@@ -2,6 +2,7 @@ package oauth
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"sync"
 	"testing"
@@ -60,6 +61,17 @@ func createOAuthConfig(t *testing.T, repo *repository.LLMConfigRepo, cfg models.
 		t.Fatalf("Create config: %v", err)
 	}
 	return cfg
+}
+
+type waitingSignalContext struct {
+	context.Context
+	waiting chan struct{}
+	once    sync.Once
+}
+
+func (c *waitingSignalContext) Done() <-chan struct{} {
+	c.once.Do(func() { close(c.waiting) })
+	return c.Context.Done()
 }
 
 func TestManagerEnsureFreshSingleflightsConcurrentRefresh(t *testing.T) {
@@ -181,6 +193,166 @@ func TestManagerEnsureFreshSingleflightPreservesEachLinkedModel(t *testing.T) {
 	defer mu.Unlock()
 	if calls != 1 {
 		t.Fatalf("refresh calls = %d, want 1", calls)
+	}
+}
+
+func TestManagerEnsureFreshRetriesSharedRefreshAfterInitiatorCancellation(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := repository.NewLLMConfigRepo(db)
+	first := createOAuthConfig(t, repo, models.LLMConfig{ID: "cancel-first", Name: "Cancel First", Provider: models.ProviderOpenAI})
+	second := createOAuthConfig(t, repo, models.LLMConfig{ID: "cancel-second", Name: "Cancel Second", Provider: models.ProviderOpenAI})
+	if err := repo.LinkOAuthConnection(context.Background(), second.ID, first.OAuthConnectionID); err != nil {
+		t.Fatalf("LinkOAuthConnection: %v", err)
+	}
+	second.OAuthConnectionID = first.OAuthConnectionID
+	mgr := NewManager(repo)
+
+	firstRefreshStarted := make(chan struct{})
+	var mu sync.Mutex
+	calls := 0
+	activeRefreshes := 0
+	maxActiveRefreshes := 0
+	var refreshedConfigIDs []string
+	refresh := func(ctx context.Context, cfg models.LLMConfig) (TokenSet, error) {
+		mu.Lock()
+		calls++
+		activeRefreshes++
+		if activeRefreshes > maxActiveRefreshes {
+			maxActiveRefreshes = activeRefreshes
+		}
+		refreshedConfigIDs = append(refreshedConfigIDs, cfg.ID)
+		mu.Unlock()
+		defer func() {
+			mu.Lock()
+			activeRefreshes--
+			mu.Unlock()
+		}()
+
+		if cfg.ID == first.ID {
+			close(firstRefreshStarted)
+			<-ctx.Done()
+			return TokenSet{}, ctx.Err()
+		}
+		return TokenSet{AccessToken: "rotated-access", RefreshToken: "rotated-refresh", ExpiresAt: time.Now().Add(2 * time.Hour).UnixMilli()}, nil
+	}
+
+	type result struct {
+		cfg models.LLMConfig
+		err error
+	}
+	firstCtx, cancelFirst := context.WithCancel(context.Background())
+	defer cancelFirst()
+	firstDone := make(chan result, 1)
+	go func() {
+		cfg, err := mgr.EnsureFresh(firstCtx, first, time.Hour, refresh)
+		firstDone <- result{cfg: cfg, err: err}
+	}()
+	<-firstRefreshStarted
+
+	secondCtx := &waitingSignalContext{Context: context.Background(), waiting: make(chan struct{})}
+	secondDone := make(chan result, 1)
+	go func() {
+		cfg, err := mgr.EnsureFresh(secondCtx, second, time.Hour, refresh)
+		secondDone <- result{cfg: cfg, err: err}
+	}()
+	<-secondCtx.waiting
+	cancelFirst()
+
+	select {
+	case got := <-firstDone:
+		if !errors.Is(got.err, context.Canceled) {
+			t.Fatalf("canceled initiating caller error = %v, want context.Canceled", got.err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("canceled initiating caller waited for the shared refresh to finish")
+	}
+
+	var secondResult result
+	select {
+	case secondResult = <-secondDone:
+	case <-time.After(3 * time.Second):
+		t.Fatal("active waiter did not complete after retrying the canceled refresh")
+	}
+	if secondResult.err != nil {
+		t.Fatalf("active waiter EnsureFresh: %v", secondResult.err)
+	}
+	if secondResult.cfg.ID != second.ID || secondResult.cfg.Model != second.Model {
+		t.Fatalf("active waiter received another linked model config: %#v", secondResult.cfg)
+	}
+	if secondResult.cfg.OAuthAccessToken != "rotated-access" || secondResult.cfg.OAuthRefreshToken != "rotated-refresh" {
+		t.Fatalf("active waiter did not receive rotated credentials: %#v", secondResult.cfg)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if calls != 2 {
+		t.Fatalf("refresh calls = %d, want canceled attempt plus one retry", calls)
+	}
+	if maxActiveRefreshes != 1 {
+		t.Fatalf("maximum concurrent refreshes = %d, want 1", maxActiveRefreshes)
+	}
+	if len(refreshedConfigIDs) != 2 || refreshedConfigIDs[0] != first.ID || refreshedConfigIDs[1] != second.ID {
+		t.Fatalf("refresh used unexpected linked configs: %v", refreshedConfigIDs)
+	}
+}
+
+func TestManagerEnsureFreshCanceledWaiterReturnsWhileRefreshContinues(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := repository.NewLLMConfigRepo(db)
+	cfg := createOAuthConfig(t, repo, models.LLMConfig{ID: "cancel-waiter", Provider: models.ProviderAnthropic})
+	mgr := NewManager(repo)
+
+	refreshStarted := make(chan struct{})
+	releaseRefresh := make(chan struct{})
+	var releaseOnce sync.Once
+	defer releaseOnce.Do(func() { close(releaseRefresh) })
+	refresh := func(context.Context, models.LLMConfig) (TokenSet, error) {
+		close(refreshStarted)
+		<-releaseRefresh
+		return TokenSet{AccessToken: "fresh-access", RefreshToken: "fresh-refresh", ExpiresAt: time.Now().Add(2 * time.Hour).UnixMilli()}, nil
+	}
+
+	type result struct {
+		cfg models.LLMConfig
+		err error
+	}
+	leaderDone := make(chan result, 1)
+	go func() {
+		fresh, err := mgr.EnsureFresh(context.Background(), cfg, time.Hour, refresh)
+		leaderDone <- result{cfg: fresh, err: err}
+	}()
+	<-refreshStarted
+
+	waiterBaseCtx, cancelWaiter := context.WithCancel(context.Background())
+	waiterCtx := &waitingSignalContext{Context: waiterBaseCtx, waiting: make(chan struct{})}
+	waiterDone := make(chan result, 1)
+	go func() {
+		fresh, err := mgr.EnsureFresh(waiterCtx, cfg, time.Hour, refresh)
+		waiterDone <- result{cfg: fresh, err: err}
+	}()
+	<-waiterCtx.waiting
+	cancelWaiter()
+
+	select {
+	case got := <-waiterDone:
+		if !errors.Is(got.err, context.Canceled) {
+			t.Fatalf("canceled waiting caller error = %v, want context.Canceled", got.err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("canceled waiting caller waited for the shared refresh to finish")
+	}
+
+	releaseOnce.Do(func() { close(releaseRefresh) })
+	select {
+	case got := <-leaderDone:
+		if got.err != nil {
+			t.Fatalf("leader EnsureFresh: %v", got.err)
+		}
+		if got.cfg.OAuthAccessToken != "fresh-access" {
+			t.Fatalf("leader access token = %q", got.cfg.OAuthAccessToken)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("live refresh did not complete")
 	}
 }
 
