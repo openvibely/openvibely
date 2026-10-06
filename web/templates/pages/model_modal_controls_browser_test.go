@@ -36,7 +36,7 @@ func TestBrowserFunctional_ModelModalDiscoveryAndDefaults(t *testing.T) {
   assert(new FormData(field('model_form')).get('worker_timeout')==='0','default timeout wire value');
   for(var provider of ['openai_compatible_vllm','openai_compatible_lm_studio','openai_compatible_openrouter']) {
    await selectProvider(provider);
-   assert(!hidden('model_refresh') && !hidden('model_base_url_field') && hidden('model_manual_id_field'),'discovery controls '+provider);
+   assert(!hidden('model_refresh') && !hidden('model_base_url_field') && hidden('model_manual_id_field') && hidden('custom_provider_auth_fields') && hidden('model_oauth_setup'),'discovery controls '+provider);
    assert(field('model_id').options.length===2,'only discovered models '+provider);
    assert(!Array.from(field('model_id').options).some(function(o){return o.value==='local-model';}),'no fake model');
    assert(field('model_api_key').placeholder.indexOf('sk-ant-')===-1,'no Anthropic hint '+provider);
@@ -169,6 +169,8 @@ func TestBrowserFunctional_CustomOAuthBeforeCreate(t *testing.T) {
  if(requests.length)throw Error('Discovery ran before sign-in');
  if(f('model_submit_btn').textContent!=='Create'||f('model_id').checkValidity())throw Error('Create incorrectly allows missing model');
  if(f('model_oauth_setup').classList.contains('hidden'))throw Error('Cannot sign in before creating');
+ var before=function(a,b){return !!(f(a).compareDocumentPosition(f(b)) & Node.DOCUMENT_POSITION_FOLLOWING);};
+ if(!before('model_base_url','model_custom_auth_method') || !before('model_custom_auth_method','model_api_key') || !before('model_custom_models_url','model_id') || !before('model_custom_token_url','model_oauth_setup') || !before('model_oauth_setup','model_id'))throw Error('Connection settings must precede sign-in and model selection');
  await startCustomModelOAuth(f('model_oauth_setup').querySelector('button'));
  await new Promise(function(resolve){setTimeout(resolve,50);});
  if(f('model_id').value)throw Error('Model selected before manual completion');
@@ -192,10 +194,13 @@ func TestBrowserFunctional_CustomOAuthBeforeCreate(t *testing.T) {
  if(new FormData(f('model_form')).get('oauth_setup_session'))throw Error('API key form retains OAuth session');
  if(!requests.some(function(r){return r.options.method==='DELETE' && r.options.headers['X-Model-OAuth-Setup']==='temporary-sign-in';}))throw Error('Auth switch did not cancel OAuth');
  if(!f('model_oauth_setup').classList.contains('hidden'))throw Error('OAuth setup still visible for API key');
+ f('model_provider').value='openai';toggleProviderFields();
+ if(!f('custom_provider_auth_fields').classList.contains('hidden'))throw Error('Custom settings leaked after provider switch');
  closeModelModal();
  if(f('model_oauth_setup_session').value)throw Error('Cancelled form retains sign-in');
  if(!requests.some(function(r){return r.options.method==='DELETE';}))throw Error('Temporary session not discarded');
  openNewModelModal();
+ if(!f('custom_provider_auth_fields').classList.contains('hidden'))throw Error('Custom settings leaked into Anthropic');
  if(f('model_oauth_setup_session').value || !f('model_oauth_setup').classList.contains('hidden'))throw Error('Sign-in leaked into another provider');
  f('reconnect-result').setAttribute('data-test-result','pass');
  }catch(e){f('reconnect-result').setAttribute('data-test-result','fail');f('reconnect-result').setAttribute('data-test-error',String(e.stack));}
