@@ -2,6 +2,7 @@ package stream
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -81,13 +82,27 @@ func TestStreamingWriter_PeriodicFlush(t *testing.T) {
 	if updatedExec.Output != "hello world" {
 		t.Errorf("expected DB output %q after periodic flush, got %q", "hello world", updatedExec.Output)
 	}
+
+	sw.Flush()
+	var finalizedOutput string
+	var remainingChunks int
+	if err := db.QueryRowContext(ctx, `SELECT output FROM executions WHERE id = ?`, exec.ID).Scan(&finalizedOutput); err != nil {
+		t.Fatalf("failed to read finalized execution output: %v", err)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM execution_output_chunks WHERE execution_id = ?`, exec.ID).Scan(&remainingChunks); err != nil {
+		t.Fatalf("failed to count finalized output chunks: %v", err)
+	}
+	if finalizedOutput != "hello world" || remainingChunks != 0 {
+		t.Fatalf("final flush should materialize output and clear chunks, output=%q remaining_chunks=%d", finalizedOutput, remainingChunks)
+	}
 }
 
 type fakeExecutionOutputRepo struct {
-	mu      sync.Mutex
-	output  string
-	writes  []string
-	updated chan string
+	mu       sync.Mutex
+	output   string
+	writes   []string
+	failNext int
+	updated  chan string
 }
 
 func (r *fakeExecutionOutputRepo) GetByID(ctx context.Context, id string) (*models.Execution, error) {
@@ -96,14 +111,27 @@ func (r *fakeExecutionOutputRepo) GetByID(ctx context.Context, id string) (*mode
 	return &models.Execution{ID: id, Output: r.output}, nil
 }
 
-func (r *fakeExecutionOutputRepo) UpdateOutput(ctx context.Context, id string, output string) error {
+func (r *fakeExecutionOutputRepo) AppendOutput(ctx context.Context, id string, output string) error {
 	r.mu.Lock()
-	r.output = output
 	r.writes = append(r.writes, output)
+	if r.failNext > 0 {
+		r.failNext--
+		r.mu.Unlock()
+		return errors.New("injected append failure")
+	}
+	r.output += output
 	r.mu.Unlock()
 	if r.updated != nil {
 		r.updated <- output
 	}
+	return nil
+}
+
+func (r *fakeExecutionOutputRepo) FinalizeOutput(ctx context.Context, id string, output string) error {
+	r.mu.Lock()
+	r.writes = append(r.writes, output)
+	r.output = output
+	r.mu.Unlock()
 	return nil
 }
 
@@ -172,8 +200,81 @@ func TestStreamingWriter_PeriodicCannotOverwriteNewerFinalFlush(t *testing.T) {
 	if output != "hello world" {
 		t.Fatalf("expected persisted output to remain %q, got %q (writes=%q)", "hello world", output, writes)
 	}
-	if len(writes) != 2 || writes[0] != "hello" || writes[1] != "hello world" {
-		t.Fatalf("expected stale periodic write to be followed by final full write, got writes=%q", writes)
+	if len(writes) != 3 || writes[0] != "hello" || writes[1] != " world" || writes[2] != "hello world" {
+		t.Fatalf("expected periodic and final delta appends followed by final materialization, got writes=%q", writes)
+	}
+}
+
+func TestStreamingWriter_PeriodicFlushRetriesFailedDeltaWithoutLossOrDuplication(t *testing.T) {
+	repo := &fakeExecutionOutputRepo{failNext: 1}
+	sw := newWriterWithOutputRepo("exec-1", "task-1", repo, context.Background(), time.Hour, nil)
+	defer sw.Stop()
+
+	if _, err := sw.Write([]byte("first")); err != nil {
+		t.Fatalf("first write failed: %v", err)
+	}
+	sw.flushPeriodicOnce()
+	if output, _ := repo.snapshot(); output != "" {
+		t.Fatalf("failed append changed persisted output to %q", output)
+	}
+
+	if _, err := sw.Write([]byte(" second")); err != nil {
+		t.Fatalf("second write failed: %v", err)
+	}
+	sw.flushPeriodicOnce()
+	output, writes := repo.snapshot()
+	if output != "first second" {
+		t.Fatalf("retry should persist the complete output once, got %q", output)
+	}
+	if len(writes) != 2 || writes[0] != "first" || writes[1] != "first second" {
+		t.Fatalf("expected retry to include the still-pending delta and new bytes, got %q", writes)
+	}
+	sw.Flush()
+	output, writes = repo.snapshot()
+	if output != "first second" || len(writes) != 3 || writes[0] != "first" || writes[1] != "first second" || writes[2] != "first second" {
+		t.Fatalf("final flush should materialize the complete output once, got output=%q writes=%q", output, writes)
+	}
+}
+
+func TestStreamingWriter_FinalFlushRetriesPendingDeltaAfterPeriodicFailure(t *testing.T) {
+	repo := &fakeExecutionOutputRepo{output: "seed", failNext: 1}
+	sw := newWriterWithOutputRepo("exec-1", "task-1", repo, context.Background(), time.Hour, nil)
+	defer sw.Stop()
+
+	if _, err := sw.Write([]byte(" retry 世界")); err != nil {
+		t.Fatalf("write failed: %v", err)
+	}
+	sw.flushPeriodicOnce()
+	sw.Flush()
+
+	output, writes := repo.snapshot()
+	if output != "seed retry 世界" {
+		t.Fatalf("final retry should preserve the byte-for-byte transcript, got %q", output)
+	}
+	if len(writes) != 3 || writes[0] != " retry 世界" || writes[1] != " retry 世界" || writes[2] != "seed retry 世界" {
+		t.Fatalf("final flush should retry the delta then materialize the seeded transcript, got %q", writes)
+	}
+}
+
+func TestStreamingWriter_PeriodicFlushPersistsOnlyNewDeltasFromSeed(t *testing.T) {
+	repo := &fakeExecutionOutputRepo{output: "prior output"}
+	sw := newWriterWithOutputRepo("exec-1", "task-1", repo, context.Background(), time.Hour, nil)
+	defer sw.Stop()
+
+	for _, delta := range []string{" plus", " and more"} {
+		if _, err := sw.Write([]byte(delta)); err != nil {
+			t.Fatalf("write failed: %v", err)
+		}
+		sw.flushPeriodicOnce()
+	}
+	sw.Flush()
+
+	output, writes := repo.snapshot()
+	if output != "prior output plus and more" {
+		t.Fatalf("expected seeded transcript with appended deltas, got %q", output)
+	}
+	if len(writes) != 3 || writes[0] != " plus" || writes[1] != " and more" || writes[2] != output {
+		t.Fatalf("expected deltas followed by final transcript materialization, got %q", writes)
 	}
 }
 
@@ -438,7 +539,6 @@ func TestStreamingWriter_WriteDoesNotFlushSynchronouslyWhenIntervalElapsed(t *te
 	publisher := &recordingExecutionStreamPublisher{}
 	sw := NewWriterWithPublisher(exec.ID, task.ID, execRepo, ctx, time.Hour, publisher)
 	defer sw.Stop()
-	sw.lastFlush = time.Now().Add(-time.Hour)
 
 	if _, err := sw.Write([]byte("instant")); err != nil {
 		t.Fatalf("write failed: %v", err)

@@ -182,7 +182,11 @@ const historyExecutionLimit = 200
 func (r *UpcomingRepo) ListRecentExecutions(ctx context.Context, projectID string, since time.Time) ([]models.HistoryExecution, error) {
 	rows, err := r.db.QueryContext(ctx,
 		`SELECT e.id, e.task_id, COALESCE(e.agent_config_id, ''), e.status,
-			SUBSTR(e.output, 1, ?),
+			SUBSTR(COALESCE(e.output, '') || COALESCE((
+				SELECT group_concat(output, '') FROM (
+					SELECT output FROM execution_output_chunks WHERE execution_id = e.id ORDER BY id
+				)
+			), ''), 1, ?),
 			SUBSTR(e.error_message, 1, ?),
 			e.tokens_used, e.duration_ms, e.started_at, e.completed_at,
 			t.title as task_title,
