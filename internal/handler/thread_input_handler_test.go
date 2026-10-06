@@ -411,3 +411,18 @@ func TestExpiredEditorResumesQueuedMessage(t *testing.T) {
 		return err == nil && execution != nil && execution.PromptSent == "last saved text" && execution.Status != models.ExecRunning
 	}, 5*time.Second, 10*time.Millisecond)
 }
+
+func TestEditHoldOwnerRoutes(t *testing.T) {
+	tc := NewTestContext(t)
+	ctx := context.Background()
+	project := tc.CreateProject().Build()
+	input := &models.ThreadInput{Scope: models.ThreadInputScopeChat, ProjectID: project.ID, Content: "original"}
+	require.NoError(t, tc.handler.threadInputRepo.CreateQueued(ctx, input))
+	base := "/thread-inputs/" + input.ID
+	tc.Assert(tc.HTTP().Post(base + "/edit-hold").WithForm(url.Values{"edit_token": {"owner"}}).Execute()).StatusCode(http.StatusOK)
+	for _, values := range []url.Values{{"edit_token": {"other"}}, {"edit_token": {"other"}, "renew": {"true"}}, {"edit_token": {"other"}, "hold": {"false"}}} {
+		tc.Assert(tc.HTTP().Post(base + "/edit-hold").WithForm(values).Execute()).StatusCode(http.StatusConflict)
+	}
+	tc.Assert(tc.HTTP().Post(base + "/edit").WithForm(url.Values{"edit_token": {"other"}, "content": {"wrong"}}).Execute()).StatusCode(http.StatusConflict)
+	tc.Assert(tc.HTTP().Post(base + "/edit").WithForm(url.Values{"edit_token": {"owner"}, "content": {"saved"}}).Execute()).StatusCode(http.StatusOK)
+}

@@ -2067,3 +2067,31 @@ func TestEditHoldRenewalAndExpiry(t *testing.T) {
 	require.Equal(t, "saved", next.Content)
 	require.ErrorIs(t, repo.RenewEditHold(ctx, input.ID), ErrInputNotPending)
 }
+
+func TestEditHoldOwnership(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	repo := NewThreadInputRepo(db)
+	project := createThreadInputProject(t, ctx, db)
+	input := &models.ThreadInput{Scope: models.ThreadInputScopeChat, ProjectID: project.ID, Content: "original"}
+	require.NoError(t, repo.CreateQueued(ctx, input))
+	_, err := repo.SetEditHold(ctx, input.ID, true, "first")
+	require.NoError(t, err)
+	_, err = repo.SetEditHold(ctx, input.ID, true, "second")
+	require.ErrorIs(t, err, ErrInputNotPending)
+	require.ErrorIs(t, repo.RenewEditHold(ctx, input.ID, "second"), ErrInputNotPending)
+	_, err = repo.EditPending(ctx, input.ID, "wrong", "second")
+	require.ErrorIs(t, err, ErrInputNotPending)
+	_, err = repo.SetEditHold(ctx, input.ID, false, "second")
+	require.ErrorIs(t, err, ErrInputNotPending)
+	_, err = repo.SetEditHold(ctx, input.ID, false, "first")
+	require.NoError(t, err)
+	_, err = repo.SetEditHold(ctx, input.ID, true, "second")
+	require.NoError(t, err)
+	_, err = repo.SetEditHold(ctx, input.ID, false, "first")
+	require.ErrorIs(t, err, ErrInputNotPending)
+	require.NoError(t, repo.RenewEditHold(ctx, input.ID, "second"))
+	updated, err := repo.EditPending(ctx, input.ID, "revised", "second")
+	require.NoError(t, err)
+	require.Equal(t, "revised", updated.Content)
+}

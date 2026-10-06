@@ -25,7 +25,7 @@ func (h *Handler) EditThreadInput(c echo.Context) error {
 	if content == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "Message cannot be empty")
 	}
-	input, err := h.threadInputRepo.EditPending(c.Request().Context(), c.Param("inputId"), content)
+	input, err := h.threadInputRepo.EditPending(c.Request().Context(), c.Param("inputId"), content, c.FormValue("edit_token"))
 	if errors.Is(err, repository.ErrInputNotPending) {
 		return echo.NewHTTPError(http.StatusConflict, "This message is no longer pending and cannot be edited")
 	}
@@ -204,7 +204,7 @@ func (h *Handler) HoldThreadInputEdit(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "thread input queue is unavailable")
 	}
 	if c.FormValue("renew") == "true" {
-		err := h.threadInputRepo.RenewEditHold(c.Request().Context(), c.Param("inputId"))
+		err := h.threadInputRepo.RenewEditHold(c.Request().Context(), c.Param("inputId"), c.FormValue("edit_token"))
 		if errors.Is(err, repository.ErrInputNotPending) {
 			return echo.NewHTTPError(http.StatusConflict, "Editing session expired. Copy your draft and reopen the editor.")
 		}
@@ -214,7 +214,7 @@ func (h *Handler) HoldThreadInputEdit(c echo.Context) error {
 		return c.NoContent(http.StatusNoContent)
 	}
 	hold := c.FormValue("hold") != "false"
-	input, err := h.threadInputRepo.SetEditHold(c.Request().Context(), c.Param("inputId"), hold)
+	input, err := h.threadInputRepo.SetEditHold(c.Request().Context(), c.Param("inputId"), hold, c.FormValue("edit_token"))
 	if errors.Is(err, repository.ErrInputNotPending) {
 		return echo.NewHTTPError(http.StatusConflict, "This message is already being consumed")
 	}

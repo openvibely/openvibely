@@ -1813,8 +1813,15 @@ func TestPendingEditorReleasesOnPageExit(t *testing.T) {
 const assert = require('node:assert/strict');
 const listeners = {};
 let renewal;
-global.setInterval = (fn, ms) => { assert.equal(ms, 20000); renewal = fn; return 1; };
-global.clearInterval = () => { renewal = null; };
+let expiry;
+let timeout;
+let now = 100000;
+Date.now = () => now;
+global.crypto = require('node:crypto').webcrypto;
+global.setTimeout = fn => { timeout = fn; return 1; };
+global.clearTimeout = () => {};
+global.setInterval = (fn, ms) => { if(ms === 20000) renewal = fn; else expiry = fn; return ms; };
+global.clearInterval = ms => { if(ms === 20000) renewal = null; else expiry = null; };
 global.window = {addEventListener: (n,f) => listeners[n]=f, removeEventListener: n => delete listeners[n], alert: m => {throw Error(m)}};
 const controls = {textarea: {focus(){}}, '[data-cancel]': {}, form: {}, '[role="alert"]': {}, '[type="submit"]': {}};
 let closed = 0;
@@ -1828,7 +1835,7 @@ let requests = [];
 let completeHold;
 global.fetch = (url, options) => {
  requests.push({url, options});
- if (!options.body) return new Promise(resolve => completeHold = () => resolve({ok:true, json:async()=>({content:'original'})}));
+ if (!options.body.get('renew') && !options.body.get('hold')) return new Promise(resolve => completeHold = () => resolve({ok:true, json:async()=>({content:'original'})}));
  return Promise.resolve({ok:true});
 };
 ` + html[start:start+end] + `
@@ -1836,6 +1843,11 @@ global.fetch = (url, options) => {
  let opening = window.editPendingThreadInput(button);
  completeHold(); await opening;
  assert.equal(shown, 1);
+ controls.textarea.value = 'draft';
+ listeners['htmx:beforeSwap']({detail:{target:{id:'pending-thread-inputs', contains:()=>true}}});
+ assert.equal(closed, 0);
+ assert.equal(controls.textarea.value, 'draft');
+ assert.ok(requests[0].options.body.get('edit_token'));
  await renewal();
  assert.equal(requests.pop().options.body.get('renew'), 'true');
  listeners.pagehide();
@@ -1859,8 +1871,13 @@ global.fetch = (url, options) => {
  completeHold(); await opening;
  controls.textarea.value = 'unsaved draft';
  const workingFetch = global.fetch;
- global.fetch = async () => { throw Error('offline'); };
- await renewal();
+ global.fetch = () => new Promise(()=>{});
+ const pending = renewal();
+ timeout();
+ await pending;
+ assert.notEqual(renewal, null);
+ now += 120000;
+ expiry();
  assert.equal(controls.textarea.value, 'unsaved draft');
  assert.equal(controls['[type="submit"]'].disabled, true);
  assert.ok(controls['[role="alert"]'].textContent);

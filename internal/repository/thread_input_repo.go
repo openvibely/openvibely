@@ -1236,11 +1236,15 @@ func (r *ThreadInputRepo) ClaimQueuedForChatExecution(ctx context.Context, input
 	})
 }
 
-func (r *ThreadInputRepo) EditPending(ctx context.Context, id, content string) (*models.ThreadInput, error) {
+func (r *ThreadInputRepo) EditPending(ctx context.Context, id, content string, tokens ...string) (*models.ThreadInput, error) {
+	token := ""
+	if len(tokens) > 0 {
+		token = tokens[0]
+	}
 	updated, err := scanThreadInput(queryRowBoundSQLite(ctx, r.db, `
 		UPDATE thread_inputs
-		SET content = ?, edit_hold = 0, edit_hold_until = NULL, updated_at = datetime('now')
-		WHERE id = ? AND input_status = 'pending'
+		SET content = ?, edit_hold = 0, edit_hold_until = NULL, edit_hold_token = '', updated_at = datetime('now')
+		WHERE id = ? AND input_status = 'pending' AND ((? = '' AND edit_hold_token = '') OR (edit_hold = 1 AND edit_hold_token = ? AND edit_hold_until > datetime('now')))
 			  AND COALESCE(expected_turn_id, '') != id
  AND NOT EXISTS (SELECT 1 FROM thread_input_provider_steering ps WHERE ps.thread_input_id = thread_inputs.id)
  AND NOT (
@@ -1249,7 +1253,7 @@ func (r *ThreadInputRepo) EditPending(ctx context.Context, id, content string) (
 			    AND COALESCE(run_execution_id, '') != ''
 			    AND EXISTS (SELECT 1 FROM executions WHERE id = thread_inputs.run_execution_id AND status = 'running')
 			  )
-		RETURNING `+threadInputSelectColumns, content, id))
+		RETURNING `+threadInputSelectColumns, content, id, token, token))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrInputNotPending
 	}
@@ -1416,11 +1420,15 @@ func currentActiveExecutionIDForInput(ctx context.Context, exec sqlExecutor, inp
 	return activeID, nil
 }
 
-func (r *ThreadInputRepo) SetEditHold(ctx context.Context, id string, hold bool) (*models.ThreadInput, error) {
+func (r *ThreadInputRepo) SetEditHold(ctx context.Context, id string, hold bool, tokens ...string) (*models.ThreadInput, error) {
+	token := ""
+	if len(tokens) > 0 {
+		token = tokens[0]
+	}
 	updated, err := scanThreadInput(queryRowBoundSQLite(ctx, r.db, `
 		UPDATE thread_inputs
-		SET edit_hold = ?, edit_hold_until = CASE WHEN ? THEN datetime('now', '+120 seconds') ELSE NULL END, updated_at = datetime('now')
-		WHERE id = ? AND input_status = 'pending'
+		SET edit_hold = ?, edit_hold_until = CASE WHEN ? THEN datetime('now', '+120 seconds') ELSE NULL END, edit_hold_token = CASE WHEN ? THEN ? ELSE '' END, updated_at = datetime('now')
+		WHERE id = ? AND input_status = 'pending' AND ((? AND (edit_hold = 0 OR edit_hold_until <= datetime('now') OR edit_hold_until IS NULL)) OR (NOT ? AND edit_hold = 1 AND edit_hold_token = ?))
 			  AND COALESCE(expected_turn_id, '') != id
  AND NOT EXISTS (SELECT 1 FROM thread_input_provider_steering ps WHERE ps.thread_input_id = thread_inputs.id)
  AND NOT (
@@ -1429,7 +1437,7 @@ func (r *ThreadInputRepo) SetEditHold(ctx context.Context, id string, hold bool)
 			    AND COALESCE(run_execution_id, '') != ''
 			    AND EXISTS (SELECT 1 FROM executions WHERE id = thread_inputs.run_execution_id AND status = 'running')
 			  )
-		RETURNING `+threadInputSelectColumns, hold, hold, id))
+		RETURNING `+threadInputSelectColumns, hold, hold, hold, token, id, hold, hold, token))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrInputNotPending
 	}
@@ -1443,8 +1451,12 @@ func (r *ThreadInputRepo) SetEditHold(ctx context.Context, id string, hold bool)
 }
 
 // RenewEditHold cannot resurrect an expired or released editor.
-func (r *ThreadInputRepo) RenewEditHold(ctx context.Context, id string) error {
-	res, err := execBoundSQLite(ctx, r.db, `UPDATE thread_inputs SET edit_hold_until = datetime('now', '+120 seconds') WHERE id = ? AND input_status = 'pending' AND edit_hold = 1 AND edit_hold_until > datetime('now')`, id)
+func (r *ThreadInputRepo) RenewEditHold(ctx context.Context, id string, tokens ...string) error {
+	token := ""
+	if len(tokens) > 0 {
+		token = tokens[0]
+	}
+	res, err := execBoundSQLite(ctx, r.db, `UPDATE thread_inputs SET edit_hold_until = datetime('now', '+120 seconds') WHERE id = ? AND input_status = 'pending' AND edit_hold = 1 AND edit_hold_until > datetime('now') AND edit_hold_token = ?`, id, token)
 	if err != nil {
 		return err
 	}
@@ -1467,7 +1479,7 @@ func (r *ThreadInputRepo) ReleaseExpiredEditHolds(ctx context.Context) ([]models
 		if err != nil {
 			return err
 		}
-		_, err = tx.ExecContext(ctx, `UPDATE thread_inputs SET edit_hold = 0, edit_hold_until = NULL WHERE edit_hold = 1 AND (edit_hold_until IS NULL OR edit_hold_until <= datetime('now'))`)
+		_, err = tx.ExecContext(ctx, `UPDATE thread_inputs SET edit_hold = 0, edit_hold_until = NULL, edit_hold_token = '' WHERE edit_hold = 1 AND (edit_hold_until IS NULL OR edit_hold_until <= datetime('now'))`)
 		return err
 	})
 	if err != nil {
