@@ -522,7 +522,8 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						/* Toast notifications */
 						#toast-container {
 							position: fixed;
-							top: 16px;					right: 16px;
+							top: calc(var(--project-titlebar-height, 0px) + 16px);
+							right: 16px;
 					z-index: 1300;
 					display: flex;
 					flex-direction: column;
@@ -543,7 +544,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						width: min(11rem, 100%);
 					}
 					#toast-container {
-						top: 8px;
+						top: calc(var(--project-titlebar-height, 0px) + 8px);
 						right: 8px;
 						left: 8px;
 						width: auto;
