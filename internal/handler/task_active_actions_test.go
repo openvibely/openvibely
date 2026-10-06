@@ -112,3 +112,70 @@ func TestActiveBulkActionsScope(t *testing.T) {
 		})
 	}
 }
+
+func TestActiveManualOrderAfterSort(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	createTask(t, h, "default", "Apple active")
+	zebra := createTask(t, h, "default", "Zebra active")
+	for _, path := range []string{
+		"/tasks/" + zebra.ID + "/reorder",
+		"/tasks/active/sort?project_id=default&sort=manual",
+	} {
+		method := http.MethodPatch
+		if strings.Contains(path, "/sort?") {
+			method = http.MethodPost
+		}
+		req := httptest.NewRequest(method, path, strings.NewReader("position=0"))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.Header.Set("HX-Request", "true")
+		req.AddCookie(&http.Cookie{Name: "active_sort", Value: "title_asc"})
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s: %d %s", path, rec.Code, rec.Body.String())
+		}
+		body := rec.Body.String()
+		if strings.Index(body, "Zebra active") > strings.Index(body, "Apple active") {
+			t.Fatal("sort overrides manual order")
+		}
+		found := false
+		for _, cookie := range rec.Result().Cookies() {
+			if cookie.Name == "active_sort" && cookie.Value == "manual" {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatal("manual preference not persisted")
+		}
+	}
+}
+
+func TestActiveDeletionSkipsChangedScheduledState(t *testing.T) {
+	h, _, _ := setupTestHandler(t)
+	ctx := context.Background()
+	task := createTask(t, h, "default", "Scheduled run", func(task *models.Task) {
+		task.Category = models.CategoryScheduled
+		task.Status = models.StatusRunning
+	})
+	observed, err := h.taskSvc.GetByID(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := h.taskSvc.UpdateStatus(ctx, task.ID, models.StatusCompleted); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.taskSvc.DeleteObservedTask(ctx, observed); err != nil {
+		t.Fatal(err)
+	}
+	current, err := h.taskSvc.GetByID(ctx, task.ID)
+	if err != nil || current == nil || current.Status != models.StatusCompleted {
+		t.Fatalf("finished scheduled task was deleted: %+v %v", current, err)
+	}
+	if err := h.taskSvc.DeleteObservedTask(ctx, current); err != nil {
+		t.Fatal(err)
+	}
+	current, err = h.taskSvc.GetByID(ctx, task.ID)
+	if err != nil || current != nil {
+		t.Fatalf("unchanged observation not deleted: %+v %v", current, err)
+	}
+}
