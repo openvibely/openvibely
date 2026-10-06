@@ -198,6 +198,9 @@ jobs:
         run: go test -tags gtk3 ./cmd/desktop -count=1 -timeout 120s
 
       - name: Test native Linux caption controls with GTK3 and GTK4
+        env:
+          # Hosted runners block the namespace setup required by WebKit's sandbox.
+          WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS: "1"
         run: |
           xvfb-run -a sh -c '
             openbox >/tmp/openvibely-caption-wm.log 2>&1 &
