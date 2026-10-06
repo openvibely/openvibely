@@ -203,6 +203,8 @@ func builtInModelOptionsJSON() string {
 		Temperature bool     `json:"temperature"`
 		OAuth       bool     `json:"oauth"`
 		DefaultEffort string `json:"defaultEffort"`
+		ContextWindow int `json:"context_length"`
+		MaxOutputTokens int `json:"max_output_tokens"`
 	}
 	data := map[string][]modelOption{}
 	for _, provider := range []models.LLMProvider{models.ProviderAnthropic, models.ProviderOpenAI} {
@@ -211,6 +213,7 @@ func builtInModelOptionsJSON() string {
 				Value: spec.ID, Label: spec.Label, Efforts: spec.ReasoningEfforts,
 				Temperature: spec.SupportsTemperature, OAuth: spec.SupportsOAuth,
 				DefaultEffort: spec.DefaultReasoningEffort,
+				ContextWindow: spec.ContextWindow, MaxOutputTokens: spec.MaxOutputTokens,
 			})
 		}
 	}
@@ -637,7 +640,7 @@ for _, agent := range modelOptions {
 								<input type="hidden" id="model_openai_compatible_preset" name="preset_slug" value="custom"/>
 								<input type="hidden" id="model_openai_compatible_transport" name="transport" value="chat_completions"/>							<div class="form-control mb-3">
 								<label class="label"><span class="label-text">Base URL</span></label>
-								<input type="text" id="model_base_url" name="base_url" class="input input-bordered" placeholder="https://openrouter.ai/api/v1/" oninput="scheduleAutoDiscoverOpenAICompatibleModels()"/>
+								<input type="text" id="model_base_url" name="base_url" class="input input-bordered" placeholder="https://openrouter.ai/api/v1/" oninput="clearDiscoveredModelLimits(); scheduleAutoDiscoverOpenAICompatibleModels()"/>
 								<label class="label"><span class="label-text-alt opacity-70">API root; requests go to base URL + /chat/completions.</span></label>
 							</div>
 								<div class="form-control mb-3">
@@ -658,7 +661,7 @@ for _, agent := range modelOptions {
 										</select>
 									</div>
 									<div id="custom_provider_request_fields" class="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
-										<div class="form-control md:col-span-2"><label class="label"><span class="label-text">Models URL</span></label><input id="model_custom_models_url" name="models_url" class="input input-bordered" placeholder="https://…/models" oninput="scheduleAutoDiscoverOpenAICompatibleModels()"/><label class="label"><span class="label-text-alt opacity-70">Optional dedicated endpoint used by Discover Models.</span></label></div>
+										<div class="form-control md:col-span-2"><label class="label"><span class="label-text">Models URL</span></label><input id="model_custom_models_url" name="models_url" class="input input-bordered" placeholder="https://…/models" oninput="clearDiscoveredModelLimits(); scheduleAutoDiscoverOpenAICompatibleModels()"/><label class="label"><span class="label-text-alt opacity-70">Optional dedicated endpoint used by Discover Models.</span></label></div>
 										<div class="form-control"><label class="label"><span class="label-text">Models array path</span></label><input id="model_custom_models_array_path" name="custom_models_array_path" class="input input-bordered" value="data" oninput="scheduleAutoDiscoverOpenAICompatibleModels()"/></div>
 										<div class="form-control"><label class="label"><span class="label-text">Model ID field</span></label><input id="model_custom_model_id_field" name="custom_model_id_field" class="input input-bordered" value="id" oninput="scheduleAutoDiscoverOpenAICompatibleModels()"/></div>
 										<div class="form-control"><label class="label"><span class="label-text">API key header</span></label><input id="model_compatible_auth_header_name" name="auth_header_name" class="input input-bordered" value="Authorization" placeholder="Authorization" oninput="scheduleAutoDiscoverOpenAICompatibleModels()"/></div>
@@ -912,21 +915,21 @@ for _, agent := range modelOptions {
 						<div class="form-control">
 							<label class="label"><span class="label-text">Provider context (tokens)</span></label>
 							<input type="text" id="model_provider_context_display" class="input input-bordered input-disabled" readonly placeholder="From provider or discovery"/>
-							<label class="label"><span class="label-text-alt opacity-70">Reported by the server or built-in catalog</span></label>
+							<label class="label"><span id="model_context_source" class="label-text-alt opacity-70">Reported by the server or built-in catalog</span></label>
 						</div>
 						<div class="form-control">
-							<label class="label"><span class="label-text">Context cap (tokens)</span></label>
-							<input type="text" inputmode="numeric" pattern="[0-9]*" id="model_context_window_cap" name="context_window" class="input input-bordered" value="0" placeholder="0"/>
-							<label class="label"><span class="label-text-alt opacity-70">0 = use full provider window; lower values cap input budget</span></label>
+							<label class="label"><span class="label-text">Context window (tokens)</span></label>
+							<input type="number" min="1" step="1" id="model_context_window_cap" name="context_window" class="input input-bordered" value="200000" required onchange="updateContextLimitInputs(Number(document.getElementById('model_provider_context_window').value), Number(document.getElementById('model_provider_max_output_tokens').value), true)"/>
+							<label class="label"><span class="label-text-alt opacity-70">Use the reported limit, or enter the window configured on your server.</span></label>
 						</div>
 						<div class="form-control">
 							<label class="label"><span class="label-text">Provider max output (tokens)</span></label>
 							<input type="text" id="model_provider_max_output_display" class="input input-bordered input-disabled" readonly placeholder="From provider or discovery"/>
 						</div>
-						<div class="form-control">
-							<label class="label"><span class="label-text">Max output cap (tokens)</span></label>
-							<input type="text" inputmode="numeric" pattern="[0-9]*" id="model_default_max_tokens" name="default_max_tokens" class="input input-bordered" value="0" placeholder="0"/>
-							<label class="label"><span class="label-text-alt opacity-70">0 = use provider default output limit</span></label>
+						<div id="model_output_limit_field" class="form-control">
+							<label class="label"><span class="label-text">Max output (tokens)</span></label>
+							<input type="number" min="1" step="1" id="model_default_max_tokens" name="default_max_tokens" class="input input-bordered" value="16384"/>
+							<label class="label"><span class="label-text-alt opacity-70">Limited to one quarter of the context window to leave room for your prompt.</span></label>
 						</div>
 					</div>
 					<div class="form-control mt-2">
@@ -1350,6 +1353,9 @@ for _, agent := range modelOptions {
 					updateTemperatureField(provider, model);
 					if (isOpenAICompatibleProvider(provider)) {
 						document.getElementById('model_openai_compatible_custom_model').value = model;
+						applyDiscoveredModelLimits(openAICompatibleDiscoveredModels[model]);
+					} else {
+						applyDiscoveredModelLimits(selectedModelOption(provider, model));
 					}
 				}
 
@@ -1692,24 +1698,68 @@ for _, agent := range modelOptions {
 							document.getElementById('model_provider_max_output_display').value = formatContextLimitTokens(providerOut);
 						}
 
-						function applyDiscoveredModelLimits(info) {
-							if (!info) return;
-							if (info.context_length > 0) {
-								document.getElementById('model_provider_context_window').value = String(info.context_length);
+						function contextLimitDefaults() {
+							var provider = document.getElementById('model_provider').value;
+							var model = document.getElementById('model_id').value;
+							var spec = selectedModelOption(provider, model) || {};
+							return {
+								context: spec.context_length || (isOpenAICompatibleProvider(provider) ? 128000 : provider === 'ollama' ? 8192 : 200000),
+								output: spec.max_output_tokens || 16384
+							};
+						}
+
+						function updateContextLimitInputs(context, output, preserve) {
+							var defaults = contextLimitDefaults();
+							var input = document.getElementById('model_context_window_cap');
+							var maxOutput = document.getElementById('model_default_max_tokens');
+							function fill(field, suggested, reported) {
+								var current = parseInt(field.value, 10) || 0;
+								if (!preserve || !current || field.value === field.dataset.automaticValue) {
+									field.value = String(suggested);
+									field.dataset.automaticValue = field.value;
+								} else if (reported > 0 && current > reported) {
+									field.value = String(reported);
+								}
 							}
-							if (info.max_output_tokens > 0) {
-								document.getElementById('model_provider_max_output_tokens').value = String(info.max_output_tokens);
-							}
+							fill(input, context || defaults.context, context);
+							var compatible = isOpenAICompatibleProvider(document.getElementById('model_provider').value);
+							var outputLimit = compatible ? Math.max(1, Math.floor(Number(input.value) / 4)) : defaults.output;
+							fill(maxOutput, Math.min(output || defaults.output, outputLimit), Math.min(output || outputLimit, outputLimit));
+							document.getElementById('model_output_limit_field').classList.toggle('hidden', !compatible);
+							maxOutput.disabled = !compatible;
+							document.getElementById('model_context_source').textContent = context > 0 ? 'Reported by the server or built-in catalog' : 'No reported limit. Verify the context window against your server configuration.';
+						}
+
+						function applyDiscoveredModelLimits(info, preserve) {
+							info = info || {};
+							var context = info.context_length || 0;
+							var output = info.max_output_tokens || 0;
+							document.getElementById('model_provider_context_window').value = String(context);
+							document.getElementById('model_provider_max_output_tokens').value = String(output);
+							updateContextLimitInputs(context, output, preserve);
 							updateProviderContextDisplays();
 						}
 
 						function populateContextLimitFields(details) {
-							document.getElementById('model_provider_context_window').value = String(details.provider_context_window || 0);
-							document.getElementById('model_provider_max_output_tokens').value = String(details.provider_max_output_tokens || 0);
-							document.getElementById('model_context_window_cap').value = String(details.context_window || 0);
-							document.getElementById('model_default_max_tokens').value = String(details.default_max_tokens || 0);
+							var spec = selectedModelOption(document.getElementById("model_provider").value, document.getElementById("model_id").value) || {};
+							var context = details.provider_context_window || spec.context_length || 0;
+							var output = details.provider_max_output_tokens || spec.max_output_tokens || 0;
+							document.getElementById('model_provider_context_window').value = String(context);
+							document.getElementById('model_provider_max_output_tokens').value = String(output);
+							var input = document.getElementById('model_context_window_cap');
+							var maxOutput = document.getElementById('model_default_max_tokens');
+							input.value = String(details.context_window || 0);
+							maxOutput.value = String(details.default_max_tokens || 0);
+							delete input.dataset.automaticValue;
+							delete maxOutput.dataset.automaticValue;
 							document.getElementById('model_compaction_threshold').value = String(details.compaction_threshold || 0);
+							updateContextLimitInputs(context, output, true);
 							updateProviderContextDisplays();
+						}
+
+						function clearDiscoveredModelLimits() {
+							openAICompatibleDiscoveredModels = {};
+							applyDiscoveredModelLimits(null);
 						}
 
 						function resetContextLimitFields() {
@@ -1718,7 +1768,7 @@ for _, agent := range modelOptions {
 						}
 
 						function setOpenAICompatibleModelValue(modelID, label, selectModel) {						var modelSelect = document.getElementById('model_id');
-						if (!modelID) return;
+						if (!modelID) { modelSelect.value = ''; applyDiscoveredModelLimits(null); return; }
 						var found = false;
 						for (var i = 0; i < modelSelect.options.length; i++) {
 							if (modelSelect.options[i].value === modelID) found = true;
@@ -1730,10 +1780,11 @@ for _, agent := range modelOptions {
 							modelSelect.appendChild(opt);
 						}
 						if (selectModel !== false) {
+							var sameModel = modelSelect.value === modelID;
 							modelSelect.value = modelID;
 							document.getElementById('model_openai_compatible_custom_model').value = modelID;
 							updateTemperatureField(document.getElementById('model_provider').value, modelID);
-							applyDiscoveredModelLimits(openAICompatibleDiscoveredModels[modelID]);
+							applyDiscoveredModelLimits(openAICompatibleDiscoveredModels[modelID], sameModel);
 						}
 					}
 
@@ -1834,6 +1885,7 @@ for _, agent := range modelOptions {
 										}
 									}
 									if (data.resolved_id) setOpenAICompatibleModelValue(data.resolved_id, data.resolved_id, true);
+									else applyDiscoveredModelLimits(openAICompatibleDiscoveredModels[document.getElementById("model_id").value], true);
 									status.textContent = models.length ? ('Discovered ' + models.length + ' model' + (models.length === 1 ? ' and selected it.' : 's. Choose one or enter the model ID manually.')) : 'No models returned; enter the model ID manually.';
 								})
 									.catch(function(err) {
@@ -2001,6 +2053,7 @@ for _, agent := range modelOptions {
 
 			function populateModelEditForm(button) {
 				cancelOpenAICompatibleDiscovery();
+				openAICompatibleDiscoveredModels = {};
 				var id = button.dataset.modelId;
 				var name = button.dataset.modelName;
 					var dbProvider = button.dataset.modelProvider;
@@ -2110,6 +2163,9 @@ for _, agent := range modelOptions {
 					applyCustomAuthConfig(customAuthConfigJSON);
 						document.getElementById('model_openai_compatible_custom_model').value = dbProvider === 'openai_compatible' ? model : '';
 						document.getElementById('model_auto_start_tasks').checked = autoStartTasks;
+
+					document.getElementById('model_submit_btn').textContent = 'Save';
+				toggleProviderFields(model, reasoningEffort);
 					populateContextLimitFields({
 						provider_context_window: parseInt(button.dataset.modelProviderContextWindow, 10) || 0,
 						provider_max_output_tokens: parseInt(button.dataset.modelProviderMaxOutputTokens, 10) || 0,
@@ -2117,8 +2173,6 @@ for _, agent := range modelOptions {
 						default_max_tokens: parseInt(button.dataset.modelDefaultMaxTokens, 10) || 0,
 						compaction_threshold: parseInt(button.dataset.modelCompactionThreshold, 10) || 0
 					});
-					document.getElementById('model_submit_btn').textContent = 'Save';
-				toggleProviderFields(model, reasoningEffort);
 				applyMixtureConfig(dbProvider === 'mixture' ? mixtureConfigJSON : '');
 				resetSecretInputVisibility('model_api_key');
 				resetSecretInputVisibility('model_custom_oauth_client_secret');
@@ -2148,6 +2202,13 @@ for _, agent := range modelOptions {
 				document.getElementById('model_provider_value').value = effectiveProvider;
 				hideAllInfoBoxes();
 				var activeModel = setModelOptions(provider, selectedModel);
+				if (forcePresetDefaults) {
+					openAICompatibleDiscoveredModels = {};
+					applyDiscoveredModelLimits(selectedModelOption(provider, activeModel));
+				}
+				var compatibleOutput = isOpenAICompatibleProvider(provider);
+				document.getElementById('model_output_limit_field').classList.toggle('hidden', !compatibleOutput);
+				document.getElementById('model_default_max_tokens').disabled = !compatibleOutput;
 				if (modelField) modelField.classList.toggle('hidden', provider === 'mixture');
 				if (provider === 'anthropic') {
 					anthropicAuthTypeField.classList.remove('hidden');
@@ -2477,7 +2538,6 @@ for _, agent := range modelOptions {
 					document.getElementById('model_auth_method').value = 'oauth';
 					document.getElementById('model_max_workers').value = '0';
 					document.getElementById('model_worker_timeout').value = '0';
-					resetContextLimitFields();
 					document.getElementById('model_ollama_base_url').value = 'http://localhost:11434';
 					document.getElementById('model_ollama_custom_model').value = '';
 					document.getElementById('model_openai_compatible_preset').value = 'openrouter';
@@ -2499,6 +2559,7 @@ for _, agent := range modelOptions {
 						applyMixtureConfig('');
 						document.getElementById('model_auto_start_tasks').checked = false;				document.getElementById('model_submit_btn').textContent = 'Create';
 				toggleProviderFields('', '');
+				resetContextLimitFields();
 				resetSecretInputVisibility('model_api_key');
 				resetSecretInputVisibility('model_custom_oauth_client_secret');
 				resetSecretInputVisibility('model_custom_signing_secret');

@@ -39,7 +39,7 @@ func TestResolveOutputCap(t *testing.T) {
 	agent := models.LLMConfig{
 		Provider:                models.ProviderOpenAICompatible,
 		ProviderMaxOutputTokens: 8192,
-		DefaultMaxTokens:          4096,
+		DefaultMaxTokens:        4096,
 	}
 	resolved := Resolve(agent)
 	if resolved.EffectiveOutputCap != 4096 {
@@ -52,5 +52,31 @@ func TestSyncProviderFromCatalog(t *testing.T) {
 	SyncProviderFromCatalog(&agent)
 	if agent.ProviderContextWindow <= 0 {
 		t.Fatal("expected catalog context window on agent")
+	}
+}
+
+func TestResolveCompatibleManualWindowWithoutDiscovery(t *testing.T) {
+	for _, window := range []int{8192, 262144, 1000000} {
+		got := Resolve(models.LLMConfig{Provider: models.ProviderOpenAICompatible, ContextWindow: window})
+		if got.EffectiveInputWindow != window {
+			t.Fatalf("manual window %d resolved to %d", window, got.EffectiveInputWindow)
+		}
+	}
+	got := Resolve(models.LLMConfig{Provider: models.ProviderOpenAICompatible, ContextWindow: 262144, ProviderContextWindow: 32768})
+	if got.EffectiveInputWindow != 32768 {
+		t.Fatalf("reported server limit must win: %+v", got)
+	}
+}
+
+func TestResolveCompatibleOutputLeavesPromptRoom(t *testing.T) {
+	for _, output := range []int{0, 16384, 1024} {
+		got := Resolve(models.LLMConfig{Provider: models.ProviderOpenAICompatible, ProviderContextWindow: 8192, DefaultMaxTokens: output})
+		want := 2048
+		if output == 1024 {
+			want = 1024
+		}
+		if got.EffectiveOutputCap != want {
+			t.Fatalf("output %d: got %d, want %d", output, got.EffectiveOutputCap, want)
+		}
 	}
 }

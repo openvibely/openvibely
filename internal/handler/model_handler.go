@@ -1819,70 +1819,12 @@ func decodeOpenAICompatibleModels(body io.Reader) ([]openAICompatibleModelInfo, 
 }
 
 func enrichOpenAICompatibleModels(payload any, cfg llmcustomauth.Config) []openAICompatibleModelInfo {
-	ids := llmcustomauth.ExtractModelIDs(payload, cfg)
-	if len(ids) == 0 {
-		return nil
-	}
-	byID := map[string]openAICompatibleModelInfo{}
-	for _, id := range ids {
-		byID[id] = openAICompatibleModelInfo{ID: id}
-	}
-	entries := extractOpenAICompatibleModelMaps(payload, cfg)
-	for _, entry := range entries {
-		id, limits := service.ParseOpenAICompatibleModelEntry(entry)
-		id = strings.TrimSpace(id)
-		if id == "" {
-			continue
-		}
-		info := byID[id]
-		info.ID = id
-		if limits.ContextLength > 0 {
-			info.ContextLength = limits.ContextLength
-		}
-		if limits.MaxOutput > 0 {
-			info.MaxOutputTokens = limits.MaxOutput
-		}
-		byID[id] = info
-	}
-	out := make([]openAICompatibleModelInfo, 0, len(byID))
-	for _, id := range ids {
-		if info, ok := byID[id]; ok {
-			out = append(out, info)
-		}
-	}
-	return out
-}
-
-func extractOpenAICompatibleModelMaps(payload any, cfg llmcustomauth.Config) []map[string]any {
-	switch typed := payload.(type) {
-	case map[string]any:
-		if arrayPath := strings.TrimSpace(cfg.ModelsArrayPath); arrayPath != "" {
-			if v, ok := typed[arrayPath]; ok {
-				return mapsFromModelArray(v)
-			}
-		}
-		if data, ok := typed["data"]; ok {
-			return mapsFromModelArray(data)
-		}
-		if modelsVal, ok := typed["models"]; ok {
-			return mapsFromModelArray(modelsVal)
-		}
-	case []any:
-		return mapsFromModelArray(typed)
-	}
-	return nil
-}
-
-func mapsFromModelArray(v any) []map[string]any {
-	items, ok := v.([]any)
-	if !ok {
-		return nil
-	}
-	out := make([]map[string]any, 0, len(items))
-	for _, item := range items {
-		if m, ok := item.(map[string]any); ok {
-			out = append(out, m)
-		}
+	var out []openAICompatibleModelInfo
+	for _, entry := range llmcustomauth.ExtractModels(payload, cfg) {
+		_, limits := service.ParseOpenAICompatibleModelEntry(entry.Metadata)
+		out = append(out, openAICompatibleModelInfo{
+			ID: entry.ID, ContextLength: limits.ContextLength, MaxOutputTokens: limits.MaxOutput,
+		})
 	}
 	return out
 }

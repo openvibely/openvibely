@@ -722,22 +722,36 @@ func ExtractState(payload any, cfg Config) State {
 	}
 }
 
-func ExtractModelIDs(payload any, cfg Config) []string {
+// DiscoveredModel retains the source metadata alongside the configured model ID.
+type DiscoveredModel struct {
+	ID       string
+	Metadata map[string]any
+}
+
+func ExtractModels(payload any, cfg Config) []DiscoveredModel {
 	cfg.applyDefaults()
-	value := valueAt(payload, cfg.ModelsArrayPath)
-	items, ok := value.([]any)
+	items, ok := valueAt(payload, cfg.ModelsArrayPath).([]any)
 	if !ok {
 		return nil
 	}
-	out := make([]string, 0, len(items))
+	var out []DiscoveredModel
 	for _, item := range items {
 		id, isString := item.(string)
 		if !isString {
 			id = stringValueAt(item, cfg.ModelIDField)
 		}
 		if id = strings.TrimSpace(id); id != "" {
-			out = append(out, id)
+			metadata, _ := item.(map[string]any)
+			out = append(out, DiscoveredModel{ID: id, Metadata: metadata})
 		}
+	}
+	return out
+}
+
+func ExtractModelIDs(payload any, cfg Config) []string {
+	var out []string
+	for _, model := range ExtractModels(payload, cfg) {
+		out = append(out, model.ID)
 	}
 	return out
 }
