@@ -1609,14 +1609,14 @@ func ChatQueuedInputRowForTask(inputID, message, steerEndpoint string, hasAttach
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 101, "<div class=\"ml-auto flex shrink-0 items-center gap-2\"><button type=\"button\" class=\"btn btn-ghost btn-xs h-6 min-h-0 rounded-md px-2 text-sm font-normal\" onclick=\"window.editPendingThreadInput(this)\" title=\"Edit message\" aria-label=\"Edit message\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" aria-hidden=\"true\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M16.862 3.487a2.1 2.1 0 012.97 2.97L7.5 18.789 3 20l1.211-4.5L16.862 3.487zM15 5l3 3\"></path></svg></button> <button type=\"button\" class=\"btn btn-ghost btn-xs h-6 min-h-0 rounded-md px-2 text-sm font-normal\" hx-post=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 101, "<div class=\"ml-auto flex shrink-0 items-center gap-2\"><button type=\"button\" class=\"btn btn-ghost btn-xs h-6 min-h-0 rounded-md px-2 text-sm font-normal\" hx-post=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var86 string
 		templ_7745c5c3_Var86, templ_7745c5c3_Err = templ.ResolveAttributeValue(steerEndpoint)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1314, Col: 125}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1313, Col: 125}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var86)
 		if templ_7745c5c3_Err != nil {
@@ -1629,13 +1629,13 @@ func ChatQueuedInputRowForTask(inputID, message, steerEndpoint string, hasAttach
 		var templ_7745c5c3_Var87 string
 		templ_7745c5c3_Var87, templ_7745c5c3_Err = templ.ResolveAttributeValue("#thread-input-" + inputID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1314, Col: 166}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1313, Col: 166}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var87)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 103, "\" hx-swap=\"outerHTML\" title=\"Convert queued follow-up to steering\">Steer</button> <button type=\"button\" class=\"btn btn-ghost btn-xs h-6 min-h-0 rounded-md px-2 text-xs text-error\" hx-post=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 103, "\" hx-swap=\"outerHTML\" title=\"Convert queued follow-up to steering\">Steer</button> <button type=\"button\" class=\"btn btn-ghost btn-xs h-6 min-h-0 rounded-md px-2 text-sm font-normal\" onclick=\"window.editPendingThreadInput(this)\" title=\"Edit message\" aria-label=\"Edit message\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" aria-hidden=\"true\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M16.862 3.487a2.1 2.1 0 012.97 2.97L7.5 18.789 3 20l1.211-4.5L16.862 3.487zM15 5l3 3\"></path></svg></button> <button type=\"button\" class=\"btn btn-ghost btn-xs h-6 min-h-0 rounded-md px-2 text-xs text-error\" hx-post=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
