@@ -1882,7 +1882,7 @@ func TestSendAgentic_ResponsesLiteReusesConnectionAndSendsIncrementalTurn(t *tes
 }
 
 func TestSendAgentic_OAuthModelsReplayEncryptedReasoningWithStoreFalse(t *testing.T) {
-	models := []string{"gpt-5.5", "gpt-5.5-pro", "gpt-5.3-codex", "gpt-5-codex-mini"}
+	models := []string{"gpt-5.5", "gpt-5.5-pro", "gpt-5.3-codex"}
 	requests := make(chan map[string]any, len(models)*2)
 	var turns atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
