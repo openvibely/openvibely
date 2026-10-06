@@ -15,7 +15,8 @@ import (
 
 type executionOutputRepo interface {
 	GetByID(ctx context.Context, id string) (*models.Execution, error)
-	UpdateOutput(ctx context.Context, id string, output string) error
+	AppendOutput(ctx context.Context, id string, output string) error
+	FinalizeOutput(ctx context.Context, id string, output string) error
 }
 
 type ExecutionStreamPublisher interface {
@@ -39,9 +40,8 @@ type Writer struct {
 	repo                  executionOutputRepo
 	ctx                   context.Context
 	publisher             ExecutionStreamPublisher
-	lastFlush             time.Time
 	interval              time.Duration
-	dirty                 bool // true when buf has unflushed content
+	persistedOffset       int // byte offset through buf successfully appended to the database
 	afterPeriodicSnapshot func(string)
 	done                  chan struct{}
 	isError               bool   // true if CLI result event had is_error=true
@@ -69,7 +69,6 @@ func newWriterWithOutputRepo(execID, taskID string, repo executionOutputRepo, ct
 		ctx:       ctx,
 		publisher: publisher,
 		interval:  interval,
-		lastFlush: time.Now(),
 		done:      make(chan struct{}),
 	}
 
@@ -83,6 +82,7 @@ func newWriterWithOutputRepo(execID, taskID string, repo executionOutputRepo, ct
 			applog.Infof("[agent-svc] streamingWriter seed load error exec=%s task=%s: %v", execID, taskID, err)
 		} else if exec != nil && exec.Output != "" {
 			sw.buf.WriteString(exec.Output)
+			sw.persistedOffset = sw.buf.Len()
 		}
 	}
 
@@ -113,26 +113,30 @@ func (w *Writer) flushPeriodicOnce() {
 	defer w.flushMu.Unlock()
 
 	w.mu.Lock()
-	shouldFlush := w.dirty && w.repo != nil && w.execID != ""
+	shouldFlush := w.repo != nil && w.execID != "" && w.persistedOffset < w.buf.Len()
 	output := ""
-	totalLen := 0
+	startOffset := w.persistedOffset
 	if shouldFlush {
-		output = w.buf.String()
-		totalLen = w.buf.Len()
-		w.dirty = false
-		w.lastFlush = time.Now()
+		output = pendingOutputDelta(&w.buf, startOffset)
 	}
 	w.mu.Unlock()
 	if shouldFlush && w.afterPeriodicSnapshot != nil {
 		w.afterPeriodicSnapshot(output)
 	}
 	if shouldFlush {
-		if dbErr := w.repo.UpdateOutput(w.ctx, w.execID, output); dbErr != nil {
+		if dbErr := w.repo.AppendOutput(w.ctx, w.execID, output); dbErr != nil {
 			applog.Infof("[agent-svc] streamingWriter periodic flush error exec=%s task=%s: %v", w.execID, w.taskID, dbErr)
 		} else {
-			applog.Debugf("[agent-svc] streamingWriter periodic flush to DB exec=%s task=%s total_len=%d", w.execID, w.taskID, totalLen)
+			w.mu.Lock()
+			w.persistedOffset = startOffset + len(output)
+			w.mu.Unlock()
+			applog.Debugf("[agent-svc] streamingWriter periodic flush to DB exec=%s task=%s delta_len=%d", w.execID, w.taskID, len(output))
 		}
 	}
+}
+
+func pendingOutputDelta(buf *bytes.Buffer, offset int) string {
+	return string(buf.Bytes()[offset:])
 }
 
 func (w *Writer) Write(p []byte) (int, error) {
@@ -144,7 +148,6 @@ func (w *Writer) Write(p []byte) (int, error) {
 	// errors) uses applog.Infof and is always emitted.
 	// Uncomment to log raw streamed LLM content when debugging stream issues:
 	// applog.Debugf("[agent-svc] streamingWriter received %d bytes exec=%s task=%s: %q", n, w.execID, w.taskID, string(p))
-	w.dirty = true
 	if n > 0 && w.publisher != nil && w.execID != "" {
 		event = &events.ExecutionStreamEvent{
 			ExecID: w.execID,
@@ -168,35 +171,45 @@ func (w *Writer) Stop() {
 	close(w.done)
 }
 
-// Flush writes the final accumulated output to the database.
-// It uses a detached context so the write succeeds even if the
-// original context was canceled (e.g., HTTP client disconnect).
+// Flush retries any pending delta, then materializes the complete transcript
+// for existing readers. Both writes use a detached context so they can finish
+// after an HTTP client disconnect cancels the original context.
 func (w *Writer) Flush() {
 	w.flushMu.Lock()
 	defer w.flushMu.Unlock()
 
 	w.mu.Lock()
-	if w.repo == nil || w.execID == "" {
-		w.dirty = false
+	if w.repo == nil || w.execID == "" || w.buf.Len() == 0 {
 		w.mu.Unlock()
 		return
 	}
-	if w.buf.Len() == 0 {
-		applog.Debugf("[agent-svc] streamingWriter final flush skipped empty buffer exec=%s task=%s", w.execID, w.taskID)
-		w.dirty = false
-		w.mu.Unlock()
-		return
+	startOffset := w.persistedOffset
+	pending := ""
+	if startOffset < w.buf.Len() {
+		pending = pendingOutputDelta(&w.buf, startOffset)
 	}
 	output := w.buf.String()
-	totalLen := w.buf.Len()
-	w.dirty = false
 	w.mu.Unlock()
 
 	flushCtx := context.WithoutCancel(w.ctx)
-	if dbErr := w.repo.UpdateOutput(flushCtx, w.execID, output); dbErr != nil {
+	if pending != "" {
+		if dbErr := w.repo.AppendOutput(flushCtx, w.execID, pending); dbErr != nil {
+			applog.Infof("[agent-svc] streamingWriter final delta retry error exec=%s task=%s: %v", w.execID, w.taskID, dbErr)
+		} else {
+			w.mu.Lock()
+			w.persistedOffset = startOffset + len(pending)
+			w.mu.Unlock()
+		}
+	}
+	if dbErr := w.repo.FinalizeOutput(flushCtx, w.execID, output); dbErr != nil {
 		applog.Infof("[agent-svc] streamingWriter final flush error exec=%s task=%s: %v", w.execID, w.taskID, dbErr)
 	} else {
-		applog.Debugf("[agent-svc] streamingWriter final flush to DB exec=%s task=%s total_len=%d", w.execID, w.taskID, totalLen)
+		w.mu.Lock()
+		if len(output) > w.persistedOffset {
+			w.persistedOffset = len(output)
+		}
+		w.mu.Unlock()
+		applog.Debugf("[agent-svc] streamingWriter final flush to DB exec=%s task=%s total_len=%d", w.execID, w.taskID, len(output))
 	}
 }
 

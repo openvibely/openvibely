@@ -1412,3 +1412,100 @@ func TestExecutionRepo_CancelActiveByTaskReturnsCount(t *testing.T) {
 		t.Fatalf("unexpected execution statuses after cancel: %#v", statuses)
 	}
 }
+
+func TestExecutionRepo_StreamOutputChunksAreVisibleAndFlattenedOnCompletion(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	taskRepo := NewTaskRepo(db, nil)
+	execRepo := NewExecutionRepo(db)
+	task := &models.Task{ProjectID: "default", Title: "Stream chunks", Prompt: "prompt", Status: models.StatusPending, Category: models.CategoryActive}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	exec := &models.Execution{TaskID: task.ID, Status: models.ExecRunning, PromptSent: "prompt"}
+	if err := execRepo.Create(ctx, exec); err != nil {
+		t.Fatalf("create execution: %v", err)
+	}
+
+	for _, delta := range []string{"first ", "second"} {
+		if err := execRepo.AppendOutput(ctx, exec.ID, delta); err != nil {
+			t.Fatalf("append output chunk: %v", err)
+		}
+	}
+	for name, load := range map[string]func() (*models.Execution, error){
+		"by id":      func() (*models.Execution, error) { return execRepo.GetByID(ctx, exec.ID) },
+		"API status": func() (*models.Execution, error) { return execRepo.GetAPIChatStatusByID(ctx, exec.ID) },
+	} {
+		got, err := load()
+		if err != nil {
+			t.Fatalf("%s read: %v", name, err)
+		}
+		if got.Output != "first second" {
+			t.Errorf("%s output = %q, want %q", name, got.Output, "first second")
+		}
+	}
+	page, err := execRepo.ListByTaskChronologicalPage(ctx, task.ID, 0, 5)
+	if err != nil {
+		t.Fatalf("list task thread page: %v", err)
+	}
+	if len(page) != 1 || page[0].Output != "first second" {
+		t.Fatalf("task thread output = %+v, want one execution with assembled chunks", page)
+	}
+
+	var baseOutput string
+	var chunkCount int
+	if err := db.QueryRowContext(ctx, `SELECT output FROM executions WHERE id = ?`, exec.ID).Scan(&baseOutput); err != nil {
+		t.Fatalf("read unmaterialized output: %v", err)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM execution_output_chunks WHERE execution_id = ?`, exec.ID).Scan(&chunkCount); err != nil {
+		t.Fatalf("count output chunks: %v", err)
+	}
+	if baseOutput != "" || chunkCount != 2 {
+		t.Fatalf("periodic writes should remain separate chunks, base=%q chunk_count=%d", baseOutput, chunkCount)
+	}
+
+	if err := execRepo.Complete(ctx, exec.ID, models.ExecFailed, "", "provider failed", 0, 10); err != nil {
+		t.Fatalf("complete failed execution with streamed output: %v", err)
+	}
+	stored, err := execRepo.GetByID(ctx, exec.ID)
+	if err != nil {
+		t.Fatalf("read completed execution: %v", err)
+	}
+	if stored.Output != "first second" {
+		t.Fatalf("completed output = %q, want %q", stored.Output, "first second")
+	}
+	if err := db.QueryRowContext(ctx, `SELECT output FROM executions WHERE id = ?`, exec.ID).Scan(&baseOutput); err != nil {
+		t.Fatalf("read flattened output: %v", err)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM execution_output_chunks WHERE execution_id = ?`, exec.ID).Scan(&chunkCount); err != nil {
+		t.Fatalf("count flattened output chunks: %v", err)
+	}
+	if baseOutput != "first second" || chunkCount != 0 {
+		t.Fatalf("completion should flatten and clear chunks, base=%q chunk_count=%d", baseOutput, chunkCount)
+	}
+
+	successExec := &models.Execution{TaskID: task.ID, Status: models.ExecRunning, PromptSent: "successful streamed output"}
+	if err := execRepo.Create(ctx, successExec); err != nil {
+		t.Fatalf("create successful execution: %v", err)
+	}
+	if err := execRepo.AppendOutput(ctx, successExec.ID, "successful "); err != nil {
+		t.Fatalf("append successful output chunk: %v", err)
+	}
+	if err := execRepo.AppendOutput(ctx, successExec.ID, "transcript"); err != nil {
+		t.Fatalf("append final successful output chunk: %v", err)
+	}
+	outcome, err := execRepo.CompleteSuccessIfNoPendingSteering(ctx, successExec.ID, "", 1, 2)
+	if err != nil {
+		t.Fatalf("complete successful streamed execution: %v", err)
+	}
+	if outcome != CompleteSuccessCompleted {
+		t.Fatalf("completion outcome = %q, want %q", outcome, CompleteSuccessCompleted)
+	}
+	stored, err = execRepo.GetByID(ctx, successExec.ID)
+	if err != nil {
+		t.Fatalf("read successful execution: %v", err)
+	}
+	if stored.Output != "successful transcript" {
+		t.Fatalf("successful output = %q, want complete streamed transcript", stored.Output)
+	}
+}
