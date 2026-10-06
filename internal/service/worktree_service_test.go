@@ -5778,8 +5778,8 @@ func TestGetWorktreeDiffMissingRefsAndWorktreeReturnEmpty(t *testing.T) {
 // Hold cleanup at a deterministic intermediate state: tracked files are gone,
 // but Git metadata still exists. Readers must not publish this as task output.
 func TestWorktreeDiffWaitsForCleanup(t *testing.T) {
-	for _, singleFile := range []bool{false, true} {
-		t.Run(fmt.Sprintf("single_file=%t", singleFile), func(t *testing.T) {
+	for _, reader := range []string{"diff", "file", "stats"} {
+		t.Run(reader, func(t *testing.T) {
 			repoDir := createTestGitRepo(t)
 			worktreePath := filepath.Join(t.TempDir(), "worktree")
 			branch := "task/cleanup-diff"
@@ -5790,10 +5790,16 @@ func TestWorktreeDiffWaitsForCleanup(t *testing.T) {
 			runGitTest(t, worktreePath, "add", "task.txt")
 			runGitTest(t, worktreePath, "commit", "-m", "task change")
 			expected := GetWorktreeDiff(repoDir, branch, "main")
+			if reader == "stats" {
+				expected = fmt.Sprint(GetWorktreeFileStats(repoDir, branch, "main"))
+			}
 
 			// This is the same boundary used by CleanupWorktree and orphan cleanup.
 			var done chan string
 			err := WithRepositoryMutation(repoDir, func() error {
+				lock := worktreeLifecycleLock(repoDir)
+				lock.Lock()
+				defer lock.Unlock()
 				if err := os.Remove(filepath.Join(worktreePath, "README.md")); err != nil {
 					return err
 				}
@@ -5802,7 +5808,9 @@ func TestWorktreeDiffWaitsForCleanup(t *testing.T) {
 				}
 				done = make(chan string, 1)
 				go func() {
-					if singleFile {
+					if reader == "stats" {
+						done <- fmt.Sprint(GetWorktreeFileStatsWithUncommitted(repoDir, branch, "main", worktreePath))
+					} else if reader == "file" {
 						diff, _ := GetWorktreeDiffFileWithUncommitted(repoDir, branch, "main", worktreePath, 0)
 						done <- diff
 					} else {
@@ -5829,6 +5837,39 @@ func TestWorktreeDiffWaitsForCleanup(t *testing.T) {
 				t.Fatal("diff reader did not resume after cleanup")
 			}
 		})
+	}
+}
+
+// A long repository writer (such as AI conflict recovery) must not block
+// review reads when no worktree creation/removal is underway.
+func TestWorktreeReviewReadsDoNotWaitForRepositoryWriter(t *testing.T) {
+	repoDir := createTestGitRepo(t)
+	worktreePath := filepath.Join(t.TempDir(), "worktree")
+	branch := "task/read-during-writer"
+	runGitTest(t, repoDir, "worktree", "add", "-b", branch, worktreePath, "main")
+	if err := os.WriteFile(filepath.Join(worktreePath, "task.txt"), []byte("task output\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	err := WithRepositoryMutation(repoDir, func() error {
+		done := make(chan bool, 1)
+		go func() {
+			diff := GetWorktreeDiffWithUncommitted(repoDir, branch, "main", worktreePath)
+			file, ok := GetWorktreeDiffFileWithUncommitted(repoDir, branch, "main", worktreePath, 0)
+			stats := GetWorktreeFileStatsWithUncommitted(repoDir, branch, "main", worktreePath)
+			done <- strings.Contains(diff, "+task output") && ok && strings.Contains(file, "+task output") && len(stats) == 1 && stats[0].Path == "task.txt"
+		}()
+		select {
+		case valid := <-done:
+			if !valid {
+				t.Error("review readers lost live task changes")
+			}
+		case <-time.After(3 * time.Second):
+			t.Error("review readers blocked on unrelated repository writer")
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 }
 
