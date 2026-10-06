@@ -54,6 +54,7 @@ const (
 
 // oauthPendingFlow stores the PKCE verifier and model config ID for an in-progress OAuth flow.
 type oauthPendingFlow struct {
+	SetupID        string
 	ConfigID       string
 	ConnectionID   string
 	Verifier       string
@@ -154,6 +155,12 @@ func (h *Handler) OAuthInitiate(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "OAuth is only available for OAuth-configured models")
 	}
 
+	return h.initiateOAuthForConfig(c, agent, "")
+}
+
+func (h *Handler) initiateOAuthForConfig(c echo.Context, agent *models.LLMConfig, setupID string) error {
+	id := agent.ID
+
 	redirectMode := resolveOAuthRedirectMode()
 	publicBaseURL := h.configuredAppBaseURL()
 	if redirectMode == oauthRedirectModeHosted && publicBaseURL == "" {
@@ -241,7 +248,7 @@ func (h *Handler) OAuthInitiate(c echo.Context) error {
 	}
 	state := base64.RawURLEncoding.EncodeToString(stateBytes)
 
-	if agent.Provider == models.ProviderOpenAICompatible {
+	if agent.Provider == models.ProviderOpenAICompatible && setupID == "" {
 		revision, advanced, revisionErr := h.llmConfigRepo.AdvanceCustomOAuthRevision(c.Request().Context(), agent.ID)
 		if revisionErr != nil {
 			return revisionErr
@@ -254,6 +261,9 @@ func (h *Handler) OAuthInitiate(c echo.Context) error {
 
 	// Cancel any previous callback server for this credential owner before starting a new one.
 	oauthOwnerID := id
+	if setupID != "" {
+		oauthOwnerID = setupID
+	}
 	if agent.OAuthConnectionID != "" {
 		oauthOwnerID = agent.OAuthConnectionID
 	}
@@ -328,6 +338,9 @@ func (h *Handler) OAuthInitiate(c echo.Context) error {
 	// Clean up expired flows and invalidate any prior attempt for this config.
 	for k, v := range oauthFlows {
 		flowOwnerID := v.ConfigID
+		if v.SetupID != "" {
+			flowOwnerID = v.SetupID
+		}
 		if v.ConnectionID != "" {
 			flowOwnerID = v.ConnectionID
 		}
@@ -336,6 +349,7 @@ func (h *Handler) OAuthInitiate(c echo.Context) error {
 		}
 	}
 	oauthFlows[state] = &oauthPendingFlow{
+		SetupID:        setupID,
 		ConfigID:       id,
 		ConnectionID:   agent.OAuthConnectionID,
 		Verifier:       verifier,
@@ -407,6 +421,16 @@ func (h *Handler) OAuthInitiate(c echo.Context) error {
 		authURLFull += "&id_token_add_organizations=true"
 		authURLFull += "&codex_cli_simplified_flow=true"
 		authURLFull += "&originator=" + url.QueryEscape(openAIOriginator)
+	}
+
+	if setupID != "" {
+		if h.desktopMode {
+			if err := openOAuthURL(authURLFull); err != nil {
+				return echo.NewHTTPError(http.StatusBadGateway, "failed to open system browser")
+			}
+		}
+		c.Response().Header().Set("Cache-Control", "no-store")
+		return c.JSON(http.StatusOK, map[string]any{"session_id": setupID, "authorization_url": authURLFull, "opened": h.desktopMode})
 	}
 
 	applog.Infof("[handler] OAuthInitiate redirecting to OAuth for config=%s provider=%s callback=%s port=%d public_callback=%t", id, agent.Provider, redirectURI, portForLog, usePublicCallback)
@@ -551,6 +575,7 @@ func (h *Handler) handleOAuthCallbackResponse(w http.ResponseWriter, r *http.Req
 	if state != "" && (r.URL.Query().Get("error") != "" || code == "") {
 		flow, ok = takeOAuthFlow(state)
 		if ok {
+			failModelOAuthSetup(flow.SetupID)
 			modelsURL = modelsReturnURLFromRequest(r, flow.ProjectID, modelsURL)
 		}
 	}
@@ -607,6 +632,11 @@ func (h *Handler) handleOAuthCallbackResponse(w http.ResponseWriter, r *http.Req
 		return
 	}
 
+	if result.Flow.SetupID != "" {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		fmt.Fprint(w, `<html><body><h2>Signed in</h2><p>Return to the model setup window to select a model and finish creating it.</p></body></html>`)
+		return
+	}
 	applog.Infof("[handler] OAuthCallback success config=%s provider=%s expires=%s", result.Flow.ConfigID, result.Flow.Provider, time.UnixMilli(result.ExpiresAt).Format(time.RFC3339))
 	http.Redirect(w, r, modelsURL, http.StatusTemporaryRedirect)
 }
@@ -619,6 +649,7 @@ func (h *Handler) completeOAuthFlow(state, code string) oauthCompletionResult {
 
 	expiresAt, err := h.exchangeOAuthCodeAndSaveTokens(flow, code, state)
 	if err != nil {
+		failModelOAuthSetup(flow.SetupID)
 		return oauthCompletionResult{
 			Outcome: oauthCompletionExchangeFailed,
 			Flow:    flow,
@@ -824,6 +855,10 @@ func (h *Handler) exchangeCustomOAuthCodeAndSaveTokens(flow *oauthPendingFlow, c
 	if err := llmcustomauth.ValidateRequestHeaderValues(cfg, customState, tokens.AccessToken); err != nil {
 		return 0, err
 	}
+	if flow.SetupID != "" {
+		return tokens.ExpiresAt, h.finishModelOAuthSetup(flow.SetupID, tokens.AccessToken, tokens.RefreshToken, tokens.ExpiresAt, llmcustomauth.MarshalState(customState))
+	}
+
 	updated, err := h.llmConfigRepo.UpdateCustomOAuthConnectionIfRevision(
 		context.Background(), flow.ConfigID, flow.ConfigRevision,
 		tokens.AccessToken, tokens.RefreshToken, tokens.ExpiresAt, llmcustomauth.MarshalState(customState),
@@ -931,6 +966,11 @@ func (h *Handler) ensureCustomOAuthFlowCurrent(ctx context.Context, flow *oauthP
 	if flow == nil {
 		return fmt.Errorf("custom OAuth authorization flow is missing")
 	}
+	if flow.SetupID != "" {
+		_, err := h.modelOAuthSetupConfig(flow.SetupID, false)
+		return err
+	}
+
 	current, err := h.llmConfigRepo.GetByID(ctx, flow.ConfigID)
 	if err != nil {
 		return err

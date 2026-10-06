@@ -919,6 +919,9 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	e.DELETE("/models/bulk", h.DeleteModelsBulk)
 	e.DELETE("/models/:id", h.DeleteModel)
 	// OAuth for model providers
+	e.POST("/models/oauth/setup", h.BeginModelOAuthSetup)
+	e.DELETE("/models/oauth/setup", h.CancelModelOAuthSetup)
+	e.GET("/models/oauth/setup/status", h.ModelOAuthSetupStatus)
 	e.GET("/models/:id/oauth/initiate", h.OAuthInitiate)
 	e.POST("/models/:id/oauth/disconnect", h.DisconnectModelOAuthConnection)
 	e.POST("/models/oauth/manual-complete", h.OAuthManualComplete)
