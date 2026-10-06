@@ -213,6 +213,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
                 }
                 var leaving = false;
                 var holdAcquired = false;
+                var saveUncertain = false;
                 var released = false;
                 var renewalTimer;
                 var renewing = false;
@@ -226,12 +227,22 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
                     window.removeEventListener('popstate', leaveEditor);
                     document.body.removeEventListener('htmx:afterSwap', beforeNavigation);
                 }
+                function releaseOwnHold() {
+                    return fetch(holdURL, {method: 'POST', body: new URLSearchParams({hold: 'false', edit_token: editToken}), keepalive: true}).catch(function() {});
+                }
                 function leaveEditor() {
                     leaving = true;
+                    if (saveUncertain) {
+                        // Save owns the outcome; a Cancel must never overtake it.
+                        // If delivery is uncertain, lease expiry is the fallback.
+                        detachLifecycle();
+                        if (dialog) dialog.close();
+                        return;
+                    }
                     if (!holdAcquired || released) return;
                     released = true;
                     // Keep the Cancel request alive while the document is unloading.
-                    fetch(holdURL, {method: 'POST', body: new URLSearchParams({hold: 'false', edit_token: editToken}), keepalive: true}).catch(function() {});
+                    releaseOwnHold();
                     detachLifecycle();
                     if (dialog) dialog.close();
                 }
@@ -253,7 +264,13 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
                     holdAcquired = true;
                     deadline = started + 119000;
                     if (leaving) { leaveEditor(); return; }
-                } catch (err) { detachLifecycle(); window.alert(err.message); return; }
+                } catch (err) {
+                    // The server may have acquired our hold before the response failed.
+                    releaseOwnHold();
+                    detachLifecycle();
+                    if (!leaving) window.alert(err.message);
+                    return;
+                }
                 finally { button.disabled = false; window._pendingInputEditorOpening = false; }
                 var dialog = document.createElement('dialog');
 				dialog.id = 'pending-input-editor';
@@ -264,9 +281,14 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				textarea.value = held.content;
 				var saving = false;
 				dialog.addEventListener('cancel', function(event) { event.preventDefault(); releaseEdit(); });
-				dialog.addEventListener('close', function() { if (!released) leaveEditor(); detachLifecycle(); dialog.remove(); if (button.isConnected) button.focus(); });
+				dialog.addEventListener('close', function() { if (!released && !leaving) leaveEditor(); detachLifecycle(); dialog.remove(); if (button.isConnected) button.focus(); });
 				async function releaseEdit() {
                     if (saving) return;
+                    if (saveUncertain) {
+                        // An unanswered Save may still be executing on the server.
+                        leaveEditor();
+                        return;
+                    }
                     saving = true;
                     try {
                         var response = await timedFetch('/thread-inputs/' + encodeURIComponent(inputID) + '/edit-hold', {method: 'POST', body: new URLSearchParams({hold: 'false', edit_token: editToken})});
@@ -308,11 +330,13 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					dialog.querySelectorAll('button, textarea').forEach(function(el) { el.disabled = true; });
 					var save = dialog.querySelector('[type="submit"]');
 					save.textContent = 'Saving…';
+                    saveUncertain = true;
 					try {
 						var response = await timedFetch('/thread-inputs/' + encodeURIComponent(inputID) + '/edit', {
-							method: 'POST', body: new URLSearchParams({content: textarea.value, resume: "true", edit_token: editToken})
+							method: 'POST', keepalive: true, body: new URLSearchParams({content: textarea.value, resume: "true", edit_token: editToken})
 						}, true);
 						var result = response.editorBody;
+                        saveUncertain = false;
 						if (!response.ok) throw new Error(result.message || 'Failed to edit message');
 						var currentRow = document.getElementById('thread-input-' + inputID);
 						var currentPreview = currentRow && currentRow.querySelector('[data-pending-input-content]');
