@@ -4101,7 +4101,7 @@ func TestNormalizeOpenAIModel(t *testing.T) {
 		{"gpt-5.1-codex", ""},
 		{"gpt-5.1-codex-mini", ""},
 		{"gpt-5-codex", ""},
-		{"gpt-5-codex-mini", "gpt-5-codex-mini"},
+		{"gpt-5-codex-mini", ""},
 		{"", ""},                   // empty stays empty for form validation
 		{"invalid-model", ""},      // unknown is rejected
 		{"  gpt-5.5  ", "gpt-5.5"}, // whitespace trimmed
@@ -4119,7 +4119,7 @@ func TestNormalizeOpenAIModel(t *testing.T) {
 
 func TestSupportedOpenAIModelByConnection(t *testing.T) {
 	for _, auth := range []models.AuthMethod{models.AuthMethodAPIKey, models.AuthMethodOAuth} {
-		for _, model := range []string{"gpt-5.2-codex", "gpt-5.1-codex", "gpt-5.1-codex-max", "gpt-5.1-codex-mini", "gpt-5-codex", "gpt-5.3-codex-spark"} {
+		for _, model := range []string{"gpt-5.2-codex", "gpt-5.1-codex", "gpt-5.1-codex-max", "gpt-5.1-codex-mini", "gpt-5-codex", "gpt-5-codex-mini", "gpt-5.3-codex-spark"} {
 			if supportedOpenAIModel(model, auth) {
 				t.Errorf("%s allowed with %s", model, auth)
 			}
