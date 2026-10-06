@@ -3291,6 +3291,84 @@ func TestAutomationGitHubIssueRuntimeAssignedIssuesWithPRsPaginates(t *testing.T
 	require.Equal(t, callsBeforeInvalid, providerCalls)
 }
 
+func TestAutomationGitHubIssueRuntimeAssignedIssuesWithPRsRecordsTaskCreationProvenance(t *testing.T) {
+	fixture := newAutomationRuntimeFixture(t, AutomationAdapterGitHubSDLC)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(fixture.repo.DB())
+	fixture.project.RepoURL = "https://github.com/example/runtime.git"
+	require.NoError(t, projectRepo.Update(ctx, &fixture.project))
+	authRepo := repository.NewGitHubAuthRepo(fixture.repo.DB())
+	require.NoError(t, authRepo.UpsertAuthorizedActor(ctx, &models.GitHubAuthorizedActor{GitHubLogin: "dev"}))
+
+	issue := GitHubIssue{Number: 91, URL: "https://github.com/example/runtime/issues/91", Title: "Review linked implementation", State: "open"}
+	provider := &fakeGitHubIssueRuntimeProvider{
+		resolveRepoFn: func(context.Context, string, string) (*GitHubRepoRef, error) {
+			return &GitHubRepoRef{Owner: "example", Name: "runtime", FullName: "example/runtime", HTMLURL: "https://github.com/example/runtime"}, nil
+		},
+		listIssuesPRFn: func(_ context.Context, repo *GitHubRepoRef, assignee string) ([]GitHubIssueWithPullRequest, error) {
+			require.Equal(t, "example/runtime", repo.FullName)
+			require.Equal(t, "dev", assignee)
+			return []GitHubIssueWithPullRequest{{Issue: issue, PullRequest: GitHubPullRequest{Number: 101}}}, nil
+		},
+	}
+	handlers := buildGitHubIssueRuntimeHandlers(githubIssueRuntimeOptions{
+		ProjectID: fixture.project.ID, ProjectRepo: projectRepo, TaskRepo: fixture.taskRepo,
+		AutomationRepo: fixture.repo, GitHubAuthRepo: authRepo, GitHub: provider,
+	})
+	inboxCtx := newAutomationGitHubIssueCausalContext(t, fixture, fixture.definition, fixture.task, "dev_inbox", "pr-filtered-discovery")
+	workerSvc := newTestWorkerService(t)
+	llmSvc := &LLMService{automationRepo: fixture.repo, githubIssueRuntime: provider, projectRepo: projectRepo,
+		taskRepo: fixture.taskRepo, taskSvc: NewTaskService(fixture.taskRepo, nil, workerSvc)}
+	runtime := llmSvc.taskControlRuntimeTools(fixture.task)
+	require.NotNil(t, runtime)
+	taskInput := json.RawMessage(`{
+		"title":"Review issue 91","prompt":"Review the implementation linked to issue 91","category":"active",
+		"source_github_issue_number":91
+	}`)
+	assertRejected := func(callCtx context.Context) {
+		t.Helper()
+		_, handled, isErr, err := runtime.Executor(callCtx, "create_task", taskInput)
+		require.True(t, handled)
+		require.True(t, isErr)
+		require.ErrorContains(t, err, "not discovered by this exact current Automation execution")
+		task, err := fixture.taskRepo.GetByProjectAndTitle(ctx, fixture.project.ID, "Review issue 91")
+		require.NoError(t, err)
+		require.Nil(t, task, "rejected provenance must not persist a task")
+	}
+	assertRejected(inboxCtx)
+
+	// Discovery must go through the public handler, not a direct call to the recording helper.
+	output, err := handlers["github_list_assigned_issues_with_prs"](inboxCtx, json.RawMessage(`{"assignee":"dev"}`))
+	require.NoError(t, err)
+	var result struct {
+		Items []GitHubIssueWithPullRequest `json:"items"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(output), &result))
+	require.Len(t, result.Items, 1)
+	require.Equal(t, issue.Number, result.Items[0].Issue.Number)
+	require.Equal(t, 101, result.Items[0].PullRequest.Number)
+
+	// Seeing an issue in one execution must not authorize another execution to use it.
+	wrongExecution := models.Execution{TaskID: fixture.task.ID, Status: models.ExecRunning, PromptSent: "different execution"}
+	require.NoError(t, repository.NewExecutionRepo(fixture.repo.DB()).Create(ctx, &wrongExecution))
+	assertRejected(withAutomationExecution(inboxCtx, fixture.task.ID, wrongExecution.ID))
+
+	output, handled, isErr, err := runtime.Executor(inboxCtx, "create_task", taskInput)
+	require.NoError(t, err)
+	require.True(t, handled)
+	require.False(t, isErr)
+	task, err := fixture.taskRepo.GetByProjectAndTitle(ctx, fixture.project.ID, "Review issue 91")
+	require.NoError(t, err)
+	require.NotNil(t, task)
+	require.Contains(t, output, task.ID)
+	select {
+	case submitted := <-workerSvc.Submitted():
+		require.Equal(t, task.ID, submitted.ID)
+	case <-time.After(time.Second):
+		t.Fatal("task for the PR-linked issue was not submitted")
+	}
+}
+
 func TestAutomationGitHubIssueCreationAllowsMissingIdempotencyKey(t *testing.T) {
 	var createCalls atomic.Int32
 	provider := &fakeGitHubIssueRuntimeProvider{
