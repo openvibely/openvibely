@@ -803,7 +803,6 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	e.POST("/tasks/backlog/execute", h.ExecuteBacklogTasks)
 	e.GET("/tasks/backlog/priority-counts", h.CountBacklogByPriority)
 	e.GET("/api/tasks/status-counts", h.GetTaskStatusCounts)
-	e.POST("/tasks/active/sort", h.SetActiveSort)
 	e.POST("/tasks/active/stop", h.StopAllActiveTasks)
 	e.DELETE("/tasks/active", h.DeleteAllActiveTasks)
 	e.POST("/tasks/backlog/sort", h.SetBacklogSort)
