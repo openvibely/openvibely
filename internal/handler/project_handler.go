@@ -662,6 +662,7 @@ func render(c echo.Context, status int, component templ.Component) error {
 	ctx := c.Request().Context()
 	if h, ok := c.Get("handler").(*Handler); ok {
 		ctx = layout.WithDesktopMode(ctx, h.desktopMode)
+		ctx = layout.WithNativeWindow(ctx, h.desktopMode && c.Request().Header.Get("X-OpenVibely-Native-Window") == "1")
 		if !isHTMX(c) {
 			ctx = layout.WithUIPreferences(ctx, h.uiPreferences(ctx))
 		}

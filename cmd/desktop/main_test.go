@@ -535,3 +535,29 @@ func unsetEnv(t *testing.T, key string) {
 		_ = os.Unsetenv(key)
 	})
 }
+
+func TestDesktopProxyMarksNativeWindowRequests(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(r.Header.Get("X-OpenVibely-Native-Window")))
+	}))
+	defer backend.Close()
+	target, _ := url.Parse(backend.URL)
+	proxy := desktopAssetProxy(target)
+	for _, path := range []string{"/chat", "/alerts", "/tasks/example"} {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		rec := httptest.NewRecorder()
+		proxy.ServeHTTP(rec, req)
+		if rec.Body.String() != "1" {
+			t.Fatalf("native request %s missing marker: %q", path, rec.Body.String())
+		}
+		if req.Header.Get("X-OpenVibely-Native-Window") != "" {
+			t.Fatal("proxy mutated original request headers")
+		}
+	}
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/chat", nil)
+	backend.Config.Handler.ServeHTTP(rec, req)
+	if rec.Body.String() != "" {
+		t.Fatal("direct browser request must not have native marker")
+	}
+}

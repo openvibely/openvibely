@@ -235,6 +235,12 @@ func startDesktopBackend(ctx context.Context, cfg *config.Config) (*desktopBacke
 func desktopAssetProxy(backendURL *url.URL) http.Handler {
 	proxy := httputil.NewSingleHostReverseProxy(backendURL)
 	proxy.FlushInterval = -1
+	director := proxy.Director
+	proxy.Director = func(r *http.Request) {
+		director(r)
+		// Identify documents requested through the native window, not the server mode.
+		r.Header.Set("X-OpenVibely-Native-Window", "1")
+	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Wails' streaming WebView bodies can omit Content-Length. ReverseProxy
 		// drops bodies with length zero, so mark a supplied body as unknown-length

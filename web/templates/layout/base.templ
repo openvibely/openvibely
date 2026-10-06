@@ -8,6 +8,7 @@ import (
 )
 
 type desktopModeContextKey struct{}
+type nativeWindowContextKey struct{}
 type uiPreferencesContextKey struct{}
 
 type UIPreferences struct {
@@ -19,6 +20,17 @@ type UIPreferences struct {
 
 func WithDesktopMode(ctx context.Context, desktop bool) context.Context {
 	return context.WithValue(ctx, desktopModeContextKey{}, desktop)
+}
+
+func WithNativeWindow(ctx context.Context, native bool) context.Context {
+	return context.WithValue(ctx, nativeWindowContextKey{}, native)
+}
+
+func nativeWindowMarker(ctx context.Context) string {
+	if native, _ := ctx.Value(nativeWindowContextKey{}).(bool); native {
+		return "true"
+	}
+	return "false"
 }
 
 func WithUIPreferences(ctx context.Context, prefs UIPreferences) context.Context {
@@ -54,6 +66,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 		lang="en"
 		data-theme="dark"
 		data-openvibely-runtime={ serverRuntimeMode(ctx) }
+		data-openvibely-native-window={ nativeWindowMarker(ctx) }
 		data-runtime={ serverRuntimeMode(ctx) }
 		data-project-locations={ uiPreferences(ctx).ProjectLocations }
 		data-ui-theme={ uiPreferences(ctx).Theme }
@@ -5107,7 +5120,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 
 				function reloadAfterSystemUpdate(data) {
 					// The native app relaunch already loads the updated UI.
-					if (document.documentElement.getAttribute('data-openvibely-runtime') === 'desktop') return false;
+					if (document.documentElement.getAttribute('data-openvibely-native-window') === 'true') return false;
 					if (systemUpdateReloading) return true;
 					if (!data && systemUpdateReloadPending) {
 						confirmHiddenSystemUpdate();
