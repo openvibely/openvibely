@@ -109,7 +109,7 @@ func BuildWorktreeContextSentence(workDir string) string {
 	if parent != ".worktrees" || !strings.HasPrefix(base, "task_") {
 		return ""
 	}
-	return "You are operating in an isolated git worktree at " + workDir + ". Treat this path as the repository root for this run."
+	return "You are operating in an isolated git worktree at " + workDir + ". Treat this path as the repository root for this run. The app automatically commits changes in your task worktree when the task completes. You do not need to run git commit unless the user explicitly requests it."
 }
 
 // AppendWorktreeContextPrompt appends explicit worktree context to an existing
