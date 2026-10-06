@@ -24,7 +24,7 @@ func TestBuildAgentSystemPrompt_OmitsWorktreeContextWhenNotProvided(t *testing.T
 func TestBuildWorktreeContextSentence(t *testing.T) {
 	worktreePath := "/tmp/.worktrees/task_abc"
 	got := BuildWorktreeContextSentence("  " + worktreePath + " ")
-	want := "You are operating in an isolated git worktree at " + worktreePath + ". Treat this path as the repository root for this run."
+	want := "You are operating in an isolated git worktree at " + worktreePath + ". Treat this path as the repository root for this run. The app automatically commits changes in your task worktree when the task completes. You do not need to run git commit unless the user explicitly requests it."
 	if got != want {
 		t.Fatalf("expected %q, got %q", want, got)
 	}
