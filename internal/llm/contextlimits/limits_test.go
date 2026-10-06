@@ -80,3 +80,28 @@ func TestResolveCompatibleOutputLeavesPromptRoom(t *testing.T) {
 		}
 	}
 }
+
+func TestResolveCompatiblePreservesOutputForLargerWindows(t *testing.T) {
+	for _, tc := range []struct {
+		name                               string
+		window, reported, configured, want int
+	}{
+		{"reported and configured", 131072, 65536, 65536, 65536},
+		{"manual without discovery", 131072, 0, 65536, 65536},
+		{"reported default", 131072, 65536, 0, 16384},
+		{"reported ceiling", 131072, 32768, 65536, 32768},
+		{"small window boundary", 32768, 16384, 16384, 16384},
+		{"below boundary", 32767, 16384, 16384, 8191},
+		{"default equals context", 65536, 65536, 0, 16384},
+		{"default exceeds context", 65536, 131072, 0, 16384},
+		{"saved oversized reservation", 65536, 65536, 65536, 16384},
+		{"default below fallback", 65536, 4096, 0, 4096},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := Resolve(models.LLMConfig{Provider: models.ProviderOpenAICompatible, ProviderContextWindow: tc.window, ProviderMaxOutputTokens: tc.reported, DefaultMaxTokens: tc.configured})
+			if got.EffectiveOutputCap != tc.want {
+				t.Fatalf("output = %d, want %d", got.EffectiveOutputCap, tc.want)
+			}
+		})
+	}
+}

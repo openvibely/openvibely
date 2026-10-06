@@ -103,6 +103,25 @@ func TestBrowserFunctional_ModelContextDiscoveryAndEdit(t *testing.T) {
   if(field('model_context_window_cap').value!=='8192'||field('model_default_max_tokens').value!=='2048') throw Error('switch failed to update budgets');
   field('model_base_url').value='http://127.0.0.1:9000/v1/';field('model_base_url').dispatchEvent(new Event('input'));
   if(field('model_provider_context_window').value!=='0'||field('model_context_window_cap').value!=='128000') throw Error('endpoint inherited limits');
+  // Opening and saving an existing large output budget must not shrink it.
+  Object.assign(edit.dataset,{modelContextWindowCap:'131072',modelProviderContextWindow:'131072',modelDefaultMaxTokens:'65536',modelProviderMaxOutputTokens:'65536'});
+  populateModelEditForm(edit); await wait();
+  if(field('model_default_max_tokens').value!=='65536') throw Error('valid compatible output budget reduced');
+  if(new FormData(field('model_form')).get('default_max_tokens')!=='65536') throw Error('compatible output budget not submitted');
+  applyDiscoveredModelLimits({context_length:65536,max_output_tokens:65536});
+  if(field('model_default_max_tokens').value!=='16384') throw Error('reported maximum consumed the context window');
+  field('model_default_max_tokens').value='65536';field('model_default_max_tokens').dispatchEvent(new Event('change'));
+  if(field('model_default_max_tokens').value!=='16384') throw Error('oversized edited output not corrected');
+  populateContextLimitFields({context_window:65536,provider_context_window:65536,provider_max_output_tokens:65536,default_max_tokens:65536});
+  if(field('model_default_max_tokens').value!=='16384') throw Error('saved oversized output not corrected');
+  field('model_provider').value='ollama';toggleProviderFields();
+  if(field('model_default_max_tokens').disabled || field('model_output_limit_field').classList.contains('hidden')) throw Error('Ollama output control hidden');
+  if(field('model_default_max_tokens').value!=='2048') throw Error('small Ollama default not bounded');
+  populateContextLimitFields({context_window:131072,default_max_tokens:65536});
+  if(field('model_default_max_tokens').value!=='65536') throw Error('saved Ollama output budget reduced');
+  if(new FormData(field('model_form')).get('default_max_tokens')!=='65536') throw Error('Ollama output budget not submitted');
+  field('model_provider').value='openai';toggleProviderFields();
+  if(!field('model_default_max_tokens').disabled || !field('model_output_limit_field').classList.contains('hidden')) throw Error('unsupported output control exposed');
   result.setAttribute('data-test-result','pass');
  }catch(e){result.setAttribute('data-test-result','fail');result.setAttribute('data-test-error',String(e.stack));}
  })();</script>`
