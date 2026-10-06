@@ -179,6 +179,35 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				var preview = row && row.querySelector('[data-pending-input-content]');
 				if (!preview) return;
 				var inputID = row.getAttribute('data-thread-input-id');
+                var bytes = new Uint8Array(16);
+                crypto.getRandomValues(bytes);
+                var editToken = Array.from(bytes, function(b) { return b.toString(16).padStart(2, '0'); }).join('');
+                var deadline = 0;
+                var expiryTimer;
+                function checkExpiry() {
+                    if (deadline && Date.now() >= deadline) loseLease();
+                }
+                function loseLease() {
+                    if (released || leaving) return;
+                    leaseLost = true;
+                    clearInterval(renewalTimer);
+                    if (dialog) {
+                        dialog.querySelector('[type="submit"]').disabled = true;
+                        dialog.querySelector('[role="alert"]').textContent = 'Editing paused—the message may have been sent. Copy your draft and reopen the editor.';
+                    }
+                }
+                async function timedFetch(url, options) {
+                    var controller = new AbortController();
+                    var timer;
+                    try {
+                        return await Promise.race([
+                            fetch(url, Object.assign({}, options, {signal: controller.signal})),
+                            new Promise(function(resolve, reject) {
+                                timer = setTimeout(function() { controller.abort(); reject(new Error('Request timed out')); }, 10000);
+                            })
+                        ]);
+                    } finally { clearTimeout(timer); }
+                }
                 var leaving = false;
                 var holdAcquired = false;
                 var released = false;
@@ -188,6 +217,8 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
                 var holdURL = '/thread-inputs/' + encodeURIComponent(inputID) + '/edit-hold';
                 function detachLifecycle() {
                     clearInterval(renewalTimer);
+                    clearInterval(expiryTimer);
+                    window.removeEventListener('focus', checkExpiry);
                     window.removeEventListener('pagehide', leaveEditor);
                     document.body.removeEventListener('htmx:beforeSwap', beforeNavigation);
                 }
@@ -196,13 +227,13 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
                     if (!holdAcquired || released) return;
                     released = true;
                     // Keep the Cancel request alive while the document is unloading.
-                    fetch(holdURL, {method: 'POST', body: new URLSearchParams({hold: 'false'}), keepalive: true}).catch(function() {});
+                    fetch(holdURL, {method: 'POST', body: new URLSearchParams({hold: 'false', edit_token: editToken}), keepalive: true}).catch(function() {});
                     detachLifecycle();
                     if (dialog) dialog.close();
                 }
                 function beforeNavigation(event) {
                     var target = event.detail && event.detail.target;
-                    if (target && target.contains(row)) leaveEditor();
+                    if (target && target.id === 'main-content') leaveEditor();
                 }
                 window.addEventListener('pagehide', leaveEditor);
                 document.body.addEventListener('htmx:beforeSwap', beforeNavigation);
@@ -210,10 +241,12 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
                 window._pendingInputEditorOpening = true;
                 var held;
                 try {
-                    var response = await fetch('/thread-inputs/' + encodeURIComponent(inputID) + '/edit-hold', {method: 'POST'});
+                    var started = Date.now();
+                    var response = await timedFetch('/thread-inputs/' + encodeURIComponent(inputID) + '/edit-hold', {method: 'POST', body: new URLSearchParams({edit_token: editToken})});
                     held = await response.json();
                     if (!response.ok) throw new Error(held.message || 'Failed to hold message');
                     holdAcquired = true;
+                    deadline = started + 119000;
                     if (leaving) { leaveEditor(); return; }
                 } catch (err) { detachLifecycle(); window.alert(err.message); return; }
                 finally { button.disabled = false; window._pendingInputEditorOpening = false; }
@@ -231,7 +264,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
                     if (saving) return;
                     saving = true;
                     try {
-                        var response = await fetch('/thread-inputs/' + encodeURIComponent(inputID) + '/edit-hold', {method: 'POST', body: new URLSearchParams({hold: 'false'})});
+                        var response = await timedFetch('/thread-inputs/' + encodeURIComponent(inputID) + '/edit-hold', {method: 'POST', body: new URLSearchParams({hold: 'false', edit_token: editToken})});
                         if (!response.ok && response.status !== 409) throw new Error('Could not release message. Please try again.');
                         released = true;
                         dialog.close();
@@ -239,22 +272,30 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
                     finally { saving = false; }
                 }
                 dialog.querySelector('[data-cancel]').onclick = releaseEdit;
+                expiryTimer = setInterval(checkExpiry, 1000);
+                window.addEventListener('focus', checkExpiry);
                 renewalTimer = setInterval(async function() {
+                    checkExpiry();
                     if (saving || renewing || released || leaving || leaseLost) return;
                     renewing = true;
+                    var started = Date.now();
                     try {
-                        var response = await fetch(holdURL, {method: 'POST', body: new URLSearchParams({renew: 'true'})});
-                        if (!response.ok) throw new Error('Editing connection lost. Copy your draft and reopen the editor. The queued message will use its last saved text.');
+                        var response = await timedFetch(holdURL, {method: 'POST', body: new URLSearchParams({renew: 'true', edit_token: editToken})});
+                        if (released || leaving || leaseLost) return;
+                        if (!response.ok) { loseLease(); return; }
+                        deadline = started + 119000;
+                        checkExpiry();
                     } catch (err) {
-                        leaseLost = true;
-                        clearInterval(renewalTimer);
-                        dialog.querySelector('[type="submit"]').disabled = true;
-                        dialog.querySelector('[role="alert"]').textContent = err.message || 'Editing connection lost. Copy your draft and reopen the editor.';
+                        if (!released && !leaving && !leaseLost) {
+                            dialog.querySelector('[role="alert"]').textContent = 'Connection interrupted. Retrying…';
+                            checkExpiry();
+                        }
                     } finally { renewing = false; }
                 }, 20000);
-				dialog.querySelector('form').onsubmit = async function(event) {
+                dialog.querySelector('form').onsubmit = async function(event) {
 					event.preventDefault();
-					if (saving || leaseLost) return;
+					checkExpiry();
+                    if (saving || leaseLost) return;
 					var error = dialog.querySelector('[role="alert"]');
 					if (!textarea.value.trim()) { error.textContent = 'Message cannot be empty'; return; }
 					saving = true;
@@ -263,8 +304,8 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					var save = dialog.querySelector('[type="submit"]');
 					save.textContent = 'Saving…';
 					try {
-						var response = await fetch('/thread-inputs/' + encodeURIComponent(inputID) + '/edit', {
-							method: 'POST', body: new URLSearchParams({content: textarea.value, resume: "true"})
+						var response = await timedFetch('/thread-inputs/' + encodeURIComponent(inputID) + '/edit', {
+							method: 'POST', body: new URLSearchParams({content: textarea.value, resume: "true", edit_token: editToken})
 						});
 						var result = await response.json();
 						if (!response.ok) throw new Error(result.message || 'Failed to edit message');
@@ -278,7 +319,9 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					} finally {
 						saving = false;
 						dialog.querySelectorAll('button, textarea').forEach(function(el) { el.disabled = false; });
-						save.textContent = 'Save';
+						checkExpiry();
+                        if (leaseLost) save.disabled = true;
+                        save.textContent = 'Save';
 					}
 				};
 				document.body.appendChild(dialog);
