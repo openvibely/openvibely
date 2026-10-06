@@ -1622,6 +1622,8 @@ func (h *Handler) startQueuedChatInput(ctx context.Context, input models.ThreadI
 		return
 	}
 
+	input.Content = exec.PromptSent
+
 	var attachmentContext string
 	var imageAttachments []models.Attachment
 	if input.AttachmentSessionID != "" {
@@ -2034,6 +2036,7 @@ func (h *Handler) startQueuedTaskThreadInput(ctx context.Context, input models.T
 		}
 		return err
 	}
+	input.Content = exec.PromptSent
 	if h.workerSvc != nil {
 		h.workerSvc.ClearCancellationRequested(input.TaskID)
 	}

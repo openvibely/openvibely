@@ -1770,3 +1770,29 @@ func TestToolOutputCSS_UsesBoundedResponsiveScrollableContainer(t *testing.T) {
 		t.Fatal("tool output body must not contain overscroll, because page scrolling must chain at top/bottom boundaries")
 	}
 }
+
+func TestPendingEditorAcquiresHoldBeforeOpening(t *testing.T) {
+	var buf bytes.Buffer
+	if err := Base("Chat", nil, "").Render(context.Background(), &buf); err != nil {
+		t.Fatal(err)
+	}
+	html := buf.String()
+	start := strings.Index(html, "window.editPendingThreadInput = async")
+	if start < 0 {
+		t.Fatal("missing async pending input editor")
+	}
+	script := html[start:]
+	hold := strings.Index(script, "/edit-hold")
+	show := strings.Index(script, "dialog.showModal()")
+	if hold < 0 || show < hold {
+		t.Fatal("editor must acquire the server hold before allowing editing")
+	}
+	for _, want := range []string{"held.content", "hold: 'false'", "releaseEdit()", "resume: \"true\"", "button.setAttribute('aria-label', 'Edit message')"} {
+		if !strings.Contains(html, want) {
+			t.Errorf("missing editor contract %q", want)
+		}
+	}
+	if strings.Contains(html, "button.textContent = 'Edit'") {
+		t.Fatal("edit control should render a pencil icon")
+	}
+}
