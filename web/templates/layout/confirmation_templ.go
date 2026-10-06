@@ -35,7 +35,29 @@ func ConfirmationDialog() templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<script>\n\t\t(function() {\n\t\t\tif (window.openVibelyConfirm) return;\n\t\t\tvar modal = document.getElementById('app_confirm_modal');\n\t\t\tvar pending = null;\n\t\t\twindow.openVibelyConfirm = function(message) {\n\t\t\t\t// A second action must not replace the action awaiting confirmation.\n\t\t\t\tif (pending) return Promise.resolve(false);\n\t\t\t\treturn new Promise(function(resolve) {\n\t\t\t\t\tpending = resolve;\n\t\t\t\t\tmodal.returnValue = '';\n\t\t\t\t\tdocument.getElementById('app_confirm_message').textContent = message;\n\t\t\t\t\tmodal.showModal();\n\t\t\t\t});\n\t\t\t};\n\t\t\tmodal.addEventListener('keydown', function(event) {\n\t\t\t\tif (event.key === 'Escape' && modal.open) {\n\t\t\t\t\tevent.preventDefault();\n\t\t\t\t\tmodal.close();\n\t\t\t\t}\n\t\t\t});\n\t\t\tmodal.addEventListener('close', function() {\n\t\t\t\tvar resolve = pending;\n\t\t\t\tpending = null;\n\t\t\t\tif (resolve) resolve(modal.returnValue === 'confirm');\n\t\t\t});\n\t\t\tdocument.addEventListener('htmx:confirm', function(event) {\n\t\t\t\tif (!event.detail.question) return;\n\t\t\t\tevent.preventDefault();\n\t\t\t\tvar source = event.detail.elt;\n\t\t\t\twindow.openVibelyConfirm(event.detail.question).then(function(confirmed) {\n\t\t\t\t\tif (confirmed && source.isConnected) event.detail.issueRequest(true);\n\t\t\t\t});\n\t\t\t});\n\t\t})();\n\t</script>")
+		templ_7745c5c3_Var2 := templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
+			templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
+			templ_7745c5c3_Buffer, templ_7745c5c3_IsBuffer := templruntime.GetBuffer(templ_7745c5c3_W)
+			if !templ_7745c5c3_IsBuffer {
+				defer func() {
+					templ_7745c5c3_BufErr := templruntime.ReleaseBuffer(templ_7745c5c3_Buffer)
+					if templ_7745c5c3_Err == nil {
+						templ_7745c5c3_Err = templ_7745c5c3_BufErr
+					}
+				}()
+			}
+			ctx = templ.InitializeContext(ctx)
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<p>All messages in this chat will be permanently deleted.</p>")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			return nil
+		})
+		templ_7745c5c3_Err = ConfirmationFrame("clear_chat_confirm_modal", "Close clear chat confirmation", "Clear Chat", "Are you sure you want to delete ", "", "all chat history", "? This action cannot be undone.", "Clear Chat", true, templ.ComponentScript{Call: "document.getElementById('clear_chat_confirm_modal').close()"}, templ.ComponentScript{Call: "document.getElementById('clear_chat_confirm_modal').close('confirm')"}).Render(templ.WithChildren(ctx, templ_7745c5c3_Var2), templ_7745c5c3_Buffer)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "<script>\n\t\t(function() {\n\t\t\tif (window.openVibelyConfirm) return;\n\t\t\tvar defaultModal = document.getElementById('app_confirm_modal');\n\t\t\tvar destructiveModal = document.getElementById('clear_chat_confirm_modal');\n\t\t\tvar pending = null;\n\t\t\twindow.openVibelyConfirm = function(message, dialogID) {\n\t\t\t\t// A second action must not replace the action awaiting confirmation.\n\t\t\t\tif (pending) return Promise.resolve(false);\n\t\t\t\tvar modal = dialogID === 'clear_chat_confirm_modal' ? destructiveModal : defaultModal;\n\t\t\t\treturn new Promise(function(resolve) {\n\t\t\t\t\tpending = resolve;\n\t\t\t\t\tmodal.returnValue = '';\n\t\t\t\t\tif (modal === defaultModal) document.getElementById('app_confirm_message').textContent = message;\n\t\t\t\t\tmodal.showModal();\n\t\t\t\t});\n\t\t\t};\n\t\t\t[defaultModal, destructiveModal].forEach(function(modal) {\n\t\t\t\tmodal.addEventListener('keydown', function(event) {\n\t\t\t\t\tif (event.key === 'Escape' && modal.open) {\n\t\t\t\t\t\tevent.preventDefault();\n\t\t\t\t\t\tmodal.close();\n\t\t\t\t\t}\n\t\t\t\t});\n\t\t\t\tmodal.addEventListener('close', function() {\n\t\t\t\t\tvar resolve = pending;\n\t\t\t\t\tpending = null;\n\t\t\t\t\tif (resolve) resolve(modal.returnValue === 'confirm');\n\t\t\t\t});\n\t\t\t});\n\t\t\tdocument.addEventListener('htmx:confirm', function(event) {\n\t\t\t\tif (!event.detail.question) return;\n\t\t\t\tevent.preventDefault();\n\t\t\t\tvar source = event.detail.elt;\n\t\t\t\twindow.openVibelyConfirm(event.detail.question, source.getAttribute('data-confirm-dialog')).then(function(confirmed) {\n\t\t\t\t\tif (confirmed && source.isConnected) event.detail.issueRequest(true);\n\t\t\t\t});\n\t\t\t});\n\t\t})();\n\t</script>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
