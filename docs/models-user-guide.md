@@ -73,7 +73,6 @@ OpenVibely currently budgets Anthropic requests with a 200k context window. Clau
 | gpt-5.4 | low / medium / high / xhigh | API key only; retired from Codex usage. |
 | gpt-5.4-mini | low / medium / high / xhigh | API key only; retired from Codex usage. |
 | gpt-5.3-codex | low / medium / high / xhigh | Legacy. |
-| gpt-5-codex-mini | low / medium / high | Legacy. |
 
 The retired `gpt-5.2-codex`, `gpt-5.1-codex`, `gpt-5.1-codex-max`, `gpt-5.1-codex-mini`, and `gpt-5-codex` models are no longer offered. OpenAI shut down their API access on July 23, 2026. See [OpenAI's deprecation notices](https://developers.openai.com/api/docs/deprecations).
 

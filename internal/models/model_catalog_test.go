@@ -82,6 +82,7 @@ func TestRetiredBuiltInModelsAreUnsupported(t *testing.T) {
 		model    string
 	}{
 		{ProviderOpenAI, "gpt-5.2-codex"},
+		{ProviderOpenAI, "gpt-5-codex-mini"},
 		{ProviderAnthropic, "claude-opus-4-5"},
 	} {
 		if BuiltInModelSupported(tc.provider, tc.model) {
