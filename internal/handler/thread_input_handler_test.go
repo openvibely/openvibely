@@ -3,8 +3,11 @@ package handler
 import (
 	"context"
 	"net/http"
+	"net/url"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 
 	"github.com/openvibely/openvibely/internal/models"
 )
@@ -238,4 +241,60 @@ func TestPublishThreadInputCancelledEvent_NilInput(t *testing.T) {
 	tc := NewTestContext(t)
 	// publishThreadInputCancelledEvent with nil input is a no-op; call it to exercise the nil guard.
 	tc.handler.publishThreadInputCancelledEvent(nil)
+}
+
+func TestEditThreadInput(t *testing.T) {
+	for _, scope := range []models.ThreadInputScope{models.ThreadInputScopeTask, models.ThreadInputScopeChat} {
+		t.Run(string(scope), func(t *testing.T) {
+			tc := NewTestContext(t)
+			ctx := context.Background()
+			p := tc.CreateProject().Build()
+			task := tc.CreateTask(p.ID).Build()
+			input := &models.ThreadInput{Scope: scope, ProjectID: p.ID, TaskID: task.ID, Content: "original"}
+			require.NoError(t, tc.handler.threadInputRepo.CreateQueued(ctx, input))
+			endpoint := "/thread-inputs/" + input.ID + "/edit"
+			rec := tc.HTTP().Post(endpoint).WithForm(url.Values{"content": {"  revised\nmessage  "}}).Execute()
+			tc.Assert(rec).StatusCode(http.StatusOK)
+			stored, err := tc.handler.threadInputRepo.GetByID(ctx, input.ID)
+			require.NoError(t, err)
+			require.Equal(t, "revised\nmessage", stored.Content)
+			require.Equal(t, input.QueuePosition, stored.QueuePosition)
+			require.Equal(t, models.ThreadInputPending, stored.InputStatus)
+			require.Equal(t, input.AttachmentSessionID, stored.AttachmentSessionID)
+			rec = tc.HTTP().Post(endpoint).WithForm(url.Values{"content": {" \n "}}).Execute()
+			tc.Assert(rec).StatusCode(http.StatusBadRequest)
+			_, err = tc.handler.threadInputRepo.CancelPending(ctx, input.ID)
+			require.NoError(t, err)
+			rec = tc.HTTP().Post(endpoint).WithForm(url.Values{"content": {"too late"}}).Execute()
+			tc.Assert(rec).StatusCode(http.StatusConflict)
+			stored, err = tc.handler.threadInputRepo.GetByID(ctx, input.ID)
+			require.NoError(t, err)
+			require.Equal(t, "revised\nmessage", stored.Content)
+		})
+	}
+}
+
+func TestEditThreadInputSteeringConsumptionGuard(t *testing.T) {
+	tc := NewTestContext(t)
+	ctx := context.Background()
+	p := tc.CreateProject().Build()
+	task := tc.CreateTask(p.ID).Build()
+	agent, err := tc.llmConfigRepo.GetDefault(ctx)
+	require.NoError(t, err)
+	exec := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "active"}
+	require.NoError(t, tc.execRepo.Create(ctx, exec))
+	input := &models.ThreadInput{Scope: models.ThreadInputScopeTask, ProjectID: p.ID, TaskID: task.ID, Content: "original", RunExecutionID: exec.ID, TurnID: exec.ID, ExpectedTurnID: exec.ID}
+	require.NoError(t, tc.handler.threadInputRepo.CreateSteeringForActiveExecution(ctx, input, exec.ID))
+	endpoint := "/thread-inputs/" + input.ID + "/edit"
+	rec := tc.HTTP().Post(endpoint).WithForm(url.Values{"content": {"revised steering"}}).Execute()
+	tc.Assert(rec).StatusCode(http.StatusOK)
+	prepared, err := tc.handler.threadInputRepo.PreparePendingSteering(ctx, exec.ID, exec.ID)
+	require.NoError(t, err)
+	require.Len(t, prepared, 1)
+	require.Equal(t, "revised steering", prepared[0].Content)
+	rec = tc.HTTP().Post(endpoint).WithForm(url.Values{"content": {"too late"}}).Execute()
+	tc.Assert(rec).StatusCode(http.StatusConflict)
+	stored, err := tc.handler.threadInputRepo.GetByID(ctx, input.ID)
+	require.NoError(t, err)
+	require.Equal(t, "revised steering", stored.Content)
 }

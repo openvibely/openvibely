@@ -15,6 +15,25 @@ import (
 
 const threadInputMutationStatusHeader = "X-OpenVibely-Thread-Input-Status"
 
+// EditThreadInput updates only inputs that have not entered consumption.
+func (h *Handler) EditThreadInput(c echo.Context) error {
+	if h.threadInputRepo == nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "thread input queue is unavailable")
+	}
+	content := strings.TrimSpace(c.FormValue("content"))
+	if content == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "Message cannot be empty")
+	}
+	input, err := h.threadInputRepo.EditPending(c.Request().Context(), c.Param("inputId"), content)
+	if errors.Is(err, repository.ErrInputNotPending) {
+		return echo.NewHTTPError(http.StatusConflict, "This message is no longer pending and cannot be edited")
+	}
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to edit message")
+	}
+	return c.JSON(http.StatusOK, map[string]string{"content": input.Content})
+}
+
 func (h *Handler) CancelThreadInput(c echo.Context) error {
 	inputID := c.Param("inputId")
 	if inputID == "" {

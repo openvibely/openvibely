@@ -822,6 +822,7 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	e.POST("/tasks/:taskId/thread/model", h.TaskThreadSelectModel)
 	e.POST("/tasks/:taskId/thread/steer", h.TaskThreadSteer)
 	e.GET("/tasks/:taskId/thread/pending-inputs", h.TaskThreadPendingInputs)
+	e.POST("/thread-inputs/:inputId/edit", h.EditThreadInput)
 	e.POST("/thread-inputs/:inputId/cancel", h.CancelThreadInput)
 	e.POST("/tasks/:taskId/thread/queued/:inputId/steer", h.TaskThreadQueuedInputSteer)
 	e.GET("/tasks/:taskId/goal", h.GetTaskGoal)

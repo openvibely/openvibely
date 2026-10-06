@@ -1232,6 +1232,27 @@ func (r *ThreadInputRepo) ClaimQueuedForChatExecution(ctx context.Context, input
 	})
 }
 
+func (r *ThreadInputRepo) EditPending(ctx context.Context, id, content string) (*models.ThreadInput, error) {
+	updated, err := scanThreadInput(queryRowBoundSQLite(ctx, r.db, `
+		UPDATE thread_inputs
+		SET content = ?, updated_at = datetime('now')
+		WHERE id = ? AND input_status = 'pending'
+			  AND NOT (
+			    input_mode = 'steering'
+			    AND COALESCE(expected_turn_id, '') = ''
+			    AND COALESCE(run_execution_id, '') != ''
+			    AND EXISTS (SELECT 1 FROM executions WHERE id = thread_inputs.run_execution_id AND status = 'running')
+			  )
+		RETURNING `+threadInputSelectColumns, content, id))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrInputNotPending
+	}
+	if err != nil {
+		return nil, fmt.Errorf("editing thread input: %w", err)
+	}
+	return &updated, nil
+}
+
 func (r *ThreadInputRepo) CancelPending(ctx context.Context, id string) (*models.ThreadInput, error) {
 	cancelled, err := scanThreadInput(queryRowBoundSQLite(ctx, r.db, `
 		UPDATE thread_inputs
