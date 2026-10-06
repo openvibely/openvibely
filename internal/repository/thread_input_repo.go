@@ -483,7 +483,7 @@ func (r *ThreadInputRepo) populateProviderSteeringStates(ctx context.Context, in
 }
 
 func (r *ThreadInputRepo) ListPendingSteering(ctx context.Context, runExecutionID, turnID string) ([]models.ThreadInput, error) {
-	return r.list(ctx, `WHERE run_execution_id = ? AND turn_id = ? AND input_mode = 'steering' AND input_status = 'pending' AND COALESCE(expected_turn_id, '') != ''
+	return r.list(ctx, `WHERE run_execution_id = ? AND turn_id = ? AND input_mode = 'steering' AND input_status = 'pending' AND edit_hold = 0 AND COALESCE(expected_turn_id, '') != ''
 		AND NOT EXISTS (
 			SELECT 1 FROM thread_input_provider_steering provider_steering
 			WHERE provider_steering.thread_input_id = thread_inputs.id
@@ -499,7 +499,7 @@ func (r *ThreadInputRepo) PreparePendingTextSteering(ctx context.Context, runExe
 }
 
 func (r *ThreadInputRepo) preparePendingSteering(ctx context.Context, runExecutionID, turnID string, textOnly bool) ([]models.ThreadInput, error) {
-	pendingWhere := `run_execution_id = ? AND turn_id = ? AND input_mode = 'steering' AND input_status = 'pending' AND COALESCE(expected_turn_id, '') != ''
+	pendingWhere := `run_execution_id = ? AND turn_id = ? AND input_mode = 'steering' AND input_status = 'pending' AND edit_hold = 0 AND COALESCE(expected_turn_id, '') != ''
 		AND NOT EXISTS (
 			SELECT 1 FROM thread_input_provider_steering provider_steering
 			WHERE provider_steering.thread_input_id = thread_inputs.id
@@ -529,7 +529,7 @@ func (r *ThreadInputRepo) preparePendingSteering(ctx context.Context, runExecuti
 			res, err := tx.ExecContext(ctx, `
 				UPDATE thread_inputs
 				SET expected_turn_id = NULL, updated_at = datetime('now')
-				WHERE id = ? AND run_execution_id = ? AND turn_id = ? AND input_mode = 'steering' AND input_status = 'pending' AND COALESCE(expected_turn_id, '') != ''`, input.ID, runExecutionID, turnID)
+				WHERE id = ? AND run_execution_id = ? AND turn_id = ? AND input_mode = 'steering' AND input_status = 'pending' AND edit_hold = 0 AND COALESCE(expected_turn_id, '') != ''`, input.ID, runExecutionID, turnID)
 			if err != nil {
 				return fmt.Errorf("preparing steering input: %w", err)
 			}
@@ -663,6 +663,7 @@ func (r *ThreadInputRepo) findOldestQueued(ctx context.Context, scope models.Thr
 		args = append(args, taskID)
 	}
 	query += ` ORDER BY queue_position ASC, created_at ASC, rowid ASC LIMIT 1`
+	query = `SELECT ` + threadInputSelectColumns + ` FROM thread_inputs WHERE edit_hold = 0 AND id = (SELECT id FROM (` + query + `))`
 	input, err := scanThreadInput(r.db.QueryRowContext(ctx, query, args...))
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -748,7 +749,7 @@ func (r *ThreadInputRepo) ConvertQueuedToSteering(ctx context.Context, id, runEx
 		res, err := tx.ExecContext(ctx, `
 				UPDATE thread_inputs
 				SET input_mode = 'steering', run_execution_id = ?, turn_id = ?, expected_turn_id = ?, updated_at = datetime('now')
-				WHERE id = ? AND input_mode = 'queued' AND input_status = 'pending' AND run_execution_id = ?
+				WHERE id = ? AND input_mode = 'queued' AND input_status = 'pending' AND edit_hold = 0 AND run_execution_id = ?
 				  AND EXISTS (SELECT 1 FROM executions WHERE id = ? AND status = 'running')`, runExecutionID, expectedTurnID, expectedTurnID, id, expectedTurnID, runExecutionID)
 		if err != nil {
 			return fmt.Errorf("converting queued input to steering: %w", err)
@@ -756,7 +757,7 @@ func (r *ThreadInputRepo) ConvertQueuedToSteering(ctx context.Context, id, runEx
 		changed, _ := res.RowsAffected()
 		if changed == 0 {
 			var pendingQueued int
-			if checkErr := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM thread_inputs WHERE id = ? AND input_mode = 'queued' AND input_status = 'pending'`, id).Scan(&pendingQueued); checkErr != nil {
+			if checkErr := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM thread_inputs WHERE id = ? AND input_mode = 'queued' AND input_status = 'pending' AND edit_hold = 0`, id).Scan(&pendingQueued); checkErr != nil {
 				return fmt.Errorf("checking queued input guard: %w", checkErr)
 			}
 			if pendingQueued > 0 {
@@ -790,7 +791,7 @@ func (r *ThreadInputRepo) MarkApplied(ctx context.Context, id, runExecutionID, t
 		res, err := tx.ExecContext(ctx, `
 			UPDATE thread_inputs
 			SET input_status = 'applied', run_execution_id = NULLIF(?, ''), turn_id = NULLIF(?, ''), applied_at = datetime('now'), updated_at = datetime('now')
-			WHERE id = ? AND input_status = 'pending'`, runExecutionID, turnID, id)
+			WHERE id = ? AND input_status = 'pending' AND edit_hold = 0`, runExecutionID, turnID, id)
 		if err != nil {
 			return fmt.Errorf("marking thread input applied: %w", err)
 		}
@@ -1010,6 +1011,7 @@ func (r *ThreadInputRepo) ClaimQueuedForTaskExecution(ctx context.Context, input
 		if err != nil {
 			return fmt.Errorf("loading queued input before claim: %w", err)
 		}
+		exec.PromptSent = promoted.Content
 		if promoted.Scope != models.ThreadInputScopeTask || promoted.TaskID != exec.TaskID || promoted.InputMode != models.ThreadInputModeQueued || promoted.InputStatus != models.ThreadInputPending {
 			if _, guarded := activeLaneExpectedState(ctx, exec.TaskID); guarded {
 				return fmt.Errorf("%w: %s", ErrActiveLaneTaskChanged, exec.TaskID)
@@ -1061,7 +1063,7 @@ func (r *ThreadInputRepo) ClaimQueuedForTaskExecution(ctx context.Context, input
 		res, err := dbexec.ExecContext(ctx, `
 			UPDATE thread_inputs
 			SET expected_turn_id = id, updated_at = datetime('now')
-			WHERE id = ? AND scope = 'task_thread' AND task_id = ? AND input_mode = 'queued' AND input_status = 'pending'`, inputID, exec.TaskID)
+			WHERE id = ? AND scope = 'task_thread' AND task_id = ? AND input_mode = 'queued' AND input_status = 'pending' AND edit_hold = 0`, inputID, exec.TaskID)
 		if err != nil {
 			return fmt.Errorf("claiming queued input: %w", err)
 		}
@@ -1134,7 +1136,7 @@ func (r *ThreadInputRepo) ClaimQueuedForTaskExecution(ctx context.Context, input
 		}
 		res, err = dbexec.ExecContext(ctx, `				UPDATE thread_inputs
 				SET input_status = 'applied', run_execution_id = ?, turn_id = ?, expected_turn_id = NULL, applied_at = datetime('now'), updated_at = datetime('now')
-				WHERE id = ? AND scope = 'task_thread' AND task_id = ? AND input_mode = 'queued' AND input_status = 'pending' AND expected_turn_id = id`, exec.ID, exec.ID, inputID, exec.TaskID)
+				WHERE id = ? AND scope = 'task_thread' AND task_id = ? AND input_mode = 'queued' AND input_status = 'pending' AND edit_hold = 0 AND expected_turn_id = id`, exec.ID, exec.ID, inputID, exec.TaskID)
 		if err != nil {
 			return fmt.Errorf("applying queued input claim: %w", err)
 		}
@@ -1157,6 +1159,8 @@ func (r *ThreadInputRepo) ClaimQueuedForChatExecution(ctx context.Context, input
 		if err != nil {
 			return fmt.Errorf("loading queued chat input before claim: %w", err)
 		}
+		exec.PromptSent = promoted.Content
+		task.Prompt = promoted.Content
 		var maxOrder sql.NullInt64
 		if err := tx.QueryRowContext(ctx, `SELECT MAX(display_order) FROM tasks WHERE project_id = ? AND category = ?`, task.ProjectID, task.Category).Scan(&maxOrder); err != nil && err != sql.ErrNoRows {
 			return fmt.Errorf("getting max display_order: %w", err)
@@ -1220,7 +1224,7 @@ func (r *ThreadInputRepo) ClaimQueuedForChatExecution(ctx context.Context, input
 		res, err := tx.ExecContext(ctx, `
 				UPDATE thread_inputs
 				SET input_status = 'applied', run_execution_id = ?, turn_id = ?, applied_at = datetime('now'), updated_at = datetime('now')
-				WHERE id = ? AND scope = 'chat' AND project_id = ? AND input_mode = 'queued' AND input_status = 'pending'`, exec.ID, exec.ID, inputID, task.ProjectID)
+				WHERE id = ? AND scope = 'chat' AND project_id = ? AND input_mode = 'queued' AND input_status = 'pending' AND edit_hold = 0`, exec.ID, exec.ID, inputID, task.ProjectID)
 		if err != nil {
 			return fmt.Errorf("claiming queued chat input: %w", err)
 		}
@@ -1235,9 +1239,11 @@ func (r *ThreadInputRepo) ClaimQueuedForChatExecution(ctx context.Context, input
 func (r *ThreadInputRepo) EditPending(ctx context.Context, id, content string) (*models.ThreadInput, error) {
 	updated, err := scanThreadInput(queryRowBoundSQLite(ctx, r.db, `
 		UPDATE thread_inputs
-		SET content = ?, updated_at = datetime('now')
+		SET content = ?, edit_hold = 0, updated_at = datetime('now')
 		WHERE id = ? AND input_status = 'pending'
-			  AND NOT (
+			  AND COALESCE(expected_turn_id, '') != id
+ AND NOT EXISTS (SELECT 1 FROM thread_input_provider_steering ps WHERE ps.thread_input_id = thread_inputs.id)
+ AND NOT (
 			    input_mode = 'steering'
 			    AND COALESCE(expected_turn_id, '') = ''
 			    AND COALESCE(run_execution_id, '') != ''
@@ -1250,6 +1256,7 @@ func (r *ThreadInputRepo) EditPending(ctx context.Context, id, content string) (
 	if err != nil {
 		return nil, fmt.Errorf("editing thread input: %w", err)
 	}
+	r.notifySteeringWakeups(updated.RunExecutionID)
 	return &updated, nil
 }
 
@@ -1407,4 +1414,30 @@ func currentActiveExecutionIDForInput(ctx context.Context, exec sqlExecutor, inp
 		return "", fmt.Errorf("checking current active execution: %w", err)
 	}
 	return activeID, nil
+}
+
+func (r *ThreadInputRepo) SetEditHold(ctx context.Context, id string, hold bool) (*models.ThreadInput, error) {
+	updated, err := scanThreadInput(queryRowBoundSQLite(ctx, r.db, `
+		UPDATE thread_inputs
+		SET edit_hold = ?, updated_at = datetime('now')
+		WHERE id = ? AND input_status = 'pending'
+			  AND COALESCE(expected_turn_id, '') != id
+ AND NOT EXISTS (SELECT 1 FROM thread_input_provider_steering ps WHERE ps.thread_input_id = thread_inputs.id)
+ AND NOT (
+			    input_mode = 'steering'
+			    AND COALESCE(expected_turn_id, '') = ''
+			    AND COALESCE(run_execution_id, '') != ''
+			    AND EXISTS (SELECT 1 FROM executions WHERE id = thread_inputs.run_execution_id AND status = 'running')
+			  )
+		RETURNING `+threadInputSelectColumns, hold, id))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrInputNotPending
+	}
+	if err != nil {
+		return nil, fmt.Errorf("editing thread input: %w", err)
+	}
+	if !hold {
+		r.notifySteeringWakeups(updated.RunExecutionID)
+	}
+	return &updated, nil
 }

@@ -1996,3 +1996,42 @@ func createThreadInputLLMConfig(t *testing.T, ctx context.Context, db *sql.DB) *
 	}
 	return agent
 }
+
+func TestThreadInputEditHoldGuardsAtomicClaims(t *testing.T) {
+	for _, scope := range []models.ThreadInputScope{models.ThreadInputScopeTask, models.ThreadInputScopeChat} {
+		t.Run(string(scope), func(t *testing.T) {
+			db := testutil.NewTestDB(t)
+			ctx := context.Background()
+			repo := NewThreadInputRepo(db)
+			project := createThreadInputProject(t, ctx, db)
+			task := createThreadInputTask(t, ctx, db, project.ID)
+			require.NoError(t, NewTaskRepo(db, nil).UpdateStatus(ctx, task.ID, models.StatusCompleted))
+			agent := createThreadInputLLMConfig(t, ctx, db)
+			input := &models.ThreadInput{Scope: scope, ProjectID: project.ID, TaskID: task.ID, Content: "old text"}
+			require.NoError(t, repo.CreateQueued(ctx, input))
+			_, err := repo.SetEditHold(ctx, input.ID, true)
+			require.NoError(t, err)
+			claim := func() (*models.Execution, error) {
+				execution := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "old text", IsFollowup: true}
+				if scope == models.ThreadInputScopeTask {
+					return execution, repo.ClaimQueuedForTaskExecution(ctx, input.ID, execution)
+				}
+				chatTask := &models.Task{ProjectID: project.ID, Title: "Chat", Category: models.CategoryChat, Status: models.StatusRunning, Prompt: "old text"}
+				return execution, repo.ClaimQueuedForChatExecution(ctx, input.ID, chatTask, execution, nil, nil, nil)
+			}
+			_, err = claim()
+			require.ErrorIs(t, err, ErrInputNotPending)
+			// Saving after a consumer read the old text must still run the newly saved text.
+			_, err = repo.EditPending(ctx, input.ID, "new text")
+			require.NoError(t, err)
+			execution, err := claim()
+			require.NoError(t, err)
+			require.Equal(t, "new text", execution.PromptSent)
+			stored, err := NewExecutionRepo(db).GetByID(ctx, execution.ID)
+			require.NoError(t, err)
+			require.Equal(t, "new text", stored.PromptSent)
+			_, err = repo.SetEditHold(ctx, input.ID, true)
+			require.ErrorIs(t, err, ErrInputNotPending)
+		})
+	}
+}

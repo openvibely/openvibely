@@ -31,6 +31,9 @@ func (h *Handler) EditThreadInput(c echo.Context) error {
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to edit message")
 	}
+	if c.FormValue("resume") == "true" {
+		h.resumeEditedInput(input)
+	}
 	return c.JSON(http.StatusOK, map[string]string{"content": input.Content})
 }
 
@@ -192,4 +195,30 @@ func (h *Handler) TaskThreadQueuedInputSteer(c echo.Context) error {
 		})
 	}
 	return render(c, http.StatusOK, components.ChatSteeringInputRowForTask(steering.ID, steering.Content, steering.AttachmentSessionID != "", taskID))
+}
+
+// Holds persist across disconnects so abandoned editors cannot send an old draft.
+func (h *Handler) HoldThreadInputEdit(c echo.Context) error {
+	if h.threadInputRepo == nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "thread input queue is unavailable")
+	}
+	hold := c.FormValue("hold") != "false"
+	input, err := h.threadInputRepo.SetEditHold(c.Request().Context(), c.Param("inputId"), hold)
+	if errors.Is(err, repository.ErrInputNotPending) {
+		return echo.NewHTTPError(http.StatusConflict, "This message is already being consumed")
+	}
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to hold message")
+	}
+	if !hold {
+		h.resumeEditedInput(input)
+	}
+	return c.JSON(http.StatusOK, map[string]string{"content": input.Content})
+}
+
+func (h *Handler) resumeEditedInput(input *models.ThreadInput) {
+	if input.InputMode != models.ThreadInputModeQueued {
+		return
+	}
+	h.goStartNextQueuedTurnAfter(streamingResponseParams{ProjectID: input.ProjectID, TaskID: input.TaskID, IsTaskFollowup: input.Scope == models.ThreadInputScopeTask}, "")
 }

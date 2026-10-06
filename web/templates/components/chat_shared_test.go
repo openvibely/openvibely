@@ -2236,8 +2236,8 @@ func TestChatQueuedInputRowOOB_WithAttachmentsShowsQueuedAttachmentIndicator(t *
 	}
 
 	content := buf.String()
-	if !strings.Contains(content, `onclick="window.editPendingThreadInput(this)"`) || !strings.Contains(content, `>Edit</button>`) || !strings.Contains(content, `data-pending-input-content`) {
-		t.Fatal("pending message should expose Edit and the original content for the editor")
+	if !strings.Contains(content, `onclick="window.editPendingThreadInput(this)"`) || !strings.Contains(content, `aria-label="Edit message"`) || strings.Contains(content, `>Edit</button>`) || !strings.Contains(content, `data-pending-input-content`) {
+		t.Fatal("pending message should expose an accessible pencil button and original content")
 	}
 	if !strings.Contains(content, `hx-swap-oob="beforeend"`) || !strings.Contains(content, `thread-input-queued-1`) {
 		t.Fatal("OOB queued row should append the pending input row")
@@ -2254,8 +2254,8 @@ func TestChatSteeringInputRow_WithAttachmentsShowsIncludedAttachmentIndicator(t 
 	}
 
 	content := buf.String()
-	if !strings.Contains(content, `onclick="window.editPendingThreadInput(this)"`) || !strings.Contains(content, `>Edit</button>`) || !strings.Contains(content, `data-pending-input-content`) {
-		t.Fatal("pending message should expose Edit and the original content for the editor")
+	if !strings.Contains(content, `onclick="window.editPendingThreadInput(this)"`) || !strings.Contains(content, `aria-label="Edit message"`) || strings.Contains(content, `>Edit</button>`) || !strings.Contains(content, `data-pending-input-content`) {
+		t.Fatal("pending message should expose an accessible pencil button and original content")
 	}
 	if !strings.Contains(content, `thread-input-steer-1`) || !strings.Contains(content, `data-input-mode="steering"`) || !strings.Contains(content, "Steering pending") {
 		t.Fatal("steering row should render as a pending steering row")

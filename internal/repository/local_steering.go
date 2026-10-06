@@ -19,7 +19,7 @@ func (r *ThreadInputRepo) CommitLocalSteering(ctx context.Context, execID string
 	}
 	return withImmediateTx(ctx, r.db, func(tx SQLExecutor) error {
 		for _, id := range ids {
-			res, err := tx.ExecContext(ctx, `UPDATE thread_inputs SET input_status = 'applied', applied_at = COALESCE(applied_at, datetime('now')), updated_at = datetime('now') WHERE id = ? AND run_execution_id = ? AND input_status IN ('pending', 'applied') AND input_mode = 'steering'`, id, execID)
+			res, err := tx.ExecContext(ctx, `UPDATE thread_inputs SET input_status = 'applied', applied_at = COALESCE(applied_at, datetime('now')), updated_at = datetime('now') WHERE id = ? AND run_execution_id = ? AND edit_hold = 0 AND input_status IN ('pending', 'applied') AND input_mode = 'steering'`, id, execID)
 			if err != nil {
 				return err
 			}
