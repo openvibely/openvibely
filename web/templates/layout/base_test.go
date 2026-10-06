@@ -1796,3 +1796,61 @@ func TestPendingEditorAcquiresHoldBeforeOpening(t *testing.T) {
 		t.Fatal("edit control should render a pencil icon")
 	}
 }
+
+func TestPendingEditorReleasesOnPageExit(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node required")
+	}
+	var buf bytes.Buffer
+	if err := Base("Chat", nil, "").Render(context.Background(), &buf); err != nil {
+		t.Fatal(err)
+	}
+	html := buf.String()
+	start := strings.Index(html, "window.editPendingThreadInput = async")
+	end := strings.Index(html[start:], "</script>")
+	script := `
+const assert = require('node:assert/strict');
+const listeners = {};
+global.window = {addEventListener: (n,f) => listeners[n]=f, removeEventListener: n => delete listeners[n], alert: m => {throw Error(m)}};
+const controls = {textarea: {focus(){}}, '[data-cancel]': {}, form: {}, '[role="alert"]': {}};
+let closed = 0;
+let shown = 0;
+const dialogEvents = {};
+const dialog = {setAttribute(){}, querySelector: s => controls[s], addEventListener: (n,f) => dialogEvents[n]=f, showModal(){shown++}, close(){closed++; if(dialogEvents.close) dialogEvents.close()}, remove(){}};
+global.document = {getElementById: () => null, createElement: () => dialog, body: {appendChild(){}, addEventListener: (n,f) => listeners[n]=f, removeEventListener: n => delete listeners[n]}};
+const row = {querySelector: () => ({}), getAttribute: () => 'input-1'};
+const button = {closest: () => row};
+let requests = [];
+let completeHold;
+global.fetch = (url, options) => {
+ requests.push({url, options});
+ if (!options.body) return new Promise(resolve => completeHold = () => resolve({ok:true, json:async()=>({content:'original'})}));
+ return Promise.resolve({ok:true});
+};
+` + html[start:start+end] + `
+(async () => {
+ let opening = window.editPendingThreadInput(button);
+ completeHold(); await opening;
+ assert.equal(shown, 1);
+ listeners.pagehide();
+ assert.equal(requests.length, 2);
+ assert.equal(requests[1].options.body.get('hold'), 'false');
+ assert.equal(requests[1].options.keepalive, true);
+ assert.equal(closed, 1);
+ assert.equal(listeners.pagehide, undefined);
+ // Navigating away while the hold request is in flight also releases it.
+ requests = []; shown = 0;
+ opening = window.editPendingThreadInput(button);
+ listeners.pagehide();
+ completeHold(); await opening;
+ assert.equal(shown, 0);
+ assert.equal(requests.length, 2);
+ assert.equal(requests[1].options.body.get('hold'), 'false');
+ assert.equal(requests[1].options.keepalive, true);
+})().catch(error => {console.error(error); process.exit(1)});
+`
+	if output, err := exec.Command(node, "-e", script).CombinedOutput(); err != nil {
+		t.Fatalf("editor lifecycle: %v\n%s", err, output)
+	}
+}
