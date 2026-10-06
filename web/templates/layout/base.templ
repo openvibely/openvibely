@@ -5106,6 +5106,8 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				}
 
 				function reloadAfterSystemUpdate(data) {
+					// The native app relaunch already loads the updated UI.
+					if (document.documentElement.getAttribute('data-openvibely-runtime') === 'desktop') return false;
 					if (systemUpdateReloading) return true;
 					if (!data && systemUpdateReloadPending) {
 						confirmHiddenSystemUpdate();

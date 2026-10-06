@@ -1988,12 +1988,12 @@ func TestBaseReloadsAfterSuccessfulSystemUpdate(t *testing.T) {
 const vm = require('node:vm');
 const assert = require('node:assert/strict');
 const controller = ` + string(controller) + `;
-function page() {
+function page(runtime = 'web') {
   let reloads = 0;
   const storage = new Map();
   const context = vm.createContext({
     window: {location: {reload() { reloads++; }}},
-    document: {getElementById() { return null; }, querySelector() { return null; }},
+    document: {documentElement: {getAttribute(name) { return name === 'data-openvibely-runtime' ? runtime : null; }}, getElementById() { return null; }, querySelector() { return null; }},
     localStorage: {getItem(k) { return storage.get(k); }, setItem(k,v) { storage.set(k,v); }, removeItem(k) { storage.delete(k); }},
     getToastContainer() { return null; }
   });
@@ -2024,6 +2024,17 @@ for (const state of ['failed','rolled_back','idle']) {
   p.send(snapshot(state));
   p.send(null);
   assert.equal(p.count(), 0, state + ' must cancel reload');
+}
+
+for (const finalState of ['succeeded', 'idle', null]) {
+  const desktop = page('desktop');
+  let healthChecks = 0;
+  desktop.context.fetch = async () => { healthChecks++; return {ok: true, json: async () => ({ready: true, version: '2'})}; };
+  desktop.send(snapshot('restarting'));
+  desktop.send(snapshot('validating', '2'));
+  desktop.send(finalState ? snapshot(finalState, '2', null) : null);
+  assert.equal(desktop.count(), 0, 'desktop relaunch already refreshed the UI');
+  assert.equal(healthChecks, 0, 'desktop must not start a health-check reload');
 }
 
 const initial = page();
