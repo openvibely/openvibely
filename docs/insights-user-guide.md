@@ -39,6 +39,8 @@ OAuth-connected provider accounts (Anthropic, OpenAI) show a usage snapshot card
 
 Analytics charts render in the browser timezone so time-axis labels match local working hours.
 
+Use a chart's expand control to inspect it in a larger modal preview. The preview retains chart tooltips; close it or press Escape to return to the dashboard.
+
 ## How Insights Fit The Workflow
 
 Use the task board for live execution status. Use Insights when you want to step back and answer questions like:

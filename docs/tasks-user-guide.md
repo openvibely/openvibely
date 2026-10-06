@@ -30,21 +30,18 @@ You can drag cards between categories and active sub-lanes to change where work 
 
 ## Create a Task
 
-1. Click `+ Add Task`.
-2. Fill:
-   - `Title`
-   - `Prompt`
-   - Optional `Model`
-   - Optional `Agent`
-   - `Category`, `Priority`, `Tag`
-   - Optional attachments
-3. Click `Create Task`.
+1. Click `+ Add Task` to open a new task workspace.
+2. Write the request in the thread composer and add any attachments.
+3. Set the model, agent, category, priority, and other properties in the Details panel.
+4. Send the first message to create the task. Active tasks begin execution; Backlog tasks are saved for later.
+
+You can configure a schedule before the first send. Existing tasks open directly to their thread, where follow-ups continue the same work.
 
 Optional: enable `Auto-merge to target branch on successful completion` to merge after a successful task run, or independently enable `Auto-merge to target branch when goal is achieved` to merge only when the stored Task Goal reaches `achieved`. Both options are off by default.
 
 ## Swarm Tasks
 
-Enable `Swarm mode` in the task dialog when a job should be split across planner, worker, reviewer, and merger child tasks. OpenVibely creates a swarm parent card plus real child tasks, so each worker keeps its own thread, diff, retry, follow-up, and worktree context.
+Enable `Swarm mode` in the task workspace when a job should be split across planner, worker, reviewer, and merger child tasks. OpenVibely creates a swarm parent card plus real child tasks, so each worker keeps its own thread, diff, retry, follow-up, and worktree context.
 
 Workers created by the planner all start in parallel as soon as the plan is applied; there is no dependency ordering between workers, so a worker cannot wait for another worker to finish first. Validation of the combined worker output happens only in the reviewer and merger phases, which run after all required workers complete.
 
@@ -100,15 +97,19 @@ Use bulk actions when you want to process many tasks quickly (for example, execu
 
 ## Task Detail Page
 
-Open a task card title to access tabs:
+Open a task card title to enter its thread. Switch to `Changes` to review code, or open the resizable Details panel for task properties and supporting views:
 
 - `Details`: run now, edit fields, delete
 - `Thread`: task-specific conversation/execution follow-ups
 - `Changes`: git diff and review comments
 - `Lifecycle`: hook invocations, skill pills, and recalled memory pills for every hook run
-- `Schedules`: add/edit/remove task schedules
+- `Schedule`: add/edit/remove task schedules
 - `Chaining`: configure child-task creation flow
-- `Attachments`: manage attached files
+- `Files`: manage attached files and open image previews
+
+Edit task properties directly from the Details panel. Its open state is remembered across tasks and projects. Lifecycle entries expand to show activity details and links back to the thread. Chat and task threads also render Mermaid diagrams.
+
+Use [keyboard shortcuts](keyboard-shortcuts.md) to switch tasks, toggle the Details panel, and move between the thread and Changes without leaving the composer.
 
 Why task detail matters:
 
