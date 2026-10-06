@@ -94,10 +94,72 @@ static void ovCaptionFree(gpointer data) {
  g_free(c);
 }
 
+#if GTK_MAJOR_VERSION < 4
+static gboolean ovWindowDraw(GtkWidget *window, cairo_t *cr, gpointer data) {
+ GdkWindow *surface = gtk_widget_get_window(window);
+ GdkWindowState state = gdk_window_get_state(surface);
+ gboolean square = (state & (GDK_WINDOW_STATE_MAXIMIZED | GDK_WINDOW_STATE_FULLSCREEN | GDK_WINDOW_STATE_TILED |
+  GDK_WINDOW_STATE_TOP_TILED | GDK_WINDOW_STATE_RIGHT_TILED | GDK_WINDOW_STATE_BOTTOM_TILED | GDK_WINDOW_STATE_LEFT_TILED)) ||
+  !gdk_screen_is_composited(gtk_widget_get_screen(window)) ||
+  gtk_widget_get_visual(window) != gdk_screen_get_rgba_visual(gtk_widget_get_screen(window));
+ double width = gtk_widget_get_allocated_width(window);
+ double height = gtk_widget_get_allocated_height(window);
+ double radius = square ? 0 : MIN(12, MIN(width, height) / 2);
+ // Clear the previous frame first, including pixels exposed after restoring
+ // from maximized. GTK3 doesn't clip child drawing to CSS border-radius.
+ cairo_save(cr);
+ cairo_set_operator(cr, CAIRO_OPERATOR_CLEAR);
+ cairo_paint(cr);
+ cairo_set_operator(cr, CAIRO_OPERATOR_OVER);
+ cairo_new_path(cr);
+ if (radius > 0) {
+  cairo_arc(cr, width-radius, radius, radius, -G_PI/2, 0);
+  cairo_arc(cr, width-radius, height-radius, radius, 0, G_PI/2);
+  cairo_arc(cr, radius, height-radius, radius, G_PI/2, G_PI);
+  cairo_arc(cr, radius, radius, radius, G_PI, 3*G_PI/2);
+  cairo_close_path(cr);
+ } else {
+  cairo_rectangle(cr, 0, 0, width, height);
+ }
+ cairo_clip(cr);
+ // Invoke the default renderer once under the clip, including the WebKit
+ // surface and native caption overlay. Returning TRUE stops a second draw.
+ GTK_WIDGET_GET_CLASS(window)->draw(window, cr);
+ cairo_restore(cr);
+ return TRUE;
+}
+
+static gboolean ovWindowState(GtkWidget *window, GdkEventWindowState *event, gpointer data) {
+ gtk_widget_queue_draw(window);
+ return FALSE;
+}
+#endif
+
+static void ovInstallWindowCorners(GtkWidget *window) {
+#if GTK_MAJOR_VERSION < 4
+ g_signal_connect(window, "draw", G_CALLBACK(ovWindowDraw), NULL);
+ g_signal_connect(window, "window-state-event", G_CALLBACK(ovWindowState), NULL);
+#else
+ // GTK4 clips the entire child snapshot (including WebKit) to the rounded
+ // CSS padding box. Window-state classes remove the clip at screen edges.
+ GtkCssProvider *css = gtk_css_provider_new();
+ gtk_css_provider_load_from_data(css,
+  "window.ov-rounded { border-radius: 12px; }"
+  "window.ov-rounded.maximized, window.ov-rounded.fullscreen, window.ov-rounded.tiled,"
+  "window.ov-rounded.tiled-top, window.ov-rounded.tiled-right,"
+  "window.ov-rounded.tiled-bottom, window.ov-rounded.tiled-left { border-radius: 0; }", -1);
+ gtk_style_context_add_provider(gtk_widget_get_style_context(window), GTK_STYLE_PROVIDER(css), GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+ g_object_unref(css);
+ gtk_widget_add_css_class(window, "ov-rounded");
+ gtk_widget_set_overflow(window, GTK_OVERFLOW_HIDDEN);
+#endif
+}
+
 void ovInstallLinuxCaption(void *native_window) {
  if (!native_window || !GTK_IS_WINDOW(native_window)) return;
  GtkWidget *window = GTK_WIDGET(native_window);
  if (g_object_get_data(G_OBJECT(window), "ov-caption")) return;
+ ovInstallWindowCorners(window);
  OVCaption *c = g_new0(OVCaption, 1);
  c->window = window; c->last_left = c->last_right = -1;
  GtkWidget *overlay = gtk_overlay_new();
