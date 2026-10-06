@@ -59,7 +59,7 @@ templ TasksContent(project *models.Project, tasks []models.Task, agents []models
 				var category = button.dataset.deleteAllTasksCategory || '';
 				var projectID = button.dataset.projectId || '';
 				var displayName = button.dataset.deleteAllTasksName || '';
-				if ((category !== 'completed' && category !== 'backlog') || !projectID || !displayName) return;
+				if ((category !== 'completed' && category !== 'backlog' && category !== 'active') || !projectID || !displayName) return;
 				deleteAllTasksURL = '/tasks/' + category + '?project_id=' + encodeURIComponent(projectID);
 				button.focus({preventScroll: true});
 				window.openDestructiveConfirmDialog('delete_all_tasks_confirm_modal', 'delete_all_tasks_confirm_name', displayName);

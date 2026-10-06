@@ -174,7 +174,7 @@ templ TaskWorkspaceScript() {
 		var breadcrumbButton = breadcrumb && breadcrumb.querySelector('[data-breadcrumb-selector-button]');
 		var apple = /Mac|iPhone|iPad/.test(navigator.platform);
 		opener.title = 'Toggle task details (' + (apple ? '⌘⇧B' : 'Ctrl+Shift+B') + ')';
-		if (breadcrumbButton) breadcrumbButton.title = 'Switch task (' + (apple ? '⌘K' : 'Ctrl+K') + '); previous/next: ' + (apple ? 'Option' : 'Alt') + '+↑/↓; last visited: ' + (apple ? 'Option' : 'Alt') + '+L';
+		if (breadcrumbButton) breadcrumbButton.title = 'Switch task (' + (apple ? '⌘K' : 'Ctrl+K') + '); previous/next: ' + (apple ? '⌘⇧↑/↓' : 'Ctrl+Shift+↑/↓') + '; last visited: ' + (apple ? '⌘⇧L' : 'Ctrl+Shift+L');
 		function navigateTask(url, cycling) {
 			var destination = new URL(url, location.href);
 			if (destination.origin !== location.origin) return;
