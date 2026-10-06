@@ -7,17 +7,19 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
-	"golang.org/x/sync/singleflight"
 )
 
 // ErrReauthenticationRequired marks a refresh-token failure that cannot recover
 // without reconnecting the model configuration.
 var ErrReauthenticationRequired = errors.New("OAuth reauthentication required")
+
+var errOAuthRefreshInitiatorCanceled = errors.New("OAuth refresh initiator canceled")
 
 // TokenSet is a provider-neutral OAuth token refresh result.
 type TokenSet struct {
@@ -30,16 +32,24 @@ type TokenSet struct {
 // RefreshFunc refreshes the selected config's OAuth tokens using its current refresh token.
 type RefreshFunc func(ctx context.Context, cfg models.LLMConfig) (TokenSet, error)
 
+type refreshCall struct {
+	done  chan struct{}
+	value any
+	err   error
+}
+
 // Manager coordinates OAuth refresh for provider adapters. It reloads the exact
 // selected model and serializes refresh-token rotation in-process and across
 // processes at the linked connection boundary.
 type Manager struct {
-	repo  *repository.LLMConfigRepo
-	group singleflight.Group
+	repo *repository.LLMConfigRepo
+
+	mu       sync.Mutex
+	inFlight map[string]*refreshCall
 }
 
 func NewManager(repo *repository.LLMConfigRepo) *Manager {
-	return &Manager{repo: repo}
+	return &Manager{repo: repo, inFlight: make(map[string]*refreshCall)}
 }
 
 func (m *Manager) EnsureFresh(ctx context.Context, cfg models.LLMConfig, minTTL time.Duration, refresh RefreshFunc) (models.LLMConfig, error) {
@@ -88,15 +98,33 @@ func (m *Manager) refreshSelected(ctx context.Context, cfg models.LLMConfig, tok
 		ownerID = cfg.OAuthConnectionID
 	}
 	key := string(cfg.Provider) + ":" + ownerID
-	value, err, _ := m.group.Do(key, func() (any, error) {
-		return m.refreshSelectedLocked(ctx, cfg, tokenUsed, minTTL, refresh)
-	})
-	if err != nil {
-		return cfg, err
-	}
-	fresh, ok := value.(models.LLMConfig)
-	if !ok {
-		return cfg, fmt.Errorf("OAuth recovery internal type mismatch for model config %q", cfg.Name)
+	var fresh models.LLMConfig
+	for {
+		if err := ctx.Err(); err != nil {
+			return cfg, err
+		}
+		value, refreshErr, shared := m.doRefresh(ctx, key, func() (any, error) {
+			fresh, err := m.refreshSelectedLocked(ctx, cfg, tokenUsed, minTTL, refresh)
+			if err != nil && ctx.Err() != nil && (errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)) {
+				err = fmt.Errorf("%w: %w", errOAuthRefreshInitiatorCanceled, err)
+			}
+			return fresh, err
+		})
+		if err := ctx.Err(); err != nil {
+			return cfg, err
+		}
+		if refreshErr != nil {
+			if shared && errors.Is(refreshErr, errOAuthRefreshInitiatorCanceled) {
+				continue
+			}
+			return cfg, refreshErr
+		}
+		var ok bool
+		fresh, ok = value.(models.LLMConfig)
+		if !ok {
+			return cfg, fmt.Errorf("OAuth recovery internal type mismatch for model config %q", cfg.Name)
+		}
+		break
 	}
 	if strings.TrimSpace(cfg.OAuthConnectionID) == "" {
 		return fresh, nil
@@ -112,6 +140,38 @@ func (m *Manager) refreshSelected(ctx context.Context, cfg models.LLMConfig, tok
 		return cfg, fmt.Errorf("selected OAuth config changed account connection for %q", cfg.Name)
 	}
 	return *current, nil
+}
+
+// doRefresh runs the operation in its initiating caller so its lifecycle waits
+// for the refresh to exit. Joined callers wait independently on their contexts.
+func (m *Manager) doRefresh(ctx context.Context, key string, refresh func() (any, error)) (any, error, bool) {
+	m.mu.Lock()
+	if call, ok := m.inFlight[key]; ok {
+		m.mu.Unlock()
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err(), true
+		case <-call.done:
+			if err := ctx.Err(); err != nil {
+				return nil, err, true
+			}
+			return call.value, call.err, true
+		}
+	}
+	if m.inFlight == nil {
+		m.inFlight = make(map[string]*refreshCall)
+	}
+	call := &refreshCall{done: make(chan struct{})}
+	m.inFlight[key] = call
+	m.mu.Unlock()
+
+	call.value, call.err = refresh()
+
+	m.mu.Lock()
+	delete(m.inFlight, key)
+	close(call.done)
+	m.mu.Unlock()
+	return call.value, call.err, false
 }
 
 func (m *Manager) refreshSelectedLocked(ctx context.Context, cfg models.LLMConfig, tokenUsed string, minTTL time.Duration, refresh RefreshFunc) (models.LLMConfig, error) {
