@@ -92,7 +92,7 @@ func TestModelsContent_CatalogModelsInSelector(t *testing.T) {
 	if strings.Contains(out, "Max Output Tokens / Request") || strings.Contains(out, "model_max_tokens") {
 		t.Error("expected model dialog not to expose internal output-token cap")
 	}
-	if !strings.Contains(out, "0 = use global pool; positive values set a per-model cap with no product-level maximum") {
+	if !strings.Contains(out, "Choose a custom limit to restrict concurrent workers for this model.") {
 		t.Error("expected model worker limit guidance to describe inherited and positive per-model limits")
 	}
 	modelWorkerInputStart := strings.Index(out, `id="model_max_workers"`)
@@ -107,7 +107,7 @@ func TestModelsContent_CatalogModelsInSelector(t *testing.T) {
 		t.Error("expected model worker input not to retain a hard maximum of 10")
 	}
 	if !strings.Contains(out, "Save endpoint changes and reconnect before discovering models.") {
-		t.Error("expected edit-mode discovery to explain that endpoint changes must be saved first")
+		t.Error("expected OAuth discovery to require reconnecting after endpoint changes")
 	}
 	if !strings.Contains(out, `name="custom_access_token_header"`) ||
 		!strings.Contains(out, `name="custom_access_token_prefix"`) ||
@@ -922,7 +922,7 @@ func TestModelsContent_OpenAICompatibleDiscoveryUI(t *testing.T) {
 		`oninput="syncModelAPIKeySubmitValue(); scheduleAutoDiscoverOpenAICompatibleModels()"`,
 		`onsubmit="clearModelFormError(); if (!normalizeModelFormBeforeSubmit()) { event.preventDefault(); event.stopImmediatePropagation(); return false; }"`,
 		`<input type="hidden" id="model_openai_compatible_preset" name="preset_slug" value="custom"`,
-		"OpenAI-compatible presets auto-load available models when selected; Custom stays manual.",
+		"Loading models…",
 		"openai_compatible_openrouter: [",
 		"openai_compatible_groq: [",
 		"openai_compatible_deepseek: [",
@@ -931,7 +931,7 @@ func TestModelsContent_OpenAICompatibleDiscoveryUI(t *testing.T) {
 		"{ value: 'nvidia/nemotron-3-ultra-550b-a55b', label: 'NVIDIA Nemotron', efforts: [] }",
 		"{ value: 'deepseek-chat', label: 'DeepSeek Chat', efforts: [] }",
 		"{ value: 'local-model', label: 'LM Studio local model', efforts: [] }",
-		"Enter model ID manually",
+		"No models available",
 		"function modelOptionsForProvider(provider)",
 		"isDiscoverableOpenAICompatiblePreset()",
 		"runAutoDiscoverOpenAICompatibleModels();",
@@ -966,11 +966,10 @@ func TestModelsContent_OpenAICompatibleDiscoveryUI(t *testing.T) {
 		"(!configID || customAuthMethod === 'api_key')",
 		"clearExtraHeaders.checked",
 		"cfg.model_id_field || 'id'",
-		"data.resolved_id",
 		"setOpenAICompatibleModelValue(models[i].id, models[i].id, false)",
-		"setOpenAICompatibleModelValue(data.resolved_id, data.resolved_id, true)",
+		"setOpenAICompatibleModelValue(models[0].id, models[0].id, true)",
 		"if (!isDiscoverableOpenAICompatiblePreset())",
-		"Discover Models",
+		`aria-label="Refresh models"`,
 		`onclick="discoverOpenAICompatibleModels()"`,
 		`name="custom_static_headers_json"`,
 		`name="custom_authorization_parameters_json"`,
