@@ -1552,43 +1552,7 @@ func modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, o
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 94, "\" class=\"btn btn-sm btn-outline\" onclick=\"return launchOAuthInSystemBrowser(this.dataset.oauthPath, this)\">Connect OAuth</a></div><p id=\"model_oauth_connection_save_hint\" class=\"hidden text-sm opacity-70\">Save this model before connecting the selected account.</p></div><!-- Connection method selector for OpenAI OAuth (CLI option removed) --><div id=\"openai_connection_method_field\" class=\"form-control mb-3 hidden\"><label class=\"label\"><span class=\"label-text\">Connection Method</span></label> <select name=\"auth_method\" id=\"model_openai_connection_method\" class=\"select select-bordered\" onchange=\"toggleOpenAIConnectionMethodFields()\"><option value=\"oauth\">API (OAuth via web)</option></select></div><div id=\"model_field\" class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">Model</span></label><div class=\"flex items-center gap-2\"><select name=\"model\" id=\"model_id\" class=\"select select-bordered flex-1 min-w-0\" onchange=\"handleModelChange()\">")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		for _, spec := range models.ProviderModels(models.ProviderAnthropic) {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 95, "<option value=\"")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			var templ_7745c5c3_Var69 string
-			templ_7745c5c3_Var69, templ_7745c5c3_Err = templ.ResolveAttributeValue(spec.ID)
-			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 582, Col: 31}
-			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var69)
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 96, "\">")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			var templ_7745c5c3_Var70 string
-			templ_7745c5c3_Var70, templ_7745c5c3_Err = templ.JoinStringErrs(spec.Label)
-			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 582, Col: 46}
-			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var70))
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 97, "</option>")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 98, "</select> <button id=\"model_refresh\" type=\"button\" class=\"btn btn-square btn-outline hidden\" aria-label=\"Refresh models\" title=\"Refresh models\" onclick=\"discoverOpenAICompatibleModels()\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-5 w-5\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" aria-hidden=\"true\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" d=\"M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8M21 3v5h-5M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16M8 16H3v5\"></path></svg></button></div><p id=\"openai_compatible_discovery_status\" class=\"text-sm mt-2 hidden\" role=\"status\" aria-live=\"polite\"></p></div><div id=\"reasoning_effort_field\" class=\"form-control mb-3 hidden\"><label class=\"label\"><span id=\"reasoning_effort_label\" class=\"label-text\">Effort</span></label> <select name=\"reasoning_effort\" id=\"model_reasoning_effort\" class=\"select select-bordered\"></select> <label class=\"label\"><span id=\"reasoning_effort_help\" class=\"label-text-alt opacity-70\">Controls provider reasoning/thinking effort for supported models.</span></label></div><div id=\"api_key_field\" class=\"form-control mb-3\"><label class=\"label\"><span id=\"model_api_key_label\" class=\"label-text\">API key</span></label>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 94, "\" class=\"btn btn-sm btn-outline\" onclick=\"return launchOAuthInSystemBrowser(this.dataset.oauthPath, this)\">Connect OAuth</a></div><p id=\"model_oauth_connection_save_hint\" class=\"hidden text-sm opacity-70\">Save this model before connecting the selected account.</p></div><!-- Connection method selector for OpenAI OAuth (CLI option removed) --><div id=\"openai_connection_method_field\" class=\"form-control mb-3 hidden\"><label class=\"label\"><span class=\"label-text\">Connection Method</span></label> <select name=\"auth_method\" id=\"model_openai_connection_method\" class=\"select select-bordered\" onchange=\"toggleOpenAIConnectionMethodFields()\"><option value=\"oauth\">API (OAuth via web)</option></select></div><div id=\"api_key_field\" class=\"form-control mb-3\"><label class=\"label\"><span id=\"model_api_key_label\" class=\"label-text\">API key</span></label>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -1603,7 +1567,43 @@ func modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, o
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 99, "<input type=\"hidden\" id=\"model_api_key_submit\" name=\"api_key\" value=\"\"> <label class=\"label\"><span id=\"model_api_key_help\" class=\"label-text-alt opacity-70\">API keys are hidden by default. When editing, leave empty to keep the saved key.</span></label></div><!-- Connection method selector for Anthropic OAuth (CLI option removed) --><div id=\"auth_method_field\" class=\"form-control mb-3 hidden\"><label class=\"label\"><span class=\"label-text\">Connection Method</span></label> <select name=\"auth_method\" id=\"model_auth_method\" class=\"select select-bordered\" onchange=\"toggleSubscriptionMethodFields()\"><option value=\"oauth\">API (OAuth via web)</option></select></div><div id=\"subscription_info_oauth\" class=\"mb-3 hidden\"><div class=\"alert alert-info\"><svg xmlns=\"http://www.w3.org/2000/svg\" fill=\"none\" viewBox=\"0 0 24 24\" class=\"stroke-current shrink-0 w-6 h-6\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z\"></path></svg><div><p class=\"font-semibold\">OAuth via API</p><p class=\"text-sm\">Uses the Anthropic API directly via OAuth. After saving, edit the model to connect its selected OAuth account.</p></div></div></div><div id=\"openai_subscription_info_oauth\" class=\"mb-3 hidden\"><div class=\"alert alert-info\"><svg xmlns=\"http://www.w3.org/2000/svg\" fill=\"none\" viewBox=\"0 0 24 24\" class=\"stroke-current shrink-0 w-6 h-6\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z\"></path></svg><div><p class=\"font-semibold\">OAuth via API</p><p class=\"text-sm\">Uses the OpenAI API directly via OAuth. After saving, edit the model to connect its selected OAuth account.</p></div></div></div><div id=\"ollama_info\" class=\"mb-3 hidden\"><div class=\"alert alert-info\"><svg xmlns=\"http://www.w3.org/2000/svg\" fill=\"none\" viewBox=\"0 0 24 24\" class=\"stroke-current shrink-0 w-6 h-6\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z\"></path></svg><div><p class=\"font-semibold\">Local Ollama Instance</p><p class=\"text-sm\">Connects to your local Ollama server. Make sure Ollama is running with <code>ollama serve</code>.</p></div></div></div><div id=\"openai_compatible_fields\" class=\"hidden\"><input type=\"hidden\" id=\"model_openai_compatible_preset\" name=\"preset_slug\" value=\"custom\"> <input type=\"hidden\" id=\"model_openai_compatible_transport\" name=\"transport\" value=\"chat_completions\"><div class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">Base URL</span></label> <input type=\"text\" id=\"model_base_url\" name=\"base_url\" class=\"input input-bordered\" placeholder=\"https://openrouter.ai/api/v1/\" oninput=\"clearDiscoveredModelLimits(); scheduleAutoDiscoverOpenAICompatibleModels()\"> <label class=\"label\"><span class=\"label-text-alt opacity-70\">API root; requests go to base URL + /chat/completions.</span></label></div><div id=\"model_manual_id_field\" class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">Model ID</span></label> <input type=\"text\" id=\"model_openai_compatible_custom_model\" class=\"input input-bordered\" placeholder=\"provider/model-id\" oninput=\"syncOpenAICompatibleModel()\"> <label class=\"label\"><span class=\"label-text-alt opacity-70\">Stored exactly as entered, after trimming whitespace.</span></label></div><input type=\"hidden\" name=\"oauth_setup_session\" id=\"model_oauth_setup_session\"><div id=\"model_oauth_setup\" class=\"hidden mb-3\"><button type=\"button\" class=\"btn btn-outline\" data-desktop=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 95, "<input type=\"hidden\" id=\"model_api_key_submit\" name=\"api_key\" value=\"\"> <label class=\"label\"><span id=\"model_api_key_help\" class=\"label-text-alt opacity-70\">API keys are hidden by default. When editing, leave empty to keep the saved key.</span></label></div><div id=\"model_field\" class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">Model</span></label><div class=\"flex items-center gap-2\"><select name=\"model\" id=\"model_id\" class=\"select select-bordered flex-1 min-w-0\" onchange=\"handleModelChange()\">")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		for _, spec := range models.ProviderModels(models.ProviderAnthropic) {
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 96, "<option value=\"")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var69 string
+			templ_7745c5c3_Var69, templ_7745c5c3_Err = templ.ResolveAttributeValue(spec.ID)
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 596, Col: 31}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var69)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 97, "\">")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var70 string
+			templ_7745c5c3_Var70, templ_7745c5c3_Err = templ.JoinStringErrs(spec.Label)
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 596, Col: 46}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var70))
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 98, "</option>")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 99, "</select> <button id=\"model_refresh\" type=\"button\" class=\"btn btn-square btn-outline hidden\" aria-label=\"Refresh models\" title=\"Refresh models\" onclick=\"discoverOpenAICompatibleModels()\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-5 w-5\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" aria-hidden=\"true\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" d=\"M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8M21 3v5h-5M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16M8 16H3v5\"></path></svg></button></div><p id=\"openai_compatible_discovery_status\" class=\"text-sm mt-2 hidden\" role=\"status\" aria-live=\"polite\"></p></div><div id=\"reasoning_effort_field\" class=\"form-control mb-3 hidden\"><label class=\"label\"><span id=\"reasoning_effort_label\" class=\"label-text\">Effort</span></label> <select name=\"reasoning_effort\" id=\"model_reasoning_effort\" class=\"select select-bordered\"></select> <label class=\"label\"><span id=\"reasoning_effort_help\" class=\"label-text-alt opacity-70\">Controls provider reasoning/thinking effort for supported models.</span></label></div><!-- Connection method selector for Anthropic OAuth (CLI option removed) --><div id=\"auth_method_field\" class=\"form-control mb-3 hidden\"><label class=\"label\"><span class=\"label-text\">Connection Method</span></label> <select name=\"auth_method\" id=\"model_auth_method\" class=\"select select-bordered\" onchange=\"toggleSubscriptionMethodFields()\"><option value=\"oauth\">API (OAuth via web)</option></select></div><div id=\"subscription_info_oauth\" class=\"mb-3 hidden\"><div class=\"alert alert-info\"><svg xmlns=\"http://www.w3.org/2000/svg\" fill=\"none\" viewBox=\"0 0 24 24\" class=\"stroke-current shrink-0 w-6 h-6\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z\"></path></svg><div><p class=\"font-semibold\">OAuth via API</p><p class=\"text-sm\">Uses the Anthropic API directly via OAuth. After saving, edit the model to connect its selected OAuth account.</p></div></div></div><div id=\"openai_subscription_info_oauth\" class=\"mb-3 hidden\"><div class=\"alert alert-info\"><svg xmlns=\"http://www.w3.org/2000/svg\" fill=\"none\" viewBox=\"0 0 24 24\" class=\"stroke-current shrink-0 w-6 h-6\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z\"></path></svg><div><p class=\"font-semibold\">OAuth via API</p><p class=\"text-sm\">Uses the OpenAI API directly via OAuth. After saving, edit the model to connect its selected OAuth account.</p></div></div></div><div id=\"ollama_info\" class=\"mb-3 hidden\"><div class=\"alert alert-info\"><svg xmlns=\"http://www.w3.org/2000/svg\" fill=\"none\" viewBox=\"0 0 24 24\" class=\"stroke-current shrink-0 w-6 h-6\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z\"></path></svg><div><p class=\"font-semibold\">Local Ollama Instance</p><p class=\"text-sm\">Connects to your local Ollama server. Make sure Ollama is running with <code>ollama serve</code>.</p></div></div></div><div id=\"openai_compatible_fields\" class=\"hidden\"><input type=\"hidden\" id=\"model_openai_compatible_preset\" name=\"preset_slug\" value=\"custom\"> <input type=\"hidden\" id=\"model_openai_compatible_transport\" name=\"transport\" value=\"chat_completions\"><div class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">Base URL</span></label> <input type=\"text\" id=\"model_base_url\" name=\"base_url\" class=\"input input-bordered\" placeholder=\"https://openrouter.ai/api/v1/\" oninput=\"clearDiscoveredModelLimits(); scheduleAutoDiscoverOpenAICompatibleModels()\"> <label class=\"label\"><span class=\"label-text-alt opacity-70\">API root; requests go to base URL + /chat/completions.</span></label></div><div id=\"model_manual_id_field\" class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">Model ID</span></label> <input type=\"text\" id=\"model_openai_compatible_custom_model\" class=\"input input-bordered\" placeholder=\"provider/model-id\" oninput=\"syncOpenAICompatibleModel()\"> <label class=\"label\"><span class=\"label-text-alt opacity-70\">Stored exactly as entered, after trimming whitespace.</span></label></div><input type=\"hidden\" name=\"oauth_setup_session\" id=\"model_oauth_setup_session\"><div id=\"model_oauth_setup\" class=\"hidden mb-3\"><button type=\"button\" class=\"btn btn-outline\" data-desktop=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

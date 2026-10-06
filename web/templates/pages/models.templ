@@ -574,6 +574,20 @@ for _, agent := range modelOptions {
 							<option value="oauth">API (OAuth via web)</option>
 						</select>
 					</div>
+						<div id="api_key_field" class="form-control mb-3">
+							<label class="label"><span id="model_api_key_label" class="label-text">API key</span></label>
+								@components.SecretInput(components.SecretInputConfig{
+									ID:           "model_api_key",
+									Class:        "input input-bordered w-full pr-10 font-mono text-xs",
+									Placeholder:  "sk-ant-...",
+									AutoComplete: "off",
+									OnInput:      "syncModelAPIKeySubmitValue(); scheduleAutoDiscoverOpenAICompatibleModels()",
+									AriaLabel:    "Toggle API key visibility",
+								})
+								<input type="hidden" id="model_api_key_submit" name="api_key" value=""/>							<label class="label">
+								<span id="model_api_key_help" class="label-text-alt opacity-70">API keys are hidden by default. When editing, leave empty to keep the saved key.</span>
+							</label>
+							</div>
 						<div id="model_field" class="form-control mb-3">
 							<label class="label"><span class="label-text">Model</span></label>
 							<div class="flex items-center gap-2">
@@ -594,20 +608,6 @@ for _, agent := range modelOptions {
 								<label class="label">
 									<span id="reasoning_effort_help" class="label-text-alt opacity-70">Controls provider reasoning/thinking effort for supported models.</span>
 								</label>
-							</div>
-						<div id="api_key_field" class="form-control mb-3">
-							<label class="label"><span id="model_api_key_label" class="label-text">API key</span></label>
-								@components.SecretInput(components.SecretInputConfig{
-									ID:           "model_api_key",
-									Class:        "input input-bordered w-full pr-10 font-mono text-xs",
-									Placeholder:  "sk-ant-...",
-									AutoComplete: "off",
-									OnInput:      "syncModelAPIKeySubmitValue(); scheduleAutoDiscoverOpenAICompatibleModels()",
-									AriaLabel:    "Toggle API key visibility",
-								})
-								<input type="hidden" id="model_api_key_submit" name="api_key" value=""/>							<label class="label">
-								<span id="model_api_key_help" class="label-text-alt opacity-70">API keys are hidden by default. When editing, leave empty to keep the saved key.</span>
-							</label>
 							</div>
 						<!-- Connection method selector for Anthropic OAuth (CLI option removed) -->
 						<div id="auth_method_field" class="form-control mb-3 hidden">						<label class="label"><span class="label-text">Connection Method</span></label>
