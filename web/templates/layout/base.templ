@@ -162,6 +162,65 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 			</script>
 			<link href={ static.URL("app.css") } rel="stylesheet" type="text/css"/>
 			<script src={ static.URL("vendor/htmx.min.js") }></script>
+			<script>
+			window.appendPendingThreadInputEditButton = function(actions) {
+				var button = document.createElement('button');
+				button.type = 'button';
+				button.className = 'btn btn-ghost btn-xs h-6 min-h-0 rounded-md px-2 text-sm font-normal';
+				button.textContent = 'Edit';
+				button.onclick = function() { window.editPendingThreadInput(button); };
+				actions.appendChild(button);
+			};
+			window.editPendingThreadInput = function(button) {
+				if (document.getElementById('pending-input-editor')) return;
+				var row = button.closest('[data-thread-input-id]');
+				var preview = row && row.querySelector('[data-pending-input-content]');
+				if (!preview) return;
+				var inputID = row.getAttribute('data-thread-input-id');
+				var dialog = document.createElement('dialog');
+				dialog.id = 'pending-input-editor';
+				dialog.className = 'modal';
+				dialog.setAttribute('aria-labelledby', 'pending-input-editor-title');
+				dialog.innerHTML = '<form class="modal-box"><h3 id="pending-input-editor-title" class="font-bold text-lg">Edit pending message</h3><textarea class="textarea w-full" rows="6" aria-label="Message" required></textarea><p role="alert" class="text-error"></p><div class="modal-action"><button type="button" class="btn" data-cancel>Cancel</button><button type="submit" class="btn btn-primary">Save</button></div></form>';
+				var textarea = dialog.querySelector('textarea');
+				textarea.value = preview.textContent;
+				var saving = false;
+				dialog.addEventListener('cancel', function(event) { if (saving) event.preventDefault(); });
+				dialog.addEventListener('close', function() { dialog.remove(); if (button.isConnected) button.focus(); });
+				dialog.querySelector('[data-cancel]').onclick = function() { dialog.close(); };
+				dialog.querySelector('form').onsubmit = async function(event) {
+					event.preventDefault();
+					if (saving) return;
+					var error = dialog.querySelector('[role="alert"]');
+					if (!textarea.value.trim()) { error.textContent = 'Message cannot be empty'; return; }
+					saving = true;
+					error.textContent = '';
+					dialog.querySelectorAll('button, textarea').forEach(function(el) { el.disabled = true; });
+					var save = dialog.querySelector('[type="submit"]');
+					save.textContent = 'Saving…';
+					try {
+						var response = await fetch('/thread-inputs/' + encodeURIComponent(inputID) + '/edit', {
+							method: 'POST', body: new URLSearchParams({content: textarea.value})
+						});
+						var result = await response.json();
+						if (!response.ok) throw new Error(result.message || 'Failed to edit message');
+						var currentRow = document.getElementById('thread-input-' + inputID);
+						var currentPreview = currentRow && currentRow.querySelector('[data-pending-input-content]');
+						if (currentPreview) currentPreview.textContent = result.content;
+						dialog.close();
+					} catch (err) {
+						error.textContent = err.message || 'Failed to edit message';
+					} finally {
+						saving = false;
+						dialog.querySelectorAll('button, textarea').forEach(function(el) { el.disabled = false; });
+						save.textContent = 'Save';
+					}
+				};
+				document.body.appendChild(dialog);
+				dialog.showModal();
+				textarea.focus();
+			};
+			</script>
 			<script src={ static.URL("vendor/idiomorph-ext.min.js") }></script>
 			<meta name="ov-asset-mermaid" content={ static.URL("vendor/mermaid.min.js") }/>
 			@MermaidDiagrams()

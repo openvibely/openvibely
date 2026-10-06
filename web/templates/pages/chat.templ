@@ -1659,6 +1659,7 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 							var preview = document.createElement('div');
 							preview.className = 'truncate';
 							preview.textContent = data.message || '';
+						preview.setAttribute('data-pending-input-content', '');
 							content.appendChild(preview);
 							var hint = document.createElement('div');
 							hint.className = 'text-xs opacity-60';
@@ -1675,7 +1676,8 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 							cancelSteeringBtn.title = 'Cancel pending steering';
 							cancelSteeringBtn.setAttribute('aria-label', 'Cancel pending steering');
 							cancelSteeringBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>';
-							actionWrap.appendChild(cancelSteeringBtn);
+							window.appendPendingThreadInputEditButton(actionWrap);
+						actionWrap.appendChild(cancelSteeringBtn);
 								steeringRow.appendChild(content);
 								if (data.has_attachments) steeringRow.appendChild(createPendingAttachmentBadge('Attachments included', 'Attachments included with this steering instruction'));
 								steeringRow.appendChild(actionWrap);							pendingContainer.appendChild(steeringRow);
@@ -1756,6 +1758,7 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 										var queuedPreview = document.createElement('div');
 										queuedPreview.className = 'min-w-0 flex-1 truncate';
 										queuedPreview.textContent = data.message || '';
+										queuedPreview.setAttribute('data-pending-input-content', '');
 										var actionWrap = document.createElement('div');
 										actionWrap.className = 'ml-auto flex shrink-0 items-center gap-2';
 										var steerBtn = document.createElement('button');
@@ -1775,7 +1778,8 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 										cancelBtn.title = 'Cancel queued follow-up';
 											cancelBtn.setAttribute('aria-label', 'Cancel queued follow-up');
 											cancelBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>';										actionWrap.appendChild(steerBtn);
-										actionWrap.appendChild(cancelBtn);
+										window.appendPendingThreadInputEditButton(actionWrap);
+						actionWrap.appendChild(cancelBtn);
 										queuedRow.appendChild(queuedPreview);
 										if (data.has_attachments) queuedRow.appendChild(createPendingAttachmentBadge('Attachments queued', 'Attachments queued with this follow-up'));
 										queuedRow.appendChild(actionWrap);

@@ -1305,11 +1305,12 @@ templ pendingAttachmentBadge(label, title string) {
 
 templ ChatQueuedInputRowForTask(inputID, message, steerEndpoint string, hasAttachments bool, taskID string) {
 	<div id={ "thread-input-" + inputID } class="queued-input-row flex min-h-8 items-center gap-3 rounded-lg bg-base-300/45 px-3 py-1.5 text-sm text-base-content/80" data-thread-input-id={ inputID } data-task-id={ taskID } data-input-mode="queued" title="Queued follow-up will run after the active response finishes">
-		<div class="min-w-0 flex-1 truncate">{ message }</div>
+		<div class="min-w-0 flex-1 truncate" data-pending-input-content>{ message }</div>
 		if hasAttachments {
 			@pendingAttachmentBadge("Attachments queued", "Attachments queued with this follow-up")
 		}
 		<div class="ml-auto flex shrink-0 items-center gap-2">
+			<button type="button" class="btn btn-ghost btn-xs h-6 min-h-0 rounded-md px-2 text-sm font-normal" onclick="window.editPendingThreadInput(this)">Edit</button>
 			<button type="button" class="btn btn-ghost btn-xs h-6 min-h-0 rounded-md px-2 text-sm font-normal" hx-post={ steerEndpoint } hx-target={ "#thread-input-" + inputID } hx-swap="outerHTML" title="Convert queued follow-up to steering">Steer</button>
 			<button type="button" class="btn btn-ghost btn-xs h-6 min-h-0 rounded-md px-2 text-xs text-error" hx-post={ "/thread-inputs/" + inputID + "/cancel" } hx-target={ "#thread-input-" + inputID } hx-swap="outerHTML" title="Cancel queued follow-up" aria-label="Cancel queued follow-up">
 				<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -1338,13 +1339,14 @@ templ ChatSteeringInputRowForTask(inputID, message string, hasAttachments bool, 
 	<div id={ "thread-input-" + inputID } class="steering-input-row flex min-h-8 items-center gap-3 rounded-lg bg-base-300/45 px-3 py-1.5 text-sm text-base-content/80" data-thread-input-id={ inputID } data-task-id={ taskID } data-input-mode="steering" title="Steering instruction will be applied before the active run's next model step">
 		<div class="min-w-0 flex-1">
 			<div class="text-xs font-semibold opacity-70">Steering pending</div>
-			<div class="truncate">{ message }</div>
+			<div class="truncate" data-pending-input-content>{ message }</div>
 			<div class="text-xs opacity-60">Will be applied before the active run's next model step.</div>
 		</div>
 		if hasAttachments {
 			@pendingAttachmentBadge("Attachments included", "Attachments included with this steering instruction")
 		}
 		<div class="ml-auto flex shrink-0 items-center gap-2">
+			<button type="button" class="btn btn-ghost btn-xs h-6 min-h-0 rounded-md px-2 text-sm font-normal" onclick="window.editPendingThreadInput(this)">Edit</button>
 			<button type="button" class="btn btn-ghost btn-xs h-6 min-h-0 rounded-md px-2 text-xs text-error" hx-post={ "/thread-inputs/" + inputID + "/cancel" } hx-target={ "#thread-input-" + inputID } hx-swap="outerHTML" title="Cancel pending steering" aria-label="Cancel pending steering">
 				<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
 					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>

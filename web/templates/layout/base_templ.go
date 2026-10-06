@@ -219,14 +219,14 @@ func Base(title string, projects []models.Project, currentProjectID string) temp
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 11, "\"></script><script src=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 11, "\"></script><script>\n\t\t\twindow.appendPendingThreadInputEditButton = function(actions) {\n\t\t\t\tvar button = document.createElement('button');\n\t\t\t\tbutton.type = 'button';\n\t\t\t\tbutton.className = 'btn btn-ghost btn-xs h-6 min-h-0 rounded-md px-2 text-sm font-normal';\n\t\t\t\tbutton.textContent = 'Edit';\n\t\t\t\tbutton.onclick = function() { window.editPendingThreadInput(button); };\n\t\t\t\tactions.appendChild(button);\n\t\t\t};\n\t\t\twindow.editPendingThreadInput = function(button) {\n\t\t\t\tif (document.getElementById('pending-input-editor')) return;\n\t\t\t\tvar row = button.closest('[data-thread-input-id]');\n\t\t\t\tvar preview = row && row.querySelector('[data-pending-input-content]');\n\t\t\t\tif (!preview) return;\n\t\t\t\tvar inputID = row.getAttribute('data-thread-input-id');\n\t\t\t\tvar dialog = document.createElement('dialog');\n\t\t\t\tdialog.id = 'pending-input-editor';\n\t\t\t\tdialog.className = 'modal';\n\t\t\t\tdialog.setAttribute('aria-labelledby', 'pending-input-editor-title');\n\t\t\t\tdialog.innerHTML = '<form class=\"modal-box\"><h3 id=\"pending-input-editor-title\" class=\"font-bold text-lg\">Edit pending message</h3><textarea class=\"textarea w-full\" rows=\"6\" aria-label=\"Message\" required></textarea><p role=\"alert\" class=\"text-error\"></p><div class=\"modal-action\"><button type=\"button\" class=\"btn\" data-cancel>Cancel</button><button type=\"submit\" class=\"btn btn-primary\">Save</button></div></form>';\n\t\t\t\tvar textarea = dialog.querySelector('textarea');\n\t\t\t\ttextarea.value = preview.textContent;\n\t\t\t\tvar saving = false;\n\t\t\t\tdialog.addEventListener('cancel', function(event) { if (saving) event.preventDefault(); });\n\t\t\t\tdialog.addEventListener('close', function() { dialog.remove(); if (button.isConnected) button.focus(); });\n\t\t\t\tdialog.querySelector('[data-cancel]').onclick = function() { dialog.close(); };\n\t\t\t\tdialog.querySelector('form').onsubmit = async function(event) {\n\t\t\t\t\tevent.preventDefault();\n\t\t\t\t\tif (saving) return;\n\t\t\t\t\tvar error = dialog.querySelector('[role=\"alert\"]');\n\t\t\t\t\tif (!textarea.value.trim()) { error.textContent = 'Message cannot be empty'; return; }\n\t\t\t\t\tsaving = true;\n\t\t\t\t\terror.textContent = '';\n\t\t\t\t\tdialog.querySelectorAll('button, textarea').forEach(function(el) { el.disabled = true; });\n\t\t\t\t\tvar save = dialog.querySelector('[type=\"submit\"]');\n\t\t\t\t\tsave.textContent = 'Saving…';\n\t\t\t\t\ttry {\n\t\t\t\t\t\tvar response = await fetch('/thread-inputs/' + encodeURIComponent(inputID) + '/edit', {\n\t\t\t\t\t\t\tmethod: 'POST', body: new URLSearchParams({content: textarea.value})\n\t\t\t\t\t\t});\n\t\t\t\t\t\tvar result = await response.json();\n\t\t\t\t\t\tif (!response.ok) throw new Error(result.message || 'Failed to edit message');\n\t\t\t\t\t\tvar currentRow = document.getElementById('thread-input-' + inputID);\n\t\t\t\t\t\tvar currentPreview = currentRow && currentRow.querySelector('[data-pending-input-content]');\n\t\t\t\t\t\tif (currentPreview) currentPreview.textContent = result.content;\n\t\t\t\t\t\tdialog.close();\n\t\t\t\t\t} catch (err) {\n\t\t\t\t\t\terror.textContent = err.message || 'Failed to edit message';\n\t\t\t\t\t} finally {\n\t\t\t\t\t\tsaving = false;\n\t\t\t\t\t\tdialog.querySelectorAll('button, textarea').forEach(function(el) { el.disabled = false; });\n\t\t\t\t\t\tsave.textContent = 'Save';\n\t\t\t\t\t}\n\t\t\t\t};\n\t\t\t\tdocument.body.appendChild(dialog);\n\t\t\t\tdialog.showModal();\n\t\t\t\ttextarea.focus();\n\t\t\t};\n\t\t\t</script><script src=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var12 string
 		templ_7745c5c3_Var12, templ_7745c5c3_Err = templ.ResolveAttributeValue(static.URL("vendor/idiomorph-ext.min.js"))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/base.templ`, Line: 165, Col: 58}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/base.templ`, Line: 224, Col: 58}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var12)
 		if templ_7745c5c3_Err != nil {
@@ -239,7 +239,7 @@ func Base(title string, projects []models.Project, currentProjectID string) temp
 		var templ_7745c5c3_Var13 string
 		templ_7745c5c3_Var13, templ_7745c5c3_Err = templ.ResolveAttributeValue(static.URL("vendor/mermaid.min.js"))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/base.templ`, Line: 166, Col: 78}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/base.templ`, Line: 225, Col: 78}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var13)
 		if templ_7745c5c3_Err != nil {
@@ -260,7 +260,7 @@ func Base(title string, projects []models.Project, currentProjectID string) temp
 		var templ_7745c5c3_Var14 string
 		templ_7745c5c3_Var14, templ_7745c5c3_Err = templ.ResolveAttributeValue(static.URL("vendor/marked.min.js"))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/base.templ`, Line: 169, Col: 51}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/base.templ`, Line: 228, Col: 51}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var14)
 		if templ_7745c5c3_Err != nil {
@@ -273,7 +273,7 @@ func Base(title string, projects []models.Project, currentProjectID string) temp
 		var templ_7745c5c3_Var15 templ.SafeURL
 		templ_7745c5c3_Var15, templ_7745c5c3_Err = templ.JoinURLErrs(static.URL("vendor/highlight-github-dark.min.css"))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/base.templ`, Line: 170, Col: 83}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/base.templ`, Line: 229, Col: 83}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var15))
 		if templ_7745c5c3_Err != nil {
@@ -286,7 +286,7 @@ func Base(title string, projects []models.Project, currentProjectID string) temp
 		var templ_7745c5c3_Var16 string
 		templ_7745c5c3_Var16, templ_7745c5c3_Err = templ.ResolveAttributeValue(static.URL("vendor/highlight.min.js"))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/base.templ`, Line: 171, Col: 54}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/base.templ`, Line: 230, Col: 54}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var16)
 		if templ_7745c5c3_Err != nil {
@@ -299,7 +299,7 @@ func Base(title string, projects []models.Project, currentProjectID string) temp
 		var templ_7745c5c3_Var17 string
 		templ_7745c5c3_Var17, templ_7745c5c3_Err = templ.ResolveAttributeValue(static.URL("vendor/chart.umd.min.js"))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/base.templ`, Line: 172, Col: 80}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/base.templ`, Line: 231, Col: 80}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var17)
 		if templ_7745c5c3_Err != nil {
@@ -322,7 +322,7 @@ func Base(title string, projects []models.Project, currentProjectID string) temp
 		var templ_7745c5c3_Var18 templ.SafeURL
 		templ_7745c5c3_Var18, templ_7745c5c3_Err = templ.JoinURLErrs(static.URL("app-utilities.css"))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/base.templ`, Line: 4356, Col: 47}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/base.templ`, Line: 4415, Col: 47}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var18))
 		if templ_7745c5c3_Err != nil {
