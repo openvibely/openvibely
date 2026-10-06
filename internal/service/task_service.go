@@ -698,12 +698,12 @@ func (s *TaskService) Delete(ctx context.Context, id string) error {
 	return err
 }
 
-// DeleteObservedTask preserves the project/category fence of a bulk selection.
+// DeleteObservedTask skips tasks whose project, category, or status changed since selection.
 func (s *TaskService) DeleteObservedTask(ctx context.Context, task *models.Task) error {
 	if task == nil || strings.TrimSpace(task.ProjectID) == "" {
 		return ErrTaskProjectScopeRequired
 	}
-	_, err := s.deleteTask(ctx, task.ID, task.ProjectID, task.Category)
+	_, err := s.deleteTask(ctx, task.ID, task.ProjectID, task.Category, task)
 	return err
 }
 
@@ -797,7 +797,7 @@ func (s *TaskService) cleanupDeletionFiles(manifest repository.TaskDeletionManif
 	return errors.Join(cleanupErrors...)
 }
 
-func (s *TaskService) deleteTask(ctx context.Context, id, projectID string, category models.TaskCategory) (bool, error) {
+func (s *TaskService) deleteTask(ctx context.Context, id, projectID string, category models.TaskCategory, observed ...*models.Task) (bool, error) {
 	prepareDelete := func(manifest repository.TaskDeletionManifest) error {
 		taskIDs := append([]string{id}, manifest.SwarmChildTaskIDs...)
 		return s.prepareDeletion(manifest, taskIDs)
@@ -807,7 +807,9 @@ func (s *TaskService) deleteTask(ctx context.Context, id, projectID string, cate
 		deleted  bool
 		err      error
 	)
-	if projectID == "" && category == "" {
+	if len(observed) > 0 && observed[0] != nil {
+		manifest, deleted, err = s.repo.DeleteWithCleanupManifestIfObserved(ctx, observed[0], prepareDelete)
+	} else if projectID == "" && category == "" {
 		manifest, deleted, err = s.repo.DeleteWithCleanupManifest(ctx, id, prepareDelete)
 	} else {
 		manifest, deleted, err = s.repo.DeleteWithCleanupManifestIfCategory(ctx, id, projectID, category, prepareDelete)

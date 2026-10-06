@@ -5410,3 +5410,29 @@ func TestTaskRepo_BoardReservedExecutionWaitsForWorkerAdmission(t *testing.T) {
 	}
 	check(false)
 }
+
+func TestTaskRepo_ObservedDeletionSkipsCleanupAfterStatusChange(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := NewTaskRepo(db, nil)
+	ctx := context.Background()
+	task := &models.Task{ProjectID: "default", Title: "Scheduled", Category: models.CategoryScheduled, Status: models.StatusRunning, Prompt: "p"}
+	if err := repo.Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.UpdateStatus(ctx, task.ID, models.StatusCompleted); err != nil {
+		t.Fatal(err)
+	}
+	called := false
+	_, deleted, err := repo.DeleteWithCleanupManifestIfObserved(ctx, task, func(TaskDeletionManifest) error { called = true; return nil })
+	if err != nil || deleted || called {
+		t.Fatalf("stale deletion: deleted=%v cleanup=%v err=%v", deleted, called, err)
+	}
+	current, err := repo.GetByID(ctx, task.ID)
+	if err != nil || current == nil {
+		t.Fatalf("task missing: %v", err)
+	}
+	_, deleted, err = repo.DeleteWithCleanupManifestIfObserved(ctx, current, func(TaskDeletionManifest) error { called = true; return nil })
+	if err != nil || !deleted || !called {
+		t.Fatalf("current deletion: deleted=%v cleanup=%v err=%v", deleted, called, err)
+	}
+}

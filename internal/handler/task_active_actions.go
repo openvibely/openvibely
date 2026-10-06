@@ -14,7 +14,7 @@ import (
 func (h *Handler) SetActiveSort(c echo.Context) error {
 	projectID := strings.TrimSpace(c.QueryParam("project_id"))
 	sortBy := c.QueryParam("sort")
-	if projectID == "" || !isValidBacklogSort(sortBy) {
+	if projectID == "" || (sortBy != "manual" && !isValidBacklogSort(sortBy)) {
 		return echo.NewHTTPError(http.StatusBadRequest, "project_id and a valid sort are required")
 	}
 	setTaskSortCookie(c, "active_sort", sortBy)

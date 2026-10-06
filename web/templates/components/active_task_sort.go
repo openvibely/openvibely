@@ -16,6 +16,9 @@ func WithActiveTaskSort(ctx context.Context, value string) context.Context {
 
 func activeTaskSort(ctx context.Context) string {
 	value, _ := ctx.Value(activeTaskSortKey{}).(string)
+	if value == "" {
+		return "manual"
+	}
 	return value
 }
 
@@ -32,7 +35,7 @@ func ActiveBoardTasks(tasks []models.Task) []models.Task {
 }
 
 func sortActiveTasks(tasks []models.Task, preference string) []models.Task {
-	if preference == "" {
+	if preference == "" || preference == "manual" {
 		return tasks
 	}
 	result := append([]models.Task(nil), tasks...)

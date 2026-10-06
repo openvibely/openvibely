@@ -2718,9 +2718,18 @@ func (h *Handler) ReorderTask(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusNotFound, "task not found")
 	}
 
+	active := task.Category == models.CategoryActive
+	if active {
+		setTaskSortCookie(c, "active_sort", "manual")
+	}
+
 	// Return the full kanban board
 	if isHTMX(c) {
-		return h.renderTaskBoardRefresh(c, task.ProjectID, nil)
+		return h.renderTaskBoardRefresh(c, task.ProjectID, func(p *taskSortPreferences) {
+			if active {
+				p.Active = "manual"
+			}
+		})
 	}
 	return c.NoContent(http.StatusOK)
 }

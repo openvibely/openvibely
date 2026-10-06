@@ -2235,7 +2235,11 @@ func (r *TaskRepo) DeleteWithCleanupManifestIfCategory(ctx context.Context, id, 
 	return r.deleteWithCleanupManifest(ctx, id, projectID, string(category), beforeDelete)
 }
 
-func (r *TaskRepo) deleteWithCleanupManifest(ctx context.Context, id, projectID, category string, beforeDelete func(TaskDeletionManifest) error) (manifest TaskDeletionManifest, deleted bool, err error) {
+func (r *TaskRepo) DeleteWithCleanupManifestIfObserved(ctx context.Context, task *models.Task, beforeDelete func(TaskDeletionManifest) error) (TaskDeletionManifest, bool, error) {
+	return r.deleteWithCleanupManifest(ctx, task.ID, task.ProjectID, string(task.Category), beforeDelete, task)
+}
+
+func (r *TaskRepo) deleteWithCleanupManifest(ctx context.Context, id, projectID, category string, beforeDelete func(TaskDeletionManifest) error, observed ...*models.Task) (manifest TaskDeletionManifest, deleted bool, err error) {
 	tx, cleanup, err := beginImmediateTx(ctx, r.db)
 	if err != nil {
 		return manifest, false, fmt.Errorf("beginning task deletion: %w", err)
@@ -2247,6 +2251,12 @@ func (r *TaskRepo) deleteWithCleanupManifest(ctx context.Context, id, projectID,
 	if projectID != "" || category != "" {
 		where += ` AND project_id = ? AND category = ?`
 		args = append(args, projectID, category)
+	}
+	// Check the selected lifecycle state under the same write transaction that
+	// captures cleanup and deletes the row, before any runtime cancellation.
+	if len(observed) > 0 && observed[0] != nil {
+		where += ` AND status = ?`
+		args = append(args, observed[0].Status)
 	}
 	var exists int
 	if err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM tasks WHERE `+where, args...).Scan(&exists); err != nil {
