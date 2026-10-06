@@ -5775,6 +5775,63 @@ func TestGetWorktreeDiffMissingRefsAndWorktreeReturnEmpty(t *testing.T) {
 	}
 }
 
+// Hold cleanup at a deterministic intermediate state: tracked files are gone,
+// but Git metadata still exists. Readers must not publish this as task output.
+func TestWorktreeDiffWaitsForCleanup(t *testing.T) {
+	for _, singleFile := range []bool{false, true} {
+		t.Run(fmt.Sprintf("single_file=%t", singleFile), func(t *testing.T) {
+			repoDir := createTestGitRepo(t)
+			worktreePath := filepath.Join(t.TempDir(), "worktree")
+			branch := "task/cleanup-diff"
+			runGitTest(t, repoDir, "worktree", "add", "-b", branch, worktreePath, "main")
+			if err := os.WriteFile(filepath.Join(worktreePath, "task.txt"), []byte("real task change\n"), 0644); err != nil {
+				t.Fatal(err)
+			}
+			runGitTest(t, worktreePath, "add", "task.txt")
+			runGitTest(t, worktreePath, "commit", "-m", "task change")
+			expected := GetWorktreeDiff(repoDir, branch, "main")
+
+			// This is the same boundary used by CleanupWorktree and orphan cleanup.
+			var done chan string
+			err := WithRepositoryMutation(repoDir, func() error {
+				if err := os.Remove(filepath.Join(worktreePath, "README.md")); err != nil {
+					return err
+				}
+				if diff, ok := captureWorktreeDiffAgainstTarget(worktreePath, "main"); !ok || !strings.Contains(diff, "deleted file mode") {
+					t.Fatal("fixture must expose a spurious deletion during cleanup")
+				}
+				done = make(chan string, 1)
+				go func() {
+					if singleFile {
+						diff, _ := GetWorktreeDiffFileWithUncommitted(repoDir, branch, "main", worktreePath, 0)
+						done <- diff
+					} else {
+						done <- GetWorktreeDiffWithUncommitted(repoDir, branch, "main", worktreePath)
+					}
+				}()
+				select {
+				case diff := <-done:
+					t.Fatalf("diff reader exposed partially removed worktree: %s", diff)
+				case <-time.After(100 * time.Millisecond):
+				}
+				runGitTest(t, repoDir, "worktree", "remove", worktreePath, "--force")
+				return nil
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			select {
+			case diff := <-done:
+				if diff != expected {
+					t.Fatalf("expected committed task diff after cleanup; got %q, want %q", diff, expected)
+				}
+			case <-time.After(2 * time.Second):
+				t.Fatal("diff reader did not resume after cleanup")
+			}
+		})
+	}
+}
+
 func TestGetWorktreeDiffWithUncommitted(t *testing.T) {
 	repoDir := createTestGitRepo(t)
 
@@ -6019,7 +6076,8 @@ func TestGetWorktreeDiffFileWithUncommittedUsesPathScopedGitDiff(t *testing.T) {
 		t.Fatalf("read git log: %v", err)
 	}
 	commands := strings.FieldsFunc(strings.TrimSpace(string(logBytes)), func(r rune) bool { return r == '\n' })
-	if len(commands) > 6 {
+	// Includes resolving the common Git directory for snapshot serialization.
+	if len(commands) > 7 {
 		t.Fatalf("expected bounded git subprocess count, got %d commands:\n%s", len(commands), logBytes)
 	}
 	pathScopedPatchDiff := false
