@@ -136,6 +136,7 @@ func TestBrowserFunctional_ModelModalDiscoveryAndDefaults(t *testing.T) {
 }
 
 func TestBrowserFunctional_CustomOAuthBeforeCreate(t *testing.T) {
+	t.Setenv("OAUTH_REDIRECT_MODE", "localhost_manual")
 	var content bytes.Buffer
 	if err := ModelsContent(nil, nil, false).Render(context.Background(), &content); err != nil {
 		t.Fatal(err)
@@ -143,11 +144,13 @@ func TestBrowserFunctional_CustomOAuthBeforeCreate(t *testing.T) {
 	fixture := `<main id="reconnect-result"></main><script>
  window.htmx={process:function(){}};
  var requests=[];
+ var connected=false;
  window.open=function(){return {location:{href:''},close:function(){}};};
  window.fetch=function(url,options){
   options=options||{};requests.push({url:url,options:options});
   var data={};
-  if(url.indexOf('/models/oauth/setup/status')===0)data={connected:true};
+  if(url.indexOf('/models/oauth/manual-complete')===0){connected=true;data={};}
+  else if(url.indexOf('/models/oauth/setup/status')===0)data={connected:connected};
   else if(url.indexOf('/models/oauth/setup')===0)data={session_id:'temporary-sign-in',authorization_url:'https://auth.example/authorize',opened:false};
   else if(url.indexOf('/models/openai-compatible/available')===0){
    if(options.headers['X-Model-OAuth-Setup']!=='temporary-sign-in')return Promise.reject(Error('Discovery attempted without temporary authorization'));
@@ -168,11 +171,27 @@ func TestBrowserFunctional_CustomOAuthBeforeCreate(t *testing.T) {
  if(f('model_oauth_setup').classList.contains('hidden'))throw Error('Cannot sign in before creating');
  await startCustomModelOAuth(f('model_oauth_setup').querySelector('button'));
  await new Promise(function(resolve){setTimeout(resolve,50);});
+ if(f('model_id').value)throw Error('Model selected before manual completion');
+ var callback=f('model_oauth_setup_callback_url');
+ if(!callback || !f('new_model_modal').contains(callback))throw Error('Manual callback outside modal');
+ callback.closest('details').open=true;
+ callback.value='http://localhost:1455/callback?code=test-code&state=test-state';
+ callback.parentElement.querySelector('button').click();
+ await new Promise(function(resolve){setTimeout(resolve,50);});
+ var completion=requests.find(function(r){return r.url.indexOf('/models/oauth/manual-complete')===0;});
+ if(!completion || JSON.parse(completion.options.body).callback_url.indexOf('code=test-code')===-1)throw Error('Manual callback not submitted');
+ if(!f('new_model_modal').open || callback.value)throw Error('Manual completion closed modal or kept callback');
  if(f('model_id').value!=='authorized-model'||f('model_config_id').value)throw Error('Expected selected model without a saved configuration');
  if(f('model_submit_btn').textContent!=='Create'||!f('model_id').checkValidity())throw Error('Cannot create completed model');
  if(requests.some(function(r){return r.url==='/models';}))throw Error('Model saved before Create');
  var data=new FormData(f('model_form'));
  if(data.get('model')!=='authorized-model'||data.get('oauth_setup_session')!=='temporary-sign-in')throw Error('Create missing selected model or sign-in session');
+ f('model_custom_auth_method').value='api_key';
+ f('model_custom_auth_method').dispatchEvent(new Event('change'));
+ cancelOpenAICompatibleDiscovery();
+ if(new FormData(f('model_form')).get('oauth_setup_session'))throw Error('API key form retains OAuth session');
+ if(!requests.some(function(r){return r.options.method==='DELETE' && r.options.headers['X-Model-OAuth-Setup']==='temporary-sign-in';}))throw Error('Auth switch did not cancel OAuth');
+ if(!f('model_oauth_setup').classList.contains('hidden'))throw Error('OAuth setup still visible for API key');
  closeModelModal();
  if(f('model_oauth_setup_session').value)throw Error('Cancelled form retains sign-in');
  if(!requests.some(function(r){return r.options.method==='DELETE';}))throw Error('Temporary session not discarded');

@@ -659,6 +659,14 @@ for _, agent := range modelOptions {
 <div id="model_oauth_setup" class="hidden mb-3">
 							<button type="button" class="btn btn-outline" data-desktop={ fmt.Sprintf("%t", desktopMode) } onclick="startCustomModelOAuth(this)">Connect OAuth</button>
 							<span id="model_oauth_setup_status" class="text-sm" role="status" aria-live="polite">Sign in to load your models.</span>
+	if showOAuthLocalhostFallback() {
+		<details class="mt-3">
+			<summary class="cursor-pointer text-sm">Sign-in redirected to a failed localhost page?</summary>
+			<label for="model_oauth_setup_callback_url" class="label"><span class="label-text">Paste the full callback URL to finish sign-in.</span></label>
+			<input id="model_oauth_setup_callback_url" type="text" class="input input-bordered w-full" placeholder="http://localhost:…/callback?code=…&state=…"/>
+			<button type="button" class="btn btn-sm mt-2" onclick="submitOAuthManualComplete('model_oauth_setup_callback_url')">Complete OAuth</button>
+		</details>
+	}
 </div>
 <div id="custom_provider_auth_fields">
 									<div class="form-control mb-3">
@@ -1040,8 +1048,9 @@ for _, agent := range modelOptions {
 										: 'No API key is currently saved for this model. Type a key to save one, or leave empty to keep it blank.';
 								}
 							}
-					function submitOAuthManualComplete() {
-					var input = document.getElementById('oauth_manual_callback_url');
+					function submitOAuthManualComplete(inputID) {
+					var input = document.getElementById(inputID || 'oauth_manual_callback_url');
+					var setupGeneration = modelOAuthSetupGeneration;
 					if (!input) return;
 					var callbackUrl = (input.value || '').trim();
 					if (!callbackUrl) {
@@ -1066,6 +1075,7 @@ for _, agent := range modelOptions {
 						}
 						return resp.json();
 					}).then(function() {
+						if (inputID && setupGeneration !== modelOAuthSetupGeneration) return;
 						if (window.showToast) window.showToast('OAuth connected', 'completed');
 						input.value = '';
 						if (document.getElementById('model_oauth_setup_session').value) {discoverOpenAICompatibleModels();return;}
@@ -1448,6 +1458,8 @@ for _, agent := range modelOptions {
 
 						var modelOAuthSetupGeneration = 0;
 						function resetModelOAuthSetup() {
+							var callbackInput = document.getElementById('model_oauth_setup_callback_url');
+							if (callbackInput) callbackInput.value = '';
 							var oldSession = document.getElementById('model_oauth_setup_session').value;
 							if (oldSession) fetch('/models/oauth/setup', {method:'DELETE',headers:{'X-Model-OAuth-Setup':oldSession}}).catch(function(){});
 							modelOAuthSetupGeneration++;
@@ -2590,6 +2602,7 @@ for _, agent := range modelOptions {
 					var showCustom = canonicalProvider(provider) === 'openai_compatible' && preset === 'custom';
 					if (!showCustom) methodInput.value = 'api_key';
 					var method = methodInput.value;
+					if (!showCustom || method !== 'oauth') resetModelOAuthSetup();
 					if (root) root.classList.toggle('hidden', !showCustom);
 					if (oauthFields) oauthFields.classList.toggle('hidden', !showCustom || method !== 'oauth');
 					if (root) root.querySelectorAll('input, select, textarea').forEach(function(el) { el.disabled = !showCustom; });
