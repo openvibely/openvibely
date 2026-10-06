@@ -380,3 +380,34 @@ func TestFinishingQueuedEditResumesAfterCompletedTurn(t *testing.T) {
 		})
 	}
 }
+
+func TestExpiredEditorResumesQueuedMessage(t *testing.T) {
+	tc := NewTestContext(t)
+	ctx := context.Background()
+	p := tc.CreateProject().Build()
+	task := tc.CreateTask(p.ID).Build()
+	agent, err := tc.llmConfigRepo.GetDefault(ctx)
+	require.NoError(t, err)
+	input := &models.ThreadInput{Scope: models.ThreadInputScopeChat, ProjectID: p.ID, TaskID: task.ID, AgentConfigID: agent.ID, Content: "last saved text"}
+	require.NoError(t, tc.handler.threadInputRepo.CreateQueued(ctx, input))
+	endpoint := "/thread-inputs/" + input.ID + "/edit-hold"
+	tc.Assert(tc.HTTP().Post(endpoint).Execute()).StatusCode(http.StatusOK)
+	tc.Assert(tc.HTTP().Post(endpoint).WithForm(url.Values{"renew": {"true"}}).Execute()).StatusCode(http.StatusNoContent)
+	tc.handler.RecoverExpiredInputEdits(ctx)
+	next, err := tc.handler.threadInputRepo.FindOldestQueuedForChat(ctx, p.ID)
+	require.NoError(t, err)
+	require.Nil(t, next)
+	// Simulate a crashed browser without waiting for wall-clock expiry.
+	_, err = tc.execRepo.DB().ExecContext(ctx, `UPDATE thread_inputs SET edit_hold_until = datetime('now', '-1 second') WHERE id = ?`, input.ID)
+	require.NoError(t, err)
+	tc.Assert(tc.HTTP().Post(endpoint).WithForm(url.Values{"renew": {"true"}}).Execute()).StatusCode(http.StatusConflict)
+	tc.handler.RecoverExpiredInputEdits(ctx)
+	require.Eventually(t, func() bool {
+		stored, err := tc.handler.threadInputRepo.GetByID(ctx, input.ID)
+		if err != nil || stored.InputStatus != models.ThreadInputApplied {
+			return false
+		}
+		execution, err := tc.execRepo.GetByID(ctx, stored.RunExecutionID)
+		return err == nil && execution != nil && execution.PromptSent == "last saved text" && execution.Status != models.ExecRunning
+	}, 5*time.Second, 10*time.Millisecond)
+}

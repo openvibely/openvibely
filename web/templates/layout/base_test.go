@@ -1812,8 +1812,11 @@ func TestPendingEditorReleasesOnPageExit(t *testing.T) {
 	script := `
 const assert = require('node:assert/strict');
 const listeners = {};
+let renewal;
+global.setInterval = (fn, ms) => { assert.equal(ms, 20000); renewal = fn; return 1; };
+global.clearInterval = () => { renewal = null; };
 global.window = {addEventListener: (n,f) => listeners[n]=f, removeEventListener: n => delete listeners[n], alert: m => {throw Error(m)}};
-const controls = {textarea: {focus(){}}, '[data-cancel]': {}, form: {}, '[role="alert"]': {}};
+const controls = {textarea: {focus(){}}, '[data-cancel]': {}, form: {}, '[role="alert"]': {}, '[type="submit"]': {}};
 let closed = 0;
 let shown = 0;
 const dialogEvents = {};
@@ -1833,7 +1836,10 @@ global.fetch = (url, options) => {
  let opening = window.editPendingThreadInput(button);
  completeHold(); await opening;
  assert.equal(shown, 1);
+ await renewal();
+ assert.equal(requests.pop().options.body.get('renew'), 'true');
  listeners.pagehide();
+ assert.equal(renewal, null);
  assert.equal(requests.length, 2);
  assert.equal(requests[1].options.body.get('hold'), 'false');
  assert.equal(requests[1].options.keepalive, true);
@@ -1848,6 +1854,19 @@ global.fetch = (url, options) => {
  assert.equal(requests.length, 2);
  assert.equal(requests[1].options.body.get('hold'), 'false');
  assert.equal(requests[1].options.keepalive, true);
+ // Failed renewal preserves the editor draft and prevents saving under a lost hold.
+ opening = window.editPendingThreadInput(button);
+ completeHold(); await opening;
+ controls.textarea.value = 'unsaved draft';
+ const workingFetch = global.fetch;
+ global.fetch = async () => { throw Error('offline'); };
+ await renewal();
+ assert.equal(controls.textarea.value, 'unsaved draft');
+ assert.equal(controls['[type="submit"]'].disabled, true);
+ assert.ok(controls['[role="alert"]'].textContent);
+ assert.equal(renewal, null);
+ global.fetch = workingFetch;
+ listeners.pagehide();
 })().catch(error => {console.error(error); process.exit(1)});
 `
 	if output, err := exec.Command(node, "-e", script).CombinedOutput(); err != nil {

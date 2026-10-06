@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/labstack/echo/v4"
+	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
@@ -197,10 +198,20 @@ func (h *Handler) TaskThreadQueuedInputSteer(c echo.Context) error {
 	return render(c, http.StatusOK, components.ChatSteeringInputRowForTask(steering.ID, steering.Content, steering.AttachmentSessionID != "", taskID))
 }
 
-// Holds persist across disconnects so abandoned editors cannot send an old draft.
+// Editing holds are renewed by the open editor and expire after disconnects.
 func (h *Handler) HoldThreadInputEdit(c echo.Context) error {
 	if h.threadInputRepo == nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "thread input queue is unavailable")
+	}
+	if c.FormValue("renew") == "true" {
+		err := h.threadInputRepo.RenewEditHold(c.Request().Context(), c.Param("inputId"))
+		if errors.Is(err, repository.ErrInputNotPending) {
+			return echo.NewHTTPError(http.StatusConflict, "Editing session expired. Copy your draft and reopen the editor.")
+		}
+		if err != nil {
+			return echo.NewHTTPError(http.StatusInternalServerError, "Failed to renew editing session")
+		}
+		return c.NoContent(http.StatusNoContent)
 	}
 	hold := c.FormValue("hold") != "false"
 	input, err := h.threadInputRepo.SetEditHold(c.Request().Context(), c.Param("inputId"), hold)
@@ -221,4 +232,21 @@ func (h *Handler) resumeEditedInput(input *models.ThreadInput) {
 		return
 	}
 	h.goStartNextQueuedTurnAfter(streamingResponseParams{ProjectID: input.ProjectID, TaskID: input.TaskID, IsTaskFollowup: input.Scope == models.ThreadInputScopeTask}, "")
+}
+
+// RecoverExpiredInputEdits also resumes queues whose active turn ended during editing.
+func (h *Handler) RecoverExpiredInputEdits(ctx context.Context) {
+	if h.threadInputRepo == nil {
+		return
+	}
+	inputs, err := h.threadInputRepo.ReleaseExpiredEditHolds(ctx)
+	if err != nil {
+		applog.Infof("recover expired input edits: %v", err)
+		return
+	}
+	for _, input := range inputs {
+		if input.InputStatus == models.ThreadInputPending {
+			h.resumeEditedInput(&input)
+		}
+	}
 }

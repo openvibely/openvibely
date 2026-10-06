@@ -182,8 +182,12 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
                 var leaving = false;
                 var holdAcquired = false;
                 var released = false;
+                var renewalTimer;
+                var renewing = false;
+                var leaseLost = false;
                 var holdURL = '/thread-inputs/' + encodeURIComponent(inputID) + '/edit-hold';
                 function detachLifecycle() {
+                    clearInterval(renewalTimer);
                     window.removeEventListener('pagehide', leaveEditor);
                     document.body.removeEventListener('htmx:beforeSwap', beforeNavigation);
                 }
@@ -228,16 +232,29 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
                     saving = true;
                     try {
                         var response = await fetch('/thread-inputs/' + encodeURIComponent(inputID) + '/edit-hold', {method: 'POST', body: new URLSearchParams({hold: 'false'})});
-                        if (!response.ok) throw new Error('Could not release message. Please try again.');
+                        if (!response.ok && response.status !== 409) throw new Error('Could not release message. Please try again.');
                         released = true;
                         dialog.close();
                     } catch (err) { dialog.querySelector('[role="alert"]').textContent = err.message; }
                     finally { saving = false; }
                 }
                 dialog.querySelector('[data-cancel]').onclick = releaseEdit;
+                renewalTimer = setInterval(async function() {
+                    if (saving || renewing || released || leaving || leaseLost) return;
+                    renewing = true;
+                    try {
+                        var response = await fetch(holdURL, {method: 'POST', body: new URLSearchParams({renew: 'true'})});
+                        if (!response.ok) throw new Error('Editing connection lost. Copy your draft and reopen the editor. The queued message will use its last saved text.');
+                    } catch (err) {
+                        leaseLost = true;
+                        clearInterval(renewalTimer);
+                        dialog.querySelector('[type="submit"]').disabled = true;
+                        dialog.querySelector('[role="alert"]').textContent = err.message || 'Editing connection lost. Copy your draft and reopen the editor.';
+                    } finally { renewing = false; }
+                }, 20000);
 				dialog.querySelector('form').onsubmit = async function(event) {
 					event.preventDefault();
-					if (saving) return;
+					if (saving || leaseLost) return;
 					var error = dialog.querySelector('[role="alert"]');
 					if (!textarea.value.trim()) { error.textContent = 'Message cannot be empty'; return; }
 					saving = true;
