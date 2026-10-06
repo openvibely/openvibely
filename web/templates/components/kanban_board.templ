@@ -280,9 +280,8 @@ templ KanbanColumn(tasks []models.Task, projectID string, category models.TaskCa
 
 					}
 			}
-			if category == models.CategoryActive {
+			if category == models.CategoryActive && countActiveDisplayedTasks(tasks) > 0 {
 				@CardActionDropdown(CardActionDropdownConfig{WrapperClass: "dropdown dropdown-end", TriggerClass: "btn btn-xs btn-ghost min-h-11 h-11 w-11 p-0", IconClass: "h-5 w-5", MenuClass: "dropdown-content menu p-2 shadow bg-base-100 rounded-box w-56 max-w-[calc(100vw-2rem)] z-[100]", Label: "More actions", TriggerAriaExpanded: "false", TriggerKanbanMenu: true, MenuKanbanContent: true, KanbanMenuKey: "column-active"}) {
-						if countActiveDisplayedTasks(tasks) > 0 {
 							<li class="menu-title mt-2"><span>Actions</span></li>
 							<li>
 								<button type="button" hx-post={ fmt.Sprintf("/tasks/active/stop?project_id=%s", projectID) } hx-target="#kanban-board" hx-swap="outerHTML" hx-disabled-elt="this">
@@ -300,7 +299,6 @@ templ KanbanColumn(tasks []models.Task, projectID string, category models.TaskCa
 									Delete All
 								</button>
 							</li>
-						}
 				}
 			}
 			if category == models.CategoryBacklog {
