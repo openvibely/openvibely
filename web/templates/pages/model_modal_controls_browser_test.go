@@ -30,13 +30,13 @@ func TestBrowserFunctional_ModelModalDiscoveryAndDefaults(t *testing.T) {
  try {
   openNewModelModal();
   assert(field('model_api_key').placeholder.indexOf('sk-ant-')===0,'Anthropic key hint');
-  assert(hidden('model_refresh'),'Anthropic has no refresh');
+  assert(hidden('model_refresh') && hidden('model_base_url_field'),'Anthropic hides compatible connection controls');
   assert(field('model_compaction_threshold_mode').value==='default','default compaction mode');
   assert(hidden('model_worker_timeout_custom'),'default timeout hides numeric sentinel');
   assert(new FormData(field('model_form')).get('worker_timeout')==='0','default timeout wire value');
   for(var provider of ['openai_compatible_vllm','openai_compatible_lm_studio','openai_compatible_openrouter']) {
    await selectProvider(provider);
-   assert(!hidden('model_refresh') && hidden('model_manual_id_field'),'discovery controls '+provider);
+   assert(!hidden('model_refresh') && !hidden('model_base_url_field') && hidden('model_manual_id_field'),'discovery controls '+provider);
    assert(field('model_id').options.length===2,'only discovered models '+provider);
    assert(!Array.from(field('model_id').options).some(function(o){return o.value==='local-model';}),'no fake model');
    assert(field('model_api_key').placeholder.indexOf('sk-ant-')===-1,'no Anthropic hint '+provider);
@@ -63,7 +63,7 @@ func TestBrowserFunctional_ModelModalDiscoveryAndDefaults(t *testing.T) {
   var values=new FormData(field('model_form'));
   assert(values.get('worker_timeout')==='120' && values.get('model_max_workers')==='3' && values.get('compaction_threshold')==='100000','custom overrides submitted');
   await selectProvider('openai');
-  assert(hidden('model_refresh') && hidden('openai_compatible_fields'),'OpenAI controls restored');
+  assert(hidden('model_refresh') && hidden('openai_compatible_fields') && hidden('model_base_url_field'),'OpenAI controls restored');
   assert(field('model_worker_timeout_custom').value==='120','provider change preserves timeout');
   assert(field('model_api_key').placeholder==='API key','OpenAI key hint');
   field('model_openai_auth_type').value='oauth';toggleOpenAIAuthFields();
