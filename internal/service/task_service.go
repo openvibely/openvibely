@@ -698,6 +698,15 @@ func (s *TaskService) Delete(ctx context.Context, id string) error {
 	return err
 }
 
+// DeleteObservedTask preserves the project/category fence of a bulk selection.
+func (s *TaskService) DeleteObservedTask(ctx context.Context, task *models.Task) error {
+	if task == nil || strings.TrimSpace(task.ProjectID) == "" {
+		return ErrTaskProjectScopeRequired
+	}
+	_, err := s.deleteTask(ctx, task.ID, task.ProjectID, task.Category)
+	return err
+}
+
 func (s *TaskService) DeleteProjectTasks(ctx context.Context, projectID string) error {
 	for {
 		tasks, err := s.repo.ListByProject(ctx, projectID, "")
