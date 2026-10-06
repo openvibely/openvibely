@@ -9,6 +9,7 @@ import (
 
 type desktopModeContextKey struct{}
 type nativeWindowContextKey struct{}
+type buildVersionContextKey struct{}
 type uiPreferencesContextKey struct{}
 
 type UIPreferences struct {
@@ -20,6 +21,15 @@ type UIPreferences struct {
 
 func WithDesktopMode(ctx context.Context, desktop bool) context.Context {
 	return context.WithValue(ctx, desktopModeContextKey{}, desktop)
+}
+
+func WithBuildVersion(ctx context.Context, version string) context.Context {
+	return context.WithValue(ctx, buildVersionContextKey{}, version)
+}
+
+func pageBuildVersion(ctx context.Context) string {
+	version, _ := ctx.Value(buildVersionContextKey{}).(string)
+	return version
 }
 
 func WithNativeWindow(ctx context.Context, native bool) context.Context {
@@ -67,6 +77,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 		data-theme="dark"
 		data-openvibely-runtime={ serverRuntimeMode(ctx) }
 		data-openvibely-native-window={ nativeWindowMarker(ctx) }
+		data-build-version={ pageBuildVersion(ctx) }
 		data-runtime={ serverRuntimeMode(ctx) }
 		data-project-locations={ uiPreferences(ctx).ProjectLocations }
 		data-ui-theme={ uiPreferences(ctx).Theme }
@@ -4970,15 +4981,13 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					return { version: version, noticeKey: systemUpdateNoticeKey(data) };
 				}
 
-				var systemUpdatePageVersion = '';
-				var systemUpdateReloadPending = null;
+				var systemUpdatePageVersion = document.documentElement.getAttribute('data-build-version');
 				var systemUpdateReloading = false;
 				var systemUpdateHealthChecking = false;
 
 				function rememberSystemUpdatePendingSuccess(data) {
 					var pending = systemUpdatePendingSuccessFromData(data);
 					if (!pending) return;
-					systemUpdateReloadPending = pending;
 					try {
 						localStorage.setItem('openvibely-system-update-pending-success', JSON.stringify(pending));
 					} catch (_) {}
@@ -4999,7 +5008,6 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				}
 
 				function clearSystemUpdatePendingSuccess() {
-					systemUpdateReloadPending = null;
 					try { localStorage.removeItem('openvibely-system-update-pending-success'); } catch (_) {}
 				}
 
@@ -5099,52 +5107,28 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					container.appendChild(toast);
 				}
 
-				async function confirmHiddenSystemUpdate() {
-					if (systemUpdateHealthChecking) return;
+				async function refreshPageBuildVersion() {
+					// Native relaunch already loads the updated UI.
+					if (document.documentElement.getAttribute('data-openvibely-native-window') === 'true') return;
+					if (!systemUpdatePageVersion || systemUpdateHealthChecking || systemUpdateReloading) return;
 					systemUpdateHealthChecking = true;
-					var pending = systemUpdateReloadPending;
 					try {
 						var response = await fetch('/api/system/health', { cache: 'no-store', headers: { 'Accept': 'application/json' } });
 						if (!response.ok) return;
 						var health = await response.json();
-						if (pending && pending === systemUpdateReloadPending && health.ready && health.version === pending.version && !systemUpdateReloading) {
+						if (health.ready === true && typeof health.version === 'string' && health.version && health.version !== systemUpdatePageVersion) {
 							systemUpdateReloading = true;
 							window.location.reload();
 						}
 					} catch (_) {
-						// Poll again while the server is restarting.
+						// Retry on the next poll while the server is restarting.
 					} finally {
 						systemUpdateHealthChecking = false;
 					}
 				}
 
-				function reloadAfterSystemUpdate(data) {
-					// The native app relaunch already loads the updated UI.
-					if (document.documentElement.getAttribute('data-openvibely-native-window') === 'true') return false;
-					if (systemUpdateReloading) return true;
-					if (!data && systemUpdateReloadPending) {
-						confirmHiddenSystemUpdate();
-						return true;
-					}
-					var state = data && data.state;
-					if (state === 'failed' || state === 'rolled_back' || (state === 'idle' && data.current_version !== (systemUpdateReloadPending && systemUpdateReloadPending.version))) {
-						clearSystemUpdatePendingSuccess();
-					}
-					var version = data && data.current_version;
-					var changed = !!(version && systemUpdatePageVersion && version !== systemUpdatePageVersion);
-					if (!systemUpdatePageVersion && version) systemUpdatePageVersion = version;
-					// A successful response after restart confirms the server is reachable.
-					// Keep this guard in memory so a freshly loaded page cannot reload again.
-					var succeeded = state === 'succeeded' || state === 'idle' && systemUpdateReloadPending && version === systemUpdateReloadPending.version;
-					if (succeeded && (systemUpdateReloadPending || changed)) {
-						systemUpdateReloading = true;
-						window.location.reload();
-						return true;
-					}
-					return false;
-				}
-
 				async function refreshGlobalSystemUpdateIndicators() {
+					refreshPageBuildVersion();
 					try {
 						var response = await fetch('/api/system/update', { cache: 'no-store', headers: { 'Accept': 'application/json' } });
 						if (response.status === 204) {
@@ -5158,7 +5142,6 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				}
 
 				function handleGlobalSystemUpdateSnapshot(data) {
-					if (reloadAfterSystemUpdate(data)) return;
 					var view = normalizeSystemUpdateSnapshot(data);
 					if (!data) {
 						setSystemUpdateIndicators(false);
