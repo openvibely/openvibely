@@ -457,6 +457,10 @@ func runChatActionsDropdownInChrome(t *testing.T, chrome string, htmxJS []byte, 
 	}
 	baseHTML := base.String()
 	productionStyle := layoutStyleBlocks(t, baseHTML)
+	var confirmation bytes.Buffer
+	if err := layout.ConfirmationDialog().Render(context.Background(), &confirmation); err != nil {
+		t.Fatal(err)
+	}
 	navStart := strings.Index(baseHTML, "window.openVibelyNavigate = function")
 	if navStart < 0 {
 		t.Fatal("could not isolate production HTMX navigation helper")
@@ -592,19 +596,35 @@ window.addEventListener('DOMContentLoaded', function() {
       assertClosed('Escape from trigger');
       if (document.activeElement !== trigger()) fail('Escape from trigger did not retain focus on the trigger');
 
-      var confirmationMessage = '';
-      window.confirm = function(message) {
-        confirmationMessage = String(message);
-        return false;
-      };
+      window.confirm = function() { throw new Error('native confirm must not be called'); };
       mouseClick(trigger());
-      await wait(30);
-      assertOpen('confirmation setup');
+      await wait(40);
       clearItem().click();
+      var modal = document.getElementById('app_confirm_modal');
+      await waitFor(function() { return modal.open; }, 'app confirmation');
+      if (document.getElementById('app_confirm_message').textContent !== 'Clear all chat history? This cannot be undone.') fail('wrong confirmation message');
+      modal.querySelector('[autofocus]').click();
       await wait(100);
-      if (confirmationMessage !== 'Clear all chat history? This cannot be undone.') fail('clear action used unexpected confirmation text: ' + confirmationMessage);
       var historyCount = await fetch('/chat-history-count').then(function(response) { return response.text(); });
-      if (historyCount !== '0') fail('cancelled clear action issued ' + historyCount + ' history request(s)');
+      if (historyCount !== '0') fail('cancelled clear action issued a request');
+      clearItem().click();
+      await waitFor(function() { return modal.open; }, 'second app confirmation');
+      modal.querySelector('[data-confirm-accept]').click();
+      modal.querySelector('[data-confirm-accept]').click();
+      await wait(150);
+      historyCount = await fetch('/chat-history-count').then(function(response) { return response.text(); });
+      if (historyCount !== '1') fail('confirmed clear action must issue exactly one request: ' + historyCount);
+      for (var dismissal of ['escape', 'close', 'backdrop']) {
+        clearItem().click();
+        await waitFor(function() { return modal.open; }, 'reopened confirmation');
+        if (dismissal === 'escape') key(modal, 'Escape');
+        else if (dismissal === 'close') modal.querySelector('.ov-modal-close').click();
+        else modal.querySelector('.modal-backdrop button').click();
+        await wait(60);
+        if (modal.open) fail('confirmation remained open after ' + dismissal);
+      }
+      historyCount = await fetch('/chat-history-count').then(function(response) { return response.text(); });
+      if (historyCount !== '1') fail('dismissal reused an earlier confirmation');
       document.body.dispatchEvent(new Event('pointerdown', {bubbles: true}));
       await wait(30);
       assertClosed('outside close after cancelled confirmation');
@@ -661,7 +681,7 @@ html, body, #main-content { height: 100%; margin: 0; }
 				_, _ = w.Write([]byte(chatFragment))
 				return
 			}
-			doc := `<!doctype html><html lang="en" data-theme="dark" data-openvibely-runtime="` + runtime + `"><head><meta charset="utf-8"><script src="/htmx-2.0.4.min.js"></script><script>` + navigationScript + `</script>` + productionStyle + fixtureStyle + runner + `</head><body><main id="main-content">` + chatFragment + `</main></body></html>`
+			doc := `<!doctype html><html lang="en" data-theme="dark" data-openvibely-runtime="` + runtime + `"><head><meta charset="utf-8"><script src="/htmx-2.0.4.min.js"></script><script>` + navigationScript + `</script>` + productionStyle + fixtureStyle + runner + `</head><body><main id="main-content">` + chatFragment + `</main>` + confirmation.String() + `</body></html>`
 			_, _ = w.Write([]byte(doc))
 		case "/other":
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -751,8 +771,8 @@ html, body, #main-content { height: 100%; margin: 0; }
 
 	stateMu.Lock()
 	defer stateMu.Unlock()
-	if historyRequests != 0 {
-		t.Fatalf("cancelled Chat clear action issued %d history request(s) in %s runtime", historyRequests, runtime)
+	if historyRequests != 1 {
+		t.Fatalf("expected one confirmed Chat clear request, got %d in %s runtime", historyRequests, runtime)
 	}
 }
 

@@ -477,7 +477,7 @@ for _, agent := range modelOptions {
 					<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
 				</button>
 					<h3 id="model_modal_title" class="font-bold text-lg mb-4 pr-10">New Model Configuration</h3>
-						<form id="model_form" method="post" action="/models" hx-post="/models" hx-target="#models-container" hx-swap="outerHTML" onsubmit="clearModelFormError(); return normalizeModelFormBeforeSubmit()">					<input type="hidden" id="model_config_id" name="model_config_id" value=""/>
+						<form id="model_form" method="post" action="/models" hx-post="/models" hx-target="#models-container" hx-swap="outerHTML" onsubmit="clearModelFormError(); if (!normalizeModelFormBeforeSubmit()) { event.preventDefault(); event.stopImmediatePropagation(); return false; }">					<input type="hidden" id="model_config_id" name="model_config_id" value=""/>
 					<div id="model_form_error" class="alert alert-error hidden mb-4" role="alert" aria-live="assertive" tabindex="-1">
 						<span id="model_form_error_message">Could not save model.</span>
 					</div>
@@ -1632,7 +1632,17 @@ for _, agent := range modelOptions {
 							var originalOAuthConnection = form ? (form.dataset.originalOAuthConnectionId || '') : '';
 							if (form && form.dataset.mode === 'edit' && (provider === 'openai' || provider === 'anthropic') &&
 								oauthConnection && oauthConnection.value !== originalOAuthConnection &&
-								!window.confirm('Move this model to the selected OAuth account? Future refresh and reconnect state will come from that account.')) {
+								form.__confirmedOAuthConnection !== oauthConnection.value) {
+								var selectedConnection = oauthConnection.value;
+								if (!form.__oauthConfirmationPending) {
+								    form.__oauthConfirmationPending = true;
+								    window.openVibelyConfirm('Move this model to the selected OAuth account? Future refresh and reconnect state will come from that account.').then(function(confirmed) {
+								        form.__oauthConfirmationPending = false;
+								        if (!confirmed || !form.isConnected || oauthConnection.value !== selectedConnection) return;
+								        form.__confirmedOAuthConnection = selectedConnection;
+								        try { form.requestSubmit(); } finally { delete form.__confirmedOAuthConnection; }
+								    });
+								}
 								return false;
 							}
 							var providerValue = document.getElementById('model_provider_value');

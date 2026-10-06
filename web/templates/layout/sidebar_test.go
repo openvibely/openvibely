@@ -244,7 +244,7 @@ func TestSidebar_ProjectSelectorPreservesRouteMappingAndConfirmation(t *testing.
 		}
 	}
 	for _, required := range []string{
-		`if (!confirm('You may have unsaved changes. Switch project anyway?'))`,
+		`if (!await window.openVibelyConfirm('You may have unsaved changes. Switch project anyway?'))`,
 		`document.querySelector('[data-analytics-view].btn-primary')`,
 		`['usage','models','learning'].includes(analyticsView) ? analyticsView : 'usage'`,
 		`newUrl = '/analytics?' + nextAnalyticsParams.toString()`,

@@ -1,0 +1,43 @@
+package layout
+
+// ConfirmationDialog uses the same modal controls as the app's delete dialogs.
+// It lives outside main-content so HTMX page swaps cannot remove a pending prompt.
+templ ConfirmationDialog() {
+	@ConfirmationFrame("app_confirm_modal", "Close confirmation", "Confirm action", "", "app_confirm_message", "", "", "Confirm", false, templ.ComponentScript{Call: "document.getElementById('app_confirm_modal').close()"}, templ.ComponentScript{Call: "document.getElementById('app_confirm_modal').close('confirm')"})
+	<script>
+		(function() {
+			if (window.openVibelyConfirm) return;
+			var modal = document.getElementById('app_confirm_modal');
+			var pending = null;
+			window.openVibelyConfirm = function(message) {
+				// A second action must not replace the action awaiting confirmation.
+				if (pending) return Promise.resolve(false);
+				return new Promise(function(resolve) {
+					pending = resolve;
+					modal.returnValue = '';
+					document.getElementById('app_confirm_message').textContent = message;
+					modal.showModal();
+				});
+			};
+			modal.addEventListener('keydown', function(event) {
+				if (event.key === 'Escape' && modal.open) {
+					event.preventDefault();
+					modal.close();
+				}
+			});
+			modal.addEventListener('close', function() {
+				var resolve = pending;
+				pending = null;
+				if (resolve) resolve(modal.returnValue === 'confirm');
+			});
+			document.addEventListener('htmx:confirm', function(event) {
+				if (!event.detail.question) return;
+				event.preventDefault();
+				var source = event.detail.elt;
+				window.openVibelyConfirm(event.detail.question).then(function(confirmed) {
+					if (confirmed && source.isConnected) event.detail.issueRequest(true);
+				});
+			});
+		})();
+	</script>
+}

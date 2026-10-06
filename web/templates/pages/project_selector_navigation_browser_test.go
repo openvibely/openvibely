@@ -244,14 +244,16 @@ window.addEventListener('DOMContentLoaded', function() {
     unsaved.id = 'unsaved-dialog';
     unsaved.setAttribute('open', '');
     document.body.appendChild(unsaved);
-    var confirmCalls = 0;
-    window.confirm = function() { confirmCalls++; return false; };
+    window.confirm = function() { throw new Error('native confirm must not be used'); };
+    var confirmation = document.getElementById('app_confirm_modal');
     document.querySelector('[data-project-id="payments-api"]').click();
-    if (confirmCalls !== 1 || select.value !== 'default' || trigger.textContent.trim() !== 'Default' || navigations.length !== 0 || preferences !== 0) fail('cancelled unsaved project switch changed state');
+    if (!confirmation.open) fail('app confirmation missing');
+    confirmation.querySelector('[autofocus]').click();
+    await wait(30);
+    if (select.value !== 'default' || trigger.textContent.trim() !== 'Default' || navigations.length !== 0 || preferences !== 0) fail('cancelled unsaved project switch changed state');
     if (!unsaved.hasAttribute('open')) fail('cancelled project switch closed the unsaved dialog');
     unsaved.remove();
 
-    window.confirm = function() { confirmCalls++; return true; };
     history.replaceState({}, '', '/analytics?project_id=default&view=models&range=7d&agent=old-project-agent');
     trigger.click();
     var confirmed = document.createElement('dialog');
@@ -260,8 +262,10 @@ window.addEventListener('DOMContentLoaded', function() {
     document.body.appendChild(confirmed);
     key(search, 'ArrowDown');
     key(document.activeElement, 'Enter');
-    await wait(0);
-    if (trigger.hasAttribute('data-pointer-over') || getComputedStyle(trigger).outlineStyle !== 'none') fail('keyboard project selection left trigger highlighted');
+    if (!confirmation.open) fail('app confirmation missing for project switch');
+    confirmation.querySelector('[data-confirm-accept]').click();
+    await wait(30);
+    // Closing the app dialog restores keyboard focus, so a focus outline is expected here.
     if (select.value !== 'payments-api' || trigger.textContent.trim() !== 'Payments API') fail('confirmed project switch did not update the selected project');
     if (confirmed.hasAttribute('open') || navigations[navigations.length - 1] !== '/analytics?project_id=payments-api&view=models&range=7d' || preferences !== 1) fail('confirmed project switch must retain the analytics tab and period, but clear project-specific filters');
     var retarget = window.sidebarSSERetargets && window.sidebarSSERetargets[window.sidebarSSERetargets.length - 1];
@@ -298,10 +302,14 @@ window.addEventListener('DOMContentLoaded', function() {
 });
 </script>`
 
+	var confirmation bytes.Buffer
+	if err := layout.ConfirmationDialog().Render(context.Background(), &confirmation); err != nil {
+		t.Fatal(err)
+	}
 	page := `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">` +
 		`<style>dialog[open]{display:block;position:fixed;box-sizing:border-box;width:448px;max-width:calc(100vw - 16px);max-height:calc(100vh - 16px);margin:0;padding:0;overflow:hidden} .modal-box{box-sizing:border-box;width:91.666667%;max-width:32rem;max-height:calc(100vh - 5em);overflow-y:auto} [class~="max-h-[inherit]"]{max-height:inherit}.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}.flex{display:flex}.hidden{display:none!important}.flex-1{flex:1 1 0%}.flex-col{flex-direction:column}.min-h-0{min-height:0}.w-full{width:100%}.max-w-none{max-width:none}.min-w-0{min-width:0}.overflow-hidden{overflow:hidden}.overflow-y-auto{overflow-y:auto}.truncate{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.sidebar-aside{width:256px}.sidebar-inner{padding:16px}.sidebar-project-select{box-sizing:border-box;height:32px}</style>` +
 		`<script>(function(){var staleAbort=new AbortController();window.staleSearchableSelectorSignal=staleAbort.signal;window.openVibelySearchableSelectorInstalled=true;window.openVibelySearchableSelectorVersion=1;window.openVibelySearchableSelectorController={version:1,abort:staleAbort};window.staleSearchableSelectorEvents=0;document.addEventListener('input',function(event){if(event.target.matches&&event.target.matches('[data-searchable-selector-search]'))window.staleSearchableSelectorEvents++;},{signal:staleAbort.signal});window._tabVisibility={dispatchSSEEvent:function(){},registerSSE:function(){return {close:function(){}}},retargetSSE:function(name,url){window.sidebarSSERetargets=(window.sidebarSSERetargets||[]).concat([[name,url]])}};window.htmx={process:function(){},trigger:function(){},ajax:function(){return Promise.resolve();}};window.toggleTheme=function(){};window.openVibelyNavigate=function(){return Promise.resolve();};})();</script></head><body>` +
-		markup + `<script>(function(){var search=document.querySelector('[data-project-selector-search]');var legacy=document.createElement('button');legacy.type='button';legacy.setAttribute('data-project-selector-clear','');legacy.textContent='✕';search.parentElement.appendChild(legacy);})();</script>` + breadcrumbHTML + selectorScripts.String() + runner + `</body></html>`
+		markup + `<script>(function(){var search=document.querySelector('[data-project-selector-search]');var legacy=document.createElement('button');legacy.type='button';legacy.setAttribute('data-project-selector-clear','');legacy.textContent='✕';search.parentElement.appendChild(legacy);})();</script>` + breadcrumbHTML + selectorScripts.String() + confirmation.String() + runner + `</body></html>`
 
 	browserResult := make(chan string, 4)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

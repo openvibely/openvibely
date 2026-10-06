@@ -204,7 +204,7 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
                         previousProjectID = startupProjectID;
                     }
 
-					sel.addEventListener('change', function(event) {
+					sel.addEventListener('change', async function(event) {
 						const newProjectId = sel.value;
 						if (!newProjectId || newProjectId === previousProjectID) {
 							syncProjectSelector();
@@ -214,7 +214,7 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 						// Check for open modals with unsaved changes
 						const openModals = document.querySelectorAll('dialog[open]');
 						if (openModals.length > 0) {
-							if (!confirm('You may have unsaved changes. Switch project anyway?')) {
+							if (!await window.openVibelyConfirm('You may have unsaved changes. Switch project anyway?')) {
 								// Revert selector to the last confirmed value.
 								sel.value = previousProjectID;
 								syncProjectSelector();

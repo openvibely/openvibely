@@ -920,7 +920,7 @@ func TestModelsContent_OpenAICompatibleDiscoveryUI(t *testing.T) {
 		`<select id="model_provider"`,
 		`id="model_base_url" name="base_url" class="input input-bordered" placeholder="https://openrouter.ai/api/v1/" oninput="scheduleAutoDiscoverOpenAICompatibleModels()"`,
 		`oninput="syncModelAPIKeySubmitValue(); scheduleAutoDiscoverOpenAICompatibleModels()"`,
-		`onsubmit="clearModelFormError(); return normalizeModelFormBeforeSubmit()"`,
+		`onsubmit="clearModelFormError(); if (!normalizeModelFormBeforeSubmit()) { event.preventDefault(); event.stopImmediatePropagation(); return false; }"`,
 		`<input type="hidden" id="model_openai_compatible_preset" name="preset_slug" value="custom"`,
 		"OpenAI-compatible presets auto-load available models when selected; Custom stays manual.",
 		"openai_compatible_openrouter: [",
