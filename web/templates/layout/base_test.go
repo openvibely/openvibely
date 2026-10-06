@@ -1897,12 +1897,17 @@ global.fetch = (url, options) => {
  assert.equal(listeners.pagehide, undefined);
  // Headers arrive, but the body never does: acquisition must time out.
  window.alert = () => {};
- global.fetch = async () => ({ok:true, json:()=>new Promise(()=>{})});
+ const failedOpeningRequests = [];
+ global.fetch = async (url, options) => { failedOpeningRequests.push(options); return {ok:true, json:()=>new Promise(()=>{})}; };
  opening = window.editPendingThreadInput(button);
  await Promise.resolve(); await Promise.resolve();
  timeout(); await opening;
  assert.equal(window._pendingInputEditorOpening, false);
  assert.equal(button.disabled, false);
+ assert.equal(failedOpeningRequests.length, 2);
+ assert.equal(failedOpeningRequests[1].body.get('hold'), 'false');
+ assert.equal(failedOpeningRequests[1].body.get('edit_token'), failedOpeningRequests[0].body.get('edit_token'));
+ assert.equal(failedOpeningRequests[1].keepalive, true);
  // Saving also times out while reading the body and preserves the draft.
  global.fetch = workingFetch;
  opening = window.editPendingThreadInput(button);
@@ -1916,7 +1921,24 @@ global.fetch = (url, options) => {
  assert.equal(controls.textarea.disabled, false);
  assert.match(controls['[role="alert"]'].textContent, /timed out/);
  global.fetch = workingFetch;
+ const beforeExit = requests.length;
  listeners.pagehide();
+ assert.equal(requests.length, beforeExit, 'ambiguous Save must not be overtaken by Cancel');
+ // Page exit during a Save lets the keepalive Save finish without Cancel.
+ opening = window.editPendingThreadInput(button);
+ completeHold(); await opening;
+ controls.textarea.value = 'new text';
+ let finishSave;
+ const saveRequests = [];
+ global.fetch = (url, options) => { saveRequests.push({url, options}); return new Promise(resolve => finishSave = resolve); };
+ const savingNow = controls.form.onsubmit({preventDefault(){}});
+ listeners.pagehide();
+ assert.equal(saveRequests.length, 1);
+ assert.equal(saveRequests[0].options.keepalive, true);
+ assert.equal(saveRequests[0].options.body.get('content'), 'new text');
+ finishSave({ok:true, json:async()=>({content:'new text'})});
+ await savingNow;
+ assert.equal(saveRequests.length, 1);
 })().catch(error => {console.error(error); process.exit(1)});
 `
 	if output, err := exec.Command(node, "-e", script).CombinedOutput(); err != nil {
