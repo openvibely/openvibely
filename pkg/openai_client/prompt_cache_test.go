@@ -13,8 +13,8 @@ import (
 	"github.com/coder/websocket"
 )
 
-func TestResponsesPromptCacheKeyStableAcrossTurnsAndFallback(t *testing.T) {
-	for _, model := range []string{"gpt-5.5", "gpt-6-sol"} {
+func TestResponsesPromptCacheKeyAndTextVerbosityAcrossTurnsAndFallback(t *testing.T) {
+	for _, model := range []string{"gpt-5.5", "gpt-6-sol", "gpt-4o"} {
 		for _, oauth := range []bool{false, true} {
 			for _, agentic := range []bool{false, true} {
 				for _, transport := range []string{"http", "websocket_fallback"} {
@@ -22,17 +22,21 @@ func TestResponsesPromptCacheKeyStableAcrossTurnsAndFallback(t *testing.T) {
 						type capturedRequest struct {
 							transport string
 							key       string
+							verbosity *string
 						}
 						requests := make(chan capturedRequest, 16)
 						capture := func(data []byte, transport string) {
 							var payload struct {
-								Key string `json:"prompt_cache_key"`
+								Key  string `json:"prompt_cache_key"`
+								Text struct {
+									Verbosity *string `json:"verbosity"`
+								} `json:"text"`
 							}
 							if err := json.Unmarshal(data, &payload); err != nil {
 								t.Errorf("decode %s request: %v", transport, err)
 								return
 							}
-							requests <- capturedRequest{transport: transport, key: payload.Key}
+							requests <- capturedRequest{transport: transport, key: payload.Key, verbosity: payload.Text.Verbosity}
 						}
 						events := []string{
 							`{"type":"response.output_text.delta","delta":"ok"}`,
@@ -139,6 +143,15 @@ func TestResponsesPromptCacheKeyStableAcrossTurnsAndFallback(t *testing.T) {
 							case request := <-requests:
 								if request.transport != wantTransport || request.key != wantKey {
 									t.Fatalf("turn %d: transport/key = %s/%q, want %s/%q", turn, request.transport, request.key, wantTransport, wantKey)
+								}
+								if model == "gpt-4o" {
+									if request.verbosity != nil {
+										t.Fatalf("turn %d: unsupported model received text.verbosity = %q", turn, *request.verbosity)
+									}
+								} else if request.verbosity == nil {
+									t.Fatalf("turn %d: missing text.verbosity", turn)
+								} else if *request.verbosity != "low" {
+									t.Fatalf("turn %d: text.verbosity = %q, want low", turn, *request.verbosity)
 								}
 							default:
 								t.Fatalf("turn %d: no request captured", turn)
