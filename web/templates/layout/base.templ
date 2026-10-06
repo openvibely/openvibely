@@ -179,6 +179,29 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				var preview = row && row.querySelector('[data-pending-input-content]');
 				if (!preview) return;
 				var inputID = row.getAttribute('data-thread-input-id');
+                var leaving = false;
+                var holdAcquired = false;
+                var released = false;
+                var holdURL = '/thread-inputs/' + encodeURIComponent(inputID) + '/edit-hold';
+                function detachLifecycle() {
+                    window.removeEventListener('pagehide', leaveEditor);
+                    document.body.removeEventListener('htmx:beforeSwap', beforeNavigation);
+                }
+                function leaveEditor() {
+                    leaving = true;
+                    if (!holdAcquired || released) return;
+                    released = true;
+                    // Keep the Cancel request alive while the document is unloading.
+                    fetch(holdURL, {method: 'POST', body: new URLSearchParams({hold: 'false'}), keepalive: true}).catch(function() {});
+                    detachLifecycle();
+                    if (dialog) dialog.close();
+                }
+                function beforeNavigation(event) {
+                    var target = event.detail && event.detail.target;
+                    if (target && target.contains(row)) leaveEditor();
+                }
+                window.addEventListener('pagehide', leaveEditor);
+                document.body.addEventListener('htmx:beforeSwap', beforeNavigation);
 				button.disabled = true;
                 window._pendingInputEditorOpening = true;
                 var held;
@@ -186,7 +209,9 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
                     var response = await fetch('/thread-inputs/' + encodeURIComponent(inputID) + '/edit-hold', {method: 'POST'});
                     held = await response.json();
                     if (!response.ok) throw new Error(held.message || 'Failed to hold message');
-                } catch (err) { window.alert(err.message); return; }
+                    holdAcquired = true;
+                    if (leaving) { leaveEditor(); return; }
+                } catch (err) { detachLifecycle(); window.alert(err.message); return; }
                 finally { button.disabled = false; window._pendingInputEditorOpening = false; }
                 var dialog = document.createElement('dialog');
 				dialog.id = 'pending-input-editor';
@@ -197,13 +222,14 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				textarea.value = held.content;
 				var saving = false;
 				dialog.addEventListener('cancel', function(event) { event.preventDefault(); releaseEdit(); });
-				dialog.addEventListener('close', function() { dialog.remove(); if (button.isConnected) button.focus(); });
+				dialog.addEventListener('close', function() { if (!released) leaveEditor(); detachLifecycle(); dialog.remove(); if (button.isConnected) button.focus(); });
 				async function releaseEdit() {
                     if (saving) return;
                     saving = true;
                     try {
                         var response = await fetch('/thread-inputs/' + encodeURIComponent(inputID) + '/edit-hold', {method: 'POST', body: new URLSearchParams({hold: 'false'})});
                         if (!response.ok) throw new Error('Could not release message. Please try again.');
+                        released = true;
                         dialog.close();
                     } catch (err) { dialog.querySelector('[role="alert"]').textContent = err.message; }
                     finally { saving = false; }
@@ -228,6 +254,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						var currentRow = document.getElementById('thread-input-' + inputID);
 						var currentPreview = currentRow && currentRow.querySelector('[data-pending-input-content]');
 						if (currentPreview) currentPreview.textContent = result.content;
+                        released = true;
 						dialog.close();
 					} catch (err) {
 						error.textContent = err.message || 'Failed to edit message';
