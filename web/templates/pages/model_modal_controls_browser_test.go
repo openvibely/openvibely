@@ -134,3 +134,52 @@ func TestBrowserFunctional_ModelModalDiscoveryAndDefaults(t *testing.T) {
  </script>`
 	runReconnectChromeFixture(t, fixture)
 }
+
+func TestBrowserFunctional_CustomOAuthBeforeCreate(t *testing.T) {
+	var content bytes.Buffer
+	if err := ModelsContent(nil, nil, false).Render(context.Background(), &content); err != nil {
+		t.Fatal(err)
+	}
+	fixture := `<main id="reconnect-result"></main><script>
+ window.htmx={process:function(){}};
+ var requests=[];
+ window.open=function(){return {location:{href:''},close:function(){}};};
+ window.fetch=function(url,options){
+  options=options||{};requests.push({url:url,options:options});
+  var data={};
+  if(url.indexOf('/models/oauth/setup/status')===0)data={connected:true};
+  else if(url.indexOf('/models/oauth/setup')===0)data={session_id:'temporary-sign-in',authorization_url:'https://auth.example/authorize',opened:false};
+  else if(url.indexOf('/models/openai-compatible/available')===0){
+   if(options.headers['X-Model-OAuth-Setup']!=='temporary-sign-in')return Promise.reject(Error('Discovery attempted without temporary authorization'));
+   data={models:[{id:'authorized-model',context_length:262144}]};
+  }
+  return Promise.resolve({ok:true,json:function(){return Promise.resolve(data);}});
+ };
+ </script>` + content.String() + `<script>
+ (async function(){var f=function(id){return document.getElementById(id);};
+ try{
+ openNewModelModal();f('model_provider').value='openai_compatible_custom';toggleProviderFields();
+ f('model_name').value='Custom model';f('model_base_url').value='https://api.example/v1';
+ f('model_custom_auth_method').value='oauth';toggleCustomProviderAuthFields();
+ f('model_custom_models_url').value='https://api.example/models';scheduleAutoDiscoverOpenAICompatibleModels();cancelOpenAICompatibleDiscovery();
+ discoverOpenAICompatibleModels();
+ if(requests.length)throw Error('Discovery ran before sign-in');
+ if(f('model_submit_btn').textContent!=='Create'||f('model_id').checkValidity())throw Error('Create incorrectly allows missing model');
+ if(f('model_oauth_setup').classList.contains('hidden'))throw Error('Cannot sign in before creating');
+ await startCustomModelOAuth(f('model_oauth_setup').querySelector('button'));
+ await new Promise(function(resolve){setTimeout(resolve,50);});
+ if(f('model_id').value!=='authorized-model'||f('model_config_id').value)throw Error('Expected selected model without a saved configuration');
+ if(f('model_submit_btn').textContent!=='Create'||!f('model_id').checkValidity())throw Error('Cannot create completed model');
+ if(requests.some(function(r){return r.url==='/models';}))throw Error('Model saved before Create');
+ var data=new FormData(f('model_form'));
+ if(data.get('model')!=='authorized-model'||data.get('oauth_setup_session')!=='temporary-sign-in')throw Error('Create missing selected model or sign-in session');
+ closeModelModal();
+ if(f('model_oauth_setup_session').value)throw Error('Cancelled form retains sign-in');
+ if(!requests.some(function(r){return r.options.method==='DELETE';}))throw Error('Temporary session not discarded');
+ openNewModelModal();
+ if(f('model_oauth_setup_session').value || !f('model_oauth_setup').classList.contains('hidden'))throw Error('Sign-in leaked into another provider');
+ f('reconnect-result').setAttribute('data-test-result','pass');
+ }catch(e){f('reconnect-result').setAttribute('data-test-result','fail');f('reconnect-result').setAttribute('data-test-error',String(e.stack));}
+ })();</script>`
+	runReconnectChromeFixture(t, fixture)
+}

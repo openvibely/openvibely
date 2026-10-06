@@ -978,6 +978,9 @@ func (h *Handler) CreateModel(c echo.Context) error {
 	if err := h.normalizeBrowserModelForm(c.Request().Context(), c, a, modelFormOptions{mode: modelFormCreate}); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
+ setupKey, err := h.attachModelOAuthSetup(c,a)
+ if err != nil {return err}
+
 	syncCatalogProviderLimits(a, "")
 	applog.Infof("[handler] CreateModel name=%q provider=%s model=%s auth_method=%s temp=%.1f default=%v",
 		a.Name, a.Provider, a.Model, a.AuthMethod, a.Temperature, a.IsDefault)
@@ -989,7 +992,8 @@ func (h *Handler) CreateModel(c echo.Context) error {
 		}
 		return err
 	}
-	applog.Infof("[handler] CreateModel success id=%s", a.ID)
+	if setupKey != "" {removeModelOAuthSetup(setupKey)}
+ applog.Infof("[handler] CreateModel success id=%s", a.ID)
 	if h.workerSvc != nil {
 		h.workerSvc.DispatchNext()
 	}
@@ -1448,6 +1452,16 @@ func (h *Handler) ListOpenAICompatibleAvailableModels(c echo.Context) error {
 			return c.JSON(http.StatusConflict, map[string]string{"error": "save endpoint changes and reconnect before discovering models"})
 		}
 	}
+ if key := c.Request().Header.Get(modelOAuthSetupHeader); key != "" {
+  if configured != nil {return echo.NewHTTPError(http.StatusBadRequest,"Use either a saved model or a sign-in session.")}
+  var err error
+  configured,err=h.modelOAuthSetupConfig(key,true)
+  if err!=nil {return err}
+  if c.QueryParam("base_url")!=configured.BaseURL || c.QueryParam("models_url")!=configured.ModelsURL {
+   return echo.NewHTTPError(http.StatusConflict,"Connection settings changed. Connect OAuth again.")
+  }
+ }
+
 	baseURL, modelsURL := c.QueryParam("base_url"), c.QueryParam("models_url")
 	if configured != nil {
 		baseURL, modelsURL = configured.BaseURL, configured.ModelsURL
@@ -1501,6 +1515,7 @@ func (h *Handler) ListOpenAICompatibleAvailableModels(c echo.Context) error {
 	}
 	discoveryCtx, cancelDiscovery := context.WithTimeout(c.Request().Context(), openAICompatibleDiscoveryBudget)
 	defer cancelDiscovery()
+ if key := c.Request().Header.Get(modelOAuthSetupHeader); key != "" { discoveryCtx = context.WithValue(discoveryCtx,modelOAuthSetupContextKey{},key) }
 	client := llmcustomauth.NewHTTPClient(openAICompatibleDiscoveryBudget, requestPrivate)
 	discoveryKey := apiKey
 	if configured != nil && discoveryKey == "" {
@@ -1593,6 +1608,7 @@ func (h *Handler) fetchOpenAICompatibleDiscoveryURL(ctx context.Context, client 
 	if configured != nil && configured.AuthMethod == models.AuthMethodOAuth {
 		modelsFound, err := h.fetchCustomOpenAICompatibleModels(ctx, client, modelsURL, *configured)
 		if errors.Is(err, errCustomOAuthUnauthorized) {
+ if configured.ID == "" {return nil,fmt.Errorf("sign-in expired; connect OAuth again")}
 			if refreshErr := h.refreshCustomCompatibleOAuth(ctx, configured, client, configured.OAuthAccessToken); refreshErr == nil {
 				modelsFound, err = h.fetchCustomOpenAICompatibleModels(ctx, client, modelsURL, *configured)
 			} else {
@@ -1725,6 +1741,7 @@ func (h *Handler) fetchCustomOpenAICompatibleModels(ctx context.Context, client 
 }
 
 func (h *Handler) currentCustomOAuthConfig(ctx context.Context, snapshot models.LLMConfig) (*models.LLMConfig, error) {
+ if key,ok:=ctx.Value(modelOAuthSetupContextKey{}).(string); ok && snapshot.ID=="" { return h.modelOAuthSetupConfig(key,true) }
 	current, err := h.llmConfigRepo.GetByID(ctx, snapshot.ID)
 	if err != nil {
 		return nil, err
