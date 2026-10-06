@@ -1967,3 +1967,99 @@ global.fetch = (url, options) => {
 		t.Fatalf("editor lifecycle: %v\n%s", err, output)
 	}
 }
+
+func TestBaseReloadsAfterSuccessfulSystemUpdate(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node is required to execute update reload regression tests")
+	}
+	var buf bytes.Buffer
+	if err := Base("Test", nil, "").Render(context.Background(), &buf); err != nil {
+		t.Fatal(err)
+	}
+	html := buf.String()
+	start := strings.Index(html, "function normalizeSystemUpdateSnapshot(data)")
+	end := strings.Index(html, "window.refreshGlobalSystemUpdateIndicators =")
+	if start < 0 || end <= start {
+		t.Fatal("missing global update controller")
+	}
+	controller, _ := json.Marshal(html[start:end])
+	script := `
+const vm = require('node:vm');
+const assert = require('node:assert/strict');
+const controller = ` + string(controller) + `;
+function page() {
+  let reloads = 0;
+  const storage = new Map();
+  const context = vm.createContext({
+    window: {location: {reload() { reloads++; }}},
+    document: {getElementById() { return null; }, querySelector() { return null; }},
+    localStorage: {getItem(k) { return storage.get(k); }, setItem(k,v) { storage.set(k,v); }, removeItem(k) { storage.delete(k); }},
+    getToastContainer() { return null; }
+  });
+  vm.runInContext(controller, context);
+  return {context, count: () => reloads, send(data) { context.handleGlobalSystemUpdateSnapshot(data); }};
+}
+function snapshot(state, current = '1', release = '2') {
+  return {state, current_version: current, distribution: 'binary', staged: true,
+    release: release ? {metadata: {version: release}} : null};
+}
+for (const finalState of ['succeeded', 'idle']) {
+  const p = page();
+  for (const state of ['available','waiting_for_idle','ready','applying','restarting','validating']) {
+    p.send(snapshot(state));
+    assert.equal(p.count(), 0, state);
+  }
+  p.send(snapshot(finalState, '2', null));
+  assert.equal(p.count(), 1, finalState + ' after restart without release metadata');
+  p.send(snapshot(finalState, '2', null));
+  assert.equal(p.count(), 1, 'only one reload');
+  const fresh = page();
+  fresh.send(snapshot(finalState, '2', null));
+  assert.equal(fresh.count(), 0, 'no reload loop on fresh page');
+}
+for (const state of ['failed','rolled_back','idle']) {
+  const p = page();
+  p.send(snapshot('restarting'));
+  p.send(snapshot(state));
+  p.send(null);
+  assert.equal(p.count(), 0, state + ' must cancel reload');
+}
+
+const initial = page();
+initial.send(null);
+assert.equal(initial.count(), 0, 'no update in progress');
+const missed = page();
+missed.send(snapshot('available'));
+missed.send(snapshot('succeeded', '2', null));
+assert.equal(missed.count(), 1, 'poll missed intermediate update states');
+const cancelled = page();
+cancelled.send(snapshot('waiting_for_idle'));
+cancelled.context.clearSystemUpdatePendingSuccess();
+cancelled.send(null);
+assert.equal(cancelled.count(), 0, 'explicit cancellation');
+(async () => {
+  const hidden = page();
+  hidden.send(snapshot('restarting'));
+  for (const health of [{ready: true, version: '1'}, {ready: false, version: '2'}, {ready: true, version: '2'}]) {
+    hidden.context.fetch = async () => ({ok: true, json: async () => health});
+    hidden.send(null);
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(hidden.count(), health.ready && health.version === '2' ? 1 : 0, 'verify ready target version when status is hidden');
+  }
+  const offline = page();
+  offline.send(snapshot('restarting'));
+  offline.context.fetch = async () => { throw new Error('offline'); };
+  offline.send(null);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(offline.count(), 0, 'wait through connection errors');
+  offline.context.fetch = async () => ({ok: true, json: async () => ({ready: true, version: '2'})});
+  offline.send(null);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(offline.count(), 1, 'retry after server returns');
+})().catch(error => { console.error(error); process.exitCode = 1; });
+`
+	if output, err := exec.Command(node, "-e", script).CombinedOutput(); err != nil {
+		t.Fatalf("update reload regression: %v\n%s", err, output)
+	}
+}
