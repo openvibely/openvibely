@@ -697,7 +697,7 @@ func TestModelsContentOmitsRetiredOpenAIOptions(t *testing.T) {
 		t.Fatal(err)
 	}
 	visible := models.ProviderModels(models.ProviderOpenAI)
-	for _, model := range []string{"gpt-5.2-codex", "gpt-5.1-codex-max", "gpt-5.1-codex", "gpt-5.1-codex-mini", "gpt-5-codex", "gpt-5.3-codex-spark"} {
+	for _, model := range []string{"gpt-5.2-codex", "gpt-5.1-codex-max", "gpt-5.1-codex", "gpt-5.1-codex-mini", "gpt-5-codex", "gpt-5-codex-mini", "gpt-5.3-codex-spark"} {
 		if slices.ContainsFunc(visible, func(spec models.ModelSpec) bool { return spec.ID == model }) {
 			t.Errorf("retired model %s remains selectable", model)
 		}
