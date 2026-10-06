@@ -290,9 +290,16 @@ func launchNativeWindow(baseURL string, onShutdown func(), coordinator *update.C
 			}
 		})
 	}
+	backgroundType := application.BackgroundTypeSolid
+	if runtime.GOOS == "linux" {
+		// GTK3 needs an RGBA visual before the window is realized so native
+		// corner clipping can expose the desktop instead of black pixels.
+		backgroundType = application.BackgroundTypeTransparent
+	}
 	window := app.Window.NewWithOptions(application.WebviewWindowOptions{
-		Name:  "main",
-		Title: "OpenVibely",
+		BackgroundType: backgroundType,
+		Name:           "main",
+		Title:          "OpenVibely",
 		// WebKit's native asset transport cannot follow the root's /chat redirect.
 		URL:       "/chat",
 		Width:     1280,
