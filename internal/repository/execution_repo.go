@@ -34,20 +34,32 @@ func (r *ExecutionRepo) DB() *sql.DB {
 	return r.db
 }
 
-const executionSelectColumns = `id, task_id, COALESCE(agent_config_id, ''), status, prompt_sent, output, reasoning_content, error_message,
+const executionOutputSelect = `COALESCE(executions.output, '') || COALESCE((
+		SELECT group_concat(output, '') FROM (
+			SELECT output FROM execution_output_chunks WHERE execution_id = executions.id ORDER BY id
+		)
+	), '')`
+
+const executionOutputSelectAlias = `COALESCE(e.output, '') || COALESCE((
+		SELECT group_concat(output, '') FROM (
+			SELECT output FROM execution_output_chunks WHERE execution_id = e.id ORDER BY id
+		)
+	), '')`
+
+const executionSelectColumns = `id, task_id, COALESCE(agent_config_id, ''), status, prompt_sent, ` + executionOutputSelect + `, reasoning_content, error_message,
 		tokens_used, duration_ms, is_followup, starts_new_context, diff_output, cli_session_id, COALESCE(dispatch_id, ''), started_at, completed_at`
 
 // executionSelectColumnsLight omits reasoning_content and diff_output (substituting
 // empty strings) so list/pagination queries don't load potentially very large blobs.
 // The scan shape matches executionSelectColumns, so scanExecutionRow still works; the
 // resulting Execution will have ReasoningContent == "" and DiffOutput == "".
-const executionSelectColumnsLight = `id, task_id, COALESCE(agent_config_id, ''), status, prompt_sent, output, '' AS reasoning_content, error_message,
+const executionSelectColumnsLight = `id, task_id, COALESCE(agent_config_id, ''), status, prompt_sent, ` + executionOutputSelect + `, '' AS reasoning_content, error_message,
 		tokens_used, duration_ms, is_followup, starts_new_context, '' AS diff_output, cli_session_id, COALESCE(dispatch_id, ''), started_at, completed_at`
 
-const executionSelectColumnsAlias = `e.id, e.task_id, COALESCE(e.agent_config_id, ''), e.status, e.prompt_sent, e.output, e.reasoning_content, e.error_message,
+const executionSelectColumnsAlias = `e.id, e.task_id, COALESCE(e.agent_config_id, ''), e.status, e.prompt_sent, ` + executionOutputSelectAlias + `, e.reasoning_content, e.error_message,
 			e.tokens_used, e.duration_ms, e.is_followup, e.starts_new_context, e.diff_output, e.cli_session_id, COALESCE(e.dispatch_id, ''), e.started_at, e.completed_at`
 
-const executionSelectColumnsAliasLight = `e.id, e.task_id, COALESCE(e.agent_config_id, ''), e.status, e.prompt_sent, e.output, '' AS reasoning_content, e.error_message,
+const executionSelectColumnsAliasLight = `e.id, e.task_id, COALESCE(e.agent_config_id, ''), e.status, e.prompt_sent, ` + executionOutputSelectAlias + `, '' AS reasoning_content, e.error_message,
 			e.tokens_used, e.duration_ms, e.is_followup, e.starts_new_context, '' AS diff_output, e.cli_session_id, COALESCE(e.dispatch_id, ''), e.started_at, e.completed_at`
 
 const taskExecutionCountSQL = `SELECT COUNT(*) FROM executions WHERE task_id = ?`
@@ -55,7 +67,7 @@ const taskExecutionCountSQL = `SELECT COUNT(*) FROM executions WHERE task_id = ?
 // taskThreadExecutionSelectColumns contains only the fields needed to render a
 // runtime task-thread transcript. It deliberately omits execution metadata and
 // detail-only payloads that the formatter never reads.
-const taskThreadExecutionSelectColumns = `id, task_id, status, prompt_sent, output, error_message, is_followup, started_at`
+const taskThreadExecutionSelectColumns = `id, task_id, status, prompt_sent, ` + executionOutputSelect + `, error_message, is_followup, started_at`
 
 const taskExecutionChronologicalPageSQL = `SELECT ` + taskThreadExecutionSelectColumns + ` FROM executions WHERE task_id = ? ORDER BY started_at ASC, rowid ASC LIMIT ? OFFSET ?`
 
@@ -63,7 +75,7 @@ const taskExecutionMetricsSQL = `SELECT
 	(SELECT started_at FROM executions WHERE task_id = ? ORDER BY started_at DESC, rowid DESC LIMIT 1) AS latest_started_at,
 	COALESCE((SELECT duration_ms FROM executions WHERE task_id = ? AND duration_ms > 0 ORDER BY started_at DESC, rowid DESC LIMIT 1), 0) AS latest_duration_ms`
 
-const apiChatExecutionStatusSQL = `SELECT id, status, COALESCE(output, ''), COALESCE(error_message, ''), tokens_used, duration_ms
+const apiChatExecutionStatusSQL = `SELECT id, status, ` + executionOutputSelect + `, COALESCE(error_message, ''), tokens_used, duration_ms
 	FROM executions WHERE id = ?`
 
 func scanExecutionRow(scanner interface {
@@ -432,14 +444,45 @@ func (r *ExecutionRepo) SetAgentConfigIfEmpty(ctx context.Context, id, agentConf
 	return nil
 }
 
+func (r *ExecutionRepo) AppendOutput(ctx context.Context, id string, output string) error {
+	_, err := execBoundSQLite(ctx, r.db,
+		`INSERT INTO execution_output_chunks (execution_id, output)
+		 SELECT id, ? FROM executions WHERE id = ? AND status = 'running'`, output, id)
+	if err != nil {
+		return fmt.Errorf("appending execution output chunk: %w", err)
+	}
+	return nil
+}
+
+// FinalizeOutput replaces the execution's base output with its complete
+// transcript and removes its persisted stream chunks in one transaction.
+func (r *ExecutionRepo) FinalizeOutput(ctx context.Context, id string, output string) error {
+	return r.replaceRunningOutput(ctx, id, output, "finalizing")
+}
+
 func (r *ExecutionRepo) UpdateOutput(ctx context.Context, id string, output string) error {
-	err := withBoundSQLiteConn(ctx, r.db, func(conn *sql.Conn) error {
-		_, err := conn.ExecContext(ctx,
+	return r.replaceRunningOutput(ctx, id, output, "updating")
+}
+
+func (r *ExecutionRepo) replaceRunningOutput(ctx context.Context, id, output, operation string) error {
+	err := withImmediateTx(ctx, r.db, func(tx SQLExecutor) error {
+		result, err := tx.ExecContext(ctx,
 			`UPDATE executions SET output = ? WHERE id = ? AND status = 'running'`, output, id)
+		if err != nil {
+			return err
+		}
+		changed, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if changed == 0 {
+			return nil
+		}
+		_, err = tx.ExecContext(ctx, `DELETE FROM execution_output_chunks WHERE execution_id = ?`, id)
 		return err
 	})
 	if err != nil {
-		return fmt.Errorf("updating execution output: %w", err)
+		return fmt.Errorf("%s execution output: %w", operation, err)
 	}
 	return nil
 }
@@ -571,15 +614,26 @@ func uniqueExecutionIDArgs(ids []string) ([]string, []interface{}) {
 
 func (r *ExecutionRepo) Complete(ctx context.Context, id string, status models.ExecutionStatus, output, errMsg string, tokensUsed int, durationMs int64) error {
 	output = llmtranscript.NormalizeMarkers(output)
-	// When output is empty, preserve any partial output already written by the
-	// streaming writer during LLM execution. Failure completion paths frequently
-	// call Complete with empty output while the streamed transcript already exists
-	// in the row; preserving it keeps thread continuity after failures/retries.
-	_, err := execBoundSQLite(ctx, r.db,
-		`UPDATE executions SET status = ?, output = CASE WHEN ? = '' THEN output ELSE ? END, error_message = ?,
-		 tokens_used = ?, duration_ms = ?, completed_at = datetime('now')
-		 WHERE id = ?`,
-		status, output, output, errMsg, tokensUsed, durationMs, id)
+	// When output is empty, preserve all partial output already written by the
+	// streaming writer. Chunk rows are folded into executions.output as the
+	// execution becomes terminal so completed and failed readers keep the
+	// existing full-transcript contract.
+	err := withImmediateTx(ctx, r.db, func(tx SQLExecutor) error {
+		if _, err := tx.ExecContext(ctx,
+			`UPDATE executions SET status = ?, output = CASE WHEN ? = '' THEN
+				COALESCE(output, '') || COALESCE((
+					SELECT group_concat(output, '') FROM (
+						SELECT output FROM execution_output_chunks WHERE execution_id = executions.id ORDER BY id
+					)
+				), '') ELSE ? END, error_message = ?,
+			 tokens_used = ?, duration_ms = ?, completed_at = datetime('now')
+			 WHERE id = ?`,
+			status, output, output, errMsg, tokensUsed, durationMs, id); err != nil {
+			return err
+		}
+		_, err := tx.ExecContext(ctx, `DELETE FROM execution_output_chunks WHERE execution_id = ?`, id)
+		return err
+	})
 	if err != nil {
 		return fmt.Errorf("completing execution: %w", err)
 	}
@@ -743,27 +797,40 @@ func (r *ExecutionRepo) SuccessCompletionReadiness(ctx context.Context, id strin
 
 func (r *ExecutionRepo) CompleteSuccessIfNoPendingSteering(ctx context.Context, id string, output string, tokensUsed int, durationMs int64) (CompleteSuccessOutcome, error) {
 	output = llmtranscript.NormalizeMarkers(output)
-	// When output is empty, preserve any partial output already written by the
-	// streaming writer during LLM execution. Failure completion paths frequently
-	// call Complete with empty output while the streamed transcript already exists
-	// in the row; preserving it keeps thread continuity after failures/retries.
-	res, err := execBoundSQLite(ctx, r.db,
-		`UPDATE executions SET status = ?, output = CASE WHEN ? = '' THEN output ELSE ? END, error_message = '',
-		 tokens_used = ?, duration_ms = ?, completed_at = datetime('now')
-		 WHERE id = ?
-		   AND status = 'running'
-		   AND NOT EXISTS (
-		       SELECT 1 FROM thread_inputs
-		       WHERE run_execution_id = executions.id
-		         AND turn_id = executions.id
-		         AND input_mode = 'steering'
-		         AND input_status = 'pending'
-		   )`,
-		models.ExecCompleted, output, output, tokensUsed, durationMs, id)
+	// Preserve streamed chunks when no complete provider output was supplied.
+	var changed int64
+	err := withImmediateTx(ctx, r.db, func(tx SQLExecutor) error {
+		result, err := tx.ExecContext(ctx,
+			`UPDATE executions SET status = ?, output = CASE WHEN ? = '' THEN
+				COALESCE(output, '') || COALESCE((
+					SELECT group_concat(output, '') FROM (
+						SELECT output FROM execution_output_chunks WHERE execution_id = executions.id ORDER BY id
+					)
+				), '') ELSE ? END, error_message = '',
+			 tokens_used = ?, duration_ms = ?, completed_at = datetime('now')
+			 WHERE id = ?
+			   AND status = 'running'
+			   AND NOT EXISTS (
+			       SELECT 1 FROM thread_inputs
+			       WHERE run_execution_id = executions.id
+			         AND turn_id = executions.id
+			         AND input_mode = 'steering'
+			         AND input_status = 'pending'
+			   )`,
+			models.ExecCompleted, output, output, tokensUsed, durationMs, id)
+		if err != nil {
+			return err
+		}
+		changed, err = result.RowsAffected()
+		if err != nil || changed == 0 {
+			return err
+		}
+		_, err = tx.ExecContext(ctx, `DELETE FROM execution_output_chunks WHERE execution_id = ?`, id)
+		return err
+	})
 	if err != nil {
 		return "", fmt.Errorf("completing execution: %w", err)
 	}
-	changed, _ := res.RowsAffected()
 	if changed > 0 {
 		if err := r.syncAutomationActivitiesForExecution(ctx, id, models.ExecCompleted, ""); err != nil {
 			applog.Infof("[execution-repo] automation steering activity projection deferred execution=%s: %v", id, err)
