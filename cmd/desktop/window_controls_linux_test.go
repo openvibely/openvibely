@@ -10,19 +10,19 @@ import (
 	"time"
 )
 
-// Runs the actual production GTK overlay in a separate process. A real window
-// manager is required for maximize/restore, not just an X server.
+// Runs the production GTK overlay and corner clipping over a real WebKit view.
+// A real window manager is required for maximize/restore, not just an X server.
 func TestNativeLinuxWindowControls(t *testing.T) {
 	if os.Getenv("OPENVIBELY_RUN_NATIVE_UI") != "1" {
 		t.Skip("set OPENVIBELY_RUN_NATIVE_UI=1 with a display and window manager")
 	}
-	for _, toolkit := range []string{"gtk+-3.0", "gtk4"} {
+	for _, toolkit := range []string{"webkit2gtk-4.1", "webkitgtk-6.0"} {
 		t.Run(toolkit, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
 			flags, err := exec.CommandContext(ctx, "pkg-config", "--cflags", "--libs", toolkit).CombinedOutput()
 			if err != nil {
-				t.Fatalf("GTK development packages: %v: %s", err, flags)
+				t.Fatalf("GTK/WebKit development packages: %v: %s", err, flags)
 			}
 			binary := filepath.Join(t.TempDir(), "caption-check")
 			args := append([]string{"testdata/linux_caption_check.c", "-o", binary}, strings.Fields(string(flags))...)
