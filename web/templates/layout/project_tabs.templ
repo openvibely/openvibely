@@ -39,12 +39,14 @@ func projectBarPlatform(ctx context.Context) string {
 
 templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
 	<style>
+ html[data-openvibely-runtime="desktop"] { --project-titlebar-height: 46px; }
  [data-openvibely-runtime="web"] #desktop-project-titlebar { display: none; --wails-draggable: no-drag; }
  #project-selector-trigger .project-selector-plus { display: none; }
  #desktop-project-titlebar #project-selector-trigger .project-selector-plus { display: block; }
  #desktop-project-titlebar #project-selector-current-label { display: none; }
  #desktop-project-titlebar #project-selector-trigger { background: transparent; border: 0; }
  @media (min-width: 1024px) {
+  html[data-openvibely-runtime="web"] { --project-titlebar-height: 46px; }
   [data-openvibely-runtime="web"] #desktop-project-titlebar { display: flex; }
   [data-openvibely-runtime="web"] body > .drawer { height: calc(100% - 46px); }
   [data-openvibely-runtime="web"] #sidebar { height: calc(100dvh - 46px); }
@@ -57,7 +59,7 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
   [data-openvibely-runtime="desktop"] .drawer-side { top: 0; height: calc(100dvh - 46px); z-index: auto; }
   [data-openvibely-runtime="desktop"] .drawer-content > .navbar,
   [data-openvibely-runtime="desktop"] .sidebar-header { display: none; }
-  #desktop-project-titlebar { height: 46px; display: flex; align-items: center; gap: 6px; padding: 0 8px; box-sizing: border-box; --wails-draggable: drag; cursor: default; -webkit-user-select: none; user-select: none; --project-tab-selected: oklch(var(--b2)); --project-tab-contour: oklch(var(--b1)); box-shadow: inset 0 -2px var(--project-tab-contour); }
+  #desktop-project-titlebar { height: var(--project-titlebar-height, 46px); display: flex; align-items: center; gap: 6px; padding: 0 8px; box-sizing: border-box; --wails-draggable: drag; cursor: default; -webkit-user-select: none; user-select: none; --project-tab-selected: oklch(var(--b2)); --project-tab-contour: oklch(var(--b1)); box-shadow: inset 0 -2px var(--project-tab-contour); }
   /* Reserve the sidebar column; the first tab's curved foot starts at its edge. */
   #desktop-project-titlebar { position: relative; }
   #desktop-project-titlebar[data-platform="darwin"] { padding-left: 128px; }
