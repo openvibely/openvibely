@@ -4,37 +4,44 @@ package layout
 // It lives outside main-content so HTMX page swaps cannot remove a pending prompt.
 templ ConfirmationDialog() {
 	@ConfirmationFrame("app_confirm_modal", "Close confirmation", "Confirm action", "", "app_confirm_message", "", "", "Confirm", false, templ.ComponentScript{Call: "document.getElementById('app_confirm_modal').close()"}, templ.ComponentScript{Call: "document.getElementById('app_confirm_modal').close('confirm')"})
+	@ConfirmationFrame("clear_chat_confirm_modal", "Close clear chat confirmation", "Clear Chat", "Are you sure you want to delete ", "", "all chat history", "? This action cannot be undone.", "Clear Chat", true, templ.ComponentScript{Call: "document.getElementById('clear_chat_confirm_modal').close()"}, templ.ComponentScript{Call: "document.getElementById('clear_chat_confirm_modal').close('confirm')"}) {
+		<p>All messages in this chat will be permanently deleted.</p>
+	}
 	<script>
 		(function() {
 			if (window.openVibelyConfirm) return;
-			var modal = document.getElementById('app_confirm_modal');
+			var defaultModal = document.getElementById('app_confirm_modal');
+			var destructiveModal = document.getElementById('clear_chat_confirm_modal');
 			var pending = null;
-			window.openVibelyConfirm = function(message) {
+			window.openVibelyConfirm = function(message, dialogID) {
 				// A second action must not replace the action awaiting confirmation.
 				if (pending) return Promise.resolve(false);
+				var modal = dialogID === 'clear_chat_confirm_modal' ? destructiveModal : defaultModal;
 				return new Promise(function(resolve) {
 					pending = resolve;
 					modal.returnValue = '';
-					document.getElementById('app_confirm_message').textContent = message;
+					if (modal === defaultModal) document.getElementById('app_confirm_message').textContent = message;
 					modal.showModal();
 				});
 			};
-			modal.addEventListener('keydown', function(event) {
-				if (event.key === 'Escape' && modal.open) {
-					event.preventDefault();
-					modal.close();
-				}
-			});
-			modal.addEventListener('close', function() {
-				var resolve = pending;
-				pending = null;
-				if (resolve) resolve(modal.returnValue === 'confirm');
+			[defaultModal, destructiveModal].forEach(function(modal) {
+				modal.addEventListener('keydown', function(event) {
+					if (event.key === 'Escape' && modal.open) {
+						event.preventDefault();
+						modal.close();
+					}
+				});
+				modal.addEventListener('close', function() {
+					var resolve = pending;
+					pending = null;
+					if (resolve) resolve(modal.returnValue === 'confirm');
+				});
 			});
 			document.addEventListener('htmx:confirm', function(event) {
 				if (!event.detail.question) return;
 				event.preventDefault();
 				var source = event.detail.elt;
-				window.openVibelyConfirm(event.detail.question).then(function(confirmed) {
+				window.openVibelyConfirm(event.detail.question, source.getAttribute('data-confirm-dialog')).then(function(confirmed) {
 					if (confirmed && source.isConnected) event.detail.issueRequest(true);
 				});
 			});

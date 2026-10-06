@@ -86,6 +86,7 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 							hx-target="closest #chat-page-root"
 							hx-swap="outerHTML"
 							hx-confirm="Clear all chat history? This cannot be undone."
+							data-confirm-dialog="clear_chat_confirm_modal"
 							class="text-error"
 							role="menuitem"
 						>

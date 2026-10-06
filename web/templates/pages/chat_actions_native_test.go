@@ -337,9 +337,13 @@ window.addEventListener('DOMContentLoaded', function() {
       mouseClick(trigger());
       await wait(40);
       clearItem().click();
-      var modal = document.getElementById('app_confirm_modal');
+      var modal = document.getElementById('clear_chat_confirm_modal');
       await waitFor(function() { return modal.open; }, 'app confirmation');
-      if (document.getElementById('app_confirm_message').textContent !== 'Clear all chat history? This cannot be undone.') fail('wrong confirmation message');
+      if (!modal.hasAttribute('data-destructive-confirm-dialog')) fail('not the standard destructive modal');
+      if (modal.querySelector('h3').textContent !== 'Clear Chat' || !modal.querySelector('h3').classList.contains('text-error')) fail('wrong destructive title');
+      var accept = modal.querySelector('[data-confirm-accept]');
+      if (!accept.classList.contains('btn-error') || accept.textContent !== 'Clear Chat') fail('wrong destructive action');
+      if (!modal.querySelector('.bg-base-200').textContent.includes('permanently deleted')) fail('missing deletion warning');
       modal.querySelector('[autofocus]').click();
       await wait(100);
       var historyCount = await fetch('/chat-history-count').then(function(response) { return response.text(); });

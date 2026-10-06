@@ -296,14 +296,14 @@ func ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, curr
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 12, "\" hx-target=\"closest #chat-page-root\" hx-swap=\"outerHTML\" hx-confirm=\"Clear all chat history? This cannot be undone.\" class=\"text-error\" role=\"menuitem\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16\"></path></svg> Clear Chat</button></li></ul></div></div><!-- Chat Messages Container --><div class=\"relative flex-1 min-h-0 min-w-0\"><div id=\"chat-messages\" class=\"h-full min-h-0 overflow-y-auto pt-4 pb-4 -mb-3 space-y-6\" style=\"visibility: hidden;\" data-transcript-hydrating=\"true\" data-window-limit=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 12, "\" hx-target=\"closest #chat-page-root\" hx-swap=\"outerHTML\" hx-confirm=\"Clear all chat history? This cannot be undone.\" data-confirm-dialog=\"clear_chat_confirm_modal\" class=\"text-error\" role=\"menuitem\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16\"></path></svg> Clear Chat</button></li></ul></div></div><!-- Chat Messages Container --><div class=\"relative flex-1 min-h-0 min-w-0\"><div id=\"chat-messages\" class=\"h-full min-h-0 overflow-y-auto pt-4 pb-4 -mb-3 space-y-6\" style=\"visibility: hidden;\" data-transcript-hydrating=\"true\" data-window-limit=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var13 string
 		templ_7745c5c3_Var13, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%d", windowLimit))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/chat.templ`, Line: 103, Col: 203}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/chat.templ`, Line: 104, Col: 203}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var13)
 		if templ_7745c5c3_Err != nil {
@@ -316,7 +316,7 @@ func ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, curr
 		var templ_7745c5c3_Var14 string
 		templ_7745c5c3_Var14, templ_7745c5c3_Err = templ.ResolveAttributeValue("/chat?project_id=" + currentProjectID + "&limit=" + fmt.Sprintf("%d", windowLimit))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/chat.templ`, Line: 103, Col: 313}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/chat.templ`, Line: 104, Col: 313}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var14)
 		if templ_7745c5c3_Err != nil {
@@ -329,7 +329,7 @@ func ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, curr
 		var templ_7745c5c3_Var15 string
 		templ_7745c5c3_Var15, templ_7745c5c3_Err = templ.ResolveAttributeValue(currentProjectID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/chat.templ`, Line: 103, Col: 359}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/chat.templ`, Line: 104, Col: 359}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var15)
 		if templ_7745c5c3_Err != nil {
@@ -359,7 +359,7 @@ func ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, curr
 				var templ_7745c5c3_Var16 string
 				templ_7745c5c3_Var16, templ_7745c5c3_Err = templ.ResolveAttributeValue("chat-execution-" + exec.ID)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/chat.templ`, Line: 112, Col: 39}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/chat.templ`, Line: 113, Col: 39}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var16)
 				if templ_7745c5c3_Err != nil {
@@ -372,7 +372,7 @@ func ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, curr
 				var templ_7745c5c3_Var17 string
 				templ_7745c5c3_Var17, templ_7745c5c3_Err = templ.ResolveAttributeValue(exec.ID)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/chat.templ`, Line: 115, Col: 29}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/chat.templ`, Line: 116, Col: 29}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var17)
 				if templ_7745c5c3_Err != nil {
@@ -385,7 +385,7 @@ func ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, curr
 				var templ_7745c5c3_Var18 string
 				templ_7745c5c3_Var18, templ_7745c5c3_Err = templ.ResolveAttributeValue(string(exec.Status))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/chat.templ`, Line: 116, Col: 45}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/chat.templ`, Line: 117, Col: 45}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var18)
 				if templ_7745c5c3_Err != nil {
@@ -398,7 +398,7 @@ func ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, curr
 				var templ_7745c5c3_Var19 string
 				templ_7745c5c3_Var19, templ_7745c5c3_Err = templ.ResolveAttributeValue(components.ChatExecutionRevision(exec))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/chat.templ`, Line: 117, Col: 71}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/chat.templ`, Line: 118, Col: 71}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var19)
 				if templ_7745c5c3_Err != nil {
@@ -411,7 +411,7 @@ func ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, curr
 				var templ_7745c5c3_Var20 string
 				templ_7745c5c3_Var20, templ_7745c5c3_Err = templ.ResolveAttributeValue(exec.StartedAt.Format(time.RFC3339Nano))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/chat.templ`, Line: 118, Col: 64}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/chat.templ`, Line: 119, Col: 64}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var20)
 				if templ_7745c5c3_Err != nil {
@@ -492,7 +492,7 @@ func ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, curr
 		var templ_7745c5c3_Var21 string
 		templ_7745c5c3_Var21, templ_7745c5c3_Err = templ.ResolveAttributeValue(planCompleteDataAttr(latestPlanComplete))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/chat.templ`, Line: 144, Col: 176}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/chat.templ`, Line: 145, Col: 176}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var21)
 		if templ_7745c5c3_Err != nil {
@@ -572,7 +572,7 @@ func ChatModelInfo(info string) templ.Component {
 			var templ_7745c5c3_Var23 string
 			templ_7745c5c3_Var23, templ_7745c5c3_Err = templ.JoinStringErrs(info)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/chat.templ`, Line: 1963, Col: 9}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/chat.templ`, Line: 1964, Col: 9}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var23))
 			if templ_7745c5c3_Err != nil {
