@@ -43,6 +43,7 @@ const (
 )
 
 type taskSortPreferences struct {
+	Active    string
 	Backlog   string
 	Completed string
 }
@@ -75,6 +76,7 @@ func getSortPreference(c echo.Context, cookieName string) string {
 
 func getSortPreferences(c echo.Context) taskSortPreferences {
 	preferences := taskSortPreferences{
+		Active:    getSortPreference(c, "active_sort"),
 		Backlog:   getSortPreference(c, backlogSortCookieName),
 		Completed: getCompletedSortPreference(c),
 	}
@@ -803,6 +805,7 @@ func (h *Handler) taskCardMergeMenuStates(ctx context.Context, tasks []models.Ta
 }
 
 func (h *Handler) renderKanbanBoard(c echo.Context, tasks []models.Task, projectID string, sortPrefs taskSortPreferences, llmModels []models.LLMConfig) error {
+	c.SetRequest(c.Request().WithContext(components.WithActiveTaskSort(c.Request().Context(), sortPrefs.Active)))
 	tasks = service.AttachSwarmChildren(tasks)
 	agentDefs := h.listAgentDefinitions(c.Request().Context())
 	return render(c, http.StatusOK, components.KanbanBoard(tasks, projectID, sortPrefs.Backlog, sortPrefs.Completed, llmModels, agentDefs))
@@ -835,6 +838,7 @@ func (h *Handler) ListTasks(c echo.Context) error {
 
 	// Read sort preferences from cookies
 	sortPrefs := getSortPreferences(c)
+	c.SetRequest(c.Request().WithContext(components.WithActiveTaskSort(c.Request().Context(), sortPrefs.Active)))
 	if sortPrefs.Backlog != "" || sortPrefs.Completed != "" {
 		applog.Debugf("[handler] ListTasks using sort preferences: backlog=%s completed=%s", sortPrefs.Backlog, sortPrefs.Completed)
 	}
