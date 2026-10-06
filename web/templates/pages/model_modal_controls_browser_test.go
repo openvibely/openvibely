@@ -1,0 +1,136 @@
+package pages
+
+import (
+	"bytes"
+	"context"
+	"testing"
+)
+
+func TestBrowserFunctional_ModelModalDiscoveryAndDefaults(t *testing.T) {
+	var content bytes.Buffer
+	if err := ModelsContent(nil, nil, false).Render(context.Background(), &content); err != nil {
+		t.Fatal(err)
+	}
+	fixture := `<main id="reconnect-result"></main><script>
+ window.htmx={process:function(){},ajax:function(){return Promise.resolve();}};
+ var returnedModels=[{id:'qwen',context_length:262144},{id:'other',context_length:8192}];
+ var discoveryFails=false;
+ var discoveryRequests=[];
+ window.fetch=function(url,options){discoveryRequests.push({url:new URL(url,window.location.href),headers:options.headers});return discoveryFails ? Promise.reject(Error('Server unavailable')) : Promise.resolve({ok:true,json:function(){return Promise.resolve({models:returnedModels});}});};
+ </script>` + content.String() + `<script>
+ (async function(){
+ var result=document.getElementById('reconnect-result');
+ var field=function(id){return document.getElementById(id);};
+ var wait=function(){return new Promise(function(resolve){setTimeout(resolve,30);});};
+ var assert=function(ok,message){if(!ok)throw Error(message);};
+ var hidden=function(id){return field(id).classList.contains('hidden');};
+ var selectProvider=async function(provider){field('model_provider').value=provider;toggleProviderFields();await wait();};
+ var change=function(id,value){field(id).value=value;field(id).dispatchEvent(new Event('change'));};
+ var input=function(id,value){field(id).value=value;field(id).dispatchEvent(new Event('input'));};
+ try {
+  openNewModelModal();
+  assert(field('model_api_key').placeholder.indexOf('sk-ant-')===0,'Anthropic key hint');
+  assert(hidden('model_refresh'),'Anthropic has no refresh');
+  assert(field('model_compaction_threshold_mode').value==='default','default compaction mode');
+  assert(hidden('model_worker_timeout_custom'),'default timeout hides numeric sentinel');
+  assert(new FormData(field('model_form')).get('worker_timeout')==='0','default timeout wire value');
+  for(var provider of ['openai_compatible_vllm','openai_compatible_lm_studio','openai_compatible_openrouter']) {
+   await selectProvider(provider);
+   assert(!hidden('model_refresh') && hidden('model_manual_id_field'),'discovery controls '+provider);
+   assert(field('model_id').options.length===2,'only discovered models '+provider);
+   assert(!Array.from(field('model_id').options).some(function(o){return o.value==='local-model';}),'no fake model');
+   assert(field('model_api_key').placeholder.indexOf('sk-ant-')===-1,'no Anthropic hint '+provider);
+   assert(field('model_id').value==='qwen' && field('model_id').checkValidity(),'first model selected automatically');
+  }
+  await selectProvider('openai_compatible_vllm');
+  change('model_id','other');field('model_refresh').click();await wait();
+  assert(field('model_id').value==='other','refresh preserves a selection other than the first model');
+  assert(field('model_api_key_label').textContent==='API key (optional)','local key optional');
+  change('model_id','qwen');
+  assert(field('model_compaction_threshold_mode').options[0].textContent.includes('235,929'),'automatic threshold');
+  field('model_context_window_cap').value='131072';field('model_context_window_cap').dispatchEvent(new Event('change'));
+  field('model_refresh').click();await wait();
+  assert(field('model_id').value==='qwen' && field('model_context_window_cap').value==='131072','refresh preserves selected model and manual context');
+  discoveryFails=true;field('model_refresh').click();await wait();
+  assert(field('openai_compatible_discovery_status').textContent.includes('Server unavailable'),'discovery error');
+  assert(hidden('model_manual_id_field'),'failure does not expose manual workaround');
+  discoveryFails=false;returnedModels=[{id:'qwen',context_length:262144}];field('model_refresh').click();await wait();
+  assert(field('model_id').options.length===1,'refresh removes stale models');
+  assert(!field('openai_compatible_discovery_status').classList.contains('text-error'),'retry clears error');
+  change('model_worker_timeout_mode','custom');input('model_worker_timeout_custom','120');
+  change('model_max_workers_mode','custom');input('model_max_workers_custom','3');
+  change('model_compaction_threshold_mode','custom');input('model_compaction_threshold_custom','100000');
+  var values=new FormData(field('model_form'));
+  assert(values.get('worker_timeout')==='120' && values.get('model_max_workers')==='3' && values.get('compaction_threshold')==='100000','custom overrides submitted');
+  await selectProvider('openai');
+  assert(hidden('model_refresh') && hidden('openai_compatible_fields'),'OpenAI controls restored');
+  assert(field('model_worker_timeout_custom').value==='120','provider change preserves timeout');
+  assert(field('model_api_key').placeholder==='API key','OpenAI key hint');
+  field('model_openai_auth_type').value='oauth';toggleOpenAIAuthFields();
+  assert(hidden('api_key_field'),'OpenAI OAuth hides key');
+  await selectProvider('anthropic');
+  assert(field('model_api_key').placeholder.indexOf('sk-ant-')===0,'Anthropic hint restored');
+  field('model_anthropic_auth_type').value='oauth';toggleAnthropicAuthFields();
+  assert(hidden('api_key_field'),'Anthropic OAuth hides key');
+  await selectProvider('ollama');
+  assert(hidden('model_refresh') && hidden('api_key_field') && !hidden('ollama_fields'),'Ollama controls unchanged');
+  await selectProvider('mixture');
+  assert(hidden('model_field') && !field('model_id').required,'mixture not blocked by hidden select');
+  await selectProvider('openai_compatible_custom');
+  assert(!hidden('model_manual_id_field') && hidden('model_field'),'custom manual-only entry');
+  input('model_openai_compatible_custom_model','manual-id');
+  assert(new FormData(field('model_form')).get('model')==='manual-id','manual custom model submitted');
+  input('model_custom_models_url','http://localhost:8000/v1/models');
+  assert(hidden('model_manual_id_field') && !hidden('model_refresh'),'custom models URL enables discovery');
+  cancelOpenAICompatibleDiscovery();
+  field('model_id').value='';discoverOpenAICompatibleModels();await wait();
+  assert(field('model_id').value==='qwen','single discovered model selected');
+  input('model_custom_models_url','');cancelOpenAICompatibleDiscovery();
+  assert(!hidden('model_manual_id_field') && hidden('model_refresh'),'removing models URL restores manual');
+  change('model_worker_timeout_mode','default');
+  assert(new FormData(field('model_form')).get('worker_timeout')==='0' && hidden('model_worker_timeout_custom'),'restore default');
+  field('new_model_modal').close();
+  var edit=document.createElement('button');
+  Object.assign(edit.dataset,{modelId:'saved',modelName:'Saved',modelProvider:'openai_compatible',modelModel:'qwen',modelPresetSlug:'vllm',modelBaseUrl:'http://127.0.0.1:8000/v1/',modelContextWindowCap:'131072',modelWorkerTimeout:'240',modelMaxWorkers:'4',modelCompactionThreshold:'80000'});
+  populateModelEditForm(edit);await wait();
+  assert(field('model_worker_timeout_mode').value==='custom' && field('model_worker_timeout_custom').value==='240','saved timeout restored');
+  assert(field('model_max_workers_custom').value==='4' && field('model_compaction_threshold_custom').value==='80000','saved limits restored');
+  assert(new FormData(field('model_form')).get('context_window')==='131072','saved context preserved on discovery');
+  field('new_model_modal').close();openNewModelModal();
+  assert(field('model_worker_timeout_mode').value==='default' && field('model_max_workers_mode').value==='default','new form resets saved overrides');
+  returnedModels=[{id:'kimi-k3',context_length:262144}];
+  await selectProvider('openai_compatible_moonshot');
+  assert(field('model_id').value==='kimi-k3' && !hidden('reasoning_effort_field'),'automatic selection updates reasoning controls');
+  // Reproduce editing a saved NIM configuration and switching it to local vLLM.
+  field('new_model_modal').close();
+  returnedModels=[{id:'nvidia/model',context_length:131072}];
+  Object.assign(edit.dataset,{modelId:'saved-nim',modelProvider:'openai_compatible',modelModel:'nvidia/model',modelPresetSlug:'nvidia_nim',modelBaseUrl:'https://integrate.api.nvidia.com/v1/',modelModelsUrl:'https://integrate.api.nvidia.com/v1/models',modelApiKey:'saved-nim-secret',modelAuthMethod:'api_key',modelExtraHeadersJson:'{"X-Saved-Secret":"old-secret"}'});
+  populateModelEditForm(edit);await wait();
+  assert(discoveryRequests.at(-1).url.searchParams.get('config_id')==='saved-nim','unchanged edit uses saved connection');
+  returnedModels=[{id:'qwen',context_length:262144}];
+  var beforeSwitch=discoveryRequests.length;
+  await selectProvider('openai_compatible_vllm');
+  assert(discoveryRequests.length>beforeSwitch && field('model_id').value==='qwen','saved NIM to vLLM auto-discovery');
+  var request=discoveryRequests.at(-1);
+  assert(request.url.searchParams.get('base_url')==='http://127.0.0.1:8000/v1/','new endpoint');
+  assert(!request.url.searchParams.has('config_id') && !request.url.searchParams.has('models_url'),'no old connection or models endpoint');
+  assert(!request.headers['X-OpenAI-Compatible-API-Key'] && !request.headers['X-OpenAI-Compatible-Extra-Headers'],'no saved secrets forwarded');
+  assert(field('model_config_id').value==='saved-nim','edit still updates same saved record');
+  field('model_refresh').click();await wait();
+  assert(discoveryRequests.length>beforeSwitch+1 && field('model_id').value==='qwen','refresh after provider switch');
+  assert(field('model_refresh').querySelector('svg') && !field('model_refresh').textContent.trim() && field('model_refresh').getAttribute('aria-label')==='Refresh models','accessible icon-only refresh');
+  // Explicitly entered credentials may be used for the new server.
+  input('model_api_key','new-server-key');cancelOpenAICompatibleDiscovery();field('model_refresh').click();await wait();
+  assert(discoveryRequests.at(-1).headers['X-OpenAI-Compatible-API-Key']==='new-server-key','new credential used');
+  // Returning to the saved provider reuses its saved endpoint only when they match.
+  field('model_api_key').value='saved-nim-secret';
+  await selectProvider('openai_compatible_nvidia_nim');
+  field('model_custom_models_url').value='https://integrate.api.nvidia.com/v1/models';
+  field('model_refresh').click();await wait();
+  assert(discoveryRequests.at(-1).url.searchParams.get('config_id')==='saved-nim','saved connection restored');
+  result.setAttribute('data-test-result','pass');
+ }catch(e){result.setAttribute('data-test-result','fail');result.setAttribute('data-test-error',String(e.stack));}
+ })();
+ </script>`
+	runReconnectChromeFixture(t, fixture)
+}
