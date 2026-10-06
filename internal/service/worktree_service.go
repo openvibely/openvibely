@@ -2378,6 +2378,16 @@ func GetWorktreeDiff(repoDir string, branchName string, targetBranch string) str
 // files without rendering the same tracked path once for the committed branch
 // state and again for the uncommitted follow-up state.
 func GetWorktreeDiffWithUncommitted(repoDir string, branchName string, targetBranch string, worktreePath string) string {
+	lock := repositoryWriterLock(canonicalRepositoryMutationKey(repoDir))
+	lock.Lock()
+	defer lock.Unlock()
+	return getWorktreeDiffWithUncommittedUnlocked(repoDir, branchName, targetBranch, worktreePath)
+}
+
+// The caller must hold the repository mutation lock for the entire snapshot,
+// including worktree validation and untracked files. Otherwise setup or cleanup
+// can make temporarily missing files appear as task deletions.
+func getWorktreeDiffWithUncommittedUnlocked(repoDir string, branchName string, targetBranch string, worktreePath string) string {
 	if targetBranch == "" {
 		return ""
 	}
@@ -2402,6 +2412,9 @@ func GetWorktreeDiffWithUncommitted(repoDir string, branchName string, targetBra
 // It resolves the changed-file order from compact name-status/untracked output,
 // then runs a path-scoped git diff or synthesizes one untracked-file diff.
 func GetWorktreeDiffFileWithUncommitted(repoDir string, branchName string, targetBranch string, worktreePath string, fileIndex int) (string, bool) {
+	lock := repositoryWriterLock(canonicalRepositoryMutationKey(repoDir))
+	lock.Lock()
+	defer lock.Unlock()
 	if fileIndex < 0 || targetBranch == "" {
 		return "", false
 	}
@@ -3161,7 +3174,7 @@ func (ws *WorktreeService) finalizeTaskOutputChangesUnlocked(ctx context.Context
 	// or the provider already committed. If the app-level commit fails, include any
 	// uncommitted edits so the Changes view does not appear empty.
 	if result.WorktreeBranch != "" && result.TargetBranch != "" {
-		result.DiffOutput = GetWorktreeDiffWithUncommitted(repoDir, result.WorktreeBranch, result.TargetBranch, task.WorktreePath)
+		result.DiffOutput = getWorktreeDiffWithUncommittedUnlocked(repoDir, result.WorktreeBranch, result.TargetBranch, task.WorktreePath)
 	}
 	return result
 }
