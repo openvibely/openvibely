@@ -11,19 +11,6 @@ import (
 	"github.com/openvibely/openvibely/web/templates/components"
 )
 
-func (h *Handler) SetActiveSort(c echo.Context) error {
-	projectID := strings.TrimSpace(c.QueryParam("project_id"))
-	sortBy := c.QueryParam("sort")
-	if projectID == "" || (sortBy != "manual" && !isValidBacklogSort(sortBy)) {
-		return echo.NewHTTPError(http.StatusBadRequest, "project_id and a valid sort are required")
-	}
-	setTaskSortCookie(c, "active_sort", sortBy)
-	if isHTMX(c) {
-		return h.renderTaskBoardRefresh(c, projectID, func(p *taskSortPreferences) { p.Active = sortBy })
-	}
-	return c.Redirect(http.StatusSeeOther, "/tasks?project_id="+projectID)
-}
-
 func (h *Handler) StopAllActiveTasks(c echo.Context) error {
 	return h.applyActiveTaskAction(c, false)
 }

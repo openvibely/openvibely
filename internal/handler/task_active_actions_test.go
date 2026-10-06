@@ -10,47 +10,40 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 )
 
-func TestActiveMenuSortAndRefresh(t *testing.T) {
+func TestActiveMenuIgnoresOldSortPreference(t *testing.T) {
 	h, e, _ := setupTestHandler(t)
 	createTask(t, h, "default", "Zebra active")
 	createTask(t, h, "default", "Apple active")
-	req := httptest.NewRequest(http.MethodPost, "/tasks/active/sort?project_id=default&sort=title_asc", nil)
-	req.Header.Set("HX-Request", "true")
-	rec := httptest.NewRecorder()
-	e.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("sort: %d %s", rec.Code, rec.Body.String())
-	}
-	check := func(body string) {
-		t.Helper()
-		for _, text := range []string{"column-active", "Stop All", `data-delete-all-tasks-category="active"`, "/tasks/active/stop?project_id=default", "Priority (High to Low)"} {
+	for _, fragment := range []bool{false, true} {
+		req := httptest.NewRequest(http.MethodGet, "/tasks?project_id=default", nil)
+		req.AddCookie(&http.Cookie{Name: "active_sort", Value: "title_asc"})
+		if fragment {
+			req.Header.Set("HX-Request", "true")
+		}
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("refresh: %d", rec.Code)
+		}
+		body := rec.Body.String()
+		for _, text := range []string{"column-active", "Stop All", `data-delete-all-tasks-category="active"`} {
 			if !strings.Contains(body, text) {
 				t.Errorf("missing %s", text)
 			}
 		}
-		a, z := strings.Index(body, "Apple active"), strings.Index(body, "Zebra active")
-		if a < 0 || z < 0 || a > z {
-			t.Error("Active tasks not sorted by name")
+		for _, text := range []string{"/tasks/active/sort", "Manual order"} {
+			if strings.Contains(body, text) {
+				t.Errorf("obsolete Active sorting: %s", text)
+			}
+		}
+		z, a := strings.Index(body, "Zebra active"), strings.Index(body, "Apple active")
+		if z < 0 || a < 0 || z > a {
+			t.Fatal("old sort cookie changed Active order")
+		}
+		if !strings.Contains(body, "/tasks/backlog/sort") || !strings.Contains(body, "/tasks/completed/sort") {
+			t.Fatal("other column sorting missing")
 		}
 	}
-	check(rec.Body.String())
-	req = httptest.NewRequest(http.MethodGet, "/tasks?project_id=default", nil)
-	var found bool
-	for _, c := range rec.Result().Cookies() {
-		if c.Name == "active_sort" {
-			req.AddCookie(c)
-			found = true
-		}
-	}
-	if !found {
-		t.Fatal("missing sort cookie")
-	}
-	rec = httptest.NewRecorder()
-	e.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("refresh: %d", rec.Code)
-	}
-	check(rec.Body.String())
 }
 
 func TestActiveBulkActionsScope(t *testing.T) {
@@ -110,43 +103,6 @@ func TestActiveBulkActionsScope(t *testing.T) {
 				}
 			}
 		})
-	}
-}
-
-func TestActiveManualOrderAfterSort(t *testing.T) {
-	h, e, _ := setupTestHandler(t)
-	createTask(t, h, "default", "Apple active")
-	zebra := createTask(t, h, "default", "Zebra active")
-	for _, path := range []string{
-		"/tasks/" + zebra.ID + "/reorder",
-		"/tasks/active/sort?project_id=default&sort=manual",
-	} {
-		method := http.MethodPatch
-		if strings.Contains(path, "/sort?") {
-			method = http.MethodPost
-		}
-		req := httptest.NewRequest(method, path, strings.NewReader("position=0"))
-		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-		req.Header.Set("HX-Request", "true")
-		req.AddCookie(&http.Cookie{Name: "active_sort", Value: "title_asc"})
-		rec := httptest.NewRecorder()
-		e.ServeHTTP(rec, req)
-		if rec.Code != http.StatusOK {
-			t.Fatalf("%s: %d %s", path, rec.Code, rec.Body.String())
-		}
-		body := rec.Body.String()
-		if strings.Index(body, "Zebra active") > strings.Index(body, "Apple active") {
-			t.Fatal("sort overrides manual order")
-		}
-		found := false
-		for _, cookie := range rec.Result().Cookies() {
-			if cookie.Name == "active_sort" && cookie.Value == "manual" {
-				found = true
-			}
-		}
-		if !found {
-			t.Fatal("manual preference not persisted")
-		}
 	}
 }
 

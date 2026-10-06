@@ -1,34 +1,9 @@
 package components
 
 import (
-	"testing"
-	"time"
-
 	"github.com/openvibely/openvibely/internal/models"
+	"testing"
 )
-
-func TestActiveTaskSortOptions(t *testing.T) {
-	now := time.Now()
-	tasks := []models.Task{
-		{ID: "z", Title: "Zebra", Priority: 4, CreatedAt: now},
-		{ID: "a", Title: "apple", Priority: 1, CreatedAt: now.Add(-time.Hour)},
-	}
-	for _, tc := range []struct{ sort, first string }{
-		{"", "z"}, {"title_asc", "a"}, {"title_desc", "z"},
-		{"created_asc", "a"}, {"created_desc", "z"},
-		{"priority_asc", "a"}, {"priority_desc", "z"},
-	} {
-		t.Run(tc.sort, func(t *testing.T) {
-			got := sortActiveTasks(tasks, tc.sort)
-			if got[0].ID != tc.first {
-				t.Fatalf("first = %s, want %s", got[0].ID, tc.first)
-			}
-			if tasks[0].ID != "z" {
-				t.Fatal("sort changed source tasks")
-			}
-		})
-	}
-}
 
 func TestActiveBoardBulkSelectionMatchesVisibleCards(t *testing.T) {
 	tasks := []models.Task{
