@@ -1102,3 +1102,27 @@ func TestCallDirectNonLifecycleKeepsBothPrompts(t *testing.T) {
 		}
 	}
 }
+
+func TestCompatibleSmallWindowSendsUsableOutputBudget(t *testing.T) {
+	var sent int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Error(err)
+		}
+		sent = int(body["max_tokens"].(float64))
+		w.Header().Set("Content-Type", "text/event-stream")
+		io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"content\":\"Hello\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n")
+	}))
+	defer srv.Close()
+	_, err := New(nil, nil).Call(context.Background(), llmcontracts.AgentRequest{
+		Operation: llmcontracts.OperationDirect, Message: "Say hi",
+		Agent: models.LLMConfig{Provider: models.ProviderOpenAICompatible, PresetSlug: "vllm", Model: "small-qwen", AuthMethod: models.AuthMethodAPIKey, BaseURL: srv.URL + "/v1/", Transport: "chat_completions", ProviderContextWindow: 8192},
+	}, ".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sent != 2048 {
+		t.Fatalf("sent max_tokens=%d, want 2048", sent)
+	}
+}

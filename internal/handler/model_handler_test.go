@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -4471,5 +4472,68 @@ func TestCreateModel_RedirectWithoutProjectID(t *testing.T) {
 	location := rec.Header().Get("Location")
 	if location != "/models" {
 		t.Errorf("redirect Location = %q, want plain /models", location)
+	}
+}
+
+func TestEnrichCompatibleModelsUsesCustomDiscoveryMappings(t *testing.T) {
+	payload := map[string]any{"result": map[string]any{"models": []any{
+		map[string]any{"identity": map[string]any{"name": "qwen"}, "max_model_len": float64(262144), "max_output_tokens": float64(8192)},
+		map[string]any{"identity": map[string]any{"name": "unknown"}},
+	}}}
+	got := enrichOpenAICompatibleModels(payload, llmcustomauth.Config{ModelsArrayPath: "result.models", ModelIDField: "identity.name"})
+	if len(got) != 2 || got[0].ID != "qwen" || got[0].ContextLength != 262144 || got[0].MaxOutputTokens != 8192 || got[1].ID != "unknown" || got[1].ContextLength != 0 {
+		t.Fatalf("mapped discovery = %+v", got)
+	}
+}
+
+func TestCompatibleContextLimitsPersistThroughCreateAndEdit(t *testing.T) {
+	t.Setenv("OPENVIBELY_ALLOW_PRIVATE_MODEL_ENDPOINTS", "true")
+	_, e, repo := setupTestHandler(t)
+	form := url.Values{
+		"name": {"Context regression"}, "provider": {"openai_compatible_vllm"}, "model": {"qwen"},
+		"base_url": {"http://127.0.0.1:8000/v1/"}, "preset_slug": {"vllm"}, "transport": {"chat_completions"},
+		"context_window": {"262144"}, "provider_context_window": {"262144"}, "default_max_tokens": {"4096"},
+	}
+	send := func(method, path string) {
+		t.Helper()
+		req := httptest.NewRequest(method, path, strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, req)
+		if rec.Code != http.StatusSeeOther {
+			t.Fatalf("%s %s: %d %s", method, path, rec.Code, rec.Body.String())
+		}
+	}
+	send(http.MethodPost, "/models")
+	configs, err := repo.List(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var id string
+	for _, cfg := range configs {
+		if cfg.Name == "Context regression" {
+			id = cfg.ID
+		}
+	}
+	if id == "" {
+		t.Fatal("model not created")
+	}
+	for _, window := range []string{"262144", "65536"} {
+		if window == "65536" {
+			form.Set("context_window", window)
+			send(http.MethodPut, "/models/"+id)
+		}
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/models/"+id+"/edit-details", nil))
+		var details modelEditDetails
+		if rec.Code != http.StatusOK {
+			t.Fatalf("edit details: %d %s", rec.Code, rec.Body.String())
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &details); err != nil {
+			t.Fatal(err)
+		}
+		if fmt.Sprint(details.ContextWindow) != window || details.ProviderContextWindow != 262144 || details.DefaultMaxTokens != 4096 {
+			t.Fatalf("limits lost on edit: context=%d provider=%d output=%d", details.ContextWindow, details.ProviderContextWindow, details.DefaultMaxTokens)
+		}
 	}
 }

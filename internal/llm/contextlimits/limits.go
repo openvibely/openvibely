@@ -9,8 +9,8 @@ import (
 const (
 	DefaultOpenAICompatibleContextWindow = 128000
 	DefaultAnthropicContextWindow        = 200000
-	DefaultOpenAIContextWindow             = 200000
-	DefaultReservedOutputTokens            = 16384
+	DefaultOpenAIContextWindow           = 200000
+	DefaultReservedOutputTokens          = 16384
 )
 
 // Resolved holds effective input/output windows for budgeting and provider requests.
@@ -57,6 +57,10 @@ func providerInputWindow(agent models.LLMConfig) int {
 		}
 		return DefaultAnthropicContextWindow
 	case models.ProviderOpenAICompatible:
+		// Without reported metadata, a saved/manual window is authoritative.
+		if agent.ContextWindow > 0 {
+			return agent.ContextWindow
+		}
 		return DefaultOpenAICompatibleContextWindow
 	case models.ProviderOllama:
 		return llmollama.DefaultContextWindow
@@ -66,6 +70,9 @@ func providerInputWindow(agent models.LLMConfig) int {
 }
 
 func providerOutputWindow(agent models.LLMConfig) int {
+	if agent.Provider == models.ProviderOpenAICompatible && agent.ProviderMaxOutputTokens <= 0 && agent.DefaultMaxTokens > 0 {
+		return agent.DefaultMaxTokens
+	}
 	if agent.ProviderMaxOutputTokens > 0 {
 		return agent.ProviderMaxOutputTokens
 	}
@@ -85,7 +92,8 @@ func providerOutputWindow(agent models.LLMConfig) int {
 	}
 }
 
-// Resolve applies cap-only user overrides on top of provider/catalog limits.
+// Resolve caps against reported limits, using manual compatible-provider limits
+// when discovery metadata is unavailable.
 func Resolve(agent models.LLMConfig) Resolved {
 	providerIn := providerInputWindow(agent)
 	effectiveIn := providerIn
@@ -97,6 +105,12 @@ func Resolve(agent models.LLMConfig) Resolved {
 	effectiveOut := providerOut
 	if agent.DefaultMaxTokens > 0 {
 		effectiveOut = minPositive(providerOut, agent.DefaultMaxTokens)
+	}
+
+	// Compatible servers generally share one window between input and output.
+	// Leave room for the prompt when their output limit is absent or oversized.
+	if agent.Provider == models.ProviderOpenAICompatible {
+		effectiveOut = minPositive(effectiveOut, max(1, effectiveIn/4))
 	}
 
 	autoLimit := (effectiveIn * 90) / 100
