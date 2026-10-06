@@ -928,8 +928,8 @@ for _, agent := range modelOptions {
 						</div>
 						<div id="model_output_limit_field" class="form-control">
 							<label class="label"><span class="label-text">Max output (tokens)</span></label>
-							<input type="number" min="1" step="1" id="model_default_max_tokens" name="default_max_tokens" class="input input-bordered" value="16384"/>
-							<label class="label"><span class="label-text-alt opacity-70">Limited to one quarter of the context window to leave room for your prompt.</span></label>
+							<input type="number" min="1" step="1" id="model_default_max_tokens" name="default_max_tokens" class="input input-bordered" value="16384" onchange="updateContextLimitInputs(Number(document.getElementById('model_provider_context_window').value), Number(document.getElementById('model_provider_max_output_tokens').value), true)"/>
+							<label class="label"><span class="label-text-alt opacity-70">Defaults leave room for input. Below 32,768 context tokens, output is limited to one quarter of the window.</span></label>
 						</div>
 					</div>
 					<div class="form-control mt-2">
@@ -1704,7 +1704,7 @@ for _, agent := range modelOptions {
 							var spec = selectedModelOption(provider, model) || {};
 							return {
 								context: spec.context_length || (isOpenAICompatibleProvider(provider) ? 128000 : provider === 'ollama' ? 8192 : 200000),
-								output: spec.max_output_tokens || 16384
+								output: spec.max_output_tokens || (provider === 'ollama' ? 4096 : 16384)
 							};
 						}
 
@@ -1722,11 +1722,19 @@ for _, agent := range modelOptions {
 								}
 							}
 							fill(input, context || defaults.context, context);
-							var compatible = isOpenAICompatibleProvider(document.getElementById('model_provider').value);
-							var outputLimit = compatible ? Math.max(1, Math.floor(Number(input.value) / 4)) : defaults.output;
-							fill(maxOutput, Math.min(output || defaults.output, outputLimit), Math.min(output || outputLimit, outputLimit));
-							document.getElementById('model_output_limit_field').classList.toggle('hidden', !compatible);
-							maxOutput.disabled = !compatible;
+							var provider = document.getElementById('model_provider').value;
+							var supportsOutput = isOpenAICompatibleProvider(provider) || provider === 'ollama';
+							var windowSize = Number(input.value);
+							var outputLimit = supportsOutput && windowSize < 32768 ? Math.max(1, Math.floor(windowSize / 4)) : Number.MAX_SAFE_INTEGER;
+							var suggestedOutput = output || defaults.output;
+							if (isOpenAICompatibleProvider(provider)) suggestedOutput = Math.min(suggestedOutput, 16384, outputLimit);
+							fill(maxOutput, Math.min(suggestedOutput, outputLimit), Math.min(output || outputLimit, outputLimit));
+							if (isOpenAICompatibleProvider(provider) && Number(maxOutput.value) >= windowSize - Math.max(1024, Math.floor(windowSize / 50))) {
+								maxOutput.value = String(suggestedOutput);
+								maxOutput.dataset.automaticValue = maxOutput.value;
+							}
+							document.getElementById('model_output_limit_field').classList.toggle('hidden', !supportsOutput);
+							maxOutput.disabled = !supportsOutput;
 							document.getElementById('model_context_source').textContent = context > 0 ? 'Reported by the server or built-in catalog' : 'No reported limit. Verify the context window against your server configuration.';
 						}
 
@@ -2206,7 +2214,7 @@ for _, agent := range modelOptions {
 					openAICompatibleDiscoveredModels = {};
 					applyDiscoveredModelLimits(selectedModelOption(provider, activeModel));
 				}
-				var compatibleOutput = isOpenAICompatibleProvider(provider);
+				var compatibleOutput = isOpenAICompatibleProvider(provider) || provider === 'ollama';
 				document.getElementById('model_output_limit_field').classList.toggle('hidden', !compatibleOutput);
 				document.getElementById('model_default_max_tokens').disabled = !compatibleOutput;
 				if (modelField) modelField.classList.toggle('hidden', provider === 'mixture');

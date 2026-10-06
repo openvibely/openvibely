@@ -107,10 +107,18 @@ func Resolve(agent models.LLMConfig) Resolved {
 		effectiveOut = minPositive(providerOut, agent.DefaultMaxTokens)
 	}
 
-	// Compatible servers generally share one window between input and output.
-	// Leave room for the prompt when their output limit is absent or oversized.
+	// A provider maximum is a ceiling, not a default reservation. Use a bounded
+	// default, while preserving explicit budgets that leave space for input.
 	if agent.Provider == models.ProviderOpenAICompatible {
-		effectiveOut = minPositive(effectiveOut, max(1, effectiveIn/4))
+		automaticOutput := minPositive(providerOut, DefaultReservedOutputTokens)
+		if effectiveIn < 32768 {
+			automaticOutput = minPositive(automaticOutput, max(1, effectiveIn/4))
+		}
+		if agent.DefaultMaxTokens <= 0 || effectiveOut >= effectiveIn-max(1024, effectiveIn/50) {
+			effectiveOut = automaticOutput
+		} else if effectiveIn < 32768 {
+			effectiveOut = minPositive(effectiveOut, max(1, effectiveIn/4))
+		}
 	}
 
 	autoLimit := (effectiveIn * 90) / 100
