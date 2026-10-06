@@ -223,12 +223,18 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
                     clearInterval(renewalTimer);
                     clearInterval(expiryTimer);
                     window.removeEventListener('focus', checkExpiry);
+                    window.removeEventListener('beforeunload', beforeUnload);
                     window.removeEventListener('pagehide', leaveEditor);
                     window.removeEventListener('popstate', leaveEditor);
                     document.body.removeEventListener('htmx:afterSwap', beforeNavigation);
                 }
                 function releaseOwnHold() {
                     return fetch(holdURL, {method: 'POST', body: new URLSearchParams({hold: 'false', edit_token: editToken}), keepalive: true}).catch(function() {});
+                }
+                function beforeUnload(event) {
+                    if (!saving) return;
+                    event.preventDefault();
+                    event.returnValue = '';
                 }
                 function leaveEditor() {
                     leaving = true;
@@ -250,6 +256,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
                     var target = event.detail && event.detail.target;
                     if (target && target.id === 'main-content') leaveEditor();
                 }
+                window.addEventListener('beforeunload', beforeUnload);
                 window.addEventListener('pagehide', leaveEditor);
                 window.addEventListener('popstate', leaveEditor);
                 document.body.addEventListener('htmx:afterSwap', beforeNavigation);
@@ -333,7 +340,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
                     saveUncertain = true;
 					try {
 						var response = await timedFetch('/thread-inputs/' + encodeURIComponent(inputID) + '/edit', {
-							method: 'POST', keepalive: true, body: new URLSearchParams({content: textarea.value, resume: "true", edit_token: editToken})
+							method: 'POST', body: new URLSearchParams({content: textarea.value, resume: "true", edit_token: editToken})
 						}, true);
 						var result = response.editorBody;
                         saveUncertain = false;

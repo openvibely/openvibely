@@ -1924,19 +1924,41 @@ global.fetch = (url, options) => {
  const beforeExit = requests.length;
  listeners.pagehide();
  assert.equal(requests.length, beforeExit, 'ambiguous Save must not be overtaken by Cancel');
- // Page exit during a Save lets the keepalive Save finish without Cancel.
+ // A rejected large save keeps the draft and Cancel still releases the hold.
  opening = window.editPendingThreadInput(button);
  completeHold(); await opening;
- controls.textarea.value = 'new text';
+ controls.textarea.value = 'large message '.repeat(10000);
+ global.fetch = async (url, options) => {
+   assert.notEqual(options.keepalive, true);
+   return {ok:false, json:async()=>({message:'Save rejected'})};
+ };
+ await controls.form.onsubmit({preventDefault(){}});
+ assert.match(controls['[role="alert"]'].textContent, /Save rejected/);
+ global.fetch = workingFetch;
+ const beforeCancel = requests.length;
+ await controls['[data-cancel]'].onclick();
+ assert.equal(requests.length, beforeCancel + 1);
+ assert.equal(requests.at(-1).options.body.get('hold'), 'false');
+ // Large saves avoid the keepalive quota and page exit cannot send a competing Cancel.
+ opening = window.editPendingThreadInput(button);
+ completeHold(); await opening;
+ const largeDraft = '🦆 &'.repeat(20000);
+ controls.textarea.value = largeDraft;
  let finishSave;
  const saveRequests = [];
- global.fetch = (url, options) => { saveRequests.push({url, options}); return new Promise(resolve => finishSave = resolve); };
+ global.fetch = (url, options) => {
+ if (options.keepalive && Buffer.byteLength(options.body.toString()) > 65536) return Promise.reject(new TypeError('keepalive quota exceeded'));
+ saveRequests.push({url, options}); return new Promise(resolve => finishSave = resolve);
+ };
  const savingNow = controls.form.onsubmit({preventDefault(){}});
+ let warned = false;
+ listeners.beforeunload({preventDefault(){warned = true}});
+ assert.equal(warned, true);
  listeners.pagehide();
  assert.equal(saveRequests.length, 1);
- assert.equal(saveRequests[0].options.keepalive, true);
- assert.equal(saveRequests[0].options.body.get('content'), 'new text');
- finishSave({ok:true, json:async()=>({content:'new text'})});
+ assert.notEqual(saveRequests[0].options.keepalive, true);
+ assert.equal(saveRequests[0].options.body.get('content'), largeDraft);
+ finishSave({ok:true, json:async()=>({content:largeDraft})});
  await savingNow;
  assert.equal(saveRequests.length, 1);
 })().catch(error => {console.error(error); process.exit(1)});
