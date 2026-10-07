@@ -6,6 +6,10 @@
 #endif
 
 static int reported_left, reported_right, close_count;
+static gboolean content_loaded;
+static void load_changed(WebKitWebView *view, WebKitLoadEvent event, gpointer data) {
+ if (event == WEBKIT_LOAD_FINISHED) content_loaded = TRUE;
+}
 void ovLinuxCaptionLayout(int left, int right) { reported_left=left; reported_right=right; }
 static gboolean closing(GtkWidget *widget, gpointer a, gpointer b) { close_count++; return TRUE; }
 static void settle(void) {
@@ -35,7 +39,7 @@ static GtkWidget *find_button(GtkWidget *root, const char *style) {
  return NULL;
 #endif
 }
-static gboolean corners_match(GtkWidget *window, gboolean rounded) {
+static gboolean sample_corners(GtkWidget *window, gboolean rounded, gboolean report) {
 #if GTK_MAJOR_VERSION < 4
  // Match the production fallback on desktops without alpha compositing.
  rounded = rounded && gdk_screen_is_composited(gtk_widget_get_screen(window)) &&
@@ -63,13 +67,32 @@ static gboolean corners_match(GtkWidget *window, gboolean rounded) {
  int points[][2] = {{0,0}, {width-1,0}, {0,height-1}, {width-1,height-1}};
  for (int i=0;i<4;i++) {
   guint32 pixel = *(guint32 *)(pixels + points[i][1]*stride + points[i][0]*4);
-  if ((pixel >> 24) != (rounded ? 0 : 255)) matches = FALSE;
+  if ((pixel >> 24) != (rounded ? 0 : 255)) {
+   if (report) g_printerr("corner (%d,%d): pixel=%08x, expected alpha=%d\n", points[i][0], points[i][1], pixel, rounded ? 0 : 255);
+   matches = FALSE;
+  }
  }
  // The content must still paint fully opaque away from the clipped corners.
- if ((*(guint32 *)(pixels + (height/2)*stride + (width/2)*4) >> 24) != 255) matches = FALSE;
+ guint32 center = *(guint32 *)(pixels + (height/2)*stride + (width/2)*4);
+ if ((center >> 24) != 255) {
+  if (report) g_printerr("center (%d,%d): pixel=%08x, expected alpha=255\n", width/2, height/2, center);
+  matches = FALSE;
+ }
  cairo_surface_destroy(surface);
- if (!matches) g_printerr("corner pixels did not match rounded=%d\n", rounded);
+ if (!matches && report) g_printerr("corner pixels did not match rounded=%d (size=%dx%d)\n", rounded, width, height);
  return matches;
+}
+
+static gboolean corners_match(GtkWidget *window, gboolean rounded) {
+ // WebKit paints asynchronously, including after native window state changes.
+ // A fixed delay can sample an empty or stale frame on a busy CI runner.
+ gint64 deadline = g_get_monotonic_time() + 5 * G_TIME_SPAN_SECOND;
+ do {
+  while (g_main_context_iteration(NULL, FALSE));
+  if (sample_corners(window, rounded, FALSE)) return TRUE;
+  g_usleep(10000);
+ } while (g_get_monotonic_time() < deadline);
+ return sample_corners(window, rounded, TRUE);
 }
 
 int main(int argc,char **argv) {
@@ -94,11 +117,18 @@ int main(int argc,char **argv) {
 #endif
  // Use a real, opaque WebKit surface to catch corner clipping that works for
  // ordinary GTK widgets but is bypassed by the webview's renderer.
+ g_signal_connect(content, "load-changed", G_CALLBACK(load_changed), NULL);
  webkit_web_view_load_html(WEBKIT_WEB_VIEW(content), "<html style='background:#234567'><body>Shared header and webview content</body></html>", NULL);
  gtk_window_set_default_size(GTK_WINDOW(window),800,400);
  g_object_set(gtk_settings_get_default(),"gtk-decoration-layout",":minimize,maximize,close",NULL);
  ovInstallLinuxCaption(window);
  gtk_window_present(GTK_WINDOW(window)); settle();
+ gint64 load_deadline = g_get_monotonic_time() + 10 * G_TIME_SPAN_SECOND;
+ while (!content_loaded && g_get_monotonic_time() < load_deadline) {
+  while (g_main_context_iteration(NULL, FALSE));
+  g_usleep(10000);
+ }
+ if (!content_loaded) { g_printerr("WebKit content did not finish loading\n"); return 28; }
  OVCaption *c=g_object_get_data(G_OBJECT(window),"ov-caption");
  if (!c || !gtk_widget_get_parent(content)) return 10;
  if (!corners_match(window, TRUE)) return 23;
