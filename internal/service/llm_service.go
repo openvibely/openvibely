@@ -1085,12 +1085,29 @@ func (s *LLMService) ExecuteTaskWithAgent(ctx context.Context, task models.Task,
 	return exec, err
 }
 
+func applyPlannerFollowupEffort(task models.Task, agent *models.LLMConfig, modelDefaultEffort string) {
+	if task.SwarmRole != models.SwarmRolePlanner || agent == nil {
+		return
+	}
+	cfg, err := models.ParseSwarmConfig(task.SwarmConfig)
+	if err != nil || cfg.FollowupReasoningEffort == nil || cfg.FollowupEffortModelID != agent.ID || cfg.FollowupEffortGeneration != cfg.RerunGeneration {
+		return
+	}
+	if *cfg.FollowupReasoningEffort == "" {
+		agent.ReasoningEffort = modelDefaultEffort
+	} else if models.ValidConversationEffort(*agent, *cfg.FollowupReasoningEffort) {
+		agent.ReasoningEffort = *cfg.FollowupReasoningEffort
+	}
+}
+
 func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task, agent models.LLMConfig) (*models.Execution, llmcontracts.ChatContext, error) {
+	modelDefaultEffort := agent.ReasoningEffort
 	if s.taskRepo != nil {
 		if err := s.taskRepo.ApplyModelEffort(ctx, task.ID, &agent); err != nil {
 			return nil, llmcontracts.ChatContext{}, err
 		}
 	}
+	applyPlannerFollowupEffort(task, &agent, modelDefaultEffort)
 	applog.Infof("[agent-svc] ExecuteTaskWithAgent task=%s agent=%s model=%s", task.ID, agent.Name, agent.Model)
 	finalizeCtx := context.Background()
 

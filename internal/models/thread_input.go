@@ -26,7 +26,6 @@ const (
 
 type ThreadInput struct {
 	ReasoningEffort        string            `json:"reasoning_effort,omitempty"`
-	ModelSelectionSnapshot bool              `json:"model_selection_snapshot,omitempty"`
 	ID                     string            `json:"id"`
 	Scope                  ThreadInputScope  `json:"scope"`
 	ProjectID              string            `json:"project_id"`

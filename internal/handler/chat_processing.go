@@ -1764,20 +1764,6 @@ func (h *Handler) resolveTaskThreadExecutionAgent(ctx context.Context, task *mod
 	return agent, agent == nil, nil
 }
 
-func (h *Handler) resolveQueuedTaskThreadInputAgent(ctx context.Context, task *models.Task, input models.ThreadInput) (*models.LLMConfig, bool, error) {
-	if !input.ModelSelectionSnapshot || input.AgentConfigID == "" {
-		return h.resolveTaskThreadExecutionAgent(ctx, task)
-	}
-	agent, err := h.llmConfigRepo.GetByID(ctx, input.AgentConfigID)
-	if err != nil || agent == nil {
-		return agent, agent == nil, err
-	}
-	if models.ValidConversationEffort(*agent, input.ReasoningEffort) {
-		agent.ReasoningEffort = input.ReasoningEffort
-	}
-	return agent, false, nil
-}
-
 func (h *Handler) cancelUnstartableQueuedInput(ctx context.Context, input models.ThreadInput) {
 	if h.threadInputRepo == nil || input.ID == "" {
 		return
@@ -2035,7 +2021,7 @@ func (h *Handler) startQueuedTaskThreadInput(ctx context.Context, input models.T
 		applog.Infof("[handler] startQueuedTaskThreadInput input=%s task=%s load error: %v", input.ID, input.TaskID, err)
 		return err
 	}
-	agent, unstartable, err := h.resolveQueuedTaskThreadInputAgent(ctx, task, input)
+	agent, unstartable, err := h.resolveTaskThreadExecutionAgent(ctx, task)
 	if err != nil {
 		applog.Infof("[handler] startQueuedTaskThreadInput input=%s task=%s model load error: %v", input.ID, task.ID, err)
 		return err
@@ -4334,14 +4320,13 @@ func (e *taskFollowupAdmissionError) Unwrap() error {
 }
 
 type taskFollowupAdmissionRequest struct {
-	Task                   *models.Task
-	Agent                  *models.LLMConfig
-	ModelSelectionSnapshot bool
-	Message                string
-	Source                 string
-	AttachmentSessionID    string
-	LogPrefix              string
-	FatalQueueCareError    bool
+	Task                *models.Task
+	Agent               *models.LLMConfig
+	Message             string
+	Source              string
+	AttachmentSessionID string
+	LogPrefix           string
+	FatalQueueCareError bool
 }
 
 type taskFollowupAdmissionResult struct {
@@ -4388,10 +4373,6 @@ func (h *Handler) admitTaskFollowup(ctx context.Context, req taskFollowupAdmissi
 			runExecutionID = activeExec.ID
 		}
 		queued := h.buildTaskFollowupQueuedInput(task, req.Agent.ID, req.Message, req.Source, req.AttachmentSessionID, runExecutionID)
-		if req.ModelSelectionSnapshot {
-			queued.ModelSelectionSnapshot = true
-			queued.ReasoningEffort = req.Agent.ReasoningEffort
-		}
 		if err := h.threadInputRepo.CreateQueued(ctx, queued); err != nil {
 			return nil, &taskFollowupAdmissionError{Op: taskFollowupAdmissionOpQueueCreate, Err: err}
 		}
@@ -4420,10 +4401,6 @@ func (h *Handler) admitTaskFollowup(ctx context.Context, req taskFollowupAdmissi
 		IsFollowup:    true,
 	}
 	queued := h.buildTaskFollowupQueuedInput(task, req.Agent.ID, req.Message, req.Source, req.AttachmentSessionID, "")
-	if req.ModelSelectionSnapshot {
-		queued.ModelSelectionSnapshot = true
-		queued.ReasoningEffort = req.Agent.ReasoningEffort
-	}
 	started, err := h.execRepo.CreateDirectTaskFollowupOrQueue(ctx, exec, queued)
 	if err != nil {
 		return nil, &taskFollowupAdmissionError{Op: taskFollowupAdmissionOpDirectAdmission, Err: err}

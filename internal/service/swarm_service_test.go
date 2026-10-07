@@ -17,6 +17,37 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestPlannerFollowupEffortUsesSentValueOnlyForMatchingRun(t *testing.T) {
+	low := "low"
+	cfg := models.SwarmConfig{RerunGeneration: 3}
+	setPlannerFollowupEffort(&cfg, &SwarmFollowupModelSelection{ModelID: "model-a", ReasoningEffort: &low})
+	raw, err := cfg.JSON()
+	require.NoError(t, err)
+	task := models.Task{SwarmRole: models.SwarmRolePlanner, SwarmConfig: raw}
+	agent := models.LLMConfig{ID: "model-a", Provider: models.ProviderOpenAI, Model: "gpt-5.5", ReasoningEffort: "high"}
+	applyPlannerFollowupEffort(task, &agent, "medium")
+	require.Equal(t, "low", agent.ReasoningEffort)
+	otherModel := agent
+	otherModel.ID = "model-b"
+	otherModel.ReasoningEffort = "high"
+	applyPlannerFollowupEffort(task, &otherModel, "medium")
+	require.Equal(t, "high", otherModel.ReasoningEffort, "the snapshot cannot affect another model")
+
+	agent.ReasoningEffort = "high"
+	cfg.RerunGeneration++
+	task.SwarmConfig, err = cfg.JSON()
+	require.NoError(t, err)
+	applyPlannerFollowupEffort(task, &agent, "medium")
+	require.Equal(t, "high", agent.ReasoningEffort, "another generation cannot inherit the old send")
+
+	empty := ""
+	setPlannerFollowupEffort(&cfg, &SwarmFollowupModelSelection{ModelID: "model-a", ReasoningEffort: &empty})
+	task.SwarmConfig, err = cfg.JSON()
+	require.NoError(t, err)
+	applyPlannerFollowupEffort(task, &agent, "medium")
+	require.Equal(t, "medium", agent.ReasoningEffort, "empty effort restores the model default")
+}
+
 func requireFullSwarmTestTask(t testing.TB, repo *repository.TaskRepo, id string) *models.Task {
 	t.Helper()
 	task, err := repo.GetByID(context.Background(), id)
