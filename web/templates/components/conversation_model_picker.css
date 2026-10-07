@@ -43,7 +43,8 @@
   flex: 0 1 auto;
   padding: 6px;
   min-height: 0;
-  scrollbar-width: thin;
+  scrollbar-width: auto;
+  scrollbar-color: auto;
 }
 .ov-mp-row {
   display: flex;
@@ -185,10 +186,12 @@
   border-bottom: 1px solid var(--ov-border-subtle, #414753);
 }
 .ov-mp-sublist {
+  min-height: 0;
   max-height: 310px;
   overflow: auto;
   padding: 6px;
-  scrollbar-width: thin;
+  scrollbar-width: auto;
+  scrollbar-color: auto;
 }
 .ov-mp-empty {
   padding: 22px 12px;
@@ -259,33 +262,6 @@
   outline-offset: 3px;
 }
 
-.ov-mp-scroll-frame {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  overflow: hidden;
-}
-.ov-mp-scroll-hints {
-  display: flex;
-  justify-content: space-between;
-  flex-shrink: 0;
-  padding: 3px 10px;
-  border-top: 1px solid var(--ov-border-subtle, #414753);
-}
-.ov-mp-scroll-hints button {
-  font: inherit;
-  font-size: 11px;
-  color: inherit;
-  background: none;
-  border: 0;
-  cursor: pointer;
-  padding: 3px;
-}
-.ov-mp-scroll-hints button:last-child {
-  margin-left: auto;
-}
-.ov-mp-scroll-hints[hidden],
-.ov-mp-scroll-hints button[hidden],
 .ov-mp-reset[hidden] {
   display: none;
 }
@@ -296,4 +272,32 @@
 
 .ov-mp-status:empty {
   display: none;
+}
+
+/* Explicit WebKit scrollbars stay visible on macOS when content overflows. */
+.ov-mp-list,
+.ov-mp-sublist {
+  overflow-x: hidden;
+  overflow-y: auto;
+  --ov-mp-scroll-thumb: #737b89;
+}
+[data-theme="light"] .ov-mp-list,
+[data-theme="light"] .ov-mp-sublist {
+  --ov-mp-scroll-thumb: #a0a6b0;
+}
+.ov-mp-list::-webkit-scrollbar,
+.ov-mp-sublist::-webkit-scrollbar {
+  width: 8px;
+}
+.ov-mp-list::-webkit-scrollbar-track,
+.ov-mp-sublist::-webkit-scrollbar-track {
+  background: transparent;
+}
+.ov-mp-list::-webkit-scrollbar-thumb,
+.ov-mp-sublist::-webkit-scrollbar-thumb {
+  background-color: var(--ov-mp-scroll-thumb);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+  border-radius: 8px;
+  min-height: 24px;
 }
