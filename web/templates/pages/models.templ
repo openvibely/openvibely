@@ -494,6 +494,7 @@ for _, agent := range modelOptions {
 					<div class="form-control mb-3">						<label class="label"><span class="label-text">Name</span></label>
 							<input type="text" id="model_name" name="name" class="input input-bordered" required placeholder="My Model"/>
 					</div>
+<div id="model_provider_auth_row">
 					<div class="form-control mb-3">
 						<label class="label"><span class="label-text">Provider</span></label>
 							<input type="hidden" id="model_provider_value" name="provider" value="anthropic"/>
@@ -557,6 +558,14 @@ for _, agent := range modelOptions {
 							<option value="oauth">OAuth</option>
 						</select>
 					</div>
+									<div id="custom_auth_type_field" class="form-control mb-3 hidden">
+										<label class="label"><span class="label-text">Authentication</span></label>
+										<select id="model_custom_auth_method" name="custom_auth_method" class="select select-bordered" onchange="toggleCustomProviderAuthFields(); scheduleAutoDiscoverOpenAICompatibleModels()">
+											<option value="api_key">API Key / None</option>
+											<option value="oauth">OAuth + signed requests</option>
+										</select>
+									</div>
+</div>
 					<div id="oauth_connection_field" class="form-control mb-3 hidden">
 						<label class="label"><span class="label-text">OAuth Account</span></label>
 						<select name="oauth_connection_id" id="model_oauth_connection_id" class="select select-bordered" onchange="updateOAuthConnectionAction()">
@@ -593,13 +602,6 @@ for _, agent := range modelOptions {
 								<label class="label"><span class="label-text-alt opacity-70">API root; requests go to base URL + /chat/completions.</span></label>
 							</div>
 						<div id="custom_provider_auth_fields" class="hidden">
-									<div class="form-control mb-3">
-										<label class="label"><span class="label-text">Authentication</span></label>
-										<select id="model_custom_auth_method" name="custom_auth_method" class="select select-bordered" onchange="toggleCustomProviderAuthFields(); scheduleAutoDiscoverOpenAICompatibleModels()">
-											<option value="api_key">API Key / None</option>
-											<option value="oauth">OAuth + signed requests</option>
-										</select>
-									</div>
 									<div id="custom_provider_request_fields" class="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
 										<div class="form-control md:col-span-2"><label class="label"><span class="label-text">Models URL</span></label><input id="model_custom_models_url" name="models_url" class="input input-bordered" placeholder="https://…/models" oninput="clearDiscoveredModelLimits(); scheduleAutoDiscoverOpenAICompatibleModels()"/><label class="label"><span class="label-text-alt opacity-70">Optional endpoint for automatic model discovery.</span></label></div>
 										<div class="form-control"><label class="label"><span class="label-text">Models array path</span></label><input id="model_custom_models_array_path" name="custom_models_array_path" class="input input-bordered" value="data" oninput="scheduleAutoDiscoverOpenAICompatibleModels()"/></div>
@@ -976,12 +978,22 @@ for _, agent := range modelOptions {
             #new_model_modal > .modal-box {
                 display: flex;
                 flex-direction: column;
-                height: calc(100dvh - 2rem);
+                height: min(46rem, calc(100dvh - 2rem));
                 max-height: calc(100dvh - 2rem);
                 overflow: hidden !important;
             }
             #new_model_modal #model-panel-model > .form-control { margin-bottom: 0.5rem; }
             #new_model_modal #model-panel-model .label { padding-top: 0.25rem; padding-bottom: 0.25rem; }
+            #model_provider_auth_row { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0 1rem; }
+            #model_provider_auth_row > .form-control { min-width: 0; margin-bottom: 0.5rem; }
+            #model_provider_auth_row select { width: 100%; }
+            @media (min-width: 641px) {
+                #model_provider_auth_row:has(> #anthropic_auth_type_field:not(.hidden)),
+                #model_provider_auth_row:has(> #openai_auth_type_field:not(.hidden)),
+                #model_provider_auth_row:has(> #custom_auth_type_field:not(.hidden)) {
+                    grid-template-columns: repeat(2, minmax(0, 1fr));
+                }
+            }
             #new_model_modal #model_form {
                 display: flex;
                 flex-direction: column;
@@ -2224,6 +2236,8 @@ for _, agent := range modelOptions {
 								document.getElementById('openai_compatible_info').classList.add('hidden');
 								document.getElementById('openai_compatible_fields').classList.add('hidden');
 							document.getElementById('custom_provider_auth_fields').classList.add('hidden');
+                        document.getElementById('custom_auth_type_field').classList.add('hidden');
+                        document.getElementById('model_custom_auth_method').disabled = true;
 							document.getElementById('model_oauth_setup').classList.add('hidden');
 							document.getElementById('model_base_url_field').classList.add('hidden');
 								document.getElementById('mixture_fields').classList.add('hidden');
@@ -2740,7 +2754,9 @@ for _, agent := range modelOptions {
 					var oauthFields = document.getElementById('custom_provider_oauth_fields');
 					var methodInput = document.getElementById('model_custom_auth_method');
 					var showCustom = canonicalProvider(provider) === 'openai_compatible' && preset === 'custom';
-					if (!showCustom) methodInput.value = 'api_key';
+					document.getElementById('custom_auth_type_field').classList.toggle('hidden', !showCustom);
+                    methodInput.disabled = !showCustom;
+                    if (!showCustom) methodInput.value = 'api_key';
 					var method = methodInput.value;
 					if (!showCustom || method !== 'oauth') resetModelOAuthSetup();
 					if (root) root.classList.toggle('hidden', !showCustom);

@@ -191,7 +191,7 @@ func TestBrowserFunctional_CustomOAuthBeforeCreate(t *testing.T) {
  if(f('model_submit_btn').textContent!=='Create'||f('model_id').checkValidity())throw Error('Create incorrectly allows missing model');
  if(f('model_oauth_setup').classList.contains('hidden'))throw Error('Cannot sign in before creating');
  var before=function(a,b){return !!(f(a).compareDocumentPosition(f(b)) & Node.DOCUMENT_POSITION_FOLLOWING);};
- if(!before('model_base_url','model_custom_auth_method') || !before('model_custom_auth_method','model_api_key') || !before('model_custom_models_url','model_id') || !before('model_custom_token_url','model_oauth_setup') || !before('model_oauth_setup','model_id'))throw Error('Connection settings must precede sign-in and model selection');
+ if(!before('model_provider','model_custom_auth_method') || !before('model_custom_auth_method','model_base_url') || !before('model_custom_auth_method','model_api_key') || !before('model_custom_models_url','model_id') || !before('model_custom_token_url','model_oauth_setup') || !before('model_oauth_setup','model_id'))throw Error('Connection settings must precede sign-in and model selection');
  await startCustomModelOAuth(f('model_oauth_setup').querySelector('button'));
  await new Promise(function(resolve){setTimeout(resolve,50);});
  if(f('model_id').value)throw Error('Model selected before manual completion');
@@ -375,6 +375,29 @@ func TestBrowserFunctional_ModelHelpLayout(t *testing.T) {
         document.getElementById('model_output_limit_field').classList.remove('hidden');
         for (var width of [360, 896]) {
             box.style.width=width+'px';
+            window.fetch=function(){return Promise.resolve({ok:true,json:function(){return Promise.resolve({models:[]});}});};
+            for(var provider of ['anthropic','openai','openai_compatible_custom','openai_compatible_vllm']) {
+                setModelSection('model');
+                document.getElementById('model_provider').value=provider;
+                toggleProviderFields();
+                cancelOpenAICompatibleDiscovery();
+                var row=document.getElementById('model_provider_auth_row').getBoundingClientRect();
+                var providerRect=document.getElementById('model_provider').getBoundingClientRect();
+                var authID={anthropic:'model_anthropic_auth_type',openai:'model_openai_auth_type',openai_compatible_custom:'model_custom_auth_method'}[provider];
+                if(authID) {
+                    var authRect=document.getElementById(authID).getBoundingClientRect();
+                    if(Math.abs(providerRect.top-authRect.top)>1 || providerRect.right>=authRect.left)
+                        throw Error('Provider and authentication are not side by side: '+provider);
+                } else if(Math.abs(providerRect.width-row.width)>1) throw Error('Provider leaves an empty slot without authentication');
+                var height=box.getBoundingClientRect().height;
+                for(var section of ['generation','execution','model']) {
+                    setModelSection(section);
+                    if(Math.abs(box.getBoundingClientRect().height-height)>1) throw Error('Modal resizes on tab switch');
+                }
+            }
+            document.getElementById('model_provider').value='anthropic';
+            toggleProviderFields();
+            document.getElementById('model_output_limit_field').classList.remove('hidden');
             for (var button of modal.querySelectorAll('.model-setting-help')) {
                 setModelSection(button.closest('[data-model-panel]').dataset.modelPanel);
                 var body=document.getElementById('model_section_body');
