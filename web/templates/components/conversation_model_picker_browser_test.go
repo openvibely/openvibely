@@ -39,8 +39,13 @@ func TestBrowserFunctional_ConversationModelPicker(t *testing.T) {
  assert(!panel.hidden,'picker opens');
  assert(panel.querySelectorAll('.ov-mp-provider').length===2,'provider groups');
  const providers=[...panel.querySelectorAll('.ov-mp-provider')];
+ const originalLeft=panel.getBoundingClientRect().left;
+ const originalTriggerRect=trigger.getBoundingClientRect.bind(trigger);
+ trigger.getBoundingClientRect=()=>{const r=originalTriggerRect();return {...r,left:r.left-2};};
  providers[0].dispatchEvent(new PointerEvent('pointerenter',{pointerType:'mouse'}));
  assert(!sub.hidden && sub.getAttribute('aria-label')===providers[0].dataset.provider+' models','hover opens provider submenu');
+ assert(panel.getBoundingClientRect().left===originalLeft,'provider submenu does not move the original picker');
+ trigger.getBoundingClientRect=originalTriggerRect;
  providers[0].click();
  assert(!sub.hidden,'click keeps hovered provider open');
  providers[1].dispatchEvent(new PointerEvent('pointerenter',{pointerType:'mouse'}));
