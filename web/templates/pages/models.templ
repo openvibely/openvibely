@@ -893,7 +893,6 @@ for _, agent := range modelOptions {
 					</div>
 </section>
 <section id="model-panel-generation" role="tabpanel" aria-labelledby="model-tab-generation" data-model-panel="generation" hidden>
-<h4 class="divider text-sm opacity-60 mt-4 mb-2 model-response-heading">Response settings</h4>
 							<div id="reasoning_effort_field" class="form-control mb-3 hidden">
 								<label class="label"><span id="reasoning_effort_label" class="label-text">Effort</span></label>
 								<select name="reasoning_effort" id="model_reasoning_effort" class="select select-bordered"></select>
@@ -908,7 +907,6 @@ for _, agent := range modelOptions {
 								<span class="label-text-alt opacity-70">Optional. Leave default unless you know you need more randomness.</span>
 							</label>
 						</div>
-					<h4 class="divider text-sm opacity-60 mt-4 mb-2">Context management</h4>
 					<input type="hidden" id="model_provider_context_window" name="provider_context_window" value="0"/>
 					<input type="hidden" id="model_provider_max_output_tokens" name="provider_max_output_tokens" value="0"/>
 					<div class="grid grid-cols-2 gap-3">
@@ -930,7 +928,6 @@ for _, agent := range modelOptions {
 					</div>
 </section>
 <section id="model-panel-execution" role="tabpanel" aria-labelledby="model-tab-execution" data-model-panel="execution" hidden>
-<h4 class="divider text-sm opacity-60 mt-4 mb-2">Defaults</h4>
 						<div class="form-control mt-3">
 						<label class="label cursor-pointer justify-start gap-2">
 							<input type="checkbox" id="model_is_default" name="is_default" class="checkbox checkbox-sm"/>
@@ -946,7 +943,6 @@ for _, agent := range modelOptions {
 							<span class="label-text-alt opacity-70">When enabled, tasks created with this model automatically move to "active" status</span>
 						</label>
 					</div>
-					<h4 class="divider text-sm opacity-60 mt-4 mb-2">Worker limits</h4>
 					<div class="grid grid-cols-2 gap-3">
 						<div class="form-control">
 							@modelSettingLabel("Max Workers", "model_max_workers_mode", "model_workers_help", "Choose a custom limit to restrict concurrent workers for this model.")
@@ -1011,9 +1007,6 @@ for _, agent := range modelOptions {
             #new_model_modal .modal-action, #new_model_modal #model_form_error { flex-shrink: 0; }
             #new_model_modal .modal-action { margin-top: 1rem; }
 
-            #model-panel-generation:not(:has(#reasoning_effort_field:not(.hidden))):not(:has(#model_temperature_field:not(.hidden))) .model-response-heading {
-                display: none;
-            }
             #new_model_modal .model-numeric-input {
                 width: 12rem;
                 max-width: 100%;
