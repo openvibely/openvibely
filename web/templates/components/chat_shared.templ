@@ -1554,6 +1554,8 @@ templ chatComposerActionButton(stopEndpoint string, isRunning bool) {
 
 // ChatInputForm renders a shared chat input form with attachment support.
 templ ChatInputForm(config ChatInputFormConfig) {
+	@templ.Raw("<style>" + conversationModelPickerCSS + "</style><script>" + conversationModelPickerJS + "</script>")
+
 	<div class="chat-input-shadow-gutter w-full min-w-0 max-w-full mt-6">
 		<form
 			id={ config.FormID }
@@ -1588,6 +1590,7 @@ templ ChatInputForm(config ChatInputFormConfig) {
 				</div>
 			</div>
 			if config.ShowModelSelector {
+				<input type="hidden" name="reasoning_effort" value=""/>
 				<input type="hidden" id={ config.FormID + "-agent-id" } name="agent_id" value={ selectedAgentOrAuto(config.SelectedAgentID) }/>
 			}
 			if config.ShowModeSelector {
@@ -1645,7 +1648,7 @@ templ ChatInputForm(config ChatInputFormConfig) {
 								<li data-value="auto">Auto</li>
 								<li data-value="default">Default</li>
 								for _, agent := range config.Agents {
-									<li data-value={ agent.ID }>{ agent.Name } ({ agent.Model })</li>
+									<li data-value={ agent.ID } data-picker-name={ agent.Name } data-picker-model={ agent.Model } data-picker-provider={ pickerProvider(agent) } data-picker-efforts={ pickerEfforts(agent) } data-picker-default={ pickerDefaultEffort(agent) }>{ agent.Name } ({ agent.Model })</li>
 								}
 							</ul>
 						</div>
@@ -1852,6 +1855,7 @@ templ ChatInputForm(config ChatInputFormConfig) {
 			var _csActiveBtn = null;
 
 			function _csClose() {
+				if (window.ovModelPicker) window.ovModelPicker.close(false);
 				if (_csActiveBtn) {
 					_csActiveBtn.setAttribute('aria-expanded', 'false');
 					_csActiveBtn = null;
@@ -1862,6 +1866,10 @@ templ ChatInputForm(config ChatInputFormConfig) {
 
 			function _csOpen(btn) {
 				_csClose();
+				if (btn.classList.contains("chat-model-select") && window.ovModelPicker) {
+					window.ovModelPicker.open(btn);
+					return;
+				}
 				var optList = btn.parentElement && btn.parentElement.querySelector('.chat-custom-select-options');
 				if (!optList) return;
 				var currentValue = btn.dataset.currentValue || '';
@@ -1972,7 +1980,7 @@ templ ChatInputForm(config ChatInputFormConfig) {
 				if (li.dataset.value === currentValue) matchingLi = li;
 			});
 			var firstLi = optList.querySelector('li[data-value]');
-			var label = matchingLi ? matchingLi.textContent.trim() : (firstLi ? firstLi.textContent.trim() : '');
+			var label = matchingLi ? (matchingLi.dataset.pickerName || matchingLi.textContent.trim()) : (firstLi ? firstLi.textContent.trim() : '');
 			var labelEl = btn.querySelector('.chat-custom-select-label');
 			if (labelEl) labelEl.textContent = label;
 			if (!btn._chatCustomSelectBound) {
@@ -1999,7 +2007,7 @@ templ ChatInputForm(config ChatInputFormConfig) {
 				if (li.dataset.value === value) matchingLi = li;
 			});
 			if (!matchingLi) return;
-			var label = matchingLi.textContent.trim();
+			var label = (matchingLi.dataset.pickerName || matchingLi.textContent.trim());
 			var labelEl = btn.querySelector('.chat-custom-select-label');
 			if (labelEl) labelEl.textContent = label;
 			btn.dataset.currentValue = value;
@@ -2620,7 +2628,7 @@ templ ChatInputForm(config ChatInputFormConfig) {
 						}
 					}
 				}
-				var modelSelectEndpoint = form.getAttribute('data-model-select-endpoint');
+				if (window.ovModelPicker) window.ovModelPicker.init(agentSelect);
 				agentSelect.addEventListener('chat-select-change', function(e) {
 					agentInput.value = e.detail.value;
 					if (modelStorageKey) {
@@ -2630,11 +2638,7 @@ templ ChatInputForm(config ChatInputFormConfig) {
 					// ProjectID, which task threads omit); persist the
 					// selection server-side immediately so navigating away
 					// and back does not silently revert to the task default.
-					if (modelSelectEndpoint) {
-						var body = new URLSearchParams();
-						body.set('agent_id', e.detail.value);
-						fetch(modelSelectEndpoint, { method: 'POST', body: body }).catch(function() {});
-					}
+					if (window.ovModelPicker) window.ovModelPicker.changed(agentSelect);
 				});
 			}
 

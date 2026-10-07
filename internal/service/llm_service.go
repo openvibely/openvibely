@@ -1086,6 +1086,11 @@ func (s *LLMService) ExecuteTaskWithAgent(ctx context.Context, task models.Task,
 }
 
 func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task, agent models.LLMConfig) (*models.Execution, llmcontracts.ChatContext, error) {
+	if s.taskRepo != nil {
+		if err := s.taskRepo.ApplyModelEffort(ctx, task.ID, &agent); err != nil {
+			return nil, llmcontracts.ChatContext{}, err
+		}
+	}
 	applog.Infof("[agent-svc] ExecuteTaskWithAgent task=%s agent=%s model=%s", task.ID, agent.Name, agent.Model)
 	finalizeCtx := context.Background()
 

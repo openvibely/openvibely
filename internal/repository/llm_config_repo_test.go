@@ -1180,7 +1180,7 @@ func TestLLMConfigRepo_ListPickerOptionsUsesBoundedProjection(t *testing.T) {
 		t.Fatalf("picker len = %d, full len = %d", len(picker), len(full))
 	}
 	for i := range full {
-		if picker[i].ID != full[i].ID || picker[i].Name != full[i].Name || picker[i].Model != full[i].Model {
+		if picker[i].ID != full[i].ID || picker[i].Name != full[i].Name || picker[i].Model != full[i].Model || picker[i].Provider != full[i].Provider || picker[i].PresetSlug != full[i].PresetSlug || picker[i].ReasoningEffort != full[i].ReasoningEffort || picker[i].IsDefault != full[i].IsDefault {
 			t.Fatalf("picker[%d] = %#v, full[%d] = %#v", i, picker[i], i, full[i])
 		}
 	}
@@ -1193,7 +1193,7 @@ func TestLLMConfigRepo_ListPickerOptionsUsesBoundedProjection(t *testing.T) {
 	if custom.Name != "Alpha Custom" || custom.Model != "alpha-model" {
 		t.Fatalf("picker label fields not preserved: %#v", custom)
 	}
-	if custom.Provider != "" || custom.APIKey != "" || custom.OAuthAccessToken != "" || custom.OAuthRefreshToken != "" ||
+	if custom.APIKey != "" || custom.OAuthAccessToken != "" || custom.OAuthRefreshToken != "" ||
 		custom.OAuthClientSecret != "" || custom.BaseURL != "" || custom.ExtraHeadersJSON != "" || custom.ExtraBodyJSON != "" ||
 		custom.CustomAuthConfigJSON != "" || custom.CustomAuthStateJSON != "" || custom.MixtureConfigJSON != "" {
 		t.Fatalf("picker materialized execution/edit-only fields: %#v", custom)
@@ -1208,7 +1208,7 @@ func TestLLMConfigRepo_ListPickerOptionsUsesBoundedProjection(t *testing.T) {
 	if !strings.Contains(projection, "select id, name, model") {
 		t.Fatalf("picker projection = %q, want id/name/model in %s", projection, statements[0])
 	}
-	for _, forbidden := range []string{"provider", "api_key", "oauth_access_token", "oauth_refresh_token", "oauth_client_secret", "oauth_authorize_url", "oauth_token_url", "ollama_base_url", "base_url", "models_url", "extra_headers_json", "extra_body_json", "custom_auth_config_json", "custom_auth_state_json", "mixture_config_json"} {
+	for _, forbidden := range []string{"api_key", "oauth_access_token", "oauth_refresh_token", "oauth_client_secret", "oauth_authorize_url", "oauth_token_url", "ollama_base_url", "base_url", "models_url", "extra_headers_json", "extra_body_json", "custom_auth_config_json", "custom_auth_state_json", "mixture_config_json"} {
 		if strings.Contains(projection, forbidden) {
 			t.Fatalf("picker query selected forbidden column %q: %s", forbidden, statements[0])
 		}

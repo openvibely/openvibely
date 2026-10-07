@@ -1703,7 +1703,13 @@ func surfaceForThreadInput(input models.ThreadInput) chatcontrol.Surface {
 	}
 }
 
-func (h *Handler) resolveQueuedInputAgent(ctx context.Context, input models.ThreadInput) (*models.LLMConfig, bool, error) {
+func (h *Handler) resolveQueuedInputAgent(ctx context.Context, input models.ThreadInput) (selected *models.LLMConfig, unavailable bool, resultErr error) {
+	defer func() {
+		if selected != nil && resultErr == nil && selected.ID == input.AgentConfigID && models.ValidConversationEffort(*selected, input.ReasoningEffort) {
+			selected.ReasoningEffort = input.ReasoningEffort
+		}
+	}()
+
 	if strings.TrimSpace(input.AgentConfigID) != "" {
 		agent, err := h.llmConfigRepo.GetByID(ctx, input.AgentConfigID)
 		if err != nil || agent != nil {
@@ -1720,7 +1726,13 @@ func (h *Handler) resolveQueuedInputAgent(ctx context.Context, input models.Thre
 	return agent, agent == nil, nil
 }
 
-func (h *Handler) resolveTaskThreadExecutionAgent(ctx context.Context, task *models.Task) (*models.LLMConfig, bool, error) {
+func (h *Handler) resolveTaskThreadExecutionAgent(ctx context.Context, task *models.Task) (selected *models.LLMConfig, unavailable bool, resultErr error) {
+	defer func() {
+		if selected != nil && task != nil && h.taskRepo != nil && resultErr == nil {
+			resultErr = h.taskRepo.ApplyModelEffort(ctx, task.ID, selected)
+		}
+	}()
+
 	if task == nil || h.llmConfigRepo == nil {
 		return nil, true, nil
 	}
