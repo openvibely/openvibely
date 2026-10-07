@@ -1198,6 +1198,81 @@ func TestHandler_GetTaskChanges_UsesMissingWorktreeFallback(t *testing.T) {
 	}
 }
 
+// Remove the worktree after the handler's initial Stat, at the service read
+// boundary. This reproduces cleanup winning the lifecycle lock before a reader.
+func TestHandler_ChangesCleanupDuringReadUsesSavedDiff(t *testing.T) {
+	for _, status := range []models.TaskStatus{models.StatusRunning, models.StatusQueued} {
+		for _, reader := range []string{"summary", "file"} {
+			t.Run(string(status)+"/"+reader, func(t *testing.T) {
+				h, e, _, db := setupTestHandlerWithDB(t)
+				defer db.Close()
+				ctx := context.Background()
+				repoDir := createHandlerTestGitRepo(t)
+				target := gitCurrentBranch(t, repoDir)
+				branch := "task/cleanup-during-read"
+				worktree := filepath.Join(t.TempDir(), "worktree")
+				runGit(t, repoDir, "worktree", "add", "-b", branch, worktree, target)
+				project := &models.Project{Name: "Cleanup during read", RepoPath: repoDir}
+				if err := h.projectRepo.Create(ctx, project); err != nil {
+					t.Fatal(err)
+				}
+				task := &models.Task{ProjectID: project.ID, Title: "Cleanup during read", Category: models.CategoryActive, Status: status, WorktreePath: worktree, WorktreeBranch: branch, MergeTargetBranch: target, MergeStatus: models.MergeStatusPending}
+				if err := h.taskRepo.Create(ctx, task); err != nil {
+					t.Fatal(err)
+				}
+				execution := &models.Execution{TaskID: task.ID, AgentConfigID: firstAgentID(t, h), Status: models.ExecCompleted, PromptSent: "saved output"}
+				if err := h.execRepo.Create(ctx, execution); err != nil {
+					t.Fatal(err)
+				}
+				saved := "diff --git a/saved.txt b/saved.txt\nnew file mode 100644\n--- /dev/null\n+++ b/saved.txt\n@@ -0,0 +1 @@\n+saved task output\n"
+				if err := h.execRepo.UpdateDiffOutput(ctx, execution.ID, saved); err != nil {
+					t.Fatal(err)
+				}
+				realGit, err := exec.LookPath("git")
+				if err != nil {
+					t.Fatal(err)
+				}
+				wrapperDir := t.TempDir()
+				wrapper := `#!/bin/sh
+if [ "$1" = "rev-parse" ] && [ "$2" = "--git-common-dir" ] && [ -d "$TEST_CLEANUP_WORKTREE" ]; then
+ "$TEST_REAL_GIT" -C "$TEST_CLEANUP_REPO" worktree remove --force "$TEST_CLEANUP_WORKTREE" || exit 1
+ "$TEST_REAL_GIT" -C "$TEST_CLEANUP_REPO" branch -D "$TEST_CLEANUP_BRANCH" || exit 1
+fi
+exec "$TEST_REAL_GIT" "$@"
+`
+				if err := os.WriteFile(filepath.Join(wrapperDir, "git"), []byte(wrapper), 0755); err != nil {
+					t.Fatal(err)
+				}
+				t.Setenv("TEST_REAL_GIT", realGit)
+				t.Setenv("TEST_CLEANUP_REPO", repoDir)
+				t.Setenv("TEST_CLEANUP_WORKTREE", worktree)
+				t.Setenv("TEST_CLEANUP_BRANCH", branch)
+				t.Setenv("PATH", wrapperDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+				if reader == "summary" {
+					rec := httptest.NewRecorder()
+					c := e.NewContext(httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID+"/changes/summary?project_id="+project.ID, nil), rec)
+					c.SetParamNames("taskId")
+					c.SetParamValues(task.ID)
+					if err := h.GetTaskChangesSummary(c); err != nil {
+						t.Fatal(err)
+					}
+					if !strings.Contains(rec.Body.String(), `"files":1`) || !strings.Contains(rec.Body.String(), `"insertions":1`) {
+						t.Fatalf("lost saved diff: %s", rec.Body.String())
+					}
+				} else {
+					meta, ok := h.resolveTaskChangesFileMeta(ctx, task, 0)
+					if !ok || meta.File.Path != "saved.txt" {
+						t.Fatalf("lost saved file: %+v, ok=%v", meta, ok)
+					}
+				}
+				if _, err := os.Stat(worktree); !os.IsNotExist(err) {
+					t.Fatalf("cleanup did not run: %v", err)
+				}
+			})
+		}
+	}
+}
+
 func renderTaskChangesEndpoint(t *testing.T, h *Handler, e *echo.Echo, method, path, taskID string) string {
 	t.Helper()
 	req := httptest.NewRequest(method, path, nil)
