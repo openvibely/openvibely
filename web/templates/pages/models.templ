@@ -916,22 +916,16 @@ for _, agent := range modelOptions {
 					<input type="hidden" id="model_provider_max_output_tokens" name="provider_max_output_tokens" value="0"/>
 					<div class="grid grid-cols-2 gap-3">
 						<div class="form-control">
-							<label class="label"><span class="label-text">Provider context (tokens)</span></label>
-							<input type="text" id="model_provider_context_display" class="input input-bordered input-disabled" readonly placeholder="From provider or discovery"/>
-							<label class="label"><span id="model_context_source" class="label-text-alt opacity-70">Reported by the server or built-in catalog</span></label>
-						</div>
-						<div class="form-control">
 							<label class="label"><span class="label-text">Context window (tokens)</span></label>
 							<input type="number" min="1" step="1" id="model_context_window_cap" name="context_window" class="input input-bordered" value="200000" required onchange="updateContextLimitInputs(Number(document.getElementById('model_provider_context_window').value), Number(document.getElementById('model_provider_max_output_tokens').value), true)"/>
+							<p id="model_provider_context_display" class="text-sm opacity-70 mt-2">Reported context limit: Not reported</p>
+							<p id="model_context_source" class="text-sm opacity-70">Reported by the server or built-in catalog</p>
 							<label class="label"><span class="label-text-alt opacity-70">Use the reported limit, or enter the window configured on your server.</span></label>
-						</div>
-						<div class="form-control">
-							<label class="label"><span class="label-text">Provider max output (tokens)</span></label>
-							<input type="text" id="model_provider_max_output_display" class="input input-bordered input-disabled" readonly placeholder="From provider or discovery"/>
 						</div>
 						<div id="model_output_limit_field" class="form-control">
 							<label class="label"><span class="label-text">Max output (tokens)</span></label>
 							<input type="number" min="1" step="1" id="model_default_max_tokens" name="default_max_tokens" class="input input-bordered" value="16384" onchange="updateContextLimitInputs(Number(document.getElementById('model_provider_context_window').value), Number(document.getElementById('model_provider_max_output_tokens').value), true)"/>
+							<p id="model_provider_max_output_display" class="text-sm opacity-70 mt-2">Reported output limit: Not reported</p>
 							<label class="label"><span class="label-text-alt opacity-70">Defaults leave room for input. Below 32,768 context tokens, output is limited to one quarter of the window.</span></label>
 						</div>
 					</div>
@@ -1883,14 +1877,14 @@ for _, agent := range modelOptions {
 
 						function formatContextLimitTokens(value) {
 							var n = parseInt(value, 10);
-							return n > 0 ? n.toLocaleString() : '';
+							return n > 0 ? n.toLocaleString() + ' tokens' : 'Not reported';
 						}
 
 						function updateProviderContextDisplays() {
 							var providerCtx = parseInt(document.getElementById('model_provider_context_window').value, 10) || 0;
 							var providerOut = parseInt(document.getElementById('model_provider_max_output_tokens').value, 10) || 0;
-							document.getElementById('model_provider_context_display').value = formatContextLimitTokens(providerCtx);
-							document.getElementById('model_provider_max_output_display').value = formatContextLimitTokens(providerOut);
+							document.getElementById('model_provider_context_display').textContent = 'Reported context limit: ' + formatContextLimitTokens(providerCtx);
+							document.getElementById('model_provider_max_output_display').textContent = 'Reported output limit: ' + formatContextLimitTokens(providerOut);
 						}
 
 						function contextLimitDefaults() {
