@@ -42,7 +42,7 @@ func TestBrowserFunctional_ConversationModelPicker(t *testing.T) {
  assert(!sub.hidden && sub.querySelectorAll('.ov-mp-pick').length===12,'provider submenu');
  assert(sub.querySelector('.ov-mp-subhead').hidden,'no redundant submenu heading');
  const row=sub.querySelector('.ov-mp-row');
- assert(row.firstElementChild.classList.contains('ov-mp-pick')&&row.children[1].classList.contains('ov-mp-star')&&row.lastElementChild.classList.contains('ov-mp-check'),'model first, favorite on right');
+ assert(row.firstElementChild.classList.contains('ov-mp-pick')&&row.firstElementChild.firstElementChild.classList.contains('ov-mp-check')&&row.lastElementChild.classList.contains('ov-mp-star'),'checkmark on left, favorite on right');
  row.dispatchEvent(new PointerEvent('pointermove'));
  assert(row.hasAttribute('data-picker-active'),'hover activates model row');
  const next=row.nextElementSibling;next.dispatchEvent(new PointerEvent('pointermove'));
@@ -67,6 +67,15 @@ func TestBrowserFunctional_ConversationModelPicker(t *testing.T) {
  panel.querySelector('.ov-mp-reset').click();
  assert(document.querySelector('[name=reasoning_effort]').value==='','restore model default');
  assert(panel.getBoundingClientRect().left>=0 && panel.getBoundingClientRect().right<=innerWidth,'panel fits');
+ search.value='';search.dispatchEvent(new Event('input'));await wait();
+ const list=panel.querySelector('.ov-mp-list'),hints=panel.querySelector('.ov-mp-scroll-hints');
+ assert(hints.hidden,'no scroll hints when models fit');
+ list.style.maxHeight='75px';await wait();
+ assert(!hints.hidden&&!hints.lastElementChild.hidden,'visible indication when models overflow');
+ hints.lastElementChild.click();await new Promise(r=>setTimeout(r,350));
+ assert(list.scrollTop>0&&!hints.firstElementChild.hidden,'scroll affordance scrolls list and offers way back');
+ assert(!panel.querySelector('.ov-mp-effort').hidden,'effort stays accessible while list scrolls');
+ list.style.maxHeight='';await wait();
  document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));
  assert(panel.hidden,'escape closes');
  document.body.setAttribute('data-test-result','pass');
