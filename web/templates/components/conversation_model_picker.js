@@ -196,9 +196,13 @@
         bubbles: true,
       }),
     );
-    closeSub();
     render();
-    search.focus({ preventScroll: true });
+    renderSub();
+    if (provider) {
+      sublist
+        .querySelector('[data-model="' + CSS.escape(m.id) + '"]')
+        ?.focus({ preventScroll: true });
+    } else search.focus({ preventScroll: true });
   }
   function row(m, target) {
     const r = el("div", "ov-mp-row");
@@ -456,11 +460,16 @@
       init(btn);
       active = btn;
       favorites = read(favoritesKey);
-      provider = null;
+      const selected = current(btn);
+      provider =
+        selected?.provider && !favorites[selected.id]
+          ? selected.provider
+          : null;
       search.value = "";
       panel.hidden = false;
       btn.setAttribute("aria-expanded", "true");
       render();
+      renderSub();
       search.focus({ preventScroll: true });
       if (state(btn).error) state(btn).ready = load(btn);
     },

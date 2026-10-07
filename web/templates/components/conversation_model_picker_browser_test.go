@@ -94,6 +94,15 @@ func TestBrowserFunctional_TaskModelPickerPersistence(t *testing.T) {
  const slider=panel.querySelector('input[type=range]');slider.value='2';slider.dispatchEvent(new Event('input'));slider.dispatchEvent(new Event('change'));await trigger._ovModelState.pending;
  assert(stored.b==='high'&&stored.a==='high','persist override for selected configuration');
  choose('c');await trigger._ovModelState.ready;assert(panel.querySelector('.ov-mp-effort').hidden&&effort.value==='','unsupported model has no slider or stale effort');
+ // Selecting from a provider keeps the selected row visible even without effort controls.
+ const search=panel.querySelector('input');search.value='';search.dispatchEvent(new Event('input'));
+ [...panel.querySelectorAll('.ov-mp-provider')].find(b=>b.dataset.provider==='Ollama').click();
+ const sub=document.getElementById('conversation-provider-models');
+ sub.querySelector('[data-model=c]').click();await trigger._ovModelState.ready;
+ assert(!sub.hidden && sub.querySelector('[data-model=c]').getAttribute('aria-pressed')==='true','selected model remains visible without effort');
+ assert(sub.querySelector('[data-model=c] .ov-mp-check').textContent==='✓','selected checkmark without effort');
+ window.ovModelPicker.close(false);trigger.click();
+ assert(!sub.hidden && sub.querySelector('[data-model=c]').getAttribute('aria-pressed')==='true','reopen selected provider');
  assert(panel.getBoundingClientRect().right<=innerWidth,'small viewport bounds');
  document.body.dataset.testResult='pass';
  }catch(e){document.body.dataset.testResult='fail';document.body.dataset.testError=e.stack;document.getElementById('browser-result').textContent=String(e)}})();
