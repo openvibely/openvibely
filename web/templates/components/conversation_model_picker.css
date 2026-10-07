@@ -1,0 +1,203 @@
+.ov-model-picker,
+.ov-model-submenu {
+  position: fixed;
+  z-index: 10010;
+  box-sizing: border-box;
+  background: var(--ov-menu-surface, #1e242c);
+  color: var(--ov-text-primary, inherit);
+  border: 1px solid var(--ov-border-subtle, #414753);
+  border-radius: 12px;
+  box-shadow: 0 12px 40px #0004;
+  font-size: 13px;
+  overflow: hidden;
+}
+.ov-model-picker {
+  width: 350px;
+  max-width: calc(100vw - 16px);
+  display: flex;
+  flex-direction: column;
+}
+.ov-model-picker[hidden],
+.ov-model-submenu[hidden],
+.ov-mp-effort[hidden] {
+  display: none !important;
+}
+.ov-mp-search {
+  display: flex;
+  align-items: center;
+  border-bottom: 1px solid var(--ov-border-subtle, #414753);
+  padding: 12px;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.ov-mp-search input {
+  min-width: 0;
+  width: 100%;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  outline: none;
+}
+.ov-mp-list {
+  overflow: auto;
+  max-height: 370px;
+  padding: 6px;
+  min-height: 0;
+  scrollbar-width: thin;
+}
+.ov-mp-row {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  border-radius: 7px;
+}
+.ov-mp-row:hover,
+.ov-mp-provider:hover,
+.ov-model-picker button:focus-visible,
+.ov-model-submenu button:focus-visible {
+  background: var(--ov-menu-hover, #303846);
+}
+.ov-mp-row[data-selected="true"] {
+  background: rgba(128, 120, 255, 0.14);
+}
+.ov-mp-pick,
+.ov-mp-provider,
+.ov-mp-star,
+.ov-mp-clear,
+.ov-mp-back,
+.ov-mp-reset {
+  border: 0;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+}
+.ov-mp-pick {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 7px 10px;
+  border-radius: 7px;
+}
+.ov-mp-copy {
+  min-width: 0;
+  flex: 1;
+}
+.ov-mp-name {
+  display: block;
+  font-weight: 550;
+}
+.ov-mp-detail {
+  display: block;
+  font-size: 11px;
+  opacity: 0.65;
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ov-mp-star {
+  padding: 6px 8px;
+  font-size: 18px;
+  color: #939aaa;
+}
+.ov-mp-star[aria-pressed="true"] {
+  color: #aba5ff;
+}
+.ov-mp-check {
+  width: 15px;
+  color: #a9a2ff;
+  flex-shrink: 0;
+}
+.ov-mp-heading {
+  font-size: 10px;
+  opacity: 0.6;
+  letter-spacing: 0.08em;
+  padding: 9px 9px 4px;
+}
+.ov-mp-provider {
+  width: 100%;
+  padding: 8px 10px;
+  display: flex;
+  justify-content: space-between;
+  text-align: left;
+  border-radius: 7px;
+}
+.ov-mp-provider[aria-expanded="true"] {
+  background: rgba(128, 120, 255, 0.14);
+}
+.ov-mp-rule {
+  border-top: 1px solid var(--ov-border-subtle, #414753);
+  margin: 6px 4px;
+}
+.ov-mp-effort {
+  padding: 12px 14px;
+  border-top: 1px solid var(--ov-border-subtle, #414753);
+  flex-shrink: 0;
+}
+.ov-mp-effort-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+}
+.ov-mp-effort-model {
+  font-size: 11px;
+  opacity: 0.65;
+  margin: 3px 0 8px;
+}
+.ov-mp-effort input {
+  display: block;
+  width: 100%;
+  accent-color: #938aff;
+  margin: 9px 0;
+  cursor: pointer;
+}
+.ov-mp-ticks {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+  gap: 3px;
+}
+.ov-mp-reset {
+  font-size: 11px;
+  text-decoration: underline;
+  opacity: 0.7;
+  margin-top: 8px;
+  padding: 0;
+}
+.ov-mp-status {
+  font-size: 11px;
+  padding: 0 12px 8px;
+  color: var(--ov-text-primary, inherit);
+}
+.ov-model-submenu {
+  width: 300px;
+  max-width: calc(100vw - 16px);
+}
+.ov-mp-subhead {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--ov-border-subtle, #414753);
+}
+.ov-mp-sublist {
+  max-height: 310px;
+  overflow: auto;
+  padding: 6px;
+  scrollbar-width: thin;
+}
+.ov-mp-empty {
+  padding: 22px 12px;
+  opacity: 0.65;
+  text-align: center;
+}
+.ov-model-picker button:focus-visible,
+.ov-model-submenu button:focus-visible {
+  outline: 2px solid #938aff;
+  outline-offset: -2px;
+}

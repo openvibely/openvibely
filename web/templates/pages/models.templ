@@ -1367,16 +1367,16 @@ for _, agent := range modelOptions {
 					reasoningField.classList.remove('hidden');
 					reasoningSelect.disabled = false;
 					if (provider === 'anthropic') {
-						reasoningLabel.textContent = 'Claude Effort';
+						reasoningLabel.textContent = 'Default Claude effort';
 						reasoningHelp.dataset.modelSettingHelp = 'Matches Claude Code effort: low, medium, high, xhigh, or max. Availability varies by model. Blank saved configs keep the provider default.';
 					} else if (isOpenAICompatibleProvider(provider) && (model || '').trim().toLowerCase() === 'kimi-k3') {
-						reasoningLabel.textContent = 'Kimi Reasoning Effort';
+						reasoningLabel.textContent = 'Default Kimi reasoning effort';
 						reasoningHelp.dataset.modelSettingHelp = 'Controls Kimi K3 reasoning effort: low, high, or max.';
 					} else if (isOpenAICompatibleProvider(provider) && (model || '').trim().toLowerCase() === 'glm-5.2') {
-						reasoningLabel.textContent = 'GLM Reasoning Effort';
+						reasoningLabel.textContent = 'Default GLM reasoning effort';
 						reasoningHelp.dataset.modelSettingHelp = 'Controls GLM 5.2 reasoning effort from none through max.';
 					} else {
-						reasoningLabel.textContent = 'Codex Reasoning Effort';
+						reasoningLabel.textContent = 'Default reasoning effort';
 						reasoningHelp.dataset.modelSettingHelp = 'Matches Codex reasoning effort for supported OpenAI models.';
 					}
 					reasoningHelp.setAttribute('aria-label', reasoningLabel.textContent + ': ' + reasoningHelp.dataset.modelSettingHelp);

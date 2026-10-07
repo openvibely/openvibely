@@ -165,6 +165,10 @@ func (h *Handler) ChatSend(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 
+	if err := h.applyConversationEffort(c, "", agent); err != nil {
+		return err
+	}
+
 	// Get project from query param or use default
 	projectID, err := h.getCurrentProjectID(c)
 	if err != nil || projectID == "" {
@@ -191,6 +195,7 @@ func (h *Handler) ChatSend(c echo.Context) error {
 			ProjectID:           projectID,
 			RunExecutionID:      activeChatExec.ID,
 			AgentConfigID:       agent.ID,
+			ReasoningEffort:     agent.ReasoningEffort,
 			InputMode:           models.ThreadInputModeQueued,
 			InputStatus:         models.ThreadInputPending,
 			Content:             message,

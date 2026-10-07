@@ -54,10 +54,10 @@ const llmConfigCardColumns = `id, name, provider, model, reasoning_effort,
 			COALESCE((SELECT ` + oauthConnectionAccountLabelSQL + ` FROM oauth_connections c WHERE c.id = oauth_connection_id), '')`
 
 // llmConfigPickerColumns is the render-only model picker projection for Chat
-// and Agent dialogs. It deliberately excludes provider identity, credentials,
+// and task/Agent dialogs. It includes grouping and effort metadata but excludes credentials,
 // endpoint settings, request JSON, custom-auth state, worker fields, timestamps,
 // and mixture definitions.
-const llmConfigPickerColumns = `id, name, model`
+const llmConfigPickerColumns = `id, name, model, provider, preset_slug, reasoning_effort, is_default`
 
 // llmConfigChatSelectionColumns is the compact API Chat auto-selection and
 // prompt-context projection. It preserves model identity, provider display, and
@@ -516,7 +516,7 @@ func (r *LLMConfigRepo) ListPickerOptions(ctx context.Context) ([]models.LLMConf
 	var configs []models.LLMConfig
 	for rows.Next() {
 		var a models.LLMConfig
-		if err := rows.Scan(&a.ID, &a.Name, &a.Model); err != nil {
+		if err := rows.Scan(&a.ID, &a.Name, &a.Model, &a.Provider, &a.PresetSlug, &a.ReasoningEffort, &a.IsDefault); err != nil {
 			return nil, fmt.Errorf("scanning model picker option: %w", err)
 		}
 		configs = append(configs, a)

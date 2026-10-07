@@ -896,7 +896,7 @@ func (h *Handler) NewTask(c echo.Context) error {
 	if project == nil {
 		return echo.NewHTTPError(http.StatusNotFound, "project not found")
 	}
-	agents, err := h.llmConfigRepo.ListBadgeOptions(ctx)
+	agents, err := h.llmConfigRepo.ListPickerOptions(ctx)
 	if err != nil {
 		return err
 	}
@@ -1196,7 +1196,7 @@ func (h *Handler) loadTaskDetailContentData(ctx context.Context, taskID string) 
 
 	executionMetrics, _ := h.execRepo.GetTaskExecutionMetrics(ctx, taskID)
 	schedules, _ := h.scheduleRepo.ListByTask(ctx, taskID)
-	agents, _ := h.llmConfigRepo.ListBadgeOptions(ctx)
+	agents, _ := h.llmConfigRepo.ListPickerOptions(ctx)
 	attachments, _ := h.attachmentRepo.ListByTask(ctx, taskID)
 	agentDefs := h.listTaskFormAgentDefinitions(ctx, task.ProjectID, task.AgentDefinitionID)
 
@@ -3259,6 +3259,9 @@ func (h *Handler) persistTaskThreadModel(c echo.Context, task *models.Task) erro
 		if selErr != nil || agent == nil {
 			return echo.NewHTTPError(http.StatusBadRequest, "invalid model selection")
 		}
+		if err := h.applyConversationEffort(c, task.ID, agent); err != nil {
+			return err
+		}
 		if task.AgentID == nil || *task.AgentID != agent.ID {
 			if updErr := h.taskRepo.UpdateAgentID(c.Request().Context(), task.ID, agent.ID); updErr != nil {
 				applog.Infof("[handler] TaskThreadSelectModel error persisting selected model task=%s agent=%s: %v", task.ID, agent.ID, updErr)
@@ -3357,6 +3360,10 @@ func (h *Handler) TaskThreadSend(c echo.Context) error {
 		if agent == nil {
 			return echo.NewHTTPError(http.StatusBadRequest, "no agent available")
 		}
+	}
+
+	if err := h.applyConversationEffort(c, task.ID, agent); err != nil {
+		return err
 	}
 
 	// An explicit composer model selection (a concrete model ID, or an explicit
@@ -3576,7 +3583,7 @@ func (h *Handler) GetTaskThread(c echo.Context) error {
 		executions = []models.Execution{}
 		hasEarlier = false
 	}
-	agents, _ := h.llmConfigRepo.ListBadgeOptions(ctx)
+	agents, _ := h.llmConfigRepo.ListPickerOptions(ctx)
 
 	chatAttachmentsByExec := h.loadChatAttachmentsForExecutions(ctx, executions, "GetTaskThread")
 
