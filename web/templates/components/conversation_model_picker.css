@@ -116,7 +116,7 @@
 }
 .ov-mp-check {
   width: 15px;
-  color: #a9a2ff;
+  color: var(--fallback-bc, oklch(var(--bc) / 1));
   flex-shrink: 0;
 }
 .ov-mp-heading {
