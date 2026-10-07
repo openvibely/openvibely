@@ -953,12 +953,21 @@ for _, agent := range modelOptions {
 					</div>
 				</form>
 			</div>
+			<div id="modelSettingHelp" popover="auto" role="tooltip" class="bg-base-100 text-base-content border border-base-300 rounded-lg shadow-xl p-3 text-sm" style="position:fixed;margin:0;width:min(360px,calc(100vw - 16px));max-height:calc(100vh - 16px);overflow:auto"></div>
 			<form class="modal-backdrop">
 				<button type="button" onclick="closeModelModal()">close</button>
 			</form>
 		</dialog>
 
 		<style>
+            #new_model_modal .model-setting-label {
+                position: relative;
+                justify-content: flex-start;
+                gap: 0.375rem;
+            }
+            #modelSettingHelp { display: none; }
+            #modelSettingHelp:popover-open { display: block; }
+            #modelSettingHelp[data-help-open] { display: block; z-index: 1212; }
 			/* Keep password toggle button fixed inside input across press/focus states */
 			.password-toggle-btn:active,
 			.password-toggle-btn:focus,
@@ -1916,7 +1925,7 @@ for _, agent := range modelOptions {
 							maxOutput.disabled = !supportsOutput;
 							var contextHelp = context > 0 ? 'Limit from the server or built-in catalog. You can enter the window configured on your server.' : 'No reported limit. Verify the context window against your server configuration.';
 							var contextTooltip = document.getElementById('model_context_source');
-							contextTooltip.setAttribute('data-tip', contextHelp);
+							contextTooltip.setAttribute('data-model-setting-help', contextHelp);
 							contextTooltip.setAttribute('aria-label', contextHelp);
 							syncModelDefaultControls();
 						}
@@ -2831,14 +2840,87 @@ for _, agent := range modelOptions {
 					if (!label && control) label = control.querySelector('.label-text');
 					var fieldName = label ? label.textContent.trim() : ((field && field.name) || 'a required field');
 					showModelFormError('Complete the required field: ' + fieldName + '.');
-				}, true);		</script>
+				}, true);
+
+                (function setupModelSettingHelp() {
+                    if (window._modelSettingHelpController) window._modelSettingHelpController.abort();
+                    var controller = new AbortController();
+                    window._modelSettingHelpController = controller;
+                    var signal = controller.signal;
+                    var root = document.getElementById('new_model_modal');
+                    var tip = document.getElementById('modelSettingHelp');
+                    var nativePopover = typeof tip.showPopover === 'function';
+                    if (!nativePopover) tip.removeAttribute('popover');
+                    var active = null, pinned = false;
+                    function close() {
+                        if (active) {
+                            active.removeAttribute('aria-describedby');
+                            active.setAttribute('aria-expanded', 'false');
+                        }
+                        active = null;
+                        pinned = false;
+                        if (nativePopover && tip.matches(':popover-open')) tip.hidePopover();
+                        tip.removeAttribute('data-help-open');
+                    }
+                    function show(button, pin) {
+                        if (active !== button) close();
+                        active = button;
+                        pinned = pinned || pin;
+                        tip.textContent = button.dataset.modelSettingHelp;
+                        button.setAttribute('aria-describedby', tip.id);
+                        button.setAttribute('aria-expanded', 'true');
+                        if (nativePopover) {
+                            if (!tip.matches(':popover-open')) tip.showPopover();
+                        } else tip.setAttribute('data-help-open', '');
+                        var r = button.getBoundingClientRect(), box = tip.getBoundingClientRect();
+                        tip.style.left = Math.max(8, Math.min(r.left, window.innerWidth - box.width - 8)) + 'px';
+                        tip.style.top = Math.max(8, r.bottom + box.height + 8 <= window.innerHeight ? r.bottom : r.top - box.height) + 'px';
+                    }
+                    root.addEventListener('pointerover', function(e) {
+                        var b = e.target.closest('[data-model-setting-help]');
+                        if (b && !pinned) show(b, false);
+                    }, {signal: signal});
+                    root.addEventListener('pointerout', function(e) {
+                        if (!pinned && active && !active.contains(e.relatedTarget) && !tip.contains(e.relatedTarget)) close();
+                    }, {signal: signal});
+                    root.addEventListener('focusin', function(e) {
+                        var b = e.target.closest('[data-model-setting-help]');
+                        if (b) show(b, false);
+                    }, {signal: signal});
+                    root.addEventListener('focusout', function(e) {
+                        if (active === e.target) close();
+                    }, {signal: signal});
+                    root.addEventListener('click', function(e) {
+                        var b = e.target.closest('[data-model-setting-help]');
+                        if (!b) { if (!tip.contains(e.target)) close(); return; }
+                        if (active === b && pinned) close(); else show(b, true);
+                    }, {signal: signal});
+                    root.addEventListener('close', close, {signal: signal});
+                    root.addEventListener('keydown', function(e) {
+                        if (e.key === 'Escape' && active) {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            close();
+                        }
+                    }, {signal: signal});
+                    tip.addEventListener('toggle', function() {
+                        if (nativePopover && !tip.matches(':popover-open')) close();
+                    }, {signal: signal});
+                    root.addEventListener('scroll', function(e) { if (e.target !== tip) close(); }, {capture: true, signal: signal});
+                    window.addEventListener('resize', close, {signal: signal});
+                    document.addEventListener('htmx:beforeCleanupElement', function(e) {
+                        if (e.detail && e.detail.elt && e.detail.elt.contains(root)) controller.abort();
+                    }, {signal: signal});
+                    signal.addEventListener('abort', close, {once: true});
+                })();
+		</script>
 	</div>
 }
 
 templ modelSettingLabel(label string, fieldID string, helpID string, help string) {
-	<div class="label">
+	<div class="label model-setting-label">
 		<label for={ fieldID } class="label-text">{ label }</label>
-		<button type="button" id={ helpID } class="tooltip tooltip-left inline-flex h-5 w-5 shrink-0 items-center justify-center opacity-70" data-tip={ help } aria-label={ help } onfocus="this.classList.add('tooltip-open')" onblur="this.classList.remove('tooltip-open')">
+		<button type="button" id={ helpID } class="btn btn-ghost btn-circle btn-xs model-setting-help shrink-0" data-model-setting-help={ help } aria-label={ help } aria-expanded="false">
 			<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
 				<circle cx="12" cy="12" r="9"></circle>
 				<path stroke-linecap="round" d="M12 11v6M12 7h.01"></path>
