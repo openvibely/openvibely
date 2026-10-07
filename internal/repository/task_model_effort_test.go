@@ -31,6 +31,31 @@ func TestTaskModelEffort_UsesDedicatedWriter(t *testing.T) {
 	require.Equal(t, "high", effort)
 }
 
+func TestQueuedTaskClaimUsesEffortCurrentAtClaim(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	project := createThreadInputProject(t, ctx, db)
+	task := createThreadInputTask(t, ctx, db, project.ID)
+	config := &models.LLMConfig{Name: "Queued effort model", Provider: models.ProviderOpenAI, Model: "gpt-5.5", APIKey: "test", ReasoningEffort: "medium"}
+	require.NoError(t, NewLLMConfigRepo(db).Create(ctx, config))
+	taskRepo := NewTaskRepo(db, nil)
+	require.NoError(t, taskRepo.UpdateAgentID(ctx, task.ID, config.ID))
+	require.NoError(t, taskRepo.UpdateStatus(ctx, task.ID, models.StatusCompleted))
+	inputRepo := NewThreadInputRepo(db)
+	queued := &models.ThreadInput{Scope: models.ThreadInputScopeTask, ProjectID: project.ID, TaskID: task.ID, AgentConfigID: config.ID, InputMode: models.ThreadInputModeQueued, Content: "follow up"}
+	require.NoError(t, inputRepo.CreateQueued(ctx, queued))
+
+	// The promoter has the saved default. The user changes effort before claim.
+	selected := *config
+	require.NoError(t, taskRepo.SetModelEffort(ctx, task.ID, *config, "high"))
+	exec := &models.Execution{TaskID: task.ID, AgentConfigID: config.ID, IsFollowup: true}
+	require.NoError(t, inputRepo.ClaimQueuedForTaskExecutionWithModel(ctx, queued.ID, exec, &config.ID, &selected))
+	require.Equal(t, "high", selected.ReasoningEffort)
+	stored, err := NewExecutionRepo(db).GetByID(ctx, exec.ID)
+	require.NoError(t, err)
+	require.Equal(t, config.ID, stored.AgentConfigID)
+}
+
 func TestTaskModelEffort_IsolatedAndModelBound(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()

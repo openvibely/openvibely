@@ -18,12 +18,20 @@ func (r *TaskRepo) SetModelEffort(ctx context.Context, taskID string, agent mode
 }
 
 func (r *TaskRepo) ModelEffort(ctx context.Context, taskID string, agent models.LLMConfig) (string, error) {
+	return modelEffort(ctx, r.db, taskID, agent)
+}
+
+type modelEffortQuerier interface {
+	QueryRowContext(context.Context, string, ...interface{}) *sql.Row
+}
+
+func modelEffort(ctx context.Context, db modelEffortQuerier, taskID string, agent models.LLMConfig) (string, error) {
 	var effort string
-	err := r.db.QueryRowContext(ctx, "SELECT effort FROM task_model_efforts WHERE task_id = ? AND agent_config_id = ? AND model = ?", taskID, agent.ID, agent.Model).Scan(&effort)
+	err := db.QueryRowContext(ctx, "SELECT effort FROM task_model_efforts WHERE task_id = ? AND agent_config_id = ? AND model = ?", taskID, agent.ID, agent.Model).Scan(&effort)
 	if errors.Is(err, sql.ErrNoRows) {
 		// A swarm parent conversation runs on its planner. Other swarm roles
 		// keep their own defaults. An explicit empty child row resets inheritance.
-		err = r.db.QueryRowContext(ctx, `SELECT e.effort FROM tasks child
+		err = db.QueryRowContext(ctx, `SELECT e.effort FROM tasks child
             JOIN tasks parent ON parent.id = child.parent_task_id
             JOIN task_model_efforts e ON e.task_id = parent.id
             WHERE child.id = ? AND child.swarm_role = 'planner'

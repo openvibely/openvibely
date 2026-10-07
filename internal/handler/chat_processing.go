@@ -1727,11 +1727,16 @@ func (h *Handler) resolveQueuedInputAgent(ctx context.Context, input models.Thre
 }
 
 func (h *Handler) resolveTaskThreadExecutionAgent(ctx context.Context, task *models.Task) (selected *models.LLMConfig, unavailable bool, resultErr error) {
-	defer func() {
-		if selected != nil && task != nil && h.taskRepo != nil && resultErr == nil {
-			resultErr = h.taskRepo.ApplyModelEffort(ctx, task.ID, selected)
-		}
-	}()
+	selected, unavailable, resultErr = h.resolveTaskThreadExecutionAgentBase(ctx, task)
+	if selected != nil && task != nil && h.taskRepo != nil && resultErr == nil {
+		resultErr = h.taskRepo.ApplyModelEffort(ctx, task.ID, selected)
+	}
+	return
+}
+
+// The queued claim reads effort under its write transaction, so it starts with
+// the saved model default rather than a possibly stale task override.
+func (h *Handler) resolveTaskThreadExecutionAgentBase(ctx context.Context, task *models.Task) (selected *models.LLMConfig, unavailable bool, resultErr error) {
 
 	if task == nil || h.llmConfigRepo == nil {
 		return nil, true, nil
@@ -2027,7 +2032,7 @@ func (h *Handler) startQueuedTaskThreadInput(ctx context.Context, input models.T
 			return err
 		}
 		var unstartable bool
-		agent, unstartable, err = h.resolveTaskThreadExecutionAgent(ctx, task)
+		agent, unstartable, err = h.resolveTaskThreadExecutionAgentBase(ctx, task)
 		if err != nil {
 			applog.Infof("[handler] startQueuedTaskThreadInput input=%s task=%s model load error: %v", input.ID, task.ID, err)
 			return err
@@ -2048,7 +2053,7 @@ func (h *Handler) startQueuedTaskThreadInput(ctx context.Context, input models.T
 			PromptSent:    input.Content,
 			IsFollowup:    true,
 		}
-		err = h.threadInputRepo.ClaimQueuedForTaskExecutionWithModel(ctx, input.ID, exec, task.AgentID)
+		err = h.threadInputRepo.ClaimQueuedForTaskExecutionWithModel(ctx, input.ID, exec, task.AgentID, agent)
 		if errors.Is(err, repository.ErrTaskModelChanged) {
 			continue
 		}

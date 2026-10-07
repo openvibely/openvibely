@@ -344,14 +344,14 @@ func TestThreadInputRepo_ClaimQueuedForTaskExecutionRejectsStaleModel(t *testing
 	// The selection changes after the promoter reads it, before its claim.
 	require.NoError(t, taskRepo.UpdateAgentID(ctx, task.ID, second.ID))
 	stale := &models.Execution{TaskID: task.ID, AgentConfigID: first.ID, IsFollowup: true}
-	require.ErrorIs(t, repo.ClaimQueuedForTaskExecutionWithModel(ctx, queued.ID, stale, &first.ID), ErrTaskModelChanged)
+	require.ErrorIs(t, repo.ClaimQueuedForTaskExecutionWithModel(ctx, queued.ID, stale, &first.ID, first), ErrTaskModelChanged)
 	stored, err := repo.GetByID(ctx, queued.ID)
 	require.NoError(t, err)
 	require.Equal(t, models.ThreadInputPending, stored.InputStatus)
 	require.Empty(t, stale.ID)
 
 	current := &models.Execution{TaskID: task.ID, AgentConfigID: second.ID, IsFollowup: true}
-	require.NoError(t, repo.ClaimQueuedForTaskExecutionWithModel(ctx, queued.ID, current, &second.ID))
+	require.NoError(t, repo.ClaimQueuedForTaskExecutionWithModel(ctx, queued.ID, current, &second.ID, second))
 	storedExec, err := NewExecutionRepo(db).GetByID(ctx, current.ID)
 	require.NoError(t, err)
 	require.Equal(t, second.ID, storedExec.AgentConfigID)
