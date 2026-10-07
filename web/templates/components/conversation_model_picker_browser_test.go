@@ -38,7 +38,14 @@ func TestBrowserFunctional_ConversationModelPicker(t *testing.T) {
  const panel=document.getElementById('conversation-model-picker'),sub=document.getElementById('conversation-provider-models');
  assert(!panel.hidden,'picker opens');
  assert(panel.querySelectorAll('.ov-mp-provider').length===2,'provider groups');
- panel.querySelector('.ov-mp-provider').click();
+ const providers=[...panel.querySelectorAll('.ov-mp-provider')];
+ providers[0].dispatchEvent(new PointerEvent('pointerenter',{pointerType:'mouse'}));
+ assert(!sub.hidden && sub.getAttribute('aria-label')===providers[0].dataset.provider+' models','hover opens provider submenu');
+ providers[0].click();
+ assert(!sub.hidden,'click keeps hovered provider open');
+ providers[1].dispatchEvent(new PointerEvent('pointerenter',{pointerType:'mouse'}));
+ assert(sub.getAttribute('aria-label')===providers[1].dataset.provider+' models','hover switches provider submenu');
+ providers[0].dispatchEvent(new PointerEvent('pointerenter',{pointerType:'mouse'}));
  assert(!sub.hidden && sub.querySelectorAll('.ov-mp-pick').length===12,'provider submenu');
  assert(sub.querySelector('.ov-mp-subhead').hidden,'no redundant submenu heading');
  const row=sub.querySelector('.ov-mp-row');

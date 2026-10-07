@@ -320,18 +320,25 @@
         b.dataset.provider = p;
         b.onpointermove = () => activateRow(b, list);
         b.onfocus = () => activateRow(b, list);
+        b.onpointerenter = (e) => {
+          if (e.pointerType !== "touch") openProvider(p);
+        };
         b.setAttribute("aria-haspopup", "dialog");
         b.setAttribute("aria-controls", sub.id);
         b.setAttribute("aria-expanded", String(provider === p));
         b.append(el("span", "", p), el("span", "", "›"));
-        b.onclick = () => {
-          provider = provider === p ? null : p;
-          renderList();
-          renderSub();
-        };
+        b.onclick = () => openProvider(p);
         list.append(b);
       });
     list.scrollTop = scroll;
+  }
+  function openProvider(p) {
+    if (provider === p && !sub.hidden) return;
+    provider = p;
+    list.querySelectorAll(".ov-mp-provider").forEach((b) => {
+      b.setAttribute("aria-expanded", String(b.dataset.provider === p));
+    });
+    renderSub();
   }
   function renderSub() {
     if (!active || !provider) {
