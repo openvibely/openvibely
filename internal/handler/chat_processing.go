@@ -2013,40 +2013,52 @@ func (h *Handler) startQueuedTaskThreadInput(ctx context.Context, input models.T
 			}
 		}()
 	}
-	task, err := h.taskRepo.GetByID(ctx, input.TaskID)
-	if err != nil || task == nil {
-		if err == nil {
-			err = fmt.Errorf("task not found: %s", input.TaskID)
+	var task *models.Task
+	var agent *models.LLMConfig
+	var exec *models.Execution
+	for {
+		var err error
+		task, err = h.taskRepo.GetByID(ctx, input.TaskID)
+		if err != nil || task == nil {
+			if err == nil {
+				err = fmt.Errorf("task not found: %s", input.TaskID)
+			}
+			applog.Infof("[handler] startQueuedTaskThreadInput input=%s task=%s load error: %v", input.ID, input.TaskID, err)
+			return err
 		}
-		applog.Infof("[handler] startQueuedTaskThreadInput input=%s task=%s load error: %v", input.ID, input.TaskID, err)
-		return err
-	}
-	agent, unstartable, err := h.resolveTaskThreadExecutionAgent(ctx, task)
-	if err != nil {
-		applog.Infof("[handler] startQueuedTaskThreadInput input=%s task=%s model load error: %v", input.ID, task.ID, err)
-		return err
-	}
-	if agent == nil {
-		applog.Infof("[handler] startQueuedTaskThreadInput input=%s task=%s no usable current model", input.ID, task.ID)
-		if unstartable {
-			h.cancelUnstartableQueuedInput(ctx, input)
-			h.startNextQueuedTurnAfter(ctx, streamingResponseParams{ProjectID: task.ProjectID, TaskID: task.ID, IsTaskFollowup: true}, "")
-			return nil
+		var unstartable bool
+		agent, unstartable, err = h.resolveTaskThreadExecutionAgent(ctx, task)
+		if err != nil {
+			applog.Infof("[handler] startQueuedTaskThreadInput input=%s task=%s model load error: %v", input.ID, task.ID, err)
+			return err
 		}
-		return fmt.Errorf("model not found for queued task-thread input: %s", input.AgentConfigID)
-	}
-	exec := &models.Execution{
-		TaskID:        input.TaskID,
-		AgentConfigID: agent.ID,
-		Status:        models.ExecQueued,
-		PromptSent:    input.Content,
-		IsFollowup:    true,
-	}
-	if err := h.threadInputRepo.ClaimQueuedForTaskExecution(ctx, input.ID, exec); err != nil {
-		if err != repository.ErrInputNotPending {
-			applog.Infof("[handler] startQueuedTaskThreadInput input=%s claim error: %v", input.ID, err)
+		if agent == nil {
+			applog.Infof("[handler] startQueuedTaskThreadInput input=%s task=%s no usable current model", input.ID, task.ID)
+			if unstartable {
+				h.cancelUnstartableQueuedInput(ctx, input)
+				h.startNextQueuedTurnAfter(ctx, streamingResponseParams{ProjectID: task.ProjectID, TaskID: task.ID, IsTaskFollowup: true}, "")
+				return nil
+			}
+			return fmt.Errorf("model not found for queued task-thread input: %s", input.AgentConfigID)
 		}
-		return err
+		exec = &models.Execution{
+			TaskID:        input.TaskID,
+			AgentConfigID: agent.ID,
+			Status:        models.ExecQueued,
+			PromptSent:    input.Content,
+			IsFollowup:    true,
+		}
+		err = h.threadInputRepo.ClaimQueuedForTaskExecutionWithModel(ctx, input.ID, exec, task.AgentID)
+		if errors.Is(err, repository.ErrTaskModelChanged) {
+			continue
+		}
+		if err != nil {
+			if err != repository.ErrInputNotPending {
+				applog.Infof("[handler] startQueuedTaskThreadInput input=%s claim error: %v", input.ID, err)
+			}
+			return err
+		}
+		break
 	}
 	input.Content = exec.PromptSent
 	if h.workerSvc != nil {

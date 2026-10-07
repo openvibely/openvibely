@@ -326,6 +326,37 @@ func TestThreadInputRepo_ClaimQueuedForTaskExecutionRequiresNoActiveExecution(t 
 	}
 }
 
+func TestThreadInputRepo_ClaimQueuedForTaskExecutionRejectsStaleModel(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	repo := NewThreadInputRepo(db)
+	project := createThreadInputProject(t, ctx, db)
+	task := createThreadInputTask(t, ctx, db, project.ID)
+	first := createThreadInputLLMConfig(t, ctx, db)
+	second := &models.LLMConfig{Name: "Second queued model", Provider: models.ProviderTest, Model: "second-queued-model"}
+	require.NoError(t, NewLLMConfigRepo(db).Create(ctx, second))
+	taskRepo := NewTaskRepo(db, nil)
+	require.NoError(t, taskRepo.UpdateStatus(ctx, task.ID, models.StatusCompleted))
+	require.NoError(t, taskRepo.UpdateAgentID(ctx, task.ID, first.ID))
+	queued := &models.ThreadInput{Scope: models.ThreadInputScopeTask, ProjectID: project.ID, TaskID: task.ID, AgentConfigID: first.ID, InputMode: models.ThreadInputModeQueued, Content: "follow up"}
+	require.NoError(t, repo.CreateQueued(ctx, queued))
+
+	// The selection changes after the promoter reads it, before its claim.
+	require.NoError(t, taskRepo.UpdateAgentID(ctx, task.ID, second.ID))
+	stale := &models.Execution{TaskID: task.ID, AgentConfigID: first.ID, IsFollowup: true}
+	require.ErrorIs(t, repo.ClaimQueuedForTaskExecutionWithModel(ctx, queued.ID, stale, &first.ID), ErrTaskModelChanged)
+	stored, err := repo.GetByID(ctx, queued.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.ThreadInputPending, stored.InputStatus)
+	require.Empty(t, stale.ID)
+
+	current := &models.Execution{TaskID: task.ID, AgentConfigID: second.ID, IsFollowup: true}
+	require.NoError(t, repo.ClaimQueuedForTaskExecutionWithModel(ctx, queued.ID, current, &second.ID))
+	storedExec, err := NewExecutionRepo(db).GetByID(ctx, current.ID)
+	require.NoError(t, err)
+	require.Equal(t, second.ID, storedExec.AgentConfigID)
+}
+
 func TestThreadInputRepo_ClaimQueuedForTaskExecutionRetargetsRemainingQueuedGuards(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
