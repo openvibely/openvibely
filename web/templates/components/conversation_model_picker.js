@@ -355,7 +355,7 @@
       return;
     }
     sub.hidden = false;
-    position();
+    positionSub();
   }
   function renderEffort() {
     effortBox.replaceChildren();
@@ -443,7 +443,10 @@
       Math.max(8, Math.min(r.left, width - panel.offsetWidth - 8)) + "px";
     panel.style.top =
       (up ? Math.max(8, r.top - panel.offsetHeight - 6) : r.bottom + 6) + "px";
-    if (provider && !sub.hidden) {
+    positionSub();
+  }
+  function positionSub() {
+    if (active && provider && !sub.hidden) {
       const b = [...list.querySelectorAll(".ov-mp-provider")].find(
         (b) => b.dataset.provider === provider,
       );
@@ -451,7 +454,9 @@
         closeSub();
         return;
       }
-      const p = panel.getBoundingClientRect(),
+      const height = window.innerHeight,
+        width = window.innerWidth,
+        p = panel.getBoundingClientRect(),
         a = b.getBoundingClientRect();
       let left = p.right + 6;
       if (left + sub.offsetWidth > width - 8)
@@ -628,7 +633,7 @@
     (e) => {
       if (active && !panel.contains(e.target) && !sub.contains(e.target))
         position();
-      else if (active && provider) position();
+      else if (active && provider) positionSub();
     },
     true,
   );
