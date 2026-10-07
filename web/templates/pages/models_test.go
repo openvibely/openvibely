@@ -92,7 +92,7 @@ func TestModelsContent_CatalogModelsInSelector(t *testing.T) {
 	if strings.Contains(out, "Max Output Tokens / Request") || strings.Contains(out, "model_max_tokens") {
 		t.Error("expected model dialog not to expose internal output-token cap")
 	}
-	if !strings.Contains(out, "Choose a custom limit to restrict concurrent workers for this model.") {
+	if !strings.Contains(out, "Maximum concurrent workers for this model. Leave empty to use the shared global worker pool.") {
 		t.Error("expected model worker limit guidance to describe inherited and positive per-model limits")
 	}
 	modelWorkerInputStart := strings.Index(out, `id="model_max_workers"`)

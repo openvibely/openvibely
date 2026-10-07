@@ -893,39 +893,33 @@ for _, agent := range modelOptions {
 					</div>
 </section>
 <section id="model-panel-generation" role="tabpanel" aria-labelledby="model-tab-generation" data-model-panel="generation" hidden>
-							<div id="reasoning_effort_field" class="form-control mb-3 hidden">
-								<label class="label"><span id="reasoning_effort_label" class="label-text">Effort</span></label>
-								<select name="reasoning_effort" id="model_reasoning_effort" class="select select-bordered"></select>
-								<label class="label">
-									<span id="reasoning_effort_help" class="label-text-alt opacity-70">Controls provider reasoning/thinking effort for supported models.</span>
-								</label>
-							</div>
+<div class="model-settings-grid">
+							<div id="reasoning_effort_field" class="form-control hidden">
+								@modelSettingLabel("Effort", "model_reasoning_effort", "reasoning_effort_help", "Controls provider reasoning/thinking effort for supported models.")
+                                <select name="reasoning_effort" id="model_reasoning_effort" class="select select-bordered model-numeric-input"></select>
+                            </div>
 						<div id="model_temperature_field" class="form-control">
-							<label class="label"><span class="label-text">Temperature</span></label>
+							@modelSettingLabel("Temperature", "model_temperature", "model_temperature_help", "Controls randomness. Leave the default unless you want more varied responses.")
 							<input type="text" inputmode="decimal" pattern="[0-9]*.?[0-9]*" id="model_temperature" name="temperature" class="input input-bordered model-numeric-input" value="0" placeholder="0–1"/>
-							<label class="label">
-								<span class="label-text-alt opacity-70">Optional. Leave default unless you know you need more randomness.</span>
-							</label>
 						</div>
 					<input type="hidden" id="model_provider_context_window" name="provider_context_window" value="0"/>
 					<input type="hidden" id="model_provider_max_output_tokens" name="provider_max_output_tokens" value="0"/>
-					<div class="grid grid-cols-2 gap-3">
 						<div class="form-control">
 							@modelSettingLabel("Context window (tokens)", "model_context_window_cap", "model_context_source", "Use the reported limit, or enter the window configured on your server.")
-							<input type="number" min="1" step="1" id="model_context_window_cap" name="context_window" class="input input-bordered" value="200000" required onchange="updateContextLimitInputs(Number(document.getElementById('model_provider_context_window').value), Number(document.getElementById('model_provider_max_output_tokens').value), true)"/>
+							<input type="number" min="1" step="1" id="model_context_window_cap" name="context_window" class="input input-bordered model-numeric-input" value="200000" required onchange="updateContextLimitInputs(Number(document.getElementById('model_provider_context_window').value), Number(document.getElementById('model_provider_max_output_tokens').value), true)"/>
 							<p id="model_provider_context_display" class="text-sm opacity-70 mt-2">Reported context limit: Not reported</p>
 						</div>
 						<div id="model_output_limit_field" class="form-control">
 							@modelSettingLabel("Max output (tokens)", "model_default_max_tokens", "model_output_help", "Defaults leave room for input. Below 32,768 context tokens, output is limited to one quarter of the window.")
-							<input type="number" min="1" step="1" id="model_default_max_tokens" name="default_max_tokens" class="input input-bordered" value="16384" onchange="updateContextLimitInputs(Number(document.getElementById('model_provider_context_window').value), Number(document.getElementById('model_provider_max_output_tokens').value), true)"/>
+							<input type="number" min="1" step="1" id="model_default_max_tokens" name="default_max_tokens" class="input input-bordered model-numeric-input" value="16384" onchange="updateContextLimitInputs(Number(document.getElementById('model_provider_context_window').value), Number(document.getElementById('model_provider_max_output_tokens').value), true)"/>
 							<p id="model_provider_max_output_display" class="text-sm opacity-70 mt-2">Reported output limit: Not reported</p>
 						</div>
-					</div>
-					<div class="form-control mt-2">
+					<div class="form-control">
 						@modelSettingLabel("Compact conversation at (tokens)", "model_compaction_threshold_input", "model_compaction_help", "When the input sent to the model reaches this size, compact the conversation history to free up context space.")
 						<input id="model_compaction_threshold_input" type="number" min="1" step="1" class="input input-bordered model-numeric-input" required oninput="document.getElementById('model_compaction_threshold').value = this.value"/>
 						<input type="hidden" id="model_compaction_threshold" name="compaction_threshold" value="0"/>
 					</div>
+</div>
 </section>
 <section id="model-panel-execution" role="tabpanel" aria-labelledby="model-tab-execution" data-model-panel="execution" hidden>
 						<div class="form-control mt-3">
@@ -943,12 +937,11 @@ for _, agent := range modelOptions {
 							<span class="label-text-alt opacity-70">When enabled, tasks created with this model automatically move to "active" status</span>
 						</label>
 					</div>
-					<div class="grid grid-cols-2 gap-3">
+					<div class="model-settings-grid">
 						<div class="form-control">
-							@modelSettingLabel("Max Workers", "model_max_workers_mode", "model_workers_help", "Choose a custom limit to restrict concurrent workers for this model.")
-							<select id="model_max_workers_mode" class="select select-bordered" aria-label="Custom worker limit mode" onchange="changeModelDefaultMode('model_max_workers')"><option value="default">Use global pool</option><option value="custom">Custom worker limit</option></select>
-							<input id="model_max_workers_custom" type="number" min="1" step="1" class="input input-bordered mt-2 hidden" aria-label="Custom worker limit" oninput="document.getElementById('model_max_workers').value = this.value" disabled/>
-							<input type="hidden" id="model_max_workers" name="model_max_workers" class="input input-bordered" value="0"/>
+							@modelSettingLabel("Max Workers", "model_max_workers_input", "model_workers_help", "Maximum concurrent workers for this model. Leave empty to use the shared global worker pool.")
+                            <input id="model_max_workers_input" type="number" min="1" step="1" class="input input-bordered model-numeric-input" placeholder="Global pool" oninput="document.getElementById('model_max_workers').value = this.value === '' ? '0' : this.value"/>
+                            <input type="hidden" id="model_max_workers" name="model_max_workers" value="0"/>
 						</div>
 						<div class="form-control">
 							@modelSettingLabel("Inactivity timeout (seconds)", "model_worker_timeout_input", "model_timeout_help", "Stops a worker after this many seconds without model or tool activity. Default: 1800 seconds (30 minutes).")
@@ -1007,6 +1000,16 @@ for _, agent := range modelOptions {
             #new_model_modal .modal-action, #new_model_modal #model_form_error { flex-shrink: 0; }
             #new_model_modal .modal-action { margin-top: 1rem; }
 
+            #new_model_modal .model-settings-grid {
+                display: grid;
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+                gap: 1rem;
+                align-items: start;
+            }
+            #new_model_modal .model-settings-grid > .form-control { min-width: 0; }
+            @media (max-width: 640px) {
+                #new_model_modal .model-settings-grid { grid-template-columns: minmax(0, 1fr); }
+            }
             #new_model_modal .model-numeric-input {
                 width: 12rem;
                 max-width: 100%;
@@ -1346,7 +1349,7 @@ for _, agent := range modelOptions {
 				function setReasoningEffortOptions(provider, model, selectedEffort) {
 					var reasoningField = document.getElementById('reasoning_effort_field');
 					var reasoningSelect = document.getElementById('model_reasoning_effort');
-					var reasoningLabel = document.getElementById('reasoning_effort_label');
+					var reasoningLabel = document.querySelector('label[for="model_reasoning_effort"]');
 					var reasoningHelp = document.getElementById('reasoning_effort_help');
 
 					var modelOption = selectedModelOption(provider, model);
@@ -1365,18 +1368,19 @@ for _, agent := range modelOptions {
 					reasoningSelect.disabled = false;
 					if (provider === 'anthropic') {
 						reasoningLabel.textContent = 'Claude Effort';
-						reasoningHelp.textContent = 'Matches Claude Code effort: low, medium, high, xhigh, or max. Availability varies by model. Blank saved configs keep the provider default.';
+						reasoningHelp.dataset.modelSettingHelp = 'Matches Claude Code effort: low, medium, high, xhigh, or max. Availability varies by model. Blank saved configs keep the provider default.';
 					} else if (isOpenAICompatibleProvider(provider) && (model || '').trim().toLowerCase() === 'kimi-k3') {
 						reasoningLabel.textContent = 'Kimi Reasoning Effort';
-						reasoningHelp.textContent = 'Controls Kimi K3 reasoning effort: low, high, or max.';
+						reasoningHelp.dataset.modelSettingHelp = 'Controls Kimi K3 reasoning effort: low, high, or max.';
 					} else if (isOpenAICompatibleProvider(provider) && (model || '').trim().toLowerCase() === 'glm-5.2') {
 						reasoningLabel.textContent = 'GLM Reasoning Effort';
-						reasoningHelp.textContent = 'Controls GLM 5.2 reasoning effort from none through max.';
+						reasoningHelp.dataset.modelSettingHelp = 'Controls GLM 5.2 reasoning effort from none through max.';
 					} else {
 						reasoningLabel.textContent = 'Codex Reasoning Effort';
-						reasoningHelp.textContent = 'Matches Codex reasoning effort for supported OpenAI models.';
+						reasoningHelp.dataset.modelSettingHelp = 'Matches Codex reasoning effort for supported OpenAI models.';
 					}
-					reasoningSelect.innerHTML = '';				for (var i = 0; i < supportedEfforts.length; i++) {
+					reasoningHelp.setAttribute('aria-label', reasoningLabel.textContent + ': ' + reasoningHelp.dataset.modelSettingHelp);
+                    reasoningSelect.innerHTML = '';				for (var i = 0; i < supportedEfforts.length; i++) {
 					var effort = supportedEfforts[i];
 					var opt = document.createElement('option');
 					opt.value = effort;
@@ -1941,26 +1945,12 @@ for _, agent := range modelOptions {
                                 var savedTimeout = Number(document.getElementById('model_worker_timeout').value);
                                 timeoutInput.value = String(savedTimeout > 0 ? savedTimeout : 1800);
                             }
-                            ['model_max_workers'].forEach(function(id) {
-								var mode = document.getElementById(id + '_mode');
-								if (!mode) return;
-								var input = document.getElementById(id);
-								var custom = document.getElementById(id + '_custom');
-								var hasOverride = Number(input.value) > 0;
-								mode.value = hasOverride ? 'custom' : 'default';
-								custom.classList.toggle('hidden', !hasOverride);
-								custom.disabled = !hasOverride;
-								custom.required = hasOverride;
-								custom.value = hasOverride ? input.value : '';
-							});
-						}
-
-						function changeModelDefaultMode(id) {
-							var mode = document.getElementById(id + '_mode');
-							var defaults = {model_max_workers: 1};
-							document.getElementById(id).value = mode.value === 'default' ? '0' : String(defaults[id]);
-							syncModelDefaultControls();
-						}
+                            var workersInput = document.getElementById('model_max_workers_input');
+                            if (workersInput) {
+                                var savedWorkers = Number(document.getElementById('model_max_workers').value);
+                                workersInput.value = savedWorkers > 0 ? String(savedWorkers) : '';
+                            }
+                        }
 
 						function formatContextLimitTokens(value) {
 							var n = parseInt(value, 10);

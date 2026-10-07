@@ -74,10 +74,15 @@ func TestBrowserFunctional_ModelModalDiscoveryAndDefaults(t *testing.T) {
   returnedModels=[{id:'qwen',context_length:262144}];field('model_refresh').click();await wait();
 
   input('model_worker_timeout_input','120');
-  change('model_max_workers_mode','custom');input('model_max_workers_custom','3');
+  input('model_max_workers_input','3');
   input('model_compaction_threshold_input','100000');
   var values=new FormData(field('model_form'));
   assert(values.get('worker_timeout')==='120' && values.get('model_max_workers')==='3' && values.get('compaction_threshold')==='100000','custom overrides submitted');
+  input('model_max_workers_input','');
+  assert(new FormData(field('model_form')).get('model_max_workers')==='0','clearing workers restores global pool');
+  input('model_max_workers_input','0');
+  assert(!field('model_max_workers_input').checkValidity(),'explicit zero workers rejected');
+  input('model_max_workers_input','3');
   await selectProvider('openai');
   assert(hidden('model_refresh') && hidden('openai_compatible_fields') && hidden('model_base_url_field'),'OpenAI controls restored');
   assert(field('model_worker_timeout_input').value==='120','provider change preserves timeout');
@@ -115,10 +120,10 @@ func TestBrowserFunctional_ModelModalDiscoveryAndDefaults(t *testing.T) {
   Object.assign(edit.dataset,{modelId:'saved',modelName:'Saved',modelProvider:'openai_compatible',modelModel:'qwen',modelPresetSlug:'vllm',modelBaseUrl:'http://127.0.0.1:8000/v1/',modelContextWindowCap:'131072',modelWorkerTimeout:'240',modelMaxWorkers:'4',modelCompactionThreshold:'80000'});
   populateModelEditForm(edit);await wait();
   assert(field('model_worker_timeout_input').value==='240','saved timeout restored');
-  assert(field('model_max_workers_custom').value==='4' && field('model_compaction_threshold_input').value==='80000','saved limits restored');
+  assert(field('model_max_workers_input').value==='4' && field('model_compaction_threshold_input').value==='80000','saved limits restored');
   assert(new FormData(field('model_form')).get('context_window')==='131072','saved context preserved on discovery');
   field('new_model_modal').close();openNewModelModal();
-  assert(field('model_worker_timeout_input').value==='1800' && field('model_max_workers_mode').value==='default','new form resets saved overrides');
+  assert(field('model_worker_timeout_input').value==='1800' && field('model_max_workers_input').value==='','new form resets saved overrides');
   returnedModels=[{id:'kimi-k3',context_length:262144}];
   await selectProvider('openai_compatible_moonshot');
   assert(field('model_id').value==='kimi-k3' && !hidden('reasoning_effort_field'),'automatic selection updates reasoning controls');
