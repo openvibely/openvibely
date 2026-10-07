@@ -1572,7 +1572,7 @@ for _, agent := range modelOptions {
 							var provider = document.getElementById('model_provider').value;
 							var compatible = isOpenAICompatibleProvider(provider);
 							var discovery = provider === 'ollama' || (compatible && isDiscoverableOpenAICompatiblePreset());
-							document.getElementById('model_oauth_setup').classList.toggle('hidden', !(compatible && openAICompatiblePresetForProvider(provider) === 'custom' && document.getElementById('model_custom_auth_method').value === 'oauth' && !isEditingModelForm()));
+							document.getElementById('model_oauth_setup').classList.toggle('hidden', !(compatible && openAICompatiblePresetForProvider(provider) === 'custom' && document.getElementById('model_custom_auth_method').value === 'oauth'));
 							document.getElementById('model_id').required = discovery;
 							document.getElementById('model_openai_compatible_custom_model').required = compatible && !discovery;
 							document.getElementById('model_refresh').classList.toggle('hidden', !discovery);
@@ -1962,6 +1962,7 @@ for _, agent := range modelOptions {
 						}
 
 						function clearDiscoveredModelLimits() {
+							resetModelOAuthSetup();
 							if (isOpenAICompatibleProvider(document.getElementById('model_provider').value) && isDiscoverableOpenAICompatiblePreset()) {
 								document.getElementById('model_id').replaceChildren(new Option('Loading models…', ''));
 								document.getElementById('model_openai_compatible_custom_model').value = '';
@@ -2055,21 +2056,19 @@ for _, agent := range modelOptions {
 									 modelsURL !== (form.dataset.originalModelsUrl || ''));
 								var preset = document.getElementById('model_openai_compatible_preset').value || 'custom';
 								var customAuthMethod = document.getElementById('model_custom_auth_method').value;
-							if (!configID && preset === 'custom' && customAuthMethod === 'oauth') {
+							if (preset === 'custom' && customAuthMethod === 'oauth') {
 								var setupSession = document.getElementById('model_oauth_setup_session').value;
-								if (!setupSession) {status.textContent = 'Connect OAuth to load models.';return;}
-							}
-
-								if (endpointChanged) {
-									if (preset === 'custom' && customAuthMethod === 'oauth') {
-										cancelOpenAICompatibleDiscovery();
-										status.textContent = 'Save endpoint changes and reconnect before discovering models.';
-										return;
-									}
-									// Discover the new endpoint without loading the saved connection's secrets.
+								if (setupSession) {
 									configID = '';
+								} else if (!configID || endpointChanged) {
+									status.textContent = 'Connect OAuth to load models for these settings.';
+									return;
 								}
-								if (configID) params.set('config_id', configID);
+							} else if (endpointChanged) {
+								// Discover the new endpoint without the saved connection's credentials.
+								configID = '';
+							}
+							if (configID) params.set('config_id', configID);
 							if (modelsURL || configID) params.set('models_url', modelsURL);
 
 							var allowPrivate = document.getElementById('model_custom_allow_private_endpoints').checked ||
@@ -2531,12 +2530,11 @@ for _, agent := range modelOptions {
 					var provider = canonicalProvider(document.getElementById('model_provider').value);
 					var builtInOAuth = (provider === 'anthropic' && document.getElementById('model_anthropic_auth_type').value === 'oauth') ||
 						(provider === 'openai' && document.getElementById('model_openai_auth_type').value === 'oauth');
-					var customOAuth = provider === 'openai_compatible' && document.getElementById('model_custom_auth_method').value === 'oauth';
 					var editing = form.dataset.mode === 'edit';
 					var persistedConnectionID = form.dataset.originalOAuthConnectionId || '';
 					var hasSelectedAccount = builtInOAuth && select.value && select.value !== 'new';
 					var selectionChanged = hasSelectedAccount && select.value !== persistedConnectionID;
-					var available = editing && (hasSelectedAccount || customOAuth);
+					var available = editing && hasSelectedAccount;
 					action.classList.toggle('hidden', !available);
 					if (!available) return;
 

@@ -1056,6 +1056,11 @@ func (h *Handler) updateModelByID(c echo.Context, id string) error {
 		clearOAuthCredentials(agent)
 	}
 
+	setupKey, err := h.attachModelOAuthSetup(c, agent)
+	if err != nil {
+		return err
+	}
+
 	applog.Infof("[handler] UpdateModel id=%s name=%q model=%s auth_method=%s max_workers=%d", id, agent.Name, agent.Model, agent.AuthMethod, agent.MaxWorkers)
 	if err := h.llmConfigRepo.Update(c.Request().Context(), agent); err != nil {
 		applog.Infof("[handler] UpdateModel error: %v", err)
@@ -1063,6 +1068,9 @@ func (h *Handler) updateModelByID(c echo.Context, id string) error {
 			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 		}
 		return err
+	}
+	if setupKey != "" {
+		removeModelOAuthSetup(setupKey)
 	}
 	applog.Infof("[handler] UpdateModel success id=%s", id)
 	if h.workerSvc != nil {

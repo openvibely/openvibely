@@ -131,6 +131,70 @@ func TestModelOAuthSetupSignsInAndDiscoversBeforeCreate(t *testing.T) {
 	if _, err := h.modelOAuthSetupConfig(setup.SessionID, true); err == nil {
 		t.Fatal("consumed setup session still usable")
 	}
+	// Editing signs in against the new endpoint without changing the saved model.
+	saved.OAuthAccessToken = "old-access"
+	saved.OAuthClientSecret = "saved-secret"
+	if err := repo.Update(context.Background(), saved); err != nil {
+		t.Fatal(err)
+	}
+	form.Del("oauth_setup_session")
+	form.Set("model_config_id", saved.ID)
+	form.Set("base_url", provider.URL+"/new")
+	form.Set("model", "")
+	rec = send(http.MethodPost, "/models/oauth/setup", form, "")
+	if rec.Code != 200 {
+		t.Fatalf("edit setup: %d %s", rec.Code, rec.Body.String())
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &setup); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { removeModelOAuthSetup(setup.SessionID) })
+	snapshot, err := h.modelOAuthSetupConfig(setup.SessionID, false)
+	if err != nil || snapshot.OAuthClientSecret != "saved-secret" || snapshot.ID != "" || snapshot.OAuthAccessToken != "" {
+		t.Fatalf("edit snapshot: %#v %v", snapshot, err)
+	}
+	authURL, _ = url.Parse(setup.URL)
+	result = h.completeOAuthFlow(authURL.Query().Get("state"), "edit-code")
+	if result.Outcome != oauthCompletionSucceeded {
+		t.Fatalf("edit callback: %v", result.Err)
+	}
+	unchanged, _ := repo.GetByID(context.Background(), saved.ID)
+	if unchanged.BaseURL != provider.URL || unchanged.OAuthAccessToken != "old-access" {
+		t.Fatal("sign-in changed saved configuration before Save")
+	}
+	query.Set("base_url", provider.URL+"/new")
+	rec = send(http.MethodGet, "/models/openai-compatible/available?"+query.Encode(), nil, setup.SessionID)
+	if rec.Code != 200 {
+		t.Fatalf("edit discovery: %d %s", rec.Code, rec.Body.String())
+	}
+	form.Set("oauth_setup_session", setup.SessionID)
+	rec = send(http.MethodPut, "/models/"+saved.ID, form, "")
+	if rec.Code != 400 {
+		t.Fatalf("edit without selection: %d", rec.Code)
+	}
+	form.Set("model", "qwen")
+	form.Set("base_url", provider.URL+"/tampered")
+	rec = send(http.MethodPut, "/models/"+saved.ID, form, "")
+	if rec.Code != 409 {
+		t.Fatalf("edit with changed authenticated settings: %d", rec.Code)
+	}
+	form.Set("base_url", provider.URL+"/new")
+	rec = send(http.MethodPut, "/models/"+saved.ID, form, "")
+	if rec.Code != 303 {
+		t.Fatalf("save edit: %d %s", rec.Code, rec.Body.String())
+	}
+	updated, _ := repo.GetByID(context.Background(), saved.ID)
+	if updated.BaseURL != provider.URL+"/new" || updated.OAuthAccessToken != "setup-access" || updated.OAuthClientSecret != "saved-secret" {
+		t.Fatal("edited settings and new credentials not saved together")
+	}
+	if _, err := h.modelOAuthSetupConfig(setup.SessionID, true); err == nil {
+		t.Fatal("edit session not consumed")
+	}
+	after, _ = repo.List(context.Background())
+	if len(after) != len(before)+1 {
+		t.Fatal("editing created another model")
+	}
+
 }
 
 func TestModelOAuthSetupCancellationAndExpiry(t *testing.T) {
