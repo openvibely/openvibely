@@ -30,7 +30,7 @@ func TestBrowserFunctional_ModelContextLimitsFollowSelection(t *testing.T) {
 <select id="model_id" onchange="handleModelChange()"><option value="large">large</option><option value="small">small</option><option value="unknown">unknown</option></select>
 <input id="model_reasoning_effort"><input id="model_openai_compatible_custom_model">
 <input id="model_provider_context_window"><input id="model_provider_max_output_tokens">
-<input id="model_provider_context_display"><input id="model_provider_max_output_display">
+<p id="model_provider_context_display"></p><p id="model_provider_max_output_display"></p>
 <input id="model_context_window_cap"><input id="model_default_max_tokens"><input id="model_compaction_threshold">
 <div id="model_output_limit_field"></div><span id="model_context_source"></span>
 <script>
