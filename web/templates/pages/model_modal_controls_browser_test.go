@@ -3,6 +3,7 @@ package pages
 import (
 	"bytes"
 	"context"
+	"os"
 	"testing"
 )
 
@@ -344,5 +345,67 @@ func TestBrowserFunctional_ModelDiscoveryLoading(t *testing.T) {
  f('reconnect-result').setAttribute('data-test-result','pass');
  }catch(error){f('reconnect-result').setAttribute('data-test-result','fail');f('reconnect-result').setAttribute('data-test-error',String(error.stack));}
  })();</script>`
+	runReconnectChromeFixture(t, fixture)
+}
+
+func TestBrowserFunctional_ModelHelpLayout(t *testing.T) {
+	var content bytes.Buffer
+	if err := ModelsContent(nil, nil, false).Render(context.Background(), &content); err != nil {
+		t.Fatal(err)
+	}
+	var css string
+	for _, path := range []string{"../../static/dist/app.css", "../../static/dist/app-utilities.css"} {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		css += string(data)
+	}
+	fixture := `<style>` + css + `
+    #new_model_modal .modal-box { max-width:none; transition:none; transform:none; }
+    #modelSettingHelp { transition:none; }
+    </style><main id="reconnect-result"></main><script>
+    window.htmx={process:function(){}};
+    </script>` + content.String() + `<script>
+    try {
+        var modal=document.getElementById('new_model_modal');
+        var box=modal.querySelector('.modal-box');
+        modal.showModal();
+        document.getElementById('model_output_limit_field').classList.remove('hidden');
+        for (var width of [360, 896]) {
+            box.style.width=width+'px';
+            for (var button of modal.querySelectorAll('.model-setting-help')) {
+                button.focus();
+                var row=button.parentElement;
+                var label=row.querySelector('label');
+                var iconRect=button.getBoundingClientRect();
+                var labelRect=label.getBoundingClientRect();
+                var rowRect=row.getBoundingClientRect();
+                var boxRect=box.getBoundingClientRect();
+                var tip=document.getElementById('modelSettingHelp');
+                var tipRect=tip.getBoundingClientRect();
+                var style=getComputedStyle(tip);
+                if(iconRect.left-labelRect.right < 0 || iconRect.left-labelRect.right > 8)
+                    throw Error('Help icon separated from label at '+width+': '+button.id);
+                if(tipRect.left < 0 || tipRect.right > innerWidth || tipRect.top < 0 || tipRect.bottom > innerHeight)
+                    throw Error('Tooltip escapes viewport at '+width+': '+button.id);
+                if(!tip.matches(':popover-open') || style.opacity!=='1') throw Error('Focused tooltip is hidden: '+button.id+' open='+tip.matches(':popover-open')+' opacity='+style.opacity+' active='+document.activeElement.id+' expanded='+button.getAttribute('aria-expanded'));
+                if(style.backgroundColor==='transparent' || style.backgroundColor==='rgba(0, 0, 0, 0)') throw Error('Tooltip has no solid background');
+                if(tip.textContent!==button.dataset.modelSettingHelp) throw Error('Wrong help text');
+                button.blur();
+                if(tip.matches(':popover-open')) throw Error('Tooltip stays open after blur');
+                button.click();
+                if(!tip.matches(':popover-open')) throw Error('Click did not open help');
+                button.click();
+                if(tip.matches(':popover-open')) throw Error('Second click did not close help');
+            }
+        }
+        modal.close();
+        document.getElementById('reconnect-result').setAttribute('data-test-result','pass');
+    } catch(e) {
+        document.getElementById('reconnect-result').setAttribute('data-test-result','fail');
+        document.getElementById('reconnect-result').setAttribute('data-test-error',String(e.stack));
+    }
+    </script>`
 	runReconnectChromeFixture(t, fixture)
 }
