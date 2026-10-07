@@ -74,8 +74,11 @@ func TestBrowserFunctional_ModelModalDiscoveryAndDefaults(t *testing.T) {
   assert(hidden('api_key_field'),'Anthropic OAuth hides key');
   await selectProvider('ollama');
   assert(hidden('model_refresh') && hidden('api_key_field') && !hidden('ollama_fields'),'Ollama controls unchanged');
+  assert(!hidden('model_ollama_base_url_field') && !!(field('model_ollama_base_url').compareDocumentPosition(field('model_id')) & Node.DOCUMENT_POSITION_FOLLOWING),'Ollama URL precedes model selection');
+  assert(new FormData(field('model_form')).get('ollama_base_url')==='http://localhost:11434','Ollama URL still submitted');
   await selectProvider('mixture');
   assert(hidden('model_field') && !field('model_id').required,'mixture not blocked by hidden select');
+  assert(hidden('model_ollama_base_url_field'),'Ollama URL hidden after provider switch');
   await selectProvider('openai_compatible_custom');
   assert(!hidden('model_manual_id_field') && hidden('model_field'),'custom manual-only entry');
   input('model_openai_compatible_custom_model','manual-id');

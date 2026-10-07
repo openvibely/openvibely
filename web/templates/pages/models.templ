@@ -574,6 +574,12 @@ for _, agent := range modelOptions {
 							<option value="oauth">API (OAuth via web)</option>
 						</select>
 					</div>
+						<div id="model_ollama_base_url_field" class="form-control mb-3 hidden">							<label class="label"><span class="label-text">Base URL</span></label>
+							<input type="text" id="model_ollama_base_url" name="ollama_base_url" class="input input-bordered" placeholder="http://localhost:11434" value="http://localhost:11434"/>
+							<label class="label">
+								<span class="label-text-alt opacity-70">Default: http://localhost:11434</span>
+							</label>
+						</div>
 						<div id="model_base_url_field" class="form-control mb-3 hidden">
 								<label class="label"><span class="label-text">Base URL</span></label>
 								<input type="text" id="model_base_url" name="base_url" class="input input-bordered" placeholder="https://openrouter.ai/api/v1/" oninput="clearDiscoveredModelLimits(); scheduleAutoDiscoverOpenAICompatibleModels()"/>
@@ -812,12 +818,6 @@ for _, agent := range modelOptions {
 
 							</div>
 						<div id="ollama_fields" class="hidden">
-							<div class="form-control mb-3">							<label class="label"><span class="label-text">Base URL</span></label>
-							<input type="text" id="model_ollama_base_url" name="ollama_base_url" class="input input-bordered" placeholder="http://localhost:11434" value="http://localhost:11434"/>
-							<label class="label">
-								<span class="label-text-alt opacity-70">Default: http://localhost:11434</span>
-							</label>
-						</div>
 						<div class="form-control mb-3">
 							<label class="label"><span class="label-text">Custom Model Name</span></label>
 							<input type="text" id="model_ollama_custom_model" name="ollama_custom_model" class="input input-bordered" placeholder="e.g. llama3.1:8b, codellama:13b"/>
@@ -2087,6 +2087,7 @@ for _, agent := range modelOptions {
 						document.getElementById('subscription_info_oauth').classList.add('hidden');
 							document.getElementById('ollama_info').classList.add('hidden');
 						document.getElementById('ollama_fields').classList.add('hidden');
+					document.getElementById('model_ollama_base_url_field').classList.add('hidden');
 								document.getElementById('openai_compatible_info').classList.add('hidden');
 								document.getElementById('openai_compatible_fields').classList.add('hidden');
 							document.getElementById('custom_provider_auth_fields').classList.add('hidden');
@@ -2446,6 +2447,7 @@ for _, agent := range modelOptions {
 					apiKeyInput.required = false;
 					ollamaInfo.classList.remove('hidden');
 					document.getElementById('ollama_fields').classList.remove('hidden');
+					document.getElementById('model_ollama_base_url_field').classList.remove('hidden');
 					document.getElementById('model_auth_method').disabled = true;
 					document.getElementById('model_openai_connection_method').disabled = true;
 				} else {
