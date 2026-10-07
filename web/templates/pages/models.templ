@@ -484,6 +484,13 @@ for _, agent := range modelOptions {
 					<div id="model_form_error" class="alert alert-error hidden mb-4" role="alert" aria-live="assertive" tabindex="-1">
 						<span id="model_form_error_message">Could not save model.</span>
 					</div>
+<div role="tablist" aria-label="Model settings" class="tabs tabs-bordered model-section-tabs" onkeydown="handleModelSectionKey(event)">
+<button type="button" role="tab" id="model-tab-model" aria-controls="model-panel-model" aria-selected="true" tabindex="0" class="tab tab-active" data-model-tab="model" onclick="setModelSection('model')">Model</button>
+<button type="button" role="tab" id="model-tab-generation" aria-controls="model-panel-generation" aria-selected="false" tabindex="-1" class="tab" data-model-tab="generation" onclick="setModelSection('generation')">Generation</button>
+<button type="button" role="tab" id="model-tab-execution" aria-controls="model-panel-execution" aria-selected="false" tabindex="-1" class="tab" data-model-tab="execution" onclick="setModelSection('execution')">Task execution</button>
+</div>
+<div id="model_section_body">
+<section id="model-panel-model" role="tabpanel" aria-labelledby="model-tab-model" data-model-panel="model">
 					<div class="form-control mb-3">						<label class="label"><span class="label-text">Name</span></label>
 							<input type="text" id="model_name" name="name" class="input input-bordered" required placeholder="My Model"/>
 					</div>
@@ -767,13 +774,6 @@ for _, agent := range modelOptions {
 							</div>
 							<p id="openai_compatible_discovery_status" class="text-sm mt-2 hidden" role="status" aria-live="polite"></p>
 					</div>
-							<div id="reasoning_effort_field" class="form-control mb-3 hidden">
-								<label class="label"><span id="reasoning_effort_label" class="label-text">Effort</span></label>
-								<select name="reasoning_effort" id="model_reasoning_effort" class="select select-bordered"></select>
-								<label class="label">
-									<span id="reasoning_effort_help" class="label-text-alt opacity-70">Controls provider reasoning/thinking effort for supported models.</span>
-								</label>
-							</div>
 						<!-- Connection method selector for Anthropic OAuth (CLI option removed) -->
 						<div id="auth_method_field" class="form-control mb-3 hidden">						<label class="label"><span class="label-text">Connection Method</span></label>
 						<select name="auth_method" id="model_auth_method" class="select select-bordered" onchange="toggleSubscriptionMethodFields()">
@@ -889,6 +889,15 @@ for _, agent := range modelOptions {
 							</div>
 						</div>
 					</div>
+</section>
+<section id="model-panel-generation" role="tabpanel" aria-labelledby="model-tab-generation" data-model-panel="generation" hidden>
+							<div id="reasoning_effort_field" class="form-control mb-3 hidden">
+								<label class="label"><span id="reasoning_effort_label" class="label-text">Effort</span></label>
+								<select name="reasoning_effort" id="model_reasoning_effort" class="select select-bordered"></select>
+								<label class="label">
+									<span id="reasoning_effort_help" class="label-text-alt opacity-70">Controls provider reasoning/thinking effort for supported models.</span>
+								</label>
+							</div>
 						<div id="model_temperature_field" class="form-control">
 							<label class="label"><span class="label-text">Temperature</span></label>
 							<input type="text" inputmode="decimal" pattern="[0-9]*.?[0-9]*" id="model_temperature" name="temperature" class="input input-bordered model-numeric-input" value="0" placeholder="0–1"/>
@@ -896,21 +905,6 @@ for _, agent := range modelOptions {
 								<span class="label-text-alt opacity-70">Optional. Leave default unless you know you need more randomness.</span>
 							</label>
 						</div>
-						<div class="form-control mt-3">
-						<label class="label cursor-pointer justify-start gap-2">
-							<input type="checkbox" id="model_is_default" name="is_default" class="checkbox checkbox-sm"/>
-							<span class="label-text">Set as default model</span>
-						</label>
-					</div>
-					<div class="form-control mt-2">
-						<label class="label cursor-pointer justify-start gap-2">
-							<input type="checkbox" id="model_auto_start_tasks" name="auto_start_tasks" class="checkbox checkbox-sm"/>
-							<span class="label-text">Auto-start created tasks</span>
-						</label>
-						<label class="label">
-							<span class="label-text-alt opacity-70">When enabled, tasks created with this model automatically move to "active" status</span>
-						</label>
-					</div>
 					<div class="divider text-sm opacity-60 mt-4 mb-2">Context &amp; compaction</div>
 					<input type="hidden" id="model_provider_context_window" name="provider_context_window" value="0"/>
 					<input type="hidden" id="model_provider_max_output_tokens" name="provider_max_output_tokens" value="0"/>
@@ -931,6 +925,23 @@ for _, agent := range modelOptions {
 						<input id="model_compaction_threshold_input" type="number" min="1" step="1" class="input input-bordered model-numeric-input" required oninput="document.getElementById('model_compaction_threshold').value = this.value"/>
 						<input type="hidden" id="model_compaction_threshold" name="compaction_threshold" value="0"/>
 					</div>
+</section>
+<section id="model-panel-execution" role="tabpanel" aria-labelledby="model-tab-execution" data-model-panel="execution" hidden>
+						<div class="form-control mt-3">
+						<label class="label cursor-pointer justify-start gap-2">
+							<input type="checkbox" id="model_is_default" name="is_default" class="checkbox checkbox-sm"/>
+							<span class="label-text">Set as default model</span>
+						</label>
+					</div>
+					<div class="form-control mt-2">
+						<label class="label cursor-pointer justify-start gap-2">
+							<input type="checkbox" id="model_auto_start_tasks" name="auto_start_tasks" class="checkbox checkbox-sm"/>
+							<span class="label-text">Auto-start created tasks</span>
+						</label>
+						<label class="label">
+							<span class="label-text-alt opacity-70">When enabled, tasks created with this model automatically move to "active" status</span>
+						</label>
+					</div>
 					<div class="divider text-sm opacity-60 mt-4 mb-2">Worker Pool</div>
 					<div class="grid grid-cols-2 gap-3">
 						<div class="form-control">
@@ -945,6 +956,8 @@ for _, agent := range modelOptions {
 							<input type="hidden" id="model_worker_timeout" name="worker_timeout" value="0"/>
 						</div>
 					</div>
+</section>
+</div>
 					<div class="modal-action">
 						<button type="button" class="btn" onclick="closeModelModal()">Cancel</button>
 						<button type="submit" id="model_submit_btn" class="btn btn-primary">Create</button>
@@ -958,6 +971,28 @@ for _, agent := range modelOptions {
 		</dialog>
 
 		<style>
+            #new_model_modal > .modal-box {
+                display: flex;
+                flex-direction: column;
+                height: min(46rem, calc(100dvh - 2rem));
+                overflow: hidden !important;
+            }
+            #new_model_modal #model_form {
+                display: flex;
+                flex-direction: column;
+                flex: 1;
+                min-height: 0;
+            }
+            #new_model_modal .model-section-tabs {
+                display: flex;
+                flex-shrink: 0;
+                margin-bottom: 1rem;
+            }
+            #new_model_modal .model-section-tabs .tab { flex: 1; white-space: nowrap; }
+            #new_model_modal #model_section_body { flex: 1; min-height: 0; overflow-y: auto; padding-right: 0.25rem; }
+            #new_model_modal [data-model-panel][hidden] { display: none !important; }
+            #new_model_modal .modal-action, #new_model_modal #model_form_error { flex-shrink: 0; }
+
             #new_model_modal .model-numeric-input {
                 width: 12rem;
                 max-width: 100%;
@@ -982,6 +1017,33 @@ for _, agent := range modelOptions {
 		@components.SecretInputVisibilityScript()
 
 		<script>
+                function setModelSection(section) {
+                    var modal = document.getElementById('new_model_modal');
+                    modal.querySelectorAll('[data-model-panel]').forEach(function(panel) {
+                        panel.hidden = panel.dataset.modelPanel !== section;
+                    });
+                    modal.querySelectorAll('[data-model-tab]').forEach(function(tab) {
+                        var selected = tab.dataset.modelTab === section;
+                        tab.classList.toggle('tab-active', selected);
+                        tab.setAttribute('aria-selected', String(selected));
+                        tab.tabIndex = selected ? 0 : -1;
+                    });
+                    document.getElementById('model_section_body').scrollTop = 0;
+                    modal.dispatchEvent(new Event('model-section-change'));
+                }
+                function handleModelSectionKey(event) {
+                    var tabs = Array.from(document.querySelectorAll('#new_model_modal [data-model-tab]'));
+                    var index = tabs.indexOf(event.target);
+                    if (index < 0) return;
+                    if (event.key === 'ArrowRight') index = (index + 1) % tabs.length;
+                    else if (event.key === 'ArrowLeft') index = (index + tabs.length - 1) % tabs.length;
+                    else if (event.key === 'Home') index = 0;
+                    else if (event.key === 'End') index = tabs.length - 1;
+                    else return;
+                    event.preventDefault();
+                    setModelSection(tabs[index].dataset.modelTab);
+                    tabs[index].focus();
+                }
 			function launchOAuthInSystemBrowser(path, anchor) {
 						var href = path || '';
 						if (!href) return false;
@@ -1815,10 +1877,12 @@ for _, agent := range modelOptions {
 									var aggregatorID = document.getElementById('model_mixture_aggregator').value;
 									var refs = selectedMixtureReferenceIDs();
 									if (!aggregatorID) {
+                                        setModelSection('model');
 										setMixtureValidationError('Choose an aggregator model.');
 										return false;
 									}
 									if (refs.length === 0 && document.getElementById('model_mixture_enabled').checked) {
+                                        setModelSection('model');
 										setMixtureValidationError('Add at least one reference model, or disable reference fan-out.');
 										return false;
 									}
@@ -2431,6 +2495,7 @@ for _, agent := range modelOptions {
 				resetSecretInputVisibility('model_custom_token_headers_json');
 				resetSecretInputVisibility('model_custom_refresh_headers_json');
 				resetSecretInputVisibility('model_custom_refresh_parameters_json');
+				setModelSection('model');
 				new_model_modal.showModal();
 			}
 
@@ -2824,6 +2889,7 @@ for _, agent := range modelOptions {
 				resetSecretInputVisibility('model_custom_token_headers_json');
 				resetSecretInputVisibility('model_custom_refresh_headers_json');
 				resetSecretInputVisibility('model_custom_refresh_parameters_json');
+				setModelSection('model');
 				new_model_modal.showModal();
 			}
 		</script>
@@ -2845,6 +2911,12 @@ for _, agent := range modelOptions {
 				});
 				document.getElementById('model_form').addEventListener('invalid', function(event) {
 					var field = event.target;
+                    var form = document.getElementById('model_form');
+                    if (form._revealingInvalidField) return;
+                    form._revealingInvalidField = true;
+                    setTimeout(function() { form._revealingInvalidField = false; }, 0);
+                    var panel = field.closest('[data-model-panel]');
+                    if (panel) setModelSection(panel.dataset.modelPanel);
 					var control = field && field.closest ? field.closest('.form-control') : null;
 					var label = field && field.id ? document.querySelector('label[for="' + field.id + '"]') : null;
 					if (!label && control) label = control.querySelector('.label-text');
@@ -2906,6 +2978,7 @@ for _, agent := range modelOptions {
                         if (active === b && pinned) close(); else show(b, true);
                     }, {signal: signal});
                     root.addEventListener('close', close, {signal: signal});
+                    root.addEventListener('model-section-change', close, {signal: signal});
                     root.addEventListener('keydown', function(e) {
                         if (e.key === 'Escape' && active) {
                             e.preventDefault();
