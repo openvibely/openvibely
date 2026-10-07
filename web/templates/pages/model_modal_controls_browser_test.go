@@ -273,3 +273,49 @@ func TestBrowserFunctional_OllamaDiscovery(t *testing.T) {
  })();</script>`
 	runReconnectChromeFixture(t, fixture)
 }
+
+func TestBrowserFunctional_ModelDiscoveryLoading(t *testing.T) {
+	var content bytes.Buffer
+	if err := ModelsContent(nil, nil, false).Render(context.Background(), &content); err != nil {
+		t.Fatal(err)
+	}
+	fixture := `<main id="reconnect-result"></main><script>
+ window.htmx={process:function(){}};
+ var pending=[];
+ window.fetch=function(url,options){return new Promise(function(resolve,reject){pending.push({url:url,resolve:resolve,reject:reject});});};
+ </script>` + content.String() + `<script>
+ (async function(){
+ var f=function(id){return document.getElementById(id);};
+ var assert=function(ok,message){if(!ok)throw Error(message);};
+ var wait=function(){return new Promise(function(resolve){setTimeout(resolve,30);});};
+ var complete=function(request){request.resolve({ok:true,json:function(){return Promise.resolve(request.url.includes('/ollama/') ? [{name:'local:model'}] : {models:[{id:'remote:model'}]});}});};
+ var busy=function(){return f('model_refresh').disabled && f('model_refresh').getAttribute('aria-busy')==='true' && !f('model_refresh').querySelector('.loading').classList.contains('hidden') && f('model_refresh').querySelector('svg').classList.contains('hidden');};
+ var idle=function(){return !f('model_refresh').disabled && f('model_refresh').getAttribute('aria-busy')==='false' && f('model_refresh').querySelector('.loading').classList.contains('hidden') && !f('model_refresh').querySelector('svg').classList.contains('hidden');};
+ try {
+ openNewModelModal();
+ for(var provider of ['ollama','openai_compatible_vllm']) {
+  f('model_provider').value=provider;toggleProviderFields();
+  assert(busy(),'automatic discovery shows spinner '+provider);
+  var count=pending.length;f('model_refresh').click();assert(pending.length===count,'disabled button cannot restart request');
+  complete(pending[pending.length-1]);await wait();assert(idle(),'success restores button');
+  f('model_refresh').click();assert(busy(),'manual refresh shows spinner');
+  pending[pending.length-1].reject(Error('timeout'));await wait();assert(idle(),'failure restores button');
+  f('model_refresh').click();var old=pending[pending.length-1];
+  if(provider==='ollama') {f('model_ollama_base_url').value='http://localhost:11435';ollamaEndpointChanged();}
+  else {f('model_base_url').value='http://localhost:8001/v1';scheduleAutoDiscoverOpenAICompatibleModels();}
+  assert(idle(),'cancellation restores button');
+  runAutoDiscoverOpenAICompatibleModels();var current=pending[pending.length-1];assert(busy(),'new request busy');
+  complete(old);await wait();assert(busy(),'old completion cannot enable button for new request');
+  complete(current);await wait();assert(idle(),'new completion restores button');
+  f('model_refresh').click();old=pending[pending.length-1];closeModelModal();assert(idle(),'closing modal cancels loading');
+  complete(old);await wait();openNewModelModal();
+ }
+ f('model_provider').value='openai_compatible_custom';toggleProviderFields();
+ f('model_custom_auth_method').value='oauth';toggleCustomProviderAuthFields();
+ f('model_base_url').value='https://api.example';f('model_custom_models_url').value='https://api.example/models';
+ runAutoDiscoverOpenAICompatibleModels();assert(idle(),'waiting for OAuth is not a running discovery');
+ f('reconnect-result').setAttribute('data-test-result','pass');
+ }catch(error){f('reconnect-result').setAttribute('data-test-result','fail');f('reconnect-result').setAttribute('data-test-error',String(error.stack));}
+ })();</script>`
+	runReconnectChromeFixture(t, fixture)
+}

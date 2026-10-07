@@ -432,7 +432,7 @@ func TestModelsContent_OpenAICompatibleDiscoveryCancelsStaleRequest(t *testing.T
 		"fetch('/models/openai-compatible/available?' + params.toString(), fetchOptions)",
 		"if (err && err.name === 'AbortError') return;",
 		"openAICompatibleDiscoveryGeneration !== discoveryGeneration",
-		"openAICompatibleDiscoveryAbortController === discoveryAbortController",
+		"if (generation !== openAICompatibleDiscoveryGeneration) return;",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("expected OpenAI-compatible discovery cancellation script to contain %q", want)
