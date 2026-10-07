@@ -45,11 +45,11 @@
   panel.append(searchWrap, list, effortBox, status);
   const subhead = el("div", "ov-mp-subhead"),
     back = el("button", "ov-mp-back", "‹"),
-    subname = el("span"),
     sublist = el("div", "ov-mp-sublist");
   back.type = "button";
   back.setAttribute("aria-label", "Back to providers");
-  subhead.append(back, subname);
+  subhead.append(back);
+  subhead.hidden = true;
   sub.append(subhead, sublist);
   document.body.append(panel, sub);
   let active = null,
@@ -124,11 +124,19 @@
     s.pending.then(
       () => {
         s.error = "";
-        if (active === btn) status.textContent = "";
+        s.failedSave = false;
+        if (active === btn) {
+          status.textContent = "";
+          renderEffort();
+        }
       },
       (err) => {
         s.error = err.message;
-        if (active === btn) status.textContent = s.error;
+        s.failedSave = true;
+        if (active === btn) {
+          status.textContent = s.error;
+          renderEffort();
+        }
       },
     );
     return s.pending;
@@ -206,8 +214,16 @@
         ?.focus({ preventScroll: true });
     } else search.focus({ preventScroll: true });
   }
+  function activateRow(row, target) {
+    target
+      .querySelectorAll("[data-picker-active]")
+      .forEach((item) => item.removeAttribute("data-picker-active"));
+    row.setAttribute("data-picker-active", "");
+  }
   function row(m, target) {
     const r = el("div", "ov-mp-row");
+    r.onpointermove = () => activateRow(r, target);
+    r.onfocusin = () => activateRow(r, target);
     r.dataset.selected = String(m.id === active.dataset.currentValue);
     if (m.provider) {
       const star = el("button", "ov-mp-star", favorites[m.id] ? "★" : "☆");
@@ -257,7 +273,7 @@
       ),
     );
     pick.onclick = () => choose(m);
-    r.append(pick);
+    r.prepend(pick);
     target.append(r);
   }
   function renderList() {
@@ -296,6 +312,8 @@
         const b = el("button", "ov-mp-provider");
         b.type = "button";
         b.dataset.provider = p;
+        b.onpointermove = () => activateRow(b, list);
+        b.onfocus = () => activateRow(b, list);
         b.setAttribute("aria-haspopup", "dialog");
         b.setAttribute("aria-controls", sub.id);
         b.setAttribute("aria-expanded", String(provider === p));
@@ -315,7 +333,7 @@
       return;
     }
     sublist.replaceChildren();
-    subname.textContent = provider;
+    sub.setAttribute("aria-label", provider + " models");
     options(active)
       .filter((m) => m.provider === provider && !favorites[m.id])
       .forEach((m) => row(m, sublist));
@@ -423,6 +441,7 @@
       let left = p.right + 6;
       if (left + sub.offsetWidth > width - 8)
         left = p.left - sub.offsetWidth - 6;
+      subhead.hidden = left >= 8;
       if (left < 8) {
         left = p.left;
         sub.style.width = p.width + "px";
@@ -473,7 +492,10 @@
       render();
       renderSub();
       search.focus({ preventScroll: true });
-      if (state(btn).error) state(btn).ready = load(btn);
+      const s = state(btn);
+      if (s.error) {
+        s.ready = s.failedSave ? save(btn).catch(() => {}) : load(btn);
+      }
     },
     changed(btn) {
       init(btn);
@@ -481,6 +503,7 @@
       s.loadToken++;
       s.loading = false;
       s.error = "";
+      s.failedSave = false;
       sync(btn);
       // Fetch an existing task/model preference before persisting a newly selected model.
       if (taskEndpoint(btn)) {

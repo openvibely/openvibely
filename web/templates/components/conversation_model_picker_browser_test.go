@@ -40,6 +40,13 @@ func TestBrowserFunctional_ConversationModelPicker(t *testing.T) {
  assert(panel.querySelectorAll('.ov-mp-provider').length===2,'provider groups');
  panel.querySelector('.ov-mp-provider').click();
  assert(!sub.hidden && sub.querySelectorAll('.ov-mp-pick').length===12,'provider submenu');
+ assert(sub.querySelector('.ov-mp-subhead').hidden,'no redundant submenu heading');
+ const row=sub.querySelector('.ov-mp-row');
+ assert(row.firstElementChild.classList.contains('ov-mp-pick')&&row.lastElementChild.classList.contains('ov-mp-star'),'model first, favorite on right');
+ row.dispatchEvent(new PointerEvent('pointermove'));
+ assert(row.hasAttribute('data-picker-active'),'hover activates model row');
+ const next=row.nextElementSibling;next.dispatchEvent(new PointerEvent('pointermove'));
+ assert(!row.hasAttribute('data-picker-active')&&next.hasAttribute('data-picker-active'),'hover moves highlight');
  sub.querySelector('.ov-mp-star').click();
  assert(panel.querySelectorAll('.ov-mp-star[aria-pressed=true]').length===1,'favorite moved to main panel');
  assert(sub.querySelectorAll('.ov-mp-pick').length===11,'favorite not duplicated');
@@ -108,6 +115,8 @@ func TestBrowserFunctional_TaskModelPickerPersistence(t *testing.T) {
  assert(!!trigger._ovModelState.error,'failed save reported');
  window.ovModelPicker.close(false);trigger.click();await trigger._ovModelState.ready;
  assert(!trigger._ovModelState.error,'reopen recovers after failed save');
+ assert(posts.at(-1)==='b','reopen retries the failed model selection');
+ assert(!panel.querySelector('input[type=range]').disabled,'effort controls recover after retry');
  choose('a');await trigger._ovModelState.ready;assert(posts.at(-1)==='a','can save after failure');
  const form=trigger.closest('form'),message=form.querySelector('[name=message]'),attachment=form.querySelector('[name=attachment_session_id]');
  let sent=null;

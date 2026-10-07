@@ -51,14 +51,20 @@
   min-width: 0;
   border-radius: 7px;
 }
-.ov-mp-row:hover,
-.ov-mp-provider:hover,
-.ov-model-picker button:focus-visible,
-.ov-model-submenu button:focus-visible {
-  background: var(--ov-menu-hover, #303846);
+/* Match the shared project selector's active-row colors. */
+.ov-mp-row[data-picker-active],
+.ov-mp-provider[data-picker-active] {
+  background-color: oklch(var(--bc) / 0.1);
 }
-.ov-mp-row[data-selected="true"] {
-  background: rgba(128, 120, 255, 0.14);
+@supports not (color: oklch(0 0 0)) {
+  .ov-mp-row[data-picker-active],
+  .ov-mp-provider[data-picker-active] {
+    background-color: var(--ov-hover);
+  }
+}
+[data-theme="light"] .ov-mp-row[data-picker-active],
+[data-theme="light"] .ov-mp-provider[data-picker-active] {
+  background-color: var(--ov-l-surface-active);
 }
 .ov-mp-pick,
 .ov-mp-provider,
@@ -125,9 +131,6 @@
   justify-content: space-between;
   text-align: left;
   border-radius: 7px;
-}
-.ov-mp-provider[aria-expanded="true"] {
-  background: rgba(128, 120, 255, 0.14);
 }
 .ov-mp-rule {
   border-top: 1px solid var(--ov-border-subtle, #414753);
@@ -198,6 +201,9 @@
 }
 .ov-model-picker button:focus-visible,
 .ov-model-submenu button:focus-visible {
-  outline: 2px solid #938aff;
-  outline-offset: -2px;
+  outline: none;
+}
+
+.ov-mp-subhead[hidden] {
+  display: none;
 }
