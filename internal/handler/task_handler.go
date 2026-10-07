@@ -3344,13 +3344,13 @@ func (h *Handler) TaskThreadSend(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusNotFound, "task not found")
 	}
 	if h.swarmSvc != nil && task.SwarmRole == models.SwarmRoleParent {
-		var modelOverride []string
+		var modelSelection []service.SwarmFollowupModelSelection
 		if agentID == "auto" || agentID == "" {
 			model, err := h.selectTaskAgent(c.Request().Context(), task.ProjectID, agentID, message, hasPendingImages(sessionID))
 			if err != nil || model == nil {
 				return echo.NewHTTPError(http.StatusBadRequest, "no model available for automatic selection")
 			}
-			modelOverride = []string{model.ID}
+			modelSelection = []service.SwarmFollowupModelSelection{{ModelID: model.ID}}
 		} else if managedModelSelection {
 			model, err := h.selectTaskAgent(c.Request().Context(), task.ProjectID, agentID, "", false)
 			if err != nil || model == nil {
@@ -3359,7 +3359,11 @@ func (h *Handler) TaskThreadSend(c echo.Context) error {
 			if err := h.applyConversationEffort(c, "", model); err != nil {
 				return err
 			}
-			modelOverride = []string{model.ID}
+			selection := service.SwarmFollowupModelSelection{ModelID: model.ID}
+			if effort, present := formValueIfPresent(c, "reasoning_effort"); present {
+				selection.ReasoningEffort = &effort
+			}
+			modelSelection = []service.SwarmFollowupModelSelection{selection}
 		}
 		if !managedModelSelection {
 			if err := h.persistTaskThreadModel(c, task); err != nil {
@@ -3369,7 +3373,7 @@ func (h *Handler) TaskThreadSend(c echo.Context) error {
 		if err := h.saveDeferredTaskUploads(c.Request().Context(), task.ID, sessionID); err != nil {
 			return err
 		}
-		if err := h.swarmSvc.HandleParentFollowup(c.Request().Context(), task.ID, message, modelOverride...); err != nil {
+		if err := h.swarmSvc.HandleParentFollowup(c.Request().Context(), task.ID, message, modelSelection...); err != nil {
 			applog.Infof("[handler] TaskThreadSend swarm parent follow-up routing failed task=%s: %v", taskID, err)
 			return echo.NewHTTPError(http.StatusInternalServerError, "failed to route swarm follow-up")
 		}
@@ -3422,13 +3426,12 @@ func (h *Handler) TaskThreadSend(c echo.Context) error {
 	}
 
 	admission, err := h.admitTaskFollowup(c.Request().Context(), taskFollowupAdmissionRequest{
-		Task:                   task,
-		Agent:                  agent,
-		ModelSelectionSnapshot: managedModelSelection,
-		Message:                message,
-		Source:                 models.TaskOriginWeb,
-		AttachmentSessionID:    sessionID,
-		LogPrefix:              "TaskThreadSend",
+		Task:                task,
+		Agent:               agent,
+		Message:             message,
+		Source:              models.TaskOriginWeb,
+		AttachmentSessionID: sessionID,
+		LogPrefix:           "TaskThreadSend",
 	})
 	if err != nil {
 		if admissionErr, ok := err.(*taskFollowupAdmissionError); ok {

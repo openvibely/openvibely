@@ -120,15 +120,19 @@ type SwarmConfig struct {
 	Isolation                        string   `json:"isolation,omitempty"`
 	DependsOnRoles                   []string `json:"depends_on_roles,omitempty"`
 	RerunGeneration                  int      `json:"rerun_generation,omitempty"`
-	CompletedGeneration              int      `json:"completed_generation,omitempty"`
-	Required                         bool     `json:"required,omitempty"`
-	WriteScope                       []string `json:"write_scope,omitempty"`
-	ReadScope                        []string `json:"read_scope,omitempty"`
-	ReviewerPrompt                   string   `json:"reviewer_prompt,omitempty"`
-	MergerPrompt                     string   `json:"merger_prompt,omitempty"`
-	IntegratorPrompt                 string   `json:"integrator_prompt,omitempty"`
-	PlannerNotes                     string   `json:"planner_notes,omitempty"`
-	LastError                        string   `json:"last_error,omitempty"`
+	// A nil follow-up effort uses the current task preference; an empty value uses the model default.
+	FollowupEffortModelID    string   `json:"followup_effort_model_id,omitempty"`
+	FollowupEffortGeneration int      `json:"followup_effort_generation,omitempty"`
+	FollowupReasoningEffort  *string  `json:"followup_reasoning_effort,omitempty"`
+	CompletedGeneration      int      `json:"completed_generation,omitempty"`
+	Required                 bool     `json:"required,omitempty"`
+	WriteScope               []string `json:"write_scope,omitempty"`
+	ReadScope                []string `json:"read_scope,omitempty"`
+	ReviewerPrompt           string   `json:"reviewer_prompt,omitempty"`
+	MergerPrompt             string   `json:"merger_prompt,omitempty"`
+	IntegratorPrompt         string   `json:"integrator_prompt,omitempty"`
+	PlannerNotes             string   `json:"planner_notes,omitempty"`
+	LastError                string   `json:"last_error,omitempty"`
 }
 
 func ParseSwarmConfig(raw string) (SwarmConfig, error) {

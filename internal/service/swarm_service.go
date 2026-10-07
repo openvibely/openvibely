@@ -200,11 +200,28 @@ func (s *SwarmService) StartPlannerForScheduledRun(ctx context.Context, parentTa
 	return s.startPlanner(ctx, parentTaskID, startsNewContext)
 }
 
-func (s *SwarmService) startPlanner(ctx context.Context, parentTaskID string, startsNewContext bool, modelOverride ...string) error {
-	return s.startPlannerWithFollowup(ctx, parentTaskID, startsNewContext, "", modelOverride...)
+func (s *SwarmService) startPlanner(ctx context.Context, parentTaskID string, startsNewContext bool) error {
+	return s.startPlannerWithFollowup(ctx, parentTaskID, startsNewContext, "", nil)
 }
 
-func (s *SwarmService) startPlannerWithFollowup(ctx context.Context, parentTaskID string, startsNewContext bool, followup string, modelOverride ...string) error {
+type SwarmFollowupModelSelection struct {
+	ModelID         string
+	ReasoningEffort *string
+}
+
+func setPlannerFollowupEffort(cfg *models.SwarmConfig, selection *SwarmFollowupModelSelection) {
+	cfg.FollowupEffortModelID = ""
+	cfg.FollowupEffortGeneration = 0
+	cfg.FollowupReasoningEffort = nil
+	if selection != nil && selection.ModelID != "" && selection.ReasoningEffort != nil {
+		effort := *selection.ReasoningEffort
+		cfg.FollowupEffortModelID = selection.ModelID
+		cfg.FollowupEffortGeneration = cfg.RerunGeneration
+		cfg.FollowupReasoningEffort = &effort
+	}
+}
+
+func (s *SwarmService) startPlannerWithFollowup(ctx context.Context, parentTaskID string, startsNewContext bool, followup string, selection *SwarmFollowupModelSelection) error {
 	s.orchestration.Lock()
 	defer s.orchestration.Unlock()
 	parent, err := s.taskRepo.GetByID(ctx, parentTaskID)
@@ -220,8 +237,8 @@ func (s *SwarmService) startPlannerWithFollowup(ctx context.Context, parentTaskI
 			return fmt.Errorf("reloading guarded swarm parent: %w", err)
 		}
 	}
-	if len(modelOverride) > 0 {
-		parent.AgentID = &modelOverride[0]
+	if selection != nil && selection.ModelID != "" {
+		parent.AgentID = &selection.ModelID
 	}
 	if s.workerSvc != nil {
 		s.workerSvc.ClearCancellationRequested(parent.ID)
@@ -249,6 +266,13 @@ func (s *SwarmService) startPlannerWithFollowup(ctx context.Context, parentTaskI
 		goal += "\n\nFollow-up request:\n" + followup
 	}
 	prompt := plannerPrompt(goal, maxWorkers(parent))
+	parentCfg, _ := models.ParseSwarmConfig(parent.SwarmConfig)
+	plannerCfg := models.SwarmConfig{Isolation: "read_only", RerunGeneration: max(1, parentCfg.Generation), Required: true}
+	setPlannerFollowupEffort(&plannerCfg, selection)
+	plannerConfigJSON, err := plannerCfg.JSON()
+	if err != nil {
+		return err
+	}
 	child := &models.Task{
 		ProjectID:         parent.ProjectID,
 		Title:             parent.Title + " · Planner",
@@ -261,7 +285,7 @@ func (s *SwarmService) startPlannerWithFollowup(ctx context.Context, parentTaskI
 		ParentTaskID:      &parent.ID,
 		SwarmRole:         models.SwarmRolePlanner,
 		SwarmStatus:       "planning",
-		SwarmConfig:       `{"isolation":"read_only","rerun_generation":1,"required":true}`,
+		SwarmConfig:       plannerConfigJSON,
 		SwarmSequence:     0,
 		StartsNewContext:  startsNewContext,
 	}
@@ -799,7 +823,11 @@ func (s *SwarmService) handleChildCancelled(ctx context.Context, parent *models.
 	return nil
 }
 
-func (s *SwarmService) HandleParentFollowup(ctx context.Context, parentTaskID string, message string, modelOverride ...string) error {
+func (s *SwarmService) HandleParentFollowup(ctx context.Context, parentTaskID string, message string, modelSelection ...SwarmFollowupModelSelection) error {
+	var selection *SwarmFollowupModelSelection
+	if len(modelSelection) > 0 {
+		selection = &modelSelection[0]
+	}
 	unlock := repository.LockTaskLifecycle(parentTaskID)
 	defer unlock()
 	parent, err := s.taskRepo.GetByID(ctx, parentTaskID)
@@ -828,7 +856,7 @@ func (s *SwarmService) HandleParentFollowup(ctx context.Context, parentTaskID st
 		return err
 	}
 	if planner == nil {
-		return s.startPlannerWithFollowup(ctx, parent.ID, false, message, modelOverride...)
+		return s.startPlannerWithFollowup(ctx, parent.ID, false, message, selection)
 	}
 	planner, err = s.taskRepo.GetByID(ctx, planner.ID)
 	if err != nil {
@@ -838,8 +866,8 @@ func (s *SwarmService) HandleParentFollowup(ctx context.Context, parentTaskID st
 		return fmt.Errorf("loading planner task for parent %s: task not found", parent.ID)
 	}
 	planner.AgentID = parent.AgentID
-	if len(modelOverride) > 0 {
-		planner.AgentID = &modelOverride[0]
+	if selection != nil && selection.ModelID != "" {
+		planner.AgentID = &selection.ModelID
 	}
 	planner.Prompt = coordinatorFollowupPrompt(parent.Prompt, message, cfg.Generation)
 	planner.Status = models.StatusPending
@@ -847,6 +875,7 @@ func (s *SwarmService) HandleParentFollowup(ctx context.Context, parentTaskID st
 	planner.SwarmStatus = "coordinating"
 	plannerCfg, _ := models.ParseSwarmConfig(planner.SwarmConfig)
 	plannerCfg.RerunGeneration = cfg.Generation
+	setPlannerFollowupEffort(&plannerCfg, selection)
 	planner.SwarmConfig, _ = plannerCfg.JSON()
 	if err := s.taskRepo.Update(ctx, planner); err != nil {
 		return err
