@@ -11,7 +11,6 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/a-h/templ"
 	"github.com/labstack/echo/v4"
@@ -33,7 +32,6 @@ const (
 	openAICompatibleExtraHeadersHeader     = "X-OpenAI-Compatible-Extra-Headers"
 	openAICompatibleModelsArrayPathHeader  = "X-OpenAI-Compatible-Models-Array-Path"
 	openAICompatibleModelIDFieldHeader     = "X-OpenAI-Compatible-Model-ID-Field"
-	openAICompatibleDiscoveryBudget        = 5 * time.Second
 )
 
 func modelCardListFilter(c echo.Context, page cardPageRequest) repository.ModelCardListFilter {
@@ -1513,10 +1511,10 @@ func (h *Handler) ListOpenAICompatibleAvailableModels(c echo.Context) error {
 			return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
 		}
 	}
-	discoveryCtx, cancelDiscovery := context.WithTimeout(c.Request().Context(), openAICompatibleDiscoveryBudget)
+	discoveryCtx, cancelDiscovery := context.WithTimeout(c.Request().Context(), service.ModelDiscoveryTimeout)
 	defer cancelDiscovery()
  if key := c.Request().Header.Get(modelOAuthSetupHeader); key != "" { discoveryCtx = context.WithValue(discoveryCtx,modelOAuthSetupContextKey{},key) }
-	client := llmcustomauth.NewHTTPClient(openAICompatibleDiscoveryBudget, requestPrivate)
+	client := llmcustomauth.NewHTTPClient(service.ModelDiscoveryTimeout, requestPrivate)
 	discoveryKey := apiKey
 	if configured != nil && discoveryKey == "" {
 		discoveryKey = configured.APIKey
@@ -1855,6 +1853,9 @@ func (h *Handler) ListOllamaAvailableModels(c echo.Context) error {
 	models, err := service.ListOllamaModels(c.Request().Context(), baseURL)
 	if err != nil {
 		applog.Infof("[handler] ListOllamaAvailableModels error: %v", err)
+		if errors.Is(err, context.DeadlineExceeded) {
+			return c.JSON(http.StatusGatewayTimeout, map[string]string{"error": "Ollama model discovery timed out. Check the server connection."})
+		}
 		return c.JSON(http.StatusBadGateway, map[string]string{"error": err.Error()})
 	}
 

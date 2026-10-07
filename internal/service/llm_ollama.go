@@ -57,6 +57,8 @@ type ollamaErrorResponse struct {
 
 // ListOllamaModels queries an Ollama instance for available models.
 func ListOllamaModels(ctx context.Context, baseURL string) ([]OllamaModelInfo, error) {
+	ctx, cancel := context.WithTimeout(ctx, ModelDiscoveryTimeout)
+	defer cancel()
 	if baseURL == "" {
 		baseURL = "http://localhost:11434"
 	}
