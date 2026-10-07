@@ -125,6 +125,8 @@
       () => {
         s.error = "";
         s.failedSave = false;
+        if (s.selectionPending === body.get("agent_id"))
+          s.selectionPending = null;
         if (active === btn) {
           status.textContent = "";
           renderEffort();
@@ -264,16 +266,17 @@
           m.provider + (m.model ? " · " + m.model : ""),
         ),
       );
-    pick.append(
-      copy,
-      el(
-        "span",
-        "ov-mp-check",
-        m.id === active.dataset.currentValue ? "✓" : "",
-      ),
-    );
+    pick.append(copy);
     pick.onclick = () => choose(m);
     r.prepend(pick);
+    const check = el(
+      "span",
+      "ov-mp-check",
+      m.id === active.dataset.currentValue ? "✓" : "",
+    );
+    check.setAttribute("aria-hidden", "true");
+    check.onclick = () => choose(m);
+    r.append(check);
     target.append(r);
   }
   function renderList() {
@@ -368,6 +371,12 @@
     slider.max = String(levels.length - 1);
     slider.step = "1";
     slider.value = String(Math.max(0, levels.indexOf(value)));
+    const updateTrack = () =>
+      slider.style.setProperty(
+        "--ov-mp-progress",
+        (Number(slider.value) / Math.max(1, levels.length - 1)) * 100 + "%",
+      );
+    updateTrack();
     slider.disabled = s.loading || !!s.error;
     slider.setAttribute("aria-label", "Reasoning effort");
     slider.setAttribute(
@@ -375,6 +384,7 @@
       value ? label(value) : "Model default",
     );
     slider.oninput = () => {
+      updateTrack();
       const value = levels[Number(slider.value)];
       s.efforts[key(m)] = value;
       sync(active);
@@ -473,6 +483,23 @@
       btn._ovModelState.ready = load(btn);
     } else btn._ovModelState.ready = Promise.resolve();
   }
+  function loadSelection(btn) {
+    const s = state(btn),
+      chosen = btn.dataset.currentValue;
+    const promise = load(btn),
+      token = s.loadToken;
+    return promise
+      .then(() => {
+        if (
+          token !== s.loadToken ||
+          chosen !== btn.dataset.currentValue ||
+          s.error
+        )
+          return;
+        return save(btn);
+      })
+      .catch(() => {});
+  }
   window.ovModelPicker = {
     init,
     save,
@@ -494,7 +521,11 @@
       search.focus({ preventScroll: true });
       const s = state(btn);
       if (s.error) {
-        s.ready = s.failedSave ? save(btn).catch(() => {}) : load(btn);
+        s.ready = s.failedSave
+          ? save(btn).catch(() => {})
+          : s.selectionPending
+            ? loadSelection(btn)
+            : load(btn);
       }
     },
     changed(btn) {
@@ -507,20 +538,8 @@
       sync(btn);
       // Fetch an existing task/model preference before persisting a newly selected model.
       if (taskEndpoint(btn)) {
-        const chosen = btn.dataset.currentValue;
-        const promise = load(btn);
-        const token = s.loadToken;
-        s.ready = promise
-          .then(() => {
-            if (
-              token !== s.loadToken ||
-              chosen !== btn.dataset.currentValue ||
-              s.error
-            )
-              return;
-            return save(btn);
-          })
-          .catch(() => {});
+        s.selectionPending = btn.dataset.currentValue;
+        s.ready = loadSelection(btn);
       } else save(btn);
     },
   };

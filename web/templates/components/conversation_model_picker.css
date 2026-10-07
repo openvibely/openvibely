@@ -115,6 +115,8 @@
 }
 .ov-mp-check {
   width: 15px;
+  margin-right: 10px;
+  cursor: pointer;
   color: #a9a2ff;
   flex-shrink: 0;
 }
@@ -206,4 +208,59 @@
 
 .ov-mp-subhead[hidden] {
   display: none;
+}
+
+/* Explicit range styling avoids native pressed/hover colors in WebKit. */
+.ov-mp-effort input[type="range"] {
+  --ov-mp-track: #4b5260;
+  --ov-mp-accent: #938aff;
+  appearance: none;
+  -webkit-appearance: none;
+  background: transparent;
+  height: 20px;
+}
+[data-theme="light"] .ov-mp-effort input[type="range"] {
+  --ov-mp-track: #d5d8df;
+}
+.ov-mp-effort input[type="range"]::-webkit-slider-runnable-track {
+  height: 6px;
+  border-radius: 3px;
+  background: linear-gradient(
+    to right,
+    var(--ov-mp-accent) 0 var(--ov-mp-progress),
+    var(--ov-mp-track) var(--ov-mp-progress) 100%
+  );
+}
+.ov-mp-effort input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 14px;
+  width: 14px;
+  margin-top: -4px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--ov-mp-accent);
+  box-shadow: none;
+}
+.ov-mp-effort input[type="range"]::-moz-range-track {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--ov-mp-track);
+}
+.ov-mp-effort input[type="range"]::-moz-range-progress {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--ov-mp-accent);
+}
+.ov-mp-effort input[type="range"]::-moz-range-thumb {
+  height: 14px;
+  width: 14px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--ov-mp-accent);
+  box-shadow: none;
+}
+.ov-mp-effort input[type="range"]:focus-visible {
+  outline: 2px solid var(--ov-mp-accent);
+  outline-offset: 3px;
 }

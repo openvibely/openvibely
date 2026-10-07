@@ -42,7 +42,7 @@ func TestBrowserFunctional_ConversationModelPicker(t *testing.T) {
  assert(!sub.hidden && sub.querySelectorAll('.ov-mp-pick').length===12,'provider submenu');
  assert(sub.querySelector('.ov-mp-subhead').hidden,'no redundant submenu heading');
  const row=sub.querySelector('.ov-mp-row');
- assert(row.firstElementChild.classList.contains('ov-mp-pick')&&row.lastElementChild.classList.contains('ov-mp-star'),'model first, favorite on right');
+ assert(row.firstElementChild.classList.contains('ov-mp-pick')&&row.children[1].classList.contains('ov-mp-star')&&row.lastElementChild.classList.contains('ov-mp-check'),'model first, favorite on right');
  row.dispatchEvent(new PointerEvent('pointermove'));
  assert(row.hasAttribute('data-picker-active'),'hover activates model row');
  const next=row.nextElementSibling;next.dispatchEvent(new PointerEvent('pointermove'));
@@ -54,7 +54,15 @@ func TestBrowserFunctional_ConversationModelPicker(t *testing.T) {
  assert(sub.hidden && panel.querySelectorAll('.ov-mp-pick').length===1,'search all providers');
  panel.querySelector('.ov-mp-pick').click();
  assert(!panel.hidden && trigger.dataset.currentValue==='m23','select keeps picker open');
- const slider=panel.querySelector('input[type=range]');slider.value='2';slider.dispatchEvent(new Event('input'));slider.dispatchEvent(new Event('change'));
+ const slider=panel.querySelector('input[type=range]');
+ document.documentElement.dataset.theme='light';
+ assert(getComputedStyle(slider).getPropertyValue('--ov-mp-track').trim()==='#d5d8df','light track is light gray');
+ const accent=getComputedStyle(slider).getPropertyValue('--ov-mp-accent');
+ slider.value='1';slider.dispatchEvent(new Event('input'));
+ assert(getComputedStyle(slider).getPropertyValue('--ov-mp-accent')===accent,'adjustment keeps same accent');
+ document.documentElement.dataset.theme='dark';
+ assert(getComputedStyle(slider).getPropertyValue('--ov-mp-track').trim()==='#4b5260','dark track is gray');
+ slider.value='2';slider.dispatchEvent(new Event('input'));slider.dispatchEvent(new Event('change'));
  assert(document.querySelector('[name=reasoning_effort]').value==='high','effort submitted');
  panel.querySelector('.ov-mp-reset').click();
  assert(document.querySelector('[name=reasoning_effort]').value==='','restore model default');
@@ -84,10 +92,10 @@ func TestBrowserFunctional_TaskModelPickerPersistence(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, `<!doctype html><html><head><style>body{font-family:sans-serif}form{margin-top:550px}</style></head><body data-test-result="pending"><script>
  localStorage.clear();window.htmx={process:function(){}};
- const stored={a:'high',b:'low'},posts=[];let failNextWrite=false;
+ const stored={a:'high',b:'low'},posts=[];let failNextWrite=false,failNextRead=false;
  window.fetch=async function(url,options){
  if(options?.method==='POST'){if(failNextWrite){failNextWrite=false;return {ok:false};}const body=options.body;await new Promise(r=>setTimeout(r,20));stored[body.get('agent_id')]=body.get('reasoning_effort');posts.push(body.get('agent_id'));return {ok:true};}
- const id=new URL(url,location.href).searchParams.get('agent_id');await new Promise(r=>setTimeout(r,id==='a'?80:20));return {ok:true,json:async()=>({reasoning_effort:stored[id]||''})};
+ if(failNextRead){failNextRead=false;return {ok:false};}const id=new URL(url,location.href).searchParams.get('agent_id');await new Promise(r=>setTimeout(r,id==='a'?80:20));return {ok:true,json:async()=>({reasoning_effort:stored[id]||''})};
  };
  </script>`+content.String()+`<div id="browser-result"></div><script>
  (async()=>{const assert=(v,m)=>{if(!v)throw Error(m)},wait=ms=>new Promise(r=>setTimeout(r,ms));try{
@@ -107,10 +115,14 @@ func TestBrowserFunctional_TaskModelPickerPersistence(t *testing.T) {
  const sub=document.getElementById('conversation-provider-models');
  sub.querySelector('[data-model=c]').click();await trigger._ovModelState.ready;
  assert(!sub.hidden && sub.querySelector('[data-model=c]').getAttribute('aria-pressed')==='true','selected model remains visible without effort');
- assert(sub.querySelector('[data-model=c] .ov-mp-check').textContent==='✓','selected checkmark without effort');
+ assert(sub.querySelector('[data-model=c]').closest('.ov-mp-row').querySelector('.ov-mp-check').textContent==='✓','selected checkmark without effort');
  window.ovModelPicker.close(false);trigger.click();
  assert(!sub.hidden && sub.querySelector('[data-model=c]').getAttribute('aria-pressed')==='true','reopen selected provider');
  assert(panel.getBoundingClientRect().right<=innerWidth,'small viewport bounds');
+ failNextRead=true;choose('b');await trigger._ovModelState.ready;
+ assert(!!trigger._ovModelState.error,'lookup failure shown');
+ window.ovModelPicker.close(false);trigger.click();await trigger._ovModelState.ready;
+ assert(!trigger._ovModelState.error&&posts.at(-1)==='b','lookup retry persists pending selection');
  failNextWrite=true;choose('b');await trigger._ovModelState.ready;
  assert(!!trigger._ovModelState.error,'failed save reported');
  window.ovModelPicker.close(false);trigger.click();await trigger._ovModelState.ready;
