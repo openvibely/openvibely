@@ -916,45 +916,35 @@ for _, agent := range modelOptions {
 					<input type="hidden" id="model_provider_max_output_tokens" name="provider_max_output_tokens" value="0"/>
 					<div class="grid grid-cols-2 gap-3">
 						<div class="form-control">
-							<label class="label"><span class="label-text">Context window (tokens)</span></label>
+							@modelSettingLabel("Context window (tokens)", "model_context_window_cap", "model_context_source", "Use the reported limit, or enter the window configured on your server.")
 							<input type="number" min="1" step="1" id="model_context_window_cap" name="context_window" class="input input-bordered" value="200000" required onchange="updateContextLimitInputs(Number(document.getElementById('model_provider_context_window').value), Number(document.getElementById('model_provider_max_output_tokens').value), true)"/>
 							<p id="model_provider_context_display" class="text-sm opacity-70 mt-2">Reported context limit: Not reported</p>
-							<p id="model_context_source" class="text-sm opacity-70">Reported by the server or built-in catalog</p>
-							<label class="label"><span class="label-text-alt opacity-70">Use the reported limit, or enter the window configured on your server.</span></label>
 						</div>
 						<div id="model_output_limit_field" class="form-control">
-							<label class="label"><span class="label-text">Max output (tokens)</span></label>
+							@modelSettingLabel("Max output (tokens)", "model_default_max_tokens", "model_output_help", "Defaults leave room for input. Below 32,768 context tokens, output is limited to one quarter of the window.")
 							<input type="number" min="1" step="1" id="model_default_max_tokens" name="default_max_tokens" class="input input-bordered" value="16384" onchange="updateContextLimitInputs(Number(document.getElementById('model_provider_context_window').value), Number(document.getElementById('model_provider_max_output_tokens').value), true)"/>
 							<p id="model_provider_max_output_display" class="text-sm opacity-70 mt-2">Reported output limit: Not reported</p>
-							<label class="label"><span class="label-text-alt opacity-70">Defaults leave room for input. Below 32,768 context tokens, output is limited to one quarter of the window.</span></label>
 						</div>
 					</div>
 					<div class="form-control mt-2">
-						<label class="label"><span class="label-text">Compact when input exceeds (tokens)</span></label>
+						@modelSettingLabel("Compact when input exceeds (tokens)", "model_compaction_threshold_mode", "model_compaction_help", "Automatic follows the model’s context window. Choose a lower threshold to compact earlier.")
 						<select id="model_compaction_threshold_mode" class="select select-bordered" aria-label="Custom threshold mode" onchange="changeModelDefaultMode('model_compaction_threshold')"><option value="default">Automatic</option><option value="custom">Custom threshold</option></select>
 							<input id="model_compaction_threshold_custom" type="number" min="1" step="1" class="input input-bordered mt-2 hidden" aria-label="Custom threshold" oninput="document.getElementById('model_compaction_threshold').value = this.value" disabled/>
 							<input type="hidden" id="model_compaction_threshold" name="compaction_threshold" class="input input-bordered" value="0"/>
-						<label class="label"><span class="label-text-alt opacity-70">Automatic follows the model’s context window. Choose a lower threshold to compact earlier.</span></label>
 					</div>
 					<div class="divider text-sm opacity-60 mt-4 mb-2">Worker Pool</div>
 					<div class="grid grid-cols-2 gap-3">
 						<div class="form-control">
-							<label class="label"><span class="label-text">Max Workers</span></label>
+							@modelSettingLabel("Max Workers", "model_max_workers_mode", "model_workers_help", "Choose a custom limit to restrict concurrent workers for this model.")
 							<select id="model_max_workers_mode" class="select select-bordered" aria-label="Custom worker limit mode" onchange="changeModelDefaultMode('model_max_workers')"><option value="default">Use global pool</option><option value="custom">Custom worker limit</option></select>
 							<input id="model_max_workers_custom" type="number" min="1" step="1" class="input input-bordered mt-2 hidden" aria-label="Custom worker limit" oninput="document.getElementById('model_max_workers').value = this.value" disabled/>
 							<input type="hidden" id="model_max_workers" name="model_max_workers" class="input input-bordered" value="0"/>
-							<label class="label">
-								<span class="label-text-alt opacity-70">Choose a custom limit to restrict concurrent workers for this model.</span>
-							</label>
 						</div>
 						<div class="form-control">
-							<label class="label"><span class="label-text">Inactivity timeout (seconds)</span></label>
+							@modelSettingLabel("Inactivity timeout (seconds)", "model_worker_timeout_mode", "model_timeout_help", "Resets on model and tool activity. Custom durations are in seconds.")
 							<select id="model_worker_timeout_mode" class="select select-bordered" aria-label="Custom timeout mode" onchange="changeModelDefaultMode('model_worker_timeout')"><option value="default">Default — 30 minutes</option><option value="custom">Custom timeout</option></select>
 							<input id="model_worker_timeout_custom" type="number" min="1" step="1" class="input input-bordered mt-2 hidden" aria-label="Custom timeout" oninput="document.getElementById('model_worker_timeout').value = this.value" disabled/>
 							<input type="hidden" id="model_worker_timeout" name="worker_timeout" class="input input-bordered" value="0"/>
-							<label class="label">
-								<span class="label-text-alt opacity-70">Resets on model and tool activity. Custom durations are in seconds.</span>
-							</label>
 						</div>
 					</div>
 					<div class="modal-action">
@@ -1924,7 +1914,10 @@ for _, agent := range modelOptions {
 							}
 							document.getElementById('model_output_limit_field').classList.toggle('hidden', !supportsOutput);
 							maxOutput.disabled = !supportsOutput;
-							document.getElementById('model_context_source').textContent = context > 0 ? 'Reported by the server or built-in catalog' : 'No reported limit. Verify the context window against your server configuration.';
+							var contextHelp = context > 0 ? 'Limit from the server or built-in catalog. You can enter the window configured on your server.' : 'No reported limit. Verify the context window against your server configuration.';
+							var contextTooltip = document.getElementById('model_context_source');
+							contextTooltip.setAttribute('data-tip', contextHelp);
+							contextTooltip.setAttribute('aria-label', contextHelp);
 							syncModelDefaultControls();
 						}
 
@@ -2839,5 +2832,17 @@ for _, agent := range modelOptions {
 					var fieldName = label ? label.textContent.trim() : ((field && field.name) || 'a required field');
 					showModelFormError('Complete the required field: ' + fieldName + '.');
 				}, true);		</script>
+	</div>
+}
+
+templ modelSettingLabel(label string, fieldID string, helpID string, help string) {
+	<div class="label">
+		<label for={ fieldID } class="label-text">{ label }</label>
+		<button type="button" id={ helpID } class="tooltip tooltip-left inline-flex h-5 w-5 shrink-0 items-center justify-center opacity-70" data-tip={ help } aria-label={ help } onfocus="this.classList.add('tooltip-open')" onblur="this.classList.remove('tooltip-open')">
+			<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+				<circle cx="12" cy="12" r="9"></circle>
+				<path stroke-linecap="round" d="M12 11v6M12 7h.01"></path>
+			</svg>
+		</button>
 	</div>
 }
