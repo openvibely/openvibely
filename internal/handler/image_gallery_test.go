@@ -52,7 +52,11 @@ func TestNewTaskMessageImagesRemainInAttachmentPanel(t *testing.T) {
 	useTempUploadsDir(t)
 	project := createProject(t, h, "Gallery first send")
 	other := createProject(t, h, "Other gallery")
-	agent := createAgent(t, modelsRepo)
+	agent := createAgent(t, modelsRepo, func(a *models.LLMConfig) {
+		a.Provider = models.ProviderOpenAI
+		a.Model = "gpt-5.5"
+		a.ReasoningEffort = "medium"
+	})
 	var upload bytes.Buffer
 	writer := multipart.NewWriter(&upload)
 	file, err := writer.CreateFormFile("files", "screenshot.png")
@@ -70,7 +74,7 @@ func TestNewTaskMessageImagesRemainInAttachmentPanel(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &uploaded))
 	require.NotEmpty(t, uploaded.SessionID)
-	form := url.Values{"message": {"Inspect screenshot"}, "agent_id": {agent.ID}, "attachment_session_id": {uploaded.SessionID}}
+	form := url.Values{"message": {"Inspect screenshot"}, "agent_id": {agent.ID}, "reasoning_effort": {"high"}, "model_selection_managed": {"1"}, "attachment_session_id": {uploaded.SessionID}}
 	req = httptest.NewRequest(http.MethodPost, "/tasks?project_id="+project.ID+"&from=new&thread=1", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("HX-Request", "true")
@@ -79,6 +83,13 @@ func TestNewTaskMessageImagesRemainInAttachmentPanel(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 	id := rec.Header().Get("X-Created-Task-ID")
 	require.NotEmpty(t, id)
+	effort, err := h.taskRepo.ModelEffort(context.Background(), id, *agent)
+	require.NoError(t, err)
+	require.Equal(t, "high", effort)
+	executions, err := h.execRepo.ListByTask(context.Background(), id)
+	require.NoError(t, err)
+	require.Len(t, executions, 1)
+	require.Equal(t, agent.ID, executions[0].AgentConfigID)
 	require.Contains(t, rec.Body.String(), `/tasks/`+id+`/attachments?project_id=`+project.ID)
 	for _, projectID := range []string{project.ID, other.ID} {
 		req = httptest.NewRequest(http.MethodGet, "/tasks/"+id+"/attachments?project_id="+projectID, nil)

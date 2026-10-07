@@ -12,7 +12,7 @@ import (
 // Editing a configuration to use another model must not inherit stale effort.
 func (r *TaskRepo) SetModelEffort(ctx context.Context, taskID string, agent models.LLMConfig, effort string) error {
 
-	_, err := r.db.ExecContext(ctx, `INSERT INTO task_model_efforts (task_id, agent_config_id, model, effort) VALUES (?, ?, ?, ?)
+	_, err := execBoundSQLite(ctx, r.db, `INSERT INTO task_model_efforts (task_id, agent_config_id, model, effort) VALUES (?, ?, ?, ?)
  ON CONFLICT(task_id, agent_config_id) DO UPDATE SET model=excluded.model, effort=excluded.effort`, taskID, agent.ID, agent.Model, effort)
 	return err
 }

@@ -2,12 +2,34 @@ package repository
 
 import (
 	"context"
+	"path/filepath"
 	"testing"
 
+	"github.com/openvibely/openvibely/internal/database"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/stretchr/testify/require"
 )
+
+func TestTaskModelEffort_UsesDedicatedWriter(t *testing.T) {
+	connections, err := database.NewReadWrite(filepath.Join(t.TempDir(), "task-effort.db"))
+	require.NoError(t, err)
+	defer connections.Close()
+	unregister := RegisterDedicatedWriter(connections.Reader, connections.Writer)
+	defer unregister()
+
+	ctx := context.Background()
+	project := createThreadInputProject(t, ctx, connections.Writer)
+	task := createThreadInputTask(t, ctx, connections.Writer, project.ID)
+	agent := &models.LLMConfig{Name: "Effort test model", Provider: models.ProviderOpenAI, Model: "gpt-5.5", APIKey: "test", ReasoningEffort: "medium"}
+	require.NoError(t, NewLLMConfigRepo(connections.Writer).Create(ctx, agent))
+
+	repo := NewTaskRepo(connections.Reader, nil)
+	require.NoError(t, repo.SetModelEffort(ctx, task.ID, *agent, "high"))
+	effort, err := repo.ModelEffort(ctx, task.ID, *agent)
+	require.NoError(t, err)
+	require.Equal(t, "high", effort)
+}
 
 func TestTaskModelEffort_IsolatedAndModelBound(t *testing.T) {
 	db := testutil.NewTestDB(t)
