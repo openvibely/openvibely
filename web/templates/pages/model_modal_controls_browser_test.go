@@ -376,6 +376,13 @@ func TestBrowserFunctional_ModelHelpLayout(t *testing.T) {
         for (var width of [360, 896]) {
             box.style.width=width+'px';
             for (var button of modal.querySelectorAll('.model-setting-help')) {
+                setModelSection(button.closest('[data-model-panel]').dataset.modelPanel);
+                var body=document.getElementById('model_section_body');
+                var footer=modal.querySelector('.modal-action');
+                var footerTop=footer.getBoundingClientRect().top;
+                body.scrollTop=body.scrollHeight;
+                if(Math.abs(footer.getBoundingClientRect().top-footerTop)>1 || footer.getBoundingClientRect().bottom>box.getBoundingClientRect().bottom)
+                    throw Error('Footer scrolls out of view');
                 button.focus();
                 var row=button.parentElement;
                 var label=row.querySelector('label');
@@ -407,6 +414,58 @@ func TestBrowserFunctional_ModelHelpLayout(t *testing.T) {
         document.getElementById('reconnect-result').setAttribute('data-test-result','fail');
         document.getElementById('reconnect-result').setAttribute('data-test-error',String(e.stack));
     }
+    </script>`
+	runReconnectChromeFixture(t, fixture)
+}
+
+func TestBrowserFunctional_ModelModalSections(t *testing.T) {
+	var content bytes.Buffer
+	if err := ModelsContent(nil, nil, false).Render(context.Background(), &content); err != nil {
+		t.Fatal(err)
+	}
+	fixture := `<main id="reconnect-result"></main><script>
+    window.htmx={process:function(){},ajax:function(){return Promise.resolve();}};
+    window.fetch=function(){return Promise.resolve({ok:true,json:function(){return Promise.resolve({models:[{id:'qwen',context_length:262144}]});}});};
+    </script>` + content.String() + `<script>
+    (async function() {
+      var f=function(id){return document.getElementById(id);};
+      var expect=function(value,message){if(!value)throw Error(message);};
+      var wait=function(){return new Promise(function(resolve){setTimeout(resolve,30);});};
+      try {
+        openNewModelModal();
+        expect(!f('model-panel-model').hidden && f('model-panel-generation').hidden && f('model-panel-execution').hidden,'start on Model');
+        expect(f('model_temperature').closest('[data-model-panel]').dataset.modelPanel==='generation','temperature in Generation');
+        expect(f('model_auto_start_tasks').closest('[data-model-panel]').dataset.modelPanel==='execution','task defaults in Task execution');
+        expect(f('model_worker_timeout_input').closest('[data-model-panel]').dataset.modelPanel==='execution','workers in Task execution');
+        f('model-tab-generation').click();
+        expect(!f('model-panel-generation').hidden && f('model-panel-model').hidden,'tab click switches content');
+        f('model-tab-generation').dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowRight',bubbles:true}));
+        expect(!f('model-panel-execution').hidden && document.activeElement===f('model-tab-execution'),'keyboard switches tab');
+        f('model_worker_timeout_input').value='120';
+        f('model_worker_timeout_input').dispatchEvent(new Event('input'));
+        setModelSection('model');
+        expect(new FormData(f('model_form')).get('worker_timeout')==='120','hidden tab values submitted');
+        f('model_name').value='Example';f('model_api_key').value='test';
+        f('model_compaction_threshold_input').value='';
+        expect(!f('model_form').reportValidity(),'invalid generation value blocks save');
+        expect(!f('model-panel-generation').hidden,'invalid field reveals Generation');
+        await wait();
+        f('model_compaction_threshold_input').value='100000';
+        f('model_compaction_threshold_input').dispatchEvent(new Event('input'));
+        f('model_worker_timeout_input').value='';
+        expect(!f('model_form').reportValidity(),'invalid timeout blocks save');
+        expect(!f('model-panel-execution').hidden,'invalid field reveals Task execution');
+        await wait();
+        f('new_model_modal').close();openNewModelModal();
+        expect(!f('model-panel-model').hidden,'reopening resets tab');
+        f('model_provider').value='openai_compatible_custom';toggleProviderFields();
+        f('model_custom_auth_method').value='oauth';toggleCustomProviderAuthFields();
+        expect(f('model_custom_authorize_url').closest('[data-model-panel]').dataset.modelPanel==='model','custom OAuth stays in Model');
+        expect(f('model_oauth_setup').closest('[data-model-panel]').dataset.modelPanel==='model','OAuth connect stays in Model');
+        f('new_model_modal').close();
+        f('reconnect-result').setAttribute('data-test-result','pass');
+      } catch(e) { f('reconnect-result').setAttribute('data-test-result','fail'); f('reconnect-result').setAttribute('data-test-error',String(e.stack)); }
+    })();
     </script>`
 	runReconnectChromeFixture(t, fixture)
 }
