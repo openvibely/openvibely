@@ -32,7 +32,8 @@ func TestBrowserFunctional_ModelModalDiscoveryAndDefaults(t *testing.T) {
   openNewModelModal();
   assert(field('model_api_key').placeholder.indexOf('sk-ant-')===0,'Anthropic key hint');
   assert(hidden('model_refresh') && hidden('model_base_url_field'),'Anthropic hides compatible connection controls');
-  assert(field('model_compaction_threshold_mode').value==='default','default compaction mode');
+  assert(field('model_compaction_threshold_input').type==='number' && Number(field('model_compaction_threshold_input').value)>0,'single prefilled compaction input');
+  assert(new FormData(field('model_form')).get('compaction_threshold')==='0','unedited threshold retains automatic behavior');
   assert(hidden('model_worker_timeout_custom'),'default timeout hides numeric sentinel');
   assert(new FormData(field('model_form')).get('worker_timeout')==='0','default timeout wire value');
   for(var provider of ['openai_compatible_vllm','openai_compatible_lm_studio','openai_compatible_openrouter']) {
@@ -48,7 +49,7 @@ func TestBrowserFunctional_ModelModalDiscoveryAndDefaults(t *testing.T) {
   assert(field('model_id').value==='other','refresh preserves a selection other than the first model');
   assert(field('model_api_key_label').textContent==='API key (optional)','local key optional');
   change('model_id','qwen');
-  assert(field('model_compaction_threshold_mode').options[0].textContent.includes('235,929'),'automatic threshold');
+  assert(field('model_compaction_threshold_input').value==='235929','automatic threshold');
   field('model_context_window_cap').value='131072';field('model_context_window_cap').dispatchEvent(new Event('change'));
   field('model_refresh').click();await wait();
   assert(field('model_id').value==='qwen' && field('model_context_window_cap').value==='131072','refresh preserves selected model and manual context');
@@ -74,7 +75,7 @@ func TestBrowserFunctional_ModelModalDiscoveryAndDefaults(t *testing.T) {
 
   change('model_worker_timeout_mode','custom');input('model_worker_timeout_custom','120');
   change('model_max_workers_mode','custom');input('model_max_workers_custom','3');
-  change('model_compaction_threshold_mode','custom');input('model_compaction_threshold_custom','100000');
+  input('model_compaction_threshold_input','100000');
   var values=new FormData(field('model_form'));
   assert(values.get('worker_timeout')==='120' && values.get('model_max_workers')==='3' && values.get('compaction_threshold')==='100000','custom overrides submitted');
   await selectProvider('openai');
@@ -114,7 +115,7 @@ func TestBrowserFunctional_ModelModalDiscoveryAndDefaults(t *testing.T) {
   Object.assign(edit.dataset,{modelId:'saved',modelName:'Saved',modelProvider:'openai_compatible',modelModel:'qwen',modelPresetSlug:'vllm',modelBaseUrl:'http://127.0.0.1:8000/v1/',modelContextWindowCap:'131072',modelWorkerTimeout:'240',modelMaxWorkers:'4',modelCompactionThreshold:'80000'});
   populateModelEditForm(edit);await wait();
   assert(field('model_worker_timeout_mode').value==='custom' && field('model_worker_timeout_custom').value==='240','saved timeout restored');
-  assert(field('model_max_workers_custom').value==='4' && field('model_compaction_threshold_custom').value==='80000','saved limits restored');
+  assert(field('model_max_workers_custom').value==='4' && field('model_compaction_threshold_input').value==='80000','saved limits restored');
   assert(new FormData(field('model_form')).get('context_window')==='131072','saved context preserved on discovery');
   field('new_model_modal').close();openNewModelModal();
   assert(field('model_worker_timeout_mode').value==='default' && field('model_max_workers_mode').value==='default','new form resets saved overrides');

@@ -927,10 +927,9 @@ for _, agent := range modelOptions {
 						</div>
 					</div>
 					<div class="form-control mt-2">
-						@modelSettingLabel("Compact when input exceeds (tokens)", "model_compaction_threshold_mode", "model_compaction_help", "Automatic follows the model’s context window. Choose a lower threshold to compact earlier.")
-						<select id="model_compaction_threshold_mode" class="select select-bordered" aria-label="Custom threshold mode" onchange="changeModelDefaultMode('model_compaction_threshold')"><option value="default">Automatic</option><option value="custom">Custom threshold</option></select>
-							<input id="model_compaction_threshold_custom" type="number" min="1" step="1" class="input input-bordered mt-2 hidden" aria-label="Custom threshold" oninput="document.getElementById('model_compaction_threshold').value = this.value" disabled/>
-							<input type="hidden" id="model_compaction_threshold" name="compaction_threshold" class="input input-bordered" value="0"/>
+						@modelSettingLabel("Compact conversation at (tokens)", "model_compaction_threshold_input", "model_compaction_help", "When the input sent to the model reaches this size, compact the conversation history to free up context space.")
+						<input id="model_compaction_threshold_input" type="number" min="1" step="1" class="input input-bordered" required oninput="document.getElementById('model_compaction_threshold').value = this.value"/>
+						<input type="hidden" id="model_compaction_threshold" name="compaction_threshold" value="0"/>
 					</div>
 					<div class="divider text-sm opacity-60 mt-4 mb-2">Worker Pool</div>
 					<div class="grid grid-cols-2 gap-3">
@@ -1850,7 +1849,12 @@ for _, agent := range modelOptions {
 						}
 
 						function syncModelDefaultControls() {
-							['model_compaction_threshold', 'model_max_workers', 'model_worker_timeout'].forEach(function(id) {
+							var thresholdInput = document.getElementById('model_compaction_threshold_input');
+                            if (thresholdInput) {
+                                var savedThreshold = Number(document.getElementById('model_compaction_threshold').value);
+                                thresholdInput.value = String(savedThreshold > 0 ? savedThreshold : automaticModelCompactionThreshold());
+                            }
+                            ['model_max_workers', 'model_worker_timeout'].forEach(function(id) {
 								var mode = document.getElementById(id + '_mode');
 								if (!mode) return;
 								var input = document.getElementById(id);
@@ -1861,15 +1865,12 @@ for _, agent := range modelOptions {
 								custom.disabled = !hasOverride;
 								custom.required = hasOverride;
 								custom.value = hasOverride ? input.value : '';
-								if (id === 'model_compaction_threshold') {
-									mode.options[0].textContent = 'Automatic — ' + automaticModelCompactionThreshold().toLocaleString() + ' tokens';
-								}
 							});
 						}
 
 						function changeModelDefaultMode(id) {
 							var mode = document.getElementById(id + '_mode');
-							var defaults = {model_compaction_threshold: automaticModelCompactionThreshold(), model_worker_timeout: 1800, model_max_workers: 1};
+							var defaults = {model_worker_timeout: 1800, model_max_workers: 1};
 							document.getElementById(id).value = mode.value === 'default' ? '0' : String(defaults[id]);
 							syncModelDefaultControls();
 						}
