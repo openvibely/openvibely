@@ -679,11 +679,17 @@
           if (attachment) attachment.value = payload.attachmentSessionID;
           if (model) model.value = payload.modelID;
           if (effort) effort.value = payload.reasoningEffort;
+          const managedSelection = el("input");
+          managedSelection.type = "hidden";
+          managedSelection.name = "model_selection_managed";
+          managedSelection.value = "1";
+          form.append(managedSelection);
           btn._ovResubmit = true;
           try {
             form.requestSubmit(submitter);
           } finally {
             btn._ovResubmit = false;
+            managedSelection.remove();
             if (message) message.value = draft;
             if (attachment) attachment.value = draftAttachments;
             if (model) model.value = draftModel;

@@ -164,6 +164,7 @@ func TestBrowserFunctional_TaskModelPickerPersistence(t *testing.T) {
  await trigger._ovModelState.ready;await wait(50);
  assert(switchedSend?.get('message')==='send before switching','delayed send keeps its message');
  assert(switchedSend?.get('agent_id')==='a'&&switchedSend?.get('reasoning_effort')==='medium','delayed send keeps the model and effort selected at Send');
+ assert(switchedSend?.get('model_selection_managed')==='1'&&!form.querySelector('[name=model_selection_managed]'),'picker send marks selection ownership without changing the composer');
  assert(modelInput.value==='b'&&effort.value==='high','later model selection remains in composer');
  form._chatNextSubmissionPayload=null;
  choose('a');assert(trigger._ovModelState.loading,'first model effort is loading');
