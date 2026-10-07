@@ -970,7 +970,7 @@ func TestModelsContent_OpenAICompatibleDiscoveryUI(t *testing.T) {
 		"setOpenAICompatibleModelValue(models[0].id, models[0].id, true)",
 		"if (!isDiscoverableOpenAICompatiblePreset())",
 		`aria-label="Refresh models"`,
-		`onclick="discoverOpenAICompatibleModels()"`,
+		`onclick="refreshModelDiscovery()"`,
 		`name="custom_static_headers_json"`,
 		`name="custom_authorization_parameters_json"`,
 		`name="custom_oauth_pkce"`,

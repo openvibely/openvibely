@@ -16,7 +16,7 @@ func TestBrowserFunctional_ModelModalDiscoveryAndDefaults(t *testing.T) {
  var returnedModels=[{id:'qwen',context_length:262144},{id:'other',context_length:8192}];
  var discoveryFails=false;
  var discoveryRequests=[];
- window.fetch=function(url,options){discoveryRequests.push({url:new URL(url,window.location.href),headers:options.headers});return discoveryFails ? Promise.reject(Error('Server unavailable')) : Promise.resolve({ok:true,json:function(){return Promise.resolve({models:returnedModels});}});};
+ window.fetch=function(url,options){discoveryRequests.push({url:new URL(url,window.location.href),headers:options.headers});return discoveryFails ? Promise.reject(Error('Server unavailable')) : Promise.resolve({ok:true,json:function(){return Promise.resolve(url.indexOf('/models/ollama/available')===0 ? [{name:'installed:latest'}] : {models:returnedModels});}});};
  </script>` + content.String() + `<script>
  (async function(){
  var result=document.getElementById('reconnect-result');
@@ -73,7 +73,8 @@ func TestBrowserFunctional_ModelModalDiscoveryAndDefaults(t *testing.T) {
   field('model_anthropic_auth_type').value='oauth';toggleAnthropicAuthFields();
   assert(hidden('api_key_field'),'Anthropic OAuth hides key');
   await selectProvider('ollama');
-  assert(hidden('model_refresh') && hidden('api_key_field') && !hidden('ollama_fields'),'Ollama controls unchanged');
+  assert(!hidden('model_refresh') && hidden('api_key_field') && !field('model_ollama_custom_model'),'Ollama uses one discovered dropdown');
+  assert(field('model_id').value==='installed:latest','Ollama selects installed model');
   assert(!hidden('model_ollama_base_url_field') && !!(field('model_ollama_base_url').compareDocumentPosition(field('model_id')) & Node.DOCUMENT_POSITION_FOLLOWING),'Ollama URL precedes model selection');
   assert(new FormData(field('model_form')).get('ollama_base_url')==='http://localhost:11434','Ollama URL still submitted');
   await selectProvider('mixture');
@@ -207,6 +208,54 @@ func TestBrowserFunctional_CustomOAuthBeforeCreate(t *testing.T) {
  if(f('model_oauth_setup_session').value || !f('model_oauth_setup').classList.contains('hidden'))throw Error('Sign-in leaked into another provider');
  f('reconnect-result').setAttribute('data-test-result','pass');
  }catch(e){f('reconnect-result').setAttribute('data-test-result','fail');f('reconnect-result').setAttribute('data-test-error',String(e.stack));}
+ })();</script>`
+	runReconnectChromeFixture(t, fixture)
+}
+
+func TestBrowserFunctional_OllamaDiscovery(t *testing.T) {
+	var content bytes.Buffer
+	if err := ModelsContent(nil, nil, false).Render(context.Background(), &content); err != nil {
+		t.Fatal(err)
+	}
+	fixture := `<main id="reconnect-result"></main><script>
+ window.htmx={process:function(){}};
+ var models=[{name:'installed:a'},{model:'installed:b'}], fail=false, pending=null, requested=[];
+ window.fetch=function(url,options){
+  requested.push(url);
+  if(pending)return new Promise(function(resolve){pending.resolve=resolve;});
+  return Promise.resolve({ok:!fail,json:function(){return Promise.resolve(fail?{error:'Server offline'}:models);}});
+ };
+ </script>` + content.String() + `<script>
+ (async function(){
+ var f=function(id){return document.getElementById(id);};
+ var wait=function(){return new Promise(function(resolve){setTimeout(resolve,40);});};
+ var assert=function(ok,message){if(!ok)throw Error(message);};
+ try {
+ openNewModelModal();f('model_provider').value='ollama';toggleProviderFields();await wait();
+ assert(f('model_id').value==='installed:a' && f('model_id').options.length===2,'installed models only, first selected');
+ assert(new FormData(f('model_form')).get('model')==='installed:a','selected model submitted');
+ f('model_id').value='installed:b';f('model_refresh').click();await wait();
+ assert(f('model_id').value==='installed:b','refresh preserves selection');
+ f('model_ollama_base_url').value='http://localhost:11435';f('model_ollama_base_url').dispatchEvent(new Event('input'));
+ assert(!f('model_id').value && !f('model_id').checkValidity(),'changing server clears previous model');
+ models=[];runAutoDiscoverOpenAICompatibleModels();await wait();
+ assert(requested[requested.length-1].includes('11435'),'discovery uses changed server');
+ assert(!f('model_id').checkValidity() && f('openai_compatible_discovery_status').textContent.includes('No models installed'),'empty server blocks create');
+ fail=true;f('model_refresh').click();await wait();
+ assert(f('openai_compatible_discovery_status').textContent.includes('Server offline') && !f('model_id').checkValidity(),'failure shown without fallback models');
+ fail=false;models=[{name:'new:model'}];f('model_refresh').click();await wait();
+ assert(f('model_id').value==='new:model' && !f('openai_compatible_discovery_status').classList.contains('text-error'),'refresh recovers');
+ pending={};f('model_refresh').click();
+ f('model_provider').value='anthropic';toggleProviderFields();var original=f('model_id').value;
+ pending.resolve({ok:true,json:function(){return Promise.resolve([{name:'stale:model'}]);}});pending=null;await wait();
+ assert(f('model_id').value===original,'late discovery cannot overwrite another provider');
+ var edit=document.createElement('button');
+ Object.assign(edit.dataset,{modelId:'saved',modelName:'Saved',modelProvider:'ollama',modelModel:'saved:model',modelOllamaBaseUrl:'http://localhost:11436'});
+ models=[{name:'saved:model'},{name:'other:model'}];populateModelEditForm(edit);await wait();
+ assert(f('model_id').value==='saved:model','editing preserves saved model');
+ assert(requested[requested.length-1].includes('11436'),'editing discovers saved server');
+ f('reconnect-result').setAttribute('data-test-result','pass');
+ } catch(error){f('reconnect-result').setAttribute('data-test-result','fail');f('reconnect-result').setAttribute('data-test-error',String(error.stack));}
  })();</script>`
 	runReconnectChromeFixture(t, fixture)
 }
