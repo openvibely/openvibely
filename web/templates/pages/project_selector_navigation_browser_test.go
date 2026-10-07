@@ -87,6 +87,7 @@ window.addEventListener('DOMContentLoaded', function() {
     input.dispatchEvent(new Event('input', {bubbles: true}));
   }
   function wait(ms) { return new Promise(function(resolve) { setTimeout(resolve, ms); }); }
+  function closed(dialog) { return new Promise(function(resolve) { dialog.addEventListener('close', resolve, {once: true}); }); }
   (async function() {
     var root = document.querySelector('[data-project-selector]');
     var trigger = document.getElementById('project-selector-trigger');
@@ -248,7 +249,9 @@ window.addEventListener('DOMContentLoaded', function() {
     var confirmation = document.getElementById('app_confirm_modal');
     document.querySelector('[data-project-id="payments-api"]').click();
     if (!confirmation.open) fail('app confirmation missing');
+    var cancelled = closed(confirmation);
     confirmation.querySelector('[autofocus]').click();
+    await cancelled;
     await wait(30);
     if (select.value !== 'default' || trigger.textContent.trim() !== 'Default' || navigations.length !== 0 || preferences !== 0) fail('cancelled unsaved project switch changed state');
     if (!unsaved.hasAttribute('open')) fail('cancelled project switch closed the unsaved dialog');
@@ -263,7 +266,9 @@ window.addEventListener('DOMContentLoaded', function() {
     key(search, 'ArrowDown');
     key(document.activeElement, 'Enter');
     if (!confirmation.open) fail('app confirmation missing for project switch');
+    var accepted = closed(confirmation);
     confirmation.querySelector('[data-confirm-accept]').click();
+    await accepted;
     await wait(30);
     // Closing the app dialog restores keyboard focus, so a focus outline is expected here.
     if (select.value !== 'payments-api' || trigger.textContent.trim() !== 'Payments API') fail('confirmed project switch did not update the selected project');
