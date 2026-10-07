@@ -6345,6 +6345,47 @@ func TestHandler_TaskThreadSend_SwarmParentRoutesWithoutNormalExecution(t *testi
 	assert.Contains(t, fullPlanner.Prompt, "Update only the API worker")
 }
 
+func TestHandler_TaskThreadSend_SwarmPickerSnapshotKeepsLaterSelection(t *testing.T) {
+	h, e, agents := setupTestHandler(t)
+	h.workerSvc = nil
+	ctx := context.Background()
+	sentWith := createAgent(t, agents, func(a *models.LLMConfig) { a.Name = "Planner for message" })
+	selectedLater := createAgent(t, agents, func(a *models.LLMConfig) {
+		a.Name = "Later planner selection"
+		a.IsDefault = false
+	})
+	project := createProject(t, h, "Swarm picker send race")
+	parent, err := h.swarmSvc.CreateSwarmTask(ctx, service.CreateSwarmTaskRequest{
+		ProjectID:       project.ID,
+		Title:           "Swarm parent",
+		Prompt:          "Build the swarm result",
+		Category:        models.CategoryActive,
+		Priority:        2,
+		AgentID:         &sentWith.ID,
+		MaxWorkers:      3,
+		WorkerIsolation: "worktree",
+		ReviewerEnabled: true,
+		MergerEnabled:   true,
+	})
+	require.NoError(t, err)
+
+	endpoint := "/tasks/" + parent.ID + "/thread"
+	assertCode(t, postForm(e, endpoint+"/model", url.Values{"agent_id": {selectedLater.ID}}), http.StatusNoContent)
+	assertCode(t, htmxPost(e, endpoint, url.Values{
+		"message":                 {"Follow up with the earlier model"},
+		"agent_id":                {sentWith.ID},
+		"model_selection_managed": {"1"},
+	}), http.StatusOK)
+
+	stored, err := h.taskRepo.GetByID(ctx, parent.ID)
+	require.NoError(t, err)
+	require.Equal(t, selectedLater.ID, *stored.AgentID, "the later picker choice remains assigned")
+	planner, err := h.taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRolePlanner)
+	require.NoError(t, err)
+	require.NotNil(t, planner)
+	require.Equal(t, sentWith.ID, *planner.AgentID, "this follow-up uses its captured model")
+}
+
 func TestHandler_SwarmFollowupChildCreatesTaskThreadExecution(t *testing.T) {
 	h, e, llmConfigRepo := setupTestHandler(t)
 	h.workerSvc = nil
@@ -7738,6 +7779,119 @@ func TestHandler_TaskThreadSend_ExplicitAgentPersistsAsTaskDefault(t *testing.T)
 	threadRec := htmxGet(e, "/tasks/"+task.ID+"/thread")
 	assertCode(t, threadRec, http.StatusOK)
 	assertContains(t, threadRec, "data-task-agent=\""+explicitAgent.ID+"\"")
+}
+
+func TestHandler_TaskThreadSend_PickerSnapshotDoesNotReplaceLaterSelection(t *testing.T) {
+	h, e, agents := setupTestHandler(t)
+	ctx := context.Background()
+	sentWith := createAgent(t, agents, func(a *models.LLMConfig) { a.Name = "Message model" })
+	selectedLater := createAgent(t, agents, func(a *models.LLMConfig) {
+		a.Name = "Later selection"
+		a.IsDefault = false
+	})
+	project := createProject(t, h, "Picker send race")
+	task := createTask(t, h, project.ID, "Picker send race", func(tk *models.Task) {
+		tk.Status = models.StatusCompleted
+		tk.AgentID = &sentWith.ID
+	})
+
+	endpoint := "/tasks/" + task.ID + "/thread"
+	assertCode(t, postForm(e, endpoint+"/model", url.Values{"agent_id": {selectedLater.ID}}), http.StatusNoContent)
+	assertCode(t, postForm(e, endpoint, url.Values{
+		"message":                 {"Sent before choosing another model"},
+		"agent_id":                {sentWith.ID},
+		"model_selection_managed": {"1"},
+	}), http.StatusOK)
+
+	stored, err := h.taskRepo.GetByID(ctx, task.ID)
+	require.NoError(t, err)
+	require.Equal(t, selectedLater.ID, *stored.AgentID, "the later picker choice remains assigned")
+	executions, err := h.execRepo.ListByTaskChronological(ctx, task.ID)
+	require.NoError(t, err)
+	require.NotEmpty(t, executions)
+	require.Equal(t, sentWith.ID, executions[len(executions)-1].AgentConfigID, "the message uses its captured model")
+}
+
+func TestHandler_TaskThreadSend_PickerSnapshotDoesNotReplaceLaterEffort(t *testing.T) {
+	h, e, agents := setupTestHandler(t)
+	ctx := context.Background()
+	agent := createAgent(t, agents, func(a *models.LLMConfig) {
+		a.Provider = models.ProviderOpenAI
+		a.Model = "gpt-5.5"
+		a.ReasoningEffort = "medium"
+	})
+	project := createProject(t, h, "Picker effort race")
+	task := createTask(t, h, project.ID, "Picker effort race", func(tk *models.Task) {
+		tk.Status = models.StatusCompleted
+		tk.AgentID = &agent.ID
+	})
+
+	endpoint := "/tasks/" + task.ID + "/thread"
+	assertCode(t, postForm(e, endpoint+"/model", url.Values{
+		"agent_id":         {agent.ID},
+		"reasoning_effort": {"high"},
+	}), http.StatusNoContent)
+	assertCode(t, postForm(e, endpoint, url.Values{
+		"message":                 {"Sent before changing effort"},
+		"agent_id":                {agent.ID},
+		"reasoning_effort":        {"low"},
+		"model_selection_managed": {"1"},
+	}), http.StatusOK)
+
+	effort, err := h.taskRepo.ModelEffort(ctx, task.ID, *agent)
+	require.NoError(t, err)
+	require.Equal(t, "high", effort, "the later picker effort remains saved")
+}
+
+func TestHandler_TaskThreadSend_QueuedPickerSnapshotKeepsSentModelAndEffort(t *testing.T) {
+	h, e, agents := setupTestHandler(t)
+	ctx := context.Background()
+	sentWith := createAgent(t, agents, func(a *models.LLMConfig) {
+		a.Name = "Queued message model"
+		a.Provider = models.ProviderOpenAI
+		a.Model = "gpt-5.5"
+		a.ReasoningEffort = "medium"
+	})
+	selectedLater := createAgent(t, agents, func(a *models.LLMConfig) {
+		a.Name = "Later queued selection"
+		a.IsDefault = false
+	})
+	project := createProject(t, h, "Queued picker send race")
+	task := createTask(t, h, project.ID, "Queued picker send race", func(tk *models.Task) {
+		tk.Status = models.StatusRunning
+		tk.Category = models.CategoryActive
+		tk.AgentID = &sentWith.ID
+	})
+	createExec(t, h, task.ID, sentWith.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecRunning
+		ex.PromptSent = "active turn"
+	})
+
+	endpoint := "/tasks/" + task.ID + "/thread"
+	assertCode(t, postForm(e, endpoint+"/model", url.Values{"agent_id": {selectedLater.ID}}), http.StatusNoContent)
+	assertCode(t, postForm(e, endpoint, url.Values{
+		"message":                 {"Queued with the earlier model"},
+		"agent_id":                {sentWith.ID},
+		"reasoning_effort":        {"low"},
+		"model_selection_managed": {"1"},
+	}), http.StatusOK)
+
+	stored, err := h.taskRepo.GetByID(ctx, task.ID)
+	require.NoError(t, err)
+	require.Equal(t, selectedLater.ID, *stored.AgentID)
+	inputs, err := h.threadInputRepo.ListPendingForTask(ctx, task.ID)
+	require.NoError(t, err)
+	require.Len(t, inputs, 1)
+	require.True(t, inputs[0].ModelSelectionSnapshot)
+	require.Equal(t, sentWith.ID, inputs[0].AgentConfigID)
+	require.Equal(t, "low", inputs[0].ReasoningEffort)
+
+	require.NoError(t, h.taskRepo.SetModelEffort(ctx, task.ID, *sentWith, "high"))
+	resolved, unavailable, err := h.resolveQueuedTaskThreadInputAgent(ctx, stored, inputs[0])
+	require.NoError(t, err)
+	require.False(t, unavailable)
+	require.Equal(t, sentWith.ID, resolved.ID)
+	require.Equal(t, "low", resolved.ReasoningEffort, "later effort edits do not change this queued message")
 }
 
 // TestHandler_TaskThreadSend_AutoSelectionDoesNotOverrideTaskDefault verifies that

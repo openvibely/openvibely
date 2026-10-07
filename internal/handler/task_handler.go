@@ -3323,6 +3323,9 @@ func (h *Handler) TaskThreadSend(c echo.Context) error {
 	message := strings.TrimSpace(c.FormValue("message"))
 	agentID := c.FormValue("agent_id")
 	sessionID := c.FormValue("attachment_session_id")
+	// The picker persists the current task selection separately. A delayed send
+	// can carry an older model for this message without changing that selection.
+	managedModelSelection := c.FormValue("model_selection_managed") == "1"
 
 	if message == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "message is required")
@@ -3348,9 +3351,20 @@ func (h *Handler) TaskThreadSend(c echo.Context) error {
 				return echo.NewHTTPError(http.StatusBadRequest, "no model available for automatic selection")
 			}
 			modelOverride = []string{model.ID}
+		} else if managedModelSelection {
+			model, err := h.selectTaskAgent(c.Request().Context(), task.ProjectID, agentID, "", false)
+			if err != nil || model == nil {
+				return echo.NewHTTPError(http.StatusBadRequest, "invalid model selection")
+			}
+			if err := h.applyConversationEffort(c, "", model); err != nil {
+				return err
+			}
+			modelOverride = []string{model.ID}
 		}
-		if err := h.persistTaskThreadModel(c, task); err != nil {
-			return err
+		if !managedModelSelection {
+			if err := h.persistTaskThreadModel(c, task); err != nil {
+				return err
+			}
 		}
 		if err := h.saveDeferredTaskUploads(c.Request().Context(), task.ID, sessionID); err != nil {
 			return err
@@ -3370,6 +3384,9 @@ func (h *Handler) TaskThreadSend(c echo.Context) error {
 	hasImages := hasPendingImages(sessionID)
 	agent, err := h.selectTaskThreadAgent(c, task.ProjectID, agentID, message, hasImages)
 	if err != nil {
+		if managedModelSelection {
+			return echo.NewHTTPError(http.StatusBadRequest, "selected model is unavailable")
+		}
 		applog.Infof("[handler] TaskThreadSend agent selection error: %v, trying task fallback", err)
 		if task.AgentID != nil {
 			agent, _ = h.llmConfigRepo.GetByID(c.Request().Context(), *task.AgentID)
@@ -3379,21 +3396,21 @@ func (h *Handler) TaskThreadSend(c echo.Context) error {
 		}
 	}
 
-	if err := h.applyConversationEffort(c, task.ID, agent); err != nil {
+	effortTaskID := task.ID
+	if managedModelSelection {
+		// The picker saved the selected effort separately. This send only uses
+		// its captured value and must not overwrite a later effort change.
+		effortTaskID = ""
+	}
+	if err := h.applyConversationEffort(c, effortTaskID, agent); err != nil {
 		return err
 	}
 
-	// An explicit composer model selection (a concrete model ID, or an explicit
-	// "default" choice) becomes the task's ongoing assigned model, so the composer
-	// selector continues to reflect it after this send and on future follow-ups
-	// instead of silently reverting to the task's previous default. This matches
-	// task assignment semantics where explicit Task.AgentID drives task model
-	// selection. "auto" and unset selections are one-off routing for this send
-	// only and do not change the task's assignment. Persisting here (rather than
-	// only after execution admission) also protects against races with concurrent
-	// or queued follow-ups: each queued/direct execution still carries its own
-	// explicitly resolved agent.ID independent of this assignment update.
-	if agentID != "" && agentID != "auto" && h.taskRepo != nil {
+	// Direct callers still persist an explicit model as the task's assignment.
+	// Picker sends carry a snapshot for this message; the picker has already
+	// saved its current selection, which may have changed since Send was pressed.
+	// Each queued/direct execution carries the resolved agent.ID independently.
+	if !managedModelSelection && agentID != "" && agentID != "auto" && h.taskRepo != nil {
 		newAgentID := agent.ID
 		if task.AgentID == nil || *task.AgentID != newAgentID {
 			if updErr := h.taskRepo.UpdateAgentID(c.Request().Context(), taskID, newAgentID); updErr != nil {
@@ -3405,12 +3422,13 @@ func (h *Handler) TaskThreadSend(c echo.Context) error {
 	}
 
 	admission, err := h.admitTaskFollowup(c.Request().Context(), taskFollowupAdmissionRequest{
-		Task:                task,
-		Agent:               agent,
-		Message:             message,
-		Source:              models.TaskOriginWeb,
-		AttachmentSessionID: sessionID,
-		LogPrefix:           "TaskThreadSend",
+		Task:                   task,
+		Agent:                  agent,
+		ModelSelectionSnapshot: managedModelSelection,
+		Message:                message,
+		Source:                 models.TaskOriginWeb,
+		AttachmentSessionID:    sessionID,
+		LogPrefix:              "TaskThreadSend",
 	})
 	if err != nil {
 		if admissionErr, ok := err.(*taskFollowupAdmissionError); ok {
