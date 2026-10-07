@@ -412,6 +412,7 @@ func TestBrowserFunctional_ModelHelpLayout(t *testing.T) {
                 if(Math.abs(footer.getBoundingClientRect().top-footerTop)>1 || footer.getBoundingClientRect().bottom>box.getBoundingClientRect().bottom)
                     throw Error('Footer scrolls out of view');
                 button.focus();
+                if(!document.hasFocus()) button.dispatchEvent(new FocusEvent('focusin',{bubbles:true}));
                 var row=button.parentElement;
                 var label=row.querySelector('label');
                 var iconRect=button.getBoundingClientRect();
@@ -429,6 +430,7 @@ func TestBrowserFunctional_ModelHelpLayout(t *testing.T) {
                 if(style.backgroundColor==='transparent' || style.backgroundColor==='rgba(0, 0, 0, 0)') throw Error('Tooltip has no solid background');
                 if(tip.textContent!==button.dataset.modelSettingHelp) throw Error('Wrong help text');
                 button.blur();
+                if(!document.hasFocus()) button.dispatchEvent(new FocusEvent('focusout',{bubbles:true}));
                 if(tip.matches(':popover-open')) throw Error('Tooltip stays open after blur');
                 button.click();
                 if(!tip.matches(':popover-open')) throw Error('Click did not open help');
