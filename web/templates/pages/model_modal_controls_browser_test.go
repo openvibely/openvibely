@@ -57,6 +57,13 @@ func TestBrowserFunctional_ModelModalDiscoveryAndDefaults(t *testing.T) {
   discoveryFails=false;returnedModels=[{id:'qwen',context_length:262144}];field('model_refresh').click();await wait();
   assert(field('model_id').options.length===1,'refresh removes stale models');
   assert(!field('openai_compatible_discovery_status').classList.contains('text-error'),'retry clears error');
+  input('model_base_url','http://localhost:9000/v1');
+  assert(!field('model_id').checkValidity() && !new FormData(field('model_form')).get('model') && !field('model_openai_compatible_custom_model').value,'changing server immediately removes old model');
+  discoveryFails=true;runAutoDiscoverOpenAICompatibleModels();await wait();
+  assert(!field('model_id').checkValidity() && !field('model_id').value,'failed new server cannot retain old selection');
+  discoveryFails=false;field('model_refresh').click();await wait();
+  assert(field('model_id').value==='qwen','successful new server repopulates dropdown');
+
   returnedModels=[{id:'replacement',context_length:8192}];field('model_refresh').click();await wait();
   assert(field('model_id').value==='replacement' && field('model_id').options.length===1,'missing selected model replaced');
   assert(field('model_context_window_cap').value==='8192','replacement uses its context limit');
@@ -92,6 +99,7 @@ func TestBrowserFunctional_ModelModalDiscoveryAndDefaults(t *testing.T) {
   input('model_openai_compatible_custom_model','manual-id');
   assert(new FormData(field('model_form')).get('model')==='manual-id','manual custom model submitted');
   input('model_custom_models_url','http://localhost:8000/v1/models');
+  assert(!field('model_id').value && !field('model_openai_compatible_custom_model').value,'Models URL change clears prior model');
   assert(hidden('model_manual_id_field') && !hidden('model_refresh'),'custom models URL enables discovery');
   cancelOpenAICompatibleDiscovery();
   field('model_id').value='';discoverOpenAICompatibleModels();await wait();
@@ -302,10 +310,12 @@ func TestBrowserFunctional_ModelDiscoveryLoading(t *testing.T) {
   pending[pending.length-1].reject(Error('timeout'));await wait();assert(idle(),'failure restores button');
   f('model_refresh').click();var old=pending[pending.length-1];
   if(provider==='ollama') {f('model_ollama_base_url').value='http://localhost:11435';ollamaEndpointChanged();}
-  else {f('model_base_url').value='http://localhost:8001/v1';scheduleAutoDiscoverOpenAICompatibleModels();}
+  else {f('model_base_url').value='http://localhost:8001/v1';f('model_base_url').dispatchEvent(new Event('input'));}
+  assert(!f('model_id').value && !f('model_id').checkValidity(),'endpoint change clears selection while pending');
   assert(idle(),'cancellation restores button');
   runAutoDiscoverOpenAICompatibleModels();var current=pending[pending.length-1];assert(busy(),'new request busy');
   complete(old);await wait();assert(busy(),'old completion cannot enable button for new request');
+  assert(!f('model_id').value,'old response cannot restore models from previous server');
   complete(current);await wait();assert(idle(),'new completion restores button');
   f('model_refresh').click();old=pending[pending.length-1];closeModelModal();assert(idle(),'closing modal cancels loading');
   complete(old);await wait();openNewModelModal();

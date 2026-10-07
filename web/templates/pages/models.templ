@@ -1962,6 +1962,10 @@ for _, agent := range modelOptions {
 						}
 
 						function clearDiscoveredModelLimits() {
+							if (isOpenAICompatibleProvider(document.getElementById('model_provider').value) && isDiscoverableOpenAICompatiblePreset()) {
+								document.getElementById('model_id').replaceChildren(new Option('Loading models…', ''));
+								document.getElementById('model_openai_compatible_custom_model').value = '';
+							}
 							openAICompatibleDiscoveredModels = {};
 							applyDiscoveredModelLimits(null);
 						}
