@@ -162,9 +162,13 @@
       if (!response.ok)
         throw Error("Could not load effort. Reopen the picker to retry.");
       const data = await response.json();
-      if (token !== s.loadToken) return;
-      s.efforts[key(m)] = data.reasoning_effort || "";
+      const effort = data.reasoning_effort || "";
+      // A send started before another model was selected still needs this
+      // result, even though the stale lookup must not update the current UI.
+      if (token !== s.loadToken) return effort;
+      s.efforts[key(m)] = effort;
       s.error = "";
+      return effort;
     } catch (e) {
       if (token === s.loadToken) s.error = e.message;
     } finally {
@@ -483,14 +487,14 @@
     const promise = load(btn),
       token = s.loadToken;
     return promise
-      .then(() => {
+      .then((effort) => {
         if (
           token !== s.loadToken ||
           chosen !== btn.dataset.currentValue ||
           s.error
         )
-          return;
-        return save(btn);
+          return effort;
+        return save(btn).then(() => effort);
       })
       .catch(() => {});
   }
@@ -637,24 +641,44 @@
       const form = e.target;
       const message = form.querySelector('[name="message"]');
       const attachment = form.querySelector('[name="attachment_session_id"]');
+      const model = form.querySelector('[name="agent_id"]');
+      const effort = form.querySelector('[name="reasoning_effort"]');
       // The composer temporarily installs a steering fallback payload, then
-      // restores the newer draft synchronously. Preserve what was submitted.
+      // restores the newer draft synchronously. Preserve the selected model
+      // and effort too, since either can change while the save completes.
       const payload = {
         ...(form._chatNextSubmissionPayload || {
           message: message?.value || "",
           attachmentSessionID: attachment?.value || "",
         }),
+        modelID: model?.value || "",
+        reasoningEffort: effort?.value || "",
       };
-      Promise.resolve(s.ready)
-        .then(() => s.pending)
+      const waitingForEffort = s.loading;
+      const ready = s.ready;
+      const pending = s.pending;
+      Promise.resolve(ready)
+        .then((loadedEffort) => {
+          if (waitingForEffort) {
+            if (loadedEffort === undefined)
+              throw Error("Could not load effort for the selected model.");
+            payload.reasoningEffort = loadedEffort;
+          }
+          return pending;
+        })
         .then(() => {
-          if (s.error) throw Error(s.error);
+          if (btn.dataset.currentValue === payload.modelID && s.error)
+            throw Error(s.error);
           if (!form.isConnected) return;
           const draft = message?.value;
           const draftAttachments = attachment?.value;
+          const draftModel = model?.value;
+          const draftEffort = effort?.value;
           form._chatNextSubmissionPayload = payload;
           if (message) message.value = payload.message;
           if (attachment) attachment.value = payload.attachmentSessionID;
+          if (model) model.value = payload.modelID;
+          if (effort) effort.value = payload.reasoningEffort;
           btn._ovResubmit = true;
           try {
             form.requestSubmit(submitter);
@@ -662,6 +686,8 @@
             btn._ovResubmit = false;
             if (message) message.value = draft;
             if (attachment) attachment.value = draftAttachments;
+            if (model) model.value = draftModel;
+            if (effort) effort.value = draftEffort;
           }
         })
         .catch((err) => {

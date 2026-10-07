@@ -151,6 +151,30 @@ func TestBrowserFunctional_TaskModelPickerPersistence(t *testing.T) {
  assert(sent?.get('message')==='original steering message','retry sends original message');
  assert(sent?.get('attachment_session_id')==='original-attachment','retry sends original attachments');
  assert(message.value==='newer draft'&&attachment.value==='newer-attachment','retry preserves newer draft');
+ form._chatNextSubmissionPayload=null; // The real HTMX beforeRequest handler consumes this.
+ const modelInput=form.querySelector('[name=agent_id]');
+ const effortSlider=panel.querySelector('input[type=range]');
+ effortSlider.value='1';effortSlider.dispatchEvent(new Event('input'));effortSlider.dispatchEvent(new Event('change'));
+ assert(modelInput.value==='a'&&effort.value==='medium','pending save uses first model and effort');
+ let switchedSend=null;
+ form.addEventListener('submit',event=>{event.preventDefault();switchedSend=new FormData(form);},{once:true});
+ message.value='send before switching';
+ form.requestSubmit();
+ choose('b');
+ await trigger._ovModelState.ready;await wait(50);
+ assert(switchedSend?.get('message')==='send before switching','delayed send keeps its message');
+ assert(switchedSend?.get('agent_id')==='a'&&switchedSend?.get('reasoning_effort')==='medium','delayed send keeps the model and effort selected at Send');
+ assert(modelInput.value==='b'&&effort.value==='high','later model selection remains in composer');
+ form._chatNextSubmissionPayload=null;
+ choose('a');assert(trigger._ovModelState.loading,'first model effort is loading');
+ let loadingSend=null;
+ form.addEventListener('submit',event=>{event.preventDefault();loadingSend=new FormData(form);},{once:true});
+ message.value='send while effort loads';
+ form.requestSubmit();
+ choose('b');
+ await wait(150);
+ assert(loadingSend?.get('agent_id')==='a'&&loadingSend?.get('reasoning_effort')==='medium','send uses loaded effort even when model changes during lookup');
+ assert(modelInput.value==='b'&&effort.value==='high','lookup does not undo later model selection');
 
  document.body.dataset.testResult='pass';
  }catch(e){document.body.dataset.testResult='fail';document.body.dataset.testError=e.stack;document.getElementById('browser-result').textContent=String(e)}})();
