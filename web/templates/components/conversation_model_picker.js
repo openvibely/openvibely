@@ -42,8 +42,7 @@
     effortBox = el("div", "ov-mp-effort"),
     status = el("div", "ov-mp-status");
   status.setAttribute("role", "status");
-  const listFrame = scrollFrame(list);
-  panel.append(searchWrap, listFrame, effortBox, status);
+  panel.append(searchWrap, list, effortBox, status);
   const subhead = el("div", "ov-mp-subhead"),
     back = el("button", "ov-mp-back", "‹"),
     sublist = el("div", "ov-mp-sublist");
@@ -51,43 +50,11 @@
   back.setAttribute("aria-label", "Back to providers");
   subhead.append(back);
   subhead.hidden = true;
-  sub.append(subhead, scrollFrame(sublist));
+  sub.append(subhead, sublist);
   document.body.append(panel, sub);
   let active = null,
     provider = null,
     favorites = read(favoritesKey);
-  function scrollFrame(content) {
-    const frame = el("div", "ov-mp-scroll-frame"),
-      hints = el("div", "ov-mp-scroll-hints");
-    const up = el("button", "", "↑ More above"),
-      down = el("button", "", "↓ More below");
-    hints.hidden = true;
-    for (const button of [up, down]) button.type = "button";
-    up.onclick = () =>
-      content.scrollBy({
-        top: -Math.max(60, content.clientHeight * 0.75),
-        behavior: "smooth",
-      });
-    down.onclick = () =>
-      content.scrollBy({
-        top: Math.max(60, content.clientHeight * 0.75),
-        behavior: "smooth",
-      });
-    const update = () => {
-      const overflowing = content.scrollHeight > content.clientHeight + 1;
-      hints.hidden = !overflowing;
-      up.hidden = !overflowing || content.scrollTop < 1;
-      down.hidden =
-        !overflowing ||
-        content.scrollTop + content.clientHeight >= content.scrollHeight - 1;
-    };
-    content.addEventListener("scroll", update);
-    new ResizeObserver(update).observe(content);
-    content._updateScrollHints = update;
-    hints.append(up, down);
-    frame.append(content, hints);
-    return frame;
-  }
   function options(btn) {
     return [...btn.parentElement.querySelectorAll("li[data-value]")].map(
       (li) => ({
@@ -389,10 +356,7 @@
       value = override || m.defaultEffort;
     const levels = m.defaultEffort ? m.levels : ["", ...m.levels];
     const head = el("div", "ov-mp-effort-head");
-    head.append(
-      el("span", "", "Reasoning effort"),
-      el("span", "", value ? label(value) : "Model default"),
-    );
+    head.append(el("span", "", "Reasoning effort"));
     effortBox.append(head);
     const slider = el("input");
     slider.type = "range";
@@ -417,7 +381,7 @@
       const value = levels[Number(slider.value)];
       s.efforts[key(m)] = value;
       sync(active);
-      head.lastChild.textContent = value ? label(value) : "Model default";
+      reset.hidden = !value;
       slider.setAttribute(
         "aria-valuetext",
         value ? label(value) : "Model default",
@@ -431,7 +395,7 @@
     levels.forEach((v) =>
       ticks.append(el("span", "", v ? label(v) : "Default")),
     );
-    const reset = el("button", "ov-mp-reset", "Use model default");
+    const reset = el("button", "ov-mp-reset", "Use default");
     reset.type = "button";
     reset.hidden = !override;
     reset.disabled = s.loading;
@@ -468,7 +432,6 @@
       Math.max(8, Math.min(r.left, width - panel.offsetWidth - 8)) + "px";
     panel.style.top =
       (up ? Math.max(8, r.top - panel.offsetHeight - 6) : r.bottom + 6) + "px";
-    list._updateScrollHints();
     if (provider && !sub.hidden) {
       const b = [...list.querySelectorAll(".ov-mp-provider")].find(
         (b) => b.dataset.provider === provider,
@@ -492,7 +455,6 @@
       sub.style.left = Math.max(8, left) + "px";
       sub.style.top =
         Math.max(8, Math.min(a.top, height - sub.offsetHeight - 8)) + "px";
-      sublist._updateScrollHints();
     }
   }
   function init(btn) {

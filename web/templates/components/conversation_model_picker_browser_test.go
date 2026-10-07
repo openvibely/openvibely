@@ -59,6 +59,7 @@ func TestBrowserFunctional_ConversationModelPicker(t *testing.T) {
  assert(getComputedStyle(slider).getPropertyValue('--ov-mp-track').trim()==='#d5d8df','light track is light gray');
  const accent=getComputedStyle(slider).getPropertyValue('--ov-mp-accent');
  slider.value='1';slider.dispatchEvent(new Event('input'));
+ assert(panel.querySelector('.ov-mp-effort-head').textContent==='Reasoning effortUse default','no repeated level and reset keeps its action label');
  assert(getComputedStyle(slider).getPropertyValue('--ov-mp-accent')===accent,'adjustment keeps same accent');
  document.documentElement.dataset.theme='dark';
  assert(getComputedStyle(slider).getPropertyValue('--ov-mp-track').trim()==='#4b5260','dark track is gray');
@@ -68,12 +69,12 @@ func TestBrowserFunctional_ConversationModelPicker(t *testing.T) {
  assert(document.querySelector('[name=reasoning_effort]').value==='','restore model default');
  assert(panel.getBoundingClientRect().left>=0 && panel.getBoundingClientRect().right<=innerWidth,'panel fits');
  search.value='';search.dispatchEvent(new Event('input'));await wait();
- const list=panel.querySelector('.ov-mp-list'),hints=panel.querySelector('.ov-mp-scroll-hints');
- assert(hints.hidden,'no scroll hints when models fit');
+ const list=panel.querySelector('.ov-mp-list');
+ assert(!panel.querySelector('.ov-mp-scroll-hints'),'no more-above/below controls');
+ assert(list.offsetWidth===list.clientWidth,'no scrollbar when models fit');
  list.style.maxHeight='75px';await wait();
- assert(!hints.hidden&&!hints.lastElementChild.hidden,'visible indication when models overflow');
- hints.lastElementChild.click();await new Promise(r=>setTimeout(r,350));
- assert(list.scrollTop>0&&!hints.firstElementChild.hidden,'scroll affordance scrolls list and offers way back');
+ assert(list.scrollHeight>list.clientHeight&&list.offsetWidth>list.clientWidth,'visible scrollbar when overflowing');
+ list.scrollTop=50;await wait();assert(list.scrollTop>0,'list remains scrollable');
  assert(!panel.querySelector('.ov-mp-effort').hidden,'effort stays accessible while list scrolls');
  list.style.maxHeight='';await wait();
  document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));
