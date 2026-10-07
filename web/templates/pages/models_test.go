@@ -106,7 +106,7 @@ func TestModelsContent_CatalogModelsInSelector(t *testing.T) {
 	if strings.Contains(out[modelWorkerInputStart:modelWorkerInputStart+modelWorkerInputEnd], `max="10"`) {
 		t.Error("expected model worker input not to retain a hard maximum of 10")
 	}
-	if !strings.Contains(out, "Save endpoint changes and reconnect before discovering models.") {
+	if !strings.Contains(out, "Connect OAuth to load models for these settings.") {
 		t.Error("expected OAuth discovery to require reconnecting after endpoint changes")
 	}
 	if !strings.Contains(out, `name="custom_access_token_header"`) ||
@@ -1340,7 +1340,7 @@ func TestModelsContent_EditorOAuthActionUsesRuntimeSpecificLaunch(t *testing.T) 
 	if !strings.Contains(out, "select.value !== persistedConnectionID") || !strings.Contains(out, "Save this model before connecting the selected account") {
 		t.Fatal("expected changed account selections to require save before OAuth initiation")
 	}
-	if !strings.Contains(out, "var customOAuth = provider === 'openai_compatible'") {
+	if !strings.Contains(out, "onclick=\"startCustomModelOAuth(this)\"") {
 		t.Fatal("expected custom OpenAI-compatible OAuth to retain an editor-owned connect action")
 	}
 	if !strings.Contains(out, "data-oauth-external=\"false\"") {

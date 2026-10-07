@@ -16,10 +16,11 @@ import (
 // Setup sessions hold credentials in memory until the user creates a complete
 // model configuration. The random capability is never sent to the OAuth provider.
 type modelOAuthSetup struct {
-	owner   *Handler
-	config  models.LLMConfig
-	expires time.Time
-	failure string
+	owner    *Handler
+	targetID string
+	config   models.LLMConfig
+	expires  time.Time
+	failure  string
 }
 
 var modelOAuthSetups = struct {
@@ -51,7 +52,25 @@ func (h *Handler) modelOAuthSetupConfig(key string, connected bool) (*models.LLM
 func (h *Handler) BeginModelOAuthSetup(c echo.Context) error {
 	c.Request().Body = http.MaxBytesReader(c.Response(), c.Request().Body, 1<<20)
 	config := &models.LLMConfig{Provider: models.ProviderOpenAICompatible, AuthMethod: models.AuthMethodOAuth}
-	applyModelOAuthForm(c, config, modelFormCreate)
+	mode := modelFormCreate
+	targetID := strings.TrimSpace(c.FormValue("model_config_id"))
+	if targetID != "" {
+		saved, err := h.llmConfigRepo.GetByID(c.Request().Context(), targetID)
+		if err != nil {
+			return err
+		}
+		if saved == nil {
+			return echo.NewHTTPError(http.StatusNotFound, "Model not found")
+		}
+		if saved.Provider == models.ProviderOpenAICompatible && saved.AuthMethod == models.AuthMethodOAuth && saved.PresetSlug == "custom" {
+			*config = *saved
+			clearOAuthCredentials(config)
+			config.ID = ""
+			config.OAuthConnectionID = ""
+			mode = modelFormUpdate
+		}
+	}
+	applyModelOAuthForm(c, config, mode)
 	if err := applyOpenAICompatibleForm(c, config); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
@@ -64,7 +83,7 @@ func (h *Handler) BeginModelOAuthSetup(c echo.Context) error {
 	}
 	key := base64.RawURLEncoding.EncodeToString(keyBytes)
 	modelOAuthSetups.Lock()
-	modelOAuthSetups.sessions[key] = &modelOAuthSetup{owner: h, config: *config, expires: time.Now().Add(oauthFlowLifetime)}
+	modelOAuthSetups.sessions[key] = &modelOAuthSetup{owner: h, targetID: targetID, config: *config, expires: time.Now().Add(oauthFlowLifetime)}
 	modelOAuthSetups.Unlock()
 	time.AfterFunc(oauthFlowLifetime, func() { removeModelOAuthSetup(key) })
 	if err := h.initiateOAuthForConfig(c, config, key); err != nil {
@@ -109,9 +128,16 @@ func (h *Handler) attachModelOAuthSetup(c echo.Context, config *models.LLMConfig
 	if err != nil {
 		return "", err
 	}
+	modelOAuthSetups.Lock()
+	session := modelOAuthSetups.sessions[key]
+	matchesTarget := session != nil && session.targetID == config.ID
+	modelOAuthSetups.Unlock()
+	if !matchesTarget {
+		return "", echo.NewHTTPError(http.StatusConflict, "Sign-in belongs to a different model configuration.")
+	}
 	if config.Provider != models.ProviderOpenAICompatible || config.AuthMethod != models.AuthMethodOAuth || config.PresetSlug != "custom" ||
 		oauthSecurityConfigChanged(*signedIn, *config) || signedIn.ExtraHeadersJSON != config.ExtraHeadersJSON {
-		return "", echo.NewHTTPError(http.StatusConflict, "Connection settings changed. Connect OAuth again before creating the model.")
+		return "", echo.NewHTTPError(http.StatusConflict, "Connection settings changed. Connect OAuth again before saving the model.")
 	}
 	config.OAuthAccessToken = signedIn.OAuthAccessToken
 	config.OAuthRefreshToken = signedIn.OAuthRefreshToken

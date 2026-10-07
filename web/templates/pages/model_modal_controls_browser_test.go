@@ -221,6 +221,23 @@ func TestBrowserFunctional_CustomOAuthBeforeCreate(t *testing.T) {
  openNewModelModal();
  if(!f('custom_provider_auth_fields').classList.contains('hidden'))throw Error('Custom settings leaked into Anthropic');
  if(f('model_oauth_setup_session').value || !f('model_oauth_setup').classList.contains('hidden'))throw Error('Sign-in leaked into another provider');
+ var edit=document.createElement('button');
+ Object.assign(edit.dataset,{modelId:'saved-custom',modelName:'Saved OAuth',modelProvider:'openai_compatible',modelPresetSlug:'custom',modelAuthMethod:'oauth',modelModel:'old-model',modelBaseUrl:'https://old.example/v1',modelModelsUrl:'https://old.example/models',modelOauthConnected:'true'});
+ populateModelEditForm(edit);await new Promise(function(resolve){setTimeout(resolve,50);});
+ if(f('model_oauth_setup').classList.contains('hidden') || !f('model_oauth_connection_action').classList.contains('hidden'))throw Error('Editing must use temporary setup, not saved-endpoint sign-in');
+ f('model_base_url').value='https://new.example/v1';f('model_base_url').dispatchEvent(new Event('input'));
+ f('model_custom_models_url').value='https://new.example/models';f('model_custom_models_url').dispatchEvent(new Event('input'));
+ cancelOpenAICompatibleDiscovery();var requestCount=requests.length;discoverOpenAICompatibleModels();
+ if(requests.length!==requestCount || f('model_id').checkValidity())throw Error('Changed OAuth endpoint used old credentials or retained model');
+ await startCustomModelOAuth(f('model_oauth_setup').querySelector('button'));
+ await new Promise(function(resolve){setTimeout(resolve,50);});
+ var discovery=requests.filter(function(r){return r.url.indexOf('/models/openai-compatible/available')===0;}).pop();
+ var discoveryURL=new URL(discovery.url,window.location.href);
+ if(discoveryURL.searchParams.has('config_id') || discoveryURL.searchParams.get('base_url')!=='https://new.example/v1' || discovery.options.headers['X-Model-OAuth-Setup']!=='temporary-sign-in')throw Error('Edit discovery did not use newly authenticated settings');
+ var edited=new FormData(f('model_form'));
+ if(edited.get('model_config_id')!=='saved-custom' || edited.get('model')!=='authorized-model' || edited.get('oauth_setup_session')!=='temporary-sign-in' || f('model_submit_btn').textContent!=='Save')throw Error('Edited configuration cannot be saved with selected model and credentials');
+ closeModelModal();
+
  f('reconnect-result').setAttribute('data-test-result','pass');
  }catch(e){f('reconnect-result').setAttribute('data-test-result','fail');f('reconnect-result').setAttribute('data-test-error',String(e.stack));}
  })();</script>`
