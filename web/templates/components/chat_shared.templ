@@ -4012,19 +4012,32 @@ templ ChatAutoScrollScript() {
 			window.bindChatEarlierHTMXLifecycle = function() {
 				if (window._chatEarlierHTMXLifecycleBound) return;
 				window._chatEarlierHTMXLifecycleBound = true;
+				function requestLoader(event) {
+					var detail = event.detail || {};
+					// outerHTML dispatches swap/settle on the inserted rows. The final
+					// page has no new loader, but target still identifies the old one.
+					var target = detail.target;
+					if (target && target.matches && target.matches('[data-earlier-loader="true"]')) return target;
+					var element = detail.elt;
+					return element && element.matches && element.matches('[data-earlier-loader="true"]') ? element : null;
+				}
 				document.body.addEventListener('htmx:beforeRequest', function(event) {
 					var loader = event.detail && event.detail.elt;
 					if (!loader || !loader.matches || !loader.matches('[data-earlier-loader="true"]')) return;
+					loader._earlierSwapHandled = false;
+					loader._earlierSettleHandled = false;
 					if (window.prepareChatEarlierSwap) window.prepareChatEarlierSwap(loader);
 				});
 				document.body.addEventListener('htmx:afterSwap', function(event) {
-					var loader = event.detail && event.detail.elt;
-					if (!loader || !loader.matches || !loader.matches('[data-earlier-loader="true"]')) return;
+					var loader = requestLoader(event);
+					if (!loader || loader._earlierSwapHandled) return;
+					loader._earlierSwapHandled = true;
 					if (window.afterChatEarlierSwap) window.afterChatEarlierSwap(loader);
 				});
 				document.body.addEventListener('htmx:afterSettle', function(event) {
-					var loader = event.detail && event.detail.elt;
-					if (!loader || !loader.matches || !loader.matches('[data-earlier-loader="true"]')) return;
+					var loader = requestLoader(event);
+					if (!loader || loader._earlierSettleHandled) return;
+					loader._earlierSettleHandled = true;
 					var container = getEarlierContainerForElement(loader);
 					if (window.restoreChatEarlierScroll) window.restoreChatEarlierScroll(container);
 				});
