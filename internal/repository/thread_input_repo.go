@@ -996,17 +996,20 @@ func (r *ThreadInputRepo) RequeuePendingSteeringForExecution(ctx context.Context
 }
 
 func (r *ThreadInputRepo) ClaimQueuedForTaskExecution(ctx context.Context, inputID string, exec *models.Execution) error {
-	return r.claimQueuedForTaskExecution(ctx, inputID, exec, nil, false)
+	return r.claimQueuedForTaskExecution(ctx, inputID, exec, nil, false, nil)
 }
 
-// ClaimQueuedForTaskExecutionWithModel checks the task selection in the same
-// transaction that claims the input. A changed selection must be resolved again
-// before an execution is created.
-func (r *ThreadInputRepo) ClaimQueuedForTaskExecutionWithModel(ctx context.Context, inputID string, exec *models.Execution, expectedAgentID *string) error {
-	return r.claimQueuedForTaskExecution(ctx, inputID, exec, expectedAgentID, true)
+// ClaimQueuedForTaskExecutionWithModel checks the task selection and reads its
+// current effort in the same transaction that claims the input. The agent must
+// contain the saved model default, without a task effort override applied yet.
+func (r *ThreadInputRepo) ClaimQueuedForTaskExecutionWithModel(ctx context.Context, inputID string, exec *models.Execution, expectedAgentID *string, agent *models.LLMConfig) error {
+	if agent == nil || exec == nil || agent.ID != exec.AgentConfigID {
+		return fmt.Errorf("matching execution model is required")
+	}
+	return r.claimQueuedForTaskExecution(ctx, inputID, exec, expectedAgentID, true, agent)
 }
 
-func (r *ThreadInputRepo) claimQueuedForTaskExecution(ctx context.Context, inputID string, exec *models.Execution, expectedAgentID *string, checkModel bool) error {
+func (r *ThreadInputRepo) claimQueuedForTaskExecution(ctx context.Context, inputID string, exec *models.Execution, expectedAgentID *string, checkModel bool, agent *models.LLMConfig) error {
 	if exec == nil {
 		return fmt.Errorf("execution is required")
 	}
@@ -1015,7 +1018,8 @@ func (r *ThreadInputRepo) claimQueuedForTaskExecution(ctx context.Context, input
 		return err
 	}
 	defer unlockParent()
-	return withImmediateTx(ctx, r.db, func(dbexec SQLExecutor) error {
+	var claimedEffort string
+	err = withImmediateTx(ctx, r.db, func(dbexec SQLExecutor) error {
 		promoted, err := scanThreadInput(dbexec.QueryRowContext(ctx, `SELECT `+threadInputSelectColumns+` FROM thread_inputs WHERE id = ?`, inputID))
 		if err == sql.ErrNoRows {
 			if _, guarded := activeLaneExpectedState(ctx, exec.TaskID); guarded {
@@ -1054,6 +1058,10 @@ func (r *ThreadInputRepo) claimQueuedForTaskExecution(ctx context.Context, input
 			if (currentAgentID.Valid != (expectedAgentID != nil)) ||
 				(currentAgentID.Valid && currentAgentID.String != *expectedAgentID) {
 				return ErrTaskModelChanged
+			}
+			claimedEffort, err = modelEffort(ctx, dbexec, exec.TaskID, *agent)
+			if err != nil {
+				return fmt.Errorf("reading task effort before queued claim: %w", err)
 			}
 		}
 		var activeCount int
@@ -1171,6 +1179,10 @@ func (r *ThreadInputRepo) claimQueuedForTaskExecution(ctx context.Context, input
 		}
 		return retargetRemainingQueuedInputGuards(ctx, dbexec, promoted, exec.ID)
 	})
+	if err == nil && claimedEffort != "" {
+		agent.ReasoningEffort = claimedEffort
+	}
+	return err
 }
 func (r *ThreadInputRepo) ClaimQueuedForChatExecution(ctx context.Context, inputID string, task *models.Task, exec *models.Execution, slackContext *models.SlackTaskContext, emailContext *models.EmailTaskContext, discordContext *models.DiscordTaskContext) error {
 	if task == nil || exec == nil {
