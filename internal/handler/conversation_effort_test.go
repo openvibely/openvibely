@@ -128,3 +128,45 @@ func TestConversationPicker_RealPagesIncludeProviderAndEffortMetadata(t *testing
 	}
 	t.Fatal("selected model missing from task detail data")
 }
+
+func TestConversationEffort_NewDeferredTaskPreservesSelection(t *testing.T) {
+	for _, scheduled := range []bool{false, true} {
+		name := "backlog"
+		if scheduled {
+			name = "scheduled"
+		}
+		t.Run(name, func(t *testing.T) {
+			h, e, repo := setupTestHandler(t)
+			agent := createAgent(t, repo, func(a *models.LLMConfig) {
+				a.Provider = models.ProviderOpenAI
+				a.Model = "gpt-5.5"
+				a.ReasoningEffort = "medium"
+			})
+			project := createProject(t, h, "Deferred effort")
+			form := url.Values{"message": {"Future work"}, "category": {"backlog"}, "agent_id": {agent.ID}, "reasoning_effort": {"high"}}
+			if scheduled {
+				form.Set("add_schedule", "on")
+				form.Set("run_at", "2035-01-02T09:30")
+				form.Set("repeat_type", "once")
+			}
+			response := htmxPost(e, "/tasks?project_id="+project.ID+"&from=new&thread=1", form)
+			require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+			id := response.Header().Get("X-Created-Task-ID")
+			require.NotEmpty(t, id)
+			effort, err := h.taskRepo.ModelEffort(context.Background(), id, *agent)
+			require.NoError(t, err)
+			require.Equal(t, "high", effort)
+			task, err := h.taskRepo.GetByID(context.Background(), id)
+			require.NoError(t, err)
+			resolved, _, err := h.resolveTaskThreadExecutionAgent(context.Background(), task)
+			require.NoError(t, err)
+			require.Equal(t, "high", resolved.ReasoningEffort)
+			saved, err := repo.GetByID(context.Background(), agent.ID)
+			require.NoError(t, err)
+			require.Equal(t, "medium", saved.ReasoningEffort)
+			form.Set("reasoning_effort", "invalid")
+			response = htmxPost(e, "/tasks?project_id="+project.ID+"&from=new&thread=1", form)
+			require.Equal(t, http.StatusBadRequest, response.Code)
+		})
+	}
+}

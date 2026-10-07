@@ -960,6 +960,13 @@ func (h *Handler) CreateTask(c echo.Context) error {
 		if err == nil {
 			selectedThreadAgent = selectedAgent
 		}
+		if selectedThreadAgent != nil {
+			if err := h.applyConversationEffort(c, "", selectedThreadAgent); err != nil {
+				return err
+			}
+		} else if c.FormValue("reasoning_effort") != "" {
+			return echo.NewHTTPError(http.StatusBadRequest, "reasoning effort requires a selected model")
+		}
 	}
 	priority, _ := strconv.Atoi(c.FormValue("priority"))
 	category := models.TaskCategory(c.FormValue("category"))
@@ -1085,6 +1092,16 @@ func (h *Handler) CreateTask(c echo.Context) error {
 		}
 		applog.Infof("[handler] CreateTask error: %v", err)
 		return err
+	}
+	// Persist the composer's preference before a scheduled task or swarm planner
+	// can run; backlog drafts never pass through TaskThreadSend.
+	if threadDraft && selectedThreadAgent != nil {
+		if err := h.applyConversationEffort(c, t.ID, selectedThreadAgent); err != nil {
+			if rollbackErr := h.taskRepo.Delete(context.WithoutCancel(c.Request().Context()), t.ID); rollbackErr != nil {
+				return fmt.Errorf("saving task effort: %w; rolling back task: %v", err, rollbackErr)
+			}
+			return err
+		}
 	}
 	applog.Infof("[handler] CreateTask success id=%s", t.ID)
 

@@ -143,6 +143,8 @@
     sync(btn);
     if (active === btn) renderEffort();
     try {
+      // A failed write must not poison subsequent refreshes or selections.
+      s.pending = s.pending.catch(() => {});
       await s.pending;
       const response = await fetch(
         endpoint + "?agent_id=" + encodeURIComponent(m.id),
@@ -596,15 +598,34 @@
       e.preventDefault();
       e.stopImmediatePropagation();
       const submitter = e.submitter;
+      const form = e.target;
+      const message = form.querySelector('[name="message"]');
+      const attachment = form.querySelector('[name="attachment_session_id"]');
+      // The composer temporarily installs a steering fallback payload, then
+      // restores the newer draft synchronously. Preserve what was submitted.
+      const payload = {
+        ...(form._chatNextSubmissionPayload || {
+          message: message?.value || "",
+          attachmentSessionID: attachment?.value || "",
+        }),
+      };
       Promise.resolve(s.ready)
         .then(() => s.pending)
         .then(() => {
           if (s.error) throw Error(s.error);
+          if (!form.isConnected) return;
+          const draft = message?.value;
+          const draftAttachments = attachment?.value;
+          form._chatNextSubmissionPayload = payload;
+          if (message) message.value = payload.message;
+          if (attachment) attachment.value = payload.attachmentSessionID;
           btn._ovResubmit = true;
           try {
-            e.target.requestSubmit(submitter);
+            form.requestSubmit(submitter);
           } finally {
             btn._ovResubmit = false;
+            if (message) message.value = draft;
+            if (attachment) attachment.value = draftAttachments;
           }
         })
         .catch((err) => {

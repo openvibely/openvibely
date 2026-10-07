@@ -77,9 +77,9 @@ func TestBrowserFunctional_TaskModelPickerPersistence(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, `<!doctype html><html><head><style>body{font-family:sans-serif}form{margin-top:550px}</style></head><body data-test-result="pending"><script>
  localStorage.clear();window.htmx={process:function(){}};
- const stored={a:'high',b:'low'},posts=[];
+ const stored={a:'high',b:'low'},posts=[];let failNextWrite=false;
  window.fetch=async function(url,options){
- if(options?.method==='POST'){const body=options.body;await new Promise(r=>setTimeout(r,20));stored[body.get('agent_id')]=body.get('reasoning_effort');posts.push(body.get('agent_id'));return {ok:true};}
+ if(options?.method==='POST'){if(failNextWrite){failNextWrite=false;return {ok:false};}const body=options.body;await new Promise(r=>setTimeout(r,20));stored[body.get('agent_id')]=body.get('reasoning_effort');posts.push(body.get('agent_id'));return {ok:true};}
  const id=new URL(url,location.href).searchParams.get('agent_id');await new Promise(r=>setTimeout(r,id==='a'?80:20));return {ok:true,json:async()=>({reasoning_effort:stored[id]||''})};
  };
  </script>`+content.String()+`<div id="browser-result"></div><script>
@@ -104,6 +104,23 @@ func TestBrowserFunctional_TaskModelPickerPersistence(t *testing.T) {
  window.ovModelPicker.close(false);trigger.click();
  assert(!sub.hidden && sub.querySelector('[data-model=c]').getAttribute('aria-pressed')==='true','reopen selected provider');
  assert(panel.getBoundingClientRect().right<=innerWidth,'small viewport bounds');
+ failNextWrite=true;choose('b');await trigger._ovModelState.ready;
+ assert(!!trigger._ovModelState.error,'failed save reported');
+ window.ovModelPicker.close(false);trigger.click();await trigger._ovModelState.ready;
+ assert(!trigger._ovModelState.error,'reopen recovers after failed save');
+ choose('a');await trigger._ovModelState.ready;assert(posts.at(-1)==='a','can save after failure');
+ const form=trigger.closest('form'),message=form.querySelector('[name=message]'),attachment=form.querySelector('[name=attachment_session_id]');
+ let sent=null;
+ form.addEventListener('submit',event=>{event.preventDefault();sent=new FormData(form);},{once:true});
+ message.value='original steering message';attachment.value='original-attachment';
+ form._chatNextSubmissionPayload={message:message.value,attachmentSessionID:attachment.value,fallbackFromSteer:true};
+ form.requestSubmit();
+ message.value='newer draft';attachment.value='newer-attachment';
+ await wait(40);
+ assert(sent?.get('message')==='original steering message','retry sends original message');
+ assert(sent?.get('attachment_session_id')==='original-attachment','retry sends original attachments');
+ assert(message.value==='newer draft'&&attachment.value==='newer-attachment','retry preserves newer draft');
+
  document.body.dataset.testResult='pass';
  }catch(e){document.body.dataset.testResult='fail';document.body.dataset.testError=e.stack;document.getElementById('browser-result').textContent=String(e)}})();
  </script></body></html>`)
