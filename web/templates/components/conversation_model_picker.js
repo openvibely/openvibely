@@ -42,7 +42,8 @@
     effortBox = el("div", "ov-mp-effort"),
     status = el("div", "ov-mp-status");
   status.setAttribute("role", "status");
-  panel.append(searchWrap, list, effortBox, status);
+  const listFrame = scrollFrame(list);
+  panel.append(searchWrap, listFrame, effortBox, status);
   const subhead = el("div", "ov-mp-subhead"),
     back = el("button", "ov-mp-back", "‹"),
     sublist = el("div", "ov-mp-sublist");
@@ -50,11 +51,43 @@
   back.setAttribute("aria-label", "Back to providers");
   subhead.append(back);
   subhead.hidden = true;
-  sub.append(subhead, sublist);
+  sub.append(subhead, scrollFrame(sublist));
   document.body.append(panel, sub);
   let active = null,
     provider = null,
     favorites = read(favoritesKey);
+  function scrollFrame(content) {
+    const frame = el("div", "ov-mp-scroll-frame"),
+      hints = el("div", "ov-mp-scroll-hints");
+    const up = el("button", "", "↑ More above"),
+      down = el("button", "", "↓ More below");
+    hints.hidden = true;
+    for (const button of [up, down]) button.type = "button";
+    up.onclick = () =>
+      content.scrollBy({
+        top: -Math.max(60, content.clientHeight * 0.75),
+        behavior: "smooth",
+      });
+    down.onclick = () =>
+      content.scrollBy({
+        top: Math.max(60, content.clientHeight * 0.75),
+        behavior: "smooth",
+      });
+    const update = () => {
+      const overflowing = content.scrollHeight > content.clientHeight + 1;
+      hints.hidden = !overflowing;
+      up.hidden = !overflowing || content.scrollTop < 1;
+      down.hidden =
+        !overflowing ||
+        content.scrollTop + content.clientHeight >= content.scrollHeight - 1;
+    };
+    content.addEventListener("scroll", update);
+    new ResizeObserver(update).observe(content);
+    content._updateScrollHints = update;
+    hints.append(up, down);
+    frame.append(content, hints);
+    return frame;
+  }
   function options(btn) {
     return [...btn.parentElement.querySelectorAll("li[data-value]")].map(
       (li) => ({
@@ -275,8 +308,7 @@
       m.id === active.dataset.currentValue ? "✓" : "",
     );
     check.setAttribute("aria-hidden", "true");
-    check.onclick = () => choose(m);
-    r.append(check);
+    pick.prepend(check);
     target.append(r);
   }
   function renderList() {
@@ -361,10 +393,7 @@
       el("span", "", "Reasoning effort"),
       el("span", "", value ? label(value) : "Model default"),
     );
-    effortBox.append(
-      head,
-      el("div", "ov-mp-effort-model", m.name + (override ? "" : " · Default")),
-    );
+    effortBox.append(head);
     const slider = el("input");
     slider.type = "range";
     slider.min = "0";
@@ -393,7 +422,6 @@
         "aria-valuetext",
         value ? label(value) : "Model default",
       );
-      effortBox.querySelector(".ov-mp-effort-model").textContent = m.name;
     };
     slider.onchange = () => {
       save(active);
@@ -405,13 +433,15 @@
     );
     const reset = el("button", "ov-mp-reset", "Use model default");
     reset.type = "button";
-    reset.disabled = !override || s.loading;
+    reset.hidden = !override;
+    reset.disabled = s.loading;
     reset.onclick = () => {
       delete s.efforts[key(m)];
       save(active);
       renderEffort();
     };
-    effortBox.append(slider, ticks, reset);
+    head.append(reset);
+    effortBox.append(slider, ticks);
   }
   function render() {
     if (!active) return;
@@ -438,6 +468,7 @@
       Math.max(8, Math.min(r.left, width - panel.offsetWidth - 8)) + "px";
     panel.style.top =
       (up ? Math.max(8, r.top - panel.offsetHeight - 6) : r.bottom + 6) + "px";
+    list._updateScrollHints();
     if (provider && !sub.hidden) {
       const b = [...list.querySelectorAll(".ov-mp-provider")].find(
         (b) => b.dataset.provider === provider,
@@ -461,6 +492,7 @@
       sub.style.left = Math.max(8, left) + "px";
       sub.style.top =
         Math.max(8, Math.min(a.top, height - sub.offsetHeight - 8)) + "px";
+      sublist._updateScrollHints();
     }
   }
   function init(btn) {
