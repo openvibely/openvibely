@@ -1731,6 +1731,13 @@ func (h *Handler) resolveTaskChangesWorktreeState(ctx context.Context, task *mod
 				state.DiffOutput = service.GetWorktreeDiff(project.RepoPath, task.WorktreeBranch, targetBranch)
 				state.FileStats = service.GetWorktreeFileStats(project.RepoPath, task.WorktreeBranch, targetBranch)
 			}
+			// Cleanup may have removed the worktree while the read waited for
+			// its lifecycle lock. Use the saved diff even for active tasks.
+			if _, err := os.Stat(task.WorktreePath); os.IsNotExist(err) {
+				state.DiffOutput = preservedDiff()
+				state.FileStats = nil
+				return state
+			}
 			if strings.TrimSpace(state.DiffOutput) == "" && !isActive && (state.BranchAlreadyMerged || service.IsBranchMerged(project.RepoPath, task.WorktreeBranch, targetBranch)) {
 				if diff := preservedDiff(); diff != "" {
 					state.DiffOutput = diff
@@ -1799,6 +1806,9 @@ func (h *Handler) resolveTaskChangesFileMeta(ctx context.Context, task *models.T
 		diffOutput, ok = service.GetWorktreeDiffFileWithUncommitted(project.RepoPath, task.WorktreeBranch, targetBranch, task.WorktreePath, fileIndex)
 	} else {
 		diffOutput, ok = service.GetWorktreeDiffFileWithUncommitted(project.RepoPath, task.WorktreeBranch, targetBranch, "", fileIndex)
+	}
+	if _, err := os.Stat(task.WorktreePath); os.IsNotExist(err) {
+		return preservedMeta()
 	}
 	if !ok {
 		if !isActive && (h.reconcileAlreadyMergedBranch(ctx, task) || service.IsBranchMerged(project.RepoPath, task.WorktreeBranch, targetBranch)) {
