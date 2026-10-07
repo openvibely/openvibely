@@ -1535,11 +1535,10 @@ for _, agent := range modelOptions {
 						var previous = select.value;
 						var names = Array.from(new Set(models.map(function(model) {return model.name || model.model;}).filter(Boolean)));
 						select.replaceChildren();
-						if (previous && names.indexOf(previous) === -1) select.add(new Option(previous + ' (not returned by server)', previous));
 						names.forEach(function(name) {select.add(new Option(name, name));});
 						if (!select.options.length) select.add(new Option('No models installed', ''));
-						select.value = previous || names[0] || '';
-						if (!previous && names.length) handleModelChange();
+						select.value = names.indexOf(previous) !== -1 ? previous : (names[0] || '');
+						if (select.value !== previous) handleModelChange();
 						status.textContent = names.length ? 'Loaded ' + names.length + ' model' + (names.length === 1 ? '.' : 's.') : 'No models installed on this Ollama server. Install a model, then refresh.';
 					})
 					.catch(function(error) {
@@ -2081,14 +2080,11 @@ for _, agent := range modelOptions {
 									.then(function(data) {
 										if (openAICompatibleDiscoveryGeneration !== discoveryGeneration ||
 											currentOpenAICompatibleDiscoveryIdentity() !== discoveryIdentity) return;
-										var models = data.models || [];
+										var models = (data.models || []).filter(function(model) {return !!model.id;});
 										var select = document.getElementById('model_id');
 										var previous = select.value;
 										select.innerHTML = '';
-										if (!models.length && !previous) select.add(new Option('No models available', ''));
-										if (previous && !models.some(function(model) { return model.id === previous; })) {
-											select.add(new Option(previous + ' (not returned by server)', previous));
-										}
+										if (!models.length) select.add(new Option('No models available', ''));
 										openAICompatibleDiscoveredModels = {};
 									for (var i = 0; i < models.length; i++) {
 										if (models[i].id) {
@@ -2099,10 +2095,11 @@ for _, agent := range modelOptions {
 									select.value = previous;
 									if (previous && models.some(function(model) { return model.id === previous; })) {
 										setOpenAICompatibleModelValue(previous, previous, true);
-									} else if (!previous && models.length > 0) {
+									} else if (models.length > 0) {
 										setOpenAICompatibleModelValue(models[0].id, models[0].id, true);
 									} else {
-										applyDiscoveredModelLimits(openAICompatibleDiscoveredModels[select.value], true);
+										document.getElementById('model_openai_compatible_custom_model').value = '';
+										handleModelChange();
 									}
 									status.classList.toggle('text-error', !models.length);
 									status.textContent = models.length ? ('Loaded ' + models.length + ' model' + (models.length === 1 ? '.' : 's.')) : 'The server returned no models. Check the server and refresh.';

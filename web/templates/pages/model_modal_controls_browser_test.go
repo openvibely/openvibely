@@ -57,6 +57,13 @@ func TestBrowserFunctional_ModelModalDiscoveryAndDefaults(t *testing.T) {
   discoveryFails=false;returnedModels=[{id:'qwen',context_length:262144}];field('model_refresh').click();await wait();
   assert(field('model_id').options.length===1,'refresh removes stale models');
   assert(!field('openai_compatible_discovery_status').classList.contains('text-error'),'retry clears error');
+  returnedModels=[{id:'replacement',context_length:8192}];field('model_refresh').click();await wait();
+  assert(field('model_id').value==='replacement' && field('model_id').options.length===1,'missing selected model replaced');
+  assert(field('model_context_window_cap').value==='8192','replacement uses its context limit');
+  returnedModels=[];field('model_refresh').click();await wait();
+  assert(!field('model_id').value && !field('model_id').checkValidity() && !field('model_openai_compatible_custom_model').value,'empty refresh clears selected model and blocks save');
+  returnedModels=[{id:'qwen',context_length:262144}];field('model_refresh').click();await wait();
+
   change('model_worker_timeout_mode','custom');input('model_worker_timeout_custom','120');
   change('model_max_workers_mode','custom');input('model_max_workers_custom','3');
   change('model_compaction_threshold_mode','custom');input('model_compaction_threshold_custom','100000');
@@ -236,6 +243,11 @@ func TestBrowserFunctional_OllamaDiscovery(t *testing.T) {
  assert(new FormData(f('model_form')).get('model')==='installed:a','selected model submitted');
  f('model_id').value='installed:b';f('model_refresh').click();await wait();
  assert(f('model_id').value==='installed:b','refresh preserves selection');
+ models=[{name:'replacement:model'}];f('model_refresh').click();await wait();
+ assert(f('model_id').value==='replacement:model' && f('model_id').options.length===1,'deleted selection removed on refresh');
+ models=[];f('model_refresh').click();await wait();
+ assert(!f('model_id').value && !f('model_id').checkValidity(),'empty refresh removes deleted selection');
+
  f('model_ollama_base_url').value='http://localhost:11435';f('model_ollama_base_url').dispatchEvent(new Event('input'));
  assert(!f('model_id').value && !f('model_id').checkValidity(),'changing server clears previous model');
  models=[];runAutoDiscoverOpenAICompatibleModels();await wait();
@@ -254,6 +266,8 @@ func TestBrowserFunctional_OllamaDiscovery(t *testing.T) {
  models=[{name:'saved:model'},{name:'other:model'}];populateModelEditForm(edit);await wait();
  assert(f('model_id').value==='saved:model','editing preserves saved model');
  assert(requested[requested.length-1].includes('11436'),'editing discovers saved server');
+ models=[];f('model_refresh').click();await wait();
+ assert(!f('model_id').value && !f('model_id').checkValidity(),'uninstalled saved model cannot be resubmitted');
  f('reconnect-result').setAttribute('data-test-result','pass');
  } catch(error){f('reconnect-result').setAttribute('data-test-result','fail');f('reconnect-result').setAttribute('data-test-error',String(error.stack));}
  })();</script>`
