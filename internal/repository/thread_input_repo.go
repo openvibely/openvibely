@@ -26,6 +26,7 @@ var (
 	ErrExpectedTurnEmpty = errors.New("expected turn id is required")
 	ErrActiveTurnChanged = errors.New("active turn changed")
 	ErrInputNotPending   = errors.New("input is no longer pending")
+	ErrTaskModelChanged  = errors.New("task model changed before queued input claim")
 )
 
 const (
@@ -995,6 +996,17 @@ func (r *ThreadInputRepo) RequeuePendingSteeringForExecution(ctx context.Context
 }
 
 func (r *ThreadInputRepo) ClaimQueuedForTaskExecution(ctx context.Context, inputID string, exec *models.Execution) error {
+	return r.claimQueuedForTaskExecution(ctx, inputID, exec, nil, false)
+}
+
+// ClaimQueuedForTaskExecutionWithModel checks the task selection in the same
+// transaction that claims the input. A changed selection must be resolved again
+// before an execution is created.
+func (r *ThreadInputRepo) ClaimQueuedForTaskExecutionWithModel(ctx context.Context, inputID string, exec *models.Execution, expectedAgentID *string) error {
+	return r.claimQueuedForTaskExecution(ctx, inputID, exec, expectedAgentID, true)
+}
+
+func (r *ThreadInputRepo) claimQueuedForTaskExecution(ctx context.Context, inputID string, exec *models.Execution, expectedAgentID *string, checkModel bool) error {
 	if exec == nil {
 		return fmt.Errorf("execution is required")
 	}
@@ -1033,6 +1045,16 @@ func (r *ThreadInputRepo) ClaimQueuedForTaskExecution(ctx context.Context, input
 				return ErrInputNotPending
 			}
 			return fmt.Errorf("validating queued input task surface: %w", err)
+		}
+		if checkModel {
+			var currentAgentID sql.NullString
+			if err := dbexec.QueryRowContext(ctx, `SELECT agent_id FROM tasks WHERE id = ?`, exec.TaskID).Scan(&currentAgentID); err != nil {
+				return fmt.Errorf("checking task model before queued claim: %w", err)
+			}
+			if (currentAgentID.Valid != (expectedAgentID != nil)) ||
+				(currentAgentID.Valid && currentAgentID.String != *expectedAgentID) {
+				return ErrTaskModelChanged
+			}
 		}
 		var activeCount int
 		if err := dbexec.QueryRowContext(ctx, `SELECT COUNT(*) FROM executions WHERE task_id = ? AND status = 'running'`, exec.TaskID).Scan(&activeCount); err != nil {
