@@ -18,6 +18,9 @@ func CompactionReporter(writer *Writer, inThinking *bool) func(llmcontracts.Comp
 	return func(progress llmcontracts.CompactionProgress) {
 		if inThinking != nil && *inThinking {
 			*inThinking = false
+			if fence := transcript.UnclosedMarkdownFence(writer.String()); fence != "" {
+				writer.Write([]byte("\n" + fence + "\n"))
+			}
 			WriteEvent(writer, Event{Type: EventThinkingEnd}, false)
 		}
 		switch progress.State {
