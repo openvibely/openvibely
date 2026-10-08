@@ -1037,6 +1037,71 @@ func TestChatActionRuntimeExecutorCoversToolClosuresAndValidation(t *testing.T) 
 	require.Contains(t, summary, "Edited")
 }
 
+func TestPrimaryAgentSelectabilityMatchesTaskUIProjection(t *testing.T) {
+	archivedAt := time.Now()
+	cases := []struct {
+		name            string
+		enabled         bool
+		selectable      bool
+		generatedStatus models.AgentGeneratedStatus
+		archivedAt      *time.Time
+		wantSelectable  bool
+	}{
+		{
+			name:            "enabled selectable active",
+			enabled:         true,
+			selectable:      true,
+			generatedStatus: models.AgentStatusUserEdited,
+			wantSelectable:  true,
+		},
+		{
+			name:            "disabled",
+			enabled:         false,
+			selectable:      true,
+			generatedStatus: models.AgentStatusUserEdited,
+		},
+		{
+			name:            "not selectable",
+			enabled:         true,
+			selectable:      false,
+			generatedStatus: models.AgentStatusUserEdited,
+		},
+		{
+			name:            "generated archived status",
+			enabled:         true,
+			selectable:      true,
+			generatedStatus: models.AgentStatusArchived,
+		},
+		{
+			name:            "archive timestamp",
+			enabled:         true,
+			selectable:      true,
+			generatedStatus: models.AgentStatusUserEdited,
+			archivedAt:      &archivedAt,
+		},
+	}
+
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			fullAgentSelectable := selectablePrimaryAgentDefinition(models.Agent{
+				Enabled:             tt.enabled,
+				SelectableAsPrimary: tt.selectable,
+				GeneratedStatus:     tt.generatedStatus,
+				ArchivedAt:          tt.archivedAt,
+			})
+			compactOptionSelectable := selectableTaskUIAgentOption(repository.AgentTaskUIOption{
+				Enabled:             tt.enabled,
+				SelectableAsPrimary: tt.selectable,
+				GeneratedStatus:     tt.generatedStatus,
+				ArchivedAt:          tt.archivedAt,
+			})
+
+			require.Equal(t, tt.wantSelectable, fullAgentSelectable)
+			require.Equal(t, fullAgentSelectable, compactOptionSelectable)
+		})
+	}
+}
+
 func TestTaskFormAndAgentSelectionHelpers(t *testing.T) {
 	tc := NewTestContext(t)
 	ctx := context.Background()
