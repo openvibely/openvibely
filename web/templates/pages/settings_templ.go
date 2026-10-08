@@ -420,7 +420,7 @@ func settingsContent(view ChannelsSettingsView) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, "<div data-page-header class=\"flex items-center justify-between mb-6\"><h2 class=\"text-2xl font-bold\">Channels</h2><div class=\"dropdown dropdown-end\"><label tabindex=\"0\" class=\"btn btn-primary btn-sm\" onclick=\"handleDropdownToggle(event)\">+ Add Channel</label><ul tabindex=\"0\" class=\"dropdown-content z-[100] menu p-2 shadow bg-base-100 rounded-box w-48 border border-base-300\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, "<div data-page-header class=\"flex items-center justify-between mb-6\"><h2 class=\"text-2xl font-bold\">Channels</h2><div class=\"dropdown dropdown-end\"><label tabindex=\"0\" class=\"btn btn-primary btn-sm\" onclick=\"handleDropdownToggle(event)\">+ Add Channel</label><ul tabindex=\"0\" class=\"ov-menu ov-menu-actions ov-menu-scroll dropdown-content z-[100] menu w-48\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -526,7 +526,7 @@ func settingsContent(view ChannelsSettingsView) templ.Component {
 					}
 					return nil
 				})
-				templ_7745c5c3_Err = components.CardActionDropdown(components.CardActionDropdownConfig{Label: "More actions for X (formerly Twitter)", WrapperClass: "dropdown dropdown-end", MenuClass: "dropdown-content menu bg-base-100 rounded-box shadow z-10 w-32", StopPropagation: true}).Render(templ.WithChildren(ctx, templ_7745c5c3_Var8), templ_7745c5c3_Buffer)
+				templ_7745c5c3_Err = components.CardActionDropdown(components.CardActionDropdownConfig{Label: "More actions for X (formerly Twitter)", WrapperClass: "dropdown dropdown-end", MenuClass: "z-10 w-32", StopPropagation: true}).Render(templ.WithChildren(ctx, templ_7745c5c3_Var8), templ_7745c5c3_Buffer)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}

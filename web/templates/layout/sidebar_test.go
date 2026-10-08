@@ -106,12 +106,12 @@ func TestSidebar_ProjectSelectorSearchableAndIdentityOnly(t *testing.T) {
 		`type="text"`,
 		`placeholder="Search projects"`,
 		`data-searchable-selector-search-shell`,
-		`class="card border border-base-300 bg-base-100 shadow-sm"`,
-		`class="w-full border-0 bg-transparent px-4 py-2 text-sm focus:outline-none focus:ring-0"`,
+		`class="ov-menu-search"`,
+		`class="w-full"`,
 		`aria-autocomplete="list"`,
-		`class="menu w-full min-w-0 gap-1 overflow-x-hidden p-0"`,
-		`class="flex w-full max-w-full min-w-0 items-center gap-2 overflow-hidden rounded-btn px-4 py-2 hover:bg-base-content/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"`,
-		`class="w-4 shrink-0" aria-hidden="true" data-project-selector-current data-searchable-selector-current>✓</span>`,
+		`class="w-full min-w-0 p-0"`,
+		`class="ov-menu-option w-full max-w-full overflow-hidden"`,
+		`class="ov-menu-check" aria-hidden="true" data-project-selector-current data-searchable-selector-current>✓</span>`,
 		`role="listbox"`,
 		`data-project-selector-option`,
 		`data-project-id="payments-api"`,
@@ -659,7 +659,7 @@ func TestSidebar_UserAreaAndThemeToggleCoexist(t *testing.T) {
 	if !strings.Contains(html, `aria-haspopup="menu"`) {
 		t.Fatal("sidebar user trigger must declare menu popup semantics")
 	}
-	if !strings.Contains(html, `class="text-sm"`) || !strings.Contains(html, `>Logout</button>`) {
+	if !strings.Contains(html, `class="ov-menu-option w-full" role="menuitem">Logout</button>`) {
 		t.Fatal("sidebar user menu must include logout as a menu item")
 	}
 	if strings.Contains(html, `class="btn btn-ghost btn-xs">Logout</button>`) {
@@ -732,7 +732,7 @@ func TestSidebar_FooterAlignmentAndAccessibleHitTargets(t *testing.T) {
 		`sidebar-theme-toggle-container border-t border-base-300 p-3 flex items-center justify-end gap-2`,
 		`id="sidebar-user-menu-trigger"`,
 		`class="sidebar-user-trigger btn btn-ghost w-full justify-start items-center gap-2 normal-case"`,
-		`id="sidebar-logout-label" type="submit" class="text-sm" role="menuitem">Logout</button>`,
+		`id="sidebar-logout-label" type="submit" class="ov-menu-option w-full" role="menuitem">Logout</button>`,
 		`aria-label="Open user menu"`,
 		`.sidebar-theme-toggle-container {`,
 		`min-height: 3.25rem;`,

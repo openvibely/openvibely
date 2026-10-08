@@ -59,7 +59,7 @@ templ automationsContent(cards []models.AutomationCard, currentProjectID string,
 			<h2 class="text-2xl font-bold">Automations</h2>
 			<div class="dropdown dropdown-end">
 				<label tabindex="0" class="btn btn-primary btn-sm" onclick="handleDropdownToggle(event)">+ New Automation</label>
-				<ul tabindex="0" class="dropdown-content z-[100] menu w-48 rounded-box border border-base-300 bg-base-100 p-2 shadow" data-automation-new-menu>
+				<ul tabindex="0" class="ov-menu ov-menu-actions ov-menu-scroll dropdown-content z-[100] menu w-48" data-automation-new-menu>
 					<li><button type="button" data-automation-new-template onclick="openAutomationNewModal(event, 'automation-template-modal')">Template</button></li>
 					<li><button type="button" data-automation-new-describe onclick="openAutomationNewModal(event, 'automation-describe-modal')">Describe</button></li>
 					<li><button type="button" data-automation-new-custom onclick="submitAutomationCustom(event)">Custom</button></li>
@@ -2312,7 +2312,7 @@ templ automationGraphThemeStyles() {
 }
 
 templ automationLiveMoreActions(graph models.AutomationLiveGraph, currentProjectID string, deleteAvailable bool) {
-	@components.CardActionDropdown(components.CardActionDropdownConfig{WrapperClass: "dropdown dropdown-end shrink-0", MenuClass: "dropdown-content z-[100] menu w-48 rounded-box border border-base-300 bg-base-100 p-2 shadow", Label: "More actions for " + graph.Automation.Name, AutomationLiveMenu: true}) {
+	@components.CardActionDropdown(components.CardActionDropdownConfig{WrapperClass: "dropdown dropdown-end shrink-0", MenuClass: "z-[100] w-48", Label: "More actions for " + graph.Automation.Name, AutomationLiveMenu: true}) {
 		@automationLiveDuplicateAction(graph.Automation.ID, currentProjectID, graph.Version.AdapterKey)
 				if graph.TemplateUpdateAvailable {
 					<li><button type="button" data-automation-live-update-template onclick="document.getElementById('update-automation-template-modal').showModal()">Update to latest template</button></li>
@@ -2330,7 +2330,7 @@ templ automationLiveMoreActions(graph models.AutomationLiveGraph, currentProject
 }
 
 templ automationBuilderMoreActions(page models.AutomationBuilderPage, currentProjectID string) {
-	@components.CardActionDropdown(components.CardActionDropdownConfig{WrapperClass: "dropdown dropdown-end shrink-0", MenuClass: "dropdown-content z-[100] menu w-48 rounded-box border border-base-300 bg-base-100 p-2 shadow", Label: "More actions for " + page.Result.Candidate.Name, AutomationBuilderActions: true}) {
+	@components.CardActionDropdown(components.CardActionDropdownConfig{WrapperClass: "dropdown dropdown-end shrink-0", MenuClass: "z-[100] w-48", Label: "More actions for " + page.Result.Candidate.Name, AutomationBuilderActions: true}) {
 				if page.LifecycleState == models.AutomationActive {
 					<li><button type="submit" form="automation-builder-pause-form" data-automation-builder-pause>Disable</button></li>
 				}

@@ -108,7 +108,7 @@ templ alertsContent(alerts []models.AlertSummary, currentProjectID string, unrea
 			<div class="flex items-center gap-2">
 				if len(alerts) > 0 || unreadCount > 0 {
 					<!-- Kebab menu -->
-					@components.CardActionDropdown(components.CardActionDropdownConfig{Label: "More actions", IconClass: "h-5 w-5", MenuClass: "dropdown-content z-[100] menu p-2 shadow bg-base-100 rounded-box w-52 border border-base-300"}) {
+					@components.CardActionDropdown(components.CardActionDropdownConfig{Label: "More actions", IconClass: "h-5 w-5", MenuClass: "z-[100] w-52"}) {
 							if unreadCount > 0 {
 								<li>
 									<a

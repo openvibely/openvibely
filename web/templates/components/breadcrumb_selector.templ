@@ -85,7 +85,7 @@ templ BreadcrumbSelectorResults(kind string, currentID string, items []models.Br
 						data-breadcrumb-selector-option
 						data-searchable-selector-option
 					>
-							<span class="w-4 shrink-0" aria-hidden="true">{ breadcrumbSelectorCheck(item.ID == currentID) }</span>
+							<span class="ov-menu-check" aria-hidden="true">{ breadcrumbSelectorCheck(item.ID == currentID) }</span>
 							if kind == "Task" {
 								@TaskStateIcon(models.Task{Status: item.Status, Category: item.Category, MergeStatus: item.MergeStatus, GoalMet: item.GoalMet})
 							}

@@ -79,7 +79,7 @@ templ WorktreeInfoPanel(task *models.Task, fileStats []service.WorktreeFileStat)
 								<div tabindex="0" role="button" class="btn btn-primary btn-xs">
 									Merge to { components.TaskWorktreeMergeTarget(task) }
 								</div>
-								<ul tabindex="0" class="dropdown-content z-[1] menu p-2 shadow bg-base-100 rounded-box w-52 border border-base-300">
+								<ul tabindex="0" class="ov-menu ov-menu-actions ov-menu-scroll dropdown-content z-[1] menu w-52">
 									<li class="menu-title"><span>Local</span></li>
 									for _, action := range components.TaskWorktreeMergeActions() {
 										if !action.RequiresRebaseEligibility {
@@ -144,7 +144,7 @@ templ TaskChangesWorktreeContentWithView(diffOutput string, task *models.Task, f
 									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
 								</svg>
 							</div>
-							<ul tabindex="0" class="dropdown-content z-[100] menu p-2 shadow bg-base-100 rounded-box w-52 max-w-[calc(100vw-2rem)] border border-base-300">
+							<ul tabindex="0" class="ov-menu ov-menu-actions ov-menu-scroll dropdown-content z-[100] menu w-52 max-w-[calc(100vw-2rem)]">
 								if conflictRecovery {
 									<li class="menu-title"><span>Conflict recovery</span></li>
 									<li>

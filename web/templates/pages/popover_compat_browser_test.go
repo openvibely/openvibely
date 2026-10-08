@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/a-h/templ"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/web/static"
 	"github.com/openvibely/openvibely/web/templates/components"
@@ -74,6 +75,14 @@ func TestBrowserFunctional_PopoverCompatibility(t *testing.T) {
 					}
 				}
 				fmt.Fprint(&icons, `</a></div>`)
+				fmt.Fprint(&icons, `<div id="menu-style-fixture">`)
+				action := components.CardActionDropdown(components.CardActionDropdownConfig{Label: "Style reference"})
+				if err := action.Render(templ.WithChildren(r.Context(), templ.Raw(`<li><button type="button" class="active">Action</button></li><li><button type="button" class="text-error">Delete</button></li><li><form><button class="ov-menu-option w-full" type="submit">Form action</button></form></li>`)), &icons); err != nil {
+					t.Error(err)
+					return
+				}
+				fmt.Fprint(&icons, `</div>`)
+
 				html := strings.Replace(page.String(), "</body>", icons.String()+"</body>", 1)
 				if legacy {
 					// Emulate missing methods and an unrecognized pseudo-class, including CSS parsing.
@@ -103,6 +112,10 @@ func TestBrowserFunctional_PopoverCompatibility(t *testing.T) {
 					b.waitFor("task panel divider", `String(getComputedStyle(document.querySelector('#task-details-panel > [role="tablist"]')).boxShadow !== 'none')`, "true")
 					b.click(`#task-thread-form-agent-select`)
 					b.waitFor("composer menu surface", `String(getComputedStyle(document.getElementById('conversation-model-picker')).backgroundColor !== 'rgba(0, 0, 0, 0)' && getComputedStyle(document.getElementById('conversation-model-picker')).borderTopWidth === '1px')`, "true")
+					b.waitFor("shared menu surfaces "+theme, `(function(){var model=getComputedStyle(document.getElementById('conversation-model-picker'));return String(['#project-selector-dialog','#project-tab-menu','#task-property-picker','#menu-style-fixture .dropdown-content'].every(function(selector){var s=getComputedStyle(document.querySelector(selector));return ['backgroundColor','borderTopWidth','borderTopColor','borderRadius','boxShadow','fontSize'].every(function(key){return s[key]===model[key]})}))})()`, "true")
+					b.waitFor("selected and destructive menu colors "+theme, `(function(){var normal=getComputedStyle(document.querySelector('.ov-mp-pick')).color;return String(getComputedStyle(document.querySelector('#menu-style-fixture .active')).color===normal && getComputedStyle(document.querySelector('#menu-style-fixture .text-error')).color!==normal)})()`, "true")
+					b.waitFor("shared menu row spacing "+theme, `(function(){var model=getComputedStyle(document.querySelector('.ov-mp-pick'));return String(['#project-selector-dialog [data-searchable-selector-option]','#menu-style-fixture li button','#menu-style-fixture form button','#project-tab-settings-action','#task-property-picker button[data-value]'].every(function(selector){var s=getComputedStyle(document.querySelector(selector));return ['paddingTop','paddingBottom','paddingLeft','paddingRight','fontSize','borderRadius'].every(function(key){return s[key]===model[key]})}))})()`, "true")
+					b.waitFor("shared search headers "+theme, `(function(){var model=getComputedStyle(document.querySelector('.ov-mp-search'));return String(Array.from(document.querySelectorAll('[data-searchable-selector-search-shell],#task-property-picker .ov-menu-search')).every(function(el){var s=getComputedStyle(el);return ['padding','borderBottomWidth','borderBottomColor'].every(function(key){return s[key]===model[key]})}))})()`, "true")
 					b.waitFor("composer active-row color", `(function(){var row=document.querySelector('#conversation-model-picker .ov-mp-row');row.setAttribute('data-picker-active','');return String(getComputedStyle(row).backgroundColor!=='rgba(0, 0, 0, 0)')})()`, "true")
 					b.click(`.project-bar-brand`)
 					b.evaluate(`var source=document.createElement('a');source.id='compat-search-source';source.className='stream-web-search-source';source.textContent='Search result';source.style.cssText='position:fixed;left:300px;top:180px;z-index:1000';document.body.append(source);'ok'`)
@@ -179,7 +192,7 @@ func TestBrowserFunctional_PopoverCompatibility(t *testing.T) {
 						b.waitFor("legacy dark menu border", `getComputedStyle(document.getElementById('project-tab-menu')).borderTopColor`, "rgba(166, 173, 187, 0.2)")
 					}
 					if theme == "light" {
-						b.waitFor("light menu surface and border", `(function(){var s=getComputedStyle(document.getElementById('project-tab-menu'));return String(s.backgroundColor==='rgb(250, 250, 250)' && s.borderTopWidth==='1px' && s.borderTopStyle==='solid' && s.borderTopColor==='rgb(206, 206, 206)')})()`, "true")
+						b.waitFor("light menu surface and border", `(function(){var s=getComputedStyle(document.getElementById('project-tab-menu'));return String(s.backgroundColor==='rgb(250, 250, 250)' && s.borderTopWidth==='1px' && s.borderTopStyle==='solid' && s.borderTopColor===getComputedStyle(document.getElementById('conversation-model-picker')).borderTopColor)})()`, "true")
 						b.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseMoved", "x": 230, "y": 60}, nil)
 						b.waitFor("light menu hover highlight", `getComputedStyle(document.getElementById('project-tab-settings-action')).backgroundColor`, "rgb(232, 232, 232)")
 					}

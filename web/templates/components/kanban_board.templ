@@ -178,7 +178,7 @@ templ KanbanColumn(tasks []models.Task, projectID string, category models.TaskCa
 				}
 			</div>
 			if category == models.CategoryCompleted {
-				@CardActionDropdown(CardActionDropdownConfig{WrapperClass: "dropdown dropdown-end", TriggerClass: "btn btn-xs btn-ghost min-h-11 h-11 w-11 p-0", IconClass: "h-5 w-5", MenuClass: "dropdown-content menu p-2 shadow bg-base-100 rounded-box w-56 max-w-[calc(100vw-2rem)] z-[100]", Label: "More actions", TriggerAriaExpanded: "false", TriggerKanbanMenu: true, MenuKanbanContent: true, KanbanMenuKey: "column-completed"}) {
+				@CardActionDropdown(CardActionDropdownConfig{WrapperClass: "dropdown dropdown-end", TriggerClass: "btn btn-xs btn-ghost min-h-11 h-11 w-11 p-0", IconClass: "h-5 w-5", MenuClass: "w-56 max-w-[calc(100vw-2rem)] z-[100]", Label: "More actions", TriggerAriaExpanded: "false", TriggerKanbanMenu: true, MenuKanbanContent: true, KanbanMenuKey: "column-completed"}) {
 						<li class="menu-title"><span>Sort By</span></li>
 						<li>
 							<button type="button" tabindex="0"
@@ -206,7 +206,7 @@ templ KanbanColumn(tasks []models.Task, projectID string, category models.TaskCa
 								Name (Z-A)
 							</button>
 						</li>
-						<li class="border-t border-base-300 mt-1 pt-1">
+						<li class="ov-menu-section">
 							<button type="button" tabindex="0"
 								hx-post={ fmt.Sprintf("/tasks/completed/sort?project_id=%s&sort=completed_desc", projectID) }
 								hx-target="#kanban-board"
@@ -232,7 +232,7 @@ templ KanbanColumn(tasks []models.Task, projectID string, category models.TaskCa
 								Date (Oldest First)
 							</button>
 						</li>
-						<li class="border-t border-base-300 mt-1 pt-1">
+						<li class="ov-menu-section">
 							<button type="button" tabindex="0"
 								hx-post={ fmt.Sprintf("/tasks/completed/sort?project_id=%s&sort=priority_desc", projectID) }
 								hx-target="#kanban-board"
@@ -281,7 +281,7 @@ templ KanbanColumn(tasks []models.Task, projectID string, category models.TaskCa
 					}
 			}
 			if category == models.CategoryActive && countActiveDisplayedTasks(tasks) > 0 {
-				@CardActionDropdown(CardActionDropdownConfig{WrapperClass: "dropdown dropdown-end", TriggerClass: "btn btn-xs btn-ghost min-h-11 h-11 w-11 p-0", IconClass: "h-5 w-5", MenuClass: "dropdown-content menu p-2 shadow bg-base-100 rounded-box w-56 max-w-[calc(100vw-2rem)] z-[100]", Label: "More actions", TriggerAriaExpanded: "false", TriggerKanbanMenu: true, MenuKanbanContent: true, KanbanMenuKey: "column-active"}) {
+				@CardActionDropdown(CardActionDropdownConfig{WrapperClass: "dropdown dropdown-end", TriggerClass: "btn btn-xs btn-ghost min-h-11 h-11 w-11 p-0", IconClass: "h-5 w-5", MenuClass: "w-56 max-w-[calc(100vw-2rem)] z-[100]", Label: "More actions", TriggerAriaExpanded: "false", TriggerKanbanMenu: true, MenuKanbanContent: true, KanbanMenuKey: "column-active"}) {
 							<li class="menu-title mt-2"><span>Actions</span></li>
 							<li>
 								<button type="button" hx-post={ fmt.Sprintf("/tasks/active/stop?project_id=%s", projectID) } hx-target="#kanban-board" hx-swap="outerHTML" hx-disabled-elt="this">
@@ -302,7 +302,7 @@ templ KanbanColumn(tasks []models.Task, projectID string, category models.TaskCa
 				}
 			}
 			if category == models.CategoryBacklog {
-				@CardActionDropdown(CardActionDropdownConfig{WrapperClass: "dropdown dropdown-end", TriggerClass: "btn btn-xs btn-ghost min-h-11 h-11 w-11 p-0", IconClass: "h-5 w-5", MenuClass: "dropdown-content menu p-2 shadow bg-base-100 rounded-box w-56 max-w-[calc(100vw-2rem)] z-[100]", Label: "More actions", TriggerAriaExpanded: "false", TriggerKanbanMenu: true, MenuKanbanContent: true, KanbanMenuKey: "column-backlog"}) {
+				@CardActionDropdown(CardActionDropdownConfig{WrapperClass: "dropdown dropdown-end", TriggerClass: "btn btn-xs btn-ghost min-h-11 h-11 w-11 p-0", IconClass: "h-5 w-5", MenuClass: "w-56 max-w-[calc(100vw-2rem)] z-[100]", Label: "More actions", TriggerAriaExpanded: "false", TriggerKanbanMenu: true, MenuKanbanContent: true, KanbanMenuKey: "column-backlog"}) {
 						<li class="menu-title"><span>Sort By</span></li>
 						<li>
 							<button type="button" tabindex="0"
@@ -330,7 +330,7 @@ templ KanbanColumn(tasks []models.Task, projectID string, category models.TaskCa
 								Name (Z-A)
 							</button>
 						</li>
-						<li class="border-t border-base-300 mt-1 pt-1">
+						<li class="ov-menu-section">
 							<button type="button" tabindex="0"
 								hx-post={ fmt.Sprintf("/tasks/backlog/sort?project_id=%s&sort=created_desc", projectID) }
 								hx-target="#kanban-board"
@@ -356,7 +356,7 @@ templ KanbanColumn(tasks []models.Task, projectID string, category models.TaskCa
 								Date (Oldest First)
 							</button>
 						</li>
-						<li class="border-t border-base-300 mt-1 pt-1">
+						<li class="ov-menu-section">
 							<button type="button" tabindex="0"
 								hx-post={ fmt.Sprintf("/tasks/backlog/sort?project_id=%s&sort=priority_desc", projectID) }
 								hx-target="#kanban-board"

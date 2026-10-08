@@ -401,7 +401,7 @@ func automationsContent(cards []models.AutomationCard, currentProjectID string, 
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 4, "<div data-page-header class=\"mb-6 flex items-center justify-between gap-3\"><h2 class=\"text-2xl font-bold\">Automations</h2><div class=\"dropdown dropdown-end\"><label tabindex=\"0\" class=\"btn btn-primary btn-sm\" onclick=\"handleDropdownToggle(event)\">+ New Automation</label><ul tabindex=\"0\" class=\"dropdown-content z-[100] menu w-48 rounded-box border border-base-300 bg-base-100 p-2 shadow\" data-automation-new-menu><li><button type=\"button\" data-automation-new-template onclick=\"openAutomationNewModal(event, 'automation-template-modal')\">Template</button></li><li><button type=\"button\" data-automation-new-describe onclick=\"openAutomationNewModal(event, 'automation-describe-modal')\">Describe</button></li><li><button type=\"button\" data-automation-new-custom onclick=\"submitAutomationCustom(event)\">Custom</button></li></ul></div><form id=\"automation-custom-form\" class=\"hidden\" method=\"post\" action=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 4, "<div data-page-header class=\"mb-6 flex items-center justify-between gap-3\"><h2 class=\"text-2xl font-bold\">Automations</h2><div class=\"dropdown dropdown-end\"><label tabindex=\"0\" class=\"btn btn-primary btn-sm\" onclick=\"handleDropdownToggle(event)\">+ New Automation</label><ul tabindex=\"0\" class=\"ov-menu ov-menu-actions ov-menu-scroll dropdown-content z-[100] menu w-48\" data-automation-new-menu><li><button type=\"button\" data-automation-new-template onclick=\"openAutomationNewModal(event, 'automation-template-modal')\">Template</button></li><li><button type=\"button\" data-automation-new-describe onclick=\"openAutomationNewModal(event, 'automation-describe-modal')\">Describe</button></li><li><button type=\"button\" data-automation-new-custom onclick=\"submitAutomationCustom(event)\">Custom</button></li></ul></div><form id=\"automation-custom-form\" class=\"hidden\" method=\"post\" action=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -5933,7 +5933,7 @@ func automationLiveMoreActions(graph models.AutomationLiveGraph, currentProjectI
 			}
 			return nil
 		})
-		templ_7745c5c3_Err = components.CardActionDropdown(components.CardActionDropdownConfig{WrapperClass: "dropdown dropdown-end shrink-0", MenuClass: "dropdown-content z-[100] menu w-48 rounded-box border border-base-300 bg-base-100 p-2 shadow", Label: "More actions for " + graph.Automation.Name, AutomationLiveMenu: true}).Render(templ.WithChildren(ctx, templ_7745c5c3_Var308), templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = components.CardActionDropdown(components.CardActionDropdownConfig{WrapperClass: "dropdown dropdown-end shrink-0", MenuClass: "z-[100] w-48", Label: "More actions for " + graph.Automation.Name, AutomationLiveMenu: true}).Render(templ.WithChildren(ctx, templ_7745c5c3_Var308), templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -6006,7 +6006,7 @@ func automationBuilderMoreActions(page models.AutomationBuilderPage, currentProj
 			}
 			return nil
 		})
-		templ_7745c5c3_Err = components.CardActionDropdown(components.CardActionDropdownConfig{WrapperClass: "dropdown dropdown-end shrink-0", MenuClass: "dropdown-content z-[100] menu w-48 rounded-box border border-base-300 bg-base-100 p-2 shadow", Label: "More actions for " + page.Result.Candidate.Name, AutomationBuilderActions: true}).Render(templ.WithChildren(ctx, templ_7745c5c3_Var310), templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = components.CardActionDropdown(components.CardActionDropdownConfig{WrapperClass: "dropdown dropdown-end shrink-0", MenuClass: "z-[100] w-48", Label: "More actions for " + page.Result.Candidate.Name, AutomationBuilderActions: true}).Render(templ.WithChildren(ctx, templ_7745c5c3_Var310), templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

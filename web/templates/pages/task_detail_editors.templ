@@ -37,37 +37,37 @@ templ TaskAutoMergePanel(task *models.Task) {
 }
 
 templ TaskDetailEditors(task *models.Task, agents []models.LLMConfig, definitions []repository.AgentTaskUIOption) {
- <div id="task-property-picker" popover="auto" role="dialog" aria-label="Choose task property" class="bg-base-100 text-base-content border border-base-300 rounded-lg shadow-lg p-2">
-  <input type="search" aria-label="Search options" placeholder="Search…" class="input input-bordered input-sm w-full mb-2"/>
-  <div class="overflow-y-auto" style="max-height:240px">
+ <div id="task-property-picker" popover="auto" role="dialog" aria-label="Choose task property" class="ov-menu p-0">
+  <div class="ov-menu-search"><input type="search" aria-label="Search options" placeholder="Search…"/></div>
+  <div class="ov-menu-list ov-menu-scroll" style="max-height:240px">
    <div data-options="agent_id">
-    <button type="button" data-value="default" class="btn btn-ghost btn-sm w-full justify-start">Default</button>
-    <button type="button" data-value="" class="btn btn-ghost btn-sm w-full justify-start">Auto</button>
+    <button type="button" data-value="default" class="ov-menu-option w-full">Default</button>
+    <button type="button" data-value="" class="ov-menu-option w-full">Auto</button>
     for _, model := range agents {
-     <button type="button" data-value={ model.ID } class="btn btn-ghost btn-sm w-full justify-start">{ model.Name }</button>
+     <button type="button" data-value={ model.ID } class="ov-menu-option w-full">{ model.Name }</button>
     }
    </div>
    <div data-options="agent_definition_id">
-    <button type="button" data-value="" class="btn btn-ghost btn-sm w-full justify-start">No agent</button>
+    <button type="button" data-value="" class="ov-menu-option w-full">No agent</button>
     for _, agent := range definitions {
      if agent.Enabled && agent.SelectableAsPrimary && agent.GeneratedStatus != models.AgentStatusArchived && agent.ArchivedAt == nil {
-      <button type="button" data-value={ agent.ID } class="btn btn-ghost btn-sm w-full justify-start">{ agent.Name }</button>
+      <button type="button" data-value={ agent.ID } class="ov-menu-option w-full">{ agent.Name }</button>
      }
     }
    </div>
    <div data-options="category">
     for _, category := range models.SelectableCategories {
-     <button type="button" data-value={ string(category) } class="btn btn-ghost btn-sm w-full justify-start">{ string(category) }</button>
+     <button type="button" data-value={ string(category) } class="ov-menu-option w-full">{ string(category) }</button>
     }
    </div>
    <div data-options="priority">
     for i, label := range []string{"Low", "Normal", "High", "Urgent"} {
-     <button type="button" data-value={ fmt.Sprint(i+1) } class="btn btn-ghost btn-sm w-full justify-start">{ label }</button>
+     <button type="button" data-value={ fmt.Sprint(i+1) } class="ov-menu-option w-full">{ label }</button>
     }
    </div>
    <div data-options="tag">
     for _, option := range []struct{ Value, Label string }{{"", "None"}, {"feature", "Feature"}, {"bug", "Bug"}} {
-     <button type="button" data-value={ option.Value } class="btn btn-ghost btn-sm w-full justify-start">{ option.Label }</button>
+     <button type="button" data-value={ option.Value } class="ov-menu-option w-full">{ option.Label }</button>
     }
    </div>
   </div>
@@ -91,7 +91,6 @@ templ TaskDetailEditors(task *models.Task, agents []models.LLMConfig, definition
   #task-property-picker[data-openvibely-picker-open="true"] { display:block; z-index:1000; }
   #task-property-picker [hidden] { display:none; }
   #task-property-picker button[data-value] { outline:none; }
-  #task-property-picker button[data-active], #task-property-picker button[data-value]:hover { background:rgba(148,163,184,0.16); background:color-mix(in srgb,currentColor 8%,transparent); }
   .task-property-row[data-picker-return-focus] { outline:none; }
  </style>
  <script>

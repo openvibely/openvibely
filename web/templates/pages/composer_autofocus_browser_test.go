@@ -353,13 +353,18 @@ func TestBrowserFunctional_ComposerAutoFocusProductionNavigationInChrome(t *test
 	usePinnedHTMX := func(html string) string {
 		return strings.Replace(html, static.URL("vendor/htmx.min.js"), `/htmx-2.0.4.min.js`, 1)
 	}
-	chatFragment := func() string {
-		html := render(ChatContent(nil, nil, project.ID, nil, nil, false, false, 30))
+	// Inject fixture links by their page root, independent of deduplicated styles.
+	addChatControl := func(html string) string {
 		return strings.Replace(html, `<div id="chat-page-root"`, `<a id="to-task" href="/tasks/task-focus" hx-get="/tasks/task-focus" hx-target="#main-content" hx-swap="innerHTML" hx-push-url="true">Open task</a><div id="chat-page-root"`, 1)
 	}
-	taskFragment := func(defaultTab string) string {
-		html := render(TaskDetailContent(task, nil, nil, nil, nil, nil, nil, defaultTab, nil))
+	addTaskControls := func(html string) string {
 		return strings.Replace(html, `<div id="task-detail-content"`, `<a id="to-chat" href="/chat?project_id=project-focus" hx-get="/chat?project_id=project-focus" hx-target="#main-content" hx-swap="innerHTML" hx-push-url="true">Open Chat</a><a id="to-delayed-chat" href="/chat?project_id=project-focus&amp;delay=1" hx-get="/chat?project_id=project-focus&amp;delay=1" hx-target="#main-content" hx-swap="innerHTML" hx-push-url="true">Open delayed Chat</a><div id="task-detail-content"`, 1)
+	}
+	chatFragment := func() string {
+		return addChatControl(render(ChatContent(nil, nil, project.ID, nil, nil, false, false, 30)))
+	}
+	taskFragment := func(defaultTab string) string {
+		return addTaskControls(render(TaskDetailContent(task, nil, nil, nil, nil, nil, nil, defaultTab, nil)))
 	}
 	threadFragment := func() string {
 		return render(components.TaskThreadView(task, nil, nil, nil, nil, nil, false, 30))
@@ -394,7 +399,7 @@ func TestBrowserFunctional_ComposerAutoFocusProductionNavigationInChrome(t *test
 				return
 			}
 			document := usePinnedHTMX(render(Chat([]models.Project{project}, project.ID, nil, nil, nil, nil, false, false, 30)))
-			document = strings.Replace(document, render(ChatContent(nil, nil, project.ID, nil, nil, false, false, 30)), fragment, 1)
+			document = addChatControl(document)
 			_, _ = w.Write([]byte(injectPageControl(document, controls)))
 		case "/tasks/task-focus":
 			defaultTab := "chat"
@@ -408,7 +413,7 @@ func TestBrowserFunctional_ComposerAutoFocusProductionNavigationInChrome(t *test
 				return
 			}
 			document := usePinnedHTMX(render(TaskDetailPage([]models.Project{project}, task, nil, nil, nil, nil, nil, nil, defaultTab, nil)))
-			document = strings.Replace(document, render(TaskDetailContent(task, nil, nil, nil, nil, nil, nil, defaultTab, nil)), fragment, 1)
+			document = addTaskControls(document)
 			_, _ = w.Write([]byte(injectPageControl(document, controls)))
 		case "/tasks/task-focus/thread":
 			if r.Header.Get("HX-Request") == "true" {

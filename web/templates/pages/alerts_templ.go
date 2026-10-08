@@ -549,7 +549,7 @@ func alertsContent(alerts []models.AlertSummary, currentProjectID string, unread
 				}
 				return nil
 			})
-			templ_7745c5c3_Err = components.CardActionDropdown(components.CardActionDropdownConfig{Label: "More actions", IconClass: "h-5 w-5", MenuClass: "dropdown-content z-[100] menu p-2 shadow bg-base-100 rounded-box w-52 border border-base-300"}).Render(templ.WithChildren(ctx, templ_7745c5c3_Var19), templ_7745c5c3_Buffer)
+			templ_7745c5c3_Err = components.CardActionDropdown(components.CardActionDropdownConfig{Label: "More actions", IconClass: "h-5 w-5", MenuClass: "z-[100] w-52"}).Render(templ.WithChildren(ctx, templ_7745c5c3_Var19), templ_7745c5c3_Buffer)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}

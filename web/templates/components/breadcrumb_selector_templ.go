@@ -434,14 +434,14 @@ func BreadcrumbSelectorResults(kind string, currentID string, items []models.Bre
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 35, "\" data-breadcrumb-selector-option data-searchable-selector-option><span class=\"w-4 shrink-0\" aria-hidden=\"true\">")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 35, "\" data-breadcrumb-selector-option data-searchable-selector-option><span class=\"ov-menu-check\" aria-hidden=\"true\">")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var28 string
 				templ_7745c5c3_Var28, templ_7745c5c3_Err = templ.JoinStringErrs(breadcrumbSelectorCheck(item.ID == currentID))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/breadcrumb_selector.templ`, Line: 88, Col: 100}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/breadcrumb_selector.templ`, Line: 88, Col: 101}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var28))
 				if templ_7745c5c3_Err != nil {

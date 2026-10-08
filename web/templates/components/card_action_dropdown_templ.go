@@ -11,7 +11,7 @@ import templruntime "github.com/a-h/templ/runtime"
 type CardActionDropdownConfig struct {
 	WrapperClass             string
 	TriggerClass             string
-	MenuClass                string
+	MenuClass                string // Optional sizing and positioning classes; appearance is shared.
 	IconClass                string
 	Label                    string
 	Title                    string
@@ -40,10 +40,11 @@ func cardActionDropdownTriggerClass(config CardActionDropdownConfig) string {
 }
 
 func cardActionDropdownMenuClass(config CardActionDropdownConfig) string {
-	if config.MenuClass != "" {
-		return config.MenuClass
+	classes := config.MenuClass
+	if classes == "" {
+		classes = "z-[100] w-48"
 	}
-	return "dropdown-content z-[100] menu p-2 shadow bg-base-100 rounded-box w-48 border border-base-300"
+	return "ov-menu ov-menu-actions ov-menu-scroll dropdown-content menu " + classes
 }
 
 func cardActionDropdownIconClass(config CardActionDropdownConfig) string {
@@ -124,7 +125,7 @@ func CardActionDropdown(config CardActionDropdownConfig) templ.Component {
 			var templ_7745c5c3_Var4 string
 			templ_7745c5c3_Var4, templ_7745c5c3_Err = templ.ResolveAttributeValue(config.KanbanMenuKey)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/card_action_dropdown.templ`, Line: 69, Col: 46}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/card_action_dropdown.templ`, Line: 70, Col: 46}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var4)
 			if templ_7745c5c3_Err != nil {
@@ -176,7 +177,7 @@ func CardActionDropdown(config CardActionDropdownConfig) templ.Component {
 		var templ_7745c5c3_Var7 string
 		templ_7745c5c3_Var7, templ_7745c5c3_Err = templ.ResolveAttributeValue(cardActionDropdownTitle(config))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/card_action_dropdown.templ`, Line: 81, Col: 42}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/card_action_dropdown.templ`, Line: 82, Col: 42}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var7)
 		if templ_7745c5c3_Err != nil {
@@ -189,7 +190,7 @@ func CardActionDropdown(config CardActionDropdownConfig) templ.Component {
 		var templ_7745c5c3_Var8 string
 		templ_7745c5c3_Var8, templ_7745c5c3_Err = templ.ResolveAttributeValue(cardActionDropdownLabel(config))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/card_action_dropdown.templ`, Line: 82, Col: 47}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/card_action_dropdown.templ`, Line: 83, Col: 47}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var8)
 		if templ_7745c5c3_Err != nil {
@@ -207,7 +208,7 @@ func CardActionDropdown(config CardActionDropdownConfig) templ.Component {
 			var templ_7745c5c3_Var9 string
 			templ_7745c5c3_Var9, templ_7745c5c3_Err = templ.ResolveAttributeValue(config.TriggerAriaExpanded)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/card_action_dropdown.templ`, Line: 85, Col: 46}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/card_action_dropdown.templ`, Line: 86, Col: 46}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var9)
 			if templ_7745c5c3_Err != nil {
