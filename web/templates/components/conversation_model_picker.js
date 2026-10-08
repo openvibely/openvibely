@@ -553,6 +553,14 @@
       } else save(btn);
     },
   };
+  panel.onpointerover = (e) => {
+    if (e.pointerType === "touch") return;
+    if (!e.target.closest(".ov-mp-row,.ov-mp-provider"))
+      list
+        .querySelectorAll("[data-picker-active]")
+        .forEach((row) => row.removeAttribute("data-picker-active"));
+    if (provider && !e.target.closest(".ov-mp-provider")) closeSub();
+  };
   search.oninput = () => {
     closeSub();
     list.scrollTop = 0;
