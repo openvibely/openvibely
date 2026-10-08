@@ -19,15 +19,17 @@ func TestBrowserChatCompactionActivity(t *testing.T) {
 		t.Fatal(err)
 	}
 	var recovered []string
-	for _, fence := range []string{"```", "~~~~", "`````"} {
-		writer := llmstream.NewWriter("", "", nil, context.Background(), time.Hour)
-		writer.Write([]byte("[Thinking]\nExamining code\n" + fence + "go\npartial"))
-		report := llmstream.CompactionReporter(writer, nil)
-		report(llmcontracts.CompactionProgress{State: "started"})
-		report(llmcontracts.CompactionProgress{State: "done", Duration: time.Second})
-		writer.Write([]byte("Continued"))
-		recovered = append(recovered, writer.String())
-		writer.Stop()
+	for _, prefix := range []string{"", "[Tool read_file done]\n```text\nfile excerpt\n[/Tool]\n"} {
+		for _, fence := range []string{"```", "~~~~", "`````"} {
+			writer := llmstream.NewWriter("", "", nil, context.Background(), time.Hour)
+			writer.Write([]byte(prefix + "[Thinking]\nExamining code\n" + fence + "go\npartial"))
+			report := llmstream.CompactionReporter(writer, nil)
+			report(llmcontracts.CompactionProgress{State: "started"})
+			report(llmcontracts.CompactionProgress{State: "done", Duration: time.Second})
+			writer.Write([]byte("Continued"))
+			recovered = append(recovered, writer.String())
+			writer.Stop()
+		}
 	}
 	recoveredJSON, err := json.Marshal(recovered)
 	if err != nil {

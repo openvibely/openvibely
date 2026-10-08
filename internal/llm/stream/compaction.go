@@ -18,7 +18,7 @@ func CompactionReporter(writer *Writer, inThinking *bool) func(llmcontracts.Comp
 	return func(progress llmcontracts.CompactionProgress) {
 		if inThinking != nil && *inThinking {
 			*inThinking = false
-			if fence := transcript.UnclosedMarkdownFence(writer.String()); fence != "" {
+			if fence := transcript.UnclosedMarkdownFence(withoutToolOutput(writer.String())); fence != "" {
 				writer.Write([]byte("\n" + fence + "\n"))
 			}
 			WriteEvent(writer, Event{Type: EventThinkingEnd}, false)
@@ -36,7 +36,7 @@ func CompactionReporter(writer *Writer, inThinking *bool) func(llmcontracts.Comp
 var thinkingStateMarkers = regexp.MustCompile(`(?m)^[\t ]*(\[/?Thinking\]|\[Tool \S+ (?:done|error)\]|\[/Tool\])[\t ]*\r?$`)
 
 func unfinishedThinking(text string) bool {
-	text = transcript.NormalizeMarkers(text)
+	text = transcript.NormalizeMarkers(withoutToolOutput(text))
 	ranges := transcript.MarkdownCodeRanges(text)
 	thinking, tool := false, false
 	for _, match := range thinkingStateMarkers.FindAllStringIndex(text, -1) {
@@ -61,4 +61,26 @@ func unfinishedThinking(text string) bool {
 		}
 	}
 	return thinking
+}
+
+// Tool results are separate transcript sections; their Markdown must not change
+// the interpretation of subsequent assistant activity. Keep quoted tool blocks.
+var recoveryToolBlocks = regexp.MustCompile(`(?m)^[\t ]*\[Tool \S+ (?:done|error)\][\t ]*\r?\n[\s\S]*?^[\t ]*\[/Tool\][\t ]*\r?(?:\n|$)`)
+
+func withoutToolOutput(text string) string {
+	var out strings.Builder
+	previous := 0
+	for _, match := range recoveryToolBlocks.FindAllStringIndex(text, -1) {
+		out.WriteString(text[previous:match[0]])
+		// Checking the prefix prevents an unfinished fence inside this tool result
+		// from shielding its own opener or a later transcript section.
+		if transcript.UnclosedMarkdownFence(out.String()) != "" {
+			out.WriteString(text[match[0]:match[1]])
+		} else {
+			out.WriteByte('\n')
+		}
+		previous = match[1]
+	}
+	out.WriteString(text[previous:])
+	return out.String()
 }
