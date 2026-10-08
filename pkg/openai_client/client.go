@@ -820,9 +820,58 @@ func parseResponse(body io.Reader) (*Response, error) {
 	return resp, nil
 }
 
-func parseStreamingResponse(body io.Reader, onDelta func(string), suppressToolMarkers bool) (*Response, error) {
+var errResponsesStreamEventTooLarge = fmt.Errorf("Responses stream event exceeds maximum size of %d bytes", responsesWebsocketReadLimit)
+
+const responsesStreamMaxLineOverhead = len("data: ") + 1 // Allow the SSE prefix and an optional carriage return.
+
+func newResponsesStreamScanner(body io.Reader) *bufio.Scanner {
+	maxLineSize := responsesWebsocketReadLimit + responsesStreamMaxLineOverhead
 	scanner := bufio.NewScanner(body)
-	scanner.Buffer(make([]byte, 1024*1024), 10*1024*1024)
+	scanner.Buffer(make([]byte, 64*1024), maxLineSize+1)
+	scanner.Split(scanResponsesStreamLine)
+	return scanner
+}
+
+func scanResponsesStreamLine(data []byte, atEOF bool) (advance int, token []byte, err error) {
+	maxLineSize := responsesWebsocketReadLimit + responsesStreamMaxLineOverhead
+	if lineEnd := bytes.IndexByte(data, '\n'); lineEnd >= 0 {
+		if lineEnd > maxLineSize {
+			return 0, nil, errResponsesStreamEventTooLarge
+		}
+		return lineEnd + 1, data[:lineEnd], nil
+	}
+	if len(data) > maxLineSize {
+		return 0, nil, errResponsesStreamEventTooLarge
+	}
+	if atEOF && len(data) > 0 {
+		return len(data), data, nil
+	}
+	return 0, nil, nil
+}
+
+func responsesStreamDataFromLine(rawLine string) (data string, isData bool, err error) {
+	line := strings.TrimSpace(rawLine)
+	if !strings.HasPrefix(line, "data:") {
+		return "", false, nil
+	}
+
+	dataStart := strings.Index(rawLine, "data:") + len("data:")
+	rawData := rawLine[dataStart:]
+	if strings.HasSuffix(rawData, "\r") {
+		rawData = strings.TrimSuffix(rawData, "\r")
+	}
+	if strings.HasPrefix(rawData, " ") {
+		rawData = strings.TrimPrefix(rawData, " ")
+	}
+	if len(rawData) > responsesWebsocketReadLimit {
+		return "", true, errResponsesStreamEventTooLarge
+	}
+
+	return strings.TrimSpace(strings.TrimPrefix(line, "data:")), true, nil
+}
+
+func parseStreamingResponse(body io.Reader, onDelta func(string), suppressToolMarkers bool) (*Response, error) {
+	scanner := newResponsesStreamScanner(body)
 
 	var (
 		outputText strings.Builder
@@ -856,16 +905,17 @@ func parseStreamingResponse(body io.Reader, onDelta func(string), suppressToolMa
 	}
 
 	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
+		rawLine := scanner.Text()
+		line := strings.TrimSpace(rawLine)
 		if line == "" || strings.HasPrefix(line, "event:") {
 			continue
 		}
-		if !strings.HasPrefix(line, "data:") {
-			continue
-		}
 
-		data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
-		if data == "" || data == "[DONE]" {
+		data, isData, err := responsesStreamDataFromLine(rawLine)
+		if err != nil {
+			return nil, err
+		}
+		if !isData || data == "" || data == "[DONE]" {
 			continue
 		}
 
