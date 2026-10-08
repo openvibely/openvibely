@@ -174,6 +174,33 @@ func (r *SettingsRepo) CompareAndSet(ctx context.Context, key, expected, value s
 	return updated, err
 }
 
+// CompareAndSetMany updates a coherent settings group only when every expected
+// value and guard still matches. The immediate transaction prevents concurrent
+// pollers or configuration replacement from splitting related cursor state.
+func (r *SettingsRepo) CompareAndSetMany(ctx context.Context, expected, values, guards map[string]string) (bool, error) {
+	updated := false
+	err := withImmediateTx(ctx, r.db, func(tx SQLExecutor) error {
+		matches, err := r.MatchesWithExecutor(ctx, tx, expected)
+		if err != nil || !matches {
+			return err
+		}
+		matches, err = r.MatchesWithExecutor(ctx, tx, guards)
+		if err != nil || !matches {
+			return err
+		}
+		for key, value := range values {
+			if _, err := tx.ExecContext(ctx,
+				"INSERT INTO app_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+				key, value); err != nil {
+				return err
+			}
+		}
+		updated = true
+		return nil
+	})
+	return updated, err
+}
+
 // MatchesWithExecutor checks an expected settings snapshot using the caller's
 // transaction. It lets durable channel handoffs assert configuration authority
 // in the same commit that creates work.

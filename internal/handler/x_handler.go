@@ -94,6 +94,7 @@ func (h *Handler) handleXConfigure(c echo.Context) error {
 		service.XSettingPollIntervalSeconds: strconv.Itoa(pollSeconds),
 		service.XSettingSendResponses:       strconv.FormatBool(c.FormValue("x_send_responses") == "true"),
 		service.XSettingSinceID:             cursor,
+		service.XSettingPaginationState:     "",
 		service.XSettingAccountID:           me.ID,
 		service.XSettingConfigurationID:     configurationID,
 	}
@@ -138,7 +139,7 @@ func (h *Handler) handleXRemove(c echo.Context) error {
 	}
 	values := map[string]string{
 		service.XSettingConsumerKey: "", service.XSettingConsumerSecret: "", service.XSettingAccessToken: "",
-		service.XSettingAccessTokenSecret: "", service.XSettingPollIntervalSeconds: "", service.XSettingSendResponses: "", service.XSettingSinceID: "", service.XSettingAccountID: "", service.XSettingConfigurationID: "",
+		service.XSettingAccessTokenSecret: "", service.XSettingPollIntervalSeconds: "", service.XSettingSendResponses: "", service.XSettingSinceID: "", service.XSettingPaginationState: "", service.XSettingAccountID: "", service.XSettingConfigurationID: "",
 	}
 	if err := h.settingsRepo.SetMany(c.Request().Context(), values); err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to remove X channel settings")
