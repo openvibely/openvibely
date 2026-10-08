@@ -119,6 +119,15 @@ func TestBrowserFunctional_ConversationModelPicker(t *testing.T) {
  assert(trigger.dataset.currentValue==='default'&&!panel.querySelector('.ov-mp-effort').hidden,'global default exposes effort without changing selection');
  const defaultSlider=panel.querySelector('input[type=range]');defaultSlider.value='2';defaultSlider.dispatchEvent(new Event('input'));
  assert(document.querySelector('[name=agent_id]').value==='default'&&document.querySelector('[name=reasoning_effort]').value==='high','global default sends selected effort');
+ trigger.scrollIntoView({block:'end'});await wait();
+ [...panel.querySelectorAll('.ov-mp-provider')].find(b=>b.dataset.provider==='OpenAI').click();
+ for(let i=0;i<8;i++){
+   sub.querySelector('.ov-mp-star').click();
+   const bounds=panel.getBoundingClientRect();
+   assert(bounds.top>=8&&bounds.bottom<=innerHeight-8,'favorite growth keeps primary menu in viewport: '+JSON.stringify({top:bounds.top,bottom:bounds.bottom,height:innerHeight,trigger:trigger.getBoundingClientRect().top}));
+   assert(bounds.bottom<=trigger.getBoundingClientRect().top,'favorite growth keeps menu anchored above trigger');
+ }
+ document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));
  document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));
  assert(panel.hidden,'escape closes');
  document.body.setAttribute('data-test-result','pass');
