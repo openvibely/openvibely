@@ -1773,6 +1773,16 @@ func TestBrowserFunctional_TaskCardMergeMenuDirectActionNon2xxRetryAndCardRefres
 				if(localRect.top>localTriggerRect.bottom+1||localRect.bottom<localTriggerRect.top-1)fail('Local submenu has no continuous pointer corridor from its parent row; local='+JSON.stringify({top:localRect.top,bottom:localRect.bottom})+' trigger='+JSON.stringify({top:localTriggerRect.top,bottom:localTriggerRect.bottom}));
 				var merge=localPanel.querySelector('[data-merge-type="merge"]'),rebase=localPanel.querySelector('[data-merge-type="rebase"]');
 				if(!merge||merge.disabled||!rebase||rebase.disabled)fail('eligible Local actions were not precomputed');
+				var hoverGithub=menu.querySelector('[data-task-card-github-submenu]'),hoverGithubRect=hoverGithub.getBoundingClientRect(),opensRight=localRect.left>=menuRect.right-8;
+				var hoverOriginX=opensRight?menuRect.left+20:menuRect.right-20,hoverTargetX=opensRight?menuRect.right-12:menuRect.left+12;
+				hoverKanbanSubmenu({clientX:hoverOriginX,clientY:localTriggerRect.top+12},local);
+				hoverKanbanSubmenu({clientX:hoverTargetX,clientY:hoverGithubRect.top+12},hoverGithub);
+				if(!document.querySelector('[data-task-card-submenu-portaled="true"] [data-merge-type="merge"]'))fail('diagonal travel replaced Local submenu immediately');
+				cancelKanbanSubmenuHover(hoverGithub);await new Promise(function(r){setTimeout(r,350)});
+				if(!document.querySelector('[data-task-card-submenu-portaled="true"] [data-merge-type="merge"]'))fail('entering the open submenu did not cancel the switch');
+				hoverKanbanSubmenu({clientX:hoverTargetX,clientY:hoverGithubRect.top+12},hoverGithub);await new Promise(function(r){setTimeout(r,350)});
+				if(!document.querySelector('[data-task-card-submenu-portaled="true"] [data-task-card-pr-action]'))fail('staying on GitHub did not switch submenus');
+				positionKanbanSubmenu(local);localPanel=document.querySelector('[data-task-card-submenu-portaled="true"]');
 				localTrigger.focus();localTrigger.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowRight',bubbles:true,cancelable:true}));if(!localPanel.contains(document.activeElement))fail('keyboard could not enter portaled Local submenu');
 				var focusedLocalAction=document.activeElement;focusedLocalAction.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));await frame();if(menu.closest('[data-kanban-menu-key]').getAttribute('data-kanban-menu-open')==='true'||document.querySelector('[data-task-card-submenu-portaled="true"]'))fail('Escape inside portaled submenu did not close its owning menu');if(document.activeElement!==trigger)fail('Escape inside portaled submenu did not restore trigger focus');
 				clickTrigger(trigger);await waitFor(function(){var dropdown=menu.closest('[data-kanban-menu-key]');return dropdown.getAttribute('data-kanban-menu-open')==='true'&&dropdown.getAttribute('data-kanban-menu-positioning')!=='true'},'stable GitHub menu reveal');var github=menu.querySelector('[data-task-card-github-submenu]'),githubTrigger=github.querySelector(':scope > button'),githubPanel=github.querySelector(':scope > ul');

@@ -55,6 +55,9 @@
   let active = null,
     provider = null,
     subCloseTimer = null,
+    providerSwitchTimer = null,
+    providerSwitchButton = null,
+    providerPointerOrigin = null,
     favorites = {},
     favoritesLoading = false,
     favoritesError = "",
@@ -239,9 +242,17 @@
     if (subCloseTimer !== null) clearTimeout(subCloseTimer);
     subCloseTimer = null;
   }
+  function cancelProviderSwitch(button) {
+    if (button && providerSwitchButton !== button) return;
+    if (providerSwitchTimer !== null) clearTimeout(providerSwitchTimer);
+    providerSwitchTimer = null;
+    providerSwitchButton = null;
+  }
   function closeSub() {
     cancelSubClose();
+    cancelProviderSwitch();
     provider = null;
+    providerPointerOrigin = null;
     sub.hidden = true;
     list
       .querySelectorAll(".ov-mp-provider")
@@ -391,28 +402,64 @@
         const b = el("button", "ov-mp-provider");
         b.type = "button";
         b.dataset.provider = p;
-        b.onpointermove = () => activateRow(b, list);
+        b.onpointermove = () => {
+          if (providerSwitchButton !== b) activateRow(b, list);
+        };
         b.onfocus = () => activateRow(b, list);
         b.onpointerenter = (e) => {
-          if (e.pointerType !== "touch") openProvider(p);
+          if (e.pointerType !== "touch") hoverProvider(b, p, e);
         };
+        b.onpointerleave = () => cancelProviderSwitch(b);
         b.setAttribute("aria-haspopup", "dialog");
         b.setAttribute("aria-controls", sub.id);
         b.setAttribute("aria-expanded", String(provider === p));
         b.append(el("span", "", p), el("span", "", "›"));
-        b.onclick = () => openProvider(p);
+        b.onclick = (e) => {
+          openProvider(p);
+          if (e.detail) providerPointerOrigin = { x: e.clientX, y: e.clientY };
+        };
         list.append(b);
       });
     list.scrollTop = scroll;
   }
   function openProvider(p) {
     cancelSubClose();
+    cancelProviderSwitch();
     if (provider === p && !sub.hidden) return;
+    providerPointerOrigin = null;
     provider = p;
     list.querySelectorAll(".ov-mp-provider").forEach((b) => {
       b.setAttribute("aria-expanded", String(b.dataset.provider === p));
     });
     renderSub();
+  }
+  function hoverProvider(button, p, event) {
+    if (provider === p) {
+      cancelSubClose();
+      cancelProviderSwitch();
+      providerPointerOrigin = { x: event.clientX, y: event.clientY };
+      return;
+    }
+    if (provider && !sub.hidden && providerPointerOrigin) {
+      const bounds = sub.getBoundingClientRect();
+      const right = bounds.left >= panel.getBoundingClientRect().right - 8;
+      const toward = right
+        ? event.clientX > providerPointerOrigin.x + 8
+        : event.clientX < providerPointerOrigin.x - 8;
+      if (toward && event.clientY >= bounds.top - 12 && event.clientY <= bounds.bottom + 12) {
+        cancelProviderSwitch();
+        providerSwitchButton = button;
+        providerSwitchTimer = setTimeout(() => {
+          if (active && button.isConnected && providerSwitchButton === button) {
+            openProvider(p);
+            providerPointerOrigin = { x: event.clientX, y: event.clientY };
+          }
+        }, 300);
+        return;
+      }
+    }
+    openProvider(p);
+    providerPointerOrigin = { x: event.clientX, y: event.clientY };
   }
   function renderSub() {
     if (!active || !provider) {
@@ -532,9 +579,9 @@
         width = window.innerWidth,
         p = panel.getBoundingClientRect(),
         a = b.getBoundingClientRect();
-      let left = p.right + 6;
+      let left = p.right - 4;
       if (left + sub.offsetWidth > width - 8)
-        left = p.left - sub.offsetWidth - 6;
+        left = p.left - sub.offsetWidth + 4;
       subhead.hidden = left >= 8;
       if (left < 8) {
         left = p.left;
@@ -636,7 +683,10 @@
     else if (subCloseTimer === null)
       subCloseTimer = setTimeout(closeSub, 350);
   };
-  sub.onpointerenter = cancelSubClose;
+  sub.onpointerenter = () => {
+    cancelSubClose();
+    cancelProviderSwitch();
+  };
   search.oninput = () => {
     closeSub();
     list.scrollTop = 0;
