@@ -3253,7 +3253,7 @@ func runTelegramQueueChatIngressForTest(ctx context.Context, svc *TelegramServic
 		ChatBroadcaster: svc.chatBroadcaster,
 		UploadsDir:      telegramUploadsDir,
 		DownloadAttachments: func(context.Context) (channelChatIngressDownloadResult, error) {
-			attCtx, imgAtts := channelChatAttachmentContextAndImages(chatAttachments, channelChatMaxInlineTextAttachmentSize)
+			attCtx, imgAtts := telegramAttachmentContextAndImages(chatAttachments)
 			return channelChatIngressDownloadResult{AttachmentContext: attCtx, ImageAttachments: imgAtts, ChatAttachments: chatAttachments}, nil
 		},
 		SavePendingAttachments: svc.saveChatAttachmentsToPendingSession,
