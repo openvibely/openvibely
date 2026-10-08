@@ -262,6 +262,7 @@
         write(favoritesKey, favorites);
         renderList();
         renderSub();
+        position();
         const button = [
           ...panel.querySelectorAll(".ov-mp-star"),
           ...sub.querySelectorAll(".ov-mp-star"),
