@@ -1,7 +1,6 @@
 package openaiclient
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/base64"
@@ -2707,8 +2706,7 @@ func (c *Client) parseAgenticStream(body io.Reader, onText func(string), onThink
 }
 
 func (c *Client) parseAgenticStreamWithToolCallbacks(body io.Reader, onText func(string), onThinking func(string), onToolUse func(string, json.RawMessage), onToolResult func(string, string, bool)) (*agenticTurnResult, error) {
-	scanner := bufio.NewScanner(body)
-	scanner.Buffer(make([]byte, 1024*1024), 10*1024*1024)
+	scanner := newResponsesStreamScanner(body)
 
 	result := &agenticTurnResult{}
 	var textBuilder strings.Builder
@@ -2735,7 +2733,8 @@ func (c *Client) parseAgenticStreamWithToolCallbacks(body io.Reader, onText func
 	})
 
 	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
+		rawLine := scanner.Text()
+		line := strings.TrimSpace(rawLine)
 		if line == "" {
 			currentEventType = ""
 			continue
@@ -2744,12 +2743,12 @@ func (c *Client) parseAgenticStreamWithToolCallbacks(body io.Reader, onText func
 			currentEventType = strings.TrimSpace(strings.TrimPrefix(line, "event:"))
 			continue
 		}
-		if !strings.HasPrefix(line, "data:") {
-			continue
-		}
 
-		data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
-		if data == "" || data == "[DONE]" {
+		data, isData, err := responsesStreamDataFromLine(rawLine)
+		if err != nil {
+			return nil, err
+		}
+		if !isData || data == "" || data == "[DONE]" {
 			continue
 		}
 
