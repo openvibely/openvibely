@@ -382,14 +382,6 @@
         list.append(el("div", "ov-mp-empty", "No matching models"));
       return;
     }
-    all.filter((m) => !m.provider).forEach((m) => row(m, list));
-    list.append(el("div", "ov-menu-rule ov-mp-rule"));
-    const fav = all.filter((m) => m.provider && favorites[m.id]);
-    if (fav.length) {
-      list.append(el("div", "ov-menu-heading ov-mp-heading", "FAVORITES"));
-      fav.forEach((m) => row(m, list));
-      list.append(el("div", "ov-menu-rule ov-mp-rule"));
-    }
     [
       ...new Set(
         all
@@ -420,6 +412,17 @@
         };
         list.append(b);
       });
+    const defaults = all.filter((m) => !m.provider);
+    if (defaults.length) {
+      if (list.children.length) list.append(el("div", "ov-menu-rule ov-mp-rule"));
+      defaults.forEach((m) => row(m, list));
+    }
+    const fav = all.filter((m) => m.provider && favorites[m.id]);
+    if (fav.length) {
+      if (list.children.length) list.append(el("div", "ov-menu-rule ov-mp-rule"));
+      list.append(el("div", "ov-menu-heading ov-mp-heading", "FAVORITES"));
+      fav.forEach((m) => row(m, list));
+    }
     list.scrollTop = scroll;
   }
   function openProvider(p) {
