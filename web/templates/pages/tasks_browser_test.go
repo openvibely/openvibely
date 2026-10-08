@@ -1773,6 +1773,12 @@ func TestBrowserFunctional_TaskCardMergeMenuDirectActionNon2xxRetryAndCardRefres
 				if(localRect.top>localTriggerRect.bottom+1||localRect.bottom<localTriggerRect.top-1)fail('Local submenu has no continuous pointer corridor from its parent row; local='+JSON.stringify({top:localRect.top,bottom:localRect.bottom})+' trigger='+JSON.stringify({top:localTriggerRect.top,bottom:localTriggerRect.bottom}));
 				var merge=localPanel.querySelector('[data-merge-type="merge"]'),rebase=localPanel.querySelector('[data-merge-type="rebase"]');
 				if(!merge||merge.disabled||!rebase||rebase.disabled)fail('eligible Local actions were not precomputed');
+				var plainItem=menu.querySelector(':scope > li:not([data-task-card-local-submenu]):not([data-task-card-github-submenu]):not([data-task-card-merge-options])');
+				if(!plainItem)fail('task menu has no regular action for submenu dismissal');
+				plainItem.dispatchEvent(new MouseEvent('mouseenter',{clientX:menuRect.left+20,clientY:plainItem.getBoundingClientRect().top+12}));
+				if(document.querySelector('[data-task-card-submenu-portaled="true"]'))fail('hovering a regular task action left the submenu open');
+				if(dropdown.getAttribute('data-kanban-menu-open')!=='true')fail('hovering a regular task action closed the primary menu');
+				positionKanbanSubmenu(local);localPanel=document.querySelector('[data-task-card-submenu-portaled="true"]');localRect=localPanel.getBoundingClientRect();
 				var hoverGithub=menu.querySelector('[data-task-card-github-submenu]'),hoverGithubRect=hoverGithub.getBoundingClientRect(),opensRight=localRect.left>=menuRect.right-8;
 				var hoverOriginX=opensRight?menuRect.left+20:menuRect.right-20,hoverTargetX=opensRight?menuRect.right-12:menuRect.left+12;
 				hoverKanbanSubmenu({clientX:hoverOriginX,clientY:localTriggerRect.top+12},local);
