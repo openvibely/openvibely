@@ -251,10 +251,11 @@ func (r *ScheduleRepo) ApplyCalendarAction(ctx context.Context, projectID string
 // The returned boundary allows a skipped day/hour to advance in one scheduler tick.
 func (r *ScheduleRepo) SuppressedOccurrence(ctx context.Context, scheduleID string, occurrence time.Time) (bool, time.Time, error) {
 	var paused bool
-	var end sql.NullInt64
+	var end, restoredStart sql.NullInt64
 	err := r.db.QueryRowContext(ctx, `SELECT (s.enabled = 0 OR EXISTS(SELECT 1 FROM schedule_project_pauses p WHERE p.project_id = t.project_id)),
  (SELECT MAX(k.end_at) FROM schedule_skips k WHERE k.project_id = t.project_id AND (k.schedule_id = '' OR k.schedule_id = s.id) AND k.restored = 0 AND k.start_at <= ? AND k.end_at > ? AND NOT EXISTS (SELECT 1 FROM schedule_skips restored WHERE restored.project_id = t.project_id AND restored.schedule_id = s.id AND restored.restored = 1 AND restored.start_at <= ? AND restored.end_at > ?))
- FROM schedules s JOIN tasks t ON t.id = s.task_id WHERE s.id = ?`, occurrence.Unix(), occurrence.Unix(), occurrence.Unix(), occurrence.Unix(), scheduleID).Scan(&paused, &end)
+ ,(SELECT MIN(restored.start_at) FROM schedule_skips restored WHERE restored.project_id = t.project_id AND restored.schedule_id = s.id AND restored.restored = 1 AND restored.start_at > ?)
+ FROM schedules s JOIN tasks t ON t.id = s.task_id WHERE s.id = ?`, occurrence.Unix(), occurrence.Unix(), occurrence.Unix(), occurrence.Unix(), occurrence.Unix(), scheduleID).Scan(&paused, &end, &restoredStart)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, time.Time{}, nil
 	}
@@ -264,7 +265,11 @@ func (r *ScheduleRepo) SuppressedOccurrence(ctx context.Context, scheduleID stri
 	if paused {
 		return true, time.Time{}, nil
 	}
+	// Never jump over a restored run when reconciling overdue exclusions.
 	if end.Valid {
+		if restoredStart.Valid && restoredStart.Int64 < end.Int64 {
+			end.Int64 = restoredStart.Int64
+		}
 		return true, time.Unix(end.Int64, 0), nil
 	}
 	return false, time.Time{}, nil

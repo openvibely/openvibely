@@ -152,7 +152,7 @@ func (s *SchedulerService) checkDueTasks(ctx context.Context) {
 			}
 			if suppressed {
 				from := now
-				if !until.IsZero() && until.Before(now) {
+				if !until.IsZero() && !until.After(now) {
 					from = until.Add(-time.Nanosecond)
 				}
 				if _, err := s.scheduleRepo.UpdateNextRunIfCurrent(ctx, sched.ID, sched.TaskID, sched.NextRun, sched.ComputeNextRun(from)); err != nil {
