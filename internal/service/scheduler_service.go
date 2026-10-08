@@ -206,12 +206,16 @@ func (s *SchedulerService) checkDueTasks(ctx context.Context) {
 			continue
 		}
 
-		// Skip a one-time schedule only after its scheduled occurrence was
-		// dispatched. Task status may reflect an earlier manual run and must not
-		// consume a future scheduled occurrence.
-		if sched.RepeatType == models.RepeatOnce && sched.LastRun != nil {
-			applog.Infof("[scheduler] checkDueTasks skipping one-time schedule %s (already dispatched at %s)", sched.ID, sched.LastRun.UTC().Format(time.RFC3339))
-			continue
+		// A one-time occurrence is consumed once its dispatch time reaches or
+		// passes next_run. A stale one-time next_run that no longer matches the
+		// occurrence anchor is also consumed. A converted recurrence sets both
+		// fields to its pending occurrence, so earlier recurring history remains valid.
+		if sched.RepeatType == models.RepeatOnce && sched.LastRun != nil && sched.NextRun != nil {
+			occurrenceMatchesAnchor := sched.RunAt.Equal(*sched.NextRun)
+			if !occurrenceMatchesAnchor || !sched.LastRun.Before(*sched.NextRun) {
+				applog.Infof("[scheduler] checkDueTasks skipping one-time schedule %s (already dispatched at %s)", sched.ID, sched.LastRun.UTC().Format(time.RFC3339))
+				continue
+			}
 		}
 
 		// Reset task status to pending so ClaimTask can pick it up
