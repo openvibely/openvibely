@@ -62,10 +62,10 @@ func TestBrowserFunctional_ConversationModelPicker(t *testing.T) {
 		}
 		fmt.Fprint(w, `<!doctype html><html><head><style>body{background:#1d232a;color:#eee;font-family:sans-serif;margin:20px}form{margin-top:650px}button{font:inherit}</style></head><body data-test-result="pending"><script>localStorage.clear();window.htmx={process:function(){}};</script>`+content.String()+`<div id="browser-result"></div><script>
  (async function(){
- const assert=(ok,msg)=>{if(!ok)throw Error(msg)},wait=()=>new Promise(r=>setTimeout(r,30));
+ const assert=(ok,msg)=>{if(!ok)throw Error(msg)},wait=()=>new Promise(r=>setTimeout(r,30)),nextFrame=()=>new Promise(r=>requestAnimationFrame(r));
  try{
  const trigger=document.getElementById('chat-form-agent-select');
- trigger.scrollIntoView({block:'end'});await wait();
+ trigger.scrollIntoView({block:'end'});await nextFrame();
  trigger.click();await wait();
  const panel=document.getElementById('conversation-model-picker'),sub=document.getElementById('conversation-provider-models');
  assert(!panel.hidden,'picker opens');
@@ -171,7 +171,7 @@ func TestBrowserFunctional_ConversationModelPicker(t *testing.T) {
  assert(trigger.dataset.currentValue==='default'&&!panel.querySelector('.ov-mp-effort').hidden,'global default exposes effort without changing selection');
  const defaultSlider=panel.querySelector('input[type=range]');defaultSlider.value='2';defaultSlider.dispatchEvent(new Event('input'));
  assert(document.querySelector('[name=agent_id]').value==='default'&&document.querySelector('[name=reasoning_effort]').value==='high','global default sends selected effort');
- trigger.scrollIntoView({block:'end'});await wait();
+ trigger.scrollIntoView({block:'end'});await nextFrame();
  [...panel.querySelectorAll('.ov-mp-provider')].find(b=>b.dataset.provider==='OpenAI').click();
  for(let i=0;i<8;i++){
    sub.querySelector('.ov-mp-star').click();
@@ -202,21 +202,24 @@ func TestBrowserFunctional_ConversationModelPicker(t *testing.T) {
  list.style.maxHeight='120px';list.scrollTop=0;
  window.ovModelPicker.close(false);trigger.click();await wait();
  assert(list.scrollHeight>list.clientHeight&&atFavoritesEnd(),'overflowing picker opens at favorites end');
- let finishFavorites;
+ let heldFavorites;
+ const holdNextFavorites=()=>new Promise(r=>{heldFavorites=r;});
  window.fetch=async(url,options)=>{
    const response=await originalFetch(url,options);
    if(url==='/ui/model-favorites'&&!options){
      const saved=await response.json();saved.m12=true;
-     return new Promise(resolve=>{finishFavorites=()=>resolve(new Response(JSON.stringify(saved),{status:200}));});
+     return new Promise(resolve=>heldFavorites(()=>resolve(new Response(JSON.stringify(saved),{status:200}))));
    }
    return response;
  };
+ let finishFavorites=holdNextFavorites();
  window.ovModelPicker.close(false);trigger.click();await wait();
  assert(atFavoritesEnd(),'cached favorites visible while loading');
- finishFavorites();await wait();
+ (await finishFavorites)();await wait();
  assert(atFavoritesEnd(),'loading additional saved favorites keeps bottom visible');
+ finishFavorites=holdNextFavorites();
  window.ovModelPicker.close(false);trigger.click();await wait();list.scrollTop=0;
- finishFavorites();await wait();
+ (await finishFavorites)();await wait();
  assert(list.scrollTop===0,'loading favorites does not undo user scrolling toward providers');
  window.fetch=originalFetch;list.style.maxHeight='';
 
