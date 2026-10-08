@@ -104,6 +104,52 @@ window.addEventListener('DOMContentLoaded', async function() {
   await pending;
   check((await log()) === beforeStop + ',one:ff', 'Stop finishes current operation and leaves remaining tasks untouched');
   check(col('completed').querySelector('[data-kanban-progress]').textContent.includes('Stopped'), 'stopped progress');
+  await new Promise(r=>setTimeout(r,100));
+  // Hold each mutation so navigation and progress interactions happen between results.
+  const originalFetch = window.fetch, originalAjax = window.htmx.ajax;
+  const releases = [];
+  let finalRefreshes = 0;
+  window.fetch = (url, options) => String(url).includes('/worktree/')
+    ? new Promise(resolve => releases.push(() => resolve(new Response('<div>done</div>', {status:200}))))
+    : originalFetch(url, options);
+  window.htmx.ajax = (method, url, options) => {
+    if (method === 'GET' && url === '/tasks?project_id=batch-project') finalRefreshes++;
+    return originalAjax(method, url, options);
+  };
+  const lifecycle = window.kanbanBatch(action('ff'), [
+    {id:'one', title:'First'}, {id:'one', title:'Second'}, {id:'one', title:'Third'}
+  ]);
+  await wait(() => releases.length === 1);
+  releases.shift()();
+  await wait(() => releases.length === 1);
+  const host = col('completed').querySelector('[data-kanban-progress]');
+  const details = host.querySelector('details'), summary = details.querySelector('summary');
+  details.open = true; summary.focus();
+  releases.shift()();
+  await wait(() => releases.length === 1);
+  check(host.querySelector('details') === details && details.open, 'progress preserves expanded Details node');
+  check(document.activeElement === summary, 'progress preserves keyboard focus');
+  check(details.querySelectorAll('div').length === 2, 'progress appends results');
+  const oldBoard = document.getElementById('kanban-board');
+  const returnedBoard = oldBoard.cloneNode(true);
+  returnedBoard.querySelectorAll('[data-kanban-progress]').forEach(el => el.replaceChildren());
+  const away = document.createElement('div');
+  oldBoard.replaceWith(away);
+  document.dispatchEvent(new Event('htmx:afterSwap'));
+  // A different project's board must not receive this batch's results.
+  const foreignBoard = returnedBoard.cloneNode(true);
+  foreignBoard.querySelectorAll('[data-kanban-category]').forEach(el => el.dataset.projectId = 'foreign');
+  away.replaceWith(foreignBoard);
+  document.dispatchEvent(new Event('htmx:afterSwap'));
+  check(!foreignBoard.querySelector('[data-kanban-progress]').textContent, 'results stay project scoped');
+  foreignBoard.replaceWith(returnedBoard);
+  document.dispatchEvent(new Event('htmx:afterSwap'));
+  check(col('completed').querySelector('[data-kanban-progress]').textContent.includes('2/3'), 'return restores current progress');
+  releases.shift()();
+  await lifecycle;
+  check(col('completed').querySelector('[data-kanban-progress]').textContent.includes('3/3'), 'returned board receives final progress');
+  check(finalRefreshes === 1, 'returned board receives authoritative completion refresh');
+  window.fetch = originalFetch; window.htmx.ajax = originalAjax;
   await fetch('/result?status=pass', {method:'POST'});
  } catch(error) { await fetch('/result?status='+encodeURIComponent(error.stack), {method:'POST'}); }
 });
