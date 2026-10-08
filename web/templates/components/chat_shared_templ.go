@@ -156,13 +156,13 @@ func selectedAgentOrAuto(agentID string) string {
 	return agentID
 }
 
-func selectedAgentLabel(agentID string, agents []models.LLMConfig, defaultID string) string {
+func selectedAgentLabel(agentID string, agents []models.LLMConfig) string {
 	value := selectedAgentOrAuto(agentID)
 	switch value {
 	case "auto":
 		return "Auto"
 	case "default":
-		return pickerDefaultLabel(agents, defaultID)
+		return "Default"
 	}
 	for _, agent := range agents {
 		if agent.ID == value {
@@ -3339,9 +3339,9 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var175 string
-			templ_7745c5c3_Var175, templ_7745c5c3_Err = templ.JoinStringErrs(selectedAgentLabel(config.SelectedAgentID, config.Agents, config.DefaultAgentID))
+			templ_7745c5c3_Var175, templ_7745c5c3_Err = templ.JoinStringErrs(selectedAgentLabel(config.SelectedAgentID, config.Agents))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1647, Col: 173}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1647, Col: 150}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var175))
 			if templ_7745c5c3_Err != nil {
@@ -3360,20 +3360,20 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 210, "\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 210, "\" data-picker-detail=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var177 string
-			templ_7745c5c3_Var177, templ_7745c5c3_Err = templ.JoinStringErrs(pickerDefaultLabel(config.Agents, config.DefaultAgentID))
+			templ_7745c5c3_Var177, templ_7745c5c3_Err = templ.ResolveAttributeValue(pickerDefaultDetail(config.Agents, config.DefaultAgentID))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1650, Col: 180}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1650, Col: 200}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var177))
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var177)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 211, "</li>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 211, "\">Default</li>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -4014,12 +4014,8 @@ func pickerDefaultAgent(agents []models.LLMConfig, defaultID string) models.LLMC
 	return models.LLMConfig{}
 }
 
-func pickerDefaultLabel(agents []models.LLMConfig, defaultID string) string {
-	agent := pickerDefaultAgent(agents, defaultID)
-	if agent.ID == "" {
-		return "Default"
-	}
-	return "Default — " + agent.Name
+func pickerDefaultDetail(agents []models.LLMConfig, defaultID string) string {
+	return pickerDefaultAgent(agents, defaultID).Name
 }
 
 var _ = templruntime.GeneratedTemplate
