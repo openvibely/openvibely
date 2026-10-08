@@ -105,6 +105,12 @@ func TestBrowserFunctional_ConversationModelPicker(t *testing.T) {
  sub.querySelector('.ov-mp-star').click();
  assert(panel.querySelectorAll('.ov-mp-star[aria-pressed=true]').length===1,'favorite moved to main panel');
  assert(sub.querySelectorAll('.ov-mp-pick').length===11,'favorite not duplicated');
+ const menuRows=[...panel.querySelector('.ov-mp-list').children];
+ const lastProvider=menuRows.findLastIndex(e=>e.classList.contains('ov-mp-provider'));
+ const autoIndex=menuRows.findIndex(e=>e.querySelector('[data-model="auto"]'));
+ const defaultIndex=menuRows.findIndex(e=>e.querySelector('[data-model="default"]'));
+ const favoritesIndex=menuRows.findIndex(e=>e.classList.contains('ov-mp-heading'));
+ assert(lastProvider<autoIndex&&autoIndex<defaultIndex&&defaultIndex<favoritesIndex&&menuRows.at(-1).querySelector('.ov-mp-star'),'providers then Auto/Default then favorites nearest effort');
  const hover=(target)=>target.dispatchEvent(new PointerEvent('pointerover',{bubbles:true,pointerType:'mouse'}));
  const reopen=()=>panel.querySelector('.ov-mp-provider').dispatchEvent(new PointerEvent('pointerenter',{pointerType:'mouse'}));
  hover(panel.querySelector('.ov-mp-list'));assert(!sub.hidden,'crossing list padding keeps submenu open');
