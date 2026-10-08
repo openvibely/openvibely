@@ -55,7 +55,46 @@
   let active = null,
     provider = null,
     subCloseTimer = null,
-    favorites = read(favoritesKey);
+    favorites = {},
+    favoritesLoading = false,
+    favoritesError = "",
+    favoritesLoadToken = 0,
+    favoriteWrites = Promise.resolve();
+  const favoritesEndpoint = "/ui/model-favorites";
+  async function requestFavorites(payload) {
+    const response = await fetch(favoritesEndpoint, payload ? {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    } : undefined);
+    if (!response.ok) throw Error("Could not save favorites. Reopen the picker to retry.");
+    return response.json();
+  }
+  async function loadFavorites() {
+    const token = ++favoritesLoadToken;
+    favoritesLoading = true;
+    favoritesError = "";
+    render();
+    try {
+      await favoriteWrites.catch(() => {});
+      let saved = await requestFavorites();
+      const legacy = read(favoritesKey);
+      const importIDs = Object.keys(legacy || {}).filter((id) => legacy[id]);
+      if (importIDs.length) saved = await requestFavorites({ import_ids: importIDs });
+      try { localStorage.removeItem(favoritesKey); } catch (_) {}
+      if (token !== favoritesLoadToken) return;
+      favorites = saved;
+    } catch (_) {
+      if (token === favoritesLoadToken)
+        favoritesError = "Could not load favorites. Reopen the picker to retry.";
+    } finally {
+      if (token === favoritesLoadToken) {
+        favoritesLoading = false;
+        render();
+        renderSub();
+      }
+    }
+  }
   function options(btn) {
     const all = [...btn.parentElement.querySelectorAll("li[data-value]")].map(
       (li) => ({
@@ -257,9 +296,11 @@
         (favorites[m.id] ? "Unfavorite " : "Favorite ") + m.name,
       );
       star.setAttribute("aria-pressed", String(!!favorites[m.id]));
+      star.disabled = favoritesLoading || !!favoritesError;
       star.onclick = () => {
-        favorites[m.id] = !favorites[m.id];
-        write(favoritesKey, favorites);
+        const desired = !favorites[m.id];
+        if (desired) favorites[m.id] = true;
+        else delete favorites[m.id];
         renderList();
         renderSub();
         position();
@@ -268,6 +309,17 @@
           ...sub.querySelectorAll(".ov-mp-star"),
         ].find((b) => b.dataset.id === m.id);
         button?.focus({ preventScroll: true });
+        favoriteWrites = favoriteWrites.catch(() => {}).then(() =>
+          requestFavorites({ model_id: m.id, favorite: desired }),
+        );
+        favoriteWrites.catch(() => {
+          favoritesError = "Could not save favorites. Reopen the picker to retry.";
+          if (active) {
+            status.textContent = favoritesError;
+            renderList();
+            renderSub();
+          }
+        });
       };
       star.dataset.id = m.id;
       r.append(star);
@@ -443,7 +495,7 @@
     if (!active) return;
     renderList();
     renderEffort();
-    status.textContent = state(active).error || "";
+    status.textContent = state(active).error || favoritesError || "";
     position();
   }
   function position() {
@@ -538,13 +590,13 @@
     open(btn) {
       init(btn);
       active = btn;
-      favorites = read(favoritesKey);
       provider = null;
       search.value = "";
       panel.hidden = false;
       btn.setAttribute("aria-expanded", "true");
       render();
       renderSub();
+      loadFavorites();
       search.focus({ preventScroll: true });
       const s = state(btn);
       if (s.error) {

@@ -3,9 +3,11 @@ package components
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
@@ -28,7 +30,36 @@ func TestBrowserFunctional_ConversationModelPicker(t *testing.T) {
 	if err := ChatInputForm(ChatInputFormConfig{FormID: "chat-form", InputID: "message-input", TargetID: "messages", PostEndpoint: "/chat/send", ProjectID: "test", Agents: agents, SelectedAgentID: "m0", ShowModelSelector: true}).Render(context.Background(), &content); err != nil {
 		t.Fatal(err)
 	}
+	var favoriteMu sync.Mutex
+	favorites := map[string]bool{}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/ui/model-favorites" {
+			favoriteMu.Lock()
+			defer favoriteMu.Unlock()
+			if r.Method == http.MethodPost {
+				var body struct {
+					ModelID   string   `json:"model_id"`
+					Favorite  bool     `json:"favorite"`
+					ImportIDs []string `json:"import_ids"`
+				}
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+					t.Error(err)
+					return
+				}
+				if body.ModelID != "" {
+					if body.Favorite {
+						favorites[body.ModelID] = true
+					} else {
+						delete(favorites, body.ModelID)
+					}
+				}
+				for _, id := range body.ImportIDs {
+					favorites[id] = true
+				}
+			}
+			_ = json.NewEncoder(w).Encode(favorites)
+			return
+		}
 		fmt.Fprint(w, `<!doctype html><html><head><style>body{background:#1d232a;color:#eee;font-family:sans-serif;margin:20px}form{margin-top:650px}button{font:inherit}</style></head><body data-test-result="pending"><script>localStorage.clear();window.htmx={process:function(){}};</script>`+content.String()+`<div id="browser-result"></div><script>
  (async function(){
  const assert=(ok,msg)=>{if(!ok)throw Error(msg)},wait=()=>new Promise(r=>setTimeout(r,30));
@@ -127,6 +158,12 @@ func TestBrowserFunctional_ConversationModelPicker(t *testing.T) {
    assert(bounds.top>=8&&bounds.bottom<=innerHeight-8,'favorite growth keeps primary menu in viewport: '+JSON.stringify({top:bounds.top,bottom:bounds.bottom,height:innerHeight,trigger:trigger.getBoundingClientRect().top}));
    assert(bounds.bottom<=trigger.getBoundingClientRect().top,'favorite growth keeps menu anchored above trigger');
  }
+ for(let i=0;i<40;i++) { const saved=await (await fetch('/ui/model-favorites')).json(); if(Object.keys(saved).length===9) break; await wait(); }
+ window.ovModelPicker.close(false);localStorage.clear();trigger.click();await wait();
+ assert(panel.querySelectorAll('.ov-mp-star[aria-pressed=true]').length===9,'favorites load from server after local storage is cleared');
+ window.ovModelPicker.close(false);localStorage.setItem('openvibely-model-favorites',JSON.stringify({m10:true}));trigger.click();await wait();
+ assert(panel.querySelectorAll('.ov-mp-star[aria-pressed=true]').length===10,'legacy browser favorite merges into shared list');
+ assert(localStorage.getItem('openvibely-model-favorites')===null,'legacy favorite is removed after import');
  document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));
  document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));
  assert(panel.hidden,'escape closes');
@@ -155,6 +192,7 @@ func TestBrowserFunctional_TaskModelPickerPersistence(t *testing.T) {
  localStorage.clear();window.htmx={process:function(){}};
  const stored={a:'high',b:'low'},posts=[];let failNextWrite=false,failNextRead=false;
  window.fetch=async function(url,options){
+ if(String(url).startsWith('/ui/model-favorites'))return {ok:true,json:async()=>({})};
  if(options?.method==='POST'){if(failNextWrite){failNextWrite=false;return {ok:false};}const body=options.body;await new Promise(r=>setTimeout(r,20));stored[body.get('agent_id')==='default'?'b':body.get('agent_id')]=body.get('reasoning_effort');posts.push(body.get('agent_id'));return {ok:true};}
  if(failNextRead){failNextRead=false;return {ok:false};}const selected=new URL(url,location.href).searchParams.get('agent_id'),id=selected==='default'?'b':selected;await new Promise(r=>setTimeout(r,id==='a'?80:20));return {ok:true,json:async()=>({reasoning_effort:stored[id]||''})};
  };
