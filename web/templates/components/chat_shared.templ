@@ -1842,17 +1842,12 @@ templ ChatInputForm(config ChatInputFormConfig) {
 		// Guard ensures this runs only once even when multiple ChatInputForms exist.
 		if (!window._chatCustomSelectPanelReady) {
 			window._chatCustomSelectPanelReady = true;
-			var _csModernColors = window.CSS && CSS.supports('color', 'oklch(0 0 0)');
-			var _csSelectedBackground = _csModernColors ? 'oklch(var(--p)/0.12)' : 'rgba(116,128,255,0.12)';
-			var _csHoverBackground = _csModernColors ? 'oklch(var(--b3)/1)' : 'var(--ov-menu-hover)';
-
 			var _cspanel = document.createElement('ul');
 			_cspanel.id = 'chat-custom-select-panel';
+			_cspanel.className = 'ov-menu ov-menu-actions ov-menu-scroll';
 			_cspanel.setAttribute('role', 'listbox');
-			_cspanel.style.cssText = 'position:fixed;z-index:9999;display:none;list-style:none;margin:0;padding:4px 0;' +
-				'min-width:160px;max-height:280px;overflow-y:auto;border-radius:8px;' +
-				(_csModernColors ? 'border:1px solid oklch(var(--bc)/0.15);background:oklch(var(--b1));' : 'border:1px solid var(--ov-border-subtle);background:var(--ov-menu-surface);') +
-				'box-shadow:0 4px 20px rgba(0,0,0,0.18);';
+			_cspanel.style.cssText = 'position:fixed;z-index:9999;display:none;list-style:none;margin:0;' +
+				'min-width:160px;max-height:280px;';
 			document.body.appendChild(_cspanel);
 
 			var _csActiveBtn = null;
@@ -1885,31 +1880,17 @@ templ ChatInputForm(config ChatInputFormConfig) {
 					item.setAttribute('role', 'option');
 					item.setAttribute('aria-selected', val === currentValue ? 'true' : 'false');
 					item.dataset.value = val;
-					item.style.cssText = 'display:flex;align-items:center;gap:6px;padding:6px 12px;cursor:pointer;' +
-						'font-size:0.75rem;line-height:1.4;white-space:nowrap;' +
-						(val === currentValue ? 'background:' + _csSelectedBackground + ';font-weight:600;' : '');
+					item.className = 'ov-menu-option';
+					item.style.whiteSpace = 'nowrap';
+					var check = document.createElement('span');
+					check.className = 'ov-menu-check';
+					check.setAttribute('aria-hidden', 'true');
+					check.textContent = val === currentValue ? '✓' : '';
+					item.appendChild(check);
 					var textSpan = document.createElement('span');
 					textSpan.style.cssText = 'flex:1;min-width:0;';
 					textSpan.textContent = label;
 					item.appendChild(textSpan);
-					if (val === currentValue) {
-						var checkSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-						checkSvg.setAttribute('style', 'width:12px;height:12px;flex-shrink:0;');
-						checkSvg.setAttribute('fill', 'none');
-						checkSvg.setAttribute('viewBox', '0 0 24 24');
-						checkSvg.setAttribute('stroke', 'currentColor');
-						checkSvg.setAttribute('stroke-width', '2.5');
-						var checkPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-						checkPath.setAttribute('stroke-linecap', 'round');
-						checkPath.setAttribute('stroke-linejoin', 'round');
-						checkPath.setAttribute('d', 'M5 13l4 4L19 7');
-						checkSvg.appendChild(checkPath);
-						item.appendChild(checkSvg);
-					}
-					item.addEventListener('mouseenter', function() { this.style.background = _csHoverBackground; });
-					item.addEventListener('mouseleave', function() {
-						this.style.background = this.dataset.value === currentValue ? _csSelectedBackground : '';
-					});
 					item.addEventListener('click', function(e) {
 						e.preventDefault();
 						e.stopPropagation();
