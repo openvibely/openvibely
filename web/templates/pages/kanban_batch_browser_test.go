@@ -77,6 +77,11 @@ window.addEventListener('DOMContentLoaded', async function() {
   Array.from(currentMenu.querySelectorAll('button')).find(b => b.textContent.trim().startsWith('Filter')).focus();
   const filterPanel = document.querySelector('[data-task-card-submenu-portaled="true"]');
   check(!filterPanel.querySelector('details'), 'filters must not use accordions');
+  if (window.innerWidth < 640) {
+    await new Promise(resolve => requestAnimationFrame(resolve));
+    check(filterPanel.contains(document.activeElement), 'replacement Filter panel retains keyboard focus');
+    check(getComputedStyle(document.activeElement).visibility === 'visible', 'Filter focus is visible');
+  }
   const outcome = Array.from(filterPanel.querySelectorAll('button')).find(b => b.textContent.trim() === 'Outcome›');
   outcome.focus();
   const choices = Array.from(document.querySelectorAll('[data-task-card-submenu-portaled="true"]')).find(p => p !== filterPanel);
@@ -95,6 +100,9 @@ window.addEventListener('DOMContentLoaded', async function() {
     outcome.focus();
   }
   if (window.innerWidth < 640) {
+    await new Promise(resolve => requestAnimationFrame(resolve));
+    check(choices.contains(document.activeElement), 'replacement Outcome panel retains keyboard focus');
+    check(getComputedStyle(document.activeElement).visibility === 'visible', 'Outcome focus is visible');
     check(getComputedStyle(filterPanel).visibility === 'hidden', 'mobile choices replace Filter panel');
     check(choices.getBoundingClientRect().width >= 200, 'mobile choices keep readable width');
     choices.querySelector('[data-submenu-back] button').click();

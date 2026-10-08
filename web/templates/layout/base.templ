@@ -3325,6 +3325,12 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
                 if (replaceParent) {
                     panel.style.left = Math.max(8, Math.min(menuRect.left, window.innerWidth - panelWidth - 8)) + 'px';
                     panel.style.top = Math.max(8, Math.min(menuRect.top, window.innerHeight - panel.getBoundingClientRect().height - 8)) + 'px';
+                    // Move focus before hiding its current owner. The Back control
+                    // does not open another submenu when focused.
+                    if (menu.contains(document.activeElement)) {
+                        const back = panel.querySelector(':scope > [data-submenu-back] > button');
+                        if (back) back.focus({preventScroll: true});
+                    }
                     menu.setAttribute('data-submenu-covered', '');
                 }
 			}
