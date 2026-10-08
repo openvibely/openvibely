@@ -33,7 +33,6 @@ const (
 	discordChatHistoryLimit = 50
 	discordMessageLimit     = 2000
 	discordMaxFileSize      = 10 << 20
-	discordMaxTextFileSize  = 100 * 1024
 	discordMaxFilesPerMsg   = 3
 	discordMaxRedirects     = 10
 )
@@ -1110,7 +1109,7 @@ func (s *DiscordService) downloadDiscordAttachments(ctx context.Context, files [
 }
 
 func discordAttachmentContextAndImages(chatAttachments []models.ChatAttachment) (string, []models.Attachment) {
-	return channelChatAttachmentContextAndImages(chatAttachments, discordMaxTextFileSize)
+	return channelChatAttachmentContextAndImages(chatAttachments, channelChatMaxInlineTextAttachmentSize)
 }
 
 func discordIncomingAttachmentsRequireVision(files []discordIncomingAttachment) bool {
