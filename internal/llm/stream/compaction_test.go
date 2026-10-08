@@ -59,3 +59,27 @@ func TestCompactionClosesInterruptedThinkingFence(t *testing.T) {
 		}
 	}
 }
+
+func TestCompactionRecoveryIgnoresToolMarkdown(t *testing.T) {
+	for _, thinking := range []string{"[Thinking]\nInterrupted", "[Thinking]\n~~~~go\npartial"} {
+		prefix := "[Tool read_file done]\n```text\n[Thinking]\nfile excerpt\n[/Tool]\n"
+		writer := NewWriter("", "", nil, context.Background(), time.Hour)
+		writer.Write([]byte(prefix + thinking))
+		CompactionReporter(writer, nil)(llmcontracts.CompactionProgress{State: "started"})
+		writer.Stop()
+		got := writer.String()
+		if !strings.HasPrefix(got, prefix+thinking) || !strings.HasSuffix(got, "[/Thinking]\n\n[Compaction started]\n") {
+			t.Fatalf("incorrect recovery: %q", got)
+		}
+		if strings.Count(got, "```") != 1 {
+			t.Fatalf("closed tool fence outside tool: %q", got)
+		}
+	}
+	if unfinishedThinking("[Tool read_file done]\n[Thinking]\n[/Tool]\n") {
+		t.Fatal("tool content became thinking")
+	}
+	quoted := "```text\n[Tool read_file done]\nexample\n[/Tool]\n```\n"
+	if withoutToolOutput(quoted) != quoted {
+		t.Fatal("modified quoted tool block")
+	}
+}
