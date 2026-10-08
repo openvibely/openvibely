@@ -136,7 +136,7 @@ func countXSettingsSnapshots(statements []string) int {
 	count := 0
 	for _, statement := range statements {
 		normalized := strings.ReplaceAll(strings.ToUpper(strings.TrimSpace(statement)), " ", "")
-		if normalized == "SELECTKEY,VALUEFROMAPP_SETTINGSWHEREKEYIN(?,?,?)" {
+		if normalized == "SELECTKEY,VALUEFROMAPP_SETTINGSWHEREKEYIN(?,?,?,?)" {
 			count++
 		}
 	}
@@ -165,7 +165,7 @@ func TestXPollUsesOneConfigurationSnapshotPerBatch(t *testing.T) {
 
 			require.Equal(t, 1, countXSettingsSnapshots(statements), "X polling should load one settings snapshot per batch")
 			if mentions == 100 {
-				require.Equal(t, 1108, len(statements), "the 100-mention batch should use the bounded SQL operation count")
+				require.Equal(t, 1110, len(statements), "the 100-mention batch should use the bounded SQL operation count")
 			}
 			require.Equal(t, wantCursor, cursor)
 		})
@@ -397,17 +397,156 @@ func TestXRuntimeProjectSwitchRequiresTargetAuthorizationAndPersists(t *testing.
 	require.Equal(t, p2.ID, selected)
 }
 
-func TestXPollBoundsPaginationWithoutAdvancingCursor(t *testing.T) {
+func TestXPollPersistsContinuationWithoutAdvancingCursor(t *testing.T) {
 	ctx, svc, settings, _, _, _, _ := setupXServiceTest(t)
 	api := &fakeXAPI{me: XUser{ID: "bot"}}
 	api.mentions.Meta.NewestID = "100"
 	api.mentions.Meta.NextToken = "more"
 	svc.setAPI(api)
 	svc.me = api.me
-	require.ErrorContains(t, svc.pollOnce(ctx), "pagination exceeded")
+
+	require.NoError(t, svc.pollOnce(ctx))
 	cursor, err := settings.Get(ctx, XSettingSinceID)
 	require.NoError(t, err)
 	require.Empty(t, cursor)
+	stateJSON, err := settings.Get(ctx, XSettingPaginationState)
+	require.NoError(t, err)
+	var state xMentionPaginationState
+	require.NoError(t, json.Unmarshal([]byte(stateJSON), &state))
+	require.Equal(t, "bot", state.AccountID)
+	require.Equal(t, "", state.ConfigurationID)
+	require.Empty(t, state.SinceID)
+	require.Equal(t, "100", state.TargetID)
+	require.Equal(t, "more", state.NextToken)
+}
+
+func TestXPollResumesLargeBacklogAcrossRestartAndFetchesNewMentions(t *testing.T) {
+	ctx, svc, settings, auth, selections, project, _ := setupXServiceTest(t)
+	require.NoError(t, settings.Set(ctx, XSettingConfigurationID, "generation"))
+	svc.SetConfigurationID("generation")
+	require.NoError(t, auth.Create(ctx, &models.XAuthorizedUser{ProjectID: project.ID, XUserID: "author"}))
+
+	var requests []struct {
+		sinceID    string
+		pagination string
+	}
+	api := &fakeXAPI{me: XUser{ID: "bot", Username: "openvibely"}}
+	api.mentionsFunc = func(_ context.Context, _, sinceID, pagination string) (xMentionsResponse, error) {
+		requests = append(requests, struct {
+			sinceID    string
+			pagination string
+		}{sinceID: sinceID, pagination: pagination})
+		response := xMentionsResponse{}
+		switch sinceID {
+		case "":
+			pageIndex := 0
+			if pagination != "" {
+				if _, err := fmt.Sscanf(pagination, "page-%d", &pageIndex); err != nil {
+					return xMentionsResponse{}, fmt.Errorf("parse pagination token %q: %w", pagination, err)
+				}
+			}
+			if pageIndex < 0 || pageIndex >= 12 {
+				return xMentionsResponse{}, fmt.Errorf("unexpected backlog page %d", pageIndex)
+			}
+			response.Meta.NewestID = "12"
+			if pageIndex+1 < 12 {
+				response.Meta.NextToken = fmt.Sprintf("page-%d", pageIndex+1)
+			}
+			id := fmt.Sprintf("%d", pageIndex+1)
+			response.Data = []XTweet{{ID: id, Text: "@openvibely", AuthorID: "author", ConversationID: "conversation-" + id}}
+		case "12":
+			// A new mention arrived while the saved continuation was being drained.
+			response.Meta.NewestID = "13"
+			response.Data = []XTweet{{ID: "13", Text: "@openvibely", AuthorID: "author", ConversationID: "conversation-13"}}
+		case "13":
+			// No additional mentions remain.
+		default:
+			return xMentionsResponse{}, fmt.Errorf("unexpected X since_id %q", sinceID)
+		}
+		return response, nil
+	}
+	svc.setAPI(api)
+	svc.me = api.me
+
+	require.NoError(t, svc.pollOnce(ctx))
+	require.Len(t, requests, xMaxMentionPages)
+	for i, request := range requests {
+		require.Empty(t, request.sinceID)
+		wantToken := ""
+		if i > 0 {
+			wantToken = fmt.Sprintf("page-%d", i)
+		}
+		require.Equal(t, wantToken, request.pagination)
+	}
+	cursor, err := settings.Get(ctx, XSettingSinceID)
+	require.NoError(t, err)
+	require.Empty(t, cursor, "the cursor must remain at the old position while pages are outstanding")
+	stateJSON, err := settings.Get(ctx, XSettingPaginationState)
+	require.NoError(t, err)
+	var state xMentionPaginationState
+	require.NoError(t, json.Unmarshal([]byte(stateJSON), &state))
+	require.Equal(t, "page-10", state.NextToken)
+	require.Equal(t, "12", state.TargetID)
+
+	// Rebuild the service over the same repositories to model a process restart.
+	restarted := NewXService(svc.credentials, settings, svc.projectRepo, svc.llmConfigRepo, svc.taskRepo, svc.execRepo, svc.scheduleRepo, svc.taskSvc)
+	restarted.SetRepositories(auth, selections, svc.taskContextRepo, svc.receiptRepo, svc.threadInputRepo)
+	restarted.SetConfigurationID("generation")
+	restarted.me = api.me
+	restarted.setAPI(api)
+	require.NoError(t, restarted.pollOnce(ctx))
+	require.Len(t, requests, 12)
+	require.Equal(t, "page-10", requests[10].pagination, "restart must resume at the first unprocessed page")
+	require.Equal(t, "page-11", requests[11].pagination)
+	cursor, err = settings.Get(ctx, XSettingSinceID)
+	require.NoError(t, err)
+	require.Equal(t, "12", cursor)
+	stateJSON, err = settings.Get(ctx, XSettingPaginationState)
+	require.NoError(t, err)
+	require.Empty(t, stateJSON)
+
+	// The next since_id query finds the mention that arrived during recovery.
+	require.NoError(t, restarted.pollOnce(ctx))
+	require.Len(t, requests, 13)
+	require.Equal(t, "12", requests[12].sinceID)
+	require.Empty(t, requests[12].pagination)
+	cursor, err = settings.Get(ctx, XSettingSinceID)
+	require.NoError(t, err)
+	require.Equal(t, "13", cursor)
+	for id := 1; id <= 13; id++ {
+		claim, err := svc.receiptRepo.Claim(ctx, fmt.Sprintf("%d", id), project.ID, svc.now(), xReceiptLease)
+		require.NoError(t, err)
+		require.Equal(t, repository.XReceiptCompleted, claim.Result)
+	}
+}
+
+func TestXPollIgnoresContinuationFromReplacedConfiguration(t *testing.T) {
+	ctx, svc, settings, _, _, _, _ := setupXServiceTest(t)
+	require.NoError(t, settings.SetMany(ctx, map[string]string{
+		XSettingConfigurationID: "new-generation",
+		XSettingSinceID:         "50",
+		XSettingPaginationState: `{"account_id":"bot","configuration_id":"old-generation","since_id":"50","target_id":"99","next_token":"stale-token"}`,
+	}))
+	svc.SetConfigurationID("new-generation")
+	svc.me = XUser{ID: "bot"}
+	var gotPagination string
+	api := &fakeXAPI{me: svc.me, mentionsFunc: func(_ context.Context, _, sinceID, pagination string) (xMentionsResponse, error) {
+		require.Equal(t, "50", sinceID)
+		gotPagination = pagination
+		var response xMentionsResponse
+		response.Meta.NewestID = "60"
+		return response, nil
+	}}
+	svc.setAPI(api)
+
+	require.NoError(t, svc.pollOnce(ctx))
+	require.Empty(t, gotPagination)
+	cursor, err := settings.Get(ctx, XSettingSinceID)
+	require.NoError(t, err)
+	require.Equal(t, "60", cursor)
+	state, err := settings.Get(ctx, XSettingPaginationState)
+	require.NoError(t, err)
+	require.Empty(t, state)
 }
 
 func TestXPollCannotOverwriteCursorAfterAccountReplacement(t *testing.T) {
