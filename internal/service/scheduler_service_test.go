@@ -229,6 +229,105 @@ func TestSchedulerService_CheckDueTasksOneTimeScheduleUsesLastRunInsteadOfTaskSt
 	}
 }
 
+func TestSchedulerService_ModifyRecurringScheduleToOnceUsesUpcomingOccurrence(t *testing.T) {
+	for _, priorRun := range []bool{true, false} {
+		name := "never run"
+		if priorRun {
+			name = "prior recurring run"
+		}
+		t.Run(name, func(t *testing.T) {
+			db := testutil.NewTestDB(t)
+			scheduleRepo := repository.NewScheduleRepo(db)
+			taskRepo := repository.NewTaskRepo(db, nil)
+			workerSvc := newTestWorkerService(t)
+			ctx := context.Background()
+			now := time.Now().UTC().Truncate(time.Second)
+			upcoming := now.Add(time.Hour)
+			if priorRun {
+				upcoming = now.Add(-time.Minute)
+			}
+
+			task := &models.Task{
+				ProjectID: "default",
+				Title:     "Recurring schedule conversion",
+				Category:  models.CategoryScheduled,
+				Status:    models.StatusCompleted,
+				Prompt:    "test",
+			}
+			require.NoError(t, taskRepo.Create(ctx, task))
+			runAt := now.Add(-48 * time.Hour)
+			schedule := &models.Schedule{
+				TaskID:         task.ID,
+				RunAt:          runAt,
+				RepeatType:     models.RepeatDaily,
+				RepeatInterval: 1,
+				Enabled:        true,
+				NextRun:        &upcoming,
+			}
+			require.NoError(t, scheduleRepo.Create(ctx, schedule))
+			var historicalRun *time.Time
+			if priorRun {
+				lastRun := now.Add(-24 * time.Hour)
+				historicalRun = &lastRun
+				require.NoError(t, scheduleRepo.MarkRan(ctx, schedule.ID, lastRun, &upcoming))
+			}
+
+			modified, err := NewScheduleActionService(taskRepo, scheduleRepo).Modify(ctx, "default", ModifyScheduleRequest{
+				ScheduleID: schedule.ID,
+				Repeat:     "once",
+			})
+			require.NoError(t, err)
+			require.NotNil(t, modified.Schedule.NextRun)
+			require.True(t, modified.Schedule.NextRun.Equal(upcoming), "conversion should preserve the upcoming occurrence")
+			require.True(t, modified.Schedule.RunAt.Equal(upcoming), "once schedule anchor should match its occurrence")
+			if historicalRun != nil {
+				require.NotNil(t, modified.Schedule.LastRun)
+				require.True(t, modified.Schedule.LastRun.Equal(*historicalRun), "conversion should retain recurring execution history")
+			}
+
+			scheduler := NewSchedulerService(scheduleRepo, taskRepo, workerSvc)
+			schedulerNow := now
+			if priorRun {
+				schedulerNow = upcoming.Add(time.Minute)
+			}
+			scheduler.now = func() time.Time { return schedulerNow }
+			scheduler.checkDueTasks(ctx)
+
+			if priorRun {
+				select {
+				case submitted := <-workerSvc.Submitted():
+					require.Equal(t, task.ID, submitted.ID)
+				case <-time.After(100 * time.Millisecond):
+					t.Fatal("expected the upcoming one-time occurrence to dispatch despite earlier recurring history")
+				}
+				stored, err := scheduleRepo.GetByID(ctx, schedule.ID)
+				require.NoError(t, err)
+				require.Nil(t, stored.NextRun, "successful one-time dispatch should consume the occurrence")
+				require.NotNil(t, stored.LastRun)
+				require.True(t, stored.LastRun.Equal(schedulerNow), "dispatch should record the new run while retaining history until then")
+
+				scheduler.checkDueTasks(ctx)
+				select {
+				case submitted := <-workerSvc.Submitted():
+					t.Fatalf("one-time occurrence dispatched again: %s", submitted.ID)
+				default:
+				}
+			} else {
+				select {
+				case submitted := <-workerSvc.Submitted():
+					t.Fatalf("one-time occurrence dispatched before its upcoming time: %s", submitted.ID)
+				default:
+				}
+				stored, err := scheduleRepo.GetByID(ctx, schedule.ID)
+				require.NoError(t, err)
+				require.Nil(t, stored.LastRun)
+				require.NotNil(t, stored.NextRun)
+				require.True(t, stored.NextRun.Equal(upcoming))
+			}
+		})
+	}
+}
+
 func TestSchedulerService_CheckDueTasksDoesNotReplayDispatchedOneTimeSchedule(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	scheduleRepo := repository.NewScheduleRepo(db)
@@ -254,7 +353,7 @@ func TestSchedulerService_CheckDueTasksDoesNotReplayDispatchedOneTimeSchedule(t 
 	}
 	require.NoError(t, scheduleRepo.Create(ctx, schedule))
 
-	previousRun := runAt.Add(-24 * time.Hour)
+	previousRun := runAt.Add(time.Minute)
 	require.NoError(t, scheduleRepo.MarkRan(ctx, schedule.ID, previousRun, nil))
 	stored, err := scheduleRepo.GetByID(ctx, schedule.ID)
 	require.NoError(t, err)
@@ -263,7 +362,7 @@ func TestSchedulerService_CheckDueTasksDoesNotReplayDispatchedOneTimeSchedule(t 
 	require.NoError(t, scheduleRepo.Update(ctx, stored))
 
 	svc := NewSchedulerService(scheduleRepo, taskRepo, workerSvc)
-	svc.now = func() time.Time { return runAt }
+	svc.now = func() time.Time { return previousRun }
 	svc.checkDueTasks(ctx)
 
 	select {

@@ -358,7 +358,16 @@ func (s *ScheduleActionService) Modify(ctx context.Context, projectID string, re
 		timeChanged = true
 	}
 	if req.Repeat != "" {
+		previousRepeatType := schedule.RepeatType
 		schedule.RepeatType = repeatType
+		if repeatType == models.RepeatOnce && previousRepeatType != models.RepeatOnce && req.Time == "" {
+			if schedule.NextRun == nil {
+				return result, actionError(ScheduleActionTimeError, "", fmt.Errorf("recurring schedule has no upcoming run; supply a time when converting to once"))
+			}
+			// The recurrence anchor may be historical. A conversion without an
+			// explicit time uses the already-persisted upcoming occurrence.
+			schedule.RunAt = *schedule.NextRun
+		}
 		changes = append(changes, fmt.Sprintf("repeat→%s", req.Repeat))
 		timeChanged = true
 	}
