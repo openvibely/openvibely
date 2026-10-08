@@ -54,12 +54,7 @@
 .ov-mp-star[aria-pressed="true"] {
   color: #aba5ff;
 }
-.ov-mp-heading {
-  font-size: 10px;
-  opacity: 0.6;
-  letter-spacing: 0.08em;
-  padding: 9px 9px 4px;
-}
+
 .ov-mp-provider {
   width: 100%;
   justify-content: space-between;
