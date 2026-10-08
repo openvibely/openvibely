@@ -475,24 +475,25 @@ templ SchedulePrimaryAgentSelector(selected *string, agentDefs []repository.Agen
 	</select>
 }
 
-templ Schedule(projects []models.Project, currentProject *models.Project, tasks []repository.TaskWithSchedule, weekOffset int, agents []models.LLMConfig, agentDefs []repository.AgentScheduleOption) {
+templ Schedule(projects []models.Project, currentProject *models.Project, tasks []repository.TaskWithSchedule, weekOffset int, agents []models.LLMConfig, agentDefs []repository.AgentScheduleOption, calendarState ...models.ScheduleCalendarState) {
 	@layout.Base("Schedule", projects, projectID(currentProject)) {
-		@scheduleContent(currentProject, buildWeekData(tasks, weekOffset), weekOffset, agents, agentDefs)
+		@scheduleContent(currentProject, buildWeekData(tasks, weekOffset), weekOffset, agents, agentDefs, calendarState...)
 	}
 }
 
 // ScheduleContent renders just the schedule content for HTMX requests
-templ ScheduleContent(currentProject *models.Project, tasks []repository.TaskWithSchedule, weekOffset int, agents []models.LLMConfig, agentDefs []repository.AgentScheduleOption) {
-	@scheduleContent(currentProject, buildWeekData(tasks, weekOffset), weekOffset, agents, agentDefs)
+templ ScheduleContent(currentProject *models.Project, tasks []repository.TaskWithSchedule, weekOffset int, agents []models.LLMConfig, agentDefs []repository.AgentScheduleOption, calendarState ...models.ScheduleCalendarState) {
+	@scheduleContent(currentProject, buildWeekData(tasks, weekOffset), weekOffset, agents, agentDefs, calendarState...)
 }
 
-templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOffset int, agents []models.LLMConfig, agentDefs []repository.AgentScheduleOption) {
+templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOffset int, agents []models.LLMConfig, agentDefs []repository.AgentScheduleOption, calendarState ...models.ScheduleCalendarState) {
 	<div id="schedule-content" class="flex flex-col h-full" data-project-id={ projectID(currentProject) }>
 		@layout.PageTitle("Schedule")
 		<!-- Header: Row 1 – Title + New Task button -->
 		<div class="flex-shrink-0 sticky top-0 z-30 pb-2 md:relative md:z-auto">
 			<div data-page-header class="flex justify-between items-center mb-3">
 				<h2 class="text-2xl font-bold">Schedule</h2>
+				<button type="button" class="btn btn-sm" data-calendar-action="pause_all">Pause all schedules</button>
 				<button class="btn btn-sm btn-primary" onclick="openNewScheduledTaskModal()">
 					<span class="hidden sm:inline">+ New Scheduled Task</span>
 					<span class="sm:hidden">+ New</span>
@@ -540,8 +541,10 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 					</button>
 				</div>
 				<span class="text-sm select-none">{ formatWeekRange(weekData.WeekDays) }</span>
+				<span class="text-xs">{ time.Local.String() }</span>
 			</div>
 		</div>
+		@ScheduleCalendarControls(calendarState)
 		<!-- Week Timeline View -->
 		<div id="schedule-timeline-container" class="bg-base-100 rounded-lg shadow-lg overflow-x-auto flex flex-1 flex-col min-h-0 overflow-y-auto opacity-0" style="border: 1px solid var(--ov-schedule-grid-border);">
 			<div class="min-w-[800px] flex flex-1 flex-col min-h-0">
@@ -550,6 +553,11 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 					<div class="p-2 text-center font-semibold text-xs" style="border-right: 1px solid var(--ov-schedule-grid-border);"></div>
 					for _, day := range weekData.WeekDays {
 						<div
+							data-calendar-day={ day.Date.Format("2006-01-02") }
+							data-start={ fmt.Sprint(day.Date.Unix()) }
+							data-end={ fmt.Sprint(day.Date.AddDate(0, 0, 1).Unix()) }
+							role="button" tabindex="0" aria-pressed="false"
+							aria-label={ "Select " + day.Date.Format("Monday January 2, 2006") }
 							class={
 								"p-2 text-center last:border-r-0",
 								templ.KV("bg-indigo-900 bg-opacity-10", day.IsToday),
@@ -592,6 +600,8 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 												aria-label={ "Scheduled task " + scheduleDisplayTitle(occurrence.Task) + " (paused)" }
 												tabindex="0"
 												data-schedule-card
+												data-occurrence-start={ fmt.Sprint(scheduleCardInterval(occurrence).StartAt) }
+												data-occurrence-end={ fmt.Sprint(scheduleCardInterval(occurrence).EndAt) }
 												data-schedule-id={ getScheduleID(occurrence.Task) }
 												data-task-id={ occurrence.Task.Task.ID }
 											data-schedule-title={ scheduleDisplayTitle(occurrence.Task) }
@@ -612,6 +622,8 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 												aria-label={ "Scheduled task " + scheduleDisplayTitle(occurrence.Task) }
 												tabindex="0"
 												data-schedule-card
+												data-occurrence-start={ fmt.Sprint(scheduleCardInterval(occurrence).StartAt) }
+												data-occurrence-end={ fmt.Sprint(scheduleCardInterval(occurrence).EndAt) }
 												data-schedule-id={ getScheduleID(occurrence.Task) }
 												data-task-id={ occurrence.Task.Task.ID }
 											data-schedule-title={ scheduleDisplayTitle(occurrence.Task) }
@@ -653,7 +665,10 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 		</div>
 		<div id="schedule-context-menu" class="ov-menu fixed z-[100] hidden w-52 max-w-[calc(100vw-2rem)]" role="menu" aria-label="Scheduled task actions" data-schedule-context-menu>
 			<ul class="ov-menu-actions menu">
-				<li><button type="button" role="menuitem" data-schedule-context-action="toggle">Pause</button></li>
+				<li><button type="button" role="menuitem" data-calendar-action="skip">Skip selected runs</button></li>
+				<li><button type="button" role="menuitem" data-calendar-action="restore">Restore selected runs</button></li>
+				<li><button type="button" role="menuitem" data-calendar-action="pause">Pause schedules until resumed</button></li>
+				<li><button type="button" role="menuitem" data-calendar-action="resume">Resume schedules</button></li>
 				<li><button type="button" role="menuitem" data-schedule-context-action="run">Run Now</button></li>
 				<li><button type="button" role="menuitem" data-schedule-context-action="edit">Edit Schedule</button></li>
 				<li><button type="button" role="menuitem" class="text-error" data-schedule-context-action="delete">Delete</button></li>
@@ -667,7 +682,7 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 			</div>
 			<div class="flex items-center gap-1.5">
 				<div class="w-3 h-3 rounded bg-base-300 opacity-50 border-l-2 border-base-content border-opacity-20"></div>
-				<span>Paused/Disabled</span>
+				<span>Paused / Skipped</span>
 			</div>
 			<div class="flex items-center gap-1.5">
 				<div class="w-3 h-3 rounded bg-indigo-900 bg-opacity-10 border border-indigo-400 border-opacity-30"></div>
@@ -893,13 +908,12 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 									event.stopPropagation();
 									closeMenu(false);
 									menuCard = card;
+									if (window.selectScheduleContextCard) window.selectScheduleContextCard(card);
 									card.focus({preventScroll: true});
 									menu.dataset.scheduleId = card.dataset.scheduleId || '';
 									menu.dataset.taskId = card.dataset.taskId || '';
 									menu.dataset.scheduleTitle = card.dataset.scheduleTitle || 'this task';
 									menu.dataset.scheduleEnabled = card.dataset.scheduleEnabled || 'true';
-									var toggle = menu.querySelector('[data-schedule-context-action="toggle"]');
-									if (toggle) toggle.textContent = menu.dataset.scheduleEnabled === 'true' ? 'Pause' : 'Resume';
 									positionMenu(event);
 									var first = menu.querySelector('[role="menuitem"]');
 									if (first) first.focus({preventScroll: true});
@@ -923,9 +937,7 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 										return;
 									}
 									closeMenu(false);
-									if (action === 'toggle' && scheduleID) {
-										htmx.ajax('POST', schedulePageMutationURL('/schedules/' + encodeURIComponent(scheduleID) + '/toggle'), {target: '#schedule-content', swap: 'outerHTML show:none'});
-									} else if (action === 'run' && taskID) {
+									if (action === 'run' && taskID) {
 										htmx.ajax('POST', schedulePageMutationURL('/tasks/' + encodeURIComponent(taskID) + '/run'), {target: '#schedule-content', swap: 'outerHTML show:none'});
 									} else if (action === 'edit' && taskID) {
 										var scheduleRoot = document.getElementById('schedule-content');
@@ -1113,6 +1125,7 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 				selectedScheduleCards.forEach(function(card) { card.classList.remove('schedule-selected'); });
 				selectedScheduleCards.clear();
 				draggedScheduleIds = [];
+				if (window.updateScheduleSelection) window.updateScheduleSelection();
 			}
 
 			function handleScheduleSelect(event) {
@@ -1122,6 +1135,7 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 					return;
 				}
 				if (event.metaKey || event.ctrlKey) {
+					if (window.clearScheduleDates) window.clearScheduleDates();
 					event.preventDefault();
 					event.stopPropagation();
 					if (selectedScheduleCards.has(card)) {
@@ -1131,6 +1145,7 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 						selectedScheduleCards.add(card);
 						card.classList.add('schedule-selected');
 					}
+					if (window.updateScheduleSelection) window.updateScheduleSelection();
 					return;
 				}
 				openTaskDialog(card.dataset.taskId);
@@ -1198,6 +1213,7 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 					var state = _schedulePointerDrag;
 					if (!state || state.started) return;
 					state.started = true;
+					if (window.clearScheduleDates) window.clearScheduleDates();
 					var card = state.card;
 					draggedScheduleId = card.dataset.scheduleId;
 					draggedTaskId = card.dataset.taskId;
@@ -1287,7 +1303,7 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 				}
 
 				function handleSchedulePointerDown(event) {
-					if (event.button !== 0 || _schedulePointerDrag) return;
+					if (event.button !== 0 || _schedulePointerDrag || document.getElementById('schedule-content').dataset.calendarBusy === 'true') return;
 					var card = event.currentTarget;
 					_schedulePointerDrag = {
 						card: card,
@@ -1655,6 +1671,7 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 				});
 			}
 		</script>
+		@ScheduleCalendarScript()
 	</div>
 }
 

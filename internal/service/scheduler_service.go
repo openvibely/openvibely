@@ -144,6 +144,23 @@ func (s *SchedulerService) checkDueTasks(ctx context.Context) {
 	}
 
 	for _, sched := range schedules {
+		if sched.NextRun != nil {
+			suppressed, until, err := s.scheduleRepo.SuppressedOccurrence(ctx, sched.ID, *sched.NextRun)
+			if err != nil {
+				applog.Infof("[scheduler] schedule exclusion lookup failed schedule=%s: %v", sched.ID, err)
+				continue
+			}
+			if suppressed {
+				from := now
+				if !until.IsZero() && until.Before(now) {
+					from = until.Add(-time.Nanosecond)
+				}
+				if _, err := s.scheduleRepo.UpdateNextRunIfCurrent(ctx, sched.ID, sched.TaskID, sched.NextRun, sched.ComputeNextRun(from)); err != nil {
+					applog.Infof("[scheduler] advancing excluded schedule=%s: %v", sched.ID, err)
+				}
+				continue
+			}
+		}
 		if err := models.ValidateScheduleRepeatInterval(sched.RepeatInterval); err != nil {
 			applog.Infof("[scheduler] skipping invalid schedule %s: %v", sched.ID, err)
 			continue

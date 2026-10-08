@@ -831,7 +831,7 @@ window.addEventListener('DOMContentLoaded', function() {
     var second = document.querySelector('[data-schedule-id="schedule-multi-b"]');
     var single = document.querySelector('[data-schedule-id="schedule-single-c"]');
     if (!first || !second || !single) fail('expected all schedule cards');
-    if (!second.textContent.includes('paused')) fail('second schedule must render as paused');
+    if (!second.textContent.includes('Paused')) fail('second schedule must render as paused');
     if (getComputedStyle(second).cursor === 'not-allowed') fail('paused schedule must expose draggable cursor');
     if (document.getElementById('selection-counter')) fail('selection counter must not render');
     var singleHeight = single.getBoundingClientRect().height;

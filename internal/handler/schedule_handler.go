@@ -376,7 +376,11 @@ func (h *Handler) renderScheduleContentForProject(c echo.Context, projectID stri
 	}
 	agents, _ := h.llmConfigRepo.ListBadgeOptions(c.Request().Context())
 	agentDefs := h.listScheduleAgentOptions(c.Request().Context(), projectID)
-	return render(c, http.StatusOK, pages.ScheduleContent(currentProject, tasks, scheduleWeekOffset(c), agents, agentDefs))
+	calendarState, err := h.scheduleRepo.CalendarState(c.Request().Context(), projectID)
+	if err != nil {
+		return err
+	}
+	return render(c, http.StatusOK, pages.ScheduleContent(currentProject, tasks, scheduleWeekOffset(c), agents, agentDefs, calendarState))
 }
 
 func scheduleToggleHTTPError(err error) error {
