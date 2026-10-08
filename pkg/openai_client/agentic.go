@@ -1943,38 +1943,190 @@ func trimCompactionInputItemsToFitContextWindow(inputItems []any, tools []ToolDe
 		return nil, llmcontracts.NewCategorizedError(llmcontracts.ErrorCompactionInputInfeasible, "OpenAI compaction preflight", fmt.Errorf("context window %d cannot reserve output and safety margin", contextWindow))
 	}
 
-	trimmed := append([]any(nil), inputItems...)
-	for estimateCompactionRequestTokens(trimmed, tools, instructions)+32 > safeInputBudget {
-		objectiveIndex := compactionObjectiveIndex(trimmed)
-		recentIndex := compactionRecentContextIndex(trimmed)
-		trimIndexes := nextCompactionTrimIndexes(trimmed, objectiveIndex, recentIndex)
-		if len(trimIndexes) > 0 {
-			trimmed = removeCompactionInputIndexes(trimmed, trimIndexes)
+	itemTokens := make([]int, len(inputItems))
+	totalTokens := compactionRequestFixedTokenOverhead(tools, instructions)
+	for i, item := range inputItems {
+		itemTokens[i] = estimateAgenticInputItemTokens(item)
+		totalTokens += itemTokens[i]
+	}
+
+	objectiveIndex := compactionObjectiveIndex(inputItems)
+	recentIndex := compactionRecentContextIndex(inputItems)
+	protected := make([]bool, len(inputItems))
+	protected[objectiveIndex] = true
+	if recentIndex >= 0 {
+		protected[recentIndex] = true
+	}
+	groups, groupByIndex := indexCompactionTrimGroups(inputItems, protected)
+	generatedCandidates, fallbackCandidates := compactionTrimCandidateOrder(inputItems, groupByIndex, protected)
+	removedGroups := make([]bool, len(groups))
+	removedItems := make([]bool, len(inputItems))
+	replacements := make(map[int]any)
+	generatedCursor, fallbackCursor := 0, 0
+	removedCount := 0
+
+	for totalTokens+32 > safeInputBudget {
+		groupIndex := nextCompactionTrimGroup(groups, removedGroups, generatedCandidates, &generatedCursor)
+		if groupIndex < 0 {
+			groupIndex = nextCompactionTrimGroup(groups, removedGroups, fallbackCandidates, &fallbackCursor)
+		}
+		if groupIndex >= 0 {
+			group := groups[groupIndex]
+			removedGroups[groupIndex] = true
+			for _, index := range group.indexes {
+				removedItems[index] = true
+				removedCount++
+				totalTokens -= itemTokens[index]
+			}
 			continue
 		}
 
 		// A protected objective or recent message can itself exceed the budget.
-		// Bound the larger protected message and retry the complete estimate.
+		// Bound the larger protected message and retry without rescanning the history.
 		candidate := objectiveIndex
-		if recentIndex >= 0 && inputItemTokenEstimate(trimmed[recentIndex]) > inputItemTokenEstimate(trimmed[candidate]) {
+		if recentIndex >= 0 && itemTokens[recentIndex] > itemTokens[candidate] {
 			candidate = recentIndex
 		}
-		item, ok := trimmed[candidate].(map[string]any)
+		item, ok := replacements[candidate].(map[string]any)
+		if !ok {
+			item, ok = inputItems[candidate].(map[string]any)
+		}
 		if !ok {
 			return nil, llmcontracts.NewCategorizedError(llmcontracts.ErrorCompactionInputInfeasible, "OpenAI compaction preflight", fmt.Errorf("protected input item cannot be bounded"))
 		}
-		overhead := estimateCompactionRequestTokens(trimmed, tools, instructions) - inputItemTokenEstimate(item) + 32
+		oldItemTokens := itemTokens[candidate]
+		overhead := totalTokens - oldItemTokens + 32
 		messageBudget := safeInputBudget - overhead - 256
 		bounded, ok := truncateRetainedMessageForOpenAIRemoteCompactionV2(item, messageBudget)
-		if !ok || inputItemTokenEstimate(bounded) >= inputItemTokenEstimate(item) {
+		if !ok {
 			return nil, llmcontracts.NewCategorizedError(llmcontracts.ErrorCompactionInputInfeasible, "OpenAI compaction preflight", fmt.Errorf("protected input item exceeds safe compaction budget %d", safeInputBudget))
 		}
-		trimmed[candidate] = bounded
+		newItemTokens := estimateAgenticInputItemTokens(bounded)
+		if newItemTokens >= oldItemTokens {
+			return nil, llmcontracts.NewCategorizedError(llmcontracts.ErrorCompactionInputInfeasible, "OpenAI compaction preflight", fmt.Errorf("protected input item exceeds safe compaction budget %d", safeInputBudget))
+		}
+		replacements[candidate] = bounded
+		itemTokens[candidate] = newItemTokens
+		totalTokens += newItemTokens - oldItemTokens
 	}
-	if estimateCompactionRequestTokens(trimmed, tools, instructions)+32 > safeInputBudget {
+
+	if totalTokens+32 > safeInputBudget {
 		return nil, llmcontracts.NewCategorizedError(llmcontracts.ErrorCompactionInputInfeasible, "OpenAI compaction preflight", fmt.Errorf("trimmed compaction request exceeds safe budget %d", safeInputBudget))
 	}
+	trimmed := make([]any, 0, len(inputItems)-removedCount)
+	for i, item := range inputItems {
+		if removedItems[i] {
+			continue
+		}
+		if replacement, ok := replacements[i]; ok {
+			item = replacement
+		}
+		trimmed = append(trimmed, item)
+	}
 	return trimmed, nil
+}
+
+type compactionTrimGroup struct {
+	indexes   []int
+	protected bool
+}
+
+func indexCompactionTrimGroups(items []any, protected []bool) ([]compactionTrimGroup, []int) {
+	groups := make([]compactionTrimGroup, 0, len(items))
+	groupByIndex := make([]int, len(items))
+	toolGroupsByCallID := make(map[string]int)
+	for i, raw := range items {
+		item, ok := raw.(map[string]any)
+		itemType := ""
+		callID := ""
+		if ok {
+			itemType = strings.ToLower(strings.TrimSpace(stringFromAny(item["type"])))
+			if isCompactionToolPairType(itemType) {
+				callID = strings.TrimSpace(stringFromAny(item["call_id"]))
+			}
+		}
+
+		groupIndex := -1
+		if callID != "" {
+			if existingGroup, exists := toolGroupsByCallID[callID]; exists {
+				groupIndex = existingGroup
+			}
+		}
+		if groupIndex < 0 {
+			groupIndex = len(groups)
+			groups = append(groups, compactionTrimGroup{})
+			if callID != "" {
+				toolGroupsByCallID[callID] = groupIndex
+			}
+		}
+		groups[groupIndex].indexes = append(groups[groupIndex].indexes, i)
+		groups[groupIndex].protected = groups[groupIndex].protected || protected[i]
+		groupByIndex[i] = groupIndex
+	}
+	return groups, groupByIndex
+}
+
+func isCompactionToolPairType(itemType string) bool {
+	switch itemType {
+	case "function_call", "function_call_output", "custom_tool_call", "custom_tool_call_output":
+		return true
+	default:
+		return false
+	}
+}
+
+func compactionTrimCandidateOrder(items []any, groupByIndex []int, protected []bool) (generated, fallback []int) {
+	groupCount := 0
+	for _, groupIndex := range groupByIndex {
+		if groupIndex+1 > groupCount {
+			groupCount = groupIndex + 1
+		}
+	}
+	seenGenerated := make([]bool, groupCount)
+	seenFallback := make([]bool, groupCount)
+	for i, raw := range items {
+		if protected[i] {
+			continue
+		}
+		groupIndex := groupByIndex[i]
+		if !seenFallback[groupIndex] {
+			seenFallback[groupIndex] = true
+			fallback = append(fallback, groupIndex)
+		}
+		item, ok := raw.(map[string]any)
+		if !ok || isCodexGeneratedInputItem(item) {
+			if !seenGenerated[groupIndex] {
+				seenGenerated[groupIndex] = true
+				generated = append(generated, groupIndex)
+			}
+		}
+	}
+	return generated, fallback
+}
+
+func nextCompactionTrimGroup(groups []compactionTrimGroup, removed []bool, candidates []int, cursor *int) int {
+	for *cursor < len(candidates) {
+		groupIndex := candidates[*cursor]
+		(*cursor)++
+		if removed[groupIndex] || groups[groupIndex].protected {
+			continue
+		}
+		return groupIndex
+	}
+	return -1
+}
+
+func compactionRequestFixedTokenOverhead(tools []ToolDefinition, instructions string) int {
+	total := 0
+	if instructions != "" {
+		total += approxOpenAITokenCount(instructions)
+	}
+	if len(tools) > 0 {
+		if encoded, err := json.Marshal(tools); err == nil {
+			total += approxOpenAITokensFromByteCount(len(encoded))
+		}
+	}
+	return total
 }
 
 func inputItemTokenEstimate(item any) int {
@@ -2156,16 +2308,7 @@ func ensureOpenAIAgenticRequestFits(inputItems []any, tools []ToolDefinition, op
 }
 
 func estimateCompactionRequestTokens(inputItems []any, tools []ToolDefinition, instructions string) int {
-	total := estimateInputItemsTokens(inputItems)
-	if instructions != "" {
-		total += approxOpenAITokenCount(instructions)
-	}
-	if len(tools) > 0 {
-		if encoded, err := json.Marshal(tools); err == nil {
-			total += approxOpenAITokensFromByteCount(len(encoded))
-		}
-	}
-	return total
+	return estimateInputItemsTokens(inputItems) + compactionRequestFixedTokenOverhead(tools, instructions)
 }
 
 func isCodexGeneratedInputItem(item map[string]any) bool {

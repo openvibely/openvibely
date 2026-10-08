@@ -1,6 +1,7 @@
 package openaiclient
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -5459,4 +5460,226 @@ func TestSendAgentic_NonGPT6DoesNotEmitConfigurationUpdate(t *testing.T) {
 			t.Fatalf("non-GPT-6 input contained configuration_update: %#v", input)
 		}
 	}
+}
+
+func BenchmarkTrimCompactionInputItemsToFitContextWindow(b *testing.B) {
+	for _, pairCount := range []int{100, 500, 1000} {
+		b.Run(fmt.Sprintf("%d-pairs", pairCount), func(b *testing.B) {
+			inputItems := make([]any, 0, 2*pairCount+2)
+			inputItems = append(inputItems, agenticInputItem{"type": "message", "role": "user", "content": "Keep this objective."})
+			for i := 0; i < pairCount; i++ {
+				callID := fmt.Sprintf("call-%04d", i)
+				inputItems = append(inputItems,
+					agenticInputItem{"type": "function_call", "call_id": callID, "name": "read_file", "arguments": strings.Repeat("a", 512)},
+					agenticInputItem{"type": "function_call_output", "call_id": callID, "output": strings.Repeat("b", 512)},
+				)
+			}
+			inputItems = append(inputItems, agenticInputItem{"type": "message", "role": "assistant", "content": "Keep this recent context."})
+			tools := []ToolDefinition{{Type: "function", Name: "read_file", Description: "Read a file", Parameters: json.RawMessage(`{"type":"object"}`)}}
+			instructions := "Preserve the task objective and latest context."
+			removedPairs := pairCount / 4
+			retained := make([]any, 0, 2+2*(pairCount-removedPairs))
+			retained = append(retained, inputItems[0])
+			retained = append(retained, inputItems[1+2*removedPairs:len(inputItems)-1]...)
+			retained = append(retained, inputItems[len(inputItems)-1])
+			targetBudget := estimateCompactionRequestTokens(retained, tools, instructions) + 32
+			contextWindow := contextWindowForSafeInputBudget(targetBudget)
+			itemCount := len(inputItems)
+			// These baseline counts model the former full estimate, call-ID scan, and shrinking copy on every removal.
+			baselineEstimatorVisits := (removedPairs+1)*itemCount - removedPairs*(removedPairs+1) + itemCount - 2*removedPairs
+			baselineCallIDVisits := removedPairs*itemCount - removedPairs*(removedPairs-1)
+			baselineCopiedItems := itemCount + removedPairs*itemCount - removedPairs*(removedPairs+1)
+			wantItems := 2*(pairCount-removedPairs) + 2
+
+			run := func(name string, operation func() ([]any, error), indexed bool) {
+				b.Run(name, func(b *testing.B) {
+					trimmed, err := operation()
+					if err != nil {
+						b.Fatalf("fixture trim: %v", err)
+					}
+					if len(trimmed) != wantItems {
+						b.Fatalf("fixture retained %d items, want %d after removing %d pairs", len(trimmed), wantItems, removedPairs)
+					}
+					b.ReportAllocs()
+					b.ResetTimer()
+					for i := 0; i < b.N; i++ {
+						if _, err := operation(); err != nil {
+							b.Fatal(err)
+						}
+					}
+					b.StopTimer()
+					if indexed {
+						b.ReportMetric(float64(itemCount), "item-estimator-visits/op")
+						b.ReportMetric(float64(2*pairCount), "call-id-candidate-visits/op")
+						b.ReportMetric(float64(wantItems), "copied-items/op")
+					} else {
+						b.ReportMetric(float64(baselineEstimatorVisits), "item-estimator-visits/op")
+						b.ReportMetric(float64(baselineCallIDVisits), "call-id-candidate-visits/op")
+						b.ReportMetric(float64(baselineCopiedItems), "copied-items/op")
+					}
+				})
+			}
+			run("iterative-reference", func() ([]any, error) {
+				return iterativeReferenceTrimCompactionInputItems(inputItems, tools, instructions, "unknown-model", contextWindow)
+			}, false)
+			run("indexed", func() ([]any, error) {
+				return trimCompactionInputItemsToFitContextWindow(inputItems, tools, instructions, "unknown-model", contextWindow)
+			}, true)
+		})
+	}
+}
+
+func safeCompactionInputBudget(contextWindow int) int {
+	return contextWindow - 16384 - max(1024, contextWindow/50)
+}
+
+func TestTrimCompactionInputItemsToFitContextWindow_MatchesIterativeReference(t *testing.T) {
+	tools := []ToolDefinition{{Type: "function", Name: "read_file", Description: "Read a file", Parameters: json.RawMessage(`{"type":"object"}`)}}
+	instructions := "Keep objective and recent context."
+	mixedInput := []any{
+		agenticInputItem{"type": "message", "role": "user", "content": "Task objective."},
+		agenticInputItem{"type": "function_call", "call_id": "mixed", "name": "read_file", "arguments": strings.Repeat("a", 1600)},
+		agenticInputItem{"type": "custom_tool_call_output", "call_id": "mixed", "output": strings.Repeat("b", 1600)},
+		agenticInputItem{"type": "tool_search_call", "call_id": "mixed", "query": strings.Repeat("c", 1600)},
+		agenticInputItem{"type": "function_call", "call_id": "", "name": "bash", "arguments": strings.Repeat("d", 1600)},
+		agenticInputItem{"type": "function_call_output", "call_id": "orphan", "output": strings.Repeat("e", 1600)},
+		"unstructured fallback item",
+		agenticInputItem{"type": "message", "role": "developer", "content": strings.Repeat("f", 800)},
+		agenticInputItem{"type": "message", "role": "assistant", "content": "Recent context."},
+	}
+	oversizedProtectedInput := []any{
+		agenticInputItem{"type": "message", "role": "user", "content": strings.Repeat("objective ", 3000)},
+	}
+
+	cases := []struct {
+		name  string
+		items []any
+	}{
+		{name: "mixed call ids and non-map fallback", items: mixedInput},
+		{name: "oversized protected objective", items: oversizedProtectedInput},
+	}
+	for _, tc := range cases {
+		for _, contextWindow := range []int{17000, 18000, 20000, 24000, 40000, 200000} {
+			t.Run(fmt.Sprintf("%s/window-%d", tc.name, contextWindow), func(t *testing.T) {
+				want, wantErr := iterativeReferenceTrimCompactionInputItems(tc.items, tools, instructions, "unknown-model", contextWindow)
+				got, gotErr := trimCompactionInputItemsToFitContextWindow(tc.items, tools, instructions, "unknown-model", contextWindow)
+				if (wantErr == nil) != (gotErr == nil) {
+					t.Fatalf("error = %v, reference error = %v", gotErr, wantErr)
+				}
+				if wantErr != nil {
+					if fmt.Sprint(gotErr) != fmt.Sprint(wantErr) || llmcontracts.ErrorCategoryOf(gotErr) != llmcontracts.ErrorCategoryOf(wantErr) {
+						t.Fatalf("error = %v (%s), reference error = %v (%s)", gotErr, llmcontracts.ErrorCategoryOf(gotErr), wantErr, llmcontracts.ErrorCategoryOf(wantErr))
+					}
+					return
+				}
+				gotJSON, err := json.Marshal(got)
+				if err != nil {
+					t.Fatalf("marshal optimized result: %v", err)
+				}
+				wantJSON, err := json.Marshal(want)
+				if err != nil {
+					t.Fatalf("marshal reference result: %v", err)
+				}
+				if !bytes.Equal(gotJSON, wantJSON) {
+					t.Fatalf("trimmed input differs from reference\n got: %s\nwant: %s", gotJSON, wantJSON)
+				}
+			})
+		}
+	}
+}
+
+func iterativeReferenceTrimCompactionInputItems(items []any, tools []ToolDefinition, instructions, model string, contextWindow int) ([]any, error) {
+	if contextWindow <= 0 {
+		contextWindow, _ = openAIModelContextWindow(model)
+	}
+	if contextWindow <= 0 {
+		contextWindow = DefaultCompactionThreshold
+	}
+	if len(items) == 0 {
+		return append([]any(nil), items...), nil
+	}
+	safeInputBudget := contextWindow - 16384 - max(1024, contextWindow/50)
+	if safeInputBudget <= 0 {
+		return nil, llmcontracts.NewCategorizedError(llmcontracts.ErrorCompactionInputInfeasible, "OpenAI compaction preflight", fmt.Errorf("context window %d cannot reserve output and safety margin", contextWindow))
+	}
+	trimmed := append([]any(nil), items...)
+	for estimateCompactionRequestTokens(trimmed, tools, instructions)+32 > safeInputBudget {
+		objectiveIndex := compactionObjectiveIndex(trimmed)
+		recentIndex := compactionRecentContextIndex(trimmed)
+		trimIndexes := nextCompactionTrimIndexes(trimmed, objectiveIndex, recentIndex)
+		if len(trimIndexes) > 0 {
+			trimmed = removeCompactionInputIndexes(trimmed, trimIndexes)
+			continue
+		}
+		candidate := objectiveIndex
+		if recentIndex >= 0 && inputItemTokenEstimate(trimmed[recentIndex]) > inputItemTokenEstimate(trimmed[candidate]) {
+			candidate = recentIndex
+		}
+		item, ok := trimmed[candidate].(map[string]any)
+		if !ok {
+			return nil, llmcontracts.NewCategorizedError(llmcontracts.ErrorCompactionInputInfeasible, "OpenAI compaction preflight", fmt.Errorf("protected input item cannot be bounded"))
+		}
+		overhead := estimateCompactionRequestTokens(trimmed, tools, instructions) - inputItemTokenEstimate(item) + 32
+		messageBudget := safeInputBudget - overhead - 256
+		bounded, ok := truncateRetainedMessageForOpenAIRemoteCompactionV2(item, messageBudget)
+		if !ok || inputItemTokenEstimate(bounded) >= inputItemTokenEstimate(item) {
+			return nil, llmcontracts.NewCategorizedError(llmcontracts.ErrorCompactionInputInfeasible, "OpenAI compaction preflight", fmt.Errorf("protected input item exceeds safe compaction budget %d", safeInputBudget))
+		}
+		trimmed[candidate] = bounded
+	}
+	if estimateCompactionRequestTokens(trimmed, tools, instructions)+32 > safeInputBudget {
+		return nil, llmcontracts.NewCategorizedError(llmcontracts.ErrorCompactionInputInfeasible, "OpenAI compaction preflight", fmt.Errorf("trimmed compaction request exceeds safe budget %d", safeInputBudget))
+	}
+	return trimmed, nil
+}
+
+func TestTrimCompactionInputItemsToFitContextWindow_ExactRequestBudgetBoundary(t *testing.T) {
+	input := []any{
+		agenticInputItem{"type": "message", "role": "user", "content": "Keep the objective."},
+		agenticInputItem{"type": "function_call", "call_id": "budget-pair", "name": "read_file", "arguments": strings.Repeat("a", 6000)},
+		agenticInputItem{"type": "function_call_output", "call_id": "budget-pair", "output": strings.Repeat("b", 6000)},
+		agenticInputItem{"type": "message", "role": "assistant", "content": "Keep recent context."},
+	}
+	tools := []ToolDefinition{{Type: "function", Name: "read_file", Description: "Read a file", Parameters: json.RawMessage(`{"type":"object"}`)}}
+	instructions := "Compaction instructions count toward the request budget."
+	exactBudget := estimateCompactionRequestTokens(input, tools, instructions) + 32
+	exactWindow := contextWindowForSafeInputBudget(exactBudget)
+	if safeCompactionInputBudget(exactWindow) != exactBudget {
+		t.Fatalf("safe budget at context window %d = %d, want %d", exactWindow, safeCompactionInputBudget(exactWindow), exactBudget)
+	}
+
+	for _, tc := range []struct {
+		name          string
+		budgetDelta   int
+		wantItemCount int
+	}{
+		{name: "one token above", budgetDelta: 1, wantItemCount: len(input)},
+		{name: "exact limit", budgetDelta: 0, wantItemCount: len(input)},
+		{name: "one token below", budgetDelta: -1, wantItemCount: 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			window := contextWindowForSafeInputBudget(exactBudget + tc.budgetDelta)
+			got, err := trimCompactionInputItemsToFitContextWindow(input, tools, instructions, "unknown-model", window)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(got) != tc.wantItemCount {
+				t.Fatalf("retained items = %d, want %d", len(got), tc.wantItemCount)
+			}
+		})
+	}
+}
+
+func contextWindowForSafeInputBudget(target int) int {
+	low := 1
+	high := max(target*2+50000, 50000)
+	for low < high {
+		middle := low + (high-low)/2
+		if safeCompactionInputBudget(middle) >= target {
+			high = middle
+		} else {
+			low = middle + 1
+		}
+	}
+	return low
 }
