@@ -1353,11 +1353,9 @@ func (s *EmailService) processIncomingMessageWithNormalizedSelfAddress(ctx conte
 				}
 				return alreadyHandedOff, err
 			},
-			RuntimeTools:    s.buildEmailActionToolRuntime(projectID, msg.FromAddress),
-			LinkAttachments: s.linkAttachmentsToExecution,
-			AttachmentContextAndImages: func(atts []models.ChatAttachment) (string, []models.Attachment) {
-				return channelChatAttachmentContextAndImages(atts, channelChatMaxInlineTextAttachmentSize)
-			},
+			RuntimeTools:               s.buildEmailActionToolRuntime(projectID, msg.FromAddress),
+			LinkAttachments:            s.linkAttachmentsToExecution,
+			AttachmentContextAndImages: emailAttachmentContextAndImages,
 			CreateTaskContext: func(ctx context.Context, taskID string) error {
 				if s.emailTaskContextRepo == nil {
 					return nil
@@ -1432,8 +1430,12 @@ func (s *EmailService) stageEmailAttachments(parts []EmailInboundAttachment) (st
 		applog.Infof("[email] staged attachment file=%s size=%d mime=%s", fileName, len(part.Data), mediaType)
 	}
 	cleanup = false
-	attachmentContext, imageAttachments := channelChatAttachmentContextAndImages(chatAttachments, channelChatMaxInlineTextAttachmentSize)
+	attachmentContext, imageAttachments := emailAttachmentContextAndImages(chatAttachments)
 	return attachmentContext, imageAttachments, chatAttachments, nil
+}
+
+func emailAttachmentContextAndImages(chatAttachments []models.ChatAttachment) (string, []models.Attachment) {
+	return channelChatAttachmentContextAndImages(chatAttachments, channelChatMaxInlineTextAttachmentSize)
 }
 
 func (s *EmailService) saveChatAttachmentsToPendingSession(attachments []models.ChatAttachment) (string, error) {
