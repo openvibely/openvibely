@@ -5115,6 +5115,28 @@ templ ChatAutoScrollScript() {
 						}
 						return true;
 					}
+                    function collectCompactionMatches() {
+                        var pattern = /^[\t ]*\[Compaction (started|done|failed)(?: \| (\d+))?\][\t ]*(?=\r?$)/gm;
+                        var pending = null;
+                        var activity;
+                        while ((activity = pattern.exec(textBuffer)) !== null) {
+                            var end = activity.index + activity[0].length;
+                            if (window.isInsideCodeRanges && window.isInsideCodeRanges(codeRanges, activity.index, end)) continue;
+                            if (transcriptToolRanges.some(function(range) { return activity.index >= range.start && activity.index < range.end; })) continue;
+                            if (allMatches.some(function(item) { return item.type === 'thinking' && activity.index >= item.index && activity.index < item.index + item.length; })) continue;
+                            var item = {type: 'compaction', index: activity.index, length: activity[0].length, state: activity[1], duration: Number(activity[2] || 0)};
+                            if (item.state === 'started') {
+                                pending = item;
+                            } else if (pending) {
+                                pending.state = item.state;
+                                pending.duration = item.duration;
+                                item.type = 'compaction_end';
+                                pending = null;
+                            }
+                            allMatches.push(item);
+                        }
+                        return true;
+                    }
 					function buildSegments() {
 						allMatches.sort(function(a, b) { return a.index - b.index; });
 					var lastIndex = 0;
@@ -5211,6 +5233,7 @@ templ ChatAutoScrollScript() {
 					collectToolUsingMatches,
 					collectToolResultBlockMatches,
 						collectLegacyToolResultMatches,
+                        collectCompactionMatches,
 						buildSegments,
 						linkToolResults,
 						prepareLargeMarkdownSegments
@@ -5611,7 +5634,7 @@ templ ChatAutoScrollScript() {
 					pendingText += seg.content;
 					return;
 				}
-				if (seg.type === 'tool_result') return;
+				if (seg.type === 'tool_result' || seg.type === 'compaction_end') return;
 
 				if (seg.type === 'thinking') {
 					var c = seg.content.trim();
@@ -5630,6 +5653,34 @@ templ ChatAutoScrollScript() {
 				// Non-thinking, non-text segment — flush accumulated thinking and text
 				flushThinking();
 				flushText();
+
+                if (seg.type === 'compaction') {
+                    var pair = container.closest('[data-exec-status]');
+                    if (seg.state === 'started' && pair && /^(completed|failed|cancelled)$/.test(pair.getAttribute('data-exec-status'))) seg.state = 'interrupted';
+                    var activity = document.createElement('div');
+                    activity.className = 'stream-tool';
+                    activity.setAttribute('data-compaction-state', seg.state);
+                    activity.setAttribute('role', 'status');
+                    var summary = document.createElement('div');
+                    summary.className = 'stream-tool-summary';
+                    if (seg.state === 'started') {
+                        var spinner = document.createElement('span');
+                        spinner.className = 'loading loading-spinner tool-spinner';
+                        summary.appendChild(spinner);
+                    } else {
+                        var icon = document.createElement('template');
+                        icon.innerHTML = seg.state !== 'done' ? errorSvg : checkSvg;
+                        summary.appendChild(icon.content.cloneNode(true));
+                    }
+                    var label = document.createElement('span');
+                    label.className = 'tool-name-text';
+                    label.textContent = seg.state === 'interrupted' ? 'Compaction interrupted' : seg.state === 'started' ? 'Compacting context…' :
+                        (seg.state === 'done' ? 'Context compacted' : 'Compaction failed') + ' · ' + (seg.duration / 1000).toFixed(1) + 's';
+                    summary.appendChild(label);
+                    activity.appendChild(summary);
+                    renderFragment.appendChild(activity);
+                    return;
+                }
 
 				if (seg.type === 'using') {
 					var wrap = document.createElement('div');
@@ -5942,6 +5993,7 @@ templ ChatAutoScrollScript() {
 				if (!text) return text;
 				text = window.normalizeTranscriptMarkers(text);
 				if (!statusAlreadyScoped) text = window.stripFinalStatusControl(text);
+				text = window.stripOutsideCode(text, /^[\t ]*\[Compaction (?:started|done|failed)(?: \| \d+)?\][\t ]*$/gm);
 				text = window.stripOutsideCode(text, /\[Using tool:\s*[^\]]+\]/g);
 				text = text.replace(/<\/?\s*proposed_plan\s*>/gi, '');
 				text = window.stripOutsideCode(text, /\[Tool\s+\S+\s+(?:done|error)\](?:\r\n|\r|\n)?[\s\S]*?(?:\r\n|\r|\n)?\[\/Tool\](?:\r\n|\r|\n)?/g);
@@ -6108,7 +6160,7 @@ templ ChatAutoScrollScript() {
 					var text = div.textContent || '';
 					if (div.dataset.cleanedText === text || div.dataset.renderingText === text) return;
 					// Check if content has streaming markers that need rendering
-					if (text.indexOf('[Thinking]') >= 0 || text.indexOf('[Using tool:') >= 0) {
+					if (text.indexOf('[Thinking]') >= 0 || text.indexOf('[Using tool:') >= 0 || text.indexOf('[Compaction ') >= 0) {
 						// Render streaming markers into styled DOM elements
 						if (window.scheduleChatContentRender) {
 							div.dataset.renderingText = text;
@@ -6196,6 +6248,7 @@ func IsImageMediaType(mediaType string) bool {
 
 // Regex patterns for cleaning transcript control artifacts from display content.
 var (
+	reCompaction = regexp.MustCompile(`(?m)^[\t ]*\[Compaction (?:started|done|failed)(?: \| \d+)?\][\t ]*$`)
 	reUsingTool    = regexp.MustCompile(`\[Using tool:\s*[^\]]+\]`)
 	reProposedPlan = regexp.MustCompile(`(?i)</?\s*proposed_plan\s*>`)
 	reToolBlock    = regexp.MustCompile(`(?s)\[Tool\s+\S+\s+(?:done|error)\](?:\r\n|\r|\n)?[\s\S]*?(?:\r\n|\r|\n)?\[/Tool\](?:\r\n|\r|\n)?`)
@@ -6217,6 +6270,7 @@ func CleanDisplayContent(text string) string {
 	}
 	text = NormalizeDisplayMarkers(text)
 	text = llmoutput.StripFinalStatusControl(text)
+	text = llmoutput.ReplaceOutsideMarkdownCode(text, reCompaction, "")
 	text = llmoutput.ReplaceOutsideMarkdownCode(text, reUsingTool, "")
 	text = reProposedPlan.ReplaceAllString(text, "")
 	text = llmoutput.ReplaceOutsideMarkdownCode(text, reToolBlock, "")

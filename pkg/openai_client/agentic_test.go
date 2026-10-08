@@ -2652,6 +2652,7 @@ func TestSendAgentic_OAuthUsesCorrectEndpoint(t *testing.T) {
 func TestSendAgentic_AutoCompactionBeforeFirstTurn_APIKey(t *testing.T) {
 	requests := 0
 	var compactionCallback string
+	var progress []llmcontracts.CompactionProgress
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests++
@@ -2729,6 +2730,7 @@ func TestSendAgentic_AutoCompactionBeforeFirstTurn_APIKey(t *testing.T) {
 		DisableTools:             true,
 		AutoCompaction:           true,
 		CompactionTokenThreshold: 1,
+		OnCompactionProgress:     func(event llmcontracts.CompactionProgress) { progress = append(progress, event) },
 		OnCompaction: func(summary string) {
 			compactionCallback = summary
 		},
@@ -2737,6 +2739,9 @@ func TestSendAgentic_AutoCompactionBeforeFirstTurn_APIKey(t *testing.T) {
 		t.Fatalf("SendAgentic: %v", err)
 	}
 
+	if len(progress) != 2 || progress[0].State != "started" || progress[1].State != "done" {
+		t.Fatalf("compaction progress = %#v", progress)
+	}
 	if requests != 2 {
 		t.Fatalf("requests = %d, want 2", requests)
 	}
