@@ -3646,6 +3646,12 @@ func (h *Handler) GetTaskThread(c echo.Context) error {
 	}
 
 	renderTask := h.taskThreadRenderTaskWithEffectiveAgent(ctx, task, agents)
+	pickerDefaultAgentID := ""
+	if h.projectRepo != nil {
+		if id, err := h.projectRepo.GetDefaultAgentConfigID(ctx, task.ProjectID); err == nil && id != nil {
+			pickerDefaultAgentID = *id
+		}
+	}
 	if isPoll {
 		renderTask = taskThreadPollRenderTaskWithExecutionPrompt(renderTask, executions, hasEarlier)
 		preservedExecIDs := make(map[string]bool)
@@ -3658,9 +3664,9 @@ func (h *Handler) GetTaskThread(c echo.Context) error {
 				preservedExecIDs[id] = true
 			}
 		}
-		return render(c, http.StatusOK, components.TaskThreadPollView(renderTask, executions, agents, agentDef, chatAttachmentsByExec, pendingInputs, hasEarlier, limit, preservedExecIDs))
+		return render(c, http.StatusOK, components.TaskThreadPollView(renderTask, executions, agents, agentDef, chatAttachmentsByExec, pendingInputs, hasEarlier, limit, preservedExecIDs, pickerDefaultAgentID))
 	}
-	thread := components.TaskThreadView(renderTask, executions, agents, agentDef, chatAttachmentsByExec, pendingInputs, hasEarlier, limit)
+	thread := components.TaskThreadView(renderTask, executions, agents, agentDef, chatAttachmentsByExec, pendingInputs, hasEarlier, limit, pickerDefaultAgentID)
 	if c.Get("newTaskThread") == true {
 		data, err := h.loadTaskDetailContentData(ctx, taskID)
 		if err != nil {

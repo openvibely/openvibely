@@ -37,7 +37,13 @@ func (h *Handler) TaskThreadModelEffort(c echo.Context) error {
 	if task == nil {
 		return echo.NewHTTPError(http.StatusNotFound, "task not found")
 	}
-	agent, err := h.llmConfigRepo.GetByID(c.Request().Context(), c.QueryParam("agent_id"))
+	agentID := c.QueryParam("agent_id")
+	var agent *models.LLMConfig
+	if agentID == "default" {
+		agent, err = h.selectTaskAgent(c.Request().Context(), task.ProjectID, agentID, "", false)
+	} else {
+		agent, err = h.llmConfigRepo.GetByID(c.Request().Context(), agentID)
+	}
 	if err != nil {
 		return err
 	}

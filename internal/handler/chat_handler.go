@@ -31,6 +31,13 @@ const (
 	chatUIWindowLimitMax     = 100
 )
 
+func optionalString(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
+}
+
 func (h *Handler) Chat(c echo.Context) error {
 	isHTMX := isHTMX(c)
 	applog.Debugf("[handler] Chat requested htmx=%v", isHTMX)
@@ -69,14 +76,18 @@ func (h *Handler) Chat(c echo.Context) error {
 	if beforeExecID != "" {
 		return render(c, http.StatusOK, pages.ChatEarlierMessages(chatHistory, chatAttachmentsByExec, currentProjectID, hasEarlier, limit))
 	}
+	defaultAgentID, err := h.projectRepo.GetDefaultAgentConfigID(c.Request().Context(), currentProjectID)
+	if err != nil {
+		return err
+	}
 
 	// For HTMX requests, return just the chat content
 	if isHTMX {
-		return render(c, http.StatusOK, pages.ChatContent(agents, chatHistory, currentProjectID, chatAttachmentsByExec, pendingInputs, latestPlanComplete, hasEarlier, limit))
+		return render(c, http.StatusOK, pages.ChatContent(agents, chatHistory, currentProjectID, chatAttachmentsByExec, pendingInputs, latestPlanComplete, hasEarlier, limit, optionalString(defaultAgentID)))
 	}
 
 	projects, _ := h.projectSvc.ListSelectorOptions(c.Request().Context())
-	return render(c, http.StatusOK, pages.Chat(projects, currentProjectID, agents, chatHistory, chatAttachmentsByExec, pendingInputs, latestPlanComplete, hasEarlier, limit))
+	return render(c, http.StatusOK, pages.Chat(projects, currentProjectID, agents, chatHistory, chatAttachmentsByExec, pendingInputs, latestPlanComplete, hasEarlier, limit, optionalString(defaultAgentID)))
 }
 
 func parseThreadWindowLimit(raw string, defaultLimit, maxLimit int) int {
@@ -158,8 +169,15 @@ func (h *Handler) ChatSend(c echo.Context) error {
 	sessionID := c.FormValue("attachment_session_id")
 	hasImages := hasPendingImages(sessionID)
 
-	// Select agent (auto or explicit)
-	agent, err := h.selectAgent(c.Request().Context(), agentID, message, hasImages)
+	// Resolve the chat's project before interpreting the Default model choice.
+	projectID, err := h.getCurrentProjectID(c)
+	if err != nil || projectID == "" {
+		applog.Infof("[handler] ChatSend error getting project: %v", err)
+		return echo.NewHTTPError(http.StatusInternalServerError, "no project available")
+	}
+
+	// Select agent (auto, project default, or explicit).
+	agent, err := h.selectTaskAgent(c.Request().Context(), projectID, agentID, message, hasImages)
 	if err != nil {
 		applog.Infof("[handler] ChatSend agent selection error: %v", err)
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
@@ -167,13 +185,6 @@ func (h *Handler) ChatSend(c echo.Context) error {
 
 	if err := h.applyConversationEffort(c, "", agent); err != nil {
 		return err
-	}
-
-	// Get project from query param or use default
-	projectID, err := h.getCurrentProjectID(c)
-	if err != nil || projectID == "" {
-		applog.Infof("[handler] ChatSend error getting project: %v", err)
-		return echo.NewHTTPError(http.StatusInternalServerError, "no project available")
 	}
 
 	// Note: Interactive chat intentionally bypasses task worker capacity checks.
@@ -755,7 +766,11 @@ func (h *Handler) ClearChat(c echo.Context) error {
 	}
 
 	// Return empty chat content
-	return render(c, http.StatusOK, pages.ChatContent(agents, []models.Execution{}, projectID, make(map[string][]models.ChatAttachment), []models.ThreadInput{}, false, false, chatUIWindowLimitDefault))
+	defaultAgentID, err := h.projectRepo.GetDefaultAgentConfigID(c.Request().Context(), projectID)
+	if err != nil {
+		return err
+	}
+	return render(c, http.StatusOK, pages.ChatContent(agents, []models.Execution{}, projectID, make(map[string][]models.ChatAttachment), []models.ThreadInput{}, false, false, chatUIWindowLimitDefault, optionalString(defaultAgentID)))
 }
 
 // chatHistoryHasPlanCompletion checks if the latest completed assistant response

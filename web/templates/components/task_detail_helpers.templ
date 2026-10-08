@@ -319,20 +319,20 @@ templ TaskThreadEarlierMessages(task *models.Task, executions []models.Execution
 	@ChatMessages(executions, task, chatAttachments, "task-thread-messages", "task-thread-view", hasEarlier, task.ProjectID)
 }
 
-templ TaskThreadView(task *models.Task, executions []models.Execution, agents []models.LLMConfig, agentDef *models.Agent, chatAttachments map[string][]models.ChatAttachment, pendingInputs []models.ThreadInput, hasEarlier bool, windowLimit int) {
-	@taskThreadView(task, executions, agents, agentDef, chatAttachments, pendingInputs, hasEarlier, windowLimit, nil)
+templ TaskThreadView(task *models.Task, executions []models.Execution, agents []models.LLMConfig, agentDef *models.Agent, chatAttachments map[string][]models.ChatAttachment, pendingInputs []models.ThreadInput, hasEarlier bool, windowLimit int, defaultAgentID ...string) {
+	@taskThreadView(task, executions, agents, agentDef, chatAttachments, pendingInputs, hasEarlier, windowLimit, nil, firstString(defaultAgentID))
 }
 
 // TaskThreadPollView omits terminal transcript bodies the browser reports as
 // already preserved, keeping the recurring polling response small.
-templ TaskThreadPollView(task *models.Task, executions []models.Execution, agents []models.LLMConfig, agentDef *models.Agent, chatAttachments map[string][]models.ChatAttachment, pendingInputs []models.ThreadInput, hasEarlier bool, windowLimit int, preservedExecIDs map[string]bool) {
-	@taskThreadView(task, executions, agents, agentDef, chatAttachments, pendingInputs, hasEarlier, windowLimit, preservedExecIDs)
+templ TaskThreadPollView(task *models.Task, executions []models.Execution, agents []models.LLMConfig, agentDef *models.Agent, chatAttachments map[string][]models.ChatAttachment, pendingInputs []models.ThreadInput, hasEarlier bool, windowLimit int, preservedExecIDs map[string]bool, defaultAgentID ...string) {
+	@taskThreadView(task, executions, agents, agentDef, chatAttachments, pendingInputs, hasEarlier, windowLimit, preservedExecIDs, firstString(defaultAgentID))
 }
 
 // taskThreadView renders the unified thread interface for a task.
 // Uses shared chat components for message bubbles and input form.
 // chatAttachments map is optional - when nil, no attachment indicators are shown on messages.
-templ taskThreadView(task *models.Task, executions []models.Execution, agents []models.LLMConfig, agentDef *models.Agent, chatAttachments map[string][]models.ChatAttachment, pendingInputs []models.ThreadInput, hasEarlier bool, windowLimit int, preservedExecIDs map[string]bool) {
+templ taskThreadView(task *models.Task, executions []models.Execution, agents []models.LLMConfig, agentDef *models.Agent, chatAttachments map[string][]models.ChatAttachment, pendingInputs []models.ThreadInput, hasEarlier bool, windowLimit int, preservedExecIDs map[string]bool, defaultAgentID string) {
 	<div
 		id="task-thread-view"
 		class="flex flex-col flex-1 min-h-0 min-w-0 max-w-full"
@@ -396,6 +396,7 @@ templ taskThreadView(task *models.Task, executions []models.Execution, agents []
 			StopEndpoint:           SwarmParentStopEndpoint(task, fmt.Sprintf("/tasks/%s/cancel?composer_stop=1", task.ID)),
 			SteerEndpoint:          fmt.Sprintf("/tasks/%s/thread/steer", task.ID),
 			SelectedAgentID:        derefString(task.AgentID),
+			DefaultAgentID:         defaultAgentID,
 			PendingInputs:          pendingInputs,
 			QueuedSteerEndpointFor: taskQueuedSteerEndpoint,
 		})
@@ -1525,4 +1526,11 @@ templ taskExecutionHistoryCard(task *models.Task, exec models.Execution, index i
 			}
 		</div>
 	</div>
+}
+
+func firstString(values []string) string {
+	if len(values) == 0 {
+		return ""
+	}
+	return values[0]
 }

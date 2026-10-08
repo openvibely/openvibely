@@ -54,9 +54,10 @@
   document.body.append(panel, sub);
   let active = null,
     provider = null,
+    subCloseTimer = null,
     favorites = read(favoritesKey);
   function options(btn) {
-    return [...btn.parentElement.querySelectorAll("li[data-value]")].map(
+    const all = [...btn.parentElement.querySelectorAll("li[data-value]")].map(
       (li) => ({
         id: li.dataset.value,
         name: li.dataset.pickerName || li.textContent.trim(),
@@ -64,14 +65,23 @@
         provider: li.dataset.pickerProvider || "",
         levels: (li.dataset.pickerEfforts || "").split(",").filter(Boolean),
         defaultEffort: li.dataset.pickerDefault || "",
+        effectiveID: li.dataset.pickerEffectiveId || "",
       }),
     );
+    const fallback = all.find((m) => m.id === "default");
+    const resolved = all.find((m) => m.id === fallback?.effectiveID);
+    if (resolved) {
+      fallback.model = resolved.model;
+      fallback.levels = resolved.levels;
+      fallback.defaultEffort = resolved.defaultEffort;
+    }
+    return all;
   }
   function state(btn) {
     return btn._ovModelState;
   }
   function key(m) {
-    return m.id + ":" + m.model;
+    return (m.effectiveID || m.id) + ":" + m.model;
   }
   function current(btn) {
     return options(btn).find((m) => m.id === btn.dataset.currentValue);
@@ -147,7 +157,7 @@
     const s = state(btn),
       m = current(btn),
       endpoint = taskEndpoint(btn);
-    if (!endpoint || !m || !m.provider) return;
+    if (!endpoint || !m || (!m.provider && !m.effectiveID)) return;
     const token = ++s.loadToken;
     s.loading = true;
     sync(btn);
@@ -182,7 +192,12 @@
       }
     }
   }
+  function cancelSubClose() {
+    if (subCloseTimer !== null) clearTimeout(subCloseTimer);
+    subCloseTimer = null;
+  }
   function closeSub() {
+    cancelSubClose();
     provider = null;
     sub.hidden = true;
     list
@@ -293,6 +308,7 @@
       const matches = all.filter((m) =>
         (m.name + " " + m.provider + " " + m.model).toLowerCase().includes(q),
       );
+      matches.sort((a, b) => Number(!a.provider) - Number(!b.provider));
       matches.forEach((m) => row(m, list));
       if (!matches.length)
         list.append(el("div", "ov-mp-empty", "No matching models"));
@@ -333,6 +349,7 @@
     list.scrollTop = scroll;
   }
   function openProvider(p) {
+    cancelSubClose();
     if (provider === p && !sub.hidden) return;
     provider = p;
     list.querySelectorAll(".ov-mp-provider").forEach((b) => {
@@ -559,12 +576,14 @@
       list
         .querySelectorAll("[data-picker-active]")
         .forEach((row) => row.removeAttribute("data-picker-active"));
-    if (
-      provider &&
-      e.target.closest(".ov-mp-row,.ov-mp-search,.ov-mp-effort")
-    )
+    if (!provider) return;
+    if (e.target.closest(".ov-mp-provider")) cancelSubClose();
+    else if (e.target.closest(".ov-mp-row,.ov-mp-search,.ov-mp-effort"))
       closeSub();
+    else if (subCloseTimer === null)
+      subCloseTimer = setTimeout(closeSub, 350);
   };
+  sub.onpointerenter = cancelSubClose;
   search.oninput = () => {
     closeSub();
     list.scrollTop = 0;
