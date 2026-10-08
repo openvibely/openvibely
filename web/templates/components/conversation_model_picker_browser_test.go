@@ -291,7 +291,9 @@ func TestBrowserFunctional_TaskModelPickerPersistence(t *testing.T) {
  await wait(150);
  assert(loadingSend?.get('agent_id')==='a'&&loadingSend?.get('reasoning_effort')==='medium','send uses loaded effort even when model changes during lookup');
  assert(modelInput.value==='b'&&effort.value==='high','lookup does not undo later model selection');
+ search.value='';search.dispatchEvent(new Event('input'));
  const defaultRow=panel.querySelector('.ov-mp-pick[data-model=default]');
+ assert(defaultRow,'clearing search restores the default option');
  assert(defaultRow.querySelector('.ov-mp-name').textContent==='Default'&&defaultRow.querySelector('.ov-mp-detail').textContent==='OpenAI · gpt-5.5','project default uses provider and model subtext');
  defaultRow.click();await trigger._ovModelState.ready;
  assert(modelInput.value==='default'&&effort.value==='high'&&!panel.querySelector('.ov-mp-effort').hidden,'default keeps its selection and loads project model effort');
