@@ -99,19 +99,31 @@ templ ScheduleCalendarScript() {
    return selectedCards().map(interval);
   }
   function intersects(a, b) { return a.start_at < b.end_at && b.start_at < a.end_at; }
-  function skipped(card) {
+  function skipStatus(card) {
    var run = interval(card);
-   if (skips.some(function(skip) { return skip.restored && skip.schedule_id === run.schedule_id && skip.start_at <= run.start_at && skip.end_at >= run.end_at; })) return false;
-   return skips.some(function(skip) { return !skip.restored && (!skip.schedule_id || skip.schedule_id === run.schedule_id) && intersects(skip, run); });
+   var relevant = skips.filter(function(skip) { return (!skip.schedule_id || skip.schedule_id === run.schedule_id) && intersects(skip, run); });
+   var boundaries = [run.start_at, run.end_at];
+   relevant.forEach(function(skip) { boundaries.push(Math.max(run.start_at, skip.start_at), Math.min(run.end_at, skip.end_at)); });
+   boundaries = Array.from(new Set(boundaries)).sort(function(a,b) { return a-b; });
+   var excluded = 0;
+   for (var i = 0; i < boundaries.length-1; i++) {
+    var at = boundaries[i];
+    var restored = relevant.some(function(skip) { return skip.restored && skip.schedule_id === run.schedule_id && skip.start_at <= at && skip.end_at > at; });
+    if (!restored && relevant.some(function(skip) { return !skip.restored && skip.start_at <= at && skip.end_at > at; })) excluded += boundaries[i+1]-at;
+   }
+   return excluded === 0 ? 'none' : excluded === run.end_at-run.start_at ? 'full' : 'partial';
   }
   cards().forEach(function(card) {
    var paused = state.paused || card.dataset.scheduleEnabled === 'false';
-   var excluded = skipped(card);
+   var status = skipStatus(card);
+   var excluded = status === 'full';
    card.dataset.calendarMuted = String(paused || excluded);
    card.dataset.skipped = String(excluded);
-   if (paused || excluded) {
-    card.lastElementChild.textContent = paused ? 'Paused' : 'Skipped';
-    card.title = card.dataset.scheduleTitle + (paused ? ' (paused)' : ' (skipped)') + (paused && excluded ? ' · This run is also skipped' : '');
+   card.dataset.skipStatus = status;
+   if (paused || status !== 'none') {
+    var label = paused ? 'Paused' : excluded ? 'Skipped' : 'Partially skipped';
+    card.lastElementChild.textContent = label;
+    card.title = card.dataset.scheduleTitle + ' (' + label.toLowerCase() + ')' + (paused && status !== 'none' ? ' · This run is also ' + (excluded ? 'skipped' : 'partially skipped') : '');
     card.setAttribute('aria-label', card.title);
    }
   });

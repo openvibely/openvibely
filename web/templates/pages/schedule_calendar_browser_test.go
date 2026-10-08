@@ -26,6 +26,10 @@ func TestBrowserFunctional_ScheduleCalendarSelectionActions(t *testing.T) {
 		at := day.Add(8 * time.Hour)
 		tasks = append(tasks, repository.TaskWithSchedule{Task: models.Task{ID: fmt.Sprintf("t%d", i), ProjectID: project.ID, Title: fmt.Sprintf("Task %d", i)}, Schedule: &models.Schedule{ID: fmt.Sprintf("s%d", i), RunAt: at, NextRun: &at, RepeatType: models.RepeatDaily, RepeatInterval: 1, Enabled: i == 0}})
 	}
+	for i := 2; i < 5; i++ {
+		at := day.Add(12 * time.Hour)
+		tasks = append(tasks, repository.TaskWithSchedule{Task: models.Task{ID: fmt.Sprintf("t%d", i), ProjectID: project.ID, Title: fmt.Sprintf("Task %d", i)}, Schedule: &models.Schedule{ID: fmt.Sprintf("s%d", i), RunAt: at, NextRun: &at, RepeatType: models.RepeatMinutes, RepeatInterval: 10, Enabled: true}})
+	}
 	runner := `<script>
  window.addEventListener('DOMContentLoaded',function() {
   var nativeFetch = window.fetch;
@@ -54,6 +58,14 @@ func TestBrowserFunctional_ScheduleCalendarSelectionActions(t *testing.T) {
    window.dispatchEvent(new PointerEvent('pointermove',{pointerId:8,clientX:headerRect.left+10,clientY:headerRect.top+10}));
    up();check(count()===3,'header drag selects range');
    document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));check(count()===0,'escape clears dates');
+   function hourCard(id) { return root.querySelector('.drop-zone[data-date="'+days[1].dataset.calendarDay+'"][data-hour="12"] [data-schedule-id="'+id+'"]'); }
+   ['s2','s3'].forEach(function(id) {
+    var partial=hourCard(id);
+    check(partial.lastElementChild.textContent==='Partially skipped','partial exclusion label '+id);
+    check(partial.dataset.calendarMuted==='false','partial exclusion stays active '+id);
+    check(!getComputedStyle(partial.firstElementChild).textDecorationLine.includes('line-through'),'partial exclusion title stays normal '+id);
+   });
+   check(hourCard('s4').lastElementChild.textContent==='Skipped','adjacent exclusions fully cover block');
    var a=root.querySelector('[data-schedule-id="s0"]'),b=root.querySelector('[data-schedule-id="s1"]');
    check(a.lastElementChild.textContent==='Skipped','skipped run status');
    check(b.lastElementChild.textContent==='Paused','paused schedule status');
@@ -97,7 +109,14 @@ func TestBrowserFunctional_ScheduleCalendarSelectionActions(t *testing.T) {
 			return
 		}
 		var out bytes.Buffer
-		if err := Schedule([]models.Project{project}, &project, tasks, 0, nil, nil, models.ScheduleCalendarState{Skips: []models.ScheduleSkip{{ScheduleID: "s0", StartAt: day.Add(8 * time.Hour).Unix(), EndAt: day.Add(8*time.Hour).Unix() + 1}}}).Render(context.Background(), &out); err != nil {
+		if err := Schedule([]models.Project{project}, &project, tasks, 0, nil, nil, models.ScheduleCalendarState{Skips: []models.ScheduleSkip{
+			{ScheduleID: "s0", StartAt: day.Add(8 * time.Hour).Unix(), EndAt: day.Add(8*time.Hour).Unix() + 1},
+			{ScheduleID: "s2", StartAt: day.Add(12*time.Hour + 20*time.Minute).Unix(), EndAt: day.Add(12*time.Hour + 30*time.Minute).Unix()},
+			{ScheduleID: "s3", StartAt: day.Add(12 * time.Hour).Unix(), EndAt: day.Add(13 * time.Hour).Unix()},
+			{ScheduleID: "s3", StartAt: day.Add(12*time.Hour + 20*time.Minute).Unix(), EndAt: day.Add(12*time.Hour + 30*time.Minute).Unix(), Restored: true},
+			{ScheduleID: "s4", StartAt: day.Add(12 * time.Hour).Unix(), EndAt: day.Add(12*time.Hour + 30*time.Minute).Unix()},
+			{ScheduleID: "s4", StartAt: day.Add(12*time.Hour + 30*time.Minute).Unix(), EndAt: day.Add(13 * time.Hour).Unix()},
+		}}).Render(context.Background(), &out); err != nil {
 			t.Error(err)
 			return
 		}

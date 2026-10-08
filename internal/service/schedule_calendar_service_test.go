@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -62,5 +63,45 @@ func TestScheduleCalendarActionRejectsMalformedSelections(t *testing.T) {
 	} {
 		_, err := ApplyScheduleCalendarAction(context.Background(), repo, "default", action)
 		require.ErrorIs(t, err, repository.ErrScheduleCalendarSelection)
+	}
+}
+
+func TestSchedulerPreservesRestoredRunAfterDowntime(t *testing.T) {
+	for _, afterDay := range []bool{false, true} {
+		t.Run(fmt.Sprint(afterDay), func(t *testing.T) {
+			db := testutil.NewTestDB(t)
+			ctx := context.Background()
+			repo := repository.NewScheduleRepo(db)
+			tasks := repository.NewTaskRepo(db, nil)
+			worker := newTestWorkerService(t)
+			svc := NewSchedulerService(repo, tasks, worker)
+			day := time.Date(2026, 10, 10, 0, 0, 0, 0, time.UTC)
+			now := day.Add(9*time.Hour + 5*time.Minute)
+			if afterDay {
+				now = day.Add(25 * time.Hour)
+			}
+			svc.now = func() time.Time { return now }
+			task := &models.Task{ProjectID: "default", Title: "Restored run", Prompt: "test", Category: models.CategoryScheduled, Status: models.StatusPending}
+			require.NoError(t, tasks.Create(ctx, task))
+			sched := &models.Schedule{TaskID: task.ID, RunAt: day.Add(8 * time.Hour), RepeatType: models.RepeatHours, RepeatInterval: 1, Enabled: true}
+			require.NoError(t, repo.Create(ctx, sched))
+			_, err := repo.ApplyCalendarAction(ctx, "default", models.ScheduleCalendarAction{Action: "skip", Skips: []models.ScheduleSkip{{StartAt: day.Unix(), EndAt: day.Add(24 * time.Hour).Unix()}}}, day)
+			require.NoError(t, err)
+			restored := day.Add(9 * time.Hour)
+			_, err = repo.ApplyCalendarAction(ctx, "default", models.ScheduleCalendarAction{Action: "restore", Skips: []models.ScheduleSkip{{ScheduleID: sched.ID, StartAt: restored.Unix(), EndAt: restored.Add(time.Hour).Unix()}}}, day)
+			require.NoError(t, err)
+			svc.checkDueTasks(ctx)
+			got, err := repo.GetByID(ctx, sched.ID)
+			require.NoError(t, err)
+			require.NotNil(t, got.NextRun)
+			require.True(t, got.NextRun.Equal(restored), "restored run must remain eligible")
+			svc.checkDueTasks(ctx)
+			select {
+			case submitted := <-worker.Submitted():
+				require.Equal(t, task.ID, submitted.ID)
+			default:
+				t.Fatal("restored run was not dispatched")
+			}
+		})
 	}
 }
