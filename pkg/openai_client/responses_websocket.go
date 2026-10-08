@@ -514,19 +514,13 @@ func (c *Client) openResponsesWebsocketStream(ctx context.Context, payload map[s
 		var outputItems []any
 		responseID := ""
 		receivedFrame := false
-		forwardEventData := func(data []byte) bool {
-			// A WebSocket frame is a complete JSON event and may contain line
-			// breaks (notably provider error envelopes). Our downstream SSE
-			// parsers consume one data line, so compact before framing it.
-			var compact bytes.Buffer
-			if err := json.Compact(&compact, data); err != nil {
+		forwardEventData := func(data []byte, validJSON bool) bool {
+			invalidJSON, err := forwardResponsesWebsocketEvent(writer, data, validJSON)
+			if err != nil {
 				state.resetConnectionLocked()
-				writer.CloseWithError(fmt.Errorf("invalid Responses websocket JSON event: %w", err))
-				return false
-			}
-			data = compact.Bytes()
-			if _, writeErr := fmt.Fprintf(writer, "data: %s\n\n", data); writeErr != nil {
-				state.resetConnectionLocked()
+				if invalidJSON {
+					writer.CloseWithError(fmt.Errorf("invalid Responses websocket JSON event: %w", err))
+				}
 				return false
 			}
 			return true
@@ -553,42 +547,69 @@ func (c *Client) openResponsesWebsocketStream(ctx context.Context, payload map[s
 				writer.CloseWithError(fmt.Errorf("%w: unexpected binary frame", errResponsesWebsocketTransport))
 				return
 			}
-			var event map[string]any
-			if json.Unmarshal(data, &event) == nil {
-				eventType := stringFromAny(event["type"])
-				if eventType == "error" {
-					providerErr := responsesStreamTerminalError(eventType, event)
-					var apiErr *APIError
-					if errors.As(providerErr, &apiErr) && (apiErr.Code == "previous_response_not_found" || apiErr.Code == "websocket_connection_limit_reached") {
-						// Reconnect and replay the full transcript, without disabling WebSocket.
-						state.resetConnectionLocked()
-						writer.CloseWithError(fmt.Errorf("%w: %w", errResponsesWebsocketStale, providerErr))
-						return
-					}
-				}
-				if eventType == "response.output_item.done" {
-					if item, ok := event["item"].(map[string]any); ok {
-						outputItems = append(outputItems, item)
-					}
-				}
-				if !forwardEventData(data) {
+			eventType, event, validJSON := decodeResponsesWebsocketEvent(data)
+			if eventType == "error" {
+				providerErr := responsesStreamTerminalError(eventType, event)
+				var apiErr *APIError
+				if errors.As(providerErr, &apiErr) && (apiErr.Code == "previous_response_not_found" || apiErr.Code == "websocket_connection_limit_reached") {
+					// Reconnect and replay the full transcript, without disabling WebSocket.
+					state.resetConnectionLocked()
+					writer.CloseWithError(fmt.Errorf("%w: %w", errResponsesWebsocketStale, providerErr))
 					return
 				}
-				if isTerminalResponsesWebsocketEvent(eventType) {
-					if eventType == "response.completed" {
-						responseID = responseIDFromEvent(event)
-						recordCompletedResponse(responseID)
-					}
-					return
-				}
-				continue
 			}
-			if !forwardEventData(data) {
+			if eventType == "response.output_item.done" {
+				if item, ok := event["item"].(map[string]any); ok {
+					outputItems = append(outputItems, item)
+				}
+			}
+			if !forwardEventData(data, validJSON) {
+				return
+			}
+			if isTerminalResponsesWebsocketEvent(eventType) {
+				if eventType == "response.completed" {
+					responseID = responseIDFromEvent(event)
+					recordCompletedResponse(responseID)
+				}
 				return
 			}
 		}
 	}()
 	return reader, nil
+}
+
+func decodeResponsesWebsocketEvent(data []byte) (eventType string, event map[string]any, validJSON bool) {
+	var envelope struct {
+		Type string `json:"type"`
+	}
+	if err := json.Unmarshal(data, &envelope); err != nil {
+		// Preserve forwarding behavior for valid JSON values that are not event
+		// objects, while letting the framing path report malformed JSON below.
+		return "", nil, json.Valid(data)
+	}
+
+	eventType = envelope.Type
+	switch eventType {
+	case "error", "response.output_item.done", "response.completed":
+		if err := json.Unmarshal(data, &event); err != nil {
+			return eventType, nil, true
+		}
+	}
+	return eventType, event, true
+}
+
+func forwardResponsesWebsocketEvent(writer io.Writer, data []byte, validJSON bool) (invalidJSON bool, err error) {
+	// SSE parsers consume one data line. Compact multiline provider events, but
+	// leave already single-line frames in their original representation.
+	if !validJSON || bytes.IndexAny(data, "\r\n") >= 0 {
+		var compact bytes.Buffer
+		if err := json.Compact(&compact, data); err != nil {
+			return true, err
+		}
+		data = compact.Bytes()
+	}
+	_, err = fmt.Fprintf(writer, "data: %s\n\n", data)
+	return false, err
 }
 
 func responseIDFromEvent(event map[string]any) string {
