@@ -19,6 +19,12 @@ import (
 )
 
 func TestBrowserFunctional_KanbanSelectionFiltersAndBatchResults(t *testing.T) {
+	for _, width := range []int{1280, 390} {
+		t.Run(fmt.Sprint(width), func(t *testing.T) { testKanbanSelectionFiltersAndBatchResults(t, width) })
+	}
+}
+
+func testKanbanSelectionFiltersAndBatchResults(t *testing.T, width int) {
 	chrome := chatNavigationChromePath(t)
 	project := models.Project{ID: "batch-project", Name: "Batch"}
 	tasks := []models.Task{
@@ -70,8 +76,35 @@ window.addEventListener('DOMContentLoaded', async function() {
   await wait(() => currentMenu.getAttribute('data-kanban-menu-positioning') !== 'true');
   Array.from(currentMenu.querySelectorAll('button')).find(b => b.textContent.trim().startsWith('Filter')).focus();
   const filterPanel = document.querySelector('[data-task-card-submenu-portaled="true"]');
-  filterPanel.querySelector('summary').click();
-  filterPanel.querySelector('[data-kanban-filter="status"][data-value="completed"]').click();
+  check(!filterPanel.querySelector('details'), 'filters must not use accordions');
+  const outcome = Array.from(filterPanel.querySelectorAll('button')).find(b => b.textContent.trim() === 'Outcome›');
+  outcome.focus();
+  const choices = Array.from(document.querySelectorAll('[data-task-card-submenu-portaled="true"]')).find(p => p !== filterPanel);
+  check(choices && choices.getClientRects().length, 'Outcome opens a nested submenu');
+  if (window.innerWidth >= 640) {
+    const parentRect = filterPanel.getBoundingClientRect(), choicesRect = choices.getBoundingClientRect();
+    check(Math.min(parentRect.right, choicesRect.right) - Math.max(parentRect.left, choicesRect.left) <= 5, 'desktop choices open beside Filter');
+    const mergeTrigger = Array.from(filterPanel.querySelectorAll('button')).find(b => b.textContent.trim() === 'Merge status›');
+    mergeTrigger.dispatchEvent(new MouseEvent('mouseenter'));
+    mergeTrigger.focus();
+    check(!choices.isConnected, 'switching filters closes sibling choices');
+    const mergePanel = Array.from(document.querySelectorAll('[data-task-card-submenu-portaled="true"]')).find(p => p !== filterPanel);
+    const firstChoice = mergePanel.querySelector('button'); firstChoice.focus();
+    firstChoice.dispatchEvent(new KeyboardEvent('keydown', {key:'ArrowLeft', bubbles:true}));
+    check(!mergePanel.isConnected && document.activeElement === mergeTrigger, 'ArrowLeft returns to parent');
+    outcome.focus();
+  }
+  if (window.innerWidth < 640) {
+    check(getComputedStyle(filterPanel).visibility === 'hidden', 'mobile choices replace Filter panel');
+    check(choices.getBoundingClientRect().width >= 200, 'mobile choices keep readable width');
+    choices.querySelector('[data-submenu-back] button').click();
+    check(getComputedStyle(filterPanel).visibility !== 'hidden', 'Back restores Filter');
+    outcome.click();
+    outcome.dispatchEvent(new KeyboardEvent('keydown', {key:'ArrowRight', bubbles:true}));
+  }
+  const currentChoices = Array.from(document.querySelectorAll('[data-task-card-submenu-portaled="true"]')).find(p => p !== filterPanel);
+  currentChoices.querySelector('[data-kanban-filter="status"][data-value="completed"]').click();
+  check(currentChoices.querySelector('[data-value="completed"] [data-filter-check]').textContent === '✓', 'selected filter shows a check');
   window.closeKanbanMenu(null, false);
   filter('merge','unmerged').click();
   check(window.kanbanSelection.size === 0, 'filter clears selection');
@@ -205,7 +238,7 @@ window.addEventListener('DOMContentLoaded', async function() {
 		}
 	}))
 	defer server.Close()
-	cmd := exec.Command(chrome, "--headless=new", "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage", "--no-first-run", "--no-default-browser-check", "--window-size=1280,900", "--user-data-dir="+filepath.Join(t.TempDir(), "chrome"), server.URL+"/tasks?project_id="+project.ID)
+	cmd := exec.Command(chrome, "--headless=new", "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage", "--no-first-run", "--no-default-browser-check", fmt.Sprintf("--window-size=%d,900", width), "--user-data-dir="+filepath.Join(t.TempDir(), "chrome"), server.URL+"/tasks?project_id="+project.ID)
 	if err := startBrowserProcess(cmd); err != nil {
 		t.Fatal(err)
 	}

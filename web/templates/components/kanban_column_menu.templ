@@ -7,23 +7,18 @@ import (
 
 templ KanbanSubmenu(label string) {
 	<li class="group relative" onmouseenter="hoverKanbanSubmenu(event, this)" onmouseleave="cancelKanbanSubmenuHover(this)">
-		<button type="button" class="justify-between" onfocus="positionKanbanSubmenu(this.parentElement)" onkeydown="handleKanbanSubmenuKeydown(event, this.parentElement)">{ label }<span aria-hidden="true">›</span></button>
+		<button type="button" class="justify-between" onclick="positionKanbanSubmenu(this.parentElement)" onfocus="positionKanbanSubmenu(this.parentElement)" onkeydown="handleKanbanSubmenuKeydown(event, this.parentElement)">{ label }<span aria-hidden="true">›</span></button>
 		<ul tabindex="-1" data-task-card-submenu-panel class="ov-menu ov-menu-actions ov-menu-scroll menu absolute right-0 top-full z-[110] hidden w-56 max-w-[calc(100vw-2rem)]">{ children... }
 </ul>
 	</li>
 }
 
 templ KanbanFilter(category, key, label string, values, labels []string) {
-	<li>
-		<details>
-			<summary>{ label }</summary>
-			<ul>
-				for i, value := range values {
-					<li><button type="button" data-kanban-filter={ key } data-value={ value } data-column={ category } onclick="kanbanSetFilter(this)">{ labels[i] }</button></li>
-				}
-			</ul>
-		</details>
-	</li>
+	@KanbanSubmenu(label) {
+		for i, value := range values {
+			<li><button type="button" data-kanban-filter={ key } data-value={ value } data-filter-label={ labels[i] } data-column={ category } onclick="kanbanSetFilter(this)"><span data-filter-check aria-hidden="true" style="width:1em;display:inline-block"></span>{ labels[i] }</button></li>
+		}
+	}
 }
 
 templ KanbanColumnMenu(projectID string, category models.TaskCategory, backlogSort, completedSort string) {
