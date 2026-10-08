@@ -65,6 +65,7 @@ func TestBrowserFunctional_ConversationModelPicker(t *testing.T) {
  const assert=(ok,msg)=>{if(!ok)throw Error(msg)},wait=()=>new Promise(r=>setTimeout(r,30));
  try{
  const trigger=document.getElementById('chat-form-agent-select');
+ trigger.scrollIntoView({block:'end'});await wait();
  trigger.click();await wait();
  const panel=document.getElementById('conversation-model-picker'),sub=document.getElementById('conversation-provider-models');
  assert(!panel.hidden,'picker opens');
@@ -76,6 +77,16 @@ func TestBrowserFunctional_ConversationModelPicker(t *testing.T) {
  trigger.getBoundingClientRect=()=>{const r=originalTriggerRect();return {...r,left:r.left-2};};
  providers[0].dispatchEvent(new PointerEvent('pointerenter',{pointerType:'mouse'}));
  assert(!sub.hidden && sub.getAttribute('aria-label')===providers[0].dataset.provider+' models','hover opens provider submenu');
+ const firstRect=providers[0].getBoundingClientRect(),secondRect=providers[1].getBoundingClientRect();
+ providers[0].dispatchEvent(new PointerEvent('pointerenter',{pointerType:'mouse',clientX:firstRect.left+35,clientY:firstRect.top+12}));
+ providers[1].dispatchEvent(new PointerEvent('pointerenter',{pointerType:'mouse',clientX:secondRect.right-12,clientY:secondRect.top+12}));
+ assert(sub.getAttribute('aria-label')===providers[0].dataset.provider+' models','diagonal travel keeps current submenu open');
+ sub.dispatchEvent(new PointerEvent('pointerenter',{pointerType:'mouse'}));await new Promise(r=>setTimeout(r,350));
+ assert(sub.getAttribute('aria-label')===providers[0].dataset.provider+' models','entering submenu cancels provider switch');
+ providers[1].dispatchEvent(new PointerEvent('pointerenter',{pointerType:'mouse',clientX:secondRect.right-12,clientY:secondRect.top+12}));
+ await new Promise(r=>setTimeout(r,350));
+ assert(sub.getAttribute('aria-label')===providers[1].dataset.provider+' models','staying on another provider switches submenu');
+ providers[0].click();
  assert(panel.getBoundingClientRect().left===originalLeft,'provider submenu does not move the original picker');
  trigger.getBoundingClientRect=originalTriggerRect;
  providers[0].click();

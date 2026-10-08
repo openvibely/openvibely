@@ -3243,7 +3243,15 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				panel.__openVibelySubmenuDropdown = null;
 			}
 
+			let pendingKanbanSubmenuHover = null;
+			function cancelKanbanSubmenuHover(container) {
+				if (!pendingKanbanSubmenuHover || container && pendingKanbanSubmenuHover.container !== container) return;
+				clearTimeout(pendingKanbanSubmenuHover.timer);
+				pendingKanbanSubmenuHover = null;
+			}
+
 			function closeKanbanSubmenus(dropdown, exceptPanel) {
+				if (pendingKanbanSubmenuHover && (!dropdown || pendingKanbanSubmenuHover.dropdown === dropdown)) cancelKanbanSubmenuHover();
 				document.querySelectorAll('[data-task-card-submenu-portaled="true"]').forEach(function(panel) {
 					if (panel !== exceptPanel && (!dropdown || panel.__openVibelySubmenuDropdown === dropdown)) restoreKanbanSubmenu(panel);
 				});
@@ -3251,6 +3259,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 
 			function positionKanbanSubmenu(container) {
 				if (!container || !container.querySelector) return;
+				cancelKanbanSubmenuHover();
 				const sourcePanel = container.querySelector(':scope > [data-task-card-submenu-panel]');
 				const dropdown = container.closest('[data-kanban-menu-key]');
 				const menu = dropdown && dropdown.querySelector(':scope > [data-kanban-menu-content]');
@@ -3264,6 +3273,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					panel.__openVibelySubmenuSourcePanel = sourcePanel;
 					panel.__openVibelySubmenuDropdown = dropdown;
 					panel.setAttribute('data-task-card-submenu-portaled', 'true');
+					panel.addEventListener('mouseenter', function() { cancelKanbanSubmenuHover(); });
 					sourcePanel.style.setProperty('display', 'none', 'important');
 					document.body.appendChild(panel);
 				}
@@ -3288,7 +3298,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				const openRight = roomRight >= roomLeft;
 				const sideRoom = openRight ? roomRight : roomLeft;
 				const panelWidth = Math.min(224, sideRoom);
-				const desiredLeft = openRight ? menuRect.right - 1 : menuRect.left + 1 - panelWidth;
+				const desiredLeft = openRight ? menuRect.right - 4 : menuRect.left + 4 - panelWidth;
 				const desiredTop = Math.max(visibleTop + 8, Math.min(containerRect.top, visibleBottom - panelHeight - 8));
 				let positionedLeft = Math.max(8, Math.min(desiredLeft, window.innerWidth - panelWidth - 8));
 				panel.style.left = positionedLeft + 'px';
@@ -3299,7 +3309,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				// fixed descendants from their CSS left coordinate. Correct against
 				// the rendered edge, since menuRect is also viewport-relative.
 				let positionedRect = panel.getBoundingClientRect();
-				const targetEdge = openRight ? menuRect.right - 1 : menuRect.left + 1;
+				const targetEdge = openRight ? menuRect.right - 4 : menuRect.left + 4;
 				const renderedEdge = openRight ? positionedRect.left : positionedRect.right;
 				positionedLeft += targetEdge - renderedEdge;
 				panel.style.left = positionedLeft + 'px';
@@ -3307,6 +3317,39 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				if (positionedRect.left < 8) positionedLeft += 8 - positionedRect.left;
 				if (positionedRect.right > window.innerWidth - 8) positionedLeft -= positionedRect.right - (window.innerWidth - 8);
 				panel.style.left = positionedLeft + 'px';
+			}
+
+			function hoverKanbanSubmenu(event, container) {
+				if (!container) return;
+				const dropdown = container.closest('[data-kanban-menu-key]');
+				const sourcePanel = container.querySelector(':scope > [data-task-card-submenu-panel]');
+				const current = Array.from(document.querySelectorAll('[data-task-card-submenu-portaled="true"]')).find(function(panel) {
+					return panel.__openVibelySubmenuDropdown === dropdown;
+				});
+				if (current && current.__openVibelySubmenuSourcePanel !== sourcePanel && current.__openVibelyPointerOrigin && event) {
+				const bounds = current.getBoundingClientRect();
+				const menu = dropdown.querySelector(':scope > [data-kanban-menu-content]');
+				const menuRect = menu.getBoundingClientRect();
+				const right = bounds.left >= menuRect.right - 8;
+				const toward = right
+					? event.clientX > current.__openVibelyPointerOrigin.x + 8
+					: event.clientX < current.__openVibelyPointerOrigin.x - 8;
+				if (toward && event.clientY >= bounds.top - 12 && event.clientY <= bounds.bottom + 12) {
+					cancelKanbanSubmenuHover();
+					const pending = {container: container, dropdown: dropdown, timer: null};
+					pending.timer = setTimeout(function() {
+						if (pendingKanbanSubmenuHover !== pending || dropdown.getAttribute('data-kanban-menu-open') !== 'true' || !container.isConnected) return;
+						positionKanbanSubmenu(container);
+						const next = document.querySelector('[data-task-card-submenu-portaled="true"]');
+						if (next) next.__openVibelyPointerOrigin = {x: event.clientX, y: event.clientY};
+					}, 300);
+					pendingKanbanSubmenuHover = pending;
+					return;
+				}
+				}
+				positionKanbanSubmenu(container);
+				const panel = document.querySelector('[data-task-card-submenu-portaled="true"]');
+				if (panel) panel.__openVibelyPointerOrigin = event ? {x: event.clientX, y: event.clientY} : null;
 			}
 
 			function handleKanbanSubmenuKeydown(event, container) {
