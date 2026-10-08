@@ -544,10 +544,13 @@
   }
   function render() {
     if (!active) return;
+    const atEnd = !search.value.trim() &&
+      list.scrollTop + list.clientHeight >= list.scrollHeight - 1;
     renderList();
     renderEffort();
     status.textContent = state(active).error || favoritesError || "";
     position();
+    if (atEnd) list.scrollTop = list.scrollHeight;
   }
   function position() {
     if (!active) return;
@@ -646,6 +649,7 @@
       panel.hidden = false;
       btn.setAttribute("aria-expanded", "true");
       render();
+      list.scrollTop = list.scrollHeight;
       renderSub();
       loadFavorites();
       search.focus({ preventScroll: true });

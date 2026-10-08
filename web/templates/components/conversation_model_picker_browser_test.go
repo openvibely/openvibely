@@ -194,6 +194,28 @@ func TestBrowserFunctional_ConversationModelPicker(t *testing.T) {
  await wait();failFavoriteWrite();await wait();
  assert(panel.querySelectorAll('.ov-mp-star[aria-pressed=true]').length===10,'failed write is rolled back from server');
  assert([...panel.querySelectorAll('.ov-mp-star')].every(star=>!star.disabled),'successful reopen enables favorites after a pending write fails');
+ const atFavoritesEnd=()=>Math.abs(list.scrollHeight-list.clientHeight-list.scrollTop)<2;
+ list.style.maxHeight='120px';list.scrollTop=0;
+ window.ovModelPicker.close(false);trigger.click();await wait();
+ assert(list.scrollHeight>list.clientHeight&&atFavoritesEnd(),'overflowing picker opens at favorites end');
+ let finishFavorites;
+ window.fetch=async(url,options)=>{
+   const response=await originalFetch(url,options);
+   if(url==='/ui/model-favorites'&&!options){
+     const saved=await response.json();saved.m12=true;
+     return new Promise(resolve=>{finishFavorites=()=>resolve(new Response(JSON.stringify(saved),{status:200}));});
+   }
+   return response;
+ };
+ window.ovModelPicker.close(false);trigger.click();await wait();
+ assert(atFavoritesEnd(),'cached favorites visible while loading');
+ finishFavorites();await wait();
+ assert(atFavoritesEnd(),'loading additional saved favorites keeps bottom visible');
+ window.ovModelPicker.close(false);trigger.click();await wait();list.scrollTop=0;
+ finishFavorites();await wait();
+ assert(list.scrollTop===0,'loading favorites does not undo user scrolling toward providers');
+ window.fetch=originalFetch;list.style.maxHeight='';
+
  document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));
  document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));
  assert(panel.hidden,'escape closes');
