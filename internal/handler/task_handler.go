@@ -236,7 +236,7 @@ func agentDefinitionAvailableToProject(agent models.Agent, projectID string) boo
 }
 
 func selectablePrimaryAgentDefinition(agent models.Agent) bool {
-	return agent.Enabled && agent.SelectableAsPrimary && agent.GeneratedStatus != models.AgentStatusArchived && agent.ArchivedAt == nil
+	return selectablePrimaryAgent(agent.Enabled, agent.SelectableAsPrimary, agent.GeneratedStatus, agent.ArchivedAt)
 }
 
 func agentTaskUIOptionAvailableToProject(agent repository.AgentTaskUIOption, projectID string) bool {
@@ -247,7 +247,11 @@ func agentTaskUIOptionAvailableToProject(agent repository.AgentTaskUIOption, pro
 }
 
 func selectableTaskUIAgentOption(agent repository.AgentTaskUIOption) bool {
-	return agent.Enabled && agent.SelectableAsPrimary && agent.GeneratedStatus != models.AgentStatusArchived && agent.ArchivedAt == nil
+	return selectablePrimaryAgent(agent.Enabled, agent.SelectableAsPrimary, agent.GeneratedStatus, agent.ArchivedAt)
+}
+
+func selectablePrimaryAgent(enabled, selectableAsPrimary bool, generatedStatus models.AgentGeneratedStatus, archivedAt *time.Time) bool {
+	return enabled && selectableAsPrimary && generatedStatus != models.AgentStatusArchived && archivedAt == nil
 }
 
 func selectableTaskAgentDefinitionsForProject(agentDefs []repository.AgentTaskUIOption, projectID string) []repository.AgentTaskUIOption {
