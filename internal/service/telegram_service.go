@@ -768,7 +768,7 @@ func (s *TelegramService) handleChatMessageWithDurableHandoff(parentCtx context.
 				return linked, nil
 			},
 			AttachmentContextAndImages: func(atts []models.ChatAttachment) (string, []models.Attachment) {
-				ctxText, imgs := channelChatAttachmentContextAndImages(atts, channelChatMaxInlineTextAttachmentSize)
+				ctxText, imgs := telegramAttachmentContextAndImages(atts)
 				if len(telegramImageAttachments) > 0 {
 					imgs = updateChannelChatImageAttachmentPaths(telegramImageAttachments, atts)
 				}
@@ -963,7 +963,7 @@ func (s *TelegramService) downloadAndSaveTelegramAttachment(
 	}
 	chatAttachments := []models.ChatAttachment{chatAtt}
 
-	attachmentContext, imageAttachments := channelChatAttachmentContextAndImages(chatAttachments, channelChatMaxInlineTextAttachmentSize)
+	attachmentContext, imageAttachments := telegramAttachmentContextAndImages(chatAttachments)
 	if len(imageAttachments) > 0 {
 		applog.Infof("[telegram] image attachment file=%s size=%d", fileName, written)
 	} else if attachmentContext != "" {
@@ -971,6 +971,10 @@ func (s *TelegramService) downloadAndSaveTelegramAttachment(
 	}
 
 	return attachmentContext, imageAttachments, chatAttachments, nil
+}
+
+func telegramAttachmentContextAndImages(chatAttachments []models.ChatAttachment) (string, []models.Attachment) {
+	return channelChatAttachmentContextAndImages(chatAttachments, channelChatMaxInlineTextAttachmentSize)
 }
 
 func detectTelegramDownloadedAttachmentMediaType(path, declaredMediaType string) string {
