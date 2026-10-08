@@ -134,15 +134,15 @@ templ ScheduleCalendarScript() {
   root.querySelector('#schedule-project-menu').hidden = !!state.paused;
   var feedbackTimer;
   signal.addEventListener('abort', function() { clearTimeout(feedbackTimer); });
-  function feedback(message, inverse) {
+  function feedback(message, inverse, expires) {
    var box = root.querySelector('#schedule-calendar-feedback');
    box.classList.remove('hidden');
    box.querySelector('[data-calendar-message]').textContent = message;
    box.querySelector('[data-calendar-action="undo"]').classList.toggle('hidden', !inverse);
    clearTimeout(feedbackTimer);
-   feedbackTimer = setTimeout(function() { box.classList.add('hidden'); }, undo ? Math.max(0, undo.expires-Date.now()) : 6000);
+   feedbackTimer = setTimeout(function() { box.classList.add('hidden'); }, expires === undefined ? 6000 : Math.max(0, expires-Date.now()));
   }
-  if (undo) feedback(undo.message, undo.action);
+  if (undo) feedback(undo.message, undo.action, undo.expires);
   function paintDates() {
    days.forEach(function(day) { var active = dates.has(day.dataset.calendarDay); day.classList.toggle('schedule-day-selected', active); day.setAttribute('aria-pressed', String(active)); });
    root.querySelectorAll('.drop-zone').forEach(function(zone) { zone.classList.toggle('schedule-day-selected', dates.has(zone.dataset.date)); });

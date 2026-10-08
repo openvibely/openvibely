@@ -115,6 +115,21 @@ func TestBrowserFunctional_ScheduleCalendarSelectionActions(t *testing.T) {
    root.querySelector('#schedule-context-menu [data-calendar-action="restore"]').click();await tick();
    check(requests[3].action==='restore' && requests[3].skips.length===1 && requests[3].skips[0].schedule_id==='s0','unskip targets only selected skipped runs');
    check(window._scheduleCalendarUndo.message==='1 run unskipped.','unskip feedback uses matching terminology');
+   // A later failure gets a fresh notification lifetime even after Undo expired.
+   window._scheduleCalendarUndo.expires=Date.now()-1000;
+   var nativeTimeout=window.setTimeout, feedbackDelay;
+   window.setTimeout=function(callback,delay) {
+    if (String(callback).includes("box.classList.add('hidden')")) feedbackDelay=delay;
+    return nativeTimeout(callback,delay);
+   };
+   window.fetch=async function(){return new Response(JSON.stringify({message:'Calendar update failed'}),{status:500,headers:{'Content-Type':'application/json'}});};
+   root.querySelector('#schedule-context-menu [data-calendar-action="restore"]').click();await tick();
+   var feedback=root.querySelector('#schedule-calendar-feedback');
+   check(feedbackDelay===6000,'failed action must receive a fresh six-second lifetime');
+   check(!feedback.classList.contains('hidden'),'error must remain visible after expired success');
+   check(feedback.querySelector('[data-calendar-message]').textContent==='Calendar update failed','server error is displayed');
+   check(feedback.querySelector('[data-calendar-action="undo"]').classList.contains('hidden'),'failed action must not offer Undo');
+   window.setTimeout=nativeTimeout;
    report('pass','');
   })().catch(function(error){report('fail',error.stack||error.message);});
  });
