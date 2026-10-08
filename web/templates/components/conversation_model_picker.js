@@ -290,6 +290,7 @@
     } else search.focus({ preventScroll: true });
   }
   function activateRow(row, target) {
+    if (row.hasAttribute("data-picker-active")) return;
     target
       .querySelectorAll("[data-picker-active]")
       .forEach((item) => item.removeAttribute("data-picker-active"));

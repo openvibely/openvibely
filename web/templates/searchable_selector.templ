@@ -94,7 +94,7 @@ templ searchableSelectorScript() {
  </style>
 	<script>
 		(function() {
-			var controllerVersion = 18;
+			var controllerVersion = 19;
 			var previousController = window.openVibelySearchableSelectorController;
 			document.querySelectorAll('[data-searchable-selector-search]').forEach(function(input) { input.type = 'text'; });
 			document.querySelectorAll('[data-project-selector-clear]').forEach(function(control) { control.remove(); });
@@ -130,6 +130,7 @@ templ searchableSelectorScript() {
 			function options(root) { return root ? Array.prototype.slice.call(root.querySelectorAll('[data-searchable-selector-option]')) : []; }
 			function visibleOptions(root) { return options(root).filter(function(option) { return !option.hidden && !option.classList.contains('hidden'); }); }
             function highlight(root, option) {
+                if (root.__selectorActive === option && (!option || option.hasAttribute('data-selector-active'))) return;
                 root.__selectorActive = option;
                 options(root).forEach(function(item) { item.toggleAttribute('data-selector-active', item === option); });
             }
