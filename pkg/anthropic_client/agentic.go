@@ -135,8 +135,9 @@ type AgenticOptions struct {
 	// OnToolBoundarySteering is called after local tool results are appended and before the next model request.
 	OnToolBoundarySteering func(ctx context.Context) (string, error)
 	// RecoveryMessages replaces history and prompt after service-side compaction.
-	RecoveryMessages []Message
-	OnCompaction     func(summary string) // called when context is compacted
+	RecoveryMessages     []Message
+	OnCompactionProgress func(llmcontracts.CompactionProgress)
+	OnCompaction         func(summary string) // called when context is compacted
 }
 
 // NormalizeEffort returns an API-supported effort for the selected model.
@@ -1442,7 +1443,7 @@ func (c *Client) sendAgenticTurnOnce(ctx context.Context, messages []agenticMess
 		return nil, httpretry.NewResponseError(resp, categorizeAnthropicAPIError(resp.StatusCode, respBody, nativeCompactionEnabled))
 	}
 
-	result, err := c.parseAgenticStreamWithCallbacks(resp.Body, opts.OnText, opts.OnThinking, opts.OnToolUse, opts.OnToolResult)
+	result, err := c.parseAgenticStreamWithCallbacks(resp.Body, opts.OnText, opts.OnThinking, opts.OnToolUse, opts.OnToolResult, opts.OnCompactionProgress)
 	if err != nil {
 		return result, httpretry.NewStreamError(err)
 	}
@@ -1462,7 +1463,18 @@ func (c *Client) parseAgenticStreamWithCallbacks(
 	onThinking func(string),
 	onToolUse func(string, json.RawMessage),
 	onToolResult func(string, string, bool),
+	compactionCallbacks ...func(llmcontracts.CompactionProgress),
 ) (*turnResult, error) {
+	var reportCompaction func(llmcontracts.CompactionProgress)
+	if len(compactionCallbacks) > 0 {
+		reportCompaction = compactionCallbacks[0]
+	}
+	var finishCompaction func(bool)
+	defer func() {
+		if finishCompaction != nil {
+			finishCompaction(false)
+		}
+	}()
 	scanner := bufio.NewScanner(body)
 	scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
 
@@ -1590,6 +1602,12 @@ func (c *Client) parseAgenticStreamWithCallbacks(
 						} else if cb.Type == "server_tool_result" || isAnthropicProviderToolResultBlockType(cb.Type) {
 							bs.content.Write(cb.Content)
 						}
+					}
+					if cb.Type == "compaction" {
+						if finishCompaction != nil {
+							finishCompaction(false)
+						}
+						finishCompaction = llmcontracts.BeginCompaction(reportCompaction)
 					}
 					blocks[event.Index] = bs
 				}
@@ -1779,6 +1797,10 @@ func (c *Client) parseAgenticStreamWithCallbacks(
 				}
 			case "compaction":
 				summary := bs.compaction.String()
+				if finishCompaction != nil {
+					finishCompaction(summary != "")
+					finishCompaction = nil
+				}
 				if summary != "" {
 					result.compaction = &compactionResult{content: &summary, encryptedContent: bs.encrypted}
 				} else {

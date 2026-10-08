@@ -844,3 +844,39 @@ func TestCallChatStreamingUsesRuntimePolicyHistoryAndSystemContext(t *testing.T)
 		}
 	}
 }
+
+func TestCompactionActivityInTaskAndChatResponses(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		for _, event := range []string{
+			`{"type":"message_start","message":{"id":"msg_fixture","model":"claude-sonnet-4-6"}}`,
+			`{"type":"content_block_start","index":0,"content_block":{"type":"compaction"}}`,
+			`{"type":"content_block_delta","index":0,"delta":{"type":"compaction_delta","content":"private summary"}}`,
+			`{"type":"content_block_stop","index":0}`,
+			`{"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}}`,
+			`{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"Continued"}}`,
+			`{"type":"content_block_stop","index":1}`,
+			`{"type":"message_delta","delta":{"stop_reason":"end_turn"}}`,
+			`{"type":"message_stop"}`,
+		} {
+			fmt.Fprintf(w, "data: %s\n\n", event)
+		}
+	}))
+	defer server.Close()
+	old := anthropicclient.AnthropicAPIHost
+	anthropicclient.AnthropicAPIHost = server.URL
+	defer func() { anthropicclient.AnthropicAPIHost = old }()
+	for _, operation := range []llmcontracts.Operation{llmcontracts.OperationTask, llmcontracts.OperationStreaming} {
+		t.Run(string(operation), func(t *testing.T) {
+			adapter := New(nil, nil, nil)
+			ctx := context.Background()
+			result, err := adapter.Call(ctx, llmcontracts.AgentRequest{Ctx: ctx, Operation: operation, ExecID: "exec", Message: "continue", Agent: models.LLMConfig{Provider: models.ProviderAnthropic, AuthMethod: models.AuthMethodAPIKey, Model: "claude-sonnet-4-6", APIKey: "fixture"}}, t.TempDir(), nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(result.Output, "[Compaction started]") || !strings.Contains(result.Output, "[Compaction done | ") || !strings.Contains(result.Output, "Continued") || strings.Contains(result.Output, "private summary") {
+				t.Fatalf("output=%q", result.Output)
+			}
+		})
+	}
+}

@@ -570,6 +570,7 @@ func (a *Adapter) callChatStreaming(ctx context.Context, message string, attachm
 		OnToolResult: func(name string, output string, isError bool) {
 			llmstream.WriteEvent(sw, llmstream.Event{Type: llmstream.EventToolResult, ToolName: name, Output: output, IsError: isError}, false)
 		},
+		OnCompactionProgress: llmstream.CompactionReporter(sw, &chatInThinking),
 		OnCompaction: func(summary string) {
 			compactionSummary = strings.TrimSpace(summary)
 			applog.Infof("[anthropic] callChatStreaming context compacted, summary_len=%d", len(summary))
@@ -674,6 +675,7 @@ func (a *Adapter) callStreaming(ctx context.Context, prompt string, attachments 
 		OnToolResult: func(name string, output string, isError bool) {
 			llmstream.WriteEvent(sw, llmstream.Event{Type: llmstream.EventToolResult, ToolName: name, Output: output, IsError: isError}, false)
 		},
+		OnCompactionProgress: llmstream.CompactionReporter(sw, &inThinking),
 		OnCompaction: func(summary string) {
 			compactionSummary = strings.TrimSpace(summary)
 			applog.Infof("[anthropic] callStreaming context compacted, summary_len=%d", len(summary))

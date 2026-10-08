@@ -1053,3 +1053,43 @@ func TestCallCompletionsChatStreamingUsesHistoryRuntimeAndUsage(t *testing.T) {
 		t.Fatalf("temperature = %#v, want 0.7", gotBody["temperature"])
 	}
 }
+
+func TestCompactionActivityInTaskAndChatResponses(t *testing.T) {
+	srv := newHTTPOnlyOpenAIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/compact") {
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprint(w, `{"output":[{"type":"compaction","encrypted_content":"private state"}]}`)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, "data: {\"type\":\"response.output_text.delta\",\"delta\":\"Continued\"}\n\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_compacted\",\"status\":\"completed\",\"output\":[]}}\n\n")
+	}))
+	defer srv.Close()
+	old := openaiclient.OpenAIAPIBaseURL
+	openaiclient.OpenAIAPIBaseURL = srv.URL + "/v1/"
+	defer func() { openaiclient.OpenAIAPIBaseURL = old }()
+	agent := models.LLMConfig{Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodAPIKey, Model: "gpt-5.3-codex", APIKey: "fixture", ForceNativeCompaction: true}
+	for _, chat := range []bool{false, true} {
+		t.Run(fmt.Sprint(chat), func(t *testing.T) {
+			adapter := New(nil, nil, nil)
+			ctx := llmcontracts.WithNativeCompactionStateJSON(context.Background(), `[{"type":"message","role":"user","content":"previous work"}]`)
+			var output string
+			var err error
+			if chat {
+				output, _, err = adapter.CallChatStreaming(ctx, "continue", nil, agent, "exec", "project", "", nil, "", false, models.ChatModePlan, "", nil)
+			} else {
+				var text string
+				output, text, _, err = adapter.CallStreaming(ctx, "continue", nil, agent, "exec", "project", t.TempDir(), "", nil)
+				if text != "Continued" {
+					t.Fatalf("text-only output=%q", text)
+				}
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(output, "[Compaction started]") || !strings.Contains(output, "[Compaction done | ") || !strings.Contains(output, "Continued") || strings.Contains(output, "private state") {
+				t.Fatalf("output=%q", output)
+			}
+		})
+	}
+}

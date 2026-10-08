@@ -3082,3 +3082,21 @@ func TestAnthropicProviderToolActivityHelpers(t *testing.T) {
 		t.Fatal("web search rate limit should not count as code execution rate limit")
 	}
 }
+
+func TestCompactionProgressStreamLifecycle(t *testing.T) {
+	for _, tc := range []struct{ name, ending, state string }{
+		{"success", "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"compaction_delta\",\"content\":\"private summary\"}}\n\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\ndata: {\"type\":\"message_stop\"}\n\n", "done"},
+		{"null", "data: {\"type\":\"content_block_stop\",\"index\":0}\n\ndata: {\"type\":\"message_stop\"}\n\n", "failed"},
+		{"interrupted", "", "failed"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var events []llmcontracts.CompactionProgress
+			input := "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"compaction\"}}\n\n" + tc.ending
+			client := NewWithAPIKey("fixture")
+			_, _ = client.parseAgenticStreamWithCallbacks(strings.NewReader(input), nil, nil, nil, nil, func(e llmcontracts.CompactionProgress) { events = append(events, e) })
+			if len(events) != 2 || events[0].State != "started" || events[1].State != tc.state {
+				t.Fatalf("progress = %#v", events)
+			}
+		})
+	}
+}
