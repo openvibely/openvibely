@@ -56,9 +56,8 @@ const (
 	emailProcessTimeout   = 5 * time.Minute
 	emailChatHistoryLimit = 50
 
-	emailMaxFileSize     = 20 << 20   // 20 MB per attachment
-	emailMaxTextFileSize = 100 * 1024 // 100KB for inline text-attachment context
-	emailMaxAttachments  = 10
+	emailMaxFileSize    = 20 << 20 // 20 MB per attachment
+	emailMaxAttachments = 10
 
 	emailMaxHeaderLineLength   = 998
 	emailPreferredHeaderLength = 78
@@ -1357,7 +1356,7 @@ func (s *EmailService) processIncomingMessageWithNormalizedSelfAddress(ctx conte
 			RuntimeTools:    s.buildEmailActionToolRuntime(projectID, msg.FromAddress),
 			LinkAttachments: s.linkAttachmentsToExecution,
 			AttachmentContextAndImages: func(atts []models.ChatAttachment) (string, []models.Attachment) {
-				return channelChatAttachmentContextAndImages(atts, emailMaxTextFileSize)
+				return channelChatAttachmentContextAndImages(atts, channelChatMaxInlineTextAttachmentSize)
 			},
 			CreateTaskContext: func(ctx context.Context, taskID string) error {
 				if s.emailTaskContextRepo == nil {
@@ -1433,7 +1432,7 @@ func (s *EmailService) stageEmailAttachments(parts []EmailInboundAttachment) (st
 		applog.Infof("[email] staged attachment file=%s size=%d mime=%s", fileName, len(part.Data), mediaType)
 	}
 	cleanup = false
-	attachmentContext, imageAttachments := channelChatAttachmentContextAndImages(chatAttachments, emailMaxTextFileSize)
+	attachmentContext, imageAttachments := channelChatAttachmentContextAndImages(chatAttachments, channelChatMaxInlineTextAttachmentSize)
 	return attachmentContext, imageAttachments, chatAttachments, nil
 }
 
