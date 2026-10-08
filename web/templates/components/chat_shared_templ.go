@@ -4019,7 +4019,11 @@ func pickerDefaultDetail(agents []models.LLMConfig, defaultID string) string {
 	if agent.ID == "" {
 		return ""
 	}
-	return agent.Name + " · " + pickerProvider(agent)
+	detail := pickerProvider(agent)
+	if agent.Model != "" {
+		detail += " · " + agent.Model
+	}
+	return detail
 }
 
 var _ = templruntime.GeneratedTemplate
