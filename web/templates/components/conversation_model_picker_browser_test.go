@@ -64,6 +64,7 @@ func TestBrowserFunctional_ConversationModelPicker(t *testing.T) {
  assert(sub.querySelectorAll('.ov-mp-pick').length===11,'favorite not duplicated');
  const hover=(target)=>target.dispatchEvent(new PointerEvent('pointerover',{bubbles:true,pointerType:'mouse'}));
  const reopen=()=>panel.querySelector('.ov-mp-provider').dispatchEvent(new PointerEvent('pointerenter',{pointerType:'mouse'}));
+ hover(panel.querySelector('.ov-mp-list'));assert(!sub.hidden,'crossing list padding keeps submenu open');
  hover(sub.querySelector('.ov-mp-row'));assert(!sub.hidden,'moving into submenu keeps it open');
  panel.querySelector('.ov-mp-provider').dispatchEvent(new PointerEvent('pointermove',{bubbles:true,pointerType:'mouse'}));
  assert(panel.querySelector('[data-picker-active]'),'provider hover highlights row');
