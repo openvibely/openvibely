@@ -40,3 +40,22 @@ func TestCompactionRecoversPersistedThinkingState(t *testing.T) {
 		}
 	}
 }
+
+func TestCompactionClosesInterruptedThinkingFence(t *testing.T) {
+	for _, fence := range []string{"```", "~~~~", "`````"} {
+		for _, live := range []bool{false, true} {
+			writer := NewWriter("", "", nil, context.Background(), time.Hour)
+			writer.Write([]byte("[Thinking]\n" + fence + "go\npartial"))
+			var thinking *bool
+			if live {
+				value := true
+				thinking = &value
+			}
+			CompactionReporter(writer, thinking)(llmcontracts.CompactionProgress{State: "started"})
+			writer.Stop()
+			if !strings.Contains(writer.String(), "partial\n"+fence+"\n\n[/Thinking]\n\n[Compaction started]") {
+				t.Fatalf("transcript=%q", writer.String())
+			}
+		}
+	}
+}

@@ -148,6 +148,24 @@ func MarkdownCodeRanges(text string) []MarkdownCodeRange {
 	return ranges
 }
 
+// UnclosedMarkdownFence returns the closing delimiter needed before appending
+// transcript controls to interrupted Markdown, or an empty string if none is needed.
+func UnclosedMarkdownFence(text string) string {
+	var char byte
+	length := 0
+	for _, sourceLine := range MarkdownLineRanges(text) {
+		line := text[sourceLine.Start:sourceLine.End]
+		if length > 0 {
+			if isClosingCodeFence(line, char, length) {
+				length = 0
+			}
+		} else if c, n, ok := openingCodeFence(line); ok {
+			char, length = c, n
+		}
+	}
+	return strings.Repeat(string(char), length)
+}
+
 func markdownLineEnd(text string, start int) (lineEnd, nextLine int) {
 	for i := start; i < len(text); i++ {
 		switch text[i] {
