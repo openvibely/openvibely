@@ -91,8 +91,8 @@ func TestKanbanColumnHasMobileSafeWidthAndTouchMenu(t *testing.T) {
 		"h-11",
 		"w-11",
 		"max-w-[calc(100vw-2rem)]",
-		`/tasks/backlog/execute?project_id=project-1`,
-		`class="pl-8"`,
+		`data-kanban-action="run"`,
+		`data-kanban-select`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("expected responsive kanban column markup to contain %q, got %s", want, body)
@@ -108,11 +108,11 @@ func TestKanbanColumnHasMobileSafeWidthAndTouchMenu(t *testing.T) {
 		t.Fatalf("kanban column dropzone must have overflow-y-auto for independent scroll on mobile, got %s", body)
 	}
 
-	executeIdx := strings.Index(body, `/tasks/backlog/execute?project_id=project-1`)
+	executeIdx := strings.Index(body, `data-kanban-action="run"`)
 	if executeIdx == -1 {
 		t.Fatalf("expected backlog Execute All action in markup, got %s", body)
 	}
-	executeSnippet := body[executeIdx:]
+	executeSnippet := body[executeIdx:executeIdx+strings.Index(body[executeIdx:], "</button>")]
 	if len(executeSnippet) > 500 {
 		executeSnippet = executeSnippet[:500]
 	}

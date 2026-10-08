@@ -432,7 +432,7 @@ templ TaskCardMergeSubmenus(task *models.Task, projectID string, state TaskCardM
 			}
 		</ul>
 	</li>
-	<li class="group relative" data-task-card-github-submenu onmouseenter="hoverKanbanSubmenu(event, this)" onmouseleave="cancelKanbanSubmenuHover(this)">
+	<li data-has-pull-request={ fmt.Sprintf("%t", state.PullRequest != nil) } class="group relative" data-task-card-github-submenu onmouseenter="hoverKanbanSubmenu(event, this)" onmouseleave="cancelKanbanSubmenuHover(this)">
 		<button type="button" class="justify-between" onfocus="positionKanbanSubmenu(this.parentElement)" onkeydown="handleKanbanSubmenuKeydown(event, this.parentElement)">
 			<span>GitHub</span>
 			<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
@@ -482,11 +482,18 @@ templ TaskCard(task models.Task, projectID string, viewingCategory string, llmMo
 		class="card bg-base-100 shadow-sm border border-base-300 hover:border-primary/40 hover:shadow-md transition-all mb-2 cursor-grab active:cursor-grabbing drag-cursor-surface relative min-w-0 overflow-visible"
 		data-task-id={ task.ID }
 		data-task-status={ string(task.Status) }
+		data-task-title={ task.Title }
+		data-task-priority={ fmt.Sprintf("%d", task.Priority) }
+		data-task-merge={ string(task.MergeStatus) }
+		data-task-branch={ task.WorktreeBranch }
 		data-task-category={ string(task.Category) }
 		data-display-order={ fmt.Sprintf("%d", task.DisplayOrder) }
 		onclick="handleTaskSelect(event)"
 		onpointerdown="handleTaskPointerDown(event)"
 	>
+		<label data-kanban-checkbox class="hidden absolute top-2 right-2 z-30" onclick="event.stopPropagation()">
+			<input type="checkbox" class="checkbox checkbox-sm" aria-label={ "Select " + task.Title } onchange="window.kanbanToggleCard(this)"/>
+		</label>
 		<!-- Kebab menu in top right corner -->
 		@CardActionDropdown(CardActionDropdownConfig{WrapperClass: "dropdown dropdown-end absolute top-2 right-14 lg:right-8 z-30", TriggerClass: "btn btn-ghost btn-xs min-h-11 h-11 w-11 p-0 lg:min-h-6 lg:h-6 lg:w-6", MenuClass: "z-[100] w-52 max-w-[calc(100vw-2rem)] translate-x-4", Label: "More actions for " + task.Title, StopPropagation: true, KanbanMenuKey: "task-" + task.ID, TriggerAriaExpanded: "false", TriggerKanbanMenu: true, TriggerTaskCardMenu: true, MenuKanbanContent: true}) {
 				<!-- Run option (hide in Active column) -->

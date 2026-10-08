@@ -4169,15 +4169,10 @@ func TestHandler_ListTasks_DeleteAllUsesSharedConfirmationModal(t *testing.T) {
 		`aria-describedby="delete_all_tasks_confirm_modal_description"`,
 		`id="delete_all_tasks_confirm_name"`,
 		`autofocus`,
-		`onclick="openDeleteAllTasksConfirm(this)"`,
-		`data-delete-all-tasks-category="completed"`,
-		`data-delete-all-tasks-category="backlog"`,
+		`data-kanban-action="delete"`,
+		`onclick="kanbanBatch(this)"`,
 		`data-project-id="` + project.ID + `"`,
-		`function openDeleteAllTasksConfirm(button)`,
-		`function confirmDeleteAllTasks()`,
-		`htmx.ajax('DELETE', requestURL`,
-		`target: '#kanban-board'`,
-		`swap: 'outerHTML'`,
+		`confirmDeleteAllTasks()`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("expected task-board delete-all confirmation contract to contain %q", want)

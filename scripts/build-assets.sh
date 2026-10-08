@@ -93,6 +93,7 @@ daisyui=$(fetch "$DAISYUI_URL" "$DAISYUI_SHA256")
 
 rm -rf "$dist"
 mkdir -p "$dist/vendor"
+cp "$assets/kanban.js" "$dist/kanban.js"
 for entry in "${FILES[@]}"; do
   IFS='|' read -r dest url sha <<<"$entry"
   cp "$(fetch "$url" "$sha")" "$dist/$dest"
