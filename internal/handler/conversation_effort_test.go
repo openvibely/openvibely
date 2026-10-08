@@ -129,6 +129,78 @@ func TestConversationPicker_RealPagesIncludeProviderAndEffortMetadata(t *testing
 	t.Fatal("selected model missing from task detail data")
 }
 
+func TestConversationPicker_DefaultShowsResolvedModelAndAcceptsTaskEffort(t *testing.T) {
+	h, e, repo := setupTestHandler(t)
+	global := createAgent(t, repo, func(a *models.LLMConfig) {
+		a.Name = "Global model"
+		a.Provider = models.ProviderOpenAI
+		a.Model = "gpt-5.5"
+		a.ReasoningEffort = "medium"
+	})
+	projectModel := createAgent(t, repo, func(a *models.LLMConfig) {
+		a.Name = "Project model"
+		a.Provider = models.ProviderOpenAI
+		a.Model = "gpt-5.5"
+		a.ReasoningEffort = "medium"
+		a.IsDefault = false
+	})
+	project := createProject(t, h, "Picker default")
+	project.DefaultAgentConfigID = &projectModel.ID
+	require.NoError(t, h.projectRepo.Update(context.Background(), project))
+	task := createTask(t, h, project.ID, "Picker task", func(tk *models.Task) { tk.AgentID = &global.ID })
+	for _, tc := range []struct{ path, name, id string }{
+		{"/chat?project_id=" + project.ID, "Project model", projectModel.ID},
+		{"/tasks/new?project_id=" + project.ID, "Project model", projectModel.ID},
+		{"/tasks/" + task.ID + "/thread", "Project model", projectModel.ID},
+	} {
+		t.Run(tc.path, func(t *testing.T) {
+			response := htmxGet(e, tc.path)
+			require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+			require.Contains(t, response.Body.String(), `>Default — `+tc.name+`</li>`)
+			require.Contains(t, response.Body.String(), `data-picker-effective-id="`+tc.id+`"`)
+		})
+	}
+	fallbackProject := createProject(t, h, "Picker global fallback")
+	fallbackPage := htmxGet(e, "/chat?project_id="+fallbackProject.ID)
+	require.Equal(t, http.StatusOK, fallbackPage.Code, fallbackPage.Body.String())
+	require.Contains(t, fallbackPage.Body.String(), `>Default — Global model</li>`)
+	require.Contains(t, fallbackPage.Body.String(), `data-picker-effective-id="`+global.ID+`"`)
+	for _, tc := range []struct {
+		projectID, modelID string
+	}{
+		{project.ID, projectModel.ID},
+		{fallbackProject.ID, global.ID},
+	} {
+		activeTask := createTask(t, h, tc.projectID, "Active chat", func(tk *models.Task) {
+			tk.Category = models.CategoryChat
+			tk.Status = models.StatusRunning
+			tk.AgentID = &global.ID
+		})
+		createExec(t, h, activeTask.ID, global.ID, func(ex *models.Execution) {
+			ex.Status = models.ExecRunning
+		})
+		response := htmxPost(e, "/chat/send?project_id="+tc.projectID, url.Values{
+			"message":          {"queued with default"},
+			"agent_id":         {"default"},
+			"reasoning_effort": {"high"},
+		})
+		require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+		queued, err := h.threadInputRepo.ListPendingForChat(context.Background(), tc.projectID)
+		require.NoError(t, err)
+		require.Len(t, queued, 1)
+		require.Equal(t, tc.modelID, queued[0].AgentConfigID)
+		require.Equal(t, "high", queued[0].ReasoningEffort)
+	}
+	endpoint := "/tasks/" + task.ID + "/thread/model"
+	require.Equal(t, http.StatusNoContent, postForm(e, endpoint, url.Values{"agent_id": {"default"}, "reasoning_effort": {"high"}}).Code)
+	response := htmxGet(e, endpoint+"?agent_id=default")
+	require.Equal(t, http.StatusOK, response.Code)
+	require.Contains(t, response.Body.String(), `"reasoning_effort":"high"`)
+	saved, err := repo.GetByID(context.Background(), projectModel.ID)
+	require.NoError(t, err)
+	require.Equal(t, "medium", saved.ReasoningEffort)
+}
+
 func TestConversationEffort_NewDeferredTaskPreservesSelection(t *testing.T) {
 	for _, scheduled := range []bool{false, true} {
 		name := "backlog"

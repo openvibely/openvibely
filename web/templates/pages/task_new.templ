@@ -66,7 +66,7 @@ templ NewTaskContent(project *models.Project, agents []models.LLMConfig, agentDe
     @components.ChatInputForm(components.ChatInputFormConfig{
      FormID: "task-thread-form", InputID: "task-message-input",
      PostEndpoint: fmt.Sprintf("/tasks?project_id=%s&from=new&thread=1", project.ID),
-     TargetID: "main-content", DiscardDraftOnLeave: true, SelectedAgentID: "default", Agents: agents, ShowModelSelector: true,
+     TargetID: "main-content", DiscardDraftOnLeave: true, SelectedAgentID: "default", DefaultAgentID: projectDefaultAgentID(project), Agents: agents, ShowModelSelector: true,
     })
    </div>
   </div>
@@ -241,3 +241,10 @@ templ NewTaskDetails(agents []models.LLMConfig, agentDefs []repository.AgentTask
 }
 
 func newTaskDefaultModel() *string { value := "default"; return &value }
+
+func projectDefaultAgentID(project *models.Project) string {
+	if project == nil || project.DefaultAgentConfigID == nil {
+		return ""
+	}
+	return *project.DefaultAgentConfigID
+}

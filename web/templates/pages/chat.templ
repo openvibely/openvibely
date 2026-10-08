@@ -34,9 +34,9 @@ func chatQueuedSteerEndpoint(input models.ThreadInput) string {
 }
 
 // Chat renders the full chat page with sidebar
-templ Chat(projects []models.Project, currentProjectID string, agents []models.LLMConfig, chatHistory []models.Execution, chatAttachments map[string][]models.ChatAttachment, pendingInputs []models.ThreadInput, latestPlanComplete bool, hasEarlier bool, windowLimit int) {
+templ Chat(projects []models.Project, currentProjectID string, agents []models.LLMConfig, chatHistory []models.Execution, chatAttachments map[string][]models.ChatAttachment, pendingInputs []models.ThreadInput, latestPlanComplete bool, hasEarlier bool, windowLimit int, defaultAgentID ...string) {
 	@layout.Base("Chat", projects, currentProjectID) {
-		@ChatContent(agents, chatHistory, currentProjectID, chatAttachments, pendingInputs, latestPlanComplete, hasEarlier, windowLimit)
+		@ChatContent(agents, chatHistory, currentProjectID, chatAttachments, pendingInputs, latestPlanComplete, hasEarlier, windowLimit, defaultAgentID...)
 	}
 }
 
@@ -65,7 +65,7 @@ templ ChatEarlierMessages(chatHistory []models.Execution, chatAttachments map[st
 }
 
 // ChatContent renders just the chat content (for HTMX)
-templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, currentProjectID string, chatAttachments map[string][]models.ChatAttachment, pendingInputs []models.ThreadInput, latestPlanComplete bool, hasEarlier bool, windowLimit int) {
+templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, currentProjectID string, chatAttachments map[string][]models.ChatAttachment, pendingInputs []models.ThreadInput, latestPlanComplete bool, hasEarlier bool, windowLimit int, defaultAgentID ...string) {
 	<div id="chat-page-root" class="h-full flex flex-col min-w-0 max-w-full" data-project-id={ currentProjectID } data-chat-revision={ components.ChatTranscriptRevision(chatHistory, nil, currentProjectID) }>
 		@layout.PageTitle("Chat")
 		<div data-page-header class="mb-4 flex items-center justify-between">
@@ -165,6 +165,7 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 			ShowModeSelector:       true,
 			ChatMode:               models.ChatModeOrchestrate,
 			ProjectID:              currentProjectID,
+			DefaultAgentID:         chatDefaultAgentID(defaultAgentID),
 			IsRunning:              chatHasActiveTurn(chatHistory),
 			ActiveTurnID:           chatActiveTurnID(chatHistory),
 			StopEndpoint:           "/chat/stop?project_id=" + currentProjectID,
@@ -1955,6 +1956,13 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 			})();
 		</script>
 	</div>
+}
+
+func chatDefaultAgentID(values []string) string {
+	if len(values) == 0 {
+		return ""
+	}
+	return values[0]
 }
 
 // ChatModelInfo renders a small info badge showing which agent was auto-selected

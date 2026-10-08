@@ -112,6 +112,7 @@ type ChatInputFormConfig struct {
 	SteerEndpoint          string // guarded explicit steering endpoint used by the platform modifier-click shortcut
 	ProjectID              string // non-empty enables model selection persistence via localStorage
 	SelectedAgentID        string // initial model selection; defaults to auto when empty
+	DefaultAgentID         string // project default, when different from the global default
 	PendingInputs          []models.ThreadInput
 	QueuedSteerEndpointFor func(models.ThreadInput) string
 }
@@ -145,13 +146,13 @@ func selectedAgentOrAuto(agentID string) string {
 	return agentID
 }
 
-func selectedAgentLabel(agentID string, agents []models.LLMConfig) string {
+func selectedAgentLabel(agentID string, agents []models.LLMConfig, defaultID string) string {
 	value := selectedAgentOrAuto(agentID)
 	switch value {
 	case "auto":
 		return "Auto"
 	case "default":
-		return "Default"
+		return pickerDefaultLabel(agents, defaultID)
 	}
 	for _, agent := range agents {
 		if agent.ID == value {
@@ -1643,10 +1644,10 @@ templ ChatInputForm(config ChatInputFormConfig) {
 								data-current-value={ selectedAgentOrAuto(config.SelectedAgentID) }
 								aria-haspopup="listbox"
 								aria-expanded="false"
-							><span class="chat-custom-select-label truncate flex-1 min-w-0 pointer-events-none">{ selectedAgentLabel(config.SelectedAgentID, config.Agents) }</span><svg class="flex-shrink-0 pointer-events-none" xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg></button>
+							><span class="chat-custom-select-label truncate flex-1 min-w-0 pointer-events-none">{ selectedAgentLabel(config.SelectedAgentID, config.Agents, config.DefaultAgentID) }</span><svg class="flex-shrink-0 pointer-events-none" xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg></button>
 							<ul class="chat-custom-select-options" aria-hidden="true" style="display:none">
 								<li data-value="auto">Auto</li>
-								<li data-value="default">Default</li>
+								<li data-value="default" data-picker-effective-id={ pickerDefaultAgent(config.Agents, config.DefaultAgentID).ID }>{ pickerDefaultLabel(config.Agents, config.DefaultAgentID) }</li>
 								for _, agent := range config.Agents {
 									<li data-value={ agent.ID } data-picker-name={ agent.Name } data-picker-model={ agent.Model } data-picker-provider={ pickerProvider(agent) } data-picker-efforts={ pickerEfforts(agent) } data-picker-default={ pickerDefaultEffort(agent) }>{ agent.Name } ({ agent.Model })</li>
 								}
@@ -6315,4 +6316,29 @@ templ ChatAmbiguousSteeringInputRowForTask(inputID, message string, taskID strin
 			<button type="button" class="btn btn-ghost btn-xs h-6 min-h-0 rounded-md px-2 text-xs text-error" hx-post={ "/thread-inputs/" + inputID + "/cancel" } hx-target={ "#thread-input-" + inputID } hx-swap="outerHTML" title="Discard uncertain steering" aria-label="Discard uncertain steering">Discard</button>
 		</div>
 	</div>
+}
+
+func pickerDefaultAgent(agents []models.LLMConfig, defaultID string) models.LLMConfig {
+	for _, agent := range agents {
+		if defaultID != "" && agent.ID == defaultID {
+			return agent
+		}
+	}
+	for _, agent := range agents {
+		if agent.IsDefault {
+			return agent
+		}
+	}
+	if len(agents) > 0 {
+		return agents[0]
+	}
+	return models.LLMConfig{}
+}
+
+func pickerDefaultLabel(agents []models.LLMConfig, defaultID string) string {
+	agent := pickerDefaultAgent(agents, defaultID)
+	if agent.ID == "" {
+		return "Default"
+	}
+	return "Default — " + agent.Name
 }

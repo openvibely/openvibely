@@ -42,7 +42,7 @@ func chatQueuedSteerEndpoint(input models.ThreadInput) string {
 }
 
 // Chat renders the full chat page with sidebar
-func Chat(projects []models.Project, currentProjectID string, agents []models.LLMConfig, chatHistory []models.Execution, chatAttachments map[string][]models.ChatAttachment, pendingInputs []models.ThreadInput, latestPlanComplete bool, hasEarlier bool, windowLimit int) templ.Component {
+func Chat(projects []models.Project, currentProjectID string, agents []models.LLMConfig, chatHistory []models.Execution, chatAttachments map[string][]models.ChatAttachment, pendingInputs []models.ThreadInput, latestPlanComplete bool, hasEarlier bool, windowLimit int, defaultAgentID ...string) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
@@ -75,7 +75,7 @@ func Chat(projects []models.Project, currentProjectID string, agents []models.LL
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = ChatContent(agents, chatHistory, currentProjectID, chatAttachments, pendingInputs, latestPlanComplete, hasEarlier, windowLimit).Render(ctx, templ_7745c5c3_Buffer)
+			templ_7745c5c3_Err = ChatContent(agents, chatHistory, currentProjectID, chatAttachments, pendingInputs, latestPlanComplete, hasEarlier, windowLimit, defaultAgentID...).Render(ctx, templ_7745c5c3_Buffer)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -228,7 +228,7 @@ func ChatEarlierMessages(chatHistory []models.Execution, chatAttachments map[str
 }
 
 // ChatContent renders just the chat content (for HTMX)
-func ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, currentProjectID string, chatAttachments map[string][]models.ChatAttachment, pendingInputs []models.ThreadInput, latestPlanComplete bool, hasEarlier bool, windowLimit int) templ.Component {
+func ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, currentProjectID string, chatAttachments map[string][]models.ChatAttachment, pendingInputs []models.ThreadInput, latestPlanComplete bool, hasEarlier bool, windowLimit int, defaultAgentID ...string) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
@@ -512,6 +512,7 @@ func ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, curr
 			ShowModeSelector:       true,
 			ChatMode:               models.ChatModeOrchestrate,
 			ProjectID:              currentProjectID,
+			DefaultAgentID:         chatDefaultAgentID(defaultAgentID),
 			IsRunning:              chatHasActiveTurn(chatHistory),
 			ActiveTurnID:           chatActiveTurnID(chatHistory),
 			StopEndpoint:           "/chat/stop?project_id=" + currentProjectID,
@@ -540,6 +541,13 @@ func ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, curr
 		}
 		return nil
 	})
+}
+
+func chatDefaultAgentID(values []string) string {
+	if len(values) == 0 {
+		return ""
+	}
+	return values[0]
 }
 
 // ChatModelInfo renders a small info badge showing which agent was auto-selected
@@ -572,7 +580,7 @@ func ChatModelInfo(info string) templ.Component {
 			var templ_7745c5c3_Var23 string
 			templ_7745c5c3_Var23, templ_7745c5c3_Err = templ.JoinStringErrs(info)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/chat.templ`, Line: 1964, Col: 9}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/chat.templ`, Line: 1972, Col: 9}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var23))
 			if templ_7745c5c3_Err != nil {

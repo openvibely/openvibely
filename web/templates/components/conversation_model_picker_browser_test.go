@@ -65,6 +65,8 @@ func TestBrowserFunctional_ConversationModelPicker(t *testing.T) {
  const hover=(target)=>target.dispatchEvent(new PointerEvent('pointerover',{bubbles:true,pointerType:'mouse'}));
  const reopen=()=>panel.querySelector('.ov-mp-provider').dispatchEvent(new PointerEvent('pointerenter',{pointerType:'mouse'}));
  hover(panel.querySelector('.ov-mp-list'));assert(!sub.hidden,'crossing list padding keeps submenu open');
+ sub.dispatchEvent(new PointerEvent('pointerenter',{pointerType:'mouse'}));
+ await new Promise(r=>setTimeout(r,400));assert(!sub.hidden,'entering submenu cancels delayed close');
  hover(sub.querySelector('.ov-mp-row'));assert(!sub.hidden,'moving into submenu keeps it open');
  panel.querySelector('.ov-mp-provider').dispatchEvent(new PointerEvent('pointermove',{bubbles:true,pointerType:'mouse'}));
  assert(panel.querySelector('[data-picker-active]'),'provider hover highlights row');
@@ -76,6 +78,12 @@ func TestBrowserFunctional_ConversationModelPicker(t *testing.T) {
  panel.querySelector('.ov-mp-provider').dispatchEvent(new PointerEvent('pointermove',{bubbles:true,pointerType:'mouse'}));
  hover(panel.querySelector('.ov-mp-effort'));assert(sub.hidden,'effort hover closes submenu');
  assert(!panel.querySelector('[data-picker-active]'),'effort hover clears row highlight');reopen();
+ hover(panel.querySelector('.ov-mp-heading'));assert(!sub.hidden,'heading does not close submenu during travel');
+ await new Promise(r=>setTimeout(r,400));assert(sub.hidden,'submenu closes when pointer stays on heading');reopen();
+ hover(panel.querySelector('.ov-mp-list'));await new Promise(r=>setTimeout(r,400));
+ assert(sub.hidden,'submenu closes when pointer stays on list padding');reopen();
+ hover(panel.querySelector('.ov-mp-list'));reopen();
+ await new Promise(r=>setTimeout(r,400));assert(!sub.hidden,'returning to provider cancels delayed close');
  hover(panel.querySelector('.ov-mp-provider'));assert(!sub.hidden,'provider hover keeps submenu open');
  const search=panel.querySelector('input');search.value='Configuration 23';search.dispatchEvent(new Event('input'));
  assert(sub.hidden && panel.querySelectorAll('.ov-mp-pick').length===1,'search all providers');
@@ -104,6 +112,12 @@ func TestBrowserFunctional_ConversationModelPicker(t *testing.T) {
  list.scrollTop=50;await wait();assert(list.scrollTop>0,'list remains scrollable');
  assert(!panel.querySelector('.ov-mp-effort').hidden,'effort stays accessible while list scrolls');
  list.style.maxHeight='';await wait();
+ const defaultRow=panel.querySelector('.ov-mp-pick[data-model=default]');
+ assert(defaultRow.textContent.includes('Default — Configuration 00'),'global default identifies its model');
+ defaultRow.click();
+ assert(trigger.dataset.currentValue==='default'&&!panel.querySelector('.ov-mp-effort').hidden,'global default exposes effort without changing selection');
+ const defaultSlider=panel.querySelector('input[type=range]');defaultSlider.value='2';defaultSlider.dispatchEvent(new Event('input'));
+ assert(document.querySelector('[name=agent_id]').value==='default'&&document.querySelector('[name=reasoning_effort]').value==='high','global default sends selected effort');
  document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));
  assert(panel.hidden,'escape closes');
  document.body.setAttribute('data-test-result','pass');
@@ -117,13 +131,13 @@ func TestBrowserFunctional_ConversationModelPicker(t *testing.T) {
 func TestBrowserFunctional_TaskModelPickerPersistence(t *testing.T) {
 	chrome := testChromePath(t)
 	agents := []models.LLMConfig{
-		{ID: "a", Name: "First", Provider: models.ProviderOpenAI, Model: "gpt-5.5", ReasoningEffort: "medium"},
+		{ID: "a", Name: "First", Provider: models.ProviderOpenAI, Model: "gpt-5.5", ReasoningEffort: "medium", IsDefault: true},
 		{ID: "b", Name: "Second", Provider: models.ProviderOpenAI, Model: "gpt-5.5", ReasoningEffort: "medium"},
 		{ID: "c", Name: "Local", Provider: models.ProviderOllama, Model: "qwen"},
 		{ID: "mix", Name: "Ensemble", Provider: models.ProviderMixture},
 	}
 	var content bytes.Buffer
-	if err := ChatInputForm(ChatInputFormConfig{FormID: "task-form", InputID: "message-input", TargetID: "messages", PostEndpoint: "/tasks/t/thread", TaskID: "t", Agents: agents, SelectedAgentID: "a", ShowModelSelector: true}).Render(context.Background(), &content); err != nil {
+	if err := ChatInputForm(ChatInputFormConfig{FormID: "task-form", InputID: "message-input", TargetID: "messages", PostEndpoint: "/tasks/t/thread", TaskID: "t", Agents: agents, DefaultAgentID: "b", SelectedAgentID: "a", ShowModelSelector: true}).Render(context.Background(), &content); err != nil {
 		t.Fatal(err)
 	}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -131,8 +145,8 @@ func TestBrowserFunctional_TaskModelPickerPersistence(t *testing.T) {
  localStorage.clear();window.htmx={process:function(){}};
  const stored={a:'high',b:'low'},posts=[];let failNextWrite=false,failNextRead=false;
  window.fetch=async function(url,options){
- if(options?.method==='POST'){if(failNextWrite){failNextWrite=false;return {ok:false};}const body=options.body;await new Promise(r=>setTimeout(r,20));stored[body.get('agent_id')]=body.get('reasoning_effort');posts.push(body.get('agent_id'));return {ok:true};}
- if(failNextRead){failNextRead=false;return {ok:false};}const id=new URL(url,location.href).searchParams.get('agent_id');await new Promise(r=>setTimeout(r,id==='a'?80:20));return {ok:true,json:async()=>({reasoning_effort:stored[id]||''})};
+ if(options?.method==='POST'){if(failNextWrite){failNextWrite=false;return {ok:false};}const body=options.body;await new Promise(r=>setTimeout(r,20));stored[body.get('agent_id')==='default'?'b':body.get('agent_id')]=body.get('reasoning_effort');posts.push(body.get('agent_id'));return {ok:true};}
+ if(failNextRead){failNextRead=false;return {ok:false};}const selected=new URL(url,location.href).searchParams.get('agent_id'),id=selected==='default'?'b':selected;await new Promise(r=>setTimeout(r,id==='a'?80:20));return {ok:true,json:async()=>({reasoning_effort:stored[id]||''})};
  };
  </script>`+content.String()+`<div id="browser-result"></div><script>
  (async()=>{const assert=(v,m)=>{if(!v)throw Error(m)},wait=ms=>new Promise(r=>setTimeout(r,ms));try{
@@ -203,6 +217,13 @@ func TestBrowserFunctional_TaskModelPickerPersistence(t *testing.T) {
  await wait(150);
  assert(loadingSend?.get('agent_id')==='a'&&loadingSend?.get('reasoning_effort')==='medium','send uses loaded effort even when model changes during lookup');
  assert(modelInput.value==='b'&&effort.value==='high','lookup does not undo later model selection');
+ const defaultRow=panel.querySelector('.ov-mp-pick[data-model=default]');
+ assert(defaultRow.textContent.includes('Default — Second'),'project default identifies its model');
+ defaultRow.click();await trigger._ovModelState.ready;
+ assert(modelInput.value==='default'&&effort.value==='high'&&!panel.querySelector('.ov-mp-effort').hidden,'default keeps its selection and loads project model effort');
+ const defaultSlider=panel.querySelector('input[type=range]');defaultSlider.value='1';defaultSlider.dispatchEvent(new Event('input'));defaultSlider.dispatchEvent(new Event('change'));
+ await trigger._ovModelState.pending;
+ assert(stored.b==='medium'&&posts.at(-1)==='default','default effort saves against the project model');
 
  document.body.dataset.testResult='pass';
  }catch(e){document.body.dataset.testResult='fail';document.body.dataset.testError=e.stack;document.getElementById('browser-result').textContent=String(e)}})();
