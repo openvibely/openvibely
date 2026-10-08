@@ -23,9 +23,9 @@
 .ov-menu .ov-menu-actions { font-size: inherit; }
 .ov-menu-actions > li > form { display: block; padding: 0; background: transparent; }
 .ov-menu-row { display: flex; align-items: center; min-width: 0; border-radius: 7px; }
-.ov-menu .ov-menu-option,
-.ov-menu-actions > li:not(.menu-title) > :is(a, button, summary),
-.ov-menu-actions > :is(a, button) {
+.ov-menu .ov-menu-option:where(:not(.hidden)),
+.ov-menu-actions > li:not(.menu-title) > :is(a, button, summary):where(:not(.hidden)),
+.ov-menu-actions > :is(a, button):where(:not(.hidden)) {
   display: flex;
   align-items: center;
   gap: 8px;

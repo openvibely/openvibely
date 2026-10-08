@@ -82,6 +82,10 @@ func TestBrowserFunctional_PopoverCompatibility(t *testing.T) {
 					return
 				}
 				fmt.Fprint(&icons, `</div>`)
+				if err := components.TaskCard(models.Task{ID: "hidden-retry-fixture", Title: "Retry visibility", Category: models.CategoryBacklog, Status: models.StatusPending}, project.ID, "backlog", nil, nil).Render(r.Context(), &icons); err != nil {
+					t.Error(err)
+					return
+				}
 
 				html := strings.Replace(page.String(), "</body>", icons.String()+"</body>", 1)
 				if legacy {
@@ -109,6 +113,16 @@ func TestBrowserFunctional_PopoverCompatibility(t *testing.T) {
 				}
 				for _, theme := range []string{"dark", "light"} {
 					applyTheme(theme)
+					b.waitFor("Retry initially hidden "+theme, `getComputedStyle(document.querySelector('#task-hidden-retry-fixture [data-task-card-merge-options-retry]')).display`, "none")
+					for _, mode := range []string{"loading", "error", "idle"} {
+						b.evaluate(fmt.Sprintf(`setTaskCardMergeOptionsStatus(document.querySelector('#task-hidden-retry-fixture [data-task-card-merge-options]'), %q, null, null); 'ok'`, mode))
+						want := "none"
+						if mode == "error" {
+							want = "flex"
+						}
+						b.waitFor("Retry visibility "+theme+" "+mode, `getComputedStyle(document.querySelector('#task-hidden-retry-fixture [data-task-card-merge-options-retry]')).display`, want)
+					}
+
 					b.waitFor("task panel divider", `String(getComputedStyle(document.querySelector('#task-details-panel > [role="tablist"]')).boxShadow !== 'none')`, "true")
 					b.click(`#task-thread-form-agent-select`)
 					b.waitFor("composer menu surface", `String(getComputedStyle(document.getElementById('conversation-model-picker')).backgroundColor !== 'rgba(0, 0, 0, 0)' && getComputedStyle(document.getElementById('conversation-model-picker')).borderTopWidth === '1px')`, "true")
