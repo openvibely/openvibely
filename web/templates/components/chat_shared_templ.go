@@ -4015,7 +4015,11 @@ func pickerDefaultAgent(agents []models.LLMConfig, defaultID string) models.LLMC
 }
 
 func pickerDefaultDetail(agents []models.LLMConfig, defaultID string) string {
-	return pickerDefaultAgent(agents, defaultID).Name
+	agent := pickerDefaultAgent(agents, defaultID)
+	if agent.ID == "" {
+		return ""
+	}
+	return agent.Name + " · " + pickerProvider(agent)
 }
 
 var _ = templruntime.GeneratedTemplate
