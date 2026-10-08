@@ -3322,10 +3322,22 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 			function hoverKanbanSubmenu(event, container) {
 				if (!container) return;
 				const dropdown = container.closest('[data-kanban-menu-key]');
+				if (!dropdown) return;
 				const sourcePanel = container.querySelector(':scope > [data-task-card-submenu-panel]');
 				const current = Array.from(document.querySelectorAll('[data-task-card-submenu-portaled="true"]')).find(function(panel) {
 					return panel.__openVibelySubmenuDropdown === dropdown;
 				});
+				function activate() {
+					if (!sourcePanel) {
+						closeKanbanSubmenus(dropdown, null);
+						return;
+					}
+					positionKanbanSubmenu(container);
+					const panel = Array.from(document.querySelectorAll('[data-task-card-submenu-portaled="true"]')).find(function(candidate) {
+						return candidate.__openVibelySubmenuDropdown === dropdown;
+					});
+					if (panel) panel.__openVibelyPointerOrigin = event ? {x: event.clientX, y: event.clientY} : null;
+				}
 				if (current && current.__openVibelySubmenuSourcePanel !== sourcePanel && current.__openVibelyPointerOrigin && event) {
 				const bounds = current.getBoundingClientRect();
 				const menu = dropdown.querySelector(':scope > [data-kanban-menu-content]');
@@ -3339,17 +3351,13 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					const pending = {container: container, dropdown: dropdown, timer: null};
 					pending.timer = setTimeout(function() {
 						if (pendingKanbanSubmenuHover !== pending || dropdown.getAttribute('data-kanban-menu-open') !== 'true' || !container.isConnected) return;
-						positionKanbanSubmenu(container);
-						const next = document.querySelector('[data-task-card-submenu-portaled="true"]');
-						if (next) next.__openVibelyPointerOrigin = {x: event.clientX, y: event.clientY};
+						activate();
 					}, 300);
 					pendingKanbanSubmenuHover = pending;
 					return;
 				}
 				}
-				positionKanbanSubmenu(container);
-				const panel = document.querySelector('[data-task-card-submenu-portaled="true"]');
-				if (panel) panel.__openVibelyPointerOrigin = event ? {x: event.clientX, y: event.clientY} : null;
+				activate();
 			}
 
 			function handleKanbanSubmenuKeydown(event, container) {
