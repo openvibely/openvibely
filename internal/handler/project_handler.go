@@ -650,12 +650,16 @@ func (h *Handler) ViewSchedule(c echo.Context) error {
 	// Keep model configurations and primary Agent definitions as separate choices.
 	agents, _ := h.llmConfigRepo.ListBadgeOptions(c.Request().Context())
 	agentDefs := h.listScheduleAgentOptions(c.Request().Context(), projectID)
+	calendarState, err := h.scheduleRepo.CalendarState(c.Request().Context(), projectID)
+	if err != nil {
+		return err
+	}
 	// For HTMX requests, return just the schedule content
 	if isHTMX {
-		return render(c, http.StatusOK, pages.ScheduleContent(currentProject, tasks, weekOffset, agents, agentDefs))
+		return render(c, http.StatusOK, pages.ScheduleContent(currentProject, tasks, weekOffset, agents, agentDefs, calendarState))
 	}
 
-	return render(c, http.StatusOK, pages.Schedule(projects, currentProject, tasks, weekOffset, agents, agentDefs))
+	return render(c, http.StatusOK, pages.Schedule(projects, currentProject, tasks, weekOffset, agents, agentDefs, calendarState))
 }
 
 func render(c echo.Context, status int, component templ.Component) error {
