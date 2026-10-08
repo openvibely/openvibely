@@ -87,7 +87,7 @@ templ searchableSelectorScript() {
  </style>
 	<script>
 		(function() {
-			var controllerVersion = 17;
+			var controllerVersion = 18;
 			var previousController = window.openVibelySearchableSelectorController;
 			document.querySelectorAll('[data-searchable-selector-search]').forEach(function(input) { input.type = 'text'; });
 			document.querySelectorAll('[data-project-selector-clear]').forEach(function(control) { control.remove(); });
@@ -309,7 +309,7 @@ templ searchableSelectorScript() {
             listen(document, 'pointermove', function(event) {
                 var root = rootFor(event.target); if (!root) return;
                 var option = event.target.closest('[data-searchable-selector-option]');
-                if (option) highlight(root, option);
+                if (option || event.target.closest('[data-searchable-selector-dialog]')) highlight(root, option);
                 // Keep return-focus suppression until focus leaves the trigger.
                 // Pointer hover must not restore a keyboard outline.
             });

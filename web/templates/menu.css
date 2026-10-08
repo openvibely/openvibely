@@ -38,7 +38,7 @@
   text-align: left;
   cursor: pointer;
 }
-.ov-menu .ov-menu-option,
+.ov-menu .ov-menu-option:not(.text-error),
 .ov-menu-actions > li:not(.menu-title) > :is(a, button, summary):not(.text-error),
 .ov-menu-actions > :is(a, button):not(.text-error) { color: inherit; }
 .ov-menu .ov-menu-row[data-picker-active],
@@ -92,4 +92,10 @@
   background-clip: padding-box;
   border-radius: 8px;
   min-height: 24px;
+}
+
+/* Unavailable actions must not look clickable when Git state disables them. */
+.ov-menu.ov-menu-actions :is(a, button, summary):is(:disabled, [aria-disabled="true"]) {
+  opacity: 0.45;
+  cursor: not-allowed;
 }

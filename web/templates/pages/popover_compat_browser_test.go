@@ -77,7 +77,7 @@ func TestBrowserFunctional_PopoverCompatibility(t *testing.T) {
 				fmt.Fprint(&icons, `</a></div>`)
 				fmt.Fprint(&icons, `<div id="menu-style-fixture">`)
 				action := components.CardActionDropdown(components.CardActionDropdownConfig{Label: "Style reference"})
-				if err := action.Render(templ.WithChildren(r.Context(), templ.Raw(`<li><button type="button" class="active">Action</button></li><li><button type="button" class="text-error">Delete</button></li><li><form><button class="ov-menu-option w-full" type="submit">Form action</button></form></li>`)), &icons); err != nil {
+				if err := action.Render(templ.WithChildren(r.Context(), templ.Raw(`<li><button type="button" class="active">Action</button></li><li><button type="button" class="text-error">Delete</button></li><li><a href="#" class="text-error">Delete alerts</a></li><li><button disabled>Unavailable</button></li><li><form><button class="ov-menu-option w-full" type="submit">Form action</button></form></li>`)), &icons); err != nil {
 					t.Error(err)
 					return
 				}
@@ -113,11 +113,25 @@ func TestBrowserFunctional_PopoverCompatibility(t *testing.T) {
 					b.click(`#task-thread-form-agent-select`)
 					b.waitFor("composer menu surface", `String(getComputedStyle(document.getElementById('conversation-model-picker')).backgroundColor !== 'rgba(0, 0, 0, 0)' && getComputedStyle(document.getElementById('conversation-model-picker')).borderTopWidth === '1px')`, "true")
 					b.waitFor("shared menu surfaces "+theme, `(function(){var model=getComputedStyle(document.getElementById('conversation-model-picker'));return String(['#project-selector-dialog','#project-tab-menu','#task-property-picker','#menu-style-fixture .dropdown-content'].every(function(selector){var s=getComputedStyle(document.querySelector(selector));return ['backgroundColor','borderTopWidth','borderTopColor','borderRadius','boxShadow','fontSize'].every(function(key){return s[key]===model[key]})}))})()`, "true")
-					b.waitFor("selected and destructive menu colors "+theme, `(function(){var normal=getComputedStyle(document.querySelector('.ov-mp-pick')).color;return String(getComputedStyle(document.querySelector('#menu-style-fixture .active')).color===normal && getComputedStyle(document.querySelector('#menu-style-fixture .text-error')).color!==normal)})()`, "true")
+					b.waitFor("selected and destructive menu colors "+theme, `(function(){var normal=getComputedStyle(document.querySelector('.ov-mp-pick')).color;return String(getComputedStyle(document.querySelector('#menu-style-fixture .active')).color===normal && getComputedStyle(document.querySelector('#menu-style-fixture button.text-error')).color!==normal && getComputedStyle(document.querySelector('#menu-style-fixture a.text-error')).color===getComputedStyle(document.querySelector('#menu-style-fixture button.text-error')).color)})()`, "true")
 					b.waitFor("shared menu row spacing "+theme, `(function(){var model=getComputedStyle(document.querySelector('.ov-mp-pick'));return String(['#project-selector-dialog [data-searchable-selector-option]','#menu-style-fixture li button','#menu-style-fixture form button','#project-tab-settings-action','#task-property-picker button[data-value]'].every(function(selector){var s=getComputedStyle(document.querySelector(selector));return ['paddingTop','paddingBottom','paddingLeft','paddingRight','fontSize','borderRadius'].every(function(key){return s[key]===model[key]})}))})()`, "true")
 					b.waitFor("shared search headers "+theme, `(function(){var model=getComputedStyle(document.querySelector('.ov-mp-search'));return String(Array.from(document.querySelectorAll('[data-searchable-selector-search-shell],#task-property-picker .ov-menu-search')).every(function(el){var s=getComputedStyle(el);return ['padding','borderBottomWidth','borderBottomColor'].every(function(key){return s[key]===model[key]})}))})()`, "true")
 					b.waitFor("composer active-row color", `(function(){var row=document.querySelector('#conversation-model-picker .ov-mp-row');row.setAttribute('data-picker-active','');return String(getComputedStyle(row).backgroundColor!=='rgba(0, 0, 0, 0)')})()`, "true")
 					b.click(`.project-bar-brand`)
+					b.evaluate(`var panel=document.querySelector('#menu-style-fixture .dropdown-content').cloneNode(true);panel.id='submenu-hover-fixture';panel.classList.remove('dropdown-content');panel.setAttribute('data-task-card-submenu-portaled','true');panel.style.cssText='display:block;visibility:visible;opacity:1;position:fixed;left:300px;top:180px;z-index:2000';panel.querySelector('.active').classList.remove('active');document.body.append(panel);'ok'`)
+					hover(`#submenu-hover-fixture button:not(:disabled)`)
+					b.waitFor("enabled submenu hover "+theme, `String(getComputedStyle(document.querySelector('#submenu-hover-fixture button:not(:disabled)')).backgroundColor !== 'rgba(0, 0, 0, 0)')`, "true")
+					hover(`#submenu-hover-fixture button:disabled`)
+					b.waitFor("disabled submenu appearance "+theme, `(function(){var s=getComputedStyle(document.querySelector('#submenu-hover-fixture button:disabled'));return [s.opacity,s.cursor,s.backgroundColor].join('|')})()`, "0.45|not-allowed|rgba(0, 0, 0, 0)")
+					b.evaluate(`document.getElementById('submenu-hover-fixture').remove();'ok'`)
+					b.click(`#project-selector-trigger`)
+					hover(`#project-selector-dialog [data-searchable-selector-option]`)
+					b.waitFor("project option highlighted", `String(!!document.querySelector('#project-selector-dialog [data-selector-active]'))`, "true")
+					hover(`#project-selector-dialog input`)
+					b.waitFor("project search clears highlight", `String(!document.querySelector('#project-selector-dialog [data-selector-active]'))`, "true")
+					b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": "Escape", "code": "Escape", "windowsVirtualKeyCode": 27}, nil)
+					b.waitFor("project menu closed", `String(!document.getElementById('project-selector-dialog').open)`, "true")
+
 					b.evaluate(`var source=document.createElement('a');source.id='compat-search-source';source.className='stream-web-search-source';source.textContent='Search result';source.style.cssText='position:fixed;left:300px;top:180px;z-index:1000';document.body.append(source);'ok'`)
 					hover(`#compat-search-source`)
 					b.waitFor("search source border and hover", `String(getComputedStyle(document.getElementById('compat-search-source')).borderTopWidth === '1px' && getComputedStyle(document.getElementById('compat-search-source')).backgroundColor !== 'rgba(0, 0, 0, 0)')`, "true")
