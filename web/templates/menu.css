@@ -99,3 +99,11 @@
   opacity: 0.45;
   cursor: not-allowed;
 }
+
+/* Create actions sit outside the padded results so the divider spans the panel. */
+.ov-menu-create-row {
+  padding: 6px;
+  border-bottom: 1px solid var(--ov-border-subtle, #414753);
+  flex-shrink: 0;
+}
+.ov-menu-create-row svg { width: 16px; height: 16px; flex-shrink: 0; }

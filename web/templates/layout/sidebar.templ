@@ -1177,9 +1177,7 @@ templ ProjectSelector(projects []models.Project, currentProjectID string) {
 							class="btn btn-ghost btn-xs p-0 [&>svg]:opacity-60 hover:[&>svg]:opacity-100"
 							title="New Project"
 						>
-							<svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5 transition-opacity" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
-							</svg>
+							@templateui.SearchableSelectorCreateIcon()
 						</button>
                         }
 					</div>
@@ -1219,18 +1217,11 @@ templ ProjectSelector(projects []models.Project, currentProjectID string) {
 					<span id="project-selector-current-label" class="min-w-0 truncate" data-searchable-selector-current-label>{ sidebarProjectDisplayName(projects, currentProjectID) }</span>
 				</button>
                 }
-				@templateui.SearchableSelector(templateui.SearchableSelectorConfig{
-					ID: "project-selector",
-					Kind: "project",
-					Local: true,
-					InitialStatus: "All projects shown.",
-				}) {
-                    if serverRuntimeMode(ctx) == "desktop" {
-                        <div class={ templateui.SearchableSelectorMenuClass }>
-                        <button id="new-project-btn" type="button" data-searchable-selector-option data-searchable-selector-action class={ templateui.SearchableSelectorOptionClass } onclick="this.closest('dialog').close()"><span class="w-4 shrink-0" aria-hidden="true">+</span><span>Create New Project</span></button>
-                        </div>
-                        <hr class="my-1" data-searchable-selector-divider role="separator"/>
-                    }
+                {{ selectorConfig := templateui.SearchableSelectorConfig{ID: "project-selector", Kind: "project", Local: true, InitialStatus: "All projects shown."} }}
+                if serverRuntimeMode(ctx) == "desktop" {
+                    {{ selectorConfig.CreateButtonID = "new-project-btn"; selectorConfig.CreateLabel = "Create New Project" }}
+                }
+                @templateui.SearchableSelector(selectorConfig) {
 					if len(projects) == 0 {
 						<div class="px-3 py-8 text-center text-sm text-base-content/60" data-project-selector-no-projects>No projects available.</div>
 					} else {
