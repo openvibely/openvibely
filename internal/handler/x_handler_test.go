@@ -249,6 +249,7 @@ func TestXConfigureInitializesCursorAndCancelsReplacedService(t *testing.T) {
 	receiptRepo := repository.NewXInboundReceiptRepo(db)
 	h.SetXRepositories(authRepo, selectionRepo, contextRepo, receiptRepo)
 	require.NoError(t, h.settingsRepo.Set(context.Background(), service.XSettingAccountID, "old"))
+	require.NoError(t, h.settingsRepo.Set(context.Background(), service.XSettingPaginationState, `{"next_token":"stale-token"}`))
 	oldAPI := &cancelAwareXAPI{started: make(chan struct{}), cancelled: make(chan struct{})}
 	old := service.NewXService(service.XCredentials{ConsumerKey: "old-key", ConsumerSecret: "old-secret", AccessToken: "old-token", AccessTokenSecret: "old-token-secret"}, h.settingsRepo, h.projectRepo, h.llmConfigRepo, h.taskRepo, h.execRepo, h.scheduleRepo, h.taskSvc)
 	old.SetAPI(oldAPI)
@@ -279,6 +280,9 @@ func TestXConfigureInitializesCursorAndCancelsReplacedService(t *testing.T) {
 	cursor, err := h.settingsRepo.Get(context.Background(), service.XSettingSinceID)
 	require.NoError(t, err)
 	require.Equal(t, "99", cursor)
+	paginationState, err := h.settingsRepo.Get(context.Background(), service.XSettingPaginationState)
+	require.NoError(t, err)
+	require.Empty(t, paginationState)
 	require.True(t, h.xService.Status().Running)
 }
 

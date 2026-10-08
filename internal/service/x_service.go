@@ -32,6 +32,7 @@ const (
 	XSettingPollIntervalSeconds = "x_poll_interval_seconds"
 	XSettingSendResponses       = "x_send_responses"
 	XSettingSinceID             = "x_mentions_since_id"
+	XSettingPaginationState     = "x_mentions_pagination_state"
 	XSettingAccountID           = "x_account_id"
 	XSettingConfigurationID     = "x_configuration_id"
 	xProcessTimeout             = 5 * time.Minute
@@ -277,7 +278,7 @@ func (s *XService) pollingSettings(ctx context.Context) (map[string]string, erro
 	if s.settingsRepo == nil {
 		return nil, fmt.Errorf("X settings repository is not configured")
 	}
-	values, err := s.settingsRepo.GetMany(ctx, []string{XSettingSinceID, XSettingAccountID, XSettingConfigurationID})
+	values, err := s.settingsRepo.GetMany(ctx, []string{XSettingSinceID, XSettingAccountID, XSettingConfigurationID, XSettingPaginationState})
 	if err != nil {
 		return nil, fmt.Errorf("load X polling settings: %w", err)
 	}
@@ -300,6 +301,14 @@ func (s *XService) requireConfigurationWithExecutor(ctx context.Context, exec re
 	return nil
 }
 
+type xMentionPaginationState struct {
+	AccountID       string `json:"account_id"`
+	ConfigurationID string `json:"configuration_id"`
+	SinceID         string `json:"since_id"`
+	TargetID        string `json:"target_id"`
+	NextToken       string `json:"next_token"`
+}
+
 func (s *XService) pollOnce(ctx context.Context) error {
 	if s.receiptRepo == nil || s.authRepo == nil || s.projectRepo == nil {
 		return fmt.Errorf("X channel persistence is not configured")
@@ -309,10 +318,23 @@ func (s *XService) pollOnce(ctx context.Context) error {
 		return err
 	}
 	// Keep one coherent settings snapshot for the provider batch. Durable handoffs
-	// and the final cursor compare-and-set revalidate configuration in transactions.
+	// and pagination/cursor compare-and-sets revalidate configuration in transactions.
 	sinceID := pollingSettings[XSettingSinceID]
+	paginationStateRaw := pollingSettings[XSettingPaginationState]
 	pagination := ""
 	newest := ""
+	targetKnown := false
+	if paginationStateRaw != "" {
+		var saved xMentionPaginationState
+		if err := json.Unmarshal([]byte(paginationStateRaw), &saved); err == nil &&
+			saved.AccountID == s.me.ID && saved.ConfigurationID == s.configurationID &&
+			saved.SinceID == sinceID && saved.NextToken != "" {
+			pagination = saved.NextToken
+			newest = saved.TargetID
+			targetKnown = true
+		}
+	}
+
 	var mentions []XTweet
 	users := map[string]XUser{}
 	for pageNumber := 0; pageNumber < xMaxMentionPages; pageNumber++ {
@@ -320,8 +342,9 @@ func (s *XService) pollOnce(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		if newest == "" {
+		if !targetKnown {
 			newest = page.Meta.NewestID
+			targetKnown = true
 		}
 		mentions = append(mentions, page.Data...)
 		for _, u := range page.Includes.Users {
@@ -332,9 +355,7 @@ func (s *XService) pollOnce(ctx context.Context) error {
 			break
 		}
 	}
-	if pagination != "" {
-		return fmt.Errorf("X mention pagination exceeded %d pages", xMaxMentionPages)
-	}
+
 	sort.SliceStable(mentions, func(i, j int) bool { return xTweetIDLess(mentions[i].ID, mentions[j].ID) })
 	for _, tweet := range mentions {
 		if strings.TrimSpace(tweet.AuthorID) == "" {
@@ -353,25 +374,44 @@ func (s *XService) pollOnce(ctx context.Context) error {
 			return fmt.Errorf("X mention %s was not durably handed off", tweet.ID)
 		}
 	}
-	if newest != "" {
-		updated, err := s.settingsRepo.CompareAndSet(ctx, XSettingSinceID, sinceID, newest, s.configurationGuards())
+
+	values := map[string]string{XSettingPaginationState: ""}
+	if pagination != "" {
+		state, err := json.Marshal(xMentionPaginationState{
+			AccountID:       s.me.ID,
+			ConfigurationID: s.configurationID,
+			SinceID:         sinceID,
+			TargetID:        newest,
+			NextToken:       pagination,
+		})
 		if err != nil {
-			return fmt.Errorf("save X mention cursor: %w", err)
+			return fmt.Errorf("encode X mention pagination state: %w", err)
 		}
-		if !updated {
-			values, loadErr := s.pollingSettings(ctx)
-			if loadErr != nil {
-				return loadErr
-			}
-			if values[XSettingSinceID] != sinceID {
-				// Another poller for this exact configuration advanced the cursor
-				// first. Receipt deduplication makes this handoff safe.
-				return nil
-			}
-			return fmt.Errorf("X mention cursor changed during polling")
-		}
+		values[XSettingPaginationState] = string(state)
+	} else if newest != "" {
+		values[XSettingSinceID] = newest
 	}
-	return nil
+	expected := map[string]string{
+		XSettingSinceID:         sinceID,
+		XSettingPaginationState: paginationStateRaw,
+	}
+	updated, err := s.settingsRepo.CompareAndSetMany(ctx, expected, values, s.configurationGuards())
+	if err != nil {
+		return fmt.Errorf("save X mention polling position: %w", err)
+	}
+	if updated {
+		return nil
+	}
+	current, err := s.pollingSettings(ctx)
+	if err != nil {
+		return err
+	}
+	if current[XSettingSinceID] != sinceID || current[XSettingPaginationState] != paginationStateRaw {
+		// Another poller for this configuration durably handed off this page range
+		// and advanced the saved position first. Receipt deduplication makes it safe.
+		return nil
+	}
+	return fmt.Errorf("X mention polling position changed during polling")
 }
 func xTweetIDLess(a, b string) bool {
 	a = strings.TrimLeft(a, "0")
