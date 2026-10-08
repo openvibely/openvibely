@@ -23,23 +23,39 @@
     function textElement(tag, text) {
         const el = document.createElement(tag); el.textContent = text; return el;
     }
+    function currentColumn(batchKey) {
+        return Array.from(document.querySelectorAll('#kanban-board [data-kanban-category]')).find(col => key(col) === batchKey);
+    }
     function renderProgress(col) {
+        if (!col) return;
         const host = col.querySelector('[data-kanban-progress]'), batch = results.get(key(col));
         if (!host || !batch) return;
-        host.replaceChildren();
-        host.append(textElement('div', (batch.stop && !batch.running ? 'Stopped · ' : '') + batch.label + ': ' + batch.done + '/' + batch.total + ' · ' + batch.success + ' succeeded · ' + batch.skipped + ' skipped · ' + batch.failed + ' failed'));
-        if (batch.running) {
+        let view = host.kanbanProgressView;
+        if (!view || view.batch !== batch) {
+            const status = textElement('div', '');
             const progress = document.createElement('progress');
-            progress.max = batch.total; progress.value = batch.done; host.append(progress);
+            const button = textElement('button', '');
+            button.className = 'btn btn-xs btn-ghost';
+            const details = document.createElement('details');
+            details.append(textElement('summary', 'Details'));
+            details.open = !!batch.detailsOpen;
+            details.ontoggle = () => { batch.detailsOpen = details.open; };
+            button.onclick = () => {
+                if (batch.running) { batch.stop = true; button.disabled = true; }
+                else { results.delete(key(col)); host.replaceChildren(); host.kanbanProgressView = null; }
+            };
+            host.replaceChildren(status, progress, button, details);
+            view = host.kanbanProgressView = { batch, status, progress, button, details, lineCount: 0 };
         }
-        const button = textElement('button', batch.running ? 'Stop' : '×');
-        button.className = 'btn btn-xs btn-ghost';
-        button.setAttribute('aria-label', batch.running ? 'Stop batch' : 'Dismiss results');
-        button.onclick = () => { if (batch.running) { batch.stop = true; button.disabled = true; } else { results.delete(key(col)); host.replaceChildren(); } };
-        host.append(button);
-        if (batch.lines.length) {
-            const details = document.createElement('details'); details.append(textElement('summary', 'Details'));
-            batch.lines.forEach(line => details.append(textElement('div', line))); host.append(details);
+        view.status.textContent = (batch.stop && !batch.running ? 'Stopped · ' : '') + batch.label + ': ' + batch.done + '/' + batch.total + ' · ' + batch.success + ' succeeded · ' + batch.skipped + ' skipped · ' + batch.failed + ' failed';
+        view.progress.hidden = !batch.running;
+        view.progress.max = batch.total; view.progress.value = batch.done;
+        view.button.textContent = batch.running ? 'Stop' : '×';
+        view.button.disabled = batch.running && batch.stop;
+        view.button.setAttribute('aria-label', batch.running ? 'Stop batch' : 'Dismiss results');
+        view.details.hidden = !batch.lines.length;
+        while (view.lineCount < batch.lines.length) {
+            view.details.append(textElement('div', batch.lines[view.lineCount++]));
         }
     }
     function refresh() {
@@ -131,7 +147,8 @@
             return;
         }
         const batch = { label: button.textContent.trim(), total: targets.length, done: 0, success: 0, skipped: 0, failed: 0, lines: [], running: true, stop: false };
-        results.set(key(col), batch); window.kanbanBatchRunning = true;
+        const batchKey = key(col);
+        results.set(batchKey, batch); window.kanbanBatchRunning = true;
         if (window.closeKanbanMenu) window.closeKanbanMenu(null, false);
         refresh();
         try {
@@ -161,13 +178,13 @@
                         batch.success++; batch.lines.push(task.title + ': ' + (result.toast ? result.toast.message : 'Done'));
                     }
                 } catch (error) { batch.failed++; batch.lines.push(task.title + ': ' + error.message); if (['merge', 'squash', 'rebase'].includes(action)) batch.stop = true; }
-                batch.done++; renderProgress(col);
+                batch.done++; renderProgress(currentColumn(batchKey));
             }
         } finally {
             batch.running = false; window.kanbanBatchRunning = false;
             window.kanbanClearSelection(); refresh();
             window.dispatchEvent(new CustomEvent('kanban-refresh-unblocked'));
-            if (document.contains(col) && window.htmx) window.htmx.ajax('GET', '/tasks?project_id=' + encodeURIComponent(project), { target: '#kanban-board', select: '#kanban-board', swap: 'outerHTML' });
+            if (currentColumn(batchKey) && window.htmx) window.htmx.ajax('GET', '/tasks?project_id=' + encodeURIComponent(project), { target: '#kanban-board', select: '#kanban-board', swap: 'outerHTML' });
         }
     };
     document.addEventListener('DOMContentLoaded', refresh);
