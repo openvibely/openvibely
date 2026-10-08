@@ -148,22 +148,22 @@ func TestConversationPicker_DefaultShowsResolvedModelAndAcceptsTaskEffort(t *tes
 	project.DefaultAgentConfigID = &projectModel.ID
 	require.NoError(t, h.projectRepo.Update(context.Background(), project))
 	task := createTask(t, h, project.ID, "Picker task", func(tk *models.Task) { tk.AgentID = &global.ID })
-	for _, tc := range []struct{ path, name, id string }{
-		{"/chat?project_id=" + project.ID, "Project model", projectModel.ID},
-		{"/tasks/new?project_id=" + project.ID, "Project model", projectModel.ID},
-		{"/tasks/" + task.ID + "/thread", "Project model", projectModel.ID},
+	for _, tc := range []struct{ path, id string }{
+		{"/chat?project_id=" + project.ID, projectModel.ID},
+		{"/tasks/new?project_id=" + project.ID, projectModel.ID},
+		{"/tasks/" + task.ID + "/thread", projectModel.ID},
 	} {
 		t.Run(tc.path, func(t *testing.T) {
 			response := htmxGet(e, tc.path)
 			require.Equal(t, http.StatusOK, response.Code, response.Body.String())
-			require.Contains(t, response.Body.String(), `data-picker-detail="`+tc.name+`">Default</li>`)
+			require.Contains(t, response.Body.String(), `data-picker-detail="OpenAI · gpt-5.5">Default</li>`)
 			require.Contains(t, response.Body.String(), `data-picker-effective-id="`+tc.id+`"`)
 		})
 	}
 	fallbackProject := createProject(t, h, "Picker global fallback")
 	fallbackPage := htmxGet(e, "/chat?project_id="+fallbackProject.ID)
 	require.Equal(t, http.StatusOK, fallbackPage.Code, fallbackPage.Body.String())
-	require.Contains(t, fallbackPage.Body.String(), `data-picker-detail="Global model">Default</li>`)
+	require.Contains(t, fallbackPage.Body.String(), `data-picker-detail="OpenAI · gpt-5.5">Default</li>`)
 	require.Contains(t, fallbackPage.Body.String(), `data-picker-effective-id="`+global.ID+`"`)
 	for _, tc := range []struct {
 		projectID, modelID string
