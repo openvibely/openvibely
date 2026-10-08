@@ -95,6 +95,7 @@ func isCanonicalStatusLine(line string) bool {
 // Pre-compiled regexes for cleanChatOutput — compiled once at package init
 // instead of on every call for better performance.
 var (
+	reCleanCompaction       = regexp.MustCompile(`(?m)^[\t ]*\[Compaction (?:started|done|failed)(?: \| \d+)?\][\t ]*\r?$`)
 	reCleanTool             = regexp.MustCompile(`\[Using tool:\s*[^\]]+\]`)
 	reCleanProposedPlanTag  = regexp.MustCompile(`(?i)</?\s*proposed_plan\s*>`)
 	reCleanThinking         = regexp.MustCompile(`(?s)\[Thinking\].*?\[/Thinking\]`)
@@ -337,6 +338,7 @@ func doCleanChatOutput(output string, stripSummaries bool) string {
 		result = strings.ReplaceAll(result, code.token, code.text)
 	}
 
+	result = ReplaceOutsideMarkdownCode(result, reCleanCompaction, "")
 	result = ReplaceOutsideMarkdownCode(result, reCleanTool, "")
 	result = reCleanProposedPlanTag.ReplaceAllString(result, "")
 	result = ReplaceOutsideMarkdownCode(result, reCleanToolResult, "")

@@ -44,6 +44,10 @@ window.addEventListener('DOMContentLoaded', async function() {
   await window.renderStreamingContent(response,'[Using tool: bash]\n[Tool bash done]\n[Compaction started]\n[/Tool]\n',false);
   assert(!response.querySelector('[data-compaction-state]'),'tool output rendered as activity');
   assert(!window.cleanTranscriptControls(complete).includes('[Compaction'),'controls leaked into plain display');
+  root.setAttribute('data-exec-status','running');
+  await window.renderStreamingContent(response,before,false);
+  window.applyChatExecutionTerminalStatus(root, 'failed');
+  assert(response.querySelector('[data-compaction-state="interrupted"]') && !response.querySelector('.loading-spinner'), 'terminal event left compaction spinning');
   root.setAttribute('data-exec-status','failed');
   await window.renderStreamingContent(response,before,false);
   assert(response.textContent.includes('Compaction interrupted') && !response.querySelector('.loading-spinner'),'ended execution retained live compaction');

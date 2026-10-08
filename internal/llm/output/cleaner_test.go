@@ -778,3 +778,18 @@ func TestCleanChatOutput_StillStripsSummaries(t *testing.T) {
 		t.Errorf("CleanChatOutput() should strip only the summary and preserve inert bracket text, got %q", got)
 	}
 }
+
+func TestCleanChatOutputCompactionControls(t *testing.T) {
+	for _, clean := range []func(string) string{CleanChatOutput, CleanChatOutputForDisplay} {
+		for _, state := range []string{"started", "done | 4000", "failed | 500"} {
+			marker := "[Compaction " + state + "]"
+			if got := clean(marker + "\nAnswer."); got != "Answer." {
+				t.Fatalf("clean=%q", got)
+			}
+			code := "```text\n" + marker + "\n```"
+			if got := clean(code); got != code {
+				t.Fatalf("changed code: %q", got)
+			}
+		}
+	}
+}

@@ -4587,6 +4587,13 @@ templ ChatAutoScrollScript() {
 				var terminalStatus = terminalStatuses[authoritativeStatus] ? authoritativeStatus : (terminalStatuses[currentStatus] ? currentStatus : 'completed');
 				pair.setAttribute('data-exec-status', terminalStatus);
 				pair.setAttribute('hx-preserve', 'true');
+                pair.querySelectorAll('[data-compaction-state="started"]').forEach(function(activity) {
+                    activity.setAttribute('data-compaction-state', 'interrupted');
+                    var spinner = activity.querySelector('.loading-spinner');
+                    if (spinner) spinner.remove();
+                    var label = activity.querySelector('.tool-name-text');
+                    if (label) label.textContent = 'Compaction interrupted';
+                });
 				if (window.renderMermaidDiagrams) window.renderMermaidDiagrams(pair);
 				return terminalStatus;
 			};
