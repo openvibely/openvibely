@@ -156,14 +156,14 @@ func TestConversationPicker_DefaultShowsResolvedModelAndAcceptsTaskEffort(t *tes
 		t.Run(tc.path, func(t *testing.T) {
 			response := htmxGet(e, tc.path)
 			require.Equal(t, http.StatusOK, response.Code, response.Body.String())
-			require.Contains(t, response.Body.String(), `>Default — `+tc.name+`</li>`)
+			require.Contains(t, response.Body.String(), `data-picker-detail="`+tc.name+`">Default</li>`)
 			require.Contains(t, response.Body.String(), `data-picker-effective-id="`+tc.id+`"`)
 		})
 	}
 	fallbackProject := createProject(t, h, "Picker global fallback")
 	fallbackPage := htmxGet(e, "/chat?project_id="+fallbackProject.ID)
 	require.Equal(t, http.StatusOK, fallbackPage.Code, fallbackPage.Body.String())
-	require.Contains(t, fallbackPage.Body.String(), `>Default — Global model</li>`)
+	require.Contains(t, fallbackPage.Body.String(), `data-picker-detail="Global model">Default</li>`)
 	require.Contains(t, fallbackPage.Body.String(), `data-picker-effective-id="`+global.ID+`"`)
 	for _, tc := range []struct {
 		projectID, modelID string

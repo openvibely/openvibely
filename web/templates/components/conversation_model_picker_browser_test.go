@@ -113,7 +113,7 @@ func TestBrowserFunctional_ConversationModelPicker(t *testing.T) {
  assert(!panel.querySelector('.ov-mp-effort').hidden,'effort stays accessible while list scrolls');
  list.style.maxHeight='';await wait();
  const defaultRow=panel.querySelector('.ov-mp-pick[data-model=default]');
- assert(defaultRow.textContent.includes('Default — Configuration 00'),'global default identifies its model');
+ assert(defaultRow.querySelector('.ov-mp-name').textContent==='Default'&&defaultRow.querySelector('.ov-mp-detail').textContent==='Configuration 00','global default shows model as subtext');
  defaultRow.click();
  assert(trigger.dataset.currentValue==='default'&&!panel.querySelector('.ov-mp-effort').hidden,'global default exposes effort without changing selection');
  const defaultSlider=panel.querySelector('input[type=range]');defaultSlider.value='2';defaultSlider.dispatchEvent(new Event('input'));
@@ -218,7 +218,7 @@ func TestBrowserFunctional_TaskModelPickerPersistence(t *testing.T) {
  assert(loadingSend?.get('agent_id')==='a'&&loadingSend?.get('reasoning_effort')==='medium','send uses loaded effort even when model changes during lookup');
  assert(modelInput.value==='b'&&effort.value==='high','lookup does not undo later model selection');
  const defaultRow=panel.querySelector('.ov-mp-pick[data-model=default]');
- assert(defaultRow.textContent.includes('Default — Second'),'project default identifies its model');
+ assert(defaultRow.querySelector('.ov-mp-name').textContent==='Default'&&defaultRow.querySelector('.ov-mp-detail').textContent==='Second','project default shows model as subtext');
  defaultRow.click();await trigger._ovModelState.ready;
  assert(modelInput.value==='default'&&effort.value==='high'&&!panel.querySelector('.ov-mp-effort').hidden,'default keeps its selection and loads project model effort');
  const defaultSlider=panel.querySelector('input[type=range]');defaultSlider.value='1';defaultSlider.dispatchEvent(new Event('input'));defaultSlider.dispatchEvent(new Event('change'));

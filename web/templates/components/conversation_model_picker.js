@@ -66,6 +66,7 @@
         levels: (li.dataset.pickerEfforts || "").split(",").filter(Boolean),
         defaultEffort: li.dataset.pickerDefault || "",
         effectiveID: li.dataset.pickerEffectiveId || "",
+        detail: li.dataset.pickerDetail || "",
       }),
     );
     const fallback = all.find((m) => m.id === "default");
@@ -96,7 +97,9 @@
     const value = s.efforts[key(m)] || "";
     field(btn).value = m.levels.includes(value) ? value : "";
     btn.title =
-      m.name + (field(btn).value ? " · " + label(field(btn).value) : "");
+      m.name +
+      (m.detail ? " · " + m.detail : "") +
+      (field(btn).value ? " · " + label(field(btn).value) : "");
   }
   function label(v) {
     return (
@@ -277,12 +280,12 @@
     );
     const copy = el("span", "ov-mp-copy");
     copy.append(el("span", "ov-mp-name", m.name));
-    if (m.provider)
+    if (m.provider || m.detail)
       copy.append(
         el(
           "span",
           "ov-mp-detail",
-          m.provider + (m.model ? " · " + m.model : ""),
+          m.detail || m.provider + (m.model ? " · " + m.model : ""),
         ),
       );
     pick.append(copy);
@@ -306,7 +309,7 @@
     clear.hidden = !q;
     if (q) {
       const matches = all.filter((m) =>
-        (m.name + " " + m.provider + " " + m.model).toLowerCase().includes(q),
+        (m.name + " " + m.provider + " " + m.model + " " + m.detail).toLowerCase().includes(q),
       );
       matches.sort((a, b) => Number(!a.provider) - Number(!b.provider));
       matches.forEach((m) => row(m, list));
