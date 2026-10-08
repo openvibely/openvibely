@@ -180,10 +180,10 @@ func assertChatModelPickerQuery(t *testing.T, statements []string) {
 	}
 	picker := pickerStatements[0]
 	projection := strings.Split(strings.ToLower(picker), " from agent_configs ")[0]
-	if !strings.Contains(projection, "select id, name, model") {
-		t.Fatalf("Chat picker query does not use id/name/model projection: %s", picker)
+	if !strings.Contains(projection, "select id, name, model, provider, preset_slug, reasoning_effort, is_default") {
+		t.Fatalf("Chat picker query does not include model identity, grouping, and effort metadata: %s", picker)
 	}
-	for _, forbidden := range []string{"provider", "api_key", "oauth_access_token", "oauth_refresh_token", "oauth_client_secret", "oauth_authorize_url", "oauth_token_url", "ollama_base_url", "base_url", "models_url", "extra_headers_json", "extra_body_json", "custom_auth_config_json", "custom_auth_state_json", "mixture_config_json"} {
+	for _, forbidden := range []string{"api_key", "oauth_access_token", "oauth_refresh_token", "oauth_client_secret", "oauth_authorize_url", "oauth_token_url", "ollama_base_url", "base_url", "models_url", "extra_headers_json", "extra_body_json", "custom_auth_config_json", "custom_auth_state_json", "mixture_config_json"} {
 		if strings.Contains(projection, forbidden) {
 			t.Fatalf("Chat picker query selected forbidden column %q: %s", forbidden, picker)
 		}

@@ -134,7 +134,7 @@ func TestModelsContent_CatalogModelsInSelector(t *testing.T) {
 	if !strings.Contains(out, "el.disabled = !showCustom || method !== 'oauth';") {
 		t.Error("expected hidden OAuth controls to be disabled outside custom OAuth mode")
 	}
-	if !strings.Contains(out, "Claude Effort") {
+	if !strings.Contains(out, "Default Claude effort") {
 		t.Error("expected Claude effort label in model dialog")
 	}
 	if !strings.Contains(out, "Matches Claude Code effort: low, medium, high, xhigh, or max. Availability varies by model.") {
@@ -168,7 +168,7 @@ func TestModelsContent_CatalogModelsInSelector(t *testing.T) {
 	if !strings.Contains(out, "{ value: 'kimi-k3', label: 'Kimi K3', efforts: ['low', 'high', 'max']") {
 		t.Error("expected Kimi K3 reasoning effort options")
 	}
-	if !strings.Contains(out, "Kimi Reasoning Effort") {
+	if !strings.Contains(out, "Default Kimi reasoning effort") {
 		t.Error("expected Kimi reasoning effort label")
 	}
 	if strings.Contains(out, "{ value: 'kimi-k2-0711-preview'") {
@@ -182,7 +182,7 @@ func TestModelsContent_CatalogModelsInSelector(t *testing.T) {
 	if !strings.Contains(out, "{ value: 'glm-5.2', label: 'GLM 5.2', efforts: ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']") {
 		t.Error("expected GLM 5.2 reasoning effort options")
 	}
-	if !strings.Contains(out, "GLM Reasoning Effort") {
+	if !strings.Contains(out, "Default GLM reasoning effort") {
 		t.Error("expected GLM reasoning effort label")
 	}
 	for _, model := range []string{"claude-fable-5", "claude-mythos-5-1", "claude-mythos-5", "claude-opus-4-7", "claude-opus-4-8"} {
