@@ -2222,6 +2222,9 @@ func TestLocalCompactionActivityPersistsAcrossProviderRetry(t *testing.T) {
 			if err := repo.Create(ctx, execution); err != nil {
 				t.Fatal(err)
 			}
+			if err := repo.UpdateOutput(ctx, execution.ID, "[Thinking]\nInterrupted reasoning"); err != nil {
+				t.Fatal(err)
+			}
 			svc := &LLMService{execRepo: repo}
 			adapter := providerAdapterFunc(func(req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
 				if req.ExecID != "" {
@@ -2243,6 +2246,9 @@ func TestLocalCompactionActivityPersistsAcrossProviderRetry(t *testing.T) {
 			stored, err := repo.GetByID(ctx, execution.ID)
 			if err != nil {
 				t.Fatal(err)
+			}
+			if !strings.Contains(stored.Output, "[/Thinking]\n\n[Compaction started]") {
+				t.Fatalf("fallback remained inside thinking: %q", stored.Output)
 			}
 			state := "done"
 			if fail {

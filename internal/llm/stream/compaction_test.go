@@ -24,3 +24,19 @@ func TestCompactionReporterClosesThinkingAndKeepsTextClean(t *testing.T) {
 		t.Fatalf("activity leaked into answer: %q", writer.TextString())
 	}
 }
+
+func TestCompactionRecoversPersistedThinkingState(t *testing.T) {
+	for _, text := range []string{
+		"[Thinking]\nInterrupted",
+		"[Thinking]\nInterrupted\n[Tool bash done]\n[/Thinking]\n[/Tool]\n",
+		"[Thinking]\nInterrupted\n```text\n[/Thinking]\n```\n",
+	} {
+		writer := NewWriter("", "", nil, context.Background(), time.Hour)
+		writer.Write([]byte(text))
+		CompactionReporter(writer, nil)(llmcontracts.CompactionProgress{State: "started"})
+		writer.Stop()
+		if !strings.HasSuffix(writer.String(), "[/Thinking]\n\n[Compaction started]\n") {
+			t.Fatalf("output=%q", writer.String())
+		}
+	}
+}
