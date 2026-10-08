@@ -187,6 +187,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 			</script>
 			<link href={ static.URL("app.css") } rel="stylesheet" type="text/css"/>
 			<script src={ static.URL("vendor/htmx.min.js") }></script>
+			<script defer src={ static.URL("kanban.js") }></script>
 			<script>
 			window.appendPendingThreadInputEditButton = function(actions) {
 				var button = document.createElement('button');
@@ -412,6 +413,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				</script>
 			}
 			<style>
+                #kanban-board .card[hidden] { display: none !important; }
 				/* Disable DaisyUI button-pop animation on initial render.
 				   Without this, HTMX swaps cause all newly-inserted .btn elements
 				   to play the pop animation simultaneously. The :active click
@@ -622,24 +624,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					position: relative;
 					border-color: hsl(var(--p)) !important;
 				}
-				.task-selected::before {
-					content: '✓';
-					position: absolute;
-					top: 8px;
-					right: 8px;
-					background: hsl(var(--p));
-					color: white;
-					width: 28px;
-					height: 28px;
-					border-radius: 50%;
-					display: flex;
-					align-items: center;
-					justify-content: center;
-					font-weight: bold;
-					font-size: 16px;
-					z-index: 10;
-					box-shadow: 0 3px 8px rgba(0,0,0,0.5);
-				}
+
 					.task-selected .btn-circle {
 						display: none;
 					}
@@ -3047,6 +3032,8 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				let draggedElement = null;
 
 					let selectedTasks = new Set();
+                    window.kanbanSelection = selectedTasks;
+                    window.kanbanClearSelection = clearSelection;
 					let draggedTaskIds = [];
 					let pendingKanbanMoves = new Map();
 					let kanbanMoveTransactions = new Map();
@@ -3269,6 +3256,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					panel.addEventListener('mouseenter', function() { cancelKanbanSubmenuHover(); });
 					sourcePanel.style.setProperty('display', 'none', 'important');
 					document.body.appendChild(panel);
+                    if (window.htmx) window.htmx.process(panel);
 				}
 				panel.style.setProperty('display', 'block', 'important');
 				// The portal lives outside the menu's normal CSS context. Normalize
@@ -3359,7 +3347,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				event.preventDefault();
 				positionKanbanSubmenu(container);
 				const panel = document.querySelector('[data-task-card-submenu-portaled="true"]');
-				const action = panel && panel.querySelector('button:not([disabled]), a[href]');
+				const action = panel && Array.from(panel.querySelectorAll('summary, button:not([disabled]), a[href]')).find(function(item) { return item.getClientRects().length > 0; });
 				if (action) action.focus({preventScroll: true});
 			}
 
@@ -3584,7 +3572,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					}
 
 					// Ignore clicks on buttons, dropdowns, or other interactive elements
-					if (event.target.tagName === 'BUTTON' || event.target.closest('button') || event.target.closest('.dropdown')) {
+					if (event.target.tagName === 'BUTTON' || event.target.closest('button') || event.target.closest('.dropdown') || event.target.closest('input, label')) {
 						return;
 					}
 
@@ -3603,6 +3591,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 							selectedTasks.add(taskID);
 							card.classList.add('task-selected');
 						}
+                        if (window.kanbanRefresh) window.kanbanRefresh();
 
 						return;
 					}
@@ -3691,6 +3680,12 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 							return beginPointerCardMotion(card);
 						});
 						state.motion = state.motions[state.dragCards.indexOf(state.card)];
+                            if (draggedTaskIds.length > 1) {
+                                state.badge = document.createElement('span');
+                                state.badge.className = 'badge badge-primary';
+                                state.badge.textContent = draggedTaskIds.length + ' tasks';
+                                state.card.prepend(state.badge);
+                            }
 					}
 				function refreshTaskPointerDropZone(clientX, clientY) {
 					const state = taskPointerDrag;
@@ -3727,6 +3722,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					}
 				function cleanupTaskPointerDrag() {
 					const state = taskPointerDrag;
+                        if (state && state.badge) state.badge.remove();
 					stopAutoScroll();
 						if (state && state.dropZone) state.dropZone.classList.remove('drag-over');
 						if (state && state.motions) {
@@ -3781,7 +3777,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				}
 
 				function handleTaskPointerDown(event) {
-					if (event.button !== 0 || taskPointerDrag) return;
+					if (event.button !== 0 || taskPointerDrag || window.kanbanBatchRunning) return;
 					if (event.target && event.target.closest('button, a, input, select, textarea, summary, label, [role="button"], .dropdown')) return;
 					const card = event.currentTarget;
 					taskPointerDrag = {
@@ -4063,7 +4059,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				function getDropPosition(event, dropZone) {
 					const allCards = Array.from(dropZone.querySelectorAll('[data-task-id]'));
 					// Filter out dragged elements to get accurate drop position
-					const taskCards = allCards.filter(card => !draggedTaskIds.includes(card.getAttribute('data-task-id')));
+					const taskCards = allCards.filter(card => !card.hidden && !draggedTaskIds.includes(card.getAttribute('data-task-id')));
 
 					if (taskCards.length === 0) {
 						return 0; // Empty zone, position 0

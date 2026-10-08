@@ -45,11 +45,11 @@ func TestKanbanColumnActionDropdownKeepsSortAttributesAndActions(t *testing.T) {
 		`aria-expanded="false"`,
 		`aria-label="More actions"`,
 		`onclick="handleDropdownToggle(event)"`,
-		`Sort By`,
-		`Name (A-Z)`,
-		`Date (Newest First)`,
-		`Priority (High to Low)`,
-		`data-delete-all-tasks-category="completed"`,
+		`Sort by`,
+		`Name A–Z`,
+		`Newest first`,
+		`Priority high–low`,
+		`data-kanban-action="delete"`,
 	} {
 		if !strings.Contains(html, want) {
 			t.Fatalf("expected completed column menu to contain %q", want)

@@ -728,24 +728,15 @@ window.addEventListener('DOMContentLoaded', function() {
     var menu = backlog.querySelector('[data-kanban-menu-content]');
     var activate = Array.from(menu.querySelectorAll('button')).find(function(button) { return button.textContent.trim().indexOf('Activate All') === 0; });
     if (activate) fail('Backlog menu still contains Activate All');
-    var execute = Array.from(menu.querySelectorAll('button')).find(function(button) { return button.textContent.trim().indexOf('Execute All') === 0; });
-    if (!execute) fail('Backlog menu is missing Execute All');
-    if (execute.hasAttribute('hx-confirm')) fail('Execute All still has an hx-confirm attribute');
-
-    var requestPath = '';
-    document.body.addEventListener('htmx:beforeRequest', function(event) {
-      var config = event.detail && event.detail.requestConfig;
-      if (config && config.path && config.path.indexOf('/tasks/backlog/execute') === 0) requestPath = config.path;
-    });
+    var execute = menu.querySelector('[data-kanban-action="run"]');
+    if (!execute) fail('Backlog menu is missing Run');
     execute.click();
-    await waitFor(function() { return requestPath !== ''; }, 'Execute All request');
     await waitFor(function() {
       var pending = document.getElementById('task-bulk-pending');
       var failed = document.getElementById('task-bulk-failed');
       return pending && failed && pending.closest('.category-drop-zone[data-category="active"]') && failed.closest('.category-drop-zone[data-category="active"]') && !document.querySelector('.category-drop-zone[data-category="backlog"] #task-bulk-pending');
     }, 'authoritative board refresh');
     if (confirmationCalls.length !== 0) fail('Execute All opened a confirmation dialog');
-    if (requestPath !== '/tasks/backlog/execute?project_id=project-backlog-execute-browser') fail('unexpected Execute All request path: ' + requestPath);
     await report('pass', '');
   })().catch(function(error) { report('fail', String(error && error.stack || error)); });
 });
@@ -776,14 +767,14 @@ window.addEventListener('DOMContentLoaded', function() {
 			page := strings.Replace(out.String(), static.URL("vendor/htmx.min.js"), "/htmx-2.0.4.min.js", 1)
 			page = strings.Replace(page, "</head>", runner+"</head>", 1)
 			_, _ = w.Write([]byte(page))
-		case r.URL.Path == "/tasks/backlog/execute" && r.Method == http.MethodPost:
+		case strings.HasSuffix(r.URL.Path, "/run") && r.Method == http.MethodPost:
 			if r.URL.Query().Get("project_id") != project.ID {
 				http.Error(w, "unexpected project", http.StatusBadRequest)
 				return
 			}
 			stateMu.Lock()
 			for i := range tasks {
-				if tasks[i].ProjectID == project.ID && tasks[i].Category == models.CategoryBacklog && (tasks[i].Status == models.StatusPending || tasks[i].Status == models.StatusFailed || tasks[i].Status == models.StatusCancelled) {
+				if r.URL.Path == "/tasks/"+tasks[i].ID+"/run" && tasks[i].ProjectID == project.ID && tasks[i].Category == models.CategoryBacklog && (tasks[i].Status == models.StatusPending || tasks[i].Status == models.StatusFailed || tasks[i].Status == models.StatusCancelled) {
 					tasks[i].Category = models.CategoryActive
 					tasks[i].Status = models.StatusPending
 				}
@@ -834,14 +825,14 @@ window.addEventListener('DOMContentLoaded', function() {
 	defer requestMu.Unlock()
 	var executeRequests []string
 	for _, request := range requestLog {
-		if strings.HasPrefix(request, "POST /tasks/backlog/execute?") {
+		if strings.Contains(request, "/run?project_id=") {
 			executeRequests = append(executeRequests, request)
 		}
 	}
-	if len(executeRequests) != 1 {
-		t.Fatalf("expected exactly one bulk Execute All request, got %d: %v", len(executeRequests), executeRequests)
+	if len(executeRequests) != 2 {
+		t.Fatalf("expected two Run requests, got %d: %v", len(executeRequests), executeRequests)
 	}
-	if !strings.HasPrefix(executeRequests[0], "POST /tasks/backlog/execute?project_id="+project.ID+" ") {
+	if !strings.HasPrefix(executeRequests[0], "POST /tasks/bulk-pending/run?project_id="+project.ID+" ") {
 		t.Fatalf("bulk Execute All request lost project scoping: %s", executeRequests[0])
 	}
 }
@@ -2378,7 +2369,7 @@ window.addEventListener('DOMContentLoaded', function() {
   }
   function currentState() { return fetch('/browser-state').then(function(response) { return response.text(); }); }
   function action(category) {
-    return document.querySelector('button[data-delete-all-tasks-category="' + category + '"]');
+    return document.querySelector('button[data-kanban-action="delete"][data-column="' + category + '"]');
   }
   function openAction(category) {
     var button = action(category);
@@ -2414,7 +2405,7 @@ window.addEventListener('DOMContentLoaded', function() {
     var initialState = await currentState();
     var completedAction = openAction('completed');
     await waitFor(function() { return modal.open; }, 'completed confirmation modal');
-    if (modal.querySelector('#delete_all_tasks_confirm_name').textContent !== 'completed tasks') fail('completed confirmation name was not rendered');
+    if (modal.querySelector('#delete_all_tasks_confirm_name').textContent !== '2 tasks') fail('completed confirmation name was not rendered');
     var cancel = modalCancel(modal);
     var confirm = modalConfirm(modal);
     if (!cancel || !confirm) fail('shared confirmation modal is missing semantic actions');
@@ -2443,11 +2434,11 @@ window.addEventListener('DOMContentLoaded', function() {
     confirm.click();
     await new Promise(function(resolve) { setTimeout(resolve, 50); });
     assertDropzoneMenuClosed(completedAction, 'failed delete');
-    await waitFor(function() { return !window.deleteAllTasksRequestInFlight; }, 'failed delete request completion');
+    await waitFor(function() { return !window.kanbanBatchRunning; }, 'failed delete request completion');
     if (modal.open) fail('failed delete request left confirmation modal open');
     if (document.getElementById('task-completed-one') === null) fail('failed delete request removed a task');
     var failedState = await currentState();
-    if (failedState !== 'project-completed=2;project-backlog=1;foreign-completed=1;foreign-backlog=1;requests=1') fail('failed delete state was unexpected: ' + failedState);
+    if (failedState !== 'project-completed=2;project-backlog=1;foreign-completed=1;foreign-backlog=1;requests=2') fail('failed delete state was unexpected: ' + failedState);
 
     completedAction = openAction('completed');
     await waitFor(function() { return modal.open; }, 'retry completed confirmation modal');
@@ -2457,11 +2448,11 @@ window.addEventListener('DOMContentLoaded', function() {
     confirm.click();
     await waitFor(function() { return !document.getElementById('task-completed-one') && document.querySelector('[data-category="completed"] .text-center'); }, 'successful completed board refresh');
     var completedState = await currentState();
-    if (completedState !== 'project-completed=0;project-backlog=1;foreign-completed=1;foreign-backlog=1;requests=2') fail('successful completed delete state was unexpected: ' + completedState);
+    if (completedState !== 'project-completed=0;project-backlog=1;foreign-completed=1;foreign-backlog=1;requests=4') fail('successful completed delete state was unexpected: ' + completedState);
 
     var backlogAction = openAction('backlog');
     await waitFor(function() { return modal.open; }, 'backlog confirmation modal');
-    if (modal.querySelector('#delete_all_tasks_confirm_name').textContent !== 'backlog tasks') fail('backlog confirmation name was not rendered');
+    if (modal.querySelector('#delete_all_tasks_confirm_name').textContent !== '1 tasks') fail('backlog confirmation name was not rendered');
     modalCancel(modal).click();
     var backlogMenuTrigger = backlogAction.closest('.dropdown').querySelector('label');
     await waitFor(function() { return !modal.open && document.activeElement === backlogMenuTrigger; }, 'backlog cancel focus restoration');
@@ -2473,7 +2464,7 @@ window.addEventListener('DOMContentLoaded', function() {
     confirm.click();
     await waitFor(function() { return !document.getElementById('task-backlog-one') && document.querySelector('[data-category="backlog"] .text-center'); }, 'successful backlog board refresh');
     var finalState = await currentState();
-    if (finalState !== 'project-completed=0;project-backlog=0;foreign-completed=1;foreign-backlog=1;requests=3') fail('successful backlog delete state was unexpected: ' + finalState);
+    if (finalState !== 'project-completed=0;project-backlog=0;foreign-completed=1;foreign-backlog=1;requests=5') fail('successful backlog delete state was unexpected: ' + finalState);
     await report('pass', 'delete-all confirmation flow');
   })().catch(function(error) { report('fail', String(error && error.stack || error)); });
 });
@@ -2497,18 +2488,20 @@ window.addEventListener('DOMContentLoaded', function() {
 			page := strings.Replace(renderPage(), static.URL("vendor/htmx.min.js"), "/htmx-2.0.4.min.js", 1)
 			page = strings.Replace(page, "</head>", fixtureCSS+runner+"</head>", 1)
 			_, _ = w.Write([]byte(page))
-		case (r.URL.Path == "/tasks/completed" || r.URL.Path == "/tasks/backlog") && r.Method == http.MethodDelete:
+		case strings.HasPrefix(r.URL.Path, "/tasks/") && r.Method == http.MethodDelete:
 			mu.Lock()
 			deleteRequests++
-			category := strings.TrimPrefix(r.URL.Path, "/tasks/")
+			taskID := strings.TrimPrefix(r.URL.Path, "/tasks/")
 			if r.URL.Query().Get("project_id") != project.ID {
 				mu.Unlock()
 				w.WriteHeader(http.StatusBadRequest)
 				_, _ = w.Write([]byte("wrong project"))
 				return
 			}
-			if category == "completed" && failNextCompletedDelete {
-				failNextCompletedDelete = false
+			if strings.HasPrefix(taskID, "completed") && failNextCompletedDelete {
+				if deleteRequests == 2 {
+					failNextCompletedDelete = false
+				}
 				mu.Unlock()
 				time.Sleep(150 * time.Millisecond)
 				w.WriteHeader(http.StatusInternalServerError)
@@ -2517,7 +2510,7 @@ window.addEventListener('DOMContentLoaded', function() {
 			}
 			remaining := tasks[:0]
 			for _, task := range tasks {
-				if task.ProjectID != project.ID || string(task.Category) != category {
+				if task.ProjectID != project.ID || task.ID != taskID {
 					remaining = append(remaining, task)
 				}
 			}
@@ -2608,11 +2601,11 @@ window.addEventListener('DOMContentLoaded', function() {
     });
   }
   (async function() {
-    await waitFor(function() { return window.htmx && document.querySelector('button[data-delete-all-tasks-category="completed"]'); }, 'mobile task-board delete control');
+    await waitFor(function() { return window.htmx && document.querySelector('button[data-kanban-action="delete"][data-column="completed"]'); }, 'mobile task-board delete control');
     htmx.process(document.body);
     if (window.innerWidth > 500) fail('mobile regression ran at desktop width: ' + window.innerWidth);
     var modal = document.getElementById('delete_all_tasks_confirm_modal');
-    var action = document.querySelector('button[data-delete-all-tasks-category="completed"]');
+    var action = document.querySelector('button[data-kanban-action="delete"][data-column="completed"]');
     var menuTrigger = action && action.closest('.dropdown').querySelector('label');
     if (!modal || !action || !menuTrigger) fail('mobile confirmation controls are missing');
     menuTrigger.focus();
