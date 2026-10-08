@@ -53,7 +53,7 @@
 .ov-menu-actions > li > :is(a, button, summary) > svg { width: 16px; height: 16px; flex-shrink: 0; }
 .ov-menu-check { width: 15px; flex-shrink: 0; color: var(--fallback-bc, oklch(var(--bc) / 1)); }
 .ov-menu-rule, .ov-menu-section { border-top: 1px solid var(--ov-border-subtle, #414753); }
-.ov-menu-rule { margin: 6px 4px; }
+.ov-menu-rule { margin: 6px 4px; padding: 0; height: 0; background: transparent; opacity: 1; }
 .ov-menu-section { margin-top: 6px; padding-top: 6px; }
 .ov-menu [data-searchable-selector-divider] { border-color: var(--ov-border-subtle, #414753); }
 .ov-menu-search {
@@ -107,3 +107,22 @@
   flex-shrink: 0;
 }
 .ov-menu-create-row svg { width: 16px; height: 16px; flex-shrink: 0; }
+
+/* Section labels share the model picker's compact, muted presentation. */
+.ov-menu .ov-menu-heading,
+.ov-menu .menu-title {
+  margin: 0;
+  padding: 6px 10px 4px;
+  color: inherit;
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 1.5;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  opacity: 0.6;
+}
+.ov-menu .menu-title > span {
+  padding: 0;
+  color: inherit;
+  font: inherit;
+}

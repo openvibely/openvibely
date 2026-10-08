@@ -386,7 +386,7 @@
     list.append(el("div", "ov-menu-rule ov-mp-rule"));
     const fav = all.filter((m) => m.provider && favorites[m.id]);
     if (fav.length) {
-      list.append(el("div", "ov-mp-heading", "FAVORITES"));
+      list.append(el("div", "ov-menu-heading ov-mp-heading", "FAVORITES"));
       fav.forEach((m) => row(m, list));
       list.append(el("div", "ov-menu-rule ov-mp-rule"));
     }
