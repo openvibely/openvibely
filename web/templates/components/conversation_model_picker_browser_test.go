@@ -100,6 +100,10 @@ func TestBrowserFunctional_ConversationModelPicker(t *testing.T) {
  assert(row.firstElementChild.classList.contains('ov-mp-pick')&&row.firstElementChild.firstElementChild.classList.contains('ov-mp-check')&&row.lastElementChild.classList.contains('ov-mp-star'),'checkmark on left, favorite on right');
  row.dispatchEvent(new PointerEvent('pointermove'));
  assert(row.hasAttribute('data-picker-active'),'hover activates model row');
+ const hoverObserver=new MutationObserver(()=>{});hoverObserver.observe(sub,{attributes:true,subtree:true,attributeFilter:['data-picker-active']});
+ for(let i=0;i<10;i++)row.dispatchEvent(new PointerEvent('pointermove'));
+ assert(hoverObserver.takeRecords().length===0,'moving within model row does not rewrite highlight');hoverObserver.disconnect();
+
  const next=row.nextElementSibling;next.dispatchEvent(new PointerEvent('pointermove'));
  assert(!row.hasAttribute('data-picker-active')&&next.hasAttribute('data-picker-active'),'hover moves highlight');
  sub.querySelector('.ov-mp-star').click();

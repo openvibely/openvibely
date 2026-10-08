@@ -130,6 +130,7 @@ templ TaskDetailEditors(task *models.Task, agents []models.LLMConfig, definition
   var search = picker.querySelector('input'), activeOption = null;
   function visibleOptions() { return Array.from(picker.querySelectorAll('[data-options]:not([hidden]) button[data-value]:not([hidden])')).filter(function(option) { return !option.disabled; }); }
   function highlight(option) {
+   if (activeOption === option && (!option || option.hasAttribute('data-active'))) return;
    activeOption = option;
    picker.querySelectorAll('button[data-value]').forEach(function(item) { item.toggleAttribute('data-active', item === option); });
   }

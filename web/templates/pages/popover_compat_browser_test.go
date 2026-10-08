@@ -106,6 +106,13 @@ func TestBrowserFunctional_PopoverCompatibility(t *testing.T) {
 					b.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseMoved", "x": point.X, "y": point.Y}, nil)
 				}
 				b.waitFor("task panel", `String(!!document.querySelector('[data-detail-property="priority"]'))`, "true")
+				checkStableHover := func(selector, rootSelector, optionsSelector string) {
+					t.Helper()
+					result := b.evaluate(fmt.Sprintf(`(function(){var row=document.querySelector(%q),root=row.closest(%q);row.dispatchEvent(new PointerEvent('pointermove',{bubbles:true}));var original=root.querySelectorAll,calls=0;root.querySelectorAll=function(selector){if(selector===%q)calls++;return original.call(this,selector)};try{for(var i=0;i<10;i++)row.dispatchEvent(new PointerEvent('pointermove',{bubbles:true}));return String(calls)}finally{delete root.querySelectorAll}})()`, selector, rootSelector, optionsSelector))
+					if result != "0" {
+						t.Fatalf("repeated hover scans options for %s: %s", selector, result)
+					}
+				}
 				applyTheme := func(theme string) {
 					b.waitFor("theme switch ready", `typeof window.applyOpenVibelyTheme`, "function")
 					b.evaluate(fmt.Sprintf(`window.applyOpenVibelyTheme(%q, false); 'ok'`, "openvibely-"+theme))
@@ -141,6 +148,7 @@ func TestBrowserFunctional_PopoverCompatibility(t *testing.T) {
 					b.click(`#project-selector-trigger`)
 					hover(`#project-selector-dialog [data-searchable-selector-option]`)
 					b.waitFor("project option highlighted", `String(!!document.querySelector('#project-selector-dialog [data-selector-active]'))`, "true")
+					checkStableHover("#project-selector-dialog [data-searchable-selector-option]", "[data-searchable-selector]", "[data-searchable-selector-option]")
 					hover(`#project-selector-dialog input`)
 					b.waitFor("project search clears highlight", `String(!document.querySelector('#project-selector-dialog [data-selector-active]'))`, "true")
 					b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": "Escape", "code": "Escape", "windowsVirtualKeyCode": 27}, nil)
@@ -185,6 +193,7 @@ func TestBrowserFunctional_PopoverCompatibility(t *testing.T) {
 					b.click(`[data-detail-property="priority"]`)
 					b.waitFor("picker positioned beside property", `(function(){var p=document.getElementById('task-property-picker').getBoundingClientRect(), r=document.querySelector('[data-detail-property="priority"]').getBoundingClientRect();return String(p.width>0 && Math.abs(p.left-r.left)<1 && p.bottom<=innerHeight && p.top>=12)})()`, "true")
 					b.waitFor("only priority group visible", `String(Array.from(document.querySelectorAll('#task-property-picker [data-options]')).filter(e=>e.getClientRects().length).map(e=>e.dataset.options).join(',') === 'priority')`, "true")
+					checkStableHover("#task-property-picker [data-options=priority] [data-value='4']", "#task-property-picker", "button[data-value]")
 					b.click(`[data-options="priority"] [data-value="4"]`)
 					b.waitFor("selection saved", `document.querySelector('[data-draft-property="priority"]').value`, "4")
 					b.waitFor("picker closes after selection", `String(document.getElementById('task-property-picker').getClientRects().length === 0)`, "true")
