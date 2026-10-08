@@ -1815,10 +1815,10 @@ func assertCompactAgentPickerQueries(t *testing.T, statements []string, minQueri
 		}
 		queries++
 		projection := strings.Split(stmt, " from agent_configs ")[0]
-		if !strings.Contains(projection, "select id, name, model") {
-			t.Fatalf("agent picker projection = %q, want id/name/model in %s", projection, statement)
+		if !strings.Contains(projection, "select id, name, model, provider, preset_slug, reasoning_effort, is_default") {
+			t.Fatalf("agent picker projection = %q, want model identity, grouping, and effort metadata in %s", projection, statement)
 		}
-		for _, forbidden := range []string{"provider", "api_key", "oauth_access_token", "oauth_refresh_token", "oauth_client_secret", "oauth_authorize_url", "oauth_token_url", "ollama_base_url", "base_url", "models_url", "auth_header_name", "auth_header_value_prefix", "extra_headers_json", "extra_body_json", "custom_auth_config_json", "custom_auth_state_json", "oauth_config_revision", "mixture_config_json", "created_at", "updated_at", "max_workers", "worker_timeout", "auto_start_tasks"} {
+		for _, forbidden := range []string{"api_key", "oauth_access_token", "oauth_refresh_token", "oauth_client_secret", "oauth_authorize_url", "oauth_token_url", "ollama_base_url", "base_url", "models_url", "auth_header_name", "auth_header_value_prefix", "extra_headers_json", "extra_body_json", "custom_auth_config_json", "custom_auth_state_json", "oauth_config_revision", "mixture_config_json", "created_at", "updated_at", "max_workers", "worker_timeout", "auto_start_tasks"} {
 			if strings.Contains(projection, forbidden) {
 				t.Fatalf("agent picker query selected forbidden column %q: %s", forbidden, statement)
 			}
