@@ -559,7 +559,11 @@
       list
         .querySelectorAll("[data-picker-active]")
         .forEach((row) => row.removeAttribute("data-picker-active"));
-    if (provider && !e.target.closest(".ov-mp-provider")) closeSub();
+    if (
+      provider &&
+      e.target.closest(".ov-mp-row,.ov-mp-search,.ov-mp-effort")
+    )
+      closeSub();
   };
   search.oninput = () => {
     closeSub();
