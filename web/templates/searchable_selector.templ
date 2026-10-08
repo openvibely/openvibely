@@ -58,14 +58,21 @@ templ SearchableSelector(config SearchableSelectorConfig) {
 						}
 					</div>
 			</div>
-			if config.CreateURL != "" {
-				<div class="p-2" data-searchable-selector-divider style="border-bottom-width:1px">
-					<a href={ templ.URL(config.CreateURL) } class={ SearchableSelectorOptionClass } data-searchable-selector-option data-searchable-selector-action>
-						<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
-						<span>{ config.CreateLabel }</span>
-					</a>
-				</div>
-			}
+			if config.CreateURL != "" || config.CreateButtonID != "" {
+                <div class="ov-menu-create-row" data-searchable-selector-divider>
+                    if config.CreateButtonID != "" {
+                        <button id={ config.CreateButtonID } type="button" class={ SearchableSelectorOptionClass } data-searchable-selector-option data-searchable-selector-action onclick="this.closest('dialog').close()">
+                            @SearchableSelectorCreateIcon()
+                            <span>{ config.CreateLabel }</span>
+                        </button>
+                    } else {
+                        <a href={ templ.URL(config.CreateURL) } class={ SearchableSelectorOptionClass } data-searchable-selector-option data-searchable-selector-action>
+                            @SearchableSelectorCreateIcon()
+                            <span>{ config.CreateLabel }</span>
+                        </a>
+                    }
+                </div>
+            }
 			<div
 				id={ config.ID + "-results" }
 				class={ SearchableSelectorResultsClass }
@@ -347,4 +354,9 @@ templ searchableSelectorScript() {
 			window.openVibelySearchableSelector = { sync: syncLocal, filter: applyLocalFilter, position: position, close: close };
 		})();
 	</script>
+}
+
+// SearchableSelectorCreateIcon keeps button and link actions aligned.
+templ SearchableSelectorCreateIcon() {
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
 }

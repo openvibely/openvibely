@@ -1,13 +1,14 @@
 package templates
 
 type SearchableSelectorConfig struct {
-	CreateURL     string
-	CreateLabel   string
-	ID            string
-	Kind          string
-	SearchURL     string
-	Local         bool
-	InitialStatus string
+	CreateButtonID string
+	CreateURL      string
+	CreateLabel    string
+	ID             string
+	Kind           string
+	SearchURL      string
+	Local          bool
+	InitialStatus  string
 }
 
 const (

@@ -189,11 +189,11 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
   var createHome = create.parentElement;
   var originalCreateClass = create.className;
   var selectorMenu = document.getElementById('project-selector-dialog');
-  var results = selectorMenu.querySelector('[role="listbox"]');
+  var results = selectorMenu.querySelector('[data-searchable-selector-results]');
   var createRow = document.createElement('div');
   createRow.hidden = true;
   createRow.setAttribute('data-searchable-selector-divider', '');
-  createRow.style.cssText = 'padding: 8px; border-bottom-width: 1px';
+  createRow.className = 'ov-menu-create-row';
   (results || selectorMenu.firstElementChild).before(createRow);
   var label = document.createElement('span'); label.textContent = 'Create New Project';
   var media = matchMedia('(min-width: 1024px)');

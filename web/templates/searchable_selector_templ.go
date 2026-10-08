@@ -367,108 +367,179 @@ func SearchableSelector(config SearchableSelectorConfig) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		if config.CreateURL != "" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 31, "<div class=\"p-2\" data-searchable-selector-divider style=\"border-bottom-width:1px\">")
+		if config.CreateURL != "" || config.CreateButtonID != "" {
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 31, "<div class=\"ov-menu-create-row\" data-searchable-selector-divider>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var27 = []any{SearchableSelectorOptionClass}
-			templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var27...)
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
+			if config.CreateButtonID != "" {
+				var templ_7745c5c3_Var27 = []any{SearchableSelectorOptionClass}
+				templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var27...)
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 32, "<button id=\"")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				var templ_7745c5c3_Var28 string
+				templ_7745c5c3_Var28, templ_7745c5c3_Err = templ.ResolveAttributeValue(config.CreateButtonID)
+				if templ_7745c5c3_Err != nil {
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/searchable_selector.templ`, Line: 64, Col: 58}
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var28)
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 33, "\" type=\"button\" class=\"")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				var templ_7745c5c3_Var29 string
+				templ_7745c5c3_Var29, templ_7745c5c3_Err = templ.ResolveAttributeValue(templ.CSSClasses(templ_7745c5c3_Var27).String())
+				if templ_7745c5c3_Err != nil {
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/searchable_selector.templ`, Line: 1, Col: 0}
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var29)
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 34, "\" data-searchable-selector-option data-searchable-selector-action onclick=\"this.closest('dialog').close()\">")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				templ_7745c5c3_Err = SearchableSelectorCreateIcon().Render(ctx, templ_7745c5c3_Buffer)
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 35, "<span>")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				var templ_7745c5c3_Var30 string
+				templ_7745c5c3_Var30, templ_7745c5c3_Err = templ.JoinStringErrs(config.CreateLabel)
+				if templ_7745c5c3_Err != nil {
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/searchable_selector.templ`, Line: 66, Col: 54}
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var30))
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 36, "</span></button>")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+			} else {
+				var templ_7745c5c3_Var31 = []any{SearchableSelectorOptionClass}
+				templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var31...)
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 37, "<a href=\"")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				var templ_7745c5c3_Var32 templ.SafeURL
+				templ_7745c5c3_Var32, templ_7745c5c3_Err = templ.JoinURLErrs(templ.URL(config.CreateURL))
+				if templ_7745c5c3_Err != nil {
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/searchable_selector.templ`, Line: 69, Col: 61}
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var32))
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 38, "\" class=\"")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				var templ_7745c5c3_Var33 string
+				templ_7745c5c3_Var33, templ_7745c5c3_Err = templ.ResolveAttributeValue(templ.CSSClasses(templ_7745c5c3_Var31).String())
+				if templ_7745c5c3_Err != nil {
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/searchable_selector.templ`, Line: 1, Col: 0}
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var33)
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 39, "\" data-searchable-selector-option data-searchable-selector-action>")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				templ_7745c5c3_Err = SearchableSelectorCreateIcon().Render(ctx, templ_7745c5c3_Buffer)
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 40, "<span>")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				var templ_7745c5c3_Var34 string
+				templ_7745c5c3_Var34, templ_7745c5c3_Err = templ.JoinStringErrs(config.CreateLabel)
+				if templ_7745c5c3_Err != nil {
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/searchable_selector.templ`, Line: 71, Col: 54}
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var34))
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 41, "</span></a>")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 32, "<a href=\"")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			var templ_7745c5c3_Var28 templ.SafeURL
-			templ_7745c5c3_Var28, templ_7745c5c3_Err = templ.JoinURLErrs(templ.URL(config.CreateURL))
-			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/searchable_selector.templ`, Line: 63, Col: 42}
-			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var28))
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 33, "\" class=\"")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			var templ_7745c5c3_Var29 string
-			templ_7745c5c3_Var29, templ_7745c5c3_Err = templ.ResolveAttributeValue(templ.CSSClasses(templ_7745c5c3_Var27).String())
-			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/searchable_selector.templ`, Line: 1, Col: 0}
-			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var29)
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 34, "\" data-searchable-selector-option data-searchable-selector-action><svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" aria-hidden=\"true\"><path d=\"M12 5v14M5 12h14\"></path></svg> <span>")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			var templ_7745c5c3_Var30 string
-			templ_7745c5c3_Var30, templ_7745c5c3_Err = templ.JoinStringErrs(config.CreateLabel)
-			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/searchable_selector.templ`, Line: 65, Col: 32}
-			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var30))
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 35, "</span></a></div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 42, "</div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		var templ_7745c5c3_Var31 = []any{SearchableSelectorResultsClass}
-		templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var31...)
+		var templ_7745c5c3_Var35 = []any{SearchableSelectorResultsClass}
+		templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var35...)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 36, "<div id=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 43, "<div id=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var32 string
-		templ_7745c5c3_Var32, templ_7745c5c3_Err = templ.ResolveAttributeValue(config.ID + "-results")
+		var templ_7745c5c3_Var36 string
+		templ_7745c5c3_Var36, templ_7745c5c3_Err = templ.ResolveAttributeValue(config.ID + "-results")
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/searchable_selector.templ`, Line: 70, Col: 31}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/searchable_selector.templ`, Line: 77, Col: 31}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var32)
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 37, "\" class=\"")
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var36)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var33 string
-		templ_7745c5c3_Var33, templ_7745c5c3_Err = templ.ResolveAttributeValue(templ.CSSClasses(templ_7745c5c3_Var31).String())
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 44, "\" class=\"")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var37 string
+		templ_7745c5c3_Var37, templ_7745c5c3_Err = templ.ResolveAttributeValue(templ.CSSClasses(templ_7745c5c3_Var35).String())
 		if templ_7745c5c3_Err != nil {
 			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/searchable_selector.templ`, Line: 1, Col: 0}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var33)
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var37)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 38, "\" data-searchable-selector-results")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 45, "\" data-searchable-selector-results")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if config.Local {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 39, " data-project-selector-results")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 46, " data-project-selector-results")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
 		if !config.Local {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 40, " data-breadcrumb-selector-results")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 47, " data-breadcrumb-selector-results")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 41, ">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 48, ">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -476,36 +547,36 @@ func SearchableSelector(config SearchableSelectorConfig) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 42, "</div><span class=\"sr-only\" role=\"status\" aria-live=\"polite\" data-searchable-selector-status")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 49, "</div><span class=\"sr-only\" role=\"status\" aria-live=\"polite\" data-searchable-selector-status")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if config.Local {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 43, " data-project-selector-status")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 50, " data-project-selector-status")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
 		if !config.Local {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 44, " data-breadcrumb-selector-status")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 51, " data-breadcrumb-selector-status")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 45, ">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 52, ">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var34 string
-		templ_7745c5c3_Var34, templ_7745c5c3_Err = templ.JoinStringErrs(config.InitialStatus)
+		var templ_7745c5c3_Var38 string
+		templ_7745c5c3_Var38, templ_7745c5c3_Err = templ.JoinStringErrs(config.InitialStatus)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/searchable_selector.templ`, Line: 78, Col: 210}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/searchable_selector.templ`, Line: 85, Col: 210}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var34))
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var38))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 46, "</span></div></dialog>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 53, "</span></div></dialog>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -533,12 +604,42 @@ func searchableSelectorScript() templ.Component {
 			}()
 		}
 		ctx = templ.InitializeContext(ctx)
-		templ_7745c5c3_Var35 := templ.GetChildren(ctx)
-		if templ_7745c5c3_Var35 == nil {
-			templ_7745c5c3_Var35 = templ.NopComponent
+		templ_7745c5c3_Var39 := templ.GetChildren(ctx)
+		if templ_7745c5c3_Var39 == nil {
+			templ_7745c5c3_Var39 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 47, "<style>\n [data-searchable-selector-trigger][data-selector-return-focus] { outline: none !important; }\n </style><script>\n\t\t(function() {\n\t\t\tvar controllerVersion = 18;\n\t\t\tvar previousController = window.openVibelySearchableSelectorController;\n\t\t\tdocument.querySelectorAll('[data-searchable-selector-search]').forEach(function(input) { input.type = 'text'; });\n\t\t\tdocument.querySelectorAll('[data-project-selector-clear]').forEach(function(control) { control.remove(); });\n\t\t\tif (previousController && previousController.version === controllerVersion) return;\n\t\t\tif (previousController && previousController.abort) {\n\t\t\t\tpreviousController.abort.abort();\n\t\t\t} else if (window.openVibelySearchableSelectorInstalled) {\n\t\t\t\tif (!window.openVibelySearchableSelectorReloading) {\n\t\t\t\t\twindow.openVibelySearchableSelectorReloading = true;\n\t\t\t\t\twindow.location.reload();\n\t\t\t\t}\n\t\t\t\treturn;\n\t\t\t}\n\t\t\tvar abortController = new AbortController();\n\t\t\tfunction listen(target, type, handler, options) {\n\t\t\t\tvar config = typeof options === 'boolean' ? {capture: options} : Object.assign({}, options || {});\n\t\t\t\tconfig.signal = abortController.signal;\n\t\t\t\ttarget.addEventListener(type, handler, config);\n\t\t\t}\n\t\t\twindow.openVibelySearchableSelectorInstalled = true;\n\t\t\twindow.openVibelySearchableSelectorVersion = controllerVersion;\n\t\t\twindow.openVibelySearchableSelectorController = {version: controllerVersion, abort: abortController};\n\t\t\tfunction rootFor(node) { return node && node.closest ? node.closest('[data-searchable-selector]') : null; }\n\t\t\tfunction nodes(root) {\n\t\t\t\treturn {\n\t\t\t\t\troot: root,\n\t\t\t\t\tbutton: root && root.querySelector('[data-searchable-selector-trigger]'),\n\t\t\t\t\tdialog: root && root.querySelector('[data-searchable-selector-dialog]'),\n\t\t\t\t\tsearch: root && root.querySelector('[data-searchable-selector-search]'),\n\t\t\t\t\tvalue: root && root.querySelector('[data-searchable-selector-value]')\n\t\t\t\t};\n\t\t\t}\n\t\t\tfunction options(root) { return root ? Array.prototype.slice.call(root.querySelectorAll('[data-searchable-selector-option]')) : []; }\n\t\t\tfunction visibleOptions(root) { return options(root).filter(function(option) { return !option.hidden && !option.classList.contains('hidden'); }); }\n            function highlight(root, option) {\n                root.__selectorActive = option;\n                options(root).forEach(function(item) { item.toggleAttribute('data-selector-active', item === option); });\n            }\n            function optionKey(option) { return option ? option.getAttribute('data-searchable-selector-id') || option.getAttribute('href') : null; }\n            function reconcileHighlight(root, reset) {\n                var list = visibleOptions(root);\n                if (!reset && list.includes(root.__selectorActive)) return;\n                var key = !reset && optionKey(root.__selectorActive);\n                highlight(root, (key && list.find(function(item) { return optionKey(item) === key; })) || list.find(function(item) { return item.getAttribute('aria-selected') === 'true'; }) || list.find(function(item) { return !item.hasAttribute('data-searchable-selector-action'); }));\n            }\n\t\t\tfunction position(root) {\n\t\t\t\tvar state = nodes(root), dialog = state.dialog, button = state.button;\n\t\t\t\tif (!dialog || !dialog.open || !button) return;\n\t\t\t\tvar margin = 8, gap = 4, trigger = button.getBoundingClientRect();\n\t\t\t\tvar caret = button.querySelector('[data-searchable-selector-caret]');\n\t\t\t\tvar pointerAnchor = root && root.hasAttribute('data-searchable-selector-pointer-x-anchor') ? Number(root.__openVibelySearchableSelectorAnchorX) : NaN;\n\t\t\t\tvar anchorLeft = isFinite(pointerAnchor) ? pointerAnchor : (root.hasAttribute('data-searchable-selector-left-anchor') ? trigger.left : (caret ? caret.getBoundingClientRect().left : trigger.right));\n\t\t\t\tdialog.style.maxHeight = '';\n\t\t\t\tvar width = dialog.offsetWidth, height = dialog.offsetHeight;\n\t\t\t\tvar left = Math.max(margin, Math.min(anchorLeft, window.innerWidth - width - margin));\n\t\t\t\tvar belowTop = trigger.bottom + gap, below = window.innerHeight - belowTop - margin, above = trigger.top - gap - margin;\n\t\t\t\tvar top = belowTop, available = below;\n\t\t\t\tif (below < Math.min(height, 160) && above > below) {\n\t\t\t\t\tavailable = above;\n\t\t\t\t\ttop = Math.max(margin, trigger.top - gap - Math.min(height, available));\n\t\t\t\t}\n\t\t\t\tdialog.style.left = left + 'px';\n\t\t\t\tdialog.style.top = top + 'px';\n\t\t\t\tdialog.style.maxHeight = Math.max(0, available) + 'px';\n\t\t\t}\n\t\t\tfunction applyLocalFilter(root) {\n\t\t\t\tif (!root || !root.hasAttribute('data-searchable-selector-local')) return;\n\t\t\t\tvar state = nodes(root); if (!state.search || !state.value) return;\n\t\t\t\tvar query = String(state.search.value || '').trim().toLowerCase(), matchCount = 0;\n\t\t\t\toptions(root).forEach(function(option) {\n                    if (option.hasAttribute('data-searchable-selector-action')) return;\n\t\t\t\t\tvar match = !query || String(option.getAttribute('data-searchable-selector-name') || '').trim().toLowerCase().indexOf(query) !== -1;\n\t\t\t\t\tvar hidden = !match;\n\t\t\t\t\tif (!hidden) matchCount++;\n\t\t\t\t\toption.hidden = hidden;\n\t\t\t\t\toption.classList.toggle('hidden', hidden);\n\t\t\t\t\toption.setAttribute('aria-hidden', hidden ? 'true' : 'false');\n\t\t\t\t\toption.tabIndex = hidden ? -1 : 0;\n\t\t\t\t});\n\t\t\t\tvar empty = root.querySelector('[data-searchable-selector-no-match]'); if (empty) empty.hidden = !query || matchCount > 0;\n\t\t\t\tvar status = root.querySelector('[data-searchable-selector-status]');\n\t\t\t\tif (status) status.textContent = query && matchCount === 0 ? 'No ' + root.getAttribute('data-searchable-selector-kind') + 's match your search.' : (query ? 'Matching results updated.' : 'All results shown.');\n                reconcileHighlight(root, false);\n\t\t\t\tposition(root);\n\t\t\t}\n\t\t\tfunction syncLocal(root, value) {\n\t\t\t\tif (!root) return;\n\t\t\t\tvar name = '';\n\t\t\t\toptions(root).forEach(function(option) {\n\t\t\t\t\tvar current = option.getAttribute('data-searchable-selector-id') === value;\n\t\t\t\t\toption.setAttribute('aria-selected', current ? 'true' : 'false');\n\t\t\t\t\tvar marker = option.querySelector('[data-searchable-selector-current]'); if (marker) marker.textContent = current ? '✓' : '';\n\t\t\t\t\tif (current) name = option.getAttribute('data-searchable-selector-name') || '';\n\t\t\t\t});\n\t\t\t\tvar label = root.querySelector('[data-searchable-selector-current-label]'); if (label && name) label.textContent = name;\n\t\t\t\tapplyLocalFilter(root);\n\t\t\t}\n\t\t\tfunction refreshOpenRemoteTaskSelectors() {\n\t\t\t\tif (!window.htmx) return;\n\t\t\t\tdocument.querySelectorAll('[data-breadcrumb-selector][data-searchable-selector-kind=\"Task\"]').forEach(function(root) {\n\t\t\t\t\tvar state = nodes(root);\n\t\t\t\t\tif (!state.dialog || !state.dialog.open || !state.search || root.hasAttribute('data-searchable-selector-local')) return;\n\t\t\t\t\tif (root.__openVibelySearchableSelectorRefreshTimer) clearTimeout(root.__openVibelySearchableSelectorRefreshTimer);\n\t\t\t\t\troot.__openVibelySearchableSelectorRefreshTimer = setTimeout(function() {\n\t\t\t\t\t\tvar latest = nodes(root);\n\t\t\t\t\t\tif (!latest.dialog || !latest.dialog.open || !latest.search || !window.htmx) return;\n\t\t\t\t\t\thtmx.trigger(latest.search, 'search');\n\t\t\t\t\t}, 150);\n\t\t\t\t});\n\t\t\t}\n\t\t\tfunction close(root, restore) {\n\t\t\t\tvar state = nodes(root);\n                // Native dialog closure restores focus synchronously. Suppress the\n                // return outline before that focus event, not afterward.\n                if (state.button && root.__selectorKeyboard) {\n                    state.button.removeAttribute('data-pointer-over');\n                    state.button.setAttribute('data-selector-return-focus', '');\n                }\n                if (state.dialog && state.dialog.open) state.dialog.close();\n\t\t\t\tif (root) {\n\t\t\t\t\tdelete root.__openVibelySearchableSelectorAnchorX;\n\t\t\t\t\tif (root.__openVibelySearchableSelectorRefreshTimer) clearTimeout(root.__openVibelySearchableSelectorRefreshTimer);\n\t\t\t\t\tdelete root.__openVibelySearchableSelectorRefreshTimer;\n\t\t\t\t}\n\t\t\t\tif (state.button) state.button.setAttribute('aria-expanded', 'false');\n                if (restore && state.button && state.button.isConnected) state.button.focus({preventScroll: true});\n\t\t\t}\n\t\t\tfunction open(root, event) {\n\t\t\t\tvar state = nodes(root); if (!state.button || !state.dialog || !state.search || state.button.disabled || state.dialog.open) return;\n\t\t\t\tif (root.hasAttribute('data-searchable-selector-pointer-x-anchor') && event && typeof event.clientX === 'number' && event.clientX > 0) root.__openVibelySearchableSelectorAnchorX = event.clientX;\n\t\t\t\telse delete root.__openVibelySearchableSelectorAnchorX;\n\t\t\t\tstate.dialog.showModal(); state.button.setAttribute('aria-expanded', 'true');\n\t\t\t\tif (root.hasAttribute('data-searchable-selector-local')) syncLocal(root, state.value && state.value.value);\n\t\t\t\treconcileHighlight(root, true);\n                position(root); state.search.focus(); state.search.select();\n\t\t\t\tif (root.hasAttribute('data-searchable-selector-local') || !window.htmx) return;\n\t\t\t\t// HTMX binds hx-trigger listeners on DOMContentLoaded; a search fired earlier is dropped.\n\t\t\t\tif (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', function() { if (state.dialog.open) htmx.trigger(state.search, 'search'); }, {once: true});\n\t\t\t\telse htmx.trigger(state.search, 'search');\n\t\t\t}\n\t\t\tlisten(document, 'click', function(event) {\n\t\t\t\tvar root = rootFor(event.target); if (!root) return;\n\t\t\t\tvar trigger = event.target.closest && event.target.closest('[data-searchable-selector-trigger]'); if (trigger) { if (nodes(root).dialog.open) close(root, true); else open(root, event); return; }\n\t\t\t\tvar option = event.target.closest && event.target.closest('[data-searchable-selector-option]');\n\t\t\t\tif (option) {\n\t\t\t\t\tif (root.hasAttribute('data-searchable-selector-local')) {\n\t\t\t\t\t\tvar state = nodes(root), id = option.getAttribute('data-searchable-selector-id'); close(root, true);\n\t\t\t\t\t\tif (state.value && id && id !== state.value.value) { state.value.value = id; state.value.dispatchEvent(new Event('change', {bubbles: true})); }\n\t\t\t\t\t} else if (option.matches('a[href]')) {\n\t\t\t\t\t\tevent.preventDefault();\n                        if (option.getAttribute('aria-selected') === 'true') close(root, true);\n                        else { close(root, false); window.openVibelyNavigate(option.getAttribute('href')); }\n\t\t\t\t\t}\n\t\t\t\t\treturn;\n\t\t\t\t}\n\t\t\t\tif (event.target === nodes(root).dialog) close(root, true);\n\t\t\t});\n            var apple = /Mac|iPhone|iPad/.test(navigator.platform);\n            function labelShortcuts() {\n                document.querySelectorAll('[data-breadcrumb-selector-button], #project-selector-trigger').forEach(function(button) {\n                    var project = button.id === 'project-selector-trigger';\n                    button.setAttribute('aria-keyshortcuts', (apple ? 'Meta+' : 'Control+') + (project ? 'Shift+' : '') + 'K');\n                    if (project || !button.title) button.title = (project ? 'Open project' : button.getAttribute('aria-label')) + ' (' + (apple ? '⌘' : 'Ctrl+') + (project ? (apple ? '⇧' : 'Shift+') : '') + 'K)';\n                });\n            }\n            labelShortcuts();\n            listen(document, 'DOMContentLoaded', labelShortcuts);\n            listen(document, 'htmx:afterSwap', labelShortcuts);\n            listen(document, 'keydown', function(event) {\n                if (event.defaultPrevented || event.isComposing || event.repeat || event.altKey || event.code !== 'KeyK') return;\n                var command = apple ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey;\n                if (!command) return;\n                var button = event.shiftKey ? document.getElementById('project-selector-trigger') : Array.from(document.querySelectorAll('[data-breadcrumb-selector-button]')).find(function(el) { return el.getClientRects().length > 0; });\n                if (!button || button.disabled || !button.getClientRects().length) return;\n                var root = rootFor(button), state = nodes(root), activeDialog = document.querySelector('dialog[open]');\n                if (!state.dialog || (activeDialog && activeDialog !== state.dialog)) return;\n                event.preventDefault();\n                root.__selectorKeyboard = true;\n                if (state.dialog.open) close(root, true);\n                else open(root);\n            });\n\n\t\t\tlisten(document, 'keydown', function(event) {\n\t\t\t\tif (event.defaultPrevented || event.isComposing || event.altKey || event.metaKey || event.ctrlKey) return;\n\t\t\t\tvar root = rootFor(event.target); if (!root) return; var state = nodes(root);\n                root.__selectorKeyboard = true;\n\t\t\t\tif (event.target === state.button && (event.key === 'Enter' || event.key === ' ' || event.key === 'ArrowDown')) { event.preventDefault(); open(root); return; }\n\t\t\t\tif (!state.dialog || !state.dialog.open) return;\n\t\t\t\tif (event.key === 'Escape') { event.preventDefault(); close(root, true); return; }\n\t\t\t\tvar list = visibleOptions(root);\n                var index = list.indexOf(root.__selectorActive);\n                if (event.key === 'Enter' || (event.key === ' ' && event.target !== state.search)) {\n                    event.preventDefault();\n                    if (list.length) (list[index < 0 ? 0 : index]).click();\n                    return;\n                }\n                if (list.length && (event.key === 'ArrowDown' || event.key === 'ArrowUp')) {\n                    event.preventDefault();\n                    index = index < 0 ? (event.key === 'ArrowDown' ? 0 : list.length - 1) : (index + (event.key === 'ArrowDown' ? 1 : list.length - 1)) % list.length;\n                    highlight(root, list[index]); list[index].focus();\n                }\n\t\t\t});\n            // A modal dialog makes its trigger inert. Track pointer geometry so\n            // clicking the backdrop over the trigger retains its hover state.\n            function trackBreadcrumbHover(event) {\n                document.querySelectorAll('[data-breadcrumb-selector-button]').forEach(function(button) {\n                    var rect = button.getBoundingClientRect();\n                    button.toggleAttribute('data-pointer-over', event.pointerType !== 'touch' && event.clientX >= rect.left && event.clientX < rect.right && event.clientY >= rect.top && event.clientY < rect.bottom);\n                });\n            }\n            function clearBreadcrumbHover() {\n                document.querySelectorAll('[data-breadcrumb-selector-button][data-pointer-over]').forEach(function(button) { button.removeAttribute('data-pointer-over'); });\n            }\n            listen(document, 'pointermove', trackBreadcrumbHover, true);\n            listen(document, 'pointerdown', trackBreadcrumbHover, true);\n            listen(document, 'pointerout', function(event) { if (!event.relatedTarget) clearBreadcrumbHover(); }, true);\n            listen(window, 'blur', clearBreadcrumbHover);\n            listen(document, 'pointerdown', function(event) { var root = rootFor(event.target); if (root) root.__selectorKeyboard = false; });\n            listen(document, 'pointermove', function(event) {\n                var root = rootFor(event.target); if (!root) return;\n                var option = event.target.closest('[data-searchable-selector-option]');\n                if (option || event.target.closest('[data-searchable-selector-dialog]')) highlight(root, option);\n                // Keep return-focus suppression until focus leaves the trigger.\n                // Pointer hover must not restore a keyboard outline.\n            });\n            listen(document, 'focusin', function(event) {\n                var root = rootFor(event.target);\n                if (root && event.target.matches('[data-searchable-selector-option]')) highlight(root, event.target);\n            });\n            listen(document, 'focusout', function(event) {\n                if (event.target.matches('[data-searchable-selector-trigger]')) event.target.removeAttribute('data-selector-return-focus');\n            });\n\t\t\tlisten(document, 'cancel', function(event) { var root = rootFor(event.target); if (!root || event.target !== nodes(root).dialog) return; event.preventDefault(); close(root, true); }, true);\n\t\t\tlisten(document, 'close', function(event) { var root = rootFor(event.target), button = nodes(root).button; if (button) button.setAttribute('aria-expanded', 'false'); }, true);\n\t\t\tlisten(document, 'htmx:responseError', function(event) {\n\t\t\t\tvar root = rootFor(event.detail && event.detail.elt); if (!root || root.hasAttribute('data-searchable-selector-local')) return;\n\t\t\t\tvar results = root.querySelector('[data-searchable-selector-results]'), status = root.querySelector('[data-searchable-selector-status]');\n\t\t\t\tif (results) results.innerHTML = '<div class=\"px-3 py-8 text-center\"><p class=\"font-medium\">Could not load results</p><p class=\"mt-1 text-sm opacity-60\">Try searching again.</p></div>';\n\t\t\t\tif (status) status.textContent = 'Could not load results.';\n\t\t\t});\n\t\t\tlisten(document, 'htmx:afterSwap', function(event) {\n\t\t\t\tvar root = rootFor(event.detail && event.detail.target); if (!root) return;\n\t\t\t\tvar status = root.querySelector('[data-searchable-selector-status]');\n\t\t\t\treconcileHighlight(root, false);\n\t\t\t\tif (status && !root.hasAttribute('data-searchable-selector-local')) status.textContent = root.querySelector('[data-searchable-selector-empty]') ? 'No results.' : 'Search results updated.';\n\t\t\t\tposition(root);\n\t\t\t});\n\t\t\tlisten(window, 'sse-task-event', refreshOpenRemoteTaskSelectors);\n\t\t\tlisten(document, 'htmx:beforeSwap', function(event) {\n\t\t\t\tvar target = event.detail && event.detail.target; if (!target || rootFor(target) || target.id !== 'main-content') return;\n\t\t\t\tdocument.querySelectorAll('[data-searchable-selector-dialog][open]').forEach(function(dialog) { close(rootFor(dialog), false); });\n\t\t\t});\n\t\t\tlisten(document, 'htmx:historyRestore', function() { document.querySelectorAll('[data-searchable-selector-dialog][open]').forEach(function(dialog) { close(rootFor(dialog), false); }); });\n\t\t\tlisten(window, 'resize', function() { document.querySelectorAll('[data-searchable-selector]').forEach(position); });\n\t\t\tlisten(document, 'scroll', function(event) { if (rootFor(event.target) && event.target.closest('[data-searchable-selector-dialog]')) return; document.querySelectorAll('[data-searchable-selector]').forEach(position); }, true);\n\t\t\tlisten(window, 'popstate', function() { document.querySelectorAll('[data-searchable-selector-dialog][open]').forEach(function(dialog) { close(rootFor(dialog), false); }); });\n\t\t\twindow.openVibelySearchableSelector = { sync: syncLocal, filter: applyLocalFilter, position: position, close: close };\n\t\t})();\n\t</script>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 54, "<style>\n [data-searchable-selector-trigger][data-selector-return-focus] { outline: none !important; }\n </style><script>\n\t\t(function() {\n\t\t\tvar controllerVersion = 18;\n\t\t\tvar previousController = window.openVibelySearchableSelectorController;\n\t\t\tdocument.querySelectorAll('[data-searchable-selector-search]').forEach(function(input) { input.type = 'text'; });\n\t\t\tdocument.querySelectorAll('[data-project-selector-clear]').forEach(function(control) { control.remove(); });\n\t\t\tif (previousController && previousController.version === controllerVersion) return;\n\t\t\tif (previousController && previousController.abort) {\n\t\t\t\tpreviousController.abort.abort();\n\t\t\t} else if (window.openVibelySearchableSelectorInstalled) {\n\t\t\t\tif (!window.openVibelySearchableSelectorReloading) {\n\t\t\t\t\twindow.openVibelySearchableSelectorReloading = true;\n\t\t\t\t\twindow.location.reload();\n\t\t\t\t}\n\t\t\t\treturn;\n\t\t\t}\n\t\t\tvar abortController = new AbortController();\n\t\t\tfunction listen(target, type, handler, options) {\n\t\t\t\tvar config = typeof options === 'boolean' ? {capture: options} : Object.assign({}, options || {});\n\t\t\t\tconfig.signal = abortController.signal;\n\t\t\t\ttarget.addEventListener(type, handler, config);\n\t\t\t}\n\t\t\twindow.openVibelySearchableSelectorInstalled = true;\n\t\t\twindow.openVibelySearchableSelectorVersion = controllerVersion;\n\t\t\twindow.openVibelySearchableSelectorController = {version: controllerVersion, abort: abortController};\n\t\t\tfunction rootFor(node) { return node && node.closest ? node.closest('[data-searchable-selector]') : null; }\n\t\t\tfunction nodes(root) {\n\t\t\t\treturn {\n\t\t\t\t\troot: root,\n\t\t\t\t\tbutton: root && root.querySelector('[data-searchable-selector-trigger]'),\n\t\t\t\t\tdialog: root && root.querySelector('[data-searchable-selector-dialog]'),\n\t\t\t\t\tsearch: root && root.querySelector('[data-searchable-selector-search]'),\n\t\t\t\t\tvalue: root && root.querySelector('[data-searchable-selector-value]')\n\t\t\t\t};\n\t\t\t}\n\t\t\tfunction options(root) { return root ? Array.prototype.slice.call(root.querySelectorAll('[data-searchable-selector-option]')) : []; }\n\t\t\tfunction visibleOptions(root) { return options(root).filter(function(option) { return !option.hidden && !option.classList.contains('hidden'); }); }\n            function highlight(root, option) {\n                root.__selectorActive = option;\n                options(root).forEach(function(item) { item.toggleAttribute('data-selector-active', item === option); });\n            }\n            function optionKey(option) { return option ? option.getAttribute('data-searchable-selector-id') || option.getAttribute('href') : null; }\n            function reconcileHighlight(root, reset) {\n                var list = visibleOptions(root);\n                if (!reset && list.includes(root.__selectorActive)) return;\n                var key = !reset && optionKey(root.__selectorActive);\n                highlight(root, (key && list.find(function(item) { return optionKey(item) === key; })) || list.find(function(item) { return item.getAttribute('aria-selected') === 'true'; }) || list.find(function(item) { return !item.hasAttribute('data-searchable-selector-action'); }));\n            }\n\t\t\tfunction position(root) {\n\t\t\t\tvar state = nodes(root), dialog = state.dialog, button = state.button;\n\t\t\t\tif (!dialog || !dialog.open || !button) return;\n\t\t\t\tvar margin = 8, gap = 4, trigger = button.getBoundingClientRect();\n\t\t\t\tvar caret = button.querySelector('[data-searchable-selector-caret]');\n\t\t\t\tvar pointerAnchor = root && root.hasAttribute('data-searchable-selector-pointer-x-anchor') ? Number(root.__openVibelySearchableSelectorAnchorX) : NaN;\n\t\t\t\tvar anchorLeft = isFinite(pointerAnchor) ? pointerAnchor : (root.hasAttribute('data-searchable-selector-left-anchor') ? trigger.left : (caret ? caret.getBoundingClientRect().left : trigger.right));\n\t\t\t\tdialog.style.maxHeight = '';\n\t\t\t\tvar width = dialog.offsetWidth, height = dialog.offsetHeight;\n\t\t\t\tvar left = Math.max(margin, Math.min(anchorLeft, window.innerWidth - width - margin));\n\t\t\t\tvar belowTop = trigger.bottom + gap, below = window.innerHeight - belowTop - margin, above = trigger.top - gap - margin;\n\t\t\t\tvar top = belowTop, available = below;\n\t\t\t\tif (below < Math.min(height, 160) && above > below) {\n\t\t\t\t\tavailable = above;\n\t\t\t\t\ttop = Math.max(margin, trigger.top - gap - Math.min(height, available));\n\t\t\t\t}\n\t\t\t\tdialog.style.left = left + 'px';\n\t\t\t\tdialog.style.top = top + 'px';\n\t\t\t\tdialog.style.maxHeight = Math.max(0, available) + 'px';\n\t\t\t}\n\t\t\tfunction applyLocalFilter(root) {\n\t\t\t\tif (!root || !root.hasAttribute('data-searchable-selector-local')) return;\n\t\t\t\tvar state = nodes(root); if (!state.search || !state.value) return;\n\t\t\t\tvar query = String(state.search.value || '').trim().toLowerCase(), matchCount = 0;\n\t\t\t\toptions(root).forEach(function(option) {\n                    if (option.hasAttribute('data-searchable-selector-action')) return;\n\t\t\t\t\tvar match = !query || String(option.getAttribute('data-searchable-selector-name') || '').trim().toLowerCase().indexOf(query) !== -1;\n\t\t\t\t\tvar hidden = !match;\n\t\t\t\t\tif (!hidden) matchCount++;\n\t\t\t\t\toption.hidden = hidden;\n\t\t\t\t\toption.classList.toggle('hidden', hidden);\n\t\t\t\t\toption.setAttribute('aria-hidden', hidden ? 'true' : 'false');\n\t\t\t\t\toption.tabIndex = hidden ? -1 : 0;\n\t\t\t\t});\n\t\t\t\tvar empty = root.querySelector('[data-searchable-selector-no-match]'); if (empty) empty.hidden = !query || matchCount > 0;\n\t\t\t\tvar status = root.querySelector('[data-searchable-selector-status]');\n\t\t\t\tif (status) status.textContent = query && matchCount === 0 ? 'No ' + root.getAttribute('data-searchable-selector-kind') + 's match your search.' : (query ? 'Matching results updated.' : 'All results shown.');\n                reconcileHighlight(root, false);\n\t\t\t\tposition(root);\n\t\t\t}\n\t\t\tfunction syncLocal(root, value) {\n\t\t\t\tif (!root) return;\n\t\t\t\tvar name = '';\n\t\t\t\toptions(root).forEach(function(option) {\n\t\t\t\t\tvar current = option.getAttribute('data-searchable-selector-id') === value;\n\t\t\t\t\toption.setAttribute('aria-selected', current ? 'true' : 'false');\n\t\t\t\t\tvar marker = option.querySelector('[data-searchable-selector-current]'); if (marker) marker.textContent = current ? '✓' : '';\n\t\t\t\t\tif (current) name = option.getAttribute('data-searchable-selector-name') || '';\n\t\t\t\t});\n\t\t\t\tvar label = root.querySelector('[data-searchable-selector-current-label]'); if (label && name) label.textContent = name;\n\t\t\t\tapplyLocalFilter(root);\n\t\t\t}\n\t\t\tfunction refreshOpenRemoteTaskSelectors() {\n\t\t\t\tif (!window.htmx) return;\n\t\t\t\tdocument.querySelectorAll('[data-breadcrumb-selector][data-searchable-selector-kind=\"Task\"]').forEach(function(root) {\n\t\t\t\t\tvar state = nodes(root);\n\t\t\t\t\tif (!state.dialog || !state.dialog.open || !state.search || root.hasAttribute('data-searchable-selector-local')) return;\n\t\t\t\t\tif (root.__openVibelySearchableSelectorRefreshTimer) clearTimeout(root.__openVibelySearchableSelectorRefreshTimer);\n\t\t\t\t\troot.__openVibelySearchableSelectorRefreshTimer = setTimeout(function() {\n\t\t\t\t\t\tvar latest = nodes(root);\n\t\t\t\t\t\tif (!latest.dialog || !latest.dialog.open || !latest.search || !window.htmx) return;\n\t\t\t\t\t\thtmx.trigger(latest.search, 'search');\n\t\t\t\t\t}, 150);\n\t\t\t\t});\n\t\t\t}\n\t\t\tfunction close(root, restore) {\n\t\t\t\tvar state = nodes(root);\n                // Native dialog closure restores focus synchronously. Suppress the\n                // return outline before that focus event, not afterward.\n                if (state.button && root.__selectorKeyboard) {\n                    state.button.removeAttribute('data-pointer-over');\n                    state.button.setAttribute('data-selector-return-focus', '');\n                }\n                if (state.dialog && state.dialog.open) state.dialog.close();\n\t\t\t\tif (root) {\n\t\t\t\t\tdelete root.__openVibelySearchableSelectorAnchorX;\n\t\t\t\t\tif (root.__openVibelySearchableSelectorRefreshTimer) clearTimeout(root.__openVibelySearchableSelectorRefreshTimer);\n\t\t\t\t\tdelete root.__openVibelySearchableSelectorRefreshTimer;\n\t\t\t\t}\n\t\t\t\tif (state.button) state.button.setAttribute('aria-expanded', 'false');\n                if (restore && state.button && state.button.isConnected) state.button.focus({preventScroll: true});\n\t\t\t}\n\t\t\tfunction open(root, event) {\n\t\t\t\tvar state = nodes(root); if (!state.button || !state.dialog || !state.search || state.button.disabled || state.dialog.open) return;\n\t\t\t\tif (root.hasAttribute('data-searchable-selector-pointer-x-anchor') && event && typeof event.clientX === 'number' && event.clientX > 0) root.__openVibelySearchableSelectorAnchorX = event.clientX;\n\t\t\t\telse delete root.__openVibelySearchableSelectorAnchorX;\n\t\t\t\tstate.dialog.showModal(); state.button.setAttribute('aria-expanded', 'true');\n\t\t\t\tif (root.hasAttribute('data-searchable-selector-local')) syncLocal(root, state.value && state.value.value);\n\t\t\t\treconcileHighlight(root, true);\n                position(root); state.search.focus(); state.search.select();\n\t\t\t\tif (root.hasAttribute('data-searchable-selector-local') || !window.htmx) return;\n\t\t\t\t// HTMX binds hx-trigger listeners on DOMContentLoaded; a search fired earlier is dropped.\n\t\t\t\tif (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', function() { if (state.dialog.open) htmx.trigger(state.search, 'search'); }, {once: true});\n\t\t\t\telse htmx.trigger(state.search, 'search');\n\t\t\t}\n\t\t\tlisten(document, 'click', function(event) {\n\t\t\t\tvar root = rootFor(event.target); if (!root) return;\n\t\t\t\tvar trigger = event.target.closest && event.target.closest('[data-searchable-selector-trigger]'); if (trigger) { if (nodes(root).dialog.open) close(root, true); else open(root, event); return; }\n\t\t\t\tvar option = event.target.closest && event.target.closest('[data-searchable-selector-option]');\n\t\t\t\tif (option) {\n\t\t\t\t\tif (root.hasAttribute('data-searchable-selector-local')) {\n\t\t\t\t\t\tvar state = nodes(root), id = option.getAttribute('data-searchable-selector-id'); close(root, true);\n\t\t\t\t\t\tif (state.value && id && id !== state.value.value) { state.value.value = id; state.value.dispatchEvent(new Event('change', {bubbles: true})); }\n\t\t\t\t\t} else if (option.matches('a[href]')) {\n\t\t\t\t\t\tevent.preventDefault();\n                        if (option.getAttribute('aria-selected') === 'true') close(root, true);\n                        else { close(root, false); window.openVibelyNavigate(option.getAttribute('href')); }\n\t\t\t\t\t}\n\t\t\t\t\treturn;\n\t\t\t\t}\n\t\t\t\tif (event.target === nodes(root).dialog) close(root, true);\n\t\t\t});\n            var apple = /Mac|iPhone|iPad/.test(navigator.platform);\n            function labelShortcuts() {\n                document.querySelectorAll('[data-breadcrumb-selector-button], #project-selector-trigger').forEach(function(button) {\n                    var project = button.id === 'project-selector-trigger';\n                    button.setAttribute('aria-keyshortcuts', (apple ? 'Meta+' : 'Control+') + (project ? 'Shift+' : '') + 'K');\n                    if (project || !button.title) button.title = (project ? 'Open project' : button.getAttribute('aria-label')) + ' (' + (apple ? '⌘' : 'Ctrl+') + (project ? (apple ? '⇧' : 'Shift+') : '') + 'K)';\n                });\n            }\n            labelShortcuts();\n            listen(document, 'DOMContentLoaded', labelShortcuts);\n            listen(document, 'htmx:afterSwap', labelShortcuts);\n            listen(document, 'keydown', function(event) {\n                if (event.defaultPrevented || event.isComposing || event.repeat || event.altKey || event.code !== 'KeyK') return;\n                var command = apple ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey;\n                if (!command) return;\n                var button = event.shiftKey ? document.getElementById('project-selector-trigger') : Array.from(document.querySelectorAll('[data-breadcrumb-selector-button]')).find(function(el) { return el.getClientRects().length > 0; });\n                if (!button || button.disabled || !button.getClientRects().length) return;\n                var root = rootFor(button), state = nodes(root), activeDialog = document.querySelector('dialog[open]');\n                if (!state.dialog || (activeDialog && activeDialog !== state.dialog)) return;\n                event.preventDefault();\n                root.__selectorKeyboard = true;\n                if (state.dialog.open) close(root, true);\n                else open(root);\n            });\n\n\t\t\tlisten(document, 'keydown', function(event) {\n\t\t\t\tif (event.defaultPrevented || event.isComposing || event.altKey || event.metaKey || event.ctrlKey) return;\n\t\t\t\tvar root = rootFor(event.target); if (!root) return; var state = nodes(root);\n                root.__selectorKeyboard = true;\n\t\t\t\tif (event.target === state.button && (event.key === 'Enter' || event.key === ' ' || event.key === 'ArrowDown')) { event.preventDefault(); open(root); return; }\n\t\t\t\tif (!state.dialog || !state.dialog.open) return;\n\t\t\t\tif (event.key === 'Escape') { event.preventDefault(); close(root, true); return; }\n\t\t\t\tvar list = visibleOptions(root);\n                var index = list.indexOf(root.__selectorActive);\n                if (event.key === 'Enter' || (event.key === ' ' && event.target !== state.search)) {\n                    event.preventDefault();\n                    if (list.length) (list[index < 0 ? 0 : index]).click();\n                    return;\n                }\n                if (list.length && (event.key === 'ArrowDown' || event.key === 'ArrowUp')) {\n                    event.preventDefault();\n                    index = index < 0 ? (event.key === 'ArrowDown' ? 0 : list.length - 1) : (index + (event.key === 'ArrowDown' ? 1 : list.length - 1)) % list.length;\n                    highlight(root, list[index]); list[index].focus();\n                }\n\t\t\t});\n            // A modal dialog makes its trigger inert. Track pointer geometry so\n            // clicking the backdrop over the trigger retains its hover state.\n            function trackBreadcrumbHover(event) {\n                document.querySelectorAll('[data-breadcrumb-selector-button]').forEach(function(button) {\n                    var rect = button.getBoundingClientRect();\n                    button.toggleAttribute('data-pointer-over', event.pointerType !== 'touch' && event.clientX >= rect.left && event.clientX < rect.right && event.clientY >= rect.top && event.clientY < rect.bottom);\n                });\n            }\n            function clearBreadcrumbHover() {\n                document.querySelectorAll('[data-breadcrumb-selector-button][data-pointer-over]').forEach(function(button) { button.removeAttribute('data-pointer-over'); });\n            }\n            listen(document, 'pointermove', trackBreadcrumbHover, true);\n            listen(document, 'pointerdown', trackBreadcrumbHover, true);\n            listen(document, 'pointerout', function(event) { if (!event.relatedTarget) clearBreadcrumbHover(); }, true);\n            listen(window, 'blur', clearBreadcrumbHover);\n            listen(document, 'pointerdown', function(event) { var root = rootFor(event.target); if (root) root.__selectorKeyboard = false; });\n            listen(document, 'pointermove', function(event) {\n                var root = rootFor(event.target); if (!root) return;\n                var option = event.target.closest('[data-searchable-selector-option]');\n                if (option || event.target.closest('[data-searchable-selector-dialog]')) highlight(root, option);\n                // Keep return-focus suppression until focus leaves the trigger.\n                // Pointer hover must not restore a keyboard outline.\n            });\n            listen(document, 'focusin', function(event) {\n                var root = rootFor(event.target);\n                if (root && event.target.matches('[data-searchable-selector-option]')) highlight(root, event.target);\n            });\n            listen(document, 'focusout', function(event) {\n                if (event.target.matches('[data-searchable-selector-trigger]')) event.target.removeAttribute('data-selector-return-focus');\n            });\n\t\t\tlisten(document, 'cancel', function(event) { var root = rootFor(event.target); if (!root || event.target !== nodes(root).dialog) return; event.preventDefault(); close(root, true); }, true);\n\t\t\tlisten(document, 'close', function(event) { var root = rootFor(event.target), button = nodes(root).button; if (button) button.setAttribute('aria-expanded', 'false'); }, true);\n\t\t\tlisten(document, 'htmx:responseError', function(event) {\n\t\t\t\tvar root = rootFor(event.detail && event.detail.elt); if (!root || root.hasAttribute('data-searchable-selector-local')) return;\n\t\t\t\tvar results = root.querySelector('[data-searchable-selector-results]'), status = root.querySelector('[data-searchable-selector-status]');\n\t\t\t\tif (results) results.innerHTML = '<div class=\"px-3 py-8 text-center\"><p class=\"font-medium\">Could not load results</p><p class=\"mt-1 text-sm opacity-60\">Try searching again.</p></div>';\n\t\t\t\tif (status) status.textContent = 'Could not load results.';\n\t\t\t});\n\t\t\tlisten(document, 'htmx:afterSwap', function(event) {\n\t\t\t\tvar root = rootFor(event.detail && event.detail.target); if (!root) return;\n\t\t\t\tvar status = root.querySelector('[data-searchable-selector-status]');\n\t\t\t\treconcileHighlight(root, false);\n\t\t\t\tif (status && !root.hasAttribute('data-searchable-selector-local')) status.textContent = root.querySelector('[data-searchable-selector-empty]') ? 'No results.' : 'Search results updated.';\n\t\t\t\tposition(root);\n\t\t\t});\n\t\t\tlisten(window, 'sse-task-event', refreshOpenRemoteTaskSelectors);\n\t\t\tlisten(document, 'htmx:beforeSwap', function(event) {\n\t\t\t\tvar target = event.detail && event.detail.target; if (!target || rootFor(target) || target.id !== 'main-content') return;\n\t\t\t\tdocument.querySelectorAll('[data-searchable-selector-dialog][open]').forEach(function(dialog) { close(rootFor(dialog), false); });\n\t\t\t});\n\t\t\tlisten(document, 'htmx:historyRestore', function() { document.querySelectorAll('[data-searchable-selector-dialog][open]').forEach(function(dialog) { close(rootFor(dialog), false); }); });\n\t\t\tlisten(window, 'resize', function() { document.querySelectorAll('[data-searchable-selector]').forEach(position); });\n\t\t\tlisten(document, 'scroll', function(event) { if (rootFor(event.target) && event.target.closest('[data-searchable-selector-dialog]')) return; document.querySelectorAll('[data-searchable-selector]').forEach(position); }, true);\n\t\t\tlisten(window, 'popstate', function() { document.querySelectorAll('[data-searchable-selector-dialog][open]').forEach(function(dialog) { close(rootFor(dialog), false); }); });\n\t\t\twindow.openVibelySearchableSelector = { sync: syncLocal, filter: applyLocalFilter, position: position, close: close };\n\t\t})();\n\t</script>")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		return nil
+	})
+}
+
+// SearchableSelectorCreateIcon keeps button and link actions aligned.
+func SearchableSelectorCreateIcon() templ.Component {
+	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
+		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
+		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
+			return templ_7745c5c3_CtxErr
+		}
+		templ_7745c5c3_Buffer, templ_7745c5c3_IsBuffer := templruntime.GetBuffer(templ_7745c5c3_W)
+		if !templ_7745c5c3_IsBuffer {
+			defer func() {
+				templ_7745c5c3_BufErr := templruntime.ReleaseBuffer(templ_7745c5c3_Buffer)
+				if templ_7745c5c3_Err == nil {
+					templ_7745c5c3_Err = templ_7745c5c3_BufErr
+				}
+			}()
+		}
+		ctx = templ.InitializeContext(ctx)
+		templ_7745c5c3_Var40 := templ.GetChildren(ctx)
+		if templ_7745c5c3_Var40 == nil {
+			templ_7745c5c3_Var40 = templ.NopComponent
+		}
+		ctx = templ.ClearChildren(ctx)
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 55, "<svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" aria-hidden=\"true\"><path d=\"M12 5v14M5 12h14\"></path></svg>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

@@ -389,7 +389,7 @@ func TestBrowserFunctional_ProjectTabsAndBrowserScope(t *testing.T) {
 				browser.click("#project-selector-trigger")
 				browser.waitFor("full selector", `String(document.getElementById('project-selector-dialog').open)`, "true")
 
-				if got := browser.evaluate(`String(Math.abs(document.getElementById('new-project-btn').getBoundingClientRect().height - document.querySelector('[data-project-selector-option]').getBoundingClientRect().height) < 1 && document.getElementById('new-project-btn').parentElement.nextElementSibling.matches('[role="separator"]'))`); got != "true" {
+				if got := browser.evaluate(`String(Math.abs(document.getElementById('new-project-btn').getBoundingClientRect().height - document.querySelector('[data-project-selector-option]').getBoundingClientRect().height) < 1 && getComputedStyle(document.getElementById('new-project-btn').parentElement).borderBottomWidth === '1px' && Math.abs(document.getElementById('new-project-btn').parentElement.getBoundingClientRect().width - document.querySelector('#project-selector-dialog [data-searchable-selector-panel]').getBoundingClientRect().width) < 1)`); got != "true" {
 					t.Fatal("create row must match option height and have a separator", got)
 				}
 				var plusPoint struct{ X, Y float64 }
