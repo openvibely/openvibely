@@ -1,20 +1,21 @@
 package templates
 
 templ SearchableSelector(config SearchableSelectorConfig) {
+	@MenuStyles()
 	<dialog
 		id={ config.ID + "-dialog" }
 		class={ SearchableSelectorDialogClass }
 		role="dialog"
 		aria-modal="true"
 		aria-label={ "Select " + config.Kind }
+		data-searchable-selector-option-class={ SearchableSelectorOptionClass }
 		data-searchable-selector-dialog
 		data-project-selector-dialog?={ config.Local }
 		data-breadcrumb-selector-dialog?={ !config.Local }
 	>
 		<div class={ SearchableSelectorPanelClass } data-searchable-selector-panel>
-			<div class="p-2">
-				<div class={ SearchableSelectorSearchShellClass } data-searchable-selector-search-shell>
-					<div class="relative">
+			<div class={ SearchableSelectorSearchShellClass } data-searchable-selector-search-shell>
+					<div class="relative w-full">
 						<label class="sr-only" for={ config.ID + "-search" }>Search { config.Kind }s</label>
 						if config.Local {
 						<input
@@ -56,7 +57,6 @@ templ SearchableSelector(config SearchableSelectorConfig) {
 							<span id={ config.ID + "-loading" } class="loading loading-spinner loading-xs htmx-indicator pointer-events-none absolute right-3 top-1/2 -translate-y-1/2" aria-hidden="true"></span>
 						}
 					</div>
-				</div>
 			</div>
 			if config.CreateURL != "" {
 				<div class="p-2" data-searchable-selector-divider style="border-bottom-width:1px">
@@ -83,14 +83,6 @@ templ SearchableSelector(config SearchableSelectorConfig) {
 
 templ searchableSelectorScript() {
  <style>
- [data-searchable-selector-divider] { border-color:oklch(var(--bc) / .15); }
- [data-searchable-selector-option] { font-size:.875rem; line-height:1.25rem; font-weight:400; outline: none !important; background-color: transparent !important; }
- [data-searchable-selector-option][data-selector-active] { background-color: oklch(var(--bc) / .1) !important; }
- @supports not (color: oklch(0 0 0)) {
-  [data-searchable-selector-divider] { border-color:var(--ov-border-subtle); }
-  [data-searchable-selector-option][data-selector-active] { background-color: var(--ov-hover) !important; }
- }
- [data-theme="light"] [data-searchable-selector-option][data-selector-active] { background-color: var(--ov-l-surface-active) !important; }
  [data-searchable-selector-trigger][data-selector-return-focus] { outline: none !important; }
  </style>
 	<script>

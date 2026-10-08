@@ -2,13 +2,6 @@
 .ov-model-submenu {
   position: fixed;
   z-index: 10010;
-  box-sizing: border-box;
-  background: var(--ov-menu-surface, #1e242c);
-  color: var(--ov-text-primary, inherit);
-  border: 1px solid var(--ov-border-subtle, #414753);
-  border-radius: 12px;
-  box-shadow: 0 12px 40px #0004;
-  font-size: 13px;
   overflow: hidden;
 }
 .ov-model-picker {
@@ -22,53 +15,7 @@
 .ov-mp-effort[hidden] {
   display: none !important;
 }
-.ov-mp-search {
-  display: flex;
-  align-items: center;
-  border-bottom: 1px solid var(--ov-border-subtle, #414753);
-  padding: 12px;
-  gap: 8px;
-  flex-shrink: 0;
-}
-.ov-mp-search input {
-  min-width: 0;
-  width: 100%;
-  background: transparent;
-  border: 0;
-  color: inherit;
-  outline: none;
-}
-.ov-mp-list {
-  overflow: auto;
-  flex: 0 1 auto;
-  padding: 6px;
-  min-height: 0;
-  scrollbar-width: auto;
-  scrollbar-color: auto;
-}
-.ov-mp-row {
-  display: flex;
-  align-items: center;
-  min-width: 0;
-  border-radius: 7px;
-}
-/* Match the shared project selector's active-row colors. */
-.ov-mp-row[data-picker-active],
-.ov-mp-provider[data-picker-active] {
-  background-color: oklch(var(--bc) / 0.1);
-}
-@supports not (color: oklch(0 0 0)) {
-  .ov-mp-row[data-picker-active],
-  .ov-mp-provider[data-picker-active] {
-    background-color: var(--ov-hover);
-  }
-}
-[data-theme="light"] .ov-mp-row[data-picker-active],
-[data-theme="light"] .ov-mp-provider[data-picker-active] {
-  background-color: var(--ov-l-surface-active);
-}
-.ov-mp-pick,
-.ov-mp-provider,
+.ov-mp-list { flex: 0 1 auto; }
 .ov-mp-star,
 .ov-mp-clear,
 .ov-mp-back,
@@ -81,13 +28,6 @@
 }
 .ov-mp-pick {
   flex: 1;
-  min-width: 0;
-  text-align: left;
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  padding: 7px 10px;
-  border-radius: 7px;
 }
 .ov-mp-copy {
   min-width: 0;
@@ -114,11 +54,6 @@
 .ov-mp-star[aria-pressed="true"] {
   color: #aba5ff;
 }
-.ov-mp-check {
-  width: 15px;
-  color: var(--fallback-bc, oklch(var(--bc) / 1));
-  flex-shrink: 0;
-}
 .ov-mp-heading {
   font-size: 10px;
   opacity: 0.6;
@@ -127,15 +62,7 @@
 }
 .ov-mp-provider {
   width: 100%;
-  padding: 8px 10px;
-  display: flex;
   justify-content: space-between;
-  text-align: left;
-  border-radius: 7px;
-}
-.ov-mp-rule {
-  border-top: 1px solid var(--ov-border-subtle, #414753);
-  margin: 6px 4px;
 }
 .ov-mp-effort {
   padding: 8px 12px;
@@ -185,14 +112,7 @@
   padding: 10px 12px;
   border-bottom: 1px solid var(--ov-border-subtle, #414753);
 }
-.ov-mp-sublist {
-  min-height: 0;
-  max-height: 310px;
-  overflow: auto;
-  padding: 6px;
-  scrollbar-width: auto;
-  scrollbar-color: auto;
-}
+.ov-mp-sublist { max-height: 310px; }
 .ov-mp-empty {
   padding: 22px 12px;
   opacity: 0.65;
@@ -272,32 +192,4 @@
 
 .ov-mp-status:empty {
   display: none;
-}
-
-/* Explicit WebKit scrollbars stay visible on macOS when content overflows. */
-.ov-mp-list,
-.ov-mp-sublist {
-  overflow-x: hidden;
-  overflow-y: auto;
-  --ov-mp-scroll-thumb: #737b89;
-}
-[data-theme="light"] .ov-mp-list,
-[data-theme="light"] .ov-mp-sublist {
-  --ov-mp-scroll-thumb: #a0a6b0;
-}
-.ov-mp-list::-webkit-scrollbar,
-.ov-mp-sublist::-webkit-scrollbar {
-  width: 8px;
-}
-.ov-mp-list::-webkit-scrollbar-track,
-.ov-mp-sublist::-webkit-scrollbar-track {
-  background: transparent;
-}
-.ov-mp-list::-webkit-scrollbar-thumb,
-.ov-mp-sublist::-webkit-scrollbar-thumb {
-  background-color: var(--ov-mp-scroll-thumb);
-  border: 2px solid transparent;
-  background-clip: padding-box;
-  border-radius: 8px;
-  min-height: 24px;
 }

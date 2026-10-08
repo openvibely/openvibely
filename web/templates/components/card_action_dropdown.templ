@@ -3,7 +3,7 @@ package components
 type CardActionDropdownConfig struct {
 	WrapperClass             string
 	TriggerClass             string
-	MenuClass                string
+	MenuClass                string // Optional sizing and positioning classes; appearance is shared.
 	IconClass                string
 	Label                    string
 	Title                    string
@@ -32,10 +32,11 @@ func cardActionDropdownTriggerClass(config CardActionDropdownConfig) string {
 }
 
 func cardActionDropdownMenuClass(config CardActionDropdownConfig) string {
-	if config.MenuClass != "" {
-		return config.MenuClass
+	classes := config.MenuClass
+	if classes == "" {
+		classes = "z-[100] w-48"
 	}
-	return "dropdown-content z-[100] menu p-2 shadow bg-base-100 rounded-box w-48 border border-base-300"
+	return "ov-menu ov-menu-actions ov-menu-scroll dropdown-content menu " + classes
 }
 
 func cardActionDropdownIconClass(config CardActionDropdownConfig) string {

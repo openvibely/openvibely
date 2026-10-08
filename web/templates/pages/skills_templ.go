@@ -379,7 +379,7 @@ func skillsContent(skills []SkillCard, canManage bool, currentProjectID string, 
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, ">+ Add Skill</label><ul tabindex=\"0\" class=\"dropdown-content z-[100] menu p-2 shadow bg-base-100 rounded-box w-56 border border-base-300\"><li><button type=\"button\" onclick=\"openNewSkillModal()\">Create Skill</button></li><li><button type=\"button\" onclick=\"openImportSkillModal()\">Import Skill Package</button></li></ul></div></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, ">+ Add Skill</label><ul tabindex=\"0\" class=\"ov-menu ov-menu-actions ov-menu-scroll dropdown-content z-[100] menu w-56\"><li><button type=\"button\" onclick=\"openNewSkillModal()\">Create Skill</button></li><li><button type=\"button\" onclick=\"openImportSkillModal()\">Import Skill Package</button></li></ul></div></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -772,7 +772,7 @@ func skillsContent(skills []SkillCard, canManage bool, currentProjectID string, 
 					}
 					return nil
 				})
-				templ_7745c5c3_Err = components.CardActionDropdown(components.CardActionDropdownConfig{Label: "More actions for " + firstSkillNonEmpty(skill.Name, skill.Handle), MenuClass: "dropdown-content z-[100] menu p-2 shadow bg-base-100 rounded-box w-56 border border-base-300"}).Render(templ.WithChildren(ctx, templ_7745c5c3_Var25), templ_7745c5c3_Buffer)
+				templ_7745c5c3_Err = components.CardActionDropdown(components.CardActionDropdownConfig{Label: "More actions for " + firstSkillNonEmpty(skill.Name, skill.Handle), MenuClass: "z-[100] w-56"}).Render(templ.WithChildren(ctx, templ_7745c5c3_Var25), templ_7745c5c3_Buffer)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}

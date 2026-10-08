@@ -302,7 +302,7 @@ templ settingsContent(view ChannelsSettingsView) {
 				<label tabindex="0" class="btn btn-primary btn-sm" onclick="handleDropdownToggle(event)">
 					+ Add Channel
 				</label>
-				<ul tabindex="0" class="dropdown-content z-[100] menu p-2 shadow bg-base-100 rounded-box w-48 border border-base-300">
+				<ul tabindex="0" class="ov-menu ov-menu-actions ov-menu-scroll dropdown-content z-[100] menu w-48">
 					if !view.HasGitHubChannel {
 						<li>
 							<button type="button" onclick="openGitHubChannelFromMenu(event)">
@@ -367,7 +367,7 @@ templ settingsContent(view ChannelsSettingsView) {
 						<div class="card-body p-5">
 							<div class="flex items-start justify-between gap-3">
 								<div><h3 class="card-title">X (formerly Twitter)</h3><p class="text-sm opacity-60">Receive authorized mentions and post replies using X API v2.</p></div>
-								@components.CardActionDropdown(components.CardActionDropdownConfig{Label: "More actions for X (formerly Twitter)", WrapperClass: "dropdown dropdown-end", MenuClass: "dropdown-content menu bg-base-100 rounded-box shadow z-10 w-32", StopPropagation: true}) {
+								@components.CardActionDropdown(components.CardActionDropdownConfig{Label: "More actions for X (formerly Twitter)", WrapperClass: "dropdown dropdown-end", MenuClass: "z-10 w-32", StopPropagation: true}) {
 										<li><button type="button" onclick="openXConfigModal()">Edit</button></li><li><button type="button" class="text-error" onclick="openDeleteChannelConfirm('X (formerly Twitter)', '/channels/x/remove', 'POST')">Delete</button></li>
 									}
 							</div>

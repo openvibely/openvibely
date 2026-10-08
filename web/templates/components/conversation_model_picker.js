@@ -20,8 +20,8 @@
     if (text !== undefined) e.textContent = text;
     return e;
   };
-  const panel = el("div", "ov-model-picker"),
-    sub = el("div", "ov-model-submenu");
+  const panel = el("div", "ov-menu ov-model-picker"),
+    sub = el("div", "ov-menu ov-model-submenu");
   panel.id = "conversation-model-picker";
   panel.hidden = true;
   panel.setAttribute("role", "dialog");
@@ -30,7 +30,7 @@
   sub.id = "conversation-provider-models";
   sub.setAttribute("role", "dialog");
   sub.setAttribute("aria-label", "Provider models");
-  const searchWrap = el("div", "ov-mp-search"),
+  const searchWrap = el("div", "ov-menu-search ov-mp-search"),
     search = el("input"),
     clear = el("button", "ov-mp-clear", "×");
   search.placeholder = "Search models…";
@@ -38,14 +38,14 @@
   clear.type = "button";
   clear.setAttribute("aria-label", "Clear search");
   searchWrap.append(search, clear);
-  const list = el("div", "ov-mp-list"),
+  const list = el("div", "ov-menu-list ov-menu-scroll ov-mp-list"),
     effortBox = el("div", "ov-mp-effort"),
     status = el("div", "ov-mp-status");
   status.setAttribute("role", "status");
   panel.append(searchWrap, list, effortBox, status);
   const subhead = el("div", "ov-mp-subhead"),
     back = el("button", "ov-mp-back", "‹"),
-    sublist = el("div", "ov-mp-sublist");
+    sublist = el("div", "ov-menu-list ov-menu-scroll ov-mp-sublist");
   back.type = "button";
   back.setAttribute("aria-label", "Back to providers");
   subhead.append(back);
@@ -296,7 +296,7 @@
     row.setAttribute("data-picker-active", "");
   }
   function row(m, target) {
-    const r = el("div", "ov-mp-row");
+    const r = el("div", "ov-menu-row ov-mp-row");
     r.onpointermove = () => activateRow(r, target);
     r.onfocusin = () => activateRow(r, target);
     r.dataset.selected = String(m.id === active.dataset.currentValue);
@@ -336,7 +336,7 @@
       star.dataset.id = m.id;
       r.append(star);
     }
-    const pick = el("button", "ov-mp-pick");
+    const pick = el("button", "ov-menu-option ov-mp-pick");
     pick.type = "button";
     pick.dataset.model = m.id;
     pick.setAttribute(
@@ -358,7 +358,7 @@
     r.prepend(pick);
     const check = el(
       "span",
-      "ov-mp-check",
+      "ov-menu-check ov-mp-check",
       m.id === active.dataset.currentValue ? "✓" : "",
     );
     check.setAttribute("aria-hidden", "true");
@@ -383,12 +383,12 @@
       return;
     }
     all.filter((m) => !m.provider).forEach((m) => row(m, list));
-    list.append(el("div", "ov-mp-rule"));
+    list.append(el("div", "ov-menu-rule ov-mp-rule"));
     const fav = all.filter((m) => m.provider && favorites[m.id]);
     if (fav.length) {
       list.append(el("div", "ov-mp-heading", "FAVORITES"));
       fav.forEach((m) => row(m, list));
-      list.append(el("div", "ov-mp-rule"));
+      list.append(el("div", "ov-menu-rule ov-mp-rule"));
     }
     [
       ...new Set(
@@ -399,7 +399,7 @@
     ]
       .sort()
       .forEach((p) => {
-        const b = el("button", "ov-mp-provider");
+        const b = el("button", "ov-menu-option ov-mp-provider");
         b.type = "button";
         b.dataset.provider = p;
         b.onpointermove = () => {

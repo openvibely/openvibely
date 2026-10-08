@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/openvibely/openvibely/internal/models"
+	templateui "github.com/openvibely/openvibely/web/templates"
 	"github.com/openvibely/openvibely/web/static"
 )
 
@@ -1482,17 +1483,9 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					[data-theme="light"] .menu summary:hover {
 						background-color: var(--ov-l-surface-hover);
 					}
-					/* Mouse events can occur even when the primary input reports no hover support. */
-					[data-schedule-context-menu] [role="menuitem"]:not(:disabled):hover { background-color: var(--ov-hover); }
-					[data-theme="light"] [data-schedule-context-menu] [role="menuitem"]:not(:disabled):hover {
-						background-color: var(--ov-l-surface-active);
-					}
-					[data-theme="light"] [data-schedule-context-menu] [role="menuitem"]:not(:disabled):focus-visible {
-						background-color: var(--ov-l-surface-active);
-					}
 					/* Prevent mouse-click focus from looking like a persistent active nav item (web parity with desktop). */
-					.sidebar-aside .menu a:focus:not(:focus-visible),
-					.sidebar-aside .menu summary:focus:not(:focus-visible) {
+					.sidebar-aside .menu:not(.ov-menu) a:focus:not(:focus-visible),
+					.sidebar-aside .menu:not(.ov-menu) summary:focus:not(:focus-visible) {
 						background-color: transparent !important;
 						outline: none !important;
 					}
@@ -1827,7 +1820,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				}
 
 				/* --- Dropdown menus --- */
-				[data-theme="light"] .dropdown-content {
+				[data-theme="light"] .dropdown-content:not(.ov-menu) {
 					background-color: var(--ov-l-bg);
 					border-color: var(--ov-l-border-strong);
 					box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
@@ -4632,6 +4625,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					});
 			</script>
 			<!-- Utilities load last so they override the inline style blocks above, as the Tailwind CDN script did. -->
+			@templateui.MenuStyles()
 			<link href={ static.URL("app-utilities.css") } rel="stylesheet" type="text/css"/>
 		</head>
 		<body class="h-screen bg-base-200 overflow-hidden" hx-ext="morph">

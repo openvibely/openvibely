@@ -972,10 +972,10 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 						</div>
 						<div id="sidebar-auth-name" class="text-xs font-medium truncate leading-none">User</div>
 					</button>
-					<ul id="sidebar-user-menu" tabindex="0" class="dropdown-content menu p-2 shadow bg-base-100 rounded-box w-44 z-[120] border border-base-300" role="menu" aria-label="User menu">
+					<ul id="sidebar-user-menu" tabindex="0" class="ov-menu ov-menu-actions ov-menu-scroll dropdown-content menu w-44 z-[120]" role="menu" aria-label="User menu">
 						<li role="none">
 							<form method="POST" action="/logout" class="w-full" role="none">
-									<button id="sidebar-logout-label" type="submit" class="text-sm" role="menuitem">Logout</button>
+									<button id="sidebar-logout-label" type="submit" class="ov-menu-option w-full" role="menuitem">Logout</button>
 							</form>
 						</li>
 					</ul>
@@ -1249,7 +1249,7 @@ templ ProjectSelector(projects []models.Project, currentProjectID string) {
 									data-searchable-selector-id={ p.ID }
 									data-searchable-selector-name={ p.Name }
 								>
-									<span class="w-4 shrink-0" aria-hidden="true" data-project-selector-current data-searchable-selector-current>{ sidebarProjectCheck(p.ID == currentProjectID) }</span>
+									<span class="ov-menu-check" aria-hidden="true" data-project-selector-current data-searchable-selector-current>{ sidebarProjectCheck(p.ID == currentProjectID) }</span>
 									<span class="min-w-0 break-words">{ p.Name }</span>
 								</button>
 							}

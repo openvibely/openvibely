@@ -11,11 +11,11 @@ type SearchableSelectorConfig struct {
 }
 
 const (
-	SearchableSelectorDialogClass      = "fixed m-0 max-h-[min(32rem,calc(100dvh-1rem))] w-[28rem] max-w-[calc(100vw-1rem)] overflow-hidden rounded-box border border-base-300 bg-base-100 p-0 text-base-content shadow-xl backdrop:bg-transparent"
+	SearchableSelectorDialogClass      = "fixed m-0 max-h-[min(32rem,calc(100dvh-1rem))] w-[28rem] max-w-[calc(100vw-1rem)] overflow-hidden ov-menu p-0 backdrop:bg-transparent"
 	SearchableSelectorPanelClass       = "flex max-h-[inherit] min-h-0 flex-col overflow-hidden"
-	SearchableSelectorSearchShellClass = "card border border-base-300 bg-base-100 shadow-sm"
-	SearchableSelectorSearchClass      = "w-full border-0 bg-transparent px-4 py-2 text-sm focus:outline-none focus:ring-0"
-	SearchableSelectorResultsClass     = "min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain p-2"
-	SearchableSelectorMenuClass        = "menu w-full min-w-0 gap-1 overflow-x-hidden p-0"
-	SearchableSelectorOptionClass      = "flex w-full max-w-full min-w-0 items-center gap-2 overflow-hidden rounded-btn px-4 py-2 hover:bg-base-content/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
+	SearchableSelectorSearchShellClass = "ov-menu-search"
+	SearchableSelectorSearchClass      = "w-full"
+	SearchableSelectorResultsClass     = "ov-menu-list ov-menu-scroll min-h-0 flex-1 overscroll-contain"
+	SearchableSelectorMenuClass        = "w-full min-w-0 p-0"
+	SearchableSelectorOptionClass      = "ov-menu-option w-full max-w-full overflow-hidden"
 )

@@ -1,0 +1,95 @@
+/* Shared popup appearance. Position, dimensions and interaction belong to each menu. */
+.ov-menu {
+  box-sizing: border-box;
+  background: var(--ov-menu-surface, #1e242c);
+  color: var(--ov-text-primary, inherit);
+  border: 1px solid var(--ov-border-subtle, #414753);
+  border-radius: 12px;
+  box-shadow: 0 12px 40px #0004;
+  font-size: 13px;
+  line-height: 1.5;
+  --ov-menu-active: var(--ov-hover, #ffffff1a);
+  --ov-menu-scroll-thumb: #737b89;
+}
+@supports (color: oklch(0 0 0)) {
+  .ov-menu { --ov-menu-active: oklch(var(--bc) / 0.1); }
+}
+[data-theme="light"] .ov-menu {
+  --ov-menu-active: var(--ov-l-surface-active, #e8e8e8);
+  --ov-menu-scroll-thumb: #a0a6b0;
+}
+.ov-menu [hidden] { display: none !important; }
+.ov-menu-actions, .ov-menu-list { padding: 6px; }
+.ov-menu .ov-menu-actions { font-size: inherit; }
+.ov-menu-actions > li > form { display: block; padding: 0; background: transparent; }
+.ov-menu-row { display: flex; align-items: center; min-width: 0; border-radius: 7px; }
+.ov-menu .ov-menu-option,
+.ov-menu-actions > li:not(.menu-title) > :is(a, button, summary),
+.ov-menu-actions > :is(a, button) {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.ov-menu .ov-menu-option,
+.ov-menu-actions > li:not(.menu-title) > :is(a, button, summary):not(.text-error),
+.ov-menu-actions > :is(a, button):not(.text-error) { color: inherit; }
+.ov-menu .ov-menu-row[data-picker-active],
+.ov-menu .ov-menu-option:is([data-picker-active], [data-selector-active], [data-active]),
+.ov-menu-actions > li:not(.menu-title) > :is(a, button, summary):not(:disabled):not([aria-disabled="true"]):is(:hover, :focus-visible, .active),
+.ov-menu-actions > :is(a, button):not(:disabled):is(:hover, :focus-visible),
+.ov-menu-actions .ov-menu-option:not(:disabled):is(:hover, :focus-visible),
+.ov-menu [data-options] > .ov-menu-option:is(:hover, :focus-visible) {
+  background: var(--ov-menu-active);
+}
+.ov-menu .ov-menu-option:focus-visible { outline: none; }
+.ov-menu-actions > li > :is(a, button, summary) > svg { width: 16px; height: 16px; flex-shrink: 0; }
+.ov-menu-check { width: 15px; flex-shrink: 0; color: var(--fallback-bc, oklch(var(--bc) / 1)); }
+.ov-menu-rule, .ov-menu-section { border-top: 1px solid var(--ov-border-subtle, #414753); }
+.ov-menu-rule { margin: 6px 4px; }
+.ov-menu-section { margin-top: 6px; padding-top: 6px; }
+.ov-menu [data-searchable-selector-divider] { border-color: var(--ov-border-subtle, #414753); }
+.ov-menu-search {
+  display: flex;
+  align-items: center;
+  border-bottom: 1px solid var(--ov-border-subtle, #414753);
+  padding: 12px;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.ov-menu-search input {
+  min-width: 0;
+  width: 100%;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  color: inherit;
+  font: inherit;
+  outline: none;
+  box-shadow: none;
+}
+/* Explicit WebKit scrollbars remain visible on macOS when content overflows. */
+.ov-menu-scroll {
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-width: auto;
+  scrollbar-color: auto;
+}
+.ov-menu-scroll::-webkit-scrollbar { width: 8px; }
+.ov-menu-scroll::-webkit-scrollbar-track { background: transparent; }
+.ov-menu-scroll::-webkit-scrollbar-thumb {
+  background-color: var(--ov-menu-scroll-thumb, #737b89);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+  border-radius: 8px;
+  min-height: 24px;
+}

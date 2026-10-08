@@ -6,6 +6,7 @@ import (
 	llmoutput "github.com/openvibely/openvibely/internal/llm/output"
 	llmtranscript "github.com/openvibely/openvibely/internal/llm/transcript"
 	"github.com/openvibely/openvibely/internal/models"
+	templateui "github.com/openvibely/openvibely/web/templates"
 	"regexp"
 	"strings"
 	"time"
@@ -1555,6 +1556,7 @@ templ chatComposerActionButton(stopEndpoint string, isRunning bool) {
 
 // ChatInputForm renders a shared chat input form with attachment support.
 templ ChatInputForm(config ChatInputFormConfig) {
+	@templateui.MenuStyles()
 	@templ.Raw("<style>" + conversationModelPickerCSS + "</style><script>" + conversationModelPickerJS + "</script>")
 
 	<div class="chat-input-shadow-gutter w-full min-w-0 max-w-full mt-6">

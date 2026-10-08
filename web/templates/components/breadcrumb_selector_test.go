@@ -64,8 +64,8 @@ func TestBreadcrumbSelectorRendersAccessibleBoundedDialog(t *testing.T) {
 		`hx-trigger="input changed delay:200ms, search"`, `hx-sync="this:replace"`,
 		`hx-include="closest [data-breadcrumb-selector]"`, `name="tab" value="changes"`,
 		`name="from" value="schedule" data-breadcrumb-selector-origin`, `max-w-[calc(100vw-1rem)]`, `overflow-hidden`, `data-breadcrumb-selector-status`,
-		`data-searchable-selector-search-shell`, `class="card border border-base-300 bg-base-100 shadow-sm"`,
-		`class="w-full border-0 bg-transparent px-4 py-2 text-sm focus:outline-none focus:ring-0"`,
+		`data-searchable-selector-search-shell`, `class="ov-menu-search"`,
+		`class="w-full"`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("missing %q in selector markup", want)
@@ -117,11 +117,11 @@ func TestBrowserFunctional_BreadcrumbSelectorKeyboardFocusAndContainmentInChrome
 		    document.documentElement.setAttribute('data-theme','imported-contrast');
 		    var contrastStyle=getComputedStyle(themeBox);
 		    if(contrastStyle.backgroundColor!=='rgb(0, 0, 0)' || contrastStyle.color!=='rgb(255, 255, 255)' || contrastStyle.borderColor!=='rgb(255, 255, 255)') throw new Error('imported high-contrast variables were not honored: '+[contrastStyle.backgroundColor,contrastStyle.color,contrastStyle.borderColor].join('|'));
-		    if(!dialog.matches('.bg-base-100') || !dialog.matches('.border-base-300')) throw new Error('theme semantic classes missing');	    document.body.setAttribute('data-test-result','pass');
+		    if(!dialog.matches('.ov-menu')) throw new Error('shared menu styling missing');	    document.body.setAttribute('data-test-result','pass');
 	  })().catch(function(error){ var message=String(error.stack||error); document.body.setAttribute('data-test-result','fail'); document.body.setAttribute('data-test-error',message); document.body.appendChild(document.createTextNode(' BREADCRUMB_TEST_ERROR: '+message)); });
 	});
 	</script>`
-	page := `<!doctype html><html data-theme="light"><head><meta name="viewport" content="width=device-width"><style>dialog{border:0;background:transparent;box-sizing:border-box}.fixed{position:fixed}.m-0{margin:0}.w-\[28rem\]{width:28rem}.max-w-\[calc\(100vw-1rem\)\]{max-width:calc(100vw - 1rem)}.max-h-\[min\(32rem\,calc\(100dvh-1rem\)\)\]{max-height:min(32rem,calc(100dvh - 1rem))}.bg-base-100{background-color:var(--fixture-base)}.border-base-300{border:1px solid var(--fixture-border)}.text-base-content{color:var(--fixture-content)}[data-theme="light"]{--fixture-base:rgb(255,255,255);--fixture-border:rgb(210,210,210);--fixture-content:rgb(20,20,20)}[data-theme="dark"]{--fixture-base:rgb(24,24,27);--fixture-border:rgb(82,82,91);--fixture-content:rgb(244,244,245)}[data-theme="imported-contrast"]{--fixture-base:rgb(0,0,0);--fixture-border:rgb(255,255,255);--fixture-content:rgb(255,255,255)}</style><script src="/htmx.js"></script></head><body data-test-result="pending">` + selector.String() + runner + `</body></html>`
+	page := `<!doctype html><html data-theme="light"><head><meta name="viewport" content="width=device-width"><style>dialog{border:0;background:transparent;box-sizing:border-box}.fixed{position:fixed}.m-0{margin:0}.w-\[28rem\]{width:28rem}.max-w-\[calc\(100vw-1rem\)\]{max-width:calc(100vw - 1rem)}.max-h-\[min\(32rem\,calc\(100dvh-1rem\)\)\]{max-height:min(32rem,calc(100dvh - 1rem))}.bg-base-100{background-color:var(--fixture-base)}.border-base-300{border:1px solid var(--fixture-border)}.text-base-content{color:var(--fixture-content)}[data-theme="light"]{--ov-menu-surface:rgb(255,255,255);--ov-border-subtle:rgb(210,210,210);--ov-text-primary:rgb(20,20,20)}[data-theme="dark"]{--ov-menu-surface:rgb(24,24,27);--ov-border-subtle:rgb(82,82,91);--ov-text-primary:rgb(244,244,245)}[data-theme="imported-contrast"]{--ov-menu-surface:rgb(0,0,0);--ov-border-subtle:rgb(255,255,255);--ov-text-primary:rgb(255,255,255)}</style><script src="/htmx.js"></script></head><body data-test-result="pending">` + selector.String() + runner + `</body></html>`
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if static.ServeAsset(w, r) {
 			return
@@ -393,7 +393,7 @@ func TestBreadcrumbSelectorResultsMarksCurrentAndUsesAuthoritativeURLs(t *testin
 		t.Fatal(err)
 	}
 	body := out.String()
-	for _, want := range []string{`role="listbox"`, `aria-selected="true"`, `aria-current="true"`, `data-breadcrumb-selector-option`, `data-task-state-icon`, `data-task-state="queued"`, `data-task-state="running"`, `data-task-state="merged"`, `data-task-state="merge-failed"`, `data-task-state="merge-conflict"`, `Task state: In Progress`, `Task state: Merged`, `Task state: Merge failed`, `Task state: Merge conflict`, `overflow-x-hidden`, `w-full max-w-full min-w-0`, `overflow-hidden rounded-btn`, `class="min-w-0 flex-1 truncate"`, `/tasks/task-2?project_id=project-1&amp;tab=changes`} {
+	for _, want := range []string{`role="listbox"`, `aria-selected="true"`, `aria-current="true"`, `data-breadcrumb-selector-option`, `data-task-state-icon`, `data-task-state="queued"`, `data-task-state="running"`, `data-task-state="merged"`, `data-task-state="merge-failed"`, `data-task-state="merge-conflict"`, `Task state: In Progress`, `Task state: Merged`, `Task state: Merge failed`, `Task state: Merge conflict`, `ov-menu-option`, `w-full max-w-full`, `overflow-hidden`, `class="min-w-0 flex-1 truncate"`, `/tasks/task-2?project_id=project-1&amp;tab=changes`} {
 		if !strings.Contains(body, want) {
 			t.Errorf("missing %q in results markup", want)
 		}
