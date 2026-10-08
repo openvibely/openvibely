@@ -164,6 +164,19 @@ func TestBrowserFunctional_ConversationModelPicker(t *testing.T) {
  window.ovModelPicker.close(false);localStorage.setItem('openvibely-model-favorites',JSON.stringify({m10:true}));trigger.click();await wait();
  assert(panel.querySelectorAll('.ov-mp-star[aria-pressed=true]').length===10,'legacy browser favorite merges into shared list');
  assert(localStorage.getItem('openvibely-model-favorites')===null,'legacy favorite is removed after import');
+ const originalFetch=window.fetch.bind(window);let failFavoriteWrite;
+ window.fetch=(url,options)=>{
+   if(url==='/ui/model-favorites'&&options?.method==='POST'){
+     window.fetch=originalFetch;
+     return new Promise(resolve=>{failFavoriteWrite=()=>resolve(new Response('',{status:500}));});
+   }
+   return originalFetch(url,options);
+ };
+ panel.querySelector('.ov-mp-star[aria-pressed=true]').click();
+ window.ovModelPicker.close(false);trigger.click();
+ await wait();failFavoriteWrite();await wait();
+ assert(panel.querySelectorAll('.ov-mp-star[aria-pressed=true]').length===10,'failed write is rolled back from server');
+ assert([...panel.querySelectorAll('.ov-mp-star')].every(star=>!star.disabled),'successful reopen enables favorites after a pending write fails');
  document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));
  document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));
  assert(panel.hidden,'escape closes');

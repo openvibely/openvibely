@@ -84,6 +84,7 @@
       try { localStorage.removeItem(favoritesKey); } catch (_) {}
       if (token !== favoritesLoadToken) return;
       favorites = saved;
+      favoritesError = "";
     } catch (_) {
       if (token === favoritesLoadToken)
         favoritesError = "Could not load favorites. Reopen the picker to retry.";
