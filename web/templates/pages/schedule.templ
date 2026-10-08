@@ -493,14 +493,13 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 		<div class="flex-shrink-0 sticky top-0 z-30 pb-2 md:relative md:z-auto">
 			<div data-page-header class="flex justify-between items-center mb-3">
 				<h2 class="text-2xl font-bold">Schedule</h2>
-				<button type="button" class="btn btn-sm" data-calendar-action="pause_all">Pause all schedules</button>
 				<button class="btn btn-sm btn-primary" onclick="openNewScheduledTaskModal()">
 					<span class="hidden sm:inline">+ New Scheduled Task</span>
 					<span class="sm:hidden">+ New</span>
 				</button>
 			</div>
 			<!-- Header: Row 2 – Week navigation controls -->
-			<div class="flex items-center gap-2 opacity-60">
+			<div class="flex items-center gap-2">
 				<button
 					if weekOffset == 0 {
 						disabled
@@ -542,6 +541,12 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 				</div>
 				<span class="text-sm select-none">{ formatWeekRange(weekData.WeekDays) }</span>
 				<span class="text-xs">{ time.Local.String() }</span>
+                <details id="schedule-project-menu">
+                    <summary class="btn btn-xs btn-ghost" aria-label="Calendar actions">…</summary>
+                    <ul class="ov-menu ov-menu-actions menu">
+                        <li><button type="button" data-calendar-action="pause_all">Pause all schedules</button></li>
+                    </ul>
+                </details>
 			</div>
 		</div>
 		@ScheduleCalendarControls(calendarState)
@@ -665,9 +670,9 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 		</div>
 		<div id="schedule-context-menu" class="ov-menu fixed z-[100] hidden w-52 max-w-[calc(100vw-2rem)]" role="menu" aria-label="Scheduled task actions" data-schedule-context-menu>
 			<ul class="ov-menu-actions menu">
-				<li><button type="button" role="menuitem" data-calendar-action="skip">Skip selected runs</button></li>
-				<li><button type="button" role="menuitem" data-calendar-action="restore">Restore selected runs</button></li>
-				<li><button type="button" role="menuitem" data-calendar-action="pause">Pause schedules until resumed</button></li>
+				<li><button type="button" role="menuitem" data-calendar-action="skip">Skip runs</button></li>
+				<li><button type="button" role="menuitem" data-calendar-action="restore">Unskip runs</button></li>
+				<li><button type="button" role="menuitem" data-calendar-action="pause">Pause schedules</button></li>
 				<li><button type="button" role="menuitem" data-calendar-action="resume">Resume schedules</button></li>
 				<li><button type="button" role="menuitem" data-schedule-context-action="run">Run Now</button></li>
 				<li><button type="button" role="menuitem" data-schedule-context-action="edit">Edit Schedule</button></li>
@@ -915,7 +920,7 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 									menu.dataset.scheduleTitle = card.dataset.scheduleTitle || 'this task';
 									menu.dataset.scheduleEnabled = card.dataset.scheduleEnabled || 'true';
 									positionMenu(event);
-									var first = menu.querySelector('[role="menuitem"]');
+									var first = menu.querySelector('[role="menuitem"]:not([hidden])');
 									if (first) first.focus({preventScroll: true});
 								};
 

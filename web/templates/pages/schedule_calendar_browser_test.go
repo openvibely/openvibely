@@ -42,6 +42,7 @@ func TestBrowserFunctional_ScheduleCalendarSelectionActions(t *testing.T) {
   window.addEventListener('error',function(event){report('fail',event.message);});
   (async function(){
    var root=document.getElementById('schedule-content');
+   root.querySelector('#schedule-timeline-container').scrollTop=0;
    var days=Array.from(root.querySelectorAll('[data-calendar-day]'));
    function down(el,options){ el.dispatchEvent(new PointerEvent('pointerdown',Object.assign({bubbles:true,cancelable:true,pointerType:'mouse',button:0,pointerId:8},options||{}))); }
    function up(){window.dispatchEvent(new PointerEvent('pointerup',{pointerId:8}));}
@@ -52,6 +53,7 @@ func TestBrowserFunctional_ScheduleCalendarSelectionActions(t *testing.T) {
    check(requests[0].skips.length===2,'skip must send two exact date windows');
    check(requests[0].skips[0].start_at===Number(days[1].dataset.start),'first date epoch');
    check(requests[0].skips[1].start_at===Number(days[3].dataset.start),'second date epoch');
+   root.querySelector('#schedule-timeline-container').scrollTop=0;
    down(days[1]);up();down(days[4],{shiftKey:true});up();check(count()===4,'shift selects contiguous range');
    down(days[1]);
    var headerRect=days[3].getBoundingClientRect();
@@ -72,17 +74,36 @@ func TestBrowserFunctional_ScheduleCalendarSelectionActions(t *testing.T) {
    check(getComputedStyle(a.firstElementChild).textDecorationLine.includes('line-through'),'skipped name struck through');
    check(getComputedStyle(a).opacity==='0.5','skipped card muted');
    check(Array.from(root.querySelectorAll('[data-schedule-id="s0"]')).slice(1).every(function(card){return card.dataset.calendarMuted==='false';}),'other dates must stay normal');
+   function visible(action) { return !root.querySelector('#schedule-context-menu [data-calendar-action="'+action+'"]').hidden; }
+   var normal=Array.from(root.querySelectorAll('[data-schedule-id="s0"]'))[1];
+   selectScheduleContextCard(normal);
+   check(visible('skip') && visible('pause') && !visible('restore') && !visible('resume'),'normal run only offers skip and pause');
+   selectScheduleContextCard(a);
+   check(!visible('skip') && visible('restore') && visible('pause') && !visible('resume'),'skipped run only offers unskip and pause');
+   check(root.querySelector('#schedule-context-menu [data-calendar-action="restore"]').textContent==='Unskip runs','unskip terminology');
+   selectScheduleContextCard(b);
+   check(!visible('skip') && !visible('restore') && !visible('pause') && visible('resume'),'paused schedule only offers resume');
+   check(root.querySelector('[data-calendar-action="pause_all"]').closest('details'),'pause all belongs in overflow');
+   clearScheduleSelection();
    a.dispatchEvent(new MouseEvent('click',{bubbles:true,ctrlKey:true}));b.dispatchEvent(new MouseEvent('click',{bubbles:true,ctrlKey:true}));
    a.dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:300,clientY:200}));
    check(selectedScheduleCards.size===2,'right click must preserve multi-selection');
    root.querySelector('#schedule-context-menu [data-calendar-action="pause"]').click();await tick();
-   check(requests[1].action==='pause' && requests[1].schedule_ids.length===2,'context pause must affect both schedules');
+   check(window._scheduleCalendarUndo.message==='1 schedule paused.','brief feedback counts eligible schedules');
+   check(window._scheduleCalendarUndo.expires>Date.now() && window._scheduleCalendarUndo.expires<=Date.now()+6000,'feedback expires');
+   check(requests[1].action==='pause' && requests[1].schedule_ids.length===1 && requests[1].schedule_ids[0]==='s0','context pause must affect only eligible schedules');
    clearScheduleSelection();
    var zone=a.closest('.drop-zone');zone.scrollIntoView({block:'center'});
    var ar=a.getBoundingClientRect(),br=b.getBoundingClientRect(),zr=zone.getBoundingClientRect();
    down(zone,{clientX:zr.left+1,clientY:ar.top-1});
    window.dispatchEvent(new PointerEvent('pointermove',{pointerId:8,clientX:zr.right-1,clientY:br.bottom+1,cancelable:true}));
-   up();check(selectedScheduleCards.has(a)&&selectedScheduleCards.has(b),'box must select both cards');
+   check(selectedScheduleCards.has(a)&&selectedScheduleCards.has(b),'box must select both cards');
+   window.dispatchEvent(new PointerEvent('pointermove',{pointerId:8,clientX:innerWidth+100,clientY:innerHeight+100,cancelable:true}));
+   var box=root.ownerDocument.querySelector('.schedule-selection-box').getBoundingClientRect();
+   var grid=root.querySelector('#schedule-timeline-container').getBoundingClientRect();
+   check(box.left>=grid.left && box.top>=grid.top && box.right<=grid.right && box.bottom<=grid.bottom,'selection box stays inside calendar');
+   window.dispatchEvent(new PointerEvent('pointermove',{pointerId:8,clientX:zr.right-1,clientY:br.bottom+1,cancelable:true}));
+   up();
    var target=root.querySelector('.drop-zone[data-date="'+zone.dataset.date+'"][data-hour="10"]');
    ar=a.getBoundingClientRect();var tr=target.getBoundingClientRect();
    a.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,cancelable:true,pointerType:'mouse',button:0,pointerId:9,clientX:ar.left+5,clientY:ar.top+5}));
@@ -90,6 +111,10 @@ func TestBrowserFunctional_ScheduleCalendarSelectionActions(t *testing.T) {
    check(a.classList.contains('dragging')&&b.classList.contains('dragging'),'box-selected group must move together');
    a.dispatchEvent(new PointerEvent('pointerup',{bubbles:true,cancelable:true,pointerType:'mouse',pointerId:9,clientX:tr.left+10,clientY:tr.top+10}));await tick();
    check(requests[2].action==='drag'&&requests[2].ids==='s0,s1','group drag must send both IDs');
+   selectScheduleContextCard(a);
+   root.querySelector('#schedule-context-menu [data-calendar-action="restore"]').click();await tick();
+   check(requests[3].action==='restore' && requests[3].skips.length===1 && requests[3].skips[0].schedule_id==='s0','unskip targets only selected skipped runs');
+   check(window._scheduleCalendarUndo.message==='1 run unskipped.','unskip feedback uses matching terminology');
    report('pass','');
   })().catch(function(error){report('fail',error.stack||error.message);});
  });

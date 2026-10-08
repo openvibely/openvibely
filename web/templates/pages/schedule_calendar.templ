@@ -26,8 +26,12 @@ func scheduleCalendarJSON(states []models.ScheduleCalendarState) string {
 templ ScheduleCalendarControls(states []models.ScheduleCalendarState) {
  <style>
  #schedule-content { position: relative; }
- #schedule-selection-toolbar { position: absolute; bottom: 1.75rem; left: .5rem; right: .5rem; z-index: 40; padding: .5rem; border-radius: .5rem; background: var(--ov-menu-surface); box-shadow: 0 2px 12px rgba(0,0,0,.2); }
- .drag-cursor-active #schedule-selection-toolbar { visibility: hidden; pointer-events: none; }
+ #schedule-selection-toolbar { min-height: 2rem; white-space: nowrap; overflow-x: auto; }
+ #schedule-selection-toolbar[aria-hidden="true"] { visibility: hidden; }
+ #schedule-calendar-feedback { position: absolute; bottom: 2rem; right: 1rem; z-index: 45; padding: .75rem; border-radius: .5rem; background: var(--ov-menu-surface); box-shadow: 0 2px 12px rgba(0,0,0,.2); }
+ #schedule-content [hidden] { display: none !important; }
+ #schedule-project-menu { margin-left: auto; position: relative; }
+ #schedule-project-menu > .ov-menu { position: absolute; right: 0; z-index: 50; min-width: 12rem; }
  #schedule-content [data-calendar-day] { cursor: pointer; user-select: none; touch-action: pan-y; }
  #schedule-content .schedule-day-selected { background: rgba(116,128,255,.16) !important; }
  #schedule-content [data-calendar-day].schedule-day-selected { box-shadow: inset 0 -2px var(--ov-link-color); }
@@ -39,17 +43,16 @@ templ ScheduleCalendarControls(states []models.ScheduleCalendarState) {
  </style>
  <div id="schedule-calendar-controls" data-state={ scheduleCalendarJSON(states) } class="flex-shrink-0 text-xs">
   <div id="schedule-pause-banner" class="hidden bg-base-200 rounded p-2 mb-2" role="status">
-   All project schedules are paused.
-   <button type="button" class="btn btn-xs" data-calendar-action="resume_all">Resume all</button>
+   Schedules paused.
+   <button type="button" class="btn btn-xs" data-calendar-action="resume_all">Resume</button>
   </div>
-  <div id="schedule-selection-toolbar" class="hidden flex flex-wrap items-center gap-2 mb-2" role="toolbar" aria-label="Selected schedules or dates">
+  <div id="schedule-selection-toolbar" class="flex items-center gap-2 mb-2" aria-hidden="true" role="toolbar" aria-label="Selected schedules or dates">
    <span data-selection-count aria-live="polite"></span>
-   <button type="button" class="btn btn-xs" data-calendar-action="skip">Skip selected runs</button>
-   <button type="button" class="btn btn-xs" data-calendar-action="restore">Restore selected runs</button>
-   <button type="button" class="btn btn-xs" data-calendar-action="pause">Pause schedules until resumed</button>
+   <button type="button" class="btn btn-xs" data-calendar-action="skip">Skip runs</button>
+   <button type="button" class="btn btn-xs" data-calendar-action="restore">Unskip runs</button>
+   <button type="button" class="btn btn-xs" data-calendar-action="pause">Pause schedules</button>
    <button type="button" class="btn btn-xs" data-calendar-action="resume">Resume schedules</button>
    <button type="button" class="btn btn-xs btn-ghost" data-calendar-action="clear">Clear</button>
-   <span data-selection-hint class="opacity-60">Dragging adjusts the recurring schedules.</span>
   </div>
   <div id="schedule-calendar-feedback" class="hidden mb-2" role="status">
    <span data-calendar-message></span>
@@ -58,9 +61,9 @@ templ ScheduleCalendarControls(states []models.ScheduleCalendarState) {
  </div>
  <div id="schedule-day-menu" class="ov-menu fixed z-[100] hidden" role="menu" aria-label="Selected date actions">
   <ul class="ov-menu-actions menu">
-   <li><button type="button" role="menuitem" data-calendar-action="skip">Skip runs on selected dates</button></li>
-   <li><button type="button" role="menuitem" data-calendar-action="restore">Restore runs on selected dates</button></li>
-   <li><button type="button" role="menuitem" data-calendar-action="pause">Pause schedules until resumed</button></li>
+   <li><button type="button" role="menuitem" data-calendar-action="skip">Skip dates</button></li>
+   <li><button type="button" role="menuitem" data-calendar-action="restore">Unskip dates</button></li>
+   <li><button type="button" role="menuitem" data-calendar-action="pause">Pause schedules</button></li>
    <li><button type="button" role="menuitem" data-calendar-action="resume">Resume schedules</button></li>
   </ul>
  </div>
@@ -87,12 +90,11 @@ templ ScheduleCalendarScript() {
   var dayMenu = root.querySelector('#schedule-day-menu');
   var project = root.dataset.projectId;
   var undo = window._scheduleCalendarUndo;
-  if (undo && undo.project !== project) undo = null;
+  if (undo && (undo.project !== project || undo.expires <= Date.now())) undo = null;
   function cards() { return Array.from(root.querySelectorAll('[data-schedule-card][data-has-schedule="true"]')); }
   function selectedCards() {
    return dates.size ? cards().filter(function(card) { return dates.has(card.closest('.drop-zone').dataset.date); }) : Array.from(selectedScheduleCards).filter(function(card) { return root.contains(card); });
   }
-  function selectedIDs() { return Array.from(new Set(selectedCards().map(function(card) { return card.dataset.scheduleId; }))); }
   function interval(card) { return {schedule_id: card.dataset.scheduleId, start_at: Number(card.dataset.occurrenceStart), end_at: Number(card.dataset.occurrenceEnd)}; }
   function selectedIntervals() {
    if (dates.size) return days.filter(function(day) { return dates.has(day.dataset.calendarDay); }).map(function(day) { return {schedule_id: '', start_at: Number(day.dataset.start), end_at: Number(day.dataset.end)}; });
@@ -129,12 +131,16 @@ templ ScheduleCalendarScript() {
   });
   days.forEach(function(day) { day.dataset.skipped = String(skips.some(function(skip) { return !skip.restored && !skip.schedule_id && skip.start_at <= Number(day.dataset.start) && skip.end_at >= Number(day.dataset.end); })); });
   root.querySelector('#schedule-pause-banner').classList.toggle('hidden', !state.paused);
-  root.querySelector('[data-calendar-action="pause_all"]').classList.toggle('hidden', !!state.paused);
+  root.querySelector('#schedule-project-menu').hidden = !!state.paused;
+  var feedbackTimer;
+  signal.addEventListener('abort', function() { clearTimeout(feedbackTimer); });
   function feedback(message, inverse) {
    var box = root.querySelector('#schedule-calendar-feedback');
    box.classList.remove('hidden');
    box.querySelector('[data-calendar-message]').textContent = message;
    box.querySelector('[data-calendar-action="undo"]').classList.toggle('hidden', !inverse);
+   clearTimeout(feedbackTimer);
+   feedbackTimer = setTimeout(function() { box.classList.add('hidden'); }, undo ? Math.max(0, undo.expires-Date.now()) : 6000);
   }
   if (undo) feedback(undo.message, undo.action);
   function paintDates() {
@@ -142,21 +148,39 @@ templ ScheduleCalendarScript() {
    root.querySelectorAll('.drop-zone').forEach(function(zone) { zone.classList.toggle('schedule-day-selected', dates.has(zone.dataset.date)); });
   }
   window.clearScheduleDates = function() { dates.clear(); paintDates(); };
+  function eligibleCards(action) {
+   return selectedCards().filter(function(card) {
+    var paused = card.dataset.scheduleEnabled === 'false';
+    if (action === 'pause') return !state.paused && !paused;
+    if (action === 'resume') return !state.paused && paused;
+    if (action === 'skip') return !state.paused && !paused && card.dataset.skipStatus !== 'full';
+    return !state.paused && !paused && card.dataset.skipStatus !== 'none';
+   });
+  }
+  function dateIntervalEligible(run, action) {
+   if (action === 'restore') return skips.some(function(skip) { return !skip.restored && intersects(skip, run); });
+   return !days.some(function(day) { return Number(day.dataset.start) === run.start_at && day.dataset.skipped === 'true'; }) || selectedCards().some(function(card) { return intersects(interval(card), run) && card.dataset.skipStatus !== 'full'; });
+  }
   window.updateScheduleSelection = function() {
    var selected = selectedCards();
-   var count = selectedIDs().length;
    var any = dates.size || selected.length;
-   toolbar.classList.toggle('hidden', !any);
-   var grouped = selected.some(function(card) { return Number(card.dataset.occurrenceEnd) - Number(card.dataset.occurrenceStart) > 1; });
-   toolbar.querySelector('[data-selection-count]').textContent = dates.size ? dates.size + ' dates selected · ' + days.filter(function(day) { return dates.has(day.dataset.calendarDay); }).map(function(day) { return day.dataset.calendarDay; }).join(', ') : selected.length + (grouped ? ' run blocks selected' : ' runs selected');
-   toolbar.querySelector('[data-selection-hint]').classList.toggle('hidden', !!dates.size);
-   root.querySelectorAll('[data-calendar-action="skip"]').forEach(function(button) { button.textContent = dates.size ? 'Skip runs on selected dates' : grouped ? 'Skip runs in selected hour blocks' : 'Skip ' + selected.length + ' selected runs'; button.disabled = busy || !any; });
-   root.querySelectorAll('[data-calendar-action="restore"]').forEach(function(button) { button.textContent = dates.size ? 'Restore runs on selected dates' : 'Restore selected runs'; button.disabled = busy || !any; });
-   ['pause', 'resume'].forEach(function(action) {
-    root.querySelectorAll('[data-calendar-action="' + action + '"]').forEach(function(button) { button.textContent = (action === 'pause' ? 'Pause ' : 'Resume ') + count + (count === 1 ? ' schedule' : ' schedules') + (action === 'pause' ? ' until resumed' : ''); button.disabled = busy || !count; });
+   toolbar.setAttribute('aria-hidden', String(!any));
+   toolbar.inert = !any;
+   var grouped = selected.some(function(card) { return Number(card.dataset.occurrenceEnd)-Number(card.dataset.occurrenceStart)>1; });
+   toolbar.querySelector('[data-selection-count]').textContent = dates.size ? dates.size + (dates.size === 1 ? ' date selected' : ' dates selected') : selected.length + (grouped ? (selected.length === 1 ? ' run block selected' : ' run blocks selected') : (selected.length === 1 ? ' run selected' : ' runs selected'));
+   ['skip','restore','pause','resume'].forEach(function(action) {
+    var applicable = dates.size ? (action === 'skip' || action === 'restore') && !state.paused && selectedIntervals().some(function(run) { return dateIntervalEligible(run, action); }) : eligibleCards(action).length > 0;
+    var label = {skip:'Skip',restore:'Unskip',pause:'Pause',resume:'Resume'}[action];
+    var noun = dates.size ? (dates.size === 1 ? 'date' : 'dates') : (action === 'skip' || action === 'restore') ? (grouped ? 'blocks' : 'runs') : (new Set(eligibleCards(action).map(function(card) { return card.dataset.scheduleId; })).size === 1 ? 'schedule' : 'schedules');
+    root.querySelectorAll('[data-calendar-action="' + action + '"]').forEach(function(button) {
+     button.textContent = label + ' ' + noun;
+     button.hidden = !applicable;
+     if (button.parentElement.tagName === 'LI') button.parentElement.hidden = !applicable;
+     button.disabled = busy || !applicable;
+    });
    });
    var menu = root.querySelector('#schedule-context-menu');
-   if (menu) menu.querySelectorAll('[data-schedule-context-action]').forEach(function(button) { button.hidden = selected.length > 1; });
+   if (menu) menu.querySelectorAll('[data-schedule-context-action]').forEach(function(button) { button.hidden = selected.length > 1; button.parentElement.hidden = button.hidden; });
   };
   window.selectScheduleContextCard = function(card) {
    window.clearScheduleDates();
@@ -180,7 +204,7 @@ templ ScheduleCalendarScript() {
     paintDates(); window.updateScheduleSelection();
    }
   }
-  function closeMenus() { dayMenu.classList.add('hidden'); root.querySelector('#schedule-context-menu').classList.add('hidden'); }
+  function closeMenus() { root.querySelector('#schedule-project-menu').open = false; dayMenu.classList.add('hidden'); root.querySelector('#schedule-context-menu').classList.add('hidden'); }
   async function apply(request, isUndo) {
    if (busy) return;
    busy = true; root.dataset.calendarBusy = 'true'; closeMenus();
@@ -191,9 +215,11 @@ templ ScheduleCalendarScript() {
     var result = await response.json();
     var inverse = result.undo;
     if (!inverse || !inverse.action || (inverse.action === 'undo_skips' && !(inverse.changes || []).length) || (['skip','restore'].includes(inverse.action) && !(inverse.skips || []).length) || (['pause','resume'].includes(inverse.action) && !(inverse.schedule_ids || []).length)) inverse = null;
-    var messages = {skip: 'Selected runs skipped.', restore: 'Selected runs restored. Paused schedules stay paused.', pause: 'Selected schedules paused until resumed.', resume: 'Selected schedules resumed.', pause_all: 'All project schedules paused.', resume_all: 'Project pause removed. Individually paused schedules stay paused.'};
-    var message = isUndo ? 'Change undone.' : messages[request.action];
-    window._scheduleCalendarUndo = {project: project, action: isUndo ? null : inverse, message: message};
+    var size = (request.schedule_ids || request.skips || []).length;
+    var noun = request.schedule_ids ? (size === 1 ? 'schedule' : 'schedules') : request.skips && request.skips.every(function(skip) { return !skip.schedule_id; }) ? (size === 1 ? 'date' : 'dates') : (size === 1 ? 'run' : 'runs');
+    var verbs = {skip:'skipped',restore:'unskipped',pause:'paused',resume:'resumed'};
+    var message = isUndo ? 'Change undone.' : verbs[request.action] ? size + ' ' + noun + ' ' + verbs[request.action] + '.' : request.action === 'pause_all' ? 'Schedules paused.' : 'Schedules resumed.';
+    undo = window._scheduleCalendarUndo = {project: project, action: isUndo ? null : inverse, message: message, expires: Date.now()+6000};
     if (!root.isConnected) return;
     _schedDragDropJustCompleted = true;
     var url = new URL('/schedule', window.location.origin);
@@ -210,13 +236,13 @@ templ ScheduleCalendarScript() {
   }
   root.addEventListener('click', function(event) {
    var button = event.target.closest('[data-calendar-action]');
-   if (!button || busy) return;
+   if (!button || busy || button.hidden || button.disabled) return;
    var action = button.dataset.calendarAction;
    if (action === 'clear') { window.clearScheduleDates(); clearScheduleSelection(); return; }
    if (action === 'undo') { if (undo && undo.action) apply(undo.action, true); return; }
    var request = {action: action};
-   if (action === 'pause' || action === 'resume') request.schedule_ids = selectedIDs();
-   if (action === 'skip' || action === 'restore') request.skips = selectedIntervals();
+   if (action === 'pause' || action === 'resume') request.schedule_ids = Array.from(new Set(eligibleCards(action).map(function(card) { return card.dataset.scheduleId; })));
+   if (action === 'skip' || action === 'restore') request.skips = dates.size ? selectedIntervals().filter(function(run) { return dateIntervalEligible(run, action); }) : eligibleCards(action).map(interval);
    apply(request, false);
   }, {signal: signal});
   root.addEventListener('contextmenu', function(event) {
@@ -224,11 +250,12 @@ templ ScheduleCalendarScript() {
    if (!day || busy) return;
    event.preventDefault(); event.stopPropagation();
    if (!dates.has(day.dataset.calendarDay)) selectDay(day, {});
+   if (!dayMenu.querySelector('button:not([hidden])')) return;
    dayMenu.classList.remove('hidden');
    var rect = dayMenu.getBoundingClientRect();
    dayMenu.style.left = Math.max(8, Math.min(event.clientX, innerWidth-rect.width-8)) + 'px';
    dayMenu.style.top = Math.max(8, Math.min(event.clientY, innerHeight-rect.height-8)) + 'px';
-   dayMenu.querySelector('button').focus();
+   var first = dayMenu.querySelector('button:not([hidden])'); if (first) first.focus();
   }, {signal: signal});
   root.addEventListener('keydown', function(event) {
    var day = event.target.closest('[data-calendar-day]');
@@ -237,7 +264,7 @@ templ ScheduleCalendarScript() {
   document.addEventListener('keydown', function(event) {
    if (event.key === 'Escape') { cancelGesture(); closeMenus(); window.clearScheduleDates(); clearScheduleSelection(); }
   }, {signal: signal});
-  document.addEventListener('pointerdown', function(event) { if (!dayMenu.contains(event.target)) dayMenu.classList.add('hidden'); }, {signal: signal});
+  document.addEventListener('pointerdown', function(event) { var projectMenu = root.querySelector('#schedule-project-menu'); if (!projectMenu.contains(event.target)) projectMenu.open = false; if (!dayMenu.contains(event.target)) dayMenu.classList.add('hidden'); }, {signal: signal});
   root.addEventListener('pointerdown', function(event) {
    if (busy || event.button !== 0 || event.target.closest('[data-schedule-card]')) return;
    var day = event.target.closest('[data-calendar-day]');
@@ -262,7 +289,15 @@ templ ScheduleCalendarScript() {
    if (!gesture.box && Math.hypot(event.clientX-gesture.x,event.clientY-gesture.y) < 4) return;
    event.preventDefault();
    if (!gesture.box) { gesture.box = document.createElement('div'); gesture.box.className = 'schedule-selection-box'; document.body.appendChild(gesture.box); }
-   var left = Math.min(gesture.x,event.clientX), top = Math.min(gesture.y,event.clientY), right = Math.max(gesture.x,event.clientX), bottom = Math.max(gesture.y,event.clientY);
+   var timeline = root.querySelector('#schedule-timeline-container');
+   var bounds = timeline.getBoundingClientRect();
+   var header = days[0].parentElement.getBoundingClientRect();
+   var firstZone = root.querySelector('.drop-zone').getBoundingClientRect();
+   var minX = Math.max(bounds.left+1, firstZone.left), maxX = bounds.right-1;
+   var minY = Math.max(bounds.top+1, header.bottom), maxY = bounds.bottom-1;
+   var x = Math.max(minX, Math.min(maxX, event.clientX)), y = Math.max(minY, Math.min(maxY, event.clientY));
+   var startX = Math.max(minX, Math.min(maxX, gesture.x)), startY = Math.max(minY, Math.min(maxY, gesture.y));
+   var left = Math.min(startX,x), top = Math.min(startY,y), right = Math.max(startX,x), bottom = Math.max(startY,y);
    Object.assign(gesture.box.style,{left:left+'px',top:top+'px',width:(right-left)+'px',height:(bottom-top)+'px'});
    cards().forEach(function(card) {
     var rect = card.getBoundingClientRect();
