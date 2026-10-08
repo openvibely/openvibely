@@ -83,6 +83,8 @@
                 const checked = (active ? active.value : '') === button.dataset.value;
                 button.setAttribute('aria-pressed', String(checked));
                 button.classList.toggle('active', checked);
+                const check = button.querySelector('[data-filter-check]');
+                if (check) check.textContent = checked ? '✓' : '';
             });
             if (selected.length) summary.append(textElement('span', selected.length + ' selected '));
             if (Object.keys(filter).length) summary.append(textElement('span', visible.length + ' of ' + all.length + ' '));
@@ -112,7 +114,7 @@
         const filter = filters.get(key(col)) || {}, name = button.dataset.kanbanFilter;
         if (name === 'clear') filters.delete(key(col));
         else {
-            if (button.dataset.value) filter[name] = { value: button.dataset.value, label: button.textContent };
+            if (button.dataset.value) filter[name] = { value: button.dataset.value, label: button.dataset.filterLabel || button.textContent };
             else delete filter[name];
             filters.set(key(col), filter);
         }
@@ -146,7 +148,7 @@
             window.openDestructiveConfirmDialog('delete_all_tasks_confirm_modal', 'delete_all_tasks_confirm_name', targets.length + ' tasks');
             return;
         }
-        const batch = { label: button.textContent.trim(), total: targets.length, done: 0, success: 0, skipped: 0, failed: 0, lines: [], running: true, stop: false };
+        const batch = { label: button.dataset.filterLabel || button.textContent.trim(), total: targets.length, done: 0, success: 0, skipped: 0, failed: 0, lines: [], running: true, stop: false };
         const batchKey = key(col);
         results.set(batchKey, batch); window.kanbanBatchRunning = true;
         if (window.closeKanbanMenu) window.closeKanbanMenu(null, false);
