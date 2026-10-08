@@ -1235,6 +1235,8 @@ func channelChatImageFormatMediaType(format string) string {
 	}
 }
 
+const channelChatMaxInlineTextAttachmentSize = 100 * 1024
+
 func channelChatAttachmentContextAndImages(chatAttachments []models.ChatAttachment, maxTextFileSize int64) (string, []models.Attachment) {
 	var imageAttachments []models.Attachment
 	var attachmentContents []string

@@ -33,8 +33,7 @@ const (
 	maxMessageLength         = 4096 // Telegram message length limit
 	telegramProcessTimeout   = 5 * time.Minute
 	telegramChatHistoryLimit = 50
-	telegramMaxFileSize      = 20 << 20   // 20 MB (Telegram Bot API limit)
-	telegramMaxTextFileSize  = 100 * 1024 // 100KB for text content injection
+	telegramMaxFileSize      = 20 << 20 // 20 MB (Telegram Bot API limit)
 
 	TelegramSettingBotToken       = "telegram_bot_token"
 	TelegramSettingSendResponses  = "telegram_send_responses"
@@ -769,7 +768,7 @@ func (s *TelegramService) handleChatMessageWithDurableHandoff(parentCtx context.
 				return linked, nil
 			},
 			AttachmentContextAndImages: func(atts []models.ChatAttachment) (string, []models.Attachment) {
-				ctxText, imgs := channelChatAttachmentContextAndImages(atts, telegramMaxTextFileSize)
+				ctxText, imgs := channelChatAttachmentContextAndImages(atts, channelChatMaxInlineTextAttachmentSize)
 				if len(telegramImageAttachments) > 0 {
 					imgs = updateChannelChatImageAttachmentPaths(telegramImageAttachments, atts)
 				}
@@ -964,7 +963,7 @@ func (s *TelegramService) downloadAndSaveTelegramAttachment(
 	}
 	chatAttachments := []models.ChatAttachment{chatAtt}
 
-	attachmentContext, imageAttachments := channelChatAttachmentContextAndImages(chatAttachments, telegramMaxTextFileSize)
+	attachmentContext, imageAttachments := channelChatAttachmentContextAndImages(chatAttachments, channelChatMaxInlineTextAttachmentSize)
 	if len(imageAttachments) > 0 {
 		applog.Infof("[telegram] image attachment file=%s size=%d", fileName, written)
 	} else if attachmentContext != "" {

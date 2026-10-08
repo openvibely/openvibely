@@ -50,7 +50,6 @@ const (
 	slackPreACKTimeout      = 2500 * time.Millisecond
 	slackChatHistoryLimit   = 50
 	slackMaxFileSize        = 10 << 20
-	slackMaxTextFileSize    = 100 * 1024
 	slackMaxFilesPerMessage = 3
 )
 
@@ -1714,7 +1713,7 @@ func (s *SlackService) downloadSlackAttachments(ctx context.Context, files []sla
 }
 
 func slackAttachmentContextAndImages(chatAttachments []models.ChatAttachment) (string, []models.Attachment) {
-	return channelChatAttachmentContextAndImages(chatAttachments, slackMaxTextFileSize)
+	return channelChatAttachmentContextAndImages(chatAttachments, channelChatMaxInlineTextAttachmentSize)
 }
 
 func (s *SlackService) downloadSlackFiles(ctx context.Context, files []slackIncomingFile) ([]models.ChatAttachment, error) {
