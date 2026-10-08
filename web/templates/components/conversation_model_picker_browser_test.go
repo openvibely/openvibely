@@ -37,6 +37,7 @@ func TestBrowserFunctional_ConversationModelPicker(t *testing.T) {
  trigger.click();await wait();
  const panel=document.getElementById('conversation-model-picker'),sub=document.getElementById('conversation-provider-models');
  assert(!panel.hidden,'picker opens');
+ assert(sub.hidden,'picker opens without a provider submenu');
  assert(panel.querySelectorAll('.ov-mp-provider').length===2,'provider groups');
  const providers=[...panel.querySelectorAll('.ov-mp-provider')];
  const originalLeft=panel.getBoundingClientRect().left;
@@ -168,7 +169,9 @@ func TestBrowserFunctional_TaskModelPickerPersistence(t *testing.T) {
  assert(!sub.hidden && sub.querySelector('[data-model=c]').getAttribute('aria-pressed')==='true','selected model remains visible without effort');
  assert(sub.querySelector('[data-model=c]').closest('.ov-mp-row').querySelector('.ov-mp-check').textContent==='✓','selected checkmark without effort');
  window.ovModelPicker.close(false);trigger.click();
- assert(!sub.hidden && sub.querySelector('[data-model=c]').getAttribute('aria-pressed')==='true','reopen selected provider');
+ assert(sub.hidden,'reopen without automatically opening selected provider');
+ [...panel.querySelectorAll('.ov-mp-provider')].find(b=>b.dataset.provider==='Ollama').click();
+ assert(!sub.hidden && sub.querySelector('[data-model=c]').getAttribute('aria-pressed')==='true','selected model remains marked when provider opens');
  assert(panel.getBoundingClientRect().right<=innerWidth,'small viewport bounds');
  failNextRead=true;choose('b');await trigger._ovModelState.ready;
  assert(!!trigger._ovModelState.error,'lookup failure shown');

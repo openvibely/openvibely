@@ -538,11 +538,7 @@
       init(btn);
       active = btn;
       favorites = read(favoritesKey);
-      const selected = current(btn);
-      provider =
-        selected?.provider && !favorites[selected.id]
-          ? selected.provider
-          : null;
+      provider = null;
       search.value = "";
       panel.hidden = false;
       btn.setAttribute("aria-expanded", "true");
