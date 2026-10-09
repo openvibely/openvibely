@@ -102,6 +102,10 @@ func testScheduleCalendarHeader(t *testing.T, paused, mobile bool) {
    check(!toolbar.querySelector('[data-calendar-action="skip"]').hidden && toolbar.querySelector('[data-calendar-action="restore"]').hidden,'untouched day offers only skip');
    down(days[0]);up();
    check(count()===0 && getComputedStyle(toolbar).display==='none','second click deselects day and hides toolbar');
+   down(days[0]);up();
+   check(toolbar.querySelector('[data-calendar-action="skip"]').textContent==='Skip day','single day label');
+   down(days[3],{metaKey:true});up();
+   check(toolbar.querySelector('[data-calendar-action="skip"]').textContent==='Skip days','multiple day label');
    down(days[1]);up();
    check(toolbar.querySelector('[data-calendar-action="skip"]').textContent==='Skip remaining runs' && toolbar.querySelector('[data-calendar-action="restore"]').textContent==='Unskip skipped runs','one partially skipped day has explicit action labels');
    check(days[1].getBoundingClientRect().top===initialHeaderTop,'selection toolbar must not shift headers');down(days[3],{ctrlKey:true});up();check(count()===2,'nonconsecutive header selection');
@@ -150,9 +154,13 @@ func testScheduleCalendarHeader(t *testing.T, paused, mobile bool) {
    var normal=Array.from(root.querySelectorAll('[data-schedule-id="s0"]'))[1];
    selectScheduleContextCard(normal);
    check(visible('skip') && visible('pause') && !visible('restore') && !visible('resume'),'normal run only offers skip and pause');
+   check(toolbar.querySelector('[data-calendar-action="skip"]').textContent==='Skip run' && toolbar.querySelector('[data-calendar-action="pause"]').textContent==='Pause schedule','single occurrence uses singular action labels');
+   selectScheduleContextCard(hourCard('s2'));
+   check(toolbar.querySelector('[data-calendar-action="skip"]').textContent==='Skip runs','hour block acts on multiple runs');
+   clearScheduleSelection();
    selectScheduleContextCard(a);
    check(!visible('skip') && visible('restore') && visible('pause') && !visible('resume'),'skipped run only offers unskip and pause');
-   check(root.querySelector('#schedule-context-menu [data-calendar-action="restore"]').textContent==='Unskip runs','unskip terminology');
+   check(root.querySelector('#schedule-context-menu [data-calendar-action="restore"]').textContent==='Unskip run','single run uses singular unskip label');
    selectScheduleContextCard(b);
    check(!visible('skip') && !visible('restore') && !visible('pause') && visible('resume'),'paused schedule only offers resume');
    check(root.querySelector('[data-calendar-action="pause_all"]').closest('details'),'pause all belongs in overflow');
