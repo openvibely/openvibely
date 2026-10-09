@@ -139,12 +139,14 @@ func testScheduleCalendarHeader(t *testing.T, paused, mobile bool) {
    down(zone,{clientX:zr.left+1,clientY:ar.top-1});
    window.dispatchEvent(new PointerEvent('pointermove',{pointerId:8,clientX:zr.right-1,clientY:br.bottom+1,cancelable:true}));
    check(selectedScheduleCards.has(a)&&selectedScheduleCards.has(b),'box must select both cards');
+   check(getComputedStyle(toolbar).visibility==='hidden','selection drag reveals cards behind panel');
    window.dispatchEvent(new PointerEvent('pointermove',{pointerId:8,clientX:innerWidth+100,clientY:innerHeight+100,cancelable:true}));
    var box=root.ownerDocument.querySelector('.schedule-selection-box').getBoundingClientRect();
    var grid=root.querySelector('#schedule-timeline-container').getBoundingClientRect();
    check(box.left>=grid.left && box.top>=grid.top && box.right<=grid.right && box.bottom<=grid.bottom,'selection box stays inside calendar');
    window.dispatchEvent(new PointerEvent('pointermove',{pointerId:8,clientX:zr.right-1,clientY:br.bottom+1,cancelable:true}));
    up();
+   check(getComputedStyle(toolbar).visibility==='visible','selection panel returns after drag');
    var target=root.querySelector('.drop-zone[data-date="'+zone.dataset.date+'"][data-hour="10"]');
    ar=a.getBoundingClientRect();var tr=target.getBoundingClientRect();
    a.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,cancelable:true,pointerType:'mouse',button:0,pointerId:9,clientX:ar.left+5,clientY:ar.top+5}));
