@@ -570,7 +570,7 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 					for _, day := range weekData.WeekDays {
 						<div
 							data-calendar-day={ day.Date.Format("2006-01-02") }
-                            title={ "Click to select a day\nShift-click to select a range" }
+                            title={ "Click to select or deselect a day\nShift+click to select a range" }
 							data-start={ fmt.Sprint(day.Date.Unix()) }
 							data-end={ fmt.Sprint(day.Date.AddDate(0, 0, 1).Unix()) }
 							role="button" tabindex="0" aria-pressed="false"
