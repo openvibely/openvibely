@@ -409,6 +409,13 @@ func TestSwarmServiceScheduledStartMarksExistingPlannerBoundary(t *testing.T) {
 	}
 	svc.workerSvc = workerSvc
 
+	schedules := repository.NewScheduleRepo(db)
+	now := time.Now().UTC().Truncate(time.Second)
+	schedule := &models.Schedule{TaskID: parent.ID, RunAt: now, RepeatType: models.RepeatOnce, RepeatInterval: 1, Enabled: true, ClearContextOnStart: true}
+	require.NoError(t, schedules.Create(context.Background(), schedule))
+	claimed, err := schedules.ClaimCalendarOccurrence(context.Background(), *schedule, now, nil)
+	require.NoError(t, err)
+	require.True(t, claimed)
 	if err := svc.StartPlannerForScheduledRun(context.Background(), parent.ID, true); err != nil {
 		t.Fatalf("StartPlannerForScheduledRun: %v", err)
 	}

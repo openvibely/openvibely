@@ -193,11 +193,34 @@ func (s *SwarmService) StartPlanner(ctx context.Context, parentTaskID string) er
 	return s.startPlanner(ctx, parentTaskID, false)
 }
 
-// StartPlannerForScheduledRun starts or resumes the planner for one scheduled
-// occurrence. startsNewContext is transient dispatch metadata for the actual
-// planner execution; it is not persisted on the parent or planner task.
-func (s *SwarmService) StartPlannerForScheduledRun(ctx context.Context, parentTaskID string, startsNewContext bool) error {
-	return s.startPlanner(ctx, parentTaskID, startsNewContext)
+// StartPlannerForScheduledRun transfers a live calendar admission to a durable
+// planner execution. The persisted admission owns the context setting.
+func (s *SwarmService) StartPlannerForScheduledRun(ctx context.Context, parentTaskID string, _ bool) error {
+	unlock := repository.LockTaskLifecycle(parentTaskID)
+	defer unlock()
+	s.orchestration.Lock()
+	defer s.orchestration.Unlock()
+	admission, err := s.taskRepo.ReserveCalendarPlanner(ctx, parentTaskID, func(parent *models.Task) (*models.Task, error) {
+		cfg, _ := models.ParseSwarmConfig(parent.SwarmConfig)
+		plannerCfg := models.SwarmConfig{Isolation: "read_only", RerunGeneration: max(1, cfg.Generation), Required: true}
+		config, err := plannerCfg.JSON()
+		if err != nil {
+			return nil, err
+		}
+		return &models.Task{ProjectID: parent.ProjectID, Title: parent.Title + " · Planner", Prompt: plannerPrompt(parent.Prompt, maxWorkers(parent)),
+			Category: models.CategoryActive, Status: models.StatusPending, Priority: parent.Priority, AgentID: parent.AgentID,
+			AgentDefinitionID: parent.AgentDefinitionID, ParentTaskID: &parent.ID, SwarmRole: models.SwarmRolePlanner,
+			SwarmStatus: "planning", SwarmConfig: config}, nil
+	})
+	if err != nil || admission == nil {
+		return err
+	}
+	if s.workerSvc != nil {
+		s.workerSvc.ClearCancellationRequested(parentTaskID)
+		s.workerSvc.ClearCancellationRequested(admission.Task.ID)
+		s.workerSvc.SubmitReserved(admission.Task, admission.ExecutionID)
+	}
+	return nil
 }
 
 func (s *SwarmService) startPlanner(ctx context.Context, parentTaskID string, startsNewContext bool) error {

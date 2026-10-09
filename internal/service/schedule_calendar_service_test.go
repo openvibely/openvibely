@@ -192,49 +192,126 @@ func TestCalendarWorkerRestartExecutesReservedRun(t *testing.T) {
 	require.Empty(t, admissions)
 }
 
-type calendarRetryPlanner struct {
-	fail  bool
-	calls int
-	clear bool
-}
-
-func (p *calendarRetryPlanner) StartPlanner(context.Context, string) error {
-	return fmt.Errorf("unexpected unscheduled handoff")
-}
-func (p *calendarRetryPlanner) StartPlannerForScheduledRun(_ context.Context, _ string, clear bool) error {
-	p.calls++
-	p.clear = clear
-	if p.fail {
-		return fmt.Errorf("planner unavailable")
+// These tests use the real swarm handoff, not a starter stub.
+func TestCalendarPlannerAdmissionRecovery(t *testing.T) {
+	for _, existing := range []bool{false, true} {
+		t.Run(fmt.Sprint(existing), func(t *testing.T) {
+			db := testutil.NewTestDB(t)
+			ctx := context.Background()
+			tasks := repository.NewTaskRepo(db, nil)
+			schedules := repository.NewScheduleRepo(db)
+			worker := newTestWorkerService(t)
+			swarm := NewSwarmService(NewTaskService(tasks, nil, worker), tasks, repository.NewExecutionRepo(db), worker)
+			parent := &models.Task{ProjectID: "default", Title: "Planner recovery", Prompt: "plan", Category: models.CategoryScheduled, Status: models.StatusPending, SwarmRole: models.SwarmRoleParent}
+			require.NoError(t, tasks.Create(ctx, parent))
+			if existing {
+				child := &models.Task{ProjectID: parent.ProjectID, Title: "Existing planner", Prompt: "plan again", Category: models.CategoryBacklog, Status: models.StatusFailed, ParentTaskID: &parent.ID, SwarmRole: models.SwarmRolePlanner}
+				require.NoError(t, tasks.Create(ctx, child))
+			}
+			now := time.Now().UTC().Truncate(time.Second)
+			schedule := &models.Schedule{TaskID: parent.ID, RunAt: now, RepeatType: models.RepeatOnce, RepeatInterval: 1, Enabled: true, ClearContextOnStart: true}
+			require.NoError(t, schedules.Create(ctx, schedule))
+			claimed, err := schedules.ClaimCalendarOccurrence(ctx, *schedule, now, nil)
+			require.NoError(t, err)
+			require.True(t, claimed)
+			// The persisted flag wins over stale handoff metadata.
+			require.NoError(t, swarm.StartPlannerForScheduledRun(ctx, parent.ID, false))
+			admissions, err := schedules.ListCalendarAdmissions(ctx)
+			require.NoError(t, err)
+			require.Len(t, admissions, 1)
+			admission := admissions[0]
+			require.NotEmpty(t, admission.ExecutionID)
+			require.NotEqual(t, parent.ID, admission.Task.ID)
+			require.True(t, admission.Task.StartsNewContext)
+			require.Equal(t, models.SwarmRolePlanner, admission.Task.SwarmRole)
+			require.NoError(t, swarm.StartPlannerForScheduledRun(ctx, parent.ID, true))
+			// Lose all in-memory queues, then use actual startup reservation recovery.
+			recovered := newTestWorkerService(t)
+			recovered.SetTaskRepo(repository.NewTaskRepo(db, nil))
+			recovered.SetExecutionRepo(repository.NewExecutionRepo(db))
+			recovered.ReconcileReservedTasks(ctx)
+			select {
+			case task := <-recovered.Submitted():
+				require.Equal(t, admission.Task.ID, task.ID)
+				require.True(t, task.StartsNewContext)
+			default:
+				t.Fatal("planner reservation was not recovered")
+			}
+			dispatch, started, err := tasks.ClaimReservedTaskForDispatch(ctx, admission.Task.ID, admission.ExecutionID)
+			require.NoError(t, err)
+			require.True(t, started)
+			require.True(t, dispatch.Task.StartsNewContext)
+			_, started, err = tasks.ClaimReservedTaskForDispatch(ctx, admission.Task.ID, admission.ExecutionID)
+			require.NoError(t, err)
+			require.False(t, started)
+			var executions int
+			require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM executions WHERE task_id = ?`, admission.Task.ID).Scan(&executions))
+			require.Equal(t, 1, executions)
+		})
 	}
-	return nil
 }
 
-func TestCalendarPlannerAdmissionRetriesAfterRestart(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	ctx := context.Background()
-	repo := repository.NewScheduleRepo(db)
-	tasks := repository.NewTaskRepo(db, nil)
-	parent := &models.Task{ProjectID: "default", Title: "Planner recovery", Prompt: "plan", Category: models.CategoryScheduled, Status: models.StatusPending, SwarmRole: models.SwarmRoleParent}
-	require.NoError(t, tasks.Create(ctx, parent))
-	now := time.Now().UTC().Truncate(time.Second)
-	schedule := &models.Schedule{TaskID: parent.ID, RunAt: now, RepeatType: models.RepeatOnce, RepeatInterval: 1, Enabled: true, ClearContextOnStart: true}
-	require.NoError(t, repo.Create(ctx, schedule))
-	planner := &calendarRetryPlanner{fail: true}
-	svc := NewSchedulerService(repo, tasks, newTestWorkerService(t))
-	svc.SetSwarmPlannerStarter(planner)
-	svc.now = func() time.Time { return now }
-	svc.checkDueTasks(ctx)
-	admissions, err := repo.ListCalendarAdmissions(ctx)
-	require.NoError(t, err)
-	require.Len(t, admissions, 1)
-	planner = &calendarRetryPlanner{}
-	restarted := NewSchedulerService(repository.NewScheduleRepo(db), tasks, newTestWorkerService(t))
-	restarted.SetSwarmPlannerStarter(planner)
-	restarted.checkDueTasks(ctx)
-	require.Equal(t, 1, planner.calls)
-	require.True(t, planner.clear)
-	admissions, err = repo.ListCalendarAdmissions(ctx)
-	require.NoError(t, err)
-	require.Empty(t, admissions)
+func TestCalendarPlannerCancelledHandoff(t *testing.T) {
+	for _, transferred := range []bool{false, true} {
+		t.Run(fmt.Sprint(transferred), func(t *testing.T) {
+			db := testutil.NewTestDB(t)
+			ctx := context.Background()
+			tasks := repository.NewTaskRepo(db, nil)
+			schedules := repository.NewScheduleRepo(db)
+			worker := newTestWorkerService(t)
+			swarm := NewSwarmService(NewTaskService(tasks, nil, worker), tasks, repository.NewExecutionRepo(db), worker)
+			parent := &models.Task{ProjectID: "default", Title: "Cancelled calendar swarm", Prompt: "plan", Category: models.CategoryScheduled, Status: models.StatusPending, SwarmRole: models.SwarmRoleParent}
+			require.NoError(t, tasks.Create(ctx, parent))
+			now := time.Now().UTC().Truncate(time.Second)
+			schedule := &models.Schedule{TaskID: parent.ID, RunAt: now, RepeatType: models.RepeatOnce, RepeatInterval: 1, Enabled: true, ClearContextOnStart: true}
+			require.NoError(t, schedules.Create(ctx, schedule))
+			claimed, err := schedules.ClaimCalendarOccurrence(ctx, *schedule, now, nil)
+			require.NoError(t, err)
+			require.True(t, claimed)
+			stale, err := schedules.ListCalendarAdmissions(ctx)
+			require.NoError(t, err)
+			require.Len(t, stale, 1)
+			var queued repository.ActiveLaneTaskAdmission
+			if transferred {
+				require.NoError(t, swarm.StartPlannerForScheduledRun(ctx, parent.ID, true))
+				rows, err := schedules.ListCalendarAdmissions(ctx)
+				require.NoError(t, err)
+				require.Len(t, rows, 1)
+				queued = rows[0]
+			}
+			if transferred {
+				// Parent withdrawal must cancel the durable planner reservation
+				// even before the service cascades cancellation to its children.
+				require.NoError(t, tasks.UpdateStatus(ctx, parent.ID, models.StatusCancelled))
+				var status string
+				require.NoError(t, db.QueryRow(`SELECT status FROM executions WHERE id = ?`, queued.ExecutionID).Scan(&status))
+				require.Equal(t, string(models.ExecCancelled), status)
+				child, err := tasks.GetByID(ctx, queued.Task.ID)
+				require.NoError(t, err)
+				require.Equal(t, models.StatusCancelled, child.Status)
+			}
+			require.NoError(t, swarm.CancelSwarm(ctx, parent.ID))
+			require.NoError(t, swarm.StartPlannerForScheduledRun(ctx, stale[0].Task.ID, stale[0].Task.StartsNewContext))
+			current, err := tasks.GetByID(ctx, parent.ID)
+			require.NoError(t, err)
+			require.Equal(t, models.StatusCancelled, current.Status)
+			admissions, err := schedules.ListCalendarAdmissions(ctx)
+			require.NoError(t, err)
+			require.Empty(t, admissions)
+			if transferred {
+				_, started, err := tasks.ClaimReservedTaskForDispatch(ctx, queued.Task.ID, queued.ExecutionID)
+				require.NoError(t, err)
+				require.False(t, started)
+			} else {
+				children, err := tasks.ListSwarmChildren(ctx, parent.ID)
+				require.NoError(t, err)
+				require.Empty(t, children)
+				select {
+				case <-worker.Submitted():
+					t.Fatal("cancelled handoff submitted a planner")
+				default:
+				}
+			}
+		})
+	}
 }
