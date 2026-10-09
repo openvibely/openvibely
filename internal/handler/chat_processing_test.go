@@ -9038,11 +9038,15 @@ func TestQueuedFailedRetryPreservesSourceAndExcludesItOnPromotion(t *testing.T) 
 	require.NotNil(t, queued)
 	require.Equal(t, failed.ID, queued.RetrySourceExecutionID)
 
-	require.NoError(t, h.taskRepo.UpdateStatus(ctx, task.ID, models.StatusFailed))
 	mock := testutil.NewMockLLMCaller()
 	mock.Response = "ok"
 	h.llmSvc.SetLLMCaller(mock)
-	require.NoError(t, h.startQueuedTaskThreadInput(ctx, *queued))
+	require.NoError(t, h.taskRepo.UpdateStatus(ctx, task.ID, models.StatusFailed))
+	// Retrying schedules a background promotion that may claim the input as soon
+	// as the task leaves the queued state. Either claimant starts the same retry.
+	if err := h.startQueuedTaskThreadInput(ctx, *queued); !errors.Is(err, repository.ErrInputNotPending) {
+		require.NoError(t, err)
+	}
 	require.Eventually(t, func() bool { return mock.CallCount() == 1 }, 2*time.Second, 25*time.Millisecond)
 	req := mock.LastAgentRequest()
 	require.Equal(t, failed.ID, req.RetrySourceExecutionID)
