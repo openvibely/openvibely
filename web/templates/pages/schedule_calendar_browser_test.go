@@ -45,6 +45,8 @@ func testScheduleCalendarHeader(t *testing.T, paused, mobile bool) {
 	}
 	at := day.AddDate(0, 0, -1).Add(8 * time.Hour)
 	tasks = append(tasks, repository.TaskWithSchedule{Task: models.Task{ID: "unaffected", ProjectID: project.ID, Title: "Unaffected run"}, Schedule: &models.Schedule{ID: "unaffected", RunAt: at, NextRun: &at, RepeatType: models.RepeatOnce, RepeatInterval: 1, Enabled: true}})
+	hourlyAt := day.AddDate(0, 0, -1).Add(50 * time.Minute)
+	tasks = append(tasks, repository.TaskWithSchedule{Task: models.Task{ID: "between-runs", ProjectID: project.ID, Title: "Hourly at fifty"}, Schedule: &models.Schedule{ID: "between-runs", RunAt: hourlyAt, NextRun: &hourlyAt, RepeatType: models.RepeatHours, RepeatInterval: 1, Enabled: true}})
 	runner := `<script>
  window.addEventListener('DOMContentLoaded',function() {
   var nativeFetch = window.fetch;
@@ -53,6 +55,7 @@ func testScheduleCalendarHeader(t *testing.T, paused, mobile bool) {
   function tick() { return new Promise(function(resolve){setTimeout(resolve,30);}); }
   var requests=[];
   window.fetch=async function(url,opts) { if(url.includes('/schedule/calendar-action')) { requests.push(JSON.parse(opts.body));return new Response(JSON.stringify({undo:{action:'resume',schedule_ids:['s0','s1']}}),{status:200,headers:{'Content-Type':'application/json'}}); } if(url.includes('/reschedule')) { requests.push({action:'drag',ids:opts.body.get('schedule_ids')});return new Response('',{status:200}); } return nativeFetch(url,opts); };
+  var nativeAjax=htmx.ajax;
   htmx.ajax=function(){return Promise.resolve();};
   window.addEventListener('error',function(event){report('fail',event.message);});
   (async function(){
@@ -102,6 +105,7 @@ func testScheduleCalendarHeader(t *testing.T, paused, mobile bool) {
    function up(){window.dispatchEvent(new PointerEvent('pointerup',{pointerId:8}));}
    function count(){return root.querySelectorAll('[data-calendar-day][aria-pressed="true"]').length;}
    var initialHeaderTop=days[1].getBoundingClientRect().top;
+   check(root.querySelector('.drop-zone[data-date="'+days[0].dataset.calendarDay+'"][data-hour="23"] [data-schedule-id="between-runs"]').dataset.skipStatus==='none','pause between actual hourly runs does not mark the block skipped');
    down(days[0]);up();
    check(!toolbar.querySelector('[data-calendar-action="skip"]').hidden && toolbar.querySelector('[data-calendar-action="restore"]').hidden,'untouched day offers only skip');
    down(days[0]);up();
@@ -216,6 +220,22 @@ func testScheduleCalendarHeader(t *testing.T, paused, mobile bool) {
    check(feedback.querySelector('[data-calendar-message]').textContent==='Calendar update failed','server error is displayed');
    check(feedback.querySelector('[data-calendar-action="undo"]').classList.contains('hidden'),'failed action must not offer Undo');
    window.setTimeout=nativeTimeout;
+   var style=document.createElement('style'); style.textContent='#schedule-timeline-container {max-width:600px; max-height:320px;}'; document.head.appendChild(style);
+   // Use the real HTMX replacement path for scroll preservation.
+   htmx.ajax=nativeAjax;
+   window.fetch=async function(){return new Response(JSON.stringify({undo:{action:'resume_all'}}),{status:200,headers:{'Content-Type':'application/json'}});};
+   var timeline=root.querySelector('#schedule-timeline-container');
+   timeline.style.height='320px'; timeline.style.flex='none'; timeline.style.width='600px';
+   timeline.scrollTop=143; timeline.scrollLeft=89;
+   var expectedTop=timeline.scrollTop, expectedLeft=timeline.scrollLeft;
+   check(expectedTop>0 && expectedLeft>0,'scroll regression exercises both axes');
+   var swapped=new Promise(function(resolve){document.body.addEventListener('htmx:afterSettle',resolve,{once:true});});
+   root.querySelector('[data-calendar-action="pause_all"]').click();
+   await swapped;
+   var replacement=document.querySelector('#schedule-content');
+   check(replacement!==root && !root.isConnected,'calendar action really replaces the fragment');
+   timeline=replacement.querySelector('#schedule-timeline-container');
+   check(timeline.scrollTop===expectedTop && timeline.scrollLeft===expectedLeft,'calendar action preserves both scroll axes after scripts and HTMX settle');
    report('pass','');
   })().catch(function(error){report('fail',error.stack||error.message);});
  });
@@ -235,7 +255,7 @@ func testScheduleCalendarHeader(t *testing.T, paused, mobile bool) {
 			return
 		}
 		var out bytes.Buffer
-		if err := Schedule([]models.Project{project}, &project, tasks, 0, nil, nil, models.ScheduleCalendarState{Paused: paused, Skips: []models.ScheduleSkip{
+		state := models.ScheduleCalendarState{Paused: paused, Skips: []models.ScheduleSkip{
 			// An elapsed project pause after the daily runs, with no overlapping cards, must not offer Unskip.
 			{StartAt: day.Add(-time.Hour).Unix(), EndAt: day.Add(-30 * time.Minute).Unix()},
 			{ScheduleID: "s0", StartAt: day.Add(8 * time.Hour).Unix(), EndAt: day.Add(8*time.Hour).Unix() + 1},
@@ -244,7 +264,12 @@ func testScheduleCalendarHeader(t *testing.T, paused, mobile bool) {
 			{ScheduleID: "s3", StartAt: day.Add(12*time.Hour + 20*time.Minute).Unix(), EndAt: day.Add(12*time.Hour + 30*time.Minute).Unix(), Restored: true},
 			{ScheduleID: "s4", StartAt: day.Add(12 * time.Hour).Unix(), EndAt: day.Add(12*time.Hour + 30*time.Minute).Unix()},
 			{ScheduleID: "s4", StartAt: day.Add(12*time.Hour + 30*time.Minute).Unix(), EndAt: day.Add(13 * time.Hour).Unix()},
-		}}).Render(context.Background(), &out); err != nil {
+		}}
+		component := Schedule([]models.Project{project}, &project, tasks, 0, nil, nil, state)
+		if r.Header.Get("HX-Request") == "true" {
+			component = ScheduleContent(&project, tasks, 0, nil, nil, state)
+		}
+		if err := component.Render(context.Background(), &out); err != nil {
 			t.Error(err)
 			return
 		}

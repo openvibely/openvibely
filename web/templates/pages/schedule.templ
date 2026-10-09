@@ -618,7 +618,9 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 												aria-label={ "Scheduled task " + scheduleDisplayTitle(occurrence.Task) + " (paused)" }
 												tabindex="0"
 												data-schedule-card
-												data-occurrence-start={ fmt.Sprint(scheduleCardInterval(occurrence).StartAt) }
+												data-occurrence-first={ fmt.Sprint(occurrence.OccurrenceTime.Unix()) }
+                                                data-occurrence-step={ fmt.Sprint(scheduleOccurrenceStep(occurrence)) }
+                                                data-occurrence-start={ fmt.Sprint(scheduleCardInterval(occurrence).StartAt) }
 												data-occurrence-end={ fmt.Sprint(scheduleCardInterval(occurrence).EndAt) }
 												data-schedule-id={ getScheduleID(occurrence.Task) }
 												data-task-id={ occurrence.Task.Task.ID }
@@ -640,7 +642,9 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 												aria-label={ "Scheduled task " + scheduleDisplayTitle(occurrence.Task) }
 												tabindex="0"
 												data-schedule-card
-												data-occurrence-start={ fmt.Sprint(scheduleCardInterval(occurrence).StartAt) }
+												data-occurrence-first={ fmt.Sprint(occurrence.OccurrenceTime.Unix()) }
+                                                data-occurrence-step={ fmt.Sprint(scheduleOccurrenceStep(occurrence)) }
+                                                data-occurrence-start={ fmt.Sprint(scheduleCardInterval(occurrence).StartAt) }
 												data-occurrence-end={ fmt.Sprint(scheduleCardInterval(occurrence).EndAt) }
 												data-schedule-id={ getScheduleID(occurrence.Task) }
 												data-task-id={ occurrence.Task.Task.ID }
@@ -1649,8 +1653,17 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 			// position is set before the browser's first paint. The script
 			// is at the bottom of the template, so all DOM elements exist.
 			try { updateNowIndicator(); } catch(e) { console.error('updateNowIndicator error:', e); }
-			var doScroll = shouldAutoScroll() && !hasScrolledToNow;
+			var savedCalendarScroll = window._scheduleCalendarScroll;
+            var calendarRoot = document.getElementById('schedule-content');
+            var restoredCalendarScroll = savedCalendarScroll && savedCalendarScroll.project === calendarRoot.dataset.projectId && savedCalendarScroll.week === (new URLSearchParams(location.search).get('week') || '0');
+            delete window._scheduleCalendarScroll;
+            var doScroll = !restoredCalendarScroll && shouldAutoScroll() && !hasScrolledToNow;
 			scrollToNowIndicator(doScroll);
+            if (restoredCalendarScroll) {
+                var timeline = document.getElementById('schedule-timeline-container');
+                timeline.scrollTop = savedCalendarScroll.top;
+                timeline.scrollLeft = savedCalendarScroll.left;
+            }
 			if (doScroll) {
 				hasScrolledToNow = true;
 			}
@@ -1681,7 +1694,7 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 					try { updateNowIndicator(); } catch(e) { console.error('updateNowIndicator error:', e); }
 					// After drag-drop reschedule, skip the scroll so the viewport stays
 					// where the user dropped the task. Still reveal the container.
-					if (_schedDragDropJustCompleted) {
+					if (restoredCalendarScroll || _schedDragDropJustCompleted) {
 						_schedDragDropJustCompleted = false;
 						scrollToNowIndicator(false);
 					} else {
