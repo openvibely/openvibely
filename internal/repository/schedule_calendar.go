@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/models"
 )
 
@@ -311,13 +312,52 @@ func (r *ScheduleRepo) ClaimCalendarOccurrence(ctx context.Context, schedule mod
 		}
 		result, err := exec.ExecContext(ctx, `UPDATE schedules SET last_run = ?, next_run = ?, updated_at = datetime('now')
    WHERE id = ? AND task_id = ? AND enabled = 1 AND next_run = ? AND next_run <= ?
-   AND EXISTS (SELECT 1 FROM tasks WHERE id = schedules.task_id AND status NOT IN ('running','queued') AND category != 'chat')`,
+   AND NOT EXISTS (SELECT 1 FROM schedule_dispatch_admissions a WHERE a.task_id = schedules.task_id)
+   AND NOT EXISTS (SELECT 1 FROM executions e WHERE e.task_id = schedules.task_id AND e.status IN ('running','queued'))
+   AND NOT EXISTS (SELECT 1 FROM automation_task_run_reservations a WHERE a.task_id = schedules.task_id)
+   AND EXISTS (SELECT 1 FROM tasks WHERE id = schedules.task_id AND status NOT IN ('running','queued') AND category != 'chat' AND NOT `+taskThreadInputOwnsAdmissionPredicate+`)`,
 			normalizeScheduleTime(now), normalizeScheduleNextRun(next), schedule.ID, schedule.TaskID, normalizeScheduleTime(*schedule.NextRun), normalizeScheduleTime(now))
 		if err != nil {
 			return err
 		}
 		n, err := result.RowsAffected()
 		if err != nil || n == 0 {
+			return err
+		}
+		task, err := getTaskWithExecutor(ctx, exec, `SELECT `+taskSelectColumns+` FROM tasks WHERE id = ?`, schedule.TaskID)
+		if err != nil {
+			return err
+		}
+		category := task.Category
+		if category != models.CategoryActive {
+			category = models.CategoryScheduled
+		}
+		order := task.DisplayOrder
+		if category != task.Category {
+			if err := exec.QueryRowContext(ctx, `SELECT COALESCE(MAX(display_order), -1)+1 FROM tasks WHERE project_id = ? AND category = ?`, task.ProjectID, category).Scan(&order); err != nil {
+				return err
+			}
+		} else if category == models.CategoryActive && task.Status != models.StatusPending {
+			if err := exec.QueryRowContext(ctx, activeBoardTailOrderQuery, task.ProjectID).Scan(&order); err != nil {
+				return err
+			}
+		}
+		if _, err := exec.ExecContext(ctx, `UPDATE tasks SET status = 'pending', category = ?, display_order = ?, completed_at = NULL, updated_at = datetime('now') WHERE id = ?`, category, order, task.ID); err != nil {
+			return err
+		}
+		var executionID *string
+		if task.SwarmRole != models.SwarmRoleParent {
+			agent := ""
+			if task.AgentID != nil {
+				agent = *task.AgentID
+			}
+			execution := models.Execution{TaskID: task.ID, AgentConfigID: agent, Status: models.ExecQueued, PromptSent: task.Prompt, StartsNewContext: schedule.ClearContextOnStart}
+			if err := NewExecutionRepo(r.db).CreateWithExecutor(ctx, exec, &execution); err != nil {
+				return err
+			}
+			executionID = &execution.ID
+		}
+		if _, err := exec.ExecContext(ctx, `INSERT INTO schedule_dispatch_admissions(task_id,schedule_id,execution_id,starts_new_context) VALUES(?,?,?,?)`, task.ID, schedule.ID, executionID, schedule.ClearContextOnStart); err != nil {
 			return err
 		}
 		claimed = true
@@ -329,7 +369,100 @@ func (r *ScheduleRepo) ClaimCalendarOccurrence(ctx context.Context, schedule mod
 // ReleaseCalendarOccurrence restores a failed planner admission only if no
 // intervening scheduler or user edit has changed its occurrence state.
 func (r *ScheduleRepo) ReleaseCalendarOccurrence(ctx context.Context, schedule models.Schedule, admittedAt time.Time, next *time.Time) error {
-	_, err := execBoundSQLite(ctx, r.db, `UPDATE schedules SET last_run = ?, next_run = ?, updated_at = datetime('now') WHERE id = ? AND task_id = ? AND last_run = ? AND next_run IS ?`,
-		schedule.LastRun, schedule.NextRun, schedule.ID, schedule.TaskID, normalizeScheduleTime(admittedAt), normalizeScheduleNextRun(next))
+	return withImmediateTx(ctx, r.db, func(exec SQLExecutor) error {
+		result, err := exec.ExecContext(ctx, `UPDATE schedules SET last_run = ?, next_run = ?, updated_at = datetime('now') WHERE id = ? AND task_id = ? AND last_run = ? AND next_run IS ? AND EXISTS (SELECT 1 FROM schedule_dispatch_admissions a WHERE a.schedule_id = schedules.id)`, schedule.LastRun, schedule.NextRun, schedule.ID, schedule.TaskID, normalizeScheduleTime(admittedAt), normalizeScheduleNextRun(next))
+		if err != nil {
+			return err
+		}
+		n, err := result.RowsAffected()
+		if err != nil || n == 0 {
+			return err
+		}
+		_, err = exec.ExecContext(ctx, `DELETE FROM schedule_dispatch_admissions WHERE schedule_id = ?`, schedule.ID)
+		return err
+	})
+}
+
+// AdvanceSuppressedOccurrence rechecks the current blackout and advances under
+// the same write lock as Unskip/Resume. A stale preflight cannot consume a run.
+func (r *ScheduleRepo) AdvanceSuppressedOccurrence(ctx context.Context, schedule models.Schedule, now time.Time) (bool, error) {
+	if schedule.NextRun == nil {
+		return false, nil
+	}
+	suppressed := false
+	err := withImmediateTx(ctx, r.db, func(exec SQLExecutor) error {
+		var until time.Time
+		var err error
+		suppressed, until, err = suppressedScheduleOccurrence(ctx, exec, schedule.ID, *schedule.NextRun)
+		if err != nil || !suppressed {
+			return err
+		}
+		from := now
+		if !until.IsZero() && !until.After(now) {
+			from = until.Add(-time.Nanosecond)
+		}
+		_, err = exec.ExecContext(ctx, `UPDATE schedules SET next_run = ?, updated_at = datetime('now') WHERE id = ? AND task_id = ? AND enabled = 1 AND next_run = ?`, normalizeScheduleNextRun(schedule.ComputeNextRun(from)), schedule.ID, schedule.TaskID, normalizeScheduleTime(*schedule.NextRun))
+		return err
+	})
+	return suppressed, err
+}
+
+func (r *ScheduleRepo) ListCalendarAdmissions(ctx context.Context) ([]ActiveLaneTaskAdmission, error) {
+	rows, err := r.db.QueryContext(ctx, `SELECT task_id, COALESCE(execution_id,''), starts_new_context FROM schedule_dispatch_admissions`)
+	if err != nil {
+		return nil, err
+	}
+	var refs []struct {
+		taskID, executionID string
+		clear               bool
+	}
+	for rows.Next() {
+		var ref struct {
+			taskID, executionID string
+			clear               bool
+		}
+		if err := rows.Scan(&ref.taskID, &ref.executionID, &ref.clear); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		refs = append(refs, ref)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return nil, err
+	}
+	var result []ActiveLaneTaskAdmission
+	for _, ref := range refs {
+		task, err := NewTaskRepo(r.db, nil).GetByID(ctx, ref.taskID)
+		if err != nil {
+			return nil, err
+		}
+		if task != nil {
+			task.StartsNewContext = ref.clear
+			result = append(result, ActiveLaneTaskAdmission{Task: *task, ExecutionID: ref.executionID})
+		}
+	}
+	return result, nil
+}
+
+func (r *ScheduleRepo) CompleteCalendarPlannerAdmission(ctx context.Context, taskID string) error {
+	_, err := execBoundSQLite(ctx, r.db, `DELETE FROM schedule_dispatch_admissions WHERE task_id = ? AND execution_id IS NULL`, taskID)
 	return err
+}
+
+// AdmitScheduledCalendarOccurrence keeps task board notifications on TaskRepo
+// while ScheduleRepo owns the atomic schedule/execution reservation.
+func (r *TaskRepo) AdmitScheduledCalendarOccurrence(ctx context.Context, schedule models.Schedule, now time.Time, next *time.Time) (bool, error) {
+	claimed, err := NewScheduleRepo(r.db).ClaimCalendarOccurrence(ctx, schedule, now, next)
+	if err != nil || !claimed {
+		return claimed, err
+	}
+	if r.broadcaster != nil {
+		task, err := r.GetByID(ctx, schedule.TaskID)
+		if err == nil && task != nil {
+			r.broadcaster.Publish(events.TaskEvent{Type: events.TaskBoardUpdated, TaskID: task.ID, TaskName: task.Title, ProjectID: task.ProjectID, Category: string(task.Category), Status: string(task.Status)})
+		}
+	}
+	return true, nil
 }

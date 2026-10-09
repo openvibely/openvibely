@@ -105,3 +105,136 @@ func TestSchedulerPreservesRestoredRunAfterDowntime(t *testing.T) {
 		})
 	}
 }
+
+func TestSchedulerRecoversAdmissionBeforeWorkerSubmission(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	repo := repository.NewScheduleRepo(db)
+	tasks := repository.NewTaskRepo(db, nil)
+	task := &models.Task{ProjectID: "default", Title: "Restart recovery", Prompt: "test", Category: models.CategoryCompleted, Status: models.StatusCompleted}
+	require.NoError(t, tasks.Create(ctx, task))
+	now := time.Now().UTC().Truncate(time.Second)
+	schedule := &models.Schedule{TaskID: task.ID, RunAt: now, RepeatType: models.RepeatOnce, RepeatInterval: 1, Enabled: true, ClearContextOnStart: true}
+	require.NoError(t, repo.Create(ctx, schedule))
+	claimed, err := repo.ClaimCalendarOccurrence(ctx, *schedule, now, nil)
+	require.NoError(t, err)
+	require.True(t, claimed)
+	// Simulate losing the old scheduler and its in-memory worker queue.
+	worker := newTestWorkerService(t)
+	worker.SetTaskRepo(tasks)
+	worker.SetExecutionRepo(repository.NewExecutionRepo(db))
+	svc := NewSchedulerService(repository.NewScheduleRepo(db), tasks, worker)
+	svc.now = func() time.Time { return now.Add(time.Minute) }
+	svc.checkDueTasks(ctx)
+	select {
+	case submitted := <-worker.Submitted():
+		require.Equal(t, task.ID, submitted.ID)
+		require.True(t, submitted.StartsNewContext)
+	default:
+		t.Fatal("durable admission was lost after restart")
+	}
+	worker.mu.Lock()
+	executionID := worker.reserved[task.ID]
+	worker.mu.Unlock()
+	require.NotEmpty(t, executionID, "recovered work must use the existing execution reservation")
+	executions, err := repository.NewExecutionRepo(db).ListByTask(ctx, task.ID)
+	require.NoError(t, err)
+	require.Len(t, executions, 1)
+	require.Equal(t, executionID, executions[0].ID)
+}
+
+func TestCalendarWorkerRestartExecutesReservedRun(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	tasks := repository.NewTaskRepo(db, nil)
+	schedules := repository.NewScheduleRepo(db)
+	executions := repository.NewExecutionRepo(db)
+	projects := repository.NewProjectRepo(db)
+	configs := repository.NewLLMConfigRepo(db)
+	model := &models.LLMConfig{Name: "Calendar recovery model", Provider: models.ProviderTest, Model: "test-model", AuthMethod: models.AuthMethodAPIKey}
+	require.NoError(t, configs.Create(ctx, model))
+	task := &models.Task{ProjectID: "default", Title: "Durable calendar worker", Prompt: "test", AgentID: &model.ID, Category: models.CategoryScheduled, Status: models.StatusPending}
+	require.NoError(t, tasks.Create(ctx, task))
+	now := time.Now().UTC().Truncate(time.Second)
+	schedule := &models.Schedule{TaskID: task.ID, RunAt: now, RepeatType: models.RepeatOnce, RepeatInterval: 1, Enabled: true, ClearContextOnStart: true}
+	require.NoError(t, schedules.Create(ctx, schedule))
+	admitted, err := schedules.ClaimCalendarOccurrence(ctx, *schedule, now, nil)
+	require.NoError(t, err)
+	require.True(t, admitted)
+	before, err := executions.ListByTask(ctx, task.ID)
+	require.NoError(t, err)
+	require.Len(t, before, 1)
+	llm := NewLLMService(configs, executions, tasks, projects, schedules, repository.NewAttachmentRepo(db))
+	mock := testutil.NewMockLLMCaller()
+	mock.Response = "Recovered run complete"
+	mock.TextOnly = mock.Response
+	llm.SetLLMCaller(mock)
+	llm.SetQueuedTaskThreadPromoter(func(string) {})
+	worker := NewWorkerService(llm, 1, projects)
+	worker.SetTaskRepo(tasks)
+	worker.SetExecutionRepo(executions)
+	worker.SetLLMConfigRepo(configs)
+	// Worker startup alone recovers the durable reservation; no scheduler Submit.
+	worker.Start(ctx)
+	defer worker.Stop()
+	require.Eventually(t, func() bool {
+		stored, err := tasks.GetByID(ctx, task.ID)
+		return err == nil && stored.Status == models.StatusCompleted
+	}, 5*time.Second, 10*time.Millisecond)
+	after, err := executions.ListByTask(ctx, task.ID)
+	require.NoError(t, err)
+	require.Len(t, after, 1)
+	require.Equal(t, before[0].ID, after[0].ID)
+	require.True(t, after[0].StartsNewContext)
+	admissions, err := schedules.ListCalendarAdmissions(ctx)
+	require.NoError(t, err)
+	require.Empty(t, admissions)
+}
+
+type calendarRetryPlanner struct {
+	fail  bool
+	calls int
+	clear bool
+}
+
+func (p *calendarRetryPlanner) StartPlanner(context.Context, string) error {
+	return fmt.Errorf("unexpected unscheduled handoff")
+}
+func (p *calendarRetryPlanner) StartPlannerForScheduledRun(_ context.Context, _ string, clear bool) error {
+	p.calls++
+	p.clear = clear
+	if p.fail {
+		return fmt.Errorf("planner unavailable")
+	}
+	return nil
+}
+
+func TestCalendarPlannerAdmissionRetriesAfterRestart(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	repo := repository.NewScheduleRepo(db)
+	tasks := repository.NewTaskRepo(db, nil)
+	parent := &models.Task{ProjectID: "default", Title: "Planner recovery", Prompt: "plan", Category: models.CategoryScheduled, Status: models.StatusPending, SwarmRole: models.SwarmRoleParent}
+	require.NoError(t, tasks.Create(ctx, parent))
+	now := time.Now().UTC().Truncate(time.Second)
+	schedule := &models.Schedule{TaskID: parent.ID, RunAt: now, RepeatType: models.RepeatOnce, RepeatInterval: 1, Enabled: true, ClearContextOnStart: true}
+	require.NoError(t, repo.Create(ctx, schedule))
+	planner := &calendarRetryPlanner{fail: true}
+	svc := NewSchedulerService(repo, tasks, newTestWorkerService(t))
+	svc.SetSwarmPlannerStarter(planner)
+	svc.now = func() time.Time { return now }
+	svc.checkDueTasks(ctx)
+	admissions, err := repo.ListCalendarAdmissions(ctx)
+	require.NoError(t, err)
+	require.Len(t, admissions, 1)
+	planner = &calendarRetryPlanner{}
+	restarted := NewSchedulerService(repository.NewScheduleRepo(db), tasks, newTestWorkerService(t))
+	restarted.SetSwarmPlannerStarter(planner)
+	restarted.checkDueTasks(ctx)
+	require.Equal(t, 1, planner.calls)
+	require.True(t, planner.clear)
+	admissions, err = repo.ListCalendarAdmissions(ctx)
+	require.NoError(t, err)
+	require.Empty(t, admissions)
+}

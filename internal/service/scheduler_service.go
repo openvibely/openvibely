@@ -132,6 +132,8 @@ func (s *SchedulerService) checkDueTasks(ctx context.Context) {
 	}
 	applog.Debugf("[scheduler] checkDueTasks now=%s", now.Format("2006-01-02 15:04:05"))
 
+	s.dispatchCalendarAdmissions(ctx)
+
 	schedules, err := s.scheduleRepo.ListDue(ctx, now)
 	if err != nil {
 		applog.Infof("[scheduler] checkDueTasks error listing due schedules: %v", err)
@@ -144,23 +146,15 @@ func (s *SchedulerService) checkDueTasks(ctx context.Context) {
 	}
 
 	for _, sched := range schedules {
-		if sched.NextRun != nil {
-			suppressed, until, err := s.scheduleRepo.SuppressedOccurrence(ctx, sched.ID, *sched.NextRun)
-			if err != nil {
-				applog.Infof("[scheduler] schedule exclusion lookup failed schedule=%s: %v", sched.ID, err)
-				continue
-			}
-			if suppressed {
-				from := now
-				if !until.IsZero() && !until.After(now) {
-					from = until.Add(-time.Nanosecond)
-				}
-				if _, err := s.scheduleRepo.UpdateNextRunIfCurrent(ctx, sched.ID, sched.TaskID, sched.NextRun, sched.ComputeNextRun(from)); err != nil {
-					applog.Infof("[scheduler] advancing excluded schedule=%s: %v", sched.ID, err)
-				}
-				continue
-			}
+		suppressed, err := s.scheduleRepo.AdvanceSuppressedOccurrence(ctx, sched, now)
+		if err != nil {
+			applog.Infof("[scheduler] advancing exclusions schedule=%s: %v", sched.ID, err)
+			continue
 		}
+		if suppressed {
+			continue
+		}
+
 		if err := models.ValidateScheduleRepeatInterval(sched.RepeatInterval); err != nil {
 			applog.Infof("[scheduler] skipping invalid schedule %s: %v", sched.ID, err)
 			continue
@@ -236,67 +230,38 @@ func (s *SchedulerService) checkDueTasks(ctx context.Context) {
 		}
 
 		nextRun := sched.ComputeNextRun(now)
-		claimed, err := s.scheduleRepo.ClaimCalendarOccurrence(ctx, sched, now, nextRun)
+		claimed, err := s.taskRepo.AdmitScheduledCalendarOccurrence(ctx, sched, now, nextRun)
 		if err != nil {
 			applog.Infof("[scheduler] claiming schedule=%s: %v", sched.ID, err)
 			continue
 		}
-		if !claimed {
-			continue
+		if claimed {
+			applog.Infof("[scheduler] durably admitted schedule=%s task=%s", sched.ID, sched.TaskID)
 		}
-		releaseAdmission := func() {
-			if err := s.scheduleRepo.ReleaseCalendarOccurrence(ctx, sched, now, nextRun); err != nil {
-				applog.Infof("[scheduler] releasing schedule=%s: %v", sched.ID, err)
-			}
-		}
-		// Reset task status to pending so ClaimTask can pick it up
-		if task.Status != "pending" {
-			if err := s.taskRepo.UpdateStatus(ctx, task.ID, "pending"); err != nil {
-				applog.Infof("[scheduler] checkDueTasks error resetting task %s status to pending: %v", task.ID, err)
-				releaseAdmission()
-				continue
-			}
-			task.Status = "pending"
-		}
+	}
+	s.dispatchCalendarAdmissions(ctx)
+}
 
-		// Reset category to "scheduled" if needed — worker prunes tasks whose
-		// category is not "active" or "scheduled". A recurring task that completed
-		// its last run will have category "completed", so we must restore it.
-		if task.Category != models.CategoryActive && task.Category != models.CategoryScheduled {
-			prevCategory := task.Category
-			if err := s.taskRepo.UpdateCategory(ctx, task.ID, models.CategoryScheduled); err != nil {
-				applog.Infof("[scheduler] checkDueTasks error resetting task %s category to scheduled: %v", task.ID, err)
-				releaseAdmission()
-				continue
-			}
-			task.Category = models.CategoryScheduled
-			applog.Infof("[scheduler] checkDueTasks reset task %s category from %q to %q for recurring schedule", task.ID, prevCategory, models.CategoryScheduled)
-		}
-
-		// A clear-context schedule starts a new replay segment without deleting
-		// earlier executions, lifecycle records, goals, or audit history.
-		task.StartsNewContext = sched.ClearContextOnStart
-
-		// Log if this is a missed schedule (next_run is significantly in the past)
-		if sched.NextRun != nil && sched.NextRun.Before(now.Add(-1*time.Minute)) {
-			timeSinceDue := now.Sub(*sched.NextRun)
-			applog.Infof("[scheduler] checkDueTasks MISSED SCHEDULE: task id=%s title=%q was due %s ago, executing now",
-				task.ID, task.Title, timeSinceDue.Round(time.Second))
-		} else {
-			applog.Infof("[scheduler] checkDueTasks submitting scheduled task id=%s title=%q schedule=%s repeat=%s",
-				task.ID, task.Title, sched.ID, sched.RepeatType)
-		}
+// Durable admissions survive a process exit between schedule advancement and submission.
+func (s *SchedulerService) dispatchCalendarAdmissions(ctx context.Context) {
+	admissions, err := s.scheduleRepo.ListCalendarAdmissions(ctx)
+	if err != nil {
+		applog.Infof("[scheduler] loading calendar admissions: %v", err)
+		return
+	}
+	for _, admission := range admissions {
+		task := admission.Task
 		if task.SwarmRole == models.SwarmRoleParent && s.swarmStarter != nil {
-			if err := s.swarmStarter.StartPlannerForScheduledRun(ctx, task.ID, sched.ClearContextOnStart); err != nil {
-				applog.Infof("[scheduler] checkDueTasks error starting swarm planner task=%s: %v", task.ID, err)
-				releaseAdmission()
+			if err := s.swarmStarter.StartPlannerForScheduledRun(ctx, task.ID, task.StartsNewContext); err != nil {
+				applog.Infof("[scheduler] starting admitted planner task=%s: %v", task.ID, err)
 				continue
 			}
-		} else {
-			if s.workerSvc != nil {
-				s.workerSvc.ClearCancellationRequested(task.ID)
+			if err := s.scheduleRepo.CompleteCalendarPlannerAdmission(ctx, task.ID); err != nil {
+				applog.Infof("[scheduler] completing planner admission: %v", err)
 			}
-			s.workerSvc.Submit(*task)
+		} else if admission.ExecutionID != "" && s.workerSvc != nil {
+			s.workerSvc.ClearCancellationRequested(task.ID)
+			s.workerSvc.SubmitReserved(task, admission.ExecutionID)
 		}
 	}
 }

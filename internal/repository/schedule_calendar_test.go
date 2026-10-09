@@ -234,3 +234,114 @@ func TestCalendarAdmissionReleasePreservesLaterEdit(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, editedNext.Equal(*stored.NextRun))
 }
+
+func TestCalendarAdmissionSurvivesLostWorkerAndStartsExactlyOnce(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	repo := NewScheduleRepo(db)
+	tasks := NewTaskRepo(db, nil)
+	task := createTestTask(t, tasks)
+	require.NoError(t, tasks.UpdateCategory(ctx, task.ID, models.CategoryCompleted))
+	require.NoError(t, tasks.UpdateStatus(ctx, task.ID, models.StatusCompleted))
+	now := time.Now().UTC().Truncate(time.Second)
+	schedule := &models.Schedule{TaskID: task.ID, RunAt: now, RepeatType: models.RepeatOnce, RepeatInterval: 1, Enabled: true, ClearContextOnStart: true}
+	require.NoError(t, repo.Create(ctx, schedule))
+	admitted, err := repo.ClaimCalendarOccurrence(ctx, *schedule, now, nil)
+	require.NoError(t, err)
+	require.True(t, admitted)
+	// No worker submission occurred. Fresh repositories recover durable work even
+	// though the one-time schedule has no next_run left to list.
+	restarted := NewScheduleRepo(db)
+	due, err := restarted.ListDue(ctx, now.Add(time.Minute))
+	require.NoError(t, err)
+	require.Empty(t, due)
+	admissions, err := NewTaskRepo(db, nil).ListReservedActiveLaneAdmissions(ctx)
+	require.NoError(t, err)
+	require.Len(t, admissions, 1)
+	admission := admissions[0]
+	require.True(t, admission.Task.StartsNewContext)
+	require.Equal(t, models.StatusPending, admission.Task.Status)
+	require.Equal(t, models.CategoryScheduled, admission.Task.Category)
+	executions, err := NewExecutionRepo(db).ListByTask(ctx, task.ID)
+	require.NoError(t, err)
+	require.Len(t, executions, 1)
+	require.Equal(t, models.ExecQueued, executions[0].Status)
+	// Ordinary active/task claims must not steal the scheduled execution.
+	claimed, err := tasks.ClaimTask(ctx, task.ID)
+	require.NoError(t, err)
+	require.False(t, claimed)
+	_, claimed, err = tasks.ClaimTaskForDispatch(ctx, task.ID)
+	require.NoError(t, err)
+	require.False(t, claimed)
+	claim, claimed, err := tasks.ClaimReservedTaskForDispatch(ctx, task.ID, admission.ExecutionID)
+	require.NoError(t, err)
+	require.True(t, claimed)
+	require.True(t, claim.Task.StartsNewContext)
+	_, claimed, err = tasks.ClaimReservedTaskForDispatch(ctx, task.ID, admission.ExecutionID)
+	require.NoError(t, err)
+	require.False(t, claimed)
+	remaining, err := restarted.ListCalendarAdmissions(ctx)
+	require.NoError(t, err)
+	require.Empty(t, remaining)
+	executions, err = NewExecutionRepo(db).ListByTask(ctx, task.ID)
+	require.NoError(t, err)
+	require.Len(t, executions, 1)
+	require.Equal(t, models.ExecRunning, executions[0].Status)
+}
+
+func TestCalendarAdmissionCancelledBeforeRecovery(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	repo := NewScheduleRepo(db)
+	tasks := NewTaskRepo(db, nil)
+	task := createTestTask(t, tasks)
+	now := time.Now().UTC().Truncate(time.Second)
+	schedule := &models.Schedule{TaskID: task.ID, RunAt: now, RepeatType: models.RepeatOnce, RepeatInterval: 1, Enabled: true}
+	require.NoError(t, repo.Create(ctx, schedule))
+	ok, err := repo.ClaimCalendarOccurrence(ctx, *schedule, now, nil)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.NoError(t, tasks.UpdateStatus(ctx, task.ID, models.StatusCancelled))
+	admissions, err := repo.ListCalendarAdmissions(ctx)
+	require.NoError(t, err)
+	require.Empty(t, admissions)
+	executions, err := NewExecutionRepo(db).ListByTask(ctx, task.ID)
+	require.NoError(t, err)
+	require.Len(t, executions, 1)
+	require.Equal(t, models.ExecCancelled, executions[0].Status)
+}
+
+func TestCalendarAdvanceRechecksRestoredOccurrence(t *testing.T) {
+	for _, mode := range []string{"skip", "pause_all"} {
+		t.Run(mode, func(t *testing.T) {
+			db := testutil.NewTestDB(t)
+			ctx := context.Background()
+			repo := NewScheduleRepo(db)
+			task := createTestTask(t, NewTaskRepo(db, nil))
+			now := time.Now().UTC().Truncate(time.Second)
+			schedule := &models.Schedule{TaskID: task.ID, RunAt: now, RepeatType: models.RepeatOnce, RepeatInterval: 1, Enabled: true}
+			require.NoError(t, repo.Create(ctx, schedule))
+			action := models.ScheduleCalendarAction{Action: mode}
+			if mode == "skip" {
+				action.Skips = []models.ScheduleSkip{{ScheduleID: schedule.ID, StartAt: now.Unix(), EndAt: now.Add(time.Hour).Unix()}}
+			}
+			undo, err := repo.ApplyCalendarAction(ctx, "default", action, now)
+			require.NoError(t, err)
+			suppressed, _, err := repo.SuppressedOccurrence(ctx, schedule.ID, now)
+			require.NoError(t, err)
+			require.True(t, suppressed)
+			// Restore after the old preflight. Resume just before the due instant so it
+			// does not intentionally reconcile this occurrence as overdue.
+			_, err = repo.ApplyCalendarAction(ctx, "default", undo, now.Add(-time.Nanosecond))
+			require.NoError(t, err)
+			suppressed, err = repo.AdvanceSuppressedOccurrence(ctx, *schedule, now)
+			require.NoError(t, err)
+			require.False(t, suppressed)
+			stored, err := repo.GetByID(ctx, schedule.ID)
+			require.NoError(t, err)
+			require.NotNil(t, stored.NextRun)
+			require.True(t, stored.NextRun.Equal(now))
+			require.Nil(t, stored.LastRun)
+		})
+	}
+}

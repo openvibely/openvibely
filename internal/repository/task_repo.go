@@ -1661,7 +1661,8 @@ func (r *TaskRepo) ClaimTask(ctx context.Context, id string) (bool, error) {
 			updated_at = datetime('now')
 		 WHERE id = ? AND status = 'pending'
 		   AND NOT EXISTS (SELECT 1 FROM automation_task_run_reservations r WHERE r.task_id = tasks.id)
-		   AND NOT EXISTS (SELECT 1 FROM executions e WHERE e.task_id = tasks.id AND e.status = 'running')
+		   AND NOT EXISTS (SELECT 1 FROM schedule_dispatch_admissions a WHERE a.task_id = tasks.id)
+           AND NOT EXISTS (SELECT 1 FROM executions e WHERE e.task_id = tasks.id AND e.status = 'running')
 		   AND NOT `+taskThreadInputOwnsAdmissionPredicate,
 		id)
 	if err != nil {
@@ -1787,7 +1788,8 @@ func (r *TaskRepo) ClaimTaskForDispatch(ctx context.Context, id string) (*TaskDi
 		updated_at = datetime('now')
 		WHERE id = ? AND status = 'pending' AND category IN ('active','scheduled')
 		  AND NOT EXISTS (SELECT 1 FROM automation_task_run_reservations r WHERE r.task_id = tasks.id)
-		  AND NOT EXISTS (SELECT 1 FROM executions e WHERE e.task_id = tasks.id AND e.status = 'running')
+		  AND NOT EXISTS (SELECT 1 FROM schedule_dispatch_admissions a WHERE a.task_id = tasks.id)
+           AND NOT EXISTS (SELECT 1 FROM executions e WHERE e.task_id = tasks.id AND e.status = 'running')
 		  AND NOT `+taskThreadInputOwnsAdmissionPredicate, id)
 	if err != nil {
 		return nil, false, fmt.Errorf("claiming task for dispatch: %w", err)
@@ -1820,7 +1822,9 @@ func (r *TaskRepo) ClaimTaskForDispatch(ctx context.Context, id string) (*TaskDi
 
 func (r *TaskRepo) ListReservedActiveLaneAdmissions(ctx context.Context) ([]ActiveLaneTaskAdmission, error) {
 	rows, err := r.db.QueryContext(ctx, `SELECT t.id, e.id FROM tasks t JOIN executions e ON e.task_id = t.id
-		WHERE t.category = 'active' AND t.status = 'running' AND e.status = 'queued' AND e.is_followup = 0 AND e.dispatch_id IS NULL
+		WHERE ((t.category = 'active' AND t.status = 'running') OR
+        (t.category IN ('active','scheduled') AND t.status = 'pending' AND EXISTS (SELECT 1 FROM schedule_dispatch_admissions a WHERE a.task_id = t.id AND a.execution_id = e.id)))
+        AND e.status = 'queued' AND e.is_followup = 0 AND e.dispatch_id IS NULL
 		ORDER BY t.display_order ASC, e.started_at ASC, e.rowid ASC`)
 	if err != nil {
 		return nil, fmt.Errorf("listing reserved active lane admissions: %w", err)
@@ -1848,6 +1852,9 @@ func (r *TaskRepo) ListReservedActiveLaneAdmissions(ctx context.Context) ([]Acti
 			return nil, err
 		}
 		if task != nil {
+			if err := r.db.QueryRowContext(ctx, `SELECT starts_new_context FROM executions WHERE id = ?`, ref.executionID).Scan(&task.StartsNewContext); err != nil {
+				return nil, err
+			}
 			admissions = append(admissions, ActiveLaneTaskAdmission{Task: *task, ExecutionID: ref.executionID})
 		}
 	}
@@ -1882,7 +1889,15 @@ func (r *TaskRepo) ClaimReservedTaskForDispatch(ctx context.Context, id, executi
 	)`, id, id, executionID).Scan(&blocked); err != nil {
 		return nil, false, fmt.Errorf("validating reserved task admission: %w", err)
 	}
-	if task.Status != models.StatusRunning || task.Category != models.CategoryActive || reserved == 0 || blocked != 0 {
+	var calendar bool
+	if err := conn.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM schedule_dispatch_admissions WHERE task_id = ? AND execution_id = ?)`, id, executionID).Scan(&calendar); err != nil {
+		return nil, false, err
+	}
+	validTask := task.Status == models.StatusRunning && task.Category == models.CategoryActive
+	if calendar {
+		validTask = task.Status == models.StatusPending && (task.Category == models.CategoryActive || task.Category == models.CategoryScheduled)
+	}
+	if !validTask || reserved == 0 || blocked != 0 {
 		if reserved != 0 {
 			if _, err := conn.ExecContext(ctx, `UPDATE executions SET status = 'cancelled', error_message = 'Reserved task admission was superseded', completed_at = datetime('now') WHERE id = ? AND status = 'queued'`, executionID); err != nil {
 				return nil, false, err
@@ -1950,6 +1965,15 @@ func (r *TaskRepo) ClaimReservedTaskForDispatch(ctx context.Context, id, executi
 			return nil, false, err
 		}
 		return &TaskDispatchClaim{Task: *task, AutomationContext: automationContext}, false, nil
+	}
+	if err := conn.QueryRowContext(ctx, `SELECT starts_new_context FROM executions WHERE id = ?`, executionID).Scan(&task.StartsNewContext); err != nil {
+		return nil, false, err
+	}
+	if calendar {
+		if _, err := conn.ExecContext(ctx, `UPDATE tasks SET status = 'running', display_order = `+activeBoardTailOrderExpression+`, updated_at = datetime('now') WHERE id = ?`, id); err != nil {
+			return nil, false, err
+		}
+		task.Status = models.StatusRunning
 	}
 	if _, err := conn.ExecContext(ctx, `UPDATE executions SET status = 'running', started_at = datetime('now'),
 		prompt_sent = ?, agent_config_id = ?, starts_new_context = ?
@@ -2583,7 +2607,8 @@ func (r *TaskRepo) ListStaleQueuedTasks(ctx context.Context, staleDuration time.
 		`SELECT `+taskSelectColumns+`
 		 FROM tasks WHERE category = 'active' AND status = 'queued' AND updated_at < ?
 		 AND NOT EXISTS (SELECT 1 FROM automation_task_run_reservations r WHERE r.task_id = tasks.id)
-		 AND NOT EXISTS (SELECT 1 FROM executions e WHERE e.task_id = tasks.id AND e.status = 'running')
+		 AND NOT EXISTS (SELECT 1 FROM schedule_dispatch_admissions a WHERE a.task_id = tasks.id)
+           AND NOT EXISTS (SELECT 1 FROM executions e WHERE e.task_id = tasks.id AND e.status = 'running')
 		 AND NOT EXISTS (SELECT 1 FROM thread_inputs i
 		                 WHERE i.scope = 'task_thread' AND i.task_id = tasks.id AND i.input_status = 'pending')
 		 ORDER BY priority DESC, display_order ASC, created_at ASC`, cutoff)
