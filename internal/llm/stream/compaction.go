@@ -16,11 +16,15 @@ func CompactionReporter(writer *Writer, inThinking *bool) func(llmcontracts.Comp
 		inThinking = &thinking
 	}
 	return func(progress llmcontracts.CompactionProgress) {
-		if inThinking != nil && *inThinking {
-			*inThinking = false
+		// Activity must be outside Markdown even when the interrupted content
+		// was visible response text rather than thinking.
+		if progress.State == "started" || *inThinking {
 			if fence := transcript.UnclosedMarkdownFence(withoutToolOutput(writer.String())); fence != "" {
 				writer.Write([]byte("\n" + fence + "\n"))
 			}
+		}
+		if *inThinking {
+			*inThinking = false
 			WriteEvent(writer, Event{Type: EventThinkingEnd}, false)
 		}
 		switch progress.State {

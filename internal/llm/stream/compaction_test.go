@@ -83,3 +83,29 @@ func TestCompactionRecoveryIgnoresToolMarkdown(t *testing.T) {
 		t.Fatal("modified quoted tool block")
 	}
 }
+
+func TestCompactionClosesVisibleResponseFence(t *testing.T) {
+	for _, fence := range []string{"```", "~~~~", "`````"} {
+		for _, live := range []bool{false, true} {
+			writer := NewWriter("", "", nil, context.Background(), time.Hour)
+			original := "Here is the code:\n" + fence + "go\npartial"
+			WriteEvent(writer, Event{Type: EventTextDelta, Text: original}, false)
+			var thinking *bool
+			if live {
+				value := false
+				thinking = &value
+			}
+			report := CompactionReporter(writer, thinking)
+			report(llmcontracts.CompactionProgress{State: "started"})
+			report(llmcontracts.CompactionProgress{State: "done", Duration: time.Second})
+			writer.Stop()
+			want := original + "\n" + fence + "\n\n[Compaction started]\n\n[Compaction done | 1000]\n"
+			if got := writer.String(); got != want {
+				t.Fatalf("transcript=%q, want %q", got, want)
+			}
+			if writer.TextString() != original {
+				t.Fatal("recovery changed text-only output")
+			}
+		}
+	}
+}
