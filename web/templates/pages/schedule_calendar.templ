@@ -26,11 +26,19 @@ func scheduleCalendarJSON(states []models.ScheduleCalendarState) string {
 templ ScheduleCalendarControls(states []models.ScheduleCalendarState) {
  <style>
  #schedule-content { position: relative; }
- #schedule-selection-toolbar { min-height: 2rem; white-space: nowrap; overflow-x: auto; }
+ #schedule-selection-toolbar { min-width: 0; min-height: 2rem; flex: 1; white-space: nowrap; overflow-x: auto; }
  #schedule-selection-toolbar[aria-hidden="true"] { visibility: hidden; }
  #schedule-calendar-feedback { position: absolute; bottom: 2rem; right: 1rem; z-index: 45; padding: .75rem; border-radius: .5rem; background: var(--ov-menu-surface); box-shadow: 0 2px 12px rgba(0,0,0,.2); }
  #schedule-content [hidden] { display: none !important; }
- #schedule-project-menu { margin-left: auto; position: relative; }
+ #schedule-project-menu { position: relative; flex-shrink: 0; }
+ #schedule-content [data-page-header] { gap: 1rem; }
+ #schedule-content [data-page-header] > h2, #schedule-header-actions { flex-shrink: 0; }
+ #schedule-header-actions { display: flex; align-items: center; gap: .5rem; margin-left: auto; }
+ @media (max-width: 767px) {
+  #schedule-content [data-page-header] { flex-wrap: wrap; gap: .5rem; }
+  #schedule-selection-toolbar { order: 3; flex-basis: 100%; }
+  #schedule-selection-toolbar[aria-hidden="true"] { display: none; }
+ }
  #schedule-project-menu > .ov-menu { position: absolute; right: 0; z-index: 50; min-width: 12rem; }
  #schedule-content [data-calendar-day] { cursor: pointer; user-select: none; touch-action: pan-y; }
  #schedule-content .schedule-day-selected { background: rgba(116,128,255,.16) !important; }
@@ -42,18 +50,6 @@ templ ScheduleCalendarControls(states []models.ScheduleCalendarState) {
  #schedule-content[data-calendar-busy="true"] #schedule-timeline-container { pointer-events: none; }
  </style>
  <div id="schedule-calendar-controls" data-state={ scheduleCalendarJSON(states) } class="flex-shrink-0 text-xs">
-  <div id="schedule-pause-banner" class="hidden bg-base-200 rounded p-2 mb-2" role="status">
-   Schedules paused.
-   <button type="button" class="btn btn-xs" data-calendar-action="resume_all">Resume</button>
-  </div>
-  <div id="schedule-selection-toolbar" class="flex items-center gap-2 mb-2" aria-hidden="true" role="toolbar" aria-label="Selected schedules or dates">
-   <span data-selection-count aria-live="polite"></span>
-   <button type="button" class="btn btn-xs" data-calendar-action="skip">Skip runs</button>
-   <button type="button" class="btn btn-xs" data-calendar-action="restore">Unskip runs</button>
-   <button type="button" class="btn btn-xs" data-calendar-action="pause">Pause schedules</button>
-   <button type="button" class="btn btn-xs" data-calendar-action="resume">Resume schedules</button>
-   <button type="button" class="btn btn-xs btn-ghost" data-calendar-action="clear">Clear</button>
-  </div>
   <div id="schedule-calendar-feedback" class="hidden mb-2" role="status">
    <span data-calendar-message></span>
    <button type="button" class="btn btn-xs btn-ghost" data-calendar-action="undo">Undo</button>
@@ -130,8 +126,9 @@ templ ScheduleCalendarScript() {
    }
   });
   days.forEach(function(day) { day.dataset.skipped = String(skips.some(function(skip) { return !skip.restored && !skip.schedule_id && skip.start_at <= Number(day.dataset.start) && skip.end_at >= Number(day.dataset.end); })); });
-  root.querySelector('#schedule-pause-banner').classList.toggle('hidden', !state.paused);
-  root.querySelector('#schedule-project-menu').hidden = !!state.paused;
+  root.querySelector('#schedule-paused-status').hidden = !state.paused;
+  root.querySelector('[data-calendar-action="pause_all"]').hidden = !!state.paused;
+  root.querySelector('[data-calendar-action="resume_all"]').hidden = !state.paused;
   var feedbackTimer;
   signal.addEventListener('abort', function() { clearTimeout(feedbackTimer); });
   function feedback(message, inverse, expires) {
@@ -315,4 +312,15 @@ templ ScheduleCalendarScript() {
   window.updateScheduleSelection();
  })();
  </script>
+}
+
+ templ ScheduleSelectionToolbar() {
+  <div id="schedule-selection-toolbar" class="flex items-center gap-2 text-xs" aria-hidden="true" role="toolbar" aria-label="Selected schedules or dates">
+   <span data-selection-count aria-live="polite"></span>
+   <button type="button" class="btn btn-xs" data-calendar-action="skip">Skip runs</button>
+   <button type="button" class="btn btn-xs" data-calendar-action="restore">Unskip runs</button>
+   <button type="button" class="btn btn-xs" data-calendar-action="pause">Pause schedules</button>
+   <button type="button" class="btn btn-xs" data-calendar-action="resume">Resume schedules</button>
+   <button type="button" class="btn btn-xs btn-ghost" data-calendar-action="clear" aria-label="Clear selection">×</button>
+  </div>
 }
