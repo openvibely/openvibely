@@ -59,6 +59,12 @@ func testScheduleCalendarHeader(t *testing.T, paused, mobile bool) {
    var pageHeader=root.querySelector('[data-page-header]');
    var toolbar=root.querySelector('#schedule-selection-toolbar');
    var menu=root.querySelector('#schedule-project-menu');
+   function checkHeaderAlignment() {
+    var top=pageHeader.getBoundingClientRect().top+parseFloat(getComputedStyle(pageHeader).paddingTop);
+    check(Math.abs(pageHeader.querySelector('h2').getBoundingClientRect().top-top)<1,'Schedule title uses standard page header top');
+    check(Math.abs(root.querySelector('#schedule-header-actions').getBoundingClientRect().top-top)<1,'New button uses standard page header top');
+   }
+   checkHeaderAlignment();
    check(pageHeader.contains(toolbar),'selection panel belongs in header');
    check(getComputedStyle(toolbar).display==='none','empty selection hides panel');
    check(!root.querySelector('#schedule-paused-status'),'no redundant paused header status');
@@ -81,6 +87,7 @@ func testScheduleCalendarHeader(t *testing.T, paused, mobile bool) {
    function count(){return root.querySelectorAll('[data-calendar-day][aria-pressed="true"]').length;}
    var initialHeaderTop=days[1].getBoundingClientRect().top;
    down(days[1]);up();check(days[1].getBoundingClientRect().top===initialHeaderTop,'selection toolbar must not shift headers');down(days[3],{ctrlKey:true});up();check(count()===2,'nonconsecutive header selection');
+   checkHeaderAlignment();
    var panel=toolbar.getBoundingClientRect(), viewport=root.querySelector('#schedule-calendar-viewport').getBoundingClientRect();
    var slot=root.querySelector('#schedule-selection-slot').getBoundingClientRect();
    var title=pageHeader.querySelector('h2').getBoundingClientRect(), actions=root.querySelector('#schedule-header-actions').getBoundingClientRect();
