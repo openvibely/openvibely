@@ -55,6 +55,20 @@ func TestSyncProviderFromCatalog(t *testing.T) {
 	}
 }
 
+func TestHaiku55CatalogSyncKeepsEffectiveContextAt200K(t *testing.T) {
+	agent := models.LLMConfig{
+		Provider:              models.ProviderAnthropic,
+		Model:                 "claude-haiku-5-5",
+		ProviderContextWindow: 1000000,
+		ContextWindow:         1000000,
+	}
+	SyncProviderFromCatalog(&agent)
+	resolved := Resolve(agent)
+	if resolved.ProviderInputWindow != 200000 || resolved.EffectiveInputWindow != 200000 {
+		t.Fatalf("Haiku 5.5 resolved context = provider %d/effective %d, want 200000 each", resolved.ProviderInputWindow, resolved.EffectiveInputWindow)
+	}
+}
+
 func TestResolveCompatibleManualWindowWithoutDiscovery(t *testing.T) {
 	for _, window := range []int{8192, 262144, 1000000} {
 		got := Resolve(models.LLMConfig{Provider: models.ProviderOpenAICompatible, ContextWindow: window})

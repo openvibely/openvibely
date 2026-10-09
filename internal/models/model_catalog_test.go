@@ -76,6 +76,43 @@ func TestClaudeSonnet55CatalogPolicy(t *testing.T) {
 	}
 }
 
+func TestClaudeHaiku55CatalogPolicy(t *testing.T) {
+	spec, ok := LookupModel(ProviderAnthropic, "claude-haiku-5-5")
+	if !ok {
+		t.Fatal("claude-haiku-5-5 missing from Anthropic catalog")
+	}
+	wantEfforts := []string{"low", "medium", "high", "xhigh", "max"}
+	if len(spec.ReasoningEfforts) != len(wantEfforts) {
+		t.Fatalf("Haiku 5.5 efforts = %v, want %v", spec.ReasoningEfforts, wantEfforts)
+	}
+	for i, want := range wantEfforts {
+		if spec.ReasoningEfforts[i] != want {
+			t.Fatalf("Haiku 5.5 efforts = %v, want %v", spec.ReasoningEfforts, wantEfforts)
+		}
+	}
+	if spec.DefaultReasoningEffort != "medium" {
+		t.Fatalf("Haiku 5.5 default effort = %q, want medium", spec.DefaultReasoningEffort)
+	}
+	if spec.ContextWindow != standardAnthropicContext {
+		t.Fatalf("Haiku 5.5 context window = %d, want OpenVibely's %d-token budget", spec.ContextWindow, standardAnthropicContext)
+	}
+	if !spec.RequiresAdaptiveThinking || !spec.UsesAdaptiveThinking {
+		t.Fatalf("Haiku 5.5 thinking capabilities = (required %v, adaptive %v), want both true", spec.RequiresAdaptiveThinking, spec.UsesAdaptiveThinking)
+	}
+	if spec.DefaultOutputTokens != 64000 || spec.MaxOutputTokens != 128000 {
+		t.Fatalf("Haiku 5.5 output tokens = (%d, %d), want default 64000 and max 128000", spec.DefaultOutputTokens, spec.MaxOutputTokens)
+	}
+	if spec.SupportsTemperature || ModelSupportsTemperature(ProviderAnthropic, spec.ID) {
+		t.Fatal("Haiku 5.5 must not support configurable temperature")
+	}
+	if spec.SupportsOAuth || BuiltInModelSupportedForAuth(ProviderAnthropic, spec.ID, AuthMethodOAuth) {
+		t.Fatal("Haiku 5.5 OAuth eligibility must remain disabled without verified support")
+	}
+	if !BuiltInModelSupportedForAuth(ProviderAnthropic, spec.ID, AuthMethodAPIKey) {
+		t.Fatal("Haiku 5.5 must remain available to Anthropic API-key configurations")
+	}
+}
+
 func TestRetiredBuiltInModelsAreUnsupported(t *testing.T) {
 	for _, tc := range []struct {
 		provider LLMProvider

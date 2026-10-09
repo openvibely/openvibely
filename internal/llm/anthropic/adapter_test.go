@@ -169,6 +169,95 @@ func TestCallStreamingZeroHistoryFollowupUsesChatAssembly(t *testing.T) {
 	}
 }
 
+func TestCallHaiku55ChatAndTaskStreamingSendSupportedProviderRequest(t *testing.T) {
+	const requestCount = 10
+	requestBodies := make(chan map[string]any, requestCount)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Errorf("read request body: %v", err)
+			http.Error(w, "read request", http.StatusBadRequest)
+			return
+		}
+		var request map[string]any
+		if err := json.Unmarshal(body, &request); err != nil {
+			t.Errorf("decode request body: %v", err)
+			http.Error(w, "decode request", http.StatusBadRequest)
+			return
+		}
+		requestBodies <- request
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		for _, event := range []string{
+			`{"type":"message_start","message":{"id":"msg_haiku","model":"claude-haiku-5-5","usage":{"input_tokens":4}}}`,
+			`{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`,
+			`{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"ok"}}`,
+			`{"type":"content_block_stop","index":0}`,
+			`{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":1}}`,
+			`{"type":"message_stop"}`,
+		} {
+			fmt.Fprintf(w, "data: %s\n\n", event)
+		}
+	}))
+	defer server.Close()
+
+	originalHost := anthropicclient.AnthropicAPIHost
+	anthropicclient.AnthropicAPIHost = server.URL
+	defer func() { anthropicclient.AnthropicAPIHost = originalHost }()
+
+	adapter := New(nil, nil, nil)
+	for _, operation := range []llmcontracts.Operation{llmcontracts.OperationStreaming, llmcontracts.OperationTask} {
+		for _, effort := range []string{"low", "medium", "high", "xhigh", "max"} {
+			t.Run(string(operation)+"/"+effort, func(t *testing.T) {
+				req := llmcontracts.AgentRequest{
+					Operation: operation,
+					Message:   "Summarize this task",
+					Agent: models.LLMConfig{
+						Name:            "Haiku 5.5",
+						Provider:        models.ProviderAnthropic,
+						Model:           "claude-haiku-5-5",
+						ReasoningEffort: effort,
+						ContextWindow:   200000,
+						Temperature:     0.8,
+						AuthMethod:      models.AuthMethodAPIKey,
+						APIKey:          "test-key",
+					},
+				}
+				if operation == llmcontracts.OperationStreaming {
+					req.ChatHistory = []models.Execution{}
+				}
+				if _, err := adapter.Call(context.Background(), req, ".", nil); err != nil {
+					t.Fatalf("Call: %v", err)
+				}
+				request := <-requestBodies
+				if request["model"] != "claude-haiku-5-5" {
+					t.Fatalf("request model = %v, want exact claude-haiku-5-5", request["model"])
+				}
+				outputConfig, ok := request["output_config"].(map[string]any)
+				if !ok || outputConfig["effort"] != effort {
+					t.Fatalf("output_config = %#v, want effort %q", request["output_config"], effort)
+				}
+				thinking, ok := request["thinking"].(map[string]any)
+				if !ok || thinking["type"] != "adaptive" || len(thinking) != 1 {
+					t.Fatalf("thinking = %#v, want only type=adaptive", request["thinking"])
+				}
+				for _, unsupported := range []string{"temperature", "top_p", "top_k"} {
+					if _, ok := request[unsupported]; ok {
+						t.Fatalf("request unexpectedly contains unsupported %s: %v", unsupported, request[unsupported])
+					}
+				}
+				if _, ok := thinking["budget_tokens"]; ok {
+					t.Fatalf("request unexpectedly contains legacy thinking budget: %v", thinking)
+				}
+				maxTokens, ok := request["max_tokens"].(float64)
+				if !ok || maxTokens > 128000 {
+					t.Fatalf("max_tokens = %v, want no more than 128000", request["max_tokens"])
+				}
+			})
+		}
+	}
+}
+
 func TestCallDirectReturnsErrorOnRefusalStopReason(t *testing.T) {
 	var gotBody map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

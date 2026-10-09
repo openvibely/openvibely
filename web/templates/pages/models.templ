@@ -1311,7 +1311,10 @@ for _, agent := range modelOptions {
 
 				function modelOptionsForProvider(provider) {
 					var options = modelOptionsByProvider[provider] || modelOptionsByProvider[canonicalProvider(provider)] || [];
-					if (canonicalProvider(provider) === 'openai' && document.getElementById('model_openai_auth_type').value === 'oauth') {
+					var normalizedProvider = canonicalProvider(provider);
+					var oauthSelected = (normalizedProvider === 'openai' && document.getElementById('model_openai_auth_type').value === 'oauth') ||
+						(normalizedProvider === 'anthropic' && document.getElementById('model_anthropic_auth_type').value === 'oauth');
+					if (oauthSelected) {
 						return options.filter(function(option) { return option.oauth === true; });
 					}
 					return options;
@@ -2678,10 +2681,12 @@ for _, agent := range modelOptions {
 					authMethodSelect.value = 'oauth';
 					document.getElementById('subscription_info_oauth').classList.remove('hidden');
 				}
-				updateOAuthConnectionField();
-			}
+					updateOAuthConnectionField();
+					setModelOptions('anthropic', document.getElementById('model_id').value);
+					handleModelChange();
+				}
 
-				function setCustomAuthField(id, value) {
+					function setCustomAuthField(id, value) {
 					var el = document.getElementById(id);
 					if (el && value !== undefined && value !== null) el.value = value;
 				}

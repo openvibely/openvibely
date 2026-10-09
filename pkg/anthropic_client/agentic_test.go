@@ -2129,7 +2129,7 @@ func TestContextManagementEdit_WithThinking(t *testing.T) {
 }
 
 func TestSendAgentic_Claude5ModelsUseAdaptiveThinkingWithoutBudget(t *testing.T) {
-	models := []string{"claude-opus-5-5", "claude-opus-5", "claude-sonnet-5-5", "claude-sonnet-5", "claude-fable-5-1", "claude-mythos-5-1", "claude-fable-5", "claude-mythos-5"}
+	models := []string{"claude-opus-5-5", "claude-opus-5", "claude-sonnet-5-5", "claude-sonnet-5", "claude-fable-5-1", "claude-mythos-5-1", "claude-fable-5", "claude-mythos-5", "claude-haiku-5-5"}
 	for _, model := range models {
 		t.Run(model, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -2137,6 +2137,14 @@ func TestSendAgentic_Claude5ModelsUseAdaptiveThinkingWithoutBudget(t *testing.T)
 				var reqBody map[string]interface{}
 				if err := json.Unmarshal(body, &reqBody); err != nil {
 					t.Fatalf("decode request body: %v", err)
+				}
+				if reqBody["model"] != model {
+					t.Fatalf("request model = %v, want exact ID %q", reqBody["model"], model)
+				}
+				for _, unsupported := range []string{"temperature", "top_p", "top_k"} {
+					if _, ok := reqBody[unsupported]; ok {
+						t.Fatalf("adaptive Claude request must omit %s: %v", unsupported, reqBody[unsupported])
+					}
 				}
 				thinking, ok := reqBody["thinking"].(map[string]interface{})
 				if !ok {
@@ -2220,6 +2228,11 @@ func TestNormalizeEffortRejectsUnsupportedModelCombinations(t *testing.T) {
 		{"claude-opus-4-5-20251101", "max", ""},
 		{"claude-sonnet-4-5-20250929", "low", ""},
 		{"claude-haiku-4-5-20251001", "high", ""},
+		{"claude-haiku-5-5", "low", "low"},
+		{"claude-haiku-5-5", "medium", "medium"},
+		{"claude-haiku-5-5", "high", "high"},
+		{"claude-haiku-5-5", "xhigh", "xhigh"},
+		{"claude-haiku-5-5", "max", "max"},
 		{"claude-future-model", "low", ""},
 	}
 	for _, tt := range tests {
