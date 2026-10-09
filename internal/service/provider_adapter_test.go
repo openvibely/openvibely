@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/openvibely/openvibely/internal/agentplugins"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
@@ -2201,4 +2202,61 @@ func BenchmarkProviderContextBudgetRecoveryPaths(b *testing.B) {
 		b.StopTimer()
 		b.ReportMetric(float64(len(history)), "history_entries/op")
 	})
+}
+
+func TestLocalCompactionActivityPersistsAcrossProviderRetry(t *testing.T) {
+	for _, fail := range []bool{false, true} {
+		t.Run(fmt.Sprint(fail), func(t *testing.T) {
+			ctx := context.Background()
+			db := testutil.NewTestDB(t)
+			repo := repository.NewExecutionRepo(db)
+			task := &models.Task{ProjectID: "default", Title: "Compaction", Prompt: "continue", Category: models.CategoryActive, Status: models.StatusPending}
+			if err := repository.NewTaskRepo(db, nil).Create(ctx, task); err != nil {
+				t.Fatal(err)
+			}
+			agent, err := repository.NewLLMConfigRepo(db).GetDefault(ctx)
+			if err != nil || agent == nil {
+				t.Fatalf("model: %v", err)
+			}
+			execution := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "continue"}
+			if err := repo.Create(ctx, execution); err != nil {
+				t.Fatal(err)
+			}
+			if err := repo.UpdateOutput(ctx, execution.ID, "[Thinking]\nInterrupted reasoning"); err != nil {
+				t.Fatal(err)
+			}
+			svc := &LLMService{execRepo: repo}
+			adapter := providerAdapterFunc(func(req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
+				if req.ExecID != "" {
+					t.Fatal("summary must not stream private contents")
+				}
+				if fail {
+					return llmcontracts.AgentResult{}, errors.New("summary unavailable")
+				}
+				return llmcontracts.AgentResult{Output: "private summary"}, nil
+			})
+			_, err = svc.compactRequestHistoryWithLocalSummary(adapter, llmcontracts.AgentRequest{Ctx: ctx, ExecID: execution.ID, Agent: *agent, ChatHistory: []models.Execution{{PromptSent: "old work", Output: "old result"}}})
+			if (err != nil) != fail {
+				t.Fatalf("error=%v", err)
+			}
+			retry := stream.NewWriter(execution.ID, task.ID, repo, ctx, time.Hour)
+			defer retry.Stop()
+			stream.WriteEvent(retry, stream.Event{Type: stream.EventTextDelta, Text: "Resuming work"}, false)
+			retry.Flush()
+			stored, err := repo.GetByID(ctx, execution.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(stored.Output, "[/Thinking]\n\n[Compaction started]") {
+				t.Fatalf("fallback remained inside thinking: %q", stored.Output)
+			}
+			state := "done"
+			if fail {
+				state = "failed"
+			}
+			if !strings.Contains(stored.Output, "[Compaction started]") || !strings.Contains(stored.Output, "[Compaction "+state+" | ") || !strings.HasSuffix(stored.Output, "Resuming work") || strings.Contains(stored.Output, "private summary") {
+				t.Fatalf("transcript=%q", stored.Output)
+			}
+		})
+	}
 }

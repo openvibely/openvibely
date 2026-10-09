@@ -1358,7 +1358,13 @@ func historyWithinRequestBudget(req llmcontracts.AgentRequest, history []models.
 	return out
 }
 
-func (s *LLMService) compactRequestHistoryWithLocalSummary(adapter ProviderAdapter, req llmcontracts.AgentRequest, triggerErrors ...error) (llmcontracts.AgentRequest, error) {
+func (s *LLMService) compactRequestHistoryWithLocalSummary(adapter ProviderAdapter, req llmcontracts.AgentRequest, triggerErrors ...error) (compactedRequest llmcontracts.AgentRequest, compactErr error) {
+	// This writer completes before the retry adapter seeds its transcript.
+	if req.ExecID != "" && s != nil && s.execRepo != nil {
+		writer := llmstream.NewWriterWithPublisher(req.ExecID, "", s.execRepo, req.Ctx, 500*time.Millisecond, s.executionStreamHub)
+		finish := llmcontracts.BeginCompaction(llmstream.CompactionReporter(writer, nil))
+		defer func() { finish(compactErr == nil); writer.Flush(); writer.Stop() }()
+	}
 	req = restoreCurrentSteeringForRecovery(req)
 	history := append([]models.Execution(nil), req.ChatHistory...)
 	var trigger error
