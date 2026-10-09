@@ -35,7 +35,6 @@ templ KanbanColumnMenu(projectID string, category models.TaskCategory, backlogSo
 					@KanbanFilter(cat, "status", "Status", []string{"", "pending", "failed", "cancelled", "blocked"}, []string{"All statuses", "Pending", "Failed", "Cancelled", "Blocked"})
 				}
 				@KanbanFilter(cat, "priority", "Priority", []string{"", "4", "3", "2", "1"}, []string{"All priorities", PriorityLabel(4), PriorityLabel(3), PriorityLabel(2), PriorityLabel(1)})
-				<li><button type="button" data-column={ cat } data-kanban-filter="clear" onclick="kanbanSetFilter(this)">Clear filters</button></li>
 			}
 			@KanbanSubmenu("Sort by") {
 				{{ sort := backlogSort
@@ -54,7 +53,6 @@ if category == models.CategoryCompleted {
 			}
 		}
 		<li class="ov-menu-rule" role="separator"></li>
-		<li class="menu-title"><span data-kanban-scope={ cat }>Actions</span></li>
 		if category == models.CategoryCompleted {
 			@KanbanSubmenu("Local") {
 				for _, action := range TaskWorktreeMergeActions() {
@@ -71,7 +69,6 @@ if category == models.CategoryCompleted {
 		} else {
 			<li><button type="button" data-column={ cat } data-kanban-action="cancel" onclick="kanbanBatch(this)">Stop</button></li>
 		}
-		<li class="ov-menu-rule" role="separator"></li>
 		<li><button type="button" class="text-error" data-column={ cat } data-kanban-action="delete" onclick="kanbanBatch(this)">Delete…</button></li>
 	}
 }
