@@ -65,9 +65,9 @@ func testScheduleCalendarHeader(t *testing.T, paused, mobile bool) {
    var hintCard=root.querySelector('[data-schedule-card][data-has-schedule="true"]');
    check(!hintCard.title.includes(hintCard.dataset.scheduleTitle) && hintCard.title.split('\n').length===2 && hintCard.title===modifier+'+click to select schedule(s)\nRight-click for actions','card hover only shows commands on separate lines');
    check(hintCard.getAttribute('aria-description').includes(modifier+'+click'),'card selection hint available to assistive technology');
-   check(root.querySelector('[data-calendar-day]').title==='Click to select or deselect a day\n'+modifier+'+click to select day(s)\nClick and drag across day headers to select multiple days','day hover uses one line per command');
+   check(root.querySelector('[data-calendar-day]').title==='Click to select or deselect a day\n'+modifier+'+click to select day(s)\nClick and drag across day headers to select day(s)','day hover uses one line per command');
    check(!root.querySelector('#schedule-day-menu'),'day headers have no custom context menu');
-   check(root.querySelector('.drop-zone').title==='Drag empty space to select multiple schedules','calendar space explains box selection');
+   check(root.querySelector('.drop-zone').title==='Drag empty space to select schedule(s)','calendar space explains box selection');
    check(toolbar.querySelector('[data-calendar-action="clear"]').title==='Clear selection (Esc)','clear hover explains escape shortcut');
 
    var menu=root.querySelector('#schedule-project-menu');
@@ -103,14 +103,14 @@ func testScheduleCalendarHeader(t *testing.T, paused, mobile bool) {
    down(days[0]);up();
    check(count()===0 && getComputedStyle(toolbar).display==='none','second click deselects day and hides toolbar');
    down(days[0]);up();
-   check(toolbar.querySelector('[data-calendar-action="skip"]').textContent==='Skip day','single day label');
+   check(toolbar.querySelector('[data-calendar-action="skip"]').textContent==='Skip day(s)','single day label');
    down(days[3],{metaKey:true});up();
-   check(toolbar.querySelector('[data-calendar-action="skip"]').textContent==='Skip days','multiple day label');
+   check(toolbar.querySelector('[data-calendar-action="skip"]').textContent==='Skip day(s)','multiple day label');
    down(days[1]);up();
-   check(toolbar.querySelector('[data-calendar-action="skip"]').textContent==='Skip remaining runs' && toolbar.querySelector('[data-calendar-action="restore"]').textContent==='Unskip skipped runs','one partially skipped day has explicit action labels');
+   check(toolbar.querySelector('[data-calendar-action="skip"]').textContent==='Skip remaining run(s)' && toolbar.querySelector('[data-calendar-action="restore"]').textContent==='Unskip skipped run(s)','one partially skipped day has explicit action labels');
    check(days[1].getBoundingClientRect().top===initialHeaderTop,'selection toolbar must not shift headers');down(days[3],{ctrlKey:true});up();check(count()===2,'nonconsecutive header selection');
-   check(toolbar.querySelector('[data-calendar-action="skip"]').textContent==='Skip remaining runs','partial date selection explains remaining runs');
-   check(toolbar.querySelector('[data-calendar-action="restore"]').textContent==='Unskip skipped runs','partial date selection explains skipped runs');
+   check(toolbar.querySelector('[data-calendar-action="skip"]').textContent==='Skip remaining run(s)','partial date selection explains remaining runs');
+   check(toolbar.querySelector('[data-calendar-action="restore"]').textContent==='Unskip skipped run(s)','partial date selection explains skipped runs');
    checkHeaderAlignment();
    var panel=toolbar.getBoundingClientRect(), viewport=root.querySelector('#schedule-calendar-viewport').getBoundingClientRect();
    var slot=root.querySelector('#schedule-selection-slot').getBoundingClientRect();
@@ -154,13 +154,13 @@ func testScheduleCalendarHeader(t *testing.T, paused, mobile bool) {
    var normal=Array.from(root.querySelectorAll('[data-schedule-id="s0"]'))[1];
    selectScheduleContextCard(normal);
    check(visible('skip') && visible('pause') && !visible('restore') && !visible('resume'),'normal run only offers skip and pause');
-   check(toolbar.querySelector('[data-calendar-action="skip"]').textContent==='Skip run' && toolbar.querySelector('[data-calendar-action="pause"]').textContent==='Pause schedule','single occurrence uses singular action labels');
+   check(toolbar.querySelector('[data-calendar-action="skip"]').textContent==='Skip run(s)' && toolbar.querySelector('[data-calendar-action="pause"]').textContent==='Pause schedule(s)','single occurrence uses singular action labels');
    selectScheduleContextCard(hourCard('s2'));
-   check(toolbar.querySelector('[data-calendar-action="skip"]').textContent==='Skip runs','hour block acts on multiple runs');
+   check(toolbar.querySelector('[data-calendar-action="skip"]').textContent==='Skip run(s)','hour block acts on multiple runs');
    clearScheduleSelection();
    selectScheduleContextCard(a);
    check(!visible('skip') && visible('restore') && visible('pause') && !visible('resume'),'skipped run only offers unskip and pause');
-   check(root.querySelector('#schedule-context-menu [data-calendar-action="restore"]').textContent==='Unskip run','single run uses singular unskip label');
+   check(root.querySelector('#schedule-context-menu [data-calendar-action="restore"]').textContent==='Unskip run(s)','single run uses singular unskip label');
    selectScheduleContextCard(b);
    check(!visible('skip') && !visible('restore') && !visible('pause') && visible('resume'),'paused schedule only offers resume');
    check(root.querySelector('[data-calendar-action="pause_all"]').closest('details'),'pause all belongs in overflow');
@@ -169,7 +169,7 @@ func testScheduleCalendarHeader(t *testing.T, paused, mobile bool) {
    a.dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:300,clientY:200}));
    check(selectedScheduleCards.size===2,'right click must preserve multi-selection');
    root.querySelector('#schedule-context-menu [data-calendar-action="pause"]').click();await tick();
-   check(window._scheduleCalendarUndo.message==='1 schedule paused.','brief feedback counts eligible schedules');
+   check(window._scheduleCalendarUndo.message==='1 schedule(s) paused.','brief feedback counts eligible schedules');
    check(window._scheduleCalendarUndo.expires>Date.now() && window._scheduleCalendarUndo.expires<=Date.now()+6000,'feedback expires');
    check(requests[1].action==='pause' && requests[1].schedule_ids.length===1 && requests[1].schedule_ids[0]==='s0','context pause must affect only eligible schedules');
    clearScheduleSelection();
@@ -196,7 +196,7 @@ func testScheduleCalendarHeader(t *testing.T, paused, mobile bool) {
    selectScheduleContextCard(a);
    root.querySelector('#schedule-context-menu [data-calendar-action="restore"]').click();await tick();
    check(requests[3].action==='restore' && requests[3].skips.length===1 && requests[3].skips[0].schedule_id==='s0','unskip targets only selected skipped runs');
-   check(window._scheduleCalendarUndo.message==='1 run unskipped.','unskip feedback uses matching terminology');
+   check(window._scheduleCalendarUndo.message==='1 run(s) unskipped.','unskip feedback uses matching terminology');
    // A later failure gets a fresh notification lifetime even after Undo expired.
    window._scheduleCalendarUndo.expires=Date.now()-1000;
    var nativeTimeout=window.setTimeout, feedbackDelay;

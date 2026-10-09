@@ -123,7 +123,7 @@ templ ScheduleCalendarScript() {
    card.title = hint;
    card.setAttribute('aria-description', hint);
   });
-  days.forEach(function(day) { day.title = 'Click to select or deselect a day\n' + selectionModifier + '+click to select day(s)\nClick and drag across day headers to select multiple days'; });
+  days.forEach(function(day) { day.title = 'Click to select or deselect a day\n' + selectionModifier + '+click to select day(s)\nClick and drag across day headers to select day(s)'; });
   days.forEach(function(day) { day.dataset.skipped = String(skips.some(function(skip) { return !skip.restored && !skip.schedule_id && skip.start_at <= Number(day.dataset.start) && skip.end_at >= Number(day.dataset.end); })); });
   root.querySelector('[data-calendar-action="pause_all"]').hidden = !!state.paused;
   root.querySelector('[data-calendar-action="resume_all"]').hidden = !state.paused;
@@ -162,16 +162,14 @@ templ ScheduleCalendarScript() {
    toolbar.setAttribute('aria-hidden', String(!any));
    toolbar.inert = !any;
    var grouped = selected.some(function(card) { return Number(card.dataset.occurrenceEnd)-Number(card.dataset.occurrenceStart)>1; });
-   toolbar.querySelector('[data-selection-count]').textContent = dates.size ? dates.size + (dates.size === 1 ? ' day selected' : ' days selected') : selected.length + (grouped ? (selected.length === 1 ? ' run block selected' : ' run blocks selected') : (selected.length === 1 ? ' run selected' : ' runs selected'));
+   toolbar.querySelector('[data-selection-count]').textContent = dates.size ? dates.size + ' day(s) selected' : selected.length + (grouped ? ' run block(s) selected' : ' run(s) selected');
    ['skip','restore','pause','resume'].forEach(function(action) {
     var applicable = dates.size ? (action === 'skip' || action === 'restore') && !state.paused && selectedIntervals().some(function(run) { return dateIntervalEligible(run, action); }) : eligibleCards(action).length > 0;
     var label = {skip:'Skip',restore:'Unskip',pause:'Pause',resume:'Resume'}[action];
-    var eligible = eligibleCards(action);
-    var multipleRuns = eligible.length !== 1 || eligible.some(function(card) { return Number(card.dataset.occurrenceEnd)-Number(card.dataset.occurrenceStart)>1; });
-    var noun = dates.size ? (dates.size === 1 ? 'day' : 'days') : (action === 'skip' || action === 'restore') ? (multipleRuns ? 'runs' : 'run') : (new Set(eligibleCards(action).map(function(card) { return card.dataset.scheduleId; })).size === 1 ? 'schedule' : 'schedules');
+    var noun = dates.size ? 'day(s)' : (action === 'skip' || action === 'restore') ? 'run(s)' : 'schedule(s)';
     root.querySelectorAll('[data-calendar-action="' + action + '"]').forEach(function(button) {
      var mixedDates = dates.size && selectedIntervals().some(function(run) { return dateIntervalEligible(run, 'skip'); }) && selectedIntervals().some(function(run) { return dateIntervalEligible(run, 'restore'); });
-     button.textContent = mixedDates && action === 'skip' ? 'Skip remaining runs' : mixedDates && action === 'restore' ? 'Unskip skipped runs' : label + ' ' + noun;
+     button.textContent = mixedDates && action === 'skip' ? 'Skip remaining run(s)' : mixedDates && action === 'restore' ? 'Unskip skipped run(s)' : label + ' ' + noun;
      button.hidden = !applicable;
      if (button.parentElement.tagName === 'LI') button.parentElement.hidden = !applicable;
      button.disabled = busy || !applicable;
@@ -211,7 +209,7 @@ templ ScheduleCalendarScript() {
     var inverse = result.undo;
     if (!inverse || !inverse.action || (inverse.action === 'undo_skips' && !(inverse.changes || []).length) || (['skip','restore'].includes(inverse.action) && !(inverse.skips || []).length) || (['pause','resume'].includes(inverse.action) && !(inverse.schedule_ids || []).length)) inverse = null;
     var size = (request.schedule_ids || request.skips || []).length;
-    var noun = request.schedule_ids ? (size === 1 ? 'schedule' : 'schedules') : request.skips && request.skips.every(function(skip) { return !skip.schedule_id; }) ? (size === 1 ? 'date' : 'dates') : (size === 1 ? 'run' : 'runs');
+    var noun = request.schedule_ids ? 'schedule(s)' : request.skips && request.skips.every(function(skip) { return !skip.schedule_id; }) ? 'day(s)' : 'run(s)';
     var verbs = {skip:'skipped',restore:'unskipped',pause:'paused',resume:'resumed'};
     var message = isUndo ? 'Change undone.' : verbs[request.action] ? size + ' ' + noun + ' ' + verbs[request.action] + '.' : request.action === 'pause_all' ? 'Schedules paused.' : 'Schedules resumed.';
     undo = window._scheduleCalendarUndo = {project: project, action: isUndo ? null : inverse, message: message, expires: Date.now()+6000};
@@ -303,10 +301,10 @@ templ ScheduleCalendarScript() {
  templ ScheduleSelectionToolbar() {
   <div id="schedule-selection-toolbar" class="flex items-center gap-2 text-xs" aria-hidden="true" role="toolbar" aria-label="Selected schedules or dates">
    <span data-selection-count aria-live="polite"></span>
-   <button type="button" class="btn btn-xs" data-calendar-action="skip">Skip runs</button>
-   <button type="button" class="btn btn-xs" data-calendar-action="restore">Unskip runs</button>
-   <button type="button" class="btn btn-xs" data-calendar-action="pause">Pause schedules</button>
-   <button type="button" class="btn btn-xs" data-calendar-action="resume">Resume schedules</button>
+   <button type="button" class="btn btn-xs" data-calendar-action="skip">Skip run(s)</button>
+   <button type="button" class="btn btn-xs" data-calendar-action="restore">Unskip run(s)</button>
+   <button type="button" class="btn btn-xs" data-calendar-action="pause">Pause schedule(s)</button>
+   <button type="button" class="btn btn-xs" data-calendar-action="resume">Resume schedule(s)</button>
    <button type="button" class="btn btn-xs btn-ghost" data-calendar-action="clear" aria-label="Clear selection" title="Clear selection (Esc)" aria-keyshortcuts="Escape">×</button>
   </div>
 }
