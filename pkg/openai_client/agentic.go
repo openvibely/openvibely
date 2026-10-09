@@ -148,6 +148,7 @@ type AgenticOptions struct {
 	// reasoning-effort changes as Responses input items between turns.
 	EnableAstraConfigurationUpdate bool
 	RequestLevelReasoningEffort    string
+	OnCompactionProgress           func(llmcontracts.CompactionProgress)
 	OnCompaction                   func(summary string) // called when history is compacted
 	// onCompactionUsage records billing usage separately from active context size.
 	onCompactionUsage func(*agenticTurnResult)
@@ -388,7 +389,9 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 		applog.Infof("[openai-client] compacting context force=%v transcript_tokens=%d session_tokens=%d threshold=%d items=%d",
 			force, transcriptEstimate, sessionTokenEstimate, compactionThreshold, len(items))
 
+		finishCompaction := llmcontracts.BeginCompaction(opts.OnCompactionProgress)
 		compactedItems, summary, err := c.compactAgenticInputItems(ctx, items, tools, opts, isChatGPTOAuth)
+		finishCompaction(err == nil)
 		if err != nil {
 			if completedSampling {
 				// Codex ends the turn on mid-turn compaction failure. Retrying the

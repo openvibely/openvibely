@@ -356,3 +356,19 @@ func TestNormalizeMarkers_LeavesIncompleteMalformedToolInvokeForNextDelta(t *tes
 		t.Fatalf("expected incomplete malformed tool invocation left intact for future stream deltas, got: %q", got)
 	}
 }
+
+func TestUnclosedMarkdownFence(t *testing.T) {
+	for _, tc := range []struct{ text, want string }{
+		{"```go\npartial", "```"},
+		{"   ~~~~go\r\npartial", "~~~~"},
+		{"`````go\n```\npartial", "`````"},
+		{"```go\ncode\n```", ""},
+		{"~~~\rpartial\r~~~", ""},
+		{"    ```\nindented", ""},
+		{"`inline`", ""},
+	} {
+		if got := UnclosedMarkdownFence(tc.text); got != tc.want {
+			t.Fatalf("%q: got %q, want %q", tc.text, got, tc.want)
+		}
+	}
+}
