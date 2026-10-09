@@ -66,6 +66,33 @@ func TestBrowserFunctional_ConversationModelPicker(t *testing.T) {
  try{
  const trigger=document.getElementById('chat-form-agent-select');
  trigger.scrollIntoView({block:'end'});await nextFrame();
+ const textarea=document.querySelector('textarea');textarea.focus();
+ const apple=/Mac|iPhone|iPad|iPod|iOS/i.test(navigator.userAgentData?.platform || navigator.platform || navigator.userAgent || '');
+ const shortcut=(extra={})=>{const e=new KeyboardEvent('keydown',{key:'L',metaKey:apple,ctrlKey:!apple,shiftKey:true,bubbles:true,cancelable:true,...extra});document.activeElement.dispatchEvent(e);return e;};
+ const picker=document.getElementById('conversation-model-picker');
+ for(const extra of [{shiftKey:false},{ctrlKey:true,metaKey:true},{ctrlKey:apple,metaKey:!apple},{altKey:true},{isComposing:true},{repeat:true}]){
+   assert(!shortcut(extra).defaultPrevented && picker.hidden,'ignore other shortcuts and composing/repeated events');
+ }
+ trigger.disabled=true;assert(!shortcut().defaultPrevented && picker.hidden,'ignore disabled picker');trigger.disabled=false;
+ assert(shortcut().defaultPrevented,'consume model shortcut');await wait();
+ assert(!picker.hidden && document.activeElement===picker.querySelector('input'),'shortcut opens picker and focuses search from composer');
+ document.activeElement.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));
+ assert(picker.hidden && document.activeElement===trigger,'Escape closes picker and restores trigger focus');
+ for (const platform of ['Win32','Linux x86_64','MacIntel']) {
+   const originalPlatform=Object.getOwnPropertyDescriptor(navigator,'platform');
+   const originalData=Object.getOwnPropertyDescriptor(navigator,'userAgentData');
+   Object.defineProperty(navigator,'userAgentData',{configurable:true,value:undefined});
+   Object.defineProperty(navigator,'platform',{configurable:true,value:platform});
+   const mac=platform==='MacIntel';
+   textarea.focus();
+   assert(shortcut({metaKey:mac,ctrlKey:!mac}).defaultPrevented,'consume shortcut on '+platform);
+   assert(!picker.hidden && document.activeElement===picker.querySelector('input'),'focus model search on '+platform);
+   assert(trigger.getAttribute('aria-keyshortcuts')===(mac?'Meta+Shift+L':'Control+Shift+L'),'platform shortcut accessibility hint');
+   assert(trigger.title===(mac?'Models (⌘⇧L)':'Models (Ctrl+Shift+L)'),'platform tooltip');
+   window.ovModelPicker.close(false);
+   if(originalPlatform)Object.defineProperty(navigator,'platform',originalPlatform);else delete navigator.platform;
+   if(originalData)Object.defineProperty(navigator,'userAgentData',originalData);else delete navigator.userAgentData;
+ }
  trigger.click();await wait();
  const panel=document.getElementById('conversation-model-picker'),sub=document.getElementById('conversation-provider-models');
  assert(!panel.hidden,'picker opens');
@@ -258,7 +285,11 @@ func TestBrowserFunctional_TaskModelPickerPersistence(t *testing.T) {
  </script>`+content.String()+`<div id="browser-result"></div><script>
  (async()=>{const assert=(v,m)=>{if(!v)throw Error(m)},wait=ms=>new Promise(r=>setTimeout(r,ms));try{
  const trigger=document.getElementById('task-form-agent-select'),panel=document.getElementById('conversation-model-picker'),effort=document.querySelector('[name=reasoning_effort]');
- trigger.click();assert([...panel.querySelectorAll('.ov-mp-provider')].some(b=>b.dataset.provider==='Mixture'),'mixture configurations are grouped');assert(panel.querySelector('input[type=range]').disabled,'disable until saved effort loads');
+ document.querySelector('textarea').focus();
+ const apple=/Mac|iPhone|iPad|iPod|iOS/i.test(navigator.userAgentData?.platform || navigator.platform || navigator.userAgent || '');
+ const shortcut=new KeyboardEvent('keydown',{key:'L',metaKey:apple,ctrlKey:!apple,shiftKey:true,bubbles:true,cancelable:true});document.activeElement.dispatchEvent(shortcut);
+ assert(shortcut.defaultPrevented && !panel.hidden && document.activeElement===panel.querySelector('input'),'task shortcut opens picker and focuses search');
+ assert([...panel.querySelectorAll('.ov-mp-provider')].some(b=>b.dataset.provider==='Mixture'),'mixture configurations are grouped');assert(panel.querySelector('input[type=range]').disabled,'disable until saved effort loads');
  await trigger._ovModelState.ready;assert(effort.value==='high','load saved task effort');
  function choose(id){const search=panel.querySelector('input');search.value=id==='a'?'First':id==='b'?'Second':'Local';search.dispatchEvent(new Event('input'));panel.querySelector('.ov-mp-pick').click();}
  choose('b');await trigger._ovModelState.ready;assert(effort.value==='low'&&stored.b==='low','restore other model effort');
