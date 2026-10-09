@@ -14,7 +14,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const latestMigrationVersion = 213
+const latestMigrationVersion = 210
 
 func openMigrationTestDB(tb testing.TB, dbPath string) *sql.DB {
 	tb.Helper()
@@ -4125,5 +4125,40 @@ func TestMigration165DeletesTerminalizedAutomationPositions(t *testing.T) {
 	}
 	if remaining != 2 {
 		t.Fatalf("preserved position count = %d, want 2", remaining)
+	}
+}
+
+func TestMigration210CalendarRoundTrip(t *testing.T) {
+	db := openMigrationTestDB(t, filepath.Join(t.TempDir(), "calendar.db"))
+	goose.SetBaseFS(migrations.FS)
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, ".", 209); err != nil {
+		t.Fatal(err)
+	}
+	for cycle := 0; cycle < 2; cycle++ {
+		if err := goose.UpTo(db, ".", 210); err != nil {
+			t.Fatal(err)
+		}
+		for _, name := range []string{"schedule_skips", "schedule_project_pauses", "schedule_dispatch_admissions", "schedule_skips_delete_schedule", "schedule_admission_deleted", "schedule_admission_execution_started", "schedule_admission_task_withdrawn", "schedule_delete_withdraw_pending"} {
+			var count int
+			if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE name = ?`, name).Scan(&count); err != nil {
+				t.Fatal(err)
+			}
+			if count != 1 {
+				t.Fatalf("migration cycle %d: missing %s", cycle, name)
+			}
+		}
+		if err := goose.DownTo(db, ".", 209); err != nil {
+			t.Fatal(err)
+		}
+		var count int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE name IN ('schedule_skips', 'schedule_project_pauses', 'schedule_dispatch_admissions', 'schedule_skips_delete_schedule', 'schedule_admission_deleted', 'schedule_admission_execution_started', 'schedule_admission_task_withdrawn', 'schedule_delete_withdraw_pending')`).Scan(&count); err != nil {
+			t.Fatal(err)
+		}
+		if count != 0 {
+			t.Fatalf("rollback left %d calendar schema objects", count)
+		}
 	}
 }
