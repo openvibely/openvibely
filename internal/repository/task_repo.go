@@ -43,6 +43,7 @@ const activeTaskAdmissionSelectColumns = `id, project_id, title, category, prior
 
 const activeTaskAdmissionQuery = `SELECT ` + activeTaskAdmissionSelectColumns + `
 		 FROM tasks WHERE category = 'active' AND status = 'pending'
+		 AND NOT EXISTS (SELECT 1 FROM schedule_dispatch_admissions a WHERE a.task_id = tasks.id)
 		 AND NOT EXISTS (SELECT 1 FROM automation_task_run_reservations r WHERE r.task_id = tasks.id)
 		 AND NOT EXISTS (SELECT 1 FROM executions e WHERE e.task_id = tasks.id AND e.status IN ('queued', 'running'))
 		 AND NOT ` + taskThreadInputOwnsAdmissionPredicate + `
