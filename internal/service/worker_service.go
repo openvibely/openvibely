@@ -421,7 +421,11 @@ func (w *WorkerService) dispatchNext() {
 		if w.taskRepo != nil {
 			dbTask, err := w.taskRepo.GetByID(context.Background(), task.ID)
 			validStatus := dbTask != nil && dbTask.Status == models.StatusPending
-			if ordinaryReserved || (isPrepared && prepared.ExecutionID != "") {
+			if ordinaryReserved {
+				// Calendar reservations wait in pending; board reservations wait in running.
+				// The reservation transaction validates the exact owner at dispatch.
+				validStatus = dbTask != nil && (dbTask.Status == models.StatusPending || dbTask.Status == models.StatusRunning)
+			} else if isPrepared && prepared.ExecutionID != "" {
 				validStatus = dbTask != nil && dbTask.Status == models.StatusRunning
 			}
 			if err != nil || dbTask == nil || !validStatus ||
@@ -714,9 +718,7 @@ func (w *WorkerService) executeTask(task models.Task, agentConfigID string, prep
 		}
 		claimed = true
 		completionAttempted = true
-		startsNewContext := task.StartsNewContext
 		task = dispatchClaim.Task
-		task.StartsNewContext = startsNewContext
 		if len(dispatchClaim.AutomationContext.Bindings) > 0 || dispatchClaim.AutomationContext.OriginTask {
 			taskCtx = WithAutomationContext(taskCtx, dispatchClaim.AutomationContext)
 		}
