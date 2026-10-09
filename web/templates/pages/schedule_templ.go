@@ -715,7 +715,7 @@ func scheduleContent(currentProject *models.Project, weekData WeekData, weekOffs
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 18, "</div><div id=\"schedule-header-actions\"><button class=\"btn btn-sm btn-primary\" onclick=\"openNewScheduledTaskModal()\"><span class=\"hidden sm:inline\">+ New Scheduled Task</span> <span class=\"sm:hidden\">+ New</span></button> <details id=\"schedule-project-menu\"><summary class=\"btn btn-sm btn-ghost\" aria-label=\"Calendar actions\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-5 w-5\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" aria-hidden=\"true\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z\"></path></svg></summary><ul class=\"ov-menu ov-menu-actions menu\"><li><button type=\"button\" data-calendar-action=\"pause_all\">Pause all schedules</button></li><li><button type=\"button\" data-calendar-action=\"resume_all\" hidden>Resume schedules</button></li></ul></details></div></div><!-- Header: Row 2 – Week navigation controls --><div class=\"flex items-center gap-2\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 18, "</div><div id=\"schedule-header-actions\"><button class=\"btn btn-sm btn-primary\" onclick=\"openNewScheduledTaskModal()\"><span class=\"hidden sm:inline\">+ New Scheduled Task</span> <span class=\"sm:hidden\">+ New</span></button> <details id=\"schedule-project-menu\"><summary class=\"btn btn-sm btn-ghost\" aria-label=\"Calendar actions\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-5 w-5\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" aria-hidden=\"true\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z\"></path></svg></summary><ul class=\"ov-menu ov-menu-actions menu\"><li><button type=\"button\" data-calendar-action=\"pause_all\">Pause all</button></li><li><button type=\"button\" data-calendar-action=\"resume_all\" hidden>Resume all</button></li></ul></details></div></div><!-- Header: Row 2 – Week navigation controls --><div class=\"flex items-center gap-2\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -837,9 +837,9 @@ func scheduleContent(currentProject *models.Project, weekData WeekData, weekOffs
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var20 string
-			templ_7745c5c3_Var20, templ_7745c5c3_Err = templ.ResolveAttributeValue("Click to select or deselect a day\nShift+click to select a range")
+			templ_7745c5c3_Var20, templ_7745c5c3_Err = templ.ResolveAttributeValue("Click to select or deselect a day\nShift+click and drag to select a range")
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/schedule.templ`, Line: 573, Col: 102}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/schedule.templ`, Line: 573, Col: 111}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var20)
 			if templ_7745c5c3_Err != nil {
