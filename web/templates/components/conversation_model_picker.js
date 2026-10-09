@@ -601,7 +601,15 @@
         Math.max(8, Math.min(a.top, height - sub.offsetHeight - 8)) + "px";
     }
   }
+  function usesAppleShortcuts() {
+    return /Mac|iPhone|iPad|iPod|iOS/i.test(
+      navigator.userAgentData?.platform || navigator.platform || navigator.userAgent || "",
+    );
+  }
   function init(btn) {
+    const apple = usesAppleShortcuts();
+    btn.setAttribute("aria-keyshortcuts", apple ? "Meta+Shift+L" : "Control+Shift+L");
+    btn.title = apple ? "Models (⌘⇧L)" : "Models (Ctrl+Shift+L)";
     if (state(btn)) return;
     const form = btn.closest("form"),
       project = form.querySelector('[name="_project_id"]')?.value || "",
@@ -729,6 +737,25 @@
   document.addEventListener(
     "keydown",
     (e) => {
+      if (
+        !e.defaultPrevented && !e.isComposing && !e.repeat &&
+        (usesAppleShortcuts() ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey) &&
+        e.shiftKey && !e.altKey &&
+        e.key.toLowerCase() === "l"
+      ) {
+        const buttons = [...document.querySelectorAll("form.chat-input-container .chat-model-select")];
+        const visible = (btn) => !btn.disabled && btn.getClientRects().length > 0 &&
+          getComputedStyle(btn).visibility !== "hidden" && !btn.closest("[inert]");
+        const focusedForm = document.activeElement?.closest("form.chat-input-container");
+        const btn = buttons.find((btn) => visible(btn) && btn.closest("form") === focusedForm) ||
+          buttons.find(visible);
+        if (!btn || (document.querySelector("dialog[open]") && !btn.closest("dialog[open]"))) return;
+        e.preventDefault();
+        e.stopPropagation();
+        if (active) close(false);
+        window.ovModelPicker.open(btn);
+        return;
+      }
       if (!active) return;
       if (e.key === "Escape") {
         e.preventDefault();
