@@ -59,7 +59,7 @@ func testScheduleCalendarHeader(t *testing.T, paused, mobile bool) {
    var pageHeader=root.querySelector('[data-page-header]');
    var toolbar=root.querySelector('#schedule-selection-toolbar');
    var menu=root.querySelector('#schedule-project-menu');
-   check(root.querySelector('#schedule-calendar-viewport').contains(toolbar) && !pageHeader.contains(toolbar),'selection panel belongs inside calendar');
+   check(pageHeader.contains(toolbar),'selection panel belongs in header');
    check(getComputedStyle(toolbar).display==='none','empty selection hides panel');
    check(!root.querySelector('#schedule-paused-status'),'no redundant paused header status');
    check(pageHeader.contains(menu),'calendar menu belongs beside New');
@@ -82,8 +82,11 @@ func testScheduleCalendarHeader(t *testing.T, paused, mobile bool) {
    var initialHeaderTop=days[1].getBoundingClientRect().top;
    down(days[1]);up();check(days[1].getBoundingClientRect().top===initialHeaderTop,'selection toolbar must not shift headers');down(days[3],{ctrlKey:true});up();check(count()===2,'nonconsecutive header selection');
    var panel=toolbar.getBoundingClientRect(), viewport=root.querySelector('#schedule-calendar-viewport').getBoundingClientRect();
-   check(panel.width>0 && panel.left>=viewport.left && panel.right<=viewport.right && panel.bottom<viewport.bottom && panel.top>=viewport.top,'selection panel contained in calendar');
-   check(Math.abs((panel.left+panel.right)-(viewport.left+viewport.right))<2 && viewport.bottom-panel.bottom<24,'panel anchored bottom center');
+   var slot=root.querySelector('#schedule-selection-slot').getBoundingClientRect();
+   var title=pageHeader.querySelector('h2').getBoundingClientRect(), actions=root.querySelector('#schedule-header-actions').getBoundingClientRect();
+   check(panel.width>0 && panel.left>title.right && panel.right<actions.left,'panel has its own space between title and New');
+   check(panel.bottom<=viewport.top,'selection panel never covers calendar cards');
+   check(Math.abs((panel.left+panel.right)-(slot.left+slot.right))<2,'panel centered in available header space');
    check(parseFloat(getComputedStyle(toolbar).borderTopWidth)>0,'panel has visible border');
    if(innerWidth<768) {
     toolbar.querySelector('[data-calendar-action="clear"]').click();
@@ -139,7 +142,7 @@ func testScheduleCalendarHeader(t *testing.T, paused, mobile bool) {
    down(zone,{clientX:zr.left+1,clientY:ar.top-1});
    window.dispatchEvent(new PointerEvent('pointermove',{pointerId:8,clientX:zr.right-1,clientY:br.bottom+1,cancelable:true}));
    check(selectedScheduleCards.has(a)&&selectedScheduleCards.has(b),'box must select both cards');
-   check(getComputedStyle(toolbar).visibility==='hidden','selection drag reveals cards behind panel');
+   check(getComputedStyle(toolbar).visibility==='visible','header panel remains visible during selection drag');
    window.dispatchEvent(new PointerEvent('pointermove',{pointerId:8,clientX:innerWidth+100,clientY:innerHeight+100,cancelable:true}));
    var box=root.ownerDocument.querySelector('.schedule-selection-box').getBoundingClientRect();
    var grid=root.querySelector('#schedule-timeline-container').getBoundingClientRect();
