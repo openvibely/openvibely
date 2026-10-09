@@ -56,13 +56,17 @@ window.addEventListener('DOMContentLoaded', async function() {
   sort.focus();
   const panel = document.querySelector('[data-task-card-submenu-portaled="true"]');
   check(panel, 'Sort submenu opens');
+  check(Array.from(panel.querySelectorAll('button[hx-post]')).every(b => b.querySelector('[data-filter-check]') && !b.classList.contains('active')), 'sort uses checkmarks without persistent highlights');
+  check(panel.querySelector('button[aria-pressed="true"] [data-filter-check]').textContent.trim() === '✓', 'current sort shows the same checkmark as filters');
   let sortRequested = false;
   document.body.addEventListener('htmx:beforeRequest', event => { if ((event.detail.requestConfig.path || '').includes('/completed/sort')) sortRequested = true; });
   panel.querySelector('button[hx-post]').click();
   await wait(() => sortRequested);
   await new Promise(r=>setTimeout(r,100));
-  window.closeKanbanMenu(null, false);
+  check(!document.querySelector('[data-kanban-menu-open="true"], [data-task-card-submenu-portaled="true"]'), 'sort closes menu after refresh');
+  col('completed').querySelector('[data-kanban-menu-trigger]').click();
   select('completed').click();
+  check(!document.querySelector('[data-kanban-menu-open="true"]'), 'Select all closes menu');
   check(window.kanbanSelection.size === 4, 'select all Completed');
   check(col('completed').querySelectorAll('[data-kanban-checkbox]:not(.hidden)').length === 4, 'show checkboxes');
   const checkbox = document.querySelector('#task-two input[type=checkbox]'); checkbox.click();
@@ -112,7 +116,9 @@ window.addEventListener('DOMContentLoaded', async function() {
   }
   const currentChoices = Array.from(document.querySelectorAll('[data-task-card-submenu-portaled="true"]')).find(p => p !== filterPanel);
   currentChoices.querySelector('[data-kanban-filter="status"][data-value="completed"]').click();
-  check(currentChoices.querySelector('[data-value="completed"] [data-filter-check]').textContent === '✓', 'selected filter shows a check');
+  check(filter('status','completed').querySelector('[data-filter-check]').textContent === '✓', 'selected filter shows a check');
+  check(!filter('status','completed').classList.contains('active'), 'selected filter has no persistent highlight');
+  check(!document.querySelector('[data-kanban-menu-open="true"], [data-task-card-submenu-portaled="true"]'), 'filter choice closes entire menu');
   window.closeKanbanMenu(null, false);
   filter('merge','unmerged').click();
   check(window.kanbanSelection.size === 0, 'filter clears selection');
@@ -210,9 +216,9 @@ window.addEventListener('DOMContentLoaded', async function() {
 		case r.URL.Path == "/tasks" || r.URL.Path == "/tasks/completed/sort":
 			var out bytes.Buffer
 			if r.Header.Get("HX-Request") == "true" {
-				_ = components.KanbanBoard(tasks, project.ID, "", "", nil, nil).Render(context.Background(), &out)
+				_ = components.KanbanBoard(tasks, project.ID, "created_desc", "completed_desc", nil, nil).Render(context.Background(), &out)
 			} else {
-				_ = Tasks([]models.Project{project}, &project, tasks, nil, nil, "", "").Render(context.Background(), &out)
+				_ = Tasks([]models.Project{project}, &project, tasks, nil, nil, "created_desc", "completed_desc").Render(context.Background(), &out)
 			}
 			fmt.Fprint(w, strings.Replace(out.String(), "</head>", runner+"</head>", 1))
 		case strings.HasSuffix(r.URL.Path, "/card/merge-options"):
