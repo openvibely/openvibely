@@ -75,7 +75,6 @@ templ ScheduleCalendarScript() {
   var skips = state.skips || [];
   var days = Array.from(root.querySelectorAll('[data-calendar-day]'));
   var dates = new Set();
-  var anchor = null;
   var busy = false;
   var gesture = null;
   var toolbar = root.querySelector('#schedule-selection-toolbar');
@@ -124,7 +123,7 @@ templ ScheduleCalendarScript() {
    card.title = hint;
    card.setAttribute('aria-description', hint);
   });
-  days.forEach(function(day) { day.title = 'Click to select or deselect a day\n' + selectionModifier + '+click to select day(s)\nShift+click and drag to select a range'; });
+  days.forEach(function(day) { day.title = 'Click to select or deselect a day\n' + selectionModifier + '+click to select day(s)\nClick and drag across day headers to select multiple days'; });
   days.forEach(function(day) { day.dataset.skipped = String(skips.some(function(skip) { return !skip.restored && !skip.schedule_id && skip.start_at <= Number(day.dataset.start) && skip.end_at >= Number(day.dataset.end); })); });
   root.querySelector('[data-calendar-action="pause_all"]').hidden = !!state.paused;
   root.querySelector('[data-calendar-action="resume_all"]').hidden = !state.paused;
@@ -192,15 +191,11 @@ templ ScheduleCalendarScript() {
   }
   function selectDay(day, event) {
    clearScheduleSelection();
-   if (event.shiftKey && anchor) range(anchor, day);
-   else {
-    var key = day.dataset.calendarDay;
-    var wasSelected = dates.has(key);
-    if (!event.metaKey && !event.ctrlKey) dates.clear();
-    if (wasSelected) dates.delete(key); else dates.add(key);
-    anchor = day;
-    paintDates(); window.updateScheduleSelection();
-   }
+   var key = day.dataset.calendarDay;
+   var wasSelected = dates.has(key);
+   if (!event.metaKey && !event.ctrlKey) dates.clear();
+   if (wasSelected) dates.delete(key); else dates.add(key);
+   paintDates(); window.updateScheduleSelection();
   }
   function closeMenus() { root.querySelector('#schedule-project-menu').open = false; root.querySelector('#schedule-context-menu').classList.add('hidden'); }
   async function apply(request, isUndo) {
