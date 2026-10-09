@@ -114,6 +114,7 @@ templ ScheduleCalendarScript() {
    }
    return excluded === 0 ? 'none' : excluded === run.end_at-run.start_at ? 'full' : 'partial';
   }
+  var selectionModifier = /Mac|iPhone|iPad|iPod/.test(navigator.platform) ? '⌘' : 'Ctrl';
   cards().forEach(function(card) {
    var paused = state.paused || card.dataset.scheduleEnabled === 'false';
    var status = skipStatus(card);
@@ -127,6 +128,9 @@ templ ScheduleCalendarScript() {
     card.title = card.dataset.scheduleTitle + ' (' + label.toLowerCase() + ')' + (paused && status !== 'none' ? ' · This run is also ' + (excluded ? 'skipped' : 'partially skipped') : '');
     card.setAttribute('aria-label', card.title);
    }
+   var hint = selectionModifier + '-click to select multiple schedules · Drag to move · Right-click for actions';
+   card.title += '\n' + hint;
+   card.setAttribute('aria-description', hint);
   });
   days.forEach(function(day) { day.dataset.skipped = String(skips.some(function(skip) { return !skip.restored && !skip.schedule_id && skip.start_at <= Number(day.dataset.start) && skip.end_at >= Number(day.dataset.end); })); });
   root.querySelector('[data-calendar-action="pause_all"]').hidden = !!state.paused;
@@ -323,6 +327,6 @@ templ ScheduleCalendarScript() {
    <button type="button" class="btn btn-xs" data-calendar-action="restore">Unskip runs</button>
    <button type="button" class="btn btn-xs" data-calendar-action="pause">Pause schedules</button>
    <button type="button" class="btn btn-xs" data-calendar-action="resume">Resume schedules</button>
-   <button type="button" class="btn btn-xs btn-ghost" data-calendar-action="clear" aria-label="Clear selection">×</button>
+   <button type="button" class="btn btn-xs btn-ghost" data-calendar-action="clear" aria-label="Clear selection" title="Clear selection (Esc)" aria-keyshortcuts="Escape">×</button>
   </div>
 }

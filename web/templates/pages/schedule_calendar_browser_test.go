@@ -58,6 +58,14 @@ func testScheduleCalendarHeader(t *testing.T, paused, mobile bool) {
    root.querySelector('#schedule-timeline-container').scrollTop=0;
    var pageHeader=root.querySelector('[data-page-header]');
    var toolbar=root.querySelector('#schedule-selection-toolbar');
+   var modifier=/Mac|iPhone|iPad|iPod/.test(navigator.platform)?'⌘':'Ctrl';
+   var hintCard=root.querySelector('[data-schedule-card][data-has-schedule="true"]');
+   check(hintCard.title.includes(hintCard.dataset.scheduleTitle) && hintCard.title.includes(modifier+'-click'),'card hover preserves title and explains platform selection shortcut');
+   check(hintCard.getAttribute('aria-description').includes(modifier+'-click'),'card selection hint available to assistive technology');
+   check(root.querySelector('[data-calendar-day]').title.includes('Shift-click'),'day hover explains range selection');
+   check(root.querySelector('.drop-zone').title==='Drag empty space to select multiple schedules','calendar space explains box selection');
+   check(toolbar.querySelector('[data-calendar-action="clear"]').title==='Clear selection (Esc)','clear hover explains escape shortcut');
+
    var menu=root.querySelector('#schedule-project-menu');
    function checkHeaderAlignment() {
     var top=pageHeader.getBoundingClientRect().top+parseFloat(getComputedStyle(pageHeader).paddingTop);
