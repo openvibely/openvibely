@@ -174,8 +174,10 @@ templ ScheduleCalendarScript() {
   window.updateScheduleSelection = function() {
    var selected = selectedCards();
    var any = dates.size || selected.length;
-   toolbar.setAttribute('aria-hidden', String(!any));
-   toolbar.inert = !any;
+   var contextMenu = root.querySelector('#schedule-context-menu');
+   var showToolbar = any && (!contextMenu || contextMenu.classList.contains('hidden'));
+   toolbar.setAttribute('aria-hidden', String(!showToolbar));
+   toolbar.inert = !showToolbar;
    toolbar.querySelector('[data-selection-count]').textContent = any + ' selected';
    ['skip','restore','pause','resume'].forEach(function(action) {
     var applicable = dates.size ? (action === 'skip' || action === 'restore') && !state.paused && selectedIntervals().some(function(run) { return dateIntervalEligible(run, action); }) : eligibleCards(action).length > 0;

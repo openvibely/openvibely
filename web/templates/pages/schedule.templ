@@ -903,6 +903,7 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 								function closeMenu(restoreFocus) {
 									if (!menu || menu.classList.contains('hidden')) return;
 									menu.classList.add('hidden');
+									if (window.updateScheduleSelection) window.updateScheduleSelection();
 									menu.removeAttribute('data-schedule-id');
 									menu.removeAttribute('data-task-id');
 									if (restoreFocus && menuCard && document.contains(menuCard)) {
@@ -938,6 +939,7 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 									menu.dataset.scheduleTitle = card.dataset.scheduleTitle || 'this task';
 									menu.dataset.scheduleEnabled = card.dataset.scheduleEnabled || 'true';
 									positionMenu(event);
+									if (window.updateScheduleSelection) window.updateScheduleSelection();
 									var first = menu.querySelector('[role="menuitem"]:not([hidden])');
 									if (first) first.focus({preventScroll: true});
 								};
