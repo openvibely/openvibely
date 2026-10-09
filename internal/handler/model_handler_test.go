@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"html"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -1110,6 +1111,130 @@ func TestCreateModel_NormalizesAnthropicCatalogID(t *testing.T) {
 		}
 	}
 	t.Fatal("created model missing")
+}
+
+func TestCreateModel_Haiku55PersistsEffortAndClearsUnsupportedTemperature(t *testing.T) {
+	for _, effort := range []string{"low", "medium", "high", "xhigh", "max"} {
+		t.Run(effort, func(t *testing.T) {
+			_, e, repo := setupTestHandler(t)
+			form := modelValidationForm("Haiku 5.5 " + effort)
+			form.Set("model", "claude-haiku-5-5")
+			form.Set("reasoning_effort", effort)
+			form.Set("temperature", "0.8")
+			form.Set("provider_context_window", "1000000")
+			rec := htmxPost(e, "/models", form)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("create model: status %d: %s", rec.Code, rec.Body.String())
+			}
+
+			configs, err := repo.List(context.Background())
+			if err != nil {
+				t.Fatalf("list configs: %v", err)
+			}
+			for _, config := range configs {
+				if config.Name != "Haiku 5.5 "+effort {
+					continue
+				}
+				if config.Provider != models.ProviderAnthropic || config.Model != "claude-haiku-5-5" {
+					t.Fatalf("saved provider/model = %s/%q, want anthropic/claude-haiku-5-5", config.Provider, config.Model)
+				}
+				if config.ReasoningEffort != effort {
+					t.Fatalf("saved effort = %q, want %q", config.ReasoningEffort, effort)
+				}
+				if config.Temperature != 0 {
+					t.Fatalf("saved temperature = %v, want 0 for unsupported model setting", config.Temperature)
+				}
+				if config.ProviderContextWindow != 200000 || config.ProviderMaxOutputTokens != 128000 {
+					t.Fatalf("saved provider limits = (%d, %d), want (200000, 128000)", config.ProviderContextWindow, config.ProviderMaxOutputTokens)
+				}
+				return
+			}
+			t.Fatalf("created model %q not found", "Haiku 5.5 "+effort)
+		})
+	}
+}
+
+func TestUpdateModel_Haiku55ClearsPreviouslySavedTemperature(t *testing.T) {
+	_, e, repo := setupTestHandler(t)
+	agent := &models.LLMConfig{
+		Name:        "Stale Haiku 5.5",
+		Provider:    models.ProviderAnthropic,
+		Model:       "claude-haiku-5-5",
+		AuthMethod:  models.AuthMethodAPIKey,
+		APIKey:      "test-key",
+		Temperature: 0.7,
+	}
+	if err := repo.Create(context.Background(), agent); err != nil {
+		t.Fatalf("create stale model config: %v", err)
+	}
+
+	form := modelValidationForm(agent.Name)
+	form.Set("model", "claude-haiku-5-5")
+	form.Set("reasoning_effort", "xhigh")
+	form.Set("temperature", "0.9")
+	rec := postForm(e, "/models/"+agent.ID, form)
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("update model: status %d: %s", rec.Code, rec.Body.String())
+	}
+	updated, err := repo.GetByID(context.Background(), agent.ID)
+	if err != nil {
+		t.Fatalf("get updated config: %v", err)
+	}
+	if updated.Temperature != 0 {
+		t.Fatalf("saved stale temperature = %v, want 0", updated.Temperature)
+	}
+	if updated.ReasoningEffort != "xhigh" {
+		t.Fatalf("saved effort = %q, want xhigh", updated.ReasoningEffort)
+	}
+}
+
+func TestCreateModel_Haiku55RejectsUnverifiedOAuthEligibility(t *testing.T) {
+	_, e, repo := setupTestHandler(t)
+	form := modelValidationForm("Haiku 5.5 OAuth")
+	form.Set("anthropic_auth_type", "oauth")
+	form.Set("model", "claude-haiku-5-5")
+	form.Set("reasoning_effort", "medium")
+	rec := htmxPost(e, "/models", form)
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "no longer supported") {
+		t.Fatalf("expected Haiku 5.5 OAuth selection to be rejected, got %d: %s", rec.Code, rec.Body.String())
+	}
+	configs, err := repo.List(context.Background())
+	if err != nil {
+		t.Fatalf("list configs: %v", err)
+	}
+	for _, config := range configs {
+		if config.Name == "Haiku 5.5 OAuth" {
+			t.Fatal("unverified Haiku 5.5 OAuth configuration was saved")
+		}
+	}
+}
+
+func TestModelsPage_Haiku55HidesTemperatureOption(t *testing.T) {
+	_, e, _ := setupTestHandler(t)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/models?project_id=default", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /models: status %d: %s", rec.Code, rec.Body.String())
+	}
+	body := html.UnescapeString(rec.Body.String())
+	modelAt := strings.Index(body, `"value":"claude-haiku-5-5"`)
+	if modelAt < 0 {
+		t.Fatal("Haiku 5.5 is missing from the model choices")
+	}
+	modelEnd := strings.Index(body[modelAt:], "}")
+	if modelEnd < 0 {
+		t.Fatal("Haiku 5.5 model choice is malformed")
+	}
+	modelOption := body[modelAt : modelAt+modelEnd]
+	if !strings.Contains(modelOption, `"defaultEffort":"medium"`) {
+		t.Fatalf("Haiku 5.5 choice has no medium default effort: %s", modelOption)
+	}
+	if !strings.Contains(modelOption, `"temperature":false`) {
+		t.Fatalf("Haiku 5.5 choice must hide temperature: %s", modelOption)
+	}
+	if !strings.Contains(modelOption, `"oauth":false`) {
+		t.Fatalf("Haiku 5.5 choice must not advertise unverified OAuth eligibility: %s", modelOption)
+	}
 }
 
 func TestCreateModel_HTMXRejectsDuplicateNormalizedNameWithoutInsert(t *testing.T) {
