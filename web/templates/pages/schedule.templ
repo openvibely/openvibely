@@ -570,7 +570,7 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 					for _, day := range weekData.WeekDays {
 						<div
 							data-calendar-day={ day.Date.Format("2006-01-02") }
-                            title={ "Click to select or deselect a day\nClick and drag across day headers to select multiple days" }
+                            title={ "Click to select or deselect a day\nClick and drag across day headers to select day(s)" }
 							data-start={ fmt.Sprint(day.Date.Unix()) }
 							data-end={ fmt.Sprint(day.Date.AddDate(0, 0, 1).Unix()) }
 							role="button" tabindex="0" aria-pressed="false"
@@ -607,7 +607,7 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 									}
 									data-date={ day.Date.Format("2006-01-02") }
 									data-hour={ fmt.Sprintf("%d", slot.Hour) }
-                                    title="Drag empty space to select multiple schedules"
+                                    title="Drag empty space to select schedule(s)"
 									style="border-right: 1px solid var(--ov-schedule-grid-border);"
 								>
 									for _, occurrence := range getTasksForHour(weekData.TasksByDateTime, day.Date, slot.Hour) {
@@ -684,10 +684,10 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
         </div>
 		<div id="schedule-context-menu" class="ov-menu fixed z-[100] hidden w-52 max-w-[calc(100vw-2rem)]" role="menu" aria-label="Scheduled task actions" data-schedule-context-menu>
 			<ul class="ov-menu-actions menu">
-				<li><button type="button" role="menuitem" data-calendar-action="skip">Skip runs</button></li>
-				<li><button type="button" role="menuitem" data-calendar-action="restore">Unskip runs</button></li>
-				<li><button type="button" role="menuitem" data-calendar-action="pause">Pause schedules</button></li>
-				<li><button type="button" role="menuitem" data-calendar-action="resume">Resume schedules</button></li>
+				<li><button type="button" role="menuitem" data-calendar-action="skip">Skip run(s)</button></li>
+				<li><button type="button" role="menuitem" data-calendar-action="restore">Unskip run(s)</button></li>
+				<li><button type="button" role="menuitem" data-calendar-action="pause">Pause schedule(s)</button></li>
+				<li><button type="button" role="menuitem" data-calendar-action="resume">Resume schedule(s)</button></li>
 				<li><button type="button" role="menuitem" data-schedule-context-action="run">Run Now</button></li>
 				<li><button type="button" role="menuitem" data-schedule-context-action="edit">Edit Schedule</button></li>
 				<li><button type="button" role="menuitem" class="text-error" data-schedule-context-action="delete">Delete</button></li>
