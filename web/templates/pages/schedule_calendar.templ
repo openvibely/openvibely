@@ -27,9 +27,9 @@ templ ScheduleCalendarControls(states []models.ScheduleCalendarState) {
  <style>
  #schedule-content { position: relative; }
  #schedule-calendar-viewport { position: relative; display: flex; flex: 1; flex-direction: column; min-height: 0; min-width: 0; }
- #schedule-selection-toolbar { position: absolute; bottom: 1rem; left: 50%; transform: translateX(-50%); z-index: 40; width: max-content; max-width: calc(100% - 2rem); padding: .75rem; border: 1px solid var(--ov-link-color); border-radius: .75rem; background: var(--ov-menu-surface); box-shadow: 0 4px 18px rgba(0,0,0,.25); flex-wrap: wrap; justify-content: center; }
+ #schedule-selection-toolbar { position: absolute; bottom: 1rem; left: 50%; transform: translateX(-50%); z-index: 40; width: max-content; max-width: calc(100% - 2rem); padding: .75rem; border: 1px solid var(--ov-schedule-grid-border); border-radius: .75rem; background: var(--ov-menu-surface); box-shadow: 0 4px 18px rgba(0,0,0,.25); flex-wrap: wrap; justify-content: center; }
  #schedule-selection-toolbar button { border: 1px solid var(--ov-schedule-grid-border); }
- .drag-cursor-active #schedule-selection-toolbar { visibility: hidden; pointer-events: none; }
+ .drag-cursor-active #schedule-selection-toolbar, #schedule-content[data-selecting="true"] #schedule-selection-toolbar { visibility: hidden; pointer-events: none; }
  #schedule-selection-toolbar[aria-hidden="true"] { display: none; }
  #schedule-calendar-feedback { position: absolute; bottom: 2rem; right: 1rem; z-index: 45; padding: .75rem; border-radius: .5rem; background: var(--ov-menu-surface); box-shadow: 0 2px 12px rgba(0,0,0,.2); }
  #schedule-content [hidden] { display: none !important; }
@@ -273,6 +273,7 @@ templ ScheduleCalendarScript() {
     if (!event.metaKey && !event.ctrlKey) clearScheduleSelection();
     gesture = {x: event.clientX, y: event.clientY, pointer: event.pointerId, previous: new Set(selectedScheduleCards)};
    } else return;
+   root.dataset.selecting = 'true';
    event.preventDefault();
   }, {signal: signal});
   window.addEventListener('pointermove', function(event) {
@@ -304,7 +305,7 @@ templ ScheduleCalendarScript() {
    });
    window.updateScheduleSelection();
   }, {signal:signal,passive:false});
-  function cancelGesture() { if (gesture && gesture.box) gesture.box.remove(); gesture = null; }
+  function cancelGesture() { if (gesture && gesture.box) gesture.box.remove(); gesture = null; delete root.dataset.selecting; }
   window.addEventListener('pointerup',cancelGesture,{signal:signal});
   window.addEventListener('pointercancel',cancelGesture,{signal:signal});
   signal.addEventListener('abort',cancelGesture);
