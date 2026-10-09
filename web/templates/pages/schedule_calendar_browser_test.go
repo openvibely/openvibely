@@ -65,7 +65,7 @@ func testScheduleCalendarHeader(t *testing.T, paused, mobile bool) {
    var hintCard=root.querySelector('[data-schedule-card][data-has-schedule="true"]');
    check(!hintCard.title.includes(hintCard.dataset.scheduleTitle) && hintCard.title.split('\n').length===2 && hintCard.title===modifier+'+click to select schedule(s)\nRight-click for actions','card hover only shows commands on separate lines');
    check(hintCard.getAttribute('aria-description').includes(modifier+'+click'),'card selection hint available to assistive technology');
-   check(root.querySelector('[data-calendar-day]').title==='Click to select or deselect a day\n'+modifier+'+click to select day(s)\nShift+click and drag to select a range','day hover uses one line per command');
+   check(root.querySelector('[data-calendar-day]').title==='Click to select or deselect a day\n'+modifier+'+click to select day(s)\nClick and drag across day headers to select multiple days','day hover uses one line per command');
    check(!root.querySelector('#schedule-day-menu'),'day headers have no custom context menu');
    check(root.querySelector('.drop-zone').title==='Drag empty space to select multiple schedules','calendar space explains box selection');
    check(toolbar.querySelector('[data-calendar-action="clear"]').title==='Clear selection (Esc)','clear hover explains escape shortcut');
@@ -126,7 +126,7 @@ func testScheduleCalendarHeader(t *testing.T, paused, mobile bool) {
    check(requests[0].skips[0].start_at===Number(days[1].dataset.start),'first date epoch');
    check(requests[0].skips[1].start_at===Number(days[3].dataset.start),'second date epoch');
    root.querySelector('#schedule-timeline-container').scrollTop=0;
-   down(days[1]);up();down(days[4],{shiftKey:true});up();check(count()===4,'shift selects contiguous range');
+   down(days[1]);up();down(days[4],{shiftKey:true});up();check(count()===1 && days[4].getAttribute('aria-pressed')==='true','shift-click behaves like a normal click without selecting a range');
    down(days[1]);
    var headerRect=days[3].getBoundingClientRect();
    window.dispatchEvent(new PointerEvent('pointermove',{pointerId:8,clientX:headerRect.left+10,clientY:headerRect.top+10}));
