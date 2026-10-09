@@ -601,9 +601,15 @@
         Math.max(8, Math.min(a.top, height - sub.offsetHeight - 8)) + "px";
     }
   }
+  function usesAppleShortcuts() {
+    return /Mac|iPhone|iPad|iPod|iOS/i.test(
+      navigator.userAgentData?.platform || navigator.platform || navigator.userAgent || "",
+    );
+  }
   function init(btn) {
-    btn.setAttribute("aria-keyshortcuts", "Meta+Shift+L");
-    btn.title = "Models (⌘⇧L)";
+    const apple = usesAppleShortcuts();
+    btn.setAttribute("aria-keyshortcuts", apple ? "Meta+Shift+L" : "Control+Shift+L");
+    btn.title = apple ? "Models (⌘⇧L)" : "Models (Ctrl+Shift+L)";
     if (state(btn)) return;
     const form = btn.closest("form"),
       project = form.querySelector('[name="_project_id"]')?.value || "",
@@ -733,7 +739,8 @@
     (e) => {
       if (
         !e.defaultPrevented && !e.isComposing && !e.repeat &&
-        e.metaKey && e.shiftKey && !e.ctrlKey && !e.altKey &&
+        (usesAppleShortcuts() ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey) &&
+        e.shiftKey && !e.altKey &&
         e.key.toLowerCase() === "l"
       ) {
         const buttons = [...document.querySelectorAll("form.chat-input-container .chat-model-select")];
