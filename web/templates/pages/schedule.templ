@@ -493,9 +493,7 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 		<div class="flex-shrink-0 sticky top-0 z-30 pb-2 md:relative md:z-auto">
 			<div data-page-header class="flex justify-between items-center mb-3">
 				<h2 class="text-2xl font-bold">Schedule</h2>
-                @ScheduleSelectionToolbar()
                 <div id="schedule-header-actions">
-                    <span id="schedule-paused-status" class="text-xs" role="status" hidden>Schedules paused</span>
 				<button class="btn btn-sm btn-primary" onclick="openNewScheduledTaskModal()">
 					<span class="hidden sm:inline">+ New Scheduled Task</span>
 					<span class="sm:hidden">+ New</span>
@@ -556,6 +554,7 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 		</div>
 		@ScheduleCalendarControls(calendarState)
 		<!-- Week Timeline View -->
+        <div id="schedule-calendar-viewport">
 		<div id="schedule-timeline-container" class="bg-base-100 rounded-lg shadow-lg overflow-x-auto flex flex-1 flex-col min-h-0 overflow-y-auto opacity-0" style="border: 1px solid var(--ov-schedule-grid-border);">
 			<div class="min-w-[800px] flex flex-1 flex-col min-h-0">
 				<!-- Day Headers -->
@@ -673,6 +672,8 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 				</div>
 			</div>
 		</div>
+            @ScheduleSelectionToolbar()
+        </div>
 		<div id="schedule-context-menu" class="ov-menu fixed z-[100] hidden w-52 max-w-[calc(100vw-2rem)]" role="menu" aria-label="Scheduled task actions" data-schedule-context-menu>
 			<ul class="ov-menu-actions menu">
 				<li><button type="button" role="menuitem" data-calendar-action="skip">Skip runs</button></li>

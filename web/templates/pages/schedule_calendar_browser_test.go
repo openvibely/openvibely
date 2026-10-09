@@ -18,14 +18,18 @@ import (
 )
 
 func TestBrowserFunctional_ScheduleCalendarSelectionActions(t *testing.T) {
-	testScheduleCalendarHeader(t, false)
+	testScheduleCalendarHeader(t, false, false)
 }
 
 func TestBrowserFunctional_ScheduleCalendarPausedHeader(t *testing.T) {
-	testScheduleCalendarHeader(t, true)
+	testScheduleCalendarHeader(t, true, false)
 }
 
-func testScheduleCalendarHeader(t *testing.T, paused bool) {
+func TestBrowserFunctional_ScheduleCalendarMobileSelectionPanel(t *testing.T) {
+	testScheduleCalendarHeader(t, false, true)
+}
+
+func testScheduleCalendarHeader(t *testing.T, paused, mobile bool) {
 	t.Helper()
 	chrome := chatNavigationChromePath(t)
 	project := models.Project{ID: "calendar-selection", Name: "Calendar"}
@@ -55,12 +59,13 @@ func testScheduleCalendarHeader(t *testing.T, paused bool) {
    var pageHeader=root.querySelector('[data-page-header]');
    var toolbar=root.querySelector('#schedule-selection-toolbar');
    var menu=root.querySelector('#schedule-project-menu');
-   check(pageHeader.contains(toolbar),'selection actions belong in page header');
+   check(root.querySelector('#schedule-calendar-viewport').contains(toolbar) && !pageHeader.contains(toolbar),'selection panel belongs inside calendar');
+   check(getComputedStyle(toolbar).display==='none','empty selection hides panel');
+   check(!root.querySelector('#schedule-paused-status'),'no redundant paused header status');
    check(pageHeader.contains(menu),'calendar menu belongs beside New');
    check(menu.querySelector('summary').textContent==='⋮','visible vertical kebab');
    check(!menu.hidden,'calendar menu stays visible');
    if (JSON.parse(root.querySelector('#schedule-calendar-controls').dataset.state).paused) {
-    check(!root.querySelector('#schedule-paused-status').hidden,'paused status stays in header');
     check(root.querySelector('[data-calendar-action="pause_all"]').hidden,'paused project hides pause action');
     var resume=root.querySelector('[data-calendar-action="resume_all"]');
     check(!resume.hidden && menu.contains(resume),'resume remains in permanent menu');
@@ -76,6 +81,15 @@ func testScheduleCalendarHeader(t *testing.T, paused bool) {
    function count(){return root.querySelectorAll('[data-calendar-day][aria-pressed="true"]').length;}
    var initialHeaderTop=days[1].getBoundingClientRect().top;
    down(days[1]);up();check(days[1].getBoundingClientRect().top===initialHeaderTop,'selection toolbar must not shift headers');down(days[3],{ctrlKey:true});up();check(count()===2,'nonconsecutive header selection');
+   var panel=toolbar.getBoundingClientRect(), viewport=root.querySelector('#schedule-calendar-viewport').getBoundingClientRect();
+   check(panel.width>0 && panel.left>=viewport.left && panel.right<=viewport.right && panel.bottom<viewport.bottom && panel.top>=viewport.top,'selection panel contained in calendar');
+   check(Math.abs((panel.left+panel.right)-(viewport.left+viewport.right))<2 && viewport.bottom-panel.bottom<24,'panel anchored bottom center');
+   check(parseFloat(getComputedStyle(toolbar).borderTopWidth)>0,'panel has visible border');
+   if(innerWidth<768) {
+    toolbar.querySelector('[data-calendar-action="clear"]').click();
+    check(getComputedStyle(toolbar).display==='none','clearing selection hides panel');
+    report('pass','');return;
+   }
    root.querySelector('#schedule-selection-toolbar [data-calendar-action="skip"]').click();await tick();
    check(requests[0].skips.length===2,'skip must send two exact date windows');
    check(requests[0].skips[0].start_at===Number(days[1].dataset.start),'first date epoch');
@@ -191,7 +205,11 @@ func testScheduleCalendarHeader(t *testing.T, paused bool) {
 		_, _ = w.Write([]byte(strings.Replace(out.String(), "</head>", runner+"</head>", 1)))
 	}))
 	defer server.Close()
-	cmd := exec.Command(chrome, "--headless=new", "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage", "--disable-background-networking", "--disable-background-timer-throttling", "--no-first-run", "--window-size=1440,1200", "--user-data-dir="+filepath.Join(t.TempDir(), "profile"), server.URL+"/schedule?project_id="+project.ID)
+	windowSize := "--window-size=1440,1200"
+	if mobile {
+		windowSize = "--window-size=500,900"
+	}
+	cmd := exec.Command(chrome, "--headless=new", "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage", "--disable-background-networking", "--disable-background-timer-throttling", "--no-first-run", windowSize, "--user-data-dir="+filepath.Join(t.TempDir(), "profile"), server.URL+"/schedule?project_id="+project.ID)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if err := startBrowserProcess(cmd); err != nil {
