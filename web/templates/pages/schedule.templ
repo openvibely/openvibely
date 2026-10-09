@@ -493,6 +493,9 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 		<div class="flex-shrink-0 sticky top-0 z-30 pb-2 md:relative md:z-auto">
 			<div data-page-header class="flex justify-between items-center mb-3">
 				<h2 class="text-2xl font-bold">Schedule</h2>
+                <div id="schedule-selection-slot">
+                    @ScheduleSelectionToolbar()
+                </div>
                 <div id="schedule-header-actions">
 				<button class="btn btn-sm btn-primary" onclick="openNewScheduledTaskModal()">
 					<span class="hidden sm:inline">+ New Scheduled Task</span>
@@ -672,7 +675,6 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 				</div>
 			</div>
 		</div>
-            @ScheduleSelectionToolbar()
         </div>
 		<div id="schedule-context-menu" class="ov-menu fixed z-[100] hidden w-52 max-w-[calc(100vw-2rem)]" role="menu" aria-label="Scheduled task actions" data-schedule-context-menu>
 			<ul class="ov-menu-actions menu">

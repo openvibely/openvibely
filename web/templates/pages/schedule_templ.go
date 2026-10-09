@@ -707,7 +707,15 @@ func scheduleContent(currentProject *models.Project, weekData WeekData, weekOffs
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 17, "<!-- Header: Row 1 – Title + New Task button --><div class=\"flex-shrink-0 sticky top-0 z-30 pb-2 md:relative md:z-auto\"><div data-page-header class=\"flex justify-between items-center mb-3\"><h2 class=\"text-2xl font-bold\">Schedule</h2><div id=\"schedule-header-actions\"><button class=\"btn btn-sm btn-primary\" onclick=\"openNewScheduledTaskModal()\"><span class=\"hidden sm:inline\">+ New Scheduled Task</span> <span class=\"sm:hidden\">+ New</span></button> <details id=\"schedule-project-menu\"><summary class=\"btn btn-sm btn-ghost\" aria-label=\"Calendar actions\">⋮</summary><ul class=\"ov-menu ov-menu-actions menu\"><li><button type=\"button\" data-calendar-action=\"pause_all\">Pause all schedules</button></li><li><button type=\"button\" data-calendar-action=\"resume_all\" hidden>Resume schedules</button></li></ul></details></div></div><!-- Header: Row 2 – Week navigation controls --><div class=\"flex items-center gap-2\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 17, "<!-- Header: Row 1 – Title + New Task button --><div class=\"flex-shrink-0 sticky top-0 z-30 pb-2 md:relative md:z-auto\"><div data-page-header class=\"flex justify-between items-center mb-3\"><h2 class=\"text-2xl font-bold\">Schedule</h2><div id=\"schedule-selection-slot\">")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = ScheduleSelectionToolbar().Render(ctx, templ_7745c5c3_Buffer)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 18, "</div><div id=\"schedule-header-actions\"><button class=\"btn btn-sm btn-primary\" onclick=\"openNewScheduledTaskModal()\"><span class=\"hidden sm:inline\">+ New Scheduled Task</span> <span class=\"sm:hidden\">+ New</span></button> <details id=\"schedule-project-menu\"><summary class=\"btn btn-sm btn-ghost\" aria-label=\"Calendar actions\">⋮</summary><ul class=\"ov-menu ov-menu-actions menu\"><li><button type=\"button\" data-calendar-action=\"pause_all\">Pause all schedules</button></li><li><button type=\"button\" data-calendar-action=\"resume_all\" hidden>Resume schedules</button></li></ul></details></div></div><!-- Header: Row 2 – Week navigation controls --><div class=\"flex items-center gap-2\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -716,30 +724,30 @@ func scheduleContent(currentProject *models.Project, weekData WeekData, weekOffs
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 18, "<button")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 19, "<button")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if weekOffset == 0 {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 19, " disabled")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 20, " disabled")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 20, " hx-get=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 21, " hx-get=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var13 string
 		templ_7745c5c3_Var13, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/schedule?project_id=%s", projectID(currentProject)))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/schedule.templ`, Line: 516, Col: 79}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/schedule.templ`, Line: 519, Col: 79}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var13)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 21, "\" hx-target=\"#schedule-content\" hx-swap=\"outerHTML show:none swap:0ms\" hx-push-url=\"true\" class=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 22, "\" hx-target=\"#schedule-content\" hx-swap=\"outerHTML show:none swap:0ms\" hx-push-url=\"true\" class=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -752,46 +760,46 @@ func scheduleContent(currentProject *models.Project, weekData WeekData, weekOffs
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 22, "\" aria-label=\"Go to current week\">Today</button><div class=\"flex items-center gap-0\"><button hx-get=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 23, "\" aria-label=\"Go to current week\">Today</button><div class=\"flex items-center gap-0\"><button hx-get=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var15 string
 		templ_7745c5c3_Var15, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/schedule?project_id=%s&week=%d", projectID(currentProject), weekOffset-1))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/schedule.templ`, Line: 527, Col: 102}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/schedule.templ`, Line: 530, Col: 102}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var15)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 23, "\" hx-target=\"#schedule-content\" hx-swap=\"outerHTML show:none swap:0ms\" hx-push-url=\"true\" class=\"btn btn-xs btn-ghost px-1\" aria-label=\"Previous week\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" aria-hidden=\"true\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M15 19l-7-7 7-7\"></path></svg></button> <button hx-get=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 24, "\" hx-target=\"#schedule-content\" hx-swap=\"outerHTML show:none swap:0ms\" hx-push-url=\"true\" class=\"btn btn-xs btn-ghost px-1\" aria-label=\"Previous week\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" aria-hidden=\"true\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M15 19l-7-7 7-7\"></path></svg></button> <button hx-get=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var16 string
 		templ_7745c5c3_Var16, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/schedule?project_id=%s&week=%d", projectID(currentProject), weekOffset+1))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/schedule.templ`, Line: 539, Col: 102}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/schedule.templ`, Line: 542, Col: 102}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var16)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 24, "\" hx-target=\"#schedule-content\" hx-swap=\"outerHTML show:none swap:0ms\" hx-push-url=\"true\" class=\"btn btn-xs btn-ghost px-1\" aria-label=\"Next week\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" aria-hidden=\"true\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M9 5l7 7-7 7\"></path></svg></button></div><span class=\"text-sm select-none\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 25, "\" hx-target=\"#schedule-content\" hx-swap=\"outerHTML show:none swap:0ms\" hx-push-url=\"true\" class=\"btn btn-xs btn-ghost px-1\" aria-label=\"Next week\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" aria-hidden=\"true\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M9 5l7 7-7 7\"></path></svg></button></div><span class=\"text-sm select-none\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var17 string
 		templ_7745c5c3_Var17, templ_7745c5c3_Err = templ.JoinStringErrs(formatWeekRange(weekData.WeekDays))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/schedule.templ`, Line: 551, Col: 74}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/schedule.templ`, Line: 554, Col: 74}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var17))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 25, "</span></div></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 26, "</span></div></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -799,7 +807,7 @@ func scheduleContent(currentProject *models.Project, weekData WeekData, weekOffs
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 26, "<!-- Week Timeline View --><div id=\"schedule-calendar-viewport\"><div id=\"schedule-timeline-container\" class=\"bg-base-100 rounded-lg shadow-lg overflow-x-auto flex flex-1 flex-col min-h-0 overflow-y-auto opacity-0\" style=\"border: 1px solid var(--ov-schedule-grid-border);\"><div class=\"min-w-[800px] flex flex-1 flex-col min-h-0\"><!-- Day Headers --><div class=\"grid bg-base-200 sticky top-0 z-20\" style=\"grid-template-columns: 60px repeat(7, 1fr); border-bottom: 1px solid var(--ov-schedule-grid-border);\"><div class=\"p-2 text-center font-semibold text-xs\" style=\"border-right: 1px solid var(--ov-schedule-grid-border);\"></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 27, "<!-- Week Timeline View --><div id=\"schedule-calendar-viewport\"><div id=\"schedule-timeline-container\" class=\"bg-base-100 rounded-lg shadow-lg overflow-x-auto flex flex-1 flex-col min-h-0 overflow-y-auto opacity-0\" style=\"border: 1px solid var(--ov-schedule-grid-border);\"><div class=\"min-w-[800px] flex flex-1 flex-col min-h-0\"><!-- Day Headers --><div class=\"grid bg-base-200 sticky top-0 z-20\" style=\"grid-template-columns: 60px repeat(7, 1fr); border-bottom: 1px solid var(--ov-schedule-grid-border);\"><div class=\"p-2 text-center font-semibold text-xs\" style=\"border-right: 1px solid var(--ov-schedule-grid-border);\"></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -811,59 +819,59 @@ func scheduleContent(currentProject *models.Project, weekData WeekData, weekOffs
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 27, "<div data-calendar-day=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 28, "<div data-calendar-day=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var19 string
 			templ_7745c5c3_Var19, templ_7745c5c3_Err = templ.ResolveAttributeValue(day.Date.Format("2006-01-02"))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/schedule.templ`, Line: 565, Col: 56}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/schedule.templ`, Line: 568, Col: 56}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var19)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 28, "\" data-start=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 29, "\" data-start=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var20 string
 			templ_7745c5c3_Var20, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprint(day.Date.Unix()))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/schedule.templ`, Line: 566, Col: 47}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/schedule.templ`, Line: 569, Col: 47}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var20)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 29, "\" data-end=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 30, "\" data-end=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var21 string
 			templ_7745c5c3_Var21, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprint(day.Date.AddDate(0, 0, 1).Unix()))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/schedule.templ`, Line: 567, Col: 62}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/schedule.templ`, Line: 570, Col: 62}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var21)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 30, "\" role=\"button\" tabindex=\"0\" aria-pressed=\"false\" aria-label=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 31, "\" role=\"button\" tabindex=\"0\" aria-pressed=\"false\" aria-label=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var22 string
 			templ_7745c5c3_Var22, templ_7745c5c3_Err = templ.ResolveAttributeValue("Select " + day.Date.Format("Monday January 2, 2006"))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/schedule.templ`, Line: 569, Col: 73}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/schedule.templ`, Line: 572, Col: 73}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var22)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 31, "\" class=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 32, "\" class=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -876,7 +884,7 @@ func scheduleContent(currentProject *models.Project, weekData WeekData, weekOffs
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 32, "\" style=\"border-right: 1px solid var(--ov-schedule-grid-border);\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 33, "\" style=\"border-right: 1px solid var(--ov-schedule-grid-border);\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -885,7 +893,7 @@ func scheduleContent(currentProject *models.Project, weekData WeekData, weekOffs
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 33, "<div class=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 34, "<div class=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -898,56 +906,56 @@ func scheduleContent(currentProject *models.Project, weekData WeekData, weekOffs
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 34, "\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 35, "\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var26 string
 			templ_7745c5c3_Var26, templ_7745c5c3_Err = templ.JoinStringErrs(day.Date.Weekday().String()[:3])
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/schedule.templ`, Line: 577, Col: 41}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/schedule.templ`, Line: 580, Col: 41}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var26))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 35, "</div><div class=\"text-[10px] opacity-60\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 36, "</div><div class=\"text-[10px] opacity-60\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var27 string
 			templ_7745c5c3_Var27, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%s %d", day.Date.Month().String()[:3], day.Date.Day()))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/schedule.templ`, Line: 580, Col: 77}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/schedule.templ`, Line: 583, Col: 77}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var27))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 36, "</div></div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 37, "</div></div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 37, "</div><!-- Timeline Grid --><div class=\"relative flex flex-1 flex-col min-h-0\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 38, "</div><!-- Timeline Grid --><div class=\"relative flex flex-1 flex-col min-h-0\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		for _, slot := range getTimeSlots() {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 38, "<div class=\"grid flex-1 schedule-grid-row last:border-b-0\" style=\"grid-template-columns: 60px repeat(7, 1fr); border-bottom: 1px solid var(--ov-schedule-grid-border);\"><!-- Time Label --><div class=\"py-1 px-2 text-[10px] font-medium text-right bg-base-200 schedule-time-label\" style=\"border-right: 1px solid var(--ov-schedule-grid-border);\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 39, "<div class=\"grid flex-1 schedule-grid-row last:border-b-0\" style=\"grid-template-columns: 60px repeat(7, 1fr); border-bottom: 1px solid var(--ov-schedule-grid-border);\"><!-- Time Label --><div class=\"py-1 px-2 text-[10px] font-medium text-right bg-base-200 schedule-time-label\" style=\"border-right: 1px solid var(--ov-schedule-grid-border);\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var28 string
 			templ_7745c5c3_Var28, templ_7745c5c3_Err = templ.JoinStringErrs(slot.Label)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/schedule.templ`, Line: 591, Col: 20}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/schedule.templ`, Line: 594, Col: 20}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var28))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 39, "</div><!-- Day Columns -->")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 40, "</div><!-- Day Columns -->")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -959,7 +967,7 @@ func scheduleContent(currentProject *models.Project, weekData WeekData, weekOffs
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 40, "<div class=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 41, "<div class=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -972,369 +980,361 @@ func scheduleContent(currentProject *models.Project, weekData WeekData, weekOffs
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 41, "\" data-date=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 42, "\" data-date=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var31 string
 				templ_7745c5c3_Var31, templ_7745c5c3_Err = templ.ResolveAttributeValue(day.Date.Format("2006-01-02"))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/schedule.templ`, Line: 600, Col: 50}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/schedule.templ`, Line: 603, Col: 50}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var31)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 42, "\" data-hour=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 43, "\" data-hour=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var32 string
 				templ_7745c5c3_Var32, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%d", slot.Hour))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/schedule.templ`, Line: 601, Col: 49}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/schedule.templ`, Line: 604, Col: 49}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var32)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 43, "\" style=\"border-right: 1px solid var(--ov-schedule-grid-border);\">")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 44, "\" style=\"border-right: 1px solid var(--ov-schedule-grid-border);\">")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				for _, occurrence := range getTasksForHour(weekData.TasksByDateTime, day.Date, slot.Hour) {
 					if occurrence.Task.Schedule != nil && !occurrence.Task.Schedule.Enabled {
-						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 44, "<div class=\"text-[10px] px-1.5 py-1 mb-0.5 rounded bg-base-300 opacity-50 cursor-grab active:cursor-grabbing drag-cursor-surface transition-colors border-l-2 border-base-content border-opacity-20 overflow-hidden\" title=\"")
+						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 45, "<div class=\"text-[10px] px-1.5 py-1 mb-0.5 rounded bg-base-300 opacity-50 cursor-grab active:cursor-grabbing drag-cursor-surface transition-colors border-l-2 border-base-content border-opacity-20 overflow-hidden\" title=\"")
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
 						var templ_7745c5c3_Var33 string
 						templ_7745c5c3_Var33, templ_7745c5c3_Err = templ.ResolveAttributeValue(scheduleDisplayTitle(occurrence.Task) + " (disabled)")
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/schedule.templ`, Line: 608, Col: 73}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/schedule.templ`, Line: 611, Col: 73}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var33)
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
-						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 45, "\" aria-label=\"")
+						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 46, "\" aria-label=\"")
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
 						var templ_7745c5c3_Var34 string
 						templ_7745c5c3_Var34, templ_7745c5c3_Err = templ.ResolveAttributeValue("Scheduled task " + scheduleDisplayTitle(occurrence.Task) + " (paused)")
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/schedule.templ`, Line: 609, Col: 96}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/schedule.templ`, Line: 612, Col: 96}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var34)
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
-						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 46, "\" tabindex=\"0\" data-schedule-card data-occurrence-start=\"")
+						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 47, "\" tabindex=\"0\" data-schedule-card data-occurrence-start=\"")
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
 						var templ_7745c5c3_Var35 string
 						templ_7745c5c3_Var35, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprint(scheduleCardInterval(occurrence).StartAt))
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/schedule.templ`, Line: 612, Col: 88}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/schedule.templ`, Line: 615, Col: 88}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var35)
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
-						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 47, "\" data-occurrence-end=\"")
+						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 48, "\" data-occurrence-end=\"")
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
 						var templ_7745c5c3_Var36 string
 						templ_7745c5c3_Var36, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprint(scheduleCardInterval(occurrence).EndAt))
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/schedule.templ`, Line: 613, Col: 84}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/schedule.templ`, Line: 616, Col: 84}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var36)
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
-						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 48, "\" data-schedule-id=\"")
+						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 49, "\" data-schedule-id=\"")
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
 						var templ_7745c5c3_Var37 string
 						templ_7745c5c3_Var37, templ_7745c5c3_Err = templ.ResolveAttributeValue(getScheduleID(occurrence.Task))
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/schedule.templ`, Line: 614, Col: 61}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/schedule.templ`, Line: 617, Col: 61}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var37)
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
-						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 49, "\" data-task-id=\"")
+						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 50, "\" data-task-id=\"")
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
 						var templ_7745c5c3_Var38 string
 						templ_7745c5c3_Var38, templ_7745c5c3_Err = templ.ResolveAttributeValue(occurrence.Task.Task.ID)
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/schedule.templ`, Line: 615, Col: 50}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/schedule.templ`, Line: 618, Col: 50}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var38)
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
-						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 50, "\" data-schedule-title=\"")
+						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 51, "\" data-schedule-title=\"")
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
 						var templ_7745c5c3_Var39 string
 						templ_7745c5c3_Var39, templ_7745c5c3_Err = templ.ResolveAttributeValue(scheduleDisplayTitle(occurrence.Task))
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/schedule.templ`, Line: 616, Col: 70}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/schedule.templ`, Line: 619, Col: 70}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var39)
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
-						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 51, "\" data-schedule-next-run=\"")
+						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 52, "\" data-schedule-next-run=\"")
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
 						var templ_7745c5c3_Var40 string
 						templ_7745c5c3_Var40, templ_7745c5c3_Err = templ.ResolveAttributeValue(exactScheduleNextRun(occurrence.Task.Schedule))
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/schedule.templ`, Line: 617, Col: 82}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/schedule.templ`, Line: 620, Col: 82}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var40)
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
-						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 52, "\" data-schedule-enabled=\"false\" data-has-schedule=\"")
+						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 53, "\" data-schedule-enabled=\"false\" data-has-schedule=\"")
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
 						var templ_7745c5c3_Var41 string
 						templ_7745c5c3_Var41, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%t", occurrence.Task.Schedule != nil && getScheduleID(occurrence.Task) != ""))
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/schedule.templ`, Line: 619, Col: 121}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/schedule.templ`, Line: 622, Col: 121}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var41)
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
-						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 53, "\" onclick=\"handleScheduleSelect(event)\" oncontextmenu=\"openScheduleContextMenu(event)\" onpointerdown=\"handleSchedulePointerDown(event)\"><div class=\"font-semibold truncate leading-tight line-through\">")
+						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 54, "\" onclick=\"handleScheduleSelect(event)\" oncontextmenu=\"openScheduleContextMenu(event)\" onpointerdown=\"handleSchedulePointerDown(event)\"><div class=\"font-semibold truncate leading-tight line-through\">")
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
 						var templ_7745c5c3_Var42 string
 						templ_7745c5c3_Var42, templ_7745c5c3_Err = templ.JoinStringErrs(scheduleDisplayTitle(occurrence.Task))
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/schedule.templ`, Line: 624, Col: 114}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/schedule.templ`, Line: 627, Col: 114}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var42))
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
-						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 54, "</div><div class=\"opacity-60 leading-tight\">paused</div></div>")
+						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 55, "</div><div class=\"opacity-60 leading-tight\">paused</div></div>")
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
 					} else {
-						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 55, "<div class=\"text-[10px] px-1.5 py-1 mb-0.5 rounded bg-indigo-600 bg-opacity-30 hover:bg-opacity-40 cursor-grab active:cursor-grabbing drag-cursor-surface transition-colors border-l-2 border-indigo-500 overflow-hidden\" title=\"")
+						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 56, "<div class=\"text-[10px] px-1.5 py-1 mb-0.5 rounded bg-indigo-600 bg-opacity-30 hover:bg-opacity-40 cursor-grab active:cursor-grabbing drag-cursor-surface transition-colors border-l-2 border-indigo-500 overflow-hidden\" title=\"")
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
 						var templ_7745c5c3_Var43 string
 						templ_7745c5c3_Var43, templ_7745c5c3_Err = templ.ResolveAttributeValue(scheduleDisplayTitle(occurrence.Task))
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/schedule.templ`, Line: 630, Col: 57}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/schedule.templ`, Line: 633, Col: 57}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var43)
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
-						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 56, "\" aria-label=\"")
+						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 57, "\" aria-label=\"")
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
 						var templ_7745c5c3_Var44 string
 						templ_7745c5c3_Var44, templ_7745c5c3_Err = templ.ResolveAttributeValue("Scheduled task " + scheduleDisplayTitle(occurrence.Task))
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/schedule.templ`, Line: 631, Col: 82}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/schedule.templ`, Line: 634, Col: 82}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var44)
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
-						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 57, "\" tabindex=\"0\" data-schedule-card data-occurrence-start=\"")
+						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 58, "\" tabindex=\"0\" data-schedule-card data-occurrence-start=\"")
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
 						var templ_7745c5c3_Var45 string
 						templ_7745c5c3_Var45, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprint(scheduleCardInterval(occurrence).StartAt))
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/schedule.templ`, Line: 634, Col: 88}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/schedule.templ`, Line: 637, Col: 88}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var45)
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
-						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 58, "\" data-occurrence-end=\"")
+						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 59, "\" data-occurrence-end=\"")
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
 						var templ_7745c5c3_Var46 string
 						templ_7745c5c3_Var46, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprint(scheduleCardInterval(occurrence).EndAt))
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/schedule.templ`, Line: 635, Col: 84}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/schedule.templ`, Line: 638, Col: 84}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var46)
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
-						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 59, "\" data-schedule-id=\"")
+						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 60, "\" data-schedule-id=\"")
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
 						var templ_7745c5c3_Var47 string
 						templ_7745c5c3_Var47, templ_7745c5c3_Err = templ.ResolveAttributeValue(getScheduleID(occurrence.Task))
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/schedule.templ`, Line: 636, Col: 61}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/schedule.templ`, Line: 639, Col: 61}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var47)
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
-						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 60, "\" data-task-id=\"")
+						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 61, "\" data-task-id=\"")
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
 						var templ_7745c5c3_Var48 string
 						templ_7745c5c3_Var48, templ_7745c5c3_Err = templ.ResolveAttributeValue(occurrence.Task.Task.ID)
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/schedule.templ`, Line: 637, Col: 50}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/schedule.templ`, Line: 640, Col: 50}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var48)
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
-						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 61, "\" data-schedule-title=\"")
+						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 62, "\" data-schedule-title=\"")
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
 						var templ_7745c5c3_Var49 string
 						templ_7745c5c3_Var49, templ_7745c5c3_Err = templ.ResolveAttributeValue(scheduleDisplayTitle(occurrence.Task))
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/schedule.templ`, Line: 638, Col: 70}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/schedule.templ`, Line: 641, Col: 70}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var49)
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
-						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 62, "\" data-schedule-next-run=\"")
+						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 63, "\" data-schedule-next-run=\"")
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
 						var templ_7745c5c3_Var50 string
 						templ_7745c5c3_Var50, templ_7745c5c3_Err = templ.ResolveAttributeValue(exactScheduleNextRun(occurrence.Task.Schedule))
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/schedule.templ`, Line: 639, Col: 82}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/schedule.templ`, Line: 642, Col: 82}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var50)
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
-						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 63, "\" data-schedule-enabled=\"true\" data-has-schedule=\"")
+						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 64, "\" data-schedule-enabled=\"true\" data-has-schedule=\"")
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
 						var templ_7745c5c3_Var51 string
 						templ_7745c5c3_Var51, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%t", occurrence.Task.Schedule != nil && getScheduleID(occurrence.Task) != ""))
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/schedule.templ`, Line: 641, Col: 121}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/schedule.templ`, Line: 644, Col: 121}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var51)
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
-						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 64, "\" onclick=\"handleScheduleSelect(event)\" oncontextmenu=\"openScheduleContextMenu(event)\" onpointerdown=\"handleSchedulePointerDown(event)\"><div class=\"font-semibold truncate leading-tight\">")
+						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 65, "\" onclick=\"handleScheduleSelect(event)\" oncontextmenu=\"openScheduleContextMenu(event)\" onpointerdown=\"handleSchedulePointerDown(event)\"><div class=\"font-semibold truncate leading-tight\">")
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
 						var templ_7745c5c3_Var52 string
 						templ_7745c5c3_Var52, templ_7745c5c3_Err = templ.JoinStringErrs(scheduleDisplayTitle(occurrence.Task))
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/schedule.templ`, Line: 646, Col: 101}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/schedule.templ`, Line: 649, Col: 101}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var52))
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
-						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 65, "</div>")
+						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 66, "</div>")
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
 						if occurrence.Task.Schedule != nil && occurrence.Task.Schedule.RepeatType.IsSubDaily() {
-							templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 66, "<div class=\"opacity-60 leading-tight\">")
+							templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 67, "<div class=\"opacity-60 leading-tight\">")
 							if templ_7745c5c3_Err != nil {
 								return templ_7745c5c3_Err
 							}
 							var templ_7745c5c3_Var53 string
 							templ_7745c5c3_Var53, templ_7745c5c3_Err = templ.JoinStringErrs(formatRepeatLabel(occurrence.Task.Schedule.RepeatType, occurrence.Task.Schedule.RepeatInterval))
 							if templ_7745c5c3_Err != nil {
-								return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/schedule.templ`, Line: 648, Col: 148}
+								return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/schedule.templ`, Line: 651, Col: 148}
 							}
 							_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var53))
 							if templ_7745c5c3_Err != nil {
 								return templ_7745c5c3_Err
 							}
-							templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 67, "</div>")
+							templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 68, "</div>")
 							if templ_7745c5c3_Err != nil {
 								return templ_7745c5c3_Err
 							}
 						} else {
-							templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 68, "<div class=\"opacity-60 leading-tight\">")
+							templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 69, "<div class=\"opacity-60 leading-tight\">")
 							if templ_7745c5c3_Err != nil {
 								return templ_7745c5c3_Err
 							}
 							var templ_7745c5c3_Var54 string
 							templ_7745c5c3_Var54, templ_7745c5c3_Err = templ.JoinStringErrs(formatTime(&occurrence.OccurrenceTime))
 							if templ_7745c5c3_Err != nil {
-								return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/schedule.templ`, Line: 650, Col: 91}
+								return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/schedule.templ`, Line: 653, Col: 91}
 							}
 							_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var54))
 							if templ_7745c5c3_Err != nil {
 								return templ_7745c5c3_Err
 							}
-							templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 69, "</div>")
+							templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 70, "</div>")
 							if templ_7745c5c3_Err != nil {
 								return templ_7745c5c3_Err
 							}
 						}
-						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 70, "</div>")
+						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 71, "</div>")
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
 					}
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 71, "</div>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 72, "</div>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 72, "</div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 73, "</div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 73, "<!-- Current Time Timeline Indicators --><!-- Line before current day (dashed) --><div id=\"timeline-before\" class=\"absolute pointer-events-none hidden\" style=\"left: 0; width: 100%; z-index: 10;\"><div class=\"h-0.5 w-full\" style=\"height: 2px; background: var(--ov-schedule-timeline-dash);\"></div></div><!-- Current day timeline (solid with circles) --><div id=\"timeline-current\" class=\"absolute pointer-events-none hidden\" style=\"left: 0; width: 100%; z-index: 10;\"><div class=\"flex items-center h-full\"><div class=\"w-2 h-2 rounded-full flex-shrink-0\" style=\"background-color: var(--ov-link-color);\"></div><div class=\"flex-1 h-0.5\" style=\"background-color: var(--ov-link-color);\"></div><div class=\"w-2 h-2 rounded-full flex-shrink-0\" style=\"background-color: var(--ov-link-color);\"></div></div></div></div></div></div>")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = ScheduleSelectionToolbar().Render(ctx, templ_7745c5c3_Buffer)
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 74, "</div><div id=\"schedule-context-menu\" class=\"ov-menu fixed z-[100] hidden w-52 max-w-[calc(100vw-2rem)]\" role=\"menu\" aria-label=\"Scheduled task actions\" data-schedule-context-menu><ul class=\"ov-menu-actions menu\"><li><button type=\"button\" role=\"menuitem\" data-calendar-action=\"skip\">Skip runs</button></li><li><button type=\"button\" role=\"menuitem\" data-calendar-action=\"restore\">Unskip runs</button></li><li><button type=\"button\" role=\"menuitem\" data-calendar-action=\"pause\">Pause schedules</button></li><li><button type=\"button\" role=\"menuitem\" data-calendar-action=\"resume\">Resume schedules</button></li><li><button type=\"button\" role=\"menuitem\" data-schedule-context-action=\"run\">Run Now</button></li><li><button type=\"button\" role=\"menuitem\" data-schedule-context-action=\"edit\">Edit Schedule</button></li><li><button type=\"button\" role=\"menuitem\" class=\"text-error\" data-schedule-context-action=\"delete\">Delete</button></li></ul></div><!-- Legend --><div class=\"mt-2 flex gap-3 text-xs flex-shrink-0\"><div class=\"flex items-center gap-1.5\"><div class=\"w-3 h-3 rounded bg-indigo-600 bg-opacity-30 border-l-2 border-indigo-500\"></div><span>Scheduled Task</span></div><div class=\"flex items-center gap-1.5\"><div class=\"w-3 h-3 rounded bg-base-300 opacity-50 border-l-2 border-base-content border-opacity-20\"></div><span>Paused / Skipped</span></div><div class=\"flex items-center gap-1.5\"><div class=\"w-3 h-3 rounded bg-indigo-900 bg-opacity-10 border border-indigo-400 border-opacity-30\"></div><span>Today</span></div></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 74, "<!-- Current Time Timeline Indicators --><!-- Line before current day (dashed) --><div id=\"timeline-before\" class=\"absolute pointer-events-none hidden\" style=\"left: 0; width: 100%; z-index: 10;\"><div class=\"h-0.5 w-full\" style=\"height: 2px; background: var(--ov-schedule-timeline-dash);\"></div></div><!-- Current day timeline (solid with circles) --><div id=\"timeline-current\" class=\"absolute pointer-events-none hidden\" style=\"left: 0; width: 100%; z-index: 10;\"><div class=\"flex items-center h-full\"><div class=\"w-2 h-2 rounded-full flex-shrink-0\" style=\"background-color: var(--ov-link-color);\"></div><div class=\"flex-1 h-0.5\" style=\"background-color: var(--ov-link-color);\"></div><div class=\"w-2 h-2 rounded-full flex-shrink-0\" style=\"background-color: var(--ov-link-color);\"></div></div></div></div></div></div></div><div id=\"schedule-context-menu\" class=\"ov-menu fixed z-[100] hidden w-52 max-w-[calc(100vw-2rem)]\" role=\"menu\" aria-label=\"Scheduled task actions\" data-schedule-context-menu><ul class=\"ov-menu-actions menu\"><li><button type=\"button\" role=\"menuitem\" data-calendar-action=\"skip\">Skip runs</button></li><li><button type=\"button\" role=\"menuitem\" data-calendar-action=\"restore\">Unskip runs</button></li><li><button type=\"button\" role=\"menuitem\" data-calendar-action=\"pause\">Pause schedules</button></li><li><button type=\"button\" role=\"menuitem\" data-calendar-action=\"resume\">Resume schedules</button></li><li><button type=\"button\" role=\"menuitem\" data-schedule-context-action=\"run\">Run Now</button></li><li><button type=\"button\" role=\"menuitem\" data-schedule-context-action=\"edit\">Edit Schedule</button></li><li><button type=\"button\" role=\"menuitem\" class=\"text-error\" data-schedule-context-action=\"delete\">Delete</button></li></ul></div><!-- Legend --><div class=\"mt-2 flex gap-3 text-xs flex-shrink-0\"><div class=\"flex items-center gap-1.5\"><div class=\"w-3 h-3 rounded bg-indigo-600 bg-opacity-30 border-l-2 border-indigo-500\"></div><span>Scheduled Task</span></div><div class=\"flex items-center gap-1.5\"><div class=\"w-3 h-3 rounded bg-base-300 opacity-50 border-l-2 border-base-content border-opacity-20\"></div><span>Paused / Skipped</span></div><div class=\"flex items-center gap-1.5\"><div class=\"w-3 h-3 rounded bg-indigo-900 bg-opacity-10 border border-indigo-400 border-opacity-30\"></div><span>Today</span></div></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -1375,7 +1375,7 @@ func scheduleContent(currentProject *models.Project, weekData WeekData, weekOffs
 		var templ_7745c5c3_Var56 templ.SafeURL
 		templ_7745c5c3_Var56, templ_7745c5c3_Err = templ.JoinURLErrs(fmt.Sprintf("/tasks?project_id=%s&from=schedule", projectID(currentProject)))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/schedule.templ`, Line: 713, Col: 90}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/schedule.templ`, Line: 715, Col: 90}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var56))
 		if templ_7745c5c3_Err != nil {
@@ -1388,7 +1388,7 @@ func scheduleContent(currentProject *models.Project, weekData WeekData, weekOffs
 		var templ_7745c5c3_Var57 string
 		templ_7745c5c3_Var57, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/tasks?project_id=%s&from=schedule", projectID(currentProject)))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/schedule.templ`, Line: 714, Col: 91}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/schedule.templ`, Line: 716, Col: 91}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var57)
 		if templ_7745c5c3_Err != nil {
@@ -1406,7 +1406,7 @@ func scheduleContent(currentProject *models.Project, weekData WeekData, weekOffs
 			var templ_7745c5c3_Var58 string
 			templ_7745c5c3_Var58, templ_7745c5c3_Err = templ.ResolveAttributeValue(agent.ID)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/schedule.templ`, Line: 739, Col: 33}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/schedule.templ`, Line: 741, Col: 33}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var58)
 			if templ_7745c5c3_Err != nil {
@@ -1419,7 +1419,7 @@ func scheduleContent(currentProject *models.Project, weekData WeekData, weekOffs
 			var templ_7745c5c3_Var59 string
 			templ_7745c5c3_Var59, templ_7745c5c3_Err = templ.JoinStringErrs(agent.Name)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/schedule.templ`, Line: 740, Col: 22}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/schedule.templ`, Line: 742, Col: 22}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var59))
 			if templ_7745c5c3_Err != nil {
@@ -1529,7 +1529,7 @@ func SchedulePrimaryAgentOptionSelector(selected *string, agentDefs []repository
 			var templ_7745c5c3_Var63 string
 			templ_7745c5c3_Var63, templ_7745c5c3_Err = templ.ResolveAttributeValue(ad.ID)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/schedule.templ`, Line: 1700, Col: 17}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/schedule.templ`, Line: 1702, Col: 17}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var63)
 			if templ_7745c5c3_Err != nil {
@@ -1552,7 +1552,7 @@ func SchedulePrimaryAgentOptionSelector(selected *string, agentDefs []repository
 			var templ_7745c5c3_Var64 string
 			templ_7745c5c3_Var64, templ_7745c5c3_Err = templ.JoinStringErrs(ad.Name)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/schedule.templ`, Line: 1705, Col: 13}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/schedule.templ`, Line: 1707, Col: 13}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var64))
 			if templ_7745c5c3_Err != nil {
@@ -1570,7 +1570,7 @@ func SchedulePrimaryAgentOptionSelector(selected *string, agentDefs []repository
 				var templ_7745c5c3_Var65 string
 				templ_7745c5c3_Var65, templ_7745c5c3_Err = templ.JoinStringErrs(ad.Model)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/schedule.templ`, Line: 1707, Col: 16}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/schedule.templ`, Line: 1709, Col: 16}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var65))
 				if templ_7745c5c3_Err != nil {

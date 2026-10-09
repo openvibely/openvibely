@@ -27,18 +27,19 @@ templ ScheduleCalendarControls(states []models.ScheduleCalendarState) {
  <style>
  #schedule-content { position: relative; }
  #schedule-calendar-viewport { position: relative; display: flex; flex: 1; flex-direction: column; min-height: 0; min-width: 0; }
- #schedule-selection-toolbar { position: absolute; bottom: 1rem; left: 50%; transform: translateX(-50%); z-index: 40; width: max-content; max-width: calc(100% - 2rem); padding: .75rem; border: 1px solid var(--ov-schedule-grid-border); border-radius: .75rem; background: var(--ov-menu-surface); box-shadow: 0 4px 18px rgba(0,0,0,.25); flex-wrap: wrap; justify-content: center; }
+ #schedule-selection-slot { display: flex; flex: 1; min-width: 0; justify-content: center; align-items: center; }
+ #schedule-selection-toolbar { min-width: 0; max-width: 100%; padding: .5rem .75rem; border: 1px solid var(--ov-schedule-grid-border); border-radius: .75rem; background: var(--ov-menu-surface); box-shadow: 0 2px 8px rgba(0,0,0,.12); white-space: nowrap; overflow-x: auto; }
+ #schedule-selection-toolbar > * { flex-shrink: 0; }
  #schedule-selection-toolbar button { border: 1px solid var(--ov-schedule-grid-border); }
- .drag-cursor-active #schedule-selection-toolbar, #schedule-content[data-selecting="true"] #schedule-selection-toolbar { visibility: hidden; pointer-events: none; }
  #schedule-selection-toolbar[aria-hidden="true"] { display: none; }
  #schedule-calendar-feedback { position: absolute; bottom: 2rem; right: 1rem; z-index: 45; padding: .75rem; border-radius: .5rem; background: var(--ov-menu-surface); box-shadow: 0 2px 12px rgba(0,0,0,.2); }
  #schedule-content [hidden] { display: none !important; }
  #schedule-project-menu { position: relative; flex-shrink: 0; }
- #schedule-content [data-page-header] { gap: 1rem; }
+ #schedule-content [data-page-header] { gap: 2rem; min-height: 4.25rem; }
  #schedule-content [data-page-header] > h2, #schedule-header-actions { flex-shrink: 0; }
  #schedule-header-actions { display: flex; align-items: center; gap: .5rem; margin-left: auto; }
  @media (max-width: 767px) {
-  #schedule-content [data-page-header] { flex-wrap: wrap; gap: .5rem; }
+  #schedule-content [data-page-header] { gap: .5rem; }
  }
  #schedule-project-menu > .ov-menu { position: absolute; right: 0; z-index: 50; min-width: 12rem; }
  #schedule-content [data-calendar-day] { cursor: pointer; user-select: none; touch-action: pan-y; }
@@ -273,7 +274,6 @@ templ ScheduleCalendarScript() {
     if (!event.metaKey && !event.ctrlKey) clearScheduleSelection();
     gesture = {x: event.clientX, y: event.clientY, pointer: event.pointerId, previous: new Set(selectedScheduleCards)};
    } else return;
-   root.dataset.selecting = 'true';
    event.preventDefault();
   }, {signal: signal});
   window.addEventListener('pointermove', function(event) {
@@ -305,7 +305,7 @@ templ ScheduleCalendarScript() {
    });
    window.updateScheduleSelection();
   }, {signal:signal,passive:false});
-  function cancelGesture() { if (gesture && gesture.box) gesture.box.remove(); gesture = null; delete root.dataset.selecting; }
+  function cancelGesture() { if (gesture && gesture.box) gesture.box.remove(); gesture = null; }
   window.addEventListener('pointerup',cancelGesture,{signal:signal});
   window.addEventListener('pointercancel',cancelGesture,{signal:signal});
   signal.addEventListener('abort',cancelGesture);
