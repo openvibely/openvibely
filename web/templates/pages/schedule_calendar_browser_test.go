@@ -60,11 +60,12 @@ func testScheduleCalendarHeader(t *testing.T, paused, mobile bool) {
    root.querySelector('#schedule-timeline-container').scrollTop=0;
    var pageHeader=root.querySelector('[data-page-header]');
    var toolbar=root.querySelector('#schedule-selection-toolbar');
-   var modifier=/Mac|iPhone|iPad|iPod/.test(navigator.platform)?'⌘':'Ctrl';
+   var modifier=/Mac|iPhone|iPad|iPod/.test(navigator.platform)?'Command':'Ctrl';
+   check(root.querySelector('[data-calendar-action="pause_all"]').textContent==='Pause all' && root.querySelector('[data-calendar-action="resume_all"]').textContent==='Resume all','project menu uses concise labels');
    var hintCard=root.querySelector('[data-schedule-card][data-has-schedule="true"]');
-   check(!hintCard.title.includes(hintCard.dataset.scheduleTitle) && hintCard.title.split('\n').length===2 && hintCard.title.includes(modifier+'+click'),'card hover only shows commands on separate lines');
+   check(!hintCard.title.includes(hintCard.dataset.scheduleTitle) && hintCard.title.split('\n').length===2 && hintCard.title===modifier+'+click to select schedule(s)\nRight-click for actions','card hover only shows commands on separate lines');
    check(hintCard.getAttribute('aria-description').includes(modifier+'+click'),'card selection hint available to assistive technology');
-   check(root.querySelector('[data-calendar-day]').title==='Click to select or deselect a day\nShift+click to select a range','day hover uses one line per command');
+   check(root.querySelector('[data-calendar-day]').title==='Click to select or deselect a day\n'+modifier+'+click to select day(s)\nShift+click and drag to select a range','day hover uses one line per command');
    check(!root.querySelector('#schedule-day-menu'),'day headers have no custom context menu');
    check(root.querySelector('.drop-zone').title==='Drag empty space to select multiple schedules','calendar space explains box selection');
    check(toolbar.querySelector('[data-calendar-action="clear"]').title==='Clear selection (Esc)','clear hover explains escape shortcut');

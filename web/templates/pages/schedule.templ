@@ -508,8 +508,8 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
                             </svg>
                         </summary>
                         <ul class="ov-menu ov-menu-actions menu">
-                            <li><button type="button" data-calendar-action="pause_all">Pause all schedules</button></li>
-                            <li><button type="button" data-calendar-action="resume_all" hidden>Resume schedules</button></li>
+                            <li><button type="button" data-calendar-action="pause_all">Pause all</button></li>
+                            <li><button type="button" data-calendar-action="resume_all" hidden>Resume all</button></li>
                         </ul>
                     </details>
                 </div>
@@ -570,7 +570,7 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 					for _, day := range weekData.WeekDays {
 						<div
 							data-calendar-day={ day.Date.Format("2006-01-02") }
-                            title={ "Click to select or deselect a day\nShift+click to select a range" }
+                            title={ "Click to select or deselect a day\nShift+click and drag to select a range" }
 							data-start={ fmt.Sprint(day.Date.Unix()) }
 							data-end={ fmt.Sprint(day.Date.AddDate(0, 0, 1).Unix()) }
 							role="button" tabindex="0" aria-pressed="false"
