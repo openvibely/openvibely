@@ -176,6 +176,15 @@ func testScheduleCalendarHeader(t *testing.T, paused, mobile bool) {
    a.dispatchEvent(new MouseEvent('click',{bubbles:true,ctrlKey:true}));b.dispatchEvent(new MouseEvent('click',{bubbles:true,ctrlKey:true}));
    a.dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:300,clientY:200}));
    check(selectedScheduleCards.size===2,'right click must preserve multi-selection');
+   check(getComputedStyle(toolbar).display==='none' && toolbar.inert,'context menu hides and disables header controls for multiple cards');
+   document.body.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,button:0}));
+   check(getComputedStyle(toolbar).display!=='none' && !toolbar.inert,'dismissing context menu restores selection controls');
+   clearScheduleSelection();
+   a.dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:300,clientY:200}));
+   check(selectedScheduleCards.size===1 && getComputedStyle(toolbar).display==='none','right click on one card only shows context controls');
+   document.body.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,button:0}));
+   b.dispatchEvent(new MouseEvent('click',{bubbles:true,ctrlKey:true}));
+   a.dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:300,clientY:200}));
    root.querySelector('#schedule-context-menu [data-calendar-action="pause"]').click();await tick();
    check(window._scheduleCalendarUndo.message==='1 schedule(s) paused.','brief feedback counts eligible schedules');
    check(window._scheduleCalendarUndo.expires>Date.now() && window._scheduleCalendarUndo.expires<=Date.now()+6000,'feedback expires');
