@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-func TestBrowserChatCompactionActivity(t *testing.T) {
+func TestBrowserFunctional_ChatCompactionActivity(t *testing.T) {
 	chrome := testChromePath(t)
 	var script bytes.Buffer
 	if err := ChatAutoScrollScript().Render(context.Background(), &script); err != nil {
