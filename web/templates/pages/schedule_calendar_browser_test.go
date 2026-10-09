@@ -63,7 +63,7 @@ func testScheduleCalendarHeader(t *testing.T, paused, mobile bool) {
    check(getComputedStyle(toolbar).display==='none','empty selection hides panel');
    check(!root.querySelector('#schedule-paused-status'),'no redundant paused header status');
    check(pageHeader.contains(menu),'calendar menu belongs beside New');
-   check(menu.querySelector('summary').textContent==='⋮','visible vertical kebab');
+   check(menu.querySelector('summary svg.h-5.w-5 path'),'standard SVG kebab');
    check(!menu.hidden,'calendar menu stays visible');
    if (JSON.parse(root.querySelector('#schedule-calendar-controls').dataset.state).paused) {
     check(root.querySelector('[data-calendar-action="pause_all"]').hidden,'paused project hides pause action');
@@ -88,6 +88,7 @@ func testScheduleCalendarHeader(t *testing.T, paused, mobile bool) {
    check(panel.bottom<=viewport.top,'selection panel never covers calendar cards');
    check(Math.abs((panel.left+panel.right)-(slot.left+slot.right))<2,'panel centered in available header space');
    check(parseFloat(getComputedStyle(toolbar).borderTopWidth)>0,'panel has visible border');
+   check(parseFloat(getComputedStyle(toolbar.querySelector('[data-calendar-action="clear"]')).borderTopWidth)===0,'close button has no border');
    if(innerWidth<768) {
     toolbar.querySelector('[data-calendar-action="clear"]').click();
     check(getComputedStyle(toolbar).display==='none','clearing selection hides panel');
