@@ -247,7 +247,7 @@ window.addEventListener('DOMContentLoaded', function() {
   }
   function activeSort(category, key) {
     var link = document.querySelector('button[hx-post*="/tasks/' + category + '/sort"][hx-post*="sort=' + key + '"]');
-    return link && link.classList.contains('active');
+    return link && link.getAttribute('aria-pressed') === 'true';
   }
   function clickSort(category, key) {
     htmx.process(document.getElementById('kanban-board'));
@@ -656,6 +656,10 @@ window.addEventListener('DOMContentLoaded', function() {
 	requestMu.Lock()
 	requests := strings.Join(requestLog, "\n")
 	requestMu.Unlock()
+	if !strings.HasPrefix(outcome, "pass:") {
+		stderr, _ := os.ReadFile(stderrPath)
+		t.Fatalf("Tasks browser regression failed: %s\nRequests:\n%s\nChrome:\n%s", outcome, requests, strings.TrimSpace(string(stderr)))
+	}
 	if !strings.Contains(requests, "GET /post-move-stale-board") {
 		t.Fatalf("Tasks browser regression did not start the post-move pre-commit stale board request; requests:\n%s", requests)
 	}
@@ -664,10 +668,6 @@ window.addEventListener('DOMContentLoaded', function() {
 	}
 	if !strings.Contains(requests, "GET /failed-newer-refresh") || !strings.Contains(requests, "GET /aborted-newer-refresh") {
 		t.Fatalf("Tasks browser regression did not start newer failed and aborted refreshes; requests:\n%s", requests)
-	}
-	if !strings.HasPrefix(outcome, "pass:") {
-		stderr, _ := os.ReadFile(stderrPath)
-		t.Fatalf("Tasks browser regression failed: %s\nRequests:\n%s\nChrome:\n%s", outcome, requests, strings.TrimSpace(string(stderr)))
 	}
 }
 
