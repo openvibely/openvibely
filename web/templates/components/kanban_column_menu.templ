@@ -1,0 +1,74 @@
+package components
+
+import (
+	"fmt"
+	"github.com/openvibely/openvibely/internal/models"
+)
+
+templ KanbanSubmenu(label string) {
+	<li class="group relative" onmouseenter="hoverKanbanSubmenu(event, this)" onmouseleave="cancelKanbanSubmenuHover(this)">
+		<button type="button" class="justify-between" onclick="positionKanbanSubmenu(this.parentElement)" onfocus="positionKanbanSubmenu(this.parentElement)" onkeydown="handleKanbanSubmenuKeydown(event, this.parentElement)">{ label }<span aria-hidden="true">›</span></button>
+		<ul tabindex="-1" data-task-card-submenu-panel class="ov-menu ov-menu-actions ov-menu-scroll menu absolute right-0 top-full z-[110] hidden w-56 max-w-[calc(100vw-2rem)]">{ children... }
+</ul>
+	</li>
+}
+
+templ KanbanFilter(category, key, label string, values, labels []string) {
+	@KanbanSubmenu(label) {
+		for i, value := range values {
+			<li><button type="button" data-kanban-filter={ key } data-value={ value } data-filter-label={ labels[i] } data-column={ category } onclick="kanbanSetFilter(this)"><span data-filter-check aria-hidden="true" style="width:1em;display:inline-block"></span>{ labels[i] }</button></li>
+		}
+	}
+}
+
+templ KanbanColumnMenu(projectID string, category models.TaskCategory, backlogSort, completedSort string, hasTasks bool) {
+	{{ cat := string(category) }}
+	@CardActionDropdown(CardActionDropdownConfig{WrapperClass: "dropdown dropdown-end", TriggerClass: "btn btn-xs btn-ghost min-h-11 h-11 w-11 p-0", IconClass: "h-5 w-5", MenuClass: "w-56 max-w-[calc(100vw-2rem)] z-[100]", Label: "More actions", TriggerAriaExpanded: "false", TriggerKanbanMenu: true, MenuKanbanContent: true, KanbanMenuKey: "column-" + cat}) {
+		<li><button type="button" data-column={ cat } data-kanban-select disabled?={ !hasTasks } onclick="kanbanSelectAll(this)">Select all</button></li>
+		if category != models.CategoryActive {
+			<li class="ov-menu-rule" role="separator"></li>
+			@KanbanSubmenu("Filter") {
+				if category == models.CategoryCompleted {
+					@KanbanFilter(cat, "status", "Outcome", []string{"", "completed", "failed", "cancelled"}, []string{"All outcomes", "Succeeded", "Failed", "Cancelled"})
+					@KanbanFilter(cat, "merge", "Merge status", []string{"", "merged", "unmerged", "conflict", "failed", "none"}, []string{"All merge states", "Merged", "Unmerged", "Conflicts", "Merge failed", "No branch"})
+				} else {
+					@KanbanFilter(cat, "status", "Status", []string{"", "pending", "failed", "cancelled", "blocked"}, []string{"All statuses", "Pending", "Failed", "Cancelled", "Blocked"})
+				}
+				@KanbanFilter(cat, "priority", "Priority", []string{"", "4", "3", "2", "1"}, []string{"All priorities", PriorityLabel(4), PriorityLabel(3), PriorityLabel(2), PriorityLabel(1)})
+			}
+			@KanbanSubmenu("Sort by") {
+				{{ sort := backlogSort
+date := "created"
+if category == models.CategoryCompleted {
+	sort = completedSort
+	date = "completed"
+} }}
+				for i, value := range []string{date+"_desc", date+"_asc", "title_asc", "title_desc", "priority_desc", "priority_asc"} {
+					<li><button type="button" tabindex="0" class="whitespace-nowrap" aria-pressed={ fmt.Sprintf("%t", sort == value) } hx-on::before-request="closeKanbanMenu(null, false)" hx-post={ fmt.Sprintf("/tasks/%s/sort?project_id=%s&sort=%s", cat, projectID, value) } hx-target="#kanban-board" hx-swap="outerHTML"><span data-filter-check aria-hidden="true" style="width:1em;display:inline-block">
+                        if sort == value {
+                            ✓
+                        }
+                    </span>{ []string{"Newest first", "Oldest first", "Name A–Z", "Name Z–A", "Priority high–low", "Priority low–high"}[i] }</button></li>
+				}
+			}
+		}
+		<li class="ov-menu-rule" role="separator"></li>
+		if category == models.CategoryCompleted {
+			@KanbanSubmenu("Local") {
+				for _, action := range TaskWorktreeMergeActions() {
+					<li><button type="button" data-column={ cat } data-kanban-action={ action.MergeType } onclick="kanbanBatch(this)">{ action.Label }</button></li>
+				}
+			}
+			@KanbanSubmenu("GitHub") {
+				<li><button type="button" data-column={ cat } data-kanban-action="pr" onclick="kanbanBatch(this)">Create pull requests</button></li>
+			}
+		} else if category == models.CategoryBacklog {
+			@KanbanSubmenu("Run") {
+				<li><button type="button" data-column={ cat } data-kanban-action="run" onclick="kanbanBatch(this)">Run tasks</button></li>
+			}
+		} else {
+			<li><button type="button" data-column={ cat } data-kanban-action="cancel" onclick="kanbanBatch(this)">Stop</button></li>
+		}
+		<li><button type="button" class="text-error" data-column={ cat } data-kanban-action="delete" onclick="kanbanBatch(this)">Delete…</button></li>
+	}
+}

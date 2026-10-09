@@ -3,7 +3,6 @@ package components
 import (
 	"bytes"
 	"context"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -131,161 +130,41 @@ func TestKanbanColumn_DropdownTriggersUseLabelForDesktopWebviewCompatibility(t *
 	}
 }
 
-func TestKanbanColumn_BacklogExecuteAllActionHasNoActivationOrConfirmation(t *testing.T) {
-	body := renderKanbanColumnForTest(t, []models.Task{{
-		ID:        "eligible-backlog",
-		ProjectID: "project-1",
-		Title:     "Eligible backlog task",
-		Category:  models.CategoryBacklog,
-		Status:    models.StatusPending,
-	}})
-
-	if strings.Contains(body, "Activate All") || strings.Contains(body, "/tasks/backlog/activate") {
-		t.Fatalf("backlog menu must not render the redundant Activate All action: %s", body)
-	}
-
-	actionStart := strings.Index(body, `hx-post="/tasks/backlog/execute?project_id=project-1"`)
-	if actionStart < 0 {
-		t.Fatalf("backlog menu is missing the Execute All request: %s", body)
-	}
-	actionEnd := strings.Index(body[actionStart:], "</button>")
-	if actionEnd < 0 {
-		t.Fatalf("backlog Execute All action is missing its closing button: %s", body)
-	}
-	action := body[actionStart : actionStart+actionEnd]
-	if !strings.Contains(action, "Execute All (1)") {
-		t.Fatalf("backlog Execute All action has unexpected markup: %s", action)
-	}
-	if strings.Contains(action, "hx-confirm") {
-		t.Fatalf("backlog Execute All action must submit without confirmation: %s", action)
-	}
-	for _, required := range []string{`hx-target="#kanban-board"`, `hx-swap="outerHTML"`} {
-		if !strings.Contains(action, required) {
-			t.Fatalf("backlog Execute All action must preserve %s: %s", required, action)
+func TestKanbanColumnSharedActionsAndActiveFIFO(t *testing.T) {
+	for _, category := range []models.TaskCategory{models.CategoryBacklog, models.CategoryActive, models.CategoryCompleted} {
+		body := renderKanbanColumnForCategoryTest(t, category, []models.Task{{ID: "task", Category: category, Status: models.StatusPending}})
+		for _, want := range []string{`data-kanban-select`, `data-kanban-action="delete"`, `data-kanban-progress`} {
+			if !strings.Contains(body, want) {
+				t.Fatalf("%s missing %s", category, want)
+			}
+		}
+		hasFilters := strings.Contains(body, `data-kanban-filter`)
+		hasSort := strings.Contains(body, `/sort?`)
+		if category == models.CategoryActive {
+			if hasFilters || hasSort {
+				t.Fatal("Active must preserve the full FIFO queue")
+			}
+			if !strings.Contains(body, `data-kanban-action="cancel"`) {
+				t.Fatal("missing Stop")
+			}
+		} else if !hasFilters || !hasSort {
+			t.Fatalf("%s needs filters and sorting", category)
 		}
 	}
-}
-
-func TestKanbanColumn_BacklogPriorityExecuteActionsUsePriorityLabelsAndRoutes(t *testing.T) {
-	tasks := []models.Task{
-		{ID: "priority-4", ProjectID: "project-1", Title: "Urgent task", Category: models.CategoryBacklog, Status: models.StatusPending, Priority: 4},
-		{ID: "priority-3", ProjectID: "project-1", Title: "High task", Category: models.CategoryBacklog, Status: models.StatusFailed, Priority: 3},
-		{ID: "priority-2", ProjectID: "project-1", Title: "Normal task", Category: models.CategoryBacklog, Status: models.StatusCancelled, Priority: 2},
-		{ID: "priority-1", ProjectID: "project-1", Title: "Low task", Category: models.CategoryBacklog, Status: models.StatusPending, Priority: 1},
-	}
-
-	body := renderKanbanColumnForTest(t, tasks)
-	for _, tt := range []struct {
-		priority int
-		label    string
-	}{
-		{priority: 4, label: "Urgent"},
-		{priority: 3, label: "High"},
-		{priority: 2, label: "Normal"},
-		{priority: 1, label: "Low"},
-	} {
-		t.Run(tt.label, func(t *testing.T) {
-			if got := PriorityLabel(tt.priority); got != tt.label {
-				t.Fatalf("test expectation drifted from PriorityLabel(%d): got %q want %q", tt.priority, got, tt.label)
-			}
-			wantURL := fmt.Sprintf(`/tasks/backlog/execute?project_id=project-1&amp;priority=%d`, tt.priority)
-			if !strings.Contains(body, wantURL) {
-				t.Fatalf("expected priority action URL %q in %s", wantURL, body)
-			}
-			wantLabel := fmt.Sprintf("Execute %s (1)", tt.label)
-			if !strings.Contains(body, wantLabel) {
-				t.Fatalf("expected priority action label %q in %s", wantLabel, body)
-			}
-		})
-	}
-}
-
-func TestKanbanColumn_BacklogPriorityExecuteActionOmittedWithoutEligibleTasks(t *testing.T) {
-	body := renderKanbanColumnForTest(t, []models.Task{
-		{ID: "priority-4", ProjectID: "project-1", Title: "Urgent task", Category: models.CategoryBacklog, Status: models.StatusPending, Priority: 4},
-		{ID: "priority-3", ProjectID: "project-1", Title: "High task", Category: models.CategoryBacklog, Status: models.StatusPending, Priority: 3},
-		{ID: "priority-2", ProjectID: "project-1", Title: "Completed normal task", Category: models.CategoryBacklog, Status: models.StatusCompleted, Priority: 2},
-		{ID: "priority-1", ProjectID: "project-1", Title: "Low task", Category: models.CategoryBacklog, Status: models.StatusPending, Priority: 1},
-	})
-
-	if strings.Contains(body, `/tasks/backlog/execute?project_id=project-1&amp;priority=2`) || strings.Contains(body, "Execute Normal") {
-		t.Fatalf("normal priority action should be omitted when no priority-2 tasks are eligible, got %s", body)
-	}
-	for _, want := range []string{
-		`/tasks/backlog/execute?project_id=project-1&amp;priority=4`,
-		`/tasks/backlog/execute?project_id=project-1&amp;priority=3`,
-		`/tasks/backlog/execute?project_id=project-1&amp;priority=1`,
-	} {
-		if !strings.Contains(body, want) {
-			t.Fatalf("expected eligible priority action %q in %s", want, body)
+	body := renderKanbanColumnForCategoryTest(t, models.CategoryCompleted, nil)
+	for _, action := range []string{"merge", "ff", "squash", "rebase", "pr"} {
+		if !strings.Contains(body, `data-kanban-action="`+action+`"`) {
+			t.Fatalf("missing bulk %s", action)
 		}
 	}
-}
-
-func TestKanbanColumn_BacklogPriorityActionsDoNotHardcodePriorityLabels(t *testing.T) {
-	source, err := os.ReadFile("kanban_board.templ")
-	if err != nil {
-		t.Fatalf("read kanban template source: %v", err)
+	body = renderKanbanColumnForTest(t, nil)
+	if !strings.Contains(body, `data-kanban-action="run"`) || strings.Contains(body, "hx-confirm") {
+		t.Fatal("Run must execute directly")
 	}
-	body := string(source)
-	for _, forbidden := range []string{
-		"Execute Urgent",
-		"Execute High",
-		"Execute Normal",
-		"Execute Low",
-		"urgent priority backlog tasks",
-		"high priority backlog tasks",
-		"normal priority backlog tasks",
-		"low priority backlog tasks",
-	} {
-		if strings.Contains(body, forbidden) {
-			t.Fatalf("kanban backlog priority actions must derive labels from PriorityLabel, found hardcoded %q", forbidden)
+	for _, priority := range []int{4, 3, 2, 1} {
+		if !strings.Contains(body, PriorityLabel(priority)) {
+			t.Fatal("missing priority filter")
 		}
-	}
-	if !strings.Contains(body, "PriorityLabel(priority)") {
-		t.Fatalf("expected kanban backlog priority actions to derive labels through PriorityLabel")
-	}
-}
-
-func TestKanbanColumn_DeleteAllActionsOpenSharedConfirmation(t *testing.T) {
-	cases := []struct {
-		category  models.TaskCategory
-		name      string
-		ariaLabel string
-	}{
-		{models.CategoryCompleted, "completed tasks", "Delete all completed tasks"},
-		{models.CategoryBacklog, "backlog tasks", "Delete all backlog tasks"},
-	}
-
-	for _, tc := range cases {
-		t.Run(string(tc.category), func(t *testing.T) {
-			body := renderKanbanColumnForCategoryTest(t, tc.category, []models.Task{{
-				ID:        "task-1",
-				ProjectID: "project-1",
-				Title:     "Task to delete",
-				Category:  tc.category,
-				Status:    models.StatusCompleted,
-			}})
-
-			for _, want := range []string{
-				`data-delete-all-tasks-category="` + string(tc.category) + `"`,
-				`data-delete-all-tasks-name="` + tc.name + `"`,
-				`data-project-id="project-1"`,
-				`aria-label="` + tc.ariaLabel + `"`,
-				`onclick="openDeleteAllTasksConfirm(this)"`,
-				`Delete All</button>`,
-			} {
-				if !strings.Contains(body, want) {
-					t.Fatalf("expected %s delete action to contain %q, got %s", tc.category, want, body)
-				}
-			}
-			if strings.Contains(body, `hx-confirm="Are you sure you want to delete all`) {
-				t.Fatalf("%s delete-all action must not use the browser confirmation attribute", tc.category)
-			}
-			if strings.Contains(body, `hx-delete="/tasks/`+string(tc.category)) {
-				t.Fatalf("%s delete-all action must not delete before the shared modal is confirmed", tc.category)
-			}
-		})
 	}
 }
 
@@ -317,5 +196,21 @@ func TestKanbanBoardReservedCapacityWaitUsesQueuedLane(t *testing.T) {
 	tasks[1].WorkerCapacityQueued = false
 	if len(filterRunningTasks(tasks)) != 2 || len(filterPendingTasks(tasks)) != 0 {
 		t.Fatal("admitted task did not move to running")
+	}
+}
+
+func TestKanbanEmptyColumnControls(t *testing.T) {
+	for _, category := range []models.TaskCategory{models.CategoryBacklog, models.CategoryActive, models.CategoryCompleted} {
+		body := renderKanbanColumnForCategoryTest(t, category, nil)
+		if !strings.Contains(body, "min-h-11") {
+			t.Fatal("empty header must retain its height")
+		}
+		if category == models.CategoryActive {
+			if strings.Contains(body, `data-kanban-menu-key="column-active"`) {
+				t.Fatal("empty Active must hide its menu")
+			}
+		} else if !strings.Contains(body, `data-kanban-select disabled`) {
+			t.Fatalf("%s must disable empty selection", category)
+		}
 	}
 }

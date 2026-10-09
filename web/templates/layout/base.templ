@@ -187,6 +187,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 			</script>
 			<link href={ static.URL("app.css") } rel="stylesheet" type="text/css"/>
 			<script src={ static.URL("vendor/htmx.min.js") }></script>
+			<script defer src={ static.URL("kanban.js") }></script>
 			<script>
 			window.appendPendingThreadInputEditButton = function(actions) {
 				var button = document.createElement('button');
@@ -412,6 +413,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				</script>
 			}
 			<style>
+                #kanban-board .card[hidden] { display: none !important; }
 				/* Disable DaisyUI button-pop animation on initial render.
 				   Without this, HTMX swaps cause all newly-inserted .btn elements
 				   to play the pop animation simultaneously. The :active click
@@ -622,24 +624,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					position: relative;
 					border-color: hsl(var(--p)) !important;
 				}
-				.task-selected::before {
-					content: '✓';
-					position: absolute;
-					top: 8px;
-					right: 8px;
-					background: hsl(var(--p));
-					color: white;
-					width: 28px;
-					height: 28px;
-					border-radius: 50%;
-					display: flex;
-					align-items: center;
-					justify-content: center;
-					font-weight: bold;
-					font-size: 16px;
-					z-index: 10;
-					box-shadow: 0 3px 8px rgba(0,0,0,0.5);
-				}
+
 					.task-selected .btn-circle {
 						display: none;
 					}
@@ -959,7 +944,8 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					z-index: 1001 !important;
 					overflow-y: auto;
 				}
-				/* Chat actions are explicitly state-driven so focus alone never opens the destructive menu. */
+				[data-submenu-covered] { visibility: hidden !important; pointer-events: none !important; }
+                /* Chat actions are explicitly state-driven so focus alone never opens the destructive menu. */
 				#chat-page-root [data-chat-actions-dropdown]:not([data-chat-actions-open="true"]) > .dropdown-content {
 						visibility: hidden !important;
 						opacity: 0 !important;
@@ -3047,6 +3033,8 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				let draggedElement = null;
 
 					let selectedTasks = new Set();
+                    window.kanbanSelection = selectedTasks;
+                    window.kanbanClearSelection = clearSelection;
 					let draggedTaskIds = [];
 					let pendingKanbanMoves = new Map();
 					let kanbanMoveTransactions = new Map();
@@ -3227,9 +3215,20 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 			}
 			window.kanbanDropdownForTarget = kanbanDropdownForTarget;
 
+			let returningFromKanbanSubmenu = false;
+			function backKanbanSubmenu(panel) {
+				const trigger = panel.__openVibelySubmenuSourcePanel && panel.__openVibelySubmenuSourcePanel.previousElementSibling;
+				restoreKanbanSubmenu(panel);
+				returningFromKanbanSubmenu = true;
+				if (trigger && trigger.isConnected) trigger.focus({preventScroll: true});
+				returningFromKanbanSubmenu = false;
+			}
 			function restoreKanbanSubmenu(panel) {
 				if (!panel || panel.getAttribute('data-task-card-submenu-portaled') !== 'true') return;
-				const sourcePanel = panel.__openVibelySubmenuSourcePanel;
+				Array.from(document.querySelectorAll('[data-task-card-submenu-portaled="true"]')).filter(child => child.__openVibelySubmenuParent === panel).forEach(restoreKanbanSubmenu);
+                const sourcePanel = panel.__openVibelySubmenuSourcePanel;
+                const parent = panel.__openVibelySubmenuParent;
+                if (parent) parent.removeAttribute('data-submenu-covered');
 				if (sourcePanel) sourcePanel.style.removeProperty('display');
 				panel.remove();
 				panel.__openVibelySubmenuSourcePanel = null;
@@ -3245,30 +3244,35 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 
 			function closeKanbanSubmenus(dropdown, exceptPanel) {
 				if (pendingKanbanSubmenuHover && (!dropdown || pendingKanbanSubmenuHover.dropdown === dropdown)) cancelKanbanSubmenuHover();
-				document.querySelectorAll('[data-task-card-submenu-portaled="true"]').forEach(function(panel) {
-					if (panel !== exceptPanel && (!dropdown || panel.__openVibelySubmenuDropdown === dropdown)) restoreKanbanSubmenu(panel);
+				const keep = new Set();
+                for (let parent = exceptPanel; parent; parent = parent.__openVibelySubmenuParent) keep.add(parent);
+                Array.from(document.querySelectorAll('[data-task-card-submenu-portaled="true"]')).reverse().forEach(function(panel) {
+					if (!keep.has(panel) && (!dropdown || panel.__openVibelySubmenuDropdown === dropdown)) restoreKanbanSubmenu(panel);
 				});
 			}
 
 			function positionKanbanSubmenu(container) {
-				if (!container || !container.querySelector) return;
+				if (!container || !container.querySelector || returningFromKanbanSubmenu) return;
 				cancelKanbanSubmenuHover();
 				const sourcePanel = container.querySelector(':scope > [data-task-card-submenu-panel]');
-				const dropdown = container.closest('[data-kanban-menu-key]');
-				const menu = dropdown && dropdown.querySelector(':scope > [data-kanban-menu-content]');
+				const dropdown = kanbanDropdownForTarget(container);
+				const parentPanel = container.closest('[data-task-card-submenu-portaled="true"]');
+                const menu = parentPanel || dropdown && dropdown.querySelector(':scope > [data-kanban-menu-content]');
 				if (!sourcePanel || !dropdown || !menu) return;
 				let panel = Array.from(document.querySelectorAll('[data-task-card-submenu-portaled="true"]')).find(function(candidate) {
 					return candidate.__openVibelySubmenuSourcePanel === sourcePanel;
 				}) || null;
-				closeKanbanSubmenus(dropdown, panel);
+				closeKanbanSubmenus(dropdown, panel || parentPanel);
 				if (!panel) {
 					panel = sourcePanel.cloneNode(true);
 					panel.__openVibelySubmenuSourcePanel = sourcePanel;
 					panel.__openVibelySubmenuDropdown = dropdown;
+                    panel.__openVibelySubmenuParent = menu;
 					panel.setAttribute('data-task-card-submenu-portaled', 'true');
 					panel.addEventListener('mouseenter', function() { cancelKanbanSubmenuHover(); });
 					sourcePanel.style.setProperty('display', 'none', 'important');
 					document.body.appendChild(panel);
+                    if (window.htmx) window.htmx.process(panel);
 				}
 				panel.style.setProperty('display', 'block', 'important');
 				// The portal lives outside the menu's normal CSS context. Normalize
@@ -3290,7 +3294,15 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				const roomRight = Math.max(0, window.innerWidth - menuRect.right - 8);
 				const openRight = roomRight >= roomLeft;
 				const sideRoom = openRight ? roomRight : roomLeft;
-				const panelWidth = Math.min(224, sideRoom);
+				const replaceParent = dropdown.getAttribute('data-kanban-menu-key').startsWith('column-') && (window.innerWidth < 640 || sideRoom < 180);
+                if (replaceParent && !panel.querySelector(':scope > [data-submenu-back]')) {
+                    const row = document.createElement('li'); row.setAttribute('data-submenu-back', '');
+                    const back = document.createElement('button'); back.type = 'button';
+                    back.textContent = '‹ ' + (parentPanel ? 'Filter' : 'Menu');
+                    back.onclick = function() { backKanbanSubmenu(panel); };
+                    row.appendChild(back); panel.prepend(row);
+                }
+                const panelWidth = replaceParent ? Math.min(224, window.innerWidth - 16) : Math.min(224, sideRoom);
 				const desiredLeft = openRight ? menuRect.right - 4 : menuRect.left + 4 - panelWidth;
 				const desiredTop = Math.max(visibleTop + 8, Math.min(containerRect.top, visibleBottom - panelHeight - 8));
 				let positionedLeft = Math.max(8, Math.min(desiredLeft, window.innerWidth - panelWidth - 8));
@@ -3310,11 +3322,22 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				if (positionedRect.left < 8) positionedLeft += 8 - positionedRect.left;
 				if (positionedRect.right > window.innerWidth - 8) positionedLeft -= positionedRect.right - (window.innerWidth - 8);
 				panel.style.left = positionedLeft + 'px';
+                if (replaceParent) {
+                    panel.style.left = Math.max(8, Math.min(menuRect.left, window.innerWidth - panelWidth - 8)) + 'px';
+                    panel.style.top = Math.max(8, Math.min(menuRect.top, window.innerHeight - panel.getBoundingClientRect().height - 8)) + 'px';
+                    // Move focus before hiding its current owner. The Back control
+                    // does not open another submenu when focused.
+                    if (menu.contains(document.activeElement)) {
+                        const back = panel.querySelector(':scope > [data-submenu-back] > button');
+                        if (back) back.focus({preventScroll: true});
+                    }
+                    menu.setAttribute('data-submenu-covered', '');
+                }
 			}
 
 			function hoverKanbanSubmenu(event, container) {
 				if (!container) return;
-				const dropdown = container.closest('[data-kanban-menu-key]');
+				const dropdown = kanbanDropdownForTarget(container);
 				if (!dropdown) return;
 				const sourcePanel = container.querySelector(':scope > [data-task-card-submenu-panel]');
 				const current = Array.from(document.querySelectorAll('[data-task-card-submenu-portaled="true"]')).find(function(panel) {
@@ -3358,8 +3381,8 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				if (event.key === 'Tab' && event.shiftKey) return;
 				event.preventDefault();
 				positionKanbanSubmenu(container);
-				const panel = document.querySelector('[data-task-card-submenu-portaled="true"]');
-				const action = panel && panel.querySelector('button:not([disabled]), a[href]');
+				const panel = Array.from(document.querySelectorAll('[data-task-card-submenu-portaled="true"]')).find(candidate => candidate.__openVibelySubmenuSourcePanel === container.querySelector(':scope > [data-task-card-submenu-panel]'));
+				const action = panel && Array.from(panel.querySelectorAll('summary, button:not([disabled]), a[href]')).find(function(item) { return item.getClientRects().length > 0; });
 				if (action) action.focus({preventScroll: true});
 			}
 
@@ -3584,7 +3607,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					}
 
 					// Ignore clicks on buttons, dropdowns, or other interactive elements
-					if (event.target.tagName === 'BUTTON' || event.target.closest('button') || event.target.closest('.dropdown')) {
+					if (event.target.tagName === 'BUTTON' || event.target.closest('button') || event.target.closest('.dropdown') || event.target.closest('input, label')) {
 						return;
 					}
 
@@ -3603,6 +3626,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 							selectedTasks.add(taskID);
 							card.classList.add('task-selected');
 						}
+                        if (window.kanbanRefresh) window.kanbanRefresh();
 
 						return;
 					}
@@ -3691,6 +3715,12 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 							return beginPointerCardMotion(card);
 						});
 						state.motion = state.motions[state.dragCards.indexOf(state.card)];
+                            if (draggedTaskIds.length > 1) {
+                                state.badge = document.createElement('span');
+                                state.badge.className = 'badge badge-primary';
+                                state.badge.textContent = draggedTaskIds.length + ' tasks';
+                                state.card.prepend(state.badge);
+                            }
 					}
 				function refreshTaskPointerDropZone(clientX, clientY) {
 					const state = taskPointerDrag;
@@ -3727,6 +3757,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					}
 				function cleanupTaskPointerDrag() {
 					const state = taskPointerDrag;
+                        if (state && state.badge) state.badge.remove();
 					stopAutoScroll();
 						if (state && state.dropZone) state.dropZone.classList.remove('drag-over');
 						if (state && state.motions) {
@@ -3781,7 +3812,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				}
 
 				function handleTaskPointerDown(event) {
-					if (event.button !== 0 || taskPointerDrag) return;
+					if (event.button !== 0 || taskPointerDrag || window.kanbanBatchRunning) return;
 					if (event.target && event.target.closest('button, a, input, select, textarea, summary, label, [role="button"], .dropdown')) return;
 					const card = event.currentTarget;
 					taskPointerDrag = {
@@ -4063,7 +4094,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				function getDropPosition(event, dropZone) {
 					const allCards = Array.from(dropZone.querySelectorAll('[data-task-id]'));
 					// Filter out dragged elements to get accurate drop position
-					const taskCards = allCards.filter(card => !draggedTaskIds.includes(card.getAttribute('data-task-id')));
+					const taskCards = allCards.filter(card => !card.hidden && !draggedTaskIds.includes(card.getAttribute('data-task-id')));
 
 					if (taskCards.length === 0) {
 						return 0; // Empty zone, position 0
@@ -4414,6 +4445,10 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					}
 				}, true);
 				document.addEventListener('keydown', function(event) {
+                    if (event.key === 'ArrowLeft') {
+                        const panel = event.target.closest('[data-task-card-submenu-portaled="true"]');
+                        if (panel) { event.preventDefault(); event.stopPropagation(); backKanbanSubmenu(panel); return; }
+                    }
 					if (event.key === 'Escape') {
 						const dropdown = kanbanDropdownForTarget(event.target);
 						if (dropdown) {

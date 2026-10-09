@@ -26,7 +26,7 @@ func TestActiveMenuIgnoresOldSortPreference(t *testing.T) {
 			t.Fatalf("refresh: %d", rec.Code)
 		}
 		body := rec.Body.String()
-		for _, text := range []string{"column-active", "Stop All", `data-delete-all-tasks-category="active"`} {
+		for _, text := range []string{"column-active", `data-kanban-action="cancel"`, `data-kanban-action="delete"`} {
 			if !strings.Contains(body, text) {
 				t.Errorf("missing %s", text)
 			}
