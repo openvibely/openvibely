@@ -74,23 +74,19 @@
                 if (label) { label.classList.toggle('hidden', !selected.length); label.querySelector('input').checked = chosen; }
             });
             col.querySelectorAll('[data-kanban-select]').forEach(button => { button.textContent = selected.length ? 'Clear selection' : 'Select all'; });
-            col.querySelectorAll('[data-kanban-scope]').forEach(el => { el.textContent = 'Actions for ' + (selected.length ? selected.length + ' selected' : Object.keys(filter).length ? visible.length + ' filtered' : 'all ' + visible.length); });
+            const count = col.querySelector('[data-kanban-count]');
+            if (count) count.textContent = String(visible.length);
+            const clear = col.querySelector('[data-kanban-clear]');
+            if (clear) clear.classList.toggle('hidden', !Object.keys(filter).length);
             col.querySelectorAll('[data-kanban-action]').forEach(el => { el.disabled = !!window.kanbanBatchRunning || !visible.length; });
-            const summary = col.querySelector('[data-kanban-summary]');
-            summary.replaceChildren();
             document.querySelectorAll('[data-kanban-filter][data-column="' + col.dataset.kanbanCategory + '"]').forEach(button => {
+                if (button.dataset.kanbanFilter === 'clear') return;
                 const active = filter[button.dataset.kanbanFilter];
                 const checked = (active ? active.value : '') === button.dataset.value;
                 button.setAttribute('aria-pressed', String(checked));
                 button.classList.remove('active');
                 const check = button.querySelector('[data-filter-check]');
                 if (check) check.textContent = checked ? '✓' : '';
-            });
-            if (selected.length) summary.append(textElement('span', selected.length + ' selected '));
-            if (Object.keys(filter).length) summary.append(textElement('span', visible.length + ' of ' + all.length + ' '));
-            Object.entries(filter).forEach(([name, value]) => {
-                const chip = textElement('button', value.label + ' ×'); chip.className = 'btn btn-xs btn-ghost';
-                chip.onclick = () => { delete filter[name]; window.kanbanClearSelection(); refresh(); }; summary.append(chip);
             });
             renderProgress(col);
         });

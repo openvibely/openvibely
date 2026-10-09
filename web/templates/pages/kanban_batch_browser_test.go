@@ -49,6 +49,14 @@ window.addEventListener('DOMContentLoaded', async function() {
  const log = () => fetch('/mutations').then(r => r.text());
  const wait = async predicate => { for(let i=0;i<200;i++) { if(predicate()) return; await new Promise(r=>setTimeout(r,10)); } throw new Error('wait timed out'); };
  try {
+  for (const name of ['backlog', 'completed']) {
+    const headerClear = col(name).querySelector('[data-kanban-clear]');
+    check(headerClear && headerClear.classList.contains('hidden'), 'Clear filters hidden initially');
+    check(headerClear.nextElementSibling.matches('[data-kanban-menu-key]'), 'Clear filters sits beside kebab');
+  }
+  check(!document.querySelector('[data-kanban-summary], [data-kanban-scope]'), 'no redundant subheader or action scope');
+  const deleteRow = col('completed').querySelector('[data-kanban-action="delete"]').parentElement;
+  check(!deleteRow.previousElementSibling.matches('[role="separator"]'), 'Delete shares bulk action group');
   const menu = col('completed').querySelector('[data-kanban-menu-key="column-completed"]');
   menu.querySelector('[data-kanban-menu-trigger]').click();
   await wait(() => menu.getAttribute('data-kanban-menu-positioning') !== 'true');
@@ -123,6 +131,8 @@ window.addEventListener('DOMContentLoaded', async function() {
   filter('merge','unmerged').click();
   check(window.kanbanSelection.size === 0, 'filter clears selection');
   check(visible().length === 1 && visible()[0].dataset.taskId === 'one', 'combined filters');
+  check(col('completed').querySelector('[data-kanban-count]').textContent === '1', 'badge counts visible tasks');
+  check(!col('completed').querySelector('[data-kanban-clear]').classList.contains('hidden'), 'header Clear filters visible');
   check(document.getElementById('task-two').getClientRects().length === 0, 'hidden cards must not occupy space');
   await window.kanbanBatch(action('pr'));
   check((await log()) === 'one:pr', 'filtered batch scope');
@@ -130,6 +140,8 @@ window.addEventListener('DOMContentLoaded', async function() {
   await new Promise(r=>setTimeout(r,50));
   check(visible().length === 1, 'filter survives refresh');
   col('completed').querySelector('[data-kanban-filter="clear"]').click();
+  check(col('completed').querySelector('[data-kanban-clear]').classList.contains('hidden'), 'clearing hides header button');
+  check(col('completed').querySelector('[data-kanban-count]').textContent === '4', 'clearing restores count');
   await window.kanbanBatch(action('pr'));
   check((await log()) === 'one:pr,one:pr,merged:pr', 'skip existing closed PR and ineligible branch');
   await new Promise(r=>setTimeout(r,100));

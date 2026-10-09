@@ -133,7 +133,7 @@ func TestKanbanColumn_DropdownTriggersUseLabelForDesktopWebviewCompatibility(t *
 func TestKanbanColumnSharedActionsAndActiveFIFO(t *testing.T) {
 	for _, category := range []models.TaskCategory{models.CategoryBacklog, models.CategoryActive, models.CategoryCompleted} {
 		body := renderKanbanColumnForCategoryTest(t, category, nil)
-		for _, want := range []string{`data-kanban-select`, `data-kanban-action="delete"`, `data-kanban-scope`, `data-kanban-progress`} {
+		for _, want := range []string{`data-kanban-select`, `data-kanban-action="delete"`, `data-kanban-progress`} {
 			if !strings.Contains(body, want) {
 				t.Fatalf("%s missing %s", category, want)
 			}
