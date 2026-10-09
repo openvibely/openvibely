@@ -79,7 +79,7 @@ func testScheduleCalendarHeader(t *testing.T, paused, mobile bool) {
     var titleRect=pageHeader.querySelector('h2').getBoundingClientRect();
     var navigation=pageHeader.nextElementSibling.getBoundingClientRect();
     var standardGap=8;
-    check(Math.abs(navigation.top-titleRect.bottom-standardGap)<1,'navigation uses standard page header spacing, including during selection');
+    check(Math.abs(navigation.top-titleRect.bottom-standardGap)<1,'navigation uses standard page header spacing, including during selection: expected '+standardGap+'px, got '+(navigation.top-titleRect.bottom)+'px; header height='+pageHeader.getBoundingClientRect().height+'px, actions height='+root.querySelector('#schedule-header-actions').getBoundingClientRect().height+'px');
     check(Math.abs(pageHeader.querySelector('h2').getBoundingClientRect().top-top)<1,'Schedule title uses standard page header top');
     check(Math.abs(root.querySelector('#schedule-header-actions').getBoundingClientRect().top-top)<1,'New button uses standard page header top');
    }
@@ -116,7 +116,7 @@ func testScheduleCalendarHeader(t *testing.T, paused, mobile bool) {
    check(toolbar.querySelector('[data-calendar-action="skip"]').textContent==='Skip day(s)','multiple day label');
    down(days[1]);up();
    check(toolbar.querySelector('[data-calendar-action="skip"]').textContent==='Skip remaining run(s)' && toolbar.querySelector('[data-calendar-action="restore"]').textContent==='Unskip skipped run(s)','one partially skipped day has explicit action labels');
-   check(days[1].getBoundingClientRect().top===initialHeaderTop,'selection toolbar must not shift headers');down(days[3],{ctrlKey:true});up();check(count()===2,'nonconsecutive header selection');
+   check(days[1].getBoundingClientRect().top===initialHeaderTop,'selection toolbar must not shift headers: shift='+(days[1].getBoundingClientRect().top-initialHeaderTop)+'px, toolbar height='+toolbar.getBoundingClientRect().height+'px, scrollbar and borders='+(toolbar.offsetHeight-toolbar.clientHeight)+'px');down(days[3],{ctrlKey:true});up();check(count()===2,'nonconsecutive header selection');
    check(toolbar.querySelector('[data-calendar-action="skip"]').textContent==='Skip remaining run(s)','partial date selection explains remaining runs');
    check(toolbar.querySelector('[data-calendar-action="restore"]').textContent==='Unskip skipped run(s)','partial date selection explains skipped runs');
    checkHeaderAlignment();
