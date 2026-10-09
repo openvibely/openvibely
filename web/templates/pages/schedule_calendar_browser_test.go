@@ -18,6 +18,15 @@ import (
 )
 
 func TestBrowserFunctional_ScheduleCalendarSelectionActions(t *testing.T) {
+	testScheduleCalendarHeader(t, false)
+}
+
+func TestBrowserFunctional_ScheduleCalendarPausedHeader(t *testing.T) {
+	testScheduleCalendarHeader(t, true)
+}
+
+func testScheduleCalendarHeader(t *testing.T, paused bool) {
+	t.Helper()
 	chrome := chatNavigationChromePath(t)
 	project := models.Project{ID: "calendar-selection", Name: "Calendar"}
 	day := getStartOfWeek(0).AddDate(0, 0, 1)
@@ -43,6 +52,24 @@ func TestBrowserFunctional_ScheduleCalendarSelectionActions(t *testing.T) {
   (async function(){
    var root=document.getElementById('schedule-content');
    root.querySelector('#schedule-timeline-container').scrollTop=0;
+   var pageHeader=root.querySelector('[data-page-header]');
+   var toolbar=root.querySelector('#schedule-selection-toolbar');
+   var menu=root.querySelector('#schedule-project-menu');
+   check(pageHeader.contains(toolbar),'selection actions belong in page header');
+   check(pageHeader.contains(menu),'calendar menu belongs beside New');
+   check(menu.querySelector('summary').textContent==='⋮','visible vertical kebab');
+   check(!menu.hidden,'calendar menu stays visible');
+   if (JSON.parse(root.querySelector('#schedule-calendar-controls').dataset.state).paused) {
+    check(!root.querySelector('#schedule-paused-status').hidden,'paused status stays in header');
+    check(root.querySelector('[data-calendar-action="pause_all"]').hidden,'paused project hides pause action');
+    var resume=root.querySelector('[data-calendar-action="resume_all"]');
+    check(!resume.hidden && menu.contains(resume),'resume remains in permanent menu');
+    menu.open=true;
+    resume.click();await tick();
+    check(requests[0].action==='resume_all','project resume action works from menu');
+    report('pass','');return;
+   }
+   check(root.querySelector('[data-calendar-action="resume_all"]').hidden,'active project offers pause only');
    var days=Array.from(root.querySelectorAll('[data-calendar-day]'));
    function down(el,options){ el.dispatchEvent(new PointerEvent('pointerdown',Object.assign({bubbles:true,cancelable:true,pointerType:'mouse',button:0,pointerId:8},options||{}))); }
    function up(){window.dispatchEvent(new PointerEvent('pointerup',{pointerId:8}));}
@@ -149,7 +176,7 @@ func TestBrowserFunctional_ScheduleCalendarSelectionActions(t *testing.T) {
 			return
 		}
 		var out bytes.Buffer
-		if err := Schedule([]models.Project{project}, &project, tasks, 0, nil, nil, models.ScheduleCalendarState{Skips: []models.ScheduleSkip{
+		if err := Schedule([]models.Project{project}, &project, tasks, 0, nil, nil, models.ScheduleCalendarState{Paused: paused, Skips: []models.ScheduleSkip{
 			{ScheduleID: "s0", StartAt: day.Add(8 * time.Hour).Unix(), EndAt: day.Add(8*time.Hour).Unix() + 1},
 			{ScheduleID: "s2", StartAt: day.Add(12*time.Hour + 20*time.Minute).Unix(), EndAt: day.Add(12*time.Hour + 30*time.Minute).Unix()},
 			{ScheduleID: "s3", StartAt: day.Add(12 * time.Hour).Unix(), EndAt: day.Add(13 * time.Hour).Unix()},
