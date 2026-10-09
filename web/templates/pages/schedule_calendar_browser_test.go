@@ -73,6 +73,10 @@ func testScheduleCalendarHeader(t *testing.T, paused, mobile bool) {
    var menu=root.querySelector('#schedule-project-menu');
    function checkHeaderAlignment() {
     var top=pageHeader.getBoundingClientRect().top+parseFloat(getComputedStyle(pageHeader).paddingTop);
+    var titleRect=pageHeader.querySelector('h2').getBoundingClientRect();
+    var navigation=pageHeader.nextElementSibling.getBoundingClientRect();
+    var standardGap=8;
+    check(Math.abs(navigation.top-titleRect.bottom-standardGap)<1,'navigation uses standard page header spacing, including during selection');
     check(Math.abs(pageHeader.querySelector('h2').getBoundingClientRect().top-top)<1,'Schedule title uses standard page header top');
     check(Math.abs(root.querySelector('#schedule-header-actions').getBoundingClientRect().top-top)<1,'New button uses standard page header top');
    }
