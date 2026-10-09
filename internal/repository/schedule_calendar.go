@@ -250,9 +250,13 @@ func (r *ScheduleRepo) ApplyCalendarAction(ctx context.Context, projectID string
 // SuppressedOccurrence is checked before either ordinary or automation dispatch.
 // The returned boundary allows a skipped day/hour to advance in one scheduler tick.
 func (r *ScheduleRepo) SuppressedOccurrence(ctx context.Context, scheduleID string, occurrence time.Time) (bool, time.Time, error) {
+	return suppressedScheduleOccurrence(ctx, r.db, scheduleID, occurrence)
+}
+
+func suppressedScheduleOccurrence(ctx context.Context, exec SQLExecutor, scheduleID string, occurrence time.Time) (bool, time.Time, error) {
 	var paused bool
 	var end, restoredStart sql.NullInt64
-	err := r.db.QueryRowContext(ctx, `SELECT (s.enabled = 0 OR EXISTS(SELECT 1 FROM schedule_project_pauses p WHERE p.project_id = t.project_id)),
+	err := exec.QueryRowContext(ctx, `SELECT (s.enabled = 0 OR EXISTS(SELECT 1 FROM schedule_project_pauses p WHERE p.project_id = t.project_id)),
  (SELECT MAX(k.end_at) FROM schedule_skips k WHERE k.project_id = t.project_id AND (k.schedule_id = '' OR k.schedule_id = s.id) AND k.restored = 0 AND k.start_at <= ? AND k.end_at > ? AND NOT EXISTS (SELECT 1 FROM schedule_skips restored WHERE restored.project_id = t.project_id AND restored.schedule_id = s.id AND restored.restored = 1 AND restored.start_at <= ? AND restored.end_at > ?))
  ,(SELECT MIN(restored.start_at) FROM schedule_skips restored WHERE restored.project_id = t.project_id AND restored.schedule_id = s.id AND restored.restored = 1 AND restored.start_at > ?)
  FROM schedules s JOIN tasks t ON t.id = s.task_id WHERE s.id = ?`, occurrence.Unix(), occurrence.Unix(), occurrence.Unix(), occurrence.Unix(), occurrence.Unix(), scheduleID).Scan(&paused, &end, &restoredStart)
@@ -290,4 +294,42 @@ func changeScheduleSkip(ctx context.Context, exec SQLExecutor, projectID string,
 	}
 	n, err := result.RowsAffected()
 	return n > 0, err
+}
+
+// ClaimCalendarOccurrence serializes ordinary dispatch admission with calendar
+// mutations. A blackout committed before admission prevents dispatch; a run
+// already admitted is not cancelled by a subsequent pause.
+func (r *ScheduleRepo) ClaimCalendarOccurrence(ctx context.Context, schedule models.Schedule, now time.Time, next *time.Time) (bool, error) {
+	if schedule.NextRun == nil {
+		return false, nil
+	}
+	claimed := false
+	err := withImmediateTx(ctx, r.db, func(exec SQLExecutor) error {
+		suppressed, _, err := suppressedScheduleOccurrence(ctx, exec, schedule.ID, *schedule.NextRun)
+		if err != nil || suppressed {
+			return err
+		}
+		result, err := exec.ExecContext(ctx, `UPDATE schedules SET last_run = ?, next_run = ?, updated_at = datetime('now')
+   WHERE id = ? AND task_id = ? AND enabled = 1 AND next_run = ? AND next_run <= ?
+   AND EXISTS (SELECT 1 FROM tasks WHERE id = schedules.task_id AND status NOT IN ('running','queued') AND category != 'chat')`,
+			normalizeScheduleTime(now), normalizeScheduleNextRun(next), schedule.ID, schedule.TaskID, normalizeScheduleTime(*schedule.NextRun), normalizeScheduleTime(now))
+		if err != nil {
+			return err
+		}
+		n, err := result.RowsAffected()
+		if err != nil || n == 0 {
+			return err
+		}
+		claimed = true
+		return nil
+	})
+	return claimed && err == nil, err
+}
+
+// ReleaseCalendarOccurrence restores a failed planner admission only if no
+// intervening scheduler or user edit has changed its occurrence state.
+func (r *ScheduleRepo) ReleaseCalendarOccurrence(ctx context.Context, schedule models.Schedule, admittedAt time.Time, next *time.Time) error {
+	_, err := execBoundSQLite(ctx, r.db, `UPDATE schedules SET last_run = ?, next_run = ?, updated_at = datetime('now') WHERE id = ? AND task_id = ? AND last_run = ? AND next_run IS ?`,
+		schedule.LastRun, schedule.NextRun, schedule.ID, schedule.TaskID, normalizeScheduleTime(admittedAt), normalizeScheduleNextRun(next))
+	return err
 }

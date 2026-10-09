@@ -235,10 +235,25 @@ func (s *SchedulerService) checkDueTasks(ctx context.Context) {
 			}
 		}
 
+		nextRun := sched.ComputeNextRun(now)
+		claimed, err := s.scheduleRepo.ClaimCalendarOccurrence(ctx, sched, now, nextRun)
+		if err != nil {
+			applog.Infof("[scheduler] claiming schedule=%s: %v", sched.ID, err)
+			continue
+		}
+		if !claimed {
+			continue
+		}
+		releaseAdmission := func() {
+			if err := s.scheduleRepo.ReleaseCalendarOccurrence(ctx, sched, now, nextRun); err != nil {
+				applog.Infof("[scheduler] releasing schedule=%s: %v", sched.ID, err)
+			}
+		}
 		// Reset task status to pending so ClaimTask can pick it up
 		if task.Status != "pending" {
 			if err := s.taskRepo.UpdateStatus(ctx, task.ID, "pending"); err != nil {
 				applog.Infof("[scheduler] checkDueTasks error resetting task %s status to pending: %v", task.ID, err)
+				releaseAdmission()
 				continue
 			}
 			task.Status = "pending"
@@ -251,6 +266,7 @@ func (s *SchedulerService) checkDueTasks(ctx context.Context) {
 			prevCategory := task.Category
 			if err := s.taskRepo.UpdateCategory(ctx, task.ID, models.CategoryScheduled); err != nil {
 				applog.Infof("[scheduler] checkDueTasks error resetting task %s category to scheduled: %v", task.ID, err)
+				releaseAdmission()
 				continue
 			}
 			task.Category = models.CategoryScheduled
@@ -273,6 +289,7 @@ func (s *SchedulerService) checkDueTasks(ctx context.Context) {
 		if task.SwarmRole == models.SwarmRoleParent && s.swarmStarter != nil {
 			if err := s.swarmStarter.StartPlannerForScheduledRun(ctx, task.ID, sched.ClearContextOnStart); err != nil {
 				applog.Infof("[scheduler] checkDueTasks error starting swarm planner task=%s: %v", task.ID, err)
+				releaseAdmission()
 				continue
 			}
 		} else {
@@ -280,16 +297,6 @@ func (s *SchedulerService) checkDueTasks(ctx context.Context) {
 				s.workerSvc.ClearCancellationRequested(task.ID)
 			}
 			s.workerSvc.Submit(*task)
-		}
-		// Compute next run
-		nextRun := sched.ComputeNextRun(now)
-		if nextRun != nil {
-			applog.Infof("[scheduler] checkDueTasks next_run for schedule %s: %s", sched.ID, nextRun.Format("2006-01-02 15:04:05"))
-		} else {
-			applog.Infof("[scheduler] checkDueTasks schedule %s has no next run (one-time, completed)", sched.ID)
-		}
-		if err := s.scheduleRepo.MarkRan(ctx, sched.ID, now, nextRun); err != nil {
-			applog.Infof("[scheduler] checkDueTasks error updating schedule %s: %v", sched.ID, err)
 		}
 	}
 }

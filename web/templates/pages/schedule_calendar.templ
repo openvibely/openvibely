@@ -10,10 +10,24 @@ func scheduleCardInterval(occurrence TaskOccurrence) models.ScheduleSkip {
  start := occurrence.OccurrenceTime
  end := start.Add(time.Second)
  if occurrence.Task.Schedule != nil && occurrence.Task.Schedule.RepeatType.IsSubDaily() {
-  start = time.Date(start.Year(), start.Month(), start.Day(), start.Hour(), 0, 0, 0, start.Location())
-  end = start.Add(time.Hour)
+  sameHour := func(t time.Time) bool { return t.Format("2006-01-02-15") == occurrence.OccurrenceTime.Format("2006-01-02-15") }
+  start = start.Add(-time.Duration(start.Second())*time.Second - time.Duration(start.Nanosecond()))
+  for sameHour(start.Add(-time.Minute)) { start = start.Add(-time.Minute) }
+  end = start.Add(time.Minute)
+  for sameHour(end) { end = end.Add(time.Minute) }
  }
  return models.ScheduleSkip{ScheduleID: getScheduleID(occurrence.Task), StartAt: start.Unix(), EndAt: end.Unix()}
+}
+
+func scheduleOccurrenceStep(occurrence TaskOccurrence) int64 {
+ if occurrence.Task.Schedule == nil { return 0 }
+ s := occurrence.Task.Schedule
+ switch s.RepeatType {
+ case models.RepeatSeconds: return int64(s.RepeatInterval)
+ case models.RepeatMinutes: return int64(s.RepeatInterval)*60
+ case models.RepeatHours: return int64(s.RepeatInterval)*3600
+ }
+ return 0
 }
 
 func scheduleCalendarJSON(states []models.ScheduleCalendarState) string {
@@ -95,16 +109,16 @@ templ ScheduleCalendarScript() {
   function skipStatus(card) {
    var run = interval(card);
    var relevant = skips.filter(function(skip) { return (!skip.schedule_id || skip.schedule_id === run.schedule_id) && intersects(skip, run); });
-   var boundaries = [run.start_at, run.end_at];
-   relevant.forEach(function(skip) { boundaries.push(Math.max(run.start_at, skip.start_at), Math.min(run.end_at, skip.end_at)); });
-   boundaries = Array.from(new Set(boundaries)).sort(function(a,b) { return a-b; });
-   var excluded = 0;
-   for (var i = 0; i < boundaries.length-1; i++) {
-    var at = boundaries[i];
+   if (!relevant.length) return 'none';
+   var first = Number(card.dataset.occurrenceFirst), step = Number(card.dataset.occurrenceStep);
+   var excluded = 0, total = 0;
+   for (var at = first; at < run.end_at; at += step) {
+    total++;
     var restored = relevant.some(function(skip) { return skip.restored && skip.schedule_id === run.schedule_id && skip.start_at <= at && skip.end_at > at; });
-    if (!restored && relevant.some(function(skip) { return !skip.restored && skip.start_at <= at && skip.end_at > at; })) excluded += boundaries[i+1]-at;
+    if (!restored && relevant.some(function(skip) { return !skip.restored && skip.start_at <= at && skip.end_at > at; })) excluded++;
+    if (!(step > 0)) break;
    }
-   return excluded === 0 ? 'none' : excluded === run.end_at-run.start_at ? 'full' : 'partial';
+   return excluded === 0 ? 'none' : excluded === total ? 'full' : 'partial';
   }
   var selectionModifier = /Mac|iPhone|iPad|iPod/.test(navigator.platform) ? 'Command' : 'Ctrl';
   cards().forEach(function(card) {
@@ -214,7 +228,8 @@ templ ScheduleCalendarScript() {
     var message = isUndo ? 'Change undone.' : verbs[request.action] ? size + ' ' + noun + ' ' + verbs[request.action] + '.' : request.action === 'pause_all' ? 'Schedules paused.' : 'Schedules resumed.';
     undo = window._scheduleCalendarUndo = {project: project, action: isUndo ? null : inverse, message: message, expires: Date.now()+6000};
     if (!root.isConnected) return;
-    _schedDragDropJustCompleted = true;
+    var timeline = root.querySelector('#schedule-timeline-container');
+    window._scheduleCalendarScroll = {project: project, week: new URLSearchParams(location.search).get('week') || '0', top: timeline.scrollTop, left: timeline.scrollLeft};
     var url = new URL('/schedule', window.location.origin);
     url.searchParams.set('project_id', project);
     url.searchParams.set('week', new URLSearchParams(window.location.search).get('week') || '0');
@@ -222,7 +237,8 @@ templ ScheduleCalendarScript() {
    } catch (error) {
     if (root.isConnected) feedback(error.message, null);
    } finally {
-    busy = false; root.dataset.calendarBusy = 'false';
+    if (root.isConnected) delete window._scheduleCalendarScroll;
+   busy = false; root.dataset.calendarBusy = 'false';
     root.querySelectorAll('[data-calendar-action]').forEach(function(button) { button.disabled = false; });
     if (root.isConnected) window.updateScheduleSelection();
    }

@@ -476,6 +476,14 @@ func (r *AutomationRepo) ClaimScheduledOccurrence(ctx context.Context, schedule 
 	}
 	defer finishImmediate()
 
+	suppressed, _, err := suppressedScheduleOccurrence(ctx, conn, schedule.ID, due)
+	if err != nil {
+		return nil, nil, err
+	}
+	if suppressed {
+		return nil, nil, ErrAutomationScheduleChanged
+	}
+
 	if existing, dispatch, err := loadInvocationForOccurrence(ctx, conn, schedule.ID, occurrenceKey); err != nil {
 		return nil, nil, err
 	} else if existing != nil {
