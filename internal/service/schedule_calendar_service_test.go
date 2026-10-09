@@ -315,3 +315,94 @@ func TestCalendarPlannerCancelledHandoff(t *testing.T) {
 		})
 	}
 }
+
+func TestCalendarDeletedScheduleCannotRecoverPlanner(t *testing.T) {
+	for _, started := range []bool{false, true} {
+		t.Run(fmt.Sprint(started), func(t *testing.T) {
+			db := testutil.NewTestDB(t)
+			ctx := context.Background()
+			tasks := repository.NewTaskRepo(db, nil)
+			schedules := repository.NewScheduleRepo(db)
+			worker := newTestWorkerService(t)
+			swarm := NewSwarmService(NewTaskService(tasks, nil, worker), tasks, repository.NewExecutionRepo(db), worker)
+			parent := &models.Task{ProjectID: "default", Title: "Deleted schedule", Prompt: "plan", Category: models.CategoryActive, Status: models.StatusPending, SwarmRole: models.SwarmRoleParent}
+			require.NoError(t, tasks.Create(ctx, parent))
+			now := time.Now().UTC().Truncate(time.Second)
+			schedule := &models.Schedule{TaskID: parent.ID, RunAt: now, RepeatType: models.RepeatOnce, RepeatInterval: 1, Enabled: true, ClearContextOnStart: true}
+			require.NoError(t, schedules.Create(ctx, schedule))
+			claimed, err := schedules.ClaimCalendarOccurrence(ctx, *schedule, now, nil)
+			require.NoError(t, err)
+			require.True(t, claimed)
+			require.NoError(t, swarm.StartPlannerForScheduledRun(ctx, parent.ID, true))
+			admissions, err := schedules.ListCalendarAdmissions(ctx)
+			require.NoError(t, err)
+			require.Len(t, admissions, 1)
+			admission := admissions[0]
+			if started {
+				_, ok, err := tasks.ClaimReservedTaskForDispatch(ctx, admission.Task.ID, admission.ExecutionID)
+				require.NoError(t, err)
+				require.True(t, ok)
+			}
+			require.NoError(t, schedules.Delete(ctx, schedule.ID))
+			child, err := tasks.GetByID(ctx, admission.Task.ID)
+			require.NoError(t, err)
+			var status string
+			require.NoError(t, db.QueryRowContext(ctx, `SELECT status FROM executions WHERE id = ?`, admission.ExecutionID).Scan(&status))
+			if started {
+				require.Equal(t, models.StatusRunning, child.Status)
+				require.Equal(t, string(models.ExecRunning), status)
+			} else {
+				require.Equal(t, models.StatusCancelled, child.Status)
+				require.Equal(t, string(models.ExecCancelled), status)
+				_, ok, err := tasks.ClaimReservedTaskForDispatch(ctx, child.ID, admission.ExecutionID)
+				require.NoError(t, err)
+				require.False(t, ok)
+				recovered := newTestWorkerService(t)
+				recovered.SetTaskRepo(tasks)
+				recovered.SetExecutionRepo(repository.NewExecutionRepo(db))
+				recovered.ReconcileReservedTasks(ctx)
+				recovered.ReconcilePendingTasks(ctx)
+				select {
+				case task := <-recovered.Submitted():
+					t.Fatalf("withdrawn planner recovered: %s", task.ID)
+				default:
+				}
+			}
+		})
+	}
+}
+
+func TestCalendarActiveRecoveryPreservesParentAdmission(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	tasks := repository.NewTaskRepo(db, nil)
+	schedules := repository.NewScheduleRepo(db)
+	worker := newTestWorkerService(t)
+	swarm := NewSwarmService(NewTaskService(tasks, nil, worker), tasks, repository.NewExecutionRepo(db), worker)
+	parent := &models.Task{ProjectID: "default", Title: "Pending handoff", Prompt: "plan", Category: models.CategoryActive, Status: models.StatusPending, SwarmRole: models.SwarmRoleParent}
+	require.NoError(t, tasks.Create(ctx, parent))
+	now := time.Now().UTC().Truncate(time.Second)
+	schedule := &models.Schedule{TaskID: parent.ID, RunAt: now, RepeatType: models.RepeatOnce, RepeatInterval: 1, Enabled: true, ClearContextOnStart: true}
+	require.NoError(t, schedules.Create(ctx, schedule))
+	claimed, err := schedules.ClaimCalendarOccurrence(ctx, *schedule, now, nil)
+	require.NoError(t, err)
+	require.True(t, claimed)
+	scheduler := NewSchedulerService(schedules, tasks, worker)
+	scheduler.SetSwarmPlannerStarter(swarm)
+	// Simulate a deferred/failed handoff followed by the normal active scan.
+	scheduler.checkActiveTasks(ctx)
+	children, err := tasks.ListSwarmChildren(ctx, parent.ID)
+	require.NoError(t, err)
+	require.Empty(t, children)
+	admissions, err := schedules.ListCalendarAdmissions(ctx)
+	require.NoError(t, err)
+	require.Len(t, admissions, 1)
+	require.Equal(t, parent.ID, admissions[0].Task.ID)
+	scheduler.dispatchCalendarAdmissions(ctx)
+	admissions, err = schedules.ListCalendarAdmissions(ctx)
+	require.NoError(t, err)
+	require.Len(t, admissions, 1)
+	require.NotEmpty(t, admissions[0].ExecutionID)
+	require.NotEqual(t, parent.ID, admissions[0].Task.ID)
+	require.True(t, admissions[0].Task.StartsNewContext)
+}
