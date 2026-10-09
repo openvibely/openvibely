@@ -7,6 +7,7 @@
     const key = col => col.dataset.projectId + ':' + col.dataset.kanbanCategory;
     const cards = col => Array.from(col.querySelectorAll('.card[data-task-id]'));
     const selection = () => window.kanbanSelection || new Set();
+    const selectionModifier = /Mac|iPhone|iPad|iPod/.test(navigator.platform) ? 'Command' : 'Ctrl';
     function matches(data, filter) {
         if (filter.status && data.taskStatus !== filter.status.value) return false;
         if (filter.priority && data.taskPriority !== filter.priority.value) return false;
@@ -63,6 +64,7 @@
             const filter = filters.get(key(col)) || {};
             const all = cards(col);
             all.forEach(card => {
+                card.title = selectionModifier + '+click to select task(s)';
                 card.hidden = col.dataset.kanbanCategory !== 'active' && !matches(card.dataset, filter);
                 if (card.hidden) selection().delete(card.dataset.taskId);
             });
