@@ -502,7 +502,11 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 					<span class="sm:hidden">+ New</span>
 				</button>
                     <details id="schedule-project-menu">
-                        <summary class="btn btn-sm btn-ghost" aria-label="Calendar actions">⋮</summary>
+                        <summary class="btn btn-sm btn-ghost" aria-label="Calendar actions">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z"></path>
+                            </svg>
+                        </summary>
                         <ul class="ov-menu ov-menu-actions menu">
                             <li><button type="button" data-calendar-action="pause_all">Pause all schedules</button></li>
                             <li><button type="button" data-calendar-action="resume_all" hidden>Resume schedules</button></li>
