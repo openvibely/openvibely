@@ -28,15 +28,16 @@ templ ScheduleCalendarControls(states []models.ScheduleCalendarState) {
  #schedule-content { position: relative; }
  #schedule-calendar-viewport { position: relative; display: flex; flex: 1; flex-direction: column; min-height: 0; min-width: 0; }
  #schedule-selection-slot { display: flex; flex: 1; min-width: 0; justify-content: center; align-items: center; }
- #schedule-selection-toolbar { min-width: 0; max-width: 100%; padding: .5rem .75rem; border: 1px solid var(--ov-schedule-grid-border); border-radius: .75rem; background: var(--ov-menu-surface); box-shadow: 0 2px 8px rgba(0,0,0,.12); white-space: nowrap; overflow-x: auto; }
+ #schedule-selection-toolbar { min-width: 0; max-width: 100%; padding: 3px .75rem; border: 1px solid var(--ov-schedule-grid-border); border-radius: .75rem; background: var(--ov-menu-surface); box-shadow: 0 2px 8px rgba(0,0,0,.12); white-space: nowrap; overflow-x: auto; }
  #schedule-selection-toolbar > * { flex-shrink: 0; }
+ #schedule-content [data-page-header] #schedule-selection-toolbar button { min-height: 24px; height: 24px; }
  #schedule-selection-toolbar button { border: 1px solid var(--ov-schedule-grid-border); }
  #schedule-selection-toolbar [data-calendar-action="clear"] { border: 0; }
  #schedule-selection-toolbar[aria-hidden="true"] { display: none; }
  #schedule-calendar-feedback { position: absolute; bottom: 2rem; right: 1rem; z-index: 45; padding: .75rem; border-radius: .5rem; background: var(--ov-menu-surface); box-shadow: 0 2px 12px rgba(0,0,0,.2); }
  #schedule-content [hidden] { display: none !important; }
  #schedule-project-menu { position: relative; flex-shrink: 0; }
- #schedule-content [data-page-header] { gap: 2rem; min-height: 4.25rem; align-items: flex-start; }
+ #schedule-content [data-page-header] { gap: 2rem; align-items: flex-start; }
  #schedule-content [data-page-header] > h2, #schedule-header-actions { flex-shrink: 0; }
  #schedule-header-actions { display: flex; align-items: center; gap: .5rem; margin-left: auto; }
  @media (max-width: 767px) {
