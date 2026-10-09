@@ -45,7 +45,11 @@ if category == models.CategoryCompleted {
 	date = "completed"
 } }}
 				for i, value := range []string{date+"_desc", date+"_asc", "title_asc", "title_desc", "priority_desc", "priority_asc"} {
-					<li><button type="button" tabindex="0" class={ isSortActive(sort, value) } hx-post={ fmt.Sprintf("/tasks/%s/sort?project_id=%s&sort=%s", cat, projectID, value) } hx-target="#kanban-board" hx-swap="outerHTML">{ []string{"Newest first", "Oldest first", "Name A–Z", "Name Z–A", "Priority high–low", "Priority low–high"}[i] }</button></li>
+					<li><button type="button" tabindex="0" class="whitespace-nowrap" aria-pressed={ fmt.Sprintf("%t", sort == value) } hx-on::before-request="closeKanbanMenu(null, false)" hx-post={ fmt.Sprintf("/tasks/%s/sort?project_id=%s&sort=%s", cat, projectID, value) } hx-target="#kanban-board" hx-swap="outerHTML"><span data-filter-check aria-hidden="true" style="width:1em;display:inline-block">
+                        if sort == value {
+                            ✓
+                        }
+                    </span>{ []string{"Newest first", "Oldest first", "Name A–Z", "Name Z–A", "Priority high–low", "Priority low–high"}[i] }</button></li>
 				}
 			}
 		}

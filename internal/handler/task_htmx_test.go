@@ -337,8 +337,11 @@ func assertSortControlActive(t *testing.T, body string, sortQuery string) {
 		}
 		return false
 	}
-	if !hasClass("active") || !hasClass("font-semibold") {
-		t.Fatalf("sort control %q is not rendered active: %s", sortQuery, control)
+	if hasClass("active") || hasClass("font-semibold") {
+		t.Fatalf("sort control %q retains persistent highlighting: %s", sortQuery, control)
+	}
+	if !strings.Contains(control, `aria-pressed="true"`) || !strings.Contains(control, `data-filter-check`) || !strings.Contains(control, "✓</span>") {
+		t.Fatalf("sort control %q is missing its selected checkmark: %s", sortQuery, control)
 	}
 }
 

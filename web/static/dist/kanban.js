@@ -82,7 +82,7 @@
                 const active = filter[button.dataset.kanbanFilter];
                 const checked = (active ? active.value : '') === button.dataset.value;
                 button.setAttribute('aria-pressed', String(checked));
-                button.classList.toggle('active', checked);
+                button.classList.remove('active');
                 const check = button.querySelector('[data-filter-check]');
                 if (check) check.textContent = checked ? '✓' : '';
             });
@@ -96,12 +96,17 @@
         });
     }
     window.kanbanRefresh = refresh;
+    function closeChoiceMenu(button) {
+        const dropdown = window.kanbanDropdownForTarget(button);
+        window.closeKanbanMenu(dropdown, true);
+    }
     window.kanbanSelectAll = button => {
         const col = column(button.dataset.column); if (!col) return;
         const clear = cards(col).some(card => selection().has(card.dataset.taskId));
         window.kanbanClearSelection();
         if (!clear) cards(col).filter(card => !card.hidden).forEach(card => selection().add(card.dataset.taskId));
         refresh();
+        closeChoiceMenu(button);
     };
     window.kanbanToggleCard = input => {
         const card = input.closest('.card[data-task-id]'), col = card.closest('[data-kanban-category]');
@@ -119,6 +124,7 @@
             filters.set(key(col), filter);
         }
         window.kanbanClearSelection(); refresh();
+        closeChoiceMenu(button);
     };
     async function request(path, options) {
         const response = await fetch(path, options);
