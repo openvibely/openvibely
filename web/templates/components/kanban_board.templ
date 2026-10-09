@@ -168,7 +168,7 @@ templ KanbanBoard(tasks []models.Task, projectID string, backlogSort string, com
 
 templ KanbanColumn(tasks []models.Task, projectID string, category models.TaskCategory, backlogSort string, completedSort string, llmModels []models.LLMConfig, agentDefs []repository.AgentTaskUIOption, menuStates ...map[string]TaskCardMergeMenuState) {
 	<div data-kanban-category={ string(category) } data-project-id={ projectID } class="kanban-column w-full min-w-0 bg-base-300 rounded-lg p-3 flex flex-col h-[60dvh] min-h-[24rem] lg:h-full lg:min-h-0">
-		<div class="flex items-center justify-between mb-3 flex-shrink-0 min-h-11">
+		<div class="flex items-center justify-between mb-3 flex-shrink-0 h-11 min-h-11">
 			<div class="flex items-center gap-2">
 				<h3 class="font-bold text-lg">{ capitalize(string(category)) }</h3>
 				if category == models.CategoryActive {

@@ -255,7 +255,7 @@ func KanbanColumn(tasks []models.Task, projectID string, category models.TaskCat
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, "\" class=\"kanban-column w-full min-w-0 bg-base-300 rounded-lg p-3 flex flex-col h-[60dvh] min-h-[24rem] lg:h-full lg:min-h-0\"><div class=\"flex items-center justify-between mb-3 flex-shrink-0 min-h-11\"><div class=\"flex items-center gap-2\"><h3 class=\"font-bold text-lg\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, "\" class=\"kanban-column w-full min-w-0 bg-base-300 rounded-lg p-3 flex flex-col h-[60dvh] min-h-[24rem] lg:h-full lg:min-h-0\"><div class=\"flex items-center justify-between mb-3 flex-shrink-0 h-11 min-h-11\"><div class=\"flex items-center gap-2\"><h3 class=\"font-bold text-lg\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
