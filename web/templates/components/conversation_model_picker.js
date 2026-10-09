@@ -602,6 +602,8 @@
     }
   }
   function init(btn) {
+    btn.setAttribute("aria-keyshortcuts", "Meta+Shift+L");
+    btn.title = "Models (⌘⇧L)";
     if (state(btn)) return;
     const form = btn.closest("form"),
       project = form.querySelector('[name="_project_id"]')?.value || "",
@@ -729,6 +731,24 @@
   document.addEventListener(
     "keydown",
     (e) => {
+      if (
+        !e.defaultPrevented && !e.isComposing && !e.repeat &&
+        e.metaKey && e.shiftKey && !e.ctrlKey && !e.altKey &&
+        e.key.toLowerCase() === "l"
+      ) {
+        const buttons = [...document.querySelectorAll("form.chat-input-container .chat-model-select")];
+        const visible = (btn) => !btn.disabled && btn.getClientRects().length > 0 &&
+          getComputedStyle(btn).visibility !== "hidden" && !btn.closest("[inert]");
+        const focusedForm = document.activeElement?.closest("form.chat-input-container");
+        const btn = buttons.find((btn) => visible(btn) && btn.closest("form") === focusedForm) ||
+          buttons.find(visible);
+        if (!btn || (document.querySelector("dialog[open]") && !btn.closest("dialog[open]"))) return;
+        e.preventDefault();
+        e.stopPropagation();
+        if (active) close(false);
+        window.ovModelPicker.open(btn);
+        return;
+      }
       if (!active) return;
       if (e.key === "Escape") {
         e.preventDefault();
