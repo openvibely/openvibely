@@ -162,11 +162,13 @@ templ ScheduleCalendarScript() {
    toolbar.setAttribute('aria-hidden', String(!any));
    toolbar.inert = !any;
    var grouped = selected.some(function(card) { return Number(card.dataset.occurrenceEnd)-Number(card.dataset.occurrenceStart)>1; });
-   toolbar.querySelector('[data-selection-count]').textContent = dates.size ? dates.size + (dates.size === 1 ? ' date selected' : ' dates selected') : selected.length + (grouped ? (selected.length === 1 ? ' run block selected' : ' run blocks selected') : (selected.length === 1 ? ' run selected' : ' runs selected'));
+   toolbar.querySelector('[data-selection-count]').textContent = dates.size ? dates.size + (dates.size === 1 ? ' day selected' : ' days selected') : selected.length + (grouped ? (selected.length === 1 ? ' run block selected' : ' run blocks selected') : (selected.length === 1 ? ' run selected' : ' runs selected'));
    ['skip','restore','pause','resume'].forEach(function(action) {
     var applicable = dates.size ? (action === 'skip' || action === 'restore') && !state.paused && selectedIntervals().some(function(run) { return dateIntervalEligible(run, action); }) : eligibleCards(action).length > 0;
     var label = {skip:'Skip',restore:'Unskip',pause:'Pause',resume:'Resume'}[action];
-    var noun = dates.size ? (dates.size === 1 ? 'date' : 'dates') : (action === 'skip' || action === 'restore') ? (grouped ? 'blocks' : 'runs') : (new Set(eligibleCards(action).map(function(card) { return card.dataset.scheduleId; })).size === 1 ? 'schedule' : 'schedules');
+    var eligible = eligibleCards(action);
+    var multipleRuns = eligible.length !== 1 || eligible.some(function(card) { return Number(card.dataset.occurrenceEnd)-Number(card.dataset.occurrenceStart)>1; });
+    var noun = dates.size ? (dates.size === 1 ? 'day' : 'days') : (action === 'skip' || action === 'restore') ? (multipleRuns ? 'runs' : 'run') : (new Set(eligibleCards(action).map(function(card) { return card.dataset.scheduleId; })).size === 1 ? 'schedule' : 'schedules');
     root.querySelectorAll('[data-calendar-action="' + action + '"]').forEach(function(button) {
      var mixedDates = dates.size && selectedIntervals().some(function(run) { return dateIntervalEligible(run, 'skip'); }) && selectedIntervals().some(function(run) { return dateIntervalEligible(run, 'restore'); });
      button.textContent = mixedDates && action === 'skip' ? 'Skip remaining runs' : mixedDates && action === 'restore' ? 'Unskip skipped runs' : label + ' ' + noun;
