@@ -134,6 +134,12 @@ window.addEventListener('DOMContentLoaded', async function() {
   check(col('completed').querySelector('[data-kanban-count]').textContent === '1', 'badge counts visible tasks');
   check(!col('completed').querySelector('[data-kanban-clear]').classList.contains('hidden'), 'header Clear filters visible');
   check(document.getElementById('task-two').getClientRects().length === 0, 'hidden cards must not occupy space');
+  filter('priority','1').click();
+  check(visible().length === 0 && select('completed').disabled, 'Select all disabled when filters hide every task');
+  select('completed').click();
+  check(window.kanbanSelection.size === 0, 'empty selection does nothing');
+  filter('priority','').click();
+  check(!select('completed').disabled, 'Select all reenabled when tasks become visible');
   await window.kanbanBatch(action('pr'));
   check((await log()) === 'one:pr', 'filtered batch scope');
   await wait(() => !document.querySelector('#kanban-board.htmx-request'));

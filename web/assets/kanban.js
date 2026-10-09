@@ -73,7 +73,7 @@
                 const label = card.querySelector('[data-kanban-checkbox]');
                 if (label) { label.classList.toggle('hidden', !selected.length); label.querySelector('input').checked = chosen; }
             });
-            col.querySelectorAll('[data-kanban-select]').forEach(button => { button.textContent = selected.length ? 'Clear selection' : 'Select all'; });
+            col.querySelectorAll('[data-kanban-select]').forEach(button => { button.textContent = selected.length ? 'Clear selection' : 'Select all'; button.disabled = !visible.length; });
             const count = col.querySelector('[data-kanban-count]');
             if (count) count.textContent = String(visible.length);
             const clear = col.querySelector('[data-kanban-clear]');
@@ -97,6 +97,7 @@
         window.closeKanbanMenu(dropdown, true);
     }
     window.kanbanSelectAll = button => {
+        if (!button || button.disabled) return;
         const col = column(button.dataset.column); if (!col) return;
         const clear = cards(col).some(card => selection().has(card.dataset.taskId));
         window.kanbanClearSelection();
