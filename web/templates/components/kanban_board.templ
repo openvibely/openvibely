@@ -179,7 +179,7 @@ templ KanbanColumn(tasks []models.Task, projectID string, category models.TaskCa
 			</div>
 			<div class="flex items-center gap-2">
 				if category != models.CategoryActive {
-					<button type="button" class="btn btn-xs btn-ghost hidden" data-kanban-clear data-kanban-filter="clear" data-column={ string(category) } onclick="kanbanSetFilter(this)">Clear filters</button>
+					<button type="button" class="btn btn-xs btn-ghost hidden" data-kanban-clear data-kanban-filter="clear" data-column={ string(category) } onclick="kanbanSetFilter(this)"><span aria-hidden="true">×</span> Clear filters</button>
 				}
 				@KanbanColumnMenu(projectID, category, backlogSort, completedSort)
 			</div>
