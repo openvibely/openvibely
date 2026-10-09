@@ -120,7 +120,7 @@ templ ScheduleCalendarScript() {
     card.title = card.dataset.scheduleTitle + ' (' + label.toLowerCase() + ')' + (paused && status !== 'none' ? ' · This run is also ' + (excluded ? 'skipped' : 'partially skipped') : '');
     card.setAttribute('aria-label', card.title);
    }
-   var hint = selectionModifier + '-click to select multiple schedules\nDrag to move\nRight-click for actions';
+   var hint = selectionModifier + '+click to select multiple schedules\nRight-click for actions';
    card.title = hint;
    card.setAttribute('aria-description', hint);
   });
@@ -153,7 +153,7 @@ templ ScheduleCalendarScript() {
    });
   }
   function dateIntervalEligible(run, action) {
-   if (action === 'restore') return skips.some(function(skip) { return !skip.restored && intersects(skip, run); });
+   if (action === 'restore') return days.some(function(day) { return Number(day.dataset.start) === run.start_at && day.dataset.skipped === 'true'; }) || selectedCards().some(function(card) { return intersects(interval(card), run) && card.dataset.skipStatus !== 'none'; });
    return !days.some(function(day) { return Number(day.dataset.start) === run.start_at && day.dataset.skipped === 'true'; }) || selectedCards().some(function(card) { return intersects(interval(card), run) && card.dataset.skipStatus !== 'full'; });
   }
   window.updateScheduleSelection = function() {
@@ -193,9 +193,10 @@ templ ScheduleCalendarScript() {
    clearScheduleSelection();
    if (event.shiftKey && anchor) range(anchor, day);
    else {
-    if (!event.metaKey && !event.ctrlKey) dates.clear();
     var key = day.dataset.calendarDay;
-    if (dates.has(key)) dates.delete(key); else dates.add(key);
+    var wasSelected = dates.has(key);
+    if (!event.metaKey && !event.ctrlKey) dates.clear();
+    if (wasSelected) dates.delete(key); else dates.add(key);
     anchor = day;
     paintDates(); window.updateScheduleSelection();
    }

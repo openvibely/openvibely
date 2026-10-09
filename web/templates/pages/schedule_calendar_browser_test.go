@@ -43,6 +43,8 @@ func testScheduleCalendarHeader(t *testing.T, paused, mobile bool) {
 		at := day.Add(12 * time.Hour)
 		tasks = append(tasks, repository.TaskWithSchedule{Task: models.Task{ID: fmt.Sprintf("t%d", i), ProjectID: project.ID, Title: fmt.Sprintf("Task %d", i)}, Schedule: &models.Schedule{ID: fmt.Sprintf("s%d", i), RunAt: at, NextRun: &at, RepeatType: models.RepeatMinutes, RepeatInterval: 10, Enabled: true}})
 	}
+	at := day.AddDate(0, 0, -1).Add(8 * time.Hour)
+	tasks = append(tasks, repository.TaskWithSchedule{Task: models.Task{ID: "unaffected", ProjectID: project.ID, Title: "Unaffected run"}, Schedule: &models.Schedule{ID: "unaffected", RunAt: at, NextRun: &at, RepeatType: models.RepeatOnce, RepeatInterval: 1, Enabled: true}})
 	runner := `<script>
  window.addEventListener('DOMContentLoaded',function() {
   var nativeFetch = window.fetch;
@@ -60,9 +62,9 @@ func testScheduleCalendarHeader(t *testing.T, paused, mobile bool) {
    var toolbar=root.querySelector('#schedule-selection-toolbar');
    var modifier=/Mac|iPhone|iPad|iPod/.test(navigator.platform)?'⌘':'Ctrl';
    var hintCard=root.querySelector('[data-schedule-card][data-has-schedule="true"]');
-   check(!hintCard.title.includes(hintCard.dataset.scheduleTitle) && hintCard.title.split('\n').length===3 && hintCard.title.includes(modifier+'-click'),'card hover only shows commands on separate lines');
-   check(hintCard.getAttribute('aria-description').includes(modifier+'-click'),'card selection hint available to assistive technology');
-   check(root.querySelector('[data-calendar-day]').title==='Click to select a day\nShift-click to select a range','day hover uses one line per command');
+   check(!hintCard.title.includes(hintCard.dataset.scheduleTitle) && hintCard.title.split('\n').length===2 && hintCard.title.includes(modifier+'+click'),'card hover only shows commands on separate lines');
+   check(hintCard.getAttribute('aria-description').includes(modifier+'+click'),'card selection hint available to assistive technology');
+   check(root.querySelector('[data-calendar-day]').title==='Click to select or deselect a day\nShift+click to select a range','day hover uses one line per command');
    check(!root.querySelector('#schedule-day-menu'),'day headers have no custom context menu');
    check(root.querySelector('.drop-zone').title==='Drag empty space to select multiple schedules','calendar space explains box selection');
    check(toolbar.querySelector('[data-calendar-action="clear"]').title==='Clear selection (Esc)','clear hover explains escape shortcut');
@@ -95,8 +97,10 @@ func testScheduleCalendarHeader(t *testing.T, paused, mobile bool) {
    function up(){window.dispatchEvent(new PointerEvent('pointerup',{pointerId:8}));}
    function count(){return root.querySelectorAll('[data-calendar-day][aria-pressed="true"]').length;}
    var initialHeaderTop=days[1].getBoundingClientRect().top;
-   down(days[2]);up();
+   down(days[0]);up();
    check(!toolbar.querySelector('[data-calendar-action="skip"]').hidden && toolbar.querySelector('[data-calendar-action="restore"]').hidden,'untouched day offers only skip');
+   down(days[0]);up();
+   check(count()===0 && getComputedStyle(toolbar).display==='none','second click deselects day and hides toolbar');
    down(days[1]);up();
    check(toolbar.querySelector('[data-calendar-action="skip"]').textContent==='Skip remaining runs' && toolbar.querySelector('[data-calendar-action="restore"]').textContent==='Unskip skipped runs','one partially skipped day has explicit action labels');
    check(days[1].getBoundingClientRect().top===initialHeaderTop,'selection toolbar must not shift headers');down(days[3],{ctrlKey:true});up();check(count()===2,'nonconsecutive header selection');
@@ -219,6 +223,8 @@ func testScheduleCalendarHeader(t *testing.T, paused, mobile bool) {
 		}
 		var out bytes.Buffer
 		if err := Schedule([]models.Project{project}, &project, tasks, 0, nil, nil, models.ScheduleCalendarState{Paused: paused, Skips: []models.ScheduleSkip{
+			// An elapsed project pause after the daily runs, with no overlapping cards, must not offer Unskip.
+			{StartAt: day.Add(-time.Hour).Unix(), EndAt: day.Add(-30 * time.Minute).Unix()},
 			{ScheduleID: "s0", StartAt: day.Add(8 * time.Hour).Unix(), EndAt: day.Add(8*time.Hour).Unix() + 1},
 			{ScheduleID: "s2", StartAt: day.Add(12*time.Hour + 20*time.Minute).Unix(), EndAt: day.Add(12*time.Hour + 30*time.Minute).Unix()},
 			{ScheduleID: "s3", StartAt: day.Add(12 * time.Hour).Unix(), EndAt: day.Add(13 * time.Hour).Unix()},
