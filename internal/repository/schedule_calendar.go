@@ -446,11 +446,6 @@ func (r *ScheduleRepo) ListCalendarAdmissions(ctx context.Context) ([]ActiveLane
 	return result, nil
 }
 
-func (r *ScheduleRepo) CompleteCalendarPlannerAdmission(ctx context.Context, taskID string) error {
-	_, err := execBoundSQLite(ctx, r.db, `DELETE FROM schedule_dispatch_admissions WHERE task_id = ? AND execution_id IS NULL`, taskID)
-	return err
-}
-
 // AdmitScheduledCalendarOccurrence keeps task board notifications on TaskRepo
 // while ScheduleRepo owns the atomic schedule/execution reservation.
 func (r *TaskRepo) AdmitScheduledCalendarOccurrence(ctx context.Context, schedule models.Schedule, now time.Time, next *time.Time) (bool, error) {

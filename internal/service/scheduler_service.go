@@ -256,9 +256,6 @@ func (s *SchedulerService) dispatchCalendarAdmissions(ctx context.Context) {
 				applog.Infof("[scheduler] starting admitted planner task=%s: %v", task.ID, err)
 				continue
 			}
-			if err := s.scheduleRepo.CompleteCalendarPlannerAdmission(ctx, task.ID); err != nil {
-				applog.Infof("[scheduler] completing planner admission: %v", err)
-			}
 		} else if admission.ExecutionID != "" && s.workerSvc != nil {
 			s.workerSvc.ClearCancellationRequested(task.ID)
 			s.workerSvc.SubmitReserved(task, admission.ExecutionID)
