@@ -58,14 +58,7 @@ templ ScheduleCalendarControls(states []models.ScheduleCalendarState) {
    <button type="button" class="btn btn-xs btn-ghost" data-calendar-action="undo">Undo</button>
   </div>
  </div>
- <div id="schedule-day-menu" class="ov-menu fixed z-[100] hidden" role="menu" aria-label="Selected date actions">
-  <ul class="ov-menu-actions menu">
-   <li><button type="button" role="menuitem" data-calendar-action="skip">Skip dates</button></li>
-   <li><button type="button" role="menuitem" data-calendar-action="restore">Unskip dates</button></li>
-   <li><button type="button" role="menuitem" data-calendar-action="pause">Pause schedules</button></li>
-   <li><button type="button" role="menuitem" data-calendar-action="resume">Resume schedules</button></li>
-  </ul>
- </div>
+
 }
 
 templ ScheduleCalendarScript() {
@@ -86,7 +79,6 @@ templ ScheduleCalendarScript() {
   var busy = false;
   var gesture = null;
   var toolbar = root.querySelector('#schedule-selection-toolbar');
-  var dayMenu = root.querySelector('#schedule-day-menu');
   var project = root.dataset.projectId;
   var undo = window._scheduleCalendarUndo;
   if (undo && (undo.project !== project || undo.expires <= Date.now())) undo = null;
@@ -128,8 +120,8 @@ templ ScheduleCalendarScript() {
     card.title = card.dataset.scheduleTitle + ' (' + label.toLowerCase() + ')' + (paused && status !== 'none' ? ' · This run is also ' + (excluded ? 'skipped' : 'partially skipped') : '');
     card.setAttribute('aria-label', card.title);
    }
-   var hint = selectionModifier + '-click to select multiple schedules · Drag to move · Right-click for actions';
-   card.title += '\n' + hint;
+   var hint = selectionModifier + '-click to select multiple schedules\nDrag to move\nRight-click for actions';
+   card.title = hint;
    card.setAttribute('aria-description', hint);
   });
   days.forEach(function(day) { day.dataset.skipped = String(skips.some(function(skip) { return !skip.restored && !skip.schedule_id && skip.start_at <= Number(day.dataset.start) && skip.end_at >= Number(day.dataset.end); })); });
@@ -176,7 +168,8 @@ templ ScheduleCalendarScript() {
     var label = {skip:'Skip',restore:'Unskip',pause:'Pause',resume:'Resume'}[action];
     var noun = dates.size ? (dates.size === 1 ? 'date' : 'dates') : (action === 'skip' || action === 'restore') ? (grouped ? 'blocks' : 'runs') : (new Set(eligibleCards(action).map(function(card) { return card.dataset.scheduleId; })).size === 1 ? 'schedule' : 'schedules');
     root.querySelectorAll('[data-calendar-action="' + action + '"]').forEach(function(button) {
-     button.textContent = label + ' ' + noun;
+     var mixedDates = dates.size && selectedIntervals().some(function(run) { return dateIntervalEligible(run, 'skip'); }) && selectedIntervals().some(function(run) { return dateIntervalEligible(run, 'restore'); });
+     button.textContent = mixedDates && action === 'skip' ? 'Skip remaining runs' : mixedDates && action === 'restore' ? 'Unskip skipped runs' : label + ' ' + noun;
      button.hidden = !applicable;
      if (button.parentElement.tagName === 'LI') button.parentElement.hidden = !applicable;
      button.disabled = busy || !applicable;
@@ -207,7 +200,7 @@ templ ScheduleCalendarScript() {
     paintDates(); window.updateScheduleSelection();
    }
   }
-  function closeMenus() { root.querySelector('#schedule-project-menu').open = false; dayMenu.classList.add('hidden'); root.querySelector('#schedule-context-menu').classList.add('hidden'); }
+  function closeMenus() { root.querySelector('#schedule-project-menu').open = false; root.querySelector('#schedule-context-menu').classList.add('hidden'); }
   async function apply(request, isUndo) {
    if (busy) return;
    busy = true; root.dataset.calendarBusy = 'true'; closeMenus();
@@ -248,18 +241,6 @@ templ ScheduleCalendarScript() {
    if (action === 'skip' || action === 'restore') request.skips = dates.size ? selectedIntervals().filter(function(run) { return dateIntervalEligible(run, action); }) : eligibleCards(action).map(interval);
    apply(request, false);
   }, {signal: signal});
-  root.addEventListener('contextmenu', function(event) {
-   var day = event.target.closest('[data-calendar-day]');
-   if (!day || busy) return;
-   event.preventDefault(); event.stopPropagation();
-   if (!dates.has(day.dataset.calendarDay)) selectDay(day, {});
-   if (!dayMenu.querySelector('button:not([hidden])')) return;
-   dayMenu.classList.remove('hidden');
-   var rect = dayMenu.getBoundingClientRect();
-   dayMenu.style.left = Math.max(8, Math.min(event.clientX, innerWidth-rect.width-8)) + 'px';
-   dayMenu.style.top = Math.max(8, Math.min(event.clientY, innerHeight-rect.height-8)) + 'px';
-   var first = dayMenu.querySelector('button:not([hidden])'); if (first) first.focus();
-  }, {signal: signal});
   root.addEventListener('keydown', function(event) {
    var day = event.target.closest('[data-calendar-day]');
    if (day && (event.key === ' ' || event.key === 'Enter')) { event.preventDefault(); selectDay(day,event); }
@@ -267,7 +248,7 @@ templ ScheduleCalendarScript() {
   document.addEventListener('keydown', function(event) {
    if (event.key === 'Escape') { cancelGesture(); closeMenus(); window.clearScheduleDates(); clearScheduleSelection(); }
   }, {signal: signal});
-  document.addEventListener('pointerdown', function(event) { var projectMenu = root.querySelector('#schedule-project-menu'); if (!projectMenu.contains(event.target)) projectMenu.open = false; if (!dayMenu.contains(event.target)) dayMenu.classList.add('hidden'); }, {signal: signal});
+  document.addEventListener('pointerdown', function(event) { var projectMenu = root.querySelector('#schedule-project-menu'); if (!projectMenu.contains(event.target)) projectMenu.open = false; }, {signal: signal});
   root.addEventListener('pointerdown', function(event) {
    if (busy || event.button !== 0 || event.target.closest('[data-schedule-card]')) return;
    var day = event.target.closest('[data-calendar-day]');
