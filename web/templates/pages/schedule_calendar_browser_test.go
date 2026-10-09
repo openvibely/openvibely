@@ -65,7 +65,7 @@ func testScheduleCalendarHeader(t *testing.T, paused, mobile bool) {
    var hintCard=root.querySelector('[data-schedule-card][data-has-schedule="true"]');
    check(!hintCard.title.includes(hintCard.dataset.scheduleTitle) && hintCard.title.split('\n').length===2 && hintCard.title===modifier+'+click to select schedule(s)\nRight-click for actions','card hover only shows commands on separate lines');
    check(hintCard.getAttribute('aria-description').includes(modifier+'+click'),'card selection hint available to assistive technology');
-   check(root.querySelector('[data-calendar-day]').title==='Click to select or deselect a day\n'+modifier+'+click to select day(s)\nClick and drag across day headers to select day(s)','day hover uses one line per command');
+   check(root.querySelector('[data-calendar-day]').title==='Click to select or deselect a day\n'+modifier+'+click to select day(s)\nClick and drag across header to select days','day hover uses one line per command');
    check(!root.querySelector('#schedule-day-menu'),'day headers have no custom context menu');
    check(root.querySelector('.drop-zone').title==='Drag empty space to select schedule(s)','calendar space explains box selection');
    check(toolbar.querySelector('[data-calendar-action="clear"]').title==='Clear selection (Esc)','clear hover explains escape shortcut');

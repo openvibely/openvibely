@@ -123,7 +123,7 @@ templ ScheduleCalendarScript() {
    card.title = hint;
    card.setAttribute('aria-description', hint);
   });
-  days.forEach(function(day) { day.title = 'Click to select or deselect a day\n' + selectionModifier + '+click to select day(s)\nClick and drag across day headers to select day(s)'; });
+  days.forEach(function(day) { day.title = 'Click to select or deselect a day\n' + selectionModifier + '+click to select day(s)\nClick and drag across header to select days'; });
   days.forEach(function(day) { day.dataset.skipped = String(skips.some(function(skip) { return !skip.restored && !skip.schedule_id && skip.start_at <= Number(day.dataset.start) && skip.end_at >= Number(day.dataset.end); })); });
   root.querySelector('[data-calendar-action="pause_all"]').hidden = !!state.paused;
   root.querySelector('[data-calendar-action="resume_all"]').hidden = !state.paused;
