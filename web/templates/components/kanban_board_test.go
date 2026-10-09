@@ -132,7 +132,7 @@ func TestKanbanColumn_DropdownTriggersUseLabelForDesktopWebviewCompatibility(t *
 
 func TestKanbanColumnSharedActionsAndActiveFIFO(t *testing.T) {
 	for _, category := range []models.TaskCategory{models.CategoryBacklog, models.CategoryActive, models.CategoryCompleted} {
-		body := renderKanbanColumnForCategoryTest(t, category, nil)
+		body := renderKanbanColumnForCategoryTest(t, category, []models.Task{{ID: "task", Category: category, Status: models.StatusPending}})
 		for _, want := range []string{`data-kanban-select`, `data-kanban-action="delete"`, `data-kanban-progress`} {
 			if !strings.Contains(body, want) {
 				t.Fatalf("%s missing %s", category, want)
@@ -196,5 +196,21 @@ func TestKanbanBoardReservedCapacityWaitUsesQueuedLane(t *testing.T) {
 	tasks[1].WorkerCapacityQueued = false
 	if len(filterRunningTasks(tasks)) != 2 || len(filterPendingTasks(tasks)) != 0 {
 		t.Fatal("admitted task did not move to running")
+	}
+}
+
+func TestKanbanEmptyColumnControls(t *testing.T) {
+	for _, category := range []models.TaskCategory{models.CategoryBacklog, models.CategoryActive, models.CategoryCompleted} {
+		body := renderKanbanColumnForCategoryTest(t, category, nil)
+		if !strings.Contains(body, "min-h-11") {
+			t.Fatal("empty header must retain its height")
+		}
+		if category == models.CategoryActive {
+			if strings.Contains(body, `data-kanban-menu-key="column-active"`) {
+				t.Fatal("empty Active must hide its menu")
+			}
+		} else if !strings.Contains(body, `data-kanban-select disabled`) {
+			t.Fatalf("%s must disable empty selection", category)
+		}
 	}
 }
