@@ -451,14 +451,14 @@ window.addEventListener('DOMContentLoaded', function() {
       columnMenuTrigger.focus();
       columnMenuTrigger.dispatchEvent(new MouseEvent('click', {bubbles:true, cancelable:true, detail:1}));
       await waitFor(function() { return columnMenu.getAttribute('data-kanban-menu-positioning') !== 'true'; }, 'dropzone menu stable reveal before option focus');
-      var focusedColumnOption = columnMenu.querySelector('[data-kanban-menu-content] button[hx-post]');
+      var focusedColumnOption = columnMenu.querySelector('[data-kanban-menu-content] button[data-kanban-select]');
       focusedColumnOption.focus();
       if (document.activeElement !== focusedColumnOption) fail('dropzone menu option is not keyboard focusable before refresh');
-      var focusedColumnOptionKey = focusedColumnOption.getAttribute('hx-post');
+      var focusedColumnOptionKey = focusedColumnOption.getAttribute('data-kanban-select');
       await htmx.ajax('GET', '/refresh-kanban?state=running', {target:'#kanban-board', swap:'outerHTML'});
       columnMenu = document.querySelector('[data-kanban-menu-key="column-backlog"]');
       columnMenuTrigger = columnMenu.querySelector('[data-kanban-menu-trigger]');
-      focusedColumnOption = Array.from(columnMenu.querySelectorAll('[data-kanban-menu-content] button[hx-post]')).find(function(option) { return option.getAttribute('hx-post') === focusedColumnOptionKey; });
+      focusedColumnOption = Array.from(columnMenu.querySelectorAll('[data-kanban-menu-content] button[data-kanban-select]')).find(function(option) { return option.getAttribute('data-kanban-select') === focusedColumnOptionKey; });
       if (!focusedColumnOption) fail('surviving dropzone option was removed by authoritative refresh');
       await waitFor(function() { return document.activeElement === focusedColumnOption && columnMenuTrigger.getAttribute('aria-expanded') === 'true'; }, 'surviving dropzone menu option focus restoration after settle (active=' + (document.activeElement && document.activeElement.outerHTML) + ', expanded=' + columnMenuTrigger.getAttribute('aria-expanded') + ', open=' + columnMenu.hasAttribute('data-kanban-menu-open') + ')');
 
@@ -474,7 +474,7 @@ window.addEventListener('DOMContentLoaded', function() {
       columnMenuTrigger.dispatchEvent(new MouseEvent('mousedown', {bubbles:true, cancelable:true}));
       columnMenuTrigger.focus();
       columnMenuTrigger.dispatchEvent(new MouseEvent('click', {bubbles:true, cancelable:true, detail:1}));
-      focusedColumnOption = columnMenu.querySelector('[data-kanban-menu-content] button[hx-post]');
+      focusedColumnOption = columnMenu.querySelector('[data-kanban-menu-content] button[data-kanban-select]');
       focusedColumnOption.focus();
       focusedColumnOption.dispatchEvent(new KeyboardEvent('keydown', {key:'Escape', bubbles:true, cancelable:true}));
       if (document.activeElement !== columnMenuTrigger || columnMenuTrigger.getAttribute('aria-expanded') !== 'false' || columnMenu.hasAttribute('data-kanban-menu-open')) fail('Escape must close the menu and restore trigger focus');
