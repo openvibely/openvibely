@@ -60,9 +60,10 @@ func testScheduleCalendarHeader(t *testing.T, paused, mobile bool) {
    var toolbar=root.querySelector('#schedule-selection-toolbar');
    var modifier=/Mac|iPhone|iPad|iPod/.test(navigator.platform)?'⌘':'Ctrl';
    var hintCard=root.querySelector('[data-schedule-card][data-has-schedule="true"]');
-   check(hintCard.title.includes(hintCard.dataset.scheduleTitle) && hintCard.title.includes(modifier+'-click'),'card hover preserves title and explains platform selection shortcut');
+   check(!hintCard.title.includes(hintCard.dataset.scheduleTitle) && hintCard.title.split('\n').length===3 && hintCard.title.includes(modifier+'-click'),'card hover only shows commands on separate lines');
    check(hintCard.getAttribute('aria-description').includes(modifier+'-click'),'card selection hint available to assistive technology');
-   check(root.querySelector('[data-calendar-day]').title.includes('Shift-click'),'day hover explains range selection');
+   check(root.querySelector('[data-calendar-day]').title==='Click to select a day\nShift-click to select a range','day hover uses one line per command');
+   check(!root.querySelector('#schedule-day-menu'),'day headers have no custom context menu');
    check(root.querySelector('.drop-zone').title==='Drag empty space to select multiple schedules','calendar space explains box selection');
    check(toolbar.querySelector('[data-calendar-action="clear"]').title==='Clear selection (Esc)','clear hover explains escape shortcut');
 
@@ -94,7 +95,13 @@ func testScheduleCalendarHeader(t *testing.T, paused, mobile bool) {
    function up(){window.dispatchEvent(new PointerEvent('pointerup',{pointerId:8}));}
    function count(){return root.querySelectorAll('[data-calendar-day][aria-pressed="true"]').length;}
    var initialHeaderTop=days[1].getBoundingClientRect().top;
-   down(days[1]);up();check(days[1].getBoundingClientRect().top===initialHeaderTop,'selection toolbar must not shift headers');down(days[3],{ctrlKey:true});up();check(count()===2,'nonconsecutive header selection');
+   down(days[2]);up();
+   check(!toolbar.querySelector('[data-calendar-action="skip"]').hidden && toolbar.querySelector('[data-calendar-action="restore"]').hidden,'untouched day offers only skip');
+   down(days[1]);up();
+   check(toolbar.querySelector('[data-calendar-action="skip"]').textContent==='Skip remaining runs' && toolbar.querySelector('[data-calendar-action="restore"]').textContent==='Unskip skipped runs','one partially skipped day has explicit action labels');
+   check(days[1].getBoundingClientRect().top===initialHeaderTop,'selection toolbar must not shift headers');down(days[3],{ctrlKey:true});up();check(count()===2,'nonconsecutive header selection');
+   check(toolbar.querySelector('[data-calendar-action="skip"]').textContent==='Skip remaining runs','partial date selection explains remaining runs');
+   check(toolbar.querySelector('[data-calendar-action="restore"]').textContent==='Unskip skipped runs','partial date selection explains skipped runs');
    checkHeaderAlignment();
    var panel=toolbar.getBoundingClientRect(), viewport=root.querySelector('#schedule-calendar-viewport').getBoundingClientRect();
    var slot=root.querySelector('#schedule-selection-slot').getBoundingClientRect();
