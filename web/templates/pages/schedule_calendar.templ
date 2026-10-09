@@ -161,8 +161,7 @@ templ ScheduleCalendarScript() {
    var any = dates.size || selected.length;
    toolbar.setAttribute('aria-hidden', String(!any));
    toolbar.inert = !any;
-   var grouped = selected.some(function(card) { return Number(card.dataset.occurrenceEnd)-Number(card.dataset.occurrenceStart)>1; });
-   toolbar.querySelector('[data-selection-count]').textContent = dates.size ? dates.size + ' day(s) selected' : selected.length + (grouped ? ' run block(s) selected' : ' run(s) selected');
+   toolbar.querySelector('[data-selection-count]').textContent = any + ' selected';
    ['skip','restore','pause','resume'].forEach(function(action) {
     var applicable = dates.size ? (action === 'skip' || action === 'restore') && !state.paused && selectedIntervals().some(function(run) { return dateIntervalEligible(run, action); }) : eligibleCards(action).length > 0;
     var label = {skip:'Skip',restore:'Unskip',pause:'Pause',resume:'Resume'}[action];
