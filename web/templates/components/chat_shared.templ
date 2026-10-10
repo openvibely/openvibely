@@ -1714,10 +1714,14 @@ templ ChatInputForm(config ChatInputFormConfig) {
 			// Shared, swap-safe composer focus lifecycle for Chat and task Threads.
 			if (!window._openVibelyComposerFocusReady) {
 				window._openVibelyComposerFocusReady = true;
-				window._openVibelyComposerFocusState = { token: 0, timer: 0, historyTimer: 0, interaction: 0, navigationTrigger: null };
+				window._openVibelyComposerFocusState = { token: 0, timer: 0, historyTimer: 0, interaction: 0, navigationTrigger: null, pendingTextarea: null };
 				var _composerFocusState = window._openVibelyComposerFocusState;
 
-				function _cancelComposerFocus() {
+				function _cancelComposerFocus(consume) {
+					// Swaps may interrupt an attempt before focus happens. Leave it
+					// eligible for afterSettle; user interaction explicitly cancels it.
+					if (consume === true && _composerFocusState.pendingTextarea) _composerFocusState.pendingTextarea.dataset.composerFocusInitialized = 'true';
+					_composerFocusState.pendingTextarea = null;
 					_composerFocusState.token++;
 					if (_composerFocusState.timer) window.clearTimeout(_composerFocusState.timer);
 					if (_composerFocusState.historyTimer) window.clearTimeout(_composerFocusState.historyTimer);
@@ -1728,7 +1732,7 @@ templ ChatInputForm(config ChatInputFormConfig) {
 				function _composerFocusInteraction() {
 					_composerFocusState.navigationTrigger = null;
 					_composerFocusState.interaction++;
-					_cancelComposerFocus();
+					_cancelComposerFocus(true);
 				}
 
 				function _composerFocusVisible(element) {
@@ -1755,7 +1759,7 @@ templ ChatInputForm(config ChatInputFormConfig) {
 
 				function _cancelComposerFocusForSwap(event) {
 					var target = event.detail && (event.detail.target || event.detail.elt);
-					var withinComposerSurface = target && target.closest && target.closest('#main-content, form[data-composer-auto-focus="true"]');
+					var withinComposerSurface = target && target.closest && target.closest('form[data-composer-auto-focus="true"]');
 					var containsComposer = target && target.querySelector && target.querySelector('form[data-composer-auto-focus="true"]');
 					if (!target || target.id === 'main-content' || withinComposerSurface || containsComposer) {
 						_cancelComposerFocus();
@@ -1790,9 +1794,9 @@ templ ChatInputForm(config ChatInputFormConfig) {
 					var textarea = form.querySelector('textarea[name="message"]');
 					if (!textarea || !_composerFocusVisible(textarea)) return false;
 					if (!options.force && textarea.dataset.composerFocusInitialized === 'true') return false;
-					textarea.dataset.composerFocusInitialized = 'true';
 
 					_cancelComposerFocus();
+					_composerFocusState.pendingTextarea = textarea;
 					var token = _composerFocusState.token;
 					var interaction = _composerFocusState.interaction;
 					var trigger = options.trigger || null;
@@ -1803,6 +1807,8 @@ templ ChatInputForm(config ChatInputFormConfig) {
 							var liveForm = document.getElementById(form.id);
 							var liveTextarea = liveForm && liveForm.querySelector('textarea[name="message"]');
 							if (liveForm !== form || liveTextarea !== textarea || !_composerFocusVisible(liveTextarea)) return;
+							_composerFocusState.pendingTextarea = null;
+							textarea.dataset.composerFocusInitialized = 'true';
 							if (_composerFocusOverlayActive()) return;
 							var active = document.activeElement;
 							var allowedTrigger = trigger || _composerFocusState.navigationTrigger;
@@ -1818,11 +1824,19 @@ templ ChatInputForm(config ChatInputFormConfig) {
 				document.addEventListener('keydown', _composerFocusInteraction, true);
 				document.addEventListener('focusin', function(event) {
 					if (event.target && event.target.matches && event.target.matches('textarea[data-composer-focus-initialized="true"]')) return;
+					// HTMX can restore the breadcrumb's focus after the composer
+					// script runs. This is part of the swap, not user interaction.
+					var restoredBreadcrumb = event.target && event.target.closest && event.target.closest('#task-detail-content [data-breadcrumb-selector-button]');
+					var swappingPage = restoredBreadcrumb && restoredBreadcrumb.closest('#main-content.htmx-swapping, #main-content.htmx-settling');
+					if (swappingPage && _composerFocusState.pendingTextarea) {
+						_composerFocusState.navigationTrigger = restoredBreadcrumb;
+						return;
+					}
 					_composerFocusInteraction();
 				}, true);
 				document.addEventListener('htmx:beforeSwap', _cancelComposerFocusForSwap);
 				document.addEventListener('htmx:afterSwap', _rememberComposerFocusNavigationTrigger);
-				document.addEventListener('htmx:beforeHistorySave', _cancelComposerFocus);
+				document.addEventListener('htmx:beforeHistorySave', function() { _cancelComposerFocus(); });
 				document.addEventListener('htmx:afterSettle', function(event) {
 					var target = event.detail && (event.detail.target || event.detail.elt);
 					window.openVibelyRequestComposerFocus({ root: target || document, reason: 'htmx-settle', trigger: _composerFocusNavigationTrigger(event) });
@@ -1838,7 +1852,7 @@ templ ChatInputForm(config ChatInputFormConfig) {
 						window.openVibelyRequestComposerFocus({ root: target || document, reason: 'history-restore', force: true });
 					}, 0);
 				});
-				window.addEventListener('pagehide', _cancelComposerFocus);
+				window.addEventListener('pagehide', function() { _cancelComposerFocus(); });
 			}
 
 			// Global portal-style custom select implementation.
