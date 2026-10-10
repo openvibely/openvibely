@@ -4889,6 +4889,7 @@ templ ChatAutoScrollScript() {
 				var boundary = ranges === null ? 0 : window.chatStreamStableBoundary(suffix, ranges);
 				state.tail._chatStreamStateKey = _thinkingStateKey(container) + ':tail:' + state.offset;
 				state.tail._chatToolStateKey = _thinkingStateKey(container);
+				state.tail._chatThinkingOwner = container;
 				var options = { offset: state.renderOffset, ordinal: state.ordinal };
 				var rendered = await window.renderStreamingContent(state.tail, boundary ? suffix.slice(0, boundary) : suffix, yieldBetweenBatches, options);
 				if (rendered === false || container._incrementalChat !== state || state.generation !== generation) return false;
@@ -4904,6 +4905,7 @@ templ ChatAutoScrollScript() {
 					container.appendChild(state.tail);
 					state.tail._chatStreamStateKey = _thinkingStateKey(container) + ':tail:' + state.offset;
 					state.tail._chatToolStateKey = _thinkingStateKey(container);
+					state.tail._chatThinkingOwner = container;
 					rendered = await window.renderStreamingContent(state.tail, suffix.slice(boundary), yieldBetweenBatches, { offset: state.renderOffset, ordinal: state.ordinal });
 				}
 				return rendered !== false && container._incrementalChat === state && state.generation === generation;
@@ -5378,6 +5380,18 @@ templ ChatAutoScrollScript() {
 			// persistent window._thinkingOpenStates map (survives morph:outerHTML DOM replacement).
 			var containerKey = _thinkingStateKey(container);
 			var toolContainerKey = container._chatToolStateKey || containerKey;
+			// Tail-local indexes support incremental rerenders. Also keep the complete
+			// bubble snapshot for server-markup hydration after a morph.
+			function persistThinkingStates() {
+				if (!container.isConnected) return;
+				var states = Array.from(container.querySelectorAll('details.stream-thinking'), function(d) { return d.open; });
+				if (containerKey && states.length) window._thinkingOpenStates[containerKey] = states;
+				var owner = container._chatThinkingOwner;
+				if (owner && owner.contains(container)) {
+					var ownerKey = _thinkingStateKey(owner);
+					if (ownerKey) window._thinkingOpenStates[ownerKey] = Array.from(owner.querySelectorAll('details.stream-thinking'), function(d) { return d.open; });
+				}
+			}
 			var prevThinkingStates = [];
 			container.querySelectorAll('details.stream-thinking').forEach(function(d) {
 					prevThinkingStates.push(d.open);
@@ -5429,14 +5443,7 @@ templ ChatAutoScrollScript() {
 				var details = document.createElement('details');
 				details.className = 'stream-thinking';
 				// Update persistent store when user toggles thinking section
-				details.addEventListener('toggle', function() {
-					if (!containerKey) return;
-					var states = [];
-				container.querySelectorAll('details.stream-thinking').forEach(function(d) {
-						states.push(d.open);
-					});
-					window._thinkingOpenStates[containerKey] = states;
-				});
+				details.addEventListener('toggle', persistThinkingStates);
 				var summary = document.createElement('summary');
 				summary.innerHTML = chevronSvg + '<span>Thinking\u2026</span>';
 				var body = document.createElement('div');
@@ -5873,16 +5880,7 @@ templ ChatAutoScrollScript() {
 					}
 				}
 			}
-			// Persist current states to window store (update after restoring so new sections are tracked)
-			if (containerKey) {
-				var currentStates = [];
-			container.querySelectorAll('details.stream-thinking').forEach(function(d) {
-					currentStates.push(d.open);
-				});
-				if (currentStates.length > 0) {
-					window._thinkingOpenStates[containerKey] = currentStates;
-				}
-			}
+			persistThinkingStates();
 
 			// Restore per-tool output scroll positions without synchronously measuring
 			// every tool body. CSS overflow:auto handles non-overflowing bodies.

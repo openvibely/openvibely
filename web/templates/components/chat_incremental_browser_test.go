@@ -190,6 +190,31 @@ func TestBrowserFunctional_IncrementalChatRendering(t *testing.T) {
  if (tracker.shouldAutoScroll()) chatAutoScroll.scrollToBottom(messages, false);
  await paint();
  assert(chatAutoScroll.isNearBottom(messages), 'pinned reader did not follow');
+ // Hydrate empty server-style resume markup after expanding both committed and tail thinking.
+ const thinkingText = '[Thinking]\nFirst thought.\n[/Thinking]\n'+prose+'[Thinking]\nSecond thought.\n[/Thinking]\n';
+ await renderLiveChatContent(replacement, thinkingText, false);
+ assert(replacement._incrementalChat.offset > 8192, 'thinking fixture did not commit a prefix');
+ let sections = replacement.querySelectorAll('details.stream-thinking');
+ assert(sections.length === 2, 'thinking fixture missing sections');
+ sections.forEach(section=>{ section.open = true; section.dispatchEvent(new Event('toggle')); });
+ const resumedThinking = replacement.cloneNode(false);
+ resumedThinking.setAttribute('data-streaming-resume', 'true');
+ resumedThinking.setAttribute('data-raw-content', thinkingText);
+ resumedThinking.removeAttribute('data-rendered-revision');
+ replacement.replaceWith(resumedThinking);
+ await cleanAssistantMessages(document.getElementById('pair'));
+ sections = resumedThinking.querySelectorAll('details.stream-thinking');
+ assert(sections.length === 2 && Array.from(sections).every(section=>section.open), 'resume hydration lost expanded thinking');
+ sections[0].open = false; sections[0].dispatchEvent(new Event('toggle'));
+ await renderLiveChatContent(resumedThinking, thinkingText+'Continued.', false);
+ const remorphedThinking = resumedThinking.cloneNode(false);
+ remorphedThinking.setAttribute('data-raw-content', thinkingText+'Continued.');
+ remorphedThinking.removeAttribute('data-rendered-revision');
+ resumedThinking.replaceWith(remorphedThinking);
+ await cleanAssistantMessages(document.getElementById('pair'));
+ sections = remorphedThinking.querySelectorAll('details.stream-thinking');
+ assert(sections.length === 2 && !sections[0].open && sections[1].open, 'resume hydration lost mixed thinking states');
+ remorphedThinking.replaceWith(replacement);
  // No controls: completed Markdown blocks are reusable too; open fences remain tail.
  assert(chatStreamStableBoundary(prose.repeat(10)) > 0, 'large prose resume did not retain a prefix');
  // A completed control followed by a long answer must not keep the entire answer provisional.
