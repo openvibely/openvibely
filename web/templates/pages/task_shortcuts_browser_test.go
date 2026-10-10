@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/a-h/templ"
 	"github.com/openvibely/openvibely/internal/models"
@@ -36,6 +37,7 @@ func TestBrowserFunctional_TaskShortcuts(t *testing.T) {
 			fmt.Fprint(w, `{"files":0,"insertions":0,"deletions":0,"review_comments":0}`)
 			return
 		case strings.HasSuffix(r.URL.Path, "/thread"):
+			time.Sleep(100 * time.Millisecond) // Exercise focus across the lazy thread response.
 			task := &models.Task{ID: strings.Split(r.URL.Path, "/")[2], ProjectID: project.ID, Title: "Task", Status: models.StatusCompleted, Category: models.CategoryCompleted}
 			component = components.TaskThreadView(task, nil, nil, nil, nil, nil, false, 30)
 		case r.URL.Path == "/tasks/a" || r.URL.Path == "/tasks/b" || r.URL.Path == "/tasks/c":
@@ -56,7 +58,7 @@ func TestBrowserFunctional_TaskShortcuts(t *testing.T) {
 	defer server.Close()
 	runComposerFocusCDP(t, chrome, server.URL+"/tasks/a?project_id=shortcuts", "task-shortcuts", func(b *composerFocusCDP) {
 		b.call("Emulation.setDeviceMetricsOverride", map[string]any{"width": 1600, "height": 1000, "deviceScaleFactor": 1, "mobile": false}, nil)
-		b.waitFor("composer", `String(!!document.getElementById('task-message-input'))`, "true")
+		b.waitFor("composer", `String(document.activeElement && document.activeElement.id)`, "task-message-input")
 		b.evaluate(`['a','b','c'].forEach(function(id){localStorage.setItem('openvibely-task-thread-message-history-'+id,JSON.stringify(['Older message','Newest message']))});'ready'`)
 		command := `(/Mac|iPhone|iPad/.test(navigator.platform)?{metaKey:true}:{ctrlKey:true})`
 		key := func(code, modifiers string) {
@@ -101,47 +103,55 @@ func TestBrowserFunctional_TaskShortcuts(t *testing.T) {
 		b.waitFor("close restores breadcrumb button focus", `String(document.activeElement.hasAttribute('data-breadcrumb-selector-button'))`, "true")
 		key("ArrowDown", `Object.assign({shiftKey:true},`+command+`)`)
 		b.waitFor("command shift down from breadcrumb button switches task", `document.getElementById('task-detail-content').dataset.taskId`, "b")
-		b.waitFor("composer after breadcrumb shortcut", `String(!!document.getElementById('task-message-input'))`, "true")
-		b.evaluate(`document.getElementById('task-message-input').focus();'ready'`)
+		b.waitFor("composer after breadcrumb shortcut", `String(document.activeElement && document.activeElement.id)`, "task-message-input")
 		key("ArrowUp", `Object.assign({shiftKey:true},`+command+`)`)
 		b.waitFor("return after breadcrumb shortcut", `document.getElementById('task-detail-content').dataset.taskId`, "a")
 		// Navigate without showing the selector, then reverse through the frozen list.
-		b.waitFor("composer ready for task shortcut", `String(!!document.getElementById('task-message-input'))`, "true")
-		b.evaluate(`document.getElementById('task-message-input').focus();document.getElementById('task-message-input').setSelectionRange(0,0);'ready'`)
+		b.waitFor("composer ready for task shortcut", `String(document.activeElement && document.activeElement.id)`, "task-message-input")
+		b.evaluate(`document.getElementById('task-message-input').setSelectionRange(0,0);'ready'`)
 		key("ArrowUp", `{}`)
 		b.waitFor("history active before task switch", `document.getElementById('task-message-input').value`, "Newest message")
 		key("ArrowDown", `Object.assign({shiftKey:true},`+command+`)`)
 		b.waitFor("next task", `document.getElementById('task-detail-content').dataset.taskId`, "b")
 		count := lists.Load()
-		b.waitFor("composer ready for task shortcut", `String(!!document.getElementById('task-message-input'))`, "true")
-		b.evaluate(`document.getElementById('task-message-input').focus();document.getElementById('task-message-input').setSelectionRange(0,0);'ready'`)
+		b.waitFor("composer ready for task shortcut", `String(document.activeElement && document.activeElement.id)`, "task-message-input")
+		b.evaluate(`document.getElementById('task-message-input').setSelectionRange(0,0);'ready'`)
 		key("ArrowUp", `Object.assign({shiftKey:true},`+command+`)`)
 		b.waitFor("return to original task", `document.getElementById('task-detail-content').dataset.taskId`, "a")
 		b.waitFor("draft restored after navigation", `String(document.getElementById('task-message-input') && document.getElementById('task-message-input').value)`, "Newest message")
-		b.waitFor("composer ready for task shortcut", `String(!!document.getElementById('task-message-input'))`, "true")
-		b.evaluate(`document.getElementById('task-message-input').focus();document.getElementById('task-message-input').setSelectionRange(0,0);'ready'`)
+		b.waitFor("composer ready for task shortcut", `String(document.activeElement && document.activeElement.id)`, "task-message-input")
+		b.evaluate(`document.getElementById('task-message-input').setSelectionRange(0,0);'ready'`)
 		key("ArrowUp", `Object.assign({shiftKey:true},`+command+`)`)
 		b.waitFor("first task does not wrap", `location.pathname`, "/tasks/a")
 		key("ArrowDown", `Object.assign({shiftKey:true},`+command+`)`)
 		b.waitFor("next again", `document.getElementById('task-detail-content').dataset.taskId`, "b")
-		b.waitFor("composer ready for task shortcut", `String(!!document.getElementById('task-message-input'))`, "true")
-		b.evaluate(`document.getElementById('task-message-input').focus();document.getElementById('task-message-input').setSelectionRange(0,0);'ready'`)
+		b.waitFor("composer ready for task shortcut", `String(document.activeElement && document.activeElement.id)`, "task-message-input")
+		b.evaluate(`document.getElementById('task-message-input').setSelectionRange(0,0);'ready'`)
 		key("ArrowDown", `Object.assign({shiftKey:true},`+command+`)`)
 		b.waitFor("second next task", `document.getElementById('task-detail-content').dataset.taskId`, "c")
-		b.waitFor("composer ready for task shortcut", `String(!!document.getElementById('task-message-input'))`, "true")
-		b.evaluate(`document.getElementById('task-message-input').focus();document.getElementById('task-message-input').setSelectionRange(0,0);'ready'`)
+		b.waitFor("composer ready for task shortcut", `String(document.activeElement && document.activeElement.id)`, "task-message-input")
+		b.evaluate(`document.getElementById('task-message-input').setSelectionRange(0,0);'ready'`)
 		key("ArrowUp", `Object.assign({shiftKey:true},`+command+`)`)
 		b.waitFor("previous task", `document.getElementById('task-detail-content').dataset.taskId`, "b")
 		if lists.Load() != count {
 			t.Fatal("recent list refetched during cycling")
 		}
-		b.waitFor("composer ready for task shortcut", `String(!!document.getElementById('task-message-input'))`, "true")
-		b.evaluate(`document.getElementById('task-message-input').focus();document.getElementById('task-message-input').setSelectionRange(0,0);'ready'`)
+		b.waitFor("composer ready for task shortcut", `String(document.activeElement && document.activeElement.id)`, "task-message-input")
+		b.evaluate(`document.getElementById('task-message-input').setSelectionRange(0,0);'ready'`)
 		key("KeyL", `Object.assign({shiftKey:true},`+command+`)`)
 		b.waitFor("last task", `document.getElementById('task-detail-content').dataset.taskId`, "c")
-		b.waitFor("composer ready for task shortcut", `String(!!document.getElementById('task-message-input'))`, "true")
-		b.evaluate(`document.getElementById('task-message-input').focus();document.getElementById('task-message-input').setSelectionRange(0,0);'ready'`)
+		b.waitFor("composer ready for task shortcut", `String(document.activeElement && document.activeElement.id)`, "task-message-input")
+		b.evaluate(`document.getElementById('task-message-input').setSelectionRange(0,0);'ready'`)
 		key("KeyL", `Object.assign({shiftKey:true},`+command+`)`)
 		b.waitFor("last task toggles back", `document.getElementById('task-detail-content').dataset.taskId`, "b")
+		b.waitFor("last task composer focus", `String(document.activeElement && document.activeElement.id)`, "task-message-input")
+		key("KeyK", command)
+		b.waitFor("task menu options", `String(document.querySelectorAll('[data-breadcrumb-selector-option]').length)`, "3")
+		key("ArrowDown", `{}`)
+		key("Enter", `{}`)
+		b.waitFor("menu opens next task", `document.getElementById('task-detail-content').dataset.taskId`, "c")
+		b.waitFor("menu selection composer focus", `String(document.activeElement && document.activeElement.id)`, "task-message-input")
+		b.typeText("Ready to type")
+		b.waitFor("typing immediately after menu navigation", `document.getElementById('task-message-input').value`, "Ready to type")
 	})
 }

@@ -15,7 +15,7 @@ templ NewTask(projects []models.Project, project *models.Project, agents []model
 }
 
 templ NewTaskContent(project *models.Project, agents []models.LLMConfig, agentDefs []repository.AgentTaskUIOption) {
- <div id="task-detail-content" class="h-full flex flex-col" data-task-id="" data-project-id={ project.ID } data-initial-tab="chat">
+ <div id="task-detail-content" class="h-full flex flex-col" data-task-id="" data-project-id={ project.ID } data-initial-tab="chat" hx-history="false">
   @layout.PageTitle("New Task")
   <div data-page-header class="flex items-center gap-2 mb-6 flex-shrink-0 min-w-0">
    <nav class="flex min-w-0 flex-1 flex-shrink-0 flex-wrap items-start" aria-label="Breadcrumb" data-page-header>
