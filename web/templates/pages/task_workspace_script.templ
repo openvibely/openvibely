@@ -176,7 +176,7 @@ templ TaskWorkspaceScript() {
 		back.title = 'Back to thread (' + (apple ? '⌘⇧D' : 'Ctrl+Shift+D') + ')';
 		back.setAttribute('aria-keyshortcuts', apple ? 'Meta+Shift+D' : 'Control+Shift+D');
 		opener.title = 'Toggle task details (' + (apple ? '⌘⇧B' : 'Ctrl+Shift+B') + ')';
-		if (breadcrumbButton) breadcrumbButton.title = 'Switch task (' + (apple ? '⌘K' : 'Ctrl+K') + '); Previous/next: ' + (apple ? '⌘⇧↑/↓' : 'Ctrl+Shift+↑/↓') + '; Last visited: ' + (apple ? '⌘⇧L' : 'Ctrl+Shift+L');
+		if (breadcrumbButton) breadcrumbButton.title = 'Switch task (' + (apple ? '⌘K' : 'Ctrl+K') + ')\nPrevious: ' + (apple ? '⌘⇧↑' : 'Ctrl+Shift+↑') + '\nNext: ' + (apple ? '⌘⇧↓' : 'Ctrl+Shift+↓') + '\nLast visited: ' + (apple ? '⌘⇧L' : 'Ctrl+Shift+L');
 		function navigateTask(url, cycling) {
 			var destination = new URL(url, location.href);
 			if (destination.origin !== location.origin) return;
