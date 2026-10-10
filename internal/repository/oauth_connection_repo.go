@@ -2,7 +2,9 @@ package repository
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -11,6 +13,7 @@ import (
 )
 
 var (
+	ErrOAuthConnectionChanged     = errors.New("OAuth account changed during sign-in; connect OAuth again")
 	ErrOAuthConnectionNotFound    = errors.New("OAuth connection not found")
 	ErrOAuthConnectionInvalidMove = errors.New("invalid OAuth connection model move")
 	ErrOAuthConnectionLinked      = errors.New("OAuth connection has linked models")
@@ -120,6 +123,40 @@ func (r *LLMConfigRepo) ListOAuthConnections(ctx context.Context, provider model
 	return connections, rows.Err()
 }
 
+// OAuthConnectionSnapshots retains only fingerprints, never a second copy of tokens.
+func (r *LLMConfigRepo) OAuthConnectionSnapshots(ctx context.Context, provider models.LLMProvider) (map[string]models.OAuthCredentialSnapshot, error) {
+	rows, err := r.db.QueryContext(ctx, `SELECT id, oauth_revision, oauth_access_token, oauth_refresh_token, oauth_expires_at, oauth_account_id FROM oauth_connections WHERE provider = ?`, provider)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	snapshots := make(map[string]models.OAuthCredentialSnapshot)
+	for rows.Next() {
+		id, snapshot, err := scanOAuthCredentialSnapshot(rows)
+		if err != nil {
+			return nil, err
+		}
+		snapshots[id] = snapshot
+	}
+	return snapshots, rows.Err()
+}
+
+func scanOAuthCredentialSnapshot(row interface{ Scan(...any) error }) (string, models.OAuthCredentialSnapshot, error) {
+	var id, access, refresh, account string
+	var expiry int64
+	var snapshot models.OAuthCredentialSnapshot
+	if err := row.Scan(&id, &snapshot.Revision, &access, &refresh, &expiry, &account); err != nil {
+		return "", snapshot, err
+	}
+	// JSON encoding keeps field boundaries unambiguous, including empty values.
+	encoded, err := json.Marshal([]any{access, refresh, expiry, account})
+	if err != nil {
+		return "", snapshot, err
+	}
+	snapshot.Fingerprint = sha256.Sum256(encoded)
+	return id, snapshot, nil
+}
+
 func validateOAuthConnectionLinkTx(ctx context.Context, tx SQLExecutor, connectionID string, provider models.LLMProvider) error {
 	if strings.TrimSpace(connectionID) == "" {
 		return nil
@@ -193,6 +230,17 @@ func (r *LLMConfigRepo) ReplaceLinkedOAuthConnectionWithProfileIfRevision(ctx co
 	}
 	defer cleanup()
 
+	updated, err := replaceLinkedOAuthConnectionTx(ctx, tx, modelID, connectionID, expectedRevision, provider, accessToken, refreshToken, expiresAt, accountID, displayName, principalHash)
+	if err != nil || !updated {
+		return updated, err
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func replaceLinkedOAuthConnectionTx(ctx context.Context, tx *manualTx, modelID, connectionID string, expectedRevision int64, provider models.LLMProvider, accessToken, refreshToken string, expiresAt int64, accountID, displayName, principalHash string) (bool, error) {
 	displayName = strings.TrimSpace(displayName)
 	principalHash = strings.TrimSpace(principalHash)
 	result, err := tx.ExecContext(ctx, `
@@ -218,9 +266,6 @@ func (r *LLMConfigRepo) ReplaceLinkedOAuthConnectionWithProfileIfRevision(ctx co
 		if err := adoptVerifiedOAuthPrincipalTx(ctx, tx, connectionID, provider, expectedRevision+1, principalHash); err != nil {
 			return false, err
 		}
-	}
-	if err := tx.Commit(); err != nil {
-		return false, err
 	}
 	return true, nil
 }
@@ -595,5 +640,62 @@ func (r *LLMConfigRepo) DeleteOAuthConnection(ctx context.Context, connectionID 
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit delete OAuth connection tx: %w", err)
 	}
+	return nil
+}
+
+// Apply draft credentials inside the model transaction so failed or stale saves
+// cannot rotate a shared account independently of the model changes.
+func applyPendingModelOAuthTx(ctx context.Context, tx *manualTx, cfg *models.LLMConfig) error {
+	draft := cfg.PendingOAuthConnection
+	if draft == nil {
+		return nil
+	}
+	if cfg.AuthMethod != models.AuthMethodOAuth || cfg.Provider != draft.Provider || (draft.ID != "" && draft.ID != cfg.OAuthConnectionID) {
+		return fmt.Errorf("OAuth account selection changed; connect OAuth again")
+	}
+	// Check every account that consolidation would replace, inside the same
+	// writer transaction as the save. A new draft's own revision cannot guard
+	// accounts authorized or refreshed since this sign-in began.
+	if principal := strings.TrimSpace(draft.PrincipalHash); principal != "" || draft.ID != "" {
+		rows, err := tx.QueryContext(ctx, `SELECT id, oauth_revision, oauth_access_token, oauth_refresh_token, oauth_expires_at, oauth_account_id FROM oauth_connections
+   WHERE provider = ? AND (id = ? OR (oauth_principal_hash = ? AND oauth_principal_verified = 1 AND id != ?))`, cfg.Provider, draft.ID, principal, cfg.OAuthConnectionID)
+		if err != nil {
+			return err
+		}
+		stale := false
+		for rows.Next() {
+			id, snapshot, err := scanOAuthCredentialSnapshot(rows)
+			if err != nil {
+				rows.Close()
+				return err
+			}
+			observed, exists := draft.ObservedCredentials[id]
+			if !exists || observed != snapshot {
+				stale = true
+			}
+		}
+		err = rows.Err()
+		if closeErr := rows.Close(); err == nil {
+			err = closeErr
+		}
+		if err != nil {
+			return err
+		}
+		if stale {
+			return ErrOAuthConnectionChanged
+		}
+	}
+	revision := draft.Revision
+	if draft.ID == "" {
+		revision = cfg.OAuthConfigRevision
+	}
+	updated, err := replaceLinkedOAuthConnectionTx(ctx, tx, cfg.ID, cfg.OAuthConnectionID, revision, cfg.Provider, draft.AccessToken, draft.RefreshToken, draft.ExpiresAt, draft.AccountID, draft.ProviderDisplayName, draft.PrincipalHash)
+	if err != nil {
+		return err
+	}
+	if !updated {
+		return ErrOAuthConnectionChanged
+	}
+	cfg.OAuthConfigRevision = revision + 1
 	return nil
 }

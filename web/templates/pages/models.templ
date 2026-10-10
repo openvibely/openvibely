@@ -581,10 +581,10 @@ for _, agent := range modelOptions {
 					<div id="model_oauth_connection_action" class="hidden mb-3 rounded-box border border-base-300 p-3">
 						<div class="flex flex-wrap items-center justify-between gap-2">
 							<span id="model_oauth_connection_status" class="text-sm" role="status" aria-live="polite"></span>
-                            <button type="button" id="model_oauth_connect_action" data-desktop={ fmt.Sprintf("%t", desktopMode) } class="btn btn-sm btn-outline" onclick="saveAndConnectModelOAuth(this)">Save &amp; Connect OAuth</button>
+                            <button type="button" id="model_oauth_connect_action" data-desktop={ fmt.Sprintf("%t", desktopMode) } class="btn btn-sm btn-outline" onclick="connectModelOAuth(this)">Connect OAuth</button>
 						</div>
-                        <p class="text-sm opacity-70">Saves your model, then opens sign-in. Finish connecting here.</p>
-                        <button id="model_oauth_stop_waiting" type="button" class="btn btn-sm hidden" onclick="resetModelOAuthSetup(); updateOAuthConnectionAction()">Stop waiting</button>
+                        <p class="text-sm opacity-70">Connect your account, then Create or Save to keep this model.</p>
+                        <button id="model_oauth_stop_waiting" type="button" class="btn btn-sm hidden" onclick="resetModelOAuthSetup(); updateOAuthConnectionAction()">Cancel sign-in</button>
                         if showOAuthLocalhostFallback() {
                             <label for="model_oauth_callback_url" class="label"><span class="label-text">If the localhost page fails, paste its full URL here.</span></label>
                             <input id="model_oauth_callback_url" type="text" class="input input-bordered w-full" autocomplete="off"/>
@@ -795,7 +795,7 @@ for _, agent := range modelOptions {
 							<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" class="stroke-current shrink-0 w-6 h-6"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
 							<div>
 								<p class="font-semibold">OAuth via API</p>
-								<p class="text-sm">Uses the Anthropic API directly via OAuth. Use Save &amp; Connect OAuth above to finish sign-in in this dialog.</p>
+								<p class="text-sm">Uses the Anthropic API directly via OAuth. Use Connect OAuth above to finish sign-in in this dialog.</p>
 							</div>
 						</div>
 					</div>
@@ -804,7 +804,7 @@ for _, agent := range modelOptions {
 								<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" class="stroke-current shrink-0 w-6 h-6"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
 								<div>
 									<p class="font-semibold">OAuth via API</p>
-									<p class="text-sm">Uses the OpenAI API directly via OAuth. Use Save &amp; Connect OAuth above to finish sign-in in this dialog.</p>
+									<p class="text-sm">Uses the OpenAI API directly via OAuth. Use Connect OAuth above to finish sign-in in this dialog.</p>
 								</div>
 							</div>
 						</div>
@@ -2615,19 +2615,18 @@ for _, agent := range modelOptions {
                     document.getElementById('model_oauth_connection_action').classList.toggle('hidden', !builtInOAuth);
                     var selected = document.getElementById('model_oauth_connection_id').selectedOptions[0];
                     document.getElementById('model_oauth_connection_status').textContent = selected && selected.dataset.status || 'Not connected';
-                    document.getElementById('model_oauth_connect_action').textContent = selected && selected.dataset.status === 'Connected' ? 'Save & Reconnect OAuth' : 'Save & Connect OAuth';
+                    document.getElementById('model_oauth_connect_action').textContent = selected && selected.dataset.status === 'Connected' ? 'Reconnect OAuth' : 'Connect OAuth';
                 }
 
                 function finishModelOAuthModal() {
                     resetModelOAuthSetup();
-                    var modal = document.getElementById('new_model_modal');
-                    if (modal.dataset.oauthSaved === 'true') window.location.href = modelMutationURL('/models');
+
                 }
 
-                async function saveAndConnectModelOAuth(button) {
+                async function connectModelOAuth(button) {
                     var form = document.getElementById('model_form');
                     clearModelFormError();
-                    if (!normalizeModelFormBeforeSubmit(function() {saveAndConnectModelOAuth(button);}) || !form.reportValidity()) return;
+
                     resetModelOAuthSetup();
                     var generation = modelOAuthSetupGeneration;
                     var modal = document.getElementById('new_model_modal');
@@ -2643,7 +2642,7 @@ for _, agent := range modelOptions {
                     locked.forEach(function(el) {el.disabled = true;});
                     var unlock = function() {locked.forEach(function(el) {el.disabled = false;});};
                     modelOAuthUnlock = unlock;
-                    status.textContent = 'Saving model…';
+                    status.textContent = 'Opening sign-in…';
                     async function request(url, options) {
                         var response = await fetch(modelMutationURL(url), options);
                         var data = await response.json();
@@ -2651,29 +2650,15 @@ for _, agent := range modelOptions {
                         return data;
                     }
                     try {
-                        var saved = await request('/models', {method:'POST', headers:{Accept:'application/json'}, body:body});
-                        modal.dataset.oauthSaved = 'true';
+                        var flow = await request('/models/oauth/setup', {method:'POST', body:body});
                         if (generation !== modelOAuthSetupGeneration || !modal.open) {
-                            window.location.href = modelMutationURL('/models');
+                            fetch('/models/oauth/setup', {method:'DELETE', headers:{'X-Model-OAuth-Setup':flow.session_id}}).catch(function(){});
                             return;
                         }
-                        document.getElementById('model_config_id').value = saved.id;
-                        form.dataset.mode = 'edit';
-                        form.dataset.originalOAuthConnectionId = saved.oauth_connection_id;
-                        document.getElementById('model_modal_title').textContent = 'Edit Model Configuration';
-                        document.getElementById('model_submit_btn').textContent = 'Save';
-                        var select = document.getElementById('model_oauth_connection_id');
-                        if (!Array.from(select.options).some(function(option) {return option.value === saved.oauth_connection_id;})) {
-                            var option = new Option(document.getElementById('model_name').value, saved.oauth_connection_id);
-                            option.dataset.provider = canonicalProvider(document.getElementById('model_provider').value);
-                            select.add(option);
-                        }
-                        select.value = saved.oauth_connection_id;
-                        var flow = await request('/models/' + encodeURIComponent(saved.id) + '/oauth/initiate', {headers:{Accept:'application/json'}});
-                        if (generation !== modelOAuthSetupGeneration || !modal.open) return;
+                        document.getElementById('model_oauth_setup_session').value = flow.session_id;
                         if (flow.opened) {if (popup) popup.close();}
                         else {
-                            if (!popup) throw Error('Model saved. Allow pop-ups, then connect OAuth again.');
+                            if (!popup) throw Error('Allow pop-ups, then connect OAuth again.');
                             popup.location.href = flow.authorization_url;
                             popupNavigated = true;
                         }
@@ -2681,23 +2666,11 @@ for _, agent := range modelOptions {
                         status.textContent = 'Finish sign-in in your browser, then return here.';
                         var deadline = Date.now() + 10 * 60 * 1000;
                         while (generation === modelOAuthSetupGeneration && modal.open) {
-                            var state = await request('/models/' + encodeURIComponent(saved.id) + '/oauth/status');
+                            var state = await request('/models/oauth/setup/status', {headers:{'X-Model-OAuth-Setup':flow.session_id}});
                             if (generation !== modelOAuthSetupGeneration || !modal.open) return;
-                            if (state.status === 'connected' && (state.revision !== flow.revision || state.connection_id !== flow.connection_id)) {
-                                if (state.connection_id !== select.value) {
-                                    var connectedOption = Array.from(select.options).find(function(option) {return option.value === state.connection_id;});
-                                    if (!connectedOption) {
-                                        connectedOption = new Option(select.selectedOptions[0].textContent, state.connection_id);
-                                        connectedOption.dataset.provider = select.selectedOptions[0].dataset.provider;
-                                        select.add(connectedOption);
-                                    }
-                                    select.value = state.connection_id;
-                                }
-                                form.dataset.originalOAuthConnectionId = state.connection_id;
-                                select.selectedOptions[0].dataset.status = 'Connected';
-                                form.dataset.originalOAuthConnected = 'true';
-                                updateOAuthConnectionAction();
-                                status.textContent = 'Connected. You can close this dialog or keep editing.';
+                            if (state.connected) {
+                                status.textContent = 'Connected. Click Create or Save to keep this model.';
+                                button.textContent = 'Reconnect OAuth';
                                 return;
                             }
                             if (Date.now() >= deadline) throw Error('Sign-in timed out. Connect OAuth again to retry.');
@@ -2719,6 +2692,7 @@ for _, agent := range modelOptions {
 					var provider = canonicalProvider(document.getElementById('model_provider').value);
 					var oauthSelected = (provider === 'anthropic' && document.getElementById('model_anthropic_auth_type').value === 'oauth') ||
 						(provider === 'openai' && document.getElementById('model_openai_auth_type').value === 'oauth');
+					if ((provider === 'openai' || provider === 'anthropic') && !oauthSelected) resetModelOAuthSetup();
 					var field = document.getElementById('oauth_connection_field');
 					var select = document.getElementById('model_oauth_connection_id');
 					field.classList.toggle('hidden', !oauthSelected);

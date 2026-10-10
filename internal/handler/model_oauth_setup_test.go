@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/service"
 )
 
 func TestModelOAuthSetupSignsInAndDiscoversBeforeCreate(t *testing.T) {
@@ -240,115 +242,174 @@ func TestModelOAuthSetupCancellationAndExpiry(t *testing.T) {
 	}
 }
 
-// The built-in modal saves without an HTML swap, then authorizes that exact
-// persisted account and observes a new credential generation before finishing.
-func TestBuiltInModelOAuthModalSaveAndConnect(t *testing.T) {
+func TestBuiltInModelOAuthConnectBeforeSave(t *testing.T) {
 	for _, providerName := range []string{"anthropic", "openai"} {
 		t.Run(providerName, func(t *testing.T) {
 			t.Setenv("OAUTH_REDIRECT_MODE", "hosted")
 			t.Setenv("APP_BASE_URL", "https://app.example.com")
+			token := "draft-access"
 			provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				w.Header().Set("Content-Type", "application/json")
-				w.Write([]byte(`{"access_token":"modal-access","refresh_token":"modal-refresh","expires_in":3600}`))
+				json.NewEncoder(w).Encode(map[string]any{"access_token": token, "refresh_token": "draft-refresh", "expires_in": 3600})
 			}))
 			defer provider.Close()
 			t.Setenv(strings.ToUpper(providerName)+"_OAUTH_TOKEN_URL", provider.URL)
 			h, e, repo := setupTestHandler(t)
-			h.openAIIdentityResolver = nil
-			h.oauthIdentityResolver = nil
-			originalOpen := openOAuthURL
-			opened := 0
-			openOAuthURL = func(string) error { opened++; return nil }
-			t.Cleanup(func() { openOAuthURL = originalOpen })
-			send := func(method, path string, form url.Values) map[string]string {
-				t.Helper()
-				req := httptest.NewRequest(method, path, strings.NewReader(form.Encode()))
+			h.openAIIdentityResolver = func(context.Context, string) (service.OpenAIOAuthIdentity, error) {
+				return service.OpenAIOAuthIdentity{AccountID: "account", DisplayName: "Verified user", PrincipalHash: "principal"}, nil
+			}
+			h.oauthIdentityResolver = func(context.Context, string) (service.AnthropicOAuthIdentity, error) {
+				return service.AnthropicOAuthIdentity{AccountID: "account", DisplayName: "Verified user", PrincipalHash: "principal"}, nil
+			}
+			form := url.Values{"provider": {providerName}, providerName + "_auth_type": {"oauth"}, "auth_method": {"oauth"}, "oauth_connection_id": {"new"}}
+			send := func(path string) *httptest.ResponseRecorder {
+				req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(form.Encode()))
 				req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 				req.Header.Set("Accept", "application/json")
 				rec := httptest.NewRecorder()
 				e.ServeHTTP(rec, req)
-				if rec.Code != http.StatusOK {
-					t.Fatalf("%s %s: %d %s", method, path, rec.Code, rec.Body.String())
-				}
-				var data map[string]string
-				if err := json.Unmarshal(rec.Body.Bytes(), &data); err != nil {
-					t.Fatal(err)
-				}
-				return data
+				return rec
 			}
-			model := "claude-sonnet-4-5-20250929"
-			if providerName == "openai" {
-				model = "gpt-5.5"
-			}
-			form := url.Values{"name": {"Modal OAuth"}, "provider": {providerName}, "model": {model}, providerName + "_auth_type": {"oauth"}, "auth_method": {"oauth"}, "oauth_connection_id": {"new"}}
-			saved := send(http.MethodPost, "/models", form)
-			if saved["id"] == "" || saved["oauth_connection_id"] == "" {
-				t.Fatal("save omitted model/account identity")
-			}
-			form.Set("model_config_id", saved["id"])
-			form.Set("oauth_connection_id", saved["oauth_connection_id"])
-			for attempt := 0; attempt < 2; attempt++ {
-				// The second save and sign-in exercises reconnect without duplicating the model.
-				if attempt > 0 {
-					h.desktopMode = true
-					send(http.MethodPost, "/models", form)
+			before, _ := repo.List(context.Background())
+			var siblingID, connectionID string
+			for attempt := 0; attempt < 8; attempt++ {
+				if attempt == 2 || (attempt >= 4 && attempt != 7) {
+					form.Set("oauth_connection_id", "new")
 				}
-				req := httptest.NewRequest(http.MethodGet, "/models/"+saved["id"]+"/oauth/initiate", nil)
-				req.Header.Set("Accept", "application/json")
-				rec := httptest.NewRecorder()
-				e.ServeHTTP(rec, req)
+				if attempt == 7 {
+					current, _ := repo.GetByID(context.Background(), form.Get("model_config_id"))
+					form.Set("oauth_connection_id", current.OAuthConnectionID)
+				}
+				rec := send("/models/oauth/setup")
+				if rec.Code != 200 {
+					t.Fatalf("begin: %d %s", rec.Code, rec.Body.String())
+				}
 				var flow struct {
-					URL          string `json:"authorization_url"`
-					Revision     string `json:"revision"`
-					ConnectionID string `json:"connection_id"`
-					Opened       bool   `json:"opened"`
-				}
-				if rec.Code != http.StatusOK {
-					t.Fatalf("initiate: %d", rec.Code)
+					Session string `json:"session_id"`
+					URL     string `json:"authorization_url"`
 				}
 				if err := json.Unmarshal(rec.Body.Bytes(), &flow); err != nil {
 					t.Fatal(err)
 				}
-				if flow.Opened != h.desktopMode || opened != attempt {
-					t.Fatal("modal did not use the correct browser launch mode")
+				defer removeModelOAuthSetup(flow.Session)
+				authURL, _ := url.Parse(flow.URL)
+				result := h.completeOAuthFlow(authURL.Query().Get("state"), "code")
+				if result.Outcome != oauthCompletionSucceeded {
+					t.Fatal(result.Err)
 				}
-				pending := send(http.MethodGet, "/models/"+saved["id"]+"/oauth/status", nil)
-				if pending["revision"] != flow.Revision || pending["connection_id"] != flow.ConnectionID {
-					t.Fatal("initiation does not match persisted connection")
+				after, _ := repo.List(context.Background())
+				expectedModels := len(before)
+				if attempt > 0 {
+					expectedModels += 2
 				}
-				authorizationURL, err := url.Parse(flow.URL)
-				if err != nil {
-					t.Fatal(err)
+				if attempt > 5 {
+					expectedModels++
 				}
-				callback := url.Values{"code": {"modal-code"}, "state": {authorizationURL.Query().Get("state")}}
-				manual := `{"callback_url":"http://localhost:1455/auth/callback?` + callback.Encode() + `"}`
-				req = httptest.NewRequest(http.MethodPost, "/models/oauth/manual-complete", strings.NewReader(manual))
-				req.Header.Set("Content-Type", "application/json")
-				rec = httptest.NewRecorder()
-				e.ServeHTTP(rec, req)
-				if rec.Code != http.StatusOK {
-					t.Fatalf("complete: %d %s", rec.Code, rec.Body.String())
+				if len(after) != expectedModels {
+					t.Fatal("sign-in persisted a model")
 				}
-				state := send(http.MethodGet, "/models/"+saved["id"]+"/oauth/status", nil)
-				if state["status"] != "connected" || state["revision"] == flow.Revision {
-					t.Fatal("new sign-in not observable in modal")
-				}
-			}
-			all, err := repo.List(context.Background())
-			if err != nil {
-				t.Fatal(err)
-			}
-			count := 0
-			for _, cfg := range all {
-				if cfg.Name == "Modal OAuth" {
-					count++
-					if cfg.OAuthAccessToken != "modal-access" {
-						t.Fatal("credentials not persisted")
+				if attempt > 0 {
+					old, _ := repo.GetByID(context.Background(), form.Get("model_config_id"))
+					if old.Name != "Connected model" {
+						t.Fatal("sign-in saved draft edits")
 					}
 				}
-			}
-			if count != 1 {
-				t.Fatalf("saved %d models", count)
+				form.Set("oauth_setup_session", flow.Session)
+				form.Set("name", "Connected model")
+				model := "claude-sonnet-4-5-20250929"
+				if providerName == "openai" {
+					model = "gpt-5.5"
+				}
+				form.Set("model", model)
+				if attempt >= 3 {
+					current, _ := repo.GetByID(context.Background(), form.Get("model_config_id"))
+					if attempt == 5 {
+						// Another modal creates a matching account after this draft
+						// completed, so its ID was absent from the snapshot.
+						newer := &models.LLMConfig{Name: "Newer account", Provider: current.Provider, Model: current.Model, AuthMethod: models.AuthMethodOAuth}
+						if err := repo.Create(context.Background(), newer); err != nil {
+							t.Fatal(err)
+						}
+						current = newer
+					}
+					if attempt >= 6 {
+						// Refresh writes deliberately retain the authorization revision.
+						ok, err := repo.UpdateLinkedOAuthConnectionTokensIfRevision(context.Background(), current.ID, current.OAuthConnectionID, current.OAuthConfigRevision, current.Provider, fmt.Sprintf("refreshed-access-%d", attempt), "refreshed-refresh", time.Now().Add(2*time.Hour).UnixMilli())
+						if err != nil || !ok {
+							t.Fatal("refresh failed", err)
+						}
+						refreshed, err := repo.GetByID(context.Background(), current.ID)
+						if err != nil || refreshed.OAuthConfigRevision != current.OAuthConfigRevision {
+							t.Fatal("refresh must retain the authorization revision", err)
+						}
+					} else {
+						if ok, err := repo.ReplaceLinkedOAuthConnectionWithProfileIfRevision(context.Background(), current.ID, current.OAuthConnectionID, current.OAuthConfigRevision, current.Provider, "concurrent-access", "concurrent-refresh", time.Now().Add(time.Hour).UnixMilli(), "account", "Verified user", "principal"); err != nil || !ok {
+							t.Fatal(err)
+						}
+					}
+					form.Set("name", "Must roll back")
+					rec = send("/models")
+					if rec.Code != http.StatusConflict {
+						t.Fatalf("stale sign-in status: %d", rec.Code)
+					}
+					expectedAccess := "concurrent-access"
+					if attempt >= 6 {
+						expectedAccess = fmt.Sprintf("refreshed-access-%d", attempt)
+					}
+					unchanged, _ := repo.GetByID(context.Background(), form.Get("model_config_id"))
+					if unchanged.Name != "Connected model" || unchanged.OAuthAccessToken != expectedAccess {
+						t.Fatal("stale save was not atomic")
+					}
+					sibling, err := repo.GetByID(context.Background(), siblingID)
+					if err != nil || sibling.OAuthConnectionID != unchanged.OAuthConnectionID || sibling.OAuthAccessToken != expectedAccess {
+						t.Fatal("stale draft replaced shared credentials", err)
+					}
+					connections, err := repo.ListOAuthConnections(context.Background(), current.Provider)
+					if err != nil || len(connections) != 1 {
+						t.Fatal("stale save left an account behind", err)
+					}
+					form.Set("name", "Unsaved edit")
+					form.Del("oauth_setup_session")
+					continue
+				}
+				rec = send("/models")
+				if rec.Code != 200 {
+					t.Fatalf("save: %d %s", rec.Code, rec.Body.String())
+				}
+				var saved map[string]string
+				json.Unmarshal(rec.Body.Bytes(), &saved)
+				cfg, err := repo.GetByID(context.Background(), saved["id"])
+				if err != nil || cfg.OAuthAccessToken != token {
+					t.Fatal("save lost authorization", err)
+				}
+				connection, err := repo.GetOAuthConnectionByID(context.Background(), cfg.OAuthConnectionID)
+				if err != nil || connection.ProviderDisplayName != "Verified user" || connection.PrincipalHash != "principal" || !connection.PrincipalVerified {
+					t.Fatal("verified identity lost", err)
+				}
+				if attempt == 0 {
+					connectionID = cfg.OAuthConnectionID
+					sibling := &models.LLMConfig{Name: "Shared sibling", Provider: cfg.Provider, Model: cfg.Model, AuthMethod: models.AuthMethodOAuth, OAuthConnectionID: connectionID}
+					if err := repo.Create(context.Background(), sibling); err != nil {
+						t.Fatal(err)
+					}
+					siblingID = sibling.ID
+					token = "reconnected-access"
+				} else {
+					if attempt == 2 {
+						old, err := repo.GetOAuthConnectionByID(context.Background(), connectionID)
+						if err != nil || old != nil {
+							t.Fatal("verified duplicate was not consolidated", err)
+						}
+						connectionID = cfg.OAuthConnectionID
+					}
+					sibling, _ := repo.GetByID(context.Background(), siblingID)
+					if cfg.OAuthConnectionID != connectionID || sibling.OAuthConnectionID != connectionID || sibling.OAuthAccessToken != token {
+						t.Fatal("reconnect detached shared account")
+					}
+				}
+				form.Set("model_config_id", cfg.ID)
+				form.Set("oauth_connection_id", cfg.OAuthConnectionID)
+				form.Set("name", "Unsaved edit")
+				form.Del("oauth_setup_session")
 			}
 		})
 	}
