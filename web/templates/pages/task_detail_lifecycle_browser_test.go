@@ -51,7 +51,7 @@ func TestBrowserFunctional_TaskDetailLifecyclePaginationInChrome(t *testing.T) {
 			"summary":             summary,
 			"started_at":          startedAt.Format(time.RFC3339),
 			"selected_skills":     []string{"debug_go_tests", "openvibely_responsive_templ_layout_workflow_with_a_very_long_skill_name"},
-			"selected_memories":   []map[string]string{{"file": "testing_coverage_and_performance.md"}},
+			"selected_memories":   []map[string]string{{"file": `testing_coverage_and_performance.md" data-injected="yes`}},
 		}
 	}
 	row := func(id string, hour int, skill string) map[string]any {
@@ -307,6 +307,7 @@ window.addEventListener('DOMContentLoaded', function() {
       if (Math.abs(box.height - 20) > 1 || box.right > entry.getBoundingClientRect().right+1) fail('badge must stay one line within entry');
       if (css.whiteSpace !== 'nowrap' || css.textOverflow !== 'ellipsis' || css.overflow !== 'hidden') fail('badge must truncate with ellipsis');
       if (badge.classList.contains('badge-outline')) {
+        if (badge.hasAttribute('data-injected')) fail('evidence must not inject HTML attributes');
         if ((badge.dataset.ovTooltip || badge.title) !== badge.textContent) fail('full evidence must remain available on hover');
         if (badge.scrollWidth > badge.clientWidth) truncated = true;
       }

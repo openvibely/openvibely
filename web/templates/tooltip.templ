@@ -66,12 +66,17 @@ templ Tooltips() {
   function show(el,text,pin,point) {
    if(changing)return;
    if(pin)dismissed=null;
-   if(!el||!el.isConnected||el.closest('dialog:not([open])')||!text||blocked(el)||(dismissed&&(dismissed===el||dismissed.contains(el))))return;
+   if(!visibleOwner(el)||!text||blocked(el)||(dismissed&&(dismissed===el||dismissed.contains(el))))return;
    if(active!==el)close();cancelPending();clearTimeout(timer);pointer=point||null;active=el;pinned=pinned||!!pin;
    adopt(el);
    var host=el.closest('dialog[open]')||document.body;if(tip.parentElement!==host)host.appendChild(tip);
    render(text);describe(el,true);if(el.matches('[data-model-help],[data-model-setting-help]'))el.setAttribute('aria-expanded','true');
    tip.hidden=false;if(nativePopover&&!tip.matches(':popover-open'))tip.showPopover();position(point);
+  }
+  function visibleOwner(el){
+   if(!el||!el.isConnected||el.closest('[hidden],[inert],dialog:not([open])')||!el.getClientRects().length)return false;
+   if(el.checkVisibility)return el.checkVisibility({checkVisibilityCSS:true});
+   var style=getComputedStyle(el);return style.visibility!=='hidden'&&style.visibility!=='collapse';
   }
   function menuOpen(){
    return Array.from(document.querySelectorAll('.ov-menu,[role="menu"],[role="listbox"]')).some(function(menu){
@@ -150,10 +155,10 @@ templ Tooltips() {
     if(record.type==='childList')record.addedNodes.forEach(adopt);
     else if(record.attributeName==='title'&&record.target.hasAttribute('title'))adopt(record.target);
    });
-   if(pending&&(!pending.isConnected||blocked(pending)))cancelPending();
-   if(!active)return;if(!active.isConnected||blocked(active)){close();return;}
+   if(pending&&(!visibleOwner(pending)||blocked(pending)))cancelPending();
+   if(!active)return;if(!visibleOwner(active)||blocked(active)){close();return;}
    if(records.some(function(record){return record.type==='attributes'&&record.target===active;})){var text=textFor(active);if(text){render(text);position();}else close();}
-  }).observe(document.body,{subtree:true,childList:true,attributes:true,attributeFilter:['class','style','hidden','open','aria-expanded','title','data-tip','data-ov-tooltip','data-model-help','data-model-setting-help']});
+  }).observe(document.body,{subtree:true,childList:true,attributes:true,attributeFilter:['class','style','hidden','inert','open','aria-expanded','title','data-tip','data-ov-tooltip','data-model-help','data-model-setting-help']});
   window.openVibelyTooltip={show:show,close:close,clear:function(el){
    el.removeAttribute('title');el.removeAttribute('data-ov-tooltip');el.removeAttribute('data-tip');
    if(active===el)close();
