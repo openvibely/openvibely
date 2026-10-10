@@ -1,0 +1,185 @@
+package handler
+
+import (
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/web/static"
+	"github.com/stretchr/testify/require"
+)
+
+// TestChatInputRequestBrowserSurvivesModelMenuAndTranscriptSwaps reproduces the
+// regression where a pending request_user_input card vanished from Chat after
+// the user opened/closed the models menu or changed the model, and more
+// generally after any transcript re-render. Input-request cards are client-only
+// DOM absent from server HTML, so a chat-page-root or main-content swap wipes
+// them; they must be rebuilt from saved server state on every such swap, not
+// only on a direct chat-messages swap.
+func TestChatInputRequestBrowserSurvivesModelMenuAndTranscriptSwaps(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping browser regression in short mode")
+	}
+	chrome := findChromeForBrowserTest(t)
+	if chrome == "" {
+		t.Skip("Chrome/Chromium executable not found")
+	}
+
+	tc := NewTestContext(t)
+	project := tc.CreateProject().WithName("Browser input model menu").Build()
+	agent := tc.CreateLLMConfig().WithName("Alpha").WithProvider(models.ProviderOpenAI).WithModel("gpt-5").WithAPIKey("sk-test").AsDefault().Build()
+	tc.CreateLLMConfig().WithName("Beta").WithProvider(models.ProviderAnthropic).WithModel("claude-sonnet-4").WithAPIKey("sk-test").Build()
+
+	// A real running chat execution makes the server render a running execution
+	// pair, so a transcript morph swap replaces the pair that holds the card.
+	chatTask := tc.CreateTask(project.ID).WithTitle("Chat: continue?").WithCategory(models.CategoryChat).WithPrompt("continue?").Build()
+	runningExec := tc.CreateExecution(chatTask.ID, agent.ID).WithStatus(models.ExecRunning).WithPromptSent("continue?").Build()
+
+	pending, err := tc.handler.chatInputRequests.create(project.ID, runningExec.ID, []chatInputRequestQuestion{{
+		ID:       "continue",
+		Question: "Continue?",
+		Options:  []chatInputRequestOption{{Label: "Yes", Description: "Continue"}, {Label: "No", Description: "Stop"}},
+	}})
+	require.NoError(t, err)
+
+	requestEvent := map[string]any{
+		"type":       "chat_user_input_requested",
+		"project_id": project.ID,
+		"exec_id":    runningExec.ID,
+		"input_request": map[string]any{
+			"id":         pending.ID,
+			"exec_id":    runningExec.ID,
+			"expires_at": pending.ExpiresAt.UTC().Format(time.RFC3339),
+			"questions":  []map[string]any{{"id": "continue", "question": "Continue?", "options": []map[string]string{{"label": "Yes", "description": "Continue"}, {"label": "No", "description": "Stop"}}}},
+		},
+	}
+	eventJSON, err := json.Marshal(requestEvent)
+	require.NoError(t, err)
+
+	result := make(chan string, 1)
+	runner := fmt.Sprintf(`<script>
+	(async function() {
+		function report(status, message) { return fetch('/browser-result', {method:'POST', headers:{'X-Browser-Status':status}, body:message || status, keepalive:true}); }
+		function fail(message) { throw new Error(message); }
+		async function waitFor(predicate, message) {
+			var deadline = Date.now() + 5000;
+			while (Date.now() < deadline) {
+				var value = predicate();
+				if (value) return value;
+				await new Promise(function(resolve) { setTimeout(resolve, 25); });
+			}
+			fail(message);
+		}
+		function cardPresent() { return document.querySelector('[data-chat-input-request-id="%s"]'); }
+		function cardVisible() { var c = cardPresent(); return c && getComputedStyle(c).visibility !== 'hidden' && c.getClientRects().length > 0; }
+		function cardAnswerable() { var c = cardPresent(); return c && c.querySelectorAll('[data-chat-input-option]').length >= 2; }
+		try {
+			window.dispatchEvent(new CustomEvent('sse-chat-live-event', {detail: %s}));
+			await waitFor(cardPresent, 'input request card did not render');
+			await waitFor(cardVisible, 'card never became visible after initial hydration');
+
+			var modelButton = document.querySelector('form.chat-input-container .chat-model-select');
+			if (!modelButton) fail('model selector button missing');
+
+			// Open the models menu.
+			modelButton.click();
+			await waitFor(function() { var p = document.getElementById('conversation-model-picker'); return p && !p.hidden; }, 'models menu did not open');
+			if (!cardVisible()) fail('input request card hidden when models menu opened');
+
+			// Close the models menu via an outside click, without changing the model.
+			document.body.click();
+			await waitFor(function() { var p = document.getElementById('conversation-model-picker'); return p && p.hidden; }, 'models menu did not close');
+			await new Promise(function(resolve) { setTimeout(resolve, 150); });
+			if (!cardVisible()) fail('input request card hidden after models menu closed');
+
+			// Open again and change the model.
+			modelButton.click();
+			await waitFor(function() { var p = document.getElementById('conversation-model-picker'); return p && !p.hidden; }, 'models menu did not reopen');
+			var picks = document.querySelectorAll('#conversation-model-picker .ov-mp-pick');
+			if (!picks.length) fail('no model options to pick');
+			var target = null;
+			picks.forEach(function(p) { if (!target && p.textContent.indexOf('Beta') !== -1) target = p; });
+			(target || picks[picks.length - 1]).click();
+			await new Promise(function(resolve) { setTimeout(resolve, 250); });
+			if (!cardVisible()) fail('input request card hidden after changing the model');
+			if (!cardAnswerable()) fail('card lost its answer options after changing the model');
+
+			var pid = document.getElementById('chat-page-root').getAttribute('data-project-id');
+
+			// A transcript morph swap of chat-messages must restore the card.
+			await htmx.ajax('GET', '/chat?project_id=' + encodeURIComponent(pid), {target:'#chat-messages', select:'#chat-messages', swap:'morph:outerHTML'});
+			await waitFor(cardVisible, 'card was not restored after a chat-messages transcript swap');
+			if (!cardAnswerable()) fail('restored card lost its answer options after chat-messages swap');
+
+			// A chat-page-root swap (full content re-render) must also restore it;
+			// this is the swap target that previously dropped the card for good.
+			await htmx.ajax('GET', '/chat?project_id=' + encodeURIComponent(pid), {target:'#chat-page-root', select:'#chat-page-root', swap:'morph:outerHTML'});
+			await waitFor(cardVisible, 'card was not restored after a chat-page-root swap');
+			if (!cardAnswerable()) fail('restored card lost its answer options after chat-page-root swap');
+
+			await report('pass', 'input request survived model menu and transcript swaps');
+		} catch (error) {
+			await report('fail', String(error && error.stack || error));
+		}
+	})();
+	</script>`, pending.ID, string(eventJSON))
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if static.ServeAsset(w, r) {
+			return
+		}
+		if r.URL.Path == "/browser-result" {
+			body, _ := io.ReadAll(io.LimitReader(r.Body, 8192))
+			select {
+			case result <- r.Header.Get("X-Browser-Status") + ":" + string(body):
+			default:
+			}
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		recorder := httptest.NewRecorder()
+		tc.echo.ServeHTTP(recorder, r)
+		for key, values := range recorder.Header() {
+			for _, value := range values {
+				w.Header().Add(key, value)
+			}
+		}
+		w.WriteHeader(recorder.Code)
+		body := recorder.Body.String()
+		if r.URL.Path == "/chat" {
+			body = strings.Replace(body, "</body>", runner+"</body>", 1)
+		}
+		_, _ = io.WriteString(w, body)
+	}))
+	defer server.Close()
+
+	cmd := exec.Command(chrome,
+		"--headless=new", "--no-sandbox", "--disable-gpu", "--disable-software-rasterizer",
+		"--disable-dev-shm-usage", "--disable-extensions", "--no-first-run", "--no-default-browser-check",
+		"--user-data-dir="+filepath.Join(t.TempDir(), "chat-input-model-menu-profile"),
+		"--window-size=1024,768", server.URL+"/chat?project_id="+project.ID,
+	)
+	require.NoError(t, startHandlerBrowserProcess(cmd))
+	stopped := false
+	defer func() {
+		if !stopped {
+			stopHandlerBrowserProcess(cmd)
+		}
+	}()
+	select {
+	case outcome := <-result:
+		stopHandlerBrowserProcess(cmd)
+		stopped = true
+		require.True(t, strings.HasPrefix(outcome, "pass:"), outcome)
+	case <-time.After(45 * time.Second):
+		t.Fatal("input request model menu browser regression timed out")
+	}
+}
