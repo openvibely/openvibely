@@ -5,6 +5,7 @@ templ Tooltips() {
  .ov-tooltip { position:fixed; inset:auto; margin:0; width:max-content; max-width:min(360px,calc(100vw - 16px)); max-height:calc(100vh - 16px); overflow:auto; padding:6px 8px; border:1px solid oklch(var(--bc) / .18); border-radius:6px; background:var(--ov-menu-surface,#1D232A); color:var(--ov-tooltip-text,oklch(var(--bc))); box-shadow:0 3px 10px #0003; font:12px/1.5 system-ui,sans-serif; z-index:2147483647; }
  .ov-tooltip[hidden] { display:none; }
  .ov-tooltip-row { display:flex; align-items:baseline; justify-content:space-between; gap:12px; white-space:pre-wrap; overflow-wrap:anywhere; }
+ .ov-tooltip-row + .ov-tooltip-row { margin-top:5px; }
  .ov-tooltip kbd { flex-shrink:0; padding:0 4px; border:1px solid oklch(var(--bc) / .16); border-radius:3px; background:oklch(var(--bc) / .08); color:inherit; font:11px/16px system-ui,sans-serif; white-space:nowrap; }
  [data-tip]::before,[data-tip]::after { content:none !important; display:none !important; }
  </style>
@@ -12,7 +13,7 @@ templ Tooltips() {
  (function() {
   if (window.openVibelyTooltip) return;
   var tip=document.createElement('div');tip.id='ov-shared-tooltip';tip.className='ov-tooltip';tip.setAttribute('role','tooltip');tip.hidden=true;tip.setAttribute('popover','manual');document.body.appendChild(tip);
-  var changing=false,active=null,pinned=false,timer=null,nativePopover=typeof tip.showPopover==='function';
+  var changing=false,active=null,pinned=false,timer=null,pointer=null,nativePopover=typeof tip.showPopover==='function';
   if(!nativePopover)tip.removeAttribute('popover');
   var selector='[title],[data-tip],[data-ov-tooltip],[data-model-help],[data-model-setting-help]';
   function textFor(el) {
@@ -29,7 +30,7 @@ templ Tooltips() {
    if(changing)return;changing=true;
    clearTimeout(timer);
    if(active){describe(active,false);if(active.matches('[data-model-help],[data-model-setting-help]'))active.setAttribute('aria-expanded','false');}
-   active=null;pinned=false;
+   active=null;pinned=false;pointer=null;
    if(nativePopover&&tip.matches(':popover-open'))tip.hidePopover();tip.hidden=true;if(tip.parentElement!==document.body)document.body.appendChild(tip);
    changing=false;
   }
@@ -46,6 +47,7 @@ templ Tooltips() {
   }
   function position(point) {
    if(!active)return;
+   point=point||pointer;
    var r=active.getBoundingClientRect(),box=tip.getBoundingClientRect(),x=point?point.x:r.left,y=point?point.y:r.bottom;
    tip.style.left=Math.max(8,Math.min(x,innerWidth-box.width-8))+'px';
    tip.style.top=Math.max(8,Math.min(y+8+box.height<=innerHeight?y+8:(point?y:r.top)-box.height-8,innerHeight-box.height-8))+'px';
@@ -53,23 +55,40 @@ templ Tooltips() {
   function show(el,text,pin,point) {
    if(changing)return;
    if(!el||!el.isConnected||!text)return;
-   if(active!==el)close();clearTimeout(timer);active=el;pinned=pinned||!!pin;
+   if(active!==el)close();clearTimeout(timer);pointer=point||null;active=el;pinned=pinned||!!pin;
    adopt(el);
    var host=el.closest('dialog[open]')||document.body;if(tip.parentElement!==host)host.appendChild(tip);
    render(text);describe(el,true);if(el.matches('[data-model-help],[data-model-setting-help]'))el.setAttribute('aria-expanded','true');
    tip.hidden=false;if(nativePopover&&!tip.matches(':popover-open'))tip.showPopover();position(point);
   }
   function trigger(target){if(changing)return null;return target instanceof Element?target.closest(selector)||(active&&active.contains(target)?active:null):null;}
-  document.addEventListener('pointerover',function(e){if(tip.contains(e.target)){clearTimeout(timer);return;}var el=trigger(e.target);if(el&&!pinned&&el!==active)show(el,textFor(el));});
-  document.addEventListener('pointerout',function(e){if(pinned)return;if(active&&(!e.relatedTarget||(!active.contains(e.relatedTarget)&&!tip.contains(e.relatedTarget)))){clearTimeout(timer);timer=setTimeout(close,100);}});
+  document.addEventListener('pointerover',function(e){
+   if(tip.contains(e.target)){clearTimeout(timer);return;}
+   var el=trigger(e.target);if(!el||pinned)return;
+   clearTimeout(timer);
+   if(el===active){pointer={x:e.clientX+12,y:e.clientY+12};position();return;}
+   show(el,textFor(el),false,{x:e.clientX+12,y:e.clientY+12});
+  });
+  document.addEventListener('pointermove',function(e){
+   if(!pinned&&active&&active.contains(e.target)){pointer={x:e.clientX+12,y:e.clientY+12};position();}
+  });
+  document.addEventListener('pointerout',function(e){
+   if(pinned||!active||(!active.contains(e.target)&&!tip.contains(e.target)))return;
+   var next=trigger(e.relatedTarget);
+   if(e.relatedTarget&&(active.contains(e.relatedTarget)||tip.contains(e.relatedTarget))){clearTimeout(timer);return;}
+   if(next&&textFor(next)===textFor(active)){
+    describe(active,false);active=next;describe(active,true);clearTimeout(timer);return;
+   }
+   clearTimeout(timer);timer=setTimeout(function(){if(active&&active.matches(':hover'))return;close();},100);
+  });
   document.addEventListener('focusin',function(e){var el=trigger(e.target);if(el)show(el,textFor(el));});
-  document.addEventListener('focusout',function(e){if(!pinned&&active&&active.contains(e.target)&&!active.contains(e.relatedTarget))close();});
+  document.addEventListener('focusout',function(e){if(!pinned&&active&&active.contains(e.target)&&!active.contains(e.relatedTarget)&&!active.matches(':hover'))close();});
   document.addEventListener('click',function(e){var el=trigger(e.target);if(el&&el.matches('[data-model-help],[data-model-setting-help]')){if(active===el&&pinned)close();else show(el,textFor(el),true);}else if(!tip.contains(e.target))close();});
-  document.addEventListener('keydown',function(e){if(e.key==='Escape'&&active){e.preventDefault();e.stopPropagation();close();}},true);
+  document.addEventListener('keydown',function(e){if(e.key==='Escape'&&active){if(pinned){e.preventDefault();e.stopPropagation();}close();}},true);
   document.addEventListener('scroll',function(e){if(!tip.contains(e.target))close();},true);window.addEventListener('resize',close);
   document.addEventListener('close',function(e){if(active&&e.target.contains(active)&&!e.target.open)close();},true);
   document.addEventListener('model-section-change',close);
-  document.addEventListener('htmx:beforeSwap',close);document.addEventListener('htmx:beforeHistorySave',close);
+  document.addEventListener('htmx:beforeSwap',function(e){var target=e.detail&&e.detail.target;if(active&&target&&target.contains(active))close();});document.addEventListener('htmx:beforeHistorySave',close);
   // Consume native labels centrally, including labels produced by streamed HTML
   // and existing title setters. No native tooltip remains after dismissal.
   function adopt(el) {
