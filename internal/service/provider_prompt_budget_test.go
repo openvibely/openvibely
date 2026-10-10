@@ -54,7 +54,7 @@ func TestProviderPromptBudgetIncludesRuntimeActionMode(t *testing.T) {
 						}
 						want := base
 						if mode == models.ChatModeOrchestrate {
-							want = llmprompt.ApplyChatActionToolMode(base, rt.DefinitionNames())
+							want = llmprompt.ApplyChatActionToolMode(base, rt.DefinitionNames(), followup)
 						}
 						if got := estimateProviderSystemPromptTokens(req); got != estimatedUTF8Tokens(want) {
 							t.Fatalf("%s/%s followup=%v mode=%s tools=%v: got %d want %d", provider, auth, followup, mode, rt.DefinitionNames(), got, estimatedUTF8Tokens(want))

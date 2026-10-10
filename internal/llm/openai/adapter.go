@@ -338,11 +338,11 @@ func runtimeToolPolicyOptions(isTaskFollowup bool, chatMode models.ChatMode) llm
 	}
 }
 
-func appendToolModeSystemPrompt(base string, rt *llmcontracts.RuntimeTools, chatMode models.ChatMode) string {
+func appendToolModeSystemPrompt(base string, rt *llmcontracts.RuntimeTools, chatMode models.ChatMode, isTaskFollowup bool) string {
 	if chatMode != models.ChatModeOrchestrate {
 		return base
 	}
-	return llmprompt.ApplyChatActionToolMode(base, rt.DefinitionNames())
+	return llmprompt.ApplyChatActionToolMode(base, rt.DefinitionNames(), isTaskFollowup)
 }
 
 func buildOpenAIRuntime(ctx context.Context, workDir string, agentDef *models.Agent) ([]openaiclient.ToolDefinition, func(context.Context, string, json.RawMessage) (string, bool, error), func(string) bool, func()) {
@@ -671,7 +671,7 @@ func (a *Adapter) CallChatStreaming(ctx context.Context, message string, attachm
 	if !isTaskFollowup {
 		systemPromptStr = applyOpenAIOAuthSystemPrompt(systemPromptStr, agent)
 	}
-	systemPromptStr = appendToolModeSystemPrompt(systemPromptStr, rt, chatMode)
+	systemPromptStr = appendToolModeSystemPrompt(systemPromptStr, rt, chatMode, isTaskFollowup)
 
 	oaAttachments, err := convertAttachments(attachments)
 	if err != nil {
@@ -892,7 +892,7 @@ func (a *Adapter) CallCompletionsChatStreaming(ctx context.Context, message stri
 	if !isTaskFollowup {
 		systemPromptStr = applyOpenAIOAuthSystemPrompt(systemPromptStr, agent)
 	}
-	systemPromptStr = appendToolModeSystemPrompt(systemPromptStr, rt, chatMode)
+	systemPromptStr = appendToolModeSystemPrompt(systemPromptStr, rt, chatMode, isTaskFollowup)
 
 	oaAttachments, err := convertAttachments(attachments)
 	if err != nil {

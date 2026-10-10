@@ -104,10 +104,25 @@ func ApplyTaskCreationToolMode(base string, toolNames []string) string {
 	return strings.TrimSpace(base) + "\n\n" + TaskCreationToolModeInstructions + "\nAvailable runtime task tools: " + strings.Join(names, ", ")
 }
 
+// TaskFollowupRuntimeToolInstructions supplements, rather than replaces, the
+// coding tools available in a task thread.
+const TaskFollowupRuntimeToolInstructions = `TASK RUNTIME TOOLS:
+- Your file, search, and shell tools remain available; use them to read, edit, build, test, and run commands for the task
+- The runtime tools listed below are additional, for application actions such as managing tasks, schedules, alerts, or GitHub
+- Do not claim an application action succeeded unless the tool result confirms success`
+
 // ApplyChatActionToolMode describes the concrete runtime action surface. Requests
-// without runtime tools get an explicit capability limitation instead.
-func ApplyChatActionToolMode(base string, toolNames []string) string {
+// without runtime tools get an explicit capability limitation instead. Task
+// threads keep their coding tools, so they get a supplemental note instead of
+// the orchestration Chat action-only instructions.
+func ApplyChatActionToolMode(base string, toolNames []string, isTaskFollowup bool) string {
 	names := normalizedToolNames(toolNames)
+	if isTaskFollowup {
+		if len(names) == 0 {
+			return base
+		}
+		return strings.TrimSpace(base) + "\n\n" + TaskFollowupRuntimeToolInstructions + "\nAdditional runtime tools: " + strings.Join(names, ", ")
+	}
 	if len(names) == 0 {
 		return strings.TrimSpace(base) + "\n\n" + ChatActionUnavailableInstructions
 	}

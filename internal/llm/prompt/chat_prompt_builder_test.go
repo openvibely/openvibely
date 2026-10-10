@@ -49,11 +49,11 @@ func TestApplyTaskCreationToolMode(t *testing.T) {
 
 func TestApplyChatActionToolModeReportsConcreteCapability(t *testing.T) {
 	base := BuildChatSystemPrompt(false, models.ChatModeOrchestrate, "", false)
-	capable := ApplyChatActionToolMode(base, []string{"create_task", "edit_task"})
+	capable := ApplyChatActionToolMode(base, []string{"create_task", "edit_task"}, false)
 	if !strings.Contains(capable, ChatActionToolModeInstructions) || !strings.Contains(capable, "Available action tools: create_task, edit_task") {
 		t.Fatalf("capable prompt missing runtime action guidance: %q", capable)
 	}
-	incapable := ApplyChatActionToolMode(base, nil)
+	incapable := ApplyChatActionToolMode(base, nil, false)
 	if !strings.Contains(incapable, ChatActionUnavailableInstructions) {
 		t.Fatalf("incapable prompt missing capability limitation: %q", incapable)
 	}
@@ -67,7 +67,7 @@ func TestApplyChatActionToolModeReportsConcreteCapability(t *testing.T) {
 }
 
 func TestApplyChatActionToolModeRequiresStructuredClarificationForProposedWork(t *testing.T) {
-	prompt := ApplyChatActionToolMode("Chat assistant", []string{"request_user_input", "create_task"})
+	prompt := ApplyChatActionToolMode("Chat assistant", []string{"request_user_input", "create_task"}, false)
 	for _, want := range []string{
 		"generic statement of desired project work",
 		"not authorization to create or run a task",
@@ -128,5 +128,19 @@ func TestBuildChatSystemPrompt_TaskFollowupIncludesSelectedMemoryContext(t *test
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("task follow-up provider prompt missing %q:\n%s", want, prompt)
 		}
+	}
+}
+
+func TestApplyChatActionToolModeTaskFollowupKeepsCodingToolsPrimary(t *testing.T) {
+	base := BuildChatSystemPrompt(true, models.ChatModeOrchestrate, "You are starting work on a task.", false)
+	prompt := ApplyChatActionToolMode(base, []string{"create_task", "list_tasks"}, true)
+	if strings.Contains(prompt, ChatActionToolModeInstructions) || strings.Contains(prompt, "Perform application actions only by calling the provided runtime action tools") {
+		t.Fatalf("task-thread prompt received action-only Chat instructions: %q", prompt)
+	}
+	if !strings.Contains(prompt, TaskFollowupRuntimeToolInstructions) || !strings.Contains(prompt, "Additional runtime tools: create_task, list_tasks") {
+		t.Fatalf("task-thread prompt missing supplemental runtime tool guidance: %q", prompt)
+	}
+	if got := ApplyChatActionToolMode(base, nil, true); got != base {
+		t.Fatalf("no-tool task-thread prompt must remain unchanged: %q", got)
 	}
 }
