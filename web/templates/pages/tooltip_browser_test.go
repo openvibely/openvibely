@@ -117,7 +117,7 @@ func TestBrowserFunctional_TaskCardBadgeTooltipContinuity(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, `<!doctype html><html><head><style>.hidden, .dropdown-content { display:none }</style></head><body>`)
-		_ = components.TaskCard(models.Task{ID: "badge-test", ProjectID: "default", Title: "Task", Status: models.StatusPending, Category: models.CategoryBacklog, HasGoal: true, AgentID: func() *string { id := "model"; return &id }(), SwarmRole: models.SwarmRoleParent}, "default", "", []models.LLMConfig{{ID: "model", Name: "Test model"}}, nil).Render(r.Context(), w)
+		_ = components.TaskCard(models.Task{ID: "badge-test", ParentTaskID: func() *string { id := "parent"; return &id }(), ChainConfig: `{"enabled":true}`, ProjectID: "default", Title: "Task", Status: models.StatusPending, Category: models.CategoryBacklog, HasGoal: true, AgentID: func() *string { id := "model"; return &id }(), SwarmRole: models.SwarmRoleParent}, "default", "", []models.LLMConfig{{ID: "model", Name: "Test model"}}, nil).Render(r.Context(), w)
 		_ = templateui.Tooltips().Render(r.Context(), w)
 		fmt.Fprint(w, `</body></html>`)
 	}))
@@ -126,7 +126,7 @@ func TestBrowserFunctional_TaskCardBadgeTooltipContinuity(t *testing.T) {
 		b.waitFor("tooltip ready", `typeof window.openVibelyTooltip`, "object")
 		b.evaluate(`var badge=Array.from(document.querySelectorAll('.badge')).find(el=>el.textContent.trim()==='Goal');var owner=badge.closest('[data-task-id]');owner.dataset.ovTooltip='Select tasks (Command+click)';owner.dispatchEvent(new PointerEvent('pointerover',{bubbles:true}));'hover'`)
 		b.waitFor("card hint visible", `String(!document.getElementById('ov-shared-tooltip').hidden)`, "true")
-		for _, label := range []string{"Goal", "Swarm", "Test model"} {
+		for _, label := range []string{"Goal", "Swarm", "Test model", "Chain", "Chained"} {
 			b.evaluate(fmt.Sprintf(`var next=Array.from(document.querySelectorAll('.badge')).find(el=>el.textContent.trim()===%q);owner.dispatchEvent(new PointerEvent('pointerout',{bubbles:true,relatedTarget:next}));next.dispatchEvent(new PointerEvent('pointerover',{bubbles:true,relatedTarget:owner}));'badge'`, label))
 			b.waitFor(label+" retains card hint", `String(!document.getElementById('ov-shared-tooltip').hidden && owner.getAttribute('aria-describedby')==='ov-shared-tooltip')`, "true")
 		}
