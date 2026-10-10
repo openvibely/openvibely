@@ -84,32 +84,14 @@ const ChatActionToolModeInstructions = `RUNTIME ACTION MODE:
 // the final provider request has no executable runtime action definitions.
 const ChatActionUnavailableInstructions = `Runtime actions are unavailable for this request because no executable runtime action tools are attached. Explain this limitation plainly when the user asks for an application action, and do not claim the action was performed.`
 
-// TaskRuntimeToolInstructions supplements, rather than replaces, the coding
-// tools available to task runs and task threads.
-const TaskRuntimeToolInstructions = `TASK RUNTIME TOOLS:
-- Your file, search, and shell tools remain available; use them to read, edit, build, test, and run commands for the task
-- The runtime tools listed below are additional, for application actions such as managing tasks, schedules, alerts, or GitHub
-- Do not claim an application action succeeded unless the tool result confirms success`
-
-// ApplyTaskRuntimeToolMode notes extra runtime tools on a task prompt without
-// implying they are the only tools available.
-func ApplyTaskRuntimeToolMode(base string, toolNames []string) string {
-	names := normalizedToolNames(toolNames)
-	if len(names) == 0 {
-		return base
-	}
-	return strings.TrimSpace(base) + "\n\n" + TaskRuntimeToolInstructions + "\nAdditional runtime tools: " + strings.Join(names, ", ")
-}
-
 // ApplyChatActionToolMode describes the concrete runtime action surface. Requests
 // without runtime tools get an explicit capability limitation instead. Task
-// threads keep their coding tools, so they get a supplemental note instead of
-// the orchestration Chat action-only instructions.
+// threads rely on the request's tool definitions, so they get no note.
 func ApplyChatActionToolMode(base string, toolNames []string, isTaskFollowup bool) string {
-	names := normalizedToolNames(toolNames)
 	if isTaskFollowup {
-		return ApplyTaskRuntimeToolMode(base, names)
+		return base
 	}
+	names := normalizedToolNames(toolNames)
 	if len(names) == 0 {
 		return strings.TrimSpace(base) + "\n\n" + ChatActionUnavailableInstructions
 	}

@@ -484,8 +484,7 @@ func TestAdapterTaskWithRuntimeActionsUsesToolModePrompt(t *testing.T) {
 	user, ok := messages[len(messages)-1].(map[string]any)
 	require.True(t, ok)
 	content, _ := user["content"].(string)
-	require.Contains(t, content, llmprompt.TaskRuntimeToolInstructions)
-	require.Contains(t, content, "Additional runtime tools: create_task")
+	require.NotContains(t, content, "create_task")
 	require.NotContains(t, content, llmprompt.ChatActionUnavailableInstructions)
 	require.Contains(t, content, "If you recovered and completed the requested outcome, report success")
 	require.NotContains(t, content, "If a command failed, a script returned non-zero")
@@ -583,7 +582,7 @@ func TestAdapterTaskWithoutRuntimeActionsDoesNotAdvertiseLegacyMutationMarkers(t
 	content, _ := user["content"].(string)
 	require.NotContains(t, content, llmprompt.ChatActionUnavailableInstructions)
 	require.NotContains(t, content, "[CREATE_TASK]")
-	require.NotContains(t, content, llmprompt.TaskRuntimeToolInstructions)
+	require.NotContains(t, content, llmprompt.ChatActionToolModeInstructions)
 }
 
 func TestAdapterToolCallReplaysToolResult(t *testing.T) {

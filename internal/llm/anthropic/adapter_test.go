@@ -36,8 +36,8 @@ func TestAppendToolModeSystemPromptCoversChatAndTaskFollowupsAndPreservesPlan(t 
 	}
 
 	taskThread := appendToolModeSystemPrompt("base", rt, models.ChatModeOrchestrate, true)
-	if strings.Contains(taskThread, llmprompt.ChatActionToolModeInstructions) || !strings.Contains(taskThread, llmprompt.TaskRuntimeToolInstructions) || !strings.Contains(taskThread, "Additional runtime tools: create_task") {
-		t.Fatalf("task-thread prompt must keep coding tools and list runtime tools as additional: %q", taskThread)
+	if taskThread != "base" {
+		t.Fatalf("task-thread prompt must not add a tool note: %q", taskThread)
 	}
 	if got := appendToolModeSystemPrompt("base", nil, models.ChatModeOrchestrate, true); got != "base" {
 		t.Fatalf("no-tool task-thread prompt must not claim tools are unavailable: %q", got)
@@ -165,8 +165,8 @@ func TestCallStreamingZeroHistoryFollowupUsesChatAssembly(t *testing.T) {
 	if strings.Contains(payload, llmprompt.ChatActionUnavailableInstructions) {
 		t.Fatalf("zero-history follow-up claimed tools are unavailable: %#v", gotBody)
 	}
-	if strings.Contains(payload, llmprompt.TaskRuntimeToolInstructions) {
-		t.Fatalf("zero-history follow-up received initial-task guidance: %#v", gotBody)
+	if strings.Contains(payload, llmprompt.ChatActionToolModeInstructions) {
+		t.Fatalf("zero-history follow-up received Chat action guidance: %#v", gotBody)
 	}
 	outputConfig, ok := gotBody["output_config"].(map[string]any)
 	if !ok || outputConfig["effort"] != "medium" {
@@ -923,7 +923,7 @@ func TestCallChatStreamingUsesRuntimePolicyHistoryAndSystemContext(t *testing.T)
 			t.Fatalf("request body missing %q: %#v", want, gotBody)
 		}
 	}
-	if strings.Contains(payload, llmprompt.ChatActionToolModeInstructions) || !strings.Contains(payload, llmprompt.TaskRuntimeToolInstructions) {
+	if strings.Contains(payload, llmprompt.ChatActionToolModeInstructions) || strings.Contains(payload, "Available action tools") {
 		t.Fatalf("task follow-up runtime tools should supplement coding tools: %#v", gotBody["system"])
 	}
 	if gotBody["model"] != "claude-sonnet-5-5" {
