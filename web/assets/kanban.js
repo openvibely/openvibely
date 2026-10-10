@@ -221,12 +221,16 @@
     }
     document.addEventListener('mousedown', event => {
         const toggle = event.target.closest && event.target.closest('[data-kanban-search-toggle]');
-        // Keep focus in the open input so clicking the icon does not collapse it.
+        // Keep focus in the open input so the click handler, not focusout, decides whether to collapse.
         if (toggle && toggle.closest('[data-kanban-search]').dataset.open === 'true') event.preventDefault();
     });
     document.addEventListener('click', event => {
         const toggle = event.target.closest && event.target.closest('[data-kanban-search-toggle]');
-        if (toggle) setSearchOpen(toggle.closest('[data-kanban-search]'), true);
+        if (!toggle) return;
+        const search = toggle.closest('[data-kanban-search]');
+        const open = search.dataset.open !== 'true';
+        setSearchOpen(search, open);
+        if (!open) toggle.focus();
     });
     // iOS Safari keeps inputs focused when tapping blank space, so close on any outside press too.
     document.addEventListener('pointerdown', event => {
