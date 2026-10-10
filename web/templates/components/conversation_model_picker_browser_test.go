@@ -89,6 +89,9 @@ func TestBrowserFunctional_ConversationModelPicker(t *testing.T) {
    assert(!picker.hidden && document.activeElement===picker.querySelector('input'),'focus model search on '+platform);
    assert(trigger.getAttribute('aria-keyshortcuts')===(mac?'Meta+Shift+M':'Control+Shift+M'),'platform shortcut accessibility hint');
    assert(trigger.title===(mac?'Models (⌘⇧M)':'Models (Ctrl+Shift+M)'),'platform tooltip');
+   assert(shortcut({metaKey:mac,ctrlKey:!mac}).defaultPrevented,'consume repeated shortcut on '+platform);
+   assert(picker.hidden && document.getElementById('conversation-provider-models').hidden && document.activeElement===trigger && trigger.getAttribute('aria-expanded')==='false','shortcut closes picker and restores trigger focus on '+platform);
+   assert(shortcut({metaKey:mac,ctrlKey:!mac}).defaultPrevented && !picker.hidden && document.activeElement===picker.querySelector('input'),'shortcut reopens picker on '+platform);
    window.ovModelPicker.close(false);
    if(originalPlatform)Object.defineProperty(navigator,'platform',originalPlatform);else delete navigator.platform;
    if(originalData)Object.defineProperty(navigator,'userAgentData',originalData);else delete navigator.userAgentData;

@@ -752,8 +752,8 @@
         if (!btn || (document.querySelector("dialog[open]") && !btn.closest("dialog[open]"))) return;
         e.preventDefault();
         e.stopPropagation();
-        if (active) close(false);
-        window.ovModelPicker.open(btn);
+        if (active) close(true);
+        else window.ovModelPicker.open(btn);
         return;
       }
       if (!active) return;
