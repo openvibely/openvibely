@@ -158,6 +158,12 @@ func TestBrowserFunctional_SchedulePageDateTimePicker(t *testing.T) {
 		b.click(`[aria-label="New Scheduled Task"]`)
 		b.click(`[data-run-at-picker]`)
 		b.waitFor("combined picker opens from schedule page", `String(document.querySelector('.schedule-datetime-popup').matches(':popover-open'))`, "true")
+		// Native selects can open before pointerup, so dismissal must happen on press.
+		b.evaluate(`window.pickerClosedBeforeRepeat=false; document.getElementById('sched-repeat-type-select').addEventListener('pointerdown',function(){window.pickerClosedBeforeRepeat=!document.querySelector('.schedule-datetime-popup').matches(':popover-open');},{once:true}); 'watching'`)
+		b.click(`#sched-repeat-type-select`)
+		b.waitFor("repeat press dismisses picker before opening menu", `String(window.pickerClosedBeforeRepeat && document.activeElement.id==='sched-repeat-type-select' && document.getElementById('new_scheduled_task_modal').open)`, "true")
+		b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": "Escape"}, nil)
+		b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyUp", "key": "Escape"}, nil)
 		b.click(`#sched-task-title-input`)
 		b.waitFor("local date and time ready to submit", `String(document.querySelector('[data-run-at-picker]').checkValidity() && document.getElementById('new_scheduled_task_modal').open)`, "true")
 		b.evaluate(`document.getElementById('new_scheduled_task_modal').close();openNewScheduledTaskModal();'reset'`)
