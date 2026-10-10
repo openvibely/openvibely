@@ -426,7 +426,6 @@ templ TaskCardMergeSubmenus(task *models.Task, projectID string, state TaskCardM
 			</svg>
 		</button>
 		<ul tabindex="-1" data-task-card-submenu-panel class="ov-menu ov-menu-actions ov-menu-scroll menu absolute right-0 top-full z-[110] hidden w-56 max-w-[calc(100vw-2rem)]">
-			<li class="menu-title"><span>Local</span></li>
 			for _, action := range TaskWorktreeMergeActions() {
 				@TaskCardWorktreeMergeAction(task, projectID, targetBranch, action, taskCardMergeActionEnabled(state, action.MergeType))
 			}
@@ -440,7 +439,6 @@ templ TaskCardMergeSubmenus(task *models.Task, projectID string, state TaskCardM
 			</svg>
 		</button>
 		<ul tabindex="-1" data-task-card-submenu-panel class="ov-menu ov-menu-actions ov-menu-scroll menu absolute right-0 top-full z-[110] hidden w-56 max-w-[calc(100vw-2rem)]">
-			<li class="menu-title"><span>GitHub</span></li>
 			<li>
 				if state.PullRequest != nil && state.PullRequest.PRURL != "" && strings.EqualFold(strings.TrimSpace(state.PullRequest.PRState), "open") {
 					<a href={ templ.SafeURL(state.PullRequest.PRURL) } target="_blank" rel="noopener noreferrer">View PR #{ fmt.Sprintf("%d", state.PullRequest.PRNumber) }</a>
