@@ -112,16 +112,14 @@ func TestBrowserFunctional_MermaidRendersAfterLiveChatCompletion(t *testing.T) {
 			}
 		})
 	})
-	nested := []struct {
-		name, open, close string
-		invalidSource     bool
-	}{
-		{"list item", "1. Step one\n\n    ```mermaid\n    flowchart TD\n     A[Start] --> B[End]\n", "    ```\n\n2. Step two", false},
-		{"list marker", "1. ```mermaid\n   flowchart TD\n    A[Start] --> B[End]\n", "   ```\n\n2. Step two", false},
-		{"blockquote", "> ```mermaid\n> flowchart TD\n>  A[Start] --> B[End]\n", "> ```\n\nAfter", false},
-		// Lines that look like fences but cannot close the open block; Mermaid rejects them once closed.
-		{"four-space fence inside", "```mermaid\nflowchart TD\n A[Start] --> B[End]\n    ```\n", "```\n\nAfter", true},
-		{"list-marker fence inside", "```mermaid\nflowchart TD\n A[Start] --> B[End]\n- ```\n", "```\n\nAfter", true},
+	nested := []struct{ name, open, close string }{
+		{"list item", "1. Step one\n\n    ```mermaid\n    flowchart TD\n     A[Start] --> B[End]\n", "    ```\n\n2. Step two"},
+		{"list marker", "1. ```mermaid\n   flowchart TD\n    A[Start] --> B[End]\n", "   ```\n\n2. Step two"},
+		{"blockquote", "> ```mermaid\n> flowchart TD\n>  A[Start] --> B[End]\n", "> ```\n\nAfter"},
+		{"four-space fence inside", "```mermaid\nflowchart TD\n A[\"Start\n    ```\n\"] --> B[End]\n", "```\n\nAfter"},
+		{"list-marker fence inside", "```mermaid\nflowchart TD\n A[\"Start\n- ```\n\"] --> B[End]\n", "```\n\nAfter"},
+		// Markdown measures the closing fence from the list item's content, not the opening fence.
+		{"list fence indented from content", "1. Step one\n\n      ```mermaid\n      flowchart TD\n       A[\"Start\n         ```\n      \"] --> B[End]\n", "      ```\n\n2. Step two"},
 	}
 	for _, nc := range nested {
 		t.Run("nested fence "+nc.name, func(t *testing.T) {
@@ -142,10 +140,6 @@ func TestBrowserFunctional_MermaidRendersAfterLiveChatCompletion(t *testing.T) {
 					t.Fatalf("open nested fence rendered or errored (diagram:error) = %s", got)
 				}
 				emit(nc.close)
-				if nc.invalidSource {
-					browser.waitFor("closed fence attempted render", `(function(){var p=`+pair+`;return String(!!p.querySelector('.chat-mermaid img, [data-mermaid-error]'))})()`, "true")
-					return
-				}
 				browser.waitFor("nested diagram rendered while running", `(function(){var p=`+pair+`;return p.getAttribute('data-exec-status')+':'+!!p.querySelector('.chat-mermaid img')+':'+!!p.querySelector('[data-mermaid-error]')})()`, "running:true:false")
 			})
 		})

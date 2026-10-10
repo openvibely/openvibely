@@ -17,25 +17,50 @@ templ MermaidDiagrams() {
    const pair=code.closest('[data-execution-pair="true"]');
    return !!pair && terminal.has(pair.getAttribute('data-exec-status'));
   };
-  // A fence closes only on a complete line; a trailing partial line can still change.
-  function fenceLine(line) {
-   const match=/^((?:[ \t>]|[-*+][ \t]|\d{1,9}[.)][ \t])*)(`{3,}|~{3,})(.*)$/.exec(line);
-   if (!match) return null;
-   const prefix=match[1];
-   return {fence:match[2], info:match[3], quotes:(prefix.match(/>/g)||[]).length,
-    listMarker:/[-*+][ \t]|\d[.)][ \t]/.test(prefix), column:prefix.replace(/>[ ]?/g,'').replace(/\t/g,'    ').length};
+  // Follows CommonMark: fences are measured from the enclosing list item's content
+  // column, and a block also ends when its list item or blockquote ends.
+  // Only complete lines can close a block; a trailing partial line can still change.
+  function stripQuotes(line,limit) {
+   let quotes=0;
+   for (let match;quotes<limit && (match=/^ {0,3}>[ ]?/.exec(line));quotes++) line=line.slice(match[0].length);
+   return {line:line.replace(/\t/g,'    '),quotes};
   }
+  const indentOf=line=>/^ */.exec(line)[0].length;
   function endsInsideFence(text) {
-   let open=null;
+   let open=null, lists=[], depth=0;
    const lines=text.split(/\r\n|\r|\n/);
-   lines.forEach((line,index)=>{
-    const found=fenceLine(line);
-    if (!found) return;
-    if (!open) {
-     if (!(found.fence[0]==='`' && found.info.includes('`'))) open=found;
-    } else if (index<lines.length-1 && !found.listMarker && found.quotes===open.quotes &&
-     Math.abs(found.column-open.column)<=3 && found.fence[0]===open.fence[0] &&
-     found.fence.length>=open.fence.length && !found.info.trim()) open=null;
+   lines.forEach((raw,index)=>{
+    if (open) {
+     const {line,quotes}=stripQuotes(raw,open.quotes);
+     const blank=!line.trim();
+     if (quotes===open.quotes && (blank || indentOf(line)>=open.base)) {
+      const rest=line.slice(open.base);
+      if (index<lines.length-1 && indentOf(rest)<=3 && rest.trim().replace(open.char==='`'?/^`+/:/^~+/,'')==='' &&
+       rest.trim().length>=open.length) open=null;
+      return;
+     }
+     if (index===lines.length-1) return;
+     open=null;
+    }
+    let {line,quotes}=stripQuotes(raw,Infinity);
+    if (quotes!==depth) { lists=[]; depth=quotes; }
+    if (!line.trim()) return;
+    let offset=0;
+    for (let item;(item=/^( *)([-*+]|\d{1,9}[.)])( {1,4}(?! )|$)/.exec(line));) {
+     const column=offset+item[1].length;
+     while (lists.length && lists[lists.length-1]>column) lists.pop();
+     const width=item[0].length || item[1].length+item[2].length+1;
+     lists.push(offset+width);
+     offset+=item[0].length;
+     line=line.slice(item[0].length);
+     if (!item[3]) return;
+    }
+    const column=offset+indentOf(line);
+    if (!offset) while (lists.length && lists[lists.length-1]>column) lists.pop();
+    const base=lists.length?lists[lists.length-1]:0;
+    const fence=/^(`{3,}|~{3,})(.*)$/.exec(line.trimStart());
+    if (fence && column-base<=3 && !(fence[1][0]==='`' && fence[2].includes('`')))
+     open={char:fence[1][0], length:fence[1].length, quotes, base};
    });
    return !!open;
   }
