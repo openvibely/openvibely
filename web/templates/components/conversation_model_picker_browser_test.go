@@ -68,9 +68,9 @@ func TestBrowserFunctional_ConversationModelPicker(t *testing.T) {
  trigger.scrollIntoView({block:'end'});await nextFrame();
  const textarea=document.querySelector('textarea');textarea.focus();
  const apple=/Mac|iPhone|iPad|iPod|iOS/i.test(navigator.userAgentData?.platform || navigator.platform || navigator.userAgent || '');
- const shortcut=(extra={})=>{const e=new KeyboardEvent('keydown',{key:'M',metaKey:apple,ctrlKey:!apple,shiftKey:true,bubbles:true,cancelable:true,...extra});document.activeElement.dispatchEvent(e);return e;};
+ const shortcut=(extra={})=>{const e=new KeyboardEvent('keydown',{key:'M',metaKey:apple,ctrlKey:!apple,shiftKey:false,bubbles:true,cancelable:true,...extra});document.activeElement.dispatchEvent(e);return e;};
  const picker=document.getElementById('conversation-model-picker');
- for(const extra of [{key:'L'},{shiftKey:false},{ctrlKey:true,metaKey:true},{ctrlKey:apple,metaKey:!apple},{altKey:true},{isComposing:true},{repeat:true}]){
+ for(const extra of [{key:'L'},{shiftKey:true},{ctrlKey:true,metaKey:true},{ctrlKey:apple,metaKey:!apple},{altKey:true},{isComposing:true},{repeat:true}]){
    assert(!shortcut(extra).defaultPrevented && picker.hidden,'ignore other shortcuts and composing/repeated events');
  }
  trigger.disabled=true;assert(!shortcut().defaultPrevented && picker.hidden,'ignore disabled picker');trigger.disabled=false;
@@ -87,8 +87,8 @@ func TestBrowserFunctional_ConversationModelPicker(t *testing.T) {
    textarea.focus();
    assert(shortcut({metaKey:mac,ctrlKey:!mac}).defaultPrevented,'consume shortcut on '+platform);
    assert(!picker.hidden && document.activeElement===picker.querySelector('input'),'focus model search on '+platform);
-   assert(trigger.getAttribute('aria-keyshortcuts')===(mac?'Meta+Shift+M':'Control+Shift+M'),'platform shortcut accessibility hint');
-   assert(trigger.title===(mac?'Models (⌘⇧M)':'Models (Ctrl+Shift+M)'),'platform tooltip');
+   assert(trigger.getAttribute('aria-keyshortcuts')===(mac?'Meta+M':'Control+M'),'platform shortcut accessibility hint');
+   assert(trigger.title===(mac?'Models (⌘M)':'Models (Ctrl+M)'),'platform tooltip');
    assert(shortcut({metaKey:mac,ctrlKey:!mac}).defaultPrevented,'consume repeated shortcut on '+platform);
    assert(picker.hidden && document.getElementById('conversation-provider-models').hidden && document.activeElement===trigger && trigger.getAttribute('aria-expanded')==='false','shortcut closes picker and restores trigger focus on '+platform);
    assert(shortcut({metaKey:mac,ctrlKey:!mac}).defaultPrevented && !picker.hidden && document.activeElement===picker.querySelector('input'),'shortcut reopens picker on '+platform);
@@ -290,7 +290,7 @@ func TestBrowserFunctional_TaskModelPickerPersistence(t *testing.T) {
  const trigger=document.getElementById('task-form-agent-select'),panel=document.getElementById('conversation-model-picker'),effort=document.querySelector('[name=reasoning_effort]');
  document.querySelector('textarea').focus();
  const apple=/Mac|iPhone|iPad|iPod|iOS/i.test(navigator.userAgentData?.platform || navigator.platform || navigator.userAgent || '');
- const shortcut=new KeyboardEvent('keydown',{key:'M',metaKey:apple,ctrlKey:!apple,shiftKey:true,bubbles:true,cancelable:true});document.activeElement.dispatchEvent(shortcut);
+ const shortcut=new KeyboardEvent('keydown',{key:'M',metaKey:apple,ctrlKey:!apple,shiftKey:false,bubbles:true,cancelable:true});document.activeElement.dispatchEvent(shortcut);
  assert(shortcut.defaultPrevented && !panel.hidden && document.activeElement===panel.querySelector('input'),'task shortcut opens picker and focuses search');
  assert([...panel.querySelectorAll('.ov-mp-provider')].some(b=>b.dataset.provider==='Mixture'),'mixture configurations are grouped');assert(panel.querySelector('input[type=range]').disabled,'disable until saved effort loads');
  await trigger._ovModelState.ready;assert(effort.value==='high','load saved task effort');
