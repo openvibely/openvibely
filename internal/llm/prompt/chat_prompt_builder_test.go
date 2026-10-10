@@ -29,8 +29,8 @@ func TestApplyChatActionToolModeReportsConcreteCapability(t *testing.T) {
 		t.Fatalf("capable prompt missing runtime action guidance: %q", capable)
 	}
 	incapable := ApplyChatActionToolMode(base, nil, false)
-	if !strings.Contains(incapable, ChatActionUnavailableInstructions) {
-		t.Fatalf("incapable prompt missing capability limitation: %q", incapable)
+	if incapable != base {
+		t.Fatalf("no-tool chat prompt must be unchanged, got %q", incapable)
 	}
 	for _, prompt := range []string{capable, incapable} {
 		for _, marker := range legacyMutationMarkers {

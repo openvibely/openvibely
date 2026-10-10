@@ -80,20 +80,12 @@ const ChatActionToolModeInstructions = `RUNTIME ACTION MODE:
 - After tool calls complete and no requested follow-up remains unresolved, provide a concise plain-language summary for the user
 - Do not claim an action succeeded unless the tool result confirms success`
 
-// ChatActionUnavailableInstructions makes the capability boundary explicit when
-// the final provider request has no executable runtime action definitions.
-const ChatActionUnavailableInstructions = `Runtime actions are unavailable for this request because no executable runtime action tools are attached. Explain this limitation plainly when the user asks for an application action, and do not claim the action was performed.`
-
-// ApplyChatActionToolMode describes the concrete runtime action surface. Requests
-// without runtime tools get an explicit capability limitation instead. Task
-// threads rely on the request's tool definitions, so they get no note.
+// ApplyChatActionToolMode adds orchestration Chat action rules when runtime
+// tools are attached. Task threads rely on the request's tool definitions.
 func ApplyChatActionToolMode(base string, toolNames []string, isTaskFollowup bool) string {
-	if isTaskFollowup {
-		return base
-	}
 	names := normalizedToolNames(toolNames)
-	if len(names) == 0 {
-		return strings.TrimSpace(base) + "\n\n" + ChatActionUnavailableInstructions
+	if isTaskFollowup || len(names) == 0 {
+		return base
 	}
 	return strings.TrimSpace(base) + "\n\n" + ChatActionToolModeInstructions + "\nAvailable action tools: " + strings.Join(names, ", ")
 }
