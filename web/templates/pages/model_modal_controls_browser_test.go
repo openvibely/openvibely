@@ -369,7 +369,7 @@ func TestBrowserFunctional_ModelHelpLayout(t *testing.T) {
 	}
 	fixture := `<style>` + css + `
     #new_model_modal .modal-box { max-width:none; transition:none; transform:none; }
-    #modelSettingHelp { transition:none; }
+    #ov-shared-tooltip { transition:none; }
     </style><main id="reconnect-result"></main><script>
     window.htmx={process:function(){}};
     </script>` + content.String() + `<script>
@@ -405,6 +405,7 @@ func TestBrowserFunctional_ModelHelpLayout(t *testing.T) {
             document.getElementById('model_output_limit_field').classList.remove('hidden');
             for (var button of modal.querySelectorAll('.model-setting-help')) {
                 setModelSection(button.closest('[data-model-panel]').dataset.modelPanel);
+                if (!button.getClientRects().length) continue; // Provider-specific fields may be hidden.
                 var body=document.getElementById('model_section_body');
                 var footer=modal.querySelector('.modal-action');
                 var footerTop=footer.getBoundingClientRect().top;
@@ -419,7 +420,7 @@ func TestBrowserFunctional_ModelHelpLayout(t *testing.T) {
                 var labelRect=label.getBoundingClientRect();
                 var rowRect=row.getBoundingClientRect();
                 var boxRect=box.getBoundingClientRect();
-                var tip=document.getElementById('modelSettingHelp');
+                var tip=document.getElementById('ov-shared-tooltip');
                 var tipRect=tip.getBoundingClientRect();
                 var style=getComputedStyle(tip);
                 if(iconRect.left-labelRect.right < 0 || iconRect.left-labelRect.right > 8)

@@ -9,6 +9,7 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/web/templates/components"
 	"github.com/openvibely/openvibely/web/templates/layout"
+ templateui "github.com/openvibely/openvibely/web/templates"
 )
 
 templ Models(projects []models.Project, currentProjectID string, agents []models.LLMConfig, modelWorkerStats map[string]int, desktopMode bool) {
@@ -270,6 +271,7 @@ templ providerIcon(provider models.LLMProvider) {
 }
 
 templ modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, oauthConnections []models.OAuthConnection, modelWorkerStats map[string]int, desktopMode bool, hasMore bool, state CardListState) {
+ @templateui.Tooltips()
 		<div id="models-container" data-search-container hx-history="false" data-built-in-models={ builtInModelOptionsJSON() } data-card-pagination-root data-card-pagination-url={ CardListURL("models", state) } data-card-pagination-list="#models-card-list" data-card-pagination-card-selector="[data-model-id]" data-card-pagination-key="data-model-id" data-card-pagination-page-size="20" data-card-pagination-has-more={ cardPaginationHasMoreAttribute(hasMore) }>
 		@layout.PageTitle("Models")
 	<div data-page-header class="flex items-center justify-between mb-6">
@@ -957,7 +959,7 @@ for _, agent := range modelOptions {
 					</div>
 				</form>
 			</div>
-			<div id="modelSettingHelp" popover="auto" role="tooltip" class="bg-base-100 text-base-content border border-base-300 rounded-lg shadow-xl p-3 text-sm" style="position:fixed;margin:0;width:min(360px,calc(100vw - 16px));max-height:calc(100vh - 16px);overflow:auto"></div>
+
 			<form class="modal-backdrop">
 				<button type="button" onclick="closeModelModal()">close</button>
 			</form>
@@ -1020,9 +1022,6 @@ for _, agent := range modelOptions {
                 justify-content: flex-start;
                 gap: 0.375rem;
             }
-            #modelSettingHelp { display: none; }
-            #modelSettingHelp:popover-open { display: block; }
-            #modelSettingHelp[data-help-open] { display: block; z-index: 1212; }
 			/* Keep password toggle button fixed inside input across press/focus states */
 			.password-toggle-btn:active,
 			.password-toggle-btn:focus,
@@ -2937,78 +2936,7 @@ for _, agent := range modelOptions {
 					showModelFormError('Complete the required field: ' + fieldName + '.');
 				}, true);
 
-                (function setupModelSettingHelp() {
-                    if (window._modelSettingHelpController) window._modelSettingHelpController.abort();
-                    var controller = new AbortController();
-                    window._modelSettingHelpController = controller;
-                    var signal = controller.signal;
-                    var root = document.getElementById('new_model_modal');
-                    var tip = document.getElementById('modelSettingHelp');
-                    var nativePopover = typeof tip.showPopover === 'function';
-                    if (!nativePopover) tip.removeAttribute('popover');
-                    var active = null, pinned = false;
-                    function close() {
-                        if (active) {
-                            active.removeAttribute('aria-describedby');
-                            active.setAttribute('aria-expanded', 'false');
-                        }
-                        active = null;
-                        pinned = false;
-                        if (nativePopover && tip.matches(':popover-open')) tip.hidePopover();
-                        tip.removeAttribute('data-help-open');
-                    }
-                    function show(button, pin) {
-                        if (active !== button) close();
-                        active = button;
-                        pinned = pinned || pin;
-                        tip.textContent = button.dataset.modelSettingHelp;
-                        button.setAttribute('aria-describedby', tip.id);
-                        button.setAttribute('aria-expanded', 'true');
-                        if (nativePopover) {
-                            if (!tip.matches(':popover-open')) tip.showPopover();
-                        } else tip.setAttribute('data-help-open', '');
-                        var r = button.getBoundingClientRect(), box = tip.getBoundingClientRect();
-                        tip.style.left = Math.max(8, Math.min(r.left, window.innerWidth - box.width - 8)) + 'px';
-                        tip.style.top = Math.max(8, r.bottom + box.height + 8 <= window.innerHeight ? r.bottom : r.top - box.height) + 'px';
-                    }
-                    root.addEventListener('pointerover', function(e) {
-                        var b = e.target.closest('[data-model-setting-help]');
-                        if (b && !pinned) show(b, false);
-                    }, {signal: signal});
-                    root.addEventListener('pointerout', function(e) {
-                        if (!pinned && active && !active.contains(e.relatedTarget) && !tip.contains(e.relatedTarget)) close();
-                    }, {signal: signal});
-                    root.addEventListener('focusin', function(e) {
-                        var b = e.target.closest('[data-model-setting-help]');
-                        if (b) show(b, false);
-                    }, {signal: signal});
-                    root.addEventListener('focusout', function(e) {
-                        if (active === e.target) close();
-                    }, {signal: signal});
-                    root.addEventListener('click', function(e) {
-                        var b = e.target.closest('[data-model-setting-help]');
-                        if (!b) { if (!tip.contains(e.target)) close(); return; }
-                        if (active === b && pinned) close(); else show(b, true);
-                    }, {signal: signal});
-                    root.addEventListener('close', close, {signal: signal});
-                    root.addEventListener('model-section-change', close, {signal: signal});
-                    root.addEventListener('keydown', function(e) {
-                        if (e.key === 'Escape' && active) {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            close();
-                        }
-                    }, {signal: signal});
-                    tip.addEventListener('toggle', function() {
-                        if (nativePopover && !tip.matches(':popover-open')) close();
-                    }, {signal: signal});
-                    root.addEventListener('scroll', function(e) { if (e.target !== tip) close(); }, {capture: true, signal: signal});
-                    window.addEventListener('resize', close, {signal: signal});
-                    document.addEventListener('htmx:beforeCleanupElement', function(e) {
-                        if (e.detail && e.detail.elt && e.detail.elt.contains(root)) controller.abort();
-                    }, {signal: signal});
-                    signal.addEventListener('abort', close, {once: true});
-                })();
+
 		</script>
 	</div>
 }

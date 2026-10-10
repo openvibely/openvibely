@@ -322,7 +322,7 @@ templ searchableSelectorScript() {
                 document.querySelectorAll('[data-breadcrumb-selector-button], #project-selector-trigger').forEach(function(button) {
                     var project = button.id === 'project-selector-trigger';
                     button.setAttribute('aria-keyshortcuts', (apple ? 'Meta+' : 'Control+') + (project ? 'Shift+' : '') + 'K');
-                    if (project || !button.title) button.title = (project ? 'Open project' : button.getAttribute('aria-label')) + ' (' + (apple ? '⌘' : 'Ctrl+') + (project ? (apple ? '⇧' : 'Shift+') : '') + 'K)';
+                    if (project || !(button.title || button.dataset.ovTooltip)) button.title = (project ? 'Open project' : button.getAttribute('aria-label')) + ' (' + (apple ? '⌘' : 'Ctrl+') + (project ? (apple ? '⇧' : 'Shift+') : '') + 'K)';
                     if (automation && automation.root.contains(button)) {
                         button.title = 'Switch automation (' + (apple ? '⌘K' : 'Ctrl+K') + '); previous/next: ' + (apple ? '⌘⇧↑/↓' : 'Ctrl+Shift+↑/↓') + '; last visited: ' + (apple ? '⌘⇧L' : 'Ctrl+Shift+L');
                         button.setAttribute('aria-keyshortcuts', (apple ? 'Meta+K Meta+Shift+ArrowUp Meta+Shift+ArrowDown Meta+Shift+L' : 'Control+K Control+Shift+ArrowUp Control+Shift+ArrowDown Control+Shift+L'));
