@@ -233,14 +233,14 @@ window.Chart=function(){this.destroy=function(){};};
 window.fetch=function(){return Promise.resolve({ok:true,json:function(){return Promise.resolve({task_summary:{tasks_worked_on:42,goal_achievement:{numerator:24,denominator:30,percent:80},merge_completion:{numerator:18,denominator:24,percent:75}},models:[],agents:[],recent_outcomes:[]});}});};
 window.addEventListener('load',function(){
  var result=document.getElementById('reconnect-result'),view='models',attempts=0;
- function check(){
+ async function check(){
   var box=document.querySelector('[data-task-summary="'+view+'"]');
   if(box.textContent.includes('Loading')){if(++attempts>100){result.dataset.testResult='fail';result.dataset.testError='KPI loading stuck';return;}setTimeout(check,20);return;}
   if(Array.from(box.querySelectorAll('[data-task-summary-value]')).map(el=>el.textContent).join('|')!=='42|80.0%|75.0%'||!box.textContent.includes('24 / 30 evaluated')||!box.textContent.includes('18 / 24 eligible')){result.dataset.testResult='fail';result.dataset.testError='KPI values missing on '+view;return;}
   var help=box.querySelectorAll('[data-model-help]')[1],tip=document.getElementById('ov-shared-tooltip');
   if(tip.getClientRects().length){result.dataset.testResult='fail';result.dataset.testError='empty tooltip must start hidden';return;}
-  help.dispatchEvent(new PointerEvent('pointerover',{bubbles:true}));
-  if(!tip.matches(':popover-open')||!tip.textContent.includes('24 / 30 evaluated')||!tip.textContent.includes('goal was met')||!help.querySelector('[data-task-summary-sample]').hidden){result.dataset.testResult='fail';result.dataset.testError='sample must be hidden in card and visible in immediate tooltip';return;}
+  help.dispatchEvent(new PointerEvent('pointerover',{bubbles:true}));await new Promise(resolve=>setTimeout(resolve,450));
+  if(!tip.matches(':popover-open')||!tip.textContent.includes('24 / 30 evaluated')||!tip.textContent.includes('goal was met')||!help.querySelector('[data-task-summary-sample]').hidden){result.dataset.testResult='fail';result.dataset.testError='sample must be hidden in card and visible in delayed tooltip';return;}
   help.click();
   if(!tip.matches(':popover-open')){result.dataset.testResult='fail';result.dataset.testError='click must pin tooltip';return;}
   document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));
@@ -1123,7 +1123,7 @@ func TestBrowserFunctional_AnalyticsContent_ModelScorecardIsReadableWithoutHover
   function fail(message){result.setAttribute('data-test-result','fail');result.setAttribute('data-test-error',message);throw new Error(message);}
   var chartConfigs={}; window.Chart=function(ctx,config){chartConfigs[ctx.canvas.id]=config;this.destroy=function(){};};
 	  window.fetch=function(url){var value=String(url),payload=[];if(value.indexOf('/api/analytics/dashboard')>=0){dashboardURL=value;payload={definitions:[],current:{technical_completion:{},goal_achievement:{},first_pass:{},follow_up:{}},agents:[],workflows:[],model_categories:[{model_config_id:'model-1',model:'Fable',category:'backlog',tasks_evaluated:1,technical_completion:{numerator:1,denominator:2,percent:50}}],models:[{model_config_id:'model-1',config_name:'Fable',provider:'anthropic',model:'claude-fable',reasoning_effort:'high',outcome_trend:[{period:'2026-09-01',goal_achievement:{numerator:1,denominator:1,percent:100},merge_completion:{numerator:1,denominator:2,percent:50}},{period:'2026-09-02',goal_achievement:{numerator:0,denominator:0,percent:0},merge_completion:{numerator:0,denominator:1,percent:0}}],tasks_used:1,run_count:2,average_runs:2,average_follow_ups:1,acceptance:{numerator:1,denominator:1,percent:100},first_run_acceptance:{numerator:0,denominator:1,percent:0},technical_completion:{numerator:2,denominator:2,percent:100},goal_achievement:{numerator:1,denominator:1,percent:100},merge_completion:{numerator:1,denominator:2,percent:50},first_pass:{numerator:0,denominator:1,percent:0},follow_up:{numerator:1,denominator:1,percent:100},median_duration_ms:60000,p90_duration_ms:120000,duration_sample_size:1,total_tokens:1000,token_covered_tasks:1,known_cost_usd:0.25,cost_covered_tasks:1}],recent_outcomes:[],insights:[]};}return Promise.resolve({ok:true,json:function(){return Promise.resolve(payload);}});};
-	  function wait(attempt){
+	  async function wait(attempt){
 	    var card=document.getElementById('modelScorecard'),score=card.textContent;
 	    if(score.indexOf('Fable')>=0){
 	      if(document.getElementById('analyticsWorkType')||new URL(dashboardURL,location.href).searchParams.has('work_type'))fail('Models must not expose or apply a work-type filter');
@@ -1132,15 +1132,15 @@ func TestBrowserFunctional_AnalyticsContent_ModelScorecardIsReadableWithoutHover
 	      if(card.querySelectorAll('thead th').length!==7||card.querySelectorAll('tbody tr').length!==1)fail('expected one compact seven-column scorecard');
 	      if(card.querySelectorAll('thead button[data-model-help]').length!==7||card.querySelector('button[title]'))fail('metric explanations must not use delayed browser titles');
 	      var help=card.querySelector('thead button'),tip=document.getElementById('ov-shared-tooltip');
-	      help.dispatchEvent(new PointerEvent('pointerover',{bubbles:true}));
-	      if(!tip.matches(':popover-open')||tip.textContent!==help.dataset.modelHelp)fail('hover help must open immediately');
+	      help.dispatchEvent(new PointerEvent('pointerover',{bubbles:true}));await new Promise(resolve=>setTimeout(resolve,450));
+	      if(!tip.matches(':popover-open')||tip.textContent!==help.dataset.modelHelp)fail('hover help must open after delay');
 	      help.click();help.dispatchEvent(new PointerEvent('pointerout',{bubbles:true}));
 	      if(!tip.matches(':popover-open'))fail('clicked help must remain open');
 	      document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));
 	      if(tip.matches(':popover-open'))fail('Escape must close help');
 	      // A headless page under load can lack system focus; Chrome then moves focus without
 	      // firing focus events, so deliver them as a real keyboard focus change would.
-	      help.focus();if(!document.hasFocus())help.dispatchEvent(new FocusEvent('focusin',{bubbles:true}));
+	      document.dispatchEvent(new KeyboardEvent('keydown',{key:'Tab',bubbles:true}));help.focus();if(!document.hasFocus())help.dispatchEvent(new FocusEvent('focusin',{bubbles:true}));await new Promise(resolve=>setTimeout(resolve,450));
 	      if(!tip.matches(':popover-open'))fail('keyboard focus must open help');
 	      help.blur();if(!document.hasFocus())help.dispatchEvent(new FocusEvent('focusout',{bubbles:true}));
 	      if(tip.matches(':popover-open'))fail('leaving focus must close help');
@@ -1456,7 +1456,7 @@ func TestBrowserFunctional_AnalyticsContent_GraphPreviewInChrome(t *testing.T) {
    checkTitleAlignment(card,button);
    const close=dialog.firstElementChild;
    check(close.querySelector('svg')&&!close.textContent.trim(),'exit control is not icon only');
-   check(close.getAttribute('aria-label')==='Close graph preview'&&(close.dataset.ovTooltip||close.title)==='Close graph preview','exit icon lacks accessible label or tooltip');
+   check(close.getAttribute('aria-label')==='Close graph preview'&&close.hasAttribute('data-tooltip-disabled'),'exit icon lacks accessible label or tooltip opt-out');
    const originalStyle=plot.getAttribute('style');
    let resized=0;
    window._analyticsCharts.previewTest={canvas,resize(){resized++;},destroy(){}};
@@ -1478,7 +1478,7 @@ func TestBrowserFunctional_AnalyticsContent_GraphPreviewInChrome(t *testing.T) {
    check(dialog.querySelector('canvas')===canvas&&resized>0,'chart was replaced or not resized');
    check(document.activeElement===dialog,'mouse opening left focus on exit button');
    const help=card.querySelector('[data-model-help]'),tip=document.getElementById('ov-shared-tooltip'),tipParent=tip.parentElement;
-   help.dispatchEvent(new PointerEvent('pointerover',{bubbles:true})); await tick();
+   help.dispatchEvent(new PointerEvent('pointerover',{bubbles:true}));await new Promise(resolve=>setTimeout(resolve,450)); await tick();
    check(tip.matches(':popover-open')&&tip.textContent===help.dataset.modelHelp,'preview info hover did not show tooltip');
    check(dialog.contains(tip),'preview tooltip is outside modal and inert');
    // Native close events are queued and can arrive after a preview has reopened.
@@ -1486,19 +1486,19 @@ func TestBrowserFunctional_AnalyticsContent_GraphPreviewInChrome(t *testing.T) {
    check(tip.matches(':popover-open'),'stale preview close event dismissed reopened preview help');
    help.dispatchEvent(new PointerEvent('pointerout',{bubbles:true,relatedTarget:canvas})); await new Promise(resolve=>setTimeout(resolve,150));
    check(!tip.matches(':popover-open'),'preview info tooltip did not dismiss on pointer exit');
-   help.focus(); await tick();
+   document.dispatchEvent(new KeyboardEvent('keydown',{key:'Tab',bubbles:true}));help.focus(); await new Promise(resolve=>setTimeout(resolve,450));
    check(document.activeElement===help&&tip.matches(':popover-open'),'preview info keyboard focus did not show tooltip');
    help.click(); await tick();
    help.dispatchEvent(new PointerEvent('pointerout',{bubbles:true,relatedTarget:canvas})); await new Promise(resolve=>setTimeout(resolve,150));
    check(tip.matches(':popover-open'),'preview info click did not pin tooltip');
    canvas.click(); await tick();
    check(dialog.open&&!tip.matches(':popover-open'),'chart interaction did not dismiss only tooltip');
-   help.dispatchEvent(new PointerEvent('pointerover',{bubbles:true})); await tick();
+   help.dispatchEvent(new PointerEvent('pointerover',{bubbles:true}));await new Promise(resolve=>setTimeout(resolve,450)); await tick();
    close.dispatchEvent(new MouseEvent('click',{bubbles:true,detail:1})); await tick();
    check(!tip.matches(':popover-open')&&tip.parentElement===tipParent,'closing preview left tooltip behind');
    check(!dialog.open&&card.parentElement===parent&&card.nextSibling===next,'chart not restored in original position');
    check(document.activeElement!==button&&!button.matches(':focus-visible'),'mouse closing leaves expand button focused');
-   help.dispatchEvent(new PointerEvent('pointerover',{bubbles:true})); await tick();
+   help.dispatchEvent(new PointerEvent('pointerover',{bubbles:true}));await new Promise(resolve=>setTimeout(resolve,450)); await tick();
    check(tip.matches(':popover-open'),'restored card info tooltip no longer works');
    dialog.dispatchEvent(new Event('close'));
    check(tip.matches(':popover-open'),'stale preview close event dismissed restored card help');

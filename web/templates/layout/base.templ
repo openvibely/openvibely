@@ -5681,6 +5681,8 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						function cardKey(card, keyAttribute) {
 							var key = keyAttribute ? card.getAttribute(keyAttribute) : '';
 							if (key) return key;
+							var selectionKey = card.getAttribute('data-card-select-id');
+							if (selectionKey) return selectionKey;
 							return (card.getAttribute('data-search-text') || '') + '|' + (card.innerHTML || '');
 						}
 

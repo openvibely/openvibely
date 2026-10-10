@@ -45,8 +45,8 @@ func TestTemplateDialogsHaveConsistentCloseControls(t *testing.T) {
 			if !strings.Contains(dialogMarkup, `aria-label="Close `) && !strings.Contains(dialogMarkup, `@ModalCloseButton`) {
 				t.Errorf("%s dialog %q close button should include a specific aria-label", path, dialogID)
 			}
-			if !strings.Contains(dialogMarkup, `title="Close`) && !strings.Contains(dialogMarkup, `@ModalCloseButton`) {
-				t.Errorf("%s dialog %q close button should include a Close title", path, dialogID)
+			if strings.Contains(dialogMarkup, `title="Close`) {
+				t.Errorf("%s dialog %q close button should not show a redundant tooltip", path, dialogID)
 			}
 
 			modalBoxWithClose := false
@@ -94,7 +94,7 @@ func TestTemplateDialogsHaveConsistentCloseControls(t *testing.T) {
 	for _, expected := range []string{
 		"ov-modal-close",
 		"aria-label={ label }",
-		"title={ label }",
+		"data-tooltip-disabled",
 	} {
 		if !strings.Contains(helper, expected) {
 			t.Fatalf("expected shared modal close helper markup %q", expected)

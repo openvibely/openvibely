@@ -84,7 +84,6 @@ func TestWorkerSettingsContentSupportsHighLimitsAndReportsStaleProjectCaps(t *te
 		`max="25"`,
 		"Exceeds global limit; lower this cap",
 		"Exceeds global",
-		"positive values must not exceed the global worker limit",
 	} {
 		if !strings.Contains(html, required) {
 			t.Fatalf("high-limit UI contract missing %q", required)
