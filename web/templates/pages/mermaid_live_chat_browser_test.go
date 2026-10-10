@@ -172,6 +172,25 @@ func TestBrowserFunctional_MermaidRendersAfterLiveChatCompletion(t *testing.T) {
 			browser.waitFor("diagram rendered while running", `(function(){var p=`+pair+`;return p.getAttribute('data-exec-status')+':'+!!p.querySelector('.chat-mermaid img')+':'+!!p.querySelector('[data-mermaid-error]')})()`, "running:true:false")
 		})
 	})
+	t.Run("thinking block waits for closing fence", func(t *testing.T) {
+		phase.Store(0)
+		runComposerFocusCDP(t, chrome, server.URL+"/chat?project_id="+project.ID, "mermaid-live-chat-thinking", func(browser *composerFocusCDP) {
+			browser.waitFor("chat page", `String(!!document.getElementById('chat-messages')&&typeof window.renderMermaidDiagrams)`, "function")
+			phase.Store(1)
+			browser.evaluate(`(function(){window.dispatchEvent(new CustomEvent('sse-chat-live-event',{detail:{type:'chat_new_message',project_id:'` + project.ID + `',exec_id:'` + execID + `',message:'diagram',source:'web'}}));return 'ok';})()`)
+			browser.waitFor("live stream", `String(!!window.__terminalStreamFor('`+execID+`'))`, "true")
+			pair := `document.getElementById('chat-execution-` + execID + `')`
+			emit := func(text string) {
+				j, _ := json.Marshal(text)
+				browser.evaluate(`(function(){window.__terminalStreamFor('` + execID + `').emit('message',` + string(j) + `);return 'ok';})()`)
+			}
+			emit("Intro\n\n[Thinking]\nPlan:\n\n```mermaid\nflowchart TD\n A[Start] --> B[End]\n")
+			browser.waitFor("open fence shown as code", `String(!!`+pair+`.querySelector('code.language-mermaid'))`, "true")
+			if got := browser.evaluateAwait(`(async function(){await new Promise(r=>setTimeout(r,500));var p=` + pair + `;return !!p.querySelector('.chat-mermaid')+':'+!!p.querySelector('[data-mermaid-error]')})()`); got != "false:false" {
+				t.Fatalf("open fence in thinking rendered or errored (diagram:error) = %s", got)
+			}
+		})
+	})
 	t.Run("incremental fence check matches full parse", func(t *testing.T) {
 		phase.Store(0)
 		runComposerFocusCDP(t, chrome, server.URL+"/chat?project_id="+project.ID, "mermaid-fence-parity", func(browser *composerFocusCDP) {
