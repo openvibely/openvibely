@@ -231,7 +231,7 @@
         const input = clear.closest('[data-kanban-search]').querySelector('[data-kanban-search-input]');
         clearTimeout(searchTimer);
         input.value = '';
-        window.kanbanClearSelection(); refresh();
+        refresh();
         input.focus();
     });
     document.addEventListener('click', event => {

@@ -27,9 +27,9 @@ templ Tasks(projects []models.Project, project *models.Project, tasks []models.T
 templ TasksContent(project *models.Project, tasks []models.Task, agents []models.LLMConfig, agentDefs []repository.AgentTaskUIOption, backlogSort string, completedSort string, menuStates ...map[string]components.TaskCardMergeMenuState) {
 	<div class="flex flex-col h-full min-h-0 overflow-x-hidden overflow-y-hidden">
 		@layout.PageTitle("Tasks")
-		<div data-page-header class="flex items-center justify-between mb-6 flex-shrink-0">
-			<h2 class="text-2xl font-bold">Tasks</h2>
-			<div class="flex items-center gap-2">
+		<div data-page-header class="flex items-center justify-between mb-6 flex-shrink-0 gap-3">
+			<h2 class="text-2xl font-bold flex-shrink-0">Tasks</h2>
+			<div class="flex flex-1 min-w-0 items-center justify-end gap-2">
 				if project != nil {
 					@kanbanSearch()
 				}
@@ -618,8 +618,8 @@ templ TasksContent(project *models.Project, tasks []models.Task, agents []models
 
 templ kanbanSearch() {
 	<style>
-		.kanban-search { display:flex; align-items:center; height:2rem; width:2rem; border-radius:9999px; overflow:hidden; transition:width .25s ease, background-color .25s ease, box-shadow .25s ease; }
-		.kanban-search[data-open="true"] { width:min(16rem, 45vw); background:oklch(var(--b1)); box-shadow:0 1px 3px oklch(var(--bc) / .15), 0 0 0 1px oklch(var(--bc) / .12); }
+		.kanban-search { display:flex; align-items:center; flex:0 1 auto; min-width:2rem; max-width:100%; height:2rem; width:2rem; border-radius:9999px; overflow:hidden; transition:width .25s ease, background-color .25s ease, box-shadow .25s ease; }
+		.kanban-search[data-open="true"] { width:16rem; background:oklch(var(--b1)); box-shadow:0 1px 3px oklch(var(--bc) / .15), 0 0 0 1px oklch(var(--bc) / .12); }
 		.kanban-search-toggle { flex:0 0 2rem; height:2rem; display:inline-flex; align-items:center; justify-content:center; border-radius:9999px; opacity:.7; transition:opacity .15s ease, background-color .15s ease, color .15s ease; }
 		.kanban-search-toggle:hover { opacity:1; background:oklch(var(--bc) / .08); }
 		.kanban-search-toggle:focus-visible { outline:none; opacity:1; box-shadow:inset 0 0 0 2px oklch(var(--p)); }
@@ -632,6 +632,7 @@ templ kanbanSearch() {
 		.kanban-search-clear:focus-visible { outline:none; opacity:1; box-shadow:inset 0 0 0 2px oklch(var(--p)); }
 		.kanban-search[data-open="false"] .kanban-search-clear, .kanban-search-input:placeholder-shown + .kanban-search-clear { display:none; }
 		.kanban-search-input:not(:placeholder-shown) { padding-right:0; }
+		@media (max-width: 639px) { .kanban-search-input { font-size:1rem; } }
 		@media (prefers-reduced-motion: reduce) { .kanban-search, .kanban-search-input { transition:none; } }
 	</style>
 	<div data-kanban-search data-open="false" class="kanban-search">
