@@ -88,6 +88,12 @@ func TestBrowserFunctional_ScheduleDateTimePicker(t *testing.T) {
 		b.waitFor("today disabled in current month", `String(document.querySelector('[data-today]').disabled && document.activeElement.matches('[data-month-step="-1"]'))`, "true")
 		b.waitFor("today navigates to current month", `String(document.querySelector('[data-month-title]').textContent===new Date().toLocaleDateString(undefined,{month:'long',year:'numeric'}))`, "true")
 		b.waitFor("today preserves time", `document.querySelector('[name="run_at"]').value.slice(11)`, "13:44")
+		b.waitFor("today selects current day", `String(document.querySelector('[name="run_at"]').value.slice(0,10)===new Date().getFullYear()+'-'+String(new Date().getMonth()+1).padStart(2,'0')+'-'+String(new Date().getDate()).padStart(2,'0'))`, "true")
+		otherDay := b.evaluate(`(function(){const today=new Date(),day=new Date(today.getFullYear(),today.getMonth(),today.getDate()===1?2:1);return day.getFullYear()+'-'+String(day.getMonth()+1).padStart(2,'0')+'-'+String(day.getDate()).padStart(2,'0');})()`)
+		b.click(fmt.Sprintf(`[data-date="%s"]`, otherDay))
+		b.waitFor("today enables for another day in same month", `String(!document.querySelector('[data-today]').disabled)`, "true")
+		b.click(`[data-today]`)
+		b.waitFor("today restores selected day and disables", `String(document.querySelector('[data-today]').disabled && document.querySelector('.schedule-datetime-days [aria-pressed="true"]').textContent===String(new Date().getDate()) && document.querySelector('[name="run_at"]').value.slice(11)==='13:44')`, "true")
 		for _, selector := range []string{"[data-month-title]", ".schedule-datetime-weekdays span", "[data-today]"} {
 			var point struct{ X, Y float64 }
 			if err := json.Unmarshal([]byte(b.evaluate(fmt.Sprintf(`(function(){var r=document.querySelector(%q).getBoundingClientRect();return JSON.stringify({X:r.left+r.width/2,Y:r.top+r.height/2})})()`, selector))), &point); err != nil {

@@ -18,7 +18,7 @@ templ ScheduleDateTime(value string) {
    <div class="schedule-datetime-body">
     <div class="schedule-datetime-calendar">
      <div class="schedule-datetime-month">
-      <button type="button" class="btn btn-xs btn-ghost" data-today aria-label="Go to current month">Today</button>
+      <button type="button" class="btn btn-xs btn-ghost" data-today aria-label="Select today">Today</button>
       <div class="flex items-center gap-0">
        <button type="button" class="btn btn-xs btn-ghost px-1" data-month-step="-1" aria-label="Previous month"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M15 19l-7-7 7-7"></path></svg></button>
        <button type="button" class="btn btn-xs btn-ghost px-1" data-month-step="1" aria-label="Next month"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M9 5l7 7-7 7"></path></svg></button>
@@ -105,8 +105,9 @@ templ ScheduleDateTime(value string) {
    const today=new Date();
    const todayButton=popup.querySelector('[data-today]');
    const currentMonth=month.getFullYear()===today.getFullYear() && month.getMonth()===today.getMonth();
-   if(currentMonth && document.activeElement===todayButton)popup.querySelector('[data-month-step="-1"]').focus({preventScroll:true});
-   todayButton.disabled=currentMonth;
+   const todaySelected=currentMonth && dateValue(selected)===dateValue(today);
+   if(todaySelected && document.activeElement===todayButton)popup.querySelector('[data-month-step="-1"]').focus({preventScroll:true});
+   todayButton.disabled=todaySelected;
    popup.querySelector('[data-month-title]').textContent=month.toLocaleDateString(undefined,{month:'long',year:'numeric'});
    const days=popup.querySelector('.schedule-datetime-days');
    days.replaceChildren();
@@ -234,8 +235,9 @@ templ ScheduleDateTime(value string) {
     calendar(state);
    } else if(button.hasAttribute('data-today')) {
     const today=new Date();
+    state.selected=new Date(today.getFullYear(),today.getMonth(),today.getDate(),state.selected.getHours(),state.selected.getMinutes());
     state.month=new Date(today.getFullYear(),today.getMonth(),1);
-    calendar(state);
+    write(state); calendar(state); timeColumns(state,true);
    }
   });
   window.addEventListener('resize',()=>{if(active)position(active);});
