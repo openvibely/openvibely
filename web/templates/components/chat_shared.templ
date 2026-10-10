@@ -1718,10 +1718,11 @@ templ ChatInputForm(config ChatInputFormConfig) {
 				var _composerFocusState = window._openVibelyComposerFocusState;
 
 				function _cancelComposerFocus(consume) {
-					// Swaps may interrupt an attempt before focus happens. Leave it
-					// eligible for afterSettle; user interaction explicitly cancels it.
-					if (consume === true && _composerFocusState.pendingTextarea) _composerFocusState.pendingTextarea.dataset.composerFocusInitialized = 'true';
-					_composerFocusState.pendingTextarea = null;
+					// Retain a live pending composer across swap cancellation so an
+					// intervening user action can consume the attempt before settling.
+					var pending = _composerFocusState.pendingTextarea;
+					if (consume === true && pending) pending.dataset.composerFocusInitialized = 'true';
+					if (consume === true || (pending && !pending.isConnected)) _composerFocusState.pendingTextarea = null;
 					_composerFocusState.token++;
 					if (_composerFocusState.timer) window.clearTimeout(_composerFocusState.timer);
 					if (_composerFocusState.historyTimer) window.clearTimeout(_composerFocusState.historyTimer);
