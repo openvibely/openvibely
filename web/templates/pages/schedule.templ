@@ -927,6 +927,20 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 									menu.style.top = Math.max(8, top) + 'px';
 								}
 
+                                window.openScheduleSelectionContextMenu = function(event, anchor) {
+                                    if (!menu) return;
+                                    event.preventDefault();
+                                    event.stopPropagation();
+                                    closeMenu(false);
+                                    menuCard = anchor;
+                                    menu.setAttribute('aria-label', 'Selected dates or hours');
+                                    if (window.updateScheduleSelection) window.updateScheduleSelection();
+                                    positionMenu(event);
+                                    if (window.updateScheduleSelection) window.updateScheduleSelection();
+                                    var first = menu.querySelector('[role="menuitem"]:not([hidden]):not([disabled])');
+                                    if (first) first.focus({preventScroll: true});
+                                };
+
 								window.openScheduleContextMenu = function(event) {
 									if (!event || !menu) return;
 									var card = event.currentTarget && event.currentTarget.closest ? event.currentTarget.closest('[data-schedule-card]') : null;
@@ -935,6 +949,7 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 									event.stopPropagation();
 									closeMenu(false);
 									menuCard = card;
+                                    menu.setAttribute('aria-label', 'Scheduled task actions');
 									if (window.selectScheduleContextCard) window.selectScheduleContextCard(card);
 									card.focus({preventScroll: true});
 									menu.dataset.scheduleId = card.dataset.scheduleId || '';
