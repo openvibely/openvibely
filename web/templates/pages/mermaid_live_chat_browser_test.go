@@ -167,6 +167,10 @@ func TestBrowserFunctional_MermaidRendersAfterLiveChatCompletion(t *testing.T) {
 			if names != "2:2" {
 				t.Fatalf("diagram image names not unique (count:unique) = %s", names)
 			}
+			bad := browser.evaluate(`(function(){return Array.from(` + pair + `.querySelectorAll('a.chat-mermaid')).map(function(a){return a.dataset.imageName}).filter(function(n){return !/^diagram-[a-z0-9]{8}\.svg$/.test(n)}).join(',')})()`)
+			if bad != "" {
+				t.Fatalf("diagram image names not diagram-<8 chars>.svg: %s", bad)
+			}
 		})
 	})
 	t.Run("stray fence in tool output", func(t *testing.T) {
