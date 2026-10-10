@@ -215,6 +215,24 @@ func TestBrowserFunctional_IncrementalChatRendering(t *testing.T) {
  sections = remorphedThinking.querySelectorAll('details.stream-thinking');
  assert(sections.length === 2 && !sections[0].open && sections[1].open, 'resume hydration lost mixed thinking states');
  remorphedThinking.replaceWith(replacement);
+ // Fresh hydration has no incremental tail cache to restore from.
+ const freshThinking = document.createElement('div');
+ freshThinking.id = 'fresh-hydrated-thinking';
+ freshThinking.setAttribute('data-streaming-resume', 'true');
+ freshThinking.setAttribute('data-raw-content', thinkingText);
+ replacement.replaceWith(freshThinking);
+ await cleanAssistantMessages(document.getElementById('pair'));
+ sections = freshThinking.querySelectorAll('details.stream-thinking');
+ assert(sections.length === 2, 'fresh hydration missing thinking sections');
+ sections[1].open = true; sections[1].dispatchEvent(new Event('toggle'));
+ await renderLiveChatContent(freshThinking, thinkingText+'First appended delta.', false);
+ assert(freshThinking._incrementalChat.offset > 8192, 'fresh hydration did not split');
+ sections = freshThinking.querySelectorAll('details.stream-thinking');
+ assert(!sections[0].open && sections[1].open, 'fresh split lost later thinking state');
+ await renderLiveChatContent(freshThinking, thinkingText+'First appended delta. More.', false);
+ sections = freshThinking.querySelectorAll('details.stream-thinking');
+ assert(!sections[0].open && sections[1].open, 'subsequent delta lost transferred thinking state');
+ freshThinking.replaceWith(replacement);
  // No controls: completed Markdown blocks are reusable too; open fences remain tail.
  assert(chatStreamStableBoundary(prose.repeat(10)) > 0, 'large prose resume did not retain a prefix');
  // A completed control followed by a long answer must not keep the entire answer provisional.

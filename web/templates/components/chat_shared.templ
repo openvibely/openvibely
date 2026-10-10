@@ -4890,10 +4890,14 @@ templ ChatAutoScrollScript() {
 				state.tail._chatStreamStateKey = _thinkingStateKey(container) + ':tail:' + state.offset;
 				state.tail._chatToolStateKey = _thinkingStateKey(container);
 				state.tail._chatThinkingOwner = container;
+				// Hydration may have rendered sections beyond the boundary into this tail.
+				// Snapshot them before replacing it with only the committed prefix.
+				var thinkingStates = boundary ? Array.from(state.tail.querySelectorAll('details.stream-thinking'), function(d) { return d.open; }) : [];
 				var options = { offset: state.renderOffset, ordinal: state.ordinal };
 				var rendered = await window.renderStreamingContent(state.tail, boundary ? suffix.slice(0, boundary) : suffix, yieldBetweenBatches, options);
 				if (rendered === false || container._incrementalChat !== state || state.generation !== generation) return false;
 				if (boundary) {
+					var remainingThinkingStates = thinkingStates.slice(state.tail.querySelectorAll('details.stream-thinking').length);
 					// Compaction activities share the styling class but are not tool calls.
 					state.ordinal += state.tail.querySelectorAll('.stream-tool[data-tool-render-id]').length;
 					state.offset += boundary;
@@ -4906,6 +4910,7 @@ templ ChatAutoScrollScript() {
 					state.tail._chatStreamStateKey = _thinkingStateKey(container) + ':tail:' + state.offset;
 					state.tail._chatToolStateKey = _thinkingStateKey(container);
 					state.tail._chatThinkingOwner = container;
+					if (remainingThinkingStates.length) window._thinkingOpenStates[state.tail._chatStreamStateKey] = remainingThinkingStates;
 					rendered = await window.renderStreamingContent(state.tail, suffix.slice(boundary), yieldBetweenBatches, { offset: state.renderOffset, ordinal: state.ordinal });
 				}
 				return rendered !== false && container._incrementalChat === state && state.generation === generation;
