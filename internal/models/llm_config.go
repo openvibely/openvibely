@@ -42,9 +42,16 @@ type OAuthConnection struct {
 	UpdatedAt           time.Time   `json:"updated_at"`
 }
 
+// PendingModelOAuth holds an unsaved authorization and the account generations
+// observed before sign-in. The snapshot is immutable for the draft lifetime.
+type PendingModelOAuth struct {
+	OAuthConnection
+	ObservedRevisions map[string]int64
+}
+
 type LLMConfig struct {
 	// PendingOAuthConnection is an in-memory authorization applied atomically with an explicit model save.
-	PendingOAuthConnection *OAuthConnection `json:"-"`
+	PendingOAuthConnection *PendingModelOAuth `json:"-"`
 
 	ID              string      `json:"id"`
 	Name            string      `json:"name"`
