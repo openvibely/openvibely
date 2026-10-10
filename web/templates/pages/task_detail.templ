@@ -556,7 +556,7 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 			<div id="tab-lifecycle" class={ "task-tab-panel flex-1 flex flex-col min-h-0", templ.KV("hidden", defaultTab != "lifecycle") }>
 				<div class="flex flex-col min-w-0 flex-1 min-h-0">
 					<div class="flex flex-col flex-1 min-h-0">
-							<div class="flex items-center justify-between mb-3 flex-shrink-0">
+							<div class="flex items-center justify-between mb-3 flex-shrink-0" style="height:20px">
 								<h3 class="text-sm font-semibold">Lifecycle</h3>
 								<button type="button" class="btn btn-ghost btn-sm lifecycle-refresh" aria-label="Refresh lifecycle" data-tooltip-disabled onclick={ templ.ComponentScript{Call: "refreshLifecycleActivity('" + task.ID + "', '" + task.ProjectID + "')"} }>
 									<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
@@ -565,6 +565,8 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 								</button>
 							</div>
 							<style>
+                            #tab-lifecycle .lifecycle-refresh { box-sizing:border-box; display:inline-flex; align-items:center; justify-content:center; width:28px; height:28px; min-height:28px; padding:0; flex-shrink:0; }
+                            #tab-lifecycle .lifecycle-refresh svg { width:16px; height:16px; flex-shrink:0; }
                             #lifecycle-activity-scroll { box-sizing:border-box; width:calc(100% + 24px); margin-inline:-12px; padding-inline:12px; }
                             .lifecycle-entry summary { box-sizing:border-box; display:flex; align-items:center; justify-content:space-between; gap:12px; list-style:none; cursor:pointer; padding:4px 12px; width:calc(100% + 24px); margin-inline:-12px; border-radius:8px; }
                             .lifecycle-entry summary::-webkit-details-marker { display:none; }

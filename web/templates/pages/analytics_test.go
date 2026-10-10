@@ -1138,6 +1138,8 @@ func TestBrowserFunctional_AnalyticsContent_ModelScorecardIsReadableWithoutHover
 	      if(!tip.matches(':popover-open'))fail('clicked help must remain open');
 	      document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));
 	      if(tip.matches(':popover-open'))fail('Escape must close help');
+	      // Escape may restore focus to the help button; leave it before testing a new focus entry.
+	      help.blur();
 	      // A headless page under load can lack system focus; Chrome then moves focus without
 	      // firing focus events, so deliver them as a real keyboard focus change would.
 	      document.dispatchEvent(new KeyboardEvent('keydown',{key:'Tab',bubbles:true}));help.focus();if(!document.hasFocus())help.dispatchEvent(new FocusEvent('focusin',{bubbles:true}));await new Promise(resolve=>setTimeout(resolve,450));
