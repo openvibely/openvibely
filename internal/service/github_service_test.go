@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/chatcontrol"
+	"github.com/openvibely/openvibely/internal/httpretry"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/testutil"
@@ -1414,6 +1415,7 @@ func TestFindPullRequestForIssueFindsCrossReferenceOnSecondPage(t *testing.T) {
 func TestPaginatedGitHubGetReturnsSecondPageAPIErrorWithoutPartialResults(t *testing.T) {
 	ctx := context.Background()
 	var server *httptest.Server
+	var secondPageRequests atomic.Int32
 	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.URL.Query().Get("page") == "" {
@@ -1421,17 +1423,25 @@ func TestPaginatedGitHubGetReturnsSecondPageAPIErrorWithoutPartialResults(t *tes
 			_, _ = w.Write([]byte(`[{"number":1,"title":"partial issue"}]`))
 			return
 		}
+		secondPageRequests.Add(1)
 		w.WriteHeader(http.StatusInternalServerError)
 		_, _ = w.Write([]byte(`{"message":"page two exploded"}`))
 	}))
 	defer server.Close()
 
-	issues, err := newPATGitHubService(t, server.URL).ListAssignedIssues(ctx, &GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, "dev-bot")
+	svc := newPATGitHubService(t, server.URL)
+	immediate := make(chan time.Time)
+	close(immediate)
+	svc.retryPolicy.After = func(time.Duration) <-chan time.Time { return immediate }
+	issues, err := svc.ListAssignedIssues(ctx, &GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, "dev-bot")
 	if err == nil || !strings.Contains(err.Error(), "page two exploded") {
 		t.Fatalf("expected decoded page-two API error, got issues=%#v err=%v", issues, err)
 	}
 	if issues != nil {
 		t.Fatalf("expected no partial results after page-two error, got %#v", issues)
+	}
+	if got, want := secondPageRequests.Load(), int32(httpretry.DefaultMaxRetries+1); got != want {
+		t.Fatalf("second-page requests = %d, want initial request plus %d retries", got, httpretry.DefaultMaxRetries)
 	}
 }
 
