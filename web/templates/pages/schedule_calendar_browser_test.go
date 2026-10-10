@@ -93,6 +93,7 @@ func testScheduleCalendarHeader(t *testing.T, paused, mobile bool) {
    check(!root.querySelector('#schedule-paused-status'),'no redundant paused header status');
    check(pageHeader.contains(menu),'calendar menu belongs beside New');
    check(menu.querySelector('summary svg.h-5.w-5 path'),'standard SVG kebab');
+   (function(){var kebab=menu.querySelector("summary"),add=root.querySelector("[aria-label=\"New Scheduled Task\"]"),k=getComputedStyle(kebab),a=getComputedStyle(add),kr=kebab.getBoundingClientRect(),ar=add.getBoundingClientRect();check(kr.width===32&&kr.height===32&&kr.width===ar.width&&kr.top===ar.top&&k.borderTopLeftRadius===a.borderTopLeftRadius&&k.opacity==="1"&&a.opacity==="1"&&k.color===a.color&&kr.left-ar.right===8,"kebab matches New button: "+kr.width+"x"+kr.height+" r="+k.borderTopLeftRadius+" op="+k.opacity+"/"+a.opacity+" gap="+(kr.left-ar.right));})();
    check(!menu.hidden,'calendar menu stays visible');
    if (JSON.parse(root.querySelector('#schedule-calendar-controls').dataset.state).paused) {
     var pausedContext=root.querySelector('#schedule-context-menu');
