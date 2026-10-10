@@ -71,7 +71,7 @@ func testKanbanHeaderSearch(t *testing.T, width int) {
 		width := func(expr string) string { return expr + `.getBoundingClientRect().width` }
 		queued := `getComputedStyle(document.querySelector('.kanban-queue')).display !== 'none'`
 
-		check("search sits next to Add Task", search+`.nextElementSibling.textContent.includes('Add Task')`)
+		check("search sits next to Add Task", search+`.nextElementSibling.getAttribute('aria-label') === 'Add Task'`)
 		check("collapsed by default", search+`.dataset.open === 'false' && `+width(search)+` <= 33`)
 		check("Active count has refresh hook", count("active")+` === '2'`)
 

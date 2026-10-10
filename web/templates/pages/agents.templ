@@ -83,8 +83,8 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 		<div id="agents-container" class="overflow-x-hidden max-w-full min-w-0" data-search-container data-card-pagination-root data-card-pagination-url={ CardListURL("agents", state) } data-card-pagination-list="#agents-card-list" data-card-pagination-card-selector="[data-agent-id]" data-card-pagination-key="data-agent-id" data-card-pagination-page-size="20" data-card-pagination-has-more={ cardPaginationHasMoreAttribute(hasMore) }>		@layout.PageTitle("Agents")
 		<div data-page-header class="flex items-center justify-between mb-6">
 			<h2 class="text-2xl font-bold">Agents</h2>
-			<button class="btn btn-primary btn-sm" onclick="openNewAgentModal()">
-				+ Add Agent
+			<button class="btn btn-ghost btn-sm btn-square" aria-label="Add Agent" data-tooltip-disabled onclick="openNewAgentModal()">
+				@pageCreateIcon()
 			</button>
 		</div>
 		@CardListToolbar(collectionToolbarConfigWithState("agents", state))
@@ -93,8 +93,8 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 			if len(agents) == 0 {
 				<div class="text-center py-12" data-search-empty-state>
 				<p class="opacity-50 mb-4">No agents configured yet. Create one and attach plugins from marketplace resources.</p>
-				<button class="btn btn-primary" onclick="openNewAgentModal()">
-					Create Agent
+				<button class="btn btn-ghost btn-sm btn-square" aria-label="Create Agent" data-tooltip-disabled onclick="openNewAgentModal()">
+					@pageCreateIcon()
 				</button>
 			</div>
 		} else {
