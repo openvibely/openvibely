@@ -93,6 +93,15 @@ func TestBrowserFunctional_ScheduleDateTimePicker(t *testing.T) {
 		b.waitFor("DST date synchronizes displayed value", `document.querySelector('[data-run-at-picker]').value`, "03/09/2036, 03:30 AM")
 		b.call("Emulation.setDeviceMetricsOverride", map[string]any{"width": 360, "height": 640, "deviceScaleFactor": 1, "mobile": false}, nil)
 		b.waitFor("popup fits narrow viewport", `(function(){var r=document.querySelector('.schedule-datetime-popup').getBoundingClientRect(); return String(r.left>=0 && r.right<=innerWidth && r.top>=0 && r.bottom<=innerHeight)})()`, "true")
+		for i := 0; i < 6; i++ {
+			b.click(`[data-month-step="1"]`)
+		}
+		b.waitFor("long month displayed", `document.querySelector('[data-month-title]').textContent`, "September 2036")
+		for _, width := range []int{320, 360, 400, 450, 800} {
+			b.call("Emulation.setDeviceMetricsOverride", map[string]any{"width": width, "height": 640, "deviceScaleFactor": 1, "mobile": false}, nil)
+			b.waitFor(fmt.Sprintf("header stays inside calendar at %dpx", width), `(function(){const header=document.querySelector('.schedule-datetime-month'),hour=document.querySelector('[data-time-column="hour"]').getBoundingClientRect(),weekdays=document.querySelector('.schedule-datetime-weekdays').getBoundingClientRect();return String(Array.from(header.children).every(el=>{const r=el.getBoundingClientRect();return r.right<=hour.left && r.bottom<=weekdays.top && r.left>=header.getBoundingClientRect().left;}));})()`, "true")
+		}
+
 	})
 }
 
