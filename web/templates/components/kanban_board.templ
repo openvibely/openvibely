@@ -172,7 +172,7 @@ templ KanbanColumn(tasks []models.Task, projectID string, category models.TaskCa
 			<div class="flex items-center gap-2">
 				<h3 class="font-bold text-lg">{ capitalize(string(category)) }</h3>
 				if category == models.CategoryActive {
-					<span class="badge badge-sm badge-ghost">{ fmt.Sprintf("%d", countActiveDisplayedTasks(tasks)) }</span>
+					<span data-kanban-count class="badge badge-sm badge-ghost">{ fmt.Sprintf("%d", countActiveDisplayedTasks(tasks)) }</span>
 				} else {
 					<span data-kanban-count class="badge badge-sm badge-ghost">{ fmt.Sprintf("%d", len(tasks)) }</span>
 				}
@@ -188,6 +188,7 @@ templ KanbanColumn(tasks []models.Task, projectID string, category models.TaskCa
 
 		</div>
 		<div data-kanban-progress class="text-sm mb-2" aria-live="polite"></div>
+		<div data-kanban-no-results hidden class="text-center py-8 opacity-50 text-sm flex-shrink-0">No matching tasks</div>
 		if category == models.CategoryActive {
 			<div class="flex-1 flex flex-col min-h-0">
 				@activeColumnContent(tasks, projectID, llmModels, agentDefs, taskCardMergeMenuStateMap(menuStates))
@@ -215,7 +216,7 @@ templ activeColumnContent(tasks []models.Task, projectID string, llmModels []mod
 	<style>
 		.kanban-queue { flex:0 1 auto; min-height:44px; max-height:calc(50% - 8px); }
 		.kanban-queue > .task-drop-zone { flex:0 1 auto; min-height:0; }
-		.kanban-queue:not(:has([data-task-id])) { display:none; }
+		.kanban-queue:not(:has([data-task-id]:not([hidden]))) { display:none; }
 	</style>
 	<!-- In Progress -->
 	<div class="mb-4 flex-1 flex flex-col min-h-0">
