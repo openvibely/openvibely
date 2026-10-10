@@ -480,7 +480,7 @@ templ TaskCard(task models.Task, projectID string, viewingCategory string, llmMo
 		class="card bg-base-100 shadow-sm border border-base-300 hover:border-primary/40 hover:shadow-md transition-all mb-2 cursor-grab active:cursor-grabbing drag-cursor-surface relative min-w-0 overflow-visible"
 		data-task-id={ task.ID }
 		data-task-status={ string(task.Status) }
-		data-task-
+		data-task-title={ task.Title }
 		data-task-priority={ fmt.Sprintf("%d", task.Priority) }
 		data-task-merge={ string(task.MergeStatus) }
 		data-task-branch={ task.WorktreeBranch }

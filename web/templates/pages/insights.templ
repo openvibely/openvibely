@@ -117,6 +117,7 @@ templ InsightCard(insight *models.Insight) {
 						hx-target={ fmt.Sprintf("#insight-%s", insight.ID) }
 						hx-swap="outerHTML"
 						hx-confirm="Delete this insight?"
+						aria-label="Delete insight"
 						data-tooltip-disabled
 					>X</button>
 				</div>

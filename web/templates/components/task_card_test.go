@@ -874,6 +874,9 @@ func TestTaskCard_RendersGoalBadge(t *testing.T) {
 	if strings.Contains(body, "Task has an active goal") || strings.Contains(body, `data-tooltip-disabled>Goal</span>`) {
 		t.Fatalf("goal badge must inherit the card hint without its own tooltip, got %s", body)
 	}
+	if !strings.Contains(body, `data-task-title="Goal task"`) {
+		t.Fatal("batch results need the task title")
+	}
 	if !strings.Contains(body, ">Goal<") {
 		t.Fatalf("expected goal badge label in task card, got %s", body)
 	}

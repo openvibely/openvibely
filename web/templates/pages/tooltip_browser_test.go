@@ -191,3 +191,21 @@ func TestBrowserFunctional_TooltipPointerExit(t *testing.T) {
 		b.waitFor("tooltip closes after leaving both surfaces", `String(document.getElementById('ov-shared-tooltip').hidden)`, "true")
 	})
 }
+
+func TestBrowserFunctional_TooltipHelpClickAndDialogClose(t *testing.T) {
+	chrome := chatNavigationChromePath(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `<!doctype html><body><button id="help" data-model-help="Help text">Help</button><dialog id="dialog"><button id="pending-help" title="Delayed help">Dialog help</button></dialog>`)
+		_ = templateui.Tooltips().Render(r.Context(), w)
+	}))
+	defer server.Close()
+	runComposerFocusCDP(t, chrome, server.URL, "tooltip-help-lifecycle", func(b *composerFocusCDP) {
+		b.waitFor("controller", `typeof window.openVibelyTooltip`, "object")
+		b.click("#help")
+		b.waitFor("mouse click pins help", `String(!document.getElementById('ov-shared-tooltip').hidden)`, "true")
+		b.click("#help")
+		b.waitFor("second mouse click closes help", `String(document.getElementById('ov-shared-tooltip').hidden)`, "true")
+		b.evaluate(`document.getElementById('help').blur();document.dispatchEvent(new KeyboardEvent('keydown',{key:'Tab',bubbles:true}));var dialog=document.getElementById('dialog');dialog.showModal();document.getElementById('pending-help').dispatchEvent(new FocusEvent('focusin',{bubbles:true}));dialog.close();window.dialogTooltipCheck=null;setTimeout(()=>window.dialogTooltipCheck=document.getElementById('ov-shared-tooltip').hidden,600);'closed'`)
+		b.waitFor("closing dialog cancels pending hint", `String(window.dialogTooltipCheck)`, "true")
+	})
+}
