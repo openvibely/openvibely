@@ -384,7 +384,7 @@ func TestAdapterChatWithoutRuntimeActionsReportsCapabilityLimitation(t *testing.
 	require.NotContains(t, content, llmprompt.ChatActionToolModeInstructions)
 }
 
-func TestAdapterTaskFollowupWithoutRuntimeActionsReportsCapabilityLimitation(t *testing.T) {
+func TestAdapterTaskFollowupWithoutRuntimeActionsKeepsCodingTools(t *testing.T) {
 	var gotBody map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&gotBody))
@@ -412,7 +412,7 @@ func TestAdapterTaskFollowupWithoutRuntimeActionsReportsCapabilityLimitation(t *
 	system, ok := messages[0].(map[string]any)
 	require.True(t, ok)
 	content, _ := system["content"].(string)
-	require.Contains(t, content, llmprompt.ChatActionUnavailableInstructions)
+	require.NotContains(t, content, llmprompt.ChatActionUnavailableInstructions)
 	require.NotContains(t, content, "[CREATE_TASK]")
 	require.NotContains(t, content, llmprompt.ChatActionToolModeInstructions)
 }
@@ -484,8 +484,9 @@ func TestAdapterTaskWithRuntimeActionsUsesToolModePrompt(t *testing.T) {
 	user, ok := messages[len(messages)-1].(map[string]any)
 	require.True(t, ok)
 	content, _ := user["content"].(string)
-	require.Contains(t, content, "TASK CREATION TOOL MODE")
-	require.Contains(t, content, "Available runtime task tools: create_task")
+	require.Contains(t, content, llmprompt.TaskRuntimeToolInstructions)
+	require.Contains(t, content, "Additional runtime tools: create_task")
+	require.NotContains(t, content, llmprompt.ChatActionUnavailableInstructions)
 	require.Contains(t, content, "If you recovered and completed the requested outcome, report success")
 	require.NotContains(t, content, "If a command failed, a script returned non-zero")
 	require.NotContains(t, content, "This is the ONLY way to create a task")
@@ -580,9 +581,9 @@ func TestAdapterTaskWithoutRuntimeActionsDoesNotAdvertiseLegacyMutationMarkers(t
 	user, ok := messages[len(messages)-1].(map[string]any)
 	require.True(t, ok)
 	content, _ := user["content"].(string)
-	require.Contains(t, content, llmprompt.ChatActionUnavailableInstructions)
+	require.NotContains(t, content, llmprompt.ChatActionUnavailableInstructions)
 	require.NotContains(t, content, "[CREATE_TASK]")
-	require.NotContains(t, content, "TASK CREATION TOOL MODE")
+	require.NotContains(t, content, llmprompt.TaskRuntimeToolInstructions)
 }
 
 func TestAdapterToolCallReplaysToolResult(t *testing.T) {

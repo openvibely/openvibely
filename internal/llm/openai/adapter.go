@@ -528,7 +528,7 @@ func (a *Adapter) CallStreaming(ctx context.Context, prompt string, attachments 
 	fullPrompt := llmprompt.BuildTaskPromptHeader() +
 		llmprompt.BuildAttachmentInstructions(attachments) +
 		prompt
-	fullPrompt = llmprompt.ApplyTaskCreationToolMode(fullPrompt, rt.DefinitionNames())
+	fullPrompt = llmprompt.ApplyTaskRuntimeToolMode(fullPrompt, rt.DefinitionNames())
 	fullPrompt += llmprompt.BuildTaskStatusInstructions()
 
 	oaAttachments, err := convertAttachments(attachments)
@@ -807,7 +807,7 @@ func (a *Adapter) CallCompletionsStreaming(ctx context.Context, prompt string, a
 	fullPrompt := llmprompt.BuildTaskPromptHeader() +
 		llmprompt.BuildAttachmentInstructions(attachments) +
 		prompt
-	fullPrompt = llmprompt.ApplyTaskCreationToolMode(fullPrompt, rt.DefinitionNames())
+	fullPrompt = llmprompt.ApplyTaskRuntimeToolMode(fullPrompt, rt.DefinitionNames())
 	fullPrompt += llmprompt.BuildTaskStatusInstructions()
 
 	oaAttachments, err := convertAttachments(attachments)

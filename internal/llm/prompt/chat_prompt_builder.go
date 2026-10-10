@@ -84,32 +84,22 @@ const ChatActionToolModeInstructions = `RUNTIME ACTION MODE:
 // the final provider request has no executable runtime action definitions.
 const ChatActionUnavailableInstructions = `Runtime actions are unavailable for this request because no executable runtime action tools are attached. Explain this limitation plainly when the user asks for an application action, and do not claim the action was performed.`
 
-// TaskCreationToolModeInstructions is appended to initial task requests that have
-// an executable create_task runtime tool.
-const TaskCreationToolModeInstructions = `TASK CREATION TOOL MODE:
-- Create tasks only by calling the provided create_task runtime tool
-- Do not claim a task was created unless the tool result confirms success`
-
-// ApplyTaskCreationToolMode describes the concrete runtime capability for initial
-// task requests. It adds task-creation guidance when create_task is attached and
-// an explicit limitation when no executable runtime tools are attached.
-func ApplyTaskCreationToolMode(base string, toolNames []string) string {
-	names := normalizedToolNames(toolNames)
-	if len(names) == 0 {
-		return strings.TrimSpace(base) + "\n\n" + ChatActionUnavailableInstructions
-	}
-	if !containsToolName(names, "create_task") {
-		return base
-	}
-	return strings.TrimSpace(base) + "\n\n" + TaskCreationToolModeInstructions + "\nAvailable runtime task tools: " + strings.Join(names, ", ")
-}
-
-// TaskFollowupRuntimeToolInstructions supplements, rather than replaces, the
-// coding tools available in a task thread.
-const TaskFollowupRuntimeToolInstructions = `TASK RUNTIME TOOLS:
+// TaskRuntimeToolInstructions supplements, rather than replaces, the coding
+// tools available to task runs and task threads.
+const TaskRuntimeToolInstructions = `TASK RUNTIME TOOLS:
 - Your file, search, and shell tools remain available; use them to read, edit, build, test, and run commands for the task
 - The runtime tools listed below are additional, for application actions such as managing tasks, schedules, alerts, or GitHub
 - Do not claim an application action succeeded unless the tool result confirms success`
+
+// ApplyTaskRuntimeToolMode notes extra runtime tools on a task prompt without
+// implying they are the only tools available.
+func ApplyTaskRuntimeToolMode(base string, toolNames []string) string {
+	names := normalizedToolNames(toolNames)
+	if len(names) == 0 {
+		return base
+	}
+	return strings.TrimSpace(base) + "\n\n" + TaskRuntimeToolInstructions + "\nAdditional runtime tools: " + strings.Join(names, ", ")
+}
 
 // ApplyChatActionToolMode describes the concrete runtime action surface. Requests
 // without runtime tools get an explicit capability limitation instead. Task
@@ -118,10 +108,7 @@ const TaskFollowupRuntimeToolInstructions = `TASK RUNTIME TOOLS:
 func ApplyChatActionToolMode(base string, toolNames []string, isTaskFollowup bool) string {
 	names := normalizedToolNames(toolNames)
 	if isTaskFollowup {
-		if len(names) == 0 {
-			return base
-		}
-		return strings.TrimSpace(base) + "\n\n" + TaskFollowupRuntimeToolInstructions + "\nAdditional runtime tools: " + strings.Join(names, ", ")
+		return ApplyTaskRuntimeToolMode(base, names)
 	}
 	if len(names) == 0 {
 		return strings.TrimSpace(base) + "\n\n" + ChatActionUnavailableInstructions
@@ -137,15 +124,6 @@ func normalizedToolNames(toolNames []string) []string {
 		}
 	}
 	return names
-}
-
-func containsToolName(names []string, target string) bool {
-	for _, name := range names {
-		if name == target {
-			return true
-		}
-	}
-	return false
 }
 
 // BuildChatSystemPrompt constructs the provider-neutral prompt for Chat or task

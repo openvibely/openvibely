@@ -320,7 +320,7 @@ func TestCallCompletionsStreamingTaskWithRuntimeActionsUsesToolModePrompt(t *tes
 		t.Fatalf("user message = %#v", messages[len(messages)-1])
 	}
 	content, _ := user["content"].(string)
-	if !strings.Contains(content, "TASK CREATION TOOL MODE") || !strings.Contains(content, "Available runtime task tools: create_task") {
+	if !strings.Contains(content, llmprompt.TaskRuntimeToolInstructions) || !strings.Contains(content, "Additional runtime tools: create_task") || strings.Contains(content, llmprompt.ChatActionUnavailableInstructions) {
 		t.Fatalf("task prompt missing runtime tool guidance: %q", content)
 	}
 	if strings.Contains(content, "This is the ONLY way to create a task") || strings.Contains(content, "To create a task, output this format") {
@@ -344,7 +344,7 @@ func TestAppendToolModeSystemPromptCoversChatAndTaskFollowupsAndPreservesPlan(t 
 	}
 
 	taskThread := appendToolModeSystemPrompt("base", rt, models.ChatModeOrchestrate, true)
-	if strings.Contains(taskThread, llmprompt.ChatActionToolModeInstructions) || !strings.Contains(taskThread, llmprompt.TaskFollowupRuntimeToolInstructions) || !strings.Contains(taskThread, "Additional runtime tools: create_task") {
+	if strings.Contains(taskThread, llmprompt.ChatActionToolModeInstructions) || !strings.Contains(taskThread, llmprompt.TaskRuntimeToolInstructions) || !strings.Contains(taskThread, "Additional runtime tools: create_task") {
 		t.Fatalf("task-thread prompt must keep coding tools and list runtime tools as additional: %q", taskThread)
 	}
 	if got := appendToolModeSystemPrompt("base", nil, models.ChatModeOrchestrate, true); got != "base" {
@@ -1054,8 +1054,8 @@ func TestCallCompletionsChatStreamingUsesHistoryRuntimeAndUsage(t *testing.T) {
 			t.Fatalf("request body missing %q: %#v", want, gotBody)
 		}
 	}
-	if !strings.Contains(payload, llmprompt.ChatActionToolModeInstructions) {
-		t.Fatalf("chat completions prompt missing runtime action guidance: %#v", gotBody)
+	if strings.Contains(payload, llmprompt.ChatActionToolModeInstructions) || !strings.Contains(payload, llmprompt.TaskRuntimeToolInstructions) {
+		t.Fatalf("task follow-up runtime tools should supplement coding tools: %#v", gotBody)
 	}
 	if gotBody["temperature"] != 0.7 {
 		t.Fatalf("temperature = %#v, want 0.7", gotBody["temperature"])

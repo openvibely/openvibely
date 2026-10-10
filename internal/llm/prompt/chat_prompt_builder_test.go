@@ -22,28 +22,24 @@ var legacyMutationMarkers = []string{
 	"[SWITCH_PROJECT]",
 }
 
-func TestApplyTaskCreationToolMode(t *testing.T) {
+func TestApplyTaskRuntimeToolModeKeepsCodingTools(t *testing.T) {
 	base := "Task objective"
-	toolPrompt := ApplyTaskCreationToolMode(base, []string{"Read", "create_task"})
-	if !strings.Contains(toolPrompt, TaskCreationToolModeInstructions) || !strings.Contains(toolPrompt, "Available runtime task tools: Read, create_task") {
-		t.Fatalf("tool-mode task prompt missing runtime guidance: %q", toolPrompt)
+	toolPrompt := ApplyTaskRuntimeToolMode(base, []string{"create_task", "list_tasks"})
+	if !strings.Contains(toolPrompt, TaskRuntimeToolInstructions) || !strings.Contains(toolPrompt, "Additional runtime tools: create_task, list_tasks") {
+		t.Fatalf("task prompt missing supplemental runtime guidance: %q", toolPrompt)
+	}
+	for _, forbidden := range []string{ChatActionUnavailableInstructions, ChatActionToolModeInstructions, "only by calling"} {
+		if strings.Contains(toolPrompt, forbidden) {
+			t.Fatalf("task prompt implies runtime tools are the only tools (%q): %q", forbidden, toolPrompt)
+		}
 	}
 	for _, marker := range legacyMutationMarkers {
 		if strings.Contains(toolPrompt, marker) {
-			t.Fatalf("tool-mode task prompt advertised legacy marker %s: %q", marker, toolPrompt)
+			t.Fatalf("task prompt advertised legacy marker %s: %q", marker, toolPrompt)
 		}
 	}
-	if got := ApplyTaskCreationToolMode(base, []string{"Read"}); got != base {
-		t.Fatalf("unrelated runtime tool changed task prompt: %q", got)
-	}
-	noToolPrompt := ApplyTaskCreationToolMode(base, nil)
-	if !strings.Contains(noToolPrompt, ChatActionUnavailableInstructions) {
-		t.Fatalf("no-tool task prompt missing capability limitation: %q", noToolPrompt)
-	}
-	for _, marker := range legacyMutationMarkers {
-		if strings.Contains(noToolPrompt, marker) {
-			t.Fatalf("no-tool task prompt advertised legacy marker %s: %q", marker, noToolPrompt)
-		}
+	if got := ApplyTaskRuntimeToolMode(base, nil); got != base {
+		t.Fatalf("no-tool task prompt must be unchanged, got %q", got)
 	}
 }
 
@@ -137,7 +133,7 @@ func TestApplyChatActionToolModeTaskFollowupKeepsCodingToolsPrimary(t *testing.T
 	if strings.Contains(prompt, ChatActionToolModeInstructions) || strings.Contains(prompt, "Perform application actions only by calling the provided runtime action tools") {
 		t.Fatalf("task-thread prompt received action-only Chat instructions: %q", prompt)
 	}
-	if !strings.Contains(prompt, TaskFollowupRuntimeToolInstructions) || !strings.Contains(prompt, "Additional runtime tools: create_task, list_tasks") {
+	if !strings.Contains(prompt, TaskRuntimeToolInstructions) || !strings.Contains(prompt, "Additional runtime tools: create_task, list_tasks") {
 		t.Fatalf("task-thread prompt missing supplemental runtime tool guidance: %q", prompt)
 	}
 	if got := ApplyChatActionToolMode(base, nil, true); got != base {

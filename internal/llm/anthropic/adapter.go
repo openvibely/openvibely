@@ -615,7 +615,7 @@ func (a *Adapter) callStreaming(ctx context.Context, prompt string, attachments 
 
 	rt := llmcontracts.RuntimeToolsFromContext(ctx)
 	fullPrompt := llmprompt.BuildTaskPromptHeader() + prompt
-	fullPrompt = llmprompt.ApplyTaskCreationToolMode(fullPrompt, rt.DefinitionNames())
+	fullPrompt = llmprompt.ApplyTaskRuntimeToolMode(fullPrompt, rt.DefinitionNames())
 	fullPrompt += llmprompt.BuildTaskStatusInstructions()
 	mcAttachments, err := convertAttachments(attachments)
 	if err != nil {
