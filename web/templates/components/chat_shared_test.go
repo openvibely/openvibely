@@ -3894,7 +3894,10 @@ func TestCleanTranscriptControls_PreservesCodeExamples(t *testing.T) {
 		"  });\n" +
 		"  });\n" +
 		"}).catch(function(err) { console.error(err && err.stack || err); process.exit(58); });\n"
-	if output, err := exec.Command(node, "-e", script).CombinedOutput(); err != nil {
+	// Feed the rendered script through stdin to avoid OS argument-size limits.
+	cmd := exec.Command(node, "-")
+	cmd.Stdin = strings.NewReader(script)
+	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("rendered browser cleaner did not preserve code examples: %v\n%s", err, output)
 	}
 }
