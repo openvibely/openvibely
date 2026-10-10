@@ -122,7 +122,7 @@ templ TaskWorkspaceScript() {
 			var title = root.querySelector('#task-breadcrumb-title');
 			title.disabled = !diff;
 			if (diff) title.title = 'Back to thread';
-			else title.removeAttribute('title');
+			else { title.removeAttribute('title'); title.removeAttribute('data-ov-tooltip'); }
 			resize(width);
 			if (diff) {
 				_startFileChangesSSE(taskID);

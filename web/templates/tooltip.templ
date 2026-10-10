@@ -16,7 +16,7 @@ templ Tooltips() {
   if(!nativePopover)tip.removeAttribute('popover');
   var selector='[title],[data-tip],[data-ov-tooltip],[data-model-help],[data-model-setting-help]';
   function textFor(el) {
-   var text=el.getAttribute('title')||el.dataset.ovTooltip||el.dataset.modelSettingHelp||el.dataset.modelHelp||el.dataset.tip||'';
+   var text=el.dataset.modelSettingHelp||el.dataset.modelHelp||el.dataset.tip||el.getAttribute('title')||el.dataset.ovTooltip||'';
    var sample=el.querySelector('[data-task-summary-sample]');
    if(el.hasAttribute('data-model-help')&&sample&&sample.textContent)text+=' '+sample.textContent+'.';
    return text;
@@ -90,7 +90,10 @@ templ Tooltips() {
    if(!active)return;if(!active.isConnected){close();return;}
    if(records.some(function(record){return record.type==='attributes'&&record.target===active;})){var text=textFor(active);if(text){render(text);position();}else close();}
   }).observe(document.body,{subtree:true,childList:true,attributes:true,attributeFilter:['title','data-tip','data-ov-tooltip','data-model-help','data-model-setting-help']});
-  window.openVibelyTooltip={show:show,close:close,chart:function(context){
+  window.openVibelyTooltip={show:show,close:close,clear:function(el){
+   el.removeAttribute('title');el.removeAttribute('data-ov-tooltip');el.removeAttribute('data-tip');
+   if(active===el)close();
+  },chart:function(context){
    var model=context.tooltip,canvas=context.chart.canvas;if(!model||!model.opacity){if(active===canvas)close();return;}
    var lines=[].concat(model.title||[],model.beforeBody||[]);(model.body||[]).forEach(function(body){lines=lines.concat(body.before||[],body.lines||[],body.after||[]);});lines=lines.concat(model.afterBody||[],model.footer||[]);
    var r=canvas.getBoundingClientRect();show(canvas,lines.join('\n'),false,{x:r.left+model.caretX,y:r.top+model.caretY});
