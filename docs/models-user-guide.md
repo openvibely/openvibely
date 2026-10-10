@@ -55,7 +55,7 @@ OpenVibely currently budgets Anthropic requests with a 200k context window. Clau
 | Claude Sonnet 4.6 (`claude-sonnet-4-6`) | low / medium / high / max | 64k max output. |
 | Claude Sonnet 4.5 (`claude-sonnet-4-5-20250929`) | none | Supports manual extended thinking, but not the newer effort parameter. Legacy. |
 | Claude Haiku 4.5 (`claude-haiku-4-5-20251001`) | none | No reasoning effort support. Legacy. |
-| Claude Haiku 5.5 (`claude-haiku-5-5`) | low / medium (default) / high / xhigh / max | Available with an Anthropic API key; OAuth eligibility is not advertised. 128k max output; adaptive thinking is always on; temperature is unsupported. OpenVibely keeps its standard 200k context budget and does not enable Anthropic's 1M context mode. |
+| Claude Haiku 5.5 (`claude-haiku-5-5`) | low / medium (default) / high / xhigh / max | Available with an Anthropic API key; OAuth eligibility is not advertised. 128k max output; adaptive thinking is always on; `temperature`, `top_p`, and `top_k` are unsupported. OpenVibely keeps its standard 200k context budget and does not enable Anthropic's 1M context mode. |
 | Claude Opus 4.6 (`claude-opus-4-6`) | low / medium / high / max | Legacy. |
 
 ### OpenAI (Codex)
