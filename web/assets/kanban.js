@@ -64,6 +64,7 @@
         const term = searchTerm();
         const search = document.querySelector('[data-kanban-search]');
         if (search) search.dataset.active = String(!!term);
+        let matched = 0;
         document.querySelectorAll('#kanban-board [data-kanban-category]').forEach(col => {
             const filter = filters.get(key(col)) || {};
             const all = cards(col);
@@ -81,7 +82,10 @@
             });
             col.querySelectorAll('[data-kanban-select]').forEach(button => { button.textContent = selected.length ? 'Clear selection' : 'Select all'; button.disabled = !visible.length; });
             const noResults = col.querySelector('[data-kanban-no-results]');
-            if (noResults) noResults.hidden = !(term && all.length && !visible.length);
+            const noMatch = !!(term && all.length && !visible.length);
+            if (noResults) noResults.hidden = !noMatch;
+            col.querySelectorAll('[data-kanban-drop-hint]').forEach(hint => { hint.hidden = noMatch; });
+            matched += visible.length;
             const count = col.querySelector('[data-kanban-count]');
             if (count) count.textContent = String(visible.length);
             const clear = col.querySelector('[data-kanban-clear]');
@@ -98,6 +102,11 @@
             });
             renderProgress(col);
         });
+        const status = search && search.querySelector('[data-kanban-search-status]');
+        if (status) {
+            const text = !term ? '' : matched ? matched + (matched === 1 ? ' task matches' : ' tasks match') : 'No matching tasks';
+            if (status.textContent !== text) status.textContent = text;
+        }
     }
     window.kanbanRefresh = refresh;
     function closeChoiceMenu(button) {
@@ -200,6 +209,7 @@
             if (currentColumn(batchKey) && window.htmx) window.htmx.ajax('GET', '/tasks?project_id=' + encodeURIComponent(project), { target: '#kanban-board', select: '#kanban-board', swap: 'outerHTML' });
         }
     };
+    let searchTimer = 0;
     function setSearchOpen(search, open) {
         search.dataset.open = String(open);
         const input = search.querySelector('[data-kanban-search-input]');
@@ -229,11 +239,14 @@
         if (search && !search.contains(event.relatedTarget)) setSearchOpen(search, false);
     });
     document.addEventListener('input', event => {
-        if (event.target.matches && event.target.matches('[data-kanban-search-input]')) { window.kanbanClearSelection(); refresh(); }
+        if (!event.target.matches || !event.target.matches('[data-kanban-search-input]')) return;
+        clearTimeout(searchTimer);
+        searchTimer = setTimeout(() => { window.kanbanClearSelection(); refresh(); }, 150);
     });
     document.addEventListener('keydown', event => {
         if (event.key !== 'Escape' || !event.target.matches || !event.target.matches('[data-kanban-search-input]')) return;
         const search = event.target.closest('[data-kanban-search]');
+        clearTimeout(searchTimer);
         event.target.value = '';
         refresh();
         setSearchOpen(search, false);

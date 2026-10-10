@@ -236,7 +236,7 @@ templ activeColumnContent(tasks []models.Task, projectID string, llmModels []mod
 					@TaskCard(task, projectID, "active", llmModels, agentDefs, taskCardMergeMenuStateMap(menuStates))
 				}
 			} else {
-				<div class="text-center py-4 opacity-30 text-sm">Drop tasks here</div>
+				<div data-kanban-drop-hint class="text-center py-4 opacity-30 text-sm">Drop tasks here</div>
 			}
 		</div>
 	</div>

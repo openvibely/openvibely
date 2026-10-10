@@ -82,11 +82,13 @@ func testKanbanHeaderSearch(t *testing.T, width int) {
 		check("Add Task stays on screen", search+`.nextElementSibling.getBoundingClientRect().right <= window.innerWidth`)
 
 		b.typeText("oauth")
-		check("filters by title and prompt", visible+` === 'alpha,gamma'`)
+		b.waitFor("debounced filter", visible, "alpha,gamma")
+		check("status announces matches", `document.querySelector('[data-kanban-search-status]').textContent === '2 tasks match'`)
 		check("backlog count", count("backlog")+` === '1'`)
 		check("Active count follows search", count("active")+` === '0'`)
 		check("empty Queued section hidden", `!(`+queued+`)`)
 		check("Active shows no results", noResults("active"))
+		check("Active drop hint hidden while no results", `document.querySelector('[data-kanban-category="active"] [data-kanban-drop-hint]') === null || document.querySelector('[data-kanban-category="active"] [data-kanban-drop-hint]').hidden`)
 		check("Backlog has matches", `!(`+noResults("backlog")+`)`)
 
 		b.click(`[data-page-header] h2`)
@@ -110,10 +112,12 @@ func testKanbanHeaderSearch(t *testing.T, width int) {
 		check("counts restored", count("active")+` === '2' && `+count("backlog")+` === '2'`)
 		check("Queued restored", queued)
 		check("no-results hidden", `!(`+noResults("active")+`)`)
+		check("status cleared", `document.querySelector('[data-kanban-search-status]').textContent === ''`)
 
 		b.click(`[data-kanban-search-toggle]`)
 		b.typeText("zzz")
-		check("every column shows no results", noResults("backlog")+` && `+noResults("completed")+` && `+noResults("active"))
+		b.waitFor("debounced no results", `String(`+noResults("backlog")+` && `+noResults("completed")+` && `+noResults("active")+`)`, "true")
+		check("status announces no results", `document.querySelector('[data-kanban-search-status]').textContent === 'No matching tasks'`)
 
 		b.evaluate(`(function(){var a=document.createElement('a');a.id='nav-other';a.textContent='Other';a.setAttribute('hx-get','/other');a.setAttribute('hx-target','#main-content');a.setAttribute('hx-select','#main-content');a.setAttribute('hx-swap','outerHTML');a.setAttribute('hx-push-url','true');document.querySelector('[data-page-header]').appendChild(a);htmx.process(a);a.click();return 'ok';})()`)
 		b.waitFor("navigated away", `location.pathname`, "/other")
