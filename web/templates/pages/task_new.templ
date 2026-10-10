@@ -158,7 +158,10 @@ templ NewTaskContent(project *models.Project, agents []models.LLMConfig, agentDe
      var submittedForm = pageRoot && pageRoot.querySelector('#task-thread-form');
      if (!submittedForm || detail.elt !== submittedForm) return;
      var xhr = detail.xhr;
-     var succeeded = detail.successful || (xhr && xhr.status >= 200 && xhr.status < 300);
+     // A 204 model-setup guard is successful HTTP, but creates no task.
+     // Normal creation acknowledges the ID; swarm creation redirects to its task.
+     var succeeded = xhr && xhr.status >= 200 && xhr.status < 300 && typeof xhr.getResponseHeader === 'function' &&
+      (xhr.getResponseHeader('X-Created-Task-ID') || (xhr.getResponseHeader('HX-Location') || '').indexOf('/tasks/') === 0);
      var error = pageRoot.querySelector('#new-task-error');
      if (succeeded) {
       clearTitleDraft(pageRoot);
