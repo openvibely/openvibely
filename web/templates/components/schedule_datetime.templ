@@ -149,7 +149,7 @@ templ ScheduleDateTime(value string) {
     const cycleHeight=count*rowHeight;
     if(!column.children.length) {
      for(let i=0;i<count*(looping?5:1);i++) {
-      const value=kind==='hour'?i%count+1:i%count;
+      const value=kind==='hour'?i%count+1:kind==='period'?(current+i)%count:i%count;
       const cycle=Math.floor(i/count);
       const option=document.createElement('button'); option.type='button'; option.tabIndex=-1;
       option.id=`schedule-time-${++nextID}`; option.setAttribute('role','option'); option.dataset.value=value;
@@ -168,14 +168,14 @@ templ ScheduleDateTime(value string) {
      };
      column.onkeydown=event=>{
       const value=kind==='hour'?(state.selected.getHours()%12||12):kind==='minute'?state.selected.getMinutes():Math.floor(state.selected.getHours()/12);
-      const index=kind==='hour'?value-1:value;
+      const index=kind==='hour'?value-1:looping?value:Array.from(column.children).findIndex(option=>Number(option.dataset.value)===value);
       let next=index;
       if(event.key==='ArrowDown')next=looping?(index+1)%count:Math.min(count-1,index+1);
       else if(event.key==='ArrowUp')next=looping?(index+count-1)%count:Math.max(0,index-1);
       else if(event.key==='Home')next=0;
       else if(event.key==='End')next=count-1;
       else return;
-      event.preventDefault(); choose(kind==='hour'?next+1:next,true);
+      event.preventDefault(); choose(kind==='hour'?next+1:looping?next:Number(column.children[next].dataset.value),true);
      };
     }
     function choose(value, reveal) {
@@ -196,7 +196,7 @@ templ ScheduleDateTime(value string) {
     });
     const selected=column.querySelector('[aria-selected="true"]');
     column.setAttribute('aria-activedescendant',selected.id);
-    if(scroll)column.scrollTop=Array.from(column.children).indexOf(selected)*rowHeight-60;
+    if(scroll)column.scrollTop=Array.from(column.children).indexOf(selected)*rowHeight;
    });
   }
   window.openScheduleDateTime=input=>{
