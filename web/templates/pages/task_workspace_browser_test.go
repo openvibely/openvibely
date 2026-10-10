@@ -345,12 +345,12 @@ func TestBrowserFunctional_NewTaskWorkspace(t *testing.T) {
 		b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": "Enter", "code": "Enter", "windowsVirtualKeyCode": 13}, nil)
 		b.waitFor("first message navigation", `location.pathname`, "/tasks/created-1")
 		b.waitFor("app shell retained after first send", `String(Boolean(window.originalSidebar && window.originalSidebar.isConnected && document.getElementById('sidebar')===window.originalSidebar && window.originalSidebar.getClientRects().length && document.querySelector('#main-content #created-thread')))`, "true")
-		for attempt := 1; attempt <= 2; attempt++ {
+		for attempt := 1; attempt <= 3; attempt++ {
 			b.waitFor("accepted composer cleared", `document.getElementById('task-message-input').value`, "")
 			b.click("#task-message-input")
 			b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": "ArrowUp", "code": "ArrowUp", "windowsVirtualKeyCode": 38}, nil)
 			b.waitFor("initial message recalled", `document.getElementById('task-message-input').value`, "Implement this feature")
-			if attempt == 2 {
+			if attempt == 3 {
 				break
 			}
 			b.click(`#sidebar [data-nav-base="/tasks"]`)
@@ -359,14 +359,15 @@ func TestBrowserFunctional_NewTaskWorkspace(t *testing.T) {
 			b.click(`a[hx-get^="/tasks/new"]`)
 			b.waitFor("second new workspace", `location.pathname`, "/tasks/new")
 			b.waitFor("new composer settled", `String(!document.querySelector('.htmx-settling, .htmx-swapping, .htmx-request') && !!document.getElementById('task-message-input'))`, "true")
+			b.waitFor("new task never restores the previous message", `document.getElementById('task-message-input').value`, "")
 			b.click("#task-message-input")
 			b.typeText("Implement this feature")
 			b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": "Enter", "code": "Enter", "windowsVirtualKeyCode": 13}, nil)
-			b.waitFor("second message navigation", `location.pathname`, "/tasks/created-2")
+			b.waitFor("next message navigation", `location.pathname`, fmt.Sprintf("/tasks/created-%d", attempt+1))
 		}
 	})
-	if sends.Load() != 2 {
-		t.Fatalf("expected two first-message sends, got %d", sends.Load())
+	if sends.Load() != 3 {
+		t.Fatalf("expected three first-message sends, got %d", sends.Load())
 	}
 	if unexpected.Load() != 0 {
 		t.Fatalf("unsaved task made %d persisted-task requests", unexpected.Load())
