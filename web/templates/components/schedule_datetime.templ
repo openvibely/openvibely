@@ -5,7 +5,7 @@ import "time"
 func scheduleDateTimeLabel(value string) string {
  date, err := time.Parse("2006-01-02T15:04", value)
  if err != nil { return "" }
- return date.Format("Jan 2, 2006 · 3:04 PM")
+ return date.Format("01/02/2006, 03:04 PM")
 }
 
 // ScheduleDateTime keeps the existing local run_at form contract in every editor.
@@ -38,13 +38,13 @@ templ ScheduleDateTime(value string) {
   .schedule-datetime-days button { height:30px; border-radius:6px; padding:0; }
   .schedule-datetime-days button[data-other-month] { opacity:.4; }
   .schedule-datetime-popup button:hover { background:oklch(var(--bc) / .1); }
-  .schedule-datetime-popup [aria-pressed=true],.schedule-datetime-popup [aria-selected=true] { background:oklch(var(--p)) !important; color:oklch(var(--pc)); opacity:1 !important; }
+  .schedule-datetime-popup [aria-pressed=true],.schedule-datetime-popup [data-time-selected=true] { background:oklch(var(--p)) !important; color:oklch(var(--pc)); opacity:1 !important; }
   .schedule-datetime-popup :focus-visible { outline:2px solid oklch(var(--p)); outline-offset:-2px; }
-  .schedule-datetime-time { border-left:1px solid oklch(var(--bc) / .12); text-align:center; min-width:0; }
-  .schedule-datetime-time [role=listbox] { height:240px; overflow-y:auto; overscroll-behavior:contain; scrollbar-width:none; }
+  .schedule-datetime-time { text-align:center; min-width:0; }
+  .schedule-datetime-time [role=listbox] { height:240px; overflow-y:auto; overscroll-behavior:contain; scrollbar-width:none; overflow-anchor:none; }
   .schedule-datetime-time [role=listbox]::-webkit-scrollbar { display:none; }
   .schedule-datetime-time [role=option] { display:block; width:100%; height:30px; border-radius:6px; font-size:13px; }
-  .schedule-datetime-footer { display:flex; justify-content:space-between; border-top:1px solid oklch(var(--bc) / .12); padding-top:10px; margin-top:10px; }
+  .schedule-datetime-footer { display:flex; justify-content:space-between; padding-top:10px; margin-top:10px; }
   @media(max-width:380px) { .schedule-datetime-popup { padding:8px; } .schedule-datetime-body { grid-template-columns:minmax(0,1fr) 36px 36px 46px; gap:2px; } .schedule-datetime-calendar { padding-right:3px; } }
  </style>
  <script>
@@ -58,7 +58,7 @@ templ ScheduleDateTime(value string) {
   const stored = input => input.parentElement.querySelector('[name="run_at"]');
   function refresh(input) {
    const value=stored(input).value, date=new Date(value);
-   input.value=value && !Number.isNaN(date.getTime()) ? date.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})+' · '+date.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',hour12:true}) : '';
+   input.value=value && !Number.isNaN(date.getTime()) ? `${pad(date.getMonth()+1)}/${pad(date.getDate())}/${date.getFullYear()}, ${pad(date.getHours()%12||12)}:${pad(date.getMinutes())} ${date.getHours()<12?'AM':'PM'}` : '';
   }
   window.refreshScheduleDateTimes=root=>root.querySelectorAll('[data-run-at-picker]').forEach(refresh);
   document.addEventListener('reset',event=>queueMicrotask(()=>window.refreshScheduleDateTimes(event.target)));
@@ -122,39 +122,61 @@ templ ScheduleDateTime(value string) {
    state.popup.querySelectorAll('[data-time-column]').forEach(column=>{
     const kind=column.dataset.timeColumn;
     const current=kind==='hour'?(state.selected.getHours()%12||12):kind==='minute'?state.selected.getMinutes():Math.floor(state.selected.getHours()/12);
+    const count=kind==='hour'?12:kind==='minute'?60:2;
+    const looping=kind!=='period';
+    const middle=looping?2:0;
+    const rowHeight=30;
+    const cycleHeight=count*rowHeight;
     if(!column.children.length) {
-     const count=kind==='hour'?12:kind==='minute'?60:2;
-     for(let i=0;i<count;i++) {
-      const value=kind==='hour'?i+1:i;
+     for(let i=0;i<count*(looping?5:1);i++) {
+      const value=kind==='hour'?i%count+1:i%count;
+      const cycle=Math.floor(i/count);
       const option=document.createElement('button'); option.type='button'; option.tabIndex=-1;
       option.id=`schedule-time-${++nextID}`; option.setAttribute('role','option'); option.dataset.value=value;
+      option.dataset.cycle=cycle;
+      if(cycle!==middle)option.setAttribute('aria-hidden','true');
       option.textContent=kind==='period'?['AM','PM'][value]:pad(value);
-      option.onclick=()=>choose(value);
+      option.onclick=()=>choose(value,false);
       column.append(option);
      }
+     column.onscroll=()=>{
+      if(!looping)return;
+      // Keep the same visible sequence in the middle copies before reaching an end.
+      if(column.scrollTop<cycleHeight || column.scrollTop>=cycleHeight*3) {
+       column.scrollTop=cycleHeight*2+((column.scrollTop%cycleHeight)+cycleHeight)%cycleHeight;
+      }
+     };
      column.onkeydown=event=>{
-      const options=Array.from(column.children); const index=options.findIndex(o=>o.getAttribute('aria-selected')==='true');
+      const value=kind==='hour'?(state.selected.getHours()%12||12):kind==='minute'?state.selected.getMinutes():Math.floor(state.selected.getHours()/12);
+      const index=kind==='hour'?value-1:value;
       let next=index;
-      if(event.key==='ArrowDown')next=Math.min(options.length-1,index+1);
-      else if(event.key==='ArrowUp')next=Math.max(0,index-1);
+      if(event.key==='ArrowDown')next=looping?(index+1)%count:Math.min(count-1,index+1);
+      else if(event.key==='ArrowUp')next=looping?(index+count-1)%count:Math.max(0,index-1);
       else if(event.key==='Home')next=0;
-      else if(event.key==='End')next=options.length-1;
+      else if(event.key==='End')next=count-1;
       else return;
-      event.preventDefault(); choose(Number(options[next].dataset.value));
+      event.preventDefault(); choose(kind==='hour'?next+1:next,true);
      };
     }
-    function choose(value) {
+    function choose(value, reveal) {
      const hour=state.selected.getHours();
      if(kind==='hour')state.selected.setHours(value%12+(hour>=12?12:0));
      else if(kind==='minute')state.selected.setMinutes(value);
      else state.selected.setHours(hour%12+value*12);
-     write(state); calendar(state); timeColumns(state,false); column.focus();
-     column.querySelector('[aria-selected="true"]').scrollIntoView({block:'nearest'});
+     write(state); calendar(state); timeColumns(state,false); column.focus({preventScroll:true});
+     if(reveal) {
+      const selected=column.querySelector('[aria-selected="true"]');
+      column.scrollTop=Array.from(column.children).indexOf(selected)*rowHeight-60;
+     }
     }
-    Array.from(column.children).forEach(option=>option.setAttribute('aria-selected',String(Number(option.dataset.value)===current)));
+    Array.from(column.children).forEach(option=>{
+     const selected=Number(option.dataset.value)===current;
+     option.dataset.timeSelected=String(selected);
+     option.setAttribute('aria-selected',String(selected && Number(option.dataset.cycle)===middle));
+    });
     const selected=column.querySelector('[aria-selected="true"]');
     column.setAttribute('aria-activedescendant',selected.id);
-    if(scroll)column.scrollTop=selected.offsetTop-column.firstElementChild.offsetTop-60;
+    if(scroll)column.scrollTop=Array.from(column.children).indexOf(selected)*rowHeight-60;
    });
   }
   window.openScheduleDateTime=input=>{
