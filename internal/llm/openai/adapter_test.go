@@ -278,7 +278,7 @@ func TestCallDirectUsesResponsesAPIWithAttachmentsAndUsage(t *testing.T) {
 	}
 }
 
-func TestCallCompletionsStreamingTaskWithRuntimeActionsUsesToolModePrompt(t *testing.T) {
+func TestCallCompletionsStreamingTaskWithRuntimeActionsOmitsToolNote(t *testing.T) {
 	var gotBody map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
@@ -320,8 +320,8 @@ func TestCallCompletionsStreamingTaskWithRuntimeActionsUsesToolModePrompt(t *tes
 		t.Fatalf("user message = %#v", messages[len(messages)-1])
 	}
 	content, _ := user["content"].(string)
-	if !strings.Contains(content, "TASK CREATION TOOL MODE") || !strings.Contains(content, "Available runtime task tools: create_task") {
-		t.Fatalf("task prompt missing runtime tool guidance: %q", content)
+	if strings.Contains(content, "create_task") {
+		t.Fatalf("task prompt must not carry a tool note: %q", content)
 	}
 	if strings.Contains(content, "This is the ONLY way to create a task") || strings.Contains(content, "To create a task, output this format") {
 		t.Fatalf("task prompt retains marker-only guidance: %q", content)
@@ -331,24 +331,32 @@ func TestCallCompletionsStreamingTaskWithRuntimeActionsUsesToolModePrompt(t *tes
 	}
 }
 
-func TestAppendToolModeSystemPromptCoversTaskFollowupsAndPreservesPlan(t *testing.T) {
-	followup := appendToolModeSystemPrompt("base", nil, models.ChatModeOrchestrate)
-	if !strings.Contains(followup, llmprompt.ChatActionUnavailableInstructions) {
-		t.Fatalf("no-tool follow-up prompt missing capability limitation: %q", followup)
+func TestAppendToolModeSystemPromptCoversChatAndTaskFollowupsAndPreservesPlan(t *testing.T) {
+	noTools := appendToolModeSystemPrompt("base", nil, models.ChatModeOrchestrate, false)
+	if noTools != "base" {
+		t.Fatalf("no-tool chat prompt must be unchanged: %q", noTools)
 	}
 
 	rt := &llmcontracts.RuntimeTools{Definitions: []llmcontracts.RuntimeToolDefinition{{Name: "create_task"}}}
-	capable := appendToolModeSystemPrompt("base", rt, models.ChatModeOrchestrate)
-	if !strings.Contains(capable, llmprompt.ChatActionToolModeInstructions) || !strings.Contains(capable, "Available action tools: create_task") {
-		t.Fatalf("tool-capable follow-up prompt missing concrete runtime guidance: %q", capable)
+	capable := appendToolModeSystemPrompt("base", rt, models.ChatModeOrchestrate, false)
+	if !strings.Contains(capable, llmprompt.ChatActionToolModeInstructions) || strings.Contains(capable, "Available action tools") {
+		t.Fatalf("tool-capable chat prompt missing concrete runtime guidance: %q", capable)
 	}
-	oauthThenActions := appendToolModeSystemPrompt(applyOpenAIOAuthSystemPrompt("base", models.LLMConfig{Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodOAuth}), rt, models.ChatModeOrchestrate)
+
+	taskThread := appendToolModeSystemPrompt("base", rt, models.ChatModeOrchestrate, true)
+	if taskThread != "base" {
+		t.Fatalf("task-thread prompt must not add a tool note: %q", taskThread)
+	}
+	if got := appendToolModeSystemPrompt("base", nil, models.ChatModeOrchestrate, true); got != "base" {
+		t.Fatalf("no-tool task-thread prompt must not claim tools are unavailable: %q", got)
+	}
+	oauthThenActions := appendToolModeSystemPrompt(applyOpenAIOAuthSystemPrompt("base", models.LLMConfig{Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodOAuth}), rt, models.ChatModeOrchestrate, false)
 	oauthIndex := strings.Index(oauthThenActions, "Working with the user")
 	if oauthIndex < 0 || strings.LastIndex(oauthThenActions, llmprompt.ChatActionToolModeInstructions) < oauthIndex {
 		t.Fatalf("runtime action instructions must follow OAuth working guidance: %q", oauthThenActions)
 	}
 
-	plan := appendToolModeSystemPrompt("base", nil, models.ChatModePlan)
+	plan := appendToolModeSystemPrompt("base", nil, models.ChatModePlan, false)
 	if plan != "base" {
 		t.Fatalf("Plan prompt received action-mode guidance: %q", plan)
 	}
@@ -1046,8 +1054,8 @@ func TestCallCompletionsChatStreamingUsesHistoryRuntimeAndUsage(t *testing.T) {
 			t.Fatalf("request body missing %q: %#v", want, gotBody)
 		}
 	}
-	if !strings.Contains(payload, llmprompt.ChatActionToolModeInstructions) {
-		t.Fatalf("chat completions prompt missing runtime action guidance: %#v", gotBody)
+	if strings.Contains(payload, llmprompt.ChatActionToolModeInstructions) || strings.Contains(payload, "Available action tools") {
+		t.Fatalf("task follow-up runtime tools should supplement coding tools: %#v", gotBody)
 	}
 	if gotBody["temperature"] != 0.7 {
 		t.Fatalf("temperature = %#v, want 0.7", gotBody["temperature"])

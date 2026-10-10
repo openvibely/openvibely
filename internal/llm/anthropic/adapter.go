@@ -245,8 +245,8 @@ func composeTaskRuntimeToolFilter(base func(string) bool, rt *llmcontracts.Runti
 	return llmcontracts.ComposeRuntimeToolFilter(base, rt, runtimeToolPolicyOptions(true, models.ChatModeOrchestrate))
 }
 
-func appendToolModeSystemPrompt(base string, rt *llmcontracts.RuntimeTools, chatMode models.ChatMode) string {
-	if chatMode != models.ChatModeOrchestrate {
+func appendToolModeSystemPrompt(base string, rt *llmcontracts.RuntimeTools, chatMode models.ChatMode, isTaskFollowup bool) string {
+	if chatMode != models.ChatModeOrchestrate || isTaskFollowup {
 		return base
 	}
 	return llmprompt.ApplyChatActionToolMode(base, rt.DefinitionNames())
@@ -508,7 +508,7 @@ func (a *Adapter) callChatStreaming(ctx context.Context, message string, attachm
 	rt := llmcontracts.RuntimeToolsFromContext(ctx)
 	systemPromptStr := llmprompt.BuildAnthropicChatSystemPrompt(agent.Model, isTaskFollowup, chatMode, chatSystemContext, false)
 	systemPromptStr = llmprompt.AppendWorktreeContextPrompt(systemPromptStr, workDir)
-	systemPromptStr = appendToolModeSystemPrompt(systemPromptStr, rt, chatMode)
+	systemPromptStr = appendToolModeSystemPrompt(systemPromptStr, rt, chatMode, isTaskFollowup)
 	client.History = append(client.History, buildClientHistory(chatHistory)...)
 
 	mcAttachments, err := convertAttachments(attachments)
@@ -615,7 +615,6 @@ func (a *Adapter) callStreaming(ctx context.Context, prompt string, attachments 
 
 	rt := llmcontracts.RuntimeToolsFromContext(ctx)
 	fullPrompt := llmprompt.BuildTaskPromptHeader() + prompt
-	fullPrompt = llmprompt.ApplyTaskCreationToolMode(fullPrompt, rt.DefinitionNames())
 	fullPrompt += llmprompt.BuildTaskStatusInstructions()
 	mcAttachments, err := convertAttachments(attachments)
 	if err != nil {

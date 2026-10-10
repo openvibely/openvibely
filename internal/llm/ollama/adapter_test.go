@@ -247,10 +247,7 @@ func TestCallStreamingZeroHistoryFollowupUsesChatAssembly(t *testing.T) {
 	if !strings.Contains(systemPrompt, wantWorktreeContext) {
 		t.Fatalf("zero-history follow-up missing worktree root context %q: %q", wantWorktreeContext, systemPrompt)
 	}
-	if !strings.Contains(systemPrompt, llmprompt.ChatActionUnavailableInstructions) {
-		t.Fatalf("zero-history follow-up missing capability limitation: %q", systemPrompt)
-	}
-	if strings.Contains(systemPrompt, "TASK CREATION TOOL MODE") {
+	if strings.Contains(systemPrompt, llmprompt.ChatActionToolModeInstructions) {
 		t.Fatalf("zero-history follow-up received initial-task guidance: %q", systemPrompt)
 	}
 	if len(doer.request.Tools) != 0 {

@@ -22,40 +22,15 @@ var legacyMutationMarkers = []string{
 	"[SWITCH_PROJECT]",
 }
 
-func TestApplyTaskCreationToolMode(t *testing.T) {
-	base := "Task objective"
-	toolPrompt := ApplyTaskCreationToolMode(base, []string{"Read", "create_task"})
-	if !strings.Contains(toolPrompt, TaskCreationToolModeInstructions) || !strings.Contains(toolPrompt, "Available runtime task tools: Read, create_task") {
-		t.Fatalf("tool-mode task prompt missing runtime guidance: %q", toolPrompt)
-	}
-	for _, marker := range legacyMutationMarkers {
-		if strings.Contains(toolPrompt, marker) {
-			t.Fatalf("tool-mode task prompt advertised legacy marker %s: %q", marker, toolPrompt)
-		}
-	}
-	if got := ApplyTaskCreationToolMode(base, []string{"Read"}); got != base {
-		t.Fatalf("unrelated runtime tool changed task prompt: %q", got)
-	}
-	noToolPrompt := ApplyTaskCreationToolMode(base, nil)
-	if !strings.Contains(noToolPrompt, ChatActionUnavailableInstructions) {
-		t.Fatalf("no-tool task prompt missing capability limitation: %q", noToolPrompt)
-	}
-	for _, marker := range legacyMutationMarkers {
-		if strings.Contains(noToolPrompt, marker) {
-			t.Fatalf("no-tool task prompt advertised legacy marker %s: %q", marker, noToolPrompt)
-		}
-	}
-}
-
 func TestApplyChatActionToolModeReportsConcreteCapability(t *testing.T) {
 	base := BuildChatSystemPrompt(false, models.ChatModeOrchestrate, "", false)
 	capable := ApplyChatActionToolMode(base, []string{"create_task", "edit_task"})
-	if !strings.Contains(capable, ChatActionToolModeInstructions) || !strings.Contains(capable, "Available action tools: create_task, edit_task") {
+	if !strings.Contains(capable, ChatActionToolModeInstructions) || strings.Contains(capable, "Available action tools") {
 		t.Fatalf("capable prompt missing runtime action guidance: %q", capable)
 	}
 	incapable := ApplyChatActionToolMode(base, nil)
-	if !strings.Contains(incapable, ChatActionUnavailableInstructions) {
-		t.Fatalf("incapable prompt missing capability limitation: %q", incapable)
+	if incapable != base {
+		t.Fatalf("no-tool chat prompt must be unchanged, got %q", incapable)
 	}
 	for _, prompt := range []string{capable, incapable} {
 		for _, marker := range legacyMutationMarkers {

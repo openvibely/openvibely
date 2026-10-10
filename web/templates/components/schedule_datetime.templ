@@ -1,9 +1,18 @@
 package components
 
+import "time"
+
+func scheduleDateTimeLabel(value string) string {
+ date, err := time.Parse("2006-01-02T15:04", value)
+ if err != nil { return "" }
+ return date.Format("Jan 2, 2006 · 3:04 PM")
+}
+
 // ScheduleDateTime keeps the existing local run_at form contract in every editor.
 templ ScheduleDateTime(value string) {
  <div data-schedule-datetime>
-  <input type="text" name="run_at" value={ value } data-run-at-picker class="input input-bordered cursor-pointer w-full" required pattern="[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}" placeholder="YYYY-MM-DDTHH:MM" aria-label="Run at" aria-haspopup="dialog" aria-expanded="false" autocomplete="off" onclick="window.openScheduleDateTime(this)" onkeydown="if(event.key==='ArrowDown'||event.key==='Enter'||event.key===' '){event.preventDefault();window.openScheduleDateTime(this)}"/>
+  <input type="text" hidden name="run_at" value={ value }/>
+  <input type="text" value={ scheduleDateTimeLabel(value) } data-run-at-picker class="input input-bordered cursor-pointer w-full" required placeholder="Choose date and time" onbeforeinput="event.preventDefault()" aria-label="Run at" aria-haspopup="dialog" aria-expanded="false" autocomplete="off" onclick="window.openScheduleDateTime(this)" onkeydown="if(event.key==='ArrowDown'||event.key==='Enter'||event.key===' '){event.preventDefault();window.openScheduleDateTime(this)}"/>
   <div class="schedule-datetime-popup" popover="auto" role="dialog" aria-label="Choose date and time">
    <div class="schedule-datetime-body">
     <div class="schedule-datetime-calendar">
@@ -11,9 +20,9 @@ templ ScheduleDateTime(value string) {
      <div class="schedule-datetime-weekdays" aria-hidden="true"><span>Su</span><span>Mo</span><span>Tu</span><span>We</span><span>Th</span><span>Fr</span><span>Sa</span></div>
      <div class="schedule-datetime-days" role="group" aria-label="Date"></div>
     </div>
-    <div class="schedule-datetime-time"><span>Hour</span><div data-time-column="hour" role="listbox" aria-label="Hour" tabindex="0"></div></div>
-    <div class="schedule-datetime-time"><span>Min</span><div data-time-column="minute" role="listbox" aria-label="Minute" tabindex="0"></div></div>
-    <div class="schedule-datetime-time"><span>AM/PM</span><div data-time-column="period" role="listbox" aria-label="AM or PM" tabindex="0"></div></div>
+    <div class="schedule-datetime-time"><div data-time-column="hour" role="listbox" aria-label="Hour" tabindex="0"></div></div>
+    <div class="schedule-datetime-time"><div data-time-column="minute" role="listbox" aria-label="Minute" tabindex="0"></div></div>
+    <div class="schedule-datetime-time"><div data-time-column="period" role="listbox" aria-label="AM or PM" tabindex="0"></div></div>
    </div>
    <div class="schedule-datetime-footer"><button type="button" class="btn btn-sm btn-ghost" data-today>Today</button><button type="button" class="btn btn-sm btn-primary" data-done>Done</button></div>
   </div>
@@ -32,8 +41,8 @@ templ ScheduleDateTime(value string) {
   .schedule-datetime-popup [aria-pressed=true],.schedule-datetime-popup [aria-selected=true] { background:oklch(var(--p)) !important; color:oklch(var(--pc)); opacity:1 !important; }
   .schedule-datetime-popup :focus-visible { outline:2px solid oklch(var(--p)); outline-offset:-2px; }
   .schedule-datetime-time { border-left:1px solid oklch(var(--bc) / .12); text-align:center; min-width:0; }
-  .schedule-datetime-time > span { display:block; height:34px; line-height:34px; font-size:11px; opacity:.65; }
-  .schedule-datetime-time [role=listbox] { height:206px; overflow-y:auto; overscroll-behavior:contain; scrollbar-width:thin; }
+  .schedule-datetime-time [role=listbox] { height:240px; overflow-y:auto; overscroll-behavior:contain; scrollbar-width:none; }
+  .schedule-datetime-time [role=listbox]::-webkit-scrollbar { display:none; }
   .schedule-datetime-time [role=option] { display:block; width:100%; height:30px; border-radius:6px; font-size:13px; }
   .schedule-datetime-footer { display:flex; justify-content:space-between; border-top:1px solid oklch(var(--bc) / .12); padding-top:10px; margin-top:10px; }
   @media(max-width:380px) { .schedule-datetime-popup { padding:8px; } .schedule-datetime-body { grid-template-columns:minmax(0,1fr) 36px 36px 46px; gap:2px; } .schedule-datetime-calendar { padding-right:3px; } }
@@ -46,6 +55,14 @@ templ ScheduleDateTime(value string) {
   const pad = n => String(n).padStart(2,'0');
   const dateValue = d => `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
   const localValue = d => `${dateValue(d)}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  const stored = input => input.parentElement.querySelector('[name="run_at"]');
+  function refresh(input) {
+   const value=stored(input).value, date=new Date(value);
+   input.value=value && !Number.isNaN(date.getTime()) ? date.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})+' · '+date.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',hour12:true}) : '';
+  }
+  window.refreshScheduleDateTimes=root=>root.querySelectorAll('[data-run-at-picker]').forEach(refresh);
+  document.addEventListener('reset',event=>queueMicrotask(()=>window.refreshScheduleDateTimes(event.target)));
+  document.addEventListener('toggle',event=>{if(event.target.tagName==='DIALOG')window.refreshScheduleDateTimes(event.target);},true);
   function position(state) {
    const rect = state.input.getBoundingClientRect();
    const popup = state.popup;
@@ -56,7 +73,10 @@ templ ScheduleDateTime(value string) {
    popup.style.top = `${Math.max(8,below+popup.offsetHeight<=window.innerHeight-8 ? below : rect.top-popup.offsetHeight-6)}px`;
   }
   function write(state) {
-   state.input.value = localValue(state.selected);
+   stored(state.input).value = localValue(state.selected);
+   refresh(state.input);
+   state.input.setCustomValidity('');
+   stored(state.input).dispatchEvent(new Event('input',{bubbles:true}));
    state.input.dispatchEvent(new Event('input',{bubbles:true}));
    state.input.dispatchEvent(new Event('change',{bubbles:true}));
   }
@@ -84,7 +104,7 @@ templ ScheduleDateTime(value string) {
     button.onclick=()=>{
      state.selected=new Date(day.getFullYear(),day.getMonth(),day.getDate(),selected.getHours(),selected.getMinutes());
      state.month=new Date(day.getFullYear(),day.getMonth(),1);
-     write(state); calendar(state,day);
+     write(state); calendar(state,day); timeColumns(state,true);
      days.querySelector('[tabindex="0"]').focus();
     };
     button.onkeydown=event=>{
@@ -141,8 +161,8 @@ templ ScheduleDateTime(value string) {
    const popup=input.parentElement.querySelector('.schedule-datetime-popup');
    if(active && active.popup===popup)return;
    if(active)close(active,false);
-   let selected=new Date(input.value);
-   if(!input.value||Number.isNaN(selected.getTime())) { selected=new Date(); selected.setMinutes(selected.getMinutes()+1); }
+   let selected=new Date(stored(input).value);
+   if(!stored(input).value||Number.isNaN(selected.getTime())) { selected=new Date(); selected.setMinutes(selected.getMinutes()+1); }
    selected.setSeconds(0,0);
    const state={input,popup,selected,month:new Date(selected.getFullYear(),selected.getMonth(),1)};
    active=state;
@@ -152,22 +172,30 @@ templ ScheduleDateTime(value string) {
    // Rebuild column handlers on each opening so draft/reset values are authoritative.
    popup.querySelectorAll('[data-time-column]').forEach(column=>column.replaceChildren());
    calendar(state); timeColumns(state,false);
-   popup.querySelectorAll('[data-month-step]').forEach(button=>button.onclick=()=>{state.month.setMonth(state.month.getMonth()+Number(button.dataset.monthStep));calendar(state);});
-   popup.querySelector('[data-today]').onclick=()=>{
-    const today=new Date(); state.selected=new Date(today.getFullYear(),today.getMonth(),today.getDate(),state.selected.getHours(),state.selected.getMinutes());
-    state.month=new Date(today.getFullYear(),today.getMonth(),1); write(state);calendar(state);
-   };
-   popup.querySelector('[data-done]').onclick=()=>{write(state);close(state,true);};
    popup.ontoggle=()=>{if(!popup.matches(':popover-open'))close(state,false);};
    popup.onkeydown=event=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();close(state,true);}};
+   // Safari does not focus buttons on mouse down. Keep focus in the popup
+   // while replacing calendar days so modal focus handling cannot dismiss it.
+   popup.onmousedown=event=>{if(event.target.closest('button'))event.preventDefault();};
    popup.showPopover(); position(state); timeColumns(state,true);
    popup.querySelector('.schedule-datetime-days [tabindex="0"]').focus();
   };
-  document.addEventListener('input',event=>{
-   const input=event.target;
-   if(!input.matches('[data-run-at-picker]'))return;
-   const date=new Date(input.value);
-   input.setCustomValidity(!input.value || (!Number.isNaN(date.getTime()) && localValue(date)===input.value) ? '' : 'Enter a valid date and time.');
+  // Delegate static controls: HTMX morphs can replace their DOM nodes while open.
+  document.addEventListener('click',event=>{
+   const button=event.target.closest('[data-month-step], [data-today], [data-done]');
+   if(!active || !button || !active.popup.contains(button))return;
+   const state=active;
+   // Focus the persistent control before replacing the focused calendar day.
+   button.focus({preventScroll:true});
+   if(button.hasAttribute('data-month-step')) {
+    state.month=new Date(state.month.getFullYear(),state.month.getMonth()+Number(button.dataset.monthStep),1);
+    calendar(state);
+   } else if(button.hasAttribute('data-today')) {
+    const today=new Date();
+    state.selected=new Date(today.getFullYear(),today.getMonth(),today.getDate(),state.selected.getHours(),state.selected.getMinutes());
+    state.month=new Date(today.getFullYear(),today.getMonth(),1);
+    write(state); calendar(state); timeColumns(state,true);
+   } else { write(state); close(state,true); }
   });
   window.addEventListener('resize',()=>{if(active)position(active);});
   document.addEventListener('scroll',event=>{if(active && !active.popup.contains(event.target))position(active);},true);
