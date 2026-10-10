@@ -136,7 +136,7 @@ func TestModelsPageKeepsOAuthAccountActionsInEditorNotModelCards(t *testing.T) {
 		t.Fatalf("models status = %d, body=%s", rec.Code, rec.Body.String())
 	}
 	body := rec.Body.String()
-	for _, want := range []string{"OAuth Account", cfg.Name, cfg.OAuthConnectionID, `id="model_oauth_connection_action"`, "Save this model before connecting the selected account", `'/models/' + encodeURIComponent(id) + '/oauth/initiate'`} {
+	for _, want := range []string{"OAuth Account", cfg.Name, cfg.OAuthConnectionID, `id="model_oauth_connection_action"`, "Save &amp; Connect OAuth", `'/models/' + encodeURIComponent(saved.id) + '/oauth/initiate'`} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("models page missing editor-owned OAuth value %q", want)
 		}
