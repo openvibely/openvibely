@@ -95,6 +95,18 @@ func testScheduleCalendarHeader(t *testing.T, paused, mobile bool) {
    check(menu.querySelector('summary svg.h-5.w-5 path'),'standard SVG kebab');
    check(!menu.hidden,'calendar menu stays visible');
    if (JSON.parse(root.querySelector('#schedule-calendar-controls').dataset.state).paused) {
+    var pausedContext=root.querySelector('#schedule-context-menu');
+    ['[data-calendar-day]','[data-calendar-hour]'].forEach(function(selector){
+     var label=root.querySelector(selector);
+     down(label);up();
+     label.dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:300,clientY:200}));
+     check(pausedContext.classList.contains('hidden'),'paused selection must not open an empty context menu: '+selector);
+     check(label.getAttribute('aria-pressed')==='true','paused right-click preserves selection: '+selector);
+     check(toolbar.getAttribute('aria-hidden')==='false' && !toolbar.inert,'paused right-click keeps selection toolbar available: '+selector);
+     toolbar.querySelector('[data-calendar-action="clear"]').click();
+     check(label.getAttribute('aria-pressed')==='false','paused selection can still be cleared: '+selector);
+    });
+    check(requests.length===0,'paused selection sends no actions');
     check(root.querySelector('[data-calendar-action="pause_all"]').hidden,'paused project hides pause action');
     var resume=root.querySelector('[data-calendar-action="resume_all"]');
     check(!resume.hidden && menu.contains(resume),'resume remains in permanent menu');
