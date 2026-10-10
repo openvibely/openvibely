@@ -82,7 +82,9 @@
             });
             col.querySelectorAll('[data-kanban-select]').forEach(button => { button.textContent = selected.length ? 'Clear selection' : 'Select all'; button.disabled = !visible.length; });
             const noResults = col.querySelector('[data-kanban-no-results]');
-            const noMatch = !!(term && all.length && !visible.length);
+            const zone = col.dataset.kanbanCategory === 'active' ? col.querySelector('[data-status="running"]') : col;
+            const zoneCards = zone ? cards(zone) : [];
+            const noMatch = zoneCards.length > 0 && zoneCards.every(card => card.hidden);
             if (noResults) noResults.hidden = !noMatch;
             col.querySelectorAll('[data-kanban-drop-hint]').forEach(hint => { hint.hidden = noMatch; });
             matched += visible.length;

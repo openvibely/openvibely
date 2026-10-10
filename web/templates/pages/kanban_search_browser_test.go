@@ -114,6 +114,21 @@ func testKanbanHeaderSearch(t *testing.T, width int) {
 		check("no-results hidden", `!(`+noResults("active")+`)`)
 		check("status cleared", `document.querySelector('[data-kanban-search-status]').textContent === ''`)
 
+		b.evaluate(`(document.querySelector('[data-kanban-filter="priority"][data-value="1"][data-column="backlog"]').click(), 'ok')`)
+		check("filter-only hides every backlog card", count("backlog")+` === '0'`)
+		check("filter-only shows no results", noResults("backlog"))
+		b.evaluate(`(document.querySelector('[data-kanban-category="backlog"] [data-kanban-clear]').click(), 'ok')`)
+		check("clearing filters hides no results", `!(`+noResults("backlog")+`) && `+count("backlog")+` === '2'`)
+
+		b.click(`[data-kanban-search-toggle]`)
+		b.typeText("epsilon")
+		b.waitFor("queued-only match", visible, "epsilon")
+		check("Queued shown for its match", queued)
+		check("In Progress explains its empty area", noResults("active"))
+		b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": "Escape", "code": "Escape", "windowsVirtualKeyCode": 27}, nil)
+		b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyUp", "key": "Escape", "code": "Escape", "windowsVirtualKeyCode": 27}, nil)
+		check("Escape clears queued-only search", `!(`+noResults("active")+`)`)
+
 		b.click(`[data-kanban-search-toggle]`)
 		b.typeText("zzz")
 		b.waitFor("debounced no results", `String(`+noResults("backlog")+` && `+noResults("completed")+` && `+noResults("active")+`)`, "true")
