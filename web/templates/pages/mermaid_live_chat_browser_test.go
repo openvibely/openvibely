@@ -120,6 +120,8 @@ func TestBrowserFunctional_MermaidRendersAfterLiveChatCompletion(t *testing.T) {
 		{"list-marker fence inside", "```mermaid\nflowchart TD\n A[\"Start\n- ```\n\"] --> B[End]\n", "```\n\nAfter"},
 		// Markdown measures the closing fence from the list item's content, not the opening fence.
 		{"list fence indented from content", "1. Step one\n\n      ```mermaid\n      flowchart TD\n       A[\"Start\n         ```\n      \"] --> B[End]\n", "      ```\n\n2. Step two"},
+		{"lazy list line before fence", "1. Step one\ncontinued lazily\n\n    ```mermaid\n    flowchart TD\n     A[Start] --> B[End]\n", "    ```\n\n2. Step two"},
+		{"tab after list marker", "1.\t```mermaid\n    flowchart TD\n     A[Start] --> B[End]\n", "    ```\n\nAfter"},
 	}
 	for _, nc := range nested {
 		t.Run("nested fence "+nc.name, func(t *testing.T) {
