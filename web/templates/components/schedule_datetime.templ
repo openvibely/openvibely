@@ -240,6 +240,10 @@ templ ScheduleDateTime(value string) {
     write(state); calendar(state); timeColumns(state,true);
    }
   });
+  // Close before native menus open on press; leave their default action intact.
+  document.addEventListener('pointerdown',event=>{
+   if(active && !event.composedPath().includes(active.popup) && !event.composedPath().includes(active.input))close(active,false);
+  },true);
   window.addEventListener('resize',()=>{if(active)position(active);});
   document.addEventListener('scroll',event=>{if(active && !active.popup.contains(event.target))position(active);},true);
   document.addEventListener('close',event=>{if(active && event.target.contains(active.input))close(active,false);},true);
