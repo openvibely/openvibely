@@ -129,6 +129,10 @@ func TestChatInputRequestBrowserSurvivesModelMenuAndTranscriptSwaps(t *testing.T
 			if (!firstAnswerKept()) fail('first answer lost after changing the model');
 
 			var pid = document.getElementById('chat-page-root').getAttribute('data-project-id');
+			var originalCard = cardPresent();
+			var inputFetches = 0;
+			var realFetch = window.fetch;
+			window.fetch = function(url) { if (String(url).indexOf('/chat/input-requests') !== -1) inputFetches++; return realFetch.apply(this, arguments); };
 
 			// A transcript morph swap of chat-messages must restore the card.
 			await htmx.ajax('GET', '/chat?project_id=' + encodeURIComponent(pid), {target:'#chat-messages', select:'#chat-messages', swap:'morph:outerHTML'});
@@ -142,6 +146,8 @@ func TestChatInputRequestBrowserSurvivesModelMenuAndTranscriptSwaps(t *testing.T
 			await waitFor(cardVisible, 'card was not restored after a chat-page-root swap');
 			if (!cardAnswerable()) fail('restored card lost its answer options after chat-page-root swap');
 			await waitFor(firstAnswerKept, 'first answer lost after chat-page-root swap');
+			if (cardPresent() !== originalCard) fail('card was rebuilt instead of preserved across swaps');
+			if (inputFetches !== 0) fail('swaps refetched input requests instead of keeping server-rendered card');
 
 			await report('pass', 'input request survived model menu and transcript swaps');
 		} catch (error) {

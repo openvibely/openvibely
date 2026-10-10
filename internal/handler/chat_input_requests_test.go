@@ -367,11 +367,41 @@ func TestChatPageRendersInputRequestClientControls(t *testing.T) {
 	require.Contains(t, body, "chat_user_input_requested")
 	require.Contains(t, body, "renderChatInputRequest")
 	require.Contains(t, body, "[data-chat-input-option]")
-	require.Contains(t, body, "chat-input-option-btn")
-	require.Contains(t, body, "--btn-focus-scale', '1'")
-	require.Contains(t, body, "textContent = option.description")
-	require.NotContains(t, body, "innerHTML = option.description")
-	require.NotContains(t, body, "innerHTML = question.question")
+	require.Contains(t, body, "/chat/input-requests?format=html")
+	require.NotContains(t, body, "document.createElement('section')")
+}
+
+func TestChatPageServerRendersPendingInputRequestCard(t *testing.T) {
+	tc := NewTestContext(t)
+	project := tc.CreateProject().WithName("Server card").Build()
+	pending, err := tc.handler.chatInputRequests.create(project.ID, "exec-server", []chatInputRequestQuestion{{
+		ID:       "create",
+		Question: "<img src=x onerror=alert(1)> Create?",
+		Options:  []chatInputRequestOption{{Label: "Yes", Description: "Create <b>now</b>"}, {Label: "No", Description: "Skip"}},
+	}})
+	require.NoError(t, err)
+
+	for _, htmx := range []bool{false, true} {
+		client := tc.HTTP()
+		if htmx {
+			client = tc.HTMX()
+		}
+		body := client.Get("/chat?project_id=" + project.ID).Execute().Body.String()
+		require.Contains(t, body, `id="chat-input-request-`+pending.ID+`"`)
+		require.Contains(t, body, `data-chat-input-exec-id="exec-server"`)
+		require.Contains(t, body, `data-option-label="Yes"`)
+		require.Contains(t, body, "Recommended")
+		require.Contains(t, body, "&lt;img src=x onerror=alert(1)&gt; Create?")
+		require.NotContains(t, body, "<img src=x onerror")
+		require.NotContains(t, body, "<b>now</b>")
+	}
+
+	fragment := tc.HTTP().Get("/chat/input-requests?format=html&project_id=" + project.ID).Execute().Body.String()
+	require.Contains(t, fragment, `data-chat-input-request-id="`+pending.ID+`"`)
+
+	postInputRequestJSON(t, tc, "/chat/input-requests/"+pending.ID+"/answer", `{"project_id":"`+project.ID+`","answers":[{"question_id":"create","label":"Yes"}]}`, http.StatusOK)
+	body := tc.HTTP().Get("/chat?project_id=" + project.ID).Execute().Body.String()
+	require.NotContains(t, body, `id="chat-input-request-`+pending.ID+`"`)
 }
 
 func handlerToolDefNames(defs []llmcontracts.RuntimeToolDefinition) []string {

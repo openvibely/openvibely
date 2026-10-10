@@ -42,10 +42,10 @@ func TestBrowserFunctional_MermaidRendersAfterLiveChatCompletion(t *testing.T) {
 				executions = []models.Execution{{ID: execID, Status: models.ExecCompleted, PromptSent: "diagram", Output: output}}
 			}
 			if r.Header.Get("HX-Request") == "true" {
-				_, _ = w.Write([]byte(renderTerminalBrowserComponent(t, ChatContent(nil, executions, project.ID, nil, nil, false, false, 30))))
+				_, _ = w.Write([]byte(renderTerminalBrowserComponent(t, ChatContent(nil, executions, project.ID, nil, nil, nil, false, false, 30))))
 				return
 			}
-			document := renderTerminalBrowserComponent(t, Chat([]models.Project{project}, project.ID, nil, executions, nil, nil, false, false, 30))
+			document := renderTerminalBrowserComponent(t, Chat([]models.Project{project}, project.ID, nil, executions, nil, nil, nil, false, false, 30))
 			_, _ = w.Write([]byte(installTerminalBrowserPrelude(document)))
 		case "/chat/send":
 			phase.Store(1)

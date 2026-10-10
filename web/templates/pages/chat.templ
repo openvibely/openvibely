@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/web/templates/components"
 	"github.com/openvibely/openvibely/web/templates/layout"
@@ -34,9 +35,9 @@ func chatQueuedSteerEndpoint(input models.ThreadInput) string {
 }
 
 // Chat renders the full chat page with sidebar
-templ Chat(projects []models.Project, currentProjectID string, agents []models.LLMConfig, chatHistory []models.Execution, chatAttachments map[string][]models.ChatAttachment, pendingInputs []models.ThreadInput, latestPlanComplete bool, hasEarlier bool, windowLimit int, defaultAgentID ...string) {
+templ Chat(projects []models.Project, currentProjectID string, agents []models.LLMConfig, chatHistory []models.Execution, chatAttachments map[string][]models.ChatAttachment, pendingInputs []models.ThreadInput, inputRequests []*events.ChatInputRequestEvent, latestPlanComplete bool, hasEarlier bool, windowLimit int, defaultAgentID ...string) {
 	@layout.Base("Chat", projects, currentProjectID) {
-		@ChatContent(agents, chatHistory, currentProjectID, chatAttachments, pendingInputs, latestPlanComplete, hasEarlier, windowLimit, defaultAgentID...)
+		@ChatContent(agents, chatHistory, currentProjectID, chatAttachments, pendingInputs, inputRequests, latestPlanComplete, hasEarlier, windowLimit, defaultAgentID...)
 	}
 }
 
@@ -65,7 +66,7 @@ templ ChatEarlierMessages(chatHistory []models.Execution, chatAttachments map[st
 }
 
 // ChatContent renders just the chat content (for HTMX)
-templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, currentProjectID string, chatAttachments map[string][]models.ChatAttachment, pendingInputs []models.ThreadInput, latestPlanComplete bool, hasEarlier bool, windowLimit int, defaultAgentID ...string) {
+templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, currentProjectID string, chatAttachments map[string][]models.ChatAttachment, pendingInputs []models.ThreadInput, inputRequests []*events.ChatInputRequestEvent, latestPlanComplete bool, hasEarlier bool, windowLimit int, defaultAgentID ...string) {
 	<div id="chat-page-root" class="h-full flex flex-col min-w-0 max-w-full" data-project-id={ currentProjectID } data-chat-revision={ components.ChatTranscriptRevision(chatHistory, nil, currentProjectID) }>
 		@layout.PageTitle("Chat")
 		<div data-page-header class="mb-4 flex items-center justify-between">
@@ -105,7 +106,7 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 				if hasEarlier && len(chatHistory) > 0 {
 					@components.ChatEarlierMessagesLoader("chat-messages", "/chat?project_id="+currentProjectID+"&before="+chatHistory[0].ID+"&limit="+fmt.Sprintf("%d", windowLimit), windowLimit)
 				}
-				if len(chatHistory) == 0 && len(pendingInputs) == 0 {
+				if len(chatHistory) == 0 && len(pendingInputs) == 0 && len(chatInputRequestsWithoutExec(inputRequests, nil)) == 0 {
 					@components.ChatEmptyState("Start a conversation by typing a message below")
 				} else {
 					for _, exec := range chatHistory {
@@ -135,7 +136,13 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 							} else if exec.Status == models.ExecRunning {
 								@components.ChatBubbleStreamingResume("Assistant", exec.Output, exec.ID, "chat-messages", "")
 							}
+							for _, req := range chatInputRequestsForExec(inputRequests, exec.ID) {
+								@ChatInputRequestCard(req)
+							}
 						</div>
+					}
+					for _, req := range chatInputRequestsWithoutExec(inputRequests, chatHistory) {
+						@ChatInputRequestCard(req)
 					}
 					@components.PendingThreadInputRows(pendingInputs, chatQueuedSteerEndpoint)
 				}
@@ -1299,12 +1306,32 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 							});
 						};
 
+						function placeChatInputRequestCard(card) {
+							var chatMessages = document.getElementById('chat-messages');
+							if (!chatMessages) return;
+							var execId = card.getAttribute('data-chat-input-exec-id') || '';
+							var executionPair = execId ? document.getElementById('chat-execution-' + execId) : null;
+							var parent = executionPair || chatMessages;
+							if (card.parentElement === parent) return;
+							var emptyState = chatMessages.querySelector('.flex.flex-col.items-center.justify-center');
+							if (emptyState) emptyState.remove();
+							parent.appendChild(card);
+							var tracker = window._chatPageTracker;
+							if (window.chatAutoScroll && (!tracker || tracker.shouldAutoScroll())) window.chatAutoScroll.scrollToBottom(chatMessages, true);
+						}
+
+						function initChatInputRequestCards(scope) {
+							(scope || document).querySelectorAll('[data-chat-input-request-id]').forEach(function(card) {
+								if (card._chatInputInitialized) return;
+								card._chatInputInitialized = true;
+								showChatInputQuestion(card, applyChatInputDraft(card));
+							});
+						}
+
 						function renderChatInputRequest(data) {
 							var request = data.input_request || {};
 							var requestId = request.id || '';
 							if (!requestId) return;
-							var execId = data.exec_id || request.exec_id || '';
-							var executionPair = execId ? document.getElementById('chat-execution-' + execId) : null;
 							var existing = document.getElementById('chat-input-request-' + requestId);
 							if (request.completed) {
 								delete window._chatInputDrafts[requestId];
@@ -1312,139 +1339,10 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 								return;
 							}
 							if (existing) {
-								if (executionPair && existing.parentElement !== executionPair) executionPair.appendChild(existing);
+								placeChatInputRequestCard(existing);
 								return;
 							}
-							var questions = Array.isArray(request.questions) ? request.questions : [];
-							if (!questions.length) return;
-							var chatMessages = document.getElementById('chat-messages');
-							if (!chatMessages) return;
-							var emptyState = chatMessages.querySelector('.flex.flex-col.items-center.justify-center');
-							if (emptyState) emptyState.remove();
-							var card = document.createElement('section');
-							card.id = 'chat-input-request-' + requestId;
-							card.className = 'chat-input-request-card card shadow-lg';
-							card.setAttribute('data-chat-input-request-id', requestId);
-							card.setAttribute('aria-label', 'Input requested');
-							var body = document.createElement('div');
-							body.className = 'card-body gap-4 p-4';
-							var status = document.createElement('div');
-							status.className = 'text-sm font-medium hidden';
-							status.setAttribute('role', 'status');
-							status.setAttribute('aria-live', 'polite');
-							questions.forEach(function(question, index) {
-								var qid = question && question.id ? String(question.id) : '';
-								if (!qid) return;
-								var fieldset = document.createElement('fieldset');
-								fieldset.className = index === 0 ? 'space-y-2' : 'space-y-2 hidden';
-								fieldset.setAttribute('data-chat-input-question-id', qid);
-								fieldset.setAttribute('data-chat-input-question-index', String(index));
-								var legend = document.createElement('legend');
-								legend.className = 'text-xl font-semibold leading-snug';
-								legend.textContent = question.question || ('Question ' + (index + 1));
-								fieldset.appendChild(legend);
-								var options = Array.isArray(question.options) ? question.options : [];
-								options.forEach(function(option, optionIndex) {
-									var label = option && option.label ? String(option.label) : '';
-									if (!label) return;
-									var button = document.createElement('div');
-									button.className = 'chat-input-option-btn card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40 hover:shadow-md transition-all flex items-start justify-start h-auto min-h-0 w-full px-4 py-3 text-left normal-case';
-									button.style.setProperty('--btn-focus-scale', '1');
-									button.setAttribute('role', 'button');
-									button.setAttribute('tabindex', '0');
-									button.setAttribute('data-chat-input-option', 'true');
-									button.setAttribute('data-question-id', qid);
-									button.setAttribute('data-option-label', label);
-									button.setAttribute('aria-pressed', 'false');
-									var wrap = document.createElement('span');
-									wrap.className = 'flex min-w-0 flex-col items-start';
-									var labelLine = document.createElement('span');
-									labelLine.className = 'flex min-w-0 flex-wrap items-center gap-2';
-									var labelSpan = document.createElement('span');
-									labelSpan.className = 'font-medium';
-									labelSpan.textContent = label;
-									labelLine.appendChild(labelSpan);
-									if (optionIndex === 0) {
-										var recommendedBadge = document.createElement('span');
-										recommendedBadge.className = 'chat-input-recommended-badge';
-										recommendedBadge.textContent = 'Recommended';
-										labelLine.appendChild(recommendedBadge);
-									}
-									wrap.appendChild(labelLine);
-									var descSpan = document.createElement('span');
-									descSpan.className = 'text-xs opacity-70 whitespace-normal';
-									descSpan.textContent = option.description || '';
-									wrap.appendChild(descSpan);
-									button.appendChild(wrap);
-									fieldset.appendChild(button);
-								});
-								var customButton = document.createElement('div');
-								customButton.className = 'chat-input-option-btn card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40 hover:shadow-md transition-all flex items-start justify-start h-auto min-h-0 w-full px-4 py-3 text-left normal-case';
-								customButton.style.setProperty('--btn-focus-scale', '1');
-								customButton.setAttribute('role', 'button');
-								customButton.setAttribute('tabindex', '0');
-								customButton.setAttribute('data-chat-input-option', 'true');
-								customButton.setAttribute('data-chat-input-custom-option', 'true');
-								customButton.setAttribute('data-question-id', qid);
-								customButton.setAttribute('aria-pressed', 'false');
-								customButton.textContent = 'Something else';
-								var customWrap = document.createElement('div');
-								customWrap.className = 'hidden space-y-2 rounded-lg border border-base-300/70 p-3';
-								customWrap.setAttribute('data-chat-input-custom-wrap', 'true');
-								var customInput = document.createElement('textarea');
-								customInput.className = 'textarea textarea-bordered min-h-20 w-full';
-								customInput.maxLength = 2000;
-								customInput.placeholder = 'Type your answer';
-								customInput.setAttribute('data-chat-input-custom-answer', 'true');
-								customInput.setAttribute('aria-label', 'Custom answer');
-								customWrap.appendChild(customInput);
-								fieldset.appendChild(customButton);
-								fieldset.appendChild(customWrap);
-								body.appendChild(fieldset);
-							});
-							var recommendedActions = document.createElement('div');
-							recommendedActions.className = 'pt-1';
-							recommendedActions.setAttribute('data-chat-input-recommended-actions', 'true');
-							var recommended = document.createElement('div');
-							recommended.className = 'chat-input-option-btn chat-input-recommended-shortcut card bg-primary shadow-sm border border-primary cursor-pointer hover:shadow-md hover:border-primary transition-all inline-flex items-center justify-start h-auto min-h-0 w-fit max-w-full px-4 py-2 text-left font-normal normal-case';
-							recommended.style.setProperty('--btn-focus-scale', '1');
-							recommended.setAttribute('role', 'button');
-							recommended.setAttribute('tabindex', '0');
-							recommended.setAttribute('data-chat-input-nav', 'recommended');
-							recommended.setAttribute('aria-label', 'Use recommended answers and continue');
-							recommended.textContent = 'Recommended and move forward';
-							recommendedActions.appendChild(recommended);
-							var navigation = document.createElement('div');
-							navigation.className = 'flex justify-end text-sm text-base-content/60';
-							navigation.setAttribute('data-chat-input-navigation', 'true');
-							var position = document.createElement('span');
-							position.className = 'min-w-12 px-2 text-center';
-							position.setAttribute('data-chat-input-position', 'true');
-							var pager = document.createElement('div');
-							pager.className = 'flex items-center gap-2';
-							pager.setAttribute('data-chat-input-pager', 'true');
-							var previous = document.createElement('button');
-							previous.type = 'button';
-							previous.className = 'btn btn-ghost btn-sm';
-							previous.setAttribute('data-chat-input-nav', 'previous');
-							previous.setAttribute('aria-label', 'Previous question');
-							previous.textContent = 'Previous';
-							var next = document.createElement('button');
-							next.type = 'button';
-							next.className = 'btn btn-primary btn-sm';
-							next.setAttribute('data-chat-input-nav', 'next');
-							next.setAttribute('aria-label', 'Next question');
-							pager.appendChild(position);
-							pager.appendChild(previous);
-							pager.appendChild(next);
-							navigation.appendChild(pager);
-							body.appendChild(recommendedActions);
-							body.appendChild(navigation);
-							body.appendChild(status);
-							card.appendChild(body);
-(executionPair || chatMessages).appendChild(card);
-								showChatInputQuestion(card, applyChatInputDraft(card));							var tracker = window._chatPageTracker;
-							if (window.chatAutoScroll && (!tracker || tracker.shouldAutoScroll())) window.chatAutoScroll.scrollToBottom(chatMessages, true);
+							refreshChatInputRequests();
 						}
 
 						function showChatInputQuestion(card, index) {
@@ -1456,7 +1354,8 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 								group.classList.toggle('hidden', groupIndex !== nextIndex);
 							});
 								card.setAttribute('data-current-question-index', String(nextIndex));
-								saveChatInputDraft(card);							var position = card.querySelector('[data-chat-input-position]');
+								saveChatInputDraft(card);
+							var position = card.querySelector('[data-chat-input-position]');
 							if (position) position.textContent = (nextIndex + 1) + ' of ' + groups.length;
 							var previous = card.querySelector('[data-chat-input-nav="previous"]');
 							var next = card.querySelector('[data-chat-input-nav="next"], [data-chat-input-nav="submit"]');
@@ -1540,7 +1439,8 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 							if (!card || !fieldset || card.getAttribute('data-completed') === 'true' || card.getAttribute('data-submitted') === 'true') return;
 								var isCustom = button.hasAttribute('data-chat-input-custom-option');
 								markChatInputSelection(fieldset, button);
-								var status = card.querySelector('[role="status"]');							if (status) status.classList.add('hidden');
+								var status = card.querySelector('[role="status"]');
+								if (status) status.classList.add('hidden');
 							showChatInputQuestion(card, Number(card.getAttribute('data-current-question-index') || 0));
 							if (isCustom) {
 								var customInput = fieldset.querySelector('[data-chat-input-custom-answer]');
@@ -1562,7 +1462,7 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 							card.remove();
 						}
 
-						// Cards are rebuilt from server state after HTMX swaps; drafts keep unsubmitted picks.
+						// Swaps keep live cards via hx-preserve; drafts cover leaving Chat and coming back.
 						window._chatInputDrafts = window._chatInputDrafts || {};
 
 						function markChatInputSelection(fieldset, button) {
@@ -1619,16 +1519,20 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 							var root = document.getElementById('chat-page-root');
 							var pid = root ? root.getAttribute('data-project-id') : projectId;
 							if (!pid || typeof fetch === 'undefined') return Promise.resolve();
-							return fetch('/chat/input-requests?project_id=' + encodeURIComponent(pid), {headers: {'Accept': 'application/json'}}).then(function(resp) {
+							return fetch('/chat/input-requests?format=html&project_id=' + encodeURIComponent(pid)).then(function(resp) {
 								if (!resp.ok) throw new Error('HTTP ' + resp.status);
-								return resp.json();
-							}).then(function(payload) {
-								var requests = Array.isArray(payload.input_requests) ? payload.input_requests : [];
+								return resp.text();
+							}).then(function(html) {
+								var detached = document.createElement('template');
+								detached.innerHTML = html;
 								var activeRequestIDs = {};
-								requests.forEach(function(request) {
-									if (request && request.id) activeRequestIDs[String(request.id)] = true;
-									renderChatInputRequest({input_request: request});
+								detached.content.querySelectorAll('[data-chat-input-request-id]').forEach(function(card) {
+									var id = card.getAttribute('data-chat-input-request-id') || '';
+									activeRequestIDs[id] = true;
+									var existing = document.getElementById(card.id);
+									placeChatInputRequestCard(existing || card);
 								});
+								initChatInputRequestCards();
 								document.querySelectorAll('[data-chat-input-request-id]').forEach(function(card) {
 									var id = card.getAttribute('data-chat-input-request-id') || '';
 									if (!activeRequestIDs[id]) completeChatInputRequest(card);
@@ -1866,11 +1770,6 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 				// Also mark exec IDs from HTMX swaps to avoid duplicates after page updates.
 				var handleChatAfterSwap = function(event) {
 					var swapTarget = event.detail.target;
-					// A chat-messages swap arrives directly; a chat-page-root or
-					// main-content swap re-renders the transcript as a descendant.
-					// Input-request cards are client-only DOM absent from server HTML,
-					// so every one of these swaps wipes them and they must be rebuilt
-					// from saved server state regardless of which container swapped.
 					var swappedChatMessages = (swapTarget && swapTarget.id === 'chat-messages')
 						? swapTarget
 						: (swapTarget && swapTarget.querySelector ? swapTarget.querySelector('#chat-messages') : null);
@@ -1880,7 +1779,7 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 						swappedChatMessages.querySelectorAll('[data-exec-id]').forEach(function(el) {
 							window._chatKnownExecIds[el.getAttribute('data-exec-id')] = true;
 						});
-						refreshChatInputRequests();
+						initChatInputRequestCards(swappedChatMessages);
 					}
 					if (swapTarget && swapTarget.id === 'main-content' && !swapTarget.querySelector('#chat-page-root')) {
 						window.removeEventListener('sse-chat-live-event', handleSharedChatLiveEvent);
@@ -1949,7 +1848,7 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 					afterSwap: handleChatAfterSwap,
 					beforeSwap: handleChatBeforeSwap
 					};
-					refreshChatInputRequests();
+					initChatInputRequestCards();
 				window.restoreChatLiveEventHandlers = function() {
 					var handlers = window._chatLiveEventHandlers;
 					if (!handlers) return;
