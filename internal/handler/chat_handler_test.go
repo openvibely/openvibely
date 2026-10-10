@@ -4474,15 +4474,13 @@ func TestHandler_Chat_PlanCompletionPrompt_NewMessageSetsStreamingFlag(t *testin
 
 	steeredIdx := strings.Index(body, "if (eventType === 'chat_turn_steered') {")
 	require.NotEqual(t, -1, steeredIdx, "chat_turn_steered handler must exist")
-	steeredBody := body[steeredIdx : steeredIdx+3200]
-	assert.Contains(t, steeredBody, "ensureComposerPendingContainer",
-		"chat_turn_steered should render pending steering in the composer queue area")
+	steeredEnd := strings.Index(body[steeredIdx:], "if (eventType === 'chat_thread_input_applied'")
+	require.NotEqual(t, -1, steeredEnd)
+	steeredBody := body[steeredIdx : steeredIdx+steeredEnd]
+	assert.Contains(t, steeredBody, "refreshChatPendingInputs();",
+		"chat_turn_steered should reconcile the shared composer fragment")
 	assert.Contains(t, steeredBody, "data-thread-input-id",
-		"chat_turn_steered should render a pending steering input row")
-	assert.Contains(t, steeredBody, "Steering pending",
-		"chat_turn_steered should not render an assistant streaming bubble")
-	assert.Contains(t, steeredBody, "aria-label', 'Cancel pending steering'",
-		"chat_turn_steered should use the trash-icon cancel control")
+		"chat_turn_steered should guard against duplicate pending steering rows")
 	assert.NotContains(t, steeredBody, "createStreamingBubble(data.exec_id)",
 		"steering events must not create a new model stream bubble")
 }
@@ -4809,7 +4807,7 @@ func TestHandler_Chat_ReconnectRefreshSkipsWhileActiveStream(t *testing.T) {
 		"reconnect handler must leave active offset-aware streams mounted")
 	assert.Contains(t, onConnectBody, "function waitForChatCatchup()",
 		"reconnect handler must reconcile a queued promotion missed while the prior stream catches up")
-	assert.Contains(t, onConnectBody, "/chat/pending-inputs",
+	assert.Contains(t, onConnectBody, "refreshChatPendingInputs();",
 		"reconnect handler must refresh pending-inputs to reconcile stale steering rows")
 	assert.Contains(t, onConnectBody, "var currentRevision = chatContainer.getAttribute('data-chat-revision') || '';",
 		"reconnect handler must capture the current authoritative transcript revision")

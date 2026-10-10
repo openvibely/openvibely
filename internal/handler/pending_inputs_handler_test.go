@@ -9,13 +9,16 @@ package handler
 // UI without requiring a manual page refresh.
 
 import (
+	"bytes"
 	"context"
+	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/web/templates/components"
 	"github.com/stretchr/testify/require"
 )
 
@@ -426,5 +429,50 @@ func TestTaskThreadPendingInputs_SteerEndpointUsesTaskID(t *testing.T) {
 	expectedPath := "/tasks/" + task.ID + "/thread/queued/" + queued.ID + "/steer?expected_turn_id=" + exec.ID
 	if !strings.Contains(body, expectedPath) {
 		t.Errorf("task pending-inputs fragment must contain steer endpoint %q, got: %q", expectedPath, body)
+	}
+}
+
+func TestChatPendingInputs_SharedRowsAndProjectIsolation(t *testing.T) {
+	tc := NewTestContext(t)
+	ctx := context.Background()
+	project := tc.CreateProject().Build()
+	foreign := tc.CreateProject().Build()
+	agent, err := tc.llmConfigRepo.GetDefault(ctx)
+	require.NoError(t, err)
+	require.NotNil(t, agent)
+	for _, p := range []models.Project{*project, *foreign} {
+		task := tc.CreateTask(p.ID).WithCategory(models.CategoryChat).Build()
+		execution := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "active"}
+		require.NoError(t, tc.execRepo.Create(ctx, execution))
+		for _, mode := range []models.ThreadInputMode{models.ThreadInputModeQueued, models.ThreadInputModeSteering} {
+			for _, attachments := range []bool{false, true} {
+				input := &models.ThreadInput{Scope: models.ThreadInputScopeChat, ProjectID: p.ID, InputMode: mode, InputStatus: models.ThreadInputPending, Content: fmt.Sprintf("%s %s %t <preview>", p.ID, mode, attachments)}
+				if attachments {
+					input.AttachmentSessionID = "attachment-session"
+				}
+				if mode == models.ThreadInputModeQueued {
+					require.NoError(t, tc.handler.threadInputRepo.CreateQueued(ctx, input))
+				} else {
+					input.RunExecutionID = execution.ID
+					input.TurnID = execution.ID
+					input.ExpectedTurnID = execution.ID
+					require.NoError(t, tc.handler.threadInputRepo.CreateSteeringForActiveExecution(ctx, input, execution.ID))
+				}
+			}
+		}
+	}
+	inputs, err := tc.handler.threadInputRepo.ListPendingForChat(ctx, project.ID)
+	require.NoError(t, err)
+	require.Len(t, inputs, 4)
+	var expected bytes.Buffer
+	require.NoError(t, components.ChatComposerQueuedInputRows(inputs, func(input models.ThreadInput) string { return "/chat/queued/" + input.ID + "/steer" }).Render(ctx, &expected))
+	for i := 0; i < 2; i++ {
+		rec := tc.HTTP().Get("/chat/pending-inputs?project_id=" + project.ID).Execute()
+		tc.Assert(rec).StatusCode(http.StatusOK)
+		require.Equal(t, expected.String(), rec.Body.String())
+		require.NotContains(t, rec.Body.String(), foreign.ID)
+		for _, input := range inputs {
+			require.Equal(t, 1, strings.Count(rec.Body.String(), `id="thread-input-`+input.ID+`"`))
+		}
 	}
 }

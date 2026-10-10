@@ -1175,13 +1175,22 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 						return pendingContainer;
 					};
 
-					var createPendingAttachmentBadge = function(label, title) {
-						var badge = document.createElement('div');
-						badge.className = 'badge badge-ghost badge-sm shrink-0 gap-1 text-xs';
-						badge.title = title;
-						badge.setAttribute('aria-label', title);
-						badge.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.586-6.586a4 4 0 00-5.657-5.657L5.757 10.757a6 6 0 108.486 8.486L21 12.486"></path></svg><span>' + label + '</span>';
-						return badge;
+					var pendingInputsGeneration = 0;
+					var refreshChatPendingInputs = function() {
+						var generation = ++pendingInputsGeneration;
+						var root = document.getElementById('chat-page-root');
+						if (!root || root.getAttribute('data-project-id') !== projectId || typeof htmx === 'undefined') return;
+						return fetch('/chat/pending-inputs?project_id=' + encodeURIComponent(projectId), {headers: {'HX-Request': 'true'}}).then(function(response) {
+							if (!response.ok) throw new Error('HTTP ' + response.status);
+							return response.text();
+						}).then(function(html) {
+							// Discard responses superseded by another event or page navigation.
+							if (generation !== pendingInputsGeneration || document.getElementById('chat-page-root') !== root || root.getAttribute('data-project-id') !== projectId) return;
+							var target = ensureComposerPendingContainer();
+							if (target) htmx.swap(target, html, {swapStyle: 'outerHTML', swapDelay: 0, settleDelay: 0});
+						}).catch(function(err) {
+							console.error('[chat] pending-input reconciliation failed:', err);
+						});
 					};
 
 					window.syncChatTranscriptRevision = function(expectedExecID) {
@@ -1223,9 +1232,7 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 							refreshChatInputRequests();
 							// Pending rows have their own authoritative compact fragment and never
 							// require remounting transcript bubbles or the composer.
-							if (pid && document.getElementById('pending-thread-inputs') && typeof htmx !== 'undefined') {
-								htmx.ajax('GET', '/chat/pending-inputs?project_id=' + encodeURIComponent(pid), {target: '#pending-thread-inputs', swap: 'outerHTML'});
-							}
+							refreshChatPendingInputs();
 							// Known active executions catch up through their offset-aware stream.
 							if (window._chatStreamInProgress && hasActiveChatStream()) {
 								if (window.evaluatePlanCompletionPrompt) window.evaluatePlanCompletionPrompt();
@@ -1620,7 +1627,8 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 							});
 						}
 
-					var handleSharedChatLiveEvent = function(event) {						var data = event.detail || {};
+					var handleSharedChatLiveEvent = function(event) {
+						var data = event.detail || {};
 						var eventType = data.type || '';
 						if (data.project_id && data.project_id !== projectId) {
 							return;
@@ -1641,55 +1649,19 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 										return;
 									}
 
-										if (eventType === 'chat_turn_steered') {								var existingSteeringRow = document.querySelector('[data-thread-input-id="' + data.exec_id + '"]');
-								if (existingSteeringRow && existingSteeringRow.getAttribute('data-input-mode') === 'steering') return;
-								if (window._chatQueuedSteerInFlight && window._chatQueuedSteerInFlight[data.exec_id]) return;
-									if (data.source === 'web' && window._chatDirectSteerInFlight) return;
-									if (!existingSteeringRow && data.source === 'web' && window._chatWebSendInProgress) return;
-									if (window.hidePlanCompletionPrompt) window.hidePlanCompletionPrompt();
-								var pendingContainer = ensureComposerPendingContainer();
-								if (!pendingContainer) return;
-								if (existingSteeringRow) existingSteeringRow.remove();
-								var steeringRow = document.createElement('div');							steeringRow.id = 'thread-input-' + data.exec_id;
-							steeringRow.className = 'steering-input-row flex min-h-8 items-center gap-3 rounded-lg bg-base-300/45 px-3 py-1.5 text-sm text-base-content/80';
-							steeringRow.setAttribute('data-thread-input-id', data.exec_id);
-							steeringRow.setAttribute('data-input-mode', 'steering');
-							steeringRow.title = 'Steering instruction will be applied before the active run\'s next model step';
-							var content = document.createElement('div');
-							content.className = 'min-w-0 flex-1';
-							content.innerHTML = '<div class="text-xs font-semibold opacity-70">Steering pending</div>';
-							var preview = document.createElement('div');
-							preview.className = 'truncate';
-							preview.textContent = data.message || '';
-						preview.setAttribute('data-pending-input-content', '');
-							content.appendChild(preview);
-							var hint = document.createElement('div');
-							hint.className = 'text-xs opacity-60';
-							hint.textContent = 'Will be applied before the active run\'s next model step.';
-							content.appendChild(hint);
-							var actionWrap = document.createElement('div');
-							actionWrap.className = 'ml-auto flex shrink-0 items-center gap-2';
-							var cancelSteeringBtn = document.createElement('button');
-							cancelSteeringBtn.type = 'button';
-							cancelSteeringBtn.className = 'btn btn-ghost btn-xs h-6 min-h-0 rounded-md px-2 text-xs text-error';
-							cancelSteeringBtn.setAttribute('hx-post', '/thread-inputs/' + data.exec_id + '/cancel');
-							cancelSteeringBtn.setAttribute('hx-target', '#thread-input-' + data.exec_id);
-							cancelSteeringBtn.setAttribute('hx-swap', 'outerHTML');
-							cancelSteeringBtn.setAttribute('data-tooltip-disabled', '');
-							cancelSteeringBtn.setAttribute('aria-label', 'Cancel pending steering');
-							cancelSteeringBtn.setAttribute('aria-label', 'Cancel pending steering');
-							cancelSteeringBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>';
-							window.appendPendingThreadInputEditButton(actionWrap);
-						actionWrap.appendChild(cancelSteeringBtn);
-								steeringRow.appendChild(content);
-								if (data.has_attachments) steeringRow.appendChild(createPendingAttachmentBadge('Attachments included', 'Attachments included with this steering instruction'));
-								steeringRow.appendChild(actionWrap);							pendingContainer.appendChild(steeringRow);
-							// CSS handles bottom padding while pending rows exist.
-							if (window.htmx) htmx.process(steeringRow);
+						if (eventType === 'chat_turn_steered') {
+							var existingSteeringRow = document.querySelector('[data-thread-input-id="' + data.exec_id + '"]');
+							if (existingSteeringRow && existingSteeringRow.getAttribute('data-input-mode') === 'steering') return;
+							if (window._chatQueuedSteerInFlight && window._chatQueuedSteerInFlight[data.exec_id]) return;
+							if (data.source === 'web' && window._chatDirectSteerInFlight) return;
+							if (!existingSteeringRow && data.source === 'web' && window._chatWebSendInProgress) return;
+							if (window.hidePlanCompletionPrompt) window.hidePlanCompletionPrompt();
+							refreshChatPendingInputs();
 							return;
 						}
 
 								if (eventType === 'chat_thread_input_applied' || eventType === 'chat_thread_input_cancelled') {
+									refreshChatPendingInputs();
 									if (data.pending_input_id) {
 										var appliedRow = document.getElementById('thread-input-' + data.pending_input_id);
 										if (appliedRow) {
@@ -1718,6 +1690,9 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 								if (data.queued) {
 									if (document.querySelector('[data-thread-input-id="' + data.exec_id + '"]')) return;
 									if (data.source === 'web' && window._chatWebSendInProgress) return;
+									if (window.hidePlanCompletionPrompt) window.hidePlanCompletionPrompt();
+									refreshChatPendingInputs();
+									return;
 								} else {
 									// Skip duplicates: map guard + DOM guard for timing races
 									// between HTMX send swap and live SSE delivery.
@@ -1737,6 +1712,7 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 								var chatMessages = document.getElementById('chat-messages');
 								if (!chatMessages) return;
 								if (!data.queued && data.pending_input_id) {
+									refreshChatPendingInputs();
 										var pendingRow = document.getElementById('thread-input-' + data.pending_input_id);
 										if (pendingRow) {
 											pendingRow.remove();
@@ -1748,49 +1724,7 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 							var emptyState = chatMessages.querySelector('.flex.flex-col.items-center.justify-center');
 							if (emptyState) emptyState.remove();
 
-									if (data.queued) {
-										if (document.querySelector('[data-thread-input-id="' + data.exec_id + '"]')) return;
-										var pendingContainer = ensureComposerPendingContainer();
-										if (!pendingContainer) return;
-										var queuedRow = document.createElement('div');
-										queuedRow.id = 'thread-input-' + data.exec_id;
-										queuedRow.className = 'queued-input-row flex min-h-8 items-center gap-3 rounded-lg bg-base-300/45 px-3 py-1.5 text-sm text-base-content/80';
-										queuedRow.setAttribute('data-thread-input-id', data.exec_id);
-										queuedRow.setAttribute('data-input-mode', 'queued');
-										queuedRow.title = 'Queued follow-up will run after the active response finishes';
-										var queuedPreview = document.createElement('div');
-										queuedPreview.className = 'min-w-0 flex-1 truncate';
-										queuedPreview.textContent = data.message || '';
-										queuedPreview.setAttribute('data-pending-input-content', '');
-										var actionWrap = document.createElement('div');
-										actionWrap.className = 'ml-auto flex shrink-0 items-center gap-2';
-										var steerBtn = document.createElement('button');
-										steerBtn.type = 'button';
-										steerBtn.className = 'btn btn-ghost btn-xs h-6 min-h-0 rounded-md px-2 text-sm font-normal';
-										steerBtn.setAttribute('hx-post', '/chat/queued/' + data.exec_id + '/steer');
-										steerBtn.setAttribute('hx-target', '#thread-input-' + data.exec_id);
-										steerBtn.setAttribute('hx-swap', 'outerHTML');
-										steerBtn.title = 'Convert queued follow-up to steering';
-										steerBtn.textContent = 'Steer';
-										var cancelBtn = document.createElement('button');
-										cancelBtn.type = 'button';
-										cancelBtn.className = 'btn btn-ghost btn-xs h-6 min-h-0 rounded-md px-2 text-xs text-error';
-										cancelBtn.setAttribute('hx-post', '/thread-inputs/' + data.exec_id + '/cancel');
-										cancelBtn.setAttribute('hx-target', '#thread-input-' + data.exec_id);
-										cancelBtn.setAttribute('hx-swap', 'outerHTML');
-										cancelBtn.setAttribute('data-tooltip-disabled', '');
-										cancelBtn.setAttribute('aria-label', 'Cancel pending steering');
-											cancelBtn.setAttribute('aria-label', 'Cancel queued follow-up');
-											cancelBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>';										actionWrap.appendChild(steerBtn);
-										window.appendPendingThreadInputEditButton(actionWrap);
-						actionWrap.appendChild(cancelBtn);
-										queuedRow.appendChild(queuedPreview);
-										if (data.has_attachments) queuedRow.appendChild(createPendingAttachmentBadge('Attachments queued', 'Attachments queued with this follow-up'));
-										queuedRow.appendChild(actionWrap);
-										pendingContainer.appendChild(queuedRow);
-										// CSS handles bottom padding while pending rows exist.
-										if (window.htmx) htmx.process(queuedRow);
-									} else {								// Append user bubble and streaming assistant for a real running turn.
+									// Append user bubble and streaming assistant for a real running turn.
 									var pair = document.createElement('div');
 									pair.id = 'chat-execution-' + data.exec_id;
 									pair.className = 'chat-execution-pair space-y-6';
@@ -1803,7 +1737,7 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 									if (window.refreshChatComposerAction) window.refreshChatComposerAction();
 									window.syncChatTranscriptRevision(data.exec_id);
 									if (window.pruneChatExecutionWindow) window.pruneChatExecutionWindow(chatMessages);
-								}
+
 							// Scroll to bottom (respect user scroll position)
 							var tracker = window._chatPageTracker;
 							if (window.chatAutoScroll && (!tracker || tracker.shouldAutoScroll())) {
