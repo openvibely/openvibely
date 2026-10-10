@@ -362,7 +362,14 @@ func (h *Handler) CreateProject(c echo.Context) error {
 				_ = h.projectSvc.Delete(c.Request().Context(), p.ID)
 				return h.projectErrorResponse(c, http.StatusBadRequest, errMsg)
 			}
-			if strings.Contains(dirPath, "..") {
+			traversal := false
+			for _, seg := range strings.Split(dirPath, string(filepath.Separator)) {
+				if seg == ".." {
+					traversal = true
+					break
+				}
+			}
+			if traversal {
 				errMsg := "Repository path must not contain '..'"
 				applog.Infof("[handler] CreateProject error: %s", errMsg)
 				_ = h.projectSvc.Delete(c.Request().Context(), p.ID)

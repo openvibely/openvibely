@@ -5409,6 +5409,7 @@ func TestHandler_CreateProject_DirectoryVariations(t *testing.T) {
 		wantBody       string
 	}{
 		{"creates_nested_dir", func(t *testing.T) string { return filepath.Join(t.TempDir(), "new", "nested") }, true, http.StatusSeeOther, boolPtr(true), ""},
+		{"dir_name_with_double_dot_ok", func(t *testing.T) string { return filepath.Join(t.TempDir(), "release..archive") }, true, http.StatusSeeOther, boolPtr(true), ""},
 		{"disabled_no_create", func(t *testing.T) string { return filepath.Join(t.TempDir(), "should-not-exist") }, false, http.StatusSeeOther, boolPtr(false), ""},
 		{"relative_path_rejected", func(t *testing.T) string { return "relative/path" }, true, http.StatusBadRequest, nil, "absolute path"},
 		{"empty_path_ok", func(t *testing.T) string { return "" }, true, http.StatusSeeOther, nil, ""},
