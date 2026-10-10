@@ -47,6 +47,10 @@ func TestChatInputRequestBrowserSurvivesModelMenuAndTranscriptSwaps(t *testing.T
 		ID:       "continue",
 		Question: "Continue?",
 		Options:  []chatInputRequestOption{{Label: "Yes", Description: "Continue"}, {Label: "No", Description: "Stop"}},
+	}, {
+		ID:       "scope",
+		Question: "Scope?",
+		Options:  []chatInputRequestOption{{Label: "Small", Description: "Minimal"}, {Label: "Large", Description: "Broad"}},
 	}})
 	require.NoError(t, err)
 
@@ -58,7 +62,7 @@ func TestChatInputRequestBrowserSurvivesModelMenuAndTranscriptSwaps(t *testing.T
 			"id":         pending.ID,
 			"exec_id":    runningExec.ID,
 			"expires_at": pending.ExpiresAt.UTC().Format(time.RFC3339),
-			"questions":  []map[string]any{{"id": "continue", "question": "Continue?", "options": []map[string]string{{"label": "Yes", "description": "Continue"}, {"label": "No", "description": "Stop"}}}},
+			"questions":  []map[string]any{{"id": "continue", "question": "Continue?", "options": []map[string]string{{"label": "Yes", "description": "Continue"}, {"label": "No", "description": "Stop"}}}, {"id": "scope", "question": "Scope?", "options": []map[string]string{{"label": "Small", "description": "Minimal"}, {"label": "Large", "description": "Broad"}}}},
 		},
 	}
 	eventJSON, err := json.Marshal(requestEvent)
@@ -81,10 +85,21 @@ func TestChatInputRequestBrowserSurvivesModelMenuAndTranscriptSwaps(t *testing.T
 		function cardPresent() { return document.querySelector('[data-chat-input-request-id="%s"]'); }
 		function cardVisible() { var c = cardPresent(); return c && getComputedStyle(c).visibility !== 'hidden' && c.getClientRects().length > 0; }
 		function cardAnswerable() { var c = cardPresent(); return c && c.querySelectorAll('[data-chat-input-option]').length >= 2; }
+		function firstAnswerKept() {
+			var c = cardPresent();
+			var g = c && c.querySelector('[data-chat-input-question-id="continue"]');
+			var b = g && g.querySelector('[data-option-label="No"]');
+			return g && g.getAttribute('data-selected-label') === 'No' && b && b.getAttribute('aria-pressed') === 'true' && c.getAttribute('data-current-question-index') === '1';
+		}
 		try {
 			window.dispatchEvent(new CustomEvent('sse-chat-live-event', {detail: %s}));
 			await waitFor(cardPresent, 'input request card did not render');
 			await waitFor(cardVisible, 'card never became visible after initial hydration');
+
+			var noOption = cardPresent().querySelector('[data-chat-input-question-id="continue"] [data-option-label="No"]');
+			if (!noOption) fail('first question option missing');
+			noOption.click();
+			await waitFor(firstAnswerKept, 'first answer was not selected');
 
 			var modelButton = document.querySelector('form.chat-input-container .chat-model-select');
 			if (!modelButton) fail('model selector button missing');
@@ -111,6 +126,7 @@ func TestChatInputRequestBrowserSurvivesModelMenuAndTranscriptSwaps(t *testing.T
 			await new Promise(function(resolve) { setTimeout(resolve, 250); });
 			if (!cardVisible()) fail('input request card hidden after changing the model');
 			if (!cardAnswerable()) fail('card lost its answer options after changing the model');
+			if (!firstAnswerKept()) fail('first answer lost after changing the model');
 
 			var pid = document.getElementById('chat-page-root').getAttribute('data-project-id');
 
@@ -118,12 +134,14 @@ func TestChatInputRequestBrowserSurvivesModelMenuAndTranscriptSwaps(t *testing.T
 			await htmx.ajax('GET', '/chat?project_id=' + encodeURIComponent(pid), {target:'#chat-messages', select:'#chat-messages', swap:'morph:outerHTML'});
 			await waitFor(cardVisible, 'card was not restored after a chat-messages transcript swap');
 			if (!cardAnswerable()) fail('restored card lost its answer options after chat-messages swap');
+			await waitFor(firstAnswerKept, 'first answer lost after chat-messages swap');
 
 			// A chat-page-root swap (full content re-render) must also restore it;
 			// this is the swap target that previously dropped the card for good.
 			await htmx.ajax('GET', '/chat?project_id=' + encodeURIComponent(pid), {target:'#chat-page-root', select:'#chat-page-root', swap:'morph:outerHTML'});
 			await waitFor(cardVisible, 'card was not restored after a chat-page-root swap');
 			if (!cardAnswerable()) fail('restored card lost its answer options after chat-page-root swap');
+			await waitFor(firstAnswerKept, 'first answer lost after chat-page-root swap');
 
 			await report('pass', 'input request survived model menu and transcript swaps');
 		} catch (error) {
