@@ -423,14 +423,14 @@ func (h *Handler) initiateOAuthForConfig(c echo.Context, agent *models.LLMConfig
 		authURLFull += "&originator=" + url.QueryEscape(openAIOriginator)
 	}
 
-	if setupID != "" {
+	if setupID != "" || c.Request().Header.Get("Accept") == "application/json" {
 		if h.desktopMode {
 			if err := openOAuthURL(authURLFull); err != nil {
 				return echo.NewHTTPError(http.StatusBadGateway, "failed to open system browser")
 			}
 		}
 		c.Response().Header().Set("Cache-Control", "no-store")
-		return c.JSON(http.StatusOK, map[string]any{"session_id": setupID, "authorization_url": authURLFull, "opened": h.desktopMode})
+		return c.JSON(http.StatusOK, map[string]any{"session_id": setupID, "authorization_url": authURLFull, "opened": h.desktopMode, "connection_id": agent.OAuthConnectionID, "revision": fmt.Sprint(agent.OAuthConfigRevision)})
 	}
 
 	applog.Infof("[handler] OAuthInitiate redirecting to OAuth for config=%s provider=%s callback=%s port=%d public_callback=%t", id, agent.Provider, redirectURI, portForLog, usePublicCallback)
@@ -1023,8 +1023,11 @@ func (h *Handler) OAuthStatus(c echo.Context) error {
 		}
 	}
 
+	c.Response().Header().Set("Cache-Control", "no-store")
 	return c.JSON(http.StatusOK, map[string]string{
-		"status": status,
+		"connection_id": agent.OAuthConnectionID,
+		"revision":      fmt.Sprint(agent.OAuthConfigRevision),
+		"status":        status,
 	})
 }
 

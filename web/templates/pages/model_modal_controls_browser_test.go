@@ -521,3 +521,65 @@ func TestBrowserFunctional_ModelModalSections(t *testing.T) {
     </script>`
 	runReconnectChromeFixture(t, fixture)
 }
+
+func TestBrowserFunctional_BuiltInOAuthInsideModelModal(t *testing.T) {
+	t.Setenv("OAUTH_REDIRECT_MODE", "localhost_manual")
+	var content bytes.Buffer
+	if err := ModelsContent(nil, nil, false).Render(context.Background(), &content); err != nil {
+		t.Fatal(err)
+	}
+	fixture := `<main id="reconnect-result"></main><script>
+ window.htmx={process:function(){}};
+ var requests=[], revision=0, opened=0, failSave=false;
+ window.open=function(){opened++;return {location:{href:''},close:function(){}};};
+ window.fetch=function(url,options){
+  options=options||{};requests.push({url:url,options:options});
+  var data={},ok=true;
+  if(url==='/models') {data=failSave?{message:'Save rejected'}:{id:'saved-model',oauth_connection_id:'saved-account'};ok=!failSave;}
+  else if(url.includes('/oauth/initiate'))data={authorization_url:'https://auth.example/authorize',opened:false,revision:String(revision),connection_id:'saved-account'};
+  else if(url.includes('/oauth/status'))data={status:revision?'connected':'not_connected',revision:String(revision),connection_id:'saved-account'};
+  else if(url.includes('/oauth/manual-complete')){revision++;data={status:'connected'};}
+  else return Promise.reject(Error('Unexpected request '+url));
+  return Promise.resolve({ok:ok,json:function(){return Promise.resolve(data);}});
+ };
+ </script>` + content.String() + `<script>
+ (async function(){var f=function(id){return document.getElementById(id);};
+ var assert=function(ok,msg){if(!ok)throw Error(msg);};
+ var wait=function(ms){return new Promise(function(resolve){setTimeout(resolve,ms);});};
+ try {
+  openNewModelModal();f('model_name').value='Modal model';
+  f('model_anthropic_auth_type').value='oauth';toggleAnthropicAuthFields();
+  assert(!f('model_oauth_connection_action').classList.contains('hidden'),'new model has connect action');
+  failSave=true;await saveAndConnectModelOAuth(f('model_oauth_connect_action'));
+  assert(f('model_form_error_message').textContent==='Save rejected' && !f('model_submit_btn').disabled,'save error is recoverable');
+  assert(!requests.some(function(r){return r.url.includes('/oauth/initiate');}),'failed save must not initiate');
+  failSave=false;
+  var flow=saveAndConnectModelOAuth(f('model_oauth_connect_action'));await wait(50);
+  assert(f('new_model_modal').open && f('model_config_id').value==='saved-model','save keeps modal open with saved identity');
+  assert(f('model_provider').disabled && f('model_submit_btn').disabled && !f('model_oauth_callback_url').disabled,'conflicting actions locked; callback usable');
+  var save=requests.filter(function(r){return r.url==='/models';}).pop();
+  assert(save.options.body.get('provider')==='anthropic' && save.options.body.get('auth_method')==='oauth','saved provider/auth match form');
+  assert(f('model_oauth_connection_id').value==='saved-account','saved account selected for subsequent updates');
+  f('model_oauth_callback_url').value='http://localhost:1455/auth/callback?code=test&state=test';
+  submitOAuthManualComplete('model_oauth_callback_url');await flow;
+  assert(f('new_model_modal').open && f('model_oauth_connection_status').textContent.startsWith('Connected.'),'manual completion stays in modal and shows connected');
+  assert(!f('model_submit_btn').disabled && !f('model_oauth_callback_url').value,'controls restored and callback cleared');
+  assert(f('model_form').dataset.mode==='edit' && f('model_submit_btn').textContent==='Save','new form becomes edit without duplicate create');
+  var reconnect=saveAndConnectModelOAuth(f('model_oauth_connect_action'));await wait(50);
+  assert(f('model_submit_btn').disabled && !f('model_oauth_connection_status').textContent.startsWith('Connected.'),'reconnect must not accept pre-existing valid token');
+  save=requests.filter(function(r){return r.url==='/models';}).pop();
+  assert(save.options.body.get('model_config_id')==='saved-model' && save.options.body.get('oauth_connection_id')==='saved-account','reconnect saves same model/account');
+  revision++;await reconnect;
+  assert(f('model_oauth_connection_status').textContent.startsWith('Connected.'),'automatic callback detected');
+  var cancelled=saveAndConnectModelOAuth(f('model_oauth_connect_action'));await wait(50);
+  f('model_oauth_stop_waiting').click();await cancelled;
+  assert(!f('model_submit_btn').disabled,'stopping polling restores settings');
+  f('new_model_modal').dataset.oauthSaved='';closeModelModal();
+  openNewModelModal();f('model_provider').value='openai';toggleProviderFields();
+  f('model_openai_auth_type').value='oauth';toggleOpenAIAuthFields();
+  assert(!f('model_oauth_connection_action').classList.contains('hidden'),'OpenAI offers same modal connection flow');
+  f('reconnect-result').setAttribute('data-test-result','pass');
+ }catch(e){f('reconnect-result').setAttribute('data-test-result','fail');f('reconnect-result').setAttribute('data-test-error',String(e.stack));}
+ })();</script>`
+	runReconnectChromeFixture(t, fixture)
+}
