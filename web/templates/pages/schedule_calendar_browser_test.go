@@ -73,7 +73,7 @@ func testScheduleCalendarHeader(t *testing.T, paused, mobile bool) {
    check(root.querySelector('.drop-zone').dataset.ovTooltip==='Select schedules (Drag empty space)','calendar space explains box selection');
    check(toolbar.querySelector('[data-calendar-action="clear"]').dataset.ovTooltip==='Clear selection (Esc)','clear hover explains escape shortcut');
 
-   hintCard.dispatchEvent(new PointerEvent('pointerover',{bubbles:true}));
+   hintCard.dispatchEvent(new PointerEvent('pointerover',{bubbles:true}));await new Promise(resolve=>setTimeout(resolve,450));
    check(document.querySelector('#ov-shared-tooltip kbd').textContent===modifier+'+click','schedule hints use shared key badge');
    window.openVibelyTooltip.close();
    var menu=root.querySelector('#schedule-project-menu');

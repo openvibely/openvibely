@@ -576,7 +576,7 @@ func TestSidebar_CollapseToggleAccessibilityAndA11ySync(t *testing.T) {
 	requiredScriptSnippets := []string{
 		"function updateSidebarToggleA11y(isCollapsed)",
 		"btn.setAttribute('aria-expanded', isCollapsed ? 'false' : 'true');",
-		"btn.setAttribute('data-tip', isCollapsed ? 'Expand sidebar' : 'Collapse sidebar');",
+		"btn.setAttribute('data-tip', (isCollapsed ? 'Expand sidebar' : 'Collapse sidebar') + ' (' + (/Mac|iPhone|iPad/.test(navigator.platform) ? '⌘B' : 'Ctrl+B') + ')');",
 		"updateSidebarToggleA11y(collapsed);",
 	}
 	for _, snippet := range requiredScriptSnippets {

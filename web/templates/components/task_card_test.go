@@ -622,7 +622,7 @@ func TestTaskCard_RendersPersistentAccessibleStateIconBeforeTitle(t *testing.T) 
 					t.Fatalf("expected accessible state icon markup %q, got %s", want, body)
 				}
 			}
-			if strings.Contains(body, `data-tip=`) || strings.Contains(body, `title=`) {
+			if strings.Contains(body, `data-tip=`) || strings.Contains(body, ` title=`) {
 				t.Fatalf("state icon must not show a tooltip, got %s", body)
 			}
 			if !strings.Contains(body, `</span><span data-task-title class="min-w-0 flex-1 break-words sm:truncate">State title</span>`) {

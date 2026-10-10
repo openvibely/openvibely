@@ -307,7 +307,7 @@ window.addEventListener('DOMContentLoaded', function() {
       if (Math.abs(box.height - 20) > 1 || box.right > entry.getBoundingClientRect().right+1) fail('badge must stay one line within entry');
       if (css.whiteSpace !== 'nowrap' || css.textOverflow !== 'ellipsis' || css.overflow !== 'hidden') fail('badge must truncate with ellipsis');
       if (badge.classList.contains('badge-outline')) {
-        if (badge.title !== badge.textContent) fail('full evidence must remain available on hover');
+        if ((badge.dataset.ovTooltip || badge.title) !== badge.textContent) fail('full evidence must remain available on hover');
         if (badge.scrollWidth > badge.clientWidth) truncated = true;
       }
     });

@@ -653,10 +653,6 @@ func modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, o
 			templ_7745c5c3_Var17 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templateui.Tooltips().Render(ctx, templ_7745c5c3_Buffer)
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
 		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, "<div id=\"models-container\" data-search-container hx-history=\"false\" data-built-in-models=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
@@ -664,7 +660,7 @@ func modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, o
 		var templ_7745c5c3_Var18 string
 		templ_7745c5c3_Var18, templ_7745c5c3_Err = templ.ResolveAttributeValue(builtInModelOptionsJSON())
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 275, Col: 118}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 274, Col: 118}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var18)
 		if templ_7745c5c3_Err != nil {
@@ -677,7 +673,7 @@ func modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, o
 		var templ_7745c5c3_Var19 string
 		templ_7745c5c3_Var19, templ_7745c5c3_Err = templ.ResolveAttributeValue(CardListURL("models", state))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 275, Col: 202}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 274, Col: 202}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var19)
 		if templ_7745c5c3_Err != nil {
@@ -690,13 +686,17 @@ func modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, o
 		var templ_7745c5c3_Var20 string
 		templ_7745c5c3_Var20, templ_7745c5c3_Err = templ.ResolveAttributeValue(cardPaginationHasMoreAttribute(hasMore))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 275, Col: 452}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 274, Col: 452}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var20)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, "\">")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templateui.Tooltips().Render(ctx, templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

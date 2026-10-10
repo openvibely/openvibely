@@ -1196,7 +1196,7 @@ func TestAutomationLiveActionsUsePrimaryButtonsAndBreadcrumbKebab(t *testing.T) 
 			t.Errorf("expected Live Automation breadcrumb header to contain %q", want)
 		}
 	}
-	if !(strings.Index(cardHeader, `data-automation-view-graph`) < strings.Index(cardHeader, `data-automation-view-details`) && strings.Index(cardHeader, `data-automation-view-details`) < strings.Index(cardHeader, `data-automation-view-yaml`) && strings.Index(breadcrumbHeader, `data-automation-live-edit`) < strings.Index(breadcrumbHeader, `data-automation-live-run-now`) && strings.Index(breadcrumbHeader, `data-automation-live-run-now`) < strings.Index(breadcrumbHeader, `data-automation-live-menu`)) {
+	if !(strings.Index(cardHeader, `data-automation-view-graph`) < strings.Index(cardHeader, `data-automation-view-details`) && strings.Index(cardHeader, `data-automation-view-details`) < strings.Index(cardHeader, `data-automation-view-yaml`) && strings.Index(breadcrumbHeader, `data-automation-live-edit`) < strings.Index(breadcrumbHeader, `data-automation-live-run-now`) && strings.Index(breadcrumbHeader, `data-automation-live-run-now`) < strings.Index(breadcrumbHeader, ` data-automation-live-menu`)) {
 		t.Error("expected Live breadcrumb actions in Edit, Run, then kebab order")
 	}
 	liveSwitcherStart := strings.Index(cardHeader, `data-automation-view-switcher`)

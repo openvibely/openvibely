@@ -498,7 +498,7 @@ func TestHandler_ListTasks_HTMXUpdate_ShowsAgentDefinitionBadge(t *testing.T) {
 	}
 
 	body := rec.Body.String()
-	if !strings.Contains(body, `title="Assigned agent: Reviewer Bot"`) {
+	if !strings.Contains(body, `class="badge badge-sm badge-outline">Reviewer Bot</span>`) {
 		t.Errorf("expected kanban card to include agent definition badge, body=%s", body)
 	}
 }

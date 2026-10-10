@@ -1412,7 +1412,7 @@ func TestBrowserFunctional_TaskCardStateIconStaysVisibleWithLongTitleAtMobileWid
 	  function report(status, message) { return fetch('/browser-result?status=' + encodeURIComponent(status) + '&message=' + encodeURIComponent(message || ''), {method:'POST'}); }
 	  try {
 	    var card = document.getElementById('task-mobile-merged');
-	    var link = card && card.querySelector('a[title]');
+	    var link = card && card.querySelector('a.task-card-title-link');
 	    var icon = card && card.querySelector('[data-task-state-icon]');
 	    var title = card && card.querySelector('[data-task-title]');
 	    if (!card || !link || !icon || !title) throw new Error('missing mobile task title state markup');
