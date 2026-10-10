@@ -54,6 +54,10 @@ func TestBrowserFunctional_NewTaskTitleDraftRestoredFromProjectHistory(t *testin
 			}
 			<-r.Context().Done()
 		case "/tasks":
+			if r.Method == http.MethodPost {
+				w.WriteHeader(http.StatusNoContent) // Model setup guard: no task created.
+				return
+			}
 			project := projectByID(r.URL.Query().Get("project_id"))
 			if r.Header.Get("HX-Request") == "true" {
 				fmt.Fprint(w, render(TasksContent(project, nil, nil, nil, "", "")))
@@ -140,7 +144,17 @@ func TestBrowserFunctional_NewTaskTitleDraftRestoredFromProjectHistory(t *testin
 		b.evaluate(`(function(){var form=document.getElementById('task-thread-form');form.dispatchEvent(new CustomEvent('htmx:afterRequest',{bubbles:true,detail:{elt:form,successful:false,xhr:{status:500}}}));return 'failed request dispatched';})()`)
 		b.waitFor("failed create keeps its title draft", `sessionStorage.getItem('openvibely.new-task-title.title-project-b')`, "Project B draft")
 		b.waitFor("failed create keeps composer", `JSON.parse(sessionStorage.getItem('openvibely.new-task-composer.title-project-b')).message`, "Project B message")
-		b.evaluate(`(function(){var form=document.getElementById('task-thread-form');form.dispatchEvent(new CustomEvent('htmx:afterRequest',{bubbles:true,detail:{elt:form,successful:true,xhr:{status:200}}}));return 'successful request dispatched';})()`)
+		if got := b.evaluateAwait(`new Promise(function(resolve){var form=document.getElementById('task-thread-form');form.addEventListener('htmx:afterRequest',function(event){resolve(String(event.detail.xhr.status));},{once:true});form.requestSubmit();})`); got != "204" {
+			t.Fatalf("model setup guard status = %q, want 204", got)
+		}
+		b.waitFor("204 guard preserves title", `sessionStorage.getItem('openvibely.new-task-title.title-project-b')`, "Project B draft")
+		b.waitFor("204 guard preserves composer", `JSON.parse(sessionStorage.getItem('openvibely.new-task-composer.title-project-b')).message`, "Project B message")
+		b.evaluate(`var input=document.getElementById('task-message-input');input.value='Revised after guard';input.dispatchEvent(new Event('input',{bubbles:true}));'edited'`)
+		b.waitFor("draft still saves after guard", `JSON.parse(sessionStorage.getItem('openvibely.new-task-composer.title-project-b')).message`, "Revised after guard")
+		b.evaluateAwait(`window.openVibelyNavigate('/tasks/new?project_id=title-project-a').then(function(){return 'navigated';})`)
+		b.evaluateAwait(`window.openVibelyNavigate('/tasks/new?project_id=title-project-b').then(function(){return 'navigated';})`)
+		b.waitFor("guarded draft survives project navigation", `document.getElementById('task-message-input').value`, "Revised after guard")
+		b.evaluate(`(function(){var form=document.getElementById('task-thread-form');form.dispatchEvent(new CustomEvent('htmx:afterRequest',{bubbles:true,detail:{elt:form,successful:false,xhr:{status:200,getResponseHeader:function(name){return name==='X-Created-Task-ID'?'created-task':'';}}}}));return 'successful request dispatched';})()`)
 		b.waitFor("successful create clears only Project B title", `String(sessionStorage.getItem('openvibely.new-task-title.title-project-b')===null && sessionStorage.getItem('openvibely.new-task-title.title-project-a')==='Project A revised')`, "true")
 		b.evaluate(`document.body.dispatchEvent(new CustomEvent('htmx:beforeHistorySave',{bubbles:true,detail:{}})); 'history save dispatched'`)
 		b.waitFor("successful title is not saved again", `String(sessionStorage.getItem('openvibely.new-task-title.title-project-b')===null)`, "true")
@@ -149,5 +163,8 @@ func TestBrowserFunctional_NewTaskTitleDraftRestoredFromProjectHistory(t *testin
 		b.waitFor("fresh Project A navigation restores composer", `document.getElementById('task-message-input').value+':'+document.getElementById('task-thread-form-agent-id').value`, "Project A message:draft-model")
 		b.evaluateAwait(`window.openVibelyNavigate('/tasks/new?project_id=title-project-b').then(function(){return 'navigated';})`)
 		b.waitFor("submitted Project B starts empty", `document.getElementById('task-message-input').value+':'+document.getElementById('task-thread-form-agent-id').value`, ":default")
+		b.evaluateAwait(`window.openVibelyNavigate('/tasks/new?project_id=title-project-a').then(function(){return 'navigated';})`)
+		b.evaluate(`(function(){var form=document.getElementById('task-thread-form');form.dispatchEvent(new CustomEvent('htmx:afterRequest',{bubbles:true,detail:{elt:form,xhr:{status:200,getResponseHeader:function(name){return name==='HX-Location'?'/tasks/created-swarm?project_id=title-project-a':'';}}}}));return 'swarm created';})()`)
+		b.waitFor("swarm creation clears draft", `String(sessionStorage.getItem('openvibely.new-task-title.title-project-a')===null && sessionStorage.getItem('openvibely.new-task-composer.title-project-a')===null)`, "true")
 	})
 }
