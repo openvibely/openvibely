@@ -1555,7 +1555,7 @@ func TestScheduleContent_RunAtFieldClickablePickerAffordance(t *testing.T) {
 	}
 
 	output := buf.String()
-	for _, want := range []string{`data-schedule-datetime`, `data-run-at-picker`, `popover="auto"`, `aria-label="Choose date and time"`, `data-time-column="hour"`, `data-time-column="minute"`, `data-time-column="period"`, `data-done`} {
+	for _, want := range []string{`data-schedule-datetime`, `data-run-at-picker`, `popover="auto"`, `aria-label="Choose date and time"`, `data-time-column="hour"`, `data-time-column="minute"`, `data-time-column="period"`, `data-today`} {
 		if !strings.Contains(output, want) {
 			t.Errorf("missing custom picker markup %s", want)
 		}

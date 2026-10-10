@@ -749,7 +749,7 @@ func TestBrowserFunctional_TaskScheduleModal(t *testing.T) {
 		b.waitFor("schedule modal open", `String(document.getElementById('task-schedule-saved').open)`, "true")
 		b.click(`[data-run-at-picker]`)
 		b.waitFor("custom picker in task schedule modal", `String(document.querySelector('.schedule-datetime-popup').matches(':popover-open') && document.querySelectorAll('[data-time-column]').length===3)`, "true")
-		b.click(`[data-done]`)
+		b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": "Escape"}, nil)
 		b.waitFor("done keeps task schedule modal open", `String(document.getElementById('task-schedule-saved').open && !document.querySelector('.schedule-datetime-popup').matches(':popover-open'))`, "true")
 		b.evaluate(`document.querySelector('[data-schedule-editor] [name="repeat_interval"]').value='99'`)
 		b.click(`[data-schedule-cancel]`)

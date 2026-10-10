@@ -1061,7 +1061,7 @@ func TestTaskDetailContent_RunAtFieldsClickablePickerAffordance(t *testing.T) {
 	}
 
 	output := buf.String()
-	for _, want := range []string{`data-schedule-datetime`, `data-run-at-picker`, `data-time-column="hour"`, `data-time-column="minute"`, `data-time-column="period"`, `data-done`, `value="` + runAt.Local().Format("2006-01-02T15:04") + `"`} {
+	for _, want := range []string{`data-schedule-datetime`, `data-run-at-picker`, `data-time-column="hour"`, `data-time-column="minute"`, `data-time-column="period"`, `data-today`, `value="` + runAt.Local().Format("2006-01-02T15:04") + `"`} {
 		if !strings.Contains(output, want) {
 			t.Errorf("missing existing native picker behavior %s", want)
 		}

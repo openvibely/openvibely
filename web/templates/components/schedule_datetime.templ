@@ -10,13 +10,21 @@ func scheduleDateTimeLabel(value string) string {
 
 // ScheduleDateTime keeps the existing local run_at form contract in every editor.
 templ ScheduleDateTime(value string) {
- <div data-schedule-datetime>
+ <div data-schedule-datetime style="position:relative">
   <input type="text" hidden name="run_at" value={ value }/>
   <input type="text" value={ scheduleDateTimeLabel(value) } data-run-at-picker class="input input-bordered cursor-pointer w-full" required placeholder="Choose date and time" onbeforeinput="event.preventDefault()" aria-label="Run at" aria-haspopup="dialog" aria-expanded="false" autocomplete="off" onclick="window.openScheduleDateTime(this)" onkeydown="if(event.key==='ArrowDown'||event.key==='Enter'||event.key===' '){event.preventDefault();window.openScheduleDateTime(this)}"/>
+  <svg class="schedule-datetime-icon" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"></rect><path d="M16 3v4M8 3v4M3 11h18"></path></svg>
   <div class="schedule-datetime-popup" popover="auto" role="dialog" aria-label="Choose date and time">
    <div class="schedule-datetime-body">
     <div class="schedule-datetime-calendar">
-     <div class="schedule-datetime-month"><button type="button" data-month-step="-1" aria-label="Previous month">‹</button><strong data-month-title aria-live="polite"></strong><button type="button" data-month-step="1" aria-label="Next month">›</button></div>
+     <div class="schedule-datetime-month">
+      <button type="button" class="btn btn-xs btn-ghost" data-today aria-label="Go to current month">Today</button>
+      <div class="flex items-center gap-0">
+       <button type="button" class="btn btn-xs btn-ghost px-1" data-month-step="-1" aria-label="Previous month"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M15 19l-7-7 7-7"></path></svg></button>
+       <button type="button" class="btn btn-xs btn-ghost px-1" data-month-step="1" aria-label="Next month"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M9 5l7 7-7 7"></path></svg></button>
+      </div>
+      <span data-month-title aria-live="polite"></span>
+     </div>
      <div class="schedule-datetime-weekdays" aria-hidden="true"><span>Su</span><span>Mo</span><span>Tu</span><span>We</span><span>Th</span><span>Fr</span><span>Sa</span></div>
      <div class="schedule-datetime-days" role="group" aria-label="Date"></div>
     </div>
@@ -24,15 +32,16 @@ templ ScheduleDateTime(value string) {
     <div class="schedule-datetime-time"><div data-time-column="minute" role="listbox" aria-label="Minute" tabindex="0"></div></div>
     <div class="schedule-datetime-time"><div data-time-column="period" role="listbox" aria-label="AM or PM" tabindex="0"></div></div>
    </div>
-   <div class="schedule-datetime-footer"><button type="button" class="btn btn-sm btn-ghost" data-today>Today</button><button type="button" class="btn btn-sm btn-primary" data-done>Done</button></div>
   </div>
  </div>
  <style>
+  [data-schedule-datetime] > [data-run-at-picker] { padding-right:38px; }
+  .schedule-datetime-icon { position:absolute; right:12px; top:50%; transform:translateY(-50%); pointer-events:none; }
+
   .schedule-datetime-popup { margin:0; padding:12px; width:450px; max-width:calc(100vw - 16px); border:1px solid oklch(var(--bc) / .18); border-radius:12px; background:oklch(var(--b1)); color:oklch(var(--bc)); box-shadow:0 12px 36px #0004; }
   .schedule-datetime-body { display:grid; grid-template-columns:minmax(0, 1fr) 48px 48px 60px; gap:4px; }
   .schedule-datetime-calendar { padding-right:8px; min-width:0; }
-  .schedule-datetime-month { display:flex; align-items:center; justify-content:space-between; height:34px; font-size:13px; }
-  .schedule-datetime-month button { width:28px; height:28px; font-size:22px; border-radius:6px; }
+  .schedule-datetime-month { display:flex; align-items:center; gap:4px; height:34px; font-size:12px; white-space:nowrap; }
   .schedule-datetime-weekdays,.schedule-datetime-days { display:grid; grid-template-columns:repeat(7,minmax(0,1fr)); text-align:center; font-size:12px; }
   .schedule-datetime-weekdays { height:26px; align-items:center; opacity:.6; }
   .schedule-datetime-days button { height:30px; border-radius:6px; padding:0; }
@@ -44,11 +53,11 @@ templ ScheduleDateTime(value string) {
   .schedule-datetime-time [role=listbox] { height:240px; overflow-y:auto; overscroll-behavior:contain; scrollbar-width:none; overflow-anchor:none; }
   .schedule-datetime-time [role=listbox]::-webkit-scrollbar { display:none; }
   .schedule-datetime-time [role=option] { display:block; width:100%; height:30px; border-radius:6px; font-size:13px; }
-  .schedule-datetime-footer { display:flex; justify-content:space-between; padding-top:10px; margin-top:10px; }
   @media(max-width:380px) { .schedule-datetime-popup { padding:8px; } .schedule-datetime-body { grid-template-columns:minmax(0,1fr) 36px 36px 46px; gap:2px; } .schedule-datetime-calendar { padding-right:3px; } }
  </style>
  <script>
  (() => {
+  queueMicrotask(()=>window.refreshScheduleDateTimes(document));
   if (window.openScheduleDateTime) return;
   let active = null;
   let nextID = 0;
@@ -57,6 +66,10 @@ templ ScheduleDateTime(value string) {
   const localValue = d => `${dateValue(d)}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
   const stored = input => input.parentElement.querySelector('[name="run_at"]');
   function refresh(input) {
+   if(!stored(input).value) {
+    const now=new Date(); now.setMinutes(now.getMinutes()+1); now.setSeconds(0,0);
+    stored(input).value=localValue(now);
+   }
    const value=stored(input).value, date=new Date(value);
    input.value=value && !Number.isNaN(date.getTime()) ? `${pad(date.getMonth()+1)}/${pad(date.getDate())}/${date.getFullYear()}, ${pad(date.getHours()%12||12)}:${pad(date.getMinutes())} ${date.getHours()<12?'AM':'PM'}` : '';
   }
@@ -204,7 +217,7 @@ templ ScheduleDateTime(value string) {
   };
   // Delegate static controls: HTMX morphs can replace their DOM nodes while open.
   document.addEventListener('click',event=>{
-   const button=event.target.closest('[data-month-step], [data-today], [data-done]');
+   const button=event.target.closest('[data-month-step], [data-today]');
    if(!active || !button || !active.popup.contains(button))return;
    const state=active;
    // Focus the persistent control before replacing the focused calendar day.
@@ -214,10 +227,9 @@ templ ScheduleDateTime(value string) {
     calendar(state);
    } else if(button.hasAttribute('data-today')) {
     const today=new Date();
-    state.selected=new Date(today.getFullYear(),today.getMonth(),today.getDate(),state.selected.getHours(),state.selected.getMinutes());
     state.month=new Date(today.getFullYear(),today.getMonth(),1);
-    write(state); calendar(state); timeColumns(state,true);
-   } else { write(state); close(state,true); }
+    calendar(state);
+   }
   });
   window.addEventListener('resize',()=>{if(active)position(active);});
   document.addEventListener('scroll',event=>{if(active && !active.popup.contains(event.target))position(active);},true);
