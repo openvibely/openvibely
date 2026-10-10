@@ -75,12 +75,19 @@ func testKanbanHeaderSearch(t *testing.T, width int) {
 		check("collapsed by default", search+`.dataset.open === 'false' && `+width(search)+` <= 33`)
 		check("Active count has refresh hook", count("active")+` === '2'`)
 
-		b.evaluate(`(window.__iconColor = getComputedStyle(`+toggle+`).color, 'ok')`)
+		b.evaluate(`(window.__iconColor = getComputedStyle(` + toggle + `).color, 'ok')`)
 		b.click(`[data-kanban-search-toggle]`)
 		check("click opens and focuses input", search+`.dataset.open === 'true' && document.activeElement === `+input)
 		check("clear button hidden while empty", `document.querySelector('[data-kanban-search-clear]').getClientRects().length === 0`)
 		b.waitFor("open animation", `String(`+width(search)+` > 100)`, "true")
 		check("open box stays inside header", search+`.getBoundingClientRect().left >= document.querySelector('[data-page-header] h2').getBoundingClientRect().right`)
+		b.waitFor("open animation settles", `String(`+search+`.getAnimations().length === 0)`, "true")
+		if b.evaluate(`String(window.innerWidth < 640)`) == "true" {
+			check("phone input uses 16px text so iOS does not zoom", `getComputedStyle(`+input+`).fontSize === '16px'`)
+			check("phone box fills free header space", `document.querySelector('[data-page-header] h2').getBoundingClientRect().right + 12 + 1 >= `+search+`.getBoundingClientRect().left`)
+		} else {
+			check("desktop box is 16rem", width(search)+` === 256`)
+		}
 		check("Add Task stays on screen", search+`.nextElementSibling.getBoundingClientRect().right <= window.innerWidth`)
 
 		b.typeText("oauth")
@@ -105,8 +112,11 @@ func testKanbanHeaderSearch(t *testing.T, width int) {
 		clearBtn := `document.querySelector('[data-kanban-search-clear]')`
 		check("clear button visible with text", clearBtn+`.getClientRects().length > 0`)
 		check("clear button inside open box", clearBtn+`.getBoundingClientRect().right <= `+search+`.getBoundingClientRect().right`)
+		b.evaluate(`(window.kanbanSelection.add('alpha'), window.kanbanRefresh(), 'ok')`)
 		b.click(`[data-kanban-search-clear]`)
 		check("clear button empties search and refilters at once", input+`.value === '' && `+visible+` === 'alpha,beta,delta,epsilon,gamma'`)
+		check("clear button keeps selection", `window.kanbanSelection.has('alpha')`)
+		b.evaluate(`(window.kanbanClearSelection(), window.kanbanRefresh(), 'ok')`)
 		check("clear button keeps box open and focuses input", search+`.dataset.open === 'true' && document.activeElement === `+input)
 		check("clear button hidden when empty", clearBtn+`.getClientRects().length === 0`)
 		b.click(`[data-page-header] h2`)
