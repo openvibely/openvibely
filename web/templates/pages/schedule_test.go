@@ -1555,26 +1555,13 @@ func TestScheduleContent_RunAtFieldClickablePickerAffordance(t *testing.T) {
 	}
 
 	output := buf.String()
-	if !strings.Contains(output, `data-run-at-picker-container`) {
-		t.Fatal("expected run-at picker container hook in schedule create dialog")
+	for _, want := range []string{`data-schedule-datetime`, `data-run-at-picker`, `popover="auto"`, `aria-label="Choose date and time"`, `data-time-column="hour"`, `data-time-column="minute"`, `data-time-column="period"`, `data-done`} {
+		if !strings.Contains(output, want) {
+			t.Errorf("missing custom picker markup %s", want)
+		}
 	}
-	if !strings.Contains(output, `onclick="openScheduleRunAtPicker(this, event)"`) {
-		t.Fatal("expected run-at container click handler in schedule create dialog")
-	}
-	if !strings.Contains(output, `data-run-at-picker`) {
-		t.Fatal("expected run-at picker input hook in schedule create dialog")
-	}
-	if !strings.Contains(output, `class="input input-bordered cursor-pointer w-full"`) {
-		t.Fatal("expected pointer cursor affordance on schedule create run-at input")
-	}
-	if !strings.Contains(output, `if (event && event.target && !event.target.closest('input[data-run-at-picker]')) return;`) {
-		t.Fatal("expected run-at picker open behavior to be scoped to clicks on the datetime input")
-	}
-	if !strings.Contains(output, `function openScheduleRunAtPicker(container, event)`) {
-		t.Fatal("expected shared run-at picker open helper in schedule dialog script")
-	}
-	if !strings.Contains(output, `if (typeof pickerInput.showPicker === 'function')`) {
-		t.Fatal("expected showPicker-based open behavior with fallback focus")
+	if strings.Contains(output, "showPicker") {
+		t.Fatal("schedule editor must not open a native picker")
 	}
 }
 

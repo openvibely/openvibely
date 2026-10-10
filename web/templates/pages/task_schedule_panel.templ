@@ -93,9 +93,13 @@ if s.ID == "" {
      hx-target="#task-schedule-panel" hx-swap="outerHTML settle:0"
     }
    >
-    <label class="form-control mb-4"><span class="label">Run at</span><input type="datetime-local" name="run_at" data-run-at-picker if s.ID != "" {
- value={ components.GetScheduleEditTime(s) }
-} required class="input input-bordered input-sm cursor-pointer w-full" onclick="if(this.showPicker) this.showPicker()"/></label>
+    <div class="form-control mb-4"><span class="label">Run at</span>
+     if s.ID != "" {
+      @components.ScheduleDateTime(components.GetScheduleEditTime(s))
+     } else {
+      @components.ScheduleDateTime("")
+     }
+    </div>
     <label class="form-control mb-4"><span class="label">Repeat</span><select name="repeat_type" class="select select-bordered select-sm">
      for _, choice := range []struct{Value, Label string}{{"once","Once"},{"seconds","Every N Seconds"},{"minutes","Every N Minutes"},{"hours","Every N Hours"},{"daily","Daily"},{"weekly","Weekly"},{"monthly","Monthly"}} {
       <option value={ choice.Value } selected?={ string(s.RepeatType) == choice.Value }>{ choice.Label }</option>

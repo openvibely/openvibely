@@ -5,6 +5,7 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/web/templates/layout"
+	"github.com/openvibely/openvibely/web/templates/components"
 	"slices"
 	"time"
 )
@@ -801,9 +802,7 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 					<div class="grid grid-cols-1 gap-3 md:grid-cols-2">
 						<div class="form-control">
 							<label class="label"><span class="label-text">Run At</span></label>
-							<div class="relative" data-run-at-picker-container onclick="openScheduleRunAtPicker(this, event)">
-								<input type="datetime-local" name="run_at" class="input input-bordered cursor-pointer w-full" data-run-at-picker required/>
-							</div>
+							@components.ScheduleDateTime("")
 						</div>
 						<div class="form-control">
 							<label class="label"><span class="label-text">Repeat</span></label>
@@ -1009,16 +1008,6 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 									if (event.detail && event.detail.target && event.detail.target.id === 'schedule-content') closeMenu(false);
 								}, {signal: signal});
 							})();
-
-						function openScheduleRunAtPicker(container, event) {						if (!container) return;
-						const pickerInput = container.querySelector('input[data-run-at-picker]');
-						if (!pickerInput) return;
-						if (event && event.target && !event.target.closest('input[data-run-at-picker]')) return;
-						pickerInput.focus();
-						if (typeof pickerInput.showPicker === 'function') {
-							pickerInput.showPicker();
-						}
-					}
 
 				// New Scheduled Task modal logic
 				function openNewScheduledTaskModal() {
