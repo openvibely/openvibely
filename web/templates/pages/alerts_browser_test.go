@@ -158,7 +158,7 @@ func TestBrowserFunctional_AlertsTaskLinkedCardsSupportNativeKeyboardNavigationI
 		nestedControls := []string{
 			cardSelector + " .btn-success",
 			cardSelector + " .btn-error.btn-outline",
-			cardSelector + ` button[title="Mark as read"]`,
+			cardSelector + ` button[aria-label="Mark as read"]`,
 			cardSelector + " [data-alert-delete]",
 		}
 		for _, selector := range nestedControls {

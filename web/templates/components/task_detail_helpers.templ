@@ -1041,7 +1041,7 @@ templ TaskThreadLiveEventsScript(taskID string) {
 							function createPendingAttachmentBadge(label, title) {
 								var badge = document.createElement('div');
 								badge.className = 'badge badge-ghost badge-sm shrink-0 gap-1 text-xs';
-								badge.title = title;
+								badge.setAttribute('data-tooltip-disabled', '');
 								badge.setAttribute('aria-label', title);
 								badge.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.586-6.586a4 4 0 00-5.657-5.657L5.757 10.757a6 6 0 108.486 8.486L21 12.486"></path></svg><span>' + label + '</span>';
 								return badge;

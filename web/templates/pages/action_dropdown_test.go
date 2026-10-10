@@ -23,7 +23,7 @@ func TestCardActionDropdownMenusRenderSharedShellAndLocalActions(t *testing.T) {
 			render: func(t *testing.T) string {
 				return renderActionDropdownComponent(t, AgentsContent([]models.Agent{{ID: "agent-1", Name: "Planner", Description: "Plans", Model: "inherit", Key: "planner", Enabled: true}}, nil))
 			},
-			required: []string{`aria-label="More actions for Planner"`, `title="More actions for Planner"`, `onclick="handleDropdownToggle(event)"`, `Edit`, `Delete`, `openDeleteAgentConfirm(this)`},
+			required: []string{`aria-label="More actions for Planner"`, `data-tooltip-disabled`, `onclick="handleDropdownToggle(event)"`, `Edit`, `Delete`, `openDeleteAgentConfirm(this)`},
 		},
 		{
 			name: "models",
@@ -90,7 +90,7 @@ func TestCardActionDropdownMenusRenderSharedShellAndLocalActions(t *testing.T) {
 			render: func(t *testing.T) string {
 				return renderActionDropdownComponent(t, AlertsContent([]models.AlertSummary{{ID: "alert-1", ProjectID: "project-1", Title: "Disk full"}}, "project-1", 1))
 			},
-			required: []string{`aria-label="More actions"`, `title="More actions"`, `onclick="handleDropdownToggle(event)"`, `Mark all as read`, `Delete All Alerts`, `data-delete-url="/alerts?project_id=project-1"`},
+			required: []string{`aria-label="More actions"`, `data-tooltip-disabled`, `onclick="handleDropdownToggle(event)"`, `Mark all as read`, `Delete All Alerts`, `data-delete-url="/alerts?project_id=project-1"`},
 		},
 	}
 

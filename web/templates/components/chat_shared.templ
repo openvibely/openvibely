@@ -1297,7 +1297,7 @@ templ ChatQueuedInputRow(inputID, message, steerEndpoint string, hasAttachments 
 }
 
 templ pendingAttachmentBadge(label, title string) {
-	<div class="badge badge-ghost badge-sm shrink-0 gap-1 text-xs" title={ title } aria-label={ title }>
+	<div class="badge badge-ghost badge-sm shrink-0 gap-1 text-xs" data-tooltip-disabled aria-label={ title }>
 		<svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
 			<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.586-6.586a4 4 0 00-5.657-5.657L5.757 10.757a6 6 0 108.486 8.486L21 12.486"></path>
 		</svg>
@@ -6486,7 +6486,7 @@ templ ChatAmbiguousSteeringInputRowForTask(inputID, message string, taskID strin
 			<div class="text-xs opacity-60">The provider may or may not have received it. Discard it here, or resend it if needed.</div>
 		</div>
 		<div class="ml-auto flex shrink-0 items-center gap-2">
-			<button type="button" class="btn btn-ghost btn-xs h-6 min-h-0 rounded-md px-2 text-xs text-error" hx-post={ "/thread-inputs/" + inputID + "/cancel" } hx-target={ "#thread-input-" + inputID } hx-swap="outerHTML" title="Discard uncertain steering" aria-label="Discard uncertain steering">Discard</button>
+			<button type="button" class="btn btn-ghost btn-xs h-6 min-h-0 rounded-md px-2 text-xs text-error" hx-post={ "/thread-inputs/" + inputID + "/cancel" } hx-target={ "#thread-input-" + inputID } hx-swap="outerHTML" data-tooltip-disabled aria-label="Discard uncertain steering">Discard</button>
 		</div>
 	</div>
 }
