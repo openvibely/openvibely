@@ -719,7 +719,7 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 							values.forEach(function(value) {
 								if (!value || seen[value]) return;
 								seen[value] = true;
-								badges.push('<span class="font-mono text-xs badge badge-outline" title="' + escapeAttribute(value) + '">' + escapeText(value) + '</span>');
+								badges.push('<span class="font-mono text-xs badge badge-outline" data-tooltip-disabled>' + escapeText(value) + '</span>');
 							});
 							if (badges.length === 0) return '';
 							return '<div class="lifecycle-evidence text-sm"><span class="opacity-60">' + escapeText(label) + ':</span>' + badges.join('') + '</div>';

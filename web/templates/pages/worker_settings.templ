@@ -427,12 +427,12 @@ templ projectStatsTableBody(maxWorkers int, runningWorkers int, totalRunning int
 					/><span class="worker-limit-infinity" aria-hidden="true">∞</span></span>						<button type="submit" class="btn btn-xs btn-primary">Set</button>
 					</form>
 					if projectWorkerLimitExceedsGlobal(maxWorkers, ps.MaxWorkers) {
-						<span class="text-xs text-warning mt-1 block" title={ fmt.Sprintf("This project limit exceeds the current global limit of %d", maxWorkers) }>Exceeds global limit; lower this cap</span>
+						<span class="text-xs text-warning mt-1 block" data-tooltip-disabled>Exceeds global limit; lower this cap</span>
 					}
 				</td>
 				<td>
 					if projectWorkerLimitExceedsGlobal(maxWorkers, ps.MaxWorkers) {
-						<span class="badge badge-warning badge-sm" title={ fmt.Sprintf("Current project limit exceeds the global limit of %d; new work remains globally capped", maxWorkers) }>Exceeds global</span>
+						<span class="badge badge-warning badge-sm" data-tooltip-disabled>Exceeds global</span>
 					} else if ps.MaxWorkers != nil && *ps.MaxWorkers > 0 && ps.Running >= *ps.MaxWorkers {
 						<span class="badge badge-warning badge-sm" title={ fmt.Sprintf("Project is using all %d allowed workers", *ps.MaxWorkers) }>At capacity</span>
 					} else if ps.Running > 0 {

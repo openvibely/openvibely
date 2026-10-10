@@ -29,7 +29,7 @@ templ ReviewCommentList(comments []models.ReviewComment, taskID string) {
 						hx-delete={ fmt.Sprintf("/reviews/%s", comment.ID) }
 						hx-target="closest .review-comment-item"
 						hx-swap="outerHTML"
-						title="Remove comment"
+						data-tooltip-disabled aria-label="Remove comment"
 					>
 						<svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
 							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>

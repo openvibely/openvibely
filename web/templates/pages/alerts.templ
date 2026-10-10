@@ -296,7 +296,7 @@ templ alertsContent(alerts []models.AlertSummary, currentProjectID string, unrea
 					if (copyIcon) copyIcon.classList.add('hidden');
 					if (successIcon) successIcon.classList.toggle('hidden', failed);
 					if (errorIcon) errorIcon.classList.toggle('hidden', !failed);
-					button.title = label;
+					button.setAttribute('aria-label', label);
 					button.classList.toggle('btn-error', failed);
 					button.classList.toggle('btn-success', !failed);
 					window.setTimeout(function() {
@@ -305,7 +305,7 @@ templ alertsContent(alerts []models.AlertSummary, currentProjectID string, unrea
 						if (copyIcon) copyIcon.classList.remove('hidden');
 						if (successIcon) successIcon.classList.add('hidden');
 						if (errorIcon) errorIcon.classList.add('hidden');
-						button.title = defaultLabel;
+						button.setAttribute('aria-label', defaultLabel);
 						button.classList.remove('btn-error', 'btn-success');
 					}, 2000);
 				};
@@ -585,7 +585,7 @@ templ alertDetailBody(alert models.Alert) {
 					class="btn btn-xs btn-ghost btn-square absolute right-0 top-0"
 					data-alert-copy
 					data-default-label="Copy body"
-					title="Copy body"
+					data-tooltip-disabled
 					aria-label={ "Copy inspected " + alertDetailInspectLabel(alert) + " body" }
 					onclick="copyAlertDetails(this)"
 				>

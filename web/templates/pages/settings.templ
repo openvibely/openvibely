@@ -2139,7 +2139,7 @@ templ settingsContent(view ChannelsSettingsView) {
 							}
 
 							function outboundTargetTestFailedHTML() {
-								return '<span class="inline-flex items-center gap-1 text-error" title="Test failed."><span aria-hidden="true">✕</span><span>Failed</span></span>';
+								return '<span class="inline-flex items-center gap-1 text-error" data-tooltip-disabled><span aria-hidden="true">✕</span><span>Failed</span></span>';
 							}
 
 							function outboundTargetTestBefore(button) {

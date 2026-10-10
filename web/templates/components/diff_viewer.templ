@@ -1608,7 +1608,7 @@ templ diffFileCopyPathButton(path string) {
 	<button
 		type="button"
 		class="diff-copy-path-btn btn btn-ghost btn-xs btn-square shrink-0 opacity-60 hover:opacity-100 focus:opacity-100"
-		title="Copy file path"
+		data-tooltip-disabled
 		aria-label={ "Copy file path " + path }
 		data-copy-path={ path }
 		onclick={ templ.ComponentScript{Call: "copyDiffFilePath(event, this)"} }
@@ -1622,8 +1622,8 @@ templ diffFileCopyPathButton(path string) {
 
 templ diffStatsBadge(f DiffFile) {
 	<span class="diff-file-stats text-xs font-semibold ml-auto shrink-0 flex items-center gap-1" aria-label={ diffStatsAriaLabel(f) }>
-		<span class="diff-stat-add" title="Added lines">+{ fmt.Sprintf("%d", diffStatCounts(f).Adds) }</span>
-		<span class="diff-stat-del" title="Deleted lines">-{ fmt.Sprintf("%d", diffStatCounts(f).Dels) }</span>
+		<span class="diff-stat-add" data-tooltip-disabled>+{ fmt.Sprintf("%d", diffStatCounts(f).Adds) }</span>
+		<span class="diff-stat-del" data-tooltip-disabled>-{ fmt.Sprintf("%d", diffStatCounts(f).Dels) }</span>
 	</span>
 }
 
