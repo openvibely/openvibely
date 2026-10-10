@@ -103,8 +103,7 @@ func TestSkillsPageHeaderUsesAddSkillDropdownMenu(t *testing.T) {
 	}
 	body := rec.Body.String()
 	for _, want := range []string{
-		`class="btn btn-primary btn-sm"`,
-		`+ Add Skill`,
+		`<button type="button" tabindex="0" class="btn btn-ghost btn-sm btn-square" aria-label="Add Skill" data-tooltip-disabled onclick="handleDropdownToggle(event)">`,
 		`Create Skill`,
 		`openNewSkillModal()`,
 		`Import Skill Package`,

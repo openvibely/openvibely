@@ -180,7 +180,7 @@ func runBinaryUpdateE2E(t *testing.T, releaseVersion, replacementVersion, wantSt
 	})
 
 	baseURL := "http://127.0.0.1:" + port
-	waitForHealthVersion(t, baseURL, "0.5.0")
+	waitForHealthVersion(t, baseURL, "0.5.0", readLogs)
 	waitForStagedUpdate(t, baseURL)
 	resp, err := http.Post(baseURL+"/api/system/update/apply", "application/json", nil)
 	if err != nil {
