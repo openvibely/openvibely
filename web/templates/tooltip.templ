@@ -13,6 +13,7 @@ templ Tooltips() {
  (function() {
   if (window.openVibelyTooltip) return;
   var tip=document.createElement('div');tip.id='ov-shared-tooltip';tip.className='ov-tooltip';tip.setAttribute('role','tooltip');tip.hidden=true;tip.setAttribute('popover','manual');document.body.appendChild(tip);
+  var pressing=false;
   var changing=false,active=null,pinned=false,timer=null,dismissed=null,pointer=null,nativePopover=typeof tip.showPopover==='function';
   if(!nativePopover)tip.removeAttribute('popover');
   var selector='[title],[data-tip],[data-ov-tooltip],[data-model-help],[data-model-setting-help]';
@@ -62,9 +63,17 @@ templ Tooltips() {
    render(text);describe(el,true);if(el.matches('[data-model-help],[data-model-setting-help]'))el.setAttribute('aria-expanded','true');
    tip.hidden=false;if(nativePopover&&!tip.matches(':popover-open'))tip.showPopover();position(point);
   }
-  function blocked(target){return target instanceof Element&&!!target.closest('[data-kanban-menu-trigger],[data-tooltip-disabled],.ov-modal-close,.modal-backdrop');}
+  function menuOpen(){
+   return Array.from(document.querySelectorAll('.ov-menu,[role="menu"],[role="listbox"]')).some(function(menu){
+    if(menu.closest('details:not([open])')||!menu.getClientRects().length)return false;
+    if(menu.checkVisibility&&!menu.checkVisibility({checkOpacity:true,checkVisibilityCSS:true}))return false;
+    var style=getComputedStyle(menu);return style.visibility!=='hidden'&&style.display!=='none'&&Number(style.opacity)!==0;
+   });
+  }
+  function blocked(target){return pressing||menuOpen()||target instanceof Element&&!!target.closest('[data-kanban-menu-trigger],[data-tooltip-disabled],.ov-modal-close,.modal-backdrop');}
   function trigger(target){if(changing||blocked(target))return null;return target instanceof Element?target.closest(selector)||(active&&active.contains(target)?active:null):null;}
   document.addEventListener('pointerover',function(e){
+   if(e.buttons){close();return;}
    if(dismissed&&!dismissed.contains(e.target))dismissed=null;
    if(tip.contains(e.target)){clearTimeout(timer);return;}
    if(blocked(e.target)){if(!pinned)close();return;}
@@ -74,6 +83,7 @@ templ Tooltips() {
    show(el,textFor(el),false,{x:e.clientX+12,y:e.clientY+12});
   });
   document.addEventListener('pointermove',function(e){
+   if(e.buttons||menuOpen()){close();return;}
    if(!pinned&&active&&active.contains(e.target)){pointer={x:e.clientX+12,y:e.clientY+12};position();}
   });
   document.addEventListener('pointerout',function(e){
@@ -86,9 +96,14 @@ templ Tooltips() {
    }
    clearTimeout(timer);timer=setTimeout(function(){if(active&&active.matches(':hover'))return;close();},100);
   });
-  function dismissOnPress(e){dismissed=trigger(e.target)||active;close();}
+  function dismissOnPress(e){dismissed=trigger(e.target)||active;pressing=true;close();}
   document.addEventListener('pointerdown',dismissOnPress,true);
   document.addEventListener('mousedown',dismissOnPress,true);
+  function releasePress(){pressing=false;}
+  window.addEventListener('pointerup',releasePress,true);
+  window.addEventListener('mouseup',releasePress,true);
+  document.addEventListener('pointercancel',releasePress,true);
+  window.addEventListener('blur',function(){releasePress();close();});
   document.addEventListener('focusin',function(e){if(blocked(e.target)){if(!pinned)close();return;}var el=trigger(e.target);if(el)show(el,textFor(el));});
   document.addEventListener('focusout',function(e){if(!pinned&&active&&active.contains(e.target)&&!active.contains(e.relatedTarget)&&!active.matches(':hover'))close();});
   document.addEventListener('click',function(e){var el=trigger(e.target);if(el&&el.matches('[data-model-help],[data-model-setting-help]')){if(active===el&&pinned)close();else show(el,textFor(el),true);}else if(!tip.contains(e.target))close();});
@@ -114,9 +129,9 @@ templ Tooltips() {
     if(record.type==='childList')record.addedNodes.forEach(adopt);
     else if(record.attributeName==='title'&&record.target.hasAttribute('title'))adopt(record.target);
    });
-   if(!active)return;if(!active.isConnected){close();return;}
+   if(!active)return;if(!active.isConnected||blocked(active)){close();return;}
    if(records.some(function(record){return record.type==='attributes'&&record.target===active;})){var text=textFor(active);if(text){render(text);position();}else close();}
-  }).observe(document.body,{subtree:true,childList:true,attributes:true,attributeFilter:['title','data-tip','data-ov-tooltip','data-model-help','data-model-setting-help']});
+  }).observe(document.body,{subtree:true,childList:true,attributes:true,attributeFilter:['class','style','hidden','open','aria-expanded','title','data-tip','data-ov-tooltip','data-model-help','data-model-setting-help']});
   window.openVibelyTooltip={show:show,close:close,clear:function(el){
    el.removeAttribute('title');el.removeAttribute('data-ov-tooltip');el.removeAttribute('data-tip');
    if(active===el)close();

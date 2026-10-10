@@ -109,7 +109,7 @@ func testScheduleCalendarHeader(t *testing.T, paused, mobile bool) {
    function count(){return root.querySelectorAll('[data-calendar-day][aria-pressed="true"]').length;}
    var initialHeaderTop=days[1].getBoundingClientRect().top;
    check(root.querySelector('.drop-zone[data-date="'+days[0].dataset.calendarDay+'"][data-hour="23"] [data-schedule-id="between-runs"]').dataset.skipStatus==='none','pause between actual hourly runs does not mark the block skipped');
-   down(days[0]);up();
+   down(days[0]);days[1].dispatchEvent(new PointerEvent('pointerover',{bubbles:true,buttons:1}));check(document.getElementById('ov-shared-tooltip').hidden,'day drag suppresses tooltip across headers');up();
    check(!toolbar.querySelector('[data-calendar-action="skip"]').hidden && toolbar.querySelector('[data-calendar-action="restore"]').hidden,'untouched day offers only skip');
    down(days[0]);up();
    check(count()===0 && getComputedStyle(toolbar).display==='none','second click deselects day and hides toolbar');
@@ -178,6 +178,8 @@ func testScheduleCalendarHeader(t *testing.T, paused, mobile bool) {
    clearScheduleSelection();
    a.dispatchEvent(new MouseEvent('click',{bubbles:true,ctrlKey:true}));b.dispatchEvent(new MouseEvent('click',{bubbles:true,ctrlKey:true}));
    a.dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:300,clientY:200}));
+   b.dispatchEvent(new PointerEvent('pointerover',{bubbles:true}));check(document.getElementById('ov-shared-tooltip').hidden,'context menu suppresses other card hints');
+   root.querySelector('.drop-zone').dispatchEvent(new PointerEvent('pointerover',{bubbles:true}));check(document.getElementById('ov-shared-tooltip').hidden,'context menu suppresses empty cell hints');
    check(selectedScheduleCards.size===2,'right click must preserve multi-selection');
    check(getComputedStyle(toolbar).display==='none' && toolbar.inert,'context menu hides and disables header controls for multiple cards');
    document.body.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,button:0}));
