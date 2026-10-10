@@ -658,7 +658,7 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 						var shortcut = /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘B' : 'Ctrl+B';
 						btn.setAttribute('aria-label', (isCollapsed ? 'Expand' : 'Collapse') + ' sidebar (' + shortcut + ')');
 						btn.setAttribute('title', btn.getAttribute('aria-label'));
-						btn.setAttribute('data-tip', isCollapsed ? 'Expand sidebar' : 'Collapse sidebar');
+						btn.setAttribute('data-tip', (isCollapsed ? 'Expand sidebar' : 'Collapse sidebar') + ' (' + (/Mac|iPhone|iPad/.test(navigator.platform) ? '⌘B' : 'Ctrl+B') + ')');
 						if (document.body) document.body.classList.toggle('sidebar-collapsed-pending', isCollapsed);
 					}
 
