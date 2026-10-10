@@ -191,16 +191,12 @@ templ ScheduleCalendarScript() {
    });
   }
   function dateIntervalEligible(run, action) {
-   if (hours.size) {
-    var covering = skips.filter(function(skip) { return !skip.restored && !skip.schedule_id && intersects(skip, run); }).sort(function(a,b) { return a.start_at-b.start_at; });
-    var until = run.start_at;
-    covering.forEach(function(skip) { if (skip.start_at <= until) until = Math.max(until, skip.end_at); });
-    var affected = selectedCards().filter(function(card) { return intersects(interval(card), run); });
-    if (action === 'restore') return covering.length > 0 || affected.some(function(card) { return card.dataset.skipStatus !== 'none'; });
-    return until < run.end_at || affected.some(function(card) { return card.dataset.skipStatus !== 'full'; });
-   }
-   if (action === 'restore') return days.some(function(day) { return Number(day.dataset.start) === run.start_at && day.dataset.skipped === 'true'; }) || selectedCards().some(function(card) { return intersects(interval(card), run) && card.dataset.skipStatus !== 'none'; });
-   return !days.some(function(day) { return Number(day.dataset.start) === run.start_at && day.dataset.skipped === 'true'; }) || selectedCards().some(function(card) { return intersects(interval(card), run) && card.dataset.skipStatus !== 'full'; });
+   var covering = skips.filter(function(skip) { return !skip.restored && !skip.schedule_id && intersects(skip, run); }).sort(function(a,b) { return a.start_at-b.start_at; });
+   var until = run.start_at;
+   covering.forEach(function(skip) { if (skip.start_at <= until) until = Math.max(until, skip.end_at); });
+   var affected = selectedCards().filter(function(card) { return intersects(interval(card), run); });
+   if (action === 'restore') return covering.length > 0 || affected.some(function(card) { return card.dataset.skipStatus !== 'none'; });
+   return until < run.end_at || affected.some(function(card) { return card.dataset.skipStatus !== 'full'; });
   }
   window.updateScheduleSelection = function() {
    var selected = selectedCards();
