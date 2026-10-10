@@ -607,7 +607,7 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 									}
 									data-date={ day.Date.Format("2006-01-02") }
 									data-hour={ fmt.Sprintf("%d", slot.Hour) }
-                                    title="Drag empty space to select schedule(s)"
+                                    title="Select schedules (Drag empty space)"
 									style="border-right: 1px solid var(--ov-schedule-grid-border);"
 								>
 									for _, occurrence := range getTasksForHour(weekData.TasksByDateTime, day.Date, slot.Hour) {

@@ -940,7 +940,7 @@ func TaskCard(task models.Task, projectID string, viewingCategory string, llmMod
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 53, "<!-- X button in top right corner --><button class=\"btn btn-circle btn-ghost btn-xs min-h-11 h-11 w-11 p-0 lg:min-h-6 lg:h-6 lg:w-6 absolute top-2 right-2 z-10\" onclick=\"event.stopPropagation()\" hx-delete=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 53, "<!-- X button in top right corner --><button data-tooltip-disabled aria-label=\"Delete task\" class=\"btn btn-circle btn-ghost btn-xs min-h-11 h-11 w-11 p-0 lg:min-h-6 lg:h-6 lg:w-6 absolute top-2 right-2 z-10\" onclick=\"event.stopPropagation()\" hx-delete=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

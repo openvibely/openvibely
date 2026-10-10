@@ -2873,12 +2873,12 @@ func chatComposerActionButton(stopEndpoint string, isRunning bool) templ.Compone
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 167, "\" hx-swap=\"none\" title=\"Stop response\" aria-label=\"Stop response\"><svg data-composer-stop-icon=\"true\" xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" viewBox=\"0 0 24 24\" fill=\"currentColor\" aria-hidden=\"true\"><rect x=\"6\" y=\"6\" width=\"12\" height=\"12\" rx=\"2\"></rect></svg> <svg data-composer-steer-icon=\"true\" xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4 hidden\" viewBox=\"0 0 24 24\" fill=\"currentColor\" aria-hidden=\"true\"><path d=\"M2 3l20 9-20 9 5-9-5-9z\"></path></svg></button>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 167, "\" hx-swap=\"none\" data-tooltip-disabled aria-label=\"Stop response\"><svg data-composer-stop-icon=\"true\" xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" viewBox=\"0 0 24 24\" fill=\"currentColor\" aria-hidden=\"true\"><rect x=\"6\" y=\"6\" width=\"12\" height=\"12\" rx=\"2\"></rect></svg> <svg data-composer-steer-icon=\"true\" xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4 hidden\" viewBox=\"0 0 24 24\" fill=\"currentColor\" aria-hidden=\"true\"><path d=\"M2 3l20 9-20 9 5-9-5-9z\"></path></svg></button>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		} else {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 168, "<button type=\"submit\" class=\"btn btn-primary btn-sm chat-send-button rounded-full min-h-0 h-8 w-8 p-0 flex-shrink-0\" title=\"Send message\" aria-label=\"Send message\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" viewBox=\"0 0 24 24\" fill=\"currentColor\" aria-hidden=\"true\"><path d=\"M2 3l20 9-20 9 5-9-5-9z\"></path></svg></button>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 168, "<button type=\"submit\" class=\"btn btn-primary btn-sm chat-send-button rounded-full min-h-0 h-8 w-8 p-0 flex-shrink-0\" data-tooltip-disabled aria-label=\"Send message\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" viewBox=\"0 0 24 24\" fill=\"currentColor\" aria-hidden=\"true\"><path d=\"M2 3l20 9-20 9 5-9-5-9z\"></path></svg></button>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -3568,7 +3568,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 228, "\" class=\"btn btn-ghost btn-sm rounded-full min-h-0 h-8 w-8 p-0 flex-shrink-0 opacity-50 hover:opacity-100 hover:bg-base-300\" title=\"Attach files\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13\"></path></svg></label> <input type=\"file\" id=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 228, "\" class=\"btn btn-ghost btn-sm rounded-full min-h-0 h-8 w-8 p-0 flex-shrink-0 opacity-50 hover:opacity-100 hover:bg-base-300\" data-tooltip-disabled aria-label=\"Attach files\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13\"></path></svg></label> <input type=\"file\" id=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -3594,7 +3594,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 230, "\" class=\"btn btn-ghost btn-sm rounded-full min-h-0 h-8 w-8 p-0 flex-shrink-0 opacity-50 hover:opacity-100 hover:bg-base-300 stt-btn\" title=\"Speech to text\" aria-label=\"Start speech to text\"><!-- Mic icon (shown when not recording) --><svg class=\"stt-mic-icon h-4 w-4\" xmlns=\"http://www.w3.org/2000/svg\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z\"></path></svg><!-- Stop icon (shown when recording) --><svg class=\"stt-stop-icon h-4 w-4 hidden\" xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 24 24\" fill=\"currentColor\"><rect x=\"6\" y=\"6\" width=\"12\" height=\"12\" rx=\"2\"></rect></svg></button><div id=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 230, "\" class=\"btn btn-ghost btn-sm rounded-full min-h-0 h-8 w-8 p-0 flex-shrink-0 opacity-50 hover:opacity-100 hover:bg-base-300 stt-btn\" data-tooltip-disabled aria-label=\"Start speech to text\"><!-- Mic icon (shown when not recording) --><svg class=\"stt-mic-icon h-4 w-4\" xmlns=\"http://www.w3.org/2000/svg\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z\"></path></svg><!-- Stop icon (shown when recording) --><svg class=\"stt-stop-icon h-4 w-4 hidden\" xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 24 24\" fill=\"currentColor\"><rect x=\"6\" y=\"6\" width=\"12\" height=\"12\" rx=\"2\"></rect></svg></button><div id=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

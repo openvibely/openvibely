@@ -501,7 +501,7 @@ func TestHandler_TaskThreadComposerAction_RendersStopAndSendStates(t *testing.T)
 	if !strings.Contains(body, `id="task-thread-form-primary-action" data-composer-running="true" data-active-turn-id="`+runningExec.ID+`" data-composer-stop-endpoint="/tasks/`+task.ID+`/cancel?composer_stop=1&amp;expected_turn_id=`+runningExec.ID+`" hx-swap-oob="outerHTML"`) {
 		t.Fatalf("expected active OOB primary action fragment, got %s", body)
 	}
-	if !strings.Contains(body, `title="Stop response"`) || !strings.Contains(body, `/tasks/`+task.ID+`/cancel?composer_stop=1`) {
+	if !strings.Contains(body, `aria-label="Stop response"`) || !strings.Contains(body, `/tasks/`+task.ID+`/cancel?composer_stop=1`) {
 		t.Fatalf("expected active task-thread action to render stop button, got %s", body)
 	}
 
@@ -523,7 +523,7 @@ func TestHandler_TaskThreadComposerAction_RendersStopAndSendStates(t *testing.T)
 	if !strings.Contains(body, `data-composer-running="false"`) {
 		t.Fatalf("expected terminal task-thread action to clear active composer state, got %s", body)
 	}
-	if !strings.Contains(body, `title="Send message"`) || strings.Contains(body, `title="Stop response"`) {
+	if !strings.Contains(body, `aria-label="Send message"`) || strings.Contains(body, `aria-label="Stop response"`) {
 		t.Fatalf("expected terminal task-thread action to render send button, got %s", body)
 	}
 }
@@ -1201,7 +1201,7 @@ func TestHandler_TaskThread_RendersStopButtonWhileActiveAndSendWhenTerminal(t *t
 	rec := htmxGet(e, "/tasks/"+task.ID+"/thread")
 	assertCode(t, rec, http.StatusOK)
 	assertContains(t, rec, `hx-post="/tasks/`+task.ID+`/cancel?composer_stop=1&amp;expected_turn_id=`+exec.ID+`"`)
-	assertContains(t, rec, `title="Stop response"`)
+	assertContains(t, rec, `aria-label="Stop response"`)
 	assertContains(t, rec, `<rect x="6" y="6" width="12" height="12" rx="2"></rect>`)
 	assertNotContains(t, rec, `title="Cancel running task"`)
 	assertNotContains(t, rec, `>Cancel</button>`)
@@ -1215,7 +1215,7 @@ func TestHandler_TaskThread_RendersStopButtonWhileActiveAndSendWhenTerminal(t *t
 	rec = htmxGet(e, "/tasks/"+task.ID+"/thread")
 	assertCode(t, rec, http.StatusOK)
 	assertContains(t, rec, `hx-post="/tasks/`+task.ID+`/cancel?composer_stop=1"`)
-	assertContains(t, rec, `title="Stop response"`)
+	assertContains(t, rec, `aria-label="Stop response"`)
 
 	completedExec := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecCompleted, PromptSent: "done", Output: "done"}
 	if err := h.execRepo.Create(ctx, completedExec); err != nil {
@@ -1226,7 +1226,7 @@ func TestHandler_TaskThread_RendersStopButtonWhileActiveAndSendWhenTerminal(t *t
 	}
 	rec = htmxGet(e, "/tasks/"+task.ID+"/thread")
 	assertCode(t, rec, http.StatusOK)
-	assertContains(t, rec, `title="Send message"`)
+	assertContains(t, rec, `aria-label="Send message"`)
 	assertContains(t, rec, `<path d="M2 3l20 9-20 9 5-9-5-9z"></path>`)
 	assertNotContains(t, rec, `hx-post="/tasks/`+task.ID+`/cancel"`)
 }

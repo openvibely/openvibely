@@ -56,7 +56,7 @@
             const filter = filters.get(key(col)) || {};
             const all = cards(col);
             all.forEach(card => {
-                card.title = selectionModifier + '+click to select task(s)';
+                card.title = 'Select tasks (' + selectionModifier + '+click)';
                 card.hidden = col.dataset.kanbanCategory !== 'active' && !matches(card.dataset, filter);
                 if (card.hidden) selection().delete(card.dataset.taskId);
             });
