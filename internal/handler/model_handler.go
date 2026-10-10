@@ -996,6 +996,11 @@ func (h *Handler) CreateModel(c echo.Context) error {
 		h.workerSvc.DispatchNext()
 	}
 
+	// The modal saves before opening OAuth without replacing its draft UI.
+	if c.Request().Header.Get("Accept") == "application/json" {
+		c.Response().Header().Set("Cache-Control", "no-store")
+		return c.JSON(http.StatusOK, map[string]string{"id": a.ID, "oauth_connection_id": a.OAuthConnectionID})
+	}
 	// Return updated agents list for HTMX
 	if isHTMX(c) {
 		return h.renderRefreshedModels(c)
@@ -1077,6 +1082,11 @@ func (h *Handler) updateModelByID(c echo.Context, id string) error {
 		h.workerSvc.DispatchNext()
 	}
 
+	// The modal saves before opening OAuth without replacing its draft UI.
+	if c.Request().Header.Get("Accept") == "application/json" {
+		c.Response().Header().Set("Cache-Control", "no-store")
+		return c.JSON(http.StatusOK, map[string]string{"id": agent.ID, "oauth_connection_id": agent.OAuthConnectionID})
+	}
 	// Return updated agents list for HTMX
 	if isHTMX(c) {
 		return h.renderRefreshedModels(c)

@@ -1334,10 +1334,10 @@ func TestModelsContent_EditorOAuthActionUsesRuntimeSpecificLaunch(t *testing.T) 
 	if strings.Contains(out, "Disconnect account") || strings.Contains(out, "Reconnect account") {
 		t.Fatal("expected model cards not to expose connection-wide account controls")
 	}
-	if !strings.Contains(out, `'/models/' + encodeURIComponent(id) + '/oauth/initiate'`) {
+	if !strings.Contains(out, `'/models/' + encodeURIComponent(saved.id) + '/oauth/initiate'`) {
 		t.Fatal("expected the editor to derive its OAuth path from the loaded model")
 	}
-	if !strings.Contains(out, "select.value !== persistedConnectionID") || !strings.Contains(out, "Save this model before connecting the selected account") {
+	if !strings.Contains(out, "saveAndConnectModelOAuth(this)") || !strings.Contains(out, "Save &amp; Connect OAuth") {
 		t.Fatal("expected changed account selections to require save before OAuth initiation")
 	}
 	if !strings.Contains(out, "onclick=\"startCustomModelOAuth(this)\"") {

@@ -239,3 +239,117 @@ func TestModelOAuthSetupCancellationAndExpiry(t *testing.T) {
 		t.Fatal("setup cleanup changed model records")
 	}
 }
+
+// The built-in modal saves without an HTML swap, then authorizes that exact
+// persisted account and observes a new credential generation before finishing.
+func TestBuiltInModelOAuthModalSaveAndConnect(t *testing.T) {
+	for _, providerName := range []string{"anthropic", "openai"} {
+		t.Run(providerName, func(t *testing.T) {
+			t.Setenv("OAUTH_REDIRECT_MODE", "hosted")
+			t.Setenv("APP_BASE_URL", "https://app.example.com")
+			provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.Write([]byte(`{"access_token":"modal-access","refresh_token":"modal-refresh","expires_in":3600}`))
+			}))
+			defer provider.Close()
+			t.Setenv(strings.ToUpper(providerName)+"_OAUTH_TOKEN_URL", provider.URL)
+			h, e, repo := setupTestHandler(t)
+			h.openAIIdentityResolver = nil
+			h.oauthIdentityResolver = nil
+			originalOpen := openOAuthURL
+			opened := 0
+			openOAuthURL = func(string) error { opened++; return nil }
+			t.Cleanup(func() { openOAuthURL = originalOpen })
+			send := func(method, path string, form url.Values) map[string]string {
+				t.Helper()
+				req := httptest.NewRequest(method, path, strings.NewReader(form.Encode()))
+				req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+				req.Header.Set("Accept", "application/json")
+				rec := httptest.NewRecorder()
+				e.ServeHTTP(rec, req)
+				if rec.Code != http.StatusOK {
+					t.Fatalf("%s %s: %d %s", method, path, rec.Code, rec.Body.String())
+				}
+				var data map[string]string
+				if err := json.Unmarshal(rec.Body.Bytes(), &data); err != nil {
+					t.Fatal(err)
+				}
+				return data
+			}
+			model := "claude-sonnet-4-5-20250929"
+			if providerName == "openai" {
+				model = "gpt-5.5"
+			}
+			form := url.Values{"name": {"Modal OAuth"}, "provider": {providerName}, "model": {model}, providerName + "_auth_type": {"oauth"}, "auth_method": {"oauth"}, "oauth_connection_id": {"new"}}
+			saved := send(http.MethodPost, "/models", form)
+			if saved["id"] == "" || saved["oauth_connection_id"] == "" {
+				t.Fatal("save omitted model/account identity")
+			}
+			form.Set("model_config_id", saved["id"])
+			form.Set("oauth_connection_id", saved["oauth_connection_id"])
+			for attempt := 0; attempt < 2; attempt++ {
+				// The second save and sign-in exercises reconnect without duplicating the model.
+				if attempt > 0 {
+					h.desktopMode = true
+					send(http.MethodPost, "/models", form)
+				}
+				req := httptest.NewRequest(http.MethodGet, "/models/"+saved["id"]+"/oauth/initiate", nil)
+				req.Header.Set("Accept", "application/json")
+				rec := httptest.NewRecorder()
+				e.ServeHTTP(rec, req)
+				var flow struct {
+					URL          string `json:"authorization_url"`
+					Revision     string `json:"revision"`
+					ConnectionID string `json:"connection_id"`
+					Opened       bool   `json:"opened"`
+				}
+				if rec.Code != http.StatusOK {
+					t.Fatalf("initiate: %d", rec.Code)
+				}
+				if err := json.Unmarshal(rec.Body.Bytes(), &flow); err != nil {
+					t.Fatal(err)
+				}
+				if flow.Opened != h.desktopMode || opened != attempt {
+					t.Fatal("modal did not use the correct browser launch mode")
+				}
+				pending := send(http.MethodGet, "/models/"+saved["id"]+"/oauth/status", nil)
+				if pending["revision"] != flow.Revision || pending["connection_id"] != flow.ConnectionID {
+					t.Fatal("initiation does not match persisted connection")
+				}
+				authorizationURL, err := url.Parse(flow.URL)
+				if err != nil {
+					t.Fatal(err)
+				}
+				callback := url.Values{"code": {"modal-code"}, "state": {authorizationURL.Query().Get("state")}}
+				manual := `{"callback_url":"http://localhost:1455/auth/callback?` + callback.Encode() + `"}`
+				req = httptest.NewRequest(http.MethodPost, "/models/oauth/manual-complete", strings.NewReader(manual))
+				req.Header.Set("Content-Type", "application/json")
+				rec = httptest.NewRecorder()
+				e.ServeHTTP(rec, req)
+				if rec.Code != http.StatusOK {
+					t.Fatalf("complete: %d %s", rec.Code, rec.Body.String())
+				}
+				state := send(http.MethodGet, "/models/"+saved["id"]+"/oauth/status", nil)
+				if state["status"] != "connected" || state["revision"] == flow.Revision {
+					t.Fatal("new sign-in not observable in modal")
+				}
+			}
+			all, err := repo.List(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			count := 0
+			for _, cfg := range all {
+				if cfg.Name == "Modal OAuth" {
+					count++
+					if cfg.OAuthAccessToken != "modal-access" {
+						t.Fatal("credentials not persisted")
+					}
+				}
+			}
+			if count != 1 {
+				t.Fatalf("saved %d models", count)
+			}
+		})
+	}
+}
