@@ -2088,6 +2088,20 @@ yamlViewport.scrollTop = 0;
 							renderEdges(); syncCandidate(false);
 							var initialView = builder.querySelector('[data-automation-initial-view]');
 							if (initialView && initialView.value === 'details') selectAutomationBuilderView('details');
+                            // Compare the editable data, not focus or input events: graph edits
+                            // and programmatic field updates must also protect shortcut navigation.
+                            function automationEditSnapshot() {
+                                return JSON.stringify({
+                                    candidate: candidate,
+                                    yaml: automationYAMLValue(),
+                                    name: automationName ? automationName.value : '',
+                                    details: detailsForm ? Array.from(new FormData(detailsForm).entries()) : []
+                                });
+                            }
+                            var initialAutomationEditSnapshot = automationEditSnapshot();
+                            builder.hasUnsavedAutomationChanges = function() {
+                                return automationEditSnapshot() !== initialAutomationEditSnapshot;
+                            };
 					})();		</script>
 	</div>
 }

@@ -94,7 +94,7 @@ templ searchableSelectorScript() {
  </style>
 	<script>
 		(function() {
-			var controllerVersion = 20;
+			var controllerVersion = 21;
 			var previousController = window.openVibelySearchableSelectorController;
 			document.querySelectorAll('[data-searchable-selector-search]').forEach(function(input) { input.type = 'text'; });
 			document.querySelectorAll('[data-project-selector-clear]').forEach(function(control) { control.remove(); });
@@ -281,7 +281,7 @@ templ searchableSelectorScript() {
                 if (!(apple ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey)) return;
                 if (['ArrowUp', 'ArrowDown', 'KeyL'].indexOf(event.code) < 0) return;
                 if (event.target.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="textbox"]')) return;
-                if (document.querySelector('dialog[open], [data-openvibely-picker-open], [data-menu-open]') || (typeof HTMLElement.prototype.showPopover === 'function' && document.querySelector('[popover]:popover-open'))) return;
+                if (document.querySelector('dialog[open], [data-openvibely-picker-open], [data-menu-open], [data-automation-live-menu]:focus-within, [data-automation-builder-actions]:focus-within, [data-automation-live-menu].dropdown-open, [data-automation-builder-actions].dropdown-open') || (typeof HTMLElement.prototype.showPopover === 'function' && document.querySelector('[popover]:popover-open'))) return;
                 var context = automationContext();
                 if (!context || !context.root.getClientRects().length) return;
                 event.preventDefault();
@@ -305,6 +305,9 @@ templ searchableSelectorScript() {
                         if (index >= 0) next = visits.items[index + (event.code === 'ArrowUp' ? -1 : 1)];
                     }
                     if (!next || !context.root.isConnected) return;
+                    var builder = document.querySelector('[data-automation-yaml-builder]');
+                    if (builder && builder.hasUnsavedAutomationChanges && builder.hasUnsavedAutomationChanges() &&
+                        !window.confirm('Discard unsaved automation changes and switch automation?')) return;
                     visits.expected = next;
                     context.save();
                     await window.openVibelyNavigate(context.destination(next));
