@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -270,9 +271,13 @@ func TestBuiltInModelOAuthConnectBeforeSave(t *testing.T) {
 			}
 			before, _ := repo.List(context.Background())
 			var siblingID, connectionID string
-			for attempt := 0; attempt < 6; attempt++ {
-				if attempt == 2 || attempt >= 4 {
+			for attempt := 0; attempt < 8; attempt++ {
+				if attempt == 2 || (attempt >= 4 && attempt != 7) {
 					form.Set("oauth_connection_id", "new")
+				}
+				if attempt == 7 {
+					current, _ := repo.GetByID(context.Background(), form.Get("model_config_id"))
+					form.Set("oauth_connection_id", current.OAuthConnectionID)
 				}
 				rec := send("/models/oauth/setup")
 				if rec.Code != 200 {
@@ -295,6 +300,9 @@ func TestBuiltInModelOAuthConnectBeforeSave(t *testing.T) {
 				expectedModels := len(before)
 				if attempt > 0 {
 					expectedModels += 2
+				}
+				if attempt > 5 {
+					expectedModels++
 				}
 				if len(after) != expectedModels {
 					t.Fatal("sign-in persisted a model")
@@ -323,20 +331,36 @@ func TestBuiltInModelOAuthConnectBeforeSave(t *testing.T) {
 						}
 						current = newer
 					}
-					if ok, err := repo.ReplaceLinkedOAuthConnectionWithProfileIfRevision(context.Background(), current.ID, current.OAuthConnectionID, current.OAuthConfigRevision, current.Provider, "concurrent-access", "concurrent-refresh", time.Now().Add(time.Hour).UnixMilli(), "account", "Verified user", "principal"); err != nil || !ok {
-						t.Fatal(err)
+					if attempt >= 6 {
+						// Refresh writes deliberately retain the authorization revision.
+						ok, err := repo.UpdateLinkedOAuthConnectionTokensIfRevision(context.Background(), current.ID, current.OAuthConnectionID, current.OAuthConfigRevision, current.Provider, fmt.Sprintf("refreshed-access-%d", attempt), "refreshed-refresh", time.Now().Add(2*time.Hour).UnixMilli())
+						if err != nil || !ok {
+							t.Fatal("refresh failed", err)
+						}
+						refreshed, err := repo.GetByID(context.Background(), current.ID)
+						if err != nil || refreshed.OAuthConfigRevision != current.OAuthConfigRevision {
+							t.Fatal("refresh must retain the authorization revision", err)
+						}
+					} else {
+						if ok, err := repo.ReplaceLinkedOAuthConnectionWithProfileIfRevision(context.Background(), current.ID, current.OAuthConnectionID, current.OAuthConfigRevision, current.Provider, "concurrent-access", "concurrent-refresh", time.Now().Add(time.Hour).UnixMilli(), "account", "Verified user", "principal"); err != nil || !ok {
+							t.Fatal(err)
+						}
 					}
 					form.Set("name", "Must roll back")
 					rec = send("/models")
 					if rec.Code != http.StatusConflict {
 						t.Fatalf("stale sign-in status: %d", rec.Code)
 					}
+					expectedAccess := "concurrent-access"
+					if attempt >= 6 {
+						expectedAccess = fmt.Sprintf("refreshed-access-%d", attempt)
+					}
 					unchanged, _ := repo.GetByID(context.Background(), form.Get("model_config_id"))
-					if unchanged.Name != "Connected model" || unchanged.OAuthAccessToken != "concurrent-access" {
+					if unchanged.Name != "Connected model" || unchanged.OAuthAccessToken != expectedAccess {
 						t.Fatal("stale save was not atomic")
 					}
 					sibling, err := repo.GetByID(context.Background(), siblingID)
-					if err != nil || sibling.OAuthConnectionID != unchanged.OAuthConnectionID || sibling.OAuthAccessToken != "concurrent-access" {
+					if err != nil || sibling.OAuthConnectionID != unchanged.OAuthConnectionID || sibling.OAuthAccessToken != expectedAccess {
 						t.Fatal("stale draft replaced shared credentials", err)
 					}
 					connections, err := repo.ListOAuthConnections(context.Background(), current.Provider)
