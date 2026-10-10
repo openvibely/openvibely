@@ -5324,6 +5324,11 @@ templ ChatAutoScrollScript() {
 						if (window.dedupTaskSummaries && (text.indexOf('Created ') !== -1 || text.indexOf('Edited ') !== -1)) text = window.dedupTaskSummaries(text);
 						return text.replace(/\n{3,}/g, '\n\n').trim();
 					}
+					// Keep the final newline that trim() drops so the fence check can tell a
+					// finished closing fence from one still streaming in.
+					function markdownSource(raw, cleaned) {
+						return cleaned && /\n[ \t]*$/.test(raw) ? cleaned + '\n' : cleaned;
+					}
 					function prepareLargeMarkdownSegments() {
 						if (!shouldYieldPreparation) return true;
 						while (markdownPreparationIndex < segments.length) {
@@ -5494,7 +5499,7 @@ templ ChatAutoScrollScript() {
 				if (!t) { pendingText = ''; return; }
 				var div = document.createElement('div');
 				div.className = 'chat-markdown';
-				div._chatMarkdownSource = pendingText;
+				div._chatMarkdownSource = markdownSource(pendingText, t);
 				if (window.renderChatMarkdown) {
 					div.innerHTML = window.renderChatMarkdown(t);
 					if (window.addCodeCopyButtons) window.addCodeCopyButtons(div);
@@ -5775,7 +5780,7 @@ templ ChatAutoScrollScript() {
 						if (!seg.renderedContent) return;
 						var rendered = document.createElement('div');
 						rendered.className = 'chat-markdown';
-						rendered._chatMarkdownSource = seg.content;
+						rendered._chatMarkdownSource = markdownSource(seg.content, cleanPreparedText(seg.content));
 						if (typeof seg.renderedContent === 'string') rendered.innerHTML = seg.renderedContent;
 						else rendered.appendChild(seg.renderedContent);
 						if (window.addCodeCopyButtons) window.addCodeCopyButtons(rendered);

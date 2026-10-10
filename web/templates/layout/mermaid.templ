@@ -258,7 +258,6 @@ templ MermaidDiagrams() {
    });
    return Promise.all(pending);
   };
-  window.renderMermaidDiagrams.endsInsideFence=endsInsideFence;
   new MutationObserver(()=>window.renderMermaidDiagrams(document)).observe(document.documentElement,{attributes:true,attributeFilter:['data-theme']});
   document.addEventListener('htmx:historyRestore',()=>window.renderMermaidDiagrams(document));
  })();

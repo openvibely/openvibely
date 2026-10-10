@@ -175,7 +175,9 @@ func TestBrowserFunctional_MermaidRendersAfterLiveChatCompletion(t *testing.T) {
 	t.Run("incremental fence check matches full parse", func(t *testing.T) {
 		phase.Store(0)
 		runComposerFocusCDP(t, chrome, server.URL+"/chat?project_id="+project.ID, "mermaid-fence-parity", func(browser *composerFocusCDP) {
-			browser.waitFor("fence check", `String(typeof (window.renderMermaidDiagrams&&window.renderMermaidDiagrams.endsInsideFence)+':'+typeof (window.marked&&window.marked.lexer))`, "function:function")
+			// Evaluate a private copy of the page's own fence check instead of exposing it globally.
+			loadFenceCheck := `(function(){var src=Array.from(document.scripts).map(function(s){return s.textContent}).find(function(t){return t.indexOf('function endsInsideFence')!==-1})||'';var a=src.indexOf('const fenceState'),b=src.indexOf('function streamingFenceClosed');if(a<0||b<a)return null;return new Function(src.slice(a,b)+';return endsInsideFence;')();})()`
+			browser.waitFor("fence check", `String(typeof `+loadFenceCheck+`+':'+typeof (window.marked&&window.marked.lexer))`, "function:function")
 			samples := []string{
 				"Intro\n\n```mermaid\nflowchart TD\n A --> B\n```\n\nAfter\n",
 				"1. Step one\ncontinued lazily\n\n    ```mermaid\n    flowchart TD\n    ```\n\n2. Two\n",
@@ -187,7 +189,7 @@ func TestBrowserFunctional_MermaidRendersAfterLiveChatCompletion(t *testing.T) {
 				"```js\nx\n```\n\n```mermaid\ngraph LR\n    ```\n- ```\n```\n",
 			}
 			raw, _ := json.Marshal(samples)
-			got := browser.evaluate(`(function(){var f=window.renderMermaidDiagrams.endsInsideFence,samples=` + string(raw) + `;
+			got := browser.evaluate(`(function(){var f=` + loadFenceCheck + `,samples=` + string(raw) + `;
 for(var s=0;s<samples.length;s++){var owner={},text=samples[s];for(var size=1;size<=7;size+=3){owner={};for(var i=0;i<=text.length;i+=size){var part=text.slice(0,i);if(f(owner,part)!==f({},part))return 'mismatch sample '+s+' size '+size+' at '+i;}
 for(var r=0;r<samples.length;r++){if(f(owner,samples[r])!==f({},samples[r]))return 'mismatch after rewrite '+s+' to '+r;}}}
 return 'ok';})()`)
