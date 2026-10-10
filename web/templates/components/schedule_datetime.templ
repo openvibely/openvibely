@@ -102,6 +102,11 @@ templ ScheduleDateTime(value string) {
   }
   function calendar(state, focusDate) {
    const {popup,selected,month} = state;
+   const today=new Date();
+   const todayButton=popup.querySelector('[data-today]');
+   const currentMonth=month.getFullYear()===today.getFullYear() && month.getMonth()===today.getMonth();
+   if(currentMonth && document.activeElement===todayButton)popup.querySelector('[data-month-step="-1"]').focus({preventScroll:true});
+   todayButton.disabled=currentMonth;
    popup.querySelector('[data-month-title]').textContent=month.toLocaleDateString(undefined,{month:'long',year:'numeric'});
    const days=popup.querySelector('.schedule-datetime-days');
    days.replaceChildren();
@@ -234,7 +239,6 @@ templ ScheduleDateTime(value string) {
   });
   window.addEventListener('resize',()=>{if(active)position(active);});
   document.addEventListener('scroll',event=>{if(active && !active.popup.contains(event.target))position(active);},true);
-  document.addEventListener('focusin',event=>{if(active && event.target!==active.input && !active.popup.contains(event.target))close(active,false);});
   document.addEventListener('close',event=>{if(active && event.target.contains(active.input))close(active,false);},true);
   document.addEventListener('htmx:beforeSwap',event=>{
    const target=event.detail && event.detail.target;
