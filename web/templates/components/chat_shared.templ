@@ -1765,12 +1765,18 @@ templ ChatInputForm(config ChatInputFormConfig) {
 				function _composerFocusNavigationTrigger(event) {
 					var target = event && event.detail && (event.detail.target || event.detail.elt);
 					var active = document.activeElement;
-					if (!target || target.id !== 'main-content' || !active || !active.matches || !active.matches('[data-nav-base]')) return null;
+					if (!target || target.id !== 'main-content' || !active || !active.matches) return null;
+					// HTMX restores matching button IDs across task navigation. That
+					// breadcrumb focus belongs to navigation, not a new editing choice.
+					if (active.matches('[data-breadcrumb-selector-button]') && active.closest('#task-detail-content')) return active;
+					if (!active.matches('[data-nav-base]')) return null;
 					return active.getAttribute('data-nav-base') === window.location.pathname ? active : null;
 				}
 
 				function _rememberComposerFocusNavigationTrigger(event) {
-					_composerFocusState.navigationTrigger = _composerFocusNavigationTrigger(event);
+					var target = event.detail && (event.detail.target || event.detail.elt);
+					// Keep the page navigation trigger through the lazy thread swap.
+					if (target && target.id === 'main-content') _composerFocusState.navigationTrigger = _composerFocusNavigationTrigger(event);
 				}
 
 				window.openVibelyCancelComposerFocus = _cancelComposerFocus;
