@@ -31,7 +31,7 @@ func TestAppendToolModeSystemPromptCoversChatAndTaskFollowupsAndPreservesPlan(t 
 
 	rt := &llmcontracts.RuntimeTools{Definitions: []llmcontracts.RuntimeToolDefinition{{Name: "create_task"}}}
 	capable := appendToolModeSystemPrompt("base", rt, models.ChatModeOrchestrate, false)
-	if !strings.Contains(capable, llmprompt.ChatActionToolModeInstructions) || !strings.Contains(capable, "Available action tools: create_task") {
+	if !strings.Contains(capable, llmprompt.ChatActionToolModeInstructions) || strings.Contains(capable, "Available action tools") {
 		t.Fatalf("tool-capable chat prompt missing concrete runtime guidance: %q", capable)
 	}
 

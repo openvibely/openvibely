@@ -278,7 +278,7 @@ func TestCallDirectUsesResponsesAPIWithAttachmentsAndUsage(t *testing.T) {
 	}
 }
 
-func TestCallCompletionsStreamingTaskWithRuntimeActionsUsesToolModePrompt(t *testing.T) {
+func TestCallCompletionsStreamingTaskWithRuntimeActionsOmitsToolNote(t *testing.T) {
 	var gotBody map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
@@ -339,7 +339,7 @@ func TestAppendToolModeSystemPromptCoversChatAndTaskFollowupsAndPreservesPlan(t 
 
 	rt := &llmcontracts.RuntimeTools{Definitions: []llmcontracts.RuntimeToolDefinition{{Name: "create_task"}}}
 	capable := appendToolModeSystemPrompt("base", rt, models.ChatModeOrchestrate, false)
-	if !strings.Contains(capable, llmprompt.ChatActionToolModeInstructions) || !strings.Contains(capable, "Available action tools: create_task") {
+	if !strings.Contains(capable, llmprompt.ChatActionToolModeInstructions) || strings.Contains(capable, "Available action tools") {
 		t.Fatalf("tool-capable chat prompt missing concrete runtime guidance: %q", capable)
 	}
 
