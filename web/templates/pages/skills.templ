@@ -90,13 +90,13 @@ templ skillsContent(skills []SkillCard, canManage bool, currentProjectID string,
 			<div class="dropdown dropdown-end">
 				<label
 					tabindex="0"
-					class="btn btn-primary btn-sm"
+					class="btn btn-ghost btn-sm btn-square" aria-label="Add Skill" title="Add Skill"
 					onclick="handleDropdownToggle(event)"
 					if !canManage {
 						disabled
 					}
 				>
-					+ Add Skill
+					@pageCreateIcon()
 				</label>
 				<ul tabindex="0" class="ov-menu ov-menu-actions ov-menu-scroll dropdown-content z-[100] menu w-56">
 					<li>
@@ -114,13 +114,13 @@ templ skillsContent(skills []SkillCard, canManage bool, currentProjectID string,
 				<div class="text-center py-12" data-search-empty-state>
 				<p class="opacity-50 mb-4">No standalone skills found yet.</p>
 				<button
-					class="btn btn-primary"
+					class="btn btn-ghost btn-sm btn-square" aria-label="Create Skill" title="Create Skill"
 					onclick="openNewSkillModal()"
 					if !canManage {
 						disabled
 					}
 				>
-					Create Skill
+					@pageCreateIcon()
 				</button>
 			</div>
 		} else {

@@ -2152,7 +2152,7 @@ func TestAutomationBuilderWebSaveIsBrowserLocalUntilAtomicSaveAndProjectScoped(t
 	require.Equal(t, http.StatusOK, portfolio.Code)
 	body := portfolio.Body.String()
 	for _, marker := range []string{
-		`>+ New Automation</`,
+		`aria-label="New Automation"`,
 		`Create one from Template, Describe, or Custom.`,
 		`data-automation-new-menu`,
 		`data-automation-new-template`,

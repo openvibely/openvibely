@@ -83,11 +83,11 @@ func TestHandler_ListTasks_HTMXNavigation(t *testing.T) {
 
 	body := rec.Body.String()
 
-	// Verify that the response includes the header with "Tasks" and "+ Add Task"
+	// Verify that the response includes the header with "Tasks" and `aria-label="Add Task"`
 	if !strings.Contains(body, "Tasks") {
 		t.Error("expected response to contain 'Tasks' header, but it was missing")
 	}
-	if !strings.Contains(body, "+ Add Task") {
+	if !strings.Contains(body, `aria-label="Add Task"`) {
 		t.Error("expected response to contain '+ Add Task' button, but it was missing")
 	}
 
@@ -404,7 +404,7 @@ func TestHandler_ListTasks_NonHTMX(t *testing.T) {
 	if !strings.Contains(body, "Tasks") {
 		t.Error("expected page to contain 'Tasks' header")
 	}
-	if !strings.Contains(body, "+ Add Task") {
+	if !strings.Contains(body, `aria-label="Add Task"`) {
 		t.Error("expected page to contain '+ Add Task' button")
 	}
 	if !strings.Contains(body, "kanban-board") {

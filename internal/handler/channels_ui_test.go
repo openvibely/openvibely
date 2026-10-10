@@ -201,7 +201,7 @@ func TestChannelsPageRendersCardLayout(t *testing.T) {
 	}
 
 	// Verify "Add Channel" button
-	if !strings.Contains(body, "+ Add Channel") {
+	if !strings.Contains(body, `aria-label="Add Channel"`) {
 		t.Error("expected Add Channel button")
 	}
 
