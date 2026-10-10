@@ -4822,17 +4822,17 @@ templ ChatAutoScrollScript() {
 				function completeTool(name) {
 					if (calls[name]) { calls[name]--; pending--; }
 				}
-				var boundary = 0, match, rangeIndex = 0, hasControls = false;
+				var boundary = 0, match, rangeIndex = 0, hasControls = false, proseStart = 0;
 				while ((match = controls.exec(text)) !== null) {
 					while (rangeIndex < ranges.length && ranges[rangeIndex].end <= match.index) rangeIndex++;
 					if (!tool && rangeIndex < ranges.length && ranges[rangeIndex].start <= match.index) continue;
 					hasControls = true;
 					var control = match[1];
 					if (tool) {
-						if (control === '/Tool') { tool = false; completeTool(resultName); }
+						if (control === '/Tool') { tool = false; completeTool(resultName); proseStart = controls.lastIndex; }
 						continue;
 					}
-					if (thinking) { if (control === '/Thinking') thinking = false; continue; }
+					if (thinking) { if (control === '/Thinking') { thinking = false; proseStart = controls.lastIndex; } continue; }
 					// A marker ends the preceding Markdown section in the full renderer too.
 					// Keep adjacent thinking sections together until substantive text follows.
 					if (!pending && !compaction && (control === 'Thinking' || control.indexOf('Using tool:') === 0) &&
@@ -4846,22 +4846,24 @@ templ ChatAutoScrollScript() {
 					} else if (/^Tool \S+ (done|error)(:|$)/.test(control)) {
 						resultName = window.normalizeStreamingToolName(control.split(' ')[1]);
 						if (/^Tool \S+ (done|error)$/.test(control)) tool = true;
-						else completeTool(resultName);
+						else { completeTool(resultName); proseStart = controls.lastIndex; }
 					}
 					else if (control.indexOf('Compaction started') === 0) compaction = true;
-					else if (control.indexOf('Compaction ') === 0) compaction = false;
+					else if (control.indexOf('Compaction ') === 0) { compaction = false; proseStart = controls.lastIndex; }
 				}
-				// Without transcript controls, Marked's top-level tokens keep lists,
+				// After closed controls, advance through subsequent prose as well. Keep
+				// short interstitial text with thinking because the full renderer merges it.
+				// Marked's top-level tokens keep lists,
 				// tables, blockquotes and fences intact. Retain the final non-space token
 				// so a following line can still extend it. References reconcile at finish.
-				if (!hasControls && window.marked && window.marked.lexer) {
+				if ((!hasControls || (!thinking && !tool && !pending && !compaction && proseStart > 0)) && window.marked && window.marked.lexer) {
 					// Bound synchronous lexing when resuming a large prose-only response.
-					var tokens = window.marked.lexer(text.slice(0, 64 * 1024)), offset = 0, lastBlock = 0;
+					var tokens = window.marked.lexer(text.slice(proseStart, proseStart + 64 * 1024)), offset = proseStart, lastBlock = proseStart;
 					tokens.forEach(function(token) {
 						if (token.type !== 'space') lastBlock = offset;
 						offset += token.raw.length;
 					});
-					if (lastBlock >= 8192 && !ranges.some(function(range) { return range.start < lastBlock && range.end > lastBlock; })) boundary = lastBlock;
+					if (lastBlock >= 8192 && (!hasControls || text.slice(proseStart, lastBlock).trim().length >= 100) && !ranges.some(function(range) { return range.start < lastBlock && range.end > lastBlock; })) boundary = lastBlock;
 				}
 				return boundary;
 			};
@@ -4886,6 +4888,7 @@ templ ChatAutoScrollScript() {
 				}
 				var boundary = ranges === null ? 0 : window.chatStreamStableBoundary(suffix, ranges);
 				state.tail._chatStreamStateKey = _thinkingStateKey(container) + ':tail:' + state.offset;
+				state.tail._chatToolStateKey = _thinkingStateKey(container);
 				var options = { offset: state.renderOffset, ordinal: state.ordinal };
 				var rendered = await window.renderStreamingContent(state.tail, boundary ? suffix.slice(0, boundary) : suffix, yieldBetweenBatches, options);
 				if (rendered === false || container._incrementalChat !== state || state.generation !== generation) return false;
@@ -4899,6 +4902,7 @@ templ ChatAutoScrollScript() {
 					state.tail.style.display = 'contents';
 					container.appendChild(state.tail);
 					state.tail._chatStreamStateKey = _thinkingStateKey(container) + ':tail:' + state.offset;
+					state.tail._chatToolStateKey = _thinkingStateKey(container);
 					rendered = await window.renderStreamingContent(state.tail, suffix.slice(boundary), yieldBetweenBatches, { offset: state.renderOffset, ordinal: state.ordinal });
 				}
 				return rendered !== false && container._incrementalChat === state && state.generation === generation;
@@ -5372,6 +5376,7 @@ templ ChatAutoScrollScript() {
 			// Uses both a local array (fast path for same-call re-renders) and a
 			// persistent window._thinkingOpenStates map (survives morph:outerHTML DOM replacement).
 			var containerKey = _thinkingStateKey(container);
+			var toolContainerKey = container._chatToolStateKey || containerKey;
 			var prevThinkingStates = [];
 			container.querySelectorAll('details.stream-thinking').forEach(function(d) {
 					prevThinkingStates.push(d.open);
@@ -5388,7 +5393,7 @@ templ ChatAutoScrollScript() {
 				var pinned = el.getAttribute('data-scroll-pinned') !== 'false';
 				var scrollState = { scrollTop: el.scrollTop || 0, pinned: pinned };
 				prevToolBodyScrollStates[toolID + ':' + rowKind] = scrollState;
-				var persistentStateKey = (containerKey || 'chat') + ':' + toolID + ':' + rowKind;
+				var persistentStateKey = (toolContainerKey || 'chat') + ':' + toolID + ':' + rowKind;
 				var persistentState = window._toolOutputRowStates[persistentStateKey] || {};
 				persistentState.scrollTop = scrollState.scrollTop;
 				persistentState.pinned = scrollState.pinned;
@@ -5538,7 +5543,7 @@ templ ChatAutoScrollScript() {
 				var inContent = '';
 				var dn = toolDisplayName(seg.name);
 				function rowStateKey(rowKind) {
-					return (containerKey || 'chat') + ':' + (seg.toolRenderID || '') + ':' + rowKind;
+					return (toolContainerKey || 'chat') + ':' + (seg.toolRenderID || '') + ':' + rowKind;
 				}
 				function trackScrollPin(el, stateKey) {
 					el.setAttribute('data-scroll-pinned', 'true');
@@ -5883,7 +5888,7 @@ templ ChatAutoScrollScript() {
 			container.querySelectorAll('.stream-tool-body-scroll').forEach(function(el) {
 				var toolID = el.getAttribute('data-tool-render-id') || '';
 				var rowKind = el.getAttribute('data-tool-row') || '';
-				var state = prevToolBodyScrollStates[toolID + ':' + rowKind] || window._toolOutputRowStates[(containerKey || 'chat') + ':' + toolID + ':' + rowKind];
+				var state = prevToolBodyScrollStates[toolID + ':' + rowKind] || window._toolOutputRowStates[(toolContainerKey || 'chat') + ':' + toolID + ':' + rowKind];
 				if (!state || state.pinned) {
 					el.scrollTop = Number.MAX_SAFE_INTEGER;
 					el.setAttribute('data-scroll-pinned', 'true');

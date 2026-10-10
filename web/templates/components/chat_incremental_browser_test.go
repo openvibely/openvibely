@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -34,9 +35,48 @@ func runIncrementalChatBrowser(t *testing.T, script string) json.RawMessage {
 	if start < 0 || end < start {
 		t.Fatal("missing production markdown helpers")
 	}
-	fixture := `<!doctype html><html><head><script src="` + static.URL("vendor/marked.min.js") + `" data-ov-asset="marked"></script></head><body>
+	// Extract the production SSE coalescer, rather than duplicating its scheduling.
+	var bubble bytes.Buffer
+	if err := ChatBubbleStreaming("Assistant", "fixture", "messages", "", false).Render(context.Background(), &bubble); err != nil {
+		t.Fatal(err)
+	}
+	bubbleJS := bubble.String()
+	coalescerStart := strings.Index(bubbleJS, "function renderBufferedOutput(force, yieldLarge)")
+	coalescerEnd := strings.Index(bubbleJS, "function flushBufferedOutput()")
+	if coalescerStart < 0 || coalescerEnd <= coalescerStart {
+		t.Fatal("missing production stream coalescer")
+	}
+	coalescer := `window.makeMeasuredStream = function(container, interval) {
+	 var textBuffer = '', renderScheduled = false, renderDelayTimer = null;
+	 var lastRenderFinishedAt = 0, lastRenderedSourceLength = 0;
+	 var largeStreamRenderThreshold = 100 * 1024, largeStreamRenderInterval = interval;
+	 var messagesId = 'messages', trackerKey = '_measurementTracker', tracker = {shouldAutoScroll:()=>false};
+	 ` + bubbleJS[coalescerStart:coalescerEnd] + `
+	 return {append: function(delta) {textBuffer += delta; renderBufferedOutput(false);},
+	 idle: function() {return !renderScheduled && lastRenderedSourceLength === textBuffer.length;},
+	 finish: function() {return renderBufferedOutput(true, true);}};
+	};`
+	// Test-only CPU probes time synchronous preparation/rendering batches, including
+	// batches resumed after yielding, and worker handler CPU. They never time waits
+	// as CPU or change yielding, worker selection, or stream scheduling.
+	probe := `window.streamCPU = 0; window.streamCPUDepth = 0; window.streamWorkerReplies = 0;
+	window.measureStreamCPU = function(fn) {return function() {
+	 const outer = window.streamCPUDepth++ === 0, start = performance.now();
+	 try {return fn.apply(this, arguments);} finally {window.streamCPUDepth--; if (outer) window.streamCPU += performance.now()-start;}
+	};};
+	window.streamWorkerProbe = ';const originalHandler=self.onmessage, originalPost=self.postMessage; self.onmessage=function(event){const started=performance.now();self.postMessage=function(value){value.streamCPU=performance.now()-started;return originalPost.call(self,value);};return originalHandler.call(self,event);};';
+	const OriginalStreamWorker = window.Worker;
+	window.Worker = class extends OriginalStreamWorker { constructor(...args) {super(...args); this.addEventListener('message', event=>{window.streamWorkerReplies++; window.streamCPU += event.data.streamCPU || 0;});} };
+	`
+	baseJS := strings.ReplaceAll(source[start:end], "new Blob([workerSource]", "new Blob([workerSource + window.streamWorkerProbe]")
+	sharedJS := shared.String()
+	sharedJS = strings.Replace(sharedJS, "function renderPreparedSegments() {", "preparationPhases = preparationPhases.map(window.measureStreamCPU);\nfunction renderPreparedSegments() {", 1)
+	sharedJS = strings.Replace(sharedJS, "function fillLargeToolOutputChunks(done, fail) {", "renderSegment = window.measureStreamCPU(renderSegment); finishRender = window.measureStreamCPU(finishRender);\nfunction fillLargeToolOutputChunks(done, fail) {", 1)
+	styles := strings.Join(regexp.MustCompile(`(?s)<style>.*?</style>`).FindAllString(source, -1), "")
+	fixture := `<!doctype html><html><head>` + styles + `<script src="` + static.URL("vendor/marked.min.js") + `" data-ov-asset="marked"></script></head><body>
  <div id="messages" style="height:300px;overflow:auto"><div id="pair" data-execution-pair="true" data-exec-id="fixture" data-exec-status="running"><div id="stream" class="chat-bubble-assistant-msg"></div></div></div>
- <script>` + source[start:end] + `</script>` + shared.String() + `<script>
+ <script>` + probe + baseJS + `</script>` + sharedJS + `<script>
+ ` + coalescer + `
  const assert = (ok, message) => { if (!ok) throw Error(message); };
  const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
  const paint = () => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
@@ -152,6 +192,33 @@ func TestBrowserFunctional_IncrementalChatRendering(t *testing.T) {
  assert(chatAutoScroll.isNearBottom(messages), 'pinned reader did not follow');
  // No controls: completed Markdown blocks are reusable too; open fences remain tail.
  assert(chatStreamStableBoundary(prose.repeat(10)) > 0, 'large prose resume did not retain a prefix');
+ // A completed control followed by a long answer must not keep the entire answer provisional.
+ for (const prefix of ['[Thinking]\nDone.\n[/Thinking]\n', '[Using tool: bash]\n[Tool bash done]\nDone.\n[/Tool]\n', '[Compaction started]\n[Compaction done | 50]\n']) {
+  const answer = prefix+prose;
+  assert(chatStreamStableBoundary(answer) > prefix.length, 'closed control blocked prose boundaries');
+  await renderLiveChatContent(replacement, answer, false);
+  const stable = replacement.firstChild;
+  const offset = replacement._incrementalChat.offset;
+  await renderLiveChatContent(replacement, answer+prose, false);
+  assert(replacement.firstChild === stable && replacement._incrementalChat.offset > offset, 'closed control caused a growing full-prefix render');
+ }
+ // Expansion and a parked output scroll survive terminal reconciliation and a morph.
+ const output = prose+'[Using tool: bash]\n[Tool bash done]\n'+('a line of output\n').repeat(100)+'[/Tool]\n'+prose;
+ await renderLiveChatContent(replacement, output, false);
+ let toggle = replacement.querySelector('.stream-tool-output-toggle');
+ assert(toggle && toggle.getAttribute('aria-expanded') === 'false', 'missing collapsed output fixture');
+ toggle.click();
+ let outputScroll = replacement.querySelector('[data-tool-row="out"]');
+ outputScroll.style.height = '50px'; outputScroll.style.overflow = 'auto'; outputScroll.scrollTop = 30;
+ outputScroll.dispatchEvent(new Event('scroll'));
+ await renderLiveChatContent(replacement, output, false, true);
+ assert(replacement.querySelector('.stream-tool-output-toggle').getAttribute('aria-expanded') === 'true', 'terminal reconciliation collapsed output');
+ assert(replacement.querySelector('[data-tool-row="out"]').getAttribute('data-scroll-pinned') === 'false', 'terminal reconciliation lost output scroll intent');
+ const morphed = replacement.cloneNode(false); replacement.replaceWith(morphed);
+ await renderLiveChatContent(morphed, output, false);
+ assert(morphed.querySelector('.stream-tool-output-toggle').getAttribute('aria-expanded') === 'true', 'morph collapsed output');
+ morphed.replaceWith(replacement);
+
  assert(chatStreamStableBoundary(prose+fence+'js\nunfinished\n\n') > 0, 'plain Markdown prefix not committed');
  assert(chatStreamStableBoundary(fence+'js\n'+prose) === 0, 'open fence was split');
  // Large provisional tails still yield, and cancellation cannot commit stale work.
@@ -174,18 +241,13 @@ func TestBrowserPerformance_IncrementalChatRendering(t *testing.T) {
 	report := runIncrementalChatBrowser(t, `
  const record = '## Response section\n\n'+('Deterministic prose with **bold**, *emphasis* and inline '+String.fromCharCode(96)+'code'+String.fromCharCode(96)+'.\n\n').repeat(60)+fence+'js\nconst answer = 42;\n'+fence+'\n\n[Thinking]\nChecking the result.\n[/Thinking]\n[Using tool: bash | echo answer]\n[Tool bash done]\nanswer\n[/Tool]\n'+'Finished this section. '.repeat(8)+'\n\n';
  const original = window.renderStreamingContent;
- const boundary = window.chatStreamStableBoundary;
- let cpu = 0, chars = 0;
+ const live = window.renderLiveChatContent;
+ window.chatStreamStableBoundary = window.measureStreamCPU(window.chatStreamStableBoundary);
+ let chars = 0, yielded = 0;
  window.renderStreamingContent = function(container, text, yielding, options) {
-  const start = performance.now();
-  // Both versions use synchronous preparation to measure actual renderer CPU,
-  // excluding worker and timer wait time. Production retains yielding for large tails.
-  try { chars += text.length; return original(container, text, false, options); }
-  finally { cpu += performance.now()-start; }
- };
- window.chatStreamStableBoundary = function(text) {
-  const start = performance.now();
-  try { return boundary(text); } finally { cpu += performance.now()-start; }
+  chars += text.length;
+  if (yielding !== false && text.length >= 65536) yielded++;
+  return original(container, text, yielding, options);
  };
  let report = {};
  for (const size of [65536,262144,1048576]) {
@@ -193,25 +255,49 @@ func TestBrowserPerformance_IncrementalChatRendering(t *testing.T) {
   report[size] = {};
   for (const mode of ['baseline','incremental']) {
    stream.replaceChildren(); delete stream._incrementalChat;
-   cpu = 0; chars = 0;
-   let latencies = [];
-   let due = performance.now();
-   for (let end = 8192; end <= size; end += 8192) {
-    await pause(Math.max(0,due-performance.now())); due += 50;
-    const received = performance.now();
-    if (mode === 'baseline') await renderStreamingContent(stream,fixture.slice(0,end),false);
-    else await renderLiveChatContent(stream,fixture.slice(0,end),false);
-    await paint();
-    latencies.push(performance.now()-received);
-   }
-   // Include authoritative reconciliation in cumulative CPU and character counts.
-   await renderLiveChatContent(stream,fixture,false,true);
+   window.streamCPU = 0; window.streamWorkerReplies = 0; chars = 0; yielded = 0;
+   const latencies = [], arrivals = [];
+   let pendingPaints = 0;
+   window.renderLiveChatContent = function(container, text, yielding, final) {
+    const result = mode === 'baseline' ? window.renderStreamingContent(container,text,yielding) : live(container,text,yielding,final);
+    return Promise.resolve(result).then(committed=>{
+     if (committed !== false && !final) {
+      pendingPaints++;
+      paint().then(()=>{
+       const visible = performance.now();
+       arrivals.forEach(delta=>{if (!delta.visible && delta.end <= text.length) {delta.visible = true; latencies.push(visible-delta.received);}});
+       pendingPaints--;
+      });
+     }
+     return committed;
+    });
+   };
+   // Same production coalescer in both cases; the baseline used 250 ms and
+   // full-content rendering, whereas the incremental path uses 50 ms.
+   const input = makeMeasuredStream(stream, mode === 'baseline' ? 250 : 50);
+   const start = performance.now();
+   // Schedule every delta in advance, independently of renderer completion.
+   await Promise.all(Array.from({length:size/8192}, (_,i)=>new Promise(resolve=>{
+    setTimeout(()=>{
+     const end = (i+1)*8192;
+     arrivals.push({end,received:performance.now(),visible:false});
+     input.append(fixture.slice(end-8192,end));
+     resolve();
+    }, i*50);
+   })));
+   while (!input.idle() || pendingPaints) await pause(10);
+   assert(latencies.length === size/8192, 'missing delta visibility samples');
+   await input.finish();
    latencies.sort((a,b)=>a-b);
-   report[size][mode] = {cpuMS:cpu,characters:chars,p95MS:latencies[Math.ceil(latencies.length*.95)-1]};
+   report[size][mode] = {cpuMS:window.streamCPU,characters:chars,p95MS:latencies[Math.ceil(latencies.length*.95)-1],yieldedRenders:yielded,workerReplies:window.streamWorkerReplies,arrivalSpanMS:arrivals.at(-1).received-start};
+   if (size >= 100*1024) {
+    assert(yielded > 0, 'production yielding was bypassed');
+    assert(window.streamWorkerReplies > 0, 'production code-range workers were bypassed');
+   }
   }
  }
  return report;`)
-	t.Logf("64/256/1024 KiB, 8 KiB deltas at 20 Hz (CPU includes final reconciliation): %s", report)
+	t.Logf("64/256/1024 KiB, independent 8 KiB arrivals at 20 Hz; production coalescer/workers; renderer batch and worker CPU including final reconciliation: %s", report)
 	var metrics map[string]map[string]struct {
 		CPU        float64 `json:"cpuMS"`
 		Characters int     `json:"characters"`
