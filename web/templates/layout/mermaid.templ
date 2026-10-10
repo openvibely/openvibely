@@ -18,16 +18,24 @@ templ MermaidDiagrams() {
    return !!pair && terminal.has(pair.getAttribute('data-exec-status'));
   };
   // A fence closes only on a complete line; a trailing partial line can still change.
+  function fenceLine(line) {
+   const match=/^((?:[ \t>]|[-*+][ \t]|\d{1,9}[.)][ \t])*)(`{3,}|~{3,})(.*)$/.exec(line);
+   if (!match) return null;
+   const prefix=match[1];
+   return {fence:match[2], info:match[3], quotes:(prefix.match(/>/g)||[]).length,
+    listMarker:/[-*+][ \t]|\d[.)][ \t]/.test(prefix), column:prefix.replace(/>[ ]?/g,'').replace(/\t/g,'    ').length};
+  }
   function endsInsideFence(text) {
-   let open='';
+   let open=null;
    const lines=text.split(/\r\n|\r|\n/);
    lines.forEach((line,index)=>{
-    // Strip list indentation and blockquote markers; over-matching only delays rendering.
-    const match=/^(?:[\s>]|[-*+]\s|\d{1,9}[.)]\s)*(`{3,}|~{3,})(.*)$/.exec(line);
-    if (!match) return;
+    const found=fenceLine(line);
+    if (!found) return;
     if (!open) {
-     if (!(match[1][0]==='`' && match[2].includes('`'))) open=match[1];
-    } else if (index<lines.length-1 && match[1][0]===open[0] && match[1].length>=open.length && !match[2].trim()) open='';
+     if (!(found.fence[0]==='`' && found.info.includes('`'))) open=found;
+    } else if (index<lines.length-1 && !found.listMarker && found.quotes===open.quotes &&
+     Math.abs(found.column-open.column)<=3 && found.fence[0]===open.fence[0] &&
+     found.fence.length>=open.fence.length && !found.info.trim()) open=null;
    });
    return !!open;
   }
