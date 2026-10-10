@@ -15,7 +15,7 @@ templ NewTask(projects []models.Project, project *models.Project, agents []model
 }
 
 templ NewTaskContent(project *models.Project, agents []models.LLMConfig, agentDefs []repository.AgentTaskUIOption) {
- <div id="task-detail-content" class="h-full flex flex-col" data-task-id="" data-project-id={ project.ID } data-initial-tab="chat" hx-history="false">
+ <div id="task-detail-content" class="h-full flex flex-col" data-task-id="" data-project-id={ project.ID } data-initial-tab="chat">
   @layout.PageTitle("New Task")
   <div data-page-header class="flex items-center gap-2 mb-6 flex-shrink-0 min-w-0">
    <nav class="flex min-w-0 flex-1 flex-shrink-0 flex-wrap items-start" aria-label="Breadcrumb" data-page-header>
@@ -78,33 +78,64 @@ templ NewTaskContent(project *models.Project, agents []models.LLMConfig, agentDe
     root.querySelectorAll('#tab-details input, #tab-details select, #tab-details textarea').forEach(function(input) {
      input.setAttribute('form', 'task-thread-form');
     });
-    var form = document.getElementById('task-thread-form');
-    // Do not cache an abandoned creation draft in HTMX history.
-    function discardDraft(event) {
-     if(event.type==='htmx:beforeCleanupElement' && event.detail.elt!==root) return;
-     form.reset();
-     var clear=window[form.getAttribute('data-clear-func-name')];
-     if(clear) clear();
-     root.querySelector('#task-message-input').value='';
-     if(event.type==='htmx:beforeCleanupElement') {
-      document.body.removeEventListener('htmx:beforeHistorySave',discardDraft);
-      document.body.removeEventListener('htmx:beforeCleanupElement',discardDraft);
-     }
+    function titleDraftRoot(node) {
+     var candidate = node && node.closest ? node.closest('#task-detail-content') : null;
+     return candidate && candidate.getAttribute('data-task-id') === '' ? candidate : null;
     }
-    document.body.addEventListener('htmx:beforeHistorySave',discardDraft);
-    document.body.addEventListener('htmx:beforeCleanupElement',discardDraft);
-
-    form.addEventListener('htmx:afterRequest', function(event) {
-     if (!event.detail || event.detail.elt !== form) return;
-     var xhr = event.detail.xhr;
-     var error = root.querySelector('#new-task-error');
-     if (!error || !root.isConnected) return;
-     if (event.detail.successful || (xhr && xhr.status >= 200 && xhr.status < 300)) {
-      error.textContent = '';
+    function titleDraftKey(pageRoot) {
+     return 'openvibely.new-task-title.' + pageRoot.getAttribute('data-project-id');
+    }
+    function titleDraftInput(pageRoot) {
+     return pageRoot && pageRoot.querySelector('input[name="title"][form="task-thread-form"]');
+    }
+    function saveTitleDraft(pageRoot) {
+     if (!pageRoot || pageRoot.__openVibelyTaskCreationSucceeded) return;
+     var input = titleDraftInput(pageRoot);
+     if (!input) return;
+     try { sessionStorage.setItem(titleDraftKey(pageRoot), input.value); } catch (_) {}
+    }
+    function clearTitleDraft(pageRoot) {
+     if (!pageRoot) return;
+     pageRoot.__openVibelyTaskCreationSucceeded = true;
+     try { sessionStorage.removeItem(titleDraftKey(pageRoot)); } catch (_) {}
+    }
+    function hydrateTitleDraft(pageRoot) {
+     if (!pageRoot) return;
+     var input = titleDraftInput(pageRoot);
+     if (!input) return;
+     try {
+      var savedTitle = sessionStorage.getItem(titleDraftKey(pageRoot));
+      input.value = savedTitle === null ? '' : savedTitle;
+     } catch (_) {}
+    }
+    function resetCreationDraft(pageRoot, saveTitle) {
+     if (!pageRoot) return;
+     if (saveTitle || !pageRoot.__openVibelyTaskTitleSavedForCleanup) saveTitleDraft(pageRoot);
+     pageRoot.__openVibelyTaskTitleSavedForCleanup = true;
+     var pageForm = pageRoot.querySelector('#task-thread-form');
+     if (pageForm) {
+      pageForm.reset();
+      var clear = window[pageForm.getAttribute('data-clear-func-name')];
+      if (clear) clear();
+     }
+     var messageInput = pageRoot.querySelector('#task-message-input');
+     if (messageInput) messageInput.value = '';
+    }
+    function handleTaskCreationAfterRequest(pageRoot, event) {
+     var detail = event.detail || {};
+     var submittedForm = pageRoot && pageRoot.querySelector('#task-thread-form');
+     if (!submittedForm || detail.elt !== submittedForm) return;
+     var xhr = detail.xhr;
+     var succeeded = detail.successful || (xhr && xhr.status >= 200 && xhr.status < 300);
+     var error = pageRoot.querySelector('#new-task-error');
+     if (succeeded) {
+      clearTitleDraft(pageRoot);
+      if (error) error.textContent = '';
       return;
      }
+     if (!error || !pageRoot.isConnected) return;
      var message = 'Unable to create the task. Please try again.';
-     if (xhr) {
+     if (xhr && typeof xhr.getResponseHeader === 'function') {
       var contentType = xhr.getResponseHeader('Content-Type') || '';
       if (contentType.indexOf('application/json') !== -1) {
        try { var body = JSON.parse(xhr.responseText); if (typeof body.message === 'string') message = body.message; } catch (_) {}
@@ -113,7 +144,44 @@ templ NewTaskContent(project *models.Project, agents []models.LLMConfig, agentDe
       }
      }
      error.textContent = message;
-    });
+    }
+    function bindTaskCreationAfterRequest(pageRoot) {
+     var pageForm = pageRoot && pageRoot.querySelector('#task-thread-form');
+     if (!pageForm || pageForm.__openVibelyTaskCreationAfterRequestInstalled) return;
+     pageForm.__openVibelyTaskCreationAfterRequestInstalled = true;
+     pageForm.addEventListener('htmx:afterRequest', function(event) {
+      handleTaskCreationAfterRequest(pageRoot, event);
+     });
+    }
+    if (!window.openVibelyNewTaskTitleDraftLifecycleInstalled) {
+     window.openVibelyNewTaskTitleDraftLifecycleInstalled = true;
+     document.body.addEventListener('input', function(event) {
+      var input = event.target;
+      if (!input || !input.matches || !input.matches('input[name="title"][form="task-thread-form"]')) return;
+      var pageRoot = titleDraftRoot(input);
+      if (!pageRoot) return;
+      pageRoot.__openVibelyTaskTitleSavedForCleanup = false;
+      saveTitleDraft(pageRoot);
+     });
+     document.body.addEventListener('htmx:beforeHistorySave', function() {
+      resetCreationDraft(titleDraftRoot(document.getElementById('task-detail-content')), true);
+     });
+     document.body.addEventListener('htmx:beforeCleanupElement', function(event) {
+      var pageRoot = document.getElementById('task-detail-content');
+      if (pageRoot && event.detail && event.detail.elt === pageRoot) resetCreationDraft(titleDraftRoot(pageRoot), false);
+     });
+     document.body.addEventListener('htmx:historyRestore', function() {
+      var restoredRoot = titleDraftRoot(document.getElementById('task-detail-content'));
+      if (restoredRoot) {
+       hydrateTitleDraft(restoredRoot);
+       bindTaskCreationAfterRequest(restoredRoot);
+      }
+     });
+    }
+    bindTaskCreationAfterRequest(titleDraftRoot(root));
+    hydrateTitleDraft(titleDraftRoot(root));
+    // Keep creation fields out of HTMX history; the app-level lifecycle handler
+    // saves the title before resetting the form and hydrates cached history views.
    })();
   </script>
  </div>
