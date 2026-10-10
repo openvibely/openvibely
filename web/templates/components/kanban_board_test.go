@@ -92,7 +92,7 @@ func TestKanbanColumn_DropdownTriggersUseLabelForDesktopWebviewCompatibility(t *
 	html := buf.String()
 
 	for _, want := range []string{
-		`<label tabindex="0" class="btn btn-xs btn-ghost`,
+		`<label tabindex="0" class="sidebar-toggle-btn header-action-btn btn btn-ghost btn-sm btn-square"`,
 		`onclick="handleDropdownToggle(event)"`,
 		`data-kanban-menu-trigger`,
 		`aria-label="More actions"`,
@@ -113,7 +113,7 @@ func TestKanbanColumn_DropdownTriggersUseLabelForDesktopWebviewCompatibility(t *
 	}
 	html = buf.String()
 	for _, want := range []string{
-		`<label tabindex="0" class="btn btn-xs btn-ghost`,
+		`<label tabindex="0" class="sidebar-toggle-btn header-action-btn btn btn-ghost btn-sm btn-square"`,
 		`onclick="handleDropdownToggle(event)"`,
 		`data-kanban-menu-trigger`,
 		`aria-label="More actions"`,

@@ -541,7 +541,7 @@ func KanbanColumnMenu(projectID string, category models.TaskCategory, backlogSor
 			}
 			return nil
 		})
-		templ_7745c5c3_Err = CardActionDropdown(CardActionDropdownConfig{WrapperClass: "dropdown dropdown-end", TriggerClass: "btn btn-xs btn-ghost min-h-11 h-11 w-11 p-0", IconClass: "h-5 w-5", MenuClass: "w-56 max-w-[calc(100vw-2rem)] z-[100]", Label: "More actions", TriggerAriaExpanded: "false", TriggerKanbanMenu: true, MenuKanbanContent: true, KanbanMenuKey: "column-" + cat}).Render(templ.WithChildren(ctx, templ_7745c5c3_Var11), templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = CardActionDropdown(CardActionDropdownConfig{WrapperClass: "dropdown dropdown-end", TriggerClass: "sidebar-toggle-btn header-action-btn btn btn-ghost btn-sm btn-square", IconClass: "h-5 w-5", MenuClass: "w-56 max-w-[calc(100vw-2rem)] z-[100]", Label: "More actions", TriggerAriaExpanded: "false", TriggerKanbanMenu: true, MenuKanbanContent: true, KanbanMenuKey: "column-" + cat}).Render(templ.WithChildren(ctx, templ_7745c5c3_Var11), templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
