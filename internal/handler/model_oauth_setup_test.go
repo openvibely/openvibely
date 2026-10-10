@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/service"
 )
 
 func TestModelOAuthSetupSignsInAndDiscoversBeforeCreate(t *testing.T) {
@@ -245,14 +246,19 @@ func TestBuiltInModelOAuthConnectBeforeSave(t *testing.T) {
 		t.Run(providerName, func(t *testing.T) {
 			t.Setenv("OAUTH_REDIRECT_MODE", "hosted")
 			t.Setenv("APP_BASE_URL", "https://app.example.com")
+			token := "draft-access"
 			provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				w.Write([]byte(`{"access_token":"draft-access","refresh_token":"draft-refresh","expires_in":3600}`))
+				json.NewEncoder(w).Encode(map[string]any{"access_token": token, "refresh_token": "draft-refresh", "expires_in": 3600})
 			}))
 			defer provider.Close()
 			t.Setenv(strings.ToUpper(providerName)+"_OAUTH_TOKEN_URL", provider.URL)
 			h, e, repo := setupTestHandler(t)
-			h.openAIIdentityResolver = nil
-			h.oauthIdentityResolver = nil
+			h.openAIIdentityResolver = func(context.Context, string) (service.OpenAIOAuthIdentity, error) {
+				return service.OpenAIOAuthIdentity{AccountID: "account", DisplayName: "Verified user", PrincipalHash: "principal"}, nil
+			}
+			h.oauthIdentityResolver = func(context.Context, string) (service.AnthropicOAuthIdentity, error) {
+				return service.AnthropicOAuthIdentity{AccountID: "account", DisplayName: "Verified user", PrincipalHash: "principal"}, nil
+			}
 			form := url.Values{"provider": {providerName}, providerName + "_auth_type": {"oauth"}, "auth_method": {"oauth"}, "oauth_connection_id": {"new"}}
 			send := func(path string) *httptest.ResponseRecorder {
 				req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(form.Encode()))
@@ -263,7 +269,11 @@ func TestBuiltInModelOAuthConnectBeforeSave(t *testing.T) {
 				return rec
 			}
 			before, _ := repo.List(context.Background())
-			for attempt := 0; attempt < 2; attempt++ {
+			var siblingID, connectionID string
+			for attempt := 0; attempt < 4; attempt++ {
+				if attempt == 2 {
+					form.Set("oauth_connection_id", "new")
+				}
 				rec := send("/models/oauth/setup")
 				if rec.Code != 200 {
 					t.Fatalf("begin: %d %s", rec.Code, rec.Body.String())
@@ -282,10 +292,14 @@ func TestBuiltInModelOAuthConnectBeforeSave(t *testing.T) {
 					t.Fatal(result.Err)
 				}
 				after, _ := repo.List(context.Background())
-				if len(after) != len(before)+attempt {
+				expectedModels := len(before)
+				if attempt > 0 {
+					expectedModels += 2
+				}
+				if len(after) != expectedModels {
 					t.Fatal("sign-in persisted a model")
 				}
-				if attempt == 1 {
+				if attempt > 0 {
 					old, _ := repo.GetByID(context.Background(), form.Get("model_config_id"))
 					if old.Name != "Connected model" {
 						t.Fatal("sign-in saved draft edits")
@@ -298,6 +312,22 @@ func TestBuiltInModelOAuthConnectBeforeSave(t *testing.T) {
 					model = "gpt-5.5"
 				}
 				form.Set("model", model)
+				if attempt == 3 {
+					current, _ := repo.GetByID(context.Background(), form.Get("model_config_id"))
+					if ok, err := repo.ReplaceLinkedOAuthConnectionWithProfileIfRevision(context.Background(), current.ID, current.OAuthConnectionID, current.OAuthConfigRevision, current.Provider, "concurrent-access", "concurrent-refresh", time.Now().Add(time.Hour).UnixMilli(), "account", "Verified user", "principal"); err != nil || !ok {
+						t.Fatal(err)
+					}
+					form.Set("name", "Must roll back")
+					rec = send("/models")
+					if rec.Code != http.StatusConflict {
+						t.Fatalf("stale sign-in status: %d", rec.Code)
+					}
+					unchanged, _ := repo.GetByID(context.Background(), current.ID)
+					if unchanged.Name != "Connected model" || unchanged.OAuthAccessToken != "concurrent-access" {
+						t.Fatal("stale save was not atomic")
+					}
+					continue
+				}
 				rec = send("/models")
 				if rec.Code != 200 {
 					t.Fatalf("save: %d %s", rec.Code, rec.Body.String())
@@ -305,8 +335,33 @@ func TestBuiltInModelOAuthConnectBeforeSave(t *testing.T) {
 				var saved map[string]string
 				json.Unmarshal(rec.Body.Bytes(), &saved)
 				cfg, err := repo.GetByID(context.Background(), saved["id"])
-				if err != nil || cfg.OAuthAccessToken != "draft-access" {
+				if err != nil || cfg.OAuthAccessToken != token {
 					t.Fatal("save lost authorization", err)
+				}
+				connection, err := repo.GetOAuthConnectionByID(context.Background(), cfg.OAuthConnectionID)
+				if err != nil || connection.ProviderDisplayName != "Verified user" || connection.PrincipalHash != "principal" || !connection.PrincipalVerified {
+					t.Fatal("verified identity lost", err)
+				}
+				if attempt == 0 {
+					connectionID = cfg.OAuthConnectionID
+					sibling := &models.LLMConfig{Name: "Shared sibling", Provider: cfg.Provider, Model: cfg.Model, AuthMethod: models.AuthMethodOAuth, OAuthConnectionID: connectionID}
+					if err := repo.Create(context.Background(), sibling); err != nil {
+						t.Fatal(err)
+					}
+					siblingID = sibling.ID
+					token = "reconnected-access"
+				} else {
+					if attempt == 2 {
+						old, err := repo.GetOAuthConnectionByID(context.Background(), connectionID)
+						if err != nil || old != nil {
+							t.Fatal("verified duplicate was not consolidated", err)
+						}
+						connectionID = cfg.OAuthConnectionID
+					}
+					sibling, _ := repo.GetByID(context.Background(), siblingID)
+					if cfg.OAuthConnectionID != connectionID || sibling.OAuthConnectionID != connectionID || sibling.OAuthAccessToken != token {
+						t.Fatal("reconnect detached shared account")
+					}
 				}
 				form.Set("model_config_id", cfg.ID)
 				form.Set("oauth_connection_id", cfg.OAuthConnectionID)

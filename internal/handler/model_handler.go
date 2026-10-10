@@ -985,6 +985,9 @@ func (h *Handler) CreateModel(c echo.Context) error {
 
 	if err := h.llmConfigRepo.Create(c.Request().Context(), a); err != nil {
 		applog.Infof("[handler] CreateModel error: %v", err)
+		if errors.Is(err, repository.ErrOAuthConnectionChanged) {
+			return echo.NewHTTPError(http.StatusConflict, err.Error())
+		}
 		if isModelValidationError(err) {
 			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 		}
@@ -1069,6 +1072,9 @@ func (h *Handler) updateModelByID(c echo.Context, id string) error {
 	applog.Infof("[handler] UpdateModel id=%s name=%q model=%s auth_method=%s max_workers=%d", id, agent.Name, agent.Model, agent.AuthMethod, agent.MaxWorkers)
 	if err := h.llmConfigRepo.Update(c.Request().Context(), agent); err != nil {
 		applog.Infof("[handler] UpdateModel error: %v", err)
+		if errors.Is(err, repository.ErrOAuthConnectionChanged) {
+			return echo.NewHTTPError(http.StatusConflict, err.Error())
+		}
 		if isModelValidationError(err) {
 			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 		}
