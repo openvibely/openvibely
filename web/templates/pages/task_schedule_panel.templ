@@ -163,21 +163,22 @@ templ TaskSchedulePanelScript() {
    function interval(){var type=form.elements.repeat_type.value; var input=form.elements.repeat_interval; form.querySelector('[data-schedule-interval]').hidden=type==='once'; input.disabled=type==='once'; input.required=type!=='once'; form.querySelector('[data-schedule-unit]').textContent=({seconds:'second(s)',minutes:'minute(s)',hours:'hour(s)',daily:'day(s)',weekly:'week(s)',monthly:'month(s)'})[type]||'';}
    var runAt=form.elements.run_at;
    var originalRunAt=runAt.defaultValue;
-   runAt.addEventListener('input',function(){runAt.setCustomValidity('');});
+   var runAtDisplay=form.querySelector('[data-run-at-picker]');
+   runAt.addEventListener('input',function(){runAtDisplay.setCustomValidity('');});
    form.addEventListener('submit',function(event){
     var changed=draft || !originalRunAt || runAt.value!==originalRunAt;
     if(changed && new Date(runAt.value).getTime()<=Date.now()){
      event.preventDefault(); event.stopImmediatePropagation();
-     runAt.setCustomValidity('Run at must be in the future. Check the date and AM/PM.');
-     runAt.reportValidity();
+     runAtDisplay.setCustomValidity('Run at must be in the future. Check the date and AM/PM.');
+     runAtDisplay.reportValidity();
     }
    },true);
    form.elements.repeat_type.addEventListener('change',interval); interval();
    dialog.querySelector('[data-schedule-cancel]').onclick=function(){dialog.close();};
    root.querySelectorAll('[data-schedule-open="'+dialog.id+'"]').forEach(function(button){button.onclick=function(){
-    form.reset(); runAt.setCustomValidity(''); form.querySelector('[data-schedule-error]').textContent='';
+    form.reset(); runAtDisplay.setCustomValidity(''); form.querySelector('[data-schedule-error]').textContent='';
     if(draft){['run_at','repeat_type','repeat_interval'].forEach(function(name){form.elements[name].value=field(name).value;}); form.querySelector('[type="checkbox"]').checked=field('clear_context_on_start').value==='true'; var exists=field('add_schedule').value==='on'; dialog.querySelector('[data-schedule-editor-title]').textContent=exists?'Edit schedule':'Add schedule'; dialog.querySelector('[data-schedule-save]').textContent=exists?'Save':'Add'; dialog.querySelector('[data-draft-schedule-remove]').hidden=!exists;}
-    interval(); dialog.showModal();
+    interval(); window.refreshScheduleDateTimes(form); dialog.showModal();
    };});
    if(draft){form.addEventListener('submit',function(event){event.preventDefault(); ['run_at','repeat_type','repeat_interval'].forEach(function(name){field(name).value=form.elements[name].value;}); if(form.elements.repeat_type.value==='once')field('repeat_interval').value='1'; field('clear_context_on_start').value=String(form.querySelector('[type="checkbox"]').checked); field('add_schedule').value='on'; renderDraft(); dialog.close();});
     dialog.querySelector('[data-draft-schedule-remove]').onclick=function(){field('add_schedule').value=''; renderDraft(); dialog.close();};
