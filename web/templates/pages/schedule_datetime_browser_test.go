@@ -80,6 +80,10 @@ func TestBrowserFunctional_ScheduleDateTimePicker(t *testing.T) {
 		b.evaluate(`document.getElementById('schedule').reset(); 'reset'`)
 		b.click(`[data-run-at-picker]`)
 		b.waitFor("form reset restores original time", `document.querySelector('[data-time-column="hour"] [aria-selected="true"]').textContent`, "01")
+		// Reopen before the queued popover toggle event runs, as rapid native clicks can do.
+		b.evaluate(`document.querySelector('.schedule-datetime-popup').hidePopover(); document.getElementById('schedule').reset(); window.openScheduleDateTime(document.querySelector('[data-run-at-picker]')); 'reopened'`)
+		b.waitFor("immediate reopen survives pending close event", `String(document.querySelector('.schedule-datetime-popup').matches(':popover-open') && document.querySelector('[data-run-at-picker]').getAttribute('aria-expanded')==='true')`, "true")
+
 		b.click(`[data-today]`)
 		b.waitFor("today disabled in current month", `String(document.querySelector('[data-today]').disabled && document.activeElement.matches('[data-month-step="-1"]'))`, "true")
 		b.waitFor("today navigates to current month", `String(document.querySelector('[data-month-title]').textContent===new Date().toLocaleDateString(undefined,{month:'long',year:'numeric'}))`, "true")

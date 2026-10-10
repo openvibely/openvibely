@@ -200,7 +200,8 @@ templ ScheduleDateTime(value string) {
   }
   window.openScheduleDateTime=input=>{
    const popup=input.parentElement.querySelector('.schedule-datetime-popup');
-   if(active && active.popup===popup)return;
+   // Native light dismissal queues toggle cleanup; allow reopening before it runs.
+   if(active && active.popup===popup && popup.matches(':popover-open'))return;
    if(active)close(active,false);
    let selected=new Date(stored(input).value);
    if(!stored(input).value||Number.isNaN(selected.getTime())) { selected=new Date(); selected.setMinutes(selected.getMinutes()+1); }
