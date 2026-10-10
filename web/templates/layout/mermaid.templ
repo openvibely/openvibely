@@ -17,52 +17,30 @@ templ MermaidDiagrams() {
    const pair=code.closest('[data-execution-pair="true"]');
    return !!pair && terminal.has(pair.getAttribute('data-exec-status'));
   };
-  // Follows CommonMark: fences are measured from the enclosing list item's content
-  // column, and a block also ends when its list item or blockquote ends.
-  // Only complete lines can close a block; a trailing partial line can still change.
-  function stripQuotes(line,limit) {
-   let quotes=0;
-   for (let match;quotes<limit && (match=/^ {0,3}>[ ]?/.exec(line));quotes++) line=line.slice(match[0].length);
-   return {line:line.replace(/\t/g,'    '),quotes};
-  }
-  const indentOf=line=>/^ */.exec(line)[0].length;
+  // Ask the same Markdown lexer that renders the message whether its last block is
+  // an unclosed fence. A trailing partial line is ignored because it can still change.
+  let lastFenceText=null, lastFenceOpen=false;
   function endsInsideFence(text) {
-   let open=null, lists=[], depth=0;
-   const lines=text.split(/\r\n|\r|\n/);
-   lines.forEach((raw,index)=>{
-    if (open) {
-     const {line,quotes}=stripQuotes(raw,open.quotes);
-     const blank=!line.trim();
-     if (quotes===open.quotes && (blank || indentOf(line)>=open.base)) {
-      const rest=line.slice(open.base);
-      if (index<lines.length-1 && indentOf(rest)<=3 && rest.trim().replace(open.char==='`'?/^`+/:/^~+/,'')==='' &&
-       rest.trim().length>=open.length) open=null;
-      return;
-     }
-     if (index===lines.length-1) return;
-     open=null;
-    }
-    let {line,quotes}=stripQuotes(raw,Infinity);
-    if (quotes!==depth) { lists=[]; depth=quotes; }
-    if (!line.trim()) return;
-    let offset=0;
-    for (let item;(item=/^( *)([-*+]|\d{1,9}[.)])( {1,4}(?! )|$)/.exec(line));) {
-     const column=offset+item[1].length;
-     while (lists.length && lists[lists.length-1]>column) lists.pop();
-     const width=item[0].length || item[1].length+item[2].length+1;
-     lists.push(offset+width);
-     offset+=item[0].length;
-     line=line.slice(item[0].length);
-     if (!item[3]) return;
-    }
-    const column=offset+indentOf(line);
-    if (!offset) while (lists.length && lists[lists.length-1]>column) lists.pop();
-    const base=lists.length?lists[lists.length-1]:0;
-    const fence=/^(`{3,}|~{3,})(.*)$/.exec(line.trimStart());
-    if (fence && column-base<=3 && !(fence[1][0]==='`' && fence[2].includes('`')))
-     open={char:fence[1][0], length:fence[1].length, quotes, base};
-   });
-   return !!open;
+   if (text===lastFenceText) return lastFenceOpen;
+   const parser=window.marked;
+   if (!parser || typeof parser.lexer!=='function') return true;
+   let tokens=parser.lexer(text.slice(0,text.lastIndexOf('\n')+1));
+   let last=null;
+   while (tokens && tokens.length) {
+    const visible=tokens.filter(token=>token.type!=='space');
+    last=visible[visible.length-1];
+    if (!last) break;
+    tokens=last.type==='list'?last.items:last.tokens;
+   }
+   let open=false;
+   if (last && last.type==='code' && last.codeBlockStyle!=='indented') {
+    // Raw holds the opening fence, the content, and the closing fence only if one was found.
+    const rawLines=last.raw.replace(/\n+$/,'').split('\n').length;
+    const contentLines=last.text===''?0:last.text.split('\n').length;
+    open=rawLines<=contentLines+1;
+   }
+   lastFenceText=text; lastFenceOpen=open;
+   return open;
   }
   function streamingFenceClosed(code) {
    const owner=code.closest('[data-raw-content]');
