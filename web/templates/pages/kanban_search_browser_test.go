@@ -75,8 +75,19 @@ func testKanbanHeaderSearch(t *testing.T, width int) {
 		check("collapsed by default", search+`.dataset.open === 'false' && `+width(search)+` <= 33`)
 		check("Active count has refresh hook", count("active")+` === '2'`)
 		addTask := `document.querySelector('[aria-label="Add Task"]')`
+		b.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseMoved", "x": 5, "y": 880}, nil)
+		b.waitFor("buttons at rest", `getComputedStyle(`+toggle+`).opacity === '0.7' && getComputedStyle(`+addTask+`).opacity === '0.7' ? 'rest' : 'hover'`, "rest")
 		for _, btn := range []string{toggle, addTask} {
 			check("button matches panel toggle", `(() => { const s = getComputedStyle(`+btn+`), r = `+btn+`.getBoundingClientRect(); return `+btn+`.classList.contains('sidebar-toggle-btn') && r.width === 32 && r.height === 32 && s.borderTopLeftRadius === '8px' && s.opacity === '0.7' && `+btn+`.querySelector('svg').getBoundingClientRect().width === 20 })()`)
+		}
+		for _, sel := range []string{`[data-kanban-search-toggle]`, `[aria-label="Add Task"]`} {
+			b.evaluate(`(window.__r = document.querySelector('` + sel + `').getBoundingClientRect(), "ok")`)
+			var x, y int
+			fmt.Sscan(b.evaluate(`String(Math.round(window.__r.left + 16))`), &x)
+			fmt.Sscan(b.evaluate(`String(Math.round(window.__r.top + 16))`), &y)
+			b.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseMoved", "x": x, "y": y}, nil)
+			b.waitFor("hover shows grey", `(() => { const s = getComputedStyle(document.querySelector('`+sel+`')); return s.opacity === '1' && s.backgroundColor !== 'rgba(0, 0, 0, 0)' ? 'hover' : 'rest' })()`, "hover")
+			b.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseMoved", "x": 5, "y": 880}, nil)
 		}
 		check("collapsed box has rounded corners", `getComputedStyle(`+search+`).borderTopLeftRadius === '8px'`)
 		check("search and Add Task 8px apart", `Math.round(`+addTask+`.getBoundingClientRect().left - `+search+`.getBoundingClientRect().right) === 8`)
