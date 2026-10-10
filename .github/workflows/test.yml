@@ -165,12 +165,15 @@ jobs:
           legacy_names="$(grep -REn --include='*_test.go' '^func Test.*InChrome\(' web/templates/components web/templates/pages | grep -Ev '^.*func TestBrowser(Functional|Performance)_' || true)"
           direct_browser_violations="$(
             awk '
+              FNR == 1 || /^func / {
+                test_name = ""
+              }
               /^func Test/ {
                 test_name = $2
                 sub(/\(.*/, "", test_name)
               }
               /chatNavigationChromePath\(t\)|testChromePath\(t\)|runReconnectChromeFixture\(t,/ {
-                if (test_name !~ /^TestBrowser(Functional|Performance)_/) {
+                if (test_name != "" && test_name !~ /^TestBrowser(Functional|Performance)_/) {
                   print FILENAME ": " test_name
                 }
               }
