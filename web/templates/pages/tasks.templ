@@ -627,6 +627,7 @@ templ kanbanSearch() {
 		.kanban-search[data-active="true"] .kanban-search-toggle { opacity:1; color:oklch(var(--p)); }
 		.kanban-search-input { flex:1 1 auto; min-width:0; height:100%; padding-right:.75rem; background:transparent; border:0; outline:none; font-size:.875rem; opacity:0; transition:opacity .2s ease; }
 		.kanban-search[data-open="true"] .kanban-search-input { opacity:1; }
+		.kanban-search-input::-webkit-search-cancel-button { -webkit-appearance:none; appearance:none; }
 		@media (prefers-reduced-motion: reduce) { .kanban-search, .kanban-search-input { transition:none; } }
 	</style>
 	<div data-kanban-search data-open="false" data-active="false" class="kanban-search">

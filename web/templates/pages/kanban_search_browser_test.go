@@ -95,6 +95,14 @@ func testKanbanHeaderSearch(t *testing.T, width int) {
 		check("term keeps filtering while collapsed", visible+` === 'alpha,gamma' && `+search+`.dataset.active === 'true'`)
 
 		b.click(`[data-kanban-search-toggle]`)
+		check("reopens with term", search+`.dataset.open === 'true' && document.activeElement === `+input)
+		// iOS Safari keeps focus on the input when blank space is tapped; simulate a press that does not move focus.
+		b.evaluate(`(document.querySelector('[data-page-header] h2').dispatchEvent(new PointerEvent('pointerdown', {bubbles:true})), 'ok')`)
+		check("outside press collapses without focus change", search+`.dataset.open === 'false' && document.activeElement !== `+input)
+		check("no-results sits inside In Progress", `!!document.querySelector('[data-drop-type="status"][data-status="running"] > [data-kanban-no-results]')`)
+		check("native clear button hidden", `Array.from(document.styleSheets).some(sheet => { try { return Array.from(sheet.cssRules).some(rule => (rule.selectorText || '').includes('kanban-search-input::-webkit-search-cancel-button')); } catch (_) { return false; } })`)
+
+		b.click(`[data-kanban-search-toggle]`)
 		b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": "Escape", "code": "Escape", "windowsVirtualKeyCode": 27}, nil)
 		b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyUp", "key": "Escape", "code": "Escape", "windowsVirtualKeyCode": 27}, nil)
 		check("Escape clears and collapses", search+`.dataset.open === 'false' && `+input+`.value === '' && `+visible+` === 'alpha,beta,delta,epsilon,gamma'`)
