@@ -29,9 +29,9 @@ templ DesktopWindowControls(platform string) {
    }
   </style>
   <div class="desktop-window-controls" role="group" aria-label="Window controls">
-   <button type="button" data-window-action="Minimise" aria-label="Minimize window" title="Minimize"><svg viewBox="0 0 10 10" fill="none" stroke="currentColor" aria-hidden="true"><path d="M0 5.5h10"/></svg></button>
-   <button type="button" data-window-action="ToggleMaximise" aria-label="Maximize window" title="Maximize"><svg data-maximize-icon viewBox="0 0 10 10" fill="none" stroke="currentColor" aria-hidden="true"><rect x=".5" y=".5" width="9" height="9"/></svg><svg data-restore-icon viewBox="0 0 10 10" fill="none" stroke="currentColor" aria-hidden="true"><path d="M2.5 2.5v-2h7v7h-2m-7-5h7v7h-7z"/></svg></button>
-   <button type="button" data-window-action="Close" aria-label="Close window" title="Close"><svg viewBox="0 0 10 10" fill="none" stroke="currentColor" aria-hidden="true"><path d="m.5.5 9 9m0-9-9 9"/></svg></button>
+   <button type="button" data-window-action="Minimise" aria-label="Minimize window" data-tooltip-disabled><svg viewBox="0 0 10 10" fill="none" stroke="currentColor" aria-hidden="true"><path d="M0 5.5h10"/></svg></button>
+   <button type="button" data-window-action="ToggleMaximise" aria-label="Maximize window" data-tooltip-disabled><svg data-maximize-icon viewBox="0 0 10 10" fill="none" stroke="currentColor" aria-hidden="true"><rect x=".5" y=".5" width="9" height="9"/></svg><svg data-restore-icon viewBox="0 0 10 10" fill="none" stroke="currentColor" aria-hidden="true"><path d="M2.5 2.5v-2h7v7h-2m-7-5h7v7h-7z"/></svg></button>
+   <button type="button" data-window-action="Close" aria-label="Close window" data-tooltip-disabled><svg viewBox="0 0 10 10" fill="none" stroke="currentColor" aria-hidden="true"><path d="m.5.5 9 9m0-9-9 9"/></svg></button>
   </div>
   <script>
    window.openVibelyInstallWindowControls = function(runtime) {
@@ -63,8 +63,8 @@ templ DesktopWindowControls(platform string) {
       var state = await Promise.all([runtime.Window.IsMaximised(), runtime.Window.IsFullscreen()]);
       if (current !== generation) return;
       controls.toggleAttribute('data-maximized', state[0] || state[1]);
-      maximize.title = state[1] ? 'Exit fullscreen' : state[0] ? 'Restore' : 'Maximize';
-      maximize.setAttribute('aria-label', maximize.title + ' window');
+      var label = state[1] ? 'Exit fullscreen' : state[0] ? 'Restore' : 'Maximize';
+      maximize.setAttribute('aria-label', label + ' window');
       maximize.setAttribute('data-window-action', state[1] ? 'UnFullscreen' : 'ToggleMaximise');
       reportBounds();
      } catch (_) { /* The window may be closing. */ }

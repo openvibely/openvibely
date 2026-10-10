@@ -600,12 +600,12 @@ templ TaskCard(task models.Task, projectID string, viewingCategory string, llmMo
 							}
 						<!-- Model Badge -->
 						if len(llmModels) > 0 {
-							<span class="badge badge-sm badge-outline" title={ fmt.Sprintf("Model: %s", getModelDisplayName(findModelByID(llmModels, task.AgentID))) }>
+							<span class="badge badge-sm badge-outline" data-tooltip-disabled>
 								{ getModelDisplayName(findModelByID(llmModels, task.AgentID)) }
 							</span>
 						}
 						if ad := findAgentDefinitionByID(agentDefs, task.AgentDefinitionID); ad != nil {
-							<span class="badge badge-sm badge-outline" title={ fmt.Sprintf("Assigned agent: %s", ad.Name) }>
+							<span class="badge badge-sm badge-outline" data-tooltip-disabled>
 								{ ad.Name }
 							</span>
 						}
