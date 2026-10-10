@@ -746,7 +746,7 @@ func estimateProviderSystemPromptTokens(req llmcontracts.AgentRequest) int {
 			base = llmprompt.AppendWorktreeContextPrompt(base, req.WorkDir)
 			if req.ChatMode == models.ChatModeOrchestrate && (req.Agent.Provider == models.ProviderOpenAI || req.Agent.Provider == models.ProviderAnthropic) {
 				rt := llmcontracts.RuntimeToolsFromContext(req.Ctx)
-				base = llmprompt.ApplyChatActionToolMode(base, rt.DefinitionNames())
+				base = llmprompt.ApplyChatActionToolMode(base, rt.DefinitionNames(), req.Followup)
 			}
 			return estimatedUTF8Tokens(base)
 		}

@@ -23,19 +23,27 @@ func TestMaxTokensErrorIsCategorized(t *testing.T) {
 	}
 }
 
-func TestAppendToolModeSystemPromptCoversTaskFollowupsAndPreservesPlan(t *testing.T) {
-	followup := appendToolModeSystemPrompt("base", nil, models.ChatModeOrchestrate)
-	if !strings.Contains(followup, llmprompt.ChatActionUnavailableInstructions) {
-		t.Fatalf("no-tool follow-up prompt missing capability limitation: %q", followup)
+func TestAppendToolModeSystemPromptCoversChatAndTaskFollowupsAndPreservesPlan(t *testing.T) {
+	noTools := appendToolModeSystemPrompt("base", nil, models.ChatModeOrchestrate, false)
+	if !strings.Contains(noTools, llmprompt.ChatActionUnavailableInstructions) {
+		t.Fatalf("no-tool chat prompt missing capability limitation: %q", noTools)
 	}
 
 	rt := &llmcontracts.RuntimeTools{Definitions: []llmcontracts.RuntimeToolDefinition{{Name: "create_task"}}}
-	capable := appendToolModeSystemPrompt("base", rt, models.ChatModeOrchestrate)
+	capable := appendToolModeSystemPrompt("base", rt, models.ChatModeOrchestrate, false)
 	if !strings.Contains(capable, llmprompt.ChatActionToolModeInstructions) || !strings.Contains(capable, "Available action tools: create_task") {
-		t.Fatalf("tool-capable follow-up prompt missing concrete runtime guidance: %q", capable)
+		t.Fatalf("tool-capable chat prompt missing concrete runtime guidance: %q", capable)
 	}
 
-	plan := appendToolModeSystemPrompt("base", nil, models.ChatModePlan)
+	taskThread := appendToolModeSystemPrompt("base", rt, models.ChatModeOrchestrate, true)
+	if strings.Contains(taskThread, llmprompt.ChatActionToolModeInstructions) || !strings.Contains(taskThread, llmprompt.TaskFollowupRuntimeToolInstructions) || !strings.Contains(taskThread, "Additional runtime tools: create_task") {
+		t.Fatalf("task-thread prompt must keep coding tools and list runtime tools as additional: %q", taskThread)
+	}
+	if got := appendToolModeSystemPrompt("base", nil, models.ChatModeOrchestrate, true); got != "base" {
+		t.Fatalf("no-tool task-thread prompt must not claim tools are unavailable: %q", got)
+	}
+
+	plan := appendToolModeSystemPrompt("base", nil, models.ChatModePlan, false)
 	if plan != "base" {
 		t.Fatalf("Plan prompt received action-mode guidance: %q", plan)
 	}

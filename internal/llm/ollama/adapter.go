@@ -204,7 +204,7 @@ func (a *Adapter) callChat(ctx context.Context, message string, attachments []mo
 	systemPromptStr := llmprompt.BuildChatSystemPrompt(isTaskFollowup, chatMode, chatSystemContext, false)
 	systemPromptStr = llmprompt.AppendWorktreeContextPrompt(systemPromptStr, workDir)
 	if chatMode == models.ChatModeOrchestrate {
-		systemPromptStr = llmprompt.ApplyChatActionToolMode(systemPromptStr, nil)
+		systemPromptStr = llmprompt.ApplyChatActionToolMode(systemPromptStr, nil, isTaskFollowup)
 	}
 	messages := buildChatHistory(systemPromptStr, chatHistory)
 

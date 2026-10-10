@@ -389,7 +389,7 @@ func (a *Adapter) callChatStreaming(ctx context.Context, req llmcontracts.AgentR
 	systemPrompt := llmprompt.BuildChatSystemPrompt(req.Followup, req.ChatMode, req.ChatSystemContext, false)
 	systemPrompt = llmprompt.AppendWorktreeContextPrompt(systemPrompt, workDir)
 	if req.ChatMode == models.ChatModeOrchestrate {
-		systemPrompt = llmprompt.ApplyChatActionToolMode(systemPrompt, rt.DefinitionNames())
+		systemPrompt = llmprompt.ApplyChatActionToolMode(systemPrompt, rt.DefinitionNames(), req.Followup)
 	}
 
 	attachments, err := convertAttachments(req.Attachments)
