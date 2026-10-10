@@ -68,6 +68,7 @@ func TestBrowserFunctional_ConversationModelPicker(t *testing.T) {
  trigger.scrollIntoView({block:'end'});await nextFrame();
  const textarea=document.querySelector('textarea');textarea.focus();
  const apple=/Mac|iPhone|iPad|iPod|iOS/i.test(navigator.userAgentData?.platform || navigator.platform || navigator.userAgent || '');
+ assert(trigger.title===(apple?'Models (⌘M)':'Models (Ctrl+M)'),'initial model hint before opening menu');
  const shortcut=(extra={})=>{const e=new KeyboardEvent('keydown',{key:'M',metaKey:apple,ctrlKey:!apple,shiftKey:false,bubbles:true,cancelable:true,...extra});document.activeElement.dispatchEvent(e);return e;};
  const picker=document.getElementById('conversation-model-picker');
  for(const extra of [{key:'L'},{shiftKey:true},{ctrlKey:true,metaKey:true},{ctrlKey:apple,metaKey:!apple},{altKey:true},{isComposing:true},{repeat:true}]){

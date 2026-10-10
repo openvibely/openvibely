@@ -211,7 +211,7 @@ templ TaskWorkspaceScript() {
 			var openDialog = document.querySelector('dialog[open]');
 			if (openDialog) return;
 			if (command && !event.altKey && event.shiftKey && event.code === 'KeyD') {
-				if (!taskID || document.querySelector('[data-openvibely-picker-open], [data-menu-open]') || (typeof HTMLElement.prototype.showPopover === 'function' && document.querySelector('[popover]:popover-open')) || (!panel.hidden && panel.dataset.overlay === 'true')) return;
+				if (!taskID || document.querySelector('[data-openvibely-picker-open], [data-menu-open]') || (typeof HTMLElement.prototype.showPopover === 'function' && document.querySelector('[popover]:popover-open:not([role="tooltip"])')) || (!panel.hidden && panel.dataset.overlay === 'true')) return;
 				event.preventDefault();
 				workspace(changes.classList.contains('hidden'));
 			} else if (command && !event.altKey && event.shiftKey && event.code === 'KeyB') {

@@ -139,10 +139,7 @@
     if (!s || !m) return;
     const value = s.efforts[key(m)] || "";
     field(btn).value = m.levels.includes(value) ? value : "";
-    btn.title =
-      m.name +
-      (m.detail ? " · " + m.detail : "") +
-      (field(btn).value ? " · " + label(field(btn).value) : "");
+    btn.title = usesAppleShortcuts() ? "Models (⌘M)" : "Models (Ctrl+M)";
   }
   function label(v) {
     return (

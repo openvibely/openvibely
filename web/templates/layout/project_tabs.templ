@@ -468,7 +468,7 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
     var target = event.target;
     var composer = target && (target.id === 'message-input' || target.id === 'task-message-input');
     if (!composer && target && (target.isContentEditable || target.closest('input, textarea, select, [role="textbox"]'))) return;
-    if (document.querySelector('dialog[open], [data-openvibely-picker-open], [data-menu-open]') || (typeof HTMLElement.prototype.showPopover === 'function' && document.querySelector('[popover]:popover-open')) || Array.from(document.querySelectorAll('[role="dialog"][aria-modal="true"]')).some(function(dialog) { return dialog.getClientRects().length > 0; })) return;
+    if (document.querySelector('dialog[open], [data-openvibely-picker-open], [data-menu-open]') || (typeof HTMLElement.prototype.showPopover === 'function' && document.querySelector('[popover]:popover-open:not([role="tooltip"])')) || Array.from(document.querySelectorAll('[role="dialog"][aria-modal="true"]')).some(function(dialog) { return dialog.getClientRects().length > 0; })) return;
     var tabs = Array.from(list.querySelectorAll('[data-project-tab]'));
     if (tabs.length < 2 || !list.getClientRects().length) return;
     var index = tabs.findIndex(function(tab) { return tab.dataset.projectTab === select.value; });
