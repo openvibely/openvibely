@@ -16,6 +16,7 @@ import (
 
 func TestBrowserFunctional_NewTaskTitleDraftRestoredFromProjectHistory(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
+	agents := []models.LLMConfig{{ID: "draft-model", Name: "Draft model", Model: "test-model", Provider: models.ProviderTest}}
 	projects := []models.Project{
 		{ID: "title-project-a", Name: "Project A"},
 		{ID: "title-project-b", Name: "Project B"},
@@ -62,10 +63,10 @@ func TestBrowserFunctional_NewTaskTitleDraftRestoredFromProjectHistory(t *testin
 		case "/tasks/new":
 			project := projectByID(r.URL.Query().Get("project_id"))
 			if r.Header.Get("HX-Request") == "true" {
-				fmt.Fprint(w, render(NewTaskContent(project, nil, nil)))
+				fmt.Fprint(w, render(NewTaskContent(project, agents, nil)))
 				return
 			}
-			fmt.Fprint(w, render(NewTask(projects, project, nil, nil)))
+			fmt.Fprint(w, render(NewTask(projects, project, agents, nil)))
 		case "/chat":
 			fmt.Fprint(w, `<div id="project-b-chat">Project B chat</div>`)
 		default:
@@ -88,6 +89,11 @@ func TestBrowserFunctional_NewTaskTitleDraftRestoredFromProjectHistory(t *testin
 		b.typeText("Project A draft")
 		b.waitFor("Project A title saved", `sessionStorage.getItem('openvibely.new-task-title.title-project-a')`, "Project A draft")
 
+		b.click("#task-message-input")
+		b.typeText("Project A message")
+		b.evaluate(`(function(){var picker=document.getElementById('task-thread-form-agent-select');window._setChatCustomSelectValue(picker,'draft-model');picker.dispatchEvent(new CustomEvent('chat-select-change',{bubbles:true,detail:{value:'draft-model'}}));return 'selected';})()`)
+		b.waitFor("message and model saved", `sessionStorage.getItem('openvibely.new-task-composer.title-project-a')`, `{"message":"Project A message","model":"draft-model"}`)
+
 		// Keep the cached page script from reinitializing so the historyRestore
 		// lifecycle handler is responsible for hydrating the restored title.
 		b.evaluate(`(function(){
@@ -104,6 +110,9 @@ func TestBrowserFunctional_NewTaskTitleDraftRestoredFromProjectHistory(t *testin
 		b.waitFor("switch to Project B", `location.pathname+':'+new URLSearchParams(location.search).get('project_id')+':'+String(!!document.getElementById('project-b-chat'))`, "/chat:title-project-b:true")
 		b.evaluateAwait(`window.openVibelyNavigate('/tasks/new?project_id=title-project-b').then(function(){return 'navigated';})`)
 		b.waitFor("Project B new task form", `(function(){var root=document.querySelector('#task-detail-content');return String(!!(root && root.dataset.projectId==='title-project-b' && root.querySelector('input[name="title"]')))})()`, "true")
+		b.waitFor("Project B composer starts independently", `document.getElementById('task-message-input').value+':'+document.getElementById('task-thread-form-agent-id').value`, ":default")
+		b.click("#task-message-input")
+		b.typeText("Project B message")
 		b.click(`input[name="title"]`)
 		b.typeText("Project B draft")
 		b.waitFor("Project B title saved", `sessionStorage.getItem('openvibely.new-task-title.title-project-b')`, "Project B draft")
@@ -111,6 +120,9 @@ func TestBrowserFunctional_NewTaskTitleDraftRestoredFromProjectHistory(t *testin
 		navigateHistory(-2, "/tasks/new:title-project-a")
 		b.waitFor("Project A history restore event", `String((window._newTaskHistoryRestores||[]).some(function(item){return item.cacheHit && item.path.indexOf('/tasks/new?project_id=title-project-a')===0}))`, "true")
 		b.waitFor("cached Project A title restored", `(function(){var root=document.getElementById('task-detail-content'),input=root&&root.querySelector('input[name="title"]');return location.pathname+':'+(root&&root.dataset.projectId)+':'+(input&&input.value)+':'+sessionStorage.getItem('openvibely.new-task-title.title-project-a')})()`, "/tasks/new:title-project-a:Project A draft:Project A draft")
+
+		b.waitFor("cached Project A message and model restored", `document.getElementById('task-message-input').value+':'+document.getElementById('task-thread-form-agent-id').value+':'+document.getElementById('task-thread-form-agent-select').dataset.currentValue`, "Project A message:draft-model:draft-model")
+		b.waitFor("model label restored", `String(document.querySelector('#task-thread-form-agent-select .chat-custom-select-label').textContent.includes('Draft model'))`, "true")
 
 		// Cached fragments do not retain their original DOM listeners. A title edit
 		// after restore must update storage so another history visit cannot revert it.
@@ -122,13 +134,20 @@ func TestBrowserFunctional_NewTaskTitleDraftRestoredFromProjectHistory(t *testin
 
 		navigateHistory(2, "/tasks/new:title-project-b")
 		b.waitFor("cached Project B title restored independently", `(function(){var root=document.getElementById('task-detail-content'),input=root&&root.querySelector('input[name="title"]');return location.pathname+':'+(root&&root.dataset.projectId)+':'+(input&&input.value)})()`, "/tasks/new:title-project-b:Project B draft")
+		b.waitFor("Project B message restored independently", `document.getElementById('task-message-input').value+':'+document.getElementById('task-thread-form-agent-id').value`, "Project B message:default")
 		b.waitFor("Project A draft remains isolated", `sessionStorage.getItem('openvibely.new-task-title.title-project-a')`, "Project A revised")
 
 		b.evaluate(`(function(){var form=document.getElementById('task-thread-form');form.dispatchEvent(new CustomEvent('htmx:afterRequest',{bubbles:true,detail:{elt:form,successful:false,xhr:{status:500}}}));return 'failed request dispatched';})()`)
 		b.waitFor("failed create keeps its title draft", `sessionStorage.getItem('openvibely.new-task-title.title-project-b')`, "Project B draft")
+		b.waitFor("failed create keeps composer", `JSON.parse(sessionStorage.getItem('openvibely.new-task-composer.title-project-b')).message`, "Project B message")
 		b.evaluate(`(function(){var form=document.getElementById('task-thread-form');form.dispatchEvent(new CustomEvent('htmx:afterRequest',{bubbles:true,detail:{elt:form,successful:true,xhr:{status:200}}}));return 'successful request dispatched';})()`)
 		b.waitFor("successful create clears only Project B title", `String(sessionStorage.getItem('openvibely.new-task-title.title-project-b')===null && sessionStorage.getItem('openvibely.new-task-title.title-project-a')==='Project A revised')`, "true")
 		b.evaluate(`document.body.dispatchEvent(new CustomEvent('htmx:beforeHistorySave',{bubbles:true,detail:{}})); 'history save dispatched'`)
 		b.waitFor("successful title is not saved again", `String(sessionStorage.getItem('openvibely.new-task-title.title-project-b')===null)`, "true")
+		b.waitFor("successful composer is not saved again", `String(sessionStorage.getItem('openvibely.new-task-composer.title-project-b')===null)`, "true")
+		b.evaluateAwait(`window.openVibelyNavigate('/tasks/new?project_id=title-project-a').then(function(){return 'navigated';})`)
+		b.waitFor("fresh Project A navigation restores composer", `document.getElementById('task-message-input').value+':'+document.getElementById('task-thread-form-agent-id').value`, "Project A message:draft-model")
+		b.evaluateAwait(`window.openVibelyNavigate('/tasks/new?project_id=title-project-b').then(function(){return 'navigated';})`)
+		b.waitFor("submitted Project B starts empty", `document.getElementById('task-message-input').value+':'+document.getElementById('task-thread-form-agent-id').value`, ":default")
 	})
 }
