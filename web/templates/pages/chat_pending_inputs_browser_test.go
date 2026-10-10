@@ -11,7 +11,7 @@ import (
 )
 
 func TestBrowserFunctional_ChatLivePendingInputsUseSharedFragment(t *testing.T) {
-	page := renderReconnectComponent(t, ChatContent(nil, nil, "project-focus", nil, nil, false, false, 30))
+	page := renderReconnectComponent(t, ChatContent(nil, nil, "project-focus", nil, nil, nil, false, false, 30))
 	snapshots := map[string]string{}
 	for _, mode := range []models.ThreadInputMode{models.ThreadInputModeQueued, models.ThreadInputModeSteering} {
 		for _, attachments := range []bool{false, true} {

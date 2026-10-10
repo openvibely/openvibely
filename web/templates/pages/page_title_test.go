@@ -16,7 +16,7 @@ func TestPrimaryNavigationFragmentsIncludeAuthoritativePageTitles(t *testing.T) 
 		title     string
 		component templ.Component
 	}{
-		{name: "chat", title: "Chat", component: ChatContent(nil, nil, "", nil, nil, false, false, 30)},
+		{name: "chat", title: "Chat", component: ChatContent(nil, nil, "", nil, nil, nil, false, false, 30)},
 		{name: "tasks", title: "Tasks", component: TasksContent(nil, nil, nil, nil, "", "")},
 		{name: "schedule", title: "Schedule", component: ScheduleContent(nil, nil, 0, nil, nil)},
 		{name: "grades", title: "Proactive Insights", component: InsightsContent(nil, nil)},

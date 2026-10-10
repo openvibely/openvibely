@@ -11,7 +11,7 @@ import (
 )
 
 func renderChatContentForTest(agents []models.LLMConfig, history []models.Execution, projectID string, attachments map[string][]models.ChatAttachment, pending []models.ThreadInput, latestPlanComplete bool) templ.Component {
-	return ChatContent(agents, history, projectID, attachments, pending, latestPlanComplete, false, 30)
+	return ChatContent(agents, history, projectID, attachments, pending, nil, latestPlanComplete, false, 30)
 }
 
 func TestChatContent_IncludesSharedTaskResultConverters(t *testing.T) {
@@ -825,7 +825,7 @@ func TestChatContent_WindowedTranscriptUsesTopLoaderAndPrunesLivePairs(t *testin
 	}
 
 	var buf bytes.Buffer
-	err := ChatContent(agents, history, "project-1", map[string][]models.ChatAttachment{}, nil, false, true, 2).Render(context.Background(), &buf)
+	err := ChatContent(agents, history, "project-1", map[string][]models.ChatAttachment{}, nil, nil, false, true, 2).Render(context.Background(), &buf)
 	if err != nil {
 		t.Fatalf("render chat content: %v", err)
 	}

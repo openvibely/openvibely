@@ -15,6 +15,7 @@ import (
 	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/web/templates/pages"
 )
 
 const chatInputRequestTTL = 10 * time.Minute
@@ -296,15 +297,29 @@ func (h *Handler) ChatInputRequests(c echo.Context) error {
 	if err := h.requireChatInputProject(c.Request().Context(), projectID); err != nil {
 		return err
 	}
-	requests, err := h.listChatInputRequests(c.Request().Context(), projectID)
+	items, err := h.chatInputRequestEvents(c.Request().Context(), projectID)
 	if err != nil {
 		return err
+	}
+	if c.QueryParam("format") == "html" {
+		return render(c, http.StatusOK, pages.ChatInputRequestCards(items))
+	}
+	return c.JSON(http.StatusOK, map[string]any{"input_requests": items})
+}
+
+func (h *Handler) chatInputRequestEvents(ctx context.Context, projectID string) ([]*events.ChatInputRequestEvent, error) {
+	if strings.TrimSpace(projectID) == "" {
+		return nil, nil
+	}
+	requests, err := h.listChatInputRequests(ctx, projectID)
+	if err != nil {
+		return nil, err
 	}
 	items := make([]*events.ChatInputRequestEvent, 0, len(requests))
 	for _, req := range requests {
 		items = append(items, chatInputRequestForEvent(req))
 	}
-	return c.JSON(http.StatusOK, map[string]any{"input_requests": items})
+	return items, nil
 }
 
 func (h *Handler) persistChatInputRequest(ctx context.Context, req *chatInputRequest) error {

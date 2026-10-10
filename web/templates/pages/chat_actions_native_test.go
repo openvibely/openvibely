@@ -47,7 +47,7 @@ func TestChatActionsInNativeWailsWebView(t *testing.T) {
 	navigationScript := extractNativeChatNavigation(t, baseHTML)
 
 	var chat bytes.Buffer
-	if err := ChatContent(nil, nil, "project-native", nil, nil, false, false, 30).Render(context.Background(), &chat); err != nil {
+	if err := ChatContent(nil, nil, "project-native", nil, nil, nil, false, false, 30).Render(context.Background(), &chat); err != nil {
 		t.Fatalf("render production ChatContent: %v", err)
 	}
 
