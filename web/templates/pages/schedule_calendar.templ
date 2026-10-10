@@ -219,7 +219,7 @@ templ ScheduleCalendarScript() {
     });
    });
    var menu = root.querySelector('#schedule-context-menu');
-   if (menu) menu.querySelectorAll('[data-schedule-context-action]').forEach(function(button) { button.hidden = selected.length > 1; button.parentElement.hidden = button.hidden; });
+   if (menu) menu.querySelectorAll('[data-schedule-context-action]').forEach(function(button) { button.hidden = !!(dates.size || hours.size) || selected.length > 1; button.parentElement.hidden = button.hidden; });
   };
   window.selectScheduleContextCard = function(card) {
    window.clearScheduleDates();
@@ -290,6 +290,14 @@ templ ScheduleCalendarScript() {
    if (action === 'skip' || action === 'restore') request.skips = dates.size || hours.size ? selectedIntervals().filter(function(run) { return dateIntervalEligible(run, action); }) : eligibleCards(action).map(interval);
    apply(request, false);
   }, {signal: signal});
+  root.addEventListener('contextmenu', function(event) {
+   if (busy || !(dates.size || hours.size)) return;
+   var target = event.target.closest('[data-calendar-day], [data-calendar-hour], .drop-zone');
+   if (!target) return;
+   var selected = dates.has(target.dataset.calendarDay || target.dataset.date) || hours.has(target.dataset.calendarHour || target.dataset.hour);
+   if (!selected) return;
+   window.openScheduleSelectionContextMenu(event, target);
+  }, {capture: true, signal: signal});
   root.addEventListener('keydown', function(event) {
    var day = event.target.closest('[data-calendar-day], [data-calendar-hour]');
    if (day && (event.key === ' ' || event.key === 'Enter')) { event.preventDefault(); selectDay(day,event); }
