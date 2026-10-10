@@ -83,9 +83,9 @@ func testKanbanHeaderSearch(t *testing.T, width int) {
 			b.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseMoved", "x": px, "y": py}, nil)
 		}
 		park()
-		b.waitFor("buttons at rest", `getComputedStyle(`+toggle+`).opacity === '0.7' && getComputedStyle(`+addTask+`).opacity === '0.7' ? 'rest' : 'hover'`, "rest")
+		b.waitFor("buttons at rest", `getComputedStyle(`+toggle+`).backgroundColor === "rgba(0, 0, 0, 0)" && getComputedStyle(`+addTask+`).backgroundColor === "rgba(0, 0, 0, 0)" ? 'rest' : 'hover'`, "rest")
 		for _, btn := range []string{toggle, addTask} {
-			check("button matches panel toggle", `(() => { const s = getComputedStyle(`+btn+`), r = `+btn+`.getBoundingClientRect(); return `+btn+`.classList.contains('sidebar-toggle-btn') && r.width === 32 && r.height === 32 && s.borderTopLeftRadius === '8px' && s.opacity === '0.7' && `+btn+`.querySelector('svg').getBoundingClientRect().width === 20 })()`)
+			check("action button matches panel toggle at full strength", `(() => { const s = getComputedStyle(`+btn+`), r = `+btn+`.getBoundingClientRect(); return `+btn+`.classList.contains('sidebar-toggle-btn') && r.width === 32 && r.height === 32 && s.borderTopLeftRadius === '8px' && s.opacity === "1" && `+btn+`.querySelector('svg').getBoundingClientRect().width === 20 })()`)
 		}
 		for _, sel := range []string{`[data-kanban-search-toggle]`, `[aria-label="Add Task"]`} {
 			b.evaluate(`(window.__r = document.querySelector('` + sel + `').getBoundingClientRect(), "ok")`)

@@ -33,7 +33,7 @@ templ TasksContent(project *models.Project, tasks []models.Task, agents []models
 				if project != nil {
 					@kanbanSearch()
 				}
-				<a class="sidebar-toggle-btn btn btn-ghost btn-sm btn-square" aria-label="Add Task" data-tooltip-disabled href={ templ.URL("/tasks/new?project_id=" + getProjectID(project, nil)) } hx-get={ "/tasks/new?project_id=" + getProjectID(project, nil) } hx-target="#main-content" hx-push-url="true">
+				<a class="sidebar-toggle-btn header-action-btn btn btn-ghost btn-sm btn-square" aria-label="Add Task" data-tooltip-disabled href={ templ.URL("/tasks/new?project_id=" + getProjectID(project, nil)) } hx-get={ "/tasks/new?project_id=" + getProjectID(project, nil) } hx-target="#main-content" hx-push-url="true">
 					@pageCreateIcon()
 				</a>
 			</div>
@@ -635,7 +635,7 @@ templ kanbanSearch() {
 		@media (prefers-reduced-motion: reduce) { .kanban-search, .kanban-search-input { transition:none; } }
 	</style>
 	<div data-kanban-search data-open="false" class="kanban-search">
-		<button type="button" data-kanban-search-toggle class="kanban-search-toggle sidebar-toggle-btn btn btn-ghost btn-sm btn-square" aria-label="Search tasks" aria-expanded="false" aria-controls="kanban-search-input">
+		<button type="button" data-kanban-search-toggle class="kanban-search-toggle sidebar-toggle-btn header-action-btn btn btn-ghost btn-sm btn-square" aria-label="Search tasks" aria-expanded="false" aria-controls="kanban-search-input">
 			<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
 				<path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-4.35-4.35M17 11a6 6 0 11-12 0 6 6 0 0112 0z"></path>
 			</svg>

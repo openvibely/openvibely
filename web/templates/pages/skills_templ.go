@@ -369,7 +369,7 @@ func skillsContent(skills []SkillCard, canManage bool, currentProjectID string, 
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 4, "<div data-page-header class=\"flex items-center justify-between mb-6\"><h2 class=\"text-2xl font-bold\">Skills</h2><div class=\"dropdown dropdown-end\"><button type=\"button\" tabindex=\"0\" class=\"sidebar-toggle-btn btn btn-ghost btn-sm btn-square\" aria-label=\"Add Skill\" data-tooltip-disabled onclick=\"handleDropdownToggle(event)\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 4, "<div data-page-header class=\"flex items-center justify-between mb-6\"><h2 class=\"text-2xl font-bold\">Skills</h2><div class=\"dropdown dropdown-end\"><button type=\"button\" tabindex=\"0\" class=\"sidebar-toggle-btn header-action-btn btn btn-ghost btn-sm btn-square\" aria-label=\"Add Skill\" data-tooltip-disabled onclick=\"handleDropdownToggle(event)\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -400,7 +400,7 @@ func skillsContent(skills []SkillCard, canManage bool, currentProjectID string, 
 			return templ_7745c5c3_Err
 		}
 		if len(skills) == 0 {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 9, "<div class=\"text-center py-12\" data-search-empty-state><p class=\"opacity-50 mb-4\">No standalone skills found yet.</p><button class=\"sidebar-toggle-btn btn btn-ghost btn-sm btn-square\" aria-label=\"Create Skill\" data-tooltip-disabled onclick=\"openNewSkillModal()\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 9, "<div class=\"text-center py-12\" data-search-empty-state><p class=\"opacity-50 mb-4\">No standalone skills found yet.</p><button class=\"sidebar-toggle-btn header-action-btn btn btn-ghost btn-sm btn-square\" aria-label=\"Create Skill\" data-tooltip-disabled onclick=\"openNewSkillModal()\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
