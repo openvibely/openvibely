@@ -3,6 +3,7 @@ package pages
 import (
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/web/templates/layout"
+ templateui "github.com/openvibely/openvibely/web/templates"
 )
 
 templ Analytics(projects []models.Project, currentProject *models.Project) {
@@ -106,6 +107,7 @@ templ AnalyticsContent(currentProject *models.Project) {
 }
 
 templ analyticsContent(currentProject *models.Project) {
+ @templateui.Tooltips()
 	<div data-page-header class="flex justify-between items-center mb-6">
 		@layout.PageTitle("Analytics")
 			<div>
@@ -134,12 +136,7 @@ templ analyticsContent(currentProject *models.Project) {
 					</div></div>
 				</div>
 				<div id="analyticsError" class="alert alert-error hidden mb-6" role="alert"></div>
-				<div id="modelMetricHelp" popover="auto" role="tooltip" class="bg-base-100 text-base-content border border-base-300 rounded-lg shadow-xl p-3 text-sm" style="position:fixed;margin:0;width:min(360px,calc(100vw - 16px));max-height:calc(100vh - 16px);overflow:auto"></div>
-				<style>
-					#modelMetricHelp { display: none; }
-					#modelMetricHelp:popover-open { display: block; }
-					#modelMetricHelp[data-help-open] { display: block; z-index: 1000; }
-				</style>
+
 
 				<section id="analytics-overview" data-analytics-section="overview" class="hidden space-y-6 mb-6">
 					<div><h3 class="text-xl font-bold">Overview</h3><p class="text-sm opacity-60">What changed, what drove it, and what to inspect next.</p></div>
@@ -841,47 +838,6 @@ templ analyticsContent(currentProject *models.Project) {
 							function modelDetailLabel(row) {
 								return [row.provider, row.model, row.reasoning_effort ? row.reasoning_effort + ' reasoning' : ''].filter(Boolean).join(' · ');
 							}
-							function setupModelHelp() {
-								const root=document.getElementById('analyticsError').parentElement,tip=document.getElementById('modelMetricHelp');
-								const preview=document.querySelector('[data-analytics-preview]'),tipParent=tip.parentElement;
-								const nativePopover=typeof tip.showPopover==='function';
-								if(!nativePopover)tip.removeAttribute('popover');
-								let active=null,pinned=false;
-								function close() {
-									if(active){active.removeAttribute('aria-describedby');active.setAttribute('aria-expanded','false');}
-									active=null;pinned=false;
-									if(nativePopover&&tip.matches(':popover-open'))tip.hidePopover();
-									tip.removeAttribute('data-help-open');
-									if(tip.parentElement!==tipParent)tipParent.appendChild(tip);
-								}
-								function show(button,pin) {
-									if(active!==button)close();active=button;pinned=pinned||pin;
-									const host=button.closest('[data-analytics-preview]')||tipParent;
-									if(tip.parentElement!==host)host.appendChild(tip);
-									const sample=button.querySelector('[data-task-summary-sample]');
-									tip.textContent=button.dataset.modelHelp+(sample&&sample.textContent?' '+sample.textContent+'.':'');button.setAttribute('aria-describedby',tip.id);button.setAttribute('aria-expanded','true');
-									if(nativePopover){if(!tip.matches(':popover-open'))tip.showPopover();}
-									else tip.setAttribute('data-help-open','');
-									const r=button.getBoundingClientRect(),box=tip.getBoundingClientRect();
-									tip.style.left=Math.max(8,Math.min(r.left,window.innerWidth-box.width-8))+'px';
-									tip.style.top=Math.max(8,r.bottom+box.height+8<=window.innerHeight?r.bottom:r.top-box.height)+'px';
-								}
-								for(const helpRoot of root.contains(preview)?[root]:[root,preview]) {
-									helpRoot.addEventListener('pointerover',function(e){const b=e.target.closest('[data-model-help]');if(b&&!pinned)show(b,false);},{signal:eventSignal});
-									helpRoot.addEventListener('pointerout',function(e){if(!pinned&&active&&!active.contains(e.relatedTarget)&&!tip.contains(e.relatedTarget))close();},{signal:eventSignal});
-									helpRoot.addEventListener('focusin',function(e){const b=e.target.closest('[data-model-help]');if(b)show(b,false);},{signal:eventSignal});
-									helpRoot.addEventListener('focusout',function(e){if(active===e.target)close();},{signal:eventSignal});
-									helpRoot.addEventListener('click',function(e){const b=e.target.closest('[data-model-help]');if(!b)return;if(active===b&&pinned)close();else show(b,true);},{signal:eventSignal});
-								}
-								// A queued close event may arrive after reopening or after help opens on the restored card.
-								preview.addEventListener('close',function(){if(!preview.open&&tip.parentElement===preview)close();},{signal:eventSignal});
-								document.addEventListener('keydown',function(e){if(e.key==='Escape')close();},{signal:eventSignal});
-								document.addEventListener('click',function(e){if(active&&!active.contains(e.target)&&!tip.contains(e.target))close();},{signal:eventSignal});
-								if(nativePopover)tip.addEventListener('toggle',function(){if(!tip.matches(':popover-open'))close();},{signal:eventSignal});
-								window.addEventListener('resize',close,{signal:eventSignal});
-								document.addEventListener('scroll',function(e){if(e.target!==tip)close();},{capture:true,signal:eventSignal});
-								eventSignal.addEventListener('abort',close,{once:true});
-							}
 							const modelBarPalette=['rgba(239, 68, 68, 0.7)','rgba(34, 197, 94, 0.7)','rgba(59, 130, 246, 0.7)','rgba(251, 146, 60, 0.7)','rgba(147, 51, 234, 0.7)','rgba(20, 184, 166, 0.7)'];
 							// Keep assignments across tab/project navigation; never hash into a small palette.
 							const modelChartColors=window._analyticsModelColors||(window._analyticsModelColors=new Map());
@@ -936,7 +892,9 @@ templ analyticsContent(currentProject *models.Project) {
 							  }
 							  context.canvas.closest('.card')?.style.setProperty('min-width','0');
 							 }
-							 return new Chart(context,config);
+							 options.plugins=options.plugins||{};
+                             options.plugins.tooltip={...options.plugins.tooltip,enabled:false,external:function(context){if(window.openVibelyTooltip)window.openVibelyTooltip.chart(context);}};
+                             return new Chart(context,config);
 							}
 							function modelSlotKey(row){return row.model_config_id||JSON.stringify([row.provider,row.model,row.reasoning_effort,row.config_name]);}
 							function drawModelBarValue(chart,bar,index,label,missing){
@@ -2160,7 +2118,6 @@ templ analyticsContent(currentProject *models.Project) {
 							Object.values(charts).forEach(function(chart){if(chart&&typeof chart.resize==='function')chart.resize();});
 						}, {signal:eventSignal});
 						document.getElementById('usageBreakdownHead').innerHTML=analyticsTableHead([["Model","Saved configuration alias, with recorded provider and model plus the saved reasoning setting underneath. Usage without a linked configuration remains included."],["Input tokens","Recorded tokens sent to the model."],["Output tokens","Recorded tokens generated by the model."],["Cached input","Recorded cached input tokens. Reuse is cached input divided by input: green 80% or more, caution 50–79%, red below 50%. These bands describe reuse, not model quality."],["Reasoning tokens","Reasoning output tokens reported by the provider. May already be included in output tokens."],["Total tokens","Total recorded tokens. The percentage shows this model’s share of the selected period. More usage is not inherently bad."],["Known cost","Recorded cost only; unpriced usage is excluded. Unavailable does not mean free."]]);
-						setupModelHelp();
 						loadAllData(false);
 				}
 

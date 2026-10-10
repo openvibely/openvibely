@@ -237,7 +237,7 @@ window.addEventListener('load',function(){
   var box=document.querySelector('[data-task-summary="'+view+'"]');
   if(box.textContent.includes('Loading')){if(++attempts>100){result.dataset.testResult='fail';result.dataset.testError='KPI loading stuck';return;}setTimeout(check,20);return;}
   if(Array.from(box.querySelectorAll('[data-task-summary-value]')).map(el=>el.textContent).join('|')!=='42|80.0%|75.0%'||!box.textContent.includes('24 / 30 evaluated')||!box.textContent.includes('18 / 24 eligible')){result.dataset.testResult='fail';result.dataset.testError='KPI values missing on '+view;return;}
-  var help=box.querySelectorAll('[data-model-help]')[1],tip=document.getElementById('modelMetricHelp');
+  var help=box.querySelectorAll('[data-model-help]')[1],tip=document.getElementById('ov-shared-tooltip');
   if(tip.getClientRects().length){result.dataset.testResult='fail';result.dataset.testError='empty tooltip must start hidden';return;}
   help.dispatchEvent(new PointerEvent('pointerover',{bubbles:true}));
   if(!tip.matches(':popover-open')||!tip.textContent.includes('24 / 30 evaluated')||!tip.textContent.includes('goal was met')||!help.querySelector('[data-task-summary-sample]').hidden){result.dataset.testResult='fail';result.dataset.testError='sample must be hidden in card and visible in immediate tooltip';return;}
@@ -423,7 +423,7 @@ window.addEventListener('load',async function(){
    assert(sectionHelp.matches('button[data-model-help]')&&sectionHelp.querySelector('svg'),'tab subtitle should use the same help-icon style as Models');
    assert(!sectionTitle.parentElement.parentElement.querySelector('p.text-sm'),'tab subtitle must not remain visible');
    sectionHelp.click();
-   assert(document.getElementById('modelMetricHelp').matches(':popover-open')&&document.getElementById('modelMetricHelp').textContent===sectionHelp.dataset.modelHelp,'tab help must open on click');
+   assert(document.getElementById('ov-shared-tooltip').matches(':popover-open')&&document.getElementById('ov-shared-tooltip').textContent===sectionHelp.dataset.modelHelp,'tab help must open on click');
    document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));
   }
   assert(document.querySelectorAll('[data-usage-summary-value]').length===4&&document.querySelectorAll('[data-usage-summary-value]')[3].textContent==='2.4M','daily token KPI should show a compact backend average');
@@ -434,7 +434,7 @@ window.addEventListener('load',async function(){
   assert(!usageTable.closest('.card-body').querySelector('.flex button[data-model-help]'),'usage title must not have a floating help icon');
   assert(usageHeaders[3].querySelector('button').dataset.modelHelp.includes('green 80%'),'cache highlight explanation belongs on its column');
   var headerHelp=usageHeaders[3].querySelector('button');headerHelp.click();
-  assert(document.getElementById('modelMetricHelp').matches(':popover-open')&&document.getElementById('modelMetricHelp').textContent===headerHelp.dataset.modelHelp,'usage column help should open immediately on click');
+  assert(document.getElementById('ov-shared-tooltip').matches(':popover-open')&&document.getElementById('ov-shared-tooltip').textContent===headerHelp.dataset.modelHelp,'usage column help should open immediately on click');
   document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));
   assert(usageRows[2].cells[1].textContent.includes('1M'),'compact values should remain');
   assert(!usageTable.querySelector('button,[data-model-help],[title]'),'usage values must not have tooltip triggers');
@@ -1131,7 +1131,7 @@ func TestBrowserFunctional_AnalyticsContent_ModelScorecardIsReadableWithoutHover
 	      if(score.indexOf('1m 0s')<0||score.indexOf('1,000')<0||score.indexOf('$0.2500')<0||score.indexOf('Follow-ups / task')<0)fail('whole-task effort missing');
 	      if(card.querySelectorAll('thead th').length!==7||card.querySelectorAll('tbody tr').length!==1)fail('expected one compact seven-column scorecard');
 	      if(card.querySelectorAll('thead button[data-model-help]').length!==7||card.querySelector('button[title]'))fail('metric explanations must not use delayed browser titles');
-	      var help=card.querySelector('thead button'),tip=document.getElementById('modelMetricHelp');
+	      var help=card.querySelector('thead button'),tip=document.getElementById('ov-shared-tooltip');
 	      help.dispatchEvent(new PointerEvent('pointerover',{bubbles:true}));
 	      if(!tip.matches(':popover-open')||tip.textContent!==help.dataset.modelHelp)fail('hover help must open immediately');
 	      help.click();help.dispatchEvent(new PointerEvent('pointerout',{bubbles:true}));
@@ -1271,7 +1271,7 @@ func TestAnalyticsContent_HasPersistentViewsDefinitionsAndSafeRendering(t *testi
 	if strings.Contains(content, `id="overviewAccountUsageCards"`) || strings.Contains(content, `data-analytics-provider-usage`) {
 		t.Fatal("provider usage should live only on the Usage view")
 	}
-	if !strings.Contains(content, `data-model-attribution-help`) || !strings.Contains(content, `id="modelMetricHelp" popover="auto"`) {
+	if !strings.Contains(content, `data-model-attribution-help`) || !strings.Contains(content, `tip.id='ov-shared-tooltip'`) {
 		t.Fatal("model metric attribution guidance should be available from a compact tooltip")
 	}
 	if strings.Contains(content, `<div class="alert"><span>Run results belong to the model`) {
@@ -1456,7 +1456,7 @@ func TestBrowserFunctional_AnalyticsContent_GraphPreviewInChrome(t *testing.T) {
    checkTitleAlignment(card,button);
    const close=dialog.firstElementChild;
    check(close.querySelector('svg')&&!close.textContent.trim(),'exit control is not icon only');
-   check(close.getAttribute('aria-label')==='Close graph preview'&&close.title==='Close graph preview','exit icon lacks accessible label or tooltip');
+   check(close.getAttribute('aria-label')==='Close graph preview'&&(close.dataset.ovTooltip||close.title)==='Close graph preview','exit icon lacks accessible label or tooltip');
    const originalStyle=plot.getAttribute('style');
    let resized=0;
    window._analyticsCharts.previewTest={canvas,resize(){resized++;},destroy(){}};
@@ -1477,19 +1477,19 @@ func TestBrowserFunctional_AnalyticsContent_GraphPreviewInChrome(t *testing.T) {
    check(dialog.querySelector('select')===select,'model filter was replaced');
    check(dialog.querySelector('canvas')===canvas&&resized>0,'chart was replaced or not resized');
    check(document.activeElement===dialog,'mouse opening left focus on exit button');
-   const help=card.querySelector('[data-model-help]'),tip=document.getElementById('modelMetricHelp'),tipParent=tip.parentElement;
+   const help=card.querySelector('[data-model-help]'),tip=document.getElementById('ov-shared-tooltip'),tipParent=tip.parentElement;
    help.dispatchEvent(new PointerEvent('pointerover',{bubbles:true})); await tick();
    check(tip.matches(':popover-open')&&tip.textContent===help.dataset.modelHelp,'preview info hover did not show tooltip');
    check(dialog.contains(tip),'preview tooltip is outside modal and inert');
    // Native close events are queued and can arrive after a preview has reopened.
    dialog.dispatchEvent(new Event('close'));
    check(tip.matches(':popover-open'),'stale preview close event dismissed reopened preview help');
-   help.dispatchEvent(new PointerEvent('pointerout',{bubbles:true,relatedTarget:canvas})); await tick();
+   help.dispatchEvent(new PointerEvent('pointerout',{bubbles:true,relatedTarget:canvas})); await new Promise(resolve=>setTimeout(resolve,150));
    check(!tip.matches(':popover-open'),'preview info tooltip did not dismiss on pointer exit');
    help.focus(); await tick();
    check(document.activeElement===help&&tip.matches(':popover-open'),'preview info keyboard focus did not show tooltip');
    help.click(); await tick();
-   help.dispatchEvent(new PointerEvent('pointerout',{bubbles:true,relatedTarget:canvas})); await tick();
+   help.dispatchEvent(new PointerEvent('pointerout',{bubbles:true,relatedTarget:canvas})); await new Promise(resolve=>setTimeout(resolve,150));
    check(tip.matches(':popover-open'),'preview info click did not pin tooltip');
    canvas.click(); await tick();
    check(dialog.open&&!tip.matches(':popover-open'),'chart interaction did not dismiss only tooltip');
@@ -1502,7 +1502,7 @@ func TestBrowserFunctional_AnalyticsContent_GraphPreviewInChrome(t *testing.T) {
    check(tip.matches(':popover-open'),'restored card info tooltip no longer works');
    dialog.dispatchEvent(new Event('close'));
    check(tip.matches(':popover-open'),'stale preview close event dismissed restored card help');
-   help.dispatchEvent(new PointerEvent('pointerout',{bubbles:true,relatedTarget:canvas})); await tick();
+   help.dispatchEvent(new PointerEvent('pointerout',{bubbles:true,relatedTarget:canvas})); await new Promise(resolve=>setTimeout(resolve,150));
    check(plot.getAttribute('style')===originalStyle&&!plot.hasAttribute('data-analytics-preview-plot'),'plot sizing not restored');
    button.click(); await tick();
    check(document.activeElement===close,'keyboard opening did not focus exit button');
