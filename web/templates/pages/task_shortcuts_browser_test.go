@@ -16,6 +16,12 @@ import (
 )
 
 func TestBrowserFunctional_TaskShortcuts(t *testing.T) {
+	for _, delay := range []time.Duration{0, 100 * time.Millisecond} {
+		t.Run(delay.String(), func(t *testing.T) { testTaskShortcuts(t, delay) })
+	}
+}
+
+func testTaskShortcuts(t *testing.T, threadDelay time.Duration) {
 	chrome := chatNavigationChromePath(t)
 	project := models.Project{ID: "shortcuts", Name: "Shortcuts"}
 	var lists atomic.Int32
@@ -37,7 +43,7 @@ func TestBrowserFunctional_TaskShortcuts(t *testing.T) {
 			fmt.Fprint(w, `{"files":0,"insertions":0,"deletions":0,"review_comments":0}`)
 			return
 		case strings.HasSuffix(r.URL.Path, "/thread"):
-			time.Sleep(100 * time.Millisecond) // Exercise focus across the lazy thread response.
+			time.Sleep(threadDelay)
 			task := &models.Task{ID: strings.Split(r.URL.Path, "/")[2], ProjectID: project.ID, Title: "Task", Status: models.StatusCompleted, Category: models.CategoryCompleted}
 			component = components.TaskThreadView(task, nil, nil, nil, nil, nil, false, 30)
 		case r.URL.Path == "/tasks/a" || r.URL.Path == "/tasks/b" || r.URL.Path == "/tasks/c":
@@ -62,7 +68,11 @@ func TestBrowserFunctional_TaskShortcuts(t *testing.T) {
 		b.evaluate(`['a','b','c'].forEach(function(id){localStorage.setItem('openvibely-task-thread-message-history-'+id,JSON.stringify(['Older message','Newest message']))});'ready'`)
 		command := `(/Mac|iPhone|iPad/.test(navigator.platform)?{metaKey:true}:{ctrlKey:true})`
 		key := func(code, modifiers string) {
-			b.evaluate(`document.activeElement.dispatchEvent(new KeyboardEvent('keydown',Object.assign({key:'` + strings.TrimPrefix(code, "Key") + `',code:'` + code + `',bubbles:true,cancelable:true},` + modifiers + `)));'sent'`)
+			flags := 0
+			fmt.Sscan(b.evaluate(`String((function(m){return (m.altKey?1:0)|(m.ctrlKey?2:0)|(m.metaKey?4:0)|(m.shiftKey?8:0)})(`+modifiers+`))`), &flags)
+			keyName := strings.TrimPrefix(code, "Key")
+			b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": keyName, "code": code, "modifiers": flags}, nil)
+			b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyUp", "key": keyName, "code": code, "modifiers": 0}, nil)
 		}
 		key("KeyK", `Object.assign({shiftKey:true},`+command+`)`)
 		b.waitFor("project shortcut opens project search", `String(document.getElementById('project-selector-dialog').open && document.activeElement.id==='project-selector-search')`, "true")

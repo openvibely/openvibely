@@ -265,7 +265,7 @@ func TestBrowserFunctional_ChatComposerAutoFocusLifecycleInChrome(t *testing.T) 
 <dialog id="active-dialog"><button>Dialog action</button></dialog>
 <div id="main-content"><div id="chat-page-root"><div id="chat-messages"></div>` + chat + `</div></div>
 <template id="chat-fragment"><div id="chat-page-root"><div id="chat-messages"></div>` + chat + `</div></template>
-<template id="thread-fragment"><div id="task-thread-view"><div id="task-thread-messages"></div>` + thread + `</div></template>
+<template id="thread-fragment"><div id="task-detail-content"><button id="task-breadcrumb" data-breadcrumb-selector-button>Task</button><div id="task-thread-view"><div id="task-thread-messages"></div>` + thread + `</div></div></template>
 <div id="browser-result">pending</div>
 <script>
 (async function() {
@@ -299,7 +299,14 @@ func TestBrowserFunctional_ChatComposerAutoFocusLifecycleInChrome(t *testing.T) 
   if (document.activeElement !== other) fail('HTMX settle stole focus from another control');
 
   other.blur();
-  mount('thread-fragment');
+  var interruptedThread = mount('thread-fragment');
+  // A second swap can cancel the scheduled attempt before the browser focuses.
+  document.dispatchEvent(new CustomEvent('htmx:beforeSwap', {detail:{target:interruptedThread}}));
+  settle(interruptedThread);
+  // Browser focus restoration can arrive after the new composer script runs.
+  interruptedThread.classList.add('htmx-settling');
+  document.getElementById('task-breadcrumb').focus();
+  interruptedThread.classList.remove('htmx-settling');
   await waitFor(function() { return document.activeElement && document.activeElement.id === 'task-message-input'; }, 'HTMX/lazy Thread did not focus');
   var taskInput = document.getElementById('task-message-input');
   typeImmediately(taskInput, 'task thread');
@@ -309,6 +316,15 @@ func TestBrowserFunctional_ChatComposerAutoFocusLifecycleInChrome(t *testing.T) 
   mount('chat-fragment');
   await waitFor(function() { return document.activeElement && document.activeElement.id === 'message-input'; }, 'returning to Chat did not focus live textarea');
   if (document.activeElement === taskInput || taskInput.isConnected) fail('detached task textarea retained focus');
+
+  // An intentional keystroke while focus is pending must still cancel it,
+  // even if a later swap settles after the user leaves the composer.
+  document.activeElement.blur();
+  window.openVibelyRequestComposerFocus({root:document.getElementById('chat-form'), force:true});
+  document.body.dispatchEvent(new KeyboardEvent('keydown', {key:'Escape', bubbles:true}));
+  settle(document.getElementById('main-content'));
+  await new Promise(function(resolve) { setTimeout(resolve, 80); });
+  if (document.activeElement.id === 'message-input') fail('settle retried focus after intentional interaction');
 
   var dialog = document.getElementById('active-dialog');
   dialog.showModal();
