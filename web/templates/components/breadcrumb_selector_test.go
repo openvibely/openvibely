@@ -142,7 +142,7 @@ func TestBrowserFunctional_BreadcrumbSelectorKeyboardFocusAndContainmentInChrome
 	runHeadlessChromeFixture(t, chrome, server.URL+"/", "breadcrumb selector keyboard", 900, 20*time.Second)
 }
 
-func TestBrowserFunctional_BreadcrumbSelectorRefreshesOpenResultsOnTaskSSEInChrome(t *testing.T) {
+func TestBrowserFunctional_BreadcrumbSelectorKeepsOpenResultsStableOnTaskSSEInChrome(t *testing.T) {
 	chrome := testChromePath(t)
 	var selector bytes.Buffer
 	if err := BreadcrumbSelector(models.BreadcrumbSelector{ID: "live-selector", Kind: "Task", CurrentID: "one", CurrentName: "Current", SearchURL: "/results"}).Render(context.Background(), &selector); err != nil {
@@ -151,7 +151,7 @@ func TestBrowserFunctional_BreadcrumbSelectorRefreshesOpenResultsOnTaskSSEInChro
 	renderResults := func(name string) string {
 		t.Helper()
 		var out bytes.Buffer
-		if err := BreadcrumbSelectorResults("Task", "one", []models.BreadcrumbSelectorItem{{ID: "one", Name: name, URL: "/tasks/one", Status: models.StatusPending, Category: models.CategoryActive}}, false, false).Render(context.Background(), &out); err != nil {
+		if err := BreadcrumbSelectorResults("Task", "one", []models.BreadcrumbSelectorItem{{ID: "one", Name: name, URL: "/tasks/one", Status: models.StatusPending, Category: models.CategoryActive}, {ID: "two", Name: "Other task", URL: "/tasks/two"}}, false, false).Render(context.Background(), &out); err != nil {
 			t.Fatalf("render selector results: %v", err)
 		}
 		return out.String()
@@ -166,8 +166,31 @@ func TestBrowserFunctional_BreadcrumbSelectorRefreshesOpenResultsOnTaskSSEInChro
 	    button.click();
 	    var dialog=document.querySelector('[data-breadcrumb-selector-dialog]');
 	    await waitFor(function(){ return dialog.open && document.querySelector('[data-breadcrumb-selector-results]').textContent.indexOf('Before SSE') !== -1; });
+	    var results=document.querySelector('[data-breadcrumb-selector-results]');
+	    var hovered=results.querySelectorAll('[data-breadcrumb-selector-option]')[1];
+	    hovered.dispatchEvent(new PointerEvent('pointermove', {bubbles:true, pointerType:'mouse'}));
+	    if(!hovered.hasAttribute('data-selector-active')) throw new Error('hover did not highlight other task');
+	    var replacements=0;
+	    var observer=new MutationObserver(function(){ replacements++; });
+	    observer.observe(results, {childList:true});
+	    for(var i=0;i<4;i++) {
+	      window.dispatchEvent(new CustomEvent('sse-task-event', { detail: { type: 'task_status_changed', task_id: 'one', project_id: 'project-live' } }));
+	      await new Promise(function(resolve){ setTimeout(resolve,250); });
+	    }
+	    if(replacements || !hovered.isConnected || !hovered.hasAttribute('data-selector-active')) throw new Error('task events replaced or moved the hovered result');
+	    hovered.focus();
 	    window.dispatchEvent(new CustomEvent('sse-task-event', { detail: { type: 'task_status_changed', task_id: 'one', project_id: 'project-live' } }));
-	    await waitFor(function(){ return dialog.open && document.querySelector('[data-breadcrumb-selector-results]').textContent.indexOf('After SSE') !== -1; });
+	    await new Promise(function(resolve){ setTimeout(resolve,300); });
+	    if(document.activeElement!==hovered || replacements) throw new Error('task event disturbed keyboard selection');
+	    observer.disconnect();
+	    window.openVibelySearchableSelector.close(document.querySelector('[data-breadcrumb-selector]'), true);
+	    button.click();
+	    await waitFor(function(){ return dialog.open && results.textContent.indexOf('After SSE') !== -1; });
+	    var input=document.querySelector('[data-breadcrumb-selector-search]');
+	    var beforeSearch=results.firstElementChild;
+	    input.value='Other';
+	    input.dispatchEvent(new Event('input', {bubbles:true}));
+	    await waitFor(function(){ return results.firstElementChild!==beforeSearch; });
 	    document.body.setAttribute('data-test-result','pass');
 	  })().catch(function(error){ var message=String(error.stack||error); document.body.setAttribute('data-test-result','fail'); document.body.setAttribute('data-test-error',message); document.body.appendChild(document.createTextNode(' BREADCRUMB_SSE_TEST_ERROR: '+message)); });
 	});
@@ -195,7 +218,7 @@ func TestBrowserFunctional_BreadcrumbSelectorRefreshesOpenResultsOnTaskSSEInChro
 		}
 	}))
 	defer server.Close()
-	runHeadlessChromeFixture(t, chrome, server.URL+"/", "breadcrumb selector SSE refresh", 900, 20*time.Second)
+	runHeadlessChromeFixture(t, chrome, server.URL+"/", "breadcrumb selector stable SSE results", 8000, 20*time.Second)
 }
 
 func TestBrowserFunctional_BreadcrumbSelectorLongTitleClampsInsideNarrowViewportInChrome(t *testing.T) {
