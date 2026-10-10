@@ -79,9 +79,23 @@ templ NewTaskContent(project *models.Project, agents []models.LLMConfig, agentDe
      input.setAttribute('form', 'task-thread-form');
     });
     var form = document.getElementById('task-thread-form');
-    // Do not cache an abandoned creation draft in HTMX history.
+    var titleInput = root.querySelector('input[name="title"][form="task-thread-form"]');
+    var titleDraftKey = 'openvibely.new-task-title.' + root.getAttribute('data-project-id');
+    function saveTaskTitleDraft() {
+     try { sessionStorage.setItem(titleDraftKey, titleInput.value); } catch (_) {}
+    }
+    function clearTaskTitleDraft() {
+     try { sessionStorage.removeItem(titleDraftKey); } catch (_) {}
+    }
+    try {
+     var savedTitle = sessionStorage.getItem(titleDraftKey);
+     if (savedTitle !== null) titleInput.value = savedTitle;
+    } catch (_) {}
+    titleInput.addEventListener('input', saveTaskTitleDraft);
+    // Keep creation fields out of HTMX history; retain the title separately per project.
     function discardDraft(event) {
      if(event.type==='htmx:beforeCleanupElement' && event.detail.elt!==root) return;
+     saveTaskTitleDraft();
      form.reset();
      var clear=window[form.getAttribute('data-clear-func-name')];
      if(clear) clear();
@@ -97,9 +111,11 @@ templ NewTaskContent(project *models.Project, agents []models.LLMConfig, agentDe
     form.addEventListener('htmx:afterRequest', function(event) {
      if (!event.detail || event.detail.elt !== form) return;
      var xhr = event.detail.xhr;
+     var succeeded = event.detail.successful || (xhr && xhr.status >= 200 && xhr.status < 300);
+     if (succeeded) clearTaskTitleDraft();
      var error = root.querySelector('#new-task-error');
      if (!error || !root.isConnected) return;
-     if (event.detail.successful || (xhr && xhr.status >= 200 && xhr.status < 300)) {
+     if (succeeded) {
       error.textContent = '';
       return;
      }
