@@ -1914,6 +1914,9 @@ window.addEventListener('DOMContentLoaded', function() {
     if (editor.readOnly) fail('Edit YAML editor is unexpectedly read-only');
     var editGuard = document.querySelector('[data-automation-yaml-builder]');
     if (typeof editGuard.hasUnsavedAutomationChanges !== 'function' || editGuard.hasUnsavedAutomationChanges()) fail('fresh builder must have a clean edit snapshot');
+    editGuard.dataset.automationUnsavedChanges = 'true';
+    if (!editGuard.hasUnsavedAutomationChanges()) fail('server-rendered preview must remain dirty without further edits');
+    editGuard.dataset.automationUnsavedChanges = 'false';
     var guardedName = editGuard.querySelector('[data-automation-name]'), originalGuardedName = guardedName.value;
     guardedName.value += ' changed';
     if (!editGuard.hasUnsavedAutomationChanges()) fail('breadcrumb name edit must protect navigation');

@@ -836,6 +836,9 @@ func (h *Handler) changeAutomationLifecycle(c echo.Context, action string) error
 }
 
 func (h *Handler) renderAutomationBuilder(c echo.Context, page models.AutomationBuilderPage) error {
+	// Successful saves redirect. A POST that renders the editor is still an
+	// unsaved preview (or a failed save), even after replacing the whole editor.
+	page.UnsavedChanges = page.UnsavedChanges || c.Request().Method == http.MethodPost
 	projectID, _ := h.getCurrentProjectID(c)
 	if !page.YAMLProvided && page.YAML == "" {
 		encodedYAML, err := service.EncodeAutomationDraftYAML(page.Result.Candidate)

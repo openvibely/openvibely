@@ -135,6 +135,7 @@ type AutomationBuilderPage struct {
 	YAML                    string                       `json:"-"`
 	YAMLProvided            bool                         `json:"-"`
 	InitialView             string                       `json:"-"`
+	UnsavedChanges          bool                         `json:"-"`
 	Error                   string                       `json:"error,omitempty"`
 }
 
