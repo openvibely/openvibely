@@ -163,7 +163,7 @@ templ MermaidDiagrams() {
    link.className='chat-mermaid';
    link.href=url;
    link.dataset.imageGalleryItem='';
-   if (!isDiagram) link.dataset.imageName='diagram-'+Math.random().toString(36).slice(2,10)+'.svg';
+   if (!isDiagram) link.dataset.imageName='diagram-'+Array.from(crypto.getRandomValues(new Uint8Array(8)),b=>'abcdefghijklmnopqrstuvwxyz0123456789'[b%36]).join('')+'.svg';
    link.setAttribute('aria-label','Preview Mermaid diagram');
    link.dataset.mermaidSource=source;
    link.dataset.mermaidTheme=theme;
