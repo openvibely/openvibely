@@ -146,7 +146,13 @@ func testScheduleCalendarHeader(t *testing.T, paused, mobile bool) {
     check(getComputedStyle(toolbar).display==='none','clearing selection hides panel');
     report('pass','');return;
    }
-   root.querySelector('#schedule-selection-toolbar [data-calendar-action="skip"]').click();await tick();
+   var selectionMenu=root.querySelector('#schedule-context-menu');
+   function context(el){el.dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:300,clientY:200}));}
+   context(days[1]);
+   check(count()===2 && !selectionMenu.classList.contains('hidden'),'right-click preserves selected dates and opens menu');
+   check(Array.from(selectionMenu.querySelectorAll('[data-schedule-context-action]')).every(button=>button.hidden),'date menu hides task actions');
+   check(selectionMenu.querySelector('[data-calendar-action="pause"]').hidden,'date menu hides pause');
+   selectionMenu.querySelector('[data-calendar-action="skip"]').click();await tick();
    check(requests[0].skips.length===2,'skip must send two exact date windows');
    check(requests[0].skips[0].start_at===Number(days[1].dataset.start),'first date epoch');
    check(requests[0].skips[1].start_at===Number(days[3].dataset.start),'second date epoch');
@@ -162,7 +168,14 @@ func testScheduleCalendarHeader(t *testing.T, paused, mobile bool) {
    check(hourCount()===1 && hours[14].getAttribute('aria-pressed')==='true','Ctrl-click toggles selected hour');
    hours[9].dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',metaKey:true,bubbles:true,cancelable:true}));
    check(hourCount()===2,'keyboard modifier adds hour');
-   toolbar.querySelector('[data-calendar-action="skip"]').click();await tick();
+   context(hours[9]);
+   check(hourCount()===2 && !selectionMenu.classList.contains('hidden'),'right-click preserves nonadjacent hours');
+   document.body.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,button:0}));
+   check(selectionMenu.classList.contains('hidden') && toolbar.getAttribute('aria-hidden')==='false' && hourCount()===2,'outside click restores toolbar without clearing hours');
+   var selectedZone=root.querySelector('.drop-zone[data-hour="9"]');
+   context(selectedZone.querySelector('[data-schedule-card]') || selectedZone);
+   check(hourCount()===2 && !selectionMenu.classList.contains('hidden'),'right-click selected grid preserves hours even over a card');
+   selectionMenu.querySelector('[data-calendar-action="skip"]').click();await tick();
    var hourRequest=requests.pop();
    check(hourRequest.action==='skip' && hourRequest.skips.length===14,'two hours send fourteen exact windows');
    hourRequest.skips.forEach(function(run){
@@ -174,7 +187,8 @@ func testScheduleCalendarHeader(t *testing.T, paused, mobile bool) {
    check(hourUndo.action==='restore' && JSON.stringify(hourUndo.skips)===JSON.stringify(hourRequest.skips),'hour undo sends the returned inverse with exact windows');
    down(hours[8]);up();
    check(!toolbar.querySelector('[data-calendar-action="restore"]').hidden,'hour containing skipped run offers unskip');
-   toolbar.querySelector('[data-calendar-action="restore"]').click();await tick();
+   context(hours[8]);
+   selectionMenu.querySelector('[data-calendar-action="restore"]').click();await tick();
    var restoreRequest=requests.pop();
    check(restoreRequest.action==='restore' && restoreRequest.skips.length===1 && restoreRequest.skips[0].start_at===Number(root.querySelector('.drop-zone[data-date="'+days[1].dataset.calendarDay+'"][data-hour="8"]').dataset.start),'restore targets only affected hour windows');
    down(hours[6]);up();
