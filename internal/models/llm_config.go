@@ -42,11 +42,17 @@ type OAuthConnection struct {
 	UpdatedAt           time.Time   `json:"updated_at"`
 }
 
-// PendingModelOAuth holds an unsaved authorization and the account generations
-// observed before sign-in. The snapshot is immutable for the draft lifetime.
+// OAuthCredentialSnapshot detects both reauthorization and token refresh changes.
+type OAuthCredentialSnapshot struct {
+	Revision    int64
+	Fingerprint [32]byte
+}
+
+// PendingModelOAuth holds an unsaved authorization and immutable credential
+// snapshots observed before sign-in.
 type PendingModelOAuth struct {
 	OAuthConnection
-	ObservedRevisions map[string]int64
+	ObservedCredentials map[string]OAuthCredentialSnapshot
 }
 
 type LLMConfig struct {
