@@ -1152,7 +1152,7 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 111, "\"><div class=\"flex flex-col min-w-0 flex-1 min-h-0\"><div class=\"flex flex-col flex-1 min-h-0\"><div class=\"flex items-center justify-between mb-3 flex-shrink-0\"><h3 class=\"text-sm font-semibold\">Lifecycle</h3>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 111, "\"><div class=\"flex flex-col min-w-0 flex-1 min-h-0\"><div class=\"flex flex-col flex-1 min-h-0\"><div class=\"flex items-center justify-between mb-3 flex-shrink-0\" style=\"height:20px\"><h3 class=\"text-sm font-semibold\">Lifecycle</h3>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1169,14 +1169,14 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 113, "\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" aria-hidden=\"true\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15\"></path></svg></button></div><style>\n                            #lifecycle-activity-scroll { box-sizing:border-box; width:calc(100% + 24px); margin-inline:-12px; padding-inline:12px; }\n                            .lifecycle-entry summary { box-sizing:border-box; display:flex; align-items:center; justify-content:space-between; gap:12px; list-style:none; cursor:pointer; padding:4px 12px; width:calc(100% + 24px); margin-inline:-12px; border-radius:8px; }\n                            .lifecycle-entry summary::-webkit-details-marker { display:none; }\n                            .lifecycle-entry summary:hover { background:var(--ov-hover-subtle); background:color-mix(in srgb,currentColor 5%,transparent); }\n                            .lifecycle-entry summary > span:first-child { min-width:0; overflow-wrap:anywhere; }\n                            .lifecycle-subtitle { display:block; font-size:12px; opacity:.6; margin-top:4px; }\n                            .lifecycle-entry[open] .lifecycle-chevron { transform:rotate(90deg); }\n                            .lifecycle-entry-details { padding:8px 0 16px; overflow-wrap:anywhere; }\n                            .lifecycle-evidence { display:flex; flex-direction:column; align-items:flex-start; gap:8px; margin-top:8px; min-width:0; }\n                            .lifecycle-entry-details p { margin-top:8px; }\n                            .lifecycle-entry .badge { display:inline-block; vertical-align:middle; max-width:100%; min-width:0; height:1.25rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; line-height:calc(1.25rem - 2px); flex-shrink:0; }\n                        </style><div id=\"lifecycle-activity-scroll\" data-task-id=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 113, "\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" aria-hidden=\"true\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15\"></path></svg></button></div><style>\n                            #tab-lifecycle .lifecycle-refresh { box-sizing:border-box; display:inline-flex; align-items:center; justify-content:center; width:28px; height:28px; min-height:28px; padding:0; flex-shrink:0; }\n                            #tab-lifecycle .lifecycle-refresh svg { width:16px; height:16px; flex-shrink:0; }\n                            #lifecycle-activity-scroll { box-sizing:border-box; width:calc(100% + 24px); margin-inline:-12px; padding-inline:12px; }\n                            .lifecycle-entry summary { box-sizing:border-box; display:flex; align-items:center; justify-content:space-between; gap:12px; list-style:none; cursor:pointer; padding:4px 12px; width:calc(100% + 24px); margin-inline:-12px; border-radius:8px; }\n                            .lifecycle-entry summary::-webkit-details-marker { display:none; }\n                            .lifecycle-entry summary:hover { background:var(--ov-hover-subtle); background:color-mix(in srgb,currentColor 5%,transparent); }\n                            .lifecycle-entry summary > span:first-child { min-width:0; overflow-wrap:anywhere; }\n                            .lifecycle-subtitle { display:block; font-size:12px; opacity:.6; margin-top:4px; }\n                            .lifecycle-entry[open] .lifecycle-chevron { transform:rotate(90deg); }\n                            .lifecycle-entry-details { padding:8px 0 16px; overflow-wrap:anywhere; }\n                            .lifecycle-evidence { display:flex; flex-direction:column; align-items:flex-start; gap:8px; margin-top:8px; min-width:0; }\n                            .lifecycle-entry-details p { margin-top:8px; }\n                            .lifecycle-entry .badge { display:inline-block; vertical-align:middle; max-width:100%; min-width:0; height:1.25rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; line-height:calc(1.25rem - 2px); flex-shrink:0; }\n                        </style><div id=\"lifecycle-activity-scroll\" data-task-id=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var57 string
 			templ_7745c5c3_Var57, templ_7745c5c3_Err = templ.ResolveAttributeValue(task.ID)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 580, Col: 82}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 582, Col: 82}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var57)
 			if templ_7745c5c3_Err != nil {
@@ -1189,7 +1189,7 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models
 			var templ_7745c5c3_Var58 string
 			templ_7745c5c3_Var58, templ_7745c5c3_Err = templ.ResolveAttributeValue(task.ProjectID)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 580, Col: 117}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 582, Col: 117}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var58)
 			if templ_7745c5c3_Err != nil {
@@ -1202,7 +1202,7 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models
 			var templ_7745c5c3_Var59 string
 			templ_7745c5c3_Var59, templ_7745c5c3_Err = templ.ResolveAttributeValue(task.ID)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 581, Col: 63}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 583, Col: 63}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var59)
 			if templ_7745c5c3_Err != nil {
@@ -1215,7 +1215,7 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models
 			var templ_7745c5c3_Var60 string
 			templ_7745c5c3_Var60, templ_7745c5c3_Err = templ.ResolveAttributeValue(task.ProjectID)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 581, Col: 98}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 583, Col: 98}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var60)
 			if templ_7745c5c3_Err != nil {
@@ -1260,7 +1260,7 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models
 		var templ_7745c5c3_Var63 string
 		templ_7745c5c3_Var63, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/tasks/%s/changes", task.ID))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1496, Col: 54}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1498, Col: 54}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var63)
 		if templ_7745c5c3_Err != nil {
@@ -1273,7 +1273,7 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models
 		var templ_7745c5c3_Var64 string
 		templ_7745c5c3_Var64, templ_7745c5c3_Err = templ.ResolveAttributeValue(task.ID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1499, Col: 26}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1501, Col: 26}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var64)
 		if templ_7745c5c3_Err != nil {
@@ -1291,7 +1291,7 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models
 			var templ_7745c5c3_Var65 string
 			templ_7745c5c3_Var65, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/tasks/%s/changes", task.ID))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1502, Col: 118}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1504, Col: 118}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var65)
 			if templ_7745c5c3_Err != nil {
@@ -1336,7 +1336,7 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models
 		var templ_7745c5c3_Var68 string
 		templ_7745c5c3_Var68, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/tasks/%s/thread", task.ID))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1525, Col: 53}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1527, Col: 53}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var68)
 		if templ_7745c5c3_Err != nil {
@@ -1349,7 +1349,7 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models
 		var templ_7745c5c3_Var69 string
 		templ_7745c5c3_Var69, templ_7745c5c3_Err = templ.ResolveAttributeValue(task.ID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1528, Col: 26}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1530, Col: 26}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var69)
 		if templ_7745c5c3_Err != nil {
@@ -1362,7 +1362,7 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models
 		var templ_7745c5c3_Var70 string
 		templ_7745c5c3_Var70, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprint(len(initialThread) > 0))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1529, Col: 52}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1531, Col: 52}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var70)
 		if templ_7745c5c3_Err != nil {
@@ -1478,7 +1478,7 @@ func TaskDetailActions(task *models.TaskDetailActionMetadata) templ.Component {
 			var templ_7745c5c3_Var73 string
 			templ_7745c5c3_Var73, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/tasks/%s/run", task.ID))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 2095, Col: 51}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 2097, Col: 51}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var73)
 			if templ_7745c5c3_Err != nil {
@@ -1548,7 +1548,7 @@ func TaskDetailMetrics(task *models.Task, metrics models.TaskExecutionMetrics, a
 			var templ_7745c5c3_Var76 string
 			templ_7745c5c3_Var76, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/tasks/%s/detail-status", task.ID))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 2120, Col: 68}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 2122, Col: 68}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var76)
 			if templ_7745c5c3_Err != nil {
@@ -1566,7 +1566,7 @@ func TaskDetailMetrics(task *models.Task, metrics models.TaskExecutionMetrics, a
 		var templ_7745c5c3_Var77 string
 		templ_7745c5c3_Var77, templ_7745c5c3_Err = templ.ResolveAttributeValue(string(task.Status))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 2125, Col: 40}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 2127, Col: 40}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var77)
 		if templ_7745c5c3_Err != nil {
@@ -1626,7 +1626,7 @@ func TaskDetailMetrics(task *models.Task, metrics models.TaskExecutionMetrics, a
 			var templ_7745c5c3_Var80 string
 			templ_7745c5c3_Var80, templ_7745c5c3_Err = templ.JoinStringErrs(components.StatusLabelForTask(task.Status, task.Category))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 2146, Col: 151}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 2148, Col: 151}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var80))
 			if templ_7745c5c3_Err != nil {
@@ -1644,7 +1644,7 @@ func TaskDetailMetrics(task *models.Task, metrics models.TaskExecutionMetrics, a
 				var templ_7745c5c3_Var81 string
 				templ_7745c5c3_Var81, templ_7745c5c3_Err = templ.JoinStringErrs(components.FormatElapsedTime(*metrics.LatestStartedAt))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 2151, Col: 82}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 2153, Col: 82}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var81))
 				if templ_7745c5c3_Err != nil {
@@ -1678,7 +1678,7 @@ func TaskDetailMetrics(task *models.Task, metrics models.TaskExecutionMetrics, a
 					var templ_7745c5c3_Var82 string
 					templ_7745c5c3_Var82, templ_7745c5c3_Err = templ.JoinStringErrs(dur)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 2161, Col: 32}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 2163, Col: 32}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var82))
 					if templ_7745c5c3_Err != nil {
@@ -1728,7 +1728,7 @@ func SwarmContextPanel(task *models.Task) templ.Component {
 			var templ_7745c5c3_Var84 string
 			templ_7745c5c3_Var84, templ_7745c5c3_Err = templ.JoinStringErrs(components.SwarmStatusDisplayName(task.SwarmStatus))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 2175, Col: 104}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 2177, Col: 104}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var84))
 			if templ_7745c5c3_Err != nil {
@@ -1741,7 +1741,7 @@ func SwarmContextPanel(task *models.Task) templ.Component {
 			var templ_7745c5c3_Var85 string
 			templ_7745c5c3_Var85, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", len(task.SwarmChildren)))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 2176, Col: 97}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 2178, Col: 97}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var85))
 			if templ_7745c5c3_Err != nil {
@@ -1759,7 +1759,7 @@ func SwarmContextPanel(task *models.Task) templ.Component {
 				var templ_7745c5c3_Var86 string
 				templ_7745c5c3_Var86, templ_7745c5c3_Err = templ.JoinStringErrs(task.WorktreeBranch)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 2178, Col: 135}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 2180, Col: 135}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var86))
 				if templ_7745c5c3_Err != nil {
@@ -1809,7 +1809,7 @@ func SwarmContextPanel(task *models.Task) templ.Component {
 					var templ_7745c5c3_Var89 string
 					templ_7745c5c3_Var89, templ_7745c5c3_Err = templ.JoinStringErrs(components.StatusLabelForTask(child.Status, child.Category))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 2185, Col: 145}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 2187, Col: 145}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var89))
 					if templ_7745c5c3_Err != nil {
@@ -1822,7 +1822,7 @@ func SwarmContextPanel(task *models.Task) templ.Component {
 					var templ_7745c5c3_Var90 templ.SafeURL
 					templ_7745c5c3_Var90, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/tasks/%s", child.ID)))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 2186, Col: 93}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 2188, Col: 93}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var90))
 					if templ_7745c5c3_Err != nil {
@@ -1835,7 +1835,7 @@ func SwarmContextPanel(task *models.Task) templ.Component {
 					var templ_7745c5c3_Var91 string
 					templ_7745c5c3_Var91, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/tasks/%s", child.ID))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 2186, Col: 139}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 2188, Col: 139}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var91)
 					if templ_7745c5c3_Err != nil {
@@ -1848,7 +1848,7 @@ func SwarmContextPanel(task *models.Task) templ.Component {
 					var templ_7745c5c3_Var92 string
 					templ_7745c5c3_Var92, templ_7745c5c3_Err = templ.JoinStringErrs(child.Title)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 2186, Col: 220}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 2188, Col: 220}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var92))
 					if templ_7745c5c3_Err != nil {
@@ -1861,7 +1861,7 @@ func SwarmContextPanel(task *models.Task) templ.Component {
 					var templ_7745c5c3_Var93 string
 					templ_7745c5c3_Var93, templ_7745c5c3_Err = templ.JoinStringErrs(components.SwarmRoleDisplayName(child.SwarmRole))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 2187, Col: 84}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 2189, Col: 84}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var93))
 					if templ_7745c5c3_Err != nil {
@@ -1879,7 +1879,7 @@ func SwarmContextPanel(task *models.Task) templ.Component {
 						var templ_7745c5c3_Var94 templ.SafeURL
 						templ_7745c5c3_Var94, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/tasks/%s?tab=changes", child.ID)))
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 2189, Col: 93}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 2191, Col: 93}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var94))
 						if templ_7745c5c3_Err != nil {
@@ -1892,7 +1892,7 @@ func SwarmContextPanel(task *models.Task) templ.Component {
 						var templ_7745c5c3_Var95 string
 						templ_7745c5c3_Var95, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/tasks/%s?tab=changes", child.ID))
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 2189, Col: 151}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 2191, Col: 151}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var95)
 						if templ_7745c5c3_Err != nil {
@@ -1930,7 +1930,7 @@ func SwarmContextPanel(task *models.Task) templ.Component {
 				var templ_7745c5c3_Var96 templ.SafeURL
 				templ_7745c5c3_Var96, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/tasks/%s", *task.ParentTaskID)))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 2203, Col: 121}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 2205, Col: 121}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var96))
 				if templ_7745c5c3_Err != nil {
@@ -1943,7 +1943,7 @@ func SwarmContextPanel(task *models.Task) templ.Component {
 				var templ_7745c5c3_Var97 string
 				templ_7745c5c3_Var97, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/tasks/%s", *task.ParentTaskID))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 2203, Col: 177}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 2205, Col: 177}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var97)
 				if templ_7745c5c3_Err != nil {
@@ -1956,7 +1956,7 @@ func SwarmContextPanel(task *models.Task) templ.Component {
 				var templ_7745c5c3_Var98 string
 				templ_7745c5c3_Var98, templ_7745c5c3_Err = templ.JoinStringErrs(*task.ParentTaskID)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 2203, Col: 265}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 2205, Col: 265}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var98))
 				if templ_7745c5c3_Err != nil {
@@ -1974,7 +1974,7 @@ func SwarmContextPanel(task *models.Task) templ.Component {
 			var templ_7745c5c3_Var99 string
 			templ_7745c5c3_Var99, templ_7745c5c3_Err = templ.JoinStringErrs(components.SwarmRoleDisplayName(task.SwarmRole))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 2205, Col: 65}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 2207, Col: 65}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var99))
 			if templ_7745c5c3_Err != nil {
@@ -1992,7 +1992,7 @@ func SwarmContextPanel(task *models.Task) templ.Component {
 				var templ_7745c5c3_Var100 string
 				templ_7745c5c3_Var100, templ_7745c5c3_Err = templ.JoinStringErrs(task.WorktreeBranch)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 2207, Col: 60}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 2209, Col: 60}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var100))
 				if templ_7745c5c3_Err != nil {
@@ -2048,7 +2048,7 @@ func TaskPromptPanel(task *models.Task) templ.Component {
 			var templ_7745c5c3_Var102 string
 			templ_7745c5c3_Var102, templ_7745c5c3_Err = templ.ResolveAttributeValue(task.Prompt)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 2223, Col: 105}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 2225, Col: 105}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var102)
 			if templ_7745c5c3_Err != nil {
@@ -2091,7 +2091,7 @@ func TaskGoalPanel(taskID string, goal *models.TaskGoal) templ.Component {
 		var templ_7745c5c3_Var104 string
 		templ_7745c5c3_Var104, templ_7745c5c3_Err = templ.ResolveAttributeValue(taskID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 2229, Col: 101}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 2231, Col: 101}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var104)
 		if templ_7745c5c3_Err != nil {
@@ -2109,7 +2109,7 @@ func TaskGoalPanel(taskID string, goal *models.TaskGoal) templ.Component {
 			var templ_7745c5c3_Var105 string
 			templ_7745c5c3_Var105, templ_7745c5c3_Err = templ.JoinStringErrs(goalStatusLabel(goal))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 2233, Col: 60}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 2235, Col: 60}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var105))
 			if templ_7745c5c3_Err != nil {
@@ -2127,7 +2127,7 @@ func TaskGoalPanel(taskID string, goal *models.TaskGoal) templ.Component {
 		var templ_7745c5c3_Var106 string
 		templ_7745c5c3_Var106, templ_7745c5c3_Err = templ.ResolveAttributeValue(goalStatusLabel(goal))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 2236, Col: 119}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 2238, Col: 119}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var106)
 		if templ_7745c5c3_Err != nil {
@@ -2140,7 +2140,7 @@ func TaskGoalPanel(taskID string, goal *models.TaskGoal) templ.Component {
 		var templ_7745c5c3_Var107 string
 		templ_7745c5c3_Var107, templ_7745c5c3_Err = templ.ResolveAttributeValue(goalValue(goal))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 2236, Col: 150}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 2238, Col: 150}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var107)
 		if templ_7745c5c3_Err != nil {
