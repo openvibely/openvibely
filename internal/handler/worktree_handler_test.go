@@ -454,18 +454,27 @@ func TestHandler_TaskBoardRelationshipSnapshotSupportsShallowRepositories(t *tes
 
 func TestTaskCardRelationshipSnapshotDoesNotMaterializeLargeHistory(t *testing.T) {
 	repoDir := createHandlerTestGitRepo(t)
-	// This test creates enough loose objects to trigger Git's detached automatic
-	// maintenance on newer versions. Keep all repository writers synchronous so
-	// TempDir cleanup cannot race a background maintenance process.
+	// Build a full history in one Git process, and keep repository maintenance
+	// synchronous so temporary-directory cleanup cannot race detached work.
 	runGit(t, repoDir, "config", "maintenance.auto", "false")
 	runGit(t, repoDir, "config", "gc.auto", "0")
+	var history strings.Builder
+	parent := "refs/heads/main"
 	for i := 0; i < 256; i++ {
-		if err := os.WriteFile(filepath.Join(repoDir, "history.txt"), []byte(fmt.Sprintf("history %d\n", i)), 0o644); err != nil {
-			t.Fatal(err)
-		}
-		runGit(t, repoDir, "add", "history.txt")
-		runGit(t, repoDir, "commit", "-m", fmt.Sprintf("history %d", i))
+		message := fmt.Sprintf("history %d", i)
+		content := message + "\n"
+		mark := i + 1
+		fmt.Fprintf(&history, "commit refs/heads/task-history\nmark :%d\nauthor Test <test@test.com> 1700000000 +0000\ncommitter Test <test@test.com> 1700000000 +0000\ndata %d\n%s\nfrom %s\nM 100644 inline history.txt\ndata %d\n%s\n", mark, len(message), message, parent, len(content), content)
+		parent = fmt.Sprintf(":%d", mark)
 	}
+	fmt.Fprint(&history, "reset refs/heads/main\nfrom :256\n\nreset refs/heads/task-history\n\n")
+	cmd := exec.Command("git", "fast-import", "--quiet")
+	cmd.Dir = repoDir
+	cmd.Stdin = strings.NewReader(history.String())
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("import large history: %v\n%s", err, output)
+	}
+	runGit(t, repoDir, "reset", "--hard", "main")
 	runGit(t, repoDir, "branch", "target-large", "main")
 	runGit(t, repoDir, "checkout", "-b", "task/large-history")
 	if err := os.WriteFile(filepath.Join(repoDir, "feature.txt"), []byte("feature\n"), 0o644); err != nil {
