@@ -1307,6 +1307,7 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 							var executionPair = execId ? document.getElementById('chat-execution-' + execId) : null;
 							var existing = document.getElementById('chat-input-request-' + requestId);
 							if (request.completed) {
+								delete window._chatInputDrafts[requestId];
 								if (existing) existing.remove();
 								return;
 							}
@@ -1441,9 +1442,8 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 							body.appendChild(navigation);
 							body.appendChild(status);
 							card.appendChild(body);
-							(executionPair || chatMessages).appendChild(card);
-							showChatInputQuestion(card, 0);
-							var tracker = window._chatPageTracker;
+(executionPair || chatMessages).appendChild(card);
+								showChatInputQuestion(card, applyChatInputDraft(card));							var tracker = window._chatPageTracker;
 							if (window.chatAutoScroll && (!tracker || tracker.shouldAutoScroll())) window.chatAutoScroll.scrollToBottom(chatMessages, true);
 						}
 
@@ -1455,8 +1455,8 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 							groups.forEach(function(group, groupIndex) {
 								group.classList.toggle('hidden', groupIndex !== nextIndex);
 							});
-							card.setAttribute('data-current-question-index', String(nextIndex));
-							var position = card.querySelector('[data-chat-input-position]');
+								card.setAttribute('data-current-question-index', String(nextIndex));
+								saveChatInputDraft(card);							var position = card.querySelector('[data-chat-input-position]');
 							if (position) position.textContent = (nextIndex + 1) + ' of ' + groups.length;
 							var previous = card.querySelector('[data-chat-input-nav="previous"]');
 							var next = card.querySelector('[data-chat-input-nav="next"], [data-chat-input-nav="submit"]');
@@ -1538,18 +1538,9 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 							var card = button.closest('[data-chat-input-request-id]');
 							var fieldset = button.closest('[data-chat-input-question-id]');
 							if (!card || !fieldset || card.getAttribute('data-completed') === 'true' || card.getAttribute('data-submitted') === 'true') return;
-							var isCustom = button.hasAttribute('data-chat-input-custom-option');
-							fieldset.setAttribute('data-selected-kind', isCustom ? 'custom' : 'option');
-							fieldset.setAttribute('data-selected-label', isCustom ? '' : (button.getAttribute('data-option-label') || ''));
-							fieldset.querySelectorAll('[data-chat-input-option]').forEach(function(btn) {
-								var selected = btn === button;
-								btn.classList.toggle('chat-input-option-selected', selected);
-								btn.setAttribute('aria-pressed', selected ? 'true' : 'false');
-							});
-							var customWrap = fieldset.querySelector('[data-chat-input-custom-wrap]');
-							if (customWrap) customWrap.classList.toggle('hidden', !isCustom);
-							var status = card.querySelector('[role="status"]');
-							if (status) status.classList.add('hidden');
+								var isCustom = button.hasAttribute('data-chat-input-custom-option');
+								markChatInputSelection(fieldset, button);
+								var status = card.querySelector('[role="status"]');							if (status) status.classList.add('hidden');
 							showChatInputQuestion(card, Number(card.getAttribute('data-current-question-index') || 0));
 							if (isCustom) {
 								var customInput = fieldset.querySelector('[data-chat-input-custom-answer]');
@@ -1566,7 +1557,62 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 						}
 
 						function completeChatInputRequest(card) {
-							if (card) card.remove();
+							if (!card) return;
+							delete window._chatInputDrafts[card.getAttribute('data-chat-input-request-id') || ''];
+							card.remove();
+						}
+
+						// Cards are rebuilt from server state after HTMX swaps; drafts keep unsubmitted picks.
+						window._chatInputDrafts = window._chatInputDrafts || {};
+
+						function markChatInputSelection(fieldset, button) {
+							var isCustom = button.hasAttribute('data-chat-input-custom-option');
+							fieldset.setAttribute('data-selected-kind', isCustom ? 'custom' : 'option');
+							fieldset.setAttribute('data-selected-label', isCustom ? '' : (button.getAttribute('data-option-label') || ''));
+							fieldset.querySelectorAll('[data-chat-input-option]').forEach(function(btn) {
+								var selected = btn === button;
+								btn.classList.toggle('chat-input-option-selected', selected);
+								btn.setAttribute('aria-pressed', selected ? 'true' : 'false');
+							});
+							var customWrap = fieldset.querySelector('[data-chat-input-custom-wrap]');
+							if (customWrap) customWrap.classList.toggle('hidden', !isCustom);
+						}
+
+						function saveChatInputDraft(card) {
+							var requestId = card.getAttribute('data-chat-input-request-id') || '';
+							if (!requestId) return;
+							var selections = {};
+							card.querySelectorAll('[data-chat-input-question-id]').forEach(function(group) {
+								var kind = group.getAttribute('data-selected-kind') || '';
+								if (!kind) return;
+								var input = group.querySelector('[data-chat-input-custom-answer]');
+								selections[group.getAttribute('data-chat-input-question-id')] = {
+									kind: kind,
+									label: group.getAttribute('data-selected-label') || '',
+									custom: input ? String(input.value || '') : ''
+								};
+							});
+							window._chatInputDrafts[requestId] = {index: Number(card.getAttribute('data-current-question-index') || 0), selections: selections};
+						}
+
+						function applyChatInputDraft(card) {
+							var draft = window._chatInputDrafts[card.getAttribute('data-chat-input-request-id') || ''];
+							if (!draft) return 0;
+							card.querySelectorAll('[data-chat-input-question-id]').forEach(function(group) {
+								var saved = draft.selections[group.getAttribute('data-chat-input-question-id')];
+								if (!saved) return;
+								var match = null;
+								group.querySelectorAll('[data-chat-input-option]').forEach(function(btn) {
+									if (match) return;
+									var isCustomBtn = btn.hasAttribute('data-chat-input-custom-option');
+									if (saved.kind === 'custom' ? isCustomBtn : (!isCustomBtn && btn.getAttribute('data-option-label') === saved.label)) match = btn;
+								});
+								if (!match) return;
+								markChatInputSelection(group, match);
+								var input = group.querySelector('[data-chat-input-custom-answer]');
+								if (input && saved.kind === 'custom') input.value = saved.custom;
+							});
+							return draft.index || 0;
 						}
 
 						function refreshChatInputRequests() {
@@ -1585,7 +1631,7 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 								});
 								document.querySelectorAll('[data-chat-input-request-id]').forEach(function(card) {
 									var id = card.getAttribute('data-chat-input-request-id') || '';
-									if (!activeRequestIDs[id]) card.remove();
+									if (!activeRequestIDs[id]) completeChatInputRequest(card);
 								});
 							}).catch(function(err) {
 								console.error('[chat] input request reconciliation failed:', err);
