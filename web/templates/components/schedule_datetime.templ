@@ -104,7 +104,7 @@ templ ScheduleDateTime(value string) {
     button.onclick=()=>{
      state.selected=new Date(day.getFullYear(),day.getMonth(),day.getDate(),selected.getHours(),selected.getMinutes());
      state.month=new Date(day.getFullYear(),day.getMonth(),1);
-     write(state); calendar(state,day);
+     write(state); calendar(state,day); timeColumns(state,true);
      days.querySelector('[tabindex="0"]').focus();
     };
     button.onkeydown=event=>{
@@ -185,6 +185,8 @@ templ ScheduleDateTime(value string) {
    const button=event.target.closest('[data-month-step], [data-today], [data-done]');
    if(!active || !button || !active.popup.contains(button))return;
    const state=active;
+   // Focus the persistent control before replacing the focused calendar day.
+   button.focus({preventScroll:true});
    if(button.hasAttribute('data-month-step')) {
     state.month=new Date(state.month.getFullYear(),state.month.getMonth()+Number(button.dataset.monthStep),1);
     calendar(state);
@@ -192,7 +194,7 @@ templ ScheduleDateTime(value string) {
     const today=new Date();
     state.selected=new Date(today.getFullYear(),today.getMonth(),today.getDate(),state.selected.getHours(),state.selected.getMinutes());
     state.month=new Date(today.getFullYear(),today.getMonth(),1);
-    write(state); calendar(state);
+    write(state); calendar(state); timeColumns(state,true);
    } else { write(state); close(state,true); }
   });
   window.addEventListener('resize',()=>{if(active)position(active);});
