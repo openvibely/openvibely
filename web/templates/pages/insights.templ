@@ -90,7 +90,7 @@ templ InsightCard(insight *models.Insight) {
 							hx-vals='{"status": "accepted"}'
 							hx-target={ fmt.Sprintf("#insight-%s", insight.ID) }
 							hx-swap="outerHTML"
-							title="Accept"
+							data-tooltip-disabled
 						>Accept</button>
 						<button
 							class="btn btn-xs btn-ghost"
@@ -98,7 +98,7 @@ templ InsightCard(insight *models.Insight) {
 							hx-vals='{"status": "rejected"}'
 							hx-target={ fmt.Sprintf("#insight-%s", insight.ID) }
 							hx-swap="outerHTML"
-							title="Reject"
+							data-tooltip-disabled
 						>Reject</button>
 					}
 					if insight.Status == models.InsightStatusAccepted {
@@ -108,7 +108,7 @@ templ InsightCard(insight *models.Insight) {
 							hx-vals='{"status": "resolved"}'
 							hx-target={ fmt.Sprintf("#insight-%s", insight.ID) }
 							hx-swap="outerHTML"
-							title="Mark Resolved"
+							data-tooltip-disabled
 						>Resolve</button>
 					}
 					<button
@@ -117,7 +117,7 @@ templ InsightCard(insight *models.Insight) {
 						hx-target={ fmt.Sprintf("#insight-%s", insight.ID) }
 						hx-swap="outerHTML"
 						hx-confirm="Delete this insight?"
-						title="Delete"
+						data-tooltip-disabled
 					>X</button>
 				</div>
 			</div>
