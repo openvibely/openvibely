@@ -35,6 +35,9 @@ func TestBrowserFunctional_ScheduleDateTimePicker(t *testing.T) {
 		b.waitFor("unrelated refresh keeps picker open", `String(document.querySelector('.schedule-datetime-popup').matches(':popover-open'))`, "true")
 		b.waitFor("leap day selected", `document.querySelector('[data-date="2036-02-29"]').getAttribute('aria-pressed')`, "true")
 		b.waitFor("existing time restored", `document.querySelector('[data-time-column="hour"] [aria-selected="true"]').textContent + ':' + document.querySelector('[data-time-column="minute"] [aria-selected="true"]').textContent + document.querySelector('[data-time-column="period"] [aria-selected="true"]').textContent`, "01:44PM")
+		b.waitFor("selected values at top on opening", `String(Array.from(document.querySelectorAll('[data-time-column]')).every(column=>Math.abs(column.querySelector('[aria-selected="true"]').getBoundingClientRect().top-column.getBoundingClientRect().top)<1))`, "true")
+		b.waitFor("PM first on PM opening", `document.querySelector('[data-time-column="period"]').firstElementChild.textContent`, "PM")
+
 		b.waitFor("no internal dividers", `String(getComputedStyle(document.querySelector('.schedule-datetime-time')).borderLeftWidth==='0px' && !document.querySelector('[data-done]'))`, "true")
 		for _, kind := range []string{"hour", "minute"} {
 			b.evaluate(fmt.Sprintf(`var col=document.querySelector('[data-time-column="%s"]'); col.scrollTop=15; 'scrolled'`, kind))
@@ -57,12 +60,16 @@ func TestBrowserFunctional_ScheduleDateTimePicker(t *testing.T) {
 		b.waitFor("hours wrap from 01 to 12", `document.querySelector('[name="run_at"]').value`, "2036-02-29T12:59")
 		b.click(`[data-time-column="hour"] [data-cycle="2"][data-value="12"]`)
 		b.click(`[data-time-column="period"] [data-value="0"]`)
+		b.waitFor("period order stays fixed while open", `document.querySelector('[data-time-column="period"]').firstElementChild.textContent`, "PM")
+
 		b.evaluate(`document.querySelector('[data-time-column="minute"]').focus(); 'focused'`)
 		b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": "Home"}, nil)
 		b.click(`#outside`)
 		b.waitFor("midnight serialized in local format", `new FormData(document.getElementById('schedule')).get('run_at')`, "2036-02-29T00:00")
 		b.waitFor("outside closes picker only", `String(!document.querySelector('.schedule-datetime-popup').matches(':popover-open') && document.getElementById('editor').open)`, "true")
 		b.click(`[data-run-at-picker]`)
+		b.waitFor("AM first after reopening AM time", `document.querySelector('[data-time-column="period"]').firstElementChild.textContent`, "AM")
+		b.waitFor("midnight values at top on reopening", `String(Array.from(document.querySelectorAll('[data-time-column]')).every(column=>Math.abs(column.querySelector('[aria-selected="true"]').getBoundingClientRect().top-column.getBoundingClientRect().top)<1))`, "true")
 		b.evaluate(`document.querySelectorAll('[data-month-step], [data-today]').forEach(button=>button.replaceWith(button.cloneNode(true))); 'controls refreshed'`)
 		b.click(`[data-month-step="-1"]`)
 		b.waitFor("previous month retains focus", `String(document.activeElement.matches('[data-month-step="-1"]'))`, "true")
