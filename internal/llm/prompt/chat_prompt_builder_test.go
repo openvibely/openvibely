@@ -22,27 +22,6 @@ var legacyMutationMarkers = []string{
 	"[SWITCH_PROJECT]",
 }
 
-func TestApplyTaskRuntimeToolModeKeepsCodingTools(t *testing.T) {
-	base := "Task objective"
-	toolPrompt := ApplyTaskRuntimeToolMode(base, []string{"create_task", "list_tasks"})
-	if !strings.Contains(toolPrompt, TaskRuntimeToolInstructions) || !strings.Contains(toolPrompt, "Additional runtime tools: create_task, list_tasks") {
-		t.Fatalf("task prompt missing supplemental runtime guidance: %q", toolPrompt)
-	}
-	for _, forbidden := range []string{ChatActionUnavailableInstructions, ChatActionToolModeInstructions, "only by calling"} {
-		if strings.Contains(toolPrompt, forbidden) {
-			t.Fatalf("task prompt implies runtime tools are the only tools (%q): %q", forbidden, toolPrompt)
-		}
-	}
-	for _, marker := range legacyMutationMarkers {
-		if strings.Contains(toolPrompt, marker) {
-			t.Fatalf("task prompt advertised legacy marker %s: %q", marker, toolPrompt)
-		}
-	}
-	if got := ApplyTaskRuntimeToolMode(base, nil); got != base {
-		t.Fatalf("no-tool task prompt must be unchanged, got %q", got)
-	}
-}
-
 func TestApplyChatActionToolModeReportsConcreteCapability(t *testing.T) {
 	base := BuildChatSystemPrompt(false, models.ChatModeOrchestrate, "", false)
 	capable := ApplyChatActionToolMode(base, []string{"create_task", "edit_task"}, false)
@@ -133,8 +112,8 @@ func TestApplyChatActionToolModeTaskFollowupKeepsCodingToolsPrimary(t *testing.T
 	if strings.Contains(prompt, ChatActionToolModeInstructions) || strings.Contains(prompt, "Perform application actions only by calling the provided runtime action tools") {
 		t.Fatalf("task-thread prompt received action-only Chat instructions: %q", prompt)
 	}
-	if !strings.Contains(prompt, TaskRuntimeToolInstructions) || !strings.Contains(prompt, "Additional runtime tools: create_task, list_tasks") {
-		t.Fatalf("task-thread prompt missing supplemental runtime tool guidance: %q", prompt)
+	if prompt != base {
+		t.Fatalf("task-thread prompt must rely on tool definitions, not a tool note: %q", prompt)
 	}
 	if got := ApplyChatActionToolMode(base, nil, true); got != base {
 		t.Fatalf("no-tool task-thread prompt must remain unchanged: %q", got)
