@@ -16,6 +16,15 @@
         if (merge === 'unmerged') return !!data.taskBranch && data.taskMerge !== 'merged';
         return !merge || data.taskMerge === merge;
     }
+    function searchTerm() {
+        const input = document.querySelector('[data-kanban-search-input]');
+        return input ? input.value.trim().toLowerCase() : '';
+    }
+    function matchesSearch(card, term) {
+        if (!term) return true;
+        const prompt = card.querySelector('[data-task-prompt]');
+        return ((card.dataset.taskTitle || '') + ' ' + (prompt ? prompt.textContent : '')).toLowerCase().includes(term);
+    }
     function scope(col) {
         const visible = cards(col).filter(card => !card.hidden);
         const selected = visible.filter(card => selection().has(card.dataset.taskId));
@@ -52,12 +61,15 @@
         view.button.setAttribute('aria-label', batch.running ? 'Stop batch' : 'Dismiss results');
     }
     function refresh() {
+        const term = searchTerm();
+        const search = document.querySelector('[data-kanban-search]');
+        if (search) search.dataset.active = String(!!term);
         document.querySelectorAll('#kanban-board [data-kanban-category]').forEach(col => {
             const filter = filters.get(key(col)) || {};
             const all = cards(col);
             all.forEach(card => {
                 card.title = 'Select tasks (' + selectionModifier + '+click)';
-                card.hidden = col.dataset.kanbanCategory !== 'active' && !matches(card.dataset, filter);
+                card.hidden = !matchesSearch(card, term) || col.dataset.kanbanCategory !== 'active' && !matches(card.dataset, filter);
                 if (card.hidden) selection().delete(card.dataset.taskId);
             });
             const visible = all.filter(card => !card.hidden), selected = visible.filter(card => selection().has(card.dataset.taskId));
@@ -186,6 +198,37 @@
             if (currentColumn(batchKey) && window.htmx) window.htmx.ajax('GET', '/tasks?project_id=' + encodeURIComponent(project), { target: '#kanban-board', select: '#kanban-board', swap: 'outerHTML' });
         }
     };
+    function setSearchOpen(search, open) {
+        search.dataset.open = String(open);
+        const input = search.querySelector('[data-kanban-search-input]');
+        search.querySelector('[data-kanban-search-toggle]').setAttribute('aria-expanded', String(open));
+        input.tabIndex = open ? 0 : -1;
+        if (open) input.focus();
+    }
+    document.addEventListener('mousedown', event => {
+        const toggle = event.target.closest && event.target.closest('[data-kanban-search-toggle]');
+        // Keep focus in the open input so clicking the icon does not collapse it.
+        if (toggle && toggle.closest('[data-kanban-search]').dataset.open === 'true') event.preventDefault();
+    });
+    document.addEventListener('click', event => {
+        const toggle = event.target.closest && event.target.closest('[data-kanban-search-toggle]');
+        if (toggle) setSearchOpen(toggle.closest('[data-kanban-search]'), true);
+    });
+    document.addEventListener('focusout', event => {
+        const search = event.target.closest && event.target.closest('[data-kanban-search]');
+        if (search && !search.contains(event.relatedTarget)) setSearchOpen(search, false);
+    });
+    document.addEventListener('input', event => {
+        if (event.target.matches && event.target.matches('[data-kanban-search-input]')) { window.kanbanClearSelection(); refresh(); }
+    });
+    document.addEventListener('keydown', event => {
+        if (event.key !== 'Escape' || !event.target.matches || !event.target.matches('[data-kanban-search-input]')) return;
+        const search = event.target.closest('[data-kanban-search]');
+        event.target.value = '';
+        refresh();
+        setSearchOpen(search, false);
+        search.querySelector('[data-kanban-search-toggle]').focus();
+    });
     document.addEventListener('DOMContentLoaded', refresh);
     document.addEventListener('htmx:afterSwap', refresh);
     document.addEventListener('htmx:afterSettle', refresh);
