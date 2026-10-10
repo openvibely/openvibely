@@ -61,9 +61,11 @@ templ Tooltips() {
    render(text);describe(el,true);if(el.matches('[data-model-help],[data-model-setting-help]'))el.setAttribute('aria-expanded','true');
    tip.hidden=false;if(nativePopover&&!tip.matches(':popover-open'))tip.showPopover();position(point);
   }
-  function trigger(target){if(changing)return null;return target instanceof Element?target.closest(selector)||(active&&active.contains(target)?active:null):null;}
+  function blocked(target){return target instanceof Element&&!!target.closest('[data-kanban-menu-trigger]');}
+  function trigger(target){if(changing||blocked(target))return null;return target instanceof Element?target.closest(selector)||(active&&active.contains(target)?active:null):null;}
   document.addEventListener('pointerover',function(e){
    if(tip.contains(e.target)){clearTimeout(timer);return;}
+   if(blocked(e.target)){if(!pinned)close();return;}
    var el=trigger(e.target);if(!el||pinned)return;
    clearTimeout(timer);
    if(el===active){pointer={x:e.clientX+12,y:e.clientY+12};position();return;}
@@ -74,6 +76,7 @@ templ Tooltips() {
   });
   document.addEventListener('pointerout',function(e){
    if(pinned||!active||(!active.contains(e.target)&&!tip.contains(e.target)))return;
+   if(blocked(e.relatedTarget)){close();return;}
    var next=trigger(e.relatedTarget);
    if(e.relatedTarget&&(active.contains(e.relatedTarget)||tip.contains(e.relatedTarget))){clearTimeout(timer);return;}
    if(next&&textFor(next)===textFor(active)){
@@ -81,7 +84,7 @@ templ Tooltips() {
    }
    clearTimeout(timer);timer=setTimeout(function(){if(active&&active.matches(':hover'))return;close();},100);
   });
-  document.addEventListener('focusin',function(e){var el=trigger(e.target);if(el)show(el,textFor(el));});
+  document.addEventListener('focusin',function(e){if(blocked(e.target)){if(!pinned)close();return;}var el=trigger(e.target);if(el)show(el,textFor(el));});
   document.addEventListener('focusout',function(e){if(!pinned&&active&&active.contains(e.target)&&!active.contains(e.relatedTarget)&&!active.matches(':hover'))close();});
   document.addEventListener('click',function(e){var el=trigger(e.target);if(el&&el.matches('[data-model-help],[data-model-setting-help]')){if(active===el&&pinned)close();else show(el,textFor(el),true);}else if(!tip.contains(e.target))close();});
   document.addEventListener('keydown',function(e){if(e.key==='Escape'&&active){if(pinned){e.preventDefault();e.stopPropagation();}close();}},true);
