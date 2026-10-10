@@ -43,6 +43,9 @@ type OAuthConnection struct {
 }
 
 type LLMConfig struct {
+	// PendingOAuthConnection is an in-memory authorization applied atomically with an explicit model save.
+	PendingOAuthConnection *OAuthConnection `json:"-"`
+
 	ID              string      `json:"id"`
 	Name            string      `json:"name"`
 	Provider        LLMProvider `json:"provider"`

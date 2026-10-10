@@ -46,6 +46,10 @@ func (h *Handler) modelOAuthSetupConfig(key string, connected bool) (*models.LLM
 		return nil, echo.NewHTTPError(http.StatusConflict, "Complete OAuth sign-in first.")
 	}
 	config := session.config
+	if config.PendingOAuthConnection != nil {
+		draft := *config.PendingOAuthConnection
+		config.PendingOAuthConnection = &draft
+	}
 	return &config, nil
 }
 
@@ -85,6 +89,21 @@ func (h *Handler) BeginModelOAuthSetup(c echo.Context) error {
 		if config.PresetSlug != "custom" {
 			return echo.NewHTTPError(http.StatusBadRequest, "This sign-in is for custom OAuth endpoints.")
 		}
+	}
+	if provider == models.ProviderOpenAI || provider == models.ProviderAnthropic {
+		draft := &models.OAuthConnection{Provider: provider}
+		selected := strings.TrimSpace(c.FormValue("oauth_connection_id"))
+		if selected != "" && selected != "new" {
+			connection, err := h.llmConfigRepo.GetOAuthConnectionByID(c.Request().Context(), selected)
+			if err != nil {
+				return err
+			}
+			if connection == nil || connection.Provider != provider {
+				return echo.NewHTTPError(http.StatusBadRequest, "Select an account for this provider.")
+			}
+			draft.ID, draft.Revision = connection.ID, connection.Revision
+		}
+		config.PendingOAuthConnection = draft
 	}
 	keyBytes := make([]byte, 32)
 	if _, err := rand.Read(keyBytes); err != nil {
@@ -149,9 +168,13 @@ func (h *Handler) attachModelOAuthSetup(c echo.Context, config *models.LLMConfig
 		return "", echo.NewHTTPError(http.StatusConflict, "Connection settings changed. Connect OAuth again before saving the model.")
 	}
 	if config.Provider == models.ProviderOpenAI || config.Provider == models.ProviderAnthropic {
-		// A draft authorization belongs to this model only until explicitly saved.
-		config.OAuthConnectionID = ""
-		config.OAuthConfigRevision = 0
+		draft := signedIn.PendingOAuthConnection
+		if draft == nil || draft.ID != config.OAuthConnectionID {
+			return "", echo.NewHTTPError(http.StatusConflict, "Account selection changed. Connect OAuth again.")
+		}
+		copy := *draft
+		config.PendingOAuthConnection = &copy
+		config.OAuthConfigRevision = draft.Revision
 	}
 	config.OAuthAccountID = signedIn.OAuthAccountID
 	config.OAuthAccessToken = signedIn.OAuthAccessToken
@@ -162,7 +185,7 @@ func (h *Handler) attachModelOAuthSetup(c echo.Context, config *models.LLMConfig
 	return key, nil
 }
 
-func (h *Handler) finishModelOAuthSetup(key, access, refresh string, expires int64, state string, accountID ...string) error {
+func (h *Handler) finishModelOAuthSetup(key, access, refresh string, expires int64, state string, identity ...string) error {
 	modelOAuthSetups.Lock()
 	defer modelOAuthSetups.Unlock()
 	session := modelOAuthSetups.sessions[key]
@@ -173,8 +196,15 @@ func (h *Handler) finishModelOAuthSetup(key, access, refresh string, expires int
 	session.config.OAuthRefreshToken = refresh
 	session.config.OAuthExpiresAt = expires
 	session.config.CustomAuthStateJSON = state
-	if len(accountID) > 0 {
-		session.config.OAuthAccountID = accountID[0]
+	if len(identity) > 0 {
+		session.config.OAuthAccountID = identity[0]
+	}
+	if draft := session.config.PendingOAuthConnection; draft != nil {
+		draft.AccessToken, draft.RefreshToken, draft.ExpiresAt = access, refresh, expires
+		draft.AccountID = session.config.OAuthAccountID
+		if len(identity) == 3 {
+			draft.ProviderDisplayName, draft.PrincipalHash = identity[1], identity[2]
+		}
 	}
 	return nil
 }
