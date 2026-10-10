@@ -237,7 +237,12 @@ templ TaskWorkspaceScript() {
 		});
 		function renderSummary() {
 			var bar = root.querySelector('#task-change-activity');
-			if (!bar || !summary) return;
+			if (!bar) return;
+			bar.querySelectorAll('[data-review-changes]').forEach(function(button) {
+				button.title = 'Review changes (' + (apple ? '⌘⇧D' : 'Ctrl+Shift+D') + ')';
+				button.setAttribute('aria-keyshortcuts', apple ? 'Meta+Shift+D' : 'Control+Shift+D');
+			});
+			if (!summary) return;
 			bar.hidden = summary.files === 0;
 			root.dataset.hasChanges = String(summary.files > 0);
 			bar.querySelector('[data-change-files]').textContent = summary.files.toLocaleString() + (summary.files === 1 ? ' file' : ' files');
