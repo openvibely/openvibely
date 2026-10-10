@@ -53,8 +53,8 @@ func TestProviderPromptBudgetIncludesRuntimeActionMode(t *testing.T) {
 							base = llmprompt.BuildOpenAIOAuthSystemPrompt(base)
 						}
 						want := base
-						if mode == models.ChatModeOrchestrate {
-							want = llmprompt.ApplyChatActionToolMode(base, rt.DefinitionNames(), followup)
+						if mode == models.ChatModeOrchestrate && !followup {
+							want = llmprompt.ApplyChatActionToolMode(base, rt.DefinitionNames())
 						}
 						if got := estimateProviderSystemPromptTokens(req); got != estimatedUTF8Tokens(want) {
 							t.Fatalf("%s/%s followup=%v mode=%s tools=%v: got %d want %d", provider, auth, followup, mode, rt.DefinitionNames(), got, estimatedUTF8Tokens(want))

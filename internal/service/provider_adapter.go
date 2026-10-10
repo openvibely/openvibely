@@ -744,9 +744,9 @@ func estimateProviderSystemPromptTokens(req llmcontracts.AgentRequest) int {
 				base = llmprompt.BuildAnthropicChatSystemPrompt(req.Agent.Model, req.Followup, req.ChatMode, req.ChatSystemContext, false)
 			}
 			base = llmprompt.AppendWorktreeContextPrompt(base, req.WorkDir)
-			if req.ChatMode == models.ChatModeOrchestrate && (req.Agent.Provider == models.ProviderOpenAI || req.Agent.Provider == models.ProviderAnthropic) {
+			if req.ChatMode == models.ChatModeOrchestrate && !req.Followup && (req.Agent.Provider == models.ProviderOpenAI || req.Agent.Provider == models.ProviderAnthropic) {
 				rt := llmcontracts.RuntimeToolsFromContext(req.Ctx)
-				base = llmprompt.ApplyChatActionToolMode(base, rt.DefinitionNames(), req.Followup)
+				base = llmprompt.ApplyChatActionToolMode(base, rt.DefinitionNames())
 			}
 			return estimatedUTF8Tokens(base)
 		}

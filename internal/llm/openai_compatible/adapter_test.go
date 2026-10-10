@@ -334,7 +334,7 @@ func TestAdapterChatWithRuntimeActionsUsesToolModeSystemPrompt(t *testing.T) {
 	require.Equal(t, "system", system["role"])
 	content, _ := system["content"].(string)
 	require.Contains(t, content, llmprompt.ChatActionToolModeInstructions)
-	require.Contains(t, content, "Available action tools: request_user_input, create_task")
+	require.NotContains(t, content, "Available action tools")
 	require.Contains(t, content, "replace that response with a request_user_input tool call")
 	require.Contains(t, content, "recommended/default answer")
 	require.Contains(t, content, `Do not add a generic per-question "move forward" option`)
@@ -450,7 +450,7 @@ func TestAdapterPlanWithoutRuntimeActionsRemainsReadOnlyWithoutActionMode(t *tes
 	require.NotContains(t, content, llmprompt.ChatActionToolModeInstructions)
 }
 
-func TestAdapterTaskWithRuntimeActionsUsesToolModePrompt(t *testing.T) {
+func TestAdapterTaskWithRuntimeActionsOmitsToolNote(t *testing.T) {
 	var gotBody map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&gotBody))

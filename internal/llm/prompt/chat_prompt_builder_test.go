@@ -24,11 +24,11 @@ var legacyMutationMarkers = []string{
 
 func TestApplyChatActionToolModeReportsConcreteCapability(t *testing.T) {
 	base := BuildChatSystemPrompt(false, models.ChatModeOrchestrate, "", false)
-	capable := ApplyChatActionToolMode(base, []string{"create_task", "edit_task"}, false)
-	if !strings.Contains(capable, ChatActionToolModeInstructions) || !strings.Contains(capable, "Available action tools: create_task, edit_task") {
+	capable := ApplyChatActionToolMode(base, []string{"create_task", "edit_task"})
+	if !strings.Contains(capable, ChatActionToolModeInstructions) || strings.Contains(capable, "Available action tools") {
 		t.Fatalf("capable prompt missing runtime action guidance: %q", capable)
 	}
-	incapable := ApplyChatActionToolMode(base, nil, false)
+	incapable := ApplyChatActionToolMode(base, nil)
 	if incapable != base {
 		t.Fatalf("no-tool chat prompt must be unchanged, got %q", incapable)
 	}
@@ -42,7 +42,7 @@ func TestApplyChatActionToolModeReportsConcreteCapability(t *testing.T) {
 }
 
 func TestApplyChatActionToolModeRequiresStructuredClarificationForProposedWork(t *testing.T) {
-	prompt := ApplyChatActionToolMode("Chat assistant", []string{"request_user_input", "create_task"}, false)
+	prompt := ApplyChatActionToolMode("Chat assistant", []string{"request_user_input", "create_task"})
 	for _, want := range []string{
 		"generic statement of desired project work",
 		"not authorization to create or run a task",
@@ -103,19 +103,5 @@ func TestBuildChatSystemPrompt_TaskFollowupIncludesSelectedMemoryContext(t *test
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("task follow-up provider prompt missing %q:\n%s", want, prompt)
 		}
-	}
-}
-
-func TestApplyChatActionToolModeTaskFollowupKeepsCodingToolsPrimary(t *testing.T) {
-	base := BuildChatSystemPrompt(true, models.ChatModeOrchestrate, "You are starting work on a task.", false)
-	prompt := ApplyChatActionToolMode(base, []string{"create_task", "list_tasks"}, true)
-	if strings.Contains(prompt, ChatActionToolModeInstructions) || strings.Contains(prompt, "Perform application actions only by calling the provided runtime action tools") {
-		t.Fatalf("task-thread prompt received action-only Chat instructions: %q", prompt)
-	}
-	if prompt != base {
-		t.Fatalf("task-thread prompt must rely on tool definitions, not a tool note: %q", prompt)
-	}
-	if got := ApplyChatActionToolMode(base, nil, true); got != base {
-		t.Fatalf("no-tool task-thread prompt must remain unchanged: %q", got)
 	}
 }

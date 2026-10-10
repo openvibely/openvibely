@@ -246,10 +246,10 @@ func composeTaskRuntimeToolFilter(base func(string) bool, rt *llmcontracts.Runti
 }
 
 func appendToolModeSystemPrompt(base string, rt *llmcontracts.RuntimeTools, chatMode models.ChatMode, isTaskFollowup bool) string {
-	if chatMode != models.ChatModeOrchestrate {
+	if chatMode != models.ChatModeOrchestrate || isTaskFollowup {
 		return base
 	}
-	return llmprompt.ApplyChatActionToolMode(base, rt.DefinitionNames(), isTaskFollowup)
+	return llmprompt.ApplyChatActionToolMode(base, rt.DefinitionNames())
 }
 
 func shouldSkipDefaultToolsForChatMode(isTaskFollowup bool, chatMode models.ChatMode, rt *llmcontracts.RuntimeTools) bool {

@@ -81,27 +81,16 @@ const ChatActionToolModeInstructions = `RUNTIME ACTION MODE:
 - Do not claim an action succeeded unless the tool result confirms success`
 
 // ApplyChatActionToolMode adds orchestration Chat action rules when runtime
-// tools are attached. Task threads rely on the request's tool definitions.
-func ApplyChatActionToolMode(base string, toolNames []string, isTaskFollowup bool) string {
-	names := normalizedToolNames(toolNames)
-	if isTaskFollowup || len(names) == 0 {
+// tools are attached.
+func ApplyChatActionToolMode(base string, toolNames []string) string {
+	if len(toolNames) == 0 {
 		return base
 	}
-	return strings.TrimSpace(base) + "\n\n" + ChatActionToolModeInstructions + "\nAvailable action tools: " + strings.Join(names, ", ")
-}
-
-func normalizedToolNames(toolNames []string) []string {
-	names := make([]string, 0, len(toolNames))
-	for _, name := range toolNames {
-		if name = strings.TrimSpace(name); name != "" {
-			names = append(names, name)
-		}
-	}
-	return names
+	return strings.TrimSpace(base) + "\n\n" + ChatActionToolModeInstructions
 }
 
 // BuildChatSystemPrompt constructs the provider-neutral prompt for Chat or task
-// follow-up requests. Provider adapters append the concrete runtime capability.
+// follow-up requests.
 func BuildChatSystemPrompt(isTaskFollowup bool, chatMode models.ChatMode, chatSystemContext string, restrictTools bool) string {
 	return buildChatSystemPrompt(AgentSystemPrompt, isTaskFollowup, chatMode, chatSystemContext, restrictTools)
 }
