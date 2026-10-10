@@ -243,9 +243,6 @@ func TestSchedulerService_ModifyRecurringScheduleToOnceUsesUpcomingOccurrence(t 
 			ctx := context.Background()
 			now := time.Now().UTC().Truncate(time.Second)
 			upcoming := now.Add(time.Hour)
-			if priorRun {
-				upcoming = now.Add(-time.Minute)
-			}
 
 			task := &models.Task{
 				ProjectID: "default",
@@ -285,44 +282,53 @@ func TestSchedulerService_ModifyRecurringScheduleToOnceUsesUpcomingOccurrence(t 
 				require.True(t, modified.Schedule.LastRun.Equal(*historicalRun), "conversion should retain recurring execution history")
 			}
 
+			stored, err := scheduleRepo.GetByID(ctx, schedule.ID)
+			require.NoError(t, err)
+			require.Equal(t, models.RepeatOnce, stored.RepeatType)
+			require.NotNil(t, stored.NextRun)
+			require.True(t, stored.NextRun.Equal(upcoming))
+			require.True(t, stored.RunAt.Equal(upcoming))
+			if historicalRun != nil {
+				require.NotNil(t, stored.LastRun)
+				require.True(t, stored.LastRun.Equal(*historicalRun))
+			} else {
+				require.Nil(t, stored.LastRun)
+			}
+
 			scheduler := NewSchedulerService(scheduleRepo, taskRepo, workerSvc)
 			schedulerNow := now
-			if priorRun {
-				schedulerNow = upcoming.Add(time.Minute)
-			}
 			scheduler.now = func() time.Time { return schedulerNow }
 			scheduler.checkDueTasks(ctx)
+			select {
+			case submitted := <-workerSvc.Submitted():
+				t.Fatalf("one-time occurrence dispatched before its upcoming time: %s", submitted.ID)
+			default:
+			}
 
-			if priorRun {
-				select {
-				case submitted := <-workerSvc.Submitted():
-					require.Equal(t, task.ID, submitted.ID)
-				case <-time.After(100 * time.Millisecond):
-					t.Fatal("expected the upcoming one-time occurrence to dispatch despite earlier recurring history")
-				}
-				stored, err := scheduleRepo.GetByID(ctx, schedule.ID)
-				require.NoError(t, err)
-				require.Nil(t, stored.NextRun, "successful one-time dispatch should consume the occurrence")
-				require.NotNil(t, stored.LastRun)
-				require.True(t, stored.LastRun.Equal(schedulerNow), "dispatch should record the new run while retaining history until then")
+			schedulerNow = upcoming
+			scheduler.checkDueTasks(ctx)
+			select {
+			case submitted := <-workerSvc.Submitted():
+				require.Equal(t, task.ID, submitted.ID)
+			case <-time.After(100 * time.Millisecond):
+				t.Fatal("expected the upcoming one-time occurrence to dispatch despite earlier recurring history")
+			}
+			stored, err = scheduleRepo.GetByID(ctx, schedule.ID)
+			require.NoError(t, err)
+			require.Nil(t, stored.NextRun, "successful one-time dispatch should consume the occurrence")
+			require.NotNil(t, stored.LastRun)
+			require.True(t, stored.LastRun.Equal(schedulerNow))
 
+			// Let the task finish so an active-task guard cannot hide a replay.
+			require.NoError(t, taskRepo.UpdateStatus(ctx, task.ID, models.StatusCompleted))
+			for _, later := range []time.Time{upcoming.Add(time.Minute), upcoming.AddDate(0, 0, 1)} {
+				schedulerNow = later
 				scheduler.checkDueTasks(ctx)
 				select {
 				case submitted := <-workerSvc.Submitted():
 					t.Fatalf("one-time occurrence dispatched again: %s", submitted.ID)
 				default:
 				}
-			} else {
-				select {
-				case submitted := <-workerSvc.Submitted():
-					t.Fatalf("one-time occurrence dispatched before its upcoming time: %s", submitted.ID)
-				default:
-				}
-				stored, err := scheduleRepo.GetByID(ctx, schedule.ID)
-				require.NoError(t, err)
-				require.Nil(t, stored.LastRun)
-				require.NotNil(t, stored.NextRun)
-				require.True(t, stored.NextRun.Equal(upcoming))
 			}
 		})
 	}
