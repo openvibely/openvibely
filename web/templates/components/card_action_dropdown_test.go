@@ -16,6 +16,9 @@ func TestTaskCardActionDropdownKeepsKanbanAttributesAndActions(t *testing.T) {
 		t.Fatalf("render task card: %v", err)
 	}
 	html := buf.String()
+	if strings.Contains(html, `title="More actions`) {
+		t.Fatal("task and column kebabs must not show hover tooltips")
+	}
 	for _, want := range []string{
 		`data-kanban-menu-key="task-task-1"`,
 		`data-kanban-menu-trigger`,
@@ -38,6 +41,9 @@ func TestTaskCardActionDropdownKeepsKanbanAttributesAndActions(t *testing.T) {
 func TestKanbanColumnActionDropdownKeepsSortAttributesAndActions(t *testing.T) {
 	tasks := []models.Task{{ID: "done-1", ProjectID: "project-1", Title: "Done", Category: models.CategoryCompleted, Status: models.StatusCompleted}}
 	html := renderKanbanColumnForCategoryTest(t, models.CategoryCompleted, tasks)
+	if strings.Contains(html, `title="More actions`) {
+		t.Fatal("task and column kebabs must not show hover tooltips")
+	}
 	for _, want := range []string{
 		`data-kanban-menu-key="column-completed"`,
 		`data-kanban-menu-trigger`,

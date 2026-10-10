@@ -79,8 +79,9 @@ templ CardActionDropdown(config CardActionDropdownConfig) {
 		<label
 			tabindex="0"
 			class={ cardActionDropdownTriggerClass(config) }
-			title={ cardActionDropdownTitle(config) }
-			aria-label={ cardActionDropdownLabel(config) }
+			if !config.TriggerKanbanMenu {
+				title={ cardActionDropdownTitle(config) }
+			}			aria-label={ cardActionDropdownLabel(config) }
 			onclick="handleDropdownToggle(event)"
 			if config.TriggerAriaExpanded != "" {
 				aria-expanded={ config.TriggerAriaExpanded }
