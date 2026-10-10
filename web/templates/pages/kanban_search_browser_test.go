@@ -100,6 +100,12 @@ func testKanbanHeaderSearch(t *testing.T, width int) {
 
 		b.click(`[data-kanban-search-toggle]`)
 		check("reopens with term", search+`.dataset.open === 'true' && document.activeElement === `+input)
+		b.click(`[data-kanban-search-toggle]`)
+		check("icon click collapses open box", search+`.dataset.open === 'false' && `+toggle+`.getAttribute('aria-expanded') === 'false'`)
+		check("icon collapse keeps term and focus on icon", `document.activeElement === `+toggle+` && `+input+`.value === 'oauth' && `+visible+` === 'alpha,gamma'`)
+		b.waitFor("icon collapse animation", `String(`+width(search)+` <= 33)`, "true")
+		b.click(`[data-kanban-search-toggle]`)
+		check("icon reopens after icon collapse", search+`.dataset.open === 'true' && document.activeElement === `+input)
 		// iOS Safari keeps focus on the input when blank space is tapped; simulate a press that does not move focus.
 		b.evaluate(`(document.querySelector('[data-page-header] h2').dispatchEvent(new PointerEvent('pointerdown', {bubbles:true})), 'ok')`)
 		check("outside press collapses without focus change", search+`.dataset.open === 'false' && document.activeElement !== `+input)
