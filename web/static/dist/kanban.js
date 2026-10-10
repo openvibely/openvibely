@@ -80,6 +80,8 @@
                 if (label) { label.classList.toggle('hidden', !selected.length); label.querySelector('input').checked = chosen; }
             });
             col.querySelectorAll('[data-kanban-select]').forEach(button => { button.textContent = selected.length ? 'Clear selection' : 'Select all'; button.disabled = !visible.length; });
+            const noResults = col.querySelector('[data-kanban-no-results]');
+            if (noResults) noResults.hidden = !(term && all.length && !visible.length);
             const count = col.querySelector('[data-kanban-count]');
             if (count) count.textContent = String(visible.length);
             const clear = col.querySelector('[data-kanban-clear]');
@@ -232,6 +234,12 @@
     document.addEventListener('DOMContentLoaded', refresh);
     document.addEventListener('htmx:afterSwap', refresh);
     document.addEventListener('htmx:afterSettle', refresh);
+    // History snapshots keep cards' hidden attributes but not the typed term, so resync from the restored (empty) input.
+    document.addEventListener('htmx:historyRestore', () => {
+        const search = document.querySelector('[data-kanban-search]');
+        if (search) setSearchOpen(search, false);
+        refresh();
+    });
     document.addEventListener('task-pointer-dragend', refresh);
     document.addEventListener('click', event => {
         if (!window.kanbanBatchRunning) return;

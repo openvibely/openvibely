@@ -6,17 +6,19 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"os/exec"
-	"path/filepath"
-	"strings"
 	"testing"
-	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/web/static"
 )
 
 func TestBrowserFunctional_KanbanHeaderSearch(t *testing.T) {
+	for _, width := range []int{1280, 390} {
+		t.Run(fmt.Sprint(width), func(t *testing.T) { testKanbanHeaderSearch(t, width) })
+	}
+}
+
+func testKanbanHeaderSearch(t *testing.T, width int) {
 	chrome := chatNavigationChromePath(t)
 	project := models.Project{ID: "search-project", Name: "Search"}
 	tasks := []models.Task{
@@ -24,71 +26,93 @@ func TestBrowserFunctional_KanbanHeaderSearch(t *testing.T) {
 		{ID: "beta", Title: "Beta docs", Prompt: "write guide", ProjectID: project.ID, Category: models.CategoryBacklog, Status: models.StatusPending},
 		{ID: "gamma", Title: "Gamma", Prompt: "OAuth refresh", ProjectID: project.ID, Category: models.CategoryCompleted, Status: models.StatusCompleted},
 		{ID: "delta", Title: "Delta", ProjectID: project.ID, Category: models.CategoryActive, Status: models.StatusRunning},
+		{ID: "epsilon", Title: "Epsilon", ProjectID: project.ID, Category: models.CategoryActive, Status: models.StatusQueued},
 	}
-	result := make(chan string, 1)
-	runner := `<script>
-window.addEventListener('DOMContentLoaded', async function() {
- function check(value, message) { if (!value) throw new Error(message); }
- const wait = async predicate => { for(let i=0;i<100;i++) { if(predicate()) return; await new Promise(r=>setTimeout(r,10)); } throw new Error('wait timed out'); };
- const visible = () => Array.from(document.querySelectorAll('#kanban-board .card[data-task-id]')).filter(c => !c.hidden).map(c => c.dataset.taskId).sort().join(',');
- const type = value => { input.value = value; input.dispatchEvent(new Event('input', {bubbles:true})); };
- const search = document.querySelector('[data-page-header] [data-kanban-search]');
- const toggle = search && search.querySelector('[data-kanban-search-toggle]');
- const input = search && search.querySelector('[data-kanban-search-input]');
- const addTask = Array.from(document.querySelectorAll('[data-page-header] a')).find(a => a.textContent.includes('Add Task'));
- try {
-  check(search && toggle && input, 'search renders in header');
-  check(search.nextElementSibling === addTask, 'search sits next to Add Task');
-  check(search.dataset.open === 'false' && search.getBoundingClientRect().width <= 33, 'collapsed to icon by default');
-  toggle.click();
-  check(search.dataset.open === 'true' && document.activeElement === input, 'click opens and focuses input');
-  await wait(() => search.getBoundingClientRect().width > 100);
-  type('oauth');
-  check(visible() === 'alpha,gamma', 'filters by title and prompt across columns, got ' + visible());
-  check(document.querySelector('[data-kanban-category="backlog"] [data-kanban-count]').textContent === '1', 'counts reflect search');
-  type('DELTA');
-  check(visible() === 'delta', 'case-insensitive and includes active column');
-  document.querySelector('h2').dispatchEvent(new MouseEvent('mousedown', {bubbles:true}));
-  input.blur();
-  check(search.dataset.open === 'false', 'clicking elsewhere collapses');
-  await wait(() => search.getBoundingClientRect().width <= 33);
-  check(visible() === 'delta' && search.dataset.active === 'true', 'term keeps filtering while collapsed');
-  toggle.click();
-  input.dispatchEvent(new KeyboardEvent('keydown', {key:'Escape', bubbles:true}));
-  check(search.dataset.open === 'false' && input.value === '' && visible() === 'alpha,beta,delta,gamma', 'Escape clears and collapses');
-  check(document.activeElement === toggle, 'Escape returns focus to icon');
-  await fetch('/result?status=pass', {method:'POST'});
- } catch(error) { await fetch('/result?status='+encodeURIComponent(error.stack), {method:'POST'}); }
-});
-</script>`
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if static.ServeAsset(w, r) {
 			return
 		}
+		var out bytes.Buffer
 		switch r.URL.Path {
-		case "/result":
-			result <- r.URL.Query().Get("status")
 		case "/tasks":
-			var out bytes.Buffer
 			_ = Tasks([]models.Project{project}, &project, tasks, nil, nil, "created_desc", "completed_desc").Render(context.Background(), &out)
-			w.Header().Set("Content-Type", "text/html")
-			fmt.Fprint(w, strings.Replace(out.String(), "</head>", runner+"</head>", 1))
+		case "/other":
+			out.WriteString(`<!doctype html><html><body><main id="main-content" hx-history-elt><h2>Other</h2></main></body></html>`)
 		default:
-			http.NotFound(w, r)
+			w.WriteHeader(http.StatusNoContent)
+			return
 		}
+		w.Header().Set("Content-Type", "text/html")
+		fmt.Fprint(w, out.String())
 	}))
 	defer server.Close()
-	cmd := exec.Command(chrome, "--headless=new", "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage", "--no-first-run", "--no-default-browser-check", "--window-size=1280,900", "--user-data-dir="+filepath.Join(t.TempDir(), "chrome"), server.URL+"/tasks?project_id="+project.ID)
-	if err := startBrowserProcess(cmd); err != nil {
-		t.Fatal(err)
-	}
-	defer stopBrowserProcess(cmd)
-	select {
-	case outcome := <-result:
-		if outcome != "pass" {
-			t.Fatal(outcome)
+
+	runComposerFocusCDP(t, chrome, server.URL+"/tasks?project_id="+project.ID, fmt.Sprintf("kanban-search-%d", width), func(b *composerFocusCDP) {
+		b.call("Emulation.setDeviceMetricsOverride", map[string]any{"width": width, "height": 900, "deviceScaleFactor": 1, "mobile": width < 640}, nil)
+		b.waitFor("search ready", `document.readyState === 'complete' && window.kanbanRefresh && document.querySelector('[data-kanban-search]') ? 'ready' : 'waiting'`, "ready")
+		check := func(label, expression string) {
+			t.Helper()
+			if got := b.evaluate(`String(` + expression + `)`); got != "true" {
+				t.Fatalf("%s: %s evaluated to %s", label, expression, got)
+			}
 		}
-	case <-time.After(20 * time.Second):
-		t.Fatal("browser timed out")
-	}
+		const (
+			search = `document.querySelector('[data-kanban-search]')`
+			input  = `document.querySelector('[data-kanban-search-input]')`
+			toggle = `document.querySelector('[data-kanban-search-toggle]')`
+		)
+		visible := `Array.from(document.querySelectorAll('#kanban-board .card[data-task-id]')).filter(c => !c.hidden).map(c => c.dataset.taskId).sort().join(',')`
+		count := func(col string) string {
+			return `document.querySelector('[data-kanban-category="` + col + `"] [data-kanban-count]').textContent.trim()`
+		}
+		noResults := func(col string) string {
+			return `!document.querySelector('[data-kanban-category="` + col + `"] [data-kanban-no-results]').hidden`
+		}
+		width := func(expr string) string { return expr + `.getBoundingClientRect().width` }
+		queued := `getComputedStyle(document.querySelector('.kanban-queue')).display !== 'none'`
+
+		check("search sits next to Add Task", search+`.nextElementSibling.textContent.includes('Add Task')`)
+		check("collapsed by default", search+`.dataset.open === 'false' && `+width(search)+` <= 33`)
+		check("Active count has refresh hook", count("active")+` === '2'`)
+
+		b.click(`[data-kanban-search-toggle]`)
+		check("click opens and focuses input", search+`.dataset.open === 'true' && document.activeElement === `+input)
+		b.waitFor("open animation", `String(`+width(search)+` > 100)`, "true")
+		check("open box stays inside header", search+`.getBoundingClientRect().left >= document.querySelector('[data-page-header] h2').getBoundingClientRect().right`)
+		check("Add Task stays on screen", search+`.nextElementSibling.getBoundingClientRect().right <= window.innerWidth`)
+
+		b.typeText("oauth")
+		check("filters by title and prompt", visible+` === 'alpha,gamma'`)
+		check("backlog count", count("backlog")+` === '1'`)
+		check("Active count follows search", count("active")+` === '0'`)
+		check("empty Queued section hidden", `!(`+queued+`)`)
+		check("Active shows no results", noResults("active"))
+		check("Backlog has matches", `!(`+noResults("backlog")+`)`)
+
+		b.click(`[data-page-header] h2`)
+		check("real click elsewhere collapses", search+`.dataset.open === 'false'`)
+		b.waitFor("close animation", `String(`+width(search)+` <= 33)`, "true")
+		check("term keeps filtering while collapsed", visible+` === 'alpha,gamma' && `+search+`.dataset.active === 'true'`)
+
+		b.click(`[data-kanban-search-toggle]`)
+		b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": "Escape", "code": "Escape", "windowsVirtualKeyCode": 27}, nil)
+		b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyUp", "key": "Escape", "code": "Escape", "windowsVirtualKeyCode": 27}, nil)
+		check("Escape clears and collapses", search+`.dataset.open === 'false' && `+input+`.value === '' && `+visible+` === 'alpha,beta,delta,epsilon,gamma'`)
+		check("Escape returns focus to icon", `document.activeElement === `+toggle)
+		check("counts restored", count("active")+` === '2' && `+count("backlog")+` === '2'`)
+		check("Queued restored", queued)
+		check("no-results hidden", `!(`+noResults("active")+`)`)
+
+		b.click(`[data-kanban-search-toggle]`)
+		b.typeText("zzz")
+		check("every column shows no results", noResults("backlog")+` && `+noResults("completed")+` && `+noResults("active"))
+
+		b.evaluate(`(function(){var a=document.createElement('a');a.id='nav-other';a.textContent='Other';a.setAttribute('hx-get','/other');a.setAttribute('hx-target','#main-content');a.setAttribute('hx-select','#main-content');a.setAttribute('hx-swap','outerHTML');a.setAttribute('hx-push-url','true');document.querySelector('[data-page-header]').appendChild(a);htmx.process(a);a.click();return 'ok';})()`)
+		b.waitFor("navigated away", `location.pathname`, "/other")
+		b.evaluate(`(history.back(), 'ok')`)
+		b.waitFor("restored from history", `String(!!document.querySelector('#kanban-board'))`, "true")
+		b.waitFor("history restore resyncs filter", visible, "alpha,beta,delta,epsilon,gamma")
+		check("restored search is collapsed and inactive", search+`.dataset.open === 'false' && `+search+`.dataset.active === 'false'`)
+		check("restored no-results hidden", `!(`+noResults("backlog")+`)`)
+	})
 }
