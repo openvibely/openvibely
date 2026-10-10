@@ -33,7 +33,7 @@ func TestBrowserFunctional_TaskShortcuts(t *testing.T) {
 			}
 			component = components.BreadcrumbSelectorResults("Task", r.URL.Query().Get("current_id"), items, false, false)
 		case strings.HasSuffix(r.URL.Path, "/changes/summary"):
-			fmt.Fprint(w, `{"files":0}`)
+			fmt.Fprint(w, `{"files":0,"insertions":0,"deletions":0,"review_comments":0}`)
 			return
 		case strings.HasSuffix(r.URL.Path, "/thread"):
 			task := &models.Task{ID: strings.Split(r.URL.Path, "/")[2], ProjectID: project.ID, Title: "Task", Status: models.StatusCompleted, Category: models.CategoryCompleted}
