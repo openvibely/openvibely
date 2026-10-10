@@ -94,7 +94,7 @@ templ searchableSelectorScript() {
  </style>
 	<script>
 		(function() {
-			var controllerVersion = 19;
+			var controllerVersion = 20;
 			var previousController = window.openVibelySearchableSelectorController;
 			document.querySelectorAll('[data-searchable-selector-search]').forEach(function(input) { input.type = 'text'; });
 			document.querySelectorAll('[data-project-selector-clear]').forEach(function(control) { control.remove(); });
@@ -254,16 +254,82 @@ templ searchableSelectorScript() {
 				if (event.target === nodes(root).dialog) close(root, true);
 			});
             var apple = /Mac|iPhone|iPad/.test(navigator.platform);
+            var automationBusy = false;
+            function automationContext() {
+                var root = document.querySelector('[data-breadcrumb-selector][data-searchable-selector-kind="Automation"]');
+                var search = root && root.querySelector('[data-breadcrumb-selector-search]');
+                if (!search) return null;
+                var url = new URL(search.getAttribute('hx-get'), location.href);
+                var id = url.searchParams.get('current_id'), project = url.searchParams.get('project_id');
+                if (!id || !project) return null;
+                var key = 'automation-shortcuts-' + project, visits = {};
+                try { visits = JSON.parse(sessionStorage.getItem(key)) || {}; } catch (_) {}
+                var edit = url.searchParams.get('view') === 'edit';
+                function destination(id) { return '/automations/' + encodeURIComponent(id) + (edit ? '/builder' : '') + '?project_id=' + encodeURIComponent(project); }
+                function save() { try { sessionStorage.setItem(key, JSON.stringify(visits)); } catch (_) {} }
+                if (visits.current !== id) {
+                    visits.previous = visits.current;
+                    if (visits.expected !== id) visits.items = null;
+                    visits.current = id;
+                    delete visits.expected;
+                    save();
+                }
+                return {root:root, url:url, id:id, visits:visits, save:save, destination:destination};
+            }
+            listen(document, 'keydown', async function(event) {
+                if (event.defaultPrevented || event.isComposing || event.repeat || event.altKey || !event.shiftKey) return;
+                if (!(apple ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey)) return;
+                if (['ArrowUp', 'ArrowDown', 'KeyL'].indexOf(event.code) < 0) return;
+                if (event.target.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="textbox"]')) return;
+                if (document.querySelector('dialog[open], [data-openvibely-picker-open], [data-menu-open]') || (typeof HTMLElement.prototype.showPopover === 'function' && document.querySelector('[popover]:popover-open'))) return;
+                var context = automationContext();
+                if (!context || !context.root.getClientRects().length) return;
+                event.preventDefault();
+                if (automationBusy) return;
+                automationBusy = true;
+                try {
+                    var visits = context.visits, next;
+                    if (event.code === 'KeyL') next = visits.previous;
+                    else {
+                        if (!Array.isArray(visits.items)) {
+                            var response = await fetch(context.url, {signal:abortController.signal});
+                            if (!response.ok) throw new Error('Automation list unavailable');
+                            var html = await response.text();
+                            if (!context.root.isConnected) return;
+                            var parsed = new DOMParser().parseFromString(html, 'text/html');
+                            visits.items = Array.from(parsed.querySelectorAll('[data-breadcrumb-selector-option]')).map(function(link) {
+                                return decodeURIComponent(new URL(link.getAttribute('href'), location.href).pathname.split('/')[2]);
+                            });
+                        }
+                        var index = visits.items.indexOf(context.id);
+                        if (index >= 0) next = visits.items[index + (event.code === 'ArrowUp' ? -1 : 1)];
+                    }
+                    if (!next || !context.root.isConnected) return;
+                    visits.expected = next;
+                    context.save();
+                    await window.openVibelyNavigate(context.destination(next));
+                } catch (_) {
+                    delete context.visits.expected;
+                    context.save();
+                    if (context.root.isConnected && window.showToast) window.showToast('Could not open automation', 'error');
+                } finally { automationBusy = false; }
+            });
             function labelShortcuts() {
+                var automation = automationContext();
                 document.querySelectorAll('[data-breadcrumb-selector-button], #project-selector-trigger').forEach(function(button) {
                     var project = button.id === 'project-selector-trigger';
                     button.setAttribute('aria-keyshortcuts', (apple ? 'Meta+' : 'Control+') + (project ? 'Shift+' : '') + 'K');
                     if (project || !button.title) button.title = (project ? 'Open project' : button.getAttribute('aria-label')) + ' (' + (apple ? '⌘' : 'Ctrl+') + (project ? (apple ? '⇧' : 'Shift+') : '') + 'K)';
+                    if (automation && automation.root.contains(button)) {
+                        button.title = 'Switch automation (' + (apple ? '⌘K' : 'Ctrl+K') + '); previous/next: ' + (apple ? '⌘⇧↑/↓' : 'Ctrl+Shift+↑/↓') + '; last visited: ' + (apple ? '⌘⇧L' : 'Ctrl+Shift+L');
+                        button.setAttribute('aria-keyshortcuts', (apple ? 'Meta+K Meta+Shift+ArrowUp Meta+Shift+ArrowDown Meta+Shift+L' : 'Control+K Control+Shift+ArrowUp Control+Shift+ArrowDown Control+Shift+L'));
+                    }
                 });
             }
             labelShortcuts();
             listen(document, 'DOMContentLoaded', labelShortcuts);
             listen(document, 'htmx:afterSwap', labelShortcuts);
+            listen(document, 'htmx:historyRestore', labelShortcuts);
             listen(document, 'keydown', function(event) {
                 if (event.defaultPrevented || event.isComposing || event.repeat || event.altKey || event.code !== 'KeyK') return;
                 var command = apple ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey;
