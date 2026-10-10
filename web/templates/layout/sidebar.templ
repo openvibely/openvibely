@@ -658,7 +658,7 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 						var shortcut = /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘B' : 'Ctrl+B';
 						btn.setAttribute('aria-label', (isCollapsed ? 'Expand' : 'Collapse') + ' sidebar (' + shortcut + ')');
 						btn.setAttribute('title', btn.getAttribute('aria-label'));
-						btn.setAttribute('data-tip', isCollapsed ? 'Expand sidebar' : 'Collapse sidebar');
+						btn.setAttribute('data-tip', (isCollapsed ? 'Expand sidebar' : 'Collapse sidebar') + ' (' + (/Mac|iPhone|iPad/.test(navigator.platform) ? '⌘B' : 'Ctrl+B') + ')');
 						if (document.body) document.body.classList.toggle('sidebar-collapsed-pending', isCollapsed);
 					}
 
@@ -701,7 +701,6 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 				<li>
 					<a
 						data-nav-base="/chat"
-						data-tip="Chat"
 						href={ templ.SafeURL(fmt.Sprintf("/chat?project_id=%s", currentProjectID)) }
 						hx-get={ fmt.Sprintf("/chat?project_id=%s", currentProjectID) }
 						hx-target="#main-content"
@@ -716,7 +715,6 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 				<li>
 					<a
 						data-nav-base="/tasks"
-						data-tip="Tasks"
 						href={ templ.SafeURL(fmt.Sprintf("/tasks?project_id=%s", currentProjectID)) }
 						hx-get={ fmt.Sprintf("/tasks?project_id=%s", currentProjectID) }
 						hx-target="#main-content"
@@ -731,7 +729,6 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 					<li>
 						<a
 							data-nav-base="/automations"
-							data-tip="Automations"
 							href={ templ.SafeURL(fmt.Sprintf("/automations?project_id=%s", currentProjectID)) }
 							hx-get={ fmt.Sprintf("/automations?project_id=%s", currentProjectID) }
 							hx-target="#main-content"
@@ -743,7 +740,7 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 						</a>
 					</li>					<li>
 						<a
-							data-nav-base="/schedule"						data-tip="Schedule"
+							data-nav-base="/schedule"
 						href={ templ.SafeURL(fmt.Sprintf("/schedule?project_id=%s", currentProjectID)) }
 						hx-get={ fmt.Sprintf("/schedule?project_id=%s", currentProjectID) }
 						hx-target="#main-content"
@@ -766,7 +763,6 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 				<li>
 					<a
 						data-nav-base="/insights"
-						data-tip="Grades"
 						href={ templ.SafeURL(fmt.Sprintf("/insights?project_id=%s", currentProjectID)) }
 						hx-get={ fmt.Sprintf("/insights?project_id=%s", currentProjectID) }
 						hx-target="#main-content"
@@ -781,7 +777,6 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 				<li>
 					<a
 						data-nav-base="/upcoming"
-						data-tip="Pulse"
 						href={ templ.SafeURL(fmt.Sprintf("/upcoming?project_id=%s", currentProjectID)) }
 						hx-get={ fmt.Sprintf("/upcoming?project_id=%s", currentProjectID) }
 						hx-target="#main-content"
@@ -796,7 +791,6 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 				<li>
 					<a
 						data-nav-base="/history"
-						data-tip="Reflection"
 						href={ templ.SafeURL(fmt.Sprintf("/history?project_id=%s", currentProjectID)) }
 						hx-get={ fmt.Sprintf("/history?project_id=%s", currentProjectID) }
 						hx-target="#main-content"
@@ -811,7 +805,6 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 				<li>
 					<a
 						data-nav-base="/analytics"
-						data-tip="Analytics"
 						href={ templ.SafeURL(fmt.Sprintf("/analytics?project_id=%s", currentProjectID)) }
 						hx-get={ fmt.Sprintf("/analytics?project_id=%s", currentProjectID) }
 						hx-target="#main-content"
@@ -834,7 +827,6 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 				<li>
 					<a
 						data-nav-base="/alerts"
-						data-tip="Alerts"
 						href={ templ.SafeURL(fmt.Sprintf("/alerts?project_id=%s", currentProjectID)) }
 						hx-get={ fmt.Sprintf("/alerts?project_id=%s", currentProjectID) }
 						hx-target="#main-content"
@@ -864,7 +856,6 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 				<li>
 					<a
 						data-nav-base="/models"
-						data-tip="Models"
 						href={ templ.SafeURL(fmt.Sprintf("/models?project_id=%s", currentProjectID)) }
 						hx-get={ fmt.Sprintf("/models?project_id=%s", currentProjectID) }
 						hx-target="#main-content"
@@ -879,7 +870,6 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 				<li>
 					<a
 						data-nav-base="/agents"
-						data-tip="Agents"
 						href={ templ.SafeURL(fmt.Sprintf("/agents?project_id=%s", currentProjectID)) }
 						hx-get={ fmt.Sprintf("/agents?project_id=%s", currentProjectID) }
 						hx-target="#main-content"
@@ -894,7 +884,6 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 					<li>
 						<a
 							data-nav-base="/skills"
-							data-tip="Skills"
 							href={ templ.SafeURL(fmt.Sprintf("/skills?project_id=%s", currentProjectID)) }
 							hx-get={ fmt.Sprintf("/skills?project_id=%s", currentProjectID) }
 							hx-target="#main-content"
@@ -908,8 +897,7 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 					</li>
 					<li>
 						<a
-							data-nav-base="/workers"
-							data-tip="Workers"						href={ templ.SafeURL(fmt.Sprintf("/workers?project_id=%s", currentProjectID)) }
+							data-nav-base="/workers"						href={ templ.SafeURL(fmt.Sprintf("/workers?project_id=%s", currentProjectID)) }
 						hx-get={ fmt.Sprintf("/workers?project_id=%s", currentProjectID) }
 						hx-target="#main-content"
 						hx-push-url="true"
@@ -924,7 +912,6 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 				<li>
 					<a
 						data-nav-base="/channels"
-						data-tip="Channels"
 						href={ templ.SafeURL(fmt.Sprintf("/channels?project_id=%s", currentProjectID)) }
 						hx-get={ fmt.Sprintf("/channels?project_id=%s", currentProjectID) }
 						hx-target="#main-content"
@@ -939,7 +926,6 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 				<li>
 					<a
 						data-nav-base="/personality"
-						data-tip="Personality"
 						href={ templ.SafeURL(fmt.Sprintf("/personality?project_id=%s", currentProjectID)) }
 						hx-get={ fmt.Sprintf("/personality?project_id=%s", currentProjectID) }
 						hx-target="#main-content"
@@ -981,7 +967,7 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 					</ul>
 				</div>
 			</div>
-			<label class="theme-toggle-pill sidebar-hide-collapsed" title="Toggle light/dark mode" onclick="window.toggleTheme()">
+			<label class="theme-toggle-pill sidebar-hide-collapsed" data-tooltip-disabled aria-label="Toggle light/dark mode" onclick="window.toggleTheme()">
 				<span class="theme-toggle-icon theme-toggle-sun">
 					<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" width="11" height="11">
 						<path stroke-linecap="round" stroke-linejoin="round" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"/>
@@ -994,7 +980,7 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 				</span>
 				<span class="theme-toggle-thumb"></span>
 			</label>
-			<a class="theme-toggle-collapsed-btn" data-tip="Toggle theme" onclick="window.toggleTheme(); return false;" href="#">
+			<a class="theme-toggle-collapsed-btn" data-tooltip-disabled aria-label="Toggle theme" onclick="window.toggleTheme(); return false;" href="#">
 				<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 shrink-0 theme-collapsed-sun" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
 					<path stroke-linecap="round" stroke-linejoin="round" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"></path>
 				</svg>

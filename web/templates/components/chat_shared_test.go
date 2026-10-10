@@ -682,8 +682,8 @@ func TestInitThreadStreamingScript_CompletionStaysSmooth(t *testing.T) {
 		t.Error("resume transport errors should restore polling as a fallback")
 	}
 	if !strings.Contains(content, "var largeStreamRenderThreshold = 100 * 1024") ||
-		!strings.Contains(content, "var largeStreamRenderInterval = 250") {
-		t.Error("resume streaming must throttle full rerenders for large accumulated responses")
+		!strings.Contains(content, "var largeStreamRenderInterval = 50") {
+		t.Error("resume streaming must coalesce large stream updates within the visible latency budget")
 	}
 	if !strings.Contains(content, "if (renderDelayTimer !== null)") {
 		t.Error("resume completion must cancel a pending delayed render before forcing the final render")
@@ -737,7 +737,7 @@ func TestChatBubbleStreamingScrollBehavior(t *testing.T) {
 		t.Error("Missing requestAnimationFrame batching for streaming renders")
 	}
 	if !strings.Contains(content, "var largeStreamRenderThreshold = 100 * 1024") ||
-		!strings.Contains(content, "var largeStreamRenderInterval = 250") {
+		!strings.Contains(content, "var largeStreamRenderInterval = 50") {
 		t.Error("Missing size-aware throttling for large streaming responses")
 	}
 	if strings.Contains(content, "container.setAttribute('data-raw-content', window.normalizeTranscriptMarkers ? window.normalizeTranscriptMarkers(textBuffer) : textBuffer)") {
@@ -1554,7 +1554,7 @@ func TestChatContentRenderSchedulerSerializesAndRecovers(t *testing.T) {
 		}
 	}
 	start := strings.Index(content, "if (!window._chatContentRenderQueue)")
-	end := strings.Index(content[start:], "window.renderStreamingContent = function(container, textBuffer, yieldBetweenBatches)")
+	end := strings.Index(content[start:], "window.renderStreamingContent = function(container, textBuffer, yieldBetweenBatches, options)")
 	if start == -1 || end == -1 {
 		t.Fatal("chat render scheduler source is missing")
 	}
@@ -1565,7 +1565,8 @@ func TestChatContentRenderSchedulerSerializesAndRecovers(t *testing.T) {
 	}
 	script := "global.window = { _chatContentRenderTimeoutMS: 50 }; global.document = { createTextNode: function(text) { return { text: text }; } };\n" +
 		"window.renderChatMarkdownLargeFallback = function(text) { return { safe: text }; };\n" +
-		"function container(connected, raw) { return { isConnected: connected, hasRaw: raw !== undefined, raw: raw || '', textContent: '', attributes: {}, dataset: new Proxy({}, { set: function() { throw new Error('render cache must not create data attributes'); } }), replacements: [], hasAttribute: function(name) { return name === 'data-raw-content' && this.hasRaw; }, getAttribute: function(name) { if (name === 'data-raw-content' && this.hasRaw) return this.raw; return this.attributes[name] || null; }, setAttribute: function(name, value) { this.attributes[name] = String(value); }, removeAttribute: function(name) { delete this.attributes[name]; }, querySelector: function() { return null; }, replaceChildren: function(value) { this.replacements.push(value); this.textContent = value && value.safe ? value.safe : ''; } }; }\n" + scheduler + "\n" +
+		"function container(connected, raw) { return { closest: function() { return null; }, isConnected: connected, hasRaw: raw !== undefined, raw: raw || '', textContent: '', attributes: {}, dataset: new Proxy({}, { set: function() { throw new Error('render cache must not create data attributes'); } }), replacements: [], hasAttribute: function(name) { return name === 'data-raw-content' && this.hasRaw; }, getAttribute: function(name) { if (name === 'data-raw-content' && this.hasRaw) return this.raw; return this.attributes[name] || null; }, setAttribute: function(name, value) { this.attributes[name] = String(value); }, removeAttribute: function(name) { delete this.attributes[name]; }, querySelector: function() { return null; }, replaceChildren: function(value) { this.replacements.push(value); this.textContent = value && value.safe ? value.safe : ''; } }; }\n" + scheduler + "\n" +
+		"window.renderIncrementalChatContent = function(c, text, yielding) { return window.renderStreamingContent(c, text, yielding); };\n" +
 		"const delay = ms => new Promise(resolve => setTimeout(resolve, ms));\n" +
 		"(async function() {\n" +
 		"  const calls = [], controls = []; window.renderStreamingContent = function(c, text) { calls.push(text); return new Promise(function(resolve, reject) { controls.push({ resolve: resolve, reject: reject }); }); };\n" +
@@ -4049,7 +4050,7 @@ func TestRenderStreamingContent_RemovesWhitespacePreWrap(t *testing.T) {
 	}
 
 	content := buf.String()
-	rendererStart := strings.Index(content, "window.renderStreamingContent = function(container, textBuffer, yieldBetweenBatches)")
+	rendererStart := strings.Index(content, "window.renderStreamingContent = function(container, textBuffer, yieldBetweenBatches, options)")
 	if rendererStart == -1 {
 		t.Fatal("renderStreamingContent definition is missing")
 	}
@@ -4101,13 +4102,13 @@ func TestRenderStreamingContent_PairsRepeatedToolResultsFIFOAndUsesStableToolIDs
 
 	content := buf.String()
 	for _, want := range []string{
-		"window.linkStreamingToolResults = function(segments)",
+		"window.linkStreamingToolResults = function(segments, options)",
 		"var toolUseQueues = Object.create(null)",
 		"calls: [], next: 0",
 		"queue.calls[queue.next++]",
-		"segments[si].toolRenderID = 'tool-' + segments[si].index + '-' + toolRenderOrdinal++",
+		"segments[si].toolRenderID = 'tool-' + (segments[si].index + (options ? options.offset : 0)) + '-' + toolRenderOrdinal++",
 		"for (var si = segments.length - 1; si >= 0; si--)",
-		"window.linkStreamingToolResults(segments)",
+		"window.linkStreamingToolResults(segments, options)",
 		"wrap.setAttribute('data-tool-render-id', seg.toolRenderID || '')",
 		"outScroll.setAttribute('data-tool-render-id', seg.toolRenderID || '')",
 	} {
@@ -5333,12 +5334,12 @@ func TestStreamingRenderSnapshotsPinnedStateBeforeDomGrowth(t *testing.T) {
 		t.Fatalf("expected streaming renderers to snapshot shouldScroll before DOM render, found %d", count)
 	}
 	textScrollIdx := strings.Index(content, "var shouldScroll = !tracker || tracker.shouldAutoScroll();")
-	textRenderIdx := strings.Index(content, "var renderPromise = liveRenderer(container, renderText, shouldYield)")
+	textRenderIdx := strings.Index(content, "var renderPromise = liveRenderer(container, renderText, shouldYield, force)")
 	if textScrollIdx == -1 || textRenderIdx == -1 || textScrollIdx > textRenderIdx {
 		t.Error("new-message streaming renderer must compute shouldScroll before renderStreamingContent")
 	}
 
-	resumeRenderIdx := strings.LastIndex(content, "var renderPromise = liveRenderer(container, renderText, shouldYield)")
+	resumeRenderIdx := strings.LastIndex(content, "var renderPromise = liveRenderer(container, renderText, shouldYield, force)")
 	if resumeRenderIdx == -1 {
 		t.Fatal("resume streaming renderer must call renderStreamingContent")
 	}

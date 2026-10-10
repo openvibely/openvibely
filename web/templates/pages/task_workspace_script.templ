@@ -122,7 +122,7 @@ templ TaskWorkspaceScript() {
 			var title = root.querySelector('#task-breadcrumb-title');
 			title.disabled = !diff;
 			if (diff) title.title = 'Back to thread';
-			else title.removeAttribute('title');
+			else { title.removeAttribute('title'); title.removeAttribute('data-ov-tooltip'); }
 			resize(width);
 			if (diff) {
 				_startFileChangesSSE(taskID);
@@ -174,7 +174,7 @@ templ TaskWorkspaceScript() {
 		var breadcrumbButton = breadcrumb && breadcrumb.querySelector('[data-breadcrumb-selector-button]');
 		var apple = /Mac|iPhone|iPad/.test(navigator.platform);
 		opener.title = 'Toggle task details (' + (apple ? '⌘⇧B' : 'Ctrl+Shift+B') + ')';
-		if (breadcrumbButton) breadcrumbButton.title = 'Switch task (' + (apple ? '⌘K' : 'Ctrl+K') + '); previous/next: ' + (apple ? '⌘⇧↑/↓' : 'Ctrl+Shift+↑/↓') + '; last visited: ' + (apple ? '⌘⇧L' : 'Ctrl+Shift+L');
+		if (breadcrumbButton) breadcrumbButton.title = 'Switch task (' + (apple ? '⌘K' : 'Ctrl+K') + '); Previous/next: ' + (apple ? '⌘⇧↑/↓' : 'Ctrl+Shift+↑/↓') + '; Last visited: ' + (apple ? '⌘⇧L' : 'Ctrl+Shift+L');
 		function navigateTask(url, cycling) {
 			var destination = new URL(url, location.href);
 			if (destination.origin !== location.origin) return;
@@ -211,7 +211,7 @@ templ TaskWorkspaceScript() {
 			var openDialog = document.querySelector('dialog[open]');
 			if (openDialog) return;
 			if (command && !event.altKey && event.shiftKey && event.code === 'KeyD') {
-				if (!taskID || document.querySelector('[data-openvibely-picker-open], [data-menu-open]') || (typeof HTMLElement.prototype.showPopover === 'function' && document.querySelector('[popover]:popover-open')) || (!panel.hidden && panel.dataset.overlay === 'true')) return;
+				if (!taskID || document.querySelector('[data-openvibely-picker-open], [data-menu-open]') || (typeof HTMLElement.prototype.showPopover === 'function' && document.querySelector('[popover]:popover-open:not([role="tooltip"])')) || (!panel.hidden && panel.dataset.overlay === 'true')) return;
 				event.preventDefault();
 				workspace(changes.classList.contains('hidden'));
 			} else if (command && !event.altKey && event.shiftKey && event.code === 'KeyB') {

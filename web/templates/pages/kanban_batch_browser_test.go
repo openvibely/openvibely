@@ -188,13 +188,15 @@ window.addEventListener('DOMContentLoaded', async function() {
   releases.shift()();
   await wait(() => releases.length === 1);
   const host = col('completed').querySelector('[data-kanban-progress]');
-  const details = host.querySelector('details'), summary = details.querySelector('summary');
-  details.open = true; summary.focus();
+  const stop = host.querySelector('button');
+  check(host.firstElementChild === stop, 'batch control precedes status');
+  check(!host.querySelector('details, summary'), 'batch status has no Details accordion');
+  stop.focus();
   releases.shift()();
   await wait(() => releases.length === 1);
-  check(host.querySelector('details') === details && details.open, 'progress preserves expanded Details node');
-  check(document.activeElement === summary, 'progress preserves keyboard focus');
-  check(details.querySelectorAll('div').length === 2, 'progress appends results');
+  check(host.querySelector('button') === stop, 'progress preserves Stop control');
+  check(document.activeElement === stop, 'progress preserves keyboard focus');
+  check(host.textContent.includes('2/3'), 'progress updates counts');
   const oldBoard = document.getElementById('kanban-board');
   const returnedBoard = oldBoard.cloneNode(true);
   returnedBoard.querySelectorAll('[data-kanban-progress]').forEach(el => el.replaceChildren());
@@ -214,6 +216,12 @@ window.addEventListener('DOMContentLoaded', async function() {
   await lifecycle;
   check(col('completed').querySelector('[data-kanban-progress]').textContent.includes('3/3'), 'returned board receives final progress');
   check(finalRefreshes === 1, 'returned board receives authoritative completion refresh');
+  const completedHost = col('completed').querySelector('[data-kanban-progress]');
+  const dismiss = completedHost.querySelector('button');
+  check(completedHost.firstElementChild === dismiss && dismiss.textContent === '×', 'dismiss x precedes completed status');
+  check(!completedHost.querySelector('details, summary'), 'completed status has no accordion');
+  dismiss.click();
+  check(!completedHost.textContent, 'dismiss clears completed status');
   window.fetch = originalFetch; window.htmx.ajax = originalAjax;
   await fetch('/result?status=pass', {method:'POST'});
  } catch(error) { await fetch('/result?status='+encodeURIComponent(error.stack), {method:'POST'}); }

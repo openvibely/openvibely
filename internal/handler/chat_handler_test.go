@@ -420,7 +420,7 @@ func TestHandler_ChatSend(t *testing.T) {
 	if strings.Contains(body, `id="chat-form-action-cluster" hx-swap-oob="outerHTML"`) {
 		t.Error("composer OOB response must not replace attachment/speech controls")
 	}
-	if !strings.Contains(body, `title="Stop response"`) || !strings.Contains(body, `/chat/stop?project_id=default`) {
+	if !strings.Contains(body, `aria-label="Stop response"`) || !strings.Contains(body, `/chat/stop?project_id=default`) {
 		t.Error("expected chat send response to turn composer action into stop")
 	}
 }
@@ -1624,10 +1624,9 @@ func TestHandler_Chat_RendersStopButtonWhileActive(t *testing.T) {
 	rec := htmxGet(e, "/chat?project_id="+project.ID)
 	assertCode(t, rec, http.StatusOK)
 	assertContains(t, rec, `hx-post="/chat/stop?project_id=`+project.ID+`&amp;expected_turn_id=`+activeExec.ID+`"`)
-	assertContains(t, rec, `title="Stop response"`)
-	assertContains(t, rec, `aria-label="Stop response"`)
+	assertContains(t, rec, `data-tooltip-disabled aria-label="Stop response"`)
 	assertContains(t, rec, `<rect x="6" y="6" width="12" height="12" rx="2"></rect>`)
-	assertNotContains(t, rec, `title="Send message"`)
+	assertNotContains(t, rec, `aria-label="Send message"`)
 }
 
 func TestHandler_Chat_RendersSendButtonWhenNoActiveTurn(t *testing.T) {
@@ -1637,9 +1636,9 @@ func TestHandler_Chat_RendersSendButtonWhenNoActiveTurn(t *testing.T) {
 
 	rec := htmxGet(e, "/chat?project_id="+project.ID)
 	assertCode(t, rec, http.StatusOK)
-	assertContains(t, rec, `title="Send message"`)
+	assertContains(t, rec, `aria-label="Send message"`)
 	assertContains(t, rec, `<path d="M2 3l20 9-20 9 5-9-5-9z"></path>`)
-	assertNotContains(t, rec, `title="Stop response"`)
+	assertNotContains(t, rec, `data-tooltip-disabled aria-label="Stop response"`)
 	assertNotContains(t, rec, `/chat/stop`)
 }
 
@@ -1693,8 +1692,8 @@ func TestHandler_ChatStop_CancelsActiveChatTurn(t *testing.T) {
 	assertCode(t, rec, http.StatusOK)
 	assertContains(t, rec, `id="chat-form-primary-action" data-composer-running="false" data-active-turn-id="" hx-swap-oob="outerHTML"`)
 	assertNotContains(t, rec, `id="chat-form-action-cluster" hx-swap-oob="outerHTML"`)
-	assertContains(t, rec, `title="Send message"`)
-	assertNotContains(t, rec, `title="Stop response"`)
+	assertContains(t, rec, `aria-label="Send message"`)
+	assertNotContains(t, rec, `data-tooltip-disabled aria-label="Stop response"`)
 	if !cancelled {
 		t.Fatal("expected ChatStop to invoke the active chat task cancellation callback")
 	}
@@ -3827,7 +3826,7 @@ func TestHandler_TaskThreadSend_QueuesWhenAtCapacity(t *testing.T) {
 	assertContains(t, rec, `id="task-thread-form-primary-action" data-composer-running="true" data-active-turn-id="`)
 	assertNotContains(t, rec, `id="task-thread-form-action-cluster" hx-swap-oob="outerHTML"`)
 	assertContains(t, rec, `hx-post="/tasks/`+task.ID+`/cancel?composer_stop=1&amp;expected_turn_id=`)
-	assertContains(t, rec, `title="Stop response"`)
+	assertContains(t, rec, `aria-label="Stop response"`)
 
 	// Message should be saved in an execution record
 	execs, _ := h.execRepo.ListByTaskChronological(ctx, task.ID)
@@ -4062,8 +4061,8 @@ func TestHandler_TaskThreadSend_CancelQueuedCapacityWait(t *testing.T) {
 	require.Equal(t, http.StatusOK, cancelRec.Code, cancelRec.Body.String())
 	assertContains(t, cancelRec, `id="task-thread-form-primary-action" data-composer-running="false" data-active-turn-id="" hx-swap-oob="outerHTML"`)
 	assertNotContains(t, cancelRec, `id="task-thread-form-action-cluster" hx-swap-oob="outerHTML"`)
-	assertContains(t, cancelRec, `title="Send message"`)
-	assertNotContains(t, cancelRec, `title="Stop response"`)
+	assertContains(t, cancelRec, `aria-label="Send message"`)
+	assertNotContains(t, cancelRec, `aria-label="Stop response"`)
 
 	require.Eventually(t, func() bool {
 		execs, err := h.execRepo.ListByTaskChronological(ctx, task.ID)
@@ -4521,7 +4520,7 @@ func TestHandler_Chat_LiveStreamingUsesRenderStreamingContent(t *testing.T) {
 		"live streaming should define a batched render helper")
 	assert.Contains(t, body, "if (!window.renderStreamingContent)",
 		"batched render helper should provide text fallback when renderer is unavailable")
-	assert.Contains(t, body, "var renderPromise = liveRenderer(contentDiv, renderText)",
+	assert.Contains(t, body, "var renderPromise = liveRenderer(contentDiv, renderText, undefined, force)",
 		"batched render helper should render via shared renderer")
 	assert.Contains(t, body, "return renderPromise.then(function(committed)",
 		"batched render helper should return the shared renderer promise before accepting another batch")

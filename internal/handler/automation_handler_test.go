@@ -836,6 +836,20 @@ func TestAutomationTemplateBuilderAddsAndSavesCustomNodes(t *testing.T) {
 		"node_extra_follow_up_source_files": {"README.md"},
 	}).Execute()
 	require.Equal(t, http.StatusOK, editedPreview.Code, editedPreview.Body.String())
+	require.Contains(t, editedPreview.Body.String(), `data-automation-unsaved-changes="true"`)
+	// Switching from edited YAML to Graph/Details previews without saving.
+	for _, view := range []string{"", "details"} {
+		previewYAML, err := service.EncodeAutomationDraftYAML(automationCandidateFromResponse(t, editedPreview))
+		require.NoError(t, err)
+		refreshed := tc.HTMX().Post("/automations/" + automationID + "/builder?project_id=" + project.ID).WithForm(url.Values{
+			"project_id": {project.ID}, "automation_yaml": {previewYAML}, "initial_view": {view},
+		}).Execute()
+		require.Equal(t, http.StatusOK, refreshed.Code, refreshed.Body.String())
+		require.Contains(t, refreshed.Body.String(), `data-automation-unsaved-changes="true"`)
+	}
+	reopened := tc.HTMX().Get("/automations/" + automationID + "/builder?project_id=" + project.ID).Execute()
+	require.Equal(t, http.StatusOK, reopened.Code)
+	require.Contains(t, reopened.Body.String(), `data-automation-unsaved-changes="false"`)
 	editedCandidate := automationCandidateFromResponse(t, editedPreview)
 	require.Equal(t, "Edited template preview", editedCandidate.Name)
 	require.Equal(t, "Edit preview result", automationDraftNodeByKeyHandler(t, editedCandidate, "edit_preview_result").Name)

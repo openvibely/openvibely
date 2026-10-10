@@ -1912,6 +1912,21 @@ window.addEventListener('DOMContentLoaded', function() {
     }
     if (!editor || !graph || !yaml) fail('builder did not render both graph and YAML views');
     if (editor.readOnly) fail('Edit YAML editor is unexpectedly read-only');
+    var editGuard = document.querySelector('[data-automation-yaml-builder]');
+    if (typeof editGuard.hasUnsavedAutomationChanges !== 'function' || editGuard.hasUnsavedAutomationChanges()) fail('fresh builder must have a clean edit snapshot');
+    editGuard.dataset.automationUnsavedChanges = 'true';
+    if (!editGuard.hasUnsavedAutomationChanges()) fail('server-rendered preview must remain dirty without further edits');
+    editGuard.dataset.automationUnsavedChanges = 'false';
+    var guardedName = editGuard.querySelector('[data-automation-name]'), originalGuardedName = guardedName.value;
+    guardedName.value += ' changed';
+    if (!editGuard.hasUnsavedAutomationChanges()) fail('breadcrumb name edit must protect navigation');
+    guardedName.value = originalGuardedName;
+    if (editGuard.hasUnsavedAutomationChanges()) fail('reverted name must restore clean state');
+    var guardedDetail = editGuard.querySelector('[data-automation-details-form] input[name$="_name"]:not([type="hidden"])'), originalGuardedDetail = guardedDetail.value;
+    guardedDetail.value += ' changed';
+    if (!editGuard.hasUnsavedAutomationChanges()) fail('details edit must protect navigation');
+    guardedDetail.value = originalGuardedDetail;
+    if (editGuard.hasUnsavedAutomationChanges()) fail('reverted details must restore clean state');
     ['Automation YAML', 'YAML controls node and connection configuration', 'Preview YAML'].forEach(function(legacy) {
       if (yaml.textContent.includes(legacy)) fail('obsolete YAML editor chrome remains: ' + legacy);
     });
@@ -2124,6 +2139,7 @@ window.addEventListener('DOMContentLoaded', function() {
     await new Promise(function(resolve) { requestAnimationFrame(resolve); });
     var yamlBeforeTypingNodeName = editor.value;
     if (yamlBeforeTypingNodeName.indexOf(yamlCommentMarker) < 0) fail('manual YAML edit was not applied before opening the Add node dialog');
+    if (!editGuard.hasUnsavedAutomationChanges()) fail('manual YAML edit must protect navigation');
     document.getElementById('automation-node-dialog').showModal();
     var nodeNameInput = document.querySelector('[data-automation-node-dialog] [name="node_name"]');
     nodeNameInput.value = 'Fourth';
@@ -2167,6 +2183,7 @@ window.addEventListener('DOMContentLoaded', function() {
     submittedYAML(editor);
 
     connect('second', 'third', 2);
+    if (!editGuard.hasUnsavedAutomationChanges()) fail('graph edit must protect navigation');
     if (!edge('second', 'third')) fail('canvas connect did not render the new edge');
     contains(editor, 'from: "second"\n    to: "third"', 'canvas connect did not update YAML');
     submittedYAML(editor);

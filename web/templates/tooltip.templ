@@ -1,0 +1,147 @@
+package templates
+
+templ Tooltips() {
+ <style>
+ .ov-tooltip { position:fixed; inset:auto; margin:0; width:max-content; max-width:min(360px,calc(100vw - 16px)); max-height:calc(100vh - 16px); overflow:auto; padding:6px 8px; border:1px solid oklch(var(--bc) / .18); border-radius:6px; background:var(--ov-menu-surface,#1D232A); color:var(--ov-tooltip-text,oklch(var(--bc))); box-shadow:0 3px 10px #0003; font:12px/1.5 system-ui,sans-serif; z-index:2147483647; }
+ .ov-tooltip[hidden] { display:none; }
+ .ov-tooltip-row { display:flex; align-items:baseline; justify-content:space-between; gap:12px; white-space:pre-wrap; overflow-wrap:anywhere; }
+ .ov-tooltip-row + .ov-tooltip-row { margin-top:5px; }
+ .ov-tooltip kbd { flex-shrink:0; padding:0 4px; border:1px solid oklch(var(--bc) / .16); border-radius:3px; background:oklch(var(--bc) / .08); color:inherit; font:11px/16px system-ui,sans-serif; white-space:nowrap; }
+ [data-tip]::before,[data-tip]::after { content:none !important; display:none !important; }
+ </style>
+ <script>
+ (function() {
+  if (window.openVibelyTooltip) return;
+  var tip=document.createElement('div');tip.id='ov-shared-tooltip';tip.className='ov-tooltip';tip.setAttribute('role','tooltip');tip.hidden=true;tip.setAttribute('popover','manual');document.body.appendChild(tip);
+  var pressing=false;
+  var suppressRestoredFocus=false;
+  var changing=false,active=null,pinned=false,timer=null,dismissed=null,pointer=null,nativePopover=typeof tip.showPopover==='function';
+  if(!nativePopover)tip.removeAttribute('popover');
+  var selector='[title],[data-tip],[data-ov-tooltip],[data-model-help],[data-model-setting-help]';
+  function textFor(el) {
+   var text=el.dataset.modelSettingHelp||el.dataset.modelHelp||el.dataset.tip||el.getAttribute('title')||el.dataset.ovTooltip||'';
+   var sample=el.querySelector('[data-task-summary-sample]');
+   if(el.hasAttribute('data-model-help')&&sample&&sample.textContent)text+=' '+sample.textContent+'.';
+   return text;
+  }
+  function describe(el,add) {
+   var ids=(el.getAttribute('aria-describedby')||'').split(/\s+/).filter(function(id){return id&&id!==tip.id;});if(add)ids.push(tip.id);
+   if(ids.length)el.setAttribute('aria-describedby',ids.join(' '));else el.removeAttribute('aria-describedby');
+  }
+  function close() {
+   if(changing)return;changing=true;
+   clearTimeout(timer);
+   if(active){describe(active,false);if(active.matches('[data-model-help],[data-model-setting-help]'))active.setAttribute('aria-expanded','false');}
+   active=null;pinned=false;pointer=null;
+   if(nativePopover&&tip.matches(':popover-open'))tip.hidePopover();tip.hidden=true;if(tip.parentElement!==document.body)document.body.appendChild(tip);
+   changing=false;
+  }
+  function render(text) {
+   tip.replaceChildren();
+   String(text).split(/\n|;\s*(?=previous\/next:|last visited:)/i).forEach(function(line){
+    var row=document.createElement('div');row.className='ov-tooltip-row';
+    // Existing labels keep their wording; only recognizable shortcuts get a badge.
+    var match=line.match(/^(.*?)\s*\(((?:⌘|Ctrl\+|Command\+|Shift\+|Esc|Enter|Click|Drag|Rightclick|Right-click)[^)]*)\)$/)||line.match(/^(.*?:)\s*((?:⌘|Ctrl\+|Command\+).*)$/);
+    if(match){var label=document.createElement('span');label.textContent=match[1];var key=document.createElement('kbd');key.textContent=match[2];row.append(label,key);}
+    else {var parts=line.split(/((?:Command|Ctrl)\+click)/);parts.forEach(function(part){var node=document.createElement(/^(Command|Ctrl)\+click$/.test(part)?'kbd':'span');node.textContent=part;row.appendChild(node);});}
+    tip.appendChild(row);
+   });
+  }
+  function position(point) {
+   if(!active)return;
+   point=point||pointer;
+   var r=active.getBoundingClientRect(),box=tip.getBoundingClientRect(),x=point?point.x:r.left,y=point?point.y:r.bottom;
+   tip.style.left=Math.max(8,Math.min(x,innerWidth-box.width-8))+'px';
+   tip.style.top=Math.max(8,Math.min(y+8+box.height<=innerHeight?y+8:(point?y:r.top)-box.height-8,innerHeight-box.height-8))+'px';
+  }
+  function show(el,text,pin,point) {
+   if(changing)return;
+   if(pin)dismissed=null;
+   if(!el||!el.isConnected||!text||blocked(el)||(dismissed&&(dismissed===el||dismissed.contains(el))))return;
+   if(active!==el)close();clearTimeout(timer);pointer=point||null;active=el;pinned=pinned||!!pin;
+   adopt(el);
+   var host=el.closest('dialog[open]')||document.body;if(tip.parentElement!==host)host.appendChild(tip);
+   render(text);describe(el,true);if(el.matches('[data-model-help],[data-model-setting-help]'))el.setAttribute('aria-expanded','true');
+   tip.hidden=false;if(nativePopover&&!tip.matches(':popover-open'))tip.showPopover();position(point);
+  }
+  function menuOpen(){
+   return Array.from(document.querySelectorAll('.ov-menu,[role="menu"],[role="listbox"]')).some(function(menu){
+    if(menu.closest('details:not([open])')||!menu.getClientRects().length)return false;
+    if(menu.checkVisibility&&!menu.checkVisibility({checkOpacity:true,checkVisibilityCSS:true}))return false;
+    var style=getComputedStyle(menu);return style.visibility!=='hidden'&&style.display!=='none'&&Number(style.opacity)!==0;
+   });
+  }
+  function blocked(target){return pressing||menuOpen()||target instanceof Element&&!!target.closest('[data-kanban-menu-trigger],[data-tooltip-disabled],.ov-modal-close,.modal-backdrop');}
+  function trigger(target){if(changing||blocked(target))return null;return target instanceof Element?target.closest(selector)||(active&&active.contains(target)?active:null):null;}
+  document.addEventListener('pointerover',function(e){
+   if(e.buttons){close();return;}
+   if(dismissed&&!dismissed.contains(e.target))dismissed=null;
+   if(tip.contains(e.target)){clearTimeout(timer);return;}
+   if(blocked(e.target)){if(!pinned)close();return;}
+   var el=trigger(e.target);if(!el||pinned)return;
+   clearTimeout(timer);
+   if(el===active){pointer={x:e.clientX+12,y:e.clientY+12};position();return;}
+   show(el,textFor(el),false,{x:e.clientX+12,y:e.clientY+12});
+  });
+  document.addEventListener('pointermove',function(e){
+   if(e.buttons||menuOpen()){close();return;}
+   if(!pinned&&active&&active.contains(e.target)){pointer={x:e.clientX+12,y:e.clientY+12};position();}
+  });
+  document.addEventListener('pointerout',function(e){
+   if(pinned||!active||(!active.contains(e.target)&&!tip.contains(e.target)))return;
+   if(blocked(e.relatedTarget)){close();return;}
+   var next=trigger(e.relatedTarget);
+   if(e.relatedTarget&&(active.contains(e.relatedTarget)||tip.contains(e.relatedTarget))){clearTimeout(timer);return;}
+   if(next&&textFor(next)===textFor(active)){
+    describe(active,false);active=next;describe(active,true);clearTimeout(timer);return;
+   }
+   clearTimeout(timer);timer=setTimeout(function(){if(active&&active.matches(':hover'))return;close();},100);
+  });
+  function dismissOnPress(e){dismissed=trigger(e.target)||active;pressing=true;close();}
+  document.addEventListener('pointerdown',dismissOnPress,true);
+  document.addEventListener('mousedown',dismissOnPress,true);
+  function releasePress(){pressing=false;}
+  window.addEventListener('pointerup',releasePress,true);
+  window.addEventListener('mouseup',releasePress,true);
+  document.addEventListener('pointercancel',releasePress,true);
+  window.addEventListener('blur',function(){releasePress();close();});
+  document.addEventListener('focusin',function(e){if(suppressRestoredFocus||blocked(e.target)){if(!pinned)close();return;}var el=trigger(e.target);if(el)show(el,textFor(el));});
+  document.addEventListener('focusout',function(e){if(!pinned&&active&&active.contains(e.target)&&!active.contains(e.relatedTarget)&&!active.matches(':hover'))close();});
+  document.addEventListener('click',function(e){var el=trigger(e.target);if(el&&el.matches('[data-model-help],[data-model-setting-help]')){if(active===el&&pinned)close();else show(el,textFor(el),true);}else if(!tip.contains(e.target))close();});
+  // Menu shortcuts restore focus to the opener; that is not tooltip navigation.
+  document.addEventListener('keydown',function(e){if(e.key==='Tab')suppressRestoredFocus=false;else if(menuOpen())suppressRestoredFocus=true;if(e.key==='Escape'&&active){if(pinned){e.preventDefault();e.stopPropagation();}close();}},true);
+  document.addEventListener('scroll',function(e){if(active&&!tip.contains(e.target)&&(e.target===document||(e.target instanceof Element&&e.target.contains(active))))close();},true);window.addEventListener('resize',close);
+  document.addEventListener('close',function(e){if(active&&e.target.contains(active)&&!e.target.open)close();},true);
+  document.addEventListener('model-section-change',close);
+  document.addEventListener('htmx:beforeSwap',function(e){var target=e.detail&&e.detail.target;if(active&&target&&target.contains(active))close();});document.addEventListener('htmx:beforeHistorySave',close);
+  // Consume native labels centrally, including labels produced by streamed HTML
+  // and existing title setters. No native tooltip remains after dismissal.
+  function adopt(el) {
+   if(!(el instanceof Element))return;
+   function convert(node){
+    var text=node.getAttribute('title');if(text===null)return;
+    node.dataset.ovTooltip=text;node.removeAttribute('title');
+    if(text&&!node.textContent.trim()&&!node.hasAttribute('aria-label')&&!node.hasAttribute('aria-labelledby'))node.setAttribute('aria-label',text);
+   }
+   convert(el);el.querySelectorAll('[title]').forEach(convert);
+  }
+  adopt(document.body);
+  new MutationObserver(function(records){
+   records.forEach(function(record){
+    if(record.type==='childList')record.addedNodes.forEach(adopt);
+    else if(record.attributeName==='title'&&record.target.hasAttribute('title'))adopt(record.target);
+   });
+   if(!active)return;if(!active.isConnected||blocked(active)){close();return;}
+   if(records.some(function(record){return record.type==='attributes'&&record.target===active;})){var text=textFor(active);if(text){render(text);position();}else close();}
+  }).observe(document.body,{subtree:true,childList:true,attributes:true,attributeFilter:['class','style','hidden','open','aria-expanded','title','data-tip','data-ov-tooltip','data-model-help','data-model-setting-help']});
+  window.openVibelyTooltip={show:show,close:close,clear:function(el){
+   el.removeAttribute('title');el.removeAttribute('data-ov-tooltip');el.removeAttribute('data-tip');
+   if(active===el)close();
+  },chart:function(context){
+   var model=context.tooltip,canvas=context.chart.canvas;if(!model||!model.opacity){if(active===canvas)close();return;}
+   var lines=[].concat(model.title||[],model.beforeBody||[]);(model.body||[]).forEach(function(body){lines=lines.concat(body.before||[],body.lines||[],body.after||[]);});lines=lines.concat(model.afterBody||[],model.footer||[]);
+   var r=canvas.getBoundingClientRect();show(canvas,lines.join('\n'),false,{x:r.left+model.caretX,y:r.top+model.caretY});
+  }};
+ })();
+ </script>
+}

@@ -33,20 +33,16 @@
         if (!host || !batch) return;
         let view = host.kanbanProgressView;
         if (!view || view.batch !== batch) {
-            const status = textElement('div', '');
+            const status = textElement('span', '');
             const progress = document.createElement('progress');
             const button = textElement('button', '');
             button.className = 'btn btn-xs btn-ghost';
-            const details = document.createElement('details');
-            details.append(textElement('summary', 'Details'));
-            details.open = !!batch.detailsOpen;
-            details.ontoggle = () => { batch.detailsOpen = details.open; };
             button.onclick = () => {
                 if (batch.running) { batch.stop = true; button.disabled = true; }
                 else { results.delete(key(col)); host.replaceChildren(); host.kanbanProgressView = null; }
             };
-            host.replaceChildren(status, progress, button, details);
-            view = host.kanbanProgressView = { batch, status, progress, button, details, lineCount: 0 };
+            host.replaceChildren(button, status, progress);
+            view = host.kanbanProgressView = { batch, status, progress, button };
         }
         view.status.textContent = (batch.stop && !batch.running ? 'Stopped · ' : '') + batch.label + ': ' + batch.done + '/' + batch.total + ' · ' + batch.success + ' succeeded · ' + batch.skipped + ' skipped · ' + batch.failed + ' failed';
         view.progress.hidden = !batch.running;
@@ -54,17 +50,13 @@
         view.button.textContent = batch.running ? 'Stop' : '×';
         view.button.disabled = batch.running && batch.stop;
         view.button.setAttribute('aria-label', batch.running ? 'Stop batch' : 'Dismiss results');
-        view.details.hidden = !batch.lines.length;
-        while (view.lineCount < batch.lines.length) {
-            view.details.append(textElement('div', batch.lines[view.lineCount++]));
-        }
     }
     function refresh() {
         document.querySelectorAll('#kanban-board [data-kanban-category]').forEach(col => {
             const filter = filters.get(key(col)) || {};
             const all = cards(col);
             all.forEach(card => {
-                card.title = selectionModifier + '+click to select task(s)';
+                card.title = 'Select tasks (' + selectionModifier + '+click)';
                 card.hidden = col.dataset.kanbanCategory !== 'active' && !matches(card.dataset, filter);
                 if (card.hidden) selection().delete(card.dataset.taskId);
             });

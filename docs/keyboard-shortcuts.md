@@ -16,8 +16,12 @@ These are the app's keyboard bindings. On macOS, **Command** is ⌘ and **Option
 | Previous task in the breadcrumb list | Command+Shift+↑ | Ctrl+Shift+↑ |
 | Next task in the breadcrumb list | Command+Shift+↓ | Ctrl+Shift+↓ |
 | Switch to the last task visited | Command+Shift+L | Ctrl+Shift+L |
+| Previous / next automation in the breadcrumb list | Command+Shift+↑/↓ | Ctrl+Shift+↑/↓ |
+| Switch to the last automation visited | Command+Shift+L | Ctrl+Shift+L |
 
 Project-tab shortcuts follow the displayed tab order and wrap at either end. They require at least two tabs and a visible tab strip. They work while the chat or task composer is focused. They are ignored inside other text fields, editors, and select controls, and while a dialog or popover is open.
+
+Automation preview/edit pages also support previous/next and last-visited shortcuts. They preserve preview/edit mode, stay within the current project, and stop at the ends of the breadcrumb list. These navigation shortcuts pause inside text fields and editors and while a dialog or menu is open.
 
 Command/Ctrl+K also opens the breadcrumb selector on automation view/edit pages. Command/Ctrl+Shift+K toggles the project menu wherever its button is visible.
 

@@ -410,18 +410,18 @@ func applyAutomationDraftFormValues(c echo.Context, candidate *models.Automation
 				node.Config["clear_context_on_start"] = c.FormValue(prefix+"clear_context_on_start") == "true"
 			}
 		}
-		if _, ok := node.Config["notification_type"]; ok {
-			if value, exists := automationDraftFormValue(c, prefix+"notification_type"); exists {
-				node.Config["notification_type"] = strings.TrimSpace(value)
-			}
+		_, hasNotificationType := node.Config["notification_type"]
+		if hasNotificationType || node.Role == "create_github_issue" || node.Role == "open_pull_request" {
 			if value, exists := automationDraftFormValue(c, prefix+"instructions"); exists {
 				node.Config["instructions"] = value
 			}
 		}
-		if node.Role == "create_github_issue" {
-			if value, exists := automationDraftFormValue(c, prefix+"instructions"); exists {
-				node.Config["instructions"] = value
+		if hasNotificationType {
+			if value, exists := automationDraftFormValue(c, prefix+"notification_type"); exists {
+				node.Config["notification_type"] = strings.TrimSpace(value)
 			}
+		}
+		if node.Role == "create_github_issue" {
 			if value, exists := automationDraftFormValue(c, prefix+"labels"); exists {
 				labels := strings.FieldsFunc(value, func(r rune) bool { return r == ',' || r == '\n' })
 				for i := range labels {
@@ -431,9 +431,6 @@ func applyAutomationDraftFormValues(c echo.Context, candidate *models.Automation
 			}
 		}
 		if node.Role == "open_pull_request" {
-			if value, exists := automationDraftFormValue(c, prefix+"instructions"); exists {
-				node.Config["instructions"] = value
-			}
 			if value, exists := automationDraftFormValue(c, prefix+"base"); exists {
 				node.Config["base"] = strings.TrimSpace(value)
 			}
@@ -836,6 +833,9 @@ func (h *Handler) changeAutomationLifecycle(c echo.Context, action string) error
 }
 
 func (h *Handler) renderAutomationBuilder(c echo.Context, page models.AutomationBuilderPage) error {
+	// Successful saves redirect. A POST that renders the editor is still an
+	// unsaved preview (or a failed save), even after replacing the whole editor.
+	page.UnsavedChanges = page.UnsavedChanges || c.Request().Method == http.MethodPost
 	projectID, _ := h.getCurrentProjectID(c)
 	if !page.YAMLProvided && page.YAML == "" {
 		encodedYAML, err := service.EncodeAutomationDraftYAML(page.Result.Candidate)

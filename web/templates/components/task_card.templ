@@ -309,8 +309,8 @@ templ TaskStateIcon(task models.Task) {
 	<span
 		data-task-state-icon
 		data-task-state={ state.Key }
-		class={ "tooltip tooltip-right inline-flex h-5 w-5 shrink-0 items-center justify-center", state.TextClass }
-		data-tip={ state.Label }
+		class={ "inline-flex h-5 w-5 shrink-0 items-center justify-center", state.TextClass }
+		data-tooltip-disabled
 		role="img"
 		aria-label={ "Task state: " + state.Label }
 	>
@@ -480,7 +480,7 @@ templ TaskCard(task models.Task, projectID string, viewingCategory string, llmMo
 		class="card bg-base-100 shadow-sm border border-base-300 hover:border-primary/40 hover:shadow-md transition-all mb-2 cursor-grab active:cursor-grabbing drag-cursor-surface relative min-w-0 overflow-visible"
 		data-task-id={ task.ID }
 		data-task-status={ string(task.Status) }
-		data-task-title={ task.Title }
+		data-task-
 		data-task-priority={ fmt.Sprintf("%d", task.Priority) }
 		data-task-merge={ string(task.MergeStatus) }
 		data-task-branch={ task.WorktreeBranch }
@@ -547,7 +547,7 @@ templ TaskCard(task models.Task, projectID string, viewingCategory string, llmMo
 
 			}
 		<!-- X button in top right corner -->
-		<button
+		<button data-tooltip-disabled aria-label="Delete task"
 			class="btn btn-circle btn-ghost btn-xs min-h-11 h-11 w-11 p-0 lg:min-h-6 lg:h-6 lg:w-6 absolute top-2 right-2 z-10"
 			onclick="event.stopPropagation()"
 			hx-delete={ fmt.Sprintf("/tasks/%s", task.ID) }
@@ -568,7 +568,6 @@ templ TaskCard(task models.Task, projectID string, viewingCategory string, llmMo
 						hx-swap="innerHTML"
 						hx-push-url={ fmt.Sprintf("/tasks/%s?from=tasks", task.ID) }
 						class="task-card-title-link font-medium cursor-pointer inline-flex items-start gap-2 min-w-0 max-w-full leading-snug"
-						title={ task.Title }
 					>
 						@TaskStateIcon(task)
 						<span data-task-title class="min-w-0 flex-1 break-words sm:truncate">{ task.Title }</span>
@@ -594,10 +593,10 @@ templ TaskCard(task models.Task, projectID string, viewingCategory string, llmMo
 							</span>
 						}
 							if task.HasGoal {
-								<span class="badge badge-sm badge-primary badge-outline inline-flex items-center" title="Task has an active goal">Goal</span>
+								<span class="badge badge-sm badge-primary badge-outline inline-flex items-center" data-tooltip-disabled>Goal</span>
 							}
 							if task.SwarmRole == models.SwarmRoleParent {
-								<span class="badge badge-sm badge-accent badge-outline inline-flex items-center" title="Swarm parent task">Swarm</span>
+								<span class="badge badge-sm badge-accent badge-outline inline-flex items-center" data-tooltip-disabled>Swarm</span>
 							}
 						<!-- Model Badge -->
 						if len(llmModels) > 0 {
@@ -645,7 +644,7 @@ templ TaskCard(task models.Task, projectID string, viewingCategory string, llmMo
 													<span class={ "relative z-10 h-3.5 w-3.5 rounded-full border-2 bg-base-200", swarmStatusIndicatorClass(child.Status), templ.KV("border-current", true), templ.KV("bg-current", child.Status == models.StatusRunning) } aria-hidden="true"></span>
 												}
 											</div>
-											<a href={ templ.SafeURL(fmt.Sprintf("/tasks/%s?from=tasks", child.ID)) } hx-get={ fmt.Sprintf("/tasks/%s?from=tasks", child.ID) } hx-target="#main-content" hx-swap="innerHTML" hx-push-url="true" class="min-w-0 truncate text-sm font-semibold text-base-content/85 hover:text-primary hover:underline" title={ child.Title }>{ swarmChildDisplayTitle(child) }</a>
+											<a href={ templ.SafeURL(fmt.Sprintf("/tasks/%s?from=tasks", child.ID)) } hx-get={ fmt.Sprintf("/tasks/%s?from=tasks", child.ID) } hx-target="#main-content" hx-swap="innerHTML" hx-push-url="true" class="min-w-0 truncate text-sm font-semibold text-base-content/85 hover:text-primary hover:underline" >{ swarmChildDisplayTitle(child) }</a>
 											<div class="flex items-center gap-3 text-right text-sm font-medium shrink-0">
 												if child.WorktreeBranch != "" && (child.Status == models.StatusRunning || child.Status == models.StatusCompleted || child.Status == models.StatusFailed || child.Status == models.StatusBlocked) {
 													<a href={ templ.SafeURL(fmt.Sprintf("/tasks/%s?tab=changes&from=tasks", child.ID)) } hx-get={ fmt.Sprintf("/tasks/%s?tab=changes&from=tasks", child.ID) } hx-target="#main-content" hx-swap="innerHTML" hx-push-url="true" class="link link-primary no-underline hover:underline">Diff</a>

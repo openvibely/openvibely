@@ -473,7 +473,7 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 							var lastRenderFinishedAt = 0;
 							var lastRenderedSourceLength = 0;
 							var largeStreamRenderThreshold = 100 * 1024;
-							var largeStreamRenderInterval = 250;
+							var largeStreamRenderInterval = 50;
 							function renderBufferedOutput(force, yieldLarge) {
 							if (!window.renderStreamingContent) {
 							container.classList.remove('text-error/80', 'font-medium');
@@ -532,7 +532,7 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 							}
 							var shouldYield = renderText.length >= largeStreamRenderThreshold && yieldLarge !== false;
 							var liveRenderer = window.renderLiveChatContent || window.renderStreamingContent;
-							var renderPromise = liveRenderer(container, renderText, shouldYield);
+							var renderPromise = liveRenderer(container, renderText, shouldYield, force);
 							if (renderPromise && typeof renderPromise.then === 'function') {
 					return renderPromise.then(finishScheduledRender).catch(function(err) {
 						renderScheduled = false;
@@ -569,7 +569,7 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 							}
 					}
 						function flushBufferedOutput() {
-							if (renderScheduled || lastRenderedSourceLength !== textBuffer.length) {
+							if (renderScheduled || lastRenderedSourceLength !== textBuffer.length || container._incrementalChat) {
 								return renderBufferedOutput(true, false);
 							}
 						}
@@ -1000,7 +1000,7 @@ templ ChatStreamingResumeInitScript() {
 					var lastRenderFinishedAt = Date.now();
 					var lastRenderedSourceLength = cumulativeContent.length;
 					var largeStreamRenderThreshold = 100 * 1024;
-					var largeStreamRenderInterval = 250;
+					var largeStreamRenderInterval = 50;
 					function renderCumulativeContent(force, yieldLarge) {
 					if (!window.renderStreamingContent) {
 					container.classList.remove('text-error/80', 'font-medium');
@@ -1055,7 +1055,7 @@ templ ChatStreamingResumeInitScript() {
 						}
 						var shouldYield = renderText.length >= largeStreamRenderThreshold && yieldLarge !== false;
 						var liveRenderer = window.renderLiveChatContent || window.renderStreamingContent;
-						var renderPromise = liveRenderer(container, renderText, shouldYield);
+						var renderPromise = liveRenderer(container, renderText, shouldYield, force);
 						if (renderPromise && typeof renderPromise.then === 'function') {
 				return renderPromise.then(finishScheduledRender).catch(function(err) {
 					renderScheduled = false;
@@ -1091,7 +1091,7 @@ templ ChatStreamingResumeInitScript() {
 					}
 				}
 					function flushCumulativeContent() {
-						if (renderScheduled || lastRenderedSourceLength !== cumulativeContent.length) {
+						if (renderScheduled || lastRenderedSourceLength !== cumulativeContent.length || container._incrementalChat) {
 							return renderCumulativeContent(true, false);
 						}
 					}
@@ -1535,7 +1535,7 @@ templ chatComposerActionButton(stopEndpoint string, isRunning bool) {
 			class="btn btn-primary btn-sm rounded-full min-h-0 h-8 w-8 p-0 flex-shrink-0"
 			hx-post={ stopEndpoint }
 			hx-swap="none"
-			title="Stop response"
+			data-tooltip-disabled
 			aria-label="Stop response"
 		>
 			<svg data-composer-stop-icon="true" xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
@@ -1546,7 +1546,7 @@ templ chatComposerActionButton(stopEndpoint string, isRunning bool) {
 			</svg>
 		</button>
 	} else {
-		<button type="submit" class="btn btn-primary btn-sm chat-send-button rounded-full min-h-0 h-8 w-8 p-0 flex-shrink-0" title="Send message" aria-label="Send message">
+		<button type="submit" class="btn btn-primary btn-sm chat-send-button rounded-full min-h-0 h-8 w-8 p-0 flex-shrink-0" data-tooltip-disabled aria-label="Send message">
 			<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
 				<path d="M2 3l20 9-20 9 5-9-5-9z"></path>
 			</svg>
@@ -1678,14 +1678,14 @@ templ ChatInputForm(config ChatInputFormConfig) {
 				</div>
 				<div id={ config.FormID + "-action-cluster" } class="flex items-center gap-2 flex-shrink-0">
 					<!-- Attachment button -->
-					<label for={ chatFileInputID(config.FormID) } class="btn btn-ghost btn-sm rounded-full min-h-0 h-8 w-8 p-0 flex-shrink-0 opacity-50 hover:opacity-100 hover:bg-base-300" title="Attach files">
+					<label for={ chatFileInputID(config.FormID) } class="btn btn-ghost btn-sm rounded-full min-h-0 h-8 w-8 p-0 flex-shrink-0 opacity-50 hover:opacity-100 hover:bg-base-300" data-tooltip-disabled aria-label="Attach files">
 						<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
 							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"></path>
 						</svg>
 					</label>
 					<input type="file" id={ chatFileInputID(config.FormID) } multiple class="hidden"/>
 					<!-- Speech-to-text microphone button -->
-					<button type="button" id={ config.FormID + "-mic-btn" } class="btn btn-ghost btn-sm rounded-full min-h-0 h-8 w-8 p-0 flex-shrink-0 opacity-50 hover:opacity-100 hover:bg-base-300 stt-btn" title="Speech to text" aria-label="Start speech to text">
+					<button type="button" id={ config.FormID + "-mic-btn" } class="btn btn-ghost btn-sm rounded-full min-h-0 h-8 w-8 p-0 flex-shrink-0 opacity-50 hover:opacity-100 hover:bg-base-300 stt-btn" data-tooltip-disabled aria-label="Start speech to text">
 						<!-- Mic icon (shown when not recording) -->
 						<svg class="stt-mic-icon h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
 							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"></path>
@@ -4600,6 +4600,7 @@ templ ChatAutoScrollScript() {
 		// Generate a stable key for a container to persist thinking and tool-row
 		// states across rerenders and morph replacement. Prefer execution identity.
 		function _thinkingStateKey(container) {
+			if (container._chatStreamStateKey) return container._chatStreamStateKey;
 			if (container.id) return container.id;
 			var executionPair = container.closest && container.closest('[data-execution-pair="true"][data-exec-id]');
 			var executionID = executionPair && executionPair.getAttribute('data-exec-id');
@@ -4751,6 +4752,20 @@ templ ChatAutoScrollScript() {
 				var container = liveRequest && liveRequest.container;
 				if (!container || container._activeLiveChatRender !== liveRequest) return;
 				container._activeLiveChatRender = null;
+				if (container._incrementalChat) {
+					container._incrementalChat.generation++;
+					var tail = container._incrementalChat.tail;
+					tail._streamRenderVersion = (tail._streamRenderVersion || 0) + 1;
+					if (tail._codeRangeWorkerState && tail._codeRangeWorkerState.finish) tail._codeRangeWorkerState.finish(null);
+					if (tail._markdownWorkerState) {
+						var work = tail._markdownWorkerState;
+						work.cancelled = true;
+						clearTimeout(work.fallbackTimer);
+						work.worker.terminate();
+						work.resolve(null);
+						tail._markdownWorkerState = null;
+					}
+				}
 				container._streamRenderVersion = (container._streamRenderVersion || 0) + 1;
 				if (container._codeRangeWorkerState && container._codeRangeWorkerState.finish) container._codeRangeWorkerState.finish(null);
 				if (container._markdownWorkerState) {
@@ -4770,7 +4785,137 @@ templ ChatAutoScrollScript() {
 					});
 				}
 			};
-			window.renderLiveChatContent = function(container, textBuffer, yieldBetweenBatches) {
+			// Normalize provider-specific tool aliases to canonical IDs so
+			// [Using tool: X] can be linked with [Tool X done] across providers.
+			var normalizedToolNames = {
+				'Read': 'read_file',
+				'Write': 'write_file',
+				'Edit': 'edit_file',
+				'Bash': 'bash',
+				'Grep': 'grep_search',
+				'Glob': 'list_files',
+				'List Files': 'list_files',
+				'Search': 'grep_search',
+				'WebSearch': 'web_search',
+				'web.run': 'web_search',
+				'WebFetch': 'web_fetch',
+				'web_search_20250305': 'web_search',
+				'web_search_20260209': 'web_search',
+				'web_fetch_20250910': 'web_fetch',
+				'web_fetch_20260209': 'web_fetch',
+				'web_fetch_20260309': 'web_fetch'
+			};
+			window.normalizeStreamingToolName = function(raw) {
+				if (!raw) return raw;
+				return normalizedToolNames[raw] || raw;
+			};
+			// Commit only independently renderable transcript sections. Everything after
+			// the boundary remains provisional (including open fences and tool calls).
+			window.chatStreamStableBoundary = function(text, preparedRanges) {
+				if (text.length < 8192) return 0;
+				// Legacy XML controls can span Markdown blocks; reconcile them as one tail.
+				if (/<\s*\/?\s*thinking\s*>|<parameter\s/i.test(text)) return 0;
+				var ranges = preparedRanges || (window.codeRanges ? window.codeRanges(text) : []);
+				var controls = /^[\t ]*\[(Thinking|\/Thinking|Using tool:[^\]\r\n]+|Tool [^\]\r\n]+|\/Tool|Compaction [^\]\r\n]+)\][\t ]*(?=\r?$)/gm;
+				var thinking = false, tool = false, pending = 0, compaction = false;
+				var calls = Object.create(null), resultName = '';
+				function completeTool(name) {
+					if (calls[name]) { calls[name]--; pending--; }
+				}
+				var boundary = 0, match, rangeIndex = 0, hasControls = false, proseStart = 0;
+				while ((match = controls.exec(text)) !== null) {
+					while (rangeIndex < ranges.length && ranges[rangeIndex].end <= match.index) rangeIndex++;
+					if (!tool && rangeIndex < ranges.length && ranges[rangeIndex].start <= match.index) continue;
+					hasControls = true;
+					var control = match[1];
+					if (tool) {
+						if (control === '/Tool') { tool = false; completeTool(resultName); proseStart = controls.lastIndex; }
+						continue;
+					}
+					if (thinking) { if (control === '/Thinking') { thinking = false; proseStart = controls.lastIndex; } continue; }
+					// A marker ends the preceding Markdown section in the full renderer too.
+					// Keep adjacent thinking sections together until substantive text follows.
+					if (!pending && !compaction && (control === 'Thinking' || control.indexOf('Using tool:') === 0) &&
+						match.index >= 8192 && text.slice(0, match.index).trim().length &&
+						!/\[\/Thinking\]\s*$/.test(text.slice(0, match.index))) boundary = match.index;
+					if (control === 'Thinking') thinking = true;
+					else if (control.indexOf('Using tool:') === 0) {
+						var name = window.normalizeStreamingToolName(control.slice(11).trim().split(' | ')[0]);
+						calls[name] = (calls[name] || 0) + 1;
+						pending++;
+					} else if (/^Tool \S+ (done|error)(:|$)/.test(control)) {
+						resultName = window.normalizeStreamingToolName(control.split(' ')[1]);
+						if (/^Tool \S+ (done|error)$/.test(control)) tool = true;
+						else { completeTool(resultName); proseStart = controls.lastIndex; }
+					}
+					else if (control.indexOf('Compaction started') === 0) compaction = true;
+					else if (control.indexOf('Compaction ') === 0) { compaction = false; proseStart = controls.lastIndex; }
+				}
+				// After closed controls, advance through subsequent prose as well. Keep
+				// short interstitial text with thinking because the full renderer merges it.
+				// Marked's top-level tokens keep lists,
+				// tables, blockquotes and fences intact. Retain the final non-space token
+				// so a following line can still extend it. References reconcile at finish.
+				if ((!hasControls || (!thinking && !tool && !pending && !compaction && proseStart > 0)) && window.marked && window.marked.lexer) {
+					// Bound synchronous lexing when resuming a large prose-only response.
+					var tokens = window.marked.lexer(text.slice(proseStart, proseStart + 64 * 1024)), offset = proseStart, lastBlock = proseStart;
+					tokens.forEach(function(token) {
+						if (token.type !== 'space') lastBlock = offset;
+						offset += token.raw.length;
+					});
+					if (lastBlock >= 8192 && (!hasControls || text.slice(proseStart, lastBlock).trim().length >= 100) && !ranges.some(function(range) { return range.start < lastBlock && range.end > lastBlock; })) boundary = lastBlock;
+				}
+				return boundary;
+			};
+			window.renderIncrementalChatContent = async function(container, text, yieldBetweenBatches) {
+				container.classList.remove('whitespace-pre-wrap');
+				var state = container._incrementalChat;
+				if (!state || state.tail.parentNode !== container || !text.startsWith(state.source)) {
+					var tail = document.createElement('div');
+					tail.style.display = 'contents';
+					while (container.firstChild) tail.appendChild(container.firstChild);
+					container.replaceChildren(tail);
+					state = { source: '', offset: 0, renderOffset: 0, ordinal: 0, tail: tail, generation: 0 };
+					container._incrementalChat = state;
+				}
+				var generation = ++state.generation;
+				state.source = text;
+				var suffix = text.slice(state.offset);
+				var ranges;
+				if (suffix.length >= 64 * 1024 && yieldBetweenBatches !== false && window.codeRangesAsync) {
+					ranges = await window.codeRangesAsync(suffix, state.tail);
+					if (container._incrementalChat !== state || state.generation !== generation) return false;
+				}
+				var boundary = ranges === null ? 0 : window.chatStreamStableBoundary(suffix, ranges);
+				state.tail._chatStreamStateKey = _thinkingStateKey(container) + ':tail:' + state.offset;
+				state.tail._chatToolStateKey = _thinkingStateKey(container);
+				state.tail._chatThinkingOwner = container;
+				// Hydration may have rendered sections beyond the boundary into this tail.
+				// Snapshot them before replacing it with only the committed prefix.
+				var thinkingStates = boundary ? Array.from(state.tail.querySelectorAll('details.stream-thinking'), function(d) { return d.open; }) : [];
+				var options = { offset: state.renderOffset, ordinal: state.ordinal };
+				var rendered = await window.renderStreamingContent(state.tail, boundary ? suffix.slice(0, boundary) : suffix, yieldBetweenBatches, options);
+				if (rendered === false || container._incrementalChat !== state || state.generation !== generation) return false;
+				if (boundary) {
+					var remainingThinkingStates = thinkingStates.slice(state.tail.querySelectorAll('details.stream-thinking').length);
+					// Compaction activities share the styling class but are not tool calls.
+					state.ordinal += state.tail.querySelectorAll('.stream-tool[data-tool-render-id]').length;
+					state.offset += boundary;
+					state.renderOffset += (state.tail.getAttribute('data-raw-content') || '').length;
+					state.tail.removeAttribute('data-raw-content');
+					state.tail.removeAttribute('data-raw-revision');
+					state.tail = document.createElement('div');
+					state.tail.style.display = 'contents';
+					container.appendChild(state.tail);
+					state.tail._chatStreamStateKey = _thinkingStateKey(container) + ':tail:' + state.offset;
+					state.tail._chatToolStateKey = _thinkingStateKey(container);
+					state.tail._chatThinkingOwner = container;
+					if (remainingThinkingStates.length) window._thinkingOpenStates[state.tail._chatStreamStateKey] = remainingThinkingStates;
+					rendered = await window.renderStreamingContent(state.tail, suffix.slice(boundary), yieldBetweenBatches, { offset: state.renderOffset, ordinal: state.ordinal });
+				}
+				return rendered !== false && container._incrementalChat === state && state.generation === generation;
+			};
+			window.renderLiveChatContent = function(container, textBuffer, yieldBetweenBatches, final) {
 				var renderRevision = window.setChatRawContent ? window.setChatRawContent(container, textBuffer || '') : (textBuffer || '');
 				window._liveChatRenderActive = (window._liveChatRenderActive || 0) + 1;
 				if (!window._liveChatRenderRequests) window._liveChatRenderRequests = new Set();
@@ -4827,7 +4972,15 @@ templ ChatAutoScrollScript() {
 				window._liveChatRenderRequests.add(liveRequest);
 				var renderPromise;
 				try {
-					renderPromise = window.renderStreamingContent(container, textBuffer, yieldBetweenBatches);
+					var pair = container.closest('[data-exec-status]');
+					var terminal = final || Object.prototype.hasOwnProperty.call(container, '_authoritativeTerminalContent') ||
+						(pair && /^(completed|failed|cancelled)$/.test(pair.getAttribute('data-exec-status')));
+					if (terminal) {
+						delete container._incrementalChat;
+						renderPromise = window.renderStreamingContent(container, textBuffer, yieldBetweenBatches);
+					} else {
+						renderPromise = window.renderIncrementalChatContent(container, textBuffer || '', yieldBetweenBatches);
+					}
 				} catch (err) {
 					finishLiveRender(false, err);
 					return outerPromise;
@@ -4864,13 +5017,13 @@ templ ChatAutoScrollScript() {
 				return promise;
 			};
 
-			window.linkStreamingToolResults = function(segments) {
+			window.linkStreamingToolResults = function(segments, options) {
 				var toolUseQueues = Object.create(null);
-				var toolRenderOrdinal = 0;
+				var toolRenderOrdinal = options ? options.ordinal : 0;
 				for (var si = 0; si < segments.length; si++) {
 					if (segments[si].type === 'using') {
 						var usingName = segments[si].normalizedName || segments[si].name;
-						segments[si].toolRenderID = 'tool-' + segments[si].index + '-' + toolRenderOrdinal++;
+						segments[si].toolRenderID = 'tool-' + (segments[si].index + (options ? options.offset : 0)) + '-' + toolRenderOrdinal++;
 						if (!toolUseQueues[usingName]) toolUseQueues[usingName] = { calls: [], next: 0 };
 						toolUseQueues[usingName].calls.push(segments[si]);
 						continue;
@@ -4901,7 +5054,9 @@ templ ChatAutoScrollScript() {
 				return true;
 			};
 
-			window.renderStreamingContent = function(container, textBuffer, yieldBetweenBatches) {
+			window.renderStreamingContent = function(container, textBuffer, yieldBetweenBatches, options) {
+				// Live callers also pass a terminal boolean when this is their fallback.
+				if (!options || typeof options !== 'object') options = null;
 				var renderVersion = (container._streamRenderVersion || 0) + 1;
 				container._streamRenderVersion = renderVersion;
 				textBuffer = textBuffer || '';
@@ -4913,32 +5068,9 @@ templ ChatAutoScrollScript() {
 				'web_search': 'Web Search', 'web.run': 'Web Search', 'web_fetch': 'Web Fetch',
 				'code_execution': 'Code Execution', 'bash_code_execution': 'Bash Code Execution'
 			};
-			// Normalize provider-specific tool aliases to canonical IDs so
-			// [Using tool: X] can be linked with [Tool X done] across providers.
-			var normalizedToolNames = {
-				'Read': 'read_file',
-				'Write': 'write_file',
-				'Edit': 'edit_file',
-				'Bash': 'bash',
-				'Grep': 'grep_search',
-				'Glob': 'list_files',
-				'List Files': 'list_files',
-				'Search': 'grep_search',
-				'WebSearch': 'web_search',
-				'web.run': 'web_search',
-				'WebFetch': 'web_fetch',
-				'web_search_20250305': 'web_search',
-				'web_search_20260209': 'web_search',
-				'web_fetch_20250910': 'web_fetch',
-				'web_fetch_20260209': 'web_fetch',
-				'web_fetch_20260309': 'web_fetch'
-			};
-			function normalizeToolName(raw) {
-				if (!raw) return raw;
-				return normalizedToolNames[raw] || raw;
-			}
+
 			function toolDisplayName(raw) {
-				var normalized = normalizeToolName(raw);
+				var normalized = window.normalizeStreamingToolName(raw);
 				return displayNames[normalized] || displayNames[raw] || raw;
 			}
 
@@ -5084,7 +5216,7 @@ templ ChatAutoScrollScript() {
 					var pipeIdx = raw.indexOf(' | ');
 					var toolName = pipeIdx >= 0 ? raw.substring(0, pipeIdx) : raw;
 							var toolSecondary = pipeIdx >= 0 ? raw.substring(pipeIdx + 3) : '';
-							allMatches.push({ index: match.index, length: match[0].length, type: 'using', name: toolName, normalizedName: normalizeToolName(toolName), secondary: toolSecondary });
+							allMatches.push({ index: match.index, length: match[0].length, type: 'using', name: toolName, normalizedName: window.normalizeStreamingToolName(toolName), secondary: toolSecondary });
 							if (preparationBudgetExpired(startedAt, processed)) return false;
 						}
 						return true;
@@ -5099,7 +5231,7 @@ templ ChatAutoScrollScript() {
 								if (preparationBudgetExpired(startedAt, processed)) return false;
 							continue;
 							}
-							allMatches.push({ index: match.index, length: match[0].length, type: 'tool_result', name: match[1], normalizedName: normalizeToolName(match[1]), status: match[2], output: match[3] });
+							allMatches.push({ index: match.index, length: match[0].length, type: 'tool_result', name: match[1], normalizedName: window.normalizeStreamingToolName(match[1]), status: match[2], output: match[3] });
 							if (preparationBudgetExpired(startedAt, processed)) return false;
 						}
 						return true;
@@ -5116,7 +5248,7 @@ templ ChatAutoScrollScript() {
 					}
 					var dominated = allMatches.some(function(m) { return m.index <= match.index && m.index + m.length >= match.index + match[0].length; });
 					if (!dominated) {
-								allMatches.push({ index: match.index, length: match[0].length, type: 'tool_result', name: match[1], normalizedName: normalizeToolName(match[1]), status: match[2], output: match[3] });
+								allMatches.push({ index: match.index, length: match[0].length, type: 'tool_result', name: match[1], normalizedName: window.normalizeStreamingToolName(match[1]), status: match[2], output: match[3] });
 							}
 							if (preparationBudgetExpired(startedAt, processed)) return false;
 						}
@@ -5226,7 +5358,7 @@ templ ChatAutoScrollScript() {
 						return true;
 					}
 					function linkToolResults() {
-						return window.linkStreamingToolResults(segments);
+						return window.linkStreamingToolResults(segments, options);
 					}
 				var preparationPhases = [
 						prepareInitialCodeRanges,
@@ -5252,6 +5384,19 @@ templ ChatAutoScrollScript() {
 			// Uses both a local array (fast path for same-call re-renders) and a
 			// persistent window._thinkingOpenStates map (survives morph:outerHTML DOM replacement).
 			var containerKey = _thinkingStateKey(container);
+			var toolContainerKey = container._chatToolStateKey || containerKey;
+			// Tail-local indexes support incremental rerenders. Also keep the complete
+			// bubble snapshot for server-markup hydration after a morph.
+			function persistThinkingStates() {
+				if (!container.isConnected) return;
+				var states = Array.from(container.querySelectorAll('details.stream-thinking'), function(d) { return d.open; });
+				if (containerKey && states.length) window._thinkingOpenStates[containerKey] = states;
+				var owner = container._chatThinkingOwner;
+				if (owner && owner.contains(container)) {
+					var ownerKey = _thinkingStateKey(owner);
+					if (ownerKey) window._thinkingOpenStates[ownerKey] = Array.from(owner.querySelectorAll('details.stream-thinking'), function(d) { return d.open; });
+				}
+			}
 			var prevThinkingStates = [];
 			container.querySelectorAll('details.stream-thinking').forEach(function(d) {
 					prevThinkingStates.push(d.open);
@@ -5268,7 +5413,7 @@ templ ChatAutoScrollScript() {
 				var pinned = el.getAttribute('data-scroll-pinned') !== 'false';
 				var scrollState = { scrollTop: el.scrollTop || 0, pinned: pinned };
 				prevToolBodyScrollStates[toolID + ':' + rowKind] = scrollState;
-				var persistentStateKey = (containerKey || 'chat') + ':' + toolID + ':' + rowKind;
+				var persistentStateKey = (toolContainerKey || 'chat') + ':' + toolID + ':' + rowKind;
 				var persistentState = window._toolOutputRowStates[persistentStateKey] || {};
 				persistentState.scrollTop = scrollState.scrollTop;
 				persistentState.pinned = scrollState.pinned;
@@ -5303,14 +5448,7 @@ templ ChatAutoScrollScript() {
 				var details = document.createElement('details');
 				details.className = 'stream-thinking';
 				// Update persistent store when user toggles thinking section
-				details.addEventListener('toggle', function() {
-					if (!containerKey) return;
-					var states = [];
-				container.querySelectorAll('details.stream-thinking').forEach(function(d) {
-						states.push(d.open);
-					});
-					window._thinkingOpenStates[containerKey] = states;
-				});
+				details.addEventListener('toggle', persistThinkingStates);
 				var summary = document.createElement('summary');
 				summary.innerHTML = chevronSvg + '<span>Thinking\u2026</span>';
 				var body = document.createElement('div');
@@ -5418,7 +5556,7 @@ templ ChatAutoScrollScript() {
 				var inContent = '';
 				var dn = toolDisplayName(seg.name);
 				function rowStateKey(rowKind) {
-					return (containerKey || 'chat') + ':' + (seg.toolRenderID || '') + ':' + rowKind;
+					return (toolContainerKey || 'chat') + ':' + (seg.toolRenderID || '') + ':' + rowKind;
 				}
 				function trackScrollPin(el, stateKey) {
 					el.setAttribute('data-scroll-pinned', 'true');
@@ -5445,7 +5583,7 @@ templ ChatAutoScrollScript() {
 
 				var outputText = seg.resultOutput ? seg.resultOutput.trim() : '';
 				var webSearchSources = [];
-				if (normalizeToolName(seg.name) === 'web_search' && outputText.indexOf('web-search-json:') === 0) {
+				if (window.normalizeStreamingToolName(seg.name) === 'web_search' && outputText.indexOf('web-search-json:') === 0) {
 					try {
 						var encodedPayload = outputText.substring('web-search-json:'.length).replace(/-/g, '+').replace(/_/g, '/');
 						while (encodedPayload.length % 4) encodedPayload += '=';
@@ -5747,23 +5885,14 @@ templ ChatAutoScrollScript() {
 					}
 				}
 			}
-			// Persist current states to window store (update after restoring so new sections are tracked)
-			if (containerKey) {
-				var currentStates = [];
-			container.querySelectorAll('details.stream-thinking').forEach(function(d) {
-					currentStates.push(d.open);
-				});
-				if (currentStates.length > 0) {
-					window._thinkingOpenStates[containerKey] = currentStates;
-				}
-			}
+			persistThinkingStates();
 
 			// Restore per-tool output scroll positions without synchronously measuring
 			// every tool body. CSS overflow:auto handles non-overflowing bodies.
 			container.querySelectorAll('.stream-tool-body-scroll').forEach(function(el) {
 				var toolID = el.getAttribute('data-tool-render-id') || '';
 				var rowKind = el.getAttribute('data-tool-row') || '';
-				var state = prevToolBodyScrollStates[toolID + ':' + rowKind] || window._toolOutputRowStates[(containerKey || 'chat') + ':' + toolID + ':' + rowKind];
+				var state = prevToolBodyScrollStates[toolID + ':' + rowKind] || window._toolOutputRowStates[(toolContainerKey || 'chat') + ':' + toolID + ':' + rowKind];
 				if (!state || state.pinned) {
 					el.scrollTop = Number.MAX_SAFE_INTEGER;
 					el.setAttribute('data-scroll-pinned', 'true');
@@ -5774,10 +5903,10 @@ templ ChatAutoScrollScript() {
 			});
 			// Convert [TASK_ID:xxx] references to clickable links after rendering
 			if (window.convertTaskLinksInMessage) {
-				window.convertTaskLinksInMessage(container.closest('.chat-bubble-assistant-msg') || container);
+				window.convertTaskLinksInMessage(options ? container : (container.closest('.chat-bubble-assistant-msg') || container));
 			}
 			if (window.convertTaskEditLinksInMessage) {
-				window.convertTaskEditLinksInMessage(container.closest('.chat-bubble-assistant-msg') || container);
+				window.convertTaskEditLinksInMessage(options ? container : (container.closest('.chat-bubble-assistant-msg') || container));
 			}
 			}
 				function fillLargeToolOutputChunks(done, fail) {

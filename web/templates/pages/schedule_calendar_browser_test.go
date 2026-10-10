@@ -66,13 +66,16 @@ func testScheduleCalendarHeader(t *testing.T, paused, mobile bool) {
    var modifier=/Mac|iPhone|iPad|iPod/.test(navigator.platform)?'Command':'Ctrl';
    check(root.querySelector('[data-calendar-action="pause_all"]').textContent==='Pause all' && root.querySelector('[data-calendar-action="resume_all"]').textContent==='Resume all','project menu uses concise labels');
    var hintCard=root.querySelector('[data-schedule-card][data-has-schedule="true"]');
-   check(!hintCard.title.includes(hintCard.dataset.scheduleTitle) && hintCard.title.split('\n').length===2 && hintCard.title===modifier+'+click to select schedule(s)\nRight-click for actions','card hover only shows commands on separate lines');
+   check(!hintCard.dataset.ovTooltip.includes(hintCard.dataset.scheduleTitle) && hintCard.dataset.ovTooltip.split('\n').length===2 && hintCard.dataset.ovTooltip==='Select schedules ('+modifier+'+click)\nMore actions (Right-click)','card hover only shows commands on separate lines');
    check(hintCard.getAttribute('aria-description').includes(modifier+'+click'),'card selection hint available to assistive technology');
-   check(root.querySelector('[data-calendar-day]').title==='Click to select or deselect a day\n'+modifier+'+click to select day(s)\nClick and drag across header to select days','day hover uses one line per command');
+   check(root.querySelector('[data-calendar-day]').dataset.ovTooltip==='Select or deselect a day (Click)\nSelect multiple days ('+modifier+'+click)\nSelect days across headers (Click and drag)','day hover uses one line per command');
    check(!root.querySelector('#schedule-day-menu'),'day headers have no custom context menu');
-   check(root.querySelector('.drop-zone').title==='Drag empty space to select schedule(s)','calendar space explains box selection');
-   check(toolbar.querySelector('[data-calendar-action="clear"]').title==='Clear selection (Esc)','clear hover explains escape shortcut');
+   check(root.querySelector('.drop-zone').dataset.ovTooltip==='Select schedules (Drag empty space)','calendar space explains box selection');
+   check(toolbar.querySelector('[data-calendar-action="clear"]').dataset.ovTooltip==='Clear selection (Esc)','clear hover explains escape shortcut');
 
+   hintCard.dispatchEvent(new PointerEvent('pointerover',{bubbles:true}));
+   check(document.querySelector('#ov-shared-tooltip kbd').textContent===modifier+'+click','schedule hints use shared key badge');
+   window.openVibelyTooltip.close();
    var menu=root.querySelector('#schedule-project-menu');
    function checkHeaderAlignment() {
     var top=pageHeader.getBoundingClientRect().top+parseFloat(getComputedStyle(pageHeader).paddingTop);
@@ -106,7 +109,7 @@ func testScheduleCalendarHeader(t *testing.T, paused, mobile bool) {
    function count(){return root.querySelectorAll('[data-calendar-day][aria-pressed="true"]').length;}
    var initialHeaderTop=days[1].getBoundingClientRect().top;
    check(root.querySelector('.drop-zone[data-date="'+days[0].dataset.calendarDay+'"][data-hour="23"] [data-schedule-id="between-runs"]').dataset.skipStatus==='none','pause between actual hourly runs does not mark the block skipped');
-   down(days[0]);up();
+   down(days[0]);days[1].dispatchEvent(new PointerEvent('pointerover',{bubbles:true,buttons:1}));check(document.getElementById('ov-shared-tooltip').hidden,'day drag suppresses tooltip across headers');up();
    check(!toolbar.querySelector('[data-calendar-action="skip"]').hidden && toolbar.querySelector('[data-calendar-action="restore"]').hidden,'untouched day offers only skip');
    down(days[0]);up();
    check(count()===0 && getComputedStyle(toolbar).display==='none','second click deselects day and hides toolbar');
@@ -175,6 +178,8 @@ func testScheduleCalendarHeader(t *testing.T, paused, mobile bool) {
    clearScheduleSelection();
    a.dispatchEvent(new MouseEvent('click',{bubbles:true,ctrlKey:true}));b.dispatchEvent(new MouseEvent('click',{bubbles:true,ctrlKey:true}));
    a.dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:300,clientY:200}));
+   b.dispatchEvent(new PointerEvent('pointerover',{bubbles:true}));check(document.getElementById('ov-shared-tooltip').hidden,'context menu suppresses other card hints');
+   root.querySelector('.drop-zone').dispatchEvent(new PointerEvent('pointerover',{bubbles:true}));check(document.getElementById('ov-shared-tooltip').hidden,'context menu suppresses empty cell hints');
    check(selectedScheduleCards.size===2,'right click must preserve multi-selection');
    check(getComputedStyle(toolbar).display==='none' && toolbar.inert,'context menu hides and disables header controls for multiple cards');
    document.body.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,button:0}));
