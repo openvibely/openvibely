@@ -949,6 +949,9 @@ func (r *LLMConfigRepo) Create(ctx context.Context, a *models.LLMConfig) error {
 	if err != nil {
 		return fmt.Errorf("creating model config: %w", err)
 	}
+	if err := applyPendingModelOAuthTx(ctx, tx, a); err != nil {
+		return err
+	}
 	if err := r.ensureDefaultModelTx(ctx, tx); err != nil {
 		return err
 	}
@@ -1033,6 +1036,9 @@ func (r *LLMConfigRepo) Update(ctx context.Context, a *models.LLMConfig) error {
 		nullStringArg(a.OAuthConnectionID), a.ID)
 	if err != nil {
 		return fmt.Errorf("updating model config: %w", err)
+	}
+	if err := applyPendingModelOAuthTx(ctx, tx, a); err != nil {
+		return err
 	}
 	if err := r.ensureDefaultModelTx(ctx, tx); err != nil {
 		return err
