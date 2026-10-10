@@ -608,8 +608,8 @@
   }
   function init(btn) {
     const apple = usesAppleShortcuts();
-    btn.setAttribute("aria-keyshortcuts", apple ? "Meta+Shift+M" : "Control+Shift+M");
-    btn.title = apple ? "Models (⌘⇧M)" : "Models (Ctrl+Shift+M)";
+    btn.setAttribute("aria-keyshortcuts", apple ? "Meta+M" : "Control+M");
+    btn.title = apple ? "Models (⌘M)" : "Models (Ctrl+M)";
     if (state(btn)) return;
     const form = btn.closest("form"),
       project = form.querySelector('[name="_project_id"]')?.value || "",
@@ -740,7 +740,7 @@
       if (
         !e.defaultPrevented && !e.isComposing && !e.repeat &&
         (usesAppleShortcuts() ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey) &&
-        e.shiftKey && !e.altKey &&
+        !e.shiftKey && !e.altKey &&
         e.key.toLowerCase() === "m"
       ) {
         const buttons = [...document.querySelectorAll("form.chat-input-container .chat-model-select")];
