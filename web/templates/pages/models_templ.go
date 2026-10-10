@@ -704,7 +704,7 @@ func modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, o
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 9, "<div data-page-header class=\"flex items-center justify-between mb-6\"><h2 class=\"text-2xl font-bold\">Models</h2><button class=\"btn btn-ghost btn-sm btn-square\" aria-label=\"Add Model\" data-tooltip-disabled onclick=\"openNewModelModal()\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 9, "<div data-page-header class=\"flex items-center justify-between mb-6\"><h2 class=\"text-2xl font-bold\">Models</h2><button class=\"sidebar-toggle-btn btn btn-ghost btn-sm btn-square\" aria-label=\"Add Model\" data-tooltip-disabled onclick=\"openNewModelModal()\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -725,7 +725,7 @@ func modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, o
 			return templ_7745c5c3_Err
 		}
 		if len(agents) == 0 {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 12, "<div class=\"text-center py-12\" data-search-empty-state><p class=\"opacity-50 mb-4\">No models configured yet. Add one to start executing tasks.</p><button class=\"btn btn-ghost btn-sm btn-square\" aria-label=\"Configure Model\" data-tooltip-disabled onclick=\"openNewModelModal()\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 12, "<div class=\"text-center py-12\" data-search-empty-state><p class=\"opacity-50 mb-4\">No models configured yet. Add one to start executing tasks.</p><button class=\"sidebar-toggle-btn btn btn-ghost btn-sm btn-square\" aria-label=\"Configure Model\" data-tooltip-disabled onclick=\"openNewModelModal()\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
