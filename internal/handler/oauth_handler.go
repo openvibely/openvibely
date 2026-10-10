@@ -729,6 +729,9 @@ func (h *Handler) exchangeOAuthCodeAndSaveTokens(flow *oauthPendingFlow, code, s
 		}
 	}
 
+	if flow.SetupID != "" {
+		return expiresAt, h.finishModelOAuthSetup(flow.SetupID, tokenResult.AccessToken, tokenResult.RefreshToken, expiresAt, "", accountID)
+	}
 	bgCtx := context.Background()
 	var updated bool
 	if flow.ConnectionID != "" {

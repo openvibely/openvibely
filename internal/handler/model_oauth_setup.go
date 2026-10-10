@@ -51,7 +51,14 @@ func (h *Handler) modelOAuthSetupConfig(key string, connected bool) (*models.LLM
 
 func (h *Handler) BeginModelOAuthSetup(c echo.Context) error {
 	c.Request().Body = http.MaxBytesReader(c.Response(), c.Request().Body, 1<<20)
-	config := &models.LLMConfig{Provider: models.ProviderOpenAICompatible, AuthMethod: models.AuthMethodOAuth}
+	provider, auth := resolveProviderAndAuth(c.FormValue("provider"), c.FormValue("anthropic_auth_type"), c.FormValue("openai_auth_type"), c.FormValue("auth_method"))
+	if provider == models.ProviderOpenAICompatible {
+		auth = models.AuthMethod(c.FormValue("custom_auth_method"))
+	}
+	if auth != models.AuthMethodOAuth || (provider != models.ProviderOpenAI && provider != models.ProviderAnthropic && provider != models.ProviderOpenAICompatible) {
+		return echo.NewHTTPError(http.StatusBadRequest, "Select an OAuth provider first.")
+	}
+	config := &models.LLMConfig{Provider: provider, AuthMethod: auth}
 	mode := modelFormCreate
 	targetID := strings.TrimSpace(c.FormValue("model_config_id"))
 	if targetID != "" {
@@ -62,7 +69,7 @@ func (h *Handler) BeginModelOAuthSetup(c echo.Context) error {
 		if saved == nil {
 			return echo.NewHTTPError(http.StatusNotFound, "Model not found")
 		}
-		if saved.Provider == models.ProviderOpenAICompatible && saved.AuthMethod == models.AuthMethodOAuth && saved.PresetSlug == "custom" {
+		if saved.Provider == provider && saved.AuthMethod == models.AuthMethodOAuth {
 			*config = *saved
 			clearOAuthCredentials(config)
 			config.ID = ""
@@ -71,11 +78,13 @@ func (h *Handler) BeginModelOAuthSetup(c echo.Context) error {
 		}
 	}
 	applyModelOAuthForm(c, config, mode)
-	if err := applyOpenAICompatibleForm(c, config); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
-	}
-	if config.PresetSlug != "custom" {
-		return echo.NewHTTPError(http.StatusBadRequest, "This sign-in is for custom OAuth endpoints.")
+	if provider == models.ProviderOpenAICompatible {
+		if err := applyOpenAICompatibleForm(c, config); err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		}
+		if config.PresetSlug != "custom" {
+			return echo.NewHTTPError(http.StatusBadRequest, "This sign-in is for custom OAuth endpoints.")
+		}
 	}
 	keyBytes := make([]byte, 32)
 	if _, err := rand.Read(keyBytes); err != nil {
@@ -135,10 +144,16 @@ func (h *Handler) attachModelOAuthSetup(c echo.Context, config *models.LLMConfig
 	if !matchesTarget {
 		return "", echo.NewHTTPError(http.StatusConflict, "Sign-in belongs to a different model configuration.")
 	}
-	if config.Provider != models.ProviderOpenAICompatible || config.AuthMethod != models.AuthMethodOAuth || config.PresetSlug != "custom" ||
+	if config.Provider != signedIn.Provider || config.AuthMethod != models.AuthMethodOAuth ||
 		oauthSecurityConfigChanged(*signedIn, *config) || signedIn.ExtraHeadersJSON != config.ExtraHeadersJSON {
 		return "", echo.NewHTTPError(http.StatusConflict, "Connection settings changed. Connect OAuth again before saving the model.")
 	}
+	if config.Provider == models.ProviderOpenAI || config.Provider == models.ProviderAnthropic {
+		// A draft authorization belongs to this model only until explicitly saved.
+		config.OAuthConnectionID = ""
+		config.OAuthConfigRevision = 0
+	}
+	config.OAuthAccountID = signedIn.OAuthAccountID
 	config.OAuthAccessToken = signedIn.OAuthAccessToken
 	config.OAuthRefreshToken = signedIn.OAuthRefreshToken
 	config.OAuthExpiresAt = signedIn.OAuthExpiresAt
@@ -147,7 +162,7 @@ func (h *Handler) attachModelOAuthSetup(c echo.Context, config *models.LLMConfig
 	return key, nil
 }
 
-func (h *Handler) finishModelOAuthSetup(key, access, refresh string, expires int64, state string) error {
+func (h *Handler) finishModelOAuthSetup(key, access, refresh string, expires int64, state string, accountID ...string) error {
 	modelOAuthSetups.Lock()
 	defer modelOAuthSetups.Unlock()
 	session := modelOAuthSetups.sessions[key]
@@ -158,6 +173,9 @@ func (h *Handler) finishModelOAuthSetup(key, access, refresh string, expires int
 	session.config.OAuthRefreshToken = refresh
 	session.config.OAuthExpiresAt = expires
 	session.config.CustomAuthStateJSON = state
+	if len(accountID) > 0 {
+		session.config.OAuthAccountID = accountID[0]
+	}
 	return nil
 }
 
