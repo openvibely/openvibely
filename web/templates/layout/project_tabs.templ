@@ -172,6 +172,7 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
    var select = document.getElementById('project-selector');
    var list = document.getElementById('desktop-project-tabs');
    var menu = document.getElementById('project-tab-menu');
+   var projectTabShortcut = (bar.dataset.platform === 'darwin' || (bar.dataset.platform === 'web' && /Mac|iPhone|iPad/.test(navigator.platform))) ? '⌘⇧←/→' : 'Ctrl+Shift+←/→';
    if (typeof menu.showPopover !== 'function') menu.removeAttribute('popover');
    function closeMenu() {
     if (typeof menu.hidePopover === 'function') menu.hidePopover();
@@ -264,6 +265,7 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
     var active = select.value;
  if (active && !ids.includes(active) && active !== closedActive) { ids.push(active); saveTabs(); render(); return; }
     list.querySelectorAll('[data-project-tab]').forEach(function(tab, index) {
+     tab.dataset.ovTooltip = 'Previous/next project (' + projectTabShortcut + ')';
      tab.setAttribute('aria-selected', String(tab.dataset.projectTab === active));
      tab.parentElement.dataset.selected = String(tab.dataset.projectTab === active);
      tab.tabIndex = tab.dataset.projectTab === active || (ids.indexOf(active) === -1 && index === 0) ? 0 : -1;
