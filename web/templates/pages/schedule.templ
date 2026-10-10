@@ -935,10 +935,11 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
                                     menuCard = anchor;
                                     menu.setAttribute('aria-label', 'Selected dates or hours');
                                     if (window.updateScheduleSelection) window.updateScheduleSelection();
+                                    var first = menu.querySelector('[role="menuitem"]:not([hidden]):not([disabled])');
+                                    if (!first) { menuCard = null; return; }
                                     positionMenu(event);
                                     if (window.updateScheduleSelection) window.updateScheduleSelection();
-                                    var first = menu.querySelector('[role="menuitem"]:not([hidden]):not([disabled])');
-                                    if (first) first.focus({preventScroll: true});
+                                    first.focus({preventScroll: true});
                                 };
 
 								window.openScheduleContextMenu = function(event) {
