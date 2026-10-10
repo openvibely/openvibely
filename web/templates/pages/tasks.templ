@@ -627,7 +627,7 @@ templ kanbanSearch() {
 		.kanban-search[data-open="true"] .kanban-search-input { opacity:1; }
 		.kanban-search-input::-webkit-search-cancel-button { -webkit-appearance:none; appearance:none; }
 		.kanban-search-clear { flex:0 0 1.75rem; height:1.75rem; margin-right:.125rem; display:inline-flex; align-items:center; justify-content:center; border-radius:calc(var(--rounded-btn,.5rem) - .125rem); opacity:.6; transition:opacity .15s ease, background-color .15s ease; }
-		.kanban-search-clear:hover { opacity:1; background:oklch(var(--bc) / .08); }
+		@media (hover: hover) { .kanban-search-clear:hover { opacity:1; background:oklch(var(--bc) / .08); } }
 		.kanban-search-clear:focus-visible { outline:none; opacity:1; box-shadow:inset 0 0 0 2px oklch(var(--p)); }
 		.kanban-search[data-open="false"] .kanban-search-clear, .kanban-search-input:placeholder-shown + .kanban-search-clear { display:none; }
 		.kanban-search-input:not(:placeholder-shown) { padding-right:0; }
