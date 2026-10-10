@@ -121,6 +121,25 @@ func (r *LLMConfigRepo) ListOAuthConnections(ctx context.Context, provider model
 	return connections, rows.Err()
 }
 
+// OAuthConnectionRevisions snapshots account generations without reading credentials.
+func (r *LLMConfigRepo) OAuthConnectionRevisions(ctx context.Context, provider models.LLMProvider) (map[string]int64, error) {
+	rows, err := r.db.QueryContext(ctx, `SELECT id, oauth_revision FROM oauth_connections WHERE provider = ?`, provider)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	revisions := make(map[string]int64)
+	for rows.Next() {
+		var id string
+		var revision int64
+		if err := rows.Scan(&id, &revision); err != nil {
+			return nil, err
+		}
+		revisions[id] = revision
+	}
+	return revisions, rows.Err()
+}
+
 func validateOAuthConnectionLinkTx(ctx context.Context, tx SQLExecutor, connectionID string, provider models.LLMProvider) error {
 	if strings.TrimSpace(connectionID) == "" {
 		return nil
@@ -616,6 +635,39 @@ func applyPendingModelOAuthTx(ctx context.Context, tx *manualTx, cfg *models.LLM
 	}
 	if cfg.AuthMethod != models.AuthMethodOAuth || cfg.Provider != draft.Provider || (draft.ID != "" && draft.ID != cfg.OAuthConnectionID) {
 		return fmt.Errorf("OAuth account selection changed; connect OAuth again")
+	}
+	// Check every account that consolidation would replace, inside the same
+	// writer transaction as the save. A new draft's own revision cannot guard
+	// accounts authorized or refreshed since this sign-in began.
+	if principal := strings.TrimSpace(draft.PrincipalHash); principal != "" {
+		rows, err := tx.QueryContext(ctx, `SELECT id, oauth_revision FROM oauth_connections
+   WHERE provider = ? AND oauth_principal_hash = ? AND oauth_principal_verified = 1 AND id != ?`, cfg.Provider, principal, cfg.OAuthConnectionID)
+		if err != nil {
+			return err
+		}
+		stale := false
+		for rows.Next() {
+			var id string
+			var revision int64
+			if err := rows.Scan(&id, &revision); err != nil {
+				rows.Close()
+				return err
+			}
+			observed, exists := draft.ObservedRevisions[id]
+			if !exists || observed != revision {
+				stale = true
+			}
+		}
+		err = rows.Err()
+		if closeErr := rows.Close(); err == nil {
+			err = closeErr
+		}
+		if err != nil {
+			return err
+		}
+		if stale {
+			return ErrOAuthConnectionChanged
+		}
 	}
 	revision := draft.Revision
 	if draft.ID == "" {
