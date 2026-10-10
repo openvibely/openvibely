@@ -367,8 +367,8 @@ templ PersonalitySectionPageWithPaginationState(personality string, cards []Pers
 templ personalitySection(personality string, cards []PersonalityListCard, hasMore bool, state PersonalityListState) {
 		<div id="personality-section" data-selected-personality={ personality } data-search-container data-card-pagination-root data-card-pagination-url={ CardListURL("personality", personalityCardListState(state)) } data-card-pagination-list="#personality-card-list" data-card-pagination-card-selector="[data-personality-pagination-card='true']" data-card-pagination-replacement-card-selector="[data-personality-key]" data-card-pagination-key="data-personality-key" data-card-pagination-page-size="20" data-card-pagination-has-more={ cardPaginationHasMoreAttribute(hasMore) }>		<div data-page-header class="flex items-center justify-between mb-6">
 			<h2 class="text-2xl font-bold">Personality</h2>
-			<button class="btn btn-primary btn-sm" onclick="openNewPersonalityModal()">
-				+ Add Personality
+			<button class="btn btn-ghost btn-sm btn-square" aria-label="Add Personality" title="Add Personality" onclick="openNewPersonalityModal()">
+				@pageCreateIcon()
 			</button>
 		</div>
 			@CardListToolbar(personalityToolbarConfig(state))

@@ -139,7 +139,7 @@ func TestHandler_CreateCustomPersonality(t *testing.T) {
 	// Should return re-rendered personality section with the new card
 	assert.Contains(t, body, "Test Personality")
 	assert.Contains(t, body, "personality-section")
-	assert.Contains(t, body, "+ Add Personality")
+	assert.Contains(t, body, `aria-label="Add Personality"`)
 
 	got, err := repo.GetByKey(ctx, "test_personality")
 	require.NoError(t, err)
@@ -598,8 +598,8 @@ func TestHandler_PersonalityPage_HeaderAlignsAddButtonWithOtherManagementPages(t
 	assert.Contains(t, body, `data-selected-personality=""`)
 	assert.Contains(t, body, `<div data-page-header class="flex items-center justify-between mb-6">`)
 	assert.Contains(t, body, `<h2 class="text-2xl font-bold">Personality</h2>`)
-	assert.Contains(t, body, `<button class="btn btn-primary btn-sm" onclick="openNewPersonalityModal()">`)
-	assert.Contains(t, body, `+ Add Personality`)
+	assert.Contains(t, body, `<button class="btn btn-ghost btn-sm btn-square" aria-label="Add Personality" title="Add Personality" onclick="openNewPersonalityModal()">`)
+	assert.Contains(t, body, `aria-label="Add Personality"`)
 	assert.NotContains(t, body, `<div class="flex items-center justify-between mb-4">`)
 	assert.NotContains(t, body, `<div id="settings-container">`)
 	// Search input present
@@ -750,7 +750,7 @@ func TestHandler_PersonalityPage_CardRendering(t *testing.T) {
 	body := rec.Body.String()
 
 	// Add Personality button
-	assert.Contains(t, body, "+ Add Personality")
+	assert.Contains(t, body, `aria-label="Add Personality"`)
 
 	// Base card (no personality)
 	assert.Contains(t, body, "Base")

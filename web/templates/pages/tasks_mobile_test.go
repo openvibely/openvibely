@@ -22,8 +22,8 @@ func TestTasksContentHasMobileSafeShell(t *testing.T) {
 		"overflow-y-auto",
 		"min-h-0",
 		"flex items-center justify-between mb-6 flex-shrink-0",
-		"btn btn-primary btn-sm",
-		"+ Add Task",
+		"btn btn-ghost btn-sm btn-square",
+		`aria-label="Add Task"`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("expected tasks page shell to contain %q, got %s", want, body)

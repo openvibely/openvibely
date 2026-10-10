@@ -1842,7 +1842,7 @@ func TestGlobalPersonality(t *testing.T) {
 		if !strings.Contains(body, "Personality") {
 			t.Error("page should contain 'Personality' heading")
 		}
-		if !strings.Contains(body, "+ Add Personality") {
+		if !strings.Contains(body, `aria-label="Add Personality"`) {
 			t.Error("page should contain '+ Add Personality' button")
 		}
 		if !strings.Contains(body, "Sarcastic Engineer") {
