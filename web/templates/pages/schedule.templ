@@ -497,7 +497,7 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
                     @ScheduleSelectionToolbar()
                 </div>
                 <div id="schedule-header-actions">
-				<button class="btn btn-ghost btn-sm btn-square" aria-label="New Scheduled Task" title="New Scheduled Task" onclick="openNewScheduledTaskModal()">
+				<button class="btn btn-ghost btn-sm btn-square" aria-label="New Scheduled Task" data-tooltip-disabled onclick="openNewScheduledTaskModal()">
 					@pageCreateIcon()
 				</button>
                     <details id="schedule-project-menu">
