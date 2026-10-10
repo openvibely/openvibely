@@ -22,7 +22,8 @@ templ MermaidDiagrams() {
    let open='';
    const lines=text.split(/\r\n|\r|\n/);
    lines.forEach((line,index)=>{
-    const match=/^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
+    // Strip list indentation and blockquote markers; over-matching only delays rendering.
+    const match=/^(?:[\s>]|[-*+]\s|\d{1,9}[.)]\s)*(`{3,}|~{3,})(.*)$/.exec(line);
     if (!match) return;
     if (!open) {
      if (!(match[1][0]==='`' && match[2].includes('`'))) open=match[1];
@@ -200,7 +201,10 @@ templ MermaidDiagrams() {
       commit(code,isDiagram,source,theme,url,image);
      } catch (error) {
       // Live redraws recreate the block every frame; don't re-render a known failure.
-      if (!isTerminal(code)) failures.set(JSON.stringify([currentTheme(),source]),error);
+      if (!isTerminal(code)) {
+       failures.set(JSON.stringify([currentTheme(),source]),error);
+       if (failures.size>32) failures.delete(failures.keys().next().value);
+      }
       // Keep source (or the last successful image) and allow explicit recovery.
       showFailure(code,isDiagram,error);
      } finally {

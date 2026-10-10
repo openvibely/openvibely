@@ -112,6 +112,34 @@ func TestBrowserFunctional_MermaidRendersAfterLiveChatCompletion(t *testing.T) {
 			}
 		})
 	})
+	nested := []struct{ name, open, close string }{
+		{"list item", "1. Step one\n\n    ```mermaid\n    flowchart TD\n     A[Start] --> B[End]\n", "    ```\n\n2. Step two"},
+		{"list marker", "1. ```mermaid\n   flowchart TD\n    A[Start] --> B[End]\n", "   ```\n\n2. Step two"},
+		{"blockquote", "> ```mermaid\n> flowchart TD\n>  A[Start] --> B[End]\n", "> ```\n\nAfter"},
+	}
+	for _, nc := range nested {
+		t.Run("nested fence "+nc.name, func(t *testing.T) {
+			phase.Store(0)
+			runComposerFocusCDP(t, chrome, server.URL+"/chat?project_id="+project.ID, "mermaid-live-chat-nested", func(browser *composerFocusCDP) {
+				browser.waitFor("chat page", `String(!!document.getElementById('chat-messages')&&typeof window.renderMermaidDiagrams)`, "function")
+				phase.Store(1)
+				browser.evaluate(`(function(){window.dispatchEvent(new CustomEvent('sse-chat-live-event',{detail:{type:'chat_new_message',project_id:'` + project.ID + `',exec_id:'` + execID + `',message:'diagram',source:'web'}}));return 'ok';})()`)
+				browser.waitFor("live stream", `String(!!window.__terminalStreamFor('`+execID+`'))`, "true")
+				pair := `document.getElementById('chat-execution-` + execID + `')`
+				emit := func(text string) {
+					j, _ := json.Marshal(text)
+					browser.evaluate(`(function(){window.__terminalStreamFor('` + execID + `').emit('message',` + string(j) + `);return 'ok';})()`)
+				}
+				emit(nc.open)
+				browser.waitFor("open nested fence shown as code", `String(!!`+pair+`.querySelector('code.language-mermaid'))`, "true")
+				if got := browser.evaluateAwait(`(async function(){await new Promise(r=>setTimeout(r,500));var p=` + pair + `;return !!p.querySelector('.chat-mermaid')+':'+!!p.querySelector('[data-mermaid-error]')})()`); got != "false:false" {
+					t.Fatalf("open nested fence rendered or errored (diagram:error) = %s", got)
+				}
+				emit(nc.close)
+				browser.waitFor("nested diagram rendered while running", `(function(){var p=`+pair+`;return p.getAttribute('data-exec-status')+':'+!!p.querySelector('.chat-mermaid img')+':'+!!p.querySelector('[data-mermaid-error]')})()`, "running:true:false")
+			})
+		})
+	}
 	for _, sc := range scenarios {
 		t.Run(sc.name, func(t *testing.T) {
 			phase.Store(0)
