@@ -270,8 +270,8 @@ func TestBuiltInModelOAuthConnectBeforeSave(t *testing.T) {
 			}
 			before, _ := repo.List(context.Background())
 			var siblingID, connectionID string
-			for attempt := 0; attempt < 4; attempt++ {
-				if attempt == 2 {
+			for attempt := 0; attempt < 6; attempt++ {
+				if attempt == 2 || attempt >= 4 {
 					form.Set("oauth_connection_id", "new")
 				}
 				rec := send("/models/oauth/setup")
@@ -312,8 +312,17 @@ func TestBuiltInModelOAuthConnectBeforeSave(t *testing.T) {
 					model = "gpt-5.5"
 				}
 				form.Set("model", model)
-				if attempt == 3 {
+				if attempt >= 3 {
 					current, _ := repo.GetByID(context.Background(), form.Get("model_config_id"))
+					if attempt == 5 {
+						// Another modal creates a matching account after this draft
+						// completed, so its ID was absent from the snapshot.
+						newer := &models.LLMConfig{Name: "Newer account", Provider: current.Provider, Model: current.Model, AuthMethod: models.AuthMethodOAuth}
+						if err := repo.Create(context.Background(), newer); err != nil {
+							t.Fatal(err)
+						}
+						current = newer
+					}
 					if ok, err := repo.ReplaceLinkedOAuthConnectionWithProfileIfRevision(context.Background(), current.ID, current.OAuthConnectionID, current.OAuthConfigRevision, current.Provider, "concurrent-access", "concurrent-refresh", time.Now().Add(time.Hour).UnixMilli(), "account", "Verified user", "principal"); err != nil || !ok {
 						t.Fatal(err)
 					}
@@ -322,10 +331,20 @@ func TestBuiltInModelOAuthConnectBeforeSave(t *testing.T) {
 					if rec.Code != http.StatusConflict {
 						t.Fatalf("stale sign-in status: %d", rec.Code)
 					}
-					unchanged, _ := repo.GetByID(context.Background(), current.ID)
+					unchanged, _ := repo.GetByID(context.Background(), form.Get("model_config_id"))
 					if unchanged.Name != "Connected model" || unchanged.OAuthAccessToken != "concurrent-access" {
 						t.Fatal("stale save was not atomic")
 					}
+					sibling, err := repo.GetByID(context.Background(), siblingID)
+					if err != nil || sibling.OAuthConnectionID != unchanged.OAuthConnectionID || sibling.OAuthAccessToken != "concurrent-access" {
+						t.Fatal("stale draft replaced shared credentials", err)
+					}
+					connections, err := repo.ListOAuthConnections(context.Background(), current.Provider)
+					if err != nil || len(connections) != 1 {
+						t.Fatal("stale save left an account behind", err)
+					}
+					form.Set("name", "Unsaved edit")
+					form.Del("oauth_setup_session")
 					continue
 				}
 				rec = send("/models")
