@@ -44,7 +44,7 @@ func TestBrowserFunctional_SharedTooltips(t *testing.T) {
 		b.waitFor("page scroll still dismisses hint", `String(document.getElementById('ov-shared-tooltip').hidden)`, "true")
 		b.evaluate(`messages.remove();control.dispatchEvent(new PointerEvent('pointerover',{bubbles:true,clientX:320,clientY:220}));'hover'`)
 
-		b.evaluate(`document.body.dispatchEvent(new CustomEvent('htmx:beforeSwap',{bubbles:true,detail:{target:document.getElementById('chart')}}));document.getElementById('chart').dispatchEvent(new PointerEvent('pointerout',{bubbles:true}));window.hoverCheck=null;setTimeout(()=>window.hoverCheck=!document.getElementById('ov-shared-tooltip').hidden,300);'waiting'`)
+		b.evaluate(`document.body.dispatchEvent(new CustomEvent('htmx:beforeSwap',{bubbles:true,detail:{target:document.getElementById('chart')}}));document.getElementById('chart').dispatchEvent(new PointerEvent('pointerout',{bubbles:true}));window.hoverCheck=null;setTimeout(()=>window.hoverCheck=!document.getElementById('ov-shared-tooltip').hidden,500);'waiting'`)
 		b.waitFor("unrelated events do not expire hovered tooltip", `String(window.hoverCheck)`, "true")
 		b.evaluate(`control.dispatchEvent(new PointerEvent('pointermove',{bubbles:true,clientX:420,clientY:220}));'move'`)
 		b.waitFor("moving across wide control follows cursor", `document.getElementById('ov-shared-tooltip').style.left`, "432px")
@@ -63,7 +63,7 @@ func TestBrowserFunctional_SharedTooltips(t *testing.T) {
 		b.evaluate(`document.dispatchEvent(new KeyboardEvent('keydown',{key:'Tab',bubbles:true}));control.dispatchEvent(new FocusEvent('focusin',{bubbles:true}));'tab focus'`)
 		b.waitFor("deliberate keyboard navigation still shows hint", `String(!document.getElementById('ov-shared-tooltip').hidden)`, "true")
 		b.evaluate(`menu.hidden=true;control.dispatchEvent(new PointerEvent('pointerover',{bubbles:true}));'closed menu'`)
-		b.waitFor("shortcut badge", `document.querySelector('#ov-shared-tooltip kbd').textContent`, "⌘⇧D")
+		b.waitFor("shortcut badge", `(document.querySelector('#ov-shared-tooltip kbd')?.textContent || '')`, "⌘⇧D")
 		b.waitFor("native title suppressed", `String(!document.getElementById('native').hasAttribute('title'))`, "true")
 		b.evaluate(`document.getElementById('native').title='Loading models';'updated'`)
 		b.waitFor("dynamic title", `document.getElementById('ov-shared-tooltip').textContent`, "Loading models")
@@ -73,13 +73,13 @@ func TestBrowserFunctional_SharedTooltips(t *testing.T) {
 		b.evaluate(`var fresh=document.createElement('button');fresh.id='fresh';fresh.title='Review changes (Ctrl+Shift+D)';fresh.textContent='Review';document.body.appendChild(fresh);'inserted'`)
 		b.waitFor("inserted tooltip adopted", `document.getElementById('fresh').dataset.ovTooltip`, "Review changes (Ctrl+Shift+D)")
 		b.evaluate(`document.getElementById('fresh').dispatchEvent(new PointerEvent('pointerover',{bubbles:true}));'hovered'`)
-		b.waitFor("Windows shortcut badge", `document.querySelector('#ov-shared-tooltip kbd').textContent`, "Ctrl+Shift+D")
+		b.waitFor("Windows shortcut badge", `(document.querySelector('#ov-shared-tooltip kbd')?.textContent || '')`, "Ctrl+Shift+D")
 		b.evaluate(`document.body.style.setProperty('--ov-menu-surface','#ffffff');'theme'`)
 		b.waitFor("theme follows menu surface", `getComputedStyle(document.getElementById('ov-shared-tooltip')).backgroundColor`, "rgb(255, 255, 255)")
 		b.evaluate(`document.getElementById('fresh').remove();'removed'`)
 		b.waitFor("removed owner dismisses tooltip", `String(document.getElementById('ov-shared-tooltip').hidden)`, "true")
 		b.waitFor("latest label retained", `document.getElementById('native').dataset.ovTooltip`, "Loading models")
-		b.evaluate(`document.getElementById('state').focus();document.getElementById('state').dispatchEvent(new FocusEvent('focusin',{bubbles:true}));'ready'`)
+		b.evaluate(`document.dispatchEvent(new KeyboardEvent('keydown',{key:'Tab',bubbles:true}));document.getElementById('state').focus();document.getElementById('state').dispatchEvent(new FocusEvent('focusin',{bubbles:true}));'ready'`)
 		b.waitFor("custom tooltip", `document.getElementById('ov-shared-tooltip').textContent`, "Running")
 		b.evaluate(`document.getElementById('state').dataset.tip='Expand sidebar (Ctrl+B)';'updated'`)
 		b.waitFor("sidebar state updates despite adopted title", `document.getElementById('ov-shared-tooltip').textContent`, "Expand sidebarCtrl+B")
@@ -100,7 +100,7 @@ func TestBrowserFunctional_SharedTooltips(t *testing.T) {
 		for _, modifier := range []string{"Command", "Ctrl"} {
 			b.evaluate(`window.openVibelyTooltip.show(document.getElementById('native'),'Select schedules (` + modifier + `+click)\nMore actions (Right-click)\nSelect or deselect a day (Click)\nSelect days across headers (Click and drag)');'shown'`)
 			b.waitFor("schedule gestures follow labels", `String(Array.from(document.querySelectorAll('#ov-shared-tooltip .ov-tooltip-row')).every(row=>row.children.length===2 && row.firstElementChild.tagName==='SPAN' && row.lastElementChild.tagName==='KBD'))`, "true")
-			b.waitFor("schedule modifier badge", `document.querySelector('#ov-shared-tooltip kbd').textContent`, modifier+"+click")
+			b.waitFor("schedule modifier badge", `(document.querySelector('#ov-shared-tooltip kbd')?.textContent || '')`, modifier+"+click")
 		}
 		b.evaluate(`var wide=document.createElement('button');wide.title='Switch task (⌘K); Previous/next: ⌘⇧↑/↓; Last visited: ⌘⇧L';wide.style.cssText='position:fixed;left:100px;top:300px;width:500px;height:40px';wide.textContent='Wide control';document.body.appendChild(wide);'ready'`)
 		b.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseMoved", "x": 400, "y": 320}, nil)
@@ -129,6 +129,43 @@ func TestBrowserFunctional_TaskCardBadgeTooltipContinuity(t *testing.T) {
 		for _, label := range []string{"Goal", "Swarm", "Test model", "Chain", "Chained"} {
 			b.evaluate(fmt.Sprintf(`var next=Array.from(document.querySelectorAll('.badge')).find(el=>el.textContent.trim()===%q);owner.dispatchEvent(new PointerEvent('pointerout',{bubbles:true,relatedTarget:next}));next.dispatchEvent(new PointerEvent('pointerover',{bubbles:true,relatedTarget:owner}));'badge'`, label))
 			b.waitFor(label+" retains card hint", `String(!document.getElementById('ov-shared-tooltip').hidden && owner.getAttribute('aria-describedby')==='ov-shared-tooltip')`, "true")
+		}
+	})
+}
+
+func TestBrowserFunctional_TooltipDelayAndShortcutFocus(t *testing.T) {
+	chrome := chatNavigationChromePath(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `<!doctype html><body><button id="a" data-ov-tooltip="First"><span>Badge</span></button><button id="b" data-ov-tooltip="Second">Second</button><script>
+   var clock=1000,jobs=new Map(),sequence=0;
+   performance.now=()=>clock;
+   window.setTimeout=(fn,delay)=>{jobs.set(++sequence,{fn,at:clock+delay});return sequence};
+   window.clearTimeout=id=>jobs.delete(id);
+   function advance(ms){clock+=ms;for(var [id,job] of Array.from(jobs)){if(job.at<=clock){jobs.delete(id);job.fn()}}}
+  </script>`)
+		_ = templateui.Tooltips().Render(r.Context(), w)
+	}))
+	defer server.Close()
+	runComposerFocusCDP(t, chrome, server.URL, "tooltip-delay", func(b *composerFocusCDP) {
+		result := b.evaluate(`(()=>{
+   const a=document.getElementById('a'),b=document.getElementById('b'),tip=document.getElementById('ov-shared-tooltip');
+   function check(ok,message){if(!ok)throw Error(message)}
+   function over(el){el.dispatchEvent(new PointerEvent('pointerover',{bubbles:true}))}
+   function out(el,next){el.dispatchEvent(new PointerEvent('pointerout',{bubbles:true,relatedTarget:next}))}
+   over(a);advance(399);check(tip.hidden,'initial delay');
+   out(a,a.firstElementChild);over(a.firstElementChild);advance(1);check(!tip.hidden,'badge must not restart timer');
+   out(a,b);over(b);check(tip.textContent==='Second'&&!tip.hidden,'instant switch');
+   out(b,document.body);advance(100);check(tip.hidden,'leave hides');advance(199);over(a);check(!tip.hidden,'warm grace');
+   out(a,document.body);advance(301);over(b);check(tip.hidden,'cold again');advance(399);check(tip.hidden,'full delay after reset');advance(1);check(!tip.hidden,'show after reset');
+   window.openVibelyTooltip.close();advance(301);over(a);out(a,document.body);advance(500);check(tip.hidden,'cancel abandoned hover');
+   over(a);a.dispatchEvent(new MouseEvent('mousedown',{bubbles:true}));document.dispatchEvent(new MouseEvent('mouseup',{bubbles:true}));advance(500);check(tip.hidden,'press cancels pending');
+   over(b);b.dispatchEvent(new Event('dragstart',{bubbles:true}));advance(500);check(tip.hidden,'drag cancels pending');
+   document.dispatchEvent(new KeyboardEvent('keydown',{key:'d',ctrlKey:true,shiftKey:true,bubbles:true}));b.focus();b.dispatchEvent(new FocusEvent('focusin',{bubbles:true}));advance(1000);check(tip.hidden,'shortcut focus without menu');
+   document.dispatchEvent(new KeyboardEvent('keydown',{key:'Tab',bubbles:true}));a.focus();a.dispatchEvent(new FocusEvent('focusin',{bubbles:true}));advance(399);check(tip.hidden,'Tab delay');advance(1);check(!tip.hidden,'Tab shows');
+   return 'passed';
+  })()`)
+		if result != "passed" {
+			t.Fatalf("tooltip timing: %s", result)
 		}
 	})
 }
