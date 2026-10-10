@@ -54,11 +54,21 @@ templ MermaidDiagrams() {
    state.text=text; state.open=open;
    return open;
   }
+  // Live rendering parses each text section between tool blocks as its own document,
+  // so check the section's source rather than the raw reply with tool output.
   function streamingFenceClosed(code) {
    const owner=code.closest('[data-raw-content]');
    if (!owner) return false;
-   if (!endsInsideFence(owner,owner.getAttribute('data-raw-content')||'')) return true;
-   const blocks=Array.from(owner.querySelectorAll('pre > code')).filter(block=>!block.closest('.stream-tool'));
+   const sections=Array.from(owner.querySelectorAll('.chat-markdown')).filter(section=>'_chatMarkdownSource' in section);
+   const section=code.closest('.chat-markdown');
+   let scope=owner, source=owner.getAttribute('data-raw-content')||'';
+   if (sections.length) {
+    // An earlier section is bounded by a later tool block, so it is complete.
+    if (section!==sections[sections.length-1]) return true;
+    scope=section; source=section._chatMarkdownSource;
+   }
+   if (!endsInsideFence(owner,source)) return true;
+   const blocks=Array.from(scope.querySelectorAll('pre > code')).filter(block=>!block.closest('.stream-tool'));
    return blocks[blocks.length-1]!==code;
   }
   function eligible(code) {
@@ -248,6 +258,7 @@ templ MermaidDiagrams() {
    });
    return Promise.all(pending);
   };
+  window.renderMermaidDiagrams.endsInsideFence=endsInsideFence;
   new MutationObserver(()=>window.renderMermaidDiagrams(document)).observe(document.documentElement,{attributes:true,attributeFilter:['data-theme']});
   document.addEventListener('htmx:historyRestore',()=>window.renderMermaidDiagrams(document));
  })();

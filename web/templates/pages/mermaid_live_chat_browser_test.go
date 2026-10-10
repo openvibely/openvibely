@@ -151,6 +151,51 @@ func TestBrowserFunctional_MermaidRendersAfterLiveChatCompletion(t *testing.T) {
 			})
 		})
 	}
+	t.Run("stray fence in tool output", func(t *testing.T) {
+		phase.Store(0)
+		runComposerFocusCDP(t, chrome, server.URL+"/chat?project_id="+project.ID, "mermaid-live-chat-tool", func(browser *composerFocusCDP) {
+			browser.waitFor("chat page", `String(!!document.getElementById('chat-messages')&&typeof window.renderMermaidDiagrams)`, "function")
+			phase.Store(1)
+			browser.evaluate(`(function(){window.dispatchEvent(new CustomEvent('sse-chat-live-event',{detail:{type:'chat_new_message',project_id:'` + project.ID + `',exec_id:'` + execID + `',message:'diagram',source:'web'}}));return 'ok';})()`)
+			browser.waitFor("live stream", `String(!!window.__terminalStreamFor('`+execID+`'))`, "true")
+			pair := `document.getElementById('chat-execution-` + execID + `')`
+			emit := func(text string) {
+				j, _ := json.Marshal(text)
+				browser.evaluate(`(function(){window.__terminalStreamFor('` + execID + `').emit('message',` + string(j) + `);return 'ok';})()`)
+			}
+			emit("[Using tool: bash | $ cat notes.md]\n[Tool bash done]\n~~~~ unclosed\n[/Tool]\n\nHere:\n\n```mermaid\nflowchart TD\n A[Start] --> B[End]\n")
+			browser.waitFor("open fence shown as code", `String(!!`+pair+`.querySelector('.chat-markdown code.language-mermaid'))`, "true")
+			if got := browser.evaluateAwait(`(async function(){await new Promise(r=>setTimeout(r,500));var p=` + pair + `;return !!p.querySelector('.chat-mermaid')+':'+!!p.querySelector('[data-mermaid-error]')})()`); got != "false:false" {
+				t.Fatalf("open fence after tool output rendered or errored (diagram:error) = %s", got)
+			}
+			emit("```\n\nAfter")
+			browser.waitFor("diagram rendered while running", `(function(){var p=`+pair+`;return p.getAttribute('data-exec-status')+':'+!!p.querySelector('.chat-mermaid img')+':'+!!p.querySelector('[data-mermaid-error]')})()`, "running:true:false")
+		})
+	})
+	t.Run("incremental fence check matches full parse", func(t *testing.T) {
+		phase.Store(0)
+		runComposerFocusCDP(t, chrome, server.URL+"/chat?project_id="+project.ID, "mermaid-fence-parity", func(browser *composerFocusCDP) {
+			browser.waitFor("fence check", `String(typeof (window.renderMermaidDiagrams&&window.renderMermaidDiagrams.endsInsideFence)+':'+typeof (window.marked&&window.marked.lexer))`, "function:function")
+			samples := []string{
+				"Intro\n\n```mermaid\nflowchart TD\n A --> B\n```\n\nAfter\n",
+				"1. Step one\ncontinued lazily\n\n    ```mermaid\n    flowchart TD\n    ```\n\n2. Two\n",
+				"1.\t```mermaid\n\tflowchart TD\n\t```\nDone\n",
+				"- item\n\n  more\n\n  ```mermaid\n  graph LR\n  ```\n",
+				"> quote\n>\n> ```mermaid\n> graph LR\n> ```\n\ntext\n",
+				"<!-- a\n\nb -->\n\n~~~mermaid\ngraph LR\n```\n~~~\n",
+				"Line\r\n\r\n```mermaid\r\ngraph LR\r\n```\r\n",
+				"```js\nx\n```\n\n```mermaid\ngraph LR\n    ```\n- ```\n```\n",
+			}
+			raw, _ := json.Marshal(samples)
+			got := browser.evaluate(`(function(){var f=window.renderMermaidDiagrams.endsInsideFence,samples=` + string(raw) + `;
+for(var s=0;s<samples.length;s++){var owner={},text=samples[s];for(var size=1;size<=7;size+=3){owner={};for(var i=0;i<=text.length;i+=size){var part=text.slice(0,i);if(f(owner,part)!==f({},part))return 'mismatch sample '+s+' size '+size+' at '+i;}
+for(var r=0;r<samples.length;r++){if(f(owner,samples[r])!==f({},samples[r]))return 'mismatch after rewrite '+s+' to '+r;}}}
+return 'ok';})()`)
+			if got != "ok" {
+				t.Fatalf("incremental fence check differs from full parse: %s", got)
+			}
+		})
+	})
 	for _, sc := range scenarios {
 		t.Run(sc.name, func(t *testing.T) {
 			phase.Store(0)

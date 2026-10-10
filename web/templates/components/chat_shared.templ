@@ -5494,6 +5494,7 @@ templ ChatAutoScrollScript() {
 				if (!t) { pendingText = ''; return; }
 				var div = document.createElement('div');
 				div.className = 'chat-markdown';
+				div._chatMarkdownSource = pendingText;
 				if (window.renderChatMarkdown) {
 					div.innerHTML = window.renderChatMarkdown(t);
 					if (window.addCodeCopyButtons) window.addCodeCopyButtons(div);
@@ -5774,6 +5775,7 @@ templ ChatAutoScrollScript() {
 						if (!seg.renderedContent) return;
 						var rendered = document.createElement('div');
 						rendered.className = 'chat-markdown';
+						rendered._chatMarkdownSource = seg.content;
 						if (typeof seg.renderedContent === 'string') rendered.innerHTML = seg.renderedContent;
 						else rendered.appendChild(seg.renderedContent);
 						if (window.addCodeCopyButtons) window.addCodeCopyButtons(rendered);
