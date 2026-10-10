@@ -91,7 +91,11 @@ func (h *Handler) BeginModelOAuthSetup(c echo.Context) error {
 		}
 	}
 	if provider == models.ProviderOpenAI || provider == models.ProviderAnthropic {
-		draft := &models.OAuthConnection{Provider: provider}
+		revisions, err := h.llmConfigRepo.OAuthConnectionRevisions(c.Request().Context(), provider)
+		if err != nil {
+			return err
+		}
+		draft := &models.PendingModelOAuth{OAuthConnection: models.OAuthConnection{Provider: provider}, ObservedRevisions: revisions}
 		selected := strings.TrimSpace(c.FormValue("oauth_connection_id"))
 		if selected != "" && selected != "new" {
 			connection, err := h.llmConfigRepo.GetOAuthConnectionByID(c.Request().Context(), selected)
