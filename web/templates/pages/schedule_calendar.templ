@@ -139,7 +139,7 @@ templ ScheduleCalendarScript() {
     card.title = card.dataset.scheduleTitle + ' (' + label.toLowerCase() + ')' + (paused && status !== 'none' ? ' · This run is also ' + (excluded ? 'skipped' : 'partially skipped') : '');
     card.setAttribute('aria-label', card.title);
    }
-   var hint = 'Select schedules (' + selectionModifier + '+click)\nMore actions (Rightclick)';
+   var hint = 'Select schedules (' + selectionModifier + '+click)\nMore actions (Right-click)';
    card.title = hint;
    card.setAttribute('aria-description', hint);
   });

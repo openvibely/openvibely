@@ -96,7 +96,7 @@ func TestBrowserFunctional_SharedTooltips(t *testing.T) {
 		b.waitFor("chart hidden", `String(document.getElementById('ov-shared-tooltip').hidden)`, "true")
 
 		for _, modifier := range []string{"Command", "Ctrl"} {
-			b.evaluate(`window.openVibelyTooltip.show(document.getElementById('native'),'Select schedules (` + modifier + `+click)\nMore actions (Rightclick)\nSelect or deselect a day (Click)\nSelect days across headers (Click and drag)');'shown'`)
+			b.evaluate(`window.openVibelyTooltip.show(document.getElementById('native'),'Select schedules (` + modifier + `+click)\nMore actions (Right-click)\nSelect or deselect a day (Click)\nSelect days across headers (Click and drag)');'shown'`)
 			b.waitFor("schedule gestures follow labels", `String(Array.from(document.querySelectorAll('#ov-shared-tooltip .ov-tooltip-row')).every(row=>row.children.length===2 && row.firstElementChild.tagName==='SPAN' && row.lastElementChild.tagName==='KBD'))`, "true")
 			b.waitFor("schedule modifier badge", `document.querySelector('#ov-shared-tooltip kbd').textContent`, modifier+"+click")
 		}
