@@ -81,21 +81,45 @@ templ NewTaskContent(project *models.Project, agents []models.LLMConfig, agentDe
     var form = document.getElementById('task-thread-form');
     var titleInput = root.querySelector('input[name="title"][form="task-thread-form"]');
     var titleDraftKey = 'openvibely.new-task-title.' + root.getAttribute('data-project-id');
+    var taskCreationSucceeded = false;
+    var titleDraftSavedForCleanup = false;
+    window.openVibelyRestoreNewTaskTitleDraft = function() {
+     var restoredRoot = document.getElementById('task-detail-content');
+     if (!restoredRoot || restoredRoot.getAttribute('data-task-id') !== '') return;
+     var restoredTitleInput = restoredRoot.querySelector('input[name="title"][form="task-thread-form"]');
+     if (!restoredTitleInput) return;
+     var restoredDraftKey = 'openvibely.new-task-title.' + restoredRoot.getAttribute('data-project-id');
+     try {
+      var savedTitle = sessionStorage.getItem(restoredDraftKey);
+      if (savedTitle !== null) restoredTitleInput.value = savedTitle;
+     } catch (_) {}
+    };
+    if (!window.openVibelyNewTaskTitleHistoryRestoreInstalled) {
+     window.openVibelyNewTaskTitleHistoryRestoreInstalled = true;
+     document.body.addEventListener('htmx:historyRestore', function() {
+      if (window.openVibelyRestoreNewTaskTitleDraft) window.openVibelyRestoreNewTaskTitleDraft();
+     });
+    }
     function saveTaskTitleDraft() {
+     if (taskCreationSucceeded) return;
      try { sessionStorage.setItem(titleDraftKey, titleInput.value); } catch (_) {}
     }
     function clearTaskTitleDraft() {
+     taskCreationSucceeded = true;
      try { sessionStorage.removeItem(titleDraftKey); } catch (_) {}
     }
-    try {
-     var savedTitle = sessionStorage.getItem(titleDraftKey);
-     if (savedTitle !== null) titleInput.value = savedTitle;
-    } catch (_) {}
-    titleInput.addEventListener('input', saveTaskTitleDraft);
+    window.openVibelyRestoreNewTaskTitleDraft();
+    titleInput.addEventListener('input', function() {
+     titleDraftSavedForCleanup = false;
+     saveTaskTitleDraft();
+    });
     // Keep creation fields out of HTMX history; retain the title separately per project.
     function discardDraft(event) {
      if(event.type==='htmx:beforeCleanupElement' && event.detail.elt!==root) return;
-     saveTaskTitleDraft();
+     if(event.type==='htmx:beforeHistorySave' || !titleDraftSavedForCleanup) {
+      saveTaskTitleDraft();
+      titleDraftSavedForCleanup = true;
+     }
      form.reset();
      var clear=window[form.getAttribute('data-clear-func-name')];
      if(clear) clear();
