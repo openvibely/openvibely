@@ -77,7 +77,8 @@ templ ScheduleCalendarControls(states []models.ScheduleCalendarState) {
  #schedule-project-menu > .ov-menu { position: absolute; right: 0; z-index: 50; min-width: 12rem; }
  #schedule-content [data-calendar-day], #schedule-content [data-calendar-hour] { cursor: pointer; user-select: none; touch-action: pan-y; }
  #schedule-content .schedule-day-selected { background: rgba(116,128,255,.16) !important; }
- #schedule-content [data-calendar-day].schedule-day-selected, #schedule-content [data-calendar-hour].schedule-day-selected { box-shadow: inset 0 -2px var(--ov-link-color); }
+ #schedule-content [data-calendar-day].schedule-day-selected { box-shadow: inset 0 -2px var(--ov-link-color); }
+ #schedule-content [data-calendar-hour].schedule-day-selected { box-shadow: inset -2px 0 var(--ov-link-color); }
  #schedule-content [data-calendar-day][data-skipped="true"]::after { content: 'Runs skipped'; display: block; font-size: 10px; opacity: .65; }
  #schedule-content [data-schedule-card][data-calendar-muted="true"] { background: oklch(var(--b3)) !important; border-color: oklch(var(--bc) / .2) !important; opacity: .5; }
  #schedule-content [data-schedule-card][data-calendar-muted="true"] > :first-child { text-decoration: line-through; }
