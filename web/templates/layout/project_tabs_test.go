@@ -82,7 +82,7 @@ func TestProjectTabsCleanSelectedShape(t *testing.T) {
 	}
 }
 
-func TestProjectTabsHaveNoHoverTooltips(t *testing.T) {
+func TestProjectTabsShowNavigationHintWithoutRedundantLabels(t *testing.T) {
 	ctx := WithUIPreferences(WithDesktopMode(context.Background(), true), UIPreferences{PinnedProjectIDs: []string{"a"}})
 	var buf bytes.Buffer
 	if err := DesktopProjectTabs([]models.Project{{ID: "a", Name: "Alpha"}}, "a").Render(ctx, &buf); err != nil {
@@ -94,7 +94,7 @@ func TestProjectTabsHaveNoHoverTooltips(t *testing.T) {
 			t.Errorf("unexpected tab tooltip: %s", fragment)
 		}
 	}
-	for _, fragment := range []string{`title="Open project"`, `aria-label="Close project tab: Alpha"`} {
+	for _, fragment := range []string{`title="Open project"`, `aria-label="Close project tab: Alpha"`, `tab.dataset.ovTooltip = 'Previous/next project (' + projectTabShortcut + ')';`, `bar.dataset.platform === 'darwin'`, `/Mac|iPhone|iPad/.test(navigator.platform)`, `'⌘⇧←/→' : 'Ctrl+Shift+←/→'`} {
 		if !strings.Contains(html, fragment) {
 			t.Errorf("missing retained tooltip or accessible label: %s", fragment)
 		}
