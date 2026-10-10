@@ -90,7 +90,7 @@ templ skillsContent(skills []SkillCard, canManage bool, currentProjectID string,
 			<div class="dropdown dropdown-end">
 				<button type="button"
 					tabindex="0"
-					class="btn btn-ghost btn-sm btn-square" aria-label="Add Skill" data-tooltip-disabled
+					class="sidebar-toggle-btn btn btn-ghost btn-sm btn-square" aria-label="Add Skill" data-tooltip-disabled
 					onclick="handleDropdownToggle(event)"
 					if !canManage {
 						disabled
@@ -114,7 +114,7 @@ templ skillsContent(skills []SkillCard, canManage bool, currentProjectID string,
 				<div class="text-center py-12" data-search-empty-state>
 				<p class="opacity-50 mb-4">No standalone skills found yet.</p>
 				<button
-					class="btn btn-ghost btn-sm btn-square" aria-label="Create Skill" data-tooltip-disabled
+					class="sidebar-toggle-btn btn btn-ghost btn-sm btn-square" aria-label="Create Skill" data-tooltip-disabled
 					onclick="openNewSkillModal()"
 					if !canManage {
 						disabled

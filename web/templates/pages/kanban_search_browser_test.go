@@ -74,10 +74,36 @@ func testKanbanHeaderSearch(t *testing.T, width int) {
 		check("search sits next to Add Task", search+`.nextElementSibling.getAttribute('aria-label') === 'Add Task'`)
 		check("collapsed by default", search+`.dataset.open === 'false' && `+width(search)+` <= 33`)
 		check("Active count has refresh hook", count("active")+` === '2'`)
+		addTask := `document.querySelector('[aria-label="Add Task"]')`
+		park := func() {
+			var px, py int
+			if _, err := fmt.Sscan(b.evaluate(`(() => { for (let y = innerHeight - 5; y > 0; y -= 20) for (let x = 5; x < innerWidth; x += 20) { const el = document.elementFromPoint(x, y); if (el && !el.closest('button, a, input, [data-kanban-search], .sidebar-toggle-btn')) return x + ' ' + y } return '' })()`), &px, &py); err != nil {
+				t.Fatalf("no empty spot to park the pointer: %v", err)
+			}
+			b.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseMoved", "x": px, "y": py}, nil)
+		}
+		park()
+		b.waitFor("buttons at rest", `getComputedStyle(`+toggle+`).opacity === '0.7' && getComputedStyle(`+addTask+`).opacity === '0.7' ? 'rest' : 'hover'`, "rest")
+		for _, btn := range []string{toggle, addTask} {
+			check("button matches panel toggle", `(() => { const s = getComputedStyle(`+btn+`), r = `+btn+`.getBoundingClientRect(); return `+btn+`.classList.contains('sidebar-toggle-btn') && r.width === 32 && r.height === 32 && s.borderTopLeftRadius === '8px' && s.opacity === '0.7' && `+btn+`.querySelector('svg').getBoundingClientRect().width === 20 })()`)
+		}
+		for _, sel := range []string{`[data-kanban-search-toggle]`, `[aria-label="Add Task"]`} {
+			b.evaluate(`(window.__r = document.querySelector('` + sel + `').getBoundingClientRect(), "ok")`)
+			var x, y int
+			fmt.Sscan(b.evaluate(`String(Math.round(window.__r.left + 16))`), &x)
+			fmt.Sscan(b.evaluate(`String(Math.round(window.__r.top + 16))`), &y)
+			b.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseMoved", "x": x, "y": y}, nil)
+			b.waitFor("hover shows grey", `(() => { const s = getComputedStyle(document.querySelector('`+sel+`')); return s.opacity === '1' && s.backgroundColor !== 'rgba(0, 0, 0, 0)' ? 'hover' : 'rest' })()`, "hover")
+			park()
+		}
+		check("hover styles only on mouse devices", `(() => { const hovers = []; for (const sh of document.styleSheets) { let rules; try { rules = sh.cssRules } catch (e) { continue } const walk = (rs, media) => { for (const r of rs) { if (r.cssRules && r.media) walk(r.cssRules, r.media.mediaText); else if (r.selectorText && /(sidebar-toggle-btn|kanban-search-clear):hover/.test(r.selectorText) && !/opened|data-open/.test(r.selectorText)) hovers.push(media) } }; walk(rules, "") } return hovers.length >= 2 && hovers.every(m => m.includes("hover: hover")) })()`)
+		check("collapsed box has rounded corners", `getComputedStyle(`+search+`).borderTopLeftRadius === '8px'`)
+		check("search and Add Task 8px apart", `Math.round(`+addTask+`.getBoundingClientRect().left - `+search+`.getBoundingClientRect().right) === 8`)
 
 		b.evaluate(`(window.__iconColor = getComputedStyle(` + toggle + `).color, 'ok')`)
 		b.click(`[data-kanban-search-toggle]`)
 		check("click opens and focuses input", search+`.dataset.open === 'true' && document.activeElement === `+input)
+		check("open box keeps rounded corners", `getComputedStyle(`+search+`).borderTopLeftRadius === '8px'`)
 		check("clear button hidden while empty", `document.querySelector('[data-kanban-search-clear]').getClientRects().length === 0`)
 		b.waitFor("open animation", `String(`+width(search)+` > 100)`, "true")
 		check("open box stays inside header", search+`.getBoundingClientRect().left >= document.querySelector('[data-page-header] h2').getBoundingClientRect().right`)
