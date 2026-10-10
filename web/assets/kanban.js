@@ -63,7 +63,6 @@
     function refresh() {
         const term = searchTerm();
         const search = document.querySelector('[data-kanban-search]');
-        if (search) search.dataset.active = String(!!term);
         let matched = 0;
         document.querySelectorAll('#kanban-board [data-kanban-category]').forEach(col => {
             const filter = filters.get(key(col)) || {};
@@ -222,9 +221,18 @@
         return true;
     }
     document.addEventListener('mousedown', event => {
-        const toggle = event.target.closest && event.target.closest('[data-kanban-search-toggle]');
+        const toggle = event.target.closest && event.target.closest('[data-kanban-search-toggle], [data-kanban-search-clear]');
         // Keep focus in the open input so the click handler, not focusout, decides whether to collapse.
         if (toggle && toggle.closest('[data-kanban-search]').dataset.open === 'true') event.preventDefault();
+    });
+    document.addEventListener('click', event => {
+        const clear = event.target.closest && event.target.closest('[data-kanban-search-clear]');
+        if (!clear) return;
+        const input = clear.closest('[data-kanban-search]').querySelector('[data-kanban-search-input]');
+        clearTimeout(searchTimer);
+        input.value = '';
+        window.kanbanClearSelection(); refresh();
+        input.focus();
     });
     document.addEventListener('click', event => {
         const toggle = event.target.closest && event.target.closest('[data-kanban-search-toggle]');
