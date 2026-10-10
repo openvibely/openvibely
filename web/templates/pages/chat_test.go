@@ -298,7 +298,7 @@ func TestChatContent_LiveCompletionSyncTargetsAssistantStreamContainer(t *testin
 		t.Fatal("live-created assistant bubble must hide mixture progress when aggregator output or terminal stream events arrive")
 	}
 	if !strings.Contains(bubbleSection, "var renderGeneration = 0;") ||
-		!strings.Contains(bubbleSection, "var renderPromise = liveRenderer(contentDiv, renderText);") ||
+		!strings.Contains(bubbleSection, "var renderPromise = liveRenderer(contentDiv, renderText, undefined, force);") ||
 		!strings.Contains(bubbleSection, "return renderPromise.then(function(committed)") ||
 		!strings.Contains(bubbleSection, "if (generation !== renderGeneration) return false;") ||
 		!strings.Contains(bubbleSection, "var renderIntentRevision = tracker ? (tracker.intentRevision || 0) : 0;") ||
