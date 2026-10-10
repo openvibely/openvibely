@@ -121,6 +121,38 @@ templ NewTaskContent(project *models.Project, agents []models.LLMConfig, agentDe
      var messageInput = pageRoot.querySelector('#task-message-input');
      if (messageInput) messageInput.value = '';
     }
+    function handleTaskCreationAfterRequest(pageRoot, event) {
+     var detail = event.detail || {};
+     var submittedForm = pageRoot && pageRoot.querySelector('#task-thread-form');
+     if (!submittedForm || detail.elt !== submittedForm) return;
+     var xhr = detail.xhr;
+     var succeeded = detail.successful || (xhr && xhr.status >= 200 && xhr.status < 300);
+     var error = pageRoot.querySelector('#new-task-error');
+     if (succeeded) {
+      clearTitleDraft(pageRoot);
+      if (error) error.textContent = '';
+      return;
+     }
+     if (!error || !pageRoot.isConnected) return;
+     var message = 'Unable to create the task. Please try again.';
+     if (xhr && typeof xhr.getResponseHeader === 'function') {
+      var contentType = xhr.getResponseHeader('Content-Type') || '';
+      if (contentType.indexOf('application/json') !== -1) {
+       try { var body = JSON.parse(xhr.responseText); if (typeof body.message === 'string') message = body.message; } catch (_) {}
+      } else if (contentType.indexOf('text/plain') !== -1 && xhr.responseText.trim()) {
+       message = xhr.responseText;
+      }
+     }
+     error.textContent = message;
+    }
+    function bindTaskCreationAfterRequest(pageRoot) {
+     var pageForm = pageRoot && pageRoot.querySelector('#task-thread-form');
+     if (!pageForm || pageForm.__openVibelyTaskCreationAfterRequestInstalled) return;
+     pageForm.__openVibelyTaskCreationAfterRequestInstalled = true;
+     pageForm.addEventListener('htmx:afterRequest', function(event) {
+      handleTaskCreationAfterRequest(pageRoot, event);
+     });
+    }
     if (!window.openVibelyNewTaskTitleDraftLifecycleInstalled) {
      window.openVibelyNewTaskTitleDraftLifecycleInstalled = true;
      document.body.addEventListener('input', function(event) {
@@ -140,35 +172,13 @@ templ NewTaskContent(project *models.Project, agents []models.LLMConfig, agentDe
      });
      document.body.addEventListener('htmx:historyRestore', function() {
       var restoredRoot = titleDraftRoot(document.getElementById('task-detail-content'));
-      if (restoredRoot) hydrateTitleDraft(restoredRoot);
-     });
-     document.body.addEventListener('htmx:afterRequest', function(event) {
-      var detail = event.detail || {};
-      var submittedForm = detail.elt;
-      if (!submittedForm || submittedForm.id !== 'task-thread-form') return;
-      var pageRoot = titleDraftRoot(submittedForm);
-      if (!pageRoot) return;
-      var xhr = detail.xhr;
-      var succeeded = detail.successful || (xhr && xhr.status >= 200 && xhr.status < 300);
-      var error = pageRoot.querySelector('#new-task-error');
-      if (succeeded) {
-       clearTitleDraft(pageRoot);
-       if (error) error.textContent = '';
-       return;
+      if (restoredRoot) {
+       hydrateTitleDraft(restoredRoot);
+       bindTaskCreationAfterRequest(restoredRoot);
       }
-      if (!error || !pageRoot.isConnected) return;
-      var message = 'Unable to create the task. Please try again.';
-      if (xhr && typeof xhr.getResponseHeader === 'function') {
-       var contentType = xhr.getResponseHeader('Content-Type') || '';
-       if (contentType.indexOf('application/json') !== -1) {
-        try { var body = JSON.parse(xhr.responseText); if (typeof body.message === 'string') message = body.message; } catch (_) {}
-       } else if (contentType.indexOf('text/plain') !== -1 && xhr.responseText.trim()) {
-        message = xhr.responseText;
-       }
-      }
-      error.textContent = message;
      });
     }
+    bindTaskCreationAfterRequest(titleDraftRoot(root));
     hydrateTitleDraft(titleDraftRoot(root));
     // Keep creation fields out of HTMX history; the app-level lifecycle handler
     // saves the title before resetting the form and hydrates cached history views.
