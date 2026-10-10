@@ -448,7 +448,7 @@ func (s *InsightsService) detectIncompleteFeatures(ctx context.Context, project 
 
 	staleCount := 0
 	for _, t := range staleTasks {
-		if time.Since(t.CreatedAt) > 72*time.Hour {
+		if t.Status == models.StatusPending && time.Since(t.CreatedAt) > 72*time.Hour {
 			staleCount++
 		}
 	}
