@@ -805,7 +805,7 @@ templ settingsContent(view ChannelsSettingsView) {
 			@OutboundTargetsModal(view.CurrentProjectID, view.ChannelTargets, view.SendMessageExplicitTargets)
 			<dialog id="delete_channel_confirm_modal" class="modal">
 				<div class="modal-box">
-					<button type="button" class="btn btn-circle btn-ghost btn-xs ov-modal-close" onclick="closeDeleteChannelConfirm()" aria-label="Close delete confirmation" title="Close delete confirmation">
+					<button data-tooltip-disabled type="button" class="btn btn-circle btn-ghost btn-xs ov-modal-close" onclick="closeDeleteChannelConfirm()" aria-label="Close delete confirmation">
 						<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
 					</button>
 					<h3 class="font-bold text-lg text-error pr-10">Delete Channel</h3>
@@ -824,7 +824,7 @@ templ settingsContent(view ChannelsSettingsView) {
 
 			<dialog id="x_config_modal" class="modal">
 				<div class="modal-box max-w-2xl">
-					<button type="button" class="btn btn-circle btn-ghost btn-xs ov-modal-close" onclick="closeXConfigModal()" aria-label="Close X configuration" title="Close X configuration">×</button>
+					<button data-tooltip-disabled type="button" class="btn btn-circle btn-ghost btn-xs ov-modal-close" onclick="closeXConfigModal()" aria-label="Close X configuration">×</button>
 					<h3 class="font-bold text-lg mb-2">Configure X (formerly Twitter)</h3>
 					<div class="alert alert-info text-sm mb-4"><span>Requires an X developer app with OAuth 1.0a user authentication and read/write permissions. Mention polling and posting remain subject to your X API access tier. OpenVibely cannot create or upgrade provider credentials.</span></div>
 					<form method="post" action="/channels/x/configure" hx-post="/channels/x/configure" hx-swap="none" class="space-y-3">
@@ -864,7 +864,7 @@ templ settingsContent(view ChannelsSettingsView) {
 
 			<!-- Channel Configuration Modal -->
 			<dialog id="channel_modal" class="modal">			<div class="modal-box max-w-2xl">
-				<button type="button" class="btn btn-circle btn-ghost btn-xs ov-modal-close" onclick="closeChannelModal()" aria-label="Close channel configuration" title="Close channel configuration">
+				<button data-tooltip-disabled type="button" class="btn btn-circle btn-ghost btn-xs ov-modal-close" onclick="closeChannelModal()" aria-label="Close channel configuration">
 					<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
 				</button>
 				<h3 id="channel_modal_title" class="font-bold text-lg mb-4 pr-10">Configure Telegram Bot</h3>
@@ -990,7 +990,7 @@ templ settingsContent(view ChannelsSettingsView) {
 
 		<dialog id="github_config_modal" class="modal">
 			<div class="modal-box max-w-2xl">
-				<button type="button" class="btn btn-circle btn-ghost btn-xs ov-modal-close" onclick="closeGitHubConfigModal()" aria-label="Close GitHub configuration" title="Close GitHub configuration">
+				<button data-tooltip-disabled type="button" class="btn btn-circle btn-ghost btn-xs ov-modal-close" onclick="closeGitHubConfigModal()" aria-label="Close GitHub configuration">
 					<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
 				</button>
 				<h3 class="font-bold text-lg mb-4 pr-10">Configure GitHub</h3>
@@ -1102,7 +1102,7 @@ templ settingsContent(view ChannelsSettingsView) {
 
 		<dialog id="slack_config_modal" class="modal">
 			<div class="modal-box max-w-2xl">
-				<button type="button" class="btn btn-circle btn-ghost btn-xs ov-modal-close" onclick="closeSlackConfigModal()" aria-label="Close Slack configuration" title="Close Slack configuration">
+				<button data-tooltip-disabled type="button" class="btn btn-circle btn-ghost btn-xs ov-modal-close" onclick="closeSlackConfigModal()" aria-label="Close Slack configuration">
 					<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
 				</button>
 				<h3 class="font-bold text-lg mb-4 pr-10">Configure Slack</h3>
@@ -1214,7 +1214,7 @@ templ settingsContent(view ChannelsSettingsView) {
 
 		<dialog id="discord_config_modal" class="modal" onclose="resetDiscordConfigForm()">
 			<div class="modal-box max-w-2xl">
-				<button type="button" class="btn btn-circle btn-ghost btn-xs ov-modal-close" onclick="closeDiscordConfigModal()" aria-label="Close Discord configuration" title="Close Discord configuration">×</button>
+				<button data-tooltip-disabled type="button" class="btn btn-circle btn-ghost btn-xs ov-modal-close" onclick="closeDiscordConfigModal()" aria-label="Close Discord configuration">×</button>
 				<h3 class="font-bold text-lg mb-4 pr-10">Configure Discord</h3>
 					<form id="discord_config_form" method="post" action="/channels/discord/configure" hx-post="/channels/discord/configure" hx-swap="none">
 						<div class="alert alert-info mb-4 text-sm">
@@ -1258,7 +1258,7 @@ templ settingsContent(view ChannelsSettingsView) {
 
 			<dialog id="email_config_modal" class="modal">
 				<div class="modal-box max-w-2xl">
-					<button type="button" class="btn btn-circle btn-ghost btn-xs ov-modal-close" onclick="closeEmailConfigModal()" aria-label="Close Email configuration" title="Close Email configuration">
+					<button data-tooltip-disabled type="button" class="btn btn-circle btn-ghost btn-xs ov-modal-close" onclick="closeEmailConfigModal()" aria-label="Close Email configuration">
 						<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
 					</button>
 					<h3 class="font-bold text-lg mb-4 pr-10">Configure Email</h3>
@@ -1342,7 +1342,7 @@ templ settingsContent(view ChannelsSettingsView) {
 
 			<!-- Webhook Configuration Modal -->		<dialog id="webhook_modal" class="modal">
 			<div class="modal-box max-w-4xl p-0 overflow-hidden">
-				<button type="button" class="btn btn-circle btn-ghost btn-xs ov-modal-close" onclick="closeWebhookModal()" aria-label="Close webhook configuration" title="Close webhook configuration">
+				<button data-tooltip-disabled type="button" class="btn btn-circle btn-ghost btn-xs ov-modal-close" onclick="closeWebhookModal()" aria-label="Close webhook configuration">
 					<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
 				</button>
 				<div class="px-6 pt-6 pb-2 pr-14">
@@ -2431,7 +2431,7 @@ templ OutboundTargetsCard(currentProjectID string, summary repository.ChannelTar
 templ OutboundTargetsModal(currentProjectID string, targets []models.ChannelTarget, explicitAllowed bool) {
 		<dialog id="outbound_targets_modal" class="modal" onclose="handleOutboundTargetsModalClose()">
 		<div class="modal-box max-w-5xl">
-			<button type="button" class="btn btn-circle btn-ghost btn-xs ov-modal-close" onclick="closeOutboundTargetsModal()" aria-label="Close outbound message targets" title="Close outbound message targets">
+			<button data-tooltip-disabled type="button" class="btn btn-circle btn-ghost btn-xs ov-modal-close" onclick="closeOutboundTargetsModal()" aria-label="Close outbound message targets">
 				<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
 			</button>
 			@OutboundTargetsSection(currentProjectID, targets, explicitAllowed, "")

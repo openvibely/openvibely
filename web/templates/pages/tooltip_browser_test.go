@@ -28,6 +28,8 @@ func TestBrowserFunctional_SharedTooltips(t *testing.T) {
 		b.waitFor("card hint returns outside kebab", `String(!document.getElementById('ov-shared-tooltip').hidden)`, "true")
 		b.evaluate(`kebab.removeAttribute('data-kanban-menu-trigger');kebab.setAttribute('data-tooltip-disabled','');icon.dispatchEvent(new PointerEvent('pointerover',{bubbles:true}));'disabled'`)
 		b.waitFor("opted-out close button blocks inherited hint", `String(document.getElementById('ov-shared-tooltip').hidden)`, "true")
+		b.evaluate(`kebab.removeAttribute('data-tooltip-disabled');kebab.classList.add('ov-modal-close');kebab.setAttribute('aria-label','Close dialog');kebab.title='Close dialog';icon.dispatchEvent(new PointerEvent('pointerover',{bubbles:true}));kebab.dispatchEvent(new FocusEvent('focusin',{bubbles:true}));'modal-close'`)
+		b.waitFor("modal close suppresses own and inherited hints", `String(document.getElementById('ov-shared-tooltip').hidden && kebab.getAttribute('aria-label')==='Close dialog')`, "true")
 		b.evaluate(`card.remove();'removed'`)
 
 		b.evaluate(`document.getElementById('native').focus();document.getElementById('native').dispatchEvent(new FocusEvent('focusin',{bubbles:true}));'ready'`)
