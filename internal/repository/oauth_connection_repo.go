@@ -11,6 +11,7 @@ import (
 )
 
 var (
+	ErrOAuthConnectionChanged     = errors.New("OAuth account changed during sign-in; connect OAuth again")
 	ErrOAuthConnectionNotFound    = errors.New("OAuth connection not found")
 	ErrOAuthConnectionInvalidMove = errors.New("invalid OAuth connection model move")
 	ErrOAuthConnectionLinked      = errors.New("OAuth connection has linked models")
@@ -193,6 +194,17 @@ func (r *LLMConfigRepo) ReplaceLinkedOAuthConnectionWithProfileIfRevision(ctx co
 	}
 	defer cleanup()
 
+	updated, err := replaceLinkedOAuthConnectionTx(ctx, tx, modelID, connectionID, expectedRevision, provider, accessToken, refreshToken, expiresAt, accountID, displayName, principalHash)
+	if err != nil || !updated {
+		return updated, err
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func replaceLinkedOAuthConnectionTx(ctx context.Context, tx *manualTx, modelID, connectionID string, expectedRevision int64, provider models.LLMProvider, accessToken, refreshToken string, expiresAt int64, accountID, displayName, principalHash string) (bool, error) {
 	displayName = strings.TrimSpace(displayName)
 	principalHash = strings.TrimSpace(principalHash)
 	result, err := tx.ExecContext(ctx, `
@@ -218,9 +230,6 @@ func (r *LLMConfigRepo) ReplaceLinkedOAuthConnectionWithProfileIfRevision(ctx co
 		if err := adoptVerifiedOAuthPrincipalTx(ctx, tx, connectionID, provider, expectedRevision+1, principalHash); err != nil {
 			return false, err
 		}
-	}
-	if err := tx.Commit(); err != nil {
-		return false, err
 	}
 	return true, nil
 }
@@ -595,5 +604,30 @@ func (r *LLMConfigRepo) DeleteOAuthConnection(ctx context.Context, connectionID 
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit delete OAuth connection tx: %w", err)
 	}
+	return nil
+}
+
+// Apply draft credentials inside the model transaction so failed or stale saves
+// cannot rotate a shared account independently of the model changes.
+func applyPendingModelOAuthTx(ctx context.Context, tx *manualTx, cfg *models.LLMConfig) error {
+	draft := cfg.PendingOAuthConnection
+	if draft == nil {
+		return nil
+	}
+	if cfg.AuthMethod != models.AuthMethodOAuth || cfg.Provider != draft.Provider || (draft.ID != "" && draft.ID != cfg.OAuthConnectionID) {
+		return fmt.Errorf("OAuth account selection changed; connect OAuth again")
+	}
+	revision := draft.Revision
+	if draft.ID == "" {
+		revision = cfg.OAuthConfigRevision
+	}
+	updated, err := replaceLinkedOAuthConnectionTx(ctx, tx, cfg.ID, cfg.OAuthConnectionID, revision, cfg.Provider, draft.AccessToken, draft.RefreshToken, draft.ExpiresAt, draft.AccountID, draft.ProviderDisplayName, draft.PrincipalHash)
+	if err != nil {
+		return err
+	}
+	if !updated {
+		return ErrOAuthConnectionChanged
+	}
+	cfg.OAuthConfigRevision = revision + 1
 	return nil
 }
