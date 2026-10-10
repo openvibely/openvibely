@@ -202,9 +202,17 @@ func TestBrowserFunctional_IncrementalChatRendering(t *testing.T) {
   await renderLiveChatContent(replacement, answer+prose, false);
   assert(replacement.firstChild === stable && replacement._incrementalChat.offset > offset, 'closed control caused a growing full-prefix render');
  }
+ // Commit compaction before the tool arrives: activity rows must not consume tool IDs.
+ const compacted = '[Compaction started]\n[Compaction done | 50]\n'+prose;
+ await renderLiveChatContent(replacement, compacted, false);
+ assert(replacement._incrementalChat.offset > 8192, 'compaction prefix was not committed');
+ assert(replacement.firstChild.querySelector('[data-compaction-state]'), 'committed compaction row missing');
  // Expansion and a parked output scroll survive terminal reconciliation and a morph.
- const output = prose+'[Using tool: bash]\n[Tool bash done]\n'+('a line of output\n').repeat(100)+'[/Tool]\n'+prose;
+ const output = compacted+'[Using tool: bash]\n[Tool bash done]\n'+('a line of output\n').repeat(100)+'[/Tool]\n'+prose;
  await renderLiveChatContent(replacement, output, false);
+ const toolID = replacement.querySelector('.stream-tool[data-tool-render-id]').getAttribute('data-tool-render-id');
+ await renderStreamingContent(full, output, false);
+ assert(toolID === full.querySelector('.stream-tool[data-tool-render-id]').getAttribute('data-tool-render-id'), 'committed compaction changed tool ordinal');
  let toggle = replacement.querySelector('.stream-tool-output-toggle');
  assert(toggle && toggle.getAttribute('aria-expanded') === 'false', 'missing collapsed output fixture');
  toggle.click();
@@ -212,6 +220,7 @@ func TestBrowserFunctional_IncrementalChatRendering(t *testing.T) {
  outputScroll.style.height = '50px'; outputScroll.style.overflow = 'auto'; outputScroll.scrollTop = 30;
  outputScroll.dispatchEvent(new Event('scroll'));
  await renderLiveChatContent(replacement, output, false, true);
+ assert(replacement.querySelector('.stream-tool[data-tool-render-id]').getAttribute('data-tool-render-id') === toolID, 'terminal reconciliation changed tool ID');
  assert(replacement.querySelector('.stream-tool-output-toggle').getAttribute('aria-expanded') === 'true', 'terminal reconciliation collapsed output');
  assert(replacement.querySelector('[data-tool-row="out"]').getAttribute('data-scroll-pinned') === 'false', 'terminal reconciliation lost output scroll intent');
  const morphed = replacement.cloneNode(false); replacement.replaceWith(morphed);
