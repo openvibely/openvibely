@@ -3,6 +3,9 @@ package pages
 import (
 	"bytes"
 	"context"
+	"github.com/openvibely/openvibely/web/static"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"testing"
 )
@@ -372,7 +375,9 @@ func TestBrowserFunctional_ModelHelpLayout(t *testing.T) {
     #ov-shared-tooltip { transition:none; }
     </style><main id="reconnect-result"></main><script>
     window.htmx={process:function(){}};
+    })();
     </script>` + content.String() + `<script>
+    (async function(){
     try {
         var modal=document.getElementById('new_model_modal');
         var box=modal.querySelector('.modal-box');
@@ -412,8 +417,12 @@ func TestBrowserFunctional_ModelHelpLayout(t *testing.T) {
                 body.scrollTop=body.scrollHeight;
                 if(Math.abs(footer.getBoundingClientRect().top-footerTop)>1 || footer.getBoundingClientRect().bottom>box.getBoundingClientRect().bottom)
                     throw Error('Footer scrolls out of view');
-                button.focus();
+                button.scrollIntoView({block:'nearest'});
+                await new Promise(resolve=>setTimeout(resolve,100));
+                document.dispatchEvent(new KeyboardEvent('keydown',{key:'Tab',bubbles:true}));
+                button.focus({preventScroll:true});
                 if(!document.hasFocus()) button.dispatchEvent(new FocusEvent('focusin',{bubbles:true}));
+                await new Promise(resolve=>setTimeout(resolve,450));
                 var row=button.parentElement;
                 var label=row.querySelector('label');
                 var iconRect=button.getBoundingClientRect();
@@ -445,8 +454,20 @@ func TestBrowserFunctional_ModelHelpLayout(t *testing.T) {
         document.getElementById('reconnect-result').setAttribute('data-test-result','fail');
         document.getElementById('reconnect-result').setAttribute('data-test-error',String(e.stack));
     }
+    })();
     </script>`
-	runReconnectChromeFixture(t, fixture)
+	chrome := chatNavigationChromePath(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if static.ServeAsset(w, r) {
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write([]byte("<!doctype html><html><body>" + fixture + "</body></html>"))
+	}))
+	defer server.Close()
+	runComposerFocusCDP(t, chrome, server.URL, "model-help-layout", func(b *composerFocusCDP) {
+		b.waitFor("model help layout", `(function(){var result=document.getElementById('reconnect-result');if(!result)return 'loading';return result.getAttribute('data-test-error')||result.getAttribute('data-test-result')||'pending'})()`, "pass")
+	})
 }
 
 func TestBrowserFunctional_ModelModalSections(t *testing.T) {

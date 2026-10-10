@@ -33,6 +33,9 @@ func TestInsightCardMutationURLsIncludeProjectContext(t *testing.T) {
 		Confidence: 0.8,
 	}
 	newBody := renderInsightsComponentForTest(t, InsightCard(newInsight))
+	if !strings.Contains(newBody, `aria-label="Delete insight"`) {
+		t.Fatal("delete action needs an accessible name")
+	}
 	for _, expected := range []string{
 		`hx-patch="/insights/insight-new/status?project_id=project-insights"`,
 		`hx-delete="/insights/insight-new?project_id=project-insights"`,
