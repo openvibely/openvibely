@@ -58,6 +58,30 @@ func TestBrowserFunctional_AutomationBreadcrumbShortcuts(t *testing.T) {
 				if lists.Load() != 0 {
 					t.Fatal("editor shortcut fetched navigation list")
 				}
+				b.evaluate(`var menu=document.createElement('div');menu.className='dropdown';menu.setAttribute('data-automation-` + map[bool]string{true: "builder-actions", false: "live-menu"}[mode == "edit"] + `','');menu.innerHTML='<button id="menu-action">Action</button>';document.body.appendChild(menu);document.getElementById('menu-action').focus();'ready'`)
+				for _, code := range []string{"ArrowDown", "ArrowUp", "KeyL"} {
+					key(code)
+				}
+				if lists.Load() != 0 {
+					t.Fatal("open actions menu fetched navigation list")
+				}
+				b.waitFor("menu keeps current automation", `location.pathname`, "/automations/a"+suffix)
+				b.evaluate(`menu.remove();document.querySelector('[data-breadcrumb-selector-button]').focus();'ready'`)
+				if mode == "edit" {
+					b.evaluate(`var builder=document.createElement('div');builder.setAttribute('data-automation-yaml-builder','');builder.hasUnsavedAutomationChanges=()=>true;document.body.appendChild(builder);window.confirmCalls=0;window.confirm=()=>{window.confirmCalls++;return false};'ready'`)
+					key("ArrowDown")
+					b.waitFor("dirty edit asks before leaving", `String(window.confirmCalls)`, "1")
+					b.waitFor("cancel preserves page", `location.pathname`, "/automations/a"+suffix)
+					b.waitFor("cancel preserves visits", `JSON.parse(sessionStorage.getItem('automation-shortcuts-p')).current`, "a")
+					b.evaluate(`window.confirm=()=>{window.confirmCalls++;return true};'ready'`)
+					key("ArrowDown")
+					b.waitFor("discard navigates", `location.pathname`, "/automations/b"+suffix)
+					b.evaluate(`builder.remove();'ready'`)
+					key("KeyL")
+					b.waitFor("return after discard", `location.pathname`, "/automations/a"+suffix)
+					lists.Store(0)
+					b.evaluate(`var visits=JSON.parse(sessionStorage.getItem('automation-shortcuts-p'));visits.items=null;sessionStorage.setItem('automation-shortcuts-p',JSON.stringify(visits));'ready'`)
+				}
 				b.evaluate(`document.querySelector('[data-breadcrumb-selector-button]').focus();'ready'`)
 				for _, step := range []struct{ code, id string }{{"ArrowDown", "b"}, {"ArrowDown", "c"}, {"ArrowUp", "b"}, {"KeyL", "c"}, {"KeyL", "b"}, {"ArrowUp", "a"}, {"ArrowUp", "a"}} {
 					key(step.code)
