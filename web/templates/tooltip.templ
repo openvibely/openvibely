@@ -62,7 +62,7 @@ templ Tooltips() {
    render(text);describe(el,true);if(el.matches('[data-model-help],[data-model-setting-help]'))el.setAttribute('aria-expanded','true');
    tip.hidden=false;if(nativePopover&&!tip.matches(':popover-open'))tip.showPopover();position(point);
   }
-  function blocked(target){return target instanceof Element&&!!target.closest('[data-kanban-menu-trigger],[data-tooltip-disabled]');}
+  function blocked(target){return target instanceof Element&&!!target.closest('[data-kanban-menu-trigger],[data-tooltip-disabled],.ov-modal-close,.modal-backdrop');}
   function trigger(target){if(changing||blocked(target))return null;return target instanceof Element?target.closest(selector)||(active&&active.contains(target)?active:null):null;}
   document.addEventListener('pointerover',function(e){
    if(dismissed&&!dismissed.contains(e.target))dismissed=null;

@@ -360,7 +360,7 @@ templ projectStatsTableBody(maxWorkers int, runningWorkers int, totalRunning int
 						step="1"
 						class="input input-bordered input-xs w-20 worker-limit-input"
                         data-unlimited={ fmt.Sprintf("%t", maxWorkers == 0) }
-						title="0 = Unlimited; positive values = Max concurrent workers across all projects"
+						data-tooltip-disabled
 						data-project-id="global"
 					/><span class="worker-limit-infinity" aria-hidden="true">∞</span></span>
 					<button type="submit" class="btn btn-xs btn-primary">Set</button>
@@ -422,7 +422,7 @@ templ projectStatsTableBody(maxWorkers int, runningWorkers int, totalRunning int
 						aria-label="Project worker limit (0 means no project cap)"
 						class="input input-bordered input-xs w-20 worker-limit-input"
                         data-unlimited={ fmt.Sprintf("%t", ps.MaxWorkers == nil || *ps.MaxWorkers == 0) }
-						title="0 = No limit; positive values must not exceed the global worker limit"
+						data-tooltip-disabled
 						data-project-id={ ps.ID }
 					/><span class="worker-limit-infinity" aria-hidden="true">∞</span></span>						<button type="submit" class="btn btn-xs btn-primary">Set</button>
 					</form>

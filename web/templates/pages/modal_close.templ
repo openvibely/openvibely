@@ -1,12 +1,11 @@
 package pages
 
 templ ModalCloseButton(dialogID string, label string) {
-	<button
+	<button data-tooltip-disabled
 		type="button"
 		class="btn btn-circle btn-ghost btn-xs ov-modal-close"
 		onclick={ templ.ComponentScript{Call: dialogID + ".close()"} }
 		aria-label={ label }
-		title={ label }
 	>
 		<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
 			<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>

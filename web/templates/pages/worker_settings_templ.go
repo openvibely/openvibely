@@ -615,7 +615,7 @@ func projectStatsTableBody(maxWorkers int, runningWorkers int, totalRunning int,
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 28, "\" title=\"0 = Unlimited; positive values = Max concurrent workers across all projects\" data-project-id=\"global\"><span class=\"worker-limit-infinity\" aria-hidden=\"true\">∞</span></span> <button type=\"submit\" class=\"btn btn-xs btn-primary\">Set</button></form></td><td>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 28, "\" data-tooltip-disabled data-project-id=\"global\"><span class=\"worker-limit-infinity\" aria-hidden=\"true\">∞</span></span> <button type=\"submit\" class=\"btn btn-xs btn-primary\">Set</button></form></td><td>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -867,7 +867,7 @@ func projectStatsTableBody(maxWorkers int, runningWorkers int, totalRunning int,
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 54, "\" title=\"0 = No limit; positive values must not exceed the global worker limit\" data-project-id=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 54, "\" data-tooltip-disabled data-project-id=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}

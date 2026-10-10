@@ -4,7 +4,7 @@ package layout
 templ ImageGallery() {
  <dialog id="image-gallery" class="bg-base-200 text-base-content" aria-label="Image preview">
   <div class="modal-box image-gallery-shell bg-base-200">
-   <header><span data-gallery-name></span><span data-gallery-count aria-live="polite"></span><button type="button" data-gallery-close class="btn btn-circle btn-ghost btn-xs ov-modal-close" aria-label="Close image preview" title="Close image preview"><svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg></button></header>
+   <header><span data-gallery-name></span><span data-gallery-count aria-live="polite"></span><button data-tooltip-disabled type="button" data-gallery-close class="btn btn-circle btn-ghost btn-xs ov-modal-close" aria-label="Close image preview"><svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg></button></header>
    <div class="image-gallery-viewer">
    <div data-gallery-stage><img data-gallery-image alt="" draggable="false"/><p data-gallery-status role="status"></p></div>
     <button type="button" data-gallery-prev class="image-gallery-arrow" aria-label="Previous image"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 6 9 12 15 18"/></svg></button>
