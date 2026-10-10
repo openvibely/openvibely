@@ -14,6 +14,7 @@ templ Tooltips() {
   if (window.openVibelyTooltip) return;
   var tip=document.createElement('div');tip.id='ov-shared-tooltip';tip.className='ov-tooltip';tip.setAttribute('role','tooltip');tip.hidden=true;tip.setAttribute('popover','manual');document.body.appendChild(tip);
   var pressing=false;
+  var suppressRestoredFocus=false;
   var changing=false,active=null,pinned=false,timer=null,dismissed=null,pointer=null,nativePopover=typeof tip.showPopover==='function';
   if(!nativePopover)tip.removeAttribute('popover');
   var selector='[title],[data-tip],[data-ov-tooltip],[data-model-help],[data-model-setting-help]';
@@ -104,10 +105,11 @@ templ Tooltips() {
   window.addEventListener('mouseup',releasePress,true);
   document.addEventListener('pointercancel',releasePress,true);
   window.addEventListener('blur',function(){releasePress();close();});
-  document.addEventListener('focusin',function(e){if(blocked(e.target)){if(!pinned)close();return;}var el=trigger(e.target);if(el)show(el,textFor(el));});
+  document.addEventListener('focusin',function(e){if(suppressRestoredFocus||blocked(e.target)){if(!pinned)close();return;}var el=trigger(e.target);if(el)show(el,textFor(el));});
   document.addEventListener('focusout',function(e){if(!pinned&&active&&active.contains(e.target)&&!active.contains(e.relatedTarget)&&!active.matches(':hover'))close();});
   document.addEventListener('click',function(e){var el=trigger(e.target);if(el&&el.matches('[data-model-help],[data-model-setting-help]')){if(active===el&&pinned)close();else show(el,textFor(el),true);}else if(!tip.contains(e.target))close();});
-  document.addEventListener('keydown',function(e){if(e.key==='Escape'&&active){if(pinned){e.preventDefault();e.stopPropagation();}close();}},true);
+  // Menu shortcuts restore focus to the opener; that is not tooltip navigation.
+  document.addEventListener('keydown',function(e){if(e.key==='Tab')suppressRestoredFocus=false;else if(menuOpen())suppressRestoredFocus=true;if(e.key==='Escape'&&active){if(pinned){e.preventDefault();e.stopPropagation();}close();}},true);
   document.addEventListener('scroll',function(e){if(active&&!tip.contains(e.target)&&(e.target===document||(e.target instanceof Element&&e.target.contains(active))))close();},true);window.addEventListener('resize',close);
   document.addEventListener('close',function(e){if(active&&e.target.contains(active)&&!e.target.open)close();},true);
   document.addEventListener('model-section-change',close);
