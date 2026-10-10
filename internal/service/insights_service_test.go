@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -392,6 +393,99 @@ func TestInsightsService_RunAnalysisCreatesReportAcrossDetectors(t *testing.T) {
 	}
 	if len(duplicateIDs) != 0 {
 		t.Fatalf("duplicate analysis should not create duplicate insights: %v", duplicateIDs)
+	}
+}
+
+func TestInsightsService_RunAnalysisStalePendingTasks(t *testing.T) {
+	for _, tc := range []struct {
+		name                                            string
+		pending, running, recentPending, backlogPending int
+		wantCount                                       int
+	}{
+		{name: "four old pending", pending: 4, wantCount: 4},
+		{name: "four old running", running: 4},
+		{name: "three old pending", pending: 3},
+		{name: "mixed below threshold", pending: 3, running: 4},
+		{name: "mixed above threshold", pending: 4, running: 4, wantCount: 4},
+		{name: "recent pending excluded", pending: 3, recentPending: 4},
+		{name: "backlog pending excluded", pending: 3, backlogPending: 4},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db := testutil.NewTestDB(t)
+			ctx := context.Background()
+			projectRepo := repository.NewProjectRepo(db)
+			taskRepo := repository.NewTaskRepo(db, nil)
+			insightsRepo := repository.NewInsightsRepo(db)
+			svc := NewInsightsService(insightsRepo, taskRepo, projectRepo, repository.NewLLMConfigRepo(db), repository.NewExecutionRepo(db))
+			project := &models.Project{Name: "Stale pending analysis"}
+			if err := projectRepo.Create(ctx, project); err != nil {
+				t.Fatalf("create project: %v", err)
+			}
+			for _, group := range []struct {
+				count    int
+				status   models.TaskStatus
+				category models.TaskCategory
+				age      string
+			}{
+				{tc.pending, models.StatusPending, models.CategoryActive, "-96 hours"},
+				{tc.running, models.StatusRunning, models.CategoryActive, "-96 hours"},
+				{tc.recentPending, models.StatusPending, models.CategoryActive, "-48 hours"},
+				{tc.backlogPending, models.StatusPending, models.CategoryBacklog, "-96 hours"},
+			} {
+				for i := 0; i < group.count; i++ {
+					task := &models.Task{ProjectID: project.ID, Title: fmt.Sprintf("%s %s %s task %d", group.category, group.status, group.age, i), Prompt: "finish", Category: group.category, Status: group.status, Priority: 2}
+					if err := taskRepo.Create(ctx, task); err != nil {
+						t.Fatalf("create task: %v", err)
+					}
+					if _, err := db.ExecContext(ctx, `UPDATE tasks SET created_at = datetime('now', ?) WHERE id = ?`, group.age, task.ID); err != nil {
+						t.Fatalf("age task: %v", err)
+					}
+				}
+			}
+
+			for run := 0; run < 2; run++ {
+				report, err := svc.RunAnalysis(ctx, project.ID)
+				if err != nil {
+					t.Fatalf("RunAnalysis: %v", err)
+				}
+				wantNew := 0
+				if tc.wantCount > 0 && run == 0 {
+					wantNew = 1
+				}
+				if !strings.Contains(report.AnalysisLog, fmt.Sprintf("Incomplete features: found %d", wantNew)) {
+					t.Fatalf("run %d: unexpected analysis log: %s", run, report.AnalysisLog)
+				}
+				ids, err := report.ParseInsightIDs()
+				if err != nil || len(ids) != wantNew {
+					t.Fatalf("run %d: insight IDs = %v, error = %v; want %d IDs", run, ids, err, wantNew)
+				}
+				insights, err := insightsRepo.ListByType(ctx, project.ID, models.InsightIncompleteFeature, 100)
+				if err != nil {
+					t.Fatalf("list insights: %v", err)
+				}
+				wantStored := 0
+				if tc.wantCount > 0 {
+					wantStored = 1
+				}
+				if len(insights) != wantStored {
+					t.Fatalf("run %d: stored insights = %d, want %d", run, len(insights), wantStored)
+				}
+				for _, insight := range insights {
+					if insight.Title != "Stale pending tasks detected" {
+						t.Fatalf("unexpected insight: %s", insight.Title)
+					}
+					var evidence struct {
+						StaleCount int `json:"stale_count"`
+					}
+					if err := json.Unmarshal([]byte(insight.Evidence), &evidence); err != nil {
+						t.Fatalf("decode evidence: %v", err)
+					}
+					if evidence.StaleCount != tc.wantCount {
+						t.Fatalf("stale count = %d, want %d", evidence.StaleCount, tc.wantCount)
+					}
+				}
+			}
+		})
 	}
 }
 
