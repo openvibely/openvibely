@@ -108,6 +108,13 @@ templ Tooltips() {
    }
    leave();clearTimeout(timer);timer=setTimeout(function(){if(active&&active.matches(':hover'))return;close();},100);
   });
+  // A text update can detach the hovered child before its pointerout bubbles.
+  // Listen on the tooltip surface itself so leaving it still dismisses the hint.
+  tip.addEventListener('pointerleave',function(e){
+   if(pinned||!active)return;
+   if(e.relatedTarget&&active.contains(e.relatedTarget)){clearTimeout(timer);return;}
+   leave();clearTimeout(timer);timer=setTimeout(function(){if(active&&(active.matches(':hover')||tip.matches(':hover')))return;close();},100);
+  });
   function dismissOnPress(e){warmUntil=0;dismissed=trigger(e.target)||active;pressing=true;close();}
   document.addEventListener('pointerdown',dismissOnPress,true);
   document.addEventListener('mousedown',dismissOnPress,true);
