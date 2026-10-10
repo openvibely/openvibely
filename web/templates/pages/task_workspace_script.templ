@@ -121,8 +121,8 @@ templ TaskWorkspaceScript() {
 			root.querySelector('#task-breadcrumb-changes').hidden = !diff;
 			var title = root.querySelector('#task-breadcrumb-title');
 			title.disabled = !diff;
-			if (diff) title.title = 'Back to thread';
-			else { title.removeAttribute('title'); title.removeAttribute('data-ov-tooltip'); }
+			if (diff) { title.title = back.title || back.dataset.ovTooltip; title.setAttribute('aria-keyshortcuts', back.getAttribute('aria-keyshortcuts')); }
+			else { title.removeAttribute('title'); title.removeAttribute('data-ov-tooltip'); title.removeAttribute('aria-keyshortcuts'); }
 			resize(width);
 			if (diff) {
 				_startFileChangesSSE(taskID);
@@ -173,6 +173,8 @@ templ TaskWorkspaceScript() {
 		var breadcrumb = root.querySelector('[data-breadcrumb-selector][data-searchable-selector-kind="Task"]');
 		var breadcrumbButton = breadcrumb && breadcrumb.querySelector('[data-breadcrumb-selector-button]');
 		var apple = /Mac|iPhone|iPad/.test(navigator.platform);
+		back.title = 'Back to thread (' + (apple ? '⌘⇧D' : 'Ctrl+Shift+D') + ')';
+		back.setAttribute('aria-keyshortcuts', apple ? 'Meta+Shift+D' : 'Control+Shift+D');
 		opener.title = 'Toggle task details (' + (apple ? '⌘⇧B' : 'Ctrl+Shift+B') + ')';
 		if (breadcrumbButton) breadcrumbButton.title = 'Switch task (' + (apple ? '⌘K' : 'Ctrl+K') + '); Previous/next: ' + (apple ? '⌘⇧↑/↓' : 'Ctrl+Shift+↑/↓') + '; Last visited: ' + (apple ? '⌘⇧L' : 'Ctrl+Shift+L');
 		function navigateTask(url, cycling) {
