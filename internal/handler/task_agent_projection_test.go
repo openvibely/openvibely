@@ -50,6 +50,31 @@ func TestHandlerTaskUIAgentProjectionAcrossRenders(t *testing.T) {
 		createRichTaskUIAgent(t, agentRepo, fmt.Sprintf("Task UI Filler Agent %04d", i))
 	}
 
+	t.Run("form options use compact projection", func(t *testing.T) {
+		counter.Reset()
+		counter.SetEnabled(true)
+		options := h.listTaskFormAgentDefinitions(ctx, project, nil)
+		counter.SetEnabled(false)
+		assertTaskUIAgentProjectionQuery(t, counter)
+		ids := agentIDs(options)
+		for _, agent := range []*models.Agent{global, projectAgent} {
+			found := false
+			for _, id := range ids {
+				if id == agent.ID {
+					found = true
+				}
+			}
+			if !found {
+				t.Errorf("form options missing available Agent %q", agent.Name)
+			}
+		}
+		for _, id := range ids {
+			if id == foreign.ID || id == disabled.ID {
+				t.Errorf("form options include unavailable Agent %q", id)
+			}
+		}
+	})
+
 	cardTask := createTask(t, h, project, "Task UI Agent Badge", func(task *models.Task) {
 		task.AgentDefinitionID = &global.ID
 	})

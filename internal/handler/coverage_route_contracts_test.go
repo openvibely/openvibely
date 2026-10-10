@@ -1134,16 +1134,31 @@ func TestTaskFormAndAgentSelectionHelpers(t *testing.T) {
 	currentOther := agents[2].ID
 	formAgents := tc.handler.listTaskFormAgentDefinitions(ctx, project.ID, &currentOther)
 	require.NotContains(t, agentIDs(formAgents), currentOther)
-	require.Contains(t, agentIDs(formAgents), agents[0].ID)
-	require.Contains(t, agentIDs(formAgents), agents[1].ID)
+	require.ElementsMatch(t, []string{agents[0].ID, agents[1].ID}, agentIDs(formAgents))
 	currentProject := agents[1].ID
 	formAgents = tc.handler.listTaskFormAgentDefinitions(ctx, project.ID, &currentProject)
 	require.Contains(t, agentIDs(formAgents), currentProject)
 	resolved, err := tc.handler.resolvePrimaryAgentDefinition(ctx, project.ID, agents[1].ID)
 	require.NoError(t, err)
 	require.Equal(t, agents[1].ID, *resolved)
-	_, err = tc.handler.resolvePrimaryAgentDefinition(ctx, project.ID, agents[2].ID)
-	require.Error(t, err)
+	type invalidAgent struct {
+		name string
+		id   string
+	}
+	invalidAgents := []invalidAgent{{name: "unknown", id: "unknown-agent"}}
+	for _, agent := range agents[2:] {
+		invalidAgents = append(invalidAgents, invalidAgent{name: agent.Name, id: agent.ID})
+	}
+	for _, agent := range invalidAgents {
+		t.Run(agent.name, func(t *testing.T) {
+			resolved, err := tc.handler.resolvePrimaryAgentDefinition(ctx, project.ID, agent.id)
+			require.Nil(t, resolved)
+			var httpErr *echo.HTTPError
+			require.ErrorAs(t, err, &httpErr)
+			require.Equal(t, http.StatusBadRequest, httpErr.Code)
+			require.Equal(t, "invalid primary agent", httpErr.Message)
+		})
+	}
 
 	formContext := func(values url.Values) echo.Context {
 		req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(values.Encode()))
