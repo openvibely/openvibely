@@ -595,11 +595,12 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 					for _, slot := range getTimeSlots() {
 						<div class="grid flex-1 schedule-grid-row last:border-b-0" style="grid-template-columns: 60px repeat(7, 1fr); border-bottom: 1px solid var(--ov-schedule-grid-border);">
 							<!-- Time Label -->
-							<div class="py-1 px-2 text-[10px] font-medium text-right bg-base-200 schedule-time-label" style="border-right: 1px solid var(--ov-schedule-grid-border);">
+							<div data-calendar-hour={ fmt.Sprint(slot.Hour) } role="button" tabindex="0" aria-pressed="false" aria-label={ "Select " + slot.Label + " across displayed dates" } class="py-1 px-2 text-[10px] font-medium text-right bg-base-200 schedule-time-label" style="border-right: 1px solid var(--ov-schedule-grid-border);">
 								{ slot.Label }
 							</div>
 							<!-- Day Columns -->
 							for _, day := range weekData.WeekDays {
+                                {{ hourInterval := scheduleHourInterval(day.Date, slot.Hour) }}
 								<div
 									class={
 										"p-0.5 min-h-[32px] min-w-0 last:border-r-0 drop-zone",
@@ -607,6 +608,8 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 									}
 									data-date={ day.Date.Format("2006-01-02") }
 									data-hour={ fmt.Sprintf("%d", slot.Hour) }
+                                    data-start={ fmt.Sprint(hourInterval.StartAt) }
+                                    data-end={ fmt.Sprint(hourInterval.EndAt) }
                                     title="Select schedules (Drag empty space)"
 									style="border-right: 1px solid var(--ov-schedule-grid-border);"
 								>
