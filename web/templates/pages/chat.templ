@@ -1820,10 +1820,18 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 				// Also mark exec IDs from HTMX swaps to avoid duplicates after page updates.
 				var handleChatAfterSwap = function(event) {
 					var swapTarget = event.detail.target;
-					if (swapTarget && swapTarget.id === 'chat-messages') {
-						if (window.initChatEarlierLoader) window.initChatEarlierLoader(swapTarget);
-						if (window.pruneChatExecutionWindow) window.pruneChatExecutionWindow(swapTarget);
-						swapTarget.querySelectorAll('[data-exec-id]').forEach(function(el) {
+					// A chat-messages swap arrives directly; a chat-page-root or
+					// main-content swap re-renders the transcript as a descendant.
+					// Input-request cards are client-only DOM absent from server HTML,
+					// so every one of these swaps wipes them and they must be rebuilt
+					// from saved server state regardless of which container swapped.
+					var swappedChatMessages = (swapTarget && swapTarget.id === 'chat-messages')
+						? swapTarget
+						: (swapTarget && swapTarget.querySelector ? swapTarget.querySelector('#chat-messages') : null);
+					if (swappedChatMessages) {
+						if (window.initChatEarlierLoader) window.initChatEarlierLoader(swappedChatMessages);
+						if (window.pruneChatExecutionWindow) window.pruneChatExecutionWindow(swappedChatMessages);
+						swappedChatMessages.querySelectorAll('[data-exec-id]').forEach(function(el) {
 							window._chatKnownExecIds[el.getAttribute('data-exec-id')] = true;
 						});
 						refreshChatInputRequests();
