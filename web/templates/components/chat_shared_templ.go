@@ -3944,7 +3944,7 @@ func ChatAmbiguousSteeringInputRowForTask(inputID, message string, taskID string
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 244, "\" data-input-mode=\"steering\" title=\"The delivery outcome is unknown, so this instruction was not replayed automatically\"><div class=\"min-w-0 flex-1\"><div class=\"text-xs font-semibold text-warning\">Steering delivery uncertain</div><div class=\"truncate\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 244, "\" data-input-mode=\"steering\" data-tooltip-disabled><div class=\"min-w-0 flex-1\"><div class=\"text-xs font-semibold text-warning\">Steering delivery uncertain</div><div class=\"truncate\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
