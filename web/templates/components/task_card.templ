@@ -573,7 +573,7 @@ templ TaskCard(task models.Task, projectID string, viewingCategory string, llmMo
 						<span data-task-title class="min-w-0 flex-1 break-words sm:truncate">{ task.Title }</span>
 					</a>
 					if task.Prompt != "" {
-						<p class="text-sm opacity-60 mt-1 line-clamp-3 sm:line-clamp-2 break-words">{ task.Prompt }</p>
+						<p data-task-prompt class="text-sm opacity-60 mt-1 line-clamp-3 sm:line-clamp-2 break-words">{ task.Prompt }</p>
 					}
 					<div class="flex gap-1 mt-1 flex-wrap">
 						if task.ParentTaskID != nil {
