@@ -529,7 +529,7 @@ func TestChatContent_LiveSteeringRowsAreCancelable(t *testing.T) {
 	if strings.Contains(branch, "_chatKnownExecIds[data.exec_id]") {
 		t.Fatal("live steering pending-input ids must not pollute the chat execution duplicate guard")
 	}
-	if !strings.Contains(branch, "existingSteeringRow.remove()") || !strings.Contains(branch, "data-input-mode') === 'steering'") {
+	if !strings.Contains(branch, "refreshChatPendingInputs();") || !strings.Contains(branch, "data-input-mode') === 'steering'") {
 		t.Fatal("live steering events must replace stale queued rows without duplicating existing steering rows")
 	}
 	if !strings.Contains(branch, "window._chatQueuedSteerInFlight[data.exec_id]") {
@@ -538,14 +538,8 @@ func TestChatContent_LiveSteeringRowsAreCancelable(t *testing.T) {
 	if !strings.Contains(content, "window._chatDirectSteerInFlight = true") || !strings.Contains(branch, "window._chatDirectSteerInFlight") {
 		t.Fatal("same-tab direct steering live events must not duplicate the local HTMX steering row")
 	}
-	if !strings.Contains(branch, "'/thread-inputs/' + data.exec_id + '/cancel'") {
-		t.Fatal("live steering row must expose cancel action")
-	}
-	if !strings.Contains(branch, "htmx.process(steeringRow)") {
-		t.Fatal("live steering row must process dynamic HTMX controls")
-	}
-	if !strings.Contains(branch, "data.has_attachments") || !strings.Contains(branch, "Attachments included") {
-		t.Fatal("live steering row must render the attachment indicator when the event has attachments")
+	if strings.Contains(branch, "document.createElement") || strings.Contains(content, "createPendingAttachmentBadge") {
+		t.Fatal("live pending rows must use the shared server fragment")
 	}
 }
 
@@ -570,12 +564,12 @@ func TestChatContent_LiveQueuedAttachmentEventsReachQueuedRowBranch(t *testing.T
 	branch := content[chatNewStart : chatNewStart+branchEnd]
 	attachmentRefresh := strings.Index(branch, "if (data.has_attachments && !data.queued)")
 	queuedBranch := strings.Index(branch, "if (data.queued)")
-	queuedBadge := strings.Index(branch, "queuedRow.appendChild(createPendingAttachmentBadge('Attachments queued'")
+	queuedRefresh := strings.Index(branch, "refreshChatPendingInputs();")
 	if attachmentRefresh == -1 {
 		t.Fatal("attachment transcript refresh must be gated to non-queued events so queued attachment rows render")
 	}
-	if queuedBranch == -1 || queuedBadge == -1 || !(queuedBranch < queuedBadge) {
-		t.Fatal("live queued row branch must render the queued attachment indicator")
+	if queuedBranch == -1 || queuedRefresh == -1 || !(queuedBranch < queuedRefresh) {
+		t.Fatal("live queued row branch must request the shared fragment including attachment indicators")
 	}
 	if strings.Contains(branch, "if (data.has_attachments) {") {
 		t.Fatal("queued attachment events must not be consumed by the non-queued attachment refresh branch")
