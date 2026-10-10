@@ -1,6 +1,7 @@
 package pages
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -80,9 +81,22 @@ func TestBrowserFunctional_ScheduleDateTimePicker(t *testing.T) {
 		b.click(`[data-run-at-picker]`)
 		b.waitFor("form reset restores original time", `document.querySelector('[data-time-column="hour"] [aria-selected="true"]').textContent`, "01")
 		b.click(`[data-today]`)
-		b.waitFor("today retains focus", `String(document.activeElement.matches('[data-today]'))`, "true")
+		b.waitFor("today disabled in current month", `String(document.querySelector('[data-today]').disabled && document.activeElement.matches('[data-month-step="-1"]'))`, "true")
 		b.waitFor("today navigates to current month", `String(document.querySelector('[data-month-title]').textContent===new Date().toLocaleDateString(undefined,{month:'long',year:'numeric'}))`, "true")
 		b.waitFor("today preserves time", `document.querySelector('[name="run_at"]').value.slice(11)`, "13:44")
+		for _, selector := range []string{"[data-month-title]", ".schedule-datetime-weekdays span", "[data-today]"} {
+			var point struct{ X, Y float64 }
+			if err := json.Unmarshal([]byte(b.evaluate(fmt.Sprintf(`(function(){var r=document.querySelector(%q).getBoundingClientRect();return JSON.stringify({X:r.left+r.width/2,Y:r.top+r.height/2})})()`, selector))), &point); err != nil {
+				t.Fatal(err)
+			}
+			for _, kind := range []string{"mousePressed", "mouseReleased"} {
+				b.call("Input.dispatchMouseEvent", map[string]any{"type": kind, "x": point.X, "y": point.Y, "button": "left", "clickCount": 1}, nil)
+			}
+			b.waitFor("interior click keeps picker open: "+selector, `String(document.querySelector('.schedule-datetime-popup').matches(':popover-open'))`, "true")
+		}
+		b.click(`[data-month-step="1"]`)
+		b.waitFor("today enabled away from current month", `String(!document.querySelector('[data-today]').disabled)`, "true")
+
 		b.click(`#outside`)
 		b.call("Emulation.setTimezoneOverride", map[string]any{"timezoneId": "America/New_York"}, nil)
 		b.evaluate(`document.querySelector('[name="run_at"]').value='2036-03-08T02:30'; window.refreshScheduleDateTimes(document); 'configured'`)
