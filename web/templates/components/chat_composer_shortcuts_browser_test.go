@@ -326,6 +326,20 @@ func TestBrowserFunctional_ChatComposerAutoFocusLifecycleInChrome(t *testing.T) 
   await new Promise(function(resolve) { setTimeout(resolve, 80); });
   if (document.activeElement.id === 'message-input') fail('settle retried focus after intentional interaction');
 
+  // Cancellation must survive the interval between beforeSwap and afterSettle.
+  // Mount a fresh textarea: an already initialized composer would mask the bug.
+  for (var interaction of ['keydown', 'pointerdown']) {
+    document.activeElement.blur();
+    var interruptedChat = mount('chat-fragment');
+    document.dispatchEvent(new CustomEvent('htmx:beforeSwap', {detail:{target:interruptedChat}}));
+    document.body.dispatchEvent(interaction === 'keydown'
+      ? new KeyboardEvent('keydown', {key:'Escape', bubbles:true})
+      : new PointerEvent('pointerdown', {bubbles:true}));
+    settle(interruptedChat);
+    await new Promise(function(resolve) { setTimeout(resolve, 80); });
+    if (document.activeElement.id === 'message-input') fail('settle retried focus after ' + interaction + ' during interrupted swap');
+  }
+
   var dialog = document.getElementById('active-dialog');
   dialog.showModal();
   window.openVibelyRequestComposerFocus({root:document.getElementById('chat-form'), force:true});
