@@ -871,8 +871,8 @@ func TestTaskCard_RendersGoalBadge(t *testing.T) {
 		t.Fatalf("render task card: %v", err)
 	}
 	body := buf.String()
-	if strings.Contains(body, "Task has an active goal") || !strings.Contains(body, `data-tooltip-disabled>Goal</span>`) {
-		t.Fatalf("goal badge must suppress redundant and inherited tooltips, got %s", body)
+	if strings.Contains(body, "Task has an active goal") || strings.Contains(body, `data-tooltip-disabled>Goal</span>`) {
+		t.Fatalf("goal badge must inherit the card hint without its own tooltip, got %s", body)
 	}
 	if !strings.Contains(body, ">Goal<") {
 		t.Fatalf("expected goal badge label in task card, got %s", body)

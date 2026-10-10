@@ -1675,7 +1675,8 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 							cancelSteeringBtn.setAttribute('hx-post', '/thread-inputs/' + data.exec_id + '/cancel');
 							cancelSteeringBtn.setAttribute('hx-target', '#thread-input-' + data.exec_id);
 							cancelSteeringBtn.setAttribute('hx-swap', 'outerHTML');
-							cancelSteeringBtn.title = 'Cancel pending steering';
+							cancelSteeringBtn.setAttribute('data-tooltip-disabled', '');
+							cancelSteeringBtn.setAttribute('aria-label', 'Cancel pending steering');
 							cancelSteeringBtn.setAttribute('aria-label', 'Cancel pending steering');
 							cancelSteeringBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>';
 							window.appendPendingThreadInputEditButton(actionWrap);
@@ -1777,7 +1778,8 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 										cancelBtn.setAttribute('hx-post', '/thread-inputs/' + data.exec_id + '/cancel');
 										cancelBtn.setAttribute('hx-target', '#thread-input-' + data.exec_id);
 										cancelBtn.setAttribute('hx-swap', 'outerHTML');
-										cancelBtn.title = 'Cancel queued follow-up';
+										cancelBtn.setAttribute('data-tooltip-disabled', '');
+										cancelBtn.setAttribute('aria-label', 'Cancel pending steering');
 											cancelBtn.setAttribute('aria-label', 'Cancel queued follow-up');
 											cancelBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>';										actionWrap.appendChild(steerBtn);
 										window.appendPendingThreadInputEditButton(actionWrap);

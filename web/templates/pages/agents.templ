@@ -867,7 +867,7 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 								type="button"
 								class="btn btn-ghost btn-xs btn-square"
 								data-sync-marketplace-name="${safeName}"
-								title="${syncLabel}"
+								data-tooltip-disabled
 								aria-label="${syncLabel}"
 								${disableSync ? 'disabled' : ''}
 								${isSyncing ? 'aria-busy="true"' : ''}
@@ -881,7 +881,7 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 								type="button"
 								class="btn btn-ghost btn-xs btn-square text-error"
 								data-remove-marketplace-name="${safeName}"
-								title="${removeLabel}"
+								data-tooltip-disabled
 								aria-label="${removeLabel}"
 								${disableRemove ? 'disabled' : ''}
 								${isRemoving ? 'aria-busy="true"' : ''}

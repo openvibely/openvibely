@@ -79,7 +79,7 @@ func TestBrowserFunctional_SharedImageGallery(t *testing.T) {
 		b.waitFor("next image", `document.querySelector('[data-gallery-name]').textContent`, "two.svg")
 		b.click(`[data-gallery-plus]`)
 		b.waitFor("icon toolbar", `String(document.querySelectorAll('.image-gallery-tools svg').length===4 && document.querySelector('.image-gallery-tools').textContent.trim()==='')`, "true")
-		b.waitFor("zoom", `document.querySelector('[data-gallery-fit]').title`, "Fit image (150%)")
+		b.waitFor("zoom", `document.querySelector('[data-gallery-fit]').getAttribute('aria-label')`, "Fit image (150%)")
 		b.waitFor("arrows fixed after navigation and zoom", `String(JSON.stringify(Array.from(document.querySelectorAll('.image-gallery-arrow'),el=>{const r=el.getBoundingClientRect();return [r.x,r.y]}))===JSON.stringify(window.galleryArrowPositions))`, "true")
 		b.evaluate(`window.galleryBoundaryImage=document.querySelector('[data-gallery-image]');window.galleryBoundaryTransform=window.galleryBoundaryImage.style.transform;'saved'`)
 		b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": "ArrowRight"}, nil)

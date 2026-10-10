@@ -1040,13 +1040,13 @@ func TaskCard(task models.Task, projectID string, viewingCategory string, llmMod
 			}
 		}
 		if task.HasGoal {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 64, "<span class=\"badge badge-sm badge-primary badge-outline inline-flex items-center\" data-tooltip-disabled>Goal</span> ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 64, "<span class=\"badge badge-sm badge-primary badge-outline inline-flex items-center\">Goal</span> ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
 		if task.SwarmRole == models.SwarmRoleParent {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 65, "<span class=\"badge badge-sm badge-accent badge-outline inline-flex items-center\" data-tooltip-disabled>Swarm</span>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 65, "<span class=\"badge badge-sm badge-accent badge-outline inline-flex items-center\">Swarm</span>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1056,7 +1056,7 @@ func TaskCard(task models.Task, projectID string, viewingCategory string, llmMod
 			return templ_7745c5c3_Err
 		}
 		if len(llmModels) > 0 {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 67, "<span class=\"badge badge-sm badge-outline\" data-tooltip-disabled>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 67, "<span class=\"badge badge-sm badge-outline\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1075,7 +1075,7 @@ func TaskCard(task models.Task, projectID string, viewingCategory string, llmMod
 			}
 		}
 		if ad := findAgentDefinitionByID(agentDefs, task.AgentDefinitionID); ad != nil {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 69, "<span class=\"badge badge-sm badge-outline\" data-tooltip-disabled>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 69, "<span class=\"badge badge-sm badge-outline\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
