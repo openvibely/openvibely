@@ -556,15 +556,15 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 			<div id="tab-lifecycle" class={ "task-tab-panel flex-1 flex flex-col min-h-0", templ.KV("hidden", defaultTab != "lifecycle") }>
 				<div class="flex flex-col min-w-0 flex-1 min-h-0">
 					<div class="flex flex-col flex-1 min-h-0">
-						<div class="flex items-center justify-between mb-3 flex-shrink-0" style="height:20px">
-							<h3 class="text-sm font-semibold">Lifecycle</h3>
-							<button type="button" class="lifecycle-refresh" aria-label="Refresh lifecycle" data-tooltip-disabled onclick={ templ.ComponentScript{Call: "refreshLifecycleActivity('" + task.ID + "', '" + task.ProjectID + "')"} }><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-9-9c2.516 0 4.92 1.04 6.74 2.78L21 8"/><path d="M21 3v5h-5"/></svg></button>
-						</div>
-						<style>
-                            .lifecycle-refresh { display:inline-flex; align-items:center; justify-content:center; flex-shrink:0; width:28px; height:28px; padding:6px; margin:-4px; border:0; border-radius:6px; background:transparent; color:inherit; opacity:.7; cursor:pointer; }
-                            .lifecycle-refresh:hover { background:var(--ov-hover-subtle); background:color-mix(in srgb,currentColor 5%,transparent); opacity:1; }
-                            .lifecycle-refresh:disabled { opacity:.4; cursor:default; }
-                            .lifecycle-refresh svg { display:block; flex-shrink:0; }
+							<div class="flex items-center justify-between mb-3 flex-shrink-0">
+								<h3 class="text-sm font-semibold">Lifecycle</h3>
+								<button type="button" class="btn btn-ghost btn-sm lifecycle-refresh" aria-label="Refresh lifecycle" data-tooltip-disabled onclick={ templ.ComponentScript{Call: "refreshLifecycleActivity('" + task.ID + "', '" + task.ProjectID + "')"} }>
+									<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+									</svg>
+								</button>
+							</div>
+							<style>
                             #lifecycle-activity-scroll { box-sizing:border-box; width:calc(100% + 24px); margin-inline:-12px; padding-inline:12px; }
                             .lifecycle-entry summary { box-sizing:border-box; display:flex; align-items:center; justify-content:space-between; gap:12px; list-style:none; cursor:pointer; padding:4px 12px; width:calc(100% + 24px); margin-inline:-12px; border-radius:8px; }
                             .lifecycle-entry summary::-webkit-details-marker { display:none; }
