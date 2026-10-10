@@ -66,9 +66,9 @@ func testScheduleCalendarHeader(t *testing.T, paused, mobile bool) {
    var modifier=/Mac|iPhone|iPad|iPod/.test(navigator.platform)?'Command':'Ctrl';
    check(root.querySelector('[data-calendar-action="pause_all"]').textContent==='Pause all' && root.querySelector('[data-calendar-action="resume_all"]').textContent==='Resume all','project menu uses concise labels');
    var hintCard=root.querySelector('[data-schedule-card][data-has-schedule="true"]');
-   check(!hintCard.dataset.ovTooltip.includes(hintCard.dataset.scheduleTitle) && hintCard.dataset.ovTooltip.split('\n').length===2 && hintCard.dataset.ovTooltip===modifier+'+click to select schedule(s)\nRight-click for actions','card hover only shows commands on separate lines');
+   check(!hintCard.dataset.ovTooltip.includes(hintCard.dataset.scheduleTitle) && hintCard.dataset.ovTooltip.split('\n').length===2 && hintCard.dataset.ovTooltip==='Select schedules ('+modifier+'+click)\nMore actions (Right-click)','card hover only shows commands on separate lines');
    check(hintCard.getAttribute('aria-description').includes(modifier+'+click'),'card selection hint available to assistive technology');
-   check(root.querySelector('[data-calendar-day]').dataset.ovTooltip==='Click to select or deselect a day\n'+modifier+'+click to select day(s)\nClick and drag across header to select days','day hover uses one line per command');
+   check(root.querySelector('[data-calendar-day]').dataset.ovTooltip==='Select or deselect a day (Click)\nSelect multiple days ('+modifier+'+click)\nSelect days across headers (Click and drag)','day hover uses one line per command');
    check(!root.querySelector('#schedule-day-menu'),'day headers have no custom context menu');
    check(root.querySelector('.drop-zone').dataset.ovTooltip==='Drag empty space to select schedule(s)','calendar space explains box selection');
    check(toolbar.querySelector('[data-calendar-action="clear"]').dataset.ovTooltip==='Clear selection (Esc)','clear hover explains escape shortcut');

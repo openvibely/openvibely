@@ -39,7 +39,7 @@ templ Tooltips() {
    String(text).split(/\n|;\s*(?=previous\/next:|last visited:)/).forEach(function(line){
     var row=document.createElement('div');row.className='ov-tooltip-row';
     // Existing labels keep their wording; only recognizable shortcuts get a badge.
-    var match=line.match(/^(.*?)\s*\(((?:⌘|Ctrl\+|Command\+|Shift\+|Esc|Enter)[^)]*)\)$/)||line.match(/^(.*?:)\s*((?:⌘|Ctrl\+|Command\+).*)$/);
+    var match=line.match(/^(.*?)\s*\(((?:⌘|Ctrl\+|Command\+|Shift\+|Esc|Enter|Click|Right-click)[^)]*)\)$/)||line.match(/^(.*?:)\s*((?:⌘|Ctrl\+|Command\+).*)$/);
     if(match){var label=document.createElement('span');label.textContent=match[1];var key=document.createElement('kbd');key.textContent=match[2];row.append(label,key);}
     else {var parts=line.split(/((?:Command|Ctrl)\+click)/);parts.forEach(function(part){var node=document.createElement(/^(Command|Ctrl)\+click$/.test(part)?'kbd':'span');node.textContent=part;row.appendChild(node);});}
     tip.appendChild(row);

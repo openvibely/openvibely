@@ -63,6 +63,11 @@ func TestBrowserFunctional_SharedTooltips(t *testing.T) {
 		b.evaluate(`window.openVibelyTooltip.chart({chart:{canvas:document.getElementById('chart')},tooltip:{opacity:0}});'closed'`)
 		b.waitFor("chart hidden", `String(document.getElementById('ov-shared-tooltip').hidden)`, "true")
 
+		for _, modifier := range []string{"Command", "Ctrl"} {
+			b.evaluate(`window.openVibelyTooltip.show(document.getElementById('native'),'Select schedules (` + modifier + `+click)\nMore actions (Right-click)\nSelect or deselect a day (Click)\nSelect days across headers (Click and drag)');'shown'`)
+			b.waitFor("schedule gestures follow labels", `String(Array.from(document.querySelectorAll('#ov-shared-tooltip .ov-tooltip-row')).every(row=>row.children.length===2 && row.firstElementChild.tagName==='SPAN' && row.lastElementChild.tagName==='KBD'))`, "true")
+			b.waitFor("schedule modifier badge", `document.querySelector('#ov-shared-tooltip kbd').textContent`, modifier+"+click")
+		}
 		b.evaluate(`var wide=document.createElement('button');wide.title='Switch task (⌘K); previous/next: ⌘⇧↑/↓; last visited: ⌘⇧L';wide.style.cssText='position:fixed;left:100px;top:300px;width:500px;height:40px';wide.textContent='Wide control';document.body.appendChild(wide);'ready'`)
 		b.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseMoved", "x": 400, "y": 320}, nil)
 		b.waitFor("native pointer placement", `document.getElementById('ov-shared-tooltip').style.left`, "412px")
