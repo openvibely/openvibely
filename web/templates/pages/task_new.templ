@@ -88,6 +88,38 @@ templ NewTaskContent(project *models.Project, agents []models.LLMConfig, agentDe
     function titleDraftInput(pageRoot) {
      return pageRoot && pageRoot.querySelector('input[name="title"][form="task-thread-form"]');
     }
+    function composerDraftKey(pageRoot) {
+     return 'openvibely.new-task-composer.' + pageRoot.getAttribute('data-project-id');
+    }
+    function saveComposerDraft(pageRoot) {
+     if (!pageRoot || pageRoot.__openVibelyTaskCreationSucceeded) return;
+     var message = pageRoot.querySelector('#task-message-input');
+     var model = pageRoot.querySelector('#task-thread-form-agent-id');
+     if (!message || !model) return;
+     try { sessionStorage.setItem(composerDraftKey(pageRoot), JSON.stringify({message: message.value, model: model.value})); } catch (_) {}
+    }
+    function hydrateComposerDraft(pageRoot) {
+     if (!pageRoot) return;
+     var saved;
+     try { saved = JSON.parse(sessionStorage.getItem(composerDraftKey(pageRoot))); } catch (_) { return; }
+     if (!saved) return;
+     var message = pageRoot.querySelector('#task-message-input');
+     var model = pageRoot.querySelector('#task-thread-form-agent-id');
+     var picker = pageRoot.querySelector('#task-thread-form-agent-select');
+     if (message && typeof saved.message === 'string') {
+      message.value = saved.message;
+      message.style.height = 'auto';
+      message.style.height = Math.min(message.scrollHeight, 200) + 'px';
+     }
+     if (model && picker && typeof saved.model === 'string') {
+      var exists = Array.from(picker.parentElement.querySelectorAll('li[data-value]')).some(function(option) { return option.dataset.value === saved.model; });
+      if (exists) {
+       model.value = saved.model;
+       if (window._setChatCustomSelectValue) window._setChatCustomSelectValue(picker, saved.model);
+       if (window.ovModelPicker) window.ovModelPicker.changed(picker);
+      }
+     }
+    }
     function saveTitleDraft(pageRoot) {
      if (!pageRoot || pageRoot.__openVibelyTaskCreationSucceeded) return;
      var input = titleDraftInput(pageRoot);
@@ -97,7 +129,7 @@ templ NewTaskContent(project *models.Project, agents []models.LLMConfig, agentDe
     function clearTitleDraft(pageRoot) {
      if (!pageRoot) return;
      pageRoot.__openVibelyTaskCreationSucceeded = true;
-     try { sessionStorage.removeItem(titleDraftKey(pageRoot)); } catch (_) {}
+     try { sessionStorage.removeItem(titleDraftKey(pageRoot)); sessionStorage.removeItem(composerDraftKey(pageRoot)); } catch (_) {}
     }
     function hydrateTitleDraft(pageRoot) {
      if (!pageRoot) return;
@@ -110,7 +142,7 @@ templ NewTaskContent(project *models.Project, agents []models.LLMConfig, agentDe
     }
     function resetCreationDraft(pageRoot, saveTitle) {
      if (!pageRoot) return;
-     if (saveTitle || !pageRoot.__openVibelyTaskTitleSavedForCleanup) saveTitleDraft(pageRoot);
+     if (saveTitle || !pageRoot.__openVibelyTaskTitleSavedForCleanup) { saveTitleDraft(pageRoot); saveComposerDraft(pageRoot); }
      pageRoot.__openVibelyTaskTitleSavedForCleanup = true;
      var pageForm = pageRoot.querySelector('#task-thread-form');
      if (pageForm) {
@@ -157,11 +189,19 @@ templ NewTaskContent(project *models.Project, agents []models.LLMConfig, agentDe
      window.openVibelyNewTaskTitleDraftLifecycleInstalled = true;
      document.body.addEventListener('input', function(event) {
       var input = event.target;
-      if (!input || !input.matches || !input.matches('input[name="title"][form="task-thread-form"]')) return;
+      if (!input || !input.matches || !input.matches('input[name="title"][form="task-thread-form"], #task-message-input')) return;
       var pageRoot = titleDraftRoot(input);
       if (!pageRoot) return;
       pageRoot.__openVibelyTaskTitleSavedForCleanup = false;
       saveTitleDraft(pageRoot);
+      saveComposerDraft(pageRoot);
+     });
+     document.body.addEventListener('chat-select-change', function(event) {
+      if (event.target.id !== 'task-thread-form-agent-select') return;
+      var pageRoot = titleDraftRoot(event.target);
+      if (!pageRoot) return;
+      pageRoot.__openVibelyTaskTitleSavedForCleanup = false;
+      saveComposerDraft(pageRoot);
      });
      document.body.addEventListener('htmx:beforeHistorySave', function() {
       resetCreationDraft(titleDraftRoot(document.getElementById('task-detail-content')), true);
@@ -174,14 +214,16 @@ templ NewTaskContent(project *models.Project, agents []models.LLMConfig, agentDe
       var restoredRoot = titleDraftRoot(document.getElementById('task-detail-content'));
       if (restoredRoot) {
        hydrateTitleDraft(restoredRoot);
+       hydrateComposerDraft(restoredRoot);
        bindTaskCreationAfterRequest(restoredRoot);
       }
      });
     }
     bindTaskCreationAfterRequest(titleDraftRoot(root));
     hydrateTitleDraft(titleDraftRoot(root));
+    hydrateComposerDraft(titleDraftRoot(root));
     // Keep creation fields out of HTMX history; the app-level lifecycle handler
-    // saves the title before resetting the form and hydrates cached history views.
+    // saves the title, message and model before resetting and restores cached views.
    })();
   </script>
  </div>
