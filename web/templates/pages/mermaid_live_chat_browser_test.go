@@ -50,6 +50,9 @@ func TestBrowserFunctional_MermaidRendersAfterLiveChatCompletion(t *testing.T) {
 		case "/chat/send":
 			phase.Store(1)
 			_, _ = w.Write([]byte(renderTerminalBrowserComponent(t, components.ChatFollowupResponse("diagram", execID, "chat-messages", "", false, nil, project.ID))))
+		case "/chat/input-requests":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"input_requests":[]}`))
 		case "/auth/me":
 			w.WriteHeader(http.StatusNoContent)
 		default:
@@ -67,10 +70,12 @@ func TestBrowserFunctional_MermaidRendersAfterLiveChatCompletion(t *testing.T) {
 		{"stream done then global", `S.emit('done','completed');fire({type:'chat_response_done',project_id:P,exec_id:E,status:'completed',completed_output:OUT})`, 2},
 		{"global done only", `fire({type:'chat_response_done',project_id:P,exec_id:E,status:'completed',completed_output:OUT})`, 2},
 	}
+	// The message container and Mermaid helper exist before the page's live-event
+	// listener is registered. Wait for initialization before sending fixture events.
 	t.Run("composer send", func(t *testing.T) {
 		phase.Store(0)
 		runComposerFocusCDP(t, chrome, server.URL+"/chat?project_id="+project.ID, "mermaid-live-chat-send", func(browser *composerFocusCDP) {
-			browser.waitFor("chat page", `String(!!document.getElementById('chat-form')&&typeof window.renderMermaidDiagrams)`, "function")
+			browser.waitFor("chat page", `String(document.readyState==='complete'&&!!document.getElementById('chat-form')&&typeof window.renderMermaidDiagrams==='function'&&typeof window._chatLiveEventHandlers?.chatEvent==='function')`, "true")
 			browser.evaluate(`(function(){htmx.ajax('POST','/chat/send?project_id=` + project.ID + `',{target:'#chat-messages',swap:'beforeend'});return 'ok';})()`)
 			browser.waitFor("live stream", `String(!!window.__terminalStreamFor('`+execID+`'))`, "true")
 			browser.evaluate(`(function(){window.__terminalStreamFor('` + execID + `').emit('message',` + string(outputJSON) + `);return 'ok';})()`)
@@ -83,7 +88,7 @@ func TestBrowserFunctional_MermaidRendersAfterLiveChatCompletion(t *testing.T) {
 	t.Run("renders when fence closes mid-stream", func(t *testing.T) {
 		phase.Store(0)
 		runComposerFocusCDP(t, chrome, server.URL+"/chat?project_id="+project.ID, "mermaid-live-chat-fence", func(browser *composerFocusCDP) {
-			browser.waitFor("chat page", `String(!!document.getElementById('chat-messages')&&typeof window.renderMermaidDiagrams)`, "function")
+			browser.waitFor("chat page", `String(document.readyState==='complete'&&!!document.getElementById('chat-messages')&&typeof window.renderMermaidDiagrams==='function'&&typeof window._chatLiveEventHandlers?.chatEvent==='function')`, "true")
 			phase.Store(1)
 			browser.evaluate(`(function(){window.dispatchEvent(new CustomEvent('sse-chat-live-event',{detail:{type:'chat_new_message',project_id:'` + project.ID + `',exec_id:'` + execID + `',message:'diagram',source:'web'}}));return 'ok';})()`)
 			browser.waitFor("live stream", `String(!!window.__terminalStreamFor('`+execID+`'))`, "true")
@@ -127,7 +132,7 @@ func TestBrowserFunctional_MermaidRendersAfterLiveChatCompletion(t *testing.T) {
 		t.Run("nested fence "+nc.name, func(t *testing.T) {
 			phase.Store(0)
 			runComposerFocusCDP(t, chrome, server.URL+"/chat?project_id="+project.ID, "mermaid-live-chat-nested", func(browser *composerFocusCDP) {
-				browser.waitFor("chat page", `String(!!document.getElementById('chat-messages')&&typeof window.renderMermaidDiagrams)`, "function")
+				browser.waitFor("chat page", `String(document.readyState==='complete'&&!!document.getElementById('chat-messages')&&typeof window.renderMermaidDiagrams==='function'&&typeof window._chatLiveEventHandlers?.chatEvent==='function')`, "true")
 				phase.Store(1)
 				browser.evaluate(`(function(){window.dispatchEvent(new CustomEvent('sse-chat-live-event',{detail:{type:'chat_new_message',project_id:'` + project.ID + `',exec_id:'` + execID + `',message:'diagram',source:'web'}}));return 'ok';})()`)
 				browser.waitFor("live stream", `String(!!window.__terminalStreamFor('`+execID+`'))`, "true")
@@ -150,7 +155,7 @@ func TestBrowserFunctional_MermaidRendersAfterLiveChatCompletion(t *testing.T) {
 		t.Run(sc.name, func(t *testing.T) {
 			phase.Store(0)
 			runComposerFocusCDP(t, chrome, server.URL+"/chat?project_id="+project.ID, "mermaid-live-chat", func(browser *composerFocusCDP) {
-				browser.waitFor("chat page", `String(!!document.getElementById('chat-messages')&&typeof window.renderMermaidDiagrams)`, "function")
+				browser.waitFor("chat page", `String(document.readyState==='complete'&&!!document.getElementById('chat-messages')&&typeof window.renderMermaidDiagrams==='function'&&typeof window._chatLiveEventHandlers?.chatEvent==='function')`, "true")
 				phase.Store(1)
 				prelude := `var P='` + project.ID + `',E='` + execID + `',OUT=` + string(outputJSON) + `;function fire(d){window.dispatchEvent(new CustomEvent('sse-chat-live-event',{detail:d}))}`
 				browser.evaluate(`(function(){` + prelude + `;fire({type:'chat_new_message',project_id:P,exec_id:E,message:'diagram',source:'web'});return 'ok';})()`)
