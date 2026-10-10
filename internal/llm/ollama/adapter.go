@@ -204,7 +204,7 @@ func (a *Adapter) callChat(ctx context.Context, message string, attachments []mo
 	systemPromptStr := llmprompt.BuildChatSystemPrompt(isTaskFollowup, chatMode, chatSystemContext, false)
 	systemPromptStr = llmprompt.AppendWorktreeContextPrompt(systemPromptStr, workDir)
 	if chatMode == models.ChatModeOrchestrate {
-		systemPromptStr = llmprompt.ApplyChatActionToolMode(systemPromptStr, nil, isTaskFollowup)
+		systemPromptStr = llmprompt.ApplyChatActionToolMode(systemPromptStr, nil, false)
 	}
 	messages := buildChatHistory(systemPromptStr, chatHistory)
 
@@ -265,7 +265,7 @@ func (a *Adapter) callStreaming(ctx context.Context, prompt string, attachments 
 	systemPrompt := llmprompt.BuildAgentSystemPrompt(projectInstructions, workDir)
 	messages = append(messages, chatMessage{Role: "system", Content: systemPrompt})
 
-	fullPrompt := llmprompt.ApplyTaskCreationToolMode(prompt, nil) + llmprompt.BuildTaskStatusInstructions()
+	fullPrompt := strings.TrimSpace(prompt) + "\n\n" + llmprompt.ChatActionUnavailableInstructions + llmprompt.BuildTaskStatusInstructions()
 	userMsg := chatMessage{Role: "user", Content: fullPrompt}
 	if images := encodeImageAttachments(attachments); len(images) > 0 {
 		userMsg.Images = images
