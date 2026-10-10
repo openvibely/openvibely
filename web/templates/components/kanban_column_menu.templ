@@ -23,7 +23,7 @@ templ KanbanFilter(category, key, label string, values, labels []string) {
 
 templ KanbanColumnMenu(projectID string, category models.TaskCategory, backlogSort, completedSort string, hasTasks bool) {
 	{{ cat := string(category) }}
-	@CardActionDropdown(CardActionDropdownConfig{WrapperClass: "dropdown dropdown-end", TriggerClass: "btn btn-xs btn-ghost min-h-11 h-11 w-11 p-0", IconClass: "h-5 w-5", MenuClass: "w-56 max-w-[calc(100vw-2rem)] z-[100]", Label: "More actions", TriggerAriaExpanded: "false", TriggerKanbanMenu: true, MenuKanbanContent: true, KanbanMenuKey: "column-" + cat}) {
+	@CardActionDropdown(CardActionDropdownConfig{WrapperClass: "dropdown dropdown-end", TriggerClass: "sidebar-toggle-btn header-action-btn btn btn-ghost btn-sm btn-square", IconClass: "h-5 w-5", MenuClass: "w-56 max-w-[calc(100vw-2rem)] z-[100]", Label: "More actions", TriggerAriaExpanded: "false", TriggerKanbanMenu: true, MenuKanbanContent: true, KanbanMenuKey: "column-" + cat}) {
 		<li><button type="button" data-column={ cat } data-kanban-select disabled?={ !hasTasks } onclick="kanbanSelectAll(this)">Select all</button></li>
 		if category != models.CategoryActive {
 			<li class="ov-menu-rule" role="separator"></li>

@@ -134,8 +134,6 @@ func TestSidebar_ProjectSelectorSearchableAndIdentityOnly(t *testing.T) {
 		`option.hidden = hidden;`,
 		`option.classList.toggle('hidden', hidden);`,
 		`state.search.focus(); state.search.select();`,
-		`listen(window, 'sse-task-event', refreshOpenRemoteTaskSelectors)`,
-		`htmx.trigger(latest.search, 'search')`,
 		`event.key === 'ArrowDown'`,
 		`event.key === 'ArrowUp'`,
 		`event.key === 'Escape'`,
@@ -147,6 +145,9 @@ func TestSidebar_ProjectSelectorSearchableAndIdentityOnly(t *testing.T) {
 		if !strings.Contains(html, required) {
 			t.Fatalf("searchable project selector missing %q", required)
 		}
+	}
+	if strings.Contains(html, "refreshOpenRemoteTaskSelectors") {
+		t.Fatal("open task selector results must not refresh on live task events")
 	}
 
 	markupEnd := strings.Index(html, "<script>")

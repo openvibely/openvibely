@@ -403,7 +403,7 @@ func TestChatContent_ClearActionsUseExplicitAccessibleTrigger(t *testing.T) {
 
 	for _, required := range []string{
 		`data-chat-actions-dropdown`,
-		`<button type="button" class="btn btn-xs btn-ghost" data-tooltip-disabled aria-label="More actions" aria-haspopup="menu" aria-expanded="false" aria-controls="chat-actions-menu" onclick="toggleChatActionsDropdown(event)">`,
+		`<button type="button" class="sidebar-toggle-btn header-action-btn btn btn-ghost btn-sm btn-square" data-tooltip-disabled aria-label="More actions" aria-haspopup="menu" aria-expanded="false" aria-controls="chat-actions-menu" onclick="toggleChatActionsDropdown(event)">`,
 		`<ul id="chat-actions-menu" tabindex="0" role="menu"`,
 		`type="button"`,
 		`role="menuitem"`,
