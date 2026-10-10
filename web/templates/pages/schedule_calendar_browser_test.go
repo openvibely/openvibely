@@ -54,7 +54,7 @@ func testScheduleCalendarHeader(t *testing.T, paused, mobile bool) {
   function check(value,message) { if(!value) throw new Error(message); }
   function tick() { return new Promise(function(resolve){setTimeout(resolve,30);}); }
   var requests=[];
-  window.fetch=async function(url,opts) { if(url.includes('/schedule/calendar-action')) { requests.push(JSON.parse(opts.body));return new Response(JSON.stringify({undo:{action:'resume',schedule_ids:['s0','s1']}}),{status:200,headers:{'Content-Type':'application/json'}}); } if(url.includes('/reschedule')) { requests.push({action:'drag',ids:opts.body.get('schedule_ids')});return new Response('',{status:200}); } return nativeFetch(url,opts); };
+  window.fetch=async function(url,opts) { if(url.includes('/schedule/calendar-action')) { var request=JSON.parse(opts.body);requests.push(request);var inverse=request.skips?{action:request.action==='skip'?'restore':'skip',skips:request.skips}:{action:'resume',schedule_ids:['s0','s1']};return new Response(JSON.stringify({undo:inverse}),{status:200,headers:{'Content-Type':'application/json'}}); } if(url.includes('/reschedule')) { requests.push({action:'drag',ids:opts.body.get('schedule_ids')});return new Response('',{status:200}); } return nativeFetch(url,opts); };
   var nativeAjax=htmx.ajax;
   htmx.ajax=function(){return Promise.resolve();};
   window.addEventListener('error',function(event){report('fail',event.message);});
@@ -73,6 +73,7 @@ func testScheduleCalendarHeader(t *testing.T, paused, mobile bool) {
    check(root.querySelector('.drop-zone').dataset.ovTooltip==='Select schedules (Drag empty space)','calendar space explains box selection');
    check(toolbar.querySelector('[data-calendar-action="clear"]').dataset.ovTooltip==='Clear selection (Esc)','clear hover explains escape shortcut');
 
+   await tick(); // Let initial calendar scrolling settle before opening the tooltip.
    hintCard.dispatchEvent(new PointerEvent('pointerover',{bubbles:true}));await new Promise(resolve=>setTimeout(resolve,450));
    check(document.querySelector('#ov-shared-tooltip kbd').textContent===modifier+'+click','schedule hints use shared key badge');
    window.openVibelyTooltip.close();
@@ -140,6 +141,54 @@ func testScheduleCalendarHeader(t *testing.T, paused, mobile bool) {
    check(requests[0].skips.length===2,'skip must send two exact date windows');
    check(requests[0].skips[0].start_at===Number(days[1].dataset.start),'first date epoch');
    check(requests[0].skips[1].start_at===Number(days[3].dataset.start),'second date epoch');
+   var hours=Array.from(root.querySelectorAll('[data-calendar-hour]'));
+   function hourCount(){return hours.filter(label=>label.getAttribute('aria-pressed')==='true').length;}
+   down(hours[9]);up();
+   check(count()===0 && hourCount()===1,'time selection replaces day selection');
+   check(root.querySelectorAll('.drop-zone.schedule-day-selected').length===7,'hour highlights every displayed date');
+   check(toolbar.querySelector('[data-calendar-action="skip"]').textContent==='Skip hour(s)','hour action label');
+   down(hours[14],{metaKey:true});up();
+   check(hourCount()===2,'Command-click adds nonadjacent hour');
+   down(hours[9],{ctrlKey:true});up();
+   check(hourCount()===1 && hours[14].getAttribute('aria-pressed')==='true','Ctrl-click toggles selected hour');
+   hours[9].dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',metaKey:true,bubbles:true,cancelable:true}));
+   check(hourCount()===2,'keyboard modifier adds hour');
+   toolbar.querySelector('[data-calendar-action="skip"]').click();await tick();
+   var hourRequest=requests.pop();
+   check(hourRequest.action==='skip' && hourRequest.skips.length===14,'two hours send fourteen exact windows');
+   hourRequest.skips.forEach(function(run){
+    check(run.schedule_id==='' && run.end_at>run.start_at,'hour windows apply project-wide');
+    check(Array.from(root.querySelectorAll('.drop-zone')).some(zone=>['9','14'].includes(zone.dataset.hour) && Number(zone.dataset.start)===run.start_at && Number(zone.dataset.end)===run.end_at),'request uses server-local cell bounds');
+   });
+   root.querySelector('[data-calendar-action="undo"]').click();await tick();
+   var hourUndo=requests.pop();
+   check(hourUndo.action==='restore' && JSON.stringify(hourUndo.skips)===JSON.stringify(hourRequest.skips),'hour undo sends the returned inverse with exact windows');
+   down(hours[8]);up();
+   check(!toolbar.querySelector('[data-calendar-action="restore"]').hidden,'hour containing skipped run offers unskip');
+   toolbar.querySelector('[data-calendar-action="restore"]').click();await tick();
+   var restoreRequest=requests.pop();
+   check(restoreRequest.action==='restore' && restoreRequest.skips.length===1 && restoreRequest.skips[0].start_at===Number(root.querySelector('.drop-zone[data-date="'+days[1].dataset.calendarDay+'"][data-hour="8"]').dataset.start),'restore targets only affected hour windows');
+   down(hours[6]);up();
+   check(!toolbar.querySelector('[data-calendar-action="restore"]').hidden,'empty hour with project exclusion offers unskip');
+   toolbar.querySelector('[data-calendar-action="restore"]').click();await tick();
+   check(requests.pop().skips.length===1,'empty hour restores only excluded date');
+   down(hours[2]);
+   var savedElementFromPoint=document.elementFromPoint;
+   document.elementFromPoint=function(){return hours[4];};
+   window.dispatchEvent(new PointerEvent('pointermove',{pointerId:8,clientX:10,clientY:10}));up();
+   document.elementFromPoint=savedElementFromPoint;
+   check(hourCount()===3,'drag time column selects consecutive hours');
+   toolbar.querySelector('[data-calendar-action="clear"]').click();
+   check(hourCount()===0 && getComputedStyle(toolbar).display==='none','clear removes hour selection');
+   down(hours[9]);up();down(hours[9]);up();
+   check(hourCount()===0,'second plain click deselects hour');
+   down(hours[9]);up();
+   document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));
+   check(hourCount()===0,'escape clears hour selection');
+   down(hours[9]);up();
+   hintCard.dispatchEvent(new MouseEvent('click',{bubbles:true,metaKey:true}));
+   check(hourCount()===0 && selectedScheduleCards.has(hintCard),'card selection clears selected hours');
+   clearScheduleSelection();
    root.querySelector('#schedule-timeline-container').scrollTop=0;
    down(days[1]);up();down(days[4],{shiftKey:true});up();check(count()===1 && days[4].getAttribute('aria-pressed')==='true','shift-click behaves like a normal click without selecting a range');
    down(days[1]);
@@ -270,6 +319,7 @@ func testScheduleCalendarHeader(t *testing.T, paused, mobile bool) {
 		}
 		var out bytes.Buffer
 		state := models.ScheduleCalendarState{Paused: paused, Skips: []models.ScheduleSkip{
+			{StartAt: day.Add(6 * time.Hour).Unix(), EndAt: day.Add(7 * time.Hour).Unix()},
 			// An elapsed project pause after the daily runs, with no overlapping cards, must not offer Unskip.
 			{StartAt: day.Add(-time.Hour).Unix(), EndAt: day.Add(-30 * time.Minute).Unix()},
 			{ScheduleID: "s0", StartAt: day.Add(8 * time.Hour).Unix(), EndAt: day.Add(8*time.Hour).Unix() + 1},
