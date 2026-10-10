@@ -62,12 +62,13 @@ templ MermaidDiagrams() {
    const sections=Array.from(owner.querySelectorAll('.chat-markdown')).filter(section=>'_chatMarkdownSource' in section);
    const section=code.closest('.chat-markdown');
    let scope=owner, source=owner.getAttribute('data-raw-content')||'';
-   if (sections.length) {
+   // Blocks outside a text section (e.g. in thinking) fall back to the raw reply.
+   if (section && sections.includes(section)) {
     // An earlier section is bounded by a later tool block, so it is complete.
     if (section!==sections[sections.length-1]) return true;
     scope=section; source=section._chatMarkdownSource;
    }
-   if (!endsInsideFence(owner,source)) return true;
+   if (!endsInsideFence(scope,source)) return true;
    const blocks=Array.from(scope.querySelectorAll('pre > code')).filter(block=>!block.closest('.stream-tool'));
    return blocks[blocks.length-1]!==code;
   }
