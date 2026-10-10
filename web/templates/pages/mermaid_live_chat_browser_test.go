@@ -74,10 +74,42 @@ func TestBrowserFunctional_MermaidRendersAfterLiveChatCompletion(t *testing.T) {
 			browser.evaluate(`(function(){htmx.ajax('POST','/chat/send?project_id=` + project.ID + `',{target:'#chat-messages',swap:'beforeend'});return 'ok';})()`)
 			browser.waitFor("live stream", `String(!!window.__terminalStreamFor('`+execID+`'))`, "true")
 			browser.evaluate(`(function(){window.__terminalStreamFor('` + execID + `').emit('message',` + string(outputJSON) + `);return 'ok';})()`)
-			browser.waitFor("streamed code block", `String(!!document.querySelector('#streaming-message-`+execID+` code.language-mermaid'))`, "true")
+			browser.waitFor("streamed diagram", `String(!!document.querySelector('#streaming-message-`+execID+` code.language-mermaid, #streaming-message-`+execID+` .chat-mermaid'))`, "true")
 			phase.Store(2)
 			browser.evaluate(`(function(){var S=window.__terminalStreamFor('` + execID + `');S.emit('done','completed');window.dispatchEvent(new CustomEvent('sse-chat-live-event',{detail:{type:'chat_response_done',project_id:'` + project.ID + `',exec_id:'` + execID + `',status:'completed',completed_output:` + string(outputJSON) + `}}));return 'ok';})()`)
 			browser.waitFor("diagram rendered without refresh", `(function(){var c=document.getElementById('streaming-message-`+execID+`');var p=c&&c.closest('[data-execution-pair]');return c&&c.querySelector('.chat-mermaid img')?'rendered':'pair='+(p?p.getAttribute('data-exec-status'):'none');})()`, "rendered")
+		})
+	})
+	t.Run("renders when fence closes mid-stream", func(t *testing.T) {
+		phase.Store(0)
+		runComposerFocusCDP(t, chrome, server.URL+"/chat?project_id="+project.ID, "mermaid-live-chat-fence", func(browser *composerFocusCDP) {
+			browser.waitFor("chat page", `String(!!document.getElementById('chat-messages')&&typeof window.renderMermaidDiagrams)`, "function")
+			phase.Store(1)
+			browser.evaluate(`(function(){window.dispatchEvent(new CustomEvent('sse-chat-live-event',{detail:{type:'chat_new_message',project_id:'` + project.ID + `',exec_id:'` + execID + `',message:'diagram',source:'web'}}));return 'ok';})()`)
+			browser.waitFor("live stream", `String(!!window.__terminalStreamFor('`+execID+`'))`, "true")
+			pair := `document.getElementById('chat-execution-` + execID + `')`
+			emit := func(text string) {
+				j, _ := json.Marshal(text)
+				browser.evaluate(`(function(){window.__terminalStreamFor('` + execID + `').emit('message',` + string(j) + `);return 'ok';})()`)
+			}
+			emit("Here:\n\n```mermaid\nflowchart TD\n A[Start] --> B[End]\n")
+			browser.waitFor("open fence shown as code", `String(!!`+pair+`.querySelector('code.language-mermaid'))`, "true")
+			emit("```")
+			browser.waitFor("partial closing line stays code", `String(!!`+pair+`.querySelector('code.language-mermaid'))`, "true")
+			if got := browser.evaluateAwait(`(async function(){await new Promise(r=>setTimeout(r,500));return String(!!` + pair + `.querySelector('.chat-mermaid'))})()`); got != "false" {
+				t.Fatalf("unclosed fence rendered as diagram: %s", got)
+			}
+			emit("\n\nMore text")
+			browser.waitFor("diagram rendered while running", `(function(){var p=`+pair+`;return p.getAttribute('data-exec-status')+':'+!!p.querySelector('.chat-mermaid img')})()`, "running:true")
+			browser.evaluate(`(function(){window.__mermaidFlashes=0;new MutationObserver(function(){if(` + pair + `.querySelector('code.language-mermaid'))window.__mermaidFlashes++;}).observe(` + pair + `,{childList:true,subtree:true});return 'ok';})()`)
+			for i := 0; i < 5; i++ {
+				emit(" and more")
+			}
+			emit("\n\n```js\nconst open = true;\n")
+			browser.waitFor("later text streamed", `String(!!`+pair+`.querySelector('code.language-js'))`, "true")
+			if got := browser.evaluate(`(function(){var p=` + pair + `;return !!p.querySelector('.chat-mermaid img')+':'+window.__mermaidFlashes})()`); got != "true:0" {
+				t.Fatalf("diagram did not survive live redraws (rendered:flashes) = %s", got)
+			}
 		})
 	})
 	for _, sc := range scenarios {
@@ -90,7 +122,7 @@ func TestBrowserFunctional_MermaidRendersAfterLiveChatCompletion(t *testing.T) {
 				browser.evaluate(`(function(){` + prelude + `;fire({type:'chat_new_message',project_id:P,exec_id:E,message:'diagram',source:'web'});return 'ok';})()`)
 				browser.waitFor("live stream", `String(!!window.__terminalStreamFor('`+execID+`'))`, "true")
 				browser.evaluate(`(function(){window.__terminalStreamFor('` + execID + `').emit('message',` + string(outputJSON) + `);return 'ok';})()`)
-				browser.waitFor("streamed code block", `String(!!document.querySelector('#chat-execution-`+execID+` code.language-mermaid'))`, "true")
+				browser.waitFor("streamed diagram", `String(!!document.querySelector('#chat-execution-`+execID+` code.language-mermaid, #chat-execution-`+execID+` .chat-mermaid'))`, "true")
 				phase.Store(sc.serverPhase)
 				browser.evaluate(`(function(){` + prelude + `;var S=window.__terminalStreamFor(E);` + sc.finish + `;return 'ok';})()`)
 				browser.waitFor("diagram rendered without refresh", `(function(){var p=document.getElementById('chat-execution-`+execID+`');return p&&p.querySelector('.chat-mermaid img')?'rendered':'status='+p.getAttribute('data-exec-status')+' code='+!!p.querySelector('code.language-mermaid')+' pending='+!!(p.querySelector('code.language-mermaid')||{})._mermaidRender;})()`, "rendered")

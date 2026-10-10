@@ -10,13 +10,37 @@ templ MermaidDiagrams() {
  (() => {
   if (window.renderMermaidDiagrams) return;
   let library, frame, serial=0, queue=Promise.resolve();
-  const cache=new Map();
+  const cache=new Map(), failures=new Map();
   const currentTheme=()=>document.documentElement.getAttribute('data-theme')==='light'?'default':'dark';
   const terminal=new Set(['completed','failed','cancelled']);
-  function eligible(code) {
+  const isTerminal=code=>{
    const pair=code.closest('[data-execution-pair="true"]');
-   return code.isConnected && pair && terminal.has(pair.getAttribute('data-exec-status')) &&
-    !!code.closest('.chat-bubble-assistant-msg') && !code.closest('.stream-tool');
+   return !!pair && terminal.has(pair.getAttribute('data-exec-status'));
+  };
+  // A fence closes only on a complete line; a trailing partial line can still change.
+  function endsInsideFence(text) {
+   let open='';
+   const lines=text.split(/\r\n|\r|\n/);
+   lines.forEach((line,index)=>{
+    const match=/^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
+    if (!match) return;
+    if (!open) {
+     if (!(match[1][0]==='`' && match[2].includes('`'))) open=match[1];
+    } else if (index<lines.length-1 && match[1][0]===open[0] && match[1].length>=open.length && !match[2].trim()) open='';
+   });
+   return !!open;
+  }
+  function streamingFenceClosed(code) {
+   const owner=code.closest('[data-raw-content]');
+   if (!owner) return false;
+   if (!endsInsideFence(owner.getAttribute('data-raw-content')||'')) return true;
+   const blocks=Array.from(owner.querySelectorAll('pre > code')).filter(block=>!block.closest('.stream-tool'));
+   return blocks[blocks.length-1]!==code;
+  }
+  function eligible(code) {
+   if (!code.isConnected || !code.closest('[data-execution-pair="true"]') ||
+    !code.closest('.chat-bubble-assistant-msg') || code.closest('.stream-tool')) return false;
+   return isTerminal(code) || code.matches('a.chat-mermaid') || streamingFenceClosed(code);
   }
   function discardFrame() {
    if (frame) frame.remove();
@@ -88,6 +112,7 @@ templ MermaidDiagrams() {
    const code=anchor && (anchor.matches('a.chat-mermaid')?anchor:anchor.querySelector('code.language-mermaid'));
    if (!code || !eligible(code)) return;
    event.preventDefault();
+   failures.delete(JSON.stringify([currentTheme(),code.matches('a.chat-mermaid')?code.dataset.mermaidSource:code.textContent]));
    clearFailure(code);delete code._mermaidRender;delete code.dataset.mermaidTheme;
    window.renderMermaidDiagrams(anchor.parentElement);
   });
@@ -96,6 +121,24 @@ templ MermaidDiagrams() {
        maxTextSize:50000, maxEdges:500, htmlLabels:false, flowchart:{htmlLabels:false},
        // Lock every configuration key against frontmatter and init directives.
        secure:Array.from(new Set(['secure', 'htmlLabels', 'dompurifyConfig', ...Object.keys(mermaid.mermaidAPI.defaultConfig)]))});
+  }
+  function commit(code,isDiagram,source,theme,url,image) {
+   clearFailure(code);
+   const link=isDiagram?code:document.createElement('a');
+   link.className='chat-mermaid';
+   link.href=url;
+   link.dataset.imageGalleryItem='';
+   if (!isDiagram) link.dataset.imageName='diagram-'+serial+'.svg';
+   link.setAttribute('aria-label','Preview Mermaid diagram');
+   link.dataset.mermaidSource=source;
+   link.dataset.mermaidTheme=theme;
+   link.replaceChildren(image);
+   if (!isDiagram) {
+    const markdown=code.closest('.chat-markdown') || code.parentElement.parentElement;
+    markdown.setAttribute('data-image-gallery-group','');
+    code.parentElement.replaceWith(link);
+   }
+   if (window.imageGallery && window.imageGallery.refreshItem) window.imageGallery.refreshItem(link);
   }
   window.renderMermaidDiagrams=function(root) {
    if (!root || !root.querySelectorAll) return Promise.resolve();
@@ -107,6 +150,18 @@ templ MermaidDiagrams() {
     const source=isDiagram?code.dataset.mermaidSource:code.textContent;
     const unchanged=()=>eligible(code) && (isDiagram?code.dataset.mermaidSource:code.textContent)===source;
     if (isDiagram && code.dataset.mermaidTheme===currentTheme()) { clearFailure(code); return; }
+    if (!isDiagram) {
+     // Swap synchronously on live redraws so a rendered diagram never flashes back to code.
+     const key=JSON.stringify([currentTheme(),source]);
+     if (cache.has(key)) {
+      const image=document.createElement('img');
+      image.alt='Mermaid diagram';
+      image.src=cache.get(key);
+      commit(code,false,source,currentTheme(),image.src,image);
+      return;
+     }
+     if (failures.has(key) && !isTerminal(code)) { showFailure(code,false,failures.get(key)); return; }
+    }
     let retry=false;
     const render=async()=>{
      if (!unchanged() || source.length>50000) return;
@@ -142,23 +197,10 @@ templ MermaidDiagrams() {
       await deadline(image.decode(),Math.max(1,10000-(Date.now()-renderStarted)),()=>{image.removeAttribute('src');});
       if (!unchanged()) return;
       if (theme!==currentTheme()) { retry=true; return; }
-      clearFailure(code);
-      const link=isDiagram?code:document.createElement('a');
-      link.className='chat-mermaid';
-      link.href=url;
-      link.dataset.imageGalleryItem='';
-      if (!isDiagram) link.dataset.imageName='diagram-'+serial+'.svg';
-      link.setAttribute('aria-label','Preview Mermaid diagram');
-      link.dataset.mermaidSource=source;
-      link.dataset.mermaidTheme=theme;
-      link.replaceChildren(image);
-      if (!isDiagram) {
-       const markdown=code.closest('.chat-markdown') || code.parentElement.parentElement;
-       markdown.setAttribute('data-image-gallery-group','');
-       code.parentElement.replaceWith(link);
-      }
-      if (window.imageGallery && window.imageGallery.refreshItem) window.imageGallery.refreshItem(link);
+      commit(code,isDiagram,source,theme,url,image);
      } catch (error) {
+      // Live redraws recreate the block every frame; don't re-render a known failure.
+      if (!isTerminal(code)) failures.set(JSON.stringify([currentTheme(),source]),error);
       // Keep source (or the last successful image) and allow explicit recovery.
       showFailure(code,isDiagram,error);
      } finally {
@@ -171,6 +213,8 @@ templ MermaidDiagrams() {
      if (isDiagram) delete code._mermaidRender;
      else if (retry || requestedTheme!==currentTheme()) delete code._mermaidRender;
      if ((retry || requestedTheme!==currentTheme()) && code.isConnected) window.renderMermaidDiagrams(code.parentElement);
+     // A live redraw replaced this block mid-render; show the cached result if the stream pauses.
+     else if (!isDiagram && !code.isConnected) window.renderMermaidDiagrams(document);
     });
     queue=code._mermaidRender.catch(()=>{});
     pending.push(code._mermaidRender);
