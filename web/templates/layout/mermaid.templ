@@ -178,14 +178,6 @@ templ MermaidDiagrams() {
    return Promise.all(pending);
   };
   new MutationObserver(()=>window.renderMermaidDiagrams(document)).observe(document.documentElement,{attributes:true,attributeFilter:['data-theme']});
-  // Live chat can finish its last render after the terminal-status pass, so catch stragglers.
-  let sweepTimer;
-  new MutationObserver(()=>{
-   clearTimeout(sweepTimer);
-   sweepTimer=setTimeout(()=>{
-    if (document.querySelector('[data-execution-pair="true"] pre > code.language-mermaid')) window.renderMermaidDiagrams(document);
-   },100);
-  }).observe(document.documentElement,{childList:true,subtree:true,attributes:true,attributeFilter:['data-exec-status']});
   document.addEventListener('htmx:historyRestore',()=>window.renderMermaidDiagrams(document));
  })();
  </script>

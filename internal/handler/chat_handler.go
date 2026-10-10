@@ -322,14 +322,6 @@ func (h *Handler) ChatSend(c echo.Context) error {
 	}
 	priorHistory := filterChatHistory(chatHistory, exec.ID)
 
-	// Render user message and streaming/queued placeholder
-	var userMsg templ.Component
-	if len(chatAttachments) > 0 {
-		userMsg = components.ChatBubbleWithAttachments("User", message, chatAttachments, projectID)
-	} else {
-		userMsg = components.ChatBubble("User", message)
-	}
-	agentMsg := components.ChatBubbleStreaming("Assistant", exec.ID, "chat-messages", "", false)
 	// Build request-local context and spawn the LLM processing goroutine. Live
 	// project catalogs are discovered through runtime tools instead of being
 	// embedded in every Chat request.
@@ -355,8 +347,7 @@ func (h *Handler) ChatSend(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusServiceUnavailable, err.Error())
 	}
 	return render(c, http.StatusOK, templ.Join(
-		userMsg,
-		agentMsg,
+		components.ChatFollowupResponse(message, exec.ID, "chat-messages", "", false, chatAttachments, projectID),
 		components.ChatComposerActionButtonOOB("chat-form-primary-action", "/chat/stop?project_id="+projectID, true, exec.ID),
 	))
 }
