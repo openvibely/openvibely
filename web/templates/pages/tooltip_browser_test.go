@@ -36,6 +36,12 @@ func TestBrowserFunctional_SharedTooltips(t *testing.T) {
 
 		b.evaluate(`var control=document.getElementById('native');control.dispatchEvent(new PointerEvent('pointerover',{bubbles:true,clientX:320,clientY:220}));'hover'`)
 		b.waitFor("tooltip follows pointer", `document.getElementById('ov-shared-tooltip').style.left`, "332px")
+		b.evaluate(`var messages=document.createElement('div');messages.style.cssText='height:40px;overflow:auto';document.body.appendChild(messages);messages.innerHTML='<div style="height:200px">Streaming response</div>';messages.scrollTop=messages.scrollHeight;messages.dispatchEvent(new Event('scroll'));'chunk'`)
+		b.waitFor("streaming chat auto-scroll preserves Changes hint", `String(!document.getElementById('ov-shared-tooltip').hidden && document.getElementById('ov-shared-tooltip').textContent==='Review changes⌘⇧D')`, "true")
+		b.evaluate(`document.dispatchEvent(new Event('scroll'));'page scroll'`)
+		b.waitFor("page scroll still dismisses hint", `String(document.getElementById('ov-shared-tooltip').hidden)`, "true")
+		b.evaluate(`messages.remove();control.dispatchEvent(new PointerEvent('pointerover',{bubbles:true,clientX:320,clientY:220}));'hover'`)
+
 		b.evaluate(`document.body.dispatchEvent(new CustomEvent('htmx:beforeSwap',{bubbles:true,detail:{target:document.getElementById('chart')}}));document.getElementById('chart').dispatchEvent(new PointerEvent('pointerout',{bubbles:true}));window.hoverCheck=null;setTimeout(()=>window.hoverCheck=!document.getElementById('ov-shared-tooltip').hidden,300);'waiting'`)
 		b.waitFor("unrelated events do not expire hovered tooltip", `String(window.hoverCheck)`, "true")
 		b.evaluate(`control.dispatchEvent(new PointerEvent('pointermove',{bubbles:true,clientX:420,clientY:220}));'move'`)

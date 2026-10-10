@@ -615,16 +615,15 @@ func TestTaskCard_RendersPersistentAccessibleStateIconBeforeTitle(t *testing.T) 
 			for _, want := range []string{
 				`role="img"`,
 				`aria-label="Task state: ` + tt.wantLabel + `"`,
-				`data-tip="` + tt.wantLabel + `"`,
-				`tooltip-right`,
+				`data-tooltip-disabled`,
 				`aria-hidden="true"`,
 			} {
 				if !strings.Contains(body, want) {
 					t.Fatalf("expected accessible state icon markup %q, got %s", want, body)
 				}
 			}
-			if strings.Contains(body, `tooltip-bottom`) {
-				t.Fatalf("state tooltip must open inward from the card's left edge, got %s", body)
+			if strings.Contains(body, `data-tip=`) || strings.Contains(body, `title=`) {
+				t.Fatalf("state icon must not show a tooltip, got %s", body)
 			}
 			if !strings.Contains(body, `</span><span data-task-title class="min-w-0 flex-1 break-words sm:truncate">State title</span>`) {
 				t.Fatalf("state icon must render immediately before the shrink-safe title, got %s", body)
@@ -872,8 +871,8 @@ func TestTaskCard_RendersGoalBadge(t *testing.T) {
 		t.Fatalf("render task card: %v", err)
 	}
 	body := buf.String()
-	if !strings.Contains(body, "Task has an active goal") {
-		t.Fatalf("expected goal badge title in task card, got %s", body)
+	if strings.Contains(body, "Task has an active goal") || !strings.Contains(body, `data-tooltip-disabled>Goal</span>`) {
+		t.Fatalf("goal badge must suppress redundant and inherited tooltips, got %s", body)
 	}
 	if !strings.Contains(body, ">Goal<") {
 		t.Fatalf("expected goal badge label in task card, got %s", body)

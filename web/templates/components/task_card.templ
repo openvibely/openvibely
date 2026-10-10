@@ -309,8 +309,8 @@ templ TaskStateIcon(task models.Task) {
 	<span
 		data-task-state-icon
 		data-task-state={ state.Key }
-		class={ "tooltip tooltip-right inline-flex h-5 w-5 shrink-0 items-center justify-center", state.TextClass }
-		data-tip={ state.Label }
+		class={ "inline-flex h-5 w-5 shrink-0 items-center justify-center", state.TextClass }
+		data-tooltip-disabled
 		role="img"
 		aria-label={ "Task state: " + state.Label }
 	>
@@ -593,10 +593,10 @@ templ TaskCard(task models.Task, projectID string, viewingCategory string, llmMo
 							</span>
 						}
 							if task.HasGoal {
-								<span class="badge badge-sm badge-primary badge-outline inline-flex items-center" title="Task has an active goal">Goal</span>
+								<span class="badge badge-sm badge-primary badge-outline inline-flex items-center" data-tooltip-disabled>Goal</span>
 							}
 							if task.SwarmRole == models.SwarmRoleParent {
-								<span class="badge badge-sm badge-accent badge-outline inline-flex items-center" title="Swarm parent task">Swarm</span>
+								<span class="badge badge-sm badge-accent badge-outline inline-flex items-center" data-tooltip-disabled>Swarm</span>
 							}
 						<!-- Model Badge -->
 						if len(llmModels) > 0 {
