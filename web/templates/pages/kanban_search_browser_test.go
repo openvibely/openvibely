@@ -78,6 +78,7 @@ func testKanbanHeaderSearch(t *testing.T, width int) {
 		b.evaluate(`(window.__iconColor = getComputedStyle(`+toggle+`).color, 'ok')`)
 		b.click(`[data-kanban-search-toggle]`)
 		check("click opens and focuses input", search+`.dataset.open === 'true' && document.activeElement === `+input)
+		check("clear button hidden while empty", `document.querySelector('[data-kanban-search-clear]').getClientRects().length === 0`)
 		b.waitFor("open animation", `String(`+width(search)+` > 100)`, "true")
 		check("open box stays inside header", search+`.getBoundingClientRect().left >= document.querySelector('[data-page-header] h2').getBoundingClientRect().right`)
 		check("Add Task stays on screen", search+`.nextElementSibling.getBoundingClientRect().right <= window.innerWidth`)
@@ -101,8 +102,13 @@ func testKanbanHeaderSearch(t *testing.T, width int) {
 		b.evaluate(`(document.querySelector('[data-page-header] h2').dispatchEvent(new PointerEvent('pointerdown', {bubbles:true})), 'ok')`)
 		check("outside press keeps box open with text", search+`.dataset.open === 'true'`)
 
-		b.evaluate(`(`+input+`.value = '', `+input+`.dispatchEvent(new Event('input', {bubbles:true})), 'ok')`)
-		b.waitFor("cleared filter", visible, "alpha,beta,delta,epsilon,gamma")
+		clearBtn := `document.querySelector('[data-kanban-search-clear]')`
+		check("clear button visible with text", clearBtn+`.getClientRects().length > 0`)
+		check("clear button inside open box", clearBtn+`.getBoundingClientRect().right <= `+search+`.getBoundingClientRect().right`)
+		b.click(`[data-kanban-search-clear]`)
+		check("clear button empties search and refilters at once", input+`.value === '' && `+visible+` === 'alpha,beta,delta,epsilon,gamma'`)
+		check("clear button keeps box open and focuses input", search+`.dataset.open === 'true' && document.activeElement === `+input)
+		check("clear button hidden when empty", clearBtn+`.getClientRects().length === 0`)
 		b.click(`[data-page-header] h2`)
 		check("real click elsewhere collapses empty box", search+`.dataset.open === 'false'`)
 		b.waitFor("close animation", `String(`+width(search)+` <= 33)`, "true")
@@ -155,7 +161,7 @@ func testKanbanHeaderSearch(t *testing.T, width int) {
 		b.evaluate(`(history.back(), 'ok')`)
 		b.waitFor("restored from history", `String(!!document.querySelector('#kanban-board'))`, "true")
 		b.waitFor("history restore resyncs filter", visible, "alpha,beta,delta,epsilon,gamma")
-		check("restored search is collapsed and inactive", search+`.dataset.open === 'false' && `+search+`.dataset.active === 'false'`)
+		check("restored search is collapsed and inactive", search+`.dataset.open === 'false' && `+input+`.value === ''`)
 		check("restored no-results hidden", `!(`+noResults("backlog")+`)`)
 
 		b.evaluate(`(document.getElementById('task-delta').remove(), window.kanbanRefresh(), 'ok')`)
