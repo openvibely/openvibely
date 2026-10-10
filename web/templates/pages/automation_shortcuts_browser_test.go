@@ -51,7 +51,7 @@ func TestBrowserFunctional_AutomationBreadcrumbShortcuts(t *testing.T) {
 					b.evaluate(`document.activeElement.dispatchEvent(new KeyboardEvent('keydown',{code:'` + code + `',key:'` + code + `',shiftKey:true,metaKey:/Mac|iPhone|iPad/.test(navigator.platform),ctrlKey:!/Mac|iPhone|iPad/.test(navigator.platform),bubbles:true,cancelable:true}));'sent'`)
 				}
 				b.waitFor("platform shortcut hints", `String((function(){var button=document.querySelector('[data-breadcrumb-selector-button]'),mac=/Mac|iPhone|iPad/.test(navigator.platform);return button.title.includes(mac?'⌘⇧↑/↓':'Ctrl+Shift+↑/↓') && button.title.includes(mac?'⌘⇧L':'Ctrl+Shift+L') && button.getAttribute('aria-keyshortcuts').includes(mac?'Meta+Shift+L':'Control+Shift+L')})())`, "true")
-				b.waitFor("tooltip", `String(document.querySelector('[data-breadcrumb-selector-button]').title.includes('previous/next:') && document.querySelector('[data-breadcrumb-selector-button]').title.includes('last visited:'))`, "true")
+				b.waitFor("tooltip", `String(document.querySelector('[data-breadcrumb-selector-button]').title.includes('Previous/next:') && document.querySelector('[data-breadcrumb-selector-button]').title.includes('Last visited:'))`, "true")
 				b.evaluate(`document.getElementById('editor').focus();'ready'`)
 				key("ArrowDown")
 				b.waitFor("editor does not navigate", `location.pathname`, "/automations/a"+suffix)

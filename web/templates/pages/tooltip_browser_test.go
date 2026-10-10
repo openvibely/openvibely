@@ -18,7 +18,7 @@ func TestBrowserFunctional_SharedTooltips(t *testing.T) {
 	defer server.Close()
 	runComposerFocusCDP(t, chrome, server.URL, "shared-tooltips", func(b *composerFocusCDP) {
 		b.waitFor("tooltip controller ready", `typeof window.openVibelyTooltip`, "object")
-		b.evaluate(`var card=document.createElement('div');card.dataset.ovTooltip='Command+click to select task(s)';card.innerHTML='<button data-kanban-menu-trigger aria-label="More actions"><svg><path/></svg></button>';document.body.appendChild(card);card.dispatchEvent(new PointerEvent('pointerover',{bubbles:true}));'card'`)
+		b.evaluate(`var card=document.createElement('div');card.dataset.ovTooltip='Select tasks (Command+click)';card.innerHTML='<button data-kanban-menu-trigger aria-label="More actions"><svg><path/></svg></button>';document.body.appendChild(card);card.dispatchEvent(new PointerEvent('pointerover',{bubbles:true}));'card'`)
 		b.waitFor("card selection hint visible", `String(!document.getElementById('ov-shared-tooltip').hidden)`, "true")
 		b.evaluate(`var kebab=card.querySelector('button'),icon=kebab.querySelector('path');card.dispatchEvent(new PointerEvent('pointerout',{bubbles:true,relatedTarget:icon}));icon.dispatchEvent(new PointerEvent('pointerover',{bubbles:true}));'kebab'`)
 		b.waitFor("kebab suppresses ancestor hint", `String(document.getElementById('ov-shared-tooltip').hidden)`, "true")
@@ -26,6 +26,8 @@ func TestBrowserFunctional_SharedTooltips(t *testing.T) {
 		b.waitFor("focused kebab has no inherited hint", `String(document.getElementById('ov-shared-tooltip').hidden && kebab.getAttribute('aria-label')==='More actions')`, "true")
 		b.evaluate(`card.dispatchEvent(new PointerEvent('pointerover',{bubbles:true,relatedTarget:icon}));'return'`)
 		b.waitFor("card hint returns outside kebab", `String(!document.getElementById('ov-shared-tooltip').hidden)`, "true")
+		b.evaluate(`kebab.removeAttribute('data-kanban-menu-trigger');kebab.setAttribute('data-tooltip-disabled','');icon.dispatchEvent(new PointerEvent('pointerover',{bubbles:true}));'disabled'`)
+		b.waitFor("opted-out close button blocks inherited hint", `String(document.getElementById('ov-shared-tooltip').hidden)`, "true")
 		b.evaluate(`card.remove();'removed'`)
 
 		b.evaluate(`document.getElementById('native').focus();document.getElementById('native').dispatchEvent(new FocusEvent('focusin',{bubbles:true}));'ready'`)
@@ -39,6 +41,9 @@ func TestBrowserFunctional_SharedTooltips(t *testing.T) {
 		b.evaluate(`var cell=document.createElement('div');cell.title='Review changes (⌘⇧D)';document.body.appendChild(cell);control.dispatchEvent(new PointerEvent('pointerout',{bubbles:true,relatedTarget:cell}));cell.dispatchEvent(new PointerEvent('pointerover',{bubbles:true,relatedTarget:control,clientX:430,clientY:220}));'cell'`)
 		b.waitFor("same hint transfers without hiding", `String(!document.getElementById('ov-shared-tooltip').hidden && cell.getAttribute('aria-describedby')==='ov-shared-tooltip')`, "true")
 		b.evaluate(`control.dispatchEvent(new PointerEvent('pointerover',{bubbles:true,clientX:320,clientY:220}));'back'`)
+		b.evaluate(`control.dispatchEvent(new MouseEvent('mousedown',{bubbles:true}));control.dispatchEvent(new FocusEvent('focusin',{bubbles:true}));control.dispatchEvent(new PointerEvent('pointerover',{bubbles:true}));'pressed'`)
+		b.waitFor("mousedown dismisses and focus cannot reopen", `String(document.getElementById('ov-shared-tooltip').hidden)`, "true")
+		b.evaluate(`document.body.dispatchEvent(new PointerEvent('pointerover',{bubbles:true}));control.dispatchEvent(new PointerEvent('pointerover',{bubbles:true}));'reenter'`)
 		b.waitFor("shortcut badge", `document.querySelector('#ov-shared-tooltip kbd').textContent`, "⌘⇧D")
 		b.waitFor("native title suppressed", `String(!document.getElementById('native').hasAttribute('title'))`, "true")
 		b.evaluate(`document.getElementById('native').title='Loading models';'updated'`)
@@ -74,11 +79,11 @@ func TestBrowserFunctional_SharedTooltips(t *testing.T) {
 		b.waitFor("chart hidden", `String(document.getElementById('ov-shared-tooltip').hidden)`, "true")
 
 		for _, modifier := range []string{"Command", "Ctrl"} {
-			b.evaluate(`window.openVibelyTooltip.show(document.getElementById('native'),'Select schedules (` + modifier + `+click)\nMore actions (Right-click)\nSelect or deselect a day (Click)\nSelect days across headers (Click and drag)');'shown'`)
+			b.evaluate(`window.openVibelyTooltip.show(document.getElementById('native'),'Select schedules (` + modifier + `+click)\nMore actions (Rightclick)\nSelect or deselect a day (Click)\nSelect days across headers (Click and drag)');'shown'`)
 			b.waitFor("schedule gestures follow labels", `String(Array.from(document.querySelectorAll('#ov-shared-tooltip .ov-tooltip-row')).every(row=>row.children.length===2 && row.firstElementChild.tagName==='SPAN' && row.lastElementChild.tagName==='KBD'))`, "true")
 			b.waitFor("schedule modifier badge", `document.querySelector('#ov-shared-tooltip kbd').textContent`, modifier+"+click")
 		}
-		b.evaluate(`var wide=document.createElement('button');wide.title='Switch task (⌘K); previous/next: ⌘⇧↑/↓; last visited: ⌘⇧L';wide.style.cssText='position:fixed;left:100px;top:300px;width:500px;height:40px';wide.textContent='Wide control';document.body.appendChild(wide);'ready'`)
+		b.evaluate(`var wide=document.createElement('button');wide.title='Switch task (⌘K); Previous/next: ⌘⇧↑/↓; Last visited: ⌘⇧L';wide.style.cssText='position:fixed;left:100px;top:300px;width:500px;height:40px';wide.textContent='Wide control';document.body.appendChild(wide);'ready'`)
 		b.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseMoved", "x": 400, "y": 320}, nil)
 		b.waitFor("native pointer placement", `document.getElementById('ov-shared-tooltip').style.left`, "412px")
 		b.waitFor("shortcut rows have breathing room", `String((function(){var keys=document.querySelectorAll('#ov-shared-tooltip kbd');return keys.length===3 && keys[1].getBoundingClientRect().top-keys[0].getBoundingClientRect().bottom>=4})())`, "true")

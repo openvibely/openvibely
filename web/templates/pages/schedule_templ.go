@@ -1019,7 +1019,7 @@ func scheduleContent(currentProject *models.Project, weekData WeekData, weekOffs
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 45, "\" title=\"Drag empty space to select schedule(s)\" style=\"border-right: 1px solid var(--ov-schedule-grid-border);\">")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 45, "\" title=\"Select schedules (Drag empty space)\" style=\"border-right: 1px solid var(--ov-schedule-grid-border);\">")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}

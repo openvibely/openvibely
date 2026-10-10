@@ -547,7 +547,7 @@ templ TaskCard(task models.Task, projectID string, viewingCategory string, llmMo
 
 			}
 		<!-- X button in top right corner -->
-		<button
+		<button data-tooltip-disabled aria-label="Delete task"
 			class="btn btn-circle btn-ghost btn-xs min-h-11 h-11 w-11 p-0 lg:min-h-6 lg:h-6 lg:w-6 absolute top-2 right-2 z-10"
 			onclick="event.stopPropagation()"
 			hx-delete={ fmt.Sprintf("/tasks/%s", task.ID) }

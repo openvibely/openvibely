@@ -61,12 +61,12 @@ templ SearchableSelector(config SearchableSelectorConfig) {
 			if config.CreateURL != "" || config.CreateButtonID != "" {
                 <div class="ov-menu-create-row" data-searchable-selector-divider>
                     if config.CreateButtonID != "" {
-                        <button id={ config.CreateButtonID } type="button" class={ SearchableSelectorOptionClass } data-searchable-selector-option data-searchable-selector-action onclick="this.closest('dialog').close()">
+                        <button id={ config.CreateButtonID } type="button" class={ SearchableSelectorOptionClass } data-searchable-selector-option data-searchable-selector-action data-tooltip-disabled onclick="this.closest('dialog').close()">
                             @SearchableSelectorCreateIcon()
                             <span>{ config.CreateLabel }</span>
                         </button>
                     } else {
-                        <a href={ templ.URL(config.CreateURL) } class={ SearchableSelectorOptionClass } data-searchable-selector-option data-searchable-selector-action>
+                        <a href={ templ.URL(config.CreateURL) } class={ SearchableSelectorOptionClass } data-searchable-selector-option data-searchable-selector-action data-tooltip-disabled>
                             @SearchableSelectorCreateIcon()
                             <span>{ config.CreateLabel }</span>
                         </a>
@@ -324,7 +324,7 @@ templ searchableSelectorScript() {
                     button.setAttribute('aria-keyshortcuts', (apple ? 'Meta+' : 'Control+') + (project ? 'Shift+' : '') + 'K');
                     if (project || !(button.title || button.dataset.ovTooltip)) button.title = (project ? 'Open project' : button.getAttribute('aria-label')) + ' (' + (apple ? '⌘' : 'Ctrl+') + (project ? (apple ? '⇧' : 'Shift+') : '') + 'K)';
                     if (automation && automation.root.contains(button)) {
-                        button.title = 'Switch automation (' + (apple ? '⌘K' : 'Ctrl+K') + '); previous/next: ' + (apple ? '⌘⇧↑/↓' : 'Ctrl+Shift+↑/↓') + '; last visited: ' + (apple ? '⌘⇧L' : 'Ctrl+Shift+L');
+                        button.title = 'Switch automation (' + (apple ? '⌘K' : 'Ctrl+K') + '); Previous/next: ' + (apple ? '⌘⇧↑/↓' : 'Ctrl+Shift+↑/↓') + '; Last visited: ' + (apple ? '⌘⇧L' : 'Ctrl+Shift+L');
                         button.setAttribute('aria-keyshortcuts', (apple ? 'Meta+K Meta+Shift+ArrowUp Meta+Shift+ArrowDown Meta+Shift+L' : 'Control+K Control+Shift+ArrowUp Control+Shift+ArrowDown Control+Shift+L'));
                     }
                 });
