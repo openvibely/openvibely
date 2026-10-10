@@ -169,3 +169,25 @@ func TestBrowserFunctional_TooltipDelayAndShortcutFocus(t *testing.T) {
 		}
 	})
 }
+
+func TestBrowserFunctional_TooltipPointerExit(t *testing.T) {
+	chrome := chatNavigationChromePath(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `<!doctype html><html><body><button id="owner" title="Helpful tooltip" style="position:fixed;left:100px;top:100px;width:100px;height:40px">Owner</button>`)
+		_ = templateui.Tooltips().Render(r.Context(), w)
+		fmt.Fprint(w, `</body></html>`)
+	}))
+	defer server.Close()
+	runComposerFocusCDP(t, chrome, server.URL, "tooltip-pointer-exit", func(b *composerFocusCDP) {
+		b.waitFor("controller ready", `typeof window.openVibelyTooltip`, "object")
+		b.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseMoved", "x": 150, "y": 120}, nil)
+		b.waitFor("tooltip shown", `String(!document.getElementById('ov-shared-tooltip').hidden)`, "true")
+		// Enter the tooltip from its owner, crossing its nested text and row nodes.
+		b.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseMoved", "x": 180, "y": 155}, nil)
+		b.waitFor("pointer over tooltip", `String(document.getElementById('ov-shared-tooltip').matches(':hover'))`, "true")
+		b.evaluate(`document.getElementById("owner").title="Updated tooltip";'updated'`)
+		b.waitFor("tooltip updated under pointer", `document.getElementById("ov-shared-tooltip").textContent`, "Updated tooltip")
+		b.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseMoved", "x": 400, "y": 300}, nil)
+		b.waitFor("tooltip closes after leaving both surfaces", `String(document.getElementById('ov-shared-tooltip').hidden)`, "true")
+	})
+}
