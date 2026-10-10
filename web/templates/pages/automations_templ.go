@@ -401,7 +401,7 @@ func automationsContent(cards []models.AutomationCard, currentProjectID string, 
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 4, "<div data-page-header class=\"mb-6 flex items-center justify-between gap-3\"><h2 class=\"text-2xl font-bold\">Automations</h2><div class=\"dropdown dropdown-end\"><label tabindex=\"0\" class=\"btn btn-ghost btn-sm btn-square\" aria-label=\"New Automation\" title=\"New Automation\" onclick=\"handleDropdownToggle(event)\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 4, "<div data-page-header class=\"mb-6 flex items-center justify-between gap-3\"><h2 class=\"text-2xl font-bold\">Automations</h2><div class=\"dropdown dropdown-end\"><button type=\"button\" tabindex=\"0\" class=\"btn btn-ghost btn-sm btn-square\" aria-label=\"New Automation\" title=\"New Automation\" onclick=\"handleDropdownToggle(event)\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -409,7 +409,7 @@ func automationsContent(cards []models.AutomationCard, currentProjectID string, 
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, "</label><ul tabindex=\"0\" class=\"ov-menu ov-menu-actions ov-menu-scroll dropdown-content z-[100] menu w-48\" data-automation-new-menu><li><button type=\"button\" data-automation-new-template onclick=\"openAutomationNewModal(event, 'automation-template-modal')\">Template</button></li><li><button type=\"button\" data-automation-new-describe onclick=\"openAutomationNewModal(event, 'automation-describe-modal')\">Describe</button></li><li><button type=\"button\" data-automation-new-custom onclick=\"submitAutomationCustom(event)\">Custom</button></li></ul></div><form id=\"automation-custom-form\" class=\"hidden\" method=\"post\" action=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, "</button><ul tabindex=\"0\" class=\"ov-menu ov-menu-actions ov-menu-scroll dropdown-content z-[100] menu w-48\" data-automation-new-menu><li><button type=\"button\" data-automation-new-template onclick=\"openAutomationNewModal(event, 'automation-template-modal')\">Template</button></li><li><button type=\"button\" data-automation-new-describe onclick=\"openAutomationNewModal(event, 'automation-describe-modal')\">Describe</button></li><li><button type=\"button\" data-automation-new-custom onclick=\"submitAutomationCustom(event)\">Custom</button></li></ul></div><form id=\"automation-custom-form\" class=\"hidden\" method=\"post\" action=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

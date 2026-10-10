@@ -369,7 +369,7 @@ func skillsContent(skills []SkillCard, canManage bool, currentProjectID string, 
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 4, "<div data-page-header class=\"flex items-center justify-between mb-6\"><h2 class=\"text-2xl font-bold\">Skills</h2><div class=\"dropdown dropdown-end\"><label tabindex=\"0\" class=\"btn btn-ghost btn-sm btn-square\" aria-label=\"Add Skill\" title=\"Add Skill\" onclick=\"handleDropdownToggle(event)\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 4, "<div data-page-header class=\"flex items-center justify-between mb-6\"><h2 class=\"text-2xl font-bold\">Skills</h2><div class=\"dropdown dropdown-end\"><button type=\"button\" tabindex=\"0\" class=\"btn btn-ghost btn-sm btn-square\" aria-label=\"Add Skill\" title=\"Add Skill\" onclick=\"handleDropdownToggle(event)\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -387,7 +387,7 @@ func skillsContent(skills []SkillCard, canManage bool, currentProjectID string, 
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 7, "</label><ul tabindex=\"0\" class=\"ov-menu ov-menu-actions ov-menu-scroll dropdown-content z-[100] menu w-56\"><li><button type=\"button\" onclick=\"openNewSkillModal()\">Create Skill</button></li><li><button type=\"button\" onclick=\"openImportSkillModal()\">Import Skill Package</button></li></ul></div></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 7, "</button><ul tabindex=\"0\" class=\"ov-menu ov-menu-actions ov-menu-scroll dropdown-content z-[100] menu w-56\"><li><button type=\"button\" onclick=\"openNewSkillModal()\">Create Skill</button></li><li><button type=\"button\" onclick=\"openImportSkillModal()\">Import Skill Package</button></li></ul></div></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
