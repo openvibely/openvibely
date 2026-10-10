@@ -1017,7 +1017,7 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 					if (runtimeStatus === 'running') runtimeTitle = 'Runtime healthy';
 					if (runtimeStatus === 'failed') runtimeTitle = runtimeError ? ('Runtime failed: ' + runtimeError) : 'Runtime failed';
 					if (runtimeStatus && runtimeStatus !== 'running' && runtimeStatus !== 'failed') runtimeTitle = 'Runtime ' + runtimeStatus;
-					let runtimeStatusIndicator = '<span class="inline-flex h-2.5 w-2.5 rounded-full ' + runtimeDotClass + ' shrink-0" title="' + escapeHtml(runtimeTitle) + '"></span>';
+					let runtimeStatusIndicator = '<span class="inline-flex h-2.5 w-2.5 rounded-full ' + runtimeDotClass + ' shrink-0" role="img" aria-label="' + escapeHtml(runtimeTitle) + '" ' + (runtimeStatus === 'failed' ? 'data-tooltip-disabled' : 'title="' + escapeHtml(runtimeTitle) + '"') + '></span>';
 					// For failed runtime, show error message below the plugin name
 					const runtimeErrText = runtimeStatus === 'failed' && runtimeError
 						? '<p class="text-[11px] text-error mt-1">Runtime: ' + escapeHtml(runtimeError) + '</p>'
