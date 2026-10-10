@@ -1597,7 +1597,7 @@ templ diffFileHeader(f DiffFile, idx int, defaultExpanded bool, splitChevron boo
 			<span class="badge badge-ghost badge-sm shrink-0" data-tooltip-disabled>Binary</span>
 		}
 		<span class="flex items-center gap-1 min-w-0 flex-1">
-			<span class="font-mono text-sm font-medium truncate min-w-0" title={ diffFileDisplayPath(f) }>{ diffFileDisplayPath(f) }</span>
+			<span class="font-mono text-sm font-medium truncate min-w-0" data-tooltip-disabled>{ diffFileDisplayPath(f) }</span>
 			@diffFileCopyPathButton(diffFileDisplayPath(f))
 		</span>
 		@diffStatsBadge(f)
@@ -1704,7 +1704,7 @@ templ inlineDiffFileWithReview(f DiffFile, idx int, defaultExpanded bool, taskID
 										}
 										if lineHasComment(commentMap, f.Path, line) {
 										}
-										<button type="button" class="diff-add-comment-btn" onclick="handleAddCommentClick(event)" title="Add comment">+</button>
+										<button type="button" class="diff-add-comment-btn" onclick="handleAddCommentClick(event)" data-tooltip-disabled aria-label="Add comment">+</button>
 									</td>
 									<td class="diff-line-content px-3 py-0 whitespace-pre-wrap break-all">
 										<span class="diff-marker select-none opacity-50 inline-block w-4">{ lineMarker(line.Type) }</span>{ line.Content }
@@ -2252,7 +2252,7 @@ templ splitDiffFileWithReview(f DiffFile, idx int, defaultExpanded bool, taskID 
 										if pair.Right.Type != "empty" && lineHasComment(commentMap, f.Path, pair.Right) {
 										}
 										if pair.Right.Type != "empty" {
-											<button type="button" class="diff-add-comment-btn" onclick="handleAddCommentClick(event)" title="Add comment">+</button>
+											<button type="button" class="diff-add-comment-btn" onclick="handleAddCommentClick(event)" data-tooltip-disabled aria-label="Add comment">+</button>
 										}
 									</td>
 									<td class={ "diff-line-content px-3 py-0 whitespace-pre-wrap break-all", splitCellBg(pair.Right.Type) }>

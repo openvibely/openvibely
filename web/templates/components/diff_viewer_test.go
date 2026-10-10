@@ -910,10 +910,10 @@ func assertDiffViewerHeaderStats(t *testing.T, diff, wantAdd, wantDel, wantLabel
 	if !strings.Contains(body, `class="diff-file-stats text-xs font-semibold ml-auto shrink-0 flex items-center gap-1"`) {
 		t.Error("expected diff stats wrapper to be visible")
 	}
-	if !strings.Contains(body, `class="diff-stat-add" title="Added lines">`+wantAdd+`</span>`) {
+	if !strings.Contains(body, `class="diff-stat-add" data-tooltip-disabled>`+wantAdd+`</span>`) {
 		t.Errorf("expected additions to render as %s in dedicated stats span", wantAdd)
 	}
-	if !strings.Contains(body, `class="diff-stat-del" title="Deleted lines">`+wantDel+`</span>`) {
+	if !strings.Contains(body, `class="diff-stat-del" data-tooltip-disabled>`+wantDel+`</span>`) {
 		t.Errorf("expected deletions to render as %s in dedicated stats span", wantDel)
 	}
 	if !strings.Contains(body, `aria-label="`+wantLabel+`"`) {
@@ -1727,7 +1727,7 @@ func TestDiffViewerWithReview_LargeFileRendersLoadDiffButton(t *testing.T) {
 	if !strings.Contains(body, `data-copy-path="big.txt"`) {
 		t.Error("expected deferred large-file header copy path button")
 	}
-	if !strings.Contains(body, `<span class="flex items-center gap-1 min-w-0 flex-1"><span class="font-mono text-sm font-medium truncate min-w-0" title="big.txt">big.txt</span><button`) {
+	if !strings.Contains(body, `<span class="flex items-center gap-1 min-w-0 flex-1"><span class="font-mono text-sm font-medium truncate min-w-0" data-tooltip-disabled>big.txt</span><button`) {
 		t.Error("expected deferred large-file copy button next to filename")
 	}
 	if !strings.Contains(body, `onclick="toggleDiffFile(0)"`) {

@@ -348,11 +348,11 @@ func TestHandler_ListAgents_IncludesGenerateUI(t *testing.T) {
 	if !strings.Contains(body, "aria-label=\"${removeLabel}\"") {
 		t.Errorf("expected agents page marketplace remove icon action to include accessible label")
 	}
-	if !strings.Contains(body, "title=\"${syncLabel}\"") {
-		t.Errorf("expected agents page marketplace sync icon action to include tooltip")
+	if strings.Contains(body, "title=\"${syncLabel}\"") {
+		t.Errorf("marketplace sync icon must not show a redundant tooltip")
 	}
-	if !strings.Contains(body, "title=\"${removeLabel}\"") {
-		t.Errorf("expected agents page marketplace remove icon action to include tooltip")
+	if strings.Contains(body, "title=\"${removeLabel}\"") {
+		t.Errorf("marketplace remove icon must not show a redundant tooltip")
 	}
 	if !strings.Contains(body, "<span class=\"loading loading-spinner loading-xs\"></span>") {
 		t.Errorf("expected agents page marketplace icon actions to keep loading spinner state")
