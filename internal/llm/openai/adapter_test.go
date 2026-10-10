@@ -320,7 +320,7 @@ func TestCallCompletionsStreamingTaskWithRuntimeActionsUsesToolModePrompt(t *tes
 		t.Fatalf("user message = %#v", messages[len(messages)-1])
 	}
 	content, _ := user["content"].(string)
-	if strings.Contains(content, llmprompt.ChatActionUnavailableInstructions) || strings.Contains(content, "create_task") {
+	if strings.Contains(content, "create_task") {
 		t.Fatalf("task prompt must not carry a tool note: %q", content)
 	}
 	if strings.Contains(content, "This is the ONLY way to create a task") || strings.Contains(content, "To create a task, output this format") {
@@ -333,8 +333,8 @@ func TestCallCompletionsStreamingTaskWithRuntimeActionsUsesToolModePrompt(t *tes
 
 func TestAppendToolModeSystemPromptCoversChatAndTaskFollowupsAndPreservesPlan(t *testing.T) {
 	noTools := appendToolModeSystemPrompt("base", nil, models.ChatModeOrchestrate, false)
-	if !strings.Contains(noTools, llmprompt.ChatActionUnavailableInstructions) {
-		t.Fatalf("no-tool chat prompt missing capability limitation: %q", noTools)
+	if noTools != "base" {
+		t.Fatalf("no-tool chat prompt must be unchanged: %q", noTools)
 	}
 
 	rt := &llmcontracts.RuntimeTools{Definitions: []llmcontracts.RuntimeToolDefinition{{Name: "create_task"}}}

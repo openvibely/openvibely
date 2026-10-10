@@ -21,7 +21,6 @@ import (
 
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/lifecycle"
-	llmprompt "github.com/openvibely/openvibely/internal/llm/prompt"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/service"
@@ -7177,7 +7176,7 @@ func TestHandler_TaskThreadSend_DoesNotResumeExplicitlyPausedGoal(t *testing.T) 
 	assert.Equal(t, "paused by user", paused.Reason)
 }
 
-func TestHandler_TaskThreadSend_MixtureOllamaAggregatorReportsRuntimeActionsUnavailable(t *testing.T) {
+func TestHandler_TaskThreadSend_MixtureOllamaAggregatorGetsNoTools(t *testing.T) {
 	h, e, llmConfigRepo := setupTestHandler(t)
 	h.workerSvc = nil
 	ctx := context.Background()
@@ -7236,9 +7235,8 @@ func TestHandler_TaskThreadSend_MixtureOllamaAggregatorReportsRuntimeActionsUnav
 		message, _ := raw.(map[string]any)
 		content, _ := message["content"].(string)
 		return message["role"] == "system" &&
-			strings.Contains(content, llmprompt.ChatActionUnavailableInstructions) &&
 			!strings.Contains(content, "[CREATE_TASK]")
-	}), "runtime-tool-incapable follow-up aggregator must receive a limitation without marker guidance")
+	}), "runtime-tool-incapable follow-up aggregator must not receive marker guidance")
 	require.Eventually(t, func() bool {
 		execs, err := h.execRepo.ListByTaskChronological(ctx, task.ID)
 		return err == nil && len(execs) == 1 && execs[0].Status == models.ExecCompleted

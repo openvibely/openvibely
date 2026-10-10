@@ -25,8 +25,8 @@ func TestMaxTokensErrorIsCategorized(t *testing.T) {
 
 func TestAppendToolModeSystemPromptCoversChatAndTaskFollowupsAndPreservesPlan(t *testing.T) {
 	noTools := appendToolModeSystemPrompt("base", nil, models.ChatModeOrchestrate, false)
-	if !strings.Contains(noTools, llmprompt.ChatActionUnavailableInstructions) {
-		t.Fatalf("no-tool chat prompt missing capability limitation: %q", noTools)
+	if noTools != "base" {
+		t.Fatalf("no-tool chat prompt must be unchanged: %q", noTools)
 	}
 
 	rt := &llmcontracts.RuntimeTools{Definitions: []llmcontracts.RuntimeToolDefinition{{Name: "create_task"}}}
@@ -161,9 +161,6 @@ func TestCallStreamingZeroHistoryFollowupUsesChatAssembly(t *testing.T) {
 	payload := fmt.Sprint(gotBody)
 	if !strings.Contains(payload, "# Task Follow-up Constraints") || !strings.Contains(payload, "FOLLOWUP_CONTEXT_SENTINEL") {
 		t.Fatalf("zero-history follow-up did not use Chat assembly: %#v", gotBody)
-	}
-	if strings.Contains(payload, llmprompt.ChatActionUnavailableInstructions) {
-		t.Fatalf("zero-history follow-up claimed tools are unavailable: %#v", gotBody)
 	}
 	if strings.Contains(payload, llmprompt.ChatActionToolModeInstructions) {
 		t.Fatalf("zero-history follow-up received Chat action guidance: %#v", gotBody)
