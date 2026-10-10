@@ -1176,10 +1176,25 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 					};
 
 					var pendingInputsGeneration = 0;
+					var pendingInputMutations = 0;
+					var pendingInputsRoot = document.getElementById('chat-page-root');
+					if (pendingInputsRoot) pendingInputsRoot.addEventListener('htmx:beforeRequest', function(event) {
+						var detail = event.detail || {};
+						var trigger = detail.elt;
+						if (!trigger || !detail.xhr || !trigger.closest || !(trigger.id === 'chat-form' || trigger.closest('#pending-thread-inputs'))) return;
+						// Local HTMX responses own their row changes until the request finishes.
+						// Invalidate older snapshots even when the corresponding SSE is suppressed.
+						pendingInputsGeneration++;
+						pendingInputMutations++;
+						detail.xhr.addEventListener('loadend', function() {
+							pendingInputMutations--;
+							if (!pendingInputMutations && document.getElementById('chat-page-root') === pendingInputsRoot) refreshChatPendingInputs();
+						}, {once: true});
+					});
 					var refreshChatPendingInputs = function() {
 						var generation = ++pendingInputsGeneration;
 						var root = document.getElementById('chat-page-root');
-						if (!root || root.getAttribute('data-project-id') !== projectId || typeof htmx === 'undefined') return;
+						if (pendingInputMutations || !root || root.getAttribute('data-project-id') !== projectId || typeof htmx === 'undefined') return;
 						return fetch('/chat/pending-inputs?project_id=' + encodeURIComponent(projectId), {headers: {'HX-Request': 'true'}}).then(function(response) {
 							if (!response.ok) throw new Error('HTTP ' + response.status);
 							return response.text();
