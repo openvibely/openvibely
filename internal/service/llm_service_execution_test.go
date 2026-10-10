@@ -18,7 +18,6 @@ import (
 	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/lifecycle"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
-	llmprompt "github.com/openvibely/openvibely/internal/llm/prompt"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/testutil"
@@ -2326,19 +2325,12 @@ func TestLLMService_ExecuteTaskWithAgent_MixtureOllamaAggregatorMasksToolsAndLea
 			t.Fatalf("Ollama payload included runtime tools: %#v", providerRequest["tools"])
 		}
 		messages, _ := providerRequest["messages"].([]any)
-		foundLimitation := false
 		for _, raw := range messages {
 			message, _ := raw.(map[string]any)
 			content, _ := message["content"].(string)
-			if strings.Contains(content, llmprompt.ChatActionUnavailableInstructions) {
-				foundLimitation = true
-			}
 			if strings.Contains(content, "[CREATE_TASK]") {
 				t.Fatalf("Ollama initial-task prompt advertised a legacy marker: %q", content)
 			}
-		}
-		if !foundLimitation {
-			t.Fatalf("Ollama initial-task prompt omitted runtime-action limitation: %#v", messages)
 		}
 	default:
 		t.Fatal("expected concrete Ollama aggregator request")

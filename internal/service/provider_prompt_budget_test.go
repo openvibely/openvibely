@@ -53,7 +53,7 @@ func TestProviderPromptBudgetIncludesRuntimeActionMode(t *testing.T) {
 							base = llmprompt.BuildOpenAIOAuthSystemPrompt(base)
 						}
 						want := base
-						if mode == models.ChatModeOrchestrate {
+						if mode == models.ChatModeOrchestrate && !followup {
 							want = llmprompt.ApplyChatActionToolMode(base, rt.DefinitionNames())
 						}
 						if got := estimateProviderSystemPromptTokens(req); got != estimatedUTF8Tokens(want) {

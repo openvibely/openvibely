@@ -326,11 +326,9 @@ func (a *Adapter) callTaskStreaming(ctx context.Context, req llmcontracts.AgentR
 	if err != nil {
 		return "", "", llmusage.FromTotal(0), err
 	}
-	rt := llmcontracts.RuntimeToolsFromContext(ctx)
 	fullPrompt := llmprompt.BuildTaskPromptHeader() +
 		llmprompt.BuildAttachmentInstructions(req.Attachments) +
 		req.Message
-	fullPrompt = llmprompt.ApplyTaskCreationToolMode(fullPrompt, rt.DefinitionNames())
 	fullPrompt += llmprompt.BuildTaskStatusInstructions()
 
 	attachments, err := convertAttachments(req.Attachments)
@@ -388,7 +386,7 @@ func (a *Adapter) callChatStreaming(ctx context.Context, req llmcontracts.AgentR
 	rt := llmcontracts.RuntimeToolsFromContext(ctx)
 	systemPrompt := llmprompt.BuildChatSystemPrompt(req.Followup, req.ChatMode, req.ChatSystemContext, false)
 	systemPrompt = llmprompt.AppendWorktreeContextPrompt(systemPrompt, workDir)
-	if req.ChatMode == models.ChatModeOrchestrate {
+	if req.ChatMode == models.ChatModeOrchestrate && !req.Followup {
 		systemPrompt = llmprompt.ApplyChatActionToolMode(systemPrompt, rt.DefinitionNames())
 	}
 

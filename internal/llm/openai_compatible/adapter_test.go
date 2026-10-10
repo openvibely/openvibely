@@ -334,7 +334,7 @@ func TestAdapterChatWithRuntimeActionsUsesToolModeSystemPrompt(t *testing.T) {
 	require.Equal(t, "system", system["role"])
 	content, _ := system["content"].(string)
 	require.Contains(t, content, llmprompt.ChatActionToolModeInstructions)
-	require.Contains(t, content, "Available action tools: request_user_input, create_task")
+	require.NotContains(t, content, "Available action tools")
 	require.Contains(t, content, "replace that response with a request_user_input tool call")
 	require.Contains(t, content, "recommended/default answer")
 	require.Contains(t, content, `Do not add a generic per-question "move forward" option`)
@@ -351,7 +351,7 @@ func TestAdapterChatWithRuntimeActionsUsesToolModeSystemPrompt(t *testing.T) {
 	require.Contains(t, strings.ToLower(fmt.Sprint(tools)), "create_task")
 }
 
-func TestAdapterChatWithoutRuntimeActionsReportsCapabilityLimitation(t *testing.T) {
+func TestAdapterChatWithoutRuntimeActionsAddsNoActionNote(t *testing.T) {
 	var gotBody map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&gotBody))
@@ -379,12 +379,12 @@ func TestAdapterChatWithoutRuntimeActionsReportsCapabilityLimitation(t *testing.
 	system, ok := messages[0].(map[string]any)
 	require.True(t, ok)
 	content, _ := system["content"].(string)
-	require.Contains(t, content, llmprompt.ChatActionUnavailableInstructions)
+	require.NotContains(t, content, "Runtime actions are unavailable")
 	require.NotContains(t, content, "[CREATE_TASK]")
 	require.NotContains(t, content, llmprompt.ChatActionToolModeInstructions)
 }
 
-func TestAdapterTaskFollowupWithoutRuntimeActionsReportsCapabilityLimitation(t *testing.T) {
+func TestAdapterTaskFollowupWithoutRuntimeActionsKeepsCodingTools(t *testing.T) {
 	var gotBody map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&gotBody))
@@ -412,7 +412,7 @@ func TestAdapterTaskFollowupWithoutRuntimeActionsReportsCapabilityLimitation(t *
 	system, ok := messages[0].(map[string]any)
 	require.True(t, ok)
 	content, _ := system["content"].(string)
-	require.Contains(t, content, llmprompt.ChatActionUnavailableInstructions)
+	require.NotContains(t, content, "Runtime actions are unavailable")
 	require.NotContains(t, content, "[CREATE_TASK]")
 	require.NotContains(t, content, llmprompt.ChatActionToolModeInstructions)
 }
@@ -446,11 +446,11 @@ func TestAdapterPlanWithoutRuntimeActionsRemainsReadOnlyWithoutActionMode(t *tes
 	require.True(t, ok)
 	content, _ := system["content"].(string)
 	require.Contains(t, content, "PLAN MODE (read-only)")
-	require.NotContains(t, content, llmprompt.ChatActionUnavailableInstructions)
+	require.NotContains(t, content, "Runtime actions are unavailable")
 	require.NotContains(t, content, llmprompt.ChatActionToolModeInstructions)
 }
 
-func TestAdapterTaskWithRuntimeActionsUsesToolModePrompt(t *testing.T) {
+func TestAdapterTaskWithRuntimeActionsOmitsToolNote(t *testing.T) {
 	var gotBody map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&gotBody))
@@ -484,8 +484,8 @@ func TestAdapterTaskWithRuntimeActionsUsesToolModePrompt(t *testing.T) {
 	user, ok := messages[len(messages)-1].(map[string]any)
 	require.True(t, ok)
 	content, _ := user["content"].(string)
-	require.Contains(t, content, "TASK CREATION TOOL MODE")
-	require.Contains(t, content, "Available runtime task tools: create_task")
+	require.NotContains(t, content, "create_task")
+	require.NotContains(t, content, "Runtime actions are unavailable")
 	require.Contains(t, content, "If you recovered and completed the requested outcome, report success")
 	require.NotContains(t, content, "If a command failed, a script returned non-zero")
 	require.NotContains(t, content, "This is the ONLY way to create a task")
@@ -580,9 +580,9 @@ func TestAdapterTaskWithoutRuntimeActionsDoesNotAdvertiseLegacyMutationMarkers(t
 	user, ok := messages[len(messages)-1].(map[string]any)
 	require.True(t, ok)
 	content, _ := user["content"].(string)
-	require.Contains(t, content, llmprompt.ChatActionUnavailableInstructions)
+	require.NotContains(t, content, "Runtime actions are unavailable")
 	require.NotContains(t, content, "[CREATE_TASK]")
-	require.NotContains(t, content, "TASK CREATION TOOL MODE")
+	require.NotContains(t, content, llmprompt.ChatActionToolModeInstructions)
 }
 
 func TestAdapterToolCallReplaysToolResult(t *testing.T) {

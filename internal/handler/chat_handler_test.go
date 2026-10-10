@@ -660,9 +660,8 @@ func TestHandler_ChatSend_MixtureOllamaAggregatorLeavesActionMarkerTextInert(t *
 		message, _ := raw.(map[string]any)
 		content, _ := message["content"].(string)
 		return message["role"] == "system" &&
-			strings.Contains(content, "Runtime actions are unavailable for this request") &&
 			!strings.Contains(content, "[CREATE_TASK]")
-	}), "runtime-tool-incapable aggregator must surface its action limitation without marker guidance")
+	}), "runtime-tool-incapable aggregator must not receive marker guidance")
 	require.Eventually(t, func() bool {
 		active, err := h.execRepo.FindLatestActiveChatExecution(ctx, "default")
 		return err == nil && active == nil

@@ -23,19 +23,27 @@ func TestMaxTokensErrorIsCategorized(t *testing.T) {
 	}
 }
 
-func TestAppendToolModeSystemPromptCoversTaskFollowupsAndPreservesPlan(t *testing.T) {
-	followup := appendToolModeSystemPrompt("base", nil, models.ChatModeOrchestrate)
-	if !strings.Contains(followup, llmprompt.ChatActionUnavailableInstructions) {
-		t.Fatalf("no-tool follow-up prompt missing capability limitation: %q", followup)
+func TestAppendToolModeSystemPromptCoversChatAndTaskFollowupsAndPreservesPlan(t *testing.T) {
+	noTools := appendToolModeSystemPrompt("base", nil, models.ChatModeOrchestrate, false)
+	if noTools != "base" {
+		t.Fatalf("no-tool chat prompt must be unchanged: %q", noTools)
 	}
 
 	rt := &llmcontracts.RuntimeTools{Definitions: []llmcontracts.RuntimeToolDefinition{{Name: "create_task"}}}
-	capable := appendToolModeSystemPrompt("base", rt, models.ChatModeOrchestrate)
-	if !strings.Contains(capable, llmprompt.ChatActionToolModeInstructions) || !strings.Contains(capable, "Available action tools: create_task") {
-		t.Fatalf("tool-capable follow-up prompt missing concrete runtime guidance: %q", capable)
+	capable := appendToolModeSystemPrompt("base", rt, models.ChatModeOrchestrate, false)
+	if !strings.Contains(capable, llmprompt.ChatActionToolModeInstructions) || strings.Contains(capable, "Available action tools") {
+		t.Fatalf("tool-capable chat prompt missing concrete runtime guidance: %q", capable)
 	}
 
-	plan := appendToolModeSystemPrompt("base", nil, models.ChatModePlan)
+	taskThread := appendToolModeSystemPrompt("base", rt, models.ChatModeOrchestrate, true)
+	if taskThread != "base" {
+		t.Fatalf("task-thread prompt must not add a tool note: %q", taskThread)
+	}
+	if got := appendToolModeSystemPrompt("base", nil, models.ChatModeOrchestrate, true); got != "base" {
+		t.Fatalf("no-tool task-thread prompt must not claim tools are unavailable: %q", got)
+	}
+
+	plan := appendToolModeSystemPrompt("base", nil, models.ChatModePlan, false)
 	if plan != "base" {
 		t.Fatalf("Plan prompt received action-mode guidance: %q", plan)
 	}
@@ -154,11 +162,8 @@ func TestCallStreamingZeroHistoryFollowupUsesChatAssembly(t *testing.T) {
 	if !strings.Contains(payload, "# Task Follow-up Constraints") || !strings.Contains(payload, "FOLLOWUP_CONTEXT_SENTINEL") {
 		t.Fatalf("zero-history follow-up did not use Chat assembly: %#v", gotBody)
 	}
-	if !strings.Contains(payload, llmprompt.ChatActionUnavailableInstructions) {
-		t.Fatalf("zero-history follow-up missing capability limitation: %#v", gotBody)
-	}
-	if strings.Contains(payload, "TASK CREATION TOOL MODE") {
-		t.Fatalf("zero-history follow-up received initial-task guidance: %#v", gotBody)
+	if strings.Contains(payload, llmprompt.ChatActionToolModeInstructions) {
+		t.Fatalf("zero-history follow-up received Chat action guidance: %#v", gotBody)
 	}
 	outputConfig, ok := gotBody["output_config"].(map[string]any)
 	if !ok || outputConfig["effort"] != "medium" {
@@ -915,8 +920,8 @@ func TestCallChatStreamingUsesRuntimePolicyHistoryAndSystemContext(t *testing.T)
 			t.Fatalf("request body missing %q: %#v", want, gotBody)
 		}
 	}
-	if !strings.Contains(payload, llmprompt.ChatActionToolModeInstructions) {
-		t.Fatalf("chat runtime tools should enable action guidance: %#v", gotBody["system"])
+	if strings.Contains(payload, llmprompt.ChatActionToolModeInstructions) || strings.Contains(payload, "Available action tools") {
+		t.Fatalf("task follow-up runtime tools should supplement coding tools: %#v", gotBody["system"])
 	}
 	if gotBody["model"] != "claude-sonnet-5-5" {
 		t.Fatalf("chat model = %v, want claude-sonnet-5-5", gotBody["model"])

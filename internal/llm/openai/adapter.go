@@ -338,8 +338,8 @@ func runtimeToolPolicyOptions(isTaskFollowup bool, chatMode models.ChatMode) llm
 	}
 }
 
-func appendToolModeSystemPrompt(base string, rt *llmcontracts.RuntimeTools, chatMode models.ChatMode) string {
-	if chatMode != models.ChatModeOrchestrate {
+func appendToolModeSystemPrompt(base string, rt *llmcontracts.RuntimeTools, chatMode models.ChatMode, isTaskFollowup bool) string {
+	if chatMode != models.ChatModeOrchestrate || isTaskFollowup {
 		return base
 	}
 	return llmprompt.ApplyChatActionToolMode(base, rt.DefinitionNames())
@@ -528,7 +528,6 @@ func (a *Adapter) CallStreaming(ctx context.Context, prompt string, attachments 
 	fullPrompt := llmprompt.BuildTaskPromptHeader() +
 		llmprompt.BuildAttachmentInstructions(attachments) +
 		prompt
-	fullPrompt = llmprompt.ApplyTaskCreationToolMode(fullPrompt, rt.DefinitionNames())
 	fullPrompt += llmprompt.BuildTaskStatusInstructions()
 
 	oaAttachments, err := convertAttachments(attachments)
@@ -671,7 +670,7 @@ func (a *Adapter) CallChatStreaming(ctx context.Context, message string, attachm
 	if !isTaskFollowup {
 		systemPromptStr = applyOpenAIOAuthSystemPrompt(systemPromptStr, agent)
 	}
-	systemPromptStr = appendToolModeSystemPrompt(systemPromptStr, rt, chatMode)
+	systemPromptStr = appendToolModeSystemPrompt(systemPromptStr, rt, chatMode, isTaskFollowup)
 
 	oaAttachments, err := convertAttachments(attachments)
 	if err != nil {
@@ -807,7 +806,6 @@ func (a *Adapter) CallCompletionsStreaming(ctx context.Context, prompt string, a
 	fullPrompt := llmprompt.BuildTaskPromptHeader() +
 		llmprompt.BuildAttachmentInstructions(attachments) +
 		prompt
-	fullPrompt = llmprompt.ApplyTaskCreationToolMode(fullPrompt, rt.DefinitionNames())
 	fullPrompt += llmprompt.BuildTaskStatusInstructions()
 
 	oaAttachments, err := convertAttachments(attachments)
@@ -892,7 +890,7 @@ func (a *Adapter) CallCompletionsChatStreaming(ctx context.Context, message stri
 	if !isTaskFollowup {
 		systemPromptStr = applyOpenAIOAuthSystemPrompt(systemPromptStr, agent)
 	}
-	systemPromptStr = appendToolModeSystemPrompt(systemPromptStr, rt, chatMode)
+	systemPromptStr = appendToolModeSystemPrompt(systemPromptStr, rt, chatMode, isTaskFollowup)
 
 	oaAttachments, err := convertAttachments(attachments)
 	if err != nil {
