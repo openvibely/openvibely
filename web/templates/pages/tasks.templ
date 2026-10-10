@@ -33,7 +33,7 @@ templ TasksContent(project *models.Project, tasks []models.Task, agents []models
 				if project != nil {
 					@kanbanSearch()
 				}
-				<a class="btn btn-ghost btn-sm btn-square" aria-label="Add Task" title="Add Task" href={ templ.URL("/tasks/new?project_id=" + getProjectID(project, nil)) } hx-get={ "/tasks/new?project_id=" + getProjectID(project, nil) } hx-target="#main-content" hx-push-url="true">
+				<a class="btn btn-ghost btn-sm btn-square" aria-label="Add Task" data-tooltip-disabled href={ templ.URL("/tasks/new?project_id=" + getProjectID(project, nil)) } hx-get={ "/tasks/new?project_id=" + getProjectID(project, nil) } hx-target="#main-content" hx-push-url="true">
 					@pageCreateIcon()
 				</a>
 			</div>
