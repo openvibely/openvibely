@@ -216,6 +216,14 @@
         const toggle = event.target.closest && event.target.closest('[data-kanban-search-toggle]');
         if (toggle) setSearchOpen(toggle.closest('[data-kanban-search]'), true);
     });
+    // iOS Safari keeps inputs focused when tapping blank space, so close on any outside press too.
+    document.addEventListener('pointerdown', event => {
+        const search = document.querySelector('[data-kanban-search][data-open="true"]');
+        if (!search || search.contains(event.target)) return;
+        const input = search.querySelector('[data-kanban-search-input]');
+        setSearchOpen(search, false);
+        if (document.activeElement === input) input.blur();
+    });
     document.addEventListener('focusout', event => {
         const search = event.target.closest && event.target.closest('[data-kanban-search]');
         if (search && !search.contains(event.relatedTarget)) setSearchOpen(search, false);
