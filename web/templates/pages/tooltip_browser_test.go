@@ -113,6 +113,25 @@ func TestBrowserFunctional_SharedTooltips(t *testing.T) {
 	})
 }
 
+func TestBrowserFunctional_SharedTooltipFocusScrollIntoView(t *testing.T) {
+	chrome := chatNavigationChromePath(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `<!doctype html><html><meta charset="utf-8"><body><div style="height:5000px"></div><button id="help" data-model-help="Helpful explanation">Help</button><div style="height:5000px"></div>`)
+		_ = templateui.Tooltips().Render(r.Context(), w)
+		fmt.Fprint(w, `</body></html>`)
+	}))
+	defer server.Close()
+	runComposerFocusCDP(t, chrome, server.URL, "focus-scroll-tooltip", func(b *composerFocusCDP) {
+		b.waitFor("tooltip controller ready", `typeof window.openVibelyTooltip`, "object")
+		b.evaluate(`var help=document.getElementById('help'),tip=document.getElementById('ov-shared-tooltip');document.dispatchEvent(new KeyboardEvent('keydown',{key:'Tab',bubbles:true}));help.focus();help.dispatchEvent(new FocusEvent('focusin',{bubbles:true}));document.dispatchEvent(new Event('scroll'));'focus'`)
+		b.waitFor("focus that scrolls the owner into view still shows hint", `String(tip.matches(':popover-open') && tip.textContent==='Helpful explanation')`, "true")
+		b.evaluate(`document.dispatchEvent(new Event('scroll'));'visible scroll'`)
+		b.waitFor("scroll keeps visible focused hint", `String(tip.matches(':popover-open'))`, "true")
+		b.evaluate(`scrollTo(0,0);document.dispatchEvent(new Event('scroll'));'scrolled away'`)
+		b.waitFor("scrolling focused owner out of view dismisses hint", `String(tip.matches(':popover-open'))`, "false")
+	})
+}
+
 func TestBrowserFunctional_TaskCardBadgeTooltipContinuity(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

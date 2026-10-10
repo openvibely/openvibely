@@ -134,7 +134,9 @@ templ Tooltips() {
   document.addEventListener('click',function(e){var el=trigger(e.target),wasPinned=pressedPinned;pressedPinned=null;if(el&&el.matches('[data-model-help],[data-model-setting-help]')){if(wasPinned===el||(active===el&&pinned))close();else show(el,textFor(el),true);}else if(!tip.contains(e.target))close();});
   // Only deliberate Tab navigation re-enables focus hints after keyboard actions.
   document.addEventListener('keydown',function(e){if(e.key==='Tab'&&!e.ctrlKey&&!e.metaKey&&!e.altKey){suppressRestoredFocus=false;dismissed=null;}else {suppressRestoredFocus=true;cancelPending();}if(e.ctrlKey||e.metaKey||e.altKey){warmUntil=0;close();}if(e.key==='Escape'&&active){if(pinned){e.preventDefault();e.stopPropagation();}close();}},true);
-  document.addEventListener('scroll',function(e){var owner=active||pending;if(owner&&!tip.contains(e.target)&&(e.target===document||(e.target instanceof Element&&e.target.contains(owner))))close();},true);window.addEventListener('resize',close);
+  // Focusing an off-screen control scrolls it into view; keyboard hints stay anchored while their owner remains visible.
+  function focusHintInView(owner){if(pinned||(active?pointer:pendingPoint)||!owner.contains(document.activeElement))return false;var r=owner.getBoundingClientRect();return r.bottom>0&&r.top<innerHeight&&r.right>0&&r.left<innerWidth;}
+  document.addEventListener('scroll',function(e){var owner=active||pending;if(owner&&!tip.contains(e.target)&&(e.target===document||(e.target instanceof Element&&e.target.contains(owner)))){if(focusHintInView(owner)){position();return;}close();}},true);window.addEventListener('resize',close);
   document.addEventListener('close',function(e){if(!e.target.open&&((active&&e.target.contains(active))||(pending&&e.target.contains(pending))))close();},true);
   document.addEventListener('model-section-change',close);
   document.addEventListener('htmx:beforeSwap',function(e){var target=e.detail&&e.detail.target;if(target&&((active&&target.contains(active))||(pending&&target.contains(pending))))close();});document.addEventListener('htmx:beforeHistorySave',close);
