@@ -1013,10 +1013,12 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 				opacity: 0.7;
 				transition: opacity 0.15s, background-color 0.15s;
 			}
+			@media (hover: hover) {
 				.sidebar-toggle-btn:hover {
 					opacity: 1;
 					background-color: hsl(var(--b2));
 				}
+			}
 			
 			.sidebar-theme-toggle-container {
 				flex-shrink: 0;
