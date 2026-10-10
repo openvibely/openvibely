@@ -1577,16 +1577,6 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 								});
 							}
 
-							function openScheduleRunAtPicker(container, event) {							if (!container) return;
-							var pickerInput = container.querySelector('input[data-run-at-picker]');
-							if (!pickerInput) return;
-							if (event && event.target && !event.target.closest('input[data-run-at-picker]')) return;
-							pickerInput.focus();
-							if (typeof pickerInput.showPicker === 'function') {
-								pickerInput.showPicker();
-							}
-						}
-
 						var _threadContentLoading = false;
 					function _currentTaskIdFromPath() {
 						var taskIdMatch = window.location.pathname.match(/\/tasks\/([^\/]+)/);
