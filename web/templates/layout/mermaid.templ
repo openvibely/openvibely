@@ -19,12 +19,24 @@ templ MermaidDiagrams() {
   };
   // Ask the same Markdown lexer that renders the message whether its last block is
   // an unclosed fence. A trailing partial line is ignored because it can still change.
-  let lastFenceText=null, lastFenceOpen=false;
-  function endsInsideFence(text) {
-   if (text===lastFenceText) return lastFenceOpen;
+  // Streamed text only grows, so each message re-lexes from its last top-level blank
+  // line before the final block; blocks ending earlier can no longer change.
+  const fenceState=new WeakMap();
+  function endsInsideFence(owner,text) {
+   const state=fenceState.get(owner)||{text:null,open:false,prefix:''};
+   fenceState.set(owner,state);
+   if (text===state.text) return state.open;
    const parser=window.marked;
    if (!parser || typeof parser.lexer!=='function') return true;
-   let tokens=parser.lexer(text.slice(0,text.lastIndexOf('\n')+1));
+   const complete=text.slice(0,text.lastIndexOf('\n')+1).replace(/\r\n|\r/g,'\n');
+   const offset=complete.startsWith(state.prefix)?state.prefix.length:0;
+   let tokens=parser.lexer(complete.slice(offset));
+   let consumed=0, cut=0;
+   for (let i=0;i<tokens.length-1;i++) {
+    consumed+=tokens[i].raw.length;
+    if (tokens[i].type==='space') cut=consumed;
+   }
+   state.prefix=complete.slice(0,offset+cut);
    let last=null;
    while (tokens && tokens.length) {
     const visible=tokens.filter(token=>token.type!=='space');
@@ -39,13 +51,13 @@ templ MermaidDiagrams() {
     const contentLines=last.text===''?0:last.text.split('\n').length;
     open=rawLines<=contentLines+1;
    }
-   lastFenceText=text; lastFenceOpen=open;
+   state.text=text; state.open=open;
    return open;
   }
   function streamingFenceClosed(code) {
    const owner=code.closest('[data-raw-content]');
    if (!owner) return false;
-   if (!endsInsideFence(owner.getAttribute('data-raw-content')||'')) return true;
+   if (!endsInsideFence(owner,owner.getAttribute('data-raw-content')||'')) return true;
    const blocks=Array.from(owner.querySelectorAll('pre > code')).filter(block=>!block.closest('.stream-tool'));
    return blocks[blocks.length-1]!==code;
   }
