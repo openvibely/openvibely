@@ -74,10 +74,17 @@ func testKanbanHeaderSearch(t *testing.T, width int) {
 		check("search sits next to Add Task", search+`.nextElementSibling.getAttribute('aria-label') === 'Add Task'`)
 		check("collapsed by default", search+`.dataset.open === 'false' && `+width(search)+` <= 33`)
 		check("Active count has refresh hook", count("active")+` === '2'`)
+		addTask := `document.querySelector('[aria-label="Add Task"]')`
+		for _, btn := range []string{toggle, addTask} {
+			check("button matches panel toggle", `(() => { const s = getComputedStyle(`+btn+`), r = `+btn+`.getBoundingClientRect(); return `+btn+`.classList.contains('sidebar-toggle-btn') && r.width === 32 && r.height === 32 && s.borderTopLeftRadius === '8px' && s.opacity === '0.7' && `+btn+`.querySelector('svg').getBoundingClientRect().width === 20 })()`)
+		}
+		check("collapsed box has rounded corners", `getComputedStyle(`+search+`).borderTopLeftRadius === '8px'`)
+		check("search and Add Task 8px apart", `Math.round(`+addTask+`.getBoundingClientRect().left - `+search+`.getBoundingClientRect().right) === 8`)
 
 		b.evaluate(`(window.__iconColor = getComputedStyle(` + toggle + `).color, 'ok')`)
 		b.click(`[data-kanban-search-toggle]`)
 		check("click opens and focuses input", search+`.dataset.open === 'true' && document.activeElement === `+input)
+		check("open box keeps rounded corners", `getComputedStyle(`+search+`).borderTopLeftRadius === '8px'`)
 		check("clear button hidden while empty", `document.querySelector('[data-kanban-search-clear]').getClientRects().length === 0`)
 		b.waitFor("open animation", `String(`+width(search)+` > 100)`, "true")
 		check("open box stays inside header", search+`.getBoundingClientRect().left >= document.querySelector('[data-page-header] h2').getBoundingClientRect().right`)
