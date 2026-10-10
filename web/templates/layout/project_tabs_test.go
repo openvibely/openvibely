@@ -94,7 +94,7 @@ func TestProjectTabsShowNavigationHintWithoutRedundantLabels(t *testing.T) {
 			t.Errorf("unexpected tab tooltip: %s", fragment)
 		}
 	}
-	for _, fragment := range []string{`title="Open project"`, `aria-label="Close project tab: Alpha"`, `tab.dataset.ovTooltip = 'Previous/next project (' + projectTabShortcut + ')';`, `bar.dataset.platform === 'darwin'`, `/Mac|iPhone|iPad/.test(navigator.platform)`, `'⌘⇧←/→' : 'Ctrl+Shift+←/→'`} {
+	for _, fragment := range []string{`title="Open project"`, `aria-label="Close project tab: Alpha"`, `tab.dataset.ovTooltip = 'Next project (' + projectTabShortcut + '→)\nPrevious project (' + projectTabShortcut + '←)';`, `bar.dataset.platform === 'darwin'`, `/Mac|iPhone|iPad/.test(navigator.platform)`, `'⌘⇧' : 'Ctrl+Shift+'`} {
 		if !strings.Contains(html, fragment) {
 			t.Errorf("missing retained tooltip or accessible label: %s", fragment)
 		}
