@@ -42,7 +42,23 @@ type OAuthConnection struct {
 	UpdatedAt           time.Time   `json:"updated_at"`
 }
 
+// OAuthCredentialSnapshot detects both reauthorization and token refresh changes.
+type OAuthCredentialSnapshot struct {
+	Revision    int64
+	Fingerprint [32]byte
+}
+
+// PendingModelOAuth holds an unsaved authorization and immutable credential
+// snapshots observed before sign-in.
+type PendingModelOAuth struct {
+	OAuthConnection
+	ObservedCredentials map[string]OAuthCredentialSnapshot
+}
+
 type LLMConfig struct {
+	// PendingOAuthConnection is an in-memory authorization applied atomically with an explicit model save.
+	PendingOAuthConnection *PendingModelOAuth `json:"-"`
+
 	ID              string      `json:"id"`
 	Name            string      `json:"name"`
 	Provider        LLMProvider `json:"provider"`
