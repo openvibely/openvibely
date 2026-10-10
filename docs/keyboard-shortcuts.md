@@ -40,9 +40,12 @@ These controls apply to chat and task-thread composers.
 | Send or queue a message | Enter | Enter |
 | Insert a newline | Shift+Enter | Shift+Enter |
 | Steer an active turn | Command+Enter | Ctrl+Enter |
+| Open or close the model menu | Command+M | Ctrl+M |
 | Recall an older sent message | ↑ | ↑ |
 | Recall a newer message or return to the draft | ↓ | ↓ |
 | Exit message-history browsing and restore the draft | Escape | Escape |
+
+Command/Ctrl+M opens the model menu and focuses its search field. Press it again to close the menu and return focus to the model button. This works in chat and task-thread composers when the model button is visible and enabled.
 
 Command/Ctrl+Enter requests steering when supported and an active turn is available; otherwise it follows normal submission behavior. Holding Command/Ctrl while clicking the primary composer action also requests steering.
 
