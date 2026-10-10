@@ -71,8 +71,8 @@ func TestClaudeSonnet55CatalogPolicy(t *testing.T) {
 		t.Fatalf("Anthropic default = %q, want unchanged default claude-sonnet-4-5-20250929", defaultModel.ID)
 	}
 	providerModels := ProviderModels(ProviderAnthropic)
-	if len(providerModels) == 0 || providerModels[0].ID != "claude-opus-5-5" {
-		t.Fatalf("first Anthropic model = %v, want existing first option claude-opus-5-5", providerModels)
+	if len(providerModels) == 0 || providerModels[0].ID != "claude-haiku-5-5" {
+		t.Fatalf("first Anthropic model = %v, want version/name-sorted first option claude-haiku-5-5", providerModels)
 	}
 }
 
@@ -105,8 +105,8 @@ func TestClaudeHaiku55CatalogPolicy(t *testing.T) {
 	if spec.SupportsTemperature || ModelSupportsTemperature(ProviderAnthropic, spec.ID) {
 		t.Fatal("Haiku 5.5 must not support configurable temperature")
 	}
-	if spec.SupportsOAuth || BuiltInModelSupportedForAuth(ProviderAnthropic, spec.ID, AuthMethodOAuth) {
-		t.Fatal("Haiku 5.5 OAuth eligibility must remain disabled without verified support")
+	if !spec.SupportsOAuth || !BuiltInModelSupportedForAuth(ProviderAnthropic, spec.ID, AuthMethodOAuth) {
+		t.Fatal("Haiku 5.5 must be available for OAuth")
 	}
 	if !BuiltInModelSupportedForAuth(ProviderAnthropic, spec.ID, AuthMethodAPIKey) {
 		t.Fatal("Haiku 5.5 must remain available to Anthropic API-key configurations")
@@ -166,5 +166,18 @@ func TestProviderModelsReturnsDefensiveEffortCopies(t *testing.T) {
 	again := ProviderModels(ProviderOpenAI)
 	if again[0].ReasoningEfforts[0] == "mutated" {
 		t.Fatal("ProviderModels exposed mutable catalog storage")
+	}
+}
+
+func TestAnthropicChoicesOrderedByVersionThenName(t *testing.T) {
+	want := []string{"claude-haiku-5-5", "claude-opus-5-5", "claude-sonnet-5-5", "claude-fable-5-1", "claude-mythos-5-1", "claude-fable-5", "claude-mythos-5", "claude-opus-5", "claude-sonnet-5", "claude-opus-4-8", "claude-opus-4-7", "claude-opus-4-6", "claude-sonnet-4-6", "claude-haiku-4-5-20251001", "claude-sonnet-4-5-20250929"}
+	got := ProviderModels(ProviderAnthropic)
+	if len(got) != len(want) {
+		t.Fatalf("choices = %d, want %d", len(got), len(want))
+	}
+	for i, id := range want {
+		if got[i].ID != id {
+			t.Errorf("choice %d = %s, want %s", i, got[i].ID, id)
+		}
 	}
 }

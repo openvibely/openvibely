@@ -1188,15 +1188,15 @@ func TestUpdateModel_Haiku55ClearsPreviouslySavedTemperature(t *testing.T) {
 	}
 }
 
-func TestCreateModel_Haiku55RejectsUnverifiedOAuthEligibility(t *testing.T) {
+func TestCreateModel_Haiku55PersistsOAuthSelection(t *testing.T) {
 	_, e, repo := setupTestHandler(t)
 	form := modelValidationForm("Haiku 5.5 OAuth")
 	form.Set("anthropic_auth_type", "oauth")
 	form.Set("model", "claude-haiku-5-5")
 	form.Set("reasoning_effort", "medium")
 	rec := htmxPost(e, "/models", form)
-	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "no longer supported") {
-		t.Fatalf("expected Haiku 5.5 OAuth selection to be rejected, got %d: %s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected Haiku 5.5 OAuth selection to save, got %d: %s", rec.Code, rec.Body.String())
 	}
 	configs, err := repo.List(context.Background())
 	if err != nil {
@@ -1204,9 +1204,13 @@ func TestCreateModel_Haiku55RejectsUnverifiedOAuthEligibility(t *testing.T) {
 	}
 	for _, config := range configs {
 		if config.Name == "Haiku 5.5 OAuth" {
-			t.Fatal("unverified Haiku 5.5 OAuth configuration was saved")
+			if config.Model != "claude-haiku-5-5" || config.AuthMethod != models.AuthMethodOAuth || config.ReasoningEffort != "medium" {
+				t.Fatalf("unexpected OAuth model selection: %s/%s/%s", config.Model, config.AuthMethod, config.ReasoningEffort)
+			}
+			return
 		}
 	}
+	t.Fatal("Haiku 5.5 OAuth configuration was not saved")
 }
 
 func TestModelsPage_Haiku55HidesTemperatureOption(t *testing.T) {
@@ -1232,8 +1236,8 @@ func TestModelsPage_Haiku55HidesTemperatureOption(t *testing.T) {
 	if !strings.Contains(modelOption, `"temperature":false`) {
 		t.Fatalf("Haiku 5.5 choice must hide temperature: %s", modelOption)
 	}
-	if !strings.Contains(modelOption, `"oauth":false`) {
-		t.Fatalf("Haiku 5.5 choice must not advertise unverified OAuth eligibility: %s", modelOption)
+	if !strings.Contains(modelOption, `"oauth":true`) {
+		t.Fatalf("Haiku 5.5 choice must be available for OAuth: %s", modelOption)
 	}
 }
 

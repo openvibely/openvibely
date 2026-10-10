@@ -236,13 +236,13 @@ func TestModelsContent_AnthropicDefaultModelSelection(t *testing.T) {
 		selectHTML = selectHTML[:selectEnd]
 	}
 	firstOption := strings.Index(selectHTML, "<option ")
-	if firstOption < 0 || !strings.HasPrefix(selectHTML[firstOption:], `<option value="claude-opus-5-5"`) {
-		t.Fatal("expected claude-opus-5-5 to be the default Anthropic HTML option")
+	if firstOption < 0 || !strings.HasPrefix(selectHTML[firstOption:], `<option value="claude-haiku-5-5"`) {
+		t.Fatal("expected claude-haiku-5-5 to be the default Anthropic HTML option")
 	}
 
 	options := models.ProviderModels(models.ProviderAnthropic)
-	if len(options) == 0 || options[0].ID != "claude-opus-5-5" {
-		t.Fatal("expected claude-opus-5-5 to be the default Anthropic catalog entry")
+	if len(options) == 0 || options[0].ID != "claude-haiku-5-5" {
+		t.Fatal("expected claude-haiku-5-5 to be the default Anthropic catalog entry")
 	}
 }
 
