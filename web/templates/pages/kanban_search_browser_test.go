@@ -75,6 +75,7 @@ func testKanbanHeaderSearch(t *testing.T, width int) {
 		check("collapsed by default", search+`.dataset.open === 'false' && `+width(search)+` <= 33`)
 		check("Active count has refresh hook", count("active")+` === '2'`)
 
+		b.evaluate(`(window.__iconColor = getComputedStyle(`+toggle+`).color, 'ok')`)
 		b.click(`[data-kanban-search-toggle]`)
 		check("click opens and focuses input", search+`.dataset.open === 'true' && document.activeElement === `+input)
 		b.waitFor("open animation", `String(`+width(search)+` > 100)`, "true")
@@ -95,6 +96,7 @@ func testKanbanHeaderSearch(t *testing.T, width int) {
 		check("real click elsewhere collapses", search+`.dataset.open === 'false'`)
 		b.waitFor("close animation", `String(`+width(search)+` <= 33)`, "true")
 		check("term keeps filtering while collapsed", visible+` === 'alpha,gamma' && `+search+`.dataset.active === 'true'`)
+		check("icon keeps its colour while a search is applied", `getComputedStyle(`+toggle+`).color === window.__iconColor`)
 
 		b.click(`[data-kanban-search-toggle]`)
 		check("reopens with term", search+`.dataset.open === 'true' && document.activeElement === `+input)
@@ -141,5 +143,12 @@ func testKanbanHeaderSearch(t *testing.T, width int) {
 		b.waitFor("history restore resyncs filter", visible, "alpha,beta,delta,epsilon,gamma")
 		check("restored search is collapsed and inactive", search+`.dataset.open === 'false' && `+search+`.dataset.active === 'false'`)
 		check("restored no-results hidden", `!(`+noResults("backlog")+`)`)
+
+		b.evaluate(`(document.getElementById('task-delta').remove(), window.kanbanRefresh(), 'ok')`)
+		b.click(`[data-kanban-search-toggle]`)
+		b.typeText("beta")
+		b.waitFor("nothing running, queued hidden", visible, "beta")
+		check("In Progress shows no results when nothing is running", noResults("active"))
+		check("In Progress drop hint hidden", `Array.from(document.querySelectorAll('[data-kanban-category="active"] [data-kanban-drop-hint]')).every(h => h.hidden)`)
 	})
 }

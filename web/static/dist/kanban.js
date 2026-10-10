@@ -84,7 +84,7 @@
             const noResults = col.querySelector('[data-kanban-no-results]');
             const zone = col.dataset.kanbanCategory === 'active' ? col.querySelector('[data-status="running"]') : col;
             const zoneCards = zone ? cards(zone) : [];
-            const noMatch = zoneCards.length > 0 && zoneCards.every(card => card.hidden);
+            const noMatch = zoneCards.every(card => card.hidden) && (zoneCards.length > 0 || all.length > 0 && !visible.length);
             if (noResults) noResults.hidden = !noMatch;
             col.querySelectorAll('[data-kanban-drop-hint]').forEach(hint => { hint.hidden = noMatch; });
             matched += visible.length;
