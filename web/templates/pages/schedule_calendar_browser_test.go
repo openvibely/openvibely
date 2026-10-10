@@ -108,8 +108,17 @@ func testScheduleCalendarHeader(t *testing.T, paused, mobile bool) {
    function down(el,options){ el.dispatchEvent(new PointerEvent('pointerdown',Object.assign({bubbles:true,cancelable:true,pointerType:'mouse',button:0,pointerId:8},options||{}))); }
    function up(){window.dispatchEvent(new PointerEvent('pointerup',{pointerId:8}));}
    function count(){return root.querySelectorAll('[data-calendar-day][aria-pressed="true"]').length;}
+   // Model an excluded hour whose schedules have since been removed.
+   root.querySelectorAll('.drop-zone[data-date="'+days[6].dataset.calendarDay+'"][data-hour="6"] [data-schedule-card]').forEach(card=>card.remove());
+   down(days[6]);up();
+   check(!root.querySelector('.drop-zone[data-date="'+days[6].dataset.calendarDay+'"][data-hour="6"] [data-schedule-card]'),'regression hour has no schedule cards');
+   check(!toolbar.querySelector('[data-calendar-action="skip"]').hidden && !toolbar.querySelector('[data-calendar-action="restore"]').hidden,'day with only an empty-hour exclusion offers skip and unskip');
+   toolbar.querySelector('[data-calendar-action="restore"]').click();await tick();
+   var emptyDayRestore=requests.pop();
+   check(emptyDayRestore.action==='restore' && emptyDayRestore.skips.length===1 && emptyDayRestore.skips[0].schedule_id==='' && emptyDayRestore.skips[0].start_at===Number(days[6].dataset.start) && emptyDayRestore.skips[0].end_at===Number(days[6].dataset.end),'day unskip sends the full selected date containing the empty-hour exclusion');
+   toolbar.querySelector('[data-calendar-action="clear"]').click();
    var initialHeaderTop=days[1].getBoundingClientRect().top;
-   check(root.querySelector('.drop-zone[data-date="'+days[0].dataset.calendarDay+'"][data-hour="23"] [data-schedule-id="between-runs"]').dataset.skipStatus==='none','pause between actual hourly runs does not mark the block skipped');
+   check(root.querySelector('.drop-zone[data-date="'+days[6].dataset.calendarDay+'"][data-hour="23"] [data-schedule-id="between-runs"]').dataset.skipStatus==='none','pause between actual hourly runs does not mark the block skipped');
    down(days[0]);days[1].dispatchEvent(new PointerEvent('pointerover',{bubbles:true,buttons:1}));check(document.getElementById('ov-shared-tooltip').hidden,'day drag suppresses tooltip across headers');up();
    check(!toolbar.querySelector('[data-calendar-action="skip"]').hidden && toolbar.querySelector('[data-calendar-action="restore"]').hidden,'untouched day offers only skip');
    down(days[0]);up();
@@ -171,7 +180,7 @@ func testScheduleCalendarHeader(t *testing.T, paused, mobile bool) {
    down(hours[6]);up();
    check(!toolbar.querySelector('[data-calendar-action="restore"]').hidden,'empty hour with project exclusion offers unskip');
    toolbar.querySelector('[data-calendar-action="restore"]').click();await tick();
-   check(requests.pop().skips.length===1,'empty hour restores only excluded date');
+   check(requests.pop().skips.length===2,'empty hour restores only excluded dates');
    down(hours[2]);
    var savedElementFromPoint=document.elementFromPoint;
    document.elementFromPoint=function(){return hours[4];};
@@ -320,8 +329,10 @@ func testScheduleCalendarHeader(t *testing.T, paused, mobile bool) {
 		var out bytes.Buffer
 		state := models.ScheduleCalendarState{Paused: paused, Skips: []models.ScheduleSkip{
 			{StartAt: day.Add(6 * time.Hour).Unix(), EndAt: day.Add(7 * time.Hour).Unix()},
-			// An elapsed project pause after the daily runs, with no overlapping cards, must not offer Unskip.
-			{StartAt: day.Add(-time.Hour).Unix(), EndAt: day.Add(-30 * time.Minute).Unix()},
+			// An exclusion between actual hourly runs must not mark the block skipped.
+			{StartAt: day.AddDate(0, 0, 5).Add(23 * time.Hour).Unix(), EndAt: day.AddDate(0, 0, 5).Add(23*time.Hour + 30*time.Minute).Unix()},
+			// A partial exclusion without cards must still be restorable from its date header.
+			{StartAt: day.AddDate(0, 0, 5).Add(6 * time.Hour).Unix(), EndAt: day.AddDate(0, 0, 5).Add(7 * time.Hour).Unix()},
 			{ScheduleID: "s0", StartAt: day.Add(8 * time.Hour).Unix(), EndAt: day.Add(8*time.Hour).Unix() + 1},
 			{ScheduleID: "s2", StartAt: day.Add(12*time.Hour + 20*time.Minute).Unix(), EndAt: day.Add(12*time.Hour + 30*time.Minute).Unix()},
 			{ScheduleID: "s3", StartAt: day.Add(12 * time.Hour).Unix(), EndAt: day.Add(13 * time.Hour).Unix()},
