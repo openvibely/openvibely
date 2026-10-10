@@ -96,6 +96,32 @@ func TestBrowserFunctional_ChatLivePendingInputsUseSharedFragment(t *testing.T) 
    __deferredPending.pop()(); await __wait(10);
    check(!document.querySelector('[data-thread-input-id]'), 'late response crossed projects');
    root.setAttribute('data-project-id', 'project-focus');
+   // A local send/steer suppresses its SSE and must supersede an older snapshot.
+   for (var mutation of ['send', 'direct-steer', 'queued-steer']) {
+    __pendingPhase = 'queued-false';
+    htmx.swap(document.getElementById('pending-thread-inputs'), __pendingSnapshots[__pendingPhase], {swapStyle:'outerHTML', settleDelay:0});
+    emit('older-'+mutation, 'queued');
+    var trigger = mutation === 'queued-steer' ? document.querySelector('[hx-post="/chat/queued/queued-false/steer"]') : form;
+    if (mutation === 'direct-steer') form.setAttribute('data-submit-intent', 'steer');
+    var xhr = new EventTarget();
+    trigger.dispatchEvent(new CustomEvent('htmx:beforeRequest', {bubbles:true, detail:{elt:trigger, xhr:xhr}}));
+    var localMode = mutation === 'send' ? 'queued' : 'steering';
+    var localID = localMode+'-true';
+    emit(localID, localMode, {source:'web'});
+    // Reconnect during the local request must also wait for its completion.
+    window.dispatchEvent(new CustomEvent('sse-live-connected', {detail:{reconnected:true}}));
+    check(__deferredPending.length === 1, 'refresh started during local mutation '+mutation);
+    __pendingPhase = localID;
+    htmx.swap(document.getElementById('pending-thread-inputs'), __pendingSnapshots[localID], {swapStyle:'outerHTML', settleDelay:0});
+    document.body.dispatchEvent(new CustomEvent('htmx:afterRequest', {bubbles:true, detail:{elt:trigger, xhr:xhr}}));
+    __deferredPending.pop()(); await __wait(10);
+    check(document.getElementById('thread-input-'+localID), 'older response erased local '+mutation);
+    xhr.dispatchEvent(new Event('loadend'));
+    check(__deferredPending.length === 1, 'missing reconciliation after '+mutation);
+    __deferredPending.pop()(); await __wait(10);
+    check(document.querySelectorAll('[data-thread-input-id]').length === 1 && document.getElementById('thread-input-'+localID), 'incorrect reconciled local '+mutation);
+    form.removeAttribute('data-submit-intent');
+   }
    __deferPending = false;
    calls = __pendingCalls.length;
    emit('ordinary-execution', '', {queued:false, message:'ordinary prompt'});
