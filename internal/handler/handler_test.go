@@ -2420,7 +2420,7 @@ func TestHandler_ListModels_IncludesToastModalStackingHooks(t *testing.T) {
 	assertCode(t, rec, http.StatusOK)
 	body := rec.Body.String()
 
-	if !strings.Contains(body, "id=\"new_model_modal\" class=\"modal\" onclose=\"if (typeof syncToastContainerHost === 'function') syncToastContainerHost()\"") {
+	if !strings.Contains(body, "id=\"new_model_modal\" class=\"modal\" onclose=\"finishModelOAuthModal(); if (typeof syncToastContainerHost === 'function') syncToastContainerHost()\"") {
 		t.Errorf("expected new model modal to resync toast host on close")
 	}
 	if !strings.Contains(body, "id=\"reassign_default_modal\" class=\"modal\" onclose=\"if (typeof syncToastContainerHost === 'function') syncToastContainerHost()\"") {
