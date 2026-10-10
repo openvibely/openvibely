@@ -73,7 +73,7 @@ templ analyticsTaskSummary(view string) {
 }
 
 templ analyticsExpandButton(title string) {
-	<button type="button" class="btn btn-ghost btn-circle btn-xs shrink-0" data-analytics-expand aria-label={ "Expand " + title } title="Expand graph">
+	<button type="button" class="btn btn-ghost btn-circle btn-xs shrink-0" data-analytics-expand aria-label={ "Expand " + title } data-tooltip-disabled>
 		<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5"></path></svg>
 	</button>
 }
@@ -318,7 +318,7 @@ templ analyticsContent(currentProject *models.Project) {
 						 dialog.tabIndex = -1;
 						 const close = document.createElement('button');
 						 close.type = 'button'; close.className = 'btn btn-ghost btn-circle btn-xs shrink-0';
-						 close.setAttribute('aria-label', 'Close graph preview'); close.title = 'Close graph preview';
+						 close.setAttribute('aria-label', 'Close graph preview'); close.setAttribute('data-tooltip-disabled', '');
 						 close.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"></path></svg>';
 						 dialog.appendChild(close); document.body.appendChild(dialog);
 						 let active = null;

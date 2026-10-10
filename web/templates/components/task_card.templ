@@ -593,19 +593,19 @@ templ TaskCard(task models.Task, projectID string, viewingCategory string, llmMo
 							</span>
 						}
 							if task.HasGoal {
-								<span class="badge badge-sm badge-primary badge-outline inline-flex items-center" data-tooltip-disabled>Goal</span>
+								<span class="badge badge-sm badge-primary badge-outline inline-flex items-center">Goal</span>
 							}
 							if task.SwarmRole == models.SwarmRoleParent {
-								<span class="badge badge-sm badge-accent badge-outline inline-flex items-center" data-tooltip-disabled>Swarm</span>
+								<span class="badge badge-sm badge-accent badge-outline inline-flex items-center">Swarm</span>
 							}
 						<!-- Model Badge -->
 						if len(llmModels) > 0 {
-							<span class="badge badge-sm badge-outline" data-tooltip-disabled>
+							<span class="badge badge-sm badge-outline">
 								{ getModelDisplayName(findModelByID(llmModels, task.AgentID)) }
 							</span>
 						}
 						if ad := findAgentDefinitionByID(agentDefs, task.AgentDefinitionID); ad != nil {
-							<span class="badge badge-sm badge-outline" data-tooltip-disabled>
+							<span class="badge badge-sm badge-outline">
 								{ ad.Name }
 							</span>
 						}

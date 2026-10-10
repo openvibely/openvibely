@@ -434,7 +434,7 @@ templ projectStatsTableBody(maxWorkers int, runningWorkers int, totalRunning int
 					if projectWorkerLimitExceedsGlobal(maxWorkers, ps.MaxWorkers) {
 						<span class="badge badge-warning badge-sm" data-tooltip-disabled>Exceeds global</span>
 					} else if ps.MaxWorkers != nil && *ps.MaxWorkers > 0 && ps.Running >= *ps.MaxWorkers {
-						<span class="badge badge-warning badge-sm" title={ fmt.Sprintf("Project is using all %d allowed workers", *ps.MaxWorkers) }>At capacity</span>
+						<span class="badge badge-warning badge-sm" data-tooltip-disabled>At capacity</span>
 					} else if ps.Running > 0 {
 						<span class="badge badge-success badge-sm">Active</span>
 					} else {

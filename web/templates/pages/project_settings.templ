@@ -199,7 +199,7 @@ templ EditProjectDialog(project *models.Project, agents []models.LLMConfig, loca
 						step="1"
 						placeholder="No limit"
 						class="input input-bordered"
-						title="0 or blank = inherit the global worker limit"
+						data-tooltip-disabled
 					/>
 					if projectWorkerLimitExceedsGlobal(globalMaxWorkers, project.MaxWorkers) {
 						<p class="text-xs text-warning mt-1">The current project limit exceeds the global limit of { fmt.Sprintf("%d", globalMaxWorkers) }. Lower it before saving.</p>
@@ -446,7 +446,7 @@ templ NewProjectDialog(agents []models.LLMConfig, localRepoPathEnabled bool, glo
 						step="1"
 						placeholder="No limit"
 						class="input input-bordered"
-						title="0 or blank = inherit the global worker limit"
+						data-tooltip-disabled
 					/>
 				</div>
 				<div id="new-project-error" class="alert alert-error mb-4 hidden">
