@@ -4523,7 +4523,7 @@ func TestHandler_Chat_LiveStreamingUsesRenderStreamingContent(t *testing.T) {
 		"live streaming should define a batched render helper")
 	assert.Contains(t, body, "if (!window.renderStreamingContent)",
 		"batched render helper should provide text fallback when renderer is unavailable")
-	assert.Contains(t, body, "var renderPromise = liveRenderer(contentDiv, renderText)",
+	assert.Contains(t, body, "var renderPromise = liveRenderer(contentDiv, renderText, undefined, force)",
 		"batched render helper should render via shared renderer")
 	assert.Contains(t, body, "return renderPromise.then(function(committed)",
 		"batched render helper should return the shared renderer promise before accepting another batch")

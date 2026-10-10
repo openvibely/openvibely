@@ -968,7 +968,7 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 									}
 									if (textBuffer.length !== sourceLength) renderBufferedOutput(false);
 								}
-								var renderPromise = liveRenderer(contentDiv, renderText);
+								var renderPromise = liveRenderer(contentDiv, renderText, undefined, force);
 								if (renderPromise && typeof renderPromise.then === 'function') {
 									return renderPromise.then(function(committed) {
 										finishRender(committed);
