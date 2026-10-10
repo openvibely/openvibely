@@ -410,10 +410,10 @@ templ taskThreadView(task *models.Task, executions []models.Execution, agents []
 			@TaskThreadLiveEventsScript(task.ID)
 			<script>
 			function _taskThreadTaskId() {
-				var threadContent = document.getElementById('thread-content');
-				if (threadContent && threadContent.dataset.taskId) return threadContent.dataset.taskId;
-				var taskIdMatch = window.location.pathname.match(/\/tasks\/([^\/]+)/);
-				return taskIdMatch && taskIdMatch[1] ? taskIdMatch[1] : '';
+				// Resolve identity from the mounted thread, never the URL: /tasks/new
+				// shares the composer IDs but must not participate in saved-task drafts.
+				var view = document.getElementById('task-thread-view');
+				return view ? (view.getAttribute('data-task-id') || '') : '';
 			}
 
 			function _taskThreadDraftStorageKey() {
@@ -504,6 +504,8 @@ templ taskThreadView(task *models.Task, executions []models.Execution, agents []
 			}
 
 			function _restoreTaskThreadDraftToTextarea() {
+				var key = _taskThreadDraftStorageKey();
+				if (!key) return;
 				window._taskThreadDrafts = window._taskThreadDrafts || {};
 				var textarea = document.getElementById('task-message-input');
 				if (!textarea) return;
@@ -512,11 +514,8 @@ templ taskThreadView(task *models.Task, executions []models.Execution, agents []
 				if (typeof window._taskThreadSavedInput === 'string' && window._taskThreadSavedInput !== '') {
 					restoreValue = window._taskThreadSavedInput;
 				}
-				if (!restoreValue) {
-					var key = _taskThreadDraftStorageKey();
-					if (key && window._taskThreadDrafts[key]) {
-						restoreValue = window._taskThreadDrafts[key];
-					}
+				if (!restoreValue && window._taskThreadDrafts[key]) {
+					restoreValue = window._taskThreadDrafts[key];
 				}
 				if (restoreValue && textarea.value !== restoreValue) {
 					textarea.value = restoreValue;
