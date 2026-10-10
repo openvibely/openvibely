@@ -1559,7 +1559,7 @@ templ settingsContent(view ChannelsSettingsView) {
 							<div class="border border-base-300 rounded-lg px-3 py-2 mb-2">
 								<div class="flex items-center justify-between gap-3">
 									<div class="flex items-center gap-2 min-w-0 flex-1">
-										<span class="font-medium text-sm truncate" title="${escapeHtml(agent.id)}">${escapeHtml(agent.name)}</span>
+										<span class="font-medium text-sm truncate" data-tooltip-disabled>${escapeHtml(agent.name)}</span>
 										<span class="text-[11px] opacity-60 truncate">${escapeHtml(agent.id)}</span>
 									</div>
 									<input

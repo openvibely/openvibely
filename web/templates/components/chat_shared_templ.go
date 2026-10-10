@@ -1575,7 +1575,7 @@ func ChatQueuedInputRowForTask(inputID, message, steerEndpoint string, hasAttach
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 98, "\" data-input-mode=\"queued\" title=\"Queued follow-up will run after the active response finishes\"><div class=\"min-w-0 flex-1 truncate\" data-pending-input-content>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 98, "\" data-input-mode=\"queued\" data-tooltip-disabled><div class=\"min-w-0 flex-1 truncate\" data-pending-input-content>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -1624,7 +1624,7 @@ func ChatQueuedInputRowForTask(inputID, message, steerEndpoint string, hasAttach
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 102, "\" hx-swap=\"outerHTML\" title=\"Convert queued follow-up to steering\">Steer</button> <button type=\"button\" class=\"btn btn-ghost btn-xs h-6 min-h-0 rounded-md px-2 text-sm font-normal\" onclick=\"window.editPendingThreadInput(this)\" data-tooltip-disabled aria-label=\"Edit message\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" aria-hidden=\"true\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M16.862 3.487a2.1 2.1 0 012.97 2.97L7.5 18.789 3 20l1.211-4.5L16.862 3.487zM15 5l3 3\"></path></svg></button> <button type=\"button\" class=\"btn btn-ghost btn-xs h-6 min-h-0 rounded-md px-2 text-xs text-error\" hx-post=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 102, "\" hx-swap=\"outerHTML\" data-tooltip-disabled aria-label=\"Convert queued follow-up to steering\">Steer</button> <button type=\"button\" class=\"btn btn-ghost btn-xs h-6 min-h-0 rounded-md px-2 text-sm font-normal\" onclick=\"window.editPendingThreadInput(this)\" data-tooltip-disabled aria-label=\"Edit message\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" aria-hidden=\"true\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M16.862 3.487a2.1 2.1 0 012.97 2.97L7.5 18.789 3 20l1.211-4.5L16.862 3.487zM15 5l3 3\"></path></svg></button> <button type=\"button\" class=\"btn btn-ghost btn-xs h-6 min-h-0 rounded-md px-2 text-xs text-error\" hx-post=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -1839,7 +1839,7 @@ func ChatSteeringInputRowForTask(inputID, message string, hasAttachments bool, t
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 112, "\" data-input-mode=\"steering\" title=\"Steering instruction will be applied before the active run's next model step\"><div class=\"min-w-0 flex-1\"><div class=\"text-xs font-semibold opacity-70\">Steering pending</div><div class=\"truncate\" data-pending-input-content>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 112, "\" data-input-mode=\"steering\" data-tooltip-disabled><div class=\"min-w-0 flex-1\"><div class=\"text-xs font-semibold opacity-70\">Steering pending</div><div class=\"truncate\" data-pending-input-content>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

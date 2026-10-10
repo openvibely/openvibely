@@ -1148,7 +1148,7 @@ templ TaskThreadLiveEventsScript(taskID string) {
 							queuedRow.className = 'queued-input-row flex min-h-8 items-center gap-3 rounded-lg bg-base-300/45 px-3 py-1.5 text-sm text-base-content/80';
 							queuedRow.setAttribute('data-thread-input-id', data.pending_input_id);
 							queuedRow.setAttribute('data-task-id', taskId);
-							queuedRow.setAttribute('data-input-mode', 'queued');						queuedRow.title = 'Queued follow-up will run after the active response finishes';
+							queuedRow.setAttribute('data-input-mode', 'queued');						queuedRow.setAttribute('data-tooltip-disabled', '');
 						var preview = document.createElement('div');
 						preview.className = 'min-w-0 flex-1 truncate';
 						preview.textContent = data.message || '';
@@ -1161,7 +1161,8 @@ templ TaskThreadLiveEventsScript(taskID string) {
 						steerBtn.setAttribute('hx-post', '/tasks/' + encodeURIComponent(taskId) + '/thread/queued/' + encodeURIComponent(data.pending_input_id) + '/steer?expected_turn_id=' + encodeURIComponent(data.exec_id || ''));
 						steerBtn.setAttribute('hx-target', '#thread-input-' + data.pending_input_id);
 						steerBtn.setAttribute('hx-swap', 'outerHTML');
-						steerBtn.title = 'Convert queued follow-up to steering';
+						steerBtn.setAttribute('data-tooltip-disabled', '');
+						steerBtn.setAttribute('aria-label', 'Convert queued follow-up to steering');
 						steerBtn.textContent = 'Steer';
 						var cancelBtn = document.createElement('button');
 						cancelBtn.type = 'button';
@@ -1195,7 +1196,7 @@ templ TaskThreadLiveEventsScript(taskID string) {
 							steeringRow.setAttribute('data-thread-input-id', data.pending_input_id);
 							steeringRow.setAttribute('data-task-id', taskId);
 							steeringRow.setAttribute('data-input-mode', 'steering');
-							steeringRow.title = 'Steering instruction will be applied before the active run\'s next model step';
+							steeringRow.setAttribute('data-tooltip-disabled', '');
 							var content = document.createElement('div');
 							content.className = 'min-w-0 flex-1';
 							content.innerHTML = '<div class="text-xs font-semibold opacity-70">Steering pending</div>';
