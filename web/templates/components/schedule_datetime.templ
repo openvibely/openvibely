@@ -41,7 +41,8 @@ templ ScheduleDateTime(value string) {
   .schedule-datetime-popup { margin:0; padding:12px; width:450px; max-width:calc(100vw - 16px); border:1px solid oklch(var(--bc) / .18); border-radius:12px; background:oklch(var(--b1)); color:oklch(var(--bc)); box-shadow:0 12px 36px #0004; }
   .schedule-datetime-body { display:grid; grid-template-columns:minmax(0, 1fr) 48px 48px 60px; gap:4px; }
   .schedule-datetime-calendar { padding-right:8px; min-width:0; }
-  .schedule-datetime-month { display:flex; align-items:center; gap:4px; height:34px; font-size:12px; white-space:nowrap; }
+  .schedule-datetime-month { display:flex; flex-wrap:wrap; align-items:center; gap:4px; min-height:34px; padding-bottom:4px; font-size:12px; white-space:nowrap; }
+  .schedule-datetime-month > * { flex-shrink:0; }
   .schedule-datetime-weekdays,.schedule-datetime-days { display:grid; grid-template-columns:repeat(7,minmax(0,1fr)); text-align:center; font-size:12px; }
   .schedule-datetime-weekdays { height:26px; align-items:center; opacity:.6; }
   .schedule-datetime-days button { height:30px; border-radius:6px; padding:0; }
