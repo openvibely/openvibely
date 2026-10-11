@@ -388,6 +388,11 @@ window.addEventListener('load',async function(){
   var runSelect=document.getElementById('usageRunModelSelect'),runBars=configs.usageRunModelsChart,tokenBreakdown=configs.modelTokenBreakdownChart,requestCount=calls;
   runSelect.value='all';runSelect.dispatchEvent(new Event('change'));
   assert(configs.usageRunHoursChart.data.datasets.length===2,'each model should have its own line');
+  for (const config of Object.values(configs)) {
+   const tooltip=config.options?.plugins?.tooltip||{};
+   assert(tooltip.enabled!==false&&!tooltip.external,'charts must retain native tooltips without the shared hover controller');
+   assert(tooltip.displayColors!==false,'chart tooltips must retain series color keys');
+  }
   var trend=configs.usageRunHoursChart,hoverPlugin=trend.plugins.find(p=>p.id==='analyticsActivePointOnTop');
   var tokenTrend=configs.usageRateChart;
   assert(tokenTrend.plugins.includes(hoverPlugin),'similar line charts should share the same hover plugin');
