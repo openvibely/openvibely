@@ -56,6 +56,54 @@ func TestCardPaginationCompletionIsSilent(t *testing.T) {
 	}
 }
 
+func TestModelsContent_EmptyStateUsesLabeledConfigureButton(t *testing.T) {
+	var buf bytes.Buffer
+	if err := modelsContent(nil, nil, nil, nil, false, false, CardListState{}).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render empty models content: %v", err)
+	}
+
+	out := buf.String()
+	emptyStateStart := strings.Index(out, `data-search-empty-state`)
+	if emptyStateStart < 0 {
+		t.Fatal("expected models empty state")
+	}
+	emptyStateEnd := strings.Index(out[emptyStateStart:], `</div>`)
+	if emptyStateEnd < 0 {
+		t.Fatal("expected models empty state to close")
+	}
+	emptyState := out[emptyStateStart : emptyStateStart+emptyStateEnd]
+	buttonStart := strings.Index(emptyState, `<button`)
+	if buttonStart < 0 {
+		t.Fatal("expected empty state configure button")
+	}
+	buttonEnd := strings.Index(emptyState[buttonStart:], `</button>`)
+	if buttonEnd < 0 {
+		t.Fatal("expected empty state configure button to close")
+	}
+	button := emptyState[buttonStart : buttonStart+buttonEnd]
+	for _, want := range []string{`class="btn btn-primary"`, `onclick="openNewModelModal()"`, `Configure Model`} {
+		if !strings.Contains(button, want) {
+			t.Errorf("expected empty state configure button to contain %q, got %q", want, button)
+		}
+	}
+	if strings.Contains(button, `btn-square`) || strings.Contains(button, `<svg`) {
+		t.Errorf("expected empty state configure button to show its full text, got %q", button)
+	}
+
+	pageHeaderStart := strings.Index(out, `<div data-page-header`)
+	if pageHeaderStart < 0 {
+		t.Fatal("expected models page header")
+	}
+	pageHeaderEnd := strings.Index(out[pageHeaderStart:], `</div>`)
+	if pageHeaderEnd < 0 {
+		t.Fatal("expected models page header to close")
+	}
+	pageHeader := out[pageHeaderStart : pageHeaderStart+pageHeaderEnd]
+	if !strings.Contains(pageHeader, `aria-label="Add Model"`) || !strings.Contains(pageHeader, `btn-square`) {
+		t.Errorf("expected top-right add-model control to remain icon-only, got %q", pageHeader)
+	}
+}
+
 func TestModelsContent_CatalogModelsInSelector(t *testing.T) {
 	agents := []models.LLMConfig{}
 	var buf bytes.Buffer
