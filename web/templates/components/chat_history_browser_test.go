@@ -15,6 +15,12 @@ import (
 )
 
 func TestBrowserFunctional_ComposerHistoryAcrossTasks(t *testing.T) {
+	for _, mode := range []string{"away", "returned", "edited"} {
+		t.Run(mode, func(t *testing.T) { testComposerHistoryAcrossTasks(t, mode) })
+	}
+}
+
+func testComposerHistoryAcrossTasks(t *testing.T, mode string) {
 	chrome := testChromePath(t)
 	forms := map[string]string{}
 	for _, id := range []string{"a", "b"} {
@@ -67,15 +73,32 @@ window.addEventListener('load', async function() {
   async function send(text) { input().value=text; input().dispatchEvent(new Event('input',{bubbles:true})); key('Enter'); await waitFor(()=>input().value===''); }
   async function visit(id) { var link=document.createElement('a'); link.setAttribute('hx-push-url','true'); document.body.appendChild(link); await htmx.ajax('GET','/tasks/'+id,{source:link,target:'#main-content',swap:'innerHTML'}); link.remove(); await new Promise(r=>setTimeout(r,50)); }
   await send('task a first'); await htmx.ajax('GET','/tasks/a',{target:'#task-thread-view',swap:'morph:outerHTML'}); input().value='task a second'; key('Enter');
+  var mode = %q;
   // Finish A's send only after B is mounted with a separate draft.
   document.body.addEventListener('htmx:afterSwap', function release(event) {
     if (event.detail.target.id !== 'main-content') return;
     document.body.removeEventListener('htmx:afterSwap', release);
     input().value='task b draft'; input().dispatchEvent(new Event('input',{bubbles:true}));
-    fetch('/release');
+    if (mode === 'away') fetch('/release');
   });
   await visit('b');
+  if (mode !== 'away') {
+    await visit('a'); check('task a second');
+    if (mode === 'edited') {
+      input().value='new draft'; input().dispatchEvent(new Event('input',{bubbles:true}));
+    }
+    await fetch('/release');
+  }
   await waitFor(()=>JSON.parse(localStorage.getItem('openvibely-task-thread-message-history-a') || '[]').includes('task a second'));
+  if (mode !== 'away') {
+    check(mode === 'edited' ? 'new draft' : '');
+    await visit('b');
+    await visit('a'); check(mode === 'edited' ? 'new draft' : '');
+    input().value=''; input().dispatchEvent(new Event('input',{bubbles:true}));
+    key('ArrowUp'); check('task a second'); key('ArrowDown'); check('');
+    document.body.dataset.testResult='pass';
+    return;
+  }
   check('task b draft');
   await send('task b only');
   history.back(); await waitFor(()=>location.pathname==='/'); await new Promise(r=>setTimeout(r,100)); check(''); key('ArrowUp'); check('task a second'); key('ArrowUp'); check('task a first'); key('ArrowDown'); check('task a second'); key('ArrowDown'); check('');
@@ -87,12 +110,12 @@ window.addEventListener('load', async function() {
   document.body.dataset.testResult='pass'; document.getElementById('browser-result').textContent='PASS';
  } catch(e) { document.body.dataset.testResult='fail'; document.body.dataset.testError=e.message; document.getElementById('browser-result').textContent='FAIL:'+e.message; }
 });
-</script></body></html>`, static.URL("vendor/idiomorph-ext.min.js"), newForm.String())
+</script></body></html>`, static.URL("vendor/idiomorph-ext.min.js"), newForm.String(), mode)
 		default:
 			http.NotFound(w, r)
 		}
 	}))
 	defer server.Close()
 	defer releaseOnce.Do(func() { close(releaseSend) })
-	runHeadlessChromeFixture(t, chrome, server.URL+"/", "composer history across tasks", 10000, 25*time.Second)
+	runHeadlessChromeCDPFixture(t, chrome, server.URL+"/", "composer history across tasks", 1200, 700, 25*time.Second)
 }
