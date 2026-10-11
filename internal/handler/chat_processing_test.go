@@ -9124,3 +9124,109 @@ func TestQueuedFailedRetryPreservesSourceAndExcludesItOnPromotion(t *testing.T) 
 	}
 	require.Equal(t, failed.PromptSent, req.Message)
 }
+
+func TestCompleteWithSuccessCommitCancellationFailsTask(t *testing.T) {
+	h, _, configs := setupTestHandler(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	agent := createAgent(t, configs)
+	repoDir := createHandlerTestGitRepo(t)
+	project := &models.Project{Name: "Completion cancellation", RepoPath: repoDir}
+	require.NoError(t, h.projectRepo.Create(ctx, project))
+	task := createTask(t, h, project.ID, "Cancelled finalization", func(task *models.Task) {
+		task.Status = models.StatusRunning
+		task.Category = models.CategoryActive
+	})
+	h.worktreeSvc = service.NewWorktreeService(h.taskRepo, h.projectRepo, h.settingsRepo)
+	workDir, _, err := h.worktreeSvc.SetupWorktree(ctx, task, repoDir)
+	require.NoError(t, err)
+	execution := createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) { ex.Status = models.ExecRunning; ex.IsFollowup = true })
+	require.NoError(t, os.WriteFile(filepath.Join(workDir, "change.txt"), []byte("change\n"), 0644))
+	caller := testutil.NewMockLLMCaller()
+	called := false
+	caller.OnCall = func(context.Context, testutil.MockLLMCall) { called = true; cancel() }
+	h.llmSvc.SetLLMCaller(caller)
+	h.completeWithSuccess(ctx, execution.ID, task.ID, "finished output", workDir, 1, 2)
+	require.True(t, called, "cancel during commit preparation, after readiness passed")
+	stored, err := h.execRepo.GetByID(context.Background(), execution.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.ExecFailed, stored.Status)
+	require.Equal(t, "finished output", stored.Output)
+	require.Contains(t, stored.ErrorMessage, "context canceled")
+	storedTask, err := h.taskRepo.GetByID(context.Background(), task.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.StatusFailed, storedTask.Status)
+	require.Equal(t, models.CategoryBacklog, storedTask.Category)
+}
+
+func TestCompleteExecutionSuccessAtomicBoardState(t *testing.T) {
+	for _, scenario := range []string{"success", "task write failure", "pending steering", "cancelled", "chat"} {
+		t.Run(scenario, func(t *testing.T) {
+			h, _, configs, db := setupTestHandlerWithDB(t)
+			ctx := context.Background()
+			agent := createAgent(t, configs)
+			task := createTask(t, h, "default", "Atomic completion", func(task *models.Task) {
+				task.Status = models.StatusRunning
+				task.Category = models.CategoryActive
+				if scenario == "chat" {
+					task.Category = models.CategoryChat
+				}
+			})
+			execution := createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) { ex.Status = models.ExecRunning; ex.IsFollowup = true })
+			if scenario == "task write failure" {
+				_, err := db.Exec(`CREATE TRIGGER reject_task_completion BEFORE UPDATE OF status ON tasks WHEN NEW.status = 'completed' BEGIN SELECT RAISE(ABORT, 'task completion rejected'); END`)
+				require.NoError(t, err)
+			}
+			if scenario == "pending steering" {
+				input := &models.ThreadInput{Scope: models.ThreadInputScopeTask, ProjectID: task.ProjectID, TaskID: task.ID, RunExecutionID: execution.ID, AgentConfigID: agent.ID, InputMode: models.ThreadInputModeQueued, Content: "more work"}
+				require.NoError(t, h.threadInputRepo.CreateQueued(ctx, input))
+				_, err := h.threadInputRepo.ConvertQueuedToSteering(ctx, input.ID, execution.ID, execution.ID)
+				require.NoError(t, err)
+			}
+			if scenario == "cancelled" {
+				require.NoError(t, h.execRepo.Complete(ctx, execution.ID, models.ExecCancelled, "", "cancelled", 0, 0))
+			}
+			var outcome repository.CompleteSuccessOutcome
+			var err error
+			if scenario == "pending steering" || scenario == "cancelled" {
+				// Exercise the transaction guard itself, beyond handler readiness.
+				outcome, err = h.taskRepo.CompleteExecutionSuccess(ctx, h.execRepo, execution.ID, "done", 1, 2)
+			} else {
+				outcome, err = h.completeWithSuccessWithPRReconciliation(ctx, execution.ID, task.ID, "done", "", 1, 2, false)
+			}
+			if scenario == "task write failure" {
+				require.ErrorContains(t, err, "task completion rejected")
+			} else {
+				require.NoError(t, err)
+			}
+			stored, err := h.execRepo.GetByID(ctx, execution.ID)
+			require.NoError(t, err)
+			storedTask, err := h.taskRepo.GetByID(ctx, task.ID)
+			require.NoError(t, err)
+			switch scenario {
+			case "success", "chat":
+				require.Equal(t, repository.CompleteSuccessCompleted, outcome)
+				require.Equal(t, models.ExecCompleted, stored.Status)
+				require.Equal(t, models.StatusCompleted, storedTask.Status)
+				if scenario == "chat" {
+					require.Equal(t, models.CategoryChat, storedTask.Category)
+				} else {
+					require.Equal(t, models.CategoryCompleted, storedTask.Category)
+					require.NotNil(t, storedTask.CompletedAt)
+				}
+			default:
+				require.Equal(t, models.StatusRunning, storedTask.Status)
+				require.Equal(t, models.CategoryActive, storedTask.Category)
+				if scenario == "cancelled" {
+					require.Equal(t, repository.CompleteSuccessAlreadyTerminal, outcome)
+					require.Equal(t, models.ExecCancelled, stored.Status)
+				} else {
+					require.Equal(t, models.ExecRunning, stored.Status)
+					if scenario == "pending steering" {
+						require.Equal(t, repository.CompleteSuccessPendingSteering, outcome)
+					}
+				}
+			}
+		})
+	}
+}

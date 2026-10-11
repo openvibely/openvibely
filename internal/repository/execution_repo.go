@@ -796,6 +796,10 @@ func (r *ExecutionRepo) SuccessCompletionReadiness(ctx context.Context, id strin
 }
 
 func (r *ExecutionRepo) CompleteSuccessIfNoPendingSteering(ctx context.Context, id string, output string, tokensUsed int, durationMs int64) (CompleteSuccessOutcome, error) {
+	return r.completeSuccessIfNoPendingSteering(ctx, id, output, tokensUsed, durationMs, nil)
+}
+
+func (r *ExecutionRepo) completeSuccessIfNoPendingSteering(ctx context.Context, id, output string, tokensUsed int, durationMs int64, finalizeTask func(SQLExecutor) error) (CompleteSuccessOutcome, error) {
 	output = llmtranscript.NormalizeMarkers(output)
 	// Preserve streamed chunks when no complete provider output was supplied.
 	var changed int64
@@ -824,6 +828,11 @@ func (r *ExecutionRepo) CompleteSuccessIfNoPendingSteering(ctx context.Context, 
 		changed, err = result.RowsAffected()
 		if err != nil || changed == 0 {
 			return err
+		}
+		if finalizeTask != nil {
+			if err := finalizeTask(tx); err != nil {
+				return err
+			}
 		}
 		_, err = tx.ExecContext(ctx, `DELETE FROM execution_output_chunks WHERE execution_id = ?`, id)
 		return err

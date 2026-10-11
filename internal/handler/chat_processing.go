@@ -2238,10 +2238,10 @@ func (h *Handler) completeWithSuccessWithPRReconciliation(ctx context.Context, e
 		}
 	}
 
-	outcome, err := h.execRepo.CompleteSuccessIfNoPendingSteering(ctx, execID, output, tokensUsed, durationMs)
+	outcome, err := h.taskRepo.CompleteExecutionSuccess(ctx, h.execRepo, execID, output, tokensUsed, durationMs)
 	if err != nil {
 		applog.Infof("[handler] completeWithSuccess exec=%s error completing execution: %v", execID, err)
-		return repository.CompleteSuccessAlreadyTerminal, nil
+		return repository.CompleteSuccessAlreadyTerminal, err
 	}
 	if outcome == repository.CompleteSuccessPendingSteering {
 		applog.Infof("[handler] completeWithSuccess exec=%s deferred completion because pending steering exists", execID)
@@ -2254,20 +2254,6 @@ func (h *Handler) completeWithSuccessWithPRReconciliation(ctx context.Context, e
 	if republishOpenPR {
 		if err := h.taskPullRequestRepo.SetNeedsRepublish(ctx, taskID, false); err != nil {
 			applog.Infof("[handler] completeWithSuccess task=%s published startup-sync reconciliation but could not clear durable publication requirement: %v", taskID, err)
-		}
-	}
-
-	// Persist the final task state before notifying stream subscribers.
-	if err := h.taskRepo.UpdateStatus(ctx, taskID, models.StatusCompleted); err != nil {
-		applog.Infof("[handler] completeWithSuccess task=%s error updating status: %v", taskID, err)
-	}
-
-	// Move active tasks to the completed category so they appear in the right column
-	if task != nil && task.Category == models.CategoryActive {
-		if err := h.taskRepo.UpdateCategory(ctx, taskID, models.CategoryCompleted); err != nil {
-			applog.Infof("[handler] completeWithSuccess task=%s error moving to completed category: %v", taskID, err)
-		} else {
-			applog.Infof("[handler] completeWithSuccess task=%s moved to completed category", taskID)
 		}
 	}
 
