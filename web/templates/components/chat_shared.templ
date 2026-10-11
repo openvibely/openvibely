@@ -2312,24 +2312,47 @@ templ ChatInputForm(config ChatInputFormConfig) {
 				var deferredSteer = null;
 				var suppressMessageHistoryInputReset = false;
 
+				// Keep submitted history usable when browser storage is unavailable.
+				window._chatMessageHistories = window._chatMessageHistories || Object.create(null);
+
+				function renderedMessageHistory() {
+					// Stay inside the submitting thread, including when its form is detached.
+					// New-task forms have no transcript history to recover.
+					var root = form.closest('#task-thread-view, #chat-page-root');
+					if (!root) return [];
+					var entries = [];
+					root.querySelectorAll('.chat-bubble-user-msg .chat-bubble-inner > div:first-child, #pending-thread-inputs [data-pending-input-content]').forEach(function(node) {
+						var message = node.textContent || '';
+						if (message.trim() && entries[entries.length - 1] !== message) entries.push(message);
+					});
+					return entries.slice(-messageHistoryLimit);
+				}
+
 				function loadMessageHistory() {
 					if (!messageHistoryStorageKey) return [];
+					var remembered = window._chatMessageHistories[messageHistoryStorageKey];
+					if (remembered && remembered.length) return remembered.slice();
 					try {
 						var raw = localStorage.getItem(messageHistoryStorageKey);
 						var parsed = raw ? JSON.parse(raw) : [];
-						if (!Array.isArray(parsed)) return [];
-						return parsed.filter(function(entry) { return typeof entry === 'string' && entry.trim() !== ''; }).slice(-messageHistoryLimit);
+						if (Array.isArray(parsed)) {
+							var entries = parsed.filter(function(entry) { return typeof entry === 'string' && entry.trim() !== ''; }).slice(-messageHistoryLimit);
+							if (entries.length) return entries;
+						}
 					} catch (e) {
-						return [];
+						// Recover from the current session or the server-rendered thread below.
 					}
+					return renderedMessageHistory();
 				}
 
 				function saveMessageHistory(entries) {
 					if (!messageHistoryStorageKey) return;
 					try {
 						localStorage.setItem(messageHistoryStorageKey, JSON.stringify(entries.slice(-messageHistoryLimit)));
+						delete window._chatMessageHistories[messageHistoryStorageKey];
 					} catch (e) {
-						// Ignore storage failures; keyboard navigation still works for the current page load.
+						// Prefer this newer session copy over a stale cache when storage is full.
+						window._chatMessageHistories[messageHistoryStorageKey] = entries.slice(-messageHistoryLimit);
 					}
 				}
 

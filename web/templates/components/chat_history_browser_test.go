@@ -44,9 +44,6 @@ func testComposerHistoryAcrossTasks(t *testing.T, mode string) {
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		switch r.URL.Path {
-		case "/htmx.js":
-			w.Header().Set("Content-Type", "text/javascript")
-			_, _ = w.Write(htmx204)
 		case "/release":
 			releaseOnce.Do(func() { close(releaseSend) })
 			w.WriteHeader(http.StatusNoContent)
@@ -68,16 +65,16 @@ func testComposerHistoryAcrossTasks(t *testing.T, mode string) {
 			}
 			_, _ = w.Write([]byte(`<div>accepted</div>`))
 		case "/":
-			_, _ = fmt.Fprintf(w, `<!doctype html><html><body data-test-result="pending" hx-ext="morph"><script src="/htmx.js"></script><script src="%s"></script><main id="main-content" hx-history-elt>%s</main><div id="browser-result">pending</div><script>
+			_, _ = fmt.Fprintf(w, `<!doctype html><html><body data-test-result="pending" hx-ext="morph"><script src="/static/vendor/htmx.min.js"></script><script src="%s"></script><main id="main-content" hx-history-elt>%s</main><div id="browser-result">pending</div><script>
 window.addEventListener('load', async function() {
  try {
   function input() { return document.getElementById('task-message-input'); }
   function key(name) { input().dispatchEvent(new KeyboardEvent('keydown', {key:name,bubbles:true,cancelable:true})); }
   function check(value) { if (input().value !== value) throw new Error('expected '+JSON.stringify(value)+' got '+JSON.stringify(input().value)+' history='+localStorage.getItem('openvibely-task-thread-message-history-a')+' cursor='+input().selectionStart); }
   async function waitFor(check) { var start=performance.now(); while (!check()) { if(performance.now()-start>2000) throw new Error('timed out'); await new Promise(r=>setTimeout(r,20)); } }
-  async function send(text) { input().value=text; input().dispatchEvent(new Event('input',{bubbles:true})); key('Enter'); await waitFor(()=>input().value===''); }
+  async function send(text) { input().value=text; input().dispatchEvent(new Event('input',{bubbles:true})); key('Enter'); await waitFor(()=>input().value===''); await new Promise(r=>setTimeout(r,50)); }
   async function visit(id) { var link=document.createElement('a'); link.setAttribute('hx-push-url','true'); document.body.appendChild(link); await htmx.ajax('GET','/tasks/'+id,{source:link,target:'#main-content',swap:'innerHTML'}); link.remove(); await new Promise(r=>setTimeout(r,50)); }
-  await send('task a first'); await htmx.ajax('GET','/tasks/a?refresh=1',{target:'#task-thread-view',swap:'morph:outerHTML'}); key('ArrowUp'); check('task a first'); key('ArrowDown'); check(''); input().value='task a second'; key('Enter');
+  await send('task a first'); await send('before refresh'); await htmx.ajax('GET','/tasks/a?refresh=1',{target:'#task-thread-view',swap:'morph:outerHTML'}); key('ArrowUp'); check('before refresh'); key('ArrowUp'); check('task a first'); key('ArrowDown'); check('before refresh'); key('ArrowDown'); check(''); input().value='task a second'; key('Enter');
   var mode = %q;
   // Finish A's send only after B is mounted with a separate draft.
   document.body.addEventListener('htmx:afterSwap', function release(event) {
@@ -106,7 +103,7 @@ window.addEventListener('load', async function() {
   }
   check('task b draft');
   await send('task b only');
-  history.back(); await waitFor(()=>location.pathname==='/'); await new Promise(r=>setTimeout(r,100)); check(''); key('ArrowUp'); check('task a second'); key('ArrowUp'); check('task a first'); key('ArrowDown'); check('task a second'); key('ArrowDown'); check('');
+  history.back(); await waitFor(()=>location.pathname==='/'); await new Promise(r=>setTimeout(r,100)); check(''); key('ArrowUp'); check('task a second'); key('ArrowUp'); check('before refresh'); key('ArrowUp'); check('task a first'); key('ArrowDown'); check('before refresh'); key('ArrowDown'); check('task a second'); key('ArrowDown'); check('');
   // Restored composers must rebind draft listeners; cache attributes alone are insufficient.
   input().value='task a unsent'; input().dispatchEvent(new Event('input',{bubbles:true}));
   await visit('b'); key('ArrowUp'); check('task b only'); key('ArrowDown'); check('');
@@ -133,4 +130,82 @@ window.addEventListener('load', async function() {
 	defer server.Close()
 	defer releaseOnce.Do(func() { close(releaseSend) })
 	runHeadlessChromeCDPFixture(t, chrome, server.URL+"/", "composer history across tasks", 1200, 700, 25*time.Second)
+}
+
+func TestBrowserFunctional_ComposerHistoryWithoutBrowserCache(t *testing.T) {
+	for _, storage := range []string{"empty", "unavailable", "malformed", "read-only"} {
+		t.Run(storage, func(t *testing.T) {
+			chrome := testChromePath(t)
+			forms := map[string]string{}
+			for _, id := range []string{"a", "b"} {
+				var buf bytes.Buffer
+				executions := []models.Execution{
+					{ID: id + "-first", TaskID: id, Status: models.ExecCompleted, IsFollowup: true, PromptSent: id + " first", Output: "answer"},
+					{ID: id + "-second", TaskID: id, Status: models.ExecCompleted, IsFollowup: true, PromptSent: id + " second\nsecond line", Output: "answer"},
+				}
+				if err := TaskThreadView(&models.Task{ID: id, Status: models.StatusCompleted}, executions, nil, nil, nil, nil, false, 20).Render(context.Background(), &buf); err != nil {
+					t.Fatal(err)
+				}
+				forms[id] = buf.String()
+			}
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if static.ServeAsset(w, r) {
+					return
+				}
+				w.Header().Set("Content-Type", "text/html; charset=utf-8")
+				switch r.URL.Path {
+				case "/tasks/a", "/tasks/b":
+					fmt.Fprint(w, forms[strings.TrimPrefix(r.URL.Path, "/tasks/")])
+				case "/tasks/a/thread":
+					fmt.Fprint(w, `<div>accepted</div>`)
+				case "/":
+					fmt.Fprintf(w, `<!doctype html><html><body data-test-result="pending">
+<script src="/static/vendor/htmx.min.js"></script>
+<script>
+var storageMode = %q;
+if (storageMode === 'malformed') localStorage.setItem('openvibely-task-thread-message-history-a', '{');
+if (storageMode === 'read-only') {
+ localStorage.setItem('openvibely-task-thread-message-history-a', JSON.stringify(['a first','a second\nsecond line']));
+ Storage.prototype.setItem = function() { throw new Error('quota exceeded'); };
+}
+if (storageMode === 'unavailable') {
+ Storage.prototype.getItem = function() { throw new Error('storage unavailable'); };
+ Storage.prototype.setItem = function() { throw new Error('storage unavailable'); };
+}
+</script><main id="main-content">%s</main><script>
+window.addEventListener('load', async function() {
+ try {
+  function input() { return document.getElementById('task-message-input'); }
+  function check(value) { if(input().value!==value) throw new Error('expected '+JSON.stringify(value)+' got '+JSON.stringify(input().value)); }
+  function key(key) { input().dispatchEvent(new KeyboardEvent('keydown',{key:key,bubbles:true,cancelable:true})); }
+  async function visit(id) { await htmx.ajax('GET','/tasks/'+id,{target:'#main-content',swap:'innerHTML'}); await new Promise(r=>setTimeout(r,50)); }
+  function recall(id) {
+   key('ArrowUp'); check(id+' second\nsecond line');
+   key('ArrowUp'); check(id+' first');
+   key('ArrowDown'); check(id+' second\nsecond line');
+   key('ArrowDown'); check('');
+  }
+  recall('a'); await visit('b'); recall('b'); await visit('a'); recall('a');
+  // Accepted messages must survive navigation even when storage writes fail.
+  input().value='a just sent'; input().dispatchEvent(new Event('input',{bubbles:true})); key('Enter');
+  var started=performance.now();
+  while(input().value!=='') {
+   if(performance.now()-started>2000) throw new Error('send did not complete');
+   await new Promise(r=>setTimeout(r,20));
+  }
+  await visit('b'); recall('b'); await visit('a');
+  key('ArrowUp'); check('a just sent'); key('ArrowUp'); check('a second\nsecond line');
+  key('ArrowUp'); check('a first'); key('Escape'); check('');
+  document.body.dataset.testResult='pass';
+ } catch(e) { document.body.dataset.testResult='fail'; document.body.dataset.testError=e.message; }
+});
+</script></body></html>`, storage, forms["a"])
+				default:
+					http.NotFound(w, r)
+				}
+			}))
+			defer server.Close()
+			runHeadlessChromeCDPFixture(t, chrome, server.URL+"/", "history without browser cache", 1200, 700, 25*time.Second)
+		})
+	}
 }
