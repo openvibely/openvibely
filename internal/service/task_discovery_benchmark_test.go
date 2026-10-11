@@ -1465,6 +1465,17 @@ func BenchmarkTaskDiscoveryIndexWriteBudget(b *testing.B) {
 			b.ReportAllocs()
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
+				// These fixtures support only a bounded number of mutations before
+				// their rows are consumed or enter a terminal state. Rebuild them
+				// outside the measurement instead of timing failures or no-ops.
+				if path.operations > 0 && i > 0 && i%path.operations == 0 {
+					b.StopTimer()
+					if run.cleanup != nil {
+						run.cleanup(b)
+					}
+					run = path.setup(b, db, taskRepo)
+					b.StartTimer()
+				}
 				if err := run.write(ctx, i); err != nil {
 					b.Fatalf("%s: %v", path.name, err)
 				}

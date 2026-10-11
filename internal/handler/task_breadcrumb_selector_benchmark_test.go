@@ -16,7 +16,10 @@ import (
 	"github.com/openvibely/openvibely/web/templates/components"
 )
 
-const breadcrumbSelectorBaselineQuery = `SELECT id, title
+const breadcrumbSelectorBenchmarkColumns = `id, title, status, category, merge_status,
+	EXISTS(SELECT 1 FROM task_goals g WHERE g.task_id = tasks.id AND g.status = 'achieved') AS goal_met`
+
+const breadcrumbSelectorBaselineQuery = `SELECT ` + breadcrumbSelectorBenchmarkColumns + `
 	FROM tasks
 	WHERE project_id = ? AND category != 'chat'
 		AND (? = FALSE OR EXISTS (
@@ -30,14 +33,14 @@ const breadcrumbSelectorBaselineQuery = `SELECT id, title
 
 const breadcrumbSelectorCandidateQuery = breadcrumbSelectorBaselineQuery
 
-const breadcrumbSelectorCurrentQuery = `SELECT id, title
+const breadcrumbSelectorCurrentQuery = `SELECT ` + breadcrumbSelectorBenchmarkColumns + `
 		FROM tasks
 		WHERE project_id = ? AND id = ? AND category != 'chat'
 			AND (? = FALSE OR EXISTS (
 				SELECT 1 FROM schedules WHERE schedules.task_id = tasks.id
 			))`
 
-const breadcrumbSelectorRecencyQuery = `SELECT id, title
+const breadcrumbSelectorRecencyQuery = `SELECT ` + breadcrumbSelectorBenchmarkColumns + `
 		FROM tasks
 		WHERE project_id = ? AND category != 'chat'
 			AND (? = FALSE OR EXISTS (
@@ -154,7 +157,7 @@ func listBreadcrumbSelectorBaseline(ctx context.Context, db *sql.DB, benchmarkCa
 	items := make([]models.BreadcrumbSelectorItem, 0, limit)
 	for rows.Next() {
 		var item models.BreadcrumbSelectorItem
-		if err := rows.Scan(&item.ID, &item.Name); err != nil {
+		if err := rows.Scan(&item.ID, &item.Name, &item.Status, &item.Category, &item.MergeStatus, &item.GoalMet); err != nil {
 			return nil, err
 		}
 		items = append(items, item)
@@ -167,7 +170,7 @@ func equalBreadcrumbSelectorItems(left, right []models.BreadcrumbSelectorItem) b
 		return false
 	}
 	for i := range left {
-		if left[i].ID != right[i].ID || left[i].Name != right[i].Name {
+		if left[i] != right[i] {
 			return false
 		}
 	}
