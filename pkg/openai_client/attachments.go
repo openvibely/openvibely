@@ -92,13 +92,17 @@ func (f *FileAttachment) loadData() ([]byte, error) {
 	return attachment.LoadData(f.FileName, f.FilePath, f.Data)
 }
 
+func imageDataURL(mediaType string, data []byte) string {
+	return fmt.Sprintf("data:%s;base64,%s", mediaType, base64.StdEncoding.EncodeToString(data))
+}
+
 func (f *FileAttachment) toInputContent() (map[string]any, error) {
 	if IsImageMediaType(f.MediaType) {
 		data, err := f.loadData()
 		if err != nil {
 			return nil, err
 		}
-		dataURL := fmt.Sprintf("data:%s;base64,%s", f.MediaType, base64.StdEncoding.EncodeToString(data))
+		dataURL := imageDataURL(f.MediaType, data)
 		return map[string]any{
 			"type":      "input_image",
 			"image_url": dataURL,

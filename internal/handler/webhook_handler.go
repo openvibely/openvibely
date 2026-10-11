@@ -12,6 +12,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/models"
@@ -243,7 +244,11 @@ func buildWebhookTaskTitle(endpoint *models.WebhookEndpoint, eventType, summary 
 	if summary != "" {
 		s := summary
 		if len(s) > 80 {
-			s = s[:80] + "..."
+			cut := 80
+			for cut > 0 && !utf8.RuneStart(s[cut]) {
+				cut--
+			}
+			s = s[:cut] + "..."
 		}
 		parts = append(parts, s)
 	}
