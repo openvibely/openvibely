@@ -594,6 +594,12 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				body.drag-cursor-active * {
 					cursor: grabbing !important;
 				}
+                /* A pointer drag must not select text in columns it crosses (including WebKit). */
+                html.drag-cursor-active,
+                html.drag-cursor-active * {
+                    -webkit-user-select: none !important;
+                    user-select: none !important;
+                }
                 .drag-cursor-surface[data-task-id]:active,
                 .drag-cursor-surface[data-task-id].dragging {
                     -webkit-user-select: none;
@@ -3698,6 +3704,8 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					window.isDragging = true;
 					document.documentElement.classList.add('drag-cursor-active');
 					document.body.classList.add('drag-cursor-active');
+					const selection = window.getSelection();
+					if (selection) selection.removeAllRanges();
 					draggedElement = state.card;
 					const taskID = state.card.getAttribute('data-task-id');
 

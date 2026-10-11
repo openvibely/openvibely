@@ -375,6 +375,11 @@ window.addEventListener('DOMContentLoaded', function() {
       drop_x: targetRect.left + targetRect.width / 2,
       drop_y: targetRect.top + Math.min(20, targetRect.height / 2)
     });
+    var heading = document.querySelector('#kanban-board h3');
+    var selectionRange = document.createRange();
+    selectionRange.selectNodeContents(heading);
+    window.getSelection().removeAllRanges();
+    window.getSelection().addRange(selectionRange);
     await fetch('/browser-native-grouped-ready?' + params.toString(), {method:'POST'});
     await waitFor(function() { return first.classList.contains('task-selected') && second.classList.contains('task-selected'); }, 'native modifier selection for grouped ' + phase);
     await waitFor(function() {
@@ -383,6 +388,10 @@ window.addEventListener('DOMContentLoaded', function() {
         getComputedStyle(first).transform !== 'none' && getComputedStyle(second).transform !== 'none' &&
         document.querySelectorAll('#kanban-board [data-pointer-drag-placeholder]').length === 2;
     }, 'all selected cards moving during native grouped ' + phase);
+    if (!window.getSelection().isCollapsed) fail('task drag must clear browser text selection');
+    document.querySelectorAll('#kanban-board h3').forEach(function(heading) {
+      if (getComputedStyle(heading).userSelect !== 'none') fail('column titles must not be selectable during task drag');
+    });
     [first, second].forEach(function(card, index) {
       var rect = card.getBoundingClientRect();
       if (card.querySelectorAll('.badge').length !== cardLayouts[index].length) fail('grouped drag must not insert badges into task cards');
@@ -398,6 +407,7 @@ window.addEventListener('DOMContentLoaded', function() {
         document.querySelectorAll('#kanban-board [data-pointer-drag-placeholder]').length === 0;
     }, 'native grouped ' + phase + ' cleanup');
     await waitFor(function() { return document.querySelectorAll('#kanban-board .task-selected').length === 0; }, 'native grouped ' + phase + ' selection cleanup');
+    if (getComputedStyle(document.querySelector('#kanban-board h3')).userSelect === 'none') fail('text selection must be restored after task drag');
   }
   window.addEventListener('error', function(event) { report('fail', String(event.error && event.error.stack || event.message)); });
   (async function() {
