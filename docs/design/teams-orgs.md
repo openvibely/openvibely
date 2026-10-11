@@ -16,9 +16,14 @@ To support teams we need:
 3. **One authorization chokepoint**: a `service.Authorizer` that every surface calls: HTTP, runtime tools, channels, webhooks, scheduler, workers, automations, and SSE. Cross-project checks done per handler become `authz.RequireProject(ctx, principal, projectID, perm)`.
 4. **Attribution**: `created_by_user_id`/`author_user_id` on tasks, thread inputs, executions, schedules, automations, alerts decisions, review comments, and usage events.
 5. **Re-scoping global state**: model configs, OAuth connections, channel credentials, `app_settings`, UI preferences, global agents/skills, and worker limits currently live at instance level. Each must be explicitly assigned to user, org, or project.
-6. **A security reckoning about the runtime itself**: agents execute `bash -c` on the host (`pkg/agenttools/tools.go:343`) with the server's OS privileges. Project-level ACLs do not stop an agent in project A from reading project B's checkout or the SQLite DB. This is the largest risk; see §9.
+6. **A kernel sandbox for agent execution**: agents execute `bash -c` on the host (`pkg/agenttools/tools.go:343`) with the server's OS privileges. Project-level ACLs do not stop an agent in project A from writing a script that edits project B's checkout or reads the SQLite DB. The fix is a Landlock launcher that locks every agent command, and every server git call, to its own project's folders (§3.5–3.6).
 
-Recommended path: ship **"one org, many users"** first. Keep a single implicit org per instance and add users, project membership, attribution, and the authorizer. Single-user mode keeps working with no visible change. Real multi-org tenancy and per-user credentials come later.
+Two layers, both required:
+
+- **App policy (database)** decides *who* can do *what*: which people can see a project, start tasks, change settings, or share it.
+- **Kernel sandbox (Landlock)** decides *where* a running agent can reach: only its own project's folders, with no other projects, no database file, no secrets, and no localhost API.
+
+Recommended path: ship **"one org, many users"** first. Keep a single implicit org per instance and add users, project membership, attribution, and the authorizer. Then add the Landlock sandbox before calling private projects private. Single-user mode keeps working with no visible change. Real multi-org tenancy and per-user credentials come later. On hosted, each org gets its own container, so orgs never share a disk.
 
 ---
 
@@ -83,7 +88,10 @@ I derived this by migrating a scratch DB and listing columns. **55 tables carry 
 
 - Chat and task-thread runtime tools (`handler/chat_action_tools.go`, 1.6k lines; `service/chat_action_runtime.go`, 3.5k lines) carry `streamingResponseParams{ProjectID, PrincipalID, TaskID, IsTaskFollowup, Surface…}` (`handler/chat_processing.go:58`). Tools enforce *current-project* ownership, which is good. They do not know who the human is or what that human's role is.
 - `switch_project` on channels can move a channel identity to any project.
-- Agent tools run `bash -c` on the host (`pkg/agenttools/tools.go:343`). Default cwd is the worktree, but no sandbox exists (by design; see project guidance "worktree default is a convenience, not a sandbox").
+- Agent tools run `bash -c` on the host (`pkg/agenttools/tools.go:343`) with the server's full environment. Default cwd is the worktree, but no sandbox exists (by design for single-user; see project guidance "worktree default is a convenience, not a sandbox"). Multi-user private projects change that decision (§3.5).
+- The read/write/edit file tools run inside the server process. `resolvePath` (`pkg/agenttools/tools.go:53`) accepts any absolute path.
+- MCP servers are started directly by the server (`pkg/mcp_client/client.go:394`).
+- The server runs git in about 93 places with no shared helper (69 in `internal/service/worktree_service.go`). It never sets `core.hooksPath` or `--no-verify`, so repo hooks run on every server-side commit, merge, rebase, and checkout (`worktree_service.go:628`, `:1206`, `:1369`, `:1385`, `:1540`).
 
 ### 1.5 Background actors (no human principal)
 
@@ -371,7 +379,7 @@ Where checks must go:
 4. **Model-facing context**: chat context builders (`BuildChatContextWithAgentDefinitions`) must include only the current project's data. That is already true; keep it under test. Cross-project tools (e.g. global `list_tasks`) must filter by principal.
 5. **Caches**: channel project-selection caches (Slack, Discord, Telegram) and any `sync.Map` keyed by project must not serve another user's selection. Key them by (external identity) and re-authorize on read.
 6. **Logs**: do not log other users' message contents at info (existing rule). Add user IDs, not emails, to operational logs.
-7. **Filesystem**: see §9 R1; ACLs alone do not stop the agent.
+7. **Filesystem**: ACLs alone do not stop the agent; the kernel sandbox does (§3.5–3.6, §9 R1).
 8. **Tests**: add a reusable `authz` contract test that walks every registered route (there is already `broad_route_coverage_test.go` / `coverage_route_contracts_test.go`) with a user who is *not* a member and asserts 404. This is the highest-leverage test in the plan.
 
 ### 3.4 Background-run principal semantics
@@ -386,6 +394,63 @@ Where checks must go:
 | Channel (linked) | Linked user | Reject with a channel message |
 | Channel (unlinked allowlisted) | `channel` principal capped at `editor` on the allowlisted project | Remove from allowlist |
 | System (memory consolidation, OAuth refresh, cleanup) | `system` | n/a |
+
+### 3.5 Kernel sandbox for agent execution (Landlock)
+
+App policy (§3.1–3.4) only decides whether a person may *start* a run. Once an agent is running, it runs as the same OS user (uid `10001`, `Dockerfile:168`) that owns every project folder. It could write a script that edits project Y and run it, and Linux would allow it. Private projects are not private without a kernel-level limit.
+
+**Choice: Landlock.** Landlock is a Linux kernel feature (5.13+). A process can restrict itself to a list of folders. The restriction can't be removed, and every program the process starts inherits it. It needs no root, no extra Linux users, no user namespaces, and no new container capabilities. Docker's default seccomp profile allows it, and hosted's `no-new-privileges` setting (`openvibely-hosted/internal/provisioner/provisioner.go`) is exactly what Landlock requires.
+
+**How it runs.** Today `execBash` (`pkg/agenttools/tools.go:343`) starts `bash -c <command>`. With the sandbox it starts the OpenVibely binary in a launcher mode instead:
+
+```
+/app/openvibely --sandbox-exec <policy> -- bash -c "<command>"
+```
+
+The first lines of `main()` detect `--sandbox-exec`, skip all server startup, apply the Landlock rules, and `syscall.Exec` into the command. The process does not stay running beside the command; it *becomes* the command (same PID). That still means one process per bash call, as today, and output flows back through the same pipe. The server itself is never locked, so it can still show diffs and merge. Go can't safely lock a single child after `fork`, so this re-exec is the standard approach (as used by `go-landlock`).
+
+```mermaid
+flowchart LR
+    Model -->|"run npm test"| Server["Server (unlocked)"]
+    Server -->|"openvibely --sandbox-exec projectX"| Proc["Child: locks itself to projectX"]
+    Proc -->|"exec, same PID"| Bash["bash -c 'npm test' (locked)"]
+    Bash -->|"starts"| Script["scripts/programs (inherit lock)"]
+    Script -->|"projectX files"| OK["allowed"]
+    Script -->|"projectY files, DB, /proc"| Denied["permission denied"]
+    Bash -->|"output via pipe"| Server
+```
+
+**Policy per run:**
+
+| Access | Paths |
+|---|---|
+| Read and write | The task's worktree, the project's main repo (git metadata for worktrees), a per-run temp folder |
+| Read only | System tools and libraries (`/usr`, `/bin`, `/lib`, `/etc` minus secrets), language toolchains, global git config |
+| None | Other projects, `/data` (SQLite DB), app config, `/proc` of other processes |
+| Network | Outbound allowed by default. The app's own API on localhost is blocked (Landlock TCP rules on Linux 6.7+, or a firewall rule) |
+
+**Gaps Landlock does not close on its own, and their fixes:**
+
+| Path an agent could take | Fix |
+|---|---|
+| Read/write/edit file tools run inside the unlocked server; `resolvePath` (`pkg/agenttools/tools.go:53`) accepts any absolute path | Reject paths outside the run's allowed folders (resolve symlinks first) |
+| Child gets the server's full environment, including API keys | Pass an allow-listed environment only |
+| Git hooks or config programs (`core.fsmonitor`, diff/merge drivers) run later by the unlocked server | Run all server git calls through the lock (§3.6) |
+| A program calls the app's API on localhost to ask the server to make an edit | Block localhost from locked processes |
+| MCP servers (`pkg/mcp_client/client.go:394`) and provider-local tools | Start them through the same launcher |
+| Attaching to the server process | Already blocked by Landlock (`ptrace` restriction); keep `/proc` out of the policy |
+
+**When Landlock is unavailable** (old kernel, macOS/Windows desktop): the app refuses to create or keep *private* projects in a multi-user org, instead of quietly running unlocked. Single-user installs and the desktop app don't need the sandbox and keep today's behavior.
+
+**Compared with per-project Linux users:** that approach also works (a Linux user per project, agents run as that user), but it needs the app to run as root or a root helper to switch users, and every worktree needs the right owner. Landlock gives the same per-project wall without root, so it is the recommended choice. A container per run is stronger but slower and hard on desktop; it stays a fallback.
+
+**Before building:** a one-day test on a hosted server. Start a container with hosted's settings and check that a locked shell, a program it writes and runs, and a git hook can't read or edit another project or reach the localhost API.
+
+### 3.6 Server git calls through the lock
+
+The server runs git in about 93 places (69 in `internal/service/worktree_service.go`, the rest across about 7 files), with no shared helper and no hook protection (§1.4). An agent can write `.git/hooks/post-merge` inside its own project, and the next server-side merge runs that hook unlocked.
+
+Fix: one helper, `runGitLocked(ctx, project, args...)`, that starts git through the Landlock launcher with that project's policy (main repo and all its worktrees read-write; network only for push/fetch). Hooks keep working for projects that rely on them (formatters, linters), but they can only reach their own project. A test fails on any direct `exec.Command("git", ...)` outside the helper. Size: about 2–3 days, mostly mechanical.
 
 ---
 
@@ -477,7 +542,7 @@ Today: global `worker_settings.max_workers`, `projects.max_workers`, and `agent_
 | **Realtime fan-out** | `events.Broadcaster` already supports project-scoped subscription. Add per-user streams for notifications (`SubscribeUser(userID)`), and include `actor_user_id` in `TaskEvent`/`ChatEvent` so UIs can show "Alice moved X". Enforce authorization at subscribe time (§3.2) and on membership changes |
 | **Notifications per user** | Alerts are project-scoped broadcasts today. Add `alert_recipients(alert_id, user_id, read_at)`, or simpler per-user read state, `alert_reads(alert_id, user_id)`, replacing the global `alerts.is_read`. Add notification types: mentioned in chat (`@username`), task assigned, review requested, run failed (your run), share invite. Delivery: in-app, plus optional email or linked Slack DM via existing `send_message` channels |
 | **Audit log** | `audit_events(id, org_id, project_id, actor_user_id, actor_kind, action, target_type, target_id, metadata_json, ip, created_at)`. Write on: membership/role changes, visibility changes, shares, invites, credential changes, merges, PR opens, alert decisions, automation publish, break-glass access, project delete/transfer, and login success/failure. Read view for org admins and project maintainers |
-| **Presence** | Phase 4 nice-to-have: in-memory presence per project or conversation via the existing SSE (`presence` events with a heartbeat). It does not need persistence |
+| **Presence** | Later nice-to-have: in-memory presence per project or conversation via the existing SSE (`presence` events with a heartbeat). It does not need persistence |
 | **Mentions** | `@user` in chat creates notifications and puts the participant into the conversation |
 | **Assignment** | Optional `tasks.assignee_user_id` plus a board filter ("My tasks") |
 
@@ -509,7 +574,7 @@ Migration `21x_teams_backfill` (idempotent, `NO TRANSACTION` where tables are re
 3. `UPDATE projects SET org_id=default, owner_user_id=bootstrap, visibility='private'`. Insert `project_members(project, bootstrap, 'owner')`. Rebuild `projects` to make the columns NOT NULL.
 4. Create one default `chat_conversations` row per project. Backfill `conversation_id` on `tasks WHERE category='chat'`, `thread_inputs WHERE scope='chat'`, and `executions WHERE task_category='chat'`. Re-key `chat_compaction_checkpoints`/`chat_context_usage` rows of project scope to the conversation.
 5. Attribution columns stay NULL for legacy rows, rendered as "Owner (legacy)". Optionally backfill `created_by_user_id = bootstrap` for tasks, schedules, and automations so background run-as resolution works. **Recommended: backfill**, because schedules and automations need a run-as user.
-6. Move `ui.*` keys from `app_settings` to `user_preferences` for the bootstrap user. Leave secrets in place until the Phase 3 credential move.
+6. Move `ui.*` keys from `app_settings` to `user_preferences` for the bootstrap user. Leave secrets in place until the Phase 5 credential move.
 7. `agent_configs` / `oauth_connections` get `owner_kind='org', owner_id=default`, which preserves today's sharing.
 8. Channel allowlist rows: `linked_user_id = NULL`; `added_by` stays as text.
 
@@ -521,16 +586,19 @@ Note the project rules: never touch `openvibely.db` destructively, follow the ta
 
 ### 9.1 Risks
 
-- **R1: Host-level agent execution defeats project ACLs (critical).** Agents run `bash -c` as the server user (`pkg/agenttools/tools.go:343`) and can read any repo under `PROJECT_REPO_ROOT`, other users' worktrees, `openvibely.db` (including the OAuth tokens in `agent_configs`/`oauth_connections` and the secrets in `app_settings`), and env vars. A *private* project is therefore only private from people who cannot run an agent. Mitigations, in increasing cost:
-  1. Document the trust model honestly: "members of an org are trusted; private projects hide from the UI, not from agents". This is acceptable for small trusted teams (Phase 1–2).
-  2. Scrub the agent subprocess env (no `AUTH_*`, `OPENVIBELY_*` secrets), and move secrets out of the DB file into an encrypted store keyed by an env secret not passed to children.
-  3. Per-project OS sandbox (container, bubblewrap, or macOS sandbox-exec) with only the worktree mounted. This conflicts with the current "not a sandbox" guidance, so it is a product decision.
-  4. Per-org instance (hosted model): strongest and simplest isolation for multi-org.
+- **R1: Host-level agent execution defeats project ACLs (critical).** Agents run `bash -c` as the server user (`pkg/agenttools/tools.go:343`) and can read any repo under `PROJECT_REPO_ROOT`, other users' worktrees, `openvibely.db` (including the OAuth tokens in `agent_configs`/`oauth_connections` and the secrets in `app_settings`), and env vars. A *private* project is therefore only private from people who cannot run an agent. **Decision:** fix this with the Landlock sandbox (§3.5) and locked server git calls (§3.6) in Phase 3, before private projects ship to multi-user orgs. Supporting measures:
+  1. Until Phase 3 lands, document the trust model honestly: "members of an org are trusted; private projects hide from the UI, not from agents".
+  2. Pass agents an allow-listed environment, and move secrets out of the DB file into an encrypted store keyed by an env secret not passed to children (Phase 5).
+  3. One container per org on hosted (Phase 6), so orgs never share a disk.
+  4. Without Landlock (old kernels, desktop), private projects are not offered in multi-user orgs.
+  
+  This changes the current "worktree default is a convenience, not a sandbox" guidance for multi-user private projects only.
 - **R2: Unscoped ID routes (IDOR).** Many handlers resolve by ID without principal checks (§1.3). A big-bang retrofit risks missing routes; the route-walking contract test is mandatory.
 - **R3: Shared mutable singletons.** Global `app_settings`, `ui.selected_project_id`, channel selection caches, global worker caps, and global agents/skills create cross-user interference.
 - **R4: Prompt and context leakage.** Chat history now contains multiple authors. A private conversation must never enter another conversation's context or memory extraction. `MemoryService` extraction writes to the repo's `.openvibely/memories/`, which is visible to all project members. Private chats must be excluded from memory extraction, or it must be documented as such.
 - **R5: Cost attribution disputes.** Follow-ups on another user's task using their personal model (§5.1).
-- **R6: SQLite write contention** grows with users (single writer). Fine for teams of about 20 or fewer; monitor.
+- **R6: SQLite write contention.** WAL mode, one writer connection, and a 1-connection reader pool (`internal/database/database.go:17`, `:47`). Most writes come from agents (streamed output, executions, usage), and the worker limit caps them, so more people add little load. Fine for teams of about 5–20 (not load-tested). If needed: raise the reader pool (WAL allows many readers) and batch agent output writes; hosted spreads load with one container and DB per org; large orgs need Postgres.
+- **R8: Sandbox coverage.** Landlock only helps if every path an agent can touch files through goes through the launcher or a path check (§3.5 gaps table). Missing one path (a new tool, a new git call) reopens R1. Mitigate with the direct-`exec` lint test and a sandbox escape test suite run in CI on Linux.
 - **R7: Scope creep.** The roadmap touches nearly every handler; it needs strict phasing and feature flags per phase. This is a temporary rollout flag, not a permanent shim.
 
 ### 9.2 Open questions
@@ -550,7 +618,10 @@ Note the project rules: never touch `openvibely.db` destructively, follow the ta
 
 - **Personal namespace + orgs (full GitHub model)**: every user has a personal "org" (`organizations.is_personal`). This is more flexible, but it doubles UI states. Reserved via `is_personal`; it is not in the MVP.
 - **Project-only ACL, no org**: simplest, but it does not give a member directory, org-shared credentials, or billing unit. Rejected.
-- **Team entities (groups) inside orgs** granting project roles to a group (`teams`, `team_members`, `project_team_grants`). Useful at more than 15 users; deferred to Phase 5, and the schema stays compatible.
+- **Team entities (groups) inside orgs** granting project roles to a group (`teams`, `team_members`, `project_team_grants`). Useful at more than 15 users; deferred to "Later", and the schema stays compatible.
+- **Per-project Linux users** for agent isolation: works, but needs root or a root helper to switch users and correct file ownership on every worktree. Rejected in favor of Landlock (§3.5).
+- **Container per agent run**: strongest isolation, but slow to start, needs Docker access from the app, and is impractical on desktop. Kept as a fallback if Landlock proves unavailable on hosted servers.
+- **Turning git hooks off** (`core.hooksPath=/dev/null`) for server git calls: simple, but breaks projects that rely on hooks. Running git through the lock (§3.6) keeps hooks working safely.
 - **External policy engine (OpenFGA, Cedar, Casbin)**: overkill now. The small `Authorizer` with an explicit matrix is easier to audit, and the interface leaves room to swap.
 - **Row-level filtering in SQL views**: not portable across the future backends, and harder to test than explicit `AccessScope` parameters.
 
@@ -560,48 +631,68 @@ Note the project rules: never touch `openvibely.db` destructively, follow the ta
 
 Sizing: S ≈ ≤3 days, M ≈ 1–2 weeks, L ≈ 3–4 weeks (one engineer plus agent assistance).
 
-### Phase 0: Prerequisites (M–L)
+### Phase 0: Groundwork (3–5 weeks)
 - Land **Backend-Neutral Persistence Interfaces** (existing task `2e6c5ee5…`), with a reserved `models.Principal`/`AccessScope` type.
 - **IDOR hardening now, independent of users**: ensure every ID-addressed route verifies the row belongs to the request project (`GetTask`, `GetTaskExecutions`, attachments, SSE `ChatStreamSSE`). Add a route-walking ownership contract test. This is valuable even for single-user instances.
-- Milestone: all repos behind interfaces; contract test green.
+- Scope live event streams to the right project.
+- Milestone: all repos behind interfaces; route contract test green.
 
-### Phase 1: Identity foundation, single org (M)
+### Phase 1: Users (2–3 weeks)
 - `users`, `user_identities`, `organizations`, `org_memberships`, and `user_sessions` migrations, with bootstrap user and default org backfill (§8 steps 1–3, 6).
 - `AuthMiddleware` puts a `Principal` in the context. Disabled mode → bootstrap principal. Local auth → DB users (env seeds the admin). Hosted SSO → `user_identities`.
 - `user_preferences` replaces `ui.*` in `app_settings`.
 - Admin UI: list users, create user or invite link, disable user. `/auth/me` returns the user ID and roles.
-- Milestone: two local users can log in. Each has their own theme and selected project. Behavior is otherwise unchanged (everyone sees everything).
+- Milestone: two local users can log in. Each has their own theme and selected project. Everyone still sees everything.
 
-### Phase 2: Project ownership, sharing, and authorization (L)
+### Phase 2: Sharing and app policy (3–4 weeks)
 - `projects.org_id/owner_user_id/visibility` and `project_members`. `service/authz.Authorizer` with the matrix in §3.1.
 - Enforce on all HTTP routes, the JSON API, runtime tools, SSE, and the project selector and desktop picker. Return 404 on deny.
 - Share dialog in Project Settings (add an org member with a role; change visibility); member list; transfer ownership.
 - Attribution columns on tasks, thread_inputs, executions, schedules, automations, alerts, and review_comments. UI shows the author on chat bubbles and tasks.
 - Background run-as semantics for scheduler, workers, automations, goals, and webhooks (§3.4), with revocation handling.
 - `audit_events`, written for membership, visibility, merge, and alert decisions.
-- Milestone: Alice's private project is invisible to Bob (UI, API, SSE, tools). Shared as editor, Bob can chat and run tasks but cannot merge or change settings. Route contract test covers non-member, viewer, and editor.
+- Milestone: Alice's private project is invisible to Bob in the app (UI, API, SSE, tools). Shared as editor, Bob can chat and run tasks but cannot merge or change settings. Agents are not yet locked, so private projects stay behind the trust-model warning (R1) until Phase 3.
 
-### Phase 3: Shared chat conversations and collaboration (M–L)
+### Phase 3: Kernel sandbox (3–4 weeks)
+- Start with the **one-day Landlock test** on a hosted server (§3.5). If Landlock is unavailable there, re-plan around container-per-run.
+- **Landlock launcher**: `openvibely --sandbox-exec`; each bash call is locked to its project's folders, and scripts and programs it starts inherit the lock.
+- **Git through the lock**: route the ~93 server git calls through `runGitLocked` (§3.6), plus a test that fails on direct `exec.Command("git", ...)`.
+- **File tools**: read/write/edit reject paths outside the run's allowed folders.
+- **Environment**: allow-listed env for locked processes; no API keys or secrets.
+- **Localhost**: locked processes can't reach the app's API (Landlock network rules on Linux 6.7+, or a firewall rule).
+- **MCP servers and provider-local tools** start through the launcher.
+- **No Landlock** (old kernel, desktop): private projects are not offered in multi-user orgs.
+- Sandbox escape test suite in CI on Linux.
+- Milestone: an agent on project X can't read or edit project Y, the DB, or secrets using bash, a script, a program it wrote, a git hook, the file tools, or the localhost API.
+
+### Phase 4: Shared chat (3–4 weeks)
 - `chat_conversations` + participants. Migrate the default per-project thread. Conversation list UI. Private vs project-visible conversations; share a conversation.
 - Per-conversation FIFO queue, compaction checkpoints, and context usage. Author-labeled history in model prompts. Exclude private conversations from memory extraction.
 - Per-user alert read state, `@mentions`, and an in-app notifications stream (`SubscribeUser`).
-- `tasks.version` optimistic concurrency. `actor_user_id` on live events.
+- `tasks.version` optimistic concurrency: a second concurrent save is rejected instead of overwriting. `actor_user_id` on live events.
 - Milestone: two users in the same conversation see each other's messages live, with attribution. Private conversations are not visible to others.
 
-### Phase 4: Credentials, channels, resources (L)
+### Phase 5: Credentials and channels (3–4 weeks)
 - `agent_configs`/`oauth_connections` gain `owner_kind/owner_id`. Personal vs org models; project model allow-list; follow-up model re-resolution.
-- `integration_credentials` (org scope, with optional project override). Move secrets out of `app_settings`; encrypt at rest; scrub agent env.
+- `integration_credentials` (org scope, with optional project override). Move secrets out of `app_settings`; encrypt at rest.
 - Channel identity linking (`/link` flow), linked-user authorization, `switch_project` gating, Slack deny-by-default in multi-user mode, and per-project GitHub approvers.
 - Usage analytics by user. Org and user worker caps. Optional fair-share admission.
-- API tokens (PATs).
-- Milestone: Bob's personal Claude subscription is never used by Alice. A Slack user linked to Bob can only reach Bob's projects.
+- Personal API tokens.
+- Milestone: Bob's personal Claude subscription is never used for Alice's work. A Slack user linked to Bob can only reach Bob's projects.
 
-### Phase 5: Scale-out and extras (L+)
+### Phase 6: Hosted teams (2–4 weeks, in `openvibely-hosted`)
+- Members list per workspace, replacing the single-owner SSO check (`internal/httpapi/sso.go:242`, `:350`).
+- Invites that add someone to an existing workspace.
+- Role included in the SSO response. OpenVibely's `decodeHostedIdentity` must change in the same release, because it rejects unknown fields.
+- Per-seat Stripe billing.
+- One container per org, so orgs never share a disk.
+- Can run in parallel with Phase 4 or 5.
+
+### Later
 - GitHub OAuth login, OIDC, and GitHub-org/team → role sync.
 - Teams/groups inside orgs; project grants to teams.
 - Presence, task assignees, and a "My work" view.
-- Multi-org instances (instance admin UI). Requires a Postgres backend and the R1 sandboxing decision.
-- Hosted billing hooks (seats, usage per org).
+- Multi-org instances (instance admin UI). Requires a Postgres backend.
 
 ### Proposed follow-up tasks
 
@@ -622,15 +713,29 @@ Sizing: S ≈ ≤3 days, M ≈ 1–2 weeks, L ≈ 3–4 weeks (one engineer plus
 | 13 | Attribution columns + author display on tasks, chat, threads, reviews, alerts | 2 | M | 5 |
 | 14 | Project share dialog, member management, ownership transfer | 2 | M | 10 |
 | 15 | Audit log table, writers, and admin view | 2 | M | 9 |
-| 16 | Chat conversations (schema, migration, per-conversation queue/compaction, UI) | 3 | L | 13 |
-| 17 | Per-user notifications, alert read state, @mentions, user SSE stream | 3 | M | 16 |
-| 18 | Optimistic concurrency for task edits + actor on live events | 3 | S | 13 |
-| 19 | Personal vs org model configs/OAuth + project model allow-list + follow-up model re-resolution | 4 | L | 9 |
-| 20 | `integration_credentials` (org/project scope), encrypt at rest, scrub agent env | 4 | M | 9 |
-| 21 | Channel identity linking + linked-user authorization + `switch_project` gating | 4 | L | 9, 20 |
-| 22 | Usage analytics by user/org; org & user worker caps | 4 | M | 13 |
-| 23 | Personal API tokens with scopes | 4 | S | 5 |
-| 24 | GitHub OAuth / OIDC login | 5 | M | 5 |
-| 25 | Agent execution isolation decision + prototype (R1) | 5 | L | — (decision needed earlier) |
+| 16 | One-day Landlock test on a hosted server (shell, written program, git hook, localhost API) | 3 | S | — (run early) |
+| 17 | Landlock launcher (`--sandbox-exec`) for bash tool calls + allow-listed env | 3 | M | 16 |
+| 18 | `runGitLocked` helper; route all server git calls through it + direct-exec lint test | 3 | S | 17 |
+| 19 | Path checks on read/write/edit file tools | 3 | S | — |
+| 20 | Block localhost API from locked processes; launch MCP servers and provider-local tools through the launcher | 3 | M | 17 |
+| 21 | Refuse private projects without Landlock + sandbox escape test suite in CI | 3 | S | 17 |
+| 22 | Chat conversations (schema, migration, per-conversation queue/compaction, UI) | 4 | L | 13 |
+| 23 | Per-user notifications, alert read state, @mentions, user SSE stream | 4 | M | 22 |
+| 24 | Optimistic concurrency for task edits + actor on live events | 4 | S | 13 |
+| 25 | Personal vs org model configs/OAuth + project model allow-list + follow-up model re-resolution | 5 | L | 9 |
+| 26 | `integration_credentials` (org/project scope), encrypt at rest | 5 | M | 9 |
+| 27 | Channel identity linking + linked-user authorization + `switch_project` gating | 5 | L | 9, 26 |
+| 28 | Usage analytics by user/org; org & user worker caps | 5 | M | 13 |
+| 29 | Personal API tokens with scopes | 5 | S | 5 |
+| 30 | Hosted: workspace members, invites, role in SSO response (+ `decodeHostedIdentity` change), per-seat billing | 6 | L | 5, 9 |
+| 31 | GitHub OAuth / OIDC login | Later | M | 5 |
 
-Total rough effort through Phase 4: about 4–6 engineer-months. Phases 0–2 (about 2 months) deliver the core requirement: private vs shared projects with role-based collaboration inside one org.
+### Totals
+
+| Milestone | Phases | Time |
+|---|---|---|
+| Private and shared projects, truly locked | 0–3 | about 3 months |
+| Full teams on self-hosted | 0–5 | about 5–7 months |
+| Teams on hosted | 6 | +2–4 weeks, can run in parallel with Phase 4 or 5 |
+
+Estimates assume one engineer with agent assistance. Phase 3 depends on the one-day Landlock test.
