@@ -47,6 +47,7 @@ func TestBrowserFunctional_AutomationBreadcrumbShortcuts(t *testing.T) {
 			}))
 			defer server.Close()
 			runComposerFocusCDP(t, chrome, server.URL+"/automations/a"+suffix+"?project_id=p", "automation-shortcuts-"+mode, func(b *composerFocusCDP) {
+				b.waitFor("automation page ready", `String(document.readyState === 'complete' && !!document.querySelector('[data-breadcrumb-selector-button]') && !!document.getElementById('editor'))`, "true")
 				key := func(code string) {
 					b.evaluate(`document.activeElement.dispatchEvent(new KeyboardEvent('keydown',{code:'` + code + `',key:'` + code + `',shiftKey:true,metaKey:/Mac|iPhone|iPad/.test(navigator.platform),ctrlKey:!/Mac|iPhone|iPad/.test(navigator.platform),bubbles:true,cancelable:true}));'sent'`)
 				}

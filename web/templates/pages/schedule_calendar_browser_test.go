@@ -73,9 +73,15 @@ func testScheduleCalendarHeader(t *testing.T, paused, mobile bool) {
    check(root.querySelector('.drop-zone').dataset.ovTooltip==='Select schedules (Drag empty space)','calendar space explains box selection');
    check(toolbar.querySelector('[data-calendar-action="clear"]').dataset.ovTooltip==='Clear selection (Esc)','clear hover explains escape shortcut');
 
-   await tick(); // Let initial calendar scrolling settle before opening the tooltip.
-   hintCard.dispatchEvent(new PointerEvent('pointerover',{bubbles:true}));await new Promise(resolve=>setTimeout(resolve,450));
-   check(document.querySelector('#ov-shared-tooltip kbd').textContent===modifier+'+click','schedule hints use shared key badge');
+   // Finish loading and deliver pending layout/scroll events before hovering:
+   // the tooltip intentionally cancels pending hover hints when its owner scrolls.
+   if(document.readyState!=='complete') await new Promise(resolve=>window.addEventListener('load',resolve,{once:true}));
+   await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+   hintCard.dispatchEvent(new PointerEvent('pointerover',{bubbles:true}));
+   var hintDeadline=performance.now()+3000;
+   while(!document.querySelector('#ov-shared-tooltip:not([hidden]) kbd') && performance.now()<hintDeadline) await tick();
+   var hintKey=document.querySelector('#ov-shared-tooltip:not([hidden]) kbd');
+   check(hintKey && hintKey.textContent===modifier+'+click','schedule hints use shared key badge');
    window.openVibelyTooltip.close();
    var menu=root.querySelector('#schedule-project-menu');
    function checkHeaderAlignment() {
