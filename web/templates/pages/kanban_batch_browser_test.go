@@ -60,6 +60,34 @@ window.addEventListener('DOMContentLoaded', async function() {
   const menu = col('completed').querySelector('[data-kanban-menu-key="column-completed"]');
   menu.querySelector('[data-kanban-menu-trigger]').click();
   await wait(() => menu.getAttribute('data-kanban-menu-positioning') !== 'true');
+  if (window.innerWidth >= 640) {
+    for (const name of ['backlog', 'completed']) {
+      const dropdown = col(name).querySelector('[data-kanban-menu-key]');
+      if (dropdown.getAttribute('data-kanban-menu-open') !== 'true') dropdown.querySelector('[data-kanban-menu-trigger]').click();
+      await wait(() => dropdown.getAttribute('data-kanban-menu-positioning') !== 'true');
+      const rows = Array.from(dropdown.querySelector('[data-kanban-menu-content]').children);
+      const submenuRows = rows.filter(row => row.querySelector(':scope > [data-task-card-submenu-panel]'));
+      for (const submenu of submenuRows) {
+        for (const ordinary of [select(name).parentElement, dropdown.querySelector('[data-kanban-action="delete"]').parentElement]) {
+          submenu.dispatchEvent(new MouseEvent('mouseenter'));
+          check(document.querySelector('[data-task-card-submenu-portaled="true"]'), name + ' submenu opens before ordinary row hover');
+          ordinary.dispatchEvent(new MouseEvent('mouseenter'));
+          ordinary.dispatchEvent(new MouseEvent('mouseleave'));
+          check(!document.querySelector('[data-task-card-submenu-portaled="true"]'), name + ' ordinary row hover closes submenu');
+          check(dropdown.getAttribute('data-kanban-menu-open') === 'true', name + ' ordinary row hover keeps main menu open');
+        }
+      }
+      submenuRows[0].dispatchEvent(new MouseEvent('mouseenter'));
+      const filterPanel = document.querySelector('[data-task-card-submenu-portaled="true"]');
+      filterPanel.querySelector('li').dispatchEvent(new MouseEvent('mouseenter'));
+      check(document.querySelectorAll('[data-task-card-submenu-portaled="true"]').length === 2, name + ' nested filter opens');
+      select(name).parentElement.dispatchEvent(new MouseEvent('mouseenter'));
+      check(!document.querySelector('[data-task-card-submenu-portaled="true"]'), name + ' ordinary row closes nested filters');
+      window.closeKanbanMenu(null, false);
+    }
+    menu.querySelector('[data-kanban-menu-trigger]').click();
+    await wait(() => menu.getAttribute('data-kanban-menu-positioning') !== 'true');
+  }
   const sort = Array.from(menu.querySelectorAll('button')).find(b => b.textContent.includes('Sort by'));
   sort.focus();
   const panel = document.querySelector('[data-task-card-submenu-portaled="true"]');

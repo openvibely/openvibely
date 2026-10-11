@@ -24,7 +24,7 @@ templ KanbanFilter(category, key, label string, values, labels []string) {
 templ KanbanColumnMenu(projectID string, category models.TaskCategory, backlogSort, completedSort string, hasTasks bool) {
 	{{ cat := string(category) }}
 	@CardActionDropdown(CardActionDropdownConfig{WrapperClass: "dropdown dropdown-end", TriggerClass: "sidebar-toggle-btn header-action-btn btn btn-ghost btn-sm btn-square", IconClass: "h-5 w-5", MenuClass: "w-56 max-w-[calc(100vw-2rem)] z-[100]", Label: "More actions", TriggerAriaExpanded: "false", TriggerKanbanMenu: true, MenuKanbanContent: true, KanbanMenuKey: "column-" + cat}) {
-		<li><button type="button" data-column={ cat } data-kanban-select disabled?={ !hasTasks } onclick="kanbanSelectAll(this)">Select all</button></li>
+		<li onmouseenter="hoverKanbanSubmenu(event, this)" onmouseleave="cancelKanbanSubmenuHover(this)" onfocusin="closeKanbanSubmenus(this.closest('[data-kanban-menu-key]'), null)"><button type="button" data-column={ cat } data-kanban-select disabled?={ !hasTasks } onclick="kanbanSelectAll(this)">Select all</button></li>
 		if category != models.CategoryActive {
 			<li class="ov-menu-rule" role="separator"></li>
 			@KanbanSubmenu("Filter") {
@@ -67,8 +67,8 @@ if category == models.CategoryCompleted {
 				<li><button type="button" data-column={ cat } data-kanban-action="run" onclick="kanbanBatch(this)">Run tasks</button></li>
 			}
 		} else {
-			<li><button type="button" data-column={ cat } data-kanban-action="cancel" onclick="kanbanBatch(this)">Stop</button></li>
+			<li onmouseenter="hoverKanbanSubmenu(event, this)" onmouseleave="cancelKanbanSubmenuHover(this)" onfocusin="closeKanbanSubmenus(this.closest('[data-kanban-menu-key]'), null)"><button type="button" data-column={ cat } data-kanban-action="cancel" onclick="kanbanBatch(this)">Stop</button></li>
 		}
-		<li><button type="button" class="text-error" data-column={ cat } data-kanban-action="delete" onclick="kanbanBatch(this)">Delete…</button></li>
+		<li onmouseenter="hoverKanbanSubmenu(event, this)" onmouseleave="cancelKanbanSubmenuHover(this)" onfocusin="closeKanbanSubmenus(this.closest('[data-kanban-menu-key]'), null)"><button type="button" class="text-error" data-column={ cat } data-kanban-action="delete" onclick="kanbanBatch(this)">Delete…</button></li>
 	}
 }
