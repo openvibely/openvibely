@@ -286,8 +286,8 @@ templ modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, 
 				if len(agents) == 0 {
 						<div class="text-center py-12" data-search-empty-state>
 						<p class="opacity-50 mb-4">No models configured yet. Add one to start executing tasks.</p>
-						<button class="sidebar-toggle-btn header-action-btn btn btn-ghost btn-sm btn-square" aria-label="Configure Model" data-tooltip-disabled onclick="openNewModelModal()">
-							@pageCreateIcon()
+						<button class="btn btn-primary" onclick="openNewModelModal()">
+							Configure Model
 						</button>
 					</div>
 				}
