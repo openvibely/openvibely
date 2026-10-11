@@ -3091,7 +3091,8 @@ func (ws *WorktreeService) autoMergeTask(ctx context.Context, taskID string, tri
 	applog.Infof("[worktree] auto-merging task %s after %s: %s -> %s", task.ID, triggerName, task.WorktreeBranch, task.MergeTargetBranch)
 	result, mergeErr := ws.MergeBranchValidated(ctx, task, repoDir, "merge", validate)
 	if errors.Is(mergeErr, errAutomaticBranchAlreadyMerged) {
-		ws.reconcileVerifiedMergedTask(ctx, taskID, project.ID, repoDir)
+		// An unchanged or externally merged branch needs no app merge.
+		// Leave its status alone; periodic cleanup can reclaim the worktree.
 		return
 	}
 	if mergeErr != nil {
