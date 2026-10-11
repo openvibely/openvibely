@@ -157,7 +157,10 @@ func TestBrowserFunctional_ComposerHistoryWithoutBrowserCache(t *testing.T) {
 				case "/tasks/a", "/tasks/b":
 					fmt.Fprint(w, forms[strings.TrimPrefix(r.URL.Path, "/tasks/")])
 				case "/tasks/a/thread":
-					fmt.Fprint(w, `<div>accepted</div>`)
+					_ = r.ParseForm()
+					if err := ChatBubble("User", strings.TrimSpace(r.FormValue("message"))).Render(r.Context(), w); err != nil {
+						t.Error(err)
+					}
 				case "/":
 					fmt.Fprintf(w, `<!doctype html><html><body data-test-result="pending">
 <script src="/static/vendor/htmx.min.js"></script>
@@ -198,14 +201,16 @@ window.addEventListener('load', async function() {
   }
   recall('a'); await visit('b'); recall('b'); await visit('a'); recall('a');
   // Accepted messages must survive navigation even when storage writes fail.
-  input().value='a just sent'; input().dispatchEvent(new Event('input',{bubbles:true})); key('Enter');
+  input().value='  a just sent\n'; input().dispatchEvent(new Event('input',{bubbles:true})); key('Enter');
   var started=performance.now();
   while(input().value!=='') {
    if(performance.now()-started>2000) throw new Error('send did not complete');
    await new Promise(r=>setTimeout(r,20));
   }
+  // The accepted bubble is already in the transcript before history is saved.
+  key('ArrowUp'); check('  a just sent\n'); key('ArrowUp'); check('a second\nsecond line'); key('Escape'); check('');
   await visit('b'); recall('b'); await visit('a');
-  key('ArrowUp'); check('a just sent'); key('ArrowUp'); check('a second\nsecond line');
+  key('ArrowUp'); check('  a just sent\n'); key('ArrowUp'); check('a second\nsecond line');
   key('ArrowUp'); check('a first'); key('Escape'); check('');
   document.body.dataset.testResult='pass';
  } catch(e) { document.body.dataset.testResult='fail'; document.body.dataset.testError=e.message; }

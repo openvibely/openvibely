@@ -2391,7 +2391,12 @@ templ ChatInputForm(config ChatInputFormConfig) {
 					var trimmed = (message || '').trim();
 					if (!trimmed) return;
 					messageHistoryEntries = loadMessageHistory();
-					if (messageHistoryEntries.length === 0 || messageHistoryEntries[messageHistoryEntries.length - 1] !== message) {
+					var lastIndex = messageHistoryEntries.length - 1;
+					if (lastIndex >= 0 && messageHistoryEntries[lastIndex].trim() === trimmed) {
+						// The response may already have rendered the server-trimmed copy.
+						// Keep one entry, retaining the exact text the user submitted.
+						messageHistoryEntries[lastIndex] = message;
+					} else {
 						messageHistoryEntries.push(message);
 					}
 					messageHistoryEntries = messageHistoryEntries.slice(-messageHistoryLimit);
