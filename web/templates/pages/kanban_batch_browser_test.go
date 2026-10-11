@@ -66,22 +66,22 @@ window.addEventListener('DOMContentLoaded', async function() {
       if (dropdown.getAttribute('data-kanban-menu-open') !== 'true') dropdown.querySelector('[data-kanban-menu-trigger]').click();
       await wait(() => dropdown.getAttribute('data-kanban-menu-positioning') !== 'true');
       const rows = Array.from(dropdown.querySelector('[data-kanban-menu-content]').children);
-      const submenuRows = rows.filter(row => row.querySelector(':scope > [data-task-card-submenu-panel]'));
+      const submenuRows = rows.filter(row => row.querySelector(':scope > [data-menu-submenu-panel]'));
       for (const submenu of submenuRows) {
         for (const ordinary of [select(name).parentElement, dropdown.querySelector('[data-kanban-action="delete"]').parentElement]) {
           submenu.dispatchEvent(new MouseEvent('mouseenter'));
-          check(document.querySelector('[data-task-card-submenu-portaled="true"]'), name + ' submenu opens before ordinary row hover');
+          check(document.querySelector('[data-menu-submenu-portaled="true"]'), name + ' submenu opens before ordinary row hover');
           ordinary.dispatchEvent(new MouseEvent('mouseenter'));
           ordinary.dispatchEvent(new MouseEvent('mouseleave'));
-          check(!document.querySelector('[data-task-card-submenu-portaled="true"]'), name + ' ordinary row hover closes submenu');
+          check(!document.querySelector('[data-menu-submenu-portaled="true"]'), name + ' ordinary row hover closes submenu');
           check(dropdown.getAttribute('data-kanban-menu-open') === 'true', name + ' ordinary row hover keeps main menu open');
         }
       }
       submenuRows[0].dispatchEvent(new MouseEvent('mouseenter'));
-      const filterPanel = document.querySelector('[data-task-card-submenu-portaled="true"]');
+      const filterPanel = document.querySelector('[data-menu-submenu-portaled="true"]');
       filterPanel.querySelector('li').dispatchEvent(new MouseEvent('mouseenter'));
-      check(document.querySelectorAll('[data-task-card-submenu-portaled="true"]').length === 2, name + ' nested filter opens');
-      const choicesPanel = Array.from(document.querySelectorAll('[data-task-card-submenu-portaled="true"]')).find(panel => panel !== filterPanel);
+      check(document.querySelectorAll('[data-menu-submenu-portaled="true"]').length === 2, name + ' nested filter opens');
+      const choicesPanel = Array.from(document.querySelectorAll('[data-menu-submenu-portaled="true"]')).find(panel => panel !== filterPanel);
       choicesPanel.querySelector('li').dispatchEvent(new MouseEvent('mouseenter'));
       check(choicesPanel.isConnected && filterPanel.isConnected, name + ' hovering a choice preserves its menu and ancestors');
       const dynamicRow = document.createElement('li');
@@ -91,16 +91,16 @@ window.addEventListener('DOMContentLoaded', async function() {
       check(filterPanel.isConnected && !choicesPanel.isConnected, name + ' unannotated nested row closes only deeper menus');
       filterPanel.querySelector('li').dispatchEvent(new MouseEvent('mouseenter'));
       dynamicRow.querySelector('button').focus();
-      check(filterPanel.isConnected && document.querySelectorAll('[data-task-card-submenu-portaled="true"]').length === 1, name + ' nested row focus preserves parent menu');
+      check(filterPanel.isConnected && document.querySelectorAll('[data-menu-submenu-portaled="true"]').length === 1, name + ' nested row focus preserves parent menu');
       const mainRow = document.createElement('li');
       mainRow.innerHTML = '<button type="button">Dynamic main action</button>';
       dropdown.querySelector('[data-kanban-menu-content]').appendChild(mainRow);
       mainRow.dispatchEvent(new MouseEvent('mouseenter'));
-      check(!document.querySelector('[data-task-card-submenu-portaled="true"]'), name + ' unannotated main row closes submenus');
+      check(!document.querySelector('[data-menu-submenu-portaled="true"]'), name + ' unannotated main row closes submenus');
       mainRow.remove();
       submenuRows[0].dispatchEvent(new MouseEvent('mouseenter'));
       select(name).parentElement.dispatchEvent(new MouseEvent('mouseenter'));
-      check(!document.querySelector('[data-task-card-submenu-portaled="true"]'), name + ' ordinary row closes nested filters');
+      check(!document.querySelector('[data-menu-submenu-portaled="true"]'), name + ' ordinary row closes nested filters');
       window.closeKanbanMenu(null, false);
     }
     menu.querySelector('[data-kanban-menu-trigger]').click();
@@ -108,7 +108,7 @@ window.addEventListener('DOMContentLoaded', async function() {
   }
   const sort = Array.from(menu.querySelectorAll('button')).find(b => b.textContent.includes('Sort by'));
   sort.focus();
-  const panel = document.querySelector('[data-task-card-submenu-portaled="true"]');
+  const panel = document.querySelector('[data-menu-submenu-portaled="true"]');
   check(panel, 'Sort submenu opens');
   check(Array.from(panel.querySelectorAll('button[hx-post]')).every(b => b.querySelector('[data-filter-check]') && !b.classList.contains('active')), 'sort uses checkmarks without persistent highlights');
   check(panel.querySelector('button[aria-pressed="true"] [data-filter-check]').textContent.trim() === '✓', 'current sort shows the same checkmark as filters');
@@ -117,7 +117,7 @@ window.addEventListener('DOMContentLoaded', async function() {
   panel.querySelector('button[hx-post]').click();
   await wait(() => sortRequested);
   await new Promise(r=>setTimeout(r,100));
-  check(!document.querySelector('[data-kanban-menu-open="true"], [data-task-card-submenu-portaled="true"]'), 'sort closes menu after refresh');
+  check(!document.querySelector('[data-kanban-menu-open="true"], [data-menu-submenu-portaled="true"]'), 'sort closes menu after refresh');
   col('completed').querySelector('[data-kanban-menu-trigger]').click();
   select('completed').click();
   check(!document.querySelector('[data-kanban-menu-open="true"]'), 'Select all closes menu');
@@ -133,7 +133,7 @@ window.addEventListener('DOMContentLoaded', async function() {
   currentMenu.querySelector('[data-kanban-menu-trigger]').click();
   await wait(() => currentMenu.getAttribute('data-kanban-menu-positioning') !== 'true');
   Array.from(currentMenu.querySelectorAll('button')).find(b => b.textContent.trim().startsWith('Filter')).focus();
-  const filterPanel = document.querySelector('[data-task-card-submenu-portaled="true"]');
+  const filterPanel = document.querySelector('[data-menu-submenu-portaled="true"]');
   check(!filterPanel.querySelector('details'), 'filters must not use accordions');
   if (window.innerWidth < 640) {
     await new Promise(resolve => requestAnimationFrame(resolve));
@@ -142,7 +142,7 @@ window.addEventListener('DOMContentLoaded', async function() {
   }
   const outcome = Array.from(filterPanel.querySelectorAll('button')).find(b => b.textContent.trim() === 'Outcome›');
   outcome.focus();
-  const choices = Array.from(document.querySelectorAll('[data-task-card-submenu-portaled="true"]')).find(p => p !== filterPanel);
+  const choices = Array.from(document.querySelectorAll('[data-menu-submenu-portaled="true"]')).find(p => p !== filterPanel);
   check(choices && choices.getClientRects().length, 'Outcome opens a nested submenu');
   if (window.innerWidth >= 640) {
     const parentRect = filterPanel.getBoundingClientRect(), choicesRect = choices.getBoundingClientRect();
@@ -151,7 +151,7 @@ window.addEventListener('DOMContentLoaded', async function() {
     mergeTrigger.dispatchEvent(new MouseEvent('mouseenter'));
     mergeTrigger.focus();
     check(!choices.isConnected, 'switching filters closes sibling choices');
-    const mergePanel = Array.from(document.querySelectorAll('[data-task-card-submenu-portaled="true"]')).find(p => p !== filterPanel);
+    const mergePanel = Array.from(document.querySelectorAll('[data-menu-submenu-portaled="true"]')).find(p => p !== filterPanel);
     const firstChoice = mergePanel.querySelector('button'); firstChoice.focus();
     firstChoice.dispatchEvent(new KeyboardEvent('keydown', {key:'ArrowLeft', bubbles:true}));
     check(!mergePanel.isConnected && document.activeElement === mergeTrigger, 'ArrowLeft returns to parent');
@@ -168,11 +168,11 @@ window.addEventListener('DOMContentLoaded', async function() {
     outcome.click();
     outcome.dispatchEvent(new KeyboardEvent('keydown', {key:'ArrowRight', bubbles:true}));
   }
-  const currentChoices = Array.from(document.querySelectorAll('[data-task-card-submenu-portaled="true"]')).find(p => p !== filterPanel);
+  const currentChoices = Array.from(document.querySelectorAll('[data-menu-submenu-portaled="true"]')).find(p => p !== filterPanel);
   currentChoices.querySelector('[data-kanban-filter="status"][data-value="completed"]').click();
   check(filter('status','completed').querySelector('[data-filter-check]').textContent === '✓', 'selected filter shows a check');
   check(!filter('status','completed').classList.contains('active'), 'selected filter has no persistent highlight');
-  check(!document.querySelector('[data-kanban-menu-open="true"], [data-task-card-submenu-portaled="true"]'), 'filter choice closes entire menu');
+  check(!document.querySelector('[data-kanban-menu-open="true"], [data-menu-submenu-portaled="true"]'), 'filter choice closes entire menu');
   window.closeKanbanMenu(null, false);
   filter('merge','unmerged').click();
   check(window.kanbanSelection.size === 0, 'filter clears selection');
