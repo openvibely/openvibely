@@ -569,21 +569,21 @@ for _, agent := range modelOptions {
 									</div>
 </div>
 					<div id="oauth_connection_field" class="form-control mb-3 hidden">
-						<label class="label"><span class="label-text">OAuth Account</span></label>
+						<div class="model-oauth-account-heading">
+                            <label for="model_oauth_connection_id" class="label"><span class="label-text">OAuth account</span></label>
+                            <span id="model_oauth_connection_badge" class="badge badge-sm badge-error" role="status" aria-live="polite">Not connected</span>
+                        </div>
+                        <div id="model_oauth_connection_action" class="hidden">
+                        <div class="model-oauth-account-row">
 						<select name="oauth_connection_id" id="model_oauth_connection_id" class="select select-bordered" onchange="resetModelOAuthSetup(); updateOAuthConnectionAction()">
 							<option value="new">Connect another account</option>
 							for _, connection := range oauthConnections {
 								<option value={ connection.ID } data-provider={ string(connection.Provider) } data-status={ oauthConnectionStatusText(connection) }>{ oauthConnectionAccountLabel(connection) }</option>
 							}
 						</select>
-						<label class="label"><span class="label-text-alt opacity-70">Models using the same account share refresh and reconnect state.</span></label>
-					</div>
-					<div id="model_oauth_connection_action" class="hidden mb-3 rounded-box border border-base-300 p-3">
-						<div class="flex flex-wrap items-center justify-between gap-2">
-							<span id="model_oauth_connection_status" class="text-sm" role="status" aria-live="polite"></span>
-                            <button type="button" id="model_oauth_connect_action" data-desktop={ fmt.Sprintf("%t", desktopMode) } class="btn btn-sm btn-outline" onclick="connectModelOAuth(this)">Connect OAuth</button>
-						</div>
-                        <p class="text-sm opacity-70">Connect your account, then Create or Save to keep this model.</p>
+                            <button type="button" id="model_oauth_connect_action" data-desktop={ fmt.Sprintf("%t", desktopMode) } class="btn btn-outline" onclick="connectModelOAuth(this)">Connect OAuth</button>
+                        </div>
+                        <p id="model_oauth_connection_status" class="text-sm opacity-70" role="status" aria-live="polite"></p>
                         <button id="model_oauth_stop_waiting" type="button" class="btn btn-sm hidden" onclick="resetModelOAuthSetup(); updateOAuthConnectionAction()">Cancel sign-in</button>
                         if showOAuthLocalhostFallback() {
                             <label for="model_oauth_callback_url" class="label"><span class="label-text">If the localhost page fails, paste its full URL here.</span></label>
@@ -591,6 +591,7 @@ for _, agent := range modelOptions {
                             <button type="button" class="btn btn-sm mt-2" onclick="submitOAuthManualComplete('model_oauth_callback_url')">Complete OAuth</button>
                         }
 					</div>
+                        </div>
 					<!-- Connection method selector for OpenAI OAuth (CLI option removed) -->
 					<div id="openai_connection_method_field" class="form-control mb-3 hidden">
 						<label class="label"><span class="label-text">Connection Method</span></label>
@@ -1010,6 +1011,21 @@ for _, agent := range modelOptions {
             @media (max-width: 640px) {
                 #new_model_modal .model-settings-grid { grid-template-columns: minmax(0, 1fr); }
             }
+            #new_model_modal .model-oauth-account-heading { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; }
+            #new_model_modal #model_oauth_connection_status:empty { display: none; }
+            #new_model_modal .model-oauth-account-row {
+                display: grid;
+                grid-template-columns: minmax(0, 1fr) auto;
+                gap: 0.5rem;
+                align-items: center;
+            }
+            @media (max-width: 640px) {
+                #new_model_modal .model-oauth-account-row { grid-template-columns: minmax(0, 1fr); }
+                #new_model_modal #model_oauth_connect_action { justify-self: start; }
+            }
+            #new_model_modal input[type="number"] { -moz-appearance: textfield; appearance: textfield; }
+            #new_model_modal input[type="number"]::-webkit-inner-spin-button,
+            #new_model_modal input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
             #new_model_modal .model-numeric-input {
                 width: 100%;
                 max-width: 100%;
@@ -2599,14 +2615,24 @@ for _, agent := range modelOptions {
 						setReasoningEffortOptions(provider, activeModel, selectedReasoningEffort);						updateTemperatureField(provider, activeModel);
 					}
 
+                function updateModelOAuthBadge(status) {
+                    var selected = document.getElementById('model_oauth_connection_id').selectedOptions[0];
+                    status = status || (selected && selected.dataset.status) || 'Not connected';
+                    var badge = document.getElementById('model_oauth_connection_badge');
+                    badge.textContent = status;
+                    badge.className = 'badge badge-sm ' + (status === 'Connected' ? 'badge-success' :
+                        status === 'Token expired' ? 'badge-warning' : status === 'Connecting' ? 'badge-ghost' : 'badge-error');
+                }
+
                 function updateOAuthConnectionAction() {
                     var provider = canonicalProvider(document.getElementById('model_provider').value);
                     var builtInOAuth = (provider === 'anthropic' && document.getElementById('model_anthropic_auth_type').value === 'oauth') ||
                         (provider === 'openai' && document.getElementById('model_openai_auth_type').value === 'oauth');
                     document.getElementById('model_oauth_connection_action').classList.toggle('hidden', !builtInOAuth);
                     var selected = document.getElementById('model_oauth_connection_id').selectedOptions[0];
-                    document.getElementById('model_oauth_connection_status').textContent = selected && selected.dataset.status || 'Not connected';
-                    document.getElementById('model_oauth_connect_action').textContent = selected && selected.dataset.status === 'Connected' ? 'Reconnect OAuth' : 'Connect OAuth';
+                    document.getElementById('model_oauth_connection_status').textContent = '';
+                    updateModelOAuthBadge();
+                    document.getElementById('model_oauth_connect_action').textContent = selected && selected.dataset.status === 'Connected' ? 'Reconnect' : 'Connect OAuth';
                 }
 
                 function finishModelOAuthModal() {
@@ -2634,6 +2660,7 @@ for _, agent := range modelOptions {
                     var unlock = function() {locked.forEach(function(el) {el.disabled = false;});};
                     modelOAuthUnlock = unlock;
                     status.textContent = 'Opening sign-in…';
+                    updateModelOAuthBadge('Connecting');
                     async function request(url, options) {
                         var response = await fetch(modelMutationURL(url), options);
                         var data = await response.json();
@@ -2660,8 +2687,9 @@ for _, agent := range modelOptions {
                             var state = await request('/models/oauth/setup/status', {headers:{'X-Model-OAuth-Setup':flow.session_id}});
                             if (generation !== modelOAuthSetupGeneration || !modal.open) return;
                             if (state.connected) {
-                                status.textContent = 'Connected. Click Create or Save to keep this model.';
-                                button.textContent = 'Reconnect OAuth';
+                                updateModelOAuthBadge('Connected');
+                                status.textContent = 'Connected. Save to apply.';
+                                button.textContent = 'Reconnect';
                                 return;
                             }
                             if (Date.now() >= deadline) throw Error('Sign-in timed out. Connect OAuth again to retry.');
@@ -2670,6 +2698,7 @@ for _, agent := range modelOptions {
                     } catch (error) {
                         if (popup) popup.close();
                         if (generation === modelOAuthSetupGeneration) {
+                            updateModelOAuthBadge();
                             status.textContent = error.message;
                             showModelFormError(error.message);
                         }

@@ -549,12 +549,15 @@ func TestBrowserFunctional_BuiltInOAuthInsideModelModal(t *testing.T) {
   openNewModelModal();f('model_name').value='Modal model';
   f('model_anthropic_auth_type').value='oauth';toggleAnthropicAuthFields();
   assert(!f('model_oauth_connection_action').classList.contains('hidden'),'new model has connect action');
+  assert(f('model_oauth_connection_badge').textContent==='Not connected','initial account badge');
   var flow=connectModelOAuth(f('model_oauth_connect_action'));await wait(50);
+  assert(f('model_oauth_connection_badge').textContent==='Connecting','sign-in badge');
   assert(f('new_model_modal').open && !f('model_config_id').value,'connection must not save model');
   assert(f('model_submit_btn').disabled && !f('model_oauth_callback_url').disabled,'callback remains usable');
   f('model_oauth_callback_url').value='http://localhost:1455/auth/callback?code=test&state=test';
   submitOAuthManualComplete('model_oauth_callback_url');await flow;
   assert(f('model_oauth_connection_status').textContent.startsWith('Connected.'),'connected in modal');
+  assert(f('model_oauth_connection_badge').textContent==='Connected' && f('model_oauth_connection_badge').classList.contains('badge-success'),'connected badge matches model card');
   assert(f('model_submit_btn').textContent==='Create' && !f('model_submit_btn').disabled,'Create remains explicit');
   assert(new FormData(f('model_form')).get('oauth_setup_session')==='draft','Create attaches draft credentials');
   assert(!requests.some(function(r){return r.url==='/models';}),'sign-in never persists model');
@@ -568,6 +571,7 @@ func TestBrowserFunctional_BuiltInOAuthInsideModelModal(t *testing.T) {
   assert(setup.options.body.get('provider')==='openai','OpenAI setup sends correct provider');
   f('model_oauth_stop_waiting').click();await cancelled;
   assert(!f('model_oauth_setup_session').value && !f('model_submit_btn').disabled,'cancel discards authorization and unlocks draft');
+  assert(f('model_oauth_connection_badge').textContent==='Not connected','cancel resets badge');
   f('reconnect-result').setAttribute('data-test-result','pass');
  }catch(e){f('reconnect-result').setAttribute('data-test-result','fail');f('reconnect-result').setAttribute('data-test-error',String(e.stack));}
  })();</script>`
