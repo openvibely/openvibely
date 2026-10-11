@@ -65,7 +65,7 @@ func TestActiveColumnContent_GroupsOnlyRunningTasksInProgress(t *testing.T) {
 		t.Fatalf("render active column: %v", err)
 	}
 	html := buf.String()
-	inProgressStart := strings.Index(html, ">In Progress</h4>")
+	inProgressStart := strings.Index(html, `data-status="running"`)
 	queuedStart := strings.Index(html, ">Queued</h4>")
 	if inProgressStart < 0 || queuedStart < 0 || queuedStart <= inProgressStart {
 		t.Fatalf("active column is missing ordered In Progress and Queued sections")
