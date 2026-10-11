@@ -20,7 +20,7 @@ import (
 // Model-menu interactions do not trigger transcript reloads. Exercise them
 // separately from explicit HTMX swaps, which previously dropped question cards.
 func TestChatInputRequestBrowserPreservesProgressAcrossTranscriptSwaps(t *testing.T) {
-	for _, resolution := range []string{"event", "submit", "swap", "swap-completed"} {
+	for _, resolution := range []string{"event", "submit", "swap", "swap-completed", "next-question"} {
 		t.Run(resolution, func(t *testing.T) { runChatInputRequestProgressBrowser(t, resolution) })
 	}
 }
@@ -173,17 +173,49 @@ func runChatInputRequestProgressBrowser(t *testing.T, resolution string) {
 
 			// Capture a real pending snapshot, but delay its delivery until resolution.
 			var id = originalCard.getAttribute('data-chat-input-request-id');
+			var resolution = %q;
+			if (resolution === 'next-question') {
+				var releaseAnswer, releaseQuestion, questionFetches = 0;
+				window.fetch = function(url) {
+					var args = arguments;
+					if (String(url).endsWith('/answer')) {
+						return realFetch.apply(this, args).then(function(response) {
+							return new Promise(function(resolve) { releaseAnswer = function() { resolve(response); }; });
+						});
+					}
+					if (String(url).indexOf('/chat/input-requests?') !== -1 && ++questionFetches === 1) {
+						return realFetch.apply(this, args).then(function(response) {
+							return new Promise(function(resolve) { releaseQuestion = function() { resolve(response); }; });
+						});
+					}
+					return realFetch.apply(this, args);
+				};
+				originalCard.querySelector('[data-chat-input-nav="recommended"]').click();
+				await waitFor(function() { return releaseAnswer; }, 'answer response was not captured');
+				var nextEvent = await (await realFetch('/next-question')).json();
+				window.dispatchEvent(new CustomEvent('sse-chat-live-event', {detail:nextEvent}));
+				await waitFor(function() { return releaseQuestion; }, 'next question fetch was not captured');
+				releaseAnswer();
+				await waitFor(function() { return !cardPresent(); }, 'previous answer did not finish');
+				releaseQuestion();
+				var nextCard = await waitFor(function() { return document.getElementById('chat-input-request-' + nextEvent.input_request.id); }, 'invalidated fetch left the next question invisible');
+				if (questionFetches !== 2) fail('expected one retry, got ' + questionFetches);
+				window.fetch = realFetch;
+				nextCard.querySelector('[data-chat-input-nav="recommended"]').click();
+				await waitFor(function() { return !nextCard.isConnected; }, 'retried question was not answerable');
+				await report('pass', 'next question survives previous answer completion');
+				return;
+			}
 			var staleHTML = await (await realFetch('/chat/input-requests?project_id=' + encodeURIComponent(pid))).text();
 			var releaseSnapshot;
 			window.fetch = function(url) {
-				if (String(url).indexOf('/chat/input-requests?') !== -1) {
+				if (String(url).indexOf('/chat/input-requests?') !== -1 && !releaseSnapshot) {
 					return new Promise(function(resolve) { releaseSnapshot = function() { resolve(new Response(staleHTML)); }; });
 				}
 				return realFetch.apply(this, arguments);
 			};
 			var delayedRefresh = window.refreshChatInputRequests();
 			await waitFor(function() { return releaseSnapshot; }, 'refresh did not start');
-			var resolution = %q;
 			var swapTarget = resolution === 'submit' ? '#chat-page-root' : '#chat-messages';
 			if (resolution === 'swap-completed') {
 				if (!(await realFetch('/complete-execution')).ok) fail('could not complete execution fixture');
@@ -226,6 +258,18 @@ func runChatInputRequestProgressBrowser(t *testing.T, resolution string) {
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if static.ServeAsset(w, r) {
+			return
+		}
+		if r.URL.Path == "/next-question" {
+			next, err := tc.handler.chatInputRequests.create(project.ID, runningExec.ID, []chatInputRequestQuestion{{
+				ID: "next", Question: "Continue with the next step?", Options: []chatInputRequestOption{{Label: "Yes", Description: "Continue"}, {Label: "No", Description: "Stop"}},
+			}})
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{"type": "chat_user_input_requested", "project_id": project.ID, "input_request": chatInputRequestForEvent(next)})
 			return
 		}
 		if r.URL.Path == "/complete-execution" {

@@ -1551,7 +1551,13 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 								if (!resp.ok) throw new Error('HTTP ' + resp.status);
 								return resp.text();
 							}).then(function(html) {
-								if (document.getElementById('chat-page-root') !== root || revision !== (window._chatInputRevision || 0)) return;
+								if (document.getElementById('chat-page-root') !== root) return;
+								if (revision !== (window._chatInputRevision || 0)) {
+									// A previous answer may finish after the next question arrives.
+									// Discard this snapshot, but fetch current questions when it settles.
+									chatInputRefreshQueued = true;
+									return;
+								}
 								var detached = document.createElement('template');
 								detached.innerHTML = html;
 								var activeRequestIDs = {};
