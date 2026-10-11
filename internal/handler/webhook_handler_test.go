@@ -13,6 +13,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
@@ -255,6 +256,80 @@ func TestWebhookInbound_CreatesOneActiveTask(t *testing.T) {
 	}
 	if task.Priority != 2 {
 		t.Errorf("task priority = %d, want 2", task.Priority)
+	}
+}
+
+func TestBuildWebhookTaskTitleTruncatesAtUTF8Boundary(t *testing.T) {
+	tests := []struct {
+		name    string
+		summary string
+		want    string
+	}{
+		{
+			name:    "three-byte rune at limit",
+			summary: strings.Repeat("界", 27),
+			want:    strings.Repeat("界", 26) + "...",
+		},
+		{
+			name:    "four-byte rune crosses limit",
+			summary: strings.Repeat("a", 78) + "🙂tail",
+			want:    strings.Repeat("a", 78) + "...",
+		},
+		{
+			name:    "long ASCII summary",
+			summary: strings.Repeat("a", 81),
+			want:    strings.Repeat("a", 80) + "...",
+		},
+		{
+			name:    "short multi-byte summary",
+			summary: "你好",
+			want:    "你好",
+		},
+	}
+
+	endpoint := &models.WebhookEndpoint{Name: "Test"}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := buildWebhookTaskTitle(endpoint, "", tt.summary)
+			want := "Test: " + tt.want
+			if got != want {
+				t.Fatalf("buildWebhookTaskTitle() = %q, want %q", got, want)
+			}
+			if !utf8.ValidString(got) {
+				t.Fatalf("buildWebhookTaskTitle() returned invalid UTF-8: %q", got)
+			}
+		})
+	}
+}
+
+func TestWebhookInbound_LongUnicodeSummaryPreservesTaskTitleUTF8(t *testing.T) {
+	wtc := newWebhookTestContext(t)
+	project := wtc.CreateProject().WithName("WH Unicode Summary").Build()
+	endpoint := wtc.createEndpoint(t, project.ID, "Unicode", true)
+
+	payload, err := json.Marshal(map[string]string{"summary": strings.Repeat("界", 27)})
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+	rec := wtc.jsonRequest("POST", "/webhooks/inbound/"+endpoint.PathToken, string(payload),
+		map[string]string{"X-Webhook-Secret": endpoint.Secret})
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d; body=%s", rec.Code, rec.Body.String())
+	}
+
+	tasks, err := wtc.taskRepo.ListByProject(context.Background(), project.ID, "")
+	if err != nil {
+		t.Fatalf("ListByProject: %v", err)
+	}
+	if len(tasks) != 1 {
+		t.Fatalf("expected exactly one task, got %d", len(tasks))
+	}
+	want := "Unicode: " + strings.Repeat("界", 26) + "..."
+	if tasks[0].Title != want {
+		t.Fatalf("task title = %q, want %q", tasks[0].Title, want)
+	}
+	if !utf8.ValidString(tasks[0].Title) {
+		t.Fatalf("task title contains invalid UTF-8: %q", tasks[0].Title)
 	}
 }
 

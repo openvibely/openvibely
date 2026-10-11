@@ -8,6 +8,9 @@ import (
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -668,5 +671,66 @@ func TestCompletionsTurnResult_Structure(t *testing.T) {
 
 	if result.text != "test" {
 		t.Errorf("expected text=test, got %s", result.text)
+	}
+}
+
+func TestSendCompletions_ImageAttachment(t *testing.T) {
+	for _, fromFile := range []bool{false, true} {
+		name := "bytes"
+		if fromFile {
+			name = "file"
+		}
+		t.Run(name, func(t *testing.T) {
+			att := &FileAttachment{FileName: "test.png", MediaType: "image/png", Data: []byte("fake-png-data")}
+			if fromFile {
+				att.FilePath = filepath.Join(t.TempDir(), att.FileName)
+				if err := os.WriteFile(att.FilePath, att.Data, 0600); err != nil {
+					t.Fatal(err)
+				}
+				att.Data = nil
+			}
+			client := NewWithCompatibleAPIKey("test-key", "https://compatible.test/v1", "", "")
+			calls := 0
+			client.httpClient = &http.Client{Transport: completionsRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+				calls++
+				var body struct {
+					Messages []struct {
+						Role    string
+						Content []map[string]any
+					}
+				}
+				if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+					t.Fatal(err)
+				}
+				want := []map[string]any{
+					{"type": "text", "text": "describe screenshot"},
+					{"type": "image_url", "image_url": map[string]any{"url": "data:image/png;base64,ZmFrZS1wbmctZGF0YQ=="}},
+				}
+				if len(body.Messages) != 1 || body.Messages[0].Role != "user" || !reflect.DeepEqual(body.Messages[0].Content, want) {
+					t.Fatalf("unexpected messages: %#v", body.Messages)
+				}
+				return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader("data: [DONE]\n\n"))}, nil
+			})}
+			_, err := client.SendCompletions(context.Background(), "describe screenshot", &CompletionsOptions{DisableTools: true, Attachments: []*FileAttachment{att}})
+			if err != nil || calls != 1 {
+				t.Fatalf("SendCompletions error = %v, requests = %d; want nil, 1", err, calls)
+			}
+		})
+	}
+}
+
+func TestSendCompletions_ImageLoadFailure(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "missing.png")
+	client := NewWithCompatibleAPIKey("test-key", "https://compatible.test/v1", "", "")
+	client.httpClient = &http.Client{Transport: completionsRoundTripFunc(func(*http.Request) (*http.Response, error) {
+		t.Fatal("must not send a request after attachment loading fails")
+		return nil, nil
+	})}
+	resp, err := client.SendCompletions(context.Background(), "describe screenshot", &CompletionsOptions{
+		DisableTools: true,
+		Attachments:  []*FileAttachment{{FileName: "missing.png", MediaType: "image/png", FilePath: path}},
+	})
+	if resp != nil || !errors.Is(err, os.ErrNotExist) || !strings.HasPrefix(err.Error(), "load attachment missing.png: read attachment "+path+":") {
+		t.Fatalf("SendCompletions = %v, %v; want nil response and wrapped read error", resp, err)
 	}
 }
