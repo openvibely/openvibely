@@ -59,7 +59,6 @@ func testKanbanHeaderSearch(t *testing.T, width int) {
 		const (
 			search = `document.querySelector('[data-kanban-search]')`
 			input  = `document.querySelector('[data-kanban-search-input]')`
-			toggle = `document.querySelector('[data-kanban-search-toggle]')`
 		)
 		visible := `Array.from(document.querySelectorAll('#kanban-board .card[data-task-id]')).filter(c => !c.hidden).map(c => c.dataset.taskId).sort().join(',')`
 		count := func(col string) string {
@@ -72,49 +71,13 @@ func testKanbanHeaderSearch(t *testing.T, width int) {
 		queued := `getComputedStyle(document.querySelector('.kanban-queue')).display !== 'none'`
 
 		check("search sits next to Add Task", search+`.nextElementSibling.getAttribute('aria-label') === 'Add Task'`)
-		check("collapsed by default", search+`.dataset.open === 'false' && `+width(search)+` <= 33`)
-		check("Active count has refresh hook", count("active")+` === '2'`)
-		addTask := `document.querySelector('[aria-label="Add Task"]')`
-		park := func() {
-			var px, py int
-			if _, err := fmt.Sscan(b.evaluate(`(() => { for (let y = innerHeight - 5; y > 0; y -= 20) for (let x = 5; x < innerWidth; x += 20) { const el = document.elementFromPoint(x, y); if (el && !el.closest('button, a, input, [data-kanban-search], .sidebar-toggle-btn')) return x + ' ' + y } return '' })()`), &px, &py); err != nil {
-				t.Fatalf("no empty spot to park the pointer: %v", err)
-			}
-			b.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseMoved", "x": px, "y": py}, nil)
+		check("header remains 48px tall", `document.querySelector('[data-page-header]').getBoundingClientRect().height === 48`)
+		check("search is 38px tall with 5px above and below", `(() => { const h = document.querySelector('[data-page-header]').getBoundingClientRect(), r = `+search+`.getBoundingClientRect(); return r.height === 38 && r.top - h.top === 5 && h.bottom - r.bottom === 5 })()`)
+		check("search stays between title and Add Task", search+`.getBoundingClientRect().left >= document.querySelector('[data-page-header] h2').getBoundingClientRect().right && `+search+`.nextElementSibling.getBoundingClientRect().right <= innerWidth`)
+		if b.evaluate(`String(window.innerWidth >= 640)`) == "true" {
+			check("desktop width stays 256px", width(search)+` === 256`)
 		}
-		park()
-		b.waitFor("buttons at rest", `getComputedStyle(`+toggle+`).backgroundColor === "rgba(0, 0, 0, 0)" && getComputedStyle(`+addTask+`).backgroundColor === "rgba(0, 0, 0, 0)" ? 'rest' : 'hover'`, "rest")
-		for _, btn := range []string{toggle, addTask} {
-			check("action button matches panel toggle at full strength", `(() => { const s = getComputedStyle(`+btn+`), r = `+btn+`.getBoundingClientRect(); return `+btn+`.classList.contains('sidebar-toggle-btn') && r.width === 32 && r.height === 32 && s.borderTopLeftRadius === '8px' && s.opacity === "1" && `+btn+`.querySelector('svg').getBoundingClientRect().width === 20 })()`)
-		}
-		for _, sel := range []string{`[data-kanban-search-toggle]`, `[aria-label="Add Task"]`} {
-			b.evaluate(`(window.__r = document.querySelector('` + sel + `').getBoundingClientRect(), "ok")`)
-			var x, y int
-			fmt.Sscan(b.evaluate(`String(Math.round(window.__r.left + 16))`), &x)
-			fmt.Sscan(b.evaluate(`String(Math.round(window.__r.top + 16))`), &y)
-			b.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseMoved", "x": x, "y": y}, nil)
-			b.waitFor("hover shows grey", `(() => { const s = getComputedStyle(document.querySelector('`+sel+`')); return s.opacity === '1' && s.backgroundColor !== 'rgba(0, 0, 0, 0)' ? 'hover' : 'rest' })()`, "hover")
-			park()
-		}
-		check("hover styles only on mouse devices", `(() => { const hovers = []; for (const sh of document.styleSheets) { let rules; try { rules = sh.cssRules } catch (e) { continue } const walk = (rs, media) => { for (const r of rs) { if (r.cssRules && r.media) walk(r.cssRules, r.media.mediaText); else if (r.selectorText && /(sidebar-toggle-btn|kanban-search-clear):hover/.test(r.selectorText) && !/opened|data-open/.test(r.selectorText)) hovers.push(media) } }; walk(rules, "") } return hovers.length >= 2 && hovers.every(m => m.includes("hover: hover")) })()`)
-		check("collapsed box has rounded corners", `getComputedStyle(`+search+`).borderTopLeftRadius === '8px'`)
-		check("search and Add Task 8px apart", `Math.round(`+addTask+`.getBoundingClientRect().left - `+search+`.getBoundingClientRect().right) === 8`)
-
-		b.evaluate(`(window.__iconColor = getComputedStyle(` + toggle + `).color, 'ok')`)
-		b.click(`[data-kanban-search-toggle]`)
-		check("click opens and focuses input", search+`.dataset.open === 'true' && document.activeElement === `+input)
-		check("open box keeps rounded corners", `getComputedStyle(`+search+`).borderTopLeftRadius === '8px'`)
-		check("clear button hidden while empty", `document.querySelector('[data-kanban-search-clear]').getClientRects().length === 0`)
-		b.waitFor("open animation", `String(`+width(search)+` > 100)`, "true")
-		check("open box stays inside header", search+`.getBoundingClientRect().left >= document.querySelector('[data-page-header] h2').getBoundingClientRect().right`)
-		b.waitFor("open animation settles", `String(`+search+`.getAnimations().length === 0)`, "true")
-		if b.evaluate(`String(window.innerWidth < 640)`) == "true" {
-			check("phone input uses 16px text so iOS does not zoom", `getComputedStyle(`+input+`).fontSize === '16px'`)
-			check("phone box fills free header space", `document.querySelector('[data-page-header] h2').getBoundingClientRect().right + 12 + 1 >= `+search+`.getBoundingClientRect().left`)
-		} else {
-			check("desktop box is 16rem", width(search)+` === 256`)
-		}
-		check("Add Task stays on screen", search+`.nextElementSibling.getBoundingClientRect().right <= window.innerWidth`)
+		b.click(`[data-kanban-search-input]`)
 
 		b.typeText("oauth")
 		b.waitFor("debounced filter", visible, "alpha,gamma")
@@ -127,13 +90,7 @@ func testKanbanHeaderSearch(t *testing.T, width int) {
 		check("Backlog has matches", `!(`+noResults("backlog")+`)`)
 
 		b.click(`[data-page-header] h2`)
-		check("click elsewhere keeps box open with text", search+`.dataset.open === 'true' && `+input+`.value === 'oauth' && `+visible+` === 'alpha,gamma'`)
-		check("icon keeps its colour while a search is applied", `getComputedStyle(`+toggle+`).color === window.__iconColor`)
-		b.click(`[data-kanban-search-toggle]`)
-		check("icon click keeps box open with text and focuses input", search+`.dataset.open === 'true' && `+toggle+`.getAttribute('aria-expanded') === 'true' && document.activeElement === `+input)
-		// iOS Safari keeps focus on the input when blank space is tapped; simulate a press that does not move focus.
-		b.evaluate(`(document.querySelector('[data-page-header] h2').dispatchEvent(new PointerEvent('pointerdown', {bubbles:true})), 'ok')`)
-		check("outside press keeps box open with text", search+`.dataset.open === 'true'`)
+		check("search stays visible after blur", input+`.value === 'oauth' && `+visible+` === 'alpha,gamma'`)
 
 		clearBtn := `document.querySelector('[data-kanban-search-clear]')`
 		check("clear button visible with text", clearBtn+`.getClientRects().length > 0`)
@@ -143,21 +100,8 @@ func testKanbanHeaderSearch(t *testing.T, width int) {
 		check("clear button empties search and refilters at once", input+`.value === '' && `+visible+` === 'alpha,beta,delta,epsilon,gamma'`)
 		check("clear button keeps selection", `window.kanbanSelection.has('alpha')`)
 		b.evaluate(`(window.kanbanClearSelection(), window.kanbanRefresh(), 'ok')`)
-		check("clear button keeps box open and focuses input", search+`.dataset.open === 'true' && document.activeElement === `+input)
-		check("clear button hidden when empty", clearBtn+`.getClientRects().length === 0`)
-		b.click(`[data-page-header] h2`)
-		check("real click elsewhere collapses empty box", search+`.dataset.open === 'false'`)
-		b.waitFor("close animation", `String(`+width(search)+` <= 33)`, "true")
-		b.click(`[data-kanban-search-toggle]`)
-		check("reopens", search+`.dataset.open === 'true' && document.activeElement === `+input)
-		b.click(`[data-kanban-search-toggle]`)
-		check("icon click collapses empty box", search+`.dataset.open === 'false' && `+toggle+`.getAttribute('aria-expanded') === 'false' && document.activeElement === `+toggle)
-		b.waitFor("icon collapse animation", `String(`+width(search)+` <= 33)`, "true")
-		b.click(`[data-kanban-search-toggle]`)
-		b.evaluate(`(document.querySelector('[data-page-header] h2').dispatchEvent(new PointerEvent('pointerdown', {bubbles:true})), 'ok')`)
-		check("outside press collapses empty box without focus change", search+`.dataset.open === 'false' && document.activeElement !== `+input)
+		check("clear keeps focus in input", `document.activeElement === `+input)
 
-		b.click(`[data-kanban-search-toggle]`)
 		b.typeText("oauth")
 		b.waitFor("re-filter", visible, "alpha,gamma")
 		check("no-results sits inside In Progress", `!!document.querySelector('[data-drop-type="status"][data-status="running"] > [data-kanban-no-results]')`)
@@ -165,8 +109,8 @@ func testKanbanHeaderSearch(t *testing.T, width int) {
 
 		b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": "Escape", "code": "Escape", "windowsVirtualKeyCode": 27}, nil)
 		b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyUp", "key": "Escape", "code": "Escape", "windowsVirtualKeyCode": 27}, nil)
-		check("Escape clears and collapses", search+`.dataset.open === 'false' && `+input+`.value === '' && `+visible+` === 'alpha,beta,delta,epsilon,gamma'`)
-		check("Escape returns focus to icon", `document.activeElement === `+toggle)
+		check("Escape clears", input+`.value === '' && `+visible+` === 'alpha,beta,delta,epsilon,gamma'`)
+		check("Escape keeps focus in input", `document.activeElement === `+input)
 		check("counts restored", count("active")+` === '2' && `+count("backlog")+` === '2'`)
 		check("Queued restored", queued)
 		check("no-results hidden", `!(`+noResults("active")+`)`)
@@ -178,7 +122,7 @@ func testKanbanHeaderSearch(t *testing.T, width int) {
 		b.evaluate(`(document.querySelector('[data-kanban-category="backlog"] [data-kanban-clear]').click(), 'ok')`)
 		check("clearing filters hides no results", `!(`+noResults("backlog")+`) && `+count("backlog")+` === '2'`)
 
-		b.click(`[data-kanban-search-toggle]`)
+		b.click(`[data-kanban-search-input]`)
 		b.typeText("epsilon")
 		b.waitFor("queued-only match", visible, "epsilon")
 		check("Queued shown for its match", queued)
@@ -187,7 +131,7 @@ func testKanbanHeaderSearch(t *testing.T, width int) {
 		b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyUp", "key": "Escape", "code": "Escape", "windowsVirtualKeyCode": 27}, nil)
 		check("Escape clears queued-only search", `!(`+noResults("active")+`)`)
 
-		b.click(`[data-kanban-search-toggle]`)
+		b.click(`[data-kanban-search-input]`)
 		b.typeText("zzz")
 		b.waitFor("debounced no results", `String(`+noResults("backlog")+` && `+noResults("completed")+` && `+noResults("active")+`)`, "true")
 		check("status announces no results", `document.querySelector('[data-kanban-search-status]').textContent === 'No matching tasks'`)
@@ -197,11 +141,11 @@ func testKanbanHeaderSearch(t *testing.T, width int) {
 		b.evaluate(`(history.back(), 'ok')`)
 		b.waitFor("restored from history", `String(!!document.querySelector('#kanban-board'))`, "true")
 		b.waitFor("history restore resyncs filter", visible, "alpha,beta,delta,epsilon,gamma")
-		check("restored search is collapsed and inactive", search+`.dataset.open === 'false' && `+input+`.value === ''`)
+		check("restored search is inactive", input+`.value === ''`)
 		check("restored no-results hidden", `!(`+noResults("backlog")+`)`)
 
 		b.evaluate(`(document.getElementById('task-delta').remove(), window.kanbanRefresh(), 'ok')`)
-		b.click(`[data-kanban-search-toggle]`)
+		b.click(`[data-kanban-search-input]`)
 		b.typeText("beta")
 		b.waitFor("nothing running, queued hidden", visible, "beta")
 		check("In Progress shows no results when nothing is running", noResults("active"))
