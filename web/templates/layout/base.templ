@@ -3346,14 +3346,14 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				const dropdown = kanbanDropdownForTarget(container);
 				if (!dropdown) return;
 				const sourcePanel = container.querySelector(':scope > [data-task-card-submenu-panel]');
+				if (!sourcePanel) {
+					closeKanbanSubmenus(dropdown, null);
+					return;
+				}
 				const current = Array.from(document.querySelectorAll('[data-task-card-submenu-portaled="true"]')).find(function(panel) {
 					return panel.__openVibelySubmenuDropdown === dropdown;
 				});
 				function activate() {
-					if (!sourcePanel) {
-						closeKanbanSubmenus(dropdown, null);
-						return;
-					}
 					positionKanbanSubmenu(container);
 					const panel = Array.from(document.querySelectorAll('[data-task-card-submenu-portaled="true"]')).find(function(candidate) {
 						return candidate.__openVibelySubmenuDropdown === dropdown;
