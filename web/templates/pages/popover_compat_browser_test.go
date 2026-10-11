@@ -130,6 +130,17 @@ func TestBrowserFunctional_PopoverCompatibility(t *testing.T) {
 				b.waitFor("generic submenu reopens", `String(!!document.querySelector('[data-menu-submenu-portaled="true"]'))`, "true")
 				b.evaluate(`document.body.dispatchEvent(new PointerEvent('pointerdown', {bubbles:true})); 'ok'`)
 				b.waitFor("outside pointer dismisses generic submenu", `String(!!document.querySelector('[data-menu-submenu-portaled="true"]'))`, "false")
+				b.click(`#generic-submenu-fixture label`)
+				b.evaluate(`document.querySelector('#generic-submenu-fixture [data-menu-content] > li:first-child > button').focus(); document.querySelector('[data-menu-submenu-portaled="true"] button').focus(); document.activeElement.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true})); 'ok'`)
+				b.waitFor("Escape hides main menu and retains trigger focus", `String(getComputedStyle(document.querySelector('#generic-submenu-fixture [data-menu-content]')).visibility === 'hidden' && document.activeElement === document.querySelector('#generic-submenu-fixture label') && !document.querySelector('[data-menu-submenu-portaled="true"]'))`, "true")
+				b.click(`#generic-submenu-fixture label`)
+				b.waitFor("click reopens dismissed menu", `getComputedStyle(document.querySelector('#generic-submenu-fixture [data-menu-content]')).visibility`, "visible")
+				for _, target := range []string{"[data-menu-content] > li:first-child", "[data-menu-content]"} {
+					b.evaluate(`document.querySelector('#generic-submenu-fixture [data-menu-content] > li:first-child > button').focus(); 'ok'`)
+					b.waitFor("submenu before content swap", `String(!!document.querySelector('[data-menu-submenu-portaled="true"]'))`, "true")
+					b.evaluate(fmt.Sprintf(`var target=document.querySelector('#generic-submenu-fixture '+%q); htmx.swap(target,target.outerHTML,{swapStyle:'outerHTML',settleDelay:0}); 'ok'`, target))
+					b.waitFor("content swap removes submenu", `String(!!document.querySelector('[data-menu-submenu-portaled="true"]'))`, "false")
+				}
 				b.evaluate(`document.querySelector('#generic-submenu-fixture').remove(); 'ok'`)
 				b.waitFor("task panel", `String(!!document.querySelector('[data-detail-property="priority"]'))`, "true")
 				checkStableHover := func(selector, rootSelector, optionsSelector string) {
