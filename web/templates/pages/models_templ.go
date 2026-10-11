@@ -1765,14 +1765,14 @@ func modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, o
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 114, "</select> <button id=\"model_refresh\" type=\"button\" class=\"btn btn-square btn-outline hidden\" aria-label=\"Refresh models\" data-tooltip-disabled onclick=\"refreshModelDiscovery()\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-5 w-5\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" aria-hidden=\"true\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" d=\"M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8M21 3v5h-5M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16M8 16H3v5\"></path></svg> <span class=\"loading loading-spinner loading-sm hidden\" aria-hidden=\"true\"></span></button></div><p id=\"openai_compatible_discovery_status\" class=\"text-sm mt-2 hidden\" role=\"status\" aria-live=\"polite\"></p></div><!-- Connection method selector for Anthropic OAuth (CLI option removed) --><div id=\"auth_method_field\" class=\"form-control mb-3 hidden\"><label class=\"label\"><span class=\"label-text\">Connection Method</span></label> <select name=\"auth_method\" id=\"model_auth_method\" class=\"select select-bordered\" onchange=\"toggleSubscriptionMethodFields()\"><option value=\"oauth\">API (OAuth via web)</option></select></div><div id=\"subscription_info_oauth\" class=\"mb-3 hidden\"><div class=\"alert alert-info\"><svg xmlns=\"http://www.w3.org/2000/svg\" fill=\"none\" viewBox=\"0 0 24 24\" class=\"stroke-current shrink-0 w-6 h-6\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z\"></path></svg><div><p class=\"font-semibold\">OAuth via API</p><p class=\"text-sm\">Uses the Anthropic API directly via OAuth. Use Connect OAuth above to finish sign-in in this dialog.</p></div></div></div><div id=\"openai_subscription_info_oauth\" class=\"mb-3 hidden\"><div class=\"alert alert-info\"><svg xmlns=\"http://www.w3.org/2000/svg\" fill=\"none\" viewBox=\"0 0 24 24\" class=\"stroke-current shrink-0 w-6 h-6\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z\"></path></svg><div><p class=\"font-semibold\">OAuth via API</p><p class=\"text-sm\">Uses the OpenAI API directly via OAuth. Use Connect OAuth above to finish sign-in in this dialog.</p></div></div></div><div id=\"ollama_info\" class=\"mb-3 hidden\"><div class=\"alert alert-info\"><svg xmlns=\"http://www.w3.org/2000/svg\" fill=\"none\" viewBox=\"0 0 24 24\" class=\"stroke-current shrink-0 w-6 h-6\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z\"></path></svg><div><p class=\"font-semibold\">Local Ollama Instance</p><p class=\"text-sm\">Connects to your local Ollama server. Make sure Ollama is running with <code>ollama serve</code>.</p></div></div></div><div id=\"openai_compatible_fields\" class=\"hidden\"><input type=\"hidden\" id=\"model_openai_compatible_preset\" name=\"preset_slug\" value=\"custom\"> <input type=\"hidden\" id=\"model_openai_compatible_transport\" name=\"transport\" value=\"chat_completions\"><div id=\"model_manual_id_field\" class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">Model ID</span></label> <input type=\"text\" id=\"model_openai_compatible_custom_model\" class=\"input input-bordered\" placeholder=\"provider/model-id\" oninput=\"syncOpenAICompatibleModel()\"> <label class=\"label\"><span class=\"label-text-alt opacity-70\">Stored exactly as entered, after trimming whitespace.</span></label></div></div><div id=\"mixture_fields\" class=\"hidden\" data-options=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 114, "</select> <button id=\"model_refresh\" type=\"button\" class=\"btn btn-square btn-outline hidden\" aria-label=\"Refresh models\" data-tooltip-disabled onclick=\"refreshModelDiscovery()\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-5 w-5\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" aria-hidden=\"true\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" d=\"M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8M21 3v5h-5M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16M8 16H3v5\"></path></svg> <span class=\"loading loading-spinner loading-sm hidden\" aria-hidden=\"true\"></span></button></div><p id=\"openai_compatible_discovery_status\" class=\"text-sm mt-2 hidden\" role=\"status\" aria-live=\"polite\"></p></div><!-- Connection method selector for Anthropic OAuth (CLI option removed) --><div id=\"auth_method_field\" class=\"form-control mb-3 hidden\"><label class=\"label\"><span class=\"label-text\">Connection Method</span></label> <select name=\"auth_method\" id=\"model_auth_method\" class=\"select select-bordered\" onchange=\"toggleSubscriptionMethodFields()\"><option value=\"oauth\">API (OAuth via web)</option></select></div><div id=\"subscription_info_oauth\" class=\"text-sm opacity-70 mb-3 hidden\">Uses your Anthropic subscription through OAuth.</div><div id=\"openai_subscription_info_oauth\" class=\"text-sm opacity-70 mb-3 hidden\">Uses your OpenAI subscription through OAuth.</div><div id=\"ollama_info\" class=\"mb-3 hidden\"><div class=\"alert alert-info\"><svg xmlns=\"http://www.w3.org/2000/svg\" fill=\"none\" viewBox=\"0 0 24 24\" class=\"stroke-current shrink-0 w-6 h-6\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z\"></path></svg><div><p class=\"font-semibold\">Local Ollama Instance</p><p class=\"text-sm\">Connects to your local Ollama server. Make sure Ollama is running with <code>ollama serve</code>.</p></div></div></div><div id=\"openai_compatible_fields\" class=\"hidden\"><input type=\"hidden\" id=\"model_openai_compatible_preset\" name=\"preset_slug\" value=\"custom\"> <input type=\"hidden\" id=\"model_openai_compatible_transport\" name=\"transport\" value=\"chat_completions\"><div id=\"model_manual_id_field\" class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">Model ID</span></label> <input type=\"text\" id=\"model_openai_compatible_custom_model\" class=\"input input-bordered\" placeholder=\"provider/model-id\" oninput=\"syncOpenAICompatibleModel()\"> <label class=\"label\"><span class=\"label-text-alt opacity-70\">Stored exactly as entered, after trimming whitespace.</span></label></div></div><div id=\"mixture_fields\" class=\"hidden\" data-options=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var72 string
 		templ_7745c5c3_Var72, templ_7745c5c3_Err = templ.ResolveAttributeValue(mixtureModelOptionsJSON(modelOptions))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 831, Col: 98}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 815, Col: 98}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var72)
 		if templ_7745c5c3_Err != nil {
@@ -1790,7 +1790,7 @@ func modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, o
 			var templ_7745c5c3_Var73 string
 			templ_7745c5c3_Var73, templ_7745c5c3_Err = templ.ResolveAttributeValue(option.ID)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 844, Col: 35}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 828, Col: 35}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var73)
 			if templ_7745c5c3_Err != nil {
@@ -1803,7 +1803,7 @@ func modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, o
 			var templ_7745c5c3_Var74 string
 			templ_7745c5c3_Var74, templ_7745c5c3_Err = templ.JoinStringErrs(option.Name)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 844, Col: 51}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 828, Col: 51}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var74))
 			if templ_7745c5c3_Err != nil {
@@ -1816,7 +1816,7 @@ func modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, o
 			var templ_7745c5c3_Var75 string
 			templ_7745c5c3_Var75, templ_7745c5c3_Err = templ.JoinStringErrs(string(option.Provider))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 844, Col: 80}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 828, Col: 80}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var75))
 			if templ_7745c5c3_Err != nil {
@@ -1829,7 +1829,7 @@ func modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, o
 			var templ_7745c5c3_Var76 string
 			templ_7745c5c3_Var76, templ_7745c5c3_Err = templ.JoinStringErrs(option.Model)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 844, Col: 97}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 828, Col: 97}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var76))
 			if templ_7745c5c3_Err != nil {
@@ -1852,7 +1852,7 @@ func modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, o
 			var templ_7745c5c3_Var77 string
 			templ_7745c5c3_Var77, templ_7745c5c3_Err = templ.ResolveAttributeValue(option.ID)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 855, Col: 38}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 839, Col: 38}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var77)
 			if templ_7745c5c3_Err != nil {
@@ -1865,7 +1865,7 @@ func modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, o
 			var templ_7745c5c3_Var78 string
 			templ_7745c5c3_Var78, templ_7745c5c3_Err = templ.JoinStringErrs(option.Name)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 855, Col: 54}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 839, Col: 54}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var78))
 			if templ_7745c5c3_Err != nil {
@@ -1878,7 +1878,7 @@ func modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, o
 			var templ_7745c5c3_Var79 string
 			templ_7745c5c3_Var79, templ_7745c5c3_Err = templ.JoinStringErrs(string(option.Provider))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 855, Col: 83}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 839, Col: 83}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var79))
 			if templ_7745c5c3_Err != nil {
@@ -1891,7 +1891,7 @@ func modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, o
 			var templ_7745c5c3_Var80 string
 			templ_7745c5c3_Var80, templ_7745c5c3_Err = templ.JoinStringErrs(option.Model)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 855, Col: 100}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 839, Col: 100}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var80))
 			if templ_7745c5c3_Err != nil {
@@ -1906,7 +1906,7 @@ func modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, o
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = modelSettingLabel("Effort", "model_reasoning_effort", "reasoning_effort_help", "Controls provider reasoning/thinking effort for supported models.").Render(ctx, templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = modelSettingLabel("Reasoning effort", "model_reasoning_effort", "reasoning_effort_help", "Controls provider reasoning/thinking effort for supported models.").Render(ctx, templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -1942,11 +1942,11 @@ func modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, o
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 132, "<input id=\"model_compaction_threshold_input\" type=\"number\" min=\"1\" step=\"1\" class=\"input input-bordered model-numeric-input\" required oninput=\"document.getElementById('model_compaction_threshold').value = this.value\"> <input type=\"hidden\" id=\"model_compaction_threshold\" name=\"compaction_threshold\" value=\"0\"></div></div></section><section id=\"model-panel-execution\" role=\"tabpanel\" aria-labelledby=\"model-tab-execution\" data-model-panel=\"execution\" hidden><div class=\"form-control mt-3\"><label class=\"label cursor-pointer justify-start gap-2\"><input type=\"checkbox\" id=\"model_is_default\" name=\"is_default\" class=\"checkbox checkbox-sm\"> <span class=\"label-text\">Set as default model</span></label></div><div class=\"form-control mt-2\"><label class=\"label cursor-pointer justify-start gap-2\"><input type=\"checkbox\" id=\"model_auto_start_tasks\" name=\"auto_start_tasks\" class=\"checkbox checkbox-sm\"> <span class=\"label-text\">Auto-start created tasks</span></label> <label class=\"label\"><span class=\"label-text-alt opacity-70\">When enabled, tasks created with this model automatically move to \"active\" status</span></label></div><div class=\"model-settings-grid\"><div class=\"form-control\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 132, "<input id=\"model_compaction_threshold_input\" type=\"number\" min=\"1\" step=\"1\" class=\"input input-bordered model-numeric-input\" required oninput=\"document.getElementById('model_compaction_threshold').value = this.value\"> <input type=\"hidden\" id=\"model_compaction_threshold\" name=\"compaction_threshold\" value=\"0\"></div></div></section><section id=\"model-panel-execution\" role=\"tabpanel\" aria-labelledby=\"model-tab-execution\" data-model-panel=\"execution\" hidden><div class=\"form-control mt-3\"><label class=\"label cursor-pointer justify-start gap-2\"><input type=\"checkbox\" id=\"model_is_default\" name=\"is_default\" class=\"checkbox checkbox-sm\"> <span class=\"label-text\">Set as default model</span></label></div><div class=\"form-control mt-2\"><label class=\"label cursor-pointer justify-start gap-2\"><input type=\"checkbox\" id=\"model_auto_start_tasks\" name=\"auto_start_tasks\" class=\"checkbox checkbox-sm\"> <span class=\"label-text\">Auto-start created tasks</span></label> <label class=\"label\"><span class=\"label-text-alt opacity-70\">Automatically move tasks created with this model to active.</span></label></div><div class=\"model-settings-grid\"><div class=\"form-control\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = modelSettingLabel("Max Workers", "model_max_workers_input", "model_workers_help", "Maximum concurrent workers for this model. Leave empty to use the shared global worker pool.").Render(ctx, templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = modelSettingLabel("Worker limit", "model_max_workers_input", "model_workers_help", "Maximum concurrent workers for this model. Leave empty to use the shared global worker pool.").Render(ctx, templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -1958,7 +1958,7 @@ func modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, o
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 134, "<input id=\"model_worker_timeout_input\" type=\"number\" min=\"1\" step=\"1\" class=\"input input-bordered model-numeric-input\" required oninput=\"document.getElementById('model_worker_timeout').value = this.value\"> <input type=\"hidden\" id=\"model_worker_timeout\" name=\"worker_timeout\" value=\"0\"></div></div></section></div><div class=\"modal-action\"><button type=\"button\" class=\"btn\" onclick=\"closeModelModal()\">Cancel</button> <button type=\"submit\" id=\"model_submit_btn\" class=\"btn btn-primary\">Create</button></div></form></div><form class=\"modal-backdrop\"><button type=\"button\" onclick=\"closeModelModal()\">close</button></form></dialog><style>\n            #new_model_modal > .modal-box {\n                display: flex;\n                flex-direction: column;\n                height: min(46rem, calc(100dvh - 2rem));\n                max-height: calc(100dvh - 2rem);\n                overflow: hidden !important;\n            }\n            #new_model_modal #model-panel-model > .form-control { margin-bottom: 0.5rem; }\n            #new_model_modal #model-panel-model .label { padding-top: 0.25rem; padding-bottom: 0.25rem; }\n            #model_provider_auth_row { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0 1rem; }\n            #model_provider_auth_row > .form-control { min-width: 0; margin-bottom: 0.5rem; }\n            #model_provider_auth_row select { width: 100%; }\n            @media (min-width: 641px) {\n                #model_provider_auth_row:has(> #anthropic_auth_type_field:not(.hidden)),\n                #model_provider_auth_row:has(> #openai_auth_type_field:not(.hidden)),\n                #model_provider_auth_row:has(> #custom_auth_type_field:not(.hidden)) {\n                    grid-template-columns: repeat(2, minmax(0, 1fr));\n                }\n            }\n            #new_model_modal #model_form {\n                display: flex;\n                flex-direction: column;\n                flex: 1;\n                min-height: 0;\n            }\n            #new_model_modal .model-section-tabs {\n                display: flex;\n                flex-shrink: 0;\n                margin-bottom: 0.75rem;\n            }\n            #new_model_modal .model-section-tabs .tab { flex: 1; white-space: nowrap; }\n            #new_model_modal #model_section_body { flex: 1; min-height: 0; overflow-y: auto; padding-right: 0.25rem; }\n            #new_model_modal [data-model-panel][hidden] { display: none !important; }\n            #new_model_modal .modal-action, #new_model_modal #model_form_error { flex-shrink: 0; }\n            #new_model_modal .modal-action { margin-top: 1rem; }\n\n            #new_model_modal .model-settings-grid {\n                display: grid;\n                grid-template-columns: repeat(2, minmax(0, 1fr));\n                gap: 1rem;\n                align-items: start;\n            }\n            #new_model_modal .model-settings-grid > .form-control { min-width: 0; }\n            @media (max-width: 640px) {\n                #new_model_modal .model-settings-grid { grid-template-columns: minmax(0, 1fr); }\n            }\n            #new_model_modal .model-numeric-input {\n                width: 12rem;\n                max-width: 100%;\n                align-self: flex-start;\n            }\n            #new_model_modal .model-setting-label {\n                position: relative;\n                justify-content: flex-start;\n                gap: 0.375rem;\n            }\n\t\t\t/* Keep password toggle button fixed inside input across press/focus states */\n\t\t\t.password-toggle-btn:active,\n\t\t\t.password-toggle-btn:focus,\n\t\t\t.password-toggle-btn:focus-visible {\n\t\t\t\ttransform: translate(0, -50%) !important;\n\t\t\t}\n\t\t</style>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 134, "<input id=\"model_worker_timeout_input\" type=\"number\" min=\"1\" step=\"1\" class=\"input input-bordered model-numeric-input\" required oninput=\"document.getElementById('model_worker_timeout').value = this.value\"> <input type=\"hidden\" id=\"model_worker_timeout\" name=\"worker_timeout\" value=\"0\"></div></div></section></div><div class=\"modal-action\"><button type=\"button\" class=\"btn\" onclick=\"closeModelModal()\">Cancel</button> <button type=\"submit\" id=\"model_submit_btn\" class=\"btn btn-primary\">Create</button></div></form></div><form class=\"modal-backdrop\"><button type=\"button\" onclick=\"closeModelModal()\">close</button></form></dialog><style>\n            #new_model_modal > .modal-box {\n                display: flex;\n                flex-direction: column;\n                height: min(46rem, calc(100dvh - 2rem));\n                max-height: calc(100dvh - 2rem);\n                overflow: hidden !important;\n            }\n            #new_model_modal #model-panel-model > .form-control { margin-bottom: 0.5rem; }\n            #new_model_modal #model_modal_title { margin-bottom: 1rem; }\n            #new_model_modal #model_section_body .label { padding: 0.25rem 0; }\n            #new_model_modal #model_section_body .form-control { min-width: 0; }\n            #new_model_modal #model_section_body :is(.input, .select, .textarea) { width: 100%; min-width: 0; }\n            #new_model_modal #model_section_body .label-text-alt { line-height: 1.5; }\n            #new_model_modal #model_oauth_connection_action > p { margin-top: 0.5rem; }\n            #new_model_modal #model-panel-execution > .form-control { margin: 0 0 0.75rem; }\n            #new_model_modal #model-panel-execution > .form-control > .label + .label { padding-left: 1.75rem; }\n            #new_model_modal #model-panel-execution .model-settings-grid { margin-top: 1rem; }\n            #model_provider_auth_row { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0 1rem; }\n            #model_provider_auth_row > .form-control { min-width: 0; margin-bottom: 0.5rem; }\n            #model_provider_auth_row select { width: 100%; }\n            @media (min-width: 641px) {\n                #model_provider_auth_row:has(> #anthropic_auth_type_field:not(.hidden)),\n                #model_provider_auth_row:has(> #openai_auth_type_field:not(.hidden)),\n                #model_provider_auth_row:has(> #custom_auth_type_field:not(.hidden)) {\n                    grid-template-columns: repeat(2, minmax(0, 1fr));\n                }\n            }\n            #new_model_modal #model_form {\n                display: flex;\n                flex-direction: column;\n                flex: 1;\n                min-height: 0;\n            }\n            #new_model_modal .model-section-tabs {\n                display: flex;\n                flex-shrink: 0;\n                margin-bottom: 0.75rem;\n            }\n            #new_model_modal .model-section-tabs .tab { flex: 1; white-space: nowrap; }\n            #new_model_modal #model_section_body { flex: 1; min-height: 0; overflow-y: auto; scrollbar-gutter: stable; padding: 0.25rem 0.5rem 0.5rem 0; }\n            #new_model_modal [data-model-panel][hidden] { display: none !important; }\n            #new_model_modal .modal-action, #new_model_modal #model_form_error { flex-shrink: 0; }\n            #new_model_modal .modal-action { margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--fallback-b3, oklch(var(--b3))); }\n\n            #new_model_modal .model-settings-grid {\n                display: grid;\n                grid-template-columns: repeat(2, minmax(0, 1fr));\n                gap: 1rem;\n                align-items: start;\n            }\n            #new_model_modal .model-settings-grid > .form-control { min-width: 0; }\n            @media (max-width: 640px) {\n                #new_model_modal .model-settings-grid { grid-template-columns: minmax(0, 1fr); }\n            }\n            #new_model_modal .model-numeric-input {\n                width: 100%;\n                max-width: 100%;\n            }\n            #new_model_modal .model-setting-label {\n                position: relative;\n                justify-content: flex-start;\n                gap: 0.375rem;\n            }\n\t\t\t/* Keep password toggle button fixed inside input across press/focus states */\n\t\t\t.password-toggle-btn:active,\n\t\t\t.password-toggle-btn:focus,\n\t\t\t.password-toggle-btn:focus-visible {\n\t\t\t\ttransform: translate(0, -50%) !important;\n\t\t\t}\n\t\t</style>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -2002,7 +2002,7 @@ func modelSettingLabel(label string, fieldID string, helpID string, help string)
 		var templ_7745c5c3_Var82 string
 		templ_7745c5c3_Var82, templ_7745c5c3_Err = templ.ResolveAttributeValue(fieldID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 2999, Col: 22}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 2990, Col: 22}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var82)
 		if templ_7745c5c3_Err != nil {
@@ -2015,7 +2015,7 @@ func modelSettingLabel(label string, fieldID string, helpID string, help string)
 		var templ_7745c5c3_Var83 string
 		templ_7745c5c3_Var83, templ_7745c5c3_Err = templ.JoinStringErrs(label)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 2999, Col: 51}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 2990, Col: 51}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var83))
 		if templ_7745c5c3_Err != nil {
@@ -2028,7 +2028,7 @@ func modelSettingLabel(label string, fieldID string, helpID string, help string)
 		var templ_7745c5c3_Var84 string
 		templ_7745c5c3_Var84, templ_7745c5c3_Err = templ.ResolveAttributeValue(helpID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 3000, Col: 35}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 2991, Col: 35}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var84)
 		if templ_7745c5c3_Err != nil {
@@ -2041,7 +2041,7 @@ func modelSettingLabel(label string, fieldID string, helpID string, help string)
 		var templ_7745c5c3_Var85 string
 		templ_7745c5c3_Var85, templ_7745c5c3_Err = templ.ResolveAttributeValue(help)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 3000, Col: 136}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 2991, Col: 136}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var85)
 		if templ_7745c5c3_Err != nil {
@@ -2054,7 +2054,7 @@ func modelSettingLabel(label string, fieldID string, helpID string, help string)
 		var templ_7745c5c3_Var86 string
 		templ_7745c5c3_Var86, templ_7745c5c3_Err = templ.ResolveAttributeValue(help)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 3000, Col: 156}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 2991, Col: 156}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var86)
 		if templ_7745c5c3_Err != nil {

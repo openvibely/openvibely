@@ -790,24 +790,8 @@ for _, agent := range modelOptions {
 							<option value="oauth">API (OAuth via web)</option>
 						</select>
 					</div>
-					<div id="subscription_info_oauth" class="mb-3 hidden">
-						<div class="alert alert-info">
-							<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" class="stroke-current shrink-0 w-6 h-6"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-							<div>
-								<p class="font-semibold">OAuth via API</p>
-								<p class="text-sm">Uses the Anthropic API directly via OAuth. Use Connect OAuth above to finish sign-in in this dialog.</p>
-							</div>
-						</div>
-					</div>
-						<div id="openai_subscription_info_oauth" class="mb-3 hidden">
-							<div class="alert alert-info">
-								<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" class="stroke-current shrink-0 w-6 h-6"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-								<div>
-									<p class="font-semibold">OAuth via API</p>
-									<p class="text-sm">Uses the OpenAI API directly via OAuth. Use Connect OAuth above to finish sign-in in this dialog.</p>
-								</div>
-							</div>
-						</div>
+					<div id="subscription_info_oauth" class="text-sm opacity-70 mb-3 hidden">Uses your Anthropic subscription through OAuth.</div>
+						<div id="openai_subscription_info_oauth" class="text-sm opacity-70 mb-3 hidden">Uses your OpenAI subscription through OAuth.</div>
 					<div id="ollama_info" class="mb-3 hidden">
 						<div class="alert alert-info">
 							<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" class="stroke-current shrink-0 w-6 h-6"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
@@ -903,7 +887,7 @@ for _, agent := range modelOptions {
 <section id="model-panel-generation" role="tabpanel" aria-labelledby="model-tab-generation" data-model-panel="generation" hidden>
 <div class="model-settings-grid">
 							<div id="reasoning_effort_field" class="form-control hidden">
-								@modelSettingLabel("Effort", "model_reasoning_effort", "reasoning_effort_help", "Controls provider reasoning/thinking effort for supported models.")
+								@modelSettingLabel("Reasoning effort", "model_reasoning_effort", "reasoning_effort_help", "Controls provider reasoning/thinking effort for supported models.")
                                 <select name="reasoning_effort" id="model_reasoning_effort" class="select select-bordered model-numeric-input"></select>
                             </div>
 						<div id="model_temperature_field" class="form-control">
@@ -942,12 +926,12 @@ for _, agent := range modelOptions {
 							<span class="label-text">Auto-start created tasks</span>
 						</label>
 						<label class="label">
-							<span class="label-text-alt opacity-70">When enabled, tasks created with this model automatically move to "active" status</span>
+							<span class="label-text-alt opacity-70">Automatically move tasks created with this model to active.</span>
 						</label>
 					</div>
 					<div class="model-settings-grid">
 						<div class="form-control">
-							@modelSettingLabel("Max Workers", "model_max_workers_input", "model_workers_help", "Maximum concurrent workers for this model. Leave empty to use the shared global worker pool.")
+							@modelSettingLabel("Worker limit", "model_max_workers_input", "model_workers_help", "Maximum concurrent workers for this model. Leave empty to use the shared global worker pool.")
                             <input id="model_max_workers_input" type="number" min="1" step="1" class="input input-bordered model-numeric-input" placeholder="Global pool" oninput="document.getElementById('model_max_workers').value = this.value === '' ? '0' : this.value"/>
                             <input type="hidden" id="model_max_workers" name="model_max_workers" value="0"/>
 						</div>
@@ -980,7 +964,15 @@ for _, agent := range modelOptions {
                 overflow: hidden !important;
             }
             #new_model_modal #model-panel-model > .form-control { margin-bottom: 0.5rem; }
-            #new_model_modal #model-panel-model .label { padding-top: 0.25rem; padding-bottom: 0.25rem; }
+            #new_model_modal #model_modal_title { margin-bottom: 1rem; }
+            #new_model_modal #model_section_body .label { padding: 0.25rem 0; }
+            #new_model_modal #model_section_body .form-control { min-width: 0; }
+            #new_model_modal #model_section_body :is(.input, .select, .textarea) { width: 100%; min-width: 0; }
+            #new_model_modal #model_section_body .label-text-alt { line-height: 1.5; }
+            #new_model_modal #model_oauth_connection_action > p { margin-top: 0.5rem; }
+            #new_model_modal #model-panel-execution > .form-control { margin: 0 0 0.75rem; }
+            #new_model_modal #model-panel-execution > .form-control > .label + .label { padding-left: 1.75rem; }
+            #new_model_modal #model-panel-execution .model-settings-grid { margin-top: 1rem; }
             #model_provider_auth_row { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0 1rem; }
             #model_provider_auth_row > .form-control { min-width: 0; margin-bottom: 0.5rem; }
             #model_provider_auth_row select { width: 100%; }
@@ -1003,10 +995,10 @@ for _, agent := range modelOptions {
                 margin-bottom: 0.75rem;
             }
             #new_model_modal .model-section-tabs .tab { flex: 1; white-space: nowrap; }
-            #new_model_modal #model_section_body { flex: 1; min-height: 0; overflow-y: auto; padding-right: 0.25rem; }
+            #new_model_modal #model_section_body { flex: 1; min-height: 0; overflow-y: auto; scrollbar-gutter: stable; padding: 0.25rem 0.5rem 0.5rem 0; }
             #new_model_modal [data-model-panel][hidden] { display: none !important; }
             #new_model_modal .modal-action, #new_model_modal #model_form_error { flex-shrink: 0; }
-            #new_model_modal .modal-action { margin-top: 1rem; }
+            #new_model_modal .modal-action { margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--fallback-b3, oklch(var(--b3))); }
 
             #new_model_modal .model-settings-grid {
                 display: grid;
@@ -1019,9 +1011,8 @@ for _, agent := range modelOptions {
                 #new_model_modal .model-settings-grid { grid-template-columns: minmax(0, 1fr); }
             }
             #new_model_modal .model-numeric-input {
-                width: 12rem;
+                width: 100%;
                 max-width: 100%;
-                align-self: flex-start;
             }
             #new_model_modal .model-setting-label {
                 position: relative;
