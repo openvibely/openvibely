@@ -3487,3 +3487,48 @@ func (r *TaskRepo) CountRunningTotal(ctx context.Context) (int, error) {
 	}
 	return count, nil
 }
+
+// CompleteExecutionSuccess makes execution completion and the final board state
+// visible together. Pending steering or an already terminal execution changes neither.
+func (r *TaskRepo) CompleteExecutionSuccess(ctx context.Context, executions *ExecutionRepo, executionID, output string, tokensUsed int, durationMs int64) (CompleteSuccessOutcome, error) {
+	var task *models.Task
+	outcome, err := executions.completeSuccessIfNoPendingSteering(ctx, executionID, output, tokensUsed, durationMs, func(tx SQLExecutor) error {
+		var err error
+		task, err = getTaskWithExecutor(ctx, tx, `SELECT `+taskSelectColumns+` FROM tasks WHERE id = (SELECT task_id FROM executions WHERE id = ?)`, executionID)
+		if err != nil {
+			return err
+		}
+		if task == nil {
+			return fmt.Errorf("task not found for execution %s", executionID)
+		}
+		category := task.Category
+		order := task.DisplayOrder
+		if category == models.CategoryActive {
+			category = models.CategoryCompleted
+			if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(display_order), -1) + 1 FROM tasks WHERE project_id = ? AND category = ?`, task.ProjectID, category).Scan(&order); err != nil {
+				return err
+			}
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE tasks SET status = 'completed', category = ?, display_order = ?, updated_at = datetime('now'), completed_at = CASE WHEN category = 'active' THEN datetime('now') ELSE completed_at END WHERE id = ?`, category, order, task.ID); err != nil {
+			return err
+		}
+		_, err = tx.ExecContext(ctx, `UPDATE executions SET status = 'cancelled', error_message = 'Task left the reserved running lane', completed_at = datetime('now') WHERE task_id = ? AND status = 'queued' AND is_followup = 0 AND dispatch_id IS NULL`, task.ID)
+		return err
+	})
+	if err != nil || outcome != CompleteSuccessCompleted {
+		return outcome, err
+	}
+	if r.broadcaster != nil {
+		category := task.Category
+		if category == models.CategoryActive {
+			category = models.CategoryCompleted
+		}
+		if task.Status != models.StatusCompleted {
+			r.broadcaster.Publish(events.TaskEvent{Type: events.TaskStatusChanged, TaskID: task.ID, TaskName: task.Title, ProjectID: task.ProjectID, Status: string(models.StatusCompleted), OldStatus: string(task.Status), Category: string(category)})
+		}
+		if category != task.Category {
+			r.broadcaster.Publish(events.TaskEvent{Type: events.TaskCategoryChanged, TaskID: task.ID, TaskName: task.Title, ProjectID: task.ProjectID, Category: string(category), OldCategory: string(task.Category)})
+		}
+	}
+	return outcome, nil
+}
