@@ -2192,38 +2192,21 @@ func (h *Handler) completeWithSuccess(ctx context.Context, execID, taskID, outpu
 func (h *Handler) completeWithSuccessWithPRReconciliation(ctx context.Context, execID, taskID, output, workDir string, tokensUsed int, durationMs int64, republishOpenPR bool, completionOptions ...interface{}) (repository.CompleteSuccessOutcome, error) {
 	telegramMessageID, channelReply := parseCompletionOptions(completionOptions...)
 	var trustedPublication *startupSyncPublication
+	// Keep the execution running until its diff and merge state are ready. Both
+	// stream events and database catch-up can trigger the client's final refresh.
+	readiness, err := h.execRepo.SuccessCompletionReadiness(ctx, execID)
+	if err != nil {
+		return repository.CompleteSuccessAlreadyTerminal, err
+	}
+	if readiness != repository.CompleteSuccessCompleted {
+		return readiness, nil
+	}
 	if republishOpenPR {
-		readiness, err := h.execRepo.SuccessCompletionReadiness(ctx, execID)
-		if err != nil {
-			return repository.CompleteSuccessAlreadyTerminal, err
-		}
-		if readiness != repository.CompleteSuccessCompleted {
-			return readiness, nil
-		}
 		trustedPublication, err = h.republishOpenPullRequestAfterStartupSync(ctx, taskID)
 		if err != nil {
 			return readiness, err
 		}
 	}
-	outcome, err := h.execRepo.CompleteSuccessIfNoPendingSteering(ctx, execID, output, tokensUsed, durationMs)
-	if err != nil {
-		applog.Infof("[handler] completeWithSuccess exec=%s error completing execution: %v", execID, err)
-		return repository.CompleteSuccessAlreadyTerminal, nil
-	}
-	if outcome == repository.CompleteSuccessPendingSteering {
-		applog.Infof("[handler] completeWithSuccess exec=%s deferred completion because pending steering exists", execID)
-		return outcome, nil
-	}
-	if outcome == repository.CompleteSuccessAlreadyTerminal {
-		applog.Infof("[handler] completeWithSuccess exec=%s skipped because execution is already terminal", execID)
-		return outcome, nil
-	}
-	if republishOpenPR {
-		if err := h.taskPullRequestRepo.SetNeedsRepublish(ctx, taskID, false); err != nil {
-			applog.Infof("[handler] completeWithSuccess task=%s published startup-sync reconciliation but could not clear durable publication requirement: %v", taskID, err)
-		}
-	}
-
 	// Load task state before publishing the terminal event so any final status
 	// transition is visible when the client refreshes in response to ExecCompleted.
 	task, err := h.taskRepo.GetByID(ctx, taskID)
@@ -2234,26 +2217,7 @@ func (h *Handler) completeWithSuccessWithPRReconciliation(ctx context.Context, e
 		return repository.CompleteSuccessCompleted, errors.New(reason)
 	}
 
-	// Update task status BEFORE git diff capture. The SSE handler detects
-	// ExecCompleted and sends a 'done' event, triggering a client-side page
-	// refresh. If the task status update happens after git diff capture
-	// (which can be slow), the refreshed page may still show 'running' status.
-	if err := h.taskRepo.UpdateStatus(ctx, taskID, models.StatusCompleted); err != nil {
-		applog.Infof("[handler] completeWithSuccess task=%s error updating status: %v", taskID, err)
-	}
-	h.publishExecutionTerminal(execID, models.ExecCompleted, "")
-
-	// Move active tasks to the completed category so they appear in the right column
-	h.sendChannelResponse(ctx, task, channelReply, output, "", telegramMessageID)
-	if task != nil && task.Category == models.CategoryActive {
-		if err := h.taskRepo.UpdateCategory(ctx, taskID, models.CategoryCompleted); err != nil {
-			applog.Infof("[handler] completeWithSuccess task=%s error moving to completed category: %v", taskID, err)
-		} else {
-			applog.Infof("[handler] completeWithSuccess task=%s moved to completed category", taskID)
-		}
-	}
-
-	// Capture git diff after status update so it doesn't delay the UI refresh
+	// Capture changes and clear stale merge state before completion becomes visible.
 	if workDir != "" {
 		execForCommit, _ := h.execRepo.GetByID(ctx, execID)
 		diffOutput := h.captureTaskDiffOutput(ctx, task, execForCommit, workDir, output)
@@ -2273,6 +2237,42 @@ func (h *Handler) completeWithSuccessWithPRReconciliation(ctx context.Context, e
 			}
 		}
 	}
+
+	outcome, err := h.execRepo.CompleteSuccessIfNoPendingSteering(ctx, execID, output, tokensUsed, durationMs)
+	if err != nil {
+		applog.Infof("[handler] completeWithSuccess exec=%s error completing execution: %v", execID, err)
+		return repository.CompleteSuccessAlreadyTerminal, nil
+	}
+	if outcome == repository.CompleteSuccessPendingSteering {
+		applog.Infof("[handler] completeWithSuccess exec=%s deferred completion because pending steering exists", execID)
+		return outcome, nil
+	}
+	if outcome == repository.CompleteSuccessAlreadyTerminal {
+		applog.Infof("[handler] completeWithSuccess exec=%s skipped because execution is already terminal", execID)
+		return outcome, nil
+	}
+	if republishOpenPR {
+		if err := h.taskPullRequestRepo.SetNeedsRepublish(ctx, taskID, false); err != nil {
+			applog.Infof("[handler] completeWithSuccess task=%s published startup-sync reconciliation but could not clear durable publication requirement: %v", taskID, err)
+		}
+	}
+
+	// Persist the final task state before notifying stream subscribers.
+	if err := h.taskRepo.UpdateStatus(ctx, taskID, models.StatusCompleted); err != nil {
+		applog.Infof("[handler] completeWithSuccess task=%s error updating status: %v", taskID, err)
+	}
+
+	// Move active tasks to the completed category so they appear in the right column
+	if task != nil && task.Category == models.CategoryActive {
+		if err := h.taskRepo.UpdateCategory(ctx, taskID, models.CategoryCompleted); err != nil {
+			applog.Infof("[handler] completeWithSuccess task=%s error moving to completed category: %v", taskID, err)
+		} else {
+			applog.Infof("[handler] completeWithSuccess task=%s moved to completed category", taskID)
+		}
+	}
+
+	h.publishExecutionTerminal(execID, models.ExecCompleted, "")
+	h.sendChannelResponse(ctx, task, channelReply, output, "", telegramMessageID)
 	h.notifySwarmChildTerminal(ctx, taskID)
 	return repository.CompleteSuccessCompleted, nil
 }
