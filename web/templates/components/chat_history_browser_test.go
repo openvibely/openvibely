@@ -133,7 +133,7 @@ window.addEventListener('load', async function() {
 }
 
 func TestBrowserFunctional_ComposerHistoryWithoutBrowserCache(t *testing.T) {
-	for _, storage := range []string{"empty", "unavailable", "malformed", "read-only"} {
+	for _, storage := range []string{"empty", "unavailable", "malformed", "read-only", "stale", "stale-session", "disjoint"} {
 		t.Run(storage, func(t *testing.T) {
 			chrome := testChromePath(t)
 			forms := map[string]string{}
@@ -163,6 +163,9 @@ func TestBrowserFunctional_ComposerHistoryWithoutBrowserCache(t *testing.T) {
 <script src="/static/vendor/htmx.min.js"></script>
 <script>
 var storageMode = %q;
+if (storageMode === 'stale') localStorage.setItem('openvibely-task-thread-message-history-a', JSON.stringify(['a first']));
+if (storageMode === 'disjoint') localStorage.setItem('openvibely-task-thread-message-history-a', JSON.stringify(['older unloaded message']));
+if (storageMode === 'stale-session') window._chatMessageHistories = {'openvibely-task-thread-message-history-a':['a first']};
 if (storageMode === 'malformed') localStorage.setItem('openvibely-task-thread-message-history-a', '{');
 if (storageMode === 'read-only') {
  localStorage.setItem('openvibely-task-thread-message-history-a', JSON.stringify(['a first','a second\nsecond line']));
