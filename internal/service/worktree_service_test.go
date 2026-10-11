@@ -6304,3 +6304,80 @@ func TestIsBranchDivergedFromTargetRequiresUniqueCommitsOnBothSides(t *testing.T
 		t.Fatal("expected missing branch not to offer rebase")
 	}
 }
+
+func TestCleanupMergedWorktreesDoesNotInventMerge(t *testing.T) {
+	for _, scenario := range []string{"unchanged", "missing branch", "missing history", "unmerged changes", "followup changes"} {
+		t.Run(scenario, func(t *testing.T) {
+			ctx := context.Background()
+			db := testutil.NewTestDB(t)
+			tasks := repository.NewTaskRepo(db, nil)
+			projects := repository.NewProjectRepo(db)
+			settings := repository.NewSettingsRepo(db)
+			repoDir := createTestGitRepo(t)
+			project := &models.Project{Name: "Cleanup evidence", RepoPath: repoDir}
+			if err := projects.Create(ctx, project); err != nil {
+				t.Fatal(err)
+			}
+			if err := settings.Set(ctx, "worktree_cleanup", "after_merge"); err != nil {
+				t.Fatal(err)
+			}
+			ws := NewWorktreeService(tasks, projects, settings)
+			task := &models.Task{ProjectID: project.ID, Title: "No invented merge", Category: models.CategoryCompleted, Status: models.StatusCompleted, MergeTargetBranch: GetDefaultBranch(repoDir)}
+			if err := tasks.Create(ctx, task); err != nil {
+				t.Fatal(err)
+			}
+			path, branch, err := ws.SetupWorktree(ctx, task, repoDir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			git := func(args ...string) {
+				t.Helper()
+				cmd := exec.Command("git", args...)
+				cmd.Dir = repoDir
+				if out, err := cmd.CombinedOutput(); err != nil {
+					t.Fatalf("git %v: %v %s", args, err, out)
+				}
+			}
+			if scenario == "followup changes" || scenario == "missing history" {
+				if err := os.WriteFile(filepath.Join(path, "first.txt"), []byte("first"), 0644); err != nil {
+					t.Fatal(err)
+				}
+				if err := CommitWorktreeChanges(path, "first"); err != nil {
+					t.Fatal(err)
+				}
+				git("merge", "--ff-only", branch)
+			}
+			if scenario == "unmerged changes" || scenario == "followup changes" {
+				if err := os.WriteFile(filepath.Join(path, "new.txt"), []byte("new"), 0644); err != nil {
+					t.Fatal(err)
+				}
+				if err := CommitWorktreeChanges(path, "new"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if scenario == "missing branch" {
+				git("update-ref", "-d", "refs/heads/"+branch)
+			}
+			if scenario == "missing history" {
+				git("reflog", "expire", "--expire=now", "refs/heads/"+branch)
+			}
+			if err := ws.CleanupMergedWorktrees(ctx); err != nil {
+				t.Fatal(err)
+			}
+			stored, err := tasks.GetByID(ctx, task.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if stored.MergeStatus == models.MergeStatusMerged {
+				t.Fatal("cleanup invented a merge")
+			}
+			if scenario == "unchanged" || scenario == "missing history" {
+				if stored.WorktreePath != "" {
+					t.Fatal("safe worktree was not cleaned")
+				}
+			} else if stored.WorktreePath == "" {
+				t.Fatal("unverified or unmerged worktree was removed")
+			}
+		})
+	}
+}

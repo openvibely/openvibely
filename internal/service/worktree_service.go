@@ -3247,6 +3247,31 @@ func (ws *WorktreeService) ReconcileGoalAutoMerges(ctx context.Context) error {
 	return nil
 }
 
+// BranchProducedCommits requires the original branch-creation entry. An
+// expired reflog or missing branch cannot establish that this task produced work.
+func BranchProducedCommits(ctx context.Context, repoDir, branch string) bool {
+	cmd := exec.CommandContext(ctx, "git", "reflog", "show", "--format=%H%x09%gs", "refs/heads/"+branch)
+	cmd.Dir = repoDir
+	out, err := cmd.Output()
+	if err != nil {
+		return false
+	}
+	entries := strings.Split(strings.TrimSpace(string(out)), "\n")
+	first := strings.SplitN(entries[len(entries)-1], "\t", 2)
+	if len(first) != 2 || !strings.HasPrefix(first[1], "branch: Created from ") {
+		return false
+	}
+	head := exec.CommandContext(ctx, "git", "rev-parse", "--verify", "refs/heads/"+branch+"^{commit}")
+	head.Dir = repoDir
+	tip, err := head.Output()
+	if err != nil || strings.TrimSpace(string(tip)) == first[0] {
+		return false
+	}
+	ancestor := exec.CommandContext(ctx, "git", "merge-base", "--is-ancestor", first[0], strings.TrimSpace(string(tip)))
+	ancestor.Dir = repoDir
+	return ancestor.Run() == nil
+}
+
 // CleanupMergedWorktrees scans all tasks with worktrees and cleans up those
 // whose branches have been merged to their target branches.
 // Called periodically by the scheduler to detect manual merges.
@@ -3311,12 +3336,12 @@ func (ws *WorktreeService) CleanupMergedWorktrees(ctx context.Context) error {
 		}
 
 		// Check if branch has been merged
-		if IsBranchMergedContext(ctx, repoDir, task.WorktreeBranch, targetBranch) {
+		if ws.isBranchTipMergedIntoTarget(repoDir, task.WorktreeBranch, targetBranch) {
 			applog.Infof("[worktree] cleanup: task %s branch %s is merged to %s, cleaning up",
 				task.ID, task.WorktreeBranch, targetBranch)
 
-			// Update merge status to merged if not already
-			if task.MergeStatus != models.MergeStatusMerged {
+			// An unchanged branch is safe to clean up, but is not a merge.
+			if task.MergeStatus != models.MergeStatusMerged && BranchProducedCommits(ctx, repoDir, task.WorktreeBranch) {
 				_ = ws.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusMerged)
 			}
 
