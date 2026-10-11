@@ -8801,9 +8801,11 @@ func TestHandler_GetTaskThread_DraftClearLogic_DoesNotTreatPollingGetAsSend(t *t
 	assertCode(t, rec, http.StatusOK)
 	body := rec.Body.String()
 
-	assert.Contains(t, body, "var isPost = requestMethod === 'POST';")
-	assert.Contains(t, body, "var isThreadSendRequest = isPost && isThreadPath;")
-	assert.NotContains(t, body, "|| requestPath.indexOf('/thread') !== -1;")
+	// Draft clearing belongs to the submitting composer, not every thread GET/POST.
+	// Real navigation and delayed-send behavior is covered by the composer browser test.
+	assert.Contains(t, body, "messageInput && messageInput.value === submittedMessage")
+	assert.Contains(t, body, "textarea.closest('#task-thread-view')")
+	assert.NotContains(t, body, "delete window._taskThreadDrafts[")
 }
 
 func TestHandler_GetTaskThread_RunningPlaceholder_NoLiteralThinkingText(t *testing.T) {
