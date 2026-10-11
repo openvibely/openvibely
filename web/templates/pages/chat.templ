@@ -1492,7 +1492,14 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 									custom: input ? String(input.value || '') : ''
 								};
 							});
-							window._chatInputDrafts[requestId] = {index: Number(card.getAttribute('data-current-question-index') || 0), selections: selections};
+							var root = card.closest('#chat-page-root');
+							window._chatInputDrafts[requestId] = {projectId: root ? root.getAttribute('data-project-id') : projectId, index: Number(card.getAttribute('data-current-question-index') || 0), selections: selections};
+						}
+
+						function pruneChatInputDrafts(activeRequestIDs) {
+							Object.keys(window._chatInputDrafts).forEach(function(id) {
+								if (window._chatInputDrafts[id].projectId === projectId && !activeRequestIDs[id]) delete window._chatInputDrafts[id];
+							});
 						}
 
 						function applyChatInputDraft(card) {
@@ -1536,10 +1543,11 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 							var root = document.getElementById('chat-page-root');
 							var pid = root ? root.getAttribute('data-project-id') : projectId;
 							if (!pid || typeof fetch === 'undefined') return Promise.resolve();
-							return fetch('/chat/input-requests?format=html&project_id=' + encodeURIComponent(pid)).then(function(resp) {
+							return fetch('/chat/input-requests?project_id=' + encodeURIComponent(pid)).then(function(resp) {
 								if (!resp.ok) throw new Error('HTTP ' + resp.status);
 								return resp.text();
 							}).then(function(html) {
+								if (document.getElementById('chat-page-root') !== root) return;
 								var detached = document.createElement('template');
 								detached.innerHTML = html;
 								var activeRequestIDs = {};
@@ -1549,6 +1557,7 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 									var existing = document.getElementById(card.id);
 									placeChatInputRequestCard(existing || card);
 								});
+								pruneChatInputDrafts(activeRequestIDs);
 								initChatInputRequestCards();
 								document.querySelectorAll('[data-chat-input-request-id]').forEach(function(card) {
 									var id = card.getAttribute('data-chat-input-request-id') || '';
@@ -1796,7 +1805,17 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 						swappedChatMessages.querySelectorAll('[data-exec-id]').forEach(function(el) {
 							window._chatKnownExecIds[el.getAttribute('data-exec-id')] = true;
 						});
+						var activeRequestIDs = {};
+						swappedChatMessages.querySelectorAll('[data-chat-input-request-id]').forEach(function(card) {
+							activeRequestIDs[card.getAttribute('data-chat-input-request-id')] = true;
+						});
+						pruneChatInputDrafts(activeRequestIDs);
 						initChatInputRequestCards(swappedChatMessages);
+					}
+					// Earlier-message swaps target a loader, not the transcript itself.
+					var currentRoot = document.getElementById('chat-page-root');
+					if (currentRoot && currentRoot.getAttribute('data-project-id') === projectId) {
+						currentRoot.querySelectorAll('[data-chat-input-request-id]').forEach(placeChatInputRequestCard);
 					}
 					if (swapTarget && swapTarget.id === 'main-content' && !swapTarget.querySelector('#chat-page-root')) {
 						window.removeEventListener('sse-chat-live-event', handleSharedChatLiveEvent);
