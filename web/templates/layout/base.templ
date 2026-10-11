@@ -943,7 +943,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					transform: none !important;
 					z-index: 1001 !important;
 				}
-				[data-task-card-submenu-portaled="true"] {
+				[data-menu-submenu-portaled="true"] {
 					position: fixed !important;
 					right: auto !important;
 					top: auto;
@@ -3212,26 +3212,28 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				return null;
 			}
 
-			function kanbanDropdownForTarget(target) {
-				if (!target || !target.closest) return null;
-				const dropdown = target.closest('[data-kanban-menu-key]');
-				if (dropdown) return dropdown;
-				const panel = target.closest('[data-task-card-submenu-portaled="true"]');
-				return panel && panel.__openVibelySubmenuDropdown || null;
-			}
-			window.kanbanDropdownForTarget = kanbanDropdownForTarget;
+			function menuDropdownForTarget(target) {
+                if (!target || !target.closest) return null;
+                const panel = target.closest('[data-menu-submenu-portaled="true"]');
+                return panel ? panel.__openVibelySubmenuDropdown : target.closest('[data-menu-dropdown], [data-kanban-menu-key]');
+            }
+            function kanbanDropdownForTarget(target) {
+                const dropdown = menuDropdownForTarget(target);
+                return dropdown && dropdown.matches('[data-kanban-menu-key]') ? dropdown : null;
+            }
+            window.kanbanDropdownForTarget = kanbanDropdownForTarget;
 
-			let returningFromKanbanSubmenu = false;
-			function backKanbanSubmenu(panel) {
+			let returningFromMenuSubmenu = false;
+			function backMenuSubmenu(panel) {
 				const trigger = panel.__openVibelySubmenuSourcePanel && panel.__openVibelySubmenuSourcePanel.previousElementSibling;
-				restoreKanbanSubmenu(panel);
-				returningFromKanbanSubmenu = true;
+				restoreMenuSubmenu(panel);
+				returningFromMenuSubmenu = true;
 				if (trigger && trigger.isConnected) trigger.focus({preventScroll: true});
-				returningFromKanbanSubmenu = false;
+				returningFromMenuSubmenu = false;
 			}
-			function restoreKanbanSubmenu(panel) {
-				if (!panel || panel.getAttribute('data-task-card-submenu-portaled') !== 'true') return;
-				Array.from(document.querySelectorAll('[data-task-card-submenu-portaled="true"]')).filter(child => child.__openVibelySubmenuParent === panel).forEach(restoreKanbanSubmenu);
+			function restoreMenuSubmenu(panel) {
+				if (!panel || panel.getAttribute('data-menu-submenu-portaled') !== 'true') return;
+				Array.from(document.querySelectorAll('[data-menu-submenu-portaled="true"]')).filter(child => child.__openVibelySubmenuParent === panel).forEach(restoreMenuSubmenu);
                 const sourcePanel = panel.__openVibelySubmenuSourcePanel;
                 const parent = panel.__openVibelySubmenuParent;
                 if (parent) parent.removeAttribute('data-submenu-covered');
@@ -3241,41 +3243,42 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				panel.__openVibelySubmenuDropdown = null;
 			}
 
-			let pendingKanbanSubmenuHover = null;
-			function cancelKanbanSubmenuHover(container) {
-				if (!pendingKanbanSubmenuHover || container && pendingKanbanSubmenuHover.container !== container) return;
-				clearTimeout(pendingKanbanSubmenuHover.timer);
-				pendingKanbanSubmenuHover = null;
+			let pendingMenuSubmenuHover = null;
+			function cancelMenuSubmenuHover(container) {
+				if (!pendingMenuSubmenuHover || container && pendingMenuSubmenuHover.container !== container) return;
+				clearTimeout(pendingMenuSubmenuHover.timer);
+				pendingMenuSubmenuHover = null;
 			}
 
-			function closeKanbanSubmenus(dropdown, exceptPanel) {
-				if (pendingKanbanSubmenuHover && (!dropdown || pendingKanbanSubmenuHover.dropdown === dropdown)) cancelKanbanSubmenuHover();
+			function closeMenuSubmenus(dropdown, exceptPanel) {
+				if (pendingMenuSubmenuHover && (!dropdown || pendingMenuSubmenuHover.dropdown === dropdown)) cancelMenuSubmenuHover();
 				const keep = new Set();
                 for (let parent = exceptPanel; parent; parent = parent.__openVibelySubmenuParent) keep.add(parent);
-                Array.from(document.querySelectorAll('[data-task-card-submenu-portaled="true"]')).reverse().forEach(function(panel) {
-					if (!keep.has(panel) && (!dropdown || panel.__openVibelySubmenuDropdown === dropdown)) restoreKanbanSubmenu(panel);
+                Array.from(document.querySelectorAll('[data-menu-submenu-portaled="true"]')).reverse().forEach(function(panel) {
+					if (!keep.has(panel) && (!dropdown || panel.__openVibelySubmenuDropdown === dropdown)) restoreMenuSubmenu(panel);
 				});
 			}
 
-			function positionKanbanSubmenu(container) {
-				if (!container || !container.querySelector || returningFromKanbanSubmenu) return;
-				cancelKanbanSubmenuHover();
-				const sourcePanel = container.querySelector(':scope > [data-task-card-submenu-panel]');
-				const dropdown = kanbanDropdownForTarget(container);
-				const parentPanel = container.closest('[data-task-card-submenu-portaled="true"]');
-                const menu = parentPanel || dropdown && dropdown.querySelector(':scope > [data-kanban-menu-content]');
+			function positionMenuSubmenu(container) {
+				if (!container || !container.querySelector || returningFromMenuSubmenu) return;
+				cancelMenuSubmenuHover();
+				const sourcePanel = container.querySelector(':scope > [data-menu-submenu-panel]');
+				const dropdown = menuDropdownForTarget(container);
+				const parentPanel = container.closest('[data-menu-submenu-portaled="true"]');
+                const menu = parentPanel || dropdown && dropdown.querySelector(':scope > [data-menu-content], :scope > [data-kanban-menu-content]');
 				if (!sourcePanel || !dropdown || !menu) return;
-				let panel = Array.from(document.querySelectorAll('[data-task-card-submenu-portaled="true"]')).find(function(candidate) {
+                if (!dropdown.hasAttribute('data-kanban-menu-key')) dropdown.classList.add('dropdown-open');
+				let panel = Array.from(document.querySelectorAll('[data-menu-submenu-portaled="true"]')).find(function(candidate) {
 					return candidate.__openVibelySubmenuSourcePanel === sourcePanel;
 				}) || null;
-				closeKanbanSubmenus(dropdown, panel || parentPanel);
+				closeMenuSubmenus(dropdown, panel || parentPanel);
 				if (!panel) {
 					panel = sourcePanel.cloneNode(true);
 					panel.__openVibelySubmenuSourcePanel = sourcePanel;
 					panel.__openVibelySubmenuDropdown = dropdown;
                     panel.__openVibelySubmenuParent = menu;
-					panel.setAttribute('data-task-card-submenu-portaled', 'true');
-					panel.addEventListener('mouseenter', function() { cancelKanbanSubmenuHover(); });
+					panel.setAttribute('data-menu-submenu-portaled', 'true');
+					panel.addEventListener('mouseenter', function() { cancelMenuSubmenuHover(); });
 					sourcePanel.style.setProperty('display', 'none', 'important');
 					document.body.appendChild(panel);
                     if (window.htmx) window.htmx.process(panel);
@@ -3300,12 +3303,12 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				const roomRight = Math.max(0, window.innerWidth - menuRect.right - 8);
 				const openRight = roomRight >= roomLeft;
 				const sideRoom = openRight ? roomRight : roomLeft;
-				const replaceParent = dropdown.getAttribute('data-kanban-menu-key').startsWith('column-') && (window.innerWidth < 640 || sideRoom < 180);
+				const replaceParent = !dropdown.querySelector('[data-task-card-menu-trigger]') && (window.innerWidth < 640 || sideRoom < 180);
                 if (replaceParent && !panel.querySelector(':scope > [data-submenu-back]')) {
                     const row = document.createElement('li'); row.setAttribute('data-submenu-back', '');
                     const back = document.createElement('button'); back.type = 'button';
                     back.textContent = '‹ ' + (parentPanel ? 'Filter' : 'Menu');
-                    back.onclick = function() { backKanbanSubmenu(panel); };
+                    back.onclick = function() { backMenuSubmenu(panel); };
                     row.appendChild(back); panel.prepend(row);
                 }
                 const panelWidth = replaceParent ? Math.min(224, window.innerWidth - 16) : Math.min(224, sideRoom);
@@ -3343,72 +3346,106 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 
 			// Capture row entry so swapped menu content and portaled submenus share
 			// the same behavior without per-row event attributes.
-			function kanbanMenuRow(target) {
+			function dropdownMenuRow(target) {
 				const row = target && target.closest && target.closest('li');
-				return row && row.parentElement.matches('[data-kanban-menu-content], [data-task-card-submenu-portaled="true"]') && row.getAttribute('role') !== 'separator' ? row : null;
+				return row && row.parentElement && row.parentElement.matches('[data-menu-content], [data-kanban-menu-content], [data-menu-submenu-portaled="true"]') && row.getAttribute('role') !== 'separator' ? row : null;
 			}
 			document.addEventListener('mouseenter', function(event) {
-				const row = kanbanMenuRow(event.target);
-				if (row && event.target === row) hoverKanbanSubmenu(event, row);
+				const row = dropdownMenuRow(event.target);
+				if (row && event.target === row) hoverMenuSubmenu(event, row);
 			}, true);
 			document.addEventListener('mouseleave', function(event) {
-				const row = kanbanMenuRow(event.target);
-				if (row && event.target === row) cancelKanbanSubmenuHover(row);
+				const row = dropdownMenuRow(event.target);
+				if (row && event.target === row) cancelMenuSubmenuHover(row);
 			}, true);
 			document.addEventListener('focusin', function(event) {
-				const row = kanbanMenuRow(event.target);
-				if (row && !row.querySelector(':scope > [data-task-card-submenu-panel]')) {
-					closeKanbanSubmenus(kanbanDropdownForTarget(row), row.closest('[data-task-card-submenu-portaled="true"]'));
+				const row = dropdownMenuRow(event.target);
+				if (row && !row.querySelector(':scope > [data-menu-submenu-panel]')) {
+					closeMenuSubmenus(menuDropdownForTarget(row), row.closest('[data-menu-submenu-portaled="true"]'));
 				}
 			});
 
-			function hoverKanbanSubmenu(event, container) {
+
+            function closeGenericDropdown(dropdown) {
+                closeMenuSubmenus(dropdown, null);
+                dropdown.classList.remove('dropdown-open');
+            }
+            document.addEventListener('pointerdown', function(event) {
+                const owner = menuDropdownForTarget(event.target);
+                document.querySelectorAll('[data-menu-dropdown]:not([data-kanban-menu-key])').forEach(function(dropdown) {
+                    if (dropdown !== owner) closeGenericDropdown(dropdown);
+                });
+            }, true);
+            document.addEventListener('focusout', function(event) {
+                const owner = menuDropdownForTarget(event.target);
+                if (!owner || owner.hasAttribute('data-kanban-menu-key')) return;
+                setTimeout(function() {
+                    if (menuDropdownForTarget(document.activeElement) !== owner) closeGenericDropdown(owner);
+                }, 0);
+            });
+            document.addEventListener('keydown', function(event) {
+                const owner = menuDropdownForTarget(event.target);
+                if (!owner || owner.hasAttribute('data-kanban-menu-key') || event.key !== 'Escape') return;
+                event.preventDefault();
+                closeGenericDropdown(owner);
+                const trigger = owner.querySelector(':scope > label');
+                if (trigger) trigger.focus({preventScroll: true});
+            });
+            document.addEventListener('htmx:beforeCleanupElement', function(event) {
+                const element = event.detail.elt;
+                document.querySelectorAll('[data-menu-submenu-portaled="true"]').forEach(function(panel) {
+                    const owner = panel.__openVibelySubmenuDropdown;
+                    if (owner && (element === owner || element.contains(owner))) closeMenuSubmenus(owner, null);
+                });
+            });
+
+			function hoverMenuSubmenu(event, container) {
 				if (!container) return;
-				const dropdown = kanbanDropdownForTarget(container);
+				const dropdown = menuDropdownForTarget(container);
 				if (!dropdown) return;
-				const sourcePanel = container.querySelector(':scope > [data-task-card-submenu-panel]');
+				const sourcePanel = container.querySelector(':scope > [data-menu-submenu-panel]');
 				if (!sourcePanel) {
-					closeKanbanSubmenus(dropdown, container.closest('[data-task-card-submenu-portaled="true"]'));
+					closeMenuSubmenus(dropdown, container.closest('[data-menu-submenu-portaled="true"]'));
 					return;
 				}
-				const current = Array.from(document.querySelectorAll('[data-task-card-submenu-portaled="true"]')).find(function(panel) {
+				const current = Array.from(document.querySelectorAll('[data-menu-submenu-portaled="true"]')).find(function(panel) {
 					return panel.__openVibelySubmenuDropdown === dropdown;
 				});
 				function activate() {
-					positionKanbanSubmenu(container);
-					const panel = Array.from(document.querySelectorAll('[data-task-card-submenu-portaled="true"]')).find(function(candidate) {
+					positionMenuSubmenu(container);
+					const panel = Array.from(document.querySelectorAll('[data-menu-submenu-portaled="true"]')).find(function(candidate) {
 						return candidate.__openVibelySubmenuDropdown === dropdown;
 					});
 					if (panel) panel.__openVibelyPointerOrigin = event ? {x: event.clientX, y: event.clientY} : null;
 				}
 				if (current && current.__openVibelySubmenuSourcePanel !== sourcePanel && current.__openVibelyPointerOrigin && event) {
 				const bounds = current.getBoundingClientRect();
-				const menu = dropdown.querySelector(':scope > [data-kanban-menu-content]');
+				const menu = dropdown.querySelector(':scope > [data-menu-content], :scope > [data-kanban-menu-content]');
 				const menuRect = menu.getBoundingClientRect();
 				const right = bounds.left >= menuRect.right - 8;
 				const toward = right
 					? event.clientX > current.__openVibelyPointerOrigin.x + 8
 					: event.clientX < current.__openVibelyPointerOrigin.x - 8;
 				if (toward && event.clientY >= bounds.top - 12 && event.clientY <= bounds.bottom + 12) {
-					cancelKanbanSubmenuHover();
+					cancelMenuSubmenuHover();
 					const pending = {container: container, dropdown: dropdown, timer: null};
 					pending.timer = setTimeout(function() {
-						if (pendingKanbanSubmenuHover !== pending || dropdown.getAttribute('data-kanban-menu-open') !== 'true' || !container.isConnected) return;
+						if (pendingMenuSubmenuHover !== pending || !dropdown.isConnected || !container.isConnected) return;
 						activate();
 					}, 300);
-					pendingKanbanSubmenuHover = pending;
+					pendingMenuSubmenuHover = pending;
 					return;
 				}
 				}
 				activate();
 			}
 
-			function handleKanbanSubmenuKeydown(event, container) {
+			function handleMenuSubmenuKeydown(event, container) {
 				if (!event || (event.key !== 'ArrowRight' && event.key !== 'Enter' && event.key !== ' ' && event.key !== 'Tab')) return;
 				if (event.key === 'Tab' && event.shiftKey) return;
 				event.preventDefault();
-				positionKanbanSubmenu(container);
-				const panel = Array.from(document.querySelectorAll('[data-task-card-submenu-portaled="true"]')).find(candidate => candidate.__openVibelySubmenuSourcePanel === container.querySelector(':scope > [data-task-card-submenu-panel]'));
+				positionMenuSubmenu(container);
+				const panel = Array.from(document.querySelectorAll('[data-menu-submenu-portaled="true"]')).find(candidate => candidate.__openVibelySubmenuSourcePanel === container.querySelector(':scope > [data-menu-submenu-panel]'));
 				const action = panel && Array.from(panel.querySelectorAll('summary, button:not([disabled]), a[href]')).find(function(item) { return item.getClientRects().length > 0; });
 				if (action) action.focus({preventScroll: true});
 			}
@@ -3595,6 +3632,8 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						if (kanbanDropdown && window.closeKanbanMenu) {
 							window.closeKanbanMenu(kanbanDropdown, true);
 						} else {
+                            const owner = menuDropdownForTarget(label);
+                            if (owner) closeGenericDropdown(owner);
 							label.blur();
 						}
 						return;
@@ -4350,7 +4389,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 							dropdown.removeAttribute('data-kanban-menu-open');
 							dropdown.removeAttribute('data-kanban-menu-positioning');
 							dropdown.__openVibelyPendingMenuFocus = null;
-							closeKanbanSubmenus(dropdown, null);
+							closeMenuSubmenus(dropdown, null);
 						}
 						const column = dropdown.closest('.kanban-column');
 						if (column) {
@@ -4468,8 +4507,8 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				}, true);
 				document.addEventListener('keydown', function(event) {
                     if (event.key === 'ArrowLeft') {
-                        const panel = event.target.closest('[data-task-card-submenu-portaled="true"]');
-                        if (panel) { event.preventDefault(); event.stopPropagation(); backKanbanSubmenu(panel); return; }
+                        const panel = event.target.closest('[data-menu-submenu-portaled="true"]');
+                        if (panel) { event.preventDefault(); event.stopPropagation(); backMenuSubmenu(panel); return; }
                     }
 					if (event.key === 'Escape') {
 						const dropdown = kanbanDropdownForTarget(event.target);
@@ -4562,7 +4601,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 								return;
 							}
 							applyPendingKanbanMovesToResponse(event.detail, new Set(reconciliationGenerations));
-							closeKanbanSubmenus(null, null);
+							closeMenuSubmenus(null, null);
 							if (!savedKanbanInteraction) snapshotKanbanInteraction(event.detail.target);
 							savedScrollPositions.clear();
 							// Save scroll positions of all scrollable drop zones

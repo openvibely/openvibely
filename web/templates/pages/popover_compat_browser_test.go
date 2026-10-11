@@ -87,6 +87,15 @@ func TestBrowserFunctional_PopoverCompatibility(t *testing.T) {
 					return
 				}
 
+				var submenu bytes.Buffer
+				if err := components.MenuSubmenu("More").Render(templ.WithChildren(r.Context(), templ.Raw(`<li><button type="button">Child action</button></li>`)), &submenu); err != nil {
+					t.Fatal(err)
+				}
+				fmt.Fprint(&icons, `<div id="generic-submenu-fixture" style="position:fixed;left:300px;top:80px;z-index:1100">`)
+				if err := components.CardActionDropdown(components.CardActionDropdownConfig{}).Render(templ.WithChildren(r.Context(), templ.Raw(submenu.String()+`<li><button type="button">Ordinary action</button></li>`)), &icons); err != nil {
+					t.Fatal(err)
+				}
+				fmt.Fprint(&icons, `</div>`)
 				html := strings.Replace(page.String(), "</body>", icons.String()+"</body>", 1)
 				if legacy {
 					// Emulate missing methods and an unrecognized pseudo-class, including CSS parsing.
@@ -105,6 +114,23 @@ func TestBrowserFunctional_PopoverCompatibility(t *testing.T) {
 					}
 					b.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseMoved", "x": point.X, "y": point.Y}, nil)
 				}
+				b.waitFor("generic menu ready", `String(!!document.querySelector('#generic-submenu-fixture label') && typeof positionMenuSubmenu === 'function')`, "true")
+				b.evaluate(`document.querySelector('#generic-submenu-fixture label').focus(); 'ok'`)
+				hover(`#generic-submenu-fixture [data-menu-content] > li:first-child`)
+				b.waitFor("generic submenu opens with native hover", `String(!!document.querySelector('[data-menu-submenu-portaled="true"]'))`, "true")
+				hover(`#generic-submenu-fixture [data-menu-content] > li:last-child`)
+				b.waitFor("generic ordinary row dismisses submenu", `String(!!document.querySelector('[data-menu-submenu-portaled="true"]'))`, "false")
+				b.evaluate(`document.querySelector('#generic-submenu-fixture [data-menu-content] > li:first-child > button').focus(); 'ok'`)
+				b.waitFor("generic submenu opens on focus", `String(!!document.querySelector('[data-menu-submenu-portaled="true"]'))`, "true")
+				b.evaluate(`document.querySelector('[data-menu-submenu-portaled="true"] button').focus(); 'ok'`)
+				b.waitFor("generic child focus preserves submenu", `String(!!document.querySelector('[data-menu-submenu-portaled="true"]'))`, "true")
+				b.evaluate(`document.querySelector('#generic-submenu-fixture [data-menu-content] > li:last-child > button').focus(); 'ok'`)
+				b.waitFor("generic ordinary focus dismisses submenu", `String(!!document.querySelector('[data-menu-submenu-portaled="true"]'))`, "false")
+				b.evaluate(`document.querySelector('#generic-submenu-fixture [data-menu-content] > li:first-child > button').focus(); 'ok'`)
+				b.waitFor("generic submenu reopens", `String(!!document.querySelector('[data-menu-submenu-portaled="true"]'))`, "true")
+				b.evaluate(`document.body.dispatchEvent(new PointerEvent('pointerdown', {bubbles:true})); 'ok'`)
+				b.waitFor("outside pointer dismisses generic submenu", `String(!!document.querySelector('[data-menu-submenu-portaled="true"]'))`, "false")
+				b.evaluate(`document.querySelector('#generic-submenu-fixture').remove(); 'ok'`)
 				b.waitFor("task panel", `String(!!document.querySelector('[data-detail-property="priority"]'))`, "true")
 				checkStableHover := func(selector, rootSelector, optionsSelector string) {
 					t.Helper()
@@ -139,7 +165,7 @@ func TestBrowserFunctional_PopoverCompatibility(t *testing.T) {
 					b.waitFor("shared search headers "+theme, `(function(){var model=getComputedStyle(document.querySelector('.ov-mp-search'));return String(Array.from(document.querySelectorAll('[data-searchable-selector-search-shell],#task-property-picker .ov-menu-search')).every(function(el){var s=getComputedStyle(el);return ['padding','borderBottomWidth','borderBottomColor'].every(function(key){return s[key]===model[key]})}))})()`, "true")
 					b.waitFor("composer active-row color", `(function(){var row=document.querySelector('#conversation-model-picker .ov-mp-row');row.setAttribute('data-picker-active','');return String(getComputedStyle(row).backgroundColor!=='rgba(0, 0, 0, 0)')})()`, "true")
 					b.click(`.project-bar-brand`)
-					b.evaluate(`var panel=document.querySelector('#menu-style-fixture .dropdown-content').cloneNode(true);panel.id='submenu-hover-fixture';panel.classList.remove('dropdown-content');panel.setAttribute('data-task-card-submenu-portaled','true');panel.style.cssText='display:block;visibility:visible;opacity:1;position:fixed;left:300px;top:180px;z-index:2000';panel.querySelector('.active').classList.remove('active');document.body.append(panel);'ok'`)
+					b.evaluate(`var panel=document.querySelector('#menu-style-fixture .dropdown-content').cloneNode(true);panel.id='submenu-hover-fixture';panel.classList.remove('dropdown-content');panel.setAttribute('data-menu-submenu-portaled','true');panel.style.cssText='display:block;visibility:visible;opacity:1;position:fixed;left:300px;top:180px;z-index:2000';panel.querySelector('.active').classList.remove('active');document.body.append(panel);'ok'`)
 					hover(`#submenu-hover-fixture button:not(:disabled)`)
 					b.waitFor("enabled submenu hover "+theme, `String(getComputedStyle(document.querySelector('#submenu-hover-fixture button:not(:disabled)')).backgroundColor !== 'rgba(0, 0, 0, 0)')`, "true")
 					hover(`#submenu-hover-fixture button:disabled`)

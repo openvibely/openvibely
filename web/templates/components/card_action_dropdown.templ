@@ -62,6 +62,7 @@ func cardActionDropdownTitle(config CardActionDropdownConfig) string {
 
 templ CardActionDropdown(config CardActionDropdownConfig) {
 	<div
+		data-menu-dropdown
 		class={ cardActionDropdownWrapperClass(config) }
 		if config.StopPropagation {
 			onclick="event.stopPropagation()"
@@ -97,6 +98,7 @@ templ CardActionDropdown(config CardActionDropdownConfig) {
 			</svg>
 		</label>
 		<ul
+			data-menu-content
 			tabindex="0"
 			class={ cardActionDropdownMenuClass(config) }
 			if config.MenuKanbanContent {
@@ -106,4 +108,13 @@ templ CardActionDropdown(config CardActionDropdownConfig) {
 			{ children... }
 		</ul>
 	</div>
+}
+
+templ MenuSubmenu(label string) {
+	<li class="group relative">
+		<button type="button" class="justify-between" onclick="positionMenuSubmenu(this.parentElement)" onfocus="positionMenuSubmenu(this.parentElement)" onkeydown="handleMenuSubmenuKeydown(event, this.parentElement)">{ label }<span aria-hidden="true">›</span></button>
+		<ul tabindex="-1" data-menu-submenu-panel class="ov-menu ov-menu-actions ov-menu-scroll menu absolute right-0 top-full z-[110] hidden w-56 max-w-[calc(100vw-2rem)]">
+			{ children... }
+		</ul>
+	</li>
 }
