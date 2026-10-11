@@ -211,6 +211,20 @@
         }
     };
     let searchTimer = 0;
+    function setSearchOpen(search, open) {
+        const input = search.querySelector('[data-kanban-search-input]');
+        if (!open && input.value.trim()) return false;
+        search.dataset.open = String(open);
+        search.querySelector('[data-kanban-search-toggle]').setAttribute('aria-expanded', String(open));
+        input.tabIndex = open ? 0 : -1;
+        if (open) input.focus();
+        return true;
+    }
+    document.addEventListener('mousedown', event => {
+        const toggle = event.target.closest && event.target.closest('[data-kanban-search-toggle], [data-kanban-search-clear]');
+        // Keep focus in the open input so the click handler, not focusout, decides whether to collapse.
+        if (toggle && toggle.closest('[data-kanban-search]').dataset.open === 'true') event.preventDefault();
+    });
     document.addEventListener('click', event => {
         const clear = event.target.closest && event.target.closest('[data-kanban-search-clear]');
         if (!clear) return;
@@ -220,6 +234,25 @@
         refresh();
         input.focus();
     });
+    document.addEventListener('click', event => {
+        const toggle = event.target.closest && event.target.closest('[data-kanban-search-toggle]');
+        if (!toggle) return;
+        const search = toggle.closest('[data-kanban-search]');
+        const open = search.dataset.open !== 'true';
+        if (!setSearchOpen(search, open)) search.querySelector('[data-kanban-search-input]').focus();
+        else if (!open) toggle.focus();
+    });
+    // iOS Safari keeps inputs focused when tapping blank space, so close on any outside press too.
+    document.addEventListener('pointerdown', event => {
+        const search = document.querySelector('[data-kanban-search][data-open="true"]');
+        if (!search || search.contains(event.target)) return;
+        const input = search.querySelector('[data-kanban-search-input]');
+        if (setSearchOpen(search, false) && document.activeElement === input) input.blur();
+    });
+    document.addEventListener('focusout', event => {
+        const search = event.target.closest && event.target.closest('[data-kanban-search]');
+        if (search && !search.contains(event.relatedTarget)) setSearchOpen(search, false);
+    });
     document.addEventListener('input', event => {
         if (!event.target.matches || !event.target.matches('[data-kanban-search-input]')) return;
         clearTimeout(searchTimer);
@@ -227,16 +260,22 @@
     });
     document.addEventListener('keydown', event => {
         if (event.key !== 'Escape' || !event.target.matches || !event.target.matches('[data-kanban-search-input]')) return;
+        const search = event.target.closest('[data-kanban-search]');
         clearTimeout(searchTimer);
         event.target.value = '';
         refresh();
-        event.target.focus();
+        setSearchOpen(search, false);
+        search.querySelector('[data-kanban-search-toggle]').focus();
     });
     document.addEventListener('DOMContentLoaded', refresh);
     document.addEventListener('htmx:afterSwap', refresh);
     document.addEventListener('htmx:afterSettle', refresh);
     // History snapshots keep cards' hidden attributes but not the typed term, so resync from the restored (empty) input.
-    document.addEventListener('htmx:historyRestore', refresh);
+    document.addEventListener('htmx:historyRestore', () => {
+        const search = document.querySelector('[data-kanban-search]');
+        if (search) setSearchOpen(search, false);
+        refresh();
+    });
     document.addEventListener('task-pointer-dragend', refresh);
     document.addEventListener('click', event => {
         if (!window.kanbanBatchRunning) return;
