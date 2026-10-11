@@ -4977,63 +4977,89 @@ func TestGoalAchievedAutoMergeReconcilesAfterBusyPreCompletionEvent(t *testing.T
 	}
 }
 
-func TestGoalAchievedAutoMergeReconcilesAlreadyMergedStateAndCleanup(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	ctx := context.Background()
-	taskRepo := repository.NewTaskRepo(db, nil)
-	projectRepo := repository.NewProjectRepo(db)
-	settingsRepo := repository.NewSettingsRepo(db)
-	ws := NewWorktreeService(taskRepo, projectRepo, settingsRepo)
-	goalSvc := NewTaskGoalService(repository.NewTaskGoalRepo(db), taskRepo, nil)
-	ws.SetTaskGoalService(goalSvc)
-	goalSvc.SetGoalAchievedHandler(ws.AutoMergeOnGoalAchieved)
-	repoDir := createTestGitRepo(t)
-	target := GetDefaultBranch(repoDir)
-	project := &models.Project{Name: "Already merged goal project", RepoPath: repoDir}
-	if err := projectRepo.Create(ctx, project); err != nil {
-		t.Fatal(err)
-	}
-	task := &models.Task{ProjectID: project.ID, Title: "Already merged goal", Category: models.CategoryCompleted, Status: models.StatusCompleted, Priority: 2, AutoMergeOnGoalAchieved: true, MergeTargetBranch: target}
-	if err := taskRepo.Create(ctx, task); err != nil {
-		t.Fatal(err)
-	}
-	worktreePath, branch, err := ws.SetupWorktree(ctx, task, repoDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(worktreePath, "already-merged-goal.txt"), []byte("merged elsewhere\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := CommitWorktreeChanges(worktreePath, "Add already merged fixture"); err != nil {
-		t.Fatal(err)
-	}
-	runGitTest(t, repoDir, "merge", "--no-ff", "-m", "external merge", branch)
-	if err := taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusPending); err != nil {
-		t.Fatal(err)
-	}
-	if err := settingsRepo.Set(ctx, "worktree_cleanup_policy", "after_merge"); err != nil {
-		t.Fatal(err)
-	}
-	goal, err := goalSvc.SetGoal(ctx, task.ID, "recognize merged branch", GoalOptions{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := goalSvc.MarkAchieved(ctx, task.ID, goal.GoalID, "verified"); err != nil {
-		t.Fatal(err)
-	}
+func TestAutoMergeNoOpPreservesStatus(t *testing.T) {
+	for _, trigger := range []string{"goal", "completion"} {
+		for _, scenario := range []string{"unchanged", "manual merge", "app merged"} {
+			t.Run(trigger+"/"+scenario, func(t *testing.T) {
+				db := testutil.NewTestDB(t)
+				ctx := context.Background()
+				taskRepo := repository.NewTaskRepo(db, nil)
+				projectRepo := repository.NewProjectRepo(db)
+				settingsRepo := repository.NewSettingsRepo(db)
+				ws := NewWorktreeService(taskRepo, projectRepo, settingsRepo)
+				goalSvc := NewTaskGoalService(repository.NewTaskGoalRepo(db), taskRepo, nil)
+				ws.SetTaskGoalService(goalSvc)
+				goalSvc.SetGoalAchievedHandler(ws.AutoMergeOnGoalAchieved)
+				repoDir := createTestGitRepo(t)
+				target := GetDefaultBranch(repoDir)
+				project := &models.Project{Name: "Already merged goal project", RepoPath: repoDir}
+				if err := projectRepo.Create(ctx, project); err != nil {
+					t.Fatal(err)
+				}
+				task := &models.Task{ProjectID: project.ID, Title: "Already merged goal", Category: models.CategoryCompleted, Status: models.StatusCompleted, Priority: 2, AutoMerge: true, AutoMergeOnGoalAchieved: true, MergeTargetBranch: target}
+				if err := taskRepo.Create(ctx, task); err != nil {
+					t.Fatal(err)
+				}
+				worktreePath, branch, err := ws.SetupWorktree(ctx, task, repoDir)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if scenario != "unchanged" {
+					if err := os.WriteFile(filepath.Join(worktreePath, "already-merged-goal.txt"), []byte("merged elsewhere\n"), 0o644); err != nil {
+						t.Fatal(err)
+					}
+					if err := CommitWorktreeChanges(worktreePath, "Add already merged fixture"); err != nil {
+						t.Fatal(err)
+					}
+					runGitTest(t, repoDir, "merge", "--no-ff", "-m", "external merge", branch)
+				}
+				wantStatus := models.MergeStatusPending
+				if scenario == "app merged" {
+					wantStatus = models.MergeStatusMerged
+				}
+				if err := taskRepo.UpdateMergeStatus(ctx, task.ID, wantStatus); err != nil {
+					t.Fatal(err)
+				}
+				if err := settingsRepo.Set(ctx, "worktree_cleanup_policy", "after_merge"); err != nil {
+					t.Fatal(err)
+				}
+				if trigger == "goal" {
+					goal, err := goalSvc.SetGoal(ctx, task.ID, "recognize merged branch", GoalOptions{})
+					if err != nil {
+						t.Fatal(err)
+					}
+					if _, err := goalSvc.MarkAchieved(ctx, task.ID, goal.GoalID, "verified"); err != nil {
+						t.Fatal(err)
+					}
 
-	persisted, err := taskRepo.GetByID(ctx, task.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if persisted.MergeStatus != models.MergeStatusMerged {
-		t.Fatalf("already-merged task status = %q, want merged", persisted.MergeStatus)
-	}
-	if persisted.WorktreePath != "" || persisted.WorktreeBranch != "" {
-		t.Fatalf("verified already-merged worktree was not cleaned up: %+v", persisted)
-	}
-	if _, err := os.Stat(worktreePath); !os.IsNotExist(err) {
-		t.Fatalf("already-merged worktree still exists: %v", err)
+				} else {
+					ws.autoMergeTask(ctx, task.ID, automaticMergeTrigger{})
+				}
+				persisted, err := taskRepo.GetByID(ctx, task.ID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if persisted.MergeStatus != wantStatus {
+					t.Fatalf("no-op status = %q, want %q", persisted.MergeStatus, wantStatus)
+				}
+				if err := ws.CleanupMergedWorktrees(ctx); err != nil {
+					t.Fatal(err)
+				}
+				persisted, err = taskRepo.GetByID(ctx, task.ID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if persisted.MergeStatus != wantStatus {
+					t.Fatalf("cleanup status = %q, want %q", persisted.MergeStatus, wantStatus)
+				}
+				if persisted.WorktreePath != "" || persisted.WorktreeBranch != "" {
+					t.Fatalf("verified already-merged worktree was not cleaned up: %+v", persisted)
+				}
+				if _, err := os.Stat(worktreePath); !os.IsNotExist(err) {
+					t.Fatalf("already-merged worktree still exists: %v", err)
+				}
+			})
+		}
 	}
 }
 
