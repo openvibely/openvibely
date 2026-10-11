@@ -3715,12 +3715,6 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 							return beginPointerCardMotion(card);
 						});
 						state.motion = state.motions[state.dragCards.indexOf(state.card)];
-                            if (draggedTaskIds.length > 1) {
-                                state.badge = document.createElement('span');
-                                state.badge.className = 'badge badge-primary';
-                                state.badge.textContent = draggedTaskIds.length + ' tasks';
-                                state.card.prepend(state.badge);
-                            }
 					}
 				function refreshTaskPointerDropZone(clientX, clientY) {
 					const state = taskPointerDrag;
@@ -3757,7 +3751,6 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					}
 				function cleanupTaskPointerDrag() {
 					const state = taskPointerDrag;
-                        if (state && state.badge) state.badge.remove();
 					stopAutoScroll();
 						if (state && state.dropZone) state.dropZone.classList.remove('drag-over');
 						if (state && state.motions) {
