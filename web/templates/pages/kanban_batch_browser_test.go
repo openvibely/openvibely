@@ -81,14 +81,27 @@ window.addEventListener('DOMContentLoaded', async function() {
       const filterPanel = document.querySelector('[data-menu-submenu-portaled="true"]');
       filterPanel.querySelector('li').dispatchEvent(new MouseEvent('mouseenter'));
       check(document.querySelectorAll('[data-menu-submenu-portaled="true"]').length === 2, name + ' nested filter opens');
-      const choicesPanel = Array.from(document.querySelectorAll('[data-menu-submenu-portaled="true"]')).find(panel => panel !== filterPanel);
-      choicesPanel.querySelector('li').dispatchEvent(new MouseEvent('mouseenter'));
-      check(choicesPanel.isConnected && filterPanel.isConnected, name + ' hovering a choice preserves its menu and ancestors');
+      const nestedRows = Array.from(filterPanel.children).filter(row => row.querySelector(':scope > [data-menu-submenu-panel]'));
+      const filterRect = filterPanel.getBoundingClientRect();
+      for (const row of nestedRows.slice(1)) {
+        const rect = row.getBoundingClientRect();
+        row.dispatchEvent(new MouseEvent('mouseenter', {clientX:filterRect.right-12,clientY:rect.top+12}));
+        const source = row.querySelector(':scope > [data-menu-submenu-panel]');
+        const opened = Array.from(document.querySelectorAll('[data-menu-submenu-portaled="true"]')).find(panel => panel.__openVibelySubmenuSourcePanel === source);
+        check(opened && filterPanel.isConnected, name + ' nested sibling opens immediately');
+        row.dispatchEvent(new MouseEvent('mouseleave'));
+        opened.dispatchEvent(new MouseEvent('mouseenter'));
+        check(opened.isConnected, name + ' row exit into expanded panel preserves selection');
+      }
+      filterPanel.querySelector('li').dispatchEvent(new MouseEvent('mouseenter'));
+      const restoredChoices = Array.from(document.querySelectorAll('[data-menu-submenu-portaled="true"]')).find(panel => panel !== filterPanel);
+      restoredChoices.querySelector('li').dispatchEvent(new MouseEvent('mouseenter'));
+      check(restoredChoices.isConnected && filterPanel.isConnected, name + ' hovering a choice preserves its menu and ancestors');
       const dynamicRow = document.createElement('li');
       dynamicRow.innerHTML = '<button type="button">Dynamic action</button>';
       filterPanel.appendChild(dynamicRow);
       dynamicRow.dispatchEvent(new MouseEvent('mouseenter'));
-      check(filterPanel.isConnected && !choicesPanel.isConnected, name + ' unannotated nested row closes only deeper menus');
+      check(filterPanel.isConnected && !restoredChoices.isConnected, name + ' unannotated nested row closes only deeper menus');
       filterPanel.querySelector('li').dispatchEvent(new MouseEvent('mouseenter'));
       dynamicRow.querySelector('button').focus();
       check(filterPanel.isConnected && document.querySelectorAll('[data-menu-submenu-portaled="true"]').length === 1, name + ' nested row focus preserves parent menu');

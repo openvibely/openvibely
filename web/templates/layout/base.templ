@@ -3248,15 +3248,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				panel.__openVibelySubmenuDropdown = null;
 			}
 
-			let pendingMenuSubmenuHover = null;
-			function cancelMenuSubmenuHover(container) {
-				if (!pendingMenuSubmenuHover || container && pendingMenuSubmenuHover.container !== container) return;
-				clearTimeout(pendingMenuSubmenuHover.timer);
-				pendingMenuSubmenuHover = null;
-			}
-
 			function closeMenuSubmenus(dropdown, exceptPanel) {
-				if (pendingMenuSubmenuHover && (!dropdown || pendingMenuSubmenuHover.dropdown === dropdown)) cancelMenuSubmenuHover();
 				const keep = new Set();
                 for (let parent = exceptPanel; parent; parent = parent.__openVibelySubmenuParent) keep.add(parent);
                 Array.from(document.querySelectorAll('[data-menu-submenu-portaled="true"]')).reverse().forEach(function(panel) {
@@ -3266,7 +3258,6 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 
 			function positionMenuSubmenu(container) {
 				if (!container || !container.querySelector || returningFromMenuSubmenu) return;
-				cancelMenuSubmenuHover();
 				const sourcePanel = container.querySelector(':scope > [data-menu-submenu-panel]');
 				const dropdown = menuDropdownForTarget(container);
 				const parentPanel = container.closest('[data-menu-submenu-portaled="true"]');
@@ -3283,7 +3274,6 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					panel.__openVibelySubmenuDropdown = dropdown;
                     panel.__openVibelySubmenuParent = menu;
 					panel.setAttribute('data-menu-submenu-portaled', 'true');
-					panel.addEventListener('mouseenter', function() { cancelMenuSubmenuHover(); });
 					sourcePanel.style.setProperty('display', 'none', 'important');
 					document.body.appendChild(panel);
                     if (window.htmx) window.htmx.process(panel);
@@ -3359,10 +3349,6 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				const row = dropdownMenuRow(event.target);
 				if (row && event.target === row) hoverMenuSubmenu(event, row);
 			}, true);
-			document.addEventListener('mouseleave', function(event) {
-				const row = dropdownMenuRow(event.target);
-				if (row && event.target === row) cancelMenuSubmenuHover(row);
-			}, true);
 			document.addEventListener('focusin', function(event) {
 				const row = dropdownMenuRow(event.target);
 				if (row && !row.querySelector(':scope > [data-menu-submenu-panel]')) {
@@ -3409,7 +3395,6 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
                     const source = panel.__openVibelySubmenuSourcePanel;
                     if (owner && (element === owner || element.contains(owner))) closeMenuSubmenus(owner, null);
                     else if (source && (element.contains(source) || source.contains(element))) {
-                        cancelMenuSubmenuHover();
                         restoreMenuSubmenu(panel);
                     }
                 });
@@ -3424,37 +3409,10 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					closeMenuSubmenus(dropdown, container.closest('[data-menu-submenu-portaled="true"]'));
 					return;
 				}
-				const current = Array.from(document.querySelectorAll('[data-menu-submenu-portaled="true"]')).find(function(panel) {
-					return panel.__openVibelySubmenuDropdown === dropdown;
-				});
-				function activate() {
-					positionMenuSubmenu(container);
-					const panel = Array.from(document.querySelectorAll('[data-menu-submenu-portaled="true"]')).find(function(candidate) {
-						return candidate.__openVibelySubmenuDropdown === dropdown;
-					});
-					if (panel) panel.__openVibelyPointerOrigin = event ? {x: event.clientX, y: event.clientY} : null;
-				}
-				if (current && current.__openVibelySubmenuSourcePanel !== sourcePanel && current.__openVibelyPointerOrigin && event) {
-				const bounds = current.getBoundingClientRect();
-				const menu = dropdown.querySelector(':scope > [data-menu-content], :scope > [data-kanban-menu-content]');
-				const menuRect = menu.getBoundingClientRect();
-				const right = bounds.left >= menuRect.right - 8;
-				const toward = right
-					? event.clientX > current.__openVibelyPointerOrigin.x + 8
-					: event.clientX < current.__openVibelyPointerOrigin.x - 8;
-				if (toward && event.clientY >= bounds.top - 12 && event.clientY <= bounds.bottom + 12) {
-					cancelMenuSubmenuHover();
-					const pending = {container: container, dropdown: dropdown, timer: null};
-					pending.timer = setTimeout(function() {
-						if (pendingMenuSubmenuHover !== pending || !dropdown.isConnected || !container.isConnected) return;
-						activate();
-					}, 300);
-					pendingMenuSubmenuHover = pending;
-					return;
-				}
-				}
-				activate();
-			}
+                // Row entry is authoritative. Delayed intent heuristics can leave
+                // nested menus waiting on a sibling panel that is no longer active.
+                positionMenuSubmenu(container);
+            }
 
 			function handleMenuSubmenuKeydown(event, container) {
 				if (!event || (event.key !== 'ArrowRight' && event.key !== 'Enter' && event.key !== ' ' && event.key !== 'Tab')) return;
