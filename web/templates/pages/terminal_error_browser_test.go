@@ -352,10 +352,10 @@ func TestBrowserFunctional_ChatLiveCreatedFailureProductionWiringInChrome(t *tes
 				executions = append(executions, returnTerminal)
 			}
 			if r.Header.Get("HX-Request") == "true" {
-				_, _ = w.Write([]byte(renderTerminalBrowserComponent(t, ChatContent(nil, executions, project.ID, nil, nil, false, false, 30))))
+				_, _ = w.Write([]byte(renderTerminalBrowserComponent(t, ChatContent(nil, executions, project.ID, nil, nil, nil, false, false, 30))))
 				return
 			}
-			document := renderTerminalBrowserComponent(t, Chat([]models.Project{project}, project.ID, nil, executions, nil, nil, false, false, 30))
+			document := renderTerminalBrowserComponent(t, Chat([]models.Project{project}, project.ID, nil, executions, nil, nil, nil, false, false, 30))
 			_, _ = w.Write([]byte(installTerminalBrowserPrelude(document)))
 		case "/auth/me":
 			w.WriteHeader(http.StatusNoContent)

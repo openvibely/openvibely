@@ -73,7 +73,7 @@ func TestBrowserFunctional_ChatNavigationStateAndActiveStreamInChrome(t *testing
 			})
 		}
 		var rendered bytes.Buffer
-		if err := ChatContent(nil, currentHistory, "project-browser", nil, nil, false, false, 30).Render(context.Background(), &rendered); err != nil {
+		if err := ChatContent(nil, currentHistory, "project-browser", nil, nil, nil, false, false, 30).Render(context.Background(), &rendered); err != nil {
 			t.Fatalf("render production ChatContent: %v", err)
 		}
 		return rendered.String()
@@ -472,7 +472,7 @@ func runChatActionsDropdownInChrome(t *testing.T, chrome string, htmxJS []byte, 
 	navigationScript := baseHTML[navStart : navStart+navEndOffset]
 
 	var renderedChat bytes.Buffer
-	if err := ChatContent(nil, nil, "project-actions", nil, nil, false, false, 30).Render(context.Background(), &renderedChat); err != nil {
+	if err := ChatContent(nil, nil, "project-actions", nil, nil, nil, false, false, 30).Render(context.Background(), &renderedChat); err != nil {
 		t.Fatalf("render production ChatContent: %v", err)
 	}
 	chatFragment := renderedChat.String()

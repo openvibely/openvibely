@@ -268,9 +268,9 @@ func TestBrowserFunctional_ChatReconnectTransitionsPreserveCurrentDOMState(t *te
 	terminal.Status = models.ExecCompleted
 	terminal.Output = "partial missed"
 
-	initialHTML := renderReconnectComponent(t, ChatContent(nil, []models.Execution{completed}, "project-focus", nil, nil, false, false, 30))
-	runningHTML := renderReconnectComponent(t, ChatContent(nil, []models.Execution{completed, running}, "project-focus", nil, nil, false, false, 30))
-	terminalHTML := renderReconnectComponent(t, ChatContent(nil, []models.Execution{completed, terminal}, "project-focus", nil, nil, false, false, 30))
+	initialHTML := renderReconnectComponent(t, ChatContent(nil, []models.Execution{completed}, "project-focus", nil, nil, nil, false, false, 30))
+	runningHTML := renderReconnectComponent(t, ChatContent(nil, []models.Execution{completed, running}, "project-focus", nil, nil, nil, false, false, 30))
+	terminalHTML := renderReconnectComponent(t, ChatContent(nil, []models.Execution{completed, terminal}, "project-focus", nil, nil, nil, false, false, 30))
 	prelude := reconnectFixturePrelude(t, map[string]string{"initial": initialHTML, "running": runningHTML, "terminal": terminalHTML})
 	doneEvent := reconnectChatEventJSON(t, events.ChatEvent{Type: events.ChatResponseDone, ProjectID: "project-focus", ExecID: "chat-live", CompletedOutput: "partial missed", Status: string(models.ExecCompleted)})
 
@@ -367,8 +367,8 @@ window.addEventListener('DOMContentLoaded', async function() {
 
 func TestBrowserFunctional_ChatReconnectDiscoversMissedActiveExecutionAndAttachesStream(t *testing.T) {
 	running := models.Execution{ID: "chat-missed-active", Status: models.ExecRunning, PromptSent: "missed start", Output: "partial"}
-	initialHTML := renderReconnectComponent(t, ChatContent(nil, nil, "project-missed-active", nil, nil, false, false, 30))
-	runningHTML := renderReconnectComponent(t, ChatContent(nil, []models.Execution{running}, "project-missed-active", nil, nil, false, false, 30))
+	initialHTML := renderReconnectComponent(t, ChatContent(nil, nil, "project-missed-active", nil, nil, nil, false, false, 30))
+	runningHTML := renderReconnectComponent(t, ChatContent(nil, []models.Execution{running}, "project-missed-active", nil, nil, nil, false, false, 30))
 	stopAction := renderReconnectComponent(t, components.ChatComposerActionButtonOOB("chat-form-primary-action", "/chat/stop?project_id=project-missed-active", true, "missed-active-turn"))
 	stopActionJSON, err := json.Marshal(stopAction)
 	if err != nil {
@@ -434,9 +434,9 @@ func runChatExecutionStreamOnlyTerminalComposerCase(t *testing.T, terminalStatus
 	if terminalStatus == models.ExecFailed {
 		terminal.ErrorMessage = "provider failed"
 	}
-	initialHTML := renderReconnectComponent(t, ChatContent(nil, nil, "project-stream-only", nil, nil, false, false, 30))
-	runningHTML := renderReconnectComponent(t, ChatContent(nil, []models.Execution{running}, "project-stream-only", nil, nil, false, false, 30))
-	terminalHTML := renderReconnectComponent(t, ChatContent(nil, []models.Execution{terminal}, "project-stream-only", nil, nil, false, false, 30))
+	initialHTML := renderReconnectComponent(t, ChatContent(nil, nil, "project-stream-only", nil, nil, nil, false, false, 30))
+	runningHTML := renderReconnectComponent(t, ChatContent(nil, []models.Execution{running}, "project-stream-only", nil, nil, nil, false, false, 30))
+	terminalHTML := renderReconnectComponent(t, ChatContent(nil, []models.Execution{terminal}, "project-stream-only", nil, nil, nil, false, false, 30))
 	stopAction := renderReconnectComponent(t, components.ChatComposerActionButtonOOB("chat-form-primary-action", "/chat/stop?project_id=project-stream-only", true, "stream-only-turn"))
 	sendAction := renderReconnectComponent(t, components.ChatComposerActionButtonOOB("chat-form-primary-action", "/chat/stop?project_id=project-stream-only", false, ""))
 	stopActionJSON, err := json.Marshal(stopAction)
@@ -718,9 +718,9 @@ func runChatTerminalOrderingReconnectCase(t *testing.T, terminalStatus models.Ex
 	if terminalStatus == models.ExecFailed {
 		terminal.ErrorMessage = "provider failed"
 	}
-	initialHTML := renderReconnectComponent(t, ChatContent(nil, nil, "project-terminal", nil, nil, false, false, 30))
-	runningHTML := renderReconnectComponent(t, ChatContent(nil, []models.Execution{running}, "project-terminal", nil, nil, false, false, 30))
-	terminalHTML := renderReconnectComponent(t, ChatContent(nil, []models.Execution{terminal}, "project-terminal", nil, nil, false, false, 30))
+	initialHTML := renderReconnectComponent(t, ChatContent(nil, nil, "project-terminal", nil, nil, nil, false, false, 30))
+	runningHTML := renderReconnectComponent(t, ChatContent(nil, []models.Execution{running}, "project-terminal", nil, nil, nil, false, false, 30))
+	terminalHTML := renderReconnectComponent(t, ChatContent(nil, []models.Execution{terminal}, "project-terminal", nil, nil, nil, false, false, 30))
 	prelude := reconnectFixturePrelude(t, map[string]string{"initial": initialHTML, "running": runningHTML, "terminal": terminalHTML})
 	terminalEvent := reconnectChatEventJSON(t, events.ChatEvent{
 		Type:            events.ChatResponseDone,
