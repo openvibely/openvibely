@@ -824,8 +824,8 @@ modelLoop:
 	if completionErr != nil {
 		finalizeLifecycle(completionErr, result.ChatContext)
 		applog.Infof("[handler] processStreamingResponse exec=%s task=%s completion policy failed: %v", params.ExecID, params.TaskID, completionErr)
-		h.recordStreamingUsage(ctx, params, result, string(models.ExecFailed), completionErr.Error(), durationMs)
-		h.completeWithFailureAndOutput(ctx, params.ExecID, params.TaskID, completionErr.Error(), output, tokensUsed, durationMs, params.TelegramInitialAckMessageID, params.ChannelReply)
+		status := h.completeWithFinalizationError(ctx, params.ExecID, params.TaskID, completionErr, output, tokensUsed, durationMs, params.TelegramInitialAckMessageID, params.ChannelReply)
+		h.recordStreamingUsage(ctx, params, result, string(status), completionErr.Error(), durationMs)
 		h.finalizeStreamingTurn(params, output)
 		return
 	}
@@ -857,8 +857,8 @@ modelLoop:
 		completionOutcome, completionErr = h.completeWithSuccessWithPRReconciliation(ctx, params.ExecID, params.TaskID, output, params.WorkDir, tokensUsed, durationMs, params.RepublishOpenPRAfterStartupSync, params.TelegramInitialAckMessageID, params.ChannelReply)
 		if completionErr != nil {
 			finalizeLifecycle(completionErr, result.ChatContext)
-			h.recordStreamingUsage(ctx, params, result, string(models.ExecFailed), completionErr.Error(), durationMs)
-			h.completeWithFailureAndOutput(ctx, params.ExecID, params.TaskID, completionErr.Error(), output, tokensUsed, durationMs, params.TelegramInitialAckMessageID, params.ChannelReply)
+			status := h.completeWithFinalizationError(ctx, params.ExecID, params.TaskID, completionErr, output, tokensUsed, durationMs, params.TelegramInitialAckMessageID, params.ChannelReply)
+			h.recordStreamingUsage(ctx, params, result, string(status), completionErr.Error(), durationMs)
 			h.finalizeStreamingTurn(params, output)
 			return
 		}
@@ -2183,10 +2183,22 @@ func (h *Handler) completeWithSuccess(ctx context.Context, execID, taskID, outpu
 	outcome, err := h.completeWithSuccessWithPRReconciliation(ctx, execID, taskID, output, workDir, tokensUsed, durationMs, false, completionOptions...)
 	if err != nil {
 		applog.Infof("[handler] completeWithSuccess exec=%s completion policy failed: %v", execID, err)
-		h.completeWithFailureAndOutput(ctx, execID, taskID, err.Error(), output, tokensUsed, durationMs, completionOptions...)
+		h.completeWithFinalizationError(ctx, execID, taskID, err, output, tokensUsed, durationMs, completionOptions...)
 		return repository.CompleteSuccessAlreadyTerminal
 	}
 	return outcome
+}
+
+// completeWithFinalizationError preserves cancellation ownership when Stop or a
+// deadline interrupts finalization, just as cancellation during the model call does.
+func (h *Handler) completeWithFinalizationError(ctx context.Context, execID, taskID string, err error, output string, tokensUsed int, durationMs int64, completionOptions ...interface{}) models.ExecutionStatus {
+	if ctx.Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		telegramMessageID, channelReply := parseCompletionOptions(completionOptions...)
+		h.completeWithCancellation(execID, taskID, output, tokensUsed, durationMs, telegramMessageID, channelReply)
+		return models.ExecCancelled
+	}
+	h.completeWithFailureAndOutput(ctx, execID, taskID, err.Error(), output, tokensUsed, durationMs, completionOptions...)
+	return models.ExecFailed
 }
 
 func (h *Handler) completeWithSuccessWithPRReconciliation(ctx context.Context, execID, taskID, output, workDir string, tokensUsed int, durationMs int64, republishOpenPR bool, completionOptions ...interface{}) (repository.CompleteSuccessOutcome, error) {

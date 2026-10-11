@@ -9125,7 +9125,7 @@ func TestQueuedFailedRetryPreservesSourceAndExcludesItOnPromotion(t *testing.T) 
 	require.Equal(t, failed.PromptSent, req.Message)
 }
 
-func TestCompleteWithSuccessCommitCancellationFailsTask(t *testing.T) {
+func TestCompleteWithSuccessCommitCancellationCancelsTask(t *testing.T) {
 	h, _, configs := setupTestHandler(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -9150,12 +9150,12 @@ func TestCompleteWithSuccessCommitCancellationFailsTask(t *testing.T) {
 	require.True(t, called, "cancel during commit preparation, after readiness passed")
 	stored, err := h.execRepo.GetByID(context.Background(), execution.ID)
 	require.NoError(t, err)
-	require.Equal(t, models.ExecFailed, stored.Status)
+	require.Equal(t, models.ExecCancelled, stored.Status)
 	require.Equal(t, "finished output", stored.Output)
-	require.Contains(t, stored.ErrorMessage, "context canceled")
+	require.Equal(t, "cancelled", stored.ErrorMessage)
 	storedTask, err := h.taskRepo.GetByID(context.Background(), task.ID)
 	require.NoError(t, err)
-	require.Equal(t, models.StatusFailed, storedTask.Status)
+	require.Equal(t, models.StatusCancelled, storedTask.Status)
 	require.Equal(t, models.CategoryBacklog, storedTask.Category)
 }
 
@@ -9227,6 +9227,68 @@ func TestCompleteExecutionSuccessAtomicBoardState(t *testing.T) {
 					}
 				}
 			}
+		})
+	}
+}
+
+func TestFollowupStopDuringFinalizationPreservesSuccessor(t *testing.T) {
+	for _, successor := range []bool{false, true} {
+		t.Run(fmt.Sprintf("successor=%t", successor), func(t *testing.T) {
+			h, _, configs, db := setupTestHandlerWithDB(t)
+			ctx := context.Background()
+			agent := createAgent(t, configs)
+			repoDir := createHandlerTestGitRepo(t)
+			project := &models.Project{Name: "Stop during finalization", RepoPath: repoDir}
+			require.NoError(t, h.projectRepo.Create(ctx, project))
+			task := createTask(t, h, project.ID, "Finalization stop", func(task *models.Task) {
+				task.Status = models.StatusRunning
+				task.Category = models.CategoryActive
+			})
+			h.worktreeSvc = service.NewWorktreeService(h.taskRepo, h.projectRepo, h.settingsRepo)
+			workDir, _, err := h.worktreeSvc.SetupWorktree(ctx, task, repoDir)
+			require.NoError(t, err)
+			execution := createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) { ex.Status = models.ExecRunning; ex.IsFollowup = true })
+			require.NoError(t, os.WriteFile(filepath.Join(workDir, "change.txt"), []byte("change\n"), 0644))
+			caller := testutil.NewMockLLMCaller()
+			caller.Response = "finished output"
+			caller.TextOnly = caller.Response
+			stopped := false
+			var newer *models.Execution
+			caller.OnCall = func(_ context.Context, call testutil.MockLLMCall) {
+				if call.ExecID != "" {
+					return
+				} // Stop in commit summarization, after the streamed answer.
+				stopped = true
+				require.NoError(t, h.taskSvc.CancelTask(ctx, task.ID))
+				if successor {
+					// A new follow-up owns the task while the old commit unwinds.
+					require.NoError(t, h.taskRepo.UpdateCategory(ctx, task.ID, models.CategoryActive))
+					require.NoError(t, h.taskRepo.UpdateStatus(ctx, task.ID, models.StatusRunning))
+					newer = createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) { ex.Status = models.ExecRunning; ex.IsFollowup = true })
+				}
+			}
+			h.llmSvc.SetLLMCaller(caller)
+			h.processStreamingResponse(streamingResponseParams{ExecID: execution.ID, TaskID: task.ID, Agent: *agent, ProjectID: project.ID, Message: "continue", WorkDir: workDir, IsTaskFollowup: true})
+			require.True(t, stopped)
+			stored, err := h.execRepo.GetByID(ctx, execution.ID)
+			require.NoError(t, err)
+			require.Equal(t, models.ExecCancelled, stored.Status)
+			require.Contains(t, stored.Output, "finished output")
+			storedTask, err := h.taskRepo.GetByID(ctx, task.ID)
+			require.NoError(t, err)
+			if successor {
+				require.Equal(t, models.StatusRunning, storedTask.Status)
+				require.Equal(t, models.CategoryActive, storedTask.Category)
+				storedNewer, err := h.execRepo.GetByID(ctx, newer.ID)
+				require.NoError(t, err)
+				require.Equal(t, models.ExecRunning, storedNewer.Status)
+			} else {
+				require.Equal(t, models.StatusCancelled, storedTask.Status)
+				require.Equal(t, models.CategoryBacklog, storedTask.Category)
+			}
+			alerts, err := repository.NewAlertRepo(db).ListByProject(ctx, project.ID, 100)
+			require.NoError(t, err)
+			require.Empty(t, alerts, "Stop must not create a failure alert")
 		})
 	}
 }
