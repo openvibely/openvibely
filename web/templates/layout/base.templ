@@ -3341,13 +3341,34 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
                 }
 			}
 
+			// Capture row entry so swapped menu content and portaled submenus share
+			// the same behavior without per-row event attributes.
+			function kanbanMenuRow(target) {
+				const row = target && target.closest && target.closest('li');
+				return row && row.parentElement.matches('[data-kanban-menu-content], [data-task-card-submenu-portaled="true"]') && row.getAttribute('role') !== 'separator' ? row : null;
+			}
+			document.addEventListener('mouseenter', function(event) {
+				const row = kanbanMenuRow(event.target);
+				if (row && event.target === row) hoverKanbanSubmenu(event, row);
+			}, true);
+			document.addEventListener('mouseleave', function(event) {
+				const row = kanbanMenuRow(event.target);
+				if (row && event.target === row) cancelKanbanSubmenuHover(row);
+			}, true);
+			document.addEventListener('focusin', function(event) {
+				const row = kanbanMenuRow(event.target);
+				if (row && !row.querySelector(':scope > [data-task-card-submenu-panel]')) {
+					closeKanbanSubmenus(kanbanDropdownForTarget(row), row.closest('[data-task-card-submenu-portaled="true"]'));
+				}
+			});
+
 			function hoverKanbanSubmenu(event, container) {
 				if (!container) return;
 				const dropdown = kanbanDropdownForTarget(container);
 				if (!dropdown) return;
 				const sourcePanel = container.querySelector(':scope > [data-task-card-submenu-panel]');
 				if (!sourcePanel) {
-					closeKanbanSubmenus(dropdown, null);
+					closeKanbanSubmenus(dropdown, container.closest('[data-task-card-submenu-portaled="true"]'));
 					return;
 				}
 				const current = Array.from(document.querySelectorAll('[data-task-card-submenu-portaled="true"]')).find(function(panel) {
