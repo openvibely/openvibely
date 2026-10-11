@@ -1350,3 +1350,38 @@ func findSubstring(s, substr string) bool {
 	}
 	return false
 }
+
+func TestHandler_GetTaskWorktreeInfoUnchangedBranchDoesNotBecomeMerged(t *testing.T) {
+	h, e, _, db := setupTestHandlerWithDB(t)
+	ctx := context.Background()
+	repoDir := createHandlerTestGitRepo(t)
+	project := &models.Project{Name: "Unchanged worktree", RepoPath: repoDir}
+	projects := repository.NewProjectRepo(db)
+	if err := projects.Create(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+	tasks := repository.NewTaskRepo(db, nil)
+	task := &models.Task{ProjectID: project.ID, Title: "Read only", Category: models.CategoryCompleted, Status: models.StatusCompleted, MergeTargetBranch: gitCurrentBranch(t, repoDir)}
+	if err := tasks.Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	ws := service.NewWorktreeService(tasks, projects, repository.NewSettingsRepo(db))
+	if _, _, err := ws.SetupWorktree(ctx, task, repoDir); err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID+"/worktree", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetParamNames("taskId")
+	c.SetParamValues(task.ID)
+	if err := h.GetTaskWorktreeInfo(c); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := tasks.GetByID(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.MergeStatus == models.MergeStatusMerged {
+		t.Fatal("viewing unchanged worktree invented a merge")
+	}
+}

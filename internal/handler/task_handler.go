@@ -1486,7 +1486,7 @@ func (h *Handler) recoverTaskWorktreeState(ctx context.Context, task *models.Tas
 				return changed
 			}
 		}
-		if task.MergeStatus != models.MergeStatusMerged {
+		if task.MergeStatus != models.MergeStatusMerged && service.BranchProducedCommits(ctx, project.RepoPath, task.WorktreeBranch) {
 			if err := h.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusMerged); err != nil {
 				applog.Infof("[handler] recoverTaskWorktreeState: failed to update merge_status for task %s: %v", task.ID, err)
 			} else {
