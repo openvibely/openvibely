@@ -34,8 +34,9 @@ func TestProjectTabsUnderLoadInChrome(t *testing.T) {
 	for _, scenario := range []struct {
 		tasks int
 		delay time.Duration
-	}{{10, 0}, {30, 0}, {30, 150 * time.Millisecond}} {
-		t.Run(fmt.Sprintf("3x%d/delay=%s", scenario.tasks, scenario.delay), func(t *testing.T) {
+		burst bool
+	}{{10, 0, false}, {30, 0, false}, {30, 150 * time.Millisecond, false}, {30, 150 * time.Millisecond, true}} {
+		t.Run(fmt.Sprintf("3x%d/delay=%s/burst=%t", scenario.tasks, scenario.delay, scenario.burst), func(t *testing.T) {
 			tasks := scenario.tasks
 			reader, writer, _ := testutil.NewFileBackedSplitStatementCountingTestDB(t)
 			broadcaster := events.NewBroadcaster()
@@ -104,11 +105,15 @@ func TestProjectTabsUnderLoadInChrome(t *testing.T) {
  const nav=window.openVibelyNavigate;
  window.openVibelyNavigate=function(){return nav.apply(this,arguments).catch(e=>{errors.push('navigation status='+e.status+' '+e.message);throw e;});};
  window.addEventListener('sse-task-event',()=>received++);
- for(let i=0;i<60;i++) {
- const id='stress-project-'+((i+1)%3), start=performance.now();
+ function switchTo(id){
  let tab=document.querySelector('[data-project-tab="'+id+'"]');
  if(tab){tab.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,button:0,isPrimary:true,pointerId:1}));document.dispatchEvent(new PointerEvent('pointerup',{bubbles:true,pointerId:1}));}
  else {const sel=document.getElementById('project-selector');sel.value=id;sel.dispatchEvent(new CustomEvent('change',{bubbles:true,detail:{}}));}
+ }
+ for(let i=0;i<60;i++) {
+ const id='stress-project-'+((i+1)%3), start=performance.now();
+ if(BURST_SWITCHES){switchTo('stress-project-'+((i+2)%3));await wait(20);}
+ switchTo(id);
  while(performance.now()-start<10000){check();if(new URLSearchParams(location.search).get('project_id')===id && !window.openVibelyProtectedProjectID)break;await wait(10);}
  check();if(new URLSearchParams(location.search).get('project_id')!==id || window.openVibelyProtectedProjectID)throw new Error('switch timed out: '+id);
  if(!document.getElementById('main-content').textContent.includes('stress-task-'+((i+1)%3)+'-0'))throw new Error('wrong project content');
@@ -119,6 +124,7 @@ func TestProjectTabsUnderLoadInChrome(t *testing.T) {
  await fetch('/stress-result',{method:'POST',body:'pass:'+JSON.stringify({switches:times.length,p95:times[56],max:times[59],received})});
  }catch(e){await fetch('/stress-result',{method:'POST',body:'fail:'+String(e.stack||e)});}
  })();</script>`
+			runner = strings.ReplaceAll(runner, "BURST_SWITCHES", fmt.Sprint(scenario.burst))
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if static.ServeAsset(w, r) {
 					return
