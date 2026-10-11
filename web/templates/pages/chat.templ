@@ -106,7 +106,7 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 				if hasEarlier && len(chatHistory) > 0 {
 					@components.ChatEarlierMessagesLoader("chat-messages", "/chat?project_id="+currentProjectID+"&before="+chatHistory[0].ID+"&limit="+fmt.Sprintf("%d", windowLimit), windowLimit)
 				}
-				if len(chatHistory) == 0 && len(pendingInputs) == 0 && len(chatInputRequestsWithoutExec(inputRequests, nil)) == 0 {
+				if len(chatHistory) == 0 && len(pendingInputs) == 0 && len(pendingChatInputRequests(inputRequests)) == 0 {
 					@components.ChatEmptyState("Start a conversation by typing a message below")
 				} else {
 					for _, exec := range chatHistory {
@@ -1353,8 +1353,8 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 							groups.forEach(function(group, groupIndex) {
 								group.classList.toggle('hidden', groupIndex !== nextIndex);
 							});
-								card.setAttribute('data-current-question-index', String(nextIndex));
-								saveChatInputDraft(card);
+							card.setAttribute('data-current-question-index', String(nextIndex));
+							saveChatInputDraft(card);
 							var position = card.querySelector('[data-chat-input-position]');
 							if (position) position.textContent = (nextIndex + 1) + ' of ' + groups.length;
 							var previous = card.querySelector('[data-chat-input-nav="previous"]');
@@ -1437,10 +1437,10 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 							var card = button.closest('[data-chat-input-request-id]');
 							var fieldset = button.closest('[data-chat-input-question-id]');
 							if (!card || !fieldset || card.getAttribute('data-completed') === 'true' || card.getAttribute('data-submitted') === 'true') return;
-								var isCustom = button.hasAttribute('data-chat-input-custom-option');
-								markChatInputSelection(fieldset, button);
-								var status = card.querySelector('[role="status"]');
-								if (status) status.classList.add('hidden');
+							var isCustom = button.hasAttribute('data-chat-input-custom-option');
+							markChatInputSelection(fieldset, button);
+							var status = card.querySelector('[role="status"]');
+							if (status) status.classList.add('hidden');
 							showChatInputQuestion(card, Number(card.getAttribute('data-current-question-index') || 0));
 							if (isCustom) {
 								var customInput = fieldset.querySelector('[data-chat-input-custom-answer]');
@@ -1515,7 +1515,24 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 							return draft.index || 0;
 						}
 
+						var chatInputRefreshInFlight = null;
+						var chatInputRefreshQueued = false;
 						function refreshChatInputRequests() {
+							if (chatInputRefreshInFlight) {
+								chatInputRefreshQueued = true;
+								return chatInputRefreshInFlight;
+							}
+							chatInputRefreshInFlight = fetchChatInputRequests().then(function() {
+								chatInputRefreshInFlight = null;
+								if (chatInputRefreshQueued) {
+									chatInputRefreshQueued = false;
+									return refreshChatInputRequests();
+								}
+							});
+							return chatInputRefreshInFlight;
+						}
+
+						function fetchChatInputRequests() {
 							var root = document.getElementById('chat-page-root');
 							var pid = root ? root.getAttribute('data-project-id') : projectId;
 							if (!pid || typeof fetch === 'undefined') return Promise.resolve();
@@ -1543,7 +1560,7 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 						}
 						window.refreshChatInputRequests = refreshChatInputRequests;
 
-							function submitChatInputRequest(button, overrideAnswers) {
+						function submitChatInputRequest(button, overrideAnswers) {
 							if (!button || button.disabled || button.getAttribute('aria-disabled') === 'true') return;
 							var card = button.closest('[data-chat-input-request-id]');
 							if (!card || card.getAttribute('data-submitted') === 'true') return;

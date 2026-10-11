@@ -82,7 +82,8 @@ func (h *Handler) Chat(c echo.Context) error {
 	}
 	inputRequests, err := h.chatInputRequestEvents(c.Request().Context(), currentProjectID)
 	if err != nil {
-		return err
+		applog.Infof("[handler] Chat error loading input requests: %v", err)
+		inputRequests = nil
 	}
 
 	// For HTMX requests, return just the chat content
