@@ -698,6 +698,7 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 					}
 					document.body.addEventListener('htmx:beforeRequest', function(event) {
 						var triggerEl = event.detail.elt;
+						if (event.detail.xhr) event.detail.xhr._chatInputRevision = window._chatInputRevision || 0;
 						if (triggerEl && triggerEl.id === 'chat-form') {
 							// Hide prompt immediately on new send — will re-evaluate
 							// only after the new response completes and passes plan detection
@@ -1834,6 +1835,30 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 						if (!swapTarget) return;
 						var currentChatRoot = document.getElementById('chat-page-root');
 						var chatMessages = document.getElementById('chat-messages');
+						if (event.detail.shouldSwap === false) return;
+						var xhr = event.detail.xhr;
+						if (currentChatRoot && xhr && (swapTarget.id === 'chat-messages' || swapTarget.id === 'chat-page-root' || swapTarget.id === 'main-content')) {
+							var snapshot = document.createElement('template');
+							snapshot.innerHTML = event.detail.serverResponse || xhr.responseText || '';
+							var nextRoot = snapshot.content.querySelector('#chat-page-root');
+							var nextMessages = nextRoot && nextRoot.querySelector('#chat-messages');
+							if (nextMessages && nextRoot.getAttribute('data-project-id') === currentChatRoot.getAttribute('data-project-id')) {
+								// Reject snapshots captured before a question changed or was answered.
+								if (typeof xhr._chatInputRevision === 'number' && xhr._chatInputRevision !== (window._chatInputRevision || 0)) {
+									event.detail.shouldSwap = false;
+									return;
+								}
+								// Preserved execution pairs keep their children. Remove obsolete cards
+								// using the incoming snapshot, not the preserved DOM after the swap.
+								var pendingIDs = {};
+								nextMessages.querySelectorAll('[data-chat-input-request-id]').forEach(function(card) {
+									pendingIDs[card.getAttribute('data-chat-input-request-id')] = true;
+								});
+								currentChatRoot.querySelectorAll('[data-chat-input-request-id]').forEach(function(card) {
+									if (!pendingIDs[card.getAttribute('data-chat-input-request-id')]) completeChatInputRequest(card);
+								});
+							}
+						}
 						if (currentChatRoot && chatMessages && (swapTarget.id === 'chat-messages' || swapTarget.id === 'chat-page-root' || swapTarget.id === 'main-content')) {
 							var projectId = currentChatRoot.getAttribute('data-project-id') || '';
 							var chatScrollStateKey = 'chat-scroll-' + projectId;

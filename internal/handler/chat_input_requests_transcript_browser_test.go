@@ -20,7 +20,7 @@ import (
 // Model-menu interactions do not trigger transcript reloads. Exercise them
 // separately from explicit HTMX swaps, which previously dropped question cards.
 func TestChatInputRequestBrowserPreservesProgressAcrossTranscriptSwaps(t *testing.T) {
-	for _, resolution := range []string{"event", "submit", "swap"} {
+	for _, resolution := range []string{"event", "submit", "swap", "swap-completed"} {
 		t.Run(resolution, func(t *testing.T) { runChatInputRequestProgressBrowser(t, resolution) })
 	}
 }
@@ -70,6 +70,8 @@ func runChatInputRequestProgressBrowser(t *testing.T, resolution string) {
 	require.NoError(t, err)
 
 	result := make(chan string, 1)
+	snapshotReady := make(chan struct{})
+	releaseSnapshot := make(chan struct{})
 	runner := fmt.Sprintf(`<script>
 	(async function() {
 		function report(status, message) { return fetch('/browser-result', {method:'POST', headers:{'X-Browser-Status':status}, body:message || status, keepalive:true}); }
@@ -182,6 +184,16 @@ func runChatInputRequestProgressBrowser(t *testing.T, resolution string) {
 			var delayedRefresh = window.refreshChatInputRequests();
 			await waitFor(function() { return releaseSnapshot; }, 'refresh did not start');
 			var resolution = %q;
+			var swapTarget = resolution === 'submit' ? '#chat-page-root' : '#chat-messages';
+			if (resolution === 'swap-completed') {
+				if (!(await realFetch('/complete-execution')).ok) fail('could not complete execution fixture');
+				originalCard.parentElement.setAttribute('data-exec-status', 'completed');
+				originalCard.parentElement.setAttribute('hx-preserve', 'true');
+			}
+			var delayedTrigger = document.createElement('div');
+			document.body.appendChild(delayedTrigger);
+			var delayedTranscript = htmx.ajax('GET', '/chat?project_id=' + encodeURIComponent(pid) + '&delay_snapshot=1', {source:delayedTrigger, target:swapTarget, select:swapTarget, swap:'morph:outerHTML'});
+			await realFetch('/snapshot-ready');
 			if (resolution === 'submit') {
 				originalCard.querySelector('[data-chat-input-nav="recommended"]').click();
 				await waitFor(function() { return !cardPresent(); }, 'recommended submission did not remove card');
@@ -202,6 +214,9 @@ func runChatInputRequestProgressBrowser(t *testing.T, resolution string) {
 			await delayedRefresh;
 			if (cardPresent() || window._chatInputDrafts[id]) fail('stale refresh resurrected resolved question');
 			window.fetch = realFetch;
+			await realFetch('/release-snapshot');
+			await delayedTranscript;
+			if (cardPresent() || window._chatInputDrafts[id]) fail('stale full transcript restored answered card');
 			await report('pass', 'progress preserved and remote resolution cleaned up');
 		} catch (error) {
 			await report('fail', String(error && error.stack || error));
@@ -211,6 +226,27 @@ func runChatInputRequestProgressBrowser(t *testing.T, resolution string) {
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if static.ServeAsset(w, r) {
+			return
+		}
+		if r.URL.Path == "/complete-execution" {
+			if err := tc.execRepo.Complete(r.Context(), runningExec.ID, models.ExecCompleted, "Finished", "", 0, 0); err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		if r.URL.Path == "/snapshot-ready" {
+			select {
+			case <-snapshotReady:
+			case <-r.Context().Done():
+			}
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		if r.URL.Path == "/release-snapshot" {
+			close(releaseSnapshot)
+			w.WriteHeader(http.StatusNoContent)
 			return
 		}
 		if r.URL.Path == "/browser-result" {
@@ -228,6 +264,14 @@ func runChatInputRequestProgressBrowser(t *testing.T, resolution string) {
 		}
 		recorder := httptest.NewRecorder()
 		tc.echo.ServeHTTP(recorder, r)
+		if r.URL.Query().Get("delay_snapshot") == "1" {
+			close(snapshotReady)
+			select {
+			case <-releaseSnapshot:
+			case <-r.Context().Done():
+				return
+			}
+		}
 		for key, values := range recorder.Header() {
 			for _, value := range values {
 				w.Header().Add(key, value)
