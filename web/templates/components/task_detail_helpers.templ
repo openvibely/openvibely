@@ -490,17 +490,19 @@ templ taskThreadView(task *models.Task, executions []models.Execution, agents []
 					});
 				}
 
-			function _syncTaskThreadDraftFromTextarea() {
+			function _syncTaskThreadDraftFromTextarea(event) {
 				window._taskThreadDrafts = window._taskThreadDrafts || {};
-				var key = _taskThreadDraftStorageKey();
-				if (!key) return;
-				var textarea = document.getElementById('task-message-input');
-				if (!textarea) return;
-				if (textarea.value.trim() === '') {
-					delete window._taskThreadDrafts[key];
-					return;
-				}
+				// A send can finish after navigation. Its detached textarea still owns
+				// the draft; never read or clear the newly mounted task's composer.
+				var textarea = event ? event.target : document.getElementById('task-message-input');
+				var view = textarea && textarea.closest('#task-thread-view');
+				var taskId = view && view.getAttribute('data-task-id');
+				if (!taskId) return;
+				// Retain an empty value so a cached history snapshot cannot revive a sent draft.
+				var key = 'task-thread-draft-' + taskId;
+				if (!textarea.isConnected && window._taskThreadDrafts[key] !== textarea._taskDraftValue) return;
 				window._taskThreadDrafts[key] = textarea.value;
+				textarea._taskDraftValue = textarea.value;
 			}
 
 			function _restoreTaskThreadDraftToTextarea() {
@@ -510,18 +512,14 @@ templ taskThreadView(task *models.Task, executions []models.Execution, agents []
 				var textarea = document.getElementById('task-message-input');
 				if (!textarea) return;
 
-				var restoreValue = '';
-				if (typeof window._taskThreadSavedInput === 'string' && window._taskThreadSavedInput !== '') {
-					restoreValue = window._taskThreadSavedInput;
+				if (Object.prototype.hasOwnProperty.call(window._taskThreadDrafts, key)) {
+					var restoreValue = window._taskThreadDrafts[key];
+					if (textarea.value !== restoreValue) textarea.value = restoreValue;
 				}
-				if (!restoreValue && window._taskThreadDrafts[key]) {
-					restoreValue = window._taskThreadDrafts[key];
-				}
-				if (restoreValue && textarea.value !== restoreValue) {
-					textarea.value = restoreValue;
-				}
-				if (!textarea.dataset.draftSyncBound) {
-					textarea.dataset.draftSyncBound = 'true';
+				// DOM properties are not copied into HTMX's history cache, unlike data attributes.
+				textarea._taskDraftValue = textarea.value;
+				if (!textarea._taskDraftSyncBound) {
+					textarea._taskDraftSyncBound = true;
 					textarea.addEventListener('input', _syncTaskThreadDraftFromTextarea);
 					textarea.addEventListener('change', _syncTaskThreadDraftFromTextarea);
 				}
@@ -752,25 +750,6 @@ templ taskThreadView(task *models.Task, executions []models.Execution, agents []
 					}
 				});
 
-				document.body.addEventListener('htmx:afterRequest', function(event) {
-					var detail = event.detail || {};
-					var requestConfig = detail.requestConfig || {};
-					var requestPath = typeof requestConfig.path === 'string' ? requestConfig.path : '';
-					var requestMethod = typeof requestConfig.verb === 'string' ? requestConfig.verb.toUpperCase() : '';
-					var isPost = requestMethod === 'POST';
-					var isThreadPath = requestPath.indexOf('/thread') !== -1;
-					var isThreadSendRequest = isPost && isThreadPath;
-					if (!isThreadSendRequest) return;
-					if (!detail.successful) return;
-					var xhr = detail.xhr;
-					var responseText = xhr ? (xhr.responseText || '') : '';
-					if (responseText.trim() === '') return;
-					window._taskThreadSavedInput = '';
-					window._taskThreadDrafts = window._taskThreadDrafts || {};
-					var key = _taskThreadDraftStorageKey();
-					if (key) delete window._taskThreadDrafts[key];
-				});
-
 					function _closeTaskThreadEventSources() {
 						if (!window._threadEventSources) return;
 						window._threadEventSources.forEach(function(es) {
@@ -808,28 +787,9 @@ templ taskThreadView(task *models.Task, executions []models.Execution, agents []
 							}
 						}
 						if (target && (target.id === 'task-thread-messages' || target.id === 'task-detail-content' || target.id === 'task-thread-view' || target.id === 'thread-content' || target.id === 'main-content')) {
-							var requestConfig = event.detail.requestConfig || {};
-						var requestPath = typeof requestConfig.path === 'string' ? requestConfig.path : '';
-						var requestMethod = typeof requestConfig.verb === 'string' ? requestConfig.verb.toUpperCase() : '';
-						var isPost = requestMethod === 'POST';
-						var isThreadPath = requestPath.indexOf('/thread') !== -1;
-						var isThreadSendRequest = isPost && isThreadPath;
-						var xhr = event.detail.xhr;
-						var responseText = xhr ? (xhr.responseText || '') : '';
-
-						if (isThreadSendRequest && responseText.trim() !== '') {
-							window._taskThreadSavedInput = '';
-							window._taskThreadDrafts = window._taskThreadDrafts || {};
-							var sentKey = _taskThreadDraftStorageKey();
-							if (sentKey) delete window._taskThreadDrafts[sentKey];
-						} else {
-							// Save textarea value before swap to prevent clearing during morph polling
-							var textarea = document.getElementById('task-message-input');
-							if (textarea) {
-								window._taskThreadSavedInput = textarea.value;
-								_syncTaskThreadDraftFromTextarea();
-							}
-						}
+						// Capture the current draft before replacement. The shared composer clears
+						// only the accepted message, through its scoped input listener.
+						_syncTaskThreadDraftFromTextarea();
 						_saveTaskThreadScrollState();
 					}
 						// Clean up thread EventSource connections before replacing active thread DOM.

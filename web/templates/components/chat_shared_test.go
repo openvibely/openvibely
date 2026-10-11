@@ -5006,40 +5006,6 @@ func TestTaskThreadView_ClosesStreamsBeforeThreadRefresh(t *testing.T) {
 	}
 }
 
-func TestTaskThreadView_ClearsDraftBeforeSuccessfulThreadSwap(t *testing.T) {
-	task := &models.Task{
-		ID:        "thread-clear-1",
-		ProjectID: "p1",
-		Status:    models.StatusCompleted,
-		Category:  models.CategoryCompleted,
-	}
-
-	var buf bytes.Buffer
-	if err := TaskThreadView(task, nil, nil, nil, nil, nil, false, 30).Render(context.Background(), &buf); err != nil {
-		t.Fatalf("Failed to render TaskThreadView: %v", err)
-	}
-	content := buf.String()
-
-	if !strings.Contains(content, "isThreadSendRequest && responseText.trim() !== ''") {
-		t.Fatal("beforeSwap should detect successful thread send requests with non-empty response")
-	}
-	if !strings.Contains(content, "requestPath.indexOf('/thread') !== -1") {
-		t.Fatal("thread handlers should treat /thread requests like task-thread form submits for enter/button parity")
-	}
-	if !strings.Contains(content, "window._taskThreadUserScrolledUp = false;") {
-		t.Fatal("beforeRequest should reset thread auto-scroll state for any thread send request")
-	}
-	if strings.Contains(content, "if (window.markChatSendScrollIntent) window.markChatSendScrollIntent('task-thread-messages');") {
-		t.Fatal("thread request start must not override upward-reading intent before the send succeeds")
-	}
-	if !strings.Contains(content, "window._taskThreadSavedInput = ''") {
-		t.Fatal("beforeSwap should clear saved thread input on successful thread form swap")
-	}
-	if !strings.Contains(content, "if (sentKey) delete window._taskThreadDrafts[sentKey];") {
-		t.Fatal("beforeSwap should clear persisted draft key on successful thread form swap")
-	}
-}
-
 func TestTaskThreadView_BindsAttachmentImageSmartScrollAfterRenderAndSwap(t *testing.T) {
 	task := &models.Task{
 		ID:        "thread-attachment-scroll-1",
