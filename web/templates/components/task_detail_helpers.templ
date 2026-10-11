@@ -493,7 +493,7 @@ templ taskThreadView(task *models.Task, executions []models.Execution, agents []
 			function _syncTaskThreadDraftFromTextarea(event) {
 				window._taskThreadDrafts = window._taskThreadDrafts || {};
 				// A send can finish after navigation. Its detached textarea still owns
-				// the draft; never read or clear the newly mounted task's composer.
+				// the draft; only reconcile a replacement composer for the same task.
 				var textarea = event ? event.target : document.getElementById('task-message-input');
 				var view = textarea && textarea.closest('#task-thread-view');
 				var taskId = view && view.getAttribute('data-task-id');
@@ -501,8 +501,19 @@ templ taskThreadView(task *models.Task, executions []models.Execution, agents []
 				// Retain an empty value so a cached history snapshot cannot revive a sent draft.
 				var key = 'task-thread-draft-' + taskId;
 				if (!textarea.isConnected && window._taskThreadDrafts[key] !== textarea._taskDraftValue) return;
+				var previousValue = textarea._taskDraftValue;
 				window._taskThreadDrafts[key] = textarea.value;
 				textarea._taskDraftValue = textarea.value;
+				if (!textarea.isConnected) {
+					var current = document.getElementById('task-message-input');
+					var currentView = current && current.closest('#task-thread-view');
+					// Returning before acceptance can mount a copy of the submitted draft.
+					// Reconcile that copy without overwriting text edited since the return.
+					if (currentView && currentView.getAttribute('data-task-id') === taskId && current.value === previousValue) {
+						current.value = textarea.value;
+						current.dispatchEvent(new Event('input', { bubbles: true }));
+					}
+				}
 			}
 
 			function _restoreTaskThreadDraftToTextarea() {
