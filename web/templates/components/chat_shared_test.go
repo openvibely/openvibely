@@ -1814,7 +1814,7 @@ func TestChatInputForm_MessageHistoryNavigationScript(t *testing.T) {
 		"messageHistoryEntries.push(message);",
 		"function handleMessageHistoryKeydown(e)",
 		"if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown' && e.key !== 'Escape') return false;",
-		"if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && messageInput.value !== '' && !isAtFirstLineStart(messageInput)) return false;",
+		"if (messageHistoryIndex === -1 && messageInput.value !== '' && !isAtMessageHistoryBoundary(messageInput, e.key)) return false;",
 		"if (e.key === 'ArrowDown' && messageHistoryIndex === -1) return false;",
 		"if (messageHistoryIndex === -1) messageHistoryDraft = messageInput.value;",
 		"messageHistoryEntries[messageHistoryEntries.length - 1 - messageHistoryIndex]",
@@ -2014,10 +2014,11 @@ func TestChatInputForm_MessageHistoryCursorGuardsPreventArrowHijack(t *testing.T
 
 	content := buf.String()
 	required := []string{
-		"function isAtFirstLineStart(textarea)",
+		"function isAtMessageHistoryBoundary(textarea, key)",
 		"if (start !== end) return false;",
-		"return start === 0;",
-		"if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && messageInput.value !== '' && !isAtFirstLineStart(messageInput)) return false;",
+		"textarea.value.slice(0, start).indexOf('\\n') === -1",
+		"textarea.value.slice(end).indexOf('\\n') === -1",
+		"if (messageHistoryIndex === -1 && messageInput.value !== '' && !isAtMessageHistoryBoundary(messageInput, e.key)) return false;",
 	}
 	for _, r := range required {
 		if !strings.Contains(content, r) {
