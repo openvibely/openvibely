@@ -5226,8 +5226,8 @@ func TestCleanupMergedWorktrees(t *testing.T) {
 	if dbTask.WorktreeBranch != "" {
 		t.Error("expected worktree_branch to be cleared in DB")
 	}
-	if dbTask.MergeStatus != models.MergeStatusMerged {
-		t.Errorf("expected merge_status=merged, got %q", dbTask.MergeStatus)
+	if dbTask.MergeStatus != "" {
+		t.Errorf("expected cleanup to preserve empty merge_status, got %q", dbTask.MergeStatus)
 	}
 }
 
@@ -5322,8 +5322,8 @@ func TestCleanupMergedWorktrees_EmptyMergeTargetSkipsBranchDeletionWithNonTermin
 	if dbTask.MergeTargetBranch != "" {
 		t.Fatalf("expected empty merge_target_branch fixture, got %q", dbTask.MergeTargetBranch)
 	}
-	if dbTask.MergeStatus != models.MergeStatusMerged {
-		t.Fatalf("expected merge_status=merged, got %q", dbTask.MergeStatus)
+	if dbTask.MergeStatus != "" {
+		t.Fatalf("expected cleanup to preserve empty merge_status, got %q", dbTask.MergeStatus)
 	}
 	if dbTask.WorktreePath != "" || dbTask.WorktreeBranch != "" {
 		t.Fatalf("expected worktree metadata cleared, got path=%q branch=%q", dbTask.WorktreePath, dbTask.WorktreeBranch)
@@ -6306,7 +6306,7 @@ func TestIsBranchDivergedFromTargetRequiresUniqueCommitsOnBothSides(t *testing.T
 }
 
 func TestCleanupMergedWorktreesDoesNotInventMerge(t *testing.T) {
-	for _, scenario := range []string{"unchanged", "missing branch", "missing history", "unmerged changes", "followup changes"} {
+	for _, scenario := range []string{"unchanged", "synced main", "app merged", "missing branch", "missing history", "unmerged changes", "followup changes"} {
 		t.Run(scenario, func(t *testing.T) {
 			ctx := context.Background()
 			db := testutil.NewTestDB(t)
@@ -6338,6 +6338,20 @@ func TestCleanupMergedWorktreesDoesNotInventMerge(t *testing.T) {
 					t.Fatalf("git %v: %v %s", args, err, out)
 				}
 			}
+			if scenario == "synced main" {
+				if err := os.WriteFile(filepath.Join(repoDir, "main.txt"), []byte("main"), 0644); err != nil {
+					t.Fatal(err)
+				}
+				git("add", "main.txt")
+				git("commit", "-m", "main advances")
+				git("-C", path, "merge", "--ff-only", task.MergeTargetBranch)
+			}
+			if scenario == "app merged" {
+				if err := tasks.UpdateMergeStatus(ctx, task.ID, models.MergeStatusMerged); err != nil {
+					t.Fatal(err)
+				}
+			}
+
 			if scenario == "followup changes" || scenario == "missing history" {
 				if err := os.WriteFile(filepath.Join(path, "first.txt"), []byte("first"), 0644); err != nil {
 					t.Fatal(err)
@@ -6368,10 +6382,14 @@ func TestCleanupMergedWorktreesDoesNotInventMerge(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if stored.MergeStatus == models.MergeStatusMerged {
+			if scenario == "app merged" {
+				if stored.MergeStatus != models.MergeStatusMerged {
+					t.Fatal("cleanup cleared app merge status")
+				}
+			} else if stored.MergeStatus == models.MergeStatusMerged {
 				t.Fatal("cleanup invented a merge")
 			}
-			if scenario == "unchanged" || scenario == "missing history" {
+			if scenario == "unchanged" || scenario == "synced main" || scenario == "app merged" || scenario == "missing history" {
 				if stored.WorktreePath != "" {
 					t.Fatal("safe worktree was not cleaned")
 				}

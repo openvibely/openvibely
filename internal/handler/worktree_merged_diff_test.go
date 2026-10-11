@@ -410,7 +410,7 @@ func TestHandler_GetTaskChanges_CompletedUnmergedWorktreeShowsUncommittedChanges
 // reproduces the stale-state bug where a task branch that is already reachable
 // from the target branch keeps surfacing local merge options on the Changes tab.
 // After the fix, the changes-tab response must NOT include local /worktree/merge
-// endpoint actions, and stale merge_status is back-filled to "merged" when found.
+// endpoint actions without inferring a stored merge status.
 func TestHandler_GetTaskChanges_StaleMergedBlankMetadataRecoverableBranchShowsFastForwardOption(t *testing.T) {
 	h, e, _, db := setupTestHandlerWithDB(t)
 	defer db.Close()
@@ -932,13 +932,13 @@ func TestHandler_GetTaskChanges_FastForwardMergedBranchHidesMergeOptions(t *test
 		t.Fatalf("expected preserved diff content in changes-tab response, body=%s", body)
 	}
 
-	// Stale merge_status should have been back-filled.
+	// A manual merge must not change the stored merge status.
 	updated, err := taskRepo.GetByID(ctx, task.ID)
 	if err != nil {
 		t.Fatalf("re-fetch task: %v", err)
 	}
-	if updated.MergeStatus != models.MergeStatusMerged {
-		t.Fatalf("expected merge_status to be back-filled to merged, got %s", updated.MergeStatus)
+	if updated.MergeStatus != models.MergeStatusPending {
+		t.Fatalf("expected merge_status to remain pending, got %s", updated.MergeStatus)
 	}
 }
 
@@ -1003,8 +1003,8 @@ func TestHandler_MergeTaskBranch_RejectsAlreadyMergedBranch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("re-fetch task: %v", err)
 	}
-	if updated.MergeStatus != models.MergeStatusMerged {
-		t.Fatalf("expected merge_status back-filled to merged after rejection, got %s", updated.MergeStatus)
+	if updated.MergeStatus != models.MergeStatusPending {
+		t.Fatalf("expected merge_status unchanged after rejection, got %s", updated.MergeStatus)
 	}
 }
 
@@ -1351,37 +1351,59 @@ func findSubstring(s, substr string) bool {
 	return false
 }
 
-func TestHandler_GetTaskWorktreeInfoUnchangedBranchDoesNotBecomeMerged(t *testing.T) {
-	h, e, _, db := setupTestHandlerWithDB(t)
-	ctx := context.Background()
-	repoDir := createHandlerTestGitRepo(t)
-	project := &models.Project{Name: "Unchanged worktree", RepoPath: repoDir}
-	projects := repository.NewProjectRepo(db)
-	if err := projects.Create(ctx, project); err != nil {
-		t.Fatal(err)
-	}
-	tasks := repository.NewTaskRepo(db, nil)
-	task := &models.Task{ProjectID: project.ID, Title: "Read only", Category: models.CategoryCompleted, Status: models.StatusCompleted, MergeTargetBranch: gitCurrentBranch(t, repoDir)}
-	if err := tasks.Create(ctx, task); err != nil {
-		t.Fatal(err)
-	}
-	ws := service.NewWorktreeService(tasks, projects, repository.NewSettingsRepo(db))
-	if _, _, err := ws.SetupWorktree(ctx, task, repoDir); err != nil {
-		t.Fatal(err)
-	}
-	req := httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID+"/worktree", nil)
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-	c.SetParamNames("taskId")
-	c.SetParamValues(task.ID)
-	if err := h.GetTaskWorktreeInfo(c); err != nil {
-		t.Fatal(err)
-	}
-	stored, err := tasks.GetByID(ctx, task.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if stored.MergeStatus == models.MergeStatusMerged {
-		t.Fatal("viewing unchanged worktree invented a merge")
+func TestHandler_GetTaskWorktreeInfoDoesNotInferMerge(t *testing.T) {
+	for _, scenario := range []string{"unchanged", "synced main", "manual merge"} {
+		t.Run(scenario, func(t *testing.T) {
+			h, e, _, db := setupTestHandlerWithDB(t)
+			ctx := context.Background()
+			repoDir := createHandlerTestGitRepo(t)
+			project := &models.Project{Name: "Unchanged worktree", RepoPath: repoDir}
+			projects := repository.NewProjectRepo(db)
+			if err := projects.Create(ctx, project); err != nil {
+				t.Fatal(err)
+			}
+			tasks := repository.NewTaskRepo(db, nil)
+			task := &models.Task{ProjectID: project.ID, Title: "Read only", Category: models.CategoryCompleted, Status: models.StatusCompleted, MergeTargetBranch: gitCurrentBranch(t, repoDir)}
+			if err := tasks.Create(ctx, task); err != nil {
+				t.Fatal(err)
+			}
+			ws := service.NewWorktreeService(tasks, projects, repository.NewSettingsRepo(db))
+			path, branch, err := ws.SetupWorktree(ctx, task, repoDir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if scenario == "synced main" {
+				if err := os.WriteFile(filepath.Join(repoDir, "main.txt"), []byte("main"), 0644); err != nil {
+					t.Fatal(err)
+				}
+				runGit(t, repoDir, "add", "main.txt")
+				runGit(t, repoDir, "commit", "-m", "main advances")
+				runGit(t, path, "merge", "--ff-only", task.MergeTargetBranch)
+			}
+			if scenario == "manual merge" {
+				if err := os.WriteFile(filepath.Join(path, "task.txt"), []byte("task"), 0644); err != nil {
+					t.Fatal(err)
+				}
+				runGit(t, path, "add", "task.txt")
+				runGit(t, path, "commit", "-m", "task work")
+				runGit(t, repoDir, "merge", "--ff-only", branch)
+			}
+
+			req := httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID+"/worktree", nil)
+			rec := httptest.NewRecorder()
+			c := e.NewContext(req, rec)
+			c.SetParamNames("taskId")
+			c.SetParamValues(task.ID)
+			if err := h.GetTaskWorktreeInfo(c); err != nil {
+				t.Fatal(err)
+			}
+			stored, err := tasks.GetByID(ctx, task.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if stored.MergeStatus == models.MergeStatusMerged {
+				t.Fatal("viewing unchanged worktree invented a merge")
+			}
+		})
 	}
 }

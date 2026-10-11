@@ -1479,23 +1479,6 @@ func (h *Handler) recoverTaskWorktreeState(ctx context.Context, task *models.Tas
 		return changed
 	}
 
-	branchTipMerged := service.IsBranchTipMergedInto(project.RepoPath, task.WorktreeBranch, targetBranch)
-	if branchTipMerged {
-		if task.WorktreePath != "" {
-			if statusOut, statusErr := service.GitStatusPorcelain(task.WorktreePath); statusErr == nil && strings.TrimSpace(statusOut) != "" {
-				return changed
-			}
-		}
-		if task.MergeStatus != models.MergeStatusMerged && service.BranchProducedCommits(ctx, project.RepoPath, task.WorktreeBranch) {
-			if err := h.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusMerged); err != nil {
-				applog.Infof("[handler] recoverTaskWorktreeState: failed to update merge_status for task %s: %v", task.ID, err)
-			} else {
-				task.MergeStatus = models.MergeStatusMerged
-			}
-		}
-		return changed
-	}
-
 	if task.MergeStatus == models.MergeStatusMerged && gitBranchHasCommitsBeyondTarget(project.RepoPath, targetBranch, task.WorktreeBranch) {
 		if err := h.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusPending); err != nil {
 			applog.Infof("[handler] recoverTaskWorktreeState: failed to reset stale merge_status for task %s: %v", task.ID, err)
@@ -1507,15 +1490,6 @@ func (h *Handler) recoverTaskWorktreeState(ctx context.Context, task *models.Tas
 	return changed
 }
 
-// reconcileAlreadyMergedBranch detects task branches that are already
-// reachable from their target branch while stored merge_status is stale. When
-// such a stale state is found, it back-fills `tasks.merge_status = merged` so
-// the rest of the UI does not keep offering local merge actions for an
-// already-merged branch. Returns true when the branch is currently merged into
-// the resolved target branch.
-//
-// Active tasks (running/queued) are skipped because their worktree is in use
-// and the branch may legitimately match the target tip mid-execution.
 func (h *Handler) taskRebaseAvailable(task *models.Task, project *models.Project, branchAlreadyMerged bool) bool {
 	return h.taskRebaseAvailableWithLocks(task, project, branchAlreadyMerged, nil)
 }
