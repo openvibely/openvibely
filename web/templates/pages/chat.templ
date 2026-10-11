@@ -1329,6 +1329,7 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 						}
 
 						function renderChatInputRequest(data) {
+							window._chatInputRevision = (window._chatInputRevision || 0) + 1;
 							var request = data.input_request || {};
 							var requestId = request.id || '';
 							if (!requestId) return;
@@ -1457,6 +1458,7 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 						}
 
 						function completeChatInputRequest(card) {
+							window._chatInputRevision = (window._chatInputRevision || 0) + 1;
 							if (!card) return;
 							delete window._chatInputDrafts[card.getAttribute('data-chat-input-request-id') || ''];
 							card.remove();
@@ -1543,11 +1545,12 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 							var root = document.getElementById('chat-page-root');
 							var pid = root ? root.getAttribute('data-project-id') : projectId;
 							if (!pid || typeof fetch === 'undefined') return Promise.resolve();
+							var revision = window._chatInputRevision || 0;
 							return fetch('/chat/input-requests?project_id=' + encodeURIComponent(pid)).then(function(resp) {
 								if (!resp.ok) throw new Error('HTTP ' + resp.status);
 								return resp.text();
 							}).then(function(html) {
-								if (document.getElementById('chat-page-root') !== root) return;
+								if (document.getElementById('chat-page-root') !== root || revision !== (window._chatInputRevision || 0)) return;
 								var detached = document.createElement('template');
 								detached.innerHTML = html;
 								var activeRequestIDs = {};
@@ -1800,6 +1803,7 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 						? swapTarget
 						: (swapTarget && swapTarget.querySelector ? swapTarget.querySelector('#chat-messages') : null);
 					if (swappedChatMessages) {
+						window._chatInputRevision = (window._chatInputRevision || 0) + 1;
 						if (window.initChatEarlierLoader) window.initChatEarlierLoader(swappedChatMessages);
 						if (window.pruneChatExecutionWindow) window.pruneChatExecutionWindow(swappedChatMessages);
 						swappedChatMessages.querySelectorAll('[data-exec-id]').forEach(function(el) {

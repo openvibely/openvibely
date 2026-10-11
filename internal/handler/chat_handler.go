@@ -83,6 +83,10 @@ func (h *Handler) Chat(c echo.Context) error {
 	inputRequests, err := h.chatInputRequestEvents(c.Request().Context(), currentProjectID)
 	if err != nil {
 		applog.Infof("[handler] Chat error loading input requests: %v", err)
+		// A partial refresh must not replace live cards with an incomplete snapshot.
+		if isHTMX {
+			return echo.NewHTTPError(http.StatusServiceUnavailable, "Unable to refresh Chat questions. Try again.")
+		}
 		inputRequests = nil
 	}
 

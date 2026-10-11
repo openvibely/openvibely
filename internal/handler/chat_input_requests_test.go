@@ -419,12 +419,15 @@ func TestChatPageLoadsWhenInputRequestsFailToLoad(t *testing.T) {
 	}))
 	tc.handler.chatInputRequests = newChatInputRequestBroker()
 
-	for _, client := range []*HTTPClient{tc.HTTP(), tc.HTMX()} {
-		rec := client.Get("/chat?project_id=" + project.ID).Execute()
-		require.Equal(t, http.StatusOK, rec.Code)
-		require.Contains(t, rec.Body.String(), `id="chat-page-root"`)
-		require.NotContains(t, rec.Body.String(), `data-chat-input-exec-id="`+exec.ID+`"`)
-	}
+	rec := tc.HTTP().Get("/chat?project_id=" + project.ID).Execute()
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Contains(t, rec.Body.String(), `id="chat-page-root"`)
+	require.NotContains(t, rec.Body.String(), `data-chat-input-exec-id="`+exec.ID+`"`)
+
+	refresh := tc.HTMX().Get("/chat?project_id=" + project.ID).Execute()
+	require.Equal(t, http.StatusServiceUnavailable, refresh.Code)
+	require.NotContains(t, refresh.Body.String(), `id="chat-page-root"`)
+
 }
 
 func handlerToolDefNames(defs []llmcontracts.RuntimeToolDefinition) []string {

@@ -20,6 +20,12 @@ import (
 // Model-menu interactions do not trigger transcript reloads. Exercise them
 // separately from explicit HTMX swaps, which previously dropped question cards.
 func TestChatInputRequestBrowserPreservesProgressAcrossTranscriptSwaps(t *testing.T) {
+	for _, resolution := range []string{"event", "submit", "swap"} {
+		t.Run(resolution, func(t *testing.T) { runChatInputRequestProgressBrowser(t, resolution) })
+	}
+}
+
+func runChatInputRequestProgressBrowser(t *testing.T, resolution string) {
 	if testing.Short() {
 		t.Skip("skipping browser regression in short mode")
 	}
@@ -159,24 +165,49 @@ func TestChatInputRequestBrowserPreservesProgressAcrossTranscriptSwaps(t *testin
 			await waitFor(function() { return originalCard.parentElement.id === pairID; }, 'card did not move to loaded execution');
 			if (!firstAnswerKept()) fail('moving card lost partial answers');
 
-			// Resolve through the answer endpoint without delivering the live event,
-			// as when another tab answers while this tab is disconnected.
+			// A failed HTMX snapshot must leave the existing card and draft alone.
+			await htmx.ajax('GET', '/chat?project_id=' + encodeURIComponent(pid) + '&fail_questions=1', {target:'#chat-messages', select:'#chat-messages', swap:'morph:outerHTML'}).catch(function() {});
+			if (cardPresent() !== originalCard || !firstAnswerKept()) fail('failed refresh discarded progress');
+
+			// Capture a real pending snapshot, but delay its delivery until resolution.
 			var id = originalCard.getAttribute('data-chat-input-request-id');
-			if (!window._chatInputDrafts[id]) fail('draft was not saved');
-			var answer = await realFetch('/chat/input-requests/' + id + '/answer', {
-				method: 'POST', headers: {'Content-Type':'application/json'},
-				body: JSON.stringify({project_id:pid, answers:[{question_id:'continue',label:'Yes'},{question_id:'scope',label:'Small'}]})
-			});
-			if (!answer.ok) fail('remote answer failed');
-			await htmx.ajax('GET', '/chat?project_id=' + encodeURIComponent(pid), {target:'#chat-messages', select:'#chat-messages', swap:'morph:outerHTML'});
-			await waitFor(function() { return !cardPresent(); }, 'resolved card survived reload');
-			if (window._chatInputDrafts[id]) fail('resolved request left a stale draft');
+			var staleHTML = await (await realFetch('/chat/input-requests?project_id=' + encodeURIComponent(pid))).text();
+			var releaseSnapshot;
+			window.fetch = function(url) {
+				if (String(url).indexOf('/chat/input-requests?') !== -1) {
+					return new Promise(function(resolve) { releaseSnapshot = function() { resolve(new Response(staleHTML)); }; });
+				}
+				return realFetch.apply(this, arguments);
+			};
+			var delayedRefresh = window.refreshChatInputRequests();
+			await waitFor(function() { return releaseSnapshot; }, 'refresh did not start');
+			var resolution = %q;
+			if (resolution === 'submit') {
+				originalCard.querySelector('[data-chat-input-nav="recommended"]').click();
+				await waitFor(function() { return !cardPresent(); }, 'recommended submission did not remove card');
+			} else {
+				var answer = await realFetch('/chat/input-requests/' + id + '/answer', {
+					method: 'POST', headers: {'Content-Type':'application/json'},
+					body: JSON.stringify({project_id:pid, answers:[{question_id:'continue',label:'Yes'},{question_id:'scope',label:'Small'}]})
+				});
+				if (!answer.ok) fail('remote answer failed');
+				if (resolution === 'event') {
+					window.dispatchEvent(new CustomEvent('sse-chat-live-event', {detail:{type:'chat_user_input_resolved', project_id:pid, input_request:{id:id,completed:true}}}));
+				} else {
+					await htmx.ajax('GET', '/chat?project_id=' + encodeURIComponent(pid), {target:'#chat-messages', select:'#chat-messages', swap:'morph:outerHTML'});
+				}
+			}
+			if (cardPresent() || window._chatInputDrafts[id]) fail('resolution left card or draft');
+			releaseSnapshot();
+			await delayedRefresh;
+			if (cardPresent() || window._chatInputDrafts[id]) fail('stale refresh resurrected resolved question');
+			window.fetch = realFetch;
 			await report('pass', 'progress preserved and remote resolution cleaned up');
 		} catch (error) {
 			await report('fail', String(error && error.stack || error));
 		}
 	})();
-	</script>`, pending.ID, string(eventJSON))
+	</script>`, pending.ID, string(eventJSON), resolution)
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if static.ServeAsset(w, r) {
@@ -189,6 +220,10 @@ func TestChatInputRequestBrowserPreservesProgressAcrossTranscriptSwaps(t *testin
 			default:
 			}
 			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		if r.URL.Query().Get("fail_questions") == "1" {
+			http.Error(w, "Unable to refresh Chat questions", http.StatusServiceUnavailable)
 			return
 		}
 		recorder := httptest.NewRecorder()
