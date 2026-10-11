@@ -358,6 +358,12 @@ window.addEventListener('DOMContentLoaded', function() {
     var firstRect = first.getBoundingClientRect();
     var secondRect = second.getBoundingClientRect();
     var targetRect = target.getBoundingClientRect();
+    var cardLayouts = [first, second].map(function(card) {
+      var rect = card.getBoundingClientRect();
+      return Array.from(card.querySelectorAll('.badge')).map(function(badge) {
+        return {badge: badge, top: badge.getBoundingClientRect().top - rect.top};
+      });
+    });
     var params = new URLSearchParams({
       phase: phase,
       first_x: firstRect.left + 12,
@@ -377,6 +383,13 @@ window.addEventListener('DOMContentLoaded', function() {
         getComputedStyle(first).transform !== 'none' && getComputedStyle(second).transform !== 'none' &&
         document.querySelectorAll('#kanban-board [data-pointer-drag-placeholder]').length === 2;
     }, 'all selected cards moving during native grouped ' + phase);
+    [first, second].forEach(function(card, index) {
+      var rect = card.getBoundingClientRect();
+      if (card.querySelectorAll('.badge').length !== cardLayouts[index].length) fail('grouped drag must not insert badges into task cards');
+      cardLayouts[index].forEach(function(layout) {
+        if (Math.abs(layout.badge.getBoundingClientRect().top - rect.top - layout.top) > 1) fail('grouped drag must preserve task badge positions inside each card');
+      });
+    });
     await fetch('/browser-native-grouped-motion?phase=' + encodeURIComponent(phase), {method:'POST'});
     await waitFor(function() {
       return !first.classList.contains('dragging') && !second.classList.contains('dragging') &&
