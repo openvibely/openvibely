@@ -404,6 +404,30 @@ func TestChatPageServerRendersPendingInputRequestCard(t *testing.T) {
 	require.NotContains(t, body, `id="chat-input-request-`+pending.ID+`"`)
 }
 
+func TestChatPageLoadsWhenInputRequestsFailToLoad(t *testing.T) {
+	tc := NewTestContext(t)
+	ctx := context.Background()
+	agent := createAgent(t, tc.llmConfigRepo)
+	project := tc.CreateProject().WithName("Broken input request").Build()
+	task := createTask(t, tc.handler, project.ID, "Broken input chat", func(task *models.Task) {
+		task.Category = models.CategoryChat
+	})
+	exec := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecCompleted, PromptSent: "ask me"}
+	require.NoError(t, tc.execRepo.Create(ctx, exec))
+	repo := repository.NewChatInputRequestRepo(tc.db)
+	require.NoError(t, repo.Create(ctx, repository.ChatInputRequestRecord{
+		ID: repository.NewID(), ProjectID: project.ID, ExecutionID: exec.ID, QuestionsJSON: "{not json", ExpiresAt: time.Now().Add(time.Hour),
+	}))
+	tc.handler.chatInputRequests = newChatInputRequestBroker()
+
+	for _, client := range []*HTTPClient{tc.HTTP(), tc.HTMX()} {
+		rec := client.Get("/chat?project_id=" + project.ID).Execute()
+		require.Equal(t, http.StatusOK, rec.Code)
+		require.Contains(t, rec.Body.String(), `id="chat-page-root"`)
+		require.NotContains(t, rec.Body.String(), `data-chat-input-exec-id="`+exec.ID+`"`)
+	}
+}
+
 func handlerToolDefNames(defs []llmcontracts.RuntimeToolDefinition) []string {
 	out := make([]string, 0, len(defs))
 	for _, def := range defs {

@@ -33,6 +33,10 @@ func chatInputRequestsWithoutExec(requests []*events.ChatInputRequestEvent, hist
 	return out
 }
 
+func pendingChatInputRequests(requests []*events.ChatInputRequestEvent) []*events.ChatInputRequestEvent {
+	return chatInputRequestsWithoutExec(requests, nil)
+}
+
 func chatInputQuestionClass(index int) string {
 	if index == 0 {
 		return "space-y-2"
@@ -97,7 +101,7 @@ templ ChatInputRequestCard(req *events.ChatInputRequestEvent) {
 }
 
 templ ChatInputRequestCards(requests []*events.ChatInputRequestEvent) {
-	for _, req := range chatInputRequestsWithoutExec(requests, nil) {
+	for _, req := range pendingChatInputRequests(requests) {
 		@ChatInputRequestCard(req)
 	}
 }
