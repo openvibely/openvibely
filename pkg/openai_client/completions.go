@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -191,7 +190,7 @@ func (c *Client) SendCompletions(ctx context.Context, prompt string, opts *Compl
 				content = append(content, map[string]interface{}{
 					"type": "image_url",
 					"image_url": map[string]interface{}{
-						"url": fmt.Sprintf("data:%s;base64,%s", att.MediaType, base64.StdEncoding.EncodeToString(data)),
+						"url": imageDataURL(att.MediaType, data),
 					},
 				})
 			} else if IsTextMediaType(att.MediaType) {

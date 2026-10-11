@@ -1,6 +1,7 @@
 package openaiclient
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -356,5 +357,32 @@ func TestUnsupportedFileTypeError_Message(t *testing.T) {
 	msg2 := err2.Error()
 	if !strings.Contains(msg2, "no extension") {
 		t.Errorf("error message = %q", msg2)
+	}
+}
+
+func TestImageDataURL(t *testing.T) {
+	for _, tt := range []struct {
+		name, mediaType string
+		data            []byte
+		want            string
+	}{
+		{"PNG signature", "image/png", []byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n'}, "data:image/png;base64,iVBORw0KGgo="},
+		{"JPEG binary", "image/jpeg", []byte{0xff, 0xd8, 0xff}, "data:image/jpeg;base64,/9j/"},
+		{"empty", "image/png", nil, "data:image/png;base64,"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := imageDataURL(tt.mediaType, tt.data); got != tt.want {
+				t.Fatalf("imageDataURL = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestToInputContent_ImageLoadFailure(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "missing.png")
+	att := &FileAttachment{FileName: "missing.png", MediaType: "image/png", FilePath: path}
+	content, err := att.toInputContent()
+	if content != nil || !errors.Is(err, os.ErrNotExist) || !strings.HasPrefix(err.Error(), "read attachment "+path+":") {
+		t.Fatalf("toInputContent = %v, %v; want nil content and original read error", content, err)
 	}
 }
