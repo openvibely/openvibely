@@ -72,7 +72,7 @@ func TestTaskChangesWorktreeContent_HeaderLabelsStayContained(t *testing.T) {
 		t.Fatalf("render failed: %v", err)
 	}
 	out := buf.String()
-	if !strings.Contains(out, `<div class="flex flex-wrap items-start justify-between gap-2 mb-4 min-w-0 max-w-full">`) {
+	if !strings.Contains(out, `<div class="relative z-[90] flex flex-wrap items-start justify-between gap-2 mb-4 min-w-0 max-w-full">`) {
 		t.Fatal("expected worktree header row to wrap within the card without clipping the actions dropdown")
 	}
 	if !strings.Contains(out, `<p class="text-sm opacity-60 min-w-0 max-w-full break-words [overflow-wrap:anywhere]">`) {

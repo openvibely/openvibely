@@ -341,7 +341,7 @@ func TaskChangesWorktreeContentWithView(diffOutput string, task *models.Task, fi
 			return templ_7745c5c3_Err
 		}
 		if task.WorktreeBranch != "" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 30, "<div class=\"flex flex-wrap items-start justify-between gap-2 mb-4 min-w-0 max-w-full\"><div class=\"min-w-0 max-w-full flex-1\"><h4 class=\"text-lg font-bold\">Worktree Changes</h4><p class=\"text-sm opacity-60 min-w-0 max-w-full break-words [overflow-wrap:anywhere]\">Changes on branch <code class=\"bg-base-200 px-1.5 py-0.5 rounded text-xs break-all\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 30, "<div class=\"relative z-[90] flex flex-wrap items-start justify-between gap-2 mb-4 min-w-0 max-w-full\"><div class=\"min-w-0 max-w-full flex-1\"><h4 class=\"text-lg font-bold\">Worktree Changes</h4><p class=\"text-sm opacity-60 min-w-0 max-w-full break-words [overflow-wrap:anywhere]\">Changes on branch <code class=\"bg-base-200 px-1.5 py-0.5 rounded text-xs break-all\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}

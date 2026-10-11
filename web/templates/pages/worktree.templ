@@ -124,9 +124,9 @@ templ TaskChangesWorktreeContent(diffOutput string, task *models.Task, fileStats
 templ TaskChangesWorktreeContentWithView(diffOutput string, task *models.Task, fileStats []service.WorktreeFileStat, reviewComments []models.ReviewComment, taskPR *models.TaskPullRequest, localMergeUnavailable bool, conflictRecovery bool, rebaseAvailable bool, diffView string) {
 	<div class="card bg-base-100 shadow-sm border border-base-300">
 		<div class="card-body">
-			// Worktree branch info header
+			// Keep the actions header above sticky diff headers in the same card.
 			if task.WorktreeBranch != "" {
-				<div class="flex flex-wrap items-start justify-between gap-2 mb-4 min-w-0 max-w-full">
+				<div class="relative z-[90] flex flex-wrap items-start justify-between gap-2 mb-4 min-w-0 max-w-full">
 					<div class="min-w-0 max-w-full flex-1">
 						<h4 class="text-lg font-bold">Worktree Changes</h4>
 						<p class="text-sm opacity-60 min-w-0 max-w-full break-words [overflow-wrap:anywhere]">
