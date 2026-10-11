@@ -2328,22 +2328,53 @@ templ ChatInputForm(config ChatInputFormConfig) {
 					return entries.slice(-messageHistoryLimit);
 				}
 
-				function loadMessageHistory() {
-					if (!messageHistoryStorageKey) return [];
-					var remembered = window._chatMessageHistories[messageHistoryStorageKey];
-					if (remembered && remembered.length) return remembered.slice();
-					try {
-						var raw = localStorage.getItem(messageHistoryStorageKey);
-						var parsed = raw ? JSON.parse(raw) : [];
-						if (Array.isArray(parsed)) {
-							var entries = parsed.filter(function(entry) { return typeof entry === 'string' && entry.trim() !== ''; }).slice(-messageHistoryLimit);
-							if (entries.length) return entries;
-						}
-					} catch (e) {
-						// Recover from the current session or the server-rendered thread below.
-					}
-					return renderedMessageHistory();
-				}
+                function mergeMessageHistory(saved, rendered) {
+                    // Align matching occurrences, rather than deduplicating by text: a
+                    // user can send the same message again later. Both lists are bounded.
+                    // Sends are trimmed by the server. Match that representation but
+                    // retain the saved text so recall preserves the user's whitespace.
+                    var savedKeys = saved.map(function(message) { return message.trim(); });
+                    var renderedKeys = rendered.map(function(message) { return message.trim(); });
+                    var lengths = Array.from({length: saved.length + 1}, function() {
+                        return Array(rendered.length + 1).fill(0);
+                    });
+                    for (var i = saved.length - 1; i >= 0; i--) {
+                        for (var j = rendered.length - 1; j >= 0; j--) {
+                            lengths[i][j] = savedKeys[i] === renderedKeys[j]
+                                ? 1 + lengths[i + 1][j + 1]
+                                : Math.max(lengths[i + 1][j], lengths[i][j + 1]);
+                        }
+                    }
+                    var entries = [], i = 0, j = 0;
+                    while (i < saved.length && j < rendered.length) {
+                        if (savedKeys[i] === renderedKeys[j]) {
+                            entries.push(saved[i++]); j++;
+                        } else if (lengths[i + 1][j] >= lengths[i][j + 1]) {
+                            entries.push(saved[i++]);
+                        } else {
+                            entries.push(rendered[j++]);
+                        }
+                    }
+                    return entries.concat(saved.slice(i), rendered.slice(j)).slice(-messageHistoryLimit);
+                }
+
+                function loadMessageHistory() {
+                    if (!messageHistoryStorageKey) return [];
+                    var entries = window._chatMessageHistories[messageHistoryStorageKey];
+                    if (!entries || !entries.length) {
+                        entries = [];
+                        try {
+                            var raw = localStorage.getItem(messageHistoryStorageKey);
+                            var parsed = raw ? JSON.parse(raw) : [];
+                            if (Array.isArray(parsed)) {
+                                entries = parsed.filter(function(entry) { return typeof entry === 'string' && entry.trim() !== ''; }).slice(-messageHistoryLimit);
+                            }
+                        } catch (e) {
+                            // The server-rendered thread remains available without storage.
+                        }
+                    }
+                    return mergeMessageHistory(entries, renderedMessageHistory());
+                }
 
 				function saveMessageHistory(entries) {
 					if (!messageHistoryStorageKey) return;
@@ -2360,7 +2391,12 @@ templ ChatInputForm(config ChatInputFormConfig) {
 					var trimmed = (message || '').trim();
 					if (!trimmed) return;
 					messageHistoryEntries = loadMessageHistory();
-					if (messageHistoryEntries.length === 0 || messageHistoryEntries[messageHistoryEntries.length - 1] !== message) {
+					var lastIndex = messageHistoryEntries.length - 1;
+					if (lastIndex >= 0 && messageHistoryEntries[lastIndex].trim() === trimmed) {
+						// The response may already have rendered the server-trimmed copy.
+						// Keep one entry, retaining the exact text the user submitted.
+						messageHistoryEntries[lastIndex] = message;
+					} else {
 						messageHistoryEntries.push(message);
 					}
 					messageHistoryEntries = messageHistoryEntries.slice(-messageHistoryLimit);
