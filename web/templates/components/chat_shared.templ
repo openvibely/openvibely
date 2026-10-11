@@ -2360,12 +2360,12 @@ templ ChatInputForm(config ChatInputFormConfig) {
 					}
 				}
 
-				function isAtFirstLineStart(textarea) {
+				function isAtMessageHistoryBoundary(textarea, key) {
 					if (!textarea) return false;
 					var start = typeof textarea.selectionStart === 'number' ? textarea.selectionStart : 0;
 					var end = typeof textarea.selectionEnd === 'number' ? textarea.selectionEnd : start;
 					if (start !== end) return false;
-					return start === 0;
+					return key === 'ArrowUp' ? textarea.value.slice(0, start).indexOf('\n') === -1 : textarea.value.slice(end).indexOf('\n') === -1;
 				}
 
 				function handleMessageHistoryKeydown(e) {
@@ -2379,7 +2379,8 @@ templ ChatInputForm(config ChatInputFormConfig) {
 						resetMessageHistoryNavigation();
 						return true;
 					}
-					if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && messageInput.value !== '' && !isAtFirstLineStart(messageInput)) return false;
+					if (messageInput.selectionStart !== messageInput.selectionEnd) return false;
+					if (messageHistoryIndex === -1 && messageInput.value !== '' && !isAtMessageHistoryBoundary(messageInput, e.key)) return false;
 					if (e.key === 'ArrowDown' && messageHistoryIndex === -1) return false;
 
 					messageHistoryEntries = loadMessageHistory();

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -55,7 +56,11 @@ func testComposerHistoryAcrossTasks(t *testing.T, mode string) {
 			w.Header().Set("HX-Reswap", "innerHTML")
 			_, _ = w.Write([]byte(forms["a"]))
 		case "/tasks/a", "/tasks/b":
-			_, _ = w.Write([]byte(forms[r.URL.Path[len("/tasks/"):]]))
+			html := forms[r.URL.Path[len("/tasks/"):]]
+			if r.URL.Query().Get("refresh") != "" {
+				html = strings.Replace(html, `data-thread-revision="`, `data-thread-revision="changed-`, 1)
+			}
+			_, _ = w.Write([]byte(html))
 		case "/tasks/a/thread", "/tasks/b/thread":
 			_ = r.ParseForm()
 			if r.FormValue("message") == "task a second" {
@@ -72,7 +77,7 @@ window.addEventListener('load', async function() {
   async function waitFor(check) { var start=performance.now(); while (!check()) { if(performance.now()-start>2000) throw new Error('timed out'); await new Promise(r=>setTimeout(r,20)); } }
   async function send(text) { input().value=text; input().dispatchEvent(new Event('input',{bubbles:true})); key('Enter'); await waitFor(()=>input().value===''); }
   async function visit(id) { var link=document.createElement('a'); link.setAttribute('hx-push-url','true'); document.body.appendChild(link); await htmx.ajax('GET','/tasks/'+id,{source:link,target:'#main-content',swap:'innerHTML'}); link.remove(); await new Promise(r=>setTimeout(r,50)); }
-  await send('task a first'); await htmx.ajax('GET','/tasks/a',{target:'#task-thread-view',swap:'morph:outerHTML'}); input().value='task a second'; key('Enter');
+  await send('task a first'); await htmx.ajax('GET','/tasks/a?refresh=1',{target:'#task-thread-view',swap:'morph:outerHTML'}); key('ArrowUp'); check('task a first'); key('ArrowDown'); check(''); input().value='task a second'; key('Enter');
   var mode = %q;
   // Finish A's send only after B is mounted with a separate draft.
   document.body.addEventListener('htmx:afterSwap', function release(event) {
@@ -105,8 +110,18 @@ window.addEventListener('load', async function() {
   // Restored composers must rebind draft listeners; cache attributes alone are insufficient.
   input().value='task a unsent'; input().dispatchEvent(new Event('input',{bubbles:true}));
   await visit('b'); key('ArrowUp'); check('task b only'); key('ArrowDown'); check('');
-  await visit('a'); check('task a unsent'); input().setSelectionRange(0,0);
-  key('ArrowUp'); check('task a second'); key('ArrowDown'); check('task a unsent');
+  await visit('a'); check('task a unsent'); input().setSelectionRange(input().value.length,input().value.length);
+  key('ArrowUp'); check('task a second');
+  input().setSelectionRange(input().value.length,input().value.length);
+  key('ArrowDown'); check('task a unsent');
+  input().value='first line\nsecond line'; input().dispatchEvent(new Event('input',{bubbles:true}));
+  input().setSelectionRange(input().value.length,input().value.length);
+  key('ArrowUp'); check('first line\nsecond line');
+  input().setSelectionRange(3,3); key('ArrowUp'); check('task a second');
+  key('ArrowDown'); check('first line\nsecond line');
+  input().setSelectionRange(1,4); key('ArrowUp'); check('first line\nsecond line');
+  await send('sent first line\nsent second line');
+  key('ArrowUp'); check('sent first line\nsent second line'); key('ArrowDown'); check('');
   document.body.dataset.testResult='pass'; document.getElementById('browser-result').textContent='PASS';
  } catch(e) { document.body.dataset.testResult='fail'; document.body.dataset.testError=e.message; document.getElementById('browser-result').textContent='FAIL:'+e.message; }
 });
