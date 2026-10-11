@@ -1772,6 +1772,13 @@ func TestBrowserFunctional_TaskCardMergeMenuDirectActionNon2xxRetryAndCardRefres
 				positionKanbanSubmenu(local);localPanel=document.querySelector('[data-task-card-submenu-portaled="true"]');localRect=localPanel.getBoundingClientRect();
 				var hoverGithub=menu.querySelector('[data-task-card-github-submenu]'),hoverGithubRect=hoverGithub.getBoundingClientRect(),opensRight=localRect.left>=menuRect.right-8;
 				var hoverOriginX=opensRight?menuRect.left+20:menuRect.right-20,hoverTargetX=opensRight?menuRect.right-12:menuRect.left+12;
+				// A regular row must dismiss immediately even when pointer movement
+				// would otherwise qualify for the submenu switching delay.
+				hoverKanbanSubmenu({clientX:hoverOriginX,clientY:localTriggerRect.top+12},local);
+				plainItem.dispatchEvent(new MouseEvent('mouseenter',{clientX:hoverTargetX,clientY:localRect.top+12}));
+				plainItem.dispatchEvent(new MouseEvent('mouseleave'));
+				if(document.querySelector('[data-task-card-submenu-portaled="true"]'))fail('diagonal hover over a regular action left the submenu open');
+				if(dropdown.getAttribute('data-kanban-menu-open')!=='true')fail('diagonal hover over a regular action closed the primary menu');
 				hoverKanbanSubmenu({clientX:hoverOriginX,clientY:localTriggerRect.top+12},local);
 				hoverKanbanSubmenu({clientX:hoverTargetX,clientY:hoverGithubRect.top+12},hoverGithub);
 				if(!document.querySelector('[data-task-card-submenu-portaled="true"] [data-merge-type="merge"]'))fail('diagonal travel replaced Local submenu immediately');
