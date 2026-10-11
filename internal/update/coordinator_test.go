@@ -1879,6 +1879,8 @@ type retryingRecoveryInstaller struct {
 	countingInstaller
 	resumes   atomic.Int32
 	rollbacks atomic.Int32
+	entered   chan int32
+	proceed   chan struct{}
 }
 
 func (i *retryingRecoveryInstaller) Apply(context.Context, any) error {
@@ -1886,8 +1888,19 @@ func (i *retryingRecoveryInstaller) Apply(context.Context, any) error {
 	return ErrUpdateRecoveryPending
 }
 
-func (i *retryingRecoveryInstaller) Resume(context.Context) error {
-	if i.resumes.Add(1) < 3 {
+func (i *retryingRecoveryInstaller) Resume(ctx context.Context) error {
+	attempt := i.resumes.Add(1)
+	select {
+	case i.entered <- attempt:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	select {
+	case <-i.proceed:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	if attempt < 3 {
 		return ErrUpdateRecoveryPending
 	}
 	return nil
@@ -1901,28 +1914,47 @@ func (i *retryingRecoveryInstaller) Rollback(context.Context, any) error {
 func TestCoordinatorRetriesAmbiguousInstallerRequestWithoutReopeningDrain(t *testing.T) {
 	now := time.Unix(1000, 0).UTC()
 	drain := NewDrainManager(nil, nil, 0, func() time.Time { return now })
-	installer := &retryingRecoveryInstaller{}
+	installer := &retryingRecoveryInstaller{entered: make(chan int32), proceed: make(chan struct{})}
 	client := NewClient(ClientConfig{Channel: "stable", StatePath: filepath.Join(t.TempDir(), "client.json"), Now: func() time.Time { return now }})
 	coordinator := NewCoordinator(client, CurrentBuild{Build: buildinfo.Build{Version: "0.5.0"}}, "stable", drain, installer, false, "", nil)
 	coordinator.recoveryRetryInterval = time.Millisecond
 	coordinator.release = &VerifiedRelease{Metadata: ReleaseMetadata{Version: "0.6.0", Channel: "stable", ExpiresAt: now.Add(time.Hour)}}
 	coordinator.staged = "staged"
 	coordinator.state = StateAvailable
-	if err := coordinator.Apply(context.Background(), time.Hour); err != nil {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := coordinator.Apply(ctx, time.Hour); err != nil {
 		t.Fatal(err)
 	}
-	deadline := time.Now().Add(2 * time.Second)
-	ownedWhilePending := false
-	for coordinator.Snapshot().State != StateSucceeded && time.Now().Before(deadline) {
-		snapshot := coordinator.Snapshot()
-		if snapshot.State == StateApplying && drain.Owns(snapshot.Drain.Generation) {
-			ownedWhilePending = true
+	generation := coordinator.Snapshot().Drain.Generation
+	// Hold each Resume call until ownership is checked. Polling a transient
+	// state can miss all retries when the test goroutine is descheduled.
+	for attempt := int32(1); attempt <= 3; attempt++ {
+		select {
+		case got := <-installer.entered:
+			if got != attempt {
+				t.Fatalf("resume attempt=%d, want %d", got, attempt)
+			}
+		case <-ctx.Done():
+			t.Fatalf("wait for resume attempt %d: %v", attempt, ctx.Err())
 		}
+		snapshot := coordinator.Snapshot()
+		if snapshot.State != StateApplying || snapshot.Drain.Generation != generation || !drain.Owns(generation) {
+			t.Fatalf("drain ownership lost during resume attempt %d: snapshot=%#v", attempt, snapshot)
+		}
+		select {
+		case installer.proceed <- struct{}{}:
+		case <-ctx.Done():
+			t.Fatalf("release resume attempt %d: %v", attempt, ctx.Err())
+		}
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for coordinator.Snapshot().State != StateSucceeded && time.Now().Before(deadline) {
 		time.Sleep(time.Millisecond)
 	}
 	snapshot := coordinator.Snapshot()
-	if !ownedWhilePending || snapshot.State != StateSucceeded || snapshot.Drain.State != DrainStateIdle {
-		t.Fatalf("ownedWhilePending=%v snapshot=%#v", ownedWhilePending, snapshot)
+	if snapshot.State != StateSucceeded || snapshot.Drain.State != DrainStateIdle {
+		t.Fatalf("snapshot=%#v", snapshot)
 	}
 	if installer.applies.Load() != 1 || installer.resumes.Load() != 3 || installer.rollbacks.Load() != 0 {
 		t.Fatalf("apply=%d resume=%d rollback=%d", installer.applies.Load(), installer.resumes.Load(), installer.rollbacks.Load())
