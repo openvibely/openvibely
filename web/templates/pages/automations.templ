@@ -2326,7 +2326,7 @@ templ automationGraphThemeStyles() {
 }
 
 templ automationLiveMoreActions(graph models.AutomationLiveGraph, currentProjectID string, deleteAvailable bool) {
-	@components.CardActionDropdown(components.CardActionDropdownConfig{WrapperClass: "dropdown dropdown-end shrink-0", MenuClass: "z-[100] w-48", Label: "More actions for " + graph.Automation.Name, AutomationLiveMenu: true}) {
+	@components.CardActionDropdown(components.CardActionDropdownConfig{WrapperClass: "dropdown dropdown-end shrink-0", TriggerClass: "sidebar-toggle-btn header-action-btn btn btn-ghost btn-sm btn-square", IconClass: "h-5 w-5", MenuClass: "z-[100] w-48", Label: "More actions for " + graph.Automation.Name, AutomationLiveMenu: true}) {
 		@automationLiveDuplicateAction(graph.Automation.ID, currentProjectID, graph.Version.AdapterKey)
 				if graph.TemplateUpdateAvailable {
 					<li><button type="button" data-automation-live-update-template onclick="document.getElementById('update-automation-template-modal').showModal()">Update to latest template</button></li>
@@ -2344,7 +2344,7 @@ templ automationLiveMoreActions(graph models.AutomationLiveGraph, currentProject
 }
 
 templ automationBuilderMoreActions(page models.AutomationBuilderPage, currentProjectID string) {
-	@components.CardActionDropdown(components.CardActionDropdownConfig{WrapperClass: "dropdown dropdown-end shrink-0", MenuClass: "z-[100] w-48", Label: "More actions for " + page.Result.Candidate.Name, AutomationBuilderActions: true}) {
+	@components.CardActionDropdown(components.CardActionDropdownConfig{WrapperClass: "dropdown dropdown-end shrink-0", TriggerClass: "sidebar-toggle-btn header-action-btn btn btn-ghost btn-sm btn-square", IconClass: "h-5 w-5", MenuClass: "z-[100] w-48", Label: "More actions for " + page.Result.Candidate.Name, AutomationBuilderActions: true}) {
 				if page.LifecycleState == models.AutomationActive {
 					<li><button type="submit" form="automation-builder-pause-form" data-automation-builder-pause>Disable</button></li>
 				}
