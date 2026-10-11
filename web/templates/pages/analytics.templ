@@ -892,9 +892,7 @@ templ analyticsContent(currentProject *models.Project) {
 							  }
 							  context.canvas.closest('.card')?.style.setProperty('min-width','0');
 							 }
-							 options.plugins=options.plugins||{};
-                             options.plugins.tooltip={...options.plugins.tooltip,enabled:false,external:function(context){if(window.openVibelyTooltip)window.openVibelyTooltip.chart(context);}};
-                             return new Chart(context,config);
+							 return new Chart(context,config);
 							}
 							function modelSlotKey(row){return row.model_config_id||JSON.stringify([row.provider,row.model,row.reasoning_effort,row.config_name]);}
 							function drawModelBarValue(chart,bar,index,label,missing){
