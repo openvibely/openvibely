@@ -166,6 +166,8 @@ func TestBrowserFunctional_TooltipDelayAndShortcutFocus(t *testing.T) {
 	}))
 	defer server.Close()
 	runComposerFocusCDP(t, chrome, server.URL, "tooltip-delay", func(b *composerFocusCDP) {
+		// Page.navigate can return before the fixture DOM and fake clock are loaded.
+		b.waitFor("tooltip controller ready", `typeof window.openVibelyTooltip`, "object")
 		result := b.evaluate(`(()=>{
    const a=document.getElementById('a'),b=document.getElementById('b'),tip=document.getElementById('ov-shared-tooltip');
    function check(ok,message){if(!ok)throw Error(message)}
