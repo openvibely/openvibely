@@ -17,14 +17,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestChatInputRequestBrowserSurvivesModelMenuAndTranscriptSwaps reproduces the
-// regression where a pending request_user_input card vanished from Chat after
-// the user opened/closed the models menu or changed the model, and more
-// generally after any transcript re-render. Input-request cards are client-only
-// DOM absent from server HTML, so a chat-page-root or main-content swap wipes
-// them; they must be rebuilt from saved server state on every such swap, not
-// only on a direct chat-messages swap.
-func TestChatInputRequestBrowserSurvivesModelMenuAndTranscriptSwaps(t *testing.T) {
+// Model-menu interactions do not trigger transcript reloads. Exercise them
+// separately from explicit HTMX swaps, which previously dropped question cards.
+func TestChatInputRequestBrowserPreservesProgressAcrossTranscriptSwaps(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping browser regression in short mode")
 	}
@@ -149,7 +144,34 @@ func TestChatInputRequestBrowserSurvivesModelMenuAndTranscriptSwaps(t *testing.T
 			if (cardPresent() !== originalCard) fail('card was rebuilt instead of preserved across swaps');
 			if (inputFetches !== 0) fail('swaps refetched input requests instead of keeping server-rendered card');
 
-			await report('pass', 'input request survived model menu and transcript swaps');
+			// A card whose execution is outside the loaded window starts at the
+			// bottom. Loading that execution through an earlier-message loader
+			// must move the same card beside it without resetting the answers.
+			var pair = originalCard.parentElement;
+			var pairID = pair.id;
+			var messages = document.getElementById('chat-messages');
+			messages.appendChild(originalCard);
+			pair.remove();
+			var loader = document.createElement('div');
+			loader.id = 'chat-messages-earlier-loader';
+			messages.prepend(loader);
+			await htmx.ajax('GET', '/chat?project_id=' + encodeURIComponent(pid), {target:'#chat-messages-earlier-loader', select:'#' + pairID, swap:'outerHTML'});
+			await waitFor(function() { return originalCard.parentElement.id === pairID; }, 'card did not move to loaded execution');
+			if (!firstAnswerKept()) fail('moving card lost partial answers');
+
+			// Resolve through the answer endpoint without delivering the live event,
+			// as when another tab answers while this tab is disconnected.
+			var id = originalCard.getAttribute('data-chat-input-request-id');
+			if (!window._chatInputDrafts[id]) fail('draft was not saved');
+			var answer = await realFetch('/chat/input-requests/' + id + '/answer', {
+				method: 'POST', headers: {'Content-Type':'application/json'},
+				body: JSON.stringify({project_id:pid, answers:[{question_id:'continue',label:'Yes'},{question_id:'scope',label:'Small'}]})
+			});
+			if (!answer.ok) fail('remote answer failed');
+			await htmx.ajax('GET', '/chat?project_id=' + encodeURIComponent(pid), {target:'#chat-messages', select:'#chat-messages', swap:'morph:outerHTML'});
+			await waitFor(function() { return !cardPresent(); }, 'resolved card survived reload');
+			if (window._chatInputDrafts[id]) fail('resolved request left a stale draft');
+			await report('pass', 'progress preserved and remote resolution cleaned up');
 		} catch (error) {
 			await report('fail', String(error && error.stack || error));
 		}

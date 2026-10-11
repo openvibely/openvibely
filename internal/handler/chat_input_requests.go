@@ -301,10 +301,7 @@ func (h *Handler) ChatInputRequests(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	if c.QueryParam("format") == "html" {
-		return render(c, http.StatusOK, pages.ChatInputRequestCards(items))
-	}
-	return c.JSON(http.StatusOK, map[string]any{"input_requests": items})
+	return render(c, http.StatusOK, pages.ChatInputRequestCards(items))
 }
 
 func (h *Handler) chatInputRequestEvents(ctx context.Context, projectID string) ([]*events.ChatInputRequestEvent, error) {
