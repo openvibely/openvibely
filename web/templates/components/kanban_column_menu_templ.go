@@ -34,7 +34,7 @@ func KanbanSubmenu(label string) templ.Component {
 			templ_7745c5c3_Var1 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<li class=\"group relative\" onmouseenter=\"hoverKanbanSubmenu(event, this)\" onmouseleave=\"cancelKanbanSubmenuHover(this)\"><button type=\"button\" class=\"justify-between\" onclick=\"positionKanbanSubmenu(this.parentElement)\" onfocus=\"positionKanbanSubmenu(this.parentElement)\" onkeydown=\"handleKanbanSubmenuKeydown(event, this.parentElement)\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<li class=\"group relative\"><button type=\"button\" class=\"justify-between\" onclick=\"positionKanbanSubmenu(this.parentElement)\" onfocus=\"positionKanbanSubmenu(this.parentElement)\" onkeydown=\"handleKanbanSubmenuKeydown(event, this.parentElement)\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -211,14 +211,14 @@ func KanbanColumnMenu(projectID string, category models.TaskCategory, backlogSor
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 10, "<li onmouseenter=\"hoverKanbanSubmenu(event, this)\" onmouseleave=\"cancelKanbanSubmenuHover(this)\" onfocusin=\"closeKanbanSubmenus(this.closest('[data-kanban-menu-key]'), null)\"><button type=\"button\" data-column=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 10, "<li><button type=\"button\" data-column=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var12 string
 			templ_7745c5c3_Var12, templ_7745c5c3_Err = templ.ResolveAttributeValue(cat)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/kanban_column_menu.templ`, Line: 27, Col: 216}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/kanban_column_menu.templ`, Line: 27, Col: 45}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var12)
 			if templ_7745c5c3_Err != nil {
@@ -504,14 +504,14 @@ func KanbanColumnMenu(projectID string, category models.TaskCategory, backlogSor
 					return templ_7745c5c3_Err
 				}
 			} else {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 31, "<li onmouseenter=\"hoverKanbanSubmenu(event, this)\" onmouseleave=\"cancelKanbanSubmenuHover(this)\" onfocusin=\"closeKanbanSubmenus(this.closest('[data-kanban-menu-key]'), null)\"><button type=\"button\" data-column=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 31, "<li><button type=\"button\" data-column=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var26 string
 				templ_7745c5c3_Var26, templ_7745c5c3_Err = templ.ResolveAttributeValue(cat)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/kanban_column_menu.templ`, Line: 70, Col: 217}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/kanban_column_menu.templ`, Line: 70, Col: 46}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var26)
 				if templ_7745c5c3_Err != nil {
@@ -522,14 +522,14 @@ func KanbanColumnMenu(projectID string, category models.TaskCategory, backlogSor
 					return templ_7745c5c3_Err
 				}
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 33, " <li onmouseenter=\"hoverKanbanSubmenu(event, this)\" onmouseleave=\"cancelKanbanSubmenuHover(this)\" onfocusin=\"closeKanbanSubmenus(this.closest('[data-kanban-menu-key]'), null)\"><button type=\"button\" class=\"text-error\" data-column=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 33, " <li><button type=\"button\" class=\"text-error\" data-column=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var27 string
 			templ_7745c5c3_Var27, templ_7745c5c3_Err = templ.ResolveAttributeValue(cat)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/kanban_column_menu.templ`, Line: 72, Col: 235}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/kanban_column_menu.templ`, Line: 72, Col: 64}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var27)
 			if templ_7745c5c3_Err != nil {
