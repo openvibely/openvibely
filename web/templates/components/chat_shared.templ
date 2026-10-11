@@ -2331,19 +2331,23 @@ templ ChatInputForm(config ChatInputFormConfig) {
                 function mergeMessageHistory(saved, rendered) {
                     // Align matching occurrences, rather than deduplicating by text: a
                     // user can send the same message again later. Both lists are bounded.
+                    // Sends are trimmed by the server. Match that representation but
+                    // retain the saved text so recall preserves the user's whitespace.
+                    var savedKeys = saved.map(function(message) { return message.trim(); });
+                    var renderedKeys = rendered.map(function(message) { return message.trim(); });
                     var lengths = Array.from({length: saved.length + 1}, function() {
                         return Array(rendered.length + 1).fill(0);
                     });
                     for (var i = saved.length - 1; i >= 0; i--) {
                         for (var j = rendered.length - 1; j >= 0; j--) {
-                            lengths[i][j] = saved[i] === rendered[j]
+                            lengths[i][j] = savedKeys[i] === renderedKeys[j]
                                 ? 1 + lengths[i + 1][j + 1]
                                 : Math.max(lengths[i + 1][j], lengths[i][j + 1]);
                         }
                     }
                     var entries = [], i = 0, j = 0;
                     while (i < saved.length && j < rendered.length) {
-                        if (saved[i] === rendered[j]) {
+                        if (savedKeys[i] === renderedKeys[j]) {
                             entries.push(saved[i++]); j++;
                         } else if (lengths[i + 1][j] >= lengths[i][j + 1]) {
                             entries.push(saved[i++]);
