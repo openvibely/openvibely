@@ -54,6 +54,7 @@ func benchmarkKanbanRefresh(b *testing.B, list taskBoardListFunc) {
 
 	b.ReportAllocs()
 	b.ResetTimer()
+	b.StartTimer()
 	for i := 0; i < b.N; i++ {
 		tasks, err := list(ctx, "default", "", "priority_desc", "completed_desc")
 		if err != nil {
@@ -72,6 +73,9 @@ func benchmarkKanbanRefresh(b *testing.B, list taskBoardListFunc) {
 		responseBytes = writer.bytes
 	}
 	b.StopTimer()
+	if b.Elapsed() <= 0 {
+		b.Fatal("Kanban benchmark recorded no elapsed time")
+	}
 	b.ReportMetric(float64(promptBytes), "prompt_bytes/op")
 	b.ReportMetric(float64(responseBytes), "response_bytes/op")
 }
