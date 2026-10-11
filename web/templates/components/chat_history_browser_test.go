@@ -133,7 +133,7 @@ window.addEventListener('load', async function() {
 }
 
 func TestBrowserFunctional_ComposerHistoryWithoutBrowserCache(t *testing.T) {
-	for _, storage := range []string{"empty", "unavailable", "malformed", "read-only"} {
+	for _, storage := range []string{"empty", "unavailable", "malformed", "read-only", "stale", "stale-session", "disjoint", "whitespace", "whitespace-session"} {
 		t.Run(storage, func(t *testing.T) {
 			chrome := testChromePath(t)
 			forms := map[string]string{}
@@ -157,12 +157,20 @@ func TestBrowserFunctional_ComposerHistoryWithoutBrowserCache(t *testing.T) {
 				case "/tasks/a", "/tasks/b":
 					fmt.Fprint(w, forms[strings.TrimPrefix(r.URL.Path, "/tasks/")])
 				case "/tasks/a/thread":
-					fmt.Fprint(w, `<div>accepted</div>`)
+					_ = r.ParseForm()
+					if err := ChatBubble("User", strings.TrimSpace(r.FormValue("message"))).Render(r.Context(), w); err != nil {
+						t.Error(err)
+					}
 				case "/":
 					fmt.Fprintf(w, `<!doctype html><html><body data-test-result="pending">
 <script src="/static/vendor/htmx.min.js"></script>
 <script>
 var storageMode = %q;
+if (storageMode === 'whitespace') localStorage.setItem('openvibely-task-thread-message-history-a', JSON.stringify(['  a first\n','a second\nsecond line\n']));
+if (storageMode === 'whitespace-session') window._chatMessageHistories = {'openvibely-task-thread-message-history-a':['  a first\n','a second\nsecond line\n']};
+if (storageMode === 'stale') localStorage.setItem('openvibely-task-thread-message-history-a', JSON.stringify(['a first']));
+if (storageMode === 'disjoint') localStorage.setItem('openvibely-task-thread-message-history-a', JSON.stringify(['older unloaded message']));
+if (storageMode === 'stale-session') window._chatMessageHistories = {'openvibely-task-thread-message-history-a':['a first']};
 if (storageMode === 'malformed') localStorage.setItem('openvibely-task-thread-message-history-a', '{');
 if (storageMode === 'read-only') {
  localStorage.setItem('openvibely-task-thread-message-history-a', JSON.stringify(['a first','a second\nsecond line']));
@@ -176,25 +184,33 @@ if (storageMode === 'unavailable') {
 window.addEventListener('load', async function() {
  try {
   function input() { return document.getElementById('task-message-input'); }
-  function check(value) { if(input().value!==value) throw new Error('expected '+JSON.stringify(value)+' got '+JSON.stringify(input().value)); }
+  function check(value) {
+   if (storageMode.startsWith('whitespace')) {
+    if (value === 'a first') value = '  a first\n';
+    if (value === 'a second\nsecond line') value += '\n';
+   }
+   if(input().value!==value) throw new Error('expected '+JSON.stringify(value)+' got '+JSON.stringify(input().value)); }
   function key(key) { input().dispatchEvent(new KeyboardEvent('keydown',{key:key,bubbles:true,cancelable:true})); }
   async function visit(id) { await htmx.ajax('GET','/tasks/'+id,{target:'#main-content',swap:'innerHTML'}); await new Promise(r=>setTimeout(r,50)); }
   function recall(id) {
    key('ArrowUp'); check(id+' second\nsecond line');
    key('ArrowUp'); check(id+' first');
+   if (storageMode.startsWith('whitespace')) { key('ArrowUp'); check(id+' first'); }
    key('ArrowDown'); check(id+' second\nsecond line');
    key('ArrowDown'); check('');
   }
   recall('a'); await visit('b'); recall('b'); await visit('a'); recall('a');
   // Accepted messages must survive navigation even when storage writes fail.
-  input().value='a just sent'; input().dispatchEvent(new Event('input',{bubbles:true})); key('Enter');
+  input().value='  a just sent\n'; input().dispatchEvent(new Event('input',{bubbles:true})); key('Enter');
   var started=performance.now();
   while(input().value!=='') {
    if(performance.now()-started>2000) throw new Error('send did not complete');
    await new Promise(r=>setTimeout(r,20));
   }
+  // The accepted bubble is already in the transcript before history is saved.
+  key('ArrowUp'); check('  a just sent\n'); key('ArrowUp'); check('a second\nsecond line'); key('Escape'); check('');
   await visit('b'); recall('b'); await visit('a');
-  key('ArrowUp'); check('a just sent'); key('ArrowUp'); check('a second\nsecond line');
+  key('ArrowUp'); check('  a just sent\n'); key('ArrowUp'); check('a second\nsecond line');
   key('ArrowUp'); check('a first'); key('Escape'); check('');
   document.body.dataset.testResult='pass';
  } catch(e) { document.body.dataset.testResult='fail'; document.body.dataset.testError=e.message; }
