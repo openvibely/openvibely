@@ -26,6 +26,7 @@ import (
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/openvibely/openvibely/web/templates/components"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -7231,7 +7232,7 @@ func TestFollowupResetsMergeStatus(t *testing.T) {
 
 	// Set up worktree service and create worktree
 	h.worktreeSvc = service.NewWorktreeService(h.taskRepo, h.projectRepo, h.settingsRepo)
-	wtPath, _, err := h.worktreeSvc.SetupWorktree(ctx, task, repoDir)
+	wtPath, branch, err := h.worktreeSvc.SetupWorktree(ctx, task, repoDir)
 	if err != nil {
 		t.Fatalf("setup worktree: %v", err)
 	}
@@ -7244,7 +7245,13 @@ func TestFollowupResetsMergeStatus(t *testing.T) {
 		t.Fatalf("commit initial change: %v", err)
 	}
 
-	// Simulate the task being merged
+	// Merge the initial task changes before starting the follow-up.
+	merge := exec.Command("git", "merge", "--ff-only", branch)
+	merge.Dir = repoDir
+	mergeOutput, mergeErr := merge.CombinedOutput()
+	require.NoError(t, mergeErr, "%s", mergeOutput)
+
+	// Record the successful merge.
 	if err := h.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusMerged); err != nil {
 		t.Fatalf("update merge status to merged: %v", err)
 	}
@@ -7273,17 +7280,74 @@ func TestFollowupResetsMergeStatus(t *testing.T) {
 	// Mock LLM caller
 	h.llmSvc.SetLLMCaller(testutil.NewMockLLMCaller())
 
-	// Process the follow-up
-	h.processStreamingResponse(streamingResponseParams{
-		ExecID:         followupExec.ID,
-		TaskID:         task.ID,
-		Message:        "Make more changes",
-		Agent:          *agent,
-		ProjectID:      project.ID,
-		SystemContext:  "continue work",
-		WorkDir:        wtPath,
-		IsTaskFollowup: true,
-	})
+	// Hold the commit open so the UI can observe completion ordering reliably.
+	hookDir := t.TempDir()
+	started := filepath.Join(hookDir, "started")
+	release := filepath.Join(hookDir, "release")
+	hook := "#!/bin/sh\ntouch '" + started + "'\nwhile [ ! -f '" + release + "' ]; do sleep 0.01; done\n"
+	require.NoError(t, os.WriteFile(filepath.Join(hookDir, "pre-commit"), []byte(hook), 0755))
+	config := exec.Command("git", "config", "core.hooksPath", hookDir)
+	config.Dir = wtPath
+	require.NoError(t, config.Run())
+	h.SetExecutionStreamHub(events.NewExecutionStreamHub())
+	sub, unsubscribe, err := h.executionStreamHub.Subscribe(followupExec.ID)
+	require.NoError(t, err)
+	defer unsubscribe()
+
+	finished := make(chan struct{})
+	defer func() {
+		_ = os.WriteFile(release, nil, 0644)
+		select {
+		case <-finished:
+		case <-time.After(10 * time.Second):
+			t.Error("follow-up did not finish after releasing commit")
+		}
+	}()
+	go func() {
+		defer close(finished)
+		h.processStreamingResponse(streamingResponseParams{
+			ExecID:         followupExec.ID,
+			TaskID:         task.ID,
+			Message:        "Make more changes",
+			Agent:          *agent,
+			ProjectID:      project.ID,
+			SystemContext:  "continue work",
+			WorkDir:        wtPath,
+			IsTaskFollowup: true,
+		})
+
+	}()
+	require.Eventually(t, func() bool {
+		_, err := os.Stat(started)
+		return err == nil
+	}, 10*time.Second, 10*time.Millisecond, "follow-up never reached commit")
+
+	// Neither DB catch-up nor the live stream may signal completion yet.
+	inProgress, err := h.execRepo.GetByID(ctx, followupExec.ID)
+	require.NoError(t, err)
+	assert.Equal(t, models.ExecRunning, inProgress.Status)
+	inProgressTask, err := h.taskRepo.GetByID(ctx, task.ID)
+	require.NoError(t, err)
+	assert.Equal(t, models.StatusRunning, inProgressTask.Status)
+	recorder := httptest.NewRecorder()
+	streamContext := echo.New().NewContext(httptest.NewRequest(http.MethodGet, "/", nil), recorder)
+	sentLen := 0
+	terminal, err := h.catchUpExecutionSSE(ctx, streamContext, followupExec.ID, &sentLen, false)
+	require.NoError(t, err)
+	assert.False(t, terminal, "DB catch-up must wait for merge reconciliation")
+	for len(sub) > 0 {
+		ev := <-sub
+		assert.NotEqual(t, events.ExecutionStreamDone, ev.Type, "live stream completed before merge reconciliation")
+	}
+	require.NoError(t, os.WriteFile(release, nil, 0644))
+	select {
+	case <-finished:
+	case <-time.After(10 * time.Second):
+		t.Fatal("follow-up did not finish")
+	}
+	terminal, err = h.catchUpExecutionSSE(ctx, streamContext, followupExec.ID, &sentLen, false)
+	require.NoError(t, err)
+	assert.True(t, terminal)
 
 	// Verify execution completed
 	updatedExec, err := h.execRepo.GetByID(ctx, followupExec.ID)
@@ -7302,6 +7366,11 @@ func TestFollowupResetsMergeStatus(t *testing.T) {
 	if updatedTask.MergeStatus != models.MergeStatusPending {
 		t.Errorf("expected merge_status=pending after followup with new changes, got %s", updatedTask.MergeStatus)
 	}
+
+	var card strings.Builder
+	require.NoError(t, components.TaskCard(*updatedTask, project.ID, string(updatedTask.Category), nil, nil).Render(ctx, &card))
+	assert.Contains(t, card.String(), `data-task-state-icon data-task-state="completed"`)
+	assert.NotContains(t, card.String(), `data-task-state-icon data-task-state="merged"`)
 
 	// Verify the diff was captured
 	if updatedExec.DiffOutput == "" {
