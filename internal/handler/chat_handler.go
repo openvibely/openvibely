@@ -80,14 +80,23 @@ func (h *Handler) Chat(c echo.Context) error {
 	if err != nil {
 		return err
 	}
+	inputRequests, err := h.chatInputRequestEvents(c.Request().Context(), currentProjectID)
+	if err != nil {
+		applog.Infof("[handler] Chat error loading input requests: %v", err)
+		// A partial refresh must not replace live cards with an incomplete snapshot.
+		if isHTMX {
+			return echo.NewHTTPError(http.StatusServiceUnavailable, "Unable to refresh Chat questions. Try again.")
+		}
+		inputRequests = nil
+	}
 
 	// For HTMX requests, return just the chat content
 	if isHTMX {
-		return render(c, http.StatusOK, pages.ChatContent(agents, chatHistory, currentProjectID, chatAttachmentsByExec, pendingInputs, latestPlanComplete, hasEarlier, limit, optionalString(defaultAgentID)))
+		return render(c, http.StatusOK, pages.ChatContent(agents, chatHistory, currentProjectID, chatAttachmentsByExec, pendingInputs, inputRequests, latestPlanComplete, hasEarlier, limit, optionalString(defaultAgentID)))
 	}
 
 	projects, _ := h.projectSvc.ListSelectorOptions(c.Request().Context())
-	return render(c, http.StatusOK, pages.Chat(projects, currentProjectID, agents, chatHistory, chatAttachmentsByExec, pendingInputs, latestPlanComplete, hasEarlier, limit, optionalString(defaultAgentID)))
+	return render(c, http.StatusOK, pages.Chat(projects, currentProjectID, agents, chatHistory, chatAttachmentsByExec, pendingInputs, inputRequests, latestPlanComplete, hasEarlier, limit, optionalString(defaultAgentID)))
 }
 
 func parseThreadWindowLimit(raw string, defaultLimit, maxLimit int) int {
@@ -761,7 +770,7 @@ func (h *Handler) ClearChat(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	return render(c, http.StatusOK, pages.ChatContent(agents, []models.Execution{}, projectID, make(map[string][]models.ChatAttachment), []models.ThreadInput{}, false, false, chatUIWindowLimitDefault, optionalString(defaultAgentID)))
+	return render(c, http.StatusOK, pages.ChatContent(agents, []models.Execution{}, projectID, make(map[string][]models.ChatAttachment), []models.ThreadInput{}, nil, false, false, chatUIWindowLimitDefault, optionalString(defaultAgentID)))
 }
 
 // chatHistoryHasPlanCompletion checks if the latest completed assistant response

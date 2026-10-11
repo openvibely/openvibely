@@ -241,7 +241,7 @@ func TestChatInputRequestAnswerRejectsInvalidCrossProjectAndDuplicate(t *testing
 	require.Equal(t, "Use the deployment-configured fallback", customAnswer)
 }
 
-func TestChatInputRequestsListsPendingAndCompletedRequests(t *testing.T) {
+func TestChatInputRequestsRendersPendingAndOmitsCompletedRequests(t *testing.T) {
 	tc := NewTestContext(t)
 	project := tc.CreateProject().WithName("Input request state").Build()
 	pending, err := tc.handler.chatInputRequests.create(project.ID, "exec-state", []chatInputRequestQuestion{{
@@ -251,14 +251,13 @@ func TestChatInputRequestsListsPendingAndCompletedRequests(t *testing.T) {
 
 	rec := tc.HTTP().Get("/chat/input-requests?project_id=" + project.ID).Execute()
 	require.Equal(t, http.StatusOK, rec.Code)
-	require.Contains(t, rec.Body.String(), `"completed":false`)
+	require.Contains(t, rec.Body.String(), `data-chat-input-request-id=`)
 	require.Contains(t, rec.Body.String(), pending.ID)
 
 	postInputRequestJSON(t, tc, "/chat/input-requests/"+pending.ID+"/answer", `{"project_id":"`+project.ID+`","answers":[{"question_id":"create","label":"Yes"}]}`, http.StatusOK)
 	rec = tc.HTTP().Get("/chat/input-requests?project_id=" + project.ID).Execute()
 	require.Equal(t, http.StatusOK, rec.Code)
-	require.Contains(t, rec.Body.String(), `"completed":true`)
-	require.Contains(t, rec.Body.String(), `"label":"Yes"`)
+	require.NotContains(t, rec.Body.String(), pending.ID)
 }
 
 func TestChatInputRequestRecoveredAfterRestartRendersAndUnblocksChat(t *testing.T) {
@@ -288,7 +287,7 @@ func TestChatInputRequestRecoveredAfterRestartRendersAndUnblocksChat(t *testing.
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.Contains(t, rec.Body.String(), reqID)
 	require.Contains(t, rec.Body.String(), "Which model?")
-	require.Contains(t, rec.Body.String(), `"completed":false`)
+	require.Contains(t, rec.Body.String(), `data-chat-input-request-id=`)
 
 	postInputRequestJSON(t, tc, "/chat/input-requests/"+reqID+"/answer", `{"project_id":"`+project.ID+`","answers":[{"question_id":"model","label":"Default"}]}`, http.StatusOK)
 	stored, err := repo.Get(ctx, reqID)
@@ -367,11 +366,68 @@ func TestChatPageRendersInputRequestClientControls(t *testing.T) {
 	require.Contains(t, body, "chat_user_input_requested")
 	require.Contains(t, body, "renderChatInputRequest")
 	require.Contains(t, body, "[data-chat-input-option]")
-	require.Contains(t, body, "chat-input-option-btn")
-	require.Contains(t, body, "--btn-focus-scale', '1'")
-	require.Contains(t, body, "textContent = option.description")
-	require.NotContains(t, body, "innerHTML = option.description")
-	require.NotContains(t, body, "innerHTML = question.question")
+	require.Contains(t, body, "/chat/input-requests?project_id=")
+	require.NotContains(t, body, "document.createElement('section')")
+}
+
+func TestChatPageServerRendersPendingInputRequestCard(t *testing.T) {
+	tc := NewTestContext(t)
+	project := tc.CreateProject().WithName("Server card").Build()
+	pending, err := tc.handler.chatInputRequests.create(project.ID, "exec-server", []chatInputRequestQuestion{{
+		ID:       "create",
+		Question: "<img src=x onerror=alert(1)> Create?",
+		Options:  []chatInputRequestOption{{Label: "Yes", Description: "Create <b>now</b>"}, {Label: "No", Description: "Skip"}},
+	}})
+	require.NoError(t, err)
+
+	for _, htmx := range []bool{false, true} {
+		client := tc.HTTP()
+		if htmx {
+			client = tc.HTMX()
+		}
+		body := client.Get("/chat?project_id=" + project.ID).Execute().Body.String()
+		require.Contains(t, body, `id="chat-input-request-`+pending.ID+`"`)
+		require.Contains(t, body, `data-chat-input-exec-id="exec-server"`)
+		require.Contains(t, body, `data-option-label="Yes"`)
+		require.Contains(t, body, "Recommended")
+		require.Contains(t, body, "&lt;img src=x onerror=alert(1)&gt; Create?")
+		require.NotContains(t, body, "<img src=x onerror")
+		require.NotContains(t, body, "<b>now</b>")
+	}
+
+	fragment := tc.HTTP().Get("/chat/input-requests?project_id=" + project.ID).Execute().Body.String()
+	require.Contains(t, fragment, `data-chat-input-request-id="`+pending.ID+`"`)
+
+	postInputRequestJSON(t, tc, "/chat/input-requests/"+pending.ID+"/answer", `{"project_id":"`+project.ID+`","answers":[{"question_id":"create","label":"Yes"}]}`, http.StatusOK)
+	body := tc.HTTP().Get("/chat?project_id=" + project.ID).Execute().Body.String()
+	require.NotContains(t, body, `id="chat-input-request-`+pending.ID+`"`)
+}
+
+func TestChatPageLoadsWhenInputRequestsFailToLoad(t *testing.T) {
+	tc := NewTestContext(t)
+	ctx := context.Background()
+	agent := createAgent(t, tc.llmConfigRepo)
+	project := tc.CreateProject().WithName("Broken input request").Build()
+	task := createTask(t, tc.handler, project.ID, "Broken input chat", func(task *models.Task) {
+		task.Category = models.CategoryChat
+	})
+	exec := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecCompleted, PromptSent: "ask me"}
+	require.NoError(t, tc.execRepo.Create(ctx, exec))
+	repo := repository.NewChatInputRequestRepo(tc.db)
+	require.NoError(t, repo.Create(ctx, repository.ChatInputRequestRecord{
+		ID: repository.NewID(), ProjectID: project.ID, ExecutionID: exec.ID, QuestionsJSON: "{not json", ExpiresAt: time.Now().Add(time.Hour),
+	}))
+	tc.handler.chatInputRequests = newChatInputRequestBroker()
+
+	rec := tc.HTTP().Get("/chat?project_id=" + project.ID).Execute()
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Contains(t, rec.Body.String(), `id="chat-page-root"`)
+	require.NotContains(t, rec.Body.String(), `data-chat-input-exec-id="`+exec.ID+`"`)
+
+	refresh := tc.HTMX().Get("/chat?project_id=" + project.ID).Execute()
+	require.Equal(t, http.StatusServiceUnavailable, refresh.Code)
+	require.NotContains(t, refresh.Body.String(), `id="chat-page-root"`)
+
 }
 
 func handlerToolDefNames(defs []llmcontracts.RuntimeToolDefinition) []string {

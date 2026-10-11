@@ -361,7 +361,7 @@ func TestBrowserFunctional_ComposerAutoFocusProductionNavigationInChrome(t *test
 		return strings.Replace(html, `<div id="task-detail-content"`, `<a id="to-chat" href="/chat?project_id=project-focus" hx-get="/chat?project_id=project-focus" hx-target="#main-content" hx-swap="innerHTML" hx-push-url="true">Open Chat</a><a id="to-delayed-chat" href="/chat?project_id=project-focus&amp;delay=1" hx-get="/chat?project_id=project-focus&amp;delay=1" hx-target="#main-content" hx-swap="innerHTML" hx-push-url="true">Open delayed Chat</a><div id="task-detail-content"`, 1)
 	}
 	chatFragment := func() string {
-		return addChatControl(render(ChatContent(nil, nil, project.ID, nil, nil, false, false, 30)))
+		return addChatControl(render(ChatContent(nil, nil, project.ID, nil, nil, nil, false, false, 30)))
 	}
 	taskFragment := func(defaultTab string) string {
 		return addTaskControls(render(TaskDetailContent(task, nil, nil, nil, nil, nil, nil, defaultTab, nil)))
@@ -398,7 +398,7 @@ func TestBrowserFunctional_ComposerAutoFocusProductionNavigationInChrome(t *test
 				_, _ = w.Write([]byte(fragment))
 				return
 			}
-			document := usePinnedHTMX(render(Chat([]models.Project{project}, project.ID, nil, nil, nil, nil, false, false, 30)))
+			document := usePinnedHTMX(render(Chat([]models.Project{project}, project.ID, nil, nil, nil, nil, nil, false, false, 30)))
 			document = addChatControl(document)
 			_, _ = w.Write([]byte(injectPageControl(document, controls)))
 		case "/tasks/task-focus":
