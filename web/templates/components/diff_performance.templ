@@ -38,8 +38,8 @@ templ diffViewerPerformanceScript() {
       for (var i=0; i<rows.length; i++) {
        var rowRect = rows[i].getBoundingClientRect();
        if (rowRect.bottom > top + 40) {
-        anchor.line = rows[i].dataset.lineNum;
-        anchor.type = rows[i].dataset.lineType;
+        anchor.oldLine = Number(rows[i].dataset.oldLine) || 0;
+        anchor.newLine = Number(rows[i].dataset.newLine) || 0;
         anchor.offset = rowRect.top-top;
         break;
        }
@@ -70,13 +70,16 @@ templ diffViewerPerformanceScript() {
     });
     if (!target) return;
     var anchor = snapshot.anchor, element = target, offset = anchor.cardOffset;
-    if (anchor.line) {
+    if (anchor.oldLine || anchor.newLine) {
      var rows = target.querySelectorAll('tr.diff-review-line');
+     // Split rows can represent both sides. Prefer the new side when both
+     // exist, but preserve old-only anchors (including deletions) by old line.
+     var match = null;
      for (var i=0; i<rows.length; i++) {
-      if (rows[i].dataset.lineNum === anchor.line && rows[i].dataset.lineType === anchor.type) {
-       element = rows[i]; offset = anchor.offset; break;
-      }
+      if (anchor.newLine && Number(rows[i].dataset.newLine) === anchor.newLine) { match = rows[i]; break; }
+      if (!match && anchor.oldLine && Number(rows[i].dataset.oldLine) === anchor.oldLine) match = rows[i];
      }
+     if (match) { element = match; offset = anchor.offset; }
     }
     scroller.scrollTop += element.getBoundingClientRect().top - scroller.getBoundingClientRect().top - offset;
     if (target.hasAttribute('data-diff-lazy-url')) target._diffScrollAnchor = {snapshot:snapshot, scrollTop:scroller.scrollTop};

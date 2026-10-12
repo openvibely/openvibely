@@ -18,21 +18,47 @@ import (
 )
 
 func TestBrowserFunctional_DiffLazyFilesAndLayouts(t *testing.T) {
-	runDiffLazyBrowser(t, false)
+	runDiffLazyBrowser(t, "")
 }
 
 func TestBrowserFunctional_DiffLazyScrollPreservation(t *testing.T) {
-	runDiffLazyBrowser(t, true)
+	for _, kind := range []string{"added", "deleted", "mixed"} {
+		t.Run(kind, func(t *testing.T) { runDiffLazyBrowser(t, kind) })
+	}
 }
 
-func runDiffLazyBrowser(t *testing.T, scrollTest bool) {
+func runDiffLazyBrowser(t *testing.T, scrollKind string) {
 	chrome := testChromePath(t)
+	oldCount, newCount := 1, 1
+	switch scrollKind {
+	case "added":
+		newCount = 151
+	case "deleted":
+		oldCount = 151
+	case "mixed":
+		oldCount, newCount = 103, 103
+	}
 	var diff strings.Builder
 	for i := 0; i < 3; i++ {
-		fmt.Fprintf(&diff, "diff --git a/file%d.go b/file%d.go\n--- a/file%d.go\n+++ b/file%d.go\n@@ -1 +1 @@\n-old%d\n+new%d\n", i, i, i, i, i, i)
-		if scrollTest {
+		fmt.Fprintf(&diff, "diff --git a/file%d.go b/file%d.go\n--- a/file%d.go\n+++ b/file%d.go\n@@ -1,%d +1,%d @@\n-old%d\n+new%d\n", i, i, i, i, oldCount, newCount, i, i)
+		switch scrollKind {
+		case "added", "deleted":
+			prefix := "+"
+			if scrollKind == "deleted" {
+				prefix = "-"
+			}
 			for j := 0; j < 150; j++ {
-				fmt.Fprintf(&diff, "+extra line %d\n", j)
+				fmt.Fprintf(&diff, "%sextra line %d\n", prefix, j)
+			}
+		case "mixed":
+			for _, count := range []int{25, 75} {
+				for j := 0; j < count; j++ {
+					fmt.Fprintf(&diff, "-old block line %d\n", j)
+				}
+				for j := 0; j < count; j++ {
+					fmt.Fprintf(&diff, "+new block line %d\n", j)
+				}
+				fmt.Fprint(&diff, " context divider\n")
 			}
 		}
 	}
@@ -113,19 +139,20 @@ func runDiffLazyBrowser(t *testing.T, scrollTest bool) {
  await originalFetch('/result?status='+result.dataset.testResult+'&error='+encodeURIComponent(result.dataset.testError||''));
  });
  </script>`
-	if scrollTest {
+	if scrollKind != "" {
 		start := strings.Index(runner, "   assert(!document.querySelector")
 		end := strings.Index(runner, "   result.setAttribute('data-test-result','pass');")
 		runner = runner[:start] + `
    const scroller=document.getElementById('main-content');
-   scroller.scrollTop=1500;
+   scroller.scrollTop=1700;
    await new Promise(r=>setTimeout(r,60));
+   const matches=(a,b)=>(a.newLine ? a.newLine===b.newLine : a.oldLine>0 && a.oldLine===b.oldLine) && Math.abs(a.offset-b.offset)<2;
    const before=window._captureDiffScroll();
    switchDiffView('split',false);
    await wait(()=>document.querySelector('#diff-file-split-0 tr'));
    await new Promise(r=>setTimeout(r,60));
    const split=window._captureDiffScroll();
-   assert(split.anchor.line===before.anchor.line && Math.abs(split.anchor.offset-before.anchor.offset)<2,'layout switch lost visible line');
+   assert(matches(before.anchor,split.anchor),'layout switch lost visible line');
    const fragment=await (await originalFetch('/fragment')).text();
    const saved=window._captureDiffScroll();
    document.getElementById('diff-viewer')._diffPerformance.destroy();
@@ -136,7 +163,10 @@ func runDiffLazyBrowser(t *testing.T, scrollTest bool) {
    await wait(()=>document.querySelector('#diff-file-split-0 tr'));
    await new Promise(r=>setTimeout(r,60));
    const refreshed=window._captureDiffScroll();
-   assert(refreshed.anchor.line===saved.anchor.line && Math.abs(refreshed.anchor.offset-saved.anchor.offset)<2,'live refresh lost visible line');
+   assert(matches(saved.anchor,refreshed.anchor),'live refresh lost visible line');
+   switchDiffView('inline',false);
+   await new Promise(r=>setTimeout(r,60));
+   assert(matches(refreshed.anchor,window._captureDiffScroll().anchor),'switch back lost visible line');
    assert(count(1,'split')===0 && count(2,'split')===0,'restoration loaded collapsed files');
   ` + runner[end:]
 	}
