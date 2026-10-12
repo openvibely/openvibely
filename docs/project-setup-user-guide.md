@@ -35,9 +35,9 @@ If no model is configured, chat/task execution is blocked until a model exists.
 
 ## Open The New Project Dialog
 
-In the left sidebar, use the `Project` section:
+Use the project menu:
 
-1. Click the `+` icon (tooltip: `New Project`).
+1. Open the plus menu beside the project tabs, or the project selector on a narrow layout, and choose `Create New Project`.
 2. Fill the modal fields.
 3. Click `Create`.
 
@@ -122,9 +122,13 @@ Use this to keep one project from consuming all worker slots.
 
 To update an existing project:
 
-1. In the sidebar `Project` section, select the project from the dropdown.
-2. Click the gear icon (tooltip: `Project Settings`).
+1. Select the project's tab, or use the project selector on a narrow layout.
+2. Open the tab's context menu and choose `Project Settings`, or use the selector's settings control.
 3. Update fields and save.
+
+## Switch Projects
+
+Project tabs can be dragged to reorder them. Open tabs, their order, and each project's last page are restored across restarts. Use Command/Ctrl+Shift+Left or Right to switch tabs and Command/Ctrl+Shift+K to open the project menu.
 
 ## Delete Project
 

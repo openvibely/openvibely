@@ -24,9 +24,9 @@ What each step does:
 
 Lifecycle hook implementation skills, such as Skill Curator's `route_task`, must come from the lifecycle agent that owns the hook. Task skills are separate and come from the current task's skill scope.
 
-## Lifecycle Tab (Task Detail)
+## Lifecycle View (Task Details)
 
-The task detail page includes a **Lifecycle** tab that shows all lifecycle hook invocations for that task, newest first. Each entry displays the hook type, status badge (`queued`, `running`, `completed`, `failed`, `skipped`), and pills for what the hook involved:
+Open a task's Details panel and select **Lifecycle** to see lifecycle hook invocations for that task, newest first. Each entry displays the hook type, status badge (`queued`, `running`, `completed`, `failed`, `skipped`), and pills for what the hook involved:
 
 | Pill Type | What It Represents |
 |---|---|
