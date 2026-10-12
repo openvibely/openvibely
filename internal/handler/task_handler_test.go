@@ -907,6 +907,9 @@ func TestHandler_RunTask_NoModelsConfiguredHTMX(t *testing.T) {
 	if !strings.Contains(hxTrigger, noModelsConfiguredLinkURL) {
 		t.Fatalf("expected HX-Trigger to contain models link URL %q, got %q", noModelsConfiguredLinkURL, hxTrigger)
 	}
+	if !strings.Contains(hxTrigger, `"click_url":"/models"`) {
+		t.Fatalf("expected toast body to open Models, got %q", hxTrigger)
+	}
 	if !strings.Contains(hxTrigger, noModelsConfiguredLinkText) {
 		t.Fatalf("expected HX-Trigger to contain models link text %q, got %q", noModelsConfiguredLinkText, hxTrigger)
 	}

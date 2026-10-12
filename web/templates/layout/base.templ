@@ -723,6 +723,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					box-sizing: border-box;
 				}
 				.toast-notification .toast-action-link {
+					align-self: flex-end;
 					display: inline-flex;
 					align-items: center;
 					min-height: 1.75rem;
@@ -4969,7 +4970,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						if (containerEl) {
 							var link = document.createElement('a');
 							link.href = linkURL;
-							link.className = 'toast-action-link text-xs self-start';
+							link.className = 'toast-action-link text-xs';
 							link.textContent = linkText;
 							link.addEventListener('click', function(event) {
 								event.preventDefault();
