@@ -1,0 +1,142 @@
+package components
+
+// File bodies stay mounted once loaded. Only unopened files and the unused
+// layout are deferred; this is not row virtualization.
+templ diffViewerPerformanceScript() {
+ <script>
+ (function() {
+  if (!window._refreshDiffPerformance) {
+   var currentViewer = null;
+   window._refreshDiffPerformance = function() {
+    var viewer = document.getElementById('diff-viewer');
+    if (currentViewer && currentViewer !== viewer && currentViewer._diffPerformance) currentViewer._diffPerformance.destroy();
+    currentViewer = viewer;
+    if (!viewer) return;
+    if (!viewer._diffPerformance) {
+     if (window._restoreDiffFileState) window._restoreDiffFileState();
+     viewer._diffPerformance = createController(viewer);
+    }
+    viewer._diffPerformance.refresh();
+   };
+   window.retryLazyDiffFile = function(button) {
+    var card = button.closest('[data-diff-lazy-url]');
+    if (!card) return;
+    delete card.dataset.diffLoadFailed;
+    button.classList.add('hidden');
+    window._refreshDiffPerformance();
+   };
+   document.body.addEventListener('htmx:afterSettle', window._refreshDiffPerformance);
+   document.body.addEventListener('htmx:beforeCleanupElement', function(event) {
+    var element = event.detail && event.detail.elt;
+    if (element && element._diffPerformance) element._diffPerformance.destroy();
+   });
+  }
+
+  function createController(viewer) {
+   var activePanel = null, stopped = false, inFlight = 0;
+   var pending = new Map(), visible = new Set(), observed = new Set();
+   var headers = new Map();
+   var scroller = viewer.closest('#tab-changes') || document.getElementById('main-content');
+   var loadObserver = new IntersectionObserver(function(entries) {
+    entries.forEach(function(entry) {
+     if (entry.isIntersecting) visible.add(entry.target);
+     else visible.delete(entry.target);
+    });
+    pump();
+   }, {root:scroller, rootMargin:'300px 0px'});
+   // Only threshold crossings update sticky styling. There is no document
+   // scroll handler, header scan, or per-frame layout measurement.
+   var stickyObserver = new IntersectionObserver(function(entries) {
+    entries.forEach(function(entry) {
+     var header = headers.get(entry.target);
+     if (!header || !header.isConnected || !entry.rootBounds) return;
+     var stuck = entry.boundingClientRect.top <= entry.rootBounds.top;
+     if (stuck && header.getAttribute('data-stuck') !== '1') header.setAttribute('data-stuck','1');
+     else if (!stuck && header.hasAttribute('data-stuck')) header.removeAttribute('data-stuck');
+    });
+   }, {root:scroller, rootMargin:'-1px 0px 0px 0px', threshold:[0,1]});
+
+   function expanded(card) {
+    var header = card.querySelector('[data-diff-toggle]');
+    return header && !header.hasAttribute('data-collapsed');
+   }
+   function pump() {
+    if (stopped || !viewer.isConnected) return;
+    visible.forEach(function(card) {
+     if (inFlight >= 3 || !card.isConnected || !activePanel || !activePanel.contains(card) ||
+         !expanded(card) || pending.has(card) || card.dataset.diffLoadFailed) return;
+     load(card);
+    });
+   }
+   function load(card) {
+    var abort = new AbortController();
+    pending.set(card, abort); inFlight++;
+    card.querySelector('[data-diff-load-status]').textContent = 'Loading diff…';
+    var url = new URL(card.dataset.diffLazyUrl, location.href);
+    url.searchParams.set('file_path', card.dataset.diffFilePath);
+    fetch(url, {headers:{'HX-Request':'true'}, signal:abort.signal})
+     .then(function(response) {
+      if (!response.ok) throw new Error('Could not load diff');
+      return response.text();
+     }).then(function(html) {
+      if (stopped || !card.isConnected) return;
+      var content = document.createElement('template');
+      content.innerHTML = html;
+      var replacement = content.content.firstElementChild;
+      if (!replacement || replacement.id !== card.id) throw new Error('Diff changed; reload the Changes view');
+      // Swap only this card. HTMX preserves its normal cleanup, processing,
+      // and afterSwap/afterSettle hooks, including saved collapse state.
+      htmx.swap(card, html, {swapStyle:'outerHTML'});
+     }).catch(function(error) {
+      if (stopped || !card.isConnected || error.name === 'AbortError') return;
+      card.dataset.diffLoadFailed = 'true';
+      card.querySelector('[data-diff-load-status]').textContent = 'Unable to load this diff. Retry, or reopen Changes if files have changed.';
+      card.querySelector('[data-diff-retry]').classList.remove('hidden');
+     }).finally(function() {
+      pending.delete(card); inFlight--;
+      if (!stopped) refresh();
+     });
+   }
+   function refresh() {
+    if (stopped || !viewer.isConnected) return;
+    var panel = viewer.querySelector('#diff-content-inline:not(.hidden), #diff-content-split:not(.hidden)');
+    if (activePanel !== panel) {
+     loadObserver.disconnect(); stickyObserver.disconnect();
+     observed.clear(); visible.clear(); headers.clear(); activePanel = panel;
+    }
+    if (!panel) return;
+    observed.forEach(function(card) {
+     if (!card.isConnected) { loadObserver.unobserve(card); observed.delete(card); visible.delete(card); }
+    });
+    headers.forEach(function(header, sentinel) {
+     if (!header.isConnected) { stickyObserver.unobserve(sentinel); headers.delete(sentinel); }
+    });
+    panel.querySelectorAll('[data-diff-lazy-url]').forEach(function(card) {
+     if (observed.has(card)) return;
+     observed.add(card); loadObserver.observe(card);
+    });
+    panel.querySelectorAll('.diff-file-header').forEach(function(header) {
+     var sentinel = header.previousElementSibling;
+     if (!sentinel || !sentinel.hasAttribute('data-diff-sticky-sentinel')) {
+      sentinel = document.createElement('div');
+      sentinel.style.cssText = 'height:1px;margin-bottom:-1px;pointer-events:none;';
+      sentinel.setAttribute('aria-hidden','true');
+      sentinel.setAttribute('data-diff-sticky-sentinel','1');
+      header.before(sentinel);
+     }
+     if (headers.has(sentinel)) return;
+     headers.set(sentinel,header); stickyObserver.observe(sentinel);
+    });
+    pump();
+   }
+   return {refresh:refresh, destroy:function() {
+    stopped = true;
+    loadObserver.disconnect(); stickyObserver.disconnect();
+    pending.forEach(function(abort) { abort.abort(); });
+    visible.clear(); observed.clear(); headers.clear();
+   }};
+  }
+  window._refreshDiffPerformance();
+ })();
+ </script>
+}

@@ -131,7 +131,7 @@ index abc123..def456 100644
 	}
 
 	// Verify the response contains the preserved diff
-	body := rec.Body.String()
+	body := loadInlineTaskDiffCards(t, h, e, task.ID, rec.Body.String())
 	if rec.Code != http.StatusOK {
 		t.Errorf("expected status 200, got %d. Body: %s", rec.Code, body)
 	}
@@ -244,7 +244,7 @@ func TestHandler_GetTaskChanges_UnmergedTaskShowsLiveDiff(t *testing.T) {
 
 	// For unmerged tasks, if the worktree doesn't exist (which is likely in this test),
 	// it should fall back to showing the preserved diff
-	body := rec.Body.String()
+	body := loadInlineTaskDiffCards(t, h, e, task.ID, rec.Body.String())
 	if rec.Code != http.StatusOK {
 		t.Errorf("expected status 200, got %d", rec.Code)
 	}
@@ -339,7 +339,7 @@ func TestHandler_GetTaskChanges_PendingMergeStatusButMergedBranchShowsPreservedD
 		t.Fatalf("GetTaskChanges failed: %v", err)
 	}
 
-	body := rec.Body.String()
+	body := loadInlineTaskDiffCards(t, h, e, task.ID, rec.Body.String())
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected status 200, got %d body=%s", rec.Code, body)
 	}
@@ -394,7 +394,7 @@ func TestHandler_GetTaskChanges_CompletedUnmergedWorktreeShowsUncommittedChanges
 		t.Fatalf("GetTaskChanges failed: %v", err)
 	}
 
-	body := rec.Body.String()
+	body := loadInlineTaskDiffCards(t, h, e, task.ID, rec.Body.String())
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected status 200, got %d body=%s", rec.Code, body)
 	}
@@ -457,7 +457,7 @@ func TestHandler_GetTaskChanges_StaleMergedBlankMetadataRecoverableBranchShowsFa
 	if err := h.GetTaskChanges(c); err != nil {
 		t.Fatalf("GetTaskChanges failed: %v", err)
 	}
-	body := rec.Body.String()
+	body := loadInlineTaskDiffCards(t, h, e, task.ID, rec.Body.String())
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected status 200, got %d body=%s", rec.Code, body)
 	}
@@ -538,7 +538,7 @@ func TestHandler_GetTaskChanges_StaleMergedDivergedBranchShowsLocalActions(t *te
 	if err := h.GetTaskChanges(c); err != nil {
 		t.Fatalf("GetTaskChanges failed: %v", err)
 	}
-	body := rec.Body.String()
+	body := loadInlineTaskDiffCards(t, h, e, task.ID, rec.Body.String())
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected status 200, got %d body=%s", rec.Code, body)
 	}
@@ -613,7 +613,7 @@ func TestHandler_GetTask_DirectChangesTabLoadsRecoveredChangesRoute(t *testing.T
 	if err := h.GetTask(c); err != nil {
 		t.Fatalf("GetTask failed: %v", err)
 	}
-	body := rec.Body.String()
+	body := loadInlineTaskDiffCards(t, h, e, task.ID, rec.Body.String())
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected status 200, got %d body=%s", rec.Code, body)
 	}
@@ -679,7 +679,7 @@ func TestHandler_GetTaskWorktreeInfo_StaleMergedBlankMetadataShowsFastForwardOpt
 	if err := h.GetTaskWorktreeInfo(c); err != nil {
 		t.Fatalf("GetTaskWorktreeInfo failed: %v", err)
 	}
-	body := rec.Body.String()
+	body := loadInlineTaskDiffCards(t, h, e, task.ID, rec.Body.String())
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected status 200, got %d body=%s", rec.Code, body)
 	}
@@ -759,7 +759,7 @@ func TestHandler_GetTaskChanges_StaleMergedBlankMetadataShowsFastForwardOption(t
 	if err := h.GetTaskChanges(c); err != nil {
 		t.Fatalf("GetTaskChanges failed: %v", err)
 	}
-	body := rec.Body.String()
+	body := loadInlineTaskDiffCards(t, h, e, task.ID, rec.Body.String())
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected status 200, got %d body=%s", rec.Code, body)
 	}
@@ -921,7 +921,7 @@ func TestHandler_GetTaskChanges_FastForwardMergedBranchHidesMergeOptions(t *test
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
 	}
-	body := rec.Body.String()
+	body := loadInlineTaskDiffCards(t, h, e, task.ID, rec.Body.String())
 
 	// Local merge actions must be hidden because the branch is already merged.
 	if strings.Contains(body, "/worktree/merge") {
@@ -1286,7 +1286,7 @@ func renderTaskChangesEndpoint(t *testing.T, h *Handler, e *echo.Echo, method, p
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected status 200 for %s, got %d body=%s", path, rec.Code, rec.Body.String())
 	}
-	return rec.Body.String()
+	return loadInlineTaskDiffCards(t, h, e, taskID, rec.Body.String())
 }
 
 func firstAgentID(t *testing.T, h *Handler) string {
