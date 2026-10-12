@@ -56,7 +56,7 @@
     provider = null,
     subCloseTimer = null,
     providerSwitchTimer = null,
-    providerSwitchButton = null,
+    providerSwitchProvider = null,
     providerPointerOrigin = null,
     favorites = {},
     favoritesLoading = false,
@@ -240,10 +240,10 @@
     subCloseTimer = null;
   }
   function cancelProviderSwitch(button) {
-    if (button && providerSwitchButton !== button) return;
+    if (button && providerSwitchProvider !== button.dataset.provider) return;
     if (providerSwitchTimer !== null) clearTimeout(providerSwitchTimer);
     providerSwitchTimer = null;
-    providerSwitchButton = null;
+    providerSwitchProvider = null;
   }
   function closeSub() {
     cancelSubClose();
@@ -393,11 +393,11 @@
         b.type = "button";
         b.dataset.provider = p;
         b.onpointermove = () => {
-          if (providerSwitchButton !== b) activateRow(b, list);
+          if (providerSwitchProvider !== p) activateRow(b, list);
         };
         b.onfocus = () => activateRow(b, list);
         b.onpointerenter = (e) => {
-          if (e.pointerType !== "touch") hoverProvider(b, p, e);
+          if (e.pointerType !== "touch") hoverProvider(p, e);
         };
         b.onpointerleave = () => cancelProviderSwitch(b);
         b.setAttribute("aria-haspopup", "dialog");
@@ -434,7 +434,7 @@
     });
     renderSub();
   }
-  function hoverProvider(button, p, event) {
+  function hoverProvider(p, event) {
     if (provider === p) {
       cancelSubClose();
       cancelProviderSwitch();
@@ -449,9 +449,10 @@
         : event.clientX < providerPointerOrigin.x - 8;
       if (toward && event.clientY >= bounds.top - 12 && event.clientY <= bounds.bottom + 12) {
         cancelProviderSwitch();
-        providerSwitchButton = button;
+        providerSwitchProvider = p;
         providerSwitchTimer = setTimeout(() => {
-          if (active && button.isConnected && providerSwitchButton === button) {
+          // Favorites loading can re-render the provider list while the switch is pending.
+          if (active && providerSwitchProvider === p && list.querySelector('.ov-mp-provider[data-provider="' + CSS.escape(p) + '"]')) {
             openProvider(p);
             providerPointerOrigin = { x: event.clientX, y: event.clientY };
           }

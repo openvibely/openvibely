@@ -2636,6 +2636,8 @@ for _, agent := range modelOptions {
                 }
 
                 function finishModelOAuthModal() {
+                    // The close event is queued; skip it if the modal was reopened before it fired.
+                    if (document.getElementById('new_model_modal').open) return;
                     resetModelOAuthSetup();
 
                 }
