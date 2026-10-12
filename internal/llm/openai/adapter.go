@@ -389,7 +389,7 @@ func buildOpenAIRuntime(ctx context.Context, workDir string, agentDef *models.Ag
 			if len(input) > 0 {
 				_ = json.Unmarshal(input, &args)
 			}
-			out, isErr, err := manager.ExecuteTool(name, args)
+			out, isErr, err := manager.ExecuteTool(ctx, name, args)
 			return out, isErr, err
 		}
 		out, err := openaiclient.ExecuteTool(ctx, workDir, name, input)

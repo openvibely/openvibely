@@ -298,7 +298,7 @@ func buildAnthropicRuntime(ctx context.Context, workDir string, agentDef *models
 			if len(input) > 0 {
 				_ = json.Unmarshal(input, &args)
 			}
-			out, isErr, err := manager.ExecuteTool(name, args)
+			out, isErr, err := manager.ExecuteTool(ctx, name, args)
 			return out, isErr, err
 		}
 		out, err := anthropicclient.ExecuteTool(ctx, workDir, name, input)
