@@ -67,7 +67,7 @@ func setHTMXToastWithOptionsAndTriggers(c echo.Context, message, status, linkURL
 }
 
 func setNoModelsConfiguredHTMXToast(c echo.Context) {
-	setHTMXToastWithLink(c, noModelsConfiguredMessage, "failed", noModelsConfiguredLinkURL, noModelsConfiguredLinkText)
+	setHTMXToastWithOptions(c, noModelsConfiguredMessage, "failed", noModelsConfiguredLinkURL, noModelsConfiguredLinkText, "", "", noModelsConfiguredLinkURL)
 }
 
 func noModelsConfiguredResponse(c echo.Context) error {
