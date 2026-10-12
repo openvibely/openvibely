@@ -64,6 +64,14 @@ func TestBrowserFunctional_ConversationModelPicker(t *testing.T) {
  (async function(){
  const assert=(ok,msg)=>{if(!ok)throw Error(msg)},wait=()=>new Promise(r=>setTimeout(r,30)),nextFrame=()=>new Promise(r=>requestAnimationFrame(r));
  try{
+ let favoriteReads=0;const baseFetch=window.fetch.bind(window);
+ window.fetch=async(url,options)=>{
+   if(url!=='/ui/model-favorites'||options)return baseFetch(url,options);
+   favoriteReads++;
+   try{const r=await baseFetch(url,options),data=await r.json();return {ok:r.ok,json:async()=>data};}
+   finally{setTimeout(()=>favoriteReads--);}
+ };
+ const favoritesLoaded=async()=>{while(favoriteReads)await wait();};
  const trigger=document.getElementById('chat-form-agent-select');
  trigger.scrollIntoView({block:'end'});await nextFrame();
  const textarea=document.querySelector('textarea');textarea.focus();
@@ -97,7 +105,7 @@ func TestBrowserFunctional_ConversationModelPicker(t *testing.T) {
    if(originalPlatform)Object.defineProperty(navigator,'platform',originalPlatform);else delete navigator.platform;
    if(originalData)Object.defineProperty(navigator,'userAgentData',originalData);else delete navigator.userAgentData;
  }
- trigger.click();await wait();
+ trigger.click();await wait();await favoritesLoaded();
  const panel=document.getElementById('conversation-model-picker'),sub=document.getElementById('conversation-provider-models');
  assert(!panel.hidden,'picker opens');
  assert(sub.hidden,'picker opens without a provider submenu');
