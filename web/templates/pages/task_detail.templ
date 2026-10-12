@@ -1827,7 +1827,8 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 						var scrollY = window.scrollY || window.pageYOffset || 0;
 						var viewMode = _getDiffViewMode();
 
-							var oldViewer = changesContent.querySelector('#diff-viewer');
+							var diffScroll = window._captureDiffScroll ? window._captureDiffScroll() : null;
+                            var oldViewer = changesContent.querySelector('#diff-viewer');
                             if (oldViewer && oldViewer._diffPerformance) oldViewer._diffPerformance.destroy();
                             changesContent.innerHTML = html;
 							if (typeof htmx !== 'undefined' && typeof htmx.process === 'function') {
@@ -1840,7 +1841,8 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 								if ((viewMode === 'inline' || viewMode === 'split') && typeof switchDiffView === 'function') {
 									switchDiffView(viewMode, false);
 								}
-								// Restore scroll position so the user stays where they were.
+								if (window._restoreDiffScroll) window._restoreDiffScroll(diffScroll, true);
+									// Restore scroll position so the user stays where they were.
 								window.scrollTo(scrollX, scrollY);
 							});
 					}).catch(function() {

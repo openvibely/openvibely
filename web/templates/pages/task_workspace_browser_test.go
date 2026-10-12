@@ -606,6 +606,8 @@ func TestBrowserFunctional_TaskChangesStickyHeadersStayInsideWorkspace(t *testin
 			_ = TaskDetailPage([]models.Project{project}, task, nil, nil, nil, nil, nil, nil, "changes", nil).Render(r.Context(), w)
 		case "/tasks/sticky-task/changes":
 			_ = components.DiffViewerWithReview(diff, task.ID, nil).Render(r.Context(), w)
+		case "/tasks/sticky-task/changes/file":
+			_ = components.LoadDiffFileCard(diff, 0, "inline", task.ID, nil, true).Render(r.Context(), w)
 		case "/tasks/sticky-task/changes/summary":
 			fmt.Fprint(w, `{"files":1}`)
 		default:
