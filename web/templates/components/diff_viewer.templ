@@ -1649,6 +1649,8 @@ templ inlineDiffFileWithReview(f DiffFile, idx int, defaultExpanded bool, taskID
 								<tr
 									class={ "diff-review-line", inlineLineClass(line.Type) }
 									data-file-path={ f.Path }
+									data-old-line={ fmt.Sprintf("%d", line.OldNum) }
+									data-new-line={ fmt.Sprintf("%d", line.NewNum) }
 									data-line-num={ fmt.Sprintf("%d", lineNumForReview(line)) }
 									data-line-type={ lineTypeForDiff(line.Type) }
 								>
@@ -2144,6 +2146,8 @@ templ splitDiffFileWithReview(f DiffFile, idx int, defaultExpanded bool, taskID 
 								<tr
 									class="diff-review-line"
 									data-file-path={ f.Path }
+									data-old-line={ fmt.Sprintf("%d", pair.Left.OldNum) }
+									data-new-line={ fmt.Sprintf("%d", pair.Right.NewNum) }
 									data-line-num={ fmt.Sprintf("%d", lineNumForReview(pair.Right)) }
 									data-line-type={ lineTypeForDiff(pair.Right.Type) }
 									data-review-layout="split"
