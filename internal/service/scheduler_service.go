@@ -146,6 +146,30 @@ func (s *SchedulerService) checkDueTasks(ctx context.Context) {
 	}
 
 	for _, sched := range schedules {
+		task, err := s.taskRepo.GetByID(ctx, sched.TaskID)
+		if err != nil {
+			applog.Infof("[scheduler] checkDueTasks error getting task %s: %v", sched.TaskID, err)
+			continue
+		}
+		if task == nil {
+			applog.Infof("[scheduler] checkDueTasks deleting orphaned schedule=%s missing_task=%s", sched.ID, sched.TaskID)
+			if err := s.scheduleRepo.DeleteOrphan(ctx, sched.ID, sched.TaskID); err != nil {
+				applog.Infof("[scheduler] checkDueTasks error deleting orphaned schedule %s: %v", sched.ID, err)
+			}
+			continue
+		}
+
+		// Conversation schedules are invalid; preserve timing for recovery but
+		// remove them from the due queue instead of silently retrying forever.
+		if task.Category == models.CategoryChat {
+			if err := s.scheduleRepo.PauseConversationSchedule(ctx, sched.ID, task.ID); err != nil {
+				applog.Infof("[scheduler] error pausing conversation schedule %s: %v", sched.ID, err)
+			} else {
+				applog.Infof("[scheduler] paused conversation schedule %s: %v", sched.ID, models.ErrConversationSchedule)
+			}
+			continue
+		}
+
 		suppressed, err := s.scheduleRepo.AdvanceSuppressedOccurrence(ctx, sched, now)
 		if err != nil {
 			applog.Infof("[scheduler] advancing exclusions schedule=%s: %v", sched.ID, err)
@@ -179,24 +203,6 @@ func (s *SchedulerService) checkDueTasks(ctx context.Context) {
 				}
 				continue
 			}
-		}
-		task, err := s.taskRepo.GetByID(ctx, sched.TaskID)
-		if err != nil {
-			applog.Infof("[scheduler] checkDueTasks error getting task %s: %v", sched.TaskID, err)
-			continue
-		}
-		if task == nil {
-			applog.Infof("[scheduler] checkDueTasks deleting orphaned schedule=%s missing_task=%s", sched.ID, sched.TaskID)
-			if err := s.scheduleRepo.DeleteOrphan(ctx, sched.ID, sched.TaskID); err != nil {
-				applog.Infof("[scheduler] checkDueTasks error deleting orphaned schedule %s: %v", sched.ID, err)
-			}
-			continue
-		}
-
-		// Skip chat tasks - they bypass the worker pool and are handled in real-time
-		if task.Category == "chat" {
-			applog.Infof("[scheduler] checkDueTasks skipping chat task %s (chat tasks bypass scheduler)", task.ID)
-			continue
 		}
 
 		// Skip if task is already running. Reconcile missed recurring occurrences

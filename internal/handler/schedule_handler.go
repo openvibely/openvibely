@@ -97,6 +97,9 @@ func validatePanelScheduleStart(runAt time.Time) error {
 }
 
 func scheduleFormHTTPError(err error) error {
+	if errors.Is(err, models.ErrConversationSchedule) {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
 	var parseErr *time.ParseError
 	if errors.As(err, &parseErr) {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid date/time format")
@@ -247,7 +250,7 @@ func (h *Handler) CreateSchedule(c echo.Context) error {
 	})
 	if err != nil {
 		applog.Infof("[handler] CreateSchedule error: %v", err)
-		return err
+		return scheduleFormHTTPError(err)
 	}
 	applog.Infof("[handler] CreateSchedule success id=%s next_run=%v", result.Schedule.ID, result.Schedule.NextRun)
 	for _, warning := range result.Warnings {
@@ -314,7 +317,7 @@ func (h *Handler) UpdateSchedule(c echo.Context) error {
 	})
 	if err != nil {
 		applog.Infof("[handler] UpdateSchedule error: %v", err)
-		return err
+		return scheduleFormHTTPError(err)
 	}
 	schedule = result.Schedule
 	applog.Infof("[handler] UpdateSchedule success id=%s next_run=%v", schedule.ID, schedule.NextRun)
@@ -384,6 +387,9 @@ func (h *Handler) renderScheduleContentForProject(c echo.Context, projectID stri
 }
 
 func scheduleToggleHTTPError(err error) error {
+	if errors.Is(err, models.ErrConversationSchedule) {
+		return scheduleFormHTTPError(err)
+	}
 	var actionErr *service.ScheduleActionError
 	if !errors.As(err, &actionErr) {
 		return err
