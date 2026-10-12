@@ -18,7 +18,7 @@ Each project keeps its own code, context, history, memory, agents, and workflows
 
 Use the desktop app, self-host a single Go binary with SQLite, or run it on a VPS or with Docker.
 
-<a href="https://github.com/user-attachments/assets/377521fa-b117-476c-a52a-cfc10befb981">
+<a href="https://github.com/user-attachments/assets/efc86939-c314-4754-b79f-78fa26d9024d">
   <img src="docs/screenshots/openvibely-ui-demo-poster.png" alt="Watch the OpenVibely UI demo" width="100%" />
 </a>
 
