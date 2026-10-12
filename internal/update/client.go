@@ -13,7 +13,6 @@ import (
 	"fmt"
 	"hash"
 	"io"
-	"math"
 	"net"
 	"net/http"
 	"net/url"
@@ -219,6 +218,10 @@ func (c *Client) CheckIfDue(ctx context.Context, current CurrentBuild) (*Verifie
 	}
 	if now.Before(state.NextAttempt) {
 		return c.cachedReleaseForCurrent(state, current, now), false, nil
+	}
+	// Once the daily cooldown expires, allow a fresh batch of three attempts.
+	if state.Failures >= 3 {
+		state.Failures = 0
 	}
 
 	installIDPersistenceFailed := false
@@ -677,9 +680,12 @@ func generateInstallID() (string, error) {
 
 func (c *Client) recordFailure(state *persistedClientState, now time.Time) {
 	state.Failures++
-	power := math.Min(float64(state.Failures-1), 6)
-	delay := time.Duration(math.Pow(2, power)) * time.Minute
-	state.NextAttempt = now.Add(delay + c.cfg.Random(delay/4))
+	if state.Failures >= 3 {
+		state.NextAttempt = now.Add(24 * time.Hour)
+	} else {
+		delay := time.Duration(state.Failures) * time.Minute
+		state.NextAttempt = now.Add(delay + c.cfg.Random(delay/4))
+	}
 	_ = c.saveState(*state)
 }
 func (c *Client) loadState() (persistedClientState, error) {
