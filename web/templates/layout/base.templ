@@ -722,6 +722,11 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					max-width: 100%;
 					box-sizing: border-box;
 				}
+				.toast-notification .toast-action-link {
+					color: inherit;
+					font-weight: 600;
+					text-underline-offset: 0.15em;
+				}
 				.toast-close {
 					position: absolute;
 					top: 0.5rem;
@@ -4945,7 +4950,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						if (containerEl) {
 							var link = document.createElement('a');
 							link.href = linkURL;
-							link.className = 'link link-primary text-xs mt-1 self-start';
+							link.className = 'link toast-action-link text-xs mt-1 self-start';
 							link.textContent = linkText;
 							link.addEventListener('click', function(event) {
 								event.preventDefault();
