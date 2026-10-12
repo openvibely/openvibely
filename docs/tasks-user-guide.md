@@ -80,20 +80,11 @@ When to use:
 
 For an eligible worktree-backed task, open `Local` to choose a merge commit, fast-forward-only merge, rebase onto the target branch, or squash merge. Use `GitHub` to create or open the task's pull request. OpenVibely revalidates the task branch, target branch, worktree, and pull request state before applying an action. If the task is stale or conflicts, use the offered rebase or recovery action and review the refreshed state before retrying.
 
-## Backlog and Completed Bulk Actions
+## Search, Filters, and Batch Actions
 
-Backlog menu includes:
+Open the search control to narrow the board. Backlog and Completed column menus provide priority and status filters and sorting; Completed also filters merge outcomes. Clear filters to restore hidden cards.
 
-- Sorting options
-- `Execute All` (and priority-specific execute actions)
-- `Delete All`
-
-Completed menu includes:
-
-- Sorting options
-- `Delete All`
-
-Use bulk actions when you want to process many tasks quickly (for example, execute only urgent backlog tasks first).
+Select cards or use a column's `Select all`, then choose an available batch action: run backlog tasks, stop active work, merge completed branches, create pull requests, or delete tasks. Review the affected selection and any confirmation before applying destructive actions. Batch progress remains visible across board refreshes. Active keeps its execution order rather than offering manual sorting.
 
 ## Task Detail Page
 
@@ -122,6 +113,10 @@ Why task detail matters:
 Send follow-up messages from the `Thread` tab to continue a task after its initial run. Follow-ups queue when task capacity is full and dispatch when a slot frees.
 
 When a follow-up is queued and the task thread shows a pending input row, a **Steer** button appears on that row. Steering from a task thread redirects the active turn rather than queuing behind it — use this when you want to correct or narrow a follow-up before the worker picks it up. You can also cancel a queued follow-up before it is applied. If the turn has already started, the steer may be rejected and you should send a new follow-up instead.
+
+Pending queued messages and steering instructions can be edited before delivery. Opening the editor holds the message so it cannot dispatch during editing; save or cancel to release it. Instructions already delivered to the provider are not editable.
+
+Use the searchable model picker in the composer to choose a model, save favorites, and adjust supported reasoning effort. Command/Ctrl+M opens or closes the picker. Context compaction progress appears in response activity when conversation history is compacted.
 
 ## Task Goals
 
