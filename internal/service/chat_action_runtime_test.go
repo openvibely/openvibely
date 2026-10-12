@@ -3977,7 +3977,7 @@ func TestChannelStatusAndAutomationSummaryHelpers(t *testing.T) {
 	require.ErrorContains(t, err, "automation_id is required")
 }
 
-func TestChannelScheduleToolsRejectConversationTasks(t *testing.T) {
+func TestChannelScheduleToolsMakeConversationTasksRunnable(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)
 	tasks := repository.NewTaskRepo(db, nil)
@@ -3992,17 +3992,19 @@ func TestChannelScheduleToolsRejectConversationTasks(t *testing.T) {
 		`{"task_id":"` + task.ID + `","time":"09:30","repeat":"once"}`,
 		`{"task_id":"` + task.ID + `","time":"09:30","repeat":"daily"}`,
 	} {
+		require.NoError(t, tasks.UpdateCategory(ctx, task.ID, models.CategoryChat))
 		out, err := handlers["schedule_task"](ctx, json.RawMessage(payload))
 		require.NoError(t, err)
-		require.Contains(t, out, models.ErrConversationSchedule.Error())
+		require.NotContains(t, out, "Error")
 	}
+	require.NoError(t, tasks.UpdateCategory(ctx, task.ID, models.CategoryChat))
 	out, err := handlers["modify_schedule"](ctx, json.RawMessage(`{"schedule_id":"`+legacy.ID+`","enabled":true}`))
 	require.NoError(t, err)
-	require.Contains(t, out, models.ErrConversationSchedule.Error())
+	require.NotContains(t, out, "Error")
 	stored, err := tasks.GetByID(ctx, task.ID)
 	require.NoError(t, err)
-	require.Equal(t, models.CategoryChat, stored.Category)
+	require.Equal(t, models.CategoryScheduled, stored.Category)
 	all, err := schedules.ListByTask(ctx, task.ID)
 	require.NoError(t, err)
-	require.Len(t, all, 1)
+	require.Len(t, all, 3)
 }

@@ -2143,7 +2143,7 @@ func TestTaskPanelScheduleEditPreservesNextRun(t *testing.T) {
 	}
 }
 
-func TestConversationScheduleFormsRejectWithoutPersistence(t *testing.T) {
+func TestConversationScheduleFormsCreateRunnableSchedules(t *testing.T) {
 	for _, repeat := range []string{"once", "daily"} {
 		t.Run(repeat, func(t *testing.T) {
 			tc := NewTestContext(t)
@@ -2152,18 +2152,22 @@ func TestConversationScheduleFormsRejectWithoutPersistence(t *testing.T) {
 			rec := tc.HTMX().Post("/tasks/" + task.ID + "/schedule?from=task-panel").WithForm(url.Values{
 				"run_at": {time.Now().Add(time.Hour).Format("2006-01-02T15:04")}, "repeat_type": {repeat}, "repeat_interval": {"1"},
 			}).Execute()
-			if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "Conversation tasks cannot run on a schedule") {
-				t.Fatalf("expected clear rejection, got %d: %s", rec.Code, rec.Body.String())
+			if rec.Code != http.StatusOK {
+				t.Fatalf("expected saved schedule, got %d: %s", rec.Code, rec.Body.String())
 			}
 			schedules, err := tc.scheduleRepo.ListByTask(context.Background(), task.ID)
-			if err != nil || len(schedules) != 0 {
+			if err != nil || len(schedules) != 1 {
 				t.Fatalf("unexpected schedules: %v, %v", schedules, err)
+			}
+			stored, err := tc.taskRepo.GetByID(context.Background(), task.ID)
+			if err != nil || stored.Category != models.CategoryScheduled {
+				t.Fatalf("task not scheduled: %+v %v", stored, err)
 			}
 		})
 	}
 }
 
-func TestConversationScheduleEditAndResumeReject(t *testing.T) {
+func TestConversationScheduleEditAndResume(t *testing.T) {
 	tc := NewTestContext(t)
 	project := tc.CreateProject().Build()
 	task := tc.CreateTask(project.ID).Build()
@@ -2174,14 +2178,17 @@ func TestConversationScheduleEditAndResumeReject(t *testing.T) {
 	rec := tc.HTMX().Post("/schedules/" + schedule.ID).WithForm(url.Values{
 		"run_at": {time.Now().Add(2 * time.Hour).Format("2006-01-02T15:04")}, "repeat_type": {"daily"}, "repeat_interval": {"1"},
 	}).Execute()
-	if rec.Code != http.StatusBadRequest {
+	if rec.Code != http.StatusOK {
 		t.Fatalf("edit: %d %s", rec.Code, rec.Body.String())
 	}
 	if err := tc.scheduleRepo.ToggleEnabled(context.Background(), schedule.ID, false); err != nil {
 		t.Fatal(err)
 	}
+	if err := tc.taskRepo.UpdateCategory(context.Background(), task.ID, models.CategoryChat); err != nil {
+		t.Fatal(err)
+	}
 	rec = tc.HTTP().Post("/schedules/" + schedule.ID + "/toggle").Execute()
-	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "Conversation tasks") {
+	if rec.Code != http.StatusSeeOther {
 		t.Fatalf("resume: %d %s", rec.Code, rec.Body.String())
 	}
 }

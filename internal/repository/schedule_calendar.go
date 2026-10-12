@@ -315,7 +315,7 @@ func (r *ScheduleRepo) ClaimCalendarOccurrence(ctx context.Context, schedule mod
    AND NOT EXISTS (SELECT 1 FROM schedule_dispatch_admissions a WHERE a.task_id = schedules.task_id)
    AND NOT EXISTS (SELECT 1 FROM executions e WHERE e.task_id = schedules.task_id AND e.status IN ('running','queued'))
    AND NOT EXISTS (SELECT 1 FROM automation_task_run_reservations a WHERE a.task_id = schedules.task_id)
-   AND EXISTS (SELECT 1 FROM tasks WHERE id = schedules.task_id AND status NOT IN ('running','queued') AND category != 'chat' AND NOT `+taskThreadInputOwnsAdmissionPredicate+`)`,
+   AND EXISTS (SELECT 1 FROM tasks WHERE id = schedules.task_id AND status NOT IN ('running','queued') AND NOT `+taskThreadInputOwnsAdmissionPredicate+`)`,
 			normalizeScheduleTime(now), normalizeScheduleNextRun(next), schedule.ID, schedule.TaskID, normalizeScheduleTime(*schedule.NextRun), normalizeScheduleTime(now))
 		if err != nil {
 			return err
@@ -328,6 +328,8 @@ func (r *ScheduleRepo) ClaimCalendarOccurrence(ctx context.Context, schedule mod
 		if err != nil {
 			return err
 		}
+		// Legacy conversation schedules enter the same runnable category atomically
+		// with occurrence bookkeeping and execution reservation.
 		category := task.Category
 		if category != models.CategoryActive {
 			category = models.CategoryScheduled

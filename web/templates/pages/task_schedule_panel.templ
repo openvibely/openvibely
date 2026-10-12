@@ -27,7 +27,7 @@ templ TaskSchedulePanel(task *models.Task, schedules []models.Schedule) {
    }
   </div>
   if task.Category == models.CategoryChat {
-   <p role="alert" class="text-sm opacity-60">{ models.ErrConversationSchedule.Error() } Existing schedules are paused when due.</p>
+   <p role="alert" class="text-sm opacity-60">Scheduling this conversation moves it to Scheduled so it can run automatically.</p>
   }
   if len(schedules) == 0 {
    <p class="text-sm opacity-60" data-schedule-empty>No schedule configured.</p>

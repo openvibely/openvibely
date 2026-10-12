@@ -1,13 +1,9 @@
 package models
 
 import (
-	"errors"
 	"fmt"
 	"time"
 )
-
-// ErrConversationSchedule explains how to recover an ineligible schedule.
-var ErrConversationSchedule = errors.New("Conversation tasks cannot run on a schedule. Convert the conversation to a task before adding or resuming a schedule.")
 
 type RepeatType string
 

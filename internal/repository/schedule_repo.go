@@ -251,14 +251,10 @@ func (r *ScheduleRepo) Create(ctx context.Context, s *models.Schedule) error {
 	}
 	err := queryRowBoundSQLite(ctx, r.db,
 		`INSERT INTO schedules (id, task_id, run_at, repeat_type, repeat_interval, enabled, clear_context_on_start, next_run)
-		 SELECT lower(hex(randomblob(16))), ?, ?, ?, ?, ?, ?, ?
-		 WHERE NOT EXISTS (SELECT 1 FROM tasks WHERE id = ? AND category = 'chat')
+		 VALUES (lower(hex(randomblob(16))), ?, ?, ?, ?, ?, ?, ?)
 		 RETURNING id, created_at, updated_at`,
-		s.TaskID, s.RunAt, s.RepeatType, s.RepeatInterval, s.Enabled, s.ClearContextOnStart, s.NextRun, s.TaskID).
+		s.TaskID, s.RunAt, s.RepeatType, s.RepeatInterval, s.Enabled, s.ClearContextOnStart, s.NextRun).
 		Scan(&s.ID, &s.CreatedAt, &s.UpdatedAt)
-	if err == sql.ErrNoRows {
-		return models.ErrConversationSchedule
-	}
 	if err != nil {
 		return fmt.Errorf("creating schedule: %w", err)
 	}
@@ -438,8 +434,7 @@ func (r *ScheduleRepo) SetEnabledForTask(ctx context.Context, id, taskID string,
 	where := `id = ? AND task_id = ?`
 	args := []interface{}{enabled, id, taskID}
 	if enabled {
-		where += ` AND (repeat_type <> ? OR next_run IS NOT NULL)
-		 AND EXISTS (SELECT 1 FROM tasks WHERE id = schedules.task_id AND category <> 'chat')`
+		where += ` AND (repeat_type <> ? OR next_run IS NOT NULL)`
 		args = append(args, models.RepeatOnce)
 	}
 	var s models.Schedule
@@ -468,7 +463,6 @@ func (r *ScheduleRepo) ToggleEnabledForTask(ctx context.Context, id, taskID stri
 		 SET enabled = CASE WHEN enabled = 1 THEN 0 ELSE 1 END, updated_at = datetime('now')
 		 WHERE id = ? AND task_id = ?
 		   AND (enabled = 1 OR repeat_type <> ? OR next_run IS NOT NULL)
-		   AND (enabled = 1 OR EXISTS (SELECT 1 FROM tasks WHERE id = schedules.task_id AND category <> 'chat'))
 		 RETURNING id, task_id, run_at, repeat_type, repeat_interval, enabled, clear_context_on_start,
 		           next_run, last_run, created_at, updated_at`,
 		id, taskID, models.RepeatOnce).Scan(&s.ID, &s.TaskID, &s.RunAt, &s.RepeatType, &s.RepeatInterval, &s.Enabled,
@@ -504,13 +498,4 @@ func (r *ScheduleRepo) scanRows(rows *sql.Rows) ([]models.Schedule, error) {
 		schedules = append(schedules, s)
 	}
 	return schedules, rows.Err()
-}
-
-// PauseConversationSchedule retains timing so the user can convert the task and
-// resume it. The category predicate prevents pausing a concurrently converted task.
-func (r *ScheduleRepo) PauseConversationSchedule(ctx context.Context, id, taskID string) error {
-	_, err := execBoundSQLite(ctx, r.db, `UPDATE schedules SET enabled = 0, updated_at = datetime('now')
-	 WHERE id = ? AND task_id = ? AND enabled = 1
-	 AND EXISTS (SELECT 1 FROM tasks WHERE id = schedules.task_id AND category = 'chat')`, id, taskID)
-	return err
 }

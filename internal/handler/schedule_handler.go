@@ -97,9 +97,6 @@ func validatePanelScheduleStart(runAt time.Time) error {
 }
 
 func scheduleFormHTTPError(err error) error {
-	if errors.Is(err, models.ErrConversationSchedule) {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
-	}
 	var parseErr *time.ParseError
 	if errors.As(err, &parseErr) {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid date/time format")
@@ -387,9 +384,6 @@ func (h *Handler) renderScheduleContentForProject(c echo.Context, projectID stri
 }
 
 func scheduleToggleHTTPError(err error) error {
-	if errors.Is(err, models.ErrConversationSchedule) {
-		return scheduleFormHTTPError(err)
-	}
 	var actionErr *service.ScheduleActionError
 	if !errors.As(err, &actionErr) {
 		return err
