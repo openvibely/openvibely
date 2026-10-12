@@ -3253,6 +3253,9 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
             }
             window.kanbanDropdownForTarget = kanbanDropdownForTarget;
 
+			// Track portals directly: HTMX emits cleanup for every removed DOM node.
+            // Scanning the whole page per node makes large diff teardown quadratic.
+            const openMenuSubmenuPanels = new Set();
 			let returningFromMenuSubmenu = false;
 			function backMenuSubmenu(panel) {
 				const trigger = panel.__openVibelySubmenuSourcePanel && panel.__openVibelySubmenuSourcePanel.previousElementSibling;
@@ -3263,11 +3266,12 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 			}
 			function restoreMenuSubmenu(panel) {
 				if (!panel || panel.getAttribute('data-menu-submenu-portaled') !== 'true') return;
-				Array.from(document.querySelectorAll('[data-menu-submenu-portaled="true"]')).filter(child => child.__openVibelySubmenuParent === panel).forEach(restoreMenuSubmenu);
+				Array.from(openMenuSubmenuPanels).filter(child => child.__openVibelySubmenuParent === panel).forEach(restoreMenuSubmenu);
                 const sourcePanel = panel.__openVibelySubmenuSourcePanel;
                 const parent = panel.__openVibelySubmenuParent;
                 if (parent) parent.removeAttribute('data-submenu-covered');
 				if (sourcePanel) sourcePanel.style.removeProperty('display');
+				openMenuSubmenuPanels.delete(panel);
 				panel.remove();
 				panel.__openVibelySubmenuSourcePanel = null;
 				panel.__openVibelySubmenuDropdown = null;
@@ -3276,7 +3280,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 			function closeMenuSubmenus(dropdown, exceptPanel) {
 				const keep = new Set();
                 for (let parent = exceptPanel; parent; parent = parent.__openVibelySubmenuParent) keep.add(parent);
-                Array.from(document.querySelectorAll('[data-menu-submenu-portaled="true"]')).reverse().forEach(function(panel) {
+                Array.from(openMenuSubmenuPanels).reverse().forEach(function(panel) {
 					if (!keep.has(panel) && (!dropdown || panel.__openVibelySubmenuDropdown === dropdown)) restoreMenuSubmenu(panel);
 				});
 			}
@@ -3289,7 +3293,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
                 const menu = parentPanel || dropdown && dropdown.querySelector(':scope > [data-menu-content], :scope > [data-kanban-menu-content]');
 				if (!sourcePanel || !dropdown || !menu) return;
                 if (!dropdown.hasAttribute('data-kanban-menu-key')) dropdown.classList.add('dropdown-open');
-				let panel = Array.from(document.querySelectorAll('[data-menu-submenu-portaled="true"]')).find(function(candidate) {
+				let panel = Array.from(openMenuSubmenuPanels).find(function(candidate) {
 					return candidate.__openVibelySubmenuSourcePanel === sourcePanel;
 				}) || null;
 				closeMenuSubmenus(dropdown, panel || parentPanel);
@@ -3301,6 +3305,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					panel.setAttribute('data-menu-submenu-portaled', 'true');
 					sourcePanel.style.setProperty('display', 'none', 'important');
 					document.body.appendChild(panel);
+                    openMenuSubmenuPanels.add(panel);
                     if (window.htmx) window.htmx.process(panel);
 				}
 				panel.style.setProperty('display', 'block', 'important');
@@ -3417,7 +3422,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
             });
             document.addEventListener('htmx:beforeCleanupElement', function(event) {
                 const element = event.detail.elt;
-                document.querySelectorAll('[data-menu-submenu-portaled="true"]').forEach(function(panel) {
+                openMenuSubmenuPanels.forEach(function(panel) {
                     const owner = panel.__openVibelySubmenuDropdown;
                     const source = panel.__openVibelySubmenuSourcePanel;
                     if (owner && (element === owner || element.contains(owner))) closeMenuSubmenus(owner, null);
@@ -3446,7 +3451,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				if (event.key === 'Tab' && event.shiftKey) return;
 				event.preventDefault();
 				positionMenuSubmenu(container);
-				const panel = Array.from(document.querySelectorAll('[data-menu-submenu-portaled="true"]')).find(candidate => candidate.__openVibelySubmenuSourcePanel === container.querySelector(':scope > [data-menu-submenu-panel]'));
+				const panel = Array.from(openMenuSubmenuPanels).find(candidate => candidate.__openVibelySubmenuSourcePanel === container.querySelector(':scope > [data-menu-submenu-panel]'));
 				const action = panel && Array.from(panel.querySelectorAll('summary, button:not([disabled]), a[href]')).find(function(item) { return item.getClientRects().length > 0; });
 				if (action) action.focus({preventScroll: true});
 			}
