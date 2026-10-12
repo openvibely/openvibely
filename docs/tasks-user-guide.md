@@ -84,7 +84,7 @@ For an eligible worktree-backed task, open `Local` to choose a merge commit, fas
 
 Open the search control to narrow the board. Backlog and Completed column menus provide priority and status filters and sorting; Completed also filters merge outcomes. Clear filters to restore hidden cards.
 
-Select cards or use a column's `Select all`, then choose an available batch action: run backlog tasks, stop active work, merge completed branches, create pull requests, or delete tasks. Review the affected selection and any confirmation before applying destructive actions. Batch progress remains visible across board refreshes. Active keeps its execution order rather than offering manual sorting.
+Command-click a card's body on macOS or Ctrl-click on Windows/Linux to select or deselect it without opening the task. Select multiple cards this way or use a column's `Select all`, then choose an available batch action: run backlog tasks, stop active work, merge completed branches, create pull requests, or delete tasks. Review the affected selection and any confirmation before applying destructive actions. Batch progress remains visible across board refreshes. Active keeps its execution order rather than offering manual sorting.
 
 ## Task Detail Page
 
@@ -122,7 +122,7 @@ Use the searchable model picker in the composer to choose a model, save favorite
 
 A Task Goal is a persistent objective that the built-in Goal Agent evaluates after each execution turn. When a goal is set, the agent automatically queues continuation follow-ups until the objective is achieved, blocked, or cleared — without manual follow-up messages.
 
-Set a goal in the task edit dialog (Goal section). The goal panel on the task detail page shows the objective, current status (`active`, `paused`, `achieved`, `blocked`, `cleared`, `failed`), the agent's last evaluation reason, and when it was last checked. Clear the objective text and save to remove the goal. The separate `Auto-merge to target branch when goal is achieved` option uses the same guarded worktree merge flow when the Goal Agent marks the stored goal achieved; paused, blocked, cleared, and failed goals do not trigger it.
+Set or edit a goal from the task's Details panel. The goal panel shows the objective, current status (`active`, `paused`, `achieved`, `blocked`, `cleared`, `failed`), the agent's last evaluation reason, and when it was last checked. Clear the objective text and save to remove the goal. The separate `Auto-merge to target branch when goal is achieved` option uses the same guarded worktree merge flow when the Goal Agent marks the stored goal achieved; paused, blocked, cleared, and failed goals do not trigger it.
 
 In Chat Orchestrate mode, you can create a task and set a goal on it in the same turn using `set_task_goal`.
 
