@@ -341,7 +341,7 @@ func TestBaseGlobalToastRendererPreservesDuplicateSuppressionAndLinks(t *testing
 		"if (toastKey && findVisibleToastKey(toastKey))",
 		"if (shouldSuppressDuplicateToast(displayTitle, status, taskId))",
 		"link.className = 'toast-action-link text-xs'",
-		"align-self: flex-end;",
+		"align-self: flex-start;",
 		".toast-notification .toast-action-link {",
 		"border: 1px solid currentColor;",
 		"background: transparent;",
