@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
 )
@@ -221,15 +222,15 @@ func TestHTTPMCPManagerExecutesToolAndPropagatesServerErrors(t *testing.T) {
 	if !manager.IsMCPTool("tools__echo") || manager.IsMCPTool("tools__missing") {
 		t.Fatalf("MCP tool detection mismatch")
 	}
-	out, isErr, err := manager.ExecuteTool("tools__echo", map[string]interface{}{"text": "hello"})
+	out, isErr, err := manager.ExecuteTool(context.Background(), "tools__echo", map[string]interface{}{"text": "hello"})
 	if err != nil || isErr || out != "first line\nsecond line" {
 		t.Fatalf("ExecuteTool output=%q isErr=%v err=%v", out, isErr, err)
 	}
-	_, isErr, err = manager.ExecuteTool("tools__echo", map[string]interface{}{"fail": true})
+	_, isErr, err = manager.ExecuteTool(context.Background(), "tools__echo", map[string]interface{}{"fail": true})
 	if err == nil || !isErr || err.Error() != "MCP error -32000: tool failed" {
 		t.Fatalf("expected JSON-RPC error, isErr=%v err=%v", isErr, err)
 	}
-	_, isErr, err = manager.ExecuteTool("tools__missing", nil)
+	_, isErr, err = manager.ExecuteTool(context.Background(), "tools__missing", nil)
 	if err == nil || !isErr || err.Error() != "unknown MCP tool: tools__missing" {
 		t.Fatalf("expected unknown tool error, isErr=%v err=%v", isErr, err)
 	}
@@ -245,5 +246,108 @@ func TestHTTPMCPManagerExecutesToolAndPropagatesServerErrors(t *testing.T) {
 		if auth != "secret-token" {
 			t.Fatalf("auth header was not propagated on every call: %#v", authHeaders)
 		}
+	}
+}
+
+func TestHTTPMCPToolCallStopsWhenCallerContextIsCanceled(t *testing.T) {
+	resetSharedStateForTests()
+	defer resetSharedStateForTests()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req jsonRPCRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Errorf("decode JSON-RPC request: %v", err)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch req.Method {
+		case "initialize":
+			_ = json.NewEncoder(w).Encode(jsonRPCResponse{JSONRPC: "2.0", ID: req.ID, Result: json.RawMessage(`{"capabilities":{}}`)})
+		case "tools/list":
+			_ = json.NewEncoder(w).Encode(jsonRPCResponse{JSONRPC: "2.0", ID: req.ID, Result: json.RawMessage(`{"tools":[{"name":"slow","description":"blocks","inputSchema":{"type":"object"}}]}`)})
+		case "tools/call":
+			// Simulate a server that keeps working until the client gives up.
+			<-r.Context().Done()
+		}
+	}))
+	defer srv.Close()
+
+	manager, err := NewMCPManager(context.Background(), []models.MCPServerConfig{{
+		Name: "tools",
+		Type: "http",
+		URL:  srv.URL,
+	}}, t.TempDir())
+	if err != nil {
+		t.Fatalf("NewMCPManager: %v", err)
+	}
+	defer manager.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	time.AfterFunc(100*time.Millisecond, cancel)
+
+	done := make(chan error, 1)
+	go func() {
+		_, _, err := manager.ExecuteTool(ctx, "tools__slow", nil)
+		done <- err
+	}()
+
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("expected context.Canceled from ExecuteTool, got %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("ExecuteTool did not return after the caller context was canceled")
+	}
+}
+
+func TestHTTPMCPToolCallIsNotSentWhenCallerContextAlreadyCanceled(t *testing.T) {
+	resetSharedStateForTests()
+	defer resetSharedStateForTests()
+
+	var mu sync.Mutex
+	toolCalls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req jsonRPCRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Errorf("decode JSON-RPC request: %v", err)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch req.Method {
+		case "initialize":
+			_ = json.NewEncoder(w).Encode(jsonRPCResponse{JSONRPC: "2.0", ID: req.ID, Result: json.RawMessage(`{"capabilities":{}}`)})
+		case "tools/list":
+			_ = json.NewEncoder(w).Encode(jsonRPCResponse{JSONRPC: "2.0", ID: req.ID, Result: json.RawMessage(`{"tools":[{"name":"echo","description":"echo","inputSchema":{"type":"object"}}]}`)})
+		case "tools/call":
+			mu.Lock()
+			toolCalls++
+			mu.Unlock()
+			_ = json.NewEncoder(w).Encode(jsonRPCResponse{JSONRPC: "2.0", ID: req.ID, Result: json.RawMessage(`{"content":[{"type":"text","text":"ok"}]}`)})
+		}
+	}))
+	defer srv.Close()
+
+	manager, err := NewMCPManager(context.Background(), []models.MCPServerConfig{{
+		Name: "tools",
+		Type: "http",
+		URL:  srv.URL,
+	}}, t.TempDir())
+	if err != nil {
+		t.Fatalf("NewMCPManager: %v", err)
+	}
+	defer manager.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, isErr, err := manager.ExecuteTool(ctx, "tools__echo", nil)
+	if !errors.Is(err, context.Canceled) || !isErr {
+		t.Fatalf("expected context.Canceled with isErr, got isErr=%v err=%v", isErr, err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if toolCalls != 0 {
+		t.Fatalf("tools/call reached the server %d times after cancellation", toolCalls)
 	}
 }
