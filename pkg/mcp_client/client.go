@@ -443,7 +443,10 @@ func startServer(ctx context.Context, cfg models.MCPServerConfig, workDir string
 	return srv, nil
 }
 
-func (s *MCPServer) call(method string, params interface{}) (json.RawMessage, error) {
+func (s *MCPServer) call(ctx context.Context, method string, params interface{}) (json.RawMessage, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -490,7 +493,7 @@ func (s *MCPServer) call(method string, params interface{}) (json.RawMessage, er
 		}
 	}
 
-	httpReq, err := http.NewRequestWithContext(context.Background(), http.MethodPost, s.url, bytes.NewReader(data))
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, s.url, bytes.NewReader(data))
 	if err != nil {
 		return nil, err
 	}
@@ -531,7 +534,7 @@ func (s *MCPServer) initialize() error {
 			"version": "1.0.0",
 		},
 	}
-	_, err := s.call("initialize", params)
+	_, err := s.call(context.Background(), "initialize", params)
 	if err != nil {
 		return err
 	}
@@ -552,7 +555,7 @@ func (s *MCPServer) initialize() error {
 }
 
 func (s *MCPServer) fetchTools() error {
-	result, err := s.call("tools/list", map[string]interface{}{})
+	result, err := s.call(context.Background(), "tools/list", map[string]interface{}{})
 	if err != nil {
 		return err
 	}
@@ -576,12 +579,12 @@ func (s *MCPServer) fetchTools() error {
 }
 
 // Execute calls a tool on this server and returns the result text.
-func (s *MCPServer) Execute(toolName string, args map[string]interface{}) (string, bool, error) {
+func (s *MCPServer) Execute(ctx context.Context, toolName string, args map[string]interface{}) (string, bool, error) {
 	params := map[string]interface{}{
 		"name":      toolName,
 		"arguments": args,
 	}
-	result, err := s.call("tools/call", params)
+	result, err := s.call(ctx, "tools/call", params)
 	if err != nil {
 		return "", true, err
 	}
@@ -628,11 +631,11 @@ func (m *MCPManager) ToolDefinitions() []anthropicclient.ToolDefinition {
 
 // ExecuteTool routes a tool call to the correct MCP server.
 // Returns output text, isError, and any error.
-func (m *MCPManager) ExecuteTool(prefixedName string, args map[string]interface{}) (string, bool, error) {
+func (m *MCPManager) ExecuteTool(ctx context.Context, prefixedName string, args map[string]interface{}) (string, bool, error) {
 	for _, ref := range m.servers {
 		for _, t := range ref.srv.tools {
 			if t.PrefixName == prefixedName {
-				return ref.srv.Execute(t.Name, args)
+				return ref.srv.Execute(ctx, t.Name, args)
 			}
 		}
 	}
