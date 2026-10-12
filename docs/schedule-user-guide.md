@@ -81,7 +81,7 @@ Use these signals to quickly spot what should run soon vs later.
 
 ## Editing Schedules in Task Detail
 
-From `/tasks/{id}` -> `Schedules` tab:
+Open the task's Details panel and select `Schedule`:
 
 - Add schedules
 - Edit existing schedules

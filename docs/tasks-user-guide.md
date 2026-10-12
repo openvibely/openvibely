@@ -30,7 +30,7 @@ You can drag cards between categories and active sub-lanes to change where work 
 
 ## Create a Task
 
-1. Click `+ Add Task` to open a new task workspace.
+1. Click the plus button (`Add Task`) to open a new task workspace.
 2. Write the request in the thread composer and add any attachments.
 3. Set the model, agent, category, priority, and other properties in the Details panel.
 4. Send the first message to create the task. Active tasks begin execution; Backlog tasks are saved for later.

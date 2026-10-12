@@ -159,17 +159,6 @@ func (s *SchedulerService) checkDueTasks(ctx context.Context) {
 			continue
 		}
 
-		// Conversation schedules are invalid; preserve timing for recovery but
-		// remove them from the due queue instead of silently retrying forever.
-		if task.Category == models.CategoryChat {
-			if err := s.scheduleRepo.PauseConversationSchedule(ctx, sched.ID, task.ID); err != nil {
-				applog.Infof("[scheduler] error pausing conversation schedule %s: %v", sched.ID, err)
-			} else {
-				applog.Infof("[scheduler] paused conversation schedule %s: %v", sched.ID, models.ErrConversationSchedule)
-			}
-			continue
-		}
-
 		suppressed, err := s.scheduleRepo.AdvanceSuppressedOccurrence(ctx, sched, now)
 		if err != nil {
 			applog.Infof("[scheduler] advancing exclusions schedule=%s: %v", sched.ID, err)
