@@ -108,6 +108,23 @@ diff --git a/b.txt b/b.txt
 		t.Fatalf("expected review comment in review-enabled lazy card, got: %s", body)
 	}
 
+	for _, identity := range []struct {
+		path   string
+		status int
+	}{{"b.txt", http.StatusOK}, {"a.txt", http.StatusConflict}, {"removed.txt", http.StatusConflict}} {
+		req := httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID+"/changes/file?file_index=1&view=inline&review=true&file_path="+url.QueryEscape(identity.path), nil)
+		rec := httptest.NewRecorder()
+		c := e.NewContext(req, rec)
+		c.SetParamNames("taskId")
+		c.SetParamValues(task.ID)
+		if err := h.GetTaskChangesFile(c); err != nil {
+			e.HTTPErrorHandler(err, c)
+		}
+		if rec.Code != identity.status {
+			t.Fatalf("file identity %q: status=%d want=%d", identity.path, rec.Code, identity.status)
+		}
+	}
+
 	noReviewReq := httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID+"/changes/file?file_index=1&view=inline&review=false", nil)
 	noReviewRec := httptest.NewRecorder()
 	noReviewContext := e.NewContext(noReviewReq, noReviewRec)
