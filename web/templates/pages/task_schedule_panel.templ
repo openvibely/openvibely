@@ -26,6 +26,9 @@ templ TaskSchedulePanel(task *models.Task, schedules []models.Schedule) {
     <button type="button" class="btn btn-ghost btn-xs" aria-label="Add schedule" data-schedule-open="task-schedule-new">+</button>
    }
   </div>
+  if task.Category == models.CategoryChat {
+   <p role="alert" class="text-sm opacity-60">{ models.ErrConversationSchedule.Error() } Existing schedules are paused when due.</p>
+  }
   if len(schedules) == 0 {
    <p class="text-sm opacity-60" data-schedule-empty>No schedule configured.</p>
    if task.ID == "" {

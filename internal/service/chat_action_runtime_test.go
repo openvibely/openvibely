@@ -3976,3 +3976,33 @@ func TestChannelStatusAndAutomationSummaryHelpers(t *testing.T) {
 	_, err = channelGetAutomationResult(context.Background(), nil, "project-1", json.RawMessage(`{}`))
 	require.ErrorContains(t, err, "automation_id is required")
 }
+
+func TestChannelScheduleToolsRejectConversationTasks(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	tasks := repository.NewTaskRepo(db, nil)
+	schedules := repository.NewScheduleRepo(db)
+	task := &models.Task{ProjectID: "default", Title: "Conversation", Prompt: "test", Category: models.CategoryScheduled, Status: models.StatusPending}
+	require.NoError(t, tasks.Create(ctx, task))
+	legacy := &models.Schedule{TaskID: task.ID, RunAt: time.Now().Add(time.Hour), RepeatType: models.RepeatDaily, RepeatInterval: 1, Enabled: true}
+	require.NoError(t, schedules.Create(ctx, legacy))
+	require.NoError(t, tasks.UpdateCategory(ctx, task.ID, models.CategoryChat))
+	handlers := buildChannelUtilityActionHandlers(channelUtilityActionHandlerOptions{ProjectID: "default", TaskRepo: tasks, ScheduleRepo: schedules})
+	for _, payload := range []string{
+		`{"task_id":"` + task.ID + `","time":"09:30","repeat":"once"}`,
+		`{"task_id":"` + task.ID + `","time":"09:30","repeat":"daily"}`,
+	} {
+		out, err := handlers["schedule_task"](ctx, json.RawMessage(payload))
+		require.NoError(t, err)
+		require.Contains(t, out, models.ErrConversationSchedule.Error())
+	}
+	out, err := handlers["modify_schedule"](ctx, json.RawMessage(`{"schedule_id":"`+legacy.ID+`","enabled":true}`))
+	require.NoError(t, err)
+	require.Contains(t, out, models.ErrConversationSchedule.Error())
+	stored, err := tasks.GetByID(ctx, task.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.CategoryChat, stored.Category)
+	all, err := schedules.ListByTask(ctx, task.ID)
+	require.NoError(t, err)
+	require.Len(t, all, 1)
+}
