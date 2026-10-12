@@ -144,9 +144,6 @@ func (s *ScheduleActionService) CreateAbsoluteForTask(ctx context.Context, req C
 		return nil, actionError(ScheduleActionReferenceError, "", err)
 	}
 	result := &ScheduleActionResult{Task: task}
-	if task.Category == models.CategoryChat {
-		return result, actionError(ScheduleActionPersistError, "", models.ErrConversationSchedule)
-	}
 	schedule, err := s.CreateForTask(ctx, CreateScheduleForTaskRequest{
 		TaskID:              task.ID,
 		RunAt:               req.RunAt,
@@ -173,9 +170,6 @@ func (s *ScheduleActionService) ModifyAbsolute(ctx context.Context, req ModifyAb
 		return nil, actionError(ScheduleActionReferenceError, "", err)
 	}
 	result := &ScheduleActionResult{Task: task, Schedule: schedule}
-	if task.Category == models.CategoryChat && schedule.Enabled {
-		return result, actionError(ScheduleActionPersistError, "", models.ErrConversationSchedule)
-	}
 
 	if err := models.ValidateScheduleRepeatInterval(req.RepeatInterval); err != nil {
 		return result, actionError(ScheduleActionIntervalError, fmt.Sprintf("%d", req.RepeatInterval), err)
@@ -216,9 +210,6 @@ func (s *ScheduleActionService) Toggle(ctx context.Context, projectID, scheduleI
 		return nil, actionError(ScheduleActionReferenceError, "", err)
 	}
 	result := &ScheduleActionResult{Task: task, Schedule: schedule}
-	if task.Category == models.CategoryChat && !schedule.Enabled {
-		return result, actionError(ScheduleActionPersistError, "", models.ErrConversationSchedule)
-	}
 
 	updated, err := s.scheduleRepo.ToggleEnabledForTask(ctx, schedule.ID, task.ID)
 	if err != nil {
@@ -289,9 +280,6 @@ func (s *ScheduleActionService) Create(ctx context.Context, projectID string, re
 		return nil, actionError(ScheduleActionReferenceError, "", err)
 	}
 	result := &ScheduleActionResult{Task: task}
-	if task.Category == models.CategoryChat {
-		return result, actionError(ScheduleActionPersistError, "", models.ErrConversationSchedule)
-	}
 	hour, minute, err := parseScheduleActionTime(req.Time)
 	if err != nil {
 		return result, actionError(ScheduleActionTimeError, req.Time, err)
@@ -338,9 +326,6 @@ func (s *ScheduleActionService) Modify(ctx context.Context, projectID string, re
 		return nil, actionError(ScheduleActionReferenceError, "", err)
 	}
 	result := &ScheduleActionResult{Task: task, Schedule: schedule}
-	if task.Category == models.CategoryChat && ((req.Enabled == nil && schedule.Enabled) || (req.Enabled != nil && *req.Enabled)) {
-		return result, actionError(ScheduleActionPersistError, "", models.ErrConversationSchedule)
-	}
 
 	changes := make([]string, 0, 6)
 	timeChanged := false
@@ -473,7 +458,7 @@ func (s *ScheduleActionService) Modify(ctx context.Context, projectID string, re
 		}
 		schedule.ClearContextOnStart = *req.ClearContextOnStart
 	}
-	if schedule.NextRun != nil && (timeChanged || (req.Enabled != nil && *req.Enabled)) {
+	if schedule.NextRun != nil && (timeChanged || (req.Enabled != nil && *req.Enabled) || (task.Category == models.CategoryChat && schedule.Enabled)) {
 		lifecycleOptions := scheduleTaskLifecycleOptions{ResetTerminal: true}
 		if req.Enabled != nil && *req.Enabled {
 			lifecycleOptions.RequireEnabledSchedule = true
@@ -520,12 +505,16 @@ func (s *ScheduleActionService) applyPrimaryAgentAssignment(ctx context.Context,
 }
 
 func (s *ScheduleActionService) applyScheduleTaskLifecycle(ctx context.Context, result *ScheduleActionResult, opts scheduleTaskLifecycleOptions) bool {
-	if result == nil || result.Task == nil || s.taskRepo == nil || result.Task.Category == models.CategoryChat {
+	if result == nil || result.Task == nil || s.taskRepo == nil {
 		return false
 	}
 	task := result.Task
+	if task.Category == models.CategoryChat && (result.Schedule == nil || !result.Schedule.Enabled) {
+		return false
+	}
 	categoryChanged := false
-	if opts.PromoteToScheduled && task.Category != models.CategoryScheduled {
+	// Scheduling a conversation opts it into the ordinary worker execution path.
+	if (opts.PromoteToScheduled || task.Category == models.CategoryChat) && task.Category != models.CategoryScheduled {
 		if err := s.taskRepo.UpdateCategory(ctx, task.ID, models.CategoryScheduled); err != nil {
 			result.Warnings = append(result.Warnings, err)
 		} else {

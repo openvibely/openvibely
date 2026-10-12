@@ -1935,7 +1935,7 @@ func TestSchedulerService_DSTGapPersistsNextRunAndDoesNotDispatchEarly(t *testin
 	}
 }
 
-func TestSchedulerConversationSchedulesArePausedAndRecoverable(t *testing.T) {
+func TestSchedulerConversationSchedulesAreAdmitted(t *testing.T) {
 	for _, repeat := range []models.RepeatType{models.RepeatOnce, models.RepeatDaily} {
 		for _, category := range []models.TaskCategory{models.CategoryChat, models.CategoryScheduled, models.CategoryBacklog} {
 			t.Run(string(repeat)+"/"+string(category), func(t *testing.T) {
@@ -1953,39 +1953,27 @@ func TestSchedulerConversationSchedulesArePausedAndRecoverable(t *testing.T) {
 				svc.checkDueTasks(ctx)
 				stored, err := schedules.GetByID(ctx, schedule.ID)
 				require.NoError(t, err)
-				if category == models.CategoryChat {
-					require.False(t, stored.Enabled)
-					require.Nil(t, stored.LastRun)
-					require.True(t, stored.NextRun.Equal(*schedule.NextRun), "preserve occurrence for recovery")
-					select {
-					case <-workers.Submitted():
-						t.Fatal("conversation was submitted")
-					default:
-					}
-					due, err := schedules.ListDue(ctx, time.Now().UTC())
-					require.NoError(t, err)
-					require.Empty(t, due)
-					svc.checkDueTasks(ctx)
-					require.NoError(t, tasks.UpdateCategory(ctx, task.ID, models.CategoryScheduled))
-					_, err = NewScheduleActionService(tasks, schedules).Toggle(ctx, "default", schedule.ID)
-					require.NoError(t, err)
-					recovered, err := schedules.GetByID(ctx, schedule.ID)
-					require.NoError(t, err)
-					require.True(t, recovered.Enabled)
-				} else {
-					require.NotNil(t, stored.LastRun)
-					select {
-					case submitted := <-workers.Submitted():
-						require.Equal(t, task.ID, submitted.ID)
-					default:
-						t.Fatal("eligible task not submitted")
-					}
-					if repeat == models.RepeatOnce {
-						require.Nil(t, stored.NextRun)
-					} else {
-						require.True(t, stored.NextRun.After(time.Now().UTC()))
-					}
+				require.True(t, stored.Enabled)
+				require.NotNil(t, stored.LastRun)
+				select {
+				case submitted := <-workers.Submitted():
+					require.Equal(t, task.ID, submitted.ID)
+					require.Equal(t, models.CategoryScheduled, submitted.Category)
+				default:
+					t.Fatal("eligible task not submitted")
 				}
+				if repeat == models.RepeatOnce {
+					require.Nil(t, stored.NextRun)
+				} else {
+					require.True(t, stored.NextRun.After(time.Now().UTC()))
+				}
+				due, err := schedules.ListDue(ctx, time.Now().UTC())
+				require.NoError(t, err)
+				require.Empty(t, due)
+				executions, err := repository.NewExecutionRepo(db).ListByTask(ctx, task.ID)
+				require.NoError(t, err)
+				require.Len(t, executions, 1)
+
 			})
 		}
 	}
