@@ -3401,6 +3401,8 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
                 const owner = menuDropdownForTarget(event.target);
                 if (!owner || owner.hasAttribute('data-kanban-menu-key')) return;
                 setTimeout(function() {
+                    // Focus falls back to <body> when a swap replaces the focused row; outside clicks are handled by pointerdown.
+                    if (document.activeElement === document.body && owner.isConnected) return;
                     if (menuDropdownForTarget(document.activeElement) !== owner) closeGenericDropdown(owner);
                 }, 0);
             });
