@@ -1934,3 +1934,59 @@ func TestSchedulerService_DSTGapPersistsNextRunAndDoesNotDispatchEarly(t *testin
 	default:
 	}
 }
+
+func TestSchedulerConversationSchedulesArePausedAndRecoverable(t *testing.T) {
+	for _, repeat := range []models.RepeatType{models.RepeatOnce, models.RepeatDaily} {
+		for _, category := range []models.TaskCategory{models.CategoryChat, models.CategoryScheduled, models.CategoryBacklog} {
+			t.Run(string(repeat)+"/"+string(category), func(t *testing.T) {
+				ctx := context.Background()
+				db := testutil.NewTestDB(t)
+				tasks := repository.NewTaskRepo(db, nil)
+				schedules := repository.NewScheduleRepo(db)
+				workers := newTestWorkerService(t)
+				svc := NewSchedulerService(schedules, tasks, workers)
+				task := &models.Task{ProjectID: "default", Title: "Due schedule", Prompt: "test", Category: models.CategoryScheduled, Status: models.StatusPending}
+				require.NoError(t, tasks.Create(ctx, task))
+				schedule := &models.Schedule{TaskID: task.ID, RunAt: time.Now().UTC().Add(-time.Minute), RepeatType: repeat, RepeatInterval: 1, Enabled: true}
+				require.NoError(t, schedules.Create(ctx, schedule))
+				require.NoError(t, tasks.UpdateCategory(ctx, task.ID, category))
+				svc.checkDueTasks(ctx)
+				stored, err := schedules.GetByID(ctx, schedule.ID)
+				require.NoError(t, err)
+				if category == models.CategoryChat {
+					require.False(t, stored.Enabled)
+					require.Nil(t, stored.LastRun)
+					require.True(t, stored.NextRun.Equal(*schedule.NextRun), "preserve occurrence for recovery")
+					select {
+					case <-workers.Submitted():
+						t.Fatal("conversation was submitted")
+					default:
+					}
+					due, err := schedules.ListDue(ctx, time.Now().UTC())
+					require.NoError(t, err)
+					require.Empty(t, due)
+					svc.checkDueTasks(ctx)
+					require.NoError(t, tasks.UpdateCategory(ctx, task.ID, models.CategoryScheduled))
+					_, err = NewScheduleActionService(tasks, schedules).Toggle(ctx, "default", schedule.ID)
+					require.NoError(t, err)
+					recovered, err := schedules.GetByID(ctx, schedule.ID)
+					require.NoError(t, err)
+					require.True(t, recovered.Enabled)
+				} else {
+					require.NotNil(t, stored.LastRun)
+					select {
+					case submitted := <-workers.Submitted():
+						require.Equal(t, task.ID, submitted.ID)
+					default:
+						t.Fatal("eligible task not submitted")
+					}
+					if repeat == models.RepeatOnce {
+						require.Nil(t, stored.NextRun)
+					} else {
+						require.True(t, stored.NextRun.After(time.Now().UTC()))
+					}
+				}
+			})
+		}
+	}
+}

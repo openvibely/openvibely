@@ -1292,3 +1292,51 @@ func TestScheduleRepo_UpdateBatchForProjectRollsBackOnFailure(t *testing.T) {
 		t.Fatalf("batch failure must roll back every schedule: first=%v second=%v", storedFirst.RunAt, storedSecond.RunAt)
 	}
 }
+
+func TestConversationSchedulePersistenceGuards(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	tasks := NewTaskRepo(db, nil)
+	schedules := NewScheduleRepo(db)
+	task := createTestTask(t, tasks)
+	legacy := &models.Schedule{TaskID: task.ID, RunAt: time.Now().Add(-time.Hour), RepeatType: models.RepeatDaily, RepeatInterval: 1, Enabled: true}
+	if err := schedules.Create(ctx, legacy); err != nil {
+		t.Fatal(err)
+	}
+	if err := tasks.UpdateCategory(ctx, task.ID, models.CategoryChat); err != nil {
+		t.Fatal(err)
+	}
+	for _, repeat := range []models.RepeatType{models.RepeatOnce, models.RepeatDaily} {
+		schedule := &models.Schedule{TaskID: task.ID, RunAt: time.Now(), RepeatType: repeat, RepeatInterval: 1, Enabled: true}
+		if err := schedules.Create(ctx, schedule); !errors.Is(err, models.ErrConversationSchedule) {
+			t.Fatalf("create: %v", err)
+		}
+	}
+	paused, err := schedules.ToggleEnabledForTask(ctx, legacy.ID, task.ID)
+	if err != nil || paused == nil || paused.Enabled {
+		t.Fatalf("pause: %+v %v", paused, err)
+	}
+	resumed, err := schedules.ToggleEnabledForTask(ctx, legacy.ID, task.ID)
+	if err != nil || resumed != nil {
+		t.Fatalf("invalid toggle: %+v %v", resumed, err)
+	}
+	resumed, err = schedules.SetEnabledForTask(ctx, legacy.ID, task.ID, true)
+	if err != nil || resumed != nil {
+		t.Fatalf("invalid resume: %+v %v", resumed, err)
+	}
+	if err := tasks.UpdateCategory(ctx, task.ID, models.CategoryScheduled); err != nil {
+		t.Fatal(err)
+	}
+	resumed, err = schedules.SetEnabledForTask(ctx, legacy.ID, task.ID, true)
+	if err != nil || resumed == nil || !resumed.Enabled {
+		t.Fatalf("recovery: %+v %v", resumed, err)
+	}
+	// A stale scheduler snapshot must not pause a task converted since lookup.
+	if err := schedules.PauseConversationSchedule(ctx, legacy.ID, task.ID); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := schedules.GetByID(ctx, legacy.ID)
+	if err != nil || !stored.Enabled {
+		t.Fatalf("converted schedule paused: %+v %v", stored, err)
+	}
+}

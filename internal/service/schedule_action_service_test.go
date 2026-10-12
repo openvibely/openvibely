@@ -796,3 +796,55 @@ func TestScheduleRecurrenceEditDoesNotReplayPastAnchor(t *testing.T) {
 		require.True(t, result.Schedule.RunAt.Equal(anchor))
 	}
 }
+
+func TestConversationScheduleActions(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	tasks := repository.NewTaskRepo(db, nil)
+	schedules := repository.NewScheduleRepo(db)
+	svc := NewScheduleActionService(tasks, schedules)
+	task := &models.Task{ProjectID: "default", Title: "Conversation", Prompt: "test", Category: models.CategoryBacklog, Status: models.StatusCompleted}
+	require.NoError(t, tasks.Create(ctx, task))
+	runAt := time.Now().Add(time.Hour).UTC()
+	legacy := &models.Schedule{TaskID: task.ID, RunAt: runAt, RepeatType: models.RepeatDaily, RepeatInterval: 1, Enabled: true}
+	require.NoError(t, schedules.Create(ctx, legacy))
+	require.NoError(t, tasks.UpdateCategory(ctx, task.ID, models.CategoryChat))
+	for _, repeat := range []models.RepeatType{models.RepeatOnce, models.RepeatDaily} {
+		_, err := svc.Create(ctx, "default", ScheduleTaskRequest{TaskID: task.ID, Time: "09:30", Repeat: string(repeat)})
+		require.ErrorIs(t, err, models.ErrConversationSchedule)
+		_, err = svc.CreateAbsoluteForTask(ctx, CreateAbsoluteScheduleForTaskRequest{TaskID: task.ID, RunAt: runAt, RepeatType: repeat, RepeatInterval: 1})
+		require.ErrorIs(t, err, models.ErrConversationSchedule)
+		_, err = svc.CreateForTask(ctx, CreateScheduleForTaskRequest{TaskID: task.ID, RunAt: runAt, RepeatType: repeat, RepeatInterval: 1})
+		require.ErrorIs(t, err, models.ErrConversationSchedule)
+	}
+	_, err := svc.ModifyAbsolute(ctx, ModifyAbsoluteScheduleRequest{ScheduleID: legacy.ID, RunAt: runAt.Add(time.Hour), RepeatType: models.RepeatDaily, RepeatInterval: 1})
+	require.ErrorIs(t, err, models.ErrConversationSchedule)
+	_, err = svc.Modify(ctx, "default", ModifyScheduleRequest{ScheduleID: legacy.ID, Time: "10:30"})
+	require.ErrorIs(t, err, models.ErrConversationSchedule)
+	unchanged, err := schedules.GetByID(ctx, legacy.ID)
+	require.NoError(t, err)
+	require.True(t, unchanged.RunAt.Equal(runAt))
+	// Both browser toggling and runtime disabling remain available for recovery.
+	paused, err := svc.Toggle(ctx, "default", legacy.ID)
+	require.NoError(t, err)
+	require.False(t, paused.Schedule.Enabled)
+	_, err = svc.Toggle(ctx, "default", legacy.ID)
+	require.ErrorIs(t, err, models.ErrConversationSchedule)
+	enabled := true
+	_, err = svc.Modify(ctx, "default", ModifyScheduleRequest{ScheduleID: legacy.ID, Enabled: &enabled})
+	require.ErrorIs(t, err, models.ErrConversationSchedule)
+	enabled = false
+	_, err = svc.Modify(ctx, "default", ModifyScheduleRequest{ScheduleID: legacy.ID, Enabled: &enabled})
+	require.NoError(t, err)
+	all, err := schedules.ListByTask(ctx, task.ID)
+	require.NoError(t, err)
+	require.Len(t, all, 1)
+	stored, err := tasks.GetByID(ctx, task.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.CategoryChat, stored.Category)
+	require.Equal(t, models.StatusCompleted, stored.Status)
+	require.NoError(t, tasks.UpdateCategory(ctx, task.ID, models.CategoryScheduled))
+	resumed, err := svc.Toggle(ctx, "default", legacy.ID)
+	require.NoError(t, err)
+	require.True(t, resumed.Schedule.Enabled)
+}
