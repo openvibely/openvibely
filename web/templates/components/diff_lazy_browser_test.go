@@ -18,10 +18,23 @@ import (
 )
 
 func TestBrowserFunctional_DiffLazyFilesAndLayouts(t *testing.T) {
+	runDiffLazyBrowser(t, false)
+}
+
+func TestBrowserFunctional_DiffLazyScrollPreservation(t *testing.T) {
+	runDiffLazyBrowser(t, true)
+}
+
+func runDiffLazyBrowser(t *testing.T, scrollTest bool) {
 	chrome := testChromePath(t)
 	var diff strings.Builder
 	for i := 0; i < 3; i++ {
 		fmt.Fprintf(&diff, "diff --git a/file%d.go b/file%d.go\n--- a/file%d.go\n+++ b/file%d.go\n@@ -1 +1 @@\n-old%d\n+new%d\n", i, i, i, i, i, i)
+		if scrollTest {
+			for j := 0; j < 150; j++ {
+				fmt.Fprintf(&diff, "+extra line %d\n", j)
+			}
+		}
 	}
 	comments := []models.ReviewComment{{ID: "note", TaskID: "lazy-task", FilePath: "file0.go", LineNumber: 1, LineType: "new", CommentText: "existing review"}}
 	var markup bytes.Buffer
@@ -100,6 +113,34 @@ func TestBrowserFunctional_DiffLazyFilesAndLayouts(t *testing.T) {
  await originalFetch('/result?status='+result.dataset.testResult+'&error='+encodeURIComponent(result.dataset.testError||''));
  });
  </script>`
+	if scrollTest {
+		start := strings.Index(runner, "   assert(!document.querySelector")
+		end := strings.Index(runner, "   result.setAttribute('data-test-result','pass');")
+		runner = runner[:start] + `
+   const scroller=document.getElementById('main-content');
+   scroller.scrollTop=1500;
+   await new Promise(r=>setTimeout(r,60));
+   const before=window._captureDiffScroll();
+   switchDiffView('split',false);
+   await wait(()=>document.querySelector('#diff-file-split-0 tr'));
+   await new Promise(r=>setTimeout(r,60));
+   const split=window._captureDiffScroll();
+   assert(split.anchor.line===before.anchor.line && Math.abs(split.anchor.offset-before.anchor.offset)<2,'layout switch lost visible line');
+   const fragment=await (await originalFetch('/fragment')).text();
+   const saved=window._captureDiffScroll();
+   document.getElementById('diff-viewer')._diffPerformance.destroy();
+   scroller.innerHTML=fragment;
+   await new Promise(r=>requestAnimationFrame(r));
+   switchDiffView('split',false);
+   window._restoreDiffScroll(saved,true);
+   await wait(()=>document.querySelector('#diff-file-split-0 tr'));
+   await new Promise(r=>setTimeout(r,60));
+   const refreshed=window._captureDiffScroll();
+   assert(refreshed.anchor.line===saved.anchor.line && Math.abs(refreshed.anchor.offset-saved.anchor.offset)<2,'live refresh lost visible line');
+   assert(count(1,'split')===0 && count(2,'split')===0,'restoration loaded collapsed files');
+  ` + runner[end:]
+	}
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/result":

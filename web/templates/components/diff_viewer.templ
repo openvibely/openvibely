@@ -687,7 +687,8 @@ templ diffViewerWithReviewContent(metas []DiffFileRenderMeta, taskID string, rev
 					else el.setAttribute('data-collapsed', '1');
 				});
 
-				diffFileStateBucket()[idx] = newState;
+				if (!newState) [document.getElementById('diff-file-' + idx), document.getElementById('diff-file-split-' + idx)].forEach(function(card) { if (card) { card.style.minHeight = ''; delete card._diffScrollAnchor; } });
+                diffFileStateBucket()[idx] = newState;
                 if (window._refreshDiffPerformance) window._refreshDiffPerformance();
 			}
 
@@ -840,7 +841,8 @@ templ diffViewerWithReviewContent(metas []DiffFileRenderMeta, taskID string, rev
 				var btnSplit = document.getElementById('diff-btn-split');
 				if (!inlineEl || !splitEl || !btnInline || !btnSplit) return;
 
-				if (mode === 'split') {
+				var scroll = window._captureDiffScroll ? window._captureDiffScroll() : null;
+                if (mode === 'split') {
 					inlineEl.classList.add('hidden');
 					splitEl.classList.remove('hidden');
 					btnSplit.classList.add('btn-active');
@@ -852,7 +854,8 @@ templ diffViewerWithReviewContent(metas []DiffFileRenderMeta, taskID string, rev
 					btnSplit.classList.remove('btn-active');
 				}
 				if (window._refreshDiffPerformance) window._refreshDiffPerformance();
-				if (persist !== false) {
+				if (window._restoreDiffScroll) window._restoreDiffScroll(scroll, true);
+                if (persist !== false) {
 					persistDiffViewPreference(mode === 'split' ? 'split' : 'inline');
 				}
 			}
@@ -1891,7 +1894,8 @@ templ diffViewerContent(metas []DiffFileRenderMeta, initialView string, revision
 				});
 
 				// Persist state
-				diffFileStateBucket()[idx] = newState;
+				if (!newState) [document.getElementById('diff-file-' + idx), document.getElementById('diff-file-split-' + idx)].forEach(function(card) { if (card) { card.style.minHeight = ''; delete card._diffScrollAnchor; } });
+                diffFileStateBucket()[idx] = newState;
                 if (window._refreshDiffPerformance) window._refreshDiffPerformance();
 			}
 
@@ -2043,7 +2047,8 @@ templ diffViewerContent(metas []DiffFileRenderMeta, initialView string, revision
 				var btnSplit = document.getElementById('diff-btn-split');
 				if (!inlineEl || !splitEl || !btnInline || !btnSplit) return;
 
-				if (mode === 'split') {
+				var scroll = window._captureDiffScroll ? window._captureDiffScroll() : null;
+                if (mode === 'split') {
 					inlineEl.classList.add('hidden');
 					splitEl.classList.remove('hidden');
 					btnSplit.classList.add('btn-active');
@@ -2055,7 +2060,8 @@ templ diffViewerContent(metas []DiffFileRenderMeta, initialView string, revision
 					btnSplit.classList.remove('btn-active');
 				}
 				if (window._refreshDiffPerformance) window._refreshDiffPerformance();
-				if (persist !== false) {
+				if (window._restoreDiffScroll) window._restoreDiffScroll(scroll, true);
+                if (persist !== false) {
 					persistDiffViewPreference(mode === 'split' ? 'split' : 'inline');
 				}
 			}
