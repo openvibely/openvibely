@@ -1230,12 +1230,16 @@ var registry = []ActionDef{
 			Properties: map[string]*toolschema.Schema{
 				"task_id": {
 					Type:        "string",
-					Description: "Task id, or 'current' in a task thread.",
+					Description: "Task ID or 'current'. Omit with title, or to use the current task in a task-thread follow-up.",
+				},
+				"title": {
+					Type:        "string",
+					Description: "Task title when task_id is not known.",
 				},
 				"goal": {
 					Type: "string"},
 			},
-			Required:             []string{"task_id", "goal"},
+			Required:             []string{"goal"},
 			AdditionalProperties: toolschema.Pointer(false),
 		},
 	},
@@ -1252,8 +1256,13 @@ var registry = []ActionDef{
 			Type: "object",
 			Properties: map[string]*toolschema.Schema{
 				"task_id": {
-					Type: "string"}},
-			Required:             []string{"task_id"},
+					Type:        "string",
+					Description: "Task ID or 'current'. Omit with title, or to use the current task in a task-thread follow-up.",
+				},
+				"title": {
+					Type:        "string",
+					Description: "Task title when task_id is not known.",
+				}},
 			AdditionalProperties: toolschema.Pointer(false),
 		},
 	},
@@ -1270,8 +1279,13 @@ var registry = []ActionDef{
 			Type: "object",
 			Properties: map[string]*toolschema.Schema{
 				"task_id": {
-					Type: "string"}},
-			Required:             []string{"task_id"},
+					Type:        "string",
+					Description: "Task ID or 'current'. Omit with title, or to use the current task in a task-thread follow-up.",
+				},
+				"title": {
+					Type:        "string",
+					Description: "Task title when task_id is not known.",
+				}},
 			AdditionalProperties: toolschema.Pointer(false),
 		},
 	},
@@ -1288,8 +1302,13 @@ var registry = []ActionDef{
 			Type: "object",
 			Properties: map[string]*toolschema.Schema{
 				"task_id": {
-					Type: "string"}},
-			Required:             []string{"task_id"},
+					Type:        "string",
+					Description: "Task ID or 'current'. Omit with title, or to use the current task in a task-thread follow-up.",
+				},
+				"title": {
+					Type:        "string",
+					Description: "Task title when task_id is not known.",
+				}},
 			AdditionalProperties: toolschema.Pointer(false),
 		},
 	},
@@ -1306,8 +1325,13 @@ var registry = []ActionDef{
 			Type: "object",
 			Properties: map[string]*toolschema.Schema{
 				"task_id": {
-					Type: "string"}},
-			Required:             []string{"task_id"},
+					Type:        "string",
+					Description: "Task ID or 'current'. Omit with title, or to use the current task in a task-thread follow-up.",
+				},
+				"title": {
+					Type:        "string",
+					Description: "Task title when task_id is not known.",
+				}},
 			AdditionalProperties: toolschema.Pointer(false),
 		},
 	},
@@ -1324,13 +1348,19 @@ var registry = []ActionDef{
 			Type: "object",
 			Properties: map[string]*toolschema.Schema{
 				"task_id": {
-					Type: "string"},
+					Type:        "string",
+					Description: "Task ID or 'current'. Omit with title, or to use the current task in a task-thread follow-up.",
+				},
+				"title": {
+					Type:        "string",
+					Description: "Task title when task_id is not known.",
+				},
 				"goal_id": {
 					Type: "string"},
 				"reason": {
 					Type: "string"},
 			},
-			Required:             []string{"task_id", "goal_id", "reason"},
+			Required:             []string{"goal_id", "reason"},
 			AdditionalProperties: toolschema.Pointer(false),
 		},
 	},
@@ -1347,7 +1377,13 @@ var registry = []ActionDef{
 			Type: "object",
 			Properties: map[string]*toolschema.Schema{
 				"task_id": {
-					Type: "string"},
+					Type:        "string",
+					Description: "Task ID or 'current'. Omit with title, or to use the current task in a task-thread follow-up.",
+				},
+				"title": {
+					Type:        "string",
+					Description: "Task title when task_id is not known.",
+				},
 				"goal_id": {
 					Type: "string"},
 				"blocker_key": {
@@ -1355,7 +1391,7 @@ var registry = []ActionDef{
 				"reason": {
 					Type: "string"},
 			},
-			Required:             []string{"task_id", "goal_id", "blocker_key", "reason"},
+			Required:             []string{"goal_id", "blocker_key", "reason"},
 			AdditionalProperties: toolschema.Pointer(false),
 		},
 	},
