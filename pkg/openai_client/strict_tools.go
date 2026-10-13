@@ -48,7 +48,7 @@ func normalizeDefinedArguments(defs []ToolDefinition, name string, input json.Ra
 			continue
 		}
 		if def.Name == name && len(def.ParameterSchema()) > 0 {
-			return toolschema.NormalizeValidate(def.ParameterSchema(), input)
+			return toolschema.ValidateArguments(def.Schema, def.Parameters, input)
 		}
 	}
 	// Provider-native tools and custom executors without advertised definitions

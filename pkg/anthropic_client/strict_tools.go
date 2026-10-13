@@ -50,7 +50,7 @@ func normalizeToolArguments(opts *AgenticOptions, name string, input json.RawMes
 	}
 	for _, def := range defs {
 		if def.Name == name && len(def.ParameterSchema()) > 0 {
-			return toolschema.NormalizeValidate(def.ParameterSchema(), input)
+			return toolschema.ValidateArguments(def.Schema, def.InputSchema, input)
 		}
 	}
 	return input, nil

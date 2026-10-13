@@ -25,6 +25,16 @@ func requiredFields(s map[string]any) map[string]bool {
 // declared properties. Explicit nulls in arbitrary data are left untouched.
 // Validation uses the original schema, including constraints omitted on the wire.
 func NormalizeValidate(schema, input json.RawMessage) (json.RawMessage, error) {
+	return normalizeValidate(schema, input, false)
+}
+
+// ValidateArguments leaves unsupported external schemas to their tool server.
+// Built-in schema errors and validation failures always reject the call.
+func ValidateArguments(schema *Schema, raw, input json.RawMessage) (json.RawMessage, error) {
+	return normalizeValidate(JSON(schema, raw), input, schema == nil)
+}
+
+func normalizeValidate(schema, input json.RawMessage, external bool) (json.RawMessage, error) {
 	var s map[string]any
 	if err := json.Unmarshal(schema, &s); err != nil {
 		return nil, fmt.Errorf("invalid tool schema: %w", err)
@@ -41,7 +51,6 @@ func NormalizeValidate(schema, input json.RawMessage) (json.RawMessage, error) {
 	if _, ok := value.(map[string]any); !ok {
 		return nil, fmt.Errorf("tool arguments must be an object")
 	}
-	normalize(s, value)
 	c := jsonschema.NewCompiler()
 	// Tool schemas must be self-contained; never fetch a model/tool supplied URL.
 	c.LoadURL = func(string) (io.ReadCloser, error) { return nil, fmt.Errorf("external schema references are disabled") }
@@ -50,8 +59,12 @@ func NormalizeValidate(schema, input json.RawMessage) (json.RawMessage, error) {
 	}
 	compiled, err := c.Compile("https://tools.invalid/schema.json")
 	if err != nil {
+		if external {
+			return input, nil
+		}
 		return nil, fmt.Errorf("invalid tool schema: %w", err)
 	}
+	normalize(s, value)
 	if err = compiled.Validate(value); err != nil {
 		return nil, fmt.Errorf("invalid tool arguments: %w", err)
 	}
