@@ -121,6 +121,12 @@
     }
     return all;
   }
+  function sortModelsByName(models) {
+    return models.sort((a, b) => {
+      const byName = a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
+      return byName || a.id.localeCompare(b.id);
+    });
+  }
   function state(btn) {
     return btn._ovModelState;
   }
@@ -415,12 +421,9 @@
       if (list.children.length) list.append(el("div", "ov-menu-rule ov-mp-rule"));
       defaults.forEach((m) => row(m, list));
     }
-    const fav = all
-      .filter((m) => m.provider && favorites[m.id])
-      .sort((a, b) => {
-        const byName = a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
-        return byName || a.id.localeCompare(b.id);
-      });
+    const fav = sortModelsByName(
+      all.filter((m) => m.provider && favorites[m.id]),
+    );
     if (fav.length) {
       if (list.children.length) list.append(el("div", "ov-menu-rule ov-mp-rule"));
       list.append(el("div", "ov-menu-heading ov-mp-heading", "FAVORITES"));
@@ -475,9 +478,9 @@
     }
     sublist.replaceChildren();
     sub.setAttribute("aria-label", provider + " models");
-    options(active)
-      .filter((m) => m.provider === provider && !favorites[m.id])
-      .forEach((m) => row(m, sublist));
+    sortModelsByName(
+      options(active).filter((m) => m.provider === provider && !favorites[m.id]),
+    ).forEach((m) => row(m, sublist));
     if (!sublist.children.length) {
       closeSub();
       return;
