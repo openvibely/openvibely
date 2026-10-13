@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/service"
 )
 
@@ -19,7 +19,7 @@ func executeChatTaskCreations(ctx context.Context, requests []service.TaskCreati
 
 // executeChatTaskEdits applies typed task-edit requests and returns a summary.
 // Delegates to the shared service.ExecuteTaskEdits with attachment support.
-func executeChatTaskEdits(ctx context.Context, requests []service.TaskEditRequest, projectID string, taskSvc *service.TaskService, attachmentRepo *repository.AttachmentRepo, uploadsDir string) string {
+func executeChatTaskEdits(ctx context.Context, requests []service.TaskEditRequest, projectID string, taskSvc *service.TaskService, attachmentRepo persistence.AttachmentStore, uploadsDir string) string {
 	return service.ExecuteTaskEdits(ctx, requests, projectID, taskSvc, attachmentRepo, uploadsDir)
 }
 

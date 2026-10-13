@@ -21,13 +21,13 @@ import (
 	"github.com/openvibely/openvibely/internal/events"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence"
 )
 
 type channelChatAttachmentLinkOptions struct {
 	Platform     string
 	UploadsDir   string
-	Repo         *repository.ChatAttachmentRepo
+	Repo         persistence.ChatAttachmentStore
 	FallbackName string
 }
 
@@ -42,7 +42,7 @@ type channelChatIngressQueueOptions struct {
 	UploadsDir              string
 	BroadcastHasAttachments bool
 
-	ThreadInputRepo *repository.ThreadInputRepo
+	ThreadInputRepo persistence.ThreadInputStore
 	ChatBroadcaster *events.ChatBroadcaster
 
 	NewThreadInput        func() *models.ThreadInput
@@ -62,12 +62,12 @@ type channelTaskThreadSendOptions struct {
 	Source                     string
 	Surface                    chatcontrol.Surface
 	ReplyContext               ChannelReplyContext
-	TaskRepo                   *repository.TaskRepo
-	ExecRepo                   *repository.ExecutionRepo
-	ThreadInputRepo            *repository.ThreadInputRepo
-	LLMConfigRepo              *repository.LLMConfigRepo
-	SettingsRepo               *repository.SettingsRepo
-	CustomPersonalityRepo      *repository.CustomPersonalityRepo
+	TaskRepo                   persistence.TaskStore
+	ExecRepo                   persistence.ExecutionStore
+	ThreadInputRepo            persistence.ThreadInputStore
+	LLMConfigRepo              persistence.LLMConfigStore
+	SettingsRepo               persistence.SettingsStore
+	CustomPersonalityRepo      persistence.CustomPersonalityStore
 	ChannelTaskRunner          ChannelTaskRunner
 	RuntimeToolsForTask        func(taskID string) *llmcontracts.RuntimeTools
 	QueuedTaskThreadPromoter   func(taskID string)
@@ -112,9 +112,9 @@ type channelChatIngressFirstTurnOptions struct {
 	RuntimeTools        *llmcontracts.RuntimeTools
 	RuntimeToolsForTask func(taskID string) *llmcontracts.RuntimeTools
 
-	TaskRepo           *repository.TaskRepo
-	ExecRepo           *repository.ExecutionRepo
-	ChatAttachmentRepo *repository.ChatAttachmentRepo
+	TaskRepo           persistence.TaskStore
+	ExecRepo           persistence.ExecutionStore
+	ChatAttachmentRepo persistence.ChatAttachmentStore
 	ChatBroadcaster    *events.ChatBroadcaster
 	ChannelChatRunner  ChannelChatRunner
 
@@ -130,12 +130,12 @@ type channelChatIngressFirstTurnOptions struct {
 	ListChatHistory            func(context.Context, string) ([]models.Execution, error)
 	FilterChatHistory          func([]models.Execution, string) []models.Execution
 	TaskSvc                    *TaskService
-	LLMConfigRepo              *repository.LLMConfigRepo
-	ScheduleRepo               *repository.ScheduleRepo
-	AgentRepo                  *repository.AgentRepo
-	SettingsRepo               *repository.SettingsRepo
-	CustomPersonalityRepo      *repository.CustomPersonalityRepo
-	ProjectRepo                *repository.ProjectRepo
+	LLMConfigRepo              persistence.LLMConfigStore
+	ScheduleRepo               persistence.ScheduleStore
+	AgentRepo                  persistence.AgentStore
+	SettingsRepo               persistence.SettingsStore
+	CustomPersonalityRepo      persistence.CustomPersonalityStore
+	ProjectRepo                persistence.ProjectStore
 	OnTaskCreateFailure        func(context.Context)
 	OnTaskContextFailure       func(context.Context)
 	OnExecutionCreateFailure   func(context.Context)
@@ -160,15 +160,15 @@ type channelChatIngressOptions struct {
 	HasAttachments bool
 	Start          time.Time
 
-	TaskRepo              *repository.TaskRepo
-	ExecRepo              *repository.ExecutionRepo
-	ThreadInputRepo       *repository.ThreadInputRepo
-	LLMConfigRepo         *repository.LLMConfigRepo
-	ScheduleRepo          *repository.ScheduleRepo
-	AgentRepo             *repository.AgentRepo
-	SettingsRepo          *repository.SettingsRepo
-	CustomPersonalityRepo *repository.CustomPersonalityRepo
-	ProjectRepo           *repository.ProjectRepo
+	TaskRepo              persistence.TaskStore
+	ExecRepo              persistence.ExecutionStore
+	ThreadInputRepo       persistence.ThreadInputStore
+	LLMConfigRepo         persistence.LLMConfigStore
+	ScheduleRepo          persistence.ScheduleStore
+	AgentRepo             persistence.AgentStore
+	SettingsRepo          persistence.SettingsStore
+	CustomPersonalityRepo persistence.CustomPersonalityStore
+	ProjectRepo           persistence.ProjectStore
 	TaskSvc               *TaskService
 	ChatBroadcaster       *events.ChatBroadcaster
 	UploadsDir            string
@@ -209,7 +209,7 @@ type channelChatAgentSelection struct {
 	AvailableModels []models.LLMConfig
 }
 
-func selectChannelChatAgentOptions(ctx context.Context, repo *repository.LLMConfigRepo, message string, hasImages bool) (*channelChatAgentSelection, error) {
+func selectChannelChatAgentOptions(ctx context.Context, repo persistence.LLMConfigStore, message string, hasImages bool) (*channelChatAgentSelection, error) {
 	if repo == nil {
 		return nil, fmt.Errorf("no model repository configured")
 	}
@@ -252,7 +252,7 @@ func selectChannelChatAgentOptions(ctx context.Context, repo *repository.LLMConf
 	return &channelChatAgentSelection{Agent: &selected, AvailableModels: agents}, nil
 }
 
-func hydrateSelectedChannelChatAgent(ctx context.Context, repo *repository.LLMConfigRepo, selection *channelChatAgentSelection) (*models.LLMConfig, error) {
+func hydrateSelectedChannelChatAgent(ctx context.Context, repo persistence.LLMConfigStore, selection *channelChatAgentSelection) (*models.LLMConfig, error) {
 	if repo == nil {
 		return nil, fmt.Errorf("no model repository configured")
 	}
@@ -269,7 +269,7 @@ func hydrateSelectedChannelChatAgent(ctx context.Context, repo *repository.LLMCo
 	return agent, nil
 }
 
-func selectChannelChatAgent(ctx context.Context, repo *repository.LLMConfigRepo, message string, hasImages bool) (*models.LLMConfig, error) {
+func selectChannelChatAgent(ctx context.Context, repo persistence.LLMConfigStore, message string, hasImages bool) (*models.LLMConfig, error) {
 	selection, err := selectChannelChatAgentOptions(ctx, repo, message, hasImages)
 	if err != nil {
 		return nil, err
@@ -281,13 +281,13 @@ type channelChatContextOptions struct {
 	Platform              string
 	ProjectID             string
 	TaskSvc               *TaskService
-	LLMConfigRepo         *repository.LLMConfigRepo
+	LLMConfigRepo         persistence.LLMConfigStore
 	AvailableModels       []models.LLMConfig
 	AvailableModelsLoaded bool
-	ScheduleRepo          *repository.ScheduleRepo
-	AgentRepo             *repository.AgentRepo
-	SettingsRepo          *repository.SettingsRepo
-	CustomPersonalityRepo *repository.CustomPersonalityRepo
+	ScheduleRepo          persistence.ScheduleStore
+	AgentRepo             persistence.AgentStore
+	SettingsRepo          persistence.SettingsStore
+	CustomPersonalityRepo persistence.CustomPersonalityStore
 	AttachmentContext     string
 }
 
@@ -320,7 +320,7 @@ func buildChannelChatContext(ctx context.Context, opts channelChatContextOptions
 	return systemContext
 }
 
-func listChannelChatAssignableAgentDefinitions(ctx context.Context, platform string, repo *repository.AgentRepo) []models.ChatAssignableAgentDefinition {
+func listChannelChatAssignableAgentDefinitions(ctx context.Context, platform string, repo persistence.AgentStore) []models.ChatAssignableAgentDefinition {
 	if repo == nil {
 		return nil
 	}
@@ -332,7 +332,7 @@ func listChannelChatAssignableAgentDefinitions(ctx context.Context, platform str
 	return UniqueChatAssignableAgentDefinitions(agents)
 }
 
-func getChannelChatPersonalityContext(ctx context.Context, settingsRepo *repository.SettingsRepo, customRepo *repository.CustomPersonalityRepo) string {
+func getChannelChatPersonalityContext(ctx context.Context, settingsRepo persistence.SettingsStore, customRepo persistence.CustomPersonalityStore) string {
 	if settingsRepo == nil {
 		return ""
 	}
@@ -347,7 +347,7 @@ func getChannelChatPersonalityContext(ctx context.Context, settingsRepo *reposit
 	return "\n# Communication Style\n\n" + prompt
 }
 
-func resolveChannelChatWorkDir(ctx context.Context, projectRepo *repository.ProjectRepo, projectID string) string {
+func resolveChannelChatWorkDir(ctx context.Context, projectRepo persistence.ProjectStore, projectID string) string {
 	if projectRepo == nil {
 		return ""
 	}
@@ -388,8 +388,8 @@ func completeChannelExecution(ctx context.Context, opts channelExecutionCompleti
 
 type channelExecutionCompletionOptions struct {
 	Platform           string
-	ExecRepo           *repository.ExecutionRepo
-	TaskRepo           *repository.TaskRepo
+	ExecRepo           persistence.ExecutionStore
+	TaskRepo           persistence.TaskStore
 	ExecutionStreamHub *events.ExecutionStreamHub
 	QueuedTurnPromoter func(projectID string)
 	ExecID             string
@@ -400,7 +400,7 @@ type channelExecutionCompletionOptions struct {
 	DurationMs         int64
 }
 
-func promoteQueuedChannelChatAfterCompletion(ctx context.Context, taskRepo *repository.TaskRepo, queuedTurnPromoter func(projectID string), taskID string) {
+func promoteQueuedChannelChatAfterCompletion(ctx context.Context, taskRepo persistence.TaskStore, queuedTurnPromoter func(projectID string), taskID string) {
 	if queuedTurnPromoter == nil || taskRepo == nil {
 		return
 	}
@@ -411,7 +411,7 @@ func promoteQueuedChannelChatAfterCompletion(ctx context.Context, taskRepo *repo
 	queuedTurnPromoter(task.ProjectID)
 }
 
-func resolveChannelTaskReference(ctx context.Context, taskRepo *repository.TaskRepo, projectID, taskID, title string) (*models.Task, error) {
+func resolveChannelTaskReference(ctx context.Context, taskRepo persistence.TaskStore, projectID, taskID, title string) (*models.Task, error) {
 	return ResolveTaskReference(ctx, taskRepo, projectID, taskID, title, TaskReferenceResolutionOptions{})
 }
 
@@ -573,7 +573,7 @@ func runChannelTaskThreadSend(ctx context.Context, task *models.Task, opts chann
 	return fmt.Sprintf("Sent message to task %q [TASK_ID:%s] and started processing.", task.Title, task.ID)
 }
 
-func selectChannelTaskThreadAgent(ctx context.Context, repo *repository.LLMConfigRepo, task *models.Task, message string) (*models.LLMConfig, error) {
+func selectChannelTaskThreadAgent(ctx context.Context, repo persistence.LLMConfigStore, task *models.Task, message string) (*models.LLMConfig, error) {
 	if task != nil && task.AgentID != nil && repo != nil {
 		if agent, _ := repo.GetByID(ctx, *task.AgentID); agent != nil {
 			return agent, nil
@@ -582,7 +582,7 @@ func selectChannelTaskThreadAgent(ctx context.Context, repo *repository.LLMConfi
 	return selectChannelChatAgent(ctx, repo, message, false)
 }
 
-func findActiveOrStartingChannelTaskTurn(ctx context.Context, execRepo *repository.ExecutionRepo, task *models.Task) (*models.Execution, bool, error) {
+func findActiveOrStartingChannelTaskTurn(ctx context.Context, execRepo persistence.ExecutionStore, task *models.Task) (*models.Execution, bool, error) {
 	if task == nil || execRepo == nil {
 		return nil, false, nil
 	}
@@ -594,7 +594,7 @@ func findActiveOrStartingChannelTaskTurn(ctx context.Context, execRepo *reposito
 	return nil, starting, err
 }
 
-func channelTaskHasStartingFirstTurn(ctx context.Context, execRepo *repository.ExecutionRepo, task *models.Task) (bool, error) {
+func channelTaskHasStartingFirstTurn(ctx context.Context, execRepo persistence.ExecutionStore, task *models.Task) (bool, error) {
 	if task == nil || task.ID == "" || execRepo == nil {
 		return false, nil
 	}
@@ -608,7 +608,7 @@ func channelTaskHasStartingFirstTurn(ctx context.Context, execRepo *repository.E
 	return len(execs) == 0, nil
 }
 
-func bindQueuedChannelTaskInputToActiveExecutionIfAvailable(ctx context.Context, execRepo *repository.ExecutionRepo, threadInputRepo *repository.ThreadInputRepo, input *models.ThreadInput) error {
+func bindQueuedChannelTaskInputToActiveExecutionIfAvailable(ctx context.Context, execRepo persistence.ExecutionStore, threadInputRepo persistence.ThreadInputStore, input *models.ThreadInput) error {
 	if input == nil || input.RunExecutionID != "" || execRepo == nil || threadInputRepo == nil {
 		return nil
 	}
@@ -623,7 +623,7 @@ func bindQueuedChannelTaskInputToActiveExecutionIfAvailable(ctx context.Context,
 	return nil
 }
 
-func shouldPromotePreExecutionChannelTaskInput(ctx context.Context, execRepo *repository.ExecutionRepo, task *models.Task, input *models.ThreadInput) (bool, error) {
+func shouldPromotePreExecutionChannelTaskInput(ctx context.Context, execRepo persistence.ExecutionStore, task *models.Task, input *models.ThreadInput) (bool, error) {
 	if task == nil || input == nil || input.RunExecutionID != "" {
 		return false, nil
 	}
@@ -925,7 +925,7 @@ func cleanupChannelChatProvisionalTaskWithOptions(ctx context.Context, opts chan
 	cleanupChannelChatProvisionalTask(ctx, platform, opts.TaskRepo, taskID, reason)
 }
 
-func cleanupChannelChatProvisionalTask(ctx context.Context, platform string, taskRepo *repository.TaskRepo, taskID, reason string) {
+func cleanupChannelChatProvisionalTask(ctx context.Context, platform string, taskRepo persistence.TaskStore, taskID, reason string) {
 	if taskRepo == nil || strings.TrimSpace(taskID) == "" {
 		return
 	}
@@ -1393,7 +1393,7 @@ func updateChannelChatImageAttachmentPaths(imageAttachments []models.Attachment,
 	return imageAttachments
 }
 
-func cleanupLinkedChannelChatAttachments(ctx context.Context, repo *repository.ChatAttachmentRepo, platform string, attachments []models.ChatAttachment) {
+func cleanupLinkedChannelChatAttachments(ctx context.Context, repo persistence.ChatAttachmentStore, platform string, attachments []models.ChatAttachment) {
 	for _, att := range attachments {
 		if strings.TrimSpace(att.ID) != "" && repo != nil {
 			if err := repo.Delete(ctx, att.ID); err != nil {

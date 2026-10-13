@@ -8,7 +8,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/web/templates/pages"
 )
@@ -31,7 +31,7 @@ func (h *Handler) outboundTargetsDataForProject(c echo.Context, projectID string
 	return targets, explicitAllowed
 }
 
-func (h *Handler) outboundTargetsCardData(c echo.Context) (string, repository.ChannelTargetProjectSummary, bool) {
+func (h *Handler) outboundTargetsCardData(c echo.Context) (string, persistence.ChannelTargetProjectSummary, bool) {
 	projectID := c.QueryParam("project_id")
 	if projectID == "" {
 		projectID, _ = h.getCurrentProjectID(c)
@@ -40,8 +40,8 @@ func (h *Handler) outboundTargetsCardData(c echo.Context) (string, repository.Ch
 	return projectID, summary, explicitAllowed
 }
 
-func (h *Handler) outboundTargetsCardDataForProject(c echo.Context, projectID string) (repository.ChannelTargetProjectSummary, bool) {
-	summary := repository.ChannelTargetProjectSummary{ByPlatform: map[string]repository.ChannelTargetPlatformSummary{}}
+func (h *Handler) outboundTargetsCardDataForProject(c echo.Context, projectID string) (persistence.ChannelTargetProjectSummary, bool) {
+	summary := persistence.ChannelTargetProjectSummary{ByPlatform: map[string]persistence.ChannelTargetPlatformSummary{}}
 	if projectID != "" && h.channelTargetRepo != nil {
 		loaded, err := h.channelTargetRepo.SummarizeByProject(c.Request().Context(), projectID)
 		if err == nil {
@@ -247,7 +247,7 @@ func (h *Handler) saveOutboundTargetsDraft(c echo.Context, projectID string) err
 		seenDestinations[destinationKey] = struct{}{}
 		id := strings.TrimSpace(ids[i])
 		if id == "" {
-			id = repository.NewID()
+			id = persistence.NewID()
 		} else {
 			existing, err := h.channelTargetRepo.GetByID(c.Request().Context(), id)
 			if err != nil {

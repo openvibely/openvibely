@@ -17,7 +17,7 @@ import (
 	llmstream "github.com/openvibely/openvibely/internal/llm/stream"
 	llmusage "github.com/openvibely/openvibely/internal/llm/usage"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence"
 	openaiclient "github.com/openvibely/openvibely/pkg/openai_client"
 )
 
@@ -33,16 +33,16 @@ func compatibleResolvedLimits(agent models.LLMConfig) (contextWindow, maxOutput 
 }
 
 type Adapter struct {
-	configRepo *repository.LLMConfigRepo
-	execRepo   *repository.ExecutionRepo
+	configRepo persistence.LLMConfigStore
+	execRepo   persistence.ExecutionStore
 	streamHub  llmstream.ExecutionStreamPublisher
 }
 
-func New(execRepo *repository.ExecutionRepo, streamHub llmstream.ExecutionStreamPublisher) *Adapter {
+func New(execRepo persistence.ExecutionStore, streamHub llmstream.ExecutionStreamPublisher) *Adapter {
 	return NewWithConfigRepo(nil, execRepo, streamHub)
 }
 
-func NewWithConfigRepo(configRepo *repository.LLMConfigRepo, execRepo *repository.ExecutionRepo, streamHub llmstream.ExecutionStreamPublisher) *Adapter {
+func NewWithConfigRepo(configRepo persistence.LLMConfigStore, execRepo persistence.ExecutionStore, streamHub llmstream.ExecutionStreamPublisher) *Adapter {
 	return &Adapter{configRepo: configRepo, execRepo: execRepo, streamHub: streamHub}
 }
 

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/stretchr/testify/require"
 )
@@ -42,24 +43,24 @@ func TestXChannelRepositoriesProjectIsolationAndReceiptLease(t *testing.T) {
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	claim, err := receipts.Claim(ctx, "tweet-1", p1.ID, now, time.Minute)
 	require.NoError(t, err)
-	require.Equal(t, XReceiptClaimed, claim.Result)
+	require.Equal(t, persistence.XReceiptClaimed, claim.Result)
 	firstToken := claim.Token
 	claim, err = receipts.Claim(ctx, "tweet-1", p1.ID, now.Add(30*time.Second), time.Minute)
 	require.NoError(t, err)
-	require.Equal(t, XReceiptActive, claim.Result)
+	require.Equal(t, persistence.XReceiptActive, claim.Result)
 	claim, err = receipts.Claim(ctx, "tweet-1", p1.ID, now.Add(2*time.Minute), time.Minute)
 	require.NoError(t, err)
-	require.Equal(t, XReceiptClaimed, claim.Result)
+	require.Equal(t, persistence.XReceiptClaimed, claim.Result)
 	require.NotEqual(t, firstToken, claim.Token)
 	require.ErrorIs(t, receipts.Release(ctx, "tweet-1", firstToken), nil)
 	active, err := receipts.Claim(ctx, "tweet-1", p1.ID, now.Add(2*time.Minute+time.Second), time.Minute)
 	require.NoError(t, err)
-	require.Equal(t, XReceiptActive, active.Result, "stale release must not remove a newer lease")
+	require.Equal(t, persistence.XReceiptActive, active.Result, "stale release must not remove a newer lease")
 	_, err = receipts.CompleteWithHandoff(ctx, "tweet-1", claim.Token, nil, nil)
 	require.NoError(t, err)
 	claim, err = receipts.Claim(ctx, "tweet-1", p1.ID, now.Add(4*time.Minute), time.Minute)
 	require.NoError(t, err)
-	require.Equal(t, XReceiptCompleted, claim.Result)
+	require.Equal(t, persistence.XReceiptCompleted, claim.Result)
 }
 
 func TestXReceiptCompleteWithHandoffRollsBackWorkAndKeepsLeaseRetryable(t *testing.T) {
@@ -72,7 +73,11 @@ func TestXReceiptCompleteWithHandoffRollsBackWorkAndKeepsLeaseRetryable(t *testi
 	claim, err := receipts.Claim(ctx, "tweet-atomic", project.ID, now, time.Minute)
 	require.NoError(t, err)
 
-	_, err = receipts.CompleteWithHandoff(ctx, "tweet-atomic", claim.Token, nil, func(exec SQLExecutor) error {
+	_, err = receipts.CompleteWithHandoff(ctx, "tweet-atomic", claim.Token, nil, func(tx persistence.Tx) error {
+		exec, err := executorFromTx(tx)
+		if err != nil {
+			return err
+		}
 		if _, err := exec.ExecContext(ctx, `INSERT INTO x_user_projects(x_user_id, project_id) VALUES('atomic-user', ?)`, project.ID); err != nil {
 			return err
 		}
@@ -84,7 +89,7 @@ func TestXReceiptCompleteWithHandoffRollsBackWorkAndKeepsLeaseRetryable(t *testi
 	require.Empty(t, selected, "durable work must roll back when receipt completion fails")
 	active, err := receipts.Claim(ctx, "tweet-atomic", project.ID, now.Add(30*time.Second), time.Minute)
 	require.NoError(t, err)
-	require.Equal(t, XReceiptActive, active.Result)
+	require.Equal(t, persistence.XReceiptActive, active.Result)
 }
 
 func TestThreadInputRepoPreservesXReplyMetadataAndPromotesContextAtomically(t *testing.T) {

@@ -16,6 +16,7 @@ import (
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	llmopenai_compatible "github.com/openvibely/openvibely/internal/llm/openai_compatible"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/stretchr/testify/require"
 )
@@ -278,9 +279,9 @@ func TestChatInputRequestRecoveredAfterRestartRendersAndUnblocksChat(t *testing.
 	}}
 	questionsJSON, err := json.Marshal(questions)
 	require.NoError(t, err)
-	reqID := repository.NewID()
+	reqID := persistence.NewID()
 	repo := repository.NewChatInputRequestRepo(tc.db)
-	require.NoError(t, repo.Create(ctx, repository.ChatInputRequestRecord{ID: reqID, ProjectID: project.ID, ExecutionID: exec.ID, QuestionsJSON: string(questionsJSON), ExpiresAt: time.Now().Add(time.Hour)}))
+	require.NoError(t, repo.Create(ctx, persistence.ChatInputRequestRecord{ID: reqID, ProjectID: project.ID, ExecutionID: exec.ID, QuestionsJSON: string(questionsJSON), ExpiresAt: time.Now().Add(time.Hour)}))
 	tc.handler.chatInputRequests = newChatInputRequestBroker()
 
 	rec := tc.HTTP().Get("/chat/input-requests?project_id=" + project.ID).Execute()
@@ -292,7 +293,7 @@ func TestChatInputRequestRecoveredAfterRestartRendersAndUnblocksChat(t *testing.
 	postInputRequestJSON(t, tc, "/chat/input-requests/"+reqID+"/answer", `{"project_id":"`+project.ID+`","answers":[{"question_id":"model","label":"Default"}]}`, http.StatusOK)
 	stored, err := repo.Get(ctx, reqID)
 	require.NoError(t, err)
-	require.Equal(t, repository.ChatInputRequestResolved, stored.Status)
+	require.Equal(t, persistence.ChatInputRequestResolved, stored.Status)
 	completedExec, err := tc.execRepo.GetByID(ctx, exec.ID)
 	require.NoError(t, err)
 	require.Equal(t, models.ExecFailed, completedExec.Status)
@@ -414,8 +415,8 @@ func TestChatPageLoadsWhenInputRequestsFailToLoad(t *testing.T) {
 	exec := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecCompleted, PromptSent: "ask me"}
 	require.NoError(t, tc.execRepo.Create(ctx, exec))
 	repo := repository.NewChatInputRequestRepo(tc.db)
-	require.NoError(t, repo.Create(ctx, repository.ChatInputRequestRecord{
-		ID: repository.NewID(), ProjectID: project.ID, ExecutionID: exec.ID, QuestionsJSON: "{not json", ExpiresAt: time.Now().Add(time.Hour),
+	require.NoError(t, repo.Create(ctx, persistence.ChatInputRequestRecord{
+		ID: persistence.NewID(), ProjectID: project.ID, ExecutionID: exec.ID, QuestionsJSON: "{not json", ExpiresAt: time.Now().Add(time.Hour),
 	}))
 	tc.handler.chatInputRequests = newChatInputRequestBroker()
 

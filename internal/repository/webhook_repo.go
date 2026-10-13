@@ -5,15 +5,12 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 )
-
-// ErrWebhookNotFound indicates that a webhook mutation matched no endpoint.
-var ErrWebhookNotFound = errors.New("webhook not found")
 
 // WebhookRepo manages webhook endpoint CRUD and agent assignments.
 type WebhookRepo struct {
@@ -162,18 +159,11 @@ func (r *WebhookRepo) ListCardsByProject(ctx context.Context, projectID string) 
 	return endpoints, rows.Err()
 }
 
-// ListCardsByProjectPage returns one bounded, project-scoped webhook card page.
-type WebhookCardFilter struct {
-	Search  string
-	Enabled *bool
-	Sort    string
-}
-
 func (r *WebhookRepo) ListCardsByProjectPage(ctx context.Context, projectID string, limit, offset int, search string) ([]models.WebhookEndpoint, error) {
-	return r.ListCardsByProjectPageFiltered(ctx, projectID, limit, offset, WebhookCardFilter{Search: search})
+	return r.ListCardsByProjectPageFiltered(ctx, projectID, limit, offset, persistence.WebhookCardFilter{Search: search})
 }
 
-func (r *WebhookRepo) ListCardsByProjectPageFiltered(ctx context.Context, projectID string, limit, offset int, filter WebhookCardFilter) ([]models.WebhookEndpoint, error) {
+func (r *WebhookRepo) ListCardsByProjectPageFiltered(ctx context.Context, projectID string, limit, offset int, filter persistence.WebhookCardFilter) ([]models.WebhookEndpoint, error) {
 	limit, offset = normalizeCardPageArgs(limit, offset)
 	query := `SELECT ` + webhookCardColumns + ` FROM webhook_endpoints WHERE project_id = ?`
 	args := []any{projectID}
@@ -248,7 +238,7 @@ func (r *WebhookRepo) DeleteBulk(ctx context.Context, projectID string, ids []st
 		return err
 	}
 	if count != len(ids) {
-		return ErrWebhookNotFound
+		return persistence.ErrWebhookNotFound
 	}
 	if _, err := conn.ExecContext(ctx, `DELETE FROM webhook_endpoints WHERE project_id = ? AND id IN (`+placeholders+`)`, args...); err != nil {
 		return err
@@ -267,7 +257,7 @@ func (r *WebhookRepo) DeleteForProject(ctx context.Context, projectID, id string
 		return fmt.Errorf("checking deleted webhook endpoint: %w", err)
 	}
 	if affected == 0 {
-		return ErrWebhookNotFound
+		return persistence.ErrWebhookNotFound
 	}
 	return nil
 }
@@ -282,7 +272,7 @@ func (r *WebhookRepo) Delete(ctx context.Context, id string) error {
 		return fmt.Errorf("checking deleted webhook endpoint: %w", err)
 	}
 	if affected == 0 {
-		return ErrWebhookNotFound
+		return persistence.ErrWebhookNotFound
 	}
 	return nil
 }
@@ -304,7 +294,7 @@ func (r *WebhookRepo) RotateSecret(ctx context.Context, id string) (string, erro
 		return "", fmt.Errorf("checking rotated webhook endpoint: %w", err)
 	}
 	if affected == 0 {
-		return "", ErrWebhookNotFound
+		return "", persistence.ErrWebhookNotFound
 	}
 	return newSecret, nil
 }

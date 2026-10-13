@@ -19,6 +19,7 @@ import (
 	"github.com/openvibely/openvibely/internal/lifecycle"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/internal/testutil"
@@ -519,7 +520,7 @@ func TestAutomationWebBuilderKeepsUnsavedChangesBrowserLocal(t *testing.T) {
 	var savedName, savedTaskPrompt string
 	require.NoError(t, tc.db.QueryRow(`SELECT name FROM automations WHERE id = ?`, automationID).Scan(&savedName))
 	require.Equal(t, "Saved replacement without version token", savedName)
-	require.NoError(t, tc.db.QueryRow(`SELECT prompt FROM tasks WHERE created_via = ?`, repository.AutomationCompilerTaskCreatedVia(automationID, "review")).Scan(&savedTaskPrompt))
+	require.NoError(t, tc.db.QueryRow(`SELECT prompt FROM tasks WHERE created_via = ?`, persistence.AutomationCompilerTaskCreatedVia(automationID, "review")).Scan(&savedTaskPrompt))
 	require.Equal(t, "Review using the replacement instructions.", savedTaskPrompt)
 }
 
@@ -2650,7 +2651,7 @@ func TestAutomationChatReadToolsPreserveSharedSummaryEnvelope(t *testing.T) {
 	require.Positive(t, graphNodeCount)
 	var runningNodeID string
 	require.NoError(t, tc.db.QueryRowContext(ctx, `SELECT id FROM automation_nodes WHERE project_id = ? AND automation_id = ? AND version_id = ? ORDER BY id LIMIT 1`, project.ID, automationID, cards[0].Version.ID).Scan(&runningNodeID))
-	_, _, err = repository.NewAutomationRepo(tc.db).RecordProjectionEvent(ctx, repository.AutomationProjectionEvent{
+	_, _, err = repository.NewAutomationRepo(tc.db).RecordProjectionEvent(ctx, persistence.AutomationProjectionEvent{
 		Context:        models.AutomationContext{ProjectID: project.ID},
 		Binding:        models.AutomationBinding{AutomationID: automationID, VersionID: cards[0].Version.ID, NodeID: runningNodeID},
 		WorkItemKey:    "chat-read:running",
@@ -3628,7 +3629,7 @@ func TestAutomationTaskFollowupGitHubToolsUseHardenedRuntime(t *testing.T) {
 	causalCtx := service.WithAutomationContext(ctx, models.AutomationContext{ProjectID: project.ID, Bindings: []models.AutomationBinding{binding}})
 	causalCtx = service.WithAutomationExecution(causalCtx, task.ID, execution.ID)
 	tc.handler.SetAutomationServices(service.NewAutomationGraphService(automationRepo), service.NewAutomationRegistrationService(automationRepo, service.NewAutomationAdapterRegistry()))
-	retryItem, _, err := automationRepo.RecordProjectionEvent(ctx, repository.AutomationProjectionEvent{
+	retryItem, _, err := automationRepo.RecordProjectionEvent(ctx, persistence.AutomationProjectionEvent{
 		Context: models.AutomationContext{ProjectID: project.ID, Bindings: []models.AutomationBinding{binding}}, Binding: binding,
 		WorkItemKey: "followup-safe:retry", WorkItemKind: "task", ActivityKey: "followup-safe:retry:execution",
 		ActivityType: "task_execution", ActivityStatus: models.AutomationActivityRunning,
@@ -3740,7 +3741,7 @@ func TestReplacedAutomationOriginTaskGitHubMutationsRemainFailClosed(t *testing.
 	require.NotEmpty(t, originalTaskID)
 	originalTask, err := tc.taskRepo.GetByID(ctx, originalTaskID)
 	require.NoError(t, err)
-	require.True(t, repository.IsAutomationTaskCreatedVia(originalTask.CreatedVia))
+	require.True(t, persistence.IsAutomationTaskCreatedVia(originalTask.CreatedVia))
 	originalNodeID := ""
 	for _, node := range first.Definition.Nodes {
 		if node.NodeKey == "original" {
@@ -3793,7 +3794,7 @@ func TestReplacedAutomationOriginTaskGitHubMutationsRemainFailClosed(t *testing.
 	require.NoError(t, err)
 	originalTask, err = tc.taskRepo.GetByID(ctx, originalTask.ID)
 	require.NoError(t, err)
-	require.True(t, repository.IsAutomationTaskCreatedVia(originalTask.CreatedVia), "legacy issue-specific task must gain durable origin before projection deletion")
+	require.True(t, persistence.IsAutomationTaskCreatedVia(originalTask.CreatedVia), "legacy issue-specific task must gain durable origin before projection deletion")
 	unrelatedTaskAfter, err := tc.taskRepo.GetByID(ctx, unrelatedTask.ID)
 	require.NoError(t, err)
 	require.Empty(t, unrelatedTaskAfter.CreatedVia, "generic pre-feature create_task resources must not be registered as Automation origins")
@@ -3914,7 +3915,7 @@ func TestGoalAgentAutomationImplementationContinuationProjectsRunningNode(t *tes
 	}
 	require.NotEmpty(t, implementation.ID)
 	binding := models.AutomationBinding{AutomationID: definition.Automation.ID, VersionID: definition.Version.ID, NodeID: implementation.ID}
-	workItem, _, err := automationRepo.RecordProjectionEvent(ctx, repository.AutomationProjectionEvent{
+	workItem, _, err := automationRepo.RecordProjectionEvent(ctx, persistence.AutomationProjectionEvent{
 		Context: models.AutomationContext{ProjectID: project.ID, Bindings: []models.AutomationBinding{binding}}, Binding: binding,
 		WorkItemKey: "goal-continuation:implementation", WorkItemKind: "implementation",
 		ActivityKey: "goal-continuation:implementation:created", ActivityType: "create_implementation_task",
@@ -4030,7 +4031,7 @@ func TestAutomationSendToTaskPersistsCausalBindingsWithQueuedInput(t *testing.T)
 		}
 	}
 	binding := models.AutomationBinding{AutomationID: definition.Automation.ID, VersionID: definition.Version.ID, NodeID: producer.ID}
-	item, _, err := automationRepo.RecordProjectionEvent(ctx, repository.AutomationProjectionEvent{
+	item, _, err := automationRepo.RecordProjectionEvent(ctx, persistence.AutomationProjectionEvent{
 		Context: models.AutomationContext{ProjectID: project.ID, Bindings: []models.AutomationBinding{binding}}, Binding: binding,
 		WorkItemKey: "queue:item", ActivityKey: "queue:source", ActivityType: "task_execution", ActivityStatus: models.AutomationActivityRunning,
 		Resources: []models.AutomationActivityResource{{ResourceType: "task", ResourceID: task.ID}},

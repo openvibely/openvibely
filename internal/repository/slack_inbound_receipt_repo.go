@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+
+	"github.com/openvibely/openvibely/internal/persistence"
 )
 
 // SlackInboundReceiptRepo records Slack events whose durable ingress handoff
@@ -33,7 +35,7 @@ func (r *SlackInboundReceiptRepo) Exists(ctx context.Context, eventKey string) (
 
 // WithHandoff atomically records a Slack event receipt with its durable work.
 // If the receipt already exists, persist is not called and alreadyHandedOff is true.
-func (r *SlackInboundReceiptRepo) WithHandoff(ctx context.Context, eventKey string, persist func(SQLExecutor) error) (alreadyHandedOff bool, err error) {
+func (r *SlackInboundReceiptRepo) WithHandoff(ctx context.Context, eventKey string, persist func(persistence.Tx) error) (alreadyHandedOff bool, err error) {
 	var db *sql.DB
 	if r != nil {
 		db = r.db
@@ -46,5 +48,5 @@ func (r *SlackInboundReceiptRepo) WithHandoff(ctx context.Context, eventKey stri
 		insertArgs:        []interface{}{eventKey},
 		recordError:       "record Slack inbound receipt",
 		rowsAffectedError: "check Slack inbound receipt insertion",
-	}, persist)
+	}, withStoreTx(persist))
 }

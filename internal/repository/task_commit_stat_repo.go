@@ -7,16 +7,11 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 )
 
 type TaskCommitStatRepo struct {
 	db *sql.DB
-}
-
-type ProducedCommitStatAggregate struct {
-	TotalCommits    int
-	TotalInsertions int
-	TotalDeletions  int
 }
 
 func NewTaskCommitStatRepo(db *sql.DB) *TaskCommitStatRepo {
@@ -68,15 +63,15 @@ func (r *TaskCommitStatRepo) FirstProducedCommitStatTime(ctx context.Context, pr
 	return producedAt, nil
 }
 
-func (r *TaskCommitStatRepo) ProducedCommitStatAggregate(ctx context.Context, projectID string, since time.Time) (ProducedCommitStatAggregate, error) {
-	var aggregate ProducedCommitStatAggregate
+func (r *TaskCommitStatRepo) ProducedCommitStatAggregate(ctx context.Context, projectID string, since time.Time) (persistence.ProducedCommitStatAggregate, error) {
+	var aggregate persistence.ProducedCommitStatAggregate
 	err := r.db.QueryRowContext(ctx, `
 			SELECT COUNT(*), COALESCE(SUM(insertions), 0), COALESCE(SUM(deletions), 0)
 			FROM task_commit_stats
 			WHERE project_id = ? AND produced_at >= ?`, projectID, since).Scan(
 		&aggregate.TotalCommits, &aggregate.TotalInsertions, &aggregate.TotalDeletions)
 	if err != nil {
-		return ProducedCommitStatAggregate{}, fmt.Errorf("summarizing task commit stats: %w", err)
+		return persistence.ProducedCommitStatAggregate{}, fmt.Errorf("summarizing task commit stats: %w", err)
 	}
 	return aggregate, nil
 }

@@ -11,9 +11,8 @@ import (
 
 	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 )
-
-var ErrAlertNotFound = errors.New("alert not found")
 
 type AlertRepo struct {
 	db             *sql.DB
@@ -204,7 +203,7 @@ func (r *AlertRepo) GetByIDAdmin(ctx context.Context, id string) (*models.Alert,
 
 func alertResult(a *models.Alert, err error) (*models.Alert, error) {
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, ErrAlertNotFound
+		return nil, persistence.ErrAlertNotFound
 	}
 	if err != nil {
 		return nil, fmt.Errorf("getting alert: %w", err)
@@ -529,7 +528,7 @@ func requireAffected(result sql.Result) error {
 		return err
 	}
 	if count == 0 {
-		return ErrAlertNotFound
+		return persistence.ErrAlertNotFound
 	}
 	return nil
 }
@@ -583,7 +582,7 @@ func (r *AlertRepo) MarkReadBulk(ctx context.Context, projectID string, ids []st
 			return err
 		}
 		if count != len(ids) {
-			return ErrAlertNotFound
+			return persistence.ErrAlertNotFound
 		}
 		_, err := conn.ExecContext(ctx, `UPDATE alerts SET is_read = 1, updated_at = CURRENT_TIMESTAMP WHERE project_id = ? AND id IN (`+placeholders+`)`, args...)
 		if err != nil {
@@ -625,7 +624,7 @@ func (r *AlertRepo) DeleteBulk(ctx context.Context, projectID string, ids []stri
 			return err
 		}
 		if count != len(ids) {
-			return ErrAlertNotFound
+			return persistence.ErrAlertNotFound
 		}
 		if _, err := conn.ExecContext(ctx, `DELETE FROM alerts WHERE project_id = ? AND id IN (`+placeholders+`)`, args...); err != nil {
 			return fmt.Errorf("deleting alerts: %w", err)
@@ -657,6 +656,9 @@ func (r *AlertRepo) SetDecision(ctx context.Context, projectID, id string, state
 		if changed == 0 {
 			var current models.AlertDecisionState
 			if err := conn.QueryRowContext(ctx, `SELECT decision_state FROM alerts WHERE project_id = ? AND id = ?`, projectID, id).Scan(&current); err != nil {
+				if errors.Is(err, sql.ErrNoRows) {
+					return persistence.ErrAlertNotFound
+				}
 				return err
 			}
 			if current != state {
@@ -699,6 +701,9 @@ func (r *AlertRepo) ClaimApproved(ctx context.Context, projectID, id, claimant s
 			if err == nil && (a.ProcessingState != models.AlertProcessingClaimed || a.Claimant != claimant) {
 				return fmt.Errorf("alert is not claimable")
 			}
+		}
+		if errors.Is(err, sql.ErrNoRows) {
+			return persistence.ErrAlertNotFound
 		}
 		if err != nil {
 			return fmt.Errorf("claiming alert: %w", err)
@@ -757,10 +762,10 @@ func (r *AlertRepo) LinkImplementationTask(ctx context.Context, projectID, id, c
 		if changed, _ := result.RowsAffected(); changed == 0 {
 			var linked sql.NullString
 			if err := conn.QueryRowContext(ctx, `SELECT implementation_task_id FROM alerts WHERE project_id = ? AND id = ?`, projectID, id).Scan(&linked); err != nil {
-				return ErrAlertNotFound
+				return persistence.ErrAlertNotFound
 			}
 			if !linked.Valid || linked.String != taskID {
-				return ErrAlertNotFound
+				return persistence.ErrAlertNotFound
 			}
 		}
 		if r.automationRepo != nil {
@@ -791,7 +796,7 @@ func (r *AlertRepo) CreateImplementationTask(ctx context.Context, projectID, ale
 		if err := conn.QueryRowContext(ctx, `SELECT implementation_task_id, processing_state, COALESCE(claimant, '')
 			FROM alerts WHERE project_id = ? AND id = ?`, projectID, alertID).Scan(&linked, &state, &storedClaimant); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
-				return ErrAlertNotFound
+				return persistence.ErrAlertNotFound
 			}
 			return err
 		}
@@ -823,7 +828,7 @@ func (r *AlertRepo) CreateImplementationTask(ctx context.Context, projectID, ale
 			return fmt.Errorf("creating implementation task: %w", err)
 		}
 		if goal := strings.TrimSpace(input.Goal); goal != "" {
-			if err := createTaskGoalWithExecutor(ctx, conn, taskID, &models.TaskGoal{GoalID: NewID(), Objective: goal, Status: models.TaskGoalStatusActive, Reason: "set at task creation"}); err != nil {
+			if err := createTaskGoalWithExecutor(ctx, conn, taskID, &models.TaskGoal{GoalID: persistence.NewID(), Objective: goal, Status: models.TaskGoalStatusActive, Reason: "set at task creation"}); err != nil {
 				return err
 			}
 		}

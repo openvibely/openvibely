@@ -9,7 +9,7 @@ import (
 
 	"github.com/openvibely/openvibely/internal/automationobs"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence"
 )
 
 type automationTaskMutationService interface {
@@ -26,11 +26,11 @@ type automationQueuedWorkPruner interface {
 }
 
 type AutomationCompiler struct {
-	automationRepo *repository.AutomationRepo
+	automationRepo persistence.AutomationStore
 	taskSvc        automationTaskMutationService
-	taskRepo       *repository.TaskRepo
-	agentRepo      *repository.AgentRepo
-	scheduleRepo   *repository.ScheduleRepo
+	taskRepo       persistence.TaskStore
+	agentRepo      persistence.AgentStore
+	scheduleRepo   persistence.ScheduleStore
 	validator      *AutomationSaveValidator
 	now            func() time.Time
 }
@@ -54,11 +54,11 @@ type AutomationSaveResult struct {
 	Definition *models.AutomationDefinition `json:"definition"`
 }
 
-func NewAutomationCompiler(automationRepo *repository.AutomationRepo, taskSvc automationTaskMutationService, taskRepo *repository.TaskRepo, scheduleRepo *repository.ScheduleRepo, validator *AutomationSaveValidator) *AutomationCompiler {
+func NewAutomationCompiler(automationRepo persistence.AutomationStore, taskSvc automationTaskMutationService, taskRepo persistence.TaskStore, scheduleRepo persistence.ScheduleStore, validator *AutomationSaveValidator) *AutomationCompiler {
 	return &AutomationCompiler{automationRepo: automationRepo, taskSvc: taskSvc, taskRepo: taskRepo, scheduleRepo: scheduleRepo, validator: validator, now: time.Now}
 }
 
-func (c *AutomationCompiler) SetAgentRepository(agentRepo *repository.AgentRepo) {
+func (c *AutomationCompiler) SetAgentRepository(agentRepo persistence.AgentStore) {
 	c.agentRepo = agentRepo
 }
 
@@ -196,7 +196,7 @@ func (c *AutomationCompiler) Save(ctx context.Context, request AutomationSaveReq
 
 	automationID := strings.TrimSpace(request.AutomationID)
 	if automationID == "" {
-		automationID = repository.NewID()
+		automationID = persistence.NewID()
 	}
 	current, err := c.automationRepo.GetDefinition(ctx, request.ProjectID, automationID)
 	if err != nil {
@@ -241,7 +241,7 @@ func (c *AutomationCompiler) Save(ctx context.Context, request AutomationSaveReq
 		return nil, err
 	}
 
-	write := repository.AutomationSaveWrite{ProjectID: request.ProjectID, AutomationID: automationID, GraphID: repository.NewID(),
+	write := persistence.AutomationSaveWrite{ProjectID: request.ProjectID, AutomationID: automationID, GraphID: persistence.NewID(),
 		ExpectedCurrentGraphID: expectedGraphID, StableKey: request.StableKey, Source: request.Source,
 		CreatedVia: request.CreatedVia, TemplateRevision: templateRevision, Candidate: candidate, ConfirmationTokenID: request.ConfirmationTokenID,
 		ConfirmationPrincipal: request.ConfirmationPrincipal, ConfirmationThreadID: request.ConfirmationThreadID,
@@ -264,7 +264,7 @@ func (c *AutomationCompiler) Save(ctx context.Context, request AutomationSaveReq
 			agentID = &modelConfigID
 		}
 		goal, _ := node.Config["goal"].(string)
-		taskWrite := repository.AutomationSaveTask{
+		taskWrite := persistence.AutomationSaveTask{
 			NodeKey:           node.Key,
 			Title:             automationTaskTitle(automation, node),
 			Prompt:            prompt,
@@ -316,7 +316,7 @@ func (c *AutomationCompiler) Save(ctx context.Context, request AutomationSaveReq
 		if err != nil {
 			return nil, err
 		}
-		scheduleWrite := repository.AutomationSaveSchedule{NodeKey: node.Key, TaskNodeKey: taskNodeKey, RunAt: schedule.RunAt,
+		scheduleWrite := persistence.AutomationSaveSchedule{NodeKey: node.Key, TaskNodeKey: taskNodeKey, RunAt: schedule.RunAt,
 			RepeatType: schedule.RepeatType, RepeatInterval: schedule.RepeatInterval, Enabled: schedule.Enabled, ClearContextOnStart: schedule.ClearContextOnStart}
 		if existing := existingResources[node.Key+"\x00schedule"]; existing.ResourceID != "" {
 			scheduleWrite.ExistingScheduleID = existing.ResourceID
@@ -432,12 +432,12 @@ func (c *AutomationCompiler) scheduleFromNode(taskID string, node models.Automat
 }
 
 type AutomationLifecycleService struct {
-	repo         *repository.AutomationRepo
-	scheduleRepo *repository.ScheduleRepo
+	repo         persistence.AutomationStore
+	scheduleRepo persistence.ScheduleStore
 	taskSvc      automationTaskMutationService
 }
 
-func NewAutomationLifecycleService(repo *repository.AutomationRepo, scheduleRepo *repository.ScheduleRepo, taskSvc ...automationTaskMutationService) *AutomationLifecycleService {
+func NewAutomationLifecycleService(repo persistence.AutomationStore, scheduleRepo persistence.ScheduleStore, taskSvc ...automationTaskMutationService) *AutomationLifecycleService {
 	service := &AutomationLifecycleService{repo: repo, scheduleRepo: scheduleRepo}
 	if len(taskSvc) > 0 {
 		service.taskSvc = taskSvc[0]

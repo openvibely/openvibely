@@ -8,7 +8,7 @@ import (
 
 	"github.com/openvibely/openvibely/internal/chatcontrol"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence"
 )
 
 // listSchedulesMaxLimit bounds a single list_schedules page so discovery stays cheap
@@ -58,7 +58,7 @@ type scheduleDiscoveryResult struct {
 // discovery tool. It never crosses project boundaries. Returns a compact JSON
 // summary payload with deterministic ordering and explicit pagination. The returned
 // schedule IDs work directly with modify_schedule and delete_schedule.
-func ExecuteListSchedulesTool(ctx context.Context, scheduleRepo *repository.ScheduleRepo, projectID string, input json.RawMessage) (string, error) {
+func ExecuteListSchedulesTool(ctx context.Context, scheduleRepo persistence.ScheduleStore, projectID string, input json.RawMessage) (string, error) {
 	if scheduleRepo == nil {
 		return "", fmt.Errorf("list_schedules: schedule repository unavailable")
 	}
@@ -83,7 +83,7 @@ func ExecuteListSchedulesTool(ctx context.Context, scheduleRepo *repository.Sche
 		offset = 0
 	}
 
-	rows, total, err := scheduleRepo.ListSchedulesForDiscovery(ctx, projectID, repository.ScheduleDiscoveryFilter{
+	rows, total, err := scheduleRepo.ListSchedulesForDiscovery(ctx, projectID, persistence.ScheduleDiscoveryFilter{
 		TaskID:  strings.TrimSpace(req.TaskID),
 		Title:   strings.TrimSpace(req.Title),
 		Enabled: req.Enabled,
@@ -115,7 +115,7 @@ func ExecuteListSchedulesTool(ctx context.Context, scheduleRepo *repository.Sche
 	return string(b), nil
 }
 
-func buildScheduleDiscoverySummary(row repository.ScheduleDiscoveryRow) scheduleDiscoverySummary {
+func buildScheduleDiscoverySummary(row persistence.ScheduleDiscoveryRow) scheduleDiscoverySummary {
 	s := row.Schedule
 	summary := scheduleDiscoverySummary{
 		ScheduleID:          s.ID,

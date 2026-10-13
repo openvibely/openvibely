@@ -49,7 +49,7 @@ func TestEmailTaskContextRepo_UpsertGetDelete(t *testing.T) {
 
 	etc.EmailMessageID = "<message-2@example.com>"
 	etc.EmailSessionKey = "sender@example.com|thread-next"
-	require.NoError(t, repo.UpsertWithExecutor(ctx, db, etc))
+	require.NoError(t, repo.upsertWithExecutor(ctx, db, etc))
 
 	got, err = repo.GetByTaskID(ctx, task.ID)
 	require.NoError(t, err)

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/internal/testutil"
@@ -314,7 +315,7 @@ func TestChannelsPageOutboundTargetsRenderAsPermanentTopEditCard(t *testing.T) {
 	targetRepo := repository.NewChannelTargetRepo(db)
 	h.SetChannelTargetRepo(targetRepo)
 	seedTarget := models.ChannelTarget{
-		ID:             repository.NewID(),
+		ID:             persistence.NewID(),
 		ProjectID:      "default",
 		Platform:       "email",
 		Name:           "client",
@@ -881,7 +882,7 @@ func TestChannelsPageOutboundTargetTestButtonIncludesSelectedProjectID(t *testin
 	tc.handler.SetChannelMessageRouter(router)
 
 	target := models.ChannelTarget{
-		ID:        repository.NewID(),
+		ID:        persistence.NewID(),
 		ProjectID: selectedProject.ID,
 		Platform:  "slack",
 		Name:      "selected-alerts",

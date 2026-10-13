@@ -8,7 +8,7 @@ import (
 
 	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/automationobs"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/update"
 )
 
@@ -16,8 +16,8 @@ import (
 // prepared executions after a process restart. Existing Task and Execution rows
 // remain authoritative; this service never rewrites their state.
 type AutomationReconciler struct {
-	automationRepo      *repository.AutomationRepo
-	executionRepo       *repository.ExecutionRepo
+	automationRepo      persistence.AutomationStore
+	executionRepo       persistence.ExecutionStore
 	workerSvc           *WorkerService
 	externalStateSvc    *AutomationExternalStateService
 	liveViewTracker     *AutomationLiveViewTracker
@@ -29,7 +29,7 @@ type AutomationReconciler struct {
 	updateTracker       *update.WorkTracker
 }
 
-func NewAutomationReconciler(automationRepo *repository.AutomationRepo, executionRepo *repository.ExecutionRepo, workerSvc *WorkerService) *AutomationReconciler {
+func NewAutomationReconciler(automationRepo persistence.AutomationStore, executionRepo persistence.ExecutionStore, workerSvc *WorkerService) *AutomationReconciler {
 	return &AutomationReconciler{automationRepo: automationRepo, executionRepo: executionRepo, workerSvc: workerSvc, interval: 15 * time.Second, externalRefreshEach: 5 * time.Minute, liveViewWindow: time.Minute}
 }
 

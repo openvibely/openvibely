@@ -18,7 +18,7 @@ import (
 	llmstream "github.com/openvibely/openvibely/internal/llm/stream"
 	llmusage "github.com/openvibely/openvibely/internal/llm/usage"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence"
 	anthropicclient "github.com/openvibely/openvibely/pkg/anthropic_client"
 	mcpclient "github.com/openvibely/openvibely/pkg/mcp_client"
 )
@@ -124,8 +124,8 @@ var errRefusal = fmt.Errorf("model refused the request: Anthropic returned stop_
 
 // Adapter encapsulates Anthropic provider logic.
 type Adapter struct {
-	llmConfigRepo *repository.LLMConfigRepo
-	execRepo      *repository.ExecutionRepo
+	llmConfigRepo persistence.LLMConfigStore
+	execRepo      persistence.ExecutionStore
 	streamHub     llmstream.ExecutionStreamPublisher
 	oauthRecovery *llmoauth.Manager
 }
@@ -314,7 +314,7 @@ func buildAnthropicRuntime(ctx context.Context, workDir string, agentDef *models
 }
 
 // New creates a new Anthropic adapter.
-func New(llmConfigRepo *repository.LLMConfigRepo, execRepo *repository.ExecutionRepo, streamHub llmstream.ExecutionStreamPublisher) *Adapter {
+func New(llmConfigRepo persistence.LLMConfigStore, execRepo persistence.ExecutionStore, streamHub llmstream.ExecutionStreamPublisher) *Adapter {
 	return &Adapter{
 		llmConfigRepo: llmConfigRepo,
 		execRepo:      execRepo,

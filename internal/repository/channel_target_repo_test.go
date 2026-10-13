@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/stretchr/testify/require"
 )
@@ -155,11 +156,11 @@ func TestChannelTargetRepo_SummarizeByProjectMatchesMaterializedSummary(t *testi
 	require.Equal(t, channelTargetMaterializedSummary(materialized), summary)
 	require.Equal(t, 7, summary.Total)
 	require.True(t, summary.Configured)
-	require.Equal(t, ChannelTargetPlatformSummary{Total: 2, Home: 1, Named: 1, ByKind: map[string]int{"channel": 1, "user": 1}}, summary.ByPlatform["slack"])
-	require.Equal(t, ChannelTargetPlatformSummary{Total: 1, Home: 1, Named: 1, ByKind: map[string]int{"chat": 1}}, summary.ByPlatform["telegram"])
-	require.Equal(t, ChannelTargetPlatformSummary{Total: 2, Home: 0, Named: 1, ByKind: map[string]int{"channel": 1, "user": 1}}, summary.ByPlatform["discord"])
-	require.Equal(t, ChannelTargetPlatformSummary{Total: 1, Home: 0, Named: 1, ByKind: map[string]int{"email": 1}}, summary.ByPlatform["email"])
-	require.Equal(t, ChannelTargetPlatformSummary{Total: 1, Home: 0, Named: 1, ByKind: map[string]int{"room": 1}}, summary.ByPlatform["matrix"])
+	require.Equal(t, persistence.ChannelTargetPlatformSummary{Total: 2, Home: 1, Named: 1, ByKind: map[string]int{"channel": 1, "user": 1}}, summary.ByPlatform["slack"])
+	require.Equal(t, persistence.ChannelTargetPlatformSummary{Total: 1, Home: 1, Named: 1, ByKind: map[string]int{"chat": 1}}, summary.ByPlatform["telegram"])
+	require.Equal(t, persistence.ChannelTargetPlatformSummary{Total: 2, Home: 0, Named: 1, ByKind: map[string]int{"channel": 1, "user": 1}}, summary.ByPlatform["discord"])
+	require.Equal(t, persistence.ChannelTargetPlatformSummary{Total: 1, Home: 0, Named: 1, ByKind: map[string]int{"email": 1}}, summary.ByPlatform["email"])
+	require.Equal(t, persistence.ChannelTargetPlatformSummary{Total: 1, Home: 0, Named: 1, ByKind: map[string]int{"room": 1}}, summary.ByPlatform["matrix"])
 
 	emptySummary, err := repo.SummarizeByProject(ctx, "missing-project")
 	require.NoError(t, err)
@@ -168,8 +169,8 @@ func TestChannelTargetRepo_SummarizeByProjectMatchesMaterializedSummary(t *testi
 	require.Empty(t, emptySummary.ByPlatform)
 }
 
-func channelTargetMaterializedSummary(targets []models.ChannelTarget) ChannelTargetProjectSummary {
-	out := ChannelTargetProjectSummary{Total: len(targets), Configured: len(targets) > 0, ByPlatform: map[string]ChannelTargetPlatformSummary{}}
+func channelTargetMaterializedSummary(targets []models.ChannelTarget) persistence.ChannelTargetProjectSummary {
+	out := persistence.ChannelTargetProjectSummary{Total: len(targets), Configured: len(targets) > 0, ByPlatform: map[string]persistence.ChannelTargetPlatformSummary{}}
 	for _, target := range targets {
 		platform := normalizeChannelTargetField(target.Platform)
 		if platform == "" {

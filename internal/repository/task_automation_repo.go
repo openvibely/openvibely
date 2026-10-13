@@ -10,22 +10,12 @@ import (
 
 	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 )
-
-var ErrAutomationChainChildBusy = errors.New("automation chained task is already running")
-
-func AutomationCompilerTaskCreatedVia(automationID, nodeKey string) string {
-	return "automation:" + automationID + ":" + nodeKey
-}
-
-func IsAutomationTaskCreatedVia(createdVia string) bool {
-	parts := strings.Split(strings.TrimSpace(createdVia), ":")
-	return len(parts) >= 3 && parts[0] == "automation" && strings.TrimSpace(parts[1]) != "" && strings.TrimSpace(parts[2]) != ""
-}
 
 // ActivateAutomationChainedTask reuses the existing Task state transition and
 // records the connected Automation handoff in the same local transaction.
-func (r *TaskRepo) ActivateAutomationChainedTask(ctx context.Context, parent models.Task, child *models.Task, event AutomationProjectionEvent) (*models.AutomationWorkItem, *models.AutomationActivity, bool, error) {
+func (r *TaskRepo) ActivateAutomationChainedTask(ctx context.Context, parent models.Task, child *models.Task, event persistence.AutomationProjectionEvent) (*models.AutomationWorkItem, *models.AutomationActivity, bool, error) {
 	if r == nil || child == nil || parent.ID == "" || child.ID == "" || event.Context.ProjectID == "" || event.EventKey == "" {
 		return nil, nil, false, errors.New("complete automation task handoff is required")
 	}
@@ -51,7 +41,7 @@ func (r *TaskRepo) ActivateAutomationChainedTask(ctx context.Context, parent mod
 		event.Binding.NodeID, event.Context.ProjectID, event.Binding.AutomationID, event.Binding.VersionID).Scan(&targetNodeKey); err != nil {
 		return nil, nil, false, fmt.Errorf("loading automation chain target node: %w", err)
 	}
-	expectedChildCreatedVia := AutomationCompilerTaskCreatedVia(event.Binding.AutomationID, targetNodeKey)
+	expectedChildCreatedVia := persistence.AutomationCompilerTaskCreatedVia(event.Binding.AutomationID, targetNodeKey)
 	if parentProject != event.Context.ProjectID || childProject != event.Context.ProjectID || childParentID != parent.ID ||
 		!strings.HasPrefix(parentCreatedVia, "automation:"+event.Binding.AutomationID+":") || childCreatedVia != expectedChildCreatedVia {
 		return nil, nil, false, errors.New("automation task handoff does not match the published topology")
@@ -100,7 +90,7 @@ func (r *TaskRepo) ActivateAutomationChainedTask(ctx context.Context, parent mod
 		return nil, nil, previousStatus == models.StatusPending && previousCategory == models.CategoryActive, nil
 	}
 	if previousStatus == models.StatusRunning || previousStatus == models.StatusQueued {
-		return nil, nil, false, ErrAutomationChainChildBusy
+		return nil, nil, false, persistence.ErrAutomationChainChildBusy
 	}
 	effectiveCategory := child.Category
 	admitted := lifecycle == models.AutomationActive
@@ -172,18 +162,11 @@ func (r *TaskRepo) ClaimAutomationDispatch(ctx context.Context, dispatchID, clai
 	return r.claimAutomationDispatch(ctx, dispatchID, claimant, false, nil)
 }
 
-// QueuedAutomationDispatchClaim contains the execution and authoritative Task
-// admitted by a queued Automation dispatch.
-type QueuedAutomationDispatchClaim struct {
-	Execution models.Execution
-	Task      models.Task
-}
-
 // ClaimQueuedAutomationDispatch performs the pending-to-running transition only
 // after WorkerService has reserved global, project, and model capacity. The
 // returned Task is captured in the atomic claim transaction so execution uses
 // the exact persisted assignment that was admitted.
-func (r *TaskRepo) ClaimQueuedAutomationDispatch(ctx context.Context, dispatchID string) (*QueuedAutomationDispatchClaim, error) {
+func (r *TaskRepo) ClaimQueuedAutomationDispatch(ctx context.Context, dispatchID string) (*persistence.QueuedAutomationDispatchClaim, error) {
 	var task *models.Task
 	execution, err := r.claimAutomationDispatch(ctx, dispatchID, "", true, &task)
 	if err != nil {
@@ -192,7 +175,7 @@ func (r *TaskRepo) ClaimQueuedAutomationDispatch(ctx context.Context, dispatchID
 	if task == nil || task.Status != models.StatusRunning {
 		return nil, errors.New("claimed automation task disappeared")
 	}
-	return &QueuedAutomationDispatchClaim{Execution: *execution, Task: *task}, nil
+	return &persistence.QueuedAutomationDispatchClaim{Execution: *execution, Task: *task}, nil
 }
 
 func (r *TaskRepo) claimAutomationDispatch(ctx context.Context, dispatchID, claimant string, queued bool, claimedTask **models.Task) (*models.Execution, error) {
@@ -222,13 +205,13 @@ func (r *TaskRepo) claimAutomationDispatch(ctx context.Context, dispatchID, clai
 			WHERE d.id = ? AND `+claimPredicate, claimArgs...).
 		Scan(&invocationID, &taskID, &projectID, &versionID, &automationID, &nodeID, &leaseExpiry, &lifecycle)
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, ErrAutomationDispatchLease
+		return nil, persistence.ErrAutomationDispatchLease
 	}
 	if err != nil {
 		return nil, fmt.Errorf("validating automation dispatch claim: %w", err)
 	}
 	if queued && lifecycle != models.AutomationActive {
-		return nil, ErrAutomationTaskBusy
+		return nil, persistence.ErrAutomationTaskBusy
 	}
 
 	var executionID string
@@ -247,7 +230,7 @@ func (r *TaskRepo) claimAutomationDispatch(ctx context.Context, dispatchID, clai
 		}
 		if taskProject != projectID || taskStatus != models.StatusPending ||
 			(taskCategory != models.CategoryActive && taskCategory != models.CategoryScheduled) {
-			return nil, ErrAutomationTaskBusy
+			return nil, persistence.ErrAutomationTaskBusy
 		}
 		result, err := conn.ExecContext(ctx, `UPDATE tasks SET
 			status = 'running',
@@ -259,7 +242,7 @@ func (r *TaskRepo) claimAutomationDispatch(ctx context.Context, dispatchID, clai
 			return nil, fmt.Errorf("claiming automation task: %w", err)
 		}
 		if changed, _ := result.RowsAffected(); changed != 1 {
-			return nil, ErrAutomationTaskBusy
+			return nil, persistence.ErrAutomationTaskBusy
 		}
 		if err := conn.QueryRowContext(ctx, `INSERT INTO executions
 				(task_id, agent_config_id, status, prompt_sent, is_followup, dispatch_id, starts_new_context)
@@ -283,7 +266,7 @@ func (r *TaskRepo) claimAutomationDispatch(ctx context.Context, dispatchID, clai
 			}
 			if taskStatus != models.StatusRunning ||
 				(taskCategory != models.CategoryActive && taskCategory != models.CategoryScheduled) {
-				return nil, ErrAutomationTaskBusy
+				return nil, persistence.ErrAutomationTaskBusy
 			}
 		}
 	}

@@ -17,6 +17,7 @@ import (
 	"github.com/openvibely/openvibely/internal/lifecycle"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/internal/testutil"
@@ -303,7 +304,7 @@ func TestBatchUpdateTaskCategoryActiveLaneRejectsStaleBrowserStateAtomically(t *
 	first := tc.CreateTask(project.ID).WithTitle("Stale lane first").WithCategory(models.CategoryBacklog).Build()
 	second := tc.CreateTask(project.ID).WithTitle("Stale lane second").WithCategory(models.CategoryBacklog).Build()
 	require.NoError(t, tc.taskRepo.UpdateStatus(ctx, second.ID, models.StatusCompleted))
-	expected, err := json.Marshal([]repository.ActiveLaneTaskMove{
+	expected, err := json.Marshal([]persistence.ActiveLaneTaskMove{
 		{ID: first.ID, ExpectedCategory: models.CategoryBacklog, ExpectedStatus: models.StatusPending},
 		{ID: second.ID, ExpectedCategory: models.CategoryBacklog, ExpectedStatus: models.StatusPending},
 	})
@@ -354,7 +355,7 @@ func TestUpdateTaskCategoryRunningLaneRoutesQueuedFollowupAndReturnsConflict(t *
 	require.NoError(t, tc.taskRepo.Update(ctx, task))
 	threadRepo := repository.NewThreadInputRepo(tc.db)
 	require.NoError(t, threadRepo.CreateQueued(ctx, &models.ThreadInput{Scope: models.ThreadInputScopeTask, ProjectID: project.ID, TaskID: task.ID, AgentConfigID: model.ID, InputMode: models.ThreadInputModeQueued, InputStatus: models.ThreadInputPending, Content: "queued followup"}))
-	expected, err := json.Marshal([]repository.ActiveLaneTaskMove{{ID: task.ID, ExpectedCategory: models.CategoryBacklog, ExpectedStatus: models.StatusPending}})
+	expected, err := json.Marshal([]persistence.ActiveLaneTaskMove{{ID: task.ID, ExpectedCategory: models.CategoryBacklog, ExpectedStatus: models.StatusPending}})
 	require.NoError(t, err)
 
 	response := tc.HTMX().Patch("/tasks/" + task.ID + "/category").WithForm(url.Values{
@@ -390,7 +391,7 @@ func TestUpdateTaskCategoryQueuedToRunningRejectsStaleTerminalState(t *testing.T
 	default:
 	}
 	require.NoError(t, tc.taskRepo.UpdateStatus(ctx, task.ID, models.StatusCompleted))
-	expected, err := json.Marshal([]repository.ActiveLaneTaskMove{{ID: task.ID, ExpectedCategory: models.CategoryActive, ExpectedStatus: models.StatusPending}})
+	expected, err := json.Marshal([]persistence.ActiveLaneTaskMove{{ID: task.ID, ExpectedCategory: models.CategoryActive, ExpectedStatus: models.StatusPending}})
 	require.NoError(t, err)
 
 	response := tc.HTMX().Patch("/tasks/" + task.ID + "/category").WithForm(url.Values{
@@ -1089,7 +1090,7 @@ func TestPrimaryAgentSelectabilityMatchesTaskUIProjection(t *testing.T) {
 				GeneratedStatus:     tt.generatedStatus,
 				ArchivedAt:          tt.archivedAt,
 			})
-			compactOptionSelectable := selectableTaskUIAgentOption(repository.AgentTaskUIOption{
+			compactOptionSelectable := selectableTaskUIAgentOption(persistence.AgentTaskUIOption{
 				Enabled:             tt.enabled,
 				SelectableAsPrimary: tt.selectable,
 				GeneratedStatus:     tt.generatedStatus,
@@ -1175,7 +1176,7 @@ func TestTaskFormAndAgentSelectionHelpers(t *testing.T) {
 	require.False(t, isValidCompletedSort("created_desc"))
 }
 
-func agentIDs(agents []repository.AgentTaskUIOption) []string {
+func agentIDs(agents []persistence.AgentTaskUIOption) []string {
 	ids := make([]string, 0, len(agents))
 	for _, agent := range agents {
 		ids = append(ids, agent.ID)

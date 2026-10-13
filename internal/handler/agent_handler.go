@@ -25,7 +25,7 @@ import (
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/mcpconfig"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/internal/util"
 	"github.com/openvibely/openvibely/web/templates/pages"
@@ -1570,7 +1570,7 @@ func (h *Handler) ListAgents(c echo.Context) error {
 	}
 
 	currentProjectID, _ := h.getCurrentProjectID(c)
-	agentFilter := repository.AgentPageFilter{
+	agentFilter := persistence.AgentPageFilter{
 		ProjectID: currentProjectID,
 		Search:    page.Search,
 		Enabled:   optionalBoolQuery(c, "enabled"),
@@ -1615,10 +1615,10 @@ func (h *Handler) ListAgents(c echo.Context) error {
 }
 
 func agentNameValidationHTTPError(err error) error {
-	if errors.Is(err, repository.ErrAgentNameRequired) {
+	if errors.Is(err, persistence.ErrAgentNameRequired) {
 		return echo.NewHTTPError(http.StatusBadRequest, "agent name is required")
 	}
-	if errors.Is(err, repository.ErrSelectableAgentNameAlreadyExists) {
+	if errors.Is(err, persistence.ErrSelectableAgentNameAlreadyExists) {
 		return echo.NewHTTPError(http.StatusBadRequest, "enabled selectable primary agent name already exists")
 	}
 	return nil
@@ -1655,7 +1655,7 @@ func cleanupCreatedAgentMaterialization(agent *models.Agent, projectRoot, agentS
 	return errors.Join(cleanupErrs...)
 }
 
-func rollbackCreatedAgent(c echo.Context, agent *models.Agent, projectRoot string, agentRepo *repository.AgentRepo, agentSkillRoot string) error {
+func rollbackCreatedAgent(c echo.Context, agent *models.Agent, projectRoot string, agentRepo persistence.AgentStore, agentSkillRoot string) error {
 	if agent == nil || agentRepo == nil {
 		return errors.New("agent rollback is not configured")
 	}

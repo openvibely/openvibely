@@ -23,6 +23,7 @@ import (
 	"github.com/emersion/go-imap"
 	messagemail "github.com/emersion/go-message/mail"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/stretchr/testify/assert"
@@ -63,7 +64,7 @@ func TestEmailInboundReceiptHandoffIsAtomicAndIdempotent(t *testing.T) {
 	receipts := repository.NewEmailInboundReceiptRepo(db)
 	mailbox, messageKey := "imap.example.com\x00bot@example.com", "message-id:<atomic@example.com>"
 
-	alreadyHandedOff, err := receipts.WithHandoff(ctx, mailbox, messageKey, func(repository.SQLExecutor) error {
+	alreadyHandedOff, err := receipts.WithHandoff(ctx, mailbox, messageKey, func(persistence.Tx) error {
 		return fmt.Errorf("simulated durable row failure")
 	})
 	require.Error(t, err)
@@ -73,14 +74,14 @@ func TestEmailInboundReceiptHandoffIsAtomicAndIdempotent(t *testing.T) {
 	assert.False(t, exists, "failed durable work must roll back its receipt")
 
 	persistCalls := 0
-	alreadyHandedOff, err = receipts.WithHandoff(ctx, mailbox, messageKey, func(repository.SQLExecutor) error {
+	alreadyHandedOff, err = receipts.WithHandoff(ctx, mailbox, messageKey, func(persistence.Tx) error {
 		persistCalls++
 		return nil
 	})
 	require.NoError(t, err)
 	assert.False(t, alreadyHandedOff)
 
-	alreadyHandedOff, err = receipts.WithHandoff(ctx, mailbox, messageKey, func(repository.SQLExecutor) error {
+	alreadyHandedOff, err = receipts.WithHandoff(ctx, mailbox, messageKey, func(persistence.Tx) error {
 		persistCalls++
 		return nil
 	})
@@ -126,7 +127,7 @@ func (s *countingEmailInboundReceiptStore) Record(ctx context.Context, mailboxAd
 	return s.inner.Record(ctx, mailboxAddress, messageKey)
 }
 
-func (s *countingEmailInboundReceiptStore) WithHandoff(ctx context.Context, mailboxAddress, messageKey string, persist func(repository.SQLExecutor) error) (bool, error) {
+func (s *countingEmailInboundReceiptStore) WithHandoff(ctx context.Context, mailboxAddress, messageKey string, persist func(persistence.Tx) error) (bool, error) {
 	s.withHandoffCalls++
 	return s.inner.WithHandoff(ctx, mailboxAddress, messageKey, persist)
 }
@@ -145,7 +146,7 @@ func (failingEmailInboundReceiptStore) Record(context.Context, string, string) e
 	return nil
 }
 
-func (failingEmailInboundReceiptStore) WithHandoff(context.Context, string, string, func(repository.SQLExecutor) error) (bool, error) {
+func (failingEmailInboundReceiptStore) WithHandoff(context.Context, string, string, func(persistence.Tx) error) (bool, error) {
 	return false, nil
 }
 
@@ -914,7 +915,7 @@ func (s *benchmarkEmailInboundReceiptStore) Record(_ context.Context, _, _ strin
 	return nil
 }
 
-func (s *benchmarkEmailInboundReceiptStore) WithHandoff(_ context.Context, _, _ string, _ func(repository.SQLExecutor) error) (bool, error) {
+func (s *benchmarkEmailInboundReceiptStore) WithHandoff(_ context.Context, _, _ string, _ func(persistence.Tx) error) (bool, error) {
 	s.withHandoffCalls++
 	return false, nil
 }
@@ -1210,7 +1211,7 @@ func (s *emailPollContentionReceiptStore) Record(_ context.Context, _, _ string)
 	return s.queryErr
 }
 
-func (s *emailPollContentionReceiptStore) WithHandoff(_ context.Context, _, _ string, _ func(repository.SQLExecutor) error) (bool, error) {
+func (s *emailPollContentionReceiptStore) WithHandoff(_ context.Context, _, _ string, _ func(persistence.Tx) error) (bool, error) {
 	return false, nil
 }
 
@@ -3503,7 +3504,7 @@ func TestEmailService_InboundInlineTextAttachmentHonorsSkipSetting(t *testing.T)
 		tasks, err := svc.taskRepo.ListByProject(ctx, project.ID, "")
 		require.NoError(t, err)
 		require.Empty(t, tasks, "skipped attachment-only email must not create a task")
-		executions, err := svc.execRepo.ListByProject(ctx, project.ID, 10)
+		executions, err := svc.execRepo.(*repository.ExecutionRepo).ListByProject(ctx, project.ID, 10)
 		require.NoError(t, err)
 		require.Empty(t, executions, "skipped attachment-only email must not create an execution")
 	})

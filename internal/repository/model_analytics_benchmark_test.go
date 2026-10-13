@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/testutil"
 )
 
@@ -26,7 +27,7 @@ func BenchmarkModelAnalyticsHistory(b *testing.B) {
 	r := NewExecutionRepo(db)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		rows, err := r.queryModelPerformance(context.Background(), AnalyticsDashboardFilter{ProjectID: "bench", View: "models"})
+		rows, err := r.queryModelPerformance(context.Background(), persistence.AnalyticsDashboardFilter{ProjectID: "bench", View: "models"})
 		if err != nil {
 			b.Fatal(err)
 		}

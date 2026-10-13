@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/stretchr/testify/require"
@@ -421,8 +422,8 @@ func TestAutomationPortfolioListUsesCompactPublishedCardProjection(t *testing.T)
 		_, err = db.ExecContext(ctx, `UPDATE automations SET published_version_id = ? WHERE id = ? AND project_id = ?`, versionID, automationID, project.ID)
 		require.NoError(t, err)
 
-		nodeA := repository.NewID()
-		nodeB := repository.NewID()
+		nodeA := persistence.NewID()
+		nodeB := persistence.NewID()
 		_, err = db.ExecContext(ctx, `INSERT INTO automation_nodes
 			(id, project_id, automation_id, version_id, node_key, name, node_type, role, config_json, position_x, position_y)
 			VALUES (?, ?, ?, ?, 'trigger', 'Trigger', 'trigger', 'schedule', ?, 10, 20),
@@ -617,7 +618,7 @@ func seedRetainedAutomationSchedule(t *testing.T, db *sql.DB, taskRepo *reposito
 	schedule := models.Schedule{TaskID: task.ID, RunAt: time.Now().UTC().Add(time.Hour), RepeatType: models.RepeatDaily,
 		RepeatInterval: 1, Enabled: false}
 	require.NoError(t, scheduleRepo.Create(ctx, &schedule))
-	nodeID := repository.NewID()
+	nodeID := persistence.NewID()
 	_, err := db.ExecContext(ctx, `INSERT INTO automation_nodes
 		(id, project_id, automation_id, version_id, node_key, name, node_type, role)
 		VALUES (?, ?, ?, ?, ?, ?, 'trigger', 'schedule')`, nodeID, projectID, automationID, versionID,
@@ -973,7 +974,7 @@ func TestAutomationRegistrationRejectsUnsupportedAdapterAndExclusiveTriggerReuse
 	for registerErr := range results {
 		if registerErr == nil {
 			successes++
-		} else if errors.Is(registerErr, repository.ErrAutomationTriggerOwned) {
+		} else if errors.Is(registerErr, persistence.ErrAutomationTriggerOwned) {
 			ownershipFailures++
 		} else {
 			t.Fatalf("unexpected concurrent registration error: %v", registerErr)
@@ -1864,7 +1865,7 @@ func BenchmarkAutomationCompilerSaveAgentResolution(b *testing.B) {
 			}
 			runSave := func(b *testing.B, saveCompiler *AutomationCompiler, saveCandidate models.AutomationDraftCandidate) {
 				b.Helper()
-				automationID := repository.NewID()
+				automationID := persistence.NewID()
 				request := AutomationSaveRequest{ProjectID: project.ID, AutomationID: automationID, Source: "manual", CreatedVia: "benchmark", Candidate: saveCandidate}
 				counter.SetEnabled(false)
 				if _, err := saveCompiler.SaveValidatedCandidate(ctx, request); err != nil {

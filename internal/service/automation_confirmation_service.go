@@ -14,13 +14,13 @@ import (
 
 	"github.com/openvibely/openvibely/internal/automationobs"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence"
 )
 
 const automationConfirmationTTL = 30 * time.Minute
 const automationConfirmationSecretSetting = "automation_confirmation_secret"
 
-func LoadOrCreateAutomationConfirmationSecret(ctx context.Context, settings *repository.SettingsRepo) ([]byte, error) {
+func LoadOrCreateAutomationConfirmationSecret(ctx context.Context, settings persistence.SettingsStore) ([]byte, error) {
 	if settings == nil {
 		return nil, errors.New("settings repository is unavailable")
 	}
@@ -42,8 +42,8 @@ func LoadOrCreateAutomationConfirmationSecret(ctx context.Context, settings *rep
 }
 
 type AutomationConfirmationService struct {
-	repo     *repository.AutomationRepo
-	execRepo *repository.ExecutionRepo
+	repo     persistence.AutomationStore
+	execRepo persistence.ExecutionStore
 	secret   []byte
 	now      func() time.Time
 }
@@ -87,7 +87,7 @@ func (s *AutomationConfirmationService) PrepareChatConfirmation(ctx context.Cont
 	if err != nil || planExecution == nil || planExecution.Status != models.ExecCompleted || !inputExecution.StartedAt.After(planExecution.StartedAt) {
 		return nil, errors.New("automation save requires a completed plan and later user input")
 	}
-	marker := repository.AutomationConfirmationInputMarker{InputID: inputID, TokenID: receipt.TokenID,
+	marker := persistence.AutomationConfirmationInputMarker{InputID: inputID, TokenID: receipt.TokenID,
 		ProjectID: projectID, PrincipalID: principalID, ThreadID: threadID, Method: "command"}
 	if err := s.repo.MarkAutomationConfirmationInput(ctx, marker); err != nil {
 		return nil, err
@@ -134,7 +134,7 @@ type AutomationChatConfirmation struct {
 	AutomationName        string
 }
 
-func NewAutomationConfirmationService(repo *repository.AutomationRepo, execRepo *repository.ExecutionRepo, secret []byte) *AutomationConfirmationService {
+func NewAutomationConfirmationService(repo persistence.AutomationStore, execRepo persistence.ExecutionStore, secret []byte) *AutomationConfirmationService {
 	return &AutomationConfirmationService{repo: repo, execRepo: execRepo, secret: append([]byte(nil), secret...), now: time.Now}
 }
 
@@ -149,7 +149,7 @@ func (s *AutomationConfirmationService) Issue(ctx context.Context, input Automat
 	if err != nil {
 		return "", err
 	}
-	tokenID := repository.NewID()
+	tokenID := persistence.NewID()
 	now := s.now().UTC()
 	receipt := &models.AutomationChatConfirmationReceipt{TokenID: tokenID, ProjectID: input.ProjectID,
 		PrincipalID: input.PrincipalID, ThreadID: input.ThreadID, PlanMessageID: input.PlanMessageID,
@@ -211,7 +211,7 @@ func (s *AutomationConfirmationService) ValidateChatConfirmation(ctx context.Con
 	if normalizeAutomationSaveCommand(confirmingExecution.PromptSent) != expected {
 		return "", fmt.Errorf("automation save requires the exact confirmation command %q", "save "+input.AutomationName)
 	}
-	marked, err := s.repo.HasAutomationConfirmationInput(ctx, repository.AutomationConfirmationInputMarker{
+	marked, err := s.repo.HasAutomationConfirmationInput(ctx, persistence.AutomationConfirmationInputMarker{
 		InputID: input.ConfirmingUserInputID, TokenID: tokenID, ProjectID: input.ProjectID,
 		PrincipalID: input.PrincipalID, ThreadID: input.ThreadID, Method: "command",
 	})

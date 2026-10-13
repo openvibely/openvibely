@@ -3,23 +3,17 @@ package repository
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 )
 
 type LLMConfigRepo struct {
 	db *sql.DB
 }
-
-var (
-	ErrLLMConfigNameRequired  = errors.New("Model name is required")
-	ErrLLMConfigNameDuplicate = errors.New("A model with that name already exists")
-	ErrLLMConfigModelRequired = errors.New("Model identifier is required")
-)
 
 func NewLLMConfigRepo(db *sql.DB) *LLMConfigRepo {
 	return &LLMConfigRepo{db: db}
@@ -142,7 +136,7 @@ func scanLLMConfig(row interface{ Scan(dest ...any) error }, a *models.LLMConfig
 func normalizeLLMConfigName(name string) (string, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
-		return "", ErrLLMConfigNameRequired
+		return "", persistence.ErrLLMConfigNameRequired
 	}
 	return name, nil
 }
@@ -151,13 +145,13 @@ func validateLLMConfigModel(a *models.LLMConfig) error {
 	switch a.Provider {
 	case models.ProviderAnthropic, models.ProviderOpenAI, models.ProviderOpenAICompatible, models.ProviderOllama:
 		if strings.TrimSpace(a.Model) == "" {
-			return ErrLLMConfigModelRequired
+			return persistence.ErrLLMConfigModelRequired
 		}
 	}
 	return nil
 }
 
-func validateLLMConfigNameAvailableTx(ctx context.Context, tx SQLExecutor, name, excludeID string) (string, error) {
+func validateLLMConfigNameAvailableTx(ctx context.Context, tx sqlExecutor, name, excludeID string) (string, error) {
 	normalized, err := normalizeLLMConfigName(name)
 	if err != nil {
 		return "", err
@@ -173,7 +167,7 @@ func validateLLMConfigNameAvailableTx(ctx context.Context, tx SQLExecutor, name,
 			return "", fmt.Errorf("scanning model config name: %w", err)
 		}
 		if id != excludeID && strings.EqualFold(strings.TrimSpace(existingName), normalized) {
-			return "", ErrLLMConfigNameDuplicate
+			return "", persistence.ErrLLMConfigNameDuplicate
 		}
 	}
 	if err := rows.Err(); err != nil {
@@ -246,16 +240,10 @@ func (r *LLMConfigRepo) ListRefreshableOAuth(ctx context.Context) ([]models.LLMC
 	return configs, rows.Err()
 }
 
-type UnrefreshableOpenAIOAuth struct {
-	models.LLMConfig
-	PrincipalHash     string
-	PrincipalVerified bool
-}
-
 // ListUnrefreshableOpenAIOAuth returns one representative model for legacy
 // Codex connections whose stored access JWT or previously verified principal
 // may still identify their owner.
-func (r *LLMConfigRepo) ListUnrefreshableOpenAIOAuth(ctx context.Context) ([]UnrefreshableOpenAIOAuth, error) {
+func (r *LLMConfigRepo) ListUnrefreshableOpenAIOAuth(ctx context.Context) ([]persistence.UnrefreshableOpenAIOAuth, error) {
 	rows, err := r.db.QueryContext(ctx,
 		`SELECT a.id, a.name, a.provider, a.model, a.auth_method,
 		        c.oauth_access_token, c.oauth_refresh_token, c.oauth_expires_at,
@@ -275,9 +263,9 @@ func (r *LLMConfigRepo) ListUnrefreshableOpenAIOAuth(ctx context.Context) ([]Unr
 		return nil, fmt.Errorf("listing unrefreshable OpenAI OAuth connections: %w", err)
 	}
 	defer rows.Close()
-	var configs []UnrefreshableOpenAIOAuth
+	var configs []persistence.UnrefreshableOpenAIOAuth
 	for rows.Next() {
-		var cfg UnrefreshableOpenAIOAuth
+		var cfg persistence.UnrefreshableOpenAIOAuth
 		if err := rows.Scan(&cfg.ID, &cfg.Name, &cfg.Provider, &cfg.Model, &cfg.AuthMethod,
 			&cfg.OAuthAccessToken, &cfg.OAuthRefreshToken, &cfg.OAuthExpiresAt,
 			&cfg.OAuthAccountID, &cfg.OAuthNeedsReauth, &cfg.OAuthConfigRevision, &cfg.OAuthConnectionID,
@@ -289,12 +277,6 @@ func (r *LLMConfigRepo) ListUnrefreshableOpenAIOAuth(ctx context.Context) ([]Unr
 	return configs, rows.Err()
 }
 
-type OAuthProviderPresence struct {
-	AnyOAuth       bool
-	AnthropicOAuth bool
-	OpenAIOAuth    bool
-}
-
 func (r *LLMConfigRepo) HasAny(ctx context.Context) (bool, error) {
 	var exists bool
 	err := r.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM agent_configs)`).Scan(&exists)
@@ -304,8 +286,8 @@ func (r *LLMConfigRepo) HasAny(ctx context.Context) (bool, error) {
 	return exists, nil
 }
 
-func (r *LLMConfigRepo) OAuthProviderPresence(ctx context.Context) (OAuthProviderPresence, error) {
-	var presence OAuthProviderPresence
+func (r *LLMConfigRepo) OAuthProviderPresence(ctx context.Context) (persistence.OAuthProviderPresence, error) {
+	var presence persistence.OAuthProviderPresence
 	err := r.db.QueryRowContext(ctx, `SELECT
 		COALESCE(MAX(auth_method = ? AND provider IN (?, ?, ?)), 0),
 		COALESCE(MAX(auth_method = ? AND provider = ?), 0),
@@ -316,7 +298,7 @@ func (r *LLMConfigRepo) OAuthProviderPresence(ctx context.Context) (OAuthProvide
 		models.AuthMethodOAuth, models.ProviderOpenAI,
 	).Scan(&presence.AnyOAuth, &presence.AnthropicOAuth, &presence.OpenAIOAuth)
 	if err != nil {
-		return OAuthProviderPresence{}, fmt.Errorf("checking OAuth provider presence: %w", err)
+		return persistence.OAuthProviderPresence{}, fmt.Errorf("checking OAuth provider presence: %w", err)
 	}
 	return presence, nil
 }
@@ -358,22 +340,11 @@ func (r *LLMConfigRepo) ListCards(ctx context.Context) ([]models.LLMConfig, erro
 	return configs, rows.Err()
 }
 
-// ListCardsPage returns one bounded, ordered Models-page projection. Search
-// matches the same visible card metadata as the browser card-search helper.
-type ModelCardListFilter struct {
-	Search     string
-	Provider   string
-	Default    *bool
-	AuthStatus string
-	Kind       string
-	Sort       string
-}
-
 func (r *LLMConfigRepo) ListCardsPage(ctx context.Context, limit, offset int, search string) ([]models.LLMConfig, error) {
-	return r.ListCardsPageFiltered(ctx, limit, offset, ModelCardListFilter{Search: search})
+	return r.ListCardsPageFiltered(ctx, limit, offset, persistence.ModelCardListFilter{Search: search})
 }
 
-func (r *LLMConfigRepo) ListCardsPageFiltered(ctx context.Context, limit, offset int, filter ModelCardListFilter) ([]models.LLMConfig, error) {
+func (r *LLMConfigRepo) ListCardsPageFiltered(ctx context.Context, limit, offset int, filter persistence.ModelCardListFilter) ([]models.LLMConfig, error) {
 	limit, offset = normalizeCardPageArgs(limit, offset)
 	query := `SELECT ` + llmConfigCardColumns + ` FROM agent_configs AS configs WHERE 1=1`
 	args := make([]any, 0, 8)
@@ -812,7 +783,7 @@ func (r *LLMConfigRepo) GetDefault(ctx context.Context) (*models.LLMConfig, erro
 	return &a, nil
 }
 
-func (r *LLMConfigRepo) ensureDefaultModelTx(ctx context.Context, tx SQLExecutor) error {
+func (r *LLMConfigRepo) ensureDefaultModelTx(ctx context.Context, tx sqlExecutor) error {
 	var total int
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM agent_configs`).Scan(&total); err != nil {
 		return fmt.Errorf("counting model configs: %w", err)
@@ -863,7 +834,7 @@ func (r *LLMConfigRepo) ensureDefaultModelTx(ctx context.Context, tx SQLExecutor
 	return nil
 }
 
-func (r *LLMConfigRepo) deleteWithTx(ctx context.Context, tx SQLExecutor, id string) error {
+func (r *LLMConfigRepo) deleteWithTx(ctx context.Context, tx sqlExecutor, id string) error {
 	// Nullify FK references in tasks and executions before deleting. Agent model
 	// overrides are legacy string references, so reset them in the same transaction
 	// rather than leaving a protected or reusable Agent pointed at a deleted config.

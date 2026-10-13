@@ -25,6 +25,7 @@ import (
 	"github.com/openvibely/openvibely/internal/config"
 	"github.com/openvibely/openvibely/internal/database"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/repository"
 	openaiclient "github.com/openvibely/openvibely/pkg/openai_client"
 )
@@ -54,47 +55,47 @@ func TestLogStartupOAuthWarningsPreservesWarningMatrix(t *testing.T) {
 	cases := []struct {
 		name     string
 		baseURL  string
-		presence repository.OAuthProviderPresence
+		presence persistence.OAuthProviderPresence
 		env      map[string]string
 		want     []string
 		deny     []string
 	}{
 		{
 			name:     "no OAuth models with missing APP_BASE_URL",
-			presence: repository.OAuthProviderPresence{},
+			presence: persistence.OAuthProviderPresence{},
 			deny:     []string{"APP_BASE_URL is not set", "ANTHROPIC_OAUTH_CLIENT_ID", "OPENAI_OAUTH_CLIENT_ID", "app base url configured"},
 		},
 		{
 			name:     "OpenAI-compatible OAuth only",
 			baseURL:  "https://app.example.com",
-			presence: repository.OAuthProviderPresence{AnyOAuth: true},
+			presence: persistence.OAuthProviderPresence{AnyOAuth: true},
 			want:     []string{"app base url configured for OAuth callbacks: https://app.example.com"},
 			deny:     []string{"ANTHROPIC_OAUTH_CLIENT_ID", "OPENAI_OAUTH_CLIENT_ID", "APP_BASE_URL is not set"},
 		},
 		{
 			name:     "Anthropic OAuth without client id",
 			baseURL:  "https://app.example.com",
-			presence: repository.OAuthProviderPresence{AnyOAuth: true, AnthropicOAuth: true},
+			presence: persistence.OAuthProviderPresence{AnyOAuth: true, AnthropicOAuth: true},
 			want:     []string{"app base url configured for OAuth callbacks: https://app.example.com", "warning: ANTHROPIC_OAUTH_CLIENT_ID not set"},
 			deny:     []string{"OPENAI_OAUTH_CLIENT_ID not set", "APP_BASE_URL is not set"},
 		},
 		{
 			name:     "OpenAI OAuth without client id",
 			baseURL:  "https://app.example.com",
-			presence: repository.OAuthProviderPresence{AnyOAuth: true, OpenAIOAuth: true},
+			presence: persistence.OAuthProviderPresence{AnyOAuth: true, OpenAIOAuth: true},
 			want:     []string{"app base url configured for OAuth callbacks: https://app.example.com", "warning: OPENAI_OAUTH_CLIENT_ID not set"},
 			deny:     []string{"ANTHROPIC_OAUTH_CLIENT_ID not set", "APP_BASE_URL is not set"},
 		},
 		{
 			name:     "missing APP_BASE_URL with OAuth provider",
-			presence: repository.OAuthProviderPresence{AnyOAuth: true, AnthropicOAuth: true, OpenAIOAuth: true},
+			presence: persistence.OAuthProviderPresence{AnyOAuth: true, AnthropicOAuth: true, OpenAIOAuth: true},
 			want:     []string{"warning: APP_BASE_URL is not set while OAuth models are configured"},
 			deny:     []string{"app base url configured", "ANTHROPIC_OAUTH_CLIENT_ID", "OPENAI_OAUTH_CLIENT_ID"},
 		},
 		{
 			name:     "provider client ids suppress warnings",
 			baseURL:  "https://app.example.com",
-			presence: repository.OAuthProviderPresence{AnyOAuth: true, AnthropicOAuth: true, OpenAIOAuth: true},
+			presence: persistence.OAuthProviderPresence{AnyOAuth: true, AnthropicOAuth: true, OpenAIOAuth: true},
 			env:      map[string]string{"ANTHROPIC_OAUTH_CLIENT_ID": "anthropic-client", "OPENAI_OAUTH_CLIENT_ID": "openai-client"},
 			want:     []string{"app base url configured for OAuth callbacks: https://app.example.com"},
 			deny:     []string{"ANTHROPIC_OAUTH_CLIENT_ID not set", "OPENAI_OAUTH_CLIENT_ID not set", "APP_BASE_URL is not set"},
@@ -556,7 +557,7 @@ func TestStart_ClosesSplitDatabaseAfterConfirmationSecretFailure(t *testing.T) {
 			unregister()
 		}
 	}
-	loadAutomationConfirmationSecret = func(context.Context, *repository.SettingsRepo) ([]byte, error) {
+	loadAutomationConfirmationSecret = func(context.Context, persistence.SettingsStore) ([]byte, error) {
 		return nil, errors.New("forced confirmation secret failure")
 	}
 

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/testutil"
 )
 
@@ -67,7 +68,7 @@ func TestLLMConfigRepoRejectsBlankRunnableModelSlug(t *testing.T) {
 				t.Fatalf("list before create: %v", err)
 			}
 			cfg := &models.LLMConfig{Name: "Blank " + tt.name, Provider: tt.provider, AuthMethod: models.AuthMethodAPIKey, Model: " \t\n "}
-			if err := repo.Create(ctx, cfg); err != ErrLLMConfigModelRequired {
+			if err := repo.Create(ctx, cfg); err != persistence.ErrLLMConfigModelRequired {
 				t.Fatalf("expected ErrLLMConfigModelRequired, got %v", err)
 			}
 			after, err := repo.List(ctx)
@@ -84,7 +85,7 @@ func TestLLMConfigRepoRejectsBlankRunnableModelSlug(t *testing.T) {
 				t.Fatalf("create existing: %v", err)
 			}
 			cfg.Model = ""
-			if err := repo.Update(ctx, cfg); err != ErrLLMConfigModelRequired {
+			if err := repo.Update(ctx, cfg); err != persistence.ErrLLMConfigModelRequired {
 				t.Fatalf("expected ErrLLMConfigModelRequired, got %v", err)
 			}
 			updated, err := repo.GetByID(ctx, cfg.ID)
@@ -106,7 +107,7 @@ func TestLLMConfigRepo_OAuthProviderPresenceUsesCompactAggregate(t *testing.T) {
 		t.Fatalf("clear model configs: %v", err)
 	}
 
-	assertPresence := func(name string, want OAuthProviderPresence) {
+	assertPresence := func(name string, want persistence.OAuthProviderPresence) {
 		t.Helper()
 		counter.Reset()
 		counter.SetEnabled(true)
@@ -121,7 +122,7 @@ func TestLLMConfigRepo_OAuthProviderPresenceUsesCompactAggregate(t *testing.T) {
 		assertOAuthProviderPresenceStatement(t, counter.Statements())
 	}
 
-	assertPresence("empty", OAuthProviderPresence{})
+	assertPresence("empty", persistence.OAuthProviderPresence{})
 
 	for i, cfg := range []*models.LLMConfig{
 		{Name: "Anthropic API Key", Provider: models.ProviderAnthropic, AuthMethod: models.AuthMethodAPIKey, Model: "claude-sonnet"},
@@ -132,25 +133,25 @@ func TestLLMConfigRepo_OAuthProviderPresenceUsesCompactAggregate(t *testing.T) {
 			t.Fatalf("create non-oauth config %d: %v", i, err)
 		}
 	}
-	assertPresence("non oauth rows", OAuthProviderPresence{})
+	assertPresence("non oauth rows", persistence.OAuthProviderPresence{})
 
 	compatible := &models.LLMConfig{Name: "Compatible OAuth", Provider: models.ProviderOpenAICompatible, AuthMethod: models.AuthMethodOAuth, Model: "custom-model"}
 	if err := repo.Create(ctx, compatible); err != nil {
 		t.Fatalf("create compatible oauth: %v", err)
 	}
-	assertPresence("compatible oauth", OAuthProviderPresence{AnyOAuth: true})
+	assertPresence("compatible oauth", persistence.OAuthProviderPresence{AnyOAuth: true})
 
 	anthropic := &models.LLMConfig{Name: "Anthropic OAuth", Provider: models.ProviderAnthropic, AuthMethod: models.AuthMethodOAuth, Model: "claude-sonnet"}
 	if err := repo.Create(ctx, anthropic); err != nil {
 		t.Fatalf("create anthropic oauth: %v", err)
 	}
-	assertPresence("anthropic oauth", OAuthProviderPresence{AnyOAuth: true, AnthropicOAuth: true})
+	assertPresence("anthropic oauth", persistence.OAuthProviderPresence{AnyOAuth: true, AnthropicOAuth: true})
 
 	openai := &models.LLMConfig{Name: "OpenAI OAuth", Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodOAuth, Model: "gpt-test"}
 	if err := repo.Create(ctx, openai); err != nil {
 		t.Fatalf("create openai oauth: %v", err)
 	}
-	assertPresence("openai oauth", OAuthProviderPresence{AnyOAuth: true, AnthropicOAuth: true, OpenAIOAuth: true})
+	assertPresence("openai oauth", persistence.OAuthProviderPresence{AnyOAuth: true, AnthropicOAuth: true, OpenAIOAuth: true})
 }
 
 func assertOAuthProviderPresenceStatement(t *testing.T, statements []string) {
@@ -212,7 +213,7 @@ func TestLLMConfigRepo_OAuthProviderPresenceUsesCompactLargeFixtureQuery(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	if presence != (OAuthProviderPresence{AnyOAuth: true, AnthropicOAuth: true, OpenAIOAuth: true}) {
+	if presence != (persistence.OAuthProviderPresence{AnyOAuth: true, AnthropicOAuth: true, OpenAIOAuth: true}) {
 		t.Fatalf("presence = %#v", presence)
 	}
 	assertOAuthProviderPresenceStatement(t, counter.Statements())
@@ -243,7 +244,7 @@ func BenchmarkLLMConfigRepoStartupOAuthProviderPresence(b *testing.B) {
 					b.Fatal(err)
 				}
 				if count == 0 {
-					if presence != (OAuthProviderPresence{}) {
+					if presence != (persistence.OAuthProviderPresence{}) {
 						b.Fatalf("expected empty presence, got %#v", presence)
 					}
 				} else if !presence.AnyOAuth {

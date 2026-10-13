@@ -12,7 +12,7 @@ import (
 
 	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence"
 )
 
 // ErrReauthenticationRequired marks a refresh-token failure that cannot recover
@@ -42,13 +42,13 @@ type refreshCall struct {
 // selected model and serializes refresh-token rotation in-process and across
 // processes at the linked connection boundary.
 type Manager struct {
-	repo *repository.LLMConfigRepo
+	repo persistence.LLMConfigStore
 
 	mu       sync.Mutex
 	inFlight map[string]*refreshCall
 }
 
-func NewManager(repo *repository.LLMConfigRepo) *Manager {
+func NewManager(repo persistence.LLMConfigStore) *Manager {
 	return &Manager{repo: repo, inFlight: make(map[string]*refreshCall)}
 }
 

@@ -8,7 +8,7 @@ import (
 
 	"github.com/openvibely/openvibely/internal/chatcontrol"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence"
 )
 
 // PersonalityInfo holds display information for a personality option.
@@ -30,8 +30,8 @@ type CustomPersonalitySaveInput struct {
 
 type CustomPersonalitySaveOptions struct {
 	Input                 json.RawMessage
-	CustomPersonalityRepo *repository.CustomPersonalityRepo
-	SettingsRepo          *repository.SettingsRepo
+	CustomPersonalityRepo persistence.CustomPersonalityStore
+	SettingsRepo          persistence.SettingsStore
 }
 
 type customPersonalitySaveResponse struct {
@@ -137,7 +137,7 @@ type personalityListRequest struct {
 
 // AllPersonalitiesWithCustom returns presets merged with custom personalities from the database.
 // Custom personalities appear after the presets. Prefer ListPersonalitiesRuntimePage for Chat tools.
-func AllPersonalitiesWithCustom(ctx context.Context, repo *repository.CustomPersonalityRepo) []PersonalityInfo {
+func AllPersonalitiesWithCustom(ctx context.Context, repo persistence.CustomPersonalityStore) []PersonalityInfo {
 	result := presetPersonalities()
 	if repo == nil {
 		return result
@@ -188,7 +188,7 @@ func PersonalityListPageArgs(input json.RawMessage) (int, int, error) {
 // ListPersonalitiesRuntimePage returns one combined page: built-in presets first,
 // then custom personalities by name. Custom rows are fetched with LIMIT/OFFSET so
 // a large catalog is not fully materialized.
-func ListPersonalitiesRuntimePage(ctx context.Context, repo *repository.CustomPersonalityRepo, limit, offset int) (PersonalityListPage, error) {
+func ListPersonalitiesRuntimePage(ctx context.Context, repo persistence.CustomPersonalityStore, limit, offset int) (PersonalityListPage, error) {
 	if limit < 1 || limit > PersonalityListMaxLimit || offset < 0 {
 		return PersonalityListPage{}, fmt.Errorf("limit must be 1-50 and offset must be non-negative")
 	}
@@ -311,7 +311,7 @@ func FormatPersonalityListPage(page PersonalityListPage, current string, markdow
 }
 
 // ExecuteListPersonalitiesTool lists one bounded personality page for Chat runtimes.
-func ExecuteListPersonalitiesTool(ctx context.Context, customRepo *repository.CustomPersonalityRepo, settingsRepo *repository.SettingsRepo, input json.RawMessage, markdown bool) (string, error) {
+func ExecuteListPersonalitiesTool(ctx context.Context, customRepo persistence.CustomPersonalityStore, settingsRepo persistence.SettingsStore, input json.RawMessage, markdown bool) (string, error) {
 	limit, offset, err := PersonalityListPageArgs(input)
 	if err != nil {
 		return "", err
@@ -347,7 +347,7 @@ func IsPresetPersonality(key string) bool {
 
 // FindPersonality returns the matching built-in or custom personality for an exact key.
 // Custom keys use GetByKey so a large catalog is not fully listed.
-func FindPersonality(ctx context.Context, key string, repo *repository.CustomPersonalityRepo) (PersonalityInfo, bool) {
+func FindPersonality(ctx context.Context, key string, repo persistence.CustomPersonalityStore) (PersonalityInfo, bool) {
 	for _, personality := range presetPersonalities() {
 		if personality.Key == key {
 			return personality, true
@@ -364,7 +364,7 @@ func FindPersonality(ctx context.Context, key string, repo *repository.CustomPer
 }
 
 // IsAvailablePersonalityKey reports whether key is empty/default, a built-in preset, or an existing custom personality.
-func IsAvailablePersonalityKey(ctx context.Context, key string, repo *repository.CustomPersonalityRepo) bool {
+func IsAvailablePersonalityKey(ctx context.Context, key string, repo persistence.CustomPersonalityStore) bool {
 	_, ok := FindPersonality(ctx, key, repo)
 	return ok
 }
@@ -500,7 +500,7 @@ func GetPersonalityPrompt(personality string) string {
 }
 
 // GetPersonalityPromptWithCustom checks custom personalities first, then falls back to presets.
-func GetPersonalityPromptWithCustom(ctx context.Context, personality string, repo *repository.CustomPersonalityRepo) string {
+func GetPersonalityPromptWithCustom(ctx context.Context, personality string, repo persistence.CustomPersonalityStore) string {
 	if personality == "" {
 		return ""
 	}

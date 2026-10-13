@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 )
 
 func (r *AutomationRepo) CreateAutomationConfirmationReceipt(ctx context.Context, receipt *models.AutomationChatConfirmationReceipt) error {
@@ -63,16 +64,7 @@ func (r *AutomationRepo) GetPendingAutomationConfirmation(ctx context.Context, p
 	return receipt, automationName, err
 }
 
-type AutomationConfirmationInputMarker struct {
-	InputID     string
-	TokenID     string
-	ProjectID   string
-	PrincipalID string
-	ThreadID    string
-	Method      string
-}
-
-func (r *AutomationRepo) MarkAutomationConfirmationInput(ctx context.Context, marker AutomationConfirmationInputMarker) error {
+func (r *AutomationRepo) MarkAutomationConfirmationInput(ctx context.Context, marker persistence.AutomationConfirmationInputMarker) error {
 	_, err := execBoundSQLite(ctx, r.db, `INSERT INTO automation_chat_confirmation_inputs
 		(input_id, token_id, project_id, principal_id, thread_id, confirmation_method)
 		SELECT ?, r.token_id, r.project_id, r.principal_id, r.thread_id, ?
@@ -97,7 +89,7 @@ func (r *AutomationRepo) MarkAutomationConfirmationInput(ctx context.Context, ma
 	return nil
 }
 
-func (r *AutomationRepo) HasAutomationConfirmationInput(ctx context.Context, marker AutomationConfirmationInputMarker) (bool, error) {
+func (r *AutomationRepo) HasAutomationConfirmationInput(ctx context.Context, marker persistence.AutomationConfirmationInputMarker) (bool, error) {
 	var count int
 	err := r.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM automation_chat_confirmation_inputs
 		WHERE input_id = ? AND token_id = ? AND project_id = ? AND principal_id = ? AND thread_id = ?

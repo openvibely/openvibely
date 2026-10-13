@@ -81,7 +81,7 @@ func TestAsyncRuntimeToolCallbacksRecoverAndTerminalizeDurableRows(t *testing.T)
 	stale := create("call_stale", "list_tasks", now.Add(time.Hour))
 	expired := create("call_expired", "memory_view", now.Add(-time.Minute))
 
-	adapter := &Adapter{execRepo: repository.NewExecutionRepo(db)}
+	adapter := &Adapter{execRepo: repository.NewExecutionRepo(db), asyncToolCalls: repo}
 	var executed []string
 	callbacks, err := adapter.asyncRuntimeToolCallbacks(ctx, projectID, execID, true,
 		[]openaiclient.ToolDefinition{{Type: "function", Name: "memory_view", Async: true}},

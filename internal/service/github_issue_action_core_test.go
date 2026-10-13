@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence"
 )
 
 type fakeGitHubIssueActionProvider struct {
@@ -88,7 +88,7 @@ func (f fakeGitHubIssueAuthorizationStore) IsActorAuthorized(_ context.Context, 
 	if f.authorized == nil {
 		return true, nil
 	}
-	return f.authorized[repository.NormalizeGitHubLogin(login)], nil
+	return f.authorized[persistence.NormalizeGitHubLogin(login)], nil
 }
 
 func TestGitHubIssueActionCoreCommonActionsAndAssignedIssuePostprocessing(t *testing.T) {

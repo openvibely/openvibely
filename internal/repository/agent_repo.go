@@ -7,19 +7,14 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 )
 
 type AgentRepo struct {
 	db *sql.DB
 }
-
-var (
-	ErrAgentNameRequired                = errors.New("agent name is required")
-	ErrSelectableAgentNameAlreadyExists = errors.New("enabled selectable primary agent name already exists")
-)
 
 func NewAgentRepo(db *sql.DB) *AgentRepo {
 	return &AgentRepo{db: db}
@@ -34,87 +29,14 @@ const agentColumns = `id, name, description, system_prompt, model, tools, tool_c
 	`COALESCE(source_refs_json, '[]'), archived_at, ` +
 	`created_at, updated_at`
 
-// AgentRuntimeSummary is the compact projection needed by runtime list_agents.
-type AgentRuntimeSummary struct {
-	Name           string
-	Description    string
-	Model          string
-	SkillCount     int
-	MCPServerCount int
-}
-
-// AgentPickerOption is the compact projection needed by settings pickers that
-// render only an agent identifier and display name.
-type AgentPickerOption struct {
-	ID   string
-	Name string
-}
-
-// AgentScheduleOption is the compact projection needed by the Schedule primary
-// Agent selector. Availability is enforced by ListScheduleOptions; this type
-// contains only the display fields rendered by the selector.
-type AgentScheduleOption struct {
-	ID    string
-	Name  string
-	Model string
-}
-
-// AgentTaskUIOption is the compact Agent projection shared by Task board badges
-// and Task create/edit selectors. It preserves scalar availability state without
-// hydrating private prompt, tool, plugin, MCP, skill, or default configuration.
-type AgentTaskUIOption struct {
-	ID                  string
-	Name                string
-	Model               string
-	Scope               models.AgentScope
-	ProjectID           string
-	SelectableAsPrimary bool
-	Enabled             bool
-	GeneratedStatus     models.AgentGeneratedStatus
-	ArchivedAt          *time.Time
-}
-
-// AgentSelectableReference is the compact identity and project-scope projection
-// used when validating Automation Agent references.
-type AgentSelectableReference struct {
-	ID        string
-	Key       string
-	ProjectID string
-}
-
-// AgentSkillCatalogRef is the compact projection needed to discover agent-owned
-// skill catalogs without hydrating prompt/config/plugin/skill JSON fields.
-type AgentSkillCatalogRef struct {
-	ID        string
-	Key       string
-	ProjectID string
-}
-
-// AgentListSummary is the compact projection needed by the lifecycle agent_list
-// inspector. It excludes full prompt, model, tool, plugin, MCP, permission,
-// model-default, source-reference, and timestamp fields. Skill names are
-// extracted in SQL so skill descriptions and content are never decoded here.
-type AgentListSummary struct {
-	Key                 string
-	Name                string
-	Description         string
-	Scope               models.AgentScope
-	SelectableAsPrimary bool
-	Enabled             bool
-	GeneratedStatus     models.AgentGeneratedStatus
-	SystemKind          string
-	ArchivedAt          *time.Time
-	AttachedSkillNames  []string
-}
-
 const agentScheduleOptionColumns = `id, name, model`
 const agentTaskUIOptionColumns = `id, name, model, COALESCE(scope, 'global'), COALESCE(project_id, ''), ` +
 	`COALESCE(selectable_as_primary, 1), COALESCE(enabled, 1), ` +
 	`COALESCE(generated_status, 'user_edited'), archived_at`
 const agentSelectableReferenceColumns = `id, COALESCE(key, ''), COALESCE(project_id, '')`
 
-func scanAgentTaskUIOption(row interface{ Scan(dest ...any) error }) (*AgentTaskUIOption, error) {
-	var option AgentTaskUIOption
+func scanAgentTaskUIOption(row interface{ Scan(dest ...any) error }) (*persistence.AgentTaskUIOption, error) {
+	var option persistence.AgentTaskUIOption
 	var (
 		scope, generatedStatus    string
 		selectableInt, enabledInt int
@@ -137,8 +59,8 @@ func scanAgentTaskUIOption(row interface{ Scan(dest ...any) error }) (*AgentTask
 	return &option, nil
 }
 
-func scanAgentScheduleOption(row interface{ Scan(dest ...any) error }) (*AgentScheduleOption, error) {
-	var option AgentScheduleOption
+func scanAgentScheduleOption(row interface{ Scan(dest ...any) error }) (*persistence.AgentScheduleOption, error) {
+	var option persistence.AgentScheduleOption
 	if err := row.Scan(&option.ID, &option.Name, &option.Model); err != nil {
 		return nil, err
 	}
@@ -173,8 +95,8 @@ const agentListSummaryColumns = `COALESCE(key, ''), name, description, COALESCE(
 	`ORDER BY CAST(skill.key AS INTEGER)` +
 	`)), '[]')`
 
-func scanAgentListSummary(row interface{ Scan(dest ...any) error }) (*AgentListSummary, error) {
-	var summary AgentListSummary
+func scanAgentListSummary(row interface{ Scan(dest ...any) error }) (*persistence.AgentListSummary, error) {
+	var summary persistence.AgentListSummary
 	var (
 		scope, generatedStatus, skillNamesJSON string
 		selectableInt, enabledInt              int
@@ -316,7 +238,7 @@ func (r *AgentRepo) normalizeAndValidateAgentName(ctx context.Context, a *models
 	}
 	a.Name = strings.TrimSpace(a.Name)
 	if a.Name == "" {
-		return ErrAgentNameRequired
+		return persistence.ErrAgentNameRequired
 	}
 	if !a.Enabled || !a.SelectableAsPrimary {
 		return nil
@@ -336,7 +258,7 @@ func (r *AgentRepo) normalizeAndValidateAgentName(ctx context.Context, a *models
 	}
 	defer rows.Close()
 	if rows.Next() {
-		return ErrSelectableAgentNameAlreadyExists
+		return persistence.ErrSelectableAgentNameAlreadyExists
 	}
 	if err := rows.Err(); err != nil {
 		return fmt.Errorf("checking agent name uniqueness: %w", err)
@@ -360,7 +282,7 @@ func (r *AgentRepo) List(ctx context.Context) ([]models.Agent, error) {
 // ListTaskUIOptions returns the scalar Agent catalog needed by Task board and
 // Task create/edit renders. It intentionally retains disabled, non-selectable,
 // and archived-at rows so handlers can preserve current-assignment semantics.
-func (r *AgentRepo) ListTaskUIOptions(ctx context.Context) ([]AgentTaskUIOption, error) {
+func (r *AgentRepo) ListTaskUIOptions(ctx context.Context) ([]persistence.AgentTaskUIOption, error) {
 	rows, err := r.db.QueryContext(ctx, `SELECT `+agentTaskUIOptionColumns+` FROM agents
 		WHERE COALESCE(generated_status, 'user_edited') <> 'archived'
 		ORDER BY name ASC`)
@@ -369,7 +291,7 @@ func (r *AgentRepo) ListTaskUIOptions(ctx context.Context) ([]AgentTaskUIOption,
 	}
 	defer rows.Close()
 
-	var options []AgentTaskUIOption
+	var options []persistence.AgentTaskUIOption
 	for rows.Next() {
 		option, err := scanAgentTaskUIOption(rows)
 		if err != nil {
@@ -382,7 +304,7 @@ func (r *AgentRepo) ListTaskUIOptions(ctx context.Context) ([]AgentTaskUIOption,
 
 // ListScheduleOptions returns active primary-Agent options available to a
 // project without selecting or hydrating the Agent's rich configuration.
-func (r *AgentRepo) ListScheduleOptions(ctx context.Context, projectID string) ([]AgentScheduleOption, error) {
+func (r *AgentRepo) ListScheduleOptions(ctx context.Context, projectID string) ([]persistence.AgentScheduleOption, error) {
 	rows, err := r.db.QueryContext(ctx, `SELECT `+agentScheduleOptionColumns+` FROM agents
 		WHERE COALESCE(generated_status, 'user_edited') <> 'archived'
 		  AND archived_at IS NULL
@@ -398,7 +320,7 @@ func (r *AgentRepo) ListScheduleOptions(ctx context.Context, projectID string) (
 	}
 	defer rows.Close()
 
-	var options []AgentScheduleOption
+	var options []persistence.AgentScheduleOption
 	for rows.Next() {
 		option, err := scanAgentScheduleOption(rows)
 		if err != nil {
@@ -412,14 +334,14 @@ func (r *AgentRepo) ListScheduleOptions(ctx context.Context, projectID string) (
 // ListAgentListSummaries returns the prompt-safe lifecycle agent_list projection.
 // It keeps filtering metadata needed by the inspector while avoiding full Agent
 // hydration and decoding only the attached skill names.
-func (r *AgentRepo) ListAgentListSummaries(ctx context.Context) ([]AgentListSummary, error) {
+func (r *AgentRepo) ListAgentListSummaries(ctx context.Context) ([]persistence.AgentListSummary, error) {
 	rows, err := r.db.QueryContext(ctx, `SELECT `+agentListSummaryColumns+` FROM agents WHERE COALESCE(generated_status, 'user_edited') <> 'archived' ORDER BY name ASC`)
 	if err != nil {
 		return nil, fmt.Errorf("listing agent list summaries: %w", err)
 	}
 	defer rows.Close()
 
-	var summaries []AgentListSummary
+	var summaries []persistence.AgentListSummary
 	for rows.Next() {
 		summary, err := scanAgentListSummary(rows)
 		if err != nil {
@@ -430,23 +352,11 @@ func (r *AgentRepo) ListAgentListSummaries(ctx context.Context) ([]AgentListSumm
 	return summaries, rows.Err()
 }
 
-// ListPage returns one bounded Models-page-compatible agent projection. The
-// Agents card currently carries its edit metadata, so this method retains the
-// existing row shape while bounding both the result count and response HTML.
-type AgentPageFilter struct {
-	ProjectID string
-	Search    string
-	Enabled   *bool
-	Scope     string
-	Origin    string
-	Sort      string
-}
-
 func (r *AgentRepo) ListPage(ctx context.Context, limit, offset int, search string) ([]models.Agent, error) {
-	return r.ListPageFiltered(ctx, limit, offset, AgentPageFilter{Search: search})
+	return r.ListPageFiltered(ctx, limit, offset, persistence.AgentPageFilter{Search: search})
 }
 
-func (r *AgentRepo) ListPageFiltered(ctx context.Context, limit, offset int, filter AgentPageFilter) ([]models.Agent, error) {
+func (r *AgentRepo) ListPageFiltered(ctx context.Context, limit, offset int, filter persistence.AgentPageFilter) ([]models.Agent, error) {
 	limit, offset = normalizeCardPageArgs(limit, offset)
 	query, args := buildAgentPageFilteredQuery(limit, offset, filter)
 	rows, err := r.db.QueryContext(ctx, query, args...)
@@ -466,7 +376,7 @@ func (r *AgentRepo) ListPageFiltered(ctx context.Context, limit, offset int, fil
 	return agents, rows.Err()
 }
 
-func buildAgentPageFilteredQuery(limit, offset int, filter AgentPageFilter) (string, []any) {
+func buildAgentPageFilteredQuery(limit, offset int, filter persistence.AgentPageFilter) (string, []any) {
 	query := `SELECT ` + agentColumns + ` FROM agents WHERE COALESCE(generated_status, 'user_edited') <> 'archived'`
 	args := make([]any, 0, 4)
 	if projectID := strings.TrimSpace(filter.ProjectID); projectID != "" {
@@ -540,7 +450,7 @@ func (r *AgentRepo) ListChatAssignableDefinitions(ctx context.Context) ([]models
 	return agents, rows.Err()
 }
 
-func (r *AgentRepo) ListRuntimeSummaries(ctx context.Context) ([]AgentRuntimeSummary, error) {
+func (r *AgentRepo) ListRuntimeSummaries(ctx context.Context) ([]persistence.AgentRuntimeSummary, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT name, description, model,
 		       COALESCE(json_array_length(skills), 0) AS skill_count,
@@ -553,9 +463,9 @@ func (r *AgentRepo) ListRuntimeSummaries(ctx context.Context) ([]AgentRuntimeSum
 	}
 	defer rows.Close()
 
-	var summaries []AgentRuntimeSummary
+	var summaries []persistence.AgentRuntimeSummary
 	for rows.Next() {
-		var summary AgentRuntimeSummary
+		var summary persistence.AgentRuntimeSummary
 		if err := rows.Scan(&summary.Name, &summary.Description, &summary.Model, &summary.SkillCount, &summary.MCPServerCount); err != nil {
 			return nil, fmt.Errorf("scanning runtime agent summary: %w", err)
 		}
@@ -567,12 +477,12 @@ func (r *AgentRepo) ListRuntimeSummaries(ctx context.Context) ([]AgentRuntimeSum
 // GetTaskDetailAgentLabel returns the identity needed by the recurring Task Detail
 // status fragment. The assigned agent must still be live and available to the
 // task's project, but no full Agent configuration is selected or hydrated.
-func (r *AgentRepo) GetTaskDetailAgentLabel(ctx context.Context, projectID, agentID string) (*AgentPickerOption, error) {
+func (r *AgentRepo) GetTaskDetailAgentLabel(ctx context.Context, projectID, agentID string) (*persistence.AgentPickerOption, error) {
 	if agentID == "" {
 		return nil, nil
 	}
 
-	var option AgentPickerOption
+	var option persistence.AgentPickerOption
 	err := r.db.QueryRowContext(ctx, `
 		SELECT id, name
 		FROM agents
@@ -592,7 +502,7 @@ func (r *AgentRepo) GetTaskDetailAgentLabel(ctx context.Context, projectID, agen
 	return &option, nil
 }
 
-func (r *AgentRepo) ListPickerOptions(ctx context.Context) ([]AgentPickerOption, error) {
+func (r *AgentRepo) ListPickerOptions(ctx context.Context) ([]persistence.AgentPickerOption, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, name
 		FROM agents
@@ -603,9 +513,9 @@ func (r *AgentRepo) ListPickerOptions(ctx context.Context) ([]AgentPickerOption,
 	}
 	defer rows.Close()
 
-	var options []AgentPickerOption
+	var options []persistence.AgentPickerOption
 	for rows.Next() {
-		var option AgentPickerOption
+		var option persistence.AgentPickerOption
 		if err := rows.Scan(&option.ID, &option.Name); err != nil {
 			return nil, fmt.Errorf("scanning agent picker option: %w", err)
 		}
@@ -617,7 +527,7 @@ func (r *AgentRepo) ListPickerOptions(ctx context.Context) ([]AgentPickerOption,
 // ListPickerOptionsForProject returns compact options for global agents and
 // project-scoped agents owned by projectID. It intentionally keeps the picker
 // projection small because the settings page only needs IDs and names.
-func (r *AgentRepo) ListPickerOptionsForProject(ctx context.Context, projectID string) ([]AgentPickerOption, error) {
+func (r *AgentRepo) ListPickerOptionsForProject(ctx context.Context, projectID string) ([]persistence.AgentPickerOption, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, name
 		FROM agents
@@ -632,9 +542,9 @@ func (r *AgentRepo) ListPickerOptionsForProject(ctx context.Context, projectID s
 	}
 	defer rows.Close()
 
-	var options []AgentPickerOption
+	var options []persistence.AgentPickerOption
 	for rows.Next() {
-		var option AgentPickerOption
+		var option persistence.AgentPickerOption
 		if err := rows.Scan(&option.ID, &option.Name); err != nil {
 			return nil, fmt.Errorf("scanning project agent picker option: %w", err)
 		}
@@ -643,7 +553,7 @@ func (r *AgentRepo) ListPickerOptionsForProject(ctx context.Context, projectID s
 	return options, rows.Err()
 }
 
-func (r *AgentRepo) ListSkillCatalogRefs(ctx context.Context) ([]AgentSkillCatalogRef, error) {
+func (r *AgentRepo) ListSkillCatalogRefs(ctx context.Context) ([]persistence.AgentSkillCatalogRef, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, COALESCE(key, ''), project_id
 		FROM agents
@@ -654,9 +564,9 @@ func (r *AgentRepo) ListSkillCatalogRefs(ctx context.Context) ([]AgentSkillCatal
 	}
 	defer rows.Close()
 
-	var refs []AgentSkillCatalogRef
+	var refs []persistence.AgentSkillCatalogRef
 	for rows.Next() {
-		var ref AgentSkillCatalogRef
+		var ref persistence.AgentSkillCatalogRef
 		var projectID sql.NullString
 		if err := rows.Scan(&ref.ID, &ref.Key, &projectID); err != nil {
 			return nil, fmt.Errorf("scanning agent skill catalog ref: %w", err)
@@ -672,7 +582,7 @@ func (r *AgentRepo) ListSkillCatalogRefs(ctx context.Context) ([]AgentSkillCatal
 // ListSelectableReferencesForProject returns the bounded identity set used by
 // Automation validation. It intentionally omits every full Agent configuration
 // field because validation only matches key/ID and project scope.
-func (r *AgentRepo) ListSelectableReferencesForProject(ctx context.Context, projectID string, limit int) ([]AgentSelectableReference, error) {
+func (r *AgentRepo) ListSelectableReferencesForProject(ctx context.Context, projectID string, limit int) ([]persistence.AgentSelectableReference, error) {
 	if limit <= 0 || limit > 100 {
 		limit = 50
 	}
@@ -687,9 +597,9 @@ func (r *AgentRepo) ListSelectableReferencesForProject(ctx context.Context, proj
 	}
 	defer rows.Close()
 
-	var references []AgentSelectableReference
+	var references []persistence.AgentSelectableReference
 	for rows.Next() {
-		var reference AgentSelectableReference
+		var reference persistence.AgentSelectableReference
 		if err := rows.Scan(&reference.ID, &reference.Key, &reference.ProjectID); err != nil {
 			return nil, fmt.Errorf("scanning selectable project agent reference: %w", err)
 		}

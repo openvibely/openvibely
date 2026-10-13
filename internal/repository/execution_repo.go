@@ -12,6 +12,7 @@ import (
 	"github.com/openvibely/openvibely/internal/applog"
 	llmtranscript "github.com/openvibely/openvibely/internal/llm/transcript"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 )
 
 type ExecutionRepo struct {
@@ -281,17 +282,25 @@ func (r *ExecutionRepo) Create(ctx context.Context, e *models.Execution) error {
 	}
 	defer unlockParent()
 	if e.IsFollowup {
-		return withImmediateTx(ctx, r.db, func(exec SQLExecutor) error {
-			return r.CreateWithExecutor(ctx, exec, e)
+		return withImmediateTx(ctx, r.db, func(exec sqlExecutor) error {
+			return createExecutionWithExecutor(ctx, exec, e)
 		})
 	}
 	return withBoundSQLiteConn(ctx, r.db, func(conn *sql.Conn) error {
-		return r.CreateWithExecutor(ctx, conn, e)
+		return createExecutionWithExecutor(ctx, conn, e)
 	})
 }
 
-// CreateWithExecutor persists an execution using the caller's transaction.
-func (r *ExecutionRepo) CreateWithExecutor(ctx context.Context, exec SQLExecutor, e *models.Execution) error {
+// CreateInTx persists an execution using the caller's store transaction.
+func (r *ExecutionRepo) CreateInTx(ctx context.Context, tx persistence.Tx, e *models.Execution) error {
+	exec, err := executorFromTx(tx)
+	if err != nil {
+		return err
+	}
+	return createExecutionWithExecutor(ctx, exec, e)
+}
+
+func createExecutionWithExecutor(ctx context.Context, exec sqlExecutor, e *models.Execution) error {
 	isFollowup := 0
 	if e.IsFollowup {
 		isFollowup = 1
@@ -354,20 +363,20 @@ func (r *ExecutionRepo) CreateDirectTaskFollowupOrQueue(ctx context.Context, e *
 		return false, err
 	}
 	defer unlockParent()
-	unlock := LockTaskLifecycle(e.TaskID)
+	unlock := persistence.LockTaskLifecycle(e.TaskID)
 	defer unlock()
 	threadRepo := NewThreadInputRepo(r.db)
 	started := false
-	err = withImmediateTx(ctx, r.db, func(dbexec SQLExecutor) error {
+	err = withImmediateTx(ctx, r.db, func(dbexec sqlExecutor) error {
 		var status models.TaskStatus
 		var projectID string
-		if expected, guarded := activeLaneExpectedState(ctx, e.TaskID); guarded {
+		if expected, guarded := persistence.ActiveLaneExpectedState(ctx, e.TaskID); guarded {
 			var category models.TaskCategory
 			if err := dbexec.QueryRowContext(ctx, `SELECT category, status, project_id FROM tasks WHERE id = ?`, e.TaskID).Scan(&category, &status, &projectID); err != nil {
 				return fmt.Errorf("loading task for guarded follow-up admission: %w", err)
 			}
 			if category != expected.ExpectedCategory || status != expected.ExpectedStatus {
-				return fmt.Errorf("%w: %s", ErrActiveLaneTaskChanged, e.TaskID)
+				return fmt.Errorf("%w: %s", persistence.ErrActiveLaneTaskChanged, e.TaskID)
 			}
 		} else if err := dbexec.QueryRowContext(ctx, `SELECT status, project_id FROM tasks WHERE id = ?`, e.TaskID).Scan(&status, &projectID); err != nil {
 			return fmt.Errorf("loading task for follow-up admission: %w", err)
@@ -387,7 +396,7 @@ func (r *ExecutionRepo) CreateDirectTaskFollowupOrQueue(ctx context.Context, e *
 			input.TaskID = e.TaskID
 			input.InputMode = models.ThreadInputModeQueued
 			input.InputStatus = models.ThreadInputPending
-			return threadRepo.CreateQueuedWithExecutor(ctx, dbexec, input)
+			return threadRepo.createQueuedWithExecutor(ctx, dbexec, input)
 		}
 		if _, err := dbexec.ExecContext(ctx, `UPDATE tasks
 			SET status = 'queued', category = 'active',
@@ -465,7 +474,7 @@ func (r *ExecutionRepo) UpdateOutput(ctx context.Context, id string, output stri
 }
 
 func (r *ExecutionRepo) replaceRunningOutput(ctx context.Context, id, output, operation string) error {
-	err := withImmediateTx(ctx, r.db, func(tx SQLExecutor) error {
+	err := withImmediateTx(ctx, r.db, func(tx sqlExecutor) error {
 		result, err := tx.ExecContext(ctx,
 			`UPDATE executions SET output = ? WHERE id = ? AND status = 'running'`, output, id)
 		if err != nil {
@@ -516,7 +525,7 @@ func (r *ExecutionRepo) ReplaceReasoningReplay(ctx context.Context, id, reasonin
 	return nil
 }
 
-func replaceExecutionReplayMessages(ctx context.Context, tx SQLExecutor, id string, messages []models.ExecutionReplayMessage) error {
+func replaceExecutionReplayMessages(ctx context.Context, tx sqlExecutor, id string, messages []models.ExecutionReplayMessage) error {
 	if _, err := tx.ExecContext(ctx,
 		`DELETE FROM execution_replay_messages WHERE execution_id = ?`, id); err != nil {
 		return fmt.Errorf("clearing execution replay messages: %w", err)
@@ -618,7 +627,7 @@ func (r *ExecutionRepo) Complete(ctx context.Context, id string, status models.E
 	// streaming writer. Chunk rows are folded into executions.output as the
 	// execution becomes terminal so completed and failed readers keep the
 	// existing full-transcript contract.
-	err := withImmediateTx(ctx, r.db, func(tx SQLExecutor) error {
+	err := withImmediateTx(ctx, r.db, func(tx sqlExecutor) error {
 		if _, err := tx.ExecContext(ctx,
 			`UPDATE executions SET status = ?, output = CASE WHEN ? = '' THEN
 				COALESCE(output, '') || COALESCE((
@@ -758,19 +767,11 @@ func (r *ExecutionRepo) CancelActiveByTaskThroughHistoryOrderReturningIDs(ctx co
 	return ids, nil
 }
 
-type CompleteSuccessOutcome string
-
-const (
-	CompleteSuccessCompleted       CompleteSuccessOutcome = "completed"
-	CompleteSuccessPendingSteering CompleteSuccessOutcome = "pending_steering"
-	CompleteSuccessAlreadyTerminal CompleteSuccessOutcome = "already_terminal"
-)
-
 // SuccessCompletionReadiness reports whether an execution can currently be
 // completed without mutating execution or automation state. The subsequent
 // CompleteSuccessIfNoPendingSteering call remains the atomic authority if
 // steering arrives after this check.
-func (r *ExecutionRepo) SuccessCompletionReadiness(ctx context.Context, id string) (CompleteSuccessOutcome, error) {
+func (r *ExecutionRepo) SuccessCompletionReadiness(ctx context.Context, id string) (persistence.CompleteSuccessOutcome, error) {
 	var status models.ExecutionStatus
 	var hasPendingSteering bool
 	err := r.db.QueryRowContext(ctx, `SELECT status, EXISTS (
@@ -781,29 +782,29 @@ func (r *ExecutionRepo) SuccessCompletionReadiness(ctx context.Context, id strin
 		  AND input_status = 'pending'
 	) FROM executions WHERE id = ?`, id).Scan(&status, &hasPendingSteering)
 	if errors.Is(err, sql.ErrNoRows) {
-		return CompleteSuccessAlreadyTerminal, nil
+		return persistence.CompleteSuccessAlreadyTerminal, nil
 	}
 	if err != nil {
 		return "", fmt.Errorf("checking execution completion readiness: %w", err)
 	}
 	if status != models.ExecRunning {
-		return CompleteSuccessAlreadyTerminal, nil
+		return persistence.CompleteSuccessAlreadyTerminal, nil
 	}
 	if hasPendingSteering {
-		return CompleteSuccessPendingSteering, nil
+		return persistence.CompleteSuccessPendingSteering, nil
 	}
-	return CompleteSuccessCompleted, nil
+	return persistence.CompleteSuccessCompleted, nil
 }
 
-func (r *ExecutionRepo) CompleteSuccessIfNoPendingSteering(ctx context.Context, id string, output string, tokensUsed int, durationMs int64) (CompleteSuccessOutcome, error) {
+func (r *ExecutionRepo) CompleteSuccessIfNoPendingSteering(ctx context.Context, id string, output string, tokensUsed int, durationMs int64) (persistence.CompleteSuccessOutcome, error) {
 	return r.completeSuccessIfNoPendingSteering(ctx, id, output, tokensUsed, durationMs, nil)
 }
 
-func (r *ExecutionRepo) completeSuccessIfNoPendingSteering(ctx context.Context, id, output string, tokensUsed int, durationMs int64, finalizeTask func(SQLExecutor) error) (CompleteSuccessOutcome, error) {
+func (r *ExecutionRepo) completeSuccessIfNoPendingSteering(ctx context.Context, id, output string, tokensUsed int, durationMs int64, finalizeTask func(sqlExecutor) error) (persistence.CompleteSuccessOutcome, error) {
 	output = llmtranscript.NormalizeMarkers(output)
 	// Preserve streamed chunks when no complete provider output was supplied.
 	var changed int64
-	err := withImmediateTx(ctx, r.db, func(tx SQLExecutor) error {
+	err := withImmediateTx(ctx, r.db, func(tx sqlExecutor) error {
 		result, err := tx.ExecContext(ctx,
 			`UPDATE executions SET status = ?, output = CASE WHEN ? = '' THEN
 				COALESCE(output, '') || COALESCE((
@@ -846,25 +847,25 @@ func (r *ExecutionRepo) completeSuccessIfNoPendingSteering(ctx context.Context, 
 		} else if err := r.finalizeAutomationExecution(ctx, id, models.ExecCompleted); err != nil {
 			applog.Infof("[execution-repo] automation steering terminal projection deferred execution=%s: %v", id, err)
 		}
-		return CompleteSuccessCompleted, nil
+		return persistence.CompleteSuccessCompleted, nil
 	}
 
 	var status models.ExecutionStatus
 	if err := r.db.QueryRowContext(ctx, `SELECT status FROM executions WHERE id = ?`, id).Scan(&status); err != nil {
 		if err == sql.ErrNoRows {
-			return CompleteSuccessAlreadyTerminal, nil
+			return persistence.CompleteSuccessAlreadyTerminal, nil
 		}
 		return "", fmt.Errorf("checking execution completion state: %w", err)
 	}
 	if status != models.ExecRunning {
-		return CompleteSuccessAlreadyTerminal, nil
+		return persistence.CompleteSuccessAlreadyTerminal, nil
 	}
-	return CompleteSuccessPendingSteering, nil
+	return persistence.CompleteSuccessPendingSteering, nil
 }
 
 func (r *ExecutionRepo) RecoverPreRestartRunningTaskExecutions(ctx context.Context) (int64, error) {
 	var recovered int64
-	err := withImmediateTx(ctx, r.db, func(exec SQLExecutor) error {
+	err := withImmediateTx(ctx, r.db, func(exec sqlExecutor) error {
 		// No direct or promoted task-thread runner survives a process restart.
 		// Automation dispatches retain a durable dispatch identity/reservation and
 		// are deliberately left to Automation reconciliation.
@@ -1459,20 +1460,10 @@ func (r *ExecutionRepo) UpdateCliSessionID(ctx context.Context, id string, sessi
 
 // Analytics queries
 
-// SuccessFailureRate represents success/failure rates for a time period
-type SuccessFailureRate struct {
-	Period         string
-	TotalCount     int
-	SuccessCount   int
-	FailureCount   int
-	CancelledCount int
-	SuccessRate    float64
-}
-
 // GetSuccessFailureRates returns success/failure rates grouped by time period
 // groupBy: "day", "week", or "month"
 // dateFrom/dateTo: optional date range filters (RFC3339 format)
-func (r *ExecutionRepo) GetSuccessFailureRates(ctx context.Context, projectID string, groupBy string, dateFrom, dateTo string, dimensions ...string) ([]SuccessFailureRate, error) {
+func (r *ExecutionRepo) GetSuccessFailureRates(ctx context.Context, projectID string, groupBy string, dateFrom, dateTo string, dimensions ...string) ([]persistence.SuccessFailureRate, error) {
 	var dateFormat string
 	switch groupBy {
 	case "day":
@@ -1516,9 +1507,9 @@ func (r *ExecutionRepo) GetSuccessFailureRates(ctx context.Context, projectID st
 	}
 	defer rows.Close()
 
-	rates := []SuccessFailureRate{}
+	rates := []persistence.SuccessFailureRate{}
 	for rows.Next() {
-		var rate SuccessFailureRate
+		var rate persistence.SuccessFailureRate
 		if err := rows.Scan(&rate.Period, &rate.TotalCount, &rate.SuccessCount, &rate.FailureCount, &rate.CancelledCount); err != nil {
 			return nil, fmt.Errorf("scanning success/failure rate: %w", err)
 		}
@@ -1530,19 +1521,9 @@ func (r *ExecutionRepo) GetSuccessFailureRates(ctx context.Context, projectID st
 	return rates, rows.Err()
 }
 
-// AvgExecutionTime represents average execution time
-type AvgExecutionTime struct {
-	ID    string
-	Name  string
-	AvgMs float64
-	Count int
-	MinMs int64
-	MaxMs int64
-}
-
 // GetAvgExecutionTimeByTask returns average execution times per task.
 // Optional bounds use the Analytics half-open [dateFrom,dateTo) convention.
-func (r *ExecutionRepo) GetAvgExecutionTimeByTask(ctx context.Context, projectID string, limit int, bounds ...string) ([]AvgExecutionTime, error) {
+func (r *ExecutionRepo) GetAvgExecutionTimeByTask(ctx context.Context, projectID string, limit int, bounds ...string) ([]persistence.AvgExecutionTime, error) {
 	query := `SELECT
 			t.id,
 			t.title,
@@ -1566,9 +1547,9 @@ func (r *ExecutionRepo) GetAvgExecutionTimeByTask(ctx context.Context, projectID
 	}
 	defer rows.Close()
 
-	times := []AvgExecutionTime{}
+	times := []persistence.AvgExecutionTime{}
 	for rows.Next() {
-		var t AvgExecutionTime
+		var t persistence.AvgExecutionTime
 		if err := rows.Scan(&t.ID, &t.Name, &t.AvgMs, &t.Count, &t.MinMs, &t.MaxMs); err != nil {
 			return nil, fmt.Errorf("scanning avg execution time: %w", err)
 		}
@@ -1579,7 +1560,7 @@ func (r *ExecutionRepo) GetAvgExecutionTimeByTask(ctx context.Context, projectID
 
 // GetAvgExecutionTimeByAgent returns average execution times per model configuration.
 // Optional bounds use the Analytics half-open [dateFrom,dateTo) convention.
-func (r *ExecutionRepo) GetAvgExecutionTimeByAgent(ctx context.Context, projectID string, bounds ...string) ([]AvgExecutionTime, error) {
+func (r *ExecutionRepo) GetAvgExecutionTimeByAgent(ctx context.Context, projectID string, bounds ...string) ([]persistence.AvgExecutionTime, error) {
 	query := `SELECT
 			ac.id,
 			ac.name,
@@ -1603,9 +1584,9 @@ func (r *ExecutionRepo) GetAvgExecutionTimeByAgent(ctx context.Context, projectI
 	}
 	defer rows.Close()
 
-	times := []AvgExecutionTime{}
+	times := []persistence.AvgExecutionTime{}
 	for rows.Next() {
-		var t AvgExecutionTime
+		var t persistence.AvgExecutionTime
 		if err := rows.Scan(&t.ID, &t.Name, &t.AvgMs, &t.Count, &t.MinMs, &t.MaxMs); err != nil {
 			return nil, fmt.Errorf("scanning avg execution time: %w", err)
 		}
@@ -1643,14 +1624,8 @@ func appendAnalyticsStringBounds(query string, args []any, column string, bounds
 	return query, args
 }
 
-// ExecutionTrend represents execution frequency data
-type ExecutionTrend struct {
-	Hour  int
-	Count int
-}
-
 // GetExecutionTrendsByHour returns execution counts by hour of day
-func (r *ExecutionRepo) GetExecutionTrendsByHour(ctx context.Context, projectID string, dateFrom, dateTo string, dimensions ...string) ([]ExecutionTrend, error) {
+func (r *ExecutionRepo) GetExecutionTrendsByHour(ctx context.Context, projectID string, dateFrom, dateTo string, dimensions ...string) ([]persistence.ExecutionTrend, error) {
 	query := `
 		SELECT
 			CAST(strftime('%H', e.started_at, 'localtime') as INTEGER) as hour,
@@ -1679,9 +1654,9 @@ func (r *ExecutionRepo) GetExecutionTrendsByHour(ctx context.Context, projectID 
 	}
 	defer rows.Close()
 
-	trends := []ExecutionTrend{}
+	trends := []persistence.ExecutionTrend{}
 	for rows.Next() {
-		var trend ExecutionTrend
+		var trend persistence.ExecutionTrend
 		if err := rows.Scan(&trend.Hour, &trend.Count); err != nil {
 			return nil, fmt.Errorf("scanning execution trend: %w", err)
 		}
@@ -1690,20 +1665,9 @@ func (r *ExecutionRepo) GetExecutionTrendsByHour(ctx context.Context, projectID 
 	return trends, rows.Err()
 }
 
-// AgentUsage represents agent usage statistics
-type AgentUsage struct {
-	AgentID        string
-	AgentName      string
-	ProjectID      string
-	ProjectName    string
-	ExecutionCount int
-	SuccessCount   int
-	FailureCount   int
-}
-
 // GetAgentUsageByProject returns model-configuration usage breakdown by project.
 // Optional bounds use the Analytics half-open [dateFrom,dateTo) convention.
-func (r *ExecutionRepo) GetAgentUsageByProject(ctx context.Context, projectID string, bounds ...string) ([]AgentUsage, error) {
+func (r *ExecutionRepo) GetAgentUsageByProject(ctx context.Context, projectID string, bounds ...string) ([]persistence.AgentUsage, error) {
 	query := `
 		SELECT
 			ac.id as agent_id,
@@ -1738,9 +1702,9 @@ func (r *ExecutionRepo) GetAgentUsageByProject(ctx context.Context, projectID st
 	}
 	defer rows.Close()
 
-	usage := []AgentUsage{}
+	usage := []persistence.AgentUsage{}
 	for rows.Next() {
-		var u AgentUsage
+		var u persistence.AgentUsage
 		if err := rows.Scan(&u.AgentID, &u.AgentName, &u.ProjectID, &u.ProjectName, &u.ExecutionCount, &u.SuccessCount, &u.FailureCount); err != nil {
 			return nil, fmt.Errorf("scanning agent usage: %w", err)
 		}
@@ -1749,20 +1713,12 @@ func (r *ExecutionRepo) GetAgentUsageByProject(ctx context.Context, projectID st
 	return usage, rows.Err()
 }
 
-// TaskFrequency represents task execution frequency
-type TaskFrequency struct {
-	TaskID         string
-	TaskTitle      string
-	ExecutionCount int
-	LastExecutedAt string
-}
-
 // GetMostFrequentTasks returns the most frequently executed tasks. Positive
 // limits bound the result; limit=0 explicitly requests the complete history.
 // Results are ordered by execution count descending, then task ID ascending for
 // deterministic tie handling. Optional bounds use the Analytics half-open
 // [dateFrom,dateTo) convention.
-func (r *ExecutionRepo) GetMostFrequentTasks(ctx context.Context, projectID string, limit int, bounds ...string) ([]TaskFrequency, error) {
+func (r *ExecutionRepo) GetMostFrequentTasks(ctx context.Context, projectID string, limit int, bounds ...string) ([]persistence.TaskFrequency, error) {
 	query := `SELECT
 			t.id,
 			t.title,
@@ -1787,25 +1743,15 @@ func (r *ExecutionRepo) GetMostFrequentTasks(ctx context.Context, projectID stri
 	}
 	defer rows.Close()
 
-	frequencies := []TaskFrequency{}
+	frequencies := []persistence.TaskFrequency{}
 	for rows.Next() {
-		var freq TaskFrequency
+		var freq persistence.TaskFrequency
 		if err := rows.Scan(&freq.TaskID, &freq.TaskTitle, &freq.ExecutionCount, &freq.LastExecutedAt); err != nil {
 			return nil, fmt.Errorf("scanning task frequency: %w", err)
 		}
 		frequencies = append(frequencies, freq)
 	}
 	return frequencies, rows.Err()
-}
-
-// FailedTaskPattern represents failed task pattern
-// returned by the Analytics API.
-type FailedTaskPattern struct {
-	TaskID       string
-	TaskTitle    string
-	FailureCount int
-	LastError    string
-	LastFailedAt string
 }
 
 type failedTaskPatternProjection struct {
@@ -1863,15 +1809,15 @@ func queryFailedTaskPatterns(ctx context.Context, db *sql.DB, projectID string, 
 }
 
 // GetFailedTaskPatterns returns task-level failure patterns for Analytics.
-func (r *ExecutionRepo) GetFailedTaskPatterns(ctx context.Context, projectID string, limit int) ([]FailedTaskPattern, error) {
+func (r *ExecutionRepo) GetFailedTaskPatterns(ctx context.Context, projectID string, limit int) ([]persistence.FailedTaskPattern, error) {
 	rows, err := queryFailedTaskPatterns(ctx, r.db, projectID, 1, limit)
 	if err != nil {
 		return nil, err
 	}
 
-	patterns := make([]FailedTaskPattern, 0, len(rows))
+	patterns := make([]persistence.FailedTaskPattern, 0, len(rows))
 	for _, row := range rows {
-		patterns = append(patterns, FailedTaskPattern{
+		patterns = append(patterns, persistence.FailedTaskPattern{
 			TaskID:       row.TaskID,
 			TaskTitle:    row.TaskTitle,
 			FailureCount: row.FailureCount,
@@ -1884,7 +1830,7 @@ func (r *ExecutionRepo) GetFailedTaskPatterns(ctx context.Context, projectID str
 
 // GetFailedTaskPatternsInRange is the period-aware Analytics variant. The
 // unbounded shared query remains available to Insights with its existing semantics.
-func (r *ExecutionRepo) GetFailedTaskPatternsInRange(ctx context.Context, projectID string, limit int, bounds ...string) ([]FailedTaskPattern, error) {
+func (r *ExecutionRepo) GetFailedTaskPatternsInRange(ctx context.Context, projectID string, limit int, bounds ...string) ([]persistence.FailedTaskPattern, error) {
 	query := `WITH failed_executions AS (
 		SELECT t.id task_id,t.title task_title,e.error_message latest_error,e.started_at latest_started_at,
 			COUNT(*) OVER(PARTITION BY t.id) failure_count,
@@ -1904,9 +1850,9 @@ func (r *ExecutionRepo) GetFailedTaskPatternsInRange(ctx context.Context, projec
 		return nil, fmt.Errorf("getting period failed task patterns: %w", err)
 	}
 	defer rows.Close()
-	patterns := []FailedTaskPattern{}
+	patterns := []persistence.FailedTaskPattern{}
 	for rows.Next() {
-		var pattern FailedTaskPattern
+		var pattern persistence.FailedTaskPattern
 		if err := rows.Scan(&pattern.TaskID, &pattern.TaskTitle, &pattern.FailureCount, &pattern.LastError, &pattern.LastFailedAt); err != nil {
 			return nil, err
 		}

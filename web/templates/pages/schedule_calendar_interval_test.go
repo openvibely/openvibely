@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/stretchr/testify/require"
 )
 
@@ -15,7 +15,7 @@ func TestScheduleCardIntervalRepeatedHour(t *testing.T) {
 	require.NoError(t, err)
 	first := time.Date(2026, 11, 1, 5, 50, 0, 0, time.UTC).In(loc)
 	second := first.Add(time.Hour)
-	task := repository.TaskWithSchedule{Schedule: &models.Schedule{ID: "hourly", RepeatType: models.RepeatHours, RepeatInterval: 1}}
+	task := persistence.TaskWithSchedule{Schedule: &models.Schedule{ID: "hourly", RepeatType: models.RepeatHours, RepeatInterval: 1}}
 	a := scheduleCardInterval(TaskOccurrence{Task: task, OccurrenceTime: first})
 	b := scheduleCardInterval(TaskOccurrence{Task: task, OccurrenceTime: second})
 	require.Equal(t, a, b)

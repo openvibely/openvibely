@@ -44,7 +44,7 @@ var resolvePluginRuntimeBundleFn = agentplugins.ResolveRuntimeBundle
 
 func (s *LLMService) initProviderAdapters() {
 	anthropicAdapter := llmanthropic.New(s.llmConfigRepo, s.execRepo, s.executionStreamHub)
-	openaiAdapter := llmopenai.New(s.llmConfigRepo, s.execRepo, s.executionStreamHub)
+	openaiAdapter := llmopenai.New(s.llmConfigRepo, s.execRepo, s.openAIAsyncToolCallRepo, s.executionStreamHub)
 	openaiCompatibleAdapter := llmopenai_compatible.NewWithConfigRepo(s.llmConfigRepo, s.execRepo, s.executionStreamHub)
 	ollamaAdapter := llmollama.New(s.execRepo, s.executionStreamHub)
 	s.providerAdapters = map[models.LLMProvider]ProviderAdapter{

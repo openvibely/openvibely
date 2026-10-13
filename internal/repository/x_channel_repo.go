@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 )
 
 type XAuthRepo struct{ db *sql.DB }
@@ -65,7 +66,7 @@ func (r *XAuthRepo) Create(ctx context.Context, u *models.XAuthorizedUser) error
 	if u == nil || strings.TrimSpace(u.ProjectID) == "" || strings.TrimSpace(u.XUserID) == "" {
 		return fmt.Errorf("project and X user ID are required")
 	}
-	u.ID = NewID()
+	u.ID = persistence.NewID()
 	row := queryRowBoundSQLite(ctx, r.db, `INSERT INTO x_authorized_users(id, project_id, x_user_id, username) VALUES(?, ?, ?, ?) RETURNING added_at`, u.ID, strings.TrimSpace(u.ProjectID), strings.TrimSpace(u.XUserID), strings.TrimPrefix(strings.TrimSpace(u.Username), "@"))
 	if err := row.Scan(&u.AddedAt); err != nil {
 		return fmt.Errorf("create X authorized user: %w", err)
@@ -80,7 +81,7 @@ func (r *XAuthRepo) Delete(ctx context.Context, projectID, id string) error {
 	}
 	n, _ := res.RowsAffected()
 	if n == 0 {
-		return sql.ErrNoRows
+		return persistence.ErrNotFound
 	}
 	return nil
 }
@@ -123,9 +124,19 @@ func (r *XTaskContextRepo) Upsert(ctx context.Context, v *models.XTaskContext) e
 	if v == nil {
 		return fmt.Errorf("X task context is nil")
 	}
-	return withBoundSQLiteConn(ctx, r.db, func(conn *sql.Conn) error { return r.UpsertWithExecutor(ctx, conn, v) })
+	return withBoundSQLiteConn(ctx, r.db, func(conn *sql.Conn) error { return r.upsertWithExecutor(ctx, conn, v) })
 }
-func (r *XTaskContextRepo) UpsertWithExecutor(ctx context.Context, exec SQLExecutor, v *models.XTaskContext) error {
+
+// UpsertInTx persists task context using the caller's store transaction.
+func (r *XTaskContextRepo) UpsertInTx(ctx context.Context, tx persistence.Tx, v *models.XTaskContext) error {
+	exec, err := executorFromTx(tx)
+	if err != nil {
+		return err
+	}
+	return r.upsertWithExecutor(ctx, exec, v)
+}
+
+func (r *XTaskContextRepo) upsertWithExecutor(ctx context.Context, exec sqlExecutor, v *models.XTaskContext) error {
 	if v == nil {
 		return fmt.Errorf("X task context is nil")
 	}
@@ -135,40 +146,27 @@ func (r *XTaskContextRepo) GetByTaskID(ctx context.Context, taskID string) (*mod
 	return xTaskContextLifecycle.GetByTaskID(ctx, r.db, taskID)
 }
 
-type XReceiptClaimResult string
-
-const (
-	XReceiptClaimed   XReceiptClaimResult = "claimed"
-	XReceiptActive    XReceiptClaimResult = "active"
-	XReceiptCompleted XReceiptClaimResult = "completed"
-)
-
 var ErrXReceiptLeaseLost = fmt.Errorf("X receipt lease is no longer owned")
-
-type XReceiptClaim struct {
-	Result XReceiptClaimResult
-	Token  string
-}
 
 type XInboundReceiptRepo struct{ db *sql.DB }
 
 func NewXInboundReceiptRepo(db *sql.DB) *XInboundReceiptRepo { return &XInboundReceiptRepo{db: db} }
-func (r *XInboundReceiptRepo) Claim(ctx context.Context, tweetID, projectID string, now time.Time, lease time.Duration) (XReceiptClaim, error) {
+func (r *XInboundReceiptRepo) Claim(ctx context.Context, tweetID, projectID string, now time.Time, lease time.Duration) (persistence.XReceiptClaim, error) {
 	var status string
 	var leaseExpiresAt sql.NullTime
 	err := r.db.QueryRowContext(ctx, `SELECT status, lease_expires_at FROM x_inbound_receipts WHERE tweet_id = ?`, tweetID).Scan(&status, &leaseExpiresAt)
 	if err != nil && err != sql.ErrNoRows {
-		return XReceiptClaim{}, fmt.Errorf("load X receipt before claim: %w", err)
+		return persistence.XReceiptClaim{}, fmt.Errorf("load X receipt before claim: %w", err)
 	}
 	if err == nil {
 		if status == "completed" {
-			return XReceiptClaim{Result: XReceiptCompleted}, nil
+			return persistence.XReceiptClaim{Result: persistence.XReceiptCompleted}, nil
 		}
 		if leaseExpiresAt.Valid && leaseExpiresAt.Time.After(now) {
-			return XReceiptClaim{Result: XReceiptActive}, nil
+			return persistence.XReceiptClaim{Result: persistence.XReceiptActive}, nil
 		}
 	}
-	token := NewID()
+	token := persistence.NewID()
 	row := queryRowBoundSQLite(ctx, r.db, `INSERT INTO x_inbound_receipts(tweet_id, project_id, status, lease_expires_at, lease_token) VALUES(?, ?, 'processing', ?, ?)
 		ON CONFLICT(tweet_id) DO UPDATE SET project_id=excluded.project_id, status='processing', lease_expires_at=excluded.lease_expires_at, lease_token=excluded.lease_token, updated_at=datetime('now')
 		WHERE x_inbound_receipts.status='processing' AND x_inbound_receipts.lease_expires_at <= ? RETURNING tweet_id`, tweetID, projectID, now.Add(lease).UTC(), token, now.UTC())
@@ -178,24 +176,24 @@ func (r *XInboundReceiptRepo) Claim(ctx context.Context, tweetID, projectID stri
 		// A concurrent claimant or completer won after the advisory read.
 		err = r.db.QueryRowContext(ctx, `SELECT status FROM x_inbound_receipts WHERE tweet_id = ?`, tweetID).Scan(&status)
 		if err != nil {
-			return XReceiptClaim{}, fmt.Errorf("reload X receipt after claim conflict: %w", err)
+			return persistence.XReceiptClaim{}, fmt.Errorf("reload X receipt after claim conflict: %w", err)
 		}
 		if status == "completed" {
-			return XReceiptClaim{Result: XReceiptCompleted}, nil
+			return persistence.XReceiptClaim{Result: persistence.XReceiptCompleted}, nil
 		}
-		return XReceiptClaim{Result: XReceiptActive}, nil
+		return persistence.XReceiptClaim{Result: persistence.XReceiptActive}, nil
 	}
 	if err != nil {
-		return XReceiptClaim{}, fmt.Errorf("claim X receipt: %w", err)
+		return persistence.XReceiptClaim{}, fmt.Errorf("claim X receipt: %w", err)
 	}
-	return XReceiptClaim{Result: XReceiptClaimed, Token: token}, nil
+	return persistence.XReceiptClaim{Result: persistence.XReceiptClaimed, Token: token}, nil
 }
 
 // CompleteWithHandoff commits durable ingress work and receipt completion in one
 // immediate transaction. The lease token prevents an expired claimant from
 // completing or releasing a receipt reclaimed by a newer worker.
-func (r *XInboundReceiptRepo) CompleteWithHandoff(ctx context.Context, tweetID, token string, taskID *string, persist func(SQLExecutor) error) (alreadyHandedOff bool, err error) {
-	err = withImmediateTx(ctx, r.db, func(tx SQLExecutor) error {
+func (r *XInboundReceiptRepo) CompleteWithHandoff(ctx context.Context, tweetID, token string, taskID *string, persist func(persistence.Tx) error) (alreadyHandedOff bool, err error) {
+	err = withImmediateTx(ctx, r.db, func(tx sqlExecutor) error {
 		var status, currentToken string
 		if err := tx.QueryRowContext(ctx, `SELECT status, lease_token FROM x_inbound_receipts WHERE tweet_id = ?`, tweetID).Scan(&status, &currentToken); err != nil {
 			return fmt.Errorf("load X receipt for handoff: %w", err)
@@ -208,7 +206,7 @@ func (r *XInboundReceiptRepo) CompleteWithHandoff(ctx context.Context, tweetID, 
 			return ErrXReceiptLeaseLost
 		}
 		if persist != nil {
-			if err := persist(tx); err != nil {
+			if err := persist(storeTx(tx)); err != nil {
 				return err
 			}
 		}

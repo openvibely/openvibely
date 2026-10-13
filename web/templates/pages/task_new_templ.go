@@ -11,12 +11,12 @@ import templruntime "github.com/a-h/templ/runtime"
 import (
 	"fmt"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/web/templates/components"
 	"github.com/openvibely/openvibely/web/templates/layout"
 )
 
-func NewTask(projects []models.Project, project *models.Project, agents []models.LLMConfig, agentDefs []repository.AgentTaskUIOption) templ.Component {
+func NewTask(projects []models.Project, project *models.Project, agents []models.LLMConfig, agentDefs []persistence.AgentTaskUIOption) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
@@ -63,7 +63,7 @@ func NewTask(projects []models.Project, project *models.Project, agents []models
 	})
 }
 
-func NewTaskContent(project *models.Project, agents []models.LLMConfig, agentDefs []repository.AgentTaskUIOption) templ.Component {
+func NewTaskContent(project *models.Project, agents []models.LLMConfig, agentDefs []persistence.AgentTaskUIOption) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
@@ -240,7 +240,7 @@ func NewTaskContent(project *models.Project, agents []models.LLMConfig, agentDef
 	})
 }
 
-func NewTaskOptions(agents []models.LLMConfig, agentDefs []repository.AgentTaskUIOption) templ.Component {
+func NewTaskOptions(agents []models.LLMConfig, agentDefs []persistence.AgentTaskUIOption) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
@@ -470,7 +470,7 @@ func NewTaskAdvancedOptions() templ.Component {
 	})
 }
 
-func NewTaskDetails(agents []models.LLMConfig, agentDefs []repository.AgentTaskUIOption) templ.Component {
+func NewTaskDetails(agents []models.LLMConfig, agentDefs []persistence.AgentTaskUIOption) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {

@@ -11,6 +11,7 @@ import (
 	"sync"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 )
 
 // LifecycleRepo persists agent lifecycle hooks and lifecycle execution rows.
@@ -230,20 +231,9 @@ const listExecutionsForTaskSQL = `
 		        ORDER BY started_at DESC, id DESC`
 
 const (
-	// LifecycleExecutionPageDefaultLimit is the number of rows fetched when the
-	// lifecycle tab does not provide a page size.
-	LifecycleExecutionPageDefaultLimit = 20
-	// LifecycleExecutionPageMaxLimit prevents a caller from turning the compact
-	// lifecycle endpoint back into an unbounded detail payload.
-	LifecycleExecutionPageMaxLimit = 50
-
 	LifecycleExecutionPageOlder = "older"
 	LifecycleExecutionPageNewer = "newer"
 )
-
-// ErrLifecycleExecutionCursor reports a malformed or direction/task-mismatched
-// lifecycle page cursor.
-var ErrLifecycleExecutionCursor = errors.New("invalid lifecycle execution cursor")
 
 type lifecycleExecutionCursor struct {
 	Kind      string `json:"kind"`
@@ -295,10 +285,10 @@ const getLifecycleExecutionForTaskProjectSQL = `
 
 func lifecycleExecutionPageLimit(limit int) int {
 	if limit <= 0 {
-		return LifecycleExecutionPageDefaultLimit
+		return persistence.LifecycleExecutionPageDefaultLimit
 	}
-	if limit > LifecycleExecutionPageMaxLimit {
-		return LifecycleExecutionPageMaxLimit
+	if limit > persistence.LifecycleExecutionPageMaxLimit {
+		return persistence.LifecycleExecutionPageMaxLimit
 	}
 	return limit
 }
@@ -319,7 +309,7 @@ func encodeLifecycleExecutionCursor(taskID, direction, id string) string {
 func decodeLifecycleExecutionCursor(taskID, direction, value string, allowRawID bool) (string, error) {
 	value = strings.TrimSpace(value)
 	if value == "" {
-		return "", ErrLifecycleExecutionCursor
+		return "", persistence.ErrLifecycleExecutionCursor
 	}
 	decoded, err := base64.RawURLEncoding.DecodeString(value)
 	if err == nil {
@@ -329,13 +319,13 @@ func decodeLifecycleExecutionCursor(taskID, direction, value string, allowRawID 
 				cursor.Direction == direction && strings.TrimSpace(cursor.ID) != "" {
 				return cursor.ID, nil
 			}
-			return "", ErrLifecycleExecutionCursor
+			return "", persistence.ErrLifecycleExecutionCursor
 		}
 	}
 	if allowRawID {
 		return value, nil
 	}
-	return "", ErrLifecycleExecutionCursor
+	return "", persistence.ErrLifecycleExecutionCursor
 }
 
 func scanExecution(row interface{ Scan(...any) error }) (*models.LifecycleExecution, error) {
@@ -428,32 +418,25 @@ func (r *LifecycleRepo) CreateExecution(ctx context.Context, e *models.Lifecycle
 }
 
 // FindExecutionByIdempotencyKey returns an existing execution with the supplied
-// idempotency key, or sql.ErrNoRows if none exists. An empty key returns
-// sql.ErrNoRows so callers do not collide on unkeyed rows.
+// idempotency key, or persistence.ErrNotFound if none exists. An empty key
+// misses so callers do not collide on unkeyed rows.
 func (r *LifecycleRepo) FindExecutionByIdempotencyKey(ctx context.Context, key string) (*models.LifecycleExecution, error) {
 	if key == "" {
-		return nil, sql.ErrNoRows
+		return nil, persistence.ErrNotFound
 	}
 	row := r.db.QueryRowContext(ctx, `
 	        SELECT `+execCols+`
 	        FROM lifecycle_executions
 	        WHERE idempotency_key = ?`, key)
-	return scanExecution(row)
+	e, err := scanExecution(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, persistence.ErrNotFound
+	}
+	return e, err
 }
 
-type LifecycleTaskRunFreshness struct {
-	Stale           bool
-	TaskID          string
-	SourceRunID     string
-	SourceStartedAt string
-	SourceRowID     int64
-	LatestRunID     string
-	LatestStartedAt string
-	LatestRowID     int64
-}
-
-func (r *LifecycleRepo) TaskRunFreshness(ctx context.Context, taskID, taskRunID string) (LifecycleTaskRunFreshness, error) {
-	detail := LifecycleTaskRunFreshness{TaskID: taskID, SourceRunID: taskRunID}
+func (r *LifecycleRepo) TaskRunFreshness(ctx context.Context, taskID, taskRunID string) (persistence.LifecycleTaskRunFreshness, error) {
+	detail := persistence.LifecycleTaskRunFreshness{TaskID: taskID, SourceRunID: taskRunID}
 	if taskID == "" || taskRunID == "" {
 		return detail, nil
 	}

@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/testutil"
 )
 
@@ -43,10 +44,10 @@ func TestAgentRepoListRuntimeSummariesUsesCompactProjection(t *testing.T) {
 	if len(summaries) != 2 {
 		t.Fatalf("summaries len = %d, want 2: %#v", len(summaries), summaries)
 	}
-	if summaries[0] != (AgentRuntimeSummary{Name: "Alpha Agent", Description: "alpha work", Model: "inherit", SkillCount: 2, MCPServerCount: 1}) {
+	if summaries[0] != (persistence.AgentRuntimeSummary{Name: "Alpha Agent", Description: "alpha work", Model: "inherit", SkillCount: 2, MCPServerCount: 1}) {
 		t.Fatalf("first summary = %#v", summaries[0])
 	}
-	if summaries[1] != (AgentRuntimeSummary{Name: "Bravo Agent", Description: "bravo work", Model: "gpt-5", SkillCount: 0, MCPServerCount: 2}) {
+	if summaries[1] != (persistence.AgentRuntimeSummary{Name: "Bravo Agent", Description: "bravo work", Model: "gpt-5", SkillCount: 0, MCPServerCount: 2}) {
 		t.Fatalf("second summary = %#v", summaries[1])
 	}
 

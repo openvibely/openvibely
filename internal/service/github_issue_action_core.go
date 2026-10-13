@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence"
 )
 
 // GitHubIssueActionRequest is the canonical request contract shared by
@@ -111,7 +111,7 @@ func (c *GitHubIssueActionCore) ExecuteGetProjectInbox(ctx context.Context, _ js
 	}
 	assignees := make([]string, 0, len(actors))
 	for _, actor := range actors {
-		if login := repository.NormalizeGitHubLogin(actor.GitHubLogin); login != "" {
+		if login := persistence.NormalizeGitHubLogin(actor.GitHubLogin); login != "" {
 			assignees = append(assignees, login)
 		}
 	}
@@ -138,7 +138,7 @@ func (c *GitHubIssueActionCore) ExecuteIsActorAuthorized(ctx context.Context, in
 	if err != nil {
 		return "", err
 	}
-	return githubIssueActionJSON(map[string]any{"ok": true, "github_login": repository.NormalizeGitHubLogin(login), "authorized": authorized})
+	return githubIssueActionJSON(map[string]any{"ok": true, "github_login": persistence.NormalizeGitHubLogin(login), "authorized": authorized})
 }
 
 func (c *GitHubIssueActionCore) ExecuteListMyAssignedIssues(ctx context.Context, input json.RawMessage) (string, error) {
@@ -215,7 +215,7 @@ func (c *GitHubIssueActionCore) ExecuteListAssignedIssues(ctx context.Context, i
 		return "", err
 	}
 	summaries, nextOffset := compactAssignedGitHubIssues(issues, limit, offset)
-	return githubIssueActionJSON(map[string]any{"ok": true, "assignee": repository.NormalizeGitHubLogin(assignee), "issues": summaries, "returned": len(summaries), "total": len(issues), "offset": offset, "next_offset": nextOffset, "truncated": nextOffset > 0})
+	return githubIssueActionJSON(map[string]any{"ok": true, "assignee": persistence.NormalizeGitHubLogin(assignee), "issues": summaries, "returned": len(summaries), "total": len(issues), "offset": offset, "next_offset": nextOffset, "truncated": nextOffset > 0})
 }
 
 func assignedIssueListPage(req GitHubIssueActionRequest) (int, int, error) {
@@ -358,7 +358,7 @@ func (c *GitHubIssueActionCore) requireAuthorizedAssignee(ctx context.Context, a
 		return err
 	}
 	if !authorized {
-		return fmt.Errorf("GitHub assignee %s is not authorized", repository.NormalizeGitHubLogin(assignee))
+		return fmt.Errorf("GitHub assignee %s is not authorized", persistence.NormalizeGitHubLogin(assignee))
 	}
 	return nil
 }

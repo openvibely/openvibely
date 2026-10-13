@@ -25,7 +25,7 @@ import (
 	"github.com/openvibely/openvibely/internal/events"
 	llmworkflow "github.com/openvibely/openvibely/internal/llm/workflow"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/web/templates/components"
 	"github.com/openvibely/openvibely/web/templates/pages"
@@ -53,7 +53,7 @@ type taskDetailContentData struct {
 	executionMetrics models.TaskExecutionMetrics
 	schedules        []models.Schedule
 	agents           []models.LLMConfig
-	agentDefs        []repository.AgentTaskUIOption
+	agentDefs        []persistence.AgentTaskUIOption
 	attachments      []models.Attachment
 	reviewComments   []models.ReviewComment
 }
@@ -154,7 +154,7 @@ func setTaskSortCookie(c echo.Context, cookieName string, sortBy string) {
 	})
 }
 
-func (h *Handler) listAgentDefinitions(ctx context.Context) []repository.AgentTaskUIOption {
+func (h *Handler) listAgentDefinitions(ctx context.Context) []persistence.AgentTaskUIOption {
 	if h.agentRepo == nil {
 		return nil
 	}
@@ -182,7 +182,7 @@ func (h *Handler) loadTaskGoal(ctx context.Context, taskID string) *models.TaskG
 	return goal
 }
 
-func (h *Handler) listTaskFormAgentDefinitions(ctx context.Context, projectID string, currentAgentID *string) []repository.AgentTaskUIOption {
+func (h *Handler) listTaskFormAgentDefinitions(ctx context.Context, projectID string, currentAgentID *string) []persistence.AgentTaskUIOption {
 	agentDefs := h.listAgentDefinitions(ctx)
 	out := selectableTaskAgentDefinitionsForProject(agentDefs, projectID)
 	if currentAgentID == nil || *currentAgentID == "" {
@@ -195,13 +195,13 @@ func (h *Handler) listTaskFormAgentDefinitions(ctx context.Context, projectID st
 	}
 	for _, agent := range agentDefs {
 		if agent.ID == *currentAgentID && agentTaskUIOptionAvailableToProject(agent, projectID) && agent.GeneratedStatus != models.AgentStatusArchived && agent.ArchivedAt == nil {
-			return append([]repository.AgentTaskUIOption{agent}, out...)
+			return append([]persistence.AgentTaskUIOption{agent}, out...)
 		}
 	}
 	return out
 }
 
-func (h *Handler) listScheduleAgentOptions(ctx context.Context, projectID string) []repository.AgentScheduleOption {
+func (h *Handler) listScheduleAgentOptions(ctx context.Context, projectID string) []persistence.AgentScheduleOption {
 	if h.agentRepo == nil {
 		return nil
 	}
@@ -239,14 +239,14 @@ func selectablePrimaryAgentDefinition(agent models.Agent) bool {
 	return selectablePrimaryAgent(agent.Enabled, agent.SelectableAsPrimary, agent.GeneratedStatus, agent.ArchivedAt)
 }
 
-func agentTaskUIOptionAvailableToProject(agent repository.AgentTaskUIOption, projectID string) bool {
+func agentTaskUIOptionAvailableToProject(agent persistence.AgentTaskUIOption, projectID string) bool {
 	if agent.Scope == models.AgentScopeProject {
 		return agent.ProjectID != "" && agent.ProjectID == projectID
 	}
 	return true
 }
 
-func selectableTaskUIAgentOption(agent repository.AgentTaskUIOption) bool {
+func selectableTaskUIAgentOption(agent persistence.AgentTaskUIOption) bool {
 	return selectablePrimaryAgent(agent.Enabled, agent.SelectableAsPrimary, agent.GeneratedStatus, agent.ArchivedAt)
 }
 
@@ -254,8 +254,8 @@ func selectablePrimaryAgent(enabled, selectableAsPrimary bool, generatedStatus m
 	return enabled && selectableAsPrimary && generatedStatus != models.AgentStatusArchived && archivedAt == nil
 }
 
-func selectableTaskAgentDefinitionsForProject(agentDefs []repository.AgentTaskUIOption, projectID string) []repository.AgentTaskUIOption {
-	out := make([]repository.AgentTaskUIOption, 0, len(agentDefs))
+func selectableTaskAgentDefinitionsForProject(agentDefs []persistence.AgentTaskUIOption, projectID string) []persistence.AgentTaskUIOption {
+	out := make([]persistence.AgentTaskUIOption, 0, len(agentDefs))
 	for _, agent := range agentDefs {
 		if !selectableTaskUIAgentOption(agent) || !agentTaskUIOptionAvailableToProject(agent, projectID) {
 			continue
@@ -265,8 +265,8 @@ func selectableTaskAgentDefinitionsForProject(agentDefs []repository.AgentTaskUI
 	return out
 }
 
-func selectableTaskAgentDefinitions(agentDefs []repository.AgentTaskUIOption) []repository.AgentTaskUIOption {
-	out := make([]repository.AgentTaskUIOption, 0, len(agentDefs))
+func selectableTaskAgentDefinitions(agentDefs []persistence.AgentTaskUIOption) []persistence.AgentTaskUIOption {
+	out := make([]persistence.AgentTaskUIOption, 0, len(agentDefs))
 	for _, agent := range agentDefs {
 		if selectableTaskUIAgentOption(agent) {
 			out = append(out, agent)
@@ -1036,7 +1036,7 @@ func (h *Handler) CreateTask(c echo.Context) error {
 		t.Prompt = strings.TrimSpace(c.FormValue("message"))
 		t.Title = strings.TrimSpace(t.Title)
 		if t.Title == "" {
-			t.Title = "New task " + repository.NewID()[:8]
+			t.Title = "New task " + persistence.NewID()[:8]
 		}
 	}
 
@@ -2427,8 +2427,8 @@ func (h *Handler) CancelTask(c echo.Context) error {
 	return c.Redirect(http.StatusSeeOther, "/tasks/"+taskID)
 }
 
-func (h *Handler) activeLaneTaskMoves(ctx context.Context, taskIDs []string, encoded string) ([]repository.ActiveLaneTaskMove, error) {
-	moves := make([]repository.ActiveLaneTaskMove, 0, len(taskIDs))
+func (h *Handler) activeLaneTaskMoves(ctx context.Context, taskIDs []string, encoded string) ([]persistence.ActiveLaneTaskMove, error) {
+	moves := make([]persistence.ActiveLaneTaskMove, 0, len(taskIDs))
 	if strings.TrimSpace(encoded) != "" {
 		if err := json.Unmarshal([]byte(encoded), &moves); err != nil {
 			return nil, echo.NewHTTPError(http.StatusBadRequest, "invalid Active lane task state")
@@ -2453,7 +2453,7 @@ func (h *Handler) activeLaneTaskMoves(ctx context.Context, taskIDs []string, enc
 		if task == nil {
 			return nil, echo.NewHTTPError(http.StatusNotFound, "task not found")
 		}
-		moves = append(moves, repository.ActiveLaneTaskMove{ID: taskID, ExpectedCategory: task.Category, ExpectedStatus: task.Status})
+		moves = append(moves, persistence.ActiveLaneTaskMove{ID: taskID, ExpectedCategory: task.Category, ExpectedStatus: task.Status})
 	}
 	return moves, nil
 }
@@ -2505,7 +2505,7 @@ func (h *Handler) UpdateTaskCategory(c echo.Context) error {
 		}
 		if err := h.taskSvc.MoveTasksToActiveLane(c.Request().Context(), task.ProjectID, moves, targetStatus); err != nil {
 			applog.Infof("[handler] UpdateTaskCategory active lane error: %v", err)
-			if errors.Is(err, repository.ErrActiveLaneTaskChanged) || errors.Is(err, repository.ErrActiveLaneLifecycleOwned) || errors.Is(err, service.ErrActiveLaneLifecycleRouted) {
+			if errors.Is(err, persistence.ErrActiveLaneTaskChanged) || errors.Is(err, persistence.ErrActiveLaneLifecycleOwned) || errors.Is(err, service.ErrActiveLaneLifecycleRouted) {
 				return echo.NewHTTPError(http.StatusConflict, "task lifecycle changed before the move completed")
 			}
 			return err
@@ -2642,7 +2642,7 @@ func (h *Handler) BatchUpdateTaskCategory(c echo.Context) error {
 		}
 		if err := h.taskSvc.MoveTasksToActiveLane(c.Request().Context(), projectID, moves, targetStatus); err != nil {
 			applog.Infof("[handler] BatchUpdateTaskCategory active lane error: %v", err)
-			if errors.Is(err, repository.ErrActiveLaneTaskChanged) || errors.Is(err, repository.ErrActiveLaneLifecycleOwned) || errors.Is(err, service.ErrActiveLaneLifecycleRouted) {
+			if errors.Is(err, persistence.ErrActiveLaneTaskChanged) || errors.Is(err, persistence.ErrActiveLaneLifecycleOwned) || errors.Is(err, service.ErrActiveLaneLifecycleRouted) {
 				return echo.NewHTTPError(http.StatusConflict, "one or more selected tasks changed before the move completed")
 			}
 			return err
@@ -2815,7 +2815,7 @@ func (h *Handler) GetTaskReferenceCatalog(c echo.Context) error {
 		}
 	}
 	agentDefs := h.listTaskFormAgentDefinitions(ctx, projectID, nil)
-	visibleTasks := make([]repository.TaskReference, 0, len(tasks))
+	visibleTasks := make([]persistence.TaskReference, 0, len(tasks))
 	for _, task := range tasks {
 		if taskReferenceVisible(task) {
 			visibleTasks = append(visibleTasks, task)
@@ -2856,7 +2856,7 @@ func (h *Handler) GetTaskReferenceCatalog(c echo.Context) error {
 	return c.JSON(http.StatusOK, TaskReferenceCatalogResponse{Tasks: refs})
 }
 
-func taskReferenceProjectedToAnotherBoardColumn(task repository.TaskReference) bool {
+func taskReferenceProjectedToAnotherBoardColumn(task persistence.TaskReference) bool {
 	switch taskReferenceBoardOrder(task) {
 	case 0:
 		return task.Category != models.CategoryBacklog
@@ -2869,7 +2869,7 @@ func taskReferenceProjectedToAnotherBoardColumn(task repository.TaskReference) b
 	}
 }
 
-func taskReferenceBoardOrder(task repository.TaskReference) int {
+func taskReferenceBoardOrder(task persistence.TaskReference) int {
 	category := task.Category
 	if task.SwarmRole == models.SwarmRoleParent &&
 		category == models.CategoryActive && task.Status == models.StatusBlocked &&
@@ -2893,7 +2893,7 @@ func taskReferenceBoardOrder(task repository.TaskReference) int {
 	}
 }
 
-func taskReferenceVisible(task repository.TaskReference) bool {
+func taskReferenceVisible(task persistence.TaskReference) bool {
 	if task.Category == models.CategoryChat || models.IsSwarmChildRole(task.SwarmRole) {
 		return false
 	}
@@ -2908,7 +2908,7 @@ func taskReferenceVisible(task repository.TaskReference) bool {
 	}
 }
 
-func taskReferenceBadges(task repository.TaskReference, llmModels []models.LLMConfig, agentDefs []repository.AgentTaskUIOption) []string {
+func taskReferenceBadges(task persistence.TaskReference, llmModels []models.LLMConfig, agentDefs []persistence.AgentTaskUIOption) []string {
 	badges := make([]string, 0, 8)
 	if task.ParentTaskID != nil {
 		badges = append(badges, "Chained")
@@ -2945,7 +2945,7 @@ func taskReferenceBadges(task repository.TaskReference, llmModels []models.LLMCo
 	return badges
 }
 
-func taskReferenceModelName(task repository.TaskReference, llmModels []models.LLMConfig) string {
+func taskReferenceModelName(task persistence.TaskReference, llmModels []models.LLMConfig) string {
 	if task.AgentID != nil {
 		for _, model := range llmModels {
 			if model.ID == *task.AgentID {
@@ -3550,10 +3550,10 @@ func (h *Handler) TaskThreadSteer(c echo.Context) error {
 	}
 	if err := h.threadInputRepo.CreateSteeringForActiveExecution(c.Request().Context(), input, active.ID); err != nil {
 		applog.Infof("[handler] TaskThreadSteer error creating steering input: %v", err)
-		if errors.Is(err, repository.ErrExpectedTurnEmpty) {
+		if errors.Is(err, persistence.ErrExpectedTurnEmpty) {
 			return echo.NewHTTPError(http.StatusBadRequest, "expected turn id is required")
 		}
-		if errors.Is(err, repository.ErrNoActiveTurn) || errors.Is(err, repository.ErrActiveTurnChanged) {
+		if errors.Is(err, persistence.ErrNoActiveTurn) || errors.Is(err, persistence.ErrActiveTurnChanged) {
 			return echo.NewHTTPError(http.StatusConflict, "active turn changed; queue the message instead")
 		}
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to save steering input")

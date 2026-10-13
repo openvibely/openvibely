@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/stretchr/testify/require"
@@ -62,7 +63,7 @@ func TestScheduleCalendarActionRejectsMalformedSelections(t *testing.T) {
 		{Action: "pause_all", ScheduleIDs: []string{"unexpected"}},
 	} {
 		_, err := ApplyScheduleCalendarAction(context.Background(), repo, "default", action)
-		require.ErrorIs(t, err, repository.ErrScheduleCalendarSelection)
+		require.ErrorIs(t, err, persistence.ErrScheduleCalendarSelection)
 	}
 }
 
@@ -271,7 +272,7 @@ func TestCalendarPlannerCancelledHandoff(t *testing.T) {
 			stale, err := schedules.ListCalendarAdmissions(ctx)
 			require.NoError(t, err)
 			require.Len(t, stale, 1)
-			var queued repository.ActiveLaneTaskAdmission
+			var queued persistence.ActiveLaneTaskAdmission
 			if transferred {
 				require.NoError(t, swarm.StartPlannerForScheduledRun(ctx, parent.ID, true))
 				rows, err := schedules.ListCalendarAdmissions(ctx)

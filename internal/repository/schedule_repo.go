@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 )
 
 type ScheduleRepo struct {
@@ -112,28 +113,6 @@ func (r *ScheduleRepo) ListByTaskIDs(ctx context.Context, taskIDs []string) (map
 	return result, rows.Err()
 }
 
-// ScheduleDiscoveryFilter bounds a read-only, current-project schedule discovery query.
-type ScheduleDiscoveryFilter struct {
-	// TaskID optionally restricts results to schedules bound to a single task.
-	TaskID string
-	// Title is an optional partial (case-insensitive substring) task title match.
-	Title string
-	// Enabled optionally restricts results to enabled (true) or disabled (false)
-	// schedules. Nil returns both.
-	Enabled *bool
-	// Limit caps the number of returned rows. Callers should clamp before use.
-	Limit int
-	// Offset skips the first N rows for pagination.
-	Offset int
-}
-
-// ScheduleDiscoveryRow is a schedule paired with its bound task's title for
-// read-only discovery projections.
-type ScheduleDiscoveryRow struct {
-	Schedule  models.Schedule
-	TaskTitle string
-}
-
 // ListSchedulesForDiscovery returns a bounded, deterministic page of schedules for
 // a single project, plus the total number of matching rows for pagination. It never
 // crosses project boundaries: the join on tasks.project_id enforces isolation.
@@ -141,7 +120,7 @@ type ScheduleDiscoveryRow struct {
 // Ordering is deterministic: schedules with a pending next_run come first ordered by
 // next_run ASC, then schedules without a next_run, all tie-broken by created_at DESC
 // then id ASC.
-func (r *ScheduleRepo) ListSchedulesForDiscovery(ctx context.Context, projectID string, filter ScheduleDiscoveryFilter) ([]ScheduleDiscoveryRow, int, error) {
+func (r *ScheduleRepo) ListSchedulesForDiscovery(ctx context.Context, projectID string, filter persistence.ScheduleDiscoveryFilter) ([]persistence.ScheduleDiscoveryRow, int, error) {
 	where := `t.project_id = ?`
 	args := []any{projectID}
 	hasFilters := false
@@ -195,9 +174,9 @@ func (r *ScheduleRepo) ListSchedulesForDiscovery(ctx context.Context, projectID 
 	}
 	defer rows.Close()
 
-	var out []ScheduleDiscoveryRow
+	var out []persistence.ScheduleDiscoveryRow
 	for rows.Next() {
-		var row ScheduleDiscoveryRow
+		var row persistence.ScheduleDiscoveryRow
 		s := &row.Schedule
 		if err := rows.Scan(&s.ID, &s.TaskID, &s.RunAt, &s.RepeatType, &s.RepeatInterval,
 			&s.Enabled, &s.ClearContextOnStart, &s.NextRun, &s.LastRun, &s.CreatedAt, &s.UpdatedAt, &row.TaskTitle); err != nil {
@@ -286,7 +265,7 @@ func (r *ScheduleRepo) UpdateBatchForProject(ctx context.Context, projectID stri
 	if len(scheduleIDs) == 0 {
 		return nil
 	}
-	return withImmediateTx(ctx, r.db, func(exec SQLExecutor) error {
+	return withImmediateTx(ctx, r.db, func(exec sqlExecutor) error {
 		for _, scheduleID := range scheduleIDs {
 			var schedule models.Schedule
 			err := exec.QueryRowContext(ctx,
@@ -350,7 +329,7 @@ func (r *ScheduleRepo) UpdateForTask(ctx context.Context, s *models.Schedule, ta
 		return fmt.Errorf("checking schedule update: %w", err)
 	}
 	if rowsAffected == 0 {
-		return sql.ErrNoRows
+		return persistence.ErrNotFound
 	}
 	return nil
 }

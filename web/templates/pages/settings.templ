@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/web/templates/components"
 	"github.com/openvibely/openvibely/web/templates/layout"
@@ -203,7 +203,7 @@ func selectedWebhookAgentIDs(webhooks []models.WebhookEndpoint, webhookAgents ma
 	return strings.Join(ids, ",")
 }
 
-func agentsJSON(agents []repository.AgentPickerOption) string {
+func agentsJSON(agents []persistence.AgentPickerOption) string {
 	type agentData struct {
 		ID   string `json:"id"`
 		Name string `json:"name"`
@@ -219,8 +219,8 @@ func agentsJSON(agents []repository.AgentPickerOption) string {
 	return string(b)
 }
 
-func outboundTargetProjectSummary(targets []models.ChannelTarget) repository.ChannelTargetProjectSummary {
-	out := repository.ChannelTargetProjectSummary{Total: len(targets), Configured: len(targets) > 0, ByPlatform: map[string]repository.ChannelTargetPlatformSummary{}}
+func outboundTargetProjectSummary(targets []models.ChannelTarget) persistence.ChannelTargetProjectSummary {
+	out := persistence.ChannelTargetProjectSummary{Total: len(targets), Configured: len(targets) > 0, ByPlatform: map[string]persistence.ChannelTargetPlatformSummary{}}
 	for _, target := range targets {
 		platform := strings.ToLower(strings.TrimSpace(target.Platform))
 		if platform == "" {
@@ -251,7 +251,7 @@ func outboundTargetSummary(targets []models.ChannelTarget) string {
 	return outboundTargetProjectSummaryText(outboundTargetProjectSummary(targets))
 }
 
-func outboundTargetProjectSummaryText(summary repository.ChannelTargetProjectSummary) string {
+func outboundTargetProjectSummaryText(summary persistence.ChannelTargetProjectSummary) string {
 	if summary.Total == 0 {
 		return "No saved outbound targets"
 	}
@@ -2386,7 +2386,7 @@ templ settingsContent(view ChannelsSettingsView) {
 	</div>
 }
 
-templ OutboundTargetsCard(currentProjectID string, summary repository.ChannelTargetProjectSummary, explicitAllowed bool) {
+templ OutboundTargetsCard(currentProjectID string, summary persistence.ChannelTargetProjectSummary, explicitAllowed bool) {
 	<div
 		id="outbound-targets-card"
 		class="card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40 hover:shadow-md transition-all"
@@ -2446,7 +2446,7 @@ templ OutboundTargetsFragment(currentProjectID string, targets []models.ChannelT
 	@OutboundTargetsSection(currentProjectID, targets, explicitAllowed, notice)
 }
 
-templ OutboundTargetsCardFragment(currentProjectID string, summary repository.ChannelTargetProjectSummary, explicitAllowed bool) {
+templ OutboundTargetsCardFragment(currentProjectID string, summary persistence.ChannelTargetProjectSummary, explicitAllowed bool) {
 	@OutboundTargetsCard(currentProjectID, summary, explicitAllowed)
 }
 

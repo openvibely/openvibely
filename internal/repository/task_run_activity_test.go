@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/testutil"
 	"math"
 	"testing"
@@ -25,7 +26,7 @@ func TestTaskRunActivityScopesAndAggregates(t *testing.T) {
 		t.Fatal(err)
 	}
 	r := NewExecutionRepo(db)
-	f := AnalyticsDashboardFilter{ProjectID: "p", DateFrom: time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC), DateTo: time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC), GroupBy: "day"}
+	f := persistence.AnalyticsDashboardFilter{ProjectID: "p", DateFrom: time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC), DateTo: time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC), GroupBy: "day"}
 	data, err := r.GetTaskRunActivity(context.Background(), f)
 	if err != nil {
 		t.Fatal(err)

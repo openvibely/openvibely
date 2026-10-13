@@ -19,7 +19,7 @@ import (
 	"github.com/openvibely/openvibely/internal/chatcontrol"
 	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/web/templates/components"
 	"github.com/openvibely/openvibely/web/templates/pages"
 )
@@ -482,10 +482,10 @@ func (h *Handler) ChatSteer(c echo.Context) error {
 	}
 	if err := h.threadInputRepo.CreateSteeringForActiveExecution(c.Request().Context(), input, active.ID); err != nil {
 		applog.Infof("[handler] ChatSteer error creating steering input: %v", err)
-		if errors.Is(err, repository.ErrExpectedTurnEmpty) {
+		if errors.Is(err, persistence.ErrExpectedTurnEmpty) {
 			return echo.NewHTTPError(http.StatusBadRequest, "expected turn id is required")
 		}
-		if errors.Is(err, repository.ErrNoActiveTurn) || errors.Is(err, repository.ErrActiveTurnChanged) {
+		if errors.Is(err, persistence.ErrNoActiveTurn) || errors.Is(err, persistence.ErrActiveTurnChanged) {
 			return echo.NewHTTPError(http.StatusConflict, "active turn changed; queue the message instead")
 		}
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to save steering input")

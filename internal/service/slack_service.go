@@ -22,7 +22,7 @@ import (
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	llmoutput "github.com/openvibely/openvibely/internal/llm/output"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/util"
 	"github.com/slack-go/slack"
 	"github.com/slack-go/slack/slackevents"
@@ -75,17 +75,17 @@ type SlackConnectionStatus struct {
 // SlackService manages Slack OAuth, Socket Mode event processing, and
 // Slack-origin task completion notifications.
 type SlackService struct {
-	settingsRepo               *repository.SettingsRepo
-	projectRepo                *repository.ProjectRepo
+	settingsRepo               persistence.SettingsStore
+	projectRepo                persistence.ProjectStore
 	projectSvc                 *ProjectService
 	githubProjectSvc           GitHubProjectCloneProvider
 	memorySvc                  *MemoryService
 	agentLibraryMaintenanceSvc *AgentLibraryMaintenanceService
-	llmConfigRepo              *repository.LLMConfigRepo
-	taskRepo                   *repository.TaskRepo
-	execRepo                   *repository.ExecutionRepo
-	scheduleRepo               *repository.ScheduleRepo
-	chatAttachmentRepo         *repository.ChatAttachmentRepo
+	llmConfigRepo              persistence.LLMConfigStore
+	taskRepo                   persistence.TaskStore
+	execRepo                   persistence.ExecutionStore
+	scheduleRepo               persistence.ScheduleStore
+	chatAttachmentRepo         persistence.ChatAttachmentStore
 	taskSvc                    *TaskService
 	taskGoalSvc                *TaskGoalService
 	llmSvc                     *LLMService
@@ -93,13 +93,13 @@ type SlackService struct {
 	automationGraphSvc         *AutomationGraphService
 	automationDraftSvc         *AutomationDraftService
 	automationCompiler         *AutomationCompiler
-	slackUserProjectRepo       *repository.SlackUserProjectRepo
-	slackTaskContextRepo       *repository.SlackTaskContextRepo
-	slackInboundReceiptRepo    *repository.SlackInboundReceiptRepo
-	threadInputRepo            *repository.ThreadInputRepo
-	customPersonalityRepo      *repository.CustomPersonalityRepo
-	slackAuthRepo              *repository.SlackAuthRepo
-	agentRepo                  *repository.AgentRepo
+	slackUserProjectRepo       persistence.SlackUserProjectStore
+	slackTaskContextRepo       persistence.SlackTaskContextStore
+	slackInboundReceiptRepo    persistence.SlackInboundReceiptStore
+	threadInputRepo            persistence.ThreadInputStore
+	customPersonalityRepo      persistence.CustomPersonalityStore
+	slackAuthRepo              persistence.SlackAuthStore
+	agentRepo                  persistence.AgentStore
 	chatBroadcaster            *events.ChatBroadcaster
 	executionStreamHub         *events.ExecutionStreamHub
 	queuedTurnPromoter         func(projectID string)
@@ -111,8 +111,8 @@ type SlackService struct {
 	upcomingSvc                *UpcomingService
 	channelMessageRouter       *ChannelMessageRouter
 	emailStatus                func(context.Context) EmailConnectionStatus
-	emailAuthRepo              *repository.EmailAuthRepo
-	webhookRepo                *repository.WebhookRepo
+	emailAuthRepo              persistence.EmailAuthStore
+	webhookRepo                persistence.WebhookStore
 	uploadsDir                 string
 
 	httpClient   *http.Client
@@ -138,7 +138,7 @@ type SlackService struct {
 	ackSocketRequestFn                   func(*socketmode.Client, socketmode.Request)
 	createQueuedInputFn                  func(context.Context, *models.ThreadInput) (bool, error)
 	createExecutionFn                    func(context.Context, *models.Execution) (bool, error)
-	createFirstTurnExecutionFn           func(context.Context, repository.SQLExecutor, *models.Execution) error
+	createFirstTurnExecutionFn           func(context.Context, persistence.Tx, *models.Execution) error
 	deleteProvisionalTaskFn              func(context.Context, string) error
 	downloadSlackAttachmentsFn           func(context.Context, []slackIncomingFile) (string, []models.Attachment, []models.ChatAttachment, error)
 	savePendingAttachmentsFn             func([]models.ChatAttachment) (string, error)
@@ -148,25 +148,19 @@ type SlackService struct {
 }
 
 func NewSlackService(
-	settingsRepo *repository.SettingsRepo,
-	projectRepo *repository.ProjectRepo,
-	llmConfigRepo *repository.LLMConfigRepo,
-	taskRepo *repository.TaskRepo,
-	execRepo *repository.ExecutionRepo,
-	scheduleRepo *repository.ScheduleRepo,
+	settingsRepo persistence.SettingsStore,
+	projectRepo persistence.ProjectStore,
+	llmConfigRepo persistence.LLMConfigStore,
+	taskRepo persistence.TaskStore,
+	execRepo persistence.ExecutionStore,
+	scheduleRepo persistence.ScheduleStore,
 	taskSvc *TaskService,
 	llmSvc *LLMService,
 	workerSvc *WorkerService,
-	slackUserProjectRepo *repository.SlackUserProjectRepo,
-	slackTaskContextRepo *repository.SlackTaskContextRepo,
-	slackAuthRepo *repository.SlackAuthRepo,
+	slackUserProjectRepo persistence.SlackUserProjectStore,
+	slackTaskContextRepo persistence.SlackTaskContextStore,
+	slackAuthRepo persistence.SlackAuthStore,
 ) *SlackService {
-	var usageAnalyticsSvc *UsageAnalyticsService
-	if execRepo != nil {
-		if db := execRepo.DB(); db != nil {
-			usageAnalyticsSvc = NewUsageAnalyticsService(repository.NewUsageRepo(db), llmConfigRepo)
-		}
-	}
 	return &SlackService{
 		settingsRepo:         settingsRepo,
 		projectRepo:          projectRepo,
@@ -177,7 +171,6 @@ func NewSlackService(
 		taskSvc:              taskSvc,
 		llmSvc:               llmSvc,
 		workerSvc:            workerSvc,
-		usageAnalyticsSvc:    usageAnalyticsSvc,
 		slackUserProjectRepo: slackUserProjectRepo,
 		slackTaskContextRepo: slackTaskContextRepo,
 		slackAuthRepo:        slackAuthRepo,
@@ -195,7 +188,7 @@ func NewSlackService(
 	}
 }
 
-func (s *SlackService) SetCustomPersonalityRepo(repo *repository.CustomPersonalityRepo) {
+func (s *SlackService) SetCustomPersonalityRepo(repo persistence.CustomPersonalityStore) {
 	s.customPersonalityRepo = repo
 }
 
@@ -217,15 +210,19 @@ func (s *SlackService) SetExecutionStreamHub(hub *events.ExecutionStreamHub) {
 	s.executionStreamHub = hub
 }
 
-func (s *SlackService) SetThreadInputRepo(repo *repository.ThreadInputRepo) {
+func (s *SlackService) SetUsageAnalyticsService(svc *UsageAnalyticsService) {
+	s.usageAnalyticsSvc = svc
+}
+
+func (s *SlackService) SetThreadInputRepo(repo persistence.ThreadInputStore) {
 	s.threadInputRepo = repo
 }
 
-func (s *SlackService) SetSlackInboundReceiptRepo(repo *repository.SlackInboundReceiptRepo) {
+func (s *SlackService) SetSlackInboundReceiptRepo(repo persistence.SlackInboundReceiptStore) {
 	s.slackInboundReceiptRepo = repo
 }
 
-func (s *SlackService) SetChatAttachmentRepo(repo *repository.ChatAttachmentRepo) {
+func (s *SlackService) SetChatAttachmentRepo(repo persistence.ChatAttachmentStore) {
 	s.chatAttachmentRepo = repo
 }
 
@@ -239,7 +236,7 @@ func (s *SlackService) SetUploadsDir(dir string) {
 	s.uploadsDir = dir
 }
 
-func (s *SlackService) SetAgentRepo(repo *repository.AgentRepo) {
+func (s *SlackService) SetAgentRepo(repo persistence.AgentStore) {
 	s.agentRepo = repo
 }
 
@@ -284,11 +281,11 @@ func (s *SlackService) SetEmailStatusProvider(provider func(context.Context) Ema
 	s.emailStatus = provider
 }
 
-func (s *SlackService) SetEmailAuthRepo(repo *repository.EmailAuthRepo) {
+func (s *SlackService) SetEmailAuthRepo(repo persistence.EmailAuthStore) {
 	s.emailAuthRepo = repo
 }
 
-func (s *SlackService) SetWebhookRepo(repo *repository.WebhookRepo) {
+func (s *SlackService) SetWebhookRepo(repo persistence.WebhookStore) {
 	s.webhookRepo = repo
 }
 
@@ -1226,12 +1223,12 @@ func (s *SlackService) processIncomingMessageWithHandoff(parent context.Context,
 	var createDurableFirstTurn func(context.Context, *models.Task, *models.Execution, []models.ChatAttachment) (bool, error)
 	if s.createExecutionFn == nil && s.slackInboundReceiptRepo != nil && strings.TrimSpace(msg.EventKey) != "" {
 		createDurableFirstTurn = func(ctx context.Context, task *models.Task, execution *models.Execution, attachments []models.ChatAttachment) (bool, error) {
-			return s.slackInboundReceiptRepo.WithHandoff(ctx, msg.EventKey, func(exec repository.SQLExecutor) error {
-				if err := s.taskRepo.CreateWithExecutor(ctx, exec, task); err != nil {
+			return s.slackInboundReceiptRepo.WithHandoff(ctx, msg.EventKey, func(tx persistence.Tx) error {
+				if err := s.taskRepo.CreateInTx(ctx, tx, task); err != nil {
 					return err
 				}
 				if s.slackTaskContextRepo != nil {
-					if err := s.slackTaskContextRepo.UpsertWithExecutor(ctx, exec, &models.SlackTaskContext{
+					if err := s.slackTaskContextRepo.UpsertInTx(ctx, tx, &models.SlackTaskContext{
 						TaskID:         task.ID,
 						SlackTeamID:    msg.TeamID,
 						SlackChannelID: msg.ChannelID,
@@ -1243,10 +1240,10 @@ func (s *SlackService) processIncomingMessageWithHandoff(parent context.Context,
 				}
 				execution.TaskID = task.ID
 				if s.createFirstTurnExecutionFn != nil {
-					if err := s.createFirstTurnExecutionFn(ctx, exec, execution); err != nil {
+					if err := s.createFirstTurnExecutionFn(ctx, tx, execution); err != nil {
 						return err
 					}
-				} else if err := s.execRepo.CreateWithExecutor(ctx, exec, execution); err != nil {
+				} else if err := s.execRepo.CreateInTx(ctx, tx, execution); err != nil {
 					return err
 				}
 				if len(attachments) > 0 && s.chatAttachmentRepo == nil {
@@ -1254,7 +1251,7 @@ func (s *SlackService) processIncomingMessageWithHandoff(parent context.Context,
 				}
 				for i := range attachments {
 					attachments[i].ExecutionID = execution.ID
-					if err := s.chatAttachmentRepo.CreateWithExecutor(ctx, exec, &attachments[i]); err != nil {
+					if err := s.chatAttachmentRepo.CreateInTx(ctx, tx, &attachments[i]); err != nil {
 						return err
 					}
 				}
@@ -1308,8 +1305,8 @@ func (s *SlackService) processIncomingMessageWithHandoff(parent context.Context,
 			if s.slackInboundReceiptRepo == nil || strings.TrimSpace(msg.EventKey) == "" {
 				return false, s.threadInputRepo.CreateQueued(ctx, input)
 			}
-			return s.slackInboundReceiptRepo.WithHandoff(ctx, msg.EventKey, func(exec repository.SQLExecutor) error {
-				return s.threadInputRepo.CreateQueuedWithExecutor(ctx, exec, input)
+			return s.slackInboundReceiptRepo.WithHandoff(ctx, msg.EventKey, func(tx persistence.Tx) error {
+				return s.threadInputRepo.CreateQueuedInTx(ctx, tx, input)
 			})
 		},
 		OnAttachmentDownloadFailed: func(_ context.Context, msgText string) {
@@ -1349,8 +1346,8 @@ func (s *SlackService) processIncomingMessageWithHandoff(parent context.Context,
 				if s.slackInboundReceiptRepo == nil || strings.TrimSpace(msg.EventKey) == "" {
 					return false, s.execRepo.Create(ctx, execution)
 				}
-				return s.slackInboundReceiptRepo.WithHandoff(ctx, msg.EventKey, func(exec repository.SQLExecutor) error {
-					return s.execRepo.CreateWithExecutor(ctx, exec, execution)
+				return s.slackInboundReceiptRepo.WithHandoff(ctx, msg.EventKey, func(tx persistence.Tx) error {
+					return s.execRepo.CreateInTx(ctx, tx, execution)
 				})
 			},
 			RuntimeToolsForTask: func(taskID string) *llmcontracts.RuntimeTools {
@@ -1505,7 +1502,7 @@ func (s *SlackService) slackActionHandlersForTask(projectID, callerTaskID string
 		CustomPersonalityRepo: s.customPersonalityRepo,
 		ProjectRepo:           s.projectRepo,
 		AlertSvc:              s.alertSvc,
-		UsageAnalyticsSvc:     usageAnalyticsServiceFromRepos(s.usageAnalyticsSvc, s.execRepo, s.llmConfigRepo),
+		UsageAnalyticsSvc:     s.usageAnalyticsSvc,
 		UpcomingSvc:           s.upcomingSvc,
 		SlackStatus:           s.GetConnectionStatus,
 		SlackAuthRepo:         s.slackAuthRepo,

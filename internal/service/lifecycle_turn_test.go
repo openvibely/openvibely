@@ -18,6 +18,7 @@ import (
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/memory"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/testutil"
 )
@@ -690,7 +691,7 @@ func TestPrepareLifecycleTurn_RecordsLifecycleHookSkillAnalyticsForRouteHooks(t 
 		t.Fatalf("project A recall_memory selected events = %d, want 1", recallCount)
 	}
 
-	underusedA, err := skillRepo.GetUnderusedSkills(ctx, repository.SkillAnalyticsFilter{ProjectID: projectA.ID}, []repository.EnabledSkillInfo{{Handle: "route_task", Scope: models.SkillScopeAgentOwned, Enabled: true}, {Handle: "recall_memory", Scope: models.SkillScopeAgentOwned, Enabled: true}})
+	underusedA, err := skillRepo.GetUnderusedSkills(ctx, persistence.SkillAnalyticsFilter{ProjectID: projectA.ID}, []persistence.EnabledSkillInfo{{Handle: "route_task", Scope: models.SkillScopeAgentOwned, Enabled: true}, {Handle: "recall_memory", Scope: models.SkillScopeAgentOwned, Enabled: true}})
 	if err != nil {
 		t.Fatalf("GetUnderusedSkills project A: %v", err)
 	}
@@ -701,7 +702,7 @@ func TestPrepareLifecycleTurn_RecordsLifecycleHookSkillAnalyticsForRouteHooks(t 
 		}
 	}
 
-	underusedB, err := skillRepo.GetUnderusedSkills(ctx, repository.SkillAnalyticsFilter{ProjectID: projectB.ID}, []repository.EnabledSkillInfo{{Handle: "route_task", Scope: models.SkillScopeAgentOwned, Enabled: true}})
+	underusedB, err := skillRepo.GetUnderusedSkills(ctx, persistence.SkillAnalyticsFilter{ProjectID: projectB.ID}, []persistence.EnabledSkillInfo{{Handle: "route_task", Scope: models.SkillScopeAgentOwned, Enabled: true}})
 	if err != nil {
 		t.Fatalf("GetUnderusedSkills project B: %v", err)
 	}
@@ -749,7 +750,7 @@ func TestPrepareLifecycleTurn_RecordsLifecycleHookSkillAnalyticsForAfterComplete
 		t.Fatal("timed out waiting for after_complete hook")
 	}
 
-	underused, err := skillRepo.GetUnderusedSkills(ctx, repository.SkillAnalyticsFilter{ProjectID: project.ID}, []repository.EnabledSkillInfo{{Handle: "observe_task_for_learning", Scope: models.SkillScopeAgentOwned, Enabled: true}})
+	underused, err := skillRepo.GetUnderusedSkills(ctx, persistence.SkillAnalyticsFilter{ProjectID: project.ID}, []persistence.EnabledSkillInfo{{Handle: "observe_task_for_learning", Scope: models.SkillScopeAgentOwned, Enabled: true}})
 	if err != nil {
 		t.Fatalf("GetUnderusedSkills: %v", err)
 	}

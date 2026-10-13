@@ -14,11 +14,11 @@ import (
 
 	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence"
 )
 
 // SetTaskCommitStatRepo sets the repository used to record task-produced commit metrics.
-func (s *LLMService) SetTaskCommitStatRepo(repo *repository.TaskCommitStatRepo) {
+func (s *LLMService) SetTaskCommitStatRepo(repo persistence.TaskCommitStatStore) {
 	s.taskCommitStatRepo = repo
 }
 
@@ -46,7 +46,7 @@ func (s *LLMService) RecordTaskCommitStat(ctx context.Context, task *models.Task
 	return recordProducedCommitStat(ctx, s.taskCommitStatRepo, s.execRepo, task, execModel, repoPath, sha)
 }
 
-func recordProducedCommitStat(ctx context.Context, statRepo *repository.TaskCommitStatRepo, execRepo *repository.ExecutionRepo, task *models.Task, execModel *models.Execution, repoPath, sha string) error {
+func recordProducedCommitStat(ctx context.Context, statRepo persistence.TaskCommitStatStore, execRepo persistence.ExecutionStore, task *models.Task, execModel *models.Execution, repoPath, sha string) error {
 	if statRepo == nil || task == nil {
 		return nil
 	}
@@ -58,7 +58,7 @@ func recordProducedCommitStat(ctx context.Context, statRepo *repository.TaskComm
 	return statRepo.UpsertProducedCommitStat(ctx, stat)
 }
 
-func applyTaskCommitStatContext(ctx context.Context, stat *models.TaskCommitStat, execRepo *repository.ExecutionRepo, task *models.Task, execModel *models.Execution) {
+func applyTaskCommitStatContext(ctx context.Context, stat *models.TaskCommitStat, execRepo persistence.ExecutionStore, task *models.Task, execModel *models.Execution) {
 	stat.ProjectID = task.ProjectID
 	stat.TaskID = task.ID
 	if execModel != nil {

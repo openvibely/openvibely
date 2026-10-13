@@ -16,7 +16,7 @@ import (
 	"github.com/openvibely/openvibely/internal/buildinfo"
 	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/internal/update"
 	"github.com/openvibely/openvibely/web/static"
@@ -44,19 +44,19 @@ type Handler struct {
 	automationLifecycleSvc     *service.AutomationLifecycleService
 	automationExternalStateSvc *service.AutomationExternalStateService
 	automationLiveViewTracker  *service.AutomationLiveViewTracker
-	llmConfigRepo              *repository.LLMConfigRepo
-	taskRepo                   *repository.TaskRepo
-	scheduleRepo               *repository.ScheduleRepo
-	execRepo                   *repository.ExecutionRepo
-	threadInputRepo            *repository.ThreadInputRepo
-	usageRepo                  *repository.UsageRepo
-	skillAnalyticsRepo         *repository.SkillAnalyticsRepo
-	workerRepo                 *repository.WorkerRepo
-	attachmentRepo             *repository.AttachmentRepo
-	chatAttachmentRepo         *repository.ChatAttachmentRepo
-	chatInputRequestRepo       *repository.ChatInputRequestRepo
-	projectRepo                *repository.ProjectRepo
-	settingsRepo               *repository.SettingsRepo
+	llmConfigRepo              persistence.LLMConfigStore
+	taskRepo                   persistence.TaskStore
+	scheduleRepo               persistence.ScheduleStore
+	execRepo                   persistence.ExecutionStore
+	threadInputRepo            persistence.ThreadInputStore
+	usageRepo                  persistence.UsageStore
+	skillAnalyticsRepo         persistence.SkillAnalyticsStore
+	workerRepo                 persistence.WorkerStore
+	attachmentRepo             persistence.AttachmentStore
+	chatAttachmentRepo         persistence.ChatAttachmentStore
+	chatInputRequestRepo       persistence.ChatInputRequestStore
+	projectRepo                persistence.ProjectStore
+	settingsRepo               persistence.SettingsStore
 	usageAnalyticsSvc          *service.UsageAnalyticsService
 	broadcaster                *events.Broadcaster
 	chatBroadcaster            *events.ChatBroadcaster
@@ -69,40 +69,40 @@ type Handler struct {
 	xServiceMu                 sync.RWMutex
 	xConfigMu                  sync.Mutex
 	emailService               EmailServiceProvider
-	telegramAuthRepo           *repository.TelegramAuthRepo
-	telegramUserProjectRepo    *repository.TelegramUserProjectRepo
-	slackAuthRepo              *repository.SlackAuthRepo
-	emailAuthRepo              *repository.EmailAuthRepo
-	discordAuthRepo            *repository.DiscordAuthRepo
-	xAuthRepo                  *repository.XAuthRepo
-	xUserProjectRepo           *repository.XUserProjectRepo
-	xTaskContextRepo           *repository.XTaskContextRepo
-	xInboundReceiptRepo        *repository.XInboundReceiptRepo
-	emailTaskContextRepo       *repository.EmailTaskContextRepo
-	slackTaskContextRepo       *repository.SlackTaskContextRepo
-	discordTaskContextRepo     *repository.DiscordTaskContextRepo
-	reviewCommentRepo          *repository.ReviewCommentRepo
-	customPersonalityRepo      *repository.CustomPersonalityRepo
-	agentRepo                  *repository.AgentRepo
+	telegramAuthRepo           persistence.TelegramAuthStore
+	telegramUserProjectRepo    persistence.TelegramUserProjectStore
+	slackAuthRepo              persistence.SlackAuthStore
+	emailAuthRepo              persistence.EmailAuthStore
+	discordAuthRepo            persistence.DiscordAuthStore
+	xAuthRepo                  persistence.XAuthStore
+	xUserProjectRepo           persistence.XUserProjectStore
+	xTaskContextRepo           persistence.XTaskContextStore
+	xInboundReceiptRepo        persistence.XInboundReceiptStore
+	emailTaskContextRepo       persistence.EmailTaskContextStore
+	slackTaskContextRepo       persistence.SlackTaskContextStore
+	discordTaskContextRepo     persistence.DiscordTaskContextStore
+	reviewCommentRepo          persistence.ReviewCommentStore
+	customPersonalityRepo      persistence.CustomPersonalityStore
+	agentRepo                  persistence.AgentStore
 	// taskUIAgentOptionsLoader is a test seam; production uses agentRepo.ListTaskUIOptions.
-	taskUIAgentOptionsLoader             func(context.Context) ([]repository.AgentTaskUIOption, error)
+	taskUIAgentOptionsLoader             func(context.Context) ([]persistence.AgentTaskUIOption, error)
 	startStreamingResponseOverride       func(streamingResponseParams) error // test seam for handler-path measurements
 	processTaskThreadAttachmentsOverride func(context.Context, string, string) (string, []models.Attachment, []models.ChatAttachment, error)
 
-	lifecycleRepo              *repository.LifecycleRepo
+	lifecycleRepo              persistence.LifecycleStore
 	worktreeSvc                *service.WorktreeService
-	taskPullRequestRepo        *repository.TaskPullRequestRepo
-	taskCommitStatRepo         *repository.TaskCommitStatRepo
-	githubPRFeedbackRepo       *repository.GitHubPRFeedbackRepo
-	githubAuthRepo             *repository.GitHubAuthRepo
+	taskPullRequestRepo        persistence.TaskPullRequestStore
+	taskCommitStatRepo         persistence.TaskCommitStatStore
+	githubPRFeedbackRepo       persistence.GitHubPRFeedbackStore
+	githubAuthRepo             persistence.GitHubAuthStore
 	githubSvc                  GitHubServiceProvider
 	slackSvc                   SlackServiceProvider
 	discordSvc                 DiscordServiceProvider
 	channelMessageRouter       *service.ChannelMessageRouter
 	localRepoPathEnabled       *bool
 	projectFolderPicker        ProjectFolderPicker
-	webhookRepo                *repository.WebhookRepo
-	channelTargetRepo          *repository.ChannelTargetRepo
+	webhookRepo                persistence.WebhookStore
+	channelTargetRepo          persistence.ChannelTargetStore
 	memorySvc                  *service.MemoryService
 	agentLibraryMaintenanceSvc *service.AgentLibraryMaintenanceService
 	agentSkillRoot             string
@@ -193,11 +193,11 @@ type channelEmailStatusProviderSetter interface {
 }
 
 type channelEmailAuthRepoSetter interface {
-	SetEmailAuthRepo(*repository.EmailAuthRepo)
+	SetEmailAuthRepo(persistence.EmailAuthStore)
 }
 
 type channelWebhookRepoSetter interface {
-	SetWebhookRepo(*repository.WebhookRepo)
+	SetWebhookRepo(persistence.WebhookStore)
 }
 
 type DiscordServiceProvider interface {
@@ -205,6 +205,16 @@ type DiscordServiceProvider interface {
 	ReloadFromSettings(ctx context.Context) error
 	Disconnect(ctx context.Context) error
 	TestConnection(ctx context.Context) error
+}
+
+// RuntimeStores carries the conversation and analytics stores the handler shares
+// with the services it wires during construction.
+type RuntimeStores struct {
+	ThreadInputs      persistence.ThreadInputStore
+	Usage             persistence.UsageStore
+	SkillAnalytics    persistence.SkillAnalyticsStore
+	TaskCommitStats   persistence.TaskCommitStatStore
+	ChatInputRequests persistence.ChatInputRequestStore
 }
 
 func New(
@@ -216,33 +226,27 @@ func New(
 	alertSvc *service.AlertService,
 	upcomingSvc *service.UpcomingService,
 	insightsSvc *service.InsightsService,
-	llmConfigRepo *repository.LLMConfigRepo,
-	taskRepo *repository.TaskRepo,
-	scheduleRepo *repository.ScheduleRepo,
-	execRepo *repository.ExecutionRepo,
-	workerRepo *repository.WorkerRepo,
-	attachmentRepo *repository.AttachmentRepo,
-	chatAttachmentRepo *repository.ChatAttachmentRepo,
-	projectRepo *repository.ProjectRepo,
-	settingsRepo *repository.SettingsRepo,
+	llmConfigRepo persistence.LLMConfigStore,
+	taskRepo persistence.TaskStore,
+	scheduleRepo persistence.ScheduleStore,
+	execRepo persistence.ExecutionStore,
+	workerRepo persistence.WorkerStore,
+	attachmentRepo persistence.AttachmentStore,
+	chatAttachmentRepo persistence.ChatAttachmentStore,
+	projectRepo persistence.ProjectStore,
+	settingsRepo persistence.SettingsStore,
 	broadcaster *events.Broadcaster,
 	telegramSvc *service.TelegramService,
+	stores RuntimeStores,
 ) *Handler {
-	var threadInputRepo *repository.ThreadInputRepo
-	var usageRepo *repository.UsageRepo
-	var skillAnalyticsRepo *repository.SkillAnalyticsRepo
-	var taskCommitStatRepo *repository.TaskCommitStatRepo
-	var chatInputRequestRepo *repository.ChatInputRequestRepo
+	threadInputRepo := stores.ThreadInputs
+	usageRepo := stores.Usage
+	skillAnalyticsRepo := stores.SkillAnalytics
+	taskCommitStatRepo := stores.TaskCommitStats
+	chatInputRequestRepo := stores.ChatInputRequests
 	var usageAnalyticsSvc *service.UsageAnalyticsService
-	if execRepo != nil {
-		if db := execRepo.DB(); db != nil {
-			threadInputRepo = repository.NewThreadInputRepo(db)
-			usageRepo = repository.NewUsageRepo(db)
-			skillAnalyticsRepo = repository.NewSkillAnalyticsRepo(db)
-			taskCommitStatRepo = repository.NewTaskCommitStatRepo(db)
-			chatInputRequestRepo = repository.NewChatInputRequestRepo(db)
-			usageAnalyticsSvc = service.NewUsageAnalyticsService(usageRepo, llmConfigRepo)
-		}
+	if usageRepo != nil {
+		usageAnalyticsSvc = service.NewUsageAnalyticsService(usageRepo, llmConfigRepo)
 	}
 
 	var h *Handler
@@ -339,11 +343,11 @@ func (h *Handler) SetChatBroadcaster(cb *events.ChatBroadcaster) {
 	h.chatBroadcaster = cb
 }
 
-func (h *Handler) SetThreadInputRepo(repo *repository.ThreadInputRepo) {
+func (h *Handler) SetThreadInputRepo(repo persistence.ThreadInputStore) {
 	h.threadInputRepo = repo
 }
 
-func (h *Handler) SetUsageRepo(repo *repository.UsageRepo) {
+func (h *Handler) SetUsageRepo(repo persistence.UsageStore) {
 	h.usageRepo = repo
 	if h.llmSvc != nil {
 		h.llmSvc.SetUsageRepo(repo)
@@ -396,12 +400,12 @@ func (h *Handler) publishExecutionTerminal(execID string, status models.Executio
 }
 
 // SetTelegramAuthRepo sets the Telegram authorization repo for managing authorized users.
-func (h *Handler) SetTelegramAuthRepo(repo *repository.TelegramAuthRepo) {
+func (h *Handler) SetTelegramAuthRepo(repo persistence.TelegramAuthStore) {
 	h.telegramAuthRepo = repo
 }
 
 // SetTelegramUserProjectRepo sets the Telegram project-selection repo for live and settings-created services.
-func (h *Handler) SetTelegramUserProjectRepo(repo *repository.TelegramUserProjectRepo) {
+func (h *Handler) SetTelegramUserProjectRepo(repo persistence.TelegramUserProjectStore) {
 	h.telegramUserProjectRepo = repo
 	if h.telegramService != nil {
 		h.telegramService.SetTelegramUserProjectRepo(repo)
@@ -409,12 +413,12 @@ func (h *Handler) SetTelegramUserProjectRepo(repo *repository.TelegramUserProjec
 }
 
 // SetSlackAuthRepo sets the Slack authorization repo for managing authorized users.
-func (h *Handler) SetSlackAuthRepo(repo *repository.SlackAuthRepo) {
+func (h *Handler) SetSlackAuthRepo(repo persistence.SlackAuthStore) {
 	h.slackAuthRepo = repo
 }
 
 // SetEmailAuthRepo sets the Email authorization repo for managing authorized senders.
-func (h *Handler) SetEmailAuthRepo(repo *repository.EmailAuthRepo) {
+func (h *Handler) SetEmailAuthRepo(repo persistence.EmailAuthStore) {
 	h.emailAuthRepo = repo
 	h.wireChannelIntegrationSummaryDeps(h.slackSvc)
 	h.wireChannelIntegrationSummaryDeps(h.discordSvc)
@@ -422,15 +426,15 @@ func (h *Handler) SetEmailAuthRepo(repo *repository.EmailAuthRepo) {
 }
 
 // SetDiscordAuthRepo sets the Discord authorization repo for managing authorized users.
-func (h *Handler) SetDiscordAuthRepo(repo *repository.DiscordAuthRepo) {
+func (h *Handler) SetDiscordAuthRepo(repo persistence.DiscordAuthStore) {
 	h.discordAuthRepo = repo
 }
 
-func (h *Handler) SetEmailTaskContextRepo(repo *repository.EmailTaskContextRepo) {
+func (h *Handler) SetEmailTaskContextRepo(repo persistence.EmailTaskContextStore) {
 	h.emailTaskContextRepo = repo
 }
 
-func (h *Handler) SetDiscordTaskContextRepo(repo *repository.DiscordTaskContextRepo) {
+func (h *Handler) SetDiscordTaskContextRepo(repo persistence.DiscordTaskContextStore) {
 	h.discordTaskContextRepo = repo
 }
 
@@ -441,22 +445,22 @@ func (h *Handler) SetEmailService(svc EmailServiceProvider) {
 	h.wireChannelIntegrationSummaryDeps(h.telegramService)
 }
 
-func (h *Handler) SetSlackTaskContextRepo(repo *repository.SlackTaskContextRepo) {
+func (h *Handler) SetSlackTaskContextRepo(repo persistence.SlackTaskContextStore) {
 	h.slackTaskContextRepo = repo
 }
 
 // SetReviewCommentRepo sets the review comment repo for inline code review.
-func (h *Handler) SetReviewCommentRepo(repo *repository.ReviewCommentRepo) {
+func (h *Handler) SetReviewCommentRepo(repo persistence.ReviewCommentStore) {
 	h.reviewCommentRepo = repo
 }
 
 // SetCustomPersonalityRepo sets the custom personality repo for managing custom personalities.
-func (h *Handler) SetCustomPersonalityRepo(repo *repository.CustomPersonalityRepo) {
+func (h *Handler) SetCustomPersonalityRepo(repo persistence.CustomPersonalityStore) {
 	h.customPersonalityRepo = repo
 }
 
 // SetAgentRepo sets the agent definition repo for managing agents.
-func (h *Handler) SetAgentRepo(repo *repository.AgentRepo) {
+func (h *Handler) SetAgentRepo(repo persistence.AgentStore) {
 	h.agentRepo = repo
 	if h.taskSvc != nil {
 		h.taskSvc.SetAgentRepo(repo)
@@ -465,7 +469,7 @@ func (h *Handler) SetAgentRepo(repo *repository.AgentRepo) {
 
 // SetLifecycleRepo sets the lifecycle repo for agent hook management and
 // lifecycle execution activity surfacing.
-func (h *Handler) SetLifecycleRepo(repo *repository.LifecycleRepo) {
+func (h *Handler) SetLifecycleRepo(repo persistence.LifecycleStore) {
 	h.lifecycleRepo = repo
 }
 
@@ -475,11 +479,11 @@ func (h *Handler) SetWorktreeService(svc *service.WorktreeService) {
 }
 
 // SetTaskPullRequestRepo sets the task pull request repo for task PR records.
-func (h *Handler) SetTaskPullRequestRepo(repo *repository.TaskPullRequestRepo) {
+func (h *Handler) SetTaskPullRequestRepo(repo persistence.TaskPullRequestStore) {
 	h.taskPullRequestRepo = repo
 }
 
-func (h *Handler) SetTaskCommitStatRepo(repo *repository.TaskCommitStatRepo) {
+func (h *Handler) SetTaskCommitStatRepo(repo persistence.TaskCommitStatStore) {
 	h.taskCommitStatRepo = repo
 	if h.llmSvc != nil {
 		h.llmSvc.SetTaskCommitStatRepo(repo)
@@ -493,11 +497,11 @@ func (h *Handler) newTaskPullRequestService() *service.TaskPullRequestService {
 	return service.NewTaskPullRequestService(h.githubSvc, h.taskPullRequestRepo).SetTaskCommitStatRepo(h.taskCommitStatRepo)
 }
 
-func (h *Handler) SetGitHubPRFeedbackRepo(repo *repository.GitHubPRFeedbackRepo) {
+func (h *Handler) SetGitHubPRFeedbackRepo(repo persistence.GitHubPRFeedbackStore) {
 	h.githubPRFeedbackRepo = repo
 }
 
-func (h *Handler) SetGitHubAuthRepo(repo *repository.GitHubAuthRepo) {
+func (h *Handler) SetGitHubAuthRepo(repo persistence.GitHubAuthStore) {
 	h.githubAuthRepo = repo
 }
 
@@ -522,7 +526,7 @@ func (h *Handler) SetDiscordService(svc DiscordServiceProvider) {
 	h.wireChannelIntegrationSummaryDeps(svc)
 }
 
-func (h *Handler) SetXRepositories(auth *repository.XAuthRepo, selections *repository.XUserProjectRepo, contexts *repository.XTaskContextRepo, receipts *repository.XInboundReceiptRepo) {
+func (h *Handler) SetXRepositories(auth persistence.XAuthStore, selections persistence.XUserProjectStore, contexts persistence.XTaskContextStore, receipts persistence.XInboundReceiptStore) {
 	h.xAuthRepo = auth
 	h.xUserProjectRepo = selections
 	h.xTaskContextRepo = contexts
@@ -574,7 +578,7 @@ func (h *Handler) SetChannelMessageRouter(router *service.ChannelMessageRouter) 
 	h.channelMessageRouter = router
 }
 
-func (h *Handler) SetChannelTargetRepo(repo *repository.ChannelTargetRepo) {
+func (h *Handler) SetChannelTargetRepo(repo persistence.ChannelTargetStore) {
 	h.channelTargetRepo = repo
 }
 
@@ -594,7 +598,7 @@ func (h *Handler) SetProjectFolderPicker(picker ProjectFolderPicker) {
 }
 
 // SetWebhookRepo sets the webhook endpoint repository for inbound webhook management.
-func (h *Handler) SetWebhookRepo(repo *repository.WebhookRepo) {
+func (h *Handler) SetWebhookRepo(repo persistence.WebhookStore) {
 	h.webhookRepo = repo
 	h.wireChannelIntegrationSummaryDeps(h.slackSvc)
 	h.wireChannelIntegrationSummaryDeps(h.discordSvc)

@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence"
 )
 
 type AutomationPullRequestProvider interface {
@@ -17,13 +17,13 @@ type AutomationPullRequestProvider interface {
 }
 
 type AutomationExternalStateService struct {
-	automations *repository.AutomationRepo
-	pulls       *repository.TaskPullRequestRepo
-	projects    *repository.ProjectRepo
+	automations persistence.AutomationStore
+	pulls       persistence.TaskPullRequestStore
+	projects    persistence.ProjectStore
 	github      AutomationPullRequestProvider
 }
 
-func NewAutomationExternalStateService(automations *repository.AutomationRepo, pulls *repository.TaskPullRequestRepo, projects *repository.ProjectRepo, github AutomationPullRequestProvider) *AutomationExternalStateService {
+func NewAutomationExternalStateService(automations persistence.AutomationStore, pulls persistence.TaskPullRequestStore, projects persistence.ProjectStore, github AutomationPullRequestProvider) *AutomationExternalStateService {
 	return &AutomationExternalStateService{automations: automations, pulls: pulls, projects: projects, github: github}
 }
 
@@ -99,7 +99,7 @@ func (s *AutomationExternalStateService) refreshAfterValidation(ctx context.Cont
 			return models.AutomationExternalState{}, err
 		}
 	}
-	state, err := s.automations.AutomationExternalState(ctx, projectID, automationID, now.UTC().Add(-repository.AutomationExternalStaleAfter))
+	state, err := s.automations.AutomationExternalState(ctx, projectID, automationID, now.UTC().Add(-persistence.AutomationExternalStaleAfter))
 	if err != nil {
 		return models.AutomationExternalState{}, err
 	}
@@ -128,7 +128,7 @@ func (s *AutomationExternalStateService) reconcilePullRequestState(ctx context.C
 		}
 		binding := sourceBinding
 		binding.NodeID = review.ID
-		event := repository.AutomationProjectionEvent{
+		event := persistence.AutomationProjectionEvent{
 			Context: automationContext, Binding: binding,
 			ActivityKey: resourceID + ":state:" + state, ActivityType: "pull_request_state",
 			Resources: []models.AutomationActivityResource{{ResourceType: "task", ResourceID: taskID}, {ResourceType: "pull_request", ResourceID: resourceID}},

@@ -22,6 +22,7 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/lifecycle"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/internal/testutil"
@@ -64,11 +65,11 @@ func createProjectTB(t testing.TB, h *Handler, name string) *models.Project {
 
 // createAgent creates a test LLM config with sensible defaults.
 // Uses ProviderTest so tests never call real providers.
-func createAgent(t *testing.T, repo *repository.LLMConfigRepo, opts ...func(*models.LLMConfig)) *models.LLMConfig {
+func createAgent(t *testing.T, repo persistence.LLMConfigStore, opts ...func(*models.LLMConfig)) *models.LLMConfig {
 	return createAgentTB(t, repo, opts...)
 }
 
-func createAgentTB(t testing.TB, repo *repository.LLMConfigRepo, opts ...func(*models.LLMConfig)) *models.LLMConfig {
+func createAgentTB(t testing.TB, repo persistence.LLMConfigStore, opts ...func(*models.LLMConfig)) *models.LLMConfig {
 	t.Helper()
 	a := &models.LLMConfig{
 		Name: "Test Agent", Provider: models.ProviderTest,
@@ -5868,7 +5869,7 @@ func TestLayout_UIPreferencesRestoreFromSettings(t *testing.T) {
 func TestLayout_UIPreferencesDoNotReadSettingsForHTMXFragments(t *testing.T) {
 	h, e, _, _ := setupTestHandlerWithDB(t)
 	settingsQueries := 0
-	h.settingsRepo.SetQueryObserver(func(query string) {
+	h.settingsRepo.(*repository.SettingsRepo).SetQueryObserver(func(query string) {
 		if strings.Contains(query, "app_settings") {
 			settingsQueries++
 		}
@@ -6919,7 +6920,7 @@ func TestHandler_CompleteWithSuccess_NotifiesSwarmChildFollowupCompletion(t *tes
 	require.NoError(t, h.execRepo.Create(ctx, exec))
 
 	outcome := h.completeWithSuccess(ctx, exec.ID, worker.ID, "worker follow-up done", "", 0, 1)
-	require.Equal(t, repository.CompleteSuccessCompleted, outcome)
+	require.Equal(t, persistence.CompleteSuccessCompleted, outcome)
 
 	updatedWorker, err := h.taskRepo.GetByID(ctx, worker.ID)
 	require.NoError(t, err)
@@ -7661,7 +7662,7 @@ func TestHandler_TaskThreadSteer_CreatesPendingSteeringInput(t *testing.T) {
 	if len(execs) != 1 || execs[0].ID != activeExec.ID || execs[0].Status != models.ExecRunning {
 		t.Fatalf("expected active execution to keep running, got %#v", execs)
 	}
-	inputs, err := h.threadInputRepo.ListPendingSteering(ctx, activeExec.ID, activeExec.ID)
+	inputs, err := h.threadInputRepo.(*repository.ThreadInputRepo).ListPendingSteering(ctx, activeExec.ID, activeExec.ID)
 	require.NoError(t, err)
 	require.Len(t, inputs, 1)
 	assert.Equal(t, "Stop and use the new interface", inputs[0].Content)
@@ -8647,7 +8648,7 @@ func TestHandler_GetTaskThread_HidesLifecycleAgentActivity(t *testing.T) {
 		Status:         models.LifecycleExecCompleted,
 		OutputJSON:     `{"title":"Prepared useful context","content":"private context"}`,
 	}
-	if err := h.lifecycleRepo.CreateExecution(ctx, lifeExec); err != nil {
+	if err := h.lifecycleRepo.(*repository.LifecycleRepo).CreateExecution(ctx, lifeExec); err != nil {
 		t.Fatalf("create lifecycle execution: %v", err)
 	}
 
@@ -8831,7 +8832,7 @@ func TestHandler_GetTaskThread_RunningPlaceholder_NoLiteralThinkingText(t *testi
 		ex.Status = models.ExecRunning
 		ex.PromptSent = "Thread prompt"
 	})
-	assert.NoError(t, h.execRepo.UpdateOutput(ctx, exec.ID, ""))
+	assert.NoError(t, h.execRepo.(*repository.ExecutionRepo).UpdateOutput(ctx, exec.ID, ""))
 
 	rec := htmxGet(e, "/tasks/"+task.ID+"/thread")
 	assertCode(t, rec, http.StatusOK)
@@ -8859,7 +8860,7 @@ func TestHandler_GetTaskThread_RunningWithPartialOutput_ShowsStreamingDots(t *te
 		ex.Status = models.ExecRunning
 		ex.PromptSent = "Thread prompt"
 	})
-	assert.NoError(t, h.execRepo.UpdateOutput(ctx, exec.ID, "Partial thread output"))
+	assert.NoError(t, h.execRepo.(*repository.ExecutionRepo).UpdateOutput(ctx, exec.ID, "Partial thread output"))
 
 	rec := htmxGet(e, "/tasks/"+task.ID+"/thread")
 	assertCode(t, rec, http.StatusOK)
@@ -8906,7 +8907,7 @@ func TestHandler_GetTaskThread_ScheduledTaskExecutionSurvivesStaleRecoverySweep(
 		ex.Status = models.ExecRunning
 		ex.PromptSent = "Consolidate memories"
 	})
-	assert.NoError(t, h.execRepo.UpdateOutput(ctx, exec.ID, "partial consolidation output"))
+	assert.NoError(t, h.execRepo.(*repository.ExecutionRepo).UpdateOutput(ctx, exec.ID, "partial consolidation output"))
 
 	// Simulate an unrelated concurrent request triggering the stale-execution
 	// recovery sweep while the scheduled task is legitimately still running.
@@ -8950,7 +8951,7 @@ func TestHandler_GetTaskThread_ChannelSwarmChildFollowupSurvivesStaleRecoverySwe
 		tk.AgentID = &agent.ID
 	})
 	exec := &models.Execution{TaskID: worker.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "Continue worker implementation", IsFollowup: true}
-	assert.NoError(t, h.execRepo.CreateDirectTaskFollowup(ctx, exec))
+	assert.NoError(t, h.execRepo.(*repository.ExecutionRepo).CreateDirectTaskFollowup(ctx, exec))
 	h.StartChannelTaskRun(ctx, service.ChannelTaskRunRequest{
 		ExecID:    exec.ID,
 		TaskID:    worker.ID,
@@ -8969,7 +8970,7 @@ func TestHandler_GetTaskThread_ChannelSwarmChildFollowupSurvivesStaleRecoverySwe
 		stored, err := h.execRepo.GetByID(ctx, exec.ID)
 		return err == nil && stored != nil && stored.Status == models.ExecRunning
 	}, 2*time.Second, 25*time.Millisecond)
-	assert.NoError(t, h.execRepo.UpdateOutput(ctx, exec.ID, "partial worker output"))
+	assert.NoError(t, h.execRepo.(*repository.ExecutionRepo).UpdateOutput(ctx, exec.ID, "partial worker output"))
 
 	_, err := h.execRepo.RecoverStaleRunningTaskExecutions(ctx)
 	assert.NoError(t, err)
@@ -9100,7 +9101,7 @@ func TestHandler_GetTaskThread_PreservesHistoryAfterFailureAndRetry(t *testing.T
 		ex.IsFollowup = true
 	})
 	streamedFailureOutput := "running go test ./...\n--- FAIL: TestWidget"
-	if err := h.execRepo.UpdateOutput(ctx, failedFollowup.ID, streamedFailureOutput); err != nil {
+	if err := h.execRepo.(*repository.ExecutionRepo).UpdateOutput(ctx, failedFollowup.ID, streamedFailureOutput); err != nil {
 		t.Fatalf("failed to seed streamed failure output: %v", err)
 	}
 	h.execRepo.Complete(ctx, failedFollowup.ID, models.ExecFailed, "", "go test failed", 0, 120)
@@ -9168,7 +9169,7 @@ func TestHandler_GetTaskThread_PreservesHistoryAfterRateLimitFailure(t *testing.
 		ex.IsFollowup = true
 	})
 	streamedFailureOutput := "starting retry flow..."
-	if err := h.execRepo.UpdateOutput(ctx, rateLimited.ID, streamedFailureOutput); err != nil {
+	if err := h.execRepo.(*repository.ExecutionRepo).UpdateOutput(ctx, rateLimited.ID, streamedFailureOutput); err != nil {
 		t.Fatalf("failed to seed streamed failure output: %v", err)
 	}
 	rateLimitErr := `API error 429: {"type":"error","error":{"type":"rate_limit_error","message":"This request would exceed your account's rate limit. Please try again later."}}`

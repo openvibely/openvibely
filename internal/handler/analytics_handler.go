@@ -10,7 +10,7 @@ import (
 	"github.com/openvibely/openvibely/internal/agentskills"
 	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/web/templates/pages"
 )
@@ -148,12 +148,12 @@ func (h *Handler) GetSkillAnalytics(c echo.Context) error {
 	return c.JSON(http.StatusOK, view)
 }
 
-func parseSkillAnalyticsFilter(c echo.Context) repository.SkillAnalyticsFilter {
+func parseSkillAnalyticsFilter(c echo.Context) persistence.SkillAnalyticsFilter {
 	agentID := strings.TrimSpace(c.QueryParam("agent_id"))
 	if agentID == "" {
 		agentID = strings.TrimSpace(c.QueryParam("agent"))
 	}
-	filter := repository.SkillAnalyticsFilter{
+	filter := persistence.SkillAnalyticsFilter{
 		ProjectID:           strings.TrimSpace(c.QueryParam("project_id")),
 		AgentID:             agentID,
 		WorkflowID:          strings.TrimSpace(c.QueryParam("workflow")),
@@ -185,14 +185,14 @@ func parseSkillAnalyticsFilter(c echo.Context) repository.SkillAnalyticsFilter {
 	return filter
 }
 
-func skillEvidenceRequested(filter repository.SkillAnalyticsFilter) bool {
+func skillEvidenceRequested(filter persistence.SkillAnalyticsFilter) bool {
 	return filter.EvidencePeriod != "" || filter.EvidenceEvent != "" || filter.EvidenceAgentID != "" || filter.EvidenceSkillHandle != "" || filter.EvidenceSkillScope != ""
 }
 
-func (h *Handler) enabledSkillsForAnalytics(c echo.Context) []repository.EnabledSkillInfo {
+func (h *Handler) enabledSkillsForAnalytics(c echo.Context) []persistence.EnabledSkillInfo {
 	projectID := strings.TrimSpace(c.QueryParam("project_id"))
 	projectRoot := h.currentProjectSkillRoot(c)
-	out := []repository.EnabledSkillInfo{}
+	out := []persistence.EnabledSkillInfo{}
 	alwaysGlobal := alwaysUseSet(h.agentSkillRoot)
 	alwaysProject := alwaysUseSet(projectRoot)
 	if catalog, err := agentskills.BuildCatalogAll("skill-analytics", h.agentSkillRoot, projectRoot); err == nil {
@@ -203,7 +203,7 @@ func (h *Handler) enabledSkillsForAnalytics(c echo.Context) []repository.Enabled
 				scope = models.SkillScopeProject
 				always = alwaysProject[entry.Handle]
 			}
-			out = append(out, repository.EnabledSkillInfo{Handle: entry.Handle, Scope: scope, Enabled: true, AlwaysUse: always})
+			out = append(out, persistence.EnabledSkillInfo{Handle: entry.Handle, Scope: scope, Enabled: true, AlwaysUse: always})
 		}
 	}
 	if h.agentRepo != nil {
@@ -228,7 +228,7 @@ func (h *Handler) enabledSkillsForAnalytics(c echo.Context) []repository.Enabled
 						continue
 					}
 					seen[key] = true
-					out = append(out, repository.EnabledSkillInfo{Handle: entry.Handle, Scope: models.SkillScopeAgentOwned, Enabled: true})
+					out = append(out, persistence.EnabledSkillInfo{Handle: entry.Handle, Scope: models.SkillScopeAgentOwned, Enabled: true})
 				}
 			}
 		}
@@ -247,7 +247,7 @@ func analyticsUsageProjection(c echo.Context) string {
 	return strings.ToLower(strings.TrimSpace(c.QueryParam("projection")))
 }
 
-func parseUsageFilter(c echo.Context) repository.UsageFilter {
+func parseUsageFilter(c echo.Context) persistence.UsageFilter {
 	filter, _ := service.NormalizeUsageFilter(service.UsageFilterInput{
 		ProjectID:  c.QueryParam("project_id"),
 		Provider:   c.QueryParam("provider"),
@@ -266,7 +266,7 @@ func parseUsageFilter(c echo.Context) repository.UsageFilter {
 	return filter
 }
 
-func usageEvidenceRequested(filter repository.UsageFilter) bool {
+func usageEvidenceRequested(filter persistence.UsageFilter) bool {
 	return filter.EvidencePeriod != "" || filter.EvidenceProvider != "" || filter.EvidenceModel != ""
 }
 
@@ -318,7 +318,7 @@ func (h *Handler) GetAnalyticsDashboard(c echo.Context) error {
 	if parsed, err := strconv.Atoi(c.QueryParam("evidence_offset")); err == nil && parsed > 0 {
 		evidenceOffset = parsed
 	}
-	dashboard, err := h.execRepo.GetAnalyticsDashboard(c.Request().Context(), repository.AnalyticsDashboardFilter{
+	dashboard, err := h.execRepo.GetAnalyticsDashboard(c.Request().Context(), persistence.AnalyticsDashboardFilter{
 		ProjectID:            projectID,
 		View:                 analyticsDashboardView(c.QueryParam("view")),
 		DateFrom:             usageFilter.DateFrom,
@@ -467,7 +467,7 @@ func (h *Handler) GetTaskRunActivity(c echo.Context) error {
 	if f.ProjectID == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "project_id is required")
 	}
-	data, err := h.execRepo.GetTaskRunActivity(c.Request().Context(), repository.AnalyticsDashboardFilter{ProjectID: f.ProjectID, DateFrom: f.DateFrom, DateTo: f.DateTo, GroupBy: f.GroupBy})
+	data, err := h.execRepo.GetTaskRunActivity(c.Request().Context(), persistence.AnalyticsDashboardFilter{ProjectID: f.ProjectID, DateFrom: f.DateFrom, DateTo: f.DateTo, GroupBy: f.GroupBy})
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}

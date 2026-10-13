@@ -19,6 +19,7 @@ import (
 	"github.com/openvibely/openvibely/internal/lifecycle"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/stretchr/testify/require"
@@ -785,7 +786,7 @@ func TestLLMService_CallAgentDirect_ExplicitProjectBypassesRootDiscoveryOnSucces
 			t.Fatalf("explicit project performed root discovery: %s", statement)
 		}
 	}
-	totals, err := usageRepo.GetUsageTotals(ctx, repository.UsageFilter{ProjectID: project.ID})
+	totals, err := usageRepo.GetUsageTotals(ctx, persistence.UsageFilter{ProjectID: project.ID})
 	if err != nil {
 		t.Fatalf("GetUsageTotals: %v", err)
 	}
@@ -828,7 +829,7 @@ func TestLLMService_CallAgentDirect_RecordsUsageForProjectWorktree(t *testing.T)
 	if _, _, err := svc.CallAgentDirect(ctx, "summarize diff", nil, agent, worktreePath); err != nil {
 		t.Fatalf("CallAgentDirect: %v", err)
 	}
-	totals, err := usageRepo.GetUsageTotals(ctx, repository.UsageFilter{ProjectID: project.ID})
+	totals, err := usageRepo.GetUsageTotals(ctx, persistence.UsageFilter{ProjectID: project.ID})
 	if err != nil {
 		t.Fatalf("GetUsageTotals: %v", err)
 	}

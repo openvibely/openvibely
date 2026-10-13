@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/testutil"
 )
 
@@ -656,8 +657,8 @@ func TestScheduleRepo_UpdateForTaskRejectsReassignedSchedule(t *testing.T) {
 
 	stale.RunAt = originalRunAt.Add(24 * time.Hour)
 	stale.NextRun = &stale.RunAt
-	if err := repo.UpdateForTask(ctx, stale, originalTask.ID); !errors.Is(err, sql.ErrNoRows) {
-		t.Fatalf("UpdateForTask after reassignment error = %v, want sql.ErrNoRows", err)
+	if err := repo.UpdateForTask(ctx, stale, originalTask.ID); !errors.Is(err, persistence.ErrNotFound) {
+		t.Fatalf("UpdateForTask after reassignment error = %v, want persistence.ErrNotFound", err)
 	}
 
 	stored, err := repo.GetByID(ctx, schedule.ID)
@@ -801,7 +802,7 @@ func TestScheduleRepo_ListSchedulesForDiscovery(t *testing.T) {
 	mkSched(foreignTask.ID, models.RepeatDaily, true, now.Add(time.Hour))
 
 	// Project isolation: only the three default-project schedules appear.
-	rows, total, err := repo.ListSchedulesForDiscovery(ctx, "default", ScheduleDiscoveryFilter{})
+	rows, total, err := repo.ListSchedulesForDiscovery(ctx, "default", persistence.ScheduleDiscoveryFilter{})
 	if err != nil {
 		t.Fatalf("ListSchedulesForDiscovery all: %v", err)
 	}
@@ -825,7 +826,7 @@ func TestScheduleRepo_ListSchedulesForDiscovery(t *testing.T) {
 
 	// Enabled filter.
 	enabledTrue := true
-	enabledRows, enabledTotal, err := repo.ListSchedulesForDiscovery(ctx, "default", ScheduleDiscoveryFilter{Enabled: &enabledTrue})
+	enabledRows, enabledTotal, err := repo.ListSchedulesForDiscovery(ctx, "default", persistence.ScheduleDiscoveryFilter{Enabled: &enabledTrue})
 	if err != nil {
 		t.Fatalf("ListSchedulesForDiscovery enabled: %v", err)
 	}
@@ -838,7 +839,7 @@ func TestScheduleRepo_ListSchedulesForDiscovery(t *testing.T) {
 		}
 	}
 	enabledFalse := false
-	disabledRows, disabledTotal, err := repo.ListSchedulesForDiscovery(ctx, "default", ScheduleDiscoveryFilter{Enabled: &enabledFalse})
+	disabledRows, disabledTotal, err := repo.ListSchedulesForDiscovery(ctx, "default", persistence.ScheduleDiscoveryFilter{Enabled: &enabledFalse})
 	if err != nil {
 		t.Fatalf("ListSchedulesForDiscovery disabled: %v", err)
 	}
@@ -847,7 +848,7 @@ func TestScheduleRepo_ListSchedulesForDiscovery(t *testing.T) {
 	}
 
 	// Task identity filter.
-	betaRows, betaTotal, err := repo.ListSchedulesForDiscovery(ctx, "default", ScheduleDiscoveryFilter{TaskID: betaTask.ID})
+	betaRows, betaTotal, err := repo.ListSchedulesForDiscovery(ctx, "default", persistence.ScheduleDiscoveryFilter{TaskID: betaTask.ID})
 	if err != nil {
 		t.Fatalf("ListSchedulesForDiscovery task_id: %v", err)
 	}
@@ -856,7 +857,7 @@ func TestScheduleRepo_ListSchedulesForDiscovery(t *testing.T) {
 	}
 
 	// Title partial match.
-	titleRows, titleTotal, err := repo.ListSchedulesForDiscovery(ctx, "default", ScheduleDiscoveryFilter{Title: "alpha"})
+	titleRows, titleTotal, err := repo.ListSchedulesForDiscovery(ctx, "default", persistence.ScheduleDiscoveryFilter{Title: "alpha"})
 	if err != nil {
 		t.Fatalf("ListSchedulesForDiscovery title: %v", err)
 	}
@@ -870,14 +871,14 @@ func TestScheduleRepo_ListSchedulesForDiscovery(t *testing.T) {
 	}
 
 	// Pagination bounds with no duplicates.
-	page1, page1Total, err := repo.ListSchedulesForDiscovery(ctx, "default", ScheduleDiscoveryFilter{Limit: 2, Offset: 0})
+	page1, page1Total, err := repo.ListSchedulesForDiscovery(ctx, "default", persistence.ScheduleDiscoveryFilter{Limit: 2, Offset: 0})
 	if err != nil {
 		t.Fatalf("ListSchedulesForDiscovery page1: %v", err)
 	}
 	if page1Total != 3 || len(page1) != 2 {
 		t.Fatalf("expected page1 total=3 len=2, got total=%d len=%d", page1Total, len(page1))
 	}
-	page2, _, err := repo.ListSchedulesForDiscovery(ctx, "default", ScheduleDiscoveryFilter{Limit: 2, Offset: 2})
+	page2, _, err := repo.ListSchedulesForDiscovery(ctx, "default", persistence.ScheduleDiscoveryFilter{Limit: 2, Offset: 2})
 	if err != nil {
 		t.Fatalf("ListSchedulesForDiscovery page2: %v", err)
 	}
@@ -885,7 +886,7 @@ func TestScheduleRepo_ListSchedulesForDiscovery(t *testing.T) {
 		t.Fatalf("expected page2 len=1, got %d", len(page2))
 	}
 	seen := map[string]bool{}
-	for _, r := range append(append([]ScheduleDiscoveryRow{}, page1...), page2...) {
+	for _, r := range append(append([]persistence.ScheduleDiscoveryRow{}, page1...), page2...) {
 		if seen[r.Schedule.ID] {
 			t.Fatalf("pagination returned duplicate schedule %s", r.Schedule.ID)
 		}
@@ -897,7 +898,7 @@ func TestScheduleRepo_ListSchedulesForDiscovery(t *testing.T) {
 	if _, err := db.ExecContext(ctx, `UPDATE schedules SET next_run = NULL, created_at = ? WHERE id = ?`, now.Add(24*time.Hour), alphaDisabled.ID); err != nil {
 		t.Fatalf("clear next_run: %v", err)
 	}
-	nilRows, nilTotal, err := repo.ListSchedulesForDiscovery(ctx, "default", ScheduleDiscoveryFilter{})
+	nilRows, nilTotal, err := repo.ListSchedulesForDiscovery(ctx, "default", persistence.ScheduleDiscoveryFilter{})
 	if err != nil {
 		t.Fatalf("ListSchedulesForDiscovery nil next_run: %v", err)
 	}
@@ -924,7 +925,7 @@ func TestScheduleRepo_ListSchedulesForDiscoveryFirstPageUsesOrderedIndex(t *test
 		t.Fatalf("first-page plan = %s, want no temporary ORDER BY sort", plan)
 	}
 
-	rows, total, err := repo.ListSchedulesForDiscovery(ctx, scheduleDiscoveryTargetProjectID, ScheduleDiscoveryFilter{Limit: 50, Offset: 0})
+	rows, total, err := repo.ListSchedulesForDiscovery(ctx, scheduleDiscoveryTargetProjectID, persistence.ScheduleDiscoveryFilter{Limit: 50, Offset: 0})
 	if err != nil {
 		t.Fatalf("ListSchedulesForDiscovery first page: %v", err)
 	}
@@ -955,7 +956,7 @@ func TestScheduleRepo_ListSchedulesForDiscoveryFilteredAndOffsetPathsRemainCorre
 		t.Fatalf("filtered plan = %s, should not force global order index", filteredPlan)
 	}
 
-	rows, total, err := repo.ListSchedulesForDiscovery(ctx, scheduleDiscoveryTargetProjectID, ScheduleDiscoveryFilter{Title: "task-00001", Limit: 10})
+	rows, total, err := repo.ListSchedulesForDiscovery(ctx, scheduleDiscoveryTargetProjectID, persistence.ScheduleDiscoveryFilter{Title: "task-00001", Limit: 10})
 	if err != nil {
 		t.Fatalf("ListSchedulesForDiscovery title filter: %v", err)
 	}
@@ -965,7 +966,7 @@ func TestScheduleRepo_ListSchedulesForDiscoveryFilteredAndOffsetPathsRemainCorre
 	assertScheduleDiscoveryRowsOrdered(t, rows)
 
 	disabled := false
-	disabledRows, disabledTotal, err := repo.ListSchedulesForDiscovery(ctx, scheduleDiscoveryTargetProjectID, ScheduleDiscoveryFilter{Enabled: &disabled, Limit: 50})
+	disabledRows, disabledTotal, err := repo.ListSchedulesForDiscovery(ctx, scheduleDiscoveryTargetProjectID, persistence.ScheduleDiscoveryFilter{Enabled: &disabled, Limit: 50})
 	if err != nil {
 		t.Fatalf("ListSchedulesForDiscovery enabled=false filter: %v", err)
 	}
@@ -979,11 +980,11 @@ func TestScheduleRepo_ListSchedulesForDiscoveryFilteredAndOffsetPathsRemainCorre
 	}
 	assertScheduleDiscoveryRowsOrdered(t, disabledRows)
 
-	page1, page1Total, err := repo.ListSchedulesForDiscovery(ctx, scheduleDiscoveryTargetProjectID, ScheduleDiscoveryFilter{Limit: 10, Offset: 0})
+	page1, page1Total, err := repo.ListSchedulesForDiscovery(ctx, scheduleDiscoveryTargetProjectID, persistence.ScheduleDiscoveryFilter{Limit: 10, Offset: 0})
 	if err != nil {
 		t.Fatalf("ListSchedulesForDiscovery page1: %v", err)
 	}
-	page2, page2Total, err := repo.ListSchedulesForDiscovery(ctx, scheduleDiscoveryTargetProjectID, ScheduleDiscoveryFilter{Limit: 10, Offset: 10})
+	page2, page2Total, err := repo.ListSchedulesForDiscovery(ctx, scheduleDiscoveryTargetProjectID, persistence.ScheduleDiscoveryFilter{Limit: 10, Offset: 10})
 	if err != nil {
 		t.Fatalf("ListSchedulesForDiscovery page2: %v", err)
 	}
@@ -1003,7 +1004,7 @@ func TestScheduleRepo_ListSchedulesForDiscoveryFilteredAndOffsetPathsRemainCorre
 	if _, err := db.ExecContext(ctx, `INSERT INTO projects (id, name, description, repo_path) VALUES ('empty-schedule-project', 'Empty schedules', '', '')`); err != nil {
 		t.Fatalf("insert empty project: %v", err)
 	}
-	emptyRows, emptyTotal, err := repo.ListSchedulesForDiscovery(ctx, "empty-schedule-project", ScheduleDiscoveryFilter{Limit: 50})
+	emptyRows, emptyTotal, err := repo.ListSchedulesForDiscovery(ctx, "empty-schedule-project", persistence.ScheduleDiscoveryFilter{Limit: 50})
 	if err != nil {
 		t.Fatalf("ListSchedulesForDiscovery empty project: %v", err)
 	}
@@ -1029,7 +1030,7 @@ func BenchmarkScheduleDiscoverySelect25kProject(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		rows, total, err := repo.ListSchedulesForDiscovery(context.Background(), scheduleDiscoveryTargetProjectID, ScheduleDiscoveryFilter{Limit: 50})
+		rows, total, err := repo.ListSchedulesForDiscovery(context.Background(), scheduleDiscoveryTargetProjectID, persistence.ScheduleDiscoveryFilter{Limit: 50})
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -1120,7 +1121,7 @@ func explainScheduleDiscoveryQueryPlan(tb testing.TB, db *sql.DB, query string, 
 	return strings.Join(details, " | ")
 }
 
-func assertScheduleDiscoveryRowsOrdered(t *testing.T, rows []ScheduleDiscoveryRow) {
+func assertScheduleDiscoveryRowsOrdered(t *testing.T, rows []persistence.ScheduleDiscoveryRow) {
 	t.Helper()
 	for i := 1; i < len(rows); i++ {
 		prev := rows[i-1].Schedule

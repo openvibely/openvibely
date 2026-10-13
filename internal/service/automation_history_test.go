@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/stretchr/testify/require"
@@ -234,7 +235,7 @@ func TestAutomationHistoryStablePaginationAndProjectIsolation(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, foreign.Items)
 	_, err = fixture.repo.ListAutomationInvocations(ctx, fixture.project.ID, fixture.definition.Automation.ID, 50, "tampered")
-	require.ErrorIs(t, err, repository.ErrAutomationCursor)
+	require.ErrorIs(t, err, persistence.ErrAutomationCursor)
 }
 
 func TestAutomationHistoryInvocationIsolationWorkItemLifetimeAndReplay(t *testing.T) {
@@ -246,7 +247,7 @@ func TestAutomationHistoryInvocationIsolationWorkItemLifetimeAndReplay(t *testin
 	gate := automationNodeByKey(t, fixture.definition, "approval")
 
 	bindingA := models.AutomationBinding{AutomationID: fixture.definition.Automation.ID, VersionID: fixture.definition.Version.ID, InvocationID: invocationA.ID, NodeID: producer.ID}
-	item, _, err := fixture.repo.RecordProjectionEvent(ctx, repository.AutomationProjectionEvent{
+	item, _, err := fixture.repo.RecordProjectionEvent(ctx, persistence.AutomationProjectionEvent{
 		Context: models.AutomationContext{ProjectID: fixture.project.ID, Bindings: []models.AutomationBinding{bindingA}}, Binding: bindingA,
 		WorkItemKey: "alert:history", WorkItemKind: "suggestion", WorkItemTitle: "History suggestion",
 		ActivityKey: "history:a", ActivityType: "producer", ActivityStatus: models.AutomationActivityCompleted,
@@ -254,7 +255,7 @@ func TestAutomationHistoryInvocationIsolationWorkItemLifetimeAndReplay(t *testin
 	})
 	require.NoError(t, err)
 	bindingB := models.AutomationBinding{AutomationID: fixture.definition.Automation.ID, VersionID: fixture.definition.Version.ID, InvocationID: invocationB.ID, NodeID: gate.ID, WorkItemID: item.ID}
-	_, _, err = fixture.repo.RecordProjectionEvent(ctx, repository.AutomationProjectionEvent{
+	_, _, err = fixture.repo.RecordProjectionEvent(ctx, persistence.AutomationProjectionEvent{
 		Context: models.AutomationContext{ProjectID: fixture.project.ID, Bindings: []models.AutomationBinding{bindingB}}, Binding: bindingB,
 		WorkItemKey: "alert:history", ActivityKey: "history:b", ActivityType: "approval", ActivityStatus: models.AutomationActivityWaiting,
 		EventKey: "history:b:waiting", FromNodeID: producer.ID, ToNodeID: gate.ID, Transition: models.AutomationTransitionWaiting,
@@ -307,21 +308,21 @@ func TestAutomationHistoryMetricsAndHealthUsePersistedEvents(t *testing.T) {
 	gate := automationNodeByKey(t, fixture.definition, "approval")
 	completedNode := automationNodeByKey(t, fixture.definition, "completed")
 	binding := models.AutomationBinding{AutomationID: fixture.definition.Automation.ID, VersionID: fixture.definition.Version.ID, InvocationID: invocation.ID, NodeID: producer.ID}
-	item, _, err := fixture.repo.RecordProjectionEvent(ctx, repository.AutomationProjectionEvent{
+	item, _, err := fixture.repo.RecordProjectionEvent(ctx, persistence.AutomationProjectionEvent{
 		Context: models.AutomationContext{ProjectID: fixture.project.ID, Bindings: []models.AutomationBinding{binding}}, Binding: binding,
 		WorkItemKey: "metric:item", ActivityKey: "metric:producer", ActivityType: "producer", ActivityStatus: models.AutomationActivityCompleted,
 		EventKey: "metric:entered", ToNodeID: producer.ID, Transition: models.AutomationTransitionEntered,
 	})
 	require.NoError(t, err)
 	binding.WorkItemID, binding.NodeID = item.ID, gate.ID
-	_, _, err = fixture.repo.RecordProjectionEvent(ctx, repository.AutomationProjectionEvent{
+	_, _, err = fixture.repo.RecordProjectionEvent(ctx, persistence.AutomationProjectionEvent{
 		Context: models.AutomationContext{ProjectID: fixture.project.ID, Bindings: []models.AutomationBinding{binding}}, Binding: binding,
 		WorkItemKey: "metric:item", ActivityKey: "metric:gate", ActivityType: "gate", ActivityStatus: models.AutomationActivityWaiting,
 		EventKey: "metric:gate", FromNodeID: producer.ID, ToNodeID: gate.ID, Transition: models.AutomationTransitionWaiting,
 	})
 	require.NoError(t, err)
 	binding.NodeID = completedNode.ID
-	_, _, err = fixture.repo.RecordProjectionEvent(ctx, repository.AutomationProjectionEvent{
+	_, _, err = fixture.repo.RecordProjectionEvent(ctx, persistence.AutomationProjectionEvent{
 		Context: models.AutomationContext{ProjectID: fixture.project.ID, Bindings: []models.AutomationBinding{binding}}, Binding: binding,
 		WorkItemKey: "metric:item", ActivityKey: "metric:completed", ActivityType: "outcome", ActivityStatus: models.AutomationActivityCompleted,
 		EventKey: "metric:completed", FromNodeID: gate.ID, ToNodeID: completedNode.ID, Transition: models.AutomationTransitionCompleted,
@@ -389,14 +390,14 @@ func TestAutomationHistoryReplayPaginationSeedsPersistedPriorState(t *testing.T)
 	gate := automationNodeByKey(t, fixture.definition, "approval")
 
 	binding := models.AutomationBinding{AutomationID: fixture.definition.Automation.ID, VersionID: fixture.definition.Version.ID, InvocationID: invocationA.ID, NodeID: producer.ID}
-	item, _, err := fixture.repo.RecordProjectionEvent(ctx, repository.AutomationProjectionEvent{
+	item, _, err := fixture.repo.RecordProjectionEvent(ctx, persistence.AutomationProjectionEvent{
 		Context: models.AutomationContext{ProjectID: fixture.project.ID, Bindings: []models.AutomationBinding{binding}}, Binding: binding,
 		WorkItemKey: "replay:paged", ActivityKey: "replay:paged:create", ActivityType: "producer", ActivityStatus: models.AutomationActivityCompleted,
 		EventKey: "replay:paged:entered", ToNodeID: producer.ID, Transition: models.AutomationTransitionEntered,
 	})
 	require.NoError(t, err)
 	binding.InvocationID, binding.NodeID, binding.WorkItemID = invocationB.ID, gate.ID, item.ID
-	_, _, err = fixture.repo.RecordProjectionEvent(ctx, repository.AutomationProjectionEvent{
+	_, _, err = fixture.repo.RecordProjectionEvent(ctx, persistence.AutomationProjectionEvent{
 		Context: models.AutomationContext{ProjectID: fixture.project.ID, Bindings: []models.AutomationBinding{binding}}, Binding: binding,
 		WorkItemKey: "replay:paged", ActivityKey: "replay:paged:wait", ActivityType: "approval", ActivityStatus: models.AutomationActivityWaiting,
 		EventKey: "replay:paged:waiting", FromNodeID: producer.ID, ToNodeID: gate.ID, Transition: models.AutomationTransitionWaiting,
@@ -427,7 +428,7 @@ func TestAutomationHistoryActivityCursorIsStableAndCollectionBound(t *testing.T)
 	producer := automationNodeByKey(t, fixture.definition, "vision_suggestions")
 	binding := models.AutomationBinding{AutomationID: fixture.definition.Automation.ID, VersionID: fixture.definition.Version.ID, InvocationID: invocation.ID, NodeID: producer.ID}
 	for i := 0; i < 3; i++ {
-		_, _, err := fixture.repo.RecordProjectionEvent(ctx, repository.AutomationProjectionEvent{
+		_, _, err := fixture.repo.RecordProjectionEvent(ctx, persistence.AutomationProjectionEvent{
 			Context: models.AutomationContext{ProjectID: fixture.project.ID, Bindings: []models.AutomationBinding{binding}}, Binding: binding,
 			WorkItemKey: "activity:paged", ActivityKey: fmt.Sprintf("activity:paged:%d", i), ActivityType: "producer", ActivityStatus: models.AutomationActivityCompleted,
 			EventKey: fmt.Sprintf("activity:paged:entered:%d", i), ToNodeID: producer.ID, Transition: models.AutomationTransitionEntered,
@@ -447,7 +448,7 @@ func TestAutomationHistoryActivityCursorIsStableAndCollectionBound(t *testing.T)
 	require.NoError(t, err)
 	require.Len(t, second.Items, 1)
 	_, err = fixture.repo.ListAutomationTransitions(ctx, fixture.project.ID, fixture.definition.Automation.ID, invocation.ID, "", 2, first.NextCursor)
-	require.ErrorIs(t, err, repository.ErrAutomationCursor)
+	require.ErrorIs(t, err, persistence.ErrAutomationCursor)
 
 	transitionFirst, err := fixture.repo.ListAutomationTransitions(ctx, fixture.project.ID, fixture.definition.Automation.ID, invocation.ID, "", 2, "")
 	require.NoError(t, err)
@@ -464,7 +465,7 @@ func TestAutomationHistoryWorkItemPaginationIsStableAndFilterBound(t *testing.T)
 	producer := automationNodeByKey(t, fixture.definition, "vision_suggestions")
 	binding := models.AutomationBinding{AutomationID: fixture.definition.Automation.ID, VersionID: fixture.definition.Version.ID, NodeID: producer.ID}
 	for i := 0; i < 6; i++ {
-		item, _, err := fixture.repo.RecordProjectionEvent(ctx, repository.AutomationProjectionEvent{
+		item, _, err := fixture.repo.RecordProjectionEvent(ctx, persistence.AutomationProjectionEvent{
 			Context: models.AutomationContext{ProjectID: fixture.project.ID, Bindings: []models.AutomationBinding{binding}}, Binding: binding,
 			WorkItemKey: fmt.Sprintf("work-item:paged:%d", i), WorkItemKind: "test", ActivityKey: fmt.Sprintf("work-item:paged:%d:create", i), ActivityType: "producer", ActivityStatus: models.AutomationActivityRunning,
 		})
@@ -509,7 +510,7 @@ func TestAutomationHistoryWorkItemPaginationIsStableAndFilterBound(t *testing.T)
 		require.Equal(t, models.AutomationWorkItemCompleted, item.Status)
 	}
 	_, err = fixture.repo.ListAutomationWorkItems(ctx, fixture.project.ID, fixture.definition.Automation.ID, "completed", 2, first.NextCursor)
-	require.ErrorIs(t, err, repository.ErrAutomationCursor)
+	require.ErrorIs(t, err, persistence.ErrAutomationCursor)
 }
 
 func TestAutomationHistoryWorkItemQueryPlanUsesCreatedAtIndexes(t *testing.T) {
@@ -716,14 +717,14 @@ func TestAutomationHistoryHealthChangedInputsPersistAffectedRecords(t *testing.T
 		producer := automationNodeByKey(t, fixture.definition, "vision_suggestions")
 		gate := automationNodeByKey(t, fixture.definition, "approval")
 		binding := models.AutomationBinding{AutomationID: fixture.definition.Automation.ID, VersionID: fixture.definition.Version.ID, InvocationID: completed.ID, NodeID: producer.ID}
-		item, _, err := fixture.repo.RecordProjectionEvent(ctx, repository.AutomationProjectionEvent{
+		item, _, err := fixture.repo.RecordProjectionEvent(ctx, persistence.AutomationProjectionEvent{
 			Context: models.AutomationContext{ProjectID: fixture.project.ID, Bindings: []models.AutomationBinding{binding}}, Binding: binding,
 			WorkItemKey: "health:blocked", ActivityKey: "health:blocked:create", ActivityType: "producer", ActivityStatus: models.AutomationActivityCompleted,
 			EventKey: "health:blocked:create", ToNodeID: producer.ID, Transition: models.AutomationTransitionEntered,
 		})
 		require.NoError(t, err)
 		binding.WorkItemID, binding.NodeID = item.ID, gate.ID
-		_, _, err = fixture.repo.RecordProjectionEvent(ctx, repository.AutomationProjectionEvent{
+		_, _, err = fixture.repo.RecordProjectionEvent(ctx, persistence.AutomationProjectionEvent{
 			Context: models.AutomationContext{ProjectID: fixture.project.ID, Bindings: []models.AutomationBinding{binding}}, Binding: binding,
 			WorkItemKey: "health:blocked", ActivityKey: "health:blocked:gate", ActivityType: "approval", ActivityStatus: models.AutomationActivityFailed,
 			EventKey: "health:blocked:gate", FromNodeID: producer.ID, ToNodeID: gate.ID, Transition: models.AutomationTransitionBlocked,
@@ -762,9 +763,9 @@ func TestAutomationHistoryHealthChangedInputsPersistAffectedRecords(t *testing.T
 		require.NoError(t, fixture.repo.RecomputeAutomationHealthForAll(ctx, now, 100))
 		requireAutomationHealthState(t, fixture.repo.DB(), fixture.definition.Automation.ID, models.AutomationHealthHealthy, "Recent triggers")
 
-		_, err = fixture.repo.DB().ExecContext(ctx, `UPDATE task_pull_requests SET updated_at = ? WHERE task_id = ?`, now.Add(-2*repository.AutomationExternalStaleAfter).UTC().Format("2006-01-02 15:04:05"), fixture.task.ID)
+		_, err = fixture.repo.DB().ExecContext(ctx, `UPDATE task_pull_requests SET updated_at = ? WHERE task_id = ?`, now.Add(-2*persistence.AutomationExternalStaleAfter).UTC().Format("2006-01-02 15:04:05"), fixture.task.ID)
 		require.NoError(t, err)
-		externalState, err := fixture.repo.AutomationExternalState(ctx, fixture.project.ID, fixture.definition.Automation.ID, now.Add(time.Minute).Add(-repository.AutomationExternalStaleAfter))
+		externalState, err := fixture.repo.AutomationExternalState(ctx, fixture.project.ID, fixture.definition.Automation.ID, now.Add(time.Minute).Add(-persistence.AutomationExternalStaleAfter))
 		require.NoError(t, err)
 		require.Equal(t, 1, externalState.TrackedResources)
 		require.True(t, externalState.Stale)

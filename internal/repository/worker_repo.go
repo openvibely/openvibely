@@ -37,3 +37,15 @@ func (r *WorkerRepo) SetMaxWorkers(ctx context.Context, n int) error {
 	}
 	return nil
 }
+
+// CountQueuedWork returns pending/queued tasks plus pending queued thread inputs.
+func (r *WorkerRepo) CountQueuedWork(ctx context.Context) (int, error) {
+	var total int
+	err := r.db.QueryRowContext(ctx, `SELECT
+		(SELECT COUNT(*) FROM tasks WHERE status IN ('pending','queued')) +
+		(SELECT COUNT(*) FROM thread_inputs WHERE input_status = 'pending' AND input_mode = 'queued')`).Scan(&total)
+	if err != nil {
+		return 0, fmt.Errorf("counting queued work: %w", err)
+	}
+	return total, nil
+}

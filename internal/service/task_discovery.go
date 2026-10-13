@@ -8,7 +8,7 @@ import (
 
 	"github.com/openvibely/openvibely/internal/chatcontrol"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence"
 )
 
 // listTasksMaxLimit bounds a single list_tasks page so discovery stays cheap and
@@ -128,7 +128,7 @@ type viewSwarmResult struct {
 // ExecuteListTasksTool runs the bounded, read-only, current-project task discovery
 // tool. It never crosses project boundaries and excludes internal chat rows. Returns
 // a compact JSON summary payload with deterministic ordering and explicit pagination.
-func ExecuteListTasksTool(ctx context.Context, taskRepo *repository.TaskRepo, projectID string, input json.RawMessage) (string, error) {
+func ExecuteListTasksTool(ctx context.Context, taskRepo persistence.TaskStore, projectID string, input json.RawMessage) (string, error) {
 	if taskRepo == nil {
 		return "", fmt.Errorf("list_tasks: task repository unavailable")
 	}
@@ -167,7 +167,7 @@ func ExecuteListTasksTool(ctx context.Context, taskRepo *repository.TaskRepo, pr
 		offset = 0
 	}
 
-	tasks, total, err := taskRepo.ListTasksForDiscovery(ctx, projectID, repository.TaskDiscoveryFilter{
+	tasks, total, err := taskRepo.ListTasksForDiscovery(ctx, projectID, persistence.TaskDiscoveryFilter{
 		Query:       query,
 		Category:    category,
 		Status:      status,
@@ -212,7 +212,7 @@ func ExecuteListTasksTool(ctx context.Context, taskRepo *repository.TaskRepo, pr
 // ExecuteViewSwarmTool returns a compact parent-centered swarm hierarchy for one
 // current-project task selected by id or exact title. Children passed by id resolve
 // to their parent hierarchy. Non-swarm tasks return a controlled non-swarm payload.
-func ExecuteViewSwarmTool(ctx context.Context, taskRepo *repository.TaskRepo, projectID string, input json.RawMessage) (string, error) {
+func ExecuteViewSwarmTool(ctx context.Context, taskRepo persistence.TaskStore, projectID string, input json.RawMessage) (string, error) {
 	if taskRepo == nil {
 		return "", fmt.Errorf("view_swarm: task repository unavailable")
 	}

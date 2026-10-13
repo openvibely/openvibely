@@ -1,6 +1,7 @@
 package database
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"net/url"
@@ -189,4 +190,13 @@ func enableIncrementalVacuum(db *sql.DB) error {
 		return fmt.Errorf("vacuuming database: %w", err)
 	}
 	return nil
+}
+
+// SchemaVersion returns the highest applied goose migration version.
+func SchemaVersion(ctx context.Context, db *sql.DB) (int, error) {
+	var version int
+	if err := db.QueryRowContext(ctx, `SELECT COALESCE(MAX(version_id), 0) FROM goose_db_version WHERE is_applied = 1`).Scan(&version); err != nil {
+		return 0, err
+	}
+	return version, nil
 }

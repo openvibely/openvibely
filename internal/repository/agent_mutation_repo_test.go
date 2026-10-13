@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/testutil"
 )
 
@@ -47,10 +48,10 @@ func TestAgentMutationRepo_CreateAndFetch(t *testing.T) {
 		t.Fatalf("round-trip mismatch: %+v", got)
 	}
 
-	if _, err := repo.FindAppliedByIdempotencyKey(ctx, "missing"); !errors.Is(err, sql.ErrNoRows) {
+	if _, err := repo.FindAppliedByIdempotencyKey(ctx, "missing"); !errors.Is(err, persistence.ErrNotFound) {
 		t.Fatalf("missing key should return ErrNoRows, got %v", err)
 	}
-	if _, err := repo.FindAppliedByIdempotencyKey(ctx, ""); !errors.Is(err, sql.ErrNoRows) {
+	if _, err := repo.FindAppliedByIdempotencyKey(ctx, ""); !errors.Is(err, persistence.ErrNotFound) {
 		t.Fatalf("empty key should return ErrNoRows, got %v", err)
 	}
 }

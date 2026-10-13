@@ -20,6 +20,7 @@ import (
 	"github.com/openvibely/openvibely/internal/chatcontrol"
 	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/slack-go/slack"
@@ -361,7 +362,7 @@ func TestSlackInboundReceiptHandoffIsAtomicAndIdempotent(t *testing.T) {
 	receipts := repository.NewSlackInboundReceiptRepo(db)
 	eventKey := "T1|D1|1710000000.100000|U1"
 
-	alreadyHandedOff, err := receipts.WithHandoff(ctx, eventKey, func(repository.SQLExecutor) error {
+	alreadyHandedOff, err := receipts.WithHandoff(ctx, eventKey, func(persistence.Tx) error {
 		return fmt.Errorf("simulated durable row failure")
 	})
 	require.Error(t, err)
@@ -371,14 +372,14 @@ func TestSlackInboundReceiptHandoffIsAtomicAndIdempotent(t *testing.T) {
 	require.False(t, exists, "failed durable work must roll back its receipt")
 
 	persistCalls := 0
-	alreadyHandedOff, err = receipts.WithHandoff(ctx, eventKey, func(repository.SQLExecutor) error {
+	alreadyHandedOff, err = receipts.WithHandoff(ctx, eventKey, func(persistence.Tx) error {
 		persistCalls++
 		return nil
 	})
 	require.NoError(t, err)
 	require.False(t, alreadyHandedOff)
 
-	alreadyHandedOff, err = receipts.WithHandoff(ctx, eventKey, func(repository.SQLExecutor) error {
+	alreadyHandedOff, err = receipts.WithHandoff(ctx, eventKey, func(persistence.Tx) error {
 		persistCalls++
 		return nil
 	})
@@ -1164,7 +1165,7 @@ func TestSlackService_SocketEventAttachmentStagingAndCleanupRespectPreACKDeadlin
 				return "pending-session", nil
 			}
 			if tc.blockCleanup {
-				svc.createFirstTurnExecutionFn = func(context.Context, repository.SQLExecutor, *models.Execution) error {
+				svc.createFirstTurnExecutionFn = func(context.Context, persistence.Tx, *models.Execution) error {
 					return fmt.Errorf("simulated attachment first-turn persistence failure")
 				}
 				svc.cleanupAttachmentSourcesFn = func([]models.ChatAttachment) { <-release }
@@ -1201,7 +1202,7 @@ func TestSlackService_SocketEventRestartAfterFirstTurnPartialPersistenceLeavesNo
 	svc, db, taskRepo, _, threadInputRepo, receiptRepo, projectID := newSlackSocketIngressTestService(t)
 	acks := 0
 	svc.ackSocketRequestFn = func(*socketmode.Client, socketmode.Request) { acks++ }
-	svc.createFirstTurnExecutionFn = func(context.Context, repository.SQLExecutor, *models.Execution) error {
+	svc.createFirstTurnExecutionFn = func(context.Context, persistence.Tx, *models.Execution) error {
 		return fmt.Errorf("simulated process interruption before execution persistence")
 	}
 	event := slackSocketMessageEvent("E-restart", "1710000000.300000")

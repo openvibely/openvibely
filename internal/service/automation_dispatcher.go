@@ -9,15 +9,15 @@ import (
 
 	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/update"
 )
 
 // AutomationDispatcher is a durable adapter into WorkerService. It owns no
 // worker pool, task executor, lifecycle runner, or model invocation path.
 type AutomationDispatcher struct {
-	automationRepo *repository.AutomationRepo
-	taskRepo       *repository.TaskRepo
+	automationRepo persistence.AutomationStore
+	taskRepo       persistence.TaskStore
 	workerSvc      *WorkerService
 	claimant       string
 	interval       time.Duration
@@ -27,12 +27,12 @@ type AutomationDispatcher struct {
 	updateTracker  *update.WorkTracker
 }
 
-func NewAutomationDispatcher(automationRepo *repository.AutomationRepo, taskRepo *repository.TaskRepo, workerSvc *WorkerService) *AutomationDispatcher {
+func NewAutomationDispatcher(automationRepo persistence.AutomationStore, taskRepo persistence.TaskStore, workerSvc *WorkerService) *AutomationDispatcher {
 	return &AutomationDispatcher{
 		automationRepo: automationRepo,
 		taskRepo:       taskRepo,
 		workerSvc:      workerSvc,
-		claimant:       "automation-dispatcher-" + repository.NewID(),
+		claimant:       "automation-dispatcher-" + persistence.NewID(),
 		interval:       time.Second,
 		lease:          time.Minute,
 	}
@@ -121,7 +121,7 @@ func (d *AutomationDispatcher) DispatchOne(ctx context.Context) (bool, error) {
 	if dispatch.ExecutionID != "" {
 		execution, err := d.taskRepo.ClaimAutomationDispatch(ctx, dispatch.ID, d.claimant)
 		if err != nil {
-			if errors.Is(err, repository.ErrAutomationTaskBusy) {
+			if errors.Is(err, persistence.ErrAutomationTaskBusy) {
 				if cancelErr := d.automationRepo.CancelDispatchesForTask(context.WithoutCancel(ctx), dispatch.TaskID, "Automation task was cancelled or is no longer runnable"); cancelErr != nil {
 					return true, fmt.Errorf("cancelling non-runnable automation dispatch: %w", cancelErr)
 				}

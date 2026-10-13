@@ -13,6 +13,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/internal/testutil"
@@ -84,7 +85,7 @@ func TestOutboundTargetHandlersDenyCrossProjectTargetIDs(t *testing.T) {
 	tc.handler.SetChannelMessageRouter(router)
 
 	target := models.ChannelTarget{
-		ID:        repository.NewID(),
+		ID:        persistence.NewID(),
 		ProjectID: ownerProject.ID,
 		Platform:  "slack",
 		Name:      "alerts",
@@ -134,7 +135,7 @@ func TestOutboundTargetHandlersDenyCrossProjectTargetIDs(t *testing.T) {
 		t.Fatalf("cross-project test send should not dispatch, channel=%q text=%q", slack.channelID, slack.text)
 	}
 
-	otherTarget := models.ChannelTarget{ID: repository.NewID(), ProjectID: otherProject.ID, Platform: "slack", Name: "other", TargetID: "COTHER"}
+	otherTarget := models.ChannelTarget{ID: persistence.NewID(), ProjectID: otherProject.ID, Platform: "slack", Name: "other", TargetID: "COTHER"}
 	if err := targetRepo.Upsert(context.Background(), otherTarget); err != nil {
 		t.Fatalf("upsert other target: %v", err)
 	}
@@ -175,14 +176,14 @@ func TestOutboundTargetFragmentsShareResolvedProjectContext(t *testing.T) {
 	tc.handler.SetChannelTargetRepo(targetRepo)
 
 	targetA := models.ChannelTarget{
-		ID:         repository.NewID(),
+		ID:         persistence.NewID(),
 		ProjectID:  projectA.ID,
 		Platform:   "slack",
 		TargetKind: "channel",
 		TargetID:   "C-FRAGMENT-A",
 	}
 	targetB := models.ChannelTarget{
-		ID:         repository.NewID(),
+		ID:         persistence.NewID(),
 		ProjectID:  projectB.ID,
 		Platform:   "email",
 		TargetKind: "email",
@@ -370,8 +371,8 @@ func TestOutboundTargetsPersistOnlyOnSaveSettings(t *testing.T) {
 	targetRepo := repository.NewChannelTargetRepo(tc.db)
 	tc.handler.SetChannelTargetRepo(targetRepo)
 
-	keep := models.ChannelTarget{ID: repository.NewID(), ProjectID: project.ID, Platform: "email", Name: "keep", TargetID: "keep@example.com"}
-	remove := models.ChannelTarget{ID: repository.NewID(), ProjectID: project.ID, Platform: "slack", Name: "remove", TargetID: "CREMOVE"}
+	keep := models.ChannelTarget{ID: persistence.NewID(), ProjectID: project.ID, Platform: "email", Name: "keep", TargetID: "keep@example.com"}
+	remove := models.ChannelTarget{ID: persistence.NewID(), ProjectID: project.ID, Platform: "slack", Name: "remove", TargetID: "CREMOVE"}
 	if err := targetRepo.Upsert(context.Background(), keep); err != nil {
 		t.Fatalf("upsert keep target: %v", err)
 	}
@@ -487,7 +488,7 @@ func TestEditingOutboundTargetPreservesIDAndTestsEditedDraft(t *testing.T) {
 	tc.handler.SetChannelMessageRouter(router)
 
 	target := models.ChannelTarget{
-		ID:             repository.NewID(),
+		ID:             persistence.NewID(),
 		ProjectID:      project.ID,
 		Platform:       "email",
 		TargetKind:     "email",
@@ -676,7 +677,7 @@ func TestOutboundTargetTestPreservesThreadIDAndEscapesResult(t *testing.T) {
 	tc.handler.SetChannelMessageRouter(router)
 
 	target := models.ChannelTarget{
-		ID:        repository.NewID(),
+		ID:        persistence.NewID(),
 		ProjectID: project.ID,
 		Platform:  "slack",
 		Name:      "alerts",
@@ -997,11 +998,11 @@ func TestAuthorizedUsersMutationDoesNotAffectOutboundTargets(t *testing.T) {
 
 	// Seed two outbound targets: a Slack channel and a Discord user DM.
 	slackChannelTarget := models.ChannelTarget{
-		ID: repository.NewID(), ProjectID: project.ID,
+		ID: persistence.NewID(), ProjectID: project.ID,
 		Platform: "slack", TargetKind: "channel", Name: "ops", TargetID: "COPS123",
 	}
 	discordUserTarget := models.ChannelTarget{
-		ID: repository.NewID(), ProjectID: project.ID,
+		ID: persistence.NewID(), ProjectID: project.ID,
 		Platform: "discord", TargetKind: "user", Name: "", TargetID: "1518288288572641398",
 	}
 	if err := targetRepo.Upsert(context.Background(), slackChannelTarget); err != nil {

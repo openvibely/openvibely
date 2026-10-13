@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,7 +11,7 @@ import (
 
 	"github.com/openvibely/openvibely/internal/automationobs"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence"
 )
 
 type AutomationRegistrationRequest struct {
@@ -25,11 +24,11 @@ type AutomationRegistrationRequest struct {
 }
 
 type AutomationRegistrationService struct {
-	repo     *repository.AutomationRepo
+	repo     persistence.AutomationStore
 	registry *AutomationAdapterRegistry
 }
 
-func NewAutomationRegistrationService(repo *repository.AutomationRepo, registry *AutomationAdapterRegistry) *AutomationRegistrationService {
+func NewAutomationRegistrationService(repo persistence.AutomationStore, registry *AutomationAdapterRegistry) *AutomationRegistrationService {
 	return &AutomationRegistrationService{repo: repo, registry: registry}
 }
 
@@ -130,14 +129,14 @@ func (s *AutomationRegistrationService) Register(ctx context.Context, req Automa
 		if !ok {
 			return nil, false, fmt.Errorf("scheduled automation node %q requires its task binding on that same node", nodeKey)
 		}
-		var scheduledTaskID string
-		if err := s.repo.DB().QueryRowContext(ctx, `SELECT s.task_id FROM schedules s JOIN tasks t ON t.id = s.task_id WHERE s.id = ? AND t.project_id = ?`, scheduleID, req.ProjectID).Scan(&scheduledTaskID); err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
-				return nil, false, fmt.Errorf("schedule resource %q does not exist or belongs to another project", scheduleID)
-			}
+		schedule, found, err := s.repo.ProjectScheduleResource(ctx, req.ProjectID, scheduleID)
+		if err != nil {
 			return nil, false, fmt.Errorf("validate scheduled automation node %q: %w", nodeKey, err)
 		}
-		if scheduledTaskID != taskID {
+		if !found {
+			return nil, false, fmt.Errorf("schedule resource %q does not exist or belongs to another project", scheduleID)
+		}
+		if schedule.TaskID != taskID {
 			return nil, false, fmt.Errorf("schedule for automation node %q must target the task bound to that same node", nodeKey)
 		}
 	}
@@ -200,38 +199,31 @@ func (s *AutomationRegistrationService) registeredNodeConfig(ctx context.Context
 		config = map[string]any{}
 	}
 	if taskID != "" {
-		var prompt string
-		var category models.TaskCategory
-		var priority int
-		if err := s.repo.DB().QueryRowContext(ctx, `SELECT prompt, category, priority FROM tasks WHERE id = ? AND project_id = ?`, taskID, projectID).Scan(&prompt, &category, &priority); err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
-				return "", fmt.Errorf("task resource %q does not exist or belongs to another project", taskID)
-			}
+		task, found, err := s.repo.ProjectTaskResource(ctx, projectID, taskID)
+		if err != nil {
 			return "", fmt.Errorf("load registered task configuration for node %q: %w", node.Key, err)
 		}
-		config["prompt"] = prompt
-		config["category"] = string(category)
-		config["priority"] = priority
+		if !found {
+			return "", fmt.Errorf("task resource %q does not exist or belongs to another project", taskID)
+		}
+		config["prompt"] = task.Prompt
+		config["category"] = string(task.Category)
+		config["priority"] = task.Priority
 	}
 	if scheduleID != "" {
-		var runAt time.Time
-		var repeatType models.RepeatType
-		var repeatInterval int
-		var clearContextOnStart bool
-		if err := s.repo.DB().QueryRowContext(ctx, `SELECT s.run_at, s.repeat_type, s.repeat_interval, s.clear_context_on_start
-			FROM schedules s JOIN tasks t ON t.id = s.task_id
-			WHERE s.id = ? AND t.project_id = ?`, scheduleID, projectID).Scan(&runAt, &repeatType, &repeatInterval, &clearContextOnStart); err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
-				return "", fmt.Errorf("schedule resource %q does not exist or belongs to another project", scheduleID)
-			}
+		schedule, found, err := s.repo.ProjectScheduleResource(ctx, projectID, scheduleID)
+		if err != nil {
 			return "", fmt.Errorf("load registered schedule configuration for node %q: %w", node.Key, err)
 		}
+		if !found {
+			return "", fmt.Errorf("schedule resource %q does not exist or belongs to another project", scheduleID)
+		}
 		config["target_node_key"] = adapterScheduleTarget(adapter, node.Key)
-		config["run_at"] = runAt.Local().Format("15:04")
-		config["repeat_type"] = string(repeatType)
-		config["repeat_interval"] = repeatInterval
+		config["run_at"] = schedule.RunAt.Local().Format("15:04")
+		config["repeat_type"] = string(schedule.RepeatType)
+		config["repeat_interval"] = schedule.RepeatInterval
 		config["enabled"] = true
-		config["clear_context_on_start"] = clearContextOnStart
+		config["clear_context_on_start"] = schedule.ClearContextOnStart
 	}
 	if issues := validateAutomationNodeConfig(adapter, node, models.AutomationDraftNode{
 		Key: node.Key, Name: node.Name, Type: models.AutomationNodeType(node.Type), Role: node.Role, Config: config,
@@ -247,7 +239,7 @@ func (s *AutomationRegistrationService) registeredNodeConfig(ctx context.Context
 
 const automationExternalRefreshCache = time.Minute
 
-type AutomationGraphService struct{ repo *repository.AutomationRepo }
+type AutomationGraphService struct{ repo persistence.AutomationStore }
 
 type AutomationRuntimeListPage struct {
 	Cards      []models.AutomationCard
@@ -262,7 +254,7 @@ const (
 	AutomationRuntimeListMaxLimit     = 50
 )
 
-func NewAutomationGraphService(repo *repository.AutomationRepo) *AutomationGraphService {
+func NewAutomationGraphService(repo persistence.AutomationStore) *AutomationGraphService {
 	return &AutomationGraphService{repo: repo}
 }
 
@@ -444,10 +436,10 @@ func AutomationCardSummary(card models.AutomationCard) map[string]any {
 // ListPage returns one bounded portfolio page while keeping template revision
 // enrichment identical to the full portfolio path.
 func (s *AutomationGraphService) ListPage(ctx context.Context, projectID string, limit, offset int, search string) ([]models.AutomationCard, error) {
-	return s.ListPageFiltered(ctx, projectID, limit, offset, repository.AutomationCardListFilter{Search: search})
+	return s.ListPageFiltered(ctx, projectID, limit, offset, persistence.AutomationCardListFilter{Search: search})
 }
 
-func (s *AutomationGraphService) ListPageFiltered(ctx context.Context, projectID string, limit, offset int, filter repository.AutomationCardListFilter) ([]models.AutomationCard, error) {
+func (s *AutomationGraphService) ListPageFiltered(ctx context.Context, projectID string, limit, offset int, filter persistence.AutomationCardListFilter) ([]models.AutomationCard, error) {
 	cards, err := s.repo.ListPortfolioCardsPageFiltered(ctx, projectID, limit, offset, filter)
 	if err != nil {
 		return nil, err
@@ -486,7 +478,7 @@ func (s *AutomationGraphService) GetLive(ctx context.Context, projectID, automat
 	if err != nil {
 		return nil, err
 	}
-	externalState, err := s.repo.AutomationExternalState(ctx, projectID, automationID, now.UTC().Add(-repository.AutomationExternalStaleAfter))
+	externalState, err := s.repo.AutomationExternalState(ctx, projectID, automationID, now.UTC().Add(-persistence.AutomationExternalStaleAfter))
 	if err != nil {
 		return nil, err
 	}
@@ -556,7 +548,7 @@ func (s *AutomationGraphService) ContextForTask(ctx context.Context, projectID, 
 	return s.repo.ContextForTask(ctx, projectID, taskID)
 }
 
-func (s *AutomationGraphService) GitHubIssueTaskProvenance(ctx context.Context, projectID, taskID string) (*repository.AutomationGitHubIssueTaskProvenance, error) {
+func (s *AutomationGraphService) GitHubIssueTaskProvenance(ctx context.Context, projectID, taskID string) (*persistence.AutomationGitHubIssueTaskProvenance, error) {
 	if s == nil || s.repo == nil {
 		return nil, nil
 	}

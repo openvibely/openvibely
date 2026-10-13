@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence"
 )
 
 func TestTaskDividerPreservesPointerFocusAcrossWindowBlur(t *testing.T) {
@@ -489,7 +489,7 @@ func TestTaskDetailContent_DetailsTabRendersScrollablePlainSections(t *testing.T
 	}
 
 	modelsList := []models.LLMConfig{{ID: "model-1", Name: "Model One"}}
-	agentsList := []repository.AgentTaskUIOption{{ID: "agent-1", Name: "Agent One", Enabled: true, SelectableAsPrimary: true}}
+	agentsList := []persistence.AgentTaskUIOption{{ID: "agent-1", Name: "Agent One", Enabled: true, SelectableAsPrimary: true}}
 
 	var buf bytes.Buffer
 	err := TaskDetailContent(task, goal, nil, nil, modelsList, agentsList, nil, "details", nil).Render(context.Background(), &buf)
@@ -1069,7 +1069,7 @@ func TestTaskDetailContent_RunAtFieldsClickablePickerAffordance(t *testing.T) {
 }
 func TestTaskDetailContent_AgentSelectorAllowsNoAgentSelection(t *testing.T) {
 	task := &models.Task{ID: "task1", ProjectID: "project1", Title: "Task", Status: models.StatusPending, Category: models.CategoryActive}
-	agentDefs := []repository.AgentTaskUIOption{{ID: "agent1", Name: "Reviewer", Model: "inherit", Enabled: true, SelectableAsPrimary: true}}
+	agentDefs := []persistence.AgentTaskUIOption{{ID: "agent1", Name: "Reviewer", Model: "inherit", Enabled: true, SelectableAsPrimary: true}}
 
 	var buf bytes.Buffer
 	if err := TaskDetailContent(task, nil, nil, nil, nil, agentDefs, nil, "details", nil).Render(context.Background(), &buf); err != nil {

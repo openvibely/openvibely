@@ -14,6 +14,7 @@ import (
 	"github.com/openvibely/openvibely/internal/chatcontrol"
 	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/internal/testutil"
@@ -455,9 +456,9 @@ func TestListChannelsPlanModeReturnsPromptSafeStatus(t *testing.T) {
 
 	require.NoError(t, webhookRepo.Create(ctx, &models.WebhookEndpoint{ProjectID: project.ID, Name: "Deploy Alerts", Enabled: true, PathToken: secretValues[9], Secret: secretValues[8], DefaultPriority: 2}))
 	require.NoError(t, webhookRepo.Create(ctx, &models.WebhookEndpoint{ProjectID: project.ID, Name: "Disabled Hook", Enabled: false, DefaultPriority: 2}))
-	require.NoError(t, channelTargetRepo.Upsert(ctx, models.ChannelTarget{ID: repository.NewID(), ProjectID: project.ID, Platform: "slack", TargetKind: "channel", Name: "ops", TargetID: secretValues[10], ThreadID: secretValues[11], Home: true}))
-	require.NoError(t, channelTargetRepo.Upsert(ctx, models.ChannelTarget{ID: repository.NewID(), ProjectID: project.ID, Platform: "slack", TargetKind: "user", TargetID: "U123"}))
-	require.NoError(t, channelTargetRepo.Upsert(ctx, models.ChannelTarget{ID: repository.NewID(), ProjectID: project.ID, Platform: "email", TargetKind: "email", Name: "team", TargetID: "team@example.com", DefaultSubject: secretValues[12]}))
+	require.NoError(t, channelTargetRepo.Upsert(ctx, models.ChannelTarget{ID: persistence.NewID(), ProjectID: project.ID, Platform: "slack", TargetKind: "channel", Name: "ops", TargetID: secretValues[10], ThreadID: secretValues[11], Home: true}))
+	require.NoError(t, channelTargetRepo.Upsert(ctx, models.ChannelTarget{ID: persistence.NewID(), ProjectID: project.ID, Platform: "slack", TargetKind: "user", TargetID: "U123"}))
+	require.NoError(t, channelTargetRepo.Upsert(ctx, models.ChannelTarget{ID: persistence.NewID(), ProjectID: project.ID, Platform: "email", TargetKind: "email", Name: "team", TargetID: "team@example.com", DefaultSubject: secretValues[12]}))
 
 	rt := h.buildChatActionToolRuntimeFromDefs(
 		streamingResponseParams{ProjectID: project.ID, ChatMode: models.ChatModePlan},
@@ -516,10 +517,10 @@ func TestListChannelsOutboundTargetAggregateSummaryMatchesMaterializedOutput(t *
 		{Platform: "email", TargetKind: "email", Name: "team"},
 	}
 	materialized := summarizeOutboundTargets(targets)
-	aggregate := outboundTargetsStatusFromRepoSummary(repository.ChannelTargetProjectSummary{
+	aggregate := outboundTargetsStatusFromRepoSummary(persistence.ChannelTargetProjectSummary{
 		Total:      6,
 		Configured: true,
-		ByPlatform: map[string]repository.ChannelTargetPlatformSummary{
+		ByPlatform: map[string]persistence.ChannelTargetPlatformSummary{
 			"slack":    {Total: 2, Home: 1, Named: 1, ByKind: map[string]int{"channel": 1, "user": 1}},
 			"telegram": {Total: 1, Home: 1, Named: 1, ByKind: map[string]int{"chat": 1}},
 			"discord":  {Total: 2, Home: 0, Named: 1, ByKind: map[string]int{"channel": 1, "user": 1}},
@@ -1973,7 +1974,7 @@ func TestViewUsageAnalyticsRuntimeTool_SanitizesAccountLimitSummaries(t *testing
 	used := 91.0
 	window := 300
 	reset := time.Now().UTC().Add(time.Hour).Format(time.RFC3339)
-	require.NoError(t, h.usageRepo.CreateAccountUsageSnapshot(ctx, &models.AccountUsageSnapshot{
+	require.NoError(t, h.usageRepo.(*repository.UsageRepo).CreateAccountUsageSnapshot(ctx, &models.AccountUsageSnapshot{
 		Provider:             "openai",
 		AccountID:            cfg.OAuthAccountID,
 		AgentConfigID:        cfg.ID,

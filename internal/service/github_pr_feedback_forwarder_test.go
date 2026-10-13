@@ -315,7 +315,7 @@ func TestGitHubPRFeedbackRepoAtomicallyDeduplicatesMixedCaseRepository(t *testin
 		CreatedAt:         time.Date(2026, 7, 9, 10, 0, 0, 0, time.UTC),
 	}
 	input := &models.ThreadInput{Scope: models.ThreadInputScopeTask, ProjectID: project.ID, TaskID: task.ID, Content: "duplicate"}
-	recorded, err := feedbackRepo.RecordForwardedAndQueue(ctx, threadInputRepo, feedback, input)
+	recorded, err := feedbackRepo.RecordForwardedAndQueue(ctx, feedback, input)
 	if err != nil {
 		t.Fatalf("record duplicate feedback: %v", err)
 	}

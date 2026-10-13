@@ -12,7 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence"
 )
 
 // threadInputRepo is wired in NewTestContext (derived from execRepo.DB()).
@@ -334,7 +334,7 @@ func TestEditingHoldsQueuedMessageAfterTurnFinishes(t *testing.T) {
 			require.NoError(t, err)
 			require.Nil(t, next, "held head must also prevent later messages overtaking it")
 			// A consumer with a stale reference must be rejected atomically as well.
-			require.ErrorIs(t, tc.handler.threadInputRepo.MarkApplied(ctx, input.ID, "", ""), repository.ErrInputNotPending)
+			require.ErrorIs(t, tc.handler.threadInputRepo.MarkApplied(ctx, input.ID, "", ""), persistence.ErrInputNotPending)
 			tc.Assert(tc.HTTP().Post(endpoint + "/edit").WithForm(url.Values{"content": {"edited"}}).Execute()).StatusCode(http.StatusOK)
 			if scope == models.ThreadInputScopeTask {
 				next, err = tc.handler.threadInputRepo.FindOldestQueuedForTask(ctx, task.ID)

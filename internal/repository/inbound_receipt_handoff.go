@@ -16,14 +16,14 @@ type inboundReceiptHandoffSpec struct {
 	rowsAffectedError    string
 }
 
-func inboundReceiptHandoff(ctx context.Context, db *sql.DB, spec inboundReceiptHandoffSpec, persist func(SQLExecutor) error) (alreadyHandedOff bool, err error) {
+func inboundReceiptHandoff(ctx context.Context, db *sql.DB, spec inboundReceiptHandoffSpec, persist func(sqlExecutor) error) (alreadyHandedOff bool, err error) {
 	if db == nil {
 		return false, errors.New(spec.notConfiguredError)
 	}
 	if persist == nil {
 		return false, errors.New(spec.persistRequiredError)
 	}
-	err = withImmediateTx(ctx, db, func(exec SQLExecutor) error {
+	err = withImmediateTx(ctx, db, func(exec sqlExecutor) error {
 		result, err := exec.ExecContext(ctx, spec.insertSQL, spec.insertArgs...)
 		if err != nil {
 			return fmt.Errorf("%s: %w", spec.recordError, err)

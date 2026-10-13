@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 )
 
 // ChannelTargetRepo stores outbound channel destinations and send audit rows.
@@ -16,21 +17,8 @@ type ChannelTargetRepo struct {
 
 func NewChannelTargetRepo(db *sql.DB) *ChannelTargetRepo { return &ChannelTargetRepo{db: db} }
 
-type ChannelTargetProjectSummary struct {
-	Total      int
-	Configured bool
-	ByPlatform map[string]ChannelTargetPlatformSummary
-}
-
-type ChannelTargetPlatformSummary struct {
-	Total  int
-	Home   int
-	Named  int
-	ByKind map[string]int
-}
-
-func (r *ChannelTargetRepo) SummarizeByProject(ctx context.Context, projectID string) (ChannelTargetProjectSummary, error) {
-	out := ChannelTargetProjectSummary{ByPlatform: map[string]ChannelTargetPlatformSummary{}}
+func (r *ChannelTargetRepo) SummarizeByProject(ctx context.Context, projectID string) (persistence.ChannelTargetProjectSummary, error) {
+	out := persistence.ChannelTargetProjectSummary{ByPlatform: map[string]persistence.ChannelTargetPlatformSummary{}}
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT platform, target_kind, COUNT(*),
 		       SUM(CASE WHEN is_home THEN 1 ELSE 0 END),
@@ -335,7 +323,7 @@ func normalizeChannelTargetField(value string) string {
 	return strings.ToLower(strings.TrimSpace(value))
 }
 
-func upsertChannelTarget(ctx context.Context, exec SQLExecutor, target models.ChannelTarget) error {
+func upsertChannelTarget(ctx context.Context, exec sqlExecutor, target models.ChannelTarget) error {
 	if strings.TrimSpace(target.ID) == "" {
 		return fmt.Errorf("channel target id is required")
 	}

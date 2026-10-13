@@ -11,7 +11,7 @@ import templruntime "github.com/a-h/templ/runtime"
 import (
 	"fmt"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence"
 )
 
 func detailPointerValue(value *string) string {
@@ -220,7 +220,7 @@ func TaskAutoMergePanel(task *models.Task) templ.Component {
 	})
 }
 
-func TaskDetailEditors(task *models.Task, agents []models.LLMConfig, definitions []repository.AgentTaskUIOption) templ.Component {
+func TaskDetailEditors(task *models.Task, agents []models.LLMConfig, definitions []persistence.AgentTaskUIOption) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {

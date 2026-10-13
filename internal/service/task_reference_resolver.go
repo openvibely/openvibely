@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence"
 )
 
 // TaskReferenceResolutionOptions controls the project-scope rule used while
@@ -18,7 +18,7 @@ type TaskReferenceResolutionOptions struct {
 
 // ResolveTaskReference finds a task by ID or title while preserving the shared
 // lookup order and user-facing errors used by task action runtimes.
-func ResolveTaskReference(ctx context.Context, taskRepo *repository.TaskRepo, projectID, taskID, title string, opts TaskReferenceResolutionOptions) (*models.Task, error) {
+func ResolveTaskReference(ctx context.Context, taskRepo persistence.TaskStore, projectID, taskID, title string, opts TaskReferenceResolutionOptions) (*models.Task, error) {
 	if taskRepo == nil {
 		return nil, fmt.Errorf("task repository not configured")
 	}

@@ -14,7 +14,7 @@ import (
 	"github.com/openvibely/openvibely/internal/applog"
 	llmworkflow "github.com/openvibely/openvibely/internal/llm/workflow"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence"
 )
 
 // TaskCreationRequest represents a typed task creation action request.
@@ -98,7 +98,7 @@ type TaskCreationResult struct {
 
 // TaskCreationPersistence runs inside the task creation transaction after the
 // task ID has been assigned and before active work can be submitted.
-type TaskCreationPersistence func(context.Context, repository.SQLExecutor, *models.Task) error
+type TaskCreationPersistence func(context.Context, persistence.Tx, *models.Task) error
 
 // ExecuteTaskCreationsWithReturn creates tasks from typed action requests and returns both the created tasks and a summary.
 // This variant is used when the caller needs access to the created task objects.
@@ -193,11 +193,11 @@ func ExecuteTaskCreationsWithIndexedReturnAndPersistence(ctx context.Context, re
 			task.AgentDefinitionID = &agentDefinitionID
 		}
 
-		if err := taskSvc.CreateWithGoalAndCallback(ctx, task, req.Goal, func(exec repository.SQLExecutor) error {
+		if err := taskSvc.CreateWithGoalAndCallback(ctx, task, req.Goal, func(tx persistence.Tx) error {
 			if persist == nil {
 				return nil
 			}
-			return persist(ctx, exec, task)
+			return persist(ctx, tx, task)
 		}); err != nil {
 			applog.Infof("[task-creation] error creating task %q: %v", req.Title, err)
 			failed = append(failed, fmt.Sprintf("- \"%s\": %v", req.Title, err))
@@ -335,7 +335,7 @@ func (r *TaskEditRequest) UnmarshalJSON(data []byte) error {
 // ExecuteTaskEdits applies edits to existing tasks and returns a summary.
 // Only fields that are set in the request are updated.
 // If attachmentRepo and uploadsDir are provided, file attachments in requests are processed.
-func ExecuteTaskEdits(ctx context.Context, requests []TaskEditRequest, projectID string, taskSvc *TaskService, attachmentRepo *repository.AttachmentRepo, uploadsDir string) string {
+func ExecuteTaskEdits(ctx context.Context, requests []TaskEditRequest, projectID string, taskSvc *TaskService, attachmentRepo persistence.AttachmentStore, uploadsDir string) string {
 	if len(requests) == 0 {
 		return ""
 	}
@@ -585,7 +585,7 @@ func ExecuteTaskEdits(ctx context.Context, requests []TaskEditRequest, projectID
 // copyAttachmentFiles copies files from the given paths to the task's upload directory
 // and creates attachment records in the database. Returns count of files copied and their names.
 // Supports absolute file paths and chat attachment download URLs (e.g., /chat/attachments/{id}/download).
-func copyAttachmentFiles(ctx context.Context, filePaths []string, taskID string, attachmentRepo *repository.AttachmentRepo, uploadsDir string) (int, []string) {
+func copyAttachmentFiles(ctx context.Context, filePaths []string, taskID string, attachmentRepo persistence.AttachmentStore, uploadsDir string) (int, []string) {
 	taskDir := filepath.Join(uploadsDir, "tasks", taskID)
 	if err := os.MkdirAll(taskDir, 0755); err != nil {
 		applog.Infof("[task-edit] error creating task directory %s: %v", taskDir, err)

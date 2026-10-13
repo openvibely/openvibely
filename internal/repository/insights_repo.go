@@ -3,15 +3,10 @@ package repository
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"fmt"
 
 	"github.com/openvibely/openvibely/internal/models"
-)
-
-var (
-	ErrInsightNotFound   = errors.New("insight not found")
-	ErrKnowledgeNotFound = errors.New("knowledge entry not found")
+	"github.com/openvibely/openvibely/internal/persistence"
 )
 
 type InsightsRepo struct {
@@ -104,7 +99,7 @@ func (r *InsightsRepo) UpdateStatus(ctx context.Context, projectID, id string, s
 		return err
 	}
 	if rows == 0 {
-		return ErrInsightNotFound
+		return persistence.ErrInsightNotFound
 	}
 	return nil
 }
@@ -119,7 +114,7 @@ func (r *InsightsRepo) LinkTask(ctx context.Context, projectID, insightID, taskI
 		return err
 	}
 	if rows == 0 {
-		return ErrInsightNotFound
+		return persistence.ErrInsightNotFound
 	}
 	return nil
 }
@@ -134,7 +129,7 @@ func (r *InsightsRepo) DeleteInsight(ctx context.Context, projectID, id string) 
 		return err
 	}
 	if rows == 0 {
-		return ErrInsightNotFound
+		return persistence.ErrInsightNotFound
 	}
 	return nil
 }
@@ -314,28 +309,22 @@ func (r *InsightsRepo) DeleteKnowledge(ctx context.Context, projectID, id string
 		return err
 	}
 	if rows == 0 {
-		return ErrKnowledgeNotFound
+		return persistence.ErrKnowledgeNotFound
 	}
 	return nil
 }
 
 // --- Aggregate queries for analysis ---
 
-type InsightFailedTaskPattern struct {
-	Title     string
-	FailCount int
-	LastError string
-}
-
-func (r *InsightsRepo) GetFailedTaskPatterns(ctx context.Context, projectID string, minFailures int) ([]InsightFailedTaskPattern, error) {
+func (r *InsightsRepo) GetFailedTaskPatterns(ctx context.Context, projectID string, minFailures int) ([]persistence.InsightFailedTaskPattern, error) {
 	rows, err := queryFailedTaskPatterns(ctx, r.db, projectID, minFailures, -1)
 	if err != nil {
 		return nil, err
 	}
 
-	results := make([]InsightFailedTaskPattern, 0, len(rows))
+	results := make([]persistence.InsightFailedTaskPattern, 0, len(rows))
 	for _, row := range rows {
-		results = append(results, InsightFailedTaskPattern{
+		results = append(results, persistence.InsightFailedTaskPattern{
 			Title:     row.TaskTitle,
 			FailCount: row.FailureCount,
 			LastError: row.LastError,

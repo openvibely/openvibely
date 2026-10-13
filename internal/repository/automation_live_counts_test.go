@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/testutil"
 )
 
@@ -47,7 +48,7 @@ func TestAutomationRepoLiveNodeCountsUsesProjectedActivityStateSemantics(t *test
 	cutoff := time.Now().UTC().Add(-24 * time.Hour)
 
 	insertAutomationLiveCountsInvocation(t, db, "activity-invocation", fixture, fixture.Nodes["activity"], "completed")
-	_, _, err := repo.RecordProjectionEvent(ctx, AutomationProjectionEvent{
+	_, _, err := repo.RecordProjectionEvent(ctx, persistence.AutomationProjectionEvent{
 		Context: models.AutomationContext{ProjectID: fixture.ProjectID},
 		Binding: models.AutomationBinding{AutomationID: fixture.AutomationID, VersionID: fixture.VersionID,
 			NodeID: fixture.Nodes["activity"], InvocationID: "activity-invocation"},
@@ -57,7 +58,7 @@ func TestAutomationRepoLiveNodeCountsUsesProjectedActivityStateSemantics(t *test
 		t.Fatalf("record activity-only identity: %v", err)
 	}
 
-	workItem, _, err := repo.RecordProjectionEvent(ctx, AutomationProjectionEvent{
+	workItem, _, err := repo.RecordProjectionEvent(ctx, persistence.AutomationProjectionEvent{
 		Context:     models.AutomationContext{ProjectID: fixture.ProjectID},
 		Binding:     models.AutomationBinding{AutomationID: fixture.AutomationID, VersionID: fixture.VersionID, NodeID: fixture.Nodes["work"]},
 		WorkItemKey: "work-identity", ActivityKey: "work-identity-running", ActivityType: "work", ActivityStatus: models.AutomationActivityRunning,
@@ -65,7 +66,7 @@ func TestAutomationRepoLiveNodeCountsUsesProjectedActivityStateSemantics(t *test
 	if err != nil {
 		t.Fatalf("record initial work identity activity: %v", err)
 	}
-	_, _, err = repo.RecordProjectionEvent(ctx, AutomationProjectionEvent{
+	_, _, err = repo.RecordProjectionEvent(ctx, persistence.AutomationProjectionEvent{
 		Context: models.AutomationContext{ProjectID: fixture.ProjectID},
 		Binding: models.AutomationBinding{AutomationID: fixture.AutomationID, VersionID: fixture.VersionID,
 			NodeID: fixture.Nodes["work"], WorkItemID: workItem.ID},
@@ -77,7 +78,7 @@ func TestAutomationRepoLiveNodeCountsUsesProjectedActivityStateSemantics(t *test
 
 	insertAutomationLiveCountsTask(t, db, "task-identity-task", fixture.ProjectID)
 	insertAutomationLiveCountsInvocation(t, db, "task-invocation-one", fixture, fixture.Nodes["task"], "completed")
-	_, _, err = repo.RecordProjectionEvent(ctx, AutomationProjectionEvent{
+	_, _, err = repo.RecordProjectionEvent(ctx, persistence.AutomationProjectionEvent{
 		Context: models.AutomationContext{ProjectID: fixture.ProjectID},
 		Binding: models.AutomationBinding{AutomationID: fixture.AutomationID, VersionID: fixture.VersionID,
 			NodeID: fixture.Nodes["task"], InvocationID: "task-invocation-one"},
@@ -88,7 +89,7 @@ func TestAutomationRepoLiveNodeCountsUsesProjectedActivityStateSemantics(t *test
 		t.Fatalf("record initial task identity activity: %v", err)
 	}
 	insertAutomationLiveCountsInvocation(t, db, "task-invocation-two", fixture, fixture.Nodes["task"], "completed")
-	_, _, err = repo.RecordProjectionEvent(ctx, AutomationProjectionEvent{
+	_, _, err = repo.RecordProjectionEvent(ctx, persistence.AutomationProjectionEvent{
 		Context: models.AutomationContext{ProjectID: fixture.ProjectID},
 		Binding: models.AutomationBinding{AutomationID: fixture.AutomationID, VersionID: fixture.VersionID,
 			NodeID: fixture.Nodes["task"], InvocationID: "task-invocation-two"},
@@ -107,7 +108,7 @@ func TestAutomationRepoLiveNodeCountsUsesProjectedActivityStateSemantics(t *test
 	insertAutomationLiveCountsDefinitionResource(t, db, fixture, fixture.Nodes["represented_execution"], "task", "represented-execution-task")
 	insertAutomationLiveCountsExecution(t, db, "represented-execution", "represented-execution-task", "running")
 	insertAutomationLiveCountsInvocation(t, db, "represented-execution-invocation", fixture, fixture.Nodes["represented_execution"], "completed")
-	_, _, err = repo.RecordProjectionEvent(ctx, AutomationProjectionEvent{
+	_, _, err = repo.RecordProjectionEvent(ctx, persistence.AutomationProjectionEvent{
 		Context: models.AutomationContext{ProjectID: fixture.ProjectID},
 		Binding: models.AutomationBinding{AutomationID: fixture.AutomationID, VersionID: fixture.VersionID,
 			NodeID: fixture.Nodes["represented_execution"], InvocationID: "represented-execution-invocation"},
@@ -120,7 +121,7 @@ func TestAutomationRepoLiveNodeCountsUsesProjectedActivityStateSemantics(t *test
 
 	insertAutomationLiveCountsInvocation(t, db, "fallback-invocation", fixture, fixture.Nodes["invocation"], "running")
 	insertAutomationLiveCountsInvocation(t, db, "covered-invocation", fixture, fixture.Nodes["invocation"], "running")
-	_, _, err = repo.RecordProjectionEvent(ctx, AutomationProjectionEvent{
+	_, _, err = repo.RecordProjectionEvent(ctx, persistence.AutomationProjectionEvent{
 		Context: models.AutomationContext{ProjectID: fixture.ProjectID},
 		Binding: models.AutomationBinding{AutomationID: fixture.AutomationID, VersionID: fixture.VersionID,
 			NodeID: fixture.Nodes["invocation"], InvocationID: "covered-invocation"},
@@ -130,7 +131,7 @@ func TestAutomationRepoLiveNodeCountsUsesProjectedActivityStateSemantics(t *test
 		t.Fatalf("record covered invocation activity: %v", err)
 	}
 
-	inputWorkItem, _, err := repo.RecordProjectionEvent(ctx, AutomationProjectionEvent{
+	inputWorkItem, _, err := repo.RecordProjectionEvent(ctx, persistence.AutomationProjectionEvent{
 		Context:     models.AutomationContext{ProjectID: fixture.ProjectID},
 		Binding:     models.AutomationBinding{AutomationID: fixture.AutomationID, VersionID: fixture.VersionID, NodeID: fixture.Nodes["input"]},
 		WorkItemKey: "input-work", ActivityKey: "input-work-completed", ActivityType: "input", ActivityStatus: models.AutomationActivityCompleted,
@@ -140,7 +141,7 @@ func TestAutomationRepoLiveNodeCountsUsesProjectedActivityStateSemantics(t *test
 	}
 	insertAutomationLiveCountsPendingInput(t, db, "pending-input", fixture, fixture.Nodes["input"], inputWorkItem.ID)
 
-	_, _, err = repo.RecordProjectionEvent(ctx, AutomationProjectionEvent{
+	_, _, err = repo.RecordProjectionEvent(ctx, persistence.AutomationProjectionEvent{
 		Context:     models.AutomationContext{ProjectID: fixture.ProjectID},
 		Binding:     models.AutomationBinding{AutomationID: fixture.AutomationID, VersionID: fixture.VersionID, NodeID: fixture.Nodes["position"]},
 		WorkItemKey: "position-work", EventKey: "position-work-entered", ToNodeID: fixture.Nodes["position"], Transition: models.AutomationTransitionEntered,
@@ -148,7 +149,7 @@ func TestAutomationRepoLiveNodeCountsUsesProjectedActivityStateSemantics(t *test
 	if err != nil {
 		t.Fatalf("record active work-item position: %v", err)
 	}
-	_, _, err = repo.RecordProjectionEvent(ctx, AutomationProjectionEvent{
+	_, _, err = repo.RecordProjectionEvent(ctx, persistence.AutomationProjectionEvent{
 		Context:     models.AutomationContext{ProjectID: fixture.ProjectID},
 		Binding:     models.AutomationBinding{AutomationID: fixture.AutomationID, VersionID: fixture.VersionID, NodeID: fixture.Nodes["github_inbox"]},
 		WorkItemKey: "github-inbox-work", EventKey: "github-inbox-entered", ToNodeID: fixture.Nodes["github_inbox"], Transition: models.AutomationTransitionEntered,
@@ -156,7 +157,7 @@ func TestAutomationRepoLiveNodeCountsUsesProjectedActivityStateSemantics(t *test
 	if err != nil {
 		t.Fatalf("record active github inbox position: %v", err)
 	}
-	_, _, err = repo.RecordProjectionEvent(ctx, AutomationProjectionEvent{
+	_, _, err = repo.RecordProjectionEvent(ctx, persistence.AutomationProjectionEvent{
 		Context:     models.AutomationContext{ProjectID: fixture.ProjectID},
 		Binding:     models.AutomationBinding{AutomationID: fixture.AutomationID, VersionID: fixture.VersionID, NodeID: fixture.Nodes["native_inbox"]},
 		WorkItemKey: "native-inbox-work", EventKey: "native-inbox-entered", ToNodeID: fixture.Nodes["native_inbox"], Transition: models.AutomationTransitionEntered,
@@ -165,7 +166,7 @@ func TestAutomationRepoLiveNodeCountsUsesProjectedActivityStateSemantics(t *test
 		t.Fatalf("record active native inbox position: %v", err)
 	}
 
-	_, _, err = repo.RecordProjectionEvent(ctx, AutomationProjectionEvent{
+	_, _, err = repo.RecordProjectionEvent(ctx, persistence.AutomationProjectionEvent{
 		Context:     models.AutomationContext{ProjectID: fixture.ProjectID},
 		Binding:     models.AutomationBinding{AutomationID: fixture.AutomationID, VersionID: fixture.VersionID, NodeID: fixture.Nodes["recent"]},
 		WorkItemKey: "recent-work", EventKey: "recent-work-completed", ToNodeID: fixture.Nodes["recent"], Transition: models.AutomationTransitionCompleted,
@@ -173,7 +174,7 @@ func TestAutomationRepoLiveNodeCountsUsesProjectedActivityStateSemantics(t *test
 	if err != nil {
 		t.Fatalf("record recent completed transition: %v", err)
 	}
-	_, _, err = repo.RecordProjectionEvent(ctx, AutomationProjectionEvent{
+	_, _, err = repo.RecordProjectionEvent(ctx, persistence.AutomationProjectionEvent{
 		Context:     models.AutomationContext{ProjectID: fixture.ProjectID},
 		Binding:     models.AutomationBinding{AutomationID: fixture.AutomationID, VersionID: fixture.VersionID, NodeID: fixture.Nodes["old_completed"]},
 		WorkItemKey: "old-completed-work", ActivityKey: "old-completed-activity", ActivityType: "old", ActivityStatus: models.AutomationActivityCompleted,
@@ -192,7 +193,7 @@ func TestAutomationRepoLiveNodeCountsUsesProjectedActivityStateSemantics(t *test
 		t.Fatalf("age completed transition: %v", err)
 	}
 
-	priorityWorkItem, _, err := repo.RecordProjectionEvent(ctx, AutomationProjectionEvent{
+	priorityWorkItem, _, err := repo.RecordProjectionEvent(ctx, persistence.AutomationProjectionEvent{
 		Context:     models.AutomationContext{ProjectID: fixture.ProjectID},
 		Binding:     models.AutomationBinding{AutomationID: fixture.AutomationID, VersionID: fixture.VersionID, NodeID: fixture.Nodes["priority"]},
 		WorkItemKey: "priority-work", ActivityKey: "priority-recent", ActivityType: "priority", ActivityStatus: models.AutomationActivityCompleted,
@@ -239,7 +240,7 @@ func TestAutomationRepoLiveNodeCountsIgnoresFailedActivityForCompletedWorkItem(t
 	ctx := context.Background()
 	cutoff := time.Now().UTC().Add(-24 * time.Hour)
 
-	workItem, _, err := repo.RecordProjectionEvent(ctx, AutomationProjectionEvent{
+	workItem, _, err := repo.RecordProjectionEvent(ctx, persistence.AutomationProjectionEvent{
 		Context:        models.AutomationContext{ProjectID: fixture.ProjectID},
 		Binding:        models.AutomationBinding{AutomationID: fixture.AutomationID, VersionID: fixture.VersionID, NodeID: fixture.Nodes["approval"]},
 		WorkItemKey:    "approved-completed-work",
@@ -256,7 +257,7 @@ func TestAutomationRepoLiveNodeCountsIgnoresFailedActivityForCompletedWorkItem(t
 	if _, err := db.ExecContext(ctx, `UPDATE automation_work_items SET status = 'completed' WHERE id = ?`, workItem.ID); err != nil {
 		t.Fatalf("complete work item: %v", err)
 	}
-	_, _, err = repo.RecordProjectionEvent(ctx, AutomationProjectionEvent{
+	_, _, err = repo.RecordProjectionEvent(ctx, persistence.AutomationProjectionEvent{
 		Context:        models.AutomationContext{ProjectID: fixture.ProjectID},
 		Binding:        models.AutomationBinding{AutomationID: fixture.AutomationID, VersionID: fixture.VersionID, NodeID: fixture.Nodes["approval"], WorkItemID: workItem.ID},
 		ActivityKey:    "approved-completed-late-failure",

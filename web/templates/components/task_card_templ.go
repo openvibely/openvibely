@@ -13,7 +13,7 @@ import (
 	"strings"
 
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence"
 )
 
 func findModelByID(models []models.LLMConfig, agentID *string) *models.LLMConfig {
@@ -41,7 +41,7 @@ func getModelDisplayName(model *models.LLMConfig) string {
 	return model.Name
 }
 
-func findAgentDefinitionByID(agentDefs []repository.AgentTaskUIOption, agentDefinitionID *string) *repository.AgentTaskUIOption {
+func findAgentDefinitionByID(agentDefs []persistence.AgentTaskUIOption, agentDefinitionID *string) *persistence.AgentTaskUIOption {
 	if agentDefinitionID == nil {
 		return nil
 	}
@@ -662,7 +662,7 @@ func TaskCardMergeOptions(task *models.Task, projectID string, eligible bool, re
 	})
 }
 
-func TaskCard(task models.Task, projectID string, viewingCategory string, llmModels []models.LLMConfig, agentDefs []repository.AgentTaskUIOption, menuStates ...map[string]TaskCardMergeMenuState) templ.Component {
+func TaskCard(task models.Task, projectID string, viewingCategory string, llmModels []models.LLMConfig, agentDefs []persistence.AgentTaskUIOption, menuStates ...map[string]TaskCardMergeMenuState) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {

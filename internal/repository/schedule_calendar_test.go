@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/stretchr/testify/require"
 )
@@ -25,7 +26,7 @@ func TestScheduleCalendarBulkPauseIsAtomicAndUndoPreservesPriorPause(t *testing.
 		ids = append(ids, s.ID)
 	}
 	_, err := repo.ApplyCalendarAction(ctx, "default", models.ScheduleCalendarAction{Action: "pause", ScheduleIDs: []string{ids[0], "not-in-project"}}, now)
-	require.True(t, errors.Is(err, ErrScheduleCalendarSelection))
+	require.True(t, errors.Is(err, persistence.ErrScheduleCalendarSelection))
 	unchanged, err := repo.GetByID(ctx, ids[0])
 	require.NoError(t, err)
 	require.True(t, unchanged.Enabled)
@@ -149,7 +150,7 @@ func TestCalendarDispatchAdmissionRechecksBlackout(t *testing.T) {
 			require.NoError(t, err)
 			require.False(t, admitted, "a stale preflight must not authorize ordinary dispatch")
 			_, _, err = NewAutomationRepo(db).ClaimScheduledOccurrence(ctx, *schedule, now, nil)
-			require.ErrorIs(t, err, ErrAutomationScheduleChanged, "automation admission must reject before loading ownership")
+			require.ErrorIs(t, err, persistence.ErrAutomationScheduleChanged, "automation admission must reject before loading ownership")
 			stored, err := repo.GetByID(ctx, schedule.ID)
 			require.NoError(t, err)
 			require.Nil(t, stored.LastRun)
@@ -195,7 +196,7 @@ func TestAutomationCalendarAdmissionRechecksBlackout(t *testing.T) {
 			_, err = schedules.ApplyCalendarAction(ctx, fixture.ProjectID, request, now)
 			require.NoError(t, err)
 			invocation, dispatch, err := NewAutomationRepo(db).ClaimScheduledOccurrence(ctx, schedule, now, schedule.ComputeNextRun(now))
-			require.ErrorIs(t, err, ErrAutomationScheduleChanged)
+			require.ErrorIs(t, err, persistence.ErrAutomationScheduleChanged)
 			require.Nil(t, invocation)
 			require.Nil(t, dispatch)
 			var count int

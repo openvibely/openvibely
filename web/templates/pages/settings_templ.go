@@ -15,7 +15,7 @@ import (
 	"strings"
 
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/web/templates/components"
 	"github.com/openvibely/openvibely/web/templates/layout"
@@ -211,7 +211,7 @@ func selectedWebhookAgentIDs(webhooks []models.WebhookEndpoint, webhookAgents ma
 	return strings.Join(ids, ",")
 }
 
-func agentsJSON(agents []repository.AgentPickerOption) string {
+func agentsJSON(agents []persistence.AgentPickerOption) string {
 	type agentData struct {
 		ID   string `json:"id"`
 		Name string `json:"name"`
@@ -227,8 +227,8 @@ func agentsJSON(agents []repository.AgentPickerOption) string {
 	return string(b)
 }
 
-func outboundTargetProjectSummary(targets []models.ChannelTarget) repository.ChannelTargetProjectSummary {
-	out := repository.ChannelTargetProjectSummary{Total: len(targets), Configured: len(targets) > 0, ByPlatform: map[string]repository.ChannelTargetPlatformSummary{}}
+func outboundTargetProjectSummary(targets []models.ChannelTarget) persistence.ChannelTargetProjectSummary {
+	out := persistence.ChannelTargetProjectSummary{Total: len(targets), Configured: len(targets) > 0, ByPlatform: map[string]persistence.ChannelTargetPlatformSummary{}}
 	for _, target := range targets {
 		platform := strings.ToLower(strings.TrimSpace(target.Platform))
 		if platform == "" {
@@ -259,7 +259,7 @@ func outboundTargetSummary(targets []models.ChannelTarget) string {
 	return outboundTargetProjectSummaryText(outboundTargetProjectSummary(targets))
 }
 
-func outboundTargetProjectSummaryText(summary repository.ChannelTargetProjectSummary) string {
+func outboundTargetProjectSummaryText(summary persistence.ChannelTargetProjectSummary) string {
 	if summary.Total == 0 {
 		return "No saved outbound targets"
 	}
@@ -2584,7 +2584,7 @@ func settingsContent(view ChannelsSettingsView) templ.Component {
 	})
 }
 
-func OutboundTargetsCard(currentProjectID string, summary repository.ChannelTargetProjectSummary, explicitAllowed bool) templ.Component {
+func OutboundTargetsCard(currentProjectID string, summary persistence.ChannelTargetProjectSummary, explicitAllowed bool) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
@@ -2746,7 +2746,7 @@ func OutboundTargetsFragment(currentProjectID string, targets []models.ChannelTa
 	})
 }
 
-func OutboundTargetsCardFragment(currentProjectID string, summary repository.ChannelTargetProjectSummary, explicitAllowed bool) templ.Component {
+func OutboundTargetsCardFragment(currentProjectID string, summary persistence.ChannelTargetProjectSummary, explicitAllowed bool) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {

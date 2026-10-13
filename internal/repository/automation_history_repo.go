@@ -12,10 +12,10 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 )
 
 var (
-	ErrAutomationCursor         = errors.New("invalid automation history cursor")
 	ErrAutomationWorkItemStatus = errors.New("invalid automation work-item status")
 )
 
@@ -43,11 +43,11 @@ func decodeAutomationCursor(kind, value string) (*automationHistoryCursor, error
 	}
 	decoded, err := base64.RawURLEncoding.DecodeString(value)
 	if err != nil {
-		return nil, ErrAutomationCursor
+		return nil, persistence.ErrAutomationCursor
 	}
 	var cursor automationHistoryCursor
 	if err := json.Unmarshal(decoded, &cursor); err != nil || cursor.Kind != kind || cursor.Time.IsZero() || strings.TrimSpace(cursor.ID) == "" {
-		return nil, ErrAutomationCursor
+		return nil, persistence.ErrAutomationCursor
 	}
 	return &cursor, nil
 }
@@ -610,7 +610,7 @@ func (r *AutomationRepo) RecomputeAutomationHealth(ctx context.Context, projectI
 		ORDER BY COALESCE(completed_at, updated_at) DESC, id DESC LIMIT 3)`, projectID, automationID).Scan(&input.recentCount, &input.recentFailures); err != nil {
 		return models.AutomationHealth{}, err
 	}
-	externalState, err := r.AutomationExternalState(ctx, projectID, automationID, now.UTC().Add(-AutomationExternalStaleAfter))
+	externalState, err := r.AutomationExternalState(ctx, projectID, automationID, now.UTC().Add(-persistence.AutomationExternalStaleAfter))
 	if err != nil {
 		return models.AutomationHealth{}, err
 	}
@@ -621,6 +621,9 @@ func (r *AutomationRepo) RecomputeAutomationHealth(ctx context.Context, projectI
 	var evaluatedAt sql.NullString
 	if err := r.db.QueryRowContext(ctx, `SELECT health_state, health_reason, health_evaluated_at FROM automations
 		WHERE project_id = ? AND id = ?`, projectID, automationID).Scan(&currentState, &currentReason, &evaluatedAt); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return models.AutomationHealth{}, persistence.ErrNotFound
+		}
 		return models.AutomationHealth{}, err
 	}
 	if evaluatedAt.Valid && currentState == health.State && currentReason == health.Reason {
@@ -632,7 +635,7 @@ func (r *AutomationRepo) RecomputeAutomationHealth(ctx context.Context, projectI
 		return health, err
 	}
 	if changed, _ := result.RowsAffected(); changed == 0 {
-		return models.AutomationHealth{}, sql.ErrNoRows
+		return models.AutomationHealth{}, persistence.ErrNotFound
 	}
 	return health, nil
 }
@@ -650,7 +653,7 @@ func (r *AutomationRepo) RecomputeAutomationHealthForAll(ctx context.Context, no
 		if len(targets) == 0 {
 			return nil
 		}
-		inputs, err := r.loadAutomationHealthInputs(ctx, targets, now.UTC().Add(-AutomationExternalStaleAfter))
+		inputs, err := r.loadAutomationHealthInputs(ctx, targets, now.UTC().Add(-persistence.AutomationExternalStaleAfter))
 		if err != nil {
 			return err
 		}

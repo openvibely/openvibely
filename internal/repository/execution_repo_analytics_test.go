@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/testutil"
 )
 
@@ -207,7 +208,7 @@ func TestExecutionRepo_GetAvgExecutionTimeByTask(t *testing.T) {
 	}
 
 	// Find task1 in results
-	var task1Time *AvgExecutionTime
+	var task1Time *persistence.AvgExecutionTime
 	for i := range times {
 		if times[i].ID == task1.ID {
 			task1Time = &times[i]

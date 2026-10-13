@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence"
 )
 
 // localKey returns the expected occurrence map key for a UTC time after local conversion.
@@ -39,7 +39,7 @@ func TestScheduleUserGuideDocumentsIndependentAutoMergeTriggers(t *testing.T) {
 
 func TestScheduleContent_EnabledCardsUseGrabCursorForDrag(t *testing.T) {
 	runAt := time.Now().Local().Truncate(time.Hour)
-	tasks := []repository.TaskWithSchedule{
+	tasks := []persistence.TaskWithSchedule{
 		{
 			Task: models.Task{ID: "task-1", ProjectID: "p1", Title: "Drag schedule"},
 			Schedule: &models.Schedule{
@@ -93,7 +93,7 @@ func TestScheduleContent_RightClickContextMenuContract(t *testing.T) {
 	now := time.Now().Local()
 	runAt := time.Date(now.Year(), now.Month(), now.Day(), 12, 0, 0, 0, now.Location())
 	pausedRunAt := runAt.Add(time.Hour)
-	tasks := []repository.TaskWithSchedule{
+	tasks := []persistence.TaskWithSchedule{
 		{
 			Task: models.Task{ID: "task-menu-enabled", ProjectID: "p1", Title: "Enabled menu schedule"},
 			Schedule: &models.Schedule{
@@ -231,7 +231,7 @@ func TestBuildTaskOccurrenceMap_MonthlyMonthEndProjectionAndRewind(t *testing.T)
 		t.Run(tt.name, func(t *testing.T) {
 			runAtUTC := anchor.UTC()
 			nextRunUTC := tt.nextRun.UTC()
-			task := repository.TaskWithSchedule{
+			task := persistence.TaskWithSchedule{
 				Task: models.Task{ID: "task1", ProjectID: "project1", Title: "Monthly task"},
 				Schedule: &models.Schedule{
 					ID:             "schedule1",
@@ -244,7 +244,7 @@ func TestBuildTaskOccurrenceMap_MonthlyMonthEndProjectionAndRewind(t *testing.T)
 				},
 			}
 
-			occurrences := buildTaskOccurrenceMap([]repository.TaskWithSchedule{task}, tt.startOfWeek)
+			occurrences := buildTaskOccurrenceMap([]persistence.TaskWithSchedule{task}, tt.startOfWeek)
 			key := fmt.Sprintf("%s-%02d", tt.expected.Format("2006-01-02"), tt.expected.Hour())
 			if got := occurrences[key]; len(got) != 1 || !got[0].OccurrenceTime.Equal(tt.expected) {
 				t.Fatalf("occurrences[%s] = %#v, want one occurrence at %v", key, got, tt.expected)
@@ -264,7 +264,7 @@ func TestBuildTaskOccurrenceMap_UsesNextRunForRecurring(t *testing.T) {
 	rescheduledTime := time.Date(2026, 2, 19, 18, 31, 0, 0, time.Local)
 	rescheduledUTC := rescheduledTime.UTC()
 
-	task := repository.TaskWithSchedule{
+	task := persistence.TaskWithSchedule{
 		Task: models.Task{
 			ID:        "task1",
 			ProjectID: "project1",
@@ -281,7 +281,7 @@ func TestBuildTaskOccurrenceMap_UsesNextRunForRecurring(t *testing.T) {
 		},
 	}
 
-	occurrenceMap := buildTaskOccurrenceMap([]repository.TaskWithSchedule{task}, startOfWeek)
+	occurrenceMap := buildTaskOccurrenceMap([]persistence.TaskWithSchedule{task}, startOfWeek)
 
 	// Should appear at the rescheduled local time
 	key := localKey(rescheduledUTC)
@@ -311,7 +311,7 @@ func TestBuildTaskOccurrenceMap_RecurringWithoutNextRun(t *testing.T) {
 	runAt := time.Date(2026, 2, 18, 9, 30, 0, 0, time.Local) // Tuesday, 9:30 AM local
 	runAtUTC := runAt.UTC()
 
-	task := repository.TaskWithSchedule{
+	task := persistence.TaskWithSchedule{
 		Task: models.Task{
 			ID:        "task1",
 			ProjectID: "project1",
@@ -328,7 +328,7 @@ func TestBuildTaskOccurrenceMap_RecurringWithoutNextRun(t *testing.T) {
 		},
 	}
 
-	occurrenceMap := buildTaskOccurrenceMap([]repository.TaskWithSchedule{task}, startOfWeek)
+	occurrenceMap := buildTaskOccurrenceMap([]persistence.TaskWithSchedule{task}, startOfWeek)
 
 	key := localKey(runAtUTC)
 	occurrences := occurrenceMap[key]
@@ -352,7 +352,7 @@ func TestBuildTaskOccurrenceMap_OneTimeTask(t *testing.T) {
 	nextRun := time.Date(2026, 2, 20, 15, 0, 0, 0, time.Local)
 	nextRunUTC := nextRun.UTC()
 
-	task := repository.TaskWithSchedule{
+	task := persistence.TaskWithSchedule{
 		Task: models.Task{
 			ID:        "task1",
 			ProjectID: "project1",
@@ -368,7 +368,7 @@ func TestBuildTaskOccurrenceMap_OneTimeTask(t *testing.T) {
 		},
 	}
 
-	occurrenceMap := buildTaskOccurrenceMap([]repository.TaskWithSchedule{task}, startOfWeek)
+	occurrenceMap := buildTaskOccurrenceMap([]persistence.TaskWithSchedule{task}, startOfWeek)
 
 	key := localKey(nextRunUTC)
 	occurrences := occurrenceMap[key]
@@ -386,7 +386,7 @@ func TestBuildTaskOccurrenceMap_OneTimeTaskWithoutNextRun(t *testing.T) {
 	runAt := time.Date(2026, 2, 22, 14, 0, 0, 0, time.Local)
 	runAtUTC := runAt.UTC()
 
-	task := repository.TaskWithSchedule{
+	task := persistence.TaskWithSchedule{
 		Task: models.Task{
 			ID:        "task1",
 			ProjectID: "project1",
@@ -402,7 +402,7 @@ func TestBuildTaskOccurrenceMap_OneTimeTaskWithoutNextRun(t *testing.T) {
 		},
 	}
 
-	occurrenceMap := buildTaskOccurrenceMap([]repository.TaskWithSchedule{task}, startOfWeek)
+	occurrenceMap := buildTaskOccurrenceMap([]persistence.TaskWithSchedule{task}, startOfWeek)
 
 	key := localKey(runAtUTC)
 	occurrences := occurrenceMap[key]
@@ -434,7 +434,7 @@ func TestBuildTaskOccurrenceMap_ShowsTodayAfterExecution(t *testing.T) {
 	nextRun := time.Date(2026, 2, 23, 14, 0, 0, 0, time.Local)
 	nextRunUTC := nextRun.UTC()
 
-	task := repository.TaskWithSchedule{
+	task := persistence.TaskWithSchedule{
 		Task: models.Task{
 			ID:        "task1",
 			ProjectID: "project1",
@@ -451,7 +451,7 @@ func TestBuildTaskOccurrenceMap_ShowsTodayAfterExecution(t *testing.T) {
 		},
 	}
 
-	occurrenceMap := buildTaskOccurrenceMap([]repository.TaskWithSchedule{task}, startOfWeek)
+	occurrenceMap := buildTaskOccurrenceMap([]persistence.TaskWithSchedule{task}, startOfWeek)
 
 	// Verify all 7 days of the week are included
 	for i := 0; i < 7; i++ {
@@ -475,7 +475,7 @@ func TestBuildTaskOccurrenceMap_PastWeek(t *testing.T) {
 	nextRun := time.Date(2026, 2, 24, 23, 0, 0, 0, time.Local) // Feb 24, 11 PM local
 	nextRunUTC := nextRun.UTC()
 
-	task := repository.TaskWithSchedule{
+	task := persistence.TaskWithSchedule{
 		Task: models.Task{
 			ID:        "task1",
 			ProjectID: "project1",
@@ -492,7 +492,7 @@ func TestBuildTaskOccurrenceMap_PastWeek(t *testing.T) {
 		},
 	}
 
-	occurrenceMap := buildTaskOccurrenceMap([]repository.TaskWithSchedule{task}, startOfWeek)
+	occurrenceMap := buildTaskOccurrenceMap([]persistence.TaskWithSchedule{task}, startOfWeek)
 
 	// No day of the previous week is eligible to run.
 	for i := 0; i < 7; i++ {
@@ -530,12 +530,12 @@ func TestBuildTaskOccurrenceMap_ThursdayStart(t *testing.T) {
 				nextRun = runAt.Local().AddDate(0, 0, 8).UTC()
 				lastRun = &runAt
 			}
-			task := repository.TaskWithSchedule{
+			task := persistence.TaskWithSchedule{
 				Task: models.Task{ID: "daily", CreatedAt: startOfWeek},
 				Schedule: &models.Schedule{RunAt: runAt, NextRun: &nextRun, LastRun: lastRun,
 					RepeatType: models.RepeatDaily, RepeatInterval: 1, Enabled: true},
 			}
-			got := buildTaskOccurrenceMap([]repository.TaskWithSchedule{task}, startOfWeek)
+			got := buildTaskOccurrenceMap([]persistence.TaskWithSchedule{task}, startOfWeek)
 			if len(got) != 3 {
 				t.Fatalf("expected only Thursday–Saturday, got %#v", got)
 			}
@@ -565,7 +565,7 @@ func TestBuildTaskOccurrenceMap_FutureWeek(t *testing.T) {
 	nextRun := time.Date(2026, 2, 24, 23, 0, 0, 0, time.Local)
 	nextRunUTC := nextRun.UTC()
 
-	task := repository.TaskWithSchedule{
+	task := persistence.TaskWithSchedule{
 		Task: models.Task{
 			ID:        "task1",
 			ProjectID: "project1",
@@ -582,7 +582,7 @@ func TestBuildTaskOccurrenceMap_FutureWeek(t *testing.T) {
 		},
 	}
 
-	occurrenceMap := buildTaskOccurrenceMap([]repository.TaskWithSchedule{task}, startOfWeek)
+	occurrenceMap := buildTaskOccurrenceMap([]persistence.TaskWithSchedule{task}, startOfWeek)
 
 	// Verify all 7 days show at 11 PM local (consistent time regardless of DST)
 	for i := 0; i < 7; i++ {
@@ -619,7 +619,7 @@ func TestBuildTaskOccurrenceMap_SortedByTimeWithinHour(t *testing.T) {
 	runAt2UTC := runAt2.UTC()
 	nextRun2UTC := runAt2UTC
 
-	tasks := []repository.TaskWithSchedule{
+	tasks := []persistence.TaskWithSchedule{
 		{
 			Task: models.Task{
 				ID:        "task1",
@@ -693,7 +693,7 @@ func TestBuildTaskOccurrenceMap_WeeklyPastWeek(t *testing.T) {
 	runAtUTC := runAt.UTC()
 	nextRunUTC := time.Date(2026, 2, 25, 15, 0, 0, 0, time.Local).UTC()
 
-	task := repository.TaskWithSchedule{
+	task := persistence.TaskWithSchedule{
 		Task: models.Task{
 			ID:        "task1",
 			ProjectID: "project1",
@@ -710,7 +710,7 @@ func TestBuildTaskOccurrenceMap_WeeklyPastWeek(t *testing.T) {
 		},
 	}
 
-	occurrenceMap := buildTaskOccurrenceMap([]repository.TaskWithSchedule{task}, startOfWeek)
+	occurrenceMap := buildTaskOccurrenceMap([]persistence.TaskWithSchedule{task}, startOfWeek)
 
 	// Should show on Wednesday Feb 11 at 3 PM local
 	wedTime := time.Date(2026, 2, 11, 15, 0, 0, 0, time.Local)
@@ -769,7 +769,7 @@ func TestBuildTaskOccurrenceMap_ProductionData(t *testing.T) {
 	intRunAt := time.Date(2026, 2, 26, 2, 26, 0, 0, time.UTC)
 	intNextRun := time.Date(2026, 2, 28, 2, 26, 0, 0, time.UTC)
 
-	tasks := []repository.TaskWithSchedule{
+	tasks := []persistence.TaskWithSchedule{
 		{
 			Task:     models.Task{ID: "t1", ProjectID: "p1", Title: "dail"},
 			Schedule: &models.Schedule{ID: "s1", TaskID: "t1", RunAt: dailRunAt, NextRun: &dailNextRun, RepeatType: models.RepeatDaily, RepeatInterval: 1, Enabled: true},
@@ -931,7 +931,7 @@ func TestBuildTaskOccurrenceMap_SubDailyWithLastRun(t *testing.T) {
 	nextRun := time.Date(2026, 2, 26, 15, 0, 0, 0, time.UTC) // NextRun is Thu afternoon
 	lastRun := time.Date(2026, 2, 26, 14, 0, 0, 0, time.UTC) // Last ran Thu 2 PM
 
-	task := repository.TaskWithSchedule{
+	task := persistence.TaskWithSchedule{
 		Task: models.Task{
 			ID:        "hourly1",
 			ProjectID: "project1",
@@ -949,7 +949,7 @@ func TestBuildTaskOccurrenceMap_SubDailyWithLastRun(t *testing.T) {
 		},
 	}
 
-	occurrenceMap := buildTaskOccurrenceMap([]repository.TaskWithSchedule{task}, startOfWeek)
+	occurrenceMap := buildTaskOccurrenceMap([]persistence.TaskWithSchedule{task}, startOfWeek)
 
 	// LastRun must not create occurrences before the Tuesday start.
 	sunCount := 0
@@ -1010,7 +1010,7 @@ func TestBuildTaskOccurrenceMap_SubDailyWithoutLastRun(t *testing.T) {
 	runAtUTC := runAt.UTC()
 	nextRun := runAtUTC
 
-	task := repository.TaskWithSchedule{
+	task := persistence.TaskWithSchedule{
 		Task: models.Task{
 			ID:        "hourly2",
 			ProjectID: "project1",
@@ -1028,7 +1028,7 @@ func TestBuildTaskOccurrenceMap_SubDailyWithoutLastRun(t *testing.T) {
 		},
 	}
 
-	occurrenceMap := buildTaskOccurrenceMap([]repository.TaskWithSchedule{task}, startOfWeek)
+	occurrenceMap := buildTaskOccurrenceMap([]persistence.TaskWithSchedule{task}, startOfWeek)
 
 	// Without LastRun, entries should start from RunAt (Thu 9 PM), not from start of week
 	sunCount := 0
@@ -1098,7 +1098,7 @@ func TestBuildTaskOccurrenceMap_SubDailyEveryTwoHours(t *testing.T) {
 	lastRun := time.Date(2026, 2, 26, 9, 0, 0, 0, time.Local)
 	lastRunUTC := lastRun.UTC()
 
-	task := repository.TaskWithSchedule{
+	task := persistence.TaskWithSchedule{
 		Task: models.Task{
 			ID:        "every2h",
 			ProjectID: "project1",
@@ -1116,7 +1116,7 @@ func TestBuildTaskOccurrenceMap_SubDailyEveryTwoHours(t *testing.T) {
 		},
 	}
 
-	occurrenceMap := buildTaskOccurrenceMap([]repository.TaskWithSchedule{task}, startOfWeek)
+	occurrenceMap := buildTaskOccurrenceMap([]persistence.TaskWithSchedule{task}, startOfWeek)
 
 	// With anchor hour 9 and interval 2, valid hours are: 1, 3, 5, 7, 9, 11, 13, 15, 17, 19, 21, 23
 	// (hours where (hour - 9 + 24) % 2 == 0)
@@ -1189,7 +1189,7 @@ func TestBuildTaskOccurrenceMap_SubDailyEveryThreeHoursNewSchedule(t *testing.T)
 	runAtUTC := runAt.UTC()
 	nextRun := runAtUTC
 
-	task := repository.TaskWithSchedule{
+	task := persistence.TaskWithSchedule{
 		Task: models.Task{
 			ID:        "every3h",
 			ProjectID: "project1",
@@ -1207,7 +1207,7 @@ func TestBuildTaskOccurrenceMap_SubDailyEveryThreeHoursNewSchedule(t *testing.T)
 		},
 	}
 
-	occurrenceMap := buildTaskOccurrenceMap([]repository.TaskWithSchedule{task}, startOfWeek)
+	occurrenceMap := buildTaskOccurrenceMap([]persistence.TaskWithSchedule{task}, startOfWeek)
 
 	// Valid hours with anchor 18 and interval 3: 0, 3, 6, 9, 12, 15, 18, 21
 	// Thu (Feb 26): from 18 onwards → 18, 21 = 2 entries
@@ -1272,7 +1272,7 @@ func TestBuildTaskOccurrenceMap_CalendarDSTGap(t *testing.T) {
 				schedule := &models.Schedule{RunAt: anchor.UTC(), NextRun: &nextRun, RepeatType: repeat, RepeatInterval: 1, Enabled: true}
 				for _, weekDay := range []int{1, 8, 15} {
 					week := time.Date(2026, 3, weekDay, 0, 0, 0, 0, loc)
-					got := buildTaskOccurrenceMap([]repository.TaskWithSchedule{{Schedule: schedule}}, week)
+					got := buildTaskOccurrenceMap([]persistence.TaskWithSchedule{{Schedule: schedule}}, week)
 					count := 7
 					if repeat == models.RepeatWeekly {
 						count = 1
@@ -1324,7 +1324,7 @@ func TestBuildTaskOccurrenceMap_SubDailyElapsedIntervals(t *testing.T) {
 					// Start before the visible week with nonzero minutes and seconds.
 					anchor := week.AddDate(0, 0, -2).Add(9*time.Hour + 17*time.Minute + 13*time.Second)
 					schedule := &models.Schedule{RunAt: anchor.UTC(), RepeatType: timing.repeat, RepeatInterval: n, Enabled: true}
-					got := buildTaskOccurrenceMap([]repository.TaskWithSchedule{{Schedule: schedule}}, week)
+					got := buildTaskOccurrenceMap([]persistence.TaskWithSchedule{{Schedule: schedule}}, week)
 					// Independently enumerate real runs and retain the first in each
 					// calendar cell, including midnight and DST transitions.
 					want := make(map[string]time.Time)
@@ -1364,7 +1364,7 @@ func TestBuildTaskOccurrenceMap_ExcludesTasksWithoutSchedule(t *testing.T) {
 	runAtUTC := runAt.UTC()
 
 	// Task WITHOUT schedule (category='scheduled' but no schedule entry — should be excluded)
-	tasks := []repository.TaskWithSchedule{
+	tasks := []persistence.TaskWithSchedule{
 		{
 			Task: models.Task{
 				ID:        "task-with-schedule",
@@ -1413,7 +1413,7 @@ func TestBuildTaskOccurrenceMap_ExcludesTasksWithoutSchedule(t *testing.T) {
 // TestGetScheduleID_EdgeCases verifies the getScheduleID helper returns correct values.
 func TestGetScheduleID_EdgeCases(t *testing.T) {
 	// Task with schedule
-	withSchedule := repository.TaskWithSchedule{
+	withSchedule := persistence.TaskWithSchedule{
 		Task: models.Task{ID: "t1"},
 		Schedule: &models.Schedule{
 			ID:     "sched-123",
@@ -1425,7 +1425,7 @@ func TestGetScheduleID_EdgeCases(t *testing.T) {
 	}
 
 	// Task without schedule
-	withoutSchedule := repository.TaskWithSchedule{
+	withoutSchedule := persistence.TaskWithSchedule{
 		Task:     models.Task{ID: "t2"},
 		Schedule: nil,
 	}
@@ -1446,7 +1446,7 @@ func TestBuildTaskOccurrenceMap_RepeatOnceExecuted(t *testing.T) {
 	lastRun := runAtUTC
 	scheduleID := "sched-once-executed"
 
-	task := repository.TaskWithSchedule{
+	task := persistence.TaskWithSchedule{
 		Task: models.Task{
 			ID:        "once-executed",
 			ProjectID: "project1",
@@ -1463,7 +1463,7 @@ func TestBuildTaskOccurrenceMap_RepeatOnceExecuted(t *testing.T) {
 		},
 	}
 
-	occurrenceMap := buildTaskOccurrenceMap([]repository.TaskWithSchedule{task}, startOfWeek)
+	occurrenceMap := buildTaskOccurrenceMap([]persistence.TaskWithSchedule{task}, startOfWeek)
 
 	// Should appear at RunAt time (falls back to RunAt when NextRun is nil)
 	key := localKey(runAtUTC)
@@ -1498,7 +1498,7 @@ func TestBuildTaskOccurrenceMap_MixedScheduleTypes(t *testing.T) {
 	hourlyRunAt := time.Date(2026, 2, 24, 10, 0, 0, 0, time.Local).UTC()
 	lastRun := hourlyRunAt
 
-	tasks := []repository.TaskWithSchedule{
+	tasks := []persistence.TaskWithSchedule{
 		{
 			Task:     models.Task{ID: "t-once", ProjectID: "p1", Title: "Once"},
 			Schedule: &models.Schedule{ID: "s1", TaskID: "t-once", RunAt: onceRunAt, NextRun: &onceRunAt, RepeatType: models.RepeatOnce, Enabled: true},
@@ -1657,7 +1657,7 @@ func TestBuildTaskOccurrenceMap_DisabledScheduleIncluded(t *testing.T) {
 	startOfWeek := time.Date(2026, 2, 22, 0, 0, 0, 0, time.Local) // Sunday
 
 	runAt := time.Date(2026, 2, 25, 14, 0, 0, 0, time.Local).UTC() // Wednesday 14:00
-	task := repository.TaskWithSchedule{
+	task := persistence.TaskWithSchedule{
 		Task: models.Task{ID: "disabled-task", ProjectID: "p1", Title: "Paused Task"},
 		Schedule: &models.Schedule{
 			ID:             "s-disabled",
@@ -1670,7 +1670,7 @@ func TestBuildTaskOccurrenceMap_DisabledScheduleIncluded(t *testing.T) {
 		},
 	}
 
-	occurrenceMap := buildTaskOccurrenceMap([]repository.TaskWithSchedule{task}, startOfWeek)
+	occurrenceMap := buildTaskOccurrenceMap([]persistence.TaskWithSchedule{task}, startOfWeek)
 	key := localKey(runAt)
 	if len(occurrenceMap[key]) != 1 {
 		t.Errorf("disabled schedule must appear in occurrence map at %s, got %d items", key, len(occurrenceMap[key]))
@@ -1697,7 +1697,7 @@ func TestScheduleContent_DisabledScheduleRenderedWithGreyedStyle(t *testing.T) {
 	wednesday = time.Date(wednesday.Year(), wednesday.Month(), wednesday.Day(), 14, 0, 0, 0, wednesday.Location())
 	nextRunUTC := wednesday.UTC()
 
-	disabledTask := repository.TaskWithSchedule{
+	disabledTask := persistence.TaskWithSchedule{
 		Task: models.Task{ID: "paused-task", ProjectID: "p1", Title: "Paused Task"},
 		Schedule: &models.Schedule{
 			ID:             "s-paused",
@@ -1713,7 +1713,7 @@ func TestScheduleContent_DisabledScheduleRenderedWithGreyedStyle(t *testing.T) {
 	currentProject := &models.Project{ID: "p1", Name: "P1"}
 	var buf bytes.Buffer
 	// weekOffset=1 targets next week where our Wednesday occurrence lives.
-	err := ScheduleContent(currentProject, []repository.TaskWithSchedule{disabledTask}, 1, nil, nil).Render(context.Background(), &buf)
+	err := ScheduleContent(currentProject, []persistence.TaskWithSchedule{disabledTask}, 1, nil, nil).Render(context.Background(), &buf)
 	if err != nil {
 		t.Fatalf("render: %v", err)
 	}

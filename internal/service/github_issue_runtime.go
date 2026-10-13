@@ -13,7 +13,7 @@ import (
 	"github.com/openvibely/openvibely/internal/chatcontrol"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence"
 )
 
 type GitHubIssueRuntimeProvider interface {
@@ -47,14 +47,14 @@ const (
 
 type githubIssueRuntimeOptions struct {
 	ProjectID                string
-	ProjectRepo              *repository.ProjectRepo
-	TaskRepo                 *repository.TaskRepo
-	TaskPullRequestRepo      *repository.TaskPullRequestRepo
-	TaskCommitStatRepo       *repository.TaskCommitStatRepo
-	GitHubPRFeedbackRepo     *repository.GitHubPRFeedbackRepo
-	GitHubAuthRepo           *repository.GitHubAuthRepo
-	ThreadInputRepo          *repository.ThreadInputRepo
-	AutomationRepo           *repository.AutomationRepo
+	ProjectRepo              persistence.ProjectStore
+	TaskRepo                 persistence.TaskStore
+	TaskPullRequestRepo      persistence.TaskPullRequestStore
+	TaskCommitStatRepo       persistence.TaskCommitStatStore
+	GitHubPRFeedbackRepo     persistence.GitHubPRFeedbackStore
+	GitHubAuthRepo           persistence.GitHubAuthStore
+	ThreadInputRepo          persistence.ThreadInputStore
+	AutomationRepo           persistence.AutomationStore
 	GitHub                   GitHubIssueRuntimeProvider
 	AfterPRFeedbackForwarded func(taskID string)
 	AfterPullRequestOpened   func(taskID string, result *OpenTaskPullRequestResult)
@@ -172,7 +172,7 @@ func buildGitHubIssueRuntimeHandlers(opts githubIssueRuntimeOptions) map[string]
 					effectiveBinding.NodeID = issueNode.ID
 					resourceID, reserveErr := opts.AutomationRepo.ReserveExternalActivity(ctx, opts.ProjectID, effectiveBinding,
 						activityKey, "create_github_issue", "github_issue")
-					if errors.Is(reserveErr, repository.ErrAutomationExternalReconciliation) {
+					if errors.Is(reserveErr, persistence.ErrAutomationExternalReconciliation) {
 						reservationNeedsReconciliation = true
 						reconciliationBindings = append(reconciliationBindings, effectiveBinding)
 						continue
@@ -189,7 +189,7 @@ func buildGitHubIssueRuntimeHandlers(opts githubIssueRuntimeOptions) map[string]
 				}
 			}
 			var dedupFingerprint, dedupOwner string
-			var dedupClaim repository.AutomationGitHubIssueDedupClaim
+			var dedupClaim persistence.AutomationGitHubIssueDedupClaim
 			if automationBound {
 				if opts.AutomationRepo == nil {
 					return "", errors.New("automation repository unavailable for GitHub issue duplicate protection")
@@ -205,7 +205,7 @@ func buildGitHubIssueRuntimeHandlers(opts githubIssueRuntimeOptions) map[string]
 				dedupFingerprint = githubIssueDedupFingerprint(req.Title)
 				dedupOwner = activityKey
 				dedupClaim, err = opts.AutomationRepo.AcquireGitHubIssueDedupLease(ctx, opts.ProjectID, repo.FullName, dedupFingerprint,
-					dedupOwner, repository.AutomationGitHubIssueDedupSource{Context: dedupSourceContext, TaskID: taskID, ExecutionID: executionID},
+					dedupOwner, persistence.AutomationGitHubIssueDedupSource{Context: dedupSourceContext, TaskID: taskID, ExecutionID: executionID},
 					time.Now().UTC(), automationGitHubIssueDedupLeaseDuration)
 				if err != nil {
 					if releaseErr := releaseGitHubIssueActivityReservationsDetached(opts, reservedBindings, activityKey); releaseErr != nil {
@@ -220,13 +220,13 @@ func buildGitHubIssueRuntimeHandlers(opts githubIssueRuntimeOptions) map[string]
 						if err != nil {
 							_ = releaseGitHubIssueActivityReservationsDetached(opts, reservedBindings, activityKey)
 							return "", fmt.Errorf("%w: verifying reused GitHub issue #%d labels: %v",
-								repository.ErrAutomationExternalReconciliation, dedupClaim.IssueNumber, err)
+								persistence.ErrAutomationExternalReconciliation, dedupClaim.IssueNumber, err)
 						}
 					}
 					_, projectionErr := repairAutomationGitHubIssueProjection(opts, repo, req.Title, dedupClaim)
 					if projectionErr != nil {
 						_ = releaseGitHubIssueActivityReservationsDetached(opts, reservedBindings, activityKey)
-						return "", fmt.Errorf("%w: repairing created GitHub issue #%d projection: %v", repository.ErrAutomationExternalReconciliation, dedupClaim.IssueNumber, projectionErr)
+						return "", fmt.Errorf("%w: repairing created GitHub issue #%d projection: %v", persistence.ErrAutomationExternalReconciliation, dedupClaim.IssueNumber, projectionErr)
 					}
 					cleanupBindings := append(reservedBindings, reconciliationBindings...)
 					if releaseErr := releaseGitHubIssueActivityReservationsDetached(opts, cleanupBindings, activityKey); releaseErr != nil {
@@ -241,7 +241,7 @@ func buildGitHubIssueRuntimeHandlers(opts githubIssueRuntimeOptions) map[string]
 					if releaseErr := releaseGitHubIssueActivityReservationsDetached(opts, reservedBindings, activityKey); releaseErr != nil {
 						return "", releaseErr
 					}
-					return "", repository.ErrAutomationExternalReconciliation
+					return "", persistence.ErrAutomationExternalReconciliation
 				}
 				if err := opts.AutomationRepo.MarkGitHubIssueDedupDispatched(ctx, opts.ProjectID, repo.FullName, dedupFingerprint, dedupOwner); err != nil {
 					releaseCtx, cancel := context.WithTimeout(context.Background(), automationGitHubIssueDedupPersistenceTimeout)
@@ -256,30 +256,30 @@ func buildGitHubIssueRuntimeHandlers(opts githubIssueRuntimeOptions) map[string]
 			issue, err := opts.GitHub.CreateIssue(ctx, repo, GitHubCreateIssueRequest{Title: req.Title, Body: req.Body, Labels: req.Labels, Assignees: req.Assignees})
 			if err != nil {
 				if dedupFingerprint != "" {
-					return "", fmt.Errorf("%w: GitHub issue creation outcome is uncertain: %v", repository.ErrAutomationExternalReconciliation, err)
+					return "", fmt.Errorf("%w: GitHub issue creation outcome is uncertain: %v", persistence.ErrAutomationExternalReconciliation, err)
 				}
 				return "", err
 			}
 			if issue == nil {
 				if dedupFingerprint != "" {
-					return "", fmt.Errorf("%w: GitHub issue creation returned no issue", repository.ErrAutomationExternalReconciliation)
+					return "", fmt.Errorf("%w: GitHub issue creation returned no issue", persistence.ErrAutomationExternalReconciliation)
 				}
 				return "", errors.New("GitHub issue creation returned no issue")
 			}
 			if missing := missingGitHubIssueLabels(requiredLabels, issue.Labels); len(missing) > 0 {
 				return "", fmt.Errorf("%w: created GitHub issue #%d is missing required category labels: %s",
-					repository.ErrAutomationExternalReconciliation, issue.Number, strings.Join(missing, ", "))
+					persistence.ErrAutomationExternalReconciliation, issue.Number, strings.Join(missing, ", "))
 			}
 			if dedupFingerprint != "" {
 				persistenceCtx, cancel := context.WithTimeout(context.Background(), automationGitHubIssueDedupPersistenceTimeout)
 				completeErr := opts.AutomationRepo.CompleteGitHubIssueDedupLease(persistenceCtx, opts.ProjectID, repo.FullName, dedupFingerprint, dedupOwner, issue.Number)
 				cancel()
 				if completeErr != nil {
-					return "", fmt.Errorf("%w: recording created GitHub issue #%d locally: %v", repository.ErrAutomationExternalReconciliation, issue.Number, completeErr)
+					return "", fmt.Errorf("%w: recording created GitHub issue #%d locally: %v", persistence.ErrAutomationExternalReconciliation, issue.Number, completeErr)
 				}
 				dedupClaim.IssueNumber = issue.Number
 				if _, projectionErr := repairAutomationGitHubIssueProjection(opts, repo, req.Title, dedupClaim); projectionErr != nil {
-					return "", fmt.Errorf("%w: recording created GitHub issue #%d projection: %v", repository.ErrAutomationExternalReconciliation, issue.Number, projectionErr)
+					return "", fmt.Errorf("%w: recording created GitHub issue #%d projection: %v", persistence.ErrAutomationExternalReconciliation, issue.Number, projectionErr)
 				}
 			} else if _, err := recordGitHubIssueCreated(ctx, opts, repo, issue, activityKey); err != nil {
 				return "", err
@@ -343,7 +343,7 @@ func buildGitHubIssueRuntimeHandlers(opts githubIssueRuntimeOptions) map[string]
 				return "", err
 			}
 			summaries, nextOffset := compactAssignedGitHubIssues(issues, limit, offset)
-			return githubIssueRuntimeJSON(map[string]any{"ok": true, "assignee": repository.NormalizeGitHubLogin(assignee), "issues": summaries, "returned": len(summaries), "total": len(issues), "offset": offset, "next_offset": nextOffset, "truncated": nextOffset > 0})
+			return githubIssueRuntimeJSON(map[string]any{"ok": true, "assignee": persistence.NormalizeGitHubLogin(assignee), "issues": summaries, "returned": len(summaries), "total": len(issues), "offset": offset, "next_offset": nextOffset, "truncated": nextOffset > 0})
 		},
 		"github_list_assigned_issues_with_prs": func(ctx context.Context, input json.RawMessage) (string, error) {
 			req, err := core.request(input)
@@ -905,7 +905,7 @@ func applyAutomationPullRequestConfiguration(ctx context.Context, opts githubIss
 	return true, nil
 }
 
-func currentPullRequestConfigForProvenance(ctx context.Context, opts githubIssueRuntimeOptions, provenance *repository.AutomationGitHubIssueTaskProvenance, req *GitHubIssueActionRequest) (automationPullRequestConfig, error) {
+func currentPullRequestConfigForProvenance(ctx context.Context, opts githubIssueRuntimeOptions, provenance *persistence.AutomationGitHubIssueTaskProvenance, req *GitHubIssueActionRequest) (automationPullRequestConfig, error) {
 	if provenance == nil || strings.TrimSpace(provenance.AutomationID) == "" || strings.TrimSpace(provenance.ImplementationNodeKey) == "" {
 		return automationPullRequestConfig{}, errors.New("complete Automation GitHub issue task provenance is required")
 	}
@@ -998,7 +998,7 @@ func resolveGitHubRepoForRuntimeToolURL(ctx context.Context, opts githubIssueRun
 	return ResolveGitHubToolRepository(ctx, opts.GitHub, opts.ProjectID, repoURL, project)
 }
 
-func resolveGitHubRuntimeTask(ctx context.Context, taskRepo *repository.TaskRepo, projectID, taskID, title string) (*models.Task, error) {
+func resolveGitHubRuntimeTask(ctx context.Context, taskRepo persistence.TaskStore, projectID, taskID, title string) (*models.Task, error) {
 	if taskRepo == nil {
 		return nil, fmt.Errorf("task repository unavailable")
 	}
@@ -1051,7 +1051,7 @@ func releaseGitHubIssueActivityReservationsDetached(opts githubIssueRuntimeOptio
 	return releaseGitHubIssueActivityReservations(ctx, opts, bindings, activityKey)
 }
 
-func currentGitHubIssueProjectionSource(ctx context.Context, opts githubIssueRuntimeOptions, source repository.AutomationGitHubIssueDedupSource) (repository.AutomationGitHubIssueDedupSource, error) {
+func currentGitHubIssueProjectionSource(ctx context.Context, opts githubIssueRuntimeOptions, source persistence.AutomationGitHubIssueDedupSource) (persistence.AutomationGitHubIssueDedupSource, error) {
 	current := source
 	current.Context.Bindings = nil
 	seen := map[string]bool{}
@@ -1096,7 +1096,7 @@ func currentGitHubIssueProjectionSource(ctx context.Context, opts githubIssueRun
 	return current, nil
 }
 
-func repairAutomationGitHubIssueProjection(opts githubIssueRuntimeOptions, repo *GitHubRepoRef, title string, claim repository.AutomationGitHubIssueDedupClaim) (*GitHubIssue, error) {
+func repairAutomationGitHubIssueProjection(opts githubIssueRuntimeOptions, repo *GitHubRepoRef, title string, claim persistence.AutomationGitHubIssueDedupClaim) (*GitHubIssue, error) {
 	if claim.IssueNumber <= 0 || strings.TrimSpace(claim.OwnerToken) == "" || claim.Source.Context.ProjectID != opts.ProjectID ||
 		len(claim.Source.Context.Bindings) == 0 || strings.TrimSpace(claim.Source.TaskID) == "" || strings.TrimSpace(claim.Source.ExecutionID) == "" {
 		return nil, errors.New("trusted local GitHub issue projection source is unavailable")
@@ -1199,7 +1199,7 @@ func recordGitHubIssueCreated(ctx context.Context, opts githubIssueRuntimeOption
 		if executionID != "" {
 			resources = append(resources, models.AutomationActivityResource{ResourceType: "execution", ResourceID: executionID})
 		}
-		item, _, err := opts.AutomationRepo.RecordProjectionEvent(ctx, repository.AutomationProjectionEvent{
+		item, _, err := opts.AutomationRepo.RecordProjectionEvent(ctx, persistence.AutomationProjectionEvent{
 			Context: automationContext, Binding: binding, WorkItemKey: resourceID, WorkItemKind: "github_issue",
 			WorkItemTitle: issue.Title, WorkItemStatus: models.AutomationWorkItemWaiting,
 			ActivityKey: activityKey, ActivityType: "create_github_issue", ActivityStatus: models.AutomationActivityCompleted,
@@ -1210,7 +1210,7 @@ func recordGitHubIssueCreated(ctx context.Context, opts githubIssueRuntimeOption
 			return recordedBindings, err
 		}
 		binding.WorkItemID = item.ID
-		if _, _, err := opts.AutomationRepo.RecordProjectionEvent(ctx, repository.AutomationProjectionEvent{
+		if _, _, err := opts.AutomationRepo.RecordProjectionEvent(ctx, persistence.AutomationProjectionEvent{
 			Context: automationContext, Binding: binding,
 			ActivityKey: activityKey, ActivityType: "create_github_issue", ActivityStatus: models.AutomationActivityCompleted,
 			Resources: resources, EventKey: resourceID + ":created:assignment", FromNodeID: issueNode.ID,
@@ -1262,7 +1262,7 @@ func recordGitHubAssignedIssues(ctx context.Context, opts githubIssueRuntimeOpti
 			if executionID != "" {
 				resources = append(resources, models.AutomationActivityResource{ResourceType: "execution", ResourceID: executionID})
 			}
-			if _, _, err := opts.AutomationRepo.RecordProjectionEvent(ctx, repository.AutomationProjectionEvent{
+			if _, _, err := opts.AutomationRepo.RecordProjectionEvent(ctx, persistence.AutomationProjectionEvent{
 				Context: automationContext, Binding: binding, WorkItemKey: resourceID, WorkItemKind: "github_issue",
 				WorkItemTitle: issue.Title, WorkItemStatus: models.AutomationWorkItemWaiting,
 				ActivityKey:  "invocation:" + sourceBinding.InvocationID + ":discover:" + resourceID,
@@ -1302,7 +1302,7 @@ func recordGitHubPullRequestOpened(ctx context.Context, opts githubIssueRuntimeO
 			continue
 		}
 		implementationBinding := sourceBinding
-		if _, _, err := opts.AutomationRepo.RecordProjectionEvent(ctx, repository.AutomationProjectionEvent{
+		if _, _, err := opts.AutomationRepo.RecordProjectionEvent(ctx, persistence.AutomationProjectionEvent{
 			Context: automationContext, Binding: implementationBinding,
 			ActivityKey:  "work-item:" + sourceBinding.WorkItemID + ":implementation-task:" + task.ID,
 			ActivityType: "implementation_task", ActivityStatus: models.AutomationActivityCompleted,
@@ -1318,7 +1318,7 @@ func recordGitHubPullRequestOpened(ctx context.Context, opts githubIssueRuntimeO
 		if req.IssueNumber > 0 {
 			resources = append(resources, models.AutomationActivityResource{ResourceType: "github_issue", ResourceID: githubIssueResourceID(repo, req.IssueNumber)})
 		}
-		if _, _, err := opts.AutomationRepo.RecordProjectionEvent(ctx, repository.AutomationProjectionEvent{
+		if _, _, err := opts.AutomationRepo.RecordProjectionEvent(ctx, persistence.AutomationProjectionEvent{
 			Context: automationContext, Binding: prBinding,
 			ActivityKey: prResourceID + ":open", ActivityType: "open_pull_request", ActivityStatus: models.AutomationActivityCompleted,
 			Resources: resources, EventKey: prResourceID + ":opened", FromNodeID: sourceBinding.NodeID,
@@ -1326,7 +1326,7 @@ func recordGitHubPullRequestOpened(ctx context.Context, opts githubIssueRuntimeO
 		}); err != nil {
 			return err
 		}
-		if _, _, err := opts.AutomationRepo.RecordProjectionEvent(ctx, repository.AutomationProjectionEvent{
+		if _, _, err := opts.AutomationRepo.RecordProjectionEvent(ctx, persistence.AutomationProjectionEvent{
 			Context: automationContext, Binding: prBinding,
 			ActivityKey: prResourceID + ":open", ActivityType: "open_pull_request", ActivityStatus: models.AutomationActivityCompleted,
 			Resources: resources, EventKey: prResourceID + ":review", FromNodeID: openPRNode.ID,

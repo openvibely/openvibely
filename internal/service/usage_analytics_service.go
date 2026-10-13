@@ -22,14 +22,14 @@ import (
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	llmoauth "github.com/openvibely/openvibely/internal/llm/oauth"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence"
 	anthropicclient "github.com/openvibely/openvibely/pkg/anthropic_client"
 	openaiclient "github.com/openvibely/openvibely/pkg/openai_client"
 )
 
 type UsageAnalyticsService struct {
-	usageRepo               *repository.UsageRepo
-	llmConfigRepo           *repository.LLMConfigRepo
+	usageRepo               persistence.UsageStore
+	llmConfigRepo           persistence.LLMConfigStore
 	oauthRecovery           *llmoauth.Manager
 	accountFetcher          accountUsageFetcher
 	anthropicOAuthRefresher oauthRefreshFunc
@@ -48,7 +48,7 @@ const (
 	accountRefreshFailureRawPrefix = `{"refresh_error":`
 )
 
-func NewUsageAnalyticsService(usageRepo *repository.UsageRepo, llmConfigRepo *repository.LLMConfigRepo) *UsageAnalyticsService {
+func NewUsageAnalyticsService(usageRepo persistence.UsageStore, llmConfigRepo persistence.LLMConfigStore) *UsageAnalyticsService {
 	s := &UsageAnalyticsService{
 		usageRepo:     usageRepo,
 		llmConfigRepo: llmConfigRepo,
@@ -82,7 +82,7 @@ func (s *UsageAnalyticsService) SetOAuthRefreshers(anthropicRefresh, openAIRefre
 	}
 }
 
-func (s *UsageAnalyticsService) BuildAnalyticsUsage(ctx context.Context, filter repository.UsageFilter) (*models.AnalyticsUsageViewModel, error) {
+func (s *UsageAnalyticsService) BuildAnalyticsUsage(ctx context.Context, filter persistence.UsageFilter) (*models.AnalyticsUsageViewModel, error) {
 	if s == nil || s.usageRepo == nil {
 		return nil, fmt.Errorf("usage analytics service is not configured")
 	}
@@ -147,7 +147,7 @@ func (s *UsageAnalyticsService) ListUsageAccounts(ctx context.Context) ([]UsageA
 	return result, nil
 }
 
-func (s *UsageAnalyticsService) BuildAnalyticsAccountLimits(ctx context.Context, filter repository.UsageFilter) (*models.AnalyticsUsageAccountLimitsViewModel, error) {
+func (s *UsageAnalyticsService) BuildAnalyticsAccountLimits(ctx context.Context, filter persistence.UsageFilter) (*models.AnalyticsUsageAccountLimitsViewModel, error) {
 	view, configsByID, refreshErrors, err := s.buildAnalyticsAccountLimitBase(ctx, filter)
 	if err != nil {
 		return nil, err
@@ -162,7 +162,7 @@ func (s *UsageAnalyticsService) BuildAnalyticsAccountLimits(ctx context.Context,
 	}, nil
 }
 
-func (s *UsageAnalyticsService) buildAnalyticsAccountLimitBase(ctx context.Context, filter repository.UsageFilter) (*models.AnalyticsUsageViewModel, map[string]models.LLMConfig, map[string]string, error) {
+func (s *UsageAnalyticsService) buildAnalyticsAccountLimitBase(ctx context.Context, filter persistence.UsageFilter) (*models.AnalyticsUsageViewModel, map[string]models.LLMConfig, map[string]string, error) {
 	if s == nil || s.usageRepo == nil {
 		return nil, nil, nil, fmt.Errorf("usage analytics service is not configured")
 	}
@@ -222,14 +222,14 @@ func (s *UsageAnalyticsService) buildAnalyticsAccountLimitBase(ctx context.Conte
 	return view, configsByID, refreshErrors, nil
 }
 
-func (s *UsageAnalyticsService) BuildUsagePage(ctx context.Context, filter repository.UsageFilter) (*models.AnalyticsUsageViewModel, error) {
+func (s *UsageAnalyticsService) BuildUsagePage(ctx context.Context, filter persistence.UsageFilter) (*models.AnalyticsUsageViewModel, error) {
 	if s == nil || s.usageRepo == nil {
 		return nil, fmt.Errorf("usage analytics service is not configured")
 	}
 	return s.usageRepo.GetUsagePage(ctx, filter)
 }
 
-func (s *UsageAnalyticsService) BuildLocalAnalyticsUsage(ctx context.Context, filter repository.UsageFilter) (*models.AnalyticsUsageViewModel, error) {
+func (s *UsageAnalyticsService) BuildLocalAnalyticsUsage(ctx context.Context, filter persistence.UsageFilter) (*models.AnalyticsUsageViewModel, error) {
 	if s == nil || s.usageRepo == nil {
 		return nil, fmt.Errorf("usage analytics service is not configured")
 	}
@@ -273,16 +273,16 @@ type UsageFilterInput struct {
 
 // NormalizeUsageFilter applies the shared date, range, and grouping semantics
 // used by the web usage API and the view_usage_analytics action.
-func NormalizeUsageFilter(input UsageFilterInput) (repository.UsageFilter, string) {
+func NormalizeUsageFilter(input UsageFilterInput) (persistence.UsageFilter, string) {
 	return normalizeUsageFilterAt(input, time.Now())
 }
 
-func normalizeUsageFilterAt(input UsageFilterInput, now time.Time) (repository.UsageFilter, string) {
+func normalizeUsageFilterAt(input UsageFilterInput, now time.Time) (persistence.UsageFilter, string) {
 	rangeValue := strings.TrimSpace(input.Range)
 	if rangeValue == "" {
 		rangeValue = "30d"
 	}
-	filter := repository.UsageFilter{
+	filter := persistence.UsageFilter{
 		ProjectID:  strings.TrimSpace(input.ProjectID),
 		Provider:   strings.TrimSpace(input.Provider),
 		AgentID:    strings.TrimSpace(input.AgentID),
@@ -435,7 +435,7 @@ func ExecuteViewUsageAnalyticsTool(ctx context.Context, usageAnalyticsSvc *Usage
 	return string(b), err
 }
 
-func usageAnalyticsActionFilterFromInput(projectID string, req usageAnalyticsActionInput) (repository.UsageFilter, usageAnalyticsActionFilter) {
+func usageAnalyticsActionFilterFromInput(projectID string, req usageAnalyticsActionInput) (persistence.UsageFilter, usageAnalyticsActionFilter) {
 	filter, rangeValue := NormalizeUsageFilter(UsageFilterInput{
 		ProjectID: projectID,
 		Provider:  req.Provider,
@@ -596,7 +596,7 @@ func compactUsageAnalyticsAccountRows(accounts []models.AccountUsageView) []usag
 	return out
 }
 
-func (s *UsageAnalyticsService) populateAnalyticsAccountLimits(ctx context.Context, filter repository.UsageFilter, view *models.AnalyticsUsageViewModel, configsByID map[string]models.LLMConfig, refreshErrors map[string]string) error {
+func (s *UsageAnalyticsService) populateAnalyticsAccountLimits(ctx context.Context, filter persistence.UsageFilter, view *models.AnalyticsUsageViewModel, configsByID map[string]models.LLMConfig, refreshErrors map[string]string) error {
 	snapshots, err := s.usageRepo.GetLatestAccountUsageSnapshots(ctx, filter.Provider)
 	if err != nil {
 		view.Errors = append(view.Errors, fmt.Sprintf("loading account snapshots: %v", err))
@@ -626,14 +626,14 @@ func (s *UsageAnalyticsService) populateAnalyticsAccountLimits(ctx context.Conte
 	return nil
 }
 
-func (s *UsageAnalyticsService) populateAnalyticsUsageView(ctx context.Context, filter repository.UsageFilter, view *models.AnalyticsUsageViewModel, configsByID map[string]models.LLMConfig, refreshErrors map[string]string) error {
+func (s *UsageAnalyticsService) populateAnalyticsUsageView(ctx context.Context, filter persistence.UsageFilter, view *models.AnalyticsUsageViewModel, configsByID map[string]models.LLMConfig, refreshErrors map[string]string) error {
 	if err := s.populateAnalyticsAccountLimits(ctx, filter, view, configsByID, refreshErrors); err != nil {
 		return err
 	}
 	return s.populateLocalUsageMetrics(ctx, filter, view)
 }
 
-func (s *UsageAnalyticsService) populateLocalUsageMetrics(ctx context.Context, filter repository.UsageFilter, view *models.AnalyticsUsageViewModel) error {
+func (s *UsageAnalyticsService) populateLocalUsageMetrics(ctx context.Context, filter persistence.UsageFilter, view *models.AnalyticsUsageViewModel) error {
 	totals, err := s.usageRepo.GetUsageTotals(ctx, filter)
 	if err != nil {
 		return err
@@ -901,7 +901,7 @@ func (s *UsageAnalyticsService) refreshAccountSnapshotGroup(ctx context.Context,
 	return snapshots, errorsByKey
 }
 
-func latestAccountSnapshotForConfig(ctx context.Context, usageRepo *repository.UsageRepo, cfg models.LLMConfig, force bool) (*models.AccountUsageSnapshot, bool) {
+func latestAccountSnapshotForConfig(ctx context.Context, usageRepo persistence.UsageStore, cfg models.LLMConfig, force bool) (*models.AccountUsageSnapshot, bool) {
 	if usageRepo == nil {
 		return nil, false
 	}
@@ -2609,7 +2609,7 @@ type UsageCapture struct {
 	OccurredAt   time.Time
 }
 
-func RecordUsageFromResult(ctx context.Context, usageRepo *repository.UsageRepo, capture UsageCapture, agent models.LLMConfig, result llmcontracts.AgentResult) {
+func RecordUsageFromResult(ctx context.Context, usageRepo persistence.UsageStore, capture UsageCapture, agent models.LLMConfig, result llmcontracts.AgentResult) {
 	if usageRepo == nil {
 		return
 	}

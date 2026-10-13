@@ -14,6 +14,7 @@ import (
 	"github.com/openvibely/openvibely/internal/chatcontrol"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/stretchr/testify/require"
@@ -1574,7 +1575,7 @@ func TestBuildChannelUtilityActionHandlersUpdateAutomationTemplate(t *testing.T)
 	currentRevision := CurrentAutomationTemplateRevision(AutomationAdapterNativeSDLC)
 	require.Positive(t, currentRevision)
 	runningNode := saved.Definition.Nodes[0]
-	_, _, err = automationRepo.RecordProjectionEvent(ctx, repository.AutomationProjectionEvent{
+	_, _, err = automationRepo.RecordProjectionEvent(ctx, persistence.AutomationProjectionEvent{
 		Context:        models.AutomationContext{ProjectID: project.ID},
 		Binding:        models.AutomationBinding{AutomationID: automationID, VersionID: saved.Definition.Version.ID, NodeID: runningNode.ID},
 		WorkItemKey:    "channel-summary:running",
@@ -2118,10 +2119,10 @@ func TestChannelServiceListChannelsIncludesProviderStatusAndCountsSafely(t *test
 
 func TestChannelServiceListChannelsUsesTargetSummaryStore(t *testing.T) {
 	ctx := context.Background()
-	store := &summaryOnlyChannelTargetStore{summary: repository.ChannelTargetProjectSummary{
+	store := &summaryOnlyChannelTargetStore{summary: persistence.ChannelTargetProjectSummary{
 		Total:      4,
 		Configured: true,
-		ByPlatform: map[string]repository.ChannelTargetPlatformSummary{
+		ByPlatform: map[string]persistence.ChannelTargetPlatformSummary{
 			"slack": {Total: 2, Home: 1, Named: 1, ByKind: map[string]int{"channel": 1, "user": 1}},
 			"email": {Total: 2, Home: 0, Named: 1, ByKind: map[string]int{"email": 1, "address": 1}},
 		},
@@ -2157,7 +2158,7 @@ func TestChannelServiceListChannelsUsesTargetSummaryStore(t *testing.T) {
 	require.Equal(t, 1, result.OutboundTargets.ByPlatform["email"].Named)
 	require.Equal(t, map[string]int{"email": 1, "address": 1}, result.OutboundTargets.ByPlatform["email"].ByKind)
 
-	store.summary = repository.ChannelTargetProjectSummary{}
+	store.summary = persistence.ChannelTargetProjectSummary{}
 	out, err = handlers["list_channels"](ctx, json.RawMessage(`{}`))
 	require.NoError(t, err)
 
@@ -2174,11 +2175,11 @@ func TestChannelServiceListChannelsUsesTargetSummaryStore(t *testing.T) {
 }
 
 type summaryOnlyChannelTargetStore struct {
-	summary    repository.ChannelTargetProjectSummary
+	summary    persistence.ChannelTargetProjectSummary
 	listCalled bool
 }
 
-func (s *summaryOnlyChannelTargetStore) SummarizeByProject(ctx context.Context, projectID string) (repository.ChannelTargetProjectSummary, error) {
+func (s *summaryOnlyChannelTargetStore) SummarizeByProject(ctx context.Context, projectID string) (persistence.ChannelTargetProjectSummary, error) {
 	return s.summary, nil
 }
 
@@ -3921,7 +3922,7 @@ func TestChannelStatusAndAutomationSummaryHelpers(t *testing.T) {
 	require.Equal(t, 2, summary.ByPlatform["slack"].ByKind["channel"])
 	require.Equal(t, 1, summary.ByPlatform["unknown"].ByKind["custom"])
 
-	repoSummary := channelTargetStatusFromRepoSummary(repository.ChannelTargetProjectSummary{Total: 2, Configured: true, ByPlatform: map[string]repository.ChannelTargetPlatformSummary{"email": {Total: 2, Home: 1, Named: 1, ByKind: map[string]int{"address": 2}}}})
+	repoSummary := channelTargetStatusFromRepoSummary(persistence.ChannelTargetProjectSummary{Total: 2, Configured: true, ByPlatform: map[string]persistence.ChannelTargetPlatformSummary{"email": {Total: 2, Home: 1, Named: 1, ByKind: map[string]int{"address": 2}}}})
 	require.Equal(t, 2, repoSummary.Total)
 	require.Equal(t, 2, repoSummary.ByPlatform["email"].ByKind["address"])
 	webhookSummary := summarizeChannelStatusWebhooks([]models.WebhookEndpoint{{Enabled: true}, {Enabled: false}, {Enabled: true}})

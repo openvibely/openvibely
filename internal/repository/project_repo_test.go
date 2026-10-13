@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/testutil"
 )
 
@@ -23,7 +24,7 @@ func TestProjectRepo_DeleteWithCleanupManifestRollsBackBeforeDeleteFailure(t *te
 	}
 
 	injected := errors.New("injected pre-delete failure")
-	manifest, deleted, err := projectRepo.DeleteWithCleanupManifest(ctx, project.ID, func(manifest TaskDeletionManifest) error {
+	manifest, deleted, err := projectRepo.DeleteWithCleanupManifest(ctx, project.ID, func(manifest persistence.TaskDeletionManifest) error {
 		if len(manifest.TaskIDs) != 1 || manifest.TaskIDs[0] != "atomic-project-task" {
 			t.Fatalf("captured task IDs = %v", manifest.TaskIDs)
 		}
@@ -161,7 +162,7 @@ func TestProjectRepo_ListRepoValidationProjectsUsesCompactUnorderedProjection(t 
 	if err != nil {
 		t.Fatalf("ListRepoValidationProjects: %v", err)
 	}
-	var found *ProjectRepoValidationProject
+	var found *persistence.ProjectRepoValidationProject
 	for i := range rows {
 		if rows[i].ID == project.ID {
 			found = &rows[i]

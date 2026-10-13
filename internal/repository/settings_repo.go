@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"strings"
 )
 
@@ -95,7 +96,7 @@ func (r *SettingsRepo) SetMany(ctx context.Context, values map[string]string) er
 	if len(values) == 0 {
 		return nil
 	}
-	return withImmediateTx(ctx, r.db, func(tx SQLExecutor) error {
+	return withImmediateTx(ctx, r.db, func(tx sqlExecutor) error {
 		for key, value := range values {
 			if _, err := tx.ExecContext(ctx,
 				"INSERT INTO app_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
@@ -114,7 +115,7 @@ func (r *SettingsRepo) RemoveChannelsBulk(ctx context.Context, projectID string,
 	if len(values) == 0 && len(webhookIDs) == 0 {
 		return fmt.Errorf("at least one channel is required")
 	}
-	return withImmediateTx(ctx, r.db, func(tx SQLExecutor) error {
+	return withImmediateTx(ctx, r.db, func(tx sqlExecutor) error {
 		if len(webhookIDs) > 0 {
 			placeholders := strings.TrimSuffix(strings.Repeat("?,", len(webhookIDs)), ",")
 			args := make([]any, 0, len(webhookIDs)+1)
@@ -127,7 +128,7 @@ func (r *SettingsRepo) RemoveChannelsBulk(ctx context.Context, projectID string,
 				return err
 			}
 			if count != len(webhookIDs) {
-				return ErrWebhookNotFound
+				return persistence.ErrWebhookNotFound
 			}
 			if _, err := tx.ExecContext(ctx, `DELETE FROM webhook_endpoints WHERE project_id = ? AND id IN (`+placeholders+`)`, args...); err != nil {
 				return err
@@ -154,12 +155,12 @@ func (r *SettingsRepo) RemoveChannelsBulk(ctx context.Context, projectID string,
 // atomic with concurrent coherent settings replacement.
 func (r *SettingsRepo) CompareAndSet(ctx context.Context, key, expected, value string, guards map[string]string) (bool, error) {
 	updated := false
-	err := withImmediateTx(ctx, r.db, func(tx SQLExecutor) error {
-		matches, err := r.MatchesWithExecutor(ctx, tx, map[string]string{key: expected})
+	err := withImmediateTx(ctx, r.db, func(tx sqlExecutor) error {
+		matches, err := matchesSettingsWithExecutor(ctx, tx, map[string]string{key: expected})
 		if err != nil || !matches {
 			return err
 		}
-		matches, err = r.MatchesWithExecutor(ctx, tx, guards)
+		matches, err = matchesSettingsWithExecutor(ctx, tx, guards)
 		if err != nil || !matches {
 			return err
 		}
@@ -179,12 +180,12 @@ func (r *SettingsRepo) CompareAndSet(ctx context.Context, key, expected, value s
 // pollers or configuration replacement from splitting related cursor state.
 func (r *SettingsRepo) CompareAndSetMany(ctx context.Context, expected, values, guards map[string]string) (bool, error) {
 	updated := false
-	err := withImmediateTx(ctx, r.db, func(tx SQLExecutor) error {
-		matches, err := r.MatchesWithExecutor(ctx, tx, expected)
+	err := withImmediateTx(ctx, r.db, func(tx sqlExecutor) error {
+		matches, err := matchesSettingsWithExecutor(ctx, tx, expected)
 		if err != nil || !matches {
 			return err
 		}
-		matches, err = r.MatchesWithExecutor(ctx, tx, guards)
+		matches, err = matchesSettingsWithExecutor(ctx, tx, guards)
 		if err != nil || !matches {
 			return err
 		}
@@ -201,10 +202,18 @@ func (r *SettingsRepo) CompareAndSetMany(ctx context.Context, expected, values, 
 	return updated, err
 }
 
-// MatchesWithExecutor checks an expected settings snapshot using the caller's
+// MatchesInTx checks an expected settings snapshot using the caller's store
 // transaction. It lets durable channel handoffs assert configuration authority
 // in the same commit that creates work.
-func (r *SettingsRepo) MatchesWithExecutor(ctx context.Context, exec SQLExecutor, expected map[string]string) (bool, error) {
+func (r *SettingsRepo) MatchesInTx(ctx context.Context, tx persistence.Tx, expected map[string]string) (bool, error) {
+	exec, err := executorFromTx(tx)
+	if err != nil {
+		return false, err
+	}
+	return matchesSettingsWithExecutor(ctx, exec, expected)
+}
+
+func matchesSettingsWithExecutor(ctx context.Context, exec sqlExecutor, expected map[string]string) (bool, error) {
 	for key, value := range expected {
 		var current string
 		if err := exec.QueryRowContext(ctx, `SELECT COALESCE((SELECT value FROM app_settings WHERE key = ?), '')`, key).Scan(&current); err != nil {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/testutil"
 	"os"
 	"reflect"
@@ -26,7 +27,7 @@ func TestUsagePageConfigurationBreakdown(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	view, err := repo.GetUsagePage(context.Background(), UsageFilter{ProjectID: "p", GroupBy: "day"})
+	view, err := repo.GetUsagePage(context.Background(), persistence.UsageFilter{ProjectID: "p", GroupBy: "day"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,7 +56,7 @@ func TestUsagePageDailyAverageIncludesIdleDays(t *testing.T) {
 	}
 	repo := NewUsageRepo(db)
 	from := time.Date(2026, 9, 1, 0, 0, 0, 0, time.Local)
-	filter := UsageFilter{ProjectID: "p", DateFrom: from, DateTo: from.AddDate(0, 0, 7), GroupBy: "week"}
+	filter := persistence.UsageFilter{ProjectID: "p", DateFrom: from, DateTo: from.AddDate(0, 0, 7), GroupBy: "week"}
 	view, err := repo.GetUsagePage(context.Background(), filter)
 	if err != nil {
 		t.Fatal(err)
@@ -73,7 +74,7 @@ func TestUsagePageDailyAverageIncludesIdleDays(t *testing.T) {
 	if view.UsageCalendarDays != 7 || view.AverageTokensPerDay == nil || *view.AverageTokensPerDay != 100 {
 		t.Fatalf("idle days must count: %+v", view)
 	}
-	view, err = repo.GetUsagePage(context.Background(), UsageFilter{ProjectID: "p"})
+	view, err = repo.GetUsagePage(context.Background(), persistence.UsageFilter{ProjectID: "p"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,7 +114,7 @@ func TestUsagePageMatchesExistingMetrics(t *testing.T) {
 		}
 	}
 	for _, group := range []string{"hour", "day", "week", "month"} {
-		f := UsageFilter{ProjectID: "p", GroupBy: group, DateFrom: time.Date(2026, 9, 2, 0, 0, 0, 0, time.UTC), DateTo: time.Date(2026, 9, 8, 0, 0, 0, 0, time.UTC)}
+		f := persistence.UsageFilter{ProjectID: "p", GroupBy: group, DateFrom: time.Date(2026, 9, 2, 0, 0, 0, 0, time.UTC), DateTo: time.Date(2026, 9, 8, 0, 0, 0, 0, time.UTC)}
 		got, err := repo.GetUsagePage(ctx, f)
 		if err != nil {
 			t.Fatal(err)
@@ -155,7 +156,7 @@ func BenchmarkUsagePageLive(b *testing.B) {
 	repo := NewUsageRepo(db)
 	ctx := context.Background()
 	now := time.Now()
-	f := UsageFilter{ProjectID: project, DateFrom: now.AddDate(0, 0, -30), DateTo: now, GroupBy: "day"}
+	f := persistence.UsageFilter{ProjectID: project, DateFrom: now.AddDate(0, 0, -30), DateTo: now, GroupBy: "day"}
 	b.Run("previous", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
 			if _, err := repo.GetUsageTotals(ctx, f); err != nil {

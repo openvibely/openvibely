@@ -10,6 +10,7 @@ import (
 
 	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/testutil"
 )
 
@@ -600,13 +601,13 @@ type alertAutomationInvalidationFixture struct {
 func setupAlertAutomationInvalidationFixture(t *testing.T, db *sql.DB, projectID string) alertAutomationInvalidationFixture {
 	t.Helper()
 	ctx := context.Background()
-	automationID := NewID()
-	versionID := NewID()
-	producerNodeID := NewID()
-	notificationNodeID := NewID()
-	approvalNodeID := NewID()
-	inboxNodeID := NewID()
-	implementationNodeID := NewID()
+	automationID := persistence.NewID()
+	versionID := persistence.NewID()
+	producerNodeID := persistence.NewID()
+	notificationNodeID := persistence.NewID()
+	approvalNodeID := persistence.NewID()
+	inboxNodeID := persistence.NewID()
+	implementationNodeID := persistence.NewID()
 	if _, err := db.ExecContext(ctx, `INSERT INTO automations
 		(id, project_id, stable_key, name, lifecycle_state, published_version_id)
 		VALUES (?, ?, ?, 'Alert lifecycle automation', 'active', ?)`, automationID, projectID, automationID, versionID); err != nil {

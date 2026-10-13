@@ -13,7 +13,7 @@ import (
 	"github.com/openvibely/openvibely/internal/attachmentsession"
 	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence"
 )
 
 var ErrDuplicateTask = errors.New("task with this name already exists in this project")
@@ -26,10 +26,10 @@ var ErrActiveLaneLifecycleRouted = errors.New("task activation was routed to its
 var ErrTaskCancellationSuperseded = errors.New("task cancellation was superseded by a newer run")
 
 type TaskService struct {
-	repo                              *repository.TaskRepo
+	repo                              persistence.TaskStore
 	uploadsDir                        string
 	workerSvc                         *WorkerService
-	agentRepo                         *repository.AgentRepo
+	agentRepo                         persistence.AgentStore
 	goalSvc                           *TaskGoalService
 	swarmSvc                          *SwarmService
 	queuedTaskThreadFollowupHook      func(context.Context, string) (bool, error)
@@ -39,7 +39,7 @@ type TaskService struct {
 	beforeActiveLaneLifecycleRoute    func()
 }
 
-func NewTaskService(repo *repository.TaskRepo, _ *repository.AttachmentRepo, workerSvc *WorkerService) *TaskService {
+func NewTaskService(repo persistence.TaskStore, _ persistence.AttachmentStore, workerSvc *WorkerService) *TaskService {
 	return &TaskService{
 		repo:      repo,
 		workerSvc: workerSvc,
@@ -50,7 +50,7 @@ func (s *TaskService) SetDeletionUploadsDir(uploadsDir string) {
 	s.uploadsDir = uploadsDir
 }
 
-func (s *TaskService) SetAgentRepo(agentRepo *repository.AgentRepo) {
+func (s *TaskService) SetAgentRepo(agentRepo persistence.AgentStore) {
 	s.agentRepo = agentRepo
 }
 
@@ -137,7 +137,7 @@ func (s *TaskService) ListChatContextByProject(ctx context.Context, projectID st
 	return chatContextTasksFromRows(rows), nil
 }
 
-func chatContextRowsNeedTerminalNormalization(rows []repository.ChatTaskContextRow) bool {
+func chatContextRowsNeedTerminalNormalization(rows []persistence.ChatTaskContextRow) bool {
 	for _, row := range rows {
 		if row.Category == models.CategoryActive && (row.Status == models.StatusFailed || row.Status == models.StatusCancelled) {
 			return true
@@ -146,7 +146,7 @@ func chatContextRowsNeedTerminalNormalization(rows []repository.ChatTaskContextR
 	return false
 }
 
-func chatContextTasksFromRows(rows []repository.ChatTaskContextRow) []models.Task {
+func chatContextTasksFromRows(rows []persistence.ChatTaskContextRow) []models.Task {
 	tasks := make([]models.Task, 0, len(rows))
 	for _, row := range rows {
 		tasks = append(tasks, models.Task{
@@ -220,7 +220,7 @@ func (s *TaskService) ListBoardByProjectWithCategorySorts(ctx context.Context, p
 // ListTaskReferences returns the compact project catalog used by reference
 // selectors. It preserves the board's terminal-active normalization without
 // hydrating the board/detail projection.
-func (s *TaskService) ListTaskReferences(ctx context.Context, projectID string) ([]repository.TaskReference, error) {
+func (s *TaskService) ListTaskReferences(ctx context.Context, projectID string) ([]persistence.TaskReference, error) {
 	references, err := s.repo.ListTaskReferences(ctx, projectID)
 	if err != nil {
 		return nil, err
@@ -334,7 +334,7 @@ func (s *TaskService) CreateWithGoal(ctx context.Context, t *models.Task, object
 // CreateWithGoalAndCallback persists a task and its optional goal before
 // invoking the worker. The callback is committed atomically with the task so
 // channel-specific metadata is complete before active-task admission.
-func (s *TaskService) CreateWithGoalAndCallback(ctx context.Context, t *models.Task, objective string, callback func(repository.SQLExecutor) error) error {
+func (s *TaskService) CreateWithGoalAndCallback(ctx context.Context, t *models.Task, objective string, callback func(persistence.Tx) error) error {
 	if err := normalizeTaskTitleAndPrompt(t); err != nil {
 		return err
 	}
@@ -355,14 +355,14 @@ func (s *TaskService) CreateWithGoalAndCallback(ctx context.Context, t *models.T
 	var goal *models.TaskGoal
 	if objective != "" {
 		goal = &models.TaskGoal{
-			GoalID:    repository.NewID(),
+			GoalID:    persistence.NewID(),
 			Objective: objective,
 			Status:    models.TaskGoalStatusActive,
 			Reason:    "set at task creation",
 		}
 	}
 	if err := s.repo.CreateWithGoalAndCallback(ctx, t, goal, callback); err != nil {
-		if errors.Is(err, repository.ErrDuplicateTask) {
+		if errors.Is(err, persistence.ErrDuplicateTask) {
 			applog.Infof("[task-svc] Create duplicate task title=%q", t.Title)
 			return ErrDuplicateTask
 		}
@@ -391,7 +391,7 @@ func (s *TaskService) Update(ctx context.Context, t *models.Task) error {
 	}
 	applog.Infof("[task-svc] Update id=%s title=%q category=%s", t.ID, t.Title, t.Category)
 	if err := s.repo.Update(ctx, t); err != nil {
-		if errors.Is(err, repository.ErrDuplicateTask) {
+		if errors.Is(err, persistence.ErrDuplicateTask) {
 			applog.Infof("[task-svc] Update duplicate task title=%q", t.Title)
 			return ErrDuplicateTask
 		}
@@ -425,7 +425,7 @@ func (s *TaskService) cancelActiveTaskWork(ctx context.Context, id string) error
 	return nil
 }
 
-func (s *TaskService) MoveTasksToActiveLane(ctx context.Context, projectID string, moves []repository.ActiveLaneTaskMove, status models.TaskStatus) error {
+func (s *TaskService) MoveTasksToActiveLane(ctx context.Context, projectID string, moves []persistence.ActiveLaneTaskMove, status models.TaskStatus) error {
 	if s.workerSvc == nil {
 		return errors.New("worker service unavailable")
 	}
@@ -442,7 +442,7 @@ func (s *TaskService) MoveTasksToActiveLane(ctx context.Context, projectID strin
 	sort.Strings(ids)
 	unlocks := make([]func(), 0, len(ids))
 	for _, id := range ids {
-		unlocks = append(unlocks, repository.LockTaskLifecycle(id))
+		unlocks = append(unlocks, persistence.LockTaskLifecycle(id))
 	}
 	release := func() {
 		for i := len(unlocks) - 1; i >= 0; i-- {
@@ -452,10 +452,10 @@ func (s *TaskService) MoveTasksToActiveLane(ctx context.Context, projectID strin
 	}
 	defer release()
 	admissions, err := s.repo.MoveTasksToActiveLane(ctx, projectID, moves, status)
-	if errors.Is(err, repository.ErrActiveLaneLifecycleOwned) && len(moves) == 1 {
+	if errors.Is(err, persistence.ErrActiveLaneLifecycleOwned) && len(moves) == 1 {
 		release() // lifecycle routing can reenter RunTask for this task
 		move := moves[0]
-		routeCtx := repository.WithActiveLaneExpectedState(ctx, move)
+		routeCtx := persistence.WithActiveLaneExpectedState(ctx, move)
 		if s.beforeActiveLaneLifecycleRoute != nil {
 			s.beforeActiveLaneLifecycleRoute()
 		}
@@ -491,7 +491,7 @@ func (s *TaskService) UpdateCategory(ctx context.Context, id string, category mo
 		// A demotion may cancel the observed run after its board update. Keep
 		// direct follow-ups and manual worker submissions out until that older
 		// cancellation has finished.
-		unlock := repository.LockTaskLifecycle(id)
+		unlock := persistence.LockTaskLifecycle(id)
 		defer unlock()
 	}
 	applog.Infof("[task-svc] UpdateCategory id=%s -> %s", id, category)
@@ -502,9 +502,9 @@ func (s *TaskService) UpdateCategory(ctx context.Context, id string, category mo
 		applog.Infof("[task-svc] UpdateCategory error fetching previous task state: %v", err)
 		return err
 	}
-	if _, guarded := repository.ActiveLaneExpectedState(ctx, id); guarded && category == models.CategoryActive {
+	if _, guarded := persistence.ActiveLaneExpectedState(ctx, id); guarded && category == models.CategoryActive {
 		if previousTask == nil {
-			return fmt.Errorf("%w: %s", repository.ErrActiveLaneTaskChanged, id)
+			return fmt.Errorf("%w: %s", persistence.ErrActiveLaneTaskChanged, id)
 		}
 		if s.queuedTaskThreadFollowupHook != nil {
 			handled, hookErr := s.queuedTaskThreadFollowupHook(ctx, id)
@@ -533,7 +533,7 @@ func (s *TaskService) UpdateCategory(ctx context.Context, id string, category mo
 			s.resumeGoalStoppedByUser(ctx, id, "user")
 			return nil
 		}
-		return fmt.Errorf("%w: %s", repository.ErrActiveLaneTaskChanged, id)
+		return fmt.Errorf("%w: %s", persistence.ErrActiveLaneTaskChanged, id)
 	}
 	rollbackActivation := func(activationErr error) error {
 		if category != models.CategoryActive || previousTask == nil {
@@ -628,7 +628,7 @@ func (s *TaskService) UpdateCategory(ctx context.Context, id string, category mo
 			}
 		}
 		applog.Infof("[task-svc] UpdateCategory resetting status to pending and activating id=%s (was %s)", id, task.Status)
-		unlock := repository.LockTaskLifecycle(id)
+		unlock := persistence.LockTaskLifecycle(id)
 		defer unlock()
 		// Category editing and follow-up hooks ran outside the gate. A Stop may
 		// have completed meanwhile, so restore Active from current durable state
@@ -665,7 +665,7 @@ func (s *TaskService) UpdateStatus(ctx context.Context, id string, status models
 		return s.RunTask(ctx, id)
 	}
 	if status == models.StatusPending {
-		unlock := repository.LockTaskLifecycle(id)
+		unlock := persistence.LockTaskLifecycle(id)
 		defer unlock()
 	}
 	if err := s.repo.UpdateStatus(ctx, id, status); err != nil {
@@ -730,7 +730,7 @@ func (s *TaskService) DeleteProjectTasks(ctx context.Context, projectID string) 
 	}
 }
 
-func (s *TaskService) validateDeletion(manifest repository.TaskDeletionManifest) error {
+func (s *TaskService) validateDeletion(manifest persistence.TaskDeletionManifest) error {
 	if len(manifest.PendingUploadSessionIDs) > 0 && strings.TrimSpace(s.uploadsDir) == "" {
 		return errors.New("uploads directory is not configured for pending upload cleanup")
 	}
@@ -759,7 +759,7 @@ func (s *TaskService) cleanupDeletedProjectRuntime(ctx context.Context, taskIDs 
 	return errors.Join(cleanupErrors...)
 }
 
-func (s *TaskService) prepareDeletion(manifest repository.TaskDeletionManifest, taskIDs []string) error {
+func (s *TaskService) prepareDeletion(manifest persistence.TaskDeletionManifest, taskIDs []string) error {
 	if err := s.validateDeletion(manifest); err != nil {
 		return err
 	}
@@ -767,7 +767,7 @@ func (s *TaskService) prepareDeletion(manifest repository.TaskDeletionManifest, 
 	return nil
 }
 
-func (s *TaskService) cleanupDeletionFiles(manifest repository.TaskDeletionManifest) error {
+func (s *TaskService) cleanupDeletionFiles(manifest persistence.TaskDeletionManifest) error {
 	var cleanupErrors []error
 	removeFile := func(kind, path string) {
 		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
@@ -798,12 +798,12 @@ func (s *TaskService) cleanupDeletionFiles(manifest repository.TaskDeletionManif
 }
 
 func (s *TaskService) deleteTask(ctx context.Context, id, projectID string, category models.TaskCategory, observed ...*models.Task) (bool, error) {
-	prepareDelete := func(manifest repository.TaskDeletionManifest) error {
+	prepareDelete := func(manifest persistence.TaskDeletionManifest) error {
 		taskIDs := append([]string{id}, manifest.SwarmChildTaskIDs...)
 		return s.prepareDeletion(manifest, taskIDs)
 	}
 	var (
-		manifest repository.TaskDeletionManifest
+		manifest persistence.TaskDeletionManifest
 		deleted  bool
 		err      error
 	)
@@ -841,7 +841,7 @@ func (s *TaskService) RunTask(ctx context.Context, id string) error {
 		applog.Infof("[task-svc] RunTask not found id=%s", id)
 		return fmt.Errorf("task not found: %s", id)
 	}
-	if _, guarded := repository.ActiveLaneExpectedState(ctx, id); guarded {
+	if _, guarded := persistence.ActiveLaneExpectedState(ctx, id); guarded {
 		if s.queuedTaskThreadFollowupHook != nil {
 			handled, hookErr := s.queuedTaskThreadFollowupHook(ctx, id)
 			if hookErr != nil {
@@ -869,7 +869,7 @@ func (s *TaskService) RunTask(ctx context.Context, id string) error {
 			s.resumeGoalStoppedByUser(ctx, id, "user")
 			return nil
 		}
-		return fmt.Errorf("%w: %s", repository.ErrActiveLaneTaskChanged, id)
+		return fmt.Errorf("%w: %s", persistence.ErrActiveLaneTaskChanged, id)
 	}
 	s.resumeGoalStoppedByUser(ctx, id, "user")
 
@@ -904,7 +904,7 @@ func (s *TaskService) RunTask(ctx context.Context, id string) error {
 
 	// Move to active category if not already active (e.g., task is in backlog).
 	// This must happen before submission so the UI reflects the move immediately.
-	unlock := repository.LockTaskLifecycle(id)
+	unlock := persistence.LockTaskLifecycle(id)
 	defer unlock()
 	// The task may have changed while the hook and model selection ran. Reload it
 	// under the same gate that protects cancellation's callback and queue purge.
@@ -953,7 +953,7 @@ func (s *TaskService) CancelTask(ctx context.Context, id string) error {
 // one gate. Splitting these reads can pair an old running task with a newer
 // follow-up's history cutoff, allowing the older Stop to cancel that turn.
 func (s *TaskService) ObserveTaskCancellation(ctx context.Context, id string) (*models.Task, int64, error) {
-	unlock := repository.LockTaskLifecycle(id)
+	unlock := persistence.LockTaskLifecycle(id)
 	defer unlock()
 	observed, err := s.repo.GetByID(ctx, id)
 	if err != nil {
@@ -983,7 +983,7 @@ func (s *TaskService) CancelTaskObservedWithPending(ctx context.Context, observe
 		return fmt.Errorf("task not found")
 	}
 	id := observed.ID
-	unlock := repository.LockTaskLifecycle(id)
+	unlock := persistence.LockTaskLifecycle(id)
 	defer unlock()
 	currentCutoff, err := s.repo.TaskExecutionHistoryCutoff(ctx, id)
 	if err != nil {
@@ -1146,7 +1146,7 @@ func (s *TaskService) ActivateAllBacklog(ctx context.Context, projectID string) 
 	return count, nil
 }
 
-func (s *TaskService) GetTasksWithSchedulesByProject(ctx context.Context, projectID string) ([]repository.TaskWithSchedule, error) {
+func (s *TaskService) GetTasksWithSchedulesByProject(ctx context.Context, projectID string) ([]persistence.TaskWithSchedule, error) {
 	applog.Infof("[task-svc] GetTasksWithSchedulesByProject project=%s", projectID)
 	tasks, err := s.repo.ListWithSchedulesByProject(ctx, projectID)
 	if err != nil {

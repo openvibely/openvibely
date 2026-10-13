@@ -16,6 +16,7 @@ import (
 	"github.com/openvibely/openvibely/internal/chatcontrol"
 	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/stretchr/testify/require"
@@ -212,7 +213,7 @@ func TestAutomationManualRunUsesExistingDispatchWithoutChangingSchedule(t *testi
 		VALUES (?, ?, ?, ?, ?, 'manual', ?, 'manual:previous-failed', 'failed', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
 		"previous-failed-manual-run", fixture.project.ID, fixture.definition.Automation.ID, fixture.definition.Version.ID, triggerNode.ID, fixture.schedule.ID)
 	require.NoError(t, err)
-	_, _, err = fixture.repo.RecordProjectionEvent(ctx, repository.AutomationProjectionEvent{
+	_, _, err = fixture.repo.RecordProjectionEvent(ctx, persistence.AutomationProjectionEvent{
 		Context: models.AutomationContext{ProjectID: fixture.project.ID},
 		Binding: models.AutomationBinding{AutomationID: fixture.definition.Automation.ID, VersionID: fixture.definition.Version.ID,
 			NodeID: triggerNode.ID, InvocationID: "previous-failed-manual-run"},
@@ -333,7 +334,7 @@ func TestAutomationManualRunQueuesEveryScheduleEntryAndRejectsTamperedBinding(t 
 		WHERE version_id = ? AND resource_type = 'task' AND resource_id = ?`, tampered.definition.Version.ID, tampered.task.ID)
 	require.NoError(t, err)
 	invocations, dispatches, err = tampered.repo.ClaimManualAutomationRun(ctx, tampered.project.ID, tampered.definition.Automation.ID, time.Now().UTC())
-	require.ErrorIs(t, err, repository.ErrAutomationNoScheduleEntries)
+	require.ErrorIs(t, err, persistence.ErrAutomationNoScheduleEntries)
 	require.Empty(t, invocations)
 	require.Empty(t, dispatches)
 	var invocationCount int
@@ -374,7 +375,7 @@ func TestAutomationManualRunSkipsBusyEntryAndRejectsInactiveLifecycle(t *testing
 			fixture := newAutomationRuntimeFixture(t, AutomationAdapterNativeSDLC)
 			require.NoError(t, fixture.repo.SetAutomationLifecycle(context.Background(), fixture.project.ID, fixture.definition.Automation.ID, state))
 			invocations, dispatches, err := fixture.repo.ClaimManualAutomationRun(context.Background(), fixture.project.ID, fixture.definition.Automation.ID, time.Now().UTC())
-			require.ErrorIs(t, err, repository.ErrAutomationNotActive)
+			require.ErrorIs(t, err, persistence.ErrAutomationNotActive)
 			require.Empty(t, invocations)
 			require.Empty(t, dispatches)
 			var count int
@@ -513,12 +514,12 @@ func TestAutomationRuntimeAtomicOccurrenceDispatchAndRestartRecovery(t *testing.
 	sameExecution, err := fixture.taskRepo.ClaimAutomationDispatch(ctx, dispatch.ID, "owner")
 	require.NoError(t, err)
 	require.Equal(t, execution.ID, sameExecution.ID, "dispatch retry must resolve the prepared execution")
-	require.ErrorIs(t, fixture.repo.RenewDispatchLease(ctx, dispatch.ID, "not-owner", now.Add(4*time.Minute)), repository.ErrAutomationDispatchLease)
+	require.ErrorIs(t, fixture.repo.RenewDispatchLease(ctx, dispatch.ID, "not-owner", now.Add(4*time.Minute)), persistence.ErrAutomationDispatchLease)
 	require.NoError(t, fixture.repo.RenewDispatchLease(ctx, dispatch.ID, "owner", now.Add(4*time.Minute)))
 	producer := automationNodeByKey(t, fixture.definition, "vision_suggestions")
 	pendingBinding := models.AutomationBinding{AutomationID: fixture.definition.Automation.ID, VersionID: fixture.definition.Version.ID,
 		InvocationID: invocation.ID, NodeID: producer.ID}
-	_, pendingActivity, err := fixture.repo.RecordProjectionEvent(ctx, repository.AutomationProjectionEvent{
+	_, pendingActivity, err := fixture.repo.RecordProjectionEvent(ctx, persistence.AutomationProjectionEvent{
 		Context: models.AutomationContext{ProjectID: fixture.project.ID, Bindings: []models.AutomationBinding{pendingBinding}}, Binding: pendingBinding,
 		ActivityKey: "invocation:pending-external", ActivityType: "external_reconciliation", ActivityStatus: models.AutomationActivityPending,
 	})
@@ -572,7 +573,7 @@ func TestAutomationDeleteRejectsOrdinaryRunningExecution(t *testing.T) {
 	require.NoError(t, execRepo.Create(ctx, &execution))
 	require.Empty(t, execution.DispatchID, "ordinary task execution must not depend on scheduler dispatch ownership")
 	require.NoError(t, fixture.taskRepo.UpdateStatus(ctx, fixture.task.ID, models.StatusRunning))
-	_, activity, err := fixture.repo.RecordProjectionEvent(ctx, repository.AutomationProjectionEvent{
+	_, activity, err := fixture.repo.RecordProjectionEvent(ctx, persistence.AutomationProjectionEvent{
 		Context:        models.AutomationContext{ProjectID: fixture.project.ID, Bindings: []models.AutomationBinding{binding}},
 		Binding:        binding,
 		WorkItemKey:    "execution:" + execution.ID + ":root",
@@ -590,7 +591,7 @@ func TestAutomationDeleteRejectsOrdinaryRunningExecution(t *testing.T) {
 
 	lifecycle := NewAutomationLifecycleService(fixture.repo, fixture.schedRepo)
 	err = lifecycle.Delete(ctx, fixture.project.ID, fixture.definition.Automation.ID)
-	require.ErrorIs(t, err, repository.ErrAutomationDispatchInFlight)
+	require.ErrorIs(t, err, persistence.ErrAutomationDispatchInFlight)
 	definition, err := fixture.repo.GetDefinition(ctx, fixture.project.ID, fixture.definition.Automation.ID)
 	require.NoError(t, err)
 	require.NotNil(t, definition, "rejected deletion must preserve the Automation graph")
@@ -809,7 +810,7 @@ func TestAutomationRuntimeExpectedDueCASLeavesNoOrphanInvocation(t *testing.T) {
 	fixture.schedule.NextRun = &future
 	require.NoError(t, fixture.schedRepo.Update(ctx, &fixture.schedule))
 	_, _, err := fixture.repo.ClaimScheduledOccurrence(ctx, stale, time.Now().UTC(), stale.ComputeNextRun(time.Now().UTC()))
-	require.ErrorIs(t, err, repository.ErrAutomationScheduleChanged)
+	require.ErrorIs(t, err, persistence.ErrAutomationScheduleChanged)
 	var invocations int
 	require.NoError(t, fixture.repo.DB().QueryRow(`SELECT COUNT(*) FROM automation_invocations WHERE trigger_resource_id = ?`, stale.ID).Scan(&invocations))
 	require.Zero(t, invocations)
@@ -1875,7 +1876,7 @@ func TestAutomationRuntimeReconcilesTerminalExecutionProjectionAfterCrash(t *tes
 	inbox := automationNodeByKey(t, fixture.definition, "inbox")
 	implementation := automationNodeByKey(t, fixture.definition, "implementation")
 	binding := models.AutomationBinding{AutomationID: fixture.definition.Automation.ID, VersionID: fixture.definition.Version.ID, NodeID: implementation.ID}
-	item, _, err := fixture.repo.RecordProjectionEvent(ctx, repository.AutomationProjectionEvent{
+	item, _, err := fixture.repo.RecordProjectionEvent(ctx, persistence.AutomationProjectionEvent{
 		Context: models.AutomationContext{ProjectID: fixture.project.ID, Bindings: []models.AutomationBinding{binding}}, Binding: binding,
 		WorkItemKey: "crash:item", ActivityKey: "crash:handoff", ActivityType: "handoff", ActivityStatus: models.AutomationActivityCompleted,
 		EventKey: "crash:implementation", FromNodeID: inbox.ID, ToNodeID: implementation.ID, Transition: models.AutomationTransitionEntered,
@@ -1885,13 +1886,13 @@ func TestAutomationRuntimeReconcilesTerminalExecutionProjectionAfterCrash(t *tes
 	execution := models.Execution{TaskID: fixture.task.ID, Status: models.ExecRunning, PromptSent: "crash recovery"}
 	execRepo := repository.NewExecutionRepo(fixture.repo.DB())
 	require.NoError(t, execRepo.Create(ctx, &execution))
-	_, _, err = fixture.repo.RecordProjectionEvent(ctx, repository.AutomationProjectionEvent{
+	_, _, err = fixture.repo.RecordProjectionEvent(ctx, persistence.AutomationProjectionEvent{
 		Context: models.AutomationContext{ProjectID: fixture.project.ID, Bindings: []models.AutomationBinding{binding}}, Binding: binding,
 		ActivityKey: "execution:" + execution.ID + ":run", ActivityType: "task_execution", ActivityStatus: models.AutomationActivityRunning,
 		Resources: []models.AutomationActivityResource{{ResourceType: "execution", ResourceID: execution.ID}, {ResourceType: "task", ResourceID: fixture.task.ID}},
 	})
 	require.NoError(t, err)
-	_, _, err = fixture.repo.RecordProjectionEvent(ctx, repository.AutomationProjectionEvent{
+	_, _, err = fixture.repo.RecordProjectionEvent(ctx, persistence.AutomationProjectionEvent{
 		Context: models.AutomationContext{ProjectID: fixture.project.ID, Bindings: []models.AutomationBinding{binding}}, Binding: binding,
 		ActivityKey: "execution:" + execution.ID + ":external-action", ActivityType: "create_notification", ActivityStatus: models.AutomationActivityCompleted,
 		Resources: []models.AutomationActivityResource{{ResourceType: "execution", ResourceID: execution.ID}},
@@ -1932,7 +1933,7 @@ func TestAutomationRuntimeDoesNotRepairCompletedReviewExecutionPosition(t *testi
 	openPR := automationNodeByKey(t, fixture.definition, "open_pr")
 	review := automationNodeByKey(t, fixture.definition, "review")
 	binding := models.AutomationBinding{AutomationID: fixture.definition.Automation.ID, VersionID: fixture.definition.Version.ID, NodeID: review.ID}
-	item, _, err := fixture.repo.RecordProjectionEvent(ctx, repository.AutomationProjectionEvent{
+	item, _, err := fixture.repo.RecordProjectionEvent(ctx, persistence.AutomationProjectionEvent{
 		Context: models.AutomationContext{ProjectID: fixture.project.ID, Bindings: []models.AutomationBinding{binding}}, Binding: binding,
 		WorkItemKey: "review:item", ActivityKey: "review:handoff", ActivityType: "handoff", ActivityStatus: models.AutomationActivityCompleted,
 		EventKey: "review:waiting", FromNodeID: openPR.ID, ToNodeID: review.ID, Transition: models.AutomationTransitionWaiting,
@@ -1942,7 +1943,7 @@ func TestAutomationRuntimeDoesNotRepairCompletedReviewExecutionPosition(t *testi
 	execution := models.Execution{TaskID: fixture.task.ID, Status: models.ExecRunning, PromptSent: "review helper"}
 	execRepo := repository.NewExecutionRepo(fixture.repo.DB())
 	require.NoError(t, execRepo.Create(ctx, &execution))
-	_, _, err = fixture.repo.RecordProjectionEvent(ctx, repository.AutomationProjectionEvent{
+	_, _, err = fixture.repo.RecordProjectionEvent(ctx, persistence.AutomationProjectionEvent{
 		Context: models.AutomationContext{ProjectID: fixture.project.ID, Bindings: []models.AutomationBinding{binding}}, Binding: binding,
 		ActivityKey: "execution:" + execution.ID + ":review", ActivityType: "task_execution", ActivityStatus: models.AutomationActivityCompleted,
 		Resources: []models.AutomationActivityResource{{ResourceType: "execution", ResourceID: execution.ID}},
@@ -1969,7 +1970,7 @@ func TestAutomationRuntimeSkippedOccurrenceAndProjectionIdempotency(t *testing.T
 
 	approval := automationNodeByKey(t, fixture.definition, "approval")
 	binding := models.AutomationBinding{AutomationID: fixture.definition.Automation.ID, VersionID: fixture.definition.Version.ID, InvocationID: invocation.ID, NodeID: approval.ID}
-	projection := repository.AutomationProjectionEvent{
+	projection := persistence.AutomationProjectionEvent{
 		Context: models.AutomationContext{ProjectID: fixture.project.ID, Bindings: []models.AutomationBinding{binding}}, Binding: binding,
 		WorkItemKey: "alert:stable", WorkItemKind: "suggestion", WorkItemTitle: "Stable", WorkItemStatus: models.AutomationWorkItemWaiting,
 		ActivityKey: "alert:stable:create", ActivityType: "create_notification", ActivityStatus: models.AutomationActivityCompleted,
@@ -1994,7 +1995,7 @@ func TestAutomationRuntimeSkippedOccurrenceAndProjectionIdempotency(t *testing.T
 	newApproval := automationNodeByKey(t, newDefinition, "approval")
 	newCompleted := automationNodeByKey(t, newDefinition, "completed")
 	newBinding := models.AutomationBinding{AutomationID: newDefinition.Automation.ID, VersionID: newDefinition.Version.ID, NodeID: newApproval.ID}
-	mappedItem, mappedActivity, err := fixture.repo.RecordProjectionEvent(ctx, repository.AutomationProjectionEvent{
+	mappedItem, mappedActivity, err := fixture.repo.RecordProjectionEvent(ctx, persistence.AutomationProjectionEvent{
 		Context: models.AutomationContext{ProjectID: fixture.project.ID, Bindings: []models.AutomationBinding{newBinding}}, Binding: newBinding,
 		WorkItemKey: "alert:stable", WorkItemStatus: models.AutomationWorkItemWaiting,
 		ActivityKey: "alert:stable:current-graph-process", ActivityType: "process_existing", ActivityStatus: models.AutomationActivityCompleted,
@@ -2015,7 +2016,7 @@ func TestAutomationRuntimeSkippedOccurrenceAndProjectionIdempotency(t *testing.T
 	}
 
 	newBinding.WorkItemID = mappedItem.ID
-	_, _, err = fixture.repo.RecordProjectionEvent(ctx, repository.AutomationProjectionEvent{
+	_, _, err = fixture.repo.RecordProjectionEvent(ctx, persistence.AutomationProjectionEvent{
 		Context: models.AutomationContext{ProjectID: fixture.project.ID, Bindings: []models.AutomationBinding{newBinding}}, Binding: newBinding,
 		ActivityKey: "alert:stable:current-graph-complete", ActivityType: "outcome", ActivityStatus: models.AutomationActivityCompleted,
 		EventKey: "alert:stable:current-graph-completed", FromNodeID: newApproval.ID, ToNodeID: newCompleted.ID, Transition: models.AutomationTransitionCompleted,
@@ -2032,17 +2033,17 @@ func TestAutomationRuntimeSkippedOccurrenceAndProjectionIdempotency(t *testing.T
 	otherProject := automationTestProject(t, repository.NewProjectRepo(fixture.repo.DB()), "Foreign runtime")
 	foreignTask := models.Task{ProjectID: otherProject.ID, Title: "Foreign", Category: models.CategoryBacklog, Status: models.StatusPending, Priority: 2}
 	require.NoError(t, repository.NewTaskRepo(fixture.repo.DB(), nil).Create(ctx, &foreignTask))
-	_, _, err = fixture.repo.RecordProjectionEvent(ctx, repository.AutomationProjectionEvent{
+	_, _, err = fixture.repo.RecordProjectionEvent(ctx, persistence.AutomationProjectionEvent{
 		Context: currentContext, Binding: newBinding, ActivityKey: "foreign-resource", ActivityType: "test", ActivityStatus: models.AutomationActivityCompleted,
 		Resources: []models.AutomationActivityResource{{ResourceType: "task", ResourceID: foreignTask.ID}},
 	})
 	require.ErrorContains(t, err, "does not belong to project")
-	_, _, err = fixture.repo.RecordProjectionEvent(ctx, repository.AutomationProjectionEvent{
+	_, _, err = fixture.repo.RecordProjectionEvent(ctx, persistence.AutomationProjectionEvent{
 		Context: currentContext, Binding: newBinding, ActivityKey: "malformed-external", ActivityType: "test", ActivityStatus: models.AutomationActivityCompleted,
 		Resources: []models.AutomationActivityResource{{ResourceType: "github_issue", ResourceID: "github:not-qualified"}},
 	})
 	require.ErrorContains(t, err, "canonical and repository-qualified")
-	_, _, err = fixture.repo.RecordProjectionEvent(ctx, repository.AutomationProjectionEvent{
+	_, _, err = fixture.repo.RecordProjectionEvent(ctx, persistence.AutomationProjectionEvent{
 		Context: currentContext, Binding: newBinding, ActivityKey: "unsafe-external", ActivityType: "test", ActivityStatus: models.AutomationActivityCompleted,
 		Resources: []models.AutomationActivityResource{{ResourceType: "github_issue", ResourceID: "github:owner/<script>:issue:1"}},
 	})
@@ -2123,7 +2124,7 @@ func TestAutomationRuntimeCompletedBranchDoesNotCloseParallelWork(t *testing.T) 
 	inbox := automationNodeByKey(t, fixture.definition, "inbox")
 	completed := automationNodeByKey(t, fixture.definition, "completed")
 	binding := models.AutomationBinding{AutomationID: fixture.definition.Automation.ID, VersionID: fixture.definition.Version.ID, NodeID: approval.ID}
-	item, _, err := fixture.repo.RecordProjectionEvent(ctx, repository.AutomationProjectionEvent{
+	item, _, err := fixture.repo.RecordProjectionEvent(ctx, persistence.AutomationProjectionEvent{
 		Context: models.AutomationContext{ProjectID: fixture.project.ID, Bindings: []models.AutomationBinding{binding}}, Binding: binding,
 		WorkItemKey: "parallel:item", ActivityKey: "parallel:approval", ActivityType: "branch", ActivityStatus: models.AutomationActivityCompleted,
 		EventKey: "parallel:approval", ToNodeID: approval.ID, Transition: models.AutomationTransitionEntered,
@@ -2131,14 +2132,14 @@ func TestAutomationRuntimeCompletedBranchDoesNotCloseParallelWork(t *testing.T) 
 	require.NoError(t, err)
 	binding.WorkItemID = item.ID
 	binding.NodeID = inbox.ID
-	_, _, err = fixture.repo.RecordProjectionEvent(ctx, repository.AutomationProjectionEvent{
+	_, _, err = fixture.repo.RecordProjectionEvent(ctx, persistence.AutomationProjectionEvent{
 		Context: models.AutomationContext{ProjectID: fixture.project.ID, Bindings: []models.AutomationBinding{binding}}, Binding: binding,
 		ActivityKey: "parallel:inbox", ActivityType: "branch", ActivityStatus: models.AutomationActivityCompleted,
 		EventKey: "parallel:inbox", ToNodeID: inbox.ID, Transition: models.AutomationTransitionEntered,
 	})
 	require.NoError(t, err)
 	binding.NodeID = approval.ID
-	_, _, err = fixture.repo.RecordProjectionEvent(ctx, repository.AutomationProjectionEvent{
+	_, _, err = fixture.repo.RecordProjectionEvent(ctx, persistence.AutomationProjectionEvent{
 		Context: models.AutomationContext{ProjectID: fixture.project.ID, Bindings: []models.AutomationBinding{binding}}, Binding: binding,
 		ActivityKey: "parallel:approval:done", ActivityType: "branch", ActivityStatus: models.AutomationActivityCompleted,
 		EventKey: "parallel:approval:done", FromNodeID: approval.ID, ToNodeID: completed.ID, Transition: models.AutomationTransitionCompleted,
@@ -2151,7 +2152,7 @@ func TestAutomationRuntimeCompletedBranchDoesNotCloseParallelWork(t *testing.T) 
 	require.NoError(t, fixture.repo.DB().QueryRow(`SELECT COUNT(*) FROM automation_work_item_positions WHERE work_item_id = ?`, item.ID).Scan(&positions))
 	require.Equal(t, 1, positions)
 	binding.NodeID = inbox.ID
-	_, _, err = fixture.repo.RecordProjectionEvent(ctx, repository.AutomationProjectionEvent{
+	_, _, err = fixture.repo.RecordProjectionEvent(ctx, persistence.AutomationProjectionEvent{
 		Context: models.AutomationContext{ProjectID: fixture.project.ID, Bindings: []models.AutomationBinding{binding}}, Binding: binding,
 		ActivityKey: "parallel:inbox:done", ActivityType: "branch", ActivityStatus: models.AutomationActivityCompleted,
 		EventKey: "parallel:inbox:done", FromNodeID: inbox.ID, ToNodeID: completed.ID, Transition: models.AutomationTransitionCompleted,
@@ -2181,7 +2182,7 @@ func TestAutomationRuntimeCompositeConstraintsAndProjectCascade(t *testing.T) {
 	require.NoError(t, err)
 	approval := automationNodeByKey(t, fixture.definition, "approval")
 	binding := models.AutomationBinding{AutomationID: fixture.definition.Automation.ID, VersionID: fixture.definition.Version.ID, InvocationID: invocation.ID, NodeID: approval.ID}
-	item, activity, err := fixture.repo.RecordProjectionEvent(ctx, repository.AutomationProjectionEvent{
+	item, activity, err := fixture.repo.RecordProjectionEvent(ctx, persistence.AutomationProjectionEvent{
 		Context: models.AutomationContext{ProjectID: fixture.project.ID, Bindings: []models.AutomationBinding{binding}}, Binding: binding,
 		WorkItemKey: "constraint:item", ActivityKey: "constraint:activity", ActivityType: "test", ActivityStatus: models.AutomationActivityRunning,
 	})
@@ -2223,7 +2224,7 @@ func TestAutomationRuntimeChildTaskInheritsPersistedParentContext(t *testing.T) 
 	ctx := context.Background()
 	producer := automationNodeByKey(t, fixture.definition, "vision_suggestions")
 	binding := models.AutomationBinding{AutomationID: fixture.definition.Automation.ID, VersionID: fixture.definition.Version.ID, NodeID: producer.ID}
-	_, _, err := fixture.repo.RecordProjectionEvent(ctx, repository.AutomationProjectionEvent{
+	_, _, err := fixture.repo.RecordProjectionEvent(ctx, persistence.AutomationProjectionEvent{
 		Context: models.AutomationContext{ProjectID: fixture.project.ID, Bindings: []models.AutomationBinding{binding}}, Binding: binding,
 		WorkItemKey: "parent:causal-work", ActivityKey: "parent:causal-task", ActivityType: "task_execution", ActivityStatus: models.AutomationActivityRunning,
 		Resources: []models.AutomationActivityResource{{ResourceType: "task", ResourceID: fixture.task.ID}},
@@ -2255,7 +2256,7 @@ func TestAutomationRuntimeDispatchFailureBackoffIsOwnerOnlyAndTerminal(t *testin
 	require.NoError(t, err)
 	require.NotNil(t, leased)
 	require.Equal(t, dispatch.ID, leased.ID)
-	require.ErrorIs(t, fixture.repo.FailDispatch(ctx, dispatch.ID, "other", "wrong owner", 2, now), repository.ErrAutomationDispatchLease)
+	require.ErrorIs(t, fixture.repo.FailDispatch(ctx, dispatch.ID, "other", "wrong owner", 2, now), persistence.ErrAutomationDispatchLease)
 	require.NoError(t, fixture.repo.FailDispatch(ctx, dispatch.ID, "owner", "retry", 2, now))
 	var status string
 	var nextAttempt time.Time
@@ -2271,7 +2272,7 @@ func TestAutomationRuntimeDispatchFailureBackoffIsOwnerOnlyAndTerminal(t *testin
 	require.Equal(t, models.StatusFailed, storedTask.Status)
 	require.Equal(t, models.CategoryCompleted, storedTask.Category)
 	require.NotNil(t, storedTask.CompletedAt)
-	require.ErrorIs(t, fixture.repo.FailDispatch(ctx, dispatch.ID, "owner", "duplicate terminal retry", 2, nextAttempt.Add(2*time.Millisecond)), repository.ErrAutomationDispatchLease)
+	require.ErrorIs(t, fixture.repo.FailDispatch(ctx, dispatch.ID, "owner", "duplicate terminal retry", 2, nextAttempt.Add(2*time.Millisecond)), persistence.ErrAutomationDispatchLease)
 	require.NoError(t, fixture.repo.DB().QueryRow(`SELECT status FROM automation_dispatch_outbox WHERE id = ?`, dispatch.ID).Scan(&status))
 	require.Equal(t, "failed", status)
 	var invocationStatus string
@@ -2297,7 +2298,7 @@ func TestAutomationRuntimeSharedInboxExecutionPreservesMultipleBindings(t *testi
 	for i, definition := range definitions {
 		inbox := automationNodeByKey(t, definition, "inbox")
 		binding := models.AutomationBinding{AutomationID: definition.Automation.ID, VersionID: definition.Version.ID, NodeID: inbox.ID}
-		item, _, err := fixture.repo.RecordProjectionEvent(ctx, repository.AutomationProjectionEvent{
+		item, _, err := fixture.repo.RecordProjectionEvent(ctx, persistence.AutomationProjectionEvent{
 			Context: models.AutomationContext{ProjectID: fixture.project.ID, Bindings: []models.AutomationBinding{binding}}, Binding: binding,
 			WorkItemKey: fmt.Sprintf("shared:item:%d", i), ActivityKey: fmt.Sprintf("shared:seed:%d", i), ActivityType: "shared_inbox", ActivityStatus: models.AutomationActivityRunning,
 			Resources: []models.AutomationActivityResource{{ResourceType: "task", ResourceID: fixture.task.ID}},
@@ -2312,7 +2313,7 @@ func TestAutomationRuntimeSharedInboxExecutionPreservesMultipleBindings(t *testi
 	execution := models.Execution{TaskID: fixture.task.ID, Status: models.ExecRunning, PromptSent: "shared inbox"}
 	require.NoError(t, repository.NewExecutionRepo(fixture.repo.DB()).Create(ctx, &execution))
 	for i, binding := range bindings {
-		_, _, err := fixture.repo.RecordProjectionEvent(ctx, repository.AutomationProjectionEvent{
+		_, _, err := fixture.repo.RecordProjectionEvent(ctx, persistence.AutomationProjectionEvent{
 			Context: models.AutomationContext{ProjectID: fixture.project.ID, Bindings: bindings}, Binding: binding,
 			ActivityKey: fmt.Sprintf("shared:execution:%s:%d", execution.ID, i), ActivityType: "thread_input_execution", ActivityStatus: models.AutomationActivityRunning,
 			Resources: []models.AutomationActivityResource{{ResourceType: "execution", ResourceID: execution.ID}, {ResourceType: "task", ResourceID: fixture.task.ID}},
@@ -2337,7 +2338,7 @@ func TestAutomationRuntimeThreadInputBindingSurvivesPromotion(t *testing.T) {
 	inbox := automationNodeByKey(t, fixture.definition, "inbox")
 	binding := models.AutomationBinding{AutomationID: fixture.definition.Automation.ID, VersionID: fixture.definition.Version.ID, NodeID: inbox.ID, InvocationID: ""}
 	// A queued binding must have an invocation or work item. Create a durable work item first.
-	item, _, err := fixture.repo.RecordProjectionEvent(ctx, repository.AutomationProjectionEvent{
+	item, _, err := fixture.repo.RecordProjectionEvent(ctx, persistence.AutomationProjectionEvent{
 		Context: models.AutomationContext{ProjectID: fixture.project.ID, Bindings: []models.AutomationBinding{binding}}, Binding: binding,
 		WorkItemKey: "alert:queued", WorkItemKind: "suggestion", ActivityKey: "alert:queued:seed", ActivityType: "seed", ActivityStatus: models.AutomationActivityCompleted,
 	})
@@ -2642,7 +2643,7 @@ func TestAutomationRuntimeGitHubIssueInboxAndPRProvenance(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, resourceID)
 	_, err = handlers["github_create_issue"](ctx, json.RawMessage(`{"title":"Ambiguous issue","body":"body"}`))
-	require.ErrorIs(t, err, repository.ErrAutomationExternalReconciliation)
+	require.ErrorIs(t, err, persistence.ErrAutomationExternalReconciliation)
 	require.Equal(t, int32(1), createCalls.Load(), "an ambiguous prior mutation must not call GitHub again")
 
 	devInbox := automationNodeByKey(t, fixture.definition, "dev_inbox")
@@ -2755,7 +2756,7 @@ func TestAutomationRuntimeGitHubIssueInboxAndPRProvenance(t *testing.T) {
 	implementationTask, err := fixture.taskRepo.GetByProjectAndTitle(ctx, fixture.project.ID, "Implement exact issue")
 	require.NoError(t, err)
 	require.NotNil(t, implementationTask)
-	require.Equal(t, repository.AutomationCompilerTaskCreatedVia(fixture.definition.Automation.ID, implementationNode.NodeKey), implementationTask.CreatedVia,
+	require.Equal(t, persistence.AutomationCompilerTaskCreatedVia(fixture.definition.Automation.ID, implementationNode.NodeKey), implementationTask.CreatedVia,
 		"issue-specific Automation Tasks need a durable origin marker after graph replacement deletes projection")
 	require.True(t, implementationTask.AutoMerge, "GitHub inbox create_task must persist advertised auto_merge")
 	require.True(t, implementationTask.AutoMergeOnGoalAchieved, "GitHub inbox create_task must persist advertised auto_merge_on_goal_achieved")
@@ -3537,7 +3538,7 @@ func TestAutomationGitHubIssueProjectionRepairRejectsDeletedSourceGraph(t *testi
 		FROM automation_github_issue_dedup_leases
 		WHERE project_id = ? AND repository_full_name = ? AND title_fingerprint = ?`, fixture.project.ID, "example/runtime", fingerprint).
 		Scan(&ownerToken, &sourceJSON, &issueNumber))
-	var source repository.AutomationGitHubIssueDedupSource
+	var source persistence.AutomationGitHubIssueDedupSource
 	require.NoError(t, json.Unmarshal([]byte(sourceJSON), &source))
 	replaceAutomationGitHubIssueGraphWithoutNode(t, fixture, "bug_finder")
 
@@ -3545,7 +3546,7 @@ func TestAutomationGitHubIssueProjectionRepairRejectsDeletedSourceGraph(t *testi
 	opts := githubIssueRuntimeOptions{ProjectID: fixture.project.ID, ProjectRepo: projectRepo,
 		TaskRepo: fixture.taskRepo, AutomationRepo: fixture.repo, GitHub: provider}
 	_, repairErr := repairAutomationGitHubIssueProjection(opts, &GitHubRepoRef{Owner: "example", Name: "runtime", FullName: "example/runtime"}, title,
-		repository.AutomationGitHubIssueDedupClaim{IssueNumber: issueNumber, OwnerToken: ownerToken, Source: source})
+		persistence.AutomationGitHubIssueDedupClaim{IssueNumber: issueNumber, OwnerToken: ownerToken, Source: source})
 	require.ErrorContains(t, repairErr, "current active Automation graph")
 }
 
@@ -3572,7 +3573,7 @@ func TestAutomationGitHubIssueCreationFailsClosedAfterAmbiguousProviderOutcome(t
 	require.NoError(t, err)
 
 	_, retryErr := createIssue(newCausalContext("ambiguous-retry"), input)
-	require.ErrorIs(t, retryErr, repository.ErrAutomationExternalReconciliation)
+	require.ErrorIs(t, retryErr, persistence.ErrAutomationExternalReconciliation)
 	require.Equal(t, int32(1), createCalls.Load(), "lease expiry must not retry a create whose external outcome is uncertain")
 	var mutationState string
 	var recordedNumber sql.NullInt64
@@ -3809,7 +3810,7 @@ func TestAutomationGitHubIssueCreationUsesLaunchAuthorizationAfterGraphReplaceme
 	fixture, newCausalContext, _ := newAutomationGitHubIssueDedupHarness(t, provider)
 	ctx := newCausalContext("launch-safe-after-save")
 	replaced := replaceAutomationGitHubIssueGraph(t, fixture)
-	fixture.task.CreatedVia = repository.AutomationCompilerTaskCreatedVia(fixture.definition.Automation.ID, "bug_finder")
+	fixture.task.CreatedVia = persistence.AutomationCompilerTaskCreatedVia(fixture.definition.Automation.ID, "bug_finder")
 	_, err := fixture.repo.DB().ExecContext(context.Background(), `UPDATE tasks SET created_via = ? WHERE id = ?`, fixture.task.CreatedVia, fixture.task.ID)
 	require.NoError(t, err)
 	activityKey := githubIssueCreationActivityKey(ctx, &GitHubRepoRef{FullName: "example/runtime"}, githubCreateIssueRuntimeInput{
@@ -4109,7 +4110,7 @@ func TestAutomationObservabilityRecordsSafeLifecycleAndGraphMetrics(t *testing.T
 
 	producer := automationNodeByKey(t, fixture.definition, "vision_suggestions")
 	binding := models.AutomationBinding{AutomationID: fixture.definition.Automation.ID, VersionID: fixture.definition.Version.ID, InvocationID: invocation.ID, NodeID: producer.ID}
-	_, _, err = fixture.repo.RecordProjectionEvent(ctx, repository.AutomationProjectionEvent{
+	_, _, err = fixture.repo.RecordProjectionEvent(ctx, persistence.AutomationProjectionEvent{
 		Context: models.AutomationContext{ProjectID: fixture.project.ID, Bindings: []models.AutomationBinding{binding}}, Binding: binding,
 		WorkItemKey: "observability:item", ActivityKey: "observability:activity", ActivityType: "test", ActivityStatus: models.AutomationActivityRunning,
 		EventKey: "observability:bad-transition", ToNodeID: "missing-node", Transition: models.AutomationTransitionEntered,
@@ -4269,7 +4270,7 @@ func TestAutomationLiveDisplayStatePrecedencePreservesMixedCounters(t *testing.T
 		{key: "completed", transition: models.AutomationTransitionCompleted, activity: models.AutomationActivityCompleted},
 	}
 	for _, tc := range cases {
-		_, _, err := fixture.repo.RecordProjectionEvent(ctx, repository.AutomationProjectionEvent{
+		_, _, err := fixture.repo.RecordProjectionEvent(ctx, persistence.AutomationProjectionEvent{
 			Context: models.AutomationContext{ProjectID: fixture.project.ID, Bindings: []models.AutomationBinding{binding}}, Binding: binding,
 			WorkItemKey: "mixed:" + tc.key, ActivityKey: "mixed:" + tc.key, ActivityType: "test", ActivityStatus: tc.activity,
 			EventKey: "mixed:" + tc.key, ToNodeID: approval.ID, Transition: tc.transition,
@@ -4280,7 +4281,7 @@ func TestAutomationLiveDisplayStatePrecedencePreservesMixedCounters(t *testing.T
 	require.NoError(t, err)
 	invocationBinding := binding
 	invocationBinding.InvocationID = invocation.ID
-	_, _, err = fixture.repo.RecordProjectionEvent(ctx, repository.AutomationProjectionEvent{
+	_, _, err = fixture.repo.RecordProjectionEvent(ctx, persistence.AutomationProjectionEvent{
 		Context: models.AutomationContext{ProjectID: fixture.project.ID, Bindings: []models.AutomationBinding{invocationBinding}}, Binding: invocationBinding,
 		ActivityKey: "mixed:invocation-only-failure", ActivityType: "test", ActivityStatus: models.AutomationActivityFailed,
 	})
@@ -4309,13 +4310,13 @@ func TestAutomationLiveDisplayStateShowsRunningWhenMixedWithWaiting(t *testing.T
 	ctx := context.Background()
 	approval := automationNodeByKey(t, fixture.definition, "approval")
 	binding := models.AutomationBinding{AutomationID: fixture.definition.Automation.ID, VersionID: fixture.definition.Version.ID, NodeID: approval.ID}
-	_, _, err := fixture.repo.RecordProjectionEvent(ctx, repository.AutomationProjectionEvent{
+	_, _, err := fixture.repo.RecordProjectionEvent(ctx, persistence.AutomationProjectionEvent{
 		Context: models.AutomationContext{ProjectID: fixture.project.ID, Bindings: []models.AutomationBinding{binding}}, Binding: binding,
 		WorkItemKey: "mixed-display:waiting", ActivityKey: "mixed-display:waiting", ActivityType: "test", ActivityStatus: models.AutomationActivityRunning,
 		EventKey: "mixed-display:waiting", ToNodeID: approval.ID, Transition: models.AutomationTransitionWaiting,
 	})
 	require.NoError(t, err)
-	_, _, err = fixture.repo.RecordProjectionEvent(ctx, repository.AutomationProjectionEvent{
+	_, _, err = fixture.repo.RecordProjectionEvent(ctx, persistence.AutomationProjectionEvent{
 		Context: models.AutomationContext{ProjectID: fixture.project.ID, Bindings: []models.AutomationBinding{binding}}, Binding: binding,
 		WorkItemKey: "mixed-display:running", ActivityKey: "mixed-display:running", ActivityType: "test", ActivityStatus: models.AutomationActivityRunning,
 		EventKey: "mixed-display:running", ToNodeID: approval.ID, Transition: models.AutomationTransitionEntered,
@@ -4420,7 +4421,7 @@ func TestAutomationExternalRefreshClosedPullRequestWithoutMergeReconcilesFailure
 	openPR := automationNodeByKey(t, fixture.definition, "open_pr")
 	review := automationNodeByKey(t, fixture.definition, "review")
 	binding := models.AutomationBinding{AutomationID: fixture.definition.Automation.ID, VersionID: fixture.definition.Version.ID, NodeID: openPR.ID}
-	_, _, err := fixture.repo.RecordProjectionEvent(ctx, repository.AutomationProjectionEvent{
+	_, _, err := fixture.repo.RecordProjectionEvent(ctx, persistence.AutomationProjectionEvent{
 		Context: models.AutomationContext{ProjectID: fixture.project.ID, Bindings: []models.AutomationBinding{binding}}, Binding: binding,
 		WorkItemKey: "github:example/runtime:issue:77", ActivityKey: "github:example/runtime:pull:77:open",
 		ActivityType: "open_pull_request", ActivityStatus: models.AutomationActivityCompleted,
@@ -4524,8 +4525,8 @@ func seedAutomationExternalRefreshBenchmark(tb testing.TB, db *sql.DB, nodeCount
 	if err := repository.NewProjectRepo(db).Create(ctx, &project); err != nil {
 		tb.Fatalf("create benchmark project: %v", err)
 	}
-	automationID := repository.NewID()
-	versionID := repository.NewID()
+	automationID := persistence.NewID()
+	versionID := persistence.NewID()
 	if _, err := db.ExecContext(ctx, `INSERT INTO automations (id, project_id, stable_key, name, automation_type, lifecycle_state)
 		VALUES (?, ?, ?, ?, 'custom', 'active')`, automationID, project.ID, fmt.Sprintf("benchmark/%d", nodeCount), "External refresh benchmark"); err != nil {
 		tb.Fatalf("insert benchmark automation: %v", err)
@@ -4537,7 +4538,7 @@ func seedAutomationExternalRefreshBenchmark(tb testing.TB, db *sql.DB, nodeCount
 	nodeIDs := make([]string, nodeCount)
 	configJSON := fmt.Sprintf(`{"payload":"%s"}`, strings.Repeat("x", 4096))
 	for i := range nodeIDs {
-		nodeIDs[i] = repository.NewID()
+		nodeIDs[i] = persistence.NewID()
 		if _, err := db.ExecContext(ctx, `INSERT INTO automation_nodes
 			(id, project_id, automation_id, version_id, node_key, name, node_type, role, config_json, position_x, position_y)
 			VALUES (?, ?, ?, ?, ?, ?, 'agent_task', 'task', ?, ?, 0)`, nodeIDs[i], project.ID, automationID, versionID,
@@ -4607,7 +4608,7 @@ func seedAutomationExternalRefreshEndToEndFixture(tb testing.TB, db *sql.DB, nod
 	}
 	automationRepo := repository.NewAutomationRepo(db)
 	binding := models.AutomationBinding{AutomationID: automationID, VersionID: versionID, NodeID: nodeID}
-	if _, _, err := automationRepo.RecordProjectionEvent(ctx, repository.AutomationProjectionEvent{
+	if _, _, err := automationRepo.RecordProjectionEvent(ctx, persistence.AutomationProjectionEvent{
 		Context: models.AutomationContext{ProjectID: projectID, Bindings: []models.AutomationBinding{binding}}, Binding: binding,
 		WorkItemKey: "benchmark:external-refresh", ActivityKey: "benchmark:external-refresh:pull",
 		ActivityType: "open_pull_request", ActivityStatus: models.AutomationActivityCompleted,
@@ -4689,7 +4690,7 @@ func TestAutomationExternalPullRequestRefreshIsExplicitCachedAndReconcilesProjec
 	review := automationNodeByKey(t, fixture.definition, "review")
 	binding := models.AutomationBinding{AutomationID: fixture.definition.Automation.ID, VersionID: fixture.definition.Version.ID, NodeID: openPR.ID}
 	contextValue := models.AutomationContext{ProjectID: fixture.project.ID, Bindings: []models.AutomationBinding{binding}}
-	_, _, err := fixture.repo.RecordProjectionEvent(ctx, repository.AutomationProjectionEvent{
+	_, _, err := fixture.repo.RecordProjectionEvent(ctx, persistence.AutomationProjectionEvent{
 		Context: contextValue, Binding: binding, WorkItemKey: "github:example/runtime:issue:42",
 		ActivityKey: "github:example/runtime:pull:7:open", ActivityType: "open_pull_request", ActivityStatus: models.AutomationActivityCompleted,
 		Resources: []models.AutomationActivityResource{{ResourceType: "task", ResourceID: fixture.task.ID}, {ResourceType: "pull_request", ResourceID: "github:example/runtime:pull:7"}},
@@ -4777,7 +4778,7 @@ func TestAutomationReconcilerRefreshesStaleExternalPullRequestStateInBackground(
 	review := automationNodeByKey(t, fixture.definition, "review")
 	binding := models.AutomationBinding{AutomationID: fixture.definition.Automation.ID, VersionID: fixture.definition.Version.ID, NodeID: openPR.ID}
 	contextValue := models.AutomationContext{ProjectID: fixture.project.ID, Bindings: []models.AutomationBinding{binding}}
-	_, _, err := fixture.repo.RecordProjectionEvent(ctx, repository.AutomationProjectionEvent{
+	_, _, err := fixture.repo.RecordProjectionEvent(ctx, persistence.AutomationProjectionEvent{
 		Context: contextValue, Binding: binding, WorkItemKey: "github:example/runtime:issue:99",
 		ActivityKey: "github:example/runtime:pull:9:open", ActivityType: "open_pull_request", ActivityStatus: models.AutomationActivityCompleted,
 		Resources: []models.AutomationActivityResource{{ResourceType: "task", ResourceID: fixture.task.ID}, {ResourceType: "pull_request", ResourceID: "github:example/runtime:pull:9"}},
@@ -4832,7 +4833,7 @@ func TestAutomationReconcilerSkipsExternalStateRefreshWhenLiveViewNotRecentlyOpe
 	review := automationNodeByKey(t, fixture.definition, "review")
 	binding := models.AutomationBinding{AutomationID: fixture.definition.Automation.ID, VersionID: fixture.definition.Version.ID, NodeID: openPR.ID}
 	contextValue := models.AutomationContext{ProjectID: fixture.project.ID, Bindings: []models.AutomationBinding{binding}}
-	_, _, err := fixture.repo.RecordProjectionEvent(ctx, repository.AutomationProjectionEvent{
+	_, _, err := fixture.repo.RecordProjectionEvent(ctx, persistence.AutomationProjectionEvent{
 		Context: contextValue, Binding: binding, WorkItemKey: "github:example/runtime:issue:99",
 		ActivityKey: "github:example/runtime:pull:9:open", ActivityType: "open_pull_request", ActivityStatus: models.AutomationActivityCompleted,
 		Resources: []models.AutomationActivityResource{{ResourceType: "task", ResourceID: fixture.task.ID}, {ResourceType: "pull_request", ResourceID: "github:example/runtime:pull:9"}},
@@ -5600,7 +5601,7 @@ func TestAutomationRuntimeNativeAlertLifecycleAndLiveProjection(t *testing.T) {
 	execRepo.SetAutomationRepo(fixture.repo)
 	require.NoError(t, execRepo.Create(ctx, &implementationExecution))
 	implementationBinding := contextForTask.Bindings[0]
-	_, _, err = fixture.repo.RecordProjectionEvent(ctx, repository.AutomationProjectionEvent{
+	_, _, err = fixture.repo.RecordProjectionEvent(ctx, persistence.AutomationProjectionEvent{
 		Context: contextForTask, Binding: implementationBinding,
 		ActivityKey: "execution:" + implementationExecution.ID + ":run", ActivityType: "task_execution", ActivityStatus: models.AutomationActivityRunning,
 		Resources: []models.AutomationActivityResource{{ResourceType: "task", ResourceID: implementation.ID}, {ResourceType: "execution", ResourceID: implementationExecution.ID}},

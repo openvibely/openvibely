@@ -7,7 +7,7 @@ import (
 
 	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/update"
 )
 
@@ -28,9 +28,9 @@ type SwarmPlannerStarter interface {
 }
 
 type SchedulerService struct {
-	scheduleRepo   *repository.ScheduleRepo
-	taskRepo       *repository.TaskRepo
-	automationRepo *repository.AutomationRepo
+	scheduleRepo   persistence.ScheduleStore
+	taskRepo       persistence.TaskStore
+	automationRepo persistence.AutomationStore
 	workerSvc      *WorkerService
 	worktreeSvc    *WorktreeService
 	swarmStarter   SwarmPlannerStarter
@@ -42,7 +42,7 @@ type SchedulerService struct {
 	now            func() time.Time
 }
 
-func NewSchedulerService(scheduleRepo *repository.ScheduleRepo, taskRepo *repository.TaskRepo, workerSvc *WorkerService) *SchedulerService {
+func NewSchedulerService(scheduleRepo persistence.ScheduleStore, taskRepo persistence.TaskStore, workerSvc *WorkerService) *SchedulerService {
 	return &SchedulerService{
 		scheduleRepo: scheduleRepo,
 		taskRepo:     taskRepo,
@@ -53,7 +53,7 @@ func NewSchedulerService(scheduleRepo *repository.ScheduleRepo, taskRepo *reposi
 }
 
 // SetWorktreeService sets the worktree service for automatic cleanup.
-func (s *SchedulerService) SetAutomationRepo(repo *repository.AutomationRepo) {
+func (s *SchedulerService) SetAutomationRepo(repo persistence.AutomationStore) {
 	s.automationRepo = repo
 }
 
@@ -182,7 +182,7 @@ func (s *SchedulerService) checkDueTasks(ctx context.Context) {
 				nextRun := sched.ComputeNextRun(now)
 				invocation, dispatch, claimErr := s.automationRepo.ClaimScheduledOccurrence(ctx, sched, now, nextRun)
 				if claimErr != nil {
-					if claimErr != repository.ErrAutomationScheduleChanged {
+					if claimErr != persistence.ErrAutomationScheduleChanged {
 						applog.Infof("[scheduler] automation occurrence claim failed schedule=%s automation=%s: %v", sched.ID, owner.AutomationID, claimErr)
 					}
 					continue

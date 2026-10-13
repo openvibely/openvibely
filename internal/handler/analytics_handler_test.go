@@ -17,6 +17,7 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/database"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/testutil"
 )
@@ -631,7 +632,7 @@ func TestAnalyticsTaskRunActivity(t *testing.T) {
 	tc.Assert(tc.HTTP().Get("/api/analytics/task-run-activity").Execute()).StatusCode(http.StatusBadRequest)
 	rec := tc.HTTP().Get("/api/analytics/task-run-activity?project_id=missing&range=all").Execute()
 	tc.Assert(rec).StatusCode(http.StatusOK)
-	var data repository.TaskRunActivity
+	var data persistence.TaskRunActivity
 	if err := json.Unmarshal(rec.Body.Bytes(), &data); err != nil {
 		t.Fatal(err)
 	}
@@ -749,7 +750,7 @@ func TestGetMostFrequentTasks_StableTieBreakAndFullHistory(t *testing.T) {
 
 	bounded := tc.HTTP().Get("/api/analytics/most-frequent-tasks?project_id=" + project.ID + "&limit=2").Execute()
 	tc.Assert(bounded).StatusCode(http.StatusOK)
-	var boundedRows []repository.TaskFrequency
+	var boundedRows []persistence.TaskFrequency
 	if err := json.Unmarshal(bounded.Body.Bytes(), &boundedRows); err != nil {
 		t.Fatalf("decode bounded response: %v", err)
 	}
@@ -759,7 +760,7 @@ func TestGetMostFrequentTasks_StableTieBreakAndFullHistory(t *testing.T) {
 
 	full := tc.HTTP().Get("/api/analytics/most-frequent-tasks?project_id=" + project.ID + "&limit=0").Execute()
 	tc.Assert(full).StatusCode(http.StatusOK)
-	var fullRows []repository.TaskFrequency
+	var fullRows []persistence.TaskFrequency
 	if err := json.Unmarshal(full.Body.Bytes(), &fullRows); err != nil {
 		t.Fatalf("decode full-history response: %v", err)
 	}
@@ -810,12 +811,12 @@ func TestGetMostFrequentTasks_RealFiveThousandRecordResponseBoundary(t *testing.
 	}
 	rollback = false
 
-	request := func(limit int) ([]repository.TaskFrequency, int) {
+	request := func(limit int) ([]persistence.TaskFrequency, int) {
 		t.Helper()
 		path := fmt.Sprintf("/api/analytics/most-frequent-tasks?project_id=%s&limit=%d", project.ID, limit)
 		rec := tc.HTTP().Get(path).Execute()
 		tc.Assert(rec).StatusCode(http.StatusOK)
-		var rows []repository.TaskFrequency
+		var rows []persistence.TaskFrequency
 		if err := json.Unmarshal(rec.Body.Bytes(), &rows); err != nil {
 			t.Fatalf("decode limit=%d response: %v", limit, err)
 		}

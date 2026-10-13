@@ -3,7 +3,6 @@ package service
 import (
 	"bytes"
 	"context"
-	"database/sql"
 	_ "embed"
 	"encoding/json"
 	"errors"
@@ -15,7 +14,7 @@ import (
 
 	"github.com/openvibely/openvibely/internal/automationobs"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence"
 )
 
 const (
@@ -44,7 +43,7 @@ func maintainedAutomationTemplateYAML(adapterKey string) (string, bool) {
 }
 
 type AutomationDraftService struct {
-	repo         *repository.AutomationRepo
+	repo         persistence.AutomationStore
 	registry     *AutomationAdapterRegistry
 	capabilities *AutomationCapabilitySnapshotBuilder
 }
@@ -59,7 +58,7 @@ type AutomationDraftCreateRequest struct {
 	Candidate    models.AutomationDraftCandidate
 }
 
-func NewAutomationDraftService(repo *repository.AutomationRepo, registry *AutomationAdapterRegistry) *AutomationDraftService {
+func NewAutomationDraftService(repo persistence.AutomationStore, registry *AutomationAdapterRegistry) *AutomationDraftService {
 	if registry == nil {
 		registry = NewAutomationAdapterRegistry()
 	}
@@ -1845,16 +1844,14 @@ func (s *AutomationDraftService) hydratePersistedScheduleContextForNodes(ctx con
 		if scheduleID == "" {
 			continue
 		}
-		var clearContextOnStart bool
-		if err := s.repo.DB().QueryRowContext(ctx, `SELECT s.clear_context_on_start
-			FROM schedules s JOIN tasks t ON t.id = s.task_id
-			WHERE s.id = ? AND t.project_id = ?`, scheduleID, projectID).Scan(&clearContextOnStart); err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
-				continue
-			}
+		schedule, found, err := s.repo.ProjectScheduleResource(ctx, projectID, scheduleID)
+		if err != nil {
 			return candidate, fmt.Errorf("load saved schedule context for node %q: %w", node.Key, err)
 		}
-		node.Config["clear_context_on_start"] = clearContextOnStart
+		if !found {
+			continue
+		}
+		node.Config["clear_context_on_start"] = schedule.ClearContextOnStart
 	}
 	return candidate, nil
 }

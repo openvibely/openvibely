@@ -21,7 +21,7 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/web/static"
 	"github.com/openvibely/openvibely/web/templates/components"
 )
@@ -191,7 +191,7 @@ func TestBrowserFunctional_TaskAndScheduleCardsUsePointerDragWithGrabCursor(t *t
 			DisplayOrder: 0,
 		},
 	}
-	scheduledTasks := []repository.TaskWithSchedule{{
+	scheduledTasks := []persistence.TaskWithSchedule{{
 		Task: models.Task{
 			ID:        "schedule-task-drag-cursor",
 			ProjectID: project.ID,
@@ -812,7 +812,7 @@ window.addEventListener('DOMContentLoaded', function() {
 	if len(gotGroupedExpectedStates) != 2 || gotGroupedExpectedStates[0] != "" {
 		t.Fatalf("grouped expected-state payloads = %v", gotGroupedExpectedStates)
 	}
-	var expectedMoves []repository.ActiveLaneTaskMove
+	var expectedMoves []persistence.ActiveLaneTaskMove
 	if err := json.Unmarshal([]byte(gotGroupedExpectedStates[1]), &expectedMoves); err != nil {
 		t.Fatalf("decode grouped Active expected states: %v", err)
 	}
@@ -829,11 +829,11 @@ func TestBrowserFunctional_ScheduleCardsSupportModifierMultiSelectGroupedPointer
 	}
 	project := models.Project{ID: "project-schedule-multi-drag", Name: "Schedule multi drag"}
 	start := getStartOfWeek(0).AddDate(0, 0, 1)
-	makeScheduled := func(id string, hour int, enabled bool) repository.TaskWithSchedule {
+	makeScheduled := func(id string, hour int, enabled bool) persistence.TaskWithSchedule {
 		runAt := time.Date(start.Year(), start.Month(), start.Day(), hour, 0, 0, 0, time.Local)
-		return repository.TaskWithSchedule{Task: models.Task{ID: "task-" + id, ProjectID: project.ID, Title: id, Category: models.CategoryScheduled, Status: models.StatusPending, CreatedAt: start, UpdatedAt: start}, Schedule: &models.Schedule{ID: id, TaskID: "task-" + id, RunAt: runAt, NextRun: &runAt, RepeatType: models.RepeatOnce, RepeatInterval: 1, Enabled: enabled}}
+		return persistence.TaskWithSchedule{Task: models.Task{ID: "task-" + id, ProjectID: project.ID, Title: id, Category: models.CategoryScheduled, Status: models.StatusPending, CreatedAt: start, UpdatedAt: start}, Schedule: &models.Schedule{ID: id, TaskID: "task-" + id, RunAt: runAt, NextRun: &runAt, RepeatType: models.RepeatOnce, RepeatInterval: 1, Enabled: enabled}}
 	}
-	scheduled := []repository.TaskWithSchedule{makeScheduled("schedule-multi-a", 8, true), makeScheduled("schedule-multi-b", 8, false), makeScheduled("schedule-single-c", 12, true)}
+	scheduled := []persistence.TaskWithSchedule{makeScheduled("schedule-multi-a", 8, true), makeScheduled("schedule-multi-b", 8, false), makeScheduled("schedule-single-c", 12, true)}
 
 	runner := `<script>
 window.addEventListener('DOMContentLoaded', function() {

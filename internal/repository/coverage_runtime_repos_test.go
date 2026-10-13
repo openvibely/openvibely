@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/stretchr/testify/require"
 )
@@ -70,9 +71,11 @@ func TestEmailInboundReceiptRepoWithHandoffIsAtomicAndIdempotent(t *testing.T) {
 	repo := NewEmailInboundReceiptRepo(db)
 
 	persistCalls := 0
-	already, err := repo.WithHandoff(ctx, "inbox@example.com", "message-1", func(exec SQLExecutor) error {
+	already, err := repo.WithHandoff(ctx, "inbox@example.com", "message-1", func(tx persistence.Tx) error {
 		persistCalls++
-		_, err := exec.ExecContext(ctx, `INSERT INTO app_settings (key, value) VALUES (?, ?)`, "email-handoff-test", "created")
+		exec, err := executorFromTx(tx)
+		require.NoError(t, err)
+		_, err = exec.ExecContext(ctx, `INSERT INTO app_settings (key, value) VALUES (?, ?)`, "email-handoff-test", "created")
 		return err
 	})
 	require.NoError(t, err)
@@ -83,7 +86,7 @@ func TestEmailInboundReceiptRepoWithHandoffIsAtomicAndIdempotent(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, exists)
 
-	already, err = repo.WithHandoff(ctx, "inbox@example.com", "message-1", func(exec SQLExecutor) error {
+	already, err = repo.WithHandoff(ctx, "inbox@example.com", "message-1", func(persistence.Tx) error {
 		persistCalls++
 		return nil
 	})
@@ -91,7 +94,7 @@ func TestEmailInboundReceiptRepoWithHandoffIsAtomicAndIdempotent(t *testing.T) {
 	require.True(t, already)
 	require.Equal(t, 1, persistCalls)
 
-	already, err = repo.WithHandoff(ctx, "inbox@example.com", "message-2", func(exec SQLExecutor) error {
+	already, err = repo.WithHandoff(ctx, "inbox@example.com", "message-2", func(persistence.Tx) error {
 		persistCalls++
 		return errors.New("persist failed")
 	})
@@ -222,7 +225,7 @@ func TestAutomationConfirmationReceiptsRoundTripAndMatchInputScope(t *testing.T)
 	require.NotNil(t, pending)
 	require.Equal(t, "Nightly audit", name)
 
-	marker := AutomationConfirmationInputMarker{InputID: planExec.ID, TokenID: receipt.TokenID, ProjectID: project.ID, PrincipalID: receipt.PrincipalID, ThreadID: thread.ID, Method: "command"}
+	marker := persistence.AutomationConfirmationInputMarker{InputID: planExec.ID, TokenID: receipt.TokenID, ProjectID: project.ID, PrincipalID: receipt.PrincipalID, ThreadID: thread.ID, Method: "command"}
 	require.NoError(t, automationRepo.MarkAutomationConfirmationInput(ctx, marker))
 	matched, err := automationRepo.HasAutomationConfirmationInput(ctx, marker)
 	require.NoError(t, err)

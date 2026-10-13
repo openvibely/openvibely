@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"github.com/openvibely/openvibely/internal/persistence"
 )
 
 // Preserve the largest parent Stop revision when an orchestration update
@@ -30,13 +31,13 @@ func lockSwarmParentFollowup(ctx context.Context, db *sql.DB, taskID string, isF
 	if err != nil {
 		return nil, fmt.Errorf("loading swarm parent for follow-up admission: %w", err)
 	}
-	return LockTaskLifecycle(parentID.String), nil
+	return persistence.LockTaskLifecycle(parentID.String), nil
 }
 
 // bumpSwarmParentStopRevision runs in the same transaction as the child
 // execution INSERT. A Stop observed before that INSERT must not cascade into
 // the newly admitted child, even before routing its swarm state completes.
-func bumpSwarmParentStopRevision(ctx context.Context, exec SQLExecutor, taskID string) error {
+func bumpSwarmParentStopRevision(ctx context.Context, exec sqlExecutor, taskID string) error {
 	_, err := exec.ExecContext(ctx, `UPDATE tasks
 		SET swarm_config = json_set(
 			COALESCE(NULLIF(swarm_config, ''), '{}'), '$.stop_revision',

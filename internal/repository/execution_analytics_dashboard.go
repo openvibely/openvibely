@@ -9,29 +9,10 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 )
-
-// AnalyticsDashboardFilter applies one authoritative project and a half-open
-// [DateFrom, DateTo) window to every period-sensitive dashboard query.
-type AnalyticsDashboardFilter struct {
-	ProjectID            string
-	DateFrom             time.Time
-	DateTo               time.Time
-	Compare              bool
-	Limit                int
-	EvidenceOffset       int
-	GroupBy              string
-	View                 string
-	AgentID              string
-	WorkflowID           string
-	WorkType             string
-	EvidenceSkillHandle  string
-	EvidenceSkillScope   string
-	EvidenceSkillAgentID string
-}
 
 var analyticsMetricDefinitions = []models.MetricDefinition{
 	{Key: "technical_completion", Label: "Run success rate", Definition: "Successful runs divided by all finished runs; cancelled runs remain visible in the denominator.", Denominator: "Completed, failed, and cancelled runs in the selected period."},
@@ -64,7 +45,7 @@ var analyticsMetricDefinitions = []models.MetricDefinition{
 	{Key: "workflow_nodes", Label: "Workflow node metrics", Definition: "Node entries, elapsed transition samples, failed activities, and current waiting or blocked positions.", Denominator: "Selected-period transitions and activities for funnel, duration, and failures; bottlenecks are current state."},
 }
 
-func analyticsWindowClause(alias string, filter AnalyticsDashboardFilter) (string, []any) {
+func analyticsWindowClause(alias string, filter persistence.AnalyticsDashboardFilter) (string, []any) {
 	clause := ""
 	args := []any{}
 	if !filter.DateFrom.IsZero() {
@@ -78,7 +59,7 @@ func analyticsWindowClause(alias string, filter AnalyticsDashboardFilter) (strin
 	return clause, args
 }
 
-func analyticsEventWindowClause(alias, column string, filter AnalyticsDashboardFilter) (string, []any) {
+func analyticsEventWindowClause(alias, column string, filter persistence.AnalyticsDashboardFilter) (string, []any) {
 	clause := ""
 	args := []any{}
 	if !filter.DateFrom.IsZero() {
@@ -92,7 +73,7 @@ func analyticsEventWindowClause(alias, column string, filter AnalyticsDashboardF
 	return clause, args
 }
 
-func analyticsTaskWindowClause(alias string, filter AnalyticsDashboardFilter) (string, []any) {
+func analyticsTaskWindowClause(alias string, filter persistence.AnalyticsDashboardFilter) (string, []any) {
 	clause := ""
 	args := []any{}
 	if !filter.DateFrom.IsZero() {
@@ -106,7 +87,7 @@ func analyticsTaskWindowClause(alias string, filter AnalyticsDashboardFilter) (s
 	return clause, args
 }
 
-func analyticsGoalOutcomeWindowClause(alias string, filter AnalyticsDashboardFilter) (string, []any) {
+func analyticsGoalOutcomeWindowClause(alias string, filter persistence.AnalyticsDashboardFilter) (string, []any) {
 	clause := ""
 	args := []any{}
 	expression := "COALESCE(" + alias + ".achieved_at," + alias + ".updated_at)"
@@ -121,7 +102,7 @@ func analyticsGoalOutcomeWindowClause(alias string, filter AnalyticsDashboardFil
 	return clause, args
 }
 
-func analyticsTaskDimensionClause(alias string, filter AnalyticsDashboardFilter) (string, []any) {
+func analyticsTaskDimensionClause(alias string, filter persistence.AnalyticsDashboardFilter) (string, []any) {
 	clause := ""
 	args := []any{}
 	if filter.View == "agents" {
@@ -149,7 +130,7 @@ func analyticsTaskDimensionClause(alias string, filter AnalyticsDashboardFilter)
 	return clause, args
 }
 
-func analyticsSkillOutcomeEvidenceClause(taskAlias string, filter AnalyticsDashboardFilter) (string, []any, bool) {
+func analyticsSkillOutcomeEvidenceClause(taskAlias string, filter persistence.AnalyticsDashboardFilter) (string, []any, bool) {
 	handle := strings.TrimSpace(filter.EvidenceSkillHandle)
 	scope := strings.TrimSpace(filter.EvidenceSkillScope)
 	agentID := strings.TrimSpace(filter.EvidenceSkillAgentID)
@@ -243,7 +224,7 @@ func analyticsDashboardSectionsForView(view string) analyticsDashboardSections {
 	}
 }
 
-func (r *ExecutionRepo) GetAnalyticsDashboard(ctx context.Context, filter AnalyticsDashboardFilter) (models.AnalyticsDashboard, error) {
+func (r *ExecutionRepo) GetAnalyticsDashboard(ctx context.Context, filter persistence.AnalyticsDashboardFilter) (models.AnalyticsDashboard, error) {
 	if strings.TrimSpace(filter.ProjectID) == "" {
 		return models.AnalyticsDashboard{}, fmt.Errorf("analytics project_id is required")
 	}
@@ -382,7 +363,7 @@ func (r *ExecutionRepo) GetAnalyticsDashboard(ctx context.Context, filter Analyt
 	return dashboard, nil
 }
 
-func (r *ExecutionRepo) queryOutcomeTrend(ctx context.Context, filter AnalyticsDashboardFilter) ([]models.OutcomeTrendPoint, error) {
+func (r *ExecutionRepo) queryOutcomeTrend(ctx context.Context, filter persistence.AnalyticsDashboardFilter) ([]models.OutcomeTrendPoint, error) {
 	execWindow, execArgs := analyticsWindowClause("e", filter)
 	goalWindow, goalArgs := analyticsGoalOutcomeWindowClause("g", filter)
 	dimension, dimensionArgs := analyticsTaskDimensionClause("t", filter)
@@ -458,7 +439,7 @@ func (r *ExecutionRepo) queryOutcomeTrend(ctx context.Context, filter AnalyticsD
 	return result, rows.Err()
 }
 
-func (r *ExecutionRepo) queryOutcomeMetrics(ctx context.Context, filter AnalyticsDashboardFilter, includeFollowUpDistribution bool) (models.OutcomeMetrics, []int64, []int, error) {
+func (r *ExecutionRepo) queryOutcomeMetrics(ctx context.Context, filter persistence.AnalyticsDashboardFilter, includeFollowUpDistribution bool) (models.OutcomeMetrics, []int64, []int, error) {
 	out := models.OutcomeMetrics{}
 	window, windowArgs := analyticsWindowClause("e", filter)
 	dimension, dimensionArgs := analyticsTaskDimensionClause("t", filter)
@@ -585,7 +566,7 @@ func (r *ExecutionRepo) queryOutcomeMetrics(ctx context.Context, filter Analytic
 	return out, cycles, followups, nil
 }
 
-func (r *ExecutionRepo) queryOutcomeCosts(ctx context.Context, filter AnalyticsDashboardFilter, out *models.OutcomeMetrics) error {
+func (r *ExecutionRepo) queryOutcomeCosts(ctx context.Context, filter persistence.AnalyticsDashboardFilter, out *models.OutcomeMetrics) error {
 	window, windowArgs := analyticsWindowClause("e", filter)
 	usageWindow, usageWindowArgs := analyticsEventWindowClause("u", "occurred_at", filter)
 	dimension, dimensionArgs := analyticsTaskDimensionClause("t", filter)
@@ -702,7 +683,7 @@ func followUpDistribution(values []int) []models.AnalyticsDistributionPoint {
 	return points
 }
 
-func (r *ExecutionRepo) queryOutcomeFunnel(ctx context.Context, filter AnalyticsDashboardFilter) ([]models.OutcomeFunnelStage, error) {
+func (r *ExecutionRepo) queryOutcomeFunnel(ctx context.Context, filter persistence.AnalyticsDashboardFilter) ([]models.OutcomeFunnelStage, error) {
 	taskWindow, taskArgs := analyticsTaskWindowClause("t", filter)
 	execWindow, execArgs := analyticsWindowClause("e", filter)
 	dimension, dimensionArgs := analyticsTaskDimensionClause("t", filter)
@@ -740,7 +721,7 @@ func (r *ExecutionRepo) queryOutcomeFunnel(ctx context.Context, filter Analytics
 	}, nil
 }
 
-func (r *ExecutionRepo) queryAnalyticsTaskSummary(ctx context.Context, filter AnalyticsDashboardFilter) (*models.AnalyticsTaskSummary, error) {
+func (r *ExecutionRepo) queryAnalyticsTaskSummary(ctx context.Context, filter persistence.AnalyticsDashboardFilter) (*models.AnalyticsTaskSummary, error) {
 	if filter.View == "agents" {
 		filter.WorkType = ""
 	}
@@ -767,7 +748,7 @@ func (r *ExecutionRepo) queryAnalyticsTaskSummary(ctx context.Context, filter An
 	return summary, err
 }
 
-func (r *ExecutionRepo) queryAgentPerformance(ctx context.Context, filter AnalyticsDashboardFilter) ([]models.AgentPerformance, error) {
+func (r *ExecutionRepo) queryAgentPerformance(ctx context.Context, filter persistence.AnalyticsDashboardFilter) ([]models.AgentPerformance, error) {
 	filter.WorkType = ""
 	window, windowArgs := analyticsWindowClause("e", filter)
 	usageWindow, usageWindowArgs := analyticsEventWindowClause("u", "occurred_at", filter)
@@ -877,7 +858,7 @@ func (r *ExecutionRepo) queryAgentPerformance(ctx context.Context, filter Analyt
 	return result, rows.Err()
 }
 
-func skillOutcomePopulation(filter AnalyticsDashboardFilter) (string, []any) {
+func skillOutcomePopulation(filter persistence.AnalyticsDashboardFilter) (string, []any) {
 	eventWindow, eventArgs := analyticsEventWindowClause("s", "created_at", filter)
 	execWindow, execArgs := analyticsWindowClause("e", filter)
 	dimension, dimensionArgs := analyticsTaskDimensionClause("t", filter)
@@ -907,7 +888,7 @@ func skillOutcomePopulation(filter AnalyticsDashboardFilter) (string, []any) {
 	return query, args
 }
 
-func (r *ExecutionRepo) querySkillOutcomeSummary(ctx context.Context, filter AnalyticsDashboardFilter) (models.SkillOutcomeSummary, error) {
+func (r *ExecutionRepo) querySkillOutcomeSummary(ctx context.Context, filter persistence.AnalyticsDashboardFilter) (models.SkillOutcomeSummary, error) {
 	query, args := skillOutcomePopulation(filter)
 	var summary models.SkillOutcomeSummary
 	err := r.db.QueryRowContext(ctx, query+`SELECT
@@ -917,7 +898,7 @@ func (r *ExecutionRepo) querySkillOutcomeSummary(ctx context.Context, filter Ana
 	return summary, err
 }
 
-func (r *ExecutionRepo) querySkillOutcomePerformance(ctx context.Context, filter AnalyticsDashboardFilter) ([]models.SkillOutcomePerformance, error) {
+func (r *ExecutionRepo) querySkillOutcomePerformance(ctx context.Context, filter persistence.AnalyticsDashboardFilter) ([]models.SkillOutcomePerformance, error) {
 	query, args := skillOutcomePopulation(filter)
 	query += `SELECT s.skill_handle,s.skill_scope,COUNT(*),SUM(s.completed),SUM(s.terminal),SUM(s.followed),
 		SUM(CASE WHEN g.status='achieved' THEN 1 ELSE 0 END),COUNT(g.task_id)
@@ -942,7 +923,7 @@ func (r *ExecutionRepo) querySkillOutcomePerformance(ctx context.Context, filter
 	return result, rows.Err()
 }
 
-func (r *ExecutionRepo) queryAgentSkillOutcomePerformance(ctx context.Context, filter AnalyticsDashboardFilter) ([]models.AgentSkillOutcomePerformance, error) {
+func (r *ExecutionRepo) queryAgentSkillOutcomePerformance(ctx context.Context, filter persistence.AnalyticsDashboardFilter) ([]models.AgentSkillOutcomePerformance, error) {
 	eventWindow, eventArgs := analyticsEventWindowClause("s", "created_at", filter)
 	execWindow, execArgs := analyticsWindowClause("e", filter)
 	dimension, dimensionArgs := analyticsTaskDimensionClause("t", filter)
@@ -993,7 +974,7 @@ func (r *ExecutionRepo) queryAgentSkillOutcomePerformance(ctx context.Context, f
 	return result, rows.Err()
 }
 
-func (r *ExecutionRepo) queryWorkflowPerformance(ctx context.Context, filter AnalyticsDashboardFilter) ([]models.WorkflowPerformance, error) {
+func (r *ExecutionRepo) queryWorkflowPerformance(ctx context.Context, filter persistence.AnalyticsDashboardFilter) ([]models.WorkflowPerformance, error) {
 	invocationWindow := ""
 	args := []any{filter.ProjectID}
 	if !filter.DateFrom.IsZero() {
@@ -1039,7 +1020,7 @@ func (r *ExecutionRepo) queryWorkflowPerformance(ctx context.Context, filter Ana
 	return result, rows.Err()
 }
 
-func (r *ExecutionRepo) queryEvidenceTotal(ctx context.Context, filter AnalyticsDashboardFilter) (int, error) {
+func (r *ExecutionRepo) queryEvidenceTotal(ctx context.Context, filter persistence.AnalyticsDashboardFilter) (int, error) {
 	window, windowArgs := analyticsWindowClause("e", filter)
 	taskWindow, taskWindowArgs := analyticsTaskWindowClause("t", filter)
 	goalWindow, goalWindowArgs := analyticsGoalOutcomeWindowClause("g", filter)
@@ -1074,7 +1055,7 @@ func (r *ExecutionRepo) queryEvidenceTotal(ctx context.Context, filter Analytics
 	return total, nil
 }
 
-func (r *ExecutionRepo) queryRecentOutcomes(ctx context.Context, filter AnalyticsDashboardFilter) ([]models.EvidenceTaskRow, error) {
+func (r *ExecutionRepo) queryRecentOutcomes(ctx context.Context, filter persistence.AnalyticsDashboardFilter) ([]models.EvidenceTaskRow, error) {
 	window, windowArgs := analyticsWindowClause("e", filter)
 	taskWindow, taskWindowArgs := analyticsTaskWindowClause("t", filter)
 	goalWindow, goalWindowArgs := analyticsGoalOutcomeWindowClause("g", filter)
@@ -1218,7 +1199,7 @@ func (r *ExecutionRepo) queryRecentOutcomes(ctx context.Context, filter Analytic
 	return result, rows.Err()
 }
 
-func (r *ExecutionRepo) queryModelCategoryPerformance(ctx context.Context, filter AnalyticsDashboardFilter) ([]models.ModelCategoryPerformance, error) {
+func (r *ExecutionRepo) queryModelCategoryPerformance(ctx context.Context, filter persistence.AnalyticsDashboardFilter) ([]models.ModelCategoryPerformance, error) {
 	window, windowArgs := analyticsWindowClause("e", filter)
 	dimension, dimensionArgs := analyticsTaskDimensionClause("t", filter)
 	query := `SELECT COALESCE(e.agent_config_id,''),COALESCE(ac.name || ' (' || ac.model || ')',e.agent_config_id,'Unknown'),COALESCE(t.category,''),
@@ -1249,7 +1230,7 @@ func (r *ExecutionRepo) queryModelCategoryPerformance(ctx context.Context, filte
 	return result, rows.Err()
 }
 
-func (r *ExecutionRepo) queryModelPerformance(ctx context.Context, filter AnalyticsDashboardFilter, combined ...*[]models.ModelEffortTrend) ([]models.ModelPerformance, error) {
+func (r *ExecutionRepo) queryModelPerformance(ctx context.Context, filter persistence.AnalyticsDashboardFilter, combined ...*[]models.ModelEffortTrend) ([]models.ModelPerformance, error) {
 	// Model evaluation includes scheduled and interactive tasks together, even
 	// when an older saved URL or API client still sends a work-type filter.
 	filter.WorkType = ""
@@ -1395,7 +1376,7 @@ func (r *ExecutionRepo) queryModelPerformance(ctx context.Context, filter Analyt
 	return result, rows.Err()
 }
 
-func (r *ExecutionRepo) queryAgentAnalyticsDetail(ctx context.Context, filter AnalyticsDashboardFilter, skills []models.SkillOutcomePerformance, recent []models.EvidenceTaskRow) (*models.AgentAnalyticsDetail, error) {
+func (r *ExecutionRepo) queryAgentAnalyticsDetail(ctx context.Context, filter persistence.AnalyticsDashboardFilter, skills []models.SkillOutcomePerformance, recent []models.EvidenceTaskRow) (*models.AgentAnalyticsDetail, error) {
 	filter.WorkType = ""
 	detail := &models.AgentAnalyticsDetail{AgentID: filter.AgentID, OutcomeTrend: []models.AnalyticsTrendPoint{}, Categories: []models.AnalyticsCategoryPerformance{}, ModelMix: []models.AnalyticsModelMix{}, Failures: []models.AnalyticsFailurePattern{}, Skills: skills, RecentTasks: recent}
 	window, windowArgs := analyticsWindowClause("e", filter)
@@ -1497,7 +1478,7 @@ func (r *ExecutionRepo) queryAgentAnalyticsDetail(ctx context.Context, filter An
 	return detail, rows.Err()
 }
 
-func (r *ExecutionRepo) queryWorkflowAnalyticsDetail(ctx context.Context, filter AnalyticsDashboardFilter) (*models.WorkflowAnalyticsDetail, error) {
+func (r *ExecutionRepo) queryWorkflowAnalyticsDetail(ctx context.Context, filter persistence.AnalyticsDashboardFilter) (*models.WorkflowAnalyticsDetail, error) {
 	detail := &models.WorkflowAnalyticsDetail{WorkflowID: filter.WorkflowID, Funnel: []models.AutomationFunnelPoint{}, Durations: []models.AutomationDurationPoint{}, Failures: []models.AutomationFailureSummary{}, Bottlenecks: []models.AutomationBottleneckSummary{}}
 	var versionID string
 	if err := r.db.QueryRowContext(ctx, `SELECT COALESCE(published_version_id,'') FROM automations WHERE project_id=? AND id=? AND lifecycle_state<>'archived'`, filter.ProjectID, filter.WorkflowID).Scan(&versionID); err != nil {
@@ -1601,7 +1582,7 @@ func (r *ExecutionRepo) queryWorkflowAnalyticsDetail(ctx context.Context, filter
 	return detail, rows.Err()
 }
 
-func buildAnalyticsInsights(current models.OutcomeMetrics, previous *models.OutcomeMetrics, workflows []models.WorkflowPerformance, filter AnalyticsDashboardFilter) []models.AnalyticsInsight {
+func buildAnalyticsInsights(current models.OutcomeMetrics, previous *models.OutcomeMetrics, workflows []models.WorkflowPerformance, filter persistence.AnalyticsDashboardFilter) []models.AnalyticsInsight {
 	insights := []models.AnalyticsInsight{}
 	if previous != nil {
 		window := filter.DateFrom.Format("2006-01-02") + " to " + filter.DateTo.Format("2006-01-02")

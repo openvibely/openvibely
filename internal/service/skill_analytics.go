@@ -10,7 +10,7 @@ import (
 	"github.com/openvibely/openvibely/internal/lifecycle"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence"
 )
 
 type skillAnalyticsContext struct {
@@ -23,13 +23,13 @@ type skillAnalyticsContext struct {
 	Surface     string
 }
 
-func (w *WorkerService) SetSkillAnalyticsRepo(repo *repository.SkillAnalyticsRepo) {
+func (w *WorkerService) SetSkillAnalyticsRepo(repo persistence.SkillAnalyticsStore) {
 	if w != nil {
 		w.skillAnalyticsRepo = repo
 	}
 }
 
-func (s *LLMService) SetSkillAnalyticsRepo(repo *repository.SkillAnalyticsRepo) {
+func (s *LLMService) SetSkillAnalyticsRepo(repo persistence.SkillAnalyticsStore) {
 	if s != nil {
 		s.skillAnalyticsRepo = repo
 	}
@@ -58,7 +58,7 @@ func skillScopeFromEntry(entry agentskills.Entry) string {
 	return models.SkillScopeGlobal
 }
 
-func recordSkillAnalyticsEvent(ctx context.Context, repo *repository.SkillAnalyticsRepo, event models.SkillAnalyticsEvent) {
+func recordSkillAnalyticsEvent(ctx context.Context, repo persistence.SkillAnalyticsStore, event models.SkillAnalyticsEvent) {
 	if repo == nil || strings.TrimSpace(event.SkillHandle) == "" || strings.TrimSpace(event.EventType) == "" {
 		return
 	}
@@ -137,7 +137,7 @@ func (w *WorkerService) instrumentSkillRuntimeTools(base *llmcontracts.RuntimeTo
 	return instrumentSkillRuntimeTools(w.skillAnalyticsRepo, base, catalog, meta)
 }
 
-func instrumentSkillRuntimeTools(repo *repository.SkillAnalyticsRepo, base *llmcontracts.RuntimeTools, catalog *agentskills.Catalog, meta skillAnalyticsContext) *llmcontracts.RuntimeTools {
+func instrumentSkillRuntimeTools(repo persistence.SkillAnalyticsStore, base *llmcontracts.RuntimeTools, catalog *agentskills.Catalog, meta skillAnalyticsContext) *llmcontracts.RuntimeTools {
 	if repo == nil || base == nil || base.Executor == nil || catalog == nil {
 		return base
 	}
@@ -187,7 +187,7 @@ func skillEntryFromViewInput(catalog *agentskills.Catalog, input json.RawMessage
 	return entry, strings.TrimSpace(params.FilePath) == "", true
 }
 
-func instrumentSkillEditRuntimeTools(repo *repository.SkillAnalyticsRepo, base *llmcontracts.RuntimeTools, meta skillAnalyticsContext) *llmcontracts.RuntimeTools {
+func instrumentSkillEditRuntimeTools(repo persistence.SkillAnalyticsStore, base *llmcontracts.RuntimeTools, meta skillAnalyticsContext) *llmcontracts.RuntimeTools {
 	if repo == nil || base == nil || base.Executor == nil {
 		return base
 	}

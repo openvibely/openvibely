@@ -10,9 +10,8 @@ import (
 	"github.com/openvibely/openvibely/internal/automationobs"
 	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 )
-
-var ErrAutomationDispatchInFlight = errors.New("automation has in-flight dispatch work")
 
 func (r *AutomationRepo) ResumeAutomation(ctx context.Context, projectID, automationID string) ([]models.Task, error) {
 	conn, finishImmediate, err := beginImmediateConn(ctx, r.db)
@@ -453,7 +452,7 @@ func (r *AutomationRepo) deleteAutomations(ctx context.Context, projectID string
 		return nil, nil, err
 	}
 	if inFlight > 0 {
-		return nil, nil, ErrAutomationDispatchInFlight
+		return nil, nil, persistence.ErrAutomationDispatchInFlight
 	}
 
 	taskRows, err := conn.QueryContext(ctx, `SELECT DISTINCT schedule.task_id

@@ -257,7 +257,7 @@ func TestCallDirectUsesResponsesAPIWithAttachmentsAndUsage(t *testing.T) {
 	openaiclient.OpenAIAPIBaseURL = srv.URL + "/v1/"
 	defer func() { openaiclient.OpenAIAPIBaseURL = original }()
 
-	adapter := New(nil, nil, nil)
+	adapter := New(nil, nil, nil, nil)
 	text, usage, err := adapter.CallDirect(context.Background(), "Summarize", []models.Attachment{{FileName: "notes.txt", FilePath: attachmentPath, MediaType: "text/plain"}}, models.LLMConfig{Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodAPIKey, Model: "gpt-test", APIKey: "test-key", ReasoningEffort: "high"}, "", "project instructions", false, false, false)
 	if err != nil {
 		t.Fatalf("CallDirect: %v", err)
@@ -303,7 +303,7 @@ func TestCallCompletionsStreamingTaskWithRuntimeActionsOmitsToolNote(t *testing.
 			Name: "create_task", Description: "create a task", Parameters: json.RawMessage(`{"type":"object"}`), Access: llmcontracts.RuntimeToolAccessWrite,
 		}},
 	})
-	adapter := New(nil, nil, nil)
+	adapter := New(nil, nil, nil, nil)
 	_, _, _, err := adapter.CallCompletionsStreaming(ctx, "Investigate the issue", nil, models.LLMConfig{
 		Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodAPIKey, Model: "gpt-6-sol", APIKey: "test-key", Temperature: 0.7,
 	}, "", ".", "", nil)
@@ -461,7 +461,7 @@ func TestReasoningEffortUsesModelDefaults(t *testing.T) {
 }
 
 func TestResponsesTransportStateScopedByConversation(t *testing.T) {
-	adapter := New(nil, nil, nil)
+	adapter := New(nil, nil, nil, nil)
 	agent := models.LLMConfig{ID: "cfg-1", Provider: models.ProviderOpenAI, Model: "gpt-5.6-sol"}
 	first, releaseFirst := adapter.acquireResponsesTransportState(agent, "chat:one")
 	second, releaseSecond := adapter.acquireResponsesTransportState(agent, "chat:one")
@@ -484,7 +484,7 @@ func TestResponsesTransportStateScopedByConversation(t *testing.T) {
 }
 
 func TestResponsesTransportStateCacheEvictsOldestEntry(t *testing.T) {
-	adapter := New(nil, nil, nil)
+	adapter := New(nil, nil, nil, nil)
 	agent := models.LLMConfig{ID: "cfg-1", Provider: models.ProviderOpenAI, Model: "gpt-5.6-sol"}
 	oldest, releaseOldest := adapter.acquireResponsesTransportState(agent, "chat:oldest")
 	releaseOldest()
@@ -512,7 +512,7 @@ func TestResponsesTransportStateCacheEvictsOldestEntry(t *testing.T) {
 }
 
 func TestResponsesTransportStateCacheDoesNotEvictLeasedEntry(t *testing.T) {
-	adapter := New(nil, nil, nil)
+	adapter := New(nil, nil, nil, nil)
 	agent := models.LLMConfig{ID: "cfg-1", Provider: models.ProviderOpenAI, Model: "gpt-5.6-sol"}
 	active, releaseActive := adapter.acquireResponsesTransportState(agent, "chat:active")
 	for i := 0; i < responsesTransportMax; i++ {
@@ -528,7 +528,7 @@ func TestResponsesTransportStateCacheDoesNotEvictLeasedEntry(t *testing.T) {
 }
 
 func TestResponsesTransportStateCacheExpiresIdleEntriesOnHit(t *testing.T) {
-	adapter := New(nil, nil, nil)
+	adapter := New(nil, nil, nil, nil)
 	agent := models.LLMConfig{ID: "cfg-1", Provider: models.ProviderOpenAI, Model: "gpt-5.6-sol"}
 	stale, releaseStale := adapter.acquireResponsesTransportState(agent, "chat:stale")
 	releaseStale()
@@ -551,7 +551,7 @@ func TestResponsesTransportStateCacheExpiresIdleEntriesOnHit(t *testing.T) {
 }
 
 func TestResponsesTransportStateChangesWithCredentials(t *testing.T) {
-	adapter := New(nil, nil, nil)
+	adapter := New(nil, nil, nil, nil)
 	agent := models.LLMConfig{
 		ID: "cfg-1", Provider: models.ProviderOpenAI, Model: "gpt-5.6-sol",
 		AuthMethod: models.AuthMethodAPIKey, APIKey: "first-key",
@@ -609,7 +609,7 @@ func TestPrivateResponsesTransportClosesWhenReleased(t *testing.T) {
 	openaiclient.OpenAIAPIBaseURL = srv.URL + "/v1/"
 	defer func() { openaiclient.OpenAIAPIBaseURL = original }()
 
-	adapter := New(nil, nil, nil)
+	adapter := New(nil, nil, nil, nil)
 	agent := models.LLMConfig{
 		ID: "cfg-1", Provider: models.ProviderOpenAI, Model: "gpt-5.6-sol",
 		AuthMethod: models.AuthMethodAPIKey, APIKey: "test-key",
@@ -663,7 +663,7 @@ func TestLeasedResponsesTransportSurvivesConcurrentCachePressure(t *testing.T) {
 	openaiclient.OpenAIAPIBaseURL = srv.URL + "/v1/"
 	defer func() { openaiclient.OpenAIAPIBaseURL = original }()
 
-	adapter := New(nil, nil, nil)
+	adapter := New(nil, nil, nil, nil)
 	agent := models.LLMConfig{
 		ID: "cfg-1", Provider: models.ProviderOpenAI, Model: "gpt-5.6-sol",
 		AuthMethod: models.AuthMethodAPIKey, APIKey: "test-key",
@@ -735,7 +735,7 @@ func TestInitialTaskAndFollowupShareTransportScope(t *testing.T) {
 		t.Fatalf("create execution: %v", err)
 	}
 
-	adapter := New(nil, execRepo, nil)
+	adapter := New(nil, execRepo, nil, nil)
 	initialScope := adapter.taskTransportScope(ctx, execution.ID)
 	followupScope := "task:" + task.ID
 	if initialScope != "task:"+task.ID || followupScope != initialScope {
@@ -830,7 +830,7 @@ func TestCallDirectLifecycleHookSendsAgentPromptWithoutCodingFraming(t *testing.
 	openaiclient.OpenAIAPIBaseURL = srv.URL + "/v1/"
 	defer func() { openaiclient.OpenAIAPIBaseURL = original }()
 
-	adapter := New(nil, nil, nil)
+	adapter := New(nil, nil, nil, nil)
 	_, _, err := adapter.CallDirect(context.Background(), "HOOK PROMPT", nil, models.LLMConfig{
 		Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodAPIKey, Model: "gpt-test", APIKey: "test-key",
 	}, ".", "SENTINEL_AGENT_PROMPT", true, false, true)
@@ -865,7 +865,7 @@ func TestCallDirectNonLifecycleKeepsCodingFraming(t *testing.T) {
 	openaiclient.OpenAIAPIBaseURL = srv.URL + "/v1/"
 	defer func() { openaiclient.OpenAIAPIBaseURL = original }()
 
-	adapter := New(nil, nil, nil)
+	adapter := New(nil, nil, nil, nil)
 	_, _, err := adapter.CallDirect(context.Background(), "DO WORK", nil, models.LLMConfig{
 		Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodAPIKey, Model: "gpt-test", APIKey: "test-key",
 	}, ".", "SENTINEL_AGENT_PROMPT", true, false, false)
@@ -898,7 +898,7 @@ func TestCallDirectRawPromptOmitsInteractiveAgentFraming(t *testing.T) {
 	openaiclient.OpenAIAPIBaseURL = srv.URL + "/v1/"
 	defer func() { openaiclient.OpenAIAPIBaseURL = original }()
 
-	adapter := New(nil, nil, nil)
+	adapter := New(nil, nil, nil, nil)
 	_, _, err := adapter.CallDirect(context.Background(), "COMMIT SUMMARY PROMPT", nil, models.LLMConfig{
 		Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodAPIKey, Model: "gpt-test", APIKey: "test-key",
 	}, ".", "SENTINEL_PROJECT_INSTRUCTIONS", true, true, false)
@@ -940,7 +940,7 @@ func TestCallStreamingUsesAgenticResponsesCallbacksAndUsage(t *testing.T) {
 	openaiclient.OpenAIAPIBaseURL = srv.URL + "/v1/"
 	defer func() { openaiclient.OpenAIAPIBaseURL = oldBaseURL }()
 
-	adapter := New(nil, nil, nil)
+	adapter := New(nil, nil, nil, nil)
 	out, textOnly, usage, err := adapter.CallStreaming(context.Background(), "Finish this", nil, models.LLMConfig{
 		Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodAPIKey, Model: "gpt-test", APIKey: "test-key", ReasoningEffort: "medium",
 	}, "exec-agentic-stream", "project-1", "", "project instructions", nil)
@@ -987,7 +987,7 @@ func TestCallChatStreamingUsesHistoryRuntimeAndDisableToolsPolicy(t *testing.T) 
 
 	ctx := llmcontracts.WithRuntimeTools(context.Background(), &llmcontracts.RuntimeTools{Definitions: []llmcontracts.RuntimeToolDefinition{{Name: "list_tasks", Description: "list", Access: llmcontracts.RuntimeToolAccessRead}}})
 	ctx = llmcontracts.WithNativeCompactionStateJSON(ctx, `[{"type":"compaction","encrypted_content":"opaque-checkpoint"}]`)
-	adapter := New(nil, nil, nil)
+	adapter := New(nil, nil, nil, nil)
 	out, usage, err := adapter.CallChatStreaming(ctx, "What changed?", nil, models.LLMConfig{
 		Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodAPIKey, Model: "gpt-test", APIKey: "test-key",
 	}, "exec-chat-stream", "project-1", "transport-scope", []models.Execution{{PromptSent: "previous prompt", Output: "previous output", Status: models.ExecCompleted}}, "project chat context", false, models.ChatModePlan, "", nil)
@@ -1035,7 +1035,7 @@ func TestCallCompletionsChatStreamingUsesHistoryRuntimeAndUsage(t *testing.T) {
 	ctx := llmcontracts.WithRuntimeTools(context.Background(), &llmcontracts.RuntimeTools{
 		Definitions: []llmcontracts.RuntimeToolDefinition{{Name: "list_tasks", Description: "List tasks", Parameters: json.RawMessage(`{"type":"object"}`)}},
 	})
-	adapter := New(nil, nil, nil)
+	adapter := New(nil, nil, nil, nil)
 	output, usage, err := adapter.CallCompletionsChatStreaming(ctx, "What changed?", nil, models.LLMConfig{
 		Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodAPIKey, Model: "gpt-6-luna", APIKey: "test-key", Temperature: 0.7,
 	}, "exec-completions-chat", []models.Execution{{PromptSent: "Earlier prompt", Output: "Earlier answer", Status: models.ExecCompleted}}, "CHAT_CONTEXT_SENTINEL", true, models.ChatModeOrchestrate, "/repo/worktree", nil)
@@ -1079,7 +1079,7 @@ func TestCompactionActivityInTaskAndChatResponses(t *testing.T) {
 	agent := models.LLMConfig{Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodAPIKey, Model: "gpt-5.3-codex", APIKey: "fixture", ForceNativeCompaction: true}
 	for _, chat := range []bool{false, true} {
 		t.Run(fmt.Sprint(chat), func(t *testing.T) {
-			adapter := New(nil, nil, nil)
+			adapter := New(nil, nil, nil, nil)
 			ctx := llmcontracts.WithNativeCompactionStateJSON(context.Background(), `[{"type":"message","role":"user","content":"previous work"}]`)
 			var output string
 			var err error

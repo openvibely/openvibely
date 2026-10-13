@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence"
 )
 
 // taskThreadExecutionFetchBatchSize keeps zero-limit runtime reads bounded.
@@ -15,7 +15,7 @@ const taskThreadExecutionFetchBatchSize = 20
 // caller's transcript budget has been reached.
 func LoadBoundedTaskThreadExecutions(
 	ctx context.Context,
-	execRepo *repository.ExecutionRepo,
+	execRepo persistence.ExecutionStore,
 	task *models.Task,
 	total, offset int,
 	budgetExceeded func([]models.Execution) bool,

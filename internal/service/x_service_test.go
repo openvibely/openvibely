@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/stretchr/testify/require"
@@ -516,7 +517,7 @@ func TestXPollResumesLargeBacklogAcrossRestartAndFetchesNewMentions(t *testing.T
 	for id := 1; id <= 13; id++ {
 		claim, err := svc.receiptRepo.Claim(ctx, fmt.Sprintf("%d", id), project.ID, svc.now(), xReceiptLease)
 		require.NoError(t, err)
-		require.Equal(t, repository.XReceiptCompleted, claim.Result)
+		require.Equal(t, persistence.XReceiptCompleted, claim.Result)
 	}
 }
 
@@ -810,7 +811,7 @@ func TestXAuthorizedMentionTextPreservesHandlesAndPunctuation(t *testing.T) {
 			require.Equal(t, models.TaskOriginX, tasks[0].CreatedVia)
 			receipt, err := svc.receiptRepo.Claim(ctx, api.mentions.Meta.NewestID, project.ID, svc.now(), xReceiptLease)
 			require.NoError(t, err)
-			require.Equal(t, repository.XReceiptCompleted, receipt.Result)
+			require.Equal(t, persistence.XReceiptCompleted, receipt.Result)
 
 			// A provider redelivery observes the completed durable receipt and does
 			// not create a second task.
@@ -905,7 +906,7 @@ func TestXPollActiveReceiptLeaseDoesNotAdvanceCursorOrDegradeReplacementHealth(t
 	api.mentions.Includes.Users = []XUser{{ID: "author", Username: "alice"}}
 	claim, err := old.receiptRepo.Claim(ctx, "10", project.ID, old.now(), xReceiptLease)
 	require.NoError(t, err)
-	require.Equal(t, repository.XReceiptClaimed, claim.Result)
+	require.Equal(t, persistence.XReceiptClaimed, claim.Result)
 
 	replacement := NewXService(old.credentials, settings, old.projectRepo, old.llmConfigRepo, old.taskRepo, old.execRepo, old.scheduleRepo, old.taskSvc)
 	replacement.SetRepositories(auth, selections, old.taskContextRepo, old.receiptRepo, old.threadInputRepo)

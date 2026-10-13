@@ -18,7 +18,7 @@ import (
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	llmoutput "github.com/openvibely/openvibely/internal/llm/output"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/internal/update"
 	"github.com/openvibely/openvibely/internal/util"
@@ -168,7 +168,7 @@ func (h *Handler) prepareAutomationTaskFollowup(ctx context.Context, params *str
 		params.Task = task
 	}
 	if params.AutomationContext != nil {
-		if repository.IsAutomationTaskCreatedVia(params.Task.CreatedVia) {
+		if persistence.IsAutomationTaskCreatedVia(params.Task.CreatedVia) {
 			params.AutomationContext.OriginTask = true
 		}
 		return nil
@@ -187,7 +187,7 @@ func (h *Handler) prepareAutomationTaskFollowup(ctx context.Context, params *str
 			return fmt.Errorf("loading task-thread Automation task context: %w", err)
 		}
 	}
-	if repository.IsAutomationTaskCreatedVia(params.Task.CreatedVia) {
+	if persistence.IsAutomationTaskCreatedVia(params.Task.CreatedVia) {
 		automationContext.ProjectID = params.Task.ProjectID
 		automationContext.OriginTask = true
 	}
@@ -829,15 +829,15 @@ modelLoop:
 		h.finalizeStreamingTurn(params, output)
 		return
 	}
-	if completionOutcome == repository.CompleteSuccessCompleted {
+	if completionOutcome == persistence.CompleteSuccessCompleted {
 		h.recordStreamingUsage(ctx, params, result, string(models.ExecCompleted), "", durationMs)
 	}
-	if completionOutcome == repository.CompleteSuccessAlreadyTerminal {
+	if completionOutcome == persistence.CompleteSuccessAlreadyTerminal {
 		finalizeLifecycle(nil, result.ChatContext)
 		h.finalizeStreamingTurn(params, output)
 		return
 	}
-	if completionOutcome == repository.CompleteSuccessPendingSteering {
+	if completionOutcome == persistence.CompleteSuccessPendingSteering {
 		prepared, steeringErr := h.preparePendingTextSteeringInputsFromPersistedReplay(ctx, &params, output)
 		if steeringErr != nil {
 			finalizeLifecycle(steeringErr, result.ChatContext)
@@ -862,12 +862,12 @@ modelLoop:
 			h.finalizeStreamingTurn(params, output)
 			return
 		}
-		if completionOutcome == repository.CompleteSuccessAlreadyTerminal {
+		if completionOutcome == persistence.CompleteSuccessAlreadyTerminal {
 			finalizeLifecycle(nil, result.ChatContext)
 			h.finalizeStreamingTurn(params, output)
 			return
 		}
-		if completionOutcome != repository.CompleteSuccessCompleted {
+		if completionOutcome != persistence.CompleteSuccessCompleted {
 			completionErr := errors.New("failed to complete response after steering check")
 			finalizeLifecycle(completionErr, result.ChatContext)
 			h.completeWithFailure(ctx, params.ExecID, params.TaskID, completionErr.Error(), durationMs, params.TelegramInitialAckMessageID, params.ChannelReply)
@@ -1616,7 +1616,7 @@ func (h *Handler) startQueuedChatInput(ctx context.Context, input models.ThreadI
 		}
 	}
 	if err := h.threadInputRepo.ClaimQueuedForChatExecution(ctx, input.ID, task, exec, slackContext, emailContext, discordContext); err != nil {
-		if err != repository.ErrInputNotPending {
+		if err != persistence.ErrInputNotPending {
 			applog.Infof("[handler] startQueuedChatInput input=%s claim error: %v", input.ID, err)
 		}
 		return
@@ -1773,7 +1773,7 @@ func (h *Handler) cancelUnstartableQueuedInput(ctx context.Context, input models
 	if h.threadInputRepo == nil || input.ID == "" {
 		return
 	}
-	if _, err := h.threadInputRepo.CancelPending(ctx, input.ID); err != nil && !errors.Is(err, repository.ErrInputNotPending) {
+	if _, err := h.threadInputRepo.CancelPending(ctx, input.ID); err != nil && !errors.Is(err, persistence.ErrInputNotPending) {
 		applog.Infof("[handler] cancelUnstartableQueuedInput input=%s error: %v", input.ID, err)
 	}
 }
@@ -2054,11 +2054,11 @@ func (h *Handler) startQueuedTaskThreadInput(ctx context.Context, input models.T
 			IsFollowup:    true,
 		}
 		err = h.threadInputRepo.ClaimQueuedForTaskExecutionWithModel(ctx, input.ID, exec, task.AgentID, agent)
-		if errors.Is(err, repository.ErrTaskModelChanged) {
+		if errors.Is(err, persistence.ErrTaskModelChanged) {
 			continue
 		}
 		if err != nil {
-			if err != repository.ErrInputNotPending {
+			if err != persistence.ErrInputNotPending {
 				applog.Infof("[handler] startQueuedTaskThreadInput input=%s claim error: %v", input.ID, err)
 			}
 			return err
@@ -2179,12 +2179,12 @@ func (h *Handler) deregisterTaskCancellation(taskID string, registrationID uint6
 // Also moves Active tasks to the Completed category so they appear in the right column.
 // Logs errors but does not fail since this runs in a background goroutine.
 // Captures git diff if workDir is provided.
-func (h *Handler) completeWithSuccess(ctx context.Context, execID, taskID, output, workDir string, tokensUsed int, durationMs int64, completionOptions ...interface{}) repository.CompleteSuccessOutcome {
+func (h *Handler) completeWithSuccess(ctx context.Context, execID, taskID, output, workDir string, tokensUsed int, durationMs int64, completionOptions ...interface{}) persistence.CompleteSuccessOutcome {
 	outcome, err := h.completeWithSuccessWithPRReconciliation(ctx, execID, taskID, output, workDir, tokensUsed, durationMs, false, completionOptions...)
 	if err != nil {
 		applog.Infof("[handler] completeWithSuccess exec=%s completion policy failed: %v", execID, err)
 		h.completeWithFinalizationError(ctx, execID, taskID, err, output, tokensUsed, durationMs, completionOptions...)
-		return repository.CompleteSuccessAlreadyTerminal
+		return persistence.CompleteSuccessAlreadyTerminal
 	}
 	return outcome
 }
@@ -2201,16 +2201,16 @@ func (h *Handler) completeWithFinalizationError(ctx context.Context, execID, tas
 	return models.ExecFailed
 }
 
-func (h *Handler) completeWithSuccessWithPRReconciliation(ctx context.Context, execID, taskID, output, workDir string, tokensUsed int, durationMs int64, republishOpenPR bool, completionOptions ...interface{}) (repository.CompleteSuccessOutcome, error) {
+func (h *Handler) completeWithSuccessWithPRReconciliation(ctx context.Context, execID, taskID, output, workDir string, tokensUsed int, durationMs int64, republishOpenPR bool, completionOptions ...interface{}) (persistence.CompleteSuccessOutcome, error) {
 	telegramMessageID, channelReply := parseCompletionOptions(completionOptions...)
 	var trustedPublication *startupSyncPublication
 	// Keep the execution running until its diff and merge state are ready. Both
 	// stream events and database catch-up can trigger the client's final refresh.
 	readiness, err := h.execRepo.SuccessCompletionReadiness(ctx, execID)
 	if err != nil {
-		return repository.CompleteSuccessAlreadyTerminal, err
+		return persistence.CompleteSuccessAlreadyTerminal, err
 	}
-	if readiness != repository.CompleteSuccessCompleted {
+	if readiness != persistence.CompleteSuccessCompleted {
 		return readiness, nil
 	}
 	if republishOpenPR {
@@ -2226,7 +2226,7 @@ func (h *Handler) completeWithSuccessWithPRReconciliation(ctx context.Context, e
 		applog.Infof("[handler] completeWithSuccess task=%s error getting task: %v", taskID, err)
 	}
 	if blocked, reason := h.blockGitHubSDLCSuccessWithoutPullRequest(ctx, task, trustedPublication); blocked {
-		return repository.CompleteSuccessCompleted, errors.New(reason)
+		return persistence.CompleteSuccessCompleted, errors.New(reason)
 	}
 
 	// Capture changes and clear stale merge state before completion becomes visible.
@@ -2250,16 +2250,16 @@ func (h *Handler) completeWithSuccessWithPRReconciliation(ctx context.Context, e
 		}
 	}
 
-	outcome, err := h.taskRepo.CompleteExecutionSuccess(ctx, h.execRepo, execID, output, tokensUsed, durationMs)
+	outcome, err := h.taskRepo.CompleteExecutionSuccess(ctx, execID, output, tokensUsed, durationMs)
 	if err != nil {
 		applog.Infof("[handler] completeWithSuccess exec=%s error completing execution: %v", execID, err)
-		return repository.CompleteSuccessAlreadyTerminal, err
+		return persistence.CompleteSuccessAlreadyTerminal, err
 	}
-	if outcome == repository.CompleteSuccessPendingSteering {
+	if outcome == persistence.CompleteSuccessPendingSteering {
 		applog.Infof("[handler] completeWithSuccess exec=%s deferred completion because pending steering exists", execID)
 		return outcome, nil
 	}
-	if outcome == repository.CompleteSuccessAlreadyTerminal {
+	if outcome == persistence.CompleteSuccessAlreadyTerminal {
 		applog.Infof("[handler] completeWithSuccess exec=%s skipped because execution is already terminal", execID)
 		return outcome, nil
 	}
@@ -2272,7 +2272,7 @@ func (h *Handler) completeWithSuccessWithPRReconciliation(ctx context.Context, e
 	h.publishExecutionTerminal(execID, models.ExecCompleted, "")
 	h.sendChannelResponse(ctx, task, channelReply, output, "", telegramMessageID)
 	h.notifySwarmChildTerminal(ctx, taskID)
-	return repository.CompleteSuccessCompleted, nil
+	return persistence.CompleteSuccessCompleted, nil
 }
 
 func (h *Handler) blockGitHubSDLCSuccessWithoutPullRequest(ctx context.Context, task *models.Task, trustedPublication *startupSyncPublication) (bool, string) {

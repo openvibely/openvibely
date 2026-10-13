@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/stretchr/testify/require"
@@ -249,7 +250,7 @@ func TestMaintainedSDLCSaveRemovesOptionalVisionProducerAndOwnedResources(t *tes
 			require.NoError(t, err, "restoring a maintained node must reuse its preserved backing Task")
 			require.Equal(t, visionTaskID, automationResourceID(t, restored.Definition, "vision_suggestions", "task"))
 			require.NotEqual(t, visionScheduleID, automationResourceID(t, restored.Definition, "vision_suggestions", "schedule"))
-			require.Equal(t, 1, countRows(t, h.db, `SELECT COUNT(*) FROM tasks WHERE created_via = ?`, repository.AutomationCompilerTaskCreatedVia(initial.Definition.Automation.ID, "vision_suggestions")))
+			require.Equal(t, 1, countRows(t, h.db, `SELECT COUNT(*) FROM tasks WHERE created_via = ?`, persistence.AutomationCompilerTaskCreatedVia(initial.Definition.Automation.ID, "vision_suggestions")))
 
 			bugOnly := fullCandidate
 			for _, node := range append([]models.AutomationDraftNode(nil), bugOnly.Nodes...) {
@@ -266,7 +267,7 @@ func TestMaintainedSDLCSaveRemovesOptionalVisionProducerAndOwnedResources(t *tes
 				require.Equal(t, "bug_finder", resource.NodeKey)
 			}
 
-			_, err = h.db.ExecContext(ctx, `UPDATE tasks SET created_via = ? WHERE id = ?`, repository.AutomationCompilerTaskCreatedVia(repository.NewID(), "vision_suggestions"), visionTaskID)
+			_, err = h.db.ExecContext(ctx, `UPDATE tasks SET created_via = ? WHERE id = ?`, persistence.AutomationCompilerTaskCreatedVia(persistence.NewID(), "vision_suggestions"), visionTaskID)
 			require.NoError(t, err)
 			_, err = h.compiler.Save(ctx, AutomationSaveRequest{ProjectID: h.project.ID, AutomationID: initial.Definition.Automation.ID,
 				Source: "manual", CreatedVia: "web", Candidate: fullCandidate})
@@ -285,7 +286,7 @@ func TestAutomationSaveRejectsNewVisionDriverAndAllowsExistingEdit(t *testing.T)
 	candidate, err := h.drafts.TemplateCandidate(AutomationAdapterVisionDriver)
 	require.NoError(t, err)
 
-	for _, automationID := range []string{"", repository.NewID()} {
+	for _, automationID := range []string{"", persistence.NewID()} {
 		_, err = h.compiler.Save(ctx, AutomationSaveRequest{ProjectID: h.project.ID, AutomationID: automationID,
 			Source: "template", CreatedVia: "web", Candidate: candidate})
 		require.ErrorContains(t, err, "Vision Driver cannot be created")
@@ -717,7 +718,7 @@ func TestAutomationSaveRecreatesDeletedRetainedNativeNodeResources(t *testing.T)
 	require.Equal(t, recoveredOptimizationTaskID, automationResourceID(t, repeated.Definition, "optimization_finder", "task"))
 	require.Equal(t, recoveredOptimizationScheduleID, automationResourceID(t, repeated.Definition, "optimization_finder", "schedule"))
 	require.Equal(t, 1, countRows(t, h.db, `SELECT COUNT(*) FROM tasks WHERE project_id = ? AND created_via = ?`, h.project.ID,
-		repository.AutomationCompilerTaskCreatedVia(first.Definition.Automation.ID, "optimization_finder")))
+		persistence.AutomationCompilerTaskCreatedVia(first.Definition.Automation.ID, "optimization_finder")))
 	require.Equal(t, 1, countRows(t, h.db, `SELECT COUNT(*) FROM automation_trigger_owners WHERE project_id = ? AND automation_id = ? AND node_id = (SELECT id FROM automation_nodes WHERE version_id = ? AND node_key = 'optimization_finder')`, h.project.ID, first.Definition.Automation.ID, repeated.Definition.Version.ID))
 }
 
@@ -1015,12 +1016,12 @@ func seedActivityOnlyAutomationIssueTask(t *testing.T, h automationSaveHarness, 
 	t.Helper()
 	ctx := context.Background()
 	node := automationNodeByKey(t, definition, nodeKey)
-	task := models.Task{ProjectID: h.project.ID, Title: "Issue-specific task " + repository.NewID(), Category: category,
+	task := models.Task{ProjectID: h.project.ID, Title: "Issue-specific task " + persistence.NewID(), Category: category,
 		Priority: 2, Status: models.StatusPending, Prompt: "Implement the approved issue.",
-		CreatedVia: repository.AutomationCompilerTaskCreatedVia(definition.Automation.ID, node.NodeKey)}
+		CreatedVia: persistence.AutomationCompilerTaskCreatedVia(definition.Automation.ID, node.NodeKey)}
 	require.NoError(t, h.taskRepo.Create(ctx, &task))
-	workItemID := repository.NewID()
-	activityID := repository.NewID()
+	workItemID := persistence.NewID()
+	activityID := persistence.NewID()
 	_, err := h.db.ExecContext(ctx, `INSERT INTO automation_work_items
 		(id, project_id, automation_id, origin_version_id, work_item_key)
 		VALUES (?, ?, ?, ?, ?)`, workItemID, h.project.ID, definition.Automation.ID, definition.Version.ID, "issue-work-item:"+workItemID)
@@ -1571,7 +1572,7 @@ func TestAutomationCustomTaskFanoutContinuesAfterBusyBranch(t *testing.T) {
 			llmSvc := &LLMService{taskRepo: h.taskRepo, automationRepo: h.automationRepo, taskSvc: taskSvc}
 			handled, err := llmSvc.activatePublishedCustomAutomationChild(causalCtx, *parent, "shared parent result\n[STATUS: SUCCESS]")
 			require.True(t, handled)
-			require.ErrorIs(t, err, repository.ErrAutomationChainChildBusy)
+			require.ErrorIs(t, err, persistence.ErrAutomationChainChildBusy)
 
 			unchangedBusy, err := h.taskRepo.GetByID(ctx, busy.ID)
 			require.NoError(t, err)
@@ -1597,7 +1598,7 @@ func TestAutomationCustomTaskFanoutContinuesAfterBusyBranch(t *testing.T) {
 
 			handled, err = llmSvc.activatePublishedCustomAutomationChild(causalCtx, *parent, "shared parent result\n[STATUS: SUCCESS]")
 			require.True(t, handled)
-			require.ErrorIs(t, err, repository.ErrAutomationChainChildBusy)
+			require.ErrorIs(t, err, persistence.ErrAutomationChainChildBusy)
 			select {
 			case duplicate := <-worker.Submitted():
 				t.Fatalf("fanout retry submitted child %s more than once", duplicate.ID)

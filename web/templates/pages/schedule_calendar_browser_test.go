@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/web/static"
 )
 
@@ -34,19 +34,19 @@ func testScheduleCalendarHeader(t *testing.T, paused, mobile bool) {
 	chrome := chatNavigationChromePath(t)
 	project := models.Project{ID: "calendar-selection", Name: "Calendar"}
 	day := getStartOfWeek(0).AddDate(0, 0, 1)
-	var tasks []repository.TaskWithSchedule
+	var tasks []persistence.TaskWithSchedule
 	for i := 0; i < 2; i++ {
 		at := day.Add(8 * time.Hour)
-		tasks = append(tasks, repository.TaskWithSchedule{Task: models.Task{ID: fmt.Sprintf("t%d", i), ProjectID: project.ID, Title: fmt.Sprintf("Task %d", i)}, Schedule: &models.Schedule{ID: fmt.Sprintf("s%d", i), RunAt: at, NextRun: &at, RepeatType: models.RepeatDaily, RepeatInterval: 1, Enabled: i == 0}})
+		tasks = append(tasks, persistence.TaskWithSchedule{Task: models.Task{ID: fmt.Sprintf("t%d", i), ProjectID: project.ID, Title: fmt.Sprintf("Task %d", i)}, Schedule: &models.Schedule{ID: fmt.Sprintf("s%d", i), RunAt: at, NextRun: &at, RepeatType: models.RepeatDaily, RepeatInterval: 1, Enabled: i == 0}})
 	}
 	for i := 2; i < 5; i++ {
 		at := day.Add(12 * time.Hour)
-		tasks = append(tasks, repository.TaskWithSchedule{Task: models.Task{ID: fmt.Sprintf("t%d", i), ProjectID: project.ID, Title: fmt.Sprintf("Task %d", i)}, Schedule: &models.Schedule{ID: fmt.Sprintf("s%d", i), RunAt: at, NextRun: &at, RepeatType: models.RepeatMinutes, RepeatInterval: 10, Enabled: true}})
+		tasks = append(tasks, persistence.TaskWithSchedule{Task: models.Task{ID: fmt.Sprintf("t%d", i), ProjectID: project.ID, Title: fmt.Sprintf("Task %d", i)}, Schedule: &models.Schedule{ID: fmt.Sprintf("s%d", i), RunAt: at, NextRun: &at, RepeatType: models.RepeatMinutes, RepeatInterval: 10, Enabled: true}})
 	}
 	at := day.AddDate(0, 0, -1).Add(8 * time.Hour)
-	tasks = append(tasks, repository.TaskWithSchedule{Task: models.Task{ID: "unaffected", ProjectID: project.ID, Title: "Unaffected run"}, Schedule: &models.Schedule{ID: "unaffected", RunAt: at, NextRun: &at, RepeatType: models.RepeatOnce, RepeatInterval: 1, Enabled: true}})
+	tasks = append(tasks, persistence.TaskWithSchedule{Task: models.Task{ID: "unaffected", ProjectID: project.ID, Title: "Unaffected run"}, Schedule: &models.Schedule{ID: "unaffected", RunAt: at, NextRun: &at, RepeatType: models.RepeatOnce, RepeatInterval: 1, Enabled: true}})
 	hourlyAt := day.AddDate(0, 0, -1).Add(50 * time.Minute)
-	tasks = append(tasks, repository.TaskWithSchedule{Task: models.Task{ID: "between-runs", ProjectID: project.ID, Title: "Hourly at fifty"}, Schedule: &models.Schedule{ID: "between-runs", RunAt: hourlyAt, NextRun: &hourlyAt, RepeatType: models.RepeatHours, RepeatInterval: 1, Enabled: true}})
+	tasks = append(tasks, persistence.TaskWithSchedule{Task: models.Task{ID: "between-runs", ProjectID: project.ID, Title: "Hourly at fifty"}, Schedule: &models.Schedule{ID: "between-runs", RunAt: hourlyAt, NextRun: &hourlyAt, RepeatType: models.RepeatHours, RepeatInterval: 1, Enabled: true}})
 	runner := `<script>
  window.addEventListener('DOMContentLoaded',function() {
   var nativeFetch = window.fetch;

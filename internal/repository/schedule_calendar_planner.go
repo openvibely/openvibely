@@ -6,14 +6,15 @@ import (
 
 	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 )
 
 // ReserveCalendarPlanner checks the admission, prepares the planner, and saves
 // its queued execution under the same writer lock as cancellation.
-func (r *TaskRepo) ReserveCalendarPlanner(ctx context.Context, parentID string, makePlanner func(*models.Task) (*models.Task, error)) (*ActiveLaneTaskAdmission, error) {
-	var admission *ActiveLaneTaskAdmission
+func (r *TaskRepo) ReserveCalendarPlanner(ctx context.Context, parentID string, makePlanner func(*models.Task) (*models.Task, error)) (*persistence.ActiveLaneTaskAdmission, error) {
+	var admission *persistence.ActiveLaneTaskAdmission
 	var parent *models.Task
-	err := withImmediateTx(ctx, r.db, func(exec SQLExecutor) error {
+	err := withImmediateTx(ctx, r.db, func(exec sqlExecutor) error {
 		var live, clear bool
 		if err := exec.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM schedule_dispatch_admissions a JOIN tasks t ON t.id = a.task_id
    WHERE a.task_id = ? AND a.execution_id IS NULL AND t.swarm_role = 'swarm_parent' AND t.status = 'pending' AND t.category IN ('active','scheduled'))`, parentID).Scan(&live); err != nil {
@@ -42,10 +43,10 @@ func (r *TaskRepo) ReserveCalendarPlanner(ctx context.Context, parentID string, 
 			title := planner.Title
 			for attempt := 0; ; attempt++ {
 				if attempt > 0 {
-					planner.Title = title + " · " + NewID()
+					planner.Title = title + " · " + persistence.NewID()
 				}
-				err = r.CreateWithExecutor(ctx, exec, planner)
-				if !errors.Is(err, ErrDuplicateTask) {
+				err = r.createWithExecutor(ctx, exec, planner)
+				if !errors.Is(err, persistence.ErrDuplicateTask) {
 					break
 				}
 				if err := ctx.Err(); err != nil {
@@ -77,14 +78,14 @@ func (r *TaskRepo) ReserveCalendarPlanner(ctx context.Context, parentID string, 
 			agent = *planner.AgentID
 		}
 		execution := models.Execution{TaskID: planner.ID, AgentConfigID: agent, Status: models.ExecQueued, PromptSent: planner.Prompt, StartsNewContext: clear}
-		if err := NewExecutionRepo(r.db).CreateWithExecutor(ctx, exec, &execution); err != nil {
+		if err := createExecutionWithExecutor(ctx, exec, &execution); err != nil {
 			return err
 		}
 		if _, err := exec.ExecContext(ctx, `UPDATE schedule_dispatch_admissions SET task_id = ?, execution_id = ? WHERE task_id = ? AND execution_id IS NULL`, planner.ID, execution.ID, parentID); err != nil {
 			return err
 		}
 		planner.StartsNewContext = clear
-		admission = &ActiveLaneTaskAdmission{Task: *planner, ExecutionID: execution.ID}
+		admission = &persistence.ActiveLaneTaskAdmission{Task: *planner, ExecutionID: execution.ID}
 		return nil
 	})
 	if err != nil {
