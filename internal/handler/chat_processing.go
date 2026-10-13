@@ -616,7 +616,7 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 				}
 				attachmentsCommitted = true
 			}
-			if err := h.threadInputRepo.CommitLocalSteering(commitCtx, params.ExecID, preparedSteeringInputIDs(batch), history); err != nil {
+			if err := h.threadInputRepo.CommitLocalSteering(commitCtx, persistence.LocalSteeringCommit{ExecutionID: params.ExecID, InputIDs: preparedSteeringInputIDs(batch), ResponsesHistory: history}); err != nil {
 				return err
 			}
 			pendingSteering = removePreparedSteeringInputs(pendingSteering, batch)
@@ -1362,7 +1362,7 @@ func (h *Handler) preparedSteeringCommit(params streamingResponseParams, batch p
 			}
 			attachmentsCommitted = true
 		}
-		return h.threadInputRepo.CommitLocalSteering(ctx, params.ExecID, preparedSteeringInputIDs(batch), history)
+		return h.threadInputRepo.CommitLocalSteering(ctx, persistence.LocalSteeringCommit{ExecutionID: params.ExecID, InputIDs: preparedSteeringInputIDs(batch), ResponsesHistory: history})
 	}
 }
 

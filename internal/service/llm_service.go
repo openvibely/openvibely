@@ -1469,7 +1469,7 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 			}
 			s.publishTaskThreadInputAppliedEvents(exec.ID, inputs)
 			return llmcontracts.LocalSteeringInput{Messages: messages, Commit: func(commitCtx context.Context, history []any) error {
-				if err := s.threadInputRepo.CommitLocalSteering(commitCtx, exec.ID, threadInputIDs(inputs), history); err != nil {
+				if err := s.threadInputRepo.CommitLocalSteering(commitCtx, persistence.LocalSteeringCommit{ExecutionID: exec.ID, InputIDs: threadInputIDs(inputs), ResponsesHistory: history}); err != nil {
 					return err
 				}
 				consumed := make(map[string]bool, len(inputs))
