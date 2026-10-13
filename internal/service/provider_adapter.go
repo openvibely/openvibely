@@ -387,10 +387,6 @@ func contextFailureCategory(err error) string {
 	return string(category)
 }
 
-func logContextDecision(originalHistory []models.Execution, req llmcontracts.AgentRequest, strategy string, externalized bool, trigger error) {
-	logContextDecisionWithBudget(originalHistory, req, strategy, externalized, trigger, calculateRequestBudget(req))
-}
-
 func logContextDecisionWithBudget(originalHistory []models.Execution, req llmcontracts.AgentRequest, strategy string, externalized bool, trigger error, budget requestBudget) {
 	retained, removed := historyRetentionCounts(originalHistory, req.ChatHistory)
 	logf := applog.Infof
@@ -398,10 +394,6 @@ func logContextDecisionWithBudget(originalHistory []models.Execution, req llmcon
 		logf = applog.Debugf
 	}
 	logf("[agent-svc] context decision provider=%s model=%s transport=%s context_window=%d safe_input_limit=%d fixed_tokens=%d history_tokens=%d pending_tokens=%d attachment_tokens=%d reserved_output_tokens=%d safety_margin=%d strategy=%s externalized=%t history_retained=%d history_removed=%d retry_source_execution_id=%s failure_category=%s", req.Agent.Provider, req.Agent.Model, providerTransport(req), budget.ContextWindow, budget.SafeInputLimit, budget.FixedTokens, budget.HistoryTokens+budget.NativeStateTokens, budget.PendingTokens, budget.AttachmentTokens, budget.ReservedOutputTokens, budget.SafetyMargin, strategy, externalized, retained, removed, req.RetrySourceExecutionID, contextFailureCategory(trigger))
-}
-
-func logContextFailure(req llmcontracts.AgentRequest, err error) {
-	logContextFailureWithBudget(req, err, calculateRequestBudget(req))
 }
 
 func logContextFailureWithBudget(req llmcontracts.AgentRequest, err error, budget requestBudget) {
@@ -620,10 +612,6 @@ func artifactReaderRuntime(path string) *llmcontracts.RuntimeTools {
 			return false, false
 		},
 	}
-}
-
-func (s *LLMService) preparePendingInput(req llmcontracts.AgentRequest) (llmcontracts.AgentRequest, bool, func(), error) {
-	return s.preparePendingInputWithBudget(req, calculateRequestBudget(req))
 }
 
 func (s *LLMService) preparePendingInputWithBudget(req llmcontracts.AgentRequest, budget requestBudget) (llmcontracts.AgentRequest, bool, func(), error) {
@@ -1192,10 +1180,6 @@ func parseCompactionTransportScope(scope string) (compactionScope, bool) {
 		return compactionScope{Type: "chat_project", ID: id}, id != ""
 	}
 	return compactionScope{}, false
-}
-
-func shouldUseLocalSummaryBeforeProvider(req llmcontracts.AgentRequest) bool {
-	return shouldUseLocalSummaryBeforeProviderWithBudget(req, calculateRequestBudget(req))
 }
 
 func shouldUseLocalSummaryBeforeProviderWithBudget(req llmcontracts.AgentRequest, budget requestBudget) bool {
