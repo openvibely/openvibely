@@ -651,7 +651,7 @@ func TestProviderContextBudget_LargeHistoryAndOversizedPendingAreHandledSeparate
 	var requests []llmcontracts.AgentRequest
 	adapter := providerAdapterFunc(func(req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
 		requests = append(requests, req)
-		if err := ensureRequestFits(req, "test provider-bound request"); err != nil {
+		if err := ensureRequestFitsWithBudget(req, calculateRequestBudget(req), "test provider-bound request"); err != nil {
 			t.Fatalf("oversized provider request %d: %v", len(requests), err)
 		}
 		if req.Operation == llmcontracts.OperationDirect {
@@ -1091,22 +1091,22 @@ func TestProviderContextCompactionLimits_TriggerMathAndConfiguredClamp(t *testin
 	}
 
 	req := llmcontracts.AgentRequest{Agent: models.LLMConfig{Provider: models.ProviderOpenAICompatible, ProviderContextWindow: 1000}, Message: strings.Repeat("a", 3600)}
-	triggered, _, used := shouldTriggerContextCompaction(req)
-	if !triggered || used != 900 {
-		t.Fatalf("trigger=%v used=%d, want bytes/4 estimate", triggered, used)
+	used := estimateModelVisibleRequestTokens(req)
+	if used != 900 {
+		t.Fatalf("used=%d, want bytes/4 estimate", used)
 	}
 	req.Message = strings.Repeat("a", 3800)
 	req.Agent.CompactionThreshold = 2000
-	triggered, _, used = shouldTriggerContextCompaction(req)
-	if !triggered || used != 950 {
-		t.Fatalf("trigger=%v used=%d, want bytes/4 hard-limit estimate", triggered, used)
+	used = estimateModelVisibleRequestTokens(req)
+	if used != 950 {
+		t.Fatalf("used=%d, want bytes/4 estimate", used)
 	}
 
 	rt := &llmcontracts.RuntimeTools{Definitions: []llmcontracts.RuntimeToolDefinition{{Name: "write_file", Description: strings.Repeat("tool", 200), Parameters: []byte(`{"type":"object"}`), Access: llmcontracts.RuntimeToolAccessWrite}}}
 	req = llmcontracts.AgentRequest{Ctx: llmcontracts.WithRuntimeTools(context.Background(), rt), Operation: llmcontracts.OperationStreaming, ChatMode: models.ChatModeOrchestrate, Agent: models.LLMConfig{Provider: models.ProviderOpenAICompatible, ProviderContextWindow: 1000}, Message: strings.Repeat("a", 2400)}
-	triggered, _, used = shouldTriggerContextCompaction(req)
-	if !triggered || used <= 500 {
-		t.Fatalf("trigger=%v used=%d, want model-visible system/runtime tool context included", triggered, used)
+	used = estimateModelVisibleRequestTokens(req)
+	if used <= 500 {
+		t.Fatalf("used=%d, want model-visible system/runtime tool context included", used)
 	}
 }
 

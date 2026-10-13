@@ -843,3 +843,63 @@ func TestConversationScheduleActions(t *testing.T) {
 		}
 	}
 }
+
+func TestScheduleActionServiceModifyAbsoluteOneTimeValidation(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		repeat    models.RepeatType
+		unchanged bool
+		wantError bool
+	}{
+		{name: "changed past time", repeat: models.RepeatOnce, wantError: true},
+		{name: "recurring converted to past once", repeat: models.RepeatDaily, unchanged: true, wantError: true},
+		{name: "historical anchor with interval edit", repeat: models.RepeatOnce, unchanged: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			db := teststores.NewDB(t)
+			ctx := context.Background()
+			taskRepo := teststores.Of(db).Tasks
+			scheduleRepo := teststores.Of(db).Schedules
+			project := &models.Project{Name: "Absolute validation"}
+			require.NoError(t, teststores.Of(db).Projects.Create(ctx, project))
+			task := &models.Task{ProjectID: project.ID, Title: "Target", Prompt: "prompt", Category: models.CategoryScheduled, Status: models.StatusPending, Priority: 2}
+			require.NoError(t, taskRepo.Create(ctx, task))
+			anchor := time.Now().UTC().Add(-2 * time.Hour).Truncate(time.Second)
+			schedule := &models.Schedule{TaskID: task.ID, RunAt: anchor, RepeatType: test.repeat, RepeatInterval: 1, Enabled: true, ClearContextOnStart: true}
+			require.NoError(t, scheduleRepo.Create(ctx, schedule))
+			runAt := anchor.Add(time.Hour)
+			if test.unchanged {
+				runAt = anchor
+			}
+			clearContext := false
+			result, err := NewScheduleActionService(taskRepo, scheduleRepo).ModifyAbsolute(ctx, ModifyAbsoluteScheduleRequest{
+				ScheduleID: schedule.ID, RunAt: runAt, RepeatType: models.RepeatOnce, RepeatInterval: 2, ClearContextOnStart: &clearContext,
+			})
+			if test.wantError {
+				var actionErr *ScheduleActionError
+				require.ErrorAs(t, err, &actionErr)
+				require.Equal(t, ScheduleActionTimeError, actionErr.Kind)
+				require.True(t, result.Schedule.RunAt.Equal(anchor))
+			} else {
+				require.NoError(t, err)
+			}
+			stored, err := scheduleRepo.GetByID(ctx, schedule.ID)
+			require.NoError(t, err)
+			require.True(t, stored.RunAt.Equal(anchor))
+			require.NotNil(t, stored.NextRun)
+			require.True(t, stored.NextRun.Equal(*schedule.NextRun))
+			require.True(t, stored.Enabled)
+			if test.wantError {
+				require.Equal(t, test.repeat, stored.RepeatType)
+				require.Equal(t, 1, stored.RepeatInterval)
+				require.True(t, stored.ClearContextOnStart)
+			} else {
+				require.Equal(t, 2, stored.RepeatInterval)
+				require.False(t, stored.ClearContextOnStart)
+			}
+			storedTask, err := taskRepo.GetByID(ctx, task.ID)
+			require.NoError(t, err)
+			require.Equal(t, models.StatusPending, storedTask.Status)
+		})
+	}
+}

@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
+	"github.com/openvibely/openvibely/pkg/toolschema"
 )
 
 // handleShape matches the canonical bare skill handle form. We deliberately
@@ -84,32 +85,15 @@ func skillRuntimeTools(catalog *Catalog, globalRoot, projectRoot string, inspect
 	if catalog == nil {
 		return nil
 	}
-	skillView := llmcontracts.RuntimeToolDefinition{
-		Name:        "skill_view",
-		Description: "Load an authorized skill for this turn. Use a selected bare handle when only selected skills are available, or a qualified view handle such as standalone:<skill> or agent:<agent>/<skill> when library tools return one. With file_path, loads one support file under references/, templates/, scripts/, or assets/.",
-		Parameters:  json.RawMessage(`{"type":"object","properties":{"handle":{"type":"string","description":"Selected bare handle or qualified view handle, e.g. debug_go_tests, standalone:debug_go_tests, or agent:reviewer/review_code"},"file_path":{"type":"string","description":"Optional support file path, e.g. references/common-failures.md or scripts/check.sh"}},"required":["handle"],"additionalProperties":false}`),
-	}
+
 	definitions := []llmcontracts.RuntimeToolDefinition{skillView}
 	tools := map[string]struct{}{"skill_view": {}}
 	if includeLibraryTools {
-		skillsList := llmcontracts.RuntimeToolDefinition{
-			Name:        "skills_list",
-			Description: "Return top-level skills/SKILLS.md contents plus canonical view_handle values. Optional 'scope' ('global'|'project'|'all', default 'all') filters which roots to include. Use the returned view_handle with skill_view when available.",
-			Parameters:  json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["global","project","all"]}},"additionalProperties":false}`),
-		}
+
 		definitions = append(definitions, skillsList)
 		tools["skills_list"] = struct{}{}
 		if inspector != nil {
-			agentList := llmcontracts.RuntimeToolDefinition{
-				Name:        "agent_list",
-				Description: "List enabled user-managed agents that may have maintainable agent-owned skills. Returns prompt-safe summaries; use agent_view with a returned key for details.",
-				Parameters:  json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`),
-			}
-			agentView := llmcontracts.RuntimeToolDefinition{
-				Name:        "agent_view",
-				Description: "Inspect one assigned agent: prompt, permissions, tool grants, lifecycle hooks, and attached/manual skills. Accepts an agent key/slug.",
-				Parameters:  json.RawMessage(`{"type":"object","properties":{"key":{"type":"string","description":"Agent key/slug to inspect"}},"required":["key"],"additionalProperties":false}`),
-			}
+
 			definitions = append(definitions, agentList, agentView)
 			tools["agent_list"] = struct{}{}
 			tools["agent_view"] = struct{}{}
@@ -496,10 +480,63 @@ func resolveAgentView(ctx context.Context, inspector AgentInspector, input json.
 	return string(b), nil
 }
 
-func readIfExists(path string) (string, bool) {
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return "", false
-	}
-	return string(b), true
+var skillView = llmcontracts.RuntimeToolDefinition{
+	Name:        "skill_view",
+	Description: "Load an authorized skill for this turn. Use a selected bare handle when only selected skills are available, or a qualified view handle such as standalone:<skill> or agent:<agent>/<skill> when library tools return one. With file_path, loads one support file under references/, templates/, scripts/, or assets/.",
+	Schema: &toolschema.Schema{
+		Type: "object",
+		Properties: map[string]*toolschema.Schema{
+			"handle": {
+				Type:        "string",
+				Description: "Selected bare handle or qualified view handle, e.g. debug_go_tests, standalone:debug_go_tests, or agent:reviewer/review_code",
+			},
+			"file_path": {
+				Type:        "string",
+				Description: "Optional support file path, e.g. references/common-failures.md or scripts/check.sh",
+			},
+		},
+		Required:             []string{"handle"},
+		AdditionalProperties: toolschema.Pointer(false),
+	},
+}
+
+var skillsList = llmcontracts.RuntimeToolDefinition{
+	Name:        "skills_list",
+	Description: "Return top-level skills/SKILLS.md contents plus canonical view_handle values. Optional 'scope' ('global'|'project'|'all', default 'all') filters which roots to include. Use the returned view_handle with skill_view when available.",
+	Schema: &toolschema.Schema{
+		Type: "object",
+		Properties: map[string]*toolschema.Schema{
+			"scope": {
+				Type: "string",
+				Enum: []any{"global", "project", "all"},
+			},
+		},
+		AdditionalProperties: toolschema.Pointer(false),
+	},
+}
+
+var agentList = llmcontracts.RuntimeToolDefinition{
+	Name:        "agent_list",
+	Description: "List enabled user-managed agents that may have maintainable agent-owned skills. Returns prompt-safe summaries; use agent_view with a returned key for details.",
+	Schema: &toolschema.Schema{
+		Type:                 "object",
+		Properties:           map[string]*toolschema.Schema{},
+		AdditionalProperties: toolschema.Pointer(false),
+	},
+}
+
+var agentView = llmcontracts.RuntimeToolDefinition{
+	Name:        "agent_view",
+	Description: "Inspect one assigned agent: prompt, permissions, tool grants, lifecycle hooks, and attached/manual skills. Accepts an agent key/slug.",
+	Schema: &toolschema.Schema{
+		Type: "object",
+		Properties: map[string]*toolschema.Schema{
+			"key": {
+				Type:        "string",
+				Description: "Agent key/slug to inspect",
+			},
+		},
+		Required:             []string{"key"},
+		AdditionalProperties: toolschema.Pointer(false),
+	},
 }

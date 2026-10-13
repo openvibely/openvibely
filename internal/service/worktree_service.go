@@ -2023,7 +2023,7 @@ func automaticConflictResolutionRuntime(repoDir string, conflictFiles []string) 
 		}
 	}
 	definitions := make([]llmcontracts.RuntimeToolDefinition, 0, 3)
-	for _, definition := range scopedFilesToolDefinitions() {
+	for _, definition := range scopedFileDefinitions {
 		switch definition.Name {
 		case "read_file", "write_file", "edit_file":
 			definitions = append(definitions, definition)
@@ -2062,7 +2062,7 @@ func automaticConflictResolutionRuntime(repoDir string, conflictFiles []string) 
 			if err != nil {
 				return "", true, true, err
 			}
-			out, err := agenttools.Execute(ctx, repoDir, canonicalName, rewritten, agenttools.BashPolicy{})
+			out, err := agenttools.Execute(ctx, repoDir, canonicalName, rewritten)
 			return out, true, err != nil, err
 		},
 	}
@@ -2759,25 +2759,6 @@ func parseWorktreeFileStats(out []byte) []WorktreeFileStat {
 	var stats []WorktreeFileStat
 	for _, record := range records {
 		stats = append(stats, WorktreeFileStat{Path: record.Path, Status: gitStatusToWorktreeFileStatus(record.Status)})
-	}
-	return stats
-}
-
-func parseGitStatusFileStats(out []byte) []WorktreeFileStat {
-	var stats []WorktreeFileStat
-	for _, line := range strings.Split(strings.TrimRight(string(out), "\n"), "\n") {
-		if len(line) < 4 {
-			continue
-		}
-		code := strings.TrimSpace(line[:2])
-		path := strings.TrimSpace(line[3:])
-		if code == "" || path == "" {
-			continue
-		}
-		if idx := strings.Index(path, " -> "); idx >= 0 {
-			path = strings.TrimSpace(path[idx+4:])
-		}
-		stats = append(stats, WorktreeFileStat{Path: path, Status: gitStatusToWorktreeFileStatus(code)})
 	}
 	return stats
 }

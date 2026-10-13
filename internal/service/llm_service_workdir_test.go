@@ -162,7 +162,7 @@ func TestGetDefaultAgentForTask_DeletedProjectAgent(t *testing.T) {
 	}
 }
 
-func TestProjectWorkDirMatches_PathBoundariesAndSeparators(t *testing.T) {
+func TestCleanProjectWorkDirMatches_PathBoundariesAndSeparators(t *testing.T) {
 	tests := []struct {
 		name     string
 		repoPath string
@@ -182,8 +182,8 @@ func TestProjectWorkDirMatches_PathBoundariesAndSeparators(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := projectWorkDirMatches(tt.repoPath, tt.workDir); got != tt.want {
-				t.Fatalf("projectWorkDirMatches(%q, %q) = %v, want %v", tt.repoPath, tt.workDir, got, tt.want)
+			if got := cleanProjectWorkDirMatches(cleanProjectUsagePath(tt.repoPath), cleanProjectUsagePath(tt.workDir)); got != tt.want {
+				t.Fatalf("cleanProjectWorkDirMatches(%q, %q) = %v, want %v", tt.repoPath, tt.workDir, got, tt.want)
 			}
 		})
 	}

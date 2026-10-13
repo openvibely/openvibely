@@ -906,14 +906,7 @@ func (h *Handler) handleSlackConfigure(c echo.Context) error {
 		}
 	}
 
-	if sendResponses == "true" || sendResponses == "false" {
-		_ = h.settingsRepo.Set(c.Request().Context(), service.SlackSettingSendResponses, sendResponses)
-	} else if strings.TrimSpace(sendResponses) == "" {
-		current, _ := h.settingsRepo.Get(c.Request().Context(), service.SlackSettingSendResponses)
-		if strings.TrimSpace(current) == "" {
-			_ = h.settingsRepo.Set(c.Request().Context(), service.SlackSettingSendResponses, "true")
-		}
-	}
+	_ = saveOptionalBoolSetting(c.Request().Context(), h.settingsRepo, service.SlackSettingSendResponses, sendResponses, true)
 
 	if h.slackSvc != nil {
 		_ = h.slackSvc.ReloadFromSettings(c.Request().Context())
@@ -1007,14 +1000,11 @@ func (h *Handler) handleDiscordConfigure(c echo.Context) error {
 	if err := h.settingsRepo.Set(c.Request().Context(), service.DiscordSettingBotToken, botToken); err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to save Discord bot token")
 	}
-	if sendResponses == "true" || sendResponses == "false" {
-		_ = h.settingsRepo.Set(c.Request().Context(), service.DiscordSettingSendResponses, sendResponses)
-	} else {
-		current, _ := h.settingsRepo.Get(c.Request().Context(), service.DiscordSettingSendResponses)
-		if strings.TrimSpace(current) == "" {
-			_ = h.settingsRepo.Set(c.Request().Context(), service.DiscordSettingSendResponses, "true")
-		}
+	// Discord historically treats any non-boolean submission as an omitted preference.
+	if sendResponses != "true" && sendResponses != "false" {
+		sendResponses = ""
 	}
+	_ = saveOptionalBoolSetting(c.Request().Context(), h.settingsRepo, service.DiscordSettingSendResponses, sendResponses, true)
 	if h.discordSvc != nil {
 		if err := h.discordSvc.ReloadFromSettings(c.Request().Context()); err != nil {
 			applog.Infof("warning: failed to reload discord gateway after settings save: %v", err)
@@ -1137,6 +1127,24 @@ func defaultIfBlank(value, fallback string) string {
 		return fallback
 	}
 	return value
+}
+
+// saveOptionalBoolSetting preserves a stored preference when the form omits it.
+func saveOptionalBoolSetting(ctx context.Context, settingsRepo persistence.SettingsStore, key, value string, fallback bool) error {
+	if value == "true" || value == "false" {
+		return settingsRepo.Set(ctx, key, value)
+	}
+	if value != "" {
+		return nil
+	}
+	current, err := settingsRepo.Get(ctx, key)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(current) == "" {
+		return settingsRepo.Set(ctx, key, strconv.FormatBool(fallback))
+	}
+	return nil
 }
 
 func boolFormValue(value string, fallback bool) string {

@@ -115,14 +115,13 @@ func (c *Client) SendCompletions(ctx context.Context, prompt string, opts *Compl
 	}
 
 	tools := make([]map[string]interface{}, 0, len(toolDefs))
-	for _, td := range toolDefs {
+	wireDefs := prepareStrictTools(toolDefs)
+	for _, td := range wireDefs {
+		function := map[string]interface{}{"name": td.Name, "description": td.Description, "parameters": td.ParameterSchema()}
+		function["strict"] = false
 		tools = append(tools, map[string]interface{}{
-			"type": "function",
-			"function": map[string]interface{}{
-				"name":        td.Name,
-				"description": td.Description,
-				"parameters":  td.Parameters,
-			},
+			"type":     "function",
+			"function": function,
 		})
 	}
 
@@ -295,7 +294,11 @@ func (c *Client) SendCompletions(ctx context.Context, prompt string, opts *Compl
 			output := ""
 			isError := false
 			var err error
-			if requestInputIndex >= 0 && toolIndex != requestInputIndex {
+			inputJSON, validationErr := normalizeDefinedArguments(toolDefs, tc.Function.Name, inputJSON)
+			if validationErr != nil {
+				isError = true
+				output = validationErr.Error()
+			} else if requestInputIndex >= 0 && toolIndex != requestInputIndex {
 				isError = true
 				output = "tool call rejected: request_user_input must complete in its own model turn"
 			} else if opts.ToolFilter != nil && !opts.ToolFilter(tc.Function.Name) {

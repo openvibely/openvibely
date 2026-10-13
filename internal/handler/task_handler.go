@@ -1027,8 +1027,8 @@ func (h *Handler) CreateTask(c echo.Context) error {
 		Priority:                priority,
 		Prompt:                  c.FormValue("prompt"),
 		Tag:                     models.TaskTag(c.FormValue("tag")),
-		AutoMerge:               c.FormValue("auto_merge") == "on" || c.FormValue("auto_merge") == "true",
-		AutoMergeOnGoalAchieved: c.FormValue("auto_merge_on_goal_achieved") == "on" || c.FormValue("auto_merge_on_goal_achieved") == "true",
+		AutoMerge:               formBoolEnabled(c, "auto_merge", false),
+		AutoMergeOnGoalAchieved: formBoolEnabled(c, "auto_merge_on_goal_achieved", false),
 		MergeTargetBranch:       c.FormValue("merge_target_branch"),
 	}
 
@@ -2070,10 +2070,10 @@ func (h *Handler) UpdateTask(c echo.Context) error {
 	// Handle auto-merge settings — if the hidden sentinel is present, the edit form
 	// was submitted and we always update (unchecked checkbox sends no value).
 	if c.FormValue("auto_merge_present") != "" {
-		task.AutoMerge = c.FormValue("auto_merge") == "on" || c.FormValue("auto_merge") == "true"
+		task.AutoMerge = formBoolEnabled(c, "auto_merge", false)
 	}
 	if c.FormValue("auto_merge_on_goal_achieved_present") != "" {
-		task.AutoMergeOnGoalAchieved = c.FormValue("auto_merge_on_goal_achieved") == "on" || c.FormValue("auto_merge_on_goal_achieved") == "true"
+		task.AutoMergeOnGoalAchieved = formBoolEnabled(c, "auto_merge_on_goal_achieved", false)
 	}
 	if targetBranch := c.FormValue("merge_target_branch"); targetBranch != "" {
 		task.MergeTargetBranch = targetBranch

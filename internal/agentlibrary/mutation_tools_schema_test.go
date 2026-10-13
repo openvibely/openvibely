@@ -2,6 +2,7 @@ package agentlibrary
 
 import (
 	"encoding/json"
+	"github.com/openvibely/openvibely/pkg/toolschema"
 	"strings"
 	"testing"
 )
@@ -16,8 +17,8 @@ func TestMutationToolSchemasAreValidJSONAndIncludeRequiredHints(t *testing.T) {
 	}
 	for _, def := range tools.Definitions {
 		var v map[string]any
-		if err := json.Unmarshal(def.Parameters, &v); err != nil {
-			t.Fatalf("invalid JSON schema for %s: %v\nschema:\n%s", def.Name, err, string(def.Parameters))
+		if err := json.Unmarshal(def.ParameterSchema(), &v); err != nil {
+			t.Fatalf("invalid JSON schema for %s: %v\nschema:\n%s", def.Name, err, string(def.ParameterSchema()))
 		}
 		props, ok := v["properties"].(map[string]any)
 		if !ok {
@@ -49,5 +50,21 @@ func TestMutationToolSchemasAreValidJSONAndIncludeRequiredHints(t *testing.T) {
 		default:
 			t.Fatalf("unexpected tool definition %q", def.Name)
 		}
+	}
+}
+
+func TestAgentSkillRequiredFieldsByRuntime(t *testing.T) {
+	library := LibraryAgentSkillMutationTools(&Importer{}, nil).Definitions[0]
+	assigned := AgentSkillMutationTools(&Importer{}, nil, "assigned", "project").Definitions[0]
+	for _, input := range []string{`{"action":"create"}`, `{"action":"create","agent":null}`} {
+		if _, err := toolschema.ValidateArguments(library.Schema, nil, json.RawMessage(input)); err == nil {
+			t.Fatal("library accepted missing agent")
+		}
+		if _, err := toolschema.ValidateArguments(assigned.Schema, nil, json.RawMessage(input)); err != nil {
+			t.Fatalf("assigned agent required model input: %v", err)
+		}
+	}
+	if _, err := toolschema.ValidateArguments(library.Schema, nil, json.RawMessage(`{"action":"create","agent":"target"}`)); err != nil {
+		t.Fatal(err)
 	}
 }

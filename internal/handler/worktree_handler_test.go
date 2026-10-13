@@ -1298,50 +1298,87 @@ func TestHandler_GetTaskWorktreeInfo(t *testing.T) {
 }
 
 func TestHandler_CreateTask_WithAutoMerge(t *testing.T) {
-	h, e, _ := setupTestHandler(t)
-	ctx := context.Background()
+	for _, tt := range []struct {
+		name             string
+		values           url.Values
+		completion, goal bool
+	}{
+		{"unchecked", nil, false, false},
+		{"completion", url.Values{"auto_merge": {"on"}}, true, false},
+		{"goal", url.Values{"auto_merge_on_goal_achieved": {"on"}}, false, true},
+		{"both", url.Values{"auto_merge": {"on"}, "auto_merge_on_goal_achieved": {"on"}}, true, true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			h, e, _ := setupTestHandler(t)
+			ctx := context.Background()
+			project := &models.Project{Name: "Test Project", RepoPath: "/tmp/test", IsDefault: true}
+			if err := h.projectSvc.Create(ctx, project); err != nil {
+				t.Fatal(err)
+			}
+			form := url.Values{"title": {"Task with Auto Merge"}, "prompt": {"do work"}, "category": {"backlog"}, "priority": {"1"}}
+			for key, values := range tt.values {
+				form[key] = values
+			}
+			req := worktreeFormRequest(http.MethodPost, "/tasks?project_id="+project.ID, form)
+			req.Header.Set("HX-Request", "true")
+			rec := worktreeExecute(e, req)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+			}
+			tasks, err := h.taskSvc.ListByProject(ctx, project.ID, "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(tasks) != 1 {
+				t.Fatalf("expected one task, got %d", len(tasks))
+			}
+			if tasks[0].AutoMerge != tt.completion || tasks[0].AutoMergeOnGoalAchieved != tt.goal {
+				t.Fatalf("merge settings = (%v, %v), want (%v, %v)", tasks[0].AutoMerge, tasks[0].AutoMergeOnGoalAchieved, tt.completion, tt.goal)
+			}
+		})
+	}
+}
 
-	project := &models.Project{
-		Name: "Test Project", Description: "Test", RepoPath: "/tmp/test", IsDefault: true,
-	}
-	if err := h.projectSvc.Create(ctx, project); err != nil {
-		t.Fatal(err)
-	}
-
-	form := url.Values{
-		"title":      {"Task with Auto Merge"},
-		"prompt":     {"do work"},
-		"category":   {"active"},
-		"priority":   {"1"},
-		"auto_merge": {"on"},
-	}
-
-	req := worktreeFormRequest(http.MethodPost, "/tasks?project_id="+project.ID, form)
-	req.Header.Set("HX-Request", "true")
-	rec := worktreeExecute(e, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
-	}
-
-	// Verify the created task has auto_merge enabled
-	tasks, err := h.taskSvc.ListByProject(ctx, project.ID, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	var found *models.Task
-	for i := range tasks {
-		if tasks[i].Title == "Task with Auto Merge" {
-			found = &tasks[i]
-			break
-		}
-	}
-	if found == nil {
-		t.Fatal("created task not found")
-	}
-	if !found.AutoMerge {
-		t.Error("expected auto_merge=true on created task")
+func TestHandler_UpdateTask_AutoMergePresence(t *testing.T) {
+	for _, tt := range []struct {
+		name             string
+		values           url.Values
+		completion, goal bool
+	}{
+		{"omitted sentinels", nil, true, true},
+		{"values without sentinels", url.Values{"auto_merge": {"false"}, "auto_merge_on_goal_achieved": {"false"}}, true, true},
+		{"clear completion only", url.Values{"auto_merge_present": {"1"}}, false, true},
+		{"clear goal only", url.Values{"auto_merge_on_goal_achieved_present": {"1"}}, true, false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			h, e, _ := setupTestHandler(t)
+			ctx := context.Background()
+			project := &models.Project{Name: "Test Project", RepoPath: "/tmp/test", IsDefault: true}
+			if err := h.projectSvc.Create(ctx, project); err != nil {
+				t.Fatal(err)
+			}
+			task := &models.Task{ProjectID: project.ID, Title: "Merge settings", Prompt: "do work", Category: models.CategoryBacklog, Status: models.StatusPending, AutoMerge: true, AutoMergeOnGoalAchieved: true}
+			if err := h.taskRepo.Create(ctx, task); err != nil {
+				t.Fatal(err)
+			}
+			form := url.Values{"title": {task.Title}, "prompt": {task.Prompt}, "category": {"backlog"}, "priority": {"2"}}
+			for key, values := range tt.values {
+				form[key] = values
+			}
+			req := worktreeFormRequest(http.MethodPut, "/tasks/"+task.ID, form)
+			req.Header.Set("HX-Request", "true")
+			rec := worktreeExecute(e, req)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+			}
+			updated, err := h.taskSvc.GetByID(ctx, task.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if updated.AutoMerge != tt.completion || updated.AutoMergeOnGoalAchieved != tt.goal {
+				t.Fatalf("merge settings = (%v, %v), want (%v, %v)", updated.AutoMerge, updated.AutoMergeOnGoalAchieved, tt.completion, tt.goal)
+			}
+		})
 	}
 }
 

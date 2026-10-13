@@ -20,6 +20,7 @@ import (
 	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/openvibely/openvibely/internal/testutil/teststores"
 	"github.com/openvibely/openvibely/web/templates/pages"
+	"github.com/stretchr/testify/require"
 )
 
 // ---- CreateSchedule ----
@@ -2192,5 +2193,73 @@ func TestConversationScheduleEditAndResume(t *testing.T) {
 	rec = tc.HTTP().Post("/schedules/" + schedule.ID + "/toggle").Execute()
 	if rec.Code != http.StatusSeeOther {
 		t.Fatalf("resume: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestUpdateSchedule_OneTimeRunValidation(t *testing.T) {
+	for _, source := range []string{"", "?from=schedule", "?from=task-panel"} {
+		for _, status := range []models.TaskStatus{models.StatusPending, models.StatusCompleted} {
+			for _, edit := range []string{"past", "future", "unchanged historical"} {
+				t.Run(fmt.Sprintf("%s/%s/%s", source, status, edit), func(t *testing.T) {
+					tc := NewTestContext(t)
+					ctx := context.Background()
+					project := tc.CreateProject().Build()
+					task := tc.CreateTask(project.ID).WithCategory(models.CategoryScheduled).WithStatus(status).Build()
+					original := time.Now().Add(time.Hour).Truncate(time.Minute).Add(30 * time.Second)
+					if edit == "unchanged historical" {
+						original = original.Add(-2 * time.Hour)
+					}
+					schedule := tc.CreateSchedule(task.ID).WithRepeatType(models.RepeatOnce).WithRunAt(original).Build()
+					if edit == "unchanged historical" && status == models.StatusCompleted {
+						schedule.NextRun = nil
+						require.NoError(t, tc.scheduleRepo.Update(ctx, schedule))
+					}
+					before, err := tc.scheduleRepo.GetByID(ctx, schedule.ID)
+					require.NoError(t, err)
+					selected := time.Now().Add(-time.Hour).Truncate(time.Minute)
+					if edit == "future" {
+						selected = selected.Add(3 * time.Hour)
+					}
+					if edit == "unchanged historical" {
+						selected = original.Truncate(time.Minute)
+					}
+					rec := tc.HTTP().Put("/schedules/" + schedule.ID + source).WithForm(url.Values{
+						"run_at":      {selected.Local().Format("2006-01-02T15:04")},
+						"repeat_type": {"once"}, "repeat_interval": {"1"},
+					}).Execute()
+					stored, err := tc.scheduleRepo.GetByID(ctx, schedule.ID)
+					require.NoError(t, err)
+					updatedTask, err := tc.taskRepo.GetByID(ctx, task.ID)
+					require.NoError(t, err)
+					require.True(t, stored.Enabled)
+					if edit == "past" {
+						require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
+						require.Contains(t, rec.Body.String(), "Run at must be in the future")
+						require.True(t, stored.RunAt.Equal(before.RunAt))
+						require.NotNil(t, stored.NextRun)
+						require.True(t, stored.NextRun.Equal(*before.NextRun))
+						require.Equal(t, status, updatedTask.Status)
+					} else {
+						require.Equal(t, http.StatusSeeOther, rec.Code, rec.Body.String())
+						if edit == "future" {
+							require.True(t, stored.RunAt.Equal(selected))
+							require.NotNil(t, stored.NextRun)
+							require.True(t, stored.NextRun.Equal(selected))
+							require.Equal(t, models.StatusPending, updatedTask.Status)
+							due, err := tc.scheduleRepo.ListDue(ctx, selected.Add(time.Second))
+							require.NoError(t, err)
+							require.Len(t, due, 1)
+							require.Equal(t, schedule.ID, due[0].ID)
+						} else {
+							require.True(t, stored.RunAt.Equal(before.RunAt))
+							require.Equal(t, before.NextRun, stored.NextRun)
+							if before.NextRun == nil {
+								require.Equal(t, status, updatedTask.Status)
+							}
+						}
+					}
+				})
+			}
+		}
 	}
 }
