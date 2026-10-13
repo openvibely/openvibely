@@ -68,7 +68,9 @@ func TestEveryToolOptionalArgumentContract(t *testing.T) {
 	defs = append(defs, memory.SelectedMemoryRuntimeTools("unused", []memory.SelectedMemory{{File: "audit.md"}}).Definitions...)
 	defs = append(defs, agentskills.SkillRuntimeTools(&agentskills.Catalog{}, "", "", contractAgentInspector{}).Definitions...)
 	defs = append(defs, agentlibrary.SkillMutationTools(&agentlibrary.Importer{}, nil).Definitions...)
-	defs = append(defs, agentlibrary.LibraryAgentSkillMutationTools(&agentlibrary.Importer{}, nil).Definitions...)
+	defs = append(defs, agentlibrary.AgentSkillMutationTools(&agentlibrary.Importer{}, nil, "assigned", "project").Definitions...)
+	libraryDefs := agentlibrary.LibraryAgentSkillMutationTools(&agentlibrary.Importer{}, nil).Definitions
+	defs = append(defs, libraryDefs...)
 	seen := map[string]bool{}
 	properties := 0
 	for _, d := range defs {
@@ -80,6 +82,9 @@ func TestEveryToolOptionalArgumentContract(t *testing.T) {
 			seen[d.Name] = true
 			got := append([]string{}, d.Schema.Required...)
 			expected := strings.Fields(want)
+			if d.Name == "agent_skill_manage" && d.Schema == libraryDefs[0].Schema {
+				expected = append(expected, "agent")
+			}
 			slices.Sort(got)
 			slices.Sort(expected)
 			if !slices.Equal(got, expected) {

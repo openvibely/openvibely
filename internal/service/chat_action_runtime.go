@@ -113,9 +113,10 @@ type channelTaskActionHandlerOptions struct {
 }
 
 type channelGoalActionHandlerOptions struct {
-	ProjectID   string
-	TaskRepo    *repository.TaskRepo
-	TaskGoalSvc *TaskGoalService
+	CallerTaskID string
+	ProjectID    string
+	TaskRepo     *repository.TaskRepo
+	TaskGoalSvc  *TaskGoalService
 }
 
 type channelThreadActionHandlerOptions struct {
@@ -639,6 +640,13 @@ func buildChannelGoalActionHandlers(opts channelGoalActionHandlerOptions) map[st
 	return BuildTaskGoalRuntimeActionHandlers(TaskGoalRuntimeActionOptions{
 		TaskGoalSvc: opts.TaskGoalSvc,
 		ResolveTaskID: func(ctx context.Context, req TaskGoalRuntimeToolInput) (string, error) {
+			req.TaskID = strings.TrimSpace(req.TaskID)
+			if req.TaskID == "current" || (req.TaskID == "" && strings.TrimSpace(req.Title) == "") {
+				if strings.TrimSpace(opts.CallerTaskID) == "" {
+					return "", fmt.Errorf("task_id or title is required outside a task thread")
+				}
+				req.TaskID = opts.CallerTaskID
+			}
 			task, err := resolveChannelTaskReference(ctx, opts.TaskRepo, opts.ProjectID, req.TaskID, req.Title)
 			if err != nil {
 				return "", err

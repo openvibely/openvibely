@@ -465,9 +465,10 @@ func (s *LLMService) taskControlRuntimeTools(task models.Task) *llmcontracts.Run
 		},
 	})
 	mergeChannelRuntimeActionHandlers(handlers, buildChannelGoalActionHandlers(channelGoalActionHandlerOptions{
-		ProjectID:   task.ProjectID,
-		TaskRepo:    s.taskRepo,
-		TaskGoalSvc: s.taskGoalSvc,
+		CallerTaskID: task.ID,
+		ProjectID:    task.ProjectID,
+		TaskRepo:     s.taskRepo,
+		TaskGoalSvc:  s.taskGoalSvc,
 	}))
 	var usageAnalyticsSvc *UsageAnalyticsService
 	if s.usageRepo != nil {

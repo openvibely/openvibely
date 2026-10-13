@@ -70,14 +70,18 @@ func agentSkillMutationTools(importer *Importer, recorder MutationRecorder, assi
 		return marshalToolResult(res, err)
 	}
 	description := agentSkillManageDescription(assignedAgentKey)
+	schema := agentSkillManageSchema
 	if allowExplicitAgent {
 		description = libraryAgentSkillManageDescription
+		copy := *agentSkillManageSchema
+		copy.Required = append(append([]string(nil), copy.Required...), "agent")
+		schema = &copy
 	}
 	return &llmcontracts.RuntimeTools{
 		Definitions: []llmcontracts.RuntimeToolDefinition{{
 			Name:        "agent_skill_manage",
 			Description: description,
-			Schema:      agentSkillManageSchema,
+			Schema:      schema,
 		}},
 		Executor: exec,
 		Filter: func(name string) (bool, bool) {
