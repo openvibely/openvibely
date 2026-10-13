@@ -36,9 +36,9 @@ templ:
 	go run github.com/a-h/templ/cmd/templ@$(TEMPL_VERSION) generate
 
 # Rebuild embedded front-end assets (web/static/dist) from the pins in scripts/build-assets.sh.
-# Downloads the pinned Tailwind binary and libraries (no Node). Run after changing
-# templates or a pinned version, and commit the result.
-assets:
+# Downloads the pinned Tailwind binary and libraries (no Node). Generate templates
+# first so their Go output is current when Tailwind scans it. Commit changed assets.
+assets: templ
 	scripts/build-assets.sh
 
 # List pinned front-end packages that have newer versions.
@@ -51,11 +51,11 @@ swagger:
 	@sed -i.bak '/LeftDelim:/d' docs/docs.go && sed -i.bak '/RightDelim:/d' docs/docs.go && rm docs/docs.go.bak || true
 
 # Build production server binary
-build: templ swagger
+build: assets swagger
 	go build -ldflags="-s -w" -o bin/openvibely ./cmd/server
 
 # Build desktop binary (Wails integration - see cmd/desktop)
-build-desktop: templ swagger
+build-desktop: assets swagger
 	go build $(DESKTOP_BUILD_TAGS) -ldflags="-s -w" -o bin/openvibely-desktop ./cmd/desktop
 
 # Package desktop app bundle for macOS Finder/Dock launch (no Terminal)

@@ -1,11 +1,11 @@
 root = "."
 tmp_dir = "/tmp/openvibely-air"
 [build]
-cmd = "templ generate && go build -o /tmp/openvibely-air/openvibely ./cmd/server"
+cmd = "templ generate && scripts/build-assets.sh && go build -o /tmp/openvibely-air/openvibely ./cmd/server"
 bin = "/tmp/openvibely-air/openvibely"
 full_bin = "/tmp/openvibely-air/openvibely"
 delay = 1000
-exclude_dir = [".git", ".openvibely", ".worktrees", "bin", "logs", "repos", "tmp", "uploads"]
+exclude_dir = [".git", ".openvibely", ".worktrees", "bin", "logs", "repos", "tmp", "uploads", "web/assets/.cache", "web/static/dist"]
 exclude_file = []
 exclude_regex = ["_test\\.go", ".*_templ\\.go"]
 exclude_unchanged = false
