@@ -59,7 +59,7 @@ func TestStrictFallbackAndNamespace(t *testing.T) {
 }
 
 func TestProviderWireStrictSchemas(t *testing.T) {
-	for _, mode := range []struct{ completions, strict bool }{{false, true}, {true, true}, {true, false}} {
+	for _, mode := range []struct{ completions, firstParty bool }{{false, true}, {true, true}, {true, false}} {
 		completions := mode.completions
 		t.Run(fmt.Sprint(mode), func(t *testing.T) {
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -73,7 +73,11 @@ func TestProviderWireStrictSchemas(t *testing.T) {
 				if completions {
 					tool = tool["function"].(map[string]any)
 				}
-				if tool["strict"] != false {
+				if completions && !mode.firstParty {
+					if _, exists := tool["strict"]; exists {
+						t.Error("strict sent to compatible endpoint")
+					}
+				} else if tool["strict"] != false {
 					t.Errorf("strict must be false: %v", tool)
 				}
 				schema := tool["parameters"].(map[string]any)
@@ -102,7 +106,7 @@ func TestProviderWireStrictSchemas(t *testing.T) {
 			client := newHTTPTestAPIKeyClient("test")
 			var err error
 			if completions {
-				_, err = client.SendCompletions(context.Background(), "backlog", &CompletionsOptions{Model: "test", StrictTools: mode.strict, SkipDefaultTools: true, ExtraTools: defs})
+				_, err = client.SendCompletions(context.Background(), "backlog", &CompletionsOptions{Model: "test", FirstPartyOpenAI: mode.firstParty, SkipDefaultTools: true, ExtraTools: defs})
 			} else {
 				_, err = client.SendAgentic(context.Background(), "backlog", &AgenticOptions{Model: "test", SkipDefaultTools: true, ExtraTools: defs})
 			}

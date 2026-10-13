@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-
-	"github.com/santhosh-tekuri/jsonschema/v5"
 )
 
 func requiredFields(s map[string]any) map[string]bool {
@@ -44,13 +42,7 @@ func normalizeValidate(schema, input json.RawMessage, external bool) (json.RawMe
 	if _, ok := value.(map[string]any); !ok {
 		return nil, fmt.Errorf("tool arguments must be an object")
 	}
-	c := jsonschema.NewCompiler()
-	// Tool schemas must be self-contained; never fetch a model/tool supplied URL.
-	c.LoadURL = func(string) (io.ReadCloser, error) { return nil, fmt.Errorf("external schema references are disabled") }
-	if err := c.AddResource("https://tools.invalid/schema.json", bytes.NewReader(schema)); err != nil {
-		return nil, err
-	}
-	compiled, err := c.Compile("https://tools.invalid/schema.json")
+	compiled, err := cachedValidator(schema)
 	if err != nil {
 		if external {
 			return input, nil

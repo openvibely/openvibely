@@ -20,11 +20,10 @@ type RuntimeToolDefinition struct {
 	Name        string
 	Description string
 	// Parameters holds externally supplied JSON; built-ins use Schema.
-	Parameters     json.RawMessage
-	Schema         *toolschema.Schema
-	Strict         *bool
-	StrictPriority int
-	Access         RuntimeToolAccess
+	Parameters json.RawMessage
+	Schema     *toolschema.Schema
+	Strict     *bool
+	Access     RuntimeToolAccess
 }
 
 // RuntimeToolExecutor runs request-scoped tools.

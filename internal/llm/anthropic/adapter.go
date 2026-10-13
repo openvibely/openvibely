@@ -193,12 +193,11 @@ func runtimeAnthropicTools(rt *llmcontracts.RuntimeTools) []anthropicclient.Tool
 			continue
 		}
 		out = append(out, anthropicclient.ToolDefinition{
-			Name:           anthropicRuntimeToolWireName(name),
-			Description:    strings.TrimSpace(def.Description),
-			InputSchema:    def.Parameters,
-			Schema:         def.Schema,
-			Strict:         def.Strict,
-			StrictPriority: def.StrictPriority,
+			Name:        anthropicRuntimeToolWireName(name),
+			Description: strings.TrimSpace(def.Description),
+			InputSchema: def.Parameters,
+			Schema:      def.Schema,
+			Strict:      def.Strict,
 		})
 	}
 	return out
