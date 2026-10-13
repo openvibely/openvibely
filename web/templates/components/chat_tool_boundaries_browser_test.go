@@ -91,11 +91,13 @@ func TestBrowserFunctional_PartialToolQuotesCannotHideRealCalls(t *testing.T) {
 	runIncrementalChatBrowser(t, `
  const tick=String.fromCharCode(96);
  const text='Narration '+tick+'unfinished\n[Using tool: bash]\n[Tool bash done]\noutput closes '+tick+'\n[Using tool: read_file]\n';
- for (const prefix of ['', 'long transcript prose '.repeat(4000)+'\n']) {
+ const example='Example '+tick+'literal\n[Tool bash done]\ninline'+tick+'\n';
+ for (const prefix of ['', example, example.repeat(3), 'long transcript prose '.repeat(4000)+'\n'+example]) {
   for (const ending of ['', '\n[/Tool]\nFinished.']) {
    await window.renderStreamingContent(stream,prefix+text+ending,true);
    const cards=stream.querySelectorAll('.stream-tool');
-   assert(cards.length===1 && cards[0].textContent.includes('Bash'), 'real Bash call was hidden or output became another call');
+   if (prefix.includes(example)) assert(Array.from(stream.querySelectorAll('code')).some(el=>el.textContent.includes('[Tool bash done]')), 'quoted example was not preserved as code');
+   assert(cards.length===1 && cards[0].textContent.includes('Bash'), 'real Bash call was hidden or output became another call: '+JSON.stringify({prefix:prefix.slice(-80),ending,cards:Array.from(cards).map(c=>c.textContent)}));
   }
  }
  return {};

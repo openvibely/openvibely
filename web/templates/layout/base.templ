@@ -2592,6 +2592,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					// transcript is scanned at most twice rather than once per example.
 					var quotedToolRanges = arguments[2];
 					var quotedToolIndex = 0;
+					var literalQuoteIndex = 0;
 					var ranges = [];
 					var plainStart = 0;
 					var fenceStart = -1;
@@ -2636,7 +2637,10 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						for (var openIndex = 0; openIndex < runs.length;) {
 							var closeIndex = runs[openIndex].next;
 							if (closeIndex === -1) { openIndex++; continue; }
-							ranges.push({ start: runs[openIndex].openerStart, end: runs[closeIndex].end });
+							var inlineRange = { start: runs[openIndex].openerStart, end: runs[closeIndex].end };
+							while (quotedToolRanges && literalQuoteIndex < quotedToolRanges.length && quotedToolRanges[literalQuoteIndex].end <= inlineRange.start) literalQuoteIndex++;
+							if (quotedToolRanges && literalQuoteIndex < quotedToolRanges.length && quotedToolRanges[literalQuoteIndex].start === inlineRange.start && quotedToolRanges[literalQuoteIndex].end === inlineRange.end) inlineRange.literalTool = true;
+							ranges.push(inlineRange);
 							openIndex = closeIndex + 1;
 						}
 					}
@@ -2663,7 +2667,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 								quotedToolRanges[quotedToolIndex].start < lineStart && quotedToolRanges[quotedToolIndex].end > lineStart;
 							if (!quotedTool && /^[\t ]*\[(?:Using tool:[^\]\r\n]+|Tool \S+ (?:done|error)(?::[^\]\r\n]*)?)\][\t ]*$/.test(line)) {
 								toolOutput = /^[\t ]*\[Tool \S+ (?:done|error)\][\t ]*$/.test(line);
-								opaqueRanges.push({start: lineStart, end: toolOutput ? text.length : nextLine});
+								opaqueRanges.push({start: lineStart, end: toolOutput ? text.length : nextLine, output: toolOutput});
 								continue;
 							}
 						}
@@ -2689,27 +2693,35 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 							fenceLength = runLength;
 						}
 					}
-					if (toolOutput && !quotedToolRanges) {
-						var pending = opaqueRanges.pop();
+					if (transcript && !quotedToolRanges && opaqueRanges.some(function(range) { return range.output; })) {
+						var savedOpaqueRanges = opaqueRanges;
+						var outputs = [];
+						opaqueRanges = opaqueRanges.filter(function(range) { return !range.output; });
 						var savedLength = ranges.length;
 						var savedOpaqueIndex = opaqueIndex;
-						addInlineRanges(plainStart, text.length);
+						opaqueIndex = 0;
+						addInlineRanges(0, text.length);
 						var quotes = [];
-						var callIndex = 0;
+						// Discover calls throughout the text, including calls hidden behind
+						// an earlier quoted result opener on the first pass.
+						var calls = [];
+						var callPattern = /^[\t ]*\[Using tool:[^\]\r\n]+\][\t ]*(?=\r?$)/gm;
+						var call;
+						while ((call = callPattern.exec(text)) !== null) calls.push(call.index);
+						var outputPattern = /^[\t ]*\[Tool\s+\S+\s+(?:done|error)\]/gm;
+						while ((call = outputPattern.exec(text)) !== null) outputs.push(call.index);
+						var callIndex = 0, outputIndex = 0;
 						for (var index = savedLength; index < ranges.length; index++) {
 							var candidate = ranges[index];
-							while (callIndex < opaqueRanges.length && opaqueRanges[callIndex].end <= candidate.start) callIndex++;
-							// A quote cannot cross a real call. Otherwise a backtick in its
-							// unfinished output could hide the call and expose literal markers.
-							if (callIndex < opaqueRanges.length && opaqueRanges[callIndex].start < candidate.end) continue;
-							quotes.push(candidate);
+							while (callIndex < calls.length && calls[callIndex] < candidate.start) callIndex++;
+							if (callIndex < calls.length && calls[callIndex] < candidate.end) continue;
+							while (outputIndex < outputs.length && outputs[outputIndex] <= candidate.start) outputIndex++;
+							if (outputIndex < outputs.length && outputs[outputIndex] < candidate.end) quotes.push(candidate);
 						}
-						if (quotes.some(function(range) { return range.start < pending.start && range.end > pending.start; })) {
-							return window.codeRanges(text, transcript, quotes);
-						}
+						if (quotes.length) return window.codeRanges(text, transcript, quotes);
 						ranges.length = savedLength;
 						opaqueIndex = savedOpaqueIndex;
-						opaqueRanges.push(pending);
+						opaqueRanges = savedOpaqueRanges;
 					}
 					if (fenceStart !== -1) {
 						ranges.push({ start: fenceStart, end: text.length });
