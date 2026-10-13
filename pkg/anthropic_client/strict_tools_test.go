@@ -15,7 +15,7 @@ import (
 func TestTaskLookupValidationBeforeExecution(t *testing.T) {
 	def := chatcontrol.Get("list_tasks")
 	called := 0
-	opts := &AgenticOptions{SkipDefaultTools: true, ExtraTools: []ToolDefinition{{Name: def.Name, Schema: def.Schema, StrictPriority: def.StrictPriority}}, ToolExecutor: func(_ context.Context, _ string, input json.RawMessage) (string, bool, error) {
+	opts := &AgenticOptions{SkipDefaultTools: true, ExtraTools: []ToolDefinition{{Name: def.Name, Schema: def.Schema}}, ToolExecutor: func(_ context.Context, _ string, input json.RawMessage) (string, bool, error) {
 		called++
 		if string(input) != `{"category":"backlog"}` {
 			t.Errorf("unexpected filters %s", input)
@@ -64,7 +64,7 @@ func TestProviderWireStrictSchemas(t *testing.T) {
 	AnthropicAPIHost = srv.URL
 	defer func() { AnthropicAPIHost = old }()
 	d := chatcontrol.Get("list_tasks")
-	_, err := NewWithAPIKey("test").SendAgentic(context.Background(), "backlog", &AgenticOptions{Model: "claude-opus-4-6", MaxTokens: 1024, SkipDefaultTools: true, ExtraTools: []ToolDefinition{{Name: d.Name, Schema: d.Schema, StrictPriority: d.StrictPriority}}})
+	_, err := NewWithAPIKey("test").SendAgentic(context.Background(), "backlog", &AgenticOptions{Model: "claude-opus-4-6", MaxTokens: 1024, SkipDefaultTools: true, ExtraTools: []ToolDefinition{{Name: d.Name, Schema: d.Schema}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -142,7 +142,7 @@ func TestExternalReferenceNullReachesExecutor(t *testing.T) {
 func TestStrictDisabledReachesProviderRequest(t *testing.T) {
 	var defs []ToolDefinition
 	for _, d := range chatcontrol.Registry() {
-		defs = append(defs, ToolDefinition{Name: d.Name, Schema: d.Schema, StrictPriority: d.StrictPriority})
+		defs = append(defs, ToolDefinition{Name: d.Name, Schema: d.Schema})
 	}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var body struct {

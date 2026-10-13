@@ -10,12 +10,11 @@ import (
 )
 
 type ToolDefinition struct {
-	Schema         *toolschema.Schema `json:"-"`
-	StrictPriority int                `json:"-"`
-	Strict         *bool              `json:"strict,omitempty"`
-	Name           string             `json:"name"`
-	Description    string             `json:"description"`
-	InputSchema    json.RawMessage    `json:"input_schema"`
+	Schema      *toolschema.Schema `json:"-"`
+	Strict      *bool              `json:"strict,omitempty"`
+	Name        string             `json:"name"`
+	Description string             `json:"description"`
+	InputSchema json.RawMessage    `json:"input_schema"`
 }
 
 // ToolCall records a single tool invocation and its result.

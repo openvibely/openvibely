@@ -20,8 +20,6 @@ import (
 
 // CompletionsOptions configures a /v1/chat/completions call with tool use.
 type CompletionsOptions struct {
-	// StrictTools is retained for compatibility; strict tool mode is disabled.
-	StrictTools     bool
 	Model           string
 	MaxOutputTokens int
 	ContextWindow   int
@@ -120,8 +118,8 @@ func (c *Client) SendCompletions(ctx context.Context, prompt string, opts *Compl
 	wireDefs := prepareStrictTools(toolDefs)
 	for _, td := range wireDefs {
 		function := map[string]interface{}{"name": td.Name, "description": td.Description, "parameters": td.ParameterSchema()}
-		if td.Strict != nil {
-			function["strict"] = *td.Strict
+		if opts.FirstPartyOpenAI {
+			function["strict"] = false
 		}
 		tools = append(tools, map[string]interface{}{
 			"type":     "function",

@@ -131,9 +131,8 @@ type ActionDef struct {
 	LifecycleOnly bool
 
 	// Schema is the provider-independent definition of the tool input.
-	Schema         *toolschema.Schema
-	Strict         *bool
-	StrictPriority int
+	Schema *toolschema.Schema
+	Strict *bool
 }
 
 // chainSchemaProperties is the JSON Schema for the chain configuration object.
@@ -2735,12 +2734,11 @@ func toolDefsForContext(mode models.ChatMode, surface Surface, includeThreadTool
 		// always include non-thread tools.
 		if !a.IncludeThreadTools || includeThreadTools {
 			defs = append(defs, llmcontracts.RuntimeToolDefinition{
-				Name:           a.Name,
-				Description:    a.Description,
-				Schema:         a.Schema,
-				Strict:         a.Strict,
-				StrictPriority: a.StrictPriority,
-				Access:         runtimeToolAccessForAction(a.Access),
+				Name:        a.Name,
+				Description: a.Description,
+				Schema:      a.Schema,
+				Strict:      a.Strict,
+				Access:      runtimeToolAccessForAction(a.Access),
 			})
 		}
 	}
