@@ -54,8 +54,13 @@ type Instance struct {
 }
 
 var (
-	openPersistence = func(path string, broadcaster *events.Broadcaster) (persistence.Backend, error) {
-		return sqlite.Open(path, broadcaster)
+	openPersistence = func(cfg *config.Config, broadcaster *events.Broadcaster) (persistence.Backend, error) {
+		switch cfg.DatabaseDriver {
+		case config.DatabaseDriverSQLite:
+			return sqlite.Open(cfg.DatabasePath, broadcaster)
+		default:
+			return nil, fmt.Errorf("unsupported DATABASE_DRIVER %q (supported: %s)", cfg.DatabaseDriver, config.DatabaseDriverSQLite)
+		}
 	}
 	loadAutomationConfirmationSecret = service.LoadOrCreateAutomationConfirmationSecret
 )
@@ -481,7 +486,7 @@ func Start(ctx context.Context, cfg *config.Config, options ...Options) (*Instan
 	executionStreamHub := events.NewExecutionStreamHub()
 
 	// Database
-	backend, err := openPersistence(cfg.DatabasePath, broadcaster)
+	backend, err := openPersistence(cfg, broadcaster)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize database: %w", err)
 	}

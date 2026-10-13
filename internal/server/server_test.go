@@ -553,8 +553,8 @@ func TestStart_ClosesSplitDatabaseAfterConfirmationSecretFailure(t *testing.T) {
 	}()
 
 	var opened *closeTrackingBackend
-	openPersistence = func(path string, broadcaster *events.Broadcaster) (persistence.Backend, error) {
-		backend, err := sqlite.Open(path, broadcaster)
+	openPersistence = func(cfg *config.Config, broadcaster *events.Broadcaster) (persistence.Backend, error) {
+		backend, err := sqlite.Open(cfg.DatabasePath, broadcaster)
 		if err != nil {
 			return nil, err
 		}
@@ -1171,5 +1171,32 @@ func TestStart_ServerModeDefaults(t *testing.T) {
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("GET /models returned %d, expected 200", resp.StatusCode)
+	}
+}
+
+func TestOpenPersistence_RejectsUnsupportedDriver(t *testing.T) {
+	cfg := &config.Config{DatabaseDriver: "postgres", DatabasePath: filepath.Join(t.TempDir(), "unused.db")}
+	backend, err := openPersistence(cfg, events.NewBroadcaster())
+	if err == nil {
+		_ = backend.Close()
+		t.Fatal("expected unsupported DATABASE_DRIVER error")
+	}
+	if !strings.Contains(err.Error(), `unsupported DATABASE_DRIVER "postgres"`) {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, statErr := os.Stat(cfg.DatabasePath); !os.IsNotExist(statErr) {
+		t.Fatalf("unsupported driver must not create a SQLite file, stat err = %v", statErr)
+	}
+}
+
+func TestOpenPersistence_SQLiteDriverOpensBackend(t *testing.T) {
+	cfg := &config.Config{DatabaseDriver: config.DatabaseDriverSQLite, DatabasePath: filepath.Join(t.TempDir(), "app.db")}
+	backend, err := openPersistence(cfg, events.NewBroadcaster())
+	if err != nil {
+		t.Fatalf("openPersistence: %v", err)
+	}
+	defer backend.Close()
+	if backend.Stores().Tasks == nil {
+		t.Fatal("sqlite backend returned no task store")
 	}
 }

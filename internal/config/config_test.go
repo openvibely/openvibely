@@ -370,3 +370,20 @@ func TestLoad_IsServerMode(t *testing.T) {
 		t.Fatalf("Load() should produce server mode, got %s", cfg.Mode)
 	}
 }
+
+func TestDatabaseDriverDefaultsToSQLite(t *testing.T) {
+	t.Setenv("DATABASE_DRIVER", "")
+	if got := Load().NormalizeForMode().DatabaseDriver; got != DatabaseDriverSQLite {
+		t.Fatalf("DatabaseDriver = %q, want %q", got, DatabaseDriverSQLite)
+	}
+
+	t.Setenv("DATABASE_DRIVER", " SQLite ")
+	if got := Load().NormalizeForMode().DatabaseDriver; got != DatabaseDriverSQLite {
+		t.Fatalf("DatabaseDriver = %q, want normalized %q", got, DatabaseDriverSQLite)
+	}
+
+	cfg := (&Config{}).NormalizeForMode()
+	if cfg.DatabaseDriver != DatabaseDriverSQLite {
+		t.Fatalf("zero-value DatabaseDriver = %q, want %q", cfg.DatabaseDriver, DatabaseDriverSQLite)
+	}
+}
