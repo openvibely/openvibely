@@ -118,9 +118,7 @@ func (c *Client) SendCompletions(ctx context.Context, prompt string, opts *Compl
 	wireDefs := prepareStrictTools(toolDefs)
 	for _, td := range wireDefs {
 		function := map[string]interface{}{"name": td.Name, "description": td.Description, "parameters": td.ParameterSchema()}
-		if opts.FirstPartyOpenAI {
-			function["strict"] = false
-		}
+		function["strict"] = false
 		tools = append(tools, map[string]interface{}{
 			"type":     "function",
 			"function": function,

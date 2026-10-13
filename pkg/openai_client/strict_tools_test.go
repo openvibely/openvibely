@@ -73,11 +73,7 @@ func TestProviderWireStrictSchemas(t *testing.T) {
 				if completions {
 					tool = tool["function"].(map[string]any)
 				}
-				if completions && !mode.firstParty {
-					if _, exists := tool["strict"]; exists {
-						t.Error("strict sent to compatible endpoint")
-					}
-				} else if tool["strict"] != false {
+				if tool["strict"] != false {
 					t.Errorf("strict must be false: %v", tool)
 				}
 				schema := tool["parameters"].(map[string]any)
