@@ -609,7 +609,6 @@ func runtimeTools(ctx context.Context) []openaiclient.ToolDefinition {
 			Description: strings.TrimSpace(def.Description),
 			Parameters:  def.Parameters,
 			Schema:      def.Schema,
-			Strict:      def.Strict,
 		})
 	}
 	return out

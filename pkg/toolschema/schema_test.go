@@ -8,17 +8,15 @@ import (
 
 func TestStrictAndNormalizeNestedArguments(t *testing.T) {
 	schema := json.RawMessage(`{"type":"object","properties":{"category":{"type":"string","enum":["backlog"]},"status":{"type":"string","enum":["pending"]},"items":{"type":"array","items":{"type":"object","properties":{"enabled":{"type":"boolean"},"limit":{"type":"integer","minimum":1}},"required":["enabled"],"additionalProperties":false}}},"required":["category"],"additionalProperties":false}`)
-	for _, anthropic := range []bool{false, true} {
-		wire, err := strictForTest(schema, anthropic)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !anthropic && !strings.Contains(string(wire), `"pending",null`) {
-			t.Fatalf("enum missing null: %s", wire)
-		}
-		if strings.Contains(string(schema), "null") {
-			t.Fatal("source mutated")
-		}
+	wire, err := MarshalOpenAI(nil, schema)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(wire), `"pending",null`) {
+		t.Fatalf("enum missing null: %s", wire)
+	}
+	if strings.Contains(string(schema), "null") {
+		t.Fatal("source mutated")
 	}
 	for _, input := range []string{`{"category":"backlog","status":null,"items":[{"enabled":false,"limit":null}]}`, `{"category":"backlog","items":[{"enabled":false}]}`} {
 		got, err := ValidateArguments(nil, schema, json.RawMessage(input))
@@ -38,7 +36,7 @@ func TestStrictAndNormalizeNestedArguments(t *testing.T) {
 
 func TestArbitraryObjectsAndExplicitNullsPreserved(t *testing.T) {
 	schema := json.RawMessage(`{"type":"object","properties":{"metadata":{"type":"object"},"clear":{"type":["string","null"]}}}`)
-	if _, err := strictForTest(schema, false); err == nil {
+	if _, err := MarshalOpenAI(nil, schema); err == nil {
 		t.Fatal("arbitrary object converted")
 	}
 	input := json.RawMessage(`{"metadata":{"x":null,"enabled":false},"clear":null}`)
@@ -53,7 +51,7 @@ func TestArbitraryObjectsAndExplicitNullsPreserved(t *testing.T) {
 
 func TestStrictRejectsUnsupportedSchemas(t *testing.T) {
 	for _, schema := range []string{`{"type":"object","additionalProperties":true}`, `{"type":"object","properties":{"x":{"$ref":"https://example.com/schema"}}}`, `{"type":"object","properties":{"x":{}}}`} {
-		if _, err := strictForTest(json.RawMessage(schema), false); err == nil {
+		if _, err := MarshalOpenAI(nil, json.RawMessage(schema)); err == nil {
 			t.Fatalf("accepted %s", schema)
 		}
 	}
@@ -61,87 +59,69 @@ func TestStrictRejectsUnsupportedSchemas(t *testing.T) {
 
 func TestStrictConstantRemainsRequired(t *testing.T) {
 	schema := json.RawMessage(`{"type":"object","properties":{"confirm":{"type":"boolean","const":true}},"required":["confirm"],"additionalProperties":false}`)
-	for _, anthropic := range []bool{false, true} {
-		wire, err := strictForTest(schema, anthropic)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if _, err := ValidateArguments(nil, wire, json.RawMessage(`{"confirm":false}`)); err == nil {
-			t.Fatal("constant weakened")
-		}
-		if _, err := ValidateArguments(nil, wire, json.RawMessage(`{"confirm":null}`)); err == nil {
-			t.Fatal("required confirmation made nullable")
-		}
+	wire, err := MarshalOpenAI(nil, schema)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ValidateArguments(nil, wire, json.RawMessage(`{"confirm":false}`)); err == nil {
+		t.Fatal("constant weakened")
+	}
+	if _, err := ValidateArguments(nil, wire, json.RawMessage(`{"confirm":null}`)); err == nil {
+		t.Fatal("required confirmation made nullable")
 	}
 }
 
 func TestOpenRootSchemaRemainsNonstrictForTest(t *testing.T) {
-	for _, anthropic := range []bool{false, true} {
-		schema := json.RawMessage(`{"type":"object"}`)
-		if _, err := strictForTest(schema, anthropic); err == nil {
-			t.Fatal("open root converted to an empty closed object")
-		}
-		input := json.RawMessage(`{"custom":"value","metadata":{"x":null}}`)
-		if _, err := ValidateArguments(nil, schema, input); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := strictForTest(json.RawMessage(`{"type":"object","additionalProperties":false}`), anthropic); err != nil {
-			t.Fatalf("explicitly closed empty object: %v", err)
-		}
+	schema := json.RawMessage(`{"type":"object"}`)
+	if _, err := MarshalOpenAI(nil, schema); err == nil {
+		t.Fatal("open root converted to an empty closed object")
+	}
+	input := json.RawMessage(`{"custom":"value","metadata":{"x":null}}`)
+	if _, err := ValidateArguments(nil, schema, input); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := MarshalOpenAI(nil, json.RawMessage(`{"type":"object","additionalProperties":false}`)); err != nil {
+		t.Fatalf("explicitly closed empty object: %v", err)
 	}
 }
 
 func TestEmptyPropertiesRemainOpen(t *testing.T) {
-	for _, anthropic := range []bool{false, true} {
-		for _, raw := range []string{`{"type":"object","properties":{}}`, `{"type":"object","properties":{"data":{"type":"object","properties":{}}}}`} {
-			if _, err := strictForTest(json.RawMessage(raw), anthropic); err == nil {
-				t.Fatalf("converted open object: %s", raw)
-			}
+	for _, raw := range []string{`{"type":"object","properties":{}}`, `{"type":"object","properties":{"data":{"type":"object","properties":{}}}}`} {
+		if _, err := MarshalOpenAI(nil, json.RawMessage(raw)); err == nil {
+			t.Fatalf("converted open object: %s", raw)
 		}
-		if _, err := strictForTest(json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`), anthropic); err != nil {
-			t.Fatal(err)
-		}
+	}
+	if _, err := MarshalOpenAI(nil, json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`)); err != nil {
+		t.Fatal(err)
 	}
 }
 
 func TestStrictPreservesLargeIntegers(t *testing.T) {
-	for _, anthropic := range []bool{false, true} {
-		for _, constraint := range []string{`"enum":[9007199254740993]`, `"const":9007199254740993`, `"minimum":9007199254740993,"maximum":9007199254740993`} {
-			raw := json.RawMessage(`{"type":"object","properties":{"id":{"type":"integer",` + constraint + `}},"required":["id"],"additionalProperties":false}`)
-			wire, err := strictForTest(raw, anthropic)
-			if err != nil {
+	for _, constraint := range []string{`"enum":[9007199254740993]`, `"const":9007199254740993`, `"minimum":9007199254740993,"maximum":9007199254740993`} {
+		raw := json.RawMessage(`{"type":"object","properties":{"id":{"type":"integer",` + constraint + `}},"required":["id"],"additionalProperties":false}`)
+		wire, err := MarshalOpenAI(nil, raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(wire), "9007199254740993") || strings.Contains(string(wire), "9007199254740992") {
+			t.Fatalf("number changed: %s", wire)
+		}
+		for _, schema := range []json.RawMessage{raw, wire} {
+			if _, err := ValidateArguments(nil, schema, json.RawMessage(`{"id":9007199254740993}`)); err != nil {
 				t.Fatal(err)
-			}
-			if !strings.Contains(string(wire), "9007199254740993") || strings.Contains(string(wire), "9007199254740992") {
-				t.Fatalf("number changed: %s", wire)
-			}
-			for _, schema := range []json.RawMessage{raw, wire} {
-				if _, err := ValidateArguments(nil, schema, json.RawMessage(`{"id":9007199254740993}`)); err != nil {
-					t.Fatal(err)
-				}
 			}
 		}
 	}
 }
 
 func TestDeclaredPropertiesDoNotCloseOpenObjects(t *testing.T) {
-	for _, anthropic := range []bool{false, true} {
-		for _, raw := range []string{
-			`{"type":"object","properties":{"label":{"type":"string"}}}`,
-			`{"type":"object","properties":{"data":{"type":"object","properties":{"label":{"type":"string"}}}},"additionalProperties":false}`,
-			`{"type":"object","properties":{"rows":{"type":"array","items":{"type":"object","properties":{"label":{"type":"string"}}}}},"additionalProperties":false}`,
-		} {
-			if _, err := strictForTest(json.RawMessage(raw), anthropic); err == nil {
-				t.Fatalf("closed open schema: %s", raw)
-			}
+	for _, raw := range []string{
+		`{"type":"object","properties":{"label":{"type":"string"}}}`,
+		`{"type":"object","properties":{"data":{"type":"object","properties":{"label":{"type":"string"}}}},"additionalProperties":false}`,
+		`{"type":"object","properties":{"rows":{"type":"array","items":{"type":"object","properties":{"label":{"type":"string"}}}}},"additionalProperties":false}`,
+	} {
+		if _, err := MarshalOpenAI(nil, json.RawMessage(raw)); err == nil {
+			t.Fatalf("closed open schema: %s", raw)
 		}
 	}
-}
-
-func strictForTest(raw json.RawMessage, anthropic bool) (json.RawMessage, error) {
-	if anthropic {
-		b, _, err := MarshalAnthropic(nil, raw)
-		return b, err
-	}
-	return MarshalOpenAI(nil, raw)
 }

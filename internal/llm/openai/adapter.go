@@ -122,7 +122,6 @@ func runtimeOpenAITools(rt *llmcontracts.RuntimeTools, enableAsync bool) []opena
 			Description: strings.TrimSpace(def.Description),
 			Parameters:  def.Parameters,
 			Schema:      def.Schema,
-			Strict:      def.Strict,
 			Async:       enableAsync && openAIRuntimeToolAsyncAllowed(def),
 		})
 	}
