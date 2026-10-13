@@ -166,3 +166,24 @@ func TestEmptyOpenRootToolStaysNonStrict(t *testing.T) {
 		t.Fatalf("open schema changed: %+v", got)
 	}
 }
+
+func TestDeclaredOpenToolPreservesArguments(t *testing.T) {
+	raw := json.RawMessage(`{"type":"object","properties":{"label":{"type":"string"}}}`)
+	got := prepareStrictTools([]ToolDefinition{{Type: "function", Name: "custom", Parameters: raw}})[0]
+	if got.Strict == nil || *got.Strict || string(got.Parameters) != string(raw) {
+		t.Fatalf("open schema changed: %+v", got)
+	}
+	input := json.RawMessage(`{"label":"example","custom":42}`)
+	opts := &AgenticOptions{SkipDefaultTools: true, ExtraTools: []ToolDefinition{got}}
+	normalized, err := normalizeToolArguments(opts, "custom", input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var values map[string]any
+	if err := json.Unmarshal(normalized, &values); err != nil {
+		t.Fatal(err)
+	}
+	if values["custom"] != float64(42) {
+		t.Fatalf("lost arbitrary argument: %s", normalized)
+	}
+}

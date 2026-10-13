@@ -7,7 +7,7 @@ import (
 )
 
 func TestStrictAndNormalizeNestedArguments(t *testing.T) {
-	schema := json.RawMessage(`{"type":"object","properties":{"category":{"type":"string","enum":["backlog"]},"status":{"type":"string","enum":["pending"]},"items":{"type":"array","items":{"type":"object","properties":{"enabled":{"type":"boolean"},"limit":{"type":"integer","minimum":1}},"required":["enabled"]}}},"required":["category"],"additionalProperties":false}`)
+	schema := json.RawMessage(`{"type":"object","properties":{"category":{"type":"string","enum":["backlog"]},"status":{"type":"string","enum":["pending"]},"items":{"type":"array","items":{"type":"object","properties":{"enabled":{"type":"boolean"},"limit":{"type":"integer","minimum":1}},"required":["enabled"],"additionalProperties":false}}},"required":["category"],"additionalProperties":false}`)
 	for _, anthropic := range []bool{false, true} {
 		wire, cost, err := Strict(schema, anthropic)
 		if err != nil {
@@ -63,7 +63,7 @@ func TestStrictRejectsUnsupportedSchemas(t *testing.T) {
 }
 
 func TestStrictConstantRemainsRequired(t *testing.T) {
-	schema := json.RawMessage(`{"type":"object","properties":{"confirm":{"type":"boolean","const":true}},"required":["confirm"]}`)
+	schema := json.RawMessage(`{"type":"object","properties":{"confirm":{"type":"boolean","const":true}},"required":["confirm"],"additionalProperties":false}`)
 	for _, anthropic := range []bool{false, true} {
 		wire, _, err := Strict(schema, anthropic)
 		if err != nil {
@@ -122,6 +122,20 @@ func TestStrictPreservesLargeIntegers(t *testing.T) {
 				if _, err := NormalizeValidate(schema, json.RawMessage(`{"id":9007199254740993}`)); err != nil {
 					t.Fatal(err)
 				}
+			}
+		}
+	}
+}
+
+func TestDeclaredPropertiesDoNotCloseOpenObjects(t *testing.T) {
+	for _, anthropic := range []bool{false, true} {
+		for _, raw := range []string{
+			`{"type":"object","properties":{"label":{"type":"string"}}}`,
+			`{"type":"object","properties":{"data":{"type":"object","properties":{"label":{"type":"string"}}}},"additionalProperties":false}`,
+			`{"type":"object","properties":{"rows":{"type":"array","items":{"type":"object","properties":{"label":{"type":"string"}}}}},"additionalProperties":false}`,
+		} {
+			if _, _, err := Strict(json.RawMessage(raw), anthropic); err == nil {
+				t.Fatalf("closed open schema: %s", raw)
 			}
 		}
 	}

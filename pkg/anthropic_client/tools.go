@@ -54,6 +54,7 @@ func readFileTool() ToolDefinition {
 		Description: "Read the contents of a file. Returns the file content as text. For large files, use offset and limit to read specific portions.",
 		InputSchema: json.RawMessage(`{
 			"type": "object",
+			"additionalProperties": false,
 			"properties": {
 				"file_path": {"type": "string", "description": "The path to the file to read. Relative paths are resolved against the working directory."},
 				"offset": {"type": "integer", "description": "Line number to start reading from (0-based). Default: 0"},
@@ -70,6 +71,7 @@ func writeFileTool() ToolDefinition {
 		Description: "Write content to a file. Creates the file and any parent directories if they don't exist. Overwrites existing files.",
 		InputSchema: json.RawMessage(`{
 			"type": "object",
+			"additionalProperties": false,
 			"properties": {
 				"file_path": {"type": "string", "description": "The path to the file to write. Relative paths are resolved against the working directory."},
 				"content": {"type": "string", "description": "The content to write to the file."}
@@ -85,6 +87,7 @@ func editFileTool() ToolDefinition {
 		Description: "Edit a file by replacing old_string with new_string. Tries exact match first, then whitespace-tolerant line matching (Codex-style) if exact match fails. Use this for surgical edits rather than rewriting entire files.",
 		InputSchema: json.RawMessage(`{
 			"type": "object",
+			"additionalProperties": false,
 			"properties": {
 				"file_path": {"type": "string", "description": "The path to the file to edit. Relative paths are resolved against the working directory."},
 				"old_string": {"type": "string", "description": "The exact string to find and replace. Must be unique within the file."},
@@ -102,6 +105,7 @@ func bashTool() ToolDefinition {
 		Description: "Execute a bash command and return its stdout and stderr. The command runs in the working directory. Use this for running tests, builds, git commands, and other shell operations. Commands default to a 600-second timeout when no positive timeout is provided.",
 		InputSchema: json.RawMessage(`{
 			"type": "object",
+			"additionalProperties": false,
 			"properties": {
 				"command": {"type": "string", "description": "The bash command to execute."},
 				"timeout": {"type": "integer", "description": "Timeout in seconds. Default: 600. Positive explicit values are allowed without a minimum or maximum cap."}
@@ -117,6 +121,7 @@ func listFilesTool() ToolDefinition {
 		Description: "List files and directories at a given path. Returns file names with '/' suffix for directories. Useful for exploring project structure.",
 		InputSchema: json.RawMessage(`{
 			"type": "object",
+			"additionalProperties": false,
 			"properties": {
 				"path": {"type": "string", "description": "Directory path to list. Relative paths are resolved against the working directory. Default: current working directory."},
 				"recursive": {"type": "boolean", "description": "If true, list files recursively (max depth 4, max 500 entries). Default: false"},
@@ -132,6 +137,7 @@ func grepSearchTool() ToolDefinition {
 		Description: "Search file contents using a regular expression pattern. Returns matching lines with file paths and line numbers. Useful for finding function definitions, imports, references, etc.",
 		InputSchema: json.RawMessage(`{
 			"type": "object",
+			"additionalProperties": false,
 			"properties": {
 				"pattern": {"type": "string", "description": "Regular expression pattern to search for."},
 				"path": {"type": "string", "description": "Directory or file to search in. Default: working directory."},
