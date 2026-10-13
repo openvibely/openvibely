@@ -84,6 +84,10 @@ templ ImageGallery() {
   let backdropPress=false;
   const isBackdrop=target=>!target.closest('img, button, a, [data-gallery-name], [data-gallery-count]');
   dialog.addEventListener('pointerdown',e=>{backdropPress=e.button===0&&isBackdrop(e.target);},true);
+  dialog.addEventListener('pointerup',e=>{
+   const released=document.elementFromPoint(e.clientX,e.clientY);
+   backdropPress=backdropPress&&e.button===0&&released&&dialog.contains(released)&&isBackdrop(released);
+  },true);
   dialog.addEventListener('pointercancel',()=>{backdropPress=false;});
   dialog.addEventListener('click',e=>{if(backdropPress&&isBackdrop(e.target))close();backdropPress=false;});
   q('close').onclick=close;q('prev').onclick=()=>show(index-1);q('next').onclick=()=>show(index+1);

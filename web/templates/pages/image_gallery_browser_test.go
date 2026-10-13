@@ -114,6 +114,23 @@ func TestBrowserFunctional_SharedImageGallery(t *testing.T) {
 		b.waitFor("image panned", `String(!document.querySelector('[data-gallery-image]').style.transform.startsWith('translate(0px, 0px)'))`, "true")
 		b.click(`[data-gallery-fit]`)
 		b.waitFor("fit reset", `document.querySelector('[data-gallery-image]').style.transform`, "translate(0px, 0px) scale(1)")
+		// A click spanning background and image is retargeted to their shared
+		// container. Neither direction should dismiss the preview.
+		var imagePoint struct {
+			X float64 `json:"x"`
+			Y float64 `json:"y"`
+		}
+		json.Unmarshal([]byte(b.evaluate(`JSON.stringify((()=>{const r=document.querySelector('[data-gallery-image]').getBoundingClientRect();return {x:r.left+r.width/2,y:r.top+r.height/2};})())`)), &imagePoint)
+		for _, fromImage := range []bool{false, true} {
+			startX, startY, endX, endY := 5.0, 5.0, imagePoint.X, imagePoint.Y
+			if fromImage {
+				startX, startY, endX, endY = endX, endY, startX, startY
+			}
+			b.call("Input.dispatchMouseEvent", map[string]any{"type": "mousePressed", "x": startX, "y": startY, "button": "left", "clickCount": 1}, nil)
+			b.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseMoved", "x": endX, "y": endY, "button": "left", "buttons": 1}, nil)
+			b.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseReleased", "x": endX, "y": endY, "button": "left", "clickCount": 1}, nil)
+			b.waitFor("mixed background and image gesture stays open", `String(document.getElementById('image-gallery').open)`, "true")
+		}
 		json.Unmarshal([]byte(b.evaluate(`JSON.stringify((()=>{const r=document.querySelector('[data-gallery-stage]').getBoundingClientRect();return {x:r.left+2,y:r.top+2};})())`)), &point)
 		b.call("Input.dispatchMouseEvent", map[string]any{"type": "mousePressed", "x": point.X, "y": point.Y, "button": "left", "clickCount": 1}, nil)
 		b.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseReleased", "x": point.X, "y": point.Y, "button": "left", "clickCount": 1}, nil)
