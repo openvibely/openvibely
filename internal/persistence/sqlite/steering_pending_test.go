@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/stretchr/testify/require"
 )
@@ -39,6 +40,6 @@ func TestHasPendingSteeringDoesNotClaimInput(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, claimed, 1)
 	check(false)
-	require.NoError(t, repo.CommitLocalSteering(ctx, execution.ID, []string{input.ID}, []any{map[string]any{"type": "message", "role": "user", "content": "steer"}}))
+	require.NoError(t, repo.CommitLocalSteering(ctx, persistence.LocalSteeringCommit{ExecutionID: execution.ID, InputIDs: []string{input.ID}, ResponsesHistory: []any{map[string]any{"type": "message", "role": "user", "content": "steer"}}}))
 	check(false)
 }

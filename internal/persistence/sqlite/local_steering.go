@@ -11,10 +11,11 @@ import (
 
 // CommitLocalSteering atomically records consumed steering and its native
 // conversation history. Provider completion is not the acceptance boundary.
-func (r *ThreadInputRepo) CommitLocalSteering(ctx context.Context, execID string, ids []string, history []any) error {
+func (r *ThreadInputRepo) CommitLocalSteering(ctx context.Context, commit persistence.LocalSteeringCommit) error {
+	execID, ids := commit.ExecutionID, commit.InputIDs
 	raw, err := json.Marshal(struct {
 		ResponsesInput []any `json:"responses_input"`
-	}{history})
+	}{commit.ResponsesHistory})
 	if err != nil {
 		return err
 	}

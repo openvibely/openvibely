@@ -738,7 +738,7 @@ type ThreadInputStore interface {
 	ClaimQueuedForChatExecution(ctx context.Context, inputID string, task *models.Task, exec *models.Execution, slackContext *models.SlackTaskContext, emailContext *models.EmailTaskContext, discordContext *models.DiscordTaskContext) error
 	ClaimQueuedForTaskExecutionWithModel(ctx context.Context, inputID string, exec *models.Execution, expectedAgentID *string, agent *models.LLMConfig) error
 	ClearProviderSteering(ctx context.Context, steeringIDs []string) error
-	CommitLocalSteering(ctx context.Context, execID string, ids []string, history []any) error
+	CommitLocalSteering(ctx context.Context, commit LocalSteeringCommit) error
 	ConvertQueuedToSteering(ctx context.Context, id string, runExecutionID string, expectedTurnID string) (*models.ThreadInput, error)
 	CreateQueued(ctx context.Context, input *models.ThreadInput) error
 	CreateQueuedInTx(ctx context.Context, tx Tx, input *models.ThreadInput) error
