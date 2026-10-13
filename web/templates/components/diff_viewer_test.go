@@ -1146,6 +1146,13 @@ func TestDiffViewerWithReview_WithComments(t *testing.T) {
 	if err != nil {
 		t.Fatalf("render failed: %v", err)
 	}
+	// File bodies arrive through the per-file endpoint; assert its markup
+	// alongside the initial viewer controls and review scripts.
+	for _, view := range []string{"inline", "split"} {
+		if err := LoadDiffFileCard(diff, 0, view, "task123", comments, true).Render(context.Background(), &buf); err != nil {
+			t.Fatal(err)
+		}
+	}
 	body := buf.String()
 
 	// Should contain the review toolbar
@@ -1325,6 +1332,13 @@ func TestDiffViewerWithReview_SplitViewHasAddCommentButtons(t *testing.T) {
 	if err != nil {
 		t.Fatalf("render failed: %v", err)
 	}
+	// File bodies arrive through the per-file endpoint; assert its markup
+	// alongside the initial viewer controls and review scripts.
+	for _, view := range []string{"inline", "split"} {
+		if err := LoadDiffFileCard(diff, 0, view, "task123", nil, true).Render(context.Background(), &buf); err != nil {
+			t.Fatal(err)
+		}
+	}
 	body := buf.String()
 
 	if !strings.Contains(body, `id="diff-content-split"`) {
@@ -1482,6 +1496,13 @@ func TestDiffViewerWithReview_InlineCommentRowsSupportEditAndDelete(t *testing.T
 	err := DiffViewerWithReview(diff, "task123", comments).Render(context.Background(), &buf)
 	if err != nil {
 		t.Fatalf("render failed: %v", err)
+	}
+	// File bodies arrive through the per-file endpoint; assert its markup
+	// alongside the initial viewer controls and review scripts.
+	for _, view := range []string{"inline", "split"} {
+		if err := LoadDiffFileCard(diff, 0, view, "task123", comments, true).Render(context.Background(), &buf); err != nil {
+			t.Fatal(err)
+		}
 	}
 	body := buf.String()
 
@@ -1679,6 +1700,13 @@ func TestDiffViewerWithReview_RendersSharedReviewCommentRows(t *testing.T) {
 	var buf bytes.Buffer
 	if err := DiffViewerWithReviewView(diff, "task123", comments, "inline").Render(context.Background(), &buf); err != nil {
 		t.Fatalf("render failed: %v", err)
+	}
+	// File bodies arrive through the per-file endpoint; assert its markup
+	// alongside the initial viewer controls and review scripts.
+	for _, view := range []string{"inline", "split"} {
+		if err := LoadDiffFileCard(diff, 0, view, "task123", comments, true).Render(context.Background(), &buf); err != nil {
+			t.Fatal(err)
+		}
 	}
 	body := buf.String()
 
@@ -2144,4 +2172,43 @@ func TestDiffViewerToolbar_ResponsiveNonOverlappingLayout(t *testing.T) {
 			t.Error("toolbar join div must not use flex-shrink-0 ml-auto: causes overlap on narrow viewports")
 		}
 	})
+}
+
+func TestDiffViewerWithReview_LargeDiffDefersRowsAndTracksContent(t *testing.T) {
+	var raw strings.Builder
+	for file := 0; file < 100; file++ {
+		fmt.Fprintf(&raw, "diff --git a/file%d.go b/file%d.go\n--- a/file%d.go\n+++ b/file%d.go\n@@ -1,50 +1,50 @@\n", file, file, file, file)
+		for line := 0; line < 50; line++ {
+			fmt.Fprintf(&raw, "-old line %d\n+new line %d\n", line, line)
+		}
+	}
+	diff := raw.String()
+	var initial, eager bytes.Buffer
+	if err := DiffViewerWithReview(diff, "large-task", nil).Render(context.Background(), &initial); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(initial.String(), "<tr") {
+		t.Fatal("initial lazy viewer rendered rows")
+	}
+	if got := strings.Count(initial.String(), "data-diff-lazy-url="); got != 200 {
+		t.Fatalf("lazy layout cards=%d want 200", got)
+	}
+	for _, meta := range buildDiffRenderMetas(ParseDiffOutput(diff)) {
+		for _, view := range []string{"inline", "split"} {
+			if err := LoadDiffFileCardMeta(meta, true, view, "large-task", nil, true).Render(context.Background(), &eager); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if initial.Len()*5 >= eager.Len() {
+		t.Fatalf("initial HTML %d should be under 20%% of eager bodies %d", initial.Len(), eager.Len())
+	}
+	t.Logf("100-file fixture: initial HTML %d bytes; eager layout bodies %d bytes", initial.Len(), eager.Len())
+	if diffContentRevision(diff, nil) == diffContentRevision(strings.Replace(diff, "new line 0", "changed line 0", 1), nil) {
+		t.Fatal("content-only edit did not change revision")
+	}
+	comments := []models.ReviewComment{{ID: "note", CommentText: "review"}}
+	if diffContentRevision(diff, nil) == diffContentRevision(diff, comments) {
+		t.Fatal("review edit did not change revision")
+	}
 }

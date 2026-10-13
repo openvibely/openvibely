@@ -3120,9 +3120,13 @@ func TestStartQueuedXTaskThreadInputCarriesAuthorizedRuntimeTools(t *testing.T) 
 		selected, err := selections.GetUserProject(ctx, "123")
 		return err == nil && selected == targetProject.ID
 	}, 2*time.Second, 25*time.Millisecond)
-	providerMu.Lock()
-	require.Equal(t, 2, providerRequests)
-	providerMu.Unlock()
+	// The project switch is visible before the model receives the tool result.
+	// Wait for that second request without holding the mutex across a fatal assertion.
+	require.Eventually(t, func() bool {
+		providerMu.Lock()
+		defer providerMu.Unlock()
+		return providerRequests == 2
+	}, 2*time.Second, 25*time.Millisecond)
 	require.Eventually(t, func() bool {
 		updated, err := h.taskRepo.GetByID(ctx, task.ID)
 		return err == nil && updated != nil && updated.Status != models.StatusRunning && updated.Status != models.StatusQueued
@@ -3192,9 +3196,13 @@ func TestStartImmediateXTaskThreadRunCarriesAuthorizedRuntimeTools(t *testing.T)
 		selected, err := selections.GetUserProject(ctx, "123")
 		return err == nil && selected == targetProject.ID
 	}, 2*time.Second, 25*time.Millisecond)
-	providerMu.Lock()
-	require.Equal(t, 2, providerRequests)
-	providerMu.Unlock()
+	// The project switch is visible before the model receives the tool result.
+	// Wait for that second request without holding the mutex across a fatal assertion.
+	require.Eventually(t, func() bool {
+		providerMu.Lock()
+		defer providerMu.Unlock()
+		return providerRequests == 2
+	}, 2*time.Second, 25*time.Millisecond)
 	require.Eventually(t, func() bool {
 		updated, err := h.taskRepo.GetByID(ctx, task.ID)
 		return err == nil && updated != nil && updated.Status != models.StatusRunning && updated.Status != models.StatusQueued

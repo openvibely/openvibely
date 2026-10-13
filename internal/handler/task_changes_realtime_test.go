@@ -123,7 +123,7 @@ index 0000000..d3103f9
 		t.Fatalf("expected status 200, got: %d", rec.Code)
 	}
 
-	body := rec.Body.String()
+	body := loadInlineTaskDiffCards(t, h, e, task.ID, rec.Body.String())
 
 	// The response should contain the diff content from the running execution
 	if !strings.Contains(body, "func main") {
@@ -634,7 +634,7 @@ func TestGetTaskChanges_WorktreeFollowupReeditingCommittedFileRendersSingleDiffE
 		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
 	}
 
-	body := rec.Body.String()
+	body := loadInlineTaskDiffCards(t, h, e, task.ID, rec.Body.String())
 	if !strings.Contains(body, `data-file-count="1"`) {
 		t.Fatalf("expected one rendered diff file in response, got:\n%s", body)
 	}

@@ -136,6 +136,69 @@ func TestExecutionRepo_ChatHistoryMetadataTracksTaskCategoryUpdates(t *testing.T
 	}
 }
 
+func TestExecutionRepo_IdleFollowupDoesNotRewritePriorExecutions(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	taskRepo := NewTaskRepo(db, nil)
+	repo := NewExecutionRepo(db)
+	task := &models.Task{ProjectID: "default", Title: "idle followup", Category: models.CategoryCompleted, Status: models.StatusCompleted, Prompt: "p"}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	prior := &models.Execution{TaskID: task.ID, Status: models.ExecCompleted, Output: "preserved output", DiffOutput: "preserved diff"}
+	if err := repo.Create(ctx, prior); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`UPDATE executions SET output = ?, diff_output = ? WHERE id = ?`, prior.Output, prior.DiffOutput, prior.ID); err != nil {
+		t.Fatal(err)
+	}
+	// Count physical row updates, not elapsed time: even a metadata-only UPDATE
+	// rewrites the large inline diff/output payload on an old execution.
+	if _, err := db.Exec(`CREATE TABLE execution_update_audit (execution_id TEXT);
+		CREATE TRIGGER audit_execution_updates AFTER UPDATE ON executions
+		BEGIN INSERT INTO execution_update_audit VALUES (NEW.id); END;`); err != nil {
+		t.Fatal(err)
+	}
+	followup := &models.Execution{TaskID: task.ID, IsFollowup: true, PromptSent: "followup"}
+	started, err := repo.CreateDirectTaskFollowupOrQueue(ctx, followup, &models.ThreadInput{Content: "followup"})
+	if err != nil || !started {
+		t.Fatalf("idle followup admission: started=%v err=%v", started, err)
+	}
+	if _, err := db.Exec(`UPDATE tasks SET category = category, project_id = project_id WHERE id = ?`, task.ID); err != nil {
+		t.Fatal(err)
+	}
+	var writes int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM execution_update_audit WHERE execution_id = ?`, prior.ID).Scan(&writes); err != nil {
+		t.Fatal(err)
+	}
+	if writes != 0 {
+		t.Fatalf("idle followup rewrote prior execution %d times", writes)
+	}
+
+	// Cached non-chat categories may differ from the current board lane, but
+	// project changes and both directions across Chat must remain authoritative.
+	if _, err := db.Exec(`INSERT INTO projects(id, name) VALUES ('moved-project', 'Moved')`); err != nil {
+		t.Fatal(err)
+	}
+	for _, step := range []struct{ project, category string }{
+		{"moved-project", "completed"},
+		{"moved-project", "chat"},
+		{"default", "chat"},
+		{"default", "active"},
+	} {
+		if _, err := db.Exec(`UPDATE tasks SET project_id = ?, category = ? WHERE id = ?`, step.project, step.category, task.ID); err != nil {
+			t.Fatal(err)
+		}
+		var project, category, output, diff string
+		if err := db.QueryRow(`SELECT task_project_id, task_category, output, diff_output FROM executions WHERE id = ?`, prior.ID).Scan(&project, &category, &output, &diff); err != nil {
+			t.Fatal(err)
+		}
+		if project != step.project || category != step.category || output != prior.Output || diff != prior.DiffOutput {
+			t.Fatalf("metadata/payload after %+v: project=%q category=%q output=%q diff=%q", step, project, category, output, diff)
+		}
+	}
+}
+
 func TestExecutionRepo_FindLatestActiveChatExecutionUsesStatusOrderIndex(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	seedChatHistoryBenchFixture(t, db, true)

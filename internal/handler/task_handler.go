@@ -1917,6 +1917,9 @@ func (h *Handler) GetTaskChangesFile(c echo.Context) error {
 	}
 
 	meta, exists := h.resolveTaskChangesFileMeta(c.Request().Context(), task, fileIndex)
+	if expectedPath := c.QueryParam("file_path"); expectedPath != "" && (!exists || meta.File.Path != expectedPath) {
+		return echo.NewHTTPError(http.StatusConflict, "diff files changed; reload the Changes view")
+	}
 	return render(c, http.StatusOK, components.LoadDiffFileCardMeta(meta, exists, view, taskID, reviewComments, reviewMode))
 }
 

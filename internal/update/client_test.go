@@ -309,3 +309,70 @@ func TestCheckIfDueRetriesAfterReleaseVerificationFailureWithoutSuccessThrottle(
 		t.Fatalf("requests after success throttle=%d, want 2", requests)
 	}
 }
+
+func TestClientPausesForDayAfterThreeFailures(t *testing.T) {
+	for _, status := range []int{http.StatusBadRequest, http.StatusServiceUnavailable} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			now := time.Unix(1700000000, 0).UTC()
+			requests := 0
+			fail := true
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				requests++
+				if fail {
+					w.WriteHeader(status)
+					return
+				}
+				_ = json.NewEncoder(w).Encode(CheckResponse{SchemaVersion: 1})
+			}))
+			defer srv.Close()
+			cfg := ClientConfig{ServiceURL: srv.URL, Channel: "stable", StatePath: filepath.Join(t.TempDir(), "state.json"), HTTPClient: srv.Client(), Now: func() time.Time { return now }, Random: func(max time.Duration) time.Duration { return max / 2 }}
+			client := NewClient(cfg)
+			current := CurrentBuild{Build: buildinfo.Build{Version: "dev-unknown", Commit: "unknown", OS: "darwin", Arch: "arm64"}, Distribution: buildinfo.DistributionDesktop}
+			// Two full batches verify that the budget resets after each cooldown.
+			for batch := 0; batch < 2; batch++ {
+				for attempt := 1; attempt <= 3; attempt++ {
+					if _, checked, err := client.CheckIfDue(context.Background(), current); !checked || err == nil {
+						t.Fatalf("batch=%d attempt=%d checked=%v err=%v", batch, attempt, checked, err)
+					}
+					wantRequests := batch*3 + attempt
+					if requests != wantRequests {
+						t.Fatalf("requests=%d want=%d", requests, wantRequests)
+					}
+					state, err := client.loadState()
+					if err != nil {
+						t.Fatal(err)
+					}
+					delay := time.Duration(attempt) * time.Minute
+					delay += delay / 8
+					if attempt == 3 {
+						delay = 24 * time.Hour
+					}
+					if state.Failures != attempt || !state.NextAttempt.Equal(now.Add(delay)) {
+						t.Fatalf("failures=%d next=%v want=%v", state.Failures, state.NextAttempt, now.Add(delay))
+					}
+					// A process restart must not bypass backoff or the daily pause.
+					client = NewClient(cfg)
+					now = state.NextAttempt.Add(-time.Nanosecond)
+					if _, checked, err := client.CheckIfDue(context.Background(), current); checked || err != nil || requests != wantRequests {
+						t.Fatalf("during cooldown: checked=%v err=%v requests=%d", checked, err, requests)
+					}
+					now = state.NextAttempt
+				}
+			}
+			fail = false
+			if _, checked, err := client.CheckIfDue(context.Background(), current); !checked || err != nil {
+				t.Fatalf("recovery: checked=%v err=%v", checked, err)
+			}
+			state, err := client.loadState()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if state.Failures != 0 || !state.LastSuccessfulCheck.Equal(now) {
+				t.Fatalf("success did not reset failures: %+v", state)
+			}
+			if _, checked, err := client.CheckIfDue(context.Background(), current); checked || err != nil || requests != 7 {
+				t.Fatalf("after success: checked=%v err=%v requests=%d", checked, err, requests)
+			}
+		})
+	}
+}

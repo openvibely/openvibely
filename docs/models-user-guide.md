@@ -81,9 +81,9 @@ The GPT-6 catalog advertises a separate 1.05M API context mode. OpenVibely does 
 
 ### Output Token Caps
 
-Output token caps are not model configuration. Codex and Claude-style workflows primarily expose model and effort controls, so OpenVibely does not show or accept output-token settings in the model dialog.
+For OpenAI-compatible providers and Ollama, the model editor's Generation tab exposes `Max output (tokens)`. Set an output allowance that leaves room for input within the configured context window. For windows smaller than 32,768 tokens, the editor limits output to one quarter of the window.
 
-Where a low-level provider API still requires an output limit, OpenVibely chooses an internal runtime budget in the provider adapter. Existing saved `max_tokens` values are ignored by runtime code and retained only so older database rows remain readable.
+OpenAI and Anthropic configurations do not expose this output setting; their adapters manage the output budget. This is separate from the `Context window (tokens)` and `Compact conversation at (tokens)` controls.
 
 ## Provider-Specific Options
 
@@ -122,7 +122,7 @@ GPT-6 workflow behavior is gated to those three exact first-party model IDs:
 - Local/self-hosted presets such as `Local vLLM`, `LM Studio`, `SGLang`, `LiteLLM`, `Inferrs Local`, and `ds4 Local` allow blank API keys. `Custom OpenAI-Compatible` is manual-entry oriented; enter the base URL and exact model ID expected by your server or gateway.
 - API keys are sent in headers, not URL parameters. Local/self-hosted servers may allow the API key field to remain blank.
 - OpenAI-compatible configs call `base_url + /chat/completions` and store the exact model ID after trimming whitespace.
-- **Context & compaction** (Models dialog): discovery and built-in catalogs record the provider’s input window and max output. Use **Context cap** or **Max output cap** to lower those limits without exceeding what the server reports (`0` = no cap). **Compact when input exceeds** sets an earlier compaction threshold in tokens (`0` = automatic, about 90% of the effective window).
+- **Context and compaction** (Generation tab): discovery supplies reported limits when available. Set **Context window (tokens)** to match your server, **Max output (tokens)** to reserve output space, and **Compact conversation at (tokens)** to choose when history is compacted. The editor fills suggested positive values; verify them when the endpoint does not report its limits.
 
 ### Ollama
 

@@ -1934,3 +1934,47 @@ func TestSchedulerService_DSTGapPersistsNextRunAndDoesNotDispatchEarly(t *testin
 	default:
 	}
 }
+
+func TestSchedulerConversationSchedulesAreAdmitted(t *testing.T) {
+	for _, repeat := range []models.RepeatType{models.RepeatOnce, models.RepeatDaily} {
+		for _, category := range []models.TaskCategory{models.CategoryChat, models.CategoryScheduled, models.CategoryBacklog} {
+			t.Run(string(repeat)+"/"+string(category), func(t *testing.T) {
+				ctx := context.Background()
+				db := testutil.NewTestDB(t)
+				tasks := repository.NewTaskRepo(db, nil)
+				schedules := repository.NewScheduleRepo(db)
+				workers := newTestWorkerService(t)
+				svc := NewSchedulerService(schedules, tasks, workers)
+				task := &models.Task{ProjectID: "default", Title: "Due schedule", Prompt: "test", Category: models.CategoryScheduled, Status: models.StatusPending}
+				require.NoError(t, tasks.Create(ctx, task))
+				schedule := &models.Schedule{TaskID: task.ID, RunAt: time.Now().UTC().Add(-time.Minute), RepeatType: repeat, RepeatInterval: 1, Enabled: true}
+				require.NoError(t, schedules.Create(ctx, schedule))
+				require.NoError(t, tasks.UpdateCategory(ctx, task.ID, category))
+				svc.checkDueTasks(ctx)
+				stored, err := schedules.GetByID(ctx, schedule.ID)
+				require.NoError(t, err)
+				require.True(t, stored.Enabled)
+				require.NotNil(t, stored.LastRun)
+				select {
+				case submitted := <-workers.Submitted():
+					require.Equal(t, task.ID, submitted.ID)
+					require.Equal(t, models.CategoryScheduled, submitted.Category)
+				default:
+					t.Fatal("eligible task not submitted")
+				}
+				if repeat == models.RepeatOnce {
+					require.Nil(t, stored.NextRun)
+				} else {
+					require.True(t, stored.NextRun.After(time.Now().UTC()))
+				}
+				due, err := schedules.ListDue(ctx, time.Now().UTC())
+				require.NoError(t, err)
+				require.Empty(t, due)
+				executions, err := repository.NewExecutionRepo(db).ListByTask(ctx, task.ID)
+				require.NoError(t, err)
+				require.Len(t, executions, 1)
+
+			})
+		}
+	}
+}

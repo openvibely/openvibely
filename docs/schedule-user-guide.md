@@ -39,6 +39,12 @@ Use this to plan load across days/hours instead of crowding everything into one 
    - `Clear context on start` (selected by default)
 5. Click `Create Scheduled Task`.
 
+## Skipping Runs and Project Pauses
+
+Select dates or hour ranges in the calendar and use `Skip` to exclude scheduled occurrences without deleting the schedules. Use `Unskip` to restore excluded time ranges. The calendar supports selections across dates and shows partially skipped runs.
+
+Use the page actions to pause or resume scheduled dispatch for the current project. This is separate from pausing individual schedules and does not cancel work already running. The schedule editor uses a shared date/time picker for choosing future run times.
+
 ## Repeat Types
 
 | Repeat Type | Use It For |
@@ -75,7 +81,7 @@ Use these signals to quickly spot what should run soon vs later.
 
 ## Editing Schedules in Task Detail
 
-From `/tasks/{id}` -> `Schedules` tab:
+Open the task's Details panel and select `Schedule`:
 
 - Add schedules
 - Edit existing schedules

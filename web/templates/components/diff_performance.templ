@@ -1,0 +1,212 @@
+package components
+
+// File bodies stay mounted once loaded. Only unopened files and the unused
+// layout are deferred; this is not row virtualization.
+templ diffViewerPerformanceScript() {
+ <script>
+ (function() {
+  if (!window._refreshDiffPerformance) {
+   var currentViewer = null;
+   window._refreshDiffPerformance = function() {
+    var viewer = document.getElementById('diff-viewer');
+    if (currentViewer && currentViewer !== viewer && currentViewer._diffPerformance) currentViewer._diffPerformance.destroy();
+    currentViewer = viewer;
+    if (!viewer) return;
+    if (!viewer._diffPerformance) {
+     if (window._restoreDiffFileState) window._restoreDiffFileState();
+     viewer._diffPerformance = createController(viewer);
+    }
+    viewer._diffPerformance.refresh();
+   };
+   // Reserve deferred card geometry and anchor by file/line across transitions.
+   // Measurements happen only when replacing content, never on scroll.
+   window._captureDiffScroll = function() {
+    var viewer = document.getElementById('diff-viewer');
+    var panel = viewer && viewer.querySelector('#diff-content-inline:not(.hidden), #diff-content-split:not(.hidden)');
+    var scroller = viewer && (viewer.closest('#tab-changes') || document.getElementById('main-content'));
+    if (!panel || !scroller) return null;
+    var top = scroller.getBoundingClientRect().top;
+    var snapshot = {heights:new Map(), anchor:null};
+    panel.querySelectorAll('.diff-file-card').forEach(function(card) {
+     var path = card.querySelector('[data-copy-path]');
+     if (!path) return;
+     var rect = card.getBoundingClientRect();
+     snapshot.heights.set(path.dataset.copyPath, rect.height);
+     if (!snapshot.anchor && rect.bottom > top && rect.height > 0) {
+      var anchor = {path:path.dataset.copyPath, cardOffset:rect.top-top};
+      var rows = card.querySelectorAll('tr.diff-review-line');
+      for (var i=0; i<rows.length; i++) {
+       var rowRect = rows[i].getBoundingClientRect();
+       if (rowRect.bottom > top + 40) {
+        anchor.oldLine = Number(rows[i].dataset.oldLine) || 0;
+        anchor.newLine = Number(rows[i].dataset.newLine) || 0;
+        anchor.offset = rowRect.top-top;
+        break;
+       }
+      }
+      // Keep the original line while its placeholder is still loading.
+      var saved = card._diffScrollAnchor;
+      if (saved && Math.abs(scroller.scrollTop-saved.scrollTop) < 2) anchor = saved.snapshot.anchor;
+      snapshot.anchor = anchor;
+     }
+    });
+    return snapshot;
+   };
+   window._restoreDiffScroll = function(snapshot, reserve) {
+    if (!snapshot) return;
+    var viewer = document.getElementById('diff-viewer');
+    var panel = viewer && viewer.querySelector('#diff-content-inline:not(.hidden), #diff-content-split:not(.hidden)');
+    var scroller = viewer && (viewer.closest('#tab-changes') || document.getElementById('main-content'));
+    if (!panel || !scroller) return;
+    var target = null;
+    panel.querySelectorAll('.diff-file-card').forEach(function(card) {
+     var path = card.querySelector('[data-copy-path]');
+     if (!path) return;
+     if (reserve && card.hasAttribute('data-diff-lazy-url') && !card.querySelector('[data-collapsed]')) {
+      var height = snapshot.heights.get(path.dataset.copyPath);
+      if (height) card.style.minHeight = height + 'px';
+     }
+     if (snapshot.anchor && path.dataset.copyPath === snapshot.anchor.path) target = card;
+    });
+    if (!target) return;
+    var anchor = snapshot.anchor, element = target, offset = anchor.cardOffset;
+    if (anchor.oldLine || anchor.newLine) {
+     var rows = target.querySelectorAll('tr.diff-review-line');
+     // Split rows can represent both sides. Prefer the new side when both
+     // exist, but preserve old-only anchors (including deletions) by old line.
+     var match = null;
+     for (var i=0; i<rows.length; i++) {
+      if (anchor.newLine && Number(rows[i].dataset.newLine) === anchor.newLine) { match = rows[i]; break; }
+      if (!match && anchor.oldLine && Number(rows[i].dataset.oldLine) === anchor.oldLine) match = rows[i];
+     }
+     if (match) { element = match; offset = anchor.offset; }
+    }
+    scroller.scrollTop += element.getBoundingClientRect().top - scroller.getBoundingClientRect().top - offset;
+    if (target.hasAttribute('data-diff-lazy-url')) target._diffScrollAnchor = {snapshot:snapshot, scrollTop:scroller.scrollTop};
+   };
+   window.retryLazyDiffFile = function(button) {
+    var card = button.closest('[data-diff-lazy-url]');
+    if (!card) return;
+    delete card.dataset.diffLoadFailed;
+    button.classList.add('hidden');
+    window._refreshDiffPerformance();
+   };
+   document.body.addEventListener('htmx:afterSettle', window._refreshDiffPerformance);
+   document.body.addEventListener('htmx:beforeCleanupElement', function(event) {
+    var element = event.detail && event.detail.elt;
+    if (element && element._diffPerformance) element._diffPerformance.destroy();
+   });
+  }
+
+  function createController(viewer) {
+   var activePanel = null, stopped = false, inFlight = 0;
+   var pending = new Map(), visible = new Set(), observed = new Set();
+   var headers = new Map();
+   var scroller = viewer.closest('#tab-changes') || document.getElementById('main-content');
+   var loadObserver = new IntersectionObserver(function(entries) {
+    entries.forEach(function(entry) {
+     if (entry.isIntersecting) visible.add(entry.target);
+     else visible.delete(entry.target);
+    });
+    pump();
+   }, {root:scroller, rootMargin:'300px 0px'});
+   // Only threshold crossings update sticky styling. There is no document
+   // scroll handler, header scan, or per-frame layout measurement.
+   var stickyObserver = new IntersectionObserver(function(entries) {
+    entries.forEach(function(entry) {
+     var header = headers.get(entry.target);
+     if (!header || !header.isConnected || !entry.rootBounds) return;
+     var stuck = entry.boundingClientRect.top <= entry.rootBounds.top;
+     if (stuck && header.getAttribute('data-stuck') !== '1') header.setAttribute('data-stuck','1');
+     else if (!stuck && header.hasAttribute('data-stuck')) header.removeAttribute('data-stuck');
+    });
+   }, {root:scroller, rootMargin:'-1px 0px 0px 0px', threshold:[0,1]});
+
+   function expanded(card) {
+    var header = card.querySelector('[data-diff-toggle]');
+    return header && !header.hasAttribute('data-collapsed');
+   }
+   function pump() {
+    if (stopped || !viewer.isConnected) return;
+    visible.forEach(function(card) {
+     if (inFlight >= 3 || !card.isConnected || !activePanel || !activePanel.contains(card) ||
+         !expanded(card) || pending.has(card) || card.dataset.diffLoadFailed) return;
+     load(card);
+    });
+   }
+   function load(card) {
+    var abort = new AbortController();
+    pending.set(card, abort); inFlight++;
+    card.querySelector('[data-diff-load-status]').textContent = 'Loading diff…';
+    var url = new URL(card.dataset.diffLazyUrl, location.href);
+    url.searchParams.set('file_path', card.dataset.diffFilePath);
+    fetch(url, {headers:{'HX-Request':'true'}, signal:abort.signal})
+     .then(function(response) {
+      if (!response.ok) throw new Error('Could not load diff');
+      return response.text();
+     }).then(function(html) {
+      if (stopped || !card.isConnected) return;
+      var content = document.createElement('template');
+      content.innerHTML = html;
+      var replacement = content.content.firstElementChild;
+      if (!replacement || replacement.id !== card.id) throw new Error('Diff changed; reload the Changes view');
+      // Swap only this card. HTMX preserves its normal cleanup, processing,
+      // and afterSwap/afterSettle hooks, including saved collapse state.
+      var scroll = window._captureDiffScroll();
+      var saved = card._diffScrollAnchor;
+      if (saved && scroller && Math.abs(scroller.scrollTop-saved.scrollTop) < 2) scroll = saved.snapshot;
+      htmx.swap(card, html, {swapStyle:'outerHTML'});
+      window._restoreDiffScroll(scroll, false);
+     }).catch(function(error) {
+      if (stopped || !card.isConnected || error.name === 'AbortError') return;
+      card.dataset.diffLoadFailed = 'true';
+      card.querySelector('[data-diff-load-status]').textContent = 'Unable to load this diff. Retry, or reopen Changes if files have changed.';
+      card.querySelector('[data-diff-retry]').classList.remove('hidden');
+     }).finally(function() {
+      pending.delete(card); inFlight--;
+      if (!stopped) refresh();
+     });
+   }
+   function refresh() {
+    if (stopped || !viewer.isConnected) return;
+    var panel = viewer.querySelector('#diff-content-inline:not(.hidden), #diff-content-split:not(.hidden)');
+    if (activePanel !== panel) {
+     loadObserver.disconnect(); stickyObserver.disconnect();
+     observed.clear(); visible.clear(); headers.clear(); activePanel = panel;
+    }
+    if (!panel) return;
+    observed.forEach(function(card) {
+     if (!card.isConnected) { loadObserver.unobserve(card); observed.delete(card); visible.delete(card); }
+    });
+    headers.forEach(function(header, sentinel) {
+     if (!header.isConnected) { stickyObserver.unobserve(sentinel); headers.delete(sentinel); }
+    });
+    panel.querySelectorAll('[data-diff-lazy-url]').forEach(function(card) {
+     if (observed.has(card)) return;
+     observed.add(card); loadObserver.observe(card);
+    });
+    panel.querySelectorAll('.diff-file-header').forEach(function(header) {
+     var sentinel = header.previousElementSibling;
+     if (!sentinel || !sentinel.hasAttribute('data-diff-sticky-sentinel')) {
+      sentinel = document.createElement('div');
+      sentinel.style.cssText = 'height:1px;margin-bottom:-1px;pointer-events:none;';
+      sentinel.setAttribute('aria-hidden','true');
+      sentinel.setAttribute('data-diff-sticky-sentinel','1');
+      header.before(sentinel);
+     }
+     if (headers.has(sentinel)) return;
+     headers.set(sentinel,header); stickyObserver.observe(sentinel);
+    });
+    pump();
+   }
+   return {refresh:refresh, destroy:function() {
+    stopped = true;
+    loadObserver.disconnect(); stickyObserver.disconnect();
+    pending.forEach(function(abort) { abort.abort(); });
+    visible.clear(); observed.clear(); headers.clear();
+   }};
+  }
+  window._refreshDiffPerformance();
+ })();
+ </script>
+}

@@ -1,6 +1,8 @@
 package components
 
 import (
+	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"strconv"
@@ -436,7 +438,7 @@ templ DiffViewerWithView(diffOutput string, initialView string) {
 			<p class="text-sm mt-1">No files were modified during this execution.</p>
 		</div>
 	} else {
-		@diffViewerContent(buildDiffRenderMetas(ParseDiffOutput(diffOutput)), initialView)
+		@diffViewerContent(buildDiffRenderMetas(ParseDiffOutput(diffOutput)), initialView, diffContentRevision(diffOutput, nil))
 	}
 }
 
@@ -455,7 +457,7 @@ templ DiffViewerWithReviewView(diffOutput string, taskID string, reviewComments 
 			<p class="text-sm mt-1">No files were modified during this execution.</p>
 		</div>
 	} else {
-		@diffViewerWithReviewContent(buildDiffRenderMetas(ParseDiffOutput(diffOutput)), taskID, reviewComments, initialView)
+		@diffViewerWithReviewContent(buildDiffRenderMetas(ParseDiffOutput(diffOutput)), taskID, reviewComments, initialView, diffContentRevision(diffOutput, reviewComments))
 	}
 }
 
@@ -529,8 +531,8 @@ func lineNumForReview(line DiffLine) int {
 	return reviewTargetForDiffLine(line).LineNumber
 }
 
-templ diffViewerWithReviewContent(metas []DiffFileRenderMeta, taskID string, reviewComments []models.ReviewComment, initialView string) {
-	<div id="diff-viewer" class="flex flex-col h-full" data-file-count={ fmt.Sprintf("%d", len(metas)) } data-task-id={ taskID } data-state-key={ diffViewerStateKey(metas, taskID) } data-initial-view={ normalizeDiffViewMode(initialView) }>
+templ diffViewerWithReviewContent(metas []DiffFileRenderMeta, taskID string, reviewComments []models.ReviewComment, initialView string, revision string) {
+	<div id="diff-viewer" data-diff-revision={ revision } hx-history="false" class="flex flex-col h-full" data-file-count={ fmt.Sprintf("%d", len(metas)) } data-task-id={ taskID } data-state-key={ diffViewerStateKey(metas, taskID) } data-initial-view={ normalizeDiffViewMode(initialView) }>
 		<!-- Toolbar -->
 		<div class="flex flex-wrap items-center gap-2 mb-4">
 			<div class="flex items-center gap-2 flex-1">
@@ -592,7 +594,7 @@ templ diffViewerWithReviewContent(metas []DiffFileRenderMeta, taskID string, rev
 		<!-- Diff Content with Review -->
 		<div id="diff-content-inline" class={ diffViewContentClass("inline", initialView) }>
 			for _, m := range metas {
-				if m.AutoLoad {
+				if m.AutoLoad && taskID == "" {
 					@inlineDiffFileWithReview(m.File, m.Index, shouldDefaultExpand(len(metas)), taskID, buildCommentMap(reviewComments))
 				} else {
 					@deferredDiffFileWithReview(m, taskID, "inline", true)
@@ -601,7 +603,7 @@ templ diffViewerWithReviewContent(metas []DiffFileRenderMeta, taskID string, rev
 		</div>
 		<div id="diff-content-split" class={ diffViewContentClass("split", initialView) }>
 			for _, m := range metas {
-				if m.AutoLoad {
+				if m.AutoLoad && taskID == "" {
 					@splitDiffFileWithReview(m.File, m.Index, shouldDefaultExpand(len(metas)), taskID, buildCommentMap(reviewComments))
 				} else {
 					@deferredDiffFileWithReview(m, taskID, "split", true)
@@ -685,7 +687,9 @@ templ diffViewerWithReviewContent(metas []DiffFileRenderMeta, taskID string, rev
 					else el.setAttribute('data-collapsed', '1');
 				});
 
-				diffFileStateBucket()[idx] = newState;
+				if (!newState) [document.getElementById('diff-file-' + idx), document.getElementById('diff-file-split-' + idx)].forEach(function(card) { if (card) { card.style.minHeight = ''; delete card._diffScrollAnchor; } });
+                diffFileStateBucket()[idx] = newState;
+                if (window._refreshDiffPerformance) window._refreshDiffPerformance();
 			}
 
 			function toggleAllDiffFiles(expand) {
@@ -708,7 +712,9 @@ templ diffViewerWithReviewContent(metas []DiffFileRenderMeta, taskID string, rev
 					toggleDiffFile(idx);
 				}
 				setTimeout(function() {
-					var el = document.getElementById('diff-file-' + idx);
+					var split = document.getElementById('diff-content-split');
+                    var prefix = split && !split.classList.contains('hidden') ? 'diff-file-split-' : 'diff-file-';
+                    var el = document.getElementById(prefix + idx);
 					if (el) el.scrollIntoView({behavior: 'smooth', block: 'start'});
 				}, 50);
 			}
@@ -744,7 +750,6 @@ templ diffViewerWithReviewContent(metas []DiffFileRenderMeta, taskID string, rev
 							var previousTransition = c.style.transition;
 							c.style.transition = 'none';
 							c.classList.toggle('rotate-90', savedExpanded);
-							c.getBoundingClientRect();
 							c.style.transition = previousTransition;
 						});
 						document.querySelectorAll('[data-diff-toggle="' + i + '"]').forEach(function(el) {
@@ -836,7 +841,8 @@ templ diffViewerWithReviewContent(metas []DiffFileRenderMeta, taskID string, rev
 				var btnSplit = document.getElementById('diff-btn-split');
 				if (!inlineEl || !splitEl || !btnInline || !btnSplit) return;
 
-				if (mode === 'split') {
+				var scroll = window._captureDiffScroll ? window._captureDiffScroll() : null;
+                if (mode === 'split') {
 					inlineEl.classList.add('hidden');
 					splitEl.classList.remove('hidden');
 					btnSplit.classList.add('btn-active');
@@ -847,7 +853,9 @@ templ diffViewerWithReviewContent(metas []DiffFileRenderMeta, taskID string, rev
 					btnInline.classList.add('btn-active');
 					btnSplit.classList.remove('btn-active');
 				}
-				if (persist !== false) {
+				if (window._refreshDiffPerformance) window._refreshDiffPerformance();
+				if (window._restoreDiffScroll) window._restoreDiffScroll(scroll, true);
+                if (persist !== false) {
 					persistDiffViewPreference(mode === 'split' ? 'split' : 'inline');
 				}
 			}
@@ -1347,57 +1355,8 @@ templ diffViewerWithReviewContent(metas []DiffFileRenderMeta, taskID string, rev
 				});
 			}
 
-			// Track when sticky diff file headers are pinned. Headers keep their
-			// original rounded corners in normal flow, then square their top
-			// corners while pinned so diff rows cannot show through the radius.
-			window._wireDiffStickyHeaders = window._wireDiffStickyHeaders || (function() {
-				var ticking = false;
-
-				function updateStickyHeaders() {
-					ticking = false;
-					var viewer = document.getElementById("diff-viewer") || document;
-					viewer.querySelectorAll(".diff-file-header").forEach(function(header) {
-						var scroller = header.closest("#tab-changes") || document.getElementById("main-content");
-						var rootTop = scroller ? scroller.getBoundingClientRect().top : 0;
-						var sentinel = header.previousElementSibling;
-						if (!sentinel || sentinel.getAttribute("data-diff-sticky-sentinel") !== "1") return;
-						if (sentinel.getBoundingClientRect().top <= rootTop + 1) {
-							header.setAttribute("data-stuck", "1");
-						} else {
-							header.removeAttribute("data-stuck");
-						}
-					});
-				}
-
-				function scheduleUpdate() {
-					if (ticking) return;
-					ticking = true;
-					requestAnimationFrame(updateStickyHeaders);
-				}
-
-				return function() {
-					var viewer = document.getElementById("diff-viewer") || document;
-					viewer.querySelectorAll(".diff-file-header:not([data-sticky-wired])").forEach(function(header) {
-						var sentinel = document.createElement("div");
-						sentinel.style.cssText = "height:1px;margin-bottom:-1px;pointer-events:none;";
-						sentinel.setAttribute("aria-hidden", "true");
-						sentinel.setAttribute("data-diff-sticky-sentinel", "1");
-						header.parentNode.insertBefore(sentinel, header);
-						header.setAttribute("data-sticky-wired", "1");
-					});
-					scheduleUpdate();
-				};
-			})();
-			window._wireDiffStickyHeaders();
-			if (!window._diffStickyHeadersScrollRegistered) {
-				window._diffStickyHeadersScrollRegistered = true;
-				// Capture nested workspace scrolling, including after HTMX replaces it.
-				document.addEventListener("scroll", window._wireDiffStickyHeaders, { passive: true, capture: true });
-				window.addEventListener("resize", window._wireDiffStickyHeaders);
-				document.body.addEventListener("htmx:afterSettle", window._wireDiffStickyHeaders);
-			}
-
 		</script>
+		@diffViewerPerformanceScript()
 		<style>
 			/* Sticky file headers within the diff viewer.
 			   The Task Detail page scroll container is #main-content. The
@@ -1690,6 +1649,8 @@ templ inlineDiffFileWithReview(f DiffFile, idx int, defaultExpanded bool, taskID
 								<tr
 									class={ "diff-review-line", inlineLineClass(line.Type) }
 									data-file-path={ f.Path }
+									data-old-line={ fmt.Sprintf("%d", line.OldNum) }
+									data-new-line={ fmt.Sprintf("%d", line.NewNum) }
 									data-line-num={ fmt.Sprintf("%d", lineNumForReview(line)) }
 									data-line-type={ lineTypeForDiff(line.Type) }
 								>
@@ -1724,8 +1685,8 @@ templ inlineDiffFileWithReview(f DiffFile, idx int, defaultExpanded bool, taskID
 	</div>
 }
 
-templ diffViewerContent(metas []DiffFileRenderMeta, initialView string) {
-	<div id="diff-viewer" class="flex flex-col h-full" data-file-count={ fmt.Sprintf("%d", len(metas)) } data-state-key={ diffViewerStateKey(metas, "") } data-initial-view={ normalizeDiffViewMode(initialView) }>
+templ diffViewerContent(metas []DiffFileRenderMeta, initialView string, revision string) {
+	<div id="diff-viewer" data-diff-revision={ revision } hx-history="false" class="flex flex-col h-full" data-file-count={ fmt.Sprintf("%d", len(metas)) } data-state-key={ diffViewerStateKey(metas, "") } data-initial-view={ normalizeDiffViewMode(initialView) }>
 		<!-- Toolbar -->
 		<div class="flex flex-wrap items-center gap-2 mb-4">
 			<div class="flex items-center gap-2 flex-1">
@@ -1935,7 +1896,9 @@ templ diffViewerContent(metas []DiffFileRenderMeta, initialView string) {
 				});
 
 				// Persist state
-				diffFileStateBucket()[idx] = newState;
+				if (!newState) [document.getElementById('diff-file-' + idx), document.getElementById('diff-file-split-' + idx)].forEach(function(card) { if (card) { card.style.minHeight = ''; delete card._diffScrollAnchor; } });
+                diffFileStateBucket()[idx] = newState;
+                if (window._refreshDiffPerformance) window._refreshDiffPerformance();
 			}
 
 			function toggleAllDiffFiles(expand) {
@@ -1995,7 +1958,6 @@ templ diffViewerContent(metas []DiffFileRenderMeta, initialView string) {
 							var previousTransition = c.style.transition;
 							c.style.transition = 'none';
 							c.classList.toggle('rotate-90', savedExpanded);
-							c.getBoundingClientRect();
 							c.style.transition = previousTransition;
 						});
 						document.querySelectorAll('[data-diff-toggle="' + i + '"]').forEach(function(el) {
@@ -2087,7 +2049,8 @@ templ diffViewerContent(metas []DiffFileRenderMeta, initialView string) {
 				var btnSplit = document.getElementById('diff-btn-split');
 				if (!inlineEl || !splitEl || !btnInline || !btnSplit) return;
 
-				if (mode === 'split') {
+				var scroll = window._captureDiffScroll ? window._captureDiffScroll() : null;
+                if (mode === 'split') {
 					inlineEl.classList.add('hidden');
 					splitEl.classList.remove('hidden');
 					btnSplit.classList.add('btn-active');
@@ -2098,62 +2061,15 @@ templ diffViewerContent(metas []DiffFileRenderMeta, initialView string) {
 					btnInline.classList.add('btn-active');
 					btnSplit.classList.remove('btn-active');
 				}
-				if (persist !== false) {
+				if (window._refreshDiffPerformance) window._refreshDiffPerformance();
+				if (window._restoreDiffScroll) window._restoreDiffScroll(scroll, true);
+                if (persist !== false) {
 					persistDiffViewPreference(mode === 'split' ? 'split' : 'inline');
 				}
 			}
 
-			// Track when sticky diff file headers are pinned. Headers keep their
-			// original rounded corners in normal flow, then square their top
-			// corners while pinned so diff rows cannot show through the radius.
-			window._wireDiffStickyHeaders = window._wireDiffStickyHeaders || (function() {
-				var ticking = false;
-
-				function updateStickyHeaders() {
-					ticking = false;
-					var viewer = document.getElementById("diff-viewer") || document;
-					viewer.querySelectorAll(".diff-file-header").forEach(function(header) {
-						var scroller = header.closest("#tab-changes") || document.getElementById("main-content");
-						var rootTop = scroller ? scroller.getBoundingClientRect().top : 0;
-						var sentinel = header.previousElementSibling;
-						if (!sentinel || sentinel.getAttribute("data-diff-sticky-sentinel") !== "1") return;
-						if (sentinel.getBoundingClientRect().top <= rootTop + 1) {
-							header.setAttribute("data-stuck", "1");
-						} else {
-							header.removeAttribute("data-stuck");
-						}
-					});
-				}
-
-				function scheduleUpdate() {
-					if (ticking) return;
-					ticking = true;
-					requestAnimationFrame(updateStickyHeaders);
-				}
-
-				return function() {
-					var viewer = document.getElementById("diff-viewer") || document;
-					viewer.querySelectorAll(".diff-file-header:not([data-sticky-wired])").forEach(function(header) {
-						var sentinel = document.createElement("div");
-						sentinel.style.cssText = "height:1px;margin-bottom:-1px;pointer-events:none;";
-						sentinel.setAttribute("aria-hidden", "true");
-						sentinel.setAttribute("data-diff-sticky-sentinel", "1");
-						header.parentNode.insertBefore(sentinel, header);
-						header.setAttribute("data-sticky-wired", "1");
-					});
-					scheduleUpdate();
-				};
-			})();
-			window._wireDiffStickyHeaders();
-			if (!window._diffStickyHeadersScrollRegistered) {
-				window._diffStickyHeadersScrollRegistered = true;
-				// Capture nested workspace scrolling, including after HTMX replaces it.
-				document.addEventListener("scroll", window._wireDiffStickyHeaders, { passive: true, capture: true });
-				window.addEventListener("resize", window._wireDiffStickyHeaders);
-				document.body.addEventListener("htmx:afterSettle", window._wireDiffStickyHeaders);
-			}
-
 		</script>
+		@diffViewerPerformanceScript()
 	</div>
 }
 
@@ -2230,6 +2146,8 @@ templ splitDiffFileWithReview(f DiffFile, idx int, defaultExpanded bool, taskID 
 								<tr
 									class="diff-review-line"
 									data-file-path={ f.Path }
+									data-old-line={ fmt.Sprintf("%d", pair.Left.OldNum) }
+									data-new-line={ fmt.Sprintf("%d", pair.Right.NewNum) }
 									data-line-num={ fmt.Sprintf("%d", lineNumForReview(pair.Right)) }
 									data-line-type={ lineTypeForDiff(pair.Right.Type) }
 									data-review-layout="split"
@@ -2776,6 +2694,10 @@ templ deferredDiffFileWithReview(meta DiffFileRenderMeta, taskID string, view st
 	<div
 		id={ diffFileCardID(meta.Index, view) }
 		class="diff-file-card card bg-base-100 border border-base-300 scroll-mt-2"
+		if meta.AutoLoad && taskID != "" {
+			data-diff-lazy-url={ fmt.Sprintf("/tasks/%s/changes/file?file_index=%d&view=%s&review=%t", taskID, meta.Index, view, reviewMode) }
+			data-diff-file-path={ meta.File.Path }
+		}
 	>
 		@diffFileHeader(meta.File, meta.Index, true, view == "split")
 		<div
@@ -2787,7 +2709,10 @@ templ deferredDiffFileWithReview(meta DiffFileRenderMeta, taskID string, view st
 			class="diff-file-body overflow-hidden transition-all duration-300 ease-in-out"
 		>
 			<div class="p-6 bg-base-100 text-center">
-				if meta.CanLoadOnDemand {
+				if meta.AutoLoad && taskID != "" {
+					<div role="status" data-diff-load-status class="text-sm opacity-60">Diff loads when visible.</div>
+					<button type="button" class="btn btn-sm btn-ghost hidden" data-diff-retry onclick="retryLazyDiffFile(this)">Retry loading diff</button>
+				} else if meta.CanLoadOnDemand {
 					<div class="text-sm font-medium mb-1">Large file diff not shown by default</div>
 					<div class="text-xs opacity-60 mb-4">
 						Auto-load is limited to { fmt.Sprintf("%d lines / %s", autoLoadFileDiffLines, formatByteSize(autoLoadFileDiffChars)) } per file.
@@ -2906,4 +2831,11 @@ func minInt(a int, b int) int {
 // shouldDefaultExpand returns true so all diff files are expanded by default.
 func shouldDefaultExpand(fileCount int) bool {
 	return true
+}
+
+// A server revision detects edits even when file bodies are not mounted yet.
+// Collapse state remains keyed by file identity, independently of content.
+func diffContentRevision(diff string, comments []models.ReviewComment) string {
+ commentJSON, _ := json.Marshal(comments)
+ return fmt.Sprintf("%x-%x", sha256.Sum256([]byte(diff)), sha256.Sum256(commentJSON))
 }
