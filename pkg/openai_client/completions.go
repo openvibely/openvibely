@@ -115,8 +115,7 @@ func (c *Client) SendCompletions(ctx context.Context, prompt string, opts *Compl
 	}
 
 	tools := make([]map[string]interface{}, 0, len(toolDefs))
-	wireDefs := prepareStrictTools(toolDefs)
-	for _, td := range wireDefs {
+	for _, td := range toolDefs {
 		function := map[string]interface{}{"name": td.Name, "description": td.Description, "parameters": td.ParameterSchema()}
 		function["strict"] = false
 		tools = append(tools, map[string]interface{}{

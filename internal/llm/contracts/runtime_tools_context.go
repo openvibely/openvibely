@@ -22,7 +22,6 @@ type RuntimeToolDefinition struct {
 	// Parameters holds externally supplied JSON; built-ins use Schema.
 	Parameters json.RawMessage
 	Schema     *toolschema.Schema
-	Strict     *bool
 	Access     RuntimeToolAccess
 }
 

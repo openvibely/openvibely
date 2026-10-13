@@ -132,7 +132,6 @@ type ActionDef struct {
 
 	// Schema is the provider-independent definition of the tool input.
 	Schema *toolschema.Schema
-	Strict *bool
 }
 
 // chainSchemaProperties is the JSON Schema for the chain configuration object.
@@ -2737,7 +2736,6 @@ func toolDefsForContext(mode models.ChatMode, surface Surface, includeThreadTool
 				Name:        a.Name,
 				Description: a.Description,
 				Schema:      a.Schema,
-				Strict:      a.Strict,
 				Access:      runtimeToolAccessForAction(a.Access),
 			})
 		}
