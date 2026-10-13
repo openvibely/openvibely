@@ -12,9 +12,13 @@ type Definition struct {
 	Schema      *toolschema.Schema
 }
 
-func Definitions(policy BashPolicy) []Definition {
-	return []Definition{readFileTool(), writeFileTool(), editFileTool(), bashTool(policy), listFilesTool(), grepSearchTool()}
+// Definitions returns a fresh slice around shared, read-only schemas.
+func Definitions() []Definition {
+	return append([]Definition(nil), definitions...)
 }
+
+var definitions = []Definition{readFileTool(), writeFileTool(), editFileTool(), bashTool(), listFilesTool(), grepSearchTool()}
+
 func readFileTool() Definition {
 	return Definition{
 		Name:        "read_file",
@@ -93,14 +97,9 @@ func editFileTool() Definition {
 	}
 }
 
-func bashTool(policy BashPolicy) Definition {
-	description := fmt.Sprintf("Execute a bash command and return its stdout and stderr. The command runs in the working directory. Use this for running tests, builds, git commands, and other shell operations. Commands have a default timeout of %d seconds.", policy.DefaultTimeoutSeconds)
-	timeoutDescription := fmt.Sprintf("Timeout in seconds. Default: %d.", policy.DefaultTimeoutSeconds)
-	if policy.MaxTimeoutSeconds > 0 {
-		timeoutDescription += fmt.Sprintf(" Max: %d.", policy.MaxTimeoutSeconds)
-	} else {
-		timeoutDescription += " Positive explicit values are allowed without a minimum or maximum cap."
-	}
+func bashTool() Definition {
+	description := fmt.Sprintf("Execute a bash command and return its stdout and stderr. The command runs in the working directory. Use this for running tests, builds, git commands, and other shell operations. Commands have a default timeout of %d seconds.", DefaultBashTimeoutSeconds)
+	timeoutDescription := fmt.Sprintf("Timeout in seconds. Default: %d. Max: %d.", DefaultBashTimeoutSeconds, MaxBashTimeoutSeconds)
 
 	return Definition{
 		Name:        "bash",

@@ -33,7 +33,7 @@ type ToolCall struct {
 // in OpenAI's function calling format.
 func DefaultTools() []ToolDefinition {
 	var out []ToolDefinition
-	for _, d := range agenttools.Definitions(agenttools.BashPolicy{DefaultTimeoutSeconds: 120, MaxTimeoutSeconds: 600}) {
+	for _, d := range agenttools.Definitions() {
 		out = append(out, ToolDefinition{
 			Type: "function", Name: d.Name, Description: d.Description, Schema: d.Schema})
 	}
@@ -56,10 +56,7 @@ func filterToolDefinitions(tools []ToolDefinition, filter func(string) bool) []T
 // ExecuteTool runs a tool locally and returns the output string.
 // It resolves relative paths against workDir.
 func ExecuteTool(ctx context.Context, workDir, name string, input json.RawMessage) (string, error) {
-	return agenttools.Execute(ctx, workDir, name, input, agenttools.BashPolicy{
-		DefaultTimeoutSeconds: 120,
-		MaxTimeoutSeconds:     600,
-	})
+	return agenttools.Execute(ctx, workDir, name, input)
 }
 
 func (t ToolDefinition) ParameterSchema() json.RawMessage {
