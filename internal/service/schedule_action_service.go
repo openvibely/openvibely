@@ -29,6 +29,8 @@ type ScheduleActionError struct {
 	Err   error
 }
 
+func (e *ScheduleActionError) Unwrap() error { return e.Err }
+
 func (e *ScheduleActionError) Error() string {
 	if e.Err != nil {
 		return e.Err.Error()
@@ -168,6 +170,7 @@ func (s *ScheduleActionService) ModifyAbsolute(ctx context.Context, req ModifyAb
 		return nil, actionError(ScheduleActionReferenceError, "", err)
 	}
 	result := &ScheduleActionResult{Task: task, Schedule: schedule}
+
 	if err := models.ValidateScheduleRepeatInterval(req.RepeatInterval); err != nil {
 		return result, actionError(ScheduleActionIntervalError, fmt.Sprintf("%d", req.RepeatInterval), err)
 	}
@@ -323,6 +326,7 @@ func (s *ScheduleActionService) Modify(ctx context.Context, projectID string, re
 		return nil, actionError(ScheduleActionReferenceError, "", err)
 	}
 	result := &ScheduleActionResult{Task: task, Schedule: schedule}
+
 	changes := make([]string, 0, 6)
 	timeChanged := false
 	var hour, minute int
@@ -454,7 +458,7 @@ func (s *ScheduleActionService) Modify(ctx context.Context, projectID string, re
 		}
 		schedule.ClearContextOnStart = *req.ClearContextOnStart
 	}
-	if schedule.NextRun != nil && (timeChanged || (req.Enabled != nil && *req.Enabled)) {
+	if schedule.NextRun != nil && (timeChanged || (req.Enabled != nil && *req.Enabled) || (task.Category == models.CategoryChat && schedule.Enabled)) {
 		lifecycleOptions := scheduleTaskLifecycleOptions{ResetTerminal: true}
 		if req.Enabled != nil && *req.Enabled {
 			lifecycleOptions.RequireEnabledSchedule = true
@@ -505,8 +509,12 @@ func (s *ScheduleActionService) applyScheduleTaskLifecycle(ctx context.Context, 
 		return false
 	}
 	task := result.Task
+	if task.Category == models.CategoryChat && (result.Schedule == nil || !result.Schedule.Enabled) {
+		return false
+	}
 	categoryChanged := false
-	if opts.PromoteToScheduled && task.Category != models.CategoryScheduled {
+	// Scheduling a conversation opts it into the ordinary worker execution path.
+	if (opts.PromoteToScheduled || task.Category == models.CategoryChat) && task.Category != models.CategoryScheduled {
 		if err := s.taskRepo.UpdateCategory(ctx, task.ID, models.CategoryScheduled); err != nil {
 			result.Warnings = append(result.Warnings, err)
 		} else {

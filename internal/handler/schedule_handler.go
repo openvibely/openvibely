@@ -247,7 +247,7 @@ func (h *Handler) CreateSchedule(c echo.Context) error {
 	})
 	if err != nil {
 		applog.Infof("[handler] CreateSchedule error: %v", err)
-		return err
+		return scheduleFormHTTPError(err)
 	}
 	applog.Infof("[handler] CreateSchedule success id=%s next_run=%v", result.Schedule.ID, result.Schedule.NextRun)
 	for _, warning := range result.Warnings {
@@ -314,7 +314,7 @@ func (h *Handler) UpdateSchedule(c echo.Context) error {
 	})
 	if err != nil {
 		applog.Infof("[handler] UpdateSchedule error: %v", err)
-		return err
+		return scheduleFormHTTPError(err)
 	}
 	schedule = result.Schedule
 	applog.Infof("[handler] UpdateSchedule success id=%s next_run=%v", schedule.ID, schedule.NextRun)

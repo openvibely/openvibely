@@ -30,7 +30,7 @@ You can drag cards between categories and active sub-lanes to change where work 
 
 ## Create a Task
 
-1. Click `+ Add Task` to open a new task workspace.
+1. Click the plus button (`Add Task`) to open a new task workspace.
 2. Write the request in the thread composer and add any attachments.
 3. Set the model, agent, category, priority, and other properties in the Details panel.
 4. Send the first message to create the task. Active tasks begin execution; Backlog tasks are saved for later.
@@ -80,20 +80,11 @@ When to use:
 
 For an eligible worktree-backed task, open `Local` to choose a merge commit, fast-forward-only merge, rebase onto the target branch, or squash merge. Use `GitHub` to create or open the task's pull request. OpenVibely revalidates the task branch, target branch, worktree, and pull request state before applying an action. If the task is stale or conflicts, use the offered rebase or recovery action and review the refreshed state before retrying.
 
-## Backlog and Completed Bulk Actions
+## Search, Filters, and Batch Actions
 
-Backlog menu includes:
+Open the search control to narrow the board. Backlog and Completed column menus provide priority and status filters and sorting; Completed also filters merge outcomes. Clear filters to restore hidden cards.
 
-- Sorting options
-- `Execute All` (and priority-specific execute actions)
-- `Delete All`
-
-Completed menu includes:
-
-- Sorting options
-- `Delete All`
-
-Use bulk actions when you want to process many tasks quickly (for example, execute only urgent backlog tasks first).
+Command-click a card's body on macOS or Ctrl-click on Windows/Linux to select or deselect it without opening the task. Select multiple cards this way or use a column's `Select all`, then choose an available batch action: run backlog tasks, stop active work, merge completed branches, create pull requests, or delete tasks. Review the affected selection and any confirmation before applying destructive actions. Batch progress remains visible across board refreshes. Active keeps its execution order rather than offering manual sorting.
 
 ## Task Detail Page
 
@@ -123,11 +114,15 @@ Send follow-up messages from the `Thread` tab to continue a task after its initi
 
 When a follow-up is queued and the task thread shows a pending input row, a **Steer** button appears on that row. Steering from a task thread redirects the active turn rather than queuing behind it — use this when you want to correct or narrow a follow-up before the worker picks it up. You can also cancel a queued follow-up before it is applied. If the turn has already started, the steer may be rejected and you should send a new follow-up instead.
 
+Pending queued messages and steering instructions can be edited before delivery. Opening the editor holds the message so it cannot dispatch during editing; save or cancel to release it. Instructions already delivered to the provider are not editable.
+
+Use the searchable model picker in the composer to choose a model, save favorites, and adjust supported reasoning effort. Command/Ctrl+M opens or closes the picker. Context compaction progress appears in response activity when conversation history is compacted.
+
 ## Task Goals
 
 A Task Goal is a persistent objective that the built-in Goal Agent evaluates after each execution turn. When a goal is set, the agent automatically queues continuation follow-ups until the objective is achieved, blocked, or cleared — without manual follow-up messages.
 
-Set a goal in the task edit dialog (Goal section). The goal panel on the task detail page shows the objective, current status (`active`, `paused`, `achieved`, `blocked`, `cleared`, `failed`), the agent's last evaluation reason, and when it was last checked. Clear the objective text and save to remove the goal. The separate `Auto-merge to target branch when goal is achieved` option uses the same guarded worktree merge flow when the Goal Agent marks the stored goal achieved; paused, blocked, cleared, and failed goals do not trigger it.
+Set or edit a goal from the task's Details panel. The goal panel shows the objective, current status (`active`, `paused`, `achieved`, `blocked`, `cleared`, `failed`), the agent's last evaluation reason, and when it was last checked. Clear the objective text and save to remove the goal. The separate `Auto-merge to target branch when goal is achieved` option uses the same guarded worktree merge flow when the Goal Agent marks the stored goal achieved; paused, blocked, cleared, and failed goals do not trigger it.
 
 In Chat Orchestrate mode, you can create a task and set a goal on it in the same turn using `set_task_goal`.
 

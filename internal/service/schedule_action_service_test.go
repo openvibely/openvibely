@@ -796,3 +796,50 @@ func TestScheduleRecurrenceEditDoesNotReplayPastAnchor(t *testing.T) {
 		require.True(t, result.Schedule.RunAt.Equal(anchor))
 	}
 }
+
+func TestConversationScheduleActions(t *testing.T) {
+	for _, repeat := range []models.RepeatType{models.RepeatOnce, models.RepeatDaily} {
+		for _, action := range []string{"browser create", "runtime create", "browser edit", "runtime edit", "browser resume", "runtime resume"} {
+			t.Run(string(repeat)+"/"+action, func(t *testing.T) {
+				ctx := context.Background()
+				db := testutil.NewTestDB(t)
+				tasks := repository.NewTaskRepo(db, nil)
+				schedules := repository.NewScheduleRepo(db)
+				svc := NewScheduleActionService(tasks, schedules)
+				task := &models.Task{ProjectID: "default", Title: "Conversation", Prompt: "test", Category: models.CategoryChat, Status: models.StatusCompleted}
+				require.NoError(t, tasks.Create(ctx, task))
+				runAt := time.Now().Add(time.Hour).UTC()
+				legacy := &models.Schedule{TaskID: task.ID, RunAt: runAt, RepeatType: repeat, RepeatInterval: 1, Enabled: true}
+				if action != "browser create" && action != "runtime create" {
+					legacy.Enabled = action != "browser resume" && action != "runtime resume"
+					require.NoError(t, schedules.Create(ctx, legacy))
+				}
+				var result *ScheduleActionResult
+				var err error
+				switch action {
+				case "browser create":
+					result, err = svc.CreateAbsoluteForTask(ctx, CreateAbsoluteScheduleForTaskRequest{TaskID: task.ID, RunAt: runAt, RepeatType: repeat, RepeatInterval: 1})
+				case "runtime create":
+					result, err = svc.Create(ctx, "default", ScheduleTaskRequest{TaskID: task.ID, Time: "09:30", Repeat: string(repeat)})
+				case "browser edit":
+					result, err = svc.ModifyAbsolute(ctx, ModifyAbsoluteScheduleRequest{ScheduleID: legacy.ID, RunAt: runAt.Add(time.Hour), RepeatType: repeat, RepeatInterval: 1})
+				case "runtime edit":
+					result, err = svc.Modify(ctx, "default", ModifyScheduleRequest{ScheduleID: legacy.ID, Time: "10:30"})
+				case "browser resume":
+					result, err = svc.Toggle(ctx, "default", legacy.ID)
+				case "runtime resume":
+					enabled := true
+					result, err = svc.Modify(ctx, "default", ModifyScheduleRequest{ScheduleID: legacy.ID, Enabled: &enabled})
+				}
+				require.NoError(t, err)
+				require.Empty(t, result.Warnings)
+				require.True(t, result.Schedule.Enabled)
+				require.NotNil(t, result.Schedule.NextRun)
+				stored, err := tasks.GetByID(ctx, task.ID)
+				require.NoError(t, err)
+				require.Equal(t, models.CategoryScheduled, stored.Category)
+				require.Equal(t, models.StatusPending, stored.Status)
+			})
+		}
+	}
+}

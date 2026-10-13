@@ -54,6 +54,8 @@ At the bottom input bar you can set:
 
 Then send with Enter (Shift+Enter for new line).
 
+The model picker supports search, provider groups, saved favorites, and supported reasoning-effort overrides. Command/Ctrl+M opens or closes it. Draft text and model selections are retained in their project or task context while navigating.
+
 ## Plan And Orchestrate Modes
 
 The chat input includes a mode selector. OpenVibely defaults to `Orchestrate` when no mode is selected, and the selected mode is remembered per project in the browser.
@@ -120,6 +122,10 @@ Use attachments whenever the answer depends on local file content or visual cont
 ## Queueing And Steering
 
 If Chat is already responding, a new prompt can become queued input for the next turn. When the UI offers active-turn steering, a prompt can instead redirect the current response. This keeps the project conversation responsive without forcing users to open another thread just to add context or correct scope.
+
+Pending queued messages and steering instructions offer an edit action before delivery. The editor temporarily holds a message from dispatch; saving or cancelling releases the hold. Already-delivered instructions cannot be edited.
+
+Context compaction progress is shown in response activity. Mermaid diagrams render as complete diagram blocks arrive during streaming.
 
 ## Project Scope
 

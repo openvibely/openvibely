@@ -1769,6 +1769,7 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 				function _computeDiffFingerprint(container) {
 					var viewer = container && container.querySelector('#diff-viewer');
 					if (!viewer) return '';
+                    if (viewer.dataset.diffRevision) return viewer.dataset.diffRevision;
 					// Use a simple hash of the full diff viewer HTML for accurate
 					// change detection. The previous badge+row-count approach missed
 					// content changes within existing lines.
@@ -1826,7 +1827,10 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 						var scrollY = window.scrollY || window.pageYOffset || 0;
 						var viewMode = _getDiffViewMode();
 
-							changesContent.innerHTML = html;
+							var diffScroll = window._captureDiffScroll ? window._captureDiffScroll() : null;
+                            var oldViewer = changesContent.querySelector('#diff-viewer');
+                            if (oldViewer && oldViewer._diffPerformance) oldViewer._diffPerformance.destroy();
+                            changesContent.innerHTML = html;
 							if (typeof htmx !== 'undefined' && typeof htmx.process === 'function') {
 								htmx.process(changesContent);
 							}
@@ -1837,7 +1841,8 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 								if ((viewMode === 'inline' || viewMode === 'split') && typeof switchDiffView === 'function') {
 									switchDiffView(viewMode, false);
 								}
-								// Restore scroll position so the user stays where they were.
+								if (window._restoreDiffScroll) window._restoreDiffScroll(diffScroll, true);
+									// Restore scroll position so the user stays where they were.
 								window.scrollTo(scrollX, scrollY);
 							});
 					}).catch(function() {
