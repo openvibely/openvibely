@@ -133,3 +133,11 @@ func TestProviderWireStrictSchemas(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestOpenRootToolStaysNonStrict(t *testing.T) {
+	raw := json.RawMessage(`{"type":"object"}`)
+	got := prepareStrictTools([]ToolDefinition{{Name: "custom", InputSchema: raw}})[0]
+	if got.Strict == nil || *got.Strict || string(got.InputSchema) != string(raw) {
+		t.Fatalf("open schema changed: %+v", got)
+	}
+}
