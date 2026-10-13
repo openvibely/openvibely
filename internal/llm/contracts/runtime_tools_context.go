@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"strings"
+
+	"github.com/openvibely/openvibely/pkg/toolschema"
 )
 
 // RuntimeToolDefinition is a provider-agnostic tool definition injected at request time.
@@ -17,8 +19,12 @@ const (
 type RuntimeToolDefinition struct {
 	Name        string
 	Description string
-	Parameters  json.RawMessage
-	Access      RuntimeToolAccess
+	// Parameters holds externally supplied JSON; built-ins use Schema.
+	Parameters     json.RawMessage
+	Schema         *toolschema.Schema
+	Strict         *bool
+	StrictPriority int
+	Access         RuntimeToolAccess
 }
 
 // RuntimeToolExecutor runs request-scoped tools.
@@ -105,4 +111,8 @@ func RuntimeToolsFromContext(ctx context.Context) *RuntimeTools {
 		return tools
 	}
 	return nil
+}
+
+func (d RuntimeToolDefinition) ParameterSchema() json.RawMessage {
+	return toolschema.JSON(d.Schema, d.Parameters)
 }

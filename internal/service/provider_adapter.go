@@ -32,6 +32,7 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 	anthropicclient "github.com/openvibely/openvibely/pkg/anthropic_client"
 	openaiclient "github.com/openvibely/openvibely/pkg/openai_client"
+	"github.com/openvibely/openvibely/pkg/toolschema"
 )
 
 // ProviderAdapter isolates provider-specific call routing from core orchestration.
@@ -581,7 +582,22 @@ func artifactReaderRuntime(path string) *llmcontracts.RuntimeTools {
 		Definitions: []llmcontracts.RuntimeToolDefinition{{
 			Name: oversizedInputReaderTool, Access: llmcontracts.RuntimeToolAccessRead,
 			Description: "Read one bounded byte range from the oversized current input artifact. Use targeted offsets and never request the entire file.",
-			Parameters:  json.RawMessage(`{"type":"object","properties":{"offset":{"type":"integer","minimum":0},"limit":{"type":"integer","minimum":1,"maximum":65536}},"required":["offset","limit"],"additionalProperties":false}`),
+			Schema: &toolschema.Schema{
+				Type: "object",
+				Properties: map[string]*toolschema.Schema{
+					"offset": {
+						Type:    "integer",
+						Minimum: toolschema.Number("0"),
+					},
+					"limit": {
+						Type:    "integer",
+						Minimum: toolschema.Number("1"),
+						Maximum: toolschema.Number("65536"),
+					},
+				},
+				Required:             []string{"offset", "limit"},
+				AdditionalProperties: toolschema.Pointer(false),
+			},
 		}},
 		Executor: func(_ context.Context, name string, input json.RawMessage) (string, bool, bool, error) {
 			if name != oversizedInputReaderTool {
@@ -776,7 +792,7 @@ func estimateRuntimeToolDefinitionTokens(rt *llmcontracts.RuntimeTools) int {
 	}
 	total := 0
 	for _, def := range rt.Definitions {
-		total += estimatedUTF8Tokens(def.Name) + estimatedUTF8Tokens(def.Description) + estimatedUTF8Tokens(string(def.Parameters)) + estimatedUTF8Tokens(string(def.Access))
+		total += estimatedUTF8Tokens(def.Name) + estimatedUTF8Tokens(def.Description) + estimatedUTF8Tokens(string(def.ParameterSchema())) + estimatedUTF8Tokens(string(def.Access))
 	}
 	return total
 }

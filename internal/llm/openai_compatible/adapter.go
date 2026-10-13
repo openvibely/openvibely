@@ -603,7 +603,15 @@ func runtimeTools(ctx context.Context) []openaiclient.ToolDefinition {
 		if name == "" {
 			continue
 		}
-		out = append(out, openaiclient.ToolDefinition{Type: "function", Name: name, Description: strings.TrimSpace(def.Description), Parameters: def.Parameters})
+		out = append(out, openaiclient.ToolDefinition{
+			Type:           "function",
+			Name:           name,
+			Description:    strings.TrimSpace(def.Description),
+			Parameters:     def.Parameters,
+			Schema:         def.Schema,
+			Strict:         def.Strict,
+			StrictPriority: def.StrictPriority,
+		})
 	}
 	return out
 }

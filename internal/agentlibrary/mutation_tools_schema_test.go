@@ -16,8 +16,8 @@ func TestMutationToolSchemasAreValidJSONAndIncludeRequiredHints(t *testing.T) {
 	}
 	for _, def := range tools.Definitions {
 		var v map[string]any
-		if err := json.Unmarshal(def.Parameters, &v); err != nil {
-			t.Fatalf("invalid JSON schema for %s: %v\nschema:\n%s", def.Name, err, string(def.Parameters))
+		if err := json.Unmarshal(def.ParameterSchema(), &v); err != nil {
+			t.Fatalf("invalid JSON schema for %s: %v\nschema:\n%s", def.Name, err, string(def.ParameterSchema()))
 		}
 		props, ok := v["properties"].(map[string]any)
 		if !ok {

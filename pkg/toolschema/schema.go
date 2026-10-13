@@ -1,4 +1,4 @@
-// Package toolschema adapts tool schemas without changing the handler contract.
+// Package toolschema defines tool inputs independently of provider wire formats.
 package toolschema
 
 import (
@@ -7,223 +7,229 @@ import (
 	"fmt"
 	"io"
 	"sort"
-
-	"github.com/santhosh-tekuri/jsonschema/v5"
 )
 
-// Strict returns a closed, required-but-nullable schema. Unsupported schemas
-// remain non-strict rather than silently losing arbitrary object fields.
-// unions is the number of union fields charged to Anthropic's request budget.
-func Strict(raw json.RawMessage, anthropic bool) (converted json.RawMessage, unions int, err error) {
-	if len(raw) > 120000 {
-		return nil, 0, fmt.Errorf("strict schema size limit exceeded")
-	}
-	var schema map[string]any
-	decoder := json.NewDecoder(bytes.NewReader(raw))
-	decoder.UseNumber()
-	if err = decoder.Decode(&schema); err != nil {
-		return
-	}
-	if err = decoder.Decode(new(any)); err != io.EOF {
-		return nil, 0, fmt.Errorf("invalid trailing tool schema")
-	}
-	properties, enums := schemaSize(schema)
-	if properties > 5000 || enums > 1000 {
-		return nil, 0, fmt.Errorf("strict schema property or enum limit exceeded")
-	}
-	if schema["type"] != "object" {
-		return nil, 0, fmt.Errorf("tool root must be an object")
-	}
-	err = convert(schema, anthropic, &unions, 0)
-	if err != nil {
-		return nil, 0, err
-	}
-	_, enums = schemaSize(schema)
-	if enums > 1000 {
-		return nil, 0, fmt.Errorf("strict schema enum limit exceeded")
-	}
-	converted, err = json.Marshal(schema)
-	return
+// Schema is the shared definition for built-in tools. A property is optional
+// unless its name appears in Required. Nil AdditionalProperties means open;
+// serializers must never silently close arbitrary user data.
+// External schemas stay raw when they use features this representation cannot express.
+type Schema struct {
+	Type                 string             `json:"type,omitempty"`
+	Description          string             `json:"description,omitempty"`
+	Title                string             `json:"title,omitempty"`
+	Properties           map[string]*Schema `json:"properties,omitempty"`
+	Required             []string           `json:"required,omitempty"`
+	AdditionalProperties *bool              `json:"additionalProperties,omitempty"`
+	Items                *Schema            `json:"items,omitempty"`
+	Enum                 []any              `json:"enum,omitempty"`
+	Const                json.RawMessage    `json:"const,omitempty"`
+	Default              any                `json:"default,omitempty"`
+	Minimum              *json.Number       `json:"minimum,omitempty"`
+	Maximum              *json.Number       `json:"maximum,omitempty"`
+	MinLength            *int               `json:"minLength,omitempty"`
+	MaxLength            *int               `json:"maxLength,omitempty"`
+	MinItems             *int               `json:"minItems,omitempty"`
+	MaxItems             *int               `json:"maxItems,omitempty"`
+	Pattern              string             `json:"pattern,omitempty"`
 }
 
-func convert(s map[string]any, anthropic bool, unions *int, depth int) error {
-	if depth > 9 {
-		return fmt.Errorf("strict schema nesting limit exceeded")
+func Pointer[T any](v T) *T { return &v }
+
+// Literal preserves JSON constants, including false, zero and explicit null.
+func Literal(v any) json.RawMessage {
+	b, err := json.Marshal(v)
+	if err != nil {
+		panic(err)
 	}
-	for k := range s {
-		switch k {
-		case "type", "properties", "required", "additionalProperties", "items", "enum", "const", "description", "title", "default", "minimum", "maximum", "minLength", "maxLength", "minItems", "maxItems", "pattern":
-		default:
-			return fmt.Errorf("unsupported strict keyword %s", k)
+	return b
+}
+
+func Number(v string) *json.Number { n := json.Number(v); return &n }
+
+// JSON returns the unmodified handler contract. Raw schemas belong to external
+// tools; typed built-in definitions take precedence. Invalid built-in constants
+// are programming errors, like an invalid regexp passed to regexp.MustCompile.
+func JSON(s *Schema, raw json.RawMessage) json.RawMessage {
+	if s == nil {
+		return raw
+	}
+	b, err := json.Marshal(s)
+	if err != nil {
+		panic(fmt.Sprintf("invalid built-in tool schema: %v", err))
+	}
+	return b
+}
+
+// WithoutProperties returns a copy suitable for request-scoped restrictions.
+func (s *Schema) WithoutProperties(names ...string) *Schema {
+	copy := *s
+	copy.Properties = make(map[string]*Schema, len(s.Properties))
+	removed := map[string]bool{}
+	for _, name := range names {
+		removed[name] = true
+	}
+	for name, child := range s.Properties {
+		if !removed[name] {
+			copy.Properties[name] = child
 		}
 	}
-	delete(s, "default")
-	if value, ok := s["const"]; ok {
-		if _, hasEnum := s["enum"]; hasEnum {
-			return fmt.Errorf("combined const and enum")
-		}
-		s["enum"] = []any{value}
-		delete(s, "const")
-	}
-	if anthropic {
-		for _, k := range []string{"minimum", "maximum", "minLength", "maxLength", "minItems", "maxItems", "pattern"} {
-			if v, ok := s[k]; ok {
-				desc, _ := s["description"].(string)
-				s["description"] = fmt.Sprintf("%s Constraint: %s=%v.", desc, k, v)
-				delete(s, k)
-			}
+	copy.Required = nil
+	for _, name := range s.Required {
+		if !removed[name] {
+			copy.Required = append(copy.Required, name)
 		}
 	}
-	kind, ok := s["type"].(string)
-	if !ok {
-		return fmt.Errorf("unsupported strict type")
+	return &copy
+}
+
+// ParseExternal is deliberately conservative: unsupported keywords/types cause
+// strict mode to be disabled, retaining the original JSON without data loss.
+func ParseExternal(raw json.RawMessage) (*Schema, error) {
+	if len(raw) > 120000 {
+		return nil, fmt.Errorf("strict schema size limit exceeded")
 	}
-	switch kind {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	dec.DisallowUnknownFields()
+	var s *Schema
+	if err := dec.Decode(&s); err != nil {
+		return nil, err
+	}
+	if err := dec.Decode(new(any)); err != io.EOF {
+		return nil, fmt.Errorf("invalid trailing tool schema")
+	}
+	return s, nil
+}
+
+type Cost struct {
+	Optional int
+	Unions   int
+}
+type serializer struct {
+	property    func(map[string]any, bool, *Cost) bool
+	constraints func(map[string]any)
+}
+
+func marshalStrict(s *Schema, raw json.RawMessage, rules serializer) (json.RawMessage, Cost, error) {
+	var cost Cost
+	if s == nil {
+		var err error
+		s, err = ParseExternal(raw)
+		if err != nil {
+			return nil, cost, err
+		}
+	}
+	if s == nil || s.Type != "object" {
+		return nil, cost, fmt.Errorf("tool root must be an object")
+	}
+	properties, enums := 0, 0
+	out, err := build(s, rules, &cost, 0, &properties, &enums)
+	if err != nil {
+		return nil, cost, err
+	}
+	if properties > 5000 || enums > 1000 {
+		return nil, cost, fmt.Errorf("strict schema property or enum limit exceeded")
+	}
+	data, err := json.Marshal(out)
+	if len(data) > 120000 {
+		return nil, cost, fmt.Errorf("strict schema size limit exceeded")
+	}
+	return data, cost, err
+}
+
+func build(s *Schema, rules serializer, cost *Cost, depth int, properties, enums *int) (map[string]any, error) {
+	if s == nil || depth > 9 {
+		return nil, fmt.Errorf("invalid or deeply nested strict schema")
+	}
+	out := map[string]any{"type": s.Type}
+	if s.Description != "" {
+		out["description"] = s.Description
+	}
+	if s.Title != "" {
+		out["title"] = s.Title
+	}
+	if s.Enum != nil {
+		out["enum"] = append([]any{}, s.Enum...)
+	}
+	if s.Const != nil {
+		if s.Enum != nil {
+			return nil, fmt.Errorf("combined const and enum")
+		}
+		out["enum"] = []any{s.Const}
+	}
+	if s.Minimum != nil {
+		out["minimum"] = *s.Minimum
+	}
+	if s.Maximum != nil {
+		out["maximum"] = *s.Maximum
+	}
+	if s.MinLength != nil {
+		out["minLength"] = *s.MinLength
+	}
+	if s.MaxLength != nil {
+		out["maxLength"] = *s.MaxLength
+	}
+	if s.MinItems != nil {
+		out["minItems"] = *s.MinItems
+	}
+	if s.MaxItems != nil {
+		out["maxItems"] = *s.MaxItems
+	}
+	if s.Pattern != "" {
+		out["pattern"] = s.Pattern
+	}
+	if rules.constraints != nil {
+		rules.constraints(out)
+	}
+	switch s.Type {
 	case "object":
-		props, _ := s["properties"].(map[string]any)
-		// Properties describe known fields; only an explicit false closes an object.
-		if s["additionalProperties"] != false {
-			return fmt.Errorf("open object")
+		if s.AdditionalProperties == nil || *s.AdditionalProperties {
+			return nil, fmt.Errorf("open object")
 		}
-		if props == nil {
-			props = map[string]any{}
+		required := map[string]bool{}
+		for _, name := range s.Required {
+			if _, ok := s.Properties[name]; !ok {
+				return nil, fmt.Errorf("unknown required property %s", name)
+			}
+			required[name] = true
 		}
-		required := requiredFields(s)
-		names := make([]string, 0, len(props))
-		for name, value := range props {
-			child, ok := value.(map[string]any)
-			if !ok {
-				return fmt.Errorf("invalid property")
-			}
-			if err := convert(child, anthropic, unions, depth+1); err != nil {
-				return err
-			}
-			if !required[name] && child["type"] != "null" {
-				child["type"] = []any{child["type"], "null"}
-				if values, ok := child["enum"].([]any); ok {
-					child["enum"] = append(values, nil)
-				}
-				*unions++
-			}
+		names := make([]string, 0, len(s.Properties))
+		for name := range s.Properties {
 			names = append(names, name)
 		}
 		sort.Strings(names)
-		s["properties"], s["required"], s["additionalProperties"] = props, names, false
-	case "array":
-		child, ok := s["items"].(map[string]any)
-		if !ok {
-			return fmt.Errorf("untyped array")
+		props := map[string]any{}
+		requiredNames := []string{}
+		*properties += len(names)
+		for _, name := range names {
+			child, err := build(s.Properties[name], rules, cost, depth+1, properties, enums)
+			if err != nil {
+				return nil, err
+			}
+			previousEnum, _ := child["enum"].([]any)
+			if rules.property(child, required[name], cost) {
+				requiredNames = append(requiredNames, name)
+			}
+			if values, ok := child["enum"].([]any); ok {
+				*enums += len(values) - len(previousEnum)
+			}
+			props[name] = child
 		}
-		return convert(child, anthropic, unions, depth+1)
+		out["properties"] = props
+		out["required"] = requiredNames
+		out["additionalProperties"] = false
+	case "array":
+		child, err := build(s.Items, rules, cost, depth+1, properties, enums)
+		if err != nil {
+			return nil, err
+		}
+		out["items"] = child
 	case "string", "integer", "number", "boolean", "null":
 	default:
-		return fmt.Errorf("unsupported type %s", kind)
+		return nil, fmt.Errorf("unsupported strict type %s", s.Type)
 	}
-	return nil
-}
-
-func requiredFields(s map[string]any) map[string]bool {
-	result := map[string]bool{}
-	if names, ok := s["required"].([]any); ok {
-		for _, name := range names {
-			if n, ok := name.(string); ok {
-				result[n] = true
-			}
-		}
+	if values, ok := out["enum"].([]any); ok {
+		*enums += len(values)
 	}
-	return result
-}
-
-// NormalizeValidate removes null placeholders only from optional, non-nullable
-// declared properties. Explicit nulls in arbitrary data are left untouched.
-// Validation uses the original schema, including constraints omitted on the wire.
-func NormalizeValidate(schema, input json.RawMessage) (json.RawMessage, error) {
-	var s map[string]any
-	if err := json.Unmarshal(schema, &s); err != nil {
-		return nil, fmt.Errorf("invalid tool schema: %w", err)
-	}
-	var value any
-	dec := json.NewDecoder(bytes.NewReader(input))
-	dec.UseNumber()
-	if err := dec.Decode(&value); err != nil {
-		return nil, fmt.Errorf("invalid tool arguments: %w", err)
-	}
-	if err := dec.Decode(new(any)); err != io.EOF {
-		return nil, fmt.Errorf("invalid trailing tool arguments")
-	}
-	if _, ok := value.(map[string]any); !ok {
-		return nil, fmt.Errorf("tool arguments must be an object")
-	}
-	normalize(s, value)
-	c := jsonschema.NewCompiler()
-	// Tool schemas must be self-contained; never fetch a model/tool supplied URL.
-	c.LoadURL = func(string) (io.ReadCloser, error) { return nil, fmt.Errorf("external schema references are disabled") }
-	if err := c.AddResource("https://tools.invalid/schema.json", bytes.NewReader(schema)); err != nil {
-		return nil, err
-	}
-	compiled, err := c.Compile("https://tools.invalid/schema.json")
-	if err != nil {
-		return nil, fmt.Errorf("invalid tool schema: %w", err)
-	}
-	if err = compiled.Validate(value); err != nil {
-		return nil, fmt.Errorf("invalid tool arguments: %w", err)
-	}
-	return json.Marshal(value)
-}
-
-func normalize(s map[string]any, value any) {
-	switch v := value.(type) {
-	case map[string]any:
-		props, _ := s["properties"].(map[string]any)
-		required := requiredFields(s)
-		for name, raw := range props {
-			child, ok := raw.(map[string]any)
-			if !ok {
-				continue
-			}
-			val, present := v[name]
-			if !present {
-				continue
-			}
-			// Only simple non-nullable types are converted; union/ref semantics remain intact.
-			kind, _ := child["type"].(string)
-			if val == nil && !required[name] && kind != "" && kind != "null" {
-				delete(v, name)
-				continue
-			}
-			normalize(child, val)
-		}
-	case []any:
-		if child, ok := s["items"].(map[string]any); ok {
-			for _, item := range v {
-				normalize(child, item)
-			}
-		}
-	}
-}
-
-// Count across the whole schema, not independently for each nested object.
-func schemaSize(s map[string]any) (properties, enums int) {
-	if values, ok := s["enum"].([]any); ok {
-		enums += len(values)
-	}
-	if _, ok := s["const"]; ok {
-		enums++
-	}
-	if props, ok := s["properties"].(map[string]any); ok {
-		properties += len(props)
-		for _, raw := range props {
-			if child, ok := raw.(map[string]any); ok {
-				p, e := schemaSize(child)
-				properties += p
-				enums += e
-			}
-		}
-	}
-	if child, ok := s["items"].(map[string]any); ok {
-		p, e := schemaSize(child)
-		properties += p
-		enums += e
-	}
-	return
+	return out, nil
 }

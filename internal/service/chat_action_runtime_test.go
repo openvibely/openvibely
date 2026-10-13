@@ -1275,7 +1275,7 @@ func TestTaskControlRuntimeListAlertsUsesPersistedProjectAcrossReadStates(t *tes
 	}
 	for _, definition := range runtime.Definitions {
 		if definition.Name == "list_alerts" {
-			require.NoError(t, json.Unmarshal(definition.Parameters, &listSchema))
+			require.NoError(t, json.Unmarshal(definition.ParameterSchema(), &listSchema))
 			break
 		}
 	}
@@ -1300,7 +1300,7 @@ func TestTaskControlRuntimeListAlertsUsesPersistedProjectAcrossReadStates(t *tes
 		var ordinarySchema struct {
 			Properties map[string]json.RawMessage `json:"properties"`
 		}
-		require.NoError(t, json.Unmarshal(definition.Parameters, &ordinarySchema))
+		require.NoError(t, json.Unmarshal(definition.ParameterSchema(), &ordinarySchema))
 		require.Contains(t, ordinarySchema.Properties, "project_id")
 		require.Contains(t, ordinarySchema.Properties, "read")
 		return

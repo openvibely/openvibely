@@ -20,11 +20,12 @@ func prepareStrictTools(tools []ToolDefinition) []ToolDefinition {
 		if t.Type != "function" || (t.Strict != nil && !*t.Strict) {
 			continue
 		}
-		schema, _, err := toolschema.Strict(t.Parameters, false)
+		schema, err := toolschema.MarshalOpenAI(t.Schema, t.Parameters, true)
 		strict := err == nil
 		t.Strict = &strict
 		if strict {
 			t.Parameters = schema
+			t.Schema = nil
 		}
 	}
 	return out
@@ -46,8 +47,8 @@ func normalizeDefinedArguments(defs []ToolDefinition, name string, input json.Ra
 			}
 			continue
 		}
-		if def.Name == name && len(def.Parameters) > 0 {
-			return toolschema.NormalizeValidate(def.Parameters, input)
+		if def.Name == name && len(def.ParameterSchema()) > 0 {
+			return toolschema.NormalizeValidate(def.ParameterSchema(), input)
 		}
 	}
 	// Provider-native tools and custom executors without advertised definitions
