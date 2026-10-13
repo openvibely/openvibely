@@ -28,10 +28,14 @@ const (
 	ModeDesktop RuntimeMode = "desktop"
 )
 
+// DatabaseDriverSQLite is the default and currently only supported DATABASE_DRIVER.
+const DatabaseDriverSQLite = "sqlite"
+
 type Config struct {
 	// Mode is the runtime mode (server or desktop).
 	Mode                       RuntimeMode
 	Port                       string
+	DatabaseDriver             string
 	DatabasePath               string
 	DatabaseURL                string
 	AnthropicKey               string
@@ -124,6 +128,7 @@ func LoadWithMode(mode RuntimeMode) *Config {
 	return (&Config{
 		Mode:                       mode,
 		Port:                       getEnv("PORT", defaults.Port),
+		DatabaseDriver:             getEnv("DATABASE_DRIVER", DatabaseDriverSQLite),
 		DatabasePath:               getEnv("DATABASE_PATH", defaultDBPath),
 		DatabaseURL:                getEnv("DATABASE_URL", ""),
 		AnthropicKey:               getEnv("ANTHROPIC_API_KEY", ""),
@@ -188,6 +193,10 @@ func (c *Config) NormalizeForMode() *Config {
 	}
 	if c.AppDataDir != "" {
 		_ = os.MkdirAll(c.AppDataDir, 0o755)
+	}
+	c.DatabaseDriver = strings.ToLower(strings.TrimSpace(c.DatabaseDriver))
+	if c.DatabaseDriver == "" {
+		c.DatabaseDriver = DatabaseDriverSQLite
 	}
 	defaultDBPath, defaultRepoRoot := defaultStoragePaths(c.AppDataDir)
 	if c.DatabasePath == "" {
