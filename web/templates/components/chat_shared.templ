@@ -4211,7 +4211,6 @@ templ ChatAutoScrollScript() {
 						loader.setAttribute('hx-on::after-request', 'if (event.detail && !event.detail.successful && window.finishChatEarlierRequest) window.finishChatEarlierRequest(this)');
 						loader.innerHTML = '<span data-earlier-loader-idle>Scroll up to load earlier messages</span><span data-earlier-loader-busy class="hidden"><span class="loading loading-spinner loading-xs align-middle mr-2"></span>Loading earlier messages...</span>';
 						container.insertBefore(loader, container.firstChild);
-						if (window.htmx) htmx.process(loader);
 					}
 				}
 				if (first && loader) {
@@ -4222,6 +4221,9 @@ templ ChatAutoScrollScript() {
 							var url = new URL(hxGet, window.location.origin);
 							url.searchParams.set('before', execID);
 							loader.setAttribute('hx-get', url.pathname + url.search);
+							// HTMX captures the URL when processing the element. Register only
+							// after setting the cursor, and reprocess when that cursor advances.
+							if (window.htmx) htmx.process(loader);
 						} catch (e) {}
 					}
 				}
