@@ -197,7 +197,6 @@ func runtimeAnthropicTools(rt *llmcontracts.RuntimeTools) []anthropicclient.Tool
 			Description: strings.TrimSpace(def.Description),
 			InputSchema: def.Parameters,
 			Schema:      def.Schema,
-			Strict:      def.Strict,
 		})
 	}
 	return out
