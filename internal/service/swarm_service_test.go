@@ -877,8 +877,7 @@ func TestSwarmServiceResolveAssignedAgentIDFallbacks(t *testing.T) {
 func TestSwarmServiceResolveAssignedAgentIDNoModelPreservesRequestedState(t *testing.T) {
 	ctx := context.Background()
 	db := teststores.NewDB(t)
-	_, err := db.ExecContext(ctx, `DELETE FROM agent_configs WHERE 1 = 1`)
-	require.NoError(t, err)
+	teststores.ClearLLMConfigs(t, teststores.Of(db).LLMConfigs)
 	projectRepo := teststores.Of(db).Projects
 	llmConfigRepo := teststores.Of(db).LLMConfigs
 	svc := NewSwarmService(nil, nil, nil, nil)

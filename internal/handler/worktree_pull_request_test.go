@@ -229,7 +229,13 @@ func TestCreateTaskPullRequest_TaskCardRevalidatesProjectContextInsideRepository
 		{
 			name: "project repository changed",
 			mutate: func(ctx context.Context, t *testing.T, project, _ *models.Project, _ *models.Task, db *sql.DB) {
-				if _, err := db.ExecContext(ctx, "UPDATE projects SET repo_path = ? WHERE id = ?", t.TempDir(), project.ID); err != nil {
+				projects := teststores.Of(db).Projects
+				stored, err := projects.GetByID(ctx, project.ID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				stored.RepoPath = t.TempDir()
+				if err := projects.Update(ctx, stored); err != nil {
 					t.Fatal(err)
 				}
 			},

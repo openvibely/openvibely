@@ -3,6 +3,7 @@
 package teststores
 
 import (
+	"context"
 	"database/sql"
 	"os"
 	"strings"
@@ -85,5 +86,35 @@ func RequireSQLite(tb testing.TB) {
 	tb.Helper()
 	if driver := Driver(); driver != config.DatabaseDriverSQLite {
 		tb.Skipf("requires sqlite; %s=%s", DriverEnv, driver)
+	}
+}
+
+// ClearLLMConfigs deletes every model config through the store.
+func ClearLLMConfigs(tb testing.TB, s persistence.LLMConfigStore) {
+	tb.Helper()
+	ctx := context.Background()
+	configs, err := s.List(ctx)
+	if err != nil {
+		tb.Fatalf("list model configs: %v", err)
+	}
+	for _, c := range configs {
+		if err := s.Delete(ctx, c.ID); err != nil {
+			tb.Fatalf("delete model config %s: %v", c.ID, err)
+		}
+	}
+}
+
+// ClearAgents deletes every agent definition, including archived ones, through the store.
+func ClearAgents(tb testing.TB, s persistence.AgentStore) {
+	tb.Helper()
+	ctx := context.Background()
+	agents, err := s.ListIncludingArchived(ctx)
+	if err != nil {
+		tb.Fatalf("list agents: %v", err)
+	}
+	for _, a := range agents {
+		if err := s.Delete(ctx, a.ID); err != nil {
+			tb.Fatalf("delete agent %s: %v", a.ID, err)
+		}
 	}
 }

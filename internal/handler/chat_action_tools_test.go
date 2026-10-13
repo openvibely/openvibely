@@ -1300,8 +1300,7 @@ func TestCreateTaskRuntimeToolUsesCompactModelSelection(t *testing.T) {
 	db, counter := testutil.NewStatementCountingTestDB(t)
 	h, _, llmConfigRepo := setupTestHandlerForDB(t, db)
 	ctx := context.Background()
-	_, err := db.Exec(`DELETE FROM agent_configs`)
-	require.NoError(t, err)
+	teststores.ClearLLMConfigs(t, teststores.Of(db).LLMConfigs)
 	project := createProject(t, h, "Runtime Compact Create Task")
 	largeProviderJSON := strings.Repeat("large-provider-json", 4096)
 	agent := &models.LLMConfig{
@@ -1338,8 +1337,7 @@ func TestCreateTaskRuntimeToolUsesCompactModelSelection(t *testing.T) {
 func TestCreateTaskRuntimeToolDefersAutoStartUntilChatAttachmentsActivate(t *testing.T) {
 	h, _, llmConfigRepo, db := setupTestHandlerWithDB(t)
 	ctx := context.Background()
-	_, err := db.Exec(`DELETE FROM agent_configs`)
-	require.NoError(t, err)
+	teststores.ClearLLMConfigs(t, teststores.Of(db).LLMConfigs)
 	project := createProject(t, h, "Runtime Attachment Deferral")
 	agent := &models.LLMConfig{Name: "Attachment Auto Start", Provider: models.ProviderTest, Model: "claude-sonnet-attachments", IsDefault: true, AutoStartTasks: true}
 	require.NoError(t, llmConfigRepo.Create(ctx, agent))

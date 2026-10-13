@@ -44,18 +44,20 @@ func TestRuntimeOpenAIToolsMarksOnlyAllowlistedReadToolsAsync(t *testing.T) {
 func TestAsyncRuntimeToolCallbacksRecoverAndTerminalizeDurableRows(t *testing.T) {
 	db := teststores.NewDB(t)
 	ctx := context.Background()
-	projectID := "async-recover-project"
-	taskID := "async-recover-task"
-	execID := "async-recover-exec"
-	if _, err := db.ExecContext(ctx, `INSERT INTO projects(id, name, repo_path) VALUES (?, 'Async Recover Project', '')`, projectID); err != nil {
+	stores := teststores.Of(db)
+	project := &models.Project{Name: "Async Recover Project"}
+	if err := stores.Projects.Create(ctx, project); err != nil {
 		t.Fatalf("insert project: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, `INSERT INTO tasks(id, project_id, title, status, category, prompt) VALUES (?, ?, 'Async Recover Task', 'running', 'active', 'prompt')`, taskID, projectID); err != nil {
+	task := &models.Task{ProjectID: project.ID, Title: "Async Recover Task", Status: models.StatusRunning, Category: models.CategoryActive, Prompt: "prompt"}
+	if err := stores.Tasks.Create(ctx, task); err != nil {
 		t.Fatalf("insert task: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, `INSERT INTO executions(id, task_id, status, prompt_sent) VALUES (?, ?, 'running', 'prompt')`, execID, taskID); err != nil {
+	execution := &models.Execution{ID: "async-recover-exec", TaskID: task.ID, Status: models.ExecRunning, PromptSent: "prompt"}
+	if err := stores.Executions.Create(ctx, execution); err != nil {
 		t.Fatalf("insert execution: %v", err)
 	}
+	projectID, taskID, execID := project.ID, task.ID, execution.ID
 	repo := teststores.Of(db).OpenAIAsyncToolCalls
 	now := time.Now().UTC()
 	create := func(callID, toolName string, deadline time.Time) *models.OpenAIAsyncToolCall {

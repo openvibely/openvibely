@@ -185,9 +185,7 @@ func TestLLMService_ImageAttachments_VisionRoutingKeepsNoQueryFastPaths(t *testi
 	ctx := context.Background()
 	db, counter := testutil.NewStatementCountingTestDB(t)
 	llmConfigRepo := teststores.Of(db).LLMConfigs
-	if _, err := db.Exec(`DELETE FROM agent_configs`); err != nil {
-		t.Fatalf("clear model configs: %v", err)
-	}
+	teststores.ClearLLMConfigs(t, teststores.Of(db).LLMConfigs)
 	textOnly := &models.LLMConfig{
 		Name:       "Fast-path text model",
 		Provider:   models.ProviderOpenAICompatible,
@@ -289,9 +287,7 @@ func TestLLMService_ImageAttachments_VisionRoutingPreservesCompactSelectionSeman
 	ctx := context.Background()
 	db, counter := testutil.NewStatementCountingTestDB(t)
 	llmConfigRepo := teststores.Of(db).LLMConfigs
-	if _, err := db.Exec(`DELETE FROM agent_configs`); err != nil {
-		t.Fatalf("clear model configs: %v", err)
-	}
+	teststores.ClearLLMConfigs(t, teststores.Of(db).LLMConfigs)
 
 	textOnlyDefault := &models.LLMConfig{
 		Name:       "Text-only Default",
@@ -423,9 +419,7 @@ func TestLLMService_ImageAttachments_VisionRoutingHydratesStoredConfigForStreami
 	ctx := context.Background()
 	db, counter := testutil.NewStatementCountingTestDB(t)
 	llmConfigRepo := teststores.Of(db).LLMConfigs
-	if _, err := db.Exec(`DELETE FROM agent_configs`); err != nil {
-		t.Fatalf("clear model configs: %v", err)
-	}
+	teststores.ClearLLMConfigs(t, teststores.Of(db).LLMConfigs)
 
 	textOnly := &models.LLMConfig{
 		Name:       "Text-only local model",
@@ -516,9 +510,7 @@ func TestLLMService_ExecuteTaskWithAgent_ImageAttachmentsPassHydratedVisionConfi
 	taskRepo := teststores.Of(db).Tasks
 	attachmentRepo := teststores.Of(db).Attachments
 	execRepo := teststores.Of(db).Executions
-	if _, err := db.Exec(`DELETE FROM agent_configs`); err != nil {
-		t.Fatalf("clear model configs: %v", err)
-	}
+	teststores.ClearLLMConfigs(t, teststores.Of(db).LLMConfigs)
 
 	textOnly := &models.LLMConfig{
 		Name:       "Task text-only model",
@@ -605,9 +597,7 @@ func TestLLMService_ImageAttachments_VisionRoutingHandlesNoStoredModels(t *testi
 	ctx := context.Background()
 	db, counter := testutil.NewStatementCountingTestDB(t)
 	repo := teststores.Of(db).LLMConfigs
-	if _, err := db.Exec(`DELETE FROM agent_configs`); err != nil {
-		t.Fatalf("clear model configs: %v", err)
-	}
+	teststores.ClearLLMConfigs(t, teststores.Of(db).LLMConfigs)
 
 	svc := NewLLMService(repo, nil, nil, nil, nil, nil)
 	textOnly := models.LLMConfig{
@@ -881,9 +871,7 @@ func TestLLMService_SwarmChildReceivesParentImages(t *testing.T) {
 	taskRepo := teststores.Of(db).Tasks
 	attachmentRepo := teststores.Of(db).Attachments
 	execRepo := teststores.Of(db).Executions
-	if _, err := db.Exec(`DELETE FROM agent_configs`); err != nil {
-		t.Fatalf("clear model configs: %v", err)
-	}
+	teststores.ClearLLMConfigs(t, teststores.Of(db).LLMConfigs)
 
 	textOnly := &models.LLMConfig{
 		Name:       "Task text-only model",

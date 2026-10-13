@@ -20,9 +20,7 @@ func TestAgentInspectorListAgentsUsesCompactProjection(t *testing.T) {
 	db, counter := testutil.NewStatementCountingTestDB(t)
 	repo := teststores.Of(db).Agents
 	ctx := context.Background()
-	if _, err := db.ExecContext(ctx, `DELETE FROM agents WHERE id IS NOT NULL`); err != nil {
-		t.Fatalf("clear agents: %v", err)
-	}
+	teststores.ClearAgents(t, teststores.Of(db).Agents)
 
 	visible := &models.Agent{
 		Name:         "Alpha Agent",
@@ -159,9 +157,7 @@ func BenchmarkLifecycleAgentListProjection(b *testing.B) {
 	db := teststores.NewDB(b)
 	repo := teststores.Of(db).Agents
 	ctx := context.Background()
-	if _, err := db.ExecContext(ctx, `DELETE FROM agents WHERE id IS NOT NULL`); err != nil {
-		b.Fatalf("clear agents: %v", err)
-	}
+	teststores.ClearAgents(b, teststores.Of(db).Agents)
 	for i := 0; i < 100; i++ {
 		agent := lifecycleBenchmarkAgent(i)
 		if err := repo.Create(ctx, agent); err != nil {

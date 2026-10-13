@@ -465,9 +465,7 @@ func TestChannelChatIngressImageSelectionExcludesTextOnlyModels(t *testing.T) {
 	db, counter := testutil.NewStatementCountingTestDB(t)
 	repo := teststores.Of(db).LLMConfigs
 	ctx := context.Background()
-	if _, err := db.ExecContext(ctx, `DELETE FROM agent_configs`); err != nil {
-		t.Fatalf("clear model configs: %v", err)
-	}
+	teststores.ClearLLMConfigs(t, teststores.Of(db).LLMConfigs)
 	textOnly := &models.LLMConfig{
 		Name:       "Text-only model",
 		Provider:   models.ProviderOpenAICompatible,
@@ -524,9 +522,7 @@ func TestChannelChatAgentSelectionSkipsOAuthRetiredDefault(t *testing.T) {
 	db := teststores.NewDB(t)
 	repo := teststores.Of(db).LLMConfigs
 	ctx := context.Background()
-	if _, err := db.ExecContext(ctx, `DELETE FROM agent_configs`); err != nil {
-		t.Fatal(err)
-	}
+	teststores.ClearLLMConfigs(t, teststores.Of(db).LLMConfigs)
 	retired := &models.LLMConfig{Name: "Retired", Provider: models.ProviderOpenAI, Model: "gpt-5.3-codex", AuthMethod: models.AuthMethodOAuth, IsDefault: true}
 	if err := repo.Create(ctx, retired); err != nil {
 		t.Fatal(err)
@@ -552,9 +548,7 @@ func TestChannelChatAgentSelectionWithNoModelsUsesCompactQuery(t *testing.T) {
 	db, counter := testutil.NewStatementCountingTestDB(t)
 	repo := teststores.Of(db).LLMConfigs
 	ctx := context.Background()
-	if _, err := db.ExecContext(ctx, `DELETE FROM agent_configs`); err != nil {
-		t.Fatalf("clear model configs: %v", err)
-	}
+	teststores.ClearLLMConfigs(t, teststores.Of(db).LLMConfigs)
 	counter.SetEnabled(true)
 
 	if _, err := selectChannelChatAgentOptions(ctx, repo, "hello", false); err == nil || err.Error() != "no agents configured" {
@@ -740,9 +734,7 @@ func TestChannelModelLoadingUsesCompactProjectionOnLargeFixture(t *testing.T) {
 
 func seedChannelRichModel(tb testing.TB, ctx context.Context, db *sql.DB, repo persistence.LLMConfigStore, name string, provider models.LLMProvider, authMethod models.AuthMethod, isDefault bool) *models.LLMConfig {
 	tb.Helper()
-	if _, err := db.ExecContext(ctx, `DELETE FROM agent_configs`); err != nil {
-		tb.Fatalf("clear model configs: %v", err)
-	}
+	teststores.ClearLLMConfigs(tb, teststores.Of(db).LLMConfigs)
 	largePayload := strings.Repeat("x", 56*1024)
 	model := &models.LLMConfig{
 		Name:                 name,
@@ -772,9 +764,7 @@ func seedChannelRichModel(tb testing.TB, ctx context.Context, db *sql.DB, repo p
 
 func seedChannelRichModels(tb testing.TB, ctx context.Context, db *sql.DB, repo persistence.LLMConfigStore, count int) {
 	tb.Helper()
-	if _, err := db.ExecContext(ctx, `DELETE FROM agent_configs`); err != nil {
-		tb.Fatalf("clear model configs: %v", err)
-	}
+	teststores.ClearLLMConfigs(tb, teststores.Of(db).LLMConfigs)
 	largePayload := strings.Repeat("x", 56*1024)
 	for i := 0; i < count; i++ {
 		model := &models.LLMConfig{

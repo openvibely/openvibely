@@ -737,10 +737,10 @@ func seedLargeExecutionHistory(t testing.TB, db *sql.DB, taskID, agentID string,
 
 func newestHistoryExecutionID(t testing.TB, db *sql.DB, taskID string, offset int) string {
 	t.Helper()
-	var id string
-	err := db.QueryRow(`SELECT id FROM executions WHERE task_id = ? ORDER BY started_at DESC, rowid DESC LIMIT 1 OFFSET ?`, taskID, offset-1).Scan(&id)
+	execs, err := teststores.Of(db).Executions.ListByTask(context.Background(), taskID)
 	require.NoError(t, err)
-	return id
+	require.Greater(t, len(execs), offset-1)
+	return execs[offset-1].ID
 }
 
 func TestHandler_GetTaskDetailStatusUsesCompactAgentLabelProjection(t *testing.T) {
@@ -1179,12 +1179,9 @@ func BenchmarkHandler_GetTaskDetailStatus_MetricsProjection(b *testing.B) {
 func BenchmarkHandler_GetTaskDetailStatus_AgentProjection(b *testing.B) {
 	db, counter := testutil.NewStatementCountingTestDB(b)
 	h, e, llmConfigRepo := setupTestHandlerForDB(b, db)
-	ctx := context.Background()
 	agentRepo := teststores.Of(db).Agents
 	h.SetAgentRepo(agentRepo)
-	if _, err := db.ExecContext(ctx, `DELETE FROM agents WHERE id IS NOT NULL`); err != nil {
-		b.Fatalf("clear Agent definitions: %v", err)
-	}
+	teststores.ClearAgents(b, agentRepo)
 
 	var targetAgent *models.Agent
 	for i := 0; i < 1000; i++ {
@@ -4016,12 +4013,14 @@ func TestHandler_UpdateTask_CategoryChangeFromCompletedToActiveIsMetadataOnly(t 
 	assert.Equal(t, 0, tc.handler.workerSvc.QueueSize(), "task detail metadata save must not queue worker work")
 	assert.Equal(t, 0, tc.handler.workerSvc.TotalRunning(), "task detail metadata save must not start worker work")
 	assert.Equal(t, 0, tc.handler.workerSvc.ProjectRunning(updated.ProjectID), "task detail metadata save must not start project worker work")
-	var lifecycleRows int
-	require.NoError(t, tc.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM lifecycle_executions WHERE task_id = ?`, task.ID).Scan(&lifecycleRows))
-	assert.Equal(t, 0, lifecycleRows, "task detail metadata save must not create lifecycle continuations")
-	var scheduleRuns int
-	require.NoError(t, tc.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM schedules WHERE task_id = ? AND last_run IS NOT NULL`, task.ID).Scan(&scheduleRuns))
-	assert.Equal(t, 0, scheduleRuns, "task detail metadata save must not mark schedule runs")
+	lifecyclePage, err := teststores.Of(tc.db).Lifecycle.ListExecutionsForTaskPage(ctx, task.ID, 1, "")
+	require.NoError(t, err)
+	assert.Empty(t, lifecyclePage.Items, "task detail metadata save must not create lifecycle continuations")
+	schedules, err := tc.scheduleRepo.ListByTask(ctx, task.ID)
+	require.NoError(t, err)
+	for _, schedule := range schedules {
+		assert.Nil(t, schedule.LastRun, "task detail metadata save must not mark schedule runs")
+	}
 	resumed, err := tc.handler.taskGoalSvc.GetGoal(ctx, task.ID)
 	require.NoError(t, err)
 	require.NotNil(t, resumed)
@@ -9331,20 +9330,17 @@ func TestModelsListOmitsEagerEditConfiguration(t *testing.T) {
 
 func BenchmarkHandlerListModelsHTMXLargeEditConfig(b *testing.B) {
 	_, e, _, db := setupTestHandlerWithDB(b)
-	if _, err := db.Exec(`DELETE FROM agent_configs`); err != nil {
-		b.Fatal(err)
-	}
+	teststores.ClearLLMConfigs(b, teststores.Of(db).LLMConfigs)
 	extraBody := `{"padding":"` + strings.Repeat("x", 1024*1024-len(`{"padding":""}`)) + `"}`
 	if len(extraBody) != 1024*1024 {
 		b.Fatalf("extra_body_json fixture size = %d, want %d", len(extraBody), 1024*1024)
 	}
 	for i := 0; i < 50; i++ {
-		_, err := db.Exec(`INSERT INTO agent_configs (
-			id, name, provider, model, api_key, temperature, is_default, auth_method,
-			base_url, transport, preset_slug, extra_body_json
-		) VALUES (?, ?, 'openai_compatible', 'custom-model', 'secret', 0.2, ?, 'api_key',
-			'https://example.com/v1', 'chat_completions', 'custom', ?)`,
-			fmt.Sprintf("large-%02d", i), fmt.Sprintf("Large Custom %02d", i), i == 0, extraBody)
+		err := teststores.Of(db).LLMConfigs.Create(context.Background(), &models.LLMConfig{
+			Name: fmt.Sprintf("Large Custom %02d", i), Provider: models.ProviderOpenAICompatible, Model: "custom-model",
+			APIKey: "secret", Temperature: 0.2, IsDefault: i == 0, AuthMethod: models.AuthMethodAPIKey,
+			BaseURL: "https://example.com/v1", Transport: "chat_completions", PresetSlug: "custom", ExtraBodyJSON: extraBody,
+		})
 		if err != nil {
 			b.Fatal(err)
 		}

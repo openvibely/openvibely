@@ -299,9 +299,7 @@ func TestProjectDialogsUseCompactDefaultModelProjection(t *testing.T) {
 	db, counter := testutil.NewStatementCountingTestDB(t)
 	h, e, llmConfigRepo := setupTestHandlerForDB(t, db)
 	ctx := context.Background()
-	if _, err := db.Exec(`DELETE FROM agent_configs`); err != nil {
-		t.Fatalf("clear model configs: %v", err)
-	}
+	teststores.ClearLLMConfigs(t, teststores.Of(db).LLMConfigs)
 
 	largeHiddenField := strings.Repeat("hidden-project-dialog-model-field", 4096)
 	globalDefault := &models.LLMConfig{
@@ -1200,10 +1198,8 @@ func TestDeleteProject(t *testing.T) {
 		}
 
 		// Create a task in the project so we verify cascade
-		_, err := db.ExecContext(ctx,
-			`INSERT INTO tasks (id, project_id, title, prompt) VALUES ('task-del-1', ?, 'Test Task', 'do something')`,
-			project.ID)
-		if err != nil {
+		seededTask := &models.Task{ProjectID: project.ID, Title: "Test Task", Prompt: "do something", Category: models.CategoryActive, Status: models.StatusPending}
+		if err := taskRepo.Create(ctx, seededTask); err != nil {
 			t.Fatalf("failed to create task: %v", err)
 		}
 
@@ -1239,7 +1235,7 @@ func TestDeleteProject(t *testing.T) {
 		}
 
 		// Verify task was cascade-deleted
-		task, err := taskRepo.GetByID(ctx, "task-del-1")
+		task, err := taskRepo.GetByID(ctx, seededTask.ID)
 		if err != nil {
 			t.Fatalf("error checking deleted task: %v", err)
 		}
@@ -1258,9 +1254,7 @@ func TestDeleteProject(t *testing.T) {
 		if err := projectSvc.Create(ctx, project); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := db.ExecContext(ctx, `
-			INSERT INTO tasks (id, project_id, title, prompt, worktree_path)
-			VALUES ('cleanup-warning', ?, 'Cleanup warning task', 'test', ?)`, project.ID, worktreePath); err != nil {
+		if err := taskRepo.Create(ctx, &models.Task{ProjectID: project.ID, Title: "Cleanup warning task", Prompt: "test", Category: models.CategoryActive, Status: models.StatusPending, WorktreePath: worktreePath}); err != nil {
 			t.Fatal(err)
 		}
 
@@ -1292,9 +1286,7 @@ func TestDeleteProject(t *testing.T) {
 		if err := projectSvc.Create(ctx, project); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := db.ExecContext(ctx, `
-			INSERT INTO tasks (id, project_id, title, prompt, worktree_path)
-			VALUES ('cleanup-warning-http', ?, 'Cleanup warning task', 'test', ?)`, project.ID, worktreePath); err != nil {
+		if err := taskRepo.Create(ctx, &models.Task{ProjectID: project.ID, Title: "Cleanup warning task", Prompt: "test", Category: models.CategoryActive, Status: models.StatusPending, WorktreePath: worktreePath}); err != nil {
 			t.Fatal(err)
 		}
 
@@ -1321,10 +1313,8 @@ func TestDeleteProject(t *testing.T) {
 			t.Fatalf("failed to create project: %v", err)
 		}
 
-		_, err := db.ExecContext(ctx,
-			`INSERT INTO tasks (id, project_id, title, prompt) VALUES ('task-del-attachment', ?, 'Task With Attachment', 'do something')`,
-			project.ID)
-		if err != nil {
+		attachmentTask := &models.Task{ProjectID: project.ID, Title: "Task With Attachment", Prompt: "do something", Category: models.CategoryActive, Status: models.StatusPending}
+		if err := taskRepo.Create(ctx, attachmentTask); err != nil {
 			t.Fatalf("failed to create task: %v", err)
 		}
 
@@ -1334,11 +1324,8 @@ func TestDeleteProject(t *testing.T) {
 			t.Fatalf("expected pending upload directory before delete: %v", err)
 		}
 
-		_, err = db.ExecContext(ctx, `
-				INSERT INTO thread_inputs
-					(id, scope, project_id, task_id, input_mode, input_status, content, attachment_session_id, queue_position)
-				VALUES ('project-delete-pending-input', 'task_thread', ?, 'task-del-attachment', 'queued', 'pending', 'queued with file', ?, 1)`, project.ID, sessionID)
-		if err != nil {
+		pendingInput := &models.ThreadInput{Scope: models.ThreadInputScopeTask, ProjectID: project.ID, TaskID: attachmentTask.ID, Content: "queued with file", AttachmentSessionID: sessionID}
+		if err := teststores.Of(db).ThreadInputs.CreateQueued(ctx, pendingInput); err != nil {
 			t.Fatalf("failed to create pending task-thread input: %v", err)
 		}
 
@@ -1356,19 +1343,19 @@ func TestDeleteProject(t *testing.T) {
 			t.Fatalf("expected status 200, got %d", rec.Code)
 		}
 
-		var retiredCount int
-		if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM retired_attachment_sessions WHERE session_id = ?`, sessionID).Scan(&retiredCount); err != nil {
-			t.Fatalf("failed to count retired session: %v", err)
+		retired, err := teststores.Of(db).ThreadInputs.IsAttachmentSessionRetired(ctx, sessionID)
+		if err != nil {
+			t.Fatalf("failed to check retired session: %v", err)
 		}
-		if retiredCount != 1 {
-			t.Fatalf("expected session %s to be retired once, got %d", sessionID, retiredCount)
+		if !retired {
+			t.Fatalf("expected session %s to be retired", sessionID)
 		}
-		var inputCount int
-		if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM thread_inputs WHERE id = 'project-delete-pending-input'`).Scan(&inputCount); err != nil {
-			t.Fatalf("failed to count thread inputs: %v", err)
+		remainingInput, err := teststores.Of(db).ThreadInputs.GetByID(ctx, pendingInput.ID)
+		if err != nil {
+			t.Fatalf("failed to load thread input: %v", err)
 		}
-		if inputCount != 0 {
-			t.Fatalf("expected thread input to be deleted, got %d", inputCount)
+		if remainingInput != nil {
+			t.Fatalf("expected thread input to be deleted, got %+v", remainingInput)
 		}
 		if _, err := os.Stat(pendingDir); !os.IsNotExist(err) {
 			t.Fatalf("expected pending upload directory to be removed, stat err=%v", err)
@@ -1414,18 +1401,18 @@ func TestDeleteProject(t *testing.T) {
 		if err := projectSvc.Create(ctx, project); err != nil {
 			t.Fatalf("failed to create project: %v", err)
 		}
-		_, err := db.ExecContext(ctx, `
-				INSERT INTO tasks (id, project_id, title, category, status, prompt) VALUES
-				('task-del-running', ?, 'Running Task', 'active', 'running', 'run'),
-				('task-del-queued', ?, 'Queued Task', 'active', 'queued', 'queue')`, project.ID, project.ID)
-		if err != nil {
-			t.Fatalf("failed to create cancellable tasks: %v", err)
+		runningTask := &models.Task{ProjectID: project.ID, Title: "Running Task", Category: models.CategoryActive, Status: models.StatusRunning, Prompt: "run"}
+		queuedTask := &models.Task{ProjectID: project.ID, Title: "Queued Task", Category: models.CategoryActive, Status: models.StatusQueued, Prompt: "queue"}
+		for _, task := range []*models.Task{runningTask, queuedTask} {
+			if err := taskRepo.Create(ctx, task); err != nil {
+				t.Fatalf("failed to create cancellable tasks: %v", err)
+			}
 		}
 
 		runningCancelled := false
 		queuedCancelled := false
-		workerSvc.RegisterCancel("task-del-running", func() { runningCancelled = true })
-		workerSvc.RegisterCancel("task-del-queued", func() { queuedCancelled = true })
+		workerSvc.RegisterCancel(runningTask.ID, func() { runningCancelled = true })
+		workerSvc.RegisterCancel(queuedTask.ID, func() { queuedCancelled = true })
 
 		req := httptest.NewRequest(http.MethodDelete, "/projects/"+project.ID, nil)
 		rec := httptest.NewRecorder()
@@ -1449,7 +1436,8 @@ func TestDeleteProject(t *testing.T) {
 		if err := projectSvc.Create(ctx, project); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := db.ExecContext(ctx, `INSERT INTO tasks (id, project_id, title, prompt) VALUES ('legacy-delete-task', ?, 'Retained task', 'test')`, project.ID); err != nil {
+		retainedTask := &models.Task{ProjectID: project.ID, Title: "Retained task", Prompt: "test", Category: models.CategoryActive, Status: models.StatusPending}
+		if err := taskRepo.Create(ctx, retainedTask); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := db.ExecContext(ctx, `
@@ -1485,7 +1473,7 @@ func TestDeleteProject(t *testing.T) {
 		if stored, getErr := projectRepo.GetByID(ctx, project.ID); getErr != nil || stored == nil {
 			t.Fatalf("project after failed handler deletion = %#v, err=%v", stored, getErr)
 		}
-		if stored, getErr := taskRepo.GetByID(ctx, "legacy-delete-task"); getErr != nil || stored == nil {
+		if stored, getErr := taskRepo.GetByID(ctx, retainedTask.ID); getErr != nil || stored == nil {
 			t.Fatalf("task after failed handler deletion = %#v, err=%v", stored, getErr)
 		}
 		if _, dropErr := db.ExecContext(ctx, `DROP TABLE memory_consolidation_schedules`); dropErr != nil {

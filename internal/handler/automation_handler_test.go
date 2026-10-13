@@ -1280,9 +1280,7 @@ func TestAutomationBuilderCreateBatchesAgentResolution(t *testing.T) {
 	project := &models.Project{Name: "Batched builder Agent create"}
 	require.NoError(t, projectRepo.Create(ctx, project))
 	agentRepo := teststores.Of(db).Agents
-	if _, err := db.ExecContext(ctx, `DELETE FROM agents WHERE id IS NOT NULL`); err != nil {
-		t.Fatalf("clear agents: %v", err)
-	}
+	teststores.ClearAgents(t, teststores.Of(db).Agents)
 	refs := make([]string, 0, 5)
 	agentIDs := make(map[string]struct{}, 5)
 	for i := 0; i < 5; i++ {

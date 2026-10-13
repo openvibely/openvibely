@@ -235,14 +235,16 @@ func setupDirectAttributionFixture(tb testing.TB, projectCount int) (*LLMService
 	repoURL := "https://example.test/" + strings.Repeat("u", 2<<10)
 	root := tb.TempDir()
 
-	var firstID string
-	if err := db.QueryRowContext(ctx, `SELECT id FROM projects LIMIT 1`).Scan(&firstID); err != nil {
-		tb.Fatalf("select seeded project: %v", err)
+	seeded, err := repo.List(ctx)
+	if err != nil || len(seeded) == 0 {
+		tb.Fatalf("select seeded project: projects=%d err=%v", len(seeded), err)
 	}
-	if _, err := db.ExecContext(ctx, `UPDATE projects SET name = ?, description = ?, repo_path = ?, repo_url = ? WHERE id = ?`, "Project 0000", description, filepath.Join(root, "project-0000"), repoURL, firstID); err != nil {
+	first := seeded[0]
+	first.Name, first.Description, first.RepoPath, first.RepoURL = "Project 0000", description, filepath.Join(root, "project-0000"), repoURL
+	if err := repo.Update(ctx, &first); err != nil {
 		tb.Fatalf("shape seeded project: %v", err)
 	}
-	targetID := firstID
+	targetID := first.ID
 	for i := 1; i < projectCount; i++ {
 		project := &models.Project{
 			Name:        fmt.Sprintf("Project %04d", i),

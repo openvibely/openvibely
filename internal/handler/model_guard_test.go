@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -63,9 +62,7 @@ func TestHandlerHasConfiguredModelsNilRepoErrors(t *testing.T) {
 func TestHandlerHasConfiguredModelsEmptyRepo(t *testing.T) {
 	db := teststores.NewDB(t)
 	repo := teststores.Of(db).LLMConfigs
-	if _, err := db.ExecContext(context.Background(), `DELETE FROM agent_configs`); err != nil {
-		t.Fatalf("clear model configs: %v", err)
-	}
+	teststores.ClearLLMConfigs(t, teststores.Of(db).LLMConfigs)
 	h := &Handler{llmConfigRepo: repo}
 	c := echo.New().NewContext(httptest.NewRequest(http.MethodGet, "/", nil), httptest.NewRecorder())
 

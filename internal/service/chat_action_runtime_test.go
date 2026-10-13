@@ -2275,8 +2275,7 @@ func TestBuildChannelUtilityActionHandlersModelStatusToolsUseCompactRuntimeSumma
 	llmConfigRepo := teststores.Of(db).LLMConfigs
 	project := &models.Project{Name: "Channel Compact Project"}
 	require.NoError(t, projectRepo.Create(ctx, project))
-	_, err := db.Exec(`DELETE FROM agent_configs`)
-	require.NoError(t, err)
+	teststores.ClearLLMConfigs(t, teststores.Of(db).LLMConfigs)
 
 	largeBody := strings.Repeat("large-provider-json", 4096)
 	defaultModel := &models.LLMConfig{
@@ -2719,9 +2718,7 @@ func TestChannelListAgentsResultUsesRuntimeSummariesAndPreservesOutput(t *testin
 	db := teststores.NewDB(t)
 	ctx := context.Background()
 	repo := teststores.Of(db).Agents
-	if _, err := db.ExecContext(ctx, `DELETE FROM agents WHERE id IS NOT NULL`); err != nil {
-		t.Fatalf("clear agents: %v", err)
-	}
+	teststores.ClearAgents(t, teststores.Of(db).Agents)
 
 	agents := []*models.Agent{
 		{Name: "Alpha Agent", Description: "alpha description", Model: "inherit", Skills: []models.SkillConfig{{Name: "one"}}, Enabled: true, SelectableAsPrimary: true},
@@ -2744,9 +2741,7 @@ func TestChannelListAgentsResultUsesRuntimeSummariesAndPreservesOutput(t *testin
 	require.Equal(t, "Agent definitions not available.", channelListAgentsResult(ctx, nil, ""))
 	require.Equal(t, "Channel unavailable.", channelListAgentsResult(ctx, nil, "Channel unavailable."))
 
-	if _, err := db.ExecContext(ctx, `DELETE FROM agents WHERE id IS NOT NULL`); err != nil {
-		t.Fatalf("clear agents for empty result: %v", err)
-	}
+	teststores.ClearAgents(t, teststores.Of(db).Agents)
 	require.Equal(t, "No agents configured.", channelListAgentsResult(ctx, repo, ""))
 }
 

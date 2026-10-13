@@ -10,6 +10,7 @@ import (
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence/sqlite"
+	"github.com/openvibely/openvibely/internal/testutil/teststores"
 	"github.com/stretchr/testify/require"
 )
 
@@ -21,8 +22,7 @@ func TestChatAutoSelectionCatalogFallback(t *testing.T) {
 		t.Run(retired.Name, func(t *testing.T) {
 			h, _, repo, db := setupTestHandlerWithDB(t)
 			ctx := context.Background()
-			_, err := db.ExecContext(ctx, `DELETE FROM agent_configs`)
-			require.NoError(t, err)
+			teststores.ClearLLMConfigs(t, teststores.Of(db).LLMConfigs)
 			require.NoError(t, repo.Create(ctx, &retired))
 			for _, images := range []bool{false, true} {
 				selected, err := h.autoSelectAgent(ctx, "hello", images)
@@ -54,8 +54,7 @@ func TestAPIChatRejectsUnsupportedOnlyCatalogBeforeSideEffects(t *testing.T) {
 		t.Run(retired.Name, func(t *testing.T) {
 			h, e, repo, db := setupTestHandlerWithDB(t)
 			ctx := context.Background()
-			_, err := db.ExecContext(ctx, `DELETE FROM agent_configs`)
-			require.NoError(t, err)
+			teststores.ClearLLMConfigs(t, teststores.Of(db).LLMConfigs)
 			require.NoError(t, repo.Create(ctx, &retired))
 			project := createProject(t, h, "Unsupported API chat")
 			form := url.Values{"project_id": {project.ID}, "message": {"hello"}}

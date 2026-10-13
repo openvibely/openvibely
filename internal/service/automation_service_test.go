@@ -1106,9 +1106,7 @@ func TestAutomationAgentReferenceValidationMatchesCapabilityAndFallback(t *testi
 	projectRepo := teststores.Of(db).Projects
 	project := automationTestProject(t, projectRepo, "Agent validation parity")
 	agentRepo := teststores.Of(db).Agents
-	if _, err := db.ExecContext(ctx, `DELETE FROM agents WHERE id IS NOT NULL`); err != nil {
-		t.Fatalf("clear agents: %v", err)
-	}
+	teststores.ClearAgents(t, teststores.Of(db).Agents)
 
 	global := automationValidationFixtureAgent("Global Agent", "global-agent")
 	require.NoError(t, agentRepo.Create(ctx, global))
@@ -1143,9 +1141,7 @@ func TestAutomationSaveValidatorAgentIssuesBatchesSelectableAgentReferences(t *t
 	ctx := context.Background()
 	project := automationTestProject(t, teststores.Of(db).Projects, "Batched Agent Validation")
 	agentRepo := teststores.Of(db).Agents
-	if _, err := db.ExecContext(ctx, `DELETE FROM agents WHERE id IS NOT NULL`); err != nil {
-		t.Fatalf("clear agents: %v", err)
-	}
+	teststores.ClearAgents(t, teststores.Of(db).Agents)
 
 	refs := make([]string, 0, automationCapabilityLimit)
 	var firstAgent *models.Agent
@@ -1246,9 +1242,7 @@ func TestAutomationSaveValidatorAgentIssuesPreservesReferenceAvailabilitySemanti
 	project := automationTestProject(t, projectRepo, "Agent Validation Project")
 	otherProject := automationTestProject(t, projectRepo, "Other Agent Validation Project")
 	agentRepo := teststores.Of(db).Agents
-	if _, err := db.ExecContext(ctx, `DELETE FROM agents WHERE id IS NOT NULL`); err != nil {
-		t.Fatalf("clear agents: %v", err)
-	}
+	teststores.ClearAgents(t, teststores.Of(db).Agents)
 
 	global := automationValidationFixtureAgent("Duplicate name", "global-agent")
 	if err := agentRepo.Create(ctx, global); err != nil {
@@ -1361,9 +1355,7 @@ func TestAutomationCompilerPreviewAndSaveUseBatchedAgentValidation(t *testing.T)
 	projectRepo := teststores.Of(db).Projects
 	project := automationTestProject(t, projectRepo, "Compiler Agent Validation")
 	agentRepo := teststores.Of(db).Agents
-	if _, err := db.ExecContext(ctx, `DELETE FROM agents WHERE id IS NOT NULL`); err != nil {
-		t.Fatalf("clear agents: %v", err)
-	}
+	teststores.ClearAgents(t, teststores.Of(db).Agents)
 	refs := make([]string, 0, 5)
 	for i := 0; i < 5; i++ {
 		agent := automationValidationFixtureAgent(fmt.Sprintf("Compiler Agent %02d", i), fmt.Sprintf("compiler-agent-%02d", i))
@@ -1437,9 +1429,7 @@ func TestAutomationCompilerSaveBatchesAgentResolution(t *testing.T) {
 	ctx := context.Background()
 	project := automationTestProject(t, teststores.Of(db).Projects, "Compiler Agent Save")
 	agentRepo := teststores.Of(db).Agents
-	if _, err := db.ExecContext(ctx, `DELETE FROM agents WHERE id IS NOT NULL`); err != nil {
-		t.Fatalf("clear agents: %v", err)
-	}
+	teststores.ClearAgents(t, teststores.Of(db).Agents)
 
 	refs := make([]string, 0, automationCapabilityLimit)
 	agentsByKey := make(map[string]*models.Agent, automationCapabilityLimit)
@@ -1528,9 +1518,7 @@ func TestAutomationCompilerSavePreservesAgentReferenceSemanticsAndRollback(t *te
 	project := automationTestProject(t, projectRepo, "Compiler Agent Semantics")
 	otherProject := automationTestProject(t, projectRepo, "Compiler Agent Foreign Project")
 	agentRepo := teststores.Of(db).Agents
-	if _, err := db.ExecContext(ctx, `DELETE FROM agents WHERE id IS NOT NULL`); err != nil {
-		t.Fatalf("clear agents: %v", err)
-	}
+	teststores.ClearAgents(t, teststores.Of(db).Agents)
 
 	createAgent := func(agent *models.Agent) *models.Agent {
 		t.Helper()
@@ -1680,9 +1668,7 @@ func newAutomationSavePerformanceFixture(tb testing.TB) *automationSavePerforman
 		tb.Fatalf("create performance project: %v", err)
 	}
 	agentRepo := teststores.Of(db).Agents
-	if _, err := db.ExecContext(ctx, `DELETE FROM agents WHERE id IS NOT NULL`); err != nil {
-		tb.Fatalf("clear performance Agents: %v", err)
-	}
+	teststores.ClearAgents(tb, teststores.Of(db).Agents)
 	refs := make([]string, 0, automationCapabilityLimit)
 	for i := 0; i < automationCapabilityLimit; i++ {
 		agent := automationValidationFixtureAgent(fmt.Sprintf("Performance Agent %02d", i), fmt.Sprintf("performance-agent-%02d", i))
@@ -1789,9 +1775,7 @@ func BenchmarkAutomationCompilerSaveAgentResolution(b *testing.B) {
 		b.Fatalf("create benchmark project: %v", err)
 	}
 	agentRepo := teststores.Of(db).Agents
-	if _, err := db.ExecContext(ctx, `DELETE FROM agents WHERE id IS NOT NULL`); err != nil {
-		b.Fatalf("clear Agents: %v", err)
-	}
+	teststores.ClearAgents(b, teststores.Of(db).Agents)
 	refs := make([]string, 0, automationCapabilityLimit)
 	for i := 0; i < automationCapabilityLimit; i++ {
 		agent := automationValidationFixtureAgent(fmt.Sprintf("Save benchmark Agent %02d", i), fmt.Sprintf("save-benchmark-agent-%02d", i))
@@ -1910,9 +1894,7 @@ func BenchmarkAutomationAgentReferenceValidationProjection(b *testing.B) {
 	project := models.Project{Name: "Automation Agent validation benchmark"}
 	require.NoError(b, projectRepo.Create(ctx, &project))
 	agentRepo := teststores.Of(db).Agents
-	if _, err := db.ExecContext(ctx, `DELETE FROM agents WHERE id IS NOT NULL`); err != nil {
-		b.Fatalf("clear agents: %v", err)
-	}
+	teststores.ClearAgents(b, teststores.Of(db).Agents)
 	refs := make([]string, 0, automationCapabilityLimit)
 	for i := 0; i < automationCapabilityLimit; i++ {
 		agent := automationValidationFixtureAgent(fmt.Sprintf("Benchmark Agent %02d", i), fmt.Sprintf("benchmark-agent-%02d", i))
