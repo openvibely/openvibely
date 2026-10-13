@@ -415,7 +415,12 @@
       if (list.children.length) list.append(el("div", "ov-menu-rule ov-mp-rule"));
       defaults.forEach((m) => row(m, list));
     }
-    const fav = all.filter((m) => m.provider && favorites[m.id]);
+    const fav = all
+      .filter((m) => m.provider && favorites[m.id])
+      .sort((a, b) => {
+        const byName = a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
+        return byName || a.id.localeCompare(b.id);
+      });
     if (fav.length) {
       if (list.children.length) list.append(el("div", "ov-menu-rule ov-mp-rule"));
       list.append(el("div", "ov-menu-heading ov-mp-heading", "FAVORITES"));
