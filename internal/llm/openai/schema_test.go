@@ -8,17 +8,16 @@ import (
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 )
 
-func TestRuntimeSchemaAndPolicyPropagation(t *testing.T) {
+func TestRuntimeSchemaPropagation(t *testing.T) {
 	d := chatcontrol.Get("list_tasks")
-	disabled := false
 	raw := json.RawMessage(`{"type":"object","properties":{"metadata":{"type":"object"}}}`)
 	rt := &llmcontracts.RuntimeTools{Definitions: []llmcontracts.RuntimeToolDefinition{
-		{Name: d.Name, Schema: d.Schema, Strict: &disabled},
+		{Name: d.Name, Schema: d.Schema},
 		{Name: "external", Parameters: raw},
 	}}
 	tools := runtimeOpenAITools(rt, false)
-	if tools[0].Schema != d.Schema || tools[0].Strict != &disabled {
-		t.Fatal("adapter lost typed schema or policy")
+	if tools[0].Schema != d.Schema {
+		t.Fatal("adapter lost typed schema")
 	}
 	if tools[1].Schema != nil || string(tools[1].ParameterSchema()) != string(raw) {
 		t.Fatal("adapter changed external schema")
