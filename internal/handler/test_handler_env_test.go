@@ -8,7 +8,7 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/openvibely/openvibely/internal/events"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/openvibely/openvibely/internal/update"
@@ -22,15 +22,15 @@ type testHandlerEnv struct {
 	Echo    *echo.Echo
 	LLM     *testutil.MockLLMCaller
 
-	ProjectRepo    *repository.ProjectRepo
-	TaskRepo       *repository.TaskRepo
-	LLMConfigRepo  *repository.LLMConfigRepo
-	ExecRepo       *repository.ExecutionRepo
-	ScheduleRepo   *repository.ScheduleRepo
-	WorkerRepo     *repository.WorkerRepo
-	AttachmentRepo *repository.AttachmentRepo
-	AlertRepo      *repository.AlertRepo
-	SettingsRepo   *repository.SettingsRepo
+	ProjectRepo    *sqlite.ProjectRepo
+	TaskRepo       *sqlite.TaskRepo
+	LLMConfigRepo  *sqlite.LLMConfigRepo
+	ExecRepo       *sqlite.ExecutionRepo
+	ScheduleRepo   *sqlite.ScheduleRepo
+	WorkerRepo     *sqlite.WorkerRepo
+	AttachmentRepo *sqlite.AttachmentRepo
+	AlertRepo      *sqlite.AlertRepo
+	SettingsRepo   *sqlite.SettingsRepo
 
 	ProjectSvc *service.ProjectService
 	LLMSvc     *service.LLMService
@@ -75,18 +75,18 @@ func newTestHandlerEnv(t testing.TB, db *sql.DB, opts ...testHandlerOption) *tes
 	env := &testHandlerEnv{
 		DB:             db,
 		LLM:            testutil.NewMockLLMCaller(),
-		ProjectRepo:    repository.NewProjectRepo(db),
-		TaskRepo:       repository.NewTaskRepo(db, o.broadcaster),
-		LLMConfigRepo:  repository.NewLLMConfigRepo(db),
-		ExecRepo:       repository.NewExecutionRepo(db),
-		ScheduleRepo:   repository.NewScheduleRepo(db),
-		WorkerRepo:     repository.NewWorkerRepo(db),
-		AttachmentRepo: repository.NewAttachmentRepo(db),
-		AlertRepo:      repository.NewAlertRepo(db),
-		SettingsRepo:   repository.NewSettingsRepo(db),
+		ProjectRepo:    sqlite.NewProjectRepo(db),
+		TaskRepo:       sqlite.NewTaskRepo(db, o.broadcaster),
+		LLMConfigRepo:  sqlite.NewLLMConfigRepo(db),
+		ExecRepo:       sqlite.NewExecutionRepo(db),
+		ScheduleRepo:   sqlite.NewScheduleRepo(db),
+		WorkerRepo:     sqlite.NewWorkerRepo(db),
+		AttachmentRepo: sqlite.NewAttachmentRepo(db),
+		AlertRepo:      sqlite.NewAlertRepo(db),
+		SettingsRepo:   sqlite.NewSettingsRepo(db),
 	}
-	chatAttachmentRepo := repository.NewChatAttachmentRepo(db)
-	upcomingRepo := repository.NewUpcomingRepo(db)
+	chatAttachmentRepo := sqlite.NewChatAttachmentRepo(db)
+	upcomingRepo := sqlite.NewUpcomingRepo(db)
 
 	env.ProjectSvc = service.NewProjectService(env.ProjectRepo)
 	env.LLMSvc = service.NewLLMService(env.LLMConfigRepo, env.ExecRepo, env.TaskRepo, env.ProjectRepo, env.ScheduleRepo, env.AttachmentRepo)
@@ -98,13 +98,13 @@ func newTestHandlerEnv(t testing.TB, db *sql.DB, opts ...testHandlerOption) *tes
 	alertSvc := service.NewAlertService(env.AlertRepo, nil)
 	upcomingSvc := service.NewUpcomingService(upcomingRepo)
 	if o.taskGoals {
-		env.TaskGoals = service.NewTaskGoalService(repository.NewTaskGoalRepo(db), env.TaskRepo, nil)
+		env.TaskGoals = service.NewTaskGoalService(sqlite.NewTaskGoalRepo(db), env.TaskRepo, nil)
 		env.TaskSvc.SetTaskGoalService(env.TaskGoals)
 		env.WorkerSvc.SetTaskGoalService(env.TaskGoals)
 	}
 	var insightsSvc *service.InsightsService
 	if o.insights {
-		insightsSvc = service.NewInsightsService(repository.NewInsightsRepo(db), env.TaskRepo, env.ProjectRepo, env.LLMConfigRepo, env.ExecRepo)
+		insightsSvc = service.NewInsightsService(sqlite.NewInsightsRepo(db), env.TaskRepo, env.ProjectRepo, env.LLMConfigRepo, env.ExecRepo)
 		insightsSvc.SetLLMService(env.LLMSvc)
 	}
 
@@ -112,12 +112,12 @@ func newTestHandlerEnv(t testing.TB, db *sql.DB, opts ...testHandlerOption) *tes
 		env.LLMConfigRepo, env.TaskRepo, env.ScheduleRepo, env.ExecRepo, env.WorkerRepo, env.AttachmentRepo, chatAttachmentRepo,
 		env.ProjectRepo, env.SettingsRepo, o.broadcaster, nil, newTestRuntimeStores(db))
 	h.oauthIdentityResolver = nil
-	h.SetGitHubAuthRepo(repository.NewGitHubAuthRepo(db))
-	h.SetSlackAuthRepo(repository.NewSlackAuthRepo(db))
-	h.SetEmailAuthRepo(repository.NewEmailAuthRepo(db))
-	h.SetEmailTaskContextRepo(repository.NewEmailTaskContextRepo(db))
-	h.SetDiscordAuthRepo(repository.NewDiscordAuthRepo(db))
-	h.SetDiscordTaskContextRepo(repository.NewDiscordTaskContextRepo(db))
+	h.SetGitHubAuthRepo(sqlite.NewGitHubAuthRepo(db))
+	h.SetSlackAuthRepo(sqlite.NewSlackAuthRepo(db))
+	h.SetEmailAuthRepo(sqlite.NewEmailAuthRepo(db))
+	h.SetEmailTaskContextRepo(sqlite.NewEmailTaskContextRepo(db))
+	h.SetDiscordAuthRepo(sqlite.NewDiscordAuthRepo(db))
+	h.SetDiscordTaskContextRepo(sqlite.NewDiscordTaskContextRepo(db))
 	h.SetLocalRepoPathEnabled(true)
 	if env.TaskGoals != nil {
 		h.SetTaskGoalService(env.TaskGoals)
@@ -156,10 +156,10 @@ func waitForHandlerBackgroundWork(t testing.TB, h *Handler) {
 
 func newTestRuntimeStores(db *sql.DB) RuntimeStores {
 	return RuntimeStores{
-		ThreadInputs:      repository.NewThreadInputRepo(db),
-		Usage:             repository.NewUsageRepo(db),
-		SkillAnalytics:    repository.NewSkillAnalyticsRepo(db),
-		TaskCommitStats:   repository.NewTaskCommitStatRepo(db),
-		ChatInputRequests: repository.NewChatInputRequestRepo(db),
+		ThreadInputs:      sqlite.NewThreadInputRepo(db),
+		Usage:             sqlite.NewUsageRepo(db),
+		SkillAnalytics:    sqlite.NewSkillAnalyticsRepo(db),
+		TaskCommitStats:   sqlite.NewTaskCommitStatRepo(db),
+		ChatInputRequests: sqlite.NewChatInputRequestRepo(db),
 	}
 }

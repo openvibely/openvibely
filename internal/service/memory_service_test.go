@@ -7,7 +7,7 @@ import (
 
 	"github.com/openvibely/openvibely/internal/memory"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/testutil"
 )
 
@@ -49,7 +49,7 @@ func TestMemoryService_SetLifecycleRepo_Stores(t *testing.T) {
 	svc := NewMemoryService(nil, nil, nil, nil, store, resolver)
 
 	db := testutil.NewTestDB(t)
-	repo := repository.NewLifecycleRepo(db)
+	repo := sqlite.NewLifecycleRepo(db)
 	svc.SetLifecycleRepo(repo)
 
 	if svc.lifecycleRepo != repo {
@@ -88,10 +88,10 @@ func TestMemoryService_EnsureProject_NilTaskRepo_Idempotent(t *testing.T) {
 // error when the project has no local repo_path configured.
 func TestMemoryService_EnsureProject_NoRepoPath(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	scheduleRepo := repository.NewScheduleRepo(db)
-	agentRepo := repository.NewAgentRepo(db)
-	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	scheduleRepo := sqlite.NewScheduleRepo(db)
+	agentRepo := sqlite.NewAgentRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
 
 	resolver, _ := memory.NewPathResolver("", "")
 	store := memory.NewFileStore(resolver)
@@ -115,10 +115,10 @@ func TestMemoryService_EnsureProject_NoRepoPath(t *testing.T) {
 // memory directory setup, agent reconciliation, and consolidation task/schedule creation.
 func TestMemoryService_EnsureProject_WithRepoPath(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	scheduleRepo := repository.NewScheduleRepo(db)
-	agentRepo := repository.NewAgentRepo(db)
-	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	scheduleRepo := sqlite.NewScheduleRepo(db)
+	agentRepo := sqlite.NewAgentRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
 
 	resolver, _ := memory.NewPathResolver("", "")
 	store := memory.NewFileStore(resolver)
@@ -173,10 +173,10 @@ func TestMemoryService_EnsureProject_WithRepoPath(t *testing.T) {
 
 func TestMemoryService_EnsureProject_RepairsMaintenanceScheduleClearContext(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	scheduleRepo := repository.NewScheduleRepo(db)
-	agentRepo := repository.NewAgentRepo(db)
-	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	scheduleRepo := sqlite.NewScheduleRepo(db)
+	agentRepo := sqlite.NewAgentRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
 
 	resolver, _ := memory.NewPathResolver("", "")
 	store := memory.NewFileStore(resolver)
@@ -234,10 +234,10 @@ func TestMemoryService_EnsureProject_RepairsMaintenanceScheduleClearContext(t *t
 // EnsureProject multiple times does not create duplicate tasks or schedules.
 func TestMemoryService_EnsureProject_WithRepoPath_Idempotent(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	scheduleRepo := repository.NewScheduleRepo(db)
-	agentRepo := repository.NewAgentRepo(db)
-	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	scheduleRepo := sqlite.NewScheduleRepo(db)
+	agentRepo := sqlite.NewAgentRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
 
 	resolver, _ := memory.NewPathResolver("", "")
 	store := memory.NewFileStore(resolver)
@@ -274,9 +274,9 @@ func TestMemoryService_EnsureProject_WithRepoPath_Idempotent(t *testing.T) {
 func TestMemoryService_EnsureGlobalAgentsCreatesAndRepairsMemoryCuratorAndHooks(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)
-	agentRepo := repository.NewAgentRepo(db)
-	lifecycleRepo := repository.NewLifecycleRepo(db)
-	projectRepo := repository.NewProjectRepo(db)
+	agentRepo := sqlite.NewAgentRepo(db)
+	lifecycleRepo := sqlite.NewLifecycleRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
 	staleProject := &models.Project{Name: "stale-memory-agent-project", RepoPath: t.TempDir()}
 	if err := projectRepo.Create(ctx, staleProject); err != nil {
 		t.Fatalf("create stale project: %v", err)
@@ -415,8 +415,8 @@ func TestMemoryService_EnsureGlobalAgentsCreatesAndRepairsMemoryCuratorAndHooks(
 func TestMemoryService_EnsureGlobalAgentsRepairsLegacyMemoryAliasInPlace(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)
-	agentRepo := repository.NewAgentRepo(db)
-	lifecycleRepo := repository.NewLifecycleRepo(db)
+	agentRepo := sqlite.NewAgentRepo(db)
+	lifecycleRepo := sqlite.NewLifecycleRepo(db)
 	resolver, _ := memory.NewPathResolver("", "")
 	store := memory.NewFileStore(resolver)
 	svc := NewMemoryService(nil, nil, agentRepo, nil, store, resolver)

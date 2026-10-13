@@ -14,7 +14,7 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/database"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 )
 
 // BenchmarkSQLiteConnectionPool compares disposable WAL databases only. Run with:
@@ -69,16 +69,16 @@ func benchmarkSQLiteDedicatedWorkload(b *testing.B, readers, active int, workloa
 	defer connections.Close()
 	connections.Reader.SetMaxOpenConns(readers)
 	connections.Reader.SetMaxIdleConns(readers)
-	unregister := repository.RegisterDedicatedWriter(connections.Reader, connections.Writer)
+	unregister := sqlite.RegisterDedicatedWriter(connections.Reader, connections.Writer)
 	defer unregister()
 	benchmarkSQLitePoolWorkloadWithHandles(b, dbPath, connections.Reader, connections.Writer, active, workload)
 }
 
 func benchmarkSQLitePoolWorkloadWithHandles(b *testing.B, dbPath string, readDB, writeDB *sql.DB, active int, workload string) {
 	seedSQLitePoolBenchmark(b, writeDB)
-	taskRepo := repository.NewTaskRepo(readDB, nil)
-	executionRepo := repository.NewExecutionRepo(readDB)
-	automationRepo := repository.NewAutomationRepo(readDB)
+	taskRepo := sqlite.NewTaskRepo(readDB, nil)
+	executionRepo := sqlite.NewExecutionRepo(readDB)
+	automationRepo := sqlite.NewAutomationRepo(readDB)
 
 	// A sustained independent reader models execution-history/SSE consumers and
 	// makes WAL growth visible without consuming a slot from the measured pool.
@@ -273,7 +273,7 @@ func seedSQLitePoolBenchmark(b *testing.B, db *sql.DB) {
 	}
 }
 
-func runSQLitePoolBenchmarkOperation(writeDB *sql.DB, taskRepo *repository.TaskRepo, executionRepo *repository.ExecutionRepo, automationRepo *repository.AutomationRepo, workload string, i int, payload string) error {
+func runSQLitePoolBenchmarkOperation(writeDB *sql.DB, taskRepo *sqlite.TaskRepo, executionRepo *sqlite.ExecutionRepo, automationRepo *sqlite.AutomationRepo, workload string, i int, payload string) error {
 	id := i % 256
 	taskID := fmt.Sprintf("pool-task-%03d", id)
 	switch workload {

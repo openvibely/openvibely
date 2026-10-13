@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/testutil"
 )
 
@@ -25,7 +25,7 @@ type validationProjectionFixture struct {
 	reader      *sql.DB
 	writer      *sql.DB
 	counter     *testutil.SQLStatementCounter
-	projectRepo *repository.ProjectRepo
+	projectRepo *sqlite.ProjectRepo
 	projectSvc  *ProjectService
 	repoPath    string
 }
@@ -136,7 +136,7 @@ func newValidationProjectionFixture(tb testing.TB, projectCount int) *validation
 	if readerQueryOnly != 1 || writerQueryOnly != 0 {
 		tb.Fatalf("validation fixture query_only: reader=%d writer=%d, want 1/0", readerQueryOnly, writerQueryOnly)
 	}
-	unregisterWriter := repository.RegisterDedicatedWriter(reader, writer)
+	unregisterWriter := sqlite.RegisterDedicatedWriter(reader, writer)
 	tb.Cleanup(unregisterWriter)
 
 	repoPath := filepath.Join(tb.TempDir(), "existing-repository")
@@ -144,7 +144,7 @@ func newValidationProjectionFixture(tb testing.TB, projectCount int) *validation
 		tb.Fatalf("create existing repository path: %v", err)
 	}
 	seedValidationProjectionProjects(tb, writer, projectCount, repoPath)
-	repo := repository.NewProjectRepo(reader)
+	repo := sqlite.NewProjectRepo(reader)
 	return &validationProjectionFixture{
 		reader:      reader,
 		writer:      writer,
@@ -281,7 +281,7 @@ func (fixture *validationProjectionFixture) selectedBytes(tb testing.TB) int {
 	return validationCompactSelectedBytes(tb, fixture.projectRepo)
 }
 
-func validationCompactSelectedBytes(tb testing.TB, repo *repository.ProjectRepo) int {
+func validationCompactSelectedBytes(tb testing.TB, repo *sqlite.ProjectRepo) int {
 	tb.Helper()
 	projects, err := repo.ListRepoValidationProjects(context.Background())
 	if err != nil {

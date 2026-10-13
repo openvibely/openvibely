@@ -24,7 +24,7 @@ import (
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/openvibely/openvibely/web/templates/components"
@@ -532,7 +532,7 @@ func TestCombineContexts_BothEmpty(t *testing.T) {
 func TestResolveTaskAgentDefinitionForTask_LoadsAssignedDefinition(t *testing.T) {
 	h, _, _, db := setupTestHandlerWithDB(t)
 	ctx := context.Background()
-	agentRepo := repository.NewAgentRepo(db)
+	agentRepo := sqlite.NewAgentRepo(db)
 	h.SetAgentRepo(agentRepo)
 
 	project := createProject(t, h, "agent-def-project")
@@ -1240,12 +1240,12 @@ func TestProcessStreamingResponse_TaskFollowupListCapabilitiesIncludesSelectedMe
 func TestProcessStreamingResponse_ManualFollowupReactivatesAchievedGoalForCheckpoint(t *testing.T) {
 	h, _, llmConfigRepo, db := setupTestHandlerWithDB(t)
 	ctx := context.Background()
-	goalRepo := repository.NewTaskGoalRepo(db)
+	goalRepo := sqlite.NewTaskGoalRepo(db)
 	goalSvc := service.NewTaskGoalService(goalRepo, h.taskRepo, nil)
 	h.SetTaskGoalService(goalSvc)
 	h.taskSvc.SetTaskGoalService(goalSvc)
 	h.workerSvc.SetTaskGoalService(goalSvc)
-	agentRepo := repository.NewAgentRepo(db)
+	agentRepo := sqlite.NewAgentRepo(db)
 	h.SetAgentRepo(agentRepo)
 	h.workerSvc.SetLifecycleAgentRepo(agentRepo)
 	mock := testutil.NewMockLLMCaller()
@@ -1305,7 +1305,7 @@ func TestProcessStreamingResponse_ManualFollowupReactivatesAchievedGoalForCheckp
 func TestProcessStreamingResponse_GoalAgentQueuedFollowupDoesNotReactivateAchievedGoal(t *testing.T) {
 	h, _, llmConfigRepo, db := setupTestHandlerWithDB(t)
 	ctx := context.Background()
-	goalRepo := repository.NewTaskGoalRepo(db)
+	goalRepo := sqlite.NewTaskGoalRepo(db)
 	goalSvc := service.NewTaskGoalService(goalRepo, h.taskRepo, nil)
 	h.SetTaskGoalService(goalSvc)
 	h.taskSvc.SetTaskGoalService(goalSvc)
@@ -1355,12 +1355,12 @@ func TestProcessStreamingResponse_GoalAgentQueuedFollowupDoesNotReactivateAchiev
 func TestProcessStreamingResponse_CancelledTaskFollowupSkipsAfterCompleteHooksAndContinuations(t *testing.T) {
 	h, _, llmConfigRepo, db := setupTestHandlerWithDB(t)
 	ctx := context.Background()
-	goalRepo := repository.NewTaskGoalRepo(db)
+	goalRepo := sqlite.NewTaskGoalRepo(db)
 	goalSvc := service.NewTaskGoalService(goalRepo, h.taskRepo, nil)
 	h.SetTaskGoalService(goalSvc)
 	h.taskSvc.SetTaskGoalService(goalSvc)
 	h.workerSvc.SetTaskGoalService(goalSvc)
-	agentRepo := repository.NewAgentRepo(db)
+	agentRepo := sqlite.NewAgentRepo(db)
 	h.SetAgentRepo(agentRepo)
 	h.workerSvc.SetLifecycleAgentRepo(agentRepo)
 
@@ -1436,7 +1436,7 @@ func TestProcessStreamingResponse_DeadlineFailureRunsAfterCompleteDespiteCancell
 	h, _, llmConfigRepo, db := setupTestHandlerWithDB(t)
 	h.workerSvc.SetTaskRepo(h.taskRepo)
 	ctx := context.Background()
-	goalRepo := repository.NewTaskGoalRepo(db)
+	goalRepo := sqlite.NewTaskGoalRepo(db)
 	goalSvc := service.NewTaskGoalService(goalRepo, h.taskRepo, nil)
 	h.SetTaskGoalService(goalSvc)
 	h.taskSvc.SetTaskGoalService(goalSvc)
@@ -1541,12 +1541,12 @@ func TestProcessStreamingResponse_DeadlineFailureRunsAfterCompleteDespiteCancell
 func TestProcessStreamingResponse_GenericAfterCompleteRunsGoalAgentWithoutAutoEnqueue(t *testing.T) {
 	h, _, llmConfigRepo, db := setupTestHandlerWithDB(t)
 	ctx := context.Background()
-	goalRepo := repository.NewTaskGoalRepo(db)
+	goalRepo := sqlite.NewTaskGoalRepo(db)
 	goalSvc := service.NewTaskGoalService(goalRepo, h.taskRepo, nil)
 	h.SetTaskGoalService(goalSvc)
 	h.taskSvc.SetTaskGoalService(goalSvc)
 	h.workerSvc.SetTaskGoalService(goalSvc)
-	agentRepo := repository.NewAgentRepo(db)
+	agentRepo := sqlite.NewAgentRepo(db)
 	h.SetAgentRepo(agentRepo)
 	h.workerSvc.SetLifecycleAgentRepo(agentRepo)
 	mock := testutil.NewMockLLMCaller()
@@ -1613,12 +1613,12 @@ func TestProcessStreamingResponse_GenericAfterCompletePublishesReloadedGoalStatu
 	sub, err := broadcaster.Subscribe()
 	require.NoError(t, err)
 	defer broadcaster.Unsubscribe(sub)
-	goalRepo := repository.NewTaskGoalRepo(db)
+	goalRepo := sqlite.NewTaskGoalRepo(db)
 	goalSvc := service.NewTaskGoalService(goalRepo, h.taskRepo, broadcaster)
 	h.SetTaskGoalService(goalSvc)
 	h.taskSvc.SetTaskGoalService(goalSvc)
 	h.workerSvc.SetTaskGoalService(goalSvc)
-	agentRepo := repository.NewAgentRepo(db)
+	agentRepo := sqlite.NewAgentRepo(db)
 	h.SetAgentRepo(agentRepo)
 	h.workerSvc.SetLifecycleAgentRepo(agentRepo)
 	mock := testutil.NewMockLLMCaller()
@@ -3094,9 +3094,9 @@ func TestStartQueuedXTaskThreadInputCarriesAuthorizedRuntimeTools(t *testing.T) 
 		tk.Status = models.StatusCompleted
 		tk.AgentID = &agent.ID
 	})
-	auth := repository.NewXAuthRepo(db)
-	selections := repository.NewXUserProjectRepo(db)
-	h.SetXRepositories(auth, selections, repository.NewXTaskContextRepo(db), repository.NewXInboundReceiptRepo(db))
+	auth := sqlite.NewXAuthRepo(db)
+	selections := sqlite.NewXUserProjectRepo(db)
+	h.SetXRepositories(auth, selections, sqlite.NewXTaskContextRepo(db), sqlite.NewXInboundReceiptRepo(db))
 	require.NoError(t, auth.Create(ctx, &models.XAuthorizedUser{ProjectID: project.ID, XUserID: "123"}))
 	require.NoError(t, auth.Create(ctx, &models.XAuthorizedUser{ProjectID: targetProject.ID, XUserID: "123"}))
 	input := &models.ThreadInput{
@@ -3182,9 +3182,9 @@ func TestStartImmediateXTaskThreadRunCarriesAuthorizedRuntimeTools(t *testing.T)
 		ex.PromptSent = "switch if needed"
 		ex.IsFollowup = true
 	})
-	auth := repository.NewXAuthRepo(db)
-	selections := repository.NewXUserProjectRepo(db)
-	h.SetXRepositories(auth, selections, repository.NewXTaskContextRepo(db), repository.NewXInboundReceiptRepo(db))
+	auth := sqlite.NewXAuthRepo(db)
+	selections := sqlite.NewXUserProjectRepo(db)
+	h.SetXRepositories(auth, selections, sqlite.NewXTaskContextRepo(db), sqlite.NewXInboundReceiptRepo(db))
 	require.NoError(t, auth.Create(ctx, &models.XAuthorizedUser{ProjectID: project.ID, XUserID: "123"}))
 	require.NoError(t, auth.Create(ctx, &models.XAuthorizedUser{ProjectID: targetProject.ID, XUserID: "123"}))
 	input := models.ThreadInput{Source: models.TaskOriginX, ProjectID: project.ID, XAccountID: "bot-account", XUserID: "123", XConversationID: "conversation", XReplyToTweetID: "tweet", XUsername: "alice"}
@@ -4425,7 +4425,7 @@ func TestPreparePendingSteeringInputsPreservesCurrentReasoningContent(t *testing
 		ex.PromptSent = "active prompt"
 		ex.IsFollowup = true
 	})
-	require.NoError(t, h.execRepo.(*repository.ExecutionRepo).UpdateReasoningContent(ctx, exec.ID, "first private reasoning plus detail"))
+	require.NoError(t, h.execRepo.(*sqlite.ExecutionRepo).UpdateReasoningContent(ctx, exec.ID, "first private reasoning plus detail"))
 
 	steering := &models.ThreadInput{
 		Scope:          models.ThreadInputScopeTask,
@@ -4461,7 +4461,7 @@ func TestPreparePendingSteeringInputsPreservesCurrentReasoningContent(t *testing
 	require.Equal(t, "assistant answer", params.ChatHistory[1].Output)
 	require.Equal(t, "first private reasoning plus detail", params.ChatHistory[1].ReasoningContent)
 
-	require.NoError(t, h.execRepo.(*repository.ExecutionRepo).UpdateReasoningContent(ctx, exec.ID, "final private reasoning"))
+	require.NoError(t, h.execRepo.(*sqlite.ExecutionRepo).UpdateReasoningContent(ctx, exec.ID, "final private reasoning"))
 	require.NoError(t, h.persistSteeringReplayHistory(ctx, params, "assistant answerfinal answer"))
 	stored, err := h.execRepo.GetByID(ctx, exec.ID)
 	require.NoError(t, err)
@@ -5832,7 +5832,7 @@ func TestResolveWorktreeWorkDir_UnbornRepoFailsClosed(t *testing.T) {
 func TestResolveWorktreeWorkDir_SyncsExistingWorktreeFromTargetBeforeFollowup(t *testing.T) {
 	h, _, _, db := setupTestHandlerWithDB(t)
 	ctx := context.Background()
-	prRepo := repository.NewTaskPullRequestRepo(db)
+	prRepo := sqlite.NewTaskPullRequestRepo(db)
 	h.SetTaskPullRequestRepo(prRepo)
 
 	repoDir := createHandlerTestGitRepo(t)
@@ -6128,8 +6128,8 @@ func TestCompleteWithSuccess_UpdatesTaskStatusBeforeDiffCapture(t *testing.T) {
 func TestCompleteWithSuccess_GitHubSDLCImplementationWithoutPullRequestFailsTask(t *testing.T) {
 	h, _, llmConfigRepo, db := setupTestHandlerWithDB(t)
 	ctx := context.Background()
-	prRepo := repository.NewTaskPullRequestRepo(db)
-	automationRepo := repository.NewAutomationRepo(db)
+	prRepo := sqlite.NewTaskPullRequestRepo(db)
+	automationRepo := sqlite.NewAutomationRepo(db)
 	h.SetTaskPullRequestRepo(prRepo)
 	h.SetAutomationServices(service.NewAutomationGraphService(automationRepo), nil)
 
@@ -6167,8 +6167,8 @@ func TestCompleteWithSuccess_GitHubSDLCImplementationWithoutPullRequestFailsTask
 func TestCompleteWithSuccess_GitHubSDLCImplementationWithSuccessfullyReplacedPullRequestCompletesTask(t *testing.T) {
 	h, _, llmConfigRepo, db := setupTestHandlerWithDB(t)
 	ctx := context.Background()
-	prRepo := repository.NewTaskPullRequestRepo(db)
-	automationRepo := repository.NewAutomationRepo(db)
+	prRepo := sqlite.NewTaskPullRequestRepo(db)
+	automationRepo := sqlite.NewAutomationRepo(db)
 	h.SetTaskPullRequestRepo(prRepo)
 	h.SetAutomationServices(service.NewAutomationGraphService(automationRepo), nil)
 
@@ -6229,7 +6229,7 @@ func TestCompleteWithSuccess_GitHubSDLCImplementationWithSuccessfullyReplacedPul
 func TestRepublishOpenPullRequestAfterStartupSyncPreservesPendingUntilCompletion(t *testing.T) {
 	h, _, _, db := setupTestHandlerWithDB(t)
 	ctx := context.Background()
-	prRepo := repository.NewTaskPullRequestRepo(db)
+	prRepo := sqlite.NewTaskPullRequestRepo(db)
 	h.SetTaskPullRequestRepo(prRepo)
 
 	project := &models.Project{Name: "Startup sync publication", RepoURL: "https://github.com/openvibely/openvibely", RepoPath: t.TempDir()}
@@ -6278,7 +6278,7 @@ func TestRepublishOpenPullRequestAfterStartupSyncPreservesPendingUntilCompletion
 func TestStartupSyncSkipsClosedLivePullRequestAndCancelsPendingPublication(t *testing.T) {
 	h, _, _, db := setupTestHandlerWithDB(t)
 	ctx := context.Background()
-	prRepo := repository.NewTaskPullRequestRepo(db)
+	prRepo := sqlite.NewTaskPullRequestRepo(db)
 	h.SetTaskPullRequestRepo(prRepo)
 	project := &models.Project{Name: "Closed startup PR", RepoURL: "https://github.com/openvibely/openvibely", RepoPath: t.TempDir()}
 	require.NoError(t, h.projectSvc.Create(ctx, project))
@@ -6323,7 +6323,7 @@ func TestStartupSyncSkipsClosedLivePullRequestAndCancelsPendingPublication(t *te
 func TestStartupSyncPublicationDoesNotReadPRAfterSuccessfulPublish(t *testing.T) {
 	h, _, _, db := setupTestHandlerWithDB(t)
 	ctx := context.Background()
-	prRepo := repository.NewTaskPullRequestRepo(db)
+	prRepo := sqlite.NewTaskPullRequestRepo(db)
 	h.SetTaskPullRequestRepo(prRepo)
 	project := &models.Project{Name: "PR closes during publication", RepoURL: "https://github.com/openvibely/openvibely", RepoPath: t.TempDir()}
 	require.NoError(t, h.projectSvc.Create(ctx, project))
@@ -6370,7 +6370,7 @@ func TestProcessStreamingResponseRepublishesOpenPRAfterStartupSync(t *testing.T)
 	h, _, llmConfigRepo, db := setupTestHandlerWithDB(t)
 	h.workerSvc = nil
 	ctx := context.Background()
-	prRepo := repository.NewTaskPullRequestRepo(db)
+	prRepo := sqlite.NewTaskPullRequestRepo(db)
 	h.SetTaskPullRequestRepo(prRepo)
 
 	agent := createAgent(t, llmConfigRepo)
@@ -6437,7 +6437,7 @@ func TestProcessStreamingResponseKeepsStartupSyncPublicationPendingAfterFailure(
 	h, _, llmConfigRepo, db := setupTestHandlerWithDB(t)
 	h.workerSvc = nil
 	ctx := context.Background()
-	prRepo := repository.NewTaskPullRequestRepo(db)
+	prRepo := sqlite.NewTaskPullRequestRepo(db)
 	h.SetTaskPullRequestRepo(prRepo)
 
 	agent := createAgent(t, llmConfigRepo)
@@ -6495,7 +6495,7 @@ func TestProcessStreamingResponseKeepsStartupSyncPublicationPendingAfterFailure(
 func TestCompleteWithSuccessDefersStartupSyncPublicationForPendingSteering(t *testing.T) {
 	h, _, llmConfigRepo, db := setupTestHandlerWithDB(t)
 	ctx := context.Background()
-	prRepo := repository.NewTaskPullRequestRepo(db)
+	prRepo := sqlite.NewTaskPullRequestRepo(db)
 	h.SetTaskPullRequestRepo(prRepo)
 
 	agent := createAgent(t, llmConfigRepo)
@@ -6544,8 +6544,8 @@ func TestCompleteWithSuccessDefersStartupSyncPublicationForPendingSteering(t *te
 func TestCompleteWithSuccess_GitHubSDLCImplementationWithOldOpenPullRequestHeadFailsTask(t *testing.T) {
 	h, _, llmConfigRepo, db := setupTestHandlerWithDB(t)
 	ctx := context.Background()
-	prRepo := repository.NewTaskPullRequestRepo(db)
-	automationRepo := repository.NewAutomationRepo(db)
+	prRepo := sqlite.NewTaskPullRequestRepo(db)
+	automationRepo := sqlite.NewAutomationRepo(db)
 	h.SetTaskPullRequestRepo(prRepo)
 	h.SetAutomationServices(service.NewAutomationGraphService(automationRepo), nil)
 
@@ -6592,8 +6592,8 @@ func TestCompleteWithSuccess_GitHubSDLCImplementationWithOldOpenPullRequestHeadF
 func TestCompleteWithSuccess_GitHubSDLCImplementationWithStaleOpenPullRequestFailsTask(t *testing.T) {
 	h, _, llmConfigRepo, db := setupTestHandlerWithDB(t)
 	ctx := context.Background()
-	prRepo := repository.NewTaskPullRequestRepo(db)
-	automationRepo := repository.NewAutomationRepo(db)
+	prRepo := sqlite.NewTaskPullRequestRepo(db)
+	automationRepo := sqlite.NewAutomationRepo(db)
 	h.SetTaskPullRequestRepo(prRepo)
 	h.SetAutomationServices(service.NewAutomationGraphService(automationRepo), nil)
 
@@ -6640,8 +6640,8 @@ func TestCompleteWithSuccess_GitHubSDLCImplementationWithStaleOpenPullRequestFai
 func TestCompleteWithSuccess_GitHubSDLCImplementationWithClosedPullRequestFailsTask(t *testing.T) {
 	h, _, llmConfigRepo, db := setupTestHandlerWithDB(t)
 	ctx := context.Background()
-	prRepo := repository.NewTaskPullRequestRepo(db)
-	automationRepo := repository.NewAutomationRepo(db)
+	prRepo := sqlite.NewTaskPullRequestRepo(db)
+	automationRepo := sqlite.NewAutomationRepo(db)
 	h.SetTaskPullRequestRepo(prRepo)
 	h.SetAutomationServices(service.NewAutomationGraphService(automationRepo), nil)
 
@@ -7101,7 +7101,7 @@ func richAutoSelectionConfig(name string, provider models.LLMProvider, authMetho
 	return cfg
 }
 
-func seedLargeAutoSelectionConfigs(tb testing.TB, ctx context.Context, repo *repository.LLMConfigRepo, count int) {
+func seedLargeAutoSelectionConfigs(tb testing.TB, ctx context.Context, repo *sqlite.LLMConfigRepo, count int) {
 	tb.Helper()
 	for i := 0; i < count; i++ {
 		cfg := richAutoSelectionConfig(fmt.Sprintf("Large Custom %02d", i), models.ProviderOpenAICompatible, models.AuthMethodAPIKey, "claude-3-5-sonnet", i == 0)
@@ -7960,7 +7960,7 @@ func TestProcessStreamingResponse_TaskFollowupRateLimitFailurePreservesHistory(t
 		ex.IsFollowup = true
 	})
 	streamedPrefix := "Investigating prior changes..."
-	if err := h.execRepo.(*repository.ExecutionRepo).UpdateOutput(ctx, failedFollowup.ID, streamedPrefix); err != nil {
+	if err := h.execRepo.(*sqlite.ExecutionRepo).UpdateOutput(ctx, failedFollowup.ID, streamedPrefix); err != nil {
 		t.Fatalf("seed streamed output: %v", err)
 	}
 
@@ -8465,7 +8465,7 @@ func TestProcessStreamingResponse_ActionMarkerTextIsInert(t *testing.T) {
 func TestStartQueuedChatInputPreservesChannelOriginMetadata(t *testing.T) {
 	h, _, llmConfigRepo, db := setupTestHandlerWithDB(t)
 	h.workerSvc = nil
-	h.SetSlackTaskContextRepo(repository.NewSlackTaskContextRepo(db))
+	h.SetSlackTaskContextRepo(sqlite.NewSlackTaskContextRepo(db))
 	ctx := context.Background()
 	agent := createAgent(t, llmConfigRepo)
 	project := createProject(t, h, "Queued Channel Metadata Project")
@@ -8767,7 +8767,7 @@ func TestProcessStreamingResponseConstructsRealHardenedGitHubRuntimeOnceFor50Too
 		execution.IsFollowup = true
 	})
 
-	automationRepo := repository.NewAutomationRepo(db)
+	automationRepo := sqlite.NewAutomationRepo(db)
 	h.llmSvc.SetAutomationRepo(automationRepo)
 	h.llmSvc.SetGitHubIssueRuntimeProvider(&fakeGitHubService{})
 	constructions := 0
@@ -8784,8 +8784,8 @@ func TestProcessStreamingResponseConstructsRealHardenedGitHubRuntimeOnceFor50Too
 }
 
 func newProductionHardenedRuntimeDispatchFixture() (*Handler, context.Context, streamingResponseParams, []llmcontracts.RuntimeToolDefinition) {
-	llmSvc := service.NewLLMService(nil, nil, nil, repository.NewProjectRepo(nil), nil, nil)
-	llmSvc.SetAutomationRepo(repository.NewAutomationRepo(nil))
+	llmSvc := service.NewLLMService(nil, nil, nil, sqlite.NewProjectRepo(nil), nil, nil)
+	llmSvc.SetAutomationRepo(sqlite.NewAutomationRepo(nil))
 	llmSvc.SetGitHubIssueRuntimeProvider(&fakeGitHubService{})
 	h := &Handler{llmSvc: llmSvc}
 	task := models.Task{ID: "runtime-fixture-task", ProjectID: "runtime-fixture-project", Category: models.CategoryScheduled}
@@ -8886,7 +8886,7 @@ func BenchmarkTaskFollowupHardenedGitHubRuntime50Dispatches(b *testing.B) {
 func TestExecuteListAgentsUsesRuntimeSummariesAndPreservesOutput(t *testing.T) {
 	h, _, _, db := setupTestHandlerWithDB(t)
 	ctx := context.Background()
-	agentRepo := repository.NewAgentRepo(db)
+	agentRepo := sqlite.NewAgentRepo(db)
 	h.SetAgentRepo(agentRepo)
 	if _, err := db.ExecContext(ctx, `DELETE FROM agents WHERE id IS NOT NULL`); err != nil {
 		t.Fatalf("clear agents: %v", err)
@@ -9295,7 +9295,7 @@ func TestFollowupStopDuringFinalizationPreservesSuccessor(t *testing.T) {
 				require.Equal(t, models.StatusCancelled, storedTask.Status)
 				require.Equal(t, models.CategoryBacklog, storedTask.Category)
 			}
-			alerts, err := repository.NewAlertRepo(db).ListByProject(ctx, project.ID, 100)
+			alerts, err := sqlite.NewAlertRepo(db).ListByProject(ctx, project.ID, 100)
 			require.NoError(t, err)
 			require.Empty(t, alerts, "Stop must not create a failure alert")
 		})

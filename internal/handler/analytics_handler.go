@@ -377,7 +377,7 @@ func analyticsDimensionParams(c echo.Context) []string {
 // @Param group_by query string false "Grouping period: day, week, or month" default(day)
 // @Param date_from query string false "Optional start datetime filter"
 // @Param date_to query string false "Optional end datetime filter"
-// @Success 200 {array} repository.SuccessFailureRate "Success/failure rates"
+// @Success 200 {array} persistence.SuccessFailureRate "Success/failure rates"
 // @Failure 500 {object} ErrorResponse "Internal server error"
 // @Router /api/analytics/success-failure-rates [get]
 func (h *Handler) GetSuccessFailureRates(c echo.Context) error {
@@ -405,7 +405,7 @@ func (h *Handler) GetSuccessFailureRates(c echo.Context) error {
 // @Produce json
 // @Param project_id query string false "Project ID filter"
 // @Param limit query int false "Maximum number of tasks to return" default(10)
-// @Success 200 {array} repository.AvgExecutionTime "Average execution time by task"
+// @Success 200 {array} persistence.AvgExecutionTime "Average execution time by task"
 // @Failure 500 {object} ErrorResponse "Internal server error"
 // @Router /api/analytics/avg-execution-time-by-task [get]
 func (h *Handler) GetAvgExecutionTimeByTask(c echo.Context) error {
@@ -433,7 +433,7 @@ func (h *Handler) GetAvgExecutionTimeByTask(c echo.Context) error {
 // @Tags analytics
 // @Produce json
 // @Param project_id query string false "Project ID filter"
-// @Success 200 {array} repository.AvgExecutionTime "Average execution time by model"
+// @Success 200 {array} persistence.AvgExecutionTime "Average execution time by model"
 // @Failure 500 {object} ErrorResponse "Internal server error"
 // @Router /api/analytics/avg-execution-time-by-agent [get]
 func (h *Handler) GetAvgExecutionTimeByAgent(c echo.Context) error {
@@ -458,7 +458,7 @@ func (h *Handler) GetAvgExecutionTimeByAgent(c echo.Context) error {
 // @Param group_by query string false "Grouping period: day, week, or month" default(day)
 // @Param date_from query string false "Optional start datetime filter"
 // @Param date_to query string false "Optional end datetime filter"
-// @Success 200 {object} repository.TaskRunActivity "Task-run activity"
+// @Success 200 {object} persistence.TaskRunActivity "Task-run activity"
 // @Failure 400 {object} ErrorResponse "Missing project ID"
 // @Failure 500 {object} ErrorResponse "Internal server error"
 // @Router /api/analytics/task-run-activity [get]
@@ -482,7 +482,7 @@ func (h *Handler) GetTaskRunActivity(c echo.Context) error {
 // @Param project_id query string false "Project ID filter"
 // @Param date_from query string false "Optional start datetime filter"
 // @Param date_to query string false "Optional end datetime filter"
-// @Success 200 {array} repository.ExecutionTrend "Execution counts by hour"
+// @Success 200 {array} persistence.ExecutionTrend "Execution counts by hour"
 // @Failure 500 {object} ErrorResponse "Internal server error"
 // @Router /api/analytics/execution-trends-by-hour [get]
 func (h *Handler) GetExecutionTrendsByHour(c echo.Context) error {
@@ -505,7 +505,7 @@ func (h *Handler) GetExecutionTrendsByHour(c echo.Context) error {
 // @Tags analytics
 // @Produce json
 // @Param project_id query string false "Project ID filter"
-// @Success 200 {array} repository.AgentUsage "Model usage breakdown"
+// @Success 200 {array} persistence.AgentUsage "Model usage breakdown"
 // @Failure 500 {object} ErrorResponse "Internal server error"
 // @Router /api/analytics/agent-usage-by-project [get]
 func (h *Handler) GetAgentUsageByProject(c echo.Context) error {
@@ -527,7 +527,7 @@ func (h *Handler) GetAgentUsageByProject(c echo.Context) error {
 // @Produce json
 // @Param project_id query string false "Project ID filter"
 // @Param limit query int false "Maximum number of tasks to return; 0 returns all matching tasks" default(10)
-// @Success 200 {array} repository.TaskFrequency "Most frequently executed tasks"
+// @Success 200 {array} persistence.TaskFrequency "Most frequently executed tasks"
 // @Failure 500 {object} ErrorResponse "Internal server error"
 // @Router /api/analytics/most-frequent-tasks [get]
 func (h *Handler) GetMostFrequentTasks(c echo.Context) error {
@@ -556,7 +556,7 @@ func (h *Handler) GetMostFrequentTasks(c echo.Context) error {
 // @Produce json
 // @Param project_id query string false "Project ID filter"
 // @Param limit query int false "Maximum number of patterns to return" default(10)
-// @Success 200 {array} repository.FailedTaskPattern "Failed task patterns"
+// @Success 200 {array} persistence.FailedTaskPattern "Failed task patterns"
 // @Failure 500 {object} ErrorResponse "Internal server error"
 // @Router /api/analytics/failed-task-patterns [get]
 func (h *Handler) GetFailedTaskPatterns(c echo.Context) error {

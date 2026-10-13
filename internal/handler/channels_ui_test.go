@@ -13,7 +13,7 @@ import (
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/internal/testutil"
 )
@@ -312,7 +312,7 @@ func TestChannelsPageTelegramRichMessagesToggleDefaultsCheckedAndHonorsSavedFals
 
 func TestChannelsPageOutboundTargetsRenderAsPermanentTopEditCard(t *testing.T) {
 	h, e, _, db := setupTestHandlerWithDB(t)
-	targetRepo := repository.NewChannelTargetRepo(db)
+	targetRepo := sqlite.NewChannelTargetRepo(db)
 	h.SetChannelTargetRepo(targetRepo)
 	seedTarget := models.ChannelTarget{
 		ID:             persistence.NewID(),
@@ -526,7 +526,7 @@ func TestChannelsPageUsesCompactAgentPickerProjection(t *testing.T) {
 	db, counter := testutil.NewStatementCountingTestDB(t)
 	env := newTestHandlerEnv(t, db)
 	h, e := env.Handler, env.Echo
-	agentRepo := repository.NewAgentRepo(db)
+	agentRepo := sqlite.NewAgentRepo(db)
 	h.SetAgentRepo(agentRepo)
 
 	alpha := &models.Agent{Name: "Alpha Picker", SystemPrompt: strings.Repeat("large hidden prompt ", 1024), ToolConfig: models.AgentToolConfig{ScopedFiles: []models.ScopedFilesConfig{{Directory: "src", Permissions: []string{"read"}}}}}
@@ -729,10 +729,10 @@ func BenchmarkHandlerChannelsSettingsBatchedContention(b *testing.B) {
 	db := testutil.NewTestDB(b)
 	h, e, _ := setupTestHandlerForDB(b, db)
 	project := createProjectTB(b, h, "Channels Settings Benchmark Project")
-	settingsRepo := repository.NewSettingsRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 	seedRepresentativeChannelsSettings(b, settingsRepo, project.ID, "other-project")
 	h.settingsRepo = settingsRepo
-	h.SetChannelTargetRepo(repository.NewChannelTargetRepo(db))
+	h.SetChannelTargetRepo(sqlite.NewChannelTargetRepo(db))
 
 	var totalLightweightLatency int64
 	b.ReportAllocs()
@@ -774,7 +774,7 @@ func BenchmarkHandlerChannelsSettingsBatchedContention(b *testing.B) {
 	b.ReportMetric(float64(totalLightweightLatency)/float64(b.N), "lightweight_db_block_ns/op")
 }
 
-func seedRepresentativeChannelsSettings(t testing.TB, settingsRepo *repository.SettingsRepo, projectID, otherProjectID string) {
+func seedRepresentativeChannelsSettings(t testing.TB, settingsRepo *sqlite.SettingsRepo, projectID, otherProjectID string) {
 	t.Helper()
 	ctx := context.Background()
 	settings := map[string]string{
@@ -874,7 +874,7 @@ func TestChannelsPageOutboundTargetTestButtonIncludesSelectedProjectID(t *testin
 		t.Fatal("expected distinct projects")
 	}
 
-	targetRepo := repository.NewChannelTargetRepo(tc.db)
+	targetRepo := sqlite.NewChannelTargetRepo(tc.db)
 	slack := &outboundTargetTestSlack{}
 	router := service.NewChannelMessageRouter(targetRepo, tc.settingsRepo)
 	router.SetSlackService(slack)
@@ -1017,7 +1017,7 @@ func TestChannelsPageStatusBadgesRenderAtBottomOfDetailsSection(t *testing.T) {
 		}
 	}
 	if h.telegramAuthRepo == nil {
-		h.SetTelegramAuthRepo(repository.NewTelegramAuthRepo(db))
+		h.SetTelegramAuthRepo(sqlite.NewTelegramAuthRepo(db))
 	}
 	if err := h.telegramAuthRepo.Create(context.Background(), &models.TelegramAuthorizedUser{
 		ProjectID:        "default",
@@ -1029,7 +1029,7 @@ func TestChannelsPageStatusBadgesRenderAtBottomOfDetailsSection(t *testing.T) {
 		t.Fatalf("failed to seed telegram authorized user: %v", err)
 	}
 	if h.discordAuthRepo == nil {
-		h.SetDiscordAuthRepo(repository.NewDiscordAuthRepo(db))
+		h.SetDiscordAuthRepo(sqlite.NewDiscordAuthRepo(db))
 	}
 	if err := h.discordAuthRepo.Create(context.Background(), &models.DiscordAuthorizedUser{
 		ProjectID:     "default",
@@ -1170,7 +1170,7 @@ func TestChannelsPageTelegramMenuShowsDeleteAndNoChannelMenuUsesRemove(t *testin
 
 func TestChannelsPageDeleteActionsUseConfirmationDialog(t *testing.T) {
 	h, e, _, db := setupTestHandlerWithDB(t)
-	webhookRepo := repository.NewWebhookRepo(db)
+	webhookRepo := sqlite.NewWebhookRepo(db)
 	h.SetWebhookRepo(webhookRepo)
 
 	h.SetGitHubService(&fakeGitHubService{

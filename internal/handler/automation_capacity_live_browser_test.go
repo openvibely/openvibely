@@ -19,7 +19,7 @@ import (
 	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/web/static"
 	"github.com/openvibely/openvibely/web/templates/components"
@@ -45,7 +45,7 @@ func TestAutomationClaimsRefreshCapacityQueuedBoardThroughLiveEventsInChrome(t *
 			ctx := context.Background()
 			broadcaster := events.NewBroadcaster()
 			tc.handler.broadcaster = broadcaster
-			automationRepo := repository.NewAutomationRepo(tc.db)
+			automationRepo := sqlite.NewAutomationRepo(tc.db)
 			automationRepo.SetBroadcaster(broadcaster)
 
 			project := models.Project{Name: "Automation " + trigger + " live board"}
@@ -203,7 +203,7 @@ func TestAutomationRunNowSupersedesFailedLiveStateAcrossRefreshAndReloadInChrome
 	broadcaster := events.NewBroadcaster()
 	tc.handler.broadcaster = broadcaster
 	project := tc.CreateProject().WithName("Automation failed Run now freshness").Build()
-	automationRepo := repository.NewAutomationRepo(tc.db)
+	automationRepo := sqlite.NewAutomationRepo(tc.db)
 	automationRepo.SetBroadcaster(broadcaster)
 	registration := service.NewAutomationRegistrationService(automationRepo, service.NewAutomationAdapterRegistry())
 	lifecycle := service.NewAutomationLifecycleService(automationRepo, tc.scheduleRepo)
@@ -422,7 +422,7 @@ func automationRunNowFreshnessBrowserRunner(automationID string) string {
 	</script>`, automationID)
 }
 
-func createAutomationLiveBoardTask(t *testing.T, ctx context.Context, repo *repository.TaskRepo, projectID, title string, category models.TaskCategory) *models.Task {
+func createAutomationLiveBoardTask(t *testing.T, ctx context.Context, repo *sqlite.TaskRepo, projectID, title string, category models.TaskCategory) *models.Task {
 	t.Helper()
 	task := &models.Task{ProjectID: projectID, Title: title, Category: category, Status: models.StatusPending, Priority: 2, Prompt: title}
 	if err := repo.Create(ctx, task); err != nil {

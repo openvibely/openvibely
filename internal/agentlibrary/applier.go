@@ -12,7 +12,7 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 )
 
-// AgentStore is the subset of repository.AgentRepo the production Applier
+// AgentStore is the subset of persistence.AgentStore the production Applier
 // needs. Extracted so the applier can be unit-tested without a real database.
 type AgentStore interface {
 	GetByKey(ctx context.Context, key string) (*models.Agent, error)
@@ -25,7 +25,7 @@ type agentStoreIncludingArchived interface {
 	GetByKeyIncludingArchived(ctx context.Context, key string) (*models.Agent, error)
 }
 
-// HookStore is the subset of repository.LifecycleRepo the production Applier
+// HookStore is the subset of persistence.LifecycleStore the production Applier
 // needs. It writes the agent_lifecycle_hooks rows declared by the importer.
 type HookStore interface {
 	HooksByAgent(ctx context.Context, agentID string) ([]models.AgentLifecycleHook, error)

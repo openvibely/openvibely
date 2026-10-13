@@ -10,18 +10,18 @@ import (
 
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/internal/testutil"
 )
 
-func setupTelegramAuthHandler(t *testing.T) (*Handler, *echo.Echo, *repository.TelegramAuthRepo, string) {
+func setupTelegramAuthHandler(t *testing.T) (*Handler, *echo.Echo, *sqlite.TelegramAuthRepo, string) {
 	t.Helper()
 	db := testutil.NewTestDB(t)
 
-	projectRepo := repository.NewProjectRepo(db)
-	telegramAuthRepo := repository.NewTelegramAuthRepo(db)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	telegramAuthRepo := sqlite.NewTelegramAuthRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
 	projectSvc := service.NewProjectService(projectRepo)
 
 	h := New(

@@ -10,7 +10,7 @@ import (
 
 	"github.com/openvibely/openvibely/internal/agentlibrary"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/service"
 )
 
@@ -44,7 +44,7 @@ func writeAgentRootSKILLSmd(t *testing.T, root, key, name, description string) {
 // ListAgents response.
 func TestHandler_DeleteAgent_RemovesAgentFromList(t *testing.T) {
 	h, e, _, db := setupTestHandlerWithDB(t)
-	agentRepo := repository.NewAgentRepo(db)
+	agentRepo := sqlite.NewAgentRepo(db)
 	h.SetAgentRepo(agentRepo)
 
 	agent := &models.Agent{
@@ -85,7 +85,7 @@ func TestHandler_DeleteAgent_RemovesAgentFromList(t *testing.T) {
 // delete a protected system agent returns 403 and leaves the agent untouched.
 func TestHandler_DeleteAgent_ProtectedAgentRejected(t *testing.T) {
 	h, e, _, db := setupTestHandlerWithDB(t)
-	agentRepo := repository.NewAgentRepo(db)
+	agentRepo := sqlite.NewAgentRepo(db)
 	h.SetAgentRepo(agentRepo)
 
 	protected := &models.Agent{
@@ -125,7 +125,7 @@ func TestHandler_DeleteAgent_ProtectedAgentRejected(t *testing.T) {
 // SyncRootDeclarations cannot re-create the agent from stale SKILLS.md.
 func TestHandler_DeleteAgent_RemovesOnDiskDirectory(t *testing.T) {
 	h, e, _, db := setupTestHandlerWithDB(t)
-	agentRepo := repository.NewAgentRepo(db)
+	agentRepo := sqlite.NewAgentRepo(db)
 	h.SetAgentRepo(agentRepo)
 	root := t.TempDir()
 	h.SetAgentSkillRoot(root)
@@ -170,10 +170,10 @@ func TestHandler_DeleteAgent_RemovesOnDiskDirectory(t *testing.T) {
 // that after deletion the agent is NOT re-created by a subsequent list request.
 func TestHandler_DeleteAgent_DoesNotReappearAfterListAgents(t *testing.T) {
 	h, e, _, db := setupTestHandlerWithDB(t)
-	agentRepo := repository.NewAgentRepo(db)
-	lifecycleRepo := repository.NewLifecycleRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	scheduleRepo := repository.NewScheduleRepo(db)
+	agentRepo := sqlite.NewAgentRepo(db)
+	lifecycleRepo := sqlite.NewLifecycleRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	scheduleRepo := sqlite.NewScheduleRepo(db)
 
 	root := t.TempDir()
 
@@ -254,7 +254,7 @@ func TestHandler_DeleteAgent_DoesNotReappearAfterListAgents(t *testing.T) {
 // system agents so users are clearly informed the agent cannot be deleted.
 func TestHandler_ListAgents_ProtectedAgentShowsDisabledDelete(t *testing.T) {
 	h, e, _, db := setupTestHandlerWithDB(t)
-	agentRepo := repository.NewAgentRepo(db)
+	agentRepo := sqlite.NewAgentRepo(db)
 	h.SetAgentRepo(agentRepo)
 
 	protected := &models.Agent{
@@ -301,7 +301,7 @@ func TestHandler_ListAgents_ProtectedAgentShowsDisabledDelete(t *testing.T) {
 // created only in the DB without being materialized to disk).
 func TestHandler_DeleteAgent_NoDiskDirDoesNotFail(t *testing.T) {
 	h, e, _, db := setupTestHandlerWithDB(t)
-	agentRepo := repository.NewAgentRepo(db)
+	agentRepo := sqlite.NewAgentRepo(db)
 	h.SetAgentRepo(agentRepo)
 	root := t.TempDir()
 	h.SetAgentSkillRoot(root)
@@ -336,7 +336,7 @@ func TestHandler_DeleteAgent_NoDiskDirDoesNotFail(t *testing.T) {
 // not pollute LLM context on subsequent task turns.
 func TestHandler_DeleteAgent_CleansUpAgentsIndex(t *testing.T) {
 	h, e, _, db := setupTestHandlerWithDB(t)
-	agentRepo := repository.NewAgentRepo(db)
+	agentRepo := sqlite.NewAgentRepo(db)
 	h.SetAgentRepo(agentRepo)
 
 	root := t.TempDir()
@@ -398,10 +398,10 @@ func TestHandler_DeleteAgent_CleansUpAgentsIndex(t *testing.T) {
 // leaves the agent disabled.
 func TestHandler_DisabledAgentSurvivesListAgents(t *testing.T) {
 	h, e, _, db := setupTestHandlerWithDB(t)
-	agentRepo := repository.NewAgentRepo(db)
-	lifecycleRepo := repository.NewLifecycleRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	scheduleRepo := repository.NewScheduleRepo(db)
+	agentRepo := sqlite.NewAgentRepo(db)
+	lifecycleRepo := sqlite.NewLifecycleRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	scheduleRepo := sqlite.NewScheduleRepo(db)
 
 	root := t.TempDir()
 
@@ -487,7 +487,7 @@ func truncateBody(s string, max int) string {
 
 func TestHandler_DeleteAgent_RejectsExplicitForeignProject(t *testing.T) {
 	h, e, _, db := setupTestHandlerWithDB(t)
-	agentRepo := repository.NewAgentRepo(db)
+	agentRepo := sqlite.NewAgentRepo(db)
 	h.SetAgentRepo(agentRepo)
 	h.SetAgentSkillRoot(t.TempDir())
 
@@ -559,10 +559,10 @@ func TestHandler_DeleteAgent_RejectsExplicitForeignProject(t *testing.T) {
 //   - proj1 is untouched
 func TestHandler_DeleteAgent_ProjectScopedRemovesCorrectProjectDirectory(t *testing.T) {
 	h, e, _, db := setupTestHandlerWithDB(t)
-	agentRepo := repository.NewAgentRepo(db)
-	lifecycleRepo := repository.NewLifecycleRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	scheduleRepo := repository.NewScheduleRepo(db)
+	agentRepo := sqlite.NewAgentRepo(db)
+	lifecycleRepo := sqlite.NewLifecycleRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	scheduleRepo := sqlite.NewScheduleRepo(db)
 
 	globalRoot := t.TempDir()
 
@@ -676,8 +676,8 @@ func TestHandler_DeleteAgent_ProjectScopedRemovesCorrectProjectDirectory(t *test
 
 func TestHandler_ListAgents_RemovedProjectOverrideDoesNotRematerializeStaleState(t *testing.T) {
 	h, e, _, db := setupTestHandlerWithDB(t)
-	agentRepo := repository.NewAgentRepo(db)
-	lifecycleRepo := repository.NewLifecycleRepo(db)
+	agentRepo := sqlite.NewAgentRepo(db)
+	lifecycleRepo := sqlite.NewLifecycleRepo(db)
 	globalRoot := t.TempDir()
 	writeAgentRootSKILLSmd(t, globalRoot, "shared", "Global Shared", "global declaration")
 
@@ -740,7 +740,7 @@ func TestHandler_ListAgents_RemovedProjectOverrideDoesNotRematerializeStaleState
 // UI requests that rely on the saved selected-project context.
 func TestHandler_DeleteAgent_ProjectScopedUsesAgentProjectID(t *testing.T) {
 	h, e, _, db := setupTestHandlerWithDB(t)
-	agentRepo := repository.NewAgentRepo(db)
+	agentRepo := sqlite.NewAgentRepo(db)
 	h.SetAgentRepo(agentRepo)
 
 	// A global skill root is required for the directory-cleanup guard.

@@ -18,7 +18,7 @@ import (
 	"github.com/openvibely/openvibely/internal/database"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/testutil"
 )
 
@@ -293,7 +293,7 @@ func TestGetAnalyticsDashboardYieldsSoleReaderForConcurrentRequest(t *testing.T)
 		t.Fatal(err)
 	}
 
-	h := &Handler{execRepo: repository.NewExecutionRepo(connections.Reader)}
+	h := &Handler{execRepo: sqlite.NewExecutionRepo(connections.Reader)}
 	e := echo.New()
 	e.GET("/api/analytics/dashboard", h.GetAnalyticsDashboard)
 	e.GET("/probe", func(c echo.Context) error {
@@ -433,7 +433,7 @@ func BenchmarkGetAnalyticsDashboardLargePayloadAgents(b *testing.B) {
 		t.Fatal(err)
 	}
 
-	h := &Handler{execRepo: repository.NewExecutionRepo(connections.Reader)}
+	h := &Handler{execRepo: sqlite.NewExecutionRepo(connections.Reader)}
 	e := echo.New()
 	e.GET("/api/analytics/dashboard", h.GetAnalyticsDashboard)
 	server := httptest.NewServer(e)
@@ -491,7 +491,7 @@ func BenchmarkGetAnalyticsDashboardLargePayloadOverview(b *testing.B) {
 		t.Fatal(err)
 	}
 
-	h := &Handler{execRepo: repository.NewExecutionRepo(connections.Reader)}
+	h := &Handler{execRepo: sqlite.NewExecutionRepo(connections.Reader)}
 	e := echo.New()
 	e.GET("/api/analytics/dashboard", h.GetAnalyticsDashboard)
 	server := httptest.NewServer(e)
@@ -606,7 +606,7 @@ func TestGetAnalyticsDashboardFiltersScopedSkillOutcomeEvidence(t *testing.T) {
 		}
 	}
 
-	skillRepo := repository.NewSkillAnalyticsRepo(tc.db)
+	skillRepo := sqlite.NewSkillAnalyticsRepo(tc.db)
 	for _, event := range []*models.SkillAnalyticsEvent{
 		{ProjectID: project.ID, TaskID: target.ID, SkillHandle: "shared:evaluator", SkillScope: models.SkillScopeProject, EventType: models.SkillEventSelected},
 		{ProjectID: project.ID, TaskID: other.ID, SkillHandle: "shared:evaluator", SkillScope: models.SkillScopeGlobal, EventType: models.SkillEventSelected},
@@ -1000,9 +1000,9 @@ func TestGetSkillAnalyticsUsesCompactAgentCatalogProjectionAndPreservesEnabledSk
 		t.Fatalf("clear agents: %v", err)
 	}
 
-	projectRepo := repository.NewProjectRepo(db)
-	agentRepo := repository.NewAgentRepo(db)
-	skillAnalyticsRepo := repository.NewSkillAnalyticsRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	agentRepo := sqlite.NewAgentRepo(db)
+	skillAnalyticsRepo := sqlite.NewSkillAnalyticsRepo(db)
 	globalRoot := filepath.Join(t.TempDir(), "global")
 	projectARepo := filepath.Join(t.TempDir(), "project-a")
 	projectBRepo := filepath.Join(t.TempDir(), "project-b")
@@ -1156,7 +1156,7 @@ func analyticsSkillBody(handle string, enabled bool) string {
 	return "---\nskill:\n  key: " + handle + "\n  enabled: " + map[bool]string{true: "true", false: "false"}[enabled] + "\n---\n\n# " + handle + "\n"
 }
 
-func createAnalyticsAgent(t *testing.T, repo *repository.AgentRepo, name, key, projectID string) *models.Agent {
+func createAnalyticsAgent(t *testing.T, repo *sqlite.AgentRepo, name, key, projectID string) *models.Agent {
 	t.Helper()
 	agent := &models.Agent{
 		Name:         name,

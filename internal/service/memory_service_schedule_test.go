@@ -9,30 +9,30 @@ import (
 
 	"github.com/openvibely/openvibely/internal/memory"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/testutil"
 )
 
 type memoryScheduleTestRepos struct {
-	tasks      *repository.TaskRepo
-	schedules  *repository.ScheduleRepo
-	agents     *repository.AgentRepo
-	lifecycles *repository.LifecycleRepo
+	tasks      *sqlite.TaskRepo
+	schedules  *sqlite.ScheduleRepo
+	agents     *sqlite.AgentRepo
+	lifecycles *sqlite.LifecycleRepo
 	projectID  string
 }
 
 func newMemoryScheduleTestService(t *testing.T) (*MemoryService, memoryScheduleTestRepos) {
 	t.Helper()
 	db := testutil.NewTestDB(t)
-	projectRepo := repository.NewProjectRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
 	project := &models.Project{Name: "Memory test", RepoPath: t.TempDir()}
 	if err := projectRepo.Create(context.Background(), project); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
-	taskRepo := repository.NewTaskRepo(db, nil)
-	scheduleRepo := repository.NewScheduleRepo(db)
-	agentRepo := repository.NewAgentRepo(db)
-	lifecycleRepo := repository.NewLifecycleRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	scheduleRepo := sqlite.NewScheduleRepo(db)
+	agentRepo := sqlite.NewAgentRepo(db)
+	lifecycleRepo := sqlite.NewLifecycleRepo(db)
 	resolver, err := memory.NewPathResolver(t.TempDir(), "")
 	if err != nil {
 		t.Fatalf("path resolver: %v", err)

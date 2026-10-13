@@ -8,13 +8,13 @@ import (
 	"testing"
 
 	"github.com/labstack/echo/v4"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/testutil"
 )
 
 func TestHandlerHasConfiguredModelsUsesExistenceQuery(t *testing.T) {
 	db, counter := testutil.NewStatementCountingTestDB(t)
-	repo := repository.NewLLMConfigRepo(db)
+	repo := sqlite.NewLLMConfigRepo(db)
 	h := &Handler{llmConfigRepo: repo}
 	c := echo.New().NewContext(httptest.NewRequest(http.MethodGet, "/", nil), httptest.NewRecorder())
 
@@ -62,7 +62,7 @@ func TestHandlerHasConfiguredModelsNilRepoErrors(t *testing.T) {
 
 func TestHandlerHasConfiguredModelsEmptyRepo(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	repo := repository.NewLLMConfigRepo(db)
+	repo := sqlite.NewLLMConfigRepo(db)
 	if _, err := db.ExecContext(context.Background(), `DELETE FROM agent_configs`); err != nil {
 		t.Fatalf("clear model configs: %v", err)
 	}

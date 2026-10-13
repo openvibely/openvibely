@@ -19,7 +19,7 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -80,7 +80,7 @@ func TestAPIChatMessage_RejectsWhitespaceOnlyMessageBeforeIdleAdmission(t *testi
 			tasks, err := h.taskRepo.ListByProject(ctx, project.ID, "")
 			require.NoError(t, err)
 			assert.Empty(t, tasks)
-			executions, err := h.execRepo.(*repository.ExecutionRepo).ListByProject(ctx, project.ID, 50)
+			executions, err := h.execRepo.(*sqlite.ExecutionRepo).ListByProject(ctx, project.ID, 50)
 			require.NoError(t, err)
 			assert.Empty(t, executions)
 			inputs, err := h.threadInputRepo.ListPendingForChat(ctx, project.ID)
@@ -109,7 +109,7 @@ func TestAPIChatMessage_RejectsWhitespaceOnlyMultipartWithoutStagingAttachments(
 	h.llmSvc.SetLLMCaller(mock)
 	beforeTasks, err := h.taskRepo.ListByProject(ctx, project.ID, "")
 	require.NoError(t, err)
-	beforeExecutions, err := h.execRepo.(*repository.ExecutionRepo).ListByProject(ctx, project.ID, 50)
+	beforeExecutions, err := h.execRepo.(*sqlite.ExecutionRepo).ListByProject(ctx, project.ID, 50)
 	require.NoError(t, err)
 	beforeInputs, err := h.threadInputRepo.ListPendingForChat(ctx, project.ID)
 	require.NoError(t, err)
@@ -144,7 +144,7 @@ func TestAPIChatMessage_RejectsWhitespaceOnlyMultipartWithoutStagingAttachments(
 			tasks, err := h.taskRepo.ListByProject(ctx, project.ID, "")
 			require.NoError(t, err)
 			assert.Equal(t, beforeTasks, tasks)
-			executions, err := h.execRepo.(*repository.ExecutionRepo).ListByProject(ctx, project.ID, 50)
+			executions, err := h.execRepo.(*sqlite.ExecutionRepo).ListByProject(ctx, project.ID, 50)
 			require.NoError(t, err)
 			assert.Equal(t, beforeExecutions, executions)
 			inputs, err := h.threadInputRepo.ListPendingForChat(ctx, project.ID)
@@ -192,7 +192,7 @@ func TestAPIChatMessage_RejectsWhitespaceOnlyMessageWithActiveTurn(t *testing.T)
 
 	beforeTasks, err := h.taskRepo.ListByProject(ctx, project.ID, "")
 	require.NoError(t, err)
-	beforeExecutions, err := h.execRepo.(*repository.ExecutionRepo).ListByProject(ctx, project.ID, 50)
+	beforeExecutions, err := h.execRepo.(*sqlite.ExecutionRepo).ListByProject(ctx, project.ID, 50)
 	require.NoError(t, err)
 	beforeInputs, err := h.threadInputRepo.ListPendingForChat(ctx, project.ID)
 	require.NoError(t, err)
@@ -220,7 +220,7 @@ func TestAPIChatMessage_RejectsWhitespaceOnlyMessageWithActiveTurn(t *testing.T)
 			tasks, err := h.taskRepo.ListByProject(ctx, project.ID, "")
 			require.NoError(t, err)
 			assert.Equal(t, beforeTasks, tasks)
-			executions, err := h.execRepo.(*repository.ExecutionRepo).ListByProject(ctx, project.ID, 50)
+			executions, err := h.execRepo.(*sqlite.ExecutionRepo).ListByProject(ctx, project.ID, 50)
 			require.NoError(t, err)
 			assert.Equal(t, beforeExecutions, executions)
 			inputs, err := h.threadInputRepo.ListPendingForChat(ctx, project.ID)

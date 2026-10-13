@@ -14,7 +14,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/internal/testutil"
 )
@@ -24,7 +24,7 @@ const apiProjectProjectionSamples = 5
 type apiProjectProjectionFixture struct {
 	db          *sql.DB
 	counter     *testutil.SQLStatementCounter
-	projectRepo *repository.ProjectRepo
+	projectRepo *sqlite.ProjectRepo
 	h           *Handler
 	e           *echo.Echo
 }
@@ -92,7 +92,7 @@ func newAPIProjectProjectionFixture(tb testing.TB, projectCount int) *apiProject
 	tb.Helper()
 	db, counter := testutil.NewStatementCountingTestDB(tb)
 	seedAPIProjectionProjects(tb, db, projectCount)
-	repo := repository.NewProjectRepo(db)
+	repo := sqlite.NewProjectRepo(db)
 	projectSvc := service.NewProjectService(repo)
 	return &apiProjectProjectionFixture{
 		db:          db,

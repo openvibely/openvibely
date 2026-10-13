@@ -9,14 +9,14 @@ import (
 
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/internal/testutil"
 )
 
 func TestAPIGetProjects_Success(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	projectRepo := repository.NewProjectRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
 	projectSvc := service.NewProjectService(projectRepo)
 	ctx := context.Background()
 
@@ -109,7 +109,7 @@ func TestAPIGetProjects_Success(t *testing.T) {
 
 func TestAPIGetProjects_EmptyList(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	projectRepo := repository.NewProjectRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
 	projectSvc := service.NewProjectService(projectRepo)
 
 	// Don't create any additional projects (only default from migration exists)
@@ -150,7 +150,7 @@ func TestAPIGetProjects_EmptyList(t *testing.T) {
 
 func TestAPIGetProjects_JSONFormat(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	projectRepo := repository.NewProjectRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
 	projectSvc := service.NewProjectService(projectRepo)
 	ctx := context.Background()
 

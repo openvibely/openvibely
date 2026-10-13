@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/testutil"
 )
 
@@ -19,7 +19,7 @@ const (
 )
 
 type benchmarkOutputRepo struct {
-	repo         *repository.ExecutionRepo
+	repo         *sqlite.ExecutionRepo
 	payloadBytes int64
 	writeTime    time.Duration
 }
@@ -60,8 +60,8 @@ func benchmarkWriterOutputPersistence(b *testing.B, transcriptBytes, snapshots i
 	b.Helper()
 	ctx := context.Background()
 	_, writer, _ := testutil.NewFileBackedSplitStatementCountingTestDB(b)
-	execRepo := repository.NewExecutionRepo(writer)
-	taskRepo := repository.NewTaskRepo(writer, nil)
+	execRepo := sqlite.NewExecutionRepo(writer)
+	taskRepo := sqlite.NewTaskRepo(writer, nil)
 	task := &models.Task{
 		ProjectID: "default",
 		Title:     "Stream writer benchmark",
@@ -72,7 +72,7 @@ func benchmarkWriterOutputPersistence(b *testing.B, transcriptBytes, snapshots i
 	if err := taskRepo.Create(ctx, task); err != nil {
 		b.Fatalf("create benchmark task: %v", err)
 	}
-	llmConfig, err := repository.NewLLMConfigRepo(writer).GetDefault(ctx)
+	llmConfig, err := sqlite.NewLLMConfigRepo(writer).GetDefault(ctx)
 	if err != nil || llmConfig == nil {
 		b.Fatalf("load benchmark agent config: config=%v err=%v", llmConfig, err)
 	}
@@ -186,7 +186,7 @@ func benchmarkWriterOutputPersistence(b *testing.B, transcriptBytes, snapshots i
 	}
 }
 
-func benchmarkSmallWriteAlongside(ctx context.Context, repo *repository.ExecutionRepo, execID string, largeWrite func() error) (time.Duration, error) {
+func benchmarkSmallWriteAlongside(ctx context.Context, repo *sqlite.ExecutionRepo, execID string, largeWrite func() error) (time.Duration, error) {
 	ready := make(chan struct{})
 	start := make(chan struct{})
 	type result struct {

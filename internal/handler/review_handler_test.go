@@ -15,17 +15,17 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/stretchr/testify/require"
 )
 
-func setupReviewHandler(t *testing.T) (*Handler, *echo.Echo, *repository.ReviewCommentRepo, *repository.ExecutionRepo, *testutil.MockLLMCaller, string) {
+func setupReviewHandler(t *testing.T) (*Handler, *echo.Echo, *sqlite.ReviewCommentRepo, *sqlite.ExecutionRepo, *testutil.MockLLMCaller, string) {
 	return setupReviewHandlerForDB(t, testutil.NewTestDB(t))
 }
 
-func setupReviewHandlerForDB(t *testing.T, db *sql.DB) (*Handler, *echo.Echo, *repository.ReviewCommentRepo, *repository.ExecutionRepo, *testutil.MockLLMCaller, string) {
+func setupReviewHandlerForDB(t *testing.T, db *sql.DB) (*Handler, *echo.Echo, *sqlite.ReviewCommentRepo, *sqlite.ExecutionRepo, *testutil.MockLLMCaller, string) {
 	t.Helper()
 
 	env := newTestHandlerEnv(t, db, withTestBroadcaster(events.NewBroadcaster()), withTestTaskGoals())
@@ -34,9 +34,9 @@ func setupReviewHandlerForDB(t *testing.T, db *sql.DB) (*Handler, *echo.Echo, *r
 	env.WorkerSvc.SetProjectRepo(env.ProjectRepo)
 	env.WorkerSvc.SetTaskRepo(taskRepo)
 	env.WorkerSvc.SetLLMConfigRepo(llmConfigRepo)
-	reviewCommentRepo := repository.NewReviewCommentRepo(db)
+	reviewCommentRepo := sqlite.NewReviewCommentRepo(db)
 	h.SetReviewCommentRepo(reviewCommentRepo)
-	threadInputRepo := repository.NewThreadInputRepo(db)
+	threadInputRepo := sqlite.NewThreadInputRepo(db)
 	h.SetThreadInputRepo(threadInputRepo)
 	env.LLMSvc.SetThreadInputRepo(threadInputRepo)
 

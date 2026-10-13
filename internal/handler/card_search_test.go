@@ -16,7 +16,7 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/web/static"
 	"github.com/openvibely/openvibely/web/templates/layout"
@@ -399,9 +399,9 @@ func TestCollectionCardToolbars(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			h, e, _, db := setupTestHandlerWithDB(t)
-			h.SetAgentRepo(repository.NewAgentRepo(db))
+			h.SetAgentRepo(sqlite.NewAgentRepo(db))
 			if tt.name == "automations" {
-				h.SetAutomationServices(service.NewAutomationGraphService(repository.NewAutomationRepo(db)), nil)
+				h.SetAutomationServices(service.NewAutomationGraphService(sqlite.NewAutomationRepo(db)), nil)
 			}
 			h.SetAgentSkillRoot(t.TempDir())
 			req := httptest.NewRequest(http.MethodGet, tt.path, nil)
@@ -567,10 +567,10 @@ func TestCardSearch_ChannelsMutationsRefreshContainerWithoutFullPageReload(t *te
 
 func TestCardSearch_AgentsPage(t *testing.T) {
 	h, e, _, db := setupTestHandlerWithDB(t)
-	h.SetAgentRepo(repository.NewAgentRepo(db))
+	h.SetAgentRepo(sqlite.NewAgentRepo(db))
 
 	// Create an agent so there's a card to search
-	agentRepo := repository.NewAgentRepo(db)
+	agentRepo := sqlite.NewAgentRepo(db)
 	agent := &models.Agent{
 		Name:        "TestSearchAgent",
 		Description: "A test agent for search",
@@ -601,7 +601,7 @@ func TestCardSearch_AgentsPage(t *testing.T) {
 
 func TestCardSearch_AgentsPartial(t *testing.T) {
 	h, e, _, db := setupTestHandlerWithDB(t)
-	h.SetAgentRepo(repository.NewAgentRepo(db))
+	h.SetAgentRepo(sqlite.NewAgentRepo(db))
 
 	req := httptest.NewRequest(http.MethodGet, "/agents?project_id=default", nil)
 	req.Header.Set("HX-Request", "true")
@@ -741,7 +741,7 @@ func TestCardSearch_SkillsManualRefreshReappliesActiveSearch(t *testing.T) {
 
 func TestCardSearch_AgentsManualDeleteRefreshReappliesActiveSearch(t *testing.T) {
 	h, e, _, db := setupTestHandlerWithDB(t)
-	h.SetAgentRepo(repository.NewAgentRepo(db))
+	h.SetAgentRepo(sqlite.NewAgentRepo(db))
 	project := createProject(t, h, "Test Project")
 
 	req := httptest.NewRequest(http.MethodGet, "/agents?project_id="+project.ID, nil)

@@ -10,7 +10,7 @@ import (
 	"github.com/openvibely/openvibely/internal/events"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/testutil"
 )
 
@@ -37,9 +37,9 @@ func TestStreamingWriterReportsActivity(t *testing.T) {
 func TestStreamingWriter_PeriodicFlush(t *testing.T) {
 
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	execRepo := repository.NewExecutionRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	execRepo := sqlite.NewExecutionRepo(db)
 	ctx := context.Background()
 
 	task := &models.Task{
@@ -281,9 +281,9 @@ func TestStreamingWriter_PeriodicFlushPersistsOnlyNewDeltasFromSeed(t *testing.T
 func TestStreamingWriter_StopPreventsLeak(t *testing.T) {
 
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	execRepo := repository.NewExecutionRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	execRepo := sqlite.NewExecutionRepo(db)
 	ctx := context.Background()
 
 	task := &models.Task{
@@ -323,9 +323,9 @@ func TestStreamingWriter_StopPreventsLeak(t *testing.T) {
 func TestStreamingWriter_FlushSucceedsAfterContextCancel(t *testing.T) {
 
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	execRepo := repository.NewExecutionRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	execRepo := sqlite.NewExecutionRepo(db)
 
 	bgCtx := context.Background()
 
@@ -376,9 +376,9 @@ func TestStreamingWriter_FlushSucceedsAfterContextCancel(t *testing.T) {
 
 func TestStreamingWriter_NewWriterSeedsExistingOutputOnRetry(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	execRepo := repository.NewExecutionRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	execRepo := sqlite.NewExecutionRepo(db)
 	ctx := context.Background()
 
 	task := &models.Task{
@@ -433,9 +433,9 @@ func TestStreamingWriter_NewWriterSeedsExistingOutputOnRetry(t *testing.T) {
 
 func TestStreamingWriter_EmptyRetryFlushDoesNotOverwriteExistingOutput(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	execRepo := repository.NewExecutionRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	execRepo := sqlite.NewExecutionRepo(db)
 	ctx := context.Background()
 
 	task := &models.Task{
@@ -518,9 +518,9 @@ func TestStreamingWriter_PublishesDeltaImmediatelyWithOffset(t *testing.T) {
 
 func TestStreamingWriter_WriteDoesNotFlushSynchronouslyWhenIntervalElapsed(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	execRepo := repository.NewExecutionRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	execRepo := sqlite.NewExecutionRepo(db)
 	ctx := context.Background()
 
 	task := &models.Task{ProjectID: "default", Title: "No Eager Flush", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "test"}
@@ -558,9 +558,9 @@ func TestStreamingWriter_WriteDoesNotFlushSynchronouslyWhenIntervalElapsed(t *te
 
 func TestStreamingWriter_DoesNotPublishSeedOrWriteText(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	execRepo := repository.NewExecutionRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	execRepo := sqlite.NewExecutionRepo(db)
 	ctx := context.Background()
 
 	task := &models.Task{ProjectID: "default", Title: "Seed Publish", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "test"}

@@ -17,7 +17,7 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/database"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/stretchr/testify/assert"
@@ -36,7 +36,7 @@ func useTempUploadsDir(t *testing.T) {
 type chatAttachmentOwnershipFixture struct {
 	e                  *echo.Echo
 	h                  *Handler
-	chatAttachmentRepo *repository.ChatAttachmentRepo
+	chatAttachmentRepo *sqlite.ChatAttachmentRepo
 	owningProject      models.Project
 	foreignProject     models.Project
 	attachment         models.ChatAttachment
@@ -48,12 +48,12 @@ func setupChatAttachmentOwnershipFixture(t *testing.T) chatAttachmentOwnershipFi
 	useTempUploadsDir(t)
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)
-	projectRepo := repository.NewProjectRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
 	projectSvc := service.NewProjectService(projectRepo)
-	settingsRepo := repository.NewSettingsRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	execRepo := repository.NewExecutionRepo(db)
-	chatAttachmentRepo := repository.NewChatAttachmentRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	execRepo := sqlite.NewExecutionRepo(db)
+	chatAttachmentRepo := sqlite.NewChatAttachmentRepo(db)
 	h := &Handler{
 		projectSvc:         projectSvc,
 		settingsRepo:       settingsRepo,
@@ -220,10 +220,10 @@ func TestUploadChatAttachment_AllFileTypes(t *testing.T) {
 
 	// Setup
 	db := testutil.NewTestDB(t)
-	chatAttachmentRepo := repository.NewChatAttachmentRepo(db)
+	chatAttachmentRepo := sqlite.NewChatAttachmentRepo(db)
 	h := &Handler{
 		chatAttachmentRepo: chatAttachmentRepo,
-		threadInputRepo:    repository.NewThreadInputRepo(db),
+		threadInputRepo:    sqlite.NewThreadInputRepo(db),
 	}
 
 	e := echo.New()
@@ -330,8 +330,8 @@ func TestUploadChatAttachment_AppendsToExistingPendingSession(t *testing.T) {
 
 	db := testutil.NewTestDB(t)
 	h := &Handler{
-		chatAttachmentRepo: repository.NewChatAttachmentRepo(db),
-		threadInputRepo:    repository.NewThreadInputRepo(db),
+		chatAttachmentRepo: sqlite.NewChatAttachmentRepo(db),
+		threadInputRepo:    sqlite.NewThreadInputRepo(db),
 	}
 	e := echo.New()
 
@@ -350,9 +350,9 @@ func TestUploadChatAttachment_RejectsRetiredSessionWithoutRecreatingDirectory(t 
 	useTempUploadsDir(t)
 
 	db := testutil.NewTestDB(t)
-	threadInputRepo := repository.NewThreadInputRepo(db)
+	threadInputRepo := sqlite.NewThreadInputRepo(db)
 	h := &Handler{
-		chatAttachmentRepo: repository.NewChatAttachmentRepo(db),
+		chatAttachmentRepo: sqlite.NewChatAttachmentRepo(db),
 		threadInputRepo:    threadInputRepo,
 	}
 	e := echo.New()
@@ -388,8 +388,8 @@ func TestUploadChatAttachment_SerializesPublicationWithConcurrentRetirement(t *t
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, db.Close()) })
 	h := &Handler{
-		chatAttachmentRepo: repository.NewChatAttachmentRepo(db),
-		threadInputRepo:    repository.NewThreadInputRepo(db),
+		chatAttachmentRepo: sqlite.NewChatAttachmentRepo(db),
+		threadInputRepo:    sqlite.NewThreadInputRepo(db),
 	}
 	e := echo.New()
 	const sessionID = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
@@ -445,8 +445,8 @@ func TestUploadChatAttachment_AppendsDuplicateNamesWithoutOverwriting(t *testing
 
 	db := testutil.NewTestDB(t)
 	h := &Handler{
-		chatAttachmentRepo: repository.NewChatAttachmentRepo(db),
-		threadInputRepo:    repository.NewThreadInputRepo(db),
+		chatAttachmentRepo: sqlite.NewChatAttachmentRepo(db),
+		threadInputRepo:    sqlite.NewThreadInputRepo(db),
 	}
 	e := echo.New()
 
@@ -468,8 +468,8 @@ func TestUploadChatAttachment_ExistingPendingSessionMaxFilesLimit(t *testing.T) 
 
 	db := testutil.NewTestDB(t)
 	h := &Handler{
-		chatAttachmentRepo: repository.NewChatAttachmentRepo(db),
-		threadInputRepo:    repository.NewThreadInputRepo(db),
+		chatAttachmentRepo: sqlite.NewChatAttachmentRepo(db),
+		threadInputRepo:    sqlite.NewThreadInputRepo(db),
 	}
 	e := echo.New()
 
@@ -502,8 +502,8 @@ func TestUploadChatAttachment_AllowsValidMultiFileUploadAboveSingleFileRequestCa
 
 	db := testutil.NewTestDB(t)
 	h := &Handler{
-		chatAttachmentRepo: repository.NewChatAttachmentRepo(db),
-		threadInputRepo:    repository.NewThreadInputRepo(db),
+		chatAttachmentRepo: sqlite.NewChatAttachmentRepo(db),
+		threadInputRepo:    sqlite.NewThreadInputRepo(db),
 	}
 	e := echo.New()
 
@@ -546,8 +546,8 @@ func TestUploadChatAttachment_AllowsPaddedBoundaryDelimiterWhitespace(t *testing
 
 	db := testutil.NewTestDB(t)
 	h := &Handler{
-		chatAttachmentRepo: repository.NewChatAttachmentRepo(db),
-		threadInputRepo:    repository.NewThreadInputRepo(db),
+		chatAttachmentRepo: sqlite.NewChatAttachmentRepo(db),
+		threadInputRepo:    sqlite.NewThreadInputRepo(db),
 	}
 	e := echo.New()
 	files := []taskAttachmentTestFile{
@@ -587,8 +587,8 @@ func TestUploadChatAttachment_OversizedMultipartRequestIsBoundedBeforePendingSes
 
 	db := testutil.NewTestDB(t)
 	h := &Handler{
-		chatAttachmentRepo: repository.NewChatAttachmentRepo(db),
-		threadInputRepo:    repository.NewThreadInputRepo(db),
+		chatAttachmentRepo: sqlite.NewChatAttachmentRepo(db),
+		threadInputRepo:    sqlite.NewThreadInputRepo(db),
 	}
 	e := echo.New()
 	const sessionID = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -613,10 +613,10 @@ func TestUploadChatAttachment_FileSizeLimit(t *testing.T) {
 
 	// Setup
 	db := testutil.NewTestDB(t)
-	chatAttachmentRepo := repository.NewChatAttachmentRepo(db)
+	chatAttachmentRepo := sqlite.NewChatAttachmentRepo(db)
 	h := &Handler{
 		chatAttachmentRepo: chatAttachmentRepo,
-		threadInputRepo:    repository.NewThreadInputRepo(db),
+		threadInputRepo:    sqlite.NewThreadInputRepo(db),
 	}
 
 	e := echo.New()
@@ -657,10 +657,10 @@ func TestUploadChatAttachment_MaxFilesLimit(t *testing.T) {
 
 	// Setup
 	db := testutil.NewTestDB(t)
-	chatAttachmentRepo := repository.NewChatAttachmentRepo(db)
+	chatAttachmentRepo := sqlite.NewChatAttachmentRepo(db)
 	h := &Handler{
 		chatAttachmentRepo: chatAttachmentRepo,
-		threadInputRepo:    repository.NewThreadInputRepo(db),
+		threadInputRepo:    sqlite.NewThreadInputRepo(db),
 	}
 
 	e := echo.New()

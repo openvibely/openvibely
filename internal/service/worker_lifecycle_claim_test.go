@@ -11,7 +11,7 @@ import (
 	"github.com/openvibely/openvibely/internal/lifecycle"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/stretchr/testify/require"
 )
@@ -34,11 +34,11 @@ import (
 func TestWorkerService_TaskAdmissionQueuesFollowupAfterPersistedClaim(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	execRepo := repository.NewExecutionRepo(db)
-	inputRepo := repository.NewThreadInputRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	execRepo := sqlite.NewExecutionRepo(db)
+	inputRepo := sqlite.NewThreadInputRepo(db)
 	project := &models.Project{Name: "task admission claim race"}
 	if err := projectRepo.Create(ctx, project); err != nil {
 		t.Fatalf("create project: %v", err)
@@ -54,7 +54,7 @@ func TestWorkerService_TaskAdmissionQueuesFollowupAfterPersistedClaim(t *testing
 
 	caller := testutil.NewMockLLMCaller()
 	caller.Response = "ordinary run complete"
-	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, nil, repository.NewAttachmentRepo(db))
+	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, nil, sqlite.NewAttachmentRepo(db))
 	llmSvc.SetLLMCaller(caller)
 	worker := NewWorkerService(llmSvc, 1, projectRepo)
 	worker.SetLLMConfigRepo(llmConfigRepo)
@@ -136,11 +136,11 @@ func TestWorkerService_TaskAdmissionQueuesFollowupAfterPersistedClaim(t *testing
 func TestWorkerService_TaskAdmissionRunsFirstTurnWhenFollowupArrivesBeforeClaim(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	execRepo := repository.NewExecutionRepo(db)
-	inputRepo := repository.NewThreadInputRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	execRepo := sqlite.NewExecutionRepo(db)
+	inputRepo := sqlite.NewThreadInputRepo(db)
 	project := &models.Project{Name: "follow-up before task claim"}
 	require.NoError(t, projectRepo.Create(ctx, project))
 	agent := &models.LLMConfig{Name: "Reverse Admission Agent", Provider: models.ProviderTest, Model: "test-model", MaxTokens: 4096, AuthMethod: models.AuthMethodAPIKey, IsDefault: true}
@@ -150,7 +150,7 @@ func TestWorkerService_TaskAdmissionRunsFirstTurnWhenFollowupArrivesBeforeClaim(
 
 	caller := testutil.NewMockLLMCaller()
 	caller.Response = "ordinary run complete"
-	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, nil, repository.NewAttachmentRepo(db))
+	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, nil, sqlite.NewAttachmentRepo(db))
 	llmSvc.SetLLMCaller(caller)
 	worker := NewWorkerService(llmSvc, 1, projectRepo)
 	worker.SetLLMConfigRepo(llmConfigRepo)
@@ -201,11 +201,11 @@ func TestWorkerService_TaskAdmissionRunsFirstTurnWhenFollowupArrivesBeforeClaim(
 func TestWorkerService_TaskClaimedBeforeLifecycleHooks(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	broadcaster := events.NewBroadcaster()
-	taskRepo := repository.NewTaskRepo(db, broadcaster)
-	projectRepo := repository.NewProjectRepo(db)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	execRepo := repository.NewExecutionRepo(db)
-	attachmentRepo := repository.NewAttachmentRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, broadcaster)
+	projectRepo := sqlite.NewProjectRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	execRepo := sqlite.NewExecutionRepo(db)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
 	ctx := context.Background()
 
 	// Subscribe to events BEFORE dispatching.
@@ -293,7 +293,7 @@ func TestWorkerService_TaskClaimedBeforeLifecycleHooks(t *testing.T) {
 	ws.SetLLMConfigRepo(llmConfigRepo)
 	ws.SetTaskRepo(taskRepo)
 	ws.SetLifecycleRunner(runner)
-	ws.SetLifecycleRepo(repository.NewLifecycleRepo(db))
+	ws.SetLifecycleRepo(sqlite.NewLifecycleRepo(db))
 	ws.SetExecutionRepo(execRepo)
 	ws.Start(ctx)
 	defer ws.Stop()

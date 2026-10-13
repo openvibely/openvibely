@@ -6,13 +6,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/testutil"
 )
 
 func TestWriteEvent_ToolUseAndSessionAndError(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	execRepo := repository.NewExecutionRepo(db)
+	execRepo := sqlite.NewExecutionRepo(db)
 	sw := NewWriter("", "", execRepo, context.Background(), time.Hour)
 	defer sw.Stop()
 

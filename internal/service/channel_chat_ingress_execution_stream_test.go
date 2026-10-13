@@ -8,15 +8,15 @@ import (
 
 	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/testutil"
 )
 
 func TestCompleteChannelExecutionPublishesFailedTerminalEvent(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	execRepo := repository.NewExecutionRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
+	execRepo := sqlite.NewExecutionRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
 	_, task, exec := createChannelExecutionStreamFixture(t, ctx, db, execRepo, taskRepo)
 	hub := events.NewExecutionStreamHub()
 	sub, _, err := hub.Subscribe(exec.ID)
@@ -51,11 +51,11 @@ func TestCompleteChannelExecutionPublishesFailedTerminalEvent(t *testing.T) {
 	}
 }
 
-func createChannelExecutionStreamFixture(t *testing.T, ctx context.Context, db *sql.DB, execRepo *repository.ExecutionRepo, taskRepo *repository.TaskRepo) (*models.Project, *models.Task, *models.Execution) {
+func createChannelExecutionStreamFixture(t *testing.T, ctx context.Context, db *sql.DB, execRepo *sqlite.ExecutionRepo, taskRepo *sqlite.TaskRepo) (*models.Project, *models.Task, *models.Execution) {
 	t.Helper()
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
 	agent := ensureDefaultAgent(t, llmConfigRepo)
-	projectRepo := repository.NewProjectRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
 	project := &models.Project{Name: "Channel execution stream project", RepoPath: t.TempDir()}
 	if err := projectRepo.Create(ctx, project); err != nil {
 		t.Fatalf("create project: %v", err)
@@ -73,8 +73,8 @@ func createChannelExecutionStreamFixture(t *testing.T, ctx context.Context, db *
 
 func TestCompleteChannelExecutionDoesNotPublishTerminalWhenExecutionCompleteFails(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	execRepo := repository.NewExecutionRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
+	execRepo := sqlite.NewExecutionRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
 	hub := events.NewExecutionStreamHub()
 	sub, unsubscribe, err := hub.Subscribe("exec-channel-failed-complete")
 	if err != nil {

@@ -1441,7 +1441,7 @@ definitions:
       workflow_name:
         type: string
     type: object
-  repository.AgentUsage:
+  persistence.AgentUsage:
     properties:
       agentID:
         type: string
@@ -1458,7 +1458,7 @@ definitions:
       successCount:
         type: integer
     type: object
-  repository.AvgExecutionTime:
+  persistence.AvgExecutionTime:
     properties:
       avgMs:
         format: float64
@@ -1476,14 +1476,14 @@ definitions:
       name:
         type: string
     type: object
-  repository.ExecutionTrend:
+  persistence.ExecutionTrend:
     properties:
       count:
         type: integer
       hour:
         type: integer
     type: object
-  repository.FailedTaskPattern:
+  persistence.FailedTaskPattern:
     properties:
       failureCount:
         type: integer
@@ -1496,7 +1496,7 @@ definitions:
       taskTitle:
         type: string
     type: object
-  repository.SuccessFailureRate:
+  persistence.SuccessFailureRate:
     properties:
       cancelledCount:
         type: integer
@@ -1512,7 +1512,7 @@ definitions:
       totalCount:
         type: integer
     type: object
-  repository.TaskFrequency:
+  persistence.TaskFrequency:
     properties:
       executionCount:
         type: integer
@@ -1523,7 +1523,7 @@ definitions:
       taskTitle:
         type: string
     type: object
-  repository.TaskRunActivity:
+  persistence.TaskRunActivity:
     properties:
       hours:
         items:
@@ -1531,10 +1531,10 @@ definitions:
         type: array
       models:
         items:
-          $ref: '#/definitions/repository.TaskRunModel'
+          $ref: '#/definitions/persistence.TaskRunModel'
         type: array
     type: object
-  repository.TaskRunModel:
+  persistence.TaskRunModel:
     properties:
       average_run_ms:
         type: number
@@ -1554,10 +1554,10 @@ definitions:
         type: integer
       trend:
         items:
-          $ref: '#/definitions/repository.TaskRunPeriod'
+          $ref: '#/definitions/persistence.TaskRunPeriod'
         type: array
     type: object
-  repository.TaskRunPeriod:
+  persistence.TaskRunPeriod:
     properties:
       average_run_ms:
         type: number
@@ -1819,7 +1819,7 @@ paths:
           description: Model usage breakdown
           schema:
             items:
-              $ref: '#/definitions/repository.AgentUsage'
+              $ref: '#/definitions/persistence.AgentUsage'
             type: array
         "500":
           description: Internal server error
@@ -1843,7 +1843,7 @@ paths:
           description: Average execution time by model
           schema:
             items:
-              $ref: '#/definitions/repository.AvgExecutionTime'
+              $ref: '#/definitions/persistence.AvgExecutionTime'
             type: array
         "500":
           description: Internal server error
@@ -1872,7 +1872,7 @@ paths:
           description: Average execution time by task
           schema:
             items:
-              $ref: '#/definitions/repository.AvgExecutionTime'
+              $ref: '#/definitions/persistence.AvgExecutionTime'
             type: array
         "500":
           description: Internal server error
@@ -1994,7 +1994,7 @@ paths:
           description: Execution counts by hour
           schema:
             items:
-              $ref: '#/definitions/repository.ExecutionTrend'
+              $ref: '#/definitions/persistence.ExecutionTrend'
             type: array
         "500":
           description: Internal server error
@@ -2023,7 +2023,7 @@ paths:
           description: Failed task patterns
           schema:
             items:
-              $ref: '#/definitions/repository.FailedTaskPattern'
+              $ref: '#/definitions/persistence.FailedTaskPattern'
             type: array
         "500":
           description: Internal server error
@@ -2054,7 +2054,7 @@ paths:
           description: Most frequently executed tasks
           schema:
             items:
-              $ref: '#/definitions/repository.TaskFrequency'
+              $ref: '#/definitions/persistence.TaskFrequency'
             type: array
         "500":
           description: Internal server error
@@ -2169,7 +2169,7 @@ paths:
           description: Success/failure rates
           schema:
             items:
-              $ref: '#/definitions/repository.SuccessFailureRate'
+              $ref: '#/definitions/persistence.SuccessFailureRate'
             type: array
         "500":
           description: Internal server error
@@ -2212,7 +2212,7 @@ paths:
         "200":
           description: Task-run activity
           schema:
-            $ref: '#/definitions/repository.TaskRunActivity'
+            $ref: '#/definitions/persistence.TaskRunActivity'
         "400":
           description: Missing project ID
           schema:

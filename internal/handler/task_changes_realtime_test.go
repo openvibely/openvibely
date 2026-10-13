@@ -16,7 +16,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/internal/testutil"
 )
@@ -28,10 +28,10 @@ func TestGetTaskChanges_ShowsRealtimeDiffDuringExecution(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
 
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	execRepo := repository.NewExecutionRepo(db)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	execRepo := sqlite.NewExecutionRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
 
 	// Create test project
 	project := &models.Project{
@@ -96,12 +96,12 @@ index 0000000..d3103f9
 	}
 
 	// Set up handler
-	attachmentRepo := repository.NewAttachmentRepo(db)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
 	h := &Handler{
 		projectRepo:       projectRepo,
 		taskRepo:          taskRepo,
 		execRepo:          execRepo,
-		reviewCommentRepo: repository.NewReviewCommentRepo(db),
+		reviewCommentRepo: sqlite.NewReviewCommentRepo(db),
 		taskSvc:           service.NewTaskService(taskRepo, attachmentRepo, nil),
 	}
 
@@ -155,10 +155,10 @@ func TestGetTaskChanges_RealtimeUpdateFlow(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
 
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	execRepo := repository.NewExecutionRepo(db)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	execRepo := sqlite.NewExecutionRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
 
 	project := &models.Project{
 		Name:     "test-project",
@@ -222,12 +222,12 @@ index 0000000..ce01362
 	}
 
 	// Step 4: User opens Changes tab while task is running
-	attachmentRepo := repository.NewAttachmentRepo(db)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
 	h := &Handler{
 		projectRepo:       projectRepo,
 		taskRepo:          taskRepo,
 		execRepo:          execRepo,
-		reviewCommentRepo: repository.NewReviewCommentRepo(db),
+		reviewCommentRepo: sqlite.NewReviewCommentRepo(db),
 		taskSvc:           service.NewTaskService(taskRepo, attachmentRepo, nil),
 	}
 
@@ -307,10 +307,10 @@ func TestGetTaskChanges_StableDOMOnUnchangedDiff(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
 
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	execRepo := repository.NewExecutionRepo(db)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	execRepo := sqlite.NewExecutionRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
 
 	project := &models.Project{
 		Name:     "test-project",
@@ -375,12 +375,12 @@ new file mode 100644
 		t.Fatalf("update diff: %v", err)
 	}
 
-	attachmentRepo := repository.NewAttachmentRepo(db)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
 	h := &Handler{
 		projectRepo:       projectRepo,
 		taskRepo:          taskRepo,
 		execRepo:          execRepo,
-		reviewCommentRepo: repository.NewReviewCommentRepo(db),
+		reviewCommentRepo: sqlite.NewReviewCommentRepo(db),
 		taskSvc:           service.NewTaskService(taskRepo, attachmentRepo, nil),
 	}
 
@@ -431,10 +431,10 @@ func TestGetTaskChanges_DiffUpdateProducesDifferentDOM(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
 
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	execRepo := repository.NewExecutionRepo(db)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	execRepo := sqlite.NewExecutionRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
 
 	project := &models.Project{
 		Name:     "test-project",
@@ -476,12 +476,12 @@ func TestGetTaskChanges_DiffUpdateProducesDifferentDOM(t *testing.T) {
 		t.Fatalf("create execution: %v", err)
 	}
 
-	attachmentRepo := repository.NewAttachmentRepo(db)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
 	h := &Handler{
 		projectRepo:       projectRepo,
 		taskRepo:          taskRepo,
 		execRepo:          execRepo,
-		reviewCommentRepo: repository.NewReviewCommentRepo(db),
+		reviewCommentRepo: sqlite.NewReviewCommentRepo(db),
 		taskSvc:           service.NewTaskService(taskRepo, attachmentRepo, nil),
 	}
 

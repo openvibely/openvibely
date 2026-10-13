@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/stretchr/testify/require"
 )
@@ -25,8 +25,8 @@ func decodeListTasksResult(t *testing.T, raw string) taskDiscoveryResult {
 
 func TestExecuteListTasksTool(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	projectRepo := sqlite.NewProjectRepo(db)
 	ctx := context.Background()
 
 	other := &models.Project{Name: "List Tasks Other Project"}
@@ -143,8 +143,8 @@ func TestExecuteListTasksTool(t *testing.T) {
 
 func TestExecuteListTasksToolTreatsLikeWildcardsAsLiteralTitleText(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	projectRepo := sqlite.NewProjectRepo(db)
 	ctx := context.Background()
 
 	other := &models.Project{Name: "List Tasks Wildcard Other Project"}
@@ -182,7 +182,7 @@ func TestExecuteListTasksToolTreatsLikeWildcardsAsLiteralTitleText(t *testing.T)
 
 func TestExecuteListTasksToolPreservesOrdinaryQueryRelevanceAndPagination(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
 	ctx := context.Background()
 
 	createTask := func(title string) *models.Task {
@@ -220,9 +220,9 @@ func TestExecuteListTasksToolPreservesOrdinaryQueryRelevanceAndPagination(t *tes
 
 func TestExecuteListSchedulesToolTreatsLikeWildcardsAsLiteralTaskTitleText(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	scheduleRepo := repository.NewScheduleRepo(db)
-	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	scheduleRepo := sqlite.NewScheduleRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
 	ctx := context.Background()
 
 	other := &models.Project{Name: "List Schedules Wildcard Other Project"}
@@ -268,7 +268,7 @@ func TestExecuteListSchedulesToolTreatsLikeWildcardsAsLiteralTaskTitleText(t *te
 
 func TestExecuteListTasksToolReportsAndFiltersMergeStatus(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
 	ctx := context.Background()
 
 	mk := func(title, branch string, merge models.MergeStatus) *models.Task {
@@ -318,7 +318,7 @@ func TestExecuteListTasksToolReportsAndFiltersMergeStatus(t *testing.T) {
 
 func TestExecuteListTasksToolSupportsEveryCategoryAndStatusFilter(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
 	ctx := context.Background()
 
 	create := func(title string, category models.TaskCategory, status models.TaskStatus) {
@@ -377,7 +377,7 @@ func TestExecuteListTasksToolSupportsEveryCategoryAndStatusFilter(t *testing.T) 
 
 func TestExecuteListTasksToolUsesCountAndBoundedPageOperations(t *testing.T) {
 	db, counter := testutil.NewStatementCountingTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
 	ctx := context.Background()
 	for i := 0; i < 3; i++ {
 		task := &models.Task{
@@ -417,7 +417,7 @@ func TestExecuteListTasksToolUsesCountAndBoundedPageOperations(t *testing.T) {
 
 func TestExecuteListTasksTool_PreservesCompactJSONContract(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
 	ctx := context.Background()
 
 	parent := &models.Task{
@@ -491,8 +491,8 @@ func TestExecuteListTasksTool_PreservesCompactJSONContract(t *testing.T) {
 func TestDiscoveryToolsUseSharedInputDecoder(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	taskRepo := repository.NewTaskRepo(db, nil)
-	scheduleRepo := repository.NewScheduleRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	scheduleRepo := sqlite.NewScheduleRepo(db)
 
 	tools := map[string]func(json.RawMessage) (string, error){
 		"list_tasks": func(input json.RawMessage) (string, error) {
@@ -635,8 +635,8 @@ func TestExecuteViewSwarmToolNonSwarmReturnsControlledResponse(t *testing.T) {
 func TestExecuteViewSwarmToolDoesNotCrossProjects(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
 	current := &models.Project{Name: "Current"}
 	foreign := &models.Project{Name: "Foreign"}
 	require.NoError(t, projectRepo.Create(ctx, current))
@@ -654,17 +654,17 @@ func TestExecuteViewSwarmToolDoesNotCrossProjects(t *testing.T) {
 	require.Contains(t, err.Error(), "current project")
 }
 
-func setupViewSwarmServiceFixture(t *testing.T) (*repository.TaskRepo, *models.Project) {
+func setupViewSwarmServiceFixture(t *testing.T) (*sqlite.TaskRepo, *models.Project) {
 	t.Helper()
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)
-	projectRepo := repository.NewProjectRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
 	project := &models.Project{Name: "Swarm Project"}
 	require.NoError(t, projectRepo.Create(ctx, project))
-	return repository.NewTaskRepo(db, nil), project
+	return sqlite.NewTaskRepo(db, nil), project
 }
 
-func createViewSwarmTask(t *testing.T, taskRepo *repository.TaskRepo, projectID, title string, mutate func(*models.Task)) *models.Task {
+func createViewSwarmTask(t *testing.T, taskRepo *sqlite.TaskRepo, projectID, title string, mutate func(*models.Task)) *models.Task {
 	t.Helper()
 	task := &models.Task{
 		ProjectID: projectID,

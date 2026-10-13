@@ -12,18 +12,18 @@ import (
 
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/testutil"
 )
 
 func TestGetDefaultAgentForTask_ProjectDefault(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	projectRepo := repository.NewProjectRepo(db)
-	execRepo := repository.NewExecutionRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	scheduleRepo := repository.NewScheduleRepo(db)
-	attachmentRepo := repository.NewAttachmentRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	execRepo := sqlite.NewExecutionRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	scheduleRepo := sqlite.NewScheduleRepo(db)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
 	ctx := context.Background()
 
 	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, scheduleRepo, attachmentRepo)
@@ -64,12 +64,12 @@ func TestGetDefaultAgentForTask_ProjectDefault(t *testing.T) {
 
 func TestGetDefaultAgentForTask_FallsBackToGlobalDefault(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	projectRepo := repository.NewProjectRepo(db)
-	execRepo := repository.NewExecutionRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	scheduleRepo := repository.NewScheduleRepo(db)
-	attachmentRepo := repository.NewAttachmentRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	execRepo := sqlite.NewExecutionRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	scheduleRepo := sqlite.NewScheduleRepo(db)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
 	ctx := context.Background()
 
 	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, scheduleRepo, attachmentRepo)
@@ -96,12 +96,12 @@ func TestGetDefaultAgentForTask_FallsBackToGlobalDefault(t *testing.T) {
 
 func TestGetDefaultAgentForTask_EmptyProjectID(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	projectRepo := repository.NewProjectRepo(db)
-	execRepo := repository.NewExecutionRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	scheduleRepo := repository.NewScheduleRepo(db)
-	attachmentRepo := repository.NewAttachmentRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	execRepo := sqlite.NewExecutionRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	scheduleRepo := sqlite.NewScheduleRepo(db)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
 	ctx := context.Background()
 
 	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, scheduleRepo, attachmentRepo)
@@ -121,12 +121,12 @@ func TestGetDefaultAgentForTask_EmptyProjectID(t *testing.T) {
 
 func TestGetDefaultAgentForTask_DeletedProjectAgent(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	projectRepo := repository.NewProjectRepo(db)
-	execRepo := repository.NewExecutionRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	scheduleRepo := repository.NewScheduleRepo(db)
-	attachmentRepo := repository.NewAttachmentRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	execRepo := sqlite.NewExecutionRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	scheduleRepo := sqlite.NewScheduleRepo(db)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
 	ctx := context.Background()
 
 	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, scheduleRepo, attachmentRepo)
@@ -189,7 +189,7 @@ func TestProjectWorkDirMatches_PathBoundariesAndSeparators(t *testing.T) {
 
 func TestLLMService_projectIDForWorkDir_EmptyWorkDirSkipsLookup(t *testing.T) {
 	db, counter := testutil.NewStatementCountingTestDB(t)
-	svc := NewLLMService(nil, nil, nil, repository.NewProjectRepo(db), nil, nil)
+	svc := NewLLMService(nil, nil, nil, sqlite.NewProjectRepo(db), nil, nil)
 	counter.SetEnabled(true)
 	if got := svc.projectIDForWorkDir(context.Background(), "  "); got != "" {
 		t.Fatalf("projectIDForWorkDir(empty) = %q, want empty", got)
@@ -224,10 +224,10 @@ func callDirectAttributionPath(ctx context.Context, svc *LLMService, workDir str
 	return err
 }
 
-func setupDirectAttributionFixture(tb testing.TB, projectCount int) (*LLMService, *repository.ProjectRepo, *testutil.SQLStatementCounter, string, string) {
+func setupDirectAttributionFixture(tb testing.TB, projectCount int) (*LLMService, *sqlite.ProjectRepo, *testutil.SQLStatementCounter, string, string) {
 	tb.Helper()
 	db, counter := testutil.NewStatementCountingTestDB(tb)
-	repo := repository.NewProjectRepo(db)
+	repo := sqlite.NewProjectRepo(db)
 	ctx := context.Background()
 	description := strings.Repeat("d", 16<<10)
 	repoURL := "https://example.test/" + strings.Repeat("u", 2<<10)
@@ -338,7 +338,7 @@ func TestDirectModelUsageExplicitProjectAvoidsFallbackLookupAt500Projects(t *tes
 
 func TestLLMService_projectIDForWorkDir_DeletedAndEmptyRepositoriesDoNotMatch(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	repo := repository.NewProjectRepo(db)
+	repo := sqlite.NewProjectRepo(db)
 	svc := NewLLMService(nil, nil, nil, repo, nil, nil)
 	ctx := context.Background()
 	root := t.TempDir()
@@ -363,7 +363,7 @@ func TestLLMService_projectIDForWorkDir_DeletedAndEmptyRepositoriesDoNotMatch(t 
 
 func TestLLMService_projectIDForWorkDir_ResolvesTaskWorktreesToProject(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	projectRepo := repository.NewProjectRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
 	ctx := context.Background()
 	svc := NewLLMService(nil, nil, nil, projectRepo, nil, nil)
 
@@ -393,7 +393,7 @@ func TestLLMService_projectIDForWorkDir_ResolvesTaskWorktreesToProject(t *testin
 
 func TestLLMService_projectIDForWorkDir_PrefersMostSpecificProject(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	projectRepo := repository.NewProjectRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
 	ctx := context.Background()
 	svc := NewLLMService(nil, nil, nil, projectRepo, nil, nil)
 
@@ -422,12 +422,12 @@ func TestLLMService_projectIDForWorkDir_PrefersMostSpecificProject(t *testing.T)
 
 func TestLLMService_ExecuteTaskWithAgent_UsesProjectRepoPathAsWorkDir(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	execRepo := repository.NewExecutionRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	projectRepo := repository.NewProjectRepo(db)
-	scheduleRepo := repository.NewScheduleRepo(db)
-	attachmentRepo := repository.NewAttachmentRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	execRepo := sqlite.NewExecutionRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	projectRepo := sqlite.NewProjectRepo(db)
+	scheduleRepo := sqlite.NewScheduleRepo(db)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
 	ctx := context.Background()
 
 	mock := testutil.NewMockLLMCaller()
@@ -475,12 +475,12 @@ func TestLLMService_ExecuteTaskWithAgent_UsesProjectRepoPathAsWorkDir(t *testing
 
 func TestLLMService_ExecuteTaskWithAgent_UsesProjectWorkDir(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	execRepo := repository.NewExecutionRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	projectRepo := repository.NewProjectRepo(db)
-	scheduleRepo := repository.NewScheduleRepo(db)
-	attachmentRepo := repository.NewAttachmentRepo(db)
+	execRepo := sqlite.NewExecutionRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	scheduleRepo := sqlite.NewScheduleRepo(db)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
 	ctx := context.Background()
 
 	mock := testutil.NewMockLLMCaller()
@@ -529,12 +529,12 @@ func TestLLMService_ExecuteTaskWithAgent_UsesProjectWorkDir(t *testing.T) {
 
 func TestLLMService_ExecuteTaskWithAgent_NoWorkDirWhenProjectHasNoRepoPath(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	execRepo := repository.NewExecutionRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	projectRepo := repository.NewProjectRepo(db)
-	scheduleRepo := repository.NewScheduleRepo(db)
-	attachmentRepo := repository.NewAttachmentRepo(db)
+	execRepo := sqlite.NewExecutionRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	scheduleRepo := sqlite.NewScheduleRepo(db)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
 	ctx := context.Background()
 
 	mock := testutil.NewMockLLMCaller()
@@ -574,12 +574,12 @@ func TestLLMService_ExecuteTaskWithAgent_NoWorkDirWhenProjectHasNoRepoPath(t *te
 
 func TestLLMService_ExecuteTaskWithAgent_SetsWorkDir(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	execRepo := repository.NewExecutionRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	projectRepo := repository.NewProjectRepo(db)
-	scheduleRepo := repository.NewScheduleRepo(db)
-	attachmentRepo := repository.NewAttachmentRepo(db)
+	execRepo := sqlite.NewExecutionRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	scheduleRepo := sqlite.NewScheduleRepo(db)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
 	ctx := context.Background()
 
 	mock := testutil.NewMockLLMCaller()

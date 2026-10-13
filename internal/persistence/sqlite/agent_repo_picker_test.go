@@ -1,0 +1,799 @@
+package sqlite
+
+import (
+	"context"
+	"database/sql"
+	"encoding/json"
+	"fmt"
+	"slices"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
+	"github.com/openvibely/openvibely/internal/testutil"
+)
+
+func TestAgentRepoListPickerOptionsUsesCompactProjection(t *testing.T) {
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	repo := NewAgentRepo(db)
+	ctx := context.Background()
+	clearAgentsForRuntimeSummaryTest(t, db)
+
+	zulu := createPickerAgent(t, repo, "Zulu Agent")
+	alpha := createPickerAgent(t, repo, "Alpha Agent")
+	archived := createPickerAgent(t, repo, "Archived Agent")
+	archived.GeneratedStatus = models.AgentStatusArchived
+	if err := repo.Update(ctx, archived); err != nil {
+		t.Fatalf("archive picker agent: %v", err)
+	}
+
+	counter.Reset()
+	counter.SetEnabled(true)
+	options, err := repo.ListPickerOptions(ctx)
+	counter.SetEnabled(false)
+	if err != nil {
+		t.Fatalf("ListPickerOptions: %v", err)
+	}
+
+	want := []persistence.AgentPickerOption{{ID: alpha.ID, Name: "Alpha Agent"}, {ID: zulu.ID, Name: "Zulu Agent"}}
+	if len(options) != len(want) {
+		t.Fatalf("options len = %d, want %d: %#v", len(options), len(want), options)
+	}
+	for i := range want {
+		if options[i] != want[i] {
+			t.Fatalf("options[%d] = %#v, want %#v; all=%#v", i, options[i], want[i], options)
+		}
+	}
+
+	statements := counter.Statements()
+	if len(statements) != 1 {
+		t.Fatalf("statements = %#v, want exactly one compact query", statements)
+	}
+	stmt := strings.ToLower(statements[0])
+	projection := strings.Split(stmt, "from agents")[0]
+	for _, required := range []string{"select id, name"} {
+		if !strings.Contains(projection, required) {
+			t.Fatalf("picker query projection = %q, want %q in %s", projection, required, statements[0])
+		}
+	}
+	for _, forbidden := range []string{"description", "system_prompt", "tools", "tool_config", "plugins", "mcp_servers", "skills", "permission_defaults_json", "model_defaults_json", "source_refs_json", "created_at", "updated_at"} {
+		if strings.Contains(projection, forbidden) {
+			t.Fatalf("picker query selected forbidden column %q: %s", forbidden, statements[0])
+		}
+	}
+	if !strings.Contains(stmt, "coalesce(generated_status, 'user_edited') <> 'archived'") {
+		t.Fatalf("picker query must exclude archived agents: %s", statements[0])
+	}
+	if !strings.Contains(stmt, "order by name asc") {
+		t.Fatalf("picker query must keep name ASC ordering: %s", statements[0])
+	}
+
+	full, err := repo.GetByID(ctx, alpha.ID)
+	if err != nil {
+		t.Fatalf("GetByID full agent: %v", err)
+	}
+	if full == nil || full.SystemPrompt == "" || len(full.Tools) == 0 || len(full.ToolConfig.ScopedFiles) == 0 || len(full.Plugins) == 0 || len(full.MCPServers) == 0 || len(full.Skills) == 0 || len(full.SourceRefs) == 0 || !full.PermissionDefaults.ReadAgents || full.ModelDefaults.Model != "gpt-5" {
+		t.Fatalf("full detail path lost hydrated fields: %#v", full)
+	}
+}
+
+func TestAgentRepoListPickerOptionsForProjectExcludesForeignProjectAgents(t *testing.T) {
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	repo := NewAgentRepo(db)
+	projectRepo := NewProjectRepo(db)
+	ctx := context.Background()
+	clearAgentsForRuntimeSummaryTest(t, db)
+
+	projectA := &models.Project{Name: "Picker Project A"}
+	if err := projectRepo.Create(ctx, projectA); err != nil {
+		t.Fatalf("create project A: %v", err)
+	}
+	projectB := &models.Project{Name: "Picker Project B"}
+	if err := projectRepo.Create(ctx, projectB); err != nil {
+		t.Fatalf("create project B: %v", err)
+	}
+
+	global := createPickerAgent(t, repo, "Global Picker Agent")
+	projectAgentA := createPickerAgent(t, repo, "Project A Picker Agent")
+	projectAgentA.Scope = models.AgentScopeProject
+	projectAgentA.ProjectID = projectA.ID
+	if err := repo.Update(ctx, projectAgentA); err != nil {
+		t.Fatalf("update project A agent: %v", err)
+	}
+	projectAgentB := createPickerAgent(t, repo, "Project B Picker Agent")
+	projectAgentB.Scope = models.AgentScopeProject
+	projectAgentB.ProjectID = projectB.ID
+	if err := repo.Update(ctx, projectAgentB); err != nil {
+		t.Fatalf("update project B agent: %v", err)
+	}
+
+	counter.Reset()
+	counter.SetEnabled(true)
+	options, err := repo.ListPickerOptionsForProject(ctx, projectA.ID)
+	counter.SetEnabled(false)
+	if err != nil {
+		t.Fatalf("ListPickerOptionsForProject: %v", err)
+	}
+	gotIDs := make([]string, 0, len(options))
+	for _, option := range options {
+		gotIDs = append(gotIDs, option.ID)
+	}
+	if len(gotIDs) != 2 || !containsString(gotIDs, global.ID) || !containsString(gotIDs, projectAgentA.ID) || containsString(gotIDs, projectAgentB.ID) {
+		t.Fatalf("project A picker IDs = %#v, want global=%s and project A=%s without project B=%s", gotIDs, global.ID, projectAgentA.ID, projectAgentB.ID)
+	}
+
+	statements := counter.Statements()
+	if len(statements) != 1 {
+		t.Fatalf("statements = %#v, want exactly one compact query", statements)
+	}
+	stmt := strings.ToLower(statements[0])
+	projection := strings.Split(stmt, "from agents")[0]
+	if !strings.Contains(projection, "select id, name") {
+		t.Fatalf("project picker projection = %q, want only identity columns: %s", projection, statements[0])
+	}
+	if !strings.Contains(stmt, "coalesce(scope, 'global')") || !strings.Contains(stmt, "project_id = ?") {
+		t.Fatalf("project picker query must enforce project availability: %s", statements[0])
+	}
+	for _, forbidden := range []string{"description", "system_prompt", "tools", "tool_config", "plugins", "mcp_servers", "skills", "permission_defaults_json", "model_defaults_json", "source_refs_json", "created_at", "updated_at"} {
+		if strings.Contains(projection, forbidden) {
+			t.Fatalf("project picker query selected forbidden column %q: %s", forbidden, statements[0])
+		}
+	}
+}
+
+func TestAgentRepoListScheduleOptionsUsesCompactProjectionAndAvailability(t *testing.T) {
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	repo := NewAgentRepo(db)
+	ctx := context.Background()
+	clearAgentsForRuntimeSummaryTest(t, db)
+	projectRepo := NewProjectRepo(db)
+	project := &models.Project{Name: "Schedule Projection Project"}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create schedule project: %v", err)
+	}
+	otherProject := &models.Project{Name: "Other Schedule Projection Project"}
+	if err := projectRepo.Create(ctx, otherProject); err != nil {
+		t.Fatalf("create other schedule project: %v", err)
+	}
+	projectID := project.ID
+
+	global := createPickerAgent(t, repo, "Global Schedule Agent")
+	global.Model = "sonnet"
+	if err := repo.Update(ctx, global); err != nil {
+		t.Fatalf("update global schedule agent: %v", err)
+	}
+	projectAgent := createPickerAgent(t, repo, "Project Schedule Agent")
+	projectAgent.Scope = models.AgentScopeProject
+	projectAgent.ProjectID = projectID
+	if err := repo.Update(ctx, projectAgent); err != nil {
+		t.Fatalf("update project schedule agent: %v", err)
+	}
+	foreign := createPickerAgent(t, repo, "Foreign Schedule Agent")
+	foreign.Scope = models.AgentScopeProject
+	foreign.ProjectID = otherProject.ID
+	if err := repo.Update(ctx, foreign); err != nil {
+		t.Fatalf("update foreign schedule agent: %v", err)
+	}
+	disabled := createPickerAgent(t, repo, "Disabled Schedule Agent")
+	disabled.Enabled = false
+	if err := repo.Update(ctx, disabled); err != nil {
+		t.Fatalf("update disabled schedule agent: %v", err)
+	}
+	nonPrimary := createPickerAgent(t, repo, "Non Primary Schedule Agent")
+	nonPrimary.SelectableAsPrimary = false
+	if err := repo.Update(ctx, nonPrimary); err != nil {
+		t.Fatalf("update non-primary schedule agent: %v", err)
+	}
+	generatedArchived := createPickerAgent(t, repo, "Generated Archived Schedule Agent")
+	generatedArchived.GeneratedStatus = models.AgentStatusArchived
+	if err := repo.Update(ctx, generatedArchived); err != nil {
+		t.Fatalf("archive generated schedule agent: %v", err)
+	}
+	archivedAt := createPickerAgent(t, repo, "Archived Timestamp Schedule Agent")
+	if _, err := db.ExecContext(ctx, `UPDATE agents SET archived_at = datetime('now') WHERE id = ?`, archivedAt.ID); err != nil {
+		t.Fatalf("archive timestamp schedule agent: %v", err)
+	}
+
+	counter.Reset()
+	counter.SetEnabled(true)
+	options, err := repo.ListScheduleOptions(ctx, projectID)
+	counter.SetEnabled(false)
+	if err != nil {
+		t.Fatalf("ListScheduleOptions: %v", err)
+	}
+	if len(options) != 2 {
+		t.Fatalf("schedule options = %#v, want global and project-scoped options only", options)
+	}
+	if options[0].ID != global.ID || options[0].Name != global.Name || options[0].Model != global.Model {
+		t.Fatalf("global schedule option = %#v, want %s/%s/%s", options[0], global.ID, global.Name, global.Model)
+	}
+	if options[1].ID != projectAgent.ID || options[1].Name != projectAgent.Name || options[1].Model != projectAgent.Model {
+		t.Fatalf("project schedule option = %#v, want %s/%s/%s", options[1], projectAgent.ID, projectAgent.Name, projectAgent.Model)
+	}
+
+	statements := counter.Statements()
+	if len(statements) != 1 {
+		t.Fatalf("statements = %#v, want exactly one compact schedule query", statements)
+	}
+	query := strings.ToLower(strings.Join(strings.Fields(statements[0]), " "))
+	projection := strings.Split(query, " from agents ")[0]
+	if projection != "select id, name, model" {
+		t.Fatalf("schedule projection = %q, want only selector fields: %s", projection, statements[0])
+	}
+	for _, forbidden := range []string{"description", "system_prompt", "tools", "tool_config", "plugins", "mcp_servers", "skills", "permission_defaults_json", "model_defaults_json", "source_refs_json", "created_by", "absorbed_into", "created_at", "updated_at"} {
+		if strings.Contains(projection, forbidden) {
+			t.Fatalf("schedule query selected forbidden column %q: %s", forbidden, statements[0])
+		}
+	}
+	for _, requiredPredicate := range []string{"coalesce(generated_status, 'user_edited') <> 'archived'", "archived_at is null", "coalesce(enabled, 1) = 1", "coalesce(selectable_as_primary, 1) = 1", "coalesce(scope, 'global') <> 'project'", "project_id = ?", "order by name asc"} {
+		if !strings.Contains(query, requiredPredicate) {
+			t.Fatalf("schedule query is missing predicate/order %q: %s", requiredPredicate, statements[0])
+		}
+	}
+
+	full, err := repo.GetByID(ctx, global.ID)
+	if err != nil {
+		t.Fatalf("GetByID full schedule agent: %v", err)
+	}
+	if full == nil || full.SystemPrompt == "" || len(full.Tools) == 0 || len(full.ToolConfig.ScopedFiles) == 0 || len(full.Plugins) == 0 || len(full.MCPServers) == 0 || len(full.Skills) == 0 || len(full.SourceRefs) == 0 || !full.PermissionDefaults.ReadAgents || full.ModelDefaults.Model != "gpt-5" {
+		t.Fatalf("full detail path lost hydrated fields: %#v", full)
+	}
+}
+func TestAgentRepoListTaskUIOptionsUsesCompactProjection(t *testing.T) {
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	repo := NewAgentRepo(db)
+	ctx := context.Background()
+	clearAgentsForRuntimeSummaryTest(t, db)
+
+	projectRepo := NewProjectRepo(db)
+	project := &models.Project{Name: "Task UI Projection Project"}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+
+	zulu := createPickerAgent(t, repo, "Zulu Task UI Agent")
+	zulu.Model = "opus"
+	if err := repo.Update(ctx, zulu); err != nil {
+		t.Fatalf("update zulu: %v", err)
+	}
+	alpha := createPickerAgent(t, repo, "Alpha Task UI Agent")
+	alpha.Scope = models.AgentScopeProject
+	alpha.ProjectID = project.ID
+	alpha.Enabled = false
+	alpha.SelectableAsPrimary = false
+	if err := repo.Update(ctx, alpha); err != nil {
+		t.Fatalf("update alpha: %v", err)
+	}
+	archived := createPickerAgent(t, repo, "Archived Task UI Agent")
+	archived.GeneratedStatus = models.AgentStatusArchived
+	if err := repo.Update(ctx, archived); err != nil {
+		t.Fatalf("archive task UI agent: %v", err)
+	}
+
+	counter.Reset()
+	counter.SetEnabled(true)
+	options, err := repo.ListTaskUIOptions(ctx)
+	counter.SetEnabled(false)
+	if err != nil {
+		t.Fatalf("ListTaskUIOptions: %v", err)
+	}
+	if len(options) != 2 {
+		t.Fatalf("options = %#v, want two non-generated-archived agents", options)
+	}
+	if options[0].ID != alpha.ID || options[0].Name != alpha.Name || options[0].Model != alpha.Model || options[0].Scope != models.AgentScopeProject || options[0].ProjectID != project.ID || options[0].Enabled || options[0].SelectableAsPrimary || options[0].GeneratedStatus != models.AgentStatusUserEdited || options[0].ArchivedAt != nil {
+		t.Fatalf("alpha task UI option = %#v, want scalar task UI state", options[0])
+	}
+	if options[1].ID != zulu.ID || options[1].Name != zulu.Name || options[1].Model != "opus" || options[1].Scope != models.AgentScopeGlobal || !options[1].Enabled || !options[1].SelectableAsPrimary {
+		t.Fatalf("zulu task UI option = %#v, want ordered global scalar state", options[1])
+	}
+
+	statements := counter.Statements()
+	if len(statements) != 1 {
+		t.Fatalf("statements = %#v, want exactly one compact task UI query", statements)
+	}
+	query := strings.ToLower(strings.Join(strings.Fields(statements[0]), " "))
+	projection := strings.Split(query, " from agents ")[0]
+	for _, required := range []string{"id", "name", "model", "coalesce(scope, 'global')", "coalesce(project_id, '')", "coalesce(selectable_as_primary, 1)", "coalesce(enabled, 1)", "coalesce(generated_status, 'user_edited')", "archived_at"} {
+		if !strings.Contains(projection, required) {
+			t.Fatalf("task UI projection = %q, missing %q", projection, required)
+		}
+	}
+	for _, forbidden := range []string{"description", "system_prompt", "tools", "tool_config", "plugins", "mcp_servers", "skills", "permission_defaults_json", "model_defaults_json", "source_refs_json", "created_by", "absorbed_into", "created_at", "updated_at"} {
+		if strings.Contains(projection, forbidden) {
+			t.Fatalf("task UI query selected forbidden column %q: %s", forbidden, statements[0])
+		}
+	}
+	if !strings.Contains(query, "coalesce(generated_status, 'user_edited') <> 'archived'") || !strings.Contains(query, "order by name asc") {
+		t.Fatalf("task UI query must preserve catalog filtering and name ordering: %s", statements[0])
+	}
+
+	full, err := repo.GetByID(ctx, zulu.ID)
+	if err != nil {
+		t.Fatalf("GetByID full task UI agent: %v", err)
+	}
+	if full == nil || full.SystemPrompt == "" || len(full.Tools) == 0 || len(full.ToolConfig.ScopedFiles) == 0 || len(full.Plugins) == 0 || len(full.MCPServers) == 0 || len(full.Skills) == 0 || len(full.SourceRefs) == 0 || !full.PermissionDefaults.ReadAgents || full.ModelDefaults.Model != "gpt-5" {
+		t.Fatalf("full detail path lost hydrated fields: %#v", full)
+	}
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
+}
+
+func TestAgentRepoGetTaskDetailAgentLabelUsesCompactProjection(t *testing.T) {
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	repo := NewAgentRepo(db)
+	ctx := context.Background()
+	clearAgentsForRuntimeSummaryTest(t, db)
+
+	global := createPickerAgent(t, repo, "Global Status Agent")
+	projectAgent := &models.Agent{
+		Name:                "Project Status Agent",
+		SystemPrompt:        "Project agent details stay out of the badge query.",
+		Model:               "inherit",
+		Scope:               models.AgentScopeProject,
+		ProjectID:           "default",
+		Enabled:             true,
+		SelectableAsPrimary: true,
+	}
+	if err := repo.Create(ctx, projectAgent); err != nil {
+		t.Fatalf("create project agent: %v", err)
+	}
+	archived := createPickerAgent(t, repo, "Archived Status Agent")
+	archived.GeneratedStatus = models.AgentStatusArchived
+	if err := repo.Update(ctx, archived); err != nil {
+		t.Fatalf("archive status agent: %v", err)
+	}
+	disabled := createPickerAgent(t, repo, "Disabled Status Agent")
+	disabled.Enabled = false
+	disabled.SelectableAsPrimary = false
+	if err := repo.Update(ctx, disabled); err != nil {
+		t.Fatalf("disable status agent: %v", err)
+	}
+
+	counter.Reset()
+	counter.SetEnabled(true)
+	label, err := repo.GetTaskDetailAgentLabel(ctx, "other-project", global.ID)
+	counter.SetEnabled(false)
+	if err != nil {
+		t.Fatalf("get global task detail label: %v", err)
+	}
+	if label == nil || *label != (persistence.AgentPickerOption{ID: global.ID, Name: global.Name}) {
+		t.Fatalf("global label = %#v, want id/name for %q", label, global.Name)
+	}
+	statements := counter.Statements()
+	if len(statements) != 1 {
+		t.Fatalf("statements = %#v, want exactly one label query", statements)
+	}
+	stmt := strings.ToLower(statements[0])
+	projection := strings.Split(stmt, "from agents")[0]
+	if !strings.Contains(projection, "select id, name") {
+		t.Fatalf("task detail label projection = %q, want only identity columns: %s", projection, statements[0])
+	}
+	for _, forbidden := range []string{"description", "system_prompt", "tools", "tool_config", "plugins", "mcp_servers", "skills", "permission_defaults_json", "model_defaults_json", "source_refs_json", "created_at", "updated_at"} {
+		if strings.Contains(projection, forbidden) {
+			t.Fatalf("task detail label query selected forbidden column %q: %s", forbidden, statements[0])
+		}
+	}
+	if !strings.Contains(stmt, "coalesce(scope, 'global')") || !strings.Contains(stmt, "project_id = ?") {
+		t.Fatalf("task detail label query must enforce project availability: %s", statements[0])
+	}
+
+	projectLabel, err := repo.GetTaskDetailAgentLabel(ctx, "default", projectAgent.ID)
+	if err != nil {
+		t.Fatalf("get available project label: %v", err)
+	}
+	if projectLabel == nil || projectLabel.Name != projectAgent.Name {
+		t.Fatalf("available project label = %#v, want %q", projectLabel, projectAgent.Name)
+	}
+	unavailableProjectLabel, err := repo.GetTaskDetailAgentLabel(ctx, "other-project", projectAgent.ID)
+	if err != nil {
+		t.Fatalf("get unavailable project label: %v", err)
+	}
+	if unavailableProjectLabel != nil {
+		t.Fatalf("unavailable project label = %#v, want nil", unavailableProjectLabel)
+	}
+	archivedLabel, err := repo.GetTaskDetailAgentLabel(ctx, "default", archived.ID)
+	if err != nil {
+		t.Fatalf("get archived label: %v", err)
+	}
+	if archivedLabel != nil {
+		t.Fatalf("archived label = %#v, want nil", archivedLabel)
+	}
+	disabledLabel, err := repo.GetTaskDetailAgentLabel(ctx, "other-project", disabled.ID)
+	if err != nil {
+		t.Fatalf("get disabled label: %v", err)
+	}
+	if disabledLabel == nil || disabledLabel.Name != disabled.Name {
+		t.Fatalf("disabled assigned label = %#v, want %q", disabledLabel, disabled.Name)
+	}
+
+	counter.Reset()
+	counter.SetEnabled(true)
+	missing, err := repo.GetTaskDetailAgentLabel(ctx, "default", "missing-agent-id")
+	_, emptyErr := repo.GetTaskDetailAgentLabel(ctx, "default", "")
+	counter.SetEnabled(false)
+	if err != nil || emptyErr != nil {
+		t.Fatalf("missing/empty labels returned errors: missing=%v empty=%v", err, emptyErr)
+	}
+	if missing != nil {
+		t.Fatalf("missing label = %#v, want nil", missing)
+	}
+	if len(counter.Statements()) != 1 {
+		t.Fatalf("empty Agent ID should skip lookup; statements = %#v", counter.Statements())
+	}
+
+	full, err := repo.GetByID(ctx, global.ID)
+	if err != nil {
+		t.Fatalf("get full status agent: %v", err)
+	}
+	if full == nil || full.SystemPrompt == "" || len(full.Tools) == 0 || len(full.ToolConfig.ScopedFiles) == 0 || len(full.Plugins) == 0 || len(full.MCPServers) == 0 || len(full.Skills) == 0 || len(full.SourceRefs) == 0 || !full.PermissionDefaults.ReadAgents || full.ModelDefaults.Model != "gpt-5" {
+		t.Fatalf("full detail path lost hydrated fields: %#v", full)
+	}
+}
+
+func TestAgentRepoListTaskUIOptionsProductionShape(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping production-shaped task UI Agent fixture in short mode")
+	}
+
+	db := testutil.NewTestDB(t)
+	repo := NewAgentRepo(db)
+	ctx := context.Background()
+	clearAgentsForRuntimeSummaryTest(t, db)
+	for i := 0; i < 1000; i++ {
+		agent := createPickerAgent(t, repo, fmt.Sprintf("Agent %04d", i))
+		enrichTaskUIProjectionAgent(t, repo, agent)
+	}
+
+	compact, err := repo.ListTaskUIOptions(ctx)
+	if err != nil {
+		t.Fatalf("compact task UI Agent list: %v", err)
+	}
+	if len(compact) != 1000 || compact[0].Name != "Agent 0000" || compact[len(compact)-1].Name != "Agent 0999" {
+		t.Fatalf("production-shaped Task UI catalog changed: compact=%d first=%#v last=%#v", len(compact), compact[0], compact[len(compact)-1])
+	}
+	if got := taskUIAgentSelectorBytes(compact); got > 256*1024 {
+		t.Fatalf("compact Task UI selector bytes = %d, want at most %d", got, 256*1024)
+	}
+
+}
+
+func measureTaskUIAgentLoad(t *testing.T, db *sql.DB, counter *testutil.SQLStatementCounter, load func() error) (time.Duration, float64, time.Duration) {
+	t.Helper()
+	const samples = 5
+	latencies := make([]time.Duration, 0, samples)
+	waits := make([]time.Duration, 0, samples)
+	for range samples {
+		latency, wait := measureTaskUIAgentLoadSample(t, db, counter, load)
+		latencies = append(latencies, latency)
+		waits = append(waits, wait)
+	}
+	allocs := testing.AllocsPerRun(3, func() {
+		if err := load(); err != nil {
+			t.Fatal(err)
+		}
+	})
+	slices.Sort(latencies)
+	slices.Sort(waits)
+	return latencies[len(latencies)/2], allocs, waits[len(waits)/2]
+}
+
+func measureTaskUIAgentLoadSample(t *testing.T, db *sql.DB, counter *testutil.SQLStatementCounter, load func() error) (time.Duration, time.Duration) {
+	t.Helper()
+	queryStarted := make(chan struct{})
+	releaseQuery := make(chan struct{})
+	var (
+		queryOnce   sync.Once
+		releaseOnce sync.Once
+	)
+	release := func() { releaseOnce.Do(func() { close(releaseQuery) }) }
+	counter.SetObserver(func(_ context.Context, query string) {
+		if strings.Contains(strings.ToLower(query), "from agents") {
+			queryOnce.Do(func() {
+				close(queryStarted)
+				<-releaseQuery
+			})
+		}
+	})
+	defer func() {
+		release()
+		counter.SetObserver(nil)
+	}()
+
+	result := make(chan error, 1)
+	startedAt := time.Now()
+	go func() { result <- load() }()
+	select {
+	case <-queryStarted:
+	case err := <-result:
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Fatal("Task UI Agent query completed before concurrent wait measurement")
+	case <-time.After(5 * time.Second):
+		t.Fatal("Task UI Agent query did not start")
+	}
+
+	waitBefore := db.Stats().WaitCount
+	lightweightResult := make(chan error, 1)
+	waitStartedAt := time.Now()
+	go func() {
+		var projectID string
+		lightweightResult <- db.QueryRowContext(context.Background(), `SELECT id FROM projects ORDER BY id LIMIT 1`).Scan(&projectID)
+	}()
+	deadline := time.After(5 * time.Second)
+	for db.Stats().WaitCount <= waitBefore {
+		select {
+		case err := <-lightweightResult:
+			t.Fatalf("concurrent lightweight project lookup completed without waiting: %v", err)
+		case <-deadline:
+			t.Fatal("concurrent lightweight project lookup did not queue behind Task UI Agent query")
+		default:
+			time.Sleep(time.Millisecond)
+		}
+	}
+	release()
+	if err := <-result; err != nil {
+		t.Fatal(err)
+	}
+	if err := <-lightweightResult; err != nil {
+		t.Fatalf("concurrent lightweight project lookup: %v", err)
+	}
+	return time.Since(startedAt), time.Since(waitStartedAt)
+}
+
+func taskUIAgentSelectorBytes(options []persistence.AgentTaskUIOption) int {
+	var builder strings.Builder
+	for _, option := range options {
+		builder.WriteString(option.ID)
+		builder.WriteString(option.Name)
+		builder.WriteString(option.Model)
+	}
+	return builder.Len()
+}
+
+func BenchmarkAgentTaskUIOptionsProjection(b *testing.B) {
+	db := testutil.NewTestDB(b)
+	repo := NewAgentRepo(db)
+	ctx := context.Background()
+	clearAgentsForRuntimeSummaryTest(b, db)
+	for i := 0; i < 1000; i++ {
+		agent := createPickerAgent(b, repo, fmt.Sprintf("Agent %04d", i))
+		enrichTaskUIProjectionAgent(b, repo, agent)
+	}
+
+	b.Run("compact Task UI projection", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			options, err := repo.ListTaskUIOptions(ctx)
+			if err != nil {
+				b.Fatal(err)
+			}
+			if len(options) != 1000 {
+				b.Fatalf("Task UI options len = %d, want 1000", len(options))
+			}
+			if i == 0 {
+				b.ReportMetric(float64(taskUIAgentSelectorBytes(options)), "selector_bytes")
+			}
+		}
+	})
+}
+
+func BenchmarkAgentTaskDetailLabelProjection(b *testing.B) {
+	db, counter := testutil.NewStatementCountingTestDB(b)
+	repo := NewAgentRepo(db)
+	clearAgentsForRuntimeSummaryTest(b, db)
+
+	var targetID string
+	for i := 0; i < 1000; i++ {
+		agent := createPickerAgent(b, repo, fmt.Sprintf("Agent %04d", i))
+		if i == 999 {
+			targetID = agent.ID
+		}
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	var totalLightweightWait time.Duration
+	for i := 0; i < b.N; i++ {
+		queryStarted := make(chan struct{})
+		var once sync.Once
+		counter.SetObserver(func(_ context.Context, query string) {
+			if strings.Contains(strings.ToLower(query), "from agents") {
+				once.Do(func() { close(queryStarted) })
+			}
+		})
+
+		type lookupResult struct {
+			name string
+			err  error
+		}
+		resultCh := make(chan lookupResult, 1)
+		go func() {
+			label, err := repo.GetTaskDetailAgentLabel(context.Background(), "benchmark-project", targetID)
+			if err != nil {
+				resultCh <- lookupResult{err: err}
+				return
+			}
+			if label == nil {
+				resultCh <- lookupResult{err: fmt.Errorf("target agent %q not found", targetID)}
+				return
+			}
+			resultCh <- lookupResult{name: label.Name}
+		}()
+		var result lookupResult
+		lookupComplete := false
+		select {
+		case <-queryStarted:
+		case result = <-resultCh:
+			lookupComplete = true
+		case <-time.After(2 * time.Second):
+			b.Fatalf("Agent lookup query did not start")
+		}
+
+		lightweightStart := time.Now()
+		var projectID string
+		if err := db.QueryRowContext(context.Background(), `SELECT id FROM projects ORDER BY id LIMIT 1`).Scan(&projectID); err != nil {
+			b.Fatalf("lightweight project lookup: %v", err)
+		}
+		totalLightweightWait += time.Since(lightweightStart)
+
+		if !lookupComplete {
+			result = <-resultCh
+		}
+		counter.SetObserver(nil)
+		if result.err != nil {
+			b.Fatal(result.err)
+		}
+	}
+	b.StopTimer()
+	b.ReportMetric(float64(totalLightweightWait.Nanoseconds())/float64(b.N), "lightweight_db_wait_ns/op")
+}
+
+func TestAgentRepoListPickerOptionsProductionShape(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping production-shaped allocation fixture in short mode")
+	}
+
+	db := testutil.NewTestDB(t)
+	repo := NewAgentRepo(db)
+	ctx := context.Background()
+	clearAgentsForRuntimeSummaryTest(t, db)
+
+	for i := 0; i < 1000; i++ {
+		createPickerAgent(t, repo, fmt.Sprintf("Agent %04d", i))
+	}
+	archived := createPickerAgent(t, repo, "Agent Archived")
+	archived.GeneratedStatus = models.AgentStatusArchived
+	if err := repo.Update(ctx, archived); err != nil {
+		t.Fatalf("archive picker agent: %v", err)
+	}
+
+	compactOptions, err := repo.ListPickerOptions(ctx)
+	if err != nil {
+		t.Fatalf("ListPickerOptions: %v", err)
+	}
+	if len(compactOptions) != 1000 {
+		t.Fatalf("picker options = %d, want 1000", len(compactOptions))
+	}
+	if compactOptions[0].Name != "Agent 0000" || compactOptions[len(compactOptions)-1].Name != "Agent 0999" {
+		t.Fatalf("picker ordering changed: first=%q last=%q", compactOptions[0].Name, compactOptions[len(compactOptions)-1].Name)
+	}
+}
+
+func BenchmarkAgentPickerOptionsProjection(b *testing.B) {
+	db := testutil.NewTestDB(b)
+	repo := NewAgentRepo(db)
+	ctx := context.Background()
+	clearAgentsForRuntimeSummaryTest(b, db)
+	for i := 0; i < 1000; i++ {
+		createPickerAgent(b, repo, fmt.Sprintf("Agent %04d", i))
+	}
+
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		options, err := repo.ListPickerOptions(ctx)
+		if err != nil {
+			b.Fatal(err)
+		}
+		if len(options) != 1000 {
+			b.Fatalf("options len = %d, want 1000", len(options))
+		}
+		if i == 0 {
+			b.ReportMetric(float64(len(marshalPickerJSONFromOptions(b, options))), "json_bytes")
+		}
+	}
+}
+
+func createPickerAgent(tb testing.TB, repo *AgentRepo, name string) *models.Agent {
+	tb.Helper()
+	agent := &models.Agent{
+		Name:         name,
+		Description:  "production-shaped picker agent",
+		SystemPrompt: strings.Repeat("large webhook picker prompt with instructions and examples. ", 320),
+		Model:        "inherit",
+		Tools:        []string{"Read", "Write", "Edit", "Bash", models.AgentToolScopedFiles},
+		ToolConfig: models.AgentToolConfig{ScopedFiles: []models.ScopedFilesConfig{{
+			Directory:   "src",
+			Permissions: []string{"read", "write"},
+		}}},
+		Plugins: []string{"github@marketplace", "playwright@claude-plugins-official"},
+		MCPServers: []models.MCPServerConfig{{
+			Name:    "playwright",
+			Command: []string{"npx", "-y", "@playwright/mcp"},
+			Env:     map[string]string{"TOKEN": strings.Repeat("x", 256)},
+		}},
+		Skills: []models.SkillConfig{{
+			Name:        "triage",
+			Description: "large skill config",
+			Tools:       "Read, Grep, Bash",
+			Content:     strings.Repeat("skill body ", 256),
+		}},
+		PermissionDefaults:  models.AgentPermissionDefaults{ReadAgents: true, ReadSkills: true, ReadRepositoryFiles: true, UseShellOrTools: true},
+		ModelDefaults:       models.AgentModelDefaults{Model: "gpt-5", Temperature: 0.3, MaxTokens: 8192},
+		SourceRefs:          []string{"agents/picker/SKILLS.md", strings.Repeat("ref", 128)},
+		Enabled:             true,
+		SelectableAsPrimary: true,
+	}
+	if err := repo.Create(context.Background(), agent); err != nil {
+		tb.Fatalf("create picker agent %q: %v", name, err)
+	}
+	return agent
+}
+
+func enrichTaskUIProjectionAgent(tb testing.TB, repo *AgentRepo, agent *models.Agent) {
+	tb.Helper()
+	for i := 0; i < 12; i++ {
+		suffix := fmt.Sprintf("%02d", i)
+		agent.Tools = append(agent.Tools, "TaskUI"+suffix)
+		agent.ToolConfig.ScopedFiles = append(agent.ToolConfig.ScopedFiles, models.ScopedFilesConfig{
+			Directory:   "project/" + suffix,
+			Permissions: []string{"read", "write", "execute"},
+		})
+		agent.Plugins = append(agent.Plugins, "task-ui-plugin-"+suffix)
+		agent.MCPServers = append(agent.MCPServers, models.MCPServerConfig{
+			Name:    "task-ui-mcp-" + suffix,
+			Command: []string{"task-ui-mcp", "--profile", suffix},
+			Env: map[string]string{
+				"TOKEN":  strings.Repeat("x", 256),
+				"CONFIG": strings.Repeat("configuration-", 32),
+			},
+		})
+		agent.Skills = append(agent.Skills, models.SkillConfig{
+			Name:        "task-ui-skill-" + suffix,
+			Description: "production-shaped Task UI projection skill",
+			Tools:       "Read, Grep, Edit, Bash",
+			Content:     strings.Repeat("production-shaped skill body ", 128),
+		})
+		agent.SourceRefs = append(agent.SourceRefs, "agents/task-ui/"+suffix+"/SKILLS.md")
+	}
+	if err := repo.Update(context.Background(), agent); err != nil {
+		tb.Fatalf("enrich task UI projection Agent %q: %v", agent.Name, err)
+	}
+}
+
+func marshalPickerJSONFromOptions(tb testing.TB, options []persistence.AgentPickerOption) []byte {
+	tb.Helper()
+	type agentData struct {
+		ID   string `json:"id"`
+		Name string `json:"name"`
+	}
+	data := make([]agentData, len(options))
+	for i, option := range options {
+		data[i] = agentData{ID: option.ID, Name: option.Name}
+	}
+	b, err := json.Marshal(data)
+	if err != nil {
+		tb.Fatalf("marshal picker JSON: %v", err)
+	}
+	return b
+}

@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/stretchr/testify/require"
 )
@@ -15,7 +15,7 @@ import (
 func TestAutomationBuilderActionInstructionsSubmission(t *testing.T) {
 	tc := NewTestContext(t)
 	project := tc.CreateProject().Build()
-	repo := repository.NewAutomationRepo(tc.db)
+	repo := sqlite.NewAutomationRepo(tc.db)
 	registry := service.NewAutomationAdapterRegistry()
 	drafts := service.NewAutomationDraftService(repo, registry)
 	validator := service.NewAutomationSaveValidator(registry, drafts)

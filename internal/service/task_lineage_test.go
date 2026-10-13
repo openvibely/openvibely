@@ -6,7 +6,7 @@ import (
 
 	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/testutil"
 )
 
@@ -32,8 +32,8 @@ func TestTaskLineage_PersistsInDB(t *testing.T) {
 	ctx := context.Background()
 
 	broadcaster := events.NewBroadcaster()
-	taskRepo := repository.NewTaskRepo(db, broadcaster)
-	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, broadcaster)
+	projectRepo := sqlite.NewProjectRepo(db)
 
 	project := &models.Project{Name: "Lineage Test", Description: "test"}
 	if err := projectRepo.Create(ctx, project); err != nil {
@@ -92,8 +92,8 @@ func TestTaskLineage_UpdateLineage(t *testing.T) {
 	ctx := context.Background()
 
 	broadcaster := events.NewBroadcaster()
-	taskRepo := repository.NewTaskRepo(db, broadcaster)
-	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, broadcaster)
+	projectRepo := sqlite.NewProjectRepo(db)
 
 	project := &models.Project{Name: "Update Lineage", Description: "test"}
 	if err := projectRepo.Create(ctx, project); err != nil {
@@ -141,8 +141,8 @@ func TestTaskLineage_HasNonTerminalDescendants(t *testing.T) {
 	ctx := context.Background()
 
 	broadcaster := events.NewBroadcaster()
-	taskRepo := repository.NewTaskRepo(db, broadcaster)
-	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, broadcaster)
+	projectRepo := sqlite.NewProjectRepo(db)
 
 	project := &models.Project{Name: "Descendants", Description: "test"}
 	if err := projectRepo.Create(ctx, project); err != nil {
@@ -225,8 +225,8 @@ func TestWorkerService_DependencyGating(t *testing.T) {
 	ctx := context.Background()
 
 	broadcaster := events.NewBroadcaster()
-	taskRepo := repository.NewTaskRepo(db, broadcaster)
-	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, broadcaster)
+	projectRepo := sqlite.NewProjectRepo(db)
 
 	project := &models.Project{Name: "Gating", Description: "test"}
 	if err := projectRepo.Create(ctx, project); err != nil {
@@ -305,8 +305,8 @@ func TestTaskLineage_NonChainedTasksUnaffected(t *testing.T) {
 	ctx := context.Background()
 
 	broadcaster := events.NewBroadcaster()
-	taskRepo := repository.NewTaskRepo(db, broadcaster)
-	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, broadcaster)
+	projectRepo := sqlite.NewProjectRepo(db)
 
 	project := &models.Project{Name: "NonChained", Description: "test"}
 	if err := projectRepo.Create(ctx, project); err != nil {
@@ -350,12 +350,12 @@ func TestTaskLineage_ChainCreationSetsLineageDepth(t *testing.T) {
 	ctx := context.Background()
 
 	broadcaster := events.NewBroadcaster()
-	taskRepo := repository.NewTaskRepo(db, broadcaster)
-	execRepo := repository.NewExecutionRepo(db)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	projectRepo := repository.NewProjectRepo(db)
-	scheduleRepo := repository.NewScheduleRepo(db)
-	attachmentRepo := repository.NewAttachmentRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, broadcaster)
+	execRepo := sqlite.NewExecutionRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	scheduleRepo := sqlite.NewScheduleRepo(db)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
 
 	workerSvc := NewWorkerService(nil, 0, nil)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)

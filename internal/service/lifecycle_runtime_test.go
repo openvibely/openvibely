@@ -12,13 +12,13 @@ import (
 	"github.com/openvibely/openvibely/internal/agentskills"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/testutil"
 )
 
 func TestAgentInspectorListAgentsUsesCompactProjection(t *testing.T) {
 	db, counter := testutil.NewStatementCountingTestDB(t)
-	repo := repository.NewAgentRepo(db)
+	repo := sqlite.NewAgentRepo(db)
 	ctx := context.Background()
 	if _, err := db.ExecContext(ctx, `DELETE FROM agents WHERE id IS NOT NULL`); err != nil {
 		t.Fatalf("clear agents: %v", err)
@@ -157,7 +157,7 @@ func TestAgentInspectorListAgentsUsesCompactProjection(t *testing.T) {
 
 func BenchmarkLifecycleAgentListProjection(b *testing.B) {
 	db := testutil.NewTestDB(b)
-	repo := repository.NewAgentRepo(db)
+	repo := sqlite.NewAgentRepo(db)
 	ctx := context.Background()
 	if _, err := db.ExecContext(ctx, `DELETE FROM agents WHERE id IS NOT NULL`); err != nil {
 		b.Fatalf("clear agents: %v", err)
@@ -261,7 +261,7 @@ func appendIndexHeader(t *testing.T, path, header string) {
 
 func TestCatalogSkillResolver_UsesOwningAgentSkill(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	agents := repository.NewAgentRepo(db)
+	agents := sqlite.NewAgentRepo(db)
 	ctx := context.Background()
 	a := &models.Agent{Name: "Router", Key: "router", Enabled: true, SelectableAsPrimary: true}
 	if err := agents.Create(ctx, a); err != nil {
@@ -285,7 +285,7 @@ func TestCatalogSkillResolver_UsesOwningAgentSkill(t *testing.T) {
 
 func TestCatalogSkillResolver_DoesNotFallbackToTaskCatalogForOwnedHook(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	agents := repository.NewAgentRepo(db)
+	agents := sqlite.NewAgentRepo(db)
 	ctx := context.Background()
 	owner := &models.Agent{Name: "Router", Key: "router", Enabled: true, SelectableAsPrimary: true}
 	if err := agents.Create(ctx, owner); err != nil {

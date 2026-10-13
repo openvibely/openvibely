@@ -10,7 +10,7 @@ import (
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/testutil"
 )
 
@@ -18,7 +18,7 @@ func TestHandlerTaskUIAgentProjectionAcrossRenders(t *testing.T) {
 	db, counter := testutil.NewStatementCountingTestDB(t)
 	h, e, _ := setupTestHandlerForDB(t, db)
 	ctx := context.Background()
-	agentRepo := repository.NewAgentRepo(db)
+	agentRepo := sqlite.NewAgentRepo(db)
 	h.SetAgentRepo(agentRepo)
 
 	project := "default"
@@ -182,7 +182,7 @@ func TestHandlerTaskUIAgentProjectionAcrossRenders(t *testing.T) {
 	assertTaskUIAgentProjectionQuery(t, counter)
 }
 
-func createRichTaskUIAgent(t *testing.T, repo *repository.AgentRepo, name string) *models.Agent {
+func createRichTaskUIAgent(t *testing.T, repo *sqlite.AgentRepo, name string) *models.Agent {
 	t.Helper()
 	agent := &models.Agent{
 		Name:                name,

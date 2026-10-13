@@ -9,16 +9,16 @@ import (
 
 	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/testutil"
 )
 
 func TestLLMService_ReconcileMissingTaskAttachmentsRemovesBrokenMetadata(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, events.NewBroadcaster())
-	attachmentRepo := repository.NewAttachmentRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, events.NewBroadcaster())
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
 	project := &models.Project{Name: "Broken attachment project"}
 	if err := projectRepo.Create(ctx, project); err != nil {
 		t.Fatal(err)
@@ -32,7 +32,7 @@ func TestLLMService_ReconcileMissingTaskAttachmentsRemovesBrokenMetadata(t *test
 		t.Fatal(err)
 	}
 
-	svc := NewLLMService(repository.NewLLMConfigRepo(db), repository.NewExecutionRepo(db), taskRepo, projectRepo, nil, attachmentRepo)
+	svc := NewLLMService(sqlite.NewLLMConfigRepo(db), sqlite.NewExecutionRepo(db), taskRepo, projectRepo, nil, attachmentRepo)
 	valid := svc.reconcileMissingTaskAttachments(ctx, task.ID, []models.Attachment{*missing})
 	if len(valid) != 0 {
 		t.Fatalf("expected broken attachment to be excluded from execution, got %#v", valid)
@@ -51,12 +51,12 @@ func TestLLMService_ImageAttachments_TextOnlyAgentRoutesToVisionAgent(t *testing
 	db := testutil.NewTestDB(t)
 
 	// Create repos
-	projectRepo := repository.NewProjectRepo(db)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
 	broadcaster := events.NewBroadcaster()
-	taskRepo := repository.NewTaskRepo(db, broadcaster)
-	execRepo := repository.NewExecutionRepo(db)
-	attachmentRepo := repository.NewAttachmentRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, broadcaster)
+	execRepo := sqlite.NewExecutionRepo(db)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
 
 	// Create a test project
 	project := &models.Project{Name: "Test Project"}
@@ -184,7 +184,7 @@ func TestLLMService_ImageAttachments_TextOnlyAgentRoutesToVisionAgent(t *testing
 func TestLLMService_ImageAttachments_VisionRoutingKeepsNoQueryFastPaths(t *testing.T) {
 	ctx := context.Background()
 	db, counter := testutil.NewStatementCountingTestDB(t)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
 	if _, err := db.Exec(`DELETE FROM agent_configs`); err != nil {
 		t.Fatalf("clear model configs: %v", err)
 	}
@@ -288,7 +288,7 @@ func TestLLMService_ImageAttachments_VisionRoutingKeepsNoQueryFastPaths(t *testi
 func TestLLMService_ImageAttachments_VisionRoutingPreservesCompactSelectionSemantics(t *testing.T) {
 	ctx := context.Background()
 	db, counter := testutil.NewStatementCountingTestDB(t)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
 	if _, err := db.Exec(`DELETE FROM agent_configs`); err != nil {
 		t.Fatalf("clear model configs: %v", err)
 	}
@@ -422,7 +422,7 @@ func TestLLMService_ImageAttachments_VisionRoutingPreservesCompactSelectionSeman
 func TestLLMService_ImageAttachments_VisionRoutingHydratesStoredConfigForStreaming(t *testing.T) {
 	ctx := context.Background()
 	db, counter := testutil.NewStatementCountingTestDB(t)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
 	if _, err := db.Exec(`DELETE FROM agent_configs`); err != nil {
 		t.Fatalf("clear model configs: %v", err)
 	}
@@ -459,7 +459,7 @@ func TestLLMService_ImageAttachments_VisionRoutingHydratesStoredConfigForStreami
 		}
 	}
 
-	svc := NewLLMService(llmConfigRepo, repository.NewExecutionRepo(db), repository.NewTaskRepo(db, nil), nil, nil, nil)
+	svc := NewLLMService(llmConfigRepo, sqlite.NewExecutionRepo(db), sqlite.NewTaskRepo(db, nil), nil, nil, nil)
 	capture := &captureProviderAdapter{}
 	svc.providerAdapters = map[models.LLMProvider]ProviderAdapter{models.ProviderAnthropic: capture}
 	attachments := []models.Attachment{{FileName: "screenshot.png", MediaType: "image/png"}}
@@ -512,10 +512,10 @@ func TestLLMService_ImageAttachments_VisionRoutingHydratesStoredConfigForStreami
 func TestLLMService_ExecuteTaskWithAgent_ImageAttachmentsPassHydratedVisionConfig(t *testing.T) {
 	ctx := context.Background()
 	db, counter := testutil.NewStatementCountingTestDB(t)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	attachmentRepo := repository.NewAttachmentRepo(db)
-	execRepo := repository.NewExecutionRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
+	execRepo := sqlite.NewExecutionRepo(db)
 	if _, err := db.Exec(`DELETE FROM agent_configs`); err != nil {
 		t.Fatalf("clear model configs: %v", err)
 	}
@@ -604,7 +604,7 @@ func TestLLMService_ExecuteTaskWithAgent_ImageAttachmentsPassHydratedVisionConfi
 func TestLLMService_ImageAttachments_VisionRoutingHandlesNoStoredModels(t *testing.T) {
 	ctx := context.Background()
 	db, counter := testutil.NewStatementCountingTestDB(t)
-	repo := repository.NewLLMConfigRepo(db)
+	repo := sqlite.NewLLMConfigRepo(db)
 	if _, err := db.Exec(`DELETE FROM agent_configs`); err != nil {
 		t.Fatalf("clear model configs: %v", err)
 	}
@@ -658,12 +658,12 @@ func TestLLMService_ImageAttachments_VisionRouting_Integration(t *testing.T) {
 	db := testutil.NewTestDB(t)
 
 	// Create repos
-	projectRepo := repository.NewProjectRepo(db)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
 	broadcaster := events.NewBroadcaster()
-	taskRepo := repository.NewTaskRepo(db, broadcaster)
-	execRepo := repository.NewExecutionRepo(db)
-	attachmentRepo := repository.NewAttachmentRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, broadcaster)
+	execRepo := sqlite.NewExecutionRepo(db)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
 
 	// Create a test project
 	project := &models.Project{Name: "Test Project"}
@@ -776,12 +776,12 @@ func TestLLMService_ImageAttachments_NoVisionAgent_ClearError(t *testing.T) {
 	db := testutil.NewTestDB(t)
 
 	// Create repos
-	projectRepo := repository.NewProjectRepo(db)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
 	broadcaster := events.NewBroadcaster()
-	taskRepo := repository.NewTaskRepo(db, broadcaster)
-	execRepo := repository.NewExecutionRepo(db)
-	attachmentRepo := repository.NewAttachmentRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, broadcaster)
+	execRepo := sqlite.NewExecutionRepo(db)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
 
 	// Create a test project
 	project := &models.Project{Name: "Test Project"}
@@ -877,10 +877,10 @@ func TestLLMService_ImageAttachments_NoVisionAgent_ClearError(t *testing.T) {
 func TestLLMService_SwarmChildReceivesParentImages(t *testing.T) {
 	ctx := context.Background()
 	db, counter := testutil.NewStatementCountingTestDB(t)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	attachmentRepo := repository.NewAttachmentRepo(db)
-	execRepo := repository.NewExecutionRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
+	execRepo := sqlite.NewExecutionRepo(db)
 	if _, err := db.Exec(`DELETE FROM agent_configs`); err != nil {
 		t.Fatalf("clear model configs: %v", err)
 	}

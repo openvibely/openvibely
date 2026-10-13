@@ -14,7 +14,7 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/testutil"
 )
 
@@ -82,7 +82,7 @@ func (p *synchronizedPRFeedbackProvider) ListPullRequestFeedback(ctx context.Con
 func TestGitHubPRFeedbackForwarderResolvesPATIdentityThroughEnterpriseEndpoint(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)
-	settingsRepo := repository.NewSettingsRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 	if err := settingsRepo.Set(ctx, GitHubSettingPAT, "enterprise-token"); err != nil {
 		t.Fatalf("set PAT: %v", err)
 	}
@@ -113,9 +113,9 @@ func TestGitHubPRFeedbackForwarderResolvesPATIdentityThroughEnterpriseEndpoint(t
 	}))
 	defer enterpriseServer.Close()
 
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	prRepo := repository.NewTaskPullRequestRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	prRepo := sqlite.NewTaskPullRequestRepo(db)
 	project := &models.Project{Name: "Enterprise Identity", RepoPath: t.TempDir(), RepoURL: "https://github.example.com/acme/widgets"}
 	if err := projectRepo.Create(ctx, project); err != nil {
 		t.Fatalf("create project: %v", err)
@@ -133,9 +133,9 @@ func TestGitHubPRFeedbackForwarderResolvesPATIdentityThroughEnterpriseEndpoint(t
 	forwarder := NewGitHubPRFeedbackForwarder(
 		github,
 		prRepo,
-		repository.NewGitHubPRFeedbackRepo(db),
-		repository.NewGitHubAuthRepo(db),
-		repository.NewThreadInputRepo(db),
+		sqlite.NewGitHubPRFeedbackRepo(db),
+		sqlite.NewGitHubAuthRepo(db),
+		sqlite.NewThreadInputRepo(db),
 	)
 	_, err := forwarder.ForwardAuthorizedFeedback(ctx, project.ID, &GitHubRepoRef{
 		Owner:      "acme",
@@ -158,12 +158,12 @@ func TestGitHubPRFeedbackForwarderResolvesPATIdentityThroughEnterpriseEndpoint(t
 func TestGitHubPRFeedbackForwarderQueuesAuthorizedFeedbackOnce(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	prRepo := repository.NewTaskPullRequestRepo(db)
-	feedbackRepo := repository.NewGitHubPRFeedbackRepo(db)
-	authRepo := repository.NewGitHubAuthRepo(db)
-	threadInputRepo := repository.NewThreadInputRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	prRepo := sqlite.NewTaskPullRequestRepo(db)
+	feedbackRepo := sqlite.NewGitHubPRFeedbackRepo(db)
+	authRepo := sqlite.NewGitHubAuthRepo(db)
+	threadInputRepo := sqlite.NewThreadInputRepo(db)
 
 	project := &models.Project{ID: "proj-pr-feedback", Name: "PR Feedback", RepoPath: t.TempDir(), RepoURL: "https://github.com/openvibely/openvibely"}
 	if err := projectRepo.Create(ctx, project); err != nil {
@@ -226,12 +226,12 @@ func TestGitHubPRFeedbackForwarderQueuesAuthorizedFeedbackOnce(t *testing.T) {
 func TestGitHubPRFeedbackForwarderDeduplicatesPreexistingMixedCaseRepository(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	prRepo := repository.NewTaskPullRequestRepo(db)
-	feedbackRepo := repository.NewGitHubPRFeedbackRepo(db)
-	authRepo := repository.NewGitHubAuthRepo(db)
-	threadInputRepo := repository.NewThreadInputRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	prRepo := sqlite.NewTaskPullRequestRepo(db)
+	feedbackRepo := sqlite.NewGitHubPRFeedbackRepo(db)
+	authRepo := sqlite.NewGitHubAuthRepo(db)
+	threadInputRepo := sqlite.NewThreadInputRepo(db)
 
 	project := &models.Project{Name: "Mixed Case Feedback", RepoPath: t.TempDir(), RepoURL: "https://github.com/Owner/Repo"}
 	if err := projectRepo.Create(ctx, project); err != nil {
@@ -278,11 +278,11 @@ func TestGitHubPRFeedbackForwarderDeduplicatesPreexistingMixedCaseRepository(t *
 func TestGitHubPRFeedbackRepoAtomicallyDeduplicatesMixedCaseRepository(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	prRepo := repository.NewTaskPullRequestRepo(db)
-	feedbackRepo := repository.NewGitHubPRFeedbackRepo(db)
-	threadInputRepo := repository.NewThreadInputRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	prRepo := sqlite.NewTaskPullRequestRepo(db)
+	feedbackRepo := sqlite.NewGitHubPRFeedbackRepo(db)
+	threadInputRepo := sqlite.NewThreadInputRepo(db)
 
 	project := &models.Project{Name: "Atomic Mixed Case Feedback", RepoPath: t.TempDir()}
 	if err := projectRepo.Create(ctx, project); err != nil {
@@ -334,12 +334,12 @@ func TestGitHubPRFeedbackRepoAtomicallyDeduplicatesMixedCaseRepository(t *testin
 func TestGitHubPRFeedbackForwarderDoesNotFetchPersistedPRFromSelectedRepository(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	prRepo := repository.NewTaskPullRequestRepo(db)
-	feedbackRepo := repository.NewGitHubPRFeedbackRepo(db)
-	authRepo := repository.NewGitHubAuthRepo(db)
-	threadInputRepo := repository.NewThreadInputRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	prRepo := sqlite.NewTaskPullRequestRepo(db)
+	feedbackRepo := sqlite.NewGitHubPRFeedbackRepo(db)
+	authRepo := sqlite.NewGitHubAuthRepo(db)
+	threadInputRepo := sqlite.NewThreadInputRepo(db)
 
 	project := &models.Project{ID: "proj-pr-repo-mismatch", Name: "PR Repo Mismatch", RepoPath: t.TempDir(), RepoURL: "https://github.com/example/repo-b"}
 	if err := projectRepo.Create(ctx, project); err != nil {
@@ -401,12 +401,12 @@ func TestParsePersistedGitHubPullRequestURLMatchesExplicitDefaultHTTPSPort(t *te
 func TestGitHubPRFeedbackForwarderUsesEnterpriseHostAndAPIEndpoint(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	prRepo := repository.NewTaskPullRequestRepo(db)
-	feedbackRepo := repository.NewGitHubPRFeedbackRepo(db)
-	authRepo := repository.NewGitHubAuthRepo(db)
-	threadInputRepo := repository.NewThreadInputRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	prRepo := sqlite.NewTaskPullRequestRepo(db)
+	feedbackRepo := sqlite.NewGitHubPRFeedbackRepo(db)
+	authRepo := sqlite.NewGitHubAuthRepo(db)
+	threadInputRepo := sqlite.NewThreadInputRepo(db)
 
 	project := &models.Project{ID: "proj-enterprise-pr-feedback", Name: "Enterprise PR Feedback", RepoPath: t.TempDir(), RepoURL: "https://github.example.com:8443/acme/widgets"}
 	if err := projectRepo.Create(ctx, project); err != nil {
@@ -467,12 +467,12 @@ func TestGitHubPRFeedbackForwarderUsesEnterpriseHostAndAPIEndpoint(t *testing.T)
 func TestGitHubPRFeedbackForwarderUsesPersistedRepositoryForEachPR(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	prRepo := repository.NewTaskPullRequestRepo(db)
-	feedbackRepo := repository.NewGitHubPRFeedbackRepo(db)
-	authRepo := repository.NewGitHubAuthRepo(db)
-	threadInputRepo := repository.NewThreadInputRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	prRepo := sqlite.NewTaskPullRequestRepo(db)
+	feedbackRepo := sqlite.NewGitHubPRFeedbackRepo(db)
+	authRepo := sqlite.NewGitHubAuthRepo(db)
+	threadInputRepo := sqlite.NewThreadInputRepo(db)
 
 	project := &models.Project{ID: "proj-multi-pr-repos", Name: "Multiple PR Repos", RepoPath: t.TempDir(), RepoURL: "https://github.com/example/current"}
 	if err := projectRepo.Create(ctx, project); err != nil {
@@ -573,7 +573,7 @@ type githubPRFeedbackForwarderFixture struct {
 	forwarder       *GitHubPRFeedbackForwarder
 	provider        *fakePRFeedbackProvider
 	counter         *testutil.SQLStatementCounter
-	threadInputRepo *repository.ThreadInputRepo
+	threadInputRepo *sqlite.ThreadInputRepo
 }
 
 func TestGitHubPRFeedbackForwarderCachesAuthorizationDecisionsPerPass(t *testing.T) {
@@ -668,7 +668,7 @@ func TestGitHubPRFeedbackForwarderKeepsAuthorizationFilteringAndErrorsFailClosed
 	t.Run("authorization lookup error aborts forwarding", func(t *testing.T) {
 		fixture := newGitHubPRFeedbackForwarderFixture(t, []string{"alice"}, realisticGitHubPRFeedbackItems(1, []string{"alice"}, "auth-error"))
 		authDB := testutil.NewTestDB(t)
-		fixture.forwarder.authRepo = repository.NewGitHubAuthRepo(authDB)
+		fixture.forwarder.authRepo = sqlite.NewGitHubAuthRepo(authDB)
 		if err := authDB.Close(); err != nil {
 			t.Fatalf("close authorization database: %v", err)
 		}
@@ -825,12 +825,12 @@ func newGitHubPRFeedbackForwarderFixture(tb testing.TB, authorizedLogins []strin
 	tb.Helper()
 	ctx := context.Background()
 	db, counter := testutil.NewStatementCountingTestDB(tb)
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	prRepo := repository.NewTaskPullRequestRepo(db)
-	feedbackRepo := repository.NewGitHubPRFeedbackRepo(db)
-	authRepo := repository.NewGitHubAuthRepo(db)
-	threadInputRepo := repository.NewThreadInputRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	prRepo := sqlite.NewTaskPullRequestRepo(db)
+	feedbackRepo := sqlite.NewGitHubPRFeedbackRepo(db)
+	authRepo := sqlite.NewGitHubAuthRepo(db)
+	threadInputRepo := sqlite.NewThreadInputRepo(db)
 	project := &models.Project{Name: "PR feedback authorization cache", RepoPath: tb.TempDir(), RepoURL: "https://github.com/openvibely/openvibely"}
 	if err := projectRepo.Create(ctx, project); err != nil {
 		tb.Fatalf("create project: %v", err)

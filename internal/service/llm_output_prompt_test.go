@@ -8,21 +8,21 @@ import (
 
 	llmoutput "github.com/openvibely/openvibely/internal/llm/output"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/testutil"
 )
 
 func TestLLMService_CallAgentDirectStreaming_TaskFollowupFlag(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	execRepo := repository.NewExecutionRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	attachmentRepo := repository.NewAttachmentRepo(db)
-	scheduleRepo := repository.NewScheduleRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	execRepo := sqlite.NewExecutionRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
+	scheduleRepo := sqlite.NewScheduleRepo(db)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, repository.NewProjectRepo(db), scheduleRepo, attachmentRepo)
+	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, sqlite.NewProjectRepo(db), scheduleRepo, attachmentRepo)
 
 	defaultAgent, _ := llmConfigRepo.GetDefault(ctx)
 	if defaultAgent == nil {
@@ -74,9 +74,9 @@ func TestLLMService_CallAgentDirectStreaming_TaskFollowupFlag(t *testing.T) {
 
 func TestChatHistoryIncludesFailedExecutions(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	execRepo := repository.NewExecutionRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	execRepo := sqlite.NewExecutionRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
 	ctx := context.Background()
 
 	task := &models.Task{

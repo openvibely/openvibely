@@ -90,7 +90,7 @@
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/repository.AgentUsage"
+                                "$ref": "#/definitions/persistence.AgentUsage"
                             }
                         }
                     },
@@ -127,7 +127,7 @@
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/repository.AvgExecutionTime"
+                                "$ref": "#/definitions/persistence.AvgExecutionTime"
                             }
                         }
                     },
@@ -171,7 +171,7 @@
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/repository.AvgExecutionTime"
+                                "$ref": "#/definitions/persistence.AvgExecutionTime"
                             }
                         }
                     },
@@ -348,7 +348,7 @@
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/repository.ExecutionTrend"
+                                "$ref": "#/definitions/persistence.ExecutionTrend"
                             }
                         }
                     },
@@ -392,7 +392,7 @@
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/repository.FailedTaskPattern"
+                                "$ref": "#/definitions/persistence.FailedTaskPattern"
                             }
                         }
                     },
@@ -436,7 +436,7 @@
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/repository.TaskFrequency"
+                                "$ref": "#/definitions/persistence.TaskFrequency"
                             }
                         }
                     },
@@ -600,7 +600,7 @@
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/repository.SuccessFailureRate"
+                                "$ref": "#/definitions/persistence.SuccessFailureRate"
                             }
                         }
                     },
@@ -662,7 +662,7 @@
                     "200": {
                         "description": "Task-run activity",
                         "schema": {
-                            "$ref": "#/definitions/repository.TaskRunActivity"
+                            "$ref": "#/definitions/persistence.TaskRunActivity"
                         }
                     },
                     "400": {
@@ -3875,7 +3875,7 @@
                 }
             }
         },
-        "repository.AgentUsage": {
+        "persistence.AgentUsage": {
             "type": "object",
             "properties": {
                 "agentID": {
@@ -3901,7 +3901,7 @@
                 }
             }
         },
-        "repository.AvgExecutionTime": {
+        "persistence.AvgExecutionTime": {
             "type": "object",
             "properties": {
                 "avgMs": {
@@ -3927,7 +3927,7 @@
                 }
             }
         },
-        "repository.ExecutionTrend": {
+        "persistence.ExecutionTrend": {
             "type": "object",
             "properties": {
                 "count": {
@@ -3938,7 +3938,7 @@
                 }
             }
         },
-        "repository.FailedTaskPattern": {
+        "persistence.FailedTaskPattern": {
             "type": "object",
             "properties": {
                 "failureCount": {
@@ -3958,7 +3958,7 @@
                 }
             }
         },
-        "repository.SuccessFailureRate": {
+        "persistence.SuccessFailureRate": {
             "type": "object",
             "properties": {
                 "cancelledCount": {
@@ -3982,7 +3982,7 @@
                 }
             }
         },
-        "repository.TaskFrequency": {
+        "persistence.TaskFrequency": {
             "type": "object",
             "properties": {
                 "executionCount": {
@@ -3999,7 +3999,7 @@
                 }
             }
         },
-        "repository.TaskRunActivity": {
+        "persistence.TaskRunActivity": {
             "type": "object",
             "properties": {
                 "hours": {
@@ -4011,12 +4011,12 @@
                 "models": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/repository.TaskRunModel"
+                        "$ref": "#/definitions/persistence.TaskRunModel"
                     }
                 }
             }
         },
-        "repository.TaskRunModel": {
+        "persistence.TaskRunModel": {
             "type": "object",
             "properties": {
                 "average_run_ms": {
@@ -4046,12 +4046,12 @@
                 "trend": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/repository.TaskRunPeriod"
+                        "$ref": "#/definitions/persistence.TaskRunPeriod"
                     }
                 }
             }
         },
-        "repository.TaskRunPeriod": {
+        "persistence.TaskRunPeriod": {
             "type": "object",
             "properties": {
                 "average_run_ms": {

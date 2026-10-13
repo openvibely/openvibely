@@ -16,7 +16,7 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/events"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/openvibely/openvibely/web/static"
 )
@@ -41,8 +41,8 @@ func TestProjectTabsUnderLoadInChrome(t *testing.T) {
 			reader, writer, _ := testutil.NewFileBackedSplitStatementCountingTestDB(t)
 			broadcaster := events.NewBroadcaster()
 			env := newTestHandlerEnv(t, reader, withTestBroadcaster(broadcaster))
-			taskRepo := repository.NewTaskRepo(writer, nil)
-			execRepo := repository.NewExecutionRepo(writer)
+			taskRepo := sqlite.NewTaskRepo(writer, nil)
+			execRepo := sqlite.NewExecutionRepo(writer)
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			var ids []string

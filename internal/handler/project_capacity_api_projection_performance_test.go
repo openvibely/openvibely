@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/labstack/echo/v4"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/testutil"
 )
 
@@ -21,7 +21,7 @@ const projectCapacityAPIProjectionSamples = 7
 
 type projectCapacityAPIProjectionFixture struct {
 	counter     *testutil.SQLStatementCounter
-	projectRepo *repository.ProjectRepo
+	projectRepo *sqlite.ProjectRepo
 	h           *Handler
 	e           *echo.Echo
 }
@@ -97,7 +97,7 @@ func newProjectCapacityAPIProjectionFixture(tb testing.TB, projectCount int) *pr
 		tb.Fatalf("project capacity fixture requires production 1W + 1R topology: reader=%p writer=%p reader_max=%d writer_max=%d",
 			reader, writer, reader.Stats().MaxOpenConnections, writer.Stats().MaxOpenConnections)
 	}
-	unregister := repository.RegisterDedicatedWriter(reader, writer)
+	unregister := sqlite.RegisterDedicatedWriter(reader, writer)
 	tb.Cleanup(unregister)
 	seedProjectCapacityAPIProjectionFixture(tb, writer, projectCount)
 
@@ -105,7 +105,7 @@ func newProjectCapacityAPIProjectionFixture(tb testing.TB, projectCount int) *pr
 	h.workerSvc.SetProjectRepo(h.projectRepo)
 	return &projectCapacityAPIProjectionFixture{
 		counter:     counter,
-		projectRepo: repository.NewProjectRepo(reader),
+		projectRepo: sqlite.NewProjectRepo(reader),
 		h:           h,
 		e:           e,
 	}

@@ -9,16 +9,16 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/testutil"
 )
 
 func TestBuildChannelChatContextUsesCompactTaskProjection(t *testing.T) {
 	db, counter := testutil.NewStatementCountingTestDB(t)
 	ctx := context.Background()
-	taskRepo := repository.NewTaskRepo(db, nil)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
 	taskSvc := NewTaskService(taskRepo, nil, nil)
-	scheduleRepo := repository.NewScheduleRepo(db)
+	scheduleRepo := sqlite.NewScheduleRepo(db)
 	task := &models.Task{
 		ProjectID:   "default",
 		Title:       "Inbound context task",
@@ -79,9 +79,9 @@ func TestBuildChannelChatContextUsesCompactTaskProjection(t *testing.T) {
 func TestChannelChatContextCompactTaskProjectionMatchesFullContext(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	taskRepo := repository.NewTaskRepo(db, nil)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
 	taskSvc := NewTaskService(taskRepo, nil, nil)
-	scheduleRepo := repository.NewScheduleRepo(db)
+	scheduleRepo := sqlite.NewScheduleRepo(db)
 
 	root := &models.Task{
 		ProjectID:   "default",
@@ -168,7 +168,7 @@ func TestChannelChatContextCompactTaskProjectionMatchesFullContext(t *testing.T)
 func TestChannelChatContextCompactChainProjectionMatchesJSONUnmarshalEdgeCases(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	taskRepo := repository.NewTaskRepo(db, nil)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
 	taskSvc := NewTaskService(taskRepo, nil, nil)
 
 	cases := []struct {
@@ -218,7 +218,7 @@ func TestChannelChatContextCompactChainProjectionMatchesJSONUnmarshalEdgeCases(t
 func TestListChatContextByProjectNormalizesActiveTerminalTasks(t *testing.T) {
 	db, counter := testutil.NewStatementCountingTestDB(t)
 	ctx := context.Background()
-	taskRepo := repository.NewTaskRepo(db, nil)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
 	taskSvc := NewTaskService(taskRepo, nil, nil)
 
 	backlog := &models.Task{
@@ -266,7 +266,7 @@ func TestListChatContextByProjectNormalizesActiveTerminalTasks(t *testing.T) {
 	END WHERE project_id = ?`, "default"); err != nil {
 		t.Fatalf("set deterministic display order: %v", err)
 	}
-	executionRepo := repository.NewExecutionRepo(db)
+	executionRepo := sqlite.NewExecutionRepo(db)
 	queuedExecutions := make([]*models.Execution, 0, 2)
 	for _, task := range []*models.Task{failed, cancelled} {
 		execution := &models.Execution{TaskID: task.ID, Status: models.ExecQueued, PromptSent: task.Prompt}
@@ -363,7 +363,7 @@ func TestListChatContextByProjectNormalizesActiveTerminalTasks(t *testing.T) {
 
 func TestChannelChatIngressUsesCompactSelectionAndSelectedDetail(t *testing.T) {
 	db, counter := testutil.NewStatementCountingTestDB(t)
-	repo := repository.NewLLMConfigRepo(db)
+	repo := sqlite.NewLLMConfigRepo(db)
 	ctx := context.Background()
 	model := seedChannelRichModel(t, ctx, db, repo, "Channel Text Default", models.ProviderOpenAICompatible, models.AuthMethodAPIKey, true)
 	counter.SetEnabled(true)
@@ -376,7 +376,7 @@ func TestChannelChatIngressUsesCompactSelectionAndSelectedDetail(t *testing.T) {
 		Message:       "hello channel",
 		Source:        models.TaskOriginSlack,
 		LLMConfigRepo: repo,
-		TaskRepo:      repository.NewTaskRepo(db, nil),
+		TaskRepo:      sqlite.NewTaskRepo(db, nil),
 		FirstTurn: channelChatIngressFirstTurnOptions{
 			Task: task,
 			CreateDurableFirstTurn: func(_ context.Context, task *models.Task, execution *models.Execution, _ []models.ChatAttachment) (bool, error) {
@@ -416,7 +416,7 @@ func TestChannelChatIngressUsesCompactSelectionAndSelectedDetail(t *testing.T) {
 
 func TestChannelChatIngressQueuesUsingCompactModelIDWithoutHydration(t *testing.T) {
 	db, counter := testutil.NewStatementCountingTestDB(t)
-	repo := repository.NewLLMConfigRepo(db)
+	repo := sqlite.NewLLMConfigRepo(db)
 	ctx := context.Background()
 	model := seedChannelRichModel(t, ctx, db, repo, "Channel Queue Default", models.ProviderOpenAICompatible, models.AuthMethodAPIKey, true)
 	counter.SetEnabled(true)
@@ -462,7 +462,7 @@ func TestChannelChatIngressQueuesUsingCompactModelIDWithoutHydration(t *testing.
 
 func TestChannelChatIngressImageSelectionExcludesTextOnlyModels(t *testing.T) {
 	db, counter := testutil.NewStatementCountingTestDB(t)
-	repo := repository.NewLLMConfigRepo(db)
+	repo := sqlite.NewLLMConfigRepo(db)
 	ctx := context.Background()
 	if _, err := db.ExecContext(ctx, `DELETE FROM agent_configs`); err != nil {
 		t.Fatalf("clear model configs: %v", err)
@@ -486,7 +486,7 @@ func TestChannelChatIngressImageSelectionExcludesTextOnlyModels(t *testing.T) {
 		Message:       "inspect the image",
 		Source:        models.TaskOriginTelegram,
 		LLMConfigRepo: repo,
-		TaskRepo:      repository.NewTaskRepo(db, nil),
+		TaskRepo:      sqlite.NewTaskRepo(db, nil),
 		DownloadAttachments: func(context.Context) (channelChatIngressDownloadResult, error) {
 			return channelChatIngressDownloadResult{ImageAttachments: []models.Attachment{{FileName: "image.png", MediaType: "image/png"}}}, nil
 		},
@@ -521,7 +521,7 @@ func TestChannelChatIngressImageSelectionExcludesTextOnlyModels(t *testing.T) {
 
 func TestChannelChatAgentSelectionSkipsOAuthRetiredDefault(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	repo := repository.NewLLMConfigRepo(db)
+	repo := sqlite.NewLLMConfigRepo(db)
 	ctx := context.Background()
 	if _, err := db.ExecContext(ctx, `DELETE FROM agent_configs`); err != nil {
 		t.Fatal(err)
@@ -549,7 +549,7 @@ func TestChannelChatAgentSelectionSkipsOAuthRetiredDefault(t *testing.T) {
 
 func TestChannelChatAgentSelectionWithNoModelsUsesCompactQuery(t *testing.T) {
 	db, counter := testutil.NewStatementCountingTestDB(t)
-	repo := repository.NewLLMConfigRepo(db)
+	repo := sqlite.NewLLMConfigRepo(db)
 	ctx := context.Background()
 	if _, err := db.ExecContext(ctx, `DELETE FROM agent_configs`); err != nil {
 		t.Fatalf("clear model configs: %v", err)
@@ -591,15 +591,15 @@ type channelTaskContextBenchmarkFixture struct {
 	ctx          context.Context
 	counter      *testutil.SQLStatementCounter
 	taskSvc      *TaskService
-	scheduleRepo *repository.ScheduleRepo
+	scheduleRepo *sqlite.ScheduleRepo
 }
 
 func newChannelTaskContextBenchmarkFixture(tb testing.TB, taskCount int) *channelTaskContextBenchmarkFixture {
 	tb.Helper()
 	db, counter := testutil.NewStatementCountingTestDB(tb)
 	ctx := context.Background()
-	taskRepo := repository.NewTaskRepo(db, nil)
-	scheduleRepo := repository.NewScheduleRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	scheduleRepo := sqlite.NewScheduleRepo(db)
 	payload := strings.Repeat("payload", 128*1024/len("payload"))
 	chainPayload := strings.Repeat("chain-payload", 128*1024/len("chain-payload"))
 	for i := 0; i < taskCount; i++ {
@@ -690,7 +690,7 @@ func (f *channelTaskContextBenchmarkFixture) benchmark(b *testing.B) {
 }
 func BenchmarkChannelModelLoads(b *testing.B) {
 	db := testutil.NewTestDB(b)
-	repo := repository.NewLLMConfigRepo(db)
+	repo := sqlite.NewLLMConfigRepo(db)
 	ctx := context.Background()
 	seedChannelRichModels(b, ctx, db, repo, 50)
 
@@ -717,7 +717,7 @@ func TestChannelModelLoadingUsesCompactProjectionOnLargeFixture(t *testing.T) {
 		t.Skip("skipping channel model-loading large fixture in short mode")
 	}
 	db := testutil.NewTestDB(t)
-	repo := repository.NewLLMConfigRepo(db)
+	repo := sqlite.NewLLMConfigRepo(db)
 	ctx := context.Background()
 	seedChannelRichModels(t, ctx, db, repo, 50)
 
@@ -737,7 +737,7 @@ func TestChannelModelLoadingUsesCompactProjectionOnLargeFixture(t *testing.T) {
 	}
 }
 
-func seedChannelRichModel(tb testing.TB, ctx context.Context, db *sql.DB, repo *repository.LLMConfigRepo, name string, provider models.LLMProvider, authMethod models.AuthMethod, isDefault bool) *models.LLMConfig {
+func seedChannelRichModel(tb testing.TB, ctx context.Context, db *sql.DB, repo *sqlite.LLMConfigRepo, name string, provider models.LLMProvider, authMethod models.AuthMethod, isDefault bool) *models.LLMConfig {
 	tb.Helper()
 	if _, err := db.ExecContext(ctx, `DELETE FROM agent_configs`); err != nil {
 		tb.Fatalf("clear model configs: %v", err)
@@ -769,7 +769,7 @@ func seedChannelRichModel(tb testing.TB, ctx context.Context, db *sql.DB, repo *
 	return model
 }
 
-func seedChannelRichModels(tb testing.TB, ctx context.Context, db *sql.DB, repo *repository.LLMConfigRepo, count int) {
+func seedChannelRichModels(tb testing.TB, ctx context.Context, db *sql.DB, repo *sqlite.LLMConfigRepo, count int) {
 	tb.Helper()
 	if _, err := db.ExecContext(ctx, `DELETE FROM agent_configs`); err != nil {
 		tb.Fatalf("clear model configs: %v", err)

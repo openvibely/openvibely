@@ -12,7 +12,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 )
 
 func TestCreateSchedule_TimezoneHandling(t *testing.T) {
@@ -243,7 +243,7 @@ func TestUpdateSchedule_WeeklyTimezoneRoundTrip(t *testing.T) {
 	// Simulate the schedule having run once
 	ranTime := runAtLocal.Add(5 * time.Minute) // Five minutes after due in any timezone.
 	nextAfterRun := schedule.ComputeNextRun(ranTime)
-	if err := h.scheduleRepo.(*repository.ScheduleRepo).MarkRan(ctx, schedule.ID, ranTime, nextAfterRun); err != nil {
+	if err := h.scheduleRepo.(*sqlite.ScheduleRepo).MarkRan(ctx, schedule.ID, ranTime, nextAfterRun); err != nil {
 		t.Fatalf("Failed to mark ran: %v", err)
 	}
 

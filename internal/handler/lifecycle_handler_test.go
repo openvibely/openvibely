@@ -13,14 +13,14 @@ import (
 
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/viewmodels"
 )
 
 func TestHandler_AgentLifecycleHooks_RejectForeignProjectWithoutMutation(t *testing.T) {
 	h, e, _, db := setupTestHandlerWithDB(t)
-	agentRepo := repository.NewAgentRepo(db)
-	lifecycleRepo := repository.NewLifecycleRepo(db)
+	agentRepo := sqlite.NewAgentRepo(db)
+	lifecycleRepo := sqlite.NewLifecycleRepo(db)
 	h.SetAgentRepo(agentRepo)
 	h.SetLifecycleRepo(lifecycleRepo)
 
@@ -159,8 +159,8 @@ func TestHandler_AgentLifecycleHooks_RejectForeignProjectWithoutMutation(t *test
 
 func TestHandler_AgentLifecycleHooks_AllowsOwningProjectAndGlobalContexts(t *testing.T) {
 	h, e, _, db := setupTestHandlerWithDB(t)
-	agentRepo := repository.NewAgentRepo(db)
-	lifecycleRepo := repository.NewLifecycleRepo(db)
+	agentRepo := sqlite.NewAgentRepo(db)
+	lifecycleRepo := sqlite.NewLifecycleRepo(db)
 	h.SetAgentRepo(agentRepo)
 	h.SetLifecycleRepo(lifecycleRepo)
 
@@ -288,8 +288,8 @@ func TestHandler_AgentLifecycleHooks_AllowsOwningProjectAndGlobalContexts(t *tes
 
 func TestHandler_GetAgentLifecycleHooks_ReturnsAgentScopedHooks(t *testing.T) {
 	h, e, _, db := setupTestHandlerWithDB(t)
-	agentRepo := repository.NewAgentRepo(db)
-	lifecycleRepo := repository.NewLifecycleRepo(db)
+	agentRepo := sqlite.NewAgentRepo(db)
+	lifecycleRepo := sqlite.NewLifecycleRepo(db)
 	h.SetAgentRepo(agentRepo)
 	h.SetLifecycleRepo(lifecycleRepo)
 
@@ -328,8 +328,8 @@ func TestHandler_GetAgentLifecycleHooks_ReturnsAgentScopedHooks(t *testing.T) {
 
 func TestHandler_SaveAgentLifecycleHooks_ReconcilesSet(t *testing.T) {
 	h, e, _, db := setupTestHandlerWithDB(t)
-	agentRepo := repository.NewAgentRepo(db)
-	lifecycleRepo := repository.NewLifecycleRepo(db)
+	agentRepo := sqlite.NewAgentRepo(db)
+	lifecycleRepo := sqlite.NewLifecycleRepo(db)
 	h.SetAgentRepo(agentRepo)
 	h.SetLifecycleRepo(lifecycleRepo)
 
@@ -383,8 +383,8 @@ func TestHandler_SaveAgentLifecycleHooks_ReconcilesSet(t *testing.T) {
 
 func TestHandler_SaveAgentLifecycleHooks_RejectsInvalidWhenAndTaskMode(t *testing.T) {
 	h, e, _, db := setupTestHandlerWithDB(t)
-	agentRepo := repository.NewAgentRepo(db)
-	lifecycleRepo := repository.NewLifecycleRepo(db)
+	agentRepo := sqlite.NewAgentRepo(db)
+	lifecycleRepo := sqlite.NewLifecycleRepo(db)
 	h.SetAgentRepo(agentRepo)
 	h.SetLifecycleRepo(lifecycleRepo)
 
@@ -406,8 +406,8 @@ func TestHandler_SaveAgentLifecycleHooks_RejectsInvalidWhenAndTaskMode(t *testin
 
 func TestHandler_SaveAgentLifecycleHooks_RejectsProtectedAgent(t *testing.T) {
 	h, e, _, db := setupTestHandlerWithDB(t)
-	agentRepo := repository.NewAgentRepo(db)
-	lifecycleRepo := repository.NewLifecycleRepo(db)
+	agentRepo := sqlite.NewAgentRepo(db)
+	lifecycleRepo := sqlite.NewLifecycleRepo(db)
 	h.SetAgentRepo(agentRepo)
 	h.SetLifecycleRepo(lifecycleRepo)
 
@@ -472,8 +472,8 @@ func TestTaskDetailLifecycleTabRendersSelectedMemoryClientUI(t *testing.T) {
 
 func TestHandler_GetLifecycleExecutionEvents_ReturnsTraceEventsForSameProject(t *testing.T) {
 	h, e, _, db := setupTestHandlerWithDB(t)
-	agentRepo := repository.NewAgentRepo(db)
-	lifecycleRepo := repository.NewLifecycleRepo(db)
+	agentRepo := sqlite.NewAgentRepo(db)
+	lifecycleRepo := sqlite.NewLifecycleRepo(db)
 	h.SetLifecycleRepo(lifecycleRepo)
 
 	project := createProject(t, h, "trace-events-project")
@@ -508,8 +508,8 @@ func TestHandler_GetLifecycleExecutionEvents_ReturnsTraceEventsForSameProject(t 
 
 func TestHandler_GetLifecycleExecutionEvents_RejectsForeignProject(t *testing.T) {
 	h, e, _, db := setupTestHandlerWithDB(t)
-	agentRepo := repository.NewAgentRepo(db)
-	lifecycleRepo := repository.NewLifecycleRepo(db)
+	agentRepo := sqlite.NewAgentRepo(db)
+	lifecycleRepo := sqlite.NewLifecycleRepo(db)
 	h.SetLifecycleRepo(lifecycleRepo)
 
 	projectA := createProject(t, h, "trace-project-a")
@@ -541,8 +541,8 @@ func TestHandler_GetLifecycleExecutionEvents_RejectsForeignProject(t *testing.T)
 
 func TestHandler_GetTaskLifecycleExecution_ReturnsPromptSafeViewAndRejectsForeign(t *testing.T) {
 	h, e, _, db := setupTestHandlerWithDB(t)
-	agentRepo := repository.NewAgentRepo(db)
-	lifecycleRepo := repository.NewLifecycleRepo(db)
+	agentRepo := sqlite.NewAgentRepo(db)
+	lifecycleRepo := sqlite.NewLifecycleRepo(db)
 	h.SetLifecycleRepo(lifecycleRepo)
 	h.SetAgentRepo(agentRepo)
 
@@ -610,7 +610,7 @@ func TestHandler_GetTaskLifecycleExecution_ReturnsPromptSafeViewAndRejectsForeig
 
 func TestHandler_GetLifecycleActivity_UnknownIDsReturnControlledNotFound(t *testing.T) {
 	h, e, _, db := setupTestHandlerWithDB(t)
-	lifecycleRepo := repository.NewLifecycleRepo(db)
+	lifecycleRepo := sqlite.NewLifecycleRepo(db)
 	h.SetLifecycleRepo(lifecycleRepo)
 	project := createProject(t, h, "unknown-lifecycle-project")
 
@@ -638,8 +638,8 @@ func TestHandler_GetLifecycleActivity_UnknownIDsReturnControlledNotFound(t *test
 
 func TestHandler_GetTaskLifecycleExecutions_RejectsForeignProject(t *testing.T) {
 	h, e, _, db := setupTestHandlerWithDB(t)
-	agentRepo := repository.NewAgentRepo(db)
-	lifecycleRepo := repository.NewLifecycleRepo(db)
+	agentRepo := sqlite.NewAgentRepo(db)
+	lifecycleRepo := sqlite.NewLifecycleRepo(db)
 	h.SetAgentRepo(agentRepo)
 	h.SetLifecycleRepo(lifecycleRepo)
 
@@ -680,8 +680,8 @@ func TestHandler_GetTaskLifecycleExecutions_RejectsForeignProject(t *testing.T) 
 
 func TestHandler_GetTaskLifecycleExecutions_ReturnsPromptSafeView(t *testing.T) {
 	h, e, _, db := setupTestHandlerWithDB(t)
-	agentRepo := repository.NewAgentRepo(db)
-	lifecycleRepo := repository.NewLifecycleRepo(db)
+	agentRepo := sqlite.NewAgentRepo(db)
+	lifecycleRepo := sqlite.NewLifecycleRepo(db)
 	h.SetAgentRepo(agentRepo)
 	h.SetLifecycleRepo(lifecycleRepo)
 	h.SetAgentRepo(agentRepo)
@@ -849,8 +849,8 @@ func TestHandler_GetTaskLifecycleExecutions_ReturnsPromptSafeView(t *testing.T) 
 
 func TestHandler_GetTaskLifecycleExecutions_PaginatesAndPreservesProjectBoundary(t *testing.T) {
 	h, e, _, db := setupTestHandlerWithDB(t)
-	agentRepo := repository.NewAgentRepo(db)
-	lifecycleRepo := repository.NewLifecycleRepo(db)
+	agentRepo := sqlite.NewAgentRepo(db)
+	lifecycleRepo := sqlite.NewLifecycleRepo(db)
 	h.SetAgentRepo(agentRepo)
 	h.SetLifecycleRepo(lifecycleRepo)
 
@@ -971,8 +971,8 @@ func lifecycleViewIDs(rows []viewmodels.LifecycleExecutionView) []string {
 
 func TestHandler_GetTaskLifecycleExecutions_BoundsPromptSafeDetailPayload(t *testing.T) {
 	h, e, _, db := setupTestHandlerWithDB(t)
-	agentRepo := repository.NewAgentRepo(db)
-	lifecycleRepo := repository.NewLifecycleRepo(db)
+	agentRepo := sqlite.NewAgentRepo(db)
+	lifecycleRepo := sqlite.NewLifecycleRepo(db)
 	h.SetAgentRepo(agentRepo)
 	h.SetLifecycleRepo(lifecycleRepo)
 

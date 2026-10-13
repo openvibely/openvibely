@@ -16,22 +16,22 @@ import (
 	"unicode/utf8"
 
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/web/templates/components"
 )
 
 // webhookTestContext sets up a test context with webhook repo wired in.
 type webhookTestContext struct {
 	*TestContext
-	webhookRepo *repository.WebhookRepo
-	agentRepo   *repository.AgentRepo
+	webhookRepo *sqlite.WebhookRepo
+	agentRepo   *sqlite.AgentRepo
 }
 
 func newWebhookTestContext(t *testing.T) *webhookTestContext {
 	t.Helper()
 	tc := NewTestContext(t)
-	webhookRepo := repository.NewWebhookRepo(tc.db)
-	agentRepo := repository.NewAgentRepo(tc.db)
+	webhookRepo := sqlite.NewWebhookRepo(tc.db)
+	agentRepo := sqlite.NewAgentRepo(tc.db)
 	tc.handler.SetWebhookRepo(webhookRepo)
 	tc.handler.SetAgentRepo(agentRepo)
 	return &webhookTestContext{

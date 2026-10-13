@@ -15,7 +15,7 @@ import (
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/stretchr/testify/require"
 )
@@ -23,9 +23,9 @@ import (
 func TestRunChannelViewTaskThreadUsesBoundedExecutionPage(t *testing.T) {
 	db, counter := testutil.NewStatementCountingTestDB(t)
 	ctx := context.Background()
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	execRepo := repository.NewExecutionRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	execRepo := sqlite.NewExecutionRepo(db)
 	project := &models.Project{Name: "Bounded Channel Thread Project"}
 	require.NoError(t, projectRepo.Create(ctx, project))
 	task := &models.Task{
@@ -101,9 +101,9 @@ func TestRunChannelViewTaskThreadUsesBoundedExecutionPage(t *testing.T) {
 func TestRunChannelViewTaskThreadPreservesChannelFormattingContract(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	execRepo := repository.NewExecutionRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	execRepo := sqlite.NewExecutionRepo(db)
 	project := &models.Project{Name: "Channel Thread Formatting Project"}
 	require.NoError(t, projectRepo.Create(ctx, project))
 	task := &models.Task{
@@ -133,7 +133,7 @@ func TestRunChannelViewTaskThreadPreservesChannelFormattingContract(t *testing.T
 func TestChannelContextModeActionHandlers(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	projectRepo := repository.NewProjectRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
 	project := &models.Project{Name: "Channel Runtime Project"}
 	require.NoError(t, projectRepo.Create(ctx, project))
 
@@ -163,7 +163,7 @@ func TestChannelContextModeActionHandlers(t *testing.T) {
 func TestChannelRuntimeHandlerMapsCoverAdvertisedTools(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	projectRepo := repository.NewProjectRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
 	project := &models.Project{Name: "Channel Handler Coverage"}
 	require.NoError(t, projectRepo.Create(ctx, project))
 
@@ -307,8 +307,8 @@ func TestAutomationNotificationCreationAllowsMissingIdempotencyKey(t *testing.T)
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
 	project := &models.Project{Name: "Native existing-work dedupe"}
-	require.NoError(t, repository.NewProjectRepo(db).Create(ctx, project))
-	alertSvc := NewAlertService(repository.NewAlertRepo(db), nil)
+	require.NoError(t, sqlite.NewProjectRepo(db).Create(ctx, project))
+	alertSvc := NewAlertService(sqlite.NewAlertRepo(db), nil)
 	handlers := BuildAlertRuntimeActionHandlers(AlertRuntimeOptions{ProjectID: project.ID, AlertSvc: alertSvc})
 	automationCtx := WithAutomationContext(ctx, models.AutomationContext{ProjectID: project.ID, OriginTask: true})
 
@@ -324,8 +324,8 @@ func TestAlertRuntimeCreateNotificationIgnoresHiddenIdempotencyKey(t *testing.T)
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
 	project := &models.Project{Name: "Runtime hidden idempotency"}
-	require.NoError(t, repository.NewProjectRepo(db).Create(ctx, project))
-	alertSvc := NewAlertService(repository.NewAlertRepo(db), nil)
+	require.NoError(t, sqlite.NewProjectRepo(db).Create(ctx, project))
+	alertSvc := NewAlertService(sqlite.NewAlertRepo(db), nil)
 	handlers := BuildAlertRuntimeActionHandlers(AlertRuntimeOptions{ProjectID: project.ID, AlertSvc: alertSvc})
 	input := json.RawMessage(`{"type":"bug_suggestion","title":"Hidden key notification","idempotency_key":"hidden-runtime-key"}`)
 
@@ -352,8 +352,8 @@ func TestAlertRuntimeCreateNotificationUsesUnicodeCharacterLimits(t *testing.T) 
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
 	project := &models.Project{Name: "Unicode notification limits"}
-	require.NoError(t, repository.NewProjectRepo(db).Create(ctx, project))
-	alertSvc := NewAlertService(repository.NewAlertRepo(db), nil)
+	require.NoError(t, sqlite.NewProjectRepo(db).Create(ctx, project))
+	alertSvc := NewAlertService(sqlite.NewAlertRepo(db), nil)
 	handlers := BuildAlertRuntimeActionHandlers(AlertRuntimeOptions{ProjectID: project.ID, AlertSvc: alertSvc})
 
 	create := func(t *testing.T, input map[string]any) (models.Alert, error) {
@@ -422,13 +422,13 @@ func TestAlertRuntimeCreateNotificationUsesUnicodeCharacterLimits(t *testing.T) 
 func TestAlertRuntimeTerminalProcessingMessagesUseUnicodeCharacterLimits(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
 	project := &models.Project{Name: "Unicode terminal notification limits"}
 	require.NoError(t, projectRepo.Create(ctx, project))
 	caller := &models.Task{ProjectID: project.ID, Title: "Notification inbox", Prompt: "scan", Category: models.CategoryScheduled, Status: models.StatusPending, Priority: 2}
 	require.NoError(t, taskRepo.Create(ctx, caller))
-	alertSvc := NewAlertService(repository.NewAlertRepo(db), nil)
+	alertSvc := NewAlertService(sqlite.NewAlertRepo(db), nil)
 	handlers := BuildAlertRuntimeActionHandlers(AlertRuntimeOptions{ProjectID: project.ID, CallerTaskID: caller.ID, Source: "scheduled_task", AlertSvc: alertSvc})
 
 	createClaimed := func(t *testing.T, title string) models.Alert {
@@ -537,15 +537,15 @@ func TestAlertRuntimeTerminalProcessingMessagesUseUnicodeCharacterLimits(t *test
 func TestAlertRuntimeSuggestionApprovalClaimAndTaskLinkage(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
 	project := &models.Project{Name: "Native SDLC"}
 	foreign := &models.Project{Name: "Foreign SDLC"}
 	require.NoError(t, projectRepo.Create(ctx, project))
 	require.NoError(t, projectRepo.Create(ctx, foreign))
 	caller := &models.Task{ProjectID: project.ID, Title: "Scheduled notification inbox", Prompt: "scan", Category: models.CategoryScheduled, Status: models.StatusPending, Priority: 2}
 	require.NoError(t, taskRepo.Create(ctx, caller))
-	alertSvc := NewAlertService(repository.NewAlertRepo(db), nil)
+	alertSvc := NewAlertService(sqlite.NewAlertRepo(db), nil)
 	handlers := BuildAlertRuntimeActionHandlers(AlertRuntimeOptions{ProjectID: project.ID, CallerTaskID: caller.ID, Source: "scheduled_task", AlertSvc: alertSvc})
 
 	createInput := json.RawMessage(`{"project_id":"` + project.ID + `","type":"product_suggestion","title":"Add approval inbox","message":"Review this","body":"Detailed implementation context","metadata":{"component":"alerts"}}`)
@@ -598,7 +598,7 @@ func TestAlertRuntimeSuggestionApprovalClaimAndTaskLinkage(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal([]byte(taskJSON), &linked))
 	require.NotEmpty(t, linked.ImplementationTaskID)
-	implementationGoal, err := repository.NewTaskGoalRepo(db).GetByTaskID(ctx, linked.ImplementationTaskID)
+	implementationGoal, err := sqlite.NewTaskGoalRepo(db).GetByTaskID(ctx, linked.ImplementationTaskID)
 	require.NoError(t, err)
 	require.NotNil(t, implementationGoal)
 	require.Equal(t, "Complete the approved change with focused regression coverage.", implementationGoal.Objective)
@@ -622,8 +622,8 @@ func TestAlertRuntimeSuggestionApprovalClaimAndTaskLinkage(t *testing.T) {
 func TestAlertRuntimeDecideAlertApprovesRejectsAndValidates(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
 	project := &models.Project{Name: "Runtime Alert Decisions"}
 	foreign := &models.Project{Name: "Foreign Runtime Alert Decisions"}
 	require.NoError(t, projectRepo.Create(ctx, project))
@@ -632,7 +632,7 @@ func TestAlertRuntimeDecideAlertApprovesRejectsAndValidates(t *testing.T) {
 	foreignCaller := &models.Task{ProjectID: foreign.ID, Title: "Foreign decision caller", Prompt: "review", Category: models.CategoryScheduled, Status: models.StatusPending, Priority: 2}
 	require.NoError(t, taskRepo.Create(ctx, caller))
 	require.NoError(t, taskRepo.Create(ctx, foreignCaller))
-	alertSvc := NewAlertService(repository.NewAlertRepo(db), nil)
+	alertSvc := NewAlertService(sqlite.NewAlertRepo(db), nil)
 	handlers := BuildAlertRuntimeActionHandlers(AlertRuntimeOptions{ProjectID: project.ID, CallerTaskID: caller.ID, Source: "chat", AlertSvc: alertSvc})
 	foreignHandlers := BuildAlertRuntimeActionHandlers(AlertRuntimeOptions{ProjectID: foreign.ID, CallerTaskID: foreignCaller.ID, Source: "chat", AlertSvc: alertSvc})
 
@@ -696,13 +696,13 @@ func TestAlertRuntimeDecideAlertApprovesRejectsAndValidates(t *testing.T) {
 func TestAlertRuntimeClaimAlertValidatesLeaseSeconds(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
 	project := &models.Project{Name: "Runtime Claim Lease Validation"}
 	require.NoError(t, projectRepo.Create(ctx, project))
 	caller := &models.Task{ProjectID: project.ID, Title: "Scheduled notification inbox", Prompt: "scan", Category: models.CategoryScheduled, Status: models.StatusPending, Priority: 2}
 	require.NoError(t, taskRepo.Create(ctx, caller))
-	alertRepo := repository.NewAlertRepo(db)
+	alertRepo := sqlite.NewAlertRepo(db)
 	alertSvc := NewAlertService(alertRepo, nil)
 	handlers := BuildAlertRuntimeActionHandlers(AlertRuntimeOptions{ProjectID: project.ID, CallerTaskID: caller.ID, Source: "scheduled_task", AlertSvc: alertSvc})
 
@@ -758,13 +758,13 @@ func TestAlertRuntimeClaimAlertValidatesLeaseSeconds(t *testing.T) {
 func TestAlertRuntimeOwnedNotificationMutationsRequireCallerAndService(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
 	project := &models.Project{Name: "Owned notification preflight"}
 	require.NoError(t, projectRepo.Create(ctx, project))
 	caller := &models.Task{ProjectID: project.ID, Title: "Approved inbox", Prompt: "scan", Category: models.CategoryScheduled, Status: models.StatusPending, Priority: 2}
 	require.NoError(t, taskRepo.Create(ctx, caller))
-	alertSvc := NewAlertService(repository.NewAlertRepo(db), nil)
+	alertSvc := NewAlertService(sqlite.NewAlertRepo(db), nil)
 	createHandlers := BuildAlertRuntimeActionHandlers(AlertRuntimeOptions{ProjectID: project.ID, CallerTaskID: caller.ID, Source: "scheduled_task", AlertSvc: alertSvc})
 	createdJSON, err := createHandlers["create_notification"](ctx, json.RawMessage(`{"type":"product","title":"Preflight target"}`))
 	require.NoError(t, err)
@@ -803,13 +803,13 @@ func TestAlertRuntimeOwnedNotificationMutationsRequireCallerAndService(t *testin
 func TestAlertRuntimeOwnedNotificationMutationsRejectUnownedAutomationInboxNotification(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
 	project := &models.Project{Name: "Unowned inbox notification"}
 	require.NoError(t, projectRepo.Create(ctx, project))
 	caller := &models.Task{ProjectID: project.ID, Title: "Approved inbox", Prompt: "scan", Category: models.CategoryScheduled, Status: models.StatusPending, Priority: 2}
 	require.NoError(t, taskRepo.Create(ctx, caller))
-	alertSvc := NewAlertService(repository.NewAlertRepo(db), nil)
+	alertSvc := NewAlertService(sqlite.NewAlertRepo(db), nil)
 	handlers := BuildAlertRuntimeActionHandlers(AlertRuntimeOptions{ProjectID: project.ID, CallerTaskID: caller.ID, Source: "scheduled_task", AlertSvc: alertSvc})
 	createdJSON, err := handlers["create_notification"](ctx, json.RawMessage(`{"type":"product","title":"Unowned preflight target"}`))
 	require.NoError(t, err)
@@ -842,13 +842,13 @@ func TestAlertRuntimeOwnedNotificationMutationsRejectUnownedAutomationInboxNotif
 func TestNativeInboxCollectsAllPagesBeforeShrinkingEligibleSet(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
 	project := &models.Project{Name: "Native inbox pagination"}
 	require.NoError(t, projectRepo.Create(ctx, project))
 	caller := &models.Task{ProjectID: project.ID, Title: "Approved inbox", Prompt: "scan", Category: models.CategoryScheduled, Status: models.StatusPending, Priority: 2}
 	require.NoError(t, taskRepo.Create(ctx, caller))
-	alertSvc := NewAlertService(repository.NewAlertRepo(db), nil)
+	alertSvc := NewAlertService(sqlite.NewAlertRepo(db), nil)
 	handlers := BuildAlertRuntimeActionHandlers(AlertRuntimeOptions{ProjectID: project.ID, CallerTaskID: caller.ID, Source: "scheduled_task", AlertSvc: alertSvc})
 
 	createdIDs := make(map[string]struct{}, 3)
@@ -896,13 +896,13 @@ func TestNativeInboxCollectsAllPagesBeforeShrinkingEligibleSet(t *testing.T) {
 func TestAlertRuntimeListToolsRejectExplicitZeroPageSize(t *testing.T) {
 	db, counter := testutil.NewStatementCountingTestDB(t)
 	ctx := context.Background()
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
 	project := &models.Project{Name: "Alert list page size"}
 	require.NoError(t, projectRepo.Create(ctx, project))
 	caller := &models.Task{ProjectID: project.ID, Title: "Inbox", Prompt: "scan", Category: models.CategoryScheduled, Status: models.StatusPending, Priority: 2}
 	require.NoError(t, taskRepo.Create(ctx, caller))
-	alertSvc := NewAlertService(repository.NewAlertRepo(db), nil)
+	alertSvc := NewAlertService(sqlite.NewAlertRepo(db), nil)
 	handlers := BuildAlertRuntimeActionHandlers(AlertRuntimeOptions{ProjectID: project.ID, CallerTaskID: caller.ID, Source: "scheduled_task", AlertSvc: alertSvc})
 
 	for i := 0; i < 2; i++ {
@@ -965,13 +965,13 @@ func TestAlertRuntimeListToolsRejectExplicitZeroPageSize(t *testing.T) {
 func TestAlertRuntimeCreateAlertPreservesOperationalContract(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
 	project := &models.Project{Name: "Operational Alerts"}
 	require.NoError(t, projectRepo.Create(ctx, project))
 	task := &models.Task{ProjectID: project.ID, Title: "Source task", Prompt: "run", Category: models.CategoryBacklog, Status: models.StatusPending, Priority: 2}
 	require.NoError(t, taskRepo.Create(ctx, task))
-	alertSvc := NewAlertService(repository.NewAlertRepo(db), nil)
+	alertSvc := NewAlertService(sqlite.NewAlertRepo(db), nil)
 	handlers := BuildAlertRuntimeActionHandlers(AlertRuntimeOptions{ProjectID: project.ID, CallerTaskID: task.ID, AlertSvc: alertSvc, TaskRepo: taskRepo})
 
 	result, err := handlers["create_alert"](ctx, json.RawMessage(`{"title":"Legacy operational alert","task_id":"`+task.ID+`"}`))
@@ -998,8 +998,8 @@ func TestAlertRuntimeCreateAlertPreservesOperationalContract(t *testing.T) {
 func TestAlertRuntimeFiltersPaginationAuthorizationAndRecovery(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
 	project := &models.Project{Name: "Runtime Project"}
 	foreign := &models.Project{Name: "Foreign Runtime Project"}
 	require.NoError(t, projectRepo.Create(ctx, project))
@@ -1008,7 +1008,7 @@ func TestAlertRuntimeFiltersPaginationAuthorizationAndRecovery(t *testing.T) {
 	foreignCaller := &models.Task{ProjectID: foreign.ID, Title: "Foreign scanner", Prompt: "scan", Category: models.CategoryScheduled, Status: models.StatusPending, Priority: 2}
 	require.NoError(t, taskRepo.Create(ctx, caller))
 	require.NoError(t, taskRepo.Create(ctx, foreignCaller))
-	alertSvc := NewAlertService(repository.NewAlertRepo(db), nil)
+	alertSvc := NewAlertService(sqlite.NewAlertRepo(db), nil)
 	handlers := BuildAlertRuntimeActionHandlers(AlertRuntimeOptions{ProjectID: project.ID, CallerTaskID: caller.ID, Source: "scheduled_task", AlertSvc: alertSvc})
 	foreignHandlers := BuildAlertRuntimeActionHandlers(AlertRuntimeOptions{ProjectID: foreign.ID, CallerTaskID: foreignCaller.ID, Source: "scheduled_task", AlertSvc: alertSvc})
 
@@ -1090,10 +1090,10 @@ func TestAlertRuntimeFiltersPaginationAuthorizationAndRecovery(t *testing.T) {
 func TestRunChannelChatFirstTurnBuildsRuntimeAfterPersistingCallerTask(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	execRepo := repository.NewExecutionRepo(db)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	execRepo := sqlite.NewExecutionRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
 	project := &models.Project{Name: "Channel Runtime Identity"}
 	require.NoError(t, projectRepo.Create(ctx, project))
 	agent := &models.LLMConfig{Name: "Channel Agent", Provider: models.ProviderTest, Model: "test"}
@@ -1209,8 +1209,8 @@ func TestTaskControlRuntimeNativeInboxKeepsApprovalProcessingTools(t *testing.T)
 func TestTaskControlRuntimeExposesExecuteTasksAndStartsExactBacklogTask(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
 	project := &models.Project{Name: "Scheduled Inbox Runtime"}
 	require.NoError(t, projectRepo.Create(ctx, project))
 	inboxTask := &models.Task{ProjectID: project.ID, Title: "Approved inbox", Prompt: "process approvals", Category: models.CategoryScheduled, Status: models.StatusPending, Priority: 2}
@@ -1247,15 +1247,15 @@ func TestTaskControlRuntimeExposesExecuteTasksAndStartsExactBacklogTask(t *testi
 func TestTaskControlRuntimeListAlertsUsesPersistedProjectAcrossReadStates(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
 	project := &models.Project{Name: "Scheduled Alert Inbox"}
 	foreign := &models.Project{Name: "Foreign Alert Inbox"}
 	require.NoError(t, projectRepo.Create(ctx, project))
 	require.NoError(t, projectRepo.Create(ctx, foreign))
 	inboxTask := &models.Task{ProjectID: project.ID, Title: "Approved inbox", Prompt: "process approvals", Category: models.CategoryScheduled, Status: models.StatusPending, Priority: 2}
 	require.NoError(t, taskRepo.Create(ctx, inboxTask))
-	alertSvc := NewAlertService(repository.NewAlertRepo(db), nil)
+	alertSvc := NewAlertService(sqlite.NewAlertRepo(db), nil)
 	createNotification := func(title string, read bool) models.Alert {
 		created, err := alertSvc.CreateActionable(ctx, &models.Alert{ProjectID: project.ID, Scope: models.AlertScopeProject, Type: "product_suggestion", Title: title, Source: "producer"})
 		require.NoError(t, err)
@@ -1312,13 +1312,13 @@ func TestTaskControlRuntimeListAlertsUsesPersistedProjectAcrossReadStates(t *tes
 func TestTaskControlRuntimeExposesCreateNotificationForScheduledTask(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
 	project := &models.Project{Name: "Scheduled Notification Runtime"}
 	require.NoError(t, projectRepo.Create(ctx, project))
 	task := &models.Task{ProjectID: project.ID, Title: "Suggestion producer", Prompt: "inspect", Category: models.CategoryScheduled, Status: models.StatusPending, Priority: 2}
 	require.NoError(t, taskRepo.Create(ctx, task))
-	alertSvc := NewAlertService(repository.NewAlertRepo(db), nil)
+	alertSvc := NewAlertService(sqlite.NewAlertRepo(db), nil)
 	svc := &LLMService{taskRepo: taskRepo, alertSvc: alertSvc}
 
 	runtime := svc.taskControlRuntimeTools(*task)
@@ -1338,10 +1338,10 @@ func TestTaskControlRuntimeExposesCreateNotificationForScheduledTask(t *testing.
 func TestRunChannelTaskThreadSendStartsDirectFollowupWithReplyContext(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	execRepo := repository.NewExecutionRepo(db)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	execRepo := sqlite.NewExecutionRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
 	project := &models.Project{Name: "Task Thread Channel"}
 	require.NoError(t, projectRepo.Create(ctx, project))
 	agent := &models.LLMConfig{Name: "Task Agent", Provider: models.ProviderTest, Model: "test", IsDefault: true}
@@ -1375,13 +1375,13 @@ func TestRunChannelTaskThreadSendStartsDirectFollowupWithReplyContext(t *testing
 func TestBuildChannelGoalActionHandlersUseSharedGoalRuntime(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
 	project := &models.Project{Name: "Goal Actions"}
 	require.NoError(t, projectRepo.Create(ctx, project))
 	task := &models.Task{ProjectID: project.ID, Title: "Goal target", Prompt: "prompt", Category: models.CategoryBacklog, Status: models.StatusPending, Priority: 2}
 	require.NoError(t, taskRepo.Create(ctx, task))
-	handlers := buildChannelGoalActionHandlers(channelGoalActionHandlerOptions{ProjectID: project.ID, TaskRepo: taskRepo, TaskGoalSvc: NewTaskGoalService(repository.NewTaskGoalRepo(db), taskRepo, nil)})
+	handlers := buildChannelGoalActionHandlers(channelGoalActionHandlerOptions{ProjectID: project.ID, TaskRepo: taskRepo, TaskGoalSvc: NewTaskGoalService(sqlite.NewTaskGoalRepo(db), taskRepo, nil)})
 	payload, err := json.Marshal(TaskGoalRuntimeToolInput{Title: "Goal target", Goal: "Finish the shared refactor"})
 	require.NoError(t, err)
 
@@ -1407,9 +1407,9 @@ func TestBuildChannelGoalActionHandlersUseSharedGoalRuntime(t *testing.T) {
 func TestBuildChannelUtilityActionHandlersScheduleTaskAndModifyUseSharedLogic(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	scheduleRepo := repository.NewScheduleRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	scheduleRepo := sqlite.NewScheduleRepo(db)
 	project := &models.Project{Name: "Utility Actions"}
 	require.NoError(t, projectRepo.Create(ctx, project))
 	task := &models.Task{ProjectID: project.ID, Title: "Scheduled target", Prompt: "prompt", Category: models.CategoryBacklog, Status: models.StatusCompleted, Priority: 2}
@@ -1550,10 +1550,10 @@ func TestBuildChannelUtilityActionHandlersAutomationReadsRejectForeignProject(t 
 func TestBuildChannelUtilityActionHandlersUpdateAutomationTemplate(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	scheduleRepo := repository.NewScheduleRepo(db)
-	automationRepo := repository.NewAutomationRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	scheduleRepo := sqlite.NewScheduleRepo(db)
+	automationRepo := sqlite.NewAutomationRepo(db)
 	project := &models.Project{Name: "Channel Automation Update"}
 	require.NoError(t, projectRepo.Create(ctx, project))
 	foreign := &models.Project{Name: "Foreign Channel Automation Update"}
@@ -1707,9 +1707,9 @@ func channelAutomationPublishedGraphID(t *testing.T, db *sql.DB, automationID st
 func TestBuildChannelUtilityActionHandlersListSchedulesDiscovery(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	scheduleRepo := repository.NewScheduleRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	scheduleRepo := sqlite.NewScheduleRepo(db)
 	project := &models.Project{Name: "Schedule Discovery"}
 	require.NoError(t, projectRepo.Create(ctx, project))
 	other := &models.Project{Name: "Other Discovery"}
@@ -1770,10 +1770,10 @@ func TestBuildChannelUtilityActionHandlersListSchedulesDiscovery(t *testing.T) {
 func TestBuildChannelUtilityActionHandlersViewPulseUsesUpcomingService(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	scheduleRepo := repository.NewScheduleRepo(db)
-	upcomingSvc := NewUpcomingService(repository.NewUpcomingRepo(db))
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	scheduleRepo := sqlite.NewScheduleRepo(db)
+	upcomingSvc := NewUpcomingService(sqlite.NewUpcomingRepo(db))
 	project := &models.Project{Name: "Channel Pulse"}
 	require.NoError(t, projectRepo.Create(ctx, project))
 	other := &models.Project{Name: "Other Channel Pulse"}
@@ -1833,9 +1833,9 @@ func TestBuildChannelUtilityActionHandlersViewPulseUsesUpcomingService(t *testin
 func TestBuildChannelUtilityActionHandlersListSchedulesIncludesEmptyDaysAndNullNextRun(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	scheduleRepo := repository.NewScheduleRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	scheduleRepo := sqlite.NewScheduleRepo(db)
 	project := &models.Project{Name: "Schedule Discovery Contract"}
 	require.NoError(t, projectRepo.Create(ctx, project))
 	task := &models.Task{ProjectID: project.ID, Title: "One time", Prompt: "prompt", Category: models.CategoryScheduled, Status: models.StatusPending, Priority: 2}
@@ -1865,8 +1865,8 @@ func TestBuildChannelUtilityActionHandlersListSchedulesIncludesEmptyDaysAndNullN
 func TestBuildChannelUtilityActionHandlersListChannelsReportsGitHubAppConnectionSafely(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	settingsRepo := repository.NewSettingsRepo(db)
-	projectRepo := repository.NewProjectRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
 	project := &models.Project{Name: "Channel GitHub App Status"}
 	require.NoError(t, projectRepo.Create(ctx, project))
 	require.NoError(t, settingsRepo.Set(ctx, GitHubSettingAuthMode, GitHubAuthModeApp))
@@ -1920,11 +1920,11 @@ func TestBuildChannelUtilityActionHandlersListChannelsReportsGitHubAppConnection
 func TestChannelServiceListChannelsIncludesProviderStatusAndCountsSafely(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	settingsRepo := repository.NewSettingsRepo(db)
-	projectRepo := repository.NewProjectRepo(db)
-	emailAuthRepo := repository.NewEmailAuthRepo(db)
-	webhookRepo := repository.NewWebhookRepo(db)
-	channelTargetRepo := repository.NewChannelTargetRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	emailAuthRepo := sqlite.NewEmailAuthRepo(db)
+	webhookRepo := sqlite.NewWebhookRepo(db)
+	channelTargetRepo := sqlite.NewChannelTargetRepo(db)
 	project := &models.Project{Name: "Channel Surface Complete Status"}
 	require.NoError(t, projectRepo.Create(ctx, project))
 	settings := map[string]string{
@@ -2216,11 +2216,11 @@ func (s *summaryOnlyChannelTargetStore) RecordSend(ctx context.Context, send mod
 func TestBuildChannelUtilityActionHandlersPersonalityModelAndProjectInfo(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	settingsRepo := repository.NewSettingsRepo(db)
-	customPersonalityRepo := repository.NewCustomPersonalityRepo(db)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	settingsRepo := sqlite.NewSettingsRepo(db)
+	customPersonalityRepo := sqlite.NewCustomPersonalityRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
 	project := &models.Project{Name: "Info Project", Description: "Details"}
 	require.NoError(t, projectRepo.Create(ctx, project))
 	agent := &models.LLMConfig{Name: "Default Model", Provider: models.ProviderTest, Model: "test", IsDefault: true}
@@ -2267,9 +2267,9 @@ func TestBuildChannelUtilityActionHandlersPersonalityModelAndProjectInfo(t *test
 func TestBuildChannelUtilityActionHandlersModelStatusToolsUseCompactRuntimeSummaries(t *testing.T) {
 	db, counter := testutil.NewStatementCountingTestDB(t)
 	ctx := context.Background()
-	projectRepo := repository.NewProjectRepo(db)
-	settingsRepo := repository.NewSettingsRepo(db)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
 	project := &models.Project{Name: "Channel Compact Project"}
 	require.NoError(t, projectRepo.Create(ctx, project))
 	_, err := db.Exec(`DELETE FROM agent_configs`)
@@ -2359,8 +2359,8 @@ func assertChannelModelStatusStatementsCompact(t *testing.T, statements []string
 func TestBuildChannelTaskActionHandlersCreateTaskValidatesSharedInput(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
 	project := &models.Project{Name: "Channel Create Validation"}
 	require.NoError(t, projectRepo.Create(ctx, project))
 	handlers := buildChannelTaskActionHandlers(channelTaskActionHandlerOptions{
@@ -2401,9 +2401,9 @@ func TestBuildChannelTaskActionHandlersCreateTaskValidatesSharedInput(t *testing
 func TestBuildChannelTaskActionHandlersCreateTaskUsesSharedLogicAndOriginCallback(t *testing.T) {
 	db, counter := testutil.NewStatementCountingTestDB(t)
 	ctx := context.Background()
-	projectRepo := repository.NewProjectRepo(db)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
+	projectRepo := sqlite.NewProjectRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
 	project := &models.Project{Name: "Channel Actions"}
 	require.NoError(t, projectRepo.Create(ctx, project))
 	largeProviderJSON := strings.Repeat("large-provider-json", 4096)
@@ -2480,14 +2480,14 @@ func assertChannelCreateTaskUsesCompactModelSelection(t *testing.T, statements [
 func TestBuildChannelTaskActionHandlersEditTaskUpdatesPrimaryAgentDefinition(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
 	project := &models.Project{Name: "Channel Edit Primary Agent"}
 	require.NoError(t, projectRepo.Create(ctx, project))
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
 	modelConfig := &models.LLMConfig{Name: "Channel Model", Provider: models.ProviderTest, Model: "test"}
 	require.NoError(t, llmConfigRepo.Create(ctx, modelConfig))
-	agentRepo := repository.NewAgentRepo(db)
+	agentRepo := sqlite.NewAgentRepo(db)
 	agentDef := &models.Agent{Name: "Channel Reviewer", Key: "channel_reviewer", Enabled: true, SelectableAsPrimary: true}
 	require.NoError(t, agentRepo.Create(ctx, agentDef))
 	taskSvc := NewTaskService(taskRepo, nil, nil)
@@ -2525,8 +2525,8 @@ func TestBuildChannelTaskActionHandlersEditTaskUpdatesPrimaryAgentDefinition(t *
 func TestBuildChannelTaskActionHandlersEditTaskRejectsInvalidPriority(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
 	project := &models.Project{Name: "Channel Edit Invalid Priority"}
 	require.NoError(t, projectRepo.Create(ctx, project))
 	taskSvc := NewTaskService(taskRepo, nil, nil)
@@ -2555,8 +2555,8 @@ func TestBuildChannelTaskActionHandlersEditTaskRejectsInvalidPriority(t *testing
 func TestBuildChannelTaskActionHandlersCreateSwarmTaskUsesSharedSwarmService(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
 	project := &models.Project{Name: "Channel Swarm Actions"}
 	require.NoError(t, projectRepo.Create(ctx, project))
 	foreignProject := &models.Project{Name: "Foreign Channel Swarm Project"}
@@ -2610,18 +2610,18 @@ func TestBuildChannelTaskActionHandlersCreateSwarmTaskUsesSharedSwarmService(t *
 func TestBuildChannelTaskActionHandlersCreateSwarmTaskPersistsMetadata(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
 	directProject := &models.Project{Name: "Direct Swarm Metadata"}
 	require.NoError(t, projectRepo.Create(ctx, directProject))
 	channelProject := &models.Project{Name: "Channel Swarm Metadata"}
 	require.NoError(t, projectRepo.Create(ctx, channelProject))
 	foreignProject := &models.Project{Name: "Foreign Channel Swarm Metadata"}
 	require.NoError(t, projectRepo.Create(ctx, foreignProject))
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
 	modelConfig := &models.LLMConfig{Name: "Channel Swarm Model", Provider: models.ProviderTest, Model: "claude-sonnet-4-5", MaxTokens: 4096}
 	require.NoError(t, llmConfigRepo.Create(ctx, modelConfig))
-	agentRepo := repository.NewAgentRepo(db)
+	agentRepo := sqlite.NewAgentRepo(db)
 	agentDef := &models.Agent{Name: "Channel Swarm Agent", Key: "channel-swarm-agent", Enabled: true, SelectableAsPrimary: true}
 	require.NoError(t, agentRepo.Create(ctx, agentDef))
 	taskSvc := NewTaskService(taskRepo, nil, nil)
@@ -2691,7 +2691,7 @@ func TestBuildChannelTaskActionHandlersCreateSwarmTaskPersistsMetadata(t *testin
 		require.NotNil(t, task.AgentDefinitionID)
 		cfg, err := models.ParseSwarmConfig(task.SwarmConfig)
 		require.NoError(t, err)
-		goal, err := repository.NewTaskGoalRepo(db).GetByTaskID(ctx, task.ID)
+		goal, err := sqlite.NewTaskGoalRepo(db).GetByTaskID(ctx, task.ID)
 		require.NoError(t, err)
 		require.NotNil(t, goal)
 		return persistedSwarmMetadata{
@@ -2715,7 +2715,7 @@ func TestBuildChannelTaskActionHandlersCreateSwarmTaskPersistsMetadata(t *testin
 func TestChannelListAgentsResultUsesRuntimeSummariesAndPreservesOutput(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	repo := repository.NewAgentRepo(db)
+	repo := sqlite.NewAgentRepo(db)
 	if _, err := db.ExecContext(ctx, `DELETE FROM agents WHERE id IS NOT NULL`); err != nil {
 		t.Fatalf("clear agents: %v", err)
 	}
@@ -2761,9 +2761,9 @@ func (f fakeProjectCloneProvider) CloneProjectRepo(ctx context.Context, projectI
 func TestExecuteCreateGitHubProjectRuntimeCreatesGitHubBackedProject(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	projectRepo := repository.NewProjectRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
 	projectSvc := NewProjectService(projectRepo)
-	modelRepo := repository.NewLLMConfigRepo(db)
+	modelRepo := sqlite.NewLLMConfigRepo(db)
 	model := &models.LLMConfig{Name: "Project Default", Provider: models.ProviderTest, Model: "test"}
 	require.NoError(t, modelRepo.Create(ctx, model))
 
@@ -2805,7 +2805,7 @@ func TestExecuteCreateGitHubProjectRuntimeCreatesGitHubBackedProject(t *testing.
 func TestExecuteCreateGitHubProjectRuntimeRejectsUnsupportedWorkerLimitsBeforeSideEffects(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	projectRepo := repository.NewProjectRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
 	projectSvc := NewProjectService(projectRepo)
 	cloneCalls := 0
 	opts := CreateGitHubProjectRuntimeOptions{
@@ -2847,7 +2847,7 @@ func TestExecuteCreateGitHubProjectRuntimeRejectsUnsupportedWorkerLimitsBeforeSi
 func TestExecuteCreateGitHubProjectRuntimeAllowsWorkerLimitAboveTen(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	projectRepo := repository.NewProjectRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
 	projectSvc := NewProjectService(projectRepo)
 	cloneCalls := 0
 
@@ -2874,7 +2874,7 @@ func TestExecuteCreateGitHubProjectRuntimeAllowsWorkerLimitAboveTen(t *testing.T
 func TestExecuteCreateGitHubProjectRuntimeHonorsFiniteGlobalWorkerLimit(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	projectRepo := repository.NewProjectRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
 	projectSvc := NewProjectService(projectRepo)
 	workerSvc := NewWorkerService(nil, 25, projectRepo)
 	cloneCalls := 0
@@ -2913,7 +2913,7 @@ func TestExecuteCreateGitHubProjectRuntimeHonorsFiniteGlobalWorkerLimit(t *testi
 func TestExecuteCreateGitHubProjectRuntimeRollsBackOnCloneFailure(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	projectRepo := repository.NewProjectRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
 	projectSvc := NewProjectService(projectRepo)
 
 	out, err := ExecuteCreateGitHubProjectRuntime(ctx, json.RawMessage(`{"name":"Rollback Project","repo_url":"https://github.com/acme/fails"}`), CreateGitHubProjectRuntimeOptions{
@@ -2938,7 +2938,7 @@ func TestExecuteCreateGitHubProjectRuntimeRollsBackOnCloneFailure(t *testing.T) 
 func TestExecuteCreateGitHubProjectRuntimeRejectsLocalPathAndCreateDirectoryInput(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	projectSvc := NewProjectService(repository.NewProjectRepo(db))
+	projectSvc := NewProjectService(sqlite.NewProjectRepo(db))
 	opts := CreateGitHubProjectRuntimeOptions{ProjectSvc: projectSvc, GitHubSvc: fakeProjectCloneProvider{}}
 
 	for _, tc := range []struct {
@@ -2965,7 +2965,7 @@ func TestExecuteCreateGitHubProjectRuntimeRejectsLocalPathAndCreateDirectoryInpu
 func TestExecuteCreateGitHubProjectRuntimeSwitchAfterCreateWhenSupported(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	projectSvc := NewProjectService(repository.NewProjectRepo(db))
+	projectSvc := NewProjectService(sqlite.NewProjectRepo(db))
 	var switchedTo string
 
 	out, err := ExecuteCreateGitHubProjectRuntime(ctx, json.RawMessage(`{"name":"Switchable","repo_url":"https://github.com/acme/switchable","switch_after_create":true}`), CreateGitHubProjectRuntimeOptions{
@@ -2990,12 +2990,12 @@ func TestSlackTelegramDiscordRuntimesCreateGitHubProject(t *testing.T) {
 	tests := []struct {
 		name       string
 		repoSuffix string
-		runtime    func(projectID string, projectRepo *repository.ProjectRepo, projectSvc *ProjectService, githubSvc GitHubProjectCloneProvider) *llmcontracts.RuntimeTools
+		runtime    func(projectID string, projectRepo *sqlite.ProjectRepo, projectSvc *ProjectService, githubSvc GitHubProjectCloneProvider) *llmcontracts.RuntimeTools
 	}{
 		{
 			name:       "Slack",
 			repoSuffix: "slack-runtime",
-			runtime: func(projectID string, projectRepo *repository.ProjectRepo, projectSvc *ProjectService, githubSvc GitHubProjectCloneProvider) *llmcontracts.RuntimeTools {
+			runtime: func(projectID string, projectRepo *sqlite.ProjectRepo, projectSvc *ProjectService, githubSvc GitHubProjectCloneProvider) *llmcontracts.RuntimeTools {
 				svc := &SlackService{projectRepo: projectRepo, userProjects: map[string]string{}}
 				svc.SetProjectCreationServices(projectSvc, githubSvc, nil, nil)
 				return svc.buildSlackActionToolRuntime(projectID, slackActionContext{TeamID: "T1", UserID: "U1"}, nil)
@@ -3004,7 +3004,7 @@ func TestSlackTelegramDiscordRuntimesCreateGitHubProject(t *testing.T) {
 		{
 			name:       "Telegram",
 			repoSuffix: "telegram-runtime",
-			runtime: func(projectID string, projectRepo *repository.ProjectRepo, projectSvc *ProjectService, githubSvc GitHubProjectCloneProvider) *llmcontracts.RuntimeTools {
+			runtime: func(projectID string, projectRepo *sqlite.ProjectRepo, projectSvc *ProjectService, githubSvc GitHubProjectCloneProvider) *llmcontracts.RuntimeTools {
 				svc := &TelegramService{projectRepo: projectRepo, userProjects: map[int64]string{}, userProjectVersions: map[int64]uint64{}}
 				svc.SetProjectCreationServices(projectSvc, githubSvc, nil, nil)
 				return svc.buildTelegramActionToolRuntime(projectID, 12345, 67890, nil)
@@ -3013,7 +3013,7 @@ func TestSlackTelegramDiscordRuntimesCreateGitHubProject(t *testing.T) {
 		{
 			name:       "Discord",
 			repoSuffix: "discord-runtime",
-			runtime: func(projectID string, projectRepo *repository.ProjectRepo, projectSvc *ProjectService, githubSvc GitHubProjectCloneProvider) *llmcontracts.RuntimeTools {
+			runtime: func(projectID string, projectRepo *sqlite.ProjectRepo, projectSvc *ProjectService, githubSvc GitHubProjectCloneProvider) *llmcontracts.RuntimeTools {
 				svc := &DiscordService{projectRepo: projectRepo, userProjects: map[string]string{}}
 				svc.SetProjectCreationServices(projectSvc, githubSvc, nil, nil)
 				return svc.buildDiscordActionToolRuntime(projectID, discordActionContext{ChannelID: "C1", UserID: "U1"}, nil)
@@ -3024,7 +3024,7 @@ func TestSlackTelegramDiscordRuntimesCreateGitHubProject(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			db := testutil.NewTestDB(t)
-			projectRepo := repository.NewProjectRepo(db)
+			projectRepo := sqlite.NewProjectRepo(db)
 			projectSvc := NewProjectService(projectRepo)
 			current := &models.Project{Name: tt.name + " Current Project"}
 			require.NoError(t, projectRepo.Create(ctx, current))
@@ -3064,9 +3064,9 @@ func TestSlackTelegramDiscordRuntimesCreateGitHubProject(t *testing.T) {
 func TestExecuteUpdateProjectSettingsRuntimeUpdatesAndClearsDefaults(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	projectRepo := repository.NewProjectRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
 	projectSvc := NewProjectService(projectRepo)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
 
 	projectLimit := 1
 	project := &models.Project{Name: "Runtime Settings Project", Description: "old", MaxWorkers: &projectLimit}
@@ -3130,7 +3130,7 @@ func TestExecuteUpdateProjectSettingsRuntimeUpdatesAndClearsDefaults(t *testing.
 func TestExecuteUpdateProjectSettingsRuntimeTreatsZeroProjectLimitAsInherited(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	projectRepo := repository.NewProjectRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
 	projectSvc := NewProjectService(projectRepo)
 	zero := 0
 	project := &models.Project{Name: "Legacy Zero Project", MaxWorkers: &zero}
@@ -3188,9 +3188,9 @@ func TestApplyProjectWorkerLimitUpdateClassifiesDispatchFromEffectiveLimits(t *t
 func TestExecuteUpdateProjectSettingsRuntimeRejectsInvalidInputsWithoutPartialUpdate(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	projectRepo := repository.NewProjectRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
 	projectSvc := NewProjectService(projectRepo)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
 
 	limit := 2
 	project := &models.Project{Name: "No Partial Project", Description: "keep", MaxWorkers: &limit, RepoPath: t.TempDir()}
@@ -3238,7 +3238,7 @@ func TestExecuteUpdateProjectSettingsRuntimeRejectsInvalidInputsWithoutPartialUp
 func TestExecuteUpdateProjectSettingsRuntimeRejectsWorkerLimitAboveFiniteGlobal(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	projectRepo := repository.NewProjectRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
 	projectSvc := NewProjectService(projectRepo)
 	workerSvc := NewWorkerService(nil, 10, projectRepo)
 	currentLimit := 5
@@ -3267,9 +3267,9 @@ func TestExecuteUpdateProjectSettingsRuntimeRejectsWorkerLimitAboveFiniteGlobal(
 func TestExecuteUpdateProjectSettingsRuntimeRejectsAmbiguousModelName(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	projectRepo := repository.NewProjectRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
 	projectSvc := NewProjectService(projectRepo)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
 	project := &models.Project{Name: "Ambiguous Model Project"}
 	require.NoError(t, projectRepo.Create(ctx, project))
 	_, err := db.ExecContext(ctx, `INSERT INTO agent_configs (id, name, provider, model, is_default, auth_method) VALUES
@@ -3298,9 +3298,9 @@ func TestExecuteUpdateProjectSettingsRuntimeRejectsAmbiguousModelName(t *testing
 func TestBuildChannelProjectActionHandlersUpdateProjectSettings(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	projectRepo := repository.NewProjectRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
 	projectSvc := NewProjectService(projectRepo)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
 	project := &models.Project{Name: "Channel Settings Project"}
 	require.NoError(t, projectRepo.Create(ctx, project))
 	model := &models.LLMConfig{Name: "Channel Settings Model", Provider: models.ProviderTest, Model: "test"}
@@ -3321,7 +3321,7 @@ func TestBuildChannelProjectActionHandlersUpdateProjectSettings(t *testing.T) {
 func TestBuildChannelProjectActionHandlersCreateProjectUsesOuterWorkerService(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	projectRepo := repository.NewProjectRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
 	projectSvc := NewProjectService(projectRepo)
 	workerSvc := NewWorkerService(nil, 25, projectRepo)
 
@@ -3350,9 +3350,9 @@ func TestBuildChannelProjectActionHandlersCreateProjectUsesOuterWorkerService(t 
 func TestCreateAgentRuntimeRollsBackWhenMaterializationFails(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	agentRepo := repository.NewAgentRepo(db)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	projectRepo := repository.NewProjectRepo(db)
+	agentRepo := sqlite.NewAgentRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
 	project := &models.Project{Name: "Runtime Agent Rollback Project"}
 	require.NoError(t, projectRepo.Create(ctx, project))
 
@@ -3405,9 +3405,9 @@ func TestCreateAgentRuntimeRollsBackWhenMaterializationFails(t *testing.T) {
 func TestCreateAgentRuntimeCreatesAgentAndRejectsUnsafeInputs(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	agentRepo := repository.NewAgentRepo(db)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	projectRepo := repository.NewProjectRepo(db)
+	agentRepo := sqlite.NewAgentRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
 	project := &models.Project{Name: "Runtime Agent Service Project"}
 	require.NoError(t, projectRepo.Create(ctx, project))
 
@@ -3531,10 +3531,10 @@ func TestCreateAgentRuntimeCreatesAgentAndRejectsUnsafeInputs(t *testing.T) {
 func TestUpdateAgentRuntimePatchesSafeFieldsAndPreservesOwnership(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	agentRepo := repository.NewAgentRepo(db)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
+	agentRepo := sqlite.NewAgentRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
 	project := &models.Project{Name: "Runtime Agent Update Project"}
 	require.NoError(t, projectRepo.Create(ctx, project))
 	model := &models.LLMConfig{Name: "Specific Runtime Model", Provider: models.ProviderTest, Model: "specific-model"}
@@ -3652,9 +3652,9 @@ func TestUpdateAgentRuntimePatchesSafeFieldsAndPreservesOwnership(t *testing.T) 
 func TestUpdateAgentRuntimeRejectsUnsafeTargetsAndInputsWithoutPartialSave(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	agentRepo := repository.NewAgentRepo(db)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	projectRepo := repository.NewProjectRepo(db)
+	agentRepo := sqlite.NewAgentRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
 	project := &models.Project{Name: "Runtime Agent Reject Project"}
 	require.NoError(t, projectRepo.Create(ctx, project))
 	foreign := &models.Project{Name: "Foreign Runtime Agent Project"}
@@ -3753,9 +3753,9 @@ func decodeUpdateAgentChangedFields(t *testing.T, out string) []string {
 func TestChannelUtilityCreateAgentRuntimeAndCompactListAgents(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	agentRepo := repository.NewAgentRepo(db)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	projectRepo := repository.NewProjectRepo(db)
+	agentRepo := sqlite.NewAgentRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
 	project := &models.Project{Name: "Channel Runtime Agent Project"}
 	require.NoError(t, projectRepo.Create(ctx, project))
 	handlers := buildChannelUtilityActionHandlers(channelUtilityActionHandlerOptions{ProjectID: project.ID, AgentRepo: agentRepo, LLMConfigRepo: llmConfigRepo, ProjectRepo: projectRepo})
@@ -3793,8 +3793,8 @@ func TestChannelUtilityCreateAgentRuntimeAndCompactListAgents(t *testing.T) {
 func TestChannelAlertResultHelpersPersistAndFormatAlerts(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	projectRepo := repository.NewProjectRepo(db)
-	alertSvc := NewAlertService(repository.NewAlertRepo(db), nil)
+	projectRepo := sqlite.NewProjectRepo(db)
+	alertSvc := NewAlertService(sqlite.NewAlertRepo(db), nil)
 	project := &models.Project{Name: "Channel Alert Helpers"}
 	require.NoError(t, projectRepo.Create(ctx, project))
 
@@ -3981,8 +3981,8 @@ func TestChannelStatusAndAutomationSummaryHelpers(t *testing.T) {
 func TestChannelScheduleToolsMakeConversationTasksRunnable(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)
-	tasks := repository.NewTaskRepo(db, nil)
-	schedules := repository.NewScheduleRepo(db)
+	tasks := sqlite.NewTaskRepo(db, nil)
+	schedules := sqlite.NewScheduleRepo(db)
 	task := &models.Task{ProjectID: "default", Title: "Conversation", Prompt: "test", Category: models.CategoryScheduled, Status: models.StatusPending}
 	require.NoError(t, tasks.Create(ctx, task))
 	legacy := &models.Schedule{TaskID: task.ID, RunAt: time.Now().Add(time.Hour), RepeatType: models.RepeatDaily, RepeatInterval: 1, Enabled: true}

@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/testutil"
 )
 
@@ -25,12 +25,12 @@ func TestExecuteTaskCreationsRejectsRetiredOnlyAutomaticSelection(t *testing.T) 
 
 func TestExecuteTaskCreations(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	attachmentRepo := repository.NewAttachmentRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
 	workerSvc := NewWorkerService(nil, 0, nil)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 
-	projectRepo := repository.NewProjectRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
 	project := &models.Project{Name: "Test Project"}
 	if err := projectRepo.Create(context.Background(), project); err != nil {
 		t.Fatalf("failed to create project: %v", err)
@@ -75,9 +75,9 @@ func TestExecuteTaskCreations(t *testing.T) {
 
 func TestExecuteTaskCreationsWithIndexedReturn_PreservesRequestIndexAfterFailure(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	taskSvc := NewTaskService(taskRepo, repository.NewAttachmentRepo(db), NewWorkerService(nil, 0, nil))
-	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	taskSvc := NewTaskService(taskRepo, sqlite.NewAttachmentRepo(db), NewWorkerService(nil, 0, nil))
+	projectRepo := sqlite.NewProjectRepo(db)
 	project := &models.Project{Name: "Indexed Creation Project"}
 	ctx := context.Background()
 	if err := projectRepo.Create(ctx, project); err != nil {
@@ -107,9 +107,9 @@ func TestExecuteTaskCreationsWithIndexedReturn_PreservesRequestIndexAfterFailure
 
 func TestExecuteTaskCreations_ActiveTaskWaitsForWorkerAdmissionAtCapacity(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	attachmentRepo := repository.NewAttachmentRepo(db)
-	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
 	ctx := context.Background()
 
 	maxWorkers := 1
@@ -160,13 +160,13 @@ func TestExecuteTaskCreations_ActiveTaskWaitsForWorkerAdmissionAtCapacity(t *tes
 func TestExecuteTaskCreations_PersistsIndependentAutoMergeOptions(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	taskRepo := repository.NewTaskRepo(db, nil)
-	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	projectRepo := sqlite.NewProjectRepo(db)
 	project := &models.Project{Name: "Runtime auto-merge project"}
 	if err := projectRepo.Create(ctx, project); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
-	taskSvc := NewTaskService(taskRepo, repository.NewAttachmentRepo(db), NewWorkerService(nil, 0, nil))
+	taskSvc := NewTaskService(taskRepo, sqlite.NewAttachmentRepo(db), NewWorkerService(nil, 0, nil))
 	created, summary := ExecuteTaskCreationsWithReturn(ctx, []TaskCreationRequest{{Title: "Runtime merge task", Prompt: "work", Priority: 2, AutoMerge: true, AutoMergeOnGoalAchieved: true, MergeTargetBranch: "develop"}}, project.ID, taskSvc)
 	if len(created) != 1 {
 		t.Fatalf("created len=%d summary=%s", len(created), summary)
@@ -204,12 +204,12 @@ func TestExecuteTaskCreations_Empty(t *testing.T) {
 // JS must be updated too (and vice versa).
 func TestExecuteTaskCreations_SummaryMatchesFrontendRegex(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	attachmentRepo := repository.NewAttachmentRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
 	workerSvc := NewWorkerService(nil, 0, nil)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 
-	projectRepo := repository.NewProjectRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
 	project := &models.Project{Name: "Test Project"}
 	if err := projectRepo.Create(context.Background(), project); err != nil {
 		t.Fatalf("failed to create project: %v", err)
@@ -270,12 +270,12 @@ func TestBuildTaskContextString_Empty(t *testing.T) {
 
 func TestExecuteTaskEdits(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	attachmentRepo := repository.NewAttachmentRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
 	workerSvc := NewWorkerService(nil, 0, nil)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 
-	projectRepo := repository.NewProjectRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
 	project := &models.Project{Name: "Test Project"}
 	if err := projectRepo.Create(context.Background(), project); err != nil {
 		t.Fatalf("failed to create project: %v", err)
@@ -335,12 +335,12 @@ func TestExecuteTaskEdits(t *testing.T) {
 
 func TestExecuteTaskEdits_TaskNotFound(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	attachmentRepo := repository.NewAttachmentRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
 	workerSvc := NewWorkerService(nil, 0, nil)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 
-	projectRepo := repository.NewProjectRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
 	project := &models.Project{Name: "Test Project"}
 	if err := projectRepo.Create(context.Background(), project); err != nil {
 		t.Fatalf("failed to create project: %v", err)
@@ -362,12 +362,12 @@ func TestExecuteTaskEdits_TaskNotFound(t *testing.T) {
 
 func TestExecuteTaskEdits_WrongProject(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	attachmentRepo := repository.NewAttachmentRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
 	workerSvc := NewWorkerService(nil, 0, nil)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 
-	projectRepo := repository.NewProjectRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
 	project1 := &models.Project{Name: "Project 1"}
 	if err := projectRepo.Create(context.Background(), project1); err != nil {
 		t.Fatalf("failed to create project1: %v", err)
@@ -406,12 +406,12 @@ func TestExecuteTaskEdits_WrongProject(t *testing.T) {
 
 func TestExecuteTaskEdits_NoChanges(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	attachmentRepo := repository.NewAttachmentRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
 	workerSvc := NewWorkerService(nil, 0, nil)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 
-	projectRepo := repository.NewProjectRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
 	project := &models.Project{Name: "Test Project"}
 	if err := projectRepo.Create(context.Background(), project); err != nil {
 		t.Fatalf("failed to create project: %v", err)
@@ -450,12 +450,12 @@ func TestExecuteTaskEdits_Empty(t *testing.T) {
 
 func TestExecuteTaskEdits_CategoryChange(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	attachmentRepo := repository.NewAttachmentRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
 	workerSvc := newTestWorkerService(t)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 
-	projectRepo := repository.NewProjectRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
 	project := &models.Project{Name: "Test Project"}
 	if err := projectRepo.Create(context.Background(), project); err != nil {
 		t.Fatalf("failed to create project: %v", err)
@@ -510,10 +510,10 @@ func TestExecuteTaskEdits_CategoryActiveNoOpDoesNotDoubleSubmit(t *testing.T) {
 		t.Run(string(status), func(t *testing.T) {
 			ctx := context.Background()
 			db := testutil.NewTestDB(t)
-			taskRepo := repository.NewTaskRepo(db, nil)
+			taskRepo := sqlite.NewTaskRepo(db, nil)
 			workerSvc := newTestWorkerService(t)
-			taskSvc := NewTaskService(taskRepo, repository.NewAttachmentRepo(db), workerSvc)
-			projectRepo := repository.NewProjectRepo(db)
+			taskSvc := NewTaskService(taskRepo, sqlite.NewAttachmentRepo(db), workerSvc)
+			projectRepo := sqlite.NewProjectRepo(db)
 			project := &models.Project{Name: "Test Project"}
 			if err := projectRepo.Create(ctx, project); err != nil {
 				t.Fatalf("failed to create project: %v", err)
@@ -542,10 +542,10 @@ func TestExecuteTaskEdits_CategoryBacklogCancelsActiveRunningOrQueuedTask(t *tes
 		t.Run(string(status), func(t *testing.T) {
 			ctx := context.Background()
 			db := testutil.NewTestDB(t)
-			taskRepo := repository.NewTaskRepo(db, nil)
+			taskRepo := sqlite.NewTaskRepo(db, nil)
 			workerSvc := newTestWorkerService(t)
-			taskSvc := NewTaskService(taskRepo, repository.NewAttachmentRepo(db), workerSvc)
-			projectRepo := repository.NewProjectRepo(db)
+			taskSvc := NewTaskService(taskRepo, sqlite.NewAttachmentRepo(db), workerSvc)
+			projectRepo := sqlite.NewProjectRepo(db)
 			project := &models.Project{Name: "Test Project"}
 			if err := projectRepo.Create(ctx, project); err != nil {
 				t.Fatalf("failed to create project: %v", err)
@@ -587,9 +587,9 @@ func TestExecuteTaskEdits_CategoryBacklogCancelsActiveRunningOrQueuedTask(t *tes
 func TestExecuteTaskEdits_RejectsInvalidPriorities(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	taskSvc := NewTaskService(taskRepo, repository.NewAttachmentRepo(db), nil)
-	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	taskSvc := NewTaskService(taskRepo, sqlite.NewAttachmentRepo(db), nil)
+	projectRepo := sqlite.NewProjectRepo(db)
 	project := &models.Project{Name: "Runtime Invalid Priority Project"}
 	if err := projectRepo.Create(ctx, project); err != nil {
 		t.Fatalf("failed to create project: %v", err)
@@ -649,9 +649,9 @@ func TestExecuteTaskEdits_RejectsInvalidPriorities(t *testing.T) {
 func TestExecuteTaskEdits_PersistsValidPriorities(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	taskSvc := NewTaskService(taskRepo, repository.NewAttachmentRepo(db), nil)
-	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	taskSvc := NewTaskService(taskRepo, sqlite.NewAttachmentRepo(db), nil)
+	projectRepo := sqlite.NewProjectRepo(db)
 	project := &models.Project{Name: "Runtime Valid Priority Project"}
 	if err := projectRepo.Create(ctx, project); err != nil {
 		t.Fatalf("failed to create project: %v", err)
@@ -686,10 +686,10 @@ func TestExecuteTaskEdits_PersistsValidPriorities(t *testing.T) {
 func TestExecuteTaskEdits_TitleAndCategoryChangePersistsAndSubmits(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
 	workerSvc := newTestWorkerService(t)
-	taskSvc := NewTaskService(taskRepo, repository.NewAttachmentRepo(db), workerSvc)
-	projectRepo := repository.NewProjectRepo(db)
+	taskSvc := NewTaskService(taskRepo, sqlite.NewAttachmentRepo(db), workerSvc)
+	projectRepo := sqlite.NewProjectRepo(db)
 	project := &models.Project{Name: "Test Project"}
 	if err := projectRepo.Create(ctx, project); err != nil {
 		t.Fatalf("failed to create project: %v", err)
@@ -736,10 +736,10 @@ func TestExecuteTaskEdits_TitleAndCategoryChangePersistsAndSubmits(t *testing.T)
 func TestExecuteTaskEdits_TitleOnlyDoesNotSubmit(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
 	workerSvc := newTestWorkerService(t)
-	taskSvc := NewTaskService(taskRepo, repository.NewAttachmentRepo(db), workerSvc)
-	projectRepo := repository.NewProjectRepo(db)
+	taskSvc := NewTaskService(taskRepo, sqlite.NewAttachmentRepo(db), workerSvc)
+	projectRepo := sqlite.NewProjectRepo(db)
 	project := &models.Project{Name: "Test Project"}
 	if err := projectRepo.Create(ctx, project); err != nil {
 		t.Fatalf("failed to create project: %v", err)
@@ -763,19 +763,19 @@ func TestExecuteTaskEdits_TitleOnlyDoesNotSubmit(t *testing.T) {
 
 func TestExecuteTaskEdits_AgentReassignment(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	attachmentRepo := repository.NewAttachmentRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
 	workerSvc := NewWorkerService(nil, 0, nil)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 
-	projectRepo := repository.NewProjectRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
 	project := &models.Project{Name: "Test Project"}
 	if err := projectRepo.Create(context.Background(), project); err != nil {
 		t.Fatalf("failed to create project: %v", err)
 	}
 
 	// Create agent configs for testing
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
 	initialAgent := &models.LLMConfig{Name: "Initial Agent", Provider: "anthropic", Model: "claude-sonnet-4-5-20250929"}
 	if err := llmConfigRepo.Create(context.Background(), initialAgent); err != nil {
 		t.Fatalf("failed to create initial agent: %v", err)
@@ -831,19 +831,19 @@ func TestExecuteTaskEdits_AgentReassignment(t *testing.T) {
 
 func TestExecuteTaskEdits_AgentReassignmentNoChange(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	attachmentRepo := repository.NewAttachmentRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
 	workerSvc := NewWorkerService(nil, 0, nil)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 
-	projectRepo := repository.NewProjectRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
 	project := &models.Project{Name: "Test Project"}
 	if err := projectRepo.Create(context.Background(), project); err != nil {
 		t.Fatalf("failed to create project: %v", err)
 	}
 
 	// Create an agent config
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
 	agent := &models.LLMConfig{Name: "Same Agent", Provider: "anthropic", Model: "claude-sonnet-4-5-20250929"}
 	if err := llmConfigRepo.Create(context.Background(), agent); err != nil {
 		t.Fatalf("failed to create agent: %v", err)
@@ -878,19 +878,19 @@ func TestExecuteTaskEdits_AgentReassignmentNoChange(t *testing.T) {
 
 func TestExecuteTaskEdits_AgentConfigIDAlias(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	attachmentRepo := repository.NewAttachmentRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
 	workerSvc := NewWorkerService(nil, 0, nil)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 
-	projectRepo := repository.NewProjectRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
 	project := &models.Project{Name: "Test Project"}
 	if err := projectRepo.Create(context.Background(), project); err != nil {
 		t.Fatalf("failed to create project: %v", err)
 	}
 
 	// Create agent configs for testing
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
 	initialAgent := &models.LLMConfig{Name: "Initial Agent", Provider: "anthropic", Model: "claude-sonnet-4-5-20250929"}
 	if err := llmConfigRepo.Create(context.Background(), initialAgent); err != nil {
 		t.Fatalf("failed to create initial agent: %v", err)
@@ -946,19 +946,19 @@ func TestExecuteTaskEdits_AgentConfigIDAlias(t *testing.T) {
 
 func TestExecuteTaskEdits_AgentAssignmentFromNil(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	attachmentRepo := repository.NewAttachmentRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
 	workerSvc := NewWorkerService(nil, 0, nil)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 
-	projectRepo := repository.NewProjectRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
 	project := &models.Project{Name: "Test Project"}
 	if err := projectRepo.Create(context.Background(), project); err != nil {
 		t.Fatalf("failed to create project: %v", err)
 	}
 
 	// Create an agent config
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
 	agent := &models.LLMConfig{Name: "First Agent", Provider: "anthropic", Model: "claude-sonnet-4-5-20250929"}
 	if err := llmConfigRepo.Create(context.Background(), agent); err != nil {
 		t.Fatalf("failed to create agent: %v", err)
@@ -1008,16 +1008,16 @@ func TestExecuteTaskEdits_AgentAssignmentFromNil(t *testing.T) {
 func TestExecuteTaskEdits_PrimaryAgentDefinitionByIDPreservesModelConfig(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	taskRepo := repository.NewTaskRepo(db, nil)
-	taskSvc := NewTaskService(taskRepo, repository.NewAttachmentRepo(db), NewWorkerService(nil, 0, nil))
-	agentRepo := repository.NewAgentRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	taskSvc := NewTaskService(taskRepo, sqlite.NewAttachmentRepo(db), NewWorkerService(nil, 0, nil))
+	agentRepo := sqlite.NewAgentRepo(db)
 	taskSvc.SetAgentRepo(agentRepo)
 
 	project := &models.Project{Name: "Primary Agent Edit By ID"}
-	if err := repository.NewProjectRepo(db).Create(ctx, project); err != nil {
+	if err := sqlite.NewProjectRepo(db).Create(ctx, project); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
-	modelRepo := repository.NewLLMConfigRepo(db)
+	modelRepo := sqlite.NewLLMConfigRepo(db)
 	modelConfig := &models.LLMConfig{Name: "Selected model", Provider: "anthropic", Model: "claude-sonnet-4-5-20250929"}
 	if err := modelRepo.Create(ctx, modelConfig); err != nil {
 		t.Fatalf("create model config: %v", err)
@@ -1050,13 +1050,13 @@ func TestExecuteTaskEdits_PrimaryAgentDefinitionByIDPreservesModelConfig(t *test
 func TestExecuteTaskEdits_PrimaryAgentDefinitionByName(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	taskRepo := repository.NewTaskRepo(db, nil)
-	taskSvc := NewTaskService(taskRepo, repository.NewAttachmentRepo(db), NewWorkerService(nil, 0, nil))
-	agentRepo := repository.NewAgentRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	taskSvc := NewTaskService(taskRepo, sqlite.NewAttachmentRepo(db), NewWorkerService(nil, 0, nil))
+	agentRepo := sqlite.NewAgentRepo(db)
 	taskSvc.SetAgentRepo(agentRepo)
 
 	project := &models.Project{Name: "Primary Agent Edit By Name"}
-	if err := repository.NewProjectRepo(db).Create(ctx, project); err != nil {
+	if err := sqlite.NewProjectRepo(db).Create(ctx, project); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
 	agentDef := &models.Agent{Name: "Docs Reviewer", Key: "docs_reviewer", Enabled: true, SelectableAsPrimary: true}
@@ -1084,15 +1084,15 @@ func TestExecuteTaskEdits_PrimaryAgentDefinitionByName(t *testing.T) {
 func TestExecuteTaskEdits_ClearPrimaryAgentDefinitionPreservesModelConfig(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	taskRepo := repository.NewTaskRepo(db, nil)
-	taskSvc := NewTaskService(taskRepo, repository.NewAttachmentRepo(db), NewWorkerService(nil, 0, nil))
-	agentRepo := repository.NewAgentRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	taskSvc := NewTaskService(taskRepo, sqlite.NewAttachmentRepo(db), NewWorkerService(nil, 0, nil))
+	agentRepo := sqlite.NewAgentRepo(db)
 
 	project := &models.Project{Name: "Primary Agent Clear"}
-	if err := repository.NewProjectRepo(db).Create(ctx, project); err != nil {
+	if err := sqlite.NewProjectRepo(db).Create(ctx, project); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
-	modelRepo := repository.NewLLMConfigRepo(db)
+	modelRepo := sqlite.NewLLMConfigRepo(db)
 	modelConfig := &models.LLMConfig{Name: "Selected model", Provider: "anthropic", Model: "claude-sonnet-4-5-20250929"}
 	if err := modelRepo.Create(ctx, modelConfig); err != nil {
 		t.Fatalf("create model config: %v", err)
@@ -1125,13 +1125,13 @@ func TestExecuteTaskEdits_ClearPrimaryAgentDefinitionPreservesModelConfig(t *tes
 func TestExecuteTaskEdits_PrimaryAgentDefinitionRejectsInvalidWithoutPartialEdit(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	taskRepo := repository.NewTaskRepo(db, nil)
-	taskSvc := NewTaskService(taskRepo, repository.NewAttachmentRepo(db), NewWorkerService(nil, 0, nil))
-	agentRepo := repository.NewAgentRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	taskSvc := NewTaskService(taskRepo, sqlite.NewAttachmentRepo(db), NewWorkerService(nil, 0, nil))
+	agentRepo := sqlite.NewAgentRepo(db)
 	taskSvc.SetAgentRepo(agentRepo)
 
 	project := &models.Project{Name: "Primary Agent Invalid"}
-	if err := repository.NewProjectRepo(db).Create(ctx, project); err != nil {
+	if err := sqlite.NewProjectRepo(db).Create(ctx, project); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
 	agentDef := &models.Agent{Name: "Reviewer", Key: "reviewer", Enabled: true, SelectableAsPrimary: true}
@@ -1163,11 +1163,11 @@ func TestExecuteTaskEdits_PrimaryAgentDefinitionRejectsInvalidWithoutPartialEdit
 func TestExecuteTaskEdits_PrimaryAgentDefinitionRejectsCrossProject(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	taskRepo := repository.NewTaskRepo(db, nil)
-	taskSvc := NewTaskService(taskRepo, repository.NewAttachmentRepo(db), NewWorkerService(nil, 0, nil))
-	agentRepo := repository.NewAgentRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	taskSvc := NewTaskService(taskRepo, sqlite.NewAttachmentRepo(db), NewWorkerService(nil, 0, nil))
+	agentRepo := sqlite.NewAgentRepo(db)
 	taskSvc.SetAgentRepo(agentRepo)
-	projectRepo := repository.NewProjectRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
 	projectA := &models.Project{Name: "Project A"}
 	if err := projectRepo.Create(ctx, projectA); err != nil {
 		t.Fatalf("create project A: %v", err)
@@ -1201,18 +1201,18 @@ func TestExecuteTaskEdits_PrimaryAgentDefinitionRejectsCrossProject(t *testing.T
 func TestExecuteTaskEdits_AgentIDStillOnlyChangesModelConfig(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	taskRepo := repository.NewTaskRepo(db, nil)
-	taskSvc := NewTaskService(taskRepo, repository.NewAttachmentRepo(db), NewWorkerService(nil, 0, nil))
-	agentRepo := repository.NewAgentRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	taskSvc := NewTaskService(taskRepo, sqlite.NewAttachmentRepo(db), NewWorkerService(nil, 0, nil))
+	agentRepo := sqlite.NewAgentRepo(db)
 	project := &models.Project{Name: "Model Config Only Edit"}
-	if err := repository.NewProjectRepo(db).Create(ctx, project); err != nil {
+	if err := sqlite.NewProjectRepo(db).Create(ctx, project); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
 	primaryAgent := &models.Agent{Name: "Primary Agent", Key: "primary_agent", Enabled: true, SelectableAsPrimary: true}
 	if err := agentRepo.Create(ctx, primaryAgent); err != nil {
 		t.Fatalf("create primary agent: %v", err)
 	}
-	modelRepo := repository.NewLLMConfigRepo(db)
+	modelRepo := sqlite.NewLLMConfigRepo(db)
 	modelConfig := &models.LLMConfig{Name: "Model Config 2", Provider: "anthropic", Model: "claude-sonnet-4-5-20250929"}
 	if err := modelRepo.Create(ctx, modelConfig); err != nil {
 		t.Fatalf("create model config: %v", err)
@@ -1240,12 +1240,12 @@ func TestExecuteTaskEdits_AgentIDStillOnlyChangesModelConfig(t *testing.T) {
 
 func TestExecuteTaskEdits_InvalidCategory(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	attachmentRepo := repository.NewAttachmentRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
 	workerSvc := NewWorkerService(nil, 0, nil)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 
-	projectRepo := repository.NewProjectRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
 	project := &models.Project{Name: "Test Project"}
 	if err := projectRepo.Create(context.Background(), project); err != nil {
 		t.Fatalf("failed to create project: %v", err)
@@ -1286,12 +1286,12 @@ func TestExecuteTaskEdits_InvalidCategory(t *testing.T) {
 
 func TestExecuteTaskEdits_WithAttachments(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	attachmentRepo := repository.NewAttachmentRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
 	workerSvc := NewWorkerService(nil, 0, nil)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 
-	projectRepo := repository.NewProjectRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
 	project := &models.Project{Name: "Test Project"}
 	if err := projectRepo.Create(context.Background(), project); err != nil {
 		t.Fatalf("failed to create project: %v", err)
@@ -1366,12 +1366,12 @@ func TestExecuteTaskEdits_WithAttachments(t *testing.T) {
 
 func TestExecuteTaskEdits_AttachmentsNonexistentFile(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	attachmentRepo := repository.NewAttachmentRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
 	workerSvc := NewWorkerService(nil, 0, nil)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 
-	projectRepo := repository.NewProjectRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
 	project := &models.Project{Name: "Test Project"}
 	if err := projectRepo.Create(context.Background(), project); err != nil {
 		t.Fatalf("failed to create project: %v", err)
@@ -1419,12 +1419,12 @@ func TestExecuteTaskEdits_AttachmentsNonexistentFile(t *testing.T) {
 
 func TestExecuteTaskExecutions(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	attachmentRepo := repository.NewAttachmentRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
 	workerSvc := NewWorkerService(nil, 0, nil) // No workers, just testing submission
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 
-	projectRepo := repository.NewProjectRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
 	project := &models.Project{Name: "Test Project"}
 	if err := projectRepo.Create(context.Background(), project); err != nil {
 		t.Fatalf("failed to create project: %v", err)
@@ -1519,12 +1519,12 @@ func TestExecuteTaskExecutions(t *testing.T) {
 
 func TestExecuteTaskExecutions_ByTaskID_ExecutesOnlyTarget(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	attachmentRepo := repository.NewAttachmentRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
 	workerSvc := NewWorkerService(nil, 0, nil)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 
-	projectRepo := repository.NewProjectRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
 	project := &models.Project{Name: "Test Project"}
 	if err := projectRepo.Create(context.Background(), project); err != nil {
 		t.Fatalf("failed to create project: %v", err)
@@ -1583,12 +1583,12 @@ func TestExecuteTaskExecutions_ByTaskID_ExecutesOnlyTarget(t *testing.T) {
 
 func TestExecuteTaskExecutions_ByTitle_ExecutesOnlyTarget(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	attachmentRepo := repository.NewAttachmentRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
 	workerSvc := NewWorkerService(nil, 0, nil)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 
-	projectRepo := repository.NewProjectRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
 	project := &models.Project{Name: "Test Project"}
 	if err := projectRepo.Create(context.Background(), project); err != nil {
 		t.Fatalf("failed to create project: %v", err)
@@ -1645,12 +1645,12 @@ func TestExecuteTaskExecutions_ByTitle_ExecutesOnlyTarget(t *testing.T) {
 
 func TestExecuteTaskExecutions_WithPriorityFilter(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	attachmentRepo := repository.NewAttachmentRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
 	workerSvc := NewWorkerService(nil, 0, nil)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 
-	projectRepo := repository.NewProjectRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
 	project := &models.Project{Name: "Test Project"}
 	if err := projectRepo.Create(context.Background(), project); err != nil {
 		t.Fatalf("failed to create project: %v", err)
@@ -1714,12 +1714,12 @@ func TestExecuteTaskExecutions_WithPriorityFilter(t *testing.T) {
 
 func TestExecuteTaskExecutions_NoMatchingTasks(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	attachmentRepo := repository.NewAttachmentRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
 	workerSvc := NewWorkerService(nil, 0, nil)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 
-	projectRepo := repository.NewProjectRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
 	project := &models.Project{Name: "Test Project"}
 	if err := projectRepo.Create(context.Background(), project); err != nil {
 		t.Fatalf("failed to create project: %v", err)
@@ -1745,12 +1745,12 @@ func TestExecuteTaskExecutions_NoMatchingTasks(t *testing.T) {
 
 func TestExecuteTaskExecutions_InvalidTag(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	attachmentRepo := repository.NewAttachmentRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
 	workerSvc := NewWorkerService(nil, 0, nil)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 
-	projectRepo := repository.NewProjectRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
 	project := &models.Project{Name: "Test Project"}
 	if err := projectRepo.Create(context.Background(), project); err != nil {
 		t.Fatalf("failed to create project: %v", err)
@@ -1780,12 +1780,12 @@ func TestExecuteTaskExecutions_Empty(t *testing.T) {
 
 func TestExecuteTaskExecutions_NoMatchingTasksWithPriority(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	attachmentRepo := repository.NewAttachmentRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
 	workerSvc := NewWorkerService(nil, 0, nil)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 
-	projectRepo := repository.NewProjectRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
 	project := &models.Project{Name: "Test Project"}
 	if err := projectRepo.Create(context.Background(), project); err != nil {
 		t.Fatalf("failed to create project: %v", err)
@@ -1835,12 +1835,12 @@ func TestExecuteTaskExecutions_NoMatchingTasksWithPriority(t *testing.T) {
 
 func TestExecuteTaskExecutions_MultipleTagsWithPriorityNoMatch(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	attachmentRepo := repository.NewAttachmentRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
 	workerSvc := NewWorkerService(nil, 0, nil)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 
-	projectRepo := repository.NewProjectRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
 	project := &models.Project{Name: "Test Project"}
 	if err := projectRepo.Create(context.Background(), project); err != nil {
 		t.Fatalf("failed to create project: %v", err)
@@ -1897,12 +1897,12 @@ func TestExecuteTaskExecutions_MultipleTagsWithPriorityNoMatch(t *testing.T) {
 
 func TestExecuteTaskExecutions_PriorityOnly(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	attachmentRepo := repository.NewAttachmentRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
 	workerSvc := NewWorkerService(nil, 0, nil)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 
-	projectRepo := repository.NewProjectRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
 	project := &models.Project{Name: "Test Project"}
 	if err := projectRepo.Create(context.Background(), project); err != nil {
 		t.Fatalf("failed to create project: %v", err)
@@ -2003,12 +2003,12 @@ func TestExecuteTaskExecutions_PriorityOnly(t *testing.T) {
 
 func TestExecuteTaskExecutions_PriorityOnlyNoMatch(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	attachmentRepo := repository.NewAttachmentRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
 	workerSvc := NewWorkerService(nil, 0, nil)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 
-	projectRepo := repository.NewProjectRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
 	project := &models.Project{Name: "Test Project"}
 	if err := projectRepo.Create(context.Background(), project); err != nil {
 		t.Fatalf("failed to create project: %v", err)
@@ -2048,12 +2048,12 @@ func TestExecuteTaskExecutions_PriorityOnlyNoMatch(t *testing.T) {
 
 func TestExecuteTaskExecutions_CompletedBacklogTasksExcludedByDefault(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	attachmentRepo := repository.NewAttachmentRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
 	workerSvc := NewWorkerService(nil, 0, nil)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 
-	projectRepo := repository.NewProjectRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
 	project := &models.Project{Name: "Test Project"}
 	if err := projectRepo.Create(context.Background(), project); err != nil {
 		t.Fatalf("failed to create project: %v", err)
@@ -2130,12 +2130,12 @@ func TestExecuteTaskExecutions_CompletedBacklogTasksExcludedByDefault(t *testing
 
 func TestExecuteTaskExecutions_CompletedCategoryTasksExcludedByDefault(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	attachmentRepo := repository.NewAttachmentRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
 	workerSvc := NewWorkerService(nil, 0, nil)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 
-	projectRepo := repository.NewProjectRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
 	project := &models.Project{Name: "Test Project"}
 	if err := projectRepo.Create(context.Background(), project); err != nil {
 		t.Fatalf("failed to create project: %v", err)
@@ -2182,12 +2182,12 @@ func TestExecuteTaskExecutions_CompletedCategoryTasksExcludedByDefault(t *testin
 
 func TestExecuteTaskExecutions_CompletedCategoryTasksIncludedWhenExplicitlyRequested(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	attachmentRepo := repository.NewAttachmentRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
 	workerSvc := NewWorkerService(nil, 0, nil)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 
-	projectRepo := repository.NewProjectRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
 	project := &models.Project{Name: "Test Project"}
 	if err := projectRepo.Create(context.Background(), project); err != nil {
 		t.Fatalf("failed to create project: %v", err)
@@ -2269,14 +2269,14 @@ func TestBuildModelContextString_Empty(t *testing.T) {
 func TestExecuteTaskCreations_ResolvesAgentNameInSharedService(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	taskRepo := repository.NewTaskRepo(db, nil)
-	attachmentRepo := repository.NewAttachmentRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
 	workerSvc := NewWorkerService(nil, 0, nil)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
-	agentRepo := repository.NewAgentRepo(db)
+	agentRepo := sqlite.NewAgentRepo(db)
 	taskSvc.SetAgentRepo(agentRepo)
 
-	projectRepo := repository.NewProjectRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
 	project := &models.Project{Name: "Shared Agent Resolution"}
 	if err := projectRepo.Create(ctx, project); err != nil {
 		t.Fatalf("create project: %v", err)
@@ -2302,13 +2302,13 @@ func TestExecuteTaskCreations_ResolvesAgentNameInSharedService(t *testing.T) {
 func TestExecuteTaskCreations_ResolvesSingleSelectableAgentByTrimmedName(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	taskRepo := repository.NewTaskRepo(db, nil)
-	taskSvc := NewTaskService(taskRepo, repository.NewAttachmentRepo(db), NewWorkerService(nil, 0, nil))
-	agentRepo := repository.NewAgentRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	taskSvc := NewTaskService(taskRepo, sqlite.NewAttachmentRepo(db), NewWorkerService(nil, 0, nil))
+	agentRepo := sqlite.NewAgentRepo(db)
 	taskSvc.SetAgentRepo(agentRepo)
 
 	project := &models.Project{Name: "Trimmed Agent Resolution"}
-	if err := repository.NewProjectRepo(db).Create(ctx, project); err != nil {
+	if err := sqlite.NewProjectRepo(db).Create(ctx, project); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `INSERT INTO agents (id, name, key, model, enabled, selectable_as_primary) VALUES (lower(hex(randomblob(16))), ?, ?, 'inherit', 1, 1)`, " Reviewer ", "legacy_spaced_reviewer"); err != nil {
@@ -2338,13 +2338,13 @@ func TestExecuteTaskCreations_ResolvesSingleSelectableAgentByTrimmedName(t *test
 func TestExecuteTaskCreations_UnresolvedAgentNameFailsInsteadOfCreatingUnassignedTask(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	taskRepo := repository.NewTaskRepo(db, nil)
-	attachmentRepo := repository.NewAttachmentRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
 	workerSvc := NewWorkerService(nil, 0, nil)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
-	taskSvc.SetAgentRepo(repository.NewAgentRepo(db))
+	taskSvc.SetAgentRepo(sqlite.NewAgentRepo(db))
 
-	projectRepo := repository.NewProjectRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
 	project := &models.Project{Name: "Unresolved Agent Resolution"}
 	if err := projectRepo.Create(ctx, project); err != nil {
 		t.Fatalf("create project: %v", err)
@@ -2369,13 +2369,13 @@ func TestExecuteTaskCreations_UnresolvedAgentNameFailsInsteadOfCreatingUnassigne
 func TestExecuteTaskCreations_RejectsSystemAgentByNameAndID(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	taskRepo := repository.NewTaskRepo(db, nil)
-	taskSvc := NewTaskService(taskRepo, repository.NewAttachmentRepo(db), NewWorkerService(nil, 0, nil))
-	agentRepo := repository.NewAgentRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	taskSvc := NewTaskService(taskRepo, sqlite.NewAttachmentRepo(db), NewWorkerService(nil, 0, nil))
+	agentRepo := sqlite.NewAgentRepo(db)
 	taskSvc.SetAgentRepo(agentRepo)
 
 	project := &models.Project{Name: "Protected Agent Assignment"}
-	if err := repository.NewProjectRepo(db).Create(ctx, project); err != nil {
+	if err := sqlite.NewProjectRepo(db).Create(ctx, project); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
 	memoryCurator := &models.Agent{
@@ -2415,8 +2415,8 @@ func TestExecuteTaskCreations_RejectsSystemAgentByNameAndID(t *testing.T) {
 
 func TestExecuteTaskCreations_WithChainConfig(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	attachmentRepo := repository.NewAttachmentRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
 	workerSvc := NewWorkerService(nil, 0, nil)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 
@@ -2472,8 +2472,8 @@ func TestExecuteTaskCreations_WithChainConfig(t *testing.T) {
 // chain config creates both parent and blocked child in one call with no edits.
 func TestExecuteTaskCreations_ToolCallChainConfig(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	attachmentRepo := repository.NewAttachmentRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
 	workerSvc := NewWorkerService(nil, 0, nil)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 
@@ -2548,8 +2548,8 @@ func TestExecuteTaskCreations_ToolCallChainConfig(t *testing.T) {
 
 func TestExecuteTaskEdits_WithChainConfig(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	attachmentRepo := repository.NewAttachmentRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
 	workerSvc := NewWorkerService(nil, 0, nil)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 
@@ -2627,8 +2627,8 @@ func TestExecuteTaskEdits_WithChainConfig(t *testing.T) {
 
 func TestExecuteTaskEdits_DisableChain(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	attachmentRepo := repository.NewAttachmentRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
 	workerSvc := NewWorkerService(nil, 0, nil)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 
@@ -3079,9 +3079,9 @@ func TestAutoStartTasks_EnabledInModel(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
 
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
 	ws := NewWorkerService(nil, 0, nil)
 	taskSvc := NewTaskService(taskRepo, nil, ws)
 
@@ -3136,9 +3136,9 @@ func TestAutoStartTasks_DisabledInModel(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
 
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
 	ws := NewWorkerService(nil, 0, nil)
 	taskSvc := NewTaskService(taskRepo, nil, ws)
 
@@ -3280,8 +3280,8 @@ func TestTaskCreationDefaultModelSentinelSkipsAutoSelection(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
 
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
 	taskSvc := NewTaskService(taskRepo, nil, nil)
 	project := &models.Project{Name: "Test Project", RepoPath: t.TempDir()}
 	if err := projectRepo.Create(ctx, project); err != nil {
@@ -3315,9 +3315,9 @@ func TestAutoStartTasks_ExplicitCategoryOverrides(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
 
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
 	ws := NewWorkerService(nil, 0, nil)
 	taskSvc := NewTaskService(taskRepo, nil, ws)
 
@@ -3372,10 +3372,10 @@ func TestAutoStartTasks_SingleAgentAvailable(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
 
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	attachmentRepo := repository.NewAttachmentRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
 	workerSvc := NewWorkerService(nil, 0, nil)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 
@@ -3428,13 +3428,13 @@ func TestExecuteTaskCreationsWithReturn_PersistsGoal(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
 	project := &models.Project{Name: "Goal Creation Project", RepoPath: t.TempDir()}
-	if err := repository.NewProjectRepo(db).Create(ctx, project); err != nil {
+	if err := sqlite.NewProjectRepo(db).Create(ctx, project); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
-	taskRepo := repository.NewTaskRepo(db, nil)
-	goalRepo := repository.NewTaskGoalRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	goalRepo := sqlite.NewTaskGoalRepo(db)
 	goalSvc := NewTaskGoalService(goalRepo, taskRepo, nil)
-	taskSvc := NewTaskService(taskRepo, repository.NewAttachmentRepo(db), nil)
+	taskSvc := NewTaskService(taskRepo, sqlite.NewAttachmentRepo(db), nil)
 	taskSvc.SetTaskGoalService(goalSvc)
 
 	created, summary := ExecuteTaskCreationsWithReturn(ctx, []TaskCreationRequest{{Title: "Goal create", Prompt: "prompt", Goal: "All tests pass", Category: "backlog"}}, project.ID, taskSvc)

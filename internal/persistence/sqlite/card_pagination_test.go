@@ -1,0 +1,740 @@
+package sqlite
+
+import (
+	"context"
+	"database/sql"
+	"fmt"
+	"slices"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
+	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/stretchr/testify/require"
+)
+
+func TestModelAndAgentBulkDeleteEligibilityIsAtomic(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	modelsRepo := NewLLMConfigRepo(db)
+	first := &models.LLMConfig{Name: "Default bulk model", Provider: models.ProviderTest, Model: "default-bulk", IsDefault: true}
+	second := &models.LLMConfig{Name: "Other bulk model", Provider: models.ProviderTest, Model: "other-bulk"}
+	require.NoError(t, modelsRepo.Create(ctx, first))
+	require.NoError(t, modelsRepo.Create(ctx, second))
+	require.ErrorContains(t, modelsRepo.DeleteBulk(ctx, []string{first.ID, second.ID}), "default")
+	configs, err := modelsRepo.GetByIDs(ctx, []string{first.ID, second.ID})
+	require.NoError(t, err)
+	require.Len(t, configs, 2)
+
+	agentsRepo := NewAgentRepo(db)
+	protected := &models.Agent{Name: "Protected bulk", Model: "inherit", GeneratedStatus: models.AgentStatusProtected}
+	ordinary := &models.Agent{Name: "Ordinary bulk", Model: "inherit"}
+	require.NoError(t, agentsRepo.Create(ctx, protected))
+	require.NoError(t, agentsRepo.Create(ctx, ordinary))
+	require.ErrorContains(t, agentsRepo.DeleteBulk(ctx, []string{protected.ID, ordinary.ID}), "protected")
+	agents, err := agentsRepo.GetByIDs(ctx, []string{protected.ID, ordinary.ID})
+	require.NoError(t, err)
+	require.Len(t, agents, 2)
+}
+
+func TestScopedBulkDeletesPreflightWithoutPartialDeletion(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := NewProjectRepo(db)
+	first := &models.Project{Name: "Bulk first"}
+	second := &models.Project{Name: "Bulk second"}
+	require.NoError(t, projectRepo.Create(ctx, first))
+	require.NoError(t, projectRepo.Create(ctx, second))
+	alerts := NewAlertRepo(db)
+	own := &models.Alert{ProjectID: first.ID, Type: models.AlertCustom, Severity: models.SeverityInfo, Title: "own"}
+	foreign := &models.Alert{ProjectID: second.ID, Type: models.AlertCustom, Severity: models.SeverityInfo, Title: "foreign"}
+	require.NoError(t, alerts.Create(ctx, own))
+	require.NoError(t, alerts.Create(ctx, foreign))
+	require.Error(t, alerts.DeleteBulk(ctx, first.ID, []string{own.ID, foreign.ID}))
+	remaining, err := alerts.ListByProject(ctx, first.ID, 10)
+	require.NoError(t, err)
+	require.Len(t, remaining, 1)
+
+	webhooks := NewWebhookRepo(db)
+	ownHook := &models.WebhookEndpoint{ProjectID: first.ID, Name: "own", Enabled: true}
+	foreignHook := &models.WebhookEndpoint{ProjectID: second.ID, Name: "foreign", Enabled: true}
+	require.NoError(t, webhooks.Create(ctx, ownHook))
+	require.NoError(t, webhooks.Create(ctx, foreignHook))
+	require.Error(t, webhooks.DeleteBulk(ctx, first.ID, []string{ownHook.ID, foreignHook.ID}))
+	hooks, err := webhooks.ListByProject(ctx, first.ID)
+	require.NoError(t, err)
+	require.Len(t, hooks, 1)
+}
+
+func TestCollectionFiltersAndSortsApplyBeforePagination(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	modelsRepo := NewLLMConfigRepo(db)
+	for _, item := range []struct {
+		name     string
+		provider models.LLMProvider
+	}{
+		{"Zulu Anthropic", models.ProviderAnthropic}, {"Alpha OpenAI", models.ProviderOpenAI}, {"Beta Anthropic", models.ProviderAnthropic},
+		{"mix", models.ProviderTest}, {"Sol xhigh", models.ProviderTest},
+	} {
+		require.NoError(t, modelsRepo.Create(ctx, &models.LLMConfig{Name: item.name, Provider: item.provider, Model: strings.ToLower(strings.ReplaceAll(item.name, " ", "-"))}))
+	}
+	page, err := modelsRepo.ListCardsPageFiltered(ctx, 1, 1, persistence.ModelCardListFilter{Provider: string(models.ProviderAnthropic), Sort: "name_asc"})
+	require.NoError(t, err)
+	require.Len(t, page, 1)
+	require.Equal(t, "Zulu Anthropic", page[0].Name)
+	modelNames := func(configs []models.LLMConfig) []string {
+		names := make([]string, len(configs))
+		for i := range configs {
+			names[i] = configs[i].Name
+		}
+		return names
+	}
+	alphabeticalModels, err := modelsRepo.ListCardsPageFiltered(ctx, 10, 0, persistence.ModelCardListFilter{Sort: "name_asc"})
+	require.NoError(t, err)
+	alphabeticalNames := modelNames(alphabeticalModels)
+	require.Contains(t, alphabeticalNames, "mix")
+	require.Contains(t, alphabeticalNames, "Sol xhigh")
+	require.Less(t, slices.Index(alphabeticalNames, "mix"), slices.Index(alphabeticalNames, "Sol xhigh"), alphabeticalNames)
+	reverseModels, err := modelsRepo.ListCardsPageFiltered(ctx, 10, 0, persistence.ModelCardListFilter{Sort: "name_desc"})
+	require.NoError(t, err)
+	reverseNames := modelNames(reverseModels)
+	require.Contains(t, reverseNames, "mix")
+	require.Contains(t, reverseNames, "Sol xhigh")
+	require.Less(t, slices.Index(reverseNames, "Sol xhigh"), slices.Index(reverseNames, "mix"), reverseNames)
+
+	projectRepo := NewProjectRepo(db)
+	project := &models.Project{Name: "Filtered hooks"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	agentsRepo := NewAgentRepo(db)
+	enabled := true
+	for _, agent := range []*models.Agent{
+		{Name: "A disabled agent", Model: "inherit", Enabled: false},
+		{Name: "b enabled agent", Model: "inherit", Enabled: true},
+		{Name: "C enabled agent", Model: "inherit", Enabled: true},
+	} {
+		require.NoError(t, agentsRepo.Create(ctx, agent))
+	}
+	agentsPage, err := agentsRepo.ListPageFiltered(ctx, 1, 1, persistence.AgentPageFilter{Enabled: &enabled, Search: "enabled agent", Sort: "name_asc"})
+	require.NoError(t, err)
+	require.Len(t, agentsPage, 1)
+	require.Equal(t, "C enabled agent", agentsPage[0].Name)
+	descendingAgents, err := agentsRepo.ListPageFiltered(ctx, 2, 0, persistence.AgentPageFilter{Enabled: &enabled, Search: "enabled agent", Sort: "name_desc"})
+	require.NoError(t, err)
+	require.Len(t, descendingAgents, 2)
+	require.Equal(t, []string{"C enabled agent", "b enabled agent"}, []string{descendingAgents[0].Name, descendingAgents[1].Name})
+
+	automationsRepo := NewAutomationRepo(db)
+	for _, item := range []struct{ key, name, lifecycle string }{
+		{"alpha-paused", "Alpha paused", "paused"},
+		{"beta-active", "beta active", "active"},
+		{"zulu-paused", "Zulu paused", "paused"},
+	} {
+		automationID, versionID := persistence.NewID(), persistence.NewID()
+		_, insertErr := db.ExecContext(ctx, `INSERT INTO automations (id, project_id, stable_key, name, description, automation_type, lifecycle_state, health_state, created_via) VALUES (?, ?, ?, ?, 'pagination filter', 'custom', ?, 'unknown', 'test')`, automationID, project.ID, item.key, item.name, item.lifecycle)
+		require.NoError(t, insertErr)
+		_, insertErr = db.ExecContext(ctx, `INSERT INTO automation_versions (id, project_id, automation_id, version, state, source, adapter_key, published_at) VALUES (?, ?, ?, 1, 'published', 'manual', 'custom', CURRENT_TIMESTAMP)`, versionID, project.ID, automationID)
+		require.NoError(t, insertErr)
+		_, insertErr = db.ExecContext(ctx, `UPDATE automations SET published_version_id = ? WHERE id = ?`, versionID, automationID)
+		require.NoError(t, insertErr)
+	}
+	automationsPage, err := automationsRepo.ListPortfolioCardsPageFiltered(ctx, project.ID, 1, 1, persistence.AutomationCardListFilter{LifecycleState: "paused", Sort: "name_asc"})
+	require.NoError(t, err)
+	require.Len(t, automationsPage, 1)
+	require.Equal(t, "Zulu paused", automationsPage[0].Automation.Name)
+	require.Zero(t, automationsPage[0].GraphNodeCount, "legacy published Automations with no saved nodes report zero graph topology")
+
+	automationsDefault, err := automationsRepo.ListPortfolioCardsPageFiltered(ctx, project.ID, 10, 0, persistence.AutomationCardListFilter{})
+	require.NoError(t, err)
+	require.Equal(t, []string{"Alpha paused", "beta active", "Zulu paused"}, []string{
+		automationsDefault[0].Automation.Name,
+		automationsDefault[1].Automation.Name,
+		automationsDefault[2].Automation.Name,
+	})
+
+	updatedAtByName := map[string]time.Time{
+		"Alpha paused": time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC),
+		"beta active":  time.Date(2026, time.January, 3, 0, 0, 0, 0, time.UTC),
+		"Zulu paused":  time.Date(2026, time.January, 2, 0, 0, 0, 0, time.UTC),
+	}
+	for name, updatedAt := range updatedAtByName {
+		_, err = db.ExecContext(ctx, `UPDATE automations SET updated_at = ? WHERE project_id = ? AND name = ?`, updatedAt, project.ID, name)
+		require.NoError(t, err)
+	}
+	automationsRecentlyUpdated, err := automationsRepo.ListPortfolioCardsPageFiltered(ctx, project.ID, 2, 0, persistence.AutomationCardListFilter{Sort: "updated_desc"})
+	require.NoError(t, err)
+	require.Len(t, automationsRecentlyUpdated, 2)
+	require.Equal(t, []string{"beta active", "Zulu paused"}, []string{
+		automationsRecentlyUpdated[0].Automation.Name,
+		automationsRecentlyUpdated[1].Automation.Name,
+	})
+	automationsRecentlyUpdatedNextPage, err := automationsRepo.ListPortfolioCardsPageFiltered(ctx, project.ID, 2, 2, persistence.AutomationCardListFilter{Sort: "updated_desc"})
+	require.NoError(t, err)
+	require.Len(t, automationsRecentlyUpdatedNextPage, 1)
+	require.Equal(t, "Alpha paused", automationsRecentlyUpdatedNextPage[0].Automation.Name)
+
+	webhookRepo := NewWebhookRepo(db)
+	for _, endpoint := range []*models.WebhookEndpoint{{ProjectID: project.ID, Name: "A disabled", Enabled: false}, {ProjectID: project.ID, Name: "b enabled", Enabled: true}, {ProjectID: project.ID, Name: "C enabled", Enabled: true}} {
+		require.NoError(t, webhookRepo.Create(ctx, endpoint))
+	}
+	hooks, err := webhookRepo.ListCardsByProjectPageFiltered(ctx, project.ID, 1, 1, persistence.WebhookCardFilter{Enabled: &enabled})
+	require.NoError(t, err)
+	require.Len(t, hooks, 1)
+	require.Equal(t, "C enabled", hooks[0].Name)
+	descendingHooks, err := webhookRepo.ListCardsByProjectPageFiltered(ctx, project.ID, 2, 0, persistence.WebhookCardFilter{Enabled: &enabled, Sort: "name_desc"})
+	require.NoError(t, err)
+	require.Equal(t, []string{"C enabled", "b enabled"}, []string{descendingHooks[0].Name, descendingHooks[1].Name})
+}
+
+func TestModelAuthStatusFilterMatchesOAuthValidityRule(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := NewLLMConfigRepo(db)
+	ctx := context.Background()
+	configs := []*models.LLMConfig{
+		{Name: "OpenAI zero expiry", Provider: models.ProviderOpenAI, Model: "gpt-test", AuthMethod: models.AuthMethodOAuth, OAuthAccessToken: "token", OAuthExpiresAt: 0},
+		{Name: "Anthropic zero expiry", Provider: models.ProviderAnthropic, Model: "claude-test", AuthMethod: models.AuthMethodOAuth, OAuthAccessToken: "token", OAuthExpiresAt: 0},
+		{Name: "Compatible zero expiry", Provider: models.ProviderOpenAICompatible, Model: "compatible-test", AuthMethod: models.AuthMethodOAuth, OAuthAccessToken: "token", OAuthExpiresAt: 0},
+		{Name: "API key", Provider: models.ProviderOpenAI, Model: "api-key-test", AuthMethod: models.AuthMethodAPIKey, APIKey: "key"},
+	}
+	for _, config := range configs {
+		require.NoError(t, repo.Create(ctx, config))
+	}
+
+	connected, err := repo.ListCardsPageFiltered(ctx, 20, 0, persistence.ModelCardListFilter{AuthStatus: "connected"})
+	require.NoError(t, err)
+	require.Equal(t, []string{"Compatible zero expiry"}, modelConfigNames(connected))
+
+	notConnected, err := repo.ListCardsPageFiltered(ctx, 20, 0, persistence.ModelCardListFilter{AuthStatus: "not_connected", Sort: "name_asc"})
+	require.NoError(t, err)
+	require.Equal(t, []string{"Anthropic zero expiry", "OpenAI zero expiry"}, modelConfigNames(notConnected))
+
+	notRequired, err := repo.ListCardsPageFiltered(ctx, 20, 0, persistence.ModelCardListFilter{AuthStatus: "not_required"})
+	require.NoError(t, err)
+	notRequiredNames := modelConfigNames(notRequired)
+	require.Contains(t, notRequiredNames, "API key")
+	require.NotContains(t, notRequiredNames, "OpenAI zero expiry")
+	require.NotContains(t, notRequiredNames, "Anthropic zero expiry")
+	require.NotContains(t, notRequiredNames, "Compatible zero expiry")
+}
+
+func modelConfigNames(configs []models.LLMConfig) []string {
+	names := make([]string, len(configs))
+	for i := range configs {
+		names[i] = configs[i].Name
+	}
+	return names
+}
+
+func BenchmarkAgentRepoListPageFilteredLargeCatalog(b *testing.B) {
+	db := testutil.NewTestDB(b)
+	projectID := seedLargeAgentCatalogForPagination(b, db, 1200)
+	repo := NewAgentRepo(db)
+	ctx := context.Background()
+
+	for _, tc := range []struct {
+		name   string
+		offset int
+	}{
+		{name: "page1", offset: 0},
+		{name: "offset500", offset: 500},
+	} {
+		b.Run(tc.name+"_indexed_repository", func(b *testing.B) {
+			for i := 0; i < b.N; i++ {
+				agents, err := repo.ListPageFiltered(ctx, 51, tc.offset, persistence.AgentPageFilter{ProjectID: projectID})
+				if err != nil {
+					b.Fatal(err)
+				}
+				if len(agents) == 0 {
+					b.Fatal("expected at least one agent")
+				}
+			}
+		})
+
+		b.Run(tc.name+"_temp_sort_baseline", func(b *testing.B) {
+			query, args := buildAgentPageFilteredQuery(51, tc.offset, persistence.AgentPageFilter{ProjectID: projectID})
+			query = strings.Replace(query, " FROM agents WHERE ", " FROM agents NOT INDEXED WHERE ", 1)
+			for i := 0; i < b.N; i++ {
+				count := benchmarkAgentPageQuery(b, db, ctx, query, args...)
+				if count == 0 {
+					b.Fatal("expected at least one agent")
+				}
+			}
+		})
+	}
+}
+
+func BenchmarkAgentRepoWriteOverheadPageIndexes(b *testing.B) {
+	for _, tc := range []struct {
+		name        string
+		dropIndexes bool
+	}{
+		{name: "with_page_indexes"},
+		{name: "without_page_indexes", dropIndexes: true},
+	} {
+		b.Run(tc.name, func(b *testing.B) {
+			db := testutil.NewTestDB(b)
+			if tc.dropIndexes {
+				dropAgentPageIndexes(b, db)
+			}
+			repo := NewAgentRepo(db)
+			ctx := context.Background()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				agent := &models.Agent{
+					Name:                fmt.Sprintf("Write Benchmark Agent %06d", i),
+					Description:         "write overhead fixture",
+					SystemPrompt:        "prompt",
+					Model:               "inherit",
+					SelectableAsPrimary: true,
+					Enabled:             true,
+				}
+				if err := repo.Create(ctx, agent); err != nil {
+					b.Fatal(err)
+				}
+				agent.Description = "updated write overhead fixture"
+				if err := repo.Update(ctx, agent); err != nil {
+					b.Fatal(err)
+				}
+				if err := repo.Delete(ctx, agent.ID); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
+func benchmarkAgentPageQuery(b *testing.B, db *sql.DB, ctx context.Context, query string, args ...any) int {
+	b.Helper()
+	rows, err := db.QueryContext(ctx, query, args...)
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer rows.Close()
+
+	count := 0
+	for rows.Next() {
+		if _, err := scanAgent(rows); err != nil {
+			b.Fatal(err)
+		}
+		count++
+	}
+	if err := rows.Err(); err != nil {
+		b.Fatal(err)
+	}
+	return count
+}
+
+func dropAgentPageIndexes(b *testing.B, db *sql.DB) {
+	b.Helper()
+	for _, stmt := range []string{
+		`DROP INDEX IF EXISTS idx_agents_live_created_page`,
+		`DROP INDEX IF EXISTS idx_agents_live_updated_page`,
+		`DROP INDEX IF EXISTS idx_agents_live_name_page`,
+	} {
+		if _, err := db.Exec(stmt); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func TestLLMConfigRepoListCardsPageBoundsSearchAndCompactProjection(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := NewLLMConfigRepo(db)
+	ctx := context.Background()
+
+	for i := 0; i < 5; i++ {
+		config := &models.LLMConfig{
+			Name:          fmt.Sprintf("Page Model %02d", i),
+			Provider:      models.ProviderTest,
+			Model:         fmt.Sprintf("page-model-%02d", i),
+			APIKey:        "card-secret",
+			ExtraBodyJSON: strings.Repeat("large-edit-only-payload", 20),
+		}
+		require.NoError(t, repo.Create(ctx, config))
+	}
+
+	first, err := repo.ListCardsPage(ctx, 3, 0, "page model")
+	require.NoError(t, err)
+	require.Len(t, first, 3)
+	require.Equal(t, "Page Model 00", first[0].Name)
+	require.Equal(t, "Page Model 02", first[2].Name)
+	require.Equal(t, "present", first[0].APIKey)
+	require.Empty(t, first[0].ExtraBodyJSON)
+
+	second, err := repo.ListCardsPage(ctx, 3, 3, "page model")
+	require.NoError(t, err)
+	require.Len(t, second, 2)
+	require.Equal(t, "Page Model 03", second[0].Name)
+	require.Equal(t, "Page Model 04", second[1].Name)
+
+	filtered, err := repo.ListCardsPage(ctx, 3, 0, "MODEL 04")
+	require.NoError(t, err)
+	require.Len(t, filtered, 1)
+	require.Equal(t, "Page Model 04", filtered[0].Name)
+}
+
+func TestAgentRepoListPageFiltersArchivedAndSearchesBeforeOffset(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := NewAgentRepo(db)
+	ctx := context.Background()
+
+	for i := 0; i < 5; i++ {
+		agent := &models.Agent{
+			Name:                fmt.Sprintf("Paged Agent %02d", i),
+			Description:         "card description",
+			SystemPrompt:        "bounded prompt",
+			Model:               "inherit",
+			SelectableAsPrimary: true,
+			Enabled:             true,
+		}
+		require.NoError(t, repo.Create(ctx, agent))
+	}
+	archived := &models.Agent{Name: "Paged Agent Archived", Model: "inherit", GeneratedStatus: models.AgentStatusArchived}
+	require.NoError(t, repo.Create(ctx, archived))
+
+	first, err := repo.ListPage(ctx, 3, 0, "paged agent")
+	require.NoError(t, err)
+	require.Len(t, first, 3)
+	require.Equal(t, "Paged Agent 00", first[0].Name)
+	require.Equal(t, "Paged Agent 02", first[2].Name)
+
+	second, err := repo.ListPage(ctx, 3, 3, "paged agent")
+	require.NoError(t, err)
+	require.Len(t, second, 2)
+	require.Equal(t, "Paged Agent 03", second[0].Name)
+	require.Equal(t, "Paged Agent 04", second[1].Name)
+
+	for _, agent := range append(first, second...) {
+		require.NotEqual(t, models.AgentStatusArchived, agent.GeneratedStatus)
+	}
+}
+
+func TestAgentRepoListPageFilteredSortsAvoidTempBTreeOnLargeCatalog(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectID := seedLargeAgentCatalogForPagination(t, db, 1200)
+
+	for _, tc := range []struct {
+		name      string
+		sort      string
+		wantIndex string
+	}{
+		{name: "default_name_asc", sort: "", wantIndex: "idx_agents_live_name_page"},
+		{name: "name_desc_reverse_scan", sort: "name_desc", wantIndex: "idx_agents_live_name_page"},
+		{name: "updated_desc", sort: "updated_desc", wantIndex: "idx_agents_live_updated_page"},
+		{name: "created_desc", sort: "created_desc", wantIndex: "idx_agents_live_created_page"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			query, args := buildAgentPageFilteredQuery(51, 250, persistence.AgentPageFilter{ProjectID: projectID, Sort: tc.sort})
+			plan := explainSQLitePlan(t, db, ctx, query, args...)
+			require.NotContains(t, strings.ToUpper(plan), "USE TEMP B-TREE", plan)
+			require.Contains(t, plan, tc.wantIndex, plan)
+		})
+	}
+
+	repo := NewAgentRepo(db)
+	page, err := repo.ListPageFiltered(ctx, 25, 100, persistence.AgentPageFilter{ProjectID: projectID})
+	require.NoError(t, err)
+	require.Len(t, page, 25)
+	for _, agent := range page {
+		require.NotEqual(t, models.AgentStatusArchived, agent.GeneratedStatus)
+		if agent.Scope == models.AgentScopeProject {
+			require.Equal(t, projectID, agent.ProjectID)
+		}
+	}
+}
+
+func explainSQLitePlan(t *testing.T, db *sql.DB, ctx context.Context, query string, args ...any) string {
+	t.Helper()
+	rows, err := db.QueryContext(ctx, `EXPLAIN QUERY PLAN `+query, args...)
+	require.NoError(t, err)
+	defer rows.Close()
+
+	var details []string
+	for rows.Next() {
+		var id, parent, notUsed int
+		var detail string
+		require.NoError(t, rows.Scan(&id, &parent, &notUsed, &detail))
+		details = append(details, detail)
+	}
+	require.NoError(t, rows.Err())
+	return strings.Join(details, "\n")
+}
+
+func seedLargeAgentCatalogForPagination(t testing.TB, db *sql.DB, total int) string {
+	t.Helper()
+	ctx := context.Background()
+	projectRepo := NewProjectRepo(db)
+	currentProject := &models.Project{Name: "Agent pagination current"}
+	otherProject := &models.Project{Name: "Agent pagination other"}
+	require.NoError(t, projectRepo.Create(ctx, currentProject))
+	require.NoError(t, projectRepo.Create(ctx, otherProject))
+
+	tx, err := db.BeginTx(ctx, nil)
+	require.NoError(t, err)
+	stmt, err := tx.PrepareContext(ctx, `
+		INSERT INTO agents (
+			id, name, description, system_prompt, model, tools, tool_config,
+			plugins, mcp_servers, skills, key, scope, project_id, selectable_as_primary,
+			enabled, created_by, generated_status, source_refs_json, created_at, updated_at
+		) VALUES (?, ?, ?, ?, 'inherit', '[]', '{}', '[]', '[]', '[]', ?, ?, ?, 1, ?, 'user', ?, '[]', ?, ?)`)
+	require.NoError(t, err)
+	defer stmt.Close()
+
+	baseCreated := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
+	for i := 0; i < total; i++ {
+		scope := string(models.AgentScopeGlobal)
+		var projectID any
+		if i%3 == 1 {
+			scope = string(models.AgentScopeProject)
+			projectID = currentProject.ID
+		} else if i%3 == 2 {
+			scope = string(models.AgentScopeProject)
+			projectID = otherProject.ID
+		}
+		status := string(models.AgentStatusUserEdited)
+		if i%29 == 0 {
+			status = string(models.AgentStatusArchived)
+		}
+		enabled := 1
+		if i%7 == 0 {
+			enabled = 0
+		}
+		createdAt := baseCreated.Add(time.Duration(i) * time.Minute)
+		updatedAt := baseCreated.Add(time.Duration(total-i) * time.Minute)
+		_, err := stmt.ExecContext(ctx,
+			fmt.Sprintf("agent_page_%04d", i),
+			fmt.Sprintf("Pagination Agent %04d", total-i),
+			"large catalog pagination fixture",
+			"bounded prompt",
+			fmt.Sprintf("agent_page_%04d", i),
+			scope,
+			projectID,
+			enabled,
+			status,
+			createdAt.Format("2006-01-02 15:04:05"),
+			updatedAt.Format("2006-01-02 15:04:05"),
+		)
+		require.NoError(t, err)
+	}
+	require.NoError(t, tx.Commit())
+	return currentProject.ID
+}
+
+func TestWebhookRepoListCardsByProjectPageIsolatedAndSearchable(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	projectRepo := NewProjectRepo(db)
+	repo := NewWebhookRepo(db)
+	ctx := context.Background()
+	project := &models.Project{Name: "Webhook page project"}
+	other := &models.Project{Name: "Other webhook page project"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	require.NoError(t, projectRepo.Create(ctx, other))
+
+	for i := 0; i < 3; i++ {
+		endpoint := &models.WebhookEndpoint{ProjectID: project.ID, Name: fmt.Sprintf("Paged Hook %02d", i), Enabled: true}
+		require.NoError(t, repo.Create(ctx, endpoint))
+	}
+	otherEndpoint := &models.WebhookEndpoint{ProjectID: other.ID, Name: "Paged Hook Other Project", Enabled: true}
+	require.NoError(t, repo.Create(ctx, otherEndpoint))
+
+	first, err := repo.ListCardsByProjectPage(ctx, project.ID, 2, 0, "paged hook")
+	require.NoError(t, err)
+	require.Len(t, first, 2)
+	require.Equal(t, "Paged Hook 00", first[0].Name)
+
+	second, err := repo.ListCardsByProjectPage(ctx, project.ID, 2, 2, "paged hook")
+	require.NoError(t, err)
+	require.Len(t, second, 1)
+	require.Equal(t, "Paged Hook 02", second[0].Name)
+
+	otherPage, err := repo.ListCardsByProjectPage(ctx, project.ID, 20, 0, "other project")
+	require.NoError(t, err)
+	require.Empty(t, otherPage)
+	labelSearch, err := repo.ListCardsByProjectPage(ctx, project.ID, 20, 0, "webhook")
+	require.NoError(t, err)
+	require.Len(t, labelSearch, 3)
+}
+
+func TestCustomPersonalityRepoListPageUsesPromptPreviewAndSearchesPageSet(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := NewCustomPersonalityRepo(db)
+	ctx := context.Background()
+
+	for i := 0; i < 4; i++ {
+		personality := &models.CustomPersonality{
+			Name:         fmt.Sprintf("Paged Personality %02d", i),
+			Key:          fmt.Sprintf("paged_personality_%02d", i),
+			Description:  "custom card",
+			SystemPrompt: strings.Repeat("prompt body ", 30),
+		}
+		require.NoError(t, repo.Create(ctx, personality))
+	}
+
+	first, err := repo.ListPage(ctx, 3, 0, "paged personality")
+	require.NoError(t, err)
+	require.Len(t, first, 3)
+	require.Equal(t, "Paged Personality 00", first[0].Name)
+	require.Len(t, first[0].SystemPromptPreview, 150)
+	require.Empty(t, first[0].SystemPrompt)
+
+	second, err := repo.ListPage(ctx, 3, 3, "paged personality")
+	require.NoError(t, err)
+	require.Len(t, second, 1)
+	require.Equal(t, "Paged Personality 03", second[0].Name)
+}
+
+func TestAlertRepoListFilteredSummariesPageSearchesWithinProject(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	projectRepo := NewProjectRepo(db)
+	repo := NewAlertRepo(db)
+	ctx := context.Background()
+	project := &models.Project{Name: "Alert page project"}
+	other := &models.Project{Name: "Other alert page project"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	require.NoError(t, projectRepo.Create(ctx, other))
+
+	for i := 0; i < 4; i++ {
+		alert := &models.Alert{
+			ProjectID: project.ID,
+			Type:      models.AlertCustom,
+			Severity:  models.SeverityWarning,
+			Title:     fmt.Sprintf("Paged notification %02d", i),
+			Message:   "visible summary",
+			Source:    "pagination-test",
+		}
+		require.NoError(t, repo.Create(ctx, alert))
+	}
+	otherAlert := &models.Alert{
+		ProjectID: other.ID,
+		Type:      models.AlertCustom,
+		Severity:  models.SeverityError,
+		Title:     "Paged notification other project",
+		Message:   "foreign summary",
+	}
+	require.NoError(t, repo.Create(ctx, otherAlert))
+
+	first, err := repo.ListFilteredSummaries(ctx, project.ID, models.AlertListFilter{Limit: 3, Offset: 0, Search: "PAGED NOTIFICATION"})
+	require.NoError(t, err)
+	require.Len(t, first, 3)
+	bySource, err := repo.ListFilteredSummaries(ctx, project.ID, models.AlertListFilter{Limit: 20, Search: "pagination-test"})
+	require.NoError(t, err)
+	require.Len(t, bySource, 4)
+	formattedCreatedAt := first[0].CreatedAt.Local().Format("Jan 2, 2006 3:04 PM")
+	byFormattedDate, err := repo.ListFilteredSummaries(ctx, project.ID, models.AlertListFilter{Limit: 20, Search: formattedCreatedAt})
+	require.NoError(t, err)
+	require.NotEmpty(t, byFormattedDate)
+	second, err := repo.ListFilteredSummaries(ctx, project.ID, models.AlertListFilter{Limit: 3, Offset: 3, Search: "paged notification"})
+	require.NoError(t, err)
+	require.Len(t, second, 1)
+
+	foreign, err := repo.ListFilteredSummaries(ctx, project.ID, models.AlertListFilter{Limit: 20, Search: "foreign summary"})
+	require.NoError(t, err)
+	require.Empty(t, foreign)
+}
+
+func TestAlertRepoListFilteredSummariesSupportsWorkflowFiltersAndPagination(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	projectRepo := NewProjectRepo(db)
+	repo := NewAlertRepo(db)
+	ctx := context.Background()
+	project := &models.Project{Name: "Alert workflow filter project"}
+	other := &models.Project{Name: "Other alert workflow project"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	require.NoError(t, projectRepo.Create(ctx, other))
+
+	implementationTask := &models.Task{
+		ProjectID: project.ID, Title: "Alert implementation", Prompt: "Implement the alert.",
+		Category: models.CategoryBacklog, Priority: 2, Status: models.StatusPending,
+	}
+	require.NoError(t, NewTaskRepo(db, nil).Create(ctx, implementationTask))
+	implementationTaskID := implementationTask.ID
+	alerts := []struct {
+		title      string
+		decision   models.AlertDecisionState
+		processing models.AlertProcessingState
+		message    string
+	}{
+		{"Pending unclaimed", models.AlertDecisionPending, models.AlertProcessingUnclaimed, "pending work"},
+		{"Approved failed", models.AlertDecisionApproved, models.AlertProcessingFailed, "search intersection"},
+		{"Approved claimed", models.AlertDecisionApproved, models.AlertProcessingClaimed, "claimed work"},
+		{"Rejected completed", models.AlertDecisionRejected, models.AlertProcessingCompleted, "completed work"},
+		{"Dismissed linked", models.AlertDecisionDismissed, models.AlertProcessingImplementationTaskLinked, "linked work"},
+		{"Operational not applicable", models.AlertDecisionNotRequired, models.AlertProcessingNotApplicable, "operational work"},
+	}
+	for _, tc := range alerts {
+		alert := &models.Alert{
+			ProjectID:       project.ID,
+			Type:            models.AlertCustom,
+			Severity:        models.SeverityInfo,
+			Title:           tc.title,
+			Message:         tc.message,
+			DecisionState:   tc.decision,
+			ProcessingState: tc.processing,
+		}
+		if tc.processing == models.AlertProcessingImplementationTaskLinked {
+			alert.ImplementationTaskID = &implementationTaskID
+		}
+		require.NoError(t, repo.Create(ctx, alert))
+	}
+	foreign := &models.Alert{
+		ProjectID:       other.ID,
+		Type:            models.AlertCustom,
+		Severity:        models.SeverityInfo,
+		Title:           "Approved failed foreign",
+		Message:         "search intersection",
+		DecisionState:   models.AlertDecisionApproved,
+		ProcessingState: models.AlertProcessingFailed,
+	}
+	require.NoError(t, repo.Create(ctx, foreign))
+
+	pending, err := repo.ListFilteredSummaries(ctx, project.ID, models.AlertListFilter{
+		DecisionState: models.AlertDecisionPending, Limit: 20,
+	})
+	require.NoError(t, err)
+	require.Len(t, pending, 1)
+	require.Equal(t, "Pending unclaimed", pending[0].Title)
+
+	failed, err := repo.ListFilteredSummaries(ctx, project.ID, models.AlertListFilter{
+		ProcessingState: models.AlertProcessingFailed, Limit: 20,
+	})
+	require.NoError(t, err)
+	require.Len(t, failed, 1)
+	require.Equal(t, "Approved failed", failed[0].Title)
+
+	intersection, err := repo.ListFilteredSummaries(ctx, project.ID, models.AlertListFilter{
+		DecisionState: models.AlertDecisionApproved, ProcessingState: models.AlertProcessingFailed,
+		Search: "SEARCH INTERSECTION", Limit: 20,
+	})
+	require.NoError(t, err)
+	require.Len(t, intersection, 1)
+	require.Equal(t, "Approved failed", intersection[0].Title)
+
+	operational, err := repo.ListFilteredSummaries(ctx, project.ID, models.AlertListFilter{
+		DecisionState: models.AlertDecisionNotRequired, ProcessingState: models.AlertProcessingNotApplicable, Limit: 20,
+	})
+	require.NoError(t, err)
+	require.Len(t, operational, 1)
+	require.Equal(t, "Operational not applicable", operational[0].Title)
+
+	allApproved, err := repo.ListFilteredSummaries(ctx, project.ID, models.AlertListFilter{
+		DecisionState: models.AlertDecisionApproved, Limit: 1, Offset: 0,
+	})
+	require.NoError(t, err)
+	require.Len(t, allApproved, 1)
+	secondApproved, err := repo.ListFilteredSummaries(ctx, project.ID, models.AlertListFilter{
+		DecisionState: models.AlertDecisionApproved, Limit: 1, Offset: 1,
+	})
+	require.NoError(t, err)
+	require.Len(t, secondApproved, 1)
+	require.NotEqual(t, allApproved[0].ID, secondApproved[0].ID)
+
+	foreignSearch, err := repo.ListFilteredSummaries(ctx, project.ID, models.AlertListFilter{
+		DecisionState: models.AlertDecisionApproved, ProcessingState: models.AlertProcessingFailed,
+		Search: "foreign", Limit: 20,
+	})
+	require.NoError(t, err)
+	require.Empty(t, foreignSearch)
+}

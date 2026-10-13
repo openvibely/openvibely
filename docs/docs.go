@@ -92,7 +92,7 @@ const docTemplate = `{
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/repository.AgentUsage"
+                                "$ref": "#/definitions/persistence.AgentUsage"
                             }
                         }
                     },
@@ -129,7 +129,7 @@ const docTemplate = `{
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/repository.AvgExecutionTime"
+                                "$ref": "#/definitions/persistence.AvgExecutionTime"
                             }
                         }
                     },
@@ -173,7 +173,7 @@ const docTemplate = `{
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/repository.AvgExecutionTime"
+                                "$ref": "#/definitions/persistence.AvgExecutionTime"
                             }
                         }
                     },
@@ -350,7 +350,7 @@ const docTemplate = `{
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/repository.ExecutionTrend"
+                                "$ref": "#/definitions/persistence.ExecutionTrend"
                             }
                         }
                     },
@@ -394,7 +394,7 @@ const docTemplate = `{
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/repository.FailedTaskPattern"
+                                "$ref": "#/definitions/persistence.FailedTaskPattern"
                             }
                         }
                     },
@@ -438,7 +438,7 @@ const docTemplate = `{
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/repository.TaskFrequency"
+                                "$ref": "#/definitions/persistence.TaskFrequency"
                             }
                         }
                     },
@@ -602,7 +602,7 @@ const docTemplate = `{
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/repository.SuccessFailureRate"
+                                "$ref": "#/definitions/persistence.SuccessFailureRate"
                             }
                         }
                     },
@@ -664,7 +664,7 @@ const docTemplate = `{
                     "200": {
                         "description": "Task-run activity",
                         "schema": {
-                            "$ref": "#/definitions/repository.TaskRunActivity"
+                            "$ref": "#/definitions/persistence.TaskRunActivity"
                         }
                     },
                     "400": {
@@ -3877,7 +3877,7 @@ const docTemplate = `{
                 }
             }
         },
-        "repository.AgentUsage": {
+        "persistence.AgentUsage": {
             "type": "object",
             "properties": {
                 "agentID": {
@@ -3903,7 +3903,7 @@ const docTemplate = `{
                 }
             }
         },
-        "repository.AvgExecutionTime": {
+        "persistence.AvgExecutionTime": {
             "type": "object",
             "properties": {
                 "avgMs": {
@@ -3929,7 +3929,7 @@ const docTemplate = `{
                 }
             }
         },
-        "repository.ExecutionTrend": {
+        "persistence.ExecutionTrend": {
             "type": "object",
             "properties": {
                 "count": {
@@ -3940,7 +3940,7 @@ const docTemplate = `{
                 }
             }
         },
-        "repository.FailedTaskPattern": {
+        "persistence.FailedTaskPattern": {
             "type": "object",
             "properties": {
                 "failureCount": {
@@ -3960,7 +3960,7 @@ const docTemplate = `{
                 }
             }
         },
-        "repository.SuccessFailureRate": {
+        "persistence.SuccessFailureRate": {
             "type": "object",
             "properties": {
                 "cancelledCount": {
@@ -3984,7 +3984,7 @@ const docTemplate = `{
                 }
             }
         },
-        "repository.TaskFrequency": {
+        "persistence.TaskFrequency": {
             "type": "object",
             "properties": {
                 "executionCount": {
@@ -4001,7 +4001,7 @@ const docTemplate = `{
                 }
             }
         },
-        "repository.TaskRunActivity": {
+        "persistence.TaskRunActivity": {
             "type": "object",
             "properties": {
                 "hours": {
@@ -4013,12 +4013,12 @@ const docTemplate = `{
                 "models": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/repository.TaskRunModel"
+                        "$ref": "#/definitions/persistence.TaskRunModel"
                     }
                 }
             }
         },
-        "repository.TaskRunModel": {
+        "persistence.TaskRunModel": {
             "type": "object",
             "properties": {
                 "average_run_ms": {
@@ -4048,12 +4048,12 @@ const docTemplate = `{
                 "trend": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/repository.TaskRunPeriod"
+                        "$ref": "#/definitions/persistence.TaskRunPeriod"
                     }
                 }
             }
         },
-        "repository.TaskRunPeriod": {
+        "persistence.TaskRunPeriod": {
             "type": "object",
             "properties": {
                 "average_run_ms": {

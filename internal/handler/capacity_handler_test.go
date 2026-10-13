@@ -10,7 +10,7 @@ import (
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -611,7 +611,7 @@ func TestHandler_ProjectCapacityPendingCountFailureFallsBackToEmptyCounts(t *tes
 
 	closedDB := testutil.NewTestDB(t)
 	require.NoError(t, closedDB.Close())
-	h.taskRepo = repository.NewTaskRepo(closedDB, nil)
+	h.taskRepo = sqlite.NewTaskRepo(closedDB, nil)
 
 	collectionReq := httptest.NewRequest(http.MethodGet, "/api/capacity/projects", nil)
 	collectionRec := httptest.NewRecorder()

@@ -20,7 +20,7 @@ import (
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/stretchr/testify/require"
 )
@@ -143,12 +143,12 @@ func TestLLMService_ExecuteTaskWithAgent_PublishesInitialThreadExecutionStarted(
 	}
 	defer broadcaster.Unsubscribe(sub)
 
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	execRepo := repository.NewExecutionRepo(db)
-	taskRepo := repository.NewTaskRepo(db, broadcaster)
-	projectRepo := repository.NewProjectRepo(db)
-	scheduleRepo := repository.NewScheduleRepo(db)
-	attachmentRepo := repository.NewAttachmentRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	execRepo := sqlite.NewExecutionRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, broadcaster)
+	projectRepo := sqlite.NewProjectRepo(db)
+	scheduleRepo := sqlite.NewScheduleRepo(db)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
 	agent := ensureDefaultAgent(t, llmConfigRepo)
 	project := &models.Project{Name: "Initial Thread Event Project", RepoPath: t.TempDir()}
 	if err := projectRepo.Create(ctx, project); err != nil {
@@ -194,12 +194,12 @@ func TestLLMService_ExecuteTaskWithAgent_PublishesInitialThreadExecutionStarted(
 func TestLLMService_ExecuteTaskWithAgent_PublishesCompletedTerminalEvent(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	execRepo := repository.NewExecutionRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	projectRepo := repository.NewProjectRepo(db)
-	scheduleRepo := repository.NewScheduleRepo(db)
-	attachmentRepo := repository.NewAttachmentRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	execRepo := sqlite.NewExecutionRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	projectRepo := sqlite.NewProjectRepo(db)
+	scheduleRepo := sqlite.NewScheduleRepo(db)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
 	agent := ensureDefaultAgent(t, llmConfigRepo)
 	project := &models.Project{Name: "Completed terminal stream project", RepoPath: t.TempDir()}
 	if err := projectRepo.Create(ctx, project); err != nil {
@@ -274,13 +274,13 @@ func TestLLMService_ExecuteTaskWithAgent_PublishesCompletedTerminalEvent(t *test
 func TestLLMService_ExecuteTaskWithAgent_PromotesQueuedTaskThreadInputAfterCompletion(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	execRepo := repository.NewExecutionRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	projectRepo := repository.NewProjectRepo(db)
-	scheduleRepo := repository.NewScheduleRepo(db)
-	attachmentRepo := repository.NewAttachmentRepo(db)
-	threadInputRepo := repository.NewThreadInputRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	execRepo := sqlite.NewExecutionRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	projectRepo := sqlite.NewProjectRepo(db)
+	scheduleRepo := sqlite.NewScheduleRepo(db)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
+	threadInputRepo := sqlite.NewThreadInputRepo(db)
 	agent := ensureDefaultAgent(t, llmConfigRepo)
 	project := &models.Project{Name: "Worker Queue Promotion Service", RepoPath: t.TempDir()}
 	if err := projectRepo.Create(ctx, project); err != nil {
@@ -336,12 +336,12 @@ func TestLLMService_ExecuteTaskWithAgent_PromotesQueuedTaskThreadInputAfterCompl
 func TestLLMService_ExecuteTaskWithAgent_PreservesFailedTranscriptForTaskThreadFollowup(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	execRepo := repository.NewExecutionRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	projectRepo := repository.NewProjectRepo(db)
-	scheduleRepo := repository.NewScheduleRepo(db)
-	attachmentRepo := repository.NewAttachmentRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	execRepo := sqlite.NewExecutionRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	projectRepo := sqlite.NewProjectRepo(db)
+	scheduleRepo := sqlite.NewScheduleRepo(db)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
 	agent := ensureDefaultAgent(t, llmConfigRepo)
 	project := &models.Project{Name: "Failed Thread Context", RepoPath: t.TempDir()}
 	if err := projectRepo.Create(ctx, project); err != nil {
@@ -413,12 +413,12 @@ func TestLLMService_ExecuteTaskWithAgent_PreservesFailedTranscriptForTaskThreadF
 func TestLLMService_ExecuteTaskWithAgent_FailsEmptySuccessfulResponse(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	execRepo := repository.NewExecutionRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	projectRepo := repository.NewProjectRepo(db)
-	scheduleRepo := repository.NewScheduleRepo(db)
-	attachmentRepo := repository.NewAttachmentRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	execRepo := sqlite.NewExecutionRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	projectRepo := sqlite.NewProjectRepo(db)
+	scheduleRepo := sqlite.NewScheduleRepo(db)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
 	agent := ensureDefaultAgent(t, llmConfigRepo)
 	project := &models.Project{Name: "Empty Provider Response", RepoPath: t.TempDir()}
 	if err := projectRepo.Create(ctx, project); err != nil {
@@ -461,12 +461,12 @@ func TestLLMService_ExecuteTaskWithAgent_FailsEmptySuccessfulResponse(t *testing
 func TestLLMService_ExecuteTaskWithAgent_IgnoresStatusMarkerMentionInProse(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	execRepo := repository.NewExecutionRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	projectRepo := repository.NewProjectRepo(db)
-	scheduleRepo := repository.NewScheduleRepo(db)
-	attachmentRepo := repository.NewAttachmentRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	execRepo := sqlite.NewExecutionRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	projectRepo := sqlite.NewProjectRepo(db)
+	scheduleRepo := sqlite.NewScheduleRepo(db)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
 	agent := ensureDefaultAgent(t, llmConfigRepo)
 	project := &models.Project{Name: "Codex Marker Prose", RepoPath: t.TempDir()}
 	if err := projectRepo.Create(ctx, project); err != nil {
@@ -509,12 +509,12 @@ func TestLLMService_ExecuteTaskWithAgent_IgnoresStatusMarkerMentionInProse(t *te
 func TestLLMService_ExecuteTaskWithAgent_IgnoresIncompleteStatusControl(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	execRepo := repository.NewExecutionRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	projectRepo := repository.NewProjectRepo(db)
-	scheduleRepo := repository.NewScheduleRepo(db)
-	attachmentRepo := repository.NewAttachmentRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	execRepo := sqlite.NewExecutionRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	projectRepo := sqlite.NewProjectRepo(db)
+	scheduleRepo := sqlite.NewScheduleRepo(db)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
 	agent := ensureDefaultAgent(t, llmConfigRepo)
 	project := &models.Project{Name: "Incomplete Status Control", RepoPath: t.TempDir()}
 	if err := projectRepo.Create(ctx, project); err != nil {
@@ -565,12 +565,12 @@ func TestLLMService_ExecuteTaskWithAgent_IgnoresExtraStatusReasonDelimiters(t *t
 		t.Run(tc.name, func(t *testing.T) {
 			db := testutil.NewTestDB(t)
 			ctx := context.Background()
-			llmConfigRepo := repository.NewLLMConfigRepo(db)
-			execRepo := repository.NewExecutionRepo(db)
-			taskRepo := repository.NewTaskRepo(db, nil)
-			projectRepo := repository.NewProjectRepo(db)
-			scheduleRepo := repository.NewScheduleRepo(db)
-			attachmentRepo := repository.NewAttachmentRepo(db)
+			llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+			execRepo := sqlite.NewExecutionRepo(db)
+			taskRepo := sqlite.NewTaskRepo(db, nil)
+			projectRepo := sqlite.NewProjectRepo(db)
+			scheduleRepo := sqlite.NewScheduleRepo(db)
+			attachmentRepo := sqlite.NewAttachmentRepo(db)
 			agent := ensureDefaultAgent(t, llmConfigRepo)
 			project := &models.Project{Name: "Extra Status Delimiter " + tc.name, RepoPath: t.TempDir()}
 			if err := projectRepo.Create(ctx, project); err != nil {
@@ -608,13 +608,13 @@ func TestLLMService_ExecuteTaskWithAgent_IgnoresExtraStatusReasonDelimiters(t *t
 func TestLLMService_ExecuteTaskWithAgent_PromotesQueuedTaskThreadInputAfterCompletionWithMultipleQueued(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	execRepo := repository.NewExecutionRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	projectRepo := repository.NewProjectRepo(db)
-	scheduleRepo := repository.NewScheduleRepo(db)
-	attachmentRepo := repository.NewAttachmentRepo(db)
-	threadInputRepo := repository.NewThreadInputRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	execRepo := sqlite.NewExecutionRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	projectRepo := sqlite.NewProjectRepo(db)
+	scheduleRepo := sqlite.NewScheduleRepo(db)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
+	threadInputRepo := sqlite.NewThreadInputRepo(db)
 	agent := ensureDefaultAgent(t, llmConfigRepo)
 	project := &models.Project{Name: "Worker Queue Promotion Service Multi", RepoPath: t.TempDir()}
 	if err := projectRepo.Create(ctx, project); err != nil {
@@ -659,9 +659,9 @@ func TestLLMService_ExecuteTaskWithAgent_PromotesQueuedTaskThreadInputAfterCompl
 
 func TestLLMService_ExecuteTask_NoDefaultAgent(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	execRepo := repository.NewExecutionRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	execRepo := sqlite.NewExecutionRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
 	ctx := context.Background()
 
 	agents, _ := llmConfigRepo.List(ctx)
@@ -669,9 +669,9 @@ func TestLLMService_ExecuteTask_NoDefaultAgent(t *testing.T) {
 		llmConfigRepo.Delete(ctx, a.ID)
 	}
 
-	scheduleRepo := repository.NewScheduleRepo(db)
-	attachmentRepo := repository.NewAttachmentRepo(db)
-	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, repository.NewProjectRepo(db), scheduleRepo, attachmentRepo)
+	scheduleRepo := sqlite.NewScheduleRepo(db)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
+	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, sqlite.NewProjectRepo(db), scheduleRepo, attachmentRepo)
 	svc.SetLLMCaller(testutil.NewMockLLMCaller())
 
 	task := models.Task{
@@ -693,13 +693,13 @@ func TestLLMService_ExecuteTask_NoDefaultAgent(t *testing.T) {
 
 func TestLLMService_CallLLM_UnsupportedProvider(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	execRepo := repository.NewExecutionRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	execRepo := sqlite.NewExecutionRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
 
-	scheduleRepo := repository.NewScheduleRepo(db)
-	attachmentRepo := repository.NewAttachmentRepo(db)
-	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, repository.NewProjectRepo(db), scheduleRepo, attachmentRepo)
+	scheduleRepo := sqlite.NewScheduleRepo(db)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
+	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, sqlite.NewProjectRepo(db), scheduleRepo, attachmentRepo)
 
 	agent := models.LLMConfig{
 		Provider: "unsupported_provider",
@@ -747,8 +747,8 @@ func TestLLMService_CallAgentDirect_TestProviderUsesMockCaller(t *testing.T) {
 
 func TestLLMService_CallAgentDirect_ExplicitProjectBypassesRootDiscoveryOnSuccessAndFailure(t *testing.T) {
 	db, counter := testutil.NewStatementCountingTestDB(t)
-	projectRepo := repository.NewProjectRepo(db)
-	usageRepo := repository.NewUsageRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	usageRepo := sqlite.NewUsageRepo(db)
 	ctx := context.Background()
 
 	project := &models.Project{Name: "Explicit Usage Project", RepoPath: t.TempDir()}
@@ -797,9 +797,9 @@ func TestLLMService_CallAgentDirect_ExplicitProjectBypassesRootDiscoveryOnSucces
 
 func TestLLMService_CallAgentDirect_RecordsUsageForProjectWorktree(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	projectRepo := repository.NewProjectRepo(db)
-	usageRepo := repository.NewUsageRepo(db)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	usageRepo := sqlite.NewUsageRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
 	ctx := context.Background()
 
 	repoPath := t.TempDir()
@@ -1136,11 +1136,11 @@ func TestLLMService_CallAgentDirectWithDefinition_GenericHookAgentGetsScopedTool
 func TestLLMService_LifecycleAfterCompleteGenericAgentGetsScopedTools(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)
-	llmRepo := repository.NewLLMConfigRepo(db)
+	llmRepo := sqlite.NewLLMConfigRepo(db)
 	if err := llmRepo.Create(ctx, &models.LLMConfig{Name: "test", Provider: models.ProviderOpenAI, Model: "gpt-test", IsDefault: true}); err != nil {
 		t.Fatalf("create default model: %v", err)
 	}
-	agentRepo := repository.NewAgentRepo(db)
+	agentRepo := sqlite.NewAgentRepo(db)
 	hookAgent := &models.Agent{
 		Key:     "custom_memory_hook",
 		Name:    "Custom Memory Hook",
@@ -1155,12 +1155,12 @@ func TestLLMService_LifecycleAfterCompleteGenericAgentGetsScopedTools(t *testing
 	if err := agentRepo.Create(ctx, hookAgent); err != nil {
 		t.Fatalf("create hook agent: %v", err)
 	}
-	lifecycleRepo := repository.NewLifecycleRepo(db)
+	lifecycleRepo := sqlite.NewLifecycleRepo(db)
 	if err := lifecycleRepo.CreateHook(ctx, &models.AgentLifecycleHook{AgentID: hookAgent.ID, When: models.LifecycleAfterComplete, SkillKey: "update_custom_memory", OutputContract: models.OutputContractActivitySummary, Enabled: true}); err != nil {
 		t.Fatalf("create lifecycle hook: %v", err)
 	}
 	repoPath := t.TempDir()
-	projectRepo := repository.NewProjectRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
 	project, err := projectRepo.GetByID(ctx, "default")
 	if err != nil {
 		t.Fatalf("get default project: %v", err)
@@ -1277,14 +1277,14 @@ func TestLLMService_CallAgentDirectStreamingDetailed_PropagatesAgentDefinition(t
 
 func TestLLMService_ExecuteTaskWithAgent_SkipsNonPendingTask(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	execRepo := repository.NewExecutionRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	execRepo := sqlite.NewExecutionRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
 	ctx := context.Background()
 
-	scheduleRepo := repository.NewScheduleRepo(db)
-	attachmentRepo := repository.NewAttachmentRepo(db)
-	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, repository.NewProjectRepo(db), scheduleRepo, attachmentRepo)
+	scheduleRepo := sqlite.NewScheduleRepo(db)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
+	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, sqlite.NewProjectRepo(db), scheduleRepo, attachmentRepo)
 	svc.SetLLMCaller(testutil.NewMockLLMCaller())
 
 	agent := ensureDefaultAgent(t, llmConfigRepo)
@@ -1308,14 +1308,14 @@ func TestLLMService_ExecuteTaskWithAgent_SkipsNonPendingTask(t *testing.T) {
 
 func TestLLMService_ExecuteTaskWithAgent_SkipsRunningTask(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	execRepo := repository.NewExecutionRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	execRepo := sqlite.NewExecutionRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
 	ctx := context.Background()
 
-	scheduleRepo := repository.NewScheduleRepo(db)
-	attachmentRepo := repository.NewAttachmentRepo(db)
-	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, repository.NewProjectRepo(db), scheduleRepo, attachmentRepo)
+	scheduleRepo := sqlite.NewScheduleRepo(db)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
+	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, sqlite.NewProjectRepo(db), scheduleRepo, attachmentRepo)
 	svc.SetLLMCaller(testutil.NewMockLLMCaller())
 
 	task := &models.Task{ProjectID: "default", Title: "Already Running", Category: models.CategoryActive, Status: models.StatusRunning, Prompt: "test"}
@@ -1339,13 +1339,13 @@ func TestLLMService_ExecuteTaskWithAgent_SkipsRunningTask(t *testing.T) {
 
 func TestLLMService_ExecuteTaskWithAgent_ClaimsToolBoundarySteering(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	execRepo := repository.NewExecutionRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	threadInputRepo := repository.NewThreadInputRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	execRepo := sqlite.NewExecutionRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	threadInputRepo := sqlite.NewThreadInputRepo(db)
 	ctx := context.Background()
 
-	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, repository.NewProjectRepo(db), repository.NewScheduleRepo(db), repository.NewAttachmentRepo(db))
+	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, sqlite.NewProjectRepo(db), sqlite.NewScheduleRepo(db), sqlite.NewAttachmentRepo(db))
 	svc.SetThreadInputRepo(threadInputRepo)
 	adapter := &taskSteeringProviderAdapter{}
 	svc.providerAdapters = map[models.LLMProvider]ProviderAdapter{models.LLMProvider("task-steer-test"): adapter}
@@ -1458,13 +1458,13 @@ func TestLLMService_HydrateTaskSteeringMessagesPreservesBoundaries(t *testing.T)
 
 func TestLLMService_ExecuteTaskWithAgent_DoesNotReplayProviderCall(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	execRepo := repository.NewExecutionRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	threadInputRepo := repository.NewThreadInputRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	execRepo := sqlite.NewExecutionRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	threadInputRepo := sqlite.NewThreadInputRepo(db)
 	ctx := context.Background()
 
-	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, repository.NewProjectRepo(db), repository.NewScheduleRepo(db), repository.NewAttachmentRepo(db))
+	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, sqlite.NewProjectRepo(db), sqlite.NewScheduleRepo(db), sqlite.NewAttachmentRepo(db))
 	svc.SetThreadInputRepo(threadInputRepo)
 	testProvider := models.LLMProvider("task-steer-retry-test")
 	task := &models.Task{ProjectID: "default", Title: "Steer Main Run Retry", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "test"}
@@ -1537,13 +1537,13 @@ func TestLLMService_ExecuteTaskWithAgent_DoesNotReplayProviderCall(t *testing.T)
 
 func TestLLMService_ExecuteTaskWithAgent_RequeuesToolBoundarySteeringOnFailure(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	execRepo := repository.NewExecutionRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	threadInputRepo := repository.NewThreadInputRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	execRepo := sqlite.NewExecutionRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	threadInputRepo := sqlite.NewThreadInputRepo(db)
 	ctx := context.Background()
 
-	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, repository.NewProjectRepo(db), repository.NewScheduleRepo(db), repository.NewAttachmentRepo(db))
+	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, sqlite.NewProjectRepo(db), sqlite.NewScheduleRepo(db), sqlite.NewAttachmentRepo(db))
 	svc.SetThreadInputRepo(threadInputRepo)
 	testProvider := models.LLMProvider("task-steer-fail-test")
 	var inputID string
@@ -1602,13 +1602,13 @@ func TestLLMService_ExecuteTaskWithAgent_RequeuesToolBoundarySteeringOnFailure(t
 
 func TestLLMService_ExecuteTaskWithAgent_ExposesSteeringWakeup(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	execRepo := repository.NewExecutionRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	threadInputRepo := repository.NewThreadInputRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	execRepo := sqlite.NewExecutionRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	threadInputRepo := sqlite.NewThreadInputRepo(db)
 	ctx := context.Background()
 
-	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, repository.NewProjectRepo(db), repository.NewScheduleRepo(db), repository.NewAttachmentRepo(db))
+	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, sqlite.NewProjectRepo(db), sqlite.NewScheduleRepo(db), sqlite.NewAttachmentRepo(db))
 	svc.SetThreadInputRepo(threadInputRepo)
 	testProvider := models.LLMProvider("task-steer-wakeup-test")
 	task := &models.Task{ProjectID: "default", Title: "Steer Main Run Wakeup", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "test"}
@@ -1662,13 +1662,13 @@ func TestLLMService_ExecuteTaskWithAgent_ExposesSteeringWakeup(t *testing.T) {
 
 func TestLLMService_ExecuteTaskWithAgent_DrainsLocalSteering(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	execRepo := repository.NewExecutionRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	threadInputRepo := repository.NewThreadInputRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	execRepo := sqlite.NewExecutionRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	threadInputRepo := sqlite.NewThreadInputRepo(db)
 	ctx := context.Background()
 
-	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, repository.NewProjectRepo(db), repository.NewScheduleRepo(db), repository.NewAttachmentRepo(db))
+	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, sqlite.NewProjectRepo(db), sqlite.NewScheduleRepo(db), sqlite.NewAttachmentRepo(db))
 	svc.SetThreadInputRepo(threadInputRepo)
 	testProvider := models.LLMProvider("task-mid-turn-steer-test")
 	task := &models.Task{ProjectID: "default", Title: "Mid-turn Steer", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "test"}
@@ -1710,13 +1710,13 @@ func TestLLMService_ExecuteTaskWithAgent_DrainsLocalSteering(t *testing.T) {
 
 func TestLLMService_ExecuteTaskWithAgent_QueuesSteeringAtTerminalBoundary(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	execRepo := repository.NewExecutionRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	threadInputRepo := repository.NewThreadInputRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	execRepo := sqlite.NewExecutionRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	threadInputRepo := sqlite.NewThreadInputRepo(db)
 	ctx := context.Background()
 
-	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, repository.NewProjectRepo(db), repository.NewScheduleRepo(db), repository.NewAttachmentRepo(db))
+	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, sqlite.NewProjectRepo(db), sqlite.NewScheduleRepo(db), sqlite.NewAttachmentRepo(db))
 	svc.SetThreadInputRepo(threadInputRepo)
 	testProvider := models.LLMProvider("task-steer-terminal-boundary-test")
 	task := &models.Task{ProjectID: "default", Title: "Steer Terminal Boundary", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "test"}
@@ -1753,14 +1753,14 @@ func TestLLMService_ExecuteTaskWithAgent_QueuesSteeringAtTerminalBoundary(t *tes
 
 func TestLLMService_ExecuteTaskWithAgent_CommitFailureWithCancelledContextMarksExecutionFailed(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	execRepo := repository.NewExecutionRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	threadInputRepo := repository.NewThreadInputRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	execRepo := sqlite.NewExecutionRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	threadInputRepo := sqlite.NewThreadInputRepo(db)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, repository.NewProjectRepo(db), repository.NewScheduleRepo(db), repository.NewAttachmentRepo(db))
+	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, sqlite.NewProjectRepo(db), sqlite.NewScheduleRepo(db), sqlite.NewAttachmentRepo(db))
 	svc.SetThreadInputRepo(threadInputRepo)
 	testProvider := models.LLMProvider("task-steer-commit-cancel-test")
 	var inputID string
@@ -1837,14 +1837,14 @@ func TestLLMService_ExecuteTaskWithAgent_CommitFailureWithCancelledContextMarksE
 
 func TestLLMService_ExecuteTaskWithAgent_RequeuesRestoredSteeringOnCancellation(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	execRepo := repository.NewExecutionRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	threadInputRepo := repository.NewThreadInputRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	execRepo := sqlite.NewExecutionRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	threadInputRepo := sqlite.NewThreadInputRepo(db)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, repository.NewProjectRepo(db), repository.NewScheduleRepo(db), repository.NewAttachmentRepo(db))
+	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, sqlite.NewProjectRepo(db), sqlite.NewScheduleRepo(db), sqlite.NewAttachmentRepo(db))
 	svc.SetThreadInputRepo(threadInputRepo)
 	testProvider := models.LLMProvider("task-steer-cancel-after-reset-test")
 	var inputID string
@@ -1911,15 +1911,15 @@ func TestLLMService_ExecuteTaskWithAgent_RequeuesRestoredSteeringOnCancellation(
 
 func TestLLMService_ExecuteTaskWithAgent_RecordsExecution(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	execRepo := repository.NewExecutionRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	execRepo := sqlite.NewExecutionRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
 	ctx := context.Background()
 
-	scheduleRepo := repository.NewScheduleRepo(db)
-	attachmentRepo := repository.NewAttachmentRepo(db)
+	scheduleRepo := sqlite.NewScheduleRepo(db)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
 	mock := &testutil.MockLLMCaller{Err: fmt.Errorf("mock error: simulated failure")}
-	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, repository.NewProjectRepo(db), scheduleRepo, attachmentRepo)
+	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, sqlite.NewProjectRepo(db), scheduleRepo, attachmentRepo)
 	svc.SetLLMCaller(mock)
 
 	task := &models.Task{ProjectID: "default", Title: "Record Test", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "test"}
@@ -1947,13 +1947,13 @@ func TestLLMService_ExecuteTaskWithAgent_RecordsExecution(t *testing.T) {
 
 func TestLLMService_ExecuteTaskWithAgent_FinalizesAfterProviderSuccessWhenContextCancelled(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	execRepo := repository.NewExecutionRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	execRepo := sqlite.NewExecutionRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, repository.NewProjectRepo(db), repository.NewScheduleRepo(db), repository.NewAttachmentRepo(db))
+	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, sqlite.NewProjectRepo(db), sqlite.NewScheduleRepo(db), sqlite.NewAttachmentRepo(db))
 	testProvider := models.LLMProvider("task-finalize-cancel-after-success-test")
 	svc.providerAdapters = map[models.LLMProvider]ProviderAdapter{
 		testProvider: providerAdapterFunc(func(req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
@@ -1995,13 +1995,13 @@ func TestLLMService_ExecuteTaskWithAgent_FinalizesAfterProviderSuccessWhenContex
 
 func TestLLMService_ExecuteTaskWithAgent_FinalizesReportedFailureWhenContextCancelled(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	execRepo := repository.NewExecutionRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	execRepo := sqlite.NewExecutionRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, repository.NewProjectRepo(db), repository.NewScheduleRepo(db), repository.NewAttachmentRepo(db))
+	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, sqlite.NewProjectRepo(db), sqlite.NewScheduleRepo(db), sqlite.NewAttachmentRepo(db))
 	testProvider := models.LLMProvider("task-finalize-cancel-after-status-failed-test")
 	svc.providerAdapters = map[models.LLMProvider]ProviderAdapter{
 		testProvider: providerAdapterFunc(func(req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
@@ -2043,13 +2043,13 @@ func TestLLMService_ExecuteTaskWithAgent_FinalizesReportedFailureWhenContextCanc
 
 func TestLLMService_ExecuteTaskWithAgent_AllowsExplicitNonSelectableAgentForNormalTask(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	execRepo := repository.NewExecutionRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	agentRepo := repository.NewAgentRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	execRepo := sqlite.NewExecutionRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	agentRepo := sqlite.NewAgentRepo(db)
 	ctx := context.Background()
 
-	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, repository.NewProjectRepo(db), repository.NewScheduleRepo(db), repository.NewAttachmentRepo(db))
+	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, sqlite.NewProjectRepo(db), sqlite.NewScheduleRepo(db), sqlite.NewAttachmentRepo(db))
 	svc.SetAgentRepo(agentRepo)
 	mock := &testutil.MockLLMCaller{Response: "skill curator ran", TextOnly: "skill curator ran", Tokens: 1}
 	svc.SetLLMCaller(mock)
@@ -2098,14 +2098,14 @@ func TestLLMService_ExecuteTaskWithAgent_IncludesSendMessageRuntimeTool(t *testi
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			db := testutil.NewTestDB(t)
-			llmConfigRepo := repository.NewLLMConfigRepo(db)
-			execRepo := repository.NewExecutionRepo(db)
-			taskRepo := repository.NewTaskRepo(db, nil)
-			projectRepo := repository.NewProjectRepo(db)
+			llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+			execRepo := sqlite.NewExecutionRepo(db)
+			taskRepo := sqlite.NewTaskRepo(db, nil)
+			projectRepo := sqlite.NewProjectRepo(db)
 			ctx := context.Background()
 
-			svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, repository.NewScheduleRepo(db), repository.NewAttachmentRepo(db))
-			svc.SetChannelMessageRouter(NewChannelMessageRouter(repository.NewChannelTargetRepo(db), repository.NewSettingsRepo(db)))
+			svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, sqlite.NewScheduleRepo(db), sqlite.NewAttachmentRepo(db))
+			svc.SetChannelMessageRouter(NewChannelMessageRouter(sqlite.NewChannelTargetRepo(db), sqlite.NewSettingsRepo(db)))
 			capture := &captureProviderAdapter{}
 			svc.providerAdapters = map[models.LLMProvider]ProviderAdapter{tc.adapter: capture}
 
@@ -2139,18 +2139,18 @@ func TestLLMService_ExecuteTaskWithAgent_IncludesSendMessageRuntimeTool(t *testi
 
 func TestLLMService_ExecuteTaskWithAgent_MixtureSupportedAggregatorReceivesGrantedAndDefaultTools(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	execRepo := repository.NewExecutionRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	attachmentRepo := repository.NewAttachmentRepo(db)
-	projectRepo := repository.NewProjectRepo(db)
-	agentRepo := repository.NewAgentRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	execRepo := sqlite.NewExecutionRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	agentRepo := sqlite.NewAgentRepo(db)
 	ctx := context.Background()
 
-	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, repository.NewScheduleRepo(db), attachmentRepo)
+	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, sqlite.NewScheduleRepo(db), attachmentRepo)
 	svc.SetAgentRepo(agentRepo)
 	svc.SetTaskService(NewTaskService(taskRepo, attachmentRepo, nil))
-	svc.SetChannelMessageRouter(NewChannelMessageRouter(repository.NewChannelTargetRepo(db), repository.NewSettingsRepo(db)))
+	svc.SetChannelMessageRouter(NewChannelMessageRouter(sqlite.NewChannelTargetRepo(db), sqlite.NewSettingsRepo(db)))
 	recorder := &recordingMixtureAdapter{responses: map[string]llmcontracts.AgentResult{}, errors: map[string]error{}}
 	svc.providerAdapters = map[models.LLMProvider]ProviderAdapter{
 		models.ProviderMixture: &mixtureProviderAdapter{svc: svc},
@@ -2250,11 +2250,11 @@ func TestLLMService_ExecuteTaskWithAgent_MixtureSupportedAggregatorReceivesGrant
 
 func TestLLMService_ExecuteTaskWithAgent_MixtureOllamaAggregatorMasksToolsAndLeavesMarkersInert(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	execRepo := repository.NewExecutionRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	attachmentRepo := repository.NewAttachmentRepo(db)
-	projectRepo := repository.NewProjectRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	execRepo := sqlite.NewExecutionRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
 	ctx := context.Background()
 
 	providerRequests := make(chan map[string]any, 1)
@@ -2275,7 +2275,7 @@ func TestLLMService_ExecuteTaskWithAgent_MixtureOllamaAggregatorMasksToolsAndLea
 	}))
 	defer providerServer.Close()
 
-	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, repository.NewScheduleRepo(db), attachmentRepo)
+	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, sqlite.NewScheduleRepo(db), attachmentRepo)
 	svc.SetTaskService(NewTaskService(taskRepo, attachmentRepo, nil))
 	recorder := &recordingMixtureAdapter{responses: map[string]llmcontracts.AgentResult{}, errors: map[string]error{}}
 	ollamaAdapter := svc.providerAdapters[models.ProviderOllama]
@@ -2350,16 +2350,16 @@ func TestLLMService_ExecuteTaskWithAgent_MixtureOllamaAggregatorMasksToolsAndLea
 
 func TestLLMService_ExecuteTaskWithAgent_RuntimeToolsSkipTaskCreationMarkers(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	execRepo := repository.NewExecutionRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	attachmentRepo := repository.NewAttachmentRepo(db)
-	projectRepo := repository.NewProjectRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	execRepo := sqlite.NewExecutionRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
 	ctx := context.Background()
 
-	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, repository.NewScheduleRepo(db), attachmentRepo)
+	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, sqlite.NewScheduleRepo(db), attachmentRepo)
 	svc.SetTaskService(NewTaskService(taskRepo, attachmentRepo, nil))
-	svc.SetChannelMessageRouter(NewChannelMessageRouter(repository.NewChannelTargetRepo(db), repository.NewSettingsRepo(db)))
+	svc.SetChannelMessageRouter(NewChannelMessageRouter(sqlite.NewChannelTargetRepo(db), sqlite.NewSettingsRepo(db)))
 	svc.providerAdapters = map[models.LLMProvider]ProviderAdapter{models.ProviderOpenAI: providerAdapterFunc(func(req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
 		if rt := llmcontracts.RuntimeToolsFromContext(req.Ctx); rt == nil || !rt.HasDefinition("send_message") {
 			t.Fatalf("expected provider request to include send_message runtime tools, got %#v", rt)
@@ -2395,16 +2395,16 @@ func TestLLMService_ExecuteTaskWithAgent_RuntimeToolsSkipTaskCreationMarkers(t *
 
 func TestLLMService_ExecuteTaskWithAgent_RuntimeIncapableProviderLeavesTaskCreationMarkersInert(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	execRepo := repository.NewExecutionRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	attachmentRepo := repository.NewAttachmentRepo(db)
-	projectRepo := repository.NewProjectRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	execRepo := sqlite.NewExecutionRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
 	ctx := context.Background()
 
-	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, repository.NewScheduleRepo(db), attachmentRepo)
+	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, sqlite.NewScheduleRepo(db), attachmentRepo)
 	svc.SetTaskService(NewTaskService(taskRepo, attachmentRepo, nil))
-	svc.SetChannelMessageRouter(NewChannelMessageRouter(repository.NewChannelTargetRepo(db), repository.NewSettingsRepo(db)))
+	svc.SetChannelMessageRouter(NewChannelMessageRouter(sqlite.NewChannelTargetRepo(db), sqlite.NewSettingsRepo(db)))
 
 	agent := ensureDefaultAgent(t, llmConfigRepo)
 	mock := testutil.NewMockLLMCaller()
@@ -2436,18 +2436,18 @@ func TestLLMService_ExecuteTaskWithAgent_RuntimeIncapableProviderLeavesTaskCreat
 
 func TestLLMService_ExecuteTaskWithAgent_CustomAgentSkillLibraryToolsUseRoutedSelection(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	execRepo := repository.NewExecutionRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	agentRepo := repository.NewAgentRepo(db)
-	projectRepo := repository.NewProjectRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	execRepo := sqlite.NewExecutionRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	agentRepo := sqlite.NewAgentRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
 	ctx := context.Background()
 
 	root := t.TempDir()
-	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, repository.NewScheduleRepo(db), repository.NewAttachmentRepo(db))
+	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, sqlite.NewScheduleRepo(db), sqlite.NewAttachmentRepo(db))
 	svc.SetAgentRepo(agentRepo)
 	svc.SetGlobalSkillRoot(root)
-	svc.SetLifecycleRepo(repository.NewLifecycleRepo(db))
+	svc.SetLifecycleRepo(sqlite.NewLifecycleRepo(db))
 	capture := &captureProviderAdapter{}
 	svc.providerAdapters = map[models.LLMProvider]ProviderAdapter{models.ProviderOpenAI: capture}
 
@@ -2485,7 +2485,7 @@ func TestLLMService_ExecuteTaskWithAgent_CustomAgentSkillLibraryToolsUseRoutedSe
 	worker.SetLifecycleRunner(runner)
 	worker.SetLifecycleSkillRoot(root)
 	worker.SetLifecycleAgentRepo(agentRepo)
-	worker.SetLifecycleRepo(repository.NewLifecycleRepo(db))
+	worker.SetLifecycleRepo(sqlite.NewLifecycleRepo(db))
 	turn := worker.PrepareLifecycleTurn(ctx, *task)
 	exec, err := svc.ExecuteTaskWithAgent(turn.Ctx, turn.Task, *agent)
 	if err != nil {
@@ -2522,18 +2522,18 @@ func TestLLMService_ExecuteTaskWithAgent_CustomAgentSkillLibraryToolsUseRoutedSe
 
 func TestLLMService_ExecuteTaskWithAgent_AllowsScheduledSkillCuratorTask(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	execRepo := repository.NewExecutionRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	agentRepo := repository.NewAgentRepo(db)
-	projectRepo := repository.NewProjectRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	execRepo := sqlite.NewExecutionRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	agentRepo := sqlite.NewAgentRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
 	ctx := context.Background()
 
 	root := t.TempDir()
-	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, repository.NewScheduleRepo(db), repository.NewAttachmentRepo(db))
+	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, sqlite.NewScheduleRepo(db), sqlite.NewAttachmentRepo(db))
 	svc.SetAgentRepo(agentRepo)
 	svc.SetGlobalSkillRoot(root)
-	svc.SetLifecycleRepo(repository.NewLifecycleRepo(db))
+	svc.SetLifecycleRepo(sqlite.NewLifecycleRepo(db))
 	capture := &captureProviderAdapter{}
 	svc.providerAdapters = map[models.LLMProvider]ProviderAdapter{models.ProviderOpenAI: capture}
 
@@ -2571,7 +2571,7 @@ func TestLLMService_ExecuteTaskWithAgent_AllowsScheduledSkillCuratorTask(t *test
 	worker.SetLifecycleRunner(runner)
 	worker.SetLifecycleSkillRoot(root)
 	worker.SetLifecycleAgentRepo(agentRepo)
-	worker.SetLifecycleRepo(repository.NewLifecycleRepo(db))
+	worker.SetLifecycleRepo(sqlite.NewLifecycleRepo(db))
 	turn := worker.PrepareLifecycleTurn(ctx, *task)
 	exec, err := svc.ExecuteTaskWithAgent(turn.Ctx, turn.Task, *agent)
 	if err != nil {
@@ -2650,14 +2650,14 @@ func TestLLMService_ExecuteTaskWithAgent_AllowsScheduledSkillCuratorTask(t *test
 
 func TestLLMService_ExecuteTask_UsesAssignedAgent(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	execRepo := repository.NewExecutionRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	execRepo := sqlite.NewExecutionRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
 	ctx := context.Background()
 
-	scheduleRepo := repository.NewScheduleRepo(db)
-	attachmentRepo := repository.NewAttachmentRepo(db)
-	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, repository.NewProjectRepo(db), scheduleRepo, attachmentRepo)
+	scheduleRepo := sqlite.NewScheduleRepo(db)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
+	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, sqlite.NewProjectRepo(db), scheduleRepo, attachmentRepo)
 	svc.SetLLMCaller(testutil.NewMockLLMCaller())
 
 	customAgent := &models.LLMConfig{
@@ -2733,15 +2733,15 @@ func TestLLMService_ExecuteTask_UsesAssignedAgent(t *testing.T) {
 
 func TestLLMService_ExecuteTask_MemoryConsolidationUsesNormalExecutionPath(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	execRepo := repository.NewExecutionRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	scheduleRepo := repository.NewScheduleRepo(db)
-	attachmentRepo := repository.NewAttachmentRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	execRepo := sqlite.NewExecutionRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	scheduleRepo := sqlite.NewScheduleRepo(db)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
 	ctx := context.Background()
 
-	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, repository.NewProjectRepo(db), scheduleRepo, attachmentRepo)
-	agentRepo := repository.NewAgentRepo(db)
+	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, sqlite.NewProjectRepo(db), scheduleRepo, attachmentRepo)
+	agentRepo := sqlite.NewAgentRepo(db)
 	svc.SetAgentRepo(agentRepo)
 	mock := &testutil.MockLLMCaller{Response: "memory task response", TextOnly: "memory task response", Tokens: 10}
 	svc.SetLLMCaller(mock)
@@ -2764,7 +2764,7 @@ func TestLLMService_ExecuteTask_MemoryConsolidationUsesNormalExecutionPath(t *te
 	}
 	agent, _ := llmConfigRepo.GetDefault(ctx)
 	agent.Provider = models.ProviderTest
-	projectRepo := repository.NewProjectRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
 	project, err := projectRepo.GetByID(ctx, "default")
 	if err != nil {
 		t.Fatalf("get default project: %v", err)
@@ -2821,13 +2821,13 @@ func TestLLMService_ExecuteTask_MemoryConsolidationUsesNormalExecutionPath(t *te
 func TestLLMService_ExecuteTaskKeepsTaskRunningWhileManagedFinalizationWaitsForLease(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	execRepo := repository.NewExecutionRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	projectRepo := repository.NewProjectRepo(db)
-	settingsRepo := repository.NewSettingsRepo(db)
-	scheduleRepo := repository.NewScheduleRepo(db)
-	attachmentRepo := repository.NewAttachmentRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	execRepo := sqlite.NewExecutionRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	projectRepo := sqlite.NewProjectRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
+	scheduleRepo := sqlite.NewScheduleRepo(db)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
 
 	repoDir := createTestGitRepo(t)
 	project := &models.Project{Name: "Finalization lease", RepoPath: repoDir}
@@ -2946,13 +2946,13 @@ func TestLLMService_ExecuteTask_GitWorktreeIsolation(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			db := testutil.NewTestDB(t)
 			ctx := context.Background()
-			llmConfigRepo := repository.NewLLMConfigRepo(db)
-			execRepo := repository.NewExecutionRepo(db)
-			taskRepo := repository.NewTaskRepo(db, nil)
-			projectRepo := repository.NewProjectRepo(db)
-			settingsRepo := repository.NewSettingsRepo(db)
-			scheduleRepo := repository.NewScheduleRepo(db)
-			attachmentRepo := repository.NewAttachmentRepo(db)
+			llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+			execRepo := sqlite.NewExecutionRepo(db)
+			taskRepo := sqlite.NewTaskRepo(db, nil)
+			projectRepo := sqlite.NewProjectRepo(db)
+			settingsRepo := sqlite.NewSettingsRepo(db)
+			scheduleRepo := sqlite.NewScheduleRepo(db)
+			attachmentRepo := sqlite.NewAttachmentRepo(db)
 
 			repoDir := tt.prepareRepo(t)
 			project := &models.Project{Name: "Worktree Isolation", RepoPath: repoDir}
@@ -3008,13 +3008,13 @@ func TestLLMService_ExecuteTask_GitWorktreeIsolation(t *testing.T) {
 func TestLLMService_ExecuteTask_StartupConflictContinuesWithRecoveryContext(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	execRepo := repository.NewExecutionRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	projectRepo := repository.NewProjectRepo(db)
-	settingsRepo := repository.NewSettingsRepo(db)
-	scheduleRepo := repository.NewScheduleRepo(db)
-	attachmentRepo := repository.NewAttachmentRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	execRepo := sqlite.NewExecutionRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	projectRepo := sqlite.NewProjectRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
+	scheduleRepo := sqlite.NewScheduleRepo(db)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
 
 	repoDir := createTestGitRepo(t)
 	project := &models.Project{Name: "Startup Conflict Recovery", RepoPath: repoDir}
@@ -3091,13 +3091,13 @@ func TestLLMService_ExecuteTask_StartupConflictContinuesWithRecoveryContext(t *t
 func TestLLMService_ExecuteTask_DirectCheckoutCompletionIgnoresStaleWorktreeMetadata(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	execRepo := repository.NewExecutionRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	projectRepo := repository.NewProjectRepo(db)
-	settingsRepo := repository.NewSettingsRepo(db)
-	scheduleRepo := repository.NewScheduleRepo(db)
-	attachmentRepo := repository.NewAttachmentRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	execRepo := sqlite.NewExecutionRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	projectRepo := sqlite.NewProjectRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
+	scheduleRepo := sqlite.NewScheduleRepo(db)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
 
 	repoPath := createTestGitRepo(t)
 	staleWorktreePath := filepath.Join(t.TempDir(), "stale-worktree")
@@ -3111,7 +3111,7 @@ func TestLLMService_ExecuteTask_DirectCheckoutCompletionIgnoresStaleWorktreeMeta
 	if err := projectRepo.Create(ctx, project); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
-	agentRepo := repository.NewAgentRepo(db)
+	agentRepo := sqlite.NewAgentRepo(db)
 	agentDef := &models.Agent{
 		Name:         "Direct Checkout Agent",
 		SystemPrompt: "Edit the project checkout directly",
@@ -3180,13 +3180,13 @@ func TestLLMService_ExecuteTask_DirectCheckoutCompletionIgnoresStaleWorktreeMeta
 
 func TestLLMService_ExecuteTask_MemoryConsolidationSkipsRuntimeWorktree(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	execRepo := repository.NewExecutionRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	projectRepo := repository.NewProjectRepo(db)
-	settingsRepo := repository.NewSettingsRepo(db)
-	scheduleRepo := repository.NewScheduleRepo(db)
-	attachmentRepo := repository.NewAttachmentRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	execRepo := sqlite.NewExecutionRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	projectRepo := sqlite.NewProjectRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
+	scheduleRepo := sqlite.NewScheduleRepo(db)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
 	ctx := context.Background()
 
 	repoPath := createTestGitRepo(t)
@@ -3195,7 +3195,7 @@ func TestLLMService_ExecuteTask_MemoryConsolidationSkipsRuntimeWorktree(t *testi
 		t.Fatalf("create project: %v", err)
 	}
 
-	agentRepo := repository.NewAgentRepo(db)
+	agentRepo := sqlite.NewAgentRepo(db)
 	agentDef := &models.Agent{
 		Name:         "System: Memory Curator",
 		SystemKind:   models.AgentSystemKindMemoryCurator,
@@ -3254,13 +3254,13 @@ func TestLLMService_ExecuteTask_MemoryConsolidationSkipsRuntimeWorktree(t *testi
 
 func TestLLMService_ExecuteTask_ScopedFilesAgentUsesRuntimeWorktreeByDefault(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	execRepo := repository.NewExecutionRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	projectRepo := repository.NewProjectRepo(db)
-	settingsRepo := repository.NewSettingsRepo(db)
-	scheduleRepo := repository.NewScheduleRepo(db)
-	attachmentRepo := repository.NewAttachmentRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	execRepo := sqlite.NewExecutionRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	projectRepo := sqlite.NewProjectRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
+	scheduleRepo := sqlite.NewScheduleRepo(db)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
 	ctx := context.Background()
 
 	repoPath := createTestGitRepo(t)
@@ -3269,7 +3269,7 @@ func TestLLMService_ExecuteTask_ScopedFilesAgentUsesRuntimeWorktreeByDefault(t *
 		t.Fatalf("create project: %v", err)
 	}
 
-	agentRepo := repository.NewAgentRepo(db)
+	agentRepo := sqlite.NewAgentRepo(db)
 	agentDef := &models.Agent{
 		Name:                "Scoped Docs Agent",
 		SystemPrompt:        "Edit scoped docs",
@@ -3331,14 +3331,14 @@ func TestLLMService_ExecuteTask_ScopedFilesAgentUsesRuntimeWorktreeByDefault(t *
 
 func TestLLMService_ExecuteTask_UsesDefaultWhenNoAgentAssigned(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	execRepo := repository.NewExecutionRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	execRepo := sqlite.NewExecutionRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
 	ctx := context.Background()
 
-	scheduleRepo := repository.NewScheduleRepo(db)
-	attachmentRepo := repository.NewAttachmentRepo(db)
-	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, repository.NewProjectRepo(db), scheduleRepo, attachmentRepo)
+	scheduleRepo := sqlite.NewScheduleRepo(db)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
+	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, sqlite.NewProjectRepo(db), scheduleRepo, attachmentRepo)
 	svc.SetLLMCaller(testutil.NewMockLLMCaller())
 
 	defaultAgent, _ := llmConfigRepo.GetDefault(ctx)
@@ -3382,14 +3382,14 @@ func TestLLMService_ExecuteTask_UsesDefaultWhenNoAgentAssigned(t *testing.T) {
 
 func TestLLMService_ExecuteTaskWithAgent_LoadsAttachments(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	execRepo := repository.NewExecutionRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	attachmentRepo := repository.NewAttachmentRepo(db)
-	scheduleRepo := repository.NewScheduleRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	execRepo := sqlite.NewExecutionRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
+	scheduleRepo := sqlite.NewScheduleRepo(db)
 	ctx := context.Background()
 
-	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, repository.NewProjectRepo(db), scheduleRepo, attachmentRepo)
+	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, sqlite.NewProjectRepo(db), scheduleRepo, attachmentRepo)
 	svc.SetLLMCaller(testutil.NewMockLLMCaller())
 
 	task := &models.Task{
@@ -3477,14 +3477,14 @@ func TestLLMService_ExecuteTaskWithAgent_VisionAwareAgentOverride(t *testing.T) 
 
 func TestLLMService_ExecuteTaskWithAgent_NoOverrideForTextAttachments(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	execRepo := repository.NewExecutionRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	attachmentRepo := repository.NewAttachmentRepo(db)
-	scheduleRepo := repository.NewScheduleRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	execRepo := sqlite.NewExecutionRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
+	scheduleRepo := sqlite.NewScheduleRepo(db)
 	ctx := context.Background()
 
-	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, repository.NewProjectRepo(db), scheduleRepo, attachmentRepo)
+	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, sqlite.NewProjectRepo(db), scheduleRepo, attachmentRepo)
 
 	task := &models.Task{
 		ProjectID: "default",
@@ -3554,15 +3554,15 @@ func TestLLMService_CallAgentDirectStreaming_VisionAwareOverride(t *testing.T) {
 
 func TestLLMService_CallAgentDirectStreaming_NoOverrideWithoutImages(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	execRepo := repository.NewExecutionRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	attachmentRepo := repository.NewAttachmentRepo(db)
-	scheduleRepo := repository.NewScheduleRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	execRepo := sqlite.NewExecutionRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
+	scheduleRepo := sqlite.NewScheduleRepo(db)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, repository.NewProjectRepo(db), scheduleRepo, attachmentRepo)
+	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, sqlite.NewProjectRepo(db), scheduleRepo, attachmentRepo)
 
 	defaultAgent, _ := llmConfigRepo.GetDefault(ctx)
 	if defaultAgent == nil {
@@ -3628,8 +3628,8 @@ func TestLLMService_CallAgentDirectStreaming_VisionEnvVarFallback(t *testing.T) 
 
 func TestLLMService_ExecuteTaskWithAgent_MovesRepeatOnceToCompleted(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	scheduleRepo := repository.NewScheduleRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	scheduleRepo := sqlite.NewScheduleRepo(db)
 	ctx := context.Background()
 
 	task := &models.Task{
@@ -3679,14 +3679,14 @@ func TestLLMService_ExecuteTaskWithAgent_MovesRepeatOnceToCompleted(t *testing.T
 
 func TestLLMService_ExecuteTaskWithAgent_CommitsWorktreeEditsAndPersistsDiff(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	execRepo := repository.NewExecutionRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	projectRepo := repository.NewProjectRepo(db)
-	statRepo := repository.NewTaskCommitStatRepo(db)
-	scheduleRepo := repository.NewScheduleRepo(db)
-	attachmentRepo := repository.NewAttachmentRepo(db)
-	settingsRepo := repository.NewSettingsRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	execRepo := sqlite.NewExecutionRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	projectRepo := sqlite.NewProjectRepo(db)
+	statRepo := sqlite.NewTaskCommitStatRepo(db)
+	scheduleRepo := sqlite.NewScheduleRepo(db)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 	ctx := context.Background()
 
 	repoDir := createTestGitRepo(t)
@@ -3767,14 +3767,14 @@ func TestLLMService_ExecuteTaskWithAgent_CommitsWorktreeEditsAndPersistsDiff(t *
 
 func TestLLMService_ExecuteTaskWithAgent_AllowsCompletionWithoutCodeChanges(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	execRepo := repository.NewExecutionRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	projectRepo := repository.NewProjectRepo(db)
-	statRepo := repository.NewTaskCommitStatRepo(db)
-	scheduleRepo := repository.NewScheduleRepo(db)
-	attachmentRepo := repository.NewAttachmentRepo(db)
-	settingsRepo := repository.NewSettingsRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	execRepo := sqlite.NewExecutionRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	projectRepo := sqlite.NewProjectRepo(db)
+	statRepo := sqlite.NewTaskCommitStatRepo(db)
+	scheduleRepo := sqlite.NewScheduleRepo(db)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 	ctx := context.Background()
 
 	mock := testutil.NewMockLLMCaller()
@@ -3855,14 +3855,14 @@ func TestLLMService_ExecuteTaskWithAgent_AllowsCompletionWithoutCodeChanges(t *t
 
 func TestLLMService_ExecuteTaskWithAgent_WebhookOriginSkipsTaskCreationMarkers(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	execRepo := repository.NewExecutionRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	scheduleRepo := repository.NewScheduleRepo(db)
-	attachmentRepo := repository.NewAttachmentRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	execRepo := sqlite.NewExecutionRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	scheduleRepo := sqlite.NewScheduleRepo(db)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
 	ctx := context.Background()
 
-	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, repository.NewProjectRepo(db), scheduleRepo, attachmentRepo)
+	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, sqlite.NewProjectRepo(db), scheduleRepo, attachmentRepo)
 
 	agent := ensureDefaultAgent(t, llmConfigRepo)
 	mock := testutil.NewMockLLMCaller()
@@ -3899,9 +3899,9 @@ func TestLLMService_ExecuteTaskWithAgent_WebhookOriginSkipsTaskCreationMarkers(t
 
 func TestLLMService_FailedTaskMovedToCompletedCategory(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	execRepo := repository.NewExecutionRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	execRepo := sqlite.NewExecutionRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
 	ctx := context.Background()
 
 	task := &models.Task{
@@ -3963,12 +3963,12 @@ func TestLLMService_FailedTaskMovedToCompletedCategory(t *testing.T) {
 func TestLLMService_ExecuteTaskWithAgent_IncludesManagedAndOptionalRootInstructions(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	execRepo := repository.NewExecutionRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	projectRepo := repository.NewProjectRepo(db)
-	scheduleRepo := repository.NewScheduleRepo(db)
-	attachmentRepo := repository.NewAttachmentRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	execRepo := sqlite.NewExecutionRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	projectRepo := sqlite.NewProjectRepo(db)
+	scheduleRepo := sqlite.NewScheduleRepo(db)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
 
 	repoPath := t.TempDir()
 	if err := os.WriteFile(filepath.Join(repoPath, "AGENTS.md"), []byte("user AGENTS guidance"), 0o644); err != nil {
@@ -4014,18 +4014,18 @@ func TestLoadRootProjectInstructions_MissingFilesIsEmpty(t *testing.T) {
 
 func TestLLMService_ExecuteTaskWithAgent_PluginScopingWithAgentDef(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	execRepo := repository.NewExecutionRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	agentRepo := repository.NewAgentRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	execRepo := sqlite.NewExecutionRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	agentRepo := sqlite.NewAgentRepo(db)
 	ctx := context.Background()
 
-	scheduleRepo := repository.NewScheduleRepo(db)
-	attachmentRepo := repository.NewAttachmentRepo(db)
+	scheduleRepo := sqlite.NewScheduleRepo(db)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
 
 	// Use a capture adapter to inspect the request that reaches the provider
 	capture := &captureProviderAdapter{}
-	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, repository.NewProjectRepo(db), scheduleRepo, attachmentRepo)
+	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, sqlite.NewProjectRepo(db), scheduleRepo, attachmentRepo)
 	svc.SetAgentRepo(agentRepo)
 	// Override the test provider adapter with our capture
 	svc.providerAdapters[models.ProviderTest] = capture
@@ -4077,17 +4077,17 @@ func TestLLMService_ExecuteTaskWithAgent_PluginScopingWithAgentDef(t *testing.T)
 // (zero plugin context).
 func TestLLMService_ExecuteTaskWithAgent_NoAgentDef_NilPluginContext(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	execRepo := repository.NewExecutionRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	agentRepo := repository.NewAgentRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	execRepo := sqlite.NewExecutionRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	agentRepo := sqlite.NewAgentRepo(db)
 	ctx := context.Background()
 
-	scheduleRepo := repository.NewScheduleRepo(db)
-	attachmentRepo := repository.NewAttachmentRepo(db)
+	scheduleRepo := sqlite.NewScheduleRepo(db)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
 
 	capture := &captureProviderAdapter{}
-	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, repository.NewProjectRepo(db), scheduleRepo, attachmentRepo)
+	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, sqlite.NewProjectRepo(db), scheduleRepo, attachmentRepo)
 	svc.SetAgentRepo(agentRepo)
 	svc.providerAdapters[models.ProviderTest] = capture
 
@@ -4121,17 +4121,17 @@ func TestLLMService_ExecuteTaskWithAgent_NoAgentDef_NilPluginContext(t *testing.
 // leaks from other agent definitions.
 func TestLLMService_ExecuteTaskWithAgent_WrongAgentDefNotUsed(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	execRepo := repository.NewExecutionRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	agentRepo := repository.NewAgentRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	execRepo := sqlite.NewExecutionRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	agentRepo := sqlite.NewAgentRepo(db)
 	ctx := context.Background()
 
-	scheduleRepo := repository.NewScheduleRepo(db)
-	attachmentRepo := repository.NewAttachmentRepo(db)
+	scheduleRepo := sqlite.NewScheduleRepo(db)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
 
 	capture := &captureProviderAdapter{}
-	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, repository.NewProjectRepo(db), scheduleRepo, attachmentRepo)
+	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, sqlite.NewProjectRepo(db), scheduleRepo, attachmentRepo)
 	svc.SetAgentRepo(agentRepo)
 	svc.providerAdapters[models.ProviderTest] = capture
 
@@ -4224,13 +4224,13 @@ func TestLLMService_CallAgentDirectStreamingDetailed_PluginScopingByAgentDef(t *
 
 func TestLLMService_ExecuteTask_ScopedFilesPrepFailureCompletesExecution(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	execRepo := repository.NewExecutionRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	projectRepo := repository.NewProjectRepo(db)
-	scheduleRepo := repository.NewScheduleRepo(db)
-	attachmentRepo := repository.NewAttachmentRepo(db)
-	agentRepo := repository.NewAgentRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	execRepo := sqlite.NewExecutionRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	projectRepo := sqlite.NewProjectRepo(db)
+	scheduleRepo := sqlite.NewScheduleRepo(db)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
+	agentRepo := sqlite.NewAgentRepo(db)
 	ctx := context.Background()
 
 	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, scheduleRepo, attachmentRepo)
@@ -4526,7 +4526,7 @@ func (f *fakeGitHubIssueRuntimeProvider) GlobalAPIEndpoint(_ context.Context) st
 func TestGitHubRuntimeCurrentEnterpriseRepositoryRequiresAPIEndpoint(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)
-	projectRepo := repository.NewProjectRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
 	project := &models.Project{
 		Name:    "Enterprise runtime repository without endpoint",
 		RepoURL: "https://github.example.com/acme/widgets.git",
@@ -4549,7 +4549,7 @@ func TestGitHubRuntimeCurrentEnterpriseRepositoryRequiresAPIEndpoint(t *testing.
 func TestGitHubRuntimeExplicitRepositoryUsesProjectEndpointByParsedHost(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)
-	projectRepo := repository.NewProjectRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
 	const enterpriseEndpoint = "https://github.example.com/api/v3"
 	project := &models.Project{
 		Name:    "Enterprise runtime repository",
@@ -4584,7 +4584,7 @@ func TestGitHubRuntimeExplicitRepositoryUsesProjectEndpointByParsedHost(t *testi
 func TestAutomationGitHubRuntimeToolsAlwaysResolveCurrentProjectRepository(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)
-	projectRepo := repository.NewProjectRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
 	project := &models.Project{Name: "Automation repository boundary", RepoPath: t.TempDir(), RepoURL: "https://github.com/openvibely/project.git"}
 	require.NoError(t, projectRepo.Create(ctx, project))
 	var resolvedURL, resolvedPath string
@@ -4635,11 +4635,11 @@ func TestAutomationGitHubRuntimeToolsDoNotExposeStatusCommenting(t *testing.T) {
 func TestGitHubIssueRuntimeToolsExposeDefaultTaskToolsAndPreserveSafetyRules(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	prRepo := repository.NewTaskPullRequestRepo(db)
-	feedbackRepo := repository.NewGitHubPRFeedbackRepo(db)
-	threadInputRepo := repository.NewThreadInputRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	prRepo := sqlite.NewTaskPullRequestRepo(db)
+	feedbackRepo := sqlite.NewGitHubPRFeedbackRepo(db)
+	threadInputRepo := sqlite.NewThreadInputRepo(db)
 	project := &models.Project{Name: "GitHub Runtime Project", RepoPath: t.TempDir(), RepoURL: "https://github.com/openvibely/openvibely.git"}
 	if err := projectRepo.Create(ctx, project); err != nil {
 		t.Fatalf("create project: %v", err)
@@ -4723,7 +4723,7 @@ func TestGitHubIssueRuntimeToolsExposeDefaultTaskToolsAndPreserveSafetyRules(t *
 			return "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", nil
 		},
 	}
-	githubAuthRepo := repository.NewGitHubAuthRepo(db)
+	githubAuthRepo := sqlite.NewGitHubAuthRepo(db)
 	require.NoError(t, githubAuthRepo.UpsertAuthorizedActor(ctx, &models.GitHubAuthorizedActor{GitHubLogin: "Dev-Bot"}))
 	rt := buildGitHubIssueRuntimeTools(githubIssueRuntimeOptions{
 		ProjectID:            project.ID,
@@ -4909,12 +4909,12 @@ func TestGitHubIssueRuntimeToolsExposeDefaultTaskToolsAndPreserveSafetyRules(t *
 func TestGitHubIssueRuntimeForwardPRFeedbackPromotesLinkedTasks(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	prRepo := repository.NewTaskPullRequestRepo(db)
-	feedbackRepo := repository.NewGitHubPRFeedbackRepo(db)
-	threadInputRepo := repository.NewThreadInputRepo(db)
-	githubAuthRepo := repository.NewGitHubAuthRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	prRepo := sqlite.NewTaskPullRequestRepo(db)
+	feedbackRepo := sqlite.NewGitHubPRFeedbackRepo(db)
+	threadInputRepo := sqlite.NewThreadInputRepo(db)
+	githubAuthRepo := sqlite.NewGitHubAuthRepo(db)
 
 	project := &models.Project{Name: "GitHub Feedback Runtime", RepoPath: t.TempDir(), RepoURL: "https://github.com/openvibely/openvibely.git"}
 	if err := projectRepo.Create(ctx, project); err != nil {
@@ -4970,18 +4970,18 @@ func TestGitHubIssueRuntimeForwardPRFeedbackPromotesLinkedTasks(t *testing.T) {
 func TestLLMServiceExecuteTaskWithAgentExposesBootstrapToolsToInitialRuns(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	execRepo := repository.NewExecutionRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	projectRepo := repository.NewProjectRepo(db)
-	scheduleRepo := repository.NewScheduleRepo(db)
-	attachmentRepo := repository.NewAttachmentRepo(db)
-	agentRepo := repository.NewAgentRepo(db)
-	prRepo := repository.NewTaskPullRequestRepo(db)
-	feedbackRepo := repository.NewGitHubPRFeedbackRepo(db)
-	threadInputRepo := repository.NewThreadInputRepo(db)
-	githubAuthRepo := repository.NewGitHubAuthRepo(db)
-	goalRepo := repository.NewTaskGoalRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	execRepo := sqlite.NewExecutionRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	projectRepo := sqlite.NewProjectRepo(db)
+	scheduleRepo := sqlite.NewScheduleRepo(db)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
+	agentRepo := sqlite.NewAgentRepo(db)
+	prRepo := sqlite.NewTaskPullRequestRepo(db)
+	feedbackRepo := sqlite.NewGitHubPRFeedbackRepo(db)
+	threadInputRepo := sqlite.NewThreadInputRepo(db)
+	githubAuthRepo := sqlite.NewGitHubAuthRepo(db)
+	goalRepo := sqlite.NewTaskGoalRepo(db)
 	goalSvc := NewTaskGoalService(goalRepo, taskRepo, nil)
 
 	agent := ensureDefaultAgent(t, llmConfigRepo)

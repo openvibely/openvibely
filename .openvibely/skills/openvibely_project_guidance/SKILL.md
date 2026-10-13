@@ -88,7 +88,7 @@ Use this project-managed skill for coding-agent work in the OpenVibely repositor
 ## Adding Features
 
 - New tables or columns require a new migration in `internal/database/migrations/` using the existing goose numbering pattern.
-- New models belong in `internal/models/`, repositories in `internal/repository/`, services in `internal/service/`, and handlers in `internal/handler/`.
+- New models belong in `internal/models/`, store interfaces in `internal/persistence/`, SQLite implementations in `internal/persistence/sqlite/`, services in `internal/service/`, and handlers in `internal/handler/`.
 - Register new handlers and routes in `internal/handler/handler.go`.
 - Update templates under `web/templates/**/*.templ` when UI changes are needed, then run `templ generate`.
 - Front-end CSS/JS is served from the binary (`web/static`), never a CDN. Tailwind/DaisyUI classes are compiled at build time, so after adding a class that does not already appear in `web/templates` or `internal` Go files, run `make assets` and commit `web/static/dist` (CI fails otherwise). Write class names out in full; classes assembled from pieces at runtime are not compiled. Library versions and checksums are pinned in `scripts/build-assets.sh`.
@@ -127,7 +127,7 @@ go test ./internal/... -count=1 -timeout 60s  # Focused/internal tests; use the 
 | Database setup | `internal/database/database.go` |
 | Migrations | `internal/database/migrations/*.sql` |
 | Models | `internal/models/*.go` |
-| Repositories | `internal/repository/*_repo.go` |
+| Repositories | `internal/persistence/*.go` (interfaces), `internal/persistence/sqlite/*_repo.go` (SQLite) |
 | Services | `internal/service/*_service.go` |
 | HTTP Handlers | `internal/handler/*_handler.go` |
 | Route registration | `internal/handler/handler.go` |

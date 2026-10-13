@@ -9,7 +9,7 @@ import (
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/stretchr/testify/require"
 )
@@ -17,7 +17,7 @@ import (
 func TestLoadBoundedTaskThreadExecutionsHandlesInvalidInputs(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)
-	execRepo := repository.NewExecutionRepo(db)
+	execRepo := sqlite.NewExecutionRepo(db)
 	task := &models.Task{ID: "task-history-invalid"}
 
 	for _, tt := range []struct {
@@ -103,13 +103,13 @@ func TestLoadBoundedTaskThreadExecutionsStopsOnBudgetAfterBoundedPages(t *testin
 	require.Len(t, serviceThreadHistoryExecutionQueries(counter.Statements()), 2)
 }
 
-func newServiceThreadHistoryFixture(t *testing.T, name string) (*sql.DB, *testutil.SQLStatementCounter, *repository.ExecutionRepo, *models.Task) {
+func newServiceThreadHistoryFixture(t *testing.T, name string) (*sql.DB, *testutil.SQLStatementCounter, *sqlite.ExecutionRepo, *models.Task) {
 	t.Helper()
 	db, counter := testutil.NewStatementCountingTestDB(t)
 	ctx := context.Background()
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	execRepo := repository.NewExecutionRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	execRepo := sqlite.NewExecutionRepo(db)
 	project := &models.Project{Name: "Thread History " + name}
 	require.NoError(t, projectRepo.Create(ctx, project))
 	task := &models.Task{
@@ -123,7 +123,7 @@ func newServiceThreadHistoryFixture(t *testing.T, name string) (*sql.DB, *testut
 	return db, counter, execRepo, task
 }
 
-func seedServiceThreadHistoryExecutions(t *testing.T, ctx context.Context, db *sql.DB, execRepo *repository.ExecutionRepo, taskID string, count int, idPrefix string) {
+func seedServiceThreadHistoryExecutions(t *testing.T, ctx context.Context, db *sql.DB, execRepo *sqlite.ExecutionRepo, taskID string, count int, idPrefix string) {
 	t.Helper()
 	startedAt := "2026-01-02 03:04:05"
 	for i := 0; i < count; i++ {

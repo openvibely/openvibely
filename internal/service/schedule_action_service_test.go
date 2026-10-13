@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/stretchr/testify/require"
 )
@@ -15,9 +15,9 @@ import (
 func TestScheduleActionServiceCreateRejectsMalformedInputsWithoutPersistence(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	scheduleRepo := repository.NewScheduleRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	scheduleRepo := sqlite.NewScheduleRepo(db)
 	project := &models.Project{Name: "Schedule validation"}
 	require.NoError(t, projectRepo.Create(ctx, project))
 	task := &models.Task{ProjectID: project.ID, Title: "Target", Prompt: "prompt", Category: models.CategoryBacklog, Status: models.StatusCompleted, Priority: 2}
@@ -52,9 +52,9 @@ func TestScheduleActionServiceCreateRejectsMalformedInputsWithoutPersistence(t *
 func TestScheduleActionServiceCreateClearsCancellationRequestForScheduledRun(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	scheduleRepo := repository.NewScheduleRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	scheduleRepo := sqlite.NewScheduleRepo(db)
 	workerSvc := newTestWorkerService(t)
 	project := &models.Project{Name: "Schedule clears cancellation marker"}
 	require.NoError(t, projectRepo.Create(ctx, project))
@@ -76,9 +76,9 @@ func TestScheduleActionServiceCreateClearsCancellationRequestForScheduledRun(t *
 func TestScheduleActionServiceCreateOneTimeResetsCompletedAlreadyScheduledTask(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	scheduleRepo := repository.NewScheduleRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	scheduleRepo := sqlite.NewScheduleRepo(db)
 	project := &models.Project{Name: "Runtime one-time completed scheduled task"}
 	require.NoError(t, projectRepo.Create(ctx, project))
 	task := &models.Task{ProjectID: project.ID, Title: "Completed scheduled target", Prompt: "prompt", Category: models.CategoryScheduled, Status: models.StatusCompleted, Priority: 2}
@@ -105,9 +105,9 @@ func TestScheduleActionServiceCreateOneTimeResetsCompletedAlreadyScheduledTask(t
 func TestScheduleActionServiceCreateDoesNotResetRunningAlreadyScheduledTask(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	scheduleRepo := repository.NewScheduleRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	scheduleRepo := sqlite.NewScheduleRepo(db)
 	project := &models.Project{Name: "Runtime running scheduled task"}
 	require.NoError(t, projectRepo.Create(ctx, project))
 	task := &models.Task{ProjectID: project.ID, Title: "Running scheduled target", Prompt: "prompt", Category: models.CategoryScheduled, Status: models.StatusRunning, Priority: 2}
@@ -130,9 +130,9 @@ func TestScheduleActionServiceCreateRecurringPreservesTerminalAlreadyScheduledTa
 		t.Run(string(status), func(t *testing.T) {
 			db := testutil.NewTestDB(t)
 			ctx := context.Background()
-			projectRepo := repository.NewProjectRepo(db)
-			taskRepo := repository.NewTaskRepo(db, nil)
-			scheduleRepo := repository.NewScheduleRepo(db)
+			projectRepo := sqlite.NewProjectRepo(db)
+			taskRepo := sqlite.NewTaskRepo(db, nil)
+			scheduleRepo := sqlite.NewScheduleRepo(db)
 			project := &models.Project{Name: "Runtime recurring scheduled task"}
 			require.NoError(t, projectRepo.Create(ctx, project))
 			task := &models.Task{ProjectID: project.ID, Title: "Terminal scheduled target", Prompt: "prompt", Category: models.CategoryScheduled, Status: status, Priority: 2}
@@ -156,9 +156,9 @@ func TestScheduleActionServiceCreateRecurringPreservesTerminalAlreadyScheduledTa
 func TestScheduleActionServiceModifyRejectsMalformedInputsWithoutMutation(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	scheduleRepo := repository.NewScheduleRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	scheduleRepo := sqlite.NewScheduleRepo(db)
 	project := &models.Project{Name: "Schedule validation"}
 	require.NoError(t, projectRepo.Create(ctx, project))
 	task := &models.Task{ProjectID: project.ID, Title: "Target", Prompt: "prompt", Category: models.CategoryScheduled, Status: models.StatusPending, Priority: 2}
@@ -194,9 +194,9 @@ func TestScheduleActionServiceModifyRejectsMalformedInputsWithoutMutation(t *tes
 func TestScheduleActionServiceCreateRejectsMultipleWeeklyDaysWithoutPersistence(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	scheduleRepo := repository.NewScheduleRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	scheduleRepo := sqlite.NewScheduleRepo(db)
 	project := &models.Project{Name: "Schedule multi-day validation"}
 	require.NoError(t, projectRepo.Create(ctx, project))
 	task := &models.Task{ProjectID: project.ID, Title: "Target", Prompt: "prompt", Category: models.CategoryBacklog, Status: models.StatusCompleted, Priority: 2}
@@ -222,9 +222,9 @@ func TestScheduleActionServiceCreateRejectsMultipleWeeklyDaysWithoutPersistence(
 func TestScheduleActionServiceModifyRejectsMultipleWeeklyDaysWithoutMutation(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	scheduleRepo := repository.NewScheduleRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	scheduleRepo := sqlite.NewScheduleRepo(db)
 	project := &models.Project{Name: "Schedule multi-day validation"}
 	require.NoError(t, projectRepo.Create(ctx, project))
 	task := &models.Task{ProjectID: project.ID, Title: "Target", Prompt: "prompt", Category: models.CategoryScheduled, Status: models.StatusPending, Priority: 2}
@@ -252,9 +252,9 @@ func TestScheduleActionServiceModifyRejectsMultipleWeeklyDaysWithoutMutation(t *
 func TestScheduleActionServiceAcceptsTimeBoundariesAndSupportedWeekdays(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	scheduleRepo := repository.NewScheduleRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	scheduleRepo := sqlite.NewScheduleRepo(db)
 	project := &models.Project{Name: "Schedule validation"}
 	require.NoError(t, projectRepo.Create(ctx, project))
 	svc := NewScheduleActionService(taskRepo, scheduleRepo)
@@ -284,9 +284,9 @@ func TestScheduleActionServiceAcceptsTimeBoundariesAndSupportedWeekdays(t *testi
 func TestScheduleActionServiceCreateAbsoluteAppliesBrowserFormDefaultsAndLifecycle(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	scheduleRepo := repository.NewScheduleRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	scheduleRepo := sqlite.NewScheduleRepo(db)
 	workerSvc := newTestWorkerService(t)
 	project := &models.Project{Name: "Absolute create lifecycle"}
 	require.NoError(t, projectRepo.Create(ctx, project))
@@ -324,9 +324,9 @@ func TestScheduleActionServiceCreateAbsoluteAppliesBrowserFormDefaultsAndLifecyc
 func TestScheduleActionServiceModifyAbsoluteAppliesBrowserNextRunAndLifecycle(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	scheduleRepo := repository.NewScheduleRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	scheduleRepo := sqlite.NewScheduleRepo(db)
 	workerSvc := newTestWorkerService(t)
 	project := &models.Project{Name: "Absolute update lifecycle"}
 	require.NoError(t, projectRepo.Create(ctx, project))
@@ -367,9 +367,9 @@ func TestScheduleActionServiceModifyAbsoluteAppliesBrowserNextRunAndLifecycle(t 
 func TestScheduleActionServiceModifyRuntimeTimingAppliesLifecycleButDisableDoesNot(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	scheduleRepo := repository.NewScheduleRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	scheduleRepo := sqlite.NewScheduleRepo(db)
 	workerSvc := newTestWorkerService(t)
 	project := &models.Project{Name: "Runtime modify lifecycle"}
 	require.NoError(t, projectRepo.Create(ctx, project))
@@ -399,9 +399,9 @@ func TestScheduleActionServiceModifyRuntimeTimingAppliesLifecycleButDisableDoesN
 func TestScheduleActionServiceModifyRepeatOnceTimeChangeKeepsScheduleRunnable(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	scheduleRepo := repository.NewScheduleRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	scheduleRepo := sqlite.NewScheduleRepo(db)
 	project := &models.Project{Name: "Repeat once pause regression"}
 	require.NoError(t, projectRepo.Create(ctx, project))
 	task := &models.Task{
@@ -441,9 +441,9 @@ func TestScheduleActionServiceModifyRepeatOnceTimeChangeKeepsScheduleRunnable(t 
 func TestScheduleActionServiceModifyRepeatOnceEnableRequiresTimeAndCombinedEditRestoresNextRun(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	scheduleRepo := repository.NewScheduleRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	scheduleRepo := sqlite.NewScheduleRepo(db)
 	project := &models.Project{Name: "Repeat once modify resume"}
 	require.NoError(t, projectRepo.Create(ctx, project))
 	task := &models.Task{ProjectID: project.ID, Title: "Fired one-time task", Prompt: "retry once", Category: models.CategoryScheduled, Status: models.StatusCompleted, Priority: 2}
@@ -487,9 +487,9 @@ func TestScheduleActionServiceTogglePreservesTimingForRepeatingAndOneTimeSchedul
 		t.Run(string(repeatType), func(t *testing.T) {
 			db := testutil.NewTestDB(t)
 			ctx := context.Background()
-			projectRepo := repository.NewProjectRepo(db)
-			taskRepo := repository.NewTaskRepo(db, nil)
-			scheduleRepo := repository.NewScheduleRepo(db)
+			projectRepo := sqlite.NewProjectRepo(db)
+			taskRepo := sqlite.NewTaskRepo(db, nil)
+			scheduleRepo := sqlite.NewScheduleRepo(db)
 			project := &models.Project{Name: "Toggle timing preservation"}
 			require.NoError(t, projectRepo.Create(ctx, project))
 			task := &models.Task{
@@ -537,9 +537,9 @@ func TestScheduleActionServiceTogglePreservesTimingForRepeatingAndOneTimeSchedul
 func TestScheduleActionServiceToggleResumesDueOneTimeScheduleWithoutChangingTaskState(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	scheduleRepo := repository.NewScheduleRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	scheduleRepo := sqlite.NewScheduleRepo(db)
 	project := &models.Project{Name: "Due one-time toggle"}
 	require.NoError(t, projectRepo.Create(ctx, project))
 	task := &models.Task{ProjectID: project.ID, Title: "Due once", Prompt: "run", Category: models.CategoryScheduled, Status: models.StatusPending, Priority: 2}
@@ -567,9 +567,9 @@ func TestScheduleActionServiceToggleResumesDueOneTimeScheduleWithoutChangingTask
 func TestScheduleActionServiceToggleFiredOneTimeRequiresNewTimeWithoutMutation(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	scheduleRepo := repository.NewScheduleRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	scheduleRepo := sqlite.NewScheduleRepo(db)
 	project := &models.Project{Name: "Fired one-time toggle"}
 	require.NoError(t, projectRepo.Create(ctx, project))
 	task := &models.Task{ProjectID: project.ID, Title: "Fired once", Prompt: "already ran", Category: models.CategoryScheduled, Status: models.StatusCompleted, Priority: 2}
@@ -596,9 +596,9 @@ func TestScheduleActionServiceToggleFiredOneTimeRequiresNewTimeWithoutMutation(t
 func TestScheduleActionServiceToggleClearsCancellationMarkerForAlreadyPendingTask(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	scheduleRepo := repository.NewScheduleRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	scheduleRepo := sqlite.NewScheduleRepo(db)
 	workerSvc := newTestWorkerService(t)
 	project := &models.Project{Name: "Pending resume marker"}
 	require.NoError(t, projectRepo.Create(ctx, project))
@@ -628,9 +628,9 @@ func TestScheduleActionServiceToggleClearsCancellationMarkerForAlreadyPendingTas
 func TestScheduleActionServiceToggleSkipsLifecycleWhenPauseWinsAfterEnable(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	scheduleRepo := repository.NewScheduleRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	scheduleRepo := sqlite.NewScheduleRepo(db)
 	workerSvc := newTestWorkerService(t)
 	project := &models.Project{Name: "Resume pause interleaving"}
 	require.NoError(t, projectRepo.Create(ctx, project))
@@ -670,9 +670,9 @@ func TestScheduleActionServiceToggleSkipsLifecycleWhenPauseWinsAfterEnable(t *te
 func TestScheduleActionServiceResumeLifecycleSkipsTaskResetAfterPauseWins(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	scheduleRepo := repository.NewScheduleRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	scheduleRepo := sqlite.NewScheduleRepo(db)
 	workerSvc := newTestWorkerService(t)
 	project := &models.Project{Name: "Resume pause ordering"}
 	require.NoError(t, projectRepo.Create(ctx, project))
@@ -704,9 +704,9 @@ func TestScheduleActionServiceResumeLifecycleSkipsTaskResetAfterPauseWins(t *tes
 func TestScheduleActionServiceToggleResetsTerminalTaskOnlyWhenResumingRunnableSchedule(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	scheduleRepo := repository.NewScheduleRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	scheduleRepo := sqlite.NewScheduleRepo(db)
 	workerSvc := newTestWorkerService(t)
 	project := &models.Project{Name: "Toggle lifecycle"}
 	require.NoError(t, projectRepo.Create(ctx, project))
@@ -742,8 +742,8 @@ func TestScheduleActionServiceModifyLiteralTitle(t *testing.T) {
 		t.Run(tt.query, func(t *testing.T) {
 			db := testutil.NewTestDB(t)
 			ctx := context.Background()
-			taskRepo := repository.NewTaskRepo(db, nil)
-			scheduleRepo := repository.NewScheduleRepo(db)
+			taskRepo := sqlite.NewTaskRepo(db, nil)
+			scheduleRepo := sqlite.NewScheduleRepo(db)
 			tasks := []models.Task{
 				{ProjectID: "default", Title: "Release " + tt.query + " today", Prompt: "test", Category: models.CategoryScheduled, Status: models.StatusPending},
 				{ProjectID: "default", Title: tt.nonliteral, Prompt: "test", Category: models.CategoryScheduled, Status: models.StatusPending},
@@ -777,9 +777,9 @@ func TestScheduleActionServiceModifyLiteralTitle(t *testing.T) {
 func TestScheduleRecurrenceEditDoesNotReplayPastAnchor(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	projects := repository.NewProjectRepo(db)
-	tasks := repository.NewTaskRepo(db, nil)
-	schedules := repository.NewScheduleRepo(db)
+	projects := sqlite.NewProjectRepo(db)
+	tasks := sqlite.NewTaskRepo(db, nil)
+	schedules := sqlite.NewScheduleRepo(db)
 	project := &models.Project{Name: "Recurrence"}
 	require.NoError(t, projects.Create(ctx, project))
 	task := &models.Task{ProjectID: project.ID, Title: "Scheduled", Prompt: "prompt", Category: models.CategoryScheduled, Status: models.StatusPending, Priority: 2}
@@ -803,8 +803,8 @@ func TestConversationScheduleActions(t *testing.T) {
 			t.Run(string(repeat)+"/"+action, func(t *testing.T) {
 				ctx := context.Background()
 				db := testutil.NewTestDB(t)
-				tasks := repository.NewTaskRepo(db, nil)
-				schedules := repository.NewScheduleRepo(db)
+				tasks := sqlite.NewTaskRepo(db, nil)
+				schedules := sqlite.NewScheduleRepo(db)
 				svc := NewScheduleActionService(tasks, schedules)
 				task := &models.Task{ProjectID: "default", Title: "Conversation", Prompt: "test", Category: models.CategoryChat, Status: models.StatusCompleted}
 				require.NoError(t, tasks.Create(ctx, task))
