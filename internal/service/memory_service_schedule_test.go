@@ -9,30 +9,31 @@ import (
 
 	"github.com/openvibely/openvibely/internal/memory"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/persistence/sqlite"
-	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/openvibely/openvibely/internal/testutil/teststores"
 )
 
 type memoryScheduleTestRepos struct {
-	tasks      *sqlite.TaskRepo
-	schedules  *sqlite.ScheduleRepo
-	agents     *sqlite.AgentRepo
-	lifecycles *sqlite.LifecycleRepo
+	tasks      persistence.TaskStore
+	schedules  persistence.ScheduleStore
+	agents     persistence.AgentStore
+	lifecycles persistence.LifecycleStore
 	projectID  string
 }
 
 func newMemoryScheduleTestService(t *testing.T) (*MemoryService, memoryScheduleTestRepos) {
 	t.Helper()
-	db := testutil.NewTestDB(t)
-	projectRepo := sqlite.NewProjectRepo(db)
+	db := teststores.NewDB(t)
+	projectRepo := teststores.Of(db).Projects
 	project := &models.Project{Name: "Memory test", RepoPath: t.TempDir()}
 	if err := projectRepo.Create(context.Background(), project); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
-	taskRepo := sqlite.NewTaskRepo(db, nil)
-	scheduleRepo := sqlite.NewScheduleRepo(db)
-	agentRepo := sqlite.NewAgentRepo(db)
-	lifecycleRepo := sqlite.NewLifecycleRepo(db)
+	taskRepo := teststores.Of(db).Tasks
+	scheduleRepo := teststores.Of(db).Schedules
+	agentRepo := teststores.Of(db).Agents
+	lifecycleRepo := teststores.Of(db).Lifecycle
 	resolver, err := memory.NewPathResolver(t.TempDir(), "")
 	if err != nil {
 		t.Fatalf("path resolver: %v", err)
@@ -549,7 +550,7 @@ func TestMemoryServiceEnsureProjectRepairsLegacyMemoryAgents(t *testing.T) {
 	if containsMemoryScheduleHookID(hooks, legacyHook.ID) || containsMemoryScheduleHookID(hooks, archivedLegacyHook.ID) {
 		t.Fatalf("legacy memory hooks should be deleted with the agents, got %+v", hooks)
 	}
-	allAgents, err := repos.agents.List(ctx)
+	allAgents, err := repos.agents.(*sqlite.AgentRepo).List(ctx)
 	if err != nil {
 		t.Fatalf("list live agents: %v", err)
 	}

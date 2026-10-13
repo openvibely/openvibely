@@ -9,15 +9,15 @@ import (
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
-	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/openvibely/openvibely/internal/testutil/teststores"
 	"github.com/stretchr/testify/require"
 )
 
 func TestLoadBoundedTaskThreadExecutionsHandlesInvalidInputs(t *testing.T) {
 	ctx := context.Background()
-	db := testutil.NewTestDB(t)
-	execRepo := sqlite.NewExecutionRepo(db)
+	db := teststores.NewDB(t)
+	execRepo := teststores.Of(db).Executions
 	task := &models.Task{ID: "task-history-invalid"}
 
 	for _, tt := range []struct {
@@ -103,13 +103,13 @@ func TestLoadBoundedTaskThreadExecutionsStopsOnBudgetAfterBoundedPages(t *testin
 	require.Len(t, serviceThreadHistoryExecutionQueries(counter.Statements()), 2)
 }
 
-func newServiceThreadHistoryFixture(t *testing.T, name string) (*sql.DB, *testutil.SQLStatementCounter, *sqlite.ExecutionRepo, *models.Task) {
+func newServiceThreadHistoryFixture(t *testing.T, name string) (*sql.DB, *testutil.SQLStatementCounter, persistence.ExecutionStore, *models.Task) {
 	t.Helper()
 	db, counter := testutil.NewStatementCountingTestDB(t)
 	ctx := context.Background()
-	projectRepo := sqlite.NewProjectRepo(db)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
-	execRepo := sqlite.NewExecutionRepo(db)
+	projectRepo := teststores.Of(db).Projects
+	taskRepo := teststores.Of(db).Tasks
+	execRepo := teststores.Of(db).Executions
 	project := &models.Project{Name: "Thread History " + name}
 	require.NoError(t, projectRepo.Create(ctx, project))
 	task := &models.Task{
@@ -123,7 +123,7 @@ func newServiceThreadHistoryFixture(t *testing.T, name string) (*sql.DB, *testut
 	return db, counter, execRepo, task
 }
 
-func seedServiceThreadHistoryExecutions(t *testing.T, ctx context.Context, db *sql.DB, execRepo *sqlite.ExecutionRepo, taskID string, count int, idPrefix string) {
+func seedServiceThreadHistoryExecutions(t *testing.T, ctx context.Context, db *sql.DB, execRepo persistence.ExecutionStore, taskID string, count int, idPrefix string) {
 	t.Helper()
 	startedAt := "2026-01-02 03:04:05"
 	for i := 0; i < count; i++ {

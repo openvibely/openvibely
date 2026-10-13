@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/persistence/sqlite"
+	"github.com/openvibely/openvibely/internal/testutil/teststores"
 )
 
 func TestBroadReadOnlyRouteSmokeExercisesProjectTaskAndSettingsSurfaces(t *testing.T) {
@@ -42,7 +42,7 @@ func TestBroadReadOnlyRouteSmokeExercisesProjectTaskAndSettingsSurfaces(t *testi
 	if err := tc.alertRepo.Create(ctx, &models.Alert{ProjectID: project.ID, Type: models.AlertCustom, Severity: models.SeverityWarning, Title: "Broad alert", Message: "needs review"}); err != nil {
 		t.Fatalf("create alert: %v", err)
 	}
-	agentRepo := sqlite.NewAgentRepo(tc.db)
+	agentRepo := teststores.Of(tc.db).Agents
 	tc.handler.SetAgentRepo(agentRepo)
 	if err := agentRepo.Create(ctx, &models.Agent{Name: "Broad Agent", Key: "broad-agent", Scope: models.AgentScopeProject, ProjectID: project.ID, Description: "Handles broad smoke routes", Model: agent.Model}); err != nil {
 		t.Fatalf("create agent definition: %v", err)
@@ -182,10 +182,10 @@ func TestBroadMutationRouteContractsExerciseMoreHandlers(t *testing.T) {
 	if err := tc.alertRepo.Create(ctx, alert); err != nil {
 		t.Fatalf("create alert: %v", err)
 	}
-	agentRepo := sqlite.NewAgentRepo(tc.db)
+	agentRepo := teststores.Of(tc.db).Agents
 	tc.handler.SetAgentRepo(agentRepo)
-	tc.handler.SetWebhookRepo(sqlite.NewWebhookRepo(tc.db))
-	tc.handler.SetCustomPersonalityRepo(sqlite.NewCustomPersonalityRepo(tc.db))
+	tc.handler.SetWebhookRepo(teststores.Of(tc.db).Webhooks)
+	tc.handler.SetCustomPersonalityRepo(teststores.Of(tc.db).CustomPersonalities)
 
 	projectQuery := "?project_id=" + url.QueryEscape(project.ID)
 	getPaths := []string{

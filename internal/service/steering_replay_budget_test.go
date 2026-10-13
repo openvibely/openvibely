@@ -7,19 +7,18 @@ import (
 
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/persistence/sqlite"
-	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/openvibely/openvibely/internal/testutil/teststores"
 	"github.com/stretchr/testify/require"
 )
 
 func TestOpenAIReplayLoadedBeforeBudgetAndTrimming(t *testing.T) {
-	db := testutil.NewTestDB(t)
+	db := teststores.NewDB(t)
 	ctx := context.Background()
 	task := &models.Task{ProjectID: "default", Title: "steering replay", Category: models.CategoryBacklog, Status: models.StatusCompleted}
-	require.NoError(t, sqlite.NewTaskRepo(db, nil).Create(ctx, task))
+	require.NoError(t, teststores.Of(db).Tasks.Create(ctx, task))
 	_, err := db.ExecContext(ctx, `INSERT INTO executions (id, task_id, status, prompt_sent) VALUES ('steered', ?, 'completed', 'small prompt')`, task.ID)
 	require.NoError(t, err)
-	repo := sqlite.NewExecutionRepo(db)
+	repo := teststores.Of(db).Executions
 	replay := []models.ExecutionReplayMessage{{TranscriptJSON: `{"responses_input":[{"type":"message","role":"user","content":"` + strings.Repeat("x", 200000) + `"}]}`}}
 	require.NoError(t, repo.ReplaceReasoningReplay(ctx, "steered", "", replay))
 	svc := NewLLMService(nil, repo, nil, nil, nil, nil)

@@ -17,6 +17,7 @@ import (
 	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/openvibely/openvibely/internal/testutil/teststores"
 )
 
 type outboundTargetTestDiscord struct {
@@ -77,7 +78,7 @@ func TestOutboundTargetHandlersDenyCrossProjectTargetIDs(t *testing.T) {
 	tc := NewTestContext(t)
 	ownerProject := tc.CreateProject().WithName("Owner Project").Build()
 	otherProject := tc.CreateProject().WithName("Other Project").Build()
-	targetRepo := sqlite.NewChannelTargetRepo(tc.db)
+	targetRepo := teststores.Of(tc.db).ChannelTargets
 	slack := &outboundTargetTestSlack{}
 	router := service.NewChannelMessageRouter(targetRepo, tc.settingsRepo)
 	router.SetSlackService(slack)
@@ -91,7 +92,7 @@ func TestOutboundTargetHandlersDenyCrossProjectTargetIDs(t *testing.T) {
 		Name:      "alerts",
 		TargetID:  "COWNER",
 	}
-	if err := targetRepo.Upsert(context.Background(), target); err != nil {
+	if err := targetRepo.(*sqlite.ChannelTargetRepo).Upsert(context.Background(), target); err != nil {
 		t.Fatalf("upsert target: %v", err)
 	}
 
@@ -136,7 +137,7 @@ func TestOutboundTargetHandlersDenyCrossProjectTargetIDs(t *testing.T) {
 	}
 
 	otherTarget := models.ChannelTarget{ID: persistence.NewID(), ProjectID: otherProject.ID, Platform: "slack", Name: "other", TargetID: "COTHER"}
-	if err := targetRepo.Upsert(context.Background(), otherTarget); err != nil {
+	if err := targetRepo.(*sqlite.ChannelTargetRepo).Upsert(context.Background(), otherTarget); err != nil {
 		t.Fatalf("upsert other target: %v", err)
 	}
 	validThenInvalid := url.Values{}
@@ -172,7 +173,7 @@ func TestOutboundTargetFragmentsShareResolvedProjectContext(t *testing.T) {
 	tc := NewTestContext(t)
 	projectA := tc.CreateProject().WithName("Outbound Fragment A").Build()
 	projectB := tc.CreateProject().WithName("Outbound Fragment B").Build()
-	targetRepo := sqlite.NewChannelTargetRepo(tc.db)
+	targetRepo := teststores.Of(tc.db).ChannelTargets
 	tc.handler.SetChannelTargetRepo(targetRepo)
 
 	targetA := models.ChannelTarget{
@@ -190,7 +191,7 @@ func TestOutboundTargetFragmentsShareResolvedProjectContext(t *testing.T) {
 		TargetID:   "fragment-b@example.com",
 	}
 	for _, target := range []models.ChannelTarget{targetA, targetB} {
-		if err := targetRepo.Upsert(context.Background(), target); err != nil {
+		if err := targetRepo.(*sqlite.ChannelTargetRepo).Upsert(context.Background(), target); err != nil {
 			t.Fatalf("upsert target %+v: %v", target, err)
 		}
 	}
@@ -288,13 +289,13 @@ func TestOutboundTargetFragmentsShareResolvedProjectContext(t *testing.T) {
 func TestOutboundTargetsCardFragmentUsesAggregateSummaryWithoutMaterializedRows(t *testing.T) {
 	db, counter := testutil.NewStatementCountingTestDB(t)
 	ctx := context.Background()
-	projectRepo := sqlite.NewProjectRepo(db)
+	projectRepo := teststores.Of(db).Projects
 	project := &models.Project{Name: "Aggregate Card Project"}
 	if err := projectRepo.Create(ctx, project); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
-	targetRepo := sqlite.NewChannelTargetRepo(db)
-	settingsRepo := sqlite.NewSettingsRepo(db)
+	targetRepo := teststores.Of(db).ChannelTargets
+	settingsRepo := teststores.Of(db).Settings
 	if err := settingsRepo.Set(ctx, service.SendMessageAllowExplicitTargetsSetting+":"+project.ID, "true"); err != nil {
 		t.Fatalf("set explicit target policy: %v", err)
 	}
@@ -304,7 +305,7 @@ func TestOutboundTargetsCardFragmentUsesAggregateSummaryWithoutMaterializedRows(
 		if platform == "matrix" {
 			targetKind = "room"
 		}
-		if err := targetRepo.Upsert(ctx, models.ChannelTarget{
+		if err := targetRepo.(*sqlite.ChannelTargetRepo).Upsert(ctx, models.ChannelTarget{
 			ID:             fmt.Sprintf("aggregate-card-target-%04d", i),
 			ProjectID:      project.ID,
 			Platform:       platform,
@@ -368,15 +369,15 @@ func TestOutboundTargetsCardFragmentUsesAggregateSummaryWithoutMaterializedRows(
 func TestOutboundTargetsPersistOnlyOnSaveSettings(t *testing.T) {
 	tc := NewTestContext(t)
 	project := tc.CreateProject().WithName("Staged Outbound Targets").Build()
-	targetRepo := sqlite.NewChannelTargetRepo(tc.db)
+	targetRepo := teststores.Of(tc.db).ChannelTargets
 	tc.handler.SetChannelTargetRepo(targetRepo)
 
 	keep := models.ChannelTarget{ID: persistence.NewID(), ProjectID: project.ID, Platform: "email", Name: "keep", TargetID: "keep@example.com"}
 	remove := models.ChannelTarget{ID: persistence.NewID(), ProjectID: project.ID, Platform: "slack", Name: "remove", TargetID: "CREMOVE"}
-	if err := targetRepo.Upsert(context.Background(), keep); err != nil {
+	if err := targetRepo.(*sqlite.ChannelTargetRepo).Upsert(context.Background(), keep); err != nil {
 		t.Fatalf("upsert keep target: %v", err)
 	}
-	if err := targetRepo.Upsert(context.Background(), remove); err != nil {
+	if err := targetRepo.(*sqlite.ChannelTargetRepo).Upsert(context.Background(), remove); err != nil {
 		t.Fatalf("upsert remove target: %v", err)
 	}
 
@@ -480,7 +481,7 @@ func TestOutboundTargetsPersistOnlyOnSaveSettings(t *testing.T) {
 func TestEditingOutboundTargetPreservesIDAndTestsEditedDraft(t *testing.T) {
 	tc := NewTestContext(t)
 	project := tc.CreateProject().WithName("Edited Outbound Target Project").Build()
-	targetRepo := sqlite.NewChannelTargetRepo(tc.db)
+	targetRepo := teststores.Of(tc.db).ChannelTargets
 	email := &outboundTargetTestEmail{}
 	router := service.NewChannelMessageRouter(targetRepo, tc.settingsRepo)
 	router.SetEmailService(email)
@@ -498,7 +499,7 @@ func TestEditingOutboundTargetPreservesIDAndTestsEditedDraft(t *testing.T) {
 		ThreadID:       "old-thread",
 		DefaultSubject: "Original subject",
 	}
-	if err := targetRepo.Upsert(context.Background(), target); err != nil {
+	if err := targetRepo.(*sqlite.ChannelTargetRepo).Upsert(context.Background(), target); err != nil {
 		t.Fatalf("upsert target: %v", err)
 	}
 
@@ -566,7 +567,7 @@ func TestEditingOutboundTargetPreservesIDAndTestsEditedDraft(t *testing.T) {
 func TestOutboundTargetDraftTestSendsWithoutPersisting(t *testing.T) {
 	tc := NewTestContext(t)
 	project := tc.CreateProject().WithName("Outbound Draft Test Project").Build()
-	targetRepo := sqlite.NewChannelTargetRepo(tc.db)
+	targetRepo := teststores.Of(tc.db).ChannelTargets
 	slack := &outboundTargetTestSlack{}
 	router := service.NewChannelMessageRouter(targetRepo, tc.settingsRepo)
 	router.SetSlackService(slack)
@@ -602,7 +603,7 @@ func TestOutboundTargetDraftTestSendsWithoutPersisting(t *testing.T) {
 func TestOutboundTargetSaveAndDraftTestShareCanonicalValidation(t *testing.T) {
 	tc := NewTestContext(t)
 	project := tc.CreateProject().WithName("Outbound Shared Validation Project").Build()
-	targetRepo := sqlite.NewChannelTargetRepo(tc.db)
+	targetRepo := teststores.Of(tc.db).ChannelTargets
 	slack := &outboundTargetTestSlack{}
 	router := service.NewChannelMessageRouter(targetRepo, tc.settingsRepo)
 	router.SetSlackService(slack)
@@ -644,7 +645,7 @@ func TestOutboundTargetSaveAndDraftTestShareCanonicalValidation(t *testing.T) {
 func TestOutboundTargetDraftTestRendersCleanFailure(t *testing.T) {
 	tc := NewTestContext(t)
 	project := tc.CreateProject().WithName("Outbound Draft Failure Project").Build()
-	targetRepo := sqlite.NewChannelTargetRepo(tc.db)
+	targetRepo := teststores.Of(tc.db).ChannelTargets
 	router := service.NewChannelMessageRouter(targetRepo, tc.settingsRepo)
 	tc.handler.SetChannelTargetRepo(targetRepo)
 	tc.handler.SetChannelMessageRouter(router)
@@ -669,7 +670,7 @@ func TestOutboundTargetDraftTestRendersCleanFailure(t *testing.T) {
 func TestOutboundTargetTestPreservesThreadIDAndEscapesResult(t *testing.T) {
 	tc := NewTestContext(t)
 	project := tc.CreateProject().WithName("Outbound Target Project").Build()
-	targetRepo := sqlite.NewChannelTargetRepo(tc.db)
+	targetRepo := teststores.Of(tc.db).ChannelTargets
 	slack := &outboundTargetTestSlack{}
 	router := service.NewChannelMessageRouter(targetRepo, tc.settingsRepo)
 	router.SetSlackService(slack)
@@ -685,7 +686,7 @@ func TestOutboundTargetTestPreservesThreadIDAndEscapesResult(t *testing.T) {
 		ThreadID:  "1690000000.000000",
 		Home:      true,
 	}
-	if err := targetRepo.Upsert(context.Background(), target); err != nil {
+	if err := targetRepo.(*sqlite.ChannelTargetRepo).Upsert(context.Background(), target); err != nil {
 		t.Fatalf("upsert target: %v", err)
 	}
 
@@ -714,7 +715,7 @@ func TestOutboundTargetTestPreservesThreadIDAndEscapesResult(t *testing.T) {
 func TestSavingUserDMOutboundTargetPersistsTargetKind(t *testing.T) {
 	tc := NewTestContext(t)
 	project := tc.CreateProject().WithName("User DM Target Project").Build()
-	targetRepo := sqlite.NewChannelTargetRepo(tc.db)
+	targetRepo := teststores.Of(tc.db).ChannelTargets
 	slack := &outboundTargetTestSlack{}
 	router := service.NewChannelMessageRouter(targetRepo, tc.settingsRepo)
 	router.SetSlackService(slack)
@@ -773,7 +774,7 @@ func TestSavingUserDMOutboundTargetPersistsTargetKind(t *testing.T) {
 func TestOutboundTargetDraftTestUserDMDispatchesAsDM(t *testing.T) {
 	tc := NewTestContext(t)
 	project := tc.CreateProject().WithName("Draft DM Project").Build()
-	targetRepo := sqlite.NewChannelTargetRepo(tc.db)
+	targetRepo := teststores.Of(tc.db).ChannelTargets
 	slack := &outboundTargetTestSlack{}
 	router := service.NewChannelMessageRouter(targetRepo, tc.settingsRepo)
 	router.SetSlackService(slack)
@@ -810,7 +811,7 @@ func TestOutboundTargetDraftTestUserDMDispatchesAsDM(t *testing.T) {
 func TestSavingDiscordUserDMOutboundTargetPersistsTargetKind(t *testing.T) {
 	tc := NewTestContext(t)
 	project := tc.CreateProject().WithName("Discord User DM Target Project").Build()
-	targetRepo := sqlite.NewChannelTargetRepo(tc.db)
+	targetRepo := teststores.Of(tc.db).ChannelTargets
 	discord := &outboundTargetTestDiscord{}
 	router := service.NewChannelMessageRouter(targetRepo, tc.settingsRepo)
 	router.SetDiscordService(discord)
@@ -869,7 +870,7 @@ func TestSavingDiscordUserDMOutboundTargetPersistsTargetKind(t *testing.T) {
 func TestDiscordOutboundTargetDraftTestUserDMDispatchesAsDM(t *testing.T) {
 	tc := NewTestContext(t)
 	project := tc.CreateProject().WithName("Discord Draft DM Project").Build()
-	targetRepo := sqlite.NewChannelTargetRepo(tc.db)
+	targetRepo := teststores.Of(tc.db).ChannelTargets
 	discord := &outboundTargetTestDiscord{}
 	router := service.NewChannelMessageRouter(targetRepo, tc.settingsRepo)
 	router.SetDiscordService(discord)
@@ -906,8 +907,8 @@ func BenchmarkOutboundTargetsCardRefreshUsesAggregateSummary(b *testing.B) {
 	db, counter := testutil.NewStatementCountingTestDB(b)
 	projectID := "outbound-card-refresh-bench-project"
 	seedOutboundTargetsCardBenchFixture(b, db, projectID, 20000)
-	targetRepo := sqlite.NewChannelTargetRepo(db)
-	settingsRepo := sqlite.NewSettingsRepo(db)
+	targetRepo := teststores.Of(db).ChannelTargets
+	settingsRepo := teststores.Of(db).Settings
 	ctx := context.Background()
 	if err := settingsRepo.Set(ctx, service.SendMessageAllowExplicitTargetsSetting+":"+projectID, "true"); err != nil {
 		b.Fatalf("set explicit policy: %v", err)
@@ -993,7 +994,7 @@ func seedOutboundTargetsCardBenchFixture(tb testing.TB, db *sql.DB, projectID st
 func TestAuthorizedUsersMutationDoesNotAffectOutboundTargets(t *testing.T) {
 	h, e, _, db := setupTestHandlerWithDB(t)
 	project := createProject(t, h, "Auth Isolation Project")
-	targetRepo := sqlite.NewChannelTargetRepo(db)
+	targetRepo := teststores.Of(db).ChannelTargets
 	h.SetChannelTargetRepo(targetRepo)
 
 	// Seed two outbound targets: a Slack channel and a Discord user DM.
@@ -1005,10 +1006,10 @@ func TestAuthorizedUsersMutationDoesNotAffectOutboundTargets(t *testing.T) {
 		ID: persistence.NewID(), ProjectID: project.ID,
 		Platform: "discord", TargetKind: "user", Name: "", TargetID: "1518288288572641398",
 	}
-	if err := targetRepo.Upsert(context.Background(), slackChannelTarget); err != nil {
+	if err := targetRepo.(*sqlite.ChannelTargetRepo).Upsert(context.Background(), slackChannelTarget); err != nil {
 		t.Fatalf("upsert slack channel target: %v", err)
 	}
-	if err := targetRepo.Upsert(context.Background(), discordUserTarget); err != nil {
+	if err := targetRepo.(*sqlite.ChannelTargetRepo).Upsert(context.Background(), discordUserTarget); err != nil {
 		t.Fatalf("upsert discord user target: %v", err)
 	}
 
@@ -1081,7 +1082,7 @@ func TestAuthorizedUsersMutationDoesNotAffectOutboundTargets(t *testing.T) {
 func TestOutboundTargetMutationDoesNotAffectAuthorizedUsers(t *testing.T) {
 	h, e, _, db := setupTestHandlerWithDB(t)
 	project := createProject(t, h, "Outbound Isolation Project")
-	targetRepo := sqlite.NewChannelTargetRepo(db)
+	targetRepo := teststores.Of(db).ChannelTargets
 	h.SetChannelTargetRepo(targetRepo)
 
 	// Seed one Slack and one Discord authorized user.

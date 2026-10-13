@@ -20,6 +20,7 @@ import (
 	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/persistence/sqlite/database"
 	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/openvibely/openvibely/internal/testutil/teststores"
 )
 
 // --- Analytics page ---
@@ -82,7 +83,7 @@ func TestGetAnalyticsUsage_AccountLimitsProjectionOmitsFullUsageSections(t *test
 		t.Fatalf("create oauth config: %v", err)
 	}
 	usedPercent := 12.5
-	if err := tc.usageRepo.CreateAccountUsageSnapshot(ctx, &models.AccountUsageSnapshot{
+	if err := tc.usageRepo.(*sqlite.UsageRepo).CreateAccountUsageSnapshot(ctx, &models.AccountUsageSnapshot{
 		Provider:           "openai",
 		AccountID:          cfg.OAuthAccountID,
 		AgentConfigID:      cfg.ID,
@@ -169,7 +170,7 @@ func TestGetAnalyticsUsage_AccountLimitsAreOrderedAndPrivate(t *testing.T) {
 	fiveHourPercent := 4.0
 	weeklyMinutes := 10080
 	fiveHourMinutes := 300
-	if err := tc.usageRepo.CreateAccountUsageSnapshot(ctx, &models.AccountUsageSnapshot{
+	if err := tc.usageRepo.(*sqlite.UsageRepo).CreateAccountUsageSnapshot(ctx, &models.AccountUsageSnapshot{
 		Provider:               "openai",
 		AccountID:              cfg.OAuthAccountID,
 		AgentConfigID:          cfg.ID,
@@ -293,7 +294,7 @@ func TestGetAnalyticsDashboardYieldsSoleReaderForConcurrentRequest(t *testing.T)
 		t.Fatal(err)
 	}
 
-	h := &Handler{execRepo: sqlite.NewExecutionRepo(connections.Reader)}
+	h := &Handler{execRepo: teststores.Of(connections.Reader).Executions}
 	e := echo.New()
 	e.GET("/api/analytics/dashboard", h.GetAnalyticsDashboard)
 	e.GET("/probe", func(c echo.Context) error {
@@ -433,7 +434,7 @@ func BenchmarkGetAnalyticsDashboardLargePayloadAgents(b *testing.B) {
 		t.Fatal(err)
 	}
 
-	h := &Handler{execRepo: sqlite.NewExecutionRepo(connections.Reader)}
+	h := &Handler{execRepo: teststores.Of(connections.Reader).Executions}
 	e := echo.New()
 	e.GET("/api/analytics/dashboard", h.GetAnalyticsDashboard)
 	server := httptest.NewServer(e)
@@ -491,7 +492,7 @@ func BenchmarkGetAnalyticsDashboardLargePayloadOverview(b *testing.B) {
 		t.Fatal(err)
 	}
 
-	h := &Handler{execRepo: sqlite.NewExecutionRepo(connections.Reader)}
+	h := &Handler{execRepo: teststores.Of(connections.Reader).Executions}
 	e := echo.New()
 	e.GET("/api/analytics/dashboard", h.GetAnalyticsDashboard)
 	server := httptest.NewServer(e)
@@ -606,7 +607,7 @@ func TestGetAnalyticsDashboardFiltersScopedSkillOutcomeEvidence(t *testing.T) {
 		}
 	}
 
-	skillRepo := sqlite.NewSkillAnalyticsRepo(tc.db)
+	skillRepo := teststores.Of(tc.db).SkillAnalytics
 	for _, event := range []*models.SkillAnalyticsEvent{
 		{ProjectID: project.ID, TaskID: target.ID, SkillHandle: "shared:evaluator", SkillScope: models.SkillScopeProject, EventType: models.SkillEventSelected},
 		{ProjectID: project.ID, TaskID: other.ID, SkillHandle: "shared:evaluator", SkillScope: models.SkillScopeGlobal, EventType: models.SkillEventSelected},
@@ -1000,9 +1001,9 @@ func TestGetSkillAnalyticsUsesCompactAgentCatalogProjectionAndPreservesEnabledSk
 		t.Fatalf("clear agents: %v", err)
 	}
 
-	projectRepo := sqlite.NewProjectRepo(db)
-	agentRepo := sqlite.NewAgentRepo(db)
-	skillAnalyticsRepo := sqlite.NewSkillAnalyticsRepo(db)
+	projectRepo := teststores.Of(db).Projects
+	agentRepo := teststores.Of(db).Agents
+	skillAnalyticsRepo := teststores.Of(db).SkillAnalytics
 	globalRoot := filepath.Join(t.TempDir(), "global")
 	projectARepo := filepath.Join(t.TempDir(), "project-a")
 	projectBRepo := filepath.Join(t.TempDir(), "project-b")
@@ -1156,7 +1157,7 @@ func analyticsSkillBody(handle string, enabled bool) string {
 	return "---\nskill:\n  key: " + handle + "\n  enabled: " + map[bool]string{true: "true", false: "false"}[enabled] + "\n---\n\n# " + handle + "\n"
 }
 
-func createAnalyticsAgent(t *testing.T, repo *sqlite.AgentRepo, name, key, projectID string) *models.Agent {
+func createAnalyticsAgent(t *testing.T, repo persistence.AgentStore, name, key, projectID string) *models.Agent {
 	t.Helper()
 	agent := &models.Agent{
 		Name:         name,

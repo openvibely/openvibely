@@ -21,22 +21,24 @@ import (
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/openvibely/openvibely/internal/chatcontrol"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/openvibely/openvibely/internal/testutil/teststores"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 func TestTelegramService_NotificationLifecycleRuntimeUsesPersistedChannelTask(t *testing.T) {
-	db := testutil.NewTestDB(t)
+	db := teststores.NewDB(t)
 	ctx := context.Background()
-	projectRepo := sqlite.NewProjectRepo(db)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
+	projectRepo := teststores.Of(db).Projects
+	taskRepo := teststores.Of(db).Tasks
 	project := &models.Project{Name: "Telegram Notification Lifecycle"}
 	require.NoError(t, projectRepo.Create(ctx, project))
 	caller := &models.Task{ProjectID: project.ID, Title: "Telegram chat", Prompt: "process", Category: models.CategoryChat, Status: models.StatusPending, Priority: 2}
 	require.NoError(t, taskRepo.Create(ctx, caller))
-	alertSvc := NewAlertService(sqlite.NewAlertRepo(db), nil)
+	alertSvc := NewAlertService(teststores.Of(db).Alerts, nil)
 	alert, err := alertSvc.CreateActionable(ctx, &models.Alert{ProjectID: project.ID, Type: "suggestion", Title: "Telegram suggestion", Severity: models.SeverityInfo})
 	require.NoError(t, err)
 	require.NoError(t, alertSvc.SetDecision(ctx, project.ID, alert.ID, models.AlertDecisionApproved))
@@ -197,8 +199,8 @@ func TestTelegramService_GetStatusIcon(t *testing.T) {
 }
 
 func TestTelegramService_GetActiveProject(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	projectRepo := sqlite.NewProjectRepo(db)
+	db := teststores.NewDB(t)
+	projectRepo := teststores.Of(db).Projects
 
 	// Create test projects
 	ctx := context.Background()
@@ -543,17 +545,17 @@ func TestTelegramChatHandoffDoesNotWaitForModelCompletion(t *testing.T) {
 }
 
 func TestTelegramChatHandoffReportsTaskPersistenceFailure(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	projectRepo := sqlite.NewProjectRepo(db)
+	db := teststores.NewDB(t)
+	projectRepo := teststores.Of(db).Projects
 	project := &models.Project{Name: "Telegram task failure", IsDefault: true}
 	require.NoError(t, projectRepo.Create(context.Background(), project))
 
 	svc := &TelegramService{
 		projectRepo:     projectRepo,
-		llmConfigRepo:   sqlite.NewLLMConfigRepo(db),
-		taskRepo:        sqlite.NewTaskRepo(closedTestDB(t), nil),
-		execRepo:        sqlite.NewExecutionRepo(db),
-		threadInputRepo: sqlite.NewThreadInputRepo(db),
+		llmConfigRepo:   teststores.Of(db).LLMConfigs,
+		taskRepo:        teststores.Of(closedTestDB(t)).Tasks,
+		execRepo:        teststores.Of(db).Executions,
+		threadInputRepo: teststores.Of(db).ThreadInputs,
 		userProjects:    map[int64]string{7: project.ID},
 		sendMessageFunc: func(int64, string) {},
 	}
@@ -563,8 +565,8 @@ func TestTelegramChatHandoffReportsTaskPersistenceFailure(t *testing.T) {
 }
 
 func TestTelegramChatHandoffReportsExecutionPersistenceFailure(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	projectRepo := sqlite.NewProjectRepo(db)
+	db := teststores.NewDB(t)
+	projectRepo := teststores.Of(db).Projects
 	project := &models.Project{Name: "Telegram execution failure", IsDefault: true}
 	require.NoError(t, projectRepo.Create(context.Background(), project))
 	_, err := db.Exec(`CREATE TRIGGER fail_telegram_execution BEFORE INSERT ON executions BEGIN SELECT RAISE(FAIL, 'injected execution failure'); END`)
@@ -572,10 +574,10 @@ func TestTelegramChatHandoffReportsExecutionPersistenceFailure(t *testing.T) {
 
 	svc := &TelegramService{
 		projectRepo:     projectRepo,
-		llmConfigRepo:   sqlite.NewLLMConfigRepo(db),
-		taskRepo:        sqlite.NewTaskRepo(db, nil),
-		execRepo:        sqlite.NewExecutionRepo(db),
-		threadInputRepo: sqlite.NewThreadInputRepo(db),
+		llmConfigRepo:   teststores.Of(db).LLMConfigs,
+		taskRepo:        teststores.Of(db).Tasks,
+		execRepo:        teststores.Of(db).Executions,
+		threadInputRepo: teststores.Of(db).ThreadInputs,
 		userProjects:    map[int64]string{7: project.ID},
 		sendMessageFunc: func(int64, string) {},
 	}
@@ -787,12 +789,12 @@ func telegramJSONResponse(body string) *http.Response {
 // Helper to create a TelegramService for testing (no real bot connection)
 func closedTestDB(t *testing.T) *sql.DB {
 	t.Helper()
-	db := testutil.NewTestDB(t)
+	db := teststores.NewDB(t)
 	require.NoError(t, db.Close())
 	return db
 }
 
-func newTestTelegramService(t *testing.T) (*TelegramService, *sqlite.ProjectRepo, *sqlite.TaskRepo) {
+func newTestTelegramService(t *testing.T) (*TelegramService, persistence.ProjectStore, persistence.TaskStore) {
 	t.Helper()
 	oldUploadsDir := telegramUploadsDir
 	telegramUploadsDir = t.TempDir()
@@ -800,20 +802,20 @@ func newTestTelegramService(t *testing.T) (*TelegramService, *sqlite.ProjectRepo
 		telegramUploadsDir = oldUploadsDir
 	})
 
-	db := testutil.NewTestDB(t)
-	projectRepo := sqlite.NewProjectRepo(db)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
-	execRepo := sqlite.NewExecutionRepo(db)
-	attachmentRepo := sqlite.NewAttachmentRepo(db)
-	chatAttachmentRepo := sqlite.NewChatAttachmentRepo(db)
-	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	db := teststores.NewDB(t)
+	projectRepo := teststores.Of(db).Projects
+	taskRepo := teststores.Of(db).Tasks
+	execRepo := teststores.Of(db).Executions
+	attachmentRepo := teststores.Of(db).Attachments
+	chatAttachmentRepo := teststores.Of(db).ChatAttachments
+	llmConfigRepo := teststores.Of(db).LLMConfigs
 	workerSvc := NewWorkerService(nil, 0, projectRepo)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 	swarmSvc := NewSwarmService(taskSvc, taskRepo, execRepo, workerSvc)
 	taskSvc.SetSwarmService(swarmSvc)
 
-	settingsRepo := sqlite.NewSettingsRepo(db)
-	scheduleRepo := sqlite.NewScheduleRepo(db)
+	settingsRepo := teststores.Of(db).Settings
+	scheduleRepo := teststores.Of(db).Schedules
 
 	svc := &TelegramService{
 		taskSvc:            taskSvc,
@@ -824,7 +826,7 @@ func newTestTelegramService(t *testing.T) (*TelegramService, *sqlite.ProjectRepo
 		chatAttachmentRepo: chatAttachmentRepo,
 		settingsRepo:       settingsRepo,
 		scheduleRepo:       scheduleRepo,
-		threadInputRepo:    sqlite.NewThreadInputRepo(db),
+		threadInputRepo:    teststores.Of(db).ThreadInputs,
 		userProjects:       make(map[int64]string),
 	}
 	return svc, projectRepo, taskRepo
@@ -852,13 +854,13 @@ func TestTelegramService_FilterChatHistory(t *testing.T) {
 }
 
 func TestTelegramService_BuildChatContext(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	projectRepo := sqlite.NewProjectRepo(db)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
-	execRepo := sqlite.NewExecutionRepo(db)
-	attachmentRepo := sqlite.NewAttachmentRepo(db)
-	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
-	agentRepo := sqlite.NewAgentRepo(db)
+	db := teststores.NewDB(t)
+	projectRepo := teststores.Of(db).Projects
+	taskRepo := teststores.Of(db).Tasks
+	execRepo := teststores.Of(db).Executions
+	attachmentRepo := teststores.Of(db).Attachments
+	llmConfigRepo := teststores.Of(db).LLMConfigs
+	agentRepo := teststores.Of(db).Agents
 	workerSvc := NewWorkerService(nil, 0, projectRepo)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 	taskSvc.SetAgentRepo(agentRepo)
@@ -919,8 +921,8 @@ func TestTelegramService_BuildChatContext(t *testing.T) {
 }
 
 func TestChannelChatSelectAgent(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	db := teststores.NewDB(t)
+	llmConfigRepo := teststores.Of(db).LLMConfigs
 
 	ctx := context.Background()
 
@@ -997,7 +999,7 @@ func TestTelegramService_RuntimeListAlertsTool_Handled(t *testing.T) {
 	project := &models.Project{Name: "Telegram Alerts Runtime", RepoPath: "/tmp/test", IsDefault: true}
 	require.NoError(t, projectRepo.Create(ctx, project))
 
-	alertRepo := sqlite.NewAlertRepo(testutil.NewTestDB(t))
+	alertRepo := teststores.Of(teststores.NewDB(t)).Alerts
 	svc.alertSvc = NewAlertService(alertRepo, nil)
 
 	rt := svc.buildTelegramActionToolRuntime(project.ID, 12345, 12345, nil)
@@ -1017,7 +1019,7 @@ func TestTelegramService_RuntimeExecutorHandlesAllDefinedTools(t *testing.T) {
 	project := &models.Project{Name: "Telegram Full Runtime", RepoPath: "/tmp/test", IsDefault: true}
 	require.NoError(t, projectRepo.Create(ctx, project))
 
-	alertRepo := sqlite.NewAlertRepo(testutil.NewTestDB(t))
+	alertRepo := teststores.Of(teststores.NewDB(t)).Alerts
 	svc.alertSvc = NewAlertService(alertRepo, nil)
 
 	rt := svc.buildTelegramActionToolRuntime(project.ID, 12345, 12345, nil)
@@ -1037,11 +1039,11 @@ func TestTelegramService_RuntimeExecutorHandlesAllDefinedTools(t *testing.T) {
 }
 
 func TestTelegramService_CompleteExecution_Success(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	projectRepo := sqlite.NewProjectRepo(db)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
-	execRepo := sqlite.NewExecutionRepo(db)
-	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	db := teststores.NewDB(t)
+	projectRepo := teststores.Of(db).Projects
+	taskRepo := teststores.Of(db).Tasks
+	execRepo := teststores.Of(db).Executions
+	llmConfigRepo := teststores.Of(db).LLMConfigs
 
 	ctx := context.Background()
 	project := &models.Project{
@@ -1090,11 +1092,11 @@ func TestTelegramService_CompleteExecution_Success(t *testing.T) {
 }
 
 func TestTelegramService_CompleteExecution_Failure(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	projectRepo := sqlite.NewProjectRepo(db)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
-	execRepo := sqlite.NewExecutionRepo(db)
-	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	db := teststores.NewDB(t)
+	projectRepo := teststores.Of(db).Projects
+	taskRepo := teststores.Of(db).Tasks
+	execRepo := teststores.Of(db).Executions
+	llmConfigRepo := teststores.Of(db).LLMConfigs
 
 	ctx := context.Background()
 	project := &models.Project{
@@ -1146,8 +1148,8 @@ func TestTelegramService_CompleteExecution_Failure(t *testing.T) {
 }
 
 func TestTelegramService_ResolveWorkDir(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	projectRepo := sqlite.NewProjectRepo(db)
+	db := teststores.NewDB(t)
+	projectRepo := teststores.Of(db).Projects
 
 	ctx := context.Background()
 	project := &models.Project{
@@ -1166,8 +1168,8 @@ func TestTelegramService_ResolveWorkDir(t *testing.T) {
 }
 
 func TestTelegramService_HandleStart_SetsDefaultProject(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	projectRepo := sqlite.NewProjectRepo(db)
+	db := teststores.NewDB(t)
+	projectRepo := teststores.Of(db).Projects
 
 	svc := &TelegramService{
 		projectRepo:  projectRepo,
@@ -1185,8 +1187,8 @@ func TestTelegramService_HandleStart_SetsDefaultProject(t *testing.T) {
 }
 
 func TestTelegramService_HandleProject_ListProjects(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	projectRepo := sqlite.NewProjectRepo(db)
+	db := teststores.NewDB(t)
+	projectRepo := teststores.Of(db).Projects
 
 	ctx := context.Background()
 	project1 := &models.Project{
@@ -1220,8 +1222,8 @@ func TestTelegramService_HandleProject_ListProjects(t *testing.T) {
 }
 
 func TestTelegramService_HandleProject_SwitchToValidProject(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	projectRepo := sqlite.NewProjectRepo(db)
+	db := teststores.NewDB(t)
+	projectRepo := teststores.Of(db).Projects
 
 	ctx := context.Background()
 	project1 := &models.Project{
@@ -1253,8 +1255,8 @@ func TestTelegramService_HandleProject_SwitchToValidProject(t *testing.T) {
 }
 
 func TestTelegramService_HandleProject_SwitchToInvalidProject(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	projectRepo := sqlite.NewProjectRepo(db)
+	db := teststores.NewDB(t)
+	projectRepo := teststores.Of(db).Projects
 
 	ctx := context.Background()
 	project1 := &models.Project{
@@ -1282,8 +1284,8 @@ func TestTelegramService_HandleProject_SwitchToInvalidProject(t *testing.T) {
 }
 
 func TestTelegramService_HandleProject_CaseInsensitiveSwitch(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	projectRepo := sqlite.NewProjectRepo(db)
+	db := teststores.NewDB(t)
+	projectRepo := teststores.Of(db).Projects
 
 	ctx := context.Background()
 	project := &models.Project{
@@ -1308,8 +1310,8 @@ func TestTelegramService_HandleProject_CaseInsensitiveSwitch(t *testing.T) {
 }
 
 func TestTelegramService_HandleProject_SwitchByExactID(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	projectRepo := sqlite.NewProjectRepo(db)
+	db := teststores.NewDB(t)
+	projectRepo := teststores.Of(db).Projects
 
 	ctx := context.Background()
 	project1 := &models.Project{Name: "Project A", RepoPath: "/tmp/a", IsDefault: true}
@@ -1730,8 +1732,8 @@ func TestTelegramService_LinkAttachments_RollsBackPartialLinksOnFailure(t *testi
 }
 
 func TestChannelChatSelectAgent_WithImages(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	db := teststores.NewDB(t)
+	llmConfigRepo := teststores.Of(db).LLMConfigs
 
 	ctx := context.Background()
 
@@ -2054,8 +2056,8 @@ func TestTelegramService_FormatThreadTranscript_OffsetLimit(t *testing.T) {
 }
 
 func TestTelegramService_SelectDefaultAgent(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	db := teststores.NewDB(t)
+	llmConfigRepo := teststores.Of(db).LLMConfigs
 
 	svc := &TelegramService{
 		llmConfigRepo: llmConfigRepo,
@@ -2170,9 +2172,9 @@ func TestTelegramService_HandleUpdateAuthorizationStorageFailureStopsCommandProc
 }
 
 func TestTelegramService_CheckAuthorization(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	projectRepo := sqlite.NewProjectRepo(db)
-	telegramAuthRepo := sqlite.NewTelegramAuthRepo(db)
+	db := teststores.NewDB(t)
+	projectRepo := teststores.Of(db).Projects
+	telegramAuthRepo := teststores.Of(db).TelegramAuth
 	bgCtx := context.Background()
 
 	// Create a project
@@ -2289,8 +2291,8 @@ func TestTelegramService_CheckAuthorization(t *testing.T) {
 func TestTelegramService_CheckAuthorizationRejectedActiveProjectUsesSingleLookup(t *testing.T) {
 	db, counter := testutil.NewStatementCountingTestDB(t)
 	ctx := context.Background()
-	projectRepo := sqlite.NewProjectRepo(db)
-	telegramAuthRepo := sqlite.NewTelegramAuthRepo(db)
+	projectRepo := teststores.Of(db).Projects
+	telegramAuthRepo := teststores.Of(db).TelegramAuth
 
 	project := &models.Project{Name: "Telegram Single Auth Lookup"}
 	require.NoError(t, projectRepo.Create(ctx, project))
@@ -2313,10 +2315,10 @@ func TestTelegramService_CheckAuthorizationRejectedActiveProjectUsesSingleLookup
 }
 
 func BenchmarkTelegramRejectedAuthorizationSingleLookupLargeAllowlist(b *testing.B) {
-	db := testutil.NewTestDB(b)
+	db := teststores.NewDB(b)
 	ctx := context.Background()
-	projectRepo := sqlite.NewProjectRepo(db)
-	telegramAuthRepo := sqlite.NewTelegramAuthRepo(db)
+	projectRepo := teststores.Of(db).Projects
+	telegramAuthRepo := teststores.Of(db).TelegramAuth
 	project := &models.Project{Name: "Telegram Rejected Auth Benchmark"}
 	require.NoError(b, projectRepo.Create(ctx, project))
 	seedTelegramAuthorizedUsers(b, db, project.ID, 1000, 100000)
@@ -2371,11 +2373,11 @@ func installFailingTelegramUserProjectWrites(t *testing.T, db *sql.DB) {
 	require.NoError(t, err)
 }
 
-func newTelegramProjectSwitchFailureFixture(t *testing.T) (*TelegramService, *sqlite.TelegramUserProjectRepo, *models.Project, *models.Project, int64) {
+func newTelegramProjectSwitchFailureFixture(t *testing.T) (*TelegramService, persistence.TelegramUserProjectStore, *models.Project, *models.Project, int64) {
 	t.Helper()
-	db := testutil.NewTestDB(t)
-	projectRepo := sqlite.NewProjectRepo(db)
-	userProjectRepo := sqlite.NewTelegramUserProjectRepo(db)
+	db := teststores.NewDB(t)
+	projectRepo := teststores.Of(db).Projects
+	userProjectRepo := teststores.Of(db).TelegramUserProjects
 	ctx := context.Background()
 	projectA := &models.Project{Name: "Project A", RepoPath: "/tmp/a", IsDefault: true}
 	require.NoError(t, projectRepo.Create(ctx, projectA))
@@ -2395,9 +2397,9 @@ func newTelegramProjectSwitchFailureFixture(t *testing.T) (*TelegramService, *sq
 }
 
 func TestTelegramService_HandleStart_PersistenceFailureLeavesActiveProjectUnchanged(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	projectRepo := sqlite.NewProjectRepo(db)
-	userProjectRepo := sqlite.NewTelegramUserProjectRepo(db)
+	db := teststores.NewDB(t)
+	projectRepo := teststores.Of(db).Projects
+	userProjectRepo := teststores.Of(db).TelegramUserProjects
 	ctx := context.Background()
 	previousProject := &models.Project{Name: "Previous Project", RepoPath: "/tmp/previous"}
 	require.NoError(t, projectRepo.Create(ctx, previousProject))
@@ -2470,9 +2472,9 @@ func TestTelegramService_RuntimeProjectSwitch_PersistenceFailureLeavesActiveProj
 }
 
 func TestTelegramService_HandleProject_PersistsSelection(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	projectRepo := sqlite.NewProjectRepo(db)
-	userProjectRepo := sqlite.NewTelegramUserProjectRepo(db)
+	db := teststores.NewDB(t)
+	projectRepo := teststores.Of(db).Projects
+	userProjectRepo := teststores.Of(db).TelegramUserProjects
 
 	ctx := context.Background()
 	project1 := &models.Project{
@@ -2508,9 +2510,9 @@ func TestTelegramService_HandleProject_PersistsSelection(t *testing.T) {
 }
 
 func TestTelegramService_GetActiveProject_LoadsFromDB(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	projectRepo := sqlite.NewProjectRepo(db)
-	userProjectRepo := sqlite.NewTelegramUserProjectRepo(db)
+	db := teststores.NewDB(t)
+	projectRepo := teststores.Of(db).Projects
+	userProjectRepo := teststores.Of(db).TelegramUserProjects
 
 	ctx := context.Background()
 	defaultProject := &models.Project{
@@ -2545,9 +2547,9 @@ func TestTelegramService_GetActiveProject_LoadsFromDB(t *testing.T) {
 }
 
 func TestTelegramService_GetActiveProject_FallsBackToDefault(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	projectRepo := sqlite.NewProjectRepo(db)
-	userProjectRepo := sqlite.NewTelegramUserProjectRepo(db)
+	db := teststores.NewDB(t)
+	projectRepo := teststores.Of(db).Projects
+	userProjectRepo := teststores.Of(db).TelegramUserProjects
 
 	// No saved preference — new user
 	svc := &TelegramService{
@@ -2563,9 +2565,9 @@ func TestTelegramService_GetActiveProject_FallsBackToDefault(t *testing.T) {
 }
 
 func TestTelegramService_HandleStart_PersistsDefaultProject(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	projectRepo := sqlite.NewProjectRepo(db)
-	userProjectRepo := sqlite.NewTelegramUserProjectRepo(db)
+	db := teststores.NewDB(t)
+	projectRepo := teststores.Of(db).Projects
+	userProjectRepo := teststores.Of(db).TelegramUserProjects
 
 	svc := &TelegramService{
 		projectRepo:             projectRepo,
@@ -2587,9 +2589,9 @@ func TestTelegramService_HandleStart_PersistsDefaultProject(t *testing.T) {
 }
 
 func TestTelegramService_ProjectPersistence_AcrossRestarts(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	projectRepo := sqlite.NewProjectRepo(db)
-	userProjectRepo := sqlite.NewTelegramUserProjectRepo(db)
+	db := teststores.NewDB(t)
+	projectRepo := teststores.Of(db).Projects
+	userProjectRepo := teststores.Of(db).TelegramUserProjects
 
 	ctx := context.Background()
 	project1 := &models.Project{
@@ -2631,8 +2633,8 @@ func TestTelegramService_ProjectPersistence_AcrossRestarts(t *testing.T) {
 
 // TestTelegramService_IsSendResponsesEnabled tests the send-responses setting logic.
 func TestTelegramService_IsSendResponsesEnabled(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	settingsRepo := sqlite.NewSettingsRepo(db)
+	db := teststores.NewDB(t)
+	settingsRepo := teststores.Of(db).Settings
 	ctx := context.Background()
 
 	svc := &TelegramService{
@@ -2667,8 +2669,8 @@ func TestTelegramService_IsSendResponsesEnabled_NilSettingsRepo(t *testing.T) {
 // TestTelegramService_SendTaskCompletionNotification_SkipsWebTasks verifies that
 // tasks created via web never get Telegram notifications (regardless of setting).
 func TestTelegramService_SendTaskCompletionNotification_SkipsWebTasks(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	settingsRepo := sqlite.NewSettingsRepo(db)
+	db := teststores.NewDB(t)
+	settingsRepo := teststores.Of(db).Settings
 	ctx := context.Background()
 
 	// Enable send-responses
@@ -2695,8 +2697,8 @@ func TestTelegramService_SendTaskCompletionNotification_SkipsWebTasks(t *testing
 // TestTelegramService_SendTaskCompletionNotification_SkipsWhenDisabled verifies
 // that no notification is sent when the setting is disabled, even for Telegram tasks.
 func TestTelegramService_SendTaskCompletionNotification_SkipsWhenDisabled(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	settingsRepo := sqlite.NewSettingsRepo(db)
+	db := teststores.NewDB(t)
+	settingsRepo := teststores.Of(db).Settings
 	ctx := context.Background()
 
 	// Disable send-responses
@@ -2723,8 +2725,8 @@ func TestTelegramService_SendTaskCompletionNotification_SkipsWhenDisabled(t *tes
 // TestTelegramService_SendTaskCompletionNotification_SkipsChatTasks verifies
 // that chat-category tasks don't trigger notifications (they already get a direct response).
 func TestTelegramService_SendTaskCompletionNotification_SkipsChatTasks(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	settingsRepo := sqlite.NewSettingsRepo(db)
+	db := teststores.NewDB(t)
+	settingsRepo := teststores.Of(db).Settings
 	ctx := context.Background()
 
 	// Enable send-responses
@@ -2751,8 +2753,8 @@ func TestTelegramService_SendTaskCompletionNotification_SkipsChatTasks(t *testin
 // TestTelegramService_SendTaskCompletionNotification_SkipsZeroChatID verifies
 // that tasks with no chat ID don't trigger notifications.
 func TestTelegramService_SendTaskCompletionNotification_SkipsZeroChatID(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	settingsRepo := sqlite.NewSettingsRepo(db)
+	db := teststores.NewDB(t)
+	settingsRepo := teststores.Of(db).Settings
 	ctx := context.Background()
 
 	require.NoError(t, settingsRepo.Set(ctx, "telegram_send_responses", "true"))
@@ -2774,10 +2776,10 @@ func TestTelegramService_SendTaskCompletionNotification_SkipsZeroChatID(t *testi
 }
 
 func TestTelegramService_SendTaskCompletionNotification_HydratesFromDB_AndSends(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	projectRepo := sqlite.NewProjectRepo(db)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
-	settingsRepo := sqlite.NewSettingsRepo(db)
+	db := teststores.NewDB(t)
+	projectRepo := teststores.Of(db).Projects
+	taskRepo := teststores.Of(db).Tasks
+	settingsRepo := teststores.Of(db).Settings
 	ctx := context.Background()
 
 	require.NoError(t, settingsRepo.Set(ctx, "telegram_send_responses", "true"))
@@ -2828,9 +2830,9 @@ func TestTelegramService_SendTaskCompletionNotification_HydratesFromDB_AndSends(
 }
 
 func TestTelegramService_SendTaskCompletionNotification_HydrationTaskNotFound_Skips(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
-	settingsRepo := sqlite.NewSettingsRepo(db)
+	db := teststores.NewDB(t)
+	taskRepo := teststores.Of(db).Tasks
+	settingsRepo := teststores.Of(db).Settings
 	ctx := context.Background()
 
 	require.NoError(t, settingsRepo.Set(ctx, "telegram_send_responses", "true"))
@@ -2859,8 +2861,8 @@ func TestTelegramService_SendTaskCompletionNotification_HydrationTaskNotFound_Sk
 }
 
 func TestTelegramService_SendTaskCompletionNotification_HydrationDBUnavailable_Skips(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	settingsRepo := sqlite.NewSettingsRepo(db)
+	db := teststores.NewDB(t)
+	settingsRepo := teststores.Of(db).Settings
 	ctx := context.Background()
 
 	require.NoError(t, settingsRepo.Set(ctx, "telegram_send_responses", "true"))
@@ -2890,8 +2892,8 @@ func TestTelegramService_SendTaskCompletionNotification_HydrationDBUnavailable_S
 // TestTelegramService_WebCreatedTasksNeverGetNotifications is an end-to-end test verifying
 // that tasks created via the web UI never trigger Telegram notifications, regardless of settings.
 func TestTelegramService_WebCreatedTasksNeverGetNotifications(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	settingsRepo := sqlite.NewSettingsRepo(db)
+	db := teststores.NewDB(t)
+	settingsRepo := teststores.Of(db).Settings
 	ctx := context.Background()
 
 	// Enable send-responses
@@ -2922,9 +2924,9 @@ func TestTelegramService_WebCreatedTasksNeverGetNotifications(t *testing.T) {
 // TestTelegramService_TaskOriginInDB verifies that task origin fields persist correctly
 // through create and read cycles.
 func TestTelegramService_TaskOriginInDB(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	projectRepo := sqlite.NewProjectRepo(db)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
+	db := teststores.NewDB(t)
+	projectRepo := teststores.Of(db).Projects
+	taskRepo := teststores.Of(db).Tasks
 	ctx := context.Background()
 
 	project := &models.Project{Name: "DB Test", RepoPath: "/tmp/test", IsDefault: true}
@@ -3031,8 +3033,8 @@ func TestTelegramService_ExtractProjectSwitchTarget(t *testing.T) {
 }
 
 func TestTelegramService_HandleNaturalLanguageProjectCommand_List(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	projectRepo := sqlite.NewProjectRepo(db)
+	db := teststores.NewDB(t)
+	projectRepo := teststores.Of(db).Projects
 
 	ctx := context.Background()
 	project1 := &models.Project{Name: "Project Alpha", RepoPath: "/tmp/alpha", IsDefault: true}
@@ -3054,8 +3056,8 @@ func TestTelegramService_HandleNaturalLanguageProjectCommand_List(t *testing.T) 
 }
 
 func TestTelegramService_HandleNaturalLanguageProjectCommand_Switch(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	projectRepo := sqlite.NewProjectRepo(db)
+	db := teststores.NewDB(t)
+	projectRepo := teststores.Of(db).Projects
 
 	ctx := context.Background()
 	project1 := &models.Project{Name: "Project Alpha", RepoPath: "/tmp/alpha", IsDefault: true}
@@ -3086,8 +3088,8 @@ func TestTelegramService_HandleNaturalLanguageProjectCommand_NotHandled(t *testi
 }
 
 func TestBuildChannelProjectActionHandlersListProjects(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	projectRepo := sqlite.NewProjectRepo(db)
+	db := teststores.NewDB(t)
+	projectRepo := teststores.Of(db).Projects
 	ctx := context.Background()
 
 	project1 := &models.Project{Name: "Alpha", RepoPath: "/tmp/alpha", IsDefault: true}
@@ -3106,8 +3108,8 @@ func TestBuildChannelProjectActionHandlersListProjects(t *testing.T) {
 }
 
 func TestBuildChannelProjectActionHandlersSwitchProjectCallback(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	projectRepo := sqlite.NewProjectRepo(db)
+	db := teststores.NewDB(t)
+	projectRepo := teststores.Of(db).Projects
 	ctx := context.Background()
 	project1 := &models.Project{Name: "Alpha", RepoPath: "/tmp/alpha", IsDefault: true}
 	require.NoError(t, projectRepo.Create(ctx, project1))
@@ -3136,8 +3138,8 @@ func TestBuildChannelProjectActionHandlersSwitchProjectCallback(t *testing.T) {
 }
 
 func TestBuildChannelProjectActionHandlersSwitchProjectInvalidProject(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	projectRepo := sqlite.NewProjectRepo(db)
+	db := teststores.NewDB(t)
+	projectRepo := teststores.Of(db).Projects
 	ctx := context.Background()
 	project1 := &models.Project{Name: "Alpha", RepoPath: "/tmp/alpha", IsDefault: true}
 	require.NoError(t, projectRepo.Create(ctx, project1))
@@ -3149,9 +3151,9 @@ func TestBuildChannelProjectActionHandlersSwitchProjectInvalidProject(t *testing
 }
 
 func TestTelegramService_SwitchProjectThenFollowupUsesNewProject(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	projectRepo := sqlite.NewProjectRepo(db)
-	userProjectRepo := sqlite.NewTelegramUserProjectRepo(db)
+	db := teststores.NewDB(t)
+	projectRepo := teststores.Of(db).Projects
+	userProjectRepo := teststores.Of(db).TelegramUserProjects
 
 	ctx := context.Background()
 	project1 := &models.Project{Name: "Project One", RepoPath: "/tmp/one", IsDefault: true}
@@ -3189,14 +3191,14 @@ func TestTelegramService_SwitchProjectThenFollowupUsesNewProject(t *testing.T) {
 }
 
 func TestTelegramService_ProcessIncomingMessage_QueuesWhenChatActive(t *testing.T) {
-	db := testutil.NewTestDB(t)
+	db := teststores.NewDB(t)
 	ctx := context.Background()
 
-	projectRepo := sqlite.NewProjectRepo(db)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
-	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
-	execRepo := sqlite.NewExecutionRepo(db)
-	threadInputRepo := sqlite.NewThreadInputRepo(db)
+	projectRepo := teststores.Of(db).Projects
+	taskRepo := teststores.Of(db).Tasks
+	llmConfigRepo := teststores.Of(db).LLMConfigs
+	execRepo := teststores.Of(db).Executions
+	threadInputRepo := teststores.Of(db).ThreadInputs
 
 	project := &models.Project{Name: "Telegram Queue Project"}
 	require.NoError(t, projectRepo.Create(ctx, project))
@@ -3272,17 +3274,17 @@ func runTelegramQueueChatIngressForTest(ctx context.Context, svc *TelegramServic
 }
 
 func TestTelegramService_ProcessIncomingMessage_QueuesTelegramAttachmentWhenChatActive(t *testing.T) {
-	db := testutil.NewTestDB(t)
+	db := teststores.NewDB(t)
 	ctx := context.Background()
 	oldUploadsDir := telegramUploadsDir
 	telegramUploadsDir = t.TempDir()
 	t.Cleanup(func() { telegramUploadsDir = oldUploadsDir })
 
-	projectRepo := sqlite.NewProjectRepo(db)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
-	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
-	execRepo := sqlite.NewExecutionRepo(db)
-	threadInputRepo := sqlite.NewThreadInputRepo(db)
+	projectRepo := teststores.Of(db).Projects
+	taskRepo := teststores.Of(db).Tasks
+	llmConfigRepo := teststores.Of(db).LLMConfigs
+	execRepo := teststores.Of(db).Executions
+	threadInputRepo := teststores.Of(db).ThreadInputs
 
 	project := &models.Project{Name: "Telegram Attachment Queue Project"}
 	require.NoError(t, projectRepo.Create(ctx, project))
@@ -3331,19 +3333,19 @@ func TestTelegramService_ProcessIncomingMessage_QueuesTelegramAttachmentWhenChat
 }
 
 func TestTelegramService_QueueChatInputCleansPendingAttachmentsWhenQueueInsertFails(t *testing.T) {
-	db := testutil.NewTestDB(t)
+	db := teststores.NewDB(t)
 	ctx := context.Background()
 	oldUploadsDir := telegramUploadsDir
 	telegramUploadsDir = t.TempDir()
 	t.Cleanup(func() { telegramUploadsDir = oldUploadsDir })
 
-	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	llmConfigRepo := teststores.Of(db).LLMConfigs
 	agent, err := llmConfigRepo.GetDefault(ctx)
 	require.NoError(t, err)
 	require.NotNil(t, agent)
 
-	queueDB := testutil.NewTestDB(t)
-	threadInputRepo := sqlite.NewThreadInputRepo(queueDB)
+	queueDB := teststores.NewDB(t)
+	threadInputRepo := teststores.Of(queueDB).ThreadInputs
 	require.NoError(t, queueDB.Close())
 
 	fileBody := "queued telegram attachment"
@@ -3383,8 +3385,8 @@ func TestTelegramService_HandleChatMessageCleansDownloadedAttachmentOnPostDownlo
 		{
 			name: "agent selection fails",
 			configure: func(t *testing.T, db *sql.DB, projectID string, svc *TelegramService) {
-				modelDB := testutil.NewTestDB(t)
-				svc.llmConfigRepo = sqlite.NewLLMConfigRepo(modelDB)
+				modelDB := teststores.NewDB(t)
+				svc.llmConfigRepo = teststores.Of(modelDB).LLMConfigs
 				require.NoError(t, modelDB.Close())
 			},
 			wantMessage: "Error selecting model",
@@ -3392,14 +3394,14 @@ func TestTelegramService_HandleChatMessageCleansDownloadedAttachmentOnPostDownlo
 		{
 			name: "active chat lookup fails",
 			configure: func(t *testing.T, db *sql.DB, projectID string, svc *TelegramService) {
-				svc.execRepo = sqlite.NewExecutionRepo(closedTestDB(t))
+				svc.execRepo = teststores.Of(closedTestDB(t)).Executions
 			},
 			wantMessage: "Error checking active chat response",
 		},
 		{
 			name: "task creation fails",
 			configure: func(t *testing.T, db *sql.DB, projectID string, svc *TelegramService) {
-				svc.taskRepo = sqlite.NewTaskRepo(closedTestDB(t), nil)
+				svc.taskRepo = teststores.Of(closedTestDB(t)).Tasks
 			},
 			wantMessage: "Error processing your message",
 		},
@@ -3415,12 +3417,12 @@ func TestTelegramService_HandleChatMessageCleansDownloadedAttachmentOnPostDownlo
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			db := testutil.NewTestDB(t)
+			db := teststores.NewDB(t)
 			ctx := context.Background()
-			projectRepo := sqlite.NewProjectRepo(db)
-			taskRepo := sqlite.NewTaskRepo(db, nil)
-			execRepo := sqlite.NewExecutionRepo(db)
-			llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+			projectRepo := teststores.Of(db).Projects
+			taskRepo := teststores.Of(db).Tasks
+			execRepo := teststores.Of(db).Executions
+			llmConfigRepo := teststores.Of(db).LLMConfigs
 
 			project := &models.Project{Name: "Telegram Attachment Cleanup Project"}
 			require.NoError(t, projectRepo.Create(ctx, project))
@@ -3500,13 +3502,13 @@ func TestTelegramService_HandleChatMessageCleansDownloadedAttachmentOnPostDownlo
 }
 
 func TestTelegramService_HandleChatMessage_UsesSharedChannelChatRunner(t *testing.T) {
-	db := testutil.NewTestDB(t)
+	db := teststores.NewDB(t)
 	ctx := context.Background()
-	projectRepo := sqlite.NewProjectRepo(db)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
-	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
-	execRepo := sqlite.NewExecutionRepo(db)
-	attachmentRepo := sqlite.NewAttachmentRepo(db)
+	projectRepo := teststores.Of(db).Projects
+	taskRepo := teststores.Of(db).Tasks
+	llmConfigRepo := teststores.Of(db).LLMConfigs
+	execRepo := teststores.Of(db).Executions
+	attachmentRepo := teststores.Of(db).Attachments
 	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, nil, attachmentRepo)
 	workerSvc := NewWorkerService(llmSvc, 0, nil)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
@@ -3555,14 +3557,14 @@ func TestTelegramService_HandleChatMessage_UsesSharedChannelChatRunner(t *testin
 }
 
 func TestTelegramService_HandleChatMessageSniffsOctetStreamImageForVisionModel(t *testing.T) {
-	db := testutil.NewTestDB(t)
+	db := teststores.NewDB(t)
 	ctx := context.Background()
-	projectRepo := sqlite.NewProjectRepo(db)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
-	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
-	execRepo := sqlite.NewExecutionRepo(db)
-	attachmentRepo := sqlite.NewAttachmentRepo(db)
-	chatAttachmentRepo := sqlite.NewChatAttachmentRepo(db)
+	projectRepo := teststores.Of(db).Projects
+	taskRepo := teststores.Of(db).Tasks
+	llmConfigRepo := teststores.Of(db).LLMConfigs
+	execRepo := teststores.Of(db).Executions
+	attachmentRepo := teststores.Of(db).Attachments
+	chatAttachmentRepo := teststores.Of(db).ChatAttachments
 	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, nil, attachmentRepo)
 	workerSvc := NewWorkerService(llmSvc, 0, nil)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
@@ -3671,8 +3673,8 @@ func TestTelegramService_IsRichMessagesV2EnabledDefaultsTrueAndFalseOnlyExplicit
 	svc := &TelegramService{}
 	require.True(t, svc.IsRichMessagesV2Enabled(ctx))
 
-	db := testutil.NewTestDB(t)
-	settingsRepo := sqlite.NewSettingsRepo(db)
+	db := teststores.NewDB(t)
+	settingsRepo := teststores.Of(db).Settings
 	svc.settingsRepo = settingsRepo
 	require.True(t, svc.IsRichMessagesV2Enabled(ctx))
 
@@ -3718,8 +3720,8 @@ func TestTelegramService_SendMessageRichEnabledUsesSendRichMessage(t *testing.T)
 }
 
 func TestTelegramService_SendMessageRichDisabledUsesMarkdownV2Fallback(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	settingsRepo := sqlite.NewSettingsRepo(db)
+	db := teststores.NewDB(t)
+	settingsRepo := teststores.Of(db).Settings
 	require.NoError(t, settingsRepo.Set(context.Background(), TelegramSettingRichMessagesV2, "false"))
 	var sent []tgbotapi.MessageConfig
 	svc := &TelegramService{
@@ -3825,11 +3827,11 @@ func TestTelegramService_SendRichMessageDraftUsesNonZeroDraftID(t *testing.T) {
 }
 
 func TestTelegramService_StreamEditTerminalOutputDoesNotAppendGenerating(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	execRepo := sqlite.NewExecutionRepo(db)
-	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
-	projectRepo := sqlite.NewProjectRepo(db)
+	db := teststores.NewDB(t)
+	execRepo := teststores.Of(db).Executions
+	llmConfigRepo := teststores.Of(db).LLMConfigs
+	taskRepo := teststores.Of(db).Tasks
+	projectRepo := teststores.Of(db).Projects
 	ctx := context.Background()
 	project := &models.Project{Name: "Legacy Terminal Stream"}
 	require.NoError(t, projectRepo.Create(ctx, project))
@@ -3863,11 +3865,11 @@ func TestTelegramService_StreamEditTerminalOutputDoesNotAppendGenerating(t *test
 }
 
 func TestTelegramService_StreamRichDraftFallbackUsesEditLoop(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	execRepo := sqlite.NewExecutionRepo(db)
-	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
-	projectRepo := sqlite.NewProjectRepo(db)
+	db := teststores.NewDB(t)
+	execRepo := teststores.Of(db).Executions
+	llmConfigRepo := teststores.Of(db).LLMConfigs
+	taskRepo := teststores.Of(db).Tasks
+	projectRepo := teststores.Of(db).Projects
 	ctx := context.Background()
 	project := &models.Project{Name: "Rich Draft Fallback"}
 	require.NoError(t, projectRepo.Create(ctx, project))
@@ -3905,17 +3907,17 @@ func TestTelegramService_StreamRichDraftFallbackUsesEditLoop(t *testing.T) {
 }
 
 func TestTelegramService_HandleChatMessage_StartsTelegramStreamWithBackgroundContext(t *testing.T) {
-	db := testutil.NewTestDB(t)
+	db := teststores.NewDB(t)
 	ctx := context.Background()
-	projectRepo := sqlite.NewProjectRepo(db)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
-	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
-	execRepo := sqlite.NewExecutionRepo(db)
-	attachmentRepo := sqlite.NewAttachmentRepo(db)
+	projectRepo := teststores.Of(db).Projects
+	taskRepo := teststores.Of(db).Tasks
+	llmConfigRepo := teststores.Of(db).LLMConfigs
+	execRepo := teststores.Of(db).Executions
+	attachmentRepo := teststores.Of(db).Attachments
 	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, nil, attachmentRepo)
 	workerSvc := NewWorkerService(llmSvc, 0, nil)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
-	settingsRepo := sqlite.NewSettingsRepo(db)
+	settingsRepo := teststores.Of(db).Settings
 	require.NoError(t, settingsRepo.Set(ctx, TelegramSettingRichMessagesV2, "false"))
 
 	project := &models.Project{Name: "Telegram Stream Context Project"}
@@ -3954,7 +3956,7 @@ func TestTelegramService_HandleChatMessage_StartsTelegramStreamWithBackgroundCon
 	svc.SetChannelChatRunner(func(_ context.Context, req ChannelChatRunRequest) {
 		go func() {
 			require.Eventually(t, func() bool {
-				return execRepo.UpdateOutput(context.Background(), req.ExecID, "streamed output") == nil
+				return execRepo.(*sqlite.ExecutionRepo).UpdateOutput(context.Background(), req.ExecID, "streamed output") == nil
 			}, time.Second, time.Millisecond)
 		}()
 	})
@@ -4032,11 +4034,11 @@ func TestTelegramService_SendChatResponse_RichEditFailureSendsFinalRichMessageAn
 }
 
 func TestTelegramService_SendChatResponse_RichDraftStateSurvivesTerminalStreamUntilFinalDelivery(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	execRepo := sqlite.NewExecutionRepo(db)
-	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
-	projectRepo := sqlite.NewProjectRepo(db)
+	db := teststores.NewDB(t)
+	execRepo := teststores.Of(db).Executions
+	llmConfigRepo := teststores.Of(db).LLMConfigs
+	taskRepo := teststores.Of(db).Tasks
+	projectRepo := teststores.Of(db).Projects
 	ctx := context.Background()
 	project := &models.Project{Name: "Rich Draft Terminal Preview"}
 	require.NoError(t, projectRepo.Create(ctx, project))
@@ -4422,13 +4424,13 @@ func TestTelegramService_SendChatResponse_AmbiguousFinalRichSendErrorDoesNotEdit
 // This is a regression test: before the fix, all goal tool handlers were stubs
 // that always returned "task goal tools are unavailable on Telegram".
 func TestTelegramService_GoalTools_SetGetClearPauseResume(t *testing.T) {
-	db := testutil.NewTestDB(t)
+	db := teststores.NewDB(t)
 	ctx := context.Background()
 
-	projectRepo := sqlite.NewProjectRepo(db)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
-	attachmentRepo := sqlite.NewAttachmentRepo(db)
-	taskGoalRepo := sqlite.NewTaskGoalRepo(db)
+	projectRepo := teststores.Of(db).Projects
+	taskRepo := teststores.Of(db).Tasks
+	attachmentRepo := teststores.Of(db).Attachments
+	taskGoalRepo := teststores.Of(db).TaskGoals
 	workerSvc := NewWorkerService(nil, 0, projectRepo)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 	goalSvc := NewTaskGoalService(taskGoalRepo, taskRepo, nil)
@@ -4488,12 +4490,12 @@ func TestTelegramService_GoalTools_SetGetClearPauseResume(t *testing.T) {
 // taskGoalSvc is nil (not yet wired), goal tools return a descriptive error
 // rather than panicking.
 func TestTelegramService_GoalTools_UnavailableWithoutService(t *testing.T) {
-	db := testutil.NewTestDB(t)
+	db := teststores.NewDB(t)
 	ctx := context.Background()
 
-	projectRepo := sqlite.NewProjectRepo(db)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
-	attachmentRepo := sqlite.NewAttachmentRepo(db)
+	projectRepo := teststores.Of(db).Projects
+	taskRepo := teststores.Of(db).Tasks
+	attachmentRepo := teststores.Of(db).Attachments
 	workerSvc := NewWorkerService(nil, 0, projectRepo)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 
@@ -4520,13 +4522,13 @@ func TestTelegramService_GoalTools_UnavailableWithoutService(t *testing.T) {
 // mark_task_goal_achieved and report_task_goal_blocked are callable from Telegram
 // (previously blocked by the unavailable stub).
 func TestTelegramService_GoalTools_MarkAchievedReportBlocked(t *testing.T) {
-	db := testutil.NewTestDB(t)
+	db := teststores.NewDB(t)
 	ctx := context.Background()
 
-	projectRepo := sqlite.NewProjectRepo(db)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
-	attachmentRepo := sqlite.NewAttachmentRepo(db)
-	taskGoalRepo := sqlite.NewTaskGoalRepo(db)
+	projectRepo := teststores.Of(db).Projects
+	taskRepo := teststores.Of(db).Tasks
+	attachmentRepo := teststores.Of(db).Attachments
+	taskGoalRepo := teststores.Of(db).TaskGoals
 	workerSvc := NewWorkerService(nil, 0, projectRepo)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 	goalSvc := NewTaskGoalService(taskGoalRepo, taskRepo, nil)
@@ -4583,16 +4585,16 @@ func TestTelegramService_SendOutboundMessage_AppliesThreadIDAndSplits(t *testing
 }
 
 func TestTelegramService_RuntimeSwitchProject_PersistsToRepo(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	projectRepo := sqlite.NewProjectRepo(db)
-	telegramUserProjectRepo := sqlite.NewTelegramUserProjectRepo(db)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
-	execRepo := sqlite.NewExecutionRepo(db)
-	attachmentRepo := sqlite.NewAttachmentRepo(db)
-	chatAttachmentRepo := sqlite.NewChatAttachmentRepo(db)
-	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
-	settingsRepo := sqlite.NewSettingsRepo(db)
-	scheduleRepo := sqlite.NewScheduleRepo(db)
+	db := teststores.NewDB(t)
+	projectRepo := teststores.Of(db).Projects
+	telegramUserProjectRepo := teststores.Of(db).TelegramUserProjects
+	taskRepo := teststores.Of(db).Tasks
+	execRepo := teststores.Of(db).Executions
+	attachmentRepo := teststores.Of(db).Attachments
+	chatAttachmentRepo := teststores.Of(db).ChatAttachments
+	llmConfigRepo := teststores.Of(db).LLMConfigs
+	settingsRepo := teststores.Of(db).Settings
+	scheduleRepo := teststores.Of(db).Schedules
 
 	ctx := context.Background()
 
@@ -4614,7 +4616,7 @@ func TestTelegramService_RuntimeSwitchProject_PersistsToRepo(t *testing.T) {
 		chatAttachmentRepo:      chatAttachmentRepo,
 		settingsRepo:            settingsRepo,
 		scheduleRepo:            scheduleRepo,
-		threadInputRepo:         sqlite.NewThreadInputRepo(db),
+		threadInputRepo:         teststores.Of(db).ThreadInputs,
 		telegramUserProjectRepo: telegramUserProjectRepo,
 		userProjects:            make(map[int64]string),
 	}
@@ -4680,20 +4682,20 @@ func TestTelegramActiveProjectCacheConcurrentResolutionAndRuntimeSwitch(t *testi
 }
 
 func TestTelegramInboundUpdateResolvesProjectWhilePriorTurnSwitchesProject(t *testing.T) {
-	db := testutil.NewTestDB(t)
+	db := teststores.NewDB(t)
 	ctx := context.Background()
-	projectRepo := sqlite.NewProjectRepo(db)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
-	execRepo := sqlite.NewExecutionRepo(db)
-	attachmentRepo := sqlite.NewAttachmentRepo(db)
-	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	projectRepo := teststores.Of(db).Projects
+	taskRepo := teststores.Of(db).Tasks
+	execRepo := teststores.Of(db).Executions
+	attachmentRepo := teststores.Of(db).Attachments
+	llmConfigRepo := teststores.Of(db).LLMConfigs
 	alpha := &models.Project{Name: "Workflow Alpha", IsDefault: true}
 	require.NoError(t, projectRepo.Create(ctx, alpha))
 	beta := &models.Project{Name: "Workflow Beta"}
 	require.NoError(t, projectRepo.Create(ctx, beta))
 	workerSvc := NewWorkerService(nil, 0, projectRepo)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
-	userProjectRepo := sqlite.NewTelegramUserProjectRepo(db)
+	userProjectRepo := teststores.Of(db).TelegramUserProjects
 
 	const userID = int64(174174)
 	svc := &TelegramService{
@@ -4702,11 +4704,11 @@ func TestTelegramInboundUpdateResolvesProjectWhilePriorTurnSwitchesProject(t *te
 		llmConfigRepo:           llmConfigRepo,
 		taskRepo:                taskRepo,
 		execRepo:                execRepo,
-		chatAttachmentRepo:      sqlite.NewChatAttachmentRepo(db),
-		threadInputRepo:         sqlite.NewThreadInputRepo(db),
+		chatAttachmentRepo:      teststores.Of(db).ChatAttachments,
+		threadInputRepo:         teststores.Of(db).ThreadInputs,
 		telegramUserProjectRepo: userProjectRepo,
-		settingsRepo:            sqlite.NewSettingsRepo(db),
-		scheduleRepo:            sqlite.NewScheduleRepo(db),
+		settingsRepo:            teststores.Of(db).Settings,
+		scheduleRepo:            teststores.Of(db).Schedules,
 		userProjects:            map[int64]string{userID: alpha.ID},
 		ctx:                     ctx,
 		sendMessageFunc:         func(int64, string) {},

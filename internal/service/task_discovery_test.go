@@ -9,8 +9,9 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/persistence/sqlite"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/openvibely/openvibely/internal/testutil/teststores"
 	"github.com/stretchr/testify/require"
 )
 
@@ -24,9 +25,9 @@ func decodeListTasksResult(t *testing.T, raw string) taskDiscoveryResult {
 }
 
 func TestExecuteListTasksTool(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
-	projectRepo := sqlite.NewProjectRepo(db)
+	db := teststores.NewDB(t)
+	taskRepo := teststores.Of(db).Tasks
+	projectRepo := teststores.Of(db).Projects
 	ctx := context.Background()
 
 	other := &models.Project{Name: "List Tasks Other Project"}
@@ -142,9 +143,9 @@ func TestExecuteListTasksTool(t *testing.T) {
 }
 
 func TestExecuteListTasksToolTreatsLikeWildcardsAsLiteralTitleText(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
-	projectRepo := sqlite.NewProjectRepo(db)
+	db := teststores.NewDB(t)
+	taskRepo := teststores.Of(db).Tasks
+	projectRepo := teststores.Of(db).Projects
 	ctx := context.Background()
 
 	other := &models.Project{Name: "List Tasks Wildcard Other Project"}
@@ -181,8 +182,8 @@ func TestExecuteListTasksToolTreatsLikeWildcardsAsLiteralTitleText(t *testing.T)
 }
 
 func TestExecuteListTasksToolPreservesOrdinaryQueryRelevanceAndPagination(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
+	db := teststores.NewDB(t)
+	taskRepo := teststores.Of(db).Tasks
 	ctx := context.Background()
 
 	createTask := func(title string) *models.Task {
@@ -219,10 +220,10 @@ func TestExecuteListTasksToolPreservesOrdinaryQueryRelevanceAndPagination(t *tes
 }
 
 func TestExecuteListSchedulesToolTreatsLikeWildcardsAsLiteralTaskTitleText(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
-	scheduleRepo := sqlite.NewScheduleRepo(db)
-	projectRepo := sqlite.NewProjectRepo(db)
+	db := teststores.NewDB(t)
+	taskRepo := teststores.Of(db).Tasks
+	scheduleRepo := teststores.Of(db).Schedules
+	projectRepo := teststores.Of(db).Projects
 	ctx := context.Background()
 
 	other := &models.Project{Name: "List Schedules Wildcard Other Project"}
@@ -267,8 +268,8 @@ func TestExecuteListSchedulesToolTreatsLikeWildcardsAsLiteralTaskTitleText(t *te
 }
 
 func TestExecuteListTasksToolReportsAndFiltersMergeStatus(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
+	db := teststores.NewDB(t)
+	taskRepo := teststores.Of(db).Tasks
 	ctx := context.Background()
 
 	mk := func(title, branch string, merge models.MergeStatus) *models.Task {
@@ -317,8 +318,8 @@ func TestExecuteListTasksToolReportsAndFiltersMergeStatus(t *testing.T) {
 }
 
 func TestExecuteListTasksToolSupportsEveryCategoryAndStatusFilter(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
+	db := teststores.NewDB(t)
+	taskRepo := teststores.Of(db).Tasks
 	ctx := context.Background()
 
 	create := func(title string, category models.TaskCategory, status models.TaskStatus) {
@@ -377,7 +378,7 @@ func TestExecuteListTasksToolSupportsEveryCategoryAndStatusFilter(t *testing.T) 
 
 func TestExecuteListTasksToolUsesCountAndBoundedPageOperations(t *testing.T) {
 	db, counter := testutil.NewStatementCountingTestDB(t)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
+	taskRepo := teststores.Of(db).Tasks
 	ctx := context.Background()
 	for i := 0; i < 3; i++ {
 		task := &models.Task{
@@ -416,8 +417,8 @@ func TestExecuteListTasksToolUsesCountAndBoundedPageOperations(t *testing.T) {
 }
 
 func TestExecuteListTasksTool_PreservesCompactJSONContract(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
+	db := teststores.NewDB(t)
+	taskRepo := teststores.Of(db).Tasks
 	ctx := context.Background()
 
 	parent := &models.Task{
@@ -489,10 +490,10 @@ func TestExecuteListTasksTool_PreservesCompactJSONContract(t *testing.T) {
 }
 
 func TestDiscoveryToolsUseSharedInputDecoder(t *testing.T) {
-	db := testutil.NewTestDB(t)
+	db := teststores.NewDB(t)
 	ctx := context.Background()
-	taskRepo := sqlite.NewTaskRepo(db, nil)
-	scheduleRepo := sqlite.NewScheduleRepo(db)
+	taskRepo := teststores.Of(db).Tasks
+	scheduleRepo := teststores.Of(db).Schedules
 
 	tools := map[string]func(json.RawMessage) (string, error){
 		"list_tasks": func(input json.RawMessage) (string, error) {
@@ -634,9 +635,9 @@ func TestExecuteViewSwarmToolNonSwarmReturnsControlledResponse(t *testing.T) {
 
 func TestExecuteViewSwarmToolDoesNotCrossProjects(t *testing.T) {
 	ctx := context.Background()
-	db := testutil.NewTestDB(t)
-	projectRepo := sqlite.NewProjectRepo(db)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
+	db := teststores.NewDB(t)
+	projectRepo := teststores.Of(db).Projects
+	taskRepo := teststores.Of(db).Tasks
 	current := &models.Project{Name: "Current"}
 	foreign := &models.Project{Name: "Foreign"}
 	require.NoError(t, projectRepo.Create(ctx, current))
@@ -654,17 +655,17 @@ func TestExecuteViewSwarmToolDoesNotCrossProjects(t *testing.T) {
 	require.Contains(t, err.Error(), "current project")
 }
 
-func setupViewSwarmServiceFixture(t *testing.T) (*sqlite.TaskRepo, *models.Project) {
+func setupViewSwarmServiceFixture(t *testing.T) (persistence.TaskStore, *models.Project) {
 	t.Helper()
 	ctx := context.Background()
-	db := testutil.NewTestDB(t)
-	projectRepo := sqlite.NewProjectRepo(db)
+	db := teststores.NewDB(t)
+	projectRepo := teststores.Of(db).Projects
 	project := &models.Project{Name: "Swarm Project"}
 	require.NoError(t, projectRepo.Create(ctx, project))
-	return sqlite.NewTaskRepo(db, nil), project
+	return teststores.Of(db).Tasks, project
 }
 
-func createViewSwarmTask(t *testing.T, taskRepo *sqlite.TaskRepo, projectID, title string, mutate func(*models.Task)) *models.Task {
+func createViewSwarmTask(t *testing.T, taskRepo persistence.TaskStore, projectID, title string, mutate func(*models.Task)) *models.Task {
 	t.Helper()
 	task := &models.Task{
 		ProjectID: projectID,

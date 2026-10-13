@@ -221,7 +221,7 @@ func TestStandardOAuthCallbackClearsStaleAccountIdentityWhenNewIdentityIsUnavail
 				AuthMethod: models.AuthMethodOAuth,
 			}
 			require.NoError(t, repo.Create(context.Background(), sibling))
-			require.NoError(t, repo.LinkOAuthConnection(context.Background(), sibling.ID, current.OAuthConnectionID))
+			require.NoError(t, repo.(*sqlite.LLMConfigRepo).LinkOAuthConnection(context.Background(), sibling.ID, current.OAuthConnectionID))
 
 			_, err = h.exchangeOAuthCodeAndSaveTokens(&oauthPendingFlow{
 				ConfigID:       current.ID,
@@ -329,7 +329,7 @@ func TestStandardOAuthCallbackRejectsModelReassignedToAnotherConnection(t *testi
 			require.NoError(t, repo.Create(context.Background(), second))
 			started, err := repo.GetByID(context.Background(), first.ID)
 			require.NoError(t, err)
-			require.NoError(t, repo.LinkOAuthConnection(context.Background(), first.ID, second.OAuthConnectionID))
+			require.NoError(t, repo.(*sqlite.LLMConfigRepo).LinkOAuthConnection(context.Background(), first.ID, second.OAuthConnectionID))
 
 			_, err = h.exchangeOAuthCodeAndSaveTokens(&oauthPendingFlow{
 				ConfigID:       started.ID,

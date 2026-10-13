@@ -13,8 +13,8 @@ import (
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
-	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/openvibely/openvibely/internal/testutil/teststores"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/net/idna"
 )
@@ -49,36 +49,36 @@ func (f *fakeXAPI) Posts() []string {
 	return append([]string(nil), f.posted...)
 }
 
-func setupXServiceTest(t testing.TB) (context.Context, *XService, *sqlite.SettingsRepo, *sqlite.XAuthRepo, *sqlite.XUserProjectRepo, *models.Project, *models.Project) {
-	return setupXServiceTestWithDB(t, testutil.NewTestDB(t))
+func setupXServiceTest(t testing.TB) (context.Context, *XService, persistence.SettingsStore, persistence.XAuthStore, persistence.XUserProjectStore, *models.Project, *models.Project) {
+	return setupXServiceTestWithDB(t, teststores.NewDB(t))
 }
 
-func setupXServiceTestWithDB(t testing.TB, db *sql.DB) (context.Context, *XService, *sqlite.SettingsRepo, *sqlite.XAuthRepo, *sqlite.XUserProjectRepo, *models.Project, *models.Project) {
+func setupXServiceTestWithDB(t testing.TB, db *sql.DB) (context.Context, *XService, persistence.SettingsStore, persistence.XAuthStore, persistence.XUserProjectStore, *models.Project, *models.Project) {
 	ctx := context.Background()
-	projects := sqlite.NewProjectRepo(db)
+	projects := teststores.Of(db).Projects
 	p1 := &models.Project{Name: "One"}
 	p2 := &models.Project{Name: "Two"}
 	require.NoError(t, projects.Create(ctx, p1))
 	require.NoError(t, projects.Create(ctx, p2))
-	settings := sqlite.NewSettingsRepo(db)
+	settings := teststores.Of(db).Settings
 	require.NoError(t, settings.SetMany(ctx, map[string]string{XSettingAccountID: "bot", XSettingSinceID: ""}))
-	auth := sqlite.NewXAuthRepo(db)
-	selections := sqlite.NewXUserProjectRepo(db)
+	auth := teststores.Of(db).XAuth
+	selections := teststores.Of(db).XUserProjects
 	svc := NewXService(
 		XCredentials{ConsumerKey: "a", ConsumerSecret: "b", AccessToken: "c", AccessTokenSecret: "d"},
 		settings,
 		projects,
-		sqlite.NewLLMConfigRepo(db),
-		sqlite.NewTaskRepo(db, nil),
-		sqlite.NewExecutionRepo(db),
-		sqlite.NewScheduleRepo(db),
+		teststores.Of(db).LLMConfigs,
+		teststores.Of(db).Tasks,
+		teststores.Of(db).Executions,
+		teststores.Of(db).Schedules,
 		nil,
 	)
-	svc.SetRepositories(auth, selections, sqlite.NewXTaskContextRepo(db), sqlite.NewXInboundReceiptRepo(db), sqlite.NewThreadInputRepo(db))
+	svc.SetRepositories(auth, selections, teststores.Of(db).XTaskContexts, teststores.Of(db).XInboundReceipts, teststores.Of(db).ThreadInputs)
 	return ctx, svc, settings, auth, selections, p1, p2
 }
 
-func setupXBatchService(t testing.TB, db *sql.DB, counter *testutil.SQLStatementCounter, mentionsPerPage, pages int) (context.Context, *XService, *sqlite.SettingsRepo) {
+func setupXBatchService(t testing.TB, db *sql.DB, counter *testutil.SQLStatementCounter, mentionsPerPage, pages int) (context.Context, *XService, persistence.SettingsStore) {
 	ctx, svc, settings, auth, selections, project, _ := setupXServiceTestWithDB(t, db)
 	require.NoError(t, auth.Create(ctx, &models.XAuthorizedUser{ProjectID: project.ID, XUserID: "author"}))
 	require.NoError(t, selections.SetUserProject(ctx, "author", project.ID))
@@ -176,7 +176,7 @@ func TestXPollUsesOneConfigurationSnapshotPerBatch(t *testing.T) {
 type xPollBatchFixture struct {
 	ctx      context.Context
 	svc      *XService
-	settings *sqlite.SettingsRepo
+	settings persistence.SettingsStore
 	counter  *testutil.SQLStatementCounter
 }
 
@@ -237,7 +237,7 @@ func newXProjectResolutionFixture(tb testing.TB, projectCount int) xProjectResol
 	tb.Helper()
 	db, counter := testutil.NewStatementCountingTestDB(tb)
 	ctx := context.Background()
-	projectRepo := sqlite.NewProjectRepo(db)
+	projectRepo := teststores.Of(db).Projects
 	var existingProjectCount int
 	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM projects`).Scan(&existingProjectCount); err != nil {
 		tb.Fatalf("count seeded projects: %v", err)
@@ -253,12 +253,12 @@ func newXProjectResolutionFixture(tb testing.TB, projectCount int) xProjectResol
 		}
 		lastProject = project
 	}
-	authRepo := sqlite.NewXAuthRepo(db)
+	authRepo := teststores.Of(db).XAuth
 	if err := authRepo.Create(ctx, &models.XAuthorizedUser{ProjectID: lastProject.ID, XUserID: "benchmark-author"}); err != nil {
 		tb.Fatalf("authorize benchmark user: %v", err)
 	}
-	selectionRepo := sqlite.NewXUserProjectRepo(db)
-	svc := NewXService(XCredentials{}, sqlite.NewSettingsRepo(db), projectRepo, nil, nil, nil, nil, nil)
+	selectionRepo := teststores.Of(db).XUserProjects
+	svc := NewXService(XCredentials{}, teststores.Of(db).Settings, projectRepo, nil, nil, nil, nil, nil)
 	svc.SetRepositories(authRepo, selectionRepo, nil, nil, nil)
 	return xProjectResolutionFixture{
 		ctx:       ctx,
@@ -289,9 +289,9 @@ func TestXProjectForUserUsesBoundedUserKeyedAuthorizationLookup(t *testing.T) {
 }
 
 func TestXProjectForUserPreservesExplicitSelectionAndOrderedFallback(t *testing.T) {
-	db := testutil.NewTestDB(t)
+	db := teststores.NewDB(t)
 	ctx := context.Background()
-	projects := sqlite.NewProjectRepo(db)
+	projects := teststores.Of(db).Projects
 	defaultProject := &models.Project{Name: "Zulu"}
 	nameOrderedProject := &models.Project{Name: "Alpha"}
 	otherProject := &models.Project{Name: "Bravo"}
@@ -301,9 +301,9 @@ func TestXProjectForUserPreservesExplicitSelectionAndOrderedFallback(t *testing.
 	_, err := db.ExecContext(ctx, `UPDATE projects SET is_default = 1 WHERE id = ?`, defaultProject.ID)
 	require.NoError(t, err)
 
-	auth := sqlite.NewXAuthRepo(db)
-	selections := sqlite.NewXUserProjectRepo(db)
-	svc := NewXService(XCredentials{}, sqlite.NewSettingsRepo(db), projects, nil, nil, nil, nil, nil)
+	auth := teststores.Of(db).XAuth
+	selections := teststores.Of(db).XUserProjects
+	svc := NewXService(XCredentials{}, teststores.Of(db).Settings, projects, nil, nil, nil, nil, nil)
 	svc.SetRepositories(auth, selections, nil, nil, nil)
 
 	nameOrderedAuth := &models.XAuthorizedUser{ProjectID: nameOrderedProject.ID, XUserID: "author"}
@@ -583,19 +583,19 @@ func TestXPollProviderFailureDoesNotAdvanceCursor(t *testing.T) {
 }
 
 func TestXPollCursorReadFailureDoesNotCallProvider(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	settings := sqlite.NewSettingsRepo(db)
+	db := teststores.NewDB(t)
+	settings := teststores.Of(db).Settings
 	svc := NewXService(
 		XCredentials{ConsumerKey: "a", ConsumerSecret: "b", AccessToken: "c", AccessTokenSecret: "d"},
 		settings,
-		sqlite.NewProjectRepo(db),
-		sqlite.NewLLMConfigRepo(db),
-		sqlite.NewTaskRepo(db, nil),
-		sqlite.NewExecutionRepo(db),
-		sqlite.NewScheduleRepo(db),
+		teststores.Of(db).Projects,
+		teststores.Of(db).LLMConfigs,
+		teststores.Of(db).Tasks,
+		teststores.Of(db).Executions,
+		teststores.Of(db).Schedules,
 		nil,
 	)
-	svc.SetRepositories(sqlite.NewXAuthRepo(db), sqlite.NewXUserProjectRepo(db), sqlite.NewXTaskContextRepo(db), sqlite.NewXInboundReceiptRepo(db), sqlite.NewThreadInputRepo(db))
+	svc.SetRepositories(teststores.Of(db).XAuth, teststores.Of(db).XUserProjects, teststores.Of(db).XTaskContexts, teststores.Of(db).XInboundReceipts, teststores.Of(db).ThreadInputs)
 	called := false
 	svc.setAPI(&fakeXAPI{mentionsFunc: func(context.Context, string, string, string) (xMentionsResponse, error) {
 		called = true
@@ -609,8 +609,8 @@ func TestXPollCursorReadFailureDoesNotCallProvider(t *testing.T) {
 }
 
 func TestXReplySettingReadFailureDoesNotPost(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	settings := sqlite.NewSettingsRepo(db)
+	db := teststores.NewDB(t)
+	settings := teststores.Of(db).Settings
 	svc := NewXService(
 		XCredentials{ConsumerKey: "a", ConsumerSecret: "b", AccessToken: "c", AccessTokenSecret: "d"},
 		settings, nil, nil, nil, nil, nil, nil,
@@ -674,18 +674,18 @@ func TestXPollReplacementBetweenMentionHandoffsCreatesNoStaleWork(t *testing.T) 
 	for _, tt := range []struct {
 		name              string
 		initialGeneration string
-		replaceSettings   func(context.Context, *sqlite.SettingsRepo) error
+		replaceSettings   func(context.Context, persistence.SettingsStore) error
 	}{
 		{
 			name: "account",
-			replaceSettings: func(ctx context.Context, settings *sqlite.SettingsRepo) error {
+			replaceSettings: func(ctx context.Context, settings persistence.SettingsStore) error {
 				return settings.Set(ctx, XSettingAccountID, "replacement-account")
 			},
 		},
 		{
 			name:              "generation",
 			initialGeneration: "old-generation",
-			replaceSettings: func(ctx context.Context, settings *sqlite.SettingsRepo) error {
+			replaceSettings: func(ctx context.Context, settings persistence.SettingsStore) error {
 				return settings.Set(ctx, XSettingConfigurationID, "replacement-generation")
 			},
 		},
@@ -1466,14 +1466,14 @@ func TestXRuntimeCreateSwarmTaskPreservesReplyContext(t *testing.T) {
 }
 
 func TestXRuntimeCreateTaskPersistsReplyContextBeforeWorkerSubmission(t *testing.T) {
-	db := testutil.NewTestDB(t)
+	db := teststores.NewDB(t)
 	ctx := context.Background()
-	projectRepo := sqlite.NewProjectRepo(db)
+	projectRepo := teststores.Of(db).Projects
 	project := &models.Project{Name: "X runtime project"}
 	require.NoError(t, projectRepo.Create(ctx, project))
-	settingsRepo := sqlite.NewSettingsRepo(db)
+	settingsRepo := teststores.Of(db).Settings
 	require.NoError(t, settingsRepo.Set(ctx, XSettingSendResponses, "true"))
-	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	llmConfigRepo := teststores.Of(db).LLMConfigs
 	agent := &models.LLMConfig{
 		Name:           "X auto-start test model",
 		Provider:       models.ProviderTest,
@@ -1482,23 +1482,23 @@ func TestXRuntimeCreateTaskPersistsReplyContextBeforeWorkerSubmission(t *testing
 		AutoStartTasks: true,
 	}
 	require.NoError(t, llmConfigRepo.Create(ctx, agent))
-	taskRepo := sqlite.NewTaskRepo(db, nil)
+	taskRepo := teststores.Of(db).Tasks
 	worker := NewWorkerService(nil, 1, projectRepo)
 	worker.SetTaskRepo(taskRepo)
 	worker.submitted = make(chan models.Task)
-	taskSvc := NewTaskService(taskRepo, sqlite.NewAttachmentRepo(db), worker)
-	xTaskContextRepo := sqlite.NewXTaskContextRepo(db)
+	taskSvc := NewTaskService(taskRepo, teststores.Of(db).Attachments, worker)
+	xTaskContextRepo := teststores.Of(db).XTaskContexts
 	xSvc := NewXService(
 		XCredentials{ConsumerKey: "a", ConsumerSecret: "b", AccessToken: "c", AccessTokenSecret: "d"},
 		settingsRepo,
 		projectRepo,
 		llmConfigRepo,
 		taskRepo,
-		sqlite.NewExecutionRepo(db),
-		sqlite.NewScheduleRepo(db),
+		teststores.Of(db).Executions,
+		teststores.Of(db).Schedules,
 		taskSvc,
 	)
-	xSvc.SetRepositories(sqlite.NewXAuthRepo(db), sqlite.NewXUserProjectRepo(db), xTaskContextRepo, sqlite.NewXInboundReceiptRepo(db), sqlite.NewThreadInputRepo(db))
+	xSvc.SetRepositories(teststores.Of(db).XAuth, teststores.Of(db).XUserProjects, xTaskContextRepo, teststores.Of(db).XInboundReceipts, teststores.Of(db).ThreadInputs)
 	xSvc.me = XUser{ID: "bot", Username: "openvibely"}
 	xSvc.setAPI(&fakeXAPI{me: xSvc.me})
 
@@ -1549,8 +1549,8 @@ type xRuntimeWorkerFixture struct {
 	ctx              context.Context
 	db               *sql.DB
 	project          *models.Project
-	taskRepo         *sqlite.TaskRepo
-	xTaskContextRepo *sqlite.XTaskContextRepo
+	taskRepo         persistence.TaskStore
+	xTaskContextRepo persistence.XTaskContextStore
 	worker           *WorkerService
 	xSvc             *XService
 	api              *fakeXAPI
@@ -1560,14 +1560,14 @@ type xRuntimeWorkerFixture struct {
 func newXRuntimeWorkerFixture(t *testing.T) *xRuntimeWorkerFixture {
 	t.Helper()
 	ctx := context.Background()
-	db := testutil.NewTestDB(t)
-	projectRepo := sqlite.NewProjectRepo(db)
+	db := teststores.NewDB(t)
+	projectRepo := teststores.Of(db).Projects
 	project := &models.Project{Name: "X runtime worker project"}
 	require.NoError(t, projectRepo.Create(ctx, project))
 
-	settingsRepo := sqlite.NewSettingsRepo(db)
+	settingsRepo := teststores.Of(db).Settings
 	require.NoError(t, settingsRepo.Set(ctx, XSettingSendResponses, "true"))
-	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	llmConfigRepo := teststores.Of(db).LLMConfigs
 	agent := &models.LLMConfig{
 		Name:           "X auto-start worker model",
 		Provider:       models.ProviderTest,
@@ -1577,10 +1577,10 @@ func newXRuntimeWorkerFixture(t *testing.T) *xRuntimeWorkerFixture {
 	}
 	require.NoError(t, llmConfigRepo.Create(ctx, agent))
 
-	taskRepo := sqlite.NewTaskRepo(db, nil)
-	execRepo := sqlite.NewExecutionRepo(db)
-	scheduleRepo := sqlite.NewScheduleRepo(db)
-	attachmentRepo := sqlite.NewAttachmentRepo(db)
+	taskRepo := teststores.Of(db).Tasks
+	execRepo := teststores.Of(db).Executions
+	scheduleRepo := teststores.Of(db).Schedules
+	attachmentRepo := teststores.Of(db).Attachments
 	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, scheduleRepo, attachmentRepo)
 	mockLLM := testutil.NewMockLLMCaller()
 	mockLLM.Response = "child completed"
@@ -1594,7 +1594,7 @@ func newXRuntimeWorkerFixture(t *testing.T) *xRuntimeWorkerFixture {
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, worker)
 	llmSvc.SetTaskService(taskSvc)
 
-	xTaskContextRepo := sqlite.NewXTaskContextRepo(db)
+	xTaskContextRepo := teststores.Of(db).XTaskContexts
 	xSvc := NewXService(
 		XCredentials{ConsumerKey: "a", ConsumerSecret: "b", AccessToken: "c", AccessTokenSecret: "d"},
 		settingsRepo,
@@ -1605,7 +1605,7 @@ func newXRuntimeWorkerFixture(t *testing.T) *xRuntimeWorkerFixture {
 		scheduleRepo,
 		taskSvc,
 	)
-	xSvc.SetRepositories(sqlite.NewXAuthRepo(db), sqlite.NewXUserProjectRepo(db), xTaskContextRepo, sqlite.NewXInboundReceiptRepo(db), sqlite.NewThreadInputRepo(db))
+	xSvc.SetRepositories(teststores.Of(db).XAuth, teststores.Of(db).XUserProjects, xTaskContextRepo, teststores.Of(db).XInboundReceipts, teststores.Of(db).ThreadInputs)
 	xSvc.me = XUser{ID: "bot", Username: "openvibely"}
 	api := &fakeXAPI{me: xSvc.me}
 	xSvc.setAPI(api)

@@ -13,7 +13,7 @@ import (
 	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/persistence/sqlite/database"
-	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/openvibely/openvibely/internal/testutil/teststores"
 )
 
 func BenchmarkExecuteListTasksTool(b *testing.B) {
@@ -53,14 +53,14 @@ func BenchmarkExecuteListTasksTool(b *testing.B) {
 	}
 }
 
-func newTaskDiscoveryBenchmarkRepo(b *testing.B, taskCount, promptSize, configSize int) (*sql.DB, *sqlite.TaskRepo) {
+func newTaskDiscoveryBenchmarkRepo(b *testing.B, taskCount, promptSize, configSize int) (*sql.DB, persistence.TaskStore) {
 	b.Helper()
 	b.StopTimer()
 	db, err := database.New(":memory:")
 	if err != nil {
 		b.Fatalf("create benchmark database: %v", err)
 	}
-	taskRepo := sqlite.NewTaskRepo(db, nil)
+	taskRepo := teststores.Of(db).Tasks
 	ctx := context.Background()
 	prompt := strings.Repeat("p", promptSize)
 	chainConfig := `{"payload":"` + strings.Repeat("c", configSize) + `"}`
@@ -126,10 +126,10 @@ func BenchmarkExecuteListTasksToolOrderScaling(b *testing.B) {
 	}
 }
 
-func newTaskDiscoveryOrderBenchmarkRepo(tb testing.TB, taskCount, promptSize, configSize int) (*sql.DB, *sqlite.TaskRepo) {
+func newTaskDiscoveryOrderBenchmarkRepo(tb testing.TB, taskCount, promptSize, configSize int) (*sql.DB, persistence.TaskStore) {
 	tb.Helper()
-	db := testutil.NewTestDB(tb)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
+	db := teststores.NewDB(tb)
+	taskRepo := teststores.Of(db).Tasks
 	prompt := strings.Repeat("p", promptSize)
 	chainConfig := `{"payload":"` + strings.Repeat("c", configSize) + `"}`
 	swarmConfig := `{"payload":"` + strings.Repeat("s", configSize) + `"}`
@@ -184,7 +184,7 @@ type taskDiscoveryWritePath struct {
 	name         string
 	operations   int
 	affectedRows int
-	setup        func(testing.TB, *sql.DB, *sqlite.TaskRepo) taskDiscoveryWriteRun
+	setup        func(testing.TB, *sql.DB, persistence.TaskStore) taskDiscoveryWriteRun
 }
 
 const (
@@ -200,7 +200,7 @@ const (
 	taskDiscoveryBulkWriteOperations  = 1
 )
 
-func taskDiscoveryWriteTarget(tb testing.TB, taskRepo *sqlite.TaskRepo) *models.Task {
+func taskDiscoveryWriteTarget(tb testing.TB, taskRepo persistence.TaskStore) *models.Task {
 	tb.Helper()
 	task, err := taskRepo.GetByID(context.Background(), taskDiscoveryWriteTargetID)
 	if err != nil {
@@ -391,11 +391,11 @@ func taskDiscoveryWritePoolRun(tb testing.TB, db *sql.DB, prefix string, categor
 	}
 }
 
-func taskDiscoveryTargetWritePath(name string, operation func(context.Context, *sqlite.TaskRepo, string, int) error) taskDiscoveryWritePath {
+func taskDiscoveryTargetWritePath(name string, operation func(context.Context, persistence.TaskStore, string, int) error) taskDiscoveryWritePath {
 	return taskDiscoveryWritePath{
 		name:         name,
 		affectedRows: 1,
-		setup: func(tb testing.TB, db *sql.DB, taskRepo *sqlite.TaskRepo) taskDiscoveryWriteRun {
+		setup: func(tb testing.TB, db *sql.DB, taskRepo persistence.TaskStore) taskDiscoveryWriteRun {
 			resetTaskDiscoveryWriteTarget(tb, db)
 			targetID := taskDiscoveryWriteTarget(tb, taskRepo).ID
 			return taskDiscoveryWriteRun{
@@ -407,12 +407,12 @@ func taskDiscoveryTargetWritePath(name string, operation func(context.Context, *
 	}
 }
 
-func taskDiscoveryBulkWritePath(name, prefix string, category models.TaskCategory, status models.TaskStatus, operation func(context.Context, *sqlite.TaskRepo) error) taskDiscoveryWritePath {
+func taskDiscoveryBulkWritePath(name, prefix string, category models.TaskCategory, status models.TaskStatus, operation func(context.Context, persistence.TaskStore) error) taskDiscoveryWritePath {
 	return taskDiscoveryWritePath{
 		name:         name,
 		operations:   taskDiscoveryBulkWriteOperations,
 		affectedRows: taskDiscoveryWritePoolSize,
-		setup: func(tb testing.TB, db *sql.DB, taskRepo *sqlite.TaskRepo) taskDiscoveryWriteRun {
+		setup: func(tb testing.TB, db *sql.DB, taskRepo persistence.TaskStore) taskDiscoveryWriteRun {
 			seedTaskDiscoveryWritePool(tb, db, prefix, category, status, "2020-01-01 00:00:00", "", taskDiscoveryWritePoolSize)
 			return taskDiscoveryWriteRun{
 				write: func(ctx context.Context, _ int) error {
@@ -455,10 +455,10 @@ func seedTaskDiscoveryAutomationFixture(tb testing.TB, db *sql.DB, prefix string
 		Enabled:        true,
 		NextRun:        &due,
 	}
-	if err := sqlite.NewScheduleRepo(db).Create(ctx, &fixture.schedule); err != nil {
+	if err := teststores.Of(db).Schedules.Create(ctx, &fixture.schedule); err != nil {
 		tb.Fatalf("create task discovery Automation schedule: %v", err)
 	}
-	definition, _, err := sqlite.NewAutomationRepo(db).PublishRegistered(ctx, models.AutomationRegisteredPublication{
+	definition, _, err := teststores.Of(db).Automations.PublishRegistered(ctx, models.AutomationRegisteredPublication{
 		ProjectID:      "default",
 		StableKey:      prefix + "stable",
 		Name:           "Task discovery write-budget Automation " + prefix,
@@ -523,7 +523,7 @@ func prepareTaskDiscoveryAutomationDispatch(tb testing.TB, db *sql.DB, prefix st
 	tb.Helper()
 	ctx := context.Background()
 	fixture := seedTaskDiscoveryAutomationFixture(tb, db, prefix, models.CategoryScheduled, models.StatusPending, 1)
-	automationRepo := sqlite.NewAutomationRepo(db)
+	automationRepo := teststores.Of(db).Automations
 	invocations, dispatches, err := automationRepo.ClaimManualAutomationRun(ctx, "default", fixture.automationID, time.Date(2020, time.January, 2, 0, 0, 0, 0, time.UTC))
 	if err != nil {
 		cleanupTaskDiscoveryAutomationFixture(tb, db, fixture)
@@ -573,7 +573,7 @@ type taskDiscoveryAutomationChainFixture struct {
 func seedTaskDiscoveryAutomationChainFixture(tb testing.TB, db *sql.DB, prefix string) taskDiscoveryAutomationChainFixture {
 	tb.Helper()
 	ctx := context.Background()
-	automationRepo := sqlite.NewAutomationRepo(db)
+	automationRepo := teststores.Of(db).Automations
 	candidate := models.AutomationDraftCandidate{
 		SchemaVersion:  1,
 		Name:           "Task discovery chained Automation",
@@ -617,11 +617,11 @@ func seedTaskDiscoveryAutomationChainFixture(tb testing.TB, db *sql.DB, prefix s
 	if taskIDs["parent"] == "" || taskIDs["child"] == "" {
 		tb.Fatalf("task discovery Automation chain task resources are incomplete: %#v", definition.Resources)
 	}
-	parent, err := sqlite.NewTaskRepo(db, nil).GetByID(ctx, taskIDs["parent"])
+	parent, err := teststores.Of(db).Tasks.GetByID(ctx, taskIDs["parent"])
 	if err != nil || parent == nil {
 		tb.Fatalf("load task discovery Automation chain parent: %v", err)
 	}
-	child, err := sqlite.NewTaskRepo(db, nil).GetByID(ctx, taskIDs["child"])
+	child, err := teststores.Of(db).Tasks.GetByID(ctx, taskIDs["child"])
 	if err != nil || child == nil {
 		tb.Fatalf("load task discovery Automation chain child: %v", err)
 	}
@@ -706,7 +706,7 @@ func taskDiscoveryWritePaths() []taskDiscoveryWritePath {
 	return []taskDiscoveryWritePath{
 		{
 			name: "Create",
-			setup: func(tb testing.TB, db *sql.DB, taskRepo *sqlite.TaskRepo) taskDiscoveryWriteRun {
+			setup: func(tb testing.TB, db *sql.DB, taskRepo persistence.TaskStore) taskDiscoveryWriteRun {
 				return taskDiscoveryWriteRun{
 					write: func(ctx context.Context, i int) error {
 						category := models.CategoryActive
@@ -732,7 +732,7 @@ func taskDiscoveryWritePaths() []taskDiscoveryWritePath {
 		},
 		{
 			name: "Update",
-			setup: func(tb testing.TB, db *sql.DB, taskRepo *sqlite.TaskRepo) taskDiscoveryWriteRun {
+			setup: func(tb testing.TB, db *sql.DB, taskRepo persistence.TaskStore) taskDiscoveryWriteRun {
 				resetTaskDiscoveryWriteTarget(tb, db)
 				task := taskDiscoveryWriteTarget(tb, taskRepo)
 				return taskDiscoveryWriteRun{
@@ -751,7 +751,7 @@ func taskDiscoveryWritePaths() []taskDiscoveryWritePath {
 				}
 			},
 		},
-		taskDiscoveryTargetWritePath("UpdateCategory", func(ctx context.Context, taskRepo *sqlite.TaskRepo, id string, i int) error {
+		taskDiscoveryTargetWritePath("UpdateCategory", func(ctx context.Context, taskRepo persistence.TaskStore, id string, i int) error {
 			var category models.TaskCategory
 			switch i % 3 {
 			case 0:
@@ -766,7 +766,7 @@ func taskDiscoveryWritePaths() []taskDiscoveryWritePath {
 		taskDiscoveryWritePath{
 			name:         "ReorderTask",
 			affectedRows: 2,
-			setup: func(tb testing.TB, db *sql.DB, taskRepo *sqlite.TaskRepo) taskDiscoveryWriteRun {
+			setup: func(tb testing.TB, db *sql.DB, taskRepo persistence.TaskStore) taskDiscoveryWriteRun {
 				resetTaskDiscoveryWriteTarget(tb, db)
 				ctx := context.Background()
 				if _, err := db.ExecContext(ctx, `UPDATE tasks SET display_order = ? WHERE project_id = ?`, taskDiscoveryReorderOtherOrder, "default"); err != nil {
@@ -790,14 +790,14 @@ func taskDiscoveryWritePaths() []taskDiscoveryWritePath {
 				}
 			},
 		},
-		taskDiscoveryTargetWritePath("UpdateStatus", func(ctx context.Context, taskRepo *sqlite.TaskRepo, id string, i int) error {
+		taskDiscoveryTargetWritePath("UpdateStatus", func(ctx context.Context, taskRepo persistence.TaskStore, id string, i int) error {
 			status := models.StatusPending
 			if i%2 == 1 {
 				status = models.StatusRunning
 			}
 			return taskRepo.UpdateStatus(ctx, id, status)
 		}),
-		taskDiscoveryTargetWritePath("UpdateSwarmFields", func(ctx context.Context, taskRepo *sqlite.TaskRepo, id string, i int) error {
+		taskDiscoveryTargetWritePath("UpdateSwarmFields", func(ctx context.Context, taskRepo persistence.TaskStore, id string, i int) error {
 			role := models.SwarmRoleNone
 			status := "idle"
 			if i%2 == 1 {
@@ -806,53 +806,53 @@ func taskDiscoveryWritePaths() []taskDiscoveryWritePath {
 			}
 			return taskRepo.UpdateSwarmFields(ctx, id, role, status, fmt.Sprintf(`{"phase":%d}`, i%2), i%2)
 		}),
-		taskDiscoveryTargetWritePath("UpdateAgentID", func(ctx context.Context, taskRepo *sqlite.TaskRepo, id string, _ int) error {
+		taskDiscoveryTargetWritePath("UpdateAgentID", func(ctx context.Context, taskRepo persistence.TaskStore, id string, _ int) error {
 			return taskRepo.UpdateAgentID(ctx, id, "")
 		}),
-		taskDiscoveryTargetWritePath("UpdateWorktreeInfo", func(ctx context.Context, taskRepo *sqlite.TaskRepo, id string, i int) error {
+		taskDiscoveryTargetWritePath("UpdateWorktreeInfo", func(ctx context.Context, taskRepo persistence.TaskStore, id string, i int) error {
 			return taskRepo.UpdateWorktreeInfo(ctx, id, fmt.Sprintf("/tmp/discovery-worktree-%d", i%2), fmt.Sprintf("task/discovery-%d", i%2))
 		}),
-		taskDiscoveryTargetWritePath("UpdateMergeStatus", func(ctx context.Context, taskRepo *sqlite.TaskRepo, id string, i int) error {
+		taskDiscoveryTargetWritePath("UpdateMergeStatus", func(ctx context.Context, taskRepo persistence.TaskStore, id string, i int) error {
 			status := models.MergeStatusPending
 			if i%2 == 1 {
 				status = models.MergeStatusFailed
 			}
 			return taskRepo.UpdateMergeStatus(ctx, id, status)
 		}),
-		taskDiscoveryTargetWritePath("UpdateAutoMerge", func(ctx context.Context, taskRepo *sqlite.TaskRepo, id string, i int) error {
+		taskDiscoveryTargetWritePath("UpdateAutoMerge", func(ctx context.Context, taskRepo persistence.TaskStore, id string, i int) error {
 			return taskRepo.UpdateAutoMerge(ctx, id, i%2 == 1, "main")
 		}),
-		taskDiscoveryTargetWritePath("UpdateLineage", func(ctx context.Context, taskRepo *sqlite.TaskRepo, id string, i int) error {
-			return taskRepo.UpdateLineage(ctx, id, "main", strings.Repeat(fmt.Sprintf("%x", i%16), 40), i%2)
+		taskDiscoveryTargetWritePath("UpdateLineage", func(ctx context.Context, taskRepo persistence.TaskStore, id string, i int) error {
+			return taskRepo.(*sqlite.TaskRepo).UpdateLineage(ctx, id, "main", strings.Repeat(fmt.Sprintf("%x", i%16), 40), i%2)
 		}),
-		taskDiscoveryTargetWritePath("UpdateTelegramOrigin", func(ctx context.Context, taskRepo *sqlite.TaskRepo, id string, i int) error {
+		taskDiscoveryTargetWritePath("UpdateTelegramOrigin", func(ctx context.Context, taskRepo persistence.TaskStore, id string, i int) error {
 			return taskRepo.UpdateTelegramOrigin(ctx, id, int64(i%2))
 		}),
-		taskDiscoveryTargetWritePath("UpdateSlackOrigin", func(ctx context.Context, taskRepo *sqlite.TaskRepo, id string, _ int) error {
+		taskDiscoveryTargetWritePath("UpdateSlackOrigin", func(ctx context.Context, taskRepo persistence.TaskStore, id string, _ int) error {
 			return taskRepo.UpdateSlackOrigin(ctx, id)
 		}),
-		taskDiscoveryTargetWritePath("UpdateEmailOrigin", func(ctx context.Context, taskRepo *sqlite.TaskRepo, id string, _ int) error {
+		taskDiscoveryTargetWritePath("UpdateEmailOrigin", func(ctx context.Context, taskRepo persistence.TaskStore, id string, _ int) error {
 			return taskRepo.UpdateEmailOrigin(ctx, id)
 		}),
-		taskDiscoveryTargetWritePath("UpdateDiscordOrigin", func(ctx context.Context, taskRepo *sqlite.TaskRepo, id string, _ int) error {
+		taskDiscoveryTargetWritePath("UpdateDiscordOrigin", func(ctx context.Context, taskRepo persistence.TaskStore, id string, _ int) error {
 			return taskRepo.UpdateDiscordOrigin(ctx, id)
 		}),
-		taskDiscoveryTargetWritePath("UpdateXOrigin", func(ctx context.Context, taskRepo *sqlite.TaskRepo, id string, _ int) error {
+		taskDiscoveryTargetWritePath("UpdateXOrigin", func(ctx context.Context, taskRepo persistence.TaskStore, id string, _ int) error {
 			return taskRepo.UpdateXOrigin(ctx, id)
 		}),
-		taskDiscoveryTargetWritePath("UpdateAgentDefinition", func(ctx context.Context, taskRepo *sqlite.TaskRepo, id string, _ int) error {
+		taskDiscoveryTargetWritePath("UpdateAgentDefinition", func(ctx context.Context, taskRepo persistence.TaskStore, id string, _ int) error {
 			return taskRepo.UpdateAgentDefinition(ctx, id, nil)
 		}),
-		taskDiscoveryTargetWritePath("ClearWorktreeInfo", func(ctx context.Context, taskRepo *sqlite.TaskRepo, id string, _ int) error {
+		taskDiscoveryTargetWritePath("ClearWorktreeInfo", func(ctx context.Context, taskRepo persistence.TaskStore, id string, _ int) error {
 			return taskRepo.ClearWorktreeInfo(ctx, id)
 		}),
-		taskDiscoveryTargetWritePath("SetPendingIfNotRunningOrQueued", func(ctx context.Context, taskRepo *sqlite.TaskRepo, id string, _ int) error {
+		taskDiscoveryTargetWritePath("SetPendingIfNotRunningOrQueued", func(ctx context.Context, taskRepo persistence.TaskStore, id string, _ int) error {
 			_, err := taskRepo.SetPendingIfNotRunningOrQueued(ctx, id)
 			return err
 		}),
 		{
 			name: "SetPendingIfNotRunningOrQueuedForEnabledSchedule",
-			setup: func(tb testing.TB, db *sql.DB, taskRepo *sqlite.TaskRepo) taskDiscoveryWriteRun {
+			setup: func(tb testing.TB, db *sql.DB, taskRepo persistence.TaskStore) taskDiscoveryWriteRun {
 				resetTaskDiscoveryWriteTarget(tb, db)
 				ctx := context.Background()
 				if _, err := db.ExecContext(ctx, `DELETE FROM schedules WHERE id = ?`, taskDiscoveryWriteScheduleID); err != nil {
@@ -881,11 +881,11 @@ func taskDiscoveryWritePaths() []taskDiscoveryWritePath {
 			name:         "AutomationSaveCurrentGraph",
 			operations:   1,
 			affectedRows: 2,
-			setup: func(tb testing.TB, db *sql.DB, _ *sqlite.TaskRepo) taskDiscoveryWriteRun {
+			setup: func(tb testing.TB, db *sql.DB, _ persistence.TaskStore) taskDiscoveryWriteRun {
 				prefix := taskDiscoveryWritePoolPrefix + "automation-save-"
 				automationID := prefix + "automation"
 				candidate := taskDiscoveryAutomationCandidate("Task discovery saved graph")
-				automationRepo := sqlite.NewAutomationRepo(db)
+				automationRepo := teststores.Of(db).Automations
 				return taskDiscoveryWriteRun{
 					write: func(ctx context.Context, _ int) error {
 						_, _, err := automationRepo.SaveCurrentGraph(ctx, persistence.AutomationSaveWrite{
@@ -906,10 +906,10 @@ func taskDiscoveryWritePaths() []taskDiscoveryWritePath {
 			name:         "AutomationResume",
 			operations:   1,
 			affectedRows: 1,
-			setup: func(tb testing.TB, db *sql.DB, _ *sqlite.TaskRepo) taskDiscoveryWriteRun {
+			setup: func(tb testing.TB, db *sql.DB, _ persistence.TaskStore) taskDiscoveryWriteRun {
 				prefix := taskDiscoveryWritePoolPrefix + "automation-resume-"
 				fixture := seedTaskDiscoveryAutomationResumeFixture(tb, db, prefix)
-				automationRepo := sqlite.NewAutomationRepo(db)
+				automationRepo := teststores.Of(db).Automations
 				return taskDiscoveryWriteRun{
 					write: func(ctx context.Context, _ int) error {
 						_, err := automationRepo.ResumeAutomation(ctx, "default", fixture.automationID)
@@ -924,10 +924,10 @@ func taskDiscoveryWritePaths() []taskDiscoveryWritePath {
 		{
 			name: "AutomationSetLifecyclePaused", operations: 1,
 			affectedRows: taskDiscoveryWritePoolSize,
-			setup: func(tb testing.TB, db *sql.DB, _ *sqlite.TaskRepo) taskDiscoveryWriteRun {
+			setup: func(tb testing.TB, db *sql.DB, _ persistence.TaskStore) taskDiscoveryWriteRun {
 				prefix := taskDiscoveryWritePoolPrefix + "automation-lifecycle-"
 				fixture := seedTaskDiscoveryAutomationFixture(tb, db, prefix, models.CategoryActive, models.StatusPending, taskDiscoveryWritePoolSize)
-				automationRepo := sqlite.NewAutomationRepo(db)
+				automationRepo := teststores.Of(db).Automations
 				return taskDiscoveryWriteRun{
 					write: func(ctx context.Context, _ int) error {
 						return automationRepo.SetAutomationLifecycle(ctx, "default", fixture.automationID, models.AutomationPaused)
@@ -942,10 +942,10 @@ func taskDiscoveryWritePaths() []taskDiscoveryWritePath {
 			name:         "AutomationClaimManualRun",
 			operations:   1,
 			affectedRows: 1,
-			setup: func(tb testing.TB, db *sql.DB, _ *sqlite.TaskRepo) taskDiscoveryWriteRun {
+			setup: func(tb testing.TB, db *sql.DB, _ persistence.TaskStore) taskDiscoveryWriteRun {
 				prefix := taskDiscoveryWritePoolPrefix + "automation-manual-"
 				fixture := seedTaskDiscoveryAutomationFixture(tb, db, prefix, models.CategoryScheduled, models.StatusPending, 1)
-				automationRepo := sqlite.NewAutomationRepo(db)
+				automationRepo := teststores.Of(db).Automations
 				return taskDiscoveryWriteRun{
 					write: func(ctx context.Context, _ int) error {
 						_, _, err := automationRepo.ClaimManualAutomationRun(ctx, "default", fixture.automationID, time.Date(2020, time.January, 2, 0, 0, 0, 0, time.UTC))
@@ -961,10 +961,10 @@ func taskDiscoveryWritePaths() []taskDiscoveryWritePath {
 			name:         "AutomationClaimScheduledOccurrence",
 			operations:   1,
 			affectedRows: 1,
-			setup: func(tb testing.TB, db *sql.DB, _ *sqlite.TaskRepo) taskDiscoveryWriteRun {
+			setup: func(tb testing.TB, db *sql.DB, _ persistence.TaskStore) taskDiscoveryWriteRun {
 				prefix := taskDiscoveryWritePoolPrefix + "automation-scheduled-"
 				fixture := seedTaskDiscoveryAutomationFixture(tb, db, prefix, models.CategoryScheduled, models.StatusPending, 1)
-				automationRepo := sqlite.NewAutomationRepo(db)
+				automationRepo := teststores.Of(db).Automations
 				nextRun := fixture.schedule.RunAt.Add(24 * time.Hour)
 				return taskDiscoveryWriteRun{
 					write: func(ctx context.Context, _ int) error {
@@ -981,7 +981,7 @@ func taskDiscoveryWritePaths() []taskDiscoveryWritePath {
 			name:         "AutomationClaimDispatch",
 			operations:   1,
 			affectedRows: 1,
-			setup: func(tb testing.TB, db *sql.DB, taskRepo *sqlite.TaskRepo) taskDiscoveryWriteRun {
+			setup: func(tb testing.TB, db *sql.DB, taskRepo persistence.TaskStore) taskDiscoveryWriteRun {
 				prefix := taskDiscoveryWritePoolPrefix + "automation-claim-dispatch-"
 				fixture, dispatch := prepareTaskDiscoveryAutomationDispatch(tb, db, prefix)
 				claimant := "task-discovery-claim"
@@ -1001,10 +1001,10 @@ func taskDiscoveryWritePaths() []taskDiscoveryWritePath {
 			name:         "AutomationClaimQueuedDispatch",
 			operations:   1,
 			affectedRows: 1,
-			setup: func(tb testing.TB, db *sql.DB, taskRepo *sqlite.TaskRepo) taskDiscoveryWriteRun {
+			setup: func(tb testing.TB, db *sql.DB, taskRepo persistence.TaskStore) taskDiscoveryWriteRun {
 				prefix := taskDiscoveryWritePoolPrefix + "automation-queued-dispatch-"
 				fixture, dispatch := prepareTaskDiscoveryAutomationDispatch(tb, db, prefix)
-				automationRepo := sqlite.NewAutomationRepo(db)
+				automationRepo := teststores.Of(db).Automations
 				now := time.Date(2020, time.January, 2, 0, 0, 0, 0, time.UTC)
 				if _, err := db.ExecContext(context.Background(), `UPDATE automation_dispatch_outbox
 						SET next_attempt_at = ? WHERE id = ?`, now, dispatch.ID); err != nil {
@@ -1038,7 +1038,7 @@ func taskDiscoveryWritePaths() []taskDiscoveryWritePath {
 		{
 			name: "AutomationCancelDispatch", operations: 1,
 			affectedRows: 1,
-			setup: func(tb testing.TB, db *sql.DB, _ *sqlite.TaskRepo) taskDiscoveryWriteRun {
+			setup: func(tb testing.TB, db *sql.DB, _ persistence.TaskStore) taskDiscoveryWriteRun {
 				prefix := taskDiscoveryWritePoolPrefix + "automation-cancel-dispatch-"
 				fixture, dispatch := prepareTaskDiscoveryAutomationDispatch(tb, db, prefix)
 				if _, err := db.ExecContext(context.Background(), `UPDATE tasks SET category = 'active', status = 'running' WHERE id = ?`, dispatch.TaskID); err != nil {
@@ -1053,7 +1053,7 @@ func taskDiscoveryWritePaths() []taskDiscoveryWritePath {
 						WHERE id = ?`, prefix+"execution", time.Date(2099, time.January, 1, 0, 0, 0, 0, time.UTC), dispatch.ID); err != nil {
 					tb.Fatalf("prepare task discovery Automation cancellation dispatch: %v", err)
 				}
-				automationRepo := sqlite.NewAutomationRepo(db)
+				automationRepo := teststores.Of(db).Automations
 				return taskDiscoveryWriteRun{
 					write: func(ctx context.Context, _ int) error {
 						return automationRepo.CancelDispatchesForTask(ctx, dispatch.TaskID, "task discovery write budget")
@@ -1068,7 +1068,7 @@ func taskDiscoveryWritePaths() []taskDiscoveryWritePath {
 			name:         "AutomationCancelPendingDispatch",
 			operations:   1,
 			affectedRows: 1,
-			setup: func(tb testing.TB, db *sql.DB, _ *sqlite.TaskRepo) taskDiscoveryWriteRun {
+			setup: func(tb testing.TB, db *sql.DB, _ persistence.TaskStore) taskDiscoveryWriteRun {
 				prefix := taskDiscoveryWritePoolPrefix + "automation-cancel-pending-"
 				fixture, dispatch := prepareTaskDiscoveryAutomationDispatch(tb, db, prefix)
 				if _, err := db.ExecContext(context.Background(), `UPDATE tasks
@@ -1076,7 +1076,7 @@ func taskDiscoveryWritePaths() []taskDiscoveryWritePath {
 					cleanupTaskDiscoveryAutomationFixture(tb, db, fixture)
 					tb.Fatalf("prepare task discovery pending Automation cancellation task: %v", err)
 				}
-				automationRepo := sqlite.NewAutomationRepo(db)
+				automationRepo := teststores.Of(db).Automations
 				return taskDiscoveryWriteRun{
 					write: func(ctx context.Context, _ int) error {
 						return automationRepo.CancelDispatchesForTask(ctx, dispatch.TaskID, "task discovery write budget")
@@ -1090,7 +1090,7 @@ func taskDiscoveryWritePaths() []taskDiscoveryWritePath {
 		{
 			name: "AutomationFailDispatch", operations: 1,
 			affectedRows: 1,
-			setup: func(tb testing.TB, db *sql.DB, _ *sqlite.TaskRepo) taskDiscoveryWriteRun {
+			setup: func(tb testing.TB, db *sql.DB, _ persistence.TaskStore) taskDiscoveryWriteRun {
 				prefix := taskDiscoveryWritePoolPrefix + "automation-fail-dispatch-"
 				fixture, dispatch := prepareTaskDiscoveryAutomationDispatch(tb, db, prefix)
 				claimant := "task-discovery-fail"
@@ -1098,7 +1098,7 @@ func taskDiscoveryWritePaths() []taskDiscoveryWritePath {
 				if _, err := db.ExecContext(context.Background(), `UPDATE automation_dispatch_outbox SET attempts = 1 WHERE id = ?`, dispatch.ID); err != nil {
 					tb.Fatalf("prepare task discovery Automation failure attempts: %v", err)
 				}
-				automationRepo := sqlite.NewAutomationRepo(db)
+				automationRepo := teststores.Of(db).Automations
 				return taskDiscoveryWriteRun{
 					write: func(ctx context.Context, _ int) error {
 						return automationRepo.FailDispatch(ctx, dispatch.ID, claimant, "task discovery write budget", 1, time.Date(2020, time.January, 2, 0, 0, 0, 0, time.UTC))
@@ -1113,7 +1113,7 @@ func taskDiscoveryWritePaths() []taskDiscoveryWritePath {
 			name:         "AutomationCompleteDispatch",
 			operations:   1,
 			affectedRows: 1,
-			setup: func(tb testing.TB, db *sql.DB, taskRepo *sqlite.TaskRepo) taskDiscoveryWriteRun {
+			setup: func(tb testing.TB, db *sql.DB, taskRepo persistence.TaskStore) taskDiscoveryWriteRun {
 				prefix := taskDiscoveryWritePoolPrefix + "automation-complete-dispatch-"
 				fixture, dispatch := prepareTaskDiscoveryAutomationDispatch(tb, db, prefix)
 				claimant := "task-discovery-complete"
@@ -1123,7 +1123,7 @@ func taskDiscoveryWritePaths() []taskDiscoveryWritePath {
 					cleanupTaskDiscoveryAutomationFixture(tb, db, fixture)
 					tb.Fatalf("prepare task discovery Automation completion execution: %v", err)
 				}
-				automationRepo := sqlite.NewAutomationRepo(db)
+				automationRepo := teststores.Of(db).Automations
 				return taskDiscoveryWriteRun{
 					write: func(ctx context.Context, _ int) error {
 						return automationRepo.CompleteDispatch(ctx, dispatch.ID, execution.ID, models.ExecCompleted, "")
@@ -1138,7 +1138,7 @@ func taskDiscoveryWritePaths() []taskDiscoveryWritePath {
 			name:         "AutomationCompleteFailedDispatch",
 			operations:   1,
 			affectedRows: 1,
-			setup: func(tb testing.TB, db *sql.DB, taskRepo *sqlite.TaskRepo) taskDiscoveryWriteRun {
+			setup: func(tb testing.TB, db *sql.DB, taskRepo persistence.TaskStore) taskDiscoveryWriteRun {
 				prefix := taskDiscoveryWritePoolPrefix + "automation-complete-failed-"
 				fixture, dispatch := prepareTaskDiscoveryAutomationDispatch(tb, db, prefix)
 				claimant := "task-discovery-complete-failed"
@@ -1148,7 +1148,7 @@ func taskDiscoveryWritePaths() []taskDiscoveryWritePath {
 					cleanupTaskDiscoveryAutomationFixture(tb, db, fixture)
 					tb.Fatalf("prepare task discovery failed Automation completion execution: %v", err)
 				}
-				automationRepo := sqlite.NewAutomationRepo(db)
+				automationRepo := teststores.Of(db).Automations
 				return taskDiscoveryWriteRun{
 					write: func(ctx context.Context, _ int) error {
 						return automationRepo.CompleteDispatch(ctx, dispatch.ID, execution.ID, models.ExecFailed, "task discovery write budget")
@@ -1162,7 +1162,7 @@ func taskDiscoveryWritePaths() []taskDiscoveryWritePath {
 		{
 			name: "AutomationActivateChainedTask", operations: 1,
 			affectedRows: 1,
-			setup: func(tb testing.TB, db *sql.DB, taskRepo *sqlite.TaskRepo) taskDiscoveryWriteRun {
+			setup: func(tb testing.TB, db *sql.DB, taskRepo persistence.TaskStore) taskDiscoveryWriteRun {
 				prefix := taskDiscoveryWritePoolPrefix + "automation-chain-"
 				fixture := seedTaskDiscoveryAutomationChainFixture(tb, db, prefix)
 				return taskDiscoveryWriteRun{
@@ -1178,7 +1178,7 @@ func taskDiscoveryWritePaths() []taskDiscoveryWritePath {
 		},
 		{
 			name: "ClaimTask",
-			setup: func(tb testing.TB, db *sql.DB, taskRepo *sqlite.TaskRepo) taskDiscoveryWriteRun {
+			setup: func(tb testing.TB, db *sql.DB, taskRepo persistence.TaskStore) taskDiscoveryWriteRun {
 				return taskDiscoveryWritePoolRun(tb, db, taskDiscoveryWritePoolPrefix+"claim-task-", models.CategoryActive, models.StatusPending, "2020-01-01 00:00:00", "", func(ctx context.Context, id string, _ int) error {
 					_, err := taskRepo.ClaimTask(ctx, id)
 					return err
@@ -1187,7 +1187,7 @@ func taskDiscoveryWritePaths() []taskDiscoveryWritePath {
 		},
 		{
 			name: "ClaimTaskForDispatch",
-			setup: func(tb testing.TB, db *sql.DB, taskRepo *sqlite.TaskRepo) taskDiscoveryWriteRun {
+			setup: func(tb testing.TB, db *sql.DB, taskRepo persistence.TaskStore) taskDiscoveryWriteRun {
 				return taskDiscoveryWritePoolRun(tb, db, taskDiscoveryWritePoolPrefix+"claim-dispatch-", models.CategoryActive, models.StatusPending, "2020-01-01 00:00:00", "", func(ctx context.Context, id string, _ int) error {
 					_, _, err := taskRepo.ClaimTaskForDispatch(ctx, id)
 					return err
@@ -1196,7 +1196,7 @@ func taskDiscoveryWritePaths() []taskDiscoveryWritePath {
 		},
 		{
 			name: "ReclaimStaleQueuedTask",
-			setup: func(tb testing.TB, db *sql.DB, taskRepo *sqlite.TaskRepo) taskDiscoveryWriteRun {
+			setup: func(tb testing.TB, db *sql.DB, taskRepo persistence.TaskStore) taskDiscoveryWriteRun {
 				return taskDiscoveryWritePoolRun(tb, db, taskDiscoveryWritePoolPrefix+"reclaim-", models.CategoryActive, models.StatusQueued, "2020-01-01 00:00:00", "", func(ctx context.Context, id string, _ int) error {
 					_, err := taskRepo.ReclaimStaleQueuedTask(ctx, id, time.Hour)
 					return err
@@ -1205,8 +1205,8 @@ func taskDiscoveryWritePaths() []taskDiscoveryWritePath {
 		},
 		{
 			name: "ExecutionCreateDirectTaskFollowup",
-			setup: func(tb testing.TB, db *sql.DB, _ *sqlite.TaskRepo) taskDiscoveryWriteRun {
-				executionRepo := sqlite.NewExecutionRepo(db)
+			setup: func(tb testing.TB, db *sql.DB, _ persistence.TaskStore) taskDiscoveryWriteRun {
+				executionRepo := teststores.Of(db).Executions
 				return taskDiscoveryWritePoolRun(tb, db, taskDiscoveryWritePoolPrefix+"execution-followup-", models.CategoryActive, models.StatusCompleted, "2020-01-01 00:00:00", "", func(ctx context.Context, id string, _ int) error {
 					_, err := executionRepo.CreateDirectTaskFollowupOrQueue(ctx, &models.Execution{TaskID: id, PromptSent: "p"}, &models.ThreadInput{})
 					return err
@@ -1215,17 +1215,17 @@ func taskDiscoveryWritePaths() []taskDiscoveryWritePath {
 		},
 		{
 			name: "ThreadInputClaimQueuedForTaskExecution",
-			setup: func(tb testing.TB, db *sql.DB, _ *sqlite.TaskRepo) taskDiscoveryWriteRun {
+			setup: func(tb testing.TB, db *sql.DB, _ persistence.TaskStore) taskDiscoveryWriteRun {
 				prefix := taskDiscoveryWritePoolPrefix + "thread-task-"
 				count := taskDiscoveryWriteOperationCount(tb)
 				ids := seedTaskDiscoveryWritePool(tb, db, prefix, models.CategoryActive, models.StatusCompleted, "2020-01-01 00:00:00", "", count)
 				inputIDs := seedTaskDiscoveryQueuedInputs(tb, db, prefix, count)
 				agentConfigID := taskDiscoveryDefaultAgentConfigID(tb, db)
-				threadRepo := sqlite.NewThreadInputRepo(db)
+				threadRepo := teststores.Of(db).ThreadInputs
 				return taskDiscoveryWriteRun{
 					write: func(ctx context.Context, i int) error {
 						exec := &models.Execution{TaskID: ids[i%len(ids)], AgentConfigID: agentConfigID, PromptSent: "p"}
-						return threadRepo.ClaimQueuedForTaskExecution(ctx, inputIDs[i%len(inputIDs)], exec)
+						return threadRepo.(*sqlite.ThreadInputRepo).ClaimQueuedForTaskExecution(ctx, inputIDs[i%len(inputIDs)], exec)
 					},
 					cleanup: func(tb testing.TB) {
 						cleanupTaskDiscoveryWritePool(tb, db, prefix)
@@ -1236,12 +1236,12 @@ func taskDiscoveryWritePaths() []taskDiscoveryWritePath {
 		},
 		{
 			name: "ThreadInputClaimQueuedForChatExecution",
-			setup: func(tb testing.TB, db *sql.DB, _ *sqlite.TaskRepo) taskDiscoveryWriteRun {
+			setup: func(tb testing.TB, db *sql.DB, _ persistence.TaskStore) taskDiscoveryWriteRun {
 				prefix := taskDiscoveryWritePoolPrefix + "thread-chat-"
 				count := taskDiscoveryWriteOperationCount(tb)
 				inputIDs := seedTaskDiscoveryChatInputs(tb, db, prefix, count)
 				agentConfigID := taskDiscoveryDefaultAgentConfigID(tb, db)
-				threadRepo := sqlite.NewThreadInputRepo(db)
+				threadRepo := teststores.Of(db).ThreadInputs
 				return taskDiscoveryWriteRun{
 					write: func(ctx context.Context, i int) error {
 						task := &models.Task{
@@ -1267,10 +1267,10 @@ func taskDiscoveryWritePaths() []taskDiscoveryWritePath {
 		},
 		{
 			name: "AlertCreateImplementationTask",
-			setup: func(tb testing.TB, db *sql.DB, _ *sqlite.TaskRepo) taskDiscoveryWriteRun {
+			setup: func(tb testing.TB, db *sql.DB, _ persistence.TaskStore) taskDiscoveryWriteRun {
 				count := taskDiscoveryWriteOperationCount(tb)
 				alertIDs := seedTaskDiscoveryAlertPool(tb, db, taskDiscoveryWriteAlertPrefix, count)
-				alertRepo := sqlite.NewAlertRepo(db)
+				alertRepo := teststores.Of(db).Alerts
 				return taskDiscoveryWriteRun{
 					write: func(ctx context.Context, i int) error {
 						_, err := alertRepo.CreateImplementationTask(ctx, "default", alertIDs[i%len(alertIDs)], "task-discovery-write-budget", models.AlertImplementationTaskInput{
@@ -1292,15 +1292,15 @@ func taskDiscoveryWritePaths() []taskDiscoveryWritePath {
 				}
 			},
 		},
-		taskDiscoveryBulkWritePath("ResetOrphanedRunning", taskDiscoveryWritePoolPrefix+"reset-running-", models.CategoryActive, models.StatusRunning, func(ctx context.Context, taskRepo *sqlite.TaskRepo) error {
+		taskDiscoveryBulkWritePath("ResetOrphanedRunning", taskDiscoveryWritePoolPrefix+"reset-running-", models.CategoryActive, models.StatusRunning, func(ctx context.Context, taskRepo persistence.TaskStore) error {
 			_, err := taskRepo.ResetOrphanedRunning(ctx)
 			return err
 		}),
-		taskDiscoveryBulkWritePath("MoveCompletedActiveToCompleted", taskDiscoveryWritePoolPrefix+"move-completed-", models.CategoryActive, models.StatusCompleted, func(ctx context.Context, taskRepo *sqlite.TaskRepo) error {
+		taskDiscoveryBulkWritePath("MoveCompletedActiveToCompleted", taskDiscoveryWritePoolPrefix+"move-completed-", models.CategoryActive, models.StatusCompleted, func(ctx context.Context, taskRepo persistence.TaskStore) error {
 			_, err := taskRepo.MoveCompletedActiveToCompleted(ctx, "default")
 			return err
 		}),
-		taskDiscoveryBulkWritePath("ActivateAllBacklog", taskDiscoveryWritePoolPrefix+"activate-backlog-", models.CategoryBacklog, models.StatusPending, func(ctx context.Context, taskRepo *sqlite.TaskRepo) error {
+		taskDiscoveryBulkWritePath("ActivateAllBacklog", taskDiscoveryWritePoolPrefix+"activate-backlog-", models.CategoryBacklog, models.StatusPending, func(ctx context.Context, taskRepo persistence.TaskStore) error {
 			_, err := taskRepo.ActivateAllBacklog(ctx, "default")
 			return err
 		}),
@@ -1308,10 +1308,10 @@ func taskDiscoveryWritePaths() []taskDiscoveryWritePath {
 			name:         "ExecutionRecoverPreRestartRunningTaskExecutions",
 			operations:   taskDiscoveryBulkWriteOperations,
 			affectedRows: taskDiscoveryWritePoolSize,
-			setup: func(tb testing.TB, db *sql.DB, _ *sqlite.TaskRepo) taskDiscoveryWriteRun {
+			setup: func(tb testing.TB, db *sql.DB, _ persistence.TaskStore) taskDiscoveryWriteRun {
 				prefix := taskDiscoveryWritePoolPrefix + "execution-recovery-"
 				seedTaskDiscoveryRunningExecutions(tb, db, prefix, taskDiscoveryWritePoolSize)
-				executionRepo := sqlite.NewExecutionRepo(db)
+				executionRepo := teststores.Of(db).Executions
 				return taskDiscoveryWriteRun{
 					write: func(ctx context.Context, _ int) error {
 						_, err := executionRepo.RecoverPreRestartRunningTaskExecutions(ctx)
@@ -1325,7 +1325,7 @@ func taskDiscoveryWritePaths() []taskDiscoveryWritePath {
 		},
 		{
 			name: "Delete",
-			setup: func(tb testing.TB, db *sql.DB, taskRepo *sqlite.TaskRepo) taskDiscoveryWriteRun {
+			setup: func(tb testing.TB, db *sql.DB, taskRepo persistence.TaskStore) taskDiscoveryWriteRun {
 				return taskDiscoveryWritePoolRun(tb, db, taskDiscoveryWritePoolPrefix+"delete-", models.CategoryActive, models.StatusPending, "2020-01-01 00:00:00", "", func(ctx context.Context, id string, _ int) error {
 					return taskRepo.Delete(ctx, id)
 				})
@@ -1333,7 +1333,7 @@ func taskDiscoveryWritePaths() []taskDiscoveryWritePath {
 		},
 		{
 			name: "DeleteWithCleanupManifest",
-			setup: func(tb testing.TB, db *sql.DB, taskRepo *sqlite.TaskRepo) taskDiscoveryWriteRun {
+			setup: func(tb testing.TB, db *sql.DB, taskRepo persistence.TaskStore) taskDiscoveryWriteRun {
 				return taskDiscoveryWritePoolRun(tb, db, taskDiscoveryWritePoolPrefix+"delete-manifest-", models.CategoryActive, models.StatusPending, "2020-01-01 00:00:00", "", func(ctx context.Context, id string, _ int) error {
 					_, _, err := taskRepo.DeleteWithCleanupManifest(ctx, id, nil)
 					return err
@@ -1342,7 +1342,7 @@ func taskDiscoveryWritePaths() []taskDiscoveryWritePath {
 		},
 		{
 			name: "DeleteWithCleanupManifestIfCategory",
-			setup: func(tb testing.TB, db *sql.DB, taskRepo *sqlite.TaskRepo) taskDiscoveryWriteRun {
+			setup: func(tb testing.TB, db *sql.DB, taskRepo persistence.TaskStore) taskDiscoveryWriteRun {
 				return taskDiscoveryWritePoolRun(tb, db, taskDiscoveryWritePoolPrefix+"delete-manifest-category-", models.CategoryActive, models.StatusPending, "2020-01-01 00:00:00", "", func(ctx context.Context, id string, _ int) error {
 					_, _, err := taskRepo.DeleteWithCleanupManifestIfCategory(ctx, id, "default", models.CategoryActive, nil)
 					return err
@@ -1353,7 +1353,7 @@ func taskDiscoveryWritePaths() []taskDiscoveryWritePath {
 			name:         "DeleteWithCleanupManifestTerminalizesSwarmChildren",
 			operations:   taskDiscoveryBulkWriteOperations,
 			affectedRows: taskDiscoveryWritePoolSize + 1,
-			setup: func(tb testing.TB, db *sql.DB, taskRepo *sqlite.TaskRepo) taskDiscoveryWriteRun {
+			setup: func(tb testing.TB, db *sql.DB, taskRepo persistence.TaskStore) taskDiscoveryWriteRun {
 				parentPrefix := taskDiscoveryWritePoolPrefix + "delete-swarm-parent-"
 				parentIDs := seedTaskDiscoveryWritePool(tb, db, parentPrefix, models.CategoryActive, models.StatusPending, "2020-01-01 00:00:00", "", 1)
 				if _, err := db.ExecContext(context.Background(), `UPDATE tasks SET swarm_role = 'swarm_parent' WHERE id = ?`, parentIDs[0]); err != nil {
@@ -1380,7 +1380,7 @@ func taskDiscoveryWritePaths() []taskDiscoveryWritePath {
 			name:         "DeleteBlockedChildrenByParent",
 			operations:   taskDiscoveryBulkWriteOperations,
 			affectedRows: taskDiscoveryWritePoolSize,
-			setup: func(tb testing.TB, db *sql.DB, taskRepo *sqlite.TaskRepo) taskDiscoveryWriteRun {
+			setup: func(tb testing.TB, db *sql.DB, taskRepo persistence.TaskStore) taskDiscoveryWriteRun {
 				parentPrefix := taskDiscoveryWritePoolPrefix + "delete-blocked-parent-"
 				parentIDs := seedTaskDiscoveryWritePool(tb, db, parentPrefix, models.CategoryActive, models.StatusPending, "2020-01-01 00:00:00", "", 1)
 				childPrefix := taskDiscoveryWritePoolPrefix + "delete-blocked-child-"
@@ -1396,16 +1396,16 @@ func taskDiscoveryWritePaths() []taskDiscoveryWritePath {
 				}
 			},
 		},
-		taskDiscoveryBulkWritePath("DeleteAllCompleted", taskDiscoveryWritePoolPrefix+"delete-completed-", models.CategoryCompleted, models.StatusCompleted, func(ctx context.Context, taskRepo *sqlite.TaskRepo) error {
-			_, err := taskRepo.DeleteAllCompleted(ctx, "default")
+		taskDiscoveryBulkWritePath("DeleteAllCompleted", taskDiscoveryWritePoolPrefix+"delete-completed-", models.CategoryCompleted, models.StatusCompleted, func(ctx context.Context, taskRepo persistence.TaskStore) error {
+			_, err := taskRepo.(*sqlite.TaskRepo).DeleteAllCompleted(ctx, "default")
 			return err
 		}),
-		taskDiscoveryBulkWritePath("DeleteAllBacklog", taskDiscoveryWritePoolPrefix+"delete-backlog-", models.CategoryBacklog, models.StatusPending, func(ctx context.Context, taskRepo *sqlite.TaskRepo) error {
-			_, err := taskRepo.DeleteAllBacklog(ctx, "default")
+		taskDiscoveryBulkWritePath("DeleteAllBacklog", taskDiscoveryWritePoolPrefix+"delete-backlog-", models.CategoryBacklog, models.StatusPending, func(ctx context.Context, taskRepo persistence.TaskStore) error {
+			_, err := taskRepo.(*sqlite.TaskRepo).DeleteAllBacklog(ctx, "default")
 			return err
 		}),
-		taskDiscoveryBulkWritePath("DeleteAllChat", taskDiscoveryWritePoolPrefix+"delete-chat-", models.CategoryChat, models.StatusCompleted, func(ctx context.Context, taskRepo *sqlite.TaskRepo) error {
-			_, err := taskRepo.DeleteAllChat(ctx, "default")
+		taskDiscoveryBulkWritePath("DeleteAllChat", taskDiscoveryWritePoolPrefix+"delete-chat-", models.CategoryChat, models.StatusCompleted, func(ctx context.Context, taskRepo persistence.TaskStore) error {
+			_, err := taskRepo.(*sqlite.TaskRepo).DeleteAllChat(ctx, "default")
 			return err
 		}),
 	}

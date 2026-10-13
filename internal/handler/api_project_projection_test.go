@@ -11,14 +11,14 @@ import (
 	"testing"
 
 	"github.com/labstack/echo/v4"
-	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/openvibely/openvibely/internal/testutil/teststores"
 )
 
 func TestAPIGetProjectsUsesCompactProjectionAndPreservesContract(t *testing.T) {
 	db, counter := testutil.NewStatementCountingTestDB(t)
-	repo := sqlite.NewProjectRepo(db)
+	repo := teststores.Of(db).Projects
 	ctx := context.Background()
 	if _, err := db.ExecContext(ctx, `UPDATE projects SET is_default = 0 WHERE id = 'default'`); err != nil {
 		t.Fatalf("clear default project flag: %v", err)

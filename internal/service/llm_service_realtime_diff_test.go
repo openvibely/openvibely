@@ -10,8 +10,7 @@ import (
 
 	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/persistence/sqlite"
-	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/openvibely/openvibely/internal/testutil/teststores"
 )
 
 type recordingDiffRepo struct {
@@ -118,11 +117,11 @@ func TestBroadcastDiffSnapshotsNonWorktreeUsesHeadBase(t *testing.T) {
 		t.Fatalf("write pending file: %v", err)
 	}
 
-	db := testutil.NewTestDB(t)
-	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
-	execRepo := sqlite.NewExecutionRepo(db)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
-	projectRepo := sqlite.NewProjectRepo(db)
+	db := teststores.NewDB(t)
+	llmConfigRepo := teststores.Of(db).LLMConfigs
+	execRepo := teststores.Of(db).Executions
+	taskRepo := teststores.Of(db).Tasks
+	projectRepo := teststores.Of(db).Projects
 	agent := ensureDefaultAgent(t, llmConfigRepo)
 	project := &models.Project{Name: "Non-worktree snapshot project", RepoPath: repoDir}
 	if err := projectRepo.Create(ctx, project); err != nil {
@@ -149,7 +148,7 @@ func TestBroadcastDiffSnapshotsNonWorktreeUsesHeadBase(t *testing.T) {
 		t.Fatalf("create execution: %v", err)
 	}
 
-	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, sqlite.NewScheduleRepo(db), sqlite.NewAttachmentRepo(db))
+	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, teststores.Of(db).Schedules, teststores.Of(db).Attachments)
 	stop := make(chan struct{})
 	done := make(chan struct{})
 	go func() {

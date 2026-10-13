@@ -12,18 +12,20 @@ import (
 
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/openvibely/openvibely/internal/testutil/teststores"
 )
 
 func TestGetDefaultAgentForTask_ProjectDefault(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
-	projectRepo := sqlite.NewProjectRepo(db)
-	execRepo := sqlite.NewExecutionRepo(db)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
-	scheduleRepo := sqlite.NewScheduleRepo(db)
-	attachmentRepo := sqlite.NewAttachmentRepo(db)
+	db := teststores.NewDB(t)
+	llmConfigRepo := teststores.Of(db).LLMConfigs
+	projectRepo := teststores.Of(db).Projects
+	execRepo := teststores.Of(db).Executions
+	taskRepo := teststores.Of(db).Tasks
+	scheduleRepo := teststores.Of(db).Schedules
+	attachmentRepo := teststores.Of(db).Attachments
 	ctx := context.Background()
 
 	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, scheduleRepo, attachmentRepo)
@@ -63,13 +65,13 @@ func TestGetDefaultAgentForTask_ProjectDefault(t *testing.T) {
 }
 
 func TestGetDefaultAgentForTask_FallsBackToGlobalDefault(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
-	projectRepo := sqlite.NewProjectRepo(db)
-	execRepo := sqlite.NewExecutionRepo(db)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
-	scheduleRepo := sqlite.NewScheduleRepo(db)
-	attachmentRepo := sqlite.NewAttachmentRepo(db)
+	db := teststores.NewDB(t)
+	llmConfigRepo := teststores.Of(db).LLMConfigs
+	projectRepo := teststores.Of(db).Projects
+	execRepo := teststores.Of(db).Executions
+	taskRepo := teststores.Of(db).Tasks
+	scheduleRepo := teststores.Of(db).Schedules
+	attachmentRepo := teststores.Of(db).Attachments
 	ctx := context.Background()
 
 	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, scheduleRepo, attachmentRepo)
@@ -95,13 +97,13 @@ func TestGetDefaultAgentForTask_FallsBackToGlobalDefault(t *testing.T) {
 }
 
 func TestGetDefaultAgentForTask_EmptyProjectID(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
-	projectRepo := sqlite.NewProjectRepo(db)
-	execRepo := sqlite.NewExecutionRepo(db)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
-	scheduleRepo := sqlite.NewScheduleRepo(db)
-	attachmentRepo := sqlite.NewAttachmentRepo(db)
+	db := teststores.NewDB(t)
+	llmConfigRepo := teststores.Of(db).LLMConfigs
+	projectRepo := teststores.Of(db).Projects
+	execRepo := teststores.Of(db).Executions
+	taskRepo := teststores.Of(db).Tasks
+	scheduleRepo := teststores.Of(db).Schedules
+	attachmentRepo := teststores.Of(db).Attachments
 	ctx := context.Background()
 
 	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, scheduleRepo, attachmentRepo)
@@ -120,13 +122,13 @@ func TestGetDefaultAgentForTask_EmptyProjectID(t *testing.T) {
 }
 
 func TestGetDefaultAgentForTask_DeletedProjectAgent(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
-	projectRepo := sqlite.NewProjectRepo(db)
-	execRepo := sqlite.NewExecutionRepo(db)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
-	scheduleRepo := sqlite.NewScheduleRepo(db)
-	attachmentRepo := sqlite.NewAttachmentRepo(db)
+	db := teststores.NewDB(t)
+	llmConfigRepo := teststores.Of(db).LLMConfigs
+	projectRepo := teststores.Of(db).Projects
+	execRepo := teststores.Of(db).Executions
+	taskRepo := teststores.Of(db).Tasks
+	scheduleRepo := teststores.Of(db).Schedules
+	attachmentRepo := teststores.Of(db).Attachments
 	ctx := context.Background()
 
 	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, scheduleRepo, attachmentRepo)
@@ -189,7 +191,7 @@ func TestProjectWorkDirMatches_PathBoundariesAndSeparators(t *testing.T) {
 
 func TestLLMService_projectIDForWorkDir_EmptyWorkDirSkipsLookup(t *testing.T) {
 	db, counter := testutil.NewStatementCountingTestDB(t)
-	svc := NewLLMService(nil, nil, nil, sqlite.NewProjectRepo(db), nil, nil)
+	svc := NewLLMService(nil, nil, nil, teststores.Of(db).Projects, nil, nil)
 	counter.SetEnabled(true)
 	if got := svc.projectIDForWorkDir(context.Background(), "  "); got != "" {
 		t.Fatalf("projectIDForWorkDir(empty) = %q, want empty", got)
@@ -224,10 +226,10 @@ func callDirectAttributionPath(ctx context.Context, svc *LLMService, workDir str
 	return err
 }
 
-func setupDirectAttributionFixture(tb testing.TB, projectCount int) (*LLMService, *sqlite.ProjectRepo, *testutil.SQLStatementCounter, string, string) {
+func setupDirectAttributionFixture(tb testing.TB, projectCount int) (*LLMService, persistence.ProjectStore, *testutil.SQLStatementCounter, string, string) {
 	tb.Helper()
 	db, counter := testutil.NewStatementCountingTestDB(tb)
-	repo := sqlite.NewProjectRepo(db)
+	repo := teststores.Of(db).Projects
 	ctx := context.Background()
 	description := strings.Repeat("d", 16<<10)
 	repoURL := "https://example.test/" + strings.Repeat("u", 2<<10)
@@ -337,8 +339,8 @@ func TestDirectModelUsageExplicitProjectAvoidsFallbackLookupAt500Projects(t *tes
 }
 
 func TestLLMService_projectIDForWorkDir_DeletedAndEmptyRepositoriesDoNotMatch(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	repo := sqlite.NewProjectRepo(db)
+	db := teststores.NewDB(t)
+	repo := teststores.Of(db).Projects
 	svc := NewLLMService(nil, nil, nil, repo, nil, nil)
 	ctx := context.Background()
 	root := t.TempDir()
@@ -353,7 +355,7 @@ func TestLLMService_projectIDForWorkDir_DeletedAndEmptyRepositoriesDoNotMatch(t 
 	if got := svc.projectIDForWorkDir(ctx, workDir); got != project.ID {
 		t.Fatalf("projectIDForWorkDir before delete = %q, want %q", got, project.ID)
 	}
-	if err := repo.Delete(ctx, project.ID); err != nil {
+	if err := repo.(*sqlite.ProjectRepo).Delete(ctx, project.ID); err != nil {
 		t.Fatalf("Delete project: %v", err)
 	}
 	if got := svc.projectIDForWorkDir(ctx, workDir); got != "" {
@@ -362,8 +364,8 @@ func TestLLMService_projectIDForWorkDir_DeletedAndEmptyRepositoriesDoNotMatch(t 
 }
 
 func TestLLMService_projectIDForWorkDir_ResolvesTaskWorktreesToProject(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	projectRepo := sqlite.NewProjectRepo(db)
+	db := teststores.NewDB(t)
+	projectRepo := teststores.Of(db).Projects
 	ctx := context.Background()
 	svc := NewLLMService(nil, nil, nil, projectRepo, nil, nil)
 
@@ -392,8 +394,8 @@ func TestLLMService_projectIDForWorkDir_ResolvesTaskWorktreesToProject(t *testin
 }
 
 func TestLLMService_projectIDForWorkDir_PrefersMostSpecificProject(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	projectRepo := sqlite.NewProjectRepo(db)
+	db := teststores.NewDB(t)
+	projectRepo := teststores.Of(db).Projects
 	ctx := context.Background()
 	svc := NewLLMService(nil, nil, nil, projectRepo, nil, nil)
 
@@ -421,13 +423,13 @@ func TestLLMService_projectIDForWorkDir_PrefersMostSpecificProject(t *testing.T)
 }
 
 func TestLLMService_ExecuteTaskWithAgent_UsesProjectRepoPathAsWorkDir(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
-	execRepo := sqlite.NewExecutionRepo(db)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
-	projectRepo := sqlite.NewProjectRepo(db)
-	scheduleRepo := sqlite.NewScheduleRepo(db)
-	attachmentRepo := sqlite.NewAttachmentRepo(db)
+	db := teststores.NewDB(t)
+	llmConfigRepo := teststores.Of(db).LLMConfigs
+	execRepo := teststores.Of(db).Executions
+	taskRepo := teststores.Of(db).Tasks
+	projectRepo := teststores.Of(db).Projects
+	scheduleRepo := teststores.Of(db).Schedules
+	attachmentRepo := teststores.Of(db).Attachments
 	ctx := context.Background()
 
 	mock := testutil.NewMockLLMCaller()
@@ -474,13 +476,13 @@ func TestLLMService_ExecuteTaskWithAgent_UsesProjectRepoPathAsWorkDir(t *testing
 }
 
 func TestLLMService_ExecuteTaskWithAgent_UsesProjectWorkDir(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	execRepo := sqlite.NewExecutionRepo(db)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
-	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
-	projectRepo := sqlite.NewProjectRepo(db)
-	scheduleRepo := sqlite.NewScheduleRepo(db)
-	attachmentRepo := sqlite.NewAttachmentRepo(db)
+	db := teststores.NewDB(t)
+	execRepo := teststores.Of(db).Executions
+	taskRepo := teststores.Of(db).Tasks
+	llmConfigRepo := teststores.Of(db).LLMConfigs
+	projectRepo := teststores.Of(db).Projects
+	scheduleRepo := teststores.Of(db).Schedules
+	attachmentRepo := teststores.Of(db).Attachments
 	ctx := context.Background()
 
 	mock := testutil.NewMockLLMCaller()
@@ -528,13 +530,13 @@ func TestLLMService_ExecuteTaskWithAgent_UsesProjectWorkDir(t *testing.T) {
 }
 
 func TestLLMService_ExecuteTaskWithAgent_NoWorkDirWhenProjectHasNoRepoPath(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	execRepo := sqlite.NewExecutionRepo(db)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
-	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
-	projectRepo := sqlite.NewProjectRepo(db)
-	scheduleRepo := sqlite.NewScheduleRepo(db)
-	attachmentRepo := sqlite.NewAttachmentRepo(db)
+	db := teststores.NewDB(t)
+	execRepo := teststores.Of(db).Executions
+	taskRepo := teststores.Of(db).Tasks
+	llmConfigRepo := teststores.Of(db).LLMConfigs
+	projectRepo := teststores.Of(db).Projects
+	scheduleRepo := teststores.Of(db).Schedules
+	attachmentRepo := teststores.Of(db).Attachments
 	ctx := context.Background()
 
 	mock := testutil.NewMockLLMCaller()
@@ -573,13 +575,13 @@ func TestLLMService_ExecuteTaskWithAgent_NoWorkDirWhenProjectHasNoRepoPath(t *te
 }
 
 func TestLLMService_ExecuteTaskWithAgent_SetsWorkDir(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	execRepo := sqlite.NewExecutionRepo(db)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
-	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
-	projectRepo := sqlite.NewProjectRepo(db)
-	scheduleRepo := sqlite.NewScheduleRepo(db)
-	attachmentRepo := sqlite.NewAttachmentRepo(db)
+	db := teststores.NewDB(t)
+	execRepo := teststores.Of(db).Executions
+	taskRepo := teststores.Of(db).Tasks
+	llmConfigRepo := teststores.Of(db).LLMConfigs
+	projectRepo := teststores.Of(db).Projects
+	scheduleRepo := teststores.Of(db).Schedules
+	attachmentRepo := teststores.Of(db).Attachments
 	ctx := context.Background()
 
 	mock := testutil.NewMockLLMCaller()

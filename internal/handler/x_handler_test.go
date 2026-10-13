@@ -13,8 +13,8 @@ import (
 
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/service"
+	"github.com/openvibely/openvibely/internal/testutil/teststores"
 	"github.com/stretchr/testify/require"
 )
 
@@ -173,10 +173,10 @@ func TestXCredentialsBlankFieldsPreserveSavedSecrets(t *testing.T) {
 func TestXConfigureProviderFailureDoesNotOverwriteSettingsOrStopExistingService(t *testing.T) {
 	h, e, _, db := setupTestHandlerWithDB(t)
 	ctx := context.Background()
-	auth := sqlite.NewXAuthRepo(db)
-	selections := sqlite.NewXUserProjectRepo(db)
-	contexts := sqlite.NewXTaskContextRepo(db)
-	receipts := sqlite.NewXInboundReceiptRepo(db)
+	auth := teststores.Of(db).XAuth
+	selections := teststores.Of(db).XUserProjects
+	contexts := teststores.Of(db).XTaskContexts
+	receipts := teststores.Of(db).XInboundReceipts
 	h.SetXRepositories(auth, selections, contexts, receipts)
 	old := service.NewXService(service.XCredentials{ConsumerKey: "old-key", ConsumerSecret: "old-secret", AccessToken: "old-token", AccessTokenSecret: "old-token-secret"}, h.settingsRepo, h.projectRepo, h.llmConfigRepo, h.taskRepo, h.execRepo, h.scheduleRepo, h.taskSvc)
 	old.SetAPI(&readyXSettingsAPI{})
@@ -214,7 +214,7 @@ func TestXConfigureProviderFailureDoesNotOverwriteSettingsOrStopExistingService(
 
 func TestXConfigureInstallsCandidateBeforeFirstPoll(t *testing.T) {
 	h, e, _, db := setupTestHandlerWithDB(t)
-	h.SetXRepositories(sqlite.NewXAuthRepo(db), sqlite.NewXUserProjectRepo(db), sqlite.NewXTaskContextRepo(db), sqlite.NewXInboundReceiptRepo(db))
+	h.SetXRepositories(teststores.Of(db).XAuth, teststores.Of(db).XUserProjects, teststores.Of(db).XTaskContexts, teststores.Of(db).XInboundReceipts)
 	api := &candidateAuthorityXAPI{authority: make(chan bool, 1)}
 	api.check = func() bool {
 		current := h.getXService()
@@ -243,10 +243,10 @@ func TestXConfigureInstallsCandidateBeforeFirstPoll(t *testing.T) {
 
 func TestXConfigureInitializesCursorAndCancelsReplacedService(t *testing.T) {
 	h, e, _, db := setupTestHandlerWithDB(t)
-	authRepo := sqlite.NewXAuthRepo(db)
-	selectionRepo := sqlite.NewXUserProjectRepo(db)
-	contextRepo := sqlite.NewXTaskContextRepo(db)
-	receiptRepo := sqlite.NewXInboundReceiptRepo(db)
+	authRepo := teststores.Of(db).XAuth
+	selectionRepo := teststores.Of(db).XUserProjects
+	contextRepo := teststores.Of(db).XTaskContexts
+	receiptRepo := teststores.Of(db).XInboundReceipts
 	h.SetXRepositories(authRepo, selectionRepo, contextRepo, receiptRepo)
 	require.NoError(t, h.settingsRepo.Set(context.Background(), service.XSettingAccountID, "old"))
 	require.NoError(t, h.settingsRepo.Set(context.Background(), service.XSettingPaginationState, `{"next_token":"stale-token"}`))
@@ -303,10 +303,10 @@ func TestXConfigurePreservesCursorForSameAccountAndBaselinesAccountChange(t *tes
 
 func TestXReconfigurationFencesOldInFlightCursorWrite(t *testing.T) {
 	h, e, _, db := setupTestHandlerWithDB(t)
-	auth := sqlite.NewXAuthRepo(db)
-	selections := sqlite.NewXUserProjectRepo(db)
-	contexts := sqlite.NewXTaskContextRepo(db)
-	receipts := sqlite.NewXInboundReceiptRepo(db)
+	auth := teststores.Of(db).XAuth
+	selections := teststores.Of(db).XUserProjects
+	contexts := teststores.Of(db).XTaskContexts
+	receipts := teststores.Of(db).XInboundReceipts
 	h.SetXRepositories(auth, selections, contexts, receipts)
 	ctx := context.Background()
 	require.NoError(t, h.settingsRepo.SetMany(ctx, map[string]string{
@@ -354,7 +354,7 @@ func TestXStopServiceStopsDynamicallyInstalledPoller(t *testing.T) {
 	api := &cancelAwareXAPI{started: make(chan struct{}), cancelled: make(chan struct{})}
 	svc := service.NewXService(service.XCredentials{ConsumerKey: "a", ConsumerSecret: "b", AccessToken: "c", AccessTokenSecret: "d"}, h.settingsRepo, h.projectRepo, h.llmConfigRepo, h.taskRepo, h.execRepo, h.scheduleRepo, h.taskSvc)
 	svc.SetAPI(api)
-	svc.SetRepositories(sqlite.NewXAuthRepo(db), sqlite.NewXUserProjectRepo(db), sqlite.NewXTaskContextRepo(db), sqlite.NewXInboundReceiptRepo(db), h.threadInputRepo)
+	svc.SetRepositories(teststores.Of(db).XAuth, teststores.Of(db).XUserProjects, teststores.Of(db).XTaskContexts, teststores.Of(db).XInboundReceipts, h.threadInputRepo)
 	require.NoError(t, svc.StartVerified(service.XUser{ID: "dynamic", Username: "dynamic"}))
 	<-api.started
 	h.SetXService(svc)
@@ -372,7 +372,7 @@ func TestXCompletionUsesOnlyOriginatingAccount(t *testing.T) {
 	api := &readyXSettingsAPI{accountID: "new-account"}
 	svc := service.NewXService(service.XCredentials{ConsumerKey: "a", ConsumerSecret: "b", AccessToken: "c", AccessTokenSecret: "d"}, h.settingsRepo, h.projectRepo, h.llmConfigRepo, h.taskRepo, h.execRepo, h.scheduleRepo, h.taskSvc)
 	svc.SetAPI(api)
-	svc.SetRepositories(sqlite.NewXAuthRepo(db), sqlite.NewXUserProjectRepo(db), sqlite.NewXTaskContextRepo(db), sqlite.NewXInboundReceiptRepo(db), h.threadInputRepo)
+	svc.SetRepositories(teststores.Of(db).XAuth, teststores.Of(db).XUserProjects, teststores.Of(db).XTaskContexts, teststores.Of(db).XInboundReceipts, h.threadInputRepo)
 	require.NoError(t, svc.StartVerified(service.XUser{ID: "new-account", Username: "new"}))
 	t.Cleanup(svc.Stop)
 	h.SetXService(svc)
@@ -388,10 +388,10 @@ func TestXQueuedInputRuntimePreservesAuthorizedProjectSwitchPersistence(t *testi
 	h, _, _, db := setupTestHandlerWithDB(t)
 	p1 := createProject(t, h, "Queued X One")
 	p2 := createProject(t, h, "Queued X Two")
-	auth := sqlite.NewXAuthRepo(db)
-	selections := sqlite.NewXUserProjectRepo(db)
-	contexts := sqlite.NewXTaskContextRepo(db)
-	receipts := sqlite.NewXInboundReceiptRepo(db)
+	auth := teststores.Of(db).XAuth
+	selections := teststores.Of(db).XUserProjects
+	contexts := teststores.Of(db).XTaskContexts
+	receipts := teststores.Of(db).XInboundReceipts
 	require.NoError(t, auth.Create(context.Background(), &models.XAuthorizedUser{ProjectID: p1.ID, XUserID: "123"}))
 	require.NoError(t, auth.Create(context.Background(), &models.XAuthorizedUser{ProjectID: p2.ID, XUserID: "123"}))
 	h.SetXRepositories(auth, selections, contexts, receipts)
@@ -413,10 +413,10 @@ func TestXQueuedInputRuntimePreservesAuthorizedProjectSwitchPersistence(t *testi
 func TestGenericChannelStatusReportsRunningButUnhealthyXAsNotConnected(t *testing.T) {
 	h, _, _, db := setupTestHandlerWithDB(t)
 	project := createProject(t, h, "X Degraded Status")
-	auth := sqlite.NewXAuthRepo(db)
-	selections := sqlite.NewXUserProjectRepo(db)
-	contexts := sqlite.NewXTaskContextRepo(db)
-	receipts := sqlite.NewXInboundReceiptRepo(db)
+	auth := teststores.Of(db).XAuth
+	selections := teststores.Of(db).XUserProjects
+	contexts := teststores.Of(db).XTaskContexts
+	receipts := teststores.Of(db).XInboundReceipts
 	h.SetXRepositories(auth, selections, contexts, receipts)
 	require.NoError(t, h.settingsRepo.Set(context.Background(), service.XSettingAccountID, "bot"))
 	svc := service.NewXService(service.XCredentials{ConsumerKey: "a", ConsumerSecret: "b", AccessToken: "c", AccessTokenSecret: "d"}, h.settingsRepo, h.projectRepo, h.llmConfigRepo, h.taskRepo, h.execRepo, h.scheduleRepo, h.taskSvc)
@@ -437,10 +437,10 @@ func TestGenericChannelStatusReportsRunningButUnhealthyXAsNotConnected(t *testin
 func TestGenericChannelStatusRetainsXReadinessAndAuthorization(t *testing.T) {
 	h, _, _, db := setupTestHandlerWithDB(t)
 	project := createProject(t, h, "X Status")
-	auth := sqlite.NewXAuthRepo(db)
-	selections := sqlite.NewXUserProjectRepo(db)
-	contexts := sqlite.NewXTaskContextRepo(db)
-	receipts := sqlite.NewXInboundReceiptRepo(db)
+	auth := teststores.Of(db).XAuth
+	selections := teststores.Of(db).XUserProjects
+	contexts := teststores.Of(db).XTaskContexts
+	receipts := teststores.Of(db).XInboundReceipts
 	h.SetXRepositories(auth, selections, contexts, receipts)
 	require.NoError(t, auth.Create(context.Background(), &models.XAuthorizedUser{ProjectID: project.ID, XUserID: "123"}))
 	require.NoError(t, h.settingsRepo.Set(context.Background(), service.XSettingAccountID, "bot"))
@@ -463,8 +463,8 @@ func TestXAuthorizationCreateUsesExplicitFormProject(t *testing.T) {
 	h, e, _, db := setupTestHandlerWithDB(t)
 	p1 := createProject(t, h, "X Explicit One")
 	p2 := createProject(t, h, "X Explicit Two")
-	auth := sqlite.NewXAuthRepo(db)
-	h.SetXRepositories(auth, sqlite.NewXUserProjectRepo(db), sqlite.NewXTaskContextRepo(db), sqlite.NewXInboundReceiptRepo(db))
+	auth := teststores.Of(db).XAuth
+	h.SetXRepositories(auth, teststores.Of(db).XUserProjects, teststores.Of(db).XTaskContexts, teststores.Of(db).XInboundReceipts)
 	ctx := xFormContext(e, http.MethodPost, "/channels/x/authorized-users", url.Values{
 		"project_id": {p2.ID}, "x_user_id": {"123"}, "x_username": {"alice"},
 	})
@@ -482,8 +482,8 @@ func TestXAuthorizationDeleteIsProjectScoped(t *testing.T) {
 	h, e, _, db := setupTestHandlerWithDB(t)
 	p1 := createProject(t, h, "X One")
 	p2 := createProject(t, h, "X Two")
-	auth := sqlite.NewXAuthRepo(db)
-	h.SetXRepositories(auth, sqlite.NewXUserProjectRepo(db), sqlite.NewXTaskContextRepo(db), sqlite.NewXInboundReceiptRepo(db))
+	auth := teststores.Of(db).XAuth
+	h.SetXRepositories(auth, teststores.Of(db).XUserProjects, teststores.Of(db).XTaskContexts, teststores.Of(db).XInboundReceipts)
 	entry := &models.XAuthorizedUser{ProjectID: p1.ID, XUserID: "123", Username: "alice"}
 	require.NoError(t, auth.Create(context.Background(), entry))
 

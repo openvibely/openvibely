@@ -10,8 +10,8 @@ import (
 
 	"github.com/openvibely/openvibely/internal/lifecycle"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/openvibely/openvibely/internal/testutil/teststores"
 )
 
 func TestGlobalWorkerCapacityUnlimitedAndFinite(t *testing.T) {
@@ -58,9 +58,9 @@ func TestWorkerService_DeregisterCancelOwnedPreservesFollowupCallback(t *testing
 }
 
 func TestWorkerService_GlobalAdmissionUsesActualRunningAcrossProjectCaps(t *testing.T) {
-	db := testutil.NewTestDB(t)
+	db := teststores.NewDB(t)
 	ctx := context.Background()
-	projectRepo := sqlite.NewProjectRepo(db)
+	projectRepo := teststores.Of(db).Projects
 
 	projectLimit := 100
 	projectA := &models.Project{Name: "Independent Project A", MaxWorkers: &projectLimit}
@@ -168,8 +168,8 @@ func TestWorkerService_ModelSlotAcquireRelease(t *testing.T) {
 }
 
 func TestWorkerService_ModelSlotEnforcesLimit(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	db := teststores.NewDB(t)
+	llmConfigRepo := teststores.Of(db).LLMConfigs
 	ctx := context.Background()
 
 	// Create a model with max_workers=2
@@ -222,8 +222,8 @@ func TestWorkerService_ModelSlotEnforcesLimit(t *testing.T) {
 }
 
 func TestWorkerService_ModelSlotWorkerIsolation(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	db := teststores.NewDB(t)
+	llmConfigRepo := teststores.Of(db).LLMConfigs
 	ctx := context.Background()
 
 	// Create two models with max_workers=1 each
@@ -284,8 +284,8 @@ func TestWorkerService_ModelSlotWorkerIsolation(t *testing.T) {
 }
 
 func TestWorkerService_ModelSlotNoLimitWhenZero(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	db := teststores.NewDB(t)
+	llmConfigRepo := teststores.Of(db).LLMConfigs
 	ctx := context.Background()
 
 	// Create a model with max_workers=0 (no limit)
@@ -341,8 +341,8 @@ func TestWorkerService_ModelSlotEmptyIDAlwaysSucceeds(t *testing.T) {
 }
 
 func TestWorkerService_ModelSlotConcurrentAccess(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	db := teststores.NewDB(t)
+	llmConfigRepo := teststores.Of(db).LLMConfigs
 	ctx := context.Background()
 
 	agent := &models.LLMConfig{
@@ -397,9 +397,9 @@ func TestWorkerService_ModelSlotConcurrentAccess(t *testing.T) {
 }
 
 func TestWorkerService_ResolveAgentConfigID(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
-	projectRepo := sqlite.NewProjectRepo(db)
+	db := teststores.NewDB(t)
+	llmConfigRepo := teststores.Of(db).LLMConfigs
+	projectRepo := teststores.Of(db).Projects
 	ctx := context.Background()
 
 	// Create a default agent
@@ -473,9 +473,9 @@ func TestWorkerService_ResolveAgentConfigID(t *testing.T) {
 // Previously, the re-queue logic only allowed "active" category tasks, silently
 // dropping scheduled tasks.
 func TestWorkerService_ScheduledTaskNotDroppedOnRequeue(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
-	projectRepo := sqlite.NewProjectRepo(db)
+	db := teststores.NewDB(t)
+	taskRepo := teststores.Of(db).Tasks
+	projectRepo := teststores.Of(db).Projects
 	ctx := context.Background()
 
 	// Create a project with max_workers=1
@@ -580,8 +580,8 @@ func TestWorkerService_SubmitDeduplicates(t *testing.T) {
 }
 
 func TestWorkerService_AcquireModelSlotBlocking(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	db := teststores.NewDB(t)
+	llmConfigRepo := teststores.Of(db).LLMConfigs
 	ctx := context.Background()
 
 	// Create a model with max_workers=1
@@ -631,8 +631,8 @@ func TestWorkerService_AcquireModelSlotBlocking(t *testing.T) {
 }
 
 func TestWorkerService_AcquireModelSlotBlocksAndUnblocks(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	db := teststores.NewDB(t)
+	llmConfigRepo := teststores.Of(db).LLMConfigs
 	ctx := context.Background()
 
 	// Create a model with max_workers=1
@@ -713,8 +713,8 @@ func TestWorkerService_AcquireModelSlotNoLimitNoBlock(t *testing.T) {
 }
 
 func TestWorkerService_GetModelWorkerTimeout(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	db := teststores.NewDB(t)
+	llmConfigRepo := teststores.Of(db).LLMConfigs
 	ctx := context.Background()
 
 	// Create a model with worker_timeout=120
@@ -782,8 +782,8 @@ func TestWorkerService_GetModelWorkerTimeout(t *testing.T) {
 }
 
 func TestLLMConfigRepo_MaxWorkers(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	repo := sqlite.NewLLMConfigRepo(db)
+	db := teststores.NewDB(t)
+	repo := teststores.Of(db).LLMConfigs
 	ctx := context.Background()
 
 	// Create a model with max_workers and worker_timeout
@@ -833,8 +833,8 @@ func TestLLMConfigRepo_MaxWorkers(t *testing.T) {
 }
 
 func TestLLMConfigRepo_MaxWorkersDefaultZero(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	repo := sqlite.NewLLMConfigRepo(db)
+	db := teststores.NewDB(t)
+	repo := teststores.Of(db).LLMConfigs
 	ctx := context.Background()
 
 	// Create a model without setting max_workers — should default to 0
@@ -862,16 +862,16 @@ func TestLLMConfigRepo_MaxWorkersDefaultZero(t *testing.T) {
 }
 
 func TestWorkerService_CancelledInitialRunSkipsAfterCompleteHooks(t *testing.T) {
-	db := testutil.NewTestDB(t)
+	db := teststores.NewDB(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	projectRepo := sqlite.NewProjectRepo(db)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
-	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
-	execRepo := sqlite.NewExecutionRepo(db)
-	scheduleRepo := sqlite.NewScheduleRepo(db)
-	attachmentRepo := sqlite.NewAttachmentRepo(db)
+	projectRepo := teststores.Of(db).Projects
+	taskRepo := teststores.Of(db).Tasks
+	llmConfigRepo := teststores.Of(db).LLMConfigs
+	execRepo := teststores.Of(db).Executions
+	scheduleRepo := teststores.Of(db).Schedules
+	attachmentRepo := teststores.Of(db).Attachments
 	project := &models.Project{Name: "cancelled-initial-lifecycle"}
 	if err := projectRepo.Create(ctx, project); err != nil {
 		t.Fatalf("Create project: %v", err)
@@ -948,12 +948,12 @@ func TestWorkerService_CancelledInitialRunSkipsAfterCompleteHooks(t *testing.T) 
 }
 
 func TestWorkerService_NewProjectTasksRespectGlobalLimit(t *testing.T) {
-	db := testutil.NewTestDB(t)
+	db := teststores.NewDB(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	projectRepo := sqlite.NewProjectRepo(db)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
+	projectRepo := teststores.Of(db).Projects
+	taskRepo := teststores.Of(db).Tasks
 	newProject := &models.Project{Name: "new-project-global-limit"}
 	if err := projectRepo.Create(ctx, newProject); err != nil {
 		t.Fatalf("Create new project: %v", err)
@@ -1019,8 +1019,8 @@ func TestWorkerService_NewProjectTasksRespectGlobalLimit(t *testing.T) {
 }
 
 func TestWorkerService_TryAcquireProjectSlot(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	projectRepo := sqlite.NewProjectRepo(db)
+	db := teststores.NewDB(t)
+	projectRepo := teststores.Of(db).Projects
 	ctx := context.Background()
 
 	// Create a project with max_workers=2
@@ -1090,8 +1090,8 @@ func TestWorkerService_TryAcquireProjectSlot(t *testing.T) {
 }
 
 func TestWorkerService_HasProjectCapacity(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	projectRepo := sqlite.NewProjectRepo(db)
+	db := teststores.NewDB(t)
+	projectRepo := teststores.Of(db).Projects
 	ctx := context.Background()
 
 	// Create a project with max_workers=1
@@ -1170,8 +1170,8 @@ func TestWorkerService_TryAcquireProjectSlot_NoLimit(t *testing.T) {
 }
 
 func TestWorkerService_AcquireProjectSlotBlocking(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	projectRepo := sqlite.NewProjectRepo(db)
+	db := teststores.NewDB(t)
+	projectRepo := teststores.Of(db).Projects
 	ctx := context.Background()
 
 	maxWorkers := 1
@@ -1214,8 +1214,8 @@ func TestWorkerService_AcquireProjectSlotBlocking(t *testing.T) {
 }
 
 func TestWorkerService_AcquireProjectSlotBlocksAndUnblocks(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	projectRepo := sqlite.NewProjectRepo(db)
+	db := teststores.NewDB(t)
+	projectRepo := teststores.Of(db).Projects
 	ctx := context.Background()
 
 	maxWorkers := 1
@@ -1283,8 +1283,8 @@ func TestWorkerService_AcquireProjectSlotNoLimit(t *testing.T) {
 }
 
 func TestWorkerService_HasModelCapacity(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	db := teststores.NewDB(t)
+	llmConfigRepo := teststores.Of(db).LLMConfigs
 	ctx := context.Background()
 
 	// Create a model with max_workers=1
@@ -1356,11 +1356,11 @@ func TestWorkerService_HasModelCapacity_NoLimit(t *testing.T) {
 // - Task worker limits (per-model, per-project) continue to be enforced for actual tasks
 // - Worker slots consumed by tasks don't prevent chat from bypassing
 func TestWorkerService_ChatBypassesTaskLimits_TasksStillEnforced(t *testing.T) {
-	db := testutil.NewTestDB(t)
+	db := teststores.NewDB(t)
 	ctx := context.Background()
 
-	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
-	projectRepo := sqlite.NewProjectRepo(db)
+	llmConfigRepo := teststores.Of(db).LLMConfigs
+	projectRepo := teststores.Of(db).Projects
 
 	// Create a model with max_workers=1
 	agent := &models.LLMConfig{
@@ -1508,12 +1508,12 @@ func TestWorkerService_DispatchNextPromotesQueuedTasks(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping goroutine-timing test in short mode")
 	}
-	db := testutil.NewTestDB(t)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
-	projectRepo := sqlite.NewProjectRepo(db)
-	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
-	execRepo := sqlite.NewExecutionRepo(db)
-	attachmentRepo := sqlite.NewAttachmentRepo(db)
+	db := teststores.NewDB(t)
+	taskRepo := teststores.Of(db).Tasks
+	projectRepo := teststores.Of(db).Projects
+	llmConfigRepo := teststores.Of(db).LLMConfigs
+	execRepo := teststores.Of(db).Executions
+	attachmentRepo := teststores.Of(db).Attachments
 	ctx := context.Background()
 
 	// Create a project with max_workers=1
@@ -1596,9 +1596,9 @@ func TestWorkerService_DispatchNextWithoutSlotRelease(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping goroutine-timing test in short mode")
 	}
-	db := testutil.NewTestDB(t)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
-	projectRepo := sqlite.NewProjectRepo(db)
+	db := teststores.NewDB(t)
+	taskRepo := teststores.Of(db).Tasks
+	projectRepo := teststores.Of(db).Projects
 	ctx := context.Background()
 
 	maxWorkers := 1
@@ -1656,12 +1656,12 @@ func TestWorkerService_ProjectLimitIncreaseDispatchesQueued(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping goroutine-timing test in short mode")
 	}
-	db := testutil.NewTestDB(t)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
-	projectRepo := sqlite.NewProjectRepo(db)
-	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
-	execRepo := sqlite.NewExecutionRepo(db)
-	attachmentRepo := sqlite.NewAttachmentRepo(db)
+	db := teststores.NewDB(t)
+	taskRepo := teststores.Of(db).Tasks
+	projectRepo := teststores.Of(db).Projects
+	llmConfigRepo := teststores.Of(db).LLMConfigs
+	execRepo := teststores.Of(db).Executions
+	attachmentRepo := teststores.Of(db).Attachments
 	ctx := context.Background()
 
 	// Create a project with max_workers=1
@@ -1755,14 +1755,14 @@ func TestWorkerService_UnlimitedGlobalAndProjectDispatchQueuedTask(t *testing.T)
 	if testing.Short() {
 		t.Skip("skipping goroutine-timing test in short mode")
 	}
-	db := testutil.NewTestDB(t)
+	db := teststores.NewDB(t)
 	ctx := context.Background()
-	taskRepo := sqlite.NewTaskRepo(db, nil)
-	projectRepo := sqlite.NewProjectRepo(db)
-	workerRepo := sqlite.NewWorkerRepo(db)
-	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
-	execRepo := sqlite.NewExecutionRepo(db)
-	attachmentRepo := sqlite.NewAttachmentRepo(db)
+	taskRepo := teststores.Of(db).Tasks
+	projectRepo := teststores.Of(db).Projects
+	workerRepo := teststores.Of(db).Workers
+	llmConfigRepo := teststores.Of(db).LLMConfigs
+	execRepo := teststores.Of(db).Executions
+	attachmentRepo := teststores.Of(db).Attachments
 
 	projectLimit := 1
 	project := &models.Project{Name: "unlimited-transition", MaxWorkers: &projectLimit}
@@ -1849,9 +1849,9 @@ func TestWorkerService_ProjectLimitIncreaseNoDispatchWhenGlobalFull(t *testing.T
 	if testing.Short() {
 		t.Skip("skipping goroutine-timing test in short mode")
 	}
-	db := testutil.NewTestDB(t)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
-	projectRepo := sqlite.NewProjectRepo(db)
+	db := teststores.NewDB(t)
+	taskRepo := teststores.Of(db).Tasks
+	projectRepo := teststores.Of(db).Projects
 	ctx := context.Background()
 
 	// Create a project with max_workers=1
@@ -1921,9 +1921,9 @@ func TestWorkerService_ProjectLimitIncreaseFIFOOrder(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping goroutine-timing test in short mode")
 	}
-	db := testutil.NewTestDB(t)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
-	projectRepo := sqlite.NewProjectRepo(db)
+	db := teststores.NewDB(t)
+	taskRepo := teststores.Of(db).Tasks
+	projectRepo := teststores.Of(db).Projects
 	ctx := context.Background()
 
 	// Create a project with max_workers=1
@@ -2018,14 +2018,14 @@ func TestWorkerService_ProjectLimitIncreaseFIFOOrder(t *testing.T) {
 }
 
 func TestWorkerService_ReleasesSlotsAfterTaskFailure(t *testing.T) {
-	db := testutil.NewTestDB(t)
+	db := teststores.NewDB(t)
 	ctx := context.Background()
 
-	projectRepo := sqlite.NewProjectRepo(db)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
-	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
-	execRepo := sqlite.NewExecutionRepo(db)
-	attachmentRepo := sqlite.NewAttachmentRepo(db)
+	projectRepo := teststores.Of(db).Projects
+	taskRepo := teststores.Of(db).Tasks
+	llmConfigRepo := teststores.Of(db).LLMConfigs
+	execRepo := teststores.Of(db).Executions
+	attachmentRepo := teststores.Of(db).Attachments
 
 	maxWorkers := 1
 	project := &models.Project{Name: "failure-slot-release", MaxWorkers: &maxWorkers}
@@ -2082,14 +2082,14 @@ func TestWorkerService_ReleasesSlotsAfterTaskFailure(t *testing.T) {
 }
 
 func TestWorkerService_ReleasesSlotsAfterTaskPanic(t *testing.T) {
-	db := testutil.NewTestDB(t)
+	db := teststores.NewDB(t)
 	ctx := context.Background()
 
-	projectRepo := sqlite.NewProjectRepo(db)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
-	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
-	execRepo := sqlite.NewExecutionRepo(db)
-	attachmentRepo := sqlite.NewAttachmentRepo(db)
+	projectRepo := teststores.Of(db).Projects
+	taskRepo := teststores.Of(db).Tasks
+	llmConfigRepo := teststores.Of(db).LLMConfigs
+	execRepo := teststores.Of(db).Executions
+	attachmentRepo := teststores.Of(db).Attachments
 
 	maxWorkers := 1
 	project := &models.Project{Name: "panic-slot-release", MaxWorkers: &maxWorkers}

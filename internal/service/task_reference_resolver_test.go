@@ -5,16 +5,16 @@ import (
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/persistence/sqlite"
-	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/openvibely/openvibely/internal/persistence"
+	"github.com/openvibely/openvibely/internal/testutil/teststores"
 	"github.com/stretchr/testify/require"
 )
 
-func newTaskReferenceTestData(t *testing.T) (*sqlite.TaskRepo, *models.Project, *models.Task, *models.Task) {
+func newTaskReferenceTestData(t *testing.T) (persistence.TaskStore, *models.Project, *models.Task, *models.Task) {
 	t.Helper()
-	db := testutil.NewTestDB(t)
-	projectRepo := sqlite.NewProjectRepo(db)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
+	db := teststores.NewDB(t)
+	projectRepo := teststores.Of(db).Projects
+	taskRepo := teststores.Of(db).Tasks
 	project := &models.Project{Name: "Task reference project"}
 	foreignProject := &models.Project{Name: "Foreign task reference project"}
 	require.NoError(t, projectRepo.Create(context.Background(), project))
@@ -74,8 +74,8 @@ func TestResolveTaskReferencePreservesLookupOrderScopeAndErrors(t *testing.T) {
 	_, err = ResolveTaskReference(ctx, taskRepo, project.ID, "", "", TaskReferenceResolutionOptions{})
 	require.EqualError(t, err, "no task_id or title provided")
 
-	closedDB := testutil.NewTestDB(t)
-	closedTaskRepo := sqlite.NewTaskRepo(closedDB, nil)
+	closedDB := teststores.NewDB(t)
+	closedTaskRepo := teststores.Of(closedDB).Tasks
 	require.NoError(t, closedDB.Close())
 	_, err = ResolveTaskReference(ctx, closedTaskRepo, project.ID, task.ID, "", TaskReferenceResolutionOptions{})
 	require.ErrorContains(t, err, "error looking up task "+task.ID+":")
@@ -120,9 +120,9 @@ func TestResolveTaskReferenceLiteralTitle(t *testing.T) {
 		{"deploy", "Deploy service", "Redeploy web"},
 	} {
 		t.Run(tt.query, func(t *testing.T) {
-			db := testutil.NewTestDB(t)
+			db := teststores.NewDB(t)
 			ctx := context.Background()
-			taskRepo := sqlite.NewTaskRepo(db, nil)
+			taskRepo := teststores.Of(db).Tasks
 			tasks := []models.Task{
 				{ProjectID: "default", Title: tt.literal, Prompt: "test", Category: models.CategoryBacklog, Status: models.StatusPending},
 				{ProjectID: "default", Title: tt.nonliteral, Prompt: "test", Category: models.CategoryBacklog, Status: models.StatusPending},

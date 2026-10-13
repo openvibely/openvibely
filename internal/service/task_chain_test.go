@@ -9,22 +9,22 @@ import (
 	"github.com/openvibely/openvibely/internal/events"
 	llmworkflow "github.com/openvibely/openvibely/internal/llm/workflow"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/openvibely/openvibely/internal/testutil/teststores"
 )
 
 func TestLLMService_TriggerTaskChain(t *testing.T) {
-	db := testutil.NewTestDB(t)
+	db := teststores.NewDB(t)
 	ctx := context.Background()
 
 	// Create repos and services
 	broadcaster := events.NewBroadcaster()
-	taskRepo := sqlite.NewTaskRepo(db, broadcaster)
-	execRepo := sqlite.NewExecutionRepo(db)
-	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
-	projectRepo := sqlite.NewProjectRepo(db)
-	scheduleRepo := sqlite.NewScheduleRepo(db)
-	attachmentRepo := sqlite.NewAttachmentRepo(db)
+	taskRepo := teststores.Of(db, teststores.WithBroadcaster(broadcaster)).Tasks
+	execRepo := teststores.Of(db).Executions
+	llmConfigRepo := teststores.Of(db).LLMConfigs
+	projectRepo := teststores.Of(db).Projects
+	scheduleRepo := teststores.Of(db).Schedules
+	attachmentRepo := teststores.Of(db).Attachments
 
 	// Create worker service with 0 workers (no actual execution)
 	workerSvc := NewWorkerService(nil, 0, nil)
@@ -120,16 +120,16 @@ func TestLLMService_TriggerTaskChain(t *testing.T) {
 }
 
 func TestLLMService_TriggerTaskChain_DefaultsChildCategoryToParentAndAutoSubmits(t *testing.T) {
-	db := testutil.NewTestDB(t)
+	db := teststores.NewDB(t)
 	ctx := context.Background()
 
 	broadcaster := events.NewBroadcaster()
-	taskRepo := sqlite.NewTaskRepo(db, broadcaster)
-	execRepo := sqlite.NewExecutionRepo(db)
-	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
-	projectRepo := sqlite.NewProjectRepo(db)
-	scheduleRepo := sqlite.NewScheduleRepo(db)
-	attachmentRepo := sqlite.NewAttachmentRepo(db)
+	taskRepo := teststores.Of(db, teststores.WithBroadcaster(broadcaster)).Tasks
+	execRepo := teststores.Of(db).Executions
+	llmConfigRepo := teststores.Of(db).LLMConfigs
+	projectRepo := teststores.Of(db).Projects
+	scheduleRepo := teststores.Of(db).Schedules
+	attachmentRepo := teststores.Of(db).Attachments
 
 	workerSvc := NewWorkerService(nil, 0, nil)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
@@ -202,16 +202,16 @@ func TestLLMService_TriggerTaskChain_DefaultsChildCategoryToParentAndAutoSubmits
 }
 
 func TestLLMService_TriggerTaskChain_UsesLatestPersistedChainConfig(t *testing.T) {
-	db := testutil.NewTestDB(t)
+	db := teststores.NewDB(t)
 	ctx := context.Background()
 
 	broadcaster := events.NewBroadcaster()
-	taskRepo := sqlite.NewTaskRepo(db, broadcaster)
-	execRepo := sqlite.NewExecutionRepo(db)
-	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
-	projectRepo := sqlite.NewProjectRepo(db)
-	scheduleRepo := sqlite.NewScheduleRepo(db)
-	attachmentRepo := sqlite.NewAttachmentRepo(db)
+	taskRepo := teststores.Of(db, teststores.WithBroadcaster(broadcaster)).Tasks
+	execRepo := teststores.Of(db).Executions
+	llmConfigRepo := teststores.Of(db).LLMConfigs
+	projectRepo := teststores.Of(db).Projects
+	scheduleRepo := teststores.Of(db).Schedules
+	attachmentRepo := teststores.Of(db).Attachments
 
 	workerSvc := NewWorkerService(nil, 0, nil)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
@@ -299,16 +299,16 @@ func TestLLMService_TriggerTaskChain_UsesLatestPersistedChainConfig(t *testing.T
 }
 
 func TestLLMService_TriggerTaskChain_BlockedChildPreCreatedAndActivated(t *testing.T) {
-	db := testutil.NewTestDB(t)
+	db := teststores.NewDB(t)
 	ctx := context.Background()
 
 	broadcaster := events.NewBroadcaster()
-	taskRepo := sqlite.NewTaskRepo(db, broadcaster)
-	execRepo := sqlite.NewExecutionRepo(db)
-	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
-	projectRepo := sqlite.NewProjectRepo(db)
-	scheduleRepo := sqlite.NewScheduleRepo(db)
-	attachmentRepo := sqlite.NewAttachmentRepo(db)
+	taskRepo := teststores.Of(db, teststores.WithBroadcaster(broadcaster)).Tasks
+	execRepo := teststores.Of(db).Executions
+	llmConfigRepo := teststores.Of(db).LLMConfigs
+	projectRepo := teststores.Of(db).Projects
+	scheduleRepo := teststores.Of(db).Schedules
+	attachmentRepo := teststores.Of(db).Attachments
 
 	workerSvc := NewWorkerService(nil, 0, nil)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
@@ -426,16 +426,16 @@ func TestLLMService_TriggerTaskChain_BlockedChildPreCreatedAndActivated(t *testi
 }
 
 func TestLLMService_TriggerTaskChain_ChildTitle(t *testing.T) {
-	db := testutil.NewTestDB(t)
+	db := teststores.NewDB(t)
 	ctx := context.Background()
 
 	broadcaster := events.NewBroadcaster()
-	taskRepo := sqlite.NewTaskRepo(db, broadcaster)
-	execRepo := sqlite.NewExecutionRepo(db)
-	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
-	projectRepo := sqlite.NewProjectRepo(db)
-	scheduleRepo := sqlite.NewScheduleRepo(db)
-	attachmentRepo := sqlite.NewAttachmentRepo(db)
+	taskRepo := teststores.Of(db, teststores.WithBroadcaster(broadcaster)).Tasks
+	execRepo := teststores.Of(db).Executions
+	llmConfigRepo := teststores.Of(db).LLMConfigs
+	projectRepo := teststores.Of(db).Projects
+	scheduleRepo := teststores.Of(db).Schedules
+	attachmentRepo := teststores.Of(db).Attachments
 
 	workerSvc := NewWorkerService(nil, 0, nil)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
@@ -510,16 +510,16 @@ func TestLLMService_TriggerTaskChain_ChildTitle(t *testing.T) {
 }
 
 func TestLLMService_TriggerTaskChain_MultiLevel(t *testing.T) {
-	db := testutil.NewTestDB(t)
+	db := teststores.NewDB(t)
 	ctx := context.Background()
 
 	broadcaster := events.NewBroadcaster()
-	taskRepo := sqlite.NewTaskRepo(db, broadcaster)
-	execRepo := sqlite.NewExecutionRepo(db)
-	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
-	projectRepo := sqlite.NewProjectRepo(db)
-	scheduleRepo := sqlite.NewScheduleRepo(db)
-	attachmentRepo := sqlite.NewAttachmentRepo(db)
+	taskRepo := teststores.Of(db, teststores.WithBroadcaster(broadcaster)).Tasks
+	execRepo := teststores.Of(db).Executions
+	llmConfigRepo := teststores.Of(db).LLMConfigs
+	projectRepo := teststores.Of(db).Projects
+	scheduleRepo := teststores.Of(db).Schedules
+	attachmentRepo := teststores.Of(db).Attachments
 
 	workerSvc := NewWorkerService(nil, 0, nil)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
@@ -835,16 +835,16 @@ func TestCleanOutputForChain_PreservesCodedAliasesAndCleansRealAliases(t *testin
 func TestLLMService_TriggerTaskChain_TextOnlyOutput(t *testing.T) {
 	// Simulates the primary path: textOnlyOutput from TextString() contains
 	// only response text (no thinking, no tool markers, no status markers).
-	db := testutil.NewTestDB(t)
+	db := teststores.NewDB(t)
 	ctx := context.Background()
 
 	broadcaster := events.NewBroadcaster()
-	taskRepo := sqlite.NewTaskRepo(db, broadcaster)
-	execRepo := sqlite.NewExecutionRepo(db)
-	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
-	projectRepo := sqlite.NewProjectRepo(db)
-	scheduleRepo := sqlite.NewScheduleRepo(db)
-	attachmentRepo := sqlite.NewAttachmentRepo(db)
+	taskRepo := teststores.Of(db, teststores.WithBroadcaster(broadcaster)).Tasks
+	execRepo := teststores.Of(db).Executions
+	llmConfigRepo := teststores.Of(db).LLMConfigs
+	projectRepo := teststores.Of(db).Projects
+	scheduleRepo := teststores.Of(db).Schedules
+	attachmentRepo := teststores.Of(db).Attachments
 
 	workerSvc := NewWorkerService(nil, 0, nil)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
@@ -910,16 +910,16 @@ func TestLLMService_TriggerTaskChain_TextOnlyOutput(t *testing.T) {
 }
 
 func TestLLMService_TriggerTaskChain_CleansThinkingBlocks(t *testing.T) {
-	db := testutil.NewTestDB(t)
+	db := teststores.NewDB(t)
 	ctx := context.Background()
 
 	broadcaster := events.NewBroadcaster()
-	taskRepo := sqlite.NewTaskRepo(db, broadcaster)
-	execRepo := sqlite.NewExecutionRepo(db)
-	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
-	projectRepo := sqlite.NewProjectRepo(db)
-	scheduleRepo := sqlite.NewScheduleRepo(db)
-	attachmentRepo := sqlite.NewAttachmentRepo(db)
+	taskRepo := teststores.Of(db, teststores.WithBroadcaster(broadcaster)).Tasks
+	execRepo := teststores.Of(db).Executions
+	llmConfigRepo := teststores.Of(db).LLMConfigs
+	projectRepo := teststores.Of(db).Projects
+	scheduleRepo := teststores.Of(db).Schedules
+	attachmentRepo := teststores.Of(db).Attachments
 
 	workerSvc := NewWorkerService(nil, 0, nil)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
@@ -986,16 +986,16 @@ func TestLLMService_TriggerTaskChain_CleansThinkingBlocks(t *testing.T) {
 }
 
 func TestLLMService_TriggerTaskChain_Disabled(t *testing.T) {
-	db := testutil.NewTestDB(t)
+	db := teststores.NewDB(t)
 	ctx := context.Background()
 
 	broadcaster := events.NewBroadcaster()
-	taskRepo := sqlite.NewTaskRepo(db, broadcaster)
-	execRepo := sqlite.NewExecutionRepo(db)
-	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
-	projectRepo := sqlite.NewProjectRepo(db)
-	scheduleRepo := sqlite.NewScheduleRepo(db)
-	attachmentRepo := sqlite.NewAttachmentRepo(db)
+	taskRepo := teststores.Of(db, teststores.WithBroadcaster(broadcaster)).Tasks
+	execRepo := teststores.Of(db).Executions
+	llmConfigRepo := teststores.Of(db).LLMConfigs
+	projectRepo := teststores.Of(db).Projects
+	scheduleRepo := teststores.Of(db).Schedules
+	attachmentRepo := teststores.Of(db).Attachments
 
 	workerSvc := NewWorkerService(nil, 0, nil)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
@@ -1049,16 +1049,16 @@ func TestLLMService_TriggerTaskChain_Disabled(t *testing.T) {
 }
 
 func TestLLMService_TriggerTaskChain_BlockedChild_DefaultCategoryUsesRunnableWhenParentNowCompleted(t *testing.T) {
-	db := testutil.NewTestDB(t)
+	db := teststores.NewDB(t)
 	ctx := context.Background()
 
 	broadcaster := events.NewBroadcaster()
-	taskRepo := sqlite.NewTaskRepo(db, broadcaster)
-	execRepo := sqlite.NewExecutionRepo(db)
-	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
-	projectRepo := sqlite.NewProjectRepo(db)
-	scheduleRepo := sqlite.NewScheduleRepo(db)
-	attachmentRepo := sqlite.NewAttachmentRepo(db)
+	taskRepo := teststores.Of(db, teststores.WithBroadcaster(broadcaster)).Tasks
+	execRepo := teststores.Of(db).Executions
+	llmConfigRepo := teststores.Of(db).LLMConfigs
+	projectRepo := teststores.Of(db).Projects
+	scheduleRepo := teststores.Of(db).Schedules
+	attachmentRepo := teststores.Of(db).Attachments
 
 	workerSvc := NewWorkerService(nil, 0, nil)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
@@ -1138,16 +1138,16 @@ func TestLLMService_TriggerTaskChain_BlockedChild_DefaultCategoryUsesRunnableWhe
 }
 
 func TestLLMService_TriggerTaskChain_FallbackCreate_DefaultCategoryUsesRunnableWhenParentNowCompleted(t *testing.T) {
-	db := testutil.NewTestDB(t)
+	db := teststores.NewDB(t)
 	ctx := context.Background()
 
 	broadcaster := events.NewBroadcaster()
-	taskRepo := sqlite.NewTaskRepo(db, broadcaster)
-	execRepo := sqlite.NewExecutionRepo(db)
-	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
-	projectRepo := sqlite.NewProjectRepo(db)
-	scheduleRepo := sqlite.NewScheduleRepo(db)
-	attachmentRepo := sqlite.NewAttachmentRepo(db)
+	taskRepo := teststores.Of(db, teststores.WithBroadcaster(broadcaster)).Tasks
+	execRepo := teststores.Of(db).Executions
+	llmConfigRepo := teststores.Of(db).LLMConfigs
+	projectRepo := teststores.Of(db).Projects
+	scheduleRepo := teststores.Of(db).Schedules
+	attachmentRepo := teststores.Of(db).Attachments
 
 	workerSvc := NewWorkerService(nil, 0, nil)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)

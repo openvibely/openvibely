@@ -12,8 +12,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/openvibely/openvibely/internal/testutil/teststores"
 )
 
 const (
@@ -25,7 +27,7 @@ type validationProjectionFixture struct {
 	reader      *sql.DB
 	writer      *sql.DB
 	counter     *testutil.SQLStatementCounter
-	projectRepo *sqlite.ProjectRepo
+	projectRepo persistence.ProjectStore
 	projectSvc  *ProjectService
 	repoPath    string
 }
@@ -144,7 +146,7 @@ func newValidationProjectionFixture(tb testing.TB, projectCount int) *validation
 		tb.Fatalf("create existing repository path: %v", err)
 	}
 	seedValidationProjectionProjects(tb, writer, projectCount, repoPath)
-	repo := sqlite.NewProjectRepo(reader)
+	repo := teststores.Of(reader).Projects
 	return &validationProjectionFixture{
 		reader:      reader,
 		writer:      writer,
@@ -281,7 +283,7 @@ func (fixture *validationProjectionFixture) selectedBytes(tb testing.TB) int {
 	return validationCompactSelectedBytes(tb, fixture.projectRepo)
 }
 
-func validationCompactSelectedBytes(tb testing.TB, repo *sqlite.ProjectRepo) int {
+func validationCompactSelectedBytes(tb testing.TB, repo persistence.ProjectStore) int {
 	tb.Helper()
 	projects, err := repo.ListRepoValidationProjects(context.Background())
 	if err != nil {

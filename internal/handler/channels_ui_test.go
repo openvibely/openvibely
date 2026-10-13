@@ -16,6 +16,7 @@ import (
 	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/openvibely/openvibely/internal/testutil/teststores"
 )
 
 func TestChannelsPageRendersConfiguredXWithoutOAuthSecrets(t *testing.T) {
@@ -312,7 +313,7 @@ func TestChannelsPageTelegramRichMessagesToggleDefaultsCheckedAndHonorsSavedFals
 
 func TestChannelsPageOutboundTargetsRenderAsPermanentTopEditCard(t *testing.T) {
 	h, e, _, db := setupTestHandlerWithDB(t)
-	targetRepo := sqlite.NewChannelTargetRepo(db)
+	targetRepo := teststores.Of(db).ChannelTargets
 	h.SetChannelTargetRepo(targetRepo)
 	seedTarget := models.ChannelTarget{
 		ID:             persistence.NewID(),
@@ -323,7 +324,7 @@ func TestChannelsPageOutboundTargetsRenderAsPermanentTopEditCard(t *testing.T) {
 		Home:           true,
 		DefaultSubject: "Original subject",
 	}
-	if err := targetRepo.Upsert(context.Background(), seedTarget); err != nil {
+	if err := targetRepo.(*sqlite.ChannelTargetRepo).Upsert(context.Background(), seedTarget); err != nil {
 		t.Fatalf("failed to seed outbound target: %v", err)
 	}
 	h.SetSlackService(&fakeSlackService{
@@ -526,7 +527,7 @@ func TestChannelsPageUsesCompactAgentPickerProjection(t *testing.T) {
 	db, counter := testutil.NewStatementCountingTestDB(t)
 	env := newTestHandlerEnv(t, db)
 	h, e := env.Handler, env.Echo
-	agentRepo := sqlite.NewAgentRepo(db)
+	agentRepo := teststores.Of(db).Agents
 	h.SetAgentRepo(agentRepo)
 
 	alpha := &models.Agent{Name: "Alpha Picker", SystemPrompt: strings.Repeat("large hidden prompt ", 1024), ToolConfig: models.AgentToolConfig{ScopedFiles: []models.ScopedFilesConfig{{Directory: "src", Permissions: []string{"read"}}}}}
@@ -597,13 +598,13 @@ func TestChannelsPageBatchesSettingsReadsAndPreservesRenderedValues(t *testing.T
 	seedRepresentativeChannelsSettings(t, tc.settingsRepo, selectedProject.ID, otherProject.ID)
 
 	var settingsQueries []string
-	tc.settingsRepo.SetQueryObserver(func(query string) {
+	tc.settingsRepo.(*sqlite.SettingsRepo).SetQueryObserver(func(query string) {
 		if strings.Contains(strings.ToLower(query), "from app_settings") {
 			settingsQueries = append(settingsQueries, query)
 		}
 	})
 	rec := tc.HTMX().Get("/channels?project_id=" + url.QueryEscape(selectedProject.ID)).Execute()
-	tc.settingsRepo.SetQueryObserver(nil)
+	tc.settingsRepo.(*sqlite.SettingsRepo).SetQueryObserver(nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected Channels status 200, got %d; body=%s", rec.Code, rec.Body.String())
 	}
@@ -726,13 +727,13 @@ func TestChannelsPageDefaultsStillRenderWhenSettingsAreMissing(t *testing.T) {
 }
 
 func BenchmarkHandlerChannelsSettingsBatchedContention(b *testing.B) {
-	db := testutil.NewTestDB(b)
+	db := teststores.NewDB(b)
 	h, e, _ := setupTestHandlerForDB(b, db)
 	project := createProjectTB(b, h, "Channels Settings Benchmark Project")
-	settingsRepo := sqlite.NewSettingsRepo(db)
+	settingsRepo := teststores.Of(db).Settings
 	seedRepresentativeChannelsSettings(b, settingsRepo, project.ID, "other-project")
 	h.settingsRepo = settingsRepo
-	h.SetChannelTargetRepo(sqlite.NewChannelTargetRepo(db))
+	h.SetChannelTargetRepo(teststores.Of(db).ChannelTargets)
 
 	var totalLightweightLatency int64
 	b.ReportAllocs()
@@ -740,7 +741,7 @@ func BenchmarkHandlerChannelsSettingsBatchedContention(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		queryAcquired := make(chan struct{})
 		var once sync.Once
-		settingsRepo.SetQueryAcquiredObserver(func(query string) {
+		settingsRepo.(*sqlite.SettingsRepo).SetQueryAcquiredObserver(func(query string) {
 			if strings.Contains(strings.ToLower(query), "from app_settings") {
 				once.Do(func() { close(queryAcquired) })
 			}
@@ -769,12 +770,12 @@ func BenchmarkHandlerChannelsSettingsBatchedContention(b *testing.B) {
 		if err := <-errCh; err != nil {
 			b.Fatal(err)
 		}
-		settingsRepo.SetQueryAcquiredObserver(nil)
+		settingsRepo.(*sqlite.SettingsRepo).SetQueryAcquiredObserver(nil)
 	}
 	b.ReportMetric(float64(totalLightweightLatency)/float64(b.N), "lightweight_db_block_ns/op")
 }
 
-func seedRepresentativeChannelsSettings(t testing.TB, settingsRepo *sqlite.SettingsRepo, projectID, otherProjectID string) {
+func seedRepresentativeChannelsSettings(t testing.TB, settingsRepo persistence.SettingsStore, projectID, otherProjectID string) {
 	t.Helper()
 	ctx := context.Background()
 	settings := map[string]string{
@@ -874,7 +875,7 @@ func TestChannelsPageOutboundTargetTestButtonIncludesSelectedProjectID(t *testin
 		t.Fatal("expected distinct projects")
 	}
 
-	targetRepo := sqlite.NewChannelTargetRepo(tc.db)
+	targetRepo := teststores.Of(tc.db).ChannelTargets
 	slack := &outboundTargetTestSlack{}
 	router := service.NewChannelMessageRouter(targetRepo, tc.settingsRepo)
 	router.SetSlackService(slack)
@@ -888,7 +889,7 @@ func TestChannelsPageOutboundTargetTestButtonIncludesSelectedProjectID(t *testin
 		Name:      "selected-alerts",
 		TargetID:  "CSELECTED",
 	}
-	if err := targetRepo.Upsert(context.Background(), target); err != nil {
+	if err := targetRepo.(*sqlite.ChannelTargetRepo).Upsert(context.Background(), target); err != nil {
 		t.Fatalf("failed to seed selected project target: %v", err)
 	}
 
@@ -1017,7 +1018,7 @@ func TestChannelsPageStatusBadgesRenderAtBottomOfDetailsSection(t *testing.T) {
 		}
 	}
 	if h.telegramAuthRepo == nil {
-		h.SetTelegramAuthRepo(sqlite.NewTelegramAuthRepo(db))
+		h.SetTelegramAuthRepo(teststores.Of(db).TelegramAuth)
 	}
 	if err := h.telegramAuthRepo.Create(context.Background(), &models.TelegramAuthorizedUser{
 		ProjectID:        "default",
@@ -1029,7 +1030,7 @@ func TestChannelsPageStatusBadgesRenderAtBottomOfDetailsSection(t *testing.T) {
 		t.Fatalf("failed to seed telegram authorized user: %v", err)
 	}
 	if h.discordAuthRepo == nil {
-		h.SetDiscordAuthRepo(sqlite.NewDiscordAuthRepo(db))
+		h.SetDiscordAuthRepo(teststores.Of(db).DiscordAuth)
 	}
 	if err := h.discordAuthRepo.Create(context.Background(), &models.DiscordAuthorizedUser{
 		ProjectID:     "default",
@@ -1170,7 +1171,7 @@ func TestChannelsPageTelegramMenuShowsDeleteAndNoChannelMenuUsesRemove(t *testin
 
 func TestChannelsPageDeleteActionsUseConfirmationDialog(t *testing.T) {
 	h, e, _, db := setupTestHandlerWithDB(t)
-	webhookRepo := sqlite.NewWebhookRepo(db)
+	webhookRepo := teststores.Of(db).Webhooks
 	h.SetWebhookRepo(webhookRepo)
 
 	h.SetGitHubService(&fakeGitHubService{

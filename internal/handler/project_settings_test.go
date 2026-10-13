@@ -15,9 +15,9 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/openvibely/openvibely/internal/testutil/teststores"
 )
 
 // TestProjectSettings_EndToEnd tests the complete flow of editing project settings
@@ -25,21 +25,21 @@ import (
 func TestProjectSettings_EndToEnd(t *testing.T) {
 	t.Setenv("OPENVIBELY_ENABLE_LOCAL_REPO_PATH", "true")
 
-	db := testutil.NewTestDB(t)
+	db := teststores.NewDB(t)
 	ctx := context.Background()
 
 	// Setup broadcaster
 	broadcaster := events.NewBroadcaster()
 
 	// Setup repositories
-	projectRepo := sqlite.NewProjectRepo(db)
-	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
-	taskRepo := sqlite.NewTaskRepo(db, broadcaster)
-	execRepo := sqlite.NewExecutionRepo(db)
-	scheduleRepo := sqlite.NewScheduleRepo(db)
-	workerRepo := sqlite.NewWorkerRepo(db)
-	attachmentRepo := sqlite.NewAttachmentRepo(db)
-	chatAttachmentRepo := sqlite.NewChatAttachmentRepo(db)
+	projectRepo := teststores.Of(db).Projects
+	llmConfigRepo := teststores.Of(db).LLMConfigs
+	taskRepo := teststores.Of(db, teststores.WithBroadcaster(broadcaster)).Tasks
+	execRepo := teststores.Of(db).Executions
+	scheduleRepo := teststores.Of(db).Schedules
+	workerRepo := teststores.Of(db).Workers
+	attachmentRepo := teststores.Of(db).Attachments
+	chatAttachmentRepo := teststores.Of(db).ChatAttachments
 
 	// Setup services (need to setup in correct order due to dependencies)
 	projectSvc := service.NewProjectService(projectRepo)
@@ -413,12 +413,12 @@ func assertProjectDialogHiddenModelFieldsAbsent(t *testing.T, body, largeHiddenF
 func TestNewProjectDialog(t *testing.T) {
 	t.Setenv("OPENVIBELY_ENABLE_LOCAL_REPO_PATH", "true")
 
-	db := testutil.NewTestDB(t)
+	db := teststores.NewDB(t)
 	ctx := context.Background()
 
-	projectRepo := sqlite.NewProjectRepo(db)
-	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
-	workerRepo := sqlite.NewWorkerRepo(db)
+	projectRepo := teststores.Of(db).Projects
+	llmConfigRepo := teststores.Of(db).LLMConfigs
+	workerRepo := teststores.Of(db).Workers
 	projectSvc := service.NewProjectService(projectRepo)
 	if err := workerRepo.SetMaxWorkers(ctx, 25); err != nil {
 		t.Fatalf("set global worker limit: %v", err)
@@ -552,11 +552,11 @@ func TestProjectDialogs_GitHubOnlyModeHidesLocalSourceOption(t *testing.T) {
 	t.Setenv("OPENVIBELY_ENABLE_LOCAL_REPO_PATH", "false")
 	t.Setenv("ENVIRONMENT", "production")
 
-	db := testutil.NewTestDB(t)
+	db := teststores.NewDB(t)
 	ctx := context.Background()
 
-	projectRepo := sqlite.NewProjectRepo(db)
-	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	projectRepo := teststores.Of(db).Projects
+	llmConfigRepo := teststores.Of(db).LLMConfigs
 	projectSvc := service.NewProjectService(projectRepo)
 
 	e := echo.New()
@@ -686,11 +686,11 @@ func TestProjectDialogs_GitHubOnlyModeHidesLocalSourceOption(t *testing.T) {
 func TestUpdateProject_SwitchLocalToGitHub_LocalDisabled(t *testing.T) {
 	t.Setenv("OPENVIBELY_ENABLE_LOCAL_REPO_PATH", "false")
 
-	db := testutil.NewTestDB(t)
+	db := teststores.NewDB(t)
 	ctx := context.Background()
 
-	projectRepo := sqlite.NewProjectRepo(db)
-	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	projectRepo := teststores.Of(db).Projects
+	llmConfigRepo := teststores.Of(db).LLMConfigs
 	projectSvc := service.NewProjectService(projectRepo)
 
 	e := echo.New()
@@ -805,11 +805,11 @@ func TestUpdateProject_SwitchLocalToGitHub_LocalDisabled(t *testing.T) {
 func TestProjectCreate_WithDefaultSettings(t *testing.T) {
 	t.Setenv("OPENVIBELY_ENABLE_LOCAL_REPO_PATH", "true")
 
-	db := testutil.NewTestDB(t)
+	db := teststores.NewDB(t)
 	ctx := context.Background()
 
-	projectRepo := sqlite.NewProjectRepo(db)
-	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	projectRepo := teststores.Of(db).Projects
+	llmConfigRepo := teststores.Of(db).LLMConfigs
 	projectSvc := service.NewProjectService(projectRepo)
 
 	e := echo.New()
@@ -1045,11 +1045,11 @@ func TestProjectCreate_WithDefaultSettings(t *testing.T) {
 func TestProjectCreate_WithSettings(t *testing.T) {
 	t.Setenv("OPENVIBELY_ENABLE_LOCAL_REPO_PATH", "true")
 
-	db := testutil.NewTestDB(t)
+	db := teststores.NewDB(t)
 	ctx := context.Background()
 
-	projectRepo := sqlite.NewProjectRepo(db)
-	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	projectRepo := teststores.Of(db).Projects
+	llmConfigRepo := teststores.Of(db).LLMConfigs
 	projectSvc := service.NewProjectService(projectRepo)
 
 	e := echo.New()
@@ -1142,19 +1142,19 @@ func TestDeleteProject(t *testing.T) {
 	t.Setenv("OPENVIBELY_ENABLE_LOCAL_REPO_PATH", "true")
 	useTempUploadsDir(t)
 
-	db := testutil.NewTestDB(t)
+	db := teststores.NewDB(t)
 	ctx := context.Background()
 
 	broadcaster := events.NewBroadcaster()
 
-	projectRepo := sqlite.NewProjectRepo(db)
-	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
-	taskRepo := sqlite.NewTaskRepo(db, broadcaster)
-	execRepo := sqlite.NewExecutionRepo(db)
-	scheduleRepo := sqlite.NewScheduleRepo(db)
-	workerRepo := sqlite.NewWorkerRepo(db)
-	attachmentRepo := sqlite.NewAttachmentRepo(db)
-	chatAttachmentRepo := sqlite.NewChatAttachmentRepo(db)
+	projectRepo := teststores.Of(db).Projects
+	llmConfigRepo := teststores.Of(db).LLMConfigs
+	taskRepo := teststores.Of(db, teststores.WithBroadcaster(broadcaster)).Tasks
+	execRepo := teststores.Of(db).Executions
+	scheduleRepo := teststores.Of(db).Schedules
+	workerRepo := teststores.Of(db).Workers
+	attachmentRepo := teststores.Of(db).Attachments
+	chatAttachmentRepo := teststores.Of(db).ChatAttachments
 
 	projectSvc := service.NewProjectService(projectRepo)
 	llmSvc := service.NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, scheduleRepo, attachmentRepo)
@@ -1646,12 +1646,12 @@ func TestDeleteProject(t *testing.T) {
 func TestGlobalPersonality(t *testing.T) {
 	t.Setenv("OPENVIBELY_ENABLE_LOCAL_REPO_PATH", "true")
 
-	db := testutil.NewTestDB(t)
+	db := teststores.NewDB(t)
 	ctx := context.Background()
 
-	projectRepo := sqlite.NewProjectRepo(db)
-	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
-	settingsRepo := sqlite.NewSettingsRepo(db)
+	projectRepo := teststores.Of(db).Projects
+	llmConfigRepo := teststores.Of(db).LLMConfigs
+	settingsRepo := teststores.Of(db).Settings
 
 	projectSvc := service.NewProjectService(projectRepo)
 
@@ -1919,10 +1919,10 @@ func TestGlobalPersonality(t *testing.T) {
 func TestEditProjectDialogShowsRepositoryPathHealth(t *testing.T) {
 	t.Setenv("OPENVIBELY_ENABLE_LOCAL_REPO_PATH", "true")
 
-	db := testutil.NewTestDB(t)
+	db := teststores.NewDB(t)
 	ctx := context.Background()
-	projectRepo := sqlite.NewProjectRepo(db)
-	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	projectRepo := teststores.Of(db).Projects
+	llmConfigRepo := teststores.Of(db).LLMConfigs
 	projectSvc := service.NewProjectService(projectRepo)
 	h := New(projectSvc, nil, nil, nil, nil, nil, nil, nil, llmConfigRepo, nil, nil, nil, nil, nil, nil, projectRepo, nil, events.NewBroadcaster(), nil, RuntimeStores{})
 	e := echo.New()

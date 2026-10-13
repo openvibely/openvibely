@@ -8,16 +8,18 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/openvibely/openvibely/internal/testutil/teststores"
 	"github.com/stretchr/testify/require"
 )
 
 func TestSchedulerService_CheckDueTasks(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	scheduleRepo := sqlite.NewScheduleRepo(db)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
-	agentRepo := sqlite.NewAgentRepo(db)
+	db := teststores.NewDB(t)
+	scheduleRepo := teststores.Of(db).Schedules
+	taskRepo := teststores.Of(db).Tasks
+	agentRepo := teststores.Of(db).Agents
 	workerSvc := newTestWorkerService(t)
 	ctx := context.Background()
 
@@ -77,9 +79,9 @@ func TestSchedulerService_CheckDueTasks(t *testing.T) {
 }
 
 func TestSchedulerService_CheckDueTasksClearsCancellationRequestBeforeSubmit(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	scheduleRepo := sqlite.NewScheduleRepo(db)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
+	db := teststores.NewDB(t)
+	scheduleRepo := teststores.Of(db).Schedules
+	taskRepo := teststores.Of(db).Tasks
 	workerSvc := newTestWorkerService(t)
 	ctx := context.Background()
 	svc := NewSchedulerService(scheduleRepo, taskRepo, workerSvc)
@@ -111,9 +113,9 @@ func TestSchedulerService_CheckDueTasksClearsCancellationRequestBeforeSubmit(t *
 }
 
 func TestSchedulerService_CheckDueTasksDeletesOrphanedDueSchedule(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	scheduleRepo := sqlite.NewScheduleRepo(db)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
+	db := teststores.NewDB(t)
+	scheduleRepo := teststores.Of(db).Schedules
+	taskRepo := teststores.Of(db).Tasks
 	workerSvc := newTestWorkerService(t)
 	ctx := context.Background()
 	svc := NewSchedulerService(scheduleRepo, taskRepo, workerSvc)
@@ -140,9 +142,9 @@ func TestSchedulerService_CheckDueTasksDeletesOrphanedDueSchedule(t *testing.T) 
 }
 
 func TestSchedulerService_CheckDueTasksSubmitsOneTimeScheduleCreatedForCompletedScheduledTask(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	scheduleRepo := sqlite.NewScheduleRepo(db)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
+	db := teststores.NewDB(t)
+	scheduleRepo := teststores.Of(db).Schedules
+	taskRepo := teststores.Of(db).Tasks
 	workerSvc := newTestWorkerService(t)
 	ctx := context.Background()
 	svc := NewSchedulerService(scheduleRepo, taskRepo, workerSvc)
@@ -183,9 +185,9 @@ func TestSchedulerService_CheckDueTasksSubmitsOneTimeScheduleCreatedForCompleted
 func TestSchedulerService_CheckDueTasksOneTimeScheduleUsesLastRunInsteadOfTaskStatus(t *testing.T) {
 	for _, status := range []models.TaskStatus{models.StatusCompleted, models.StatusFailed} {
 		t.Run("manual "+string(status), func(t *testing.T) {
-			db := testutil.NewTestDB(t)
-			scheduleRepo := sqlite.NewScheduleRepo(db)
-			taskRepo := sqlite.NewTaskRepo(db, nil)
+			db := teststores.NewDB(t)
+			scheduleRepo := teststores.Of(db).Schedules
+			taskRepo := teststores.Of(db).Tasks
 			workerSvc := newTestWorkerService(t)
 			ctx := context.Background()
 
@@ -236,9 +238,9 @@ func TestSchedulerService_ModifyRecurringScheduleToOnceUsesUpcomingOccurrence(t 
 			name = "prior recurring run"
 		}
 		t.Run(name, func(t *testing.T) {
-			db := testutil.NewTestDB(t)
-			scheduleRepo := sqlite.NewScheduleRepo(db)
-			taskRepo := sqlite.NewTaskRepo(db, nil)
+			db := teststores.NewDB(t)
+			scheduleRepo := teststores.Of(db).Schedules
+			taskRepo := teststores.Of(db).Tasks
 			workerSvc := newTestWorkerService(t)
 			ctx := context.Background()
 			now := time.Now().UTC().Truncate(time.Second)
@@ -266,7 +268,7 @@ func TestSchedulerService_ModifyRecurringScheduleToOnceUsesUpcomingOccurrence(t 
 			if priorRun {
 				lastRun := now.Add(-24 * time.Hour)
 				historicalRun = &lastRun
-				require.NoError(t, scheduleRepo.MarkRan(ctx, schedule.ID, lastRun, &upcoming))
+				require.NoError(t, scheduleRepo.(*sqlite.ScheduleRepo).MarkRan(ctx, schedule.ID, lastRun, &upcoming))
 			}
 
 			modified, err := NewScheduleActionService(taskRepo, scheduleRepo).Modify(ctx, "default", ModifyScheduleRequest{
@@ -335,9 +337,9 @@ func TestSchedulerService_ModifyRecurringScheduleToOnceUsesUpcomingOccurrence(t 
 }
 
 func TestSchedulerService_CheckDueTasksDoesNotReplayDispatchedOneTimeSchedule(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	scheduleRepo := sqlite.NewScheduleRepo(db)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
+	db := teststores.NewDB(t)
+	scheduleRepo := teststores.Of(db).Schedules
+	taskRepo := teststores.Of(db).Tasks
 	workerSvc := newTestWorkerService(t)
 	ctx := context.Background()
 
@@ -360,7 +362,7 @@ func TestSchedulerService_CheckDueTasksDoesNotReplayDispatchedOneTimeSchedule(t 
 	require.NoError(t, scheduleRepo.Create(ctx, schedule))
 
 	previousRun := runAt.Add(time.Minute)
-	require.NoError(t, scheduleRepo.MarkRan(ctx, schedule.ID, previousRun, nil))
+	require.NoError(t, scheduleRepo.(*sqlite.ScheduleRepo).MarkRan(ctx, schedule.ID, previousRun, nil))
 	stored, err := scheduleRepo.GetByID(ctx, schedule.ID)
 	require.NoError(t, err)
 	require.NotNil(t, stored.LastRun)
@@ -379,9 +381,9 @@ func TestSchedulerService_CheckDueTasksDoesNotReplayDispatchedOneTimeSchedule(t 
 }
 
 func TestSchedulerService_MalformedScheduleDoesNotBlockLaterValidSchedule(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	scheduleRepo := sqlite.NewScheduleRepo(db)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
+	db := teststores.NewDB(t)
+	scheduleRepo := teststores.Of(db).Schedules
+	taskRepo := teststores.Of(db).Tasks
 	workerSvc := newTestWorkerService(t)
 	ctx := context.Background()
 	svc := NewSchedulerService(scheduleRepo, taskRepo, workerSvc)
@@ -434,16 +436,16 @@ func TestSchedulerService_MalformedScheduleDoesNotBlockLaterValidSchedule(t *tes
 }
 
 func TestSchedulerService_CheckDueTasks_PersistsContextBoundaryAfterWorkerReload(t *testing.T) {
-	db := testutil.NewTestDB(t)
+	db := teststores.NewDB(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	scheduleRepo := sqlite.NewScheduleRepo(db)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
-	projectRepo := sqlite.NewProjectRepo(db)
-	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
-	execRepo := sqlite.NewExecutionRepo(db)
-	attachmentRepo := sqlite.NewAttachmentRepo(db)
+	scheduleRepo := teststores.Of(db).Schedules
+	taskRepo := teststores.Of(db).Tasks
+	projectRepo := teststores.Of(db).Projects
+	llmConfigRepo := teststores.Of(db).LLMConfigs
+	execRepo := teststores.Of(db).Executions
+	attachmentRepo := teststores.Of(db).Attachments
 
 	model := &models.LLMConfig{Name: "Scheduled context model", Provider: models.ProviderTest, Model: "test", IsDefault: true}
 	if err := llmConfigRepo.Create(ctx, model); err != nil {
@@ -510,16 +512,16 @@ func TestSchedulerService_CheckDueTasks_PersistsContextBoundaryAfterWorkerReload
 }
 
 func TestSchedulerService_CheckDueTasks_SwarmPlannerPersistsContextBoundary(t *testing.T) {
-	db := testutil.NewTestDB(t)
+	db := teststores.NewDB(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	scheduleRepo := sqlite.NewScheduleRepo(db)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
-	projectRepo := sqlite.NewProjectRepo(db)
-	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
-	execRepo := sqlite.NewExecutionRepo(db)
-	attachmentRepo := sqlite.NewAttachmentRepo(db)
+	scheduleRepo := teststores.Of(db).Schedules
+	taskRepo := teststores.Of(db).Tasks
+	projectRepo := teststores.Of(db).Projects
+	llmConfigRepo := teststores.Of(db).LLMConfigs
+	execRepo := teststores.Of(db).Executions
+	attachmentRepo := teststores.Of(db).Attachments
 	model := &models.LLMConfig{Name: "Scheduled swarm context model", Provider: models.ProviderTest, Model: "test", IsDefault: true}
 	if err := llmConfigRepo.Create(ctx, model); err != nil {
 		t.Fatalf("create model: %v", err)
@@ -585,9 +587,9 @@ func TestSchedulerService_CheckDueTasks_SwarmPlannerPersistsContextBoundary(t *t
 }
 
 func TestSchedulerService_CheckDueTasks_StartsPlannerForSwarmParent(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	scheduleRepo := sqlite.NewScheduleRepo(db)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
+	db := teststores.NewDB(t)
+	scheduleRepo := teststores.Of(db).Schedules
+	taskRepo := teststores.Of(db).Tasks
 	workerSvc := newTestWorkerService(t)
 	taskSvc := NewTaskService(taskRepo, nil, workerSvc)
 	swarmSvc := NewSwarmService(taskSvc, taskRepo, nil, workerSvc)
@@ -640,9 +642,9 @@ func TestSchedulerService_CheckDueTasks_StartsPlannerForSwarmParent(t *testing.T
 }
 
 func TestSchedulerService_CheckDueTasks_SubmitsMemoryConsolidationTask(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	scheduleRepo := sqlite.NewScheduleRepo(db)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
+	db := teststores.NewDB(t)
+	scheduleRepo := teststores.Of(db).Schedules
+	taskRepo := teststores.Of(db).Tasks
 	workerSvc := newTestWorkerService(t)
 	ctx := context.Background()
 
@@ -695,9 +697,9 @@ func TestSchedulerService_CheckDueTasks_SubmitsMemoryConsolidationTask(t *testin
 }
 
 func TestSchedulerService_CheckDueTasks_SkipsRunningRecurringTaskAndAdvancesNextRun(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	scheduleRepo := sqlite.NewScheduleRepo(db)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
+	db := teststores.NewDB(t)
+	scheduleRepo := teststores.Of(db).Schedules
+	taskRepo := teststores.Of(db).Tasks
 	workerSvc := newTestWorkerService(t)
 	ctx := context.Background()
 	svc := NewSchedulerService(scheduleRepo, taskRepo, workerSvc)
@@ -751,9 +753,9 @@ func TestSchedulerService_CheckDueTasks_SkipsRunningRecurringTaskAndAdvancesNext
 }
 
 func TestSchedulerService_CheckDueTasks_SkipsRunningTask(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	scheduleRepo := sqlite.NewScheduleRepo(db)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
+	db := teststores.NewDB(t)
+	scheduleRepo := teststores.Of(db).Schedules
+	taskRepo := teststores.Of(db).Tasks
 	workerSvc := newTestWorkerService(t)
 	ctx := context.Background()
 
@@ -790,21 +792,21 @@ func TestSchedulerService_CheckDueTasks_SkipsRunningTask(t *testing.T) {
 }
 
 func TestSchedulerService_CheckActiveTasks_DoesNotSubmitBehindDirectFollowup(t *testing.T) {
-	db := testutil.NewTestDB(t)
+	db := teststores.NewDB(t)
 	ctx := context.Background()
-	taskRepo := sqlite.NewTaskRepo(db, nil)
+	taskRepo := teststores.Of(db).Tasks
 	workerSvc := newTestWorkerService(t)
 	task := &models.Task{ProjectID: "default", Title: "Follow-up owns admission", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "stored original prompt"}
 	if err := taskRepo.Create(ctx, task); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
 	exec := &models.Execution{TaskID: task.ID, Status: models.ExecRunning, PromptSent: "active direct follow-up", IsFollowup: true}
-	started, err := sqlite.NewExecutionRepo(db).CreateDirectTaskFollowupOrQueue(ctx, exec, &models.ThreadInput{Content: exec.PromptSent, Source: models.TaskOriginWeb})
+	started, err := teststores.Of(db).Executions.CreateDirectTaskFollowupOrQueue(ctx, exec, &models.ThreadInput{Content: exec.PromptSent, Source: models.TaskOriginWeb})
 	if err != nil || !started {
 		t.Fatalf("admit direct follow-up: started=%v err=%v", started, err)
 	}
 
-	svc := NewSchedulerService(sqlite.NewScheduleRepo(db), taskRepo, workerSvc)
+	svc := NewSchedulerService(teststores.Of(db).Schedules, taskRepo, workerSvc)
 	for i := 0; i < 5; i++ {
 		svc.checkActiveTasks(ctx)
 	}
@@ -813,23 +815,23 @@ func TestSchedulerService_CheckActiveTasks_DoesNotSubmitBehindDirectFollowup(t *
 		t.Fatalf("scheduler resubmitted original prompt behind direct follow-up: %#v", submitted)
 	case <-time.After(100 * time.Millisecond):
 	}
-	execs, err := sqlite.NewExecutionRepo(db).ListByTaskChronological(ctx, task.ID)
+	execs, err := teststores.Of(db).Executions.ListByTaskChronological(ctx, task.ID)
 	if err != nil || len(execs) != 1 || execs[0].ID != exec.ID || execs[0].PromptSent != "active direct follow-up" {
 		t.Fatalf("expected only direct follow-up execution, got %#v err=%v", execs, err)
 	}
 }
 
 func TestSchedulerService_CheckActiveTasks_DoesNotRecoverStaleQueuedFollowup(t *testing.T) {
-	db := testutil.NewTestDB(t)
+	db := teststores.NewDB(t)
 	ctx := context.Background()
-	taskRepo := sqlite.NewTaskRepo(db, nil)
+	taskRepo := teststores.Of(db).Tasks
 	workerSvc := newTestWorkerService(t)
 	task := &models.Task{ProjectID: "default", Title: "long follow-up", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "stored original prompt"}
 	if err := taskRepo.Create(ctx, task); err != nil {
 		t.Fatal(err)
 	}
 	exec := &models.Execution{TaskID: task.ID, Status: models.ExecRunning, PromptSent: "long direct follow-up", IsFollowup: true}
-	started, err := sqlite.NewExecutionRepo(db).CreateDirectTaskFollowupOrQueue(ctx, exec, &models.ThreadInput{Content: exec.PromptSent})
+	started, err := teststores.Of(db).Executions.CreateDirectTaskFollowupOrQueue(ctx, exec, &models.ThreadInput{Content: exec.PromptSent})
 	if err != nil || !started {
 		t.Fatalf("admit follow-up: started=%v err=%v", started, err)
 	}
@@ -837,7 +839,7 @@ func TestSchedulerService_CheckActiveTasks_DoesNotRecoverStaleQueuedFollowup(t *
 		t.Fatal(err)
 	}
 
-	NewSchedulerService(sqlite.NewScheduleRepo(db), taskRepo, workerSvc).checkActiveTasks(ctx)
+	NewSchedulerService(teststores.Of(db).Schedules, taskRepo, workerSvc).checkActiveTasks(ctx)
 	select {
 	case submitted := <-workerSvc.Submitted():
 		t.Fatalf("stale recovery submitted original prompt behind active follow-up: %#v", submitted)
@@ -853,9 +855,9 @@ func TestSchedulerService_CheckActiveTasks_DoesNotRecoverStaleQueuedFollowup(t *
 }
 
 func TestSchedulerService_CheckActiveTasksSubmitsAdmissionWithoutPayload(t *testing.T) {
-	db := testutil.NewTestDB(t)
+	db := teststores.NewDB(t)
 	ctx := context.Background()
-	taskRepo := sqlite.NewTaskRepo(db, nil)
+	taskRepo := teststores.Of(db).Tasks
 	workerSvc := newTestWorkerService(t)
 
 	task := &models.Task{
@@ -874,7 +876,7 @@ func TestSchedulerService_CheckActiveTasksSubmitsAdmissionWithoutPayload(t *test
 		t.Fatalf("create task: %v", err)
 	}
 
-	NewSchedulerService(sqlite.NewScheduleRepo(db), taskRepo, workerSvc).checkActiveTasks(ctx)
+	NewSchedulerService(teststores.Of(db).Schedules, taskRepo, workerSvc).checkActiveTasks(ctx)
 
 	select {
 	case submitted := <-workerSvc.Submitted():
@@ -893,7 +895,7 @@ func TestSchedulerService_CheckActiveTasksSubmitsAdmissionWithoutPayload(t *test
 func TestSchedulerService_CheckActiveTasksUsesBoundedAdmissionQuery(t *testing.T) {
 	db, counter := testutil.NewStatementCountingTestDB(t)
 	ctx := context.Background()
-	taskRepo := sqlite.NewTaskRepo(db, nil)
+	taskRepo := teststores.Of(db).Tasks
 	workerSvc := newTestWorkerService(t)
 	task := &models.Task{
 		ProjectID:   "default",
@@ -910,7 +912,7 @@ func TestSchedulerService_CheckActiveTasksUsesBoundedAdmissionQuery(t *testing.T
 
 	counter.Reset()
 	counter.SetEnabled(true)
-	NewSchedulerService(sqlite.NewScheduleRepo(db), taskRepo, workerSvc).checkActiveTasks(ctx)
+	NewSchedulerService(teststores.Of(db).Schedules, taskRepo, workerSvc).checkActiveTasks(ctx)
 	counter.SetEnabled(false)
 
 	statements := counter.Statements()
@@ -955,7 +957,7 @@ func BenchmarkWorkerSchedulerActivePendingProjection(b *testing.B) {
 		fixture := fixture
 		b.Run(fixture.name, func(b *testing.B) {
 			db, counter := testutil.NewStatementCountingTestDB(b)
-			repo := sqlite.NewTaskRepo(db, nil)
+			repo := teststores.Of(db).Tasks
 			seedActivePendingProjectionBenchmark(b, repo, fixture.taskCount, fixture.promptSize, fixture.workflowSize)
 
 			admissionRows, admissionPayload, admissionStatements := measureActivePendingAdmissionProjection(b, repo, counter)
@@ -973,7 +975,7 @@ func BenchmarkWorkerSchedulerActivePendingProjection(b *testing.B) {
 	}
 }
 
-func seedActivePendingProjectionBenchmark(b *testing.B, repo *sqlite.TaskRepo, taskCount, promptSize, workflowSize int) {
+func seedActivePendingProjectionBenchmark(b *testing.B, repo persistence.TaskStore, taskCount, promptSize, workflowSize int) {
 	b.Helper()
 	ctx := context.Background()
 	prompt := strings.Repeat("p", promptSize)
@@ -996,7 +998,7 @@ func seedActivePendingProjectionBenchmark(b *testing.B, repo *sqlite.TaskRepo, t
 	}
 }
 
-func measureActivePendingAdmissionProjection(b *testing.B, repo *sqlite.TaskRepo, counter *testutil.SQLStatementCounter) (int, int64, int) {
+func measureActivePendingAdmissionProjection(b *testing.B, repo persistence.TaskStore, counter *testutil.SQLStatementCounter) (int, int64, int) {
 	b.Helper()
 	counter.Reset()
 	counter.SetEnabled(true)
@@ -1008,7 +1010,7 @@ func measureActivePendingAdmissionProjection(b *testing.B, repo *sqlite.TaskRepo
 	return len(admissions), 0, len(counter.Statements())
 }
 
-func benchmarkActivePendingAdmissionProjection(b *testing.B, repo *sqlite.TaskRepo, selectedPayloadBytes int64, expectedRows, statementCount int) {
+func benchmarkActivePendingAdmissionProjection(b *testing.B, repo persistence.TaskStore, selectedPayloadBytes int64, expectedRows, statementCount int) {
 	b.Helper()
 	ctx := context.Background()
 	var rows int
@@ -1031,9 +1033,9 @@ func benchmarkActivePendingAdmissionProjection(b *testing.B, repo *sqlite.TaskRe
 }
 
 func TestSchedulerService_CheckActiveTasks(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	scheduleRepo := sqlite.NewScheduleRepo(db)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
+	db := teststores.NewDB(t)
+	scheduleRepo := teststores.Of(db).Schedules
+	taskRepo := teststores.Of(db).Tasks
 	workerSvc := newTestWorkerService(t)
 	ctx := context.Background()
 
@@ -1079,9 +1081,9 @@ func TestSchedulerService_CheckActiveTasks(t *testing.T) {
 }
 
 func TestSchedulerService_CheckActiveTasks_NoDuplicateSubmission(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	scheduleRepo := sqlite.NewScheduleRepo(db)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
+	db := teststores.NewDB(t)
+	scheduleRepo := teststores.Of(db).Schedules
+	taskRepo := teststores.Of(db).Tasks
 	workerSvc := newTestWorkerService(t)
 	ctx := context.Background()
 
@@ -1122,9 +1124,9 @@ func TestSchedulerService_CheckActiveTasks_NoDuplicateSubmission(t *testing.T) {
 }
 
 func TestSchedulerService_CheckDueTasks_RepeatingSchedule(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	scheduleRepo := sqlite.NewScheduleRepo(db)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
+	db := teststores.NewDB(t)
+	scheduleRepo := teststores.Of(db).Schedules
+	taskRepo := teststores.Of(db).Tasks
 	workerSvc := newTestWorkerService(t)
 	ctx := context.Background()
 
@@ -1174,9 +1176,9 @@ func TestSchedulerService_CheckDueTasks_RepeatingSchedule(t *testing.T) {
 // pre-advanced next_run to the NEXT day, so a daily 1:33 AM schedule created at
 // 1:34 AM would not run until tomorrow.
 func TestSchedulerService_DailyScheduleFiresSameDay(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	scheduleRepo := sqlite.NewScheduleRepo(db)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
+	db := teststores.NewDB(t)
+	scheduleRepo := teststores.Of(db).Schedules
+	taskRepo := teststores.Of(db).Tasks
 	workerSvc := newTestWorkerService(t)
 	ctx := context.Background()
 
@@ -1233,9 +1235,9 @@ func TestSchedulerService_DailyScheduleFiresSameDay(t *testing.T) {
 // scheduler resets a completed/failed task to pending before submitting it.
 // This is important for repeating schedules where the task runs multiple times.
 func TestSchedulerService_ScheduledTaskResetsCompletedStatus(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	scheduleRepo := sqlite.NewScheduleRepo(db)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
+	db := teststores.NewDB(t)
+	scheduleRepo := teststores.Of(db).Schedules
+	taskRepo := teststores.Of(db).Tasks
 	workerSvc := newTestWorkerService(t)
 	ctx := context.Background()
 
@@ -1282,9 +1284,9 @@ func TestSchedulerService_ScheduledTaskResetsCompletedStatus(t *testing.T) {
 }
 
 func TestSchedulerService_StartupCatchesMissedSchedules(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	scheduleRepo := sqlite.NewScheduleRepo(db)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
+	db := teststores.NewDB(t)
+	scheduleRepo := teststores.Of(db).Schedules
+	taskRepo := teststores.Of(db).Tasks
 	workerSvc := newTestWorkerService(t)
 	ctx := context.Background()
 
@@ -1365,9 +1367,9 @@ func TestSchedulerService_StartupCatchesMissedSchedules(t *testing.T) {
 }
 
 func TestSchedulerService_DragDropReschedule_DoesNotExecuteCompletedTask(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	scheduleRepo := sqlite.NewScheduleRepo(db)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
+	db := teststores.NewDB(t)
+	scheduleRepo := teststores.Of(db).Schedules
+	taskRepo := teststores.Of(db).Tasks
 	workerSvc := newTestWorkerService(t)
 	ctx := context.Background()
 
@@ -1394,7 +1396,7 @@ func TestSchedulerService_DragDropReschedule_DoesNotExecuteCompletedTask(t *test
 	}
 	scheduleRepo.Create(ctx, sched)
 	previousRun := now.Add(-2 * time.Hour)
-	require.NoError(t, scheduleRepo.MarkRan(ctx, sched.ID, previousRun, nil))
+	require.NoError(t, scheduleRepo.(*sqlite.ScheduleRepo).MarkRan(ctx, sched.ID, previousRun, nil))
 	storedSchedule, err := scheduleRepo.GetByID(ctx, sched.ID)
 	require.NoError(t, err)
 	pastTime := now.Add(-30 * time.Minute)
@@ -1417,9 +1419,9 @@ func TestSchedulerService_DragDropReschedule_DoesNotExecuteCompletedTask(t *test
 }
 
 func TestSchedulerService_RecurringSchedule_ExecutesCompletedTask(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	scheduleRepo := sqlite.NewScheduleRepo(db)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
+	db := teststores.NewDB(t)
+	scheduleRepo := teststores.Of(db).Schedules
+	taskRepo := teststores.Of(db).Tasks
 	workerSvc := newTestWorkerService(t)
 	ctx := context.Background()
 
@@ -1471,9 +1473,9 @@ func TestSchedulerService_RecurringSchedule_ExecutesCompletedTask(t *testing.T) 
 // This handles the case where a thread follow-up goroutine crashed without
 // cleaning up the task status.
 func TestSchedulerService_RecoverStaleQueuedTasks(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	scheduleRepo := sqlite.NewScheduleRepo(db)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
+	db := teststores.NewDB(t)
+	scheduleRepo := teststores.Of(db).Schedules
+	taskRepo := teststores.Of(db).Tasks
 	workerSvc := newTestWorkerService(t)
 	ctx := context.Background()
 
@@ -1527,12 +1529,12 @@ func TestSchedulerService_RecoverStaleQueuedTasks(t *testing.T) {
 }
 
 func TestSchedulerService_RestartRecoveryPromotesQueuedFollowupBeforeOriginalPrompt(t *testing.T) {
-	db := testutil.NewTestDB(t)
+	db := teststores.NewDB(t)
 	ctx := context.Background()
-	taskRepo := sqlite.NewTaskRepo(db, nil)
-	inputRepo := sqlite.NewThreadInputRepo(db)
+	taskRepo := teststores.Of(db).Tasks
+	inputRepo := teststores.Of(db).ThreadInputs
 	workerSvc := newTestWorkerService(t)
-	svc := NewSchedulerService(sqlite.NewScheduleRepo(db), taskRepo, workerSvc)
+	svc := NewSchedulerService(teststores.Of(db).Schedules, taskRepo, workerSvc)
 
 	task := &models.Task{ProjectID: "default", Title: "restart admission", Category: models.CategoryActive, Status: models.StatusRunning, Prompt: "stored original prompt"}
 	if err := taskRepo.Create(ctx, task); err != nil {
@@ -1560,12 +1562,12 @@ func TestSchedulerService_RestartRecoveryPromotesQueuedFollowupBeforeOriginalPro
 	case <-time.After(100 * time.Millisecond):
 	}
 
-	agent, err := sqlite.NewLLMConfigRepo(db).GetDefault(ctx)
+	agent, err := teststores.Of(db).LLMConfigs.GetDefault(ctx)
 	if err != nil || agent == nil {
 		t.Fatalf("load default model: %#v err=%v", agent, err)
 	}
 	promoted := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: queued.Content, IsFollowup: true}
-	if err := inputRepo.ClaimQueuedForTaskExecution(ctx, queued.ID, promoted); err != nil {
+	if err := inputRepo.(*sqlite.ThreadInputRepo).ClaimQueuedForTaskExecution(ctx, queued.ID, promoted); err != nil {
 		t.Fatalf("promote durable follow-up after restart: %v", err)
 	}
 	if promoted.PromptSent != "durable follow-up" {
@@ -1577,9 +1579,9 @@ func TestSchedulerService_RestartRecoveryPromotesQueuedFollowupBeforeOriginalPro
 // checkActiveTasks does NOT reset tasks that recently entered "queued" status.
 // These tasks are actively being handled by thread follow-up goroutines.
 func TestSchedulerService_DoesNotRecoverRecentQueuedTasks(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	scheduleRepo := sqlite.NewScheduleRepo(db)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
+	db := teststores.NewDB(t)
+	scheduleRepo := teststores.Of(db).Schedules
+	taskRepo := teststores.Of(db).Tasks
 	workerSvc := newTestWorkerService(t)
 	ctx := context.Background()
 
@@ -1624,11 +1626,11 @@ func TestSchedulerService_DoesNotRecoverRecentQueuedTasks(t *testing.T) {
 }
 
 func TestSchedulerService_WorktreeCleanupIntegration(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	scheduleRepo := sqlite.NewScheduleRepo(db)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
-	projectRepo := sqlite.NewProjectRepo(db)
-	settingsRepo := sqlite.NewSettingsRepo(db)
+	db := teststores.NewDB(t)
+	scheduleRepo := teststores.Of(db).Schedules
+	taskRepo := teststores.Of(db).Tasks
+	projectRepo := teststores.Of(db).Projects
+	settingsRepo := teststores.Of(db).Settings
 	workerSvc := newTestWorkerService(t)
 	ctx := context.Background()
 
@@ -1663,9 +1665,9 @@ func TestSchedulerService_WorktreeCleanupIntegration(t *testing.T) {
 }
 
 func TestSchedulerService_CheckDueTasks_SkipsDisabledSchedule(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	scheduleRepo := sqlite.NewScheduleRepo(db)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
+	db := teststores.NewDB(t)
+	scheduleRepo := teststores.Of(db).Schedules
+	taskRepo := teststores.Of(db).Tasks
 	workerSvc := newTestWorkerService(t)
 	ctx := context.Background()
 
@@ -1690,7 +1692,7 @@ func TestSchedulerService_CheckDueTasks_SkipsDisabledSchedule(t *testing.T) {
 	}
 	scheduleRepo.Create(ctx, sched)
 	// Disable the schedule
-	scheduleRepo.ToggleEnabled(ctx, sched.ID, false)
+	scheduleRepo.(*sqlite.ScheduleRepo).ToggleEnabled(ctx, sched.ID, false)
 
 	svc.checkDueTasks(ctx)
 
@@ -1703,9 +1705,9 @@ func TestSchedulerService_CheckDueTasks_SkipsDisabledSchedule(t *testing.T) {
 }
 
 func TestSchedulerService_CheckDueTasks_ReenabledScheduleRuns(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	scheduleRepo := sqlite.NewScheduleRepo(db)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
+	db := teststores.NewDB(t)
+	scheduleRepo := teststores.Of(db).Schedules
+	taskRepo := teststores.Of(db).Tasks
 	workerSvc := newTestWorkerService(t)
 	ctx := context.Background()
 
@@ -1740,7 +1742,7 @@ func TestSchedulerService_CheckDueTasks_ReenabledScheduleRuns(t *testing.T) {
 	}
 
 	// Re-enable
-	scheduleRepo.ToggleEnabled(ctx, sched.ID, true)
+	scheduleRepo.(*sqlite.ScheduleRepo).ToggleEnabled(ctx, sched.ID, true)
 
 	// Now it should run
 	svc.checkDueTasks(ctx)
@@ -1755,9 +1757,9 @@ func TestSchedulerService_CheckDueTasks_ReenabledScheduleRuns(t *testing.T) {
 }
 
 func TestSchedulerService_CheckDueTasks_PausedDueScheduleResumesWithoutLosingOccurrence(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	scheduleRepo := sqlite.NewScheduleRepo(db)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
+	db := teststores.NewDB(t)
+	scheduleRepo := teststores.Of(db).Schedules
+	taskRepo := teststores.Of(db).Tasks
 	workerSvc := newTestWorkerService(t)
 	ctx := context.Background()
 	task := &models.Task{
@@ -1808,9 +1810,9 @@ func TestSchedulerService_CheckDueTasks_PausedDueScheduleResumesWithoutLosingOcc
 }
 
 func TestSchedulerService_CheckActiveTasksStartsSwarmPlanner(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	scheduleRepo := sqlite.NewScheduleRepo(db)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
+	db := teststores.NewDB(t)
+	scheduleRepo := teststores.Of(db).Schedules
+	taskRepo := teststores.Of(db).Tasks
 	workerSvc := newTestWorkerService(t)
 	taskSvc := NewTaskService(taskRepo, nil, workerSvc)
 	swarmSvc := NewSwarmService(taskSvc, taskRepo, nil, workerSvc)
@@ -1884,9 +1886,9 @@ func TestSchedulerService_DSTGapPersistsNextRunAndDoesNotDispatchEarly(t *testin
 	time.Local = location
 	t.Cleanup(func() { time.Local = originalLocal })
 
-	db := testutil.NewTestDB(t)
-	scheduleRepo := sqlite.NewScheduleRepo(db)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
+	db := teststores.NewDB(t)
+	scheduleRepo := teststores.Of(db).Schedules
+	taskRepo := teststores.Of(db).Tasks
 	workerSvc := newTestWorkerService(t)
 	svc := NewSchedulerService(scheduleRepo, taskRepo, workerSvc)
 	ctx := context.Background()
@@ -1940,9 +1942,9 @@ func TestSchedulerConversationSchedulesAreAdmitted(t *testing.T) {
 		for _, category := range []models.TaskCategory{models.CategoryChat, models.CategoryScheduled, models.CategoryBacklog} {
 			t.Run(string(repeat)+"/"+string(category), func(t *testing.T) {
 				ctx := context.Background()
-				db := testutil.NewTestDB(t)
-				tasks := sqlite.NewTaskRepo(db, nil)
-				schedules := sqlite.NewScheduleRepo(db)
+				db := teststores.NewDB(t)
+				tasks := teststores.Of(db).Tasks
+				schedules := teststores.Of(db).Schedules
 				workers := newTestWorkerService(t)
 				svc := NewSchedulerService(schedules, tasks, workers)
 				task := &models.Task{ProjectID: "default", Title: "Due schedule", Prompt: "test", Category: models.CategoryScheduled, Status: models.StatusPending}
@@ -1970,7 +1972,7 @@ func TestSchedulerConversationSchedulesAreAdmitted(t *testing.T) {
 				due, err := schedules.ListDue(ctx, time.Now().UTC())
 				require.NoError(t, err)
 				require.Empty(t, due)
-				executions, err := sqlite.NewExecutionRepo(db).ListByTask(ctx, task.ID)
+				executions, err := teststores.Of(db).Executions.ListByTask(ctx, task.ID)
 				require.NoError(t, err)
 				require.Len(t, executions, 1)
 

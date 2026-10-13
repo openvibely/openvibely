@@ -16,8 +16,8 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/service"
+	"github.com/openvibely/openvibely/internal/testutil/teststores"
 	"github.com/stretchr/testify/require"
 )
 
@@ -138,7 +138,7 @@ func TestHandler_GetTaskReferenceCatalog(t *testing.T) {
 		Priority: 4, Tag: models.TagBug, Prompt: strings.Repeat("p", 400), ChainConfig: `{"enabled":true}`,
 	}
 	require.NoError(t, tc.taskRepo.Create(ctx, catalogTask))
-	require.NoError(t, sqlite.NewTaskGoalRepo(tc.db).CreateOrReplace(ctx, &models.TaskGoal{
+	require.NoError(t, teststores.Of(tc.db).TaskGoals.CreateOrReplace(ctx, &models.TaskGoal{
 		TaskID: catalogTask.ID, GoalID: "catalog-goal", Objective: "finish catalog", Status: models.TaskGoalStatusActive,
 	}))
 	for i := 0; i < 25; i++ {
@@ -210,7 +210,7 @@ func TestHandler_GetTaskReferenceCatalogPreservesBoardStateOrderAndAgentScope(t 
 	project := tc.CreateProject().WithName("Task Reference State Project").Build()
 	foreign := tc.CreateProject().WithName("Foreign Task Reference State Project").Build()
 
-	agentRepo := sqlite.NewAgentRepo(tc.db)
+	agentRepo := teststores.Of(tc.db).Agents
 	tc.handler.SetAgentRepo(agentRepo)
 	foreignAgent := &models.Agent{
 		Name: "Foreign Task Agent", Scope: models.AgentScopeProject, ProjectID: foreign.ID,

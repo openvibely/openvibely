@@ -15,17 +15,19 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/openvibely/openvibely/internal/testutil/teststores"
 	"github.com/stretchr/testify/require"
 )
 
-func setupReviewHandler(t *testing.T) (*Handler, *echo.Echo, *sqlite.ReviewCommentRepo, *sqlite.ExecutionRepo, *testutil.MockLLMCaller, string) {
-	return setupReviewHandlerForDB(t, testutil.NewTestDB(t))
+func setupReviewHandler(t *testing.T) (*Handler, *echo.Echo, persistence.ReviewCommentStore, persistence.ExecutionStore, *testutil.MockLLMCaller, string) {
+	return setupReviewHandlerForDB(t, teststores.NewDB(t))
 }
 
-func setupReviewHandlerForDB(t *testing.T, db *sql.DB) (*Handler, *echo.Echo, *sqlite.ReviewCommentRepo, *sqlite.ExecutionRepo, *testutil.MockLLMCaller, string) {
+func setupReviewHandlerForDB(t *testing.T, db *sql.DB) (*Handler, *echo.Echo, persistence.ReviewCommentStore, persistence.ExecutionStore, *testutil.MockLLMCaller, string) {
 	t.Helper()
 
 	env := newTestHandlerEnv(t, db, withTestBroadcaster(events.NewBroadcaster()), withTestTaskGoals())
@@ -34,9 +36,9 @@ func setupReviewHandlerForDB(t *testing.T, db *sql.DB) (*Handler, *echo.Echo, *s
 	env.WorkerSvc.SetProjectRepo(env.ProjectRepo)
 	env.WorkerSvc.SetTaskRepo(taskRepo)
 	env.WorkerSvc.SetLLMConfigRepo(llmConfigRepo)
-	reviewCommentRepo := sqlite.NewReviewCommentRepo(db)
+	reviewCommentRepo := teststores.Of(db).ReviewComments
 	h.SetReviewCommentRepo(reviewCommentRepo)
-	threadInputRepo := sqlite.NewThreadInputRepo(db)
+	threadInputRepo := teststores.Of(db).ThreadInputs
 	h.SetThreadInputRepo(threadInputRepo)
 	env.LLMSvc.SetThreadInputRepo(threadInputRepo)
 
@@ -203,7 +205,7 @@ func TestDeleteReviewComment(t *testing.T) {
 	}
 
 	// Verify comment is gone
-	count, _ := reviewRepo.CountByTask(ctx, taskID)
+	count, _ := reviewRepo.(*sqlite.ReviewCommentRepo).CountByTask(ctx, taskID)
 	if count != 0 {
 		t.Errorf("expected 0 comments after delete, got %d", count)
 	}
@@ -322,7 +324,7 @@ func TestSubmitReview_UsesBoundedChronologicalHistory(t *testing.T) {
 		require.Equal(t, models.ExecCompleted, execution.Status)
 	}
 
-	comments, err := reviewRepo.CountByTask(ctx, taskID)
+	comments, err := reviewRepo.(*sqlite.ReviewCommentRepo).CountByTask(ctx, taskID)
 	require.NoError(t, err)
 	require.Zero(t, comments, "direct admission should clear submitted review comments")
 	allHistory, err := execRepo.ListByTaskChronological(ctx, taskID)
@@ -361,7 +363,7 @@ func TestAddMultipleComments_SameFile(t *testing.T) {
 	}
 
 	// Verify both comments exist
-	count, _ := reviewRepo.CountByTask(ctx, taskID)
+	count, _ := reviewRepo.(*sqlite.ReviewCommentRepo).CountByTask(ctx, taskID)
 	if count != 2 {
 		t.Errorf("expected 2 comments, got %d", count)
 	}
@@ -448,7 +450,7 @@ func TestSubmitReview_RejectsForeignProjectTaskBeforeSideEffects(t *testing.T) {
 
 	require.Equal(t, http.StatusNotFound, rec.Code)
 
-	commentCount, err := reviewRepo.CountByTask(ctx, foreignTaskID)
+	commentCount, err := reviewRepo.(*sqlite.ReviewCommentRepo).CountByTask(ctx, foreignTaskID)
 	require.NoError(t, err)
 	require.Equal(t, 1, commentCount, "foreign task comments must not be cleared")
 
@@ -516,7 +518,7 @@ func TestSubmitReview_CreatesFollowupExecutionAndClearsComments(t *testing.T) {
 		t.Fatalf("expected HX-Redirect to chat tab, got %q", got)
 	}
 
-	count, err := reviewRepo.CountByTask(ctx, taskID)
+	count, err := reviewRepo.(*sqlite.ReviewCommentRepo).CountByTask(ctx, taskID)
 	if err != nil {
 		t.Fatalf("CountByTask: %v", err)
 	}

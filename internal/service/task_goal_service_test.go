@@ -8,29 +8,28 @@ import (
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/persistence/sqlite"
-	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/openvibely/openvibely/internal/testutil/teststores"
 )
 
 func createServiceGoalTestProject(t *testing.T, ctx context.Context, db *sql.DB) *models.Project {
 	t.Helper()
 	project := &models.Project{Name: "Goal Service Project", RepoPath: t.TempDir()}
-	if err := sqlite.NewProjectRepo(db).Create(ctx, project); err != nil {
+	if err := teststores.Of(db).Projects.Create(ctx, project); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
 	return project
 }
 
 func TestTaskGoalService_MarkAchievedTriggersOnlySuccessfulTransition(t *testing.T) {
-	db := testutil.NewTestDB(t)
+	db := teststores.NewDB(t)
 	ctx := context.Background()
 	project := createServiceGoalTestProject(t, ctx, db)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
+	taskRepo := teststores.Of(db).Tasks
 	task := &models.Task{ProjectID: project.ID, Title: "Goal achieved callback", Category: models.CategoryCompleted, Status: models.StatusCompleted, Prompt: "prompt", Priority: 2}
 	if err := taskRepo.Create(ctx, task); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
-	svc := NewTaskGoalService(sqlite.NewTaskGoalRepo(db), taskRepo, nil)
+	svc := NewTaskGoalService(teststores.Of(db).TaskGoals, taskRepo, nil)
 	calls := 0
 	svc.SetGoalAchievedHandler(func(gotCtx context.Context, taskID, goalID string) {
 		if gotCtx != ctx || taskID != task.ID {
@@ -66,15 +65,15 @@ func TestTaskGoalService_MarkAchievedTriggersOnlySuccessfulTransition(t *testing
 }
 
 func TestTaskGoalService_ValidationPauseResumeClear(t *testing.T) {
-	db := testutil.NewTestDB(t)
+	db := teststores.NewDB(t)
 	ctx := context.Background()
 	project := createServiceGoalTestProject(t, ctx, db)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
+	taskRepo := teststores.Of(db).Tasks
 	task := &models.Task{ProjectID: project.ID, Title: "Goal svc", Category: models.CategoryBacklog, Status: models.StatusPending, Prompt: "prompt", Priority: 2}
 	if err := taskRepo.Create(ctx, task); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
-	svc := NewTaskGoalService(sqlite.NewTaskGoalRepo(db), taskRepo, nil)
+	svc := NewTaskGoalService(teststores.Of(db).TaskGoals, taskRepo, nil)
 
 	if _, err := svc.SetGoal(ctx, task.ID, "   ", GoalOptions{}); !errors.Is(err, ErrTaskGoalEmpty) {
 		t.Fatalf("empty goal error = %v", err)
@@ -165,15 +164,15 @@ func TestTaskGoalService_ValidationPauseResumeClear(t *testing.T) {
 }
 
 func TestTaskGoalService_ClearBlockedReportClearsOnlyMatchingBlocker(t *testing.T) {
-	db := testutil.NewTestDB(t)
+	db := teststores.NewDB(t)
 	ctx := context.Background()
 	project := createServiceGoalTestProject(t, ctx, db)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
+	taskRepo := teststores.Of(db).Tasks
 	task := &models.Task{ProjectID: project.ID, Title: "PR Blocker Goal", Category: models.CategoryBacklog, Status: models.StatusPending, Prompt: "prompt", Priority: 2}
 	if err := taskRepo.Create(ctx, task); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
-	svc := NewTaskGoalService(sqlite.NewTaskGoalRepo(db), taskRepo, nil)
+	svc := NewTaskGoalService(teststores.Of(db).TaskGoals, taskRepo, nil)
 	goal, err := svc.SetGoal(ctx, task.ID, "Publish the PR", GoalOptions{Actor: "test"})
 	if err != nil {
 		t.Fatalf("set goal: %v", err)
@@ -220,15 +219,15 @@ func TestTaskGoalService_ClearBlockedReportClearsOnlyMatchingBlocker(t *testing.
 }
 
 func TestTaskGoalService_UserStopPausePreservesGoalForResume(t *testing.T) {
-	db := testutil.NewTestDB(t)
+	db := teststores.NewDB(t)
 	ctx := context.Background()
 	project := createServiceGoalTestProject(t, ctx, db)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
+	taskRepo := teststores.Of(db).Tasks
 	task := &models.Task{ProjectID: project.ID, Title: "User Stop Goal", Category: models.CategoryActive, Status: models.StatusRunning, Prompt: "prompt", Priority: 2}
 	if err := taskRepo.Create(ctx, task); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
-	svc := NewTaskGoalService(sqlite.NewTaskGoalRepo(db), taskRepo, nil)
+	svc := NewTaskGoalService(teststores.Of(db).TaskGoals, taskRepo, nil)
 	goal, err := svc.SetGoal(ctx, task.ID, "Keep working until done", GoalOptions{Actor: "test"})
 	if err != nil {
 		t.Fatalf("set goal: %v", err)
@@ -258,15 +257,15 @@ func TestTaskGoalService_UserStopPausePreservesGoalForResume(t *testing.T) {
 }
 
 func TestTaskGoalService_ResumeBlockedGoalResetsBlockerCount(t *testing.T) {
-	db := testutil.NewTestDB(t)
+	db := teststores.NewDB(t)
 	ctx := context.Background()
 	project := createServiceGoalTestProject(t, ctx, db)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
+	taskRepo := teststores.Of(db).Tasks
 	task := &models.Task{ProjectID: project.ID, Title: "Blocked Resume", Category: models.CategoryBacklog, Status: models.StatusPending, Prompt: "prompt", Priority: 2}
 	if err := taskRepo.Create(ctx, task); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
-	svc := NewTaskGoalService(sqlite.NewTaskGoalRepo(db), taskRepo, nil)
+	svc := NewTaskGoalService(teststores.Of(db).TaskGoals, taskRepo, nil)
 
 	goal, err := svc.SetGoal(ctx, task.ID, "Ship the feature", GoalOptions{Actor: "test"})
 	if err != nil {

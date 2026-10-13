@@ -14,8 +14,10 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/persistence/sqlite/database"
+	"github.com/openvibely/openvibely/internal/testutil/teststores"
 )
 
 const workerCapacityProjectionSamples = 5
@@ -24,7 +26,7 @@ type workerCapacityProjectionFixture struct {
 	connections *database.Connections
 	h           *Handler
 	e           http.Handler
-	projectRepo *sqlite.ProjectRepo
+	projectRepo persistence.ProjectStore
 }
 
 type workerCapacityProjectionMeasurement struct {
@@ -112,7 +114,7 @@ func newWorkerCapacityProjectionFixture(tb testing.TB, projectCount int) *worker
 		connections: connections,
 		h:           h,
 		e:           e,
-		projectRepo: sqlite.NewProjectRepo(connections.Reader),
+		projectRepo: teststores.Of(connections.Reader).Projects,
 	}
 }
 

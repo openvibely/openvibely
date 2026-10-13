@@ -11,8 +11,8 @@ import (
 
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/service"
+	"github.com/openvibely/openvibely/internal/testutil/teststores"
 	"github.com/stretchr/testify/require"
 )
 
@@ -246,7 +246,7 @@ func TestHandler_AlertMutationHTMXRefreshContract(t *testing.T) {
 func TestHandler_IntegratedNotificationApprovalToImplementationTask(t *testing.T) {
 	h, e, _, db := setupTestHandlerWithDB(t)
 	ctx := context.Background()
-	taskRepo := sqlite.NewTaskRepo(db, nil)
+	taskRepo := teststores.Of(db).Tasks
 	project := createProject(t, h, "Integrated Notification Project")
 	caller := &models.Task{ProjectID: project.ID, Title: "Scheduled scanner", Prompt: "scan approved notifications", Category: models.CategoryScheduled, Status: models.StatusPending, Priority: 2}
 	require.NoError(t, taskRepo.Create(ctx, caller))
@@ -394,7 +394,7 @@ func TestHandler_ListAlertsSupportsWorkflowFiltersAndRefreshPreservation(t *test
 	linkedCompleted := createFilteredAlert(project.ID, "Completed with implementation task", models.AlertDecisionApproved, models.AlertProcessingCompleted, "cleanup target")
 	unlinkedCompleted := createFilteredAlert(project.ID, "Completed without implementation task", models.AlertDecisionApproved, models.AlertProcessingCompleted, "cleanup target")
 	implementationTask := &models.Task{ProjectID: project.ID, Title: "Implemented notification", Category: models.CategoryBacklog, Priority: 2, Status: models.StatusCompleted, Prompt: "Implemented", ChainConfig: "{}", SwarmConfig: "{}"}
-	require.NoError(t, sqlite.NewTaskRepo(db, nil).Create(t.Context(), implementationTask))
+	require.NoError(t, teststores.Of(db).Tasks.Create(t.Context(), implementationTask))
 	_, err := db.ExecContext(t.Context(), `UPDATE alerts SET implementation_task_id = ?, implementation_task_was_linked = 1 WHERE id = ? AND project_id = ?`, implementationTask.ID, linkedCompleted.ID, project.ID)
 	require.NoError(t, err)
 	createFilteredAlert(project.ID, "Operational excluded", models.AlertDecisionNotRequired, models.AlertProcessingNotApplicable, "other")

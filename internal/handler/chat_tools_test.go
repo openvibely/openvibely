@@ -8,21 +8,20 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/service"
-	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/openvibely/openvibely/internal/testutil/teststores"
 	"github.com/stretchr/testify/require"
 )
 
 func TestExecuteChatTaskCreations(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
-	attachmentRepo := sqlite.NewAttachmentRepo(db)
+	db := teststores.NewDB(t)
+	taskRepo := teststores.Of(db).Tasks
+	attachmentRepo := teststores.Of(db).Attachments
 	workerSvc := service.NewWorkerService(nil, 0, nil)
 	taskSvc := service.NewTaskService(taskRepo, attachmentRepo, workerSvc)
 
 	// Create a project first
-	projectRepo := sqlite.NewProjectRepo(db)
+	projectRepo := teststores.Of(db).Projects
 	project := &models.Project{Name: "Test Project"}
 	if err := projectRepo.Create(context.Background(), project); err != nil {
 		t.Fatalf("failed to create project: %v", err)
@@ -107,13 +106,13 @@ func TestDeferActiveTasksWithAttachments_DuplicateTitlesRetainRequestIdentity(t 
 }
 
 func TestExecuteChatTaskCreations_DuplicateTitle(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
-	attachmentRepo := sqlite.NewAttachmentRepo(db)
+	db := teststores.NewDB(t)
+	taskRepo := teststores.Of(db).Tasks
+	attachmentRepo := teststores.Of(db).Attachments
 	workerSvc := service.NewWorkerService(nil, 0, nil)
 	taskSvc := service.NewTaskService(taskRepo, attachmentRepo, workerSvc)
 
-	projectRepo := sqlite.NewProjectRepo(db)
+	projectRepo := teststores.Of(db).Projects
 	project := &models.Project{Name: "Test Project"}
 	if err := projectRepo.Create(context.Background(), project); err != nil {
 		t.Fatalf("failed to create project: %v", err)
@@ -144,13 +143,13 @@ func TestExecuteChatTaskCreations_DuplicateTitle(t *testing.T) {
 }
 
 func TestExecuteChatTaskCreations_InvalidCategory(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
-	attachmentRepo := sqlite.NewAttachmentRepo(db)
+	db := teststores.NewDB(t)
+	taskRepo := teststores.Of(db).Tasks
+	attachmentRepo := teststores.Of(db).Attachments
 	workerSvc := service.NewWorkerService(nil, 0, nil)
 	taskSvc := service.NewTaskService(taskRepo, attachmentRepo, workerSvc)
 
-	projectRepo := sqlite.NewProjectRepo(db)
+	projectRepo := teststores.Of(db).Projects
 	project := &models.Project{Name: "Test Project"}
 	if err := projectRepo.Create(context.Background(), project); err != nil {
 		t.Fatalf("failed to create project: %v", err)
@@ -288,13 +287,13 @@ func TestBuildTaskContextString_ExcludesChatTasks(t *testing.T) {
 // --- Task Edit Tests ---
 
 func TestExecuteChatTaskEdits(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
-	attachmentRepo := sqlite.NewAttachmentRepo(db)
+	db := teststores.NewDB(t)
+	taskRepo := teststores.Of(db).Tasks
+	attachmentRepo := teststores.Of(db).Attachments
 	workerSvc := service.NewWorkerService(nil, 0, nil)
 	taskSvc := service.NewTaskService(taskRepo, attachmentRepo, workerSvc)
 
-	projectRepo := sqlite.NewProjectRepo(db)
+	projectRepo := teststores.Of(db).Projects
 	project := &models.Project{Name: "Test Project"}
 	if err := projectRepo.Create(context.Background(), project); err != nil {
 		t.Fatalf("failed to create project: %v", err)
@@ -343,13 +342,13 @@ func TestExecuteChatTaskEdits(t *testing.T) {
 }
 
 func TestExecuteChatTaskEdits_TaskNotFound(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
-	attachmentRepo := sqlite.NewAttachmentRepo(db)
+	db := teststores.NewDB(t)
+	taskRepo := teststores.Of(db).Tasks
+	attachmentRepo := teststores.Of(db).Attachments
 	workerSvc := service.NewWorkerService(nil, 0, nil)
 	taskSvc := service.NewTaskService(taskRepo, attachmentRepo, workerSvc)
 
-	projectRepo := sqlite.NewProjectRepo(db)
+	projectRepo := teststores.Of(db).Projects
 	project := &models.Project{Name: "Test Project"}
 	if err := projectRepo.Create(context.Background(), project); err != nil {
 		t.Fatalf("failed to create project: %v", err)

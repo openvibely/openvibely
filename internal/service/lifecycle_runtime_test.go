@@ -12,13 +12,13 @@ import (
 	"github.com/openvibely/openvibely/internal/agentskills"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/openvibely/openvibely/internal/testutil/teststores"
 )
 
 func TestAgentInspectorListAgentsUsesCompactProjection(t *testing.T) {
 	db, counter := testutil.NewStatementCountingTestDB(t)
-	repo := sqlite.NewAgentRepo(db)
+	repo := teststores.Of(db).Agents
 	ctx := context.Background()
 	if _, err := db.ExecContext(ctx, `DELETE FROM agents WHERE id IS NOT NULL`); err != nil {
 		t.Fatalf("clear agents: %v", err)
@@ -156,8 +156,8 @@ func TestAgentInspectorListAgentsUsesCompactProjection(t *testing.T) {
 }
 
 func BenchmarkLifecycleAgentListProjection(b *testing.B) {
-	db := testutil.NewTestDB(b)
-	repo := sqlite.NewAgentRepo(db)
+	db := teststores.NewDB(b)
+	repo := teststores.Of(db).Agents
 	ctx := context.Background()
 	if _, err := db.ExecContext(ctx, `DELETE FROM agents WHERE id IS NOT NULL`); err != nil {
 		b.Fatalf("clear agents: %v", err)
@@ -260,8 +260,8 @@ func appendIndexHeader(t *testing.T, path, header string) {
 }
 
 func TestCatalogSkillResolver_UsesOwningAgentSkill(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	agents := sqlite.NewAgentRepo(db)
+	db := teststores.NewDB(t)
+	agents := teststores.Of(db).Agents
 	ctx := context.Background()
 	a := &models.Agent{Name: "Router", Key: "router", Enabled: true, SelectableAsPrimary: true}
 	if err := agents.Create(ctx, a); err != nil {
@@ -284,8 +284,8 @@ func TestCatalogSkillResolver_UsesOwningAgentSkill(t *testing.T) {
 }
 
 func TestCatalogSkillResolver_DoesNotFallbackToTaskCatalogForOwnedHook(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	agents := sqlite.NewAgentRepo(db)
+	db := teststores.NewDB(t)
+	agents := teststores.Of(db).Agents
 	ctx := context.Background()
 	owner := &models.Agent{Name: "Router", Key: "router", Enabled: true, SelectableAsPrimary: true}
 	if err := agents.Create(ctx, owner); err != nil {

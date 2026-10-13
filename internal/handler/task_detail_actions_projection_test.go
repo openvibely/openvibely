@@ -8,8 +8,8 @@ import (
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/openvibely/openvibely/internal/testutil/teststores"
 )
 
 func TestHandlerGetTaskDetailActionsUsesCompactTaskMetadata(t *testing.T) {
@@ -84,7 +84,7 @@ func TestHandlerGetTaskDetailActionsUsesCompactTaskMetadata(t *testing.T) {
 		assertCode(t, rec, http.StatusNotFound)
 	})
 
-	full, err := sqlite.NewTaskRepo(db, nil).GetByID(ctx, task.ID)
+	full, err := teststores.Of(db).Tasks.GetByID(ctx, task.ID)
 	if err != nil {
 		t.Fatalf("GetByID: %v", err)
 	}

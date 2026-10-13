@@ -7,8 +7,9 @@ import (
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/persistence/sqlite"
-	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/openvibely/openvibely/internal/testutil/teststores"
 	"github.com/stretchr/testify/require"
 )
 
@@ -54,19 +55,19 @@ func (f *fakeDiscordOutbound) SendOutboundDirectMessage(_ context.Context, userI
 	return SendMessageResult{OK: true, Platform: "discord", Target: formatResolvedMessageTarget("discord", userID, ""), MessageID: "discord-dm-1"}
 }
 
-func setupChannelMessageRouterTest(t *testing.T) (context.Context, *sqlite.ChannelTargetRepo, *sqlite.SettingsRepo, *sqlite.SlackAuthRepo, *sqlite.TelegramAuthRepo, *sqlite.EmailAuthRepo, *sqlite.DiscordAuthRepo, *models.Project, *ChannelMessageRouter, *fakeSlackOutbound, *fakeTelegramOutbound, *fakeEmailOutbound, *fakeDiscordOutbound) {
+func setupChannelMessageRouterTest(t *testing.T) (context.Context, persistence.ChannelTargetStore, persistence.SettingsStore, persistence.SlackAuthStore, persistence.TelegramAuthStore, persistence.EmailAuthStore, persistence.DiscordAuthStore, *models.Project, *ChannelMessageRouter, *fakeSlackOutbound, *fakeTelegramOutbound, *fakeEmailOutbound, *fakeDiscordOutbound) {
 	t.Helper()
-	db := testutil.NewTestDB(t)
+	db := teststores.NewDB(t)
 	ctx := context.Background()
-	projectRepo := sqlite.NewProjectRepo(db)
+	projectRepo := teststores.Of(db).Projects
 	project := &models.Project{Name: "Router Project"}
 	require.NoError(t, projectRepo.Create(ctx, project))
-	targetRepo := sqlite.NewChannelTargetRepo(db)
-	settingsRepo := sqlite.NewSettingsRepo(db)
-	slackAuthRepo := sqlite.NewSlackAuthRepo(db)
-	telegramAuthRepo := sqlite.NewTelegramAuthRepo(db)
-	emailAuthRepo := sqlite.NewEmailAuthRepo(db)
-	discordAuthRepo := sqlite.NewDiscordAuthRepo(db)
+	targetRepo := teststores.Of(db).ChannelTargets
+	settingsRepo := teststores.Of(db).Settings
+	slackAuthRepo := teststores.Of(db).SlackAuth
+	telegramAuthRepo := teststores.Of(db).TelegramAuth
+	emailAuthRepo := teststores.Of(db).EmailAuth
+	discordAuthRepo := teststores.Of(db).DiscordAuth
 	router := NewChannelMessageRouter(targetRepo, settingsRepo)
 	slack := &fakeSlackOutbound{}
 	telegram := &fakeTelegramOutbound{}
@@ -140,7 +141,7 @@ func TestChannelMessageRouter_ListTargets(t *testing.T) {
 		{ID: "telegram-home", ProjectID: project.ID, Platform: "telegram", TargetKind: "chat", Name: "ops", TargetID: "-100123", Home: true, ThreadID: "42"},
 	}
 	for _, target := range fixtures {
-		require.NoError(t, targetRepo.Upsert(ctx, target))
+		require.NoError(t, targetRepo.(*sqlite.ChannelTargetRepo).Upsert(ctx, target))
 	}
 
 	first, err := ExecuteSendMessageTool(ctx, router, project.ID, json.RawMessage(`{"action":"list","limit":2,"offset":0}`))
@@ -213,20 +214,20 @@ func targetIDFromListedTarget(target ChannelTarget) string {
 
 func TestChannelMessageRouter_ResolvesHomeTargets(t *testing.T) {
 	ctx, targetRepo, _, _, _, _, _, project, router, slack, telegram, email, discord := setupChannelMessageRouterTest(t)
-	require.NoError(t, targetRepo.Upsert(ctx, models.ChannelTarget{ID: "slack-home", ProjectID: project.ID, Platform: "slack", TargetID: "C123", Home: true}))
+	require.NoError(t, targetRepo.(*sqlite.ChannelTargetRepo).Upsert(ctx, models.ChannelTarget{ID: "slack-home", ProjectID: project.ID, Platform: "slack", TargetID: "C123", Home: true}))
 	require.True(t, router.Send(ctx, project.ID, SendMessageRequest{Target: "slack", Message: "hello slack"}).OK)
 	require.Equal(t, "C123", slack.channelID)
 
-	require.NoError(t, targetRepo.Upsert(ctx, models.ChannelTarget{ID: "telegram-home", ProjectID: project.ID, Platform: "telegram", TargetID: "-100123", Home: true}))
+	require.NoError(t, targetRepo.(*sqlite.ChannelTargetRepo).Upsert(ctx, models.ChannelTarget{ID: "telegram-home", ProjectID: project.ID, Platform: "telegram", TargetID: "-100123", Home: true}))
 	require.True(t, router.Send(ctx, project.ID, SendMessageRequest{Target: "telegram", Message: "hello telegram"}).OK)
 	require.Equal(t, int64(-100123), telegram.chatID)
 
-	require.NoError(t, targetRepo.Upsert(ctx, models.ChannelTarget{ID: "email-home", ProjectID: project.ID, Platform: "email", TargetID: "person@example.com", Home: true, DefaultSubject: "Default Subject"}))
+	require.NoError(t, targetRepo.(*sqlite.ChannelTargetRepo).Upsert(ctx, models.ChannelTarget{ID: "email-home", ProjectID: project.ID, Platform: "email", TargetID: "person@example.com", Home: true, DefaultSubject: "Default Subject"}))
 	require.True(t, router.Send(ctx, project.ID, SendMessageRequest{Target: "email", Message: "hello email"}).OK)
 	require.Equal(t, "person@example.com", email.to)
 	require.Equal(t, "Default Subject", email.subject)
 
-	require.NoError(t, targetRepo.Upsert(ctx, models.ChannelTarget{ID: "discord-home", ProjectID: project.ID, Platform: "discord", TargetID: "123456789", Home: true}))
+	require.NoError(t, targetRepo.(*sqlite.ChannelTargetRepo).Upsert(ctx, models.ChannelTarget{ID: "discord-home", ProjectID: project.ID, Platform: "discord", TargetID: "123456789", Home: true}))
 	require.True(t, router.Send(ctx, project.ID, SendMessageRequest{Target: "discord", Message: "hello discord"}).OK)
 	require.Equal(t, "123456789", discord.channelID)
 	require.Equal(t, "hello discord", discord.text)
@@ -234,21 +235,21 @@ func TestChannelMessageRouter_ResolvesHomeTargets(t *testing.T) {
 
 func TestChannelMessageRouter_ResolvesNamedAndThreadTargets(t *testing.T) {
 	ctx, targetRepo, _, _, _, _, _, project, router, slack, telegram, email, discord := setupChannelMessageRouterTest(t)
-	require.NoError(t, targetRepo.Upsert(ctx, models.ChannelTarget{ID: "slack-ops", ProjectID: project.ID, Platform: "slack", Name: "ops", TargetID: "COPS", ThreadID: "1690000000.000000"}))
+	require.NoError(t, targetRepo.(*sqlite.ChannelTargetRepo).Upsert(ctx, models.ChannelTarget{ID: "slack-ops", ProjectID: project.ID, Platform: "slack", Name: "ops", TargetID: "COPS", ThreadID: "1690000000.000000"}))
 	require.True(t, router.Send(ctx, project.ID, SendMessageRequest{Target: "slack:#ops", Message: "thread msg"}).OK)
 	require.Equal(t, "COPS", slack.channelID)
 	require.Equal(t, "1690000000.000000", slack.threadTS)
 
-	require.NoError(t, targetRepo.Upsert(ctx, models.ChannelTarget{ID: "tg-topic", ProjectID: project.ID, Platform: "telegram", Name: "topic", TargetID: "-100123", ThreadID: "42"}))
+	require.NoError(t, targetRepo.(*sqlite.ChannelTargetRepo).Upsert(ctx, models.ChannelTarget{ID: "tg-topic", ProjectID: project.ID, Platform: "telegram", Name: "topic", TargetID: "-100123", ThreadID: "42"}))
 	require.True(t, router.Send(ctx, project.ID, SendMessageRequest{Target: "telegram:#topic", Message: "topic msg"}).OK)
 	require.Equal(t, 42, telegram.threadID)
 
-	require.NoError(t, targetRepo.Upsert(ctx, models.ChannelTarget{ID: "email-ops", ProjectID: project.ID, Platform: "email", Name: "ops", TargetID: "ops@example.com"}))
+	require.NoError(t, targetRepo.(*sqlite.ChannelTargetRepo).Upsert(ctx, models.ChannelTarget{ID: "email-ops", ProjectID: project.ID, Platform: "email", Name: "ops", TargetID: "ops@example.com"}))
 	require.True(t, router.Send(ctx, project.ID, SendMessageRequest{Target: "email:#ops", Message: "body", Subject: "Subject"}).OK)
 	require.Equal(t, "ops@example.com", email.to)
 	require.Equal(t, "Subject", email.subject)
 
-	require.NoError(t, targetRepo.Upsert(ctx, models.ChannelTarget{ID: "discord-thread", ProjectID: project.ID, Platform: "discord", Name: "ops", TargetID: "987654321", ThreadID: "111222333"}))
+	require.NoError(t, targetRepo.(*sqlite.ChannelTargetRepo).Upsert(ctx, models.ChannelTarget{ID: "discord-thread", ProjectID: project.ID, Platform: "discord", Name: "ops", TargetID: "987654321", ThreadID: "111222333"}))
 	require.True(t, router.Send(ctx, project.ID, SendMessageRequest{Target: "discord:#ops", Message: "discord thread"}).OK)
 	require.Equal(t, "987654321", discord.channelID)
 	require.Equal(t, "111222333", discord.threadID)
@@ -269,7 +270,7 @@ func TestChannelMessageRouter_SendDirectTargetDoesNotRequireSavedOrExplicitPolic
 	targets, err := targetRepo.ListByProject(ctx, project.ID)
 	require.NoError(t, err)
 	require.Empty(t, targets, "draft test must not save outbound targets")
-	sends, err := targetRepo.ListSendsByProject(ctx, project.ID)
+	sends, err := targetRepo.(*sqlite.ChannelTargetRepo).ListSendsByProject(ctx, project.ID)
 	require.NoError(t, err)
 	require.Len(t, sends, 2)
 	var sawEmail, sawDiscord bool
@@ -331,7 +332,7 @@ func TestChannelMessageRouter_ExplicitTargetsRequireSetting(t *testing.T) {
 	require.True(t, res.OK)
 	require.Equal(t, "person@example.com", email.to)
 
-	sends, err := targetRepo.ListSendsByProject(ctx, project.ID)
+	sends, err := targetRepo.(*sqlite.ChannelTargetRepo).ListSendsByProject(ctx, project.ID)
 	require.NoError(t, err)
 	require.Len(t, sends, 2)
 	require.True(t, sends[0].Success)
@@ -352,7 +353,7 @@ func TestChannelMessageRouter_AuthorizedEmailSenderBypassesExplicitTargetPolicy(
 	require.NoError(t, err)
 	require.Empty(t, targets, "authorized-recipient fallback must not persist outbound targets")
 
-	sends, err := targetRepo.ListSendsByProject(ctx, project.ID)
+	sends, err := targetRepo.(*sqlite.ChannelTargetRepo).ListSendsByProject(ctx, project.ID)
 	require.NoError(t, err)
 	require.Len(t, sends, 1)
 	require.True(t, sends[0].Success)
@@ -373,7 +374,7 @@ func TestChannelMessageRouter_RejectsUnsavedUnauthorizedEmailWhenExplicitTargets
 	require.NoError(t, err)
 	require.Empty(t, targets)
 
-	sends, err := targetRepo.ListSendsByProject(ctx, project.ID)
+	sends, err := targetRepo.(*sqlite.ChannelTargetRepo).ListSendsByProject(ctx, project.ID)
 	require.NoError(t, err)
 	require.Len(t, sends, 1)
 	require.False(t, sends[0].Success)
@@ -393,7 +394,7 @@ func TestChannelMessageRouter_AuthorizedTelegramUserBypassesExplicitTargetPolicy
 	require.NoError(t, err)
 	require.Empty(t, targets, "authorized-recipient fallback must not persist outbound targets")
 
-	sends, err := targetRepo.ListSendsByProject(ctx, project.ID)
+	sends, err := targetRepo.(*sqlite.ChannelTargetRepo).ListSendsByProject(ctx, project.ID)
 	require.NoError(t, err)
 	require.Len(t, sends, 1)
 	require.True(t, sends[0].Success)
@@ -414,7 +415,7 @@ func TestChannelMessageRouter_RejectsUnsavedUnauthorizedTelegramWhenExplicitTarg
 	require.NoError(t, err)
 	require.Empty(t, targets)
 
-	sends, err := targetRepo.ListSendsByProject(ctx, project.ID)
+	sends, err := targetRepo.(*sqlite.ChannelTargetRepo).ListSendsByProject(ctx, project.ID)
 	require.NoError(t, err)
 	require.Len(t, sends, 1)
 	require.False(t, sends[0].Success)
@@ -433,7 +434,7 @@ func TestChannelMessageRouter_TelegramGroupTargetsDoNotUseAuthorizedUserFallback
 func TestChannelMessageRouter_SavedTelegramTargetTakesPrecedenceOverAuthorizedUserID(t *testing.T) {
 	ctx, targetRepo, _, _, telegramAuthRepo, _, _, project, router, _, telegram, _, _ := setupChannelMessageRouterTest(t)
 	require.NoError(t, telegramAuthRepo.Create(ctx, &models.TelegramAuthorizedUser{ProjectID: project.ID, TelegramUserID: 123456789, AddedBy: "test"}))
-	require.NoError(t, targetRepo.Upsert(ctx, models.ChannelTarget{ID: "telegram-topic", ProjectID: project.ID, Platform: "telegram", TargetID: "123456789", ThreadID: "42"}))
+	require.NoError(t, targetRepo.(*sqlite.ChannelTargetRepo).Upsert(ctx, models.ChannelTarget{ID: "telegram-topic", ProjectID: project.ID, Platform: "telegram", TargetID: "123456789", ThreadID: "42"}))
 
 	res := router.Send(ctx, project.ID, SendMessageRequest{Target: "telegram:123456789:42", Message: "topic body"})
 	require.True(t, res.OK, "saved Telegram targets should still take precedence: %#v", res)
@@ -490,7 +491,7 @@ func TestChannelMessageRouter_AuthorizedUserIDsResolveToDirectMessages(t *testin
 func TestChannelMessageRouter_SavedDiscordTargetTakesPrecedenceOverAuthorizedUserID(t *testing.T) {
 	ctx, targetRepo, _, _, _, _, discordAuthRepo, project, router, _, _, _, discord := setupChannelMessageRouterTest(t)
 	require.NoError(t, discordAuthRepo.Create(ctx, &models.DiscordAuthorizedUser{ProjectID: project.ID, DiscordUserID: "1518288288572641398", DisplayName: "Discord User", AddedBy: "test"}))
-	require.NoError(t, targetRepo.Upsert(ctx, models.ChannelTarget{ID: "discord-channel", ProjectID: project.ID, Platform: "discord", TargetID: "1518288288572641398"}))
+	require.NoError(t, targetRepo.(*sqlite.ChannelTargetRepo).Upsert(ctx, models.ChannelTarget{ID: "discord-channel", ProjectID: project.ID, Platform: "discord", TargetID: "1518288288572641398"}))
 
 	res := router.Send(ctx, project.ID, SendMessageRequest{Target: "discord:1518288288572641398", Message: "hi channel"})
 	require.True(t, res.OK, "saved Discord channel targets should still send as channels: %#v", res)
@@ -590,7 +591,7 @@ func TestChannelMessageRouter_SavedUserKindTargetRoutesAsDM(t *testing.T) {
 	ctx, targetRepo, _, _, _, _, _, project, router, slack, _, _, discord := setupChannelMessageRouterTest(t)
 
 	// Save a Slack user-kind target (no auth store entry needed).
-	require.NoError(t, targetRepo.Upsert(ctx, models.ChannelTarget{ID: "slack-user-dm", ProjectID: project.ID, Platform: "slack", TargetKind: "user", TargetID: "U0AQYLJR14Y"}))
+	require.NoError(t, targetRepo.(*sqlite.ChannelTargetRepo).Upsert(ctx, models.ChannelTarget{ID: "slack-user-dm", ProjectID: project.ID, Platform: "slack", TargetKind: "user", TargetID: "U0AQYLJR14Y"}))
 
 	// Bare slack:U... reference finds saved user-kind target and dispatches as DM.
 	res := router.Send(ctx, project.ID, SendMessageRequest{Target: "slack:U0AQYLJR14Y", Message: "hi"})
@@ -605,7 +606,7 @@ func TestChannelMessageRouter_SavedUserKindTargetRoutesAsDM(t *testing.T) {
 	require.Equal(t, "U0AQYLJR14Y", slack.userID)
 
 	// Save a Discord user-kind target (no auth store entry needed).
-	require.NoError(t, targetRepo.Upsert(ctx, models.ChannelTarget{ID: "discord-user-dm", ProjectID: project.ID, Platform: "discord", TargetKind: "user", TargetID: "1518288288572641398"}))
+	require.NoError(t, targetRepo.(*sqlite.ChannelTargetRepo).Upsert(ctx, models.ChannelTarget{ID: "discord-user-dm", ProjectID: project.ID, Platform: "discord", TargetKind: "user", TargetID: "1518288288572641398"}))
 
 	// Explicit discord:user:<id> reference finds saved user-kind target and dispatches as DM.
 	res = router.Send(ctx, project.ID, SendMessageRequest{Target: "discord:user:1518288288572641398", Message: "hi"})
@@ -628,7 +629,7 @@ func TestChannelMessageRouter_DiscordChannelSyntaxSendsToChannel(t *testing.T) {
 
 func TestChannelMessageRouter_DiscordChannelSyntaxDoesNotResolveSavedUserTarget(t *testing.T) {
 	ctx, targetRepo, _, _, _, _, _, project, router, _, _, _, discord := setupChannelMessageRouterTest(t)
-	require.NoError(t, targetRepo.Upsert(ctx, models.ChannelTarget{ID: "discord-user-only", ProjectID: project.ID, Platform: "discord", TargetKind: "user", TargetID: "1518288288572641398"}))
+	require.NoError(t, targetRepo.(*sqlite.ChannelTargetRepo).Upsert(ctx, models.ChannelTarget{ID: "discord-user-only", ProjectID: project.ID, Platform: "discord", TargetKind: "user", TargetID: "1518288288572641398"}))
 
 	res := router.Send(ctx, project.ID, SendMessageRequest{Target: "discord:channel:1518288288572641398", Message: "channel message"})
 	require.False(t, res.OK)
@@ -639,9 +640,9 @@ func TestChannelMessageRouter_DiscordChannelSyntaxDoesNotResolveSavedUserTarget(
 
 func TestChannelMessageRouter_DiscordTypedTargetsRespectSavedTargetKind(t *testing.T) {
 	ctx, targetRepo, _, _, _, _, _, project, router, _, _, _, discord := setupChannelMessageRouterTest(t)
-	require.NoError(t, targetRepo.Upsert(ctx, models.ChannelTarget{ID: "discord-colliding-user", ProjectID: project.ID, Platform: "discord", TargetKind: "user", TargetID: "1518288288572641398"}))
-	require.NoError(t, targetRepo.Upsert(ctx, models.ChannelTarget{ID: "discord-colliding-channel", ProjectID: project.ID, Platform: "discord", TargetKind: "channel", TargetID: "1518288288572641398"}))
-	require.NoError(t, targetRepo.Upsert(ctx, models.ChannelTarget{ID: "discord-threaded-channel", ProjectID: project.ID, Platform: "discord", TargetKind: "channel", TargetID: "2518288288572641398", ThreadID: "987654321012345678"}))
+	require.NoError(t, targetRepo.(*sqlite.ChannelTargetRepo).Upsert(ctx, models.ChannelTarget{ID: "discord-colliding-user", ProjectID: project.ID, Platform: "discord", TargetKind: "user", TargetID: "1518288288572641398"}))
+	require.NoError(t, targetRepo.(*sqlite.ChannelTargetRepo).Upsert(ctx, models.ChannelTarget{ID: "discord-colliding-channel", ProjectID: project.ID, Platform: "discord", TargetKind: "channel", TargetID: "1518288288572641398"}))
+	require.NoError(t, targetRepo.(*sqlite.ChannelTargetRepo).Upsert(ctx, models.ChannelTarget{ID: "discord-threaded-channel", ProjectID: project.ID, Platform: "discord", TargetKind: "channel", TargetID: "2518288288572641398", ThreadID: "987654321012345678"}))
 
 	res := router.Send(ctx, project.ID, SendMessageRequest{Target: "discord:channel:1518288288572641398", Message: "channel message"})
 	require.True(t, res.OK, "discord:channel:<id> must resolve the saved channel target when user and channel IDs collide: %#v", res)
@@ -687,16 +688,16 @@ func TestChannelMessageRouter_AuditRowIncludesTargetKind(t *testing.T) {
 	ctx, targetRepo, _, _, _, _, _, project, router, slack, _, _, discord := setupChannelMessageRouterTest(t)
 
 	// Saved channel target send — audit row should record target_kind 'channel'.
-	require.NoError(t, targetRepo.Upsert(ctx, models.ChannelTarget{ID: "slack-ch", ProjectID: project.ID, Platform: "slack", TargetKind: "channel", TargetID: "C123", Home: true}))
+	require.NoError(t, targetRepo.(*sqlite.ChannelTargetRepo).Upsert(ctx, models.ChannelTarget{ID: "slack-ch", ProjectID: project.ID, Platform: "slack", TargetKind: "channel", TargetID: "C123", Home: true}))
 	require.True(t, router.Send(ctx, project.ID, SendMessageRequest{Target: "slack", Message: "channel msg"}).OK)
 	require.Equal(t, "C123", slack.channelID)
 
 	// Saved user-kind DM target send — audit row should record target_kind 'user'.
-	require.NoError(t, targetRepo.Upsert(ctx, models.ChannelTarget{ID: "discord-dm", ProjectID: project.ID, Platform: "discord", TargetKind: "user", TargetID: "1518288288572641398"}))
+	require.NoError(t, targetRepo.(*sqlite.ChannelTargetRepo).Upsert(ctx, models.ChannelTarget{ID: "discord-dm", ProjectID: project.ID, Platform: "discord", TargetKind: "user", TargetID: "1518288288572641398"}))
 	require.True(t, router.Send(ctx, project.ID, SendMessageRequest{Target: "discord:user:1518288288572641398", Message: "dm msg"}).OK)
 	require.Equal(t, "1518288288572641398", discord.userID)
 
-	sends, err := targetRepo.ListSendsByProject(ctx, project.ID)
+	sends, err := targetRepo.(*sqlite.ChannelTargetRepo).ListSendsByProject(ctx, project.ID)
 	require.NoError(t, err)
 	require.Len(t, sends, 2)
 	var sawChannel, sawUser bool
@@ -728,12 +729,12 @@ func TestChannelMessageRouterXUsesSavedAccountTargetAndAudit(t *testing.T) {
 	target, err := NormalizeOutboundChannelTarget(models.ChannelTarget{ID: "x-home", ProjectID: project.ID, Platform: "x", TargetID: "me", Home: true})
 	require.NoError(t, err)
 	require.Equal(t, "account", target.TargetKind)
-	require.NoError(t, targetRepo.Upsert(ctx, target))
+	require.NoError(t, targetRepo.(*sqlite.ChannelTargetRepo).Upsert(ctx, target))
 	result := router.Send(ctx, project.ID, SendMessageRequest{Target: "x", Message: "release update"})
 	require.True(t, result.OK)
 	require.Equal(t, "me", sender.target)
 	require.Equal(t, "release update", sender.text)
-	sends, err := targetRepo.ListSendsByProject(ctx, project.ID)
+	sends, err := targetRepo.(*sqlite.ChannelTargetRepo).ListSendsByProject(ctx, project.ID)
 	require.NoError(t, err)
 	require.Len(t, sends, 1)
 	require.Equal(t, "x", sends[0].Platform)

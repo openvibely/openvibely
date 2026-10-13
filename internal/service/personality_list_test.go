@@ -8,11 +8,11 @@ import (
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/persistence/sqlite"
-	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/openvibely/openvibely/internal/persistence"
+	"github.com/openvibely/openvibely/internal/testutil/teststores"
 )
 
-func seedCustomPersonalities(t *testing.T, repo *sqlite.CustomPersonalityRepo, n int) {
+func seedCustomPersonalities(t *testing.T, repo persistence.CustomPersonalityStore, n int) {
 	t.Helper()
 	ctx := context.Background()
 	for i := 0; i < n; i++ {
@@ -59,8 +59,8 @@ func TestPersonalityListPageArgs(t *testing.T) {
 }
 
 func TestListPersonalitiesRuntimePage_DefaultFirstPageAndOffset(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	repo := sqlite.NewCustomPersonalityRepo(db)
+	db := teststores.NewDB(t)
+	repo := teststores.Of(db).CustomPersonalities
 	ctx := context.Background()
 	seedCustomPersonalities(t, repo, 25)
 
@@ -103,8 +103,8 @@ func TestListPersonalitiesRuntimePage_DefaultFirstPageAndOffset(t *testing.T) {
 }
 
 func TestListPersonalitiesRuntimePage_PageSizeCapAndEmptyCatalog(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	repo := sqlite.NewCustomPersonalityRepo(db)
+	db := teststores.NewDB(t)
+	repo := teststores.Of(db).CustomPersonalities
 	ctx := context.Background()
 
 	page, err := ListPersonalitiesRuntimePage(ctx, repo, 50, 0)
@@ -120,8 +120,8 @@ func TestListPersonalitiesRuntimePage_PageSizeCapAndEmptyCatalog(t *testing.T) {
 }
 
 func TestFindPersonality_ExactKeyWithoutFullCatalog(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	repo := sqlite.NewCustomPersonalityRepo(db)
+	db := teststores.NewDB(t)
+	repo := teststores.Of(db).CustomPersonalities
 	ctx := context.Background()
 	seedCustomPersonalities(t, repo, 3)
 
@@ -139,10 +139,10 @@ func TestFindPersonality_ExactKeyWithoutFullCatalog(t *testing.T) {
 }
 
 func TestExecuteListPersonalitiesTool_SelectedPersonalityAndUnknownKey(t *testing.T) {
-	db := testutil.NewTestDB(t)
+	db := teststores.NewDB(t)
 	ctx := context.Background()
-	customRepo := sqlite.NewCustomPersonalityRepo(db)
-	settingsRepo := sqlite.NewSettingsRepo(db)
+	customRepo := teststores.Of(db).CustomPersonalities
+	settingsRepo := teststores.Of(db).Settings
 	seedCustomPersonalities(t, customRepo, 8)
 	if err := settingsRepo.Set(ctx, "personality", "custom_007"); err != nil {
 		t.Fatal(err)

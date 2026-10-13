@@ -9,19 +9,21 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/service"
+	"github.com/openvibely/openvibely/internal/testutil/teststores"
 )
 
-func newInsightsHandlerTestContext(t *testing.T) (*TestContext, *sqlite.InsightsRepo) {
+func newInsightsHandlerTestContext(t *testing.T) (*TestContext, persistence.InsightsStore) {
 	t.Helper()
 	tc := NewTestContext(t)
-	insightsRepo := sqlite.NewInsightsRepo(tc.db)
+	insightsRepo := teststores.Of(tc.db).Insights
 	tc.handler.insightsSvc = service.NewInsightsService(insightsRepo, tc.taskRepo, tc.projectRepo, tc.llmConfigRepo, tc.execRepo)
 	return tc, insightsRepo
 }
 
-func createHandlerTestInsight(t *testing.T, repo *sqlite.InsightsRepo, projectID string, status models.InsightStatus, title string) *models.Insight {
+func createHandlerTestInsight(t *testing.T, repo persistence.InsightsStore, projectID string, status models.InsightStatus, title string) *models.Insight {
 	t.Helper()
 	insight := &models.Insight{
 		ProjectID:  projectID,
@@ -141,7 +143,7 @@ func TestInsightsMutations_EnforceProjectOwnershipAndRenderScopedCards(t *testin
 	if foreignKnowledgeDelete.Code != http.StatusNotFound || strings.Contains(foreignKnowledgeDelete.Body.String(), foreignKnowledge.Content) {
 		t.Fatalf("foreign knowledge delete response = %d %q, want not found", foreignKnowledgeDelete.Code, foreignKnowledgeDelete.Body.String())
 	}
-	if stillThere, err := insightsRepo.GetKnowledge(context.Background(), projectB.ID, foreignKnowledge.ID); err != nil || stillThere == nil {
+	if stillThere, err := insightsRepo.(*sqlite.InsightsRepo).GetKnowledge(context.Background(), projectB.ID, foreignKnowledge.ID); err != nil || stillThere == nil {
 		t.Fatalf("foreign knowledge disappeared after delete rejection: %#v err=%v", stillThere, err)
 	}
 
@@ -208,7 +210,7 @@ func TestInsightsMutations_EnforceProjectOwnershipAndRenderScopedCards(t *testin
 	if sameKnowledgeDelete.Code != http.StatusOK || sameKnowledgeDelete.Body.Len() != 0 {
 		t.Fatalf("same-project knowledge delete = %d %q, want empty 200", sameKnowledgeDelete.Code, sameKnowledgeDelete.Body.String())
 	}
-	if deleted, err := insightsRepo.GetKnowledge(context.Background(), projectA.ID, sameKnowledge.ID); err != nil || deleted != nil {
+	if deleted, err := insightsRepo.(*sqlite.InsightsRepo).GetKnowledge(context.Background(), projectA.ID, sameKnowledge.ID); err != nil || deleted != nil {
 		t.Fatalf("same-project knowledge remained after delete: %#v err=%v", deleted, err)
 	}
 

@@ -8,8 +8,7 @@ import (
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/persistence/sqlite"
-	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/openvibely/openvibely/internal/testutil/teststores"
 	"github.com/stretchr/testify/require"
 )
 
@@ -1032,9 +1031,9 @@ func TestAutomationDraftReopenLimitsLegacySemanticCleanupToTrustedSavedGraphs(t 
 }
 
 func TestAutomationDraftRejectsMissingAndUnsupportedSchemaVersions(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	project := automationTestProject(t, sqlite.NewProjectRepo(db), "Schema versions")
-	repo := sqlite.NewAutomationRepo(db)
+	db := teststores.NewDB(t)
+	project := automationTestProject(t, teststores.Of(db).Projects, "Schema versions")
+	repo := teststores.Of(db).Automations
 	svc := NewAutomationDraftService(repo, NewAutomationAdapterRegistry())
 
 	for _, version := range []int{0, 2} {
@@ -1052,14 +1051,14 @@ func TestAutomationDraftRejectsMissingAndUnsupportedSchemaVersions(t *testing.T)
 }
 
 func TestAutomationTaskReferencesResolveInsideSelectedProject(t *testing.T) {
-	db := testutil.NewTestDB(t)
+	db := teststores.NewDB(t)
 	ctx := context.Background()
-	projectRepo := sqlite.NewProjectRepo(db)
+	projectRepo := teststores.Of(db).Projects
 	project := automationTestProject(t, projectRepo, "Reference project")
 	other := automationTestProject(t, projectRepo, "Other reference project")
-	agentRepo := sqlite.NewAgentRepo(db)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
-	settingsRepo := sqlite.NewSettingsRepo(db)
+	agentRepo := teststores.Of(db).Agents
+	taskRepo := teststores.Of(db).Tasks
+	settingsRepo := teststores.Of(db).Settings
 	agent := models.Agent{Name: "Project Architect", Key: "project_architect", Scope: models.AgentScopeProject, ProjectID: project.ID,
 		Enabled: true, SelectableAsPrimary: true, Skills: []models.SkillConfig{{Name: "project-guidance", Description: "Guide project work", Content: "safe"}}}
 	require.NoError(t, agentRepo.Create(ctx, &agent))
@@ -1072,7 +1071,7 @@ func TestAutomationTaskReferencesResolveInsideSelectedProject(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, snapshot.Agents, models.AutomationCapabilityRef{ID: "project_architect", Name: "Project Architect"})
 
-	svc := NewAutomationDraftService(sqlite.NewAutomationRepo(db), NewAutomationAdapterRegistry())
+	svc := NewAutomationDraftService(teststores.Of(db).Automations, NewAutomationAdapterRegistry())
 	svc.SetCapabilitySnapshotBuilder(capabilities)
 	candidate, err := svc.TemplateCandidate(AutomationAdapterVisionDriver)
 	require.NoError(t, err)
@@ -1367,7 +1366,7 @@ edges:
 }
 
 func TestAutomationDraftYAMLRoundTripAndStrictDecoding(t *testing.T) {
-	repo := sqlite.NewAutomationRepo(testutil.NewTestDB(t))
+	repo := teststores.Of(teststores.NewDB(t)).Automations
 	drafts := NewAutomationDraftService(repo, NewAutomationAdapterRegistry())
 	for _, adapter := range []string{AutomationAdapterNativeSDLC, AutomationAdapterGitHubSDLC} {
 		candidate, err := drafts.TemplateCandidate(adapter)

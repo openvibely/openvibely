@@ -20,16 +20,16 @@ import (
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
-	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/openvibely/openvibely/internal/testutil/teststores"
 	"github.com/stretchr/testify/require"
 )
 
 func TestAutomationPortfolioCardKebabEnablesAndDisablesInPlace(t *testing.T) {
 	tc := NewTestContext(t)
 	project := tc.CreateProject().WithName("Automation card lifecycle").Build()
-	automationRepo := sqlite.NewAutomationRepo(tc.db)
+	automationRepo := teststores.Of(tc.db).Automations
 	registration := service.NewAutomationRegistrationService(automationRepo, service.NewAutomationAdapterRegistry())
 	tc.handler.SetAutomationServices(service.NewAutomationGraphService(automationRepo), registration)
 	tc.handler.SetAutomationBuilderServices(nil, nil, nil, nil, nil, service.NewAutomationLifecycleService(automationRepo, tc.scheduleRepo))
@@ -85,7 +85,7 @@ func TestAutomationPortfolioCardKebabEnablesAndDisablesInPlace(t *testing.T) {
 func TestAutomationPortfolioRunNowQueuesManualDispatchWithoutChangingCadence(t *testing.T) {
 	tc := NewTestContext(t)
 	project := tc.CreateProject().WithName("Automation card run now").Build()
-	automationRepo := sqlite.NewAutomationRepo(tc.db)
+	automationRepo := teststores.Of(tc.db).Automations
 	registration := service.NewAutomationRegistrationService(automationRepo, service.NewAutomationAdapterRegistry())
 	lifecycle := service.NewAutomationLifecycleService(automationRepo, tc.scheduleRepo)
 	tc.handler.SetAutomationServices(service.NewAutomationGraphService(automationRepo), registration)
@@ -150,7 +150,7 @@ func TestAutomationPagesRenderRegisteredDefinitionsAndEnforceProject(t *testing.
 	tc := NewTestContext(t)
 	project := tc.CreateProject().WithName("Automation Project").Build()
 	other := tc.CreateProject().WithName("Other Project").Build()
-	automationRepo := sqlite.NewAutomationRepo(tc.db)
+	automationRepo := teststores.Of(tc.db).Automations
 	registration := service.NewAutomationRegistrationService(automationRepo, service.NewAutomationAdapterRegistry())
 	tc.handler.SetAutomationServices(service.NewAutomationGraphService(automationRepo), registration)
 
@@ -309,7 +309,7 @@ func TestAutomationBrowserSaveRejectsExplicitInvalidSemanticConfiguration(t *tes
 		t.Run(test.name, func(t *testing.T) {
 			tc := NewTestContext(t)
 			project := tc.CreateProject().WithName("Strict browser Save " + test.name).Build()
-			automationRepo := sqlite.NewAutomationRepo(tc.db)
+			automationRepo := teststores.Of(tc.db).Automations
 			registry := service.NewAutomationAdapterRegistry()
 			drafts := service.NewAutomationDraftService(automationRepo, registry)
 			validator := service.NewAutomationSaveValidator(registry, drafts)
@@ -362,7 +362,7 @@ func TestAutomationBrowserSaveRejectsExplicitInvalidSemanticConfiguration(t *tes
 func TestAutomationWebBuilderKeepsUnsavedChangesBrowserLocal(t *testing.T) {
 	tc := NewTestContext(t)
 	project := tc.CreateProject().WithName("Browser Local Builder Project").Build()
-	automationRepo := sqlite.NewAutomationRepo(tc.db)
+	automationRepo := teststores.Of(tc.db).Automations
 	registry := service.NewAutomationAdapterRegistry()
 	drafts := service.NewAutomationDraftService(automationRepo, registry)
 	planner := service.NewAutomationSaveValidator(registry, drafts)
@@ -528,7 +528,7 @@ func TestAutomationDuplicateOpensUnsavedDraftAndSavesIndependentCopy(t *testing.
 	tc := NewTestContext(t)
 	project := tc.CreateProject().WithName("Duplicate Automation Project").Build()
 	foreignProject := tc.CreateProject().WithName("Foreign Duplicate Project").Build()
-	automationRepo := sqlite.NewAutomationRepo(tc.db)
+	automationRepo := teststores.Of(tc.db).Automations
 	registry := service.NewAutomationAdapterRegistry()
 	drafts := service.NewAutomationDraftService(automationRepo, registry)
 	validator := service.NewAutomationSaveValidator(registry, drafts)
@@ -665,7 +665,7 @@ func TestAutomationDuplicateOpensUnsavedDraftAndSavesIndependentCopy(t *testing.
 func TestAutomationDuplicateNameRemainsDistinctAfterPreviewNormalization(t *testing.T) {
 	tc := NewTestContext(t)
 	project := tc.CreateProject().WithName("Duplicate name boundary project").Build()
-	automationRepo := sqlite.NewAutomationRepo(tc.db)
+	automationRepo := teststores.Of(tc.db).Automations
 	registry := service.NewAutomationAdapterRegistry()
 	drafts := service.NewAutomationDraftService(automationRepo, registry)
 	validator := service.NewAutomationSaveValidator(registry, drafts)
@@ -732,7 +732,7 @@ func TestAutomationDuplicateNameIsAlwaysDistinct(t *testing.T) {
 func TestAutomationTemplateBuilderAddsAndSavesCustomNodes(t *testing.T) {
 	tc := NewTestContext(t)
 	project := tc.CreateProject().WithName("Template Custom Nodes Project").Build()
-	automationRepo := sqlite.NewAutomationRepo(tc.db)
+	automationRepo := teststores.Of(tc.db).Automations
 	registry := service.NewAutomationAdapterRegistry()
 	drafts := service.NewAutomationDraftService(automationRepo, registry)
 	planner := service.NewAutomationSaveValidator(registry, drafts)
@@ -879,7 +879,7 @@ func TestAutomationTemplateBuilderAddsAndSavesCustomNodes(t *testing.T) {
 func TestAutomationBlankBuilderOffersGraphYAMLAndDetailsViews(t *testing.T) {
 	tc := NewTestContext(t)
 	project := tc.CreateProject().WithName("Blank Builder Project").Build()
-	automationRepo := sqlite.NewAutomationRepo(tc.db)
+	automationRepo := teststores.Of(tc.db).Automations
 	registry := service.NewAutomationAdapterRegistry()
 	drafts := service.NewAutomationDraftService(automationRepo, registry)
 	validator := service.NewAutomationSaveValidator(registry, drafts)
@@ -922,7 +922,7 @@ func TestAutomationBlankBuilderOffersGraphYAMLAndDetailsViews(t *testing.T) {
 func TestAutomationBlankBuilderUsesYAMLForCustomTopology(t *testing.T) {
 	tc := NewTestContext(t)
 	project := tc.CreateProject().WithName("YAML Custom Project").Build()
-	automationRepo := sqlite.NewAutomationRepo(tc.db)
+	automationRepo := teststores.Of(tc.db).Automations
 	registry := service.NewAutomationAdapterRegistry()
 	drafts := service.NewAutomationDraftService(automationRepo, registry)
 	planner := service.NewAutomationSaveValidator(registry, drafts)
@@ -964,7 +964,7 @@ func TestAutomationBlankBuilderUsesYAMLForCustomTopology(t *testing.T) {
 func TestAutomationBuilderPreviewRestoresDetailsView(t *testing.T) {
 	tc := NewTestContext(t)
 	project := tc.CreateProject().WithName("Details preview project").Build()
-	automationRepo := sqlite.NewAutomationRepo(tc.db)
+	automationRepo := teststores.Of(tc.db).Automations
 	registry := service.NewAutomationAdapterRegistry()
 	drafts := service.NewAutomationDraftService(automationRepo, registry)
 	validator := service.NewAutomationSaveValidator(registry, drafts)
@@ -1029,7 +1029,7 @@ func TestAutomationYAMLParseReportsMalformedDocumentsWithoutSideEffects(t *testi
 func TestAutomationBuilderVisualActionsDecodeAndReserializeYAML(t *testing.T) {
 	tc := NewTestContext(t)
 	project := tc.CreateProject().WithName("Visual YAML Builder Project").Build()
-	automationRepo := sqlite.NewAutomationRepo(tc.db)
+	automationRepo := teststores.Of(tc.db).Automations
 	registry := service.NewAutomationAdapterRegistry()
 	drafts := service.NewAutomationDraftService(automationRepo, registry)
 	validator := service.NewAutomationSaveValidator(registry, drafts)
@@ -1067,11 +1067,11 @@ func TestAutomationBuilderVisualActionsDecodeAndReserializeYAML(t *testing.T) {
 func TestAutomationBuilderPreviewUsesCompilerValidation(t *testing.T) {
 	tc := NewTestContext(t)
 	project := tc.CreateProject().WithName("Compiler Preview Project").Build()
-	automationRepo := sqlite.NewAutomationRepo(tc.db)
+	automationRepo := teststores.Of(tc.db).Automations
 	registry := service.NewAutomationAdapterRegistry()
 	drafts := service.NewAutomationDraftService(automationRepo, registry)
 	validator := service.NewAutomationSaveValidator(registry, drafts)
-	validator.SetAgentRepository(sqlite.NewAgentRepo(tc.db))
+	validator.SetAgentRepository(teststores.Of(tc.db).Agents)
 	compiler := service.NewAutomationCompiler(automationRepo, tc.handler.taskSvc, tc.taskRepo, tc.scheduleRepo, validator)
 	tc.handler.SetAutomationServices(service.NewAutomationGraphService(automationRepo), nil)
 	tc.handler.SetAutomationBuilderServices(drafts, nil, validator, compiler, nil, nil)
@@ -1115,16 +1115,16 @@ func TestAutomationBuilderPreviewUsesSingleCompactAgentValidationPass(t *testing
 	db, counter := testutil.NewStatementCountingTestDB(t)
 	h, _, _ := setupTestHandlerForDB(t, db)
 	ctx := context.Background()
-	projectRepo := sqlite.NewProjectRepo(db)
+	projectRepo := teststores.Of(db).Projects
 	project := &models.Project{Name: "Single Agent validation preview"}
 	require.NoError(t, projectRepo.Create(ctx, project))
-	agentRepo := sqlite.NewAgentRepo(db)
+	agentRepo := teststores.Of(db).Agents
 	agent := &models.Agent{Name: "Preview Agent", Key: "preview-agent", SystemPrompt: "private preview prompt", Model: "inherit", Tools: []string{"Read"}, Enabled: true, SelectableAsPrimary: true}
 	require.NoError(t, agentRepo.Create(ctx, agent))
 	h.SetAgentRepo(agentRepo)
 
 	registry := service.NewAutomationAdapterRegistry()
-	automationRepo := sqlite.NewAutomationRepo(db)
+	automationRepo := teststores.Of(db).Automations
 	drafts := service.NewAutomationDraftService(automationRepo, registry)
 	capabilities := service.NewAutomationCapabilitySnapshotBuilder(projectRepo, agentRepo, nil, nil)
 	validator := service.NewAutomationSaveValidator(registry, drafts)
@@ -1180,16 +1180,16 @@ func TestAutomationBuilderEditUsesSingleCompactAgentValidationPass(t *testing.T)
 	db, counter := testutil.NewStatementCountingTestDB(t)
 	h, e, _ := setupTestHandlerForDB(t, db)
 	ctx := context.Background()
-	projectRepo := sqlite.NewProjectRepo(db)
+	projectRepo := teststores.Of(db).Projects
 	project := &models.Project{Name: "Single Agent validation edit"}
 	require.NoError(t, projectRepo.Create(ctx, project))
-	agentRepo := sqlite.NewAgentRepo(db)
+	agentRepo := teststores.Of(db).Agents
 	agent := &models.Agent{Name: "Edit Agent", Key: "edit-agent", SystemPrompt: "private edit prompt", Model: "inherit", Tools: []string{"Read"}, Enabled: true, SelectableAsPrimary: true}
 	require.NoError(t, agentRepo.Create(ctx, agent))
 	h.SetAgentRepo(agentRepo)
 
 	registry := service.NewAutomationAdapterRegistry()
-	automationRepo := sqlite.NewAutomationRepo(db)
+	automationRepo := teststores.Of(db).Automations
 	drafts := service.NewAutomationDraftService(automationRepo, registry)
 	capabilities := service.NewAutomationCapabilitySnapshotBuilder(projectRepo, agentRepo, nil, nil)
 	validator := service.NewAutomationSaveValidator(registry, drafts)
@@ -1276,10 +1276,10 @@ func TestAutomationBuilderCreateBatchesAgentResolution(t *testing.T) {
 	db, counter := testutil.NewStatementCountingTestDB(t)
 	h, e, _ := setupTestHandlerForDB(t, db)
 	ctx := context.Background()
-	projectRepo := sqlite.NewProjectRepo(db)
+	projectRepo := teststores.Of(db).Projects
 	project := &models.Project{Name: "Batched builder Agent create"}
 	require.NoError(t, projectRepo.Create(ctx, project))
-	agentRepo := sqlite.NewAgentRepo(db)
+	agentRepo := teststores.Of(db).Agents
 	if _, err := db.ExecContext(ctx, `DELETE FROM agents WHERE id IS NOT NULL`); err != nil {
 		t.Fatalf("clear agents: %v", err)
 	}
@@ -1295,7 +1295,7 @@ func TestAutomationBuilderCreateBatchesAgentResolution(t *testing.T) {
 	h.SetAgentRepo(agentRepo)
 
 	registry := service.NewAutomationAdapterRegistry()
-	automationRepo := sqlite.NewAutomationRepo(db)
+	automationRepo := teststores.Of(db).Automations
 	drafts := service.NewAutomationDraftService(automationRepo, registry)
 	capabilities := service.NewAutomationCapabilitySnapshotBuilder(projectRepo, agentRepo, nil, nil)
 	validator := service.NewAutomationSaveValidator(registry, drafts)
@@ -1376,11 +1376,11 @@ func serviceAutomationValidationReferenceCandidateForHandler(refs []string) mode
 }
 
 func TestAutomationBuilderRejectsUnsafeAndUnsupportedYAMLWithoutSideEffects(t *testing.T) {
-	newBuilder := func(t *testing.T) (*TestContext, *models.Project, *sqlite.AutomationRepo, *service.AutomationDraftService) {
+	newBuilder := func(t *testing.T) (*TestContext, *models.Project, persistence.AutomationStore, *service.AutomationDraftService) {
 		t.Helper()
 		tc := NewTestContext(t)
 		project := tc.CreateProject().WithName("YAML configuration validation project").Build()
-		automationRepo := sqlite.NewAutomationRepo(tc.db)
+		automationRepo := teststores.Of(tc.db).Automations
 		registry := service.NewAutomationAdapterRegistry()
 		drafts := service.NewAutomationDraftService(automationRepo, registry)
 		validator := service.NewAutomationSaveValidator(registry, drafts)
@@ -1474,11 +1474,11 @@ func TestAutomationBuilderRejectsUnsafeAndUnsupportedYAMLWithoutSideEffects(t *t
 }
 
 func TestAutomationBuilderRejectsEmptyYAMLWithoutSideEffects(t *testing.T) {
-	newBuilder := func(t *testing.T) (*TestContext, *models.Project, *sqlite.AutomationRepo, *service.AutomationDraftService) {
+	newBuilder := func(t *testing.T) (*TestContext, *models.Project, persistence.AutomationStore, *service.AutomationDraftService) {
 		t.Helper()
 		tc := NewTestContext(t)
 		project := tc.CreateProject().WithName("Empty YAML Builder Project").Build()
-		automationRepo := sqlite.NewAutomationRepo(tc.db)
+		automationRepo := teststores.Of(tc.db).Automations
 		registry := service.NewAutomationAdapterRegistry()
 		drafts := service.NewAutomationDraftService(automationRepo, registry)
 		validator := service.NewAutomationSaveValidator(registry, drafts)
@@ -1539,7 +1539,7 @@ func TestAutomationBuilderRejectsEmptyYAMLWithoutSideEffects(t *testing.T) {
 func TestAutomationBuilderRejectsMalformedYAMLWithoutSideEffects(t *testing.T) {
 	tc := NewTestContext(t)
 	project := tc.CreateProject().WithName("Malformed YAML Project").Build()
-	automationRepo := sqlite.NewAutomationRepo(tc.db)
+	automationRepo := teststores.Of(tc.db).Automations
 	drafts := service.NewAutomationDraftService(automationRepo, service.NewAutomationAdapterRegistry())
 	tc.handler.SetAutomationServices(service.NewAutomationGraphService(automationRepo), nil)
 	tc.handler.SetAutomationBuilderServices(drafts, nil, nil, nil, nil, nil)
@@ -1570,7 +1570,7 @@ func TestAutomationBuilderManualInboxDefaultsMatchMaintainedTemplateDefaults(t *
 		t.Run(tcSpec.name, func(t *testing.T) {
 			tc := NewTestContext(t)
 			project := tc.CreateProject().WithName("Inbox Defaults Project").Build()
-			automationRepo := sqlite.NewAutomationRepo(tc.db)
+			automationRepo := teststores.Of(tc.db).Automations
 			registry := service.NewAutomationAdapterRegistry()
 			drafts := service.NewAutomationDraftService(automationRepo, registry)
 			planner := service.NewAutomationSaveValidator(registry, drafts)
@@ -1611,7 +1611,7 @@ func TestAutomationBuilderManualInboxDefaultsMatchMaintainedTemplateDefaults(t *
 func TestAutomationBuilderSavesUnsupportedCustomConnectionsWithoutExecutingThem(t *testing.T) {
 	tc := NewTestContext(t)
 	project := tc.CreateProject().WithName("Freeform Builder Project").Build()
-	automationRepo := sqlite.NewAutomationRepo(tc.db)
+	automationRepo := teststores.Of(tc.db).Automations
 	registry := service.NewAutomationAdapterRegistry()
 	drafts := service.NewAutomationDraftService(automationRepo, registry)
 	planner := service.NewAutomationSaveValidator(registry, drafts)
@@ -1728,7 +1728,7 @@ func TestAutomationBuilderConfiguresGoalsForOwnedAndImplementationTasks(t *testi
 	tc := NewTestContext(t)
 	ctx := context.Background()
 	project := tc.CreateProject().WithName("Automation task goals").Build()
-	automationRepo := sqlite.NewAutomationRepo(tc.db)
+	automationRepo := teststores.Of(tc.db).Automations
 	registry := service.NewAutomationAdapterRegistry()
 	drafts := service.NewAutomationDraftService(automationRepo, registry)
 	validator := service.NewAutomationSaveValidator(registry, drafts)
@@ -1767,7 +1767,7 @@ func TestAutomationBuilderConfiguresGoalsForOwnedAndImplementationTasks(t *testi
 	require.NoError(t, tc.db.QueryRowContext(ctx, `SELECT resource_id FROM automation_definition_resources resource
 		JOIN automation_nodes node ON node.id = resource.node_id
 		WHERE node.node_key = 'vision_suggestions' AND resource.resource_type = 'task'`).Scan(&taskID))
-	goal, err := sqlite.NewTaskGoalRepo(tc.db).GetByTaskID(ctx, taskID)
+	goal, err := teststores.Of(tc.db).TaskGoals.GetByTaskID(ctx, taskID)
 	require.NoError(t, err)
 	require.NotNil(t, goal)
 	require.Equal(t, "Produce one reviewable product suggestion.", goal.Objective)
@@ -1777,7 +1777,7 @@ func TestAutomationLegacyMaintainedTemplateCanReplaceWithLatestRevision(t *testi
 	tc := NewTestContext(t)
 	ctx := context.Background()
 	project := tc.CreateProject().WithName("Legacy maintained template update").Build()
-	automationRepo := sqlite.NewAutomationRepo(tc.db)
+	automationRepo := teststores.Of(tc.db).Automations
 	registry := service.NewAutomationAdapterRegistry()
 	drafts := service.NewAutomationDraftService(automationRepo, registry)
 	validator := service.NewAutomationSaveValidator(registry, drafts)
@@ -1877,13 +1877,13 @@ func TestAutomationGitHubTemplateSaveExplainsUnavailableProjectSetup(t *testing.
 	project := tc.CreateProject().WithName("GitHub template without setup").Build()
 	project.DefaultAgentConfigID = &projectDefault.ID
 	require.NoError(t, tc.projectRepo.Update(ctx, project))
-	automationRepo := sqlite.NewAutomationRepo(tc.db)
+	automationRepo := teststores.Of(tc.db).Automations
 	registry := service.NewAutomationAdapterRegistry()
 	drafts := service.NewAutomationDraftService(automationRepo, registry)
 	validator := service.NewAutomationSaveValidator(registry, drafts)
-	githubAuthRepo := sqlite.NewGitHubAuthRepo(tc.db)
+	githubAuthRepo := teststores.Of(tc.db).GitHubAuth
 	validator.SetCapabilityDependencies(tc.projectRepo, tc.settingsRepo, githubAuthRepo)
-	capabilities := service.NewAutomationCapabilitySnapshotBuilder(tc.projectRepo, sqlite.NewAgentRepo(tc.db), tc.taskRepo, tc.settingsRepo)
+	capabilities := service.NewAutomationCapabilitySnapshotBuilder(tc.projectRepo, teststores.Of(tc.db).Agents, tc.taskRepo, tc.settingsRepo)
 	capabilities.SetLLMConfigRepository(tc.llmConfigRepo)
 	capabilities.SetGitHubAuthRepository(githubAuthRepo)
 	drafts.SetCapabilitySnapshotBuilder(capabilities)
@@ -1930,7 +1930,7 @@ func TestAutomationGitHubTemplateSaveUsesVisibleGitHubSetupAndBrowserActionField
 	require.NoError(t, tc.projectRepo.Update(ctx, project))
 	require.NoError(t, tc.settingsRepo.Set(ctx, service.GitHubSettingAuthMode, service.GitHubAuthModePAT))
 	require.NoError(t, tc.settingsRepo.Set(ctx, service.GitHubSettingPAT, "configured-test-pat"))
-	githubAuthRepo := sqlite.NewGitHubAuthRepo(tc.db)
+	githubAuthRepo := teststores.Of(tc.db).GitHubAuth
 	require.NoError(t, githubAuthRepo.UpsertAuthorizedActor(ctx, &models.GitHubAuthorizedActor{GitHubLogin: "configured-user"}))
 	github := &fakeGitHubService{
 		statusFn: func(context.Context) (service.GitHubConnectionStatus, error) {
@@ -1942,13 +1942,13 @@ func TestAutomationGitHubTemplateSaveUsesVisibleGitHubSetupAndBrowserActionField
 			return &service.GitHubRepoRef{Owner: "openvibely", Name: "openvibely", FullName: "openvibely/openvibely", HTMLURL: "https://github.com/openvibely/openvibely"}, nil
 		},
 	}
-	automationRepo := sqlite.NewAutomationRepo(tc.db)
+	automationRepo := teststores.Of(tc.db).Automations
 	registry := service.NewAutomationAdapterRegistry()
 	drafts := service.NewAutomationDraftService(automationRepo, registry)
 	validator := service.NewAutomationSaveValidator(registry, drafts)
 	validator.SetCapabilityDependencies(tc.projectRepo, tc.settingsRepo, githubAuthRepo)
 	validator.SetGitHubConnectionProvider(github)
-	capabilities := service.NewAutomationCapabilitySnapshotBuilder(tc.projectRepo, sqlite.NewAgentRepo(tc.db), tc.taskRepo, tc.settingsRepo)
+	capabilities := service.NewAutomationCapabilitySnapshotBuilder(tc.projectRepo, teststores.Of(tc.db).Agents, tc.taskRepo, tc.settingsRepo)
 	capabilities.SetGitHubAuthRepository(githubAuthRepo)
 	capabilities.SetGitHubConnectionProvider(github)
 	drafts.SetCapabilitySnapshotBuilder(capabilities)
@@ -2018,7 +2018,7 @@ func TestAutomationGitHubTemplateSaveUsesVisibleGitHubSetupAndBrowserActionField
 func TestAutomationBrowserRejectsForgedNewVisionDriverCandidateAndAllowsExistingEdit(t *testing.T) {
 	tc := NewTestContext(t)
 	project := tc.CreateProject().WithName("Forged Vision Driver candidate").Build()
-	automationRepo := sqlite.NewAutomationRepo(tc.db)
+	automationRepo := teststores.Of(tc.db).Automations
 	registry := service.NewAutomationAdapterRegistry()
 	drafts := service.NewAutomationDraftService(automationRepo, registry)
 	validator := service.NewAutomationSaveValidator(registry, drafts)
@@ -2060,7 +2060,7 @@ func TestAutomationBrowserRejectsForgedNewVisionDriverCandidateAndAllowsExisting
 func TestAutomationDuplicateRejectsSavedVisionDriver(t *testing.T) {
 	tc := NewTestContext(t)
 	project := tc.CreateProject().WithName("Vision Driver duplicate eligibility").Build()
-	automationRepo := sqlite.NewAutomationRepo(tc.db)
+	automationRepo := teststores.Of(tc.db).Automations
 	registry := service.NewAutomationAdapterRegistry()
 	drafts := service.NewAutomationDraftService(automationRepo, registry)
 	validator := service.NewAutomationSaveValidator(registry, drafts)
@@ -2086,7 +2086,7 @@ func TestAutomationDuplicateRejectsSavedVisionDriver(t *testing.T) {
 	require.NotContains(t, duplicate.Body.String(), candidate.Description)
 }
 
-func seedExistingVisionDriverForHandler(t *testing.T, tc *TestContext, automationRepo *sqlite.AutomationRepo, projectID string, candidate models.AutomationDraftCandidate) *models.AutomationDefinition {
+func seedExistingVisionDriverForHandler(t *testing.T, tc *TestContext, automationRepo persistence.AutomationStore, projectID string, candidate models.AutomationDraftCandidate) *models.AutomationDefinition {
 	t.Helper()
 	ctx := context.Background()
 	task := &models.Task{ProjectID: projectID, Title: "Existing Vision Driver", Prompt: candidate.Nodes[0].Config["prompt"].(string),
@@ -2130,14 +2130,14 @@ func TestAutomationBuilderWebSaveIsBrowserLocalUntilAtomicSaveAndProjectScoped(t
 	tc := NewTestContext(t)
 	project := tc.CreateProject().WithName("Builder Project").Build()
 	other := tc.CreateProject().WithName("Builder Other").Build()
-	automationRepo := sqlite.NewAutomationRepo(tc.db)
+	automationRepo := teststores.Of(tc.db).Automations
 	registry := service.NewAutomationAdapterRegistry()
 	drafts := service.NewAutomationDraftService(automationRepo, registry)
 	planner := service.NewAutomationSaveValidator(registry, drafts)
 	compiler := service.NewAutomationCompiler(automationRepo, tc.handler.taskSvc, tc.taskRepo, tc.scheduleRepo, planner)
 	confirmation := service.NewAutomationConfirmationService(automationRepo, tc.execRepo, []byte("handler-confirmation-secret-32-bytes"))
 	lifecycle := service.NewAutomationLifecycleService(automationRepo, tc.scheduleRepo)
-	agentRepo := sqlite.NewAgentRepo(tc.db)
+	agentRepo := teststores.Of(tc.db).Agents
 	architect := models.Agent{Name: "Builder Architect", Key: "builder_architect", Scope: models.AgentScopeProject, ProjectID: project.ID,
 		Enabled: true, SelectableAsPrimary: true, Skills: []models.SkillConfig{{Name: "project-guidance", Description: "Guide", Content: "safe"}}}
 	require.NoError(t, agentRepo.Create(context.Background(), &architect))
@@ -2280,7 +2280,7 @@ func TestAutomationBuilderWebSaveIsBrowserLocalUntilAtomicSaveAndProjectScoped(t
 func TestAutomationBuilderRecoversDeletedRetainedNativeResources(t *testing.T) {
 	tc := NewTestContext(t)
 	project := tc.CreateProject().WithName("Recover Native automation resources").Build()
-	automationRepo := sqlite.NewAutomationRepo(tc.db)
+	automationRepo := teststores.Of(tc.db).Automations
 	registry := service.NewAutomationAdapterRegistry()
 	drafts := service.NewAutomationDraftService(automationRepo, registry)
 	planner := service.NewAutomationSaveValidator(registry, drafts)
@@ -2409,7 +2409,7 @@ func TestAutomationBrowserSaveRejectsMalformedConnectorPorts(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			tc := NewTestContext(t)
 			project := tc.CreateProject().WithName("Strict connector Save").Build()
-			automationRepo := sqlite.NewAutomationRepo(tc.db)
+			automationRepo := teststores.Of(tc.db).Automations
 			registry := service.NewAutomationAdapterRegistry()
 			drafts := service.NewAutomationDraftService(automationRepo, registry)
 			planner := service.NewAutomationSaveValidator(registry, drafts)
@@ -2442,11 +2442,11 @@ func TestAutomationChatExplicitSavePersistsInSingleToolCall(t *testing.T) {
 	tc := NewTestContext(t)
 	ctx := context.Background()
 	project := tc.CreateProject().WithName("Automation direct Chat save").Build()
-	automationRepo := sqlite.NewAutomationRepo(tc.db)
+	automationRepo := teststores.Of(tc.db).Automations
 	registry := service.NewAutomationAdapterRegistry()
 	drafts := service.NewAutomationDraftService(automationRepo, registry)
 	planner := service.NewAutomationSaveValidator(registry, drafts)
-	capabilities := service.NewAutomationCapabilitySnapshotBuilder(tc.projectRepo, sqlite.NewAgentRepo(tc.db), tc.taskRepo, tc.settingsRepo)
+	capabilities := service.NewAutomationCapabilitySnapshotBuilder(tc.projectRepo, teststores.Of(tc.db).Agents, tc.taskRepo, tc.settingsRepo)
 	compiler := service.NewAutomationCompiler(automationRepo, tc.handler.taskSvc, tc.taskRepo, tc.scheduleRepo, planner)
 	tc.handler.SetAutomationServices(service.NewAutomationGraphService(automationRepo), nil)
 	tc.handler.SetAutomationBuilderServices(drafts, capabilities, planner, compiler, nil, service.NewAutomationLifecycleService(automationRepo, tc.scheduleRepo))
@@ -2490,13 +2490,13 @@ func configureAutomationChatRuntimeTestServices(t *testing.T, tc *TestContext) *
 	return drafts
 }
 
-func configureAutomationChatRuntimeTestServicesWithRepo(t *testing.T, tc *TestContext) (*service.AutomationDraftService, *sqlite.AutomationRepo) {
+func configureAutomationChatRuntimeTestServicesWithRepo(t *testing.T, tc *TestContext) (*service.AutomationDraftService, persistence.AutomationStore) {
 	t.Helper()
-	automationRepo := sqlite.NewAutomationRepo(tc.db)
+	automationRepo := teststores.Of(tc.db).Automations
 	registry := service.NewAutomationAdapterRegistry()
 	drafts := service.NewAutomationDraftService(automationRepo, registry)
 	validator := service.NewAutomationSaveValidator(registry, drafts)
-	capabilities := service.NewAutomationCapabilitySnapshotBuilder(tc.projectRepo, sqlite.NewAgentRepo(tc.db), tc.taskRepo, tc.settingsRepo)
+	capabilities := service.NewAutomationCapabilitySnapshotBuilder(tc.projectRepo, teststores.Of(tc.db).Agents, tc.taskRepo, tc.settingsRepo)
 	compiler := service.NewAutomationCompiler(automationRepo, tc.handler.taskSvc, tc.taskRepo, tc.scheduleRepo, validator)
 	tc.handler.SetAutomationServices(service.NewAutomationGraphService(automationRepo), nil)
 	tc.handler.SetAutomationBuilderServices(drafts, capabilities, validator, compiler, nil, service.NewAutomationLifecycleService(automationRepo, tc.scheduleRepo))
@@ -2651,7 +2651,7 @@ func TestAutomationChatReadToolsPreserveSharedSummaryEnvelope(t *testing.T) {
 	require.Positive(t, graphNodeCount)
 	var runningNodeID string
 	require.NoError(t, tc.db.QueryRowContext(ctx, `SELECT id FROM automation_nodes WHERE project_id = ? AND automation_id = ? AND version_id = ? ORDER BY id LIMIT 1`, project.ID, automationID, cards[0].Version.ID).Scan(&runningNodeID))
-	_, _, err = sqlite.NewAutomationRepo(tc.db).RecordProjectionEvent(ctx, persistence.AutomationProjectionEvent{
+	_, _, err = teststores.Of(tc.db).Automations.RecordProjectionEvent(ctx, persistence.AutomationProjectionEvent{
 		Context:        models.AutomationContext{ProjectID: project.ID},
 		Binding:        models.AutomationBinding{AutomationID: automationID, VersionID: cards[0].Version.ID, NodeID: runningNodeID},
 		WorkItemKey:    "chat-read:running",
@@ -2720,12 +2720,12 @@ func TestAutomationChatReadToolsUseBoundedRuntimePageAndDirectLookup(t *testing.
 	db, counter := testutil.NewStatementCountingTestDB(t)
 	h, _, _ := setupTestHandlerForDB(t, db)
 	ctx := context.Background()
-	projectRepo := sqlite.NewProjectRepo(db)
+	projectRepo := teststores.Of(db).Projects
 	project := &models.Project{Name: "Bounded Automation runtime reads"}
 	require.NoError(t, projectRepo.Create(ctx, project))
 	foreign := &models.Project{Name: "Foreign bounded Automation runtime reads"}
 	require.NoError(t, projectRepo.Create(ctx, foreign))
-	automationRepo := sqlite.NewAutomationRepo(db)
+	automationRepo := teststores.Of(db).Automations
 	h.SetAutomationServices(service.NewAutomationGraphService(automationRepo), nil)
 
 	insertAutomation := func(projectID string, ordinal int) string {
@@ -3228,11 +3228,11 @@ func TestAutomationChatSaveYAMLPersistsThroughCompilerPipeline(t *testing.T) {
 	tc := NewTestContext(t)
 	ctx := context.Background()
 	project := tc.CreateProject().WithName("Automation YAML Chat save").Build()
-	automationRepo := sqlite.NewAutomationRepo(tc.db)
+	automationRepo := teststores.Of(tc.db).Automations
 	registry := service.NewAutomationAdapterRegistry()
 	drafts := service.NewAutomationDraftService(automationRepo, registry)
 	planner := service.NewAutomationSaveValidator(registry, drafts)
-	agentRepo := sqlite.NewAgentRepo(tc.db)
+	agentRepo := teststores.Of(tc.db).Agents
 	agent := &models.Agent{Name: "Chat Save Agent", Key: "chat-save-agent", SystemPrompt: "private Chat save Agent prompt", Model: "inherit", Tools: []string{"Read"}, Enabled: true, SelectableAsPrimary: true}
 	require.NoError(t, agentRepo.Create(ctx, agent))
 	tc.handler.SetAgentRepo(agentRepo)
@@ -3272,7 +3272,7 @@ func TestAutomationChatSaveYAMLRejectsCandidateIdentityFieldsWithoutSideEffects(
 			tc := NewTestContext(t)
 			ctx := context.Background()
 			project := tc.CreateProject().WithName("Automation YAML Chat identity").Build()
-			automationRepo := sqlite.NewAutomationRepo(tc.db)
+			automationRepo := teststores.Of(tc.db).Automations
 			registry := service.NewAutomationAdapterRegistry()
 			drafts := service.NewAutomationDraftService(automationRepo, registry)
 			planner := service.NewAutomationSaveValidator(registry, drafts)
@@ -3359,7 +3359,7 @@ func TestAutomationChatSaveYAMLRejectsInvalidDefinitionsWithoutSideEffects(t *te
 			tc := NewTestContext(t)
 			ctx := context.Background()
 			project := tc.CreateProject().WithName("Automation YAML Chat invalid").Build()
-			automationRepo := sqlite.NewAutomationRepo(tc.db)
+			automationRepo := teststores.Of(tc.db).Automations
 			registry := service.NewAutomationAdapterRegistry()
 			drafts := service.NewAutomationDraftService(automationRepo, registry)
 			planner := service.NewAutomationSaveValidator(registry, drafts)
@@ -3388,7 +3388,7 @@ func TestAutomationChatSaveYAMLRejectsInvalidDefinitionsWithoutSideEffects(t *te
 func TestAutomationChatAndWebCreationHaveNoDraftSurfaceBeforeSave(t *testing.T) {
 	tc := NewTestContext(t)
 	project := tc.CreateProject().WithName("Automation save surfaces").Build()
-	automationRepo := sqlite.NewAutomationRepo(tc.db)
+	automationRepo := teststores.Of(tc.db).Automations
 	registry := service.NewAutomationAdapterRegistry()
 	drafts := service.NewAutomationDraftService(automationRepo, registry)
 	validator := service.NewAutomationSaveValidator(registry, drafts)
@@ -3418,7 +3418,7 @@ func TestAutomationChatSaveRejectsCandidateIdentity(t *testing.T) {
 	tc := NewTestContext(t)
 	ctx := context.Background()
 	project := tc.CreateProject().WithName("Automation Chat Identity").Build()
-	automationRepo := sqlite.NewAutomationRepo(tc.db)
+	automationRepo := teststores.Of(tc.db).Automations
 	registry := service.NewAutomationAdapterRegistry()
 	candidates := service.NewAutomationDraftService(automationRepo, registry)
 	planner := service.NewAutomationSaveValidator(registry, candidates)
@@ -3450,10 +3450,10 @@ func TestAutomationDescribeFailureIsVisibleAndPreservesInput(t *testing.T) {
 	tc := NewTestContext(t)
 	ctx := context.Background()
 	project := tc.CreateProject().WithName("Unsupported stock monitor").Build()
-	automationRepo := sqlite.NewAutomationRepo(tc.db)
+	automationRepo := teststores.Of(tc.db).Automations
 	registry := service.NewAutomationAdapterRegistry()
 	drafts := service.NewAutomationDraftService(automationRepo, registry)
-	capabilities := service.NewAutomationCapabilitySnapshotBuilder(tc.projectRepo, sqlite.NewAgentRepo(tc.db), tc.taskRepo, tc.settingsRepo)
+	capabilities := service.NewAutomationCapabilitySnapshotBuilder(tc.projectRepo, teststores.Of(tc.db).Agents, tc.taskRepo, tc.settingsRepo)
 	tc.handler.SetAutomationBuilderServices(drafts, capabilities, nil, nil, nil, nil)
 	model := models.LLMConfig{Name: "Automation generator", Provider: models.ProviderTest, Model: "test", IsDefault: true}
 	require.NoError(t, tc.llmConfigRepo.Create(ctx, &model))
@@ -3483,12 +3483,12 @@ func TestAutomationDescribePreviewUsesEditShell(t *testing.T) {
 	tc := NewTestContext(t)
 	ctx := context.Background()
 	project := tc.CreateProject().WithName("Describe save surface").Build()
-	automationRepo := sqlite.NewAutomationRepo(tc.db)
+	automationRepo := teststores.Of(tc.db).Automations
 	registry := service.NewAutomationAdapterRegistry()
 	drafts := service.NewAutomationDraftService(automationRepo, registry)
 	validator := service.NewAutomationSaveValidator(registry, drafts)
 	compiler := service.NewAutomationCompiler(automationRepo, tc.handler.taskSvc, tc.taskRepo, tc.scheduleRepo, validator)
-	capabilities := service.NewAutomationCapabilitySnapshotBuilder(tc.projectRepo, sqlite.NewAgentRepo(tc.db), tc.taskRepo, tc.settingsRepo)
+	capabilities := service.NewAutomationCapabilitySnapshotBuilder(tc.projectRepo, teststores.Of(tc.db).Agents, tc.taskRepo, tc.settingsRepo)
 	tc.handler.SetAutomationBuilderServices(drafts, capabilities, validator, compiler, nil, service.NewAutomationLifecycleService(automationRepo, tc.scheduleRepo))
 	model := models.LLMConfig{Name: "Automation generator", Provider: models.ProviderTest, Model: "test", IsDefault: true}
 	require.NoError(t, tc.llmConfigRepo.Create(ctx, &model))
@@ -3526,12 +3526,12 @@ func TestAutomationCanonicalChatRuntimeExecutesPreviewAndDirectSave(t *testing.T
 	tc := NewTestContext(t)
 	ctx := context.Background()
 	project := tc.CreateProject().WithName("Automation runtime actions").Build()
-	automationRepo := sqlite.NewAutomationRepo(tc.db)
+	automationRepo := teststores.Of(tc.db).Automations
 	registry := service.NewAutomationAdapterRegistry()
 	drafts := service.NewAutomationDraftService(automationRepo, registry)
 	planner := service.NewAutomationSaveValidator(registry, drafts)
 	compiler := service.NewAutomationCompiler(automationRepo, tc.handler.taskSvc, tc.taskRepo, tc.scheduleRepo, planner)
-	capabilities := service.NewAutomationCapabilitySnapshotBuilder(tc.projectRepo, sqlite.NewAgentRepo(tc.db), tc.taskRepo, tc.settingsRepo)
+	capabilities := service.NewAutomationCapabilitySnapshotBuilder(tc.projectRepo, teststores.Of(tc.db).Agents, tc.taskRepo, tc.settingsRepo)
 	tc.handler.SetAutomationServices(service.NewAutomationGraphService(automationRepo), nil)
 	tc.handler.SetAutomationBuilderServices(drafts, capabilities, planner, compiler, nil, service.NewAutomationLifecycleService(automationRepo, tc.scheduleRepo))
 
@@ -3603,7 +3603,7 @@ func TestAutomationTaskFollowupGitHubToolsUseHardenedRuntime(t *testing.T) {
 	require.NoError(t, tc.taskRepo.Create(ctx, &task))
 	schedule := models.Schedule{TaskID: task.ID, RunAt: time.Now().UTC().Add(time.Hour), RepeatType: models.RepeatDaily, RepeatInterval: 1, Enabled: true}
 	require.NoError(t, tc.scheduleRepo.Create(ctx, &schedule))
-	automationRepo := sqlite.NewAutomationRepo(tc.db)
+	automationRepo := teststores.Of(tc.db).Automations
 	definition, _, err := service.NewAutomationRegistrationService(automationRepo, service.NewAutomationAdapterRegistry()).Register(ctx,
 		service.AutomationRegistrationRequest{ProjectID: project.ID, AdapterKey: service.AutomationAdapterGitHubSDLC,
 			StableKey: "github-sdlc/followup-safe", Resources: []models.AutomationResourceBinding{
@@ -3720,12 +3720,12 @@ func TestReplacedAutomationOriginTaskGitHubMutationsRemainFailClosed(t *testing.
 	project.RepoPath = t.TempDir()
 	require.NoError(t, tc.projectRepo.Update(ctx, project))
 
-	automationRepo := sqlite.NewAutomationRepo(tc.db)
+	automationRepo := teststores.Of(tc.db).Automations
 	registry := service.NewAutomationAdapterRegistry()
 	drafts := service.NewAutomationDraftService(automationRepo, registry)
 	validator := service.NewAutomationSaveValidator(registry, drafts)
 	compiler := service.NewAutomationCompiler(automationRepo,
-		service.NewTaskService(tc.taskRepo, sqlite.NewAttachmentRepo(tc.db), nil), tc.taskRepo, tc.scheduleRepo, validator)
+		service.NewTaskService(tc.taskRepo, teststores.Of(tc.db).Attachments, nil), tc.taskRepo, tc.scheduleRepo, validator)
 	candidate := models.AutomationDraftCandidate{SchemaVersion: 1, Name: "Replace task graph", Description: "Original graph",
 		AutomationType: "custom", AdapterKey: service.AutomationAdapterCustom,
 		Nodes: []models.AutomationDraftNode{{Key: "original", Name: "Original task", Type: models.AutomationNodeAgentTask, Role: "task",
@@ -3894,7 +3894,7 @@ func TestGoalAgentAutomationImplementationContinuationProjectsRunningNode(t *tes
 	producerSchedule := models.Schedule{TaskID: producerTask.ID, RunAt: time.Now().UTC().Add(time.Hour), RepeatType: models.RepeatDaily, RepeatInterval: 1, Enabled: true}
 	require.NoError(t, tc.scheduleRepo.Create(ctx, &producerSchedule))
 
-	automationRepo := sqlite.NewAutomationRepo(tc.db)
+	automationRepo := teststores.Of(tc.db).Automations
 	registration := service.NewAutomationRegistrationService(automationRepo, service.NewAutomationAdapterRegistry())
 	definition, _, err := registration.Register(ctx, service.AutomationRegistrationRequest{
 		ProjectID: project.ID, AdapterKey: service.AutomationAdapterNativeSDLC, StableKey: "native-sdlc/goal-continuation",
@@ -4016,7 +4016,7 @@ func TestAutomationSendToTaskPersistsCausalBindingsWithQueuedInput(t *testing.T)
 	require.NoError(t, tc.taskRepo.Create(ctx, &task))
 	schedule := models.Schedule{TaskID: task.ID, RunAt: time.Now().UTC().Add(time.Hour), RepeatType: models.RepeatDaily, RepeatInterval: 1, Enabled: true}
 	require.NoError(t, tc.scheduleRepo.Create(ctx, &schedule))
-	automationRepo := sqlite.NewAutomationRepo(tc.db)
+	automationRepo := teststores.Of(tc.db).Automations
 	registration := service.NewAutomationRegistrationService(automationRepo, service.NewAutomationAdapterRegistry())
 	definition, _, err := registration.Register(ctx, service.AutomationRegistrationRequest{ProjectID: project.ID,
 		AdapterKey: service.AutomationAdapterNativeSDLC, StableKey: "native-sdlc/queue", Resources: []models.AutomationResourceBinding{
@@ -4073,19 +4073,19 @@ func TestAutomationLiveYAMLUsesLoadedGraphWithoutSecondDefinitionRead(t *testing
 	db, counter := testutil.NewStatementCountingTestDB(t)
 	h, e, llmConfigRepo := setupTestHandlerForDB(t, db)
 	ctx := context.Background()
-	projectRepo := sqlite.NewProjectRepo(db)
+	projectRepo := teststores.Of(db).Projects
 	project := &models.Project{Name: "Automation Live YAML query budget"}
 	require.NoError(t, projectRepo.Create(ctx, project))
 
-	taskRepo := sqlite.NewTaskRepo(db, nil)
+	taskRepo := teststores.Of(db).Tasks
 	task := &models.Task{ProjectID: project.ID, Title: "Live YAML task", Category: models.CategoryScheduled,
 		Priority: 2, Status: models.StatusPending, Prompt: "Review the current request."}
 	require.NoError(t, taskRepo.Create(ctx, task))
 	schedule := &models.Schedule{TaskID: task.ID, RunAt: time.Now().UTC().Add(time.Hour),
 		RepeatType: models.RepeatDaily, RepeatInterval: 1, Enabled: true, ClearContextOnStart: true}
-	require.NoError(t, sqlite.NewScheduleRepo(db).Create(ctx, schedule))
+	require.NoError(t, teststores.Of(db).Schedules.Create(ctx, schedule))
 
-	automationRepo := sqlite.NewAutomationRepo(db)
+	automationRepo := teststores.Of(db).Automations
 	registry := service.NewAutomationAdapterRegistry()
 	registration := service.NewAutomationRegistrationService(automationRepo, registry)
 	drafts := service.NewAutomationDraftService(automationRepo, registry)
@@ -4136,7 +4136,7 @@ func TestRefreshAutomationExternalStateRouteRendersLiveGraphAndPreservesProjectS
 	tc := NewTestContext(t)
 	ctx := context.Background()
 	project := tc.CreateProject().WithName("External refresh handler project").Build()
-	automationRepo := sqlite.NewAutomationRepo(tc.db)
+	automationRepo := teststores.Of(tc.db).Automations
 	registration := service.NewAutomationRegistrationService(automationRepo, service.NewAutomationAdapterRegistry())
 	tc.handler.SetAutomationServices(service.NewAutomationGraphService(automationRepo), registration)
 
@@ -4153,7 +4153,7 @@ func TestRefreshAutomationExternalStateRouteRendersLiveGraphAndPreservesProjectS
 	})
 	require.NoError(t, err)
 	provider := &handlerAutomationExternalProvider{}
-	tc.handler.SetAutomationExternalStateService(service.NewAutomationExternalStateService(automationRepo, sqlite.NewTaskPullRequestRepo(tc.db), tc.projectRepo, provider))
+	tc.handler.SetAutomationExternalStateService(service.NewAutomationExternalStateService(automationRepo, teststores.Of(tc.db).TaskPullRequests, tc.projectRepo, provider))
 
 	response := tc.HTMX().Post(fmt.Sprintf("/automations/%s/refresh-external?project_id=%s", definition.Automation.ID, project.ID)).Execute()
 	require.Equal(t, http.StatusOK, response.Code, response.Body.String())

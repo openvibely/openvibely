@@ -10,13 +10,14 @@ import (
 
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/persistence/sqlite"
+	"github.com/openvibely/openvibely/internal/persistence"
+	"github.com/openvibely/openvibely/internal/testutil/teststores"
 )
 
-func setupSlackAuthHandler(t *testing.T) (*Handler, *echo.Echo, *sqlite.SlackAuthRepo, string) {
+func setupSlackAuthHandler(t *testing.T) (*Handler, *echo.Echo, persistence.SlackAuthStore, string) {
 	t.Helper()
 	h, e, _, db := setupTestHandlerWithDB(t)
-	slackAuthRepo := sqlite.NewSlackAuthRepo(db)
+	slackAuthRepo := teststores.Of(db).SlackAuth
 	h.SetSlackAuthRepo(slackAuthRepo)
 	project := createProject(t, h, "Slack Auth Project")
 	return h, e, slackAuthRepo, project.ID

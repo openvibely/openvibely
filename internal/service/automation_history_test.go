@@ -12,8 +12,8 @@ import (
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
-	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/openvibely/openvibely/internal/testutil/teststores"
 	"github.com/stretchr/testify/require"
 )
 
@@ -21,7 +21,7 @@ func createHistoryInvocation(t *testing.T, fixture automationRuntimeFixture, suf
 	t.Helper()
 	trigger := automationNodeByKey(t, fixture.definition, "vision_suggestions")
 	var invocation models.AutomationInvocation
-	err := fixture.repo.DB().QueryRow(`INSERT INTO automation_invocations
+	err := fixture.db.QueryRow(`INSERT INTO automation_invocations
 		(project_id, automation_id, version_id, trigger_node_id, trigger_resource_type, trigger_resource_id,
 		 occurrence_key, status, started_at, completed_at, error_message)
 		VALUES (?, ?, ?, ?, 'schedule', ?, ?, ?, CURRENT_TIMESTAMP,
@@ -40,18 +40,18 @@ func createHistoryInvocation(t *testing.T, fixture automationRuntimeFixture, suf
 	return invocation
 }
 
-func newAutomationWorkItemHistoryBenchFixture(tb testing.TB, rowCount int) (*sql.DB, *sqlite.AutomationRepo, string, string) {
+func newAutomationWorkItemHistoryBenchFixture(tb testing.TB, rowCount int) (*sql.DB, persistence.AutomationStore, string, string) {
 	tb.Helper()
-	db := testutil.NewTestDB(tb)
+	db := teststores.NewDB(tb)
 	projectID, automationID, versionID := createAutomationHistoryBenchDefinition(tb, db, "Automation work item history", "automation-work-items-history", "version-work-items-history")
 	seedAutomationWorkItemHistoryRows(tb, db, projectID, automationID, versionID, rowCount)
-	return db, sqlite.NewAutomationRepo(db), projectID, automationID
+	return db, teststores.Of(db).Automations, projectID, automationID
 }
 
 func createAutomationHistoryBenchDefinition(tb testing.TB, db *sql.DB, name, automationID, versionID string) (string, string, string) {
 	tb.Helper()
 	ctx := context.Background()
-	projectRepo := sqlite.NewProjectRepo(db)
+	projectRepo := teststores.Of(db).Projects
 	project := models.Project{Name: name}
 	require.NoError(tb, projectRepo.Create(ctx, &project))
 	_, err := db.ExecContext(ctx, `INSERT INTO automations
@@ -91,12 +91,12 @@ func seedAutomationWorkItemHistoryRows(tb testing.TB, db *sql.DB, projectID, aut
 	require.NoError(tb, tx.Commit())
 }
 
-func newAutomationTransitionHistoryBenchFixture(tb testing.TB, invocationCount, transitionsPerInvocation int) (*sql.DB, *sqlite.AutomationRepo, string, string, string, string) {
+func newAutomationTransitionHistoryBenchFixture(tb testing.TB, invocationCount, transitionsPerInvocation int) (*sql.DB, persistence.AutomationStore, string, string, string, string) {
 	tb.Helper()
-	db := testutil.NewTestDB(tb)
+	db := teststores.NewDB(tb)
 	projectID, automationID, versionID := createAutomationHistoryBenchDefinition(tb, db, "Automation transition history", "automation-transition-history", "version-transition-history")
 	targetInvocationID, targetWorkItemID := seedAutomationTransitionHistoryRows(tb, db, projectID, automationID, versionID, invocationCount, transitionsPerInvocation)
-	return db, sqlite.NewAutomationRepo(db), projectID, automationID, targetInvocationID, targetWorkItemID
+	return db, teststores.Of(db).Automations, projectID, automationID, targetInvocationID, targetWorkItemID
 }
 
 func seedAutomationTransitionHistoryRows(tb testing.TB, db *sql.DB, projectID, automationID, versionID string, invocationCount, transitionsPerInvocation int) (string, string) {
@@ -218,7 +218,7 @@ func TestAutomationHistoryStablePaginationAndProjectIsolation(t *testing.T) {
 	for i := 0; i < 4; i++ {
 		createHistoryInvocation(t, fixture, fmt.Sprint(i), "completed")
 	}
-	_, err := fixture.repo.DB().Exec(`UPDATE automation_invocations SET created_at = '2026-01-02 03:04:05', started_at = '2026-01-02 03:04:05' WHERE automation_id = ?`, fixture.definition.Automation.ID)
+	_, err := fixture.db.Exec(`UPDATE automation_invocations SET created_at = '2026-01-02 03:04:05', started_at = '2026-01-02 03:04:05' WHERE automation_id = ?`, fixture.definition.Automation.ID)
 	require.NoError(t, err)
 
 	first, err := fixture.repo.ListAutomationInvocations(ctx, fixture.project.ID, fixture.definition.Automation.ID, 2, "")
@@ -261,7 +261,7 @@ func TestAutomationHistoryInvocationIsolationWorkItemLifetimeAndReplay(t *testin
 		EventKey: "history:b:waiting", FromNodeID: producer.ID, ToNodeID: gate.ID, Transition: models.AutomationTransitionWaiting,
 	})
 	require.NoError(t, err)
-	_, err = fixture.repo.DB().Exec(`UPDATE automation_transitions SET occurred_at = CASE event_key
+	_, err = fixture.db.Exec(`UPDATE automation_transitions SET occurred_at = CASE event_key
 		WHEN 'history:a:entered' THEN '2026-01-01 00:00:00' WHEN 'history:b:waiting' THEN '2026-01-01 00:01:00' ELSE occurred_at END
 		WHERE automation_id = ?`, fixture.definition.Automation.ID)
 	require.NoError(t, err)
@@ -328,7 +328,7 @@ func TestAutomationHistoryMetricsAndHealthUsePersistedEvents(t *testing.T) {
 		EventKey: "metric:completed", FromNodeID: gate.ID, ToNodeID: completedNode.ID, Transition: models.AutomationTransitionCompleted,
 	})
 	require.NoError(t, err)
-	_, err = fixture.repo.DB().Exec(`UPDATE automation_transitions SET occurred_at = CASE event_key
+	_, err = fixture.db.Exec(`UPDATE automation_transitions SET occurred_at = CASE event_key
 		WHEN 'metric:entered' THEN '2026-01-01 00:00:00' WHEN 'metric:gate' THEN '2026-01-01 00:02:00'
 		WHEN 'metric:completed' THEN '2026-01-01 00:05:00' ELSE occurred_at END`)
 	require.NoError(t, err)
@@ -360,7 +360,7 @@ func TestAutomationHistoryMetricsAndHealthUsePersistedEvents(t *testing.T) {
 	for i := 0; i < 3; i++ {
 		createHistoryInvocation(t, fixture, fmt.Sprintf("failed-%d", i), "failed")
 	}
-	_, err = fixture.repo.DB().Exec(`UPDATE automation_invocations SET completed_at = '2099-01-01 00:00:00'
+	_, err = fixture.db.Exec(`UPDATE automation_invocations SET completed_at = '2099-01-01 00:00:00'
 		WHERE automation_id = ? AND status = 'failed'`, fixture.definition.Automation.ID)
 	require.NoError(t, err)
 	health, err = fixture.repo.RecomputeAutomationHealth(ctx, fixture.project.ID, fixture.definition.Automation.ID, time.Now().UTC())
@@ -376,7 +376,7 @@ func TestAutomationHistoryMetricsAndHealthUsePersistedEvents(t *testing.T) {
 	}
 	require.Equal(t, 3, recentTriggerFailures)
 	var lifecycle, storedHealth string
-	require.NoError(t, fixture.repo.DB().QueryRow(`SELECT lifecycle_state, health_state FROM automations WHERE id = ?`, fixture.definition.Automation.ID).Scan(&lifecycle, &storedHealth))
+	require.NoError(t, fixture.db.QueryRow(`SELECT lifecycle_state, health_state FROM automations WHERE id = ?`, fixture.definition.Automation.ID).Scan(&lifecycle, &storedHealth))
 	require.Equal(t, "active", lifecycle)
 	require.Equal(t, "unhealthy", storedHealth)
 }
@@ -403,7 +403,7 @@ func TestAutomationHistoryReplayPaginationSeedsPersistedPriorState(t *testing.T)
 		EventKey: "replay:paged:waiting", FromNodeID: producer.ID, ToNodeID: gate.ID, Transition: models.AutomationTransitionWaiting,
 	})
 	require.NoError(t, err)
-	_, err = fixture.repo.DB().Exec(`UPDATE automation_transitions SET occurred_at = CASE event_key
+	_, err = fixture.db.Exec(`UPDATE automation_transitions SET occurred_at = CASE event_key
 		WHEN 'replay:paged:entered' THEN '2026-01-01 00:00:00' WHEN 'replay:paged:waiting' THEN '2026-01-01 00:01:00' ELSE occurred_at END
 		WHERE automation_id = ?`, fixture.definition.Automation.ID)
 	require.NoError(t, err)
@@ -435,9 +435,9 @@ func TestAutomationHistoryActivityCursorIsStableAndCollectionBound(t *testing.T)
 		})
 		require.NoError(t, err)
 	}
-	_, err := fixture.repo.DB().Exec(`UPDATE automation_activities SET started_at = '2026-01-01 00:00:00' WHERE automation_id = ?`, fixture.definition.Automation.ID)
+	_, err := fixture.db.Exec(`UPDATE automation_activities SET started_at = '2026-01-01 00:00:00' WHERE automation_id = ?`, fixture.definition.Automation.ID)
 	require.NoError(t, err)
-	_, err = fixture.repo.DB().Exec(`UPDATE automation_transitions SET occurred_at = '2026-01-01 00:00:00' WHERE automation_id = ?`, fixture.definition.Automation.ID)
+	_, err = fixture.db.Exec(`UPDATE automation_transitions SET occurred_at = '2026-01-01 00:00:00' WHERE automation_id = ?`, fixture.definition.Automation.ID)
 	require.NoError(t, err)
 
 	first, err := fixture.repo.ListAutomationActivities(ctx, fixture.project.ID, fixture.definition.Automation.ID, invocation.ID, "", 2, "")
@@ -471,11 +471,11 @@ func TestAutomationHistoryWorkItemPaginationIsStableAndFilterBound(t *testing.T)
 		})
 		require.NoError(t, err)
 		if i >= 4 {
-			_, err = fixture.repo.DB().ExecContext(ctx, `UPDATE automation_work_items SET status = 'completed', completed_at = CURRENT_TIMESTAMP WHERE id = ?`, item.ID)
+			_, err = fixture.db.ExecContext(ctx, `UPDATE automation_work_items SET status = 'completed', completed_at = CURRENT_TIMESTAMP WHERE id = ?`, item.ID)
 			require.NoError(t, err)
 		}
 	}
-	_, err := fixture.repo.DB().Exec(`UPDATE automation_work_items SET created_at = '2026-01-01 00:00:00' WHERE automation_id = ?`, fixture.definition.Automation.ID)
+	_, err := fixture.db.Exec(`UPDATE automation_work_items SET created_at = '2026-01-01 00:00:00' WHERE automation_id = ?`, fixture.definition.Automation.ID)
 	require.NoError(t, err)
 
 	unfilteredFirst, err := fixture.repo.ListAutomationWorkItems(ctx, fixture.project.ID, fixture.definition.Automation.ID, "", 3, "")
@@ -623,30 +623,30 @@ func TestAutomationHistoryHealthReconciliationCoversEverySavedAutomationBeyondOn
 	for i := 0; i < 101; i++ {
 		automationID := fmt.Sprintf("health-batch-automation-%03d", i)
 		versionID := fmt.Sprintf("health-batch-version-%03d", i)
-		_, err := fixture.repo.DB().ExecContext(ctx, `INSERT INTO automations
+		_, err := fixture.db.ExecContext(ctx, `INSERT INTO automations
 			(id, project_id, stable_key, name, automation_type, lifecycle_state, created_via)
 			VALUES (?, ?, ?, ?, 'custom', 'active', 'web')`,
 			automationID, fixture.project.ID, automationID, fmt.Sprintf("Health batch %03d", i))
 		require.NoError(t, err)
-		_, err = fixture.repo.DB().ExecContext(ctx, `INSERT INTO automation_versions
+		_, err = fixture.db.ExecContext(ctx, `INSERT INTO automation_versions
 			(id, project_id, automation_id, version, state, source, adapter_key, schema_version, published_at)
 			VALUES (?, ?, ?, 1, 'published', 'manual', 'custom', 1, CURRENT_TIMESTAMP)`,
 			versionID, fixture.project.ID, automationID)
 		require.NoError(t, err)
-		_, err = fixture.repo.DB().ExecContext(ctx, `UPDATE automations SET published_version_id = ? WHERE id = ?`, versionID, automationID)
+		_, err = fixture.db.ExecContext(ctx, `UPDATE automations SET published_version_id = ? WHERE id = ?`, versionID, automationID)
 		require.NoError(t, err)
 	}
-	_, err := fixture.repo.DB().ExecContext(ctx, `UPDATE automations SET health_evaluated_at = NULL WHERE project_id = ?`, fixture.project.ID)
+	_, err := fixture.db.ExecContext(ctx, `UPDATE automations SET health_evaluated_at = NULL WHERE project_id = ?`, fixture.project.ID)
 	require.NoError(t, err)
 
 	err = fixture.repo.RecomputeAutomationHealthForAll(ctx, time.Date(2026, time.July, 27, 12, 0, 0, 0, time.UTC), 100)
 	require.NoError(t, err)
 
 	var saved, evaluated int
-	require.NoError(t, fixture.repo.DB().QueryRowContext(ctx, `SELECT COUNT(*) FROM automations
+	require.NoError(t, fixture.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM automations
 		WHERE project_id = ? AND published_version_id IS NOT NULL`, fixture.project.ID).Scan(&saved))
 	require.Greater(t, saved, 100)
-	require.NoError(t, fixture.repo.DB().QueryRowContext(ctx, `SELECT COUNT(*) FROM automations
+	require.NoError(t, fixture.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM automations
 		WHERE project_id = ? AND published_version_id IS NOT NULL AND health_evaluated_at IS NOT NULL`, fixture.project.ID).Scan(&evaluated))
 	require.Equal(t, saved, evaluated, "one reconciliation pass must not permanently starve saved Automations beyond the first batch")
 }
@@ -661,11 +661,11 @@ func TestAutomationHistoryHealthIgnoresStaleFailureAfterRecentSuccesses(t *testi
 	require.Equal(t, models.AutomationHealthUnknown, health.State)
 
 	staleFailure := createHistoryInvocation(t, fixture, "stale-failure", "failed")
-	_, err = fixture.repo.DB().Exec(`UPDATE automation_invocations SET completed_at = '2025-01-01 00:00:00', updated_at = '2025-01-01 00:00:00' WHERE id = ?`, staleFailure.ID)
+	_, err = fixture.db.Exec(`UPDATE automation_invocations SET completed_at = '2025-01-01 00:00:00', updated_at = '2025-01-01 00:00:00' WHERE id = ?`, staleFailure.ID)
 	require.NoError(t, err)
 	for i := 0; i < 3; i++ {
 		completed := createHistoryInvocation(t, fixture, fmt.Sprintf("recent-success-%d", i), "completed")
-		_, err = fixture.repo.DB().Exec(`UPDATE automation_invocations SET completed_at = ?, updated_at = ? WHERE id = ?`, now.Add(time.Duration(i)*time.Minute), now.Add(time.Duration(i)*time.Minute), completed.ID)
+		_, err = fixture.db.Exec(`UPDATE automation_invocations SET completed_at = ?, updated_at = ? WHERE id = ?`, now.Add(time.Duration(i)*time.Minute), now.Add(time.Duration(i)*time.Minute), completed.ID)
 		require.NoError(t, err)
 	}
 
@@ -673,7 +673,7 @@ func TestAutomationHistoryHealthIgnoresStaleFailureAfterRecentSuccesses(t *testi
 	require.NoError(t, err)
 	require.Equal(t, models.AutomationHealthHealthy, health.State)
 	var lifecycle string
-	require.NoError(t, fixture.repo.DB().QueryRow(`SELECT lifecycle_state FROM automations WHERE id = ?`, fixture.definition.Automation.ID).Scan(&lifecycle))
+	require.NoError(t, fixture.db.QueryRow(`SELECT lifecycle_state FROM automations WHERE id = ?`, fixture.definition.Automation.ID).Scan(&lifecycle))
 	require.Equal(t, "active", lifecycle)
 }
 
@@ -681,7 +681,7 @@ func TestAutomationHistoryHealthStableNoChangeSkipsAutomationUpdatesAndReducesSQ
 	for _, count := range []int{100, 500} {
 		t.Run(fmt.Sprintf("%d", count), func(t *testing.T) {
 			db, counter := testutil.NewStatementCountingTestDB(t)
-			repo := sqlite.NewAutomationRepo(db)
+			repo := teststores.Of(db).Automations
 			ctx := context.Background()
 			now := time.Date(2026, time.August, 1, 12, 0, 0, 0, time.UTC)
 			fixture := seedAutomationHealthReconciliationFixture(t, db, count, now)
@@ -709,10 +709,10 @@ func TestAutomationHistoryHealthChangedInputsPersistAffectedRecords(t *testing.T
 		ctx := context.Background()
 		now := time.Date(2026, time.August, 2, 12, 0, 0, 0, time.UTC)
 		completed := createHistoryInvocation(t, fixture, "blocked-baseline", "completed")
-		_, err := fixture.repo.DB().ExecContext(ctx, `UPDATE automation_invocations SET completed_at = ?, updated_at = ? WHERE id = ?`, now, now, completed.ID)
+		_, err := fixture.db.ExecContext(ctx, `UPDATE automation_invocations SET completed_at = ?, updated_at = ? WHERE id = ?`, now, now, completed.ID)
 		require.NoError(t, err)
 		require.NoError(t, fixture.repo.RecomputeAutomationHealthForAll(ctx, now, 100))
-		requireAutomationHealthState(t, fixture.repo.DB(), fixture.definition.Automation.ID, models.AutomationHealthHealthy, "Recent triggers")
+		requireAutomationHealthState(t, fixture.db, fixture.definition.Automation.ID, models.AutomationHealthHealthy, "Recent triggers")
 
 		producer := automationNodeByKey(t, fixture.definition, "vision_suggestions")
 		gate := automationNodeByKey(t, fixture.definition, "approval")
@@ -732,7 +732,7 @@ func TestAutomationHistoryHealthChangedInputsPersistAffectedRecords(t *testing.T
 		require.NoError(t, err)
 
 		require.NoError(t, fixture.repo.RecomputeAutomationHealthForAll(ctx, now.Add(time.Minute), 100))
-		requireAutomationHealthState(t, fixture.repo.DB(), fixture.definition.Automation.ID, models.AutomationHealthDegraded, "1 blocked or failed position")
+		requireAutomationHealthState(t, fixture.db, fixture.definition.Automation.ID, models.AutomationHealthDegraded, "1 blocked or failed position")
 	})
 
 	t.Run("recent failure", func(t *testing.T) {
@@ -740,16 +740,16 @@ func TestAutomationHistoryHealthChangedInputsPersistAffectedRecords(t *testing.T
 		ctx := context.Background()
 		now := time.Date(2026, time.August, 2, 13, 0, 0, 0, time.UTC)
 		completed := createHistoryInvocation(t, fixture, "failure-baseline", "completed")
-		_, err := fixture.repo.DB().ExecContext(ctx, `UPDATE automation_invocations SET completed_at = ?, updated_at = ? WHERE id = ?`, now, now, completed.ID)
+		_, err := fixture.db.ExecContext(ctx, `UPDATE automation_invocations SET completed_at = ?, updated_at = ? WHERE id = ?`, now, now, completed.ID)
 		require.NoError(t, err)
 		require.NoError(t, fixture.repo.RecomputeAutomationHealthForAll(ctx, now, 100))
-		requireAutomationHealthState(t, fixture.repo.DB(), fixture.definition.Automation.ID, models.AutomationHealthHealthy, "Recent triggers")
+		requireAutomationHealthState(t, fixture.db, fixture.definition.Automation.ID, models.AutomationHealthHealthy, "Recent triggers")
 
 		failed := createHistoryInvocation(t, fixture, "fresh-failure", "failed")
-		_, err = fixture.repo.DB().ExecContext(ctx, `UPDATE automation_invocations SET completed_at = ?, updated_at = ? WHERE id = ?`, now.Add(time.Minute), now.Add(time.Minute), failed.ID)
+		_, err = fixture.db.ExecContext(ctx, `UPDATE automation_invocations SET completed_at = ?, updated_at = ? WHERE id = ?`, now.Add(time.Minute), now.Add(time.Minute), failed.ID)
 		require.NoError(t, err)
 		require.NoError(t, fixture.repo.RecomputeAutomationHealthForAll(ctx, now.Add(2*time.Minute), 100))
-		requireAutomationHealthState(t, fixture.repo.DB(), fixture.definition.Automation.ID, models.AutomationHealthDegraded, "1 recent failed invocation")
+		requireAutomationHealthState(t, fixture.db, fixture.definition.Automation.ID, models.AutomationHealthDegraded, "1 recent failed invocation")
 	})
 
 	t.Run("stale external state", func(t *testing.T) {
@@ -757,27 +757,27 @@ func TestAutomationHistoryHealthChangedInputsPersistAffectedRecords(t *testing.T
 		ctx := context.Background()
 		now := time.Date(2026, time.August, 2, 14, 0, 0, 0, time.UTC)
 		completed := createHistoryInvocation(t, fixture, "external-baseline", "completed")
-		_, err := fixture.repo.DB().ExecContext(ctx, `UPDATE automation_invocations SET completed_at = ?, updated_at = ? WHERE id = ?`, now, now, completed.ID)
+		_, err := fixture.db.ExecContext(ctx, `UPDATE automation_invocations SET completed_at = ?, updated_at = ? WHERE id = ?`, now, now, completed.ID)
 		require.NoError(t, err)
 		attachAutomationHealthPullRequest(t, fixture, completed.ID, now)
 		require.NoError(t, fixture.repo.RecomputeAutomationHealthForAll(ctx, now, 100))
-		requireAutomationHealthState(t, fixture.repo.DB(), fixture.definition.Automation.ID, models.AutomationHealthHealthy, "Recent triggers")
+		requireAutomationHealthState(t, fixture.db, fixture.definition.Automation.ID, models.AutomationHealthHealthy, "Recent triggers")
 
-		_, err = fixture.repo.DB().ExecContext(ctx, `UPDATE task_pull_requests SET updated_at = ? WHERE task_id = ?`, now.Add(-2*persistence.AutomationExternalStaleAfter).UTC().Format("2006-01-02 15:04:05"), fixture.task.ID)
+		_, err = fixture.db.ExecContext(ctx, `UPDATE task_pull_requests SET updated_at = ? WHERE task_id = ?`, now.Add(-2*persistence.AutomationExternalStaleAfter).UTC().Format("2006-01-02 15:04:05"), fixture.task.ID)
 		require.NoError(t, err)
 		externalState, err := fixture.repo.AutomationExternalState(ctx, fixture.project.ID, fixture.definition.Automation.ID, now.Add(time.Minute).Add(-persistence.AutomationExternalStaleAfter))
 		require.NoError(t, err)
 		require.Equal(t, 1, externalState.TrackedResources)
 		require.True(t, externalState.Stale)
 		require.NoError(t, fixture.repo.RecomputeAutomationHealthForAll(ctx, now.Add(time.Minute), 100))
-		requireAutomationHealthState(t, fixture.repo.DB(), fixture.definition.Automation.ID, models.AutomationHealthDegraded, "external GitHub state is stale")
+		requireAutomationHealthState(t, fixture.db, fixture.definition.Automation.ID, models.AutomationHealthDegraded, "external GitHub state is stale")
 	})
 
 	t.Run("publication", func(t *testing.T) {
-		db := testutil.NewTestDB(t)
-		repo := sqlite.NewAutomationRepo(db)
+		db := teststores.NewDB(t)
+		repo := teststores.Of(db).Automations
 		ctx := context.Background()
-		project := automationTestProject(t, sqlite.NewProjectRepo(db), "Health publication")
+		project := automationTestProject(t, teststores.Of(db).Projects, "Health publication")
 		automationID, versionID := "health-publication-automation", "health-publication-version"
 		require.NoError(t, insertMinimalAutomationDefinition(ctx, db, project.ID, automationID, versionID, false))
 		require.NoError(t, repo.RecomputeAutomationHealthForAll(ctx, time.Date(2026, time.August, 2, 15, 0, 0, 0, time.UTC), 100))
@@ -801,11 +801,11 @@ type automationHealthReconciliationFixture struct {
 func seedAutomationHealthReconciliationFixture(tb testing.TB, db *sql.DB, automationCount int, now time.Time) automationHealthReconciliationFixture {
 	tb.Helper()
 	ctx := context.Background()
-	projectRepo := sqlite.NewProjectRepo(db)
+	projectRepo := teststores.Of(db).Projects
 	project := models.Project{Name: fmt.Sprintf("Health reconciliation %d", automationCount)}
 	require.NoError(tb, projectRepo.Create(ctx, &project))
-	taskRepo := sqlite.NewTaskRepo(db, nil)
-	pullRepo := sqlite.NewTaskPullRequestRepo(db)
+	taskRepo := teststores.Of(db).Tasks
+	pullRepo := teststores.Of(db).TaskPullRequests
 	fixture := automationHealthReconciliationFixture{projectID: project.ID}
 	for i := 0; i < automationCount; i++ {
 		automationID := fmt.Sprintf("health-reconcile-%03d", i)
@@ -920,12 +920,12 @@ func insertAutomationHealthActivityResources(tb testing.TB, db *sql.DB, projectI
 func attachAutomationHealthPullRequest(t *testing.T, fixture automationRuntimeFixture, invocationID string, updatedAt time.Time) {
 	t.Helper()
 	ctx := context.Background()
-	pullRepo := sqlite.NewTaskPullRequestRepo(fixture.repo.DB())
+	pullRepo := teststores.Of(fixture.db).TaskPullRequests
 	pull := models.TaskPullRequest{TaskID: fixture.task.ID, PRNumber: 77, PRURL: "https://github.com/openvibely/openvibely/pull/77", PRState: "open"}
 	require.NoError(t, pullRepo.Upsert(ctx, &pull))
 	trigger := automationNodeByKey(t, fixture.definition, "vision_suggestions")
-	insertAutomationHealthActivityResources(t, fixture.repo.DB(), fixture.project.ID, fixture.definition.Automation.ID, fixture.definition.Version.ID, trigger.ID, invocationID, fixture.task.ID, pull.ID, 77)
-	_, err := fixture.repo.DB().ExecContext(ctx, `UPDATE task_pull_requests SET updated_at = ? WHERE task_id = ?`, updatedAt.UTC().Format("2006-01-02 15:04:05"), fixture.task.ID)
+	insertAutomationHealthActivityResources(t, fixture.db, fixture.project.ID, fixture.definition.Automation.ID, fixture.definition.Version.ID, trigger.ID, invocationID, fixture.task.ID, pull.ID, 77)
+	_, err := fixture.db.ExecContext(ctx, `UPDATE task_pull_requests SET updated_at = ? WHERE task_id = ?`, updatedAt.UTC().Format("2006-01-02 15:04:05"), fixture.task.ID)
 	require.NoError(t, err)
 }
 
@@ -984,10 +984,10 @@ type automationHealthMeasurement struct {
 
 type automationHealthBenchmarkPath struct {
 	name    string
-	measure func(testing.TB, *sql.DB, *sqlite.AutomationRepo, time.Time) error
+	measure func(testing.TB, *sql.DB, persistence.AutomationStore, time.Time) error
 }
 
-func measureAutomationHealthReconciliation(tb testing.TB, db *sql.DB, repo *sqlite.AutomationRepo, counter *testutil.SQLStatementCounter, now time.Time, measure func(testing.TB, *sql.DB, *sqlite.AutomationRepo, time.Time) error) automationHealthMeasurement {
+func measureAutomationHealthReconciliation(tb testing.TB, db *sql.DB, repo persistence.AutomationStore, counter *testutil.SQLStatementCounter, now time.Time, measure func(testing.TB, *sql.DB, persistence.AutomationStore, time.Time) error) automationHealthMeasurement {
 	tb.Helper()
 	var beforeMem, afterMem runtime.MemStats
 	runtime.ReadMemStats(&beforeMem)
@@ -1008,7 +1008,7 @@ func measureAutomationHealthReconciliation(tb testing.TB, db *sql.DB, repo *sqli
 	}
 }
 
-func measureCurrentAutomationHealthPath(tb testing.TB, _ *sql.DB, repo *sqlite.AutomationRepo, now time.Time) error {
+func measureCurrentAutomationHealthPath(tb testing.TB, _ *sql.DB, repo persistence.AutomationStore, now time.Time) error {
 	tb.Helper()
 	return repo.RecomputeAutomationHealthForAll(context.Background(), now, 100)
 }
@@ -1034,7 +1034,7 @@ func BenchmarkAutomationHealthReconciliation(b *testing.B) {
 		for _, path := range paths {
 			b.Run(fmt.Sprintf("%s/stable/%d", path.name, count), func(b *testing.B) {
 				db, counter := testutil.NewStatementCountingTestDB(b)
-				repo := sqlite.NewAutomationRepo(db)
+				repo := teststores.Of(db).Automations
 				now := time.Now().UTC()
 				seedAutomationHealthReconciliationFixture(b, db, count, now)
 				require.NoError(b, repo.RecomputeAutomationHealthForAll(context.Background(), now, 100))
@@ -1064,7 +1064,7 @@ func BenchmarkAutomationHealthReconciliation(b *testing.B) {
 			})
 			b.Run(fmt.Sprintf("%s/changed-position/%d", path.name, count), func(b *testing.B) {
 				db, counter := testutil.NewStatementCountingTestDB(b)
-				repo := sqlite.NewAutomationRepo(db)
+				repo := teststores.Of(db).Automations
 				now := time.Now().UTC()
 				fixture := seedAutomationHealthReconciliationFixture(b, db, count, now)
 				require.NoError(b, repo.RecomputeAutomationHealthForAll(context.Background(), now, 100))
