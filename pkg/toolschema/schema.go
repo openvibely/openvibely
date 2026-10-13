@@ -101,11 +101,9 @@ func ParseExternal(raw json.RawMessage) (*Schema, error) {
 	return s, nil
 }
 
-type serializer struct {
-	property func(map[string]any, bool) bool
-}
-
-func marshalStrict(s *Schema, raw json.RawMessage, rules serializer) (json.RawMessage, error) {
+// MarshalOpenAI builds the strict form used to check whether external schemas
+// support optional-null normalization. Provider requests use the original JSON.
+func MarshalOpenAI(s *Schema, raw json.RawMessage) (json.RawMessage, error) {
 	if s == nil {
 		var err error
 		s, err = ParseExternal(raw)
@@ -117,7 +115,7 @@ func marshalStrict(s *Schema, raw json.RawMessage, rules serializer) (json.RawMe
 		return nil, fmt.Errorf("tool root must be an object")
 	}
 	properties, enums := 0, 0
-	out, err := build(s, rules, 0, &properties, &enums)
+	out, err := build(s, 0, &properties, &enums)
 	if err != nil {
 		return nil, err
 	}
@@ -131,7 +129,7 @@ func marshalStrict(s *Schema, raw json.RawMessage, rules serializer) (json.RawMe
 	return data, err
 }
 
-func build(s *Schema, rules serializer, depth int, properties, enums *int) (map[string]any, error) {
+func build(s *Schema, depth int, properties, enums *int) (map[string]any, error) {
 	if s == nil || depth > 9 {
 		return nil, fmt.Errorf("invalid or deeply nested strict schema")
 	}
@@ -193,14 +191,18 @@ func build(s *Schema, rules serializer, depth int, properties, enums *int) (map[
 		requiredNames := []string{}
 		*properties += len(names)
 		for _, name := range names {
-			child, err := build(s.Properties[name], rules, depth+1, properties, enums)
+			child, err := build(s.Properties[name], depth+1, properties, enums)
 			if err != nil {
 				return nil, err
 			}
 			previousEnum, _ := child["enum"].([]any)
-			if rules.property(child, required[name]) {
-				requiredNames = append(requiredNames, name)
+			if !required[name] && child["type"] != "null" {
+				child["type"] = []any{child["type"], "null"}
+				if values, ok := child["enum"].([]any); ok {
+					child["enum"] = append(values, nil)
+				}
 			}
+			requiredNames = append(requiredNames, name)
 			if values, ok := child["enum"].([]any); ok {
 				*enums += len(values) - len(previousEnum)
 			}
@@ -210,7 +212,7 @@ func build(s *Schema, rules serializer, depth int, properties, enums *int) (map[
 		out["required"] = requiredNames
 		out["additionalProperties"] = false
 	case "array":
-		child, err := build(s.Items, rules, depth+1, properties, enums)
+		child, err := build(s.Items, depth+1, properties, enums)
 		if err != nil {
 			return nil, err
 		}
