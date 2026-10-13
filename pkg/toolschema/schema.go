@@ -81,11 +81,9 @@ func convert(s map[string]any, anthropic bool, unions *int, depth int) error {
 	switch kind {
 	case "object":
 		props, _ := s["properties"].(map[string]any)
-		if ap, exists := s["additionalProperties"]; exists && ap != false {
+		// Properties describe known fields; only an explicit false closes an object.
+		if s["additionalProperties"] != false {
 			return fmt.Errorf("open object")
-		}
-		if len(props) == 0 && s["additionalProperties"] != false {
-			return fmt.Errorf("arbitrary object")
 		}
 		if props == nil {
 			props = map[string]any{}
