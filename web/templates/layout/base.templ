@@ -2648,7 +2648,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						// delimiter from later prose. Fenced examples remain literal.
 						if (transcript && fenceStart === -1) {
 							if (toolOutput) {
-								if (/^[\t ]*\[\/Tool\][\t ]*$/.test(line)) {
+								if (/\[\/Tool\][\t ]*$/.test(line)) {
 									toolOutput = false;
 									opaqueRanges[opaqueRanges.length - 1].end = nextLine;
 								}
@@ -2681,6 +2681,33 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 							fenceChar = marker;
 							fenceLength = runLength;
 						}
+					}
+					if (toolOutput) {
+						// An unmatched result opener can itself be a multiline inline-code
+						// example. Reconsider it without allowing earlier command previews
+						// or completed output to supply its backticks.
+						var pending = opaqueRanges.pop();
+						var savedLength = ranges.length;
+						var savedOpaqueIndex = opaqueIndex;
+						addInlineRanges(plainStart, text.length);
+						var quoted = null;
+						for (var index = savedLength; index < ranges.length; index++) {
+							if (ranges[index].start < pending.start && ranges[index].end > pending.start) {
+								quoted = ranges[index];
+								ranges.length = index + 1;
+								break;
+							}
+						}
+						if (quoted) {
+							// The closing backtick precedes this suffix on the same line.
+							var tailRanges = window.codeRanges('x' + text.substring(quoted.end), true);
+							return ranges.concat(tailRanges.map(function(range) {
+								return {start: range.start + quoted.end - 1, end: range.end + quoted.end - 1};
+							}));
+						}
+						ranges.length = savedLength;
+						opaqueIndex = savedOpaqueIndex;
+						opaqueRanges.push(pending);
 					}
 					if (fenceStart !== -1) {
 						ranges.push({ start: fenceStart, end: text.length });

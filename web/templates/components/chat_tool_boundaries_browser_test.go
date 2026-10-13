@@ -62,3 +62,27 @@ func TestBrowserFunctional_ToolMetadataAndPartialOutputStayLiteral(t *testing.T)
  return {};
  `)
 }
+
+func TestBrowserFunctional_PendingToolDetectionPreservesLaterThinking(t *testing.T) {
+	runIncrementalChatBrowser(t, `
+ const tick = String.fromCharCode(96);
+ const cases = [
+  {text:'[Using tool: bash]\n[Tool bash done]\noutput[/Tool]\n<thinking>Real reasoning.</thinking>\nFinal answer.', tools:1},
+  {text:'Example '+tick+'literal\n[Tool bash done]\ninline'+tick+'\n[Thinking]\nReal reasoning.\n[/Thinking]\nFinal answer.', tools:0},
+  {text:'Example '+tick.repeat(2)+'literal\n[Tool bash done]\ninline'+tick.repeat(2)+'\n'+fence+'text\n[Using tool: read_file]\n'+fence+'\n<thinking>Real reasoning.</thinking>\nFinal answer.', tools:0}
+ ];
+ for (const sample of cases) {
+  for (const prefix of ['', 'long transcript prose '.repeat(4000)+'\n']) {
+   for (const newline of ['\n','\r\n']) {
+    await window.renderStreamingContent(stream, (prefix+sample.text).replace(/\n/g,newline), true);
+    assert(stream.querySelectorAll('.stream-tool').length === sample.tools, 'incorrect tool count');
+    assert(stream.querySelectorAll('.stream-thinking').length === 1, 'later thinking was swallowed');
+    assert(stream.querySelector('.stream-thinking').textContent.includes('Real reasoning.'), 'reasoning changed');
+    assert(stream.textContent.includes('Final answer.'), 'final answer lost');
+    assert(!stream.textContent.includes('<thinking>'), 'raw thinking alias leaked');
+   }
+  }
+ }
+ return {};
+ `)
+}
