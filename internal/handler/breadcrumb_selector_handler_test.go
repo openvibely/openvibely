@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/service"
+	"github.com/openvibely/openvibely/internal/testutil/teststores"
 	"github.com/stretchr/testify/require"
 )
 
@@ -205,7 +205,7 @@ func TestBreadcrumbSelectorAutomationResultsAreProjectScopedBoundedAndPreserveVi
 	tc := NewTestContext(t)
 	owning := tc.CreateProject().WithName("Automation selector owning").Build()
 	foreign := tc.CreateProject().WithName("Automation selector foreign").Build()
-	repo := sqlite.NewAutomationRepo(tc.db)
+	repo := teststores.Of(tc.db).Automations
 	tc.handler.SetAutomationServices(service.NewAutomationGraphService(repo), nil)
 
 	insertPublished := func(projectID, id, name string) {

@@ -16,6 +16,7 @@ import (
 	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/openvibely/openvibely/internal/testutil/teststores"
 )
 
 // BenchmarkProjectTabNavigationUnderLoad measures the Tasks main-content request
@@ -36,8 +37,8 @@ func BenchmarkProjectTabNavigationUnderLoad(b *testing.B) {
 			reader, writer, _ := testutil.NewFileBackedSplitStatementCountingTestDB(b)
 			broadcaster := events.NewBroadcaster()
 			env := newTestHandlerEnv(b, reader, withTestBroadcaster(broadcaster))
-			taskWriter := sqlite.NewTaskRepo(writer, nil)
-			execWriter := sqlite.NewExecutionRepo(writer)
+			taskWriter := teststores.Of(writer).Tasks
+			execWriter := teststores.Of(writer).Executions
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			for p := 0; p < 3; p++ {
@@ -94,7 +95,7 @@ func BenchmarkProjectTabNavigationUnderLoad(b *testing.B) {
 							for {
 								sequence++
 								if mode.database {
-									if err := execWriter.UpdateOutput(ctx, id, fmt.Sprintf("%d\n%s", sequence, payload)); err != nil {
+									if err := execWriter.(*sqlite.ExecutionRepo).UpdateOutput(ctx, id, fmt.Sprintf("%d\n%s", sequence, payload)); err != nil {
 										if ctx.Err() == nil {
 											errors <- err
 										}

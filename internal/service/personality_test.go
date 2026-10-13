@@ -7,8 +7,7 @@ import (
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/persistence/sqlite"
-	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/openvibely/openvibely/internal/testutil/teststores"
 )
 
 func TestGetPersonalityPrompt(t *testing.T) {
@@ -116,8 +115,8 @@ func TestIsPresetPersonality(t *testing.T) {
 }
 
 func TestIsAvailablePersonalityKey(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	repo := sqlite.NewCustomPersonalityRepo(db)
+	db := teststores.NewDB(t)
+	repo := teststores.Of(db).CustomPersonalities
 	ctx := context.Background()
 	cp := &models.CustomPersonality{
 		Name:         "Available Custom",
@@ -144,8 +143,8 @@ func TestIsAvailablePersonalityKey(t *testing.T) {
 }
 
 func TestAllPersonalitiesWithCustom(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	repo := sqlite.NewCustomPersonalityRepo(db)
+	db := teststores.NewDB(t)
+	repo := teststores.Of(db).CustomPersonalities
 	ctx := context.Background()
 
 	// Without custom personalities, should return same as AllPersonalities
@@ -188,10 +187,10 @@ func TestAllPersonalitiesWithCustom_NilRepo(t *testing.T) {
 }
 
 func TestExecuteSaveCustomPersonalityRuntime_CreateUpdateAndActivate(t *testing.T) {
-	db := testutil.NewTestDB(t)
+	db := teststores.NewDB(t)
 	ctx := context.Background()
-	customRepo := sqlite.NewCustomPersonalityRepo(db)
-	settingsRepo := sqlite.NewSettingsRepo(db)
+	customRepo := teststores.Of(db).CustomPersonalities
+	settingsRepo := teststores.Of(db).Settings
 
 	out, err := ExecuteSaveCustomPersonalityRuntime(ctx, CustomPersonalitySaveOptions{
 		Input:                 json.RawMessage(`{"mode":"create","name":" Release Notes Reviewer ","description":" Concise release-note review ","system_prompt":" You review release notes with concise, user-facing clarity. ","activate":true}`),
@@ -247,10 +246,10 @@ func TestExecuteSaveCustomPersonalityRuntime_CreateUpdateAndActivate(t *testing.
 }
 
 func TestExecuteSaveCustomPersonalityRuntime_RejectsInvalidInputsWithoutPartialWrites(t *testing.T) {
-	db := testutil.NewTestDB(t)
+	db := teststores.NewDB(t)
 	ctx := context.Background()
-	customRepo := sqlite.NewCustomPersonalityRepo(db)
-	settingsRepo := sqlite.NewSettingsRepo(db)
+	customRepo := teststores.Of(db).CustomPersonalities
+	settingsRepo := teststores.Of(db).Settings
 	if err := customRepo.Create(ctx, &models.CustomPersonality{
 		Name:         "Existing Custom",
 		Key:          "existing_custom",
@@ -306,8 +305,8 @@ func TestExecuteSaveCustomPersonalityRuntime_RejectsInvalidInputsWithoutPartialW
 }
 
 func TestGetPersonalityPromptWithCustom(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	repo := sqlite.NewCustomPersonalityRepo(db)
+	db := teststores.NewDB(t)
+	repo := teststores.Of(db).CustomPersonalities
 	ctx := context.Background()
 
 	// Create a custom personality

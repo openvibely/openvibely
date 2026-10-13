@@ -19,8 +19,8 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
-	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/openvibely/openvibely/internal/testutil/teststores"
 	"github.com/stretchr/testify/require"
 )
 
@@ -36,7 +36,7 @@ func TestHandler_NewTaskFirstMessageReusesPreflightSelection(t *testing.T) {
 		{name: "default", agentMode: "default"},
 	} {
 		t.Run(scenario.name, func(t *testing.T) {
-			db := testutil.NewTestDB(t)
+			db := teststores.NewDB(t)
 			env := newTestHandlerEnv(t, db)
 			env.Handler.startStreamingResponseOverride = func(streamingResponseParams) error { return nil }
 			project := createProjectTB(t, env.Handler, "New task selection "+scenario.name)
@@ -347,7 +347,7 @@ func seedNewTaskSelectionImage(tb testing.TB, sessionID string) {
 	}
 }
 
-func seedNewTaskSelectionModels(tb testing.TB, repo *sqlite.LLMConfigRepo, count int, includeVisionModel bool) []*models.LLMConfig {
+func seedNewTaskSelectionModels(tb testing.TB, repo persistence.LLMConfigStore, count int, includeVisionModel bool) []*models.LLMConfig {
 	tb.Helper()
 	catalog := make([]*models.LLMConfig, 0, count)
 	for i := 0; i < count; i++ {

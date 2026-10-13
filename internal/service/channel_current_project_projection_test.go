@@ -9,15 +9,16 @@ import (
 
 	"github.com/openvibely/openvibely/internal/chatcontrol"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/persistence/sqlite"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/openvibely/openvibely/internal/testutil/teststores"
 	"github.com/stretchr/testify/require"
 )
 
 func TestChannelCurrentProjectUsesIdentityProjection(t *testing.T) {
 	db, counter := testutil.NewStatementCountingTestDB(t)
 	ctx := context.Background()
-	projectRepo := sqlite.NewProjectRepo(db)
+	projectRepo := teststores.Of(db).Projects
 	project := &models.Project{
 		Name:        "Channel identity project",
 		Description: strings.Repeat("d", 16<<10),
@@ -99,16 +100,16 @@ type channelCurrentProjectProjectionFixture struct {
 func newChannelCurrentProjectProjectionFixture(tb testing.TB, fileBacked, large, missing bool) *channelCurrentProjectProjectionFixture {
 	tb.Helper()
 
-	var projectRepo, writeRepo *sqlite.ProjectRepo
+	var projectRepo, writeRepo persistence.ProjectStore
 	var counter *testutil.SQLStatementCounter
 	if fileBacked {
 		reader, writer, statementCounter := testutil.NewFileBackedSplitStatementCountingTestDB(tb)
-		projectRepo = sqlite.NewProjectRepo(reader)
-		writeRepo = sqlite.NewProjectRepo(writer)
+		projectRepo = teststores.Of(reader).Projects
+		writeRepo = teststores.Of(writer).Projects
 		counter = statementCounter
 	} else {
 		db, statementCounter := testutil.NewStatementCountingTestDB(tb)
-		projectRepo = sqlite.NewProjectRepo(db)
+		projectRepo = teststores.Of(db).Projects
 		writeRepo = projectRepo
 		counter = statementCounter
 	}

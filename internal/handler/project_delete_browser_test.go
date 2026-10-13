@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/persistence/sqlite"
+	"github.com/openvibely/openvibely/internal/testutil/teststores"
 	"github.com/openvibely/openvibely/web/static"
 	"github.com/stretchr/testify/require"
 )
@@ -108,7 +108,7 @@ func TestProjectDeletionConfirmationAndSuccessfulFlowInChrome(t *testing.T) {
 	}
 
 	_, app, _, db := setupTestHandlerWithDB(t)
-	projectRepo := sqlite.NewProjectRepo(db)
+	projectRepo := teststores.Of(db).Projects
 	project := models.Project{Name: "Disposable Browser Delete Project"}
 	require.NoError(t, projectRepo.Create(t.Context(), &project))
 	require.NoError(t, func() error {

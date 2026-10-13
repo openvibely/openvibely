@@ -10,16 +10,16 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/persistence/sqlite"
-	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/openvibely/openvibely/internal/testutil/teststores"
 )
 
 func TestSkillAnalyticsInstrumentationRecordsSelectionViewAndEditEvents(t *testing.T) {
-	db := testutil.NewTestDB(t)
+	db := teststores.NewDB(t)
 	ctx := context.Background()
-	repo := sqlite.NewSkillAnalyticsRepo(db)
-	projectRepo := sqlite.NewProjectRepo(db)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
-	agentRepo := sqlite.NewAgentRepo(db)
+	repo := teststores.Of(db).SkillAnalytics
+	projectRepo := teststores.Of(db).Projects
+	taskRepo := teststores.Of(db).Tasks
+	agentRepo := teststores.Of(db).Agents
 	project := &models.Project{Name: "Skill Analytics Project"}
 	if err := projectRepo.Create(ctx, project); err != nil {
 		t.Fatalf("create project: %v", err)
@@ -72,7 +72,7 @@ func TestSkillAnalyticsInstrumentationRecordsSelectionViewAndEditEvents(t *testi
 		}
 	}
 
-	metrics, err := repo.GetTopSkills(ctx, persistence.SkillAnalyticsFilter{ProjectID: project.ID, Limit: 10})
+	metrics, err := repo.(*sqlite.SkillAnalyticsRepo).GetTopSkills(ctx, persistence.SkillAnalyticsFilter{ProjectID: project.ID, Limit: 10})
 	if err != nil {
 		t.Fatalf("GetTopSkills: %v", err)
 	}
@@ -99,7 +99,7 @@ func TestSkillAnalyticsInstrumentationRecordsSelectionViewAndEditEvents(t *testi
 		t.Fatalf("agent_created_skill metric = %#v", byHandle["agent_created_skill"])
 	}
 
-	followThrough, err := repo.GetSelectionFollowThrough(ctx, persistence.SkillAnalyticsFilter{ProjectID: project.ID, Limit: 10})
+	followThrough, err := repo.(*sqlite.SkillAnalyticsRepo).GetSelectionFollowThrough(ctx, persistence.SkillAnalyticsFilter{ProjectID: project.ID, Limit: 10})
 	if err != nil {
 		t.Fatalf("GetSelectionFollowThrough: %v", err)
 	}

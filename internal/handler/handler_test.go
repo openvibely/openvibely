@@ -26,26 +26,27 @@ import (
 	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/openvibely/openvibely/internal/testutil/teststores"
 	"github.com/openvibely/openvibely/web/static"
 	"github.com/openvibely/openvibely/web/templates/components"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func setupTestHandler(t testing.TB) (*Handler, *echo.Echo, *sqlite.LLMConfigRepo) {
+func setupTestHandler(t testing.TB) (*Handler, *echo.Echo, persistence.LLMConfigStore) {
 	h, e, llmConfigRepo, _ := setupTestHandlerWithDB(t)
 	return h, e, llmConfigRepo
 }
 
-func setupTestHandlerForDB(t testing.TB, db *sql.DB) (*Handler, *echo.Echo, *sqlite.LLMConfigRepo) {
+func setupTestHandlerForDB(t testing.TB, db *sql.DB) (*Handler, *echo.Echo, persistence.LLMConfigStore) {
 	t.Helper()
 	env := newTestHandlerEnv(t, db)
 	return env.Handler, env.Echo, env.LLMConfigRepo
 }
 
-func setupTestHandlerWithDB(t testing.TB) (*Handler, *echo.Echo, *sqlite.LLMConfigRepo, *sql.DB) {
+func setupTestHandlerWithDB(t testing.TB) (*Handler, *echo.Echo, persistence.LLMConfigStore, *sql.DB) {
 	t.Helper()
-	env := newTestHandlerEnv(t, testutil.NewTestDB(t))
+	env := newTestHandlerEnv(t, teststores.NewDB(t))
 	return env.Handler, env.Echo, env.LLMConfigRepo, env.DB
 }
 
@@ -226,7 +227,7 @@ func boolPtr(b bool) *bool { return &b }
 
 func setupTestHandlerWithInsights(t *testing.T) (*Handler, *echo.Echo) {
 	t.Helper()
-	env := newTestHandlerEnv(t, testutil.NewTestDB(t), withTestInsights())
+	env := newTestHandlerEnv(t, teststores.NewDB(t), withTestInsights())
 	return env.Handler, env.Echo
 }
 
@@ -323,7 +324,7 @@ func TestHandler_GetTaskLargeHistoryUsesNarrowExecutionMetrics(t *testing.T) {
 }
 
 func BenchmarkHandler_GetTask_MetricsProjection(b *testing.B) {
-	db := testutil.NewTestDB(b)
+	db := teststores.NewDB(b)
 	h, e, llmConfigRepo := setupTestHandlerForDB(b, db)
 	ctx := context.Background()
 	agent := createAgentTB(b, llmConfigRepo)
@@ -745,7 +746,7 @@ func newestHistoryExecutionID(t testing.TB, db *sql.DB, taskID string, offset in
 func TestHandler_GetTaskDetailStatusUsesCompactAgentLabelProjection(t *testing.T) {
 	db, counter := testutil.NewStatementCountingTestDB(t)
 	h, e, llmConfigRepo := setupTestHandlerForDB(t, db)
-	h.SetAgentRepo(sqlite.NewAgentRepo(db))
+	h.SetAgentRepo(teststores.Of(db).Agents)
 	ctx := context.Background()
 
 	model := createAgent(t, llmConfigRepo)
@@ -815,7 +816,7 @@ func TestHandler_GetTaskDetailStatusUsesCompactAgentLabelProjection(t *testing.T
 func TestHandler_GetTaskDetailStatusPreservesAgentAvailabilityAndTaskStates(t *testing.T) {
 	db, counter := testutil.NewStatementCountingTestDB(t)
 	h, e, llmConfigRepo := setupTestHandlerForDB(t, db)
-	h.SetAgentRepo(sqlite.NewAgentRepo(db))
+	h.SetAgentRepo(teststores.Of(db).Agents)
 	ctx := context.Background()
 
 	model := createAgent(t, llmConfigRepo)
@@ -1045,7 +1046,7 @@ func TestHandler_GetTaskDetailStatusLargeHistoryUsesNarrowExecutionMetrics(t *te
 	db, counter := testutil.NewStatementCountingTestDB(t)
 	h, e, llmConfigRepo := setupTestHandlerForDB(t, db)
 	ctx := context.Background()
-	agentRepo := sqlite.NewAgentRepo(db)
+	agentRepo := teststores.Of(db).Agents
 	h.SetAgentRepo(agentRepo)
 	agent := createAgent(t, llmConfigRepo)
 	agentDef := &models.Agent{
@@ -1109,7 +1110,7 @@ func BenchmarkHandler_GetTaskDetailStatus_MetricsProjection(b *testing.B) {
 		db, counter := testutil.NewStatementCountingTestDB(b)
 		h, e, llmConfigRepo := setupTestHandlerForDB(b, db)
 		ctx := context.Background()
-		agentRepo := sqlite.NewAgentRepo(db)
+		agentRepo := teststores.Of(db).Agents
 		h.SetAgentRepo(agentRepo)
 		agent := createAgentTB(b, llmConfigRepo)
 		agentDef := &models.Agent{Name: "Primary Metrics Agent", Key: "primary_metrics_agent", SystemPrompt: "Handle metrics tasks.", Model: "inherit", Enabled: true, SelectableAsPrimary: true}
@@ -1179,7 +1180,7 @@ func BenchmarkHandler_GetTaskDetailStatus_AgentProjection(b *testing.B) {
 	db, counter := testutil.NewStatementCountingTestDB(b)
 	h, e, llmConfigRepo := setupTestHandlerForDB(b, db)
 	ctx := context.Background()
-	agentRepo := sqlite.NewAgentRepo(db)
+	agentRepo := teststores.Of(db).Agents
 	h.SetAgentRepo(agentRepo)
 	if _, err := db.ExecContext(ctx, `DELETE FROM agents WHERE id IS NOT NULL`); err != nil {
 		b.Fatalf("clear Agent definitions: %v", err)
@@ -1264,7 +1265,7 @@ func BenchmarkHandler_GetTaskDetailStatus_AgentProjection(b *testing.B) {
 	b.ReportMetric(float64(totalLightweightWait.Nanoseconds())/float64(b.N), "lightweight_db_wait_ns/op")
 }
 
-func createRichTaskDetailBenchmarkAgent(tb testing.TB, repo *sqlite.AgentRepo, name string) *models.Agent {
+func createRichTaskDetailBenchmarkAgent(tb testing.TB, repo persistence.AgentStore, name string) *models.Agent {
 	tb.Helper()
 	agent := &models.Agent{
 		Name:         name,
@@ -1680,7 +1681,7 @@ func TestHandler_GetTaskThreadPollUsesCompactTaskMetadata(t *testing.T) {
 }
 
 func TestHandler_GetTaskThreadPollIgnoresTaskPromptAndConfigChanges(t *testing.T) {
-	db := testutil.NewTestDB(t)
+	db := teststores.NewDB(t)
 	h, e, llmConfigRepo := setupTestHandlerForDB(t, db)
 	ctx := context.Background()
 	agent := createAgent(t, llmConfigRepo)
@@ -2112,7 +2113,7 @@ func TestHandler_ModelDeletionResetsProtectedAgentOverrides(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			h, e, repo, db := setupTestHandlerWithDB(t)
 			ctx := context.Background()
-			agentRepo := sqlite.NewAgentRepo(db)
+			agentRepo := teststores.Of(db).Agents
 
 			target, err := repo.GetDefault(ctx)
 			if err != nil || target == nil {
@@ -2211,7 +2212,7 @@ func TestHandler_DeleteModel_OnlyModel_Allowed(t *testing.T) {
 	rec := htmxDelete(e, "/models/"+defaultAgent.ID)
 	assertCode(t, rec, http.StatusOK)
 
-	count, err := llmConfigRepo.Count(ctx)
+	count, err := llmConfigRepo.(*sqlite.LLMConfigRepo).Count(ctx)
 	if err != nil {
 		t.Fatalf("count after delete: %v", err)
 	}
@@ -3361,7 +3362,7 @@ func TestHandler_UpdateTask_AssignsAndClearsPrimaryAgentDefinition(t *testing.T)
 	tc := NewTestContext(t)
 	ctx := context.Background()
 	project := tc.CreateProject().Build()
-	agentRepo := sqlite.NewAgentRepo(tc.db)
+	agentRepo := teststores.Of(tc.db).Agents
 	tc.handler.agentRepo = agentRepo
 	projectAgent := createScheduleTestAgent(t, agentRepo, "Task Edit Runner", models.AgentScopeProject, project.ID, true)
 	globalAgent := createScheduleTestAgent(t, agentRepo, "Task Edit Global Runner", models.AgentScopeGlobal, "", true)
@@ -3388,25 +3389,25 @@ func TestHandler_UpdateTask_AssignsAndClearsPrimaryAgentDefinition(t *testing.T)
 func TestHandler_UpdateTask_RejectsInvalidPrimaryAgentDefinitions(t *testing.T) {
 	cases := []struct {
 		name     string
-		agentID  func(t *testing.T, repo *sqlite.AgentRepo, projectID, otherProjectID string) string
+		agentID  func(t *testing.T, repo persistence.AgentStore, projectID, otherProjectID string) string
 		wantBody string
 	}{
 		{
 			name: "cross project",
-			agentID: func(t *testing.T, repo *sqlite.AgentRepo, _, otherProjectID string) string {
+			agentID: func(t *testing.T, repo persistence.AgentStore, _, otherProjectID string) string {
 				return createScheduleTestAgent(t, repo, "Other Project Task Edit Agent", models.AgentScopeProject, otherProjectID, true).ID
 			},
 			wantBody: "invalid primary agent",
 		},
 		{
 			name: "unknown",
-			agentID: func(t *testing.T, _ *sqlite.AgentRepo, _, _ string) string {
+			agentID: func(t *testing.T, _ persistence.AgentStore, _, _ string) string {
 				return "agent-does-not-exist"
 			},
 		},
 		{
 			name: "disabled",
-			agentID: func(t *testing.T, repo *sqlite.AgentRepo, projectID, _ string) string {
+			agentID: func(t *testing.T, repo persistence.AgentStore, projectID, _ string) string {
 				agent := createScheduleTestAgent(t, repo, "Disabled Task Edit Agent", models.AgentScopeProject, projectID, true)
 				agent.Enabled = false
 				require.NoError(t, repo.Update(context.Background(), agent))
@@ -3416,7 +3417,7 @@ func TestHandler_UpdateTask_RejectsInvalidPrimaryAgentDefinitions(t *testing.T) 
 		},
 		{
 			name: "archived",
-			agentID: func(t *testing.T, repo *sqlite.AgentRepo, projectID, _ string) string {
+			agentID: func(t *testing.T, repo persistence.AgentStore, projectID, _ string) string {
 				agent := createScheduleTestAgent(t, repo, "Archived Task Edit Agent", models.AgentScopeProject, projectID, true)
 				agent.GeneratedStatus = models.AgentStatusArchived
 				require.NoError(t, repo.Update(context.Background(), agent))
@@ -3426,7 +3427,7 @@ func TestHandler_UpdateTask_RejectsInvalidPrimaryAgentDefinitions(t *testing.T) 
 		},
 		{
 			name: "non selectable",
-			agentID: func(t *testing.T, repo *sqlite.AgentRepo, projectID, _ string) string {
+			agentID: func(t *testing.T, repo persistence.AgentStore, projectID, _ string) string {
 				return createScheduleTestAgent(t, repo, "Non Selectable Task Edit Agent", models.AgentScopeProject, projectID, false).ID
 			},
 			wantBody: "invalid primary agent",
@@ -3438,7 +3439,7 @@ func TestHandler_UpdateTask_RejectsInvalidPrimaryAgentDefinitions(t *testing.T) 
 			tc := NewTestContext(t)
 			project := tc.CreateProject().WithName("Project A").Build()
 			otherProject := tc.CreateProject().WithName("Project B").Build()
-			agentRepo := sqlite.NewAgentRepo(tc.db)
+			agentRepo := teststores.Of(tc.db).Agents
 			tc.handler.agentRepo = agentRepo
 			previous := createScheduleTestAgent(t, agentRepo, "Existing Task Edit Agent", models.AgentScopeProject, project.ID, true)
 			task := createTask(t, tc.handler, project.ID, "Task Edit Invalid Agent", func(tk *models.Task) {
@@ -6245,12 +6246,12 @@ func TestHandler_TaskThreadSend(t *testing.T) {
 func TestHandler_TaskThreadSend_ClearsStaleCancellationMarkerSoGoalAfterCompleteRuns(t *testing.T) {
 	h, e, llmConfigRepo, db := setupTestHandlerWithDB(t)
 	ctx := context.Background()
-	goalRepo := sqlite.NewTaskGoalRepo(db)
+	goalRepo := teststores.Of(db).TaskGoals
 	goalSvc := service.NewTaskGoalService(goalRepo, h.taskRepo, nil)
 	h.SetTaskGoalService(goalSvc)
 	h.taskSvc.SetTaskGoalService(goalSvc)
 	h.workerSvc.SetTaskGoalService(goalSvc)
-	agentRepo := sqlite.NewAgentRepo(db)
+	agentRepo := teststores.Of(db).Agents
 	h.SetAgentRepo(agentRepo)
 	h.workerSvc.SetLifecycleAgentRepo(agentRepo)
 
@@ -6558,7 +6559,7 @@ func TestHandler_SwarmFollowupChildQueuesWhenActive(t *testing.T) {
 func TestHandler_SubmitReview_SwarmChildQueuesBehindActiveExecutionWithoutRouting(t *testing.T) {
 	h, e, llmConfigRepo, db := setupTestHandlerWithDB(t)
 	h.workerSvc = nil
-	reviewRepo := sqlite.NewReviewCommentRepo(db)
+	reviewRepo := teststores.Of(db).ReviewComments
 	h.SetReviewCommentRepo(reviewRepo)
 	ctx := context.Background()
 	agent := createAgent(t, llmConfigRepo)
@@ -6628,7 +6629,7 @@ func TestHandler_SubmitReview_SwarmChildQueuesBehindActiveExecutionWithoutRoutin
 func TestHandler_SubmitReview_SwarmChildDirectStartAppliesRouting(t *testing.T) {
 	h, e, llmConfigRepo, db := setupTestHandlerWithDB(t)
 	h.workerSvc = nil
-	reviewRepo := sqlite.NewReviewCommentRepo(db)
+	reviewRepo := teststores.Of(db).ReviewComments
 	h.SetReviewCommentRepo(reviewRepo)
 	ctx := context.Background()
 	agent := createAgent(t, llmConfigRepo)
@@ -8590,7 +8591,7 @@ func TestHandler_GetTaskThreadExecutionFragmentRejectsWrongTask(t *testing.T) {
 func TestHandler_GetTaskThread_ShowsPrimaryAgentDefinition(t *testing.T) {
 	h, e, llmConfigRepo, db := setupTestHandlerWithDB(t)
 	ctx := context.Background()
-	agentRepo := sqlite.NewAgentRepo(db)
+	agentRepo := teststores.Of(db).Agents
 	h.SetAgentRepo(agentRepo)
 	agent := createAgent(t, llmConfigRepo, func(a *models.LLMConfig) { a.Temperature = 1.0 })
 	agentDef := &models.Agent{
@@ -8625,7 +8626,7 @@ func TestHandler_GetTaskThread_ShowsPrimaryAgentDefinition(t *testing.T) {
 
 func TestHandler_GetTaskThread_HidesLifecycleAgentActivity(t *testing.T) {
 	h, e, llmConfigRepo, db := setupTestHandlerWithDB(t)
-	h.SetLifecycleRepo(sqlite.NewLifecycleRepo(db))
+	h.SetLifecycleRepo(teststores.Of(db).Lifecycle)
 	ctx := context.Background()
 	agent := createAgent(t, llmConfigRepo, func(a *models.LLMConfig) { a.Temperature = 1.0 })
 	project := createProject(t, h, "Lifecycle Thread Project")

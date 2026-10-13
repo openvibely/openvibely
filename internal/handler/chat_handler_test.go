@@ -22,6 +22,7 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/openvibely/openvibely/internal/testutil/teststores"
 	"github.com/openvibely/openvibely/web/static"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -450,7 +451,7 @@ func TestHandler_ChatSend_HydratesSelectedModelWithoutEagerCatalogs(t *testing.T
 	projectID := projects[0].ID
 	queuedTask := &models.Task{ProjectID: projectID, Title: "must-not-enter-chat-task-catalog", Prompt: "must-not-enter-chat-task-prompt", Status: models.StatusPending, Category: models.CategoryBacklog}
 	require.NoError(t, h.taskRepo.Create(ctx, queuedTask))
-	h.SetAgentRepo(sqlite.NewAgentRepo(db))
+	h.SetAgentRepo(teststores.Of(db).Agents)
 	agentDefinition := &models.Agent{Name: "must-not-enter-chat-agent-catalog", Key: "no-eager-chat-agent", Enabled: true, SelectableAsPrimary: true}
 	require.NoError(t, h.agentRepo.Create(ctx, agentDefinition))
 
@@ -5483,7 +5484,7 @@ func createChatStreamExecution(t *testing.T, tc *TestContext, execStatus models.
 	require.NoError(t, tc.execRepo.Create(ctx, exec))
 	if execStatus == models.ExecRunning {
 		if output != "" {
-			require.NoError(t, tc.execRepo.UpdateOutput(ctx, exec.ID, output))
+			require.NoError(t, tc.execRepo.(*sqlite.ExecutionRepo).UpdateOutput(ctx, exec.ID, output))
 		}
 	} else {
 		require.NoError(t, tc.execRepo.Complete(ctx, exec.ID, execStatus, output, errMsg, 0, 0))

@@ -18,9 +18,9 @@ import (
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
-	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/openvibely/openvibely/internal/testutil/teststores"
 	"github.com/stretchr/testify/require"
 )
 
@@ -353,7 +353,7 @@ func TestUpdateTaskCategoryRunningLaneRoutesQueuedFollowupAndReturnsConflict(t *
 	task := tc.CreateTask(project.ID).WithTitle("Lifecycle routed lane task").WithCategory(models.CategoryBacklog).Build()
 	task.AgentID = &model.ID
 	require.NoError(t, tc.taskRepo.Update(ctx, task))
-	threadRepo := sqlite.NewThreadInputRepo(tc.db)
+	threadRepo := teststores.Of(tc.db).ThreadInputs
 	require.NoError(t, threadRepo.CreateQueued(ctx, &models.ThreadInput{Scope: models.ThreadInputScopeTask, ProjectID: project.ID, TaskID: task.ID, AgentConfigID: model.ID, InputMode: models.ThreadInputModeQueued, InputStatus: models.ThreadInputPending, Content: "queued followup"}))
 	expected, err := json.Marshal([]persistence.ActiveLaneTaskMove{{ID: task.ID, ExpectedCategory: models.CategoryBacklog, ExpectedStatus: models.StatusPending}})
 	require.NoError(t, err)
@@ -652,7 +652,7 @@ func TestPluginMarketplaceRoutesDecodeCallHooksAndReturnJSON(t *testing.T) {
 
 func TestGetAgentJSONReturnsAgentOrNotFound(t *testing.T) {
 	tc := NewTestContext(t)
-	agentRepo := sqlite.NewAgentRepo(tc.db)
+	agentRepo := teststores.Of(tc.db).Agents
 	tc.handler.SetAgentRepo(agentRepo)
 	agent := &models.Agent{Name: "JSON Agent", Key: "json-agent", Model: "inherit", Scope: models.AgentScopeProject, CreatedAt: time.Now(), UpdatedAt: time.Now()}
 	require.NoError(t, agentRepo.Create(context.Background(), agent))
@@ -678,7 +678,7 @@ func TestChatRuntimeSummaryHelpersUseRepositoriesAndPersistAlertActions(t *testi
 	model.MaxWorkers = 2
 	model.WorkerTimeout = 45
 	require.NoError(t, tc.llmConfigRepo.Update(ctx, model))
-	agentRepo := sqlite.NewAgentRepo(tc.db)
+	agentRepo := teststores.Of(tc.db).Agents
 	tc.handler.SetAgentRepo(agentRepo)
 	require.NoError(t, agentRepo.Create(ctx, &models.Agent{Name: "Runtime Agent", Key: "runtime-agent", Description: "Does runtime work", Model: "gpt-test", Skills: []models.SkillConfig{{Name: "Audit"}}, MCPServers: []models.MCPServerConfig{{Name: "tools", Command: []string{"node"}}}, Scope: models.AgentScopeProject}))
 	require.NoError(t, tc.settingsRepo.Set(ctx, "personality", "direct"))
@@ -950,7 +950,7 @@ func TestChatActionRuntimeExecutorCoversToolClosuresAndValidation(t *testing.T) 
 	ctx := context.Background()
 	project := tc.CreateProject().WithName("Runtime Executor Coverage").Build()
 	task := tc.CreateTask(project.ID).WithTitle("Runtime executor task").WithCategory(models.CategoryBacklog).Build()
-	tc.handler.SetGitHubAuthRepo(sqlite.NewGitHubAuthRepo(tc.db))
+	tc.handler.SetGitHubAuthRepo(teststores.Of(tc.db).GitHubAuth)
 	model := tc.CreateLLMConfig().WithName("Executor Model").WithProvider(models.ProviderOpenAI).WithModel("gpt-test").WithAPIKey("key").Build()
 	model.IsDefault = true
 	require.NoError(t, tc.llmConfigRepo.Update(ctx, model))
@@ -1108,7 +1108,7 @@ func TestTaskFormAndAgentSelectionHelpers(t *testing.T) {
 	ctx := context.Background()
 	project := tc.CreateProject().WithName("Agent helper project").Build()
 	otherProject := tc.CreateProject().WithName("Other helper project").Build()
-	agentRepo := sqlite.NewAgentRepo(tc.db)
+	agentRepo := teststores.Of(tc.db).Agents
 	tc.handler.SetAgentRepo(agentRepo)
 
 	archivedAt := time.Now()

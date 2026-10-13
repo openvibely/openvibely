@@ -17,7 +17,7 @@ import (
 	llmprompt "github.com/openvibely/openvibely/internal/llm/prompt"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence/sqlite"
-	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/openvibely/openvibely/internal/testutil/teststores"
 	openaiclient "github.com/openvibely/openvibely/pkg/openai_client"
 	"github.com/stretchr/testify/require"
 )
@@ -701,8 +701,8 @@ func TestSupportsReasoningContentReplayForKimiOnly(t *testing.T) {
 
 func TestEnsureFreshOAuthKeepsOpaqueTokenWithUnknownExpiry(t *testing.T) {
 	ctx := context.Background()
-	db := testutil.NewTestDB(t)
-	configRepo := sqlite.NewLLMConfigRepo(db)
+	db := teststores.NewDB(t)
+	configRepo := teststores.Of(db).LLMConfigs
 	agent := &models.LLMConfig{
 		Name:             "Opaque custom OAuth",
 		Provider:         models.ProviderOpenAICompatible,
@@ -723,8 +723,8 @@ func TestEnsureFreshOAuthKeepsOpaqueTokenWithUnknownExpiry(t *testing.T) {
 
 func TestOAuthRequestRejectsConfigurationChangedAfterClientCreation(t *testing.T) {
 	ctx := context.Background()
-	db := testutil.NewTestDB(t)
-	configRepo := sqlite.NewLLMConfigRepo(db)
+	db := teststores.NewDB(t)
+	configRepo := teststores.Of(db).LLMConfigs
 	agent := &models.LLMConfig{
 		Name:             "Revision guarded OAuth",
 		Provider:         models.ProviderOpenAICompatible,
@@ -771,8 +771,8 @@ func TestOAuthInferenceUsesOnlyConfiguredAccessTokenHeader(t *testing.T) {
 	defer server.Close()
 
 	ctx := context.Background()
-	db := testutil.NewTestDB(t)
-	configRepo := sqlite.NewLLMConfigRepo(db)
+	db := teststores.NewDB(t)
+	configRepo := teststores.Of(db).LLMConfigs
 	agent := &models.LLMConfig{
 		Name:             "Custom token header",
 		Provider:         models.ProviderOpenAICompatible,
@@ -803,10 +803,10 @@ func TestOAuthInferenceUsesOnlyConfiguredAccessTokenHeader(t *testing.T) {
 
 func TestPrepareClientHistoryLoadsReasoningOnlyForKimi(t *testing.T) {
 	ctx := context.Background()
-	db := testutil.NewTestDB(t)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
-	agentRepo := sqlite.NewLLMConfigRepo(db)
-	execRepo := sqlite.NewExecutionRepo(db)
+	db := teststores.NewDB(t)
+	taskRepo := teststores.Of(db).Tasks
+	agentRepo := teststores.Of(db).LLMConfigs
+	execRepo := teststores.Of(db).Executions
 
 	task := &models.Task{
 		ProjectID: "default",
@@ -826,7 +826,7 @@ func TestPrepareClientHistoryLoadsReasoningOnlyForKimi(t *testing.T) {
 	}
 	require.NoError(t, execRepo.Create(ctx, execution))
 	require.NoError(t, execRepo.Complete(ctx, execution.ID, models.ExecCompleted, "answer", "", 0, 0))
-	require.NoError(t, execRepo.UpdateReasoningContent(ctx, execution.ID, "private thought"))
+	require.NoError(t, execRepo.(*sqlite.ExecutionRepo).UpdateReasoningContent(ctx, execution.ID, "private thought"))
 
 	lightHistory, err := execRepo.ListByTask(ctx, task.ID)
 	require.NoError(t, err)
@@ -847,10 +847,10 @@ func TestPrepareClientHistoryLoadsReasoningOnlyForKimi(t *testing.T) {
 
 func TestPrepareClientHistoryPreservesSteeringMessageBoundaries(t *testing.T) {
 	ctx := context.Background()
-	db := testutil.NewTestDB(t)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
-	agentRepo := sqlite.NewLLMConfigRepo(db)
-	execRepo := sqlite.NewExecutionRepo(db)
+	db := teststores.NewDB(t)
+	taskRepo := teststores.Of(db).Tasks
+	agentRepo := teststores.Of(db).LLMConfigs
+	execRepo := teststores.Of(db).Executions
 
 	task := &models.Task{
 		ProjectID: "default",
@@ -908,10 +908,10 @@ func TestPrepareClientHistoryPreservesSteeringMessageBoundaries(t *testing.T) {
 
 func TestPrepareClientHistoryPreservesToolTranscript(t *testing.T) {
 	ctx := context.Background()
-	db := testutil.NewTestDB(t)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
-	agentRepo := sqlite.NewLLMConfigRepo(db)
-	execRepo := sqlite.NewExecutionRepo(db)
+	db := teststores.NewDB(t)
+	taskRepo := teststores.Of(db).Tasks
+	agentRepo := teststores.Of(db).LLMConfigs
+	execRepo := teststores.Of(db).Executions
 
 	task := &models.Task{
 		ProjectID: "default",
@@ -960,10 +960,10 @@ func TestPrepareClientHistoryPreservesToolTranscript(t *testing.T) {
 
 func TestPersistReasoningContentClearsStaleReasoning(t *testing.T) {
 	ctx := context.Background()
-	db := testutil.NewTestDB(t)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
-	agentRepo := sqlite.NewLLMConfigRepo(db)
-	execRepo := sqlite.NewExecutionRepo(db)
+	db := teststores.NewDB(t)
+	taskRepo := teststores.Of(db).Tasks
+	agentRepo := teststores.Of(db).LLMConfigs
+	execRepo := teststores.Of(db).Executions
 
 	task := &models.Task{
 		ProjectID: "default",
@@ -982,7 +982,7 @@ func TestPersistReasoningContentClearsStaleReasoning(t *testing.T) {
 		PromptSent:    "question",
 	}
 	require.NoError(t, execRepo.Create(ctx, execution))
-	require.NoError(t, execRepo.UpdateReasoningContent(ctx, execution.ID, "stale thought"))
+	require.NoError(t, execRepo.(*sqlite.ExecutionRepo).UpdateReasoningContent(ctx, execution.ID, "stale thought"))
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")

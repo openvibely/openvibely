@@ -14,8 +14,8 @@ import (
 	"time"
 
 	"github.com/labstack/echo/v4"
-	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/service"
+	"github.com/openvibely/openvibely/internal/testutil/teststores"
 	"github.com/openvibely/openvibely/web/static"
 	"github.com/stretchr/testify/require"
 )
@@ -56,8 +56,8 @@ func TestXChannelsProductionHandlersInChrome(t *testing.T) {
 	require.NoError(t, err)
 
 	h, e, _, db := setupTestHandlerWithDB(t)
-	auth := sqlite.NewXAuthRepo(db)
-	h.SetXRepositories(auth, sqlite.NewXUserProjectRepo(db), sqlite.NewXTaskContextRepo(db), sqlite.NewXInboundReceiptRepo(db))
+	auth := teststores.Of(db).XAuth
+	h.SetXRepositories(auth, teststores.Of(db).XUserProjects, teststores.Of(db).XTaskContexts, teststores.Of(db).XInboundReceipts)
 	projectOne := createProject(t, h, "X Browser One")
 	projectTwo := createProject(t, h, "X Browser Two")
 	api := &browserXAPI{}

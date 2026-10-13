@@ -13,15 +13,17 @@ import (
 	"time"
 
 	"github.com/labstack/echo/v4"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/openvibely/openvibely/internal/testutil/teststores"
 )
 
 const projectCapacityAPIProjectionSamples = 7
 
 type projectCapacityAPIProjectionFixture struct {
 	counter     *testutil.SQLStatementCounter
-	projectRepo *sqlite.ProjectRepo
+	projectRepo persistence.ProjectStore
 	h           *Handler
 	e           *echo.Echo
 }
@@ -105,7 +107,7 @@ func newProjectCapacityAPIProjectionFixture(tb testing.TB, projectCount int) *pr
 	h.workerSvc.SetProjectRepo(h.projectRepo)
 	return &projectCapacityAPIProjectionFixture{
 		counter:     counter,
-		projectRepo: sqlite.NewProjectRepo(reader),
+		projectRepo: teststores.Of(reader).Projects,
 		h:           h,
 		e:           e,
 	}

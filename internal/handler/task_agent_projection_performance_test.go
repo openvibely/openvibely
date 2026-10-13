@@ -17,6 +17,7 @@ import (
 	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/persistence/sqlite/database"
+	"github.com/openvibely/openvibely/internal/testutil/teststores"
 )
 
 const taskUIAgentPerformanceSamples = 5
@@ -25,7 +26,7 @@ type taskUIAgentRenderFixture struct {
 	connections       *database.Connections
 	h                 *Handler
 	e                 http.Handler
-	agentRepo         *sqlite.AgentRepo
+	agentRepo         persistence.AgentStore
 	projectID         string
 	detailTask        string
 	noAgentDetailTask string
@@ -84,7 +85,7 @@ func newTaskUIAgentRenderFixture(tb testing.TB) *taskUIAgentRenderFixture {
 	tb.Cleanup(unregister)
 
 	ctx := context.Background()
-	writerAgentRepo := sqlite.NewAgentRepo(connections.Writer)
+	writerAgentRepo := teststores.Of(connections.Writer).Agents
 	var assignedID, fallbackID string
 	for i := 0; i < 1000; i++ {
 		agent := newProductionTaskUIAgent(fmt.Sprintf("Task UI Performance Agent %04d", i))
@@ -103,7 +104,7 @@ func newTaskUIAgentRenderFixture(tb testing.TB) *taskUIAgentRenderFixture {
 		}
 	}
 
-	writerTaskRepo := sqlite.NewTaskRepo(connections.Writer, nil)
+	writerTaskRepo := teststores.Of(connections.Writer).Tasks
 	boardTask := &models.Task{
 		ProjectID:         "default",
 		Title:             "Task UI Performance Board Badge",
@@ -141,12 +142,12 @@ func newTaskUIAgentRenderFixture(tb testing.TB) *taskUIAgentRenderFixture {
 	}
 
 	h, e, _ := setupTestHandlerForDB(tb, connections.Reader)
-	h.SetAgentRepo(sqlite.NewAgentRepo(connections.Reader))
+	h.SetAgentRepo(teststores.Of(connections.Reader).Agents)
 	return &taskUIAgentRenderFixture{
 		connections:       connections,
 		h:                 h,
 		e:                 e,
-		agentRepo:         sqlite.NewAgentRepo(connections.Reader),
+		agentRepo:         teststores.Of(connections.Reader).Agents,
 		projectID:         "default",
 		detailTask:        detailTask.ID,
 		noAgentDetailTask: noAgentDetailTask.ID,

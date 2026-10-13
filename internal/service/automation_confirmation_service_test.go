@@ -7,27 +7,26 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/persistence/sqlite"
-	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/openvibely/openvibely/internal/testutil/teststores"
 	"github.com/stretchr/testify/require"
 )
 
 func TestAutomationChatConfirmationBindsExactCandidateWithoutCreatingAutomation(t *testing.T) {
-	db := testutil.NewTestDB(t)
+	db := teststores.NewDB(t)
 	ctx := context.Background()
-	projectRepo := sqlite.NewProjectRepo(db)
+	projectRepo := teststores.Of(db).Projects
 	project := automationTestProject(t, projectRepo, "Confirmation")
-	taskRepo := sqlite.NewTaskRepo(db, nil)
+	taskRepo := teststores.Of(db).Tasks
 	chatTask := models.Task{ProjectID: project.ID, Title: "Chat confirmation thread", Prompt: "chat", Category: models.CategoryChat, Priority: 2, Status: models.StatusRunning}
 	require.NoError(t, taskRepo.Create(ctx, &chatTask))
-	execRepo := sqlite.NewExecutionRepo(db)
+	execRepo := teststores.Of(db).Executions
 	planExec := models.Execution{TaskID: chatTask.ID, Status: models.ExecCompleted, PromptSent: "create an automation"}
 	require.NoError(t, execRepo.Create(ctx, &planExec))
 	planTime := time.Now().UTC().Add(-2 * time.Minute)
 	_, err := db.ExecContext(ctx, `UPDATE executions SET started_at = ? WHERE id = ?`, planTime, planExec.ID)
 	require.NoError(t, err)
 
-	automationRepo := sqlite.NewAutomationRepo(db)
+	automationRepo := teststores.Of(db).Automations
 	registry := NewAutomationAdapterRegistry()
 	drafts := NewAutomationDraftService(automationRepo, registry)
 	candidate, err := drafts.TemplateCandidate(AutomationAdapterNativeSDLC)
@@ -62,7 +61,7 @@ func TestAutomationChatConfirmationBindsExactCandidateWithoutCreatingAutomation(
 	require.JSONEq(t, mustJSON(t, candidate), receipt.CandidateJSON)
 
 	validator := NewAutomationSaveValidator(registry, drafts)
-	compiler := NewAutomationCompiler(automationRepo, NewTaskService(taskRepo, sqlite.NewAttachmentRepo(db), nil), taskRepo, sqlite.NewScheduleRepo(db), validator)
+	compiler := NewAutomationCompiler(automationRepo, NewTaskService(taskRepo, teststores.Of(db).Attachments, nil), taskRepo, teststores.Of(db).Schedules, validator)
 	tampered := candidate
 	tampered.Description = "A different graph than the one displayed."
 	_, err = compiler.Save(ctx, AutomationSaveRequest{ProjectID: project.ID, Source: "manual", CreatedVia: "chat", Candidate: tampered,

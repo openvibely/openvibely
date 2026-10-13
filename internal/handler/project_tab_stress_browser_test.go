@@ -18,6 +18,7 @@ import (
 	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/openvibely/openvibely/internal/testutil/teststores"
 	"github.com/openvibely/openvibely/web/static"
 )
 
@@ -41,8 +42,8 @@ func TestProjectTabsUnderLoadInChrome(t *testing.T) {
 			reader, writer, _ := testutil.NewFileBackedSplitStatementCountingTestDB(t)
 			broadcaster := events.NewBroadcaster()
 			env := newTestHandlerEnv(t, reader, withTestBroadcaster(broadcaster))
-			taskRepo := sqlite.NewTaskRepo(writer, nil)
-			execRepo := sqlite.NewExecutionRepo(writer)
+			taskRepo := teststores.Of(writer).Tasks
+			execRepo := teststores.Of(writer).Executions
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			var ids []string
@@ -73,7 +74,7 @@ func TestProjectTabsUnderLoadInChrome(t *testing.T) {
 				go func() {
 					defer wg.Done()
 					for sequence := 0; ctx.Err() == nil; sequence++ {
-						if err := execRepo.UpdateOutput(ctx, id, fmt.Sprintf("%d\n%s", sequence, payload)); err != nil {
+						if err := execRepo.(*sqlite.ExecutionRepo).UpdateOutput(ctx, id, fmt.Sprintf("%d\n%s", sequence, payload)); err != nil {
 							if ctx.Err() == nil {
 								failures <- err
 							}

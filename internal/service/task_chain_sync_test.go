@@ -7,17 +7,16 @@ import (
 
 	"github.com/openvibely/openvibely/internal/llm/workflow"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/persistence/sqlite"
-	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/openvibely/openvibely/internal/testutil/teststores"
 	"github.com/stretchr/testify/require"
 )
 
 func TestExecuteTaskEditsRefreshesBlockedChildChainConfigAndActivationCreatesGrandchild(t *testing.T) {
-	db := testutil.NewTestDB(t)
+	db := teststores.NewDB(t)
 	ctx := context.Background()
-	projectRepo := sqlite.NewProjectRepo(db)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
-	taskSvc := NewTaskService(taskRepo, sqlite.NewAttachmentRepo(db), nil)
+	projectRepo := teststores.Of(db).Projects
+	taskRepo := teststores.Of(db).Tasks
+	taskSvc := NewTaskService(taskRepo, teststores.Of(db).Attachments, nil)
 	project := &models.Project{Name: "Chain Sync"}
 	require.NoError(t, projectRepo.Create(ctx, project))
 
@@ -75,11 +74,11 @@ func TestExecuteTaskEditsRefreshesBlockedChildChainConfigAndActivationCreatesGra
 }
 
 func TestExecuteTaskEditsDoesNotRewriteOrDuplicateStartedChainChild(t *testing.T) {
-	db := testutil.NewTestDB(t)
+	db := teststores.NewDB(t)
 	ctx := context.Background()
-	projectRepo := sqlite.NewProjectRepo(db)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
-	taskSvc := NewTaskService(taskRepo, sqlite.NewAttachmentRepo(db), nil)
+	projectRepo := teststores.Of(db).Projects
+	taskRepo := teststores.Of(db).Tasks
+	taskSvc := NewTaskService(taskRepo, teststores.Of(db).Attachments, nil)
 	project := &models.Project{Name: "Started Chain Child"}
 	require.NoError(t, projectRepo.Create(ctx, project))
 

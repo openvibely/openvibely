@@ -12,19 +12,20 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/persistence/sqlite"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/openvibely/openvibely/internal/testutil/teststores"
 )
 
-func setupUpcomingTest(t *testing.T) (*UpcomingService, *sqlite.TaskRepo, *sqlite.LLMConfigRepo, *sqlite.ExecutionRepo, string) {
+func setupUpcomingTest(t *testing.T) (*UpcomingService, persistence.TaskStore, persistence.LLMConfigStore, persistence.ExecutionStore, string) {
 	t.Helper()
-	db := testutil.NewTestDB(t)
+	db := teststores.NewDB(t)
 
-	projectRepo := sqlite.NewProjectRepo(db)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
-	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
-	execRepo := sqlite.NewExecutionRepo(db)
-	upcomingRepo := sqlite.NewUpcomingRepo(db)
+	projectRepo := teststores.Of(db).Projects
+	taskRepo := teststores.Of(db).Tasks
+	llmConfigRepo := teststores.Of(db).LLMConfigs
+	execRepo := teststores.Of(db).Executions
+	upcomingRepo := teststores.Of(db).Upcoming
 
 	upcomingSvc := NewUpcomingService(upcomingRepo)
 
@@ -295,14 +296,14 @@ func TestUpcomingService_GenerateHistory_TimeRanges(t *testing.T) {
 }
 
 func TestUpcomingService_AISummariesBuildPromptsAndTrimOutput(t *testing.T) {
-	db := testutil.NewTestDB(t)
+	db := teststores.NewDB(t)
 	ctx := context.Background()
-	projectRepo := sqlite.NewProjectRepo(db)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
-	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
-	execRepo := sqlite.NewExecutionRepo(db)
-	attachmentRepo := sqlite.NewAttachmentRepo(db)
-	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, sqlite.NewScheduleRepo(db), attachmentRepo)
+	projectRepo := teststores.Of(db).Projects
+	taskRepo := teststores.Of(db).Tasks
+	llmConfigRepo := teststores.Of(db).LLMConfigs
+	execRepo := teststores.Of(db).Executions
+	attachmentRepo := teststores.Of(db).Attachments
+	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, teststores.Of(db).Schedules, attachmentRepo)
 	mock := testutil.NewMockLLMCaller()
 	llmSvc.SetLLMCaller(mock)
 
@@ -315,7 +316,7 @@ func TestUpcomingService_AISummariesBuildPromptsAndTrimOutput(t *testing.T) {
 		t.Fatalf("create agent: %v", err)
 	}
 
-	svc := NewUpcomingService(sqlite.NewUpcomingRepo(db))
+	svc := NewUpcomingService(teststores.Of(db).Upcoming)
 	svc.SetProjectRepo(projectRepo)
 	svc.SetLLMConfigRepo(llmConfigRepo)
 	svc.SetLLMService(llmSvc)
@@ -479,10 +480,10 @@ README.md
 
 func TestGenerateHistoryUsesTaskCommitStatsForProjectChanges(t *testing.T) {
 	ctx := context.Background()
-	db := testutil.NewTestDB(t)
-	projectRepo := sqlite.NewProjectRepo(db)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
-	statRepo := sqlite.NewTaskCommitStatRepo(db)
+	db := teststores.NewDB(t)
+	projectRepo := teststores.Of(db).Projects
+	taskRepo := teststores.Of(db).Tasks
+	statRepo := teststores.Of(db).TaskCommitStats
 
 	project := &models.Project{Name: "Reflection Stats"}
 	if err := projectRepo.Create(ctx, project); err != nil {
@@ -503,7 +504,7 @@ func TestGenerateHistoryUsesTaskCommitStatsForProjectChanges(t *testing.T) {
 		}
 	}
 
-	svc := NewUpcomingService(sqlite.NewUpcomingRepo(db))
+	svc := NewUpcomingService(teststores.Of(db).Upcoming)
 	svc.SetTaskCommitStatRepo(statRepo)
 	history, err := svc.GenerateHistory(ctx, project.ID, models.TimeRangeDay)
 	if err != nil {
@@ -533,10 +534,10 @@ func TestGenerateHistoryUsesTaskCommitStatsForProjectChanges(t *testing.T) {
 
 func TestGenerateHistoryTaskCommitStatsCompactPreviewPreservesTotals(t *testing.T) {
 	ctx := context.Background()
-	db := testutil.NewTestDB(t)
-	projectRepo := sqlite.NewProjectRepo(db)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
-	statRepo := sqlite.NewTaskCommitStatRepo(db)
+	db := teststores.NewDB(t)
+	projectRepo := teststores.Of(db).Projects
+	taskRepo := teststores.Of(db).Tasks
+	statRepo := teststores.Of(db).TaskCommitStats
 
 	project := &models.Project{Name: "Reflection Compact Stats"}
 	if err := projectRepo.Create(ctx, project); err != nil {
@@ -584,7 +585,7 @@ func TestGenerateHistoryTaskCommitStatsCompactPreviewPreservesTotals(t *testing.
 		}
 	}
 
-	svc := NewUpcomingService(sqlite.NewUpcomingRepo(db))
+	svc := NewUpcomingService(teststores.Of(db).Upcoming)
 	svc.SetTaskCommitStatRepo(statRepo)
 	for _, tr := range []models.TimeRange{models.TimeRangeHour, models.TimeRangeDay, models.TimeRangeWeek} {
 		history, err := svc.GenerateHistory(ctx, project.ID, tr)
@@ -630,10 +631,10 @@ func TestGenerateHistoryTaskCommitStatsCompactPreviewPreservesTotals(t *testing.
 
 func TestGenerateHistoryCombinesFallbackBeforeFirstTaskCommitStat(t *testing.T) {
 	ctx := context.Background()
-	db := testutil.NewTestDB(t)
-	projectRepo := sqlite.NewProjectRepo(db)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
-	statRepo := sqlite.NewTaskCommitStatRepo(db)
+	db := teststores.NewDB(t)
+	projectRepo := teststores.Of(db).Projects
+	taskRepo := teststores.Of(db).Tasks
+	statRepo := teststores.Of(db).TaskCommitStats
 	repoDir := t.TempDir()
 	runGit(t, repoDir, nil, "init", "-b", "main")
 	runGit(t, repoDir, nil, "config", "user.name", "Test User")
@@ -668,7 +669,7 @@ func TestGenerateHistoryCombinesFallbackBeforeFirstTaskCommitStat(t *testing.T) 
 		t.Fatalf("upsert stat: %v", err)
 	}
 
-	svc := NewUpcomingService(sqlite.NewUpcomingRepo(db))
+	svc := NewUpcomingService(teststores.Of(db).Upcoming)
 	svc.SetProjectRepo(projectRepo)
 	svc.SetTaskCommitStatRepo(statRepo)
 	history, err := svc.GenerateHistory(ctx, project.ID, models.TimeRangeDay)
@@ -693,10 +694,10 @@ func TestGenerateHistoryCombinesFallbackBeforeFirstTaskCommitStat(t *testing.T) 
 
 func TestGenerateHistoryDoesNotFallbackDuringCoveredQuietGap(t *testing.T) {
 	ctx := context.Background()
-	db := testutil.NewTestDB(t)
-	projectRepo := sqlite.NewProjectRepo(db)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
-	statRepo := sqlite.NewTaskCommitStatRepo(db)
+	db := teststores.NewDB(t)
+	projectRepo := teststores.Of(db).Projects
+	taskRepo := teststores.Of(db).Tasks
+	statRepo := teststores.Of(db).TaskCommitStats
 	repoDir := t.TempDir()
 	runGit(t, repoDir, nil, "init", "-b", "main")
 	runGit(t, repoDir, nil, "config", "user.name", "Test User")
@@ -740,7 +741,7 @@ func TestGenerateHistoryDoesNotFallbackDuringCoveredQuietGap(t *testing.T) {
 		}
 	}
 
-	svc := NewUpcomingService(sqlite.NewUpcomingRepo(db))
+	svc := NewUpcomingService(teststores.Of(db).Upcoming)
 	svc.SetProjectRepo(projectRepo)
 	svc.SetTaskCommitStatRepo(statRepo)
 	history, err := svc.GenerateHistory(ctx, project.ID, models.TimeRangeDay)
@@ -778,13 +779,13 @@ func BenchmarkTaskCommitStatHistoryProjection(b *testing.B) {
 	}
 }
 
-func setupTaskCommitStatHistoryBenchmarkFixture(tb testing.TB, rows, pathsPerCommit int) (*UpcomingService, *sqlite.TaskCommitStatRepo, string, time.Time) {
+func setupTaskCommitStatHistoryBenchmarkFixture(tb testing.TB, rows, pathsPerCommit int) (*UpcomingService, persistence.TaskCommitStatStore, string, time.Time) {
 	tb.Helper()
 	ctx := context.Background()
-	db := testutil.NewTestDB(tb)
-	projectRepo := sqlite.NewProjectRepo(db)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
-	statRepo := sqlite.NewTaskCommitStatRepo(db)
+	db := teststores.NewDB(tb)
+	projectRepo := teststores.Of(db).Projects
+	taskRepo := teststores.Of(db).Tasks
+	statRepo := teststores.Of(db).TaskCommitStats
 
 	project := &models.Project{Name: "Reflection Benchmark"}
 	if err := projectRepo.Create(ctx, project); err != nil {
@@ -822,7 +823,7 @@ func setupTaskCommitStatHistoryBenchmarkFixture(tb testing.TB, rows, pathsPerCom
 		}
 	}
 
-	svc := NewUpcomingService(sqlite.NewUpcomingRepo(db))
+	svc := NewUpcomingService(teststores.Of(db).Upcoming)
 	svc.SetTaskCommitStatRepo(statRepo)
 	return svc, statRepo, project.ID, baseTime.Add(-time.Duration(rows+1) * time.Second)
 }

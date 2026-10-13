@@ -18,6 +18,7 @@ import (
 	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/openvibely/openvibely/internal/testutil/teststores"
 	"github.com/stretchr/testify/require"
 )
 
@@ -34,12 +35,12 @@ func (r automationEnterpriseRepoResolver) GlobalAPIEndpoint(context.Context) str
 }
 
 func TestAutomationGraphServiceResolveAutomationCardPreservesChatTargetContract(t *testing.T) {
-	db := testutil.NewTestDB(t)
+	db := teststores.NewDB(t)
 	ctx := context.Background()
-	projectRepo := sqlite.NewProjectRepo(db)
+	projectRepo := teststores.Of(db).Projects
 	project := automationTestProject(t, projectRepo, "Automation card resolution")
 	foreign := automationTestProject(t, projectRepo, "Foreign Automation card resolution")
-	graphSvc := NewAutomationGraphService(sqlite.NewAutomationRepo(db))
+	graphSvc := NewAutomationGraphService(teststores.Of(db).Automations)
 
 	insertAutomation := func(projectID, automationID, name string) {
 		t.Helper()
@@ -96,14 +97,14 @@ func TestResolveAutomationProjectGitHubRepository_AppliesGlobalEndpoint(t *testi
 	require.Equal(t, endpoint, repo.APIBaseURL)
 }
 
-func automationTestProject(t *testing.T, repo *sqlite.ProjectRepo, name string) models.Project {
+func automationTestProject(t *testing.T, repo persistence.ProjectStore, name string) models.Project {
 	t.Helper()
 	project := models.Project{Name: name}
 	require.NoError(t, repo.Create(context.Background(), &project))
 	return project
 }
 
-func automationTestTaskAndSchedule(t *testing.T, dbRepo *sqlite.TaskRepo, scheduleRepo *sqlite.ScheduleRepo, projectID, title string) (models.Task, models.Schedule) {
+func automationTestTaskAndSchedule(t *testing.T, dbRepo persistence.TaskStore, scheduleRepo persistence.ScheduleStore, projectID, title string) (models.Task, models.Schedule) {
 	t.Helper()
 	task := models.Task{ProjectID: projectID, Title: title, Category: models.CategoryScheduled, Priority: 2, Status: models.StatusPending, Prompt: "visible automation task"}
 	require.NoError(t, dbRepo.Create(context.Background(), &task))
@@ -114,11 +115,11 @@ func automationTestTaskAndSchedule(t *testing.T, dbRepo *sqlite.TaskRepo, schedu
 }
 
 func TestAutomationRegistrationTelemetryReportsCreationTruthfully(t *testing.T) {
-	db := testutil.NewTestDB(t)
+	db := teststores.NewDB(t)
 	ctx := context.Background()
-	project := automationTestProject(t, sqlite.NewProjectRepo(db), "Registration telemetry")
-	task, schedule := automationTestTaskAndSchedule(t, sqlite.NewTaskRepo(db, nil), sqlite.NewScheduleRepo(db), project.ID, "Registered task")
-	registration := NewAutomationRegistrationService(sqlite.NewAutomationRepo(db), NewAutomationAdapterRegistry())
+	project := automationTestProject(t, teststores.Of(db).Projects, "Registration telemetry")
+	task, schedule := automationTestTaskAndSchedule(t, teststores.Of(db).Tasks, teststores.Of(db).Schedules, project.ID, "Registered task")
+	registration := NewAutomationRegistrationService(teststores.Of(db).Automations, NewAutomationAdapterRegistry())
 	request := AutomationRegistrationRequest{
 		ProjectID: project.ID, AdapterKey: AutomationAdapterNativeSDLC, StableKey: "native-sdlc/telemetry",
 		Resources: []models.AutomationResourceBinding{
@@ -148,11 +149,11 @@ func TestAutomationRegistrationTelemetryReportsCreationTruthfully(t *testing.T) 
 }
 
 func TestAutomationRegistrationExplicitIdentityAndIsolation(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	projectRepo := sqlite.NewProjectRepo(db)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
-	scheduleRepo := sqlite.NewScheduleRepo(db)
-	automationRepo := sqlite.NewAutomationRepo(db)
+	db := teststores.NewDB(t)
+	projectRepo := teststores.Of(db).Projects
+	taskRepo := teststores.Of(db).Tasks
+	scheduleRepo := teststores.Of(db).Schedules
+	automationRepo := teststores.Of(db).Automations
 	service := NewAutomationRegistrationService(automationRepo, NewAutomationAdapterRegistry())
 	graph := NewAutomationGraphService(automationRepo)
 	ctx := context.Background()
@@ -229,12 +230,12 @@ func TestAutomationRegistrationExplicitIdentityAndIsolation(t *testing.T) {
 }
 
 func TestRegisteredMaintainedAutomationCanBeReopenedAndSaved(t *testing.T) {
-	db := testutil.NewTestDB(t)
+	db := teststores.NewDB(t)
 	ctx := context.Background()
-	project := automationTestProject(t, sqlite.NewProjectRepo(db), "Editable registered maintained Automation")
-	taskRepo := sqlite.NewTaskRepo(db, nil)
-	scheduleRepo := sqlite.NewScheduleRepo(db)
-	automationRepo := sqlite.NewAutomationRepo(db)
+	project := automationTestProject(t, teststores.Of(db).Projects, "Editable registered maintained Automation")
+	taskRepo := teststores.Of(db).Tasks
+	scheduleRepo := teststores.Of(db).Schedules
+	automationRepo := teststores.Of(db).Automations
 	registry := NewAutomationAdapterRegistry()
 	task, schedule := automationTestTaskAndSchedule(t, taskRepo, scheduleRepo, project.ID, "Registered maintained trigger")
 
@@ -266,7 +267,7 @@ func TestRegisteredMaintainedAutomationCanBeReopenedAndSaved(t *testing.T) {
 	require.Equal(t, "native_alert", automationDraftNodeByKey(t, reopened.Candidate, "approval").Config["approval_method"])
 
 	validator := NewAutomationSaveValidator(registry, drafts)
-	compiler := NewAutomationCompiler(automationRepo, NewTaskService(taskRepo, sqlite.NewAttachmentRepo(db), nil), taskRepo, scheduleRepo, validator)
+	compiler := NewAutomationCompiler(automationRepo, NewTaskService(taskRepo, teststores.Of(db).Attachments, nil), taskRepo, scheduleRepo, validator)
 	saved, err := compiler.Save(ctx, AutomationSaveRequest{
 		ProjectID: project.ID, AutomationID: definition.Automation.ID, Source: "manual", CreatedVia: "web", Candidate: reopened.Candidate,
 	})
@@ -324,12 +325,12 @@ func TestRegisteredMaintainedAutomationCanBeReopenedAndSaved(t *testing.T) {
 }
 
 func TestRegisteredSharedInboxTaskCanBeReopenedAndSaved(t *testing.T) {
-	db := testutil.NewTestDB(t)
+	db := teststores.NewDB(t)
 	ctx := context.Background()
-	project := automationTestProject(t, sqlite.NewProjectRepo(db), "Editable shared inbox Automation")
-	taskRepo := sqlite.NewTaskRepo(db, nil)
-	scheduleRepo := sqlite.NewScheduleRepo(db)
-	automationRepo := sqlite.NewAutomationRepo(db)
+	project := automationTestProject(t, teststores.Of(db).Projects, "Editable shared inbox Automation")
+	taskRepo := teststores.Of(db).Tasks
+	scheduleRepo := teststores.Of(db).Schedules
+	automationRepo := teststores.Of(db).Automations
 	registry := NewAutomationAdapterRegistry()
 	worker, schedule := automationTestTaskAndSchedule(t, taskRepo, scheduleRepo, project.ID, "Shared inbox worker")
 
@@ -364,7 +365,7 @@ func TestRegisteredSharedInboxTaskCanBeReopenedAndSaved(t *testing.T) {
 		}
 	}
 	validator := NewAutomationSaveValidator(registry, drafts)
-	compiler := NewAutomationCompiler(automationRepo, NewTaskService(taskRepo, sqlite.NewAttachmentRepo(db), nil), taskRepo, scheduleRepo, validator)
+	compiler := NewAutomationCompiler(automationRepo, NewTaskService(taskRepo, teststores.Of(db).Attachments, nil), taskRepo, scheduleRepo, validator)
 
 	saved, err := compiler.Save(ctx, AutomationSaveRequest{ProjectID: project.ID, AutomationID: definition.Automation.ID,
 		Source: "manual", CreatedVia: "web", Candidate: reopened.Candidate})
@@ -392,10 +393,10 @@ func TestRegisteredSharedInboxTaskCanBeReopenedAndSaved(t *testing.T) {
 func TestAutomationPortfolioListUsesCompactPublishedCardProjection(t *testing.T) {
 	db, counter := testutil.NewStatementCountingTestDB(t)
 	ctx := context.Background()
-	project := automationTestProject(t, sqlite.NewProjectRepo(db), "Compact Automation portfolio")
-	other := automationTestProject(t, sqlite.NewProjectRepo(db), "Other Compact Automation portfolio")
-	taskRepo := sqlite.NewTaskRepo(db, nil)
-	scheduleRepo := sqlite.NewScheduleRepo(db)
+	project := automationTestProject(t, teststores.Of(db).Projects, "Compact Automation portfolio")
+	other := automationTestProject(t, teststores.Of(db).Projects, "Other Compact Automation portfolio")
+	taskRepo := teststores.Of(db).Tasks
+	scheduleRepo := teststores.Of(db).Schedules
 
 	largeConfig := strings.Repeat(`{"prompt":"large hidden graph config"}`, 200)
 	for i := 0; i < 4; i++ {
@@ -465,7 +466,7 @@ func TestAutomationPortfolioListUsesCompactPublishedCardProjection(t *testing.T)
 
 	counter.Reset()
 	counter.SetEnabled(true)
-	cards, err := NewAutomationGraphService(sqlite.NewAutomationRepo(db)).List(ctx, project.ID)
+	cards, err := NewAutomationGraphService(teststores.Of(db).Automations).List(ctx, project.ID)
 	counter.SetEnabled(false)
 	require.NoError(t, err)
 	require.Len(t, cards, 4)
@@ -505,10 +506,10 @@ func TestAutomationPortfolioListUsesCompactPublishedCardProjection(t *testing.T)
 }
 
 func TestAutomationPortfolioListsEverySavedAutomationBeyondOneHundred(t *testing.T) {
-	db := testutil.NewTestDB(t)
+	db := teststores.NewDB(t)
 	ctx := context.Background()
-	project := automationTestProject(t, sqlite.NewProjectRepo(db), "Large Automation portfolio")
-	other := automationTestProject(t, sqlite.NewProjectRepo(db), "Other Automation portfolio")
+	project := automationTestProject(t, teststores.Of(db).Projects, "Large Automation portfolio")
+	other := automationTestProject(t, teststores.Of(db).Projects, "Other Automation portfolio")
 
 	for i := 0; i < 5; i++ {
 		_, err := db.ExecContext(ctx, `INSERT INTO automations
@@ -543,7 +544,7 @@ func TestAutomationPortfolioListsEverySavedAutomationBeyondOneHundred(t *testing
 	_, err = db.ExecContext(ctx, `UPDATE automations SET published_version_id = 'foreign-version' WHERE id = 'foreign-saved'`)
 	require.NoError(t, err)
 
-	cards, err := NewAutomationGraphService(sqlite.NewAutomationRepo(db)).List(ctx, project.ID)
+	cards, err := NewAutomationGraphService(teststores.Of(db).Automations).List(ctx, project.ID)
 	require.NoError(t, err)
 	require.Len(t, cards, 101)
 	seen := make(map[string]bool, len(cards))
@@ -557,12 +558,12 @@ func TestAutomationPortfolioListsEverySavedAutomationBeyondOneHundred(t *testing
 }
 
 func TestGitHubSDLCRegistrationHydratesInitialSnapshotAcrossPause(t *testing.T) {
-	db := testutil.NewTestDB(t)
+	db := teststores.NewDB(t)
 	ctx := context.Background()
-	project := automationTestProject(t, sqlite.NewProjectRepo(db), "Registered GitHub prompt parity")
-	taskRepo := sqlite.NewTaskRepo(db, nil)
-	scheduleRepo := sqlite.NewScheduleRepo(db)
-	automationRepo := sqlite.NewAutomationRepo(db)
+	project := automationTestProject(t, teststores.Of(db).Projects, "Registered GitHub prompt parity")
+	taskRepo := teststores.Of(db).Tasks
+	scheduleRepo := teststores.Of(db).Schedules
+	automationRepo := teststores.Of(db).Automations
 	registration := NewAutomationRegistrationService(automationRepo, NewAutomationAdapterRegistry())
 
 	maintainedPrompt := githubSDLCDevInboxPrompt
@@ -608,7 +609,7 @@ func TestGitHubSDLCRegistrationHydratesInitialSnapshotAcrossPause(t *testing.T) 
 	require.Equal(t, maintainedPrompt, automationDraftNodeByKey(t, reopened.Candidate, "dev_inbox").Config["prompt"])
 }
 
-func seedRetainedAutomationSchedule(t *testing.T, db *sql.DB, taskRepo *sqlite.TaskRepo, scheduleRepo *sqlite.ScheduleRepo,
+func seedRetainedAutomationSchedule(t *testing.T, db *sql.DB, taskRepo persistence.TaskStore, scheduleRepo persistence.ScheduleStore,
 	projectID, automationID, versionID, label string) (models.Task, models.Schedule) {
 	t.Helper()
 	ctx := context.Background()
@@ -636,12 +637,12 @@ func seedRetainedAutomationSchedule(t *testing.T, db *sql.DB, taskRepo *sqlite.T
 }
 
 func TestMaintainedAutomationRegistrationPreservesPointInTimeSnapshot(t *testing.T) {
-	db := testutil.NewTestDB(t)
+	db := teststores.NewDB(t)
 	ctx := context.Background()
-	project := automationTestProject(t, sqlite.NewProjectRepo(db), "Point-in-time maintained template")
-	taskRepo := sqlite.NewTaskRepo(db, nil)
-	scheduleRepo := sqlite.NewScheduleRepo(db)
-	automationRepo := sqlite.NewAutomationRepo(db)
+	project := automationTestProject(t, teststores.Of(db).Projects, "Point-in-time maintained template")
+	taskRepo := teststores.Of(db).Tasks
+	scheduleRepo := teststores.Of(db).Schedules
+	automationRepo := teststores.Of(db).Automations
 	registry := NewAutomationAdapterRegistry()
 	registration := NewAutomationRegistrationService(automationRepo, registry)
 
@@ -717,12 +718,12 @@ func TestMaintainedAutomationRegistrationPreservesCurrentGraphAndLifecycle(t *te
 		{name: "archived", state: models.AutomationArchived, ownershipState: "archived"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			db := testutil.NewTestDB(t)
+			db := teststores.NewDB(t)
 			ctx := context.Background()
-			project := automationTestProject(t, sqlite.NewProjectRepo(db), "Maintained "+test.name)
-			taskRepo := sqlite.NewTaskRepo(db, nil)
-			scheduleRepo := sqlite.NewScheduleRepo(db)
-			automationRepo := sqlite.NewAutomationRepo(db)
+			project := automationTestProject(t, teststores.Of(db).Projects, "Maintained "+test.name)
+			taskRepo := teststores.Of(db).Tasks
+			scheduleRepo := teststores.Of(db).Schedules
+			automationRepo := teststores.Of(db).Automations
 			registration := NewAutomationRegistrationService(automationRepo, NewAutomationAdapterRegistry())
 
 			firstTask, firstSchedule := automationTestTaskAndSchedule(t, taskRepo, scheduleRepo, project.ID, "First maintained schedule")
@@ -793,12 +794,12 @@ func TestMaintainedAutomationRegistrationPreservesCurrentGraphAndLifecycle(t *te
 }
 
 func TestMaintainedAutomationRegistrationUnchangedCleansRetainedGraphSchedule(t *testing.T) {
-	db := testutil.NewTestDB(t)
+	db := teststores.NewDB(t)
 	ctx := context.Background()
-	project := automationTestProject(t, sqlite.NewProjectRepo(db), "Unchanged maintained retained schedule")
-	taskRepo := sqlite.NewTaskRepo(db, nil)
-	scheduleRepo := sqlite.NewScheduleRepo(db)
-	automationRepo := sqlite.NewAutomationRepo(db)
+	project := automationTestProject(t, teststores.Of(db).Projects, "Unchanged maintained retained schedule")
+	taskRepo := teststores.Of(db).Tasks
+	scheduleRepo := teststores.Of(db).Schedules
+	automationRepo := teststores.Of(db).Automations
 	registration := NewAutomationRegistrationService(automationRepo, NewAutomationAdapterRegistry())
 	currentTask, currentSchedule := automationTestTaskAndSchedule(t, taskRepo, scheduleRepo, project.ID, "Current maintained schedule")
 	request := AutomationRegistrationRequest{ProjectID: project.ID, AdapterKey: AutomationAdapterNativeSDLC,
@@ -830,12 +831,12 @@ func TestMaintainedAutomationRegistrationUnchangedCleansRetainedGraphSchedule(t 
 }
 
 func TestMaintainedAutomationRegistrationEnablesBoundSchedule(t *testing.T) {
-	db := testutil.NewTestDB(t)
+	db := teststores.NewDB(t)
 	ctx := context.Background()
-	project := automationTestProject(t, sqlite.NewProjectRepo(db), "Disabled maintained schedule")
-	taskRepo := sqlite.NewTaskRepo(db, nil)
-	scheduleRepo := sqlite.NewScheduleRepo(db)
-	automationRepo := sqlite.NewAutomationRepo(db)
+	project := automationTestProject(t, teststores.Of(db).Projects, "Disabled maintained schedule")
+	taskRepo := teststores.Of(db).Tasks
+	scheduleRepo := teststores.Of(db).Schedules
+	automationRepo := teststores.Of(db).Automations
 	registration := NewAutomationRegistrationService(automationRepo, NewAutomationAdapterRegistry())
 	task, schedule := automationTestTaskAndSchedule(t, taskRepo, scheduleRepo, project.ID, "Disabled maintained trigger")
 	_, err := db.ExecContext(ctx, `UPDATE schedules SET enabled = 0 WHERE id = ?`, schedule.ID)
@@ -868,12 +869,12 @@ func TestMaintainedAutomationRegistrationUsesGlobalPauseAndResume(t *testing.T) 
 		{name: "disabled", configuredEnabled: false},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			db := testutil.NewTestDB(t)
+			db := teststores.NewDB(t)
 			ctx := context.Background()
-			project := automationTestProject(t, sqlite.NewProjectRepo(db), "Paused maintained schedule "+test.name)
-			taskRepo := sqlite.NewTaskRepo(db, nil)
-			scheduleRepo := sqlite.NewScheduleRepo(db)
-			automationRepo := sqlite.NewAutomationRepo(db)
+			project := automationTestProject(t, teststores.Of(db).Projects, "Paused maintained schedule "+test.name)
+			taskRepo := teststores.Of(db).Tasks
+			scheduleRepo := teststores.Of(db).Schedules
+			automationRepo := teststores.Of(db).Automations
 			registration := NewAutomationRegistrationService(automationRepo, NewAutomationAdapterRegistry())
 			task, schedule := automationTestTaskAndSchedule(t, taskRepo, scheduleRepo, project.ID, "Paused maintained trigger")
 			if !test.configuredEnabled {
@@ -905,15 +906,15 @@ func TestMaintainedAutomationRegistrationUsesGlobalPauseAndResume(t *testing.T) 
 }
 
 func TestAutomationRegistrationRejectsScheduleTaskMismatch(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	project := automationTestProject(t, sqlite.NewProjectRepo(db), "Mismatched scheduled task")
-	taskRepo := sqlite.NewTaskRepo(db, nil)
-	scheduleRepo := sqlite.NewScheduleRepo(db)
+	db := teststores.NewDB(t)
+	project := automationTestProject(t, teststores.Of(db).Projects, "Mismatched scheduled task")
+	taskRepo := teststores.Of(db).Tasks
+	scheduleRepo := teststores.Of(db).Schedules
 	firstTask, schedule := automationTestTaskAndSchedule(t, taskRepo, scheduleRepo, project.ID, "Actual scheduled task")
 	secondTask := models.Task{ProjectID: project.ID, Title: "Incorrect visual task", Category: models.CategoryScheduled, Status: models.StatusPending, Priority: 2, Prompt: "different task"}
 	require.NoError(t, taskRepo.Create(context.Background(), &secondTask))
 
-	_, _, err := NewAutomationRegistrationService(sqlite.NewAutomationRepo(db), NewAutomationAdapterRegistry()).Register(context.Background(), AutomationRegistrationRequest{
+	_, _, err := NewAutomationRegistrationService(teststores.Of(db).Automations, NewAutomationAdapterRegistry()).Register(context.Background(), AutomationRegistrationRequest{
 		ProjectID: project.ID, AdapterKey: AutomationAdapterNativeSDLC, StableKey: "native-sdlc/mismatch",
 		Resources: []models.AutomationResourceBinding{
 			{NodeKey: "vision_suggestions", ResourceType: "schedule", ResourceID: schedule.ID},
@@ -925,11 +926,11 @@ func TestAutomationRegistrationRejectsScheduleTaskMismatch(t *testing.T) {
 }
 
 func TestAutomationRegistrationRejectsUnsupportedAdapterAndExclusiveTriggerReuse(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	projectRepo := sqlite.NewProjectRepo(db)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
-	scheduleRepo := sqlite.NewScheduleRepo(db)
-	automationRepo := sqlite.NewAutomationRepo(db)
+	db := teststores.NewDB(t)
+	projectRepo := teststores.Of(db).Projects
+	taskRepo := teststores.Of(db).Tasks
+	scheduleRepo := teststores.Of(db).Schedules
+	automationRepo := teststores.Of(db).Automations
 	service := NewAutomationRegistrationService(automationRepo, NewAutomationAdapterRegistry())
 	project := automationTestProject(t, projectRepo, "Exclusive")
 	task, schedule := automationTestTaskAndSchedule(t, taskRepo, scheduleRepo, project.ID, "Trigger")
@@ -989,10 +990,10 @@ func TestAutomationRegistrationRejectsUnsupportedAdapterAndExclusiveTriggerReuse
 }
 
 func TestAutomationBootstrapRuntimeToolIsSelectedSkillScoped(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	projectRepo := sqlite.NewProjectRepo(db)
+	db := teststores.NewDB(t)
+	projectRepo := teststores.Of(db).Projects
 	project := automationTestProject(t, projectRepo, "Runtime scope")
-	repo := sqlite.NewAutomationRepo(db)
+	repo := teststores.Of(db).Automations
 	llm := &LLMService{}
 	llm.SetAutomationRegistrationService(NewAutomationRegistrationService(repo, NewAutomationAdapterRegistry()))
 	task := models.Task{ID: "bootstrap-task", ProjectID: project.ID}
@@ -1004,8 +1005,8 @@ func TestAutomationBootstrapRuntimeToolIsSelectedSkillScoped(t *testing.T) {
 	require.Len(t, runtime.Definitions, 1)
 	require.Equal(t, "register_automation_resources", runtime.Definitions[0].Name)
 
-	taskRepo := sqlite.NewTaskRepo(db, nil)
-	scheduleRepo := sqlite.NewScheduleRepo(db)
+	taskRepo := teststores.Of(db).Tasks
+	scheduleRepo := teststores.Of(db).Schedules
 	producer, schedule := automationTestTaskAndSchedule(t, taskRepo, scheduleRepo, project.ID, "Runtime producer")
 	input := fmt.Sprintf(`{"adapter_key":"native_sdlc","stable_key":"native-sdlc/default","resources":[{"node_key":"vision_suggestions","resource_type":"schedule","resource_id":%q},{"node_key":"vision_suggestions","resource_type":"task","resource_id":%q}]}`, schedule.ID, producer.ID)
 	output, handled, isError, err := runtime.Executor(nativeCtx, "register_automation_resources", []byte(input))
@@ -1022,8 +1023,8 @@ func TestAutomationBootstrapRuntimeToolIsSelectedSkillScoped(t *testing.T) {
 }
 
 func TestAutomationCompositeConstraintsAndProjectCascade(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	projectRepo := sqlite.NewProjectRepo(db)
+	db := teststores.NewDB(t)
+	projectRepo := teststores.Of(db).Projects
 	project := automationTestProject(t, projectRepo, "Cascade")
 	other := automationTestProject(t, projectRepo, "Mismatch")
 
@@ -1032,18 +1033,18 @@ func TestAutomationCompositeConstraintsAndProjectCascade(t *testing.T) {
 	_, err = db.Exec(`INSERT INTO automation_versions (id, project_id, automation_id, version, adapter_key) VALUES ('v', ?, 'a', 1, 'native_sdlc')`, other.ID)
 	require.Error(t, err, "composite parent constraints must reject a foreign project")
 
-	require.NoError(t, projectRepo.Delete(context.Background(), project.ID))
+	require.NoError(t, projectRepo.(*sqlite.ProjectRepo).Delete(context.Background(), project.ID))
 	var count int
 	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM automations WHERE id = 'a'`).Scan(&count))
 	require.Zero(t, count)
 }
 
 func TestAutomationGraphServiceHistoryAndResourceWrappers(t *testing.T) {
-	db := testutil.NewTestDB(t)
+	db := teststores.NewDB(t)
 	ctx := context.Background()
-	project := automationTestProject(t, sqlite.NewProjectRepo(db), "Automation graph wrappers")
-	task, schedule := automationTestTaskAndSchedule(t, sqlite.NewTaskRepo(db, nil), sqlite.NewScheduleRepo(db), project.ID, "Automation wrapper task")
-	automationRepo := sqlite.NewAutomationRepo(db)
+	project := automationTestProject(t, teststores.Of(db).Projects, "Automation graph wrappers")
+	task, schedule := automationTestTaskAndSchedule(t, teststores.Of(db).Tasks, teststores.Of(db).Schedules, project.ID, "Automation wrapper task")
+	automationRepo := teststores.Of(db).Automations
 	registration := NewAutomationRegistrationService(automationRepo, NewAutomationAdapterRegistry())
 	definition, reused, err := registration.Register(ctx, AutomationRegistrationRequest{
 		ProjectID: project.ID, AdapterKey: AutomationAdapterNativeSDLC, StableKey: "native-sdlc/wrappers",
@@ -1100,11 +1101,11 @@ func TestAutomationGraphServiceHistoryAndResourceWrappers(t *testing.T) {
 }
 
 func TestAutomationAgentReferenceValidationMatchesCapabilityAndFallback(t *testing.T) {
-	db := testutil.NewTestDB(t)
+	db := teststores.NewDB(t)
 	ctx := context.Background()
-	projectRepo := sqlite.NewProjectRepo(db)
+	projectRepo := teststores.Of(db).Projects
 	project := automationTestProject(t, projectRepo, "Agent validation parity")
-	agentRepo := sqlite.NewAgentRepo(db)
+	agentRepo := teststores.Of(db).Agents
 	if _, err := db.ExecContext(ctx, `DELETE FROM agents WHERE id IS NOT NULL`); err != nil {
 		t.Fatalf("clear agents: %v", err)
 	}
@@ -1122,9 +1123,9 @@ func TestAutomationAgentReferenceValidationMatchesCapabilityAndFallback(t *testi
 	capabilities := NewAutomationCapabilitySnapshotBuilder(projectRepo, agentRepo, nil, nil)
 	snapshot, err := capabilities.BuildForValidation(ctx, project.ID, true)
 	require.NoError(t, err)
-	capabilityIssues := NewAutomationDraftService(sqlite.NewAutomationRepo(db), NewAutomationAdapterRegistry()).ValidateCandidateWithCapabilities(candidate, snapshot)
+	capabilityIssues := NewAutomationDraftService(teststores.Of(db).Automations, NewAutomationAdapterRegistry()).ValidateCandidateWithCapabilities(candidate, snapshot)
 
-	validator := NewAutomationSaveValidator(NewAutomationAdapterRegistry(), NewAutomationDraftService(sqlite.NewAutomationRepo(db), NewAutomationAdapterRegistry()))
+	validator := NewAutomationSaveValidator(NewAutomationAdapterRegistry(), NewAutomationDraftService(teststores.Of(db).Automations, NewAutomationAdapterRegistry()))
 	validator.SetAgentRepository(agentRepo)
 	fallbackIssues, err := validator.agentIssues(ctx, project.ID, candidate)
 	require.NoError(t, err)
@@ -1140,8 +1141,8 @@ func TestAutomationAgentReferenceValidationMatchesCapabilityAndFallback(t *testi
 func TestAutomationSaveValidatorAgentIssuesBatchesSelectableAgentReferences(t *testing.T) {
 	db, counter := testutil.NewStatementCountingTestDB(t)
 	ctx := context.Background()
-	project := automationTestProject(t, sqlite.NewProjectRepo(db), "Batched Agent Validation")
-	agentRepo := sqlite.NewAgentRepo(db)
+	project := automationTestProject(t, teststores.Of(db).Projects, "Batched Agent Validation")
+	agentRepo := teststores.Of(db).Agents
 	if _, err := db.ExecContext(ctx, `DELETE FROM agents WHERE id IS NOT NULL`); err != nil {
 		t.Fatalf("clear agents: %v", err)
 	}
@@ -1241,10 +1242,10 @@ func TestAutomationSaveValidatorAgentIssuesBatchesSelectableAgentReferences(t *t
 func TestAutomationSaveValidatorAgentIssuesPreservesReferenceAvailabilitySemantics(t *testing.T) {
 	db, counter := testutil.NewStatementCountingTestDB(t)
 	ctx := context.Background()
-	projectRepo := sqlite.NewProjectRepo(db)
+	projectRepo := teststores.Of(db).Projects
 	project := automationTestProject(t, projectRepo, "Agent Validation Project")
 	otherProject := automationTestProject(t, projectRepo, "Other Agent Validation Project")
-	agentRepo := sqlite.NewAgentRepo(db)
+	agentRepo := teststores.Of(db).Agents
 	if _, err := db.ExecContext(ctx, `DELETE FROM agents WHERE id IS NOT NULL`); err != nil {
 		t.Fatalf("clear agents: %v", err)
 	}
@@ -1357,9 +1358,9 @@ func TestAutomationSaveValidatorAgentIssuesPreservesReferenceAvailabilitySemanti
 func TestAutomationCompilerPreviewAndSaveUseBatchedAgentValidation(t *testing.T) {
 	db, counter := testutil.NewStatementCountingTestDB(t)
 	ctx := context.Background()
-	projectRepo := sqlite.NewProjectRepo(db)
+	projectRepo := teststores.Of(db).Projects
 	project := automationTestProject(t, projectRepo, "Compiler Agent Validation")
-	agentRepo := sqlite.NewAgentRepo(db)
+	agentRepo := teststores.Of(db).Agents
 	if _, err := db.ExecContext(ctx, `DELETE FROM agents WHERE id IS NOT NULL`); err != nil {
 		t.Fatalf("clear agents: %v", err)
 	}
@@ -1373,15 +1374,15 @@ func TestAutomationCompilerPreviewAndSaveUseBatchedAgentValidation(t *testing.T)
 	}
 
 	registry := NewAutomationAdapterRegistry()
-	drafts := NewAutomationDraftService(sqlite.NewAutomationRepo(db), registry)
+	drafts := NewAutomationDraftService(teststores.Of(db).Automations, registry)
 	capabilities := NewAutomationCapabilitySnapshotBuilder(projectRepo, agentRepo, nil, nil)
 	drafts.SetCapabilitySnapshotBuilder(capabilities)
 	validator := NewAutomationSaveValidator(registry, drafts)
 	validator.SetAgentRepository(agentRepo)
-	automationRepo := sqlite.NewAutomationRepo(db)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
-	scheduleRepo := sqlite.NewScheduleRepo(db)
-	compiler := NewAutomationCompiler(automationRepo, NewTaskService(taskRepo, sqlite.NewAttachmentRepo(db), nil), taskRepo, scheduleRepo, validator)
+	automationRepo := teststores.Of(db).Automations
+	taskRepo := teststores.Of(db).Tasks
+	scheduleRepo := teststores.Of(db).Schedules
+	compiler := NewAutomationCompiler(automationRepo, NewTaskService(taskRepo, teststores.Of(db).Attachments, nil), taskRepo, scheduleRepo, validator)
 
 	counter.Reset()
 	counter.SetEnabled(true)
@@ -1434,8 +1435,8 @@ func TestAutomationCompilerPreviewAndSaveUseBatchedAgentValidation(t *testing.T)
 func TestAutomationCompilerSaveBatchesAgentResolution(t *testing.T) {
 	db, counter := testutil.NewStatementCountingTestDB(t)
 	ctx := context.Background()
-	project := automationTestProject(t, sqlite.NewProjectRepo(db), "Compiler Agent Save")
-	agentRepo := sqlite.NewAgentRepo(db)
+	project := automationTestProject(t, teststores.Of(db).Projects, "Compiler Agent Save")
+	agentRepo := teststores.Of(db).Agents
 	if _, err := db.ExecContext(ctx, `DELETE FROM agents WHERE id IS NOT NULL`); err != nil {
 		t.Fatalf("clear agents: %v", err)
 	}
@@ -1452,12 +1453,12 @@ func TestAutomationCompilerSaveBatchesAgentResolution(t *testing.T) {
 	}
 
 	registry := NewAutomationAdapterRegistry()
-	automationRepo := sqlite.NewAutomationRepo(db)
+	automationRepo := teststores.Of(db).Automations
 	drafts := NewAutomationDraftService(automationRepo, registry)
 	validator := NewAutomationSaveValidator(registry, drafts)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
-	scheduleRepo := sqlite.NewScheduleRepo(db)
-	compiler := NewAutomationCompiler(automationRepo, NewTaskService(taskRepo, sqlite.NewAttachmentRepo(db), nil), taskRepo, scheduleRepo, validator)
+	taskRepo := teststores.Of(db).Tasks
+	scheduleRepo := teststores.Of(db).Schedules
+	compiler := NewAutomationCompiler(automationRepo, NewTaskService(taskRepo, teststores.Of(db).Attachments, nil), taskRepo, scheduleRepo, validator)
 	compiler.SetAgentRepository(agentRepo)
 
 	for _, referenceCount := range []int{1, 5, 20, 50} {
@@ -1523,10 +1524,10 @@ func TestAutomationCompilerSaveBatchesAgentResolution(t *testing.T) {
 func TestAutomationCompilerSavePreservesAgentReferenceSemanticsAndRollback(t *testing.T) {
 	db, counter := testutil.NewStatementCountingTestDB(t)
 	ctx := context.Background()
-	projectRepo := sqlite.NewProjectRepo(db)
+	projectRepo := teststores.Of(db).Projects
 	project := automationTestProject(t, projectRepo, "Compiler Agent Semantics")
 	otherProject := automationTestProject(t, projectRepo, "Compiler Agent Foreign Project")
-	agentRepo := sqlite.NewAgentRepo(db)
+	agentRepo := teststores.Of(db).Agents
 	if _, err := db.ExecContext(ctx, `DELETE FROM agents WHERE id IS NOT NULL`); err != nil {
 		t.Fatalf("clear agents: %v", err)
 	}
@@ -1565,12 +1566,12 @@ func TestAutomationCompilerSavePreservesAgentReferenceSemanticsAndRollback(t *te
 	}
 
 	registry := NewAutomationAdapterRegistry()
-	automationRepo := sqlite.NewAutomationRepo(db)
+	automationRepo := teststores.Of(db).Automations
 	drafts := NewAutomationDraftService(automationRepo, registry)
 	validator := NewAutomationSaveValidator(registry, drafts)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
-	scheduleRepo := sqlite.NewScheduleRepo(db)
-	compiler := NewAutomationCompiler(automationRepo, NewTaskService(taskRepo, sqlite.NewAttachmentRepo(db), nil), taskRepo, scheduleRepo, validator)
+	taskRepo := teststores.Of(db).Tasks
+	scheduleRepo := teststores.Of(db).Schedules
+	compiler := NewAutomationCompiler(automationRepo, NewTaskService(taskRepo, teststores.Of(db).Attachments, nil), taskRepo, scheduleRepo, validator)
 	compiler.SetAgentRepository(agentRepo)
 
 	candidate := automationValidationReferenceCandidate([]string{global.Key, scoped.Key, global.Key, blankKey.ID, orderedFirst.Key, orderedSecond.Key})
@@ -1673,12 +1674,12 @@ func newAutomationSavePerformanceFixture(tb testing.TB) *automationSavePerforman
 	tb.Helper()
 	db, counter := testutil.NewStatementCountingTestDB(tb)
 	ctx := context.Background()
-	projectRepo := sqlite.NewProjectRepo(db)
+	projectRepo := teststores.Of(db).Projects
 	project := models.Project{Name: "Automation Agent Save performance"}
 	if err := projectRepo.Create(ctx, &project); err != nil {
 		tb.Fatalf("create performance project: %v", err)
 	}
-	agentRepo := sqlite.NewAgentRepo(db)
+	agentRepo := teststores.Of(db).Agents
 	if _, err := db.ExecContext(ctx, `DELETE FROM agents WHERE id IS NOT NULL`); err != nil {
 		tb.Fatalf("clear performance Agents: %v", err)
 	}
@@ -1692,13 +1693,13 @@ func newAutomationSavePerformanceFixture(tb testing.TB) *automationSavePerforman
 	}
 
 	registry := NewAutomationAdapterRegistry()
-	automationRepo := sqlite.NewAutomationRepo(db)
+	automationRepo := teststores.Of(db).Automations
 	drafts := NewAutomationDraftService(automationRepo, registry)
 	validator := NewAutomationSaveValidator(registry, drafts)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
-	scheduleRepo := sqlite.NewScheduleRepo(db)
+	taskRepo := teststores.Of(db).Tasks
+	scheduleRepo := teststores.Of(db).Schedules
 	newCompiler := func() *AutomationCompiler {
-		compiler := NewAutomationCompiler(automationRepo, NewTaskService(taskRepo, sqlite.NewAttachmentRepo(db), nil), taskRepo, scheduleRepo, validator)
+		compiler := NewAutomationCompiler(automationRepo, NewTaskService(taskRepo, teststores.Of(db).Attachments, nil), taskRepo, scheduleRepo, validator)
 		compiler.SetAgentRepository(agentRepo)
 		return compiler
 	}
@@ -1782,12 +1783,12 @@ func BenchmarkAutomationCompilerSaveAgentResolution(b *testing.B) {
 	b.Cleanup(func() { log.SetOutput(originalLogWriter) })
 	db, counter := testutil.NewStatementCountingTestDB(b)
 	ctx := context.Background()
-	projectRepo := sqlite.NewProjectRepo(db)
+	projectRepo := teststores.Of(db).Projects
 	project := models.Project{Name: "Automation Agent Save benchmark"}
 	if err := projectRepo.Create(ctx, &project); err != nil {
 		b.Fatalf("create benchmark project: %v", err)
 	}
-	agentRepo := sqlite.NewAgentRepo(db)
+	agentRepo := teststores.Of(db).Agents
 	if _, err := db.ExecContext(ctx, `DELETE FROM agents WHERE id IS NOT NULL`); err != nil {
 		b.Fatalf("clear Agents: %v", err)
 	}
@@ -1805,12 +1806,12 @@ func BenchmarkAutomationCompilerSaveAgentResolution(b *testing.B) {
 	if !ok {
 		b.Fatal("custom Automation adapter is unavailable")
 	}
-	automationRepo := sqlite.NewAutomationRepo(db)
+	automationRepo := teststores.Of(db).Automations
 	drafts := NewAutomationDraftService(automationRepo, registry)
 	validator := NewAutomationSaveValidator(registry, drafts)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
-	scheduleRepo := sqlite.NewScheduleRepo(db)
-	compiler := NewAutomationCompiler(automationRepo, NewTaskService(taskRepo, sqlite.NewAttachmentRepo(db), nil), taskRepo, scheduleRepo, validator)
+	taskRepo := teststores.Of(db).Tasks
+	scheduleRepo := teststores.Of(db).Schedules
+	compiler := NewAutomationCompiler(automationRepo, NewTaskService(taskRepo, teststores.Of(db).Attachments, nil), taskRepo, scheduleRepo, validator)
 	compiler.SetAgentRepository(agentRepo)
 
 	for _, referenceCount := range []int{1, 5, 20, 50} {
@@ -1905,10 +1906,10 @@ func BenchmarkAutomationCompilerSaveAgentResolution(b *testing.B) {
 func BenchmarkAutomationAgentReferenceValidationProjection(b *testing.B) {
 	db, counter := testutil.NewStatementCountingTestDB(b)
 	ctx := context.Background()
-	projectRepo := sqlite.NewProjectRepo(db)
+	projectRepo := teststores.Of(db).Projects
 	project := models.Project{Name: "Automation Agent validation benchmark"}
 	require.NoError(b, projectRepo.Create(ctx, &project))
-	agentRepo := sqlite.NewAgentRepo(db)
+	agentRepo := teststores.Of(db).Agents
 	if _, err := db.ExecContext(ctx, `DELETE FROM agents WHERE id IS NOT NULL`); err != nil {
 		b.Fatalf("clear agents: %v", err)
 	}
@@ -1921,14 +1922,14 @@ func BenchmarkAutomationAgentReferenceValidationProjection(b *testing.B) {
 		refs = append(refs, agent.Key)
 	}
 	registry := NewAutomationAdapterRegistry()
-	automationRepo := sqlite.NewAutomationRepo(db)
+	automationRepo := teststores.Of(db).Automations
 	drafts := NewAutomationDraftService(automationRepo, registry)
 	capabilities := NewAutomationCapabilitySnapshotBuilder(projectRepo, agentRepo, nil, nil)
 	drafts.SetCapabilitySnapshotBuilder(capabilities)
 	validator := NewAutomationSaveValidator(registry, drafts)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
-	scheduleRepo := sqlite.NewScheduleRepo(db)
-	compiler := NewAutomationCompiler(automationRepo, NewTaskService(taskRepo, sqlite.NewAttachmentRepo(db), nil), taskRepo, scheduleRepo, validator)
+	taskRepo := teststores.Of(db).Tasks
+	scheduleRepo := teststores.Of(db).Schedules
+	compiler := NewAutomationCompiler(automationRepo, NewTaskService(taskRepo, teststores.Of(db).Attachments, nil), taskRepo, scheduleRepo, validator)
 
 	for _, referenceCount := range []int{1, 5, 20, 50} {
 		candidate := automationValidationReferenceCandidate(refs[:referenceCount])
@@ -1971,22 +1972,22 @@ func newAutomationLiveYAMLBenchmarkFixture(tb testing.TB, nodeCounts []int) *aut
 	tb.Helper()
 	db, counter := testutil.NewStatementCountingTestDB(tb)
 	ctx := context.Background()
-	projectRepo := sqlite.NewProjectRepo(db)
+	projectRepo := teststores.Of(db).Projects
 	project := models.Project{Name: "Automation Live YAML benchmark"}
 	if err := projectRepo.Create(ctx, &project); err != nil {
 		tb.Fatalf("create benchmark project: %v", err)
 	}
 
 	registry := NewAutomationAdapterRegistry()
-	automationRepo := sqlite.NewAutomationRepo(db)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
-	scheduleRepo := sqlite.NewScheduleRepo(db)
+	automationRepo := teststores.Of(db).Automations
+	taskRepo := teststores.Of(db).Tasks
+	scheduleRepo := teststores.Of(db).Schedules
 	drafts := NewAutomationDraftService(automationRepo, registry)
 	capabilities := NewAutomationCapabilitySnapshotBuilder(projectRepo, nil, taskRepo, nil)
-	capabilities.SetLLMConfigRepository(sqlite.NewLLMConfigRepo(db))
+	capabilities.SetLLMConfigRepository(teststores.Of(db).LLMConfigs)
 	drafts.SetCapabilitySnapshotBuilder(capabilities)
 	validator := NewAutomationSaveValidator(registry, drafts)
-	taskSvc := NewTaskService(taskRepo, sqlite.NewAttachmentRepo(db), nil)
+	taskSvc := NewTaskService(taskRepo, teststores.Of(db).Attachments, nil)
 	compiler := NewAutomationCompiler(automationRepo, taskSvc, taskRepo, scheduleRepo, validator)
 	automationIDs := make(map[int]string, len(nodeCounts))
 	for _, nodeCount := range nodeCounts {
@@ -2159,12 +2160,12 @@ func selectableAgentValidationStatements(statements []string) []string {
 func BenchmarkAutomationRuntimeReadProjection(b *testing.B) {
 	benchProject := func(b *testing.B, total int) (*AutomationGraphService, string) {
 		b.Helper()
-		db := testutil.NewTestDB(b)
+		db := teststores.NewDB(b)
 		ctx := context.Background()
 		project := models.Project{Name: fmt.Sprintf("Automation runtime bench %d", total)}
-		require.NoError(b, sqlite.NewProjectRepo(db).Create(ctx, &project))
+		require.NoError(b, teststores.Of(db).Projects.Create(ctx, &project))
 		seedAutomationRuntimeCards(b, db, project.ID, total)
-		return NewAutomationGraphService(sqlite.NewAutomationRepo(db)), project.ID
+		return NewAutomationGraphService(teststores.Of(db).Automations), project.ID
 	}
 
 	b.Run("list_full_300", func(b *testing.B) {

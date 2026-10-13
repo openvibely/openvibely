@@ -16,10 +16,11 @@ import (
 
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/persistence/sqlite/database"
 	"github.com/openvibely/openvibely/internal/service"
-	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/openvibely/openvibely/internal/testutil/teststores"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -36,7 +37,7 @@ func useTempUploadsDir(t *testing.T) {
 type chatAttachmentOwnershipFixture struct {
 	e                  *echo.Echo
 	h                  *Handler
-	chatAttachmentRepo *sqlite.ChatAttachmentRepo
+	chatAttachmentRepo persistence.ChatAttachmentStore
 	owningProject      models.Project
 	foreignProject     models.Project
 	attachment         models.ChatAttachment
@@ -47,13 +48,13 @@ func setupChatAttachmentOwnershipFixture(t *testing.T) chatAttachmentOwnershipFi
 	t.Helper()
 	useTempUploadsDir(t)
 	ctx := context.Background()
-	db := testutil.NewTestDB(t)
-	projectRepo := sqlite.NewProjectRepo(db)
+	db := teststores.NewDB(t)
+	projectRepo := teststores.Of(db).Projects
 	projectSvc := service.NewProjectService(projectRepo)
-	settingsRepo := sqlite.NewSettingsRepo(db)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
-	execRepo := sqlite.NewExecutionRepo(db)
-	chatAttachmentRepo := sqlite.NewChatAttachmentRepo(db)
+	settingsRepo := teststores.Of(db).Settings
+	taskRepo := teststores.Of(db).Tasks
+	execRepo := teststores.Of(db).Executions
+	chatAttachmentRepo := teststores.Of(db).ChatAttachments
 	h := &Handler{
 		projectSvc:         projectSvc,
 		settingsRepo:       settingsRepo,
@@ -191,7 +192,7 @@ func TestDeleteChatAttachmentRejectsCrossProjectAttachment(t *testing.T) {
 	httpErr, ok := err.(*echo.HTTPError)
 	require.True(t, ok)
 	assert.Equal(t, http.StatusNotFound, httpErr.Code)
-	stored, getErr := fixture.chatAttachmentRepo.GetByID(context.Background(), fixture.attachment.ID)
+	stored, getErr := fixture.chatAttachmentRepo.(*sqlite.ChatAttachmentRepo).GetByID(context.Background(), fixture.attachment.ID)
 	require.NoError(t, getErr)
 	require.NotNil(t, stored)
 	assert.FileExists(t, fixture.attachment.FilePath)
@@ -208,7 +209,7 @@ func TestDeleteChatAttachmentRemovesSameProjectAttachment(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusOK, rec.Code)
-	stored, getErr := fixture.chatAttachmentRepo.GetByID(context.Background(), fixture.attachment.ID)
+	stored, getErr := fixture.chatAttachmentRepo.(*sqlite.ChatAttachmentRepo).GetByID(context.Background(), fixture.attachment.ID)
 	require.NoError(t, getErr)
 	assert.Nil(t, stored)
 	assert.NoFileExists(t, fixture.attachment.FilePath)
@@ -219,11 +220,11 @@ func TestUploadChatAttachment_AllFileTypes(t *testing.T) {
 	useTempUploadsDir(t)
 
 	// Setup
-	db := testutil.NewTestDB(t)
-	chatAttachmentRepo := sqlite.NewChatAttachmentRepo(db)
+	db := teststores.NewDB(t)
+	chatAttachmentRepo := teststores.Of(db).ChatAttachments
 	h := &Handler{
 		chatAttachmentRepo: chatAttachmentRepo,
-		threadInputRepo:    sqlite.NewThreadInputRepo(db),
+		threadInputRepo:    teststores.Of(db).ThreadInputs,
 	}
 
 	e := echo.New()
@@ -328,10 +329,10 @@ func TestUploadChatAttachment_AllFileTypes(t *testing.T) {
 func TestUploadChatAttachment_AppendsToExistingPendingSession(t *testing.T) {
 	useTempUploadsDir(t)
 
-	db := testutil.NewTestDB(t)
+	db := teststores.NewDB(t)
 	h := &Handler{
-		chatAttachmentRepo: sqlite.NewChatAttachmentRepo(db),
-		threadInputRepo:    sqlite.NewThreadInputRepo(db),
+		chatAttachmentRepo: teststores.Of(db).ChatAttachments,
+		threadInputRepo:    teststores.Of(db).ThreadInputs,
 	}
 	e := echo.New()
 
@@ -349,10 +350,10 @@ func TestUploadChatAttachment_AppendsToExistingPendingSession(t *testing.T) {
 func TestUploadChatAttachment_RejectsRetiredSessionWithoutRecreatingDirectory(t *testing.T) {
 	useTempUploadsDir(t)
 
-	db := testutil.NewTestDB(t)
-	threadInputRepo := sqlite.NewThreadInputRepo(db)
+	db := teststores.NewDB(t)
+	threadInputRepo := teststores.Of(db).ThreadInputs
 	h := &Handler{
-		chatAttachmentRepo: sqlite.NewChatAttachmentRepo(db),
+		chatAttachmentRepo: teststores.Of(db).ChatAttachments,
 		threadInputRepo:    threadInputRepo,
 	}
 	e := echo.New()
@@ -388,8 +389,8 @@ func TestUploadChatAttachment_SerializesPublicationWithConcurrentRetirement(t *t
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, db.Close()) })
 	h := &Handler{
-		chatAttachmentRepo: sqlite.NewChatAttachmentRepo(db),
-		threadInputRepo:    sqlite.NewThreadInputRepo(db),
+		chatAttachmentRepo: teststores.Of(db).ChatAttachments,
+		threadInputRepo:    teststores.Of(db).ThreadInputs,
 	}
 	e := echo.New()
 	const sessionID = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
@@ -443,10 +444,10 @@ func TestUploadChatAttachment_SerializesPublicationWithConcurrentRetirement(t *t
 func TestUploadChatAttachment_AppendsDuplicateNamesWithoutOverwriting(t *testing.T) {
 	useTempUploadsDir(t)
 
-	db := testutil.NewTestDB(t)
+	db := teststores.NewDB(t)
 	h := &Handler{
-		chatAttachmentRepo: sqlite.NewChatAttachmentRepo(db),
-		threadInputRepo:    sqlite.NewThreadInputRepo(db),
+		chatAttachmentRepo: teststores.Of(db).ChatAttachments,
+		threadInputRepo:    teststores.Of(db).ThreadInputs,
 	}
 	e := echo.New()
 
@@ -466,10 +467,10 @@ func TestUploadChatAttachment_AppendsDuplicateNamesWithoutOverwriting(t *testing
 func TestUploadChatAttachment_ExistingPendingSessionMaxFilesLimit(t *testing.T) {
 	useTempUploadsDir(t)
 
-	db := testutil.NewTestDB(t)
+	db := teststores.NewDB(t)
 	h := &Handler{
-		chatAttachmentRepo: sqlite.NewChatAttachmentRepo(db),
-		threadInputRepo:    sqlite.NewThreadInputRepo(db),
+		chatAttachmentRepo: teststores.Of(db).ChatAttachments,
+		threadInputRepo:    teststores.Of(db).ThreadInputs,
 	}
 	e := echo.New()
 
@@ -500,10 +501,10 @@ func TestUploadChatAttachment_ExistingPendingSessionMaxFilesLimit(t *testing.T) 
 func TestUploadChatAttachment_AllowsValidMultiFileUploadAboveSingleFileRequestCap(t *testing.T) {
 	useTempUploadsDir(t)
 
-	db := testutil.NewTestDB(t)
+	db := teststores.NewDB(t)
 	h := &Handler{
-		chatAttachmentRepo: sqlite.NewChatAttachmentRepo(db),
-		threadInputRepo:    sqlite.NewThreadInputRepo(db),
+		chatAttachmentRepo: teststores.Of(db).ChatAttachments,
+		threadInputRepo:    teststores.Of(db).ThreadInputs,
 	}
 	e := echo.New()
 
@@ -544,10 +545,10 @@ func TestUploadChatAttachment_AllowsValidMultiFileUploadAboveSingleFileRequestCa
 func TestUploadChatAttachment_AllowsPaddedBoundaryDelimiterWhitespace(t *testing.T) {
 	useTempUploadsDir(t)
 
-	db := testutil.NewTestDB(t)
+	db := teststores.NewDB(t)
 	h := &Handler{
-		chatAttachmentRepo: sqlite.NewChatAttachmentRepo(db),
-		threadInputRepo:    sqlite.NewThreadInputRepo(db),
+		chatAttachmentRepo: teststores.Of(db).ChatAttachments,
+		threadInputRepo:    teststores.Of(db).ThreadInputs,
 	}
 	e := echo.New()
 	files := []taskAttachmentTestFile{
@@ -585,10 +586,10 @@ func TestUploadChatAttachment_OversizedMultipartRequestIsBoundedBeforePendingSes
 	tmpMultipartDir := t.TempDir()
 	t.Setenv("TMPDIR", tmpMultipartDir)
 
-	db := testutil.NewTestDB(t)
+	db := teststores.NewDB(t)
 	h := &Handler{
-		chatAttachmentRepo: sqlite.NewChatAttachmentRepo(db),
-		threadInputRepo:    sqlite.NewThreadInputRepo(db),
+		chatAttachmentRepo: teststores.Of(db).ChatAttachments,
+		threadInputRepo:    teststores.Of(db).ThreadInputs,
 	}
 	e := echo.New()
 	const sessionID = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -612,11 +613,11 @@ func TestUploadChatAttachment_FileSizeLimit(t *testing.T) {
 	useTempUploadsDir(t)
 
 	// Setup
-	db := testutil.NewTestDB(t)
-	chatAttachmentRepo := sqlite.NewChatAttachmentRepo(db)
+	db := teststores.NewDB(t)
+	chatAttachmentRepo := teststores.Of(db).ChatAttachments
 	h := &Handler{
 		chatAttachmentRepo: chatAttachmentRepo,
-		threadInputRepo:    sqlite.NewThreadInputRepo(db),
+		threadInputRepo:    teststores.Of(db).ThreadInputs,
 	}
 
 	e := echo.New()
@@ -656,11 +657,11 @@ func TestUploadChatAttachment_MaxFilesLimit(t *testing.T) {
 	useTempUploadsDir(t)
 
 	// Setup
-	db := testutil.NewTestDB(t)
-	chatAttachmentRepo := sqlite.NewChatAttachmentRepo(db)
+	db := teststores.NewDB(t)
+	chatAttachmentRepo := teststores.Of(db).ChatAttachments
 	h := &Handler{
 		chatAttachmentRepo: chatAttachmentRepo,
-		threadInputRepo:    sqlite.NewThreadInputRepo(db),
+		threadInputRepo:    teststores.Of(db).ThreadInputs,
 	}
 
 	e := echo.New()

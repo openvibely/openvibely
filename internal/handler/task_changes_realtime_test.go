@@ -16,22 +16,21 @@ import (
 
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/service"
-	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/openvibely/openvibely/internal/testutil/teststores"
 )
 
 // TestGetTaskChanges_ShowsRealtimeDiffDuringExecution verifies that the Changes tab
 // displays in-progress diffs from running executions, not just completed ones.
 // This is the end-to-end test for the realtime diff update feature.
 func TestGetTaskChanges_ShowsRealtimeDiffDuringExecution(t *testing.T) {
-	db := testutil.NewTestDB(t)
+	db := teststores.NewDB(t)
 	ctx := context.Background()
 
-	projectRepo := sqlite.NewProjectRepo(db)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
-	execRepo := sqlite.NewExecutionRepo(db)
-	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	projectRepo := teststores.Of(db).Projects
+	taskRepo := teststores.Of(db).Tasks
+	execRepo := teststores.Of(db).Executions
+	llmConfigRepo := teststores.Of(db).LLMConfigs
 
 	// Create test project
 	project := &models.Project{
@@ -96,12 +95,12 @@ index 0000000..d3103f9
 	}
 
 	// Set up handler
-	attachmentRepo := sqlite.NewAttachmentRepo(db)
+	attachmentRepo := teststores.Of(db).Attachments
 	h := &Handler{
 		projectRepo:       projectRepo,
 		taskRepo:          taskRepo,
 		execRepo:          execRepo,
-		reviewCommentRepo: sqlite.NewReviewCommentRepo(db),
+		reviewCommentRepo: teststores.Of(db).ReviewComments,
 		taskSvc:           service.NewTaskService(taskRepo, attachmentRepo, nil),
 	}
 
@@ -152,13 +151,13 @@ index 0000000..d3103f9
 // 4. User opens Changes tab
 // 5. Changes tab shows current diff (not waiting for completion)
 func TestGetTaskChanges_RealtimeUpdateFlow(t *testing.T) {
-	db := testutil.NewTestDB(t)
+	db := teststores.NewDB(t)
 	ctx := context.Background()
 
-	projectRepo := sqlite.NewProjectRepo(db)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
-	execRepo := sqlite.NewExecutionRepo(db)
-	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	projectRepo := teststores.Of(db).Projects
+	taskRepo := teststores.Of(db).Tasks
+	execRepo := teststores.Of(db).Executions
+	llmConfigRepo := teststores.Of(db).LLMConfigs
 
 	project := &models.Project{
 		Name:     "test-project",
@@ -222,12 +221,12 @@ index 0000000..ce01362
 	}
 
 	// Step 4: User opens Changes tab while task is running
-	attachmentRepo := sqlite.NewAttachmentRepo(db)
+	attachmentRepo := teststores.Of(db).Attachments
 	h := &Handler{
 		projectRepo:       projectRepo,
 		taskRepo:          taskRepo,
 		execRepo:          execRepo,
-		reviewCommentRepo: sqlite.NewReviewCommentRepo(db),
+		reviewCommentRepo: teststores.Of(db).ReviewComments,
 		taskSvc:           service.NewTaskService(taskRepo, attachmentRepo, nil),
 	}
 
@@ -304,13 +303,13 @@ index 0000000..b6fc4c6
 // for the viewport-jump bug: the frontend uses a content fingerprint to skip DOM
 // replacement when the diff hasn't changed, so stable server responses are critical.
 func TestGetTaskChanges_StableDOMOnUnchangedDiff(t *testing.T) {
-	db := testutil.NewTestDB(t)
+	db := teststores.NewDB(t)
 	ctx := context.Background()
 
-	projectRepo := sqlite.NewProjectRepo(db)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
-	execRepo := sqlite.NewExecutionRepo(db)
-	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	projectRepo := teststores.Of(db).Projects
+	taskRepo := teststores.Of(db).Tasks
+	execRepo := teststores.Of(db).Executions
+	llmConfigRepo := teststores.Of(db).LLMConfigs
 
 	project := &models.Project{
 		Name:     "test-project",
@@ -375,12 +374,12 @@ new file mode 100644
 		t.Fatalf("update diff: %v", err)
 	}
 
-	attachmentRepo := sqlite.NewAttachmentRepo(db)
+	attachmentRepo := teststores.Of(db).Attachments
 	h := &Handler{
 		projectRepo:       projectRepo,
 		taskRepo:          taskRepo,
 		execRepo:          execRepo,
-		reviewCommentRepo: sqlite.NewReviewCommentRepo(db),
+		reviewCommentRepo: teststores.Of(db).ReviewComments,
 		taskSvc:           service.NewTaskService(taskRepo, attachmentRepo, nil),
 	}
 
@@ -428,13 +427,13 @@ new file mode 100644
 // the server returns different HTML. This complements TestGetTaskChanges_StableDOMOnUnchangedDiff
 // and ensures the frontend fingerprint correctly detects actual content changes.
 func TestGetTaskChanges_DiffUpdateProducesDifferentDOM(t *testing.T) {
-	db := testutil.NewTestDB(t)
+	db := teststores.NewDB(t)
 	ctx := context.Background()
 
-	projectRepo := sqlite.NewProjectRepo(db)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
-	execRepo := sqlite.NewExecutionRepo(db)
-	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	projectRepo := teststores.Of(db).Projects
+	taskRepo := teststores.Of(db).Tasks
+	execRepo := teststores.Of(db).Executions
+	llmConfigRepo := teststores.Of(db).LLMConfigs
 
 	project := &models.Project{
 		Name:     "test-project",
@@ -476,12 +475,12 @@ func TestGetTaskChanges_DiffUpdateProducesDifferentDOM(t *testing.T) {
 		t.Fatalf("create execution: %v", err)
 	}
 
-	attachmentRepo := sqlite.NewAttachmentRepo(db)
+	attachmentRepo := teststores.Of(db).Attachments
 	h := &Handler{
 		projectRepo:       projectRepo,
 		taskRepo:          taskRepo,
 		execRepo:          execRepo,
-		reviewCommentRepo: sqlite.NewReviewCommentRepo(db),
+		reviewCommentRepo: teststores.Of(db).ReviewComments,
 		taskSvc:           service.NewTaskService(taskRepo, attachmentRepo, nil),
 	}
 

@@ -10,12 +10,12 @@ import (
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/persistence/sqlite"
+	"github.com/openvibely/openvibely/internal/testutil/teststores"
 )
 
 func TestEmailAuthorizedSendersHandlers(t *testing.T) {
 	h, e, _, db := setupTestHandlerWithDB(t)
-	h.SetEmailAuthRepo(sqlite.NewEmailAuthRepo(db))
+	h.SetEmailAuthRepo(teststores.Of(db).EmailAuth)
 	project := createProject(t, h, "Email Auth UI")
 	otherProject := createProject(t, h, "Other Email Auth UI")
 

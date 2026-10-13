@@ -10,7 +10,7 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/service"
-	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/openvibely/openvibely/internal/testutil/teststores"
 )
 
 func setupProjectTestHandler(t *testing.T) (*Handler, *service.ProjectService) {
@@ -21,7 +21,7 @@ func setupProjectTestHandler(t *testing.T) (*Handler, *service.ProjectService) {
 
 func setupProjectTestHandlerWithDB(t *testing.T) (*Handler, *service.ProjectService, *sql.DB) {
 	t.Helper()
-	env := newTestHandlerEnv(t, testutil.NewTestDB(t))
+	env := newTestHandlerEnv(t, teststores.NewDB(t))
 	return env.Handler, env.ProjectSvc, env.DB
 }
 

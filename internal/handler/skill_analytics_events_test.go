@@ -13,8 +13,7 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/agentlibrary"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/persistence/sqlite"
-	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/openvibely/openvibely/internal/testutil/teststores"
 	"github.com/stretchr/testify/require"
 )
 
@@ -93,11 +92,11 @@ func TestImportSkillPackageRecordsCreatedThenEditedEvents(t *testing.T) {
 }
 
 func TestCreateAgentOwnedSkillRecordsCreatedEvent(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	agentRepo := sqlite.NewAgentRepo(db)
-	lifecycleRepo := sqlite.NewLifecycleRepo(db)
-	projectRepo := sqlite.NewProjectRepo(db)
-	skillAnalyticsRepo := sqlite.NewSkillAnalyticsRepo(db)
+	db := teststores.NewDB(t)
+	agentRepo := teststores.Of(db).Agents
+	lifecycleRepo := teststores.Of(db).Lifecycle
+	projectRepo := teststores.Of(db).Projects
+	skillAnalyticsRepo := teststores.Of(db).SkillAnalytics
 	agent := &models.Agent{Name: "Reviewer", Key: "reviewer", Scope: models.AgentScopeProject, Enabled: true}
 	require.NoError(t, agentRepo.Create(t.Context(), agent))
 	project := &models.Project{Name: "Agent Skill Analytics Project", RepoPath: t.TempDir()}
@@ -130,11 +129,11 @@ func TestCreateAgentOwnedSkillRecordsCreatedEvent(t *testing.T) {
 }
 
 func TestEditedAgentOwnedSkillFlowsKeepEditedEvents(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	projectRepo := sqlite.NewProjectRepo(db)
+	db := teststores.NewDB(t)
+	projectRepo := teststores.Of(db).Projects
 	project := &models.Project{Name: "Edited Agent Skill Analytics Project", RepoPath: t.TempDir()}
 	require.NoError(t, projectRepo.Create(t.Context(), project))
-	agentRepo := sqlite.NewAgentRepo(db)
+	agentRepo := teststores.Of(db).Agents
 	agent := &models.Agent{
 		Name:      "Reviewer",
 		Key:       "reviewer",
@@ -143,12 +142,12 @@ func TestEditedAgentOwnedSkillFlowsKeepEditedEvents(t *testing.T) {
 		Enabled:   true,
 	}
 	require.NoError(t, agentRepo.Create(t.Context(), agent))
-	lifecycleRepo := sqlite.NewLifecycleRepo(db)
+	lifecycleRepo := teststores.Of(db).Lifecycle
 	h := &Handler{
 		agentRepo:          agentRepo,
 		lifecycleRepo:      lifecycleRepo,
 		projectRepo:        projectRepo,
-		skillAnalyticsRepo: sqlite.NewSkillAnalyticsRepo(db),
+		skillAnalyticsRepo: teststores.Of(db).SkillAnalytics,
 		agentSkillRoot:     t.TempDir(),
 	}
 	projectRoot := filepath.Join(project.RepoPath, ".openvibely")

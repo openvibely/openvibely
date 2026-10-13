@@ -13,8 +13,8 @@ import (
 
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/persistence/sqlite"
-	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/openvibely/openvibely/internal/persistence"
+	"github.com/openvibely/openvibely/internal/testutil/teststores"
 )
 
 // TestContext holds all the test dependencies and helpers for handler tests
@@ -23,22 +23,22 @@ type TestContext struct {
 	handler        *Handler
 	echo           *echo.Echo
 	db             *sql.DB
-	llmConfigRepo  *sqlite.LLMConfigRepo
-	projectRepo    *sqlite.ProjectRepo
-	taskRepo       *sqlite.TaskRepo
-	execRepo       *sqlite.ExecutionRepo
-	usageRepo      *sqlite.UsageRepo
-	scheduleRepo   *sqlite.ScheduleRepo
-	workerRepo     *sqlite.WorkerRepo
-	attachmentRepo *sqlite.AttachmentRepo
-	alertRepo      *sqlite.AlertRepo
-	settingsRepo   *sqlite.SettingsRepo
+	llmConfigRepo  persistence.LLMConfigStore
+	projectRepo    persistence.ProjectStore
+	taskRepo       persistence.TaskStore
+	execRepo       persistence.ExecutionStore
+	usageRepo      persistence.UsageStore
+	scheduleRepo   persistence.ScheduleStore
+	workerRepo     persistence.WorkerStore
+	attachmentRepo persistence.AttachmentStore
+	alertRepo      persistence.AlertStore
+	settingsRepo   persistence.SettingsStore
 }
 
 // NewTestContext creates a new test context with all dependencies initialized
 func NewTestContext(t *testing.T) *TestContext {
 	t.Helper()
-	env := newTestHandlerEnv(t, testutil.NewTestDB(t), withTestTaskGoals())
+	env := newTestHandlerEnv(t, teststores.NewDB(t), withTestTaskGoals())
 	return &TestContext{
 		t:              t,
 		handler:        env.Handler,
@@ -48,7 +48,7 @@ func NewTestContext(t *testing.T) *TestContext {
 		projectRepo:    env.ProjectRepo,
 		taskRepo:       env.TaskRepo,
 		execRepo:       env.ExecRepo,
-		usageRepo:      sqlite.NewUsageRepo(env.DB),
+		usageRepo:      teststores.Of(env.DB).Usage,
 		scheduleRepo:   env.ScheduleRepo,
 		workerRepo:     env.WorkerRepo,
 		attachmentRepo: env.AttachmentRepo,

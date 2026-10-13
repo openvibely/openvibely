@@ -13,6 +13,7 @@ import (
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
+	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 )
 
 // threadInputRepo is wired in NewTestContext (derived from execRepo.DB()).
@@ -398,7 +399,7 @@ func TestExpiredEditorResumesQueuedMessage(t *testing.T) {
 	require.NoError(t, err)
 	require.Nil(t, next)
 	// Simulate a crashed browser without waiting for wall-clock expiry.
-	_, err = tc.execRepo.DB().ExecContext(ctx, `UPDATE thread_inputs SET edit_hold_until = datetime('now', '-1 second') WHERE id = ?`, input.ID)
+	_, err = tc.execRepo.(*sqlite.ExecutionRepo).DB().ExecContext(ctx, `UPDATE thread_inputs SET edit_hold_until = datetime('now', '-1 second') WHERE id = ?`, input.ID)
 	require.NoError(t, err)
 	tc.Assert(tc.HTTP().Post(endpoint).WithForm(url.Values{"renew": {"true"}}).Execute()).StatusCode(http.StatusConflict)
 	tc.handler.RecoverExpiredInputEdits(ctx)

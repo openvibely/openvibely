@@ -15,21 +15,21 @@ import (
 
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/persistence/sqlite"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/service"
-	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/openvibely/openvibely/internal/testutil/teststores"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func setupCustomPersonalityHandler(t *testing.T) (*Handler, *echo.Echo, *sqlite.CustomPersonalityRepo, *sqlite.SettingsRepo) {
+func setupCustomPersonalityHandler(t *testing.T) (*Handler, *echo.Echo, persistence.CustomPersonalityStore, persistence.SettingsStore) {
 	t.Helper()
-	db := testutil.NewTestDB(t)
+	db := teststores.NewDB(t)
 
-	projectRepo := sqlite.NewProjectRepo(db)
-	customPersonalityRepo := sqlite.NewCustomPersonalityRepo(db)
-	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
-	settingsRepo := sqlite.NewSettingsRepo(db)
+	projectRepo := teststores.Of(db).Projects
+	customPersonalityRepo := teststores.Of(db).CustomPersonalities
+	llmConfigRepo := teststores.Of(db).LLMConfigs
+	settingsRepo := teststores.Of(db).Settings
 	projectSvc := service.NewProjectService(projectRepo)
 
 	h := New(

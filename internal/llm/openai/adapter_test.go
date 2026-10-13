@@ -17,8 +17,7 @@ import (
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	llmprompt "github.com/openvibely/openvibely/internal/llm/prompt"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/persistence/sqlite"
-	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/openvibely/openvibely/internal/testutil/teststores"
 	openaiclient "github.com/openvibely/openvibely/pkg/openai_client"
 )
 
@@ -719,9 +718,9 @@ func TestLeasedResponsesTransportSurvivesConcurrentCachePressure(t *testing.T) {
 }
 
 func TestInitialTaskAndFollowupShareTransportScope(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
-	execRepo := sqlite.NewExecutionRepo(db)
+	db := teststores.NewDB(t)
+	taskRepo := teststores.Of(db).Tasks
+	execRepo := teststores.Of(db).Executions
 	ctx := context.Background()
 	task := &models.Task{
 		ProjectID: "default", Title: "Transport reuse", Category: models.CategoryActive,

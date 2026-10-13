@@ -8,8 +8,7 @@ import (
 
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/persistence/sqlite"
-	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/openvibely/openvibely/internal/testutil/teststores"
 	openaiclient "github.com/openvibely/openvibely/pkg/openai_client"
 )
 
@@ -43,7 +42,7 @@ func TestRuntimeOpenAIToolsMarksOnlyAllowlistedReadToolsAsync(t *testing.T) {
 }
 
 func TestAsyncRuntimeToolCallbacksRecoverAndTerminalizeDurableRows(t *testing.T) {
-	db := testutil.NewTestDB(t)
+	db := teststores.NewDB(t)
 	ctx := context.Background()
 	projectID := "async-recover-project"
 	taskID := "async-recover-task"
@@ -57,7 +56,7 @@ func TestAsyncRuntimeToolCallbacksRecoverAndTerminalizeDurableRows(t *testing.T)
 	if _, err := db.ExecContext(ctx, `INSERT INTO executions(id, task_id, status, prompt_sent) VALUES (?, ?, 'running', 'prompt')`, execID, taskID); err != nil {
 		t.Fatalf("insert execution: %v", err)
 	}
-	repo := sqlite.NewOpenAIAsyncToolCallRepo(db)
+	repo := teststores.Of(db).OpenAIAsyncToolCalls
 	now := time.Now().UTC()
 	create := func(callID, toolName string, deadline time.Time) *models.OpenAIAsyncToolCall {
 		call, err := repo.CreatePending(ctx, &models.OpenAIAsyncToolCall{
@@ -81,7 +80,7 @@ func TestAsyncRuntimeToolCallbacksRecoverAndTerminalizeDurableRows(t *testing.T)
 	stale := create("call_stale", "list_tasks", now.Add(time.Hour))
 	expired := create("call_expired", "memory_view", now.Add(-time.Minute))
 
-	adapter := &Adapter{execRepo: sqlite.NewExecutionRepo(db), asyncToolCalls: repo}
+	adapter := &Adapter{execRepo: teststores.Of(db).Executions, asyncToolCalls: repo}
 	var executed []string
 	callbacks, err := adapter.asyncRuntimeToolCallbacks(ctx, projectID, execID, true,
 		[]openaiclient.ToolDefinition{{Type: "function", Name: "memory_view", Async: true}},

@@ -13,8 +13,8 @@ import (
 
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/service"
+	"github.com/openvibely/openvibely/internal/testutil/teststores"
 )
 
 // TestHandler_GetTaskChanges_MergedTaskShowsPreservedDiff verifies that after a task is merged,
@@ -27,7 +27,7 @@ func TestHandler_GetTaskChanges_MergedTaskShowsPreservedDiff(t *testing.T) {
 	_ = e // Use the echo instance variable
 
 	// Get default project from test setup
-	projectRepo := sqlite.NewProjectRepo(db)
+	projectRepo := teststores.Of(db).Projects
 	projects, err := projectRepo.List(ctx)
 	if err != nil || len(projects) == 0 {
 		// Create a project if none exists
@@ -43,8 +43,8 @@ func TestHandler_GetTaskChanges_MergedTaskShowsPreservedDiff(t *testing.T) {
 	project := &projects[0]
 
 	// Create task using the handler's task repo
-	taskRepo := sqlite.NewTaskRepo(db, nil)
-	execRepo := sqlite.NewExecutionRepo(db)
+	taskRepo := teststores.Of(db).Tasks
+	execRepo := teststores.Of(db).Executions
 
 	// Create a task with worktree that has been merged
 	task := &models.Task{
@@ -62,7 +62,7 @@ func TestHandler_GetTaskChanges_MergedTaskShowsPreservedDiff(t *testing.T) {
 	}
 
 	// Get a default agent config for the execution
-	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	llmConfigRepo := teststores.Of(db).LLMConfigs
 	agents, _ := llmConfigRepo.List(ctx)
 	var agentID string
 	if len(agents) > 0 {
@@ -170,7 +170,7 @@ func TestHandler_GetTaskChanges_UnmergedTaskShowsLiveDiff(t *testing.T) {
 	_ = e // Use the echo instance variable
 
 	// Get default project from test setup
-	projectRepo := sqlite.NewProjectRepo(db)
+	projectRepo := teststores.Of(db).Projects
 	projects, err := projectRepo.List(ctx)
 	if err != nil || len(projects) == 0 {
 		// Create a project if none exists
@@ -186,8 +186,8 @@ func TestHandler_GetTaskChanges_UnmergedTaskShowsLiveDiff(t *testing.T) {
 	project := &projects[0]
 
 	// Create task using repos
-	taskRepo := sqlite.NewTaskRepo(db, nil)
-	execRepo := sqlite.NewExecutionRepo(db)
+	taskRepo := teststores.Of(db).Tasks
+	execRepo := teststores.Of(db).Executions
 
 	// Create a task with worktree that is NOT merged (status = pending)
 	task := &models.Task{
@@ -205,7 +205,7 @@ func TestHandler_GetTaskChanges_UnmergedTaskShowsLiveDiff(t *testing.T) {
 	}
 
 	// Get a default agent config for the execution
-	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	llmConfigRepo := teststores.Of(db).LLMConfigs
 	agents, _ := llmConfigRepo.List(ctx)
 	var agentID string
 	if len(agents) > 0 {
@@ -282,7 +282,7 @@ func TestHandler_GetTaskChanges_PendingMergeStatusButMergedBranchShowsPreservedD
 	runGit(t, repoDir, "checkout", mainBranch)
 	runGit(t, repoDir, "merge", "--no-ff", "-m", "merge task branch", taskBranch)
 
-	projectRepo := sqlite.NewProjectRepo(db)
+	projectRepo := teststores.Of(db).Projects
 	project := &models.Project{
 		Name:     "Merged Branch Project",
 		RepoPath: repoDir,
@@ -291,9 +291,9 @@ func TestHandler_GetTaskChanges_PendingMergeStatusButMergedBranchShowsPreservedD
 		t.Fatalf("create project: %v", err)
 	}
 
-	taskRepo := sqlite.NewTaskRepo(db, nil)
-	execRepo := sqlite.NewExecutionRepo(db)
-	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	taskRepo := teststores.Of(db).Tasks
+	execRepo := teststores.Of(db).Executions
+	llmConfigRepo := teststores.Of(db).LLMConfigs
 	agents, _ := llmConfigRepo.List(ctx)
 	var agentID string
 	if len(agents) > 0 {
@@ -363,13 +363,13 @@ func TestHandler_GetTaskChanges_CompletedUnmergedWorktreeShowsUncommittedChanges
 		t.Fatalf("write uncommitted file: %v", err)
 	}
 
-	projectRepo := sqlite.NewProjectRepo(db)
+	projectRepo := teststores.Of(db).Projects
 	project := &models.Project{Name: "Uncommitted Worktree Project", RepoPath: repoDir}
 	if err := projectRepo.Create(ctx, project); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
 
-	taskRepo := sqlite.NewTaskRepo(db, nil)
+	taskRepo := teststores.Of(db).Tasks
 	task := &models.Task{
 		ProjectID:         project.ID,
 		Title:             "Anthropic uncommitted task",
@@ -419,13 +419,13 @@ func TestHandler_GetTaskChanges_StaleMergedBlankMetadataRecoverableBranchShowsFa
 	repoDir := createHandlerTestGitRepo(t)
 	targetBranch := gitCurrentBranch(t, repoDir)
 
-	projectRepo := sqlite.NewProjectRepo(db)
+	projectRepo := teststores.Of(db).Projects
 	project := &models.Project{Name: "Stale Metadata Project", RepoPath: repoDir}
 	if err := projectRepo.Create(ctx, project); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
 
-	taskRepo := sqlite.NewTaskRepo(db, nil)
+	taskRepo := teststores.Of(db).Tasks
 	task := &models.Task{
 		ID:                "f076cd4c16ee53c0a0e05418c388f12f",
 		ProjectID:         project.ID,
@@ -491,13 +491,13 @@ func TestHandler_GetTaskChanges_StaleMergedDivergedBranchShowsLocalActions(t *te
 	repoDir := createHandlerTestGitRepo(t)
 	targetBranch := gitCurrentBranch(t, repoDir)
 
-	projectRepo := sqlite.NewProjectRepo(db)
+	projectRepo := teststores.Of(db).Projects
 	project := &models.Project{Name: "Diverged Stale Merged Project", RepoPath: repoDir}
 	if err := projectRepo.Create(ctx, project); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
 
-	taskRepo := sqlite.NewTaskRepo(db, nil)
+	taskRepo := teststores.Of(db).Tasks
 	task := &models.Task{
 		ID:                "f076cd4c16ee53c0a0e05418c388f12f",
 		ProjectID:         project.ID,
@@ -575,13 +575,13 @@ func TestHandler_GetTask_DirectChangesTabLoadsRecoveredChangesRoute(t *testing.T
 	repoDir := createHandlerTestGitRepo(t)
 	targetBranch := gitCurrentBranch(t, repoDir)
 
-	projectRepo := sqlite.NewProjectRepo(db)
+	projectRepo := teststores.Of(db).Projects
 	project := &models.Project{Name: "Direct Changes Tab Project", RepoPath: repoDir}
 	if err := projectRepo.Create(ctx, project); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
 
-	taskRepo := sqlite.NewTaskRepo(db, nil)
+	taskRepo := teststores.Of(db).Tasks
 	task := &models.Task{
 		ID:                "f076cd4c16ee53c0a0e05418c388f12f",
 		ProjectID:         project.ID,
@@ -641,13 +641,13 @@ func TestHandler_GetTaskWorktreeInfo_StaleMergedBlankMetadataShowsFastForwardOpt
 	repoDir := createHandlerTestGitRepo(t)
 	targetBranch := gitCurrentBranch(t, repoDir)
 
-	projectRepo := sqlite.NewProjectRepo(db)
+	projectRepo := teststores.Of(db).Projects
 	project := &models.Project{Name: "Stale Metadata Worktree Info Project", RepoPath: repoDir}
 	if err := projectRepo.Create(ctx, project); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
 
-	taskRepo := sqlite.NewTaskRepo(db, nil)
+	taskRepo := teststores.Of(db).Tasks
 	task := &models.Task{
 		ID:                "f076cd4c16ee53c0a0e05418c388f12f",
 		ProjectID:         project.ID,
@@ -721,13 +721,13 @@ func TestHandler_GetTaskChanges_StaleMergedBlankMetadataShowsFastForwardOption(t
 	repoDir := createHandlerTestGitRepo(t)
 	targetBranch := gitCurrentBranch(t, repoDir)
 
-	projectRepo := sqlite.NewProjectRepo(db)
+	projectRepo := teststores.Of(db).Projects
 	project := &models.Project{Name: "Stale Metadata Worktree Fragment Project", RepoPath: repoDir}
 	if err := projectRepo.Create(ctx, project); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
 
-	taskRepo := sqlite.NewTaskRepo(db, nil)
+	taskRepo := teststores.Of(db).Tasks
 	task := &models.Task{
 		ID:                "f076cd4c16ee53c0a0e05418c388f12f",
 		ProjectID:         project.ID,
@@ -864,15 +864,15 @@ func TestHandler_GetTaskChanges_FastForwardMergedBranchHidesMergeOptions(t *test
 	runGit(t, repoDir, "checkout", mainBranch)
 	runGit(t, repoDir, "merge", "--ff-only", taskBranch)
 
-	projectRepo := sqlite.NewProjectRepo(db)
+	projectRepo := teststores.Of(db).Projects
 	project := &models.Project{Name: "FF-Merged Project", RepoPath: repoDir}
 	if err := projectRepo.Create(ctx, project); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
 
-	taskRepo := sqlite.NewTaskRepo(db, nil)
-	execRepo := sqlite.NewExecutionRepo(db)
-	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	taskRepo := teststores.Of(db).Tasks
+	execRepo := teststores.Of(db).Executions
+	llmConfigRepo := teststores.Of(db).LLMConfigs
 	agents, _ := llmConfigRepo.List(ctx)
 	var agentID string
 	if len(agents) > 0 {
@@ -963,12 +963,12 @@ func TestHandler_MergeTaskBranch_RejectsAlreadyMergedBranch(t *testing.T) {
 	runGit(t, repoDir, "checkout", mainBranch)
 	runGit(t, repoDir, "merge", "--ff-only", taskBranch)
 
-	projectRepo := sqlite.NewProjectRepo(db)
+	projectRepo := teststores.Of(db).Projects
 	project := &models.Project{Name: "Already Merged Project", RepoPath: repoDir}
 	if err := projectRepo.Create(ctx, project); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
-	taskRepo := sqlite.NewTaskRepo(db, nil)
+	taskRepo := teststores.Of(db).Tasks
 	task := &models.Task{
 		ProjectID:         project.ID,
 		Title:             "Already merged",
@@ -1358,16 +1358,16 @@ func TestHandler_GetTaskWorktreeInfoDoesNotInferMerge(t *testing.T) {
 			ctx := context.Background()
 			repoDir := createHandlerTestGitRepo(t)
 			project := &models.Project{Name: "Unchanged worktree", RepoPath: repoDir}
-			projects := sqlite.NewProjectRepo(db)
+			projects := teststores.Of(db).Projects
 			if err := projects.Create(ctx, project); err != nil {
 				t.Fatal(err)
 			}
-			tasks := sqlite.NewTaskRepo(db, nil)
+			tasks := teststores.Of(db).Tasks
 			task := &models.Task{ProjectID: project.ID, Title: "Read only", Category: models.CategoryCompleted, Status: models.StatusCompleted, MergeTargetBranch: gitCurrentBranch(t, repoDir)}
 			if err := tasks.Create(ctx, task); err != nil {
 				t.Fatal(err)
 			}
-			ws := service.NewWorktreeService(tasks, projects, sqlite.NewSettingsRepo(db))
+			ws := service.NewWorktreeService(tasks, projects, teststores.Of(db).Settings)
 			path, branch, err := ws.SetupWorktree(ctx, task, repoDir)
 			if err != nil {
 				t.Fatal(err)

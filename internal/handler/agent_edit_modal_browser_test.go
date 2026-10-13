@@ -14,7 +14,8 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/persistence/sqlite"
+	"github.com/openvibely/openvibely/internal/persistence"
+	"github.com/openvibely/openvibely/internal/testutil/teststores"
 	"github.com/openvibely/openvibely/web/static"
 )
 
@@ -28,8 +29,8 @@ func TestAgentEditModalIgnoresOutOfOrderLifecycleResponsesInChrome(t *testing.T)
 	}
 
 	tc := NewTestContext(t)
-	agentRepo := sqlite.NewAgentRepo(tc.db)
-	lifecycleRepo := sqlite.NewLifecycleRepo(tc.db)
+	agentRepo := teststores.Of(tc.db).Agents
+	lifecycleRepo := teststores.Of(tc.db).Lifecycle
 	tc.handler.SetAgentRepo(agentRepo)
 	tc.handler.SetLifecycleRepo(lifecycleRepo)
 
@@ -355,7 +356,7 @@ func TestAgentEditModalIgnoresOutOfOrderLifecycleResponsesInChrome(t *testing.T)
 	}
 }
 
-func createAgentEditModalTestHook(t *testing.T, repo *sqlite.LifecycleRepo, agentID, skillKey string) {
+func createAgentEditModalTestHook(t *testing.T, repo persistence.LifecycleStore, agentID, skillKey string) {
 	t.Helper()
 	if err := repo.CreateHook(t.Context(), &models.AgentLifecycleHook{
 		AgentID:        agentID,

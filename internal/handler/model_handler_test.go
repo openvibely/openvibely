@@ -16,6 +16,7 @@ import (
 
 	llmcustomauth "github.com/openvibely/openvibely/internal/llm/customauth"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/testutil"
 )
 
@@ -37,7 +38,7 @@ func TestDisconnectModelOAuthConnectionAffectsAllLinkedModels(t *testing.T) {
 			t.Fatalf("create %s: %v", cfg.Name, err)
 		}
 	}
-	if err := repo.LinkOAuthConnection(ctx, second.ID, first.OAuthConnectionID); err != nil {
+	if err := repo.(*sqlite.LLMConfigRepo).LinkOAuthConnection(ctx, second.ID, first.OAuthConnectionID); err != nil {
 		t.Fatalf("link OAuth connection: %v", err)
 	}
 
@@ -125,7 +126,7 @@ func TestModelsPageKeepsOAuthAccountActionsInEditorNotModelCards(t *testing.T) {
 	if err := repo.Create(ctx, sibling); err != nil {
 		t.Fatalf("create sibling OAuth model: %v", err)
 	}
-	if err := repo.LinkOAuthConnection(ctx, sibling.ID, cfg.OAuthConnectionID); err != nil {
+	if err := repo.(*sqlite.LLMConfigRepo).LinkOAuthConnection(ctx, sibling.ID, cfg.OAuthConnectionID); err != nil {
 		t.Fatalf("link sibling OAuth model: %v", err)
 	}
 

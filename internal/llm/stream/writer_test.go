@@ -11,7 +11,7 @@ import (
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence/sqlite"
-	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/openvibely/openvibely/internal/testutil/teststores"
 )
 
 func TestStreamingWriterReportsActivity(t *testing.T) {
@@ -36,10 +36,10 @@ func TestStreamingWriterReportsActivity(t *testing.T) {
 
 func TestStreamingWriter_PeriodicFlush(t *testing.T) {
 
-	db := testutil.NewTestDB(t)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
-	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
-	execRepo := sqlite.NewExecutionRepo(db)
+	db := teststores.NewDB(t)
+	taskRepo := teststores.Of(db).Tasks
+	llmConfigRepo := teststores.Of(db).LLMConfigs
+	execRepo := teststores.Of(db).Executions
 	ctx := context.Background()
 
 	task := &models.Task{
@@ -280,10 +280,10 @@ func TestStreamingWriter_PeriodicFlushPersistsOnlyNewDeltasFromSeed(t *testing.T
 
 func TestStreamingWriter_StopPreventsLeak(t *testing.T) {
 
-	db := testutil.NewTestDB(t)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
-	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
-	execRepo := sqlite.NewExecutionRepo(db)
+	db := teststores.NewDB(t)
+	taskRepo := teststores.Of(db).Tasks
+	llmConfigRepo := teststores.Of(db).LLMConfigs
+	execRepo := teststores.Of(db).Executions
 	ctx := context.Background()
 
 	task := &models.Task{
@@ -322,10 +322,10 @@ func TestStreamingWriter_StopPreventsLeak(t *testing.T) {
 
 func TestStreamingWriter_FlushSucceedsAfterContextCancel(t *testing.T) {
 
-	db := testutil.NewTestDB(t)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
-	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
-	execRepo := sqlite.NewExecutionRepo(db)
+	db := teststores.NewDB(t)
+	taskRepo := teststores.Of(db).Tasks
+	llmConfigRepo := teststores.Of(db).LLMConfigs
+	execRepo := teststores.Of(db).Executions
 
 	bgCtx := context.Background()
 
@@ -375,10 +375,10 @@ func TestStreamingWriter_FlushSucceedsAfterContextCancel(t *testing.T) {
 }
 
 func TestStreamingWriter_NewWriterSeedsExistingOutputOnRetry(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
-	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
-	execRepo := sqlite.NewExecutionRepo(db)
+	db := teststores.NewDB(t)
+	taskRepo := teststores.Of(db).Tasks
+	llmConfigRepo := teststores.Of(db).LLMConfigs
+	execRepo := teststores.Of(db).Executions
 	ctx := context.Background()
 
 	task := &models.Task{
@@ -407,7 +407,7 @@ func TestStreamingWriter_NewWriterSeedsExistingOutputOnRetry(t *testing.T) {
 		t.Fatalf("failed to create execution: %v", err)
 	}
 
-	if err := execRepo.UpdateOutput(ctx, exec.ID, "existing streamed output\n"); err != nil {
+	if err := execRepo.(*sqlite.ExecutionRepo).UpdateOutput(ctx, exec.ID, "existing streamed output\n"); err != nil {
 		t.Fatalf("failed to seed existing output: %v", err)
 	}
 
@@ -432,10 +432,10 @@ func TestStreamingWriter_NewWriterSeedsExistingOutputOnRetry(t *testing.T) {
 }
 
 func TestStreamingWriter_EmptyRetryFlushDoesNotOverwriteExistingOutput(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
-	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
-	execRepo := sqlite.NewExecutionRepo(db)
+	db := teststores.NewDB(t)
+	taskRepo := teststores.Of(db).Tasks
+	llmConfigRepo := teststores.Of(db).LLMConfigs
+	execRepo := teststores.Of(db).Executions
 	ctx := context.Background()
 
 	task := &models.Task{
@@ -464,7 +464,7 @@ func TestStreamingWriter_EmptyRetryFlushDoesNotOverwriteExistingOutput(t *testin
 		t.Fatalf("failed to create execution: %v", err)
 	}
 
-	if err := execRepo.UpdateOutput(ctx, exec.ID, "tool output before 429"); err != nil {
+	if err := execRepo.(*sqlite.ExecutionRepo).UpdateOutput(ctx, exec.ID, "tool output before 429"); err != nil {
 		t.Fatalf("failed to seed execution output: %v", err)
 	}
 
@@ -517,10 +517,10 @@ func TestStreamingWriter_PublishesDeltaImmediatelyWithOffset(t *testing.T) {
 }
 
 func TestStreamingWriter_WriteDoesNotFlushSynchronouslyWhenIntervalElapsed(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
-	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
-	execRepo := sqlite.NewExecutionRepo(db)
+	db := teststores.NewDB(t)
+	taskRepo := teststores.Of(db).Tasks
+	llmConfigRepo := teststores.Of(db).LLMConfigs
+	execRepo := teststores.Of(db).Executions
 	ctx := context.Background()
 
 	task := &models.Task{ProjectID: "default", Title: "No Eager Flush", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "test"}
@@ -557,10 +557,10 @@ func TestStreamingWriter_WriteDoesNotFlushSynchronouslyWhenIntervalElapsed(t *te
 }
 
 func TestStreamingWriter_DoesNotPublishSeedOrWriteText(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
-	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
-	execRepo := sqlite.NewExecutionRepo(db)
+	db := teststores.NewDB(t)
+	taskRepo := teststores.Of(db).Tasks
+	llmConfigRepo := teststores.Of(db).LLMConfigs
+	execRepo := teststores.Of(db).Executions
 	ctx := context.Background()
 
 	task := &models.Task{ProjectID: "default", Title: "Seed Publish", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "test"}
@@ -575,7 +575,7 @@ func TestStreamingWriter_DoesNotPublishSeedOrWriteText(t *testing.T) {
 	if err := execRepo.Create(ctx, exec); err != nil {
 		t.Fatalf("failed to create execution: %v", err)
 	}
-	if err := execRepo.UpdateOutput(ctx, exec.ID, "seed"); err != nil {
+	if err := execRepo.(*sqlite.ExecutionRepo).UpdateOutput(ctx, exec.ID, "seed"); err != nil {
 		t.Fatalf("failed to seed execution: %v", err)
 	}
 

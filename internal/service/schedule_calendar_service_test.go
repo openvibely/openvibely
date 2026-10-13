@@ -10,6 +10,7 @@ import (
 	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/openvibely/openvibely/internal/testutil/teststores"
 	"github.com/stretchr/testify/require"
 )
 
@@ -17,10 +18,10 @@ func TestSchedulerHonorsCalendarSkipsAndPauseBeforeDispatch(t *testing.T) {
 	for _, mode := range []string{"skip", "pause_all"} {
 		for _, repeat := range []models.RepeatType{models.RepeatOnce, models.RepeatMinutes} {
 			t.Run(mode+"/"+string(repeat), func(t *testing.T) {
-				db := testutil.NewTestDB(t)
+				db := teststores.NewDB(t)
 				ctx := context.Background()
-				schedules := sqlite.NewScheduleRepo(db)
-				tasks := sqlite.NewTaskRepo(db, nil)
+				schedules := teststores.Of(db).Schedules
+				tasks := teststores.Of(db).Tasks
 				worker := newTestWorkerService(t)
 				svc := NewSchedulerService(schedules, tasks, worker)
 				now := time.Now().UTC().Truncate(time.Second)
@@ -56,7 +57,7 @@ func TestSchedulerHonorsCalendarSkipsAndPauseBeforeDispatch(t *testing.T) {
 }
 
 func TestScheduleCalendarActionRejectsMalformedSelections(t *testing.T) {
-	repo := sqlite.NewScheduleRepo(testutil.NewTestDB(t))
+	repo := teststores.Of(teststores.NewDB(t)).Schedules
 	for _, action := range []models.ScheduleCalendarAction{
 		{Action: "pause"}, {Action: "skip"}, {Action: "unexpected"},
 		{Action: "skip", Skips: []models.ScheduleSkip{{StartAt: 10, EndAt: 9}}},
@@ -70,10 +71,10 @@ func TestScheduleCalendarActionRejectsMalformedSelections(t *testing.T) {
 func TestSchedulerPreservesRestoredRunAfterDowntime(t *testing.T) {
 	for _, afterDay := range []bool{false, true} {
 		t.Run(fmt.Sprint(afterDay), func(t *testing.T) {
-			db := testutil.NewTestDB(t)
+			db := teststores.NewDB(t)
 			ctx := context.Background()
-			repo := sqlite.NewScheduleRepo(db)
-			tasks := sqlite.NewTaskRepo(db, nil)
+			repo := teststores.Of(db).Schedules
+			tasks := teststores.Of(db).Tasks
 			worker := newTestWorkerService(t)
 			svc := NewSchedulerService(repo, tasks, worker)
 			day := time.Date(2026, 10, 10, 0, 0, 0, 0, time.UTC)
@@ -108,23 +109,23 @@ func TestSchedulerPreservesRestoredRunAfterDowntime(t *testing.T) {
 }
 
 func TestSchedulerRecoversAdmissionBeforeWorkerSubmission(t *testing.T) {
-	db := testutil.NewTestDB(t)
+	db := teststores.NewDB(t)
 	ctx := context.Background()
-	repo := sqlite.NewScheduleRepo(db)
-	tasks := sqlite.NewTaskRepo(db, nil)
+	repo := teststores.Of(db).Schedules
+	tasks := teststores.Of(db).Tasks
 	task := &models.Task{ProjectID: "default", Title: "Restart recovery", Prompt: "test", Category: models.CategoryCompleted, Status: models.StatusCompleted}
 	require.NoError(t, tasks.Create(ctx, task))
 	now := time.Now().UTC().Truncate(time.Second)
 	schedule := &models.Schedule{TaskID: task.ID, RunAt: now, RepeatType: models.RepeatOnce, RepeatInterval: 1, Enabled: true, ClearContextOnStart: true}
 	require.NoError(t, repo.Create(ctx, schedule))
-	claimed, err := repo.ClaimCalendarOccurrence(ctx, *schedule, now, nil)
+	claimed, err := repo.(*sqlite.ScheduleRepo).ClaimCalendarOccurrence(ctx, *schedule, now, nil)
 	require.NoError(t, err)
 	require.True(t, claimed)
 	// Simulate losing the old scheduler and its in-memory worker queue.
 	worker := newTestWorkerService(t)
 	worker.SetTaskRepo(tasks)
-	worker.SetExecutionRepo(sqlite.NewExecutionRepo(db))
-	svc := NewSchedulerService(sqlite.NewScheduleRepo(db), tasks, worker)
+	worker.SetExecutionRepo(teststores.Of(db).Executions)
+	svc := NewSchedulerService(teststores.Of(db).Schedules, tasks, worker)
 	svc.now = func() time.Time { return now.Add(time.Minute) }
 	svc.checkDueTasks(ctx)
 	select {
@@ -138,21 +139,21 @@ func TestSchedulerRecoversAdmissionBeforeWorkerSubmission(t *testing.T) {
 	executionID := worker.reserved[task.ID]
 	worker.mu.Unlock()
 	require.NotEmpty(t, executionID, "recovered work must use the existing execution reservation")
-	executions, err := sqlite.NewExecutionRepo(db).ListByTask(ctx, task.ID)
+	executions, err := teststores.Of(db).Executions.ListByTask(ctx, task.ID)
 	require.NoError(t, err)
 	require.Len(t, executions, 1)
 	require.Equal(t, executionID, executions[0].ID)
 }
 
 func TestCalendarWorkerRestartExecutesReservedRun(t *testing.T) {
-	db := testutil.NewTestDB(t)
+	db := teststores.NewDB(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	tasks := sqlite.NewTaskRepo(db, nil)
-	schedules := sqlite.NewScheduleRepo(db)
-	executions := sqlite.NewExecutionRepo(db)
-	projects := sqlite.NewProjectRepo(db)
-	configs := sqlite.NewLLMConfigRepo(db)
+	tasks := teststores.Of(db).Tasks
+	schedules := teststores.Of(db).Schedules
+	executions := teststores.Of(db).Executions
+	projects := teststores.Of(db).Projects
+	configs := teststores.Of(db).LLMConfigs
 	model := &models.LLMConfig{Name: "Calendar recovery model", Provider: models.ProviderTest, Model: "test-model", AuthMethod: models.AuthMethodAPIKey}
 	require.NoError(t, configs.Create(ctx, model))
 	task := &models.Task{ProjectID: "default", Title: "Durable calendar worker", Prompt: "test", AgentID: &model.ID, Category: models.CategoryScheduled, Status: models.StatusPending}
@@ -160,13 +161,13 @@ func TestCalendarWorkerRestartExecutesReservedRun(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
 	schedule := &models.Schedule{TaskID: task.ID, RunAt: now, RepeatType: models.RepeatOnce, RepeatInterval: 1, Enabled: true, ClearContextOnStart: true}
 	require.NoError(t, schedules.Create(ctx, schedule))
-	admitted, err := schedules.ClaimCalendarOccurrence(ctx, *schedule, now, nil)
+	admitted, err := schedules.(*sqlite.ScheduleRepo).ClaimCalendarOccurrence(ctx, *schedule, now, nil)
 	require.NoError(t, err)
 	require.True(t, admitted)
 	before, err := executions.ListByTask(ctx, task.ID)
 	require.NoError(t, err)
 	require.Len(t, before, 1)
-	llm := NewLLMService(configs, executions, tasks, projects, schedules, sqlite.NewAttachmentRepo(db))
+	llm := NewLLMService(configs, executions, tasks, projects, schedules, teststores.Of(db).Attachments)
 	mock := testutil.NewMockLLMCaller()
 	mock.Response = "Recovered run complete"
 	mock.TextOnly = mock.Response
@@ -197,12 +198,12 @@ func TestCalendarWorkerRestartExecutesReservedRun(t *testing.T) {
 func TestCalendarPlannerAdmissionRecovery(t *testing.T) {
 	for _, existing := range []bool{false, true} {
 		t.Run(fmt.Sprint(existing), func(t *testing.T) {
-			db := testutil.NewTestDB(t)
+			db := teststores.NewDB(t)
 			ctx := context.Background()
-			tasks := sqlite.NewTaskRepo(db, nil)
-			schedules := sqlite.NewScheduleRepo(db)
+			tasks := teststores.Of(db).Tasks
+			schedules := teststores.Of(db).Schedules
 			worker := newTestWorkerService(t)
-			swarm := NewSwarmService(NewTaskService(tasks, nil, worker), tasks, sqlite.NewExecutionRepo(db), worker)
+			swarm := NewSwarmService(NewTaskService(tasks, nil, worker), tasks, teststores.Of(db).Executions, worker)
 			parent := &models.Task{ProjectID: "default", Title: "Planner recovery", Prompt: "plan", Category: models.CategoryScheduled, Status: models.StatusPending, SwarmRole: models.SwarmRoleParent}
 			require.NoError(t, tasks.Create(ctx, parent))
 			if existing {
@@ -212,7 +213,7 @@ func TestCalendarPlannerAdmissionRecovery(t *testing.T) {
 			now := time.Now().UTC().Truncate(time.Second)
 			schedule := &models.Schedule{TaskID: parent.ID, RunAt: now, RepeatType: models.RepeatOnce, RepeatInterval: 1, Enabled: true, ClearContextOnStart: true}
 			require.NoError(t, schedules.Create(ctx, schedule))
-			claimed, err := schedules.ClaimCalendarOccurrence(ctx, *schedule, now, nil)
+			claimed, err := schedules.(*sqlite.ScheduleRepo).ClaimCalendarOccurrence(ctx, *schedule, now, nil)
 			require.NoError(t, err)
 			require.True(t, claimed)
 			// The persisted flag wins over stale handoff metadata.
@@ -228,8 +229,8 @@ func TestCalendarPlannerAdmissionRecovery(t *testing.T) {
 			require.NoError(t, swarm.StartPlannerForScheduledRun(ctx, parent.ID, true))
 			// Lose all in-memory queues, then use actual startup reservation recovery.
 			recovered := newTestWorkerService(t)
-			recovered.SetTaskRepo(sqlite.NewTaskRepo(db, nil))
-			recovered.SetExecutionRepo(sqlite.NewExecutionRepo(db))
+			recovered.SetTaskRepo(teststores.Of(db).Tasks)
+			recovered.SetExecutionRepo(teststores.Of(db).Executions)
 			recovered.ReconcileReservedTasks(ctx)
 			select {
 			case task := <-recovered.Submitted():
@@ -255,18 +256,18 @@ func TestCalendarPlannerAdmissionRecovery(t *testing.T) {
 func TestCalendarPlannerCancelledHandoff(t *testing.T) {
 	for _, transferred := range []bool{false, true} {
 		t.Run(fmt.Sprint(transferred), func(t *testing.T) {
-			db := testutil.NewTestDB(t)
+			db := teststores.NewDB(t)
 			ctx := context.Background()
-			tasks := sqlite.NewTaskRepo(db, nil)
-			schedules := sqlite.NewScheduleRepo(db)
+			tasks := teststores.Of(db).Tasks
+			schedules := teststores.Of(db).Schedules
 			worker := newTestWorkerService(t)
-			swarm := NewSwarmService(NewTaskService(tasks, nil, worker), tasks, sqlite.NewExecutionRepo(db), worker)
+			swarm := NewSwarmService(NewTaskService(tasks, nil, worker), tasks, teststores.Of(db).Executions, worker)
 			parent := &models.Task{ProjectID: "default", Title: "Cancelled calendar swarm", Prompt: "plan", Category: models.CategoryScheduled, Status: models.StatusPending, SwarmRole: models.SwarmRoleParent}
 			require.NoError(t, tasks.Create(ctx, parent))
 			now := time.Now().UTC().Truncate(time.Second)
 			schedule := &models.Schedule{TaskID: parent.ID, RunAt: now, RepeatType: models.RepeatOnce, RepeatInterval: 1, Enabled: true, ClearContextOnStart: true}
 			require.NoError(t, schedules.Create(ctx, schedule))
-			claimed, err := schedules.ClaimCalendarOccurrence(ctx, *schedule, now, nil)
+			claimed, err := schedules.(*sqlite.ScheduleRepo).ClaimCalendarOccurrence(ctx, *schedule, now, nil)
 			require.NoError(t, err)
 			require.True(t, claimed)
 			stale, err := schedules.ListCalendarAdmissions(ctx)
@@ -320,18 +321,18 @@ func TestCalendarPlannerCancelledHandoff(t *testing.T) {
 func TestCalendarDeletedScheduleCannotRecoverPlanner(t *testing.T) {
 	for _, started := range []bool{false, true} {
 		t.Run(fmt.Sprint(started), func(t *testing.T) {
-			db := testutil.NewTestDB(t)
+			db := teststores.NewDB(t)
 			ctx := context.Background()
-			tasks := sqlite.NewTaskRepo(db, nil)
-			schedules := sqlite.NewScheduleRepo(db)
+			tasks := teststores.Of(db).Tasks
+			schedules := teststores.Of(db).Schedules
 			worker := newTestWorkerService(t)
-			swarm := NewSwarmService(NewTaskService(tasks, nil, worker), tasks, sqlite.NewExecutionRepo(db), worker)
+			swarm := NewSwarmService(NewTaskService(tasks, nil, worker), tasks, teststores.Of(db).Executions, worker)
 			parent := &models.Task{ProjectID: "default", Title: "Deleted schedule", Prompt: "plan", Category: models.CategoryActive, Status: models.StatusPending, SwarmRole: models.SwarmRoleParent}
 			require.NoError(t, tasks.Create(ctx, parent))
 			now := time.Now().UTC().Truncate(time.Second)
 			schedule := &models.Schedule{TaskID: parent.ID, RunAt: now, RepeatType: models.RepeatOnce, RepeatInterval: 1, Enabled: true, ClearContextOnStart: true}
 			require.NoError(t, schedules.Create(ctx, schedule))
-			claimed, err := schedules.ClaimCalendarOccurrence(ctx, *schedule, now, nil)
+			claimed, err := schedules.(*sqlite.ScheduleRepo).ClaimCalendarOccurrence(ctx, *schedule, now, nil)
 			require.NoError(t, err)
 			require.True(t, claimed)
 			require.NoError(t, swarm.StartPlannerForScheduledRun(ctx, parent.ID, true))
@@ -360,7 +361,7 @@ func TestCalendarDeletedScheduleCannotRecoverPlanner(t *testing.T) {
 				require.False(t, ok)
 				recovered := newTestWorkerService(t)
 				recovered.SetTaskRepo(tasks)
-				recovered.SetExecutionRepo(sqlite.NewExecutionRepo(db))
+				recovered.SetExecutionRepo(teststores.Of(db).Executions)
 				recovered.ReconcileReservedTasks(ctx)
 				recovered.ReconcilePendingTasks(ctx)
 				select {
@@ -374,18 +375,18 @@ func TestCalendarDeletedScheduleCannotRecoverPlanner(t *testing.T) {
 }
 
 func TestCalendarActiveRecoveryPreservesParentAdmission(t *testing.T) {
-	db := testutil.NewTestDB(t)
+	db := teststores.NewDB(t)
 	ctx := context.Background()
-	tasks := sqlite.NewTaskRepo(db, nil)
-	schedules := sqlite.NewScheduleRepo(db)
+	tasks := teststores.Of(db).Tasks
+	schedules := teststores.Of(db).Schedules
 	worker := newTestWorkerService(t)
-	swarm := NewSwarmService(NewTaskService(tasks, nil, worker), tasks, sqlite.NewExecutionRepo(db), worker)
+	swarm := NewSwarmService(NewTaskService(tasks, nil, worker), tasks, teststores.Of(db).Executions, worker)
 	parent := &models.Task{ProjectID: "default", Title: "Pending handoff", Prompt: "plan", Category: models.CategoryActive, Status: models.StatusPending, SwarmRole: models.SwarmRoleParent}
 	require.NoError(t, tasks.Create(ctx, parent))
 	now := time.Now().UTC().Truncate(time.Second)
 	schedule := &models.Schedule{TaskID: parent.ID, RunAt: now, RepeatType: models.RepeatOnce, RepeatInterval: 1, Enabled: true, ClearContextOnStart: true}
 	require.NoError(t, schedules.Create(ctx, schedule))
-	claimed, err := schedules.ClaimCalendarOccurrence(ctx, *schedule, now, nil)
+	claimed, err := schedules.(*sqlite.ScheduleRepo).ClaimCalendarOccurrence(ctx, *schedule, now, nil)
 	require.NoError(t, err)
 	require.True(t, claimed)
 	scheduler := NewSchedulerService(schedules, tasks, worker)

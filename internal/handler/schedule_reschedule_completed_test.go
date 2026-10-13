@@ -13,7 +13,7 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/service"
-	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/openvibely/openvibely/internal/testutil/teststores"
 )
 
 // TestUpdateSchedule_CompletedTaskToFuture verifies that when a task has already
@@ -21,9 +21,9 @@ import (
 // to 'pending' so it can run again. This is a regression test for the bug where
 // completed tasks wouldn't re-run after schedule changes.
 func TestUpdateSchedule_CompletedTaskToFuture(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	scheduleRepo := sqlite.NewScheduleRepo(db)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
+	db := teststores.NewDB(t)
+	scheduleRepo := teststores.Of(db).Schedules
+	taskRepo := teststores.Of(db).Tasks
 
 	// Create a task with completed status (simulating a task that already ran)
 	task := &models.Task{
@@ -56,7 +56,7 @@ func TestUpdateSchedule_CompletedTaskToFuture(t *testing.T) {
 	// Mark it as ran (simulating scheduler execution)
 	lastRun := time.Now().UTC().Add(-1 * time.Hour)
 	nextRun := schedule.ComputeNextRun(lastRun) // For RepeatOnce, this returns nil
-	if err := scheduleRepo.MarkRan(context.Background(), schedule.ID, lastRun, nextRun); err != nil {
+	if err := scheduleRepo.(*sqlite.ScheduleRepo).MarkRan(context.Background(), schedule.ID, lastRun, nextRun); err != nil {
 		t.Fatalf("failed to mark as ran: %v", err)
 	}
 

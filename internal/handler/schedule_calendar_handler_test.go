@@ -12,15 +12,14 @@ import (
 
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/persistence/sqlite"
-	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/openvibely/openvibely/internal/testutil/teststores"
 	"github.com/stretchr/testify/require"
 )
 
 func TestScheduleCalendarActionBulkSelectionAndProjectIsolation(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	repo := sqlite.NewScheduleRepo(db)
-	tasks := sqlite.NewTaskRepo(db, nil)
+	db := teststores.NewDB(t)
+	repo := teststores.Of(db).Schedules
+	tasks := teststores.Of(db).Tasks
 	h := &Handler{scheduleRepo: repo}
 	ctx := context.Background()
 	var ids []string

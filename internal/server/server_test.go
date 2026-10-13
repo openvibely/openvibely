@@ -28,6 +28,7 @@ import (
 	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/persistence/sqlite/database"
+	"github.com/openvibely/openvibely/internal/testutil/teststores"
 	openaiclient "github.com/openvibely/openvibely/pkg/openai_client"
 )
 
@@ -325,7 +326,7 @@ func TestStartRefreshesExpiringOAuthConfigsInBackground(t *testing.T) {
 	if err != nil {
 		t.Fatalf("prepare database: %v", err)
 	}
-	repo := sqlite.NewLLMConfigRepo(db)
+	repo := teststores.Of(db).LLMConfigs
 	cfg := &models.LLMConfig{Name: "Idle OpenAI", Provider: models.ProviderOpenAI, Model: "gpt", AuthMethod: models.AuthMethodOAuth, OAuthAccessToken: "expired-access", OAuthRefreshToken: "old-refresh", OAuthExpiresAt: time.Now().Add(-time.Minute).UnixMilli()}
 	if err := repo.Create(context.Background(), cfg); err != nil {
 		db.Close()
@@ -361,7 +362,7 @@ func TestStartRefreshesExpiringOAuthConfigsInBackground(t *testing.T) {
 		t.Fatalf("open refreshed database: %v", err)
 	}
 	defer readDB.Close()
-	readRepo := sqlite.NewLLMConfigRepo(readDB)
+	readRepo := teststores.Of(readDB).LLMConfigs
 	deadline := time.Now().Add(5 * time.Second)
 	for {
 		loaded, loadErr := readRepo.GetByID(context.Background(), cfg.ID)

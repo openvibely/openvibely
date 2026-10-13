@@ -8,18 +8,17 @@ import (
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/persistence/sqlite"
-	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/openvibely/openvibely/internal/testutil/teststores"
 	"github.com/stretchr/testify/require"
 )
 
 func TestAutomationCapabilitySnapshotIsBoundedDeterministicAndSecretFree(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	projectRepo := sqlite.NewProjectRepo(db)
+	db := teststores.NewDB(t)
+	projectRepo := teststores.Of(db).Projects
 	project := automationTestProject(t, projectRepo, "Snapshot")
-	agentRepo := sqlite.NewAgentRepo(db)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
-	settingsRepo := sqlite.NewSettingsRepo(db)
+	agentRepo := teststores.Of(db).Agents
+	taskRepo := teststores.Of(db).Tasks
+	settingsRepo := teststores.Of(db).Settings
 	agent := models.Agent{Name: "Builder", Key: "builder", Scope: models.AgentScopeProject, ProjectID: project.ID, Enabled: true, SelectableAsPrimary: true, SystemPrompt: "secret prompt", Tools: []string{"Read", "Write"}, Skills: []models.SkillConfig{{Name: "review", Description: "Review code", Content: "private skill body"}}}
 	require.NoError(t, agentRepo.Create(context.Background(), &agent))
 	task := models.Task{ProjectID: project.ID, Title: "Reusable Inbox", Prompt: "private task prompt", Category: models.CategoryBacklog, Priority: 2, Status: models.StatusPending}
@@ -512,16 +511,16 @@ func (s *automationCapabilityGitHubResolverStub) ResolveRepo(_ context.Context, 
 func (s *automationCapabilityGitHubResolverStub) GlobalAPIEndpoint(context.Context) string { return "" }
 
 func TestAutomationCapabilitySnapshotAcceptsAuthorizedUserAndLocalGitHubRemote(t *testing.T) {
-	db := testutil.NewTestDB(t)
+	db := teststores.NewDB(t)
 	ctx := context.Background()
-	projectRepo := sqlite.NewProjectRepo(db)
+	projectRepo := teststores.Of(db).Projects
 	project := automationTestProject(t, projectRepo, "Local GitHub snapshot")
 	project.RepoPath = "/projects/local-github"
 	require.NoError(t, projectRepo.Update(ctx, &project))
-	settingsRepo := sqlite.NewSettingsRepo(db)
+	settingsRepo := teststores.Of(db).Settings
 	require.NoError(t, settingsRepo.Set(ctx, GitHubSettingAuthMode, GitHubAuthModePAT))
 	require.NoError(t, settingsRepo.Set(ctx, GitHubSettingPAT, "secret-not-rendered"))
-	githubAuthRepo := sqlite.NewGitHubAuthRepo(db)
+	githubAuthRepo := teststores.Of(db).GitHubAuth
 	require.NoError(t, githubAuthRepo.UpsertAuthorizedActor(ctx, &models.GitHubAuthorizedActor{GitHubLogin: "automation-bot"}))
 	provider := &automationCapabilityGitHubResolverStub{automationCapabilityGitHubStatusStub: automationCapabilityGitHubStatusStub{
 		status: GitHubConnectionStatus{AuthMode: GitHubAuthModePAT, Configured: true, Connected: true, HasPAT: true},
@@ -538,12 +537,12 @@ func TestAutomationCapabilitySnapshotAcceptsAuthorizedUserAndLocalGitHubRemote(t
 }
 
 func TestAutomationCapabilitySnapshotRequiresUsableConnectedGitHubMode(t *testing.T) {
-	db := testutil.NewTestDB(t)
+	db := teststores.NewDB(t)
 	ctx := context.Background()
-	projectRepo := sqlite.NewProjectRepo(db)
+	projectRepo := teststores.Of(db).Projects
 	project := automationTestProject(t, projectRepo, "GitHub snapshot")
-	settingsRepo := sqlite.NewSettingsRepo(db)
-	githubAuthRepo := sqlite.NewGitHubAuthRepo(db)
+	settingsRepo := teststores.Of(db).Settings
+	githubAuthRepo := teststores.Of(db).GitHubAuth
 	builder := NewAutomationCapabilitySnapshotBuilder(projectRepo, nil, nil, settingsRepo)
 	builder.SetGitHubAuthRepository(githubAuthRepo)
 
@@ -588,10 +587,10 @@ func TestAutomationCapabilitySnapshotRequiresUsableConnectedGitHubMode(t *testin
 }
 
 func TestAutomationDescriptionGenerationUsesOneRepairAndNoPersistence(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	projectRepo := sqlite.NewProjectRepo(db)
+	db := teststores.NewDB(t)
+	projectRepo := teststores.Of(db).Projects
 	project := automationTestProject(t, projectRepo, "Describe")
-	repo := sqlite.NewAutomationRepo(db)
+	repo := teststores.Of(db).Automations
 	svc := NewAutomationDraftService(repo, NewAutomationAdapterRegistry())
 	valid, err := svc.TemplateCandidate(AutomationAdapterVisionDriver)
 	require.NoError(t, err)

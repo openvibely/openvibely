@@ -15,6 +15,7 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/service"
+	"github.com/openvibely/openvibely/internal/testutil/teststores"
 )
 
 func TestTaskGoalRoutes_HTMXEditPauseResumeClear(t *testing.T) {
@@ -566,8 +567,8 @@ func TestGoalAgentSendToTaskQueuesCurrentRunWhenOlderAfterCompleteRowsAreLate(t 
 	if _, err := tc.handler.taskGoalSvc.SetGoal(ctx, task.ID, "Audit-only completion required", service.GoalOptions{}); err != nil {
 		t.Fatalf("set goal: %v", err)
 	}
-	tc.handler.lifecycleRepo = sqlite.NewLifecycleRepo(tc.db)
-	lifecycleAgentRepo := sqlite.NewAgentRepo(tc.db)
+	tc.handler.lifecycleRepo = teststores.Of(tc.db).Lifecycle
+	lifecycleAgentRepo := teststores.Of(tc.db).Agents
 	goalAgent := &models.Agent{Name: "Goal Agent", Model: "inherit", Enabled: true, SystemKind: models.AgentSystemKindGoal}
 	if err := lifecycleAgentRepo.Create(ctx, goalAgent); err != nil {
 		t.Fatalf("create goal agent: %v", err)
@@ -746,8 +747,8 @@ func TestLifecycleSendToTaskRejectsStaleTaskRunContinuation(t *testing.T) {
 	if err := tc.taskRepo.Create(ctx, task); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
-	tc.handler.lifecycleRepo = sqlite.NewLifecycleRepo(tc.db)
-	lifecycleAgentRepo := sqlite.NewAgentRepo(tc.db)
+	tc.handler.lifecycleRepo = teststores.Of(tc.db).Lifecycle
+	lifecycleAgentRepo := teststores.Of(tc.db).Agents
 	lifecycleAgent := &models.Agent{Name: "Lifecycle Agent", Model: "inherit", Enabled: true}
 	if err := lifecycleAgentRepo.Create(ctx, lifecycleAgent); err != nil {
 		t.Fatalf("create lifecycle agent: %v", err)
@@ -793,8 +794,8 @@ func TestLifecycleSendToTaskAllowsCrossTaskWhenDestinationHasNewerRuns(t *testin
 	if err := tc.taskRepo.Create(ctx, destinationTask); err != nil {
 		t.Fatalf("create destination task: %v", err)
 	}
-	tc.handler.lifecycleRepo = sqlite.NewLifecycleRepo(tc.db)
-	lifecycleAgentRepo := sqlite.NewAgentRepo(tc.db)
+	tc.handler.lifecycleRepo = teststores.Of(tc.db).Lifecycle
+	lifecycleAgentRepo := teststores.Of(tc.db).Agents
 	lifecycleAgent := &models.Agent{Name: "Cross Task Lifecycle Agent", Model: "inherit", Enabled: true}
 	if err := lifecycleAgentRepo.Create(ctx, lifecycleAgent); err != nil {
 		t.Fatalf("create lifecycle agent: %v", err)
@@ -870,7 +871,7 @@ func TestGoalAgentSendToTaskRejectsNonActiveGoalStates(t *testing.T) {
 					t.Fatalf("clear goal: %v", err)
 				}
 			case models.TaskGoalStatusFailed:
-				if _, err := sqlite.NewTaskGoalRepo(tc.db).UpdateStatus(ctx, task.ID, goal.GoalID, models.TaskGoalStatusFailed, "failed", false); err != nil {
+				if _, err := teststores.Of(tc.db).TaskGoals.UpdateStatus(ctx, task.ID, goal.GoalID, models.TaskGoalStatusFailed, "failed", false); err != nil {
 					t.Fatalf("mark failed: %v", err)
 				}
 			}
@@ -1155,7 +1156,7 @@ func TestGoalSaveUnchangedPreservesState(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			repo := sqlite.NewTaskGoalRepo(tc.db)
+			repo := teststores.Of(tc.db).TaskGoals
 			before, err := repo.UpdateStatus(ctx, task.ID, goal.GoalID, status, "reason", false)
 			if err != nil {
 				t.Fatal(err)

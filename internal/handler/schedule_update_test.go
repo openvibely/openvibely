@@ -12,15 +12,15 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence/sqlite"
-	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/openvibely/openvibely/internal/testutil/teststores"
 )
 
 // TestUpdateSchedule_RecurringAfterRun verifies that updating a recurring schedule
 // that has already run doesn't reset NextRun to the past
 func TestUpdateSchedule_RecurringAfterRun(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	scheduleRepo := sqlite.NewScheduleRepo(db)
-	taskRepo := sqlite.NewTaskRepo(db, nil)
+	db := teststores.NewDB(t)
+	scheduleRepo := teststores.Of(db).Schedules
+	taskRepo := teststores.Of(db).Tasks
 
 	// Create a task
 	task := &models.Task{
@@ -53,7 +53,7 @@ func TestUpdateSchedule_RecurringAfterRun(t *testing.T) {
 	// Simulate the scheduler having run it
 	now := time.Now()
 	nextRun := schedule.ComputeNextRun(now)
-	if err := scheduleRepo.MarkRan(context.Background(), schedule.ID, now, nextRun); err != nil {
+	if err := scheduleRepo.(*sqlite.ScheduleRepo).MarkRan(context.Background(), schedule.ID, now, nextRun); err != nil {
 		t.Fatalf("failed to mark as ran: %v", err)
 	}
 

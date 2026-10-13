@@ -9,8 +9,10 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/openvibely/openvibely/internal/testutil/teststores"
 )
 
 const (
@@ -19,7 +21,7 @@ const (
 )
 
 type benchmarkOutputRepo struct {
-	repo         *sqlite.ExecutionRepo
+	repo         persistence.ExecutionStore
 	payloadBytes int64
 	writeTime    time.Duration
 }
@@ -60,8 +62,8 @@ func benchmarkWriterOutputPersistence(b *testing.B, transcriptBytes, snapshots i
 	b.Helper()
 	ctx := context.Background()
 	_, writer, _ := testutil.NewFileBackedSplitStatementCountingTestDB(b)
-	execRepo := sqlite.NewExecutionRepo(writer)
-	taskRepo := sqlite.NewTaskRepo(writer, nil)
+	execRepo := teststores.Of(writer).Executions
+	taskRepo := teststores.Of(writer).Tasks
 	task := &models.Task{
 		ProjectID: "default",
 		Title:     "Stream writer benchmark",
@@ -72,7 +74,7 @@ func benchmarkWriterOutputPersistence(b *testing.B, transcriptBytes, snapshots i
 	if err := taskRepo.Create(ctx, task); err != nil {
 		b.Fatalf("create benchmark task: %v", err)
 	}
-	llmConfig, err := sqlite.NewLLMConfigRepo(writer).GetDefault(ctx)
+	llmConfig, err := teststores.Of(writer).LLMConfigs.GetDefault(ctx)
 	if err != nil || llmConfig == nil {
 		b.Fatalf("load benchmark agent config: config=%v err=%v", llmConfig, err)
 	}
@@ -109,7 +111,7 @@ func benchmarkWriterOutputPersistence(b *testing.B, transcriptBytes, snapshots i
 	b.ResetTimer()
 	for range b.N {
 		b.StopTimer()
-		if err := execRepo.UpdateOutput(ctx, largeExec.ID, ""); err != nil {
+		if err := execRepo.(*sqlite.ExecutionRepo).UpdateOutput(ctx, largeExec.ID, ""); err != nil {
 			b.Fatalf("reset large execution output: %v", err)
 		}
 		b.StartTimer()
@@ -146,7 +148,7 @@ func benchmarkWriterOutputPersistence(b *testing.B, transcriptBytes, snapshots i
 					snapshot := output.String()
 					submittedBytes += int64(len(snapshot))
 					started := time.Now()
-					_, err := execRepo.DB().ExecContext(ctx,
+					_, err := execRepo.(*sqlite.ExecutionRepo).DB().ExecContext(ctx,
 						`UPDATE executions SET output = ? WHERE id = ? AND status = 'running'`, snapshot, largeExec.ID)
 					sqliteWriteTime += time.Since(started)
 					return err
@@ -159,7 +161,7 @@ func benchmarkWriterOutputPersistence(b *testing.B, transcriptBytes, snapshots i
 			finalOutput := output.String()
 			submittedBytes += int64(len(finalOutput))
 			started := time.Now()
-			if _, err := execRepo.DB().ExecContext(ctx,
+			if _, err := execRepo.(*sqlite.ExecutionRepo).DB().ExecContext(ctx,
 				`UPDATE executions SET output = ? WHERE id = ? AND status = 'running'`, finalOutput, largeExec.ID); err != nil {
 				b.Fatalf("current-path final flush: %v", err)
 			}
@@ -186,7 +188,7 @@ func benchmarkWriterOutputPersistence(b *testing.B, transcriptBytes, snapshots i
 	}
 }
 
-func benchmarkSmallWriteAlongside(ctx context.Context, repo *sqlite.ExecutionRepo, execID string, largeWrite func() error) (time.Duration, error) {
+func benchmarkSmallWriteAlongside(ctx context.Context, repo persistence.ExecutionStore, execID string, largeWrite func() error) (time.Duration, error) {
 	ready := make(chan struct{})
 	start := make(chan struct{})
 	type result struct {
@@ -198,7 +200,7 @@ func benchmarkSmallWriteAlongside(ctx context.Context, repo *sqlite.ExecutionRep
 		close(ready)
 		<-start
 		started := time.Now()
-		err := repo.UpdateOutput(ctx, execID, "small")
+		err := repo.(*sqlite.ExecutionRepo).UpdateOutput(ctx, execID, "small")
 		finished <- result{latency: time.Since(started), err: err}
 	}()
 	<-ready

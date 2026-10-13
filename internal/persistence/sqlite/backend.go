@@ -28,11 +28,12 @@ func Open(path string, broadcaster *events.Broadcaster) (*Backend, error) {
 	return &Backend{
 		conns:            conns,
 		unregisterWriter: RegisterDedicatedWriter(conns.Reader, conns.Writer),
-		stores:           newStores(conns.Reader, broadcaster),
+		stores:           NewStores(conns.Reader, broadcaster),
 	}, nil
 }
 
-func newStores(db *sql.DB, broadcaster *events.Broadcaster) persistence.Stores {
+// NewStores builds every store on an already-migrated SQLite handle.
+func NewStores(db *sql.DB, broadcaster *events.Broadcaster) persistence.Stores {
 	automations := NewAutomationRepo(db)
 	automations.SetBroadcaster(broadcaster)
 	executions := NewExecutionRepo(db)
