@@ -3071,14 +3071,6 @@ func TestAnthropicProviderToolActivityHelpers(t *testing.T) {
 			}
 		})
 	}
-	for _, name := range []string{"code_execution", "code_execution_20250825", "bash_code_execution", " CODE_EXECUTION "} {
-		if !isAnthropicCodeExecutionToolName(name) {
-			t.Fatalf("expected %q to be treated as code execution", name)
-		}
-	}
-	if isAnthropicCodeExecutionToolName("web_search") {
-		t.Fatal("web_search should not be code execution")
-	}
 
 }
 

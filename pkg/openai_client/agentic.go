@@ -1541,13 +1541,6 @@ func approxOpenAIBytesForTokens(tokens int) int {
 	return tokenestimate.ByteBudget(tokens)
 }
 
-func normalizedCompactionThreshold(threshold int) int {
-	if threshold <= 0 {
-		return DefaultCompactionThreshold
-	}
-	return threshold
-}
-
 func normalizedCompactionThresholdForModel(threshold int, model string) int {
 	limit := openAIAutoCompactionTokenLimit(model)
 	if threshold <= 0 {
