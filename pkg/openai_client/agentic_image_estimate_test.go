@@ -186,9 +186,6 @@ func TestEstimateAgenticImageRepeatedChecksPreserveBoundariesAndRequestJSON(t *t
 				if got := estimateInputItemsTokens(inputItems); got != wantTokens {
 					t.Fatalf("round %d input tokens = %d, want %d", round, got, wantTokens)
 				}
-				if !shouldAutoCompactInputItems(inputItems, wantTokens) || shouldAutoCompactInputItems(inputItems, wantTokens+1) {
-					t.Fatalf("round %d changed the compaction boundary at %d tokens", round, wantTokens)
-				}
 
 				fitsAtBoundary := &AgenticOptions{ContextWindow: wantRequestTokens + 100 + 1024, MaxOutputTokens: 100}
 				if err := ensureOpenAIAgenticRequestFits(inputItems, nil, fitsAtBoundary); err != nil {
@@ -292,7 +289,7 @@ func BenchmarkEstimateAgenticImageContext(b *testing.B) {
 						if err := ensureOpenAIAgenticRequestFits(history, nil, opts); err != nil {
 							b.Fatal(err)
 						}
-						if shouldAutoCompactInputItems(history, 100_000_000) {
+						if estimateInputItemsTokens(history) >= 100_000_000 {
 							total++
 						}
 					}

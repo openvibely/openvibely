@@ -1007,13 +1007,6 @@ func allOpenAIToolsReadOnly(tasks []openAIToolExecutionTask) bool {
 	return true
 }
 
-func shouldAutoCompactInputItems(inputItems []any, threshold int) bool {
-	if len(inputItems) == 0 {
-		return false
-	}
-	return estimateInputItemsTokens(inputItems) >= normalizedCompactionThreshold(threshold)
-}
-
 func isContextLengthExceededError(err error) bool {
 	if err == nil {
 		return false
@@ -2240,16 +2233,6 @@ func extractCompactionSummaryFromOutputItems(items []any) string {
 	}
 
 	return ""
-}
-
-func openAICompactionOutputTokens(maxOutputTokens int) int {
-	if maxOutputTokens <= 0 || maxOutputTokens > 4096 {
-		maxOutputTokens = 4096
-	}
-	if maxOutputTokens < 512 {
-		return 512
-	}
-	return maxOutputTokens
 }
 
 func openAIInputItemsTranscript(inputItems []any) string {

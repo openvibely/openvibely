@@ -3079,21 +3079,7 @@ func TestAnthropicProviderToolActivityHelpers(t *testing.T) {
 	if isAnthropicCodeExecutionToolName("web_search") {
 		t.Fatal("web_search should not be code execution")
 	}
-	if !anthropicTurnHasWebToolActivity([]agenticBlock{{Type: "server_tool_use", Name: "web_search"}}) {
-		t.Fatal("expected server web tool use activity")
-	}
-	if !anthropicTurnHasWebToolActivity([]agenticBlock{{Type: "server_tool_result", Content: json.RawMessage(`{"type":"web_fetch_result"}`)}}) {
-		t.Fatal("expected inferred server web tool result activity")
-	}
-	if anthropicTurnHasWebToolActivity([]agenticBlock{{Type: "tool_use", Name: "local_tool"}}) {
-		t.Fatal("local tool should not count as provider web activity")
-	}
-	if !anthropicTurnHasCodeExecutionTooManyRequests([]agenticBlock{{Type: "server_tool_result", Content: json.RawMessage(`{"type":"code_execution_result","error_code":"too_many_requests"}`)}}) {
-		t.Fatal("expected code execution too_many_requests detection")
-	}
-	if anthropicTurnHasCodeExecutionTooManyRequests([]agenticBlock{{Type: "server_tool_result", Content: json.RawMessage(`{"type":"web_search_result","error_code":"too_many_requests"}`)}}) {
-		t.Fatal("web search rate limit should not count as code execution rate limit")
-	}
+
 }
 
 func TestCompactionProgressStreamLifecycle(t *testing.T) {

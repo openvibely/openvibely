@@ -669,10 +669,6 @@ func (s *LLMService) preparePendingInputWithBudget(req llmcontracts.AgentRequest
 	return req, true, cleanup, nil
 }
 
-func ensureRequestFits(req llmcontracts.AgentRequest, op string) error {
-	return ensureRequestFitsWithBudget(req, calculateRequestBudget(req), op)
-}
-
 func ensureRequestFitsWithBudget(req llmcontracts.AgentRequest, budget requestBudget, op string) error {
 	if budget.TotalInputTokens() <= budget.SafeInputLimit {
 		return nil
@@ -685,15 +681,6 @@ func openAIContextWindow(model string) int {
 		return spec.ContextWindow
 	}
 	return defaultOpenAIContextWindow
-}
-
-func shouldTriggerContextCompaction(req llmcontracts.AgentRequest) (bool, compactionLimits, int) {
-	limits := compactionLimitsForAgent(req.Agent)
-	used := estimateModelVisibleRequestTokens(req)
-	if req.ContextTokenEstimate > 0 {
-		used = req.ContextTokenEstimate
-	}
-	return used >= limits.TriggerLimit || used >= limits.EffectiveHardLimit, limits, used
 }
 
 func estimateModelVisibleRequestTokens(req llmcontracts.AgentRequest) int {

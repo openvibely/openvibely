@@ -2421,16 +2421,6 @@ func cleanProjectUsagePath(path string) string {
 	return filepath.Clean(filepath.FromSlash(path))
 }
 
-func projectWorkDirMatches(repoPath string, workDir string) bool {
-	repo := strings.TrimSpace(repoPath)
-	if repo == "" || strings.TrimSpace(workDir) == "" {
-		return false
-	}
-	repo = cleanProjectUsagePath(repo)
-	want := cleanProjectUsagePath(workDir)
-	return cleanProjectWorkDirMatches(repo, want)
-}
-
 func cleanProjectWorkDirMatches(repo string, workDir string) bool {
 	if repo == workDir {
 		return true

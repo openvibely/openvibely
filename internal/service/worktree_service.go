@@ -2763,25 +2763,6 @@ func parseWorktreeFileStats(out []byte) []WorktreeFileStat {
 	return stats
 }
 
-func parseGitStatusFileStats(out []byte) []WorktreeFileStat {
-	var stats []WorktreeFileStat
-	for _, line := range strings.Split(strings.TrimRight(string(out), "\n"), "\n") {
-		if len(line) < 4 {
-			continue
-		}
-		code := strings.TrimSpace(line[:2])
-		path := strings.TrimSpace(line[3:])
-		if code == "" || path == "" {
-			continue
-		}
-		if idx := strings.Index(path, " -> "); idx >= 0 {
-			path = strings.TrimSpace(path[idx+4:])
-		}
-		stats = append(stats, WorktreeFileStat{Path: path, Status: gitStatusToWorktreeFileStatus(code)})
-	}
-	return stats
-}
-
 func gitStatusToWorktreeFileStatus(code string) string {
 	if strings.Contains(code, "D") {
 		return "deleted"
