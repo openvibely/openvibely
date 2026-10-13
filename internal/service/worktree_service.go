@@ -2062,7 +2062,7 @@ func automaticConflictResolutionRuntime(repoDir string, conflictFiles []string) 
 			if err != nil {
 				return "", true, true, err
 			}
-			out, err := agenttools.Execute(ctx, repoDir, canonicalName, rewritten, agenttools.BashPolicy{})
+			out, err := agenttools.Execute(ctx, repoDir, canonicalName, rewritten)
 			return out, true, err != nil, err
 		},
 	}

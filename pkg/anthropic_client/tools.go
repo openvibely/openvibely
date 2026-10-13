@@ -29,7 +29,7 @@ type ToolCall struct {
 // DefaultTools returns the standard set of tool definitions for agentic use.
 func DefaultTools() []ToolDefinition {
 	var out []ToolDefinition
-	for _, d := range agenttools.Definitions(agenttools.BashPolicy{DefaultTimeoutSeconds: defaultExecBashTimeoutSeconds}) {
+	for _, d := range agenttools.Definitions() {
 		out = append(out, ToolDefinition{Name: d.Name, Description: d.Description, Schema: d.Schema})
 	}
 	return out
@@ -48,14 +48,10 @@ func filterToolDefinitions(tools []ToolDefinition, filter func(string) bool) []T
 	return out
 }
 
-const defaultExecBashTimeoutSeconds = 600
-
 // ExecuteTool runs a tool locally and returns the output string.
 // It resolves relative paths against workDir.
 func ExecuteTool(ctx context.Context, workDir, name string, input json.RawMessage) (string, error) {
-	return agenttools.Execute(ctx, workDir, name, input, agenttools.BashPolicy{
-		DefaultTimeoutSeconds: defaultExecBashTimeoutSeconds,
-	})
+	return agenttools.Execute(ctx, workDir, name, input)
 }
 
 func (t ToolDefinition) ParameterSchema() json.RawMessage {

@@ -177,21 +177,28 @@ func TestProviderWrappersShareLocalToolBehavior(t *testing.T) {
 	}
 }
 
-func TestNormalizeBashTimeoutPolicies(t *testing.T) {
-	openAI := agenttools.BashPolicy{DefaultTimeoutSeconds: 120, MaxTimeoutSeconds: 600}
-	if got := agenttools.NormalizeBashTimeout(0, openAI); got != 120 {
-		t.Fatalf("OpenAI omitted timeout = %d, want 120", got)
+func TestNormalizeBashTimeout(t *testing.T) {
+	for _, tc := range []struct{ input, want int }{{0, 120}, {-1, 120}, {1, 1}, {120, 120}, {600, 600}, {999, 600}} {
+		if got := agenttools.NormalizeBashTimeout(tc.input); got != tc.want {
+			t.Errorf("timeout %d = %d, want %d", tc.input, got, tc.want)
+		}
 	}
-	if got := agenttools.NormalizeBashTimeout(999, openAI); got != 600 {
-		t.Fatalf("OpenAI capped timeout = %d, want 600", got)
-	}
+}
 
-	anthropic := agenttools.BashPolicy{DefaultTimeoutSeconds: 600}
-	if got := agenttools.NormalizeBashTimeout(0, anthropic); got != 600 {
-		t.Fatalf("Anthropic omitted timeout = %d, want 600", got)
+func TestProviderBashDefinitionsMatch(t *testing.T) {
+	var openAI, anthropic string
+	for _, tool := range openaiclient.DefaultTools() {
+		if tool.Name == "bash" {
+			openAI = string(tool.ParameterSchema())
+		}
 	}
-	if got := agenttools.NormalizeBashTimeout(999, anthropic); got != 999 {
-		t.Fatalf("Anthropic positive timeout = %d, want 999", got)
+	for _, tool := range anthropicclient.DefaultTools() {
+		if tool.Name == "bash" {
+			anthropic = string(tool.ParameterSchema())
+		}
+	}
+	if openAI == "" || openAI != anthropic || !strings.Contains(openAI, "Default: 120. Max: 600.") {
+		t.Fatalf("inconsistent bash schemas: OpenAI=%s Anthropic=%s", openAI, anthropic)
 	}
 }
 

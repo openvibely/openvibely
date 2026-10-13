@@ -12,15 +12,15 @@ import (
 	"time"
 )
 
-// BashPolicy configures provider-specific bash timeout behavior.
-type BashPolicy struct {
-	DefaultTimeoutSeconds int
-	MaxTimeoutSeconds     int
-}
+// Bash timeouts are shared by every provider.
+const (
+	DefaultBashTimeoutSeconds = 120
+	MaxBashTimeoutSeconds     = 600
+)
 
 // Execute runs a local built-in coding tool and returns the output string.
 // It resolves relative paths against workDir.
-func Execute(ctx context.Context, workDir, name string, input json.RawMessage, bashPolicy BashPolicy) (string, error) {
+func Execute(ctx context.Context, workDir, name string, input json.RawMessage) (string, error) {
 	switch name {
 	case "read_file":
 		return execReadFile(workDir, input)
@@ -29,7 +29,7 @@ func Execute(ctx context.Context, workDir, name string, input json.RawMessage, b
 	case "edit_file":
 		return execEditFile(workDir, input)
 	case "bash":
-		return execBash(ctx, workDir, input, bashPolicy)
+		return execBash(ctx, workDir, input)
 	case "list_files":
 		return execListFiles(workDir, input)
 	case "grep_search":
@@ -39,13 +39,13 @@ func Execute(ctx context.Context, workDir, name string, input json.RawMessage, b
 	}
 }
 
-// NormalizeBashTimeout applies a provider-specific bash timeout policy.
-func NormalizeBashTimeout(seconds int, policy BashPolicy) int {
+// NormalizeBashTimeout applies the shared bash timeout limits.
+func NormalizeBashTimeout(seconds int) int {
 	if seconds <= 0 {
-		return policy.DefaultTimeoutSeconds
+		return DefaultBashTimeoutSeconds
 	}
-	if policy.MaxTimeoutSeconds > 0 && seconds > policy.MaxTimeoutSeconds {
-		return policy.MaxTimeoutSeconds
+	if seconds > MaxBashTimeoutSeconds {
+		return MaxBashTimeoutSeconds
 	}
 	return seconds
 }
@@ -323,7 +323,7 @@ func normalizeLineForMatch(s string) string {
 	return b.String()
 }
 
-func execBash(ctx context.Context, workDir string, input json.RawMessage, bashPolicy BashPolicy) (string, error) {
+func execBash(ctx context.Context, workDir string, input json.RawMessage) (string, error) {
 	var params struct {
 		Command string `json:"command"`
 		Timeout int    `json:"timeout"`
@@ -334,7 +334,7 @@ func execBash(ctx context.Context, workDir string, input json.RawMessage, bashPo
 	if params.Command == "" {
 		return "", fmt.Errorf("command is required")
 	}
-	params.Timeout = NormalizeBashTimeout(params.Timeout, bashPolicy)
+	params.Timeout = NormalizeBashTimeout(params.Timeout)
 
 	timeout := time.Duration(params.Timeout) * time.Second
 	cmdCtx, cancel := context.WithTimeout(ctx, timeout)
