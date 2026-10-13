@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/stretchr/testify/require"
 )
@@ -90,10 +90,10 @@ func TestOutboundTargetsCardAggregateSummaryMatchesMaterializedRendering(t *test
 }
 
 func TestOutboundTargetsCardSummaryMatchesRepositorySummary(t *testing.T) {
-	summary := repository.ChannelTargetProjectSummary{
+	summary := persistence.ChannelTargetProjectSummary{
 		Total:      7,
 		Configured: true,
-		ByPlatform: map[string]repository.ChannelTargetPlatformSummary{
+		ByPlatform: map[string]persistence.ChannelTargetPlatformSummary{
 			"email":    {Total: 1, ByKind: map[string]int{"email": 1}},
 			"slack":    {Total: 2, Home: 1, Named: 1, ByKind: map[string]int{"channel": 1, "user": 1}},
 			"telegram": {Total: 1, ByKind: map[string]int{"chat": 1}},
@@ -108,7 +108,7 @@ func TestOutboundTargetsCardSummaryMatchesRepositorySummary(t *testing.T) {
 	require.NotContains(t, strings.ToLower(html), "matrix: 1")
 }
 
-func renderOutboundTargetsCardForTest(t *testing.T, projectID string, summary repository.ChannelTargetProjectSummary, explicitAllowed bool) string {
+func renderOutboundTargetsCardForTest(t *testing.T, projectID string, summary persistence.ChannelTargetProjectSummary, explicitAllowed bool) string {
 	t.Helper()
 	var buf bytes.Buffer
 	require.NoError(t, OutboundTargetsCard(projectID, summary, explicitAllowed).Render(t.Context(), &buf))

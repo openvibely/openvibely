@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/testutil"
 )
 
@@ -204,8 +205,8 @@ func TestInsightsRepo_ProjectScopedMutations(t *testing.T) {
 	if err != nil || before == nil {
 		t.Fatalf("get project B insight = %#v, err=%v", before, err)
 	}
-	if err := repo.UpdateStatus(ctx, projectA.ID, insight.ID, models.InsightStatusAccepted); !errors.Is(err, ErrInsightNotFound) {
-		t.Fatalf("foreign status update error = %v, want %v", err, ErrInsightNotFound)
+	if err := repo.UpdateStatus(ctx, projectA.ID, insight.ID, models.InsightStatusAccepted); !errors.Is(err, persistence.ErrInsightNotFound) {
+		t.Fatalf("foreign status update error = %v, want %v", err, persistence.ErrInsightNotFound)
 	}
 	after, err := repo.GetInsight(ctx, projectB.ID, insight.ID)
 	if err != nil || !reflect.DeepEqual(before, after) {
@@ -231,8 +232,8 @@ func TestInsightsRepo_ProjectScopedMutations(t *testing.T) {
 		t.Fatalf("resolved_at was not preserved: insight=%#v err=%v", preserved, err)
 	}
 
-	if err := repo.DeleteInsight(ctx, projectA.ID, insight.ID); !errors.Is(err, ErrInsightNotFound) {
-		t.Fatalf("foreign insight delete error = %v, want %v", err, ErrInsightNotFound)
+	if err := repo.DeleteInsight(ctx, projectA.ID, insight.ID); !errors.Is(err, persistence.ErrInsightNotFound) {
+		t.Fatalf("foreign insight delete error = %v, want %v", err, persistence.ErrInsightNotFound)
 	}
 	if stillThere, err := repo.GetInsight(ctx, projectB.ID, insight.ID); err != nil || stillThere == nil {
 		t.Fatalf("foreign insight disappeared after rejected delete: %#v err=%v", stillThere, err)
@@ -255,8 +256,8 @@ func TestInsightsRepo_ProjectScopedMutations(t *testing.T) {
 	if got, err := repo.GetKnowledge(ctx, projectA.ID, knowledge.ID); err != nil || got != nil {
 		t.Fatalf("foreign knowledge lookup = %#v, err=%v; want not found", got, err)
 	}
-	if err := repo.DeleteKnowledge(ctx, projectA.ID, knowledge.ID); !errors.Is(err, ErrKnowledgeNotFound) {
-		t.Fatalf("foreign knowledge delete error = %v, want %v", err, ErrKnowledgeNotFound)
+	if err := repo.DeleteKnowledge(ctx, projectA.ID, knowledge.ID); !errors.Is(err, persistence.ErrKnowledgeNotFound) {
+		t.Fatalf("foreign knowledge delete error = %v, want %v", err, persistence.ErrKnowledgeNotFound)
 	}
 	if stillThere, err := repo.GetKnowledge(ctx, projectB.ID, knowledge.ID); err != nil || stillThere == nil {
 		t.Fatalf("foreign knowledge disappeared after rejected delete: %#v err=%v", stillThere, err)

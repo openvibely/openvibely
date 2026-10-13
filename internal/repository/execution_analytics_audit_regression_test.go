@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/testutil"
 )
 
@@ -50,7 +51,7 @@ func TestAnalyticsDashboardPeriodDoesNotResurrectHistoricalOutcomes(t *testing.T
 		t.Fatal(err)
 	}
 
-	dashboard, err := executions.GetAnalyticsDashboard(ctx, AnalyticsDashboardFilter{ProjectID: project.ID, DateFrom: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), DateTo: time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)})
+	dashboard, err := executions.GetAnalyticsDashboard(ctx, persistence.AnalyticsDashboardFilter{ProjectID: project.ID, DateFrom: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), DateTo: time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,7 +114,7 @@ func TestAnalyticsDashboardCycleTimeExcludesRecurringTaskTemplates(t *testing.T)
 	makeTerminal(recurring, "recurring-cycle-old", "2025-12-01 10:00:00", "2025-12-01 10:01:00")
 	makeTerminal(recurring, "recurring-cycle-current", "2026-01-15 10:00:00", "2026-01-15 10:01:00")
 
-	dashboard, err := executions.GetAnalyticsDashboard(ctx, AnalyticsDashboardFilter{ProjectID: project.ID, DateFrom: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), DateTo: time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC), Limit: 20})
+	dashboard, err := executions.GetAnalyticsDashboard(ctx, persistence.AnalyticsDashboardFilter{ProjectID: project.ID, DateFrom: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), DateTo: time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC), Limit: 20})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -179,7 +180,7 @@ func TestAnalyticsDashboardWorkflowCompletionRateIncludesAllInvocationStatuses(t
 		t.Fatal(err)
 	}
 
-	dashboard, err := NewExecutionRepo(db).GetAnalyticsDashboard(ctx, AnalyticsDashboardFilter{
+	dashboard, err := NewExecutionRepo(db).GetAnalyticsDashboard(ctx, persistence.AnalyticsDashboardFilter{
 		ProjectID: fixture.ProjectID,
 		View:      "workflows",
 		DateFrom:  from,
@@ -255,7 +256,7 @@ func TestAnalyticsDashboardWorkflowFilterReturnsLinkedTaskAndNodeEvidence(t *tes
 	if _, err := db.ExecContext(ctx, `INSERT INTO automation_dispatch_outbox (id,invocation_id,task_id) VALUES ('analytics-dispatch','inv-1',?)`, linked.ID); err != nil {
 		t.Fatal(err)
 	}
-	filter := AnalyticsDashboardFilter{ProjectID: fixture.ProjectID, WorkflowID: fixture.AutomationID, DateFrom: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), DateTo: time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC), Limit: 20}
+	filter := persistence.AnalyticsDashboardFilter{ProjectID: fixture.ProjectID, WorkflowID: fixture.AutomationID, DateFrom: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), DateTo: time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC), Limit: 20}
 	dashboard, err := execRepo.GetAnalyticsDashboard(ctx, filter)
 	if err != nil {
 		t.Fatal(err)
@@ -350,7 +351,7 @@ func TestAnalyticsAgentCategoryUsesTaskCategoryAndTerminalExecutionDenominator(t
 	if _, err := db.ExecContext(ctx, `UPDATE executions SET started_at='2026-01-12 10:00:00',completed_at='2026-01-12 10:00:00' WHERE id=?`, otherExecution.ID); err != nil {
 		t.Fatal(err)
 	}
-	dashboard, err := executions.GetAnalyticsDashboard(ctx, AnalyticsDashboardFilter{ProjectID: project.ID, AgentID: agent.ID, DateFrom: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), DateTo: time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)})
+	dashboard, err := executions.GetAnalyticsDashboard(ctx, persistence.AnalyticsDashboardFilter{ProjectID: project.ID, AgentID: agent.ID, DateFrom: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), DateTo: time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -529,7 +530,7 @@ func TestAnalyticsEvidenceMatchesFunnelCycleGoalCostAndModelCohorts(t *testing.T
 		t.Fatal(err)
 	}
 
-	dashboard, err := executions.GetAnalyticsDashboard(ctx, AnalyticsDashboardFilter{ProjectID: project.ID, DateFrom: from, DateTo: to, Limit: 20})
+	dashboard, err := executions.GetAnalyticsDashboard(ctx, persistence.AnalyticsDashboardFilter{ProjectID: project.ID, DateFrom: from, DateTo: to, Limit: 20})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -581,7 +582,7 @@ func TestAnalyticsEvidenceMatchesFunnelCycleGoalCostAndModelCohorts(t *testing.T
 	if !analyticsContainsInt(retryEvidence.ExecutionHours, wantExecutionHour) {
 		t.Fatalf("execution-hour evidence lost supporting local hour %d: %+v", wantExecutionHour, retryEvidence.ExecutionHours)
 	}
-	agentDashboard, err := executions.GetAnalyticsDashboard(ctx, AnalyticsDashboardFilter{ProjectID: project.ID, AgentID: agent.ID, DateFrom: from, DateTo: to, Limit: 20})
+	agentDashboard, err := executions.GetAnalyticsDashboard(ctx, persistence.AnalyticsDashboardFilter{ProjectID: project.ID, AgentID: agent.ID, DateFrom: from, DateTo: to, Limit: 20})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -660,7 +661,7 @@ func TestAnalyticsDashboardFailedCostDisclosesCoverageOrUnavailable(t *testing.T
 			}
 		}
 	}
-	filter := AnalyticsDashboardFilter{ProjectID: project.ID, DateFrom: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), DateTo: time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)}
+	filter := persistence.AnalyticsDashboardFilter{ProjectID: project.ID, DateFrom: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), DateTo: time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)}
 	dashboard, err := executions.GetAnalyticsDashboard(ctx, filter)
 	if err != nil {
 		t.Fatal(err)
@@ -704,7 +705,7 @@ func TestAnalyticsDashboardEvidenceIsBoundedPaginatedAndDisclosed(t *testing.T) 
 			t.Fatal(err)
 		}
 	}
-	filter := AnalyticsDashboardFilter{ProjectID: project.ID, DateFrom: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), DateTo: time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC), Limit: 2}
+	filter := persistence.AnalyticsDashboardFilter{ProjectID: project.ID, DateFrom: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), DateTo: time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC), Limit: 2}
 	first, err := NewExecutionRepo(db).GetAnalyticsDashboard(ctx, filter)
 	if err != nil {
 		t.Fatal(err)

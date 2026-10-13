@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence"
 )
 
 type GitHubPRFeedbackProvider interface {
@@ -19,10 +19,10 @@ type GitHubPRFeedbackProvider interface {
 
 type GitHubPRFeedbackForwarder struct {
 	github          GitHubPRFeedbackProvider
-	prRepo          *repository.TaskPullRequestRepo
-	feedbackRepo    *repository.GitHubPRFeedbackRepo
-	authRepo        *repository.GitHubAuthRepo
-	threadInputRepo *repository.ThreadInputRepo
+	prRepo          persistence.TaskPullRequestStore
+	feedbackRepo    persistence.GitHubPRFeedbackStore
+	authRepo        persistence.GitHubAuthStore
+	threadInputRepo persistence.ThreadInputStore
 }
 
 type GitHubPRFeedbackForwardResult struct {
@@ -45,7 +45,7 @@ type GitHubPRFeedbackForwardedResult struct {
 	URL               string `json:"url"`
 }
 
-func NewGitHubPRFeedbackForwarder(github GitHubPRFeedbackProvider, prRepo *repository.TaskPullRequestRepo, feedbackRepo *repository.GitHubPRFeedbackRepo, authRepo *repository.GitHubAuthRepo, threadInputRepo *repository.ThreadInputRepo) *GitHubPRFeedbackForwarder {
+func NewGitHubPRFeedbackForwarder(github GitHubPRFeedbackProvider, prRepo persistence.TaskPullRequestStore, feedbackRepo persistence.GitHubPRFeedbackStore, authRepo persistence.GitHubAuthStore, threadInputRepo persistence.ThreadInputStore) *GitHubPRFeedbackForwarder {
 	return &GitHubPRFeedbackForwarder{github: github, prRepo: prRepo, feedbackRepo: feedbackRepo, authRepo: authRepo, threadInputRepo: threadInputRepo}
 }
 
@@ -75,7 +75,7 @@ func (f *GitHubPRFeedbackForwarder) forwardAuthorizedFeedback(ctx context.Contex
 	}
 	selfLogin := ""
 	if authenticatedUser != nil {
-		selfLogin = repository.NormalizeGitHubLogin(authenticatedUser.Login)
+		selfLogin = persistence.NormalizeGitHubLogin(authenticatedUser.Login)
 	}
 	prs, err := f.prRepo.ListOpenByProjectID(ctx, projectID)
 	if err != nil {
@@ -102,7 +102,7 @@ func (f *GitHubPRFeedbackForwarder) forwardAuthorizedFeedback(ctx context.Contex
 				result.SkippedEmpty++
 				continue
 			}
-			author := repository.NormalizeGitHubLogin(item.AuthorLogin)
+			author := persistence.NormalizeGitHubLogin(item.AuthorLogin)
 			if author == "" {
 				result.SkippedUnauthorized++
 				continue
@@ -158,7 +158,7 @@ func (f *GitHubPRFeedbackForwarder) forwardAuthorizedFeedback(ctx context.Contex
 				Body:              item.Body,
 				CreatedAt:         createdAt,
 			}
-			recorded, err := f.feedbackRepo.RecordForwardedAndQueue(ctx, f.threadInputRepo, feedbackRecord, queued)
+			recorded, err := f.feedbackRepo.RecordForwardedAndQueue(ctx, feedbackRecord, queued)
 			if err != nil {
 				return nil, err
 			}
@@ -248,8 +248,8 @@ func githubRepositoryWebHost(repo *GitHubRepoRef) (string, error) {
 }
 
 func isGitHubPRFeedbackSelfOrBot(authorLogin, authorType, selfLogin string) bool {
-	authorLogin = repository.NormalizeGitHubLogin(authorLogin)
-	selfLogin = repository.NormalizeGitHubLogin(selfLogin)
+	authorLogin = persistence.NormalizeGitHubLogin(authorLogin)
+	selfLogin = persistence.NormalizeGitHubLogin(selfLogin)
 	if authorLogin != "" && selfLogin != "" && authorLogin == selfLogin {
 		return true
 	}
@@ -262,7 +262,7 @@ func formatGitHubPRFeedbackForTask(prNumber int, item GitHubPullRequestFeedback)
 		kind = "feedback"
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "GitHub PR #%d received authorized %s feedback from @%s.\n", prNumber, kind, repository.NormalizeGitHubLogin(item.AuthorLogin))
+	fmt.Fprintf(&b, "GitHub PR #%d received authorized %s feedback from @%s.\n", prNumber, kind, persistence.NormalizeGitHubLogin(item.AuthorLogin))
 	if strings.TrimSpace(item.State) != "" {
 		fmt.Fprintf(&b, "Review state: %s\n", strings.TrimSpace(item.State))
 	}

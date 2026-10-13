@@ -11,6 +11,7 @@ import (
 
 	"github.com/openvibely/openvibely/internal/attachmentsession"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/stretchr/testify/assert"
@@ -752,7 +753,7 @@ func TestTaskService_MoveTasksToActiveLaneRoutesSingleQueuedFollowupAndReturnsLa
 		require.NoError(t, taskRepo.UpdateStatus(ctx, taskID, models.StatusQueued))
 		return true, nil
 	})
-	err := svc.MoveTasksToActiveLane(ctx, "default", []repository.ActiveLaneTaskMove{{ID: task.ID, ExpectedCategory: models.CategoryBacklog, ExpectedStatus: models.StatusPending}}, models.StatusRunning)
+	err := svc.MoveTasksToActiveLane(ctx, "default", []persistence.ActiveLaneTaskMove{{ID: task.ID, ExpectedCategory: models.CategoryBacklog, ExpectedStatus: models.StatusPending}}, models.StatusRunning)
 	require.ErrorIs(t, err, ErrActiveLaneLifecycleRouted)
 	require.Equal(t, 1, called)
 	loaded, err := taskRepo.GetByID(ctx, task.ID)
@@ -784,7 +785,7 @@ func TestTaskService_MoveTasksToActiveLaneRoutesSingleFailedFollowupAndReturnsLa
 		require.NoError(t, taskRepo.UpdateStatus(ctx, taskID, models.StatusQueued))
 		return true, nil
 	})
-	err := svc.MoveTasksToActiveLane(ctx, "default", []repository.ActiveLaneTaskMove{{ID: task.ID, ExpectedCategory: models.CategoryBacklog, ExpectedStatus: models.StatusFailed}}, models.StatusRunning)
+	err := svc.MoveTasksToActiveLane(ctx, "default", []persistence.ActiveLaneTaskMove{{ID: task.ID, ExpectedCategory: models.CategoryBacklog, ExpectedStatus: models.StatusFailed}}, models.StatusRunning)
 	require.ErrorIs(t, err, ErrActiveLaneLifecycleRouted)
 	require.Equal(t, 1, called)
 	loaded, err := taskRepo.GetByID(ctx, task.ID)
@@ -818,8 +819,8 @@ func TestTaskService_MoveTasksToActiveLaneFencesConcurrentLifecycleOwnedTransiti
 		require.NoError(t, taskRepo.UpdateStatus(ctx, task.ID, models.StatusCompleted))
 	}
 
-	err := svc.MoveTasksToActiveLane(ctx, "default", []repository.ActiveLaneTaskMove{{ID: task.ID, ExpectedCategory: models.CategoryBacklog, ExpectedStatus: models.StatusPending}}, models.StatusRunning)
-	require.ErrorIs(t, err, repository.ErrActiveLaneTaskChanged)
+	err := svc.MoveTasksToActiveLane(ctx, "default", []persistence.ActiveLaneTaskMove{{ID: task.ID, ExpectedCategory: models.CategoryBacklog, ExpectedStatus: models.StatusPending}}, models.StatusRunning)
+	require.ErrorIs(t, err, persistence.ErrActiveLaneTaskChanged)
 	loaded, loadErr := taskRepo.GetByID(ctx, task.ID)
 	require.NoError(t, loadErr)
 	require.Equal(t, models.CategoryBacklog, loaded.Category)
@@ -854,8 +855,8 @@ func TestTaskService_MoveTasksToActiveLaneFencesConcurrentFailedFollowupTransiti
 		require.NoError(t, taskRepo.UpdateStatus(ctx, task.ID, models.StatusCompleted))
 	}
 
-	err := svc.MoveTasksToActiveLane(ctx, "default", []repository.ActiveLaneTaskMove{{ID: task.ID, ExpectedCategory: models.CategoryBacklog, ExpectedStatus: models.StatusFailed}}, models.StatusRunning)
-	require.ErrorIs(t, err, repository.ErrActiveLaneTaskChanged)
+	err := svc.MoveTasksToActiveLane(ctx, "default", []persistence.ActiveLaneTaskMove{{ID: task.ID, ExpectedCategory: models.CategoryBacklog, ExpectedStatus: models.StatusFailed}}, models.StatusRunning)
+	require.ErrorIs(t, err, persistence.ErrActiveLaneTaskChanged)
 	loaded, loadErr := taskRepo.GetByID(ctx, task.ID)
 	require.NoError(t, loadErr)
 	require.Equal(t, models.CategoryBacklog, loaded.Category)
@@ -879,11 +880,11 @@ func TestTaskService_MoveTasksToActiveLaneRejectsLifecycleOwnedGroupBeforeSubmis
 	}
 	require.NoError(t, threadRepo.CreateQueued(ctx, &models.ThreadInput{Scope: models.ThreadInputScopeTask, ProjectID: "default", TaskID: owned.ID, InputMode: models.ThreadInputModeQueued, InputStatus: models.ThreadInputPending, Content: "queued"}))
 
-	err := svc.MoveTasksToActiveLane(ctx, "default", []repository.ActiveLaneTaskMove{
+	err := svc.MoveTasksToActiveLane(ctx, "default", []persistence.ActiveLaneTaskMove{
 		{ID: ordinary.ID, ExpectedCategory: models.CategoryBacklog, ExpectedStatus: models.StatusPending},
 		{ID: owned.ID, ExpectedCategory: models.CategoryBacklog, ExpectedStatus: models.StatusPending},
 	}, models.StatusRunning)
-	require.ErrorIs(t, err, repository.ErrActiveLaneLifecycleOwned)
+	require.ErrorIs(t, err, persistence.ErrActiveLaneLifecycleOwned)
 	loaded, loadErr := taskRepo.GetByID(ctx, ordinary.ID)
 	require.NoError(t, loadErr)
 	require.Equal(t, models.CategoryBacklog, loaded.Category)
@@ -2387,7 +2388,7 @@ func TestTaskService_ObserveTaskCancellationKeepsTaskAndCutoffTogether(t *testin
 	oldCutoff, err := execRepo.TaskExecutionHistoryCutoff(ctx, task.ID)
 	require.NoError(t, err)
 
-	unlock := repository.LockTaskLifecycle(task.ID)
+	unlock := persistence.LockTaskLifecycle(task.ID)
 	_, err = db.ExecContext(ctx, `UPDATE executions SET status = 'completed' WHERE id = ?`, old.ID)
 	require.NoError(t, err)
 	require.NoError(t, taskRepo.UpdateStatus(ctx, task.ID, models.StatusCompleted))
@@ -3839,7 +3840,7 @@ func TestWorkerService_StartReconcilesDurableActiveLaneReservationWhileCapacityF
 	taskRepo := repository.NewTaskRepo(db, nil)
 	task := &models.Task{ProjectID: "default", Title: "Restart reserved worker task", Category: models.CategoryBacklog, Status: models.StatusPending}
 	require.NoError(t, taskRepo.Create(ctx, task))
-	admissions, err := taskRepo.MoveTasksToActiveLane(ctx, "default", []repository.ActiveLaneTaskMove{{ID: task.ID, ExpectedCategory: models.CategoryBacklog, ExpectedStatus: models.StatusPending}}, models.StatusRunning)
+	admissions, err := taskRepo.MoveTasksToActiveLane(ctx, "default", []persistence.ActiveLaneTaskMove{{ID: task.ID, ExpectedCategory: models.CategoryBacklog, ExpectedStatus: models.StatusPending}}, models.StatusRunning)
 	require.NoError(t, err)
 	require.Len(t, admissions, 1)
 
@@ -3872,7 +3873,7 @@ func TestWorkerService_ReservedDispatchRefreshesMetadataAfterCapacityWait(t *tes
 	require.NoError(t, modelRepo.Create(ctx, secondModel))
 	task := &models.Task{ProjectID: "default", Title: "Reserved metadata capacity wait", Category: models.CategoryBacklog, Status: models.StatusPending, Prompt: "original prompt", AgentID: &firstModel.ID}
 	require.NoError(t, taskRepo.Create(ctx, task))
-	admissions, err := taskRepo.MoveTasksToActiveLane(ctx, "default", []repository.ActiveLaneTaskMove{{ID: task.ID, ExpectedCategory: models.CategoryBacklog, ExpectedStatus: models.StatusPending}}, models.StatusRunning)
+	admissions, err := taskRepo.MoveTasksToActiveLane(ctx, "default", []persistence.ActiveLaneTaskMove{{ID: task.ID, ExpectedCategory: models.CategoryBacklog, ExpectedStatus: models.StatusPending}}, models.StatusRunning)
 	require.NoError(t, err)
 	require.Len(t, admissions, 1)
 
@@ -3923,7 +3924,7 @@ func TestWorkerService_RetriesTransientReservedClaimFailureWithSameExecution(t *
 	execRepo := repository.NewExecutionRepo(db)
 	task := &models.Task{ProjectID: "default", Title: "Retry reserved claim", Category: models.CategoryBacklog, Status: models.StatusPending, Prompt: "run once"}
 	require.NoError(t, taskRepo.Create(ctx, task))
-	admissions, err := taskRepo.MoveTasksToActiveLane(ctx, "default", []repository.ActiveLaneTaskMove{{ID: task.ID, ExpectedCategory: models.CategoryBacklog, ExpectedStatus: models.StatusPending}}, models.StatusRunning)
+	admissions, err := taskRepo.MoveTasksToActiveLane(ctx, "default", []persistence.ActiveLaneTaskMove{{ID: task.ID, ExpectedCategory: models.CategoryBacklog, ExpectedStatus: models.StatusPending}}, models.StatusRunning)
 	require.NoError(t, err)
 	require.Len(t, admissions, 1)
 
@@ -3955,7 +3956,7 @@ func TestWorkerService_PrunesAndCancelsStaleDurableReservation(t *testing.T) {
 	execRepo := repository.NewExecutionRepo(db)
 	task := &models.Task{ProjectID: "default", Title: "Cancelled reserved worker task", Category: models.CategoryBacklog, Status: models.StatusPending}
 	require.NoError(t, taskRepo.Create(ctx, task))
-	admissions, err := taskRepo.MoveTasksToActiveLane(ctx, "default", []repository.ActiveLaneTaskMove{{ID: task.ID, ExpectedCategory: models.CategoryBacklog, ExpectedStatus: models.StatusPending}}, models.StatusRunning)
+	admissions, err := taskRepo.MoveTasksToActiveLane(ctx, "default", []persistence.ActiveLaneTaskMove{{ID: task.ID, ExpectedCategory: models.CategoryBacklog, ExpectedStatus: models.StatusPending}}, models.StatusRunning)
 	require.NoError(t, err)
 	_, err = db.ExecContext(ctx, `UPDATE tasks SET status = 'cancelled' WHERE id = ?`, task.ID)
 	require.NoError(t, err)
@@ -4094,7 +4095,7 @@ func TestTaskService_MoveTasksToActiveLaneRoutesSingleSwarmPlannerAndReturnsLane
 	parent, err := swarmSvc.CreateSwarmTask(ctx, CreateSwarmTaskRequest{ProjectID: "default", Title: "Lane move swarm", Prompt: "plan later", Category: models.CategoryBacklog, MaxWorkers: 2, ReviewerEnabled: true, MergerEnabled: true, StartImmediately: &startImmediately})
 	require.NoError(t, err)
 
-	err = taskSvc.MoveTasksToActiveLane(ctx, "default", []repository.ActiveLaneTaskMove{{ID: parent.ID, ExpectedCategory: parent.Category, ExpectedStatus: parent.Status}}, models.StatusRunning)
+	err = taskSvc.MoveTasksToActiveLane(ctx, "default", []persistence.ActiveLaneTaskMove{{ID: parent.ID, ExpectedCategory: parent.Category, ExpectedStatus: parent.Status}}, models.StatusRunning)
 	require.ErrorIs(t, err, ErrActiveLaneLifecycleRouted)
 	assertPlannerSubmittedForParent(t, taskRepo, workerSvc, parent.ID)
 }
@@ -4114,8 +4115,8 @@ func TestTaskService_MoveTasksToActiveLaneFencesConcurrentSwarmParentTransition(
 		require.NoError(t, taskRepo.UpdateStatus(ctx, parent.ID, models.StatusCompleted))
 	}
 
-	err = taskSvc.MoveTasksToActiveLane(ctx, "default", []repository.ActiveLaneTaskMove{{ID: parent.ID, ExpectedCategory: parent.Category, ExpectedStatus: parent.Status}}, models.StatusRunning)
-	require.ErrorIs(t, err, repository.ErrActiveLaneTaskChanged)
+	err = taskSvc.MoveTasksToActiveLane(ctx, "default", []persistence.ActiveLaneTaskMove{{ID: parent.ID, ExpectedCategory: parent.Category, ExpectedStatus: parent.Status}}, models.StatusRunning)
+	require.ErrorIs(t, err, persistence.ErrActiveLaneTaskChanged)
 	loaded, loadErr := taskRepo.GetByID(ctx, parent.ID)
 	require.NoError(t, loadErr)
 	require.Equal(t, models.CategoryBacklog, loaded.Category)

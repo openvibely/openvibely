@@ -17,7 +17,7 @@ import (
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/memory"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/update"
 )
 
@@ -30,9 +30,9 @@ type preparedAutomationDispatch struct {
 
 type WorkerService struct {
 	llmSvc        *LLMService
-	projectRepo   *repository.ProjectRepo
-	taskRepo      *repository.TaskRepo
-	llmConfigRepo *repository.LLMConfigRepo
+	projectRepo   persistence.ProjectStore
+	taskRepo      persistence.TaskStore
+	llmConfigRepo persistence.LLMConfigStore
 
 	mu         sync.Mutex
 	numWorkers int                                   // max parallel tasks (global limit)
@@ -71,14 +71,14 @@ type WorkerService struct {
 	lifecycleRunner *lifecycle.Runner
 
 	globalSkillRoot                  string
-	agentRepo                        *repository.AgentRepo
-	lifecycleRepo                    *repository.LifecycleRepo
-	execRepo                         *repository.ExecutionRepo
-	skillAnalyticsRepo               *repository.SkillAnalyticsRepo
+	agentRepo                        persistence.AgentStore
+	lifecycleRepo                    persistence.LifecycleStore
+	execRepo                         persistence.ExecutionStore
+	skillAnalyticsRepo               persistence.SkillAnalyticsStore
 	mutationRecorder                 func(models.Task) agentlibrary.MutationRecorder
 	agentRootSyncService             *AgentLibraryMaintenanceService
 	taskGoalSvc                      *TaskGoalService
-	automationRepo                   *repository.AutomationRepo
+	automationRepo                   persistence.AutomationStore
 	afterCompleteRuntimeToolProvider func(context.Context, models.Task) *llmcontracts.RuntimeTools
 	beforeOrdinaryTaskClaim          func(models.Task)       // deterministic pre-claim test barrier
 	afterOrdinaryTaskClaim           func(models.Task)       // deterministic persisted-claim test barrier
@@ -105,15 +105,15 @@ func (w *WorkerService) SetLifecycleSkillRoot(root string) {
 	w.globalSkillRoot = root
 }
 
-func (w *WorkerService) SetLifecycleAgentRepo(repo *repository.AgentRepo) {
+func (w *WorkerService) SetLifecycleAgentRepo(repo persistence.AgentStore) {
 	w.agentRepo = repo
 }
 
-func (w *WorkerService) SetLifecycleRepo(repo *repository.LifecycleRepo) {
+func (w *WorkerService) SetLifecycleRepo(repo persistence.LifecycleStore) {
 	w.lifecycleRepo = repo
 }
 
-func (w *WorkerService) SetExecutionRepo(repo *repository.ExecutionRepo) {
+func (w *WorkerService) SetExecutionRepo(repo persistence.ExecutionStore) {
 	w.execRepo = repo
 }
 
@@ -129,7 +129,7 @@ func (w *WorkerService) SetTaskGoalService(svc *TaskGoalService) {
 	w.taskGoalSvc = svc
 }
 
-func (w *WorkerService) SetAutomationRepo(repo *repository.AutomationRepo) {
+func (w *WorkerService) SetAutomationRepo(repo persistence.AutomationStore) {
 	w.automationRepo = repo
 }
 
@@ -159,7 +159,7 @@ func hasGlobalWorkerCapacity(maxWorkers, running int) bool {
 	return maxWorkers <= 0 || running < maxWorkers
 }
 
-func NewWorkerService(llmSvc *LLMService, numWorkers int, projectRepo *repository.ProjectRepo) *WorkerService {
+func NewWorkerService(llmSvc *LLMService, numWorkers int, projectRepo persistence.ProjectStore) *WorkerService {
 	return &WorkerService{
 		llmSvc:                llmSvc,
 		projectRepo:           projectRepo,
@@ -176,18 +176,18 @@ func NewWorkerService(llmSvc *LLMService, numWorkers int, projectRepo *repositor
 
 // SetTaskRepo sets the task repo for checking task status before re-queuing.
 // Called after construction to avoid circular dependencies.
-func (w *WorkerService) SetTaskRepo(taskRepo *repository.TaskRepo) {
+func (w *WorkerService) SetTaskRepo(taskRepo persistence.TaskStore) {
 	w.taskRepo = taskRepo
 }
 
 // SetProjectRepo sets the project repo for per-project worker limit lookups.
 // Called after construction when the project repo isn't available at construction time.
-func (w *WorkerService) SetProjectRepo(projectRepo *repository.ProjectRepo) {
+func (w *WorkerService) SetProjectRepo(projectRepo persistence.ProjectStore) {
 	w.projectRepo = projectRepo
 }
 
 // SetLLMConfigRepo sets the LLM config repo for per-model worker pool lookups.
-func (w *WorkerService) SetLLMConfigRepo(llmConfigRepo *repository.LLMConfigRepo) {
+func (w *WorkerService) SetLLMConfigRepo(llmConfigRepo persistence.LLMConfigStore) {
 	w.llmConfigRepo = llmConfigRepo
 }
 
@@ -648,7 +648,7 @@ func (w *WorkerService) executeTask(task models.Task, agentConfigID string, prep
 		claim, claimErr := w.taskRepo.ClaimQueuedAutomationDispatch(taskCtx, prepared.Envelope.DispatchID)
 		if claimErr != nil {
 			applog.Infof("[worker] queued automation task=%s claim failed: %v", task.ID, claimErr)
-			if errors.Is(claimErr, repository.ErrAutomationTaskBusy) && w.automationRepo != nil {
+			if errors.Is(claimErr, persistence.ErrAutomationTaskBusy) && w.automationRepo != nil {
 				if cancelErr := w.automationRepo.CancelDispatchesForTask(context.Background(), task.ID, "Automation task is no longer runnable"); cancelErr != nil {
 					applog.Infof("[worker] cancelling rejected automation task=%s failed: %v", task.ID, cancelErr)
 				}

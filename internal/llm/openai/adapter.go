@@ -17,7 +17,7 @@ import (
 	llmstream "github.com/openvibely/openvibely/internal/llm/stream"
 	llmusage "github.com/openvibely/openvibely/internal/llm/usage"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence"
 	mcpclient "github.com/openvibely/openvibely/pkg/mcp_client"
 	openaiclient "github.com/openvibely/openvibely/pkg/openai_client"
 )
@@ -53,8 +53,9 @@ func isMaxTokensStopReason(reason string) bool {
 
 // Adapter handles all OpenAI-specific provider logic.
 type Adapter struct {
-	llmConfigRepo   *repository.LLMConfigRepo
-	execRepo        *repository.ExecutionRepo
+	llmConfigRepo   persistence.LLMConfigStore
+	execRepo        persistence.ExecutionStore
+	asyncToolCalls  persistence.OpenAIAsyncToolCallStore
 	streamHub       llmstream.ExecutionStreamPublisher
 	oauthRecovery   *llmoauth.Manager
 	transportMu     sync.Mutex
@@ -158,11 +159,15 @@ type openAIAsyncToolCallbacks struct {
 	onRejected     func(context.Context, openaiclient.AsyncToolCallRecord, error) error
 }
 
+func (a *Adapter) asyncToolStoresAvailable() bool {
+	return a.execRepo != nil && a.asyncToolCalls != nil
+}
+
 func (a *Adapter) asyncRuntimeToolCallbacks(ctx context.Context, projectID, execID string, recover bool, tools []openaiclient.ToolDefinition, toolExecutor func(context.Context, string, json.RawMessage) (string, bool, error), toolFilter func(string) bool, workDir string) (openAIAsyncToolCallbacks, error) {
-	if a == nil || a.execRepo == nil || strings.TrimSpace(execID) == "" {
+	if a == nil || !a.asyncToolStoresAvailable() || strings.TrimSpace(execID) == "" {
 		return openAIAsyncToolCallbacks{}, nil
 	}
-	repo := repository.NewOpenAIAsyncToolCallRepo(a.execRepo.DB())
+	repo := a.asyncToolCalls
 	execID = strings.TrimSpace(execID)
 	projectID = strings.TrimSpace(projectID)
 	callbacks := openAIAsyncToolCallbacks{
@@ -223,7 +228,7 @@ func (a *Adapter) asyncRuntimeToolCallbacks(ctx context.Context, projectID, exec
 	return callbacks, nil
 }
 
-func (a *Adapter) recoverAsyncToolResults(ctx context.Context, repo *repository.OpenAIAsyncToolCallRepo, projectID, execID string, now time.Time, tools []openaiclient.ToolDefinition, toolExecutor func(context.Context, string, json.RawMessage) (string, bool, error), toolFilter func(string) bool, workDir string) ([]openaiclient.AsyncToolResult, error) {
+func (a *Adapter) recoverAsyncToolResults(ctx context.Context, repo persistence.OpenAIAsyncToolCallStore, projectID, execID string, now time.Time, tools []openaiclient.ToolDefinition, toolExecutor func(context.Context, string, json.RawMessage) (string, bool, error), toolFilter func(string) bool, workDir string) ([]openaiclient.AsyncToolResult, error) {
 	calls, err := repo.ListRecoverableByExecution(ctx, execID, now, 100)
 	if err != nil {
 		return nil, err
@@ -405,10 +410,11 @@ func buildOpenAIRuntime(ctx context.Context, workDir string, agentDef *models.Ag
 }
 
 // New creates a new OpenAI adapter.
-func New(llmConfigRepo *repository.LLMConfigRepo, execRepo *repository.ExecutionRepo, streamHub llmstream.ExecutionStreamPublisher) *Adapter {
+func New(llmConfigRepo persistence.LLMConfigStore, execRepo persistence.ExecutionStore, asyncToolCalls persistence.OpenAIAsyncToolCallStore, streamHub llmstream.ExecutionStreamPublisher) *Adapter {
 	return &Adapter{
 		llmConfigRepo:   llmConfigRepo,
 		execRepo:        execRepo,
+		asyncToolCalls:  asyncToolCalls,
 		streamHub:       streamHub,
 		oauthRecovery:   llmoauth.NewManager(llmConfigRepo),
 		transportStates: make(map[string]*responsesTransportEntry),
@@ -543,7 +549,7 @@ func (a *Adapter) CallStreaming(ctx context.Context, prompt string, attachments 
 	defer cleanupRuntime()
 	steeringBaseTools := append([]openaiclient.ToolDefinition(nil), extraTools...)
 	steeringBaseExecutor, steeringBaseFilter := toolExecutor, toolFilter
-	enableAsyncTools := openAIAsyncRuntimeToolsEnabledForRequest(ctx, agent) && strings.TrimSpace(execID) != "" && a.execRepo != nil
+	enableAsyncTools := openAIAsyncRuntimeToolsEnabledForRequest(ctx, agent) && strings.TrimSpace(execID) != "" && a.asyncToolStoresAvailable()
 	toolPolicy := runtimeToolPolicyOptions(true, models.ChatModeOrchestrate)
 	extraTools = append(extraTools, runtimeOpenAITools(rt, enableAsyncTools)...)
 	toolExecutor = composeRuntimeToolExecutor(toolExecutor, rt)
@@ -685,7 +691,7 @@ func (a *Adapter) CallChatStreaming(ctx context.Context, message string, attachm
 	defer cleanupRuntime()
 	steeringBaseTools := append([]openaiclient.ToolDefinition(nil), extraTools...)
 	steeringBaseExecutor, steeringBaseFilter := toolExecutor, toolFilter
-	enableAsyncTools := openAIAsyncRuntimeToolsEnabledForRequest(ctx, agent) && strings.TrimSpace(execID) != "" && a.execRepo != nil
+	enableAsyncTools := openAIAsyncRuntimeToolsEnabledForRequest(ctx, agent) && strings.TrimSpace(execID) != "" && a.asyncToolStoresAvailable()
 	toolPolicy := runtimeToolPolicyOptions(isTaskFollowup, chatMode)
 	extraTools = append(extraTools, runtimeOpenAITools(rt, enableAsyncTools)...)
 	toolExecutor = composeRuntimeToolExecutor(toolExecutor, rt)

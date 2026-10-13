@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/database"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/stretchr/testify/require"
 	_ "modernc.org/sqlite"
 )
@@ -39,7 +40,7 @@ func TestSlackInboundReceiptHandoffCommitHonorsContextDeadline(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Millisecond)
 	defer cancel()
 	started := time.Now()
-	_, err = NewSlackInboundReceiptRepo(db).WithHandoff(ctx, "T1|D1|commit-deadline|U1", func(SQLExecutor) error {
+	_, err = NewSlackInboundReceiptRepo(db).WithHandoff(ctx, "T1|D1|commit-deadline|U1", func(persistence.Tx) error {
 		return nil
 	})
 	require.Error(t, err)
@@ -56,7 +57,7 @@ func TestSlackInboundReceiptHandoffRollbackHonorsContextDeadline(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Millisecond)
 	defer cancel()
 	started := time.Now()
-	_, err = receipts.WithHandoff(ctx, "T1|D1|rollback-deadline|U1", func(SQLExecutor) error {
+	_, err = receipts.WithHandoff(ctx, "T1|D1|rollback-deadline|U1", func(persistence.Tx) error {
 		<-ctx.Done()
 		return ctx.Err()
 	})

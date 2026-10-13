@@ -2,13 +2,13 @@ package repository
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/testutil"
 )
 
@@ -61,7 +61,7 @@ func TestAutomationHistoryPagesReplayMetricsAndHealth(t *testing.T) {
 	if len(invocations.Items) != 2 || invocations.NextCursor == "" || invocations.Items[0].ID != "inv-3" {
 		t.Fatalf("unexpected invocation page: %#v", invocations)
 	}
-	if _, err := repo.ListAutomationInvocations(ctx, fixture.ProjectID, fixture.AutomationID, 2, "not-base64"); !errors.Is(err, ErrAutomationCursor) {
+	if _, err := repo.ListAutomationInvocations(ctx, fixture.ProjectID, fixture.AutomationID, 2, "not-base64"); !errors.Is(err, persistence.ErrAutomationCursor) {
 		t.Fatalf("expected invalid cursor error, got %v", err)
 	}
 	invocation, err := repo.GetAutomationInvocation(ctx, fixture.ProjectID, fixture.AutomationID, "inv-2")
@@ -137,15 +137,15 @@ func TestAutomationHistoryCursorHelpersAndHealthNotFound(t *testing.T) {
 	if err != nil || decoded == nil || decoded.ID != "row-1" || !decoded.Time.Equal(now) {
 		t.Fatalf("decodeAutomationCursor = %#v, %v", decoded, err)
 	}
-	if _, err := decodeAutomationCursor("other", cursor); !errors.Is(err, ErrAutomationCursor) {
+	if _, err := decodeAutomationCursor("other", cursor); !errors.Is(err, persistence.ErrAutomationCursor) {
 		t.Fatalf("expected cursor kind error, got %v", err)
 	}
-	if _, err := repo.RecomputeAutomationHealth(context.Background(), "missing", "missing", now); !errors.Is(err, sql.ErrNoRows) {
+	if _, err := repo.RecomputeAutomationHealth(context.Background(), "missing", "missing", now); !errors.Is(err, persistence.ErrNotFound) {
 		t.Fatalf("expected missing automation error, got %v", err)
 	}
 }
 
-func insertAutomationHistoryInvocation(t *testing.T, db SQLExecutor, fixture automationLiveCountsFixture, id, nodeID, status string, started, completed time.Time, scheduled bool) {
+func insertAutomationHistoryInvocation(t *testing.T, db sqlExecutor, fixture automationLiveCountsFixture, id, nodeID, status string, started, completed time.Time, scheduled bool) {
 	t.Helper()
 	scheduledFor := any(nil)
 	if scheduled {
@@ -165,7 +165,7 @@ func insertAutomationHistoryInvocation(t *testing.T, db SQLExecutor, fixture aut
 	}
 }
 
-func insertAutomationHistoryWorkItem(t *testing.T, db SQLExecutor, fixture automationLiveCountsFixture, id, kind, title, status string, created, completed time.Time) {
+func insertAutomationHistoryWorkItem(t *testing.T, db sqlExecutor, fixture automationLiveCountsFixture, id, kind, title, status string, created, completed time.Time) {
 	t.Helper()
 	completedAt := any(nil)
 	if !completed.IsZero() {
@@ -179,7 +179,7 @@ func insertAutomationHistoryWorkItem(t *testing.T, db SQLExecutor, fixture autom
 	}
 }
 
-func insertAutomationHistoryActivity(t *testing.T, db SQLExecutor, fixture automationLiveCountsFixture, id, invocationID, workItemID, nodeID, activityType, status string, started, completed time.Time, message string) {
+func insertAutomationHistoryActivity(t *testing.T, db sqlExecutor, fixture automationLiveCountsFixture, id, invocationID, workItemID, nodeID, activityType, status string, started, completed time.Time, message string) {
 	t.Helper()
 	if _, err := db.ExecContext(context.Background(), `INSERT INTO automation_activities
 		(id, project_id, automation_id, version_id, node_id, invocation_id, work_item_id,
@@ -191,7 +191,7 @@ func insertAutomationHistoryActivity(t *testing.T, db SQLExecutor, fixture autom
 	}
 }
 
-func insertAutomationHistoryTransition(t *testing.T, db SQLExecutor, fixture automationLiveCountsFixture, id, workItemID, invocationID, activityID, fromNodeID, toNodeID, edgeID, state string, occurred time.Time) {
+func insertAutomationHistoryTransition(t *testing.T, db sqlExecutor, fixture automationLiveCountsFixture, id, workItemID, invocationID, activityID, fromNodeID, toNodeID, edgeID, state string, occurred time.Time) {
 	t.Helper()
 	from := any(nil)
 	if fromNodeID != "" {

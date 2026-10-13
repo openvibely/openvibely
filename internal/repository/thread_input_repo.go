@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 )
 
 type ThreadInputRepo struct {
@@ -20,14 +21,6 @@ type ThreadInputRepo struct {
 	steeringWakeupsMu      sync.Mutex
 	steeringWakeups        map[string]map[chan struct{}]struct{}
 }
-
-var (
-	ErrNoActiveTurn      = errors.New("no active turn")
-	ErrExpectedTurnEmpty = errors.New("expected turn id is required")
-	ErrActiveTurnChanged = errors.New("active turn changed")
-	ErrInputNotPending   = errors.New("input is no longer pending")
-	ErrTaskModelChanged  = errors.New("task model changed before queued input claim")
-)
 
 const (
 	ProviderSteeringAcceptedPending   = "accepted_pending"
@@ -105,7 +98,7 @@ func scanThreadInput(scanner interface {
 
 func (r *ThreadInputRepo) CreateQueued(ctx context.Context, input *models.ThreadInput) error {
 	if input.TaskID != "" {
-		unlock := LockTaskLifecycle(input.TaskID)
+		unlock := persistence.LockTaskLifecycle(input.TaskID)
 		defer unlock()
 	}
 	if input.InputMode == "" {
@@ -114,8 +107,8 @@ func (r *ThreadInputRepo) CreateQueued(ctx context.Context, input *models.Thread
 	if input.InputStatus == "" {
 		input.InputStatus = models.ThreadInputPending
 	}
-	return withImmediateTx(ctx, r.db, func(exec SQLExecutor) error {
-		return r.CreateQueuedWithExecutor(ctx, exec, input)
+	return withImmediateTx(ctx, r.db, func(exec sqlExecutor) error {
+		return r.createQueuedWithExecutor(ctx, exec, input)
 	})
 }
 
@@ -124,7 +117,7 @@ func (r *ThreadInputRepo) CreateQueued(ctx context.Context, input *models.Thread
 // queue remains authoritative for admission, cancellation, and promotion.
 func (r *ThreadInputRepo) CreateQueuedWithAutomationContext(ctx context.Context, input *models.ThreadInput, automationContext models.AutomationContext, bindingKey string) error {
 	if input.TaskID != "" {
-		unlock := LockTaskLifecycle(input.TaskID)
+		unlock := persistence.LockTaskLifecycle(input.TaskID)
 		defer unlock()
 	}
 	if automationContext.ProjectID == "" || automationContext.ProjectID != input.ProjectID || len(automationContext.Bindings) == 0 {
@@ -133,15 +126,15 @@ func (r *ThreadInputRepo) CreateQueuedWithAutomationContext(ctx context.Context,
 	if bindingKey == "" {
 		return errors.New("automation binding key is required")
 	}
-	return withImmediateTx(ctx, r.db, func(exec SQLExecutor) error {
-		if err := r.CreateQueuedWithExecutor(ctx, exec, input); err != nil {
+	return withImmediateTx(ctx, r.db, func(exec sqlExecutor) error {
+		if err := r.createQueuedWithExecutor(ctx, exec, input); err != nil {
 			return err
 		}
 		return bindAutomationThreadInputWithExecutor(ctx, exec, input.ID, automationContext, bindingKey)
 	})
 }
 
-func bindAutomationThreadInputWithExecutor(ctx context.Context, exec SQLExecutor, inputID string, automationContext models.AutomationContext, bindingKey string) error {
+func bindAutomationThreadInputWithExecutor(ctx context.Context, exec sqlExecutor, inputID string, automationContext models.AutomationContext, bindingKey string) error {
 	var inputProjectID string
 	if err := exec.QueryRowContext(ctx, `SELECT project_id FROM thread_inputs WHERE id = ?`, inputID).Scan(&inputProjectID); err != nil {
 		return fmt.Errorf("loading automation thread input: %w", err)
@@ -162,7 +155,17 @@ func bindAutomationThreadInputWithExecutor(ctx context.Context, exec SQLExecutor
 	return nil
 }
 
-func (r *ThreadInputRepo) CreateQueuedWithExecutor(ctx context.Context, exec SQLExecutor, input *models.ThreadInput) error {
+// CreateQueuedInTx persists a queued thread input using the caller's store
+// transaction.
+func (r *ThreadInputRepo) CreateQueuedInTx(ctx context.Context, tx persistence.Tx, input *models.ThreadInput) error {
+	exec, err := executorFromTx(tx)
+	if err != nil {
+		return err
+	}
+	return r.createQueuedWithExecutor(ctx, exec, input)
+}
+
+func (r *ThreadInputRepo) createQueuedWithExecutor(ctx context.Context, exec sqlExecutor, input *models.ThreadInput) error {
 	if input.InputMode == "" {
 		input.InputMode = models.ThreadInputModeQueued
 	}
@@ -174,12 +177,12 @@ func (r *ThreadInputRepo) CreateQueuedWithExecutor(ctx context.Context, exec SQL
 
 func (r *ThreadInputRepo) CreateSteeringForActiveExecution(ctx context.Context, input *models.ThreadInput, activeExecutionID string) error {
 	if input.ExpectedTurnID == "" {
-		return ErrExpectedTurnEmpty
+		return persistence.ErrExpectedTurnEmpty
 	}
 	if input.ExpectedTurnID != activeExecutionID {
-		return ErrActiveTurnChanged
+		return persistence.ErrActiveTurnChanged
 	}
-	err := withImmediateTx(ctx, r.db, func(tx SQLExecutor) error {
+	err := withImmediateTx(ctx, r.db, func(tx sqlExecutor) error {
 		input.RunExecutionID = activeExecutionID
 		input.TurnID = activeExecutionID
 		input.InputMode = models.ThreadInputModeSteering
@@ -256,7 +259,7 @@ func (r *ThreadInputRepo) CreateSteeringForActiveExecution(ctx context.Context, 
 		)
 		created, err := scanThreadInput(row)
 		if err == sql.ErrNoRows {
-			return ErrNoActiveTurn
+			return persistence.ErrNoActiveTurn
 		}
 		if err != nil {
 			return fmt.Errorf("creating steering input: %w", err)
@@ -520,7 +523,7 @@ func (r *ThreadInputRepo) preparePendingSteering(ctx context.Context, runExecuti
 	}
 
 	var prepared []models.ThreadInput
-	err := withImmediateTx(ctx, r.db, func(tx SQLExecutor) error {
+	err := withImmediateTx(ctx, r.db, func(tx sqlExecutor) error {
 		where := `WHERE ` + pendingWhere + ` ORDER BY created_at ASC, rowid ASC`
 		inputs, err := r.listWithExecutor(ctx, tx, where, runExecutionID, turnID)
 		if err != nil {
@@ -729,13 +732,13 @@ func (r *ThreadInputRepo) listWithExecutor(ctx context.Context, exec queryExecut
 // by that same execution. The active-turn check and row update share one transaction.
 func (r *ThreadInputRepo) ConvertQueuedToSteering(ctx context.Context, id, runExecutionID, expectedTurnID string) (*models.ThreadInput, error) {
 	if expectedTurnID == "" {
-		return nil, ErrExpectedTurnEmpty
+		return nil, persistence.ErrExpectedTurnEmpty
 	}
 	var converted *models.ThreadInput
-	err := withImmediateTx(ctx, r.db, func(tx SQLExecutor) error {
+	err := withImmediateTx(ctx, r.db, func(tx sqlExecutor) error {
 		queued, err := scanThreadInput(tx.QueryRowContext(ctx, `SELECT `+threadInputSelectColumns+` FROM thread_inputs WHERE id = ?`, id))
 		if err == sql.ErrNoRows {
-			return ErrInputNotPending
+			return persistence.ErrInputNotPending
 		}
 		if err != nil {
 			return fmt.Errorf("loading queued input guard: %w", err)
@@ -745,10 +748,10 @@ func (r *ThreadInputRepo) ConvertQueuedToSteering(ctx context.Context, id, runEx
 			return err
 		}
 		if activeID == "" {
-			return ErrNoActiveTurn
+			return persistence.ErrNoActiveTurn
 		}
 		if activeID != runExecutionID || expectedTurnID != activeID {
-			return ErrActiveTurnChanged
+			return persistence.ErrActiveTurnChanged
 		}
 		res, err := tx.ExecContext(ctx, `
 				UPDATE thread_inputs
@@ -770,11 +773,11 @@ func (r *ThreadInputRepo) ConvertQueuedToSteering(ctx context.Context, id, runEx
 					return fmt.Errorf("checking active turn guard: %w", runErr)
 				}
 				if stillRunning == 0 {
-					return ErrNoActiveTurn
+					return persistence.ErrNoActiveTurn
 				}
-				return ErrActiveTurnChanged
+				return persistence.ErrActiveTurnChanged
 			}
-			return ErrInputNotPending
+			return persistence.ErrInputNotPending
 		}
 		input, err := scanThreadInput(tx.QueryRowContext(ctx, `SELECT `+threadInputSelectColumns+` FROM thread_inputs WHERE id = ?`, id))
 		if err != nil {
@@ -791,7 +794,7 @@ func (r *ThreadInputRepo) ConvertQueuedToSteering(ctx context.Context, id, runEx
 }
 
 func (r *ThreadInputRepo) MarkApplied(ctx context.Context, id, runExecutionID, turnID string) error {
-	return withImmediateTx(ctx, r.db, func(tx SQLExecutor) error {
+	return withImmediateTx(ctx, r.db, func(tx sqlExecutor) error {
 		res, err := tx.ExecContext(ctx, `
 			UPDATE thread_inputs
 			SET input_status = 'applied', run_execution_id = NULLIF(?, ''), turn_id = NULLIF(?, ''), applied_at = datetime('now'), updated_at = datetime('now')
@@ -814,7 +817,7 @@ func (r *ThreadInputRepo) MarkApplied(ctx context.Context, id, runExecutionID, t
 			if confirmed != 0 {
 				return nil
 			}
-			return ErrInputNotPending
+			return persistence.ErrInputNotPending
 		}
 		if _, err := tx.ExecContext(ctx, `
 			UPDATE thread_input_provider_steering
@@ -835,7 +838,7 @@ func (r *ThreadInputRepo) RecordProviderSteering(ctx context.Context, inputIDs [
 	default:
 		return fmt.Errorf("invalid provider steering delivery state %q", deliveryState)
 	}
-	return withImmediateTx(ctx, r.db, func(tx SQLExecutor) error {
+	return withImmediateTx(ctx, r.db, func(tx sqlExecutor) error {
 		for _, inputID := range inputIDs {
 			res, err := tx.ExecContext(ctx, `
 				INSERT INTO thread_input_provider_steering
@@ -854,7 +857,7 @@ func (r *ThreadInputRepo) RecordProviderSteering(ctx context.Context, inputIDs [
 			}
 			changed, _ := res.RowsAffected()
 			if changed == 0 {
-				return fmt.Errorf("recording provider steering delivery for input %s: %w", inputID, ErrInputNotPending)
+				return fmt.Errorf("recording provider steering delivery for input %s: %w", inputID, persistence.ErrInputNotPending)
 			}
 			if deliveryState == ProviderSteeringAcceptedConfirmed {
 				confirmed, confirmErr := tx.ExecContext(ctx, `
@@ -866,7 +869,7 @@ func (r *ThreadInputRepo) RecordProviderSteering(ctx context.Context, inputIDs [
 				}
 				confirmedRows, _ := confirmed.RowsAffected()
 				if confirmedRows == 0 {
-					return fmt.Errorf("applying confirmed provider steering for input %s: %w", inputID, ErrInputNotPending)
+					return fmt.Errorf("applying confirmed provider steering for input %s: %w", inputID, persistence.ErrInputNotPending)
 				}
 			}
 		}
@@ -878,7 +881,7 @@ func (r *ThreadInputRepo) MarkProviderSteeringAmbiguous(ctx context.Context, ste
 	if len(steeringIDs) == 0 {
 		return nil
 	}
-	return withImmediateTx(ctx, r.db, func(tx SQLExecutor) error {
+	return withImmediateTx(ctx, r.db, func(tx sqlExecutor) error {
 		for _, steeringID := range steeringIDs {
 			if _, err := tx.ExecContext(ctx, `
 				UPDATE thread_input_provider_steering
@@ -895,7 +898,7 @@ func (r *ThreadInputRepo) ClearProviderSteering(ctx context.Context, steeringIDs
 	if len(steeringIDs) == 0 {
 		return nil
 	}
-	return withImmediateTx(ctx, r.db, func(tx SQLExecutor) error {
+	return withImmediateTx(ctx, r.db, func(tx sqlExecutor) error {
 		for _, steeringID := range steeringIDs {
 			if _, err := tx.ExecContext(ctx, `DELETE FROM thread_input_provider_steering WHERE steering_id = ?`, steeringID); err != nil {
 				return fmt.Errorf("clearing provider steering %s: %w", steeringID, err)
@@ -909,7 +912,7 @@ func (r *ThreadInputRepo) RestorePreparedSteering(ctx context.Context, ids []str
 	if len(ids) == 0 {
 		return nil
 	}
-	return withImmediateTx(ctx, r.db, func(tx SQLExecutor) error {
+	return withImmediateTx(ctx, r.db, func(tx sqlExecutor) error {
 		for _, id := range ids {
 			if _, err := tx.ExecContext(ctx, `
 				UPDATE thread_inputs
@@ -927,7 +930,7 @@ func (r *ThreadInputRepo) RequeuePendingSteering(ctx context.Context, ids []stri
 		return nil, nil
 	}
 	var requeued []models.ThreadInput
-	err := withImmediateTx(ctx, r.db, func(tx SQLExecutor) error {
+	err := withImmediateTx(ctx, r.db, func(tx sqlExecutor) error {
 		for _, id := range ids {
 			if _, err := tx.ExecContext(ctx, `
 					UPDATE thread_inputs
@@ -961,7 +964,7 @@ func (r *ThreadInputRepo) RequeuePendingSteeringForExecution(ctx context.Context
 		return nil, nil
 	}
 	var requeued []models.ThreadInput
-	err := withImmediateTx(ctx, r.db, func(tx SQLExecutor) error {
+	err := withImmediateTx(ctx, r.db, func(tx sqlExecutor) error {
 		inputs, err := r.listWithExecutor(ctx, tx, `WHERE input_mode = 'steering' AND input_status = 'pending' AND run_execution_id = ?
 			AND NOT EXISTS (
 				SELECT 1 FROM thread_input_provider_steering provider_steering
@@ -1019,23 +1022,23 @@ func (r *ThreadInputRepo) claimQueuedForTaskExecution(ctx context.Context, input
 	}
 	defer unlockParent()
 	var claimedEffort string
-	err = withImmediateTx(ctx, r.db, func(dbexec SQLExecutor) error {
+	err = withImmediateTx(ctx, r.db, func(dbexec sqlExecutor) error {
 		promoted, err := scanThreadInput(dbexec.QueryRowContext(ctx, `SELECT `+threadInputSelectColumns+` FROM thread_inputs WHERE id = ?`, inputID))
 		if err == sql.ErrNoRows {
-			if _, guarded := activeLaneExpectedState(ctx, exec.TaskID); guarded {
-				return fmt.Errorf("%w: %s", ErrActiveLaneTaskChanged, exec.TaskID)
+			if _, guarded := persistence.ActiveLaneExpectedState(ctx, exec.TaskID); guarded {
+				return fmt.Errorf("%w: %s", persistence.ErrActiveLaneTaskChanged, exec.TaskID)
 			}
-			return ErrInputNotPending
+			return persistence.ErrInputNotPending
 		}
 		if err != nil {
 			return fmt.Errorf("loading queued input before claim: %w", err)
 		}
 		exec.PromptSent = promoted.Content
 		if promoted.Scope != models.ThreadInputScopeTask || promoted.TaskID != exec.TaskID || promoted.InputMode != models.ThreadInputModeQueued || promoted.InputStatus != models.ThreadInputPending {
-			if _, guarded := activeLaneExpectedState(ctx, exec.TaskID); guarded {
-				return fmt.Errorf("%w: %s", ErrActiveLaneTaskChanged, exec.TaskID)
+			if _, guarded := persistence.ActiveLaneExpectedState(ctx, exec.TaskID); guarded {
+				return fmt.Errorf("%w: %s", persistence.ErrActiveLaneTaskChanged, exec.TaskID)
 			}
-			return ErrInputNotPending
+			return persistence.ErrInputNotPending
 		}
 		if exec.TaskID == "" {
 			return fmt.Errorf("execution task id is required")
@@ -1046,7 +1049,7 @@ func (r *ThreadInputRepo) claimQueuedForTaskExecution(ctx context.Context, input
 			FROM tasks
 			WHERE id = ? AND project_id = ?`, exec.TaskID, promoted.ProjectID).Scan(&surfaceOK); err != nil {
 			if err == sql.ErrNoRows {
-				return ErrInputNotPending
+				return persistence.ErrInputNotPending
 			}
 			return fmt.Errorf("validating queued input task surface: %w", err)
 		}
@@ -1057,7 +1060,7 @@ func (r *ThreadInputRepo) claimQueuedForTaskExecution(ctx context.Context, input
 			}
 			if (currentAgentID.Valid != (expectedAgentID != nil)) ||
 				(currentAgentID.Valid && currentAgentID.String != *expectedAgentID) {
-				return ErrTaskModelChanged
+				return persistence.ErrTaskModelChanged
 			}
 			claimedEffort, err = modelEffort(ctx, dbexec, exec.TaskID, *agent)
 			if err != nil {
@@ -1069,14 +1072,14 @@ func (r *ThreadInputRepo) claimQueuedForTaskExecution(ctx context.Context, input
 			return fmt.Errorf("checking active task execution before queued claim: %w", err)
 		}
 		if activeCount > 0 {
-			if _, guarded := activeLaneExpectedState(ctx, exec.TaskID); guarded {
-				return fmt.Errorf("%w: %s", ErrActiveLaneTaskChanged, exec.TaskID)
+			if _, guarded := persistence.ActiveLaneExpectedState(ctx, exec.TaskID); guarded {
+				return fmt.Errorf("%w: %s", persistence.ErrActiveLaneTaskChanged, exec.TaskID)
 			}
-			return ErrActiveTurnChanged
+			return persistence.ErrActiveTurnChanged
 		}
 		var taskAdmissionPredicate = `status NOT IN ('running', 'queued')`
 		args := []any{exec.TaskID}
-		if expected, guarded := activeLaneExpectedState(ctx, exec.TaskID); guarded {
+		if expected, guarded := persistence.ActiveLaneExpectedState(ctx, exec.TaskID); guarded {
 			taskAdmissionPredicate = `category = ? AND status = ?`
 			args = append(args, expected.ExpectedCategory, expected.ExpectedStatus)
 		}
@@ -1086,10 +1089,10 @@ func (r *ThreadInputRepo) claimQueuedForTaskExecution(ctx context.Context, input
 			WHERE id = ? AND `+taskAdmissionPredicate+`
 			  AND NOT EXISTS (SELECT 1 FROM automation_task_run_reservations r WHERE r.task_id = tasks.id)`, args...).Scan(&surfaceOK); err != nil {
 			if err == sql.ErrNoRows {
-				if _, guarded := activeLaneExpectedState(ctx, exec.TaskID); guarded {
-					return fmt.Errorf("%w: %s", ErrActiveLaneTaskChanged, exec.TaskID)
+				if _, guarded := persistence.ActiveLaneExpectedState(ctx, exec.TaskID); guarded {
+					return fmt.Errorf("%w: %s", persistence.ErrActiveLaneTaskChanged, exec.TaskID)
 				}
-				return ErrInputNotPending
+				return persistence.ErrInputNotPending
 			}
 			return fmt.Errorf("checking task admission before queued claim: %w", err)
 		}
@@ -1102,7 +1105,7 @@ func (r *ThreadInputRepo) claimQueuedForTaskExecution(ctx context.Context, input
 		}
 		changed, _ := res.RowsAffected()
 		if changed == 0 {
-			return ErrInputNotPending
+			return persistence.ErrInputNotPending
 		}
 		if _, err := dbexec.ExecContext(ctx, `
 			UPDATE tasks
@@ -1175,7 +1178,7 @@ func (r *ThreadInputRepo) claimQueuedForTaskExecution(ctx context.Context, input
 		}
 		changed, _ = res.RowsAffected()
 		if changed == 0 {
-			return ErrInputNotPending
+			return persistence.ErrInputNotPending
 		}
 		return retargetRemainingQueuedInputGuards(ctx, dbexec, promoted, exec.ID)
 	})
@@ -1188,10 +1191,10 @@ func (r *ThreadInputRepo) ClaimQueuedForChatExecution(ctx context.Context, input
 	if task == nil || exec == nil {
 		return fmt.Errorf("task and execution are required")
 	}
-	return withImmediateTx(ctx, r.db, func(tx SQLExecutor) error {
+	return withImmediateTx(ctx, r.db, func(tx sqlExecutor) error {
 		promoted, err := scanThreadInput(tx.QueryRowContext(ctx, `SELECT `+threadInputSelectColumns+` FROM thread_inputs WHERE id = ?`, inputID))
 		if err == sql.ErrNoRows {
-			return ErrInputNotPending
+			return persistence.ErrInputNotPending
 		}
 		if err != nil {
 			return fmt.Errorf("loading queued chat input before claim: %w", err)
@@ -1223,25 +1226,25 @@ func (r *ThreadInputRepo) ClaimQueuedForChatExecution(ctx context.Context, input
 
 		if slackContext != nil {
 			slackContext.TaskID = task.ID
-			if err := r.slackTaskContextRepo.UpsertWithExecutor(ctx, tx, slackContext); err != nil {
+			if err := r.slackTaskContextRepo.upsertWithExecutor(ctx, tx, slackContext); err != nil {
 				return fmt.Errorf("creating queued slack context: %w", err)
 			}
 		}
 		if emailContext != nil {
 			emailContext.TaskID = task.ID
-			if err := r.emailTaskContextRepo.UpsertWithExecutor(ctx, tx, emailContext); err != nil {
+			if err := r.emailTaskContextRepo.upsertWithExecutor(ctx, tx, emailContext); err != nil {
 				return fmt.Errorf("creating queued email context: %w", err)
 			}
 		}
 
 		if discordContext != nil {
 			discordContext.TaskID = task.ID
-			if err := r.discordTaskContextRepo.UpsertWithExecutor(ctx, tx, discordContext); err != nil {
+			if err := r.discordTaskContextRepo.upsertWithExecutor(ctx, tx, discordContext); err != nil {
 				return fmt.Errorf("creating queued discord context: %w", err)
 			}
 		}
 		if promoted.Source == models.TaskOriginX {
-			if err := r.xTaskContextRepo.UpsertWithExecutor(ctx, tx, &models.XTaskContext{TaskID: task.ID, ProjectID: promoted.ProjectID, AccountID: promoted.XAccountID, ConversationID: promoted.XConversationID, ReplyToTweetID: promoted.XReplyToTweetID, XUserID: promoted.XUserID, Username: promoted.XUsername}); err != nil {
+			if err := r.xTaskContextRepo.upsertWithExecutor(ctx, tx, &models.XTaskContext{TaskID: task.ID, ProjectID: promoted.ProjectID, AccountID: promoted.XAccountID, ConversationID: promoted.XConversationID, ReplyToTweetID: promoted.XReplyToTweetID, XUserID: promoted.XUserID, Username: promoted.XUsername}); err != nil {
 				return fmt.Errorf("creating queued X context: %w", err)
 			}
 		}
@@ -1267,7 +1270,7 @@ func (r *ThreadInputRepo) ClaimQueuedForChatExecution(ctx context.Context, input
 		}
 		changed, _ := res.RowsAffected()
 		if changed == 0 {
-			return ErrInputNotPending
+			return persistence.ErrInputNotPending
 		}
 		return retargetRemainingQueuedInputGuards(ctx, tx, promoted, exec.ID)
 	})
@@ -1292,7 +1295,7 @@ func (r *ThreadInputRepo) EditPending(ctx context.Context, id, content string, t
 			  )
 		RETURNING `+threadInputSelectColumns, content, id, token, token))
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, ErrInputNotPending
+		return nil, persistence.ErrInputNotPending
 	}
 	if err != nil {
 		return nil, fmt.Errorf("editing thread input: %w", err)
@@ -1314,7 +1317,7 @@ func (r *ThreadInputRepo) CancelPending(ctx context.Context, id string) (*models
 			  )
 		RETURNING `+threadInputSelectColumns, id))
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, ErrInputNotPending
+		return nil, persistence.ErrInputNotPending
 	}
 	if err != nil {
 		return nil, fmt.Errorf("cancelling thread input: %w", err)
@@ -1476,7 +1479,7 @@ func (r *ThreadInputRepo) SetEditHold(ctx context.Context, id string, hold bool,
 			  )
 		RETURNING `+threadInputSelectColumns, hold, hold, hold, token, id, hold, hold, token))
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, ErrInputNotPending
+		return nil, persistence.ErrInputNotPending
 	}
 	if err != nil {
 		return nil, fmt.Errorf("editing thread input: %w", err)
@@ -1502,7 +1505,7 @@ func (r *ThreadInputRepo) RenewEditHold(ctx context.Context, id string, tokens .
 		return err
 	}
 	if n == 0 {
-		return ErrInputNotPending
+		return persistence.ErrInputNotPending
 	}
 	return nil
 }
@@ -1510,7 +1513,7 @@ func (r *ThreadInputRepo) RenewEditHold(ctx context.Context, id string, tokens .
 // ReleaseExpiredEditHolds runs independently of the editor and queue consumers.
 func (r *ThreadInputRepo) ReleaseExpiredEditHolds(ctx context.Context) ([]models.ThreadInput, error) {
 	var inputs []models.ThreadInput
-	err := withImmediateTx(ctx, r.db, func(tx SQLExecutor) error {
+	err := withImmediateTx(ctx, r.db, func(tx sqlExecutor) error {
 		var err error
 		inputs, err = r.listWithExecutor(ctx, tx, `WHERE edit_hold = 1 AND (edit_hold_until IS NULL OR edit_hold_until <= datetime('now'))`)
 		if err != nil {

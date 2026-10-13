@@ -23,6 +23,7 @@ import (
 	"github.com/openvibely/openvibely/internal/lifecycle"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/internal/testutil"
@@ -3023,7 +3024,7 @@ func TestQueuedTaskFollowupRoutesMemoryFromFollowupMessageAfterInitialMemoryTask
 	require.NoError(t, h.threadInputRepo.CreateQueued(ctx, followup))
 	// The initial turn's finalization drains queued inputs through this same function and may claim
 	// the followup first on a slow runner; either path starts the same turn.
-	if err := h.startQueuedTaskThreadInput(ctx, *followup); err != nil && !errors.Is(err, repository.ErrInputNotPending) {
+	if err := h.startQueuedTaskThreadInput(ctx, *followup); err != nil && !errors.Is(err, persistence.ErrInputNotPending) {
 		require.NoError(t, err)
 	}
 	require.Eventually(t, func() bool { return mock.CallCount() == 2 }, 2*time.Second, 25*time.Millisecond)
@@ -4424,7 +4425,7 @@ func TestPreparePendingSteeringInputsPreservesCurrentReasoningContent(t *testing
 		ex.PromptSent = "active prompt"
 		ex.IsFollowup = true
 	})
-	require.NoError(t, h.execRepo.UpdateReasoningContent(ctx, exec.ID, "first private reasoning plus detail"))
+	require.NoError(t, h.execRepo.(*repository.ExecutionRepo).UpdateReasoningContent(ctx, exec.ID, "first private reasoning plus detail"))
 
 	steering := &models.ThreadInput{
 		Scope:          models.ThreadInputScopeTask,
@@ -4460,7 +4461,7 @@ func TestPreparePendingSteeringInputsPreservesCurrentReasoningContent(t *testing
 	require.Equal(t, "assistant answer", params.ChatHistory[1].Output)
 	require.Equal(t, "first private reasoning plus detail", params.ChatHistory[1].ReasoningContent)
 
-	require.NoError(t, h.execRepo.UpdateReasoningContent(ctx, exec.ID, "final private reasoning"))
+	require.NoError(t, h.execRepo.(*repository.ExecutionRepo).UpdateReasoningContent(ctx, exec.ID, "final private reasoning"))
 	require.NoError(t, h.persistSteeringReplayHistory(ctx, params, "assistant answerfinal answer"))
 	stored, err := h.execRepo.GetByID(ctx, exec.ID)
 	require.NoError(t, err)
@@ -6533,7 +6534,7 @@ func TestCompleteWithSuccessDefersStartupSyncPublicationForPendingSteering(t *te
 
 	outcome, err := h.completeWithSuccessWithPRReconciliation(ctx, exec.ID, task.ID, "waiting for steering", task.WorktreePath, 0, 1, true)
 	require.NoError(t, err)
-	require.Equal(t, repository.CompleteSuccessPendingSteering, outcome)
+	require.Equal(t, persistence.CompleteSuccessPendingSteering, outcome)
 	require.Zero(t, publishCalls)
 	reloaded, err := prRepo.GetByTaskID(ctx, task.ID)
 	require.NoError(t, err)
@@ -7959,7 +7960,7 @@ func TestProcessStreamingResponse_TaskFollowupRateLimitFailurePreservesHistory(t
 		ex.IsFollowup = true
 	})
 	streamedPrefix := "Investigating prior changes..."
-	if err := h.execRepo.UpdateOutput(ctx, failedFollowup.ID, streamedPrefix); err != nil {
+	if err := h.execRepo.(*repository.ExecutionRepo).UpdateOutput(ctx, failedFollowup.ID, streamedPrefix); err != nil {
 		t.Fatalf("seed streamed output: %v", err)
 	}
 
@@ -9121,7 +9122,7 @@ func TestQueuedFailedRetryPreservesSourceAndExcludesItOnPromotion(t *testing.T) 
 	require.NoError(t, h.taskRepo.UpdateStatus(ctx, task.ID, models.StatusFailed))
 	// Retrying schedules a background promotion that may claim the input as soon
 	// as the task leaves the queued state. Either claimant starts the same retry.
-	if err := h.startQueuedTaskThreadInput(ctx, *queued); !errors.Is(err, repository.ErrInputNotPending) {
+	if err := h.startQueuedTaskThreadInput(ctx, *queued); !errors.Is(err, persistence.ErrInputNotPending) {
 		require.NoError(t, err)
 	}
 	require.Eventually(t, func() bool { return mock.CallCount() == 1 }, 2*time.Second, 25*time.Millisecond)
@@ -9194,11 +9195,11 @@ func TestCompleteExecutionSuccessAtomicBoardState(t *testing.T) {
 			if scenario == "cancelled" {
 				require.NoError(t, h.execRepo.Complete(ctx, execution.ID, models.ExecCancelled, "", "cancelled", 0, 0))
 			}
-			var outcome repository.CompleteSuccessOutcome
+			var outcome persistence.CompleteSuccessOutcome
 			var err error
 			if scenario == "pending steering" || scenario == "cancelled" {
 				// Exercise the transaction guard itself, beyond handler readiness.
-				outcome, err = h.taskRepo.CompleteExecutionSuccess(ctx, h.execRepo, execution.ID, "done", 1, 2)
+				outcome, err = h.taskRepo.CompleteExecutionSuccess(ctx, execution.ID, "done", 1, 2)
 			} else {
 				outcome, err = h.completeWithSuccessWithPRReconciliation(ctx, execution.ID, task.ID, "done", "", 1, 2, false)
 			}
@@ -9213,7 +9214,7 @@ func TestCompleteExecutionSuccessAtomicBoardState(t *testing.T) {
 			require.NoError(t, err)
 			switch scenario {
 			case "success", "chat":
-				require.Equal(t, repository.CompleteSuccessCompleted, outcome)
+				require.Equal(t, persistence.CompleteSuccessCompleted, outcome)
 				require.Equal(t, models.ExecCompleted, stored.Status)
 				require.Equal(t, models.StatusCompleted, storedTask.Status)
 				if scenario == "chat" {
@@ -9226,12 +9227,12 @@ func TestCompleteExecutionSuccessAtomicBoardState(t *testing.T) {
 				require.Equal(t, models.StatusRunning, storedTask.Status)
 				require.Equal(t, models.CategoryActive, storedTask.Category)
 				if scenario == "cancelled" {
-					require.Equal(t, repository.CompleteSuccessAlreadyTerminal, outcome)
+					require.Equal(t, persistence.CompleteSuccessAlreadyTerminal, outcome)
 					require.Equal(t, models.ExecCancelled, stored.Status)
 				} else {
 					require.Equal(t, models.ExecRunning, stored.Status)
 					if scenario == "pending steering" {
-						require.Equal(t, repository.CompleteSuccessPendingSteering, outcome)
+						require.Equal(t, persistence.CompleteSuccessPendingSteering, outcome)
 					}
 				}
 			}

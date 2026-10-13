@@ -10,9 +10,8 @@ import (
 
 	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 )
-
-var ErrAutomationTriggerOwned = errors.New("automation trigger schedule is already owned")
 
 type AutomationRepo struct {
 	db          *sql.DB
@@ -244,22 +243,13 @@ func (r *AutomationRepo) GetRuntimeAutomationCard(ctx context.Context, projectID
 	return &card, nil
 }
 
-type AutomationCardListFilter struct {
-	Search         string
-	LifecycleState string
-	HealthState    string
-	AutomationType string
-	Adapter        string
-	Sort           string
-}
-
 // ListPortfolioCardsPage returns one bounded, project-scoped portfolio page.
 // Search is limited to the metadata rendered by automationCardSearchText.
 func (r *AutomationRepo) ListPortfolioCardsPage(ctx context.Context, projectID string, limit, offset int, search string) ([]models.AutomationCard, error) {
-	return r.ListPortfolioCardsPageFiltered(ctx, projectID, limit, offset, AutomationCardListFilter{Search: search})
+	return r.ListPortfolioCardsPageFiltered(ctx, projectID, limit, offset, persistence.AutomationCardListFilter{Search: search})
 }
 
-func (r *AutomationRepo) ListPortfolioCardsPageFiltered(ctx context.Context, projectID string, limit, offset int, filter AutomationCardListFilter) ([]models.AutomationCard, error) {
+func (r *AutomationRepo) ListPortfolioCardsPageFiltered(ctx context.Context, projectID string, limit, offset int, filter persistence.AutomationCardListFilter) ([]models.AutomationCard, error) {
 	limit, offset = normalizeCardPageArgs(limit, offset)
 	query := `SELECT
 		a.id, a.project_id, a.stable_key, a.name, a.description, a.automation_type,
@@ -462,7 +452,7 @@ func (r *AutomationRepo) PublishRegistered(ctx context.Context, in models.Automa
 				return nil, false, fmt.Errorf("checking trigger ownership: %w", err)
 			}
 			if err == nil && ownerAutomationID != a.ID {
-				return nil, false, fmt.Errorf("%w: %s", ErrAutomationTriggerOwned, binding.ResourceID)
+				return nil, false, fmt.Errorf("%w: %s", persistence.ErrAutomationTriggerOwned, binding.ResourceID)
 			}
 			ownershipState := string(effectiveLifecycle)
 			if ownershipState == string(models.AutomationActive) {
@@ -522,7 +512,7 @@ func (r *AutomationRepo) PublishRegistered(ctx context.Context, in models.Automa
 	return def, false, nil
 }
 
-func deleteObsoleteOwnedAutomationSchedules(ctx context.Context, exec SQLExecutor, projectID, automationID, retainedVersionID string) error {
+func deleteObsoleteOwnedAutomationSchedules(ctx context.Context, exec sqlExecutor, projectID, automationID, retainedVersionID string) error {
 	_, err := exec.ExecContext(ctx, `DELETE FROM schedules
 		WHERE id IN (
 			SELECT owner.schedule_id
@@ -687,4 +677,36 @@ func validateAutomationResource(ctx context.Context, q queryer, projectID, resou
 		return fmt.Errorf("automation resource %q belongs to another project", resourceID)
 	}
 	return nil
+}
+
+// ProjectTaskResource loads the configuration of a task that belongs to the
+// project. found is false when the task is missing or owned by another project.
+func (r *AutomationRepo) ProjectTaskResource(ctx context.Context, projectID, taskID string) (persistence.AutomationTaskResource, bool, error) {
+	var resource persistence.AutomationTaskResource
+	err := r.db.QueryRowContext(ctx, `SELECT prompt, category, priority FROM tasks WHERE id = ? AND project_id = ?`, taskID, projectID).
+		Scan(&resource.Prompt, &resource.Category, &resource.Priority)
+	if errors.Is(err, sql.ErrNoRows) {
+		return persistence.AutomationTaskResource{}, false, nil
+	}
+	if err != nil {
+		return persistence.AutomationTaskResource{}, false, err
+	}
+	return resource, true, nil
+}
+
+// ProjectScheduleResource loads a schedule whose task belongs to the project.
+// found is false when the schedule is missing or owned by another project.
+func (r *AutomationRepo) ProjectScheduleResource(ctx context.Context, projectID, scheduleID string) (persistence.AutomationScheduleResource, bool, error) {
+	var resource persistence.AutomationScheduleResource
+	err := r.db.QueryRowContext(ctx, `SELECT s.task_id, s.run_at, s.repeat_type, s.repeat_interval, s.clear_context_on_start
+		FROM schedules s JOIN tasks t ON t.id = s.task_id
+		WHERE s.id = ? AND t.project_id = ?`, scheduleID, projectID).
+		Scan(&resource.TaskID, &resource.RunAt, &resource.RepeatType, &resource.RepeatInterval, &resource.ClearContextOnStart)
+	if errors.Is(err, sql.ErrNoRows) {
+		return persistence.AutomationScheduleResource{}, false, nil
+	}
+	if err != nil {
+		return persistence.AutomationScheduleResource{}, false, err
+	}
+	return resource, true, nil
 }

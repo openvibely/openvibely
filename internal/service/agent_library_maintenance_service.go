@@ -16,7 +16,7 @@ import (
 	"github.com/openvibely/openvibely/internal/agentlibrary"
 	"github.com/openvibely/openvibely/internal/builtinskills"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence"
 )
 
 const agentLibraryMaintenanceTaskTitle = "System: Skill Library Maintenance"
@@ -54,10 +54,10 @@ type declarationRootSyncResult struct {
 }
 
 type AgentLibraryMaintenanceService struct {
-	taskRepo       *repository.TaskRepo
-	scheduleRepo   *repository.ScheduleRepo
-	agentRepo      *repository.AgentRepo
-	lifecycleRepo  *repository.LifecycleRepo
+	taskRepo       persistence.TaskStore
+	scheduleRepo   persistence.ScheduleStore
+	agentRepo      persistence.AgentStore
+	lifecycleRepo  persistence.LifecycleStore
 	agentsRootPath string
 
 	declarationMu          sync.Mutex
@@ -70,11 +70,11 @@ type AgentLibraryMaintenanceService struct {
 	declarationParses      atomic.Uint64
 }
 
-func NewAgentLibraryMaintenanceService(taskRepo *repository.TaskRepo, scheduleRepo *repository.ScheduleRepo, agentRepo *repository.AgentRepo) *AgentLibraryMaintenanceService {
+func NewAgentLibraryMaintenanceService(taskRepo persistence.TaskStore, scheduleRepo persistence.ScheduleStore, agentRepo persistence.AgentStore) *AgentLibraryMaintenanceService {
 	return &AgentLibraryMaintenanceService{taskRepo: taskRepo, scheduleRepo: scheduleRepo, agentRepo: agentRepo}
 }
 
-func (s *AgentLibraryMaintenanceService) SetLifecycleRepo(repo *repository.LifecycleRepo) {
+func (s *AgentLibraryMaintenanceService) SetLifecycleRepo(repo persistence.LifecycleStore) {
 	if s != nil {
 		s.lifecycleRepo = repo
 	}
@@ -376,7 +376,7 @@ func (s *AgentLibraryMaintenanceService) EnsureProject(ctx context.Context, proj
 			CreatedVia:        models.TaskOriginWeb,
 		}
 		if err := s.taskRepo.Create(ctx, task); err != nil {
-			if err != repository.ErrDuplicateTask {
+			if err != persistence.ErrDuplicateTask {
 				return fmt.Errorf("create skill library maintenance task: %w", err)
 			}
 			task, err = s.taskRepo.GetByProjectAndTitle(ctx, projectID, agentLibraryMaintenanceTaskTitle)

@@ -22,7 +22,7 @@ import (
 	"github.com/openvibely/openvibely/internal/llm/tokenestimate"
 	llmusage "github.com/openvibely/openvibely/internal/llm/usage"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence"
 )
 
 // HTTPDoer is an interface for making HTTP requests.
@@ -79,13 +79,13 @@ var retryAfter = time.After
 
 // Adapter encapsulates Ollama provider logic.
 type Adapter struct {
-	execRepo   *repository.ExecutionRepo
+	execRepo   persistence.ExecutionStore
 	streamHub  llmstream.ExecutionStreamPublisher
 	httpClient HTTPDoer
 }
 
 // New creates a new Ollama adapter.
-func New(execRepo *repository.ExecutionRepo, streamHub llmstream.ExecutionStreamPublisher) *Adapter {
+func New(execRepo persistence.ExecutionStore, streamHub llmstream.ExecutionStreamPublisher) *Adapter {
 	return &Adapter{
 		execRepo:   execRepo,
 		streamHub:  streamHub,

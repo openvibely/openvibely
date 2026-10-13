@@ -80,7 +80,7 @@ func TestWithImmediateTxCommitUsesCallerContext(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx, cancel := context.WithCancel(context.Background())
 
-	err := withImmediateTx(ctx, db, func(SQLExecutor) error {
+	err := withImmediateTx(ctx, db, func(sqlExecutor) error {
 		cancel()
 		return nil
 	})

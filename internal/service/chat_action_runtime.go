@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -17,7 +16,7 @@ import (
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	llmmixture "github.com/openvibely/openvibely/internal/llm/mixture"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence"
 )
 
 func supportsRuntimeChatActionTools(agent models.LLMConfig) bool {
@@ -36,7 +35,7 @@ func supportsRuntimeChatActionTools(agent models.LLMConfig) bool {
 // SupportsRuntimeChatActionTools reports whether the concrete transport for a
 // model config can receive and execute request-scoped runtime tools. Virtual
 // mixtures inherit this capability only from their configured aggregator.
-func SupportsRuntimeChatActionTools(ctx context.Context, repo *repository.LLMConfigRepo, agent models.LLMConfig) bool {
+func SupportsRuntimeChatActionTools(ctx context.Context, repo persistence.LLMConfigStore, agent models.LLMConfig) bool {
 	if agent.Provider != models.ProviderMixture {
 		return supportsRuntimeChatActionTools(agent)
 	}
@@ -99,11 +98,11 @@ type channelTaskActionHandlerOptions struct {
 	ProjectID           string
 	TaskSvc             *TaskService
 	SwarmSvc            *SwarmService
-	TaskRepo            *repository.TaskRepo
-	ExecRepo            *repository.ExecutionRepo
-	ThreadInputRepo     *repository.ThreadInputRepo
+	TaskRepo            persistence.TaskStore
+	ExecRepo            persistence.ExecutionStore
+	ThreadInputRepo     persistence.ThreadInputStore
 	ExecutionStreamHub  *events.ExecutionStreamHub
-	LLMConfigRepo       *repository.LLMConfigRepo
+	LLMConfigRepo       persistence.LLMConfigStore
 	Collector           *channelActionSummaryCollector
 	PrepareTaskCreation func(context.Context, *TaskCreationRequest) error
 	CreatePreparedTask  func(context.Context, TaskCreationRequest, []models.LLMConfig) ([]models.Task, string, bool, error)
@@ -114,7 +113,7 @@ type channelTaskActionHandlerOptions struct {
 
 type channelGoalActionHandlerOptions struct {
 	ProjectID   string
-	TaskRepo    *repository.TaskRepo
+	TaskRepo    persistence.TaskStore
 	TaskGoalSvc *TaskGoalService
 }
 
@@ -124,12 +123,12 @@ type channelThreadActionHandlerOptions struct {
 	Surface                  chatcontrol.Surface
 	Source                   string
 	ActorID                  string
-	TaskRepo                 *repository.TaskRepo
-	ExecRepo                 *repository.ExecutionRepo
-	ThreadInputRepo          *repository.ThreadInputRepo
-	LLMConfigRepo            *repository.LLMConfigRepo
-	SettingsRepo             *repository.SettingsRepo
-	CustomPersonalityRepo    *repository.CustomPersonalityRepo
+	TaskRepo                 persistence.TaskStore
+	ExecRepo                 persistence.ExecutionStore
+	ThreadInputRepo          persistence.ThreadInputStore
+	LLMConfigRepo            persistence.LLMConfigStore
+	SettingsRepo             persistence.SettingsStore
+	CustomPersonalityRepo    persistence.CustomPersonalityStore
 	ChannelTaskRunner        ChannelTaskRunner
 	RuntimeToolsForTask      func(taskID string) *llmcontracts.RuntimeTools
 	QueuedTaskThreadPromoter func(taskID string)
@@ -145,7 +144,7 @@ type channelThreadActionHandlerOptions struct {
 type channelContextModeActionHandlerOptions struct {
 	ChannelDisplayName string
 	ProjectID          string
-	ProjectRepo        *repository.ProjectRepo
+	ProjectRepo        persistence.ProjectStore
 }
 
 type GitHubProjectCloneProvider interface {
@@ -196,8 +195,8 @@ type UpdateProjectSettingsRuntimeOptions struct {
 	ProjectID          string
 	Input              json.RawMessage
 	ProjectSvc         *ProjectService
-	ProjectRepo        *repository.ProjectRepo
-	LLMConfigRepo      *repository.LLMConfigRepo
+	ProjectRepo        persistence.ProjectStore
+	LLMConfigRepo      persistence.LLMConfigStore
 	WorkerSvc          *WorkerService
 	DispatchQueuedWork func()
 }
@@ -227,9 +226,9 @@ type updateProjectSettingsWorkerLimit struct {
 
 type channelProjectActionHandlerOptions struct {
 	ProjectID     string
-	ProjectRepo   *repository.ProjectRepo
+	ProjectRepo   persistence.ProjectStore
 	ProjectSvc    *ProjectService
-	LLMConfigRepo *repository.LLMConfigRepo
+	LLMConfigRepo persistence.LLMConfigStore
 	WorkerSvc     *WorkerService
 	CreateProject CreateGitHubProjectRuntimeOptions
 	// SwitchProject persists the active project selection for the channel identity.
@@ -244,7 +243,7 @@ type AlertRuntimeOptions struct {
 	CallerTaskID              string
 	Source                    string
 	AlertSvc                  *AlertService
-	TaskRepo                  *repository.TaskRepo
+	TaskRepo                  persistence.TaskStore
 	PrepareImplementationTask func(context.Context, *models.AlertImplementationTaskInput) error
 }
 
@@ -281,7 +280,7 @@ type telegramAuthCountByProjectStore interface {
 }
 
 type channelTargetSummaryStore interface {
-	SummarizeByProject(ctx context.Context, projectID string) (repository.ChannelTargetProjectSummary, error)
+	SummarizeByProject(ctx context.Context, projectID string) (persistence.ChannelTargetProjectSummary, error)
 }
 
 type CreateAgentRuntimeInput struct {
@@ -300,9 +299,9 @@ type CreateAgentRuntimeInput struct {
 type CreateAgentRuntimeOptions struct {
 	ProjectID              string
 	Input                  CreateAgentRuntimeInput
-	AgentRepo              *repository.AgentRepo
-	LLMConfigRepo          *repository.LLMConfigRepo
-	ProjectRepo            *repository.ProjectRepo
+	AgentRepo              persistence.AgentStore
+	LLMConfigRepo          persistence.LLMConfigStore
+	ProjectRepo            persistence.ProjectStore
 	Materialize            func(context.Context, *models.Agent) error
 	CleanupMaterialization func(context.Context, *models.Agent) error
 }
@@ -338,9 +337,9 @@ type UpdateAgentRuntimeInput struct {
 type UpdateAgentRuntimeOptions struct {
 	ProjectID     string
 	Input         UpdateAgentRuntimeInput
-	AgentRepo     *repository.AgentRepo
-	LLMConfigRepo *repository.LLMConfigRepo
-	ProjectRepo   *repository.ProjectRepo
+	AgentRepo     persistence.AgentStore
+	LLMConfigRepo persistence.LLMConfigStore
+	ProjectRepo   persistence.ProjectStore
 	Materialize   func(context.Context, *models.Agent) error
 }
 
@@ -361,31 +360,31 @@ type updateAgentRuntimeResponse struct {
 type channelUtilityActionHandlerOptions struct {
 	ProjectID                 string
 	CallerTaskID              string
-	TaskRepo                  *repository.TaskRepo
-	ScheduleRepo              *repository.ScheduleRepo
+	TaskRepo                  persistence.TaskStore
+	ScheduleRepo              persistence.ScheduleStore
 	AutomationGraphSvc        *AutomationGraphService
 	AutomationDraftSvc        *AutomationDraftService
 	AutomationCompiler        *AutomationCompiler
 	WorkerSvc                 *WorkerService
-	LLMConfigRepo             *repository.LLMConfigRepo
-	AgentRepo                 *repository.AgentRepo
-	SettingsRepo              *repository.SettingsRepo
-	CustomPersonalityRepo     *repository.CustomPersonalityRepo
-	ProjectRepo               *repository.ProjectRepo
+	LLMConfigRepo             persistence.LLMConfigStore
+	AgentRepo                 persistence.AgentStore
+	SettingsRepo              persistence.SettingsStore
+	CustomPersonalityRepo     persistence.CustomPersonalityStore
+	ProjectRepo               persistence.ProjectStore
 	AlertSvc                  *AlertService
 	UsageAnalyticsSvc         *UsageAnalyticsService
 	UpcomingSvc               *UpcomingService
 	SlackStatus               func(context.Context) (SlackConnectionStatus, error)
-	SlackAuthRepo             *repository.SlackAuthRepo
+	SlackAuthRepo             persistence.SlackAuthStore
 	TelegramRunning           func() bool
 	TelegramAuthRepo          telegramAuthCountByProjectStore
 	DiscordStatus             func(context.Context) (DiscordConnectionStatus, error)
-	DiscordAuthRepo           *repository.DiscordAuthRepo
+	DiscordAuthRepo           persistence.DiscordAuthStore
 	XStatus                   func() XConnectionStatus
-	XAuthRepo                 *repository.XAuthRepo
+	XAuthRepo                 persistence.XAuthStore
 	EmailStatus               func(context.Context) EmailConnectionStatus
-	EmailAuthRepo             *repository.EmailAuthRepo
-	WebhookRepo               *repository.WebhookRepo
+	EmailAuthRepo             persistence.EmailAuthStore
+	WebhookRepo               persistence.WebhookStore
 	ChannelTargets            channelTargetStore
 	PrepareImplementationTask func(context.Context, *models.AlertImplementationTaskInput) error
 	UnavailableAgentsText     string
@@ -413,20 +412,6 @@ type AutomationTemplateUpdateRuntimeOptions struct {
 	AutomationGraphSvc *AutomationGraphService
 	AutomationDraftSvc *AutomationDraftService
 	AutomationCompiler *AutomationCompiler
-}
-
-func usageAnalyticsServiceFromRepos(existing *UsageAnalyticsService, execRepo *repository.ExecutionRepo, llmConfigRepo *repository.LLMConfigRepo) *UsageAnalyticsService {
-	if existing != nil {
-		return existing
-	}
-	if execRepo == nil {
-		return nil
-	}
-	db := execRepo.DB()
-	if db == nil {
-		return nil
-	}
-	return NewUsageAnalyticsService(repository.NewUsageRepo(db), llmConfigRepo)
 }
 
 func swarmFromTaskService(taskSvc *TaskService) *SwarmService {
@@ -460,7 +445,7 @@ type cancelTaskRuntimeResponse struct {
 	Message          string              `json:"message"`
 }
 
-func taskRepoFromChannelTaskOptions(opts channelTaskActionHandlerOptions) *repository.TaskRepo {
+func taskRepoFromChannelTaskOptions(opts channelTaskActionHandlerOptions) persistence.TaskStore {
 	if opts.TaskRepo != nil {
 		return opts.TaskRepo
 	}
@@ -681,7 +666,7 @@ func buildChannelThreadActionHandlers(opts channelThreadActionHandlerOptions) ma
 	return handlers
 }
 
-func runChannelViewTaskThread(ctx context.Context, taskRepo *repository.TaskRepo, execRepo *repository.ExecutionRepo, projectID string, req ViewThreadRequest) (string, error) {
+func runChannelViewTaskThread(ctx context.Context, taskRepo persistence.TaskStore, execRepo persistence.ExecutionStore, projectID string, req ViewThreadRequest) (string, error) {
 	if strings.TrimSpace(req.TaskID) == "" && strings.TrimSpace(req.Title) == "" {
 		return "", fmt.Errorf("view_task_thread requires task_id or title")
 	}
@@ -1038,7 +1023,7 @@ type OutboundTargetPlatformSummary struct {
 	ByKind map[string]int `json:"by_kind"`
 }
 
-func OutboundTargetStatusSummaryFromRepoSummary(summary repository.ChannelTargetProjectSummary) OutboundTargetStatusSummary {
+func OutboundTargetStatusSummaryFromRepoSummary(summary persistence.ChannelTargetProjectSummary) OutboundTargetStatusSummary {
 	out := OutboundTargetStatusSummary{
 		Total:      summary.Total,
 		Configured: summary.Configured,
@@ -1236,7 +1221,7 @@ func channelListChannelsResult(ctx context.Context, opts channelUtilityActionHan
 	return marshalChannelStatusAction(resp)
 }
 
-func channelTargetStatusFromRepoSummary(summary repository.ChannelTargetProjectSummary) channelTargetStatusActionSummary {
+func channelTargetStatusFromRepoSummary(summary persistence.ChannelTargetProjectSummary) channelTargetStatusActionSummary {
 	return channelTargetStatusActionSummary{
 		OutboundTargetStatusSummary: OutboundTargetStatusSummaryFromRepoSummary(summary),
 	}
@@ -1431,7 +1416,7 @@ func marshalChannelAutomationResult(value any) (string, error) {
 	return string(encoded), nil
 }
 
-func buildChannelProjectListResult(ctx context.Context, projectRepo *repository.ProjectRepo, projectID string) string {
+func buildChannelProjectListResult(ctx context.Context, projectRepo persistence.ProjectStore, projectID string) string {
 	selection, err := selectChannelProject(ctx, projectRepo, projectID, "", nil)
 	if err != nil {
 		return "Error retrieving projects: " + err.Error()
@@ -1465,14 +1450,14 @@ type channelProjectSelection struct {
 	AvailableNames []string
 }
 
-func selectChannelProject(ctx context.Context, projectRepo *repository.ProjectRepo, currentProjectID, targetProject string, switchProject func(context.Context, *models.Project) error) (channelProjectSelection, error) {
+func selectChannelProject(ctx context.Context, projectRepo persistence.ProjectStore, currentProjectID, targetProject string, switchProject func(context.Context, *models.Project) error) (channelProjectSelection, error) {
 	if projectRepo == nil {
 		return channelProjectSelection{}, fmt.Errorf("project repository not configured")
 	}
 	return selectChannelProjectWithList(ctx, projectRepo.List, currentProjectID, targetProject, switchProject)
 }
 
-func selectChannelProjectForSwitch(ctx context.Context, projectRepo *repository.ProjectRepo, targetProject string, switchProject func(context.Context, *models.Project) error) (channelProjectSelection, error) {
+func selectChannelProjectForSwitch(ctx context.Context, projectRepo persistence.ProjectStore, targetProject string, switchProject func(context.Context, *models.Project) error) (channelProjectSelection, error) {
 	if projectRepo == nil {
 		return channelProjectSelection{}, fmt.Errorf("project repository not configured")
 	}
@@ -1639,7 +1624,7 @@ func hasForbiddenProjectSettingsKeys(input json.RawMessage) bool {
 	return false
 }
 
-func applyProjectDefaultModelUpdate(ctx context.Context, repo *repository.LLMConfigRepo, project *models.Project, req UpdateProjectSettingsRuntimeInput) (bool, *models.LLMConfig, string) {
+func applyProjectDefaultModelUpdate(ctx context.Context, repo persistence.LLMConfigStore, project *models.Project, req UpdateProjectSettingsRuntimeInput) (bool, *models.LLMConfig, string) {
 	defaultModel := strings.TrimSpace(req.DefaultModel)
 	defaultModelID := strings.TrimSpace(req.DefaultModelID)
 	if req.ClearDefaultModel {
@@ -1684,7 +1669,7 @@ func applyProjectDefaultModelUpdate(ctx context.Context, repo *repository.LLMCon
 	return changed, model, ""
 }
 
-func resolveRuntimeModelByIDOrExactName(ctx context.Context, repo *repository.LLMConfigRepo, ref string) (*models.LLMConfig, error) {
+func resolveRuntimeModelByIDOrExactName(ctx context.Context, repo persistence.LLMConfigStore, ref string) (*models.LLMConfig, error) {
 	ref = strings.TrimSpace(ref)
 	if ref == "" {
 		return nil, fmt.Errorf("default_model must be nonblank")
@@ -2199,7 +2184,7 @@ func validateRuntimeScopedFilesJSON(raw json.RawMessage, action string) error {
 	return nil
 }
 
-func resolveRuntimeAgentTarget(ctx context.Context, repo *repository.AgentRepo, req UpdateAgentRuntimeInput) (*models.Agent, error) {
+func resolveRuntimeAgentTarget(ctx context.Context, repo persistence.AgentStore, req UpdateAgentRuntimeInput) (*models.Agent, error) {
 	agentID := strings.TrimSpace(req.AgentID)
 	agentName := strings.TrimSpace(req.AgentName)
 	key := strings.TrimSpace(req.Key)
@@ -2238,7 +2223,7 @@ func resolveRuntimeAgentTarget(ctx context.Context, repo *repository.AgentRepo, 
 	return &agents[0], nil
 }
 
-func validateRuntimeAgentUpdateTarget(ctx context.Context, projectRepo *repository.ProjectRepo, currentProjectID, assertedProjectID string, agent *models.Agent) error {
+func validateRuntimeAgentUpdateTarget(ctx context.Context, projectRepo persistence.ProjectStore, currentProjectID, assertedProjectID string, agent *models.Agent) error {
 	if agent == nil {
 		return fmt.Errorf("agent target not found")
 	}
@@ -2341,16 +2326,16 @@ func runtimeAgentCreateError(err error) string {
 	if err == nil {
 		return ""
 	}
-	if err == repository.ErrAgentNameRequired {
+	if err == persistence.ErrAgentNameRequired {
 		return "agent name is required"
 	}
-	if err == repository.ErrSelectableAgentNameAlreadyExists {
+	if err == persistence.ErrSelectableAgentNameAlreadyExists {
 		return "enabled selectable primary agent name already exists"
 	}
 	return err.Error()
 }
 
-func resolveRuntimeAgentModel(ctx context.Context, repo *repository.LLMConfigRepo, requested string) (string, error) {
+func resolveRuntimeAgentModel(ctx context.Context, repo persistence.LLMConfigStore, requested string) (string, error) {
 	model := strings.TrimSpace(requested)
 	if model == "" || strings.EqualFold(model, "inherit") {
 		return "inherit", nil
@@ -2514,7 +2499,7 @@ func channelProjectAvailableNames(projects []models.Project) []string {
 	return names
 }
 
-func switchChannelProjectResult(ctx context.Context, projectRepo *repository.ProjectRepo, targetProject string, switchProject func(context.Context, *models.Project) error) (string, error) {
+func switchChannelProjectResult(ctx context.Context, projectRepo persistence.ProjectStore, targetProject string, switchProject func(context.Context, *models.Project) error) (string, error) {
 	if targetProject == "" {
 		return "Project switch requires a project name or ID.", nil
 	}
@@ -2645,7 +2630,7 @@ func channelScheduleRepeatDescription(repeatType models.RepeatType, interval int
 	return FormatRepeatPattern(repeatType, interval)
 }
 
-func channelGetPersonalityResult(ctx context.Context, settingsRepo *repository.SettingsRepo) string {
+func channelGetPersonalityResult(ctx context.Context, settingsRepo persistence.SettingsStore) string {
 	if settingsRepo == nil {
 		return "Current personality: default (no personality set)"
 	}
@@ -2659,7 +2644,7 @@ func channelGetPersonalityResult(ctx context.Context, settingsRepo *repository.S
 	return fmt.Sprintf("Current personality: %s", current)
 }
 
-func channelListPersonalitiesResult(ctx context.Context, settingsRepo *repository.SettingsRepo, customRepo *repository.CustomPersonalityRepo, input json.RawMessage) string {
+func channelListPersonalitiesResult(ctx context.Context, settingsRepo persistence.SettingsStore, customRepo persistence.CustomPersonalityStore, input json.RawMessage) string {
 	out, err := ExecuteListPersonalitiesTool(ctx, customRepo, settingsRepo, input, false)
 	if err != nil {
 		return err.Error()
@@ -2667,7 +2652,7 @@ func channelListPersonalitiesResult(ctx context.Context, settingsRepo *repositor
 	return out
 }
 
-func channelSetPersonalityResult(ctx context.Context, settingsRepo *repository.SettingsRepo, customRepo *repository.CustomPersonalityRepo, input json.RawMessage) string {
+func channelSetPersonalityResult(ctx context.Context, settingsRepo persistence.SettingsStore, customRepo persistence.CustomPersonalityStore, input json.RawMessage) string {
 	var req struct {
 		Personality string `json:"personality"`
 	}
@@ -2690,7 +2675,7 @@ func channelSetPersonalityResult(ctx context.Context, settingsRepo *repository.S
 	return fmt.Sprintf("Personality changed to %q.", key)
 }
 
-func channelListModelsResult(ctx context.Context, repo *repository.LLMConfigRepo) string {
+func channelListModelsResult(ctx context.Context, repo persistence.LLMConfigStore) string {
 	configs, err := repo.ListRuntimeSummaries(ctx)
 	if err != nil {
 		return "Error retrieving model configurations."
@@ -2718,7 +2703,7 @@ func channelListModelsResult(ctx context.Context, repo *repository.LLMConfigRepo
 	return strings.TrimSpace(sb.String())
 }
 
-func channelGetModelResult(ctx context.Context, repo *repository.LLMConfigRepo, input json.RawMessage) string {
+func channelGetModelResult(ctx context.Context, repo persistence.LLMConfigStore, input json.RawMessage) string {
 	var req struct {
 		ModelID string `json:"model_id"`
 		Name    string `json:"name"`
@@ -2751,7 +2736,7 @@ func channelGetModelResult(ctx context.Context, repo *repository.LLMConfigRepo, 
 	return fmt.Sprintf("Model with name %q not found.", req.Name)
 }
 
-func channelListAgentsResult(ctx context.Context, repo *repository.AgentRepo, unavailable string) string {
+func channelListAgentsResult(ctx context.Context, repo persistence.AgentStore, unavailable string) string {
 	if repo == nil {
 		if strings.TrimSpace(unavailable) != "" {
 			return unavailable
@@ -2777,7 +2762,7 @@ func channelListAgentsResult(ctx context.Context, repo *repository.AgentRepo, un
 	return strings.TrimSpace(sb.String())
 }
 
-func channelViewSettingsResult(ctx context.Context, settingsRepo *repository.SettingsRepo, llmRepo *repository.LLMConfigRepo, projectRepo *repository.ProjectRepo) string {
+func channelViewSettingsResult(ctx context.Context, settingsRepo persistence.SettingsStore, llmRepo persistence.LLMConfigStore, projectRepo persistence.ProjectStore) string {
 	var sb strings.Builder
 	sb.WriteString("App Settings:\n")
 	if settingsRepo != nil {
@@ -2800,7 +2785,7 @@ func channelViewSettingsResult(ctx context.Context, settingsRepo *repository.Set
 	return strings.TrimSpace(sb.String())
 }
 
-func channelCurrentProjectResult(ctx context.Context, projectRepo *repository.ProjectRepo, projectID string) string {
+func channelCurrentProjectResult(ctx context.Context, projectRepo persistence.ProjectStore, projectID string) string {
 	project, err := projectRepo.GetIdentityByID(ctx, projectID)
 	if err != nil || project == nil {
 		return fmt.Sprintf("Current project ID: %s (details unavailable)", projectID)
@@ -2808,7 +2793,7 @@ func channelCurrentProjectResult(ctx context.Context, projectRepo *repository.Pr
 	return fmt.Sprintf("Current project: %s (id: %s)", project.Name, project.ID)
 }
 
-func channelProjectInfoResult(ctx context.Context, projectRepo *repository.ProjectRepo, taskRepo *repository.TaskRepo, projectID string) string {
+func channelProjectInfoResult(ctx context.Context, projectRepo persistence.ProjectStore, taskRepo persistence.TaskStore, projectID string) string {
 	project, err := projectRepo.GetByID(ctx, projectID)
 	if err != nil || project == nil {
 		return "Error retrieving project details."
@@ -3140,7 +3125,7 @@ func BuildAlertRuntimeActionHandlers(opts AlertRuntimeOptions) map[string]chatco
 			}
 			current, err := opts.AlertSvc.GetByID(ctx, opts.ProjectID, alertID)
 			if err != nil {
-				if errors.Is(err, sql.ErrNoRows) || errors.Is(err, repository.ErrAlertNotFound) {
+				if errors.Is(err, persistence.ErrAlertNotFound) {
 					return "", fmt.Errorf("alert not found or not pending")
 				}
 				return "", err
@@ -3149,7 +3134,7 @@ func BuildAlertRuntimeActionHandlers(opts AlertRuntimeOptions) map[string]chatco
 				return "", fmt.Errorf("alert decision is %s, not pending", current.DecisionState)
 			}
 			if err := opts.AlertSvc.SetDecision(ctx, opts.ProjectID, alertID, decision); err != nil {
-				if errors.Is(err, sql.ErrNoRows) || errors.Is(err, repository.ErrAlertNotFound) {
+				if errors.Is(err, persistence.ErrAlertNotFound) {
 					return "", fmt.Errorf("alert not found or not pending")
 				}
 				return "", err
@@ -3447,7 +3432,7 @@ func formatChannelCapabilities(summaries []chatcontrol.ActionSummary) string {
 	return sb.String()
 }
 
-func channelCompletionFunc(platform string, execRepo *repository.ExecutionRepo, taskRepo *repository.TaskRepo, executionStreamHub *events.ExecutionStreamHub, queuedTurnPromoter func(projectID string)) func(context.Context, string, string, string, string, int, int64) {
+func channelCompletionFunc(platform string, execRepo persistence.ExecutionStore, taskRepo persistence.TaskStore, executionStreamHub *events.ExecutionStreamHub, queuedTurnPromoter func(projectID string)) func(context.Context, string, string, string, string, int, int64) {
 	return func(ctx context.Context, execID, taskID, output, errorMessage string, tokensUsed int, durationMs int64) {
 		completeChannelExecution(ctx, channelExecutionCompletionOptions{Platform: platform, ExecRepo: execRepo, TaskRepo: taskRepo, ExecutionStreamHub: executionStreamHub, QueuedTurnPromoter: queuedTurnPromoter, ExecID: execID, TaskID: taskID, Output: output, ErrorMessage: errorMessage, TokensUsed: tokensUsed, DurationMs: durationMs})
 	}

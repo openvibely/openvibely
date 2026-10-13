@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 )
 
 type OpenAIAsyncToolCallRepo struct {
@@ -43,7 +44,7 @@ func (r *OpenAIAsyncToolCallRepo) CreatePending(ctx context.Context, call *model
 		return nil, fmt.Errorf("OpenAI async tool call is nil")
 	}
 	if call.ID == "" {
-		call.ID = NewID()
+		call.ID = persistence.NewID()
 	}
 	if call.ID == "" {
 		return nil, fmt.Errorf("generating OpenAI async tool call id")
@@ -195,7 +196,7 @@ func (r *OpenAIAsyncToolCallRepo) CancelByExecution(ctx context.Context, executi
 	return n, nil
 }
 
-func cancelOpenAIAsyncToolCallsForExecution(ctx context.Context, exec SQLExecutor, executionID, message string) error {
+func cancelOpenAIAsyncToolCallsForExecution(ctx context.Context, exec sqlExecutor, executionID, message string) error {
 	if exec == nil || executionID == "" {
 		return nil
 	}

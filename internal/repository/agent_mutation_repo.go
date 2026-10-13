@@ -3,9 +3,11 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 )
 
 // AgentMutationRepo persists historical `agent_config_mutations` audit rows for
@@ -101,17 +103,21 @@ func (r *AgentMutationRepo) Create(ctx context.Context, m *models.AgentConfigMut
 }
 
 // FindAppliedByIdempotencyKey returns an applied mutation row matching the
-// supplied key, or sql.ErrNoRows if none exists. Empty keys always miss so
-// unkeyed proposals are never deduplicated.
+// supplied key, or persistence.ErrNotFound if none exists. Empty keys always
+// miss so unkeyed proposals are never deduplicated.
 func (r *AgentMutationRepo) FindAppliedByIdempotencyKey(ctx context.Context, key string) (*models.AgentConfigMutation, error) {
 	if key == "" {
-		return nil, sql.ErrNoRows
+		return nil, persistence.ErrNotFound
 	}
 	row := r.db.QueryRowContext(ctx, `
         SELECT `+mutationCols+`
         FROM agent_config_mutations
         WHERE idempotency_key = ? AND validation_status = 'applied'`, key)
-	return scanMutation(row)
+	m, err := scanMutation(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, persistence.ErrNotFound
+	}
+	return m, err
 }
 
 // ListForExecution returns every mutation row produced by one lifecycle

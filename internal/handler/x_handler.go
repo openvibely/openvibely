@@ -10,7 +10,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/service"
 )
 
@@ -87,7 +87,7 @@ func (h *Handler) handleXConfigure(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to load X settings")
 	}
 	cursor := xCursorForConfiguration(existing, creds, me.ID, baselineCursor)
-	configurationID := repository.NewID()
+	configurationID := persistence.NewID()
 	values := map[string]string{
 		service.XSettingConsumerKey: creds.ConsumerKey, service.XSettingConsumerSecret: creds.ConsumerSecret,
 		service.XSettingAccessToken: creds.AccessToken, service.XSettingAccessTokenSecret: creds.AccessTokenSecret,

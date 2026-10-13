@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/stretchr/testify/require"
 )
@@ -116,7 +117,7 @@ func TestThreadInputRepo_ClaimQueuedValidatesPendingSurface(t *testing.T) {
 		t.Fatalf("CreateQueued chat: %v", err)
 	}
 	exec := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: chatInput.Content, IsFollowup: true}
-	if err := repo.ClaimQueuedForTaskExecution(ctx, chatInput.ID, exec); !errors.Is(err, ErrInputNotPending) {
+	if err := repo.ClaimQueuedForTaskExecution(ctx, chatInput.ID, exec); !errors.Is(err, persistence.ErrInputNotPending) {
 		t.Fatalf("expected wrong-surface claim conflict, got %v", err)
 	}
 	if exec.ID != "" {
@@ -131,7 +132,7 @@ func TestThreadInputRepo_ClaimQueuedValidatesPendingSurface(t *testing.T) {
 	}
 	chatTask := &models.Task{ProjectID: project.ID, Title: "Queued Chat", Category: models.CategoryChat, Status: models.StatusRunning, Prompt: taskInput.Content}
 	chatExec := &models.Execution{AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: taskInput.Content}
-	if err := repo.ClaimQueuedForChatExecution(ctx, taskInput.ID, chatTask, chatExec, nil, nil, nil); !errors.Is(err, ErrInputNotPending) {
+	if err := repo.ClaimQueuedForChatExecution(ctx, taskInput.ID, chatTask, chatExec, nil, nil, nil); !errors.Is(err, persistence.ErrInputNotPending) {
 		t.Fatalf("expected wrong-surface chat claim conflict, got %v", err)
 	}
 	if chatTask.ID != "" {
@@ -309,7 +310,7 @@ func TestThreadInputRepo_ClaimQueuedForTaskExecutionRequiresNoActiveExecution(t 
 		t.Fatalf("CreateQueued: %v", err)
 	}
 	promoted := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: queued.Content, IsFollowup: true}
-	if err := repo.ClaimQueuedForTaskExecution(ctx, queued.ID, promoted); !errors.Is(err, ErrActiveTurnChanged) {
+	if err := repo.ClaimQueuedForTaskExecution(ctx, queued.ID, promoted); !errors.Is(err, persistence.ErrActiveTurnChanged) {
 		t.Fatalf("expected active-turn conflict, got %v", err)
 	}
 	stored, err := repo.GetByID(ctx, queued.ID)
@@ -344,7 +345,7 @@ func TestThreadInputRepo_ClaimQueuedForTaskExecutionRejectsStaleModel(t *testing
 	// The selection changes after the promoter reads it, before its claim.
 	require.NoError(t, taskRepo.UpdateAgentID(ctx, task.ID, second.ID))
 	stale := &models.Execution{TaskID: task.ID, AgentConfigID: first.ID, IsFollowup: true}
-	require.ErrorIs(t, repo.ClaimQueuedForTaskExecutionWithModel(ctx, queued.ID, stale, &first.ID, first), ErrTaskModelChanged)
+	require.ErrorIs(t, repo.ClaimQueuedForTaskExecutionWithModel(ctx, queued.ID, stale, &first.ID, first), persistence.ErrTaskModelChanged)
 	stored, err := repo.GetByID(ctx, queued.ID)
 	require.NoError(t, err)
 	require.Equal(t, models.ThreadInputPending, stored.InputStatus)
@@ -620,10 +621,10 @@ func TestThreadInputRepo_CancelPendingReportsStaleInputs(t *testing.T) {
 	if err := repo.MarkApplied(ctx, input.ID, active.ID, active.ID); err != nil {
 		t.Fatalf("MarkApplied: %v", err)
 	}
-	if _, err := repo.CancelPending(ctx, input.ID); !errors.Is(err, ErrInputNotPending) {
+	if _, err := repo.CancelPending(ctx, input.ID); !errors.Is(err, persistence.ErrInputNotPending) {
 		t.Fatalf("expected stale cancel conflict, got %v", err)
 	}
-	if _, err := repo.CancelPending(ctx, "missing-input"); !errors.Is(err, ErrInputNotPending) {
+	if _, err := repo.CancelPending(ctx, "missing-input"); !errors.Is(err, persistence.ErrInputNotPending) {
 		t.Fatalf("expected missing cancel conflict, got %v", err)
 	}
 }
@@ -692,7 +693,7 @@ func TestThreadInputRepo_CancelPendingAllowsUnpreparedSteeringAndPreservesPrepar
 	if len(preparedRows) != 1 || preparedRows[0].ID != prepared.ID {
 		t.Fatalf("expected prepared steering row, got %#v", preparedRows)
 	}
-	if _, err := repo.CancelPending(ctx, prepared.ID); !errors.Is(err, ErrInputNotPending) {
+	if _, err := repo.CancelPending(ctx, prepared.ID); !errors.Is(err, persistence.ErrInputNotPending) {
 		t.Fatalf("expected prepared steering cancel conflict, got %v", err)
 	}
 	stored, err = repo.GetByID(ctx, prepared.ID)
@@ -845,7 +846,7 @@ func TestThreadInputRepo_ConvertQueuedToSteeringRequiresActiveExecution(t *testi
 	if err := repo.CreateQueued(ctx, guardedForWrongSurface); err != nil {
 		t.Fatalf("CreateQueued wrong surface: %v", err)
 	}
-	if _, err := repo.ConvertQueuedToSteering(ctx, guardedForWrongSurface.ID, wrongSurfaceActive.ID, wrongSurfaceActive.ID); !errors.Is(err, ErrActiveTurnChanged) {
+	if _, err := repo.ConvertQueuedToSteering(ctx, guardedForWrongSurface.ID, wrongSurfaceActive.ID, wrongSurfaceActive.ID); !errors.Is(err, persistence.ErrActiveTurnChanged) {
 		t.Fatalf("expected wrong surface active turn conflict, got %v", err)
 	}
 
@@ -853,7 +854,7 @@ func TestThreadInputRepo_ConvertQueuedToSteeringRequiresActiveExecution(t *testi
 	if err := repo.CreateQueued(ctx, unguarded); err != nil {
 		t.Fatalf("CreateQueued unguarded: %v", err)
 	}
-	if _, err := repo.ConvertQueuedToSteering(ctx, unguarded.ID, active.ID, active.ID); !errors.Is(err, ErrActiveTurnChanged) {
+	if _, err := repo.ConvertQueuedToSteering(ctx, unguarded.ID, active.ID, active.ID); !errors.Is(err, persistence.ErrActiveTurnChanged) {
 		t.Fatalf("expected missing queued guard conflict, got %v", err)
 	}
 
@@ -864,7 +865,7 @@ func TestThreadInputRepo_ConvertQueuedToSteeringRequiresActiveExecution(t *testi
 	wakeup, unsubscribe := repo.SubscribeSteeringWakeups(active.ID)
 	defer unsubscribe()
 
-	if _, err := repo.ConvertQueuedToSteering(ctx, queued.ID, active.ID, "stale-turn"); !errors.Is(err, ErrActiveTurnChanged) {
+	if _, err := repo.ConvertQueuedToSteering(ctx, queued.ID, active.ID, "stale-turn"); !errors.Is(err, persistence.ErrActiveTurnChanged) {
 		t.Fatalf("expected stale turn conflict, got %v", err)
 	}
 	select {
@@ -924,7 +925,7 @@ func TestThreadInputRepo_ConvertQueuedToSteeringRejectsExecutionThatIsNoLongerAc
 	require.NoError(t, repo.CreateQueued(ctx, queued))
 
 	_, err := repo.ConvertQueuedToSteering(ctx, queued.ID, observed.ID, observed.ID)
-	require.ErrorIs(t, err, ErrActiveTurnChanged)
+	require.ErrorIs(t, err, persistence.ErrActiveTurnChanged)
 	stored, err := repo.GetByID(ctx, queued.ID)
 	require.NoError(t, err)
 	require.NotNil(t, stored)
@@ -1148,7 +1149,7 @@ func TestThreadInputRepo_ConvertQueuedToSteeringFailsAfterTurnCompletes(t *testi
 	if err := execRepo.Complete(ctx, active.ID, models.ExecCompleted, "done", "", 0, 1); err != nil {
 		t.Fatalf("Complete: %v", err)
 	}
-	if _, err := repo.ConvertQueuedToSteering(ctx, queued.ID, active.ID, active.ID); !errors.Is(err, ErrNoActiveTurn) {
+	if _, err := repo.ConvertQueuedToSteering(ctx, queued.ID, active.ID, active.ID); !errors.Is(err, persistence.ErrNoActiveTurn) {
 		t.Fatalf("expected completed turn conversion to fail with ErrNoActiveTurn, got %v", err)
 	}
 	stored, err := repo.GetByID(ctx, queued.ID)
@@ -1177,7 +1178,7 @@ func TestThreadInputRepo_CreateSteeringForActiveExecutionFailsAfterTurnCompletes
 	}
 
 	steering := &models.ThreadInput{Scope: models.ThreadInputScopeTask, ProjectID: project.ID, TaskID: task.ID, AgentConfigID: agent.ID, ExpectedTurnID: active.ID, Content: "too late"}
-	if err := repo.CreateSteeringForActiveExecution(ctx, steering, active.ID); !errors.Is(err, ErrNoActiveTurn) {
+	if err := repo.CreateSteeringForActiveExecution(ctx, steering, active.ID); !errors.Is(err, persistence.ErrNoActiveTurn) {
 		t.Fatalf("expected ErrNoActiveTurn, got %v", err)
 	}
 	pending, err := repo.ListPendingSteering(ctx, active.ID, active.ID)
@@ -1327,7 +1328,7 @@ func TestExecutionRepo_RecoverPreRestartRunningTaskExecutionsTerminalizesQueuedF
 	require.Equal(t, []string{task.ID}, ids)
 	promoted := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: queued.Content, IsFollowup: true}
 	require.NoError(t, inputRepo.ClaimQueuedForTaskExecution(ctx, queued.ID, promoted))
-	require.ErrorIs(t, inputRepo.ClaimQueuedForTaskExecution(ctx, queued.ID, &models.Execution{TaskID: task.ID, Status: models.ExecRunning}), ErrInputNotPending)
+	require.ErrorIs(t, inputRepo.ClaimQueuedForTaskExecution(ctx, queued.ID, &models.Execution{TaskID: task.ID, Status: models.ExecRunning}), persistence.ErrInputNotPending)
 }
 
 func TestExecutionRepo_RecoverStaleRunningTaskExecutionsRepairsPendingTaskCrashLeftover(t *testing.T) {
@@ -1923,7 +1924,7 @@ func TestExecutionRepo_TaskFollowupAdmissionSerializesClaimAndFIFORecovery(t *te
 	if err := inputRepo.ClaimQueuedForTaskExecution(ctx, pending[0].ID, promoted); err != nil {
 		t.Fatalf("promote oldest input: %v", err)
 	}
-	if err := inputRepo.ClaimQueuedForTaskExecution(ctx, pending[0].ID, &models.Execution{TaskID: task.ID, Status: models.ExecRunning}); !errors.Is(err, ErrInputNotPending) {
+	if err := inputRepo.ClaimQueuedForTaskExecution(ctx, pending[0].ID, &models.Execution{TaskID: task.ID, Status: models.ExecRunning}); !errors.Is(err, persistence.ErrInputNotPending) {
 		t.Fatalf("expected exactly-once promotion guard, got %v", err)
 	}
 	remaining, err := inputRepo.ListPendingForTask(ctx, task.ID)
@@ -1965,7 +1966,7 @@ func TestThreadInputRepo_QueuedPromotionBlockedByOrdinaryTaskClaim(t *testing.T)
 		t.Fatalf("create queued input: %v", err)
 	}
 	exec := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: input.Content, IsFollowup: true}
-	if err := inputRepo.ClaimQueuedForTaskExecution(ctx, input.ID, exec); !errors.Is(err, ErrInputNotPending) {
+	if err := inputRepo.ClaimQueuedForTaskExecution(ctx, input.ID, exec); !errors.Is(err, persistence.ErrInputNotPending) {
 		t.Fatalf("claimed ordinary task must block queued promotion, got %v", err)
 	}
 	if exec.ID != "" {
@@ -2051,7 +2052,7 @@ func TestThreadInputEditHoldGuardsAtomicClaims(t *testing.T) {
 				return execution, repo.ClaimQueuedForChatExecution(ctx, input.ID, chatTask, execution, nil, nil, nil)
 			}
 			_, err = claim()
-			require.ErrorIs(t, err, ErrInputNotPending)
+			require.ErrorIs(t, err, persistence.ErrInputNotPending)
 			// Saving after a consumer read the old text must still run the newly saved text.
 			_, err = repo.EditPending(ctx, input.ID, "new text")
 			require.NoError(t, err)
@@ -2062,7 +2063,7 @@ func TestThreadInputEditHoldGuardsAtomicClaims(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, "new text", stored.PromptSent)
 			_, err = repo.SetEditHold(ctx, input.ID, true)
-			require.ErrorIs(t, err, ErrInputNotPending)
+			require.ErrorIs(t, err, persistence.ErrInputNotPending)
 		})
 	}
 }
@@ -2088,7 +2089,7 @@ func TestEditHoldRenewalAndExpiry(t *testing.T) {
 	require.Empty(t, released)
 	_, err = db.ExecContext(ctx, `UPDATE thread_inputs SET edit_hold_until = datetime('now', '-1 second') WHERE id = ?`, input.ID)
 	require.NoError(t, err)
-	require.ErrorIs(t, repo.RenewEditHold(ctx, input.ID), ErrInputNotPending)
+	require.ErrorIs(t, repo.RenewEditHold(ctx, input.ID), persistence.ErrInputNotPending)
 	released, err = repo.ReleaseExpiredEditHolds(ctx)
 	require.NoError(t, err)
 	require.Len(t, released, 1)
@@ -2096,7 +2097,7 @@ func TestEditHoldRenewalAndExpiry(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, input.ID, next.ID)
 	require.Equal(t, "saved", next.Content)
-	require.ErrorIs(t, repo.RenewEditHold(ctx, input.ID), ErrInputNotPending)
+	require.ErrorIs(t, repo.RenewEditHold(ctx, input.ID), persistence.ErrInputNotPending)
 }
 
 func TestEditHoldOwnership(t *testing.T) {
@@ -2109,18 +2110,18 @@ func TestEditHoldOwnership(t *testing.T) {
 	_, err := repo.SetEditHold(ctx, input.ID, true, "first")
 	require.NoError(t, err)
 	_, err = repo.SetEditHold(ctx, input.ID, true, "second")
-	require.ErrorIs(t, err, ErrInputNotPending)
-	require.ErrorIs(t, repo.RenewEditHold(ctx, input.ID, "second"), ErrInputNotPending)
+	require.ErrorIs(t, err, persistence.ErrInputNotPending)
+	require.ErrorIs(t, repo.RenewEditHold(ctx, input.ID, "second"), persistence.ErrInputNotPending)
 	_, err = repo.EditPending(ctx, input.ID, "wrong", "second")
-	require.ErrorIs(t, err, ErrInputNotPending)
+	require.ErrorIs(t, err, persistence.ErrInputNotPending)
 	_, err = repo.SetEditHold(ctx, input.ID, false, "second")
-	require.ErrorIs(t, err, ErrInputNotPending)
+	require.ErrorIs(t, err, persistence.ErrInputNotPending)
 	_, err = repo.SetEditHold(ctx, input.ID, false, "first")
 	require.NoError(t, err)
 	_, err = repo.SetEditHold(ctx, input.ID, true, "second")
 	require.NoError(t, err)
 	_, err = repo.SetEditHold(ctx, input.ID, false, "first")
-	require.ErrorIs(t, err, ErrInputNotPending)
+	require.ErrorIs(t, err, persistence.ErrInputNotPending)
 	require.NoError(t, repo.RenewEditHold(ctx, input.ID, "second"))
 	updated, err := repo.EditPending(ctx, input.ID, "revised", "second")
 	require.NoError(t, err)

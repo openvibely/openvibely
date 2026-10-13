@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/testutil"
 )
 
@@ -210,7 +211,7 @@ func TestAgentRepo_CreateUpdateValidateNormalizedSelectableNames(t *testing.T) {
 	ctx := context.Background()
 
 	blank := &models.Agent{Name: "   ", Enabled: true, SelectableAsPrimary: true}
-	if err := repo.Create(ctx, blank); err != ErrAgentNameRequired {
+	if err := repo.Create(ctx, blank); err != persistence.ErrAgentNameRequired {
 		t.Fatalf("expected ErrAgentNameRequired for blank create, got %v", err)
 	}
 	var blankCount int
@@ -234,7 +235,7 @@ func TestAgentRepo_CreateUpdateValidateNormalizedSelectableNames(t *testing.T) {
 	}
 
 	dup := &models.Agent{Name: "reviewer", Key: "reviewer_two", Enabled: true, SelectableAsPrimary: true}
-	if err := repo.Create(ctx, dup); err != ErrSelectableAgentNameAlreadyExists {
+	if err := repo.Create(ctx, dup); err != persistence.ErrSelectableAgentNameAlreadyExists {
 		t.Fatalf("expected duplicate selectable name error, got %v", err)
 	}
 
@@ -243,7 +244,7 @@ func TestAgentRepo_CreateUpdateValidateNormalizedSelectableNames(t *testing.T) {
 		t.Fatalf("create other: %v", err)
 	}
 	other.Name = "\t  \n"
-	if err := repo.Update(ctx, other); err != ErrAgentNameRequired {
+	if err := repo.Update(ctx, other); err != persistence.ErrAgentNameRequired {
 		t.Fatalf("expected ErrAgentNameRequired for blank update, got %v", err)
 	}
 	reloaded, err := repo.GetByID(ctx, other.ID)
@@ -255,7 +256,7 @@ func TestAgentRepo_CreateUpdateValidateNormalizedSelectableNames(t *testing.T) {
 	}
 
 	reloaded.Name = " REVIEWER "
-	if err := repo.Update(ctx, reloaded); err != ErrSelectableAgentNameAlreadyExists {
+	if err := repo.Update(ctx, reloaded); err != persistence.ErrSelectableAgentNameAlreadyExists {
 		t.Fatalf("expected duplicate selectable name update error, got %v", err)
 	}
 	reloaded, err = repo.GetByID(ctx, other.ID)

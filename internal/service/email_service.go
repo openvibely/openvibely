@@ -29,7 +29,7 @@ import (
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	llmoutput "github.com/openvibely/openvibely/internal/llm/output"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/util"
 )
 
@@ -275,7 +275,7 @@ func terminateEmailIMAPClient(client emailIMAPClient) {
 type emailInboundReceiptStore interface {
 	Exists(ctx context.Context, mailboxAddress, messageKey string) (bool, error)
 	Record(ctx context.Context, mailboxAddress, messageKey string) error
-	WithHandoff(ctx context.Context, mailboxAddress, messageKey string, persist func(repository.SQLExecutor) error) (bool, error)
+	WithHandoff(ctx context.Context, mailboxAddress, messageKey string, persist func(persistence.Tx) error) (bool, error)
 }
 
 type emailInboundReceiptBatchStore interface {
@@ -283,32 +283,32 @@ type emailInboundReceiptBatchStore interface {
 }
 
 type EmailService struct {
-	settingsRepo               *repository.SettingsRepo
-	projectRepo                *repository.ProjectRepo
+	settingsRepo               persistence.SettingsStore
+	projectRepo                persistence.ProjectStore
 	projectSvc                 *ProjectService
 	githubProjectSvc           GitHubProjectCloneProvider
 	memorySvc                  *MemoryService
 	agentLibraryMaintenanceSvc *AgentLibraryMaintenanceService
-	llmConfigRepo              *repository.LLMConfigRepo
-	taskRepo                   *repository.TaskRepo
-	execRepo                   *repository.ExecutionRepo
-	scheduleRepo               *repository.ScheduleRepo
+	llmConfigRepo              persistence.LLMConfigStore
+	taskRepo                   persistence.TaskStore
+	execRepo                   persistence.ExecutionStore
+	scheduleRepo               persistence.ScheduleStore
 	taskSvc                    *TaskService
 	llmSvc                     *LLMService
 	workerSvc                  *WorkerService
-	emailAuthRepo              *repository.EmailAuthRepo
-	emailTaskContextRepo       *repository.EmailTaskContextRepo
+	emailAuthRepo              persistence.EmailAuthStore
+	emailTaskContextRepo       persistence.EmailTaskContextStore
 	emailInboundReceiptStore   emailInboundReceiptStore
-	emailSenderProjectRepo     *repository.EmailSenderProjectRepo
-	threadInputRepo            *repository.ThreadInputRepo
-	customPersonalityRepo      *repository.CustomPersonalityRepo
-	agentRepo                  *repository.AgentRepo
+	emailSenderProjectRepo     persistence.EmailSenderProjectStore
+	threadInputRepo            persistence.ThreadInputStore
+	customPersonalityRepo      persistence.CustomPersonalityStore
+	agentRepo                  persistence.AgentStore
 	chatBroadcaster            *events.ChatBroadcaster
 	executionStreamHub         *events.ExecutionStreamHub
 	queuedTurnPromoter         func(projectID string)
 	channelChatRunner          ChannelChatRunner
 	channelMessageRouter       *ChannelMessageRouter
-	chatAttachmentRepo         *repository.ChatAttachmentRepo
+	chatAttachmentRepo         persistence.ChatAttachmentStore
 	uploadsDir                 string
 
 	mu                       sync.RWMutex
@@ -363,7 +363,7 @@ type EmailInboundAttachment struct {
 	Data        []byte
 }
 
-func NewEmailService(settingsRepo *repository.SettingsRepo, projectRepo *repository.ProjectRepo, llmConfigRepo *repository.LLMConfigRepo, taskRepo *repository.TaskRepo, execRepo *repository.ExecutionRepo, scheduleRepo *repository.ScheduleRepo, taskSvc *TaskService, llmSvc *LLMService, workerSvc *WorkerService, emailAuthRepo *repository.EmailAuthRepo, emailTaskContextRepo *repository.EmailTaskContextRepo) *EmailService {
+func NewEmailService(settingsRepo persistence.SettingsStore, projectRepo persistence.ProjectStore, llmConfigRepo persistence.LLMConfigStore, taskRepo persistence.TaskStore, execRepo persistence.ExecutionStore, scheduleRepo persistence.ScheduleStore, taskSvc *TaskService, llmSvc *LLMService, workerSvc *WorkerService, emailAuthRepo persistence.EmailAuthStore, emailTaskContextRepo persistence.EmailTaskContextStore) *EmailService {
 	s := &EmailService{
 		settingsRepo:         settingsRepo,
 		projectRepo:          projectRepo,
@@ -386,8 +386,10 @@ func (s *EmailService) SetChatBroadcaster(cb *events.ChatBroadcaster) { s.chatBr
 func (s *EmailService) SetExecutionStreamHub(hub *events.ExecutionStreamHub) {
 	s.executionStreamHub = hub
 }
-func (s *EmailService) SetThreadInputRepo(repo *repository.ThreadInputRepo) { s.threadInputRepo = repo }
-func (s *EmailService) SetCustomPersonalityRepo(repo *repository.CustomPersonalityRepo) {
+func (s *EmailService) SetThreadInputRepo(repo persistence.ThreadInputStore) {
+	s.threadInputRepo = repo
+}
+func (s *EmailService) SetCustomPersonalityRepo(repo persistence.CustomPersonalityStore) {
 	s.customPersonalityRepo = repo
 }
 func (s *EmailService) SetProjectCreationServices(projectSvc *ProjectService, githubSvc GitHubProjectCloneProvider, memorySvc *MemoryService, agentLibraryMaintenanceSvc *AgentLibraryMaintenanceService) {
@@ -396,7 +398,7 @@ func (s *EmailService) SetProjectCreationServices(projectSvc *ProjectService, gi
 	s.memorySvc = memorySvc
 	s.agentLibraryMaintenanceSvc = agentLibraryMaintenanceSvc
 }
-func (s *EmailService) SetAgentRepo(repo *repository.AgentRepo) { s.agentRepo = repo }
+func (s *EmailService) SetAgentRepo(repo persistence.AgentStore) { s.agentRepo = repo }
 func (s *EmailService) SetQueuedTurnPromoter(promoter func(projectID string)) {
 	s.queuedTurnPromoter = promoter
 }
@@ -404,13 +406,13 @@ func (s *EmailService) SetChannelChatRunner(runner ChannelChatRunner) { s.channe
 func (s *EmailService) SetChannelMessageRouter(router *ChannelMessageRouter) {
 	s.channelMessageRouter = router
 }
-func (s *EmailService) SetEmailSenderProjectRepo(repo *repository.EmailSenderProjectRepo) {
+func (s *EmailService) SetEmailSenderProjectRepo(repo persistence.EmailSenderProjectStore) {
 	s.emailSenderProjectRepo = repo
 }
-func (s *EmailService) SetEmailInboundReceiptRepo(repo *repository.EmailInboundReceiptRepo) {
+func (s *EmailService) SetEmailInboundReceiptRepo(repo persistence.EmailInboundReceiptStore) {
 	s.emailInboundReceiptStore = repo
 }
-func (s *EmailService) SetChatAttachmentRepo(repo *repository.ChatAttachmentRepo) {
+func (s *EmailService) SetChatAttachmentRepo(repo persistence.ChatAttachmentStore) {
 	s.chatAttachmentRepo = repo
 }
 func (s *EmailService) SetUploadsDir(dir string) {
@@ -568,7 +570,7 @@ func emailRuntimeConfigFromValues(values map[string]string) EmailRuntimeConfig {
 	}
 	cfg := EmailRuntimeConfig{
 		Provider:                provider,
-		Address:                 repository.NormalizeEmailAddress(get(EmailSettingAddress)),
+		Address:                 persistence.NormalizeEmailAddress(get(EmailSettingAddress)),
 		Password:                NormalizeEmailPasswordForProvider(provider, get(EmailSettingPassword)),
 		IMAPHost:                get(EmailSettingIMAPHost),
 		IMAPPort:                imapPort,
@@ -740,7 +742,7 @@ func (s *EmailService) pollOnceForRun(ctx context.Context, cfg EmailRuntimeConfi
 	// Normalize the self address once here; direct ProcessIncoming callers intentionally
 	// resolve the current setting through processIncomingMessage instead.
 	mailboxIdentity := emailMailboxIdentity(cfg)
-	selfAddress := repository.NormalizeEmailAddress(cfg.Address)
+	selfAddress := persistence.NormalizeEmailAddress(cfg.Address)
 	acknowledgementSet, unresolved := s.filterEmailReceiptCandidates(ctx, mailboxIdentity, mailbox.UidValidity, metadata)
 	if !s.pollRunCanContinue(ctx, run) {
 		return
@@ -919,7 +921,7 @@ func (s *EmailService) emailInboundReceiptPresence(ctx context.Context, mailboxA
 }
 
 func emailMailboxIdentity(cfg EmailRuntimeConfig) string {
-	return strings.ToLower(strings.TrimSpace(cfg.IMAPHost)) + "\x00" + repository.NormalizeEmailAddress(cfg.Address)
+	return strings.ToLower(strings.TrimSpace(cfg.IMAPHost)) + "\x00" + persistence.NormalizeEmailAddress(cfg.Address)
 }
 
 func emailInboundMessageKey(msg EmailInboundMessage, uidValidity, uid uint32) (string, bool) {
@@ -1099,7 +1101,7 @@ func parseIMAPMessage(msg *imap.Message, section *imap.BodySectionName, skipAtta
 		if len(msg.Envelope.From) > 0 {
 			from := msg.Envelope.From[0]
 			inbound.FromName = strings.TrimSpace(from.PersonalName)
-			inbound.FromAddress = repository.NormalizeEmailAddress(from.MailboxName + "@" + from.HostName)
+			inbound.FromAddress = persistence.NormalizeEmailAddress(from.MailboxName + "@" + from.HostName)
 		}
 	}
 	body := msg.GetBody(section)
@@ -1109,7 +1111,7 @@ func parseIMAPMessage(msg *imap.Message, section *imap.BodySectionName, skipAtta
 			h := mr.Header
 			if from, err := h.AddressList("From"); err == nil && len(from) > 0 {
 				inbound.FromName = from[0].Name
-				inbound.FromAddress = repository.NormalizeEmailAddress(from[0].Address)
+				inbound.FromAddress = persistence.NormalizeEmailAddress(from[0].Address)
 			}
 			if subj, err := h.Subject(); err == nil && subj != "" {
 				inbound.Subject = subj
@@ -1251,7 +1253,7 @@ func (s *EmailService) processIncomingMessage(ctx context.Context, msg EmailInbo
 }
 
 func (s *EmailService) processIncomingMessageWithSelfAddress(ctx context.Context, msg EmailInboundMessage, mailboxIdentity, messageKey, selfAddress string) emailIncomingProcessResult {
-	return s.processIncomingMessageWithNormalizedSelfAddress(ctx, msg, mailboxIdentity, messageKey, repository.NormalizeEmailAddress(selfAddress))
+	return s.processIncomingMessageWithNormalizedSelfAddress(ctx, msg, mailboxIdentity, messageKey, persistence.NormalizeEmailAddress(selfAddress))
 }
 
 func (s *EmailService) processIncomingMessageWithNormalizedSelfAddress(ctx context.Context, msg EmailInboundMessage, mailboxIdentity, messageKey, selfAddress string) emailIncomingProcessResult {
@@ -1324,8 +1326,8 @@ func (s *EmailService) processIncomingMessageWithNormalizedSelfAddress(ctx conte
 			if s.emailInboundReceiptStore == nil || mailboxIdentity == "" || messageKey == "" {
 				return false, s.threadInputRepo.CreateQueued(ctx, input)
 			}
-			alreadyHandedOff, err := s.emailInboundReceiptStore.WithHandoff(ctx, mailboxIdentity, messageKey, func(exec repository.SQLExecutor) error {
-				return s.threadInputRepo.CreateQueuedWithExecutor(ctx, exec, input)
+			alreadyHandedOff, err := s.emailInboundReceiptStore.WithHandoff(ctx, mailboxIdentity, messageKey, func(tx persistence.Tx) error {
+				return s.threadInputRepo.CreateQueuedInTx(ctx, tx, input)
 			})
 			if err == nil {
 				receiptRecorded = true
@@ -1345,8 +1347,8 @@ func (s *EmailService) processIncomingMessageWithNormalizedSelfAddress(ctx conte
 				if s.emailInboundReceiptStore == nil || mailboxIdentity == "" || messageKey == "" {
 					return false, s.execRepo.Create(ctx, execution)
 				}
-				alreadyHandedOff, err := s.emailInboundReceiptStore.WithHandoff(ctx, mailboxIdentity, messageKey, func(exec repository.SQLExecutor) error {
-					return s.execRepo.CreateWithExecutor(ctx, exec, execution)
+				alreadyHandedOff, err := s.emailInboundReceiptStore.WithHandoff(ctx, mailboxIdentity, messageKey, func(tx persistence.Tx) error {
+					return s.execRepo.CreateInTx(ctx, tx, execution)
 				})
 				if err == nil {
 					receiptRecorded = true
@@ -1570,15 +1572,15 @@ func (s *EmailService) getConfiguredAddress(ctx context.Context) string {
 		return ""
 	}
 	v, _ := s.settingsRepo.Get(ctx, EmailSettingAddress)
-	return repository.NormalizeEmailAddress(v)
+	return persistence.NormalizeEmailAddress(v)
 }
 
 func isIgnoredEmail(msg EmailInboundMessage, selfAddress string) bool {
-	return isIgnoredEmailWithNormalizedSelfAddress(msg, repository.NormalizeEmailAddress(selfAddress))
+	return isIgnoredEmailWithNormalizedSelfAddress(msg, persistence.NormalizeEmailAddress(selfAddress))
 }
 
 func isIgnoredEmailWithNormalizedSelfAddress(msg EmailInboundMessage, selfAddress string) bool {
-	from := repository.NormalizeEmailAddress(msg.FromAddress)
+	from := persistence.NormalizeEmailAddress(msg.FromAddress)
 	if from == "" || (selfAddress != "" && from == selfAddress) {
 		return true
 	}
@@ -1629,7 +1631,7 @@ func (s *EmailService) resolveEmailSessionKey(ctx context.Context, projectID str
 }
 
 func EmailSessionKey(sender, messageID, references, inReplyTo, subject string) string {
-	sender = repository.NormalizeEmailAddress(sender)
+	sender = persistence.NormalizeEmailAddress(sender)
 	var root string
 	if ids := emailReferenceIDs(references); len(ids) > 0 {
 		root = ids[0]
@@ -1749,7 +1751,7 @@ func (s *EmailService) SendOutboundMessage(ctx context.Context, to, subject, bod
 	if err != nil || addr == nil || strings.TrimSpace(addr.Address) == "" {
 		return SendMessageResult{OK: false, Platform: "email", Error: "invalid email recipient"}
 	}
-	to = repository.NormalizeEmailAddress(addr.Address)
+	to = persistence.NormalizeEmailAddress(addr.Address)
 	if strings.TrimSpace(body) == "" {
 		return SendMessageResult{OK: false, Platform: "email", Target: "email:" + to, Error: "message is required"}
 	}
@@ -1995,7 +1997,7 @@ func mailAddress(address string) *netmail.Address {
 }
 
 func redactEmail(email string) string {
-	email = repository.NormalizeEmailAddress(email)
+	email = persistence.NormalizeEmailAddress(email)
 	at := strings.Index(email, "@")
 	if at <= 1 {
 		return "[redacted]"

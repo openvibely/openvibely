@@ -2,7 +2,7 @@ package pages
 
 import (
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/service"
 )
 
@@ -68,7 +68,7 @@ type ChannelsSettingsView struct {
 	WebhookEnabledFilter         string
 	Sort                         string
 	WebhooksHasMore              bool
-	AgentPickerOptions           []repository.AgentPickerOption
+	AgentPickerOptions           []persistence.AgentPickerOption
 	WebhookAgents                map[string][]models.WebhookEndpointAgent
 	ChannelTargets               []models.ChannelTarget
 	SendMessageExplicitTargets   bool

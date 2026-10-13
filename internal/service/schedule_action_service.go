@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence"
 )
 
 // ScheduleActionErrorKind identifies failures that chat surfaces format differently.
@@ -50,8 +50,8 @@ type ScheduleActionResult struct {
 // tools and browser forms. Transports parse and render their own shapes; this
 // service persists schedules and applies linked task lifecycle side effects.
 type ScheduleActionService struct {
-	taskRepo     *repository.TaskRepo
-	scheduleRepo *repository.ScheduleRepo
+	taskRepo     persistence.TaskStore
+	scheduleRepo persistence.ScheduleStore
 	workerSvc    *WorkerService
 }
 
@@ -99,7 +99,7 @@ type scheduleTaskLifecycleOptions struct {
 	RequireEnabledSchedule bool
 }
 
-func NewScheduleActionService(taskRepo *repository.TaskRepo, scheduleRepo *repository.ScheduleRepo, workerSvc ...*WorkerService) *ScheduleActionService {
+func NewScheduleActionService(taskRepo persistence.TaskStore, scheduleRepo persistence.ScheduleStore, workerSvc ...*WorkerService) *ScheduleActionService {
 	svc := &ScheduleActionService{taskRepo: taskRepo, scheduleRepo: scheduleRepo}
 	if len(workerSvc) > 0 {
 		svc.workerSvc = workerSvc[0]

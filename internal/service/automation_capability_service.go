@@ -7,26 +7,26 @@ import (
 	"strings"
 
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence"
 )
 
 const automationCapabilityLimit = 50
 
 type AutomationCapabilitySnapshotBuilder struct {
-	projectRepo      *repository.ProjectRepo
-	agentRepo        *repository.AgentRepo
-	taskRepo         *repository.TaskRepo
-	settingsRepo     *repository.SettingsRepo
-	githubAuthRepo   *repository.GitHubAuthRepo
+	projectRepo      persistence.ProjectStore
+	agentRepo        persistence.AgentStore
+	taskRepo         persistence.TaskStore
+	settingsRepo     persistence.SettingsStore
+	githubAuthRepo   persistence.GitHubAuthStore
 	githubConnection automationGitHubConnectionProvider
-	llmConfigRepo    *repository.LLMConfigRepo
+	llmConfigRepo    persistence.LLMConfigStore
 }
 
-func NewAutomationCapabilitySnapshotBuilder(projectRepo *repository.ProjectRepo, agentRepo *repository.AgentRepo, taskRepo *repository.TaskRepo, settingsRepo *repository.SettingsRepo) *AutomationCapabilitySnapshotBuilder {
+func NewAutomationCapabilitySnapshotBuilder(projectRepo persistence.ProjectStore, agentRepo persistence.AgentStore, taskRepo persistence.TaskStore, settingsRepo persistence.SettingsStore) *AutomationCapabilitySnapshotBuilder {
 	return &AutomationCapabilitySnapshotBuilder{projectRepo: projectRepo, agentRepo: agentRepo, taskRepo: taskRepo, settingsRepo: settingsRepo}
 }
 
-func (b *AutomationCapabilitySnapshotBuilder) SetGitHubAuthRepository(githubAuthRepo *repository.GitHubAuthRepo) {
+func (b *AutomationCapabilitySnapshotBuilder) SetGitHubAuthRepository(githubAuthRepo persistence.GitHubAuthStore) {
 	b.githubAuthRepo = githubAuthRepo
 }
 
@@ -34,7 +34,7 @@ func (b *AutomationCapabilitySnapshotBuilder) SetGitHubConnectionProvider(provid
 	b.githubConnection = provider
 }
 
-func (b *AutomationCapabilitySnapshotBuilder) SetLLMConfigRepository(llmConfigRepo *repository.LLMConfigRepo) {
+func (b *AutomationCapabilitySnapshotBuilder) SetLLMConfigRepository(llmConfigRepo persistence.LLMConfigStore) {
 	b.llmConfigRepo = llmConfigRepo
 }
 

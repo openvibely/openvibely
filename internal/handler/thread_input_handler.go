@@ -10,7 +10,7 @@ import (
 	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/web/templates/components"
 )
 
@@ -26,7 +26,7 @@ func (h *Handler) EditThreadInput(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "Message cannot be empty")
 	}
 	input, err := h.threadInputRepo.EditPending(c.Request().Context(), c.Param("inputId"), content, c.FormValue("edit_token"))
-	if errors.Is(err, repository.ErrInputNotPending) {
+	if errors.Is(err, persistence.ErrInputNotPending) {
 		return echo.NewHTTPError(http.StatusConflict, "This message is no longer pending and cannot be edited")
 	}
 	if err != nil {
@@ -48,7 +48,7 @@ func (h *Handler) CancelThreadInput(c echo.Context) error {
 	}
 	cancelled, err := h.threadInputRepo.CancelPending(c.Request().Context(), inputID)
 	if err != nil {
-		if errors.Is(err, repository.ErrInputNotPending) {
+		if errors.Is(err, persistence.ErrInputNotPending) {
 			// The row is already applied, already cancelled, or is a prepared/in-flight steering
 			// row currently being consumed by a provider call.  In all cases it is no longer
 			// user-removable via this action.  Return the hidden-row fragment so HTMX removes
@@ -110,10 +110,10 @@ func (h *Handler) convertQueuedInputToSteering(
 	}
 	steering, err := h.threadInputRepo.ConvertQueuedToSteering(ctx, input.ID, active.ID, expectedTurnID)
 	if err != nil {
-		if errors.Is(err, repository.ErrInputNotPending) {
+		if errors.Is(err, persistence.ErrInputNotPending) {
 			return nil, echo.NewHTTPError(http.StatusConflict, "queued input is no longer pending")
 		}
-		if errors.Is(err, repository.ErrNoActiveTurn) || errors.Is(err, repository.ErrActiveTurnChanged) {
+		if errors.Is(err, persistence.ErrNoActiveTurn) || errors.Is(err, persistence.ErrActiveTurnChanged) {
 			return nil, echo.NewHTTPError(http.StatusConflict, "active turn changed; refresh and queue the message instead")
 		}
 		return nil, echo.NewHTTPError(http.StatusInternalServerError, "failed to convert queued input")
@@ -205,7 +205,7 @@ func (h *Handler) HoldThreadInputEdit(c echo.Context) error {
 	}
 	if c.FormValue("renew") == "true" {
 		err := h.threadInputRepo.RenewEditHold(c.Request().Context(), c.Param("inputId"), c.FormValue("edit_token"))
-		if errors.Is(err, repository.ErrInputNotPending) {
+		if errors.Is(err, persistence.ErrInputNotPending) {
 			return echo.NewHTTPError(http.StatusConflict, "Editing session expired. Copy your draft and reopen the editor.")
 		}
 		if err != nil {
@@ -215,7 +215,7 @@ func (h *Handler) HoldThreadInputEdit(c echo.Context) error {
 	}
 	hold := c.FormValue("hold") != "false"
 	input, err := h.threadInputRepo.SetEditHold(c.Request().Context(), c.Param("inputId"), hold, c.FormValue("edit_token"))
-	if errors.Is(err, repository.ErrInputNotPending) {
+	if errors.Is(err, persistence.ErrInputNotPending) {
 		return echo.NewHTTPError(http.StatusConflict, "This message is already being consumed")
 	}
 	if err != nil {

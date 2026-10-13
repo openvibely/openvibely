@@ -7,61 +7,11 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 )
-
-// AutomationSaveWrite is the complete, already validated state for one atomic
-// Automation Save. Graph and resource rows are committed or rolled back together.
-type AutomationSaveWrite struct {
-	ProjectID              string
-	AutomationID           string
-	GraphID                string
-	ExpectedCurrentGraphID string
-	StableKey              string
-	Source                 string
-	CreatedVia             string
-	TemplateRevision       *int
-	Candidate              models.AutomationDraftCandidate
-	ConfirmationTokenID    string
-	ConfirmationPrincipal  string
-	ConfirmationThreadID   string
-	ConfirmingUserInputID  string
-	Tasks                  []AutomationSaveTask
-	Schedules              []AutomationSaveSchedule
-}
-
-type AutomationSaveTask struct {
-	NodeKey           string
-	ExistingTaskID    string
-	Title             string
-	Prompt            string
-	Goal              string
-	Category          models.TaskCategory
-	Priority          int
-	AgentID           *string
-	AgentDefinitionID *string
-	ApplyTopology     bool
-	ParentNodeKey     string
-	ChildNodeKey      string
-	ChildTitle        string
-	ChildPromptPrefix string
-	ChildCategory     models.TaskCategory
-}
-
-type AutomationSaveSchedule struct {
-	NodeKey             string
-	ExistingScheduleID  string
-	TaskNodeKey         string
-	RunAt               time.Time
-	RepeatType          models.RepeatType
-	RepeatInterval      int
-	Enabled             bool
-	ClearContextOnStart bool
-	PreserveTiming      bool
-}
 
 func currentAutomationResourceRelation(ctx context.Context, q queryer, projectID, automationID, versionID, nodeKey, resourceType, resourceID string) (string, error) {
 	var relation string
@@ -99,7 +49,7 @@ func currentAutomationOwnsResource(ctx context.Context, q queryer, projectID, au
 	return owned == 1, nil
 }
 
-func reconcileExistingAutomationTask(ctx context.Context, q queryer, in AutomationSaveWrite, write AutomationSaveTask) (string, string, error) {
+func reconcileExistingAutomationTask(ctx context.Context, q queryer, in persistence.AutomationSaveWrite, write persistence.AutomationSaveTask) (string, string, error) {
 	relation, err := currentAutomationResourceRelation(ctx, q, in.ProjectID, in.AutomationID, in.ExpectedCurrentGraphID,
 		write.NodeKey, "task", write.ExistingTaskID)
 	if err != nil {
@@ -124,7 +74,7 @@ func reconcileExistingAutomationTask(ctx context.Context, q queryer, in Automati
 	return write.ExistingTaskID, relation, nil
 }
 
-func reconcileExistingAutomationSchedule(ctx context.Context, q queryer, in AutomationSaveWrite, write AutomationSaveSchedule, taskID string) (string, error) {
+func reconcileExistingAutomationSchedule(ctx context.Context, q queryer, in persistence.AutomationSaveWrite, write persistence.AutomationSaveSchedule, taskID string) (string, error) {
 	owned, err := currentAutomationOwnsResource(ctx, q, in.ProjectID, in.AutomationID, in.ExpectedCurrentGraphID,
 		write.NodeKey, "schedule", write.ExistingScheduleID)
 	if err != nil {
@@ -172,7 +122,7 @@ func reconcileExistingAutomationSchedule(ctx context.Context, q queryer, in Auto
 	return write.ExistingScheduleID, nil
 }
 
-func (r *AutomationRepo) SaveCurrentGraph(ctx context.Context, in AutomationSaveWrite) (*models.AutomationDefinition, []models.Task, error) {
+func (r *AutomationRepo) SaveCurrentGraph(ctx context.Context, in persistence.AutomationSaveWrite) (*models.AutomationDefinition, []models.Task, error) {
 	if r == nil || r.db == nil {
 		return nil, nil, errors.New("automation repository is unavailable")
 	}
@@ -312,7 +262,7 @@ func (r *AutomationRepo) SaveCurrentGraph(ctx context.Context, in AutomationSave
 		restoreMaintainedTask := in.ExpectedCurrentGraphID != "" &&
 			(in.Candidate.AdapterKey == "native_sdlc" || in.Candidate.AdapterKey == "github_sdlc")
 		if write.ExistingTaskID == "" && restoreMaintainedTask {
-			createdVia := AutomationCompilerTaskCreatedVia(in.AutomationID, write.NodeKey)
+			createdVia := persistence.AutomationCompilerTaskCreatedVia(in.AutomationID, write.NodeKey)
 			rows, err := conn.QueryContext(ctx, `SELECT id FROM tasks WHERE project_id = ? AND created_via = ? ORDER BY id LIMIT 2`, in.ProjectID, createdVia)
 			if err != nil {
 				return nil, nil, fmt.Errorf("finding preserved task for node %q: %w", write.NodeKey, err)
@@ -362,7 +312,7 @@ func (r *AutomationRepo) SaveCurrentGraph(ctx context.Context, in AutomationSave
 		}
 		task := &models.Task{ProjectID: in.ProjectID, Title: write.Title, Prompt: write.Prompt, Category: models.CategoryBacklog,
 			Priority: write.Priority, Status: models.StatusPending, AgentID: write.AgentID, AgentDefinitionID: write.AgentDefinitionID,
-			CreatedVia: AutomationCompilerTaskCreatedVia(in.AutomationID, write.NodeKey)}
+			CreatedVia: persistence.AutomationCompilerTaskCreatedVia(in.AutomationID, write.NodeKey)}
 		if err := taskRepo.createWithExecutor(ctx, conn, task); err != nil {
 			return nil, nil, fmt.Errorf("creating task for node %q: %w", write.NodeKey, err)
 		}
@@ -421,7 +371,7 @@ func (r *AutomationRepo) SaveCurrentGraph(ctx context.Context, in AutomationSave
 			result, err := conn.ExecContext(ctx, query, args...)
 			if err != nil {
 				if strings.Contains(err.Error(), "UNIQUE constraint failed: tasks.project_id, tasks.title") {
-					return nil, nil, ErrDuplicateTask
+					return nil, nil, persistence.ErrDuplicateTask
 				}
 				return nil, nil, fmt.Errorf("saving task for node %q: %w", write.NodeKey, err)
 			}
@@ -566,7 +516,7 @@ func (r *AutomationRepo) SaveCurrentGraph(ctx context.Context, in AutomationSave
 	return definition, runnable, nil
 }
 
-func backfillLegacyGitHubIssueTaskOrigins(ctx context.Context, exec SQLExecutor, projectID, automationID, versionID string) error {
+func backfillLegacyGitHubIssueTaskOrigins(ctx context.Context, exec sqlExecutor, projectID, automationID, versionID string) error {
 	if _, err := exec.ExecContext(ctx, `INSERT INTO automation_github_issue_task_provenance
 		(project_id, automation_id, task_id, issue_resource_id, implementation_node_key, created_from_version_id, created_from_node_id)
 		SELECT activity.project_id, activity.automation_id, task_resource.resource_id, issue_resource.resource_id,

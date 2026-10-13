@@ -118,7 +118,7 @@ type taskContextLifecycle[T any] struct {
 	scan            func(taskContextScanner) (T, error)
 }
 
-func (h taskContextLifecycle[T]) Upsert(ctx context.Context, exec SQLExecutor, contextValue T) error {
+func (h taskContextLifecycle[T]) Upsert(ctx context.Context, exec sqlExecutor, contextValue T) error {
 	taskID, metadataValues := h.values(contextValue)
 	if len(h.metadataColumns) != len(metadataValues) {
 		return fmt.Errorf("upsert %s: metadata column/value mismatch", h.errLabel)

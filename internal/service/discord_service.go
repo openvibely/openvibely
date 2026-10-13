@@ -20,7 +20,7 @@ import (
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	llmoutput "github.com/openvibely/openvibely/internal/llm/output"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/util"
 )
 
@@ -51,19 +51,19 @@ type DiscordConnectionStatus struct {
 
 type DiscordService struct {
 	session                              *discordgo.Session
-	settingsRepo                         *repository.SettingsRepo
-	discordAuthRepo                      *repository.DiscordAuthRepo
-	discordTaskContextRepo               *repository.DiscordTaskContextRepo
-	discordUserProjectRepo               *repository.DiscordUserProjectRepo
-	projectRepo                          *repository.ProjectRepo
+	settingsRepo                         persistence.SettingsStore
+	discordAuthRepo                      persistence.DiscordAuthStore
+	discordTaskContextRepo               persistence.DiscordTaskContextStore
+	discordUserProjectRepo               persistence.DiscordUserProjectStore
+	projectRepo                          persistence.ProjectStore
 	projectSvc                           *ProjectService
 	githubProjectSvc                     GitHubProjectCloneProvider
 	memorySvc                            *MemoryService
 	agentLibraryMaintenanceSvc           *AgentLibraryMaintenanceService
-	llmConfigRepo                        *repository.LLMConfigRepo
-	taskRepo                             *repository.TaskRepo
-	execRepo                             *repository.ExecutionRepo
-	scheduleRepo                         *repository.ScheduleRepo
+	llmConfigRepo                        persistence.LLMConfigStore
+	taskRepo                             persistence.TaskStore
+	execRepo                             persistence.ExecutionStore
+	scheduleRepo                         persistence.ScheduleStore
 	taskSvc                              *TaskService
 	taskGoalSvc                          *TaskGoalService
 	llmSvc                               *LLMService
@@ -71,16 +71,16 @@ type DiscordService struct {
 	automationGraphSvc                   *AutomationGraphService
 	automationDraftSvc                   *AutomationDraftService
 	automationCompiler                   *AutomationCompiler
-	threadInputRepo                      *repository.ThreadInputRepo
-	chatAttachmentRepo                   *repository.ChatAttachmentRepo
-	customPersonalityRepo                *repository.CustomPersonalityRepo
-	agentRepo                            *repository.AgentRepo
+	threadInputRepo                      persistence.ThreadInputStore
+	chatAttachmentRepo                   persistence.ChatAttachmentStore
+	customPersonalityRepo                persistence.CustomPersonalityStore
+	agentRepo                            persistence.AgentStore
 	alertSvc                             *AlertService
 	usageAnalyticsSvc                    *UsageAnalyticsService
 	upcomingSvc                          *UpcomingService
 	emailStatus                          func(context.Context) EmailConnectionStatus
-	emailAuthRepo                        *repository.EmailAuthRepo
-	webhookRepo                          *repository.WebhookRepo
+	emailAuthRepo                        persistence.EmailAuthStore
+	webhookRepo                          persistence.WebhookStore
 	chatBroadcaster                      *events.ChatBroadcaster
 	executionStreamHub                   *events.ExecutionStreamHub
 	queuedTurnPromoter                   func(projectID string)
@@ -106,24 +106,18 @@ type DiscordService struct {
 }
 
 func NewDiscordService(
-	settingsRepo *repository.SettingsRepo,
-	projectRepo *repository.ProjectRepo,
-	llmConfigRepo *repository.LLMConfigRepo,
-	taskRepo *repository.TaskRepo,
-	execRepo *repository.ExecutionRepo,
-	scheduleRepo *repository.ScheduleRepo,
+	settingsRepo persistence.SettingsStore,
+	projectRepo persistence.ProjectStore,
+	llmConfigRepo persistence.LLMConfigStore,
+	taskRepo persistence.TaskStore,
+	execRepo persistence.ExecutionStore,
+	scheduleRepo persistence.ScheduleStore,
 	taskSvc *TaskService,
 	llmSvc *LLMService,
 	workerSvc *WorkerService,
-	discordAuthRepo *repository.DiscordAuthRepo,
-	discordTaskContextRepo *repository.DiscordTaskContextRepo,
+	discordAuthRepo persistence.DiscordAuthStore,
+	discordTaskContextRepo persistence.DiscordTaskContextStore,
 ) *DiscordService {
-	var usageAnalyticsSvc *UsageAnalyticsService
-	if execRepo != nil {
-		if db := execRepo.DB(); db != nil {
-			usageAnalyticsSvc = NewUsageAnalyticsService(repository.NewUsageRepo(db), llmConfigRepo)
-		}
-	}
 	return &DiscordService{
 		settingsRepo:           settingsRepo,
 		projectRepo:            projectRepo,
@@ -134,7 +128,6 @@ func NewDiscordService(
 		taskSvc:                taskSvc,
 		llmSvc:                 llmSvc,
 		workerSvc:              workerSvc,
-		usageAnalyticsSvc:      usageAnalyticsSvc,
 		discordAuthRepo:        discordAuthRepo,
 		discordTaskContextRepo: discordTaskContextRepo,
 		userProjects:           make(map[string]string),
@@ -147,7 +140,7 @@ func (s *DiscordService) SetChatBroadcaster(cb *events.ChatBroadcaster) { s.chat
 func (s *DiscordService) SetExecutionStreamHub(hub *events.ExecutionStreamHub) {
 	s.executionStreamHub = hub
 }
-func (s *DiscordService) SetChatAttachmentRepo(repo *repository.ChatAttachmentRepo) {
+func (s *DiscordService) SetChatAttachmentRepo(repo persistence.ChatAttachmentStore) {
 	s.chatAttachmentRepo = repo
 }
 func (s *DiscordService) SetUploadsDir(dir string) {
@@ -159,10 +152,14 @@ func (s *DiscordService) SetUploadsDir(dir string) {
 	}
 	s.uploadsDir = dir
 }
-func (s *DiscordService) SetThreadInputRepo(repo *repository.ThreadInputRepo) {
+func (s *DiscordService) SetUsageAnalyticsService(svc *UsageAnalyticsService) {
+	s.usageAnalyticsSvc = svc
+}
+
+func (s *DiscordService) SetThreadInputRepo(repo persistence.ThreadInputStore) {
 	s.threadInputRepo = repo
 }
-func (s *DiscordService) SetCustomPersonalityRepo(repo *repository.CustomPersonalityRepo) {
+func (s *DiscordService) SetCustomPersonalityRepo(repo persistence.CustomPersonalityStore) {
 	s.customPersonalityRepo = repo
 }
 func (s *DiscordService) SetProjectCreationServices(projectSvc *ProjectService, githubSvc GitHubProjectCloneProvider, memorySvc *MemoryService, agentLibraryMaintenanceSvc *AgentLibraryMaintenanceService) {
@@ -174,15 +171,15 @@ func (s *DiscordService) SetProjectCreationServices(projectSvc *ProjectService, 
 	s.memorySvc = memorySvc
 	s.agentLibraryMaintenanceSvc = agentLibraryMaintenanceSvc
 }
-func (s *DiscordService) SetAgentRepo(repo *repository.AgentRepo) { s.agentRepo = repo }
-func (s *DiscordService) SetAlertService(svc *AlertService)       { s.alertSvc = svc }
-func (s *DiscordService) SetUpcomingService(svc *UpcomingService) { s.upcomingSvc = svc }
+func (s *DiscordService) SetAgentRepo(repo persistence.AgentStore) { s.agentRepo = repo }
+func (s *DiscordService) SetAlertService(svc *AlertService)        { s.alertSvc = svc }
+func (s *DiscordService) SetUpcomingService(svc *UpcomingService)  { s.upcomingSvc = svc }
 func (s *DiscordService) SetEmailStatusProvider(provider func(context.Context) EmailConnectionStatus) {
 	s.emailStatus = provider
 }
-func (s *DiscordService) SetEmailAuthRepo(repo *repository.EmailAuthRepo) { s.emailAuthRepo = repo }
-func (s *DiscordService) SetWebhookRepo(repo *repository.WebhookRepo)     { s.webhookRepo = repo }
-func (s *DiscordService) SetTaskGoalService(svc *TaskGoalService)         { s.taskGoalSvc = svc }
+func (s *DiscordService) SetEmailAuthRepo(repo persistence.EmailAuthStore) { s.emailAuthRepo = repo }
+func (s *DiscordService) SetWebhookRepo(repo persistence.WebhookStore)     { s.webhookRepo = repo }
+func (s *DiscordService) SetTaskGoalService(svc *TaskGoalService)          { s.taskGoalSvc = svc }
 func (s *DiscordService) SetAutomationGraphService(svc *AutomationGraphService) {
 	s.automationGraphSvc = svc
 }
@@ -201,7 +198,7 @@ func (s *DiscordService) SetChannelTaskRunner(runner ChannelTaskRunner) { s.chan
 func (s *DiscordService) SetChannelMessageRouter(router *ChannelMessageRouter) {
 	s.channelMessageRouter = router
 }
-func (s *DiscordService) SetDiscordUserProjectRepo(repo *repository.DiscordUserProjectRepo) {
+func (s *DiscordService) SetDiscordUserProjectRepo(repo persistence.DiscordUserProjectStore) {
 	s.discordUserProjectRepo = repo
 }
 
@@ -819,7 +816,7 @@ func (s *DiscordService) discordActionHandlersForTask(projectID, callerTaskID st
 		CustomPersonalityRepo: s.customPersonalityRepo,
 		ProjectRepo:           s.projectRepo,
 		AlertSvc:              s.alertSvc,
-		UsageAnalyticsSvc:     usageAnalyticsServiceFromRepos(s.usageAnalyticsSvc, s.execRepo, s.llmConfigRepo),
+		UsageAnalyticsSvc:     s.usageAnalyticsSvc,
 		UpcomingSvc:           s.upcomingSvc,
 		DiscordStatus:         s.GetConnectionStatus,
 		DiscordAuthRepo:       s.discordAuthRepo,

@@ -17,6 +17,7 @@ import (
 
 	"github.com/openvibely/openvibely/internal/database"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/testutil"
 )
 
@@ -1419,7 +1420,7 @@ func BenchmarkTaskRepo_ListActivePendingAdmissionsProduction(b *testing.B) {
 			size, mixed, fixtureName := size, mixed, fixtureName
 			b.Run(fmt.Sprintf("%s/%d/order_covering", fixtureName, size), func(b *testing.B) {
 				fixture := newActiveAdmissionProductionFixture(b, size, mixed)
-				load := func() ([]ActiveTaskAdmission, error) {
+				load := func() ([]persistence.ActiveTaskAdmission, error) {
 					return fixture.repo.ListActivePendingAdmissions(context.Background())
 				}
 				wantRows := 1
@@ -1488,7 +1489,7 @@ func newActiveAdmissionProductionFixture(tb testing.TB, total int, mixed bool) *
 	}
 }
 
-func measureActiveAdmissionLoad(t *testing.T, load func() ([]ActiveTaskAdmission, error), wantRows int) activeAdmissionPerformanceMetrics {
+func measureActiveAdmissionLoad(t *testing.T, load func() ([]persistence.ActiveTaskAdmission, error), wantRows int) activeAdmissionPerformanceMetrics {
 	t.Helper()
 	for range 2 {
 		admissions, err := load()
@@ -1599,11 +1600,11 @@ func TestTaskRepo_MoveTasksToActiveLaneRejectsStaleLifecycleState(t *testing.T) 
 		t.Fatal(err)
 	}
 
-	_, err := repo.MoveTasksToActiveLane(ctx, "default", []ActiveLaneTaskMove{
+	_, err := repo.MoveTasksToActiveLane(ctx, "default", []persistence.ActiveLaneTaskMove{
 		{ID: first.ID, ExpectedCategory: models.CategoryBacklog, ExpectedStatus: models.StatusPending},
 		{ID: second.ID, ExpectedCategory: models.CategoryBacklog, ExpectedStatus: models.StatusPending},
 	}, models.StatusRunning)
-	if !errors.Is(err, ErrActiveLaneTaskChanged) {
+	if !errors.Is(err, persistence.ErrActiveLaneTaskChanged) {
 		t.Fatalf("MoveTasksToActiveLane error = %v, want ErrActiveLaneTaskChanged", err)
 	}
 	loaded, loadErr := repo.GetByID(ctx, first.ID)
@@ -1627,11 +1628,11 @@ func TestTaskRepo_MoveTasksToActiveLaneRejectsGroupedLifecycleOwnedTask(t *testi
 		}
 	}
 
-	_, err := repo.MoveTasksToActiveLane(ctx, "default", []ActiveLaneTaskMove{
+	_, err := repo.MoveTasksToActiveLane(ctx, "default", []persistence.ActiveLaneTaskMove{
 		{ID: ordinary.ID, ExpectedCategory: models.CategoryBacklog, ExpectedStatus: models.StatusPending},
 		{ID: parent.ID, ExpectedCategory: models.CategoryBacklog, ExpectedStatus: models.StatusPending},
 	}, models.StatusRunning)
-	if !errors.Is(err, ErrActiveLaneLifecycleOwned) {
+	if !errors.Is(err, persistence.ErrActiveLaneLifecycleOwned) {
 		t.Fatalf("MoveTasksToActiveLane error = %v, want ErrActiveLaneLifecycleOwned", err)
 	}
 	loaded, loadErr := repo.GetByID(ctx, ordinary.ID)
@@ -1655,7 +1656,7 @@ func TestTaskRepo_MoveTasksToActiveLaneRunningDestinationNoOp(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	moved, err := repo.MoveTasksToActiveLane(ctx, "default", []ActiveLaneTaskMove{{ID: task.ID, ExpectedCategory: models.CategoryActive, ExpectedStatus: models.StatusRunning}}, models.StatusRunning)
+	moved, err := repo.MoveTasksToActiveLane(ctx, "default", []persistence.ActiveLaneTaskMove{{ID: task.ID, ExpectedCategory: models.CategoryActive, ExpectedStatus: models.StatusRunning}}, models.StatusRunning)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1705,7 +1706,7 @@ func TestTaskRepo_MoveTasksToActiveLaneRollsBackLaterFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err := repo.MoveTasksToActiveLane(ctx, "default", []ActiveLaneTaskMove{
+	_, err := repo.MoveTasksToActiveLane(ctx, "default", []persistence.ActiveLaneTaskMove{
 		{ID: first.ID, ExpectedCategory: models.CategoryBacklog, ExpectedStatus: models.StatusPending},
 		{ID: second.ID, ExpectedCategory: models.CategoryBacklog, ExpectedStatus: models.StatusPending},
 	}, models.StatusRunning)
@@ -1743,7 +1744,7 @@ func TestTaskRepo_MoveTasksToActiveLaneAppendsSubmittedOrder(t *testing.T) {
 		}
 	}
 
-	moved, err := repo.MoveTasksToActiveLane(ctx, "default", []ActiveLaneTaskMove{
+	moved, err := repo.MoveTasksToActiveLane(ctx, "default", []persistence.ActiveLaneTaskMove{
 		{ID: second.ID, ExpectedCategory: models.CategoryBacklog, ExpectedStatus: models.StatusPending},
 		{ID: first.ID, ExpectedCategory: models.CategoryBacklog, ExpectedStatus: models.StatusPending},
 	}, models.StatusRunning)
@@ -1780,7 +1781,7 @@ func TestTaskRepo_MoveTasksToActiveLaneReservationOwnsLaterFollowup(t *testing.T
 	if err := taskRepo.Create(ctx, task); err != nil {
 		t.Fatal(err)
 	}
-	admissions, err := taskRepo.MoveTasksToActiveLane(ctx, "default", []ActiveLaneTaskMove{{ID: task.ID, ExpectedCategory: models.CategoryBacklog, ExpectedStatus: models.StatusPending}}, models.StatusRunning)
+	admissions, err := taskRepo.MoveTasksToActiveLane(ctx, "default", []persistence.ActiveLaneTaskMove{{ID: task.ID, ExpectedCategory: models.CategoryBacklog, ExpectedStatus: models.StatusPending}}, models.StatusRunning)
 	if err != nil || len(admissions) != 1 || admissions[0].ExecutionID == "" {
 		t.Fatalf("reserved lane move = %#v, %v", admissions, err)
 	}
@@ -1831,7 +1832,7 @@ func TestTaskRepo_ClaimReservedTaskRefreshesAuthoritativeExecutionMetadata(t *te
 	if err := taskRepo.Create(ctx, task); err != nil {
 		t.Fatal(err)
 	}
-	admissions, err := taskRepo.MoveTasksToActiveLane(ctx, "default", []ActiveLaneTaskMove{{ID: task.ID, ExpectedCategory: models.CategoryBacklog, ExpectedStatus: models.StatusPending}}, models.StatusRunning)
+	admissions, err := taskRepo.MoveTasksToActiveLane(ctx, "default", []persistence.ActiveLaneTaskMove{{ID: task.ID, ExpectedCategory: models.CategoryBacklog, ExpectedStatus: models.StatusPending}}, models.StatusRunning)
 	if err != nil || len(admissions) != 1 {
 		t.Fatalf("lane reservation = %#v, %v", admissions, err)
 	}
@@ -1865,7 +1866,7 @@ func TestTaskRepo_ResetOrphanedRunningPreservesDurableActiveLaneReservation(t *t
 	if err := repo.Create(ctx, task); err != nil {
 		t.Fatal(err)
 	}
-	admissions, err := repo.MoveTasksToActiveLane(ctx, "default", []ActiveLaneTaskMove{{ID: task.ID, ExpectedCategory: models.CategoryBacklog, ExpectedStatus: models.StatusPending}}, models.StatusRunning)
+	admissions, err := repo.MoveTasksToActiveLane(ctx, "default", []persistence.ActiveLaneTaskMove{{ID: task.ID, ExpectedCategory: models.CategoryBacklog, ExpectedStatus: models.StatusPending}}, models.StatusRunning)
 	if err != nil || len(admissions) != 1 {
 		t.Fatalf("lane reservation = %#v, %v", admissions, err)
 	}
@@ -2564,7 +2565,7 @@ func TestTaskRepo_Create_DuplicateTitle(t *testing.T) {
 		Prompt:   "p",
 	}
 	err := repo.Create(ctx, task2)
-	if err != ErrDuplicateTask {
+	if err != persistence.ErrDuplicateTask {
 		t.Errorf("expected ErrDuplicateTask, got %v", err)
 	}
 }
@@ -2640,7 +2641,7 @@ func TestTaskRepo_Update_DuplicateTitle(t *testing.T) {
 	// Try to update task2 to have the same title as task1
 	task2.Title = "Task 1"
 	err := repo.Update(ctx, task2)
-	if err != ErrDuplicateTask {
+	if err != persistence.ErrDuplicateTask {
 		t.Errorf("expected ErrDuplicateTask, got %v", err)
 	}
 }
@@ -4687,7 +4688,7 @@ func TestTaskRepo_ListTaskReferencesHandlesMalformedChainConfigAndRunnableSwarmC
 	if err != nil {
 		t.Fatalf("ListTaskReferences: %v", err)
 	}
-	byID := make(map[string]TaskReference, len(references))
+	byID := make(map[string]persistence.TaskReference, len(references))
 	for _, reference := range references {
 		byID[reference.ID] = reference
 	}
@@ -4750,7 +4751,7 @@ func TestTaskRepo_ListTasksForDiscovery_UsesCompactProjection(t *testing.T) {
 		t.Fatalf("create child: %v", err)
 	}
 
-	tasks, total, err := repo.ListTasksForDiscovery(ctx, "default", TaskDiscoveryFilter{Query: child.Title})
+	tasks, total, err := repo.ListTasksForDiscovery(ctx, "default", persistence.TaskDiscoveryFilter{Query: child.Title})
 	if err != nil {
 		t.Fatalf("ListTasksForDiscovery: %v", err)
 	}
@@ -4803,7 +4804,7 @@ func TestTaskRepo_ListTasksForDiscovery(t *testing.T) {
 
 	// Partial title matching: substring "deploy" matches three non-chat rows in
 	// this project (chat + other-project rows excluded).
-	partial, partialTotal, err := repo.ListTasksForDiscovery(ctx, "default", TaskDiscoveryFilter{Query: "deploy"})
+	partial, partialTotal, err := repo.ListTasksForDiscovery(ctx, "default", persistence.TaskDiscoveryFilter{Query: "deploy"})
 	if err != nil {
 		t.Fatalf("ListTasksForDiscovery partial query: %v", err)
 	}
@@ -4833,7 +4834,7 @@ func TestTaskRepo_ListTasksForDiscovery(t *testing.T) {
 	}
 
 	// Exact title query ranks the exact match ahead of prefix/contains matches.
-	tasks, total, err := repo.ListTasksForDiscovery(ctx, "default", TaskDiscoveryFilter{Query: "Deploy pipeline"})
+	tasks, total, err := repo.ListTasksForDiscovery(ctx, "default", persistence.TaskDiscoveryFilter{Query: "Deploy pipeline"})
 	if err != nil {
 		t.Fatalf("ListTasksForDiscovery exact query: %v", err)
 	}
@@ -4845,7 +4846,7 @@ func TestTaskRepo_ListTasksForDiscovery(t *testing.T) {
 	}
 
 	// Category filter.
-	activeTasks, activeTotal, err := repo.ListTasksForDiscovery(ctx, "default", TaskDiscoveryFilter{Category: string(models.CategoryActive)})
+	activeTasks, activeTotal, err := repo.ListTasksForDiscovery(ctx, "default", persistence.TaskDiscoveryFilter{Category: string(models.CategoryActive)})
 	if err != nil {
 		t.Fatalf("ListTasksForDiscovery category: %v", err)
 	}
@@ -4859,7 +4860,7 @@ func TestTaskRepo_ListTasksForDiscovery(t *testing.T) {
 	}
 
 	// Status filter.
-	runningTasks, runningTotal, err := repo.ListTasksForDiscovery(ctx, "default", TaskDiscoveryFilter{Status: string(models.StatusRunning)})
+	runningTasks, runningTotal, err := repo.ListTasksForDiscovery(ctx, "default", persistence.TaskDiscoveryFilter{Status: string(models.StatusRunning)})
 	if err != nil {
 		t.Fatalf("ListTasksForDiscovery status: %v", err)
 	}
@@ -4868,7 +4869,7 @@ func TestTaskRepo_ListTasksForDiscovery(t *testing.T) {
 	}
 
 	// Deterministic ordering without query: updated_at DESC, id ASC.
-	all, allTotal, err := repo.ListTasksForDiscovery(ctx, "default", TaskDiscoveryFilter{})
+	all, allTotal, err := repo.ListTasksForDiscovery(ctx, "default", persistence.TaskDiscoveryFilter{})
 	if err != nil {
 		t.Fatalf("ListTasksForDiscovery all: %v", err)
 	}
@@ -4886,14 +4887,14 @@ func TestTaskRepo_ListTasksForDiscovery(t *testing.T) {
 	}
 
 	// Result bounds + pagination.
-	page1, page1Total, err := repo.ListTasksForDiscovery(ctx, "default", TaskDiscoveryFilter{Limit: 2, Offset: 0})
+	page1, page1Total, err := repo.ListTasksForDiscovery(ctx, "default", persistence.TaskDiscoveryFilter{Limit: 2, Offset: 0})
 	if err != nil {
 		t.Fatalf("ListTasksForDiscovery page1: %v", err)
 	}
 	if page1Total != 4 || len(page1) != 2 {
 		t.Fatalf("expected page1 total=4 len=2, got total=%d len=%d", page1Total, len(page1))
 	}
-	page2, _, err := repo.ListTasksForDiscovery(ctx, "default", TaskDiscoveryFilter{Limit: 2, Offset: 2})
+	page2, _, err := repo.ListTasksForDiscovery(ctx, "default", persistence.TaskDiscoveryFilter{Limit: 2, Offset: 2})
 	if err != nil {
 		t.Fatalf("ListTasksForDiscovery page2: %v", err)
 	}
@@ -4938,7 +4939,7 @@ func TestTaskRepo_ListTasksForDiscoveryOrdersIdenticalTimestampsByID(t *testing.
 		t.Fatalf("set identical timestamps: %v", err)
 	}
 
-	got, total, err := repo.ListTasksForDiscovery(ctx, project.ID, TaskDiscoveryFilter{Limit: 20})
+	got, total, err := repo.ListTasksForDiscovery(ctx, project.ID, persistence.TaskDiscoveryFilter{Limit: 20})
 	if err != nil {
 		t.Fatalf("ListTasksForDiscovery: %v", err)
 	}
@@ -4991,7 +4992,7 @@ func TestTaskRepo_ListTasksForDiscoveryOrdersIdenticalTimestampsWithinTitleRelev
 		t.Fatalf("set identical title relevance timestamps: %v", err)
 	}
 
-	got, total, err := repo.ListTasksForDiscovery(ctx, project.ID, TaskDiscoveryFilter{Query: "deploy", Limit: 20})
+	got, total, err := repo.ListTasksForDiscovery(ctx, project.ID, persistence.TaskDiscoveryFilter{Query: "deploy", Limit: 20})
 	if err != nil {
 		t.Fatalf("ListTasksForDiscovery: %v", err)
 	}
@@ -5089,7 +5090,7 @@ func TestTaskRepo_ListWithSchedulesByProject_UsesCalendarProjection(t *testing.T
 		t.Fatalf("expected two calendar rows, got %d: %#v", len(results), results)
 	}
 
-	byID := make(map[string]TaskWithSchedule, len(results))
+	byID := make(map[string]persistence.TaskWithSchedule, len(results))
 	for _, result := range results {
 		byID[result.Task.ID] = result
 		if result.Task.Prompt != "" || result.Task.ChainConfig != "" || result.Task.SwarmConfig != "" {
@@ -5386,7 +5387,7 @@ func TestTaskRepo_BoardReservedExecutionWaitsForWorkerAdmission(t *testing.T) {
 	if err := repo.Create(ctx, task); err != nil {
 		t.Fatal(err)
 	}
-	admissions, err := repo.MoveTasksToActiveLane(ctx, "default", []ActiveLaneTaskMove{{ID: task.ID, ExpectedCategory: models.CategoryBacklog, ExpectedStatus: models.StatusPending}}, models.StatusRunning)
+	admissions, err := repo.MoveTasksToActiveLane(ctx, "default", []persistence.ActiveLaneTaskMove{{ID: task.ID, ExpectedCategory: models.CategoryBacklog, ExpectedStatus: models.StatusPending}}, models.StatusRunning)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -5423,7 +5424,7 @@ func TestTaskRepo_ObservedDeletionSkipsCleanupAfterStatusChange(t *testing.T) {
 		t.Fatal(err)
 	}
 	called := false
-	_, deleted, err := repo.DeleteWithCleanupManifestIfObserved(ctx, task, func(TaskDeletionManifest) error { called = true; return nil })
+	_, deleted, err := repo.DeleteWithCleanupManifestIfObserved(ctx, task, func(persistence.TaskDeletionManifest) error { called = true; return nil })
 	if err != nil || deleted || called {
 		t.Fatalf("stale deletion: deleted=%v cleanup=%v err=%v", deleted, called, err)
 	}
@@ -5431,7 +5432,7 @@ func TestTaskRepo_ObservedDeletionSkipsCleanupAfterStatusChange(t *testing.T) {
 	if err != nil || current == nil {
 		t.Fatalf("task missing: %v", err)
 	}
-	_, deleted, err = repo.DeleteWithCleanupManifestIfObserved(ctx, current, func(TaskDeletionManifest) error { called = true; return nil })
+	_, deleted, err = repo.DeleteWithCleanupManifestIfObserved(ctx, current, func(persistence.TaskDeletionManifest) error { called = true; return nil })
 	if err != nil || !deleted || !called {
 		t.Fatalf("current deletion: deleted=%v cleanup=%v err=%v", deleted, called, err)
 	}

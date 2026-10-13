@@ -14,7 +14,7 @@ import (
 	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/attachmentsession"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence"
 )
 
 type ManagedProjectRepoResolver interface {
@@ -26,9 +26,9 @@ type ProjectSelectionCacheInvalidator interface {
 }
 
 type ProjectService struct {
-	repo                          *repository.ProjectRepo
+	repo                          persistence.ProjectStore
 	taskSvc                       *TaskService
-	workerRepo                    *repository.WorkerRepo
+	workerRepo                    persistence.WorkerStore
 	managedRepoResolver           ManagedProjectRepoResolver
 	beforeRelationalDeleteForTest func()
 	projectSelectionMu            sync.RWMutex
@@ -60,7 +60,7 @@ func (e *ProjectDeletionCleanupError) Unwrap() error {
 	return e.Err
 }
 
-func NewProjectService(repo *repository.ProjectRepo) *ProjectService {
+func NewProjectService(repo persistence.ProjectStore) *ProjectService {
 	return &ProjectService{repo: repo}
 }
 
@@ -94,7 +94,7 @@ func (s *ProjectService) SetManagedProjectRepoResolver(resolver ManagedProjectRe
 	s.managedRepoResolver = resolver
 }
 
-func (s *ProjectService) SetWorkerRepo(workerRepo *repository.WorkerRepo) {
+func (s *ProjectService) SetWorkerRepo(workerRepo persistence.WorkerStore) {
 	s.workerRepo = workerRepo
 }
 
@@ -187,9 +187,9 @@ func (s *ProjectService) Delete(ctx context.Context, id string) error {
 
 	var stage *projectDeletionFileStage
 	deleteRelational := func() error {
-		var preview repository.TaskDeletionManifest
+		var preview persistence.TaskDeletionManifest
 		previewComplete := errors.New("project deletion manifest preview complete")
-		_, _, previewErr := s.repo.DeleteWithCleanupManifest(ctx, id, func(manifest repository.TaskDeletionManifest) error {
+		_, _, previewErr := s.repo.DeleteWithCleanupManifest(ctx, id, func(manifest persistence.TaskDeletionManifest) error {
 			preview = manifest
 			return previewComplete
 		})
@@ -212,7 +212,7 @@ func (s *ProjectService) Delete(ctx context.Context, id string) error {
 		if s.beforeRelationalDeleteForTest != nil {
 			s.beforeRelationalDeleteForTest()
 		}
-		manifest, _, deleteErr := s.repo.DeleteWithCleanupManifest(ctx, id, func(manifest repository.TaskDeletionManifest) error {
+		manifest, _, deleteErr := s.repo.DeleteWithCleanupManifest(ctx, id, func(manifest persistence.TaskDeletionManifest) error {
 			if !projectDeletionManifestsEqual(preview, manifest) {
 				return errors.New("project-owned tasks or files changed during deletion")
 			}
@@ -261,7 +261,7 @@ func (s *ProjectService) Delete(ctx context.Context, id string) error {
 	return deleteRelational()
 }
 
-func projectDeletionManifestsEqual(a, b repository.TaskDeletionManifest) bool {
+func projectDeletionManifestsEqual(a, b persistence.TaskDeletionManifest) bool {
 	stringSetEqual := func(left, right []string) bool {
 		if len(left) != len(right) {
 			return false
@@ -278,7 +278,7 @@ func projectDeletionManifestsEqual(a, b repository.TaskDeletionManifest) bool {
 		}
 		return true
 	}
-	worktreeSet := func(values []repository.TaskWorktreeCleanup) []string {
+	worktreeSet := func(values []persistence.TaskWorktreeCleanup) []string {
 		keys := make([]string, 0, len(values))
 		for _, value := range values {
 			keys = append(keys, fmt.Sprintf("%s\x00%s\x00%s\x00%t", value.TaskID, value.WorktreePath, value.WorktreeBranch, value.DeleteBranch))
@@ -295,7 +295,7 @@ func projectDeletionManifestsEqual(a, b repository.TaskDeletionManifest) bool {
 // stageProjectDeletionFiles performs read-only path validation while acquiring
 // pending-session locks in the same order used by upload and retirement flows.
 // It deliberately does not rename any path before the relational delete commits.
-func (s *ProjectService) stageProjectDeletionFiles(ctx context.Context, project *models.Project, manifest repository.TaskDeletionManifest, managedRepo bool) (*projectDeletionFileStage, error) {
+func (s *ProjectService) stageProjectDeletionFiles(ctx context.Context, project *models.Project, manifest persistence.TaskDeletionManifest, managedRepo bool) (*projectDeletionFileStage, error) {
 	stage := &projectDeletionFileStage{}
 	fail := func(err error) (*projectDeletionFileStage, error) {
 		stage.releaseSessions()
@@ -325,7 +325,7 @@ func (s *ProjectService) stageProjectDeletionFiles(ctx context.Context, project 
 
 // stageProjectDeletionFilesAfterCommit quarantines attachment paths only after
 // the relational delete has committed and task runtime cancellation has begun.
-func (s *ProjectService) stageProjectDeletionFilesAfterCommit(ctx context.Context, project *models.Project, manifest repository.TaskDeletionManifest, managedRepo bool, stage *projectDeletionFileStage) error {
+func (s *ProjectService) stageProjectDeletionFilesAfterCommit(ctx context.Context, project *models.Project, manifest persistence.TaskDeletionManifest, managedRepo bool, stage *projectDeletionFileStage) error {
 	fail := func(err error) error {
 		if rollbackErr := stage.rollback(); rollbackErr != nil {
 			return errors.Join(err, fmt.Errorf("restoring staged project files: %w", rollbackErr))
@@ -349,7 +349,7 @@ func (s *ProjectService) stageProjectDeletionFilesAfterCommit(ctx context.Contex
 	return nil
 }
 
-func (s *ProjectService) stageProjectRepositoryFiles(ctx context.Context, project *models.Project, manifest repository.TaskDeletionManifest, managedRepo bool) (*projectDeletionFileStage, error) {
+func (s *ProjectService) stageProjectRepositoryFiles(ctx context.Context, project *models.Project, manifest persistence.TaskDeletionManifest, managedRepo bool) (*projectDeletionFileStage, error) {
 	if strings.TrimSpace(project.RepoPath) == "" {
 		return nil, nil
 	}
@@ -426,7 +426,7 @@ func (s *projectDeletionFileStage) stagePath(ctx context.Context, path, kind str
 	} else if err != nil {
 		return fmt.Errorf("inspecting %s %s: %w", kind, path, err)
 	}
-	quarantine := path + ".openvibely-delete-" + repository.NewID()
+	quarantine := path + ".openvibely-delete-" + persistence.NewID()
 	if err := os.Rename(path, quarantine); err != nil {
 		return fmt.Errorf("staging %s %s: %w", kind, path, err)
 	}

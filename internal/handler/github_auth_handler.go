@@ -6,11 +6,11 @@ import (
 
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/web/templates/components"
 )
 
-func (h *Handler) githubRuntimeSettingsPreflight(projectID string) (*repository.GitHubAuthRepo, error) {
+func (h *Handler) githubRuntimeSettingsPreflight(projectID string) (persistence.GitHubAuthStore, error) {
 	if h.githubAuthRepo == nil {
 		return nil, echo.NewHTTPError(http.StatusInternalServerError, "GitHub auth not configured")
 	}
@@ -54,7 +54,7 @@ func (h *Handler) AddGitHubAuthorizedActor(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	githubLogin := repository.NormalizeGitHubLogin(c.FormValue("github_login"))
+	githubLogin := persistence.NormalizeGitHubLogin(c.FormValue("github_login"))
 	if githubLogin == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "GitHub login is required")
 	}
@@ -100,7 +100,7 @@ func (h *Handler) SaveGitHubProjectInbox(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	githubLogin := repository.NormalizeGitHubLogin(c.FormValue("github_login"))
+	githubLogin := persistence.NormalizeGitHubLogin(c.FormValue("github_login"))
 	if githubLogin == "" {
 		existing, err := authRepo.GetProjectInbox(c.Request().Context(), projectID)
 		if err != nil {

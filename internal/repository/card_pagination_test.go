@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/stretchr/testify/require"
 )
@@ -80,7 +81,7 @@ func TestCollectionFiltersAndSortsApplyBeforePagination(t *testing.T) {
 	} {
 		require.NoError(t, modelsRepo.Create(ctx, &models.LLMConfig{Name: item.name, Provider: item.provider, Model: strings.ToLower(strings.ReplaceAll(item.name, " ", "-"))}))
 	}
-	page, err := modelsRepo.ListCardsPageFiltered(ctx, 1, 1, ModelCardListFilter{Provider: string(models.ProviderAnthropic), Sort: "name_asc"})
+	page, err := modelsRepo.ListCardsPageFiltered(ctx, 1, 1, persistence.ModelCardListFilter{Provider: string(models.ProviderAnthropic), Sort: "name_asc"})
 	require.NoError(t, err)
 	require.Len(t, page, 1)
 	require.Equal(t, "Zulu Anthropic", page[0].Name)
@@ -91,13 +92,13 @@ func TestCollectionFiltersAndSortsApplyBeforePagination(t *testing.T) {
 		}
 		return names
 	}
-	alphabeticalModels, err := modelsRepo.ListCardsPageFiltered(ctx, 10, 0, ModelCardListFilter{Sort: "name_asc"})
+	alphabeticalModels, err := modelsRepo.ListCardsPageFiltered(ctx, 10, 0, persistence.ModelCardListFilter{Sort: "name_asc"})
 	require.NoError(t, err)
 	alphabeticalNames := modelNames(alphabeticalModels)
 	require.Contains(t, alphabeticalNames, "mix")
 	require.Contains(t, alphabeticalNames, "Sol xhigh")
 	require.Less(t, slices.Index(alphabeticalNames, "mix"), slices.Index(alphabeticalNames, "Sol xhigh"), alphabeticalNames)
-	reverseModels, err := modelsRepo.ListCardsPageFiltered(ctx, 10, 0, ModelCardListFilter{Sort: "name_desc"})
+	reverseModels, err := modelsRepo.ListCardsPageFiltered(ctx, 10, 0, persistence.ModelCardListFilter{Sort: "name_desc"})
 	require.NoError(t, err)
 	reverseNames := modelNames(reverseModels)
 	require.Contains(t, reverseNames, "mix")
@@ -116,11 +117,11 @@ func TestCollectionFiltersAndSortsApplyBeforePagination(t *testing.T) {
 	} {
 		require.NoError(t, agentsRepo.Create(ctx, agent))
 	}
-	agentsPage, err := agentsRepo.ListPageFiltered(ctx, 1, 1, AgentPageFilter{Enabled: &enabled, Search: "enabled agent", Sort: "name_asc"})
+	agentsPage, err := agentsRepo.ListPageFiltered(ctx, 1, 1, persistence.AgentPageFilter{Enabled: &enabled, Search: "enabled agent", Sort: "name_asc"})
 	require.NoError(t, err)
 	require.Len(t, agentsPage, 1)
 	require.Equal(t, "C enabled agent", agentsPage[0].Name)
-	descendingAgents, err := agentsRepo.ListPageFiltered(ctx, 2, 0, AgentPageFilter{Enabled: &enabled, Search: "enabled agent", Sort: "name_desc"})
+	descendingAgents, err := agentsRepo.ListPageFiltered(ctx, 2, 0, persistence.AgentPageFilter{Enabled: &enabled, Search: "enabled agent", Sort: "name_desc"})
 	require.NoError(t, err)
 	require.Len(t, descendingAgents, 2)
 	require.Equal(t, []string{"C enabled agent", "b enabled agent"}, []string{descendingAgents[0].Name, descendingAgents[1].Name})
@@ -131,7 +132,7 @@ func TestCollectionFiltersAndSortsApplyBeforePagination(t *testing.T) {
 		{"beta-active", "beta active", "active"},
 		{"zulu-paused", "Zulu paused", "paused"},
 	} {
-		automationID, versionID := NewID(), NewID()
+		automationID, versionID := persistence.NewID(), persistence.NewID()
 		_, insertErr := db.ExecContext(ctx, `INSERT INTO automations (id, project_id, stable_key, name, description, automation_type, lifecycle_state, health_state, created_via) VALUES (?, ?, ?, ?, 'pagination filter', 'custom', ?, 'unknown', 'test')`, automationID, project.ID, item.key, item.name, item.lifecycle)
 		require.NoError(t, insertErr)
 		_, insertErr = db.ExecContext(ctx, `INSERT INTO automation_versions (id, project_id, automation_id, version, state, source, adapter_key, published_at) VALUES (?, ?, ?, 1, 'published', 'manual', 'custom', CURRENT_TIMESTAMP)`, versionID, project.ID, automationID)
@@ -139,13 +140,13 @@ func TestCollectionFiltersAndSortsApplyBeforePagination(t *testing.T) {
 		_, insertErr = db.ExecContext(ctx, `UPDATE automations SET published_version_id = ? WHERE id = ?`, versionID, automationID)
 		require.NoError(t, insertErr)
 	}
-	automationsPage, err := automationsRepo.ListPortfolioCardsPageFiltered(ctx, project.ID, 1, 1, AutomationCardListFilter{LifecycleState: "paused", Sort: "name_asc"})
+	automationsPage, err := automationsRepo.ListPortfolioCardsPageFiltered(ctx, project.ID, 1, 1, persistence.AutomationCardListFilter{LifecycleState: "paused", Sort: "name_asc"})
 	require.NoError(t, err)
 	require.Len(t, automationsPage, 1)
 	require.Equal(t, "Zulu paused", automationsPage[0].Automation.Name)
 	require.Zero(t, automationsPage[0].GraphNodeCount, "legacy published Automations with no saved nodes report zero graph topology")
 
-	automationsDefault, err := automationsRepo.ListPortfolioCardsPageFiltered(ctx, project.ID, 10, 0, AutomationCardListFilter{})
+	automationsDefault, err := automationsRepo.ListPortfolioCardsPageFiltered(ctx, project.ID, 10, 0, persistence.AutomationCardListFilter{})
 	require.NoError(t, err)
 	require.Equal(t, []string{"Alpha paused", "beta active", "Zulu paused"}, []string{
 		automationsDefault[0].Automation.Name,
@@ -162,14 +163,14 @@ func TestCollectionFiltersAndSortsApplyBeforePagination(t *testing.T) {
 		_, err = db.ExecContext(ctx, `UPDATE automations SET updated_at = ? WHERE project_id = ? AND name = ?`, updatedAt, project.ID, name)
 		require.NoError(t, err)
 	}
-	automationsRecentlyUpdated, err := automationsRepo.ListPortfolioCardsPageFiltered(ctx, project.ID, 2, 0, AutomationCardListFilter{Sort: "updated_desc"})
+	automationsRecentlyUpdated, err := automationsRepo.ListPortfolioCardsPageFiltered(ctx, project.ID, 2, 0, persistence.AutomationCardListFilter{Sort: "updated_desc"})
 	require.NoError(t, err)
 	require.Len(t, automationsRecentlyUpdated, 2)
 	require.Equal(t, []string{"beta active", "Zulu paused"}, []string{
 		automationsRecentlyUpdated[0].Automation.Name,
 		automationsRecentlyUpdated[1].Automation.Name,
 	})
-	automationsRecentlyUpdatedNextPage, err := automationsRepo.ListPortfolioCardsPageFiltered(ctx, project.ID, 2, 2, AutomationCardListFilter{Sort: "updated_desc"})
+	automationsRecentlyUpdatedNextPage, err := automationsRepo.ListPortfolioCardsPageFiltered(ctx, project.ID, 2, 2, persistence.AutomationCardListFilter{Sort: "updated_desc"})
 	require.NoError(t, err)
 	require.Len(t, automationsRecentlyUpdatedNextPage, 1)
 	require.Equal(t, "Alpha paused", automationsRecentlyUpdatedNextPage[0].Automation.Name)
@@ -178,11 +179,11 @@ func TestCollectionFiltersAndSortsApplyBeforePagination(t *testing.T) {
 	for _, endpoint := range []*models.WebhookEndpoint{{ProjectID: project.ID, Name: "A disabled", Enabled: false}, {ProjectID: project.ID, Name: "b enabled", Enabled: true}, {ProjectID: project.ID, Name: "C enabled", Enabled: true}} {
 		require.NoError(t, webhookRepo.Create(ctx, endpoint))
 	}
-	hooks, err := webhookRepo.ListCardsByProjectPageFiltered(ctx, project.ID, 1, 1, WebhookCardFilter{Enabled: &enabled})
+	hooks, err := webhookRepo.ListCardsByProjectPageFiltered(ctx, project.ID, 1, 1, persistence.WebhookCardFilter{Enabled: &enabled})
 	require.NoError(t, err)
 	require.Len(t, hooks, 1)
 	require.Equal(t, "C enabled", hooks[0].Name)
-	descendingHooks, err := webhookRepo.ListCardsByProjectPageFiltered(ctx, project.ID, 2, 0, WebhookCardFilter{Enabled: &enabled, Sort: "name_desc"})
+	descendingHooks, err := webhookRepo.ListCardsByProjectPageFiltered(ctx, project.ID, 2, 0, persistence.WebhookCardFilter{Enabled: &enabled, Sort: "name_desc"})
 	require.NoError(t, err)
 	require.Equal(t, []string{"C enabled", "b enabled"}, []string{descendingHooks[0].Name, descendingHooks[1].Name})
 }
@@ -201,15 +202,15 @@ func TestModelAuthStatusFilterMatchesOAuthValidityRule(t *testing.T) {
 		require.NoError(t, repo.Create(ctx, config))
 	}
 
-	connected, err := repo.ListCardsPageFiltered(ctx, 20, 0, ModelCardListFilter{AuthStatus: "connected"})
+	connected, err := repo.ListCardsPageFiltered(ctx, 20, 0, persistence.ModelCardListFilter{AuthStatus: "connected"})
 	require.NoError(t, err)
 	require.Equal(t, []string{"Compatible zero expiry"}, modelConfigNames(connected))
 
-	notConnected, err := repo.ListCardsPageFiltered(ctx, 20, 0, ModelCardListFilter{AuthStatus: "not_connected", Sort: "name_asc"})
+	notConnected, err := repo.ListCardsPageFiltered(ctx, 20, 0, persistence.ModelCardListFilter{AuthStatus: "not_connected", Sort: "name_asc"})
 	require.NoError(t, err)
 	require.Equal(t, []string{"Anthropic zero expiry", "OpenAI zero expiry"}, modelConfigNames(notConnected))
 
-	notRequired, err := repo.ListCardsPageFiltered(ctx, 20, 0, ModelCardListFilter{AuthStatus: "not_required"})
+	notRequired, err := repo.ListCardsPageFiltered(ctx, 20, 0, persistence.ModelCardListFilter{AuthStatus: "not_required"})
 	require.NoError(t, err)
 	notRequiredNames := modelConfigNames(notRequired)
 	require.Contains(t, notRequiredNames, "API key")
@@ -241,7 +242,7 @@ func BenchmarkAgentRepoListPageFilteredLargeCatalog(b *testing.B) {
 	} {
 		b.Run(tc.name+"_indexed_repository", func(b *testing.B) {
 			for i := 0; i < b.N; i++ {
-				agents, err := repo.ListPageFiltered(ctx, 51, tc.offset, AgentPageFilter{ProjectID: projectID})
+				agents, err := repo.ListPageFiltered(ctx, 51, tc.offset, persistence.AgentPageFilter{ProjectID: projectID})
 				if err != nil {
 					b.Fatal(err)
 				}
@@ -252,7 +253,7 @@ func BenchmarkAgentRepoListPageFilteredLargeCatalog(b *testing.B) {
 		})
 
 		b.Run(tc.name+"_temp_sort_baseline", func(b *testing.B) {
-			query, args := buildAgentPageFilteredQuery(51, tc.offset, AgentPageFilter{ProjectID: projectID})
+			query, args := buildAgentPageFilteredQuery(51, tc.offset, persistence.AgentPageFilter{ProjectID: projectID})
 			query = strings.Replace(query, " FROM agents WHERE ", " FROM agents NOT INDEXED WHERE ", 1)
 			for i := 0; i < b.N; i++ {
 				count := benchmarkAgentPageQuery(b, db, ctx, query, args...)
@@ -426,7 +427,7 @@ func TestAgentRepoListPageFilteredSortsAvoidTempBTreeOnLargeCatalog(t *testing.T
 		{name: "created_desc", sort: "created_desc", wantIndex: "idx_agents_live_created_page"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			query, args := buildAgentPageFilteredQuery(51, 250, AgentPageFilter{ProjectID: projectID, Sort: tc.sort})
+			query, args := buildAgentPageFilteredQuery(51, 250, persistence.AgentPageFilter{ProjectID: projectID, Sort: tc.sort})
 			plan := explainSQLitePlan(t, db, ctx, query, args...)
 			require.NotContains(t, strings.ToUpper(plan), "USE TEMP B-TREE", plan)
 			require.Contains(t, plan, tc.wantIndex, plan)
@@ -434,7 +435,7 @@ func TestAgentRepoListPageFilteredSortsAvoidTempBTreeOnLargeCatalog(t *testing.T
 	}
 
 	repo := NewAgentRepo(db)
-	page, err := repo.ListPageFiltered(ctx, 25, 100, AgentPageFilter{ProjectID: projectID})
+	page, err := repo.ListPageFiltered(ctx, 25, 100, persistence.AgentPageFilter{ProjectID: projectID})
 	require.NoError(t, err)
 	require.Len(t, page, 25)
 	for _, agent := range page {

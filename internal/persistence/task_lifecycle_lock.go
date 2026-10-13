@@ -1,6 +1,8 @@
-package repository
+package persistence
 
-import "sync"
+import (
+	"sync"
+)
 
 // taskLifecycleLock serializes in-process user admission with task cancellation.
 // Database transactions protect the durable state; this lock also covers the

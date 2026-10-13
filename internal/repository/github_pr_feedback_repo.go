@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 )
 
 type GitHubPRFeedbackRepo struct {
@@ -34,21 +35,19 @@ func (r *GitHubPRFeedbackRepo) AlreadyForwarded(ctx context.Context, repoFullNam
 	return count > 0, nil
 }
 
-func (r *GitHubPRFeedbackRepo) RecordForwardedAndQueue(ctx context.Context, threadInputRepo *ThreadInputRepo, feedback *models.GitHubPRFeedbackForwarded, input *models.ThreadInput) (bool, error) {
-	if threadInputRepo == nil {
-		return false, fmt.Errorf("thread input repository is required")
-	}
+func (r *GitHubPRFeedbackRepo) RecordForwardedAndQueue(ctx context.Context, feedback *models.GitHubPRFeedbackForwarded, input *models.ThreadInput) (bool, error) {
 	if input == nil {
 		return false, fmt.Errorf("thread input is required")
 	}
+	threadInputRepo := NewThreadInputRepo(r.db)
 	var recorded bool
-	err := withImmediateTx(ctx, threadInputRepo.db, func(exec SQLExecutor) error {
+	err := withImmediateTx(ctx, r.db, func(exec sqlExecutor) error {
 		ok, err := r.recordForwardedWithExecutor(ctx, exec, feedback)
 		if err != nil || !ok {
 			recorded = ok
 			return err
 		}
-		if err := threadInputRepo.CreateQueuedWithExecutor(ctx, exec, input); err != nil {
+		if err := threadInputRepo.createQueuedWithExecutor(ctx, exec, input); err != nil {
 			return err
 		}
 		feedback.QueuedThreadInputID = input.ID
@@ -72,7 +71,7 @@ func (r *GitHubPRFeedbackRepo) RecordForwarded(ctx context.Context, feedback *mo
 	return recorded, err
 }
 
-func (r *GitHubPRFeedbackRepo) recordForwardedWithExecutor(ctx context.Context, exec SQLExecutor, feedback *models.GitHubPRFeedbackForwarded) (bool, error) {
+func (r *GitHubPRFeedbackRepo) recordForwardedWithExecutor(ctx context.Context, exec sqlExecutor, feedback *models.GitHubPRFeedbackForwarded) (bool, error) {
 	if feedback == nil {
 		return false, fmt.Errorf("github pr feedback is nil")
 	}
@@ -81,7 +80,7 @@ func (r *GitHubPRFeedbackRepo) recordForwardedWithExecutor(ctx context.Context, 
 	feedback.RepoFullName = strings.ToLower(strings.TrimSpace(feedback.RepoFullName))
 	feedback.FeedbackKind = strings.TrimSpace(feedback.FeedbackKind)
 	feedback.GitHubID = strings.TrimSpace(feedback.GitHubID)
-	feedback.AuthorLogin = NormalizeGitHubLogin(feedback.AuthorLogin)
+	feedback.AuthorLogin = persistence.NormalizeGitHubLogin(feedback.AuthorLogin)
 	if feedback.TaskPullRequestID == "" || feedback.TaskID == "" || feedback.RepoFullName == "" || feedback.PRNumber <= 0 || feedback.FeedbackKind == "" || feedback.GitHubID == "" || feedback.AuthorLogin == "" {
 		return false, fmt.Errorf("task pull request id, task id, repo, pr number, feedback kind, github id, and author login are required")
 	}

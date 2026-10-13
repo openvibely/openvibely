@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/testutil"
 )
 
@@ -37,7 +38,7 @@ func TestAgentRepoListPickerOptionsUsesCompactProjection(t *testing.T) {
 		t.Fatalf("ListPickerOptions: %v", err)
 	}
 
-	want := []AgentPickerOption{{ID: alpha.ID, Name: "Alpha Agent"}, {ID: zulu.ID, Name: "Zulu Agent"}}
+	want := []persistence.AgentPickerOption{{ID: alpha.ID, Name: "Alpha Agent"}, {ID: zulu.ID, Name: "Zulu Agent"}}
 	if len(options) != len(want) {
 		t.Fatalf("options len = %d, want %d: %#v", len(options), len(want), options)
 	}
@@ -365,7 +366,7 @@ func TestAgentRepoGetTaskDetailAgentLabelUsesCompactProjection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get global task detail label: %v", err)
 	}
-	if label == nil || *label != (AgentPickerOption{ID: global.ID, Name: global.Name}) {
+	if label == nil || *label != (persistence.AgentPickerOption{ID: global.ID, Name: global.Name}) {
 		t.Fatalf("global label = %#v, want id/name for %q", label, global.Name)
 	}
 	statements := counter.Statements()
@@ -550,7 +551,7 @@ func measureTaskUIAgentLoadSample(t *testing.T, db *sql.DB, counter *testutil.SQ
 	return time.Since(startedAt), time.Since(waitStartedAt)
 }
 
-func taskUIAgentSelectorBytes(options []AgentTaskUIOption) int {
+func taskUIAgentSelectorBytes(options []persistence.AgentTaskUIOption) int {
 	var builder strings.Builder
 	for _, option := range options {
 		builder.WriteString(option.ID)
@@ -780,7 +781,7 @@ func enrichTaskUIProjectionAgent(tb testing.TB, repo *AgentRepo, agent *models.A
 	}
 }
 
-func marshalPickerJSONFromOptions(tb testing.TB, options []AgentPickerOption) []byte {
+func marshalPickerJSONFromOptions(tb testing.TB, options []persistence.AgentPickerOption) []byte {
 	tb.Helper()
 	type agentData struct {
 		ID   string `json:"id"`

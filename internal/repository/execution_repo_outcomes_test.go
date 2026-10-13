@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/testutil"
 )
 
@@ -146,7 +147,7 @@ func TestExecutionRepo_GetAnalyticsDashboardUsesTaskOutcomesAndProjectPeriod(t *
 
 	from := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	to := time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)
-	dashboard, err := executions.GetAnalyticsDashboard(ctx, AnalyticsDashboardFilter{ProjectID: project.ID, DateFrom: from, DateTo: to, Compare: true, Limit: 20})
+	dashboard, err := executions.GetAnalyticsDashboard(ctx, persistence.AnalyticsDashboardFilter{ProjectID: project.ID, DateFrom: from, DateTo: to, Compare: true, Limit: 20})
 	if err != nil {
 		t.Fatalf("GetAnalyticsDashboard: %v", err)
 	}
@@ -239,7 +240,7 @@ func TestExecutionRepo_GetAnalyticsDashboardUsesTaskOutcomesAndProjectPeriod(t *
 			t.Fatalf("Agent/skill outcome lost Agent, handle, or scope identity: %+v", row)
 		}
 	}
-	projectSkillEvidence, err := executions.GetAnalyticsDashboard(ctx, AnalyticsDashboardFilter{
+	projectSkillEvidence, err := executions.GetAnalyticsDashboard(ctx, persistence.AnalyticsDashboardFilter{
 		ProjectID: project.ID, DateFrom: from, DateTo: to, Limit: 20,
 		EvidenceSkillHandle: "project:evaluator", EvidenceSkillScope: models.SkillScopeProject, EvidenceSkillAgentID: agent.ID,
 	})
@@ -254,7 +255,7 @@ func TestExecutionRepo_GetAnalyticsDashboardUsesTaskOutcomesAndProjectPeriod(t *
 			t.Fatalf("skill outcome evidence included view-only, taskless, wrong-scope, or foreign task: %+v", row)
 		}
 	}
-	globalSkillEvidence, err := executions.GetAnalyticsDashboard(ctx, AnalyticsDashboardFilter{
+	globalSkillEvidence, err := executions.GetAnalyticsDashboard(ctx, persistence.AnalyticsDashboardFilter{
 		ProjectID: project.ID, DateFrom: from, DateTo: to, Limit: 20,
 		EvidenceSkillHandle: "project:evaluator", EvidenceSkillScope: models.SkillScopeGlobal,
 	})
@@ -270,14 +271,14 @@ func TestExecutionRepo_GetAnalyticsDashboardUsesTaskOutcomesAndProjectPeriod(t *
 	if len(dashboard.Definitions) < 12 {
 		t.Errorf("metric definitions = %d, want centralized definitions for outcome and detailed metrics", len(dashboard.Definitions))
 	}
-	filtered, err := executions.GetAnalyticsDashboard(ctx, AnalyticsDashboardFilter{ProjectID: project.ID, DateFrom: from, DateTo: to, AgentID: agent.ID, GroupBy: "day", Limit: 20})
+	filtered, err := executions.GetAnalyticsDashboard(ctx, persistence.AnalyticsDashboardFilter{ProjectID: project.ID, DateFrom: from, DateTo: to, AgentID: agent.ID, GroupBy: "day", Limit: 20})
 	if err != nil {
 		t.Fatalf("filtered Agent dashboard: %v", err)
 	}
 	if filtered.Current.TasksEvaluated != 3 || filtered.AgentDetail == nil || len(filtered.AgentDetail.OutcomeTrend) == 0 || len(filtered.AgentDetail.Categories) == 0 || len(filtered.AgentDetail.ModelMix) == 0 || len(filtered.AgentDetail.Failures) == 0 || len(filtered.AgentDetail.Skills) != 2 || len(filtered.AgentDetail.RecentTasks) != 3 {
 		t.Errorf("Agent filter/detail not applied consistently: current=%+v detail=%+v", filtered.Current, filtered.AgentDetail)
 	}
-	unassigned, err := executions.GetAnalyticsDashboard(ctx, AnalyticsDashboardFilter{ProjectID: project.ID, DateFrom: from, DateTo: to, AgentID: "__unassigned__", Limit: 20})
+	unassigned, err := executions.GetAnalyticsDashboard(ctx, persistence.AnalyticsDashboardFilter{ProjectID: project.ID, DateFrom: from, DateTo: to, AgentID: "__unassigned__", Limit: 20})
 	if err != nil || unassigned.Current.TasksEvaluated != 1 || len(unassigned.RecentOutcomes) != 1 || unassigned.RecentOutcomes[0].TaskID != cancelled.ID {
 		t.Errorf("unassigned filter = current %+v evidence %+v err=%v", unassigned.Current, unassigned.RecentOutcomes, err)
 	}
@@ -355,7 +356,7 @@ func TestExecutionRepo_SkillOutcomeEvidencePreservesAggregateEligibilityForRetri
 
 	from := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	to := time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)
-	aggregate, err := executions.GetAnalyticsDashboard(ctx, AnalyticsDashboardFilter{ProjectID: project.ID, DateFrom: from, DateTo: to, Limit: 20})
+	aggregate, err := executions.GetAnalyticsDashboard(ctx, persistence.AnalyticsDashboardFilter{ProjectID: project.ID, DateFrom: from, DateTo: to, Limit: 20})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -370,7 +371,7 @@ func TestExecutionRepo_SkillOutcomeEvidencePreservesAggregateEligibilityForRetri
 		t.Fatalf("out-of-period goal aggregate = %+v, want excluded from goal numerator and denominator", outcome.GoalAchievement)
 	}
 
-	dashboard, err := executions.GetAnalyticsDashboard(ctx, AnalyticsDashboardFilter{
+	dashboard, err := executions.GetAnalyticsDashboard(ctx, persistence.AnalyticsDashboardFilter{
 		ProjectID: project.ID, DateFrom: from, DateTo: to, Limit: 20,
 		EvidenceSkillHandle: "project:retry-review", EvidenceSkillScope: models.SkillScopeProject,
 	})
@@ -408,7 +409,7 @@ func TestSkillOutcomeSummaryCountsDistinctTasksBeyondChartLimit(t *testing.T) {
 		}
 	}
 	repo := NewExecutionRepo(db)
-	filter := AnalyticsDashboardFilter{ProjectID: "summary", View: "learning", DateFrom: from, DateTo: from.AddDate(0, 0, 1)}
+	filter := persistence.AnalyticsDashboardFilter{ProjectID: "summary", View: "learning", DateFrom: from, DateTo: from.AddDate(0, 0, 1)}
 	dashboard, err := repo.GetAnalyticsDashboard(ctx, filter)
 	if err != nil {
 		t.Fatal(err)
@@ -524,7 +525,7 @@ func TestAnalyticsDashboardModelsCompareConfiguredModelOutcomesAndUsage(t *testi
 		t.Fatalf("seed model analytics: %v", err)
 	}
 
-	dashboard, err := NewExecutionRepo(db).GetAnalyticsDashboard(ctx, AnalyticsDashboardFilter{ProjectID: "model-project", View: "models"})
+	dashboard, err := NewExecutionRepo(db).GetAnalyticsDashboard(ctx, persistence.AnalyticsDashboardFilter{ProjectID: "model-project", View: "models"})
 	if err != nil {
 		t.Fatalf("get model analytics: %v", err)
 	}
@@ -582,7 +583,7 @@ func TestAnalyticsDashboardModelsPeriodActivity(t *testing.T) {
 		t.Fatal(err)
 	}
 	from := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
-	dashboard, err := NewExecutionRepo(db).GetAnalyticsDashboard(ctx, AnalyticsDashboardFilter{ProjectID: "p", View: "models", DateFrom: from, DateTo: from.AddDate(0, 0, 1)})
+	dashboard, err := NewExecutionRepo(db).GetAnalyticsDashboard(ctx, persistence.AnalyticsDashboardFilter{ProjectID: "p", View: "models", DateFrom: from, DateTo: from.AddDate(0, 0, 1)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -590,7 +591,7 @@ func TestAnalyticsDashboardModelsPeriodActivity(t *testing.T) {
 		t.Fatalf("models: %+v", dashboard.Models)
 	}
 	r := dashboard.Models[0]
-	usage, err := NewUsageRepo(db).GetUsageTotals(ctx, UsageFilter{ProjectID: "p", DateFrom: from, DateTo: from.AddDate(0, 0, 1)})
+	usage, err := NewUsageRepo(db).GetUsageTotals(ctx, persistence.UsageFilter{ProjectID: "p", DateFrom: from, DateTo: from.AddDate(0, 0, 1)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -623,7 +624,7 @@ func TestAnalyticsDashboardModelsPeriodActivity(t *testing.T) {
 	if _, err := db.Exec(`UPDATE executions SET started_at='2026-09-02 10:00:00',completed_at='2026-09-02 10:30:00' WHERE id='f'`); err != nil {
 		t.Fatal(err)
 	}
-	filter := AnalyticsDashboardFilter{ProjectID: "p", View: "models", DateFrom: from, DateTo: from.AddDate(0, 0, 3)}
+	filter := persistence.AnalyticsDashboardFilter{ProjectID: "p", View: "models", DateFrom: from, DateTo: from.AddDate(0, 0, 3)}
 	daily, err := NewExecutionRepo(db).queryModelPerformance(ctx, filter)
 	if err != nil {
 		t.Fatal(err)
@@ -690,7 +691,7 @@ func TestAnalyticsAgentsUseTaskActivityAndActiveRunTime(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	filter := AnalyticsDashboardFilter{ProjectID: "agent-metrics", View: "agents", WorkType: "interactive", DateFrom: time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC), DateTo: time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)}
+	filter := persistence.AnalyticsDashboardFilter{ProjectID: "agent-metrics", View: "agents", WorkType: "interactive", DateFrom: time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC), DateTo: time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)}
 	repo := NewExecutionRepo(db)
 	rows, err := repo.queryAgentPerformance(ctx, filter)
 	if err != nil {
@@ -728,7 +729,7 @@ func TestAnalyticsTaskSummaryCountsTasksOnceAndFiltersAgents(t *testing.T) {
 	}
 	repo := NewExecutionRepo(db)
 	for _, view := range []string{"models", "agents"} {
-		d, err := repo.GetAnalyticsDashboard(ctx, AnalyticsDashboardFilter{ProjectID: "kpi", View: view})
+		d, err := repo.GetAnalyticsDashboard(ctx, persistence.AnalyticsDashboardFilter{ProjectID: "kpi", View: view})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -736,7 +737,7 @@ func TestAnalyticsTaskSummaryCountsTasksOnceAndFiltersAgents(t *testing.T) {
 			t.Fatalf("%s: %+v", view, d.TaskSummary)
 		}
 	}
-	s, err := repo.queryAnalyticsTaskSummary(ctx, AnalyticsDashboardFilter{ProjectID: "kpi", AgentID: "__unassigned__"})
+	s, err := repo.queryAnalyticsTaskSummary(ctx, persistence.AnalyticsDashboardFilter{ProjectID: "kpi", AgentID: "__unassigned__"})
 	if err != nil || s.TasksWorkedOn != 1 || s.GoalAchievement.Denominator != 0 {
 		t.Fatalf("filtered summary: %+v %v", s, err)
 	}
@@ -768,7 +769,7 @@ func TestAnalyticsDashboardModelsIncludeAllWorkTypes(t *testing.T) {
 		{workType: "interactive", wantTasks: 2, wantRuns: 2},
 		{workType: "recurring", wantTasks: 2, wantRuns: 2},
 	} {
-		dashboard, err := repo.GetAnalyticsDashboard(ctx, AnalyticsDashboardFilter{ProjectID: "work-type-project", View: "models", WorkType: test.workType})
+		dashboard, err := repo.GetAnalyticsDashboard(ctx, persistence.AnalyticsDashboardFilter{ProjectID: "work-type-project", View: "models", WorkType: test.workType})
 		if err != nil {
 			t.Fatalf("get %q model analytics: %v", test.workType, err)
 		}
@@ -795,7 +796,7 @@ func TestAnalyticsDashboardOverviewOmitsHiddenEvidenceCountAndFollowUpDistributi
 	}
 
 	repo := NewExecutionRepo(db)
-	overview, err := repo.GetAnalyticsDashboard(ctx, AnalyticsDashboardFilter{ProjectID: "overview-project", View: "overview"})
+	overview, err := repo.GetAnalyticsDashboard(ctx, persistence.AnalyticsDashboardFilter{ProjectID: "overview-project", View: "overview"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -809,7 +810,7 @@ func TestAnalyticsDashboardOverviewOmitsHiddenEvidenceCountAndFollowUpDistributi
 		t.Fatalf("Overview computed hidden follow-up distribution: %+v", overview.FollowUpDistribution)
 	}
 
-	outcomes, err := repo.GetAnalyticsDashboard(ctx, AnalyticsDashboardFilter{ProjectID: "overview-project", View: "outcomes"})
+	outcomes, err := repo.GetAnalyticsDashboard(ctx, persistence.AnalyticsDashboardFilter{ProjectID: "overview-project", View: "outcomes"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -828,7 +829,7 @@ func TestExecutionRepo_GetAnalyticsDashboardAllTimeOmitsComparison(t *testing.T)
 	if err := NewProjectRepo(db).Create(context.Background(), project); err != nil {
 		t.Fatal(err)
 	}
-	dashboard, err := repo.GetAnalyticsDashboard(context.Background(), AnalyticsDashboardFilter{ProjectID: project.ID, Compare: true})
+	dashboard, err := repo.GetAnalyticsDashboard(context.Background(), persistence.AnalyticsDashboardFilter{ProjectID: project.ID, Compare: true})
 	if err != nil {
 		t.Fatal(err)
 	}

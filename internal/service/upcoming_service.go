@@ -16,28 +16,28 @@ import (
 	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/chatcontrol"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence"
 )
 
 type UpcomingService struct {
-	upcomingRepo       *repository.UpcomingRepo
-	projectRepo        *repository.ProjectRepo
-	taskCommitStatRepo *repository.TaskCommitStatRepo
+	upcomingRepo       persistence.UpcomingStore
+	projectRepo        persistence.ProjectStore
+	taskCommitStatRepo persistence.TaskCommitStatStore
 	llmSvc             *LLMService
-	llmConfigRepo      *repository.LLMConfigRepo
+	llmConfigRepo      persistence.LLMConfigStore
 }
 
-func NewUpcomingService(upcomingRepo *repository.UpcomingRepo) *UpcomingService {
+func NewUpcomingService(upcomingRepo persistence.UpcomingStore) *UpcomingService {
 	return &UpcomingService{upcomingRepo: upcomingRepo}
 }
 
 // SetProjectRepo sets the project repository for git change summaries
-func (s *UpcomingService) SetProjectRepo(projectRepo *repository.ProjectRepo) {
+func (s *UpcomingService) SetProjectRepo(projectRepo persistence.ProjectStore) {
 	s.projectRepo = projectRepo
 }
 
 // SetTaskCommitStatRepo sets the task commit stat repository for Reflection git-work metrics.
-func (s *UpcomingService) SetTaskCommitStatRepo(taskCommitStatRepo *repository.TaskCommitStatRepo) {
+func (s *UpcomingService) SetTaskCommitStatRepo(taskCommitStatRepo persistence.TaskCommitStatStore) {
 	s.taskCommitStatRepo = taskCommitStatRepo
 }
 
@@ -47,7 +47,7 @@ func (s *UpcomingService) SetLLMService(llmSvc *LLMService) {
 }
 
 // SetLLMConfigRepo sets the LLM config repository for AI summary generation
-func (s *UpcomingService) SetLLMConfigRepo(llmConfigRepo *repository.LLMConfigRepo) {
+func (s *UpcomingService) SetLLMConfigRepo(llmConfigRepo persistence.LLMConfigStore) {
 	s.llmConfigRepo = llmConfigRepo
 }
 

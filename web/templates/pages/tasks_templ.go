@@ -11,7 +11,7 @@ import templruntime "github.com/a-h/templ/runtime"
 import (
 	"fmt"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/web/templates/components"
 	"github.com/openvibely/openvibely/web/templates/layout"
 )
@@ -26,7 +26,7 @@ func getProjectID(project *models.Project, projects []models.Project) string {
 	return ""
 }
 
-func Tasks(projects []models.Project, project *models.Project, tasks []models.Task, agents []models.LLMConfig, agentDefs []repository.AgentTaskUIOption, backlogSort string, completedSort string, menuStates ...map[string]components.TaskCardMergeMenuState) templ.Component {
+func Tasks(projects []models.Project, project *models.Project, tasks []models.Task, agents []models.LLMConfig, agentDefs []persistence.AgentTaskUIOption, backlogSort string, completedSort string, menuStates ...map[string]components.TaskCardMergeMenuState) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
@@ -73,7 +73,7 @@ func Tasks(projects []models.Project, project *models.Project, tasks []models.Ta
 	})
 }
 
-func TasksContent(project *models.Project, tasks []models.Task, agents []models.LLMConfig, agentDefs []repository.AgentTaskUIOption, backlogSort string, completedSort string, menuStates ...map[string]components.TaskCardMergeMenuState) templ.Component {
+func TasksContent(project *models.Project, tasks []models.Task, agents []models.LLMConfig, agentDefs []persistence.AgentTaskUIOption, backlogSort string, completedSort string, menuStates ...map[string]components.TaskCardMergeMenuState) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {

@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 )
 
 type AutomationGraphWrite struct {
@@ -63,7 +64,7 @@ func writeAutomationGraph(ctx context.Context, conn *sql.Conn, in AutomationGrap
 func writeAutomationGraphRows(ctx context.Context, conn *sql.Conn, projectID, automationID, versionID string, nodes []models.AutomationNodeSpec, edges []models.AutomationEdgeSpec) (map[string]string, error) {
 	nodeIDs := make(map[string]string, len(nodes))
 	for _, node := range nodes {
-		nodeID := NewID()
+		nodeID := persistence.NewID()
 		config := node.ConfigJSON
 		if strings.TrimSpace(config) == "" {
 			config = "{}"
@@ -88,7 +89,7 @@ func writeAutomationGraphRows(ctx context.Context, conn *sql.Conn, projectID, au
 		}
 		if _, err := conn.ExecContext(ctx, `INSERT INTO automation_edges
 			(id, project_id, automation_id, version_id, source_node_id, target_node_id, edge_key, label, condition_json, display_order)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, NewID(), projectID, automationID, versionID,
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, persistence.NewID(), projectID, automationID, versionID,
 			sourceID, targetID, edge.Key, edge.Label, condition, edge.DisplayOrder); err != nil {
 			return nil, fmt.Errorf("creating automation edge %q: %w", edge.Key, err)
 		}

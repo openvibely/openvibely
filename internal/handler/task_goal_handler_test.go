@@ -575,7 +575,7 @@ func TestGoalAgentSendToTaskQueuesCurrentRunWhenOlderAfterCompleteRowsAreLate(t 
 	createLifecycleExec := func(runID string, when models.LifecycleWhen, skill string) {
 		t.Helper()
 		exec := &models.LifecycleExecution{TaskID: task.ID, TaskRunID: runID, AgentID: goalAgent.ID, When: when, SkillKey: skill, OutputContract: models.OutputContractActivitySummary, Status: models.LifecycleExecCompleted}
-		if err := tc.handler.lifecycleRepo.CreateExecution(ctx, exec); err != nil {
+		if err := tc.handler.lifecycleRepo.(*repository.LifecycleRepo).CreateExecution(ctx, exec); err != nil {
 			t.Fatalf("create lifecycle execution %s/%s: %v", runID, skill, err)
 		}
 	}
@@ -753,11 +753,11 @@ func TestLifecycleSendToTaskRejectsStaleTaskRunContinuation(t *testing.T) {
 		t.Fatalf("create lifecycle agent: %v", err)
 	}
 	older := &models.LifecycleExecution{TaskID: task.ID, TaskRunID: "run-old", AgentID: lifecycleAgent.ID, When: models.LifecycleAfterComplete, SkillKey: "manage_dynamic_loop", OutputContract: models.OutputContractActivitySummary, Status: models.LifecycleExecRunning}
-	if err := tc.handler.lifecycleRepo.CreateExecution(ctx, older); err != nil {
+	if err := tc.handler.lifecycleRepo.(*repository.LifecycleRepo).CreateExecution(ctx, older); err != nil {
 		t.Fatalf("create older lifecycle execution: %v", err)
 	}
 	newer := &models.LifecycleExecution{TaskID: task.ID, TaskRunID: "run-new", AgentID: lifecycleAgent.ID, When: models.LifecycleRouteTask, SkillKey: "route_task", OutputContract: models.OutputContractSelectedSkills, Status: models.LifecycleExecRunning}
-	if err := tc.handler.lifecycleRepo.CreateExecution(ctx, newer); err != nil {
+	if err := tc.handler.lifecycleRepo.(*repository.LifecycleRepo).CreateExecution(ctx, newer); err != nil {
 		t.Fatalf("create newer lifecycle execution: %v", err)
 	}
 
@@ -800,15 +800,15 @@ func TestLifecycleSendToTaskAllowsCrossTaskWhenDestinationHasNewerRuns(t *testin
 		t.Fatalf("create lifecycle agent: %v", err)
 	}
 	sourceRun := &models.LifecycleExecution{TaskID: sourceTask.ID, TaskRunID: "source-run-current", AgentID: lifecycleAgent.ID, When: models.LifecycleAfterComplete, SkillKey: "coordinate", OutputContract: models.OutputContractActivitySummary, Status: models.LifecycleExecRunning}
-	if err := tc.handler.lifecycleRepo.CreateExecution(ctx, sourceRun); err != nil {
+	if err := tc.handler.lifecycleRepo.(*repository.LifecycleRepo).CreateExecution(ctx, sourceRun); err != nil {
 		t.Fatalf("create source lifecycle execution: %v", err)
 	}
 	destinationOlder := &models.LifecycleExecution{TaskID: destinationTask.ID, TaskRunID: "destination-run-old", AgentID: lifecycleAgent.ID, When: models.LifecycleAfterComplete, SkillKey: "observe", OutputContract: models.OutputContractActivitySummary, Status: models.LifecycleExecCompleted}
-	if err := tc.handler.lifecycleRepo.CreateExecution(ctx, destinationOlder); err != nil {
+	if err := tc.handler.lifecycleRepo.(*repository.LifecycleRepo).CreateExecution(ctx, destinationOlder); err != nil {
 		t.Fatalf("create destination older lifecycle execution: %v", err)
 	}
 	destinationNewer := &models.LifecycleExecution{TaskID: destinationTask.ID, TaskRunID: "destination-run-new", AgentID: lifecycleAgent.ID, When: models.LifecycleRouteTask, SkillKey: "route", OutputContract: models.OutputContractSelectedSkills, Status: models.LifecycleExecRunning}
-	if err := tc.handler.lifecycleRepo.CreateExecution(ctx, destinationNewer); err != nil {
+	if err := tc.handler.lifecycleRepo.(*repository.LifecycleRepo).CreateExecution(ctx, destinationNewer); err != nil {
 		t.Fatalf("create destination newer lifecycle execution: %v", err)
 	}
 

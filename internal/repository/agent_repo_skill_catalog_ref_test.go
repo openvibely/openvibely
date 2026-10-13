@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/testutil"
 )
 
@@ -34,7 +35,7 @@ func TestAgentRepoListSkillCatalogRefsUsesCompactProjection(t *testing.T) {
 		t.Fatalf("ListSkillCatalogRefs: %v", err)
 	}
 
-	want := []AgentSkillCatalogRef{
+	want := []persistence.AgentSkillCatalogRef{
 		{ID: alpha.ID, Key: "alpha_agent", ProjectID: alphaProjectID},
 		{ID: zulu.ID, Key: "zulu_agent"},
 	}

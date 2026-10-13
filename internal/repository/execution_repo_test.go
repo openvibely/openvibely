@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/testutil"
 )
 
@@ -1073,7 +1074,7 @@ func TestExecutionRepo_CompleteSuccessIfNoPendingSteeringReportsTerminalState(t 
 	if err != nil {
 		t.Fatalf("SuccessCompletionReadiness before cancellation: %v", err)
 	}
-	if readiness != CompleteSuccessCompleted {
+	if readiness != persistence.CompleteSuccessCompleted {
 		t.Fatalf("expected completion-ready execution, got %s", readiness)
 	}
 	if err := execRepo.Complete(ctx, exec.ID, models.ExecCancelled, "partial", "cancelled", 0, 10); err != nil {
@@ -1083,7 +1084,7 @@ func TestExecutionRepo_CompleteSuccessIfNoPendingSteeringReportsTerminalState(t 
 	if err != nil {
 		t.Fatalf("SuccessCompletionReadiness after cancellation: %v", err)
 	}
-	if readiness != CompleteSuccessAlreadyTerminal {
+	if readiness != persistence.CompleteSuccessAlreadyTerminal {
 		t.Fatalf("expected terminal readiness after cancellation, got %s", readiness)
 	}
 
@@ -1091,7 +1092,7 @@ func TestExecutionRepo_CompleteSuccessIfNoPendingSteeringReportsTerminalState(t 
 	if err != nil {
 		t.Fatalf("CompleteSuccessIfNoPendingSteering: %v", err)
 	}
-	if outcome != CompleteSuccessAlreadyTerminal {
+	if outcome != persistence.CompleteSuccessAlreadyTerminal {
 		t.Fatalf("expected already-terminal outcome, got %s", outcome)
 	}
 	stored, err := execRepo.GetByID(ctx, exec.ID)
@@ -1498,8 +1499,8 @@ func TestExecutionRepo_StreamOutputChunksAreVisibleAndFlattenedOnCompletion(t *t
 	if err != nil {
 		t.Fatalf("complete successful streamed execution: %v", err)
 	}
-	if outcome != CompleteSuccessCompleted {
-		t.Fatalf("completion outcome = %q, want %q", outcome, CompleteSuccessCompleted)
+	if outcome != persistence.CompleteSuccessCompleted {
+		t.Fatalf("completion outcome = %q, want %q", outcome, persistence.CompleteSuccessCompleted)
 	}
 	stored, err = execRepo.GetByID(ctx, successExec.ID)
 	if err != nil {

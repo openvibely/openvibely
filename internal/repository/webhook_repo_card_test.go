@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/testutil"
 )
 
@@ -42,7 +43,7 @@ func TestWebhookRepo_ListCardsByProjectUsesCompactOrderedIndex(t *testing.T) {
 				t.Fatalf("paginated card list plan = %s, want no temporary order sort", plan)
 			}
 
-			cards, err := repo.ListCardsByProjectPageFiltered(context.Background(), project.ID, 20, 20, WebhookCardFilter{Enabled: &enabled, Sort: test.sort})
+			cards, err := repo.ListCardsByProjectPageFiltered(context.Background(), project.ID, 20, 20, persistence.WebhookCardFilter{Enabled: &enabled, Sort: test.sort})
 			if err != nil {
 				t.Fatalf("ListCardsByProjectPageFiltered: %v", err)
 			}
@@ -96,7 +97,7 @@ func TestWebhookRepo_ListCardsByProjectUsesSQLiteNoCaseOrderingForUnicodeNames(t
 		t.Run(test.name, func(t *testing.T) {
 			var got []string
 			for offset := 0; offset < 4; offset += 2 {
-				cards, err := repo.ListCardsByProjectPageFiltered(context.Background(), project.ID, 2, offset, WebhookCardFilter{Sort: test.sort})
+				cards, err := repo.ListCardsByProjectPageFiltered(context.Background(), project.ID, 2, offset, persistence.WebhookCardFilter{Sort: test.sort})
 				if err != nil {
 					t.Fatalf("ListCardsByProjectPageFiltered offset %d: %v", offset, err)
 				}

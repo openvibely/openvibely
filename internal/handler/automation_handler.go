@@ -7,7 +7,7 @@ import (
 	"github.com/a-h/templ"
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/web/templates/pages"
 )
@@ -78,8 +78,8 @@ func (h *Handler) SetAutomationBuilderServices(drafts *service.AutomationDraftSe
 	}
 }
 
-func automationCardListFilter(c echo.Context, page cardPageRequest) repository.AutomationCardListFilter {
-	return repository.AutomationCardListFilter{
+func automationCardListFilter(c echo.Context, page cardPageRequest) persistence.AutomationCardListFilter {
+	return persistence.AutomationCardListFilter{
 		Search:         page.Search,
 		LifecycleState: allowlistedQuery(c, "lifecycle_state", "", "active", "paused", "draft", "archived"),
 		HealthState:    allowlistedQuery(c, "health_state", "", "unknown", "healthy", "degraded", "unhealthy"),
@@ -89,7 +89,7 @@ func automationCardListFilter(c echo.Context, page cardPageRequest) repository.A
 	}
 }
 
-func automationCardListState(projectID string, filter repository.AutomationCardListFilter) pages.CardListState {
+func automationCardListState(projectID string, filter persistence.AutomationCardListFilter) pages.CardListState {
 	return pages.CardListState{
 		ProjectID: projectID,
 		Search:    filter.Search,

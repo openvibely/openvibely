@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence"
 )
 
 // ChannelStatusAuthorizationCounts contains only aggregate counts used by the
@@ -145,7 +145,7 @@ type ChannelStatusOutboundTargets struct {
 // LoadChannelStatusSettings loads the canonical settings inventory used by all
 // list_channels surfaces. Secrets are retained only in the in-process settings
 // map so configuration can be classified; they are never part of the snapshot.
-func LoadChannelStatusSettings(ctx context.Context, settingsRepo *repository.SettingsRepo, projectID string) map[string]string {
+func LoadChannelStatusSettings(ctx context.Context, settingsRepo persistence.SettingsStore, projectID string) map[string]string {
 	if settingsRepo == nil {
 		return map[string]string{}
 	}

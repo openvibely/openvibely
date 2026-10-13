@@ -20,7 +20,7 @@ import (
 	"github.com/openvibely/openvibely/internal/applog"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/pkg/agenttools"
 )
 
@@ -65,9 +65,9 @@ func (ws *WorktreeService) WithRepositoryMutation(repoDir string, mutate func() 
 
 // WorktreeService manages git worktrees for task isolation.
 type WorktreeService struct {
-	taskRepo     *repository.TaskRepo
-	projectRepo  *repository.ProjectRepo
-	settingsRepo *repository.SettingsRepo
+	taskRepo     persistence.TaskStore
+	projectRepo  persistence.ProjectStore
+	settingsRepo persistence.SettingsStore
 	llmSvc       *LLMService
 	taskGoalSvc  *TaskGoalService
 }
@@ -77,7 +77,7 @@ type WorktreeService struct {
 // the same Git repository.
 var repositoryMutationLeases sync.Map // canonical Git common directory -> *atomic.Bool
 
-func NewWorktreeService(taskRepo *repository.TaskRepo, projectRepo *repository.ProjectRepo, settingsRepo *repository.SettingsRepo) *WorktreeService {
+func NewWorktreeService(taskRepo persistence.TaskStore, projectRepo persistence.ProjectStore, settingsRepo persistence.SettingsStore) *WorktreeService {
 	return &WorktreeService{
 		taskRepo:     taskRepo,
 		projectRepo:  projectRepo,

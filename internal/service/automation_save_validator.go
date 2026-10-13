@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence"
 )
 
 type automationGitHubConnectionProvider interface {
@@ -76,7 +76,7 @@ func resolveAutomationProjectGitHubRepository(ctx context.Context, provider any,
 	return nil, errors.New("project has no GitHub repository URL or resolvable local Git remote")
 }
 
-func automationGitHubAuthorizedInboxReady(ctx context.Context, repo *repository.GitHubAuthRepo) (bool, error) {
+func automationGitHubAuthorizedInboxReady(ctx context.Context, repo persistence.GitHubAuthStore) (bool, error) {
 	if repo == nil {
 		return false, nil
 	}
@@ -95,10 +95,10 @@ func automationGitHubAuthorizedInboxReady(ctx context.Context, repo *repository.
 type AutomationSaveValidator struct {
 	registry         *AutomationAdapterRegistry
 	drafts           *AutomationDraftService
-	projectRepo      *repository.ProjectRepo
-	settingsRepo     *repository.SettingsRepo
-	githubAuthRepo   *repository.GitHubAuthRepo
-	agentRepo        *repository.AgentRepo
+	projectRepo      persistence.ProjectStore
+	settingsRepo     persistence.SettingsStore
+	githubAuthRepo   persistence.GitHubAuthStore
+	agentRepo        persistence.AgentStore
 	githubConnection automationGitHubConnectionProvider
 }
 
@@ -106,13 +106,13 @@ func NewAutomationSaveValidator(registry *AutomationAdapterRegistry, drafts *Aut
 	return &AutomationSaveValidator{registry: registry, drafts: drafts}
 }
 
-func (p *AutomationSaveValidator) SetCapabilityDependencies(projectRepo *repository.ProjectRepo, settingsRepo *repository.SettingsRepo, githubAuthRepo *repository.GitHubAuthRepo) {
+func (p *AutomationSaveValidator) SetCapabilityDependencies(projectRepo persistence.ProjectStore, settingsRepo persistence.SettingsStore, githubAuthRepo persistence.GitHubAuthStore) {
 	p.projectRepo = projectRepo
 	p.settingsRepo = settingsRepo
 	p.githubAuthRepo = githubAuthRepo
 }
 
-func (p *AutomationSaveValidator) SetAgentRepository(agentRepo *repository.AgentRepo) {
+func (p *AutomationSaveValidator) SetAgentRepository(agentRepo persistence.AgentStore) {
 	p.agentRepo = agentRepo
 }
 
@@ -146,7 +146,7 @@ func (v *AutomationSaveValidator) agentIssues(ctx context.Context, projectID str
 	return validateAutomationCandidateAgentReferences(candidate, available), nil
 }
 
-func resolveAutomationAgent(ctx context.Context, agentRepo *repository.AgentRepo, projectID, ref string) (*models.Agent, error) {
+func resolveAutomationAgent(ctx context.Context, agentRepo persistence.AgentStore, projectID, ref string) (*models.Agent, error) {
 	if agentRepo == nil || strings.TrimSpace(ref) == "" {
 		return nil, nil
 	}

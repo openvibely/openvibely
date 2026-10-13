@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/stretchr/testify/require"
 )
@@ -17,7 +18,7 @@ type inboundReceiptHarness struct {
 	successKey  string
 	rollbackKey string
 	timeoutKey  string
-	handoff     func(context.Context, string, func(SQLExecutor) error) (bool, error)
+	handoff     func(context.Context, string, func(persistence.Tx) error) (bool, error)
 	exists      func(context.Context, string) (bool, error)
 }
 
@@ -30,7 +31,7 @@ func inboundReceiptHarnesses(db *sql.DB) []inboundReceiptHarness {
 			successKey:  "message-1",
 			rollbackKey: "message-rollback",
 			timeoutKey:  "message-timeout",
-			handoff: func(ctx context.Context, key string, persist func(SQLExecutor) error) (bool, error) {
+			handoff: func(ctx context.Context, key string, persist func(persistence.Tx) error) (bool, error) {
 				return email.WithHandoff(ctx, "inbox@example.com", key, persist)
 			},
 			exists: func(ctx context.Context, key string) (bool, error) {
@@ -42,7 +43,7 @@ func inboundReceiptHarnesses(db *sql.DB) []inboundReceiptHarness {
 			successKey:  "T1|D1|message-1|U1",
 			rollbackKey: "T1|D1|message-rollback|U1",
 			timeoutKey:  "T1|D1|timeout|U1",
-			handoff: func(ctx context.Context, key string, persist func(SQLExecutor) error) (bool, error) {
+			handoff: func(ctx context.Context, key string, persist func(persistence.Tx) error) (bool, error) {
 				return slack.WithHandoff(ctx, key, persist)
 			},
 			exists: func(ctx context.Context, key string) (bool, error) {
@@ -59,9 +60,11 @@ func TestInboundReceiptHandoffTypedReposShareAtomicIdempotentBehavior(t *testing
 		t.Run(tt.name, func(t *testing.T) {
 			ctx := context.Background()
 			persistCalls := 0
-			already, err := tt.handoff(ctx, tt.successKey, func(exec SQLExecutor) error {
+			already, err := tt.handoff(ctx, tt.successKey, func(tx persistence.Tx) error {
 				persistCalls++
-				_, err := exec.ExecContext(ctx, `INSERT INTO app_settings (key, value) VALUES (?, ?)`, fmt.Sprintf("%s-handoff", tt.name), tt.successKey)
+				exec, err := executorFromTx(tx)
+				require.NoError(t, err)
+				_, err = exec.ExecContext(ctx, `INSERT INTO app_settings (key, value) VALUES (?, ?)`, fmt.Sprintf("%s-handoff", tt.name), tt.successKey)
 				return err
 			})
 			require.NoError(t, err)
@@ -72,7 +75,7 @@ func TestInboundReceiptHandoffTypedReposShareAtomicIdempotentBehavior(t *testing
 			require.NoError(t, err)
 			require.True(t, exists)
 
-			already, err = tt.handoff(ctx, tt.successKey, func(SQLExecutor) error {
+			already, err = tt.handoff(ctx, tt.successKey, func(persistence.Tx) error {
 				persistCalls++
 				return nil
 			})
@@ -80,7 +83,7 @@ func TestInboundReceiptHandoffTypedReposShareAtomicIdempotentBehavior(t *testing
 			require.True(t, already)
 			require.Equal(t, 1, persistCalls)
 
-			already, err = tt.handoff(ctx, tt.rollbackKey, func(SQLExecutor) error {
+			already, err = tt.handoff(ctx, tt.rollbackKey, func(persistence.Tx) error {
 				persistCalls++
 				return errors.New("persist failed")
 			})
@@ -105,7 +108,7 @@ func TestInboundReceiptHandoffTypedReposRollbackOnContextTimeout(t *testing.T) {
 			defer cancel()
 
 			started := time.Now()
-			already, err := tt.handoff(ctx, tt.timeoutKey, func(SQLExecutor) error {
+			already, err := tt.handoff(ctx, tt.timeoutKey, func(persistence.Tx) error {
 				<-ctx.Done()
 				return ctx.Err()
 			})

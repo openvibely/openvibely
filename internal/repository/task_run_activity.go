@@ -3,37 +3,13 @@ package repository
 import (
 	"context"
 	"fmt"
+	"github.com/openvibely/openvibely/internal/persistence"
 )
-
-type TaskRunPeriod struct {
-	AverageRunMs    float64 `json:"average_run_ms"`
-	DurationSamples int     `json:"duration_samples"`
-	Period          string  `json:"period"`
-	Runs            int     `json:"runs"`
-	Completed       int     `json:"completed"`
-	Failed          int     `json:"failed"`
-	Cancelled       int     `json:"cancelled"`
-}
-type TaskRunModel struct {
-	ModelConfigID   string          `json:"model_config_id"`
-	ConfigName      string          `json:"config_name"`
-	Provider        string          `json:"provider"`
-	Model           string          `json:"model"`
-	ReasoningEffort string          `json:"reasoning_effort"`
-	Runs            int             `json:"runs"`
-	AverageRunMs    float64         `json:"average_run_ms"`
-	DurationSamples int             `json:"duration_samples"`
-	Trend           []TaskRunPeriod `json:"trend"`
-}
-type TaskRunActivity struct {
-	Hours  [24]int        `json:"hours"`
-	Models []TaskRunModel `json:"models"`
-}
 
 // GetTaskRunActivity counts actual task runs, attributed to the configuration
 // that ran them. It excludes chat tasks and uses run-start date throughout.
-func (r *ExecutionRepo) GetTaskRunActivity(ctx context.Context, f AnalyticsDashboardFilter) (TaskRunActivity, error) {
-	out := TaskRunActivity{Models: []TaskRunModel{}}
+func (r *ExecutionRepo) GetTaskRunActivity(ctx context.Context, f persistence.AnalyticsDashboardFilter) (persistence.TaskRunActivity, error) {
+	out := persistence.TaskRunActivity{Models: []persistence.TaskRunModel{}}
 	if f.ProjectID == "" {
 		return out, fmt.Errorf("project_id is required")
 	}
@@ -50,8 +26,8 @@ func (r *ExecutionRepo) GetTaskRunActivity(ctx context.Context, f AnalyticsDashb
 	defer rows.Close()
 	indices := map[string]int{}
 	for rows.Next() {
-		var m TaskRunModel
-		var p TaskRunPeriod
+		var m persistence.TaskRunModel
+		var p persistence.TaskRunPeriod
 		var hour, runs, n int
 		var duration float64
 		if err := rows.Scan(&m.ModelConfigID, &m.ConfigName, &m.Provider, &m.Model, &m.ReasoningEffort, &p.Period, &hour, &runs, &p.Completed, &p.Failed, &p.Cancelled, &duration, &n); err != nil {
@@ -61,7 +37,7 @@ func (r *ExecutionRepo) GetTaskRunActivity(ctx context.Context, f AnalyticsDashb
 		if !ok {
 			idx = len(out.Models)
 			indices[m.ModelConfigID] = idx
-			m.Trend = []TaskRunPeriod{}
+			m.Trend = []persistence.TaskRunPeriod{}
 			out.Models = append(out.Models, m)
 		}
 		target := &out.Models[idx]

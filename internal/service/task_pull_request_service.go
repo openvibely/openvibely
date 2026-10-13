@@ -7,7 +7,7 @@ import (
 
 	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence"
 )
 
 type TaskPullRequestGitHubProvider interface {
@@ -31,8 +31,8 @@ type taskPullRequestBranchReplacer interface {
 
 type TaskPullRequestService struct {
 	github             TaskPullRequestGitHubProvider
-	repo               *repository.TaskPullRequestRepo
-	taskCommitStatRepo *repository.TaskCommitStatRepo
+	repo               persistence.TaskPullRequestStore
+	taskCommitStatRepo persistence.TaskCommitStatStore
 }
 
 type OpenTaskPullRequestOptions struct {
@@ -59,11 +59,11 @@ type OpenTaskPullRequestResult struct {
 	Created              bool
 }
 
-func NewTaskPullRequestService(github TaskPullRequestGitHubProvider, repo *repository.TaskPullRequestRepo) *TaskPullRequestService {
+func NewTaskPullRequestService(github TaskPullRequestGitHubProvider, repo persistence.TaskPullRequestStore) *TaskPullRequestService {
 	return &TaskPullRequestService{github: github, repo: repo}
 }
 
-func (s *TaskPullRequestService) SetTaskCommitStatRepo(repo *repository.TaskCommitStatRepo) *TaskPullRequestService {
+func (s *TaskPullRequestService) SetTaskCommitStatRepo(repo persistence.TaskCommitStatStore) *TaskPullRequestService {
 	s.taskCommitStatRepo = repo
 	return s
 }

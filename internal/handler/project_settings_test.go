@@ -69,6 +69,7 @@ func TestProjectSettings_EndToEnd(t *testing.T) {
 		nil, // settingsRepo
 		broadcaster,
 		nil, // telegramSvc
+		newTestRuntimeStores(db),
 	)
 
 	e := echo.New()
@@ -444,6 +445,7 @@ func TestNewProjectDialog(t *testing.T) {
 		nil,        // settingsRepo
 		nil,        // broadcaster
 		nil,        // telegramSvc
+		RuntimeStores{},
 	)
 
 	// Create LLM configs
@@ -578,6 +580,7 @@ func TestProjectDialogs_GitHubOnlyModeHidesLocalSourceOption(t *testing.T) {
 		nil, // settingsRepo
 		nil, // broadcaster
 		nil, // telegramSvc
+		RuntimeStores{},
 	)
 
 	t.Run("new dialog github only", func(t *testing.T) {
@@ -711,6 +714,7 @@ func TestUpdateProject_SwitchLocalToGitHub_LocalDisabled(t *testing.T) {
 		nil, // settingsRepo
 		nil, // broadcaster
 		nil, // telegramSvc
+		RuntimeStores{},
 	)
 
 	// A legacy local project can submit repo_source=local and preserve local path
@@ -829,6 +833,7 @@ func TestProjectCreate_WithDefaultSettings(t *testing.T) {
 		nil, // settingsRepo
 		nil, // broadcaster
 		nil, // telegramSvc
+		RuntimeStores{},
 	)
 
 	t.Run("AbsolutePathPreservedNoCwdPrefix", func(t *testing.T) {
@@ -1068,6 +1073,7 @@ func TestProjectCreate_WithSettings(t *testing.T) {
 		nil, // settingsRepo
 		nil, // broadcaster
 		nil, // telegramSvc
+		RuntimeStores{},
 	)
 
 	// Create an LLM config
@@ -1177,6 +1183,7 @@ func TestDeleteProject(t *testing.T) {
 		nil, // settingsRepo
 		broadcaster,
 		nil, // telegramSvc
+		newTestRuntimeStores(db),
 	)
 
 	e := echo.New()
@@ -1668,6 +1675,7 @@ func TestGlobalPersonality(t *testing.T) {
 		settingsRepo,
 		nil, // broadcaster
 		nil, // telegramSvc
+		RuntimeStores{},
 	)
 
 	e := echo.New()
@@ -1916,7 +1924,7 @@ func TestEditProjectDialogShowsRepositoryPathHealth(t *testing.T) {
 	projectRepo := repository.NewProjectRepo(db)
 	llmConfigRepo := repository.NewLLMConfigRepo(db)
 	projectSvc := service.NewProjectService(projectRepo)
-	h := New(projectSvc, nil, nil, nil, nil, nil, nil, nil, llmConfigRepo, nil, nil, nil, nil, nil, nil, projectRepo, nil, events.NewBroadcaster(), nil)
+	h := New(projectSvc, nil, nil, nil, nil, nil, nil, nil, llmConfigRepo, nil, nil, nil, nil, nil, nil, projectRepo, nil, events.NewBroadcaster(), nil, RuntimeStores{})
 	e := echo.New()
 
 	renderDialog := func(t *testing.T, project *models.Project) string {

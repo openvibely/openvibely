@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"github.com/openvibely/openvibely/internal/persistence"
 )
 
 // EmailSenderProjectRepo persists active project selection per email sender.
@@ -17,7 +18,7 @@ func NewEmailSenderProjectRepo(db *sql.DB) *EmailSenderProjectRepo {
 
 // SetSenderProject writes the active project selection for a normalized sender email.
 func (r *EmailSenderProjectRepo) SetSenderProject(ctx context.Context, emailAddress, projectID string) error {
-	emailAddress = NormalizeEmailAddress(emailAddress)
+	emailAddress = persistence.NormalizeEmailAddress(emailAddress)
 	if emailAddress == "" {
 		return fmt.Errorf("set email sender project: email address is required")
 	}
@@ -26,12 +27,12 @@ func (r *EmailSenderProjectRepo) SetSenderProject(ctx context.Context, emailAddr
 
 // GetSenderProject returns the active project ID for a normalized sender email, or "" if not set.
 func (r *EmailSenderProjectRepo) GetSenderProject(ctx context.Context, emailAddress string) (string, error) {
-	emailAddress = NormalizeEmailAddress(emailAddress)
+	emailAddress = persistence.NormalizeEmailAddress(emailAddress)
 	return getUserProject(ctx, r.db, "email_sender_projects", "email_address", emailAddress, "email sender project")
 }
 
 // DeleteSenderProject removes the active project selection for a normalized sender email.
 func (r *EmailSenderProjectRepo) DeleteSenderProject(ctx context.Context, emailAddress string) error {
-	emailAddress = NormalizeEmailAddress(emailAddress)
+	emailAddress = persistence.NormalizeEmailAddress(emailAddress)
 	return deleteUserProject(ctx, r.db, "email_sender_projects", "email_address", emailAddress, "email sender project")
 }

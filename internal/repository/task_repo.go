@@ -11,9 +11,8 @@ import (
 
 	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 )
-
-var ErrDuplicateTask = errors.New("task with this name already exists in this project")
 
 // TaskExecutionHistoryCutoff is the run admission watermark used to reject a
 // stale cancellation before it can touch an in-process callback or queue.
@@ -24,14 +23,6 @@ func (r *TaskRepo) TaskExecutionHistoryCutoff(ctx context.Context, taskID string
 		return 0, fmt.Errorf("loading task execution cutoff: %w", err)
 	}
 	return cutoff, nil
-}
-
-// ProjectTaskStatusCounts contains only the task predicates needed by the
-// terminal status view. It intentionally does not hydrate task cards.
-type ProjectTaskStatusCounts struct {
-	ActiveTasks int
-	QueuedTasks int
-	FailedTasks int
 }
 
 const taskSelectColumns = `id, project_id, title, category, priority, status, prompt, agent_id, agent_definition_id, tag, display_order, parent_task_id, chain_config, swarm_role, swarm_status, swarm_config, swarm_sequence, worktree_path, worktree_branch, auto_merge, auto_merge_on_goal_achieved, merge_target_branch, merge_status, base_branch, base_commit_sha, lineage_depth, created_via, telegram_chat_id, created_at, updated_at, completed_at`
@@ -195,48 +186,7 @@ var taskReferenceSelectColumns = fmt.Sprintf(`t.id, t.project_id, t.title, t.cat
 type TaskRepo struct {
 	db          *sql.DB
 	broadcaster *events.Broadcaster
-}
-
-// ActiveTaskAdmission is the compact row returned by
-// ListActivePendingAdmissions. It is an admission hint, not a complete task;
-// callers that need prompt, workflow, worktree, or other execution detail must
-// reload the task through GetByID.
-type ActiveTaskAdmission struct {
-	ID                string
-	ProjectID         string
-	Title             string
-	Category          models.TaskCategory
-	Priority          int
-	Status            models.TaskStatus
-	AgentID           *string
-	AgentDefinitionID *string
-	ParentTaskID      *string
-	SwarmRole         models.SwarmRole
-}
-
-// ChatTaskContextRow is the bounded task projection used to build external
-// channel Chat context. It is intentionally not a models.Task so callers
-// cannot accidentally treat it as a full record for mutation or execution.
-type ChatTaskContextRow struct {
-	ID            string
-	Title         string
-	Category      models.TaskCategory
-	Priority      int
-	Status        models.TaskStatus
-	PromptPreview string
-	AgentID       *string
-	Tag           models.TaskTag
-	ParentTaskID  *string
-	ChainConfig   string
-}
-
-// ProjectedTaskCategoryChange describes one compact task row moved by a
-// project-scoped normalization update.
-type ProjectedTaskCategoryChange struct {
-	ID          string
-	Title       string
-	OldCategory models.TaskCategory
-	Category    models.TaskCategory
+	executions  *ExecutionRepo
 }
 
 func NewTaskRepo(db *sql.DB, broadcaster *events.Broadcaster) *TaskRepo {
@@ -253,16 +203,16 @@ func (r *TaskRepo) ListByProject(ctx context.Context, projectID string, category
 // ListChatContextByProject returns the bounded, project-scoped task rows needed
 // by external-channel Chat context. Chat-category tasks are excluded here just
 // as BuildChatContextWithAgentDefinitions excludes them before formatting.
-func (r *TaskRepo) ListChatContextByProject(ctx context.Context, projectID string) ([]ChatTaskContextRow, error) {
+func (r *TaskRepo) ListChatContextByProject(ctx context.Context, projectID string) ([]persistence.ChatTaskContextRow, error) {
 	rows, err := r.db.QueryContext(ctx, chatTaskContextQuery, projectID, projectID)
 	if err != nil {
 		return nil, fmt.Errorf("listing chat task context: %w", err)
 	}
 	defer rows.Close()
 
-	contextRows := make([]ChatTaskContextRow, 0)
+	contextRows := make([]persistence.ChatTaskContextRow, 0)
 	for rows.Next() {
-		var row ChatTaskContextRow
+		var row persistence.ChatTaskContextRow
 		if err := rows.Scan(&row.ID, &row.Title, &row.Category, &row.Priority, &row.Status,
 			&row.PromptPreview, &row.AgentID, &row.Tag, &row.ParentTaskID, &row.ChainConfig); err != nil {
 			return nil, fmt.Errorf("scanning chat task context: %w", err)
@@ -278,8 +228,8 @@ func (r *TaskRepo) ListChatContextByProject(ctx context.Context, projectID strin
 // NormalizeProjectedActiveTerminalTasks moves all projected active terminal
 // tasks in one project-scoped transaction without hydrating full task rows. The
 // row_number allocation preserves the order used by the full project listing.
-func (r *TaskRepo) NormalizeProjectedActiveTerminalTasks(ctx context.Context, projectID string) ([]ProjectedTaskCategoryChange, error) {
-	changes := make([]ProjectedTaskCategoryChange, 0)
+func (r *TaskRepo) NormalizeProjectedActiveTerminalTasks(ctx context.Context, projectID string) ([]persistence.ProjectedTaskCategoryChange, error) {
+	changes := make([]persistence.ProjectedTaskCategoryChange, 0)
 	err := withImmediateTx(ctx, r.db, func(exec sqlExecutor) error {
 		rows, err := exec.QueryContext(ctx, `WITH candidates AS (
 				SELECT id, ROW_NUMBER() OVER (ORDER BY display_order ASC, created_at ASC) - 1 AS backlog_offset
@@ -304,7 +254,7 @@ func (r *TaskRepo) NormalizeProjectedActiveTerminalTasks(ctx context.Context, pr
 			return fmt.Errorf("updating projected terminal task categories: %w", err)
 		}
 		for rows.Next() {
-			var change ProjectedTaskCategoryChange
+			var change persistence.ProjectedTaskCategoryChange
 			if err := rows.Scan(&change.ID, &change.Title); err != nil {
 				rows.Close()
 				return fmt.Errorf("scanning projected terminal task category: %w", err)
@@ -613,32 +563,10 @@ func (r *TaskRepo) ListBoardByProjectWithCategorySorts(ctx context.Context, proj
 	return r.listByProjectWithCategorySorts(ctx, taskBoardSelectColumnsWithGoal, projectID, category, backlogSort, completedSort)
 }
 
-// TaskReference is the compact task projection used by machine-facing reference
-// lookup. It deliberately omits detail-only task payloads.
-type TaskReference struct {
-	ID                       string
-	ProjectID                string
-	Title                    string
-	Prompt                   string
-	Category                 models.TaskCategory
-	Priority                 int
-	Status                   models.TaskStatus
-	AgentID                  *string
-	AgentDefinitionID        *string
-	Tag                      models.TaskTag
-	DisplayOrder             int
-	ParentTaskID             *string
-	ChainEnabled             bool
-	SwarmRole                models.SwarmRole
-	HasRunnableSwarmChild    bool
-	HasGoal                  bool
-	AutomationCapacityQueued bool
-}
-
 // ListTaskReferences returns the complete compact task reference catalog for one
 // project in board order. The query only selects fields needed for matching and
 // selector badges; board/detail payloads are intentionally not hydrated.
-func (r *TaskRepo) ListTaskReferences(ctx context.Context, projectID string) ([]TaskReference, error) {
+func (r *TaskRepo) ListTaskReferences(ctx context.Context, projectID string) ([]persistence.TaskReference, error) {
 	projectID = strings.TrimSpace(projectID)
 	if projectID == "" {
 		return nil, fmt.Errorf("listing task references: project id is required")
@@ -653,9 +581,9 @@ func (r *TaskRepo) ListTaskReferences(ctx context.Context, projectID string) ([]
 	}
 	defer rows.Close()
 
-	references := make([]TaskReference, 0)
+	references := make([]persistence.TaskReference, 0)
 	for rows.Next() {
-		var reference TaskReference
+		var reference persistence.TaskReference
 		if err := rows.Scan(
 			&reference.ID, &reference.ProjectID, &reference.Title, &reference.Category,
 			&reference.Priority, &reference.Status, &reference.Prompt, &reference.AgentID,
@@ -962,8 +890,12 @@ func (r *TaskRepo) Create(ctx context.Context, t *models.Task) error {
 	})
 }
 
-// CreateWithExecutor persists a task using the caller's transaction.
-func (r *TaskRepo) CreateWithExecutor(ctx context.Context, exec SQLExecutor, t *models.Task) error {
+// CreateInTx persists a task using the caller's store transaction.
+func (r *TaskRepo) CreateInTx(ctx context.Context, tx persistence.Tx, t *models.Task) error {
+	exec, err := executorFromTx(tx)
+	if err != nil {
+		return err
+	}
 	return r.createWithExecutor(ctx, exec, t)
 }
 
@@ -974,8 +906,8 @@ func (r *TaskRepo) CreateWithGoal(ctx context.Context, t *models.Task, goal *mod
 // CreateWithGoalAndCallback persists a task, its optional goal, and any related
 // metadata callback in one transaction. The callback runs after the task ID is
 // assigned and before the transaction is committed.
-func (r *TaskRepo) CreateWithGoalAndCallback(ctx context.Context, t *models.Task, goal *models.TaskGoal, callback func(SQLExecutor) error) error {
-	return withImmediateTx(ctx, r.db, func(exec SQLExecutor) error {
+func (r *TaskRepo) CreateWithGoalAndCallback(ctx context.Context, t *models.Task, goal *models.TaskGoal, callback func(persistence.Tx) error) error {
+	return withImmediateTx(ctx, r.db, func(exec sqlExecutor) error {
 		if err := r.createWithExecutor(ctx, exec, t); err != nil {
 			return err
 		}
@@ -985,7 +917,7 @@ func (r *TaskRepo) CreateWithGoalAndCallback(ctx context.Context, t *models.Task
 			}
 		}
 		if callback != nil {
-			return callback(exec)
+			return callback(storeTx(exec))
 		}
 		return nil
 	})
@@ -994,7 +926,7 @@ func (r *TaskRepo) CreateWithGoalAndCallback(ctx context.Context, t *models.Task
 func createTaskGoalWithExecutor(ctx context.Context, exec sqlExecutor, taskID string, goal *models.TaskGoal) error {
 	goal.TaskID = taskID
 	if goal.GoalID == "" {
-		goal.GoalID = NewID()
+		goal.GoalID = persistence.NewID()
 	}
 	if goal.Status == "" {
 		goal.Status = models.TaskGoalStatusActive
@@ -1020,7 +952,7 @@ func setTaskGoalWithExecutor(ctx context.Context, exec sqlExecutor, taskID, obje
 	if err != nil && err != sql.ErrNoRows {
 		return fmt.Errorf("loading task goal: %w", err)
 	}
-	goal := &models.TaskGoal{GoalID: NewID(), Objective: objective, Status: models.TaskGoalStatusActive, Reason: reason}
+	goal := &models.TaskGoal{GoalID: persistence.NewID(), Objective: objective, Status: models.TaskGoalStatusActive, Reason: reason}
 	if err == sql.ErrNoRows {
 		return createTaskGoalWithExecutor(ctx, exec, taskID, goal)
 	}
@@ -1068,7 +1000,7 @@ func (r *TaskRepo) createWithExecutor(ctx context.Context, exec sqlExecutor, t *
 		Scan(&t.ID, &t.CreatedAt, &t.UpdatedAt, &t.CompletedAt)
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE constraint failed: tasks.project_id, tasks.title") {
-			return ErrDuplicateTask
+			return persistence.ErrDuplicateTask
 		}
 		return fmt.Errorf("creating task: %w", err)
 	}
@@ -1120,41 +1052,11 @@ func (r *TaskRepo) Update(ctx context.Context, t *models.Task) error {
 		t.SwarmRole, swarmConfig, swarmConfig, swarmConfig, t.SwarmSequence, autoMerge, autoMergeOnGoalAchieved, t.MergeTargetBranch, t.BaseBranch, t.BaseCommitSHA, t.LineageDepth, t.ID)
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE constraint failed: tasks.project_id, tasks.title") {
-			return ErrDuplicateTask
+			return persistence.ErrDuplicateTask
 		}
 		return fmt.Errorf("updating task: %w", err)
 	}
 	return nil
-}
-
-var ErrActiveLaneTaskChanged = errors.New("active lane task changed")
-var ErrActiveLaneLifecycleOwned = errors.New("active lane task requires lifecycle-owned activation")
-
-type ActiveLaneTaskMove struct {
-	ID               string              `json:"id"`
-	ExpectedCategory models.TaskCategory `json:"category"`
-	ExpectedStatus   models.TaskStatus   `json:"status"`
-}
-
-type activeLaneExpectedStateKey struct{}
-
-// WithActiveLaneExpectedState carries a browser-observed state fence into a
-// lifecycle owner's first durable mutation.
-func WithActiveLaneExpectedState(ctx context.Context, move ActiveLaneTaskMove) context.Context {
-	return context.WithValue(ctx, activeLaneExpectedStateKey{}, move)
-}
-
-func activeLaneExpectedState(ctx context.Context, taskID string) (ActiveLaneTaskMove, bool) {
-	if ctx == nil {
-		return ActiveLaneTaskMove{}, false
-	}
-	move, ok := ctx.Value(activeLaneExpectedStateKey{}).(ActiveLaneTaskMove)
-	return move, ok && move.ID == taskID && move.ExpectedCategory != "" && move.ExpectedStatus != ""
-}
-
-// ActiveLaneExpectedState exposes the guarded move to lifecycle-owning services.
-func ActiveLaneExpectedState(ctx context.Context, taskID string) (ActiveLaneTaskMove, bool) {
-	return activeLaneExpectedState(ctx, taskID)
 }
 
 const activeBoardTailOrderQuery = `SELECT COALESCE(MAX(display_order), -1) + 1
@@ -1166,16 +1068,11 @@ const activeBoardTailOrderExpression = `(SELECT COALESCE(MAX(peer.display_order)
 	WHERE peer.project_id = tasks.project_id
 	  AND (peer.category = 'active' OR (peer.category = 'scheduled' AND peer.status = 'running')))`
 
-type ActiveLaneTaskAdmission struct {
-	Task        models.Task
-	ExecutionID string
-}
-
-func (r *TaskRepo) MoveTasksToActiveLane(ctx context.Context, projectID string, moves []ActiveLaneTaskMove, status models.TaskStatus) ([]ActiveLaneTaskAdmission, error) {
+func (r *TaskRepo) MoveTasksToActiveLane(ctx context.Context, projectID string, moves []persistence.ActiveLaneTaskMove, status models.TaskStatus) ([]persistence.ActiveLaneTaskAdmission, error) {
 	if status != models.StatusPending && status != models.StatusRunning {
 		return nil, fmt.Errorf("invalid active lane status: %s", status)
 	}
-	admissions := make([]ActiveLaneTaskAdmission, 0, len(moves))
+	admissions := make([]persistence.ActiveLaneTaskAdmission, 0, len(moves))
 	err := withImmediateTx(ctx, r.db, func(exec sqlExecutor) error {
 		seen := make(map[string]struct{}, len(moves))
 		candidates := make([]models.Task, 0, len(moves))
@@ -1192,7 +1089,7 @@ func (r *TaskRepo) MoveTasksToActiveLane(ctx context.Context, projectID string, 
 				return fmt.Errorf("task not found in project: %s", move.ID)
 			}
 			if task.Category != move.ExpectedCategory || task.Status != move.ExpectedStatus {
-				return fmt.Errorf("%w: %s", ErrActiveLaneTaskChanged, move.ID)
+				return fmt.Errorf("%w: %s", persistence.ErrActiveLaneTaskChanged, move.ID)
 			}
 			if task.Category == models.CategoryActive && task.Status == status {
 				continue
@@ -1211,7 +1108,7 @@ func (r *TaskRepo) MoveTasksToActiveLane(ctx context.Context, projectID string, 
 				return fmt.Errorf("checking active lane lifecycle ownership for %s: %w", task.ID, err)
 			}
 			if task.SwarmRole == models.SwarmRoleParent || lifecycleOwned != 0 || task.Status == models.StatusQueued || task.Status == models.StatusRunning {
-				return fmt.Errorf("%w: %s", ErrActiveLaneLifecycleOwned, task.ID)
+				return fmt.Errorf("%w: %s", persistence.ErrActiveLaneLifecycleOwned, task.ID)
 			}
 			candidates = append(candidates, *task)
 		}
@@ -1232,14 +1129,14 @@ func (r *TaskRepo) MoveTasksToActiveLane(ctx context.Context, projectID string, 
 			candidates[i].Status = status
 			candidates[i].DisplayOrder = nextOrder + i
 			candidates[i].CompletedAt = nil
-			admission := ActiveLaneTaskAdmission{Task: candidates[i]}
+			admission := persistence.ActiveLaneTaskAdmission{Task: candidates[i]}
 			if status == models.StatusRunning {
 				agentID := ""
 				if candidates[i].AgentID != nil {
 					agentID = *candidates[i].AgentID
 				}
 				execution := &models.Execution{TaskID: candidates[i].ID, AgentConfigID: agentID, Status: models.ExecQueued, PromptSent: candidates[i].Prompt, StartsNewContext: candidates[i].StartsNewContext}
-				if err := NewExecutionRepo(r.db).CreateWithExecutor(ctx, exec, execution); err != nil {
+				if err := createExecutionWithExecutor(ctx, exec, execution); err != nil {
 					return fmt.Errorf("reserving active lane execution for %s: %w", candidates[i].ID, err)
 				}
 				admission.ExecutionID = execution.ID
@@ -1695,18 +1592,11 @@ func (r *TaskRepo) ClaimTask(ctx context.Context, id string) (bool, error) {
 	return claimed, nil
 }
 
-// TaskDispatchClaim is the authoritative ordinary-worker dispatch state loaded
-// in the same write transaction that promotes its Task to running.
-type TaskDispatchClaim struct {
-	Task              models.Task
-	AutomationContext models.AutomationContext
-}
-
 // ClaimTaskForDispatch atomically validates worker admission, claims the Task,
 // and loads its exact persisted behavior plus current Automation bindings. This
 // prevents a concurrent Automation Save from mixing a stale queued snapshot
 // with a replacement graph.
-func (r *TaskRepo) ClaimTaskForDispatch(ctx context.Context, id string) (*TaskDispatchClaim, bool, error) {
+func (r *TaskRepo) ClaimTaskForDispatch(ctx context.Context, id string) (*persistence.TaskDispatchClaim, bool, error) {
 	conn, finishImmediate, err := beginImmediateConn(ctx, r.db)
 	if err != nil {
 		return nil, false, err
@@ -1724,14 +1614,14 @@ func (r *TaskRepo) ClaimTaskForDispatch(ctx context.Context, id string) (*TaskDi
 		if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
 			return nil, false, err
 		}
-		return &TaskDispatchClaim{Task: *task}, false, nil
+		return &persistence.TaskDispatchClaim{Task: *task}, false, nil
 	}
 
 	automationContext, err := contextForTaskWithExecutor(ctx, conn, task.ProjectID, task.ID)
 	if err != nil {
 		return nil, false, fmt.Errorf("loading task Automation context for dispatch claim: %w", err)
 	}
-	if IsAutomationTaskCreatedVia(task.CreatedVia) {
+	if persistence.IsAutomationTaskCreatedVia(task.CreatedVia) {
 		automationContext.ProjectID = task.ProjectID
 		automationContext.OriginTask = true
 	}
@@ -1780,7 +1670,7 @@ func (r *TaskRepo) ClaimTaskForDispatch(ctx context.Context, id string) (*TaskDi
 		if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
 			return nil, false, err
 		}
-		return &TaskDispatchClaim{Task: *task, AutomationContext: automationContext}, false, nil
+		return &persistence.TaskDispatchClaim{Task: *task, AutomationContext: automationContext}, false, nil
 	}
 	result, err := conn.ExecContext(ctx, `UPDATE tasks SET
 		status = 'running',
@@ -1803,7 +1693,7 @@ func (r *TaskRepo) ClaimTaskForDispatch(ctx context.Context, id string) (*TaskDi
 		if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
 			return nil, false, err
 		}
-		return &TaskDispatchClaim{Task: *task}, false, nil
+		return &persistence.TaskDispatchClaim{Task: *task}, false, nil
 	}
 	if err := conn.QueryRowContext(ctx, `SELECT display_order FROM tasks WHERE id = ?`, id).Scan(&task.DisplayOrder); err != nil {
 		return nil, false, fmt.Errorf("loading claimed task display order: %w", err)
@@ -1818,10 +1708,10 @@ func (r *TaskRepo) ClaimTaskForDispatch(ctx context.Context, id string) (*TaskDi
 			ProjectID: task.ProjectID, Status: string(models.StatusRunning), OldStatus: string(models.StatusPending),
 			Category: string(task.Category)})
 	}
-	return &TaskDispatchClaim{Task: *task, AutomationContext: automationContext}, true, nil
+	return &persistence.TaskDispatchClaim{Task: *task, AutomationContext: automationContext}, true, nil
 }
 
-func (r *TaskRepo) ListReservedActiveLaneAdmissions(ctx context.Context) ([]ActiveLaneTaskAdmission, error) {
+func (r *TaskRepo) ListReservedActiveLaneAdmissions(ctx context.Context) ([]persistence.ActiveLaneTaskAdmission, error) {
 	rows, err := r.db.QueryContext(ctx, `SELECT t.id, e.id FROM tasks t JOIN executions e ON e.task_id = t.id
 		WHERE ((t.category = 'active' AND t.status = 'running') OR
         (t.category IN ('active','scheduled') AND t.status = 'pending' AND EXISTS (SELECT 1 FROM schedule_dispatch_admissions a WHERE a.task_id = t.id AND a.execution_id = e.id)))
@@ -1846,7 +1736,7 @@ func (r *TaskRepo) ListReservedActiveLaneAdmissions(ctx context.Context) ([]Acti
 	if err := rows.Close(); err != nil {
 		return nil, err
 	}
-	admissions := make([]ActiveLaneTaskAdmission, 0, len(refs))
+	admissions := make([]persistence.ActiveLaneTaskAdmission, 0, len(refs))
 	for _, ref := range refs {
 		task, err := r.GetByID(ctx, ref.taskID)
 		if err != nil {
@@ -1856,7 +1746,7 @@ func (r *TaskRepo) ListReservedActiveLaneAdmissions(ctx context.Context) ([]Acti
 			if err := r.db.QueryRowContext(ctx, `SELECT starts_new_context FROM executions WHERE id = ?`, ref.executionID).Scan(&task.StartsNewContext); err != nil {
 				return nil, err
 			}
-			admissions = append(admissions, ActiveLaneTaskAdmission{Task: *task, ExecutionID: ref.executionID})
+			admissions = append(admissions, persistence.ActiveLaneTaskAdmission{Task: *task, ExecutionID: ref.executionID})
 		}
 	}
 	return admissions, nil
@@ -1864,7 +1754,7 @@ func (r *TaskRepo) ListReservedActiveLaneAdmissions(ctx context.Context) ([]Acti
 
 // ClaimReservedTaskForDispatch atomically validates and starts the durable queued
 // ordinary execution created by a running-lane board move.
-func (r *TaskRepo) ClaimReservedTaskForDispatch(ctx context.Context, id, executionID string) (*TaskDispatchClaim, bool, error) {
+func (r *TaskRepo) ClaimReservedTaskForDispatch(ctx context.Context, id, executionID string) (*persistence.TaskDispatchClaim, bool, error) {
 	conn, finishImmediate, err := beginImmediateConn(ctx, r.db)
 	if err != nil {
 		return nil, false, err
@@ -1907,13 +1797,13 @@ func (r *TaskRepo) ClaimReservedTaskForDispatch(ctx context.Context, id, executi
 		if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
 			return nil, false, err
 		}
-		return &TaskDispatchClaim{Task: *task}, false, nil
+		return &persistence.TaskDispatchClaim{Task: *task}, false, nil
 	}
 	automationContext, err := contextForTaskWithExecutor(ctx, conn, task.ProjectID, task.ID)
 	if err != nil {
 		return nil, false, fmt.Errorf("loading preclaimed task Automation context: %w", err)
 	}
-	if IsAutomationTaskCreatedVia(task.CreatedVia) {
+	if persistence.IsAutomationTaskCreatedVia(task.CreatedVia) {
 		automationContext.ProjectID = task.ProjectID
 		automationContext.OriginTask = true
 	}
@@ -1965,7 +1855,7 @@ func (r *TaskRepo) ClaimReservedTaskForDispatch(ctx context.Context, id, executi
 		if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
 			return nil, false, err
 		}
-		return &TaskDispatchClaim{Task: *task, AutomationContext: automationContext}, false, nil
+		return &persistence.TaskDispatchClaim{Task: *task, AutomationContext: automationContext}, false, nil
 	}
 	if err := conn.QueryRowContext(ctx, `SELECT starts_new_context FROM executions WHERE id = ?`, executionID).Scan(&task.StartsNewContext); err != nil {
 		return nil, false, err
@@ -1988,7 +1878,7 @@ func (r *TaskRepo) ClaimReservedTaskForDispatch(ctx context.Context, id, executi
 	if r.broadcaster != nil {
 		r.broadcaster.Publish(events.TaskEvent{Type: events.TaskBoardUpdated, TaskID: task.ID, TaskName: task.Title, ProjectID: task.ProjectID, Category: string(task.Category), Status: string(task.Status)})
 	}
-	return &TaskDispatchClaim{Task: *task, AutomationContext: automationContext}, true, nil
+	return &persistence.TaskDispatchClaim{Task: *task, AutomationContext: automationContext}, true, nil
 }
 
 // SearchByTitle searches for non-chat tasks matching a literal title substring within a project.
@@ -2021,23 +1911,6 @@ func (r *TaskRepo) SearchByTitle(ctx context.Context, projectID string, titleQue
 		tasks = append(tasks, t)
 	}
 	return tasks, rows.Err()
-}
-
-// TaskDiscoveryFilter bounds a read-only, current-project task discovery query.
-type TaskDiscoveryFilter struct {
-	// Query is an optional partial (case-insensitive substring) title match.
-	Query string
-	// Category optionally restricts results to a single non-chat category.
-	Category string
-	// Status optionally restricts results to a single task status.
-	Status string
-	// MergeStatus optionally restricts results by stored merge status. The value
-	// "unmerged" matches tasks with a worktree branch that is not yet merged.
-	MergeStatus string
-	// Limit caps the number of returned rows. Callers should clamp before use.
-	Limit int
-	// Offset skips the first N rows for pagination.
-	Offset int
 }
 
 // taskDiscoveryRow is the private compact projection used by list_tasks. Keep it
@@ -2073,7 +1946,7 @@ func escapeSQLLikePatternLiteral(value string) string {
 // Ordering is deterministic: when a title query is supplied, results are ranked by
 // relevance (exact, then prefix, then contains) and then by updated_at DESC with a
 // task id tiebreaker; without a query, results are ordered by updated_at DESC, id ASC.
-func (r *TaskRepo) ListTasksForDiscovery(ctx context.Context, projectID string, filter TaskDiscoveryFilter) ([]models.Task, int, error) {
+func (r *TaskRepo) ListTasksForDiscovery(ctx context.Context, projectID string, filter persistence.TaskDiscoveryFilter) ([]models.Task, int, error) {
 	where := `project_id = ? AND category != 'chat'`
 	args := []any{projectID}
 
@@ -2236,35 +2109,19 @@ func scanSwarmInspectionTask(scan func(dest ...any) error) (models.Task, error) 
 	return t, err
 }
 
-type TaskWorktreeCleanup struct {
-	TaskID         string
-	WorktreePath   string
-	WorktreeBranch string
-	DeleteBranch   bool
-}
-
-type TaskDeletionManifest struct {
-	TaskIDs                  []string
-	TaskWorktrees            []TaskWorktreeCleanup
-	TaskAttachmentPaths      []string
-	ExecutionAttachmentPaths []string
-	PendingUploadSessionIDs  []string
-	SwarmChildTaskIDs        []string
-}
-
-func (r *TaskRepo) DeleteWithCleanupManifest(ctx context.Context, id string, beforeDelete func(TaskDeletionManifest) error) (TaskDeletionManifest, bool, error) {
+func (r *TaskRepo) DeleteWithCleanupManifest(ctx context.Context, id string, beforeDelete func(persistence.TaskDeletionManifest) error) (persistence.TaskDeletionManifest, bool, error) {
 	return r.deleteWithCleanupManifest(ctx, id, "", "", beforeDelete)
 }
 
-func (r *TaskRepo) DeleteWithCleanupManifestIfCategory(ctx context.Context, id, projectID string, category models.TaskCategory, beforeDelete func(TaskDeletionManifest) error) (TaskDeletionManifest, bool, error) {
+func (r *TaskRepo) DeleteWithCleanupManifestIfCategory(ctx context.Context, id, projectID string, category models.TaskCategory, beforeDelete func(persistence.TaskDeletionManifest) error) (persistence.TaskDeletionManifest, bool, error) {
 	return r.deleteWithCleanupManifest(ctx, id, projectID, string(category), beforeDelete)
 }
 
-func (r *TaskRepo) DeleteWithCleanupManifestIfObserved(ctx context.Context, task *models.Task, beforeDelete func(TaskDeletionManifest) error) (TaskDeletionManifest, bool, error) {
+func (r *TaskRepo) DeleteWithCleanupManifestIfObserved(ctx context.Context, task *models.Task, beforeDelete func(persistence.TaskDeletionManifest) error) (persistence.TaskDeletionManifest, bool, error) {
 	return r.deleteWithCleanupManifest(ctx, task.ID, task.ProjectID, string(task.Category), beforeDelete, task)
 }
 
-func (r *TaskRepo) deleteWithCleanupManifest(ctx context.Context, id, projectID, category string, beforeDelete func(TaskDeletionManifest) error, observed ...*models.Task) (manifest TaskDeletionManifest, deleted bool, err error) {
+func (r *TaskRepo) deleteWithCleanupManifest(ctx context.Context, id, projectID, category string, beforeDelete func(persistence.TaskDeletionManifest) error, observed ...*models.Task) (manifest persistence.TaskDeletionManifest, deleted bool, err error) {
 	tx, cleanup, err := beginImmediateTx(ctx, r.db)
 	if err != nil {
 		return manifest, false, fmt.Errorf("beginning task deletion: %w", err)
@@ -2576,16 +2433,16 @@ func (r *TaskRepo) UpdateSwarmFields(ctx context.Context, id string, role models
 // active pending tasks. Keep these eligibility predicates in sync with the
 // authoritative dispatch guards: reservations, queued/running executions, and
 // pending task-thread inputs own admission and must remain excluded.
-func (r *TaskRepo) ListActivePendingAdmissions(ctx context.Context) ([]ActiveTaskAdmission, error) {
+func (r *TaskRepo) ListActivePendingAdmissions(ctx context.Context) ([]persistence.ActiveTaskAdmission, error) {
 	rows, err := r.db.QueryContext(ctx, activeTaskAdmissionQuery)
 	if err != nil {
 		return nil, fmt.Errorf("listing active pending task admissions: %w", err)
 	}
 	defer rows.Close()
 
-	var admissions []ActiveTaskAdmission
+	var admissions []persistence.ActiveTaskAdmission
 	for rows.Next() {
-		var admission ActiveTaskAdmission
+		var admission persistence.ActiveTaskAdmission
 		if err := rows.Scan(&admission.ID, &admission.ProjectID, &admission.Title,
 			&admission.Category, &admission.Priority, &admission.Status, &admission.AgentID,
 			&admission.AgentDefinitionID, &admission.ParentTaskID, &admission.SwarmRole); err != nil {
@@ -2652,27 +2509,20 @@ func (r *TaskRepo) ReclaimStaleQueuedTask(ctx context.Context, id string, staleD
 	return changed == 1, nil
 }
 
-// TaskWithSchedule represents a task with its schedule information for calendar view
-type TaskWithSchedule struct {
-	Task                   models.Task
-	Schedule               *models.Schedule
-	AutomationScheduleName string
-}
-
-func (r *TaskRepo) ListWithSchedulesByProject(ctx context.Context, projectID string) ([]TaskWithSchedule, error) {
+func (r *TaskRepo) ListWithSchedulesByProject(ctx context.Context, projectID string) ([]persistence.TaskWithSchedule, error) {
 	return r.listWithSchedulesByProjectQuery(ctx, scheduleCalendarQuery, projectID)
 }
 
-func (r *TaskRepo) listWithSchedulesByProjectQuery(ctx context.Context, query, projectID string) ([]TaskWithSchedule, error) {
+func (r *TaskRepo) listWithSchedulesByProjectQuery(ctx context.Context, query, projectID string) ([]persistence.TaskWithSchedule, error) {
 	rows, err := r.db.QueryContext(ctx, query, projectID)
 	if err != nil {
 		return nil, fmt.Errorf("listing tasks with schedules: %w", err)
 	}
 	defer rows.Close()
 
-	var results []TaskWithSchedule
+	var results []persistence.TaskWithSchedule
 	for rows.Next() {
-		var tws TaskWithSchedule
+		var tws persistence.TaskWithSchedule
 		var schedID, schedTaskID sql.NullString
 		var schedRunAt, schedCreatedAt, schedUpdatedAt sql.NullTime
 		var schedRepeatType, schedRepeatInterval, schedEnabled, schedClearContext sql.NullString
@@ -2723,7 +2573,7 @@ func (r *TaskRepo) listWithSchedulesByProjectQuery(ctx context.Context, query, p
 // project using the same card projection as the full task board. Hidden chat,
 // ordinary scheduled, and swarm-child rows must not change the status shown by
 // clients that previously counted rendered task cards.
-func (r *TaskRepo) CountProjectStatus(ctx context.Context, projectID string) (ProjectTaskStatusCounts, error) {
+func (r *TaskRepo) CountProjectStatus(ctx context.Context, projectID string) (persistence.ProjectTaskStatusCounts, error) {
 	const query = `
 		SELECT
 			COALESCE(SUM(CASE WHEN t.category = 'active'
@@ -2752,9 +2602,9 @@ func (r *TaskRepo) CountProjectStatus(ctx context.Context, projectID string) (Pr
 		FROM tasks t
 		WHERE t.project_id = ?`
 
-	var counts ProjectTaskStatusCounts
+	var counts persistence.ProjectTaskStatusCounts
 	if err := r.db.QueryRowContext(ctx, query, projectID).Scan(&counts.ActiveTasks, &counts.QueuedTasks, &counts.FailedTasks); err != nil {
-		return ProjectTaskStatusCounts{}, fmt.Errorf("counting project task status: %w", err)
+		return persistence.ProjectTaskStatusCounts{}, fmt.Errorf("counting project task status: %w", err)
 	}
 	return counts, nil
 }
@@ -3018,9 +2868,9 @@ func (r *TaskRepo) ActivateAllBacklog(ctx context.Context, projectID string) (in
 // PrepareSwarmParentForActiveLane atomically fences and transitions a
 // lifecycle-owned parent before planner submission.
 func (r *TaskRepo) PrepareSwarmParentForActiveLane(ctx context.Context, id string) error {
-	expected, guarded := activeLaneExpectedState(ctx, id)
+	expected, guarded := persistence.ActiveLaneExpectedState(ctx, id)
 	if !guarded {
-		return fmt.Errorf("%w: %s", ErrActiveLaneTaskChanged, id)
+		return fmt.Errorf("%w: %s", persistence.ErrActiveLaneTaskChanged, id)
 	}
 	var task *models.Task
 	err := withImmediateTx(ctx, r.db, func(exec sqlExecutor) error {
@@ -3030,7 +2880,7 @@ func (r *TaskRepo) PrepareSwarmParentForActiveLane(ctx context.Context, id strin
 			return err
 		}
 		if task == nil || task.Category != expected.ExpectedCategory || task.Status != expected.ExpectedStatus || task.SwarmRole != models.SwarmRoleParent {
-			return fmt.Errorf("%w: %s", ErrActiveLaneTaskChanged, id)
+			return fmt.Errorf("%w: %s", persistence.ErrActiveLaneTaskChanged, id)
 		}
 		var displayOrder int
 		if err := exec.QueryRowContext(ctx, activeBoardTailOrderQuery, task.ProjectID).Scan(&displayOrder); err != nil {
@@ -3454,13 +3304,21 @@ func (r *TaskRepo) UpdateDiscordOrigin(ctx context.Context, id string) error {
 // UpdateXOrigin marks a task as created through X.
 func (r *TaskRepo) UpdateXOrigin(ctx context.Context, id string) error {
 	return withBoundSQLiteConn(ctx, r.db, func(conn *sql.Conn) error {
-		return r.UpdateXOriginWithExecutor(ctx, conn, id)
+		return updateXOriginWithExecutor(ctx, conn, id)
 	})
 }
 
-// UpdateXOriginWithExecutor marks a task as created through X using the
-// caller's transaction.
-func (r *TaskRepo) UpdateXOriginWithExecutor(ctx context.Context, exec SQLExecutor, id string) error {
+// UpdateXOriginInTx marks a task as created through X using the caller's
+// store transaction.
+func (r *TaskRepo) UpdateXOriginInTx(ctx context.Context, tx persistence.Tx, id string) error {
+	exec, err := executorFromTx(tx)
+	if err != nil {
+		return err
+	}
+	return updateXOriginWithExecutor(ctx, exec, id)
+}
+
+func updateXOriginWithExecutor(ctx context.Context, exec sqlExecutor, id string) error {
 	_, err := exec.ExecContext(ctx, `UPDATE tasks SET created_via = 'x', updated_at = datetime('now') WHERE id = ?`, id)
 	if err != nil {
 		return fmt.Errorf("updating X origin: %w", err)
@@ -3488,11 +3346,21 @@ func (r *TaskRepo) CountRunningTotal(ctx context.Context) (int, error) {
 	return count, nil
 }
 
+// SetExecutionRepo shares the execution repository whose Automation projection
+// wiring must observe execution completions finalized through this repository.
+func (r *TaskRepo) SetExecutionRepo(executions *ExecutionRepo) {
+	r.executions = executions
+}
+
 // CompleteExecutionSuccess makes execution completion and the final board state
 // visible together. Pending steering or an already terminal execution changes neither.
-func (r *TaskRepo) CompleteExecutionSuccess(ctx context.Context, executions *ExecutionRepo, executionID, output string, tokensUsed int, durationMs int64) (CompleteSuccessOutcome, error) {
+func (r *TaskRepo) CompleteExecutionSuccess(ctx context.Context, executionID, output string, tokensUsed int, durationMs int64) (persistence.CompleteSuccessOutcome, error) {
+	executions := r.executions
+	if executions == nil {
+		executions = NewExecutionRepo(r.db)
+	}
 	var task *models.Task
-	outcome, err := executions.completeSuccessIfNoPendingSteering(ctx, executionID, output, tokensUsed, durationMs, func(tx SQLExecutor) error {
+	outcome, err := executions.completeSuccessIfNoPendingSteering(ctx, executionID, output, tokensUsed, durationMs, func(tx sqlExecutor) error {
 		var err error
 		task, err = getTaskWithExecutor(ctx, tx, `SELECT `+taskSelectColumns+` FROM tasks WHERE id = (SELECT task_id FROM executions WHERE id = ?)`, executionID)
 		if err != nil {
@@ -3515,7 +3383,7 @@ func (r *TaskRepo) CompleteExecutionSuccess(ctx context.Context, executions *Exe
 		_, err = tx.ExecContext(ctx, `UPDATE executions SET status = 'cancelled', error_message = 'Task left the reserved running lane', completed_at = datetime('now') WHERE task_id = ? AND status = 'queued' AND is_followup = 0 AND dispatch_id IS NULL`, task.ID)
 		return err
 	})
-	if err != nil || outcome != CompleteSuccessCompleted {
+	if err != nil || outcome != persistence.CompleteSuccessCompleted {
 		return outcome, err
 	}
 	if r.broadcaster != nil {

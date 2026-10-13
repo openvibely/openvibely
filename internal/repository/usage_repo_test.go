@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/testutil"
 )
 
@@ -29,7 +30,7 @@ func TestUsageRepo_TaskDimensionsAndExclusiveEnd(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	window := UsageFilter{ProjectID: "usage-dim-project", AgentID: "usage-definition", DateFrom: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), DateTo: time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)}
+	window := persistence.UsageFilter{ProjectID: "usage-dim-project", AgentID: "usage-definition", DateFrom: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), DateTo: time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)}
 	totals, err := repo.GetUsageTotals(ctx, window)
 	if err != nil || totals.TotalTokens != 10 || totals.CallCount != 1 {
 		t.Fatalf("assigned usage filter/exclusive end = %+v, %v", totals, err)
@@ -98,7 +99,7 @@ func TestUsageRepo_RecordUsageEventAndAggregate(t *testing.T) {
 		t.Fatalf("RecordUsageEvent duplicate: %v", err)
 	}
 
-	totals, err := repo.GetUsageTotals(ctx, UsageFilter{ProjectID: projectID})
+	totals, err := repo.GetUsageTotals(ctx, persistence.UsageFilter{ProjectID: projectID})
 	if err != nil {
 		t.Fatalf("GetUsageTotals: %v", err)
 	}
@@ -112,7 +113,7 @@ func TestUsageRepo_RecordUsageEventAndAggregate(t *testing.T) {
 		t.Fatalf("expected provider cost %v, got %+v", cost, totals)
 	}
 
-	breakdown, err := repo.GetModelUsageBreakdown(ctx, UsageFilter{ProjectID: projectID})
+	breakdown, err := repo.GetModelUsageBreakdown(ctx, persistence.UsageFilter{ProjectID: projectID})
 	if err != nil {
 		t.Fatalf("GetModelUsageBreakdown: %v", err)
 	}
@@ -133,14 +134,14 @@ func TestUsageRepo_RecordUsageEventAndAggregate(t *testing.T) {
 	if err := repo.RecordUsageEvent(ctx, anthropicEvent); err != nil {
 		t.Fatalf("RecordUsageEvent anthropic: %v", err)
 	}
-	dailyByModel, err := repo.GetDailyUsageByModel(ctx, UsageFilter{ProjectID: projectID})
+	dailyByModel, err := repo.GetDailyUsageByModel(ctx, persistence.UsageFilter{ProjectID: projectID})
 	if err != nil {
 		t.Fatalf("GetDailyUsageByModel: %v", err)
 	}
 	if len(dailyByModel) != 2 {
 		t.Fatalf("expected two daily model points, got %+v", dailyByModel)
 	}
-	rateByModel, err := repo.GetUsageRateBucketsByModel(ctx, UsageFilter{ProjectID: projectID, GroupBy: "day"})
+	rateByModel, err := repo.GetUsageRateBucketsByModel(ctx, persistence.UsageFilter{ProjectID: projectID, GroupBy: "day"})
 	if err != nil {
 		t.Fatalf("GetUsageRateBucketsByModel: %v", err)
 	}
@@ -157,7 +158,7 @@ func TestUsageRepo_CostUnavailableWhenProviderCostMissing(t *testing.T) {
 	if err := repo.RecordUsageEvent(ctx, &models.LLMUsageEvent{Provider: "anthropic", Model: "claude-sonnet", Operation: "task", InputTokens: 10, OutputTokens: 5}); err != nil {
 		t.Fatalf("RecordUsageEvent: %v", err)
 	}
-	totals, err := repo.GetUsageTotals(ctx, UsageFilter{})
+	totals, err := repo.GetUsageTotals(ctx, persistence.UsageFilter{})
 	if err != nil {
 		t.Fatalf("GetUsageTotals: %v", err)
 	}
@@ -359,7 +360,7 @@ func TestUsageRepo_LocaltimeDayBucketing(t *testing.T) {
 	}
 
 	// GetDailyUsage should label the period with the local date.
-	daily, err := repo.GetDailyUsage(ctx, UsageFilter{})
+	daily, err := repo.GetDailyUsage(ctx, persistence.UsageFilter{})
 	if err != nil {
 		t.Fatalf("GetDailyUsage: %v", err)
 	}
@@ -372,7 +373,7 @@ func TestUsageRepo_LocaltimeDayBucketing(t *testing.T) {
 	}
 
 	// GetDailyUsageByModel should label the period with the local date.
-	byModel, err := repo.GetDailyUsageByModel(ctx, UsageFilter{})
+	byModel, err := repo.GetDailyUsageByModel(ctx, persistence.UsageFilter{})
 	if err != nil {
 		t.Fatalf("GetDailyUsageByModel: %v", err)
 	}
@@ -385,7 +386,7 @@ func TestUsageRepo_LocaltimeDayBucketing(t *testing.T) {
 	}
 
 	// GetUsageRateBuckets with group_by=day should label the period with the local date.
-	rate, err := repo.GetUsageRateBuckets(ctx, UsageFilter{GroupBy: "day"})
+	rate, err := repo.GetUsageRateBuckets(ctx, persistence.UsageFilter{GroupBy: "day"})
 	if err != nil {
 		t.Fatalf("GetUsageRateBuckets: %v", err)
 	}
@@ -398,7 +399,7 @@ func TestUsageRepo_LocaltimeDayBucketing(t *testing.T) {
 	}
 
 	// GetUsageRateBucketsByModel with group_by=day should also label by local date.
-	rateByModel, err := repo.GetUsageRateBucketsByModel(ctx, UsageFilter{GroupBy: "day"})
+	rateByModel, err := repo.GetUsageRateBucketsByModel(ctx, persistence.UsageFilter{GroupBy: "day"})
 	if err != nil {
 		t.Fatalf("GetUsageRateBucketsByModel: %v", err)
 	}
@@ -441,7 +442,7 @@ func TestUsageRepo_LocaltimeBucketingCrossesMidnight(t *testing.T) {
 		}
 	}
 
-	daily, err := repo.GetDailyUsage(ctx, UsageFilter{})
+	daily, err := repo.GetDailyUsage(ctx, persistence.UsageFilter{})
 	if err != nil {
 		t.Fatalf("GetDailyUsage: %v", err)
 	}
@@ -492,7 +493,7 @@ func TestUsageRepo_ModelUsageGlobalVisibility(t *testing.T) {
 	}
 
 	// Global query (no project filter) must return both providers.
-	breakdown, err := repo.GetModelUsageBreakdown(ctx, UsageFilter{})
+	breakdown, err := repo.GetModelUsageBreakdown(ctx, persistence.UsageFilter{})
 	if err != nil {
 		t.Fatalf("GetModelUsageBreakdown: %v", err)
 	}
@@ -507,7 +508,7 @@ func TestUsageRepo_ModelUsageGlobalVisibility(t *testing.T) {
 		t.Errorf("expected 210 total tokens across providers, got %d", totalTokens)
 	}
 
-	totals, err := repo.GetUsageTotals(ctx, UsageFilter{})
+	totals, err := repo.GetUsageTotals(ctx, persistence.UsageFilter{})
 	if err != nil {
 		t.Fatalf("GetUsageTotals: %v", err)
 	}
@@ -521,7 +522,7 @@ func TestUsageRepo_ModelUsageGlobalVisibility(t *testing.T) {
 
 func TestUsageRepo_ProjectDateBoundedAggregatePlansAvoidTempBTree(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	filter := UsageFilter{
+	filter := persistence.UsageFilter{
 		ProjectID: "project-plan",
 		DateFrom:  time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
 		DateTo:    time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC),
@@ -564,7 +565,7 @@ func TestUsageRepo_ProjectDateBoundedAggregatesComputeLocaltimeAtReadTime(t *tes
 	}
 
 	setUsageRepoTestLocalTimezone(t, "America/Los_Angeles")
-	filter := UsageFilter{
+	filter := persistence.UsageFilter{
 		ProjectID: projectID,
 		DateFrom:  time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
 		DateTo:    time.Date(2026, 1, 1, 23, 59, 59, 0, time.UTC),
@@ -626,7 +627,7 @@ func TestUsageRepo_ProjectDateBoundedAggregatesPreserveDSTSensitiveLocaltimeSema
 		}
 	}
 
-	filter := UsageFilter{
+	filter := persistence.UsageFilter{
 		ProjectID: projectID,
 		DateFrom:  time.Date(2026, 3, 8, 0, 0, 0, 0, time.UTC),
 		DateTo:    time.Date(2026, 11, 2, 0, 0, 0, 0, time.UTC),

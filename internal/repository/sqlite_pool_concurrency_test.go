@@ -12,6 +12,7 @@ import (
 
 	"github.com/openvibely/openvibely/internal/database"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 )
 
 func TestDedicatedWriterDoesNotWaitForReaderPool(t *testing.T) {
@@ -762,7 +763,7 @@ func TestThreadInputSteeringPreparationAndPromotionAreAtomicWithFilePool(t *test
 	for err := range promotionErrs {
 		if err == nil {
 			successes++
-		} else if !errors.Is(err, ErrInputNotPending) && !errors.Is(err, ErrActiveTurnChanged) {
+		} else if !errors.Is(err, persistence.ErrInputNotPending) && !errors.Is(err, persistence.ErrActiveTurnChanged) {
 			t.Fatal(err)
 		}
 	}

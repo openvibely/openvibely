@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 )
 
 // CustomPersonalityRepo handles database operations for custom personalities.
@@ -168,22 +169,15 @@ func (r *CustomPersonalityRepo) ListPageExcludingKeys(ctx context.Context, limit
 	return r.listPage(ctx, limit, offset, search, excludedKeys)
 }
 
-type CustomPersonalityPageFilter struct {
-	Search   string
-	Active   *bool
-	Selected string
-	Sort     string
-}
-
-func (r *CustomPersonalityRepo) ListPageExcludingKeysFiltered(ctx context.Context, limit, offset int, filter CustomPersonalityPageFilter, excludedKeys []string) ([]models.CustomPersonality, error) {
+func (r *CustomPersonalityRepo) ListPageExcludingKeysFiltered(ctx context.Context, limit, offset int, filter persistence.CustomPersonalityPageFilter, excludedKeys []string) ([]models.CustomPersonality, error) {
 	return r.listPageFiltered(ctx, limit, offset, filter, excludedKeys)
 }
 
 func (r *CustomPersonalityRepo) listPage(ctx context.Context, limit, offset int, search string, excludedKeys []string) ([]models.CustomPersonality, error) {
-	return r.listPageFiltered(ctx, limit, offset, CustomPersonalityPageFilter{Search: search}, excludedKeys)
+	return r.listPageFiltered(ctx, limit, offset, persistence.CustomPersonalityPageFilter{Search: search}, excludedKeys)
 }
 
-func (r *CustomPersonalityRepo) listPageFiltered(ctx context.Context, limit, offset int, filter CustomPersonalityPageFilter, excludedKeys []string) ([]models.CustomPersonality, error) {
+func (r *CustomPersonalityRepo) listPageFiltered(ctx context.Context, limit, offset int, filter persistence.CustomPersonalityPageFilter, excludedKeys []string) ([]models.CustomPersonality, error) {
 	limit, offset = normalizeCardPageArgs(limit, offset)
 	query := `SELECT id, name, key, description, SUBSTR(system_prompt, 1, ?) AS system_prompt_preview, created_at, updated_at
 		FROM custom_personalities`

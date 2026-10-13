@@ -9,15 +9,15 @@ import (
 	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence"
 )
 
 type AlertService struct {
-	alertRepo   *repository.AlertRepo
+	alertRepo   persistence.AlertStore
 	broadcaster *events.Broadcaster
 }
 
-func NewAlertService(alertRepo *repository.AlertRepo, broadcaster *events.Broadcaster) *AlertService {
+func NewAlertService(alertRepo persistence.AlertStore, broadcaster *events.Broadcaster) *AlertService {
 	return &AlertService{alertRepo: alertRepo, broadcaster: broadcaster}
 }
 

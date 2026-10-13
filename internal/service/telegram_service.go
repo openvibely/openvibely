@@ -23,7 +23,7 @@ import (
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	llmoutput "github.com/openvibely/openvibely/internal/llm/output"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/util"
 )
 
@@ -70,25 +70,25 @@ type TelegramService struct {
 	githubProjectSvc                     GitHubProjectCloneProvider
 	memorySvc                            *MemoryService
 	agentLibraryMaintenanceSvc           *AgentLibraryMaintenanceService
-	projectRepo                          *repository.ProjectRepo
-	llmConfigRepo                        *repository.LLMConfigRepo
-	taskRepo                             *repository.TaskRepo
-	execRepo                             *repository.ExecutionRepo
-	scheduleRepo                         *repository.ScheduleRepo
-	chatAttachmentRepo                   *repository.ChatAttachmentRepo
-	threadInputRepo                      *repository.ThreadInputRepo
+	projectRepo                          persistence.ProjectStore
+	llmConfigRepo                        persistence.LLMConfigStore
+	taskRepo                             persistence.TaskStore
+	execRepo                             persistence.ExecutionStore
+	scheduleRepo                         persistence.ScheduleStore
+	chatAttachmentRepo                   persistence.ChatAttachmentStore
+	threadInputRepo                      persistence.ThreadInputStore
 	telegramAuthRepo                     telegramAuthorizationStore
-	telegramUserProjectRepo              *repository.TelegramUserProjectRepo
-	settingsRepo                         *repository.SettingsRepo
-	customPersonalityRepo                *repository.CustomPersonalityRepo
-	agentRepo                            *repository.AgentRepo
+	telegramUserProjectRepo              persistence.TelegramUserProjectStore
+	settingsRepo                         persistence.SettingsStore
+	customPersonalityRepo                persistence.CustomPersonalityStore
+	agentRepo                            persistence.AgentStore
 	alertSvc                             *AlertService
 	usageAnalyticsSvc                    *UsageAnalyticsService
 	upcomingSvc                          *UpcomingService
 	channelMessageRouter                 *ChannelMessageRouter
 	emailStatus                          func(context.Context) EmailConnectionStatus
-	emailAuthRepo                        *repository.EmailAuthRepo
-	webhookRepo                          *repository.WebhookRepo
+	emailAuthRepo                        persistence.EmailAuthStore
+	webhookRepo                          persistence.WebhookStore
 	taskGoalSvc                          *TaskGoalService
 	llmSvc                               *LLMService
 	workerSvc                            *WorkerService
@@ -127,12 +127,12 @@ type TelegramService struct {
 func NewTelegramService(
 	token string,
 	taskSvc *TaskService,
-	projectRepo *repository.ProjectRepo,
-	llmConfigRepo *repository.LLMConfigRepo,
-	taskRepo *repository.TaskRepo,
-	execRepo *repository.ExecutionRepo,
-	scheduleRepo *repository.ScheduleRepo,
-	chatAttachmentRepo *repository.ChatAttachmentRepo,
+	projectRepo persistence.ProjectStore,
+	llmConfigRepo persistence.LLMConfigStore,
+	taskRepo persistence.TaskStore,
+	execRepo persistence.ExecutionStore,
+	scheduleRepo persistence.ScheduleStore,
+	chatAttachmentRepo persistence.ChatAttachmentStore,
 	llmSvc *LLMService,
 	workerSvc *WorkerService,
 ) (*TelegramService, error) {
@@ -148,12 +148,6 @@ func NewTelegramService(
 	bot.Debug = false
 	applog.Infof("[telegram] authorized on account %s", bot.Self.UserName)
 
-	var usageAnalyticsSvc *UsageAnalyticsService
-	if execRepo != nil {
-		if db := execRepo.DB(); db != nil {
-			usageAnalyticsSvc = NewUsageAnalyticsService(repository.NewUsageRepo(db), llmConfigRepo)
-		}
-	}
 	ctx, cancel := context.WithCancel(context.Background())
 
 	return &TelegramService{
@@ -167,7 +161,6 @@ func NewTelegramService(
 		chatAttachmentRepo:  chatAttachmentRepo,
 		llmSvc:              llmSvc,
 		workerSvc:           workerSvc,
-		usageAnalyticsSvc:   usageAnalyticsSvc,
 		newBotAPI:           tgbotapi.NewBotAPI,
 		userProjects:        make(map[int64]string),
 		userProjectVersions: make(map[int64]uint64),
@@ -192,7 +185,11 @@ func (s *TelegramService) SetExecutionStreamHub(hub *events.ExecutionStreamHub) 
 	s.executionStreamHub = hub
 }
 
-func (s *TelegramService) SetThreadInputRepo(repo *repository.ThreadInputRepo) {
+func (s *TelegramService) SetUsageAnalyticsService(svc *UsageAnalyticsService) {
+	s.usageAnalyticsSvc = svc
+}
+
+func (s *TelegramService) SetThreadInputRepo(repo persistence.ThreadInputStore) {
 	s.threadInputRepo = repo
 }
 
@@ -221,22 +218,22 @@ func (s *TelegramService) HasAgentRepo() bool {
 }
 
 // SetTelegramAuthRepo sets the Telegram authorization repo for user verification.
-func (s *TelegramService) SetTelegramAuthRepo(repo *repository.TelegramAuthRepo) {
+func (s *TelegramService) SetTelegramAuthRepo(repo persistence.TelegramAuthStore) {
 	s.telegramAuthRepo = repo
 }
 
 // SetTelegramUserProjectRepo sets the repo for persisting user project selections across restarts.
-func (s *TelegramService) SetTelegramUserProjectRepo(repo *repository.TelegramUserProjectRepo) {
+func (s *TelegramService) SetTelegramUserProjectRepo(repo persistence.TelegramUserProjectStore) {
 	s.telegramUserProjectRepo = repo
 }
 
 // SetSettingsRepo sets the global settings repo for reading app-wide settings like personality.
-func (s *TelegramService) SetSettingsRepo(repo *repository.SettingsRepo) {
+func (s *TelegramService) SetSettingsRepo(repo persistence.SettingsStore) {
 	s.settingsRepo = repo
 }
 
 // SetCustomPersonalityRepo sets the custom personality repo for resolving custom personality prompts.
-func (s *TelegramService) SetCustomPersonalityRepo(repo *repository.CustomPersonalityRepo) {
+func (s *TelegramService) SetCustomPersonalityRepo(repo persistence.CustomPersonalityStore) {
 	s.customPersonalityRepo = repo
 }
 
@@ -251,7 +248,7 @@ func (s *TelegramService) SetProjectCreationServices(projectSvc *ProjectService,
 }
 
 // SetAgentRepo sets the agent repo for listing agent definitions from Telegram chat.
-func (s *TelegramService) SetAgentRepo(repo *repository.AgentRepo) {
+func (s *TelegramService) SetAgentRepo(repo persistence.AgentStore) {
 	s.agentRepo = repo
 }
 
@@ -281,11 +278,11 @@ func (s *TelegramService) SetEmailStatusProvider(provider func(context.Context) 
 	s.emailStatus = provider
 }
 
-func (s *TelegramService) SetEmailAuthRepo(repo *repository.EmailAuthRepo) {
+func (s *TelegramService) SetEmailAuthRepo(repo persistence.EmailAuthStore) {
 	s.emailAuthRepo = repo
 }
 
-func (s *TelegramService) SetWebhookRepo(repo *repository.WebhookRepo) {
+func (s *TelegramService) SetWebhookRepo(repo persistence.WebhookStore) {
 	s.webhookRepo = repo
 }
 
@@ -1399,7 +1396,7 @@ func (s *TelegramService) telegramActionHandlersForTask(projectID, callerTaskID 
 		CustomPersonalityRepo: s.customPersonalityRepo,
 		ProjectRepo:           s.projectRepo,
 		AlertSvc:              s.alertSvc,
-		UsageAnalyticsSvc:     usageAnalyticsServiceFromRepos(s.usageAnalyticsSvc, s.execRepo, s.llmConfigRepo),
+		UsageAnalyticsSvc:     s.usageAnalyticsSvc,
 		UpcomingSvc:           s.upcomingSvc,
 		TelegramRunning:       s.IsRunning,
 		TelegramAuthRepo:      telegramAuthCountStore(s.telegramAuthRepo),

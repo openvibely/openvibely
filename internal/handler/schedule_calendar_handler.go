@@ -6,7 +6,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/service"
 )
 
@@ -35,7 +35,7 @@ func (h *Handler) ScheduleCalendarAction(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid calendar action")
 	}
 	undo, err := service.ApplyScheduleCalendarAction(c.Request().Context(), h.scheduleRepo, h.mutationProjectID(c), action)
-	if errors.Is(err, repository.ErrScheduleCalendarSelection) {
+	if errors.Is(err, persistence.ErrScheduleCalendarSelection) {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 	if err != nil {

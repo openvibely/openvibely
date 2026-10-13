@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 )
 
 // DiscordTaskContextRepo persists Discord metadata for Discord-origin task notifications.
@@ -42,12 +43,20 @@ var discordTaskContextLifecycle = taskContextLifecycle[models.DiscordTaskContext
 
 func (r *DiscordTaskContextRepo) Upsert(ctx context.Context, dtc *models.DiscordTaskContext) error {
 	return withBoundSQLiteConn(ctx, r.db, func(conn *sql.Conn) error {
-		return r.UpsertWithExecutor(ctx, conn, dtc)
+		return r.upsertWithExecutor(ctx, conn, dtc)
 	})
 }
 
-// UpsertWithExecutor persists Discord task context using the caller's transaction.
-func (r *DiscordTaskContextRepo) UpsertWithExecutor(ctx context.Context, exec SQLExecutor, dtc *models.DiscordTaskContext) error {
+// UpsertInTx persists task context using the caller's store transaction.
+func (r *DiscordTaskContextRepo) UpsertInTx(ctx context.Context, tx persistence.Tx, dtc *models.DiscordTaskContext) error {
+	exec, err := executorFromTx(tx)
+	if err != nil {
+		return err
+	}
+	return r.upsertWithExecutor(ctx, exec, dtc)
+}
+
+func (r *DiscordTaskContextRepo) upsertWithExecutor(ctx context.Context, exec sqlExecutor, dtc *models.DiscordTaskContext) error {
 	if dtc == nil {
 		return fmt.Errorf("discord task context is nil")
 	}

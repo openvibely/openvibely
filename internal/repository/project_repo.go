@@ -6,19 +6,8 @@ import (
 	"fmt"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 )
-
-type ProjectRepoRoot struct {
-	ID       string
-	RepoPath string
-}
-
-type ProjectRepoValidationProject struct {
-	ID       string
-	Name     string
-	RepoPath string
-	RepoURL  string
-}
 
 type ProjectRepo struct {
 	db *sql.DB
@@ -102,16 +91,16 @@ const projectRepoValidationProjectsQuery = `SELECT id, name, repo_path, repo_url
 // ListRepoValidationProjects returns the compact unordered project projection
 // needed by startup repository-path validation. Keep this separate from List:
 // validation does not need display ordering or project settings and metadata.
-func (r *ProjectRepo) ListRepoValidationProjects(ctx context.Context) ([]ProjectRepoValidationProject, error) {
+func (r *ProjectRepo) ListRepoValidationProjects(ctx context.Context) ([]persistence.ProjectRepoValidationProject, error) {
 	rows, err := r.db.QueryContext(ctx, projectRepoValidationProjectsQuery)
 	if err != nil {
 		return nil, fmt.Errorf("listing project repository validation rows: %w", err)
 	}
 	defer rows.Close()
 
-	projects := make([]ProjectRepoValidationProject, 0, 64)
+	projects := make([]persistence.ProjectRepoValidationProject, 0, 64)
 	for rows.Next() {
-		var p ProjectRepoValidationProject
+		var p persistence.ProjectRepoValidationProject
 		if err := rows.Scan(&p.ID, &p.Name, &p.RepoPath, &p.RepoURL); err != nil {
 			return nil, fmt.Errorf("scanning project repository validation row: %w", err)
 		}
@@ -122,7 +111,7 @@ func (r *ProjectRepo) ListRepoValidationProjects(ctx context.Context) ([]Project
 
 // ForEachRepoRoot scans the compact unordered repository-root projection and
 // invokes visit once per project without materializing a full result slice.
-func (r *ProjectRepo) ForEachRepoRoot(ctx context.Context, visit func(ProjectRepoRoot)) error {
+func (r *ProjectRepo) ForEachRepoRoot(ctx context.Context, visit func(persistence.ProjectRepoRoot)) error {
 	rows, err := r.db.QueryContext(ctx, projectRepoRootsQuery)
 	if err != nil {
 		return fmt.Errorf("listing project repository roots: %w", err)
@@ -130,7 +119,7 @@ func (r *ProjectRepo) ForEachRepoRoot(ctx context.Context, visit func(ProjectRep
 	defer rows.Close()
 
 	for rows.Next() {
-		var p ProjectRepoRoot
+		var p persistence.ProjectRepoRoot
 		if err := rows.Scan(&p.ID, &p.RepoPath); err != nil {
 			return fmt.Errorf("scanning project repository root: %w", err)
 		}
@@ -141,9 +130,9 @@ func (r *ProjectRepo) ForEachRepoRoot(ctx context.Context, visit func(ProjectRep
 
 // ListRepoRoots returns only project identity and repository roots for
 // work-directory attribution. The result is intentionally unordered.
-func (r *ProjectRepo) ListRepoRoots(ctx context.Context) ([]ProjectRepoRoot, error) {
-	projects := make([]ProjectRepoRoot, 0, 64)
-	if err := r.ForEachRepoRoot(ctx, func(project ProjectRepoRoot) {
+func (r *ProjectRepo) ListRepoRoots(ctx context.Context) ([]persistence.ProjectRepoRoot, error) {
+	projects := make([]persistence.ProjectRepoRoot, 0, 64)
+	if err := r.ForEachRepoRoot(ctx, func(project persistence.ProjectRepoRoot) {
 		projects = append(projects, project)
 	}); err != nil {
 		return nil, err
@@ -274,7 +263,7 @@ func (r *ProjectRepo) Delete(ctx context.Context, id string) error {
 // DeleteWithCleanupManifest removes a project and all project-owned relational
 // state in one transaction while preserving the filesystem cleanup information
 // that database cascades would otherwise discard.
-func (r *ProjectRepo) DeleteWithCleanupManifest(ctx context.Context, id string, beforeDelete func(TaskDeletionManifest) error) (manifest TaskDeletionManifest, deleted bool, err error) {
+func (r *ProjectRepo) DeleteWithCleanupManifest(ctx context.Context, id string, beforeDelete func(persistence.TaskDeletionManifest) error) (manifest persistence.TaskDeletionManifest, deleted bool, err error) {
 	tx, cleanup, err := beginImmediateTx(ctx, r.db)
 	if err != nil {
 		return manifest, false, fmt.Errorf("beginning project deletion: %w", err)
@@ -324,7 +313,7 @@ func (r *ProjectRepo) DeleteWithCleanupManifest(ctx context.Context, id string, 
 		return manifest, false, fmt.Errorf("listing project task worktrees for deletion: %w", queryErr)
 	}
 	for worktreeRows.Next() {
-		var worktree TaskWorktreeCleanup
+		var worktree persistence.TaskWorktreeCleanup
 		if scanErr := worktreeRows.Scan(&worktree.TaskID, &worktree.WorktreePath, &worktree.WorktreeBranch, &worktree.DeleteBranch); scanErr != nil {
 			_ = worktreeRows.Close()
 			return manifest, false, fmt.Errorf("scanning project task worktree for deletion: %w", scanErr)

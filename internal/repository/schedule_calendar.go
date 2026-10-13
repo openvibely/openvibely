@@ -9,9 +9,8 @@ import (
 
 	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 )
-
-var ErrScheduleCalendarSelection = errors.New("invalid schedule selection")
 
 func (r *ScheduleRepo) CalendarState(ctx context.Context, projectID string) (models.ScheduleCalendarState, error) {
 	state := models.ScheduleCalendarState{Skips: []models.ScheduleSkip{}}
@@ -37,18 +36,18 @@ func (r *ScheduleRepo) CalendarState(ctx context.Context, projectID string) (mod
 // returns an inverse containing only rows actually changed by this action.
 func (r *ScheduleRepo) ApplyCalendarAction(ctx context.Context, projectID string, action models.ScheduleCalendarAction, now time.Time) (models.ScheduleCalendarAction, error) {
 	inverse := models.ScheduleCalendarAction{}
-	err := withImmediateTx(ctx, r.db, func(exec SQLExecutor) error {
+	err := withImmediateTx(ctx, r.db, func(exec sqlExecutor) error {
 		var exists bool
 		if err := exec.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM projects WHERE id = ?)`, projectID).Scan(&exists); err != nil {
 			return err
 		}
 		if !exists {
-			return ErrScheduleCalendarSelection
+			return persistence.ErrScheduleCalendarSelection
 		}
 		ids := map[string]bool{}
 		for _, id := range action.ScheduleIDs {
 			if id == "" {
-				return ErrScheduleCalendarSelection
+				return persistence.ErrScheduleCalendarSelection
 			}
 			ids[id] = true
 		}
@@ -67,7 +66,7 @@ func (r *ScheduleRepo) ApplyCalendarAction(ctx context.Context, projectID string
 			var s models.Schedule
 			err := exec.QueryRowContext(ctx, `SELECT s.id, s.run_at, s.repeat_type, s.repeat_interval, s.enabled, s.next_run FROM schedules s JOIN tasks t ON t.id = s.task_id WHERE s.id = ? AND t.project_id = ?`, id, projectID).Scan(&s.ID, &s.RunAt, &s.RepeatType, &s.RepeatInterval, &s.Enabled, &s.NextRun)
 			if errors.Is(err, sql.ErrNoRows) {
-				return ErrScheduleCalendarSelection
+				return persistence.ErrScheduleCalendarSelection
 			}
 			if err != nil {
 				return err
@@ -241,7 +240,7 @@ func (r *ScheduleRepo) ApplyCalendarAction(ctx context.Context, projectID string
 			}
 			inverse.Action = "pause_all"
 		default:
-			return fmt.Errorf("%w: unknown action", ErrScheduleCalendarSelection)
+			return fmt.Errorf("%w: unknown action", persistence.ErrScheduleCalendarSelection)
 		}
 		return nil
 	})
@@ -254,7 +253,7 @@ func (r *ScheduleRepo) SuppressedOccurrence(ctx context.Context, scheduleID stri
 	return suppressedScheduleOccurrence(ctx, r.db, scheduleID, occurrence)
 }
 
-func suppressedScheduleOccurrence(ctx context.Context, exec SQLExecutor, scheduleID string, occurrence time.Time) (bool, time.Time, error) {
+func suppressedScheduleOccurrence(ctx context.Context, exec sqlExecutor, scheduleID string, occurrence time.Time) (bool, time.Time, error) {
 	var paused bool
 	var end, restoredStart sql.NullInt64
 	err := exec.QueryRowContext(ctx, `SELECT (s.enabled = 0 OR EXISTS(SELECT 1 FROM schedule_project_pauses p WHERE p.project_id = t.project_id)),
@@ -282,7 +281,7 @@ func suppressedScheduleOccurrence(ctx context.Context, exec SQLExecutor, schedul
 
 // changeScheduleSkip is shared by user actions and their exact inverse. All
 // callers run inside the same project-validated write transaction.
-func changeScheduleSkip(ctx context.Context, exec SQLExecutor, projectID string, skip models.ScheduleSkip, present bool) (bool, error) {
+func changeScheduleSkip(ctx context.Context, exec sqlExecutor, projectID string, skip models.ScheduleSkip, present bool) (bool, error) {
 	var result sql.Result
 	var err error
 	if present {
@@ -305,7 +304,7 @@ func (r *ScheduleRepo) ClaimCalendarOccurrence(ctx context.Context, schedule mod
 		return false, nil
 	}
 	claimed := false
-	err := withImmediateTx(ctx, r.db, func(exec SQLExecutor) error {
+	err := withImmediateTx(ctx, r.db, func(exec sqlExecutor) error {
 		suppressed, _, err := suppressedScheduleOccurrence(ctx, exec, schedule.ID, *schedule.NextRun)
 		if err != nil || suppressed {
 			return err
@@ -354,7 +353,7 @@ func (r *ScheduleRepo) ClaimCalendarOccurrence(ctx context.Context, schedule mod
 				agent = *task.AgentID
 			}
 			execution := models.Execution{TaskID: task.ID, AgentConfigID: agent, Status: models.ExecQueued, PromptSent: task.Prompt, StartsNewContext: schedule.ClearContextOnStart}
-			if err := NewExecutionRepo(r.db).CreateWithExecutor(ctx, exec, &execution); err != nil {
+			if err := createExecutionWithExecutor(ctx, exec, &execution); err != nil {
 				return err
 			}
 			executionID = &execution.ID
@@ -371,7 +370,7 @@ func (r *ScheduleRepo) ClaimCalendarOccurrence(ctx context.Context, schedule mod
 // ReleaseCalendarOccurrence restores a failed planner admission only if no
 // intervening scheduler or user edit has changed its occurrence state.
 func (r *ScheduleRepo) ReleaseCalendarOccurrence(ctx context.Context, schedule models.Schedule, admittedAt time.Time, next *time.Time) error {
-	return withImmediateTx(ctx, r.db, func(exec SQLExecutor) error {
+	return withImmediateTx(ctx, r.db, func(exec sqlExecutor) error {
 		result, err := exec.ExecContext(ctx, `UPDATE schedules SET last_run = ?, next_run = ?, updated_at = datetime('now') WHERE id = ? AND task_id = ? AND last_run = ? AND next_run IS ? AND EXISTS (SELECT 1 FROM schedule_dispatch_admissions a WHERE a.schedule_id = schedules.id)`, schedule.LastRun, schedule.NextRun, schedule.ID, schedule.TaskID, normalizeScheduleTime(admittedAt), normalizeScheduleNextRun(next))
 		if err != nil {
 			return err
@@ -392,7 +391,7 @@ func (r *ScheduleRepo) AdvanceSuppressedOccurrence(ctx context.Context, schedule
 		return false, nil
 	}
 	suppressed := false
-	err := withImmediateTx(ctx, r.db, func(exec SQLExecutor) error {
+	err := withImmediateTx(ctx, r.db, func(exec sqlExecutor) error {
 		var until time.Time
 		var err error
 		suppressed, until, err = suppressedScheduleOccurrence(ctx, exec, schedule.ID, *schedule.NextRun)
@@ -409,7 +408,7 @@ func (r *ScheduleRepo) AdvanceSuppressedOccurrence(ctx context.Context, schedule
 	return suppressed, err
 }
 
-func (r *ScheduleRepo) ListCalendarAdmissions(ctx context.Context) ([]ActiveLaneTaskAdmission, error) {
+func (r *ScheduleRepo) ListCalendarAdmissions(ctx context.Context) ([]persistence.ActiveLaneTaskAdmission, error) {
 	rows, err := r.db.QueryContext(ctx, `SELECT task_id, COALESCE(execution_id,''), starts_new_context FROM schedule_dispatch_admissions`)
 	if err != nil {
 		return nil, err
@@ -434,7 +433,7 @@ func (r *ScheduleRepo) ListCalendarAdmissions(ctx context.Context) ([]ActiveLane
 	if err != nil {
 		return nil, err
 	}
-	var result []ActiveLaneTaskAdmission
+	var result []persistence.ActiveLaneTaskAdmission
 	for _, ref := range refs {
 		task, err := NewTaskRepo(r.db, nil).GetByID(ctx, ref.taskID)
 		if err != nil {
@@ -442,7 +441,7 @@ func (r *ScheduleRepo) ListCalendarAdmissions(ctx context.Context) ([]ActiveLane
 		}
 		if task != nil {
 			task.StartsNewContext = ref.clear
-			result = append(result, ActiveLaneTaskAdmission{Task: *task, ExecutionID: ref.executionID})
+			result = append(result, persistence.ActiveLaneTaskAdmission{Task: *task, ExecutionID: ref.executionID})
 		}
 	}
 	return result, nil

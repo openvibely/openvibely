@@ -14,7 +14,7 @@ import (
 
 	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence"
 )
 
 type CreateSwarmTaskRequest struct {
@@ -74,19 +74,19 @@ var ErrSwarmRoleActive = errors.New("swarm role already has an active execution"
 
 type SwarmService struct {
 	taskSvc       *TaskService
-	taskRepo      *repository.TaskRepo
-	execRepo      *repository.ExecutionRepo
+	taskRepo      persistence.TaskStore
+	execRepo      persistence.ExecutionStore
 	workerSvc     *WorkerService
-	llmConfigRepo *repository.LLMConfigRepo
-	projectRepo   *repository.ProjectRepo
+	llmConfigRepo persistence.LLMConfigStore
+	projectRepo   persistence.ProjectStore
 	orchestration sync.Mutex
 }
 
-func NewSwarmService(taskSvc *TaskService, taskRepo *repository.TaskRepo, execRepo *repository.ExecutionRepo, workerSvc *WorkerService) *SwarmService {
+func NewSwarmService(taskSvc *TaskService, taskRepo persistence.TaskStore, execRepo persistence.ExecutionStore, workerSvc *WorkerService) *SwarmService {
 	return &SwarmService{taskSvc: taskSvc, taskRepo: taskRepo, execRepo: execRepo, workerSvc: workerSvc}
 }
 
-func (s *SwarmService) SetModelSelectionRepos(llmConfigRepo *repository.LLMConfigRepo, projectRepo *repository.ProjectRepo) {
+func (s *SwarmService) SetModelSelectionRepos(llmConfigRepo persistence.LLMConfigStore, projectRepo persistence.ProjectStore) {
 	if s == nil {
 		return
 	}
@@ -196,7 +196,7 @@ func (s *SwarmService) StartPlanner(ctx context.Context, parentTaskID string) er
 // StartPlannerForScheduledRun transfers a live calendar admission to a durable
 // planner execution. The persisted admission owns the context setting.
 func (s *SwarmService) StartPlannerForScheduledRun(ctx context.Context, parentTaskID string, _ bool) error {
-	unlock := repository.LockTaskLifecycle(parentTaskID)
+	unlock := persistence.LockTaskLifecycle(parentTaskID)
 	defer unlock()
 	s.orchestration.Lock()
 	defer s.orchestration.Unlock()
@@ -251,7 +251,7 @@ func (s *SwarmService) startPlannerWithFollowup(ctx context.Context, parentTaskI
 	if err != nil || parent == nil {
 		return fmt.Errorf("loading swarm parent: %w", err)
 	}
-	if _, guarded := repository.ActiveLaneExpectedState(ctx, parentTaskID); guarded {
+	if _, guarded := persistence.ActiveLaneExpectedState(ctx, parentTaskID); guarded {
 		if err := s.taskRepo.PrepareSwarmParentForActiveLane(ctx, parentTaskID); err != nil {
 			return err
 		}
@@ -851,7 +851,7 @@ func (s *SwarmService) HandleParentFollowup(ctx context.Context, parentTaskID st
 	if len(modelSelection) > 0 {
 		selection = &modelSelection[0]
 	}
-	unlock := repository.LockTaskLifecycle(parentTaskID)
+	unlock := persistence.LockTaskLifecycle(parentTaskID)
 	defer unlock()
 	parent, err := s.taskRepo.GetByID(ctx, parentTaskID)
 	if err != nil || parent == nil {
@@ -916,7 +916,7 @@ func (s *SwarmService) HandleChildFollowup(ctx context.Context, childTaskID stri
 	if err != nil || initialChild == nil || initialChild.ParentTaskID == nil {
 		return err
 	}
-	unlock := repository.LockTaskLifecycle(*initialChild.ParentTaskID)
+	unlock := persistence.LockTaskLifecycle(*initialChild.ParentTaskID)
 	defer unlock()
 	s.orchestration.Lock()
 	defer s.orchestration.Unlock()
@@ -1009,7 +1009,7 @@ func (s *SwarmService) ReactivateParentForChildFollowupRetry(ctx context.Context
 	if err != nil || initialChild == nil || initialChild.ParentTaskID == nil {
 		return err
 	}
-	unlock := repository.LockTaskLifecycle(*initialChild.ParentTaskID)
+	unlock := persistence.LockTaskLifecycle(*initialChild.ParentTaskID)
 	defer unlock()
 	s.orchestration.Lock()
 	defer s.orchestration.Unlock()
@@ -1050,7 +1050,7 @@ func (s *SwarmService) ReactivateParentForChildFollowupRetry(ctx context.Context
 }
 
 func (s *SwarmService) RerunRole(ctx context.Context, parentTaskID string, role models.SwarmRole) (*models.Task, error) {
-	unlock := repository.LockTaskLifecycle(parentTaskID)
+	unlock := persistence.LockTaskLifecycle(parentTaskID)
 	defer unlock()
 	if role != models.SwarmRoleReviewer && !isMergerRole(role) {
 		return nil, fmt.Errorf("unsupported swarm rerun role %q", role)
@@ -1247,7 +1247,7 @@ func swarmCompleteWithoutMerger(children []models.Task, parentCfg models.SwarmCo
 }
 
 func (s *SwarmService) CancelSwarm(ctx context.Context, parentTaskID string) error {
-	unlock := repository.LockTaskLifecycle(parentTaskID)
+	unlock := persistence.LockTaskLifecycle(parentTaskID)
 	defer unlock()
 	return s.cancelSwarmLocked(ctx, parentTaskID)
 }
@@ -1258,7 +1258,7 @@ func (s *SwarmService) CancelSwarmObservedWithPending(ctx context.Context, obser
 	if observed == nil {
 		return fmt.Errorf("swarm parent not found")
 	}
-	unlock := repository.LockTaskLifecycle(observed.ID)
+	unlock := persistence.LockTaskLifecycle(observed.ID)
 	defer unlock()
 	current, err := s.taskRepo.GetByID(ctx, observed.ID)
 	if err != nil {

@@ -10,6 +10,7 @@ import (
 
 	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/testutil"
 )
 
@@ -127,7 +128,7 @@ func TestAutomationRepoExistsUsesProjectScopedIdentityLookup(t *testing.T) {
 	if err := projectRepo.Create(ctx, &otherProject); err != nil {
 		t.Fatalf("create other project: %v", err)
 	}
-	automationID := NewID()
+	automationID := persistence.NewID()
 	if _, err := db.ExecContext(ctx, `INSERT INTO automations (id, project_id, stable_key, name) VALUES (?, ?, ?, ?)`, automationID, project.ID, "exists/automation", "Exists automation"); err != nil {
 		t.Fatalf("insert automation: %v", err)
 	}

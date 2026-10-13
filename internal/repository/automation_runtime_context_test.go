@@ -10,6 +10,7 @@ import (
 
 	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/testutil"
 )
 
@@ -71,7 +72,7 @@ func TestAutomationRepoRuntimeGraphContextAndResources(t *testing.T) {
 		InvocationID: "runtime-context-invocation",
 		NodeID:       fixture.Nodes["task"],
 	}
-	workItem, activity, err := repo.RecordProjectionEvent(ctx, AutomationProjectionEvent{
+	workItem, activity, err := repo.RecordProjectionEvent(ctx, persistence.AutomationProjectionEvent{
 		Context:       models.AutomationContext{ProjectID: fixture.ProjectID},
 		Binding:       binding,
 		WorkItemKey:   "github:owner/repo:issue:42",
@@ -92,7 +93,7 @@ func TestAutomationRepoRuntimeGraphContextAndResources(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RecordProjectionEvent: %v", err)
 	}
-	if _, _, err := repo.RecordProjectionEvent(ctx, AutomationProjectionEvent{
+	if _, _, err := repo.RecordProjectionEvent(ctx, persistence.AutomationProjectionEvent{
 		Context: models.AutomationContext{ProjectID: fixture.ProjectID},
 		Binding: models.AutomationBinding{
 			AutomationID: fixture.AutomationID,
@@ -258,12 +259,12 @@ func TestAutomationRuntimeResourceURLCoverage(t *testing.T) {
 }
 
 func TestAutomationGitHubIssueDedupSourceAutomationCountsUseStableIdentity(t *testing.T) {
-	source := AutomationGitHubIssueDedupSource{
+	source := persistence.AutomationGitHubIssueDedupSource{
 		Context: models.AutomationContext{ProjectID: "project", Bindings: []models.AutomationBinding{
 			{AutomationID: "auto", VersionID: "v1", NodeID: "n1"},
 			{AutomationID: "auto", VersionID: "v2", NodeID: "replacement-node"},
 		}},
-		StableBindings: []AutomationGitHubIssueDedupNodeSource{
+		StableBindings: []persistence.AutomationGitHubIssueDedupNodeSource{
 			{AutomationID: "auto", NodeKey: "bug_finder"},
 			{AutomationID: "other-auto", NodeKey: "bug_finder"},
 		},
@@ -429,8 +430,8 @@ func TestAutomationScheduledCustomCategoryValidationPrecedesAdmissionSkip(t *tes
 			now := due.Add(time.Minute)
 			nextRun := now.Add(time.Hour)
 			invocation, dispatch, err := repo.ClaimScheduledOccurrence(ctx, schedule, now, &nextRun)
-			if !errors.Is(err, ErrAutomationScheduleChanged) {
-				t.Fatalf("ClaimScheduledOccurrence error = %v, want %v", err, ErrAutomationScheduleChanged)
+			if !errors.Is(err, persistence.ErrAutomationScheduleChanged) {
+				t.Fatalf("ClaimScheduledOccurrence error = %v, want %v", err, persistence.ErrAutomationScheduleChanged)
 			}
 			if invocation != nil || dispatch != nil {
 				t.Fatalf("ClaimScheduledOccurrence result invocation=%#v dispatch=%#v, want nil results", invocation, dispatch)
@@ -506,13 +507,13 @@ func TestAutomationRepoScheduledDispatchLifecycle(t *testing.T) {
 	if err != nil || envelope == nil || envelope.Task.ID != task.ID || len(envelope.Context.Bindings) != 1 {
 		t.Fatalf("GetDispatchEnvelope = %#v, %v", envelope, err)
 	}
-	if err := repo.RenewDispatchLease(ctx, leased.ID, "not-owner", now.Add(2*time.Minute)); !errors.Is(err, ErrAutomationDispatchLease) {
+	if err := repo.RenewDispatchLease(ctx, leased.ID, "not-owner", now.Add(2*time.Minute)); !errors.Is(err, persistence.ErrAutomationDispatchLease) {
 		t.Fatalf("RenewDispatchLease wrong owner err = %v", err)
 	}
 	if err := repo.RenewDispatchLease(ctx, leased.ID, "owner", now.Add(2*time.Minute)); err != nil {
 		t.Fatalf("RenewDispatchLease: %v", err)
 	}
-	if err := repo.MarkDispatchSubmitted(ctx, leased.ID, "not-owner", execution.ID); !errors.Is(err, ErrAutomationDispatchLease) {
+	if err := repo.MarkDispatchSubmitted(ctx, leased.ID, "not-owner", execution.ID); !errors.Is(err, persistence.ErrAutomationDispatchLease) {
 		t.Fatalf("MarkDispatchSubmitted wrong owner err = %v", err)
 	}
 	if err := repo.MarkDispatchSubmitted(ctx, leased.ID, "owner", execution.ID); err != nil {
@@ -1237,7 +1238,7 @@ func TestAutomationRepoGitHubDedupAndExternalActivityLeases(t *testing.T) {
 		InvocationID: "dedup-invocation",
 		NodeID:       fixture.Nodes["github"],
 	}
-	source := AutomationGitHubIssueDedupSource{
+	source := persistence.AutomationGitHubIssueDedupSource{
 		Context:     models.AutomationContext{ProjectID: fixture.ProjectID, Bindings: []models.AutomationBinding{binding}},
 		TaskID:      "task-source",
 		ExecutionID: "exec-source",
@@ -1272,7 +1273,7 @@ func TestAutomationRepoGitHubDedupAndExternalActivityLeases(t *testing.T) {
 	if err != nil || resourceID != "" {
 		t.Fatalf("ReserveExternalActivity initial = %q, %v", resourceID, err)
 	}
-	if resourceID, err := repo.ReserveExternalActivity(ctx, fixture.ProjectID, binding, "create-issue", "create_github_issue", "github_issue"); !errors.Is(err, ErrAutomationExternalReconciliation) || resourceID != "" {
+	if resourceID, err := repo.ReserveExternalActivity(ctx, fixture.ProjectID, binding, "create-issue", "create_github_issue", "github_issue"); !errors.Is(err, persistence.ErrAutomationExternalReconciliation) || resourceID != "" {
 		t.Fatalf("ReserveExternalActivity duplicate = %q, %v", resourceID, err)
 	}
 	if err := repo.ReleaseExternalActivityReservation(ctx, fixture.ProjectID, binding, "create-issue"); err != nil {

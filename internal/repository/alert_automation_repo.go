@@ -8,9 +8,10 @@ import (
 	"strings"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 )
 
-func automationNodeIDByKey(ctx context.Context, exec SQLExecutor, projectID, automationID, versionID, nodeKey string) (string, error) {
+func automationNodeIDByKey(ctx context.Context, exec sqlExecutor, projectID, automationID, versionID, nodeKey string) (string, error) {
 	var nodeID string
 	if err := exec.QueryRowContext(ctx, `SELECT id FROM automation_nodes
 		WHERE project_id = ? AND automation_id = ? AND version_id = ? AND node_key = ?`,
@@ -20,7 +21,7 @@ func automationNodeIDByKey(ctx context.Context, exec SQLExecutor, projectID, aut
 	return nodeID, nil
 }
 
-func automationWorkItemNodeIDByRole(ctx context.Context, exec SQLExecutor, projectID, automationID, versionID, workItemID, role string) (string, error) {
+func automationWorkItemNodeIDByRole(ctx context.Context, exec sqlExecutor, projectID, automationID, versionID, workItemID, role string) (string, error) {
 	var nodeID string
 	err := exec.QueryRowContext(ctx, `SELECT n.id FROM automation_work_item_positions p
 		JOIN automation_nodes n ON n.id = p.node_id AND n.project_id = p.project_id
@@ -30,7 +31,7 @@ func automationWorkItemNodeIDByRole(ctx context.Context, exec SQLExecutor, proje
 	return nodeID, err
 }
 
-func automationTargetNodeIDByRole(ctx context.Context, exec SQLExecutor, projectID, automationID, versionID, sourceNodeID, role string) (string, error) {
+func automationTargetNodeIDByRole(ctx context.Context, exec sqlExecutor, projectID, automationID, versionID, sourceNodeID, role string) (string, error) {
 	var nodeID string
 	err := exec.QueryRowContext(ctx, `SELECT target.id FROM automation_edges edge
 		JOIN automation_nodes target ON target.id = edge.target_node_id AND target.project_id = edge.project_id
@@ -40,7 +41,7 @@ func automationTargetNodeIDByRole(ctx context.Context, exec SQLExecutor, project
 	return nodeID, err
 }
 
-func alertHandoffNodeIDs(ctx context.Context, exec SQLExecutor, projectID, automationID, versionID, sourceNodeID string) (string, string, string, bool, error) {
+func alertHandoffNodeIDs(ctx context.Context, exec sqlExecutor, projectID, automationID, versionID, sourceNodeID string) (string, string, string, bool, error) {
 	var notificationNode, approvalNode, inboxNode string
 	err := exec.QueryRowContext(ctx, `SELECT notification.id, approval.id, inbox.id
 		FROM automation_edges source_edge
@@ -73,7 +74,7 @@ func alertHandoffNodeIDs(ctx context.Context, exec SQLExecutor, projectID, autom
 	return notificationNode, approvalNode, inboxNode, true, nil
 }
 
-func effectiveAlertCreationAutomationContext(ctx context.Context, exec SQLExecutor, alert *models.Alert, automationContext models.AutomationContext) (models.AutomationContext, error) {
+func effectiveAlertCreationAutomationContext(ctx context.Context, exec sqlExecutor, alert *models.Alert, automationContext models.AutomationContext) (models.AutomationContext, error) {
 	if alert == nil || automationContext.ProjectID != alert.ProjectID || len(automationContext.Bindings) == 0 {
 		return automationContext, nil
 	}
@@ -114,7 +115,7 @@ func effectiveAlertCreationAutomationContext(ctx context.Context, exec SQLExecut
 	return effective, nil
 }
 
-func currentAlertCreationBindingForAutomation(ctx context.Context, exec SQLExecutor, projectID string, taskContext models.AutomationContext, automationID string) (models.AutomationBinding, bool, error) {
+func currentAlertCreationBindingForAutomation(ctx context.Context, exec sqlExecutor, projectID string, taskContext models.AutomationContext, automationID string) (models.AutomationBinding, bool, error) {
 	for _, binding := range taskContext.Bindings {
 		if binding.AutomationID != automationID {
 			continue
@@ -130,7 +131,7 @@ func currentAlertCreationBindingForAutomation(ctx context.Context, exec SQLExecu
 	return models.AutomationBinding{}, false, nil
 }
 
-func alertCreationBindingAuthorized(ctx context.Context, exec SQLExecutor, projectID string, binding models.AutomationBinding) (bool, error) {
+func alertCreationBindingAuthorized(ctx context.Context, exec sqlExecutor, projectID string, binding models.AutomationBinding) (bool, error) {
 	var adapterKey string
 	if err := exec.QueryRowContext(ctx, `SELECT adapter_key FROM automation_versions
 		WHERE id = ? AND automation_id = ? AND project_id = ?`, binding.VersionID, binding.AutomationID, projectID).Scan(&adapterKey); errors.Is(err, sql.ErrNoRows) {
@@ -160,7 +161,7 @@ func alertCreationBindingAuthorized(ctx context.Context, exec SQLExecutor, proje
 	}
 }
 
-func applyAlertAutomationProvenance(ctx context.Context, exec SQLExecutor, alert *models.Alert, automationContext models.AutomationContext) error {
+func applyAlertAutomationProvenance(ctx context.Context, exec sqlExecutor, alert *models.Alert, automationContext models.AutomationContext) error {
 	entries := make([]any, 0, len(automationContext.Bindings))
 	for _, binding := range automationContext.Bindings {
 		notificationNode, approvalNode, inboxNode, found, err := alertHandoffNodeIDs(ctx, exec, alert.ProjectID, binding.AutomationID, binding.VersionID, binding.NodeID)
@@ -189,7 +190,7 @@ func applyAlertAutomationProvenance(ctx context.Context, exec SQLExecutor, alert
 	return nil
 }
 
-func recordAlertCreatedProjection(ctx context.Context, exec SQLExecutor, alert *models.Alert, automationContext models.AutomationContext) error {
+func recordAlertCreatedProjection(ctx context.Context, exec sqlExecutor, alert *models.Alert, automationContext models.AutomationContext) error {
 	if alert == nil || automationContext.ProjectID != alert.ProjectID {
 		return fmt.Errorf("alert automation project mismatch")
 	}
@@ -248,11 +249,11 @@ func alertAutomationResources(alertID string, sourceTaskID, executionID *string)
 	return resources
 }
 
-func recordAlertCreatedWaitingProjection(ctx context.Context, exec SQLExecutor, projectID, alertID, title string, sourceBinding models.AutomationBinding, producerNodeID, notificationNodeID, approvalNodeID string, resources []models.AutomationActivityResource) (models.AutomationBinding, error) {
+func recordAlertCreatedWaitingProjection(ctx context.Context, exec sqlExecutor, projectID, alertID, title string, sourceBinding models.AutomationBinding, producerNodeID, notificationNodeID, approvalNodeID string, resources []models.AutomationActivityResource) (models.AutomationBinding, error) {
 	binding := sourceBinding
 	binding.NodeID = notificationNodeID
 	projectionContext := models.AutomationContext{ProjectID: projectID, Bindings: []models.AutomationBinding{binding}}
-	item, _, err := recordProjectionEventWithExecutor(ctx, exec, AutomationProjectionEvent{
+	item, _, err := recordProjectionEventWithExecutor(ctx, exec, persistence.AutomationProjectionEvent{
 		Context: projectionContext, Binding: binding,
 		WorkItemKey: "alert:" + alertID, WorkItemKind: "suggestion", WorkItemTitle: title,
 		WorkItemStatus: models.AutomationWorkItemWaiting,
@@ -266,7 +267,7 @@ func recordAlertCreatedWaitingProjection(ctx context.Context, exec SQLExecutor, 
 	}
 	binding.WorkItemID = item.ID
 	projectionContext.Bindings[0] = binding
-	_, _, err = recordProjectionEventWithExecutor(ctx, exec, AutomationProjectionEvent{
+	_, _, err = recordProjectionEventWithExecutor(ctx, exec, persistence.AutomationProjectionEvent{
 		Context: projectionContext, Binding: binding,
 		ActivityKey: "alert:" + alertID + ":create", ActivityType: "create_notification", ActivityStatus: models.AutomationActivityCompleted,
 		Resources: resources,
@@ -276,7 +277,7 @@ func recordAlertCreatedWaitingProjection(ctx context.Context, exec SQLExecutor, 
 	return binding, err
 }
 
-func recordAlertDecisionProjection(ctx context.Context, exec SQLExecutor, projectID, alertID string, state models.AlertDecisionState) error {
+func recordAlertDecisionProjection(ctx context.Context, exec sqlExecutor, projectID, alertID string, state models.AlertDecisionState) error {
 	rows, err := exec.QueryContext(ctx, `SELECT DISTINCT wi.automation_id, wi.origin_version_id, wi.id
 		FROM automation_work_items wi
 		JOIN automation_activities a ON a.work_item_id = wi.id
@@ -344,7 +345,7 @@ func recordAlertDecisionProjection(ctx context.Context, exec SQLExecutor, projec
 			transition = models.AutomationTransitionCompleted
 		}
 		binding := models.AutomationBinding{AutomationID: value.automationID, VersionID: value.versionID, NodeID: approvalNode, WorkItemID: value.workItemID}
-		_, _, err = recordProjectionEventWithExecutor(ctx, exec, AutomationProjectionEvent{
+		_, _, err = recordProjectionEventWithExecutor(ctx, exec, persistence.AutomationProjectionEvent{
 			Context: models.AutomationContext{ProjectID: projectID, Bindings: []models.AutomationBinding{binding}}, Binding: binding,
 			ActivityKey: "alert:" + alertID + ":decision:" + string(state), ActivityType: "human_decision", ActivityStatus: models.AutomationActivityCompleted,
 			Resources: []models.AutomationActivityResource{{ResourceType: "alert", ResourceID: alertID}},
@@ -357,7 +358,7 @@ func recordAlertDecisionProjection(ctx context.Context, exec SQLExecutor, projec
 	return nil
 }
 
-func rebindAlertAutomationProjection(ctx context.Context, exec SQLExecutor, projectID, alertID string, bindings []models.AutomationBinding) error {
+func rebindAlertAutomationProjection(ctx context.Context, exec sqlExecutor, projectID, alertID string, bindings []models.AutomationBinding) error {
 	var title string
 	var decision models.AlertDecisionState
 	var sourceTaskID, executionID sql.NullString
@@ -416,7 +417,7 @@ func rebindAlertAutomationProjection(ctx context.Context, exec SQLExecutor, proj
 			}
 			if decision == models.AlertDecisionApproved {
 				binding.NodeID = value.gateID
-				if _, _, err := recordProjectionEventWithExecutor(ctx, exec, AutomationProjectionEvent{
+				if _, _, err := recordProjectionEventWithExecutor(ctx, exec, persistence.AutomationProjectionEvent{
 					Context: models.AutomationContext{ProjectID: projectID, Bindings: []models.AutomationBinding{binding}}, Binding: binding,
 					ActivityKey: "alert:" + alertID + ":decision:" + string(decision), ActivityType: "human_decision", ActivityStatus: models.AutomationActivityCompleted,
 					Resources: resources, EventKey: "alert:" + alertID + ":decision:" + string(decision), FromNodeID: value.gateID,
@@ -430,7 +431,7 @@ func rebindAlertAutomationProjection(ctx context.Context, exec SQLExecutor, proj
 	return nil
 }
 
-func recordAlertClaimProjection(ctx context.Context, exec SQLExecutor, projectID, alertID, claimant string) error {
+func recordAlertClaimProjection(ctx context.Context, exec sqlExecutor, projectID, alertID, claimant string) error {
 	targets, err := alertAutomationWorkItems(ctx, exec, projectID, alertID)
 	if err != nil {
 		return err
@@ -451,7 +452,7 @@ func recordAlertClaimProjection(ctx context.Context, exec SQLExecutor, projectID
 			return err
 		}
 		binding := models.AutomationBinding{AutomationID: value.automationID, VersionID: value.versionID, NodeID: inboxNode, WorkItemID: value.workItemID}
-		if _, _, err := recordProjectionEventWithExecutor(ctx, exec, AutomationProjectionEvent{
+		if _, _, err := recordProjectionEventWithExecutor(ctx, exec, persistence.AutomationProjectionEvent{
 			Context: models.AutomationContext{ProjectID: projectID, Bindings: []models.AutomationBinding{binding}}, Binding: binding,
 			ActivityKey: "alert:" + alertID + ":claim:" + claimant, ActivityType: "claim_notification", ActivityStatus: models.AutomationActivityRunning,
 			Resources: []models.AutomationActivityResource{{ResourceType: "alert", ResourceID: alertID}},
@@ -462,7 +463,7 @@ func recordAlertClaimProjection(ctx context.Context, exec SQLExecutor, projectID
 	return nil
 }
 
-func recordAlertClaimReleasedProjection(ctx context.Context, exec SQLExecutor, projectID, alertID, claimant string) error {
+func recordAlertClaimReleasedProjection(ctx context.Context, exec sqlExecutor, projectID, alertID, claimant string) error {
 	targets, err := alertAutomationWorkItems(ctx, exec, projectID, alertID)
 	if err != nil {
 		return err
@@ -482,7 +483,7 @@ func recordAlertClaimReleasedProjection(ctx context.Context, exec SQLExecutor, p
 	return nil
 }
 
-func recordAlertProcessingProjection(ctx context.Context, exec SQLExecutor, projectID, alertID string, state models.AlertProcessingState, message string) error {
+func recordAlertProcessingProjection(ctx context.Context, exec sqlExecutor, projectID, alertID string, state models.AlertProcessingState, message string) error {
 	targets, err := alertAutomationWorkItems(ctx, exec, projectID, alertID)
 	if err != nil {
 		return err
@@ -511,7 +512,7 @@ func recordAlertProcessingProjection(ctx context.Context, exec SQLExecutor, proj
 			}
 		}
 		binding := models.AutomationBinding{AutomationID: value.automationID, VersionID: value.versionID, NodeID: fromNode, WorkItemID: value.workItemID}
-		event := AutomationProjectionEvent{
+		event := persistence.AutomationProjectionEvent{
 			Context: models.AutomationContext{ProjectID: projectID, Bindings: []models.AutomationBinding{binding}}, Binding: binding,
 			ActivityKey: "alert:" + alertID + ":processing:" + string(state), ActivityType: "process_notification",
 			ActivityStatus: models.AutomationActivityCompleted,
@@ -538,7 +539,7 @@ func recordAlertProcessingProjection(ctx context.Context, exec SQLExecutor, proj
 
 type alertAutomationTarget struct{ automationID, versionID, workItemID, fromNodeID string }
 
-func alertAutomationWorkItems(ctx context.Context, exec SQLExecutor, projectID, alertID string) ([]alertAutomationTarget, error) {
+func alertAutomationWorkItems(ctx context.Context, exec sqlExecutor, projectID, alertID string) ([]alertAutomationTarget, error) {
 	rows, err := exec.QueryContext(ctx, `SELECT DISTINCT wi.automation_id, wi.origin_version_id, wi.id,
 		COALESCE((SELECT p.node_id FROM automation_work_item_positions p WHERE p.work_item_id = wi.id ORDER BY p.entered_at, p.node_id LIMIT 1), '')
 		FROM automation_work_items wi
@@ -560,7 +561,7 @@ func alertAutomationWorkItems(ctx context.Context, exec SQLExecutor, projectID, 
 	return targets, rows.Err()
 }
 
-func recordAlertImplementationProjection(ctx context.Context, exec SQLExecutor, projectID, alertID, taskID string) error {
+func recordAlertImplementationProjection(ctx context.Context, exec sqlExecutor, projectID, alertID, taskID string) error {
 	existing, err := alertAutomationBindingsForTask(ctx, exec, projectID, alertID, taskID)
 	if err != nil {
 		return err
@@ -603,7 +604,7 @@ func recordAlertImplementationProjection(ctx context.Context, exec SQLExecutor, 
 			return err
 		}
 		binding := models.AutomationBinding{AutomationID: value.automationID, VersionID: value.versionID, NodeID: implementationNode, WorkItemID: value.workItemID}
-		_, _, err = recordProjectionEventWithExecutor(ctx, exec, AutomationProjectionEvent{
+		_, _, err = recordProjectionEventWithExecutor(ctx, exec, persistence.AutomationProjectionEvent{
 			Context: models.AutomationContext{ProjectID: projectID, Bindings: []models.AutomationBinding{binding}}, Binding: binding,
 			ActivityKey: "alert:" + alertID + ":implementation-task", ActivityType: "create_implementation_task", ActivityStatus: models.AutomationActivityCompleted,
 			Resources: []models.AutomationActivityResource{{ResourceType: "alert", ResourceID: alertID}, {ResourceType: "task", ResourceID: taskID}},
@@ -616,7 +617,7 @@ func recordAlertImplementationProjection(ctx context.Context, exec SQLExecutor, 
 	return nil
 }
 
-func alertAutomationBindingsForTask(ctx context.Context, exec SQLExecutor, projectID, alertID, taskID string) ([]models.AutomationBinding, error) {
+func alertAutomationBindingsForTask(ctx context.Context, exec sqlExecutor, projectID, alertID, taskID string) ([]models.AutomationBinding, error) {
 	rows, err := exec.QueryContext(ctx, `SELECT DISTINCT a.automation_id, a.version_id, COALESCE(a.invocation_id, ''),
 		a.node_id, COALESCE(a.work_item_id, '') FROM automation_activities a
 		JOIN automation_activity_resources ar_alert ON ar_alert.activity_id = a.id AND ar_alert.resource_type = 'alert' AND ar_alert.resource_id = ?

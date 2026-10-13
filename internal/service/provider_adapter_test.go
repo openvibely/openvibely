@@ -54,7 +54,7 @@ func TestOpenAIProviderAdapterCanonicalizesModelOverrides(t *testing.T) {
 	original := openaiclient.OpenAIAPIBaseURL
 	openaiclient.OpenAIAPIBaseURL = server.URL + "/v1/"
 	defer func() { openaiclient.OpenAIAPIBaseURL = original }()
-	adapter := &openAIProviderAdapter{adapter: llmopenai.New(nil, nil, nil)}
+	adapter := &openAIProviderAdapter{adapter: llmopenai.New(nil, nil, nil, nil)}
 	_, err := adapter.Call(llmcontracts.AgentRequest{
 		Ctx: context.Background(), Operation: llmcontracts.OperationDirect, Message: "hello", RawDirectPrompt: true, DisableTools: true,
 		Agent:           models.LLMConfig{Provider: models.ProviderOpenAI, Model: "gpt-5.5", AuthMethod: models.AuthMethodAPIKey, APIKey: "test", BaseURL: server.URL + "/v1"},

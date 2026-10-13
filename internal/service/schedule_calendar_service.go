@@ -6,12 +6,12 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence"
 )
 
-func ApplyScheduleCalendarAction(ctx context.Context, repo *repository.ScheduleRepo, projectID string, action models.ScheduleCalendarAction) (models.ScheduleCalendarAction, error) {
+func ApplyScheduleCalendarAction(ctx context.Context, repo persistence.ScheduleStore, projectID string, action models.ScheduleCalendarAction) (models.ScheduleCalendarAction, error) {
 	invalid := func() (models.ScheduleCalendarAction, error) {
-		return models.ScheduleCalendarAction{}, fmt.Errorf("%w: choose schedules or dates", repository.ErrScheduleCalendarSelection)
+		return models.ScheduleCalendarAction{}, fmt.Errorf("%w: choose schedules or dates", persistence.ErrScheduleCalendarSelection)
 	}
 	if projectID == "" || len(action.ScheduleIDs) > 2000 || len(action.Skips) > 2000 || len(action.Changes) > 10000 {
 		return invalid()

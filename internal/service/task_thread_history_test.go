@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/stretchr/testify/require"
@@ -21,7 +22,7 @@ func TestLoadBoundedTaskThreadExecutionsHandlesInvalidInputs(t *testing.T) {
 
 	for _, tt := range []struct {
 		name     string
-		execRepo *repository.ExecutionRepo
+		execRepo persistence.ExecutionStore
 		task     *models.Task
 		total    int
 		offset   int

@@ -12,7 +12,7 @@ import (
 	"github.com/openvibely/openvibely/internal/events"
 	llmworkflow "github.com/openvibely/openvibely/internal/llm/workflow"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence"
 )
 
 type workflowTaskCreator struct {
@@ -235,7 +235,7 @@ func (s *LLMService) activatePublishedCustomAutomationChild(ctx context.Context,
 				ChildCategory: category, ChildPromptPrefix: automationCompiledTaskPrompt(promptCandidate, targetDraft),
 			}
 			if err := s.activateCompiledAutomationChild(ctx, parentTask, parentOutput, chain); err != nil {
-				if errors.Is(err, repository.ErrAutomationChainChildBusy) {
+				if errors.Is(err, persistence.ErrAutomationChainChildBusy) {
 					busyErr = errors.Join(busyErr, err)
 					continue
 				}
@@ -310,7 +310,7 @@ func (s *LLMService) activateCompiledAutomationChild(ctx context.Context, parent
 		return err
 	}
 	if child == nil || child.ProjectID != parentTask.ProjectID || child.ParentTaskID == nil || *child.ParentTaskID != parentTask.ID ||
-		child.CreatedVia != repository.AutomationCompilerTaskCreatedVia(automationID, config.ChildAutomationNodeKey) {
+		child.CreatedVia != persistence.AutomationCompilerTaskCreatedVia(automationID, config.ChildAutomationNodeKey) {
 		return errors.New("compiled Automation child task does not match the published topology")
 	}
 	automationContext, ok := AutomationContextFromContext(ctx)
@@ -364,7 +364,7 @@ func (s *LLMService) activateCompiledAutomationChild(ctx context.Context, parent
 	targetBinding := *sourceBinding
 	targetBinding.NodeID = targetNode.ID
 	targetContext := models.AutomationContext{ProjectID: parentTask.ProjectID, Bindings: []models.AutomationBinding{targetBinding}}
-	event := repository.AutomationProjectionEvent{
+	event := persistence.AutomationProjectionEvent{
 		Context: targetContext, Binding: targetBinding,
 		ActivityKey: "execution:" + executionID + ":handoff:" + child.ID, ActivityType: "task_handoff", ActivityStatus: models.AutomationActivityCompleted,
 		EventKey:   "execution:" + executionID + ":handoff:" + sourceNode.ID + ":" + targetNode.ID,
@@ -377,7 +377,7 @@ func (s *LLMService) activateCompiledAutomationChild(ctx context.Context, parent
 		event.WorkItemTitle = child.Title
 	}
 	workItem, _, activated, err := s.taskRepo.ActivateAutomationChainedTask(ctx, parentTask, child, event)
-	if errors.Is(err, repository.ErrAutomationChainChildBusy) {
+	if errors.Is(err, persistence.ErrAutomationChainChildBusy) {
 		blocked := event
 		blocked.ActivityKey += ":blocked"
 		blocked.ActivityStatus = models.AutomationActivityFailed

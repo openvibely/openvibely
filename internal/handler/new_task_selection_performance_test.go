@@ -18,6 +18,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/stretchr/testify/require"
@@ -53,7 +54,7 @@ func TestHandler_NewTaskFirstMessageReusesPreflightSelection(t *testing.T) {
 
 			form := url.Values{"message": {message}, "agent_id": {selectionAgentID}}
 			if scenario.images {
-				sessionID := repository.NewID()
+				sessionID := persistence.NewID()
 				form.Set("attachment_session_id", sessionID)
 				seedNewTaskSelectionImage(t, sessionID)
 			}
@@ -108,7 +109,7 @@ func TestHandler_NewTaskSelectionHandoffDoesNotRepeatModelLookups(t *testing.T) 
 				"agent_id": {scenario.agentID},
 			}
 			if scenario.hasImages {
-				sessionID := repository.NewID()
+				sessionID := persistence.NewID()
 				form.Set("attachment_session_id", sessionID)
 				seedNewTaskSelectionImage(t, sessionID)
 			}
@@ -238,7 +239,7 @@ func BenchmarkNewTaskFirstSubmitHandlerPath(b *testing.B) {
 							}
 							pendingSessionID := ""
 							if selectionMode.hasImages {
-								pendingSessionID = repository.NewID()
+								pendingSessionID = persistence.NewID()
 								form.Set("attachment_session_id", pendingSessionID)
 								seedNewTaskSelectionImage(b, pendingSessionID)
 							}

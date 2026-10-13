@@ -12,7 +12,7 @@ import (
 
 	"github.com/openvibely/openvibely/internal/chatcontrol"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence"
 )
 
 const SendMessageAllowExplicitTargetsSetting = "send_message_allow_explicit_targets"
@@ -88,7 +88,7 @@ type ChannelMessageRouter struct {
 	emailAuth    outboundAuthorizedUserStore
 	discordAuth  outboundAuthorizedUserStore
 	targets      channelTargetStore
-	settings     *repository.SettingsRepo
+	settings     persistence.SettingsStore
 	newID        func() string
 	auditSurface string
 	auditUser    string
@@ -133,8 +133,8 @@ type SendMessageResult struct {
 	Error     string `json:"error,omitempty"`
 }
 
-func NewChannelMessageRouter(targets channelTargetStore, settings *repository.SettingsRepo) *ChannelMessageRouter {
-	return &ChannelMessageRouter{targets: targets, settings: settings, newID: repository.NewID, xState: &outboundXState{}}
+func NewChannelMessageRouter(targets channelTargetStore, settings persistence.SettingsStore) *ChannelMessageRouter {
+	return &ChannelMessageRouter{targets: targets, settings: settings, newID: persistence.NewID, xState: &outboundXState{}}
 }
 
 func (r *ChannelMessageRouter) SetSlackService(svc outboundSlackSender)       { r.slack = svc }
@@ -521,7 +521,7 @@ func (r *ChannelMessageRouter) auditAndReturn(ctx context.Context, projectID, pl
 	if r.targets == nil {
 		return result
 	}
-	id := repository.NewID()
+	id := persistence.NewID()
 	if r.newID != nil {
 		id = r.newID()
 	}
@@ -778,7 +778,7 @@ func NormalizeOutboundEmailForTarget(email string) (string, error) {
 	if err != nil || addr == nil || strings.TrimSpace(addr.Address) == "" {
 		return "", fmt.Errorf("invalid email recipient")
 	}
-	return repository.NormalizeEmailAddress(addr.Address), nil
+	return persistence.NormalizeEmailAddress(addr.Address), nil
 }
 
 func (r *ChannelMessageRouter) allowExplicitTargets(ctx context.Context, projectID string) bool {

@@ -7,15 +7,8 @@ import (
 	"strings"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 )
-
-// NormalizeGitHubLogin trims a GitHub login, strips a leading @ mention marker, and lowercases it for authorization and inbox matching.
-func NormalizeGitHubLogin(login string) string {
-	normalized := strings.TrimSpace(login)
-	normalized = strings.TrimPrefix(normalized, "@")
-	normalized = strings.TrimSpace(normalized)
-	return strings.ToLower(normalized)
-}
 
 // GitHubAuthRepo handles database operations for GitHub authorized users and project inbox assignees.
 type GitHubAuthRepo struct {
@@ -63,7 +56,7 @@ func (r *GitHubAuthRepo) listAuthorizedActors(ctx context.Context, query string)
 
 // IsActorAuthorized checks whether a GitHub actor is explicitly authorized. Empty authorized lists deny by default.
 func (r *GitHubAuthRepo) IsActorAuthorized(ctx context.Context, githubLogin string) (bool, error) {
-	login := NormalizeGitHubLogin(githubLogin)
+	login := persistence.NormalizeGitHubLogin(githubLogin)
 	if login == "" {
 		return false, nil
 	}
@@ -81,7 +74,7 @@ func (r *GitHubAuthRepo) UpsertAuthorizedActor(ctx context.Context, actor *model
 	if actor == nil {
 		return fmt.Errorf("github authorized actor is required")
 	}
-	actor.GitHubLogin = NormalizeGitHubLogin(actor.GitHubLogin)
+	actor.GitHubLogin = persistence.NormalizeGitHubLogin(actor.GitHubLogin)
 	if actor.GitHubLogin == "" {
 		return fmt.Errorf("github login is required")
 	}
@@ -150,7 +143,7 @@ func (r *GitHubAuthRepo) UpsertProjectInbox(ctx context.Context, inbox *models.G
 		return fmt.Errorf("github project inbox is required")
 	}
 	inbox.ProjectID = strings.TrimSpace(inbox.ProjectID)
-	inbox.GitHubLogin = NormalizeGitHubLogin(inbox.GitHubLogin)
+	inbox.GitHubLogin = persistence.NormalizeGitHubLogin(inbox.GitHubLogin)
 	if inbox.ProjectID == "" {
 		return fmt.Errorf("project id is required")
 	}

@@ -10,7 +10,7 @@ import (
 	"github.com/openvibely/openvibely/internal/events"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence"
 )
 
 type executionOutputRepo interface {
@@ -49,11 +49,11 @@ type Writer struct {
 	sessionID             string // CLI session ID for --resume on subsequent calls
 }
 
-func NewWriter(execID, taskID string, repo *repository.ExecutionRepo, ctx context.Context, interval time.Duration) *Writer {
+func NewWriter(execID, taskID string, repo persistence.ExecutionStore, ctx context.Context, interval time.Duration) *Writer {
 	return NewWriterWithPublisher(execID, taskID, repo, ctx, interval, nil)
 }
 
-func NewWriterWithPublisher(execID, taskID string, repo *repository.ExecutionRepo, ctx context.Context, interval time.Duration, publisher ExecutionStreamPublisher) *Writer {
+func NewWriterWithPublisher(execID, taskID string, repo persistence.ExecutionStore, ctx context.Context, interval time.Duration, publisher ExecutionStreamPublisher) *Writer {
 	var outputRepo executionOutputRepo
 	if repo != nil {
 		outputRepo = repo

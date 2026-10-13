@@ -24,7 +24,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/httpretry"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -217,7 +217,7 @@ type githubAppConfig struct {
 }
 
 type GitHubService struct {
-	settingsRepo    *repository.SettingsRepo
+	settingsRepo    persistence.SettingsStore
 	appID           string
 	appSlug         string
 	appPrivateKey   string
@@ -230,7 +230,7 @@ type GitHubService struct {
 	nowFn           func() time.Time
 }
 
-func NewGitHubService(settingsRepo *repository.SettingsRepo, appID, appSlug, appPrivateKey, projectRepoRoot string) *GitHubService {
+func NewGitHubService(settingsRepo persistence.SettingsStore, appID, appSlug, appPrivateKey, projectRepoRoot string) *GitHubService {
 	return &GitHubService{
 		settingsRepo:    settingsRepo,
 		appID:           strings.TrimSpace(appID),

@@ -18,6 +18,7 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/web/static"
@@ -235,7 +236,7 @@ func TestAutomationRunNowSupersedesFailedLiveStateAcrossRefreshAndReloadInChrome
 		project.ID, definition.Automation.ID, definition.Version.ID, triggerNode.ID, schedule.ID); err != nil {
 		t.Fatalf("insert prior failed invocation: %v", err)
 	}
-	if _, _, err := automationRepo.RecordProjectionEvent(ctx, repository.AutomationProjectionEvent{
+	if _, _, err := automationRepo.RecordProjectionEvent(ctx, persistence.AutomationProjectionEvent{
 		Context: models.AutomationContext{ProjectID: project.ID},
 		Binding: models.AutomationBinding{AutomationID: definition.Automation.ID, VersionID: definition.Version.ID,
 			NodeID: triggerNode.ID, InvocationID: "browser-previous-failure"},
@@ -271,7 +272,7 @@ func TestAutomationRunNowSupersedesFailedLiveStateAcrossRefreshAndReloadInChrome
 		if _, err := tc.db.ExecContext(c.Request().Context(), `UPDATE automation_invocations SET status = 'failed', completed_at = CURRENT_TIMESTAMP WHERE id = ?`, invocationID); err != nil {
 			return err
 		}
-		if _, _, err := automationRepo.RecordProjectionEvent(c.Request().Context(), repository.AutomationProjectionEvent{
+		if _, _, err := automationRepo.RecordProjectionEvent(c.Request().Context(), persistence.AutomationProjectionEvent{
 			Context: models.AutomationContext{ProjectID: project.ID},
 			Binding: models.AutomationBinding{AutomationID: definition.Automation.ID, VersionID: definition.Version.ID,
 				NodeID: triggerNode.ID, InvocationID: invocationID},

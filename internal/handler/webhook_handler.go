@@ -16,7 +16,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence"
 )
 
 const maxWebhookBodySize = 1 << 20 // 1 MB
@@ -173,7 +173,7 @@ func (h *Handler) createWebhookTaskFromEndpoint(ctx context.Context, endpoint *m
 
 func (h *Handler) createWebhookTaskWithUniqueTitle(ctx context.Context, task *models.Task) error {
 	if err := h.taskRepo.Create(ctx, task); err != nil {
-		if !errors.Is(err, repository.ErrDuplicateTask) {
+		if !errors.Is(err, persistence.ErrDuplicateTask) {
 			return err
 		}
 		baseTitle := task.Title
@@ -181,7 +181,7 @@ func (h *Handler) createWebhookTaskWithUniqueTitle(ctx context.Context, task *mo
 			task.Title = fmt.Sprintf("%s (%d)", baseTitle, i)
 			if retryErr := h.taskRepo.Create(ctx, task); retryErr == nil {
 				return nil
-			} else if !errors.Is(retryErr, repository.ErrDuplicateTask) {
+			} else if !errors.Is(retryErr, persistence.ErrDuplicateTask) {
 				return retryErr
 			}
 		}
@@ -480,7 +480,7 @@ func (h *Handler) HandleWebhookDelete(c echo.Context) error {
 		return err
 	}
 	if err := h.webhookRepo.DeleteForProject(c.Request().Context(), projectID, id); err != nil {
-		if errors.Is(err, repository.ErrWebhookNotFound) {
+		if errors.Is(err, persistence.ErrWebhookNotFound) {
 			return echo.NewHTTPError(http.StatusNotFound, "webhook not found")
 		}
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to delete webhook")
@@ -500,7 +500,7 @@ func (h *Handler) HandleWebhookRotateSecret(c echo.Context) error {
 	id := c.Param("id")
 	newSecret, err := h.webhookRepo.RotateSecret(c.Request().Context(), id)
 	if err != nil {
-		if errors.Is(err, repository.ErrWebhookNotFound) {
+		if errors.Is(err, persistence.ErrWebhookNotFound) {
 			return echo.NewHTTPError(http.StatusNotFound, "webhook not found")
 		}
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to rotate secret")

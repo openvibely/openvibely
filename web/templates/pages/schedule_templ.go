@@ -11,7 +11,7 @@ import templruntime "github.com/a-h/templ/runtime"
 import (
 	"fmt"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/web/templates/components"
 	"github.com/openvibely/openvibely/web/templates/layout"
 	"slices"
@@ -21,11 +21,11 @@ import (
 type WeekDay struct {
 	Date    time.Time
 	IsToday bool
-	Tasks   []repository.TaskWithSchedule
+	Tasks   []persistence.TaskWithSchedule
 }
 
 type TaskOccurrence struct {
-	Task           repository.TaskWithSchedule
+	Task           persistence.TaskWithSchedule
 	OccurrenceTime time.Time
 }
 
@@ -132,7 +132,7 @@ func occurrencesPerHour(repeatType models.RepeatType, interval int) int {
 	}
 }
 
-func buildTaskOccurrenceMap(tasks []repository.TaskWithSchedule, startOfWeek time.Time) map[string][]TaskOccurrence {
+func buildTaskOccurrenceMap(tasks []persistence.TaskWithSchedule, startOfWeek time.Time) map[string][]TaskOccurrence {
 	// End of week (Saturday)
 	endOfWeek := startOfWeek.AddDate(0, 0, 6)
 	endOfWeek = time.Date(endOfWeek.Year(), endOfWeek.Month(), endOfWeek.Day(), 23, 59, 59, 0, endOfWeek.Location())
@@ -251,7 +251,7 @@ func buildTaskOccurrenceMap(tasks []repository.TaskWithSchedule, startOfWeek tim
 
 // addCalendarDayOccurrences uses the scheduler's original wall-clock anchor.
 // A missing local time shifts only that occurrence, not subsequent runs.
-func addCalendarDayOccurrences(tasksByDateTime map[string][]TaskOccurrence, task repository.TaskWithSchedule, startOfWeek, endOfWeek time.Time) {
+func addCalendarDayOccurrences(tasksByDateTime map[string][]TaskOccurrence, task persistence.TaskWithSchedule, startOfWeek, endOfWeek time.Time) {
 	if models.ValidateScheduleRepeatInterval(task.Schedule.RepeatInterval) != nil {
 		return
 	}
@@ -274,7 +274,7 @@ func addCalendarDayOccurrences(tasksByDateTime map[string][]TaskOccurrence, task
 // showing the frequency, rather than 720 individual cards.
 // For RepeatHours with interval > 1 (e.g. every 2 hours), only places cards at hours
 // aligned with the schedule's RunAt anchor.
-func addSubDailyOccurrences(tasksByDateTime map[string][]TaskOccurrence, task repository.TaskWithSchedule, startOfWeek, endOfWeek time.Time) {
+func addSubDailyOccurrences(tasksByDateTime map[string][]TaskOccurrence, task persistence.TaskWithSchedule, startOfWeek, endOfWeek time.Time) {
 	if models.ValidateScheduleRepeatInterval(task.Schedule.RepeatInterval) != nil {
 		return
 	}
@@ -347,7 +347,7 @@ func buildWeekTimeline(weekOffset int) []WeekDay {
 		weekDays = append(weekDays, WeekDay{
 			Date:    currentDate,
 			IsToday: isToday,
-			Tasks:   []repository.TaskWithSchedule{}, // Not used anymore
+			Tasks:   []persistence.TaskWithSchedule{}, // Not used anymore
 		})
 		currentDate = currentDate.AddDate(0, 0, 1)
 	}
@@ -408,14 +408,14 @@ func formatWeekRange(weekDays []WeekDay) string {
 		start.Year())
 }
 
-func getScheduleID(task repository.TaskWithSchedule) string {
+func getScheduleID(task persistence.TaskWithSchedule) string {
 	if task.Schedule != nil {
 		return task.Schedule.ID
 	}
 	return ""
 }
 
-func scheduleDisplayTitle(task repository.TaskWithSchedule) string {
+func scheduleDisplayTitle(task persistence.TaskWithSchedule) string {
 	if task.AutomationScheduleName != "" {
 		return task.AutomationScheduleName
 	}
@@ -433,7 +433,7 @@ func getStartOfWeek(weekOffset int) time.Time {
 	return startOfWeek.AddDate(0, 0, weekOffset*7)
 }
 
-func buildWeekData(tasks []repository.TaskWithSchedule, weekOffset int) WeekData {
+func buildWeekData(tasks []persistence.TaskWithSchedule, weekOffset int) WeekData {
 	startOfWeek := getStartOfWeek(weekOffset)
 	return WeekData{
 		WeekDays:        buildWeekTimeline(weekOffset),
@@ -441,11 +441,11 @@ func buildWeekData(tasks []repository.TaskWithSchedule, weekOffset int) WeekData
 	}
 }
 
-func schedulePrimaryAgentSelectable(agent repository.AgentTaskUIOption) bool {
+func schedulePrimaryAgentSelectable(agent persistence.AgentTaskUIOption) bool {
 	return agent.Enabled && agent.SelectableAsPrimary && agent.GeneratedStatus != models.AgentStatusArchived && agent.ArchivedAt == nil
 }
 
-func schedulePrimaryAgentSelectionEditable(selected *string, agentDefs []repository.AgentTaskUIOption) bool {
+func schedulePrimaryAgentSelectionEditable(selected *string, agentDefs []persistence.AgentTaskUIOption) bool {
 	if selected == nil || *selected == "" {
 		return true
 	}
@@ -457,7 +457,7 @@ func schedulePrimaryAgentSelectionEditable(selected *string, agentDefs []reposit
 	return false
 }
 
-func SchedulePrimaryAgentSelector(selected *string, agentDefs []repository.AgentTaskUIOption, selectClass string) templ.Component {
+func SchedulePrimaryAgentSelector(selected *string, agentDefs []persistence.AgentTaskUIOption, selectClass string) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
@@ -589,7 +589,7 @@ func SchedulePrimaryAgentSelector(selected *string, agentDefs []repository.Agent
 	})
 }
 
-func Schedule(projects []models.Project, currentProject *models.Project, tasks []repository.TaskWithSchedule, weekOffset int, agents []models.LLMConfig, agentDefs []repository.AgentScheduleOption, calendarState ...models.ScheduleCalendarState) templ.Component {
+func Schedule(projects []models.Project, currentProject *models.Project, tasks []persistence.TaskWithSchedule, weekOffset int, agents []models.LLMConfig, agentDefs []persistence.AgentScheduleOption, calendarState ...models.ScheduleCalendarState) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
@@ -637,7 +637,7 @@ func Schedule(projects []models.Project, currentProject *models.Project, tasks [
 }
 
 // ScheduleContent renders just the schedule content for HTMX requests
-func ScheduleContent(currentProject *models.Project, tasks []repository.TaskWithSchedule, weekOffset int, agents []models.LLMConfig, agentDefs []repository.AgentScheduleOption, calendarState ...models.ScheduleCalendarState) templ.Component {
+func ScheduleContent(currentProject *models.Project, tasks []persistence.TaskWithSchedule, weekOffset int, agents []models.LLMConfig, agentDefs []persistence.AgentScheduleOption, calendarState ...models.ScheduleCalendarState) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
@@ -666,7 +666,7 @@ func ScheduleContent(currentProject *models.Project, tasks []repository.TaskWith
 	})
 }
 
-func scheduleContent(currentProject *models.Project, weekData WeekData, weekOffset int, agents []models.LLMConfig, agentDefs []repository.AgentScheduleOption, calendarState ...models.ScheduleCalendarState) templ.Component {
+func scheduleContent(currentProject *models.Project, weekData WeekData, weekOffset int, agents []models.LLMConfig, agentDefs []persistence.AgentScheduleOption, calendarState ...models.ScheduleCalendarState) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
@@ -1599,7 +1599,7 @@ func scheduleContent(currentProject *models.Project, weekData WeekData, weekOffs
 	})
 }
 
-func SchedulePrimaryAgentOptionSelector(selected *string, agentDefs []repository.AgentScheduleOption, selectClass string) templ.Component {
+func SchedulePrimaryAgentOptionSelector(selected *string, agentDefs []persistence.AgentScheduleOption, selectClass string) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {

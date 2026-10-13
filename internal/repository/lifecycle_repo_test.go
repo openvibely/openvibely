@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/testutil"
 )
 
@@ -1170,10 +1171,10 @@ func TestLifecycleRepo_ListExecutionsForTaskPage_BoundedKeysetAndDirection(t *te
 		t.Fatalf("newer final page = %+v, want no more results", newest)
 	}
 
-	if _, err := repo.ListExecutionsForTaskPage(ctx, task.ID, 2, "not-a-valid-cursor"); !errors.Is(err, ErrLifecycleExecutionCursor) {
-		t.Fatalf("invalid older cursor error = %v, want %v", err, ErrLifecycleExecutionCursor)
+	if _, err := repo.ListExecutionsForTaskPage(ctx, task.ID, 2, "not-a-valid-cursor"); !errors.Is(err, persistence.ErrLifecycleExecutionCursor) {
+		t.Fatalf("invalid older cursor error = %v, want %v", err, persistence.ErrLifecycleExecutionCursor)
 	}
-	if _, err := repo.ListExecutionsForTaskNewerPage(ctx, task.ID, 2, first.NextCursor); !errors.Is(err, ErrLifecycleExecutionCursor) {
+	if _, err := repo.ListExecutionsForTaskNewerPage(ctx, task.ID, 2, first.NextCursor); !errors.Is(err, persistence.ErrLifecycleExecutionCursor) {
 		t.Fatalf("older cursor accepted for newer page: %v", err)
 	}
 	if strings.Contains(listExecutionsForTaskPageSQL, "input_json") || strings.Contains(listExecutionsForTaskPageSQL, "task_run_id") {
@@ -1223,7 +1224,7 @@ func TestLifecycleRepo_ListExecutionsForTaskPage_LimitAndQueryPlan(t *testing.T)
 	if err != nil {
 		t.Fatalf("large page: %v", err)
 	}
-	if len(page.Items) != LifecycleExecutionPageMaxLimit || !page.HasMore || page.NextCursor == "" {
+	if len(page.Items) != persistence.LifecycleExecutionPageMaxLimit || !page.HasMore || page.NextCursor == "" {
 		t.Fatalf("large page len=%d has_more=%v cursor=%q, want bounded max page", len(page.Items), page.HasMore, page.NextCursor)
 	}
 }

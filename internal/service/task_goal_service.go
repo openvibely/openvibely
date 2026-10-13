@@ -8,7 +8,7 @@ import (
 
 	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence"
 )
 
 const MaxTaskGoalLength = 2000
@@ -29,13 +29,13 @@ type GoalOptions struct {
 }
 
 type TaskGoalService struct {
-	repo                *repository.TaskGoalRepo
-	taskRepo            *repository.TaskRepo
+	repo                persistence.TaskGoalStore
+	taskRepo            persistence.TaskStore
 	broadcaster         *events.Broadcaster
 	goalAchievedHandler func(context.Context, string, string)
 }
 
-func NewTaskGoalService(repo *repository.TaskGoalRepo, taskRepo *repository.TaskRepo, broadcaster *events.Broadcaster) *TaskGoalService {
+func NewTaskGoalService(repo persistence.TaskGoalStore, taskRepo persistence.TaskStore, broadcaster *events.Broadcaster) *TaskGoalService {
 	return &TaskGoalService{repo: repo, taskRepo: taskRepo, broadcaster: broadcaster}
 }
 
@@ -67,7 +67,7 @@ func (s *TaskGoalService) SetGoal(ctx context.Context, taskID string, objective 
 	}
 	goal := &models.TaskGoal{
 		TaskID:    taskID,
-		GoalID:    repository.NewID(),
+		GoalID:    persistence.NewID(),
 		Objective: objective,
 		Status:    models.TaskGoalStatusActive,
 		Reason:    reason,

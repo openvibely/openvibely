@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/testutil"
 )
 
@@ -86,7 +87,7 @@ func benchmarkListWithSchedulesCalendarQuery(b *testing.B, repo *TaskRepo, proje
 	b.ReportMetric(float64(unboundedPayloadBytes), "unbounded_payload_bytes/op")
 }
 
-func scheduleCalendarUnboundedPayloadBytes(tasks []TaskWithSchedule) int64 {
+func scheduleCalendarUnboundedPayloadBytes(tasks []persistence.TaskWithSchedule) int64 {
 	var total int64
 	for _, task := range tasks {
 		total += int64(len(task.Task.Prompt) + len(task.Task.ChainConfig) + len(task.Task.SwarmConfig))

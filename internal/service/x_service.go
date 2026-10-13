@@ -17,7 +17,7 @@ import (
 	"github.com/openvibely/openvibely/internal/events"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/util"
 	"github.com/rivo/uniseg"
 	"golang.org/x/net/idna"
@@ -64,20 +64,20 @@ type XService struct {
 	mu                       sync.RWMutex
 	api                      XAPI
 	credentials              XCredentials
-	settingsRepo             *repository.SettingsRepo
-	projectRepo              *repository.ProjectRepo
-	llmConfigRepo            *repository.LLMConfigRepo
-	taskRepo                 *repository.TaskRepo
-	execRepo                 *repository.ExecutionRepo
-	scheduleRepo             *repository.ScheduleRepo
-	threadInputRepo          *repository.ThreadInputRepo
-	authRepo                 *repository.XAuthRepo
-	userProjectRepo          *repository.XUserProjectRepo
-	taskContextRepo          *repository.XTaskContextRepo
-	receiptRepo              *repository.XInboundReceiptRepo
+	settingsRepo             persistence.SettingsStore
+	projectRepo              persistence.ProjectStore
+	llmConfigRepo            persistence.LLMConfigStore
+	taskRepo                 persistence.TaskStore
+	execRepo                 persistence.ExecutionStore
+	scheduleRepo             persistence.ScheduleStore
+	threadInputRepo          persistence.ThreadInputStore
+	authRepo                 persistence.XAuthStore
+	userProjectRepo          persistence.XUserProjectStore
+	taskContextRepo          persistence.XTaskContextStore
+	receiptRepo              persistence.XInboundReceiptStore
 	taskSvc                  *TaskService
-	customPersonalityRepo    *repository.CustomPersonalityRepo
-	agentRepo                *repository.AgentRepo
+	customPersonalityRepo    persistence.CustomPersonalityStore
+	agentRepo                persistence.AgentStore
 	chatBroadcaster          *events.ChatBroadcaster
 	executionStreamHub       *events.ExecutionStreamHub
 	channelChatRunner        ChannelChatRunner
@@ -97,18 +97,18 @@ type XService struct {
 	now                      func() time.Time
 }
 
-func NewXService(credentials XCredentials, settings *repository.SettingsRepo, projects *repository.ProjectRepo, configs *repository.LLMConfigRepo, tasks *repository.TaskRepo, execs *repository.ExecutionRepo, schedules *repository.ScheduleRepo, taskSvc *TaskService) *XService {
+func NewXService(credentials XCredentials, settings persistence.SettingsStore, projects persistence.ProjectStore, configs persistence.LLMConfigStore, tasks persistence.TaskStore, execs persistence.ExecutionStore, schedules persistence.ScheduleStore, taskSvc *TaskService) *XService {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &XService{api: NewXAPIClient(credentials), credentials: credentials, settingsRepo: settings, projectRepo: projects, llmConfigRepo: configs, taskRepo: tasks, execRepo: execs, scheduleRepo: schedules, taskSvc: taskSvc, ctx: ctx, cancel: cancel, pollInterval: 30 * time.Second, now: time.Now}
 }
-func (s *XService) SetRepositories(auth *repository.XAuthRepo, selections *repository.XUserProjectRepo, contexts *repository.XTaskContextRepo, receipts *repository.XInboundReceiptRepo, inputs *repository.ThreadInputRepo) {
+func (s *XService) SetRepositories(auth persistence.XAuthStore, selections persistence.XUserProjectStore, contexts persistence.XTaskContextStore, receipts persistence.XInboundReceiptStore, inputs persistence.ThreadInputStore) {
 	s.authRepo = auth
 	s.userProjectRepo = selections
 	s.taskContextRepo = contexts
 	s.receiptRepo = receipts
 	s.threadInputRepo = inputs
 }
-func (s *XService) SetRuntime(agent *repository.AgentRepo, personalities *repository.CustomPersonalityRepo, broadcaster *events.ChatBroadcaster, hub *events.ExecutionStreamHub, chatRunner ChannelChatRunner, taskRunner ChannelTaskRunner, chatPromoter, taskPromoter func(string), router *ChannelMessageRouter) {
+func (s *XService) SetRuntime(agent persistence.AgentStore, personalities persistence.CustomPersonalityStore, broadcaster *events.ChatBroadcaster, hub *events.ExecutionStreamHub, chatRunner ChannelChatRunner, taskRunner ChannelTaskRunner, chatPromoter, taskPromoter func(string), router *ChannelMessageRouter) {
 	s.agentRepo = agent
 	s.customPersonalityRepo = personalities
 	s.chatBroadcaster = broadcaster
@@ -169,7 +169,7 @@ func (s *XService) Start() error {
 			return fmt.Errorf("configured X account does not match persisted mention cursor")
 		}
 		if configurationID == "" {
-			configurationID = repository.NewID()
+			configurationID = persistence.NewID()
 			updates[XSettingConfigurationID] = configurationID
 		}
 		if err := s.settingsRepo.SetMany(s.ctx, updates); err != nil {
@@ -290,8 +290,8 @@ func (s *XService) pollingSettings(ctx context.Context) (map[string]string, erro
 	return values, nil
 }
 
-func (s *XService) requireConfigurationWithExecutor(ctx context.Context, exec repository.SQLExecutor) error {
-	matches, err := s.settingsRepo.MatchesWithExecutor(ctx, exec, s.configurationGuards())
+func (s *XService) requireConfigurationInTx(ctx context.Context, tx persistence.Tx) error {
+	matches, err := s.settingsRepo.MatchesInTx(ctx, tx, s.configurationGuards())
 	if err != nil {
 		return fmt.Errorf("verify X configuration during durable handoff: %w", err)
 	}
@@ -486,9 +486,9 @@ func (s *XService) processMention(ctx context.Context, tweet XTweet, user XUser)
 		return false, err
 	}
 	switch claim.Result {
-	case repository.XReceiptCompleted:
+	case persistence.XReceiptCompleted:
 		return true, nil
-	case repository.XReceiptActive:
+	case persistence.XReceiptActive:
 		// Another poller for this exact configuration may still be between
 		// receipt claim and durable ingress. Keep the cursor retryable without
 		// degrading provider readiness, but never grant this treatment to a
@@ -497,14 +497,14 @@ func (s *XService) processMention(ctx context.Context, tweet XTweet, user XUser)
 			return false, err
 		}
 		return false, errXReceiptActive
-	case repository.XReceiptClaimed:
+	case persistence.XReceiptClaimed:
 	default:
 		return false, fmt.Errorf("unexpected X receipt claim state %q", claim.Result)
 	}
 	text := strings.TrimSpace(stripXSelfMentions(tweet.Text, s.me.Username))
 	if text == "" {
-		_, err := s.receiptRepo.CompleteWithHandoff(ctx, tweet.ID, claim.Token, nil, func(exec repository.SQLExecutor) error {
-			return s.requireConfigurationWithExecutor(ctx, exec)
+		_, err := s.receiptRepo.CompleteWithHandoff(ctx, tweet.ID, claim.Token, nil, func(tx persistence.Tx) error {
+			return s.requireConfigurationInTx(ctx, tx)
 		})
 		if err != nil {
 			_ = s.receiptRepo.Release(context.Background(), tweet.ID, claim.Token)
@@ -548,13 +548,13 @@ func (s *XService) ingestMention(ctx context.Context, projectID string, tweet XT
 	if conversationID == "" {
 		conversationID = tweet.ID
 	}
-	completeWithHandoff := func(ctx context.Context, taskID *string, persist func(repository.SQLExecutor) error) (bool, error) {
-		alreadyHandedOff, err := s.receiptRepo.CompleteWithHandoff(ctx, tweet.ID, receiptToken, taskID, func(exec repository.SQLExecutor) error {
-			if err := s.requireConfigurationWithExecutor(ctx, exec); err != nil {
+	completeWithHandoff := func(ctx context.Context, taskID *string, persist func(persistence.Tx) error) (bool, error) {
+		alreadyHandedOff, err := s.receiptRepo.CompleteWithHandoff(ctx, tweet.ID, receiptToken, taskID, func(tx persistence.Tx) error {
+			if err := s.requireConfigurationInTx(ctx, tx); err != nil {
 				return err
 			}
 			if persist != nil {
-				return persist(exec)
+				return persist(tx)
 			}
 			return nil
 		})
@@ -575,8 +575,8 @@ func (s *XService) ingestMention(ctx context.Context, projectID string, tweet XT
 			if s.threadInputRepo == nil {
 				return false, fmt.Errorf("thread input repository is not configured")
 			}
-			return completeWithHandoff(ctx, nil, func(exec repository.SQLExecutor) error {
-				return s.threadInputRepo.CreateQueuedWithExecutor(ctx, exec, input)
+			return completeWithHandoff(ctx, nil, func(tx persistence.Tx) error {
+				return s.threadInputRepo.CreateQueuedInTx(ctx, tx, input)
 			})
 		},
 		OnDurableHandoff: func() { handed = true },
@@ -591,16 +591,16 @@ func (s *XService) ingestMention(ctx context.Context, projectID string, tweet XT
 				if s.taskContextRepo == nil {
 					return false, fmt.Errorf("X task context repository is not configured")
 				}
-				return completeWithHandoff(ctx, &task.ID, func(exec repository.SQLExecutor) error {
-					if err := s.taskRepo.CreateWithExecutor(ctx, exec, task); err != nil {
+				return completeWithHandoff(ctx, &task.ID, func(tx persistence.Tx) error {
+					if err := s.taskRepo.CreateInTx(ctx, tx, task); err != nil {
 						return err
 					}
 					taskID = task.ID
-					if err := s.taskContextRepo.UpsertWithExecutor(ctx, exec, &models.XTaskContext{TaskID: task.ID, ProjectID: projectID, AccountID: s.me.ID, ConversationID: conversationID, ReplyToTweetID: tweet.ID, XUserID: user.ID, Username: user.Username}); err != nil {
+					if err := s.taskContextRepo.UpsertInTx(ctx, tx, &models.XTaskContext{TaskID: task.ID, ProjectID: projectID, AccountID: s.me.ID, ConversationID: conversationID, ReplyToTweetID: tweet.ID, XUserID: user.ID, Username: user.Username}); err != nil {
 						return err
 					}
 					execution.TaskID = task.ID
-					return s.execRepo.CreateWithExecutor(ctx, exec, execution)
+					return s.execRepo.CreateInTx(ctx, tx, execution)
 				})
 			},
 			ListChatHistory: func(ctx context.Context, pid string) ([]models.Execution, error) {
@@ -680,7 +680,7 @@ func (s *XService) runtimeTools(callerTaskID, projectID, accountID, userID, conv
 		TaskSvc:   s.taskSvc, TaskRepo: s.taskRepo, ExecRepo: s.execRepo,
 		ThreadInputRepo: s.threadInputRepo, ExecutionStreamHub: s.executionStreamHub,
 		LLMConfigRepo: s.llmConfigRepo, SwarmSvc: swarmFromTaskService(s.taskSvc),
-		PersistTaskCreation: func(ctx context.Context, exec repository.SQLExecutor, task *models.Task) error {
+		PersistTaskCreation: func(ctx context.Context, tx persistence.Tx, task *models.Task) error {
 			if s.taskRepo == nil {
 				return fmt.Errorf("X task repository is not configured")
 			}
@@ -690,10 +690,10 @@ func (s *XService) runtimeTools(callerTaskID, projectID, accountID, userID, conv
 			if err := s.validateRuntimeTaskContext(projectID, accountID, userID, conversationID, replyToTweetID); err != nil {
 				return err
 			}
-			if err := s.taskRepo.UpdateXOriginWithExecutor(ctx, exec, task.ID); err != nil {
+			if err := s.taskRepo.UpdateXOriginInTx(ctx, tx, task.ID); err != nil {
 				return err
 			}
-			if err := s.taskContextRepo.UpsertWithExecutor(ctx, exec, &models.XTaskContext{TaskID: task.ID, ProjectID: projectID, AccountID: accountID, ConversationID: conversationID, ReplyToTweetID: replyToTweetID, XUserID: userID, Username: username}); err != nil {
+			if err := s.taskContextRepo.UpsertInTx(ctx, tx, &models.XTaskContext{TaskID: task.ID, ProjectID: projectID, AccountID: accountID, ConversationID: conversationID, ReplyToTweetID: replyToTweetID, XUserID: userID, Username: username}); err != nil {
 				return err
 			}
 			task.CreatedVia = models.TaskOriginX

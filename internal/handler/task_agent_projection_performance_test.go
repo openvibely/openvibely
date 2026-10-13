@@ -15,6 +15,7 @@ import (
 
 	"github.com/openvibely/openvibely/internal/database"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/repository"
 )
 
@@ -238,11 +239,11 @@ func taskUIAgentRenderCases() []taskUIAgentRenderCase {
 	}
 }
 
-func (fixture *taskUIAgentRenderFixture) compactAgentLoader(ctx context.Context) ([]repository.AgentTaskUIOption, error) {
+func (fixture *taskUIAgentRenderFixture) compactAgentLoader(ctx context.Context) ([]persistence.AgentTaskUIOption, error) {
 	return fixture.agentRepo.ListTaskUIOptions(ctx)
 }
 
-func (fixture *taskUIAgentRenderFixture) measure(t *testing.T, loader func(context.Context) ([]repository.AgentTaskUIOption, error), request func(*taskUIAgentRenderFixture) *http.Request) taskUIAgentRenderMetrics {
+func (fixture *taskUIAgentRenderFixture) measure(t *testing.T, loader func(context.Context) ([]persistence.AgentTaskUIOption, error), request func(*taskUIAgentRenderFixture) *http.Request) taskUIAgentRenderMetrics {
 	t.Helper()
 	fixture.h.taskUIAgentOptionsLoader = loader
 	for range 2 {
@@ -293,11 +294,11 @@ func (fixture *taskUIAgentRenderFixture) measureRenderSample(t *testing.T, reque
 	return elapsed, after.TotalAlloc - before.TotalAlloc, after.Mallocs - before.Mallocs, responseBytes
 }
 
-func (fixture *taskUIAgentRenderFixture) measureConcurrentRead(t *testing.T, loader func(context.Context) ([]repository.AgentTaskUIOption, error), request func(*taskUIAgentRenderFixture) *http.Request) (time.Duration, int64) {
+func (fixture *taskUIAgentRenderFixture) measureConcurrentRead(t *testing.T, loader func(context.Context) ([]persistence.AgentTaskUIOption, error), request func(*taskUIAgentRenderFixture) *http.Request) (time.Duration, int64) {
 	t.Helper()
 	catalogEntered := make(chan struct{})
 	var catalogOnce sync.Once
-	fixture.h.taskUIAgentOptionsLoader = func(ctx context.Context) ([]repository.AgentTaskUIOption, error) {
+	fixture.h.taskUIAgentOptionsLoader = func(ctx context.Context) ([]persistence.AgentTaskUIOption, error) {
 		catalogOnce.Do(func() { close(catalogEntered) })
 		return loader(ctx)
 	}

@@ -12,7 +12,7 @@ import (
 	"github.com/openvibely/openvibely/internal/agentskills"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence"
 )
 
 type lifecycleTurnContextKey struct{}
@@ -74,13 +74,13 @@ func WithAfterCompleteRuntimeTools(ctx context.Context, rt *llmcontracts.Runtime
 // task-turn skill selection, where route_task may select standalone skills or
 // skills owned by the assigned task agent.
 type CatalogSkillResolver struct {
-	agentRepo   *repository.AgentRepo
+	agentRepo   persistence.AgentStore
 	catalogFn   func() *agentskills.Catalog
 	globalRoot  string
 	projectRoot func(context.Context, string) string
 }
 
-func NewCatalogSkillResolver(agentRepo *repository.AgentRepo, catalogFn func() *agentskills.Catalog, globalRoot string, projectRoot func(context.Context, string) string) *CatalogSkillResolver {
+func NewCatalogSkillResolver(agentRepo persistence.AgentStore, catalogFn func() *agentskills.Catalog, globalRoot string, projectRoot func(context.Context, string) string) *CatalogSkillResolver {
 	return &CatalogSkillResolver{agentRepo: agentRepo, catalogFn: catalogFn, globalRoot: globalRoot, projectRoot: projectRoot}
 }
 
@@ -158,12 +158,12 @@ func (r *CatalogSkillResolver) readAgentOwnedSkill(ctx context.Context, projectI
 }
 
 type agentInspector struct {
-	agentRepo     *repository.AgentRepo
-	lifecycleRepo *repository.LifecycleRepo
+	agentRepo     persistence.AgentStore
+	lifecycleRepo persistence.LifecycleStore
 	catalogFn     func() *agentskills.Catalog
 }
 
-func newAgentInspector(agentRepo *repository.AgentRepo, lifecycleRepo *repository.LifecycleRepo, catalogFn func() *agentskills.Catalog) *agentInspector {
+func newAgentInspector(agentRepo persistence.AgentStore, lifecycleRepo persistence.LifecycleStore, catalogFn func() *agentskills.Catalog) *agentInspector {
 	return &agentInspector{agentRepo: agentRepo, lifecycleRepo: lifecycleRepo, catalogFn: catalogFn}
 }
 
@@ -269,7 +269,7 @@ func trimmedAgentSkillNames(names []string) []string {
 	return out
 }
 
-func projectRepoPath(ctx context.Context, projectRepo *repository.ProjectRepo, projectID string) string {
+func projectRepoPath(ctx context.Context, projectRepo persistence.ProjectStore, projectID string) string {
 	if projectRepo == nil || projectID == "" {
 		return ""
 	}
@@ -280,7 +280,7 @@ func projectRepoPath(ctx context.Context, projectRepo *repository.ProjectRepo, p
 	return project.RepoPath
 }
 
-func projectSkillRoot(ctx context.Context, projectRepo *repository.ProjectRepo, projectID string) string {
+func projectSkillRoot(ctx context.Context, projectRepo persistence.ProjectStore, projectID string) string {
 	if repoPath := projectRepoPath(ctx, projectRepo, projectID); repoPath != "" {
 		return filepath.Join(repoPath, ".openvibely")
 	}
@@ -289,7 +289,7 @@ func projectSkillRoot(ctx context.Context, projectRepo *repository.ProjectRepo, 
 
 // ProjectSkillRootForResolver exposes the project-scoped skill root calculation
 // for lifecycle hook resolver wiring without exposing repository internals.
-func ProjectSkillRootForResolver(ctx context.Context, projectRepo *repository.ProjectRepo, projectID string) string {
+func ProjectSkillRootForResolver(ctx context.Context, projectRepo persistence.ProjectStore, projectID string) string {
 	return projectSkillRoot(ctx, projectRepo, projectID)
 }
 

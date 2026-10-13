@@ -3,10 +3,9 @@ package repository
 import (
 	"context"
 	"database/sql"
-	netmail "net/mail"
-	"strings"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 )
 
 // EmailAuthRepo handles database operations for Email authorized senders.
@@ -30,25 +29,13 @@ func NewEmailAuthRepo(db *sql.DB) *EmailAuthRepo {
 		checkAnywhereErrLabel:       "check email authorization anywhere",
 		checkProjectErrLabel:        "check email project authorization",
 		updateAddedByOnEmptyDisplay: false,
-		normalize:                   NormalizeEmailAddress,
+		normalize:                   persistence.NormalizeEmailAddress,
 		scan: func(scanner taskContextScanner) (models.EmailAuthorizedSender, error) {
 			var s models.EmailAuthorizedSender
 			err := scanner.Scan(&s.ID, &s.ProjectID, &s.EmailAddress, &s.DisplayName, &s.AddedAt, &s.AddedBy)
 			return s, err
 		},
 	}}
-}
-
-// NormalizeEmailAddress extracts the mailbox address when possible, then trims and lowercases it for storage and matching.
-func NormalizeEmailAddress(email string) string {
-	email = strings.TrimSpace(email)
-	if email == "" {
-		return ""
-	}
-	if addr, err := netmail.ParseAddress(email); err == nil && addr != nil && strings.TrimSpace(addr.Address) != "" {
-		email = addr.Address
-	}
-	return strings.ToLower(strings.TrimSpace(email))
 }
 
 // ListByProject returns the authorized email senders managed by one project.

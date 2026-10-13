@@ -4,28 +4,10 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"strings"
 	"time"
 )
-
-type ChatInputRequestStatus string
-
-const (
-	ChatInputRequestPending  ChatInputRequestStatus = "pending"
-	ChatInputRequestResolved ChatInputRequestStatus = "resolved"
-)
-
-type ChatInputRequestRecord struct {
-	ID            string
-	ProjectID     string
-	ExecutionID   string
-	QuestionsJSON string
-	AnswersJSON   string
-	Status        ChatInputRequestStatus
-	CreatedAt     time.Time
-	ExpiresAt     time.Time
-	ResolvedAt    *time.Time
-}
 
 type ChatInputRequestRepo struct {
 	db *sql.DB
@@ -35,7 +17,7 @@ func NewChatInputRequestRepo(db *sql.DB) *ChatInputRequestRepo {
 	return &ChatInputRequestRepo{db: db}
 }
 
-func (r *ChatInputRequestRepo) Create(ctx context.Context, rec ChatInputRequestRecord) error {
+func (r *ChatInputRequestRepo) Create(ctx context.Context, rec persistence.ChatInputRequestRecord) error {
 	if r == nil || r.db == nil {
 		return fmt.Errorf("chat input request repository unavailable")
 	}
@@ -49,7 +31,7 @@ func (r *ChatInputRequestRepo) Create(ctx context.Context, rec ChatInputRequestR
 	return nil
 }
 
-func (r *ChatInputRequestRepo) Get(ctx context.Context, id string) (*ChatInputRequestRecord, error) {
+func (r *ChatInputRequestRepo) Get(ctx context.Context, id string) (*persistence.ChatInputRequestRecord, error) {
 	if r == nil || r.db == nil {
 		return nil, fmt.Errorf("chat input request repository unavailable")
 	}
@@ -58,7 +40,7 @@ func (r *ChatInputRequestRepo) Get(ctx context.Context, id string) (*ChatInputRe
 		FROM chat_input_requests WHERE id = ?`, strings.TrimSpace(id)))
 }
 
-func (r *ChatInputRequestRepo) ListActiveByProject(ctx context.Context, projectID string, now time.Time) ([]ChatInputRequestRecord, error) {
+func (r *ChatInputRequestRepo) ListActiveByProject(ctx context.Context, projectID string, now time.Time) ([]persistence.ChatInputRequestRecord, error) {
 	if r == nil || r.db == nil {
 		return nil, fmt.Errorf("chat input request repository unavailable")
 	}
@@ -71,7 +53,7 @@ func (r *ChatInputRequestRepo) ListActiveByProject(ctx context.Context, projectI
 		return nil, fmt.Errorf("listing chat input requests: %w", err)
 	}
 	defer rows.Close()
-	var out []ChatInputRequestRecord
+	var out []persistence.ChatInputRequestRecord
 	for rows.Next() {
 		rec, err := scanChatInputRequest(rows)
 		if err != nil {
@@ -87,7 +69,7 @@ func (r *ChatInputRequestRepo) ListActiveByProject(ctx context.Context, projectI
 	return out, nil
 }
 
-func (r *ChatInputRequestRepo) Resolve(ctx context.Context, id, projectID, answersJSON string) (*ChatInputRequestRecord, error) {
+func (r *ChatInputRequestRepo) Resolve(ctx context.Context, id, projectID, answersJSON string) (*persistence.ChatInputRequestRecord, error) {
 	if r == nil || r.db == nil {
 		return nil, fmt.Errorf("chat input request repository unavailable")
 	}
@@ -95,15 +77,15 @@ func (r *ChatInputRequestRepo) Resolve(ctx context.Context, id, projectID, answe
 	_, err := execBoundSQLite(ctx, r.db, `
 		UPDATE chat_input_requests
 		SET status = ?, answers_json = ?, resolved_at = ?
-		WHERE id = ? AND project_id = ? AND status = ?`, string(ChatInputRequestResolved), answersJSON, now, strings.TrimSpace(id), strings.TrimSpace(projectID), string(ChatInputRequestPending))
+		WHERE id = ? AND project_id = ? AND status = ?`, string(persistence.ChatInputRequestResolved), answersJSON, now, strings.TrimSpace(id), strings.TrimSpace(projectID), string(persistence.ChatInputRequestPending))
 	if err != nil {
 		return nil, fmt.Errorf("resolving chat input request: %w", err)
 	}
 	return r.Get(ctx, id)
 }
 
-func scanChatInputRequest(scanner interface{ Scan(dest ...any) error }) (*ChatInputRequestRecord, error) {
-	var rec ChatInputRequestRecord
+func scanChatInputRequest(scanner interface{ Scan(dest ...any) error }) (*persistence.ChatInputRequestRecord, error) {
+	var rec persistence.ChatInputRequestRecord
 	var status string
 	var resolvedAt sql.NullTime
 	if err := scanner.Scan(&rec.ID, &rec.ProjectID, &rec.ExecutionID, &rec.QuestionsJSON, &rec.AnswersJSON, &status, &rec.CreatedAt, &rec.ExpiresAt, &resolvedAt); err != nil {
@@ -112,7 +94,7 @@ func scanChatInputRequest(scanner interface{ Scan(dest ...any) error }) (*ChatIn
 		}
 		return nil, fmt.Errorf("scanning chat input request: %w", err)
 	}
-	rec.Status = ChatInputRequestStatus(status)
+	rec.Status = persistence.ChatInputRequestStatus(status)
 	if resolvedAt.Valid {
 		resolved := resolvedAt.Time
 		rec.ResolvedAt = &resolved

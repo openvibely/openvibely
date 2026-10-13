@@ -12,7 +12,7 @@ import (
 	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/lifecycle"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/viewmodels"
 )
 
@@ -269,12 +269,12 @@ func (h *Handler) GetTaskLifecycleExecutions(c echo.Context) error {
 	if before != "" && after != "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "before and after cannot be used together")
 	}
-	limit := repository.LifecycleExecutionPageDefaultLimit
+	limit := persistence.LifecycleExecutionPageDefaultLimit
 	if rawLimit := strings.TrimSpace(c.QueryParam("limit")); rawLimit != "" {
 		if parsed, parseErr := strconv.Atoi(rawLimit); parseErr == nil && parsed > 0 {
 			limit = parsed
-			if limit > repository.LifecycleExecutionPageMaxLimit {
-				limit = repository.LifecycleExecutionPageMaxLimit
+			if limit > persistence.LifecycleExecutionPageMaxLimit {
+				limit = persistence.LifecycleExecutionPageMaxLimit
 			}
 		}
 	}
@@ -287,7 +287,7 @@ func (h *Handler) GetTaskLifecycleExecutions(c echo.Context) error {
 		page, err = h.lifecycleRepo.ListExecutionsForTaskPage(c.Request().Context(), taskID, limit, "")
 	}
 	if err != nil {
-		if errors.Is(err, repository.ErrLifecycleExecutionCursor) {
+		if errors.Is(err, persistence.ErrLifecycleExecutionCursor) {
 			return echo.NewHTTPError(http.StatusBadRequest, "invalid lifecycle execution cursor")
 		}
 		applog.Infof("[handler] GetTaskLifecycleExecutions task=%s error: %v", taskID, err)

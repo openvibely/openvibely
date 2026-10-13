@@ -11,7 +11,7 @@ import templruntime "github.com/a-h/templ/runtime"
 import (
 	"fmt"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"strings"
 )
 
@@ -162,7 +162,7 @@ func isSortActive(sortBy, option string) string {
 	return "whitespace-nowrap"
 }
 
-func KanbanBoard(tasks []models.Task, projectID string, backlogSort string, completedSort string, llmModels []models.LLMConfig, agentDefs []repository.AgentTaskUIOption, menuStates ...map[string]TaskCardMergeMenuState) templ.Component {
+func KanbanBoard(tasks []models.Task, projectID string, backlogSort string, completedSort string, llmModels []models.LLMConfig, agentDefs []persistence.AgentTaskUIOption, menuStates ...map[string]TaskCardMergeMenuState) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
@@ -208,7 +208,7 @@ func KanbanBoard(tasks []models.Task, projectID string, backlogSort string, comp
 	})
 }
 
-func KanbanColumn(tasks []models.Task, projectID string, category models.TaskCategory, backlogSort string, completedSort string, llmModels []models.LLMConfig, agentDefs []repository.AgentTaskUIOption, menuStates ...map[string]TaskCardMergeMenuState) templ.Component {
+func KanbanColumn(tasks []models.Task, projectID string, category models.TaskCategory, backlogSort string, completedSort string, llmModels []models.LLMConfig, agentDefs []persistence.AgentTaskUIOption, menuStates ...map[string]TaskCardMergeMenuState) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
@@ -418,7 +418,7 @@ func KanbanColumn(tasks []models.Task, projectID string, category models.TaskCat
 	})
 }
 
-func activeColumnContent(tasks []models.Task, projectID string, llmModels []models.LLMConfig, agentDefs []repository.AgentTaskUIOption, menuStates ...map[string]TaskCardMergeMenuState) templ.Component {
+func activeColumnContent(tasks []models.Task, projectID string, llmModels []models.LLMConfig, agentDefs []persistence.AgentTaskUIOption, menuStates ...map[string]TaskCardMergeMenuState) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {

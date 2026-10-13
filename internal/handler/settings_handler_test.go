@@ -11,6 +11,7 @@ import (
 	"unsafe"
 
 	"github.com/labstack/echo/v4"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/stretchr/testify/assert"
@@ -20,7 +21,7 @@ import (
 // TestHandleTelegramTest_NotRunning tests the error feedback HTML
 func TestHandleTelegramTest_NotRunning(t *testing.T) {
 	e := echo.New()
-	h := New(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	h := New(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, RuntimeStores{})
 	// telegramService is nil by default (not running)
 
 	req := httptest.NewRequest(http.MethodPost, "/channels/telegram/test", nil)
@@ -38,7 +39,7 @@ func TestHandleTelegramTest_NotRunning(t *testing.T) {
 
 func TestHandleTelegramTest_Success(t *testing.T) {
 	e := echo.New()
-	h := New(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	h := New(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, RuntimeStores{})
 	h.telegramService = &service.TelegramService{}
 	markTelegramServiceRunningForTest(t, h.telegramService)
 
@@ -301,12 +302,12 @@ func TestHandleTelegramSaveNewServiceWiresSharedRunner(t *testing.T) {
 	newTelegramService = func(
 		token string,
 		taskSvc *service.TaskService,
-		projectRepo *repository.ProjectRepo,
-		llmConfigRepo *repository.LLMConfigRepo,
-		taskRepo *repository.TaskRepo,
-		execRepo *repository.ExecutionRepo,
-		scheduleRepo *repository.ScheduleRepo,
-		chatAttachmentRepo *repository.ChatAttachmentRepo,
+		projectRepo persistence.ProjectStore,
+		llmConfigRepo persistence.LLMConfigStore,
+		taskRepo persistence.TaskStore,
+		execRepo persistence.ExecutionStore,
+		scheduleRepo persistence.ScheduleStore,
+		chatAttachmentRepo persistence.ChatAttachmentStore,
 		llmSvc *service.LLMService,
 		workerSvc *service.WorkerService,
 	) (*service.TelegramService, error) {
@@ -405,7 +406,7 @@ func TestHandleTelegramRemoveNonHTMXRedirectsToChannelsAndClearsSettings(t *test
 
 func TestHandleTelegramRemoveMissingSettingsRepoReturnsError(t *testing.T) {
 	e := echo.New()
-	h := New(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	h := New(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, RuntimeStores{})
 
 	req := httptest.NewRequest(http.MethodPost, "/channels/telegram/remove", nil)
 	rec := httptest.NewRecorder()

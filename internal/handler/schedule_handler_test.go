@@ -15,6 +15,7 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/openvibely/openvibely/web/templates/pages"
@@ -663,7 +664,7 @@ func BenchmarkScheduleAgentOptionProjectionAndContent(b *testing.B) {
 	}
 
 	ctx := context.Background()
-	renderScheduleContent := func(options []repository.AgentScheduleOption) error {
+	renderScheduleContent := func(options []persistence.AgentScheduleOption) error {
 		return pages.ScheduleContent(project, nil, 0, nil, options).Render(ctx, io.Discard)
 	}
 

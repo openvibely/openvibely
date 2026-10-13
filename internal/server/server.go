@@ -32,6 +32,7 @@ import (
 	"github.com/openvibely/openvibely/internal/lifecycle"
 	"github.com/openvibely/openvibely/internal/memory"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/internal/update"
@@ -486,8 +487,8 @@ func Start(ctx context.Context, cfg *config.Config, options ...Options) (*Instan
 		_ = databaseConnections.Close()
 	}
 	applog.Infof("database initialized")
-	var databaseSchema int
-	if err := db.QueryRowContext(ctx, `SELECT COALESCE(MAX(version_id), 0) FROM goose_db_version WHERE is_applied = 1`).Scan(&databaseSchema); err != nil {
+	databaseSchema, err := database.SchemaVersion(ctx, db)
+	if err != nil {
 		closeDatabase()
 		return nil, fmt.Errorf("reading database schema version: %w", err)
 	}
@@ -539,10 +540,7 @@ func Start(ctx context.Context, cfg *config.Config, options ...Options) (*Instan
 	updateDrain := update.NewDrainManager(
 		updateTracker.Active,
 		func() int {
-			var total int
-			_ = db.QueryRowContext(context.Background(), `SELECT
-				(SELECT COUNT(*) FROM tasks WHERE status IN ('pending','queued')) +
-				(SELECT COUNT(*) FROM thread_inputs WHERE input_status = 'pending' AND input_mode = 'queued')`).Scan(&total)
+			total, _ := workerRepo.CountQueuedWork(context.Background())
 			return total
 		},
 		2*time.Second,
@@ -1113,6 +1111,13 @@ func Start(ctx context.Context, cfg *config.Config, options ...Options) (*Instan
 	h := handler.New(
 		projectSvc, taskSvc, llmSvc, workerSvc, schedulerSvc, alertSvc, upcomingSvc, insightsSvc,
 		llmConfigRepo, taskRepo, scheduleRepo, execRepo, workerRepo, attachmentRepo, chatAttachmentRepo, projectRepo, settingsRepo, broadcaster, telegramSvc,
+		handler.RuntimeStores{
+			ThreadInputs:      repository.NewThreadInputRepo(db),
+			Usage:             repository.NewUsageRepo(db),
+			SkillAnalytics:    repository.NewSkillAnalyticsRepo(db),
+			TaskCommitStats:   taskCommitStatRepo,
+			ChatInputRequests: repository.NewChatInputRequestRepo(db),
+		},
 	)
 	for _, option := range options {
 		if option.ProjectFolderPicker != nil {
@@ -1334,7 +1339,7 @@ func Start(ctx context.Context, cfg *config.Config, options ...Options) (*Instan
 	}, nil
 }
 
-func logStartupOAuthWarnings(appBaseURL string, presence repository.OAuthProviderPresence, getenv func(string) string) {
+func logStartupOAuthWarnings(appBaseURL string, presence persistence.OAuthProviderPresence, getenv func(string) string) {
 	if appBaseURL == "" {
 		if presence.AnyOAuth {
 			applog.Infof("warning: APP_BASE_URL is not set while OAuth models are configured; hosted OAuth callbacks will use localhost. Set APP_BASE_URL to your public host (example: https://dubee.org).")

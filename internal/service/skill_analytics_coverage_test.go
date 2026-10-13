@@ -8,6 +8,7 @@ import (
 	"github.com/openvibely/openvibely/internal/agentskills"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/testutil"
 )
@@ -71,7 +72,7 @@ func TestSkillAnalyticsInstrumentationRecordsSelectionViewAndEditEvents(t *testi
 		}
 	}
 
-	metrics, err := repo.GetTopSkills(ctx, repository.SkillAnalyticsFilter{ProjectID: project.ID, Limit: 10})
+	metrics, err := repo.GetTopSkills(ctx, persistence.SkillAnalyticsFilter{ProjectID: project.ID, Limit: 10})
 	if err != nil {
 		t.Fatalf("GetTopSkills: %v", err)
 	}
@@ -98,7 +99,7 @@ func TestSkillAnalyticsInstrumentationRecordsSelectionViewAndEditEvents(t *testi
 		t.Fatalf("agent_created_skill metric = %#v", byHandle["agent_created_skill"])
 	}
 
-	followThrough, err := repo.GetSelectionFollowThrough(ctx, repository.SkillAnalyticsFilter{ProjectID: project.ID, Limit: 10})
+	followThrough, err := repo.GetSelectionFollowThrough(ctx, persistence.SkillAnalyticsFilter{ProjectID: project.ID, Limit: 10})
 	if err != nil {
 		t.Fatalf("GetSelectionFollowThrough: %v", err)
 	}

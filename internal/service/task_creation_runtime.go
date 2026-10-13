@@ -8,7 +8,7 @@ import (
 
 	"github.com/openvibely/openvibely/internal/chatcontrol"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence"
 )
 
 // RuntimeTaskCreationCreateFunc lets surfaces preserve their creation-specific
@@ -20,7 +20,7 @@ type RuntimeTaskCreationCreateFunc func(context.Context, TaskCreationRequest, []
 type RuntimeTaskCreationOptions struct {
 	ProjectID           string
 	TaskSvc             *TaskService
-	LLMConfigRepo       *repository.LLMConfigRepo
+	LLMConfigRepo       persistence.LLMConfigStore
 	PrepareTaskCreation func(context.Context, *TaskCreationRequest) error
 	CreateTask          RuntimeTaskCreationCreateFunc
 	PersistTaskCreation TaskCreationPersistence

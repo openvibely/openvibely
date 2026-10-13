@@ -12,32 +12,32 @@ import (
 
 	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/util"
 )
 
 var (
-	ErrInsightNotFound   = repository.ErrInsightNotFound
-	ErrKnowledgeNotFound = repository.ErrKnowledgeNotFound
+	ErrInsightNotFound   = persistence.ErrInsightNotFound
+	ErrKnowledgeNotFound = persistence.ErrKnowledgeNotFound
 
 	errDirectAnalysisDefaultAgentUnavailable = errors.New("direct analysis default agent unavailable")
 )
 
 type InsightsService struct {
-	insightsRepo  *repository.InsightsRepo
-	taskRepo      *repository.TaskRepo
-	projectRepo   *repository.ProjectRepo
-	llmConfigRepo *repository.LLMConfigRepo
-	execRepo      *repository.ExecutionRepo
+	insightsRepo  persistence.InsightsStore
+	taskRepo      persistence.TaskStore
+	projectRepo   persistence.ProjectStore
+	llmConfigRepo persistence.LLMConfigStore
+	execRepo      persistence.ExecutionStore
 	llmSvc        *LLMService
 }
 
 func NewInsightsService(
-	insightsRepo *repository.InsightsRepo,
-	taskRepo *repository.TaskRepo,
-	projectRepo *repository.ProjectRepo,
-	llmConfigRepo *repository.LLMConfigRepo,
-	execRepo *repository.ExecutionRepo,
+	insightsRepo persistence.InsightsStore,
+	taskRepo persistence.TaskStore,
+	projectRepo persistence.ProjectStore,
+	llmConfigRepo persistence.LLMConfigStore,
+	execRepo persistence.ExecutionStore,
 ) *InsightsService {
 	return &InsightsService{
 		insightsRepo:  insightsRepo,

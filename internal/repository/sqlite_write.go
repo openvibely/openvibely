@@ -8,13 +8,11 @@ import (
 	"github.com/openvibely/openvibely/internal/database"
 )
 
-type SQLExecutor interface {
+type sqlExecutor interface {
 	ExecContext(context.Context, string, ...interface{}) (sql.Result, error)
 	QueryContext(context.Context, string, ...interface{}) (*sql.Rows, error)
 	QueryRowContext(context.Context, string, ...interface{}) *sql.Row
 }
-
-type sqlExecutor = SQLExecutor
 
 type queryExecutor interface {
 	QueryContext(context.Context, string, ...interface{}) (*sql.Rows, error)
@@ -51,7 +49,7 @@ func beginImmediateTx(ctx context.Context, db *sql.DB) (*manualTx, func(), error
 	}, nil
 }
 
-func withImmediateTx(ctx context.Context, db *sql.DB, fn func(SQLExecutor) error) error {
+func withImmediateTx(ctx context.Context, db *sql.DB, fn func(sqlExecutor) error) error {
 	tx, cleanup, err := beginImmediateTx(ctx, db)
 	if err != nil {
 		return err

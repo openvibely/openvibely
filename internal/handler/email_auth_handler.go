@@ -7,7 +7,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/web/templates/components"
 )
 
@@ -19,7 +19,7 @@ func (h *Handler) ListEmailAuthorizedSenders(c echo.Context) error {
 // AddEmailAuthorizedSender adds a new authorized email sender.
 func (h *Handler) AddEmailAuthorizedSender(c echo.Context) error {
 	return h.emailAuthorizedUserCRUD().createHandler(c, func(ctx context.Context, projectID string) error {
-		emailAddress := repository.NormalizeEmailAddress(c.FormValue("authorized_email_address"))
+		emailAddress := persistence.NormalizeEmailAddress(c.FormValue("authorized_email_address"))
 		displayName := strings.TrimSpace(c.FormValue("display_name"))
 		if emailAddress == "" {
 			return echo.NewHTTPError(http.StatusBadRequest, "Email address is required")

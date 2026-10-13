@@ -69,8 +69,8 @@ type SkillResolver interface {
 // HookStore persists lifecycle hook configuration and lifecycle executions.
 //
 // FindExecutionByIdempotencyKey lets the runner deduplicate retried hook runs;
-// implementations may return sql.ErrNoRows (or any error) to indicate no row
-// is present, in which case the runner proceeds normally.
+// implementations may return persistence.ErrNotFound (or any error) to indicate
+// no row is present, in which case the runner proceeds normally.
 type HookStore interface {
 	HooksForWhen(ctx context.Context, when models.LifecycleWhen) ([]models.AgentLifecycleHook, error)
 	CreateExecution(ctx context.Context, e *models.LifecycleExecution) error

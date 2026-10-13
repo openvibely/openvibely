@@ -19,7 +19,7 @@ import (
 	llmnormalize "github.com/openvibely/openvibely/internal/llm/normalize"
 	llmoutput "github.com/openvibely/openvibely/internal/llm/output"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/update"
 )
 
@@ -30,14 +30,14 @@ type LLMCaller interface {
 }
 
 type LLMService struct {
-	llmConfigRepo             *repository.LLMConfigRepo
-	execRepo                  *repository.ExecutionRepo
-	taskRepo                  *repository.TaskRepo
-	projectRepo               *repository.ProjectRepo
-	scheduleRepo              *repository.ScheduleRepo
-	attachmentRepo            *repository.AttachmentRepo
-	agentRepo                 *repository.AgentRepo
-	lifecycleRepo             *repository.LifecycleRepo
+	llmConfigRepo             persistence.LLMConfigStore
+	execRepo                  persistence.ExecutionStore
+	taskRepo                  persistence.TaskStore
+	projectRepo               persistence.ProjectStore
+	scheduleRepo              persistence.ScheduleStore
+	attachmentRepo            persistence.AttachmentStore
+	agentRepo                 persistence.AgentStore
+	lifecycleRepo             persistence.LifecycleStore
 	mutationRecorder          func(models.Task) agentlibrary.MutationRecorder
 	alertSvc                  *AlertService
 	taskSvc                   *TaskService
@@ -52,21 +52,22 @@ type LLMService struct {
 	providerAdapters          map[models.LLMProvider]ProviderAdapter
 	routing                   *agentRoutingStrategy
 	fileChangeBroadcaster     *events.FileChangeBroadcaster
-	threadInputRepo           *repository.ThreadInputRepo
-	usageRepo                 *repository.UsageRepo
+	threadInputRepo           persistence.ThreadInputStore
+	usageRepo                 persistence.UsageStore
 	upcomingSvc               *UpcomingService
-	skillAnalyticsRepo        *repository.SkillAnalyticsRepo
+	skillAnalyticsRepo        persistence.SkillAnalyticsStore
 	broadcaster               *events.Broadcaster
 	executionStreamHub        *events.ExecutionStreamHub
 	queuedTaskThreadPromoter  func(taskID string)
 	channelMessageRouter      *ChannelMessageRouter
 	githubIssueRuntime        GitHubIssueRuntimeProvider
-	githubAuthRepo            *repository.GitHubAuthRepo
-	taskPullRequestRepo       *repository.TaskPullRequestRepo
-	githubPRFeedbackRepo      *repository.GitHubPRFeedbackRepo
-	taskCommitStatRepo        *repository.TaskCommitStatRepo
+	githubAuthRepo            persistence.GitHubAuthStore
+	taskPullRequestRepo       persistence.TaskPullRequestStore
+	githubPRFeedbackRepo      persistence.GitHubPRFeedbackStore
+	taskCommitStatRepo        persistence.TaskCommitStatStore
 	automationRegistrationSvc *AutomationRegistrationService
-	automationRepo            *repository.AutomationRepo
+	automationRepo            persistence.AutomationStore
+	openAIAsyncToolCallRepo   persistence.OpenAIAsyncToolCallStore
 	updateTracker             *update.WorkTracker
 
 	// automationHandoffBeforeFinalAdmission is a deterministic test barrier for
@@ -78,7 +79,7 @@ type LLMService struct {
 	globalSkillRoot string
 }
 
-func NewLLMService(llmConfigRepo *repository.LLMConfigRepo, execRepo *repository.ExecutionRepo, taskRepo *repository.TaskRepo, projectRepo *repository.ProjectRepo, scheduleRepo *repository.ScheduleRepo, attachmentRepo *repository.AttachmentRepo) *LLMService {
+func NewLLMService(llmConfigRepo persistence.LLMConfigStore, execRepo persistence.ExecutionStore, taskRepo persistence.TaskStore, projectRepo persistence.ProjectStore, scheduleRepo persistence.ScheduleStore, attachmentRepo persistence.AttachmentStore) *LLMService {
 	s := &LLMService{
 		llmConfigRepo:  llmConfigRepo,
 		execRepo:       execRepo,
@@ -151,11 +152,11 @@ func (s *LLMService) SetFileChangeBroadcaster(fcb *events.FileChangeBroadcaster)
 	s.fileChangeBroadcaster = fcb
 }
 
-func (s *LLMService) SetThreadInputRepo(repo *repository.ThreadInputRepo) {
+func (s *LLMService) SetThreadInputRepo(repo persistence.ThreadInputStore) {
 	s.threadInputRepo = repo
 }
 
-func (s *LLMService) SetUsageRepo(repo *repository.UsageRepo) {
+func (s *LLMService) SetUsageRepo(repo persistence.UsageStore) {
 	s.usageRepo = repo
 }
 
@@ -171,6 +172,11 @@ func (s *LLMService) SetUpdateWorkTracker(tracker *update.WorkTracker) { s.updat
 
 func (s *LLMService) SetExecutionStreamHub(hub *events.ExecutionStreamHub) {
 	s.executionStreamHub = hub
+	s.initProviderAdapters()
+}
+
+func (s *LLMService) SetOpenAIAsyncToolCallStore(store persistence.OpenAIAsyncToolCallStore) {
+	s.openAIAsyncToolCallRepo = store
 	s.initProviderAdapters()
 }
 
@@ -193,7 +199,7 @@ func (s *LLMService) SetGitHubIssueRuntimeProvider(provider GitHubIssueRuntimePr
 	s.githubIssueRuntime = provider
 }
 
-func (s *LLMService) SetGitHubAuthRepo(repo *repository.GitHubAuthRepo) {
+func (s *LLMService) SetGitHubAuthRepo(repo persistence.GitHubAuthStore) {
 	s.githubAuthRepo = repo
 }
 
@@ -201,15 +207,15 @@ func (s *LLMService) SetAutomationRegistrationService(registration *AutomationRe
 	s.automationRegistrationSvc = registration
 }
 
-func (s *LLMService) SetAutomationRepo(repo *repository.AutomationRepo) {
+func (s *LLMService) SetAutomationRepo(repo persistence.AutomationStore) {
 	s.automationRepo = repo
 }
 
-func (s *LLMService) SetTaskPullRequestRepo(repo *repository.TaskPullRequestRepo) {
+func (s *LLMService) SetTaskPullRequestRepo(repo persistence.TaskPullRequestStore) {
 	s.taskPullRequestRepo = repo
 }
 
-func (s *LLMService) SetGitHubPRFeedbackRepo(repo *repository.GitHubPRFeedbackRepo) {
+func (s *LLMService) SetGitHubPRFeedbackRepo(repo persistence.GitHubPRFeedbackStore) {
 	s.githubPRFeedbackRepo = repo
 }
 
@@ -822,7 +828,7 @@ func (s *LLMService) createPreparedAutomationTask(ctx context.Context, projectID
 		Status: models.StatusPending, Category: category, Priority: request.Priority,
 		AutoMerge: request.AutoMerge, AutoMergeOnGoalAchieved: request.AutoMergeOnGoalAchieved,
 		MergeTargetBranch: strings.TrimSpace(request.MergeTargetBranch),
-		CreatedVia:        repository.AutomationCompilerTaskCreatedVia(plan.sourceBinding.AutomationID, plan.targetNode.NodeKey)}
+		CreatedVia:        persistence.AutomationCompilerTaskCreatedVia(plan.sourceBinding.AutomationID, plan.targetNode.NodeKey)}
 	if selectedAgentID != "" {
 		task.AgentID = &selectedAgentID
 	}
@@ -839,15 +845,15 @@ func (s *LLMService) createPreparedAutomationTask(ctx context.Context, projectID
 	}
 	var goal *models.TaskGoal
 	if objective != "" {
-		goal = &models.TaskGoal{GoalID: repository.NewID(), Objective: objective,
+		goal = &models.TaskGoal{GoalID: persistence.NewID(), Objective: objective,
 			Status: models.TaskGoalStatusActive, Reason: "set at task creation"}
 	}
-	canonical, created, err := s.automationRepo.CreateOrGetGitHubIssueTask(ctx, s.taskRepo, repository.AutomationGitHubIssueTaskCreation{
+	canonical, created, err := s.automationRepo.CreateOrGetGitHubIssueTask(ctx, persistence.AutomationGitHubIssueTaskCreation{
 		ProjectID: projectID, ExecutionID: plan.executionID, IssueResourceID: plan.issueResourceID,
 		SourceBinding: plan.sourceBinding, TargetNodeID: plan.targetNode.ID, Task: task, Goal: goal,
 	})
 	if err != nil {
-		if errors.Is(err, repository.ErrDuplicateTask) {
+		if errors.Is(err, persistence.ErrDuplicateTask) {
 			return nil, "", true, ErrDuplicateTask
 		}
 		return nil, "", true, err
@@ -885,7 +891,7 @@ func (s *LLMService) recordAutomationTasksCreated(ctx context.Context, projectID
 			return errors.New("Automation GitHub issue tasks must use atomic exact-provenance creation")
 		}
 		for _, binding := range bindings.Bindings {
-			event := repository.AutomationProjectionEvent{
+			event := persistence.AutomationProjectionEvent{
 				Context: bindings, Binding: binding,
 				ActivityKey:  "execution:" + executionID + ":create-task:" + created.ID,
 				ActivityType: "create_task", ActivityStatus: models.AutomationActivityCompleted,
@@ -925,11 +931,11 @@ func (s *LLMService) promoteQueuedTaskThreadAfterCompletion(taskID string) {
 }
 
 // SetAgentRepo sets the agent repository for resolving agent definitions on tasks.
-func (s *LLMService) SetAgentRepo(repo *repository.AgentRepo) {
+func (s *LLMService) SetAgentRepo(repo persistence.AgentStore) {
 	s.agentRepo = repo
 }
 
-func (s *LLMService) SetLifecycleRepo(repo *repository.LifecycleRepo) {
+func (s *LLMService) SetLifecycleRepo(repo persistence.LifecycleStore) {
 	s.lifecycleRepo = repo
 }
 
@@ -1189,7 +1195,7 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 	if s.automationRepo != nil && !preparedAutomation {
 		if automationContext, ok := AutomationContextFromContext(ctx); ok && automationContext.ProjectID == task.ProjectID {
 			for i, binding := range automationContext.Bindings {
-				projection := repository.AutomationProjectionEvent{
+				projection := persistence.AutomationProjectionEvent{
 					Context: automationContext, Binding: binding,
 					ActivityKey: "execution:" + exec.ID + ":run", ActivityType: "task_execution", ActivityStatus: models.AutomationActivityRunning,
 					Resources: []models.AutomationActivityResource{{ResourceType: "task", ResourceID: task.ID}, {ResourceType: "execution", ResourceID: exec.ID}},
@@ -2410,7 +2416,7 @@ func (s *LLMService) projectIDForWorkDir(ctx context.Context, workDir string) st
 	want := cleanProjectUsagePath(workDir)
 	bestProjectID := ""
 	bestRepoLen := -1
-	err := s.projectRepo.ForEachRepoRoot(ctx, func(project repository.ProjectRepoRoot) {
+	err := s.projectRepo.ForEachRepoRoot(ctx, func(project persistence.ProjectRepoRoot) {
 		if strings.TrimSpace(project.RepoPath) == "" {
 			return
 		}

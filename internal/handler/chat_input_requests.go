@@ -14,7 +14,7 @@ import (
 	"github.com/openvibely/openvibely/internal/chatcontrol"
 	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/web/templates/pages"
 )
 
@@ -72,7 +72,7 @@ func (b *chatInputRequestBroker) create(projectID, execID string, questions []ch
 	if b == nil {
 		return nil, fmt.Errorf("input request broker unavailable")
 	}
-	id := repository.NewID()
+	id := persistence.NewID()
 	if id == "" {
 		return nil, fmt.Errorf("failed to generate input request id")
 	}
@@ -327,7 +327,7 @@ func (h *Handler) persistChatInputRequest(ctx context.Context, req *chatInputReq
 	if err != nil {
 		return fmt.Errorf("encoding chat input request questions: %w", err)
 	}
-	return h.chatInputRequestRepo.Create(ctx, repository.ChatInputRequestRecord{
+	return h.chatInputRequestRepo.Create(ctx, persistence.ChatInputRequestRecord{
 		ID:            req.ID,
 		ProjectID:     req.ProjectID,
 		ExecutionID:   req.ExecID,
@@ -384,7 +384,7 @@ func (h *Handler) resolvePersistedChatInputRequest(ctx context.Context, id, proj
 	if err != nil {
 		return nil, false, err
 	}
-	if record == nil || record.ProjectID != projectID || record.Status != repository.ChatInputRequestPending || !time.Now().Before(record.ExpiresAt) {
+	if record == nil || record.ProjectID != projectID || record.Status != persistence.ChatInputRequestPending || !time.Now().Before(record.ExpiresAt) {
 		return nil, false, echo.NewHTTPError(http.StatusGone, "input request is missing, expired, or already resolved")
 	}
 	req, err := chatInputRequestFromRecord(*record)
@@ -414,7 +414,7 @@ func (h *Handler) completeRecoveredChatInputExecution(ctx context.Context, req *
 	h.PromoteQueuedChatInput(req.ProjectID)
 }
 
-func chatInputRequestFromRecord(record repository.ChatInputRequestRecord) (*chatInputRequest, error) {
+func chatInputRequestFromRecord(record persistence.ChatInputRequestRecord) (*chatInputRequest, error) {
 	var questions []chatInputRequestQuestion
 	if err := json.Unmarshal([]byte(record.QuestionsJSON), &questions); err != nil {
 		return nil, fmt.Errorf("decoding chat input request questions: %w", err)
@@ -434,7 +434,7 @@ func chatInputRequestFromRecord(record repository.ChatInputRequestRecord) (*chat
 		CreatedAt: record.CreatedAt,
 		ExpiresAt: record.ExpiresAt,
 		answerCh:  make(chan []chatInputRequestAnswer, 1),
-		resolved:  record.Status == repository.ChatInputRequestResolved,
+		resolved:  record.Status == persistence.ChatInputRequestResolved,
 	}, nil
 }
 

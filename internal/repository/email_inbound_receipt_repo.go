@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
+
+	"github.com/openvibely/openvibely/internal/persistence"
 )
 
 const emailInboundReceiptBatchSize = 500
@@ -98,7 +100,7 @@ func (r *EmailInboundReceiptRepo) Record(ctx context.Context, mailboxAddress, me
 // WithHandoff atomically records an inbound message receipt with the durable
 // work created for that message. If the receipt already exists, persist is not
 // called and alreadyHandedOff is true.
-func (r *EmailInboundReceiptRepo) WithHandoff(ctx context.Context, mailboxAddress, messageKey string, persist func(SQLExecutor) error) (alreadyHandedOff bool, err error) {
+func (r *EmailInboundReceiptRepo) WithHandoff(ctx context.Context, mailboxAddress, messageKey string, persist func(persistence.Tx) error) (alreadyHandedOff bool, err error) {
 	var db *sql.DB
 	if r != nil {
 		db = r.db
@@ -111,5 +113,5 @@ func (r *EmailInboundReceiptRepo) WithHandoff(ctx context.Context, mailboxAddres
 		insertArgs:        []interface{}{mailboxAddress, messageKey},
 		recordError:       "record email inbound receipt",
 		rowsAffectedError: "check email inbound receipt insertion",
-	}, persist)
+	}, withStoreTx(persist))
 }

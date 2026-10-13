@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 )
 
 type ChatAttachmentRepo struct {
@@ -19,12 +20,20 @@ func NewChatAttachmentRepo(db *sql.DB) *ChatAttachmentRepo {
 
 func (r *ChatAttachmentRepo) Create(ctx context.Context, att *models.ChatAttachment) error {
 	return withBoundSQLiteConn(ctx, r.db, func(conn *sql.Conn) error {
-		return r.CreateWithExecutor(ctx, conn, att)
+		return createChatAttachmentWithExecutor(ctx, conn, att)
 	})
 }
 
-// CreateWithExecutor persists a chat attachment using the caller's transaction.
-func (r *ChatAttachmentRepo) CreateWithExecutor(ctx context.Context, exec SQLExecutor, att *models.ChatAttachment) error {
+// CreateInTx persists a chat attachment using the caller's store transaction.
+func (r *ChatAttachmentRepo) CreateInTx(ctx context.Context, tx persistence.Tx, att *models.ChatAttachment) error {
+	exec, err := executorFromTx(tx)
+	if err != nil {
+		return err
+	}
+	return createChatAttachmentWithExecutor(ctx, exec, att)
+}
+
+func createChatAttachmentWithExecutor(ctx context.Context, exec sqlExecutor, att *models.ChatAttachment) error {
 	query := `
 			INSERT INTO chat_attachments (execution_id, file_name, file_path, media_type, file_size)
 			VALUES (?, ?, ?, ?, ?)

@@ -11,6 +11,7 @@ import (
 
 	"github.com/openvibely/openvibely/internal/database"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/testutil"
 )
@@ -566,7 +567,7 @@ type taskDiscoveryAutomationChainFixture struct {
 	prefix       string
 	parent       models.Task
 	child        models.Task
-	event        repository.AutomationProjectionEvent
+	event        persistence.AutomationProjectionEvent
 }
 
 func seedTaskDiscoveryAutomationChainFixture(tb testing.TB, db *sql.DB, prefix string) taskDiscoveryAutomationChainFixture {
@@ -585,9 +586,9 @@ func seedTaskDiscoveryAutomationChainFixture(tb testing.TB, db *sql.DB, prefix s
 		Edges: []models.AutomationDraftEdge{{Key: "parent-child", From: "parent", To: "child"}},
 	}
 	automationID := prefix + "automation"
-	definition, _, err := automationRepo.SaveCurrentGraph(ctx, repository.AutomationSaveWrite{
+	definition, _, err := automationRepo.SaveCurrentGraph(ctx, persistence.AutomationSaveWrite{
 		ProjectID: "default", AutomationID: automationID, GraphID: prefix + "graph", Candidate: candidate,
-		Tasks: []repository.AutomationSaveTask{
+		Tasks: []persistence.AutomationSaveTask{
 			{NodeKey: "parent", Title: prefix + "parent", Prompt: "parent", Category: models.CategoryActive, Priority: 2, ApplyTopology: true,
 				ChildNodeKey: "child", ChildTitle: prefix + "child", ChildPromptPrefix: "child: ", ChildCategory: models.CategoryActive},
 			{NodeKey: "child", Title: prefix + "child", Prompt: "child", Category: models.CategoryActive, Priority: 2, ApplyTopology: true, ParentNodeKey: "parent"},
@@ -629,7 +630,7 @@ func seedTaskDiscoveryAutomationChainFixture(tb testing.TB, db *sql.DB, prefix s
 		prefix:       prefix,
 		parent:       *parent,
 		child:        *child,
-		event: repository.AutomationProjectionEvent{
+		event: persistence.AutomationProjectionEvent{
 			Context:        models.AutomationContext{ProjectID: "default"},
 			Binding:        models.AutomationBinding{AutomationID: definition.Automation.ID, VersionID: definition.Version.ID, NodeID: nodeKeys["child"]},
 			WorkItemKey:    prefix + "work",
@@ -887,9 +888,9 @@ func taskDiscoveryWritePaths() []taskDiscoveryWritePath {
 				automationRepo := repository.NewAutomationRepo(db)
 				return taskDiscoveryWriteRun{
 					write: func(ctx context.Context, _ int) error {
-						_, _, err := automationRepo.SaveCurrentGraph(ctx, repository.AutomationSaveWrite{
+						_, _, err := automationRepo.SaveCurrentGraph(ctx, persistence.AutomationSaveWrite{
 							ProjectID: "default", AutomationID: automationID, GraphID: prefix + "graph", Candidate: candidate,
-							Tasks: []repository.AutomationSaveTask{{
+							Tasks: []persistence.AutomationSaveTask{{
 								NodeKey: "task", Title: prefix + "task", Prompt: "p", Category: models.CategoryActive, Priority: 2,
 							}},
 						})

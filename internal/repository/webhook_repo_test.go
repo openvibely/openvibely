@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/testutil"
 )
 
@@ -178,7 +179,7 @@ func TestWebhookRepo_DeleteMissingReturnsNotFound(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	repo := NewWebhookRepo(db)
 
-	if err := repo.Delete(context.Background(), "missing-webhook"); !errors.Is(err, ErrWebhookNotFound) {
+	if err := repo.Delete(context.Background(), "missing-webhook"); !errors.Is(err, persistence.ErrWebhookNotFound) {
 		t.Fatalf("expected deleting a missing webhook to return ErrWebhookNotFound, got %v", err)
 	}
 }
@@ -222,7 +223,7 @@ func TestWebhookRepo_RotateSecretMissingReturnsNotFound(t *testing.T) {
 	repo := NewWebhookRepo(db)
 
 	newSecret, err := repo.RotateSecret(context.Background(), "missing-webhook")
-	if !errors.Is(err, ErrWebhookNotFound) {
+	if !errors.Is(err, persistence.ErrWebhookNotFound) {
 		t.Fatalf("expected rotating a missing webhook to return ErrWebhookNotFound, got %v", err)
 	}
 	if newSecret != "" {

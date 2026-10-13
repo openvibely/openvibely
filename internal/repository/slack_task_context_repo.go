@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 )
 
 // SlackTaskContextRepo persists Slack thread metadata for Slack-origin task notifications.
@@ -42,12 +43,20 @@ var slackTaskContextLifecycle = taskContextLifecycle[models.SlackTaskContext]{
 
 func (r *SlackTaskContextRepo) Upsert(ctx context.Context, stc *models.SlackTaskContext) error {
 	return withBoundSQLiteConn(ctx, r.db, func(conn *sql.Conn) error {
-		return r.UpsertWithExecutor(ctx, conn, stc)
+		return r.upsertWithExecutor(ctx, conn, stc)
 	})
 }
 
-// UpsertWithExecutor persists Slack task context using the caller's transaction.
-func (r *SlackTaskContextRepo) UpsertWithExecutor(ctx context.Context, exec SQLExecutor, stc *models.SlackTaskContext) error {
+// UpsertInTx persists task context using the caller's store transaction.
+func (r *SlackTaskContextRepo) UpsertInTx(ctx context.Context, tx persistence.Tx, stc *models.SlackTaskContext) error {
+	exec, err := executorFromTx(tx)
+	if err != nil {
+		return err
+	}
+	return r.upsertWithExecutor(ctx, exec, stc)
+}
+
+func (r *SlackTaskContextRepo) upsertWithExecutor(ctx context.Context, exec sqlExecutor, stc *models.SlackTaskContext) error {
 	if stc == nil {
 		return fmt.Errorf("slack task context is nil")
 	}

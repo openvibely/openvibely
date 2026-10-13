@@ -3,13 +3,14 @@ package repository
 import (
 	"context"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"math"
 	"sort"
 	"time"
 )
 
 // GetUsagePage computes only the displayed local metrics, reading events once.
-func (r *UsageRepo) GetUsagePage(ctx context.Context, filter UsageFilter) (*models.AnalyticsUsageViewModel, error) {
+func (r *UsageRepo) GetUsagePage(ctx context.Context, filter persistence.UsageFilter) (*models.AnalyticsUsageViewModel, error) {
 	view := &models.AnalyticsUsageViewModel{UsageRate: []models.UsageRatePoint{}, UsageRateByModel: []models.UsageRatePoint{}, ModelBreakdown: []models.ModelUsagePoint{}}
 	rates := map[usageModelKey]*models.UsageRatePoint{}
 	breakdown := map[usageModelKey]*models.ModelUsagePoint{}

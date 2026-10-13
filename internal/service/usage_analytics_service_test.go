@@ -19,6 +19,7 @@ import (
 	llmoauth "github.com/openvibely/openvibely/internal/llm/oauth"
 	llmusage "github.com/openvibely/openvibely/internal/llm/usage"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/testutil"
 	anthropicclient "github.com/openvibely/openvibely/pkg/anthropic_client"
@@ -51,7 +52,7 @@ func TestUsageAnalyticsService_AccountInventoryAndScopedLimits(t *testing.T) {
 	}
 	for _, account := range accounts {
 		before := calls
-		view, err := svc.BuildAnalyticsAccountLimits(ctx, repository.UsageFilter{AccountGroupKey: account.Key, Refresh: true})
+		view, err := svc.BuildAnalyticsAccountLimits(ctx, persistence.UsageFilter{AccountGroupKey: account.Key, Refresh: true})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -60,7 +61,7 @@ func TestUsageAnalyticsService_AccountInventoryAndScopedLimits(t *testing.T) {
 		}
 	}
 	before := calls
-	if _, err := svc.BuildAnalyticsAccountLimits(ctx, repository.UsageFilter{AccountGroupKey: "stale", Refresh: true}); err == nil {
+	if _, err := svc.BuildAnalyticsAccountLimits(ctx, persistence.UsageFilter{AccountGroupKey: "stale", Refresh: true}); err == nil {
 		t.Fatal("stale key should fail")
 	}
 	if calls != before {
@@ -370,7 +371,7 @@ func TestRecordUsageFromResult_PersistsOpenAICompatibleUsageAndAggregates(t *tes
 	}
 
 	svc := NewUsageAnalyticsService(repo, configRepo)
-	view, err := svc.BuildAnalyticsUsage(ctx, repository.UsageFilter{Provider: string(models.ProviderOpenAICompatible)})
+	view, err := svc.BuildAnalyticsUsage(ctx, persistence.UsageFilter{Provider: string(models.ProviderOpenAICompatible)})
 	if err != nil {
 		t.Fatalf("BuildAnalyticsUsage: %v", err)
 	}
@@ -452,7 +453,7 @@ func TestLLMService_CallAgentDirectRecordsAPIKeyUsageWithoutExecution(t *testing
 	if _, _, err := svc.CallAgentDirect(ctx, "hello", nil, agent, ""); err != nil {
 		t.Fatalf("CallAgentDirect: %v", err)
 	}
-	totals, err := usageRepo.GetUsageTotals(ctx, repository.UsageFilter{Provider: "openai"})
+	totals, err := usageRepo.GetUsageTotals(ctx, persistence.UsageFilter{Provider: "openai"})
 	if err != nil {
 		t.Fatalf("GetUsageTotals: %v", err)
 	}
@@ -481,7 +482,7 @@ func TestLLMService_CallAgentDirectRecordsOpenAICompatibleUsage(t *testing.T) {
 		t.Fatalf("CallAgentDirect: %v", err)
 	}
 
-	view, err := NewUsageAnalyticsService(usageRepo, configRepo).BuildAnalyticsUsage(ctx, repository.UsageFilter{Provider: string(models.ProviderOpenAICompatible)})
+	view, err := NewUsageAnalyticsService(usageRepo, configRepo).BuildAnalyticsUsage(ctx, persistence.UsageFilter{Provider: string(models.ProviderOpenAICompatible)})
 	if err != nil {
 		t.Fatalf("BuildAnalyticsUsage: %v", err)
 	}
@@ -518,7 +519,7 @@ func TestLLMService_CallAgentDirectUsageInfersProjectFromWorkDir(t *testing.T) {
 		t.Fatalf("CallAgentDirect: %v", err)
 	}
 
-	totals, err := usageRepo.GetUsageTotals(ctx, repository.UsageFilter{ProjectID: project.ID})
+	totals, err := usageRepo.GetUsageTotals(ctx, persistence.UsageFilter{ProjectID: project.ID})
 	if err != nil {
 		t.Fatalf("GetUsageTotals: %v", err)
 	}
@@ -571,7 +572,7 @@ func TestUsageAnalyticsService_RefreshesAccountsAndProvidersInParallel(t *testin
 	}
 	done := make(chan result, 1)
 	go func() {
-		view, err := svc.BuildAnalyticsUsage(ctx, repository.UsageFilter{Refresh: true})
+		view, err := svc.BuildAnalyticsUsage(ctx, persistence.UsageFilter{Refresh: true})
 		done <- result{view, err}
 	}()
 	seen := map[string]bool{}
@@ -618,7 +619,7 @@ func TestUsageAnalyticsService_BuildAnalyticsUsageIncludesSnapshotsAndLocalUsage
 	}
 
 	svc := NewUsageAnalyticsService(usageRepo, configRepo)
-	view, err := svc.BuildAnalyticsUsage(ctx, repository.UsageFilter{})
+	view, err := svc.BuildAnalyticsUsage(ctx, persistence.UsageFilter{})
 	if err != nil {
 		t.Fatalf("BuildAnalyticsUsage: %v", err)
 	}
@@ -652,7 +653,7 @@ func TestUsageAnalyticsService_APIKeyUsageDoesNotCreateAccountLimitCards(t *test
 	}
 
 	svc := NewUsageAnalyticsService(usageRepo, configRepo)
-	view, err := svc.BuildAnalyticsUsage(ctx, repository.UsageFilter{})
+	view, err := svc.BuildAnalyticsUsage(ctx, persistence.UsageFilter{})
 	if err != nil {
 		t.Fatalf("BuildAnalyticsUsage: %v", err)
 	}
@@ -703,7 +704,7 @@ func TestUsageAnalyticsService_RefreshFetchesAndStoresOAuthAccountUsage(t *testi
 		}, nil
 	})
 
-	view, err := svc.BuildAnalyticsUsage(ctx, repository.UsageFilter{Refresh: true})
+	view, err := svc.BuildAnalyticsUsage(ctx, persistence.UsageFilter{Refresh: true})
 	if err != nil {
 		t.Fatalf("BuildAnalyticsUsage: %v", err)
 	}
@@ -756,7 +757,7 @@ func TestUsageAnalyticsService_DedupesAccountLimitsByOAuthAccount(t *testing.T) 
 		}, nil
 	})
 
-	view, err := svc.BuildAnalyticsUsage(ctx, repository.UsageFilter{Refresh: true})
+	view, err := svc.BuildAnalyticsUsage(ctx, persistence.UsageFilter{Refresh: true})
 	if err != nil {
 		t.Fatalf("BuildAnalyticsUsage: %v", err)
 	}
@@ -818,7 +819,7 @@ func TestUsageAnalyticsService_DedupesAnthropicAccountLimitsByOAuthProfile(t *te
 	defer func() { anthropicclient.AnthropicAPIHost = oldHost }()
 
 	svc := NewUsageAnalyticsService(usageRepo, configRepo)
-	view, err := svc.BuildAnalyticsUsage(ctx, repository.UsageFilter{Provider: "anthropic", Refresh: true})
+	view, err := svc.BuildAnalyticsUsage(ctx, persistence.UsageFilter{Provider: "anthropic", Refresh: true})
 	if err != nil {
 		t.Fatalf("BuildAnalyticsUsage: %v", err)
 	}
@@ -883,7 +884,7 @@ func TestUsageAnalyticsService_KeepsAnthropicConfigsSeparateWhenProfileFails(t *
 	defer func() { anthropicclient.AnthropicAPIHost = oldHost }()
 
 	svc := NewUsageAnalyticsService(usageRepo, configRepo)
-	view, err := svc.BuildAnalyticsUsage(ctx, repository.UsageFilter{Provider: "anthropic", Refresh: true})
+	view, err := svc.BuildAnalyticsUsage(ctx, persistence.UsageFilter{Provider: "anthropic", Refresh: true})
 	if err != nil {
 		t.Fatalf("BuildAnalyticsUsage: %v", err)
 	}
@@ -951,7 +952,7 @@ func TestUsageAnalyticsService_DedupesStaleAnthropicSnapshotsByConfigOAuthAccoun
 	}
 
 	svc := NewUsageAnalyticsService(usageRepo, configRepo)
-	view, err := svc.BuildAnalyticsUsage(ctx, repository.UsageFilter{Provider: "anthropic"})
+	view, err := svc.BuildAnalyticsUsage(ctx, persistence.UsageFilter{Provider: "anthropic"})
 	if err != nil {
 		t.Fatalf("BuildAnalyticsUsage: %v", err)
 	}
@@ -1008,7 +1009,7 @@ func TestUsageAnalyticsService_SharedConnectionFailureUsesOneRequestAndAllowsSep
 				calls++
 				return nil, accountUsageHTTPError{Method: http.MethodGet, URL: "https://provider.example/usage", StatusCode: http.StatusTooManyRequests}
 			})
-			view, err := svc.BuildAnalyticsUsage(ctx, repository.UsageFilter{Provider: string(provider)})
+			view, err := svc.BuildAnalyticsUsage(ctx, persistence.UsageFilter{Provider: string(provider)})
 			if err != nil {
 				t.Fatalf("BuildAnalyticsUsage failed connection: %v", err)
 			}
@@ -1044,7 +1045,7 @@ func TestUsageAnalyticsService_SharedConnectionFailureUsesOneRequestAndAllowsSep
 					SecondaryUsedPercent: &used,
 				}, nil
 			})
-			view, err = svc.BuildAnalyticsUsage(ctx, repository.UsageFilter{Provider: string(provider)})
+			view, err = svc.BuildAnalyticsUsage(ctx, persistence.UsageFilter{Provider: string(provider)})
 			if err != nil {
 				t.Fatalf("BuildAnalyticsUsage fallback connection: %v", err)
 			}
@@ -1107,7 +1108,7 @@ func TestUsageAnalyticsService_DistinctSameAccountConnectionFailuresPersistIndep
 				calls++
 				return nil, accountUsageHTTPError{Method: http.MethodGet, URL: "https://provider.example/usage", StatusCode: http.StatusTooManyRequests}
 			})
-			view, err := svc.BuildAnalyticsUsage(ctx, repository.UsageFilter{Provider: string(provider)})
+			view, err := svc.BuildAnalyticsUsage(ctx, persistence.UsageFilter{Provider: string(provider)})
 			if err != nil {
 				t.Fatalf("first BuildAnalyticsUsage: %v", err)
 			}
@@ -1132,7 +1133,7 @@ func TestUsageAnalyticsService_DistinctSameAccountConnectionFailuresPersistIndep
 			}
 
 			calls = 0
-			view, err = svc.BuildAnalyticsUsage(ctx, repository.UsageFilter{Provider: string(provider)})
+			view, err = svc.BuildAnalyticsUsage(ctx, persistence.UsageFilter{Provider: string(provider)})
 			if err != nil {
 				t.Fatalf("second BuildAnalyticsUsage: %v", err)
 			}
@@ -1170,7 +1171,7 @@ func TestUsageAnalyticsService_SharedConnectionDedupesWithoutProviderIdentity(t 
 				pct := 4.0
 				return &models.AccountUsageSnapshot{Provider: string(provider), AgentConfigID: cfg.ID, SecondaryLabel: "weekly", SecondaryUsedPercent: &pct}, nil
 			})
-			view, err := svc.BuildAnalyticsUsage(ctx, repository.UsageFilter{Provider: string(provider), Refresh: true})
+			view, err := svc.BuildAnalyticsUsage(ctx, persistence.UsageFilter{Provider: string(provider), Refresh: true})
 			if err != nil {
 				t.Fatalf("BuildAnalyticsUsage: %v", err)
 			}
@@ -1245,7 +1246,7 @@ func TestUsageAnalyticsService_MovedSnapshotOriginRemainsAttributedToOriginalCon
 			}
 
 			svc := NewUsageAnalyticsService(usageRepo, configRepo)
-			view, err := svc.BuildLocalAnalyticsUsage(ctx, repository.UsageFilter{Provider: string(provider)})
+			view, err := svc.BuildLocalAnalyticsUsage(ctx, persistence.UsageFilter{Provider: string(provider)})
 			if err != nil {
 				t.Fatalf("BuildLocalAnalyticsUsage: %v", err)
 			}
@@ -1334,7 +1335,7 @@ func TestUsageAnalyticsService_MovedLegacySnapshotOriginRemainsAttributedToOrigi
 			}
 
 			svc := NewUsageAnalyticsService(usageRepo, configRepo)
-			view, err := svc.BuildLocalAnalyticsUsage(ctx, repository.UsageFilter{Provider: string(provider)})
+			view, err := svc.BuildLocalAnalyticsUsage(ctx, persistence.UsageFilter{Provider: string(provider)})
 			if err != nil {
 				t.Fatalf("BuildLocalAnalyticsUsage: %v", err)
 			}
@@ -1436,7 +1437,7 @@ func TestUsageAnalyticsService_SharedAccountFailureFallsBackToHealthyConfig(t *t
 					}, nil
 				})
 
-				view, err := svc.BuildAnalyticsUsage(ctx, repository.UsageFilter{Refresh: true})
+				view, err := svc.BuildAnalyticsUsage(ctx, persistence.UsageFilter{Refresh: true})
 				if err != nil {
 					t.Fatalf("BuildAnalyticsUsage: %v", err)
 				}
@@ -1547,7 +1548,7 @@ func TestUsageAnalyticsService_SharedAccountRecentFailureDoesNotSuppressHealthyC
 				}, nil
 			})
 
-			view, err := svc.BuildAnalyticsUsage(ctx, repository.UsageFilter{})
+			view, err := svc.BuildAnalyticsUsage(ctx, persistence.UsageFilter{})
 			if err != nil {
 				t.Fatalf("BuildAnalyticsUsage: %v", err)
 			}
@@ -1643,7 +1644,7 @@ func TestUsageAnalyticsService_SharedAccountNewerFailureDoesNotOverrideHealthyCa
 				return nil, errors.New("unexpected account usage fetch")
 			})
 
-			view, err := svc.BuildAnalyticsUsage(ctx, repository.UsageFilter{})
+			view, err := svc.BuildAnalyticsUsage(ctx, persistence.UsageFilter{})
 			if err != nil {
 				t.Fatalf("BuildAnalyticsUsage: %v", err)
 			}
@@ -1718,7 +1719,7 @@ func TestUsageAnalyticsService_RefreshKeepsDuplicateAccountCredentialsIsolated(t
 				return &models.AccountUsageSnapshot{Provider: string(fresh.Provider), AccountID: fresh.OAuthAccountID, AgentConfigID: fresh.ID, SecondaryLabel: "weekly limit", SecondaryUsedPercent: &pct}, nil
 			})
 
-			if _, err := svc.BuildAnalyticsUsage(ctx, repository.UsageFilter{Refresh: true}); err != nil {
+			if _, err := svc.BuildAnalyticsUsage(ctx, persistence.UsageFilter{Refresh: true}); err != nil {
 				t.Fatalf("BuildAnalyticsUsage: %v", err)
 			}
 			loaded, err := configRepo.GetByID(ctx, second.ID)
@@ -1762,7 +1763,7 @@ func TestUsageAnalyticsService_DedupesAccountLimitsByOpenAIAccountID(t *testing.
 		}, nil
 	})
 
-	view, err := svc.BuildAnalyticsUsage(ctx, repository.UsageFilter{Refresh: true})
+	view, err := svc.BuildAnalyticsUsage(ctx, persistence.UsageFilter{Refresh: true})
 	if err != nil {
 		t.Fatalf("BuildAnalyticsUsage: %v", err)
 	}
@@ -1800,7 +1801,7 @@ func TestUsageAnalyticsService_KeepsDistinctOAuthAccountsSeparate(t *testing.T) 
 		return normalizeAnthropicAccountUsage(cfg, raw)
 	})
 
-	view, err := svc.BuildAnalyticsUsage(ctx, repository.UsageFilter{Refresh: true})
+	view, err := svc.BuildAnalyticsUsage(ctx, persistence.UsageFilter{Refresh: true})
 	if err != nil {
 		t.Fatalf("BuildAnalyticsUsage: %v", err)
 	}
@@ -1857,7 +1858,7 @@ func TestUsageAnalyticsService_RefreshFailureKeepsLocalUsageAndBacksOff(t *testi
 		return nil, accountUsageHTTPError{Method: "GET", URL: "https://chatgpt.com/api/codex/usage", StatusCode: 403, ContentType: "text/html"}
 	})
 
-	view, err := svc.BuildAnalyticsUsage(ctx, repository.UsageFilter{Refresh: true})
+	view, err := svc.BuildAnalyticsUsage(ctx, persistence.UsageFilter{Refresh: true})
 	if err != nil {
 		t.Fatalf("BuildAnalyticsUsage should not fail on account refresh error: %v", err)
 	}
@@ -1874,7 +1875,7 @@ func TestUsageAnalyticsService_RefreshFailureKeepsLocalUsageAndBacksOff(t *testi
 		t.Fatalf("expected first refresh to call provider once, got %d", calls)
 	}
 
-	view, err = svc.BuildAnalyticsUsage(ctx, repository.UsageFilter{})
+	view, err = svc.BuildAnalyticsUsage(ctx, persistence.UsageFilter{})
 	if err != nil {
 		t.Fatalf("BuildAnalyticsUsage after failed refresh: %v", err)
 	}
@@ -1885,7 +1886,7 @@ func TestUsageAnalyticsService_RefreshFailureKeepsLocalUsageAndBacksOff(t *testi
 		t.Fatalf("expected persisted sanitized refresh error, got %+v", view.AccountLimits)
 	}
 
-	_, err = svc.BuildAnalyticsUsage(ctx, repository.UsageFilter{Refresh: true})
+	_, err = svc.BuildAnalyticsUsage(ctx, persistence.UsageFilter{Refresh: true})
 	if err != nil {
 		t.Fatalf("manual refresh after failed snapshot should not fail: %v", err)
 	}
@@ -1969,7 +1970,7 @@ func TestUsageAnalyticsService_ReconnectDoesNotReusePriorGenerationSnapshot(t *t
 				}
 
 				svc := NewUsageAnalyticsService(usageRepo, configRepo)
-				view, err := svc.BuildLocalAnalyticsUsage(ctx, repository.UsageFilter{Provider: string(provider)})
+				view, err := svc.BuildLocalAnalyticsUsage(ctx, persistence.UsageFilter{Provider: string(provider)})
 				if err != nil {
 					t.Fatalf("BuildLocalAnalyticsUsage: %v", err)
 				}
@@ -2095,7 +2096,7 @@ func TestUsageAnalyticsService_RejectsStaleSnapshotAfterFetchGenerationChange(t 
 					}, nil
 				})
 
-				if _, err := svc.BuildAnalyticsUsage(ctx, repository.UsageFilter{Refresh: true}); err != nil {
+				if _, err := svc.BuildAnalyticsUsage(ctx, persistence.UsageFilter{Refresh: true}); err != nil {
 					t.Fatalf("BuildAnalyticsUsage: %v", err)
 				}
 				snapshots, err := usageRepo.GetLatestAccountUsageSnapshots(ctx, string(provider))
@@ -2335,7 +2336,7 @@ func TestUsageAnalyticsService_AccountUsageRefreshesExpiredOpenAIOAuthBeforeRequ
 		return llmoauth.TokenSet{AccessToken: "fresh-token", RefreshToken: "fresh-refresh", ExpiresAt: time.Now().Add(2 * time.Hour).UnixMilli(), AccountID: cfg.OAuthAccountID}, nil
 	})
 
-	view, err := svc.BuildAnalyticsUsage(ctx, repository.UsageFilter{Provider: "openai", Refresh: true})
+	view, err := svc.BuildAnalyticsUsage(ctx, persistence.UsageFilter{Provider: "openai", Refresh: true})
 	if err != nil {
 		t.Fatalf("BuildAnalyticsUsage: %v", err)
 	}
@@ -2405,7 +2406,7 @@ func TestUsageAnalyticsService_AccountUsageRecoversUnauthorizedAnthropicWithFres
 		return llmoauth.TokenSet{AccessToken: "fresh-token", RefreshToken: "fresh-refresh", ExpiresAt: time.Now().Add(2 * time.Hour).UnixMilli()}, nil
 	}, nil)
 
-	view, err := svc.BuildAnalyticsUsage(ctx, repository.UsageFilter{Provider: "anthropic", Refresh: true})
+	view, err := svc.BuildAnalyticsUsage(ctx, persistence.UsageFilter{Provider: "anthropic", Refresh: true})
 	if err != nil {
 		t.Fatalf("BuildAnalyticsUsage: %v", err)
 	}
@@ -3066,7 +3067,7 @@ func BenchmarkUsageAnalyticsServiceBuildAnalyticsUsage50K(b *testing.B) {
 	seedUsageAnalyticsBenchmarkEvents(b, db, ctx, 50000)
 	usageRepo := repository.NewUsageRepo(db)
 	svc := NewUsageAnalyticsService(usageRepo, nil)
-	filter := repository.UsageFilter{
+	filter := persistence.UsageFilter{
 		ProjectID: "bench-project-0",
 		DateFrom:  time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
 		DateTo:    time.Date(2026, 4, 1, 23, 59, 59, 0, time.UTC),

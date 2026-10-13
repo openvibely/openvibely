@@ -110,7 +110,7 @@ func newTestHandlerEnv(t testing.TB, db *sql.DB, opts ...testHandlerOption) *tes
 
 	h := New(env.ProjectSvc, env.TaskSvc, env.LLMSvc, env.WorkerSvc, schedulerSvc, alertSvc, upcomingSvc, insightsSvc,
 		env.LLMConfigRepo, env.TaskRepo, env.ScheduleRepo, env.ExecRepo, env.WorkerRepo, env.AttachmentRepo, chatAttachmentRepo,
-		env.ProjectRepo, env.SettingsRepo, o.broadcaster, nil)
+		env.ProjectRepo, env.SettingsRepo, o.broadcaster, nil, newTestRuntimeStores(db))
 	h.oauthIdentityResolver = nil
 	h.SetGitHubAuthRepo(repository.NewGitHubAuthRepo(db))
 	h.SetSlackAuthRepo(repository.NewSlackAuthRepo(db))
@@ -151,5 +151,15 @@ func waitForHandlerBackgroundWork(t testing.TB, h *Handler) {
 			return
 		}
 		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func newTestRuntimeStores(db *sql.DB) RuntimeStores {
+	return RuntimeStores{
+		ThreadInputs:      repository.NewThreadInputRepo(db),
+		Usage:             repository.NewUsageRepo(db),
+		SkillAnalytics:    repository.NewSkillAnalyticsRepo(db),
+		TaskCommitStats:   repository.NewTaskCommitStatRepo(db),
+		ChatInputRequests: repository.NewChatInputRequestRepo(db),
 	}
 }

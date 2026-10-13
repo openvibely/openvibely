@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 )
 
 type UsageRepo struct {
@@ -17,23 +18,6 @@ type UsageRepo struct {
 
 func NewUsageRepo(db *sql.DB) *UsageRepo {
 	return &UsageRepo{db: db}
-}
-
-type UsageFilter struct {
-	AccountGroupKey  string
-	ProjectID        string
-	Provider         string
-	AccountID        string
-	AgentID          string
-	WorkflowID       string
-	DateFrom         time.Time
-	DateTo           time.Time
-	GroupBy          string
-	Refresh          bool
-	EvidencePeriod   string
-	EvidenceProvider string
-	EvidenceModel    string
-	EvidenceLimit    int
 }
 
 func (r *UsageRepo) RecordUsageEvent(ctx context.Context, event *models.LLMUsageEvent) error {
@@ -151,7 +135,7 @@ func (r *UsageRepo) CreateAccountUsageSnapshotIfOAuthRevision(ctx context.Contex
 	return true, nil
 }
 
-func createAccountUsageSnapshotTx(ctx context.Context, tx SQLExecutor, snapshot *models.AccountUsageSnapshot) error {
+func createAccountUsageSnapshotTx(ctx context.Context, tx sqlExecutor, snapshot *models.AccountUsageSnapshot) error {
 	if snapshot.RawJSON == "" {
 		snapshot.RawJSON = "{}"
 	}
@@ -252,7 +236,7 @@ func (r *UsageRepo) GetLatestAccountUsageSnapshots(ctx context.Context, provider
 	return snapshots, nil
 }
 
-func (r *UsageRepo) GetUsageTotals(ctx context.Context, filter UsageFilter) (*models.UsageTotals, error) {
+func (r *UsageRepo) GetUsageTotals(ctx context.Context, filter persistence.UsageFilter) (*models.UsageTotals, error) {
 	where, args := usageWhere(filter)
 	var totals models.UsageTotals
 	var cost sql.NullFloat64
@@ -277,7 +261,7 @@ func (r *UsageRepo) GetUsageTotals(ctx context.Context, filter UsageFilter) (*mo
 	return &totals, nil
 }
 
-func (r *UsageRepo) GetDailyUsage(ctx context.Context, filter UsageFilter) ([]models.DailyUsagePoint, error) {
+func (r *UsageRepo) GetDailyUsage(ctx context.Context, filter persistence.UsageFilter) ([]models.DailyUsagePoint, error) {
 	if shouldUseProjectDateBoundedAggregate(filter) {
 		return r.getDailyUsageFromScan(ctx, filter, false)
 	}
@@ -313,7 +297,7 @@ func (r *UsageRepo) GetDailyUsage(ctx context.Context, filter UsageFilter) ([]mo
 	return points, rows.Err()
 }
 
-func (r *UsageRepo) GetDailyUsageByModel(ctx context.Context, filter UsageFilter) ([]models.DailyUsagePoint, error) {
+func (r *UsageRepo) GetDailyUsageByModel(ctx context.Context, filter persistence.UsageFilter) ([]models.DailyUsagePoint, error) {
 	if shouldUseProjectDateBoundedAggregate(filter) {
 		return r.getDailyUsageFromScan(ctx, filter, true)
 	}
@@ -349,7 +333,7 @@ func (r *UsageRepo) GetDailyUsageByModel(ctx context.Context, filter UsageFilter
 	return points, rows.Err()
 }
 
-func (r *UsageRepo) GetUsageRateBuckets(ctx context.Context, filter UsageFilter) ([]models.UsageRatePoint, error) {
+func (r *UsageRepo) GetUsageRateBuckets(ctx context.Context, filter persistence.UsageFilter) ([]models.UsageRatePoint, error) {
 	if shouldUseProjectDateBoundedAggregate(filter) {
 		return r.getUsageRateBucketsFromScan(ctx, filter, false)
 	}
@@ -378,7 +362,7 @@ func (r *UsageRepo) GetUsageRateBuckets(ctx context.Context, filter UsageFilter)
 	return points, rows.Err()
 }
 
-func (r *UsageRepo) GetUsageRateBucketsByModel(ctx context.Context, filter UsageFilter) ([]models.UsageRatePoint, error) {
+func (r *UsageRepo) GetUsageRateBucketsByModel(ctx context.Context, filter persistence.UsageFilter) ([]models.UsageRatePoint, error) {
 	if shouldUseProjectDateBoundedAggregate(filter) {
 		return r.getUsageRateBucketsFromScan(ctx, filter, true)
 	}
@@ -407,7 +391,7 @@ func (r *UsageRepo) GetUsageRateBucketsByModel(ctx context.Context, filter Usage
 	return points, rows.Err()
 }
 
-func (r *UsageRepo) GetLatestUsageEventTime(ctx context.Context, filter UsageFilter) (*time.Time, error) {
+func (r *UsageRepo) GetLatestUsageEventTime(ctx context.Context, filter persistence.UsageFilter) (*time.Time, error) {
 	where, args := usageWhere(filter)
 	var occurredRaw string
 	err := r.db.QueryRowContext(ctx, `
@@ -425,7 +409,7 @@ func (r *UsageRepo) GetLatestUsageEventTime(ctx context.Context, filter UsageFil
 	return &occurredAt, nil
 }
 
-func (r *UsageRepo) GetModelUsageBreakdown(ctx context.Context, filter UsageFilter) ([]models.ModelUsagePoint, error) {
+func (r *UsageRepo) GetModelUsageBreakdown(ctx context.Context, filter persistence.UsageFilter) ([]models.ModelUsagePoint, error) {
 	if shouldUseProjectDateBoundedAggregate(filter) {
 		return r.getModelUsageBreakdownFromScan(ctx, filter)
 	}
@@ -508,7 +492,7 @@ type usageModelAggregate struct {
 	costCount int
 }
 
-func (r *UsageRepo) getDailyUsageFromScan(ctx context.Context, filter UsageFilter, byModel bool) ([]models.DailyUsagePoint, error) {
+func (r *UsageRepo) getDailyUsageFromScan(ctx context.Context, filter persistence.UsageFilter, byModel bool) ([]models.DailyUsagePoint, error) {
 	aggregates := make(map[usageModelKey]*usageDailyAggregate)
 	if err := r.forEachUsageAggregateEvent(ctx, filter, func(event usageAggregateEvent) {
 		key := usageModelKey{Period: usageLocalPeriod(event.OccurredAt, "day")}
@@ -547,7 +531,7 @@ func (r *UsageRepo) getDailyUsageFromScan(ctx context.Context, filter UsageFilte
 	return points, nil
 }
 
-func (r *UsageRepo) getUsageRateBucketsFromScan(ctx context.Context, filter UsageFilter, byModel bool) ([]models.UsageRatePoint, error) {
+func (r *UsageRepo) getUsageRateBucketsFromScan(ctx context.Context, filter persistence.UsageFilter, byModel bool) ([]models.UsageRatePoint, error) {
 	groupBy := normalizedUsageGroupBy(filter.GroupBy)
 	aggregates := make(map[usageModelKey]*usageRateAggregate)
 	if err := r.forEachUsageAggregateEvent(ctx, filter, func(event usageAggregateEvent) {
@@ -574,7 +558,7 @@ func (r *UsageRepo) getUsageRateBucketsFromScan(ctx context.Context, filter Usag
 	return points, nil
 }
 
-func (r *UsageRepo) getModelUsageBreakdownFromScan(ctx context.Context, filter UsageFilter) ([]models.ModelUsagePoint, error) {
+func (r *UsageRepo) getModelUsageBreakdownFromScan(ctx context.Context, filter persistence.UsageFilter) ([]models.ModelUsagePoint, error) {
 	aggregates := make(map[usageModelKey]*usageModelAggregate)
 	var total int
 	if err := r.forEachUsageAggregateEvent(ctx, filter, func(event usageAggregateEvent) {
@@ -622,7 +606,7 @@ func (r *UsageRepo) getModelUsageBreakdownFromScan(ctx context.Context, filter U
 	return points, nil
 }
 
-func (r *UsageRepo) forEachUsageAggregateEvent(ctx context.Context, filter UsageFilter, handle func(usageAggregateEvent)) error {
+func (r *UsageRepo) forEachUsageAggregateEvent(ctx context.Context, filter persistence.UsageFilter, handle func(usageAggregateEvent)) error {
 	source, where, args := usageAggregateScanSource(filter)
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT provider, model, input_tokens, output_tokens, cached_input_tokens, reasoning_output_tokens,
@@ -654,12 +638,12 @@ func (r *UsageRepo) forEachUsageAggregateEvent(ctx context.Context, filter Usage
 	return nil
 }
 
-func usageAggregateScanSource(filter UsageFilter) (string, string, []any) {
+func usageAggregateScanSource(filter persistence.UsageFilter) (string, string, []any) {
 	where, args := usageWhere(filter)
 	return "llm_usage_events", where, args
 }
 
-func shouldUseProjectDateBoundedAggregate(filter UsageFilter) bool {
+func shouldUseProjectDateBoundedAggregate(filter persistence.UsageFilter) bool {
 	return filter.ProjectID != "" && !filter.DateFrom.IsZero() && !filter.DateTo.IsZero()
 }
 
@@ -713,7 +697,7 @@ func sqliteWeekMonday(t time.Time) int {
 	return (yday-firstMonday)/7 + 1
 }
 
-func (r *UsageRepo) GetEvidence(ctx context.Context, filter UsageFilter) ([]models.UsageEvidenceRow, int, error) {
+func (r *UsageRepo) GetEvidence(ctx context.Context, filter persistence.UsageFilter) ([]models.UsageEvidenceRow, int, error) {
 	if filter.EvidencePeriod == "" && filter.EvidenceProvider == "" && filter.EvidenceModel == "" {
 		return []models.UsageEvidenceRow{}, 0, nil
 	}
@@ -765,7 +749,7 @@ func (r *UsageRepo) GetEvidence(ctx context.Context, filter UsageFilter) ([]mode
 	return out, total, rows.Err()
 }
 
-func usageWhere(filter UsageFilter) (string, []any) {
+func usageWhere(filter persistence.UsageFilter) (string, []any) {
 	clauses := []string{"1=1"}
 	args := []any{}
 	if filter.ProjectID != "" {
@@ -818,7 +802,7 @@ func usagePeriodExpression(groupBy string) string {
 	}
 }
 
-func insertAccountUsageExtraLimits(ctx context.Context, tx SQLExecutor, snapshot *models.AccountUsageSnapshot) error {
+func insertAccountUsageExtraLimits(ctx context.Context, tx sqlExecutor, snapshot *models.AccountUsageSnapshot) error {
 	if snapshot == nil || len(snapshot.ExtraLimits) == 0 {
 		return nil
 	}

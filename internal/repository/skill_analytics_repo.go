@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 )
 
 type SkillAnalyticsRepo struct {
@@ -17,32 +18,6 @@ type SkillAnalyticsRepo struct {
 
 func NewSkillAnalyticsRepo(db *sql.DB) *SkillAnalyticsRepo {
 	return &SkillAnalyticsRepo{db: db}
-}
-
-type SkillAnalyticsFilter struct {
-	DateFrom            time.Time
-	DateTo              time.Time
-	ProjectID           string
-	AgentID             string
-	WorkflowID          string
-	Surface             string
-	SkillScope          string
-	EventType           string
-	Limit               int
-	GroupBy             string
-	EvidencePeriod      string
-	EvidenceEvent       string
-	EvidenceAgentID     string
-	EvidenceSkillHandle string
-	EvidenceSkillScope  string
-	EvidenceLimit       int
-}
-
-type EnabledSkillInfo struct {
-	Handle    string
-	Scope     string
-	Enabled   bool
-	AlwaysUse bool
 }
 
 func (r *SkillAnalyticsRepo) RecordEvent(ctx context.Context, event *models.SkillAnalyticsEvent) error {
@@ -85,7 +60,7 @@ func (r *SkillAnalyticsRepo) RecordEvent(ctx context.Context, event *models.Skil
 	return nil
 }
 
-func (r *SkillAnalyticsRepo) GetUsageOverTime(ctx context.Context, filter SkillAnalyticsFilter) ([]models.SkillUsagePeriodMetric, error) {
+func (r *SkillAnalyticsRepo) GetUsageOverTime(ctx context.Context, filter persistence.SkillAnalyticsFilter) ([]models.SkillUsagePeriodMetric, error) {
 	where, args := skillAnalyticsWhere(filter)
 	periodExpr := skillAnalyticsPeriodExpression(filter.GroupBy)
 	rows, err := r.db.QueryContext(ctx, `
@@ -114,7 +89,7 @@ func (r *SkillAnalyticsRepo) GetUsageOverTime(ctx context.Context, filter SkillA
 	return out, rows.Err()
 }
 
-func (r *SkillAnalyticsRepo) GetTopSkills(ctx context.Context, filter SkillAnalyticsFilter) ([]models.SkillAnalyticsSkillMetric, error) {
+func (r *SkillAnalyticsRepo) GetTopSkills(ctx context.Context, filter persistence.SkillAnalyticsFilter) ([]models.SkillAnalyticsSkillMetric, error) {
 	where, args := skillAnalyticsWhere(filter)
 	limit := filter.Limit
 	if limit <= 0 {
@@ -157,7 +132,7 @@ func (r *SkillAnalyticsRepo) GetTopSkills(ctx context.Context, filter SkillAnaly
 	return out, rows.Err()
 }
 
-func (r *SkillAnalyticsRepo) GetSelectionFollowThrough(ctx context.Context, filter SkillAnalyticsFilter) ([]models.SkillFollowThroughMetric, error) {
+func (r *SkillAnalyticsRepo) GetSelectionFollowThrough(ctx context.Context, filter persistence.SkillAnalyticsFilter) ([]models.SkillFollowThroughMetric, error) {
 	filter.EventType = ""
 	where, args := skillAnalyticsWhere(filter)
 	limit := filter.Limit
@@ -197,7 +172,7 @@ func (r *SkillAnalyticsRepo) GetSelectionFollowThrough(ctx context.Context, filt
 	return out, rows.Err()
 }
 
-func (r *SkillAnalyticsRepo) GetAgentUsage(ctx context.Context, filter SkillAnalyticsFilter) (models.SkillAgentUsageHeatmap, error) {
+func (r *SkillAnalyticsRepo) GetAgentUsage(ctx context.Context, filter persistence.SkillAnalyticsFilter) (models.SkillAgentUsageHeatmap, error) {
 	where, args := skillAnalyticsWhere(filter)
 	limit := filter.Limit
 	if limit <= 0 {
@@ -250,7 +225,7 @@ func (r *SkillAnalyticsRepo) GetAgentUsage(ctx context.Context, filter SkillAnal
 	return heatmap, rows.Err()
 }
 
-func (r *SkillAnalyticsRepo) GetUnderusedSkills(ctx context.Context, filter SkillAnalyticsFilter, enabledSkills []EnabledSkillInfo) ([]models.UnderusedSkillMetric, error) {
+func (r *SkillAnalyticsRepo) GetUnderusedSkills(ctx context.Context, filter persistence.SkillAnalyticsFilter, enabledSkills []persistence.EnabledSkillInfo) ([]models.UnderusedSkillMetric, error) {
 	where, args := skillAnalyticsWhere(filter)
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT skill_handle, skill_scope,
@@ -335,7 +310,7 @@ func (r *SkillAnalyticsRepo) GetUnderusedSkills(ctx context.Context, filter Skil
 	return out, nil
 }
 
-func (r *SkillAnalyticsRepo) GetEvidence(ctx context.Context, filter SkillAnalyticsFilter) ([]models.SkillAnalyticsEvidenceRow, int, error) {
+func (r *SkillAnalyticsRepo) GetEvidence(ctx context.Context, filter persistence.SkillAnalyticsFilter) ([]models.SkillAnalyticsEvidenceRow, int, error) {
 	if filter.EvidencePeriod == "" && filter.EvidenceEvent == "" && filter.EvidenceAgentID == "" && filter.EvidenceSkillHandle == "" && filter.EvidenceSkillScope == "" {
 		return []models.SkillAnalyticsEvidenceRow{}, 0, nil
 	}
@@ -406,7 +381,7 @@ func (r *SkillAnalyticsRepo) GetEvidence(ctx context.Context, filter SkillAnalyt
 	return out, total, rows.Err()
 }
 
-func (r *SkillAnalyticsRepo) BuildDashboard(ctx context.Context, filter SkillAnalyticsFilter, enabledSkills []EnabledSkillInfo) (*models.SkillAnalyticsDashboard, error) {
+func (r *SkillAnalyticsRepo) BuildDashboard(ctx context.Context, filter persistence.SkillAnalyticsFilter, enabledSkills []persistence.EnabledSkillInfo) (*models.SkillAnalyticsDashboard, error) {
 	usage, err := r.GetUsageOverTime(ctx, filter)
 	if err != nil {
 		return nil, err
@@ -436,11 +411,11 @@ func (r *SkillAnalyticsRepo) BuildDashboard(ctx context.Context, filter SkillAna
 	return &models.SkillAnalyticsDashboard{UsageOverTime: usage, TopSkills: top, FollowThrough: follow, AgentUsage: agent, Underused: underused, Evidence: evidence, EvidenceTotal: evidenceTotal}, nil
 }
 
-func skillAnalyticsWhere(filter SkillAnalyticsFilter) (string, []any) {
+func skillAnalyticsWhere(filter persistence.SkillAnalyticsFilter) (string, []any) {
 	return skillAnalyticsWhereAlias(filter, "e")
 }
 
-func skillAnalyticsWhereAlias(filter SkillAnalyticsFilter, alias string) (string, []any) {
+func skillAnalyticsWhereAlias(filter persistence.SkillAnalyticsFilter, alias string) (string, []any) {
 	where := "WHERE 1=1"
 	args := []any{}
 	if !filter.DateFrom.IsZero() {

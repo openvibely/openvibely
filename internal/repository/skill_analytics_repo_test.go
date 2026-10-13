@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/testutil"
 )
 
@@ -26,7 +27,7 @@ func TestSkillAnalyticsRepo_UsageOverTime(t *testing.T) {
 		skillEvent(projectID, "turn-2", "", "project", "frontend", "edited", "manual", now.AddDate(0, 0, 1).Add(2*time.Minute)),
 	)
 
-	usage, err := repo.GetUsageOverTime(ctx, SkillAnalyticsFilter{ProjectID: projectID, GroupBy: "day"})
+	usage, err := repo.GetUsageOverTime(ctx, persistence.SkillAnalyticsFilter{ProjectID: projectID, GroupBy: "day"})
 	if err != nil {
 		t.Fatalf("GetUsageOverTime: %v", err)
 	}
@@ -56,7 +57,7 @@ func TestSkillAnalyticsRepo_TopSkillsAndFollowThrough(t *testing.T) {
 		skillEvent(projectID, "turn-3", "", "project", "frontend", "viewed", "manual", now.Add(4*time.Minute)),
 	)
 
-	top, err := repo.GetTopSkills(ctx, SkillAnalyticsFilter{ProjectID: projectID, Limit: 10})
+	top, err := repo.GetTopSkills(ctx, persistence.SkillAnalyticsFilter{ProjectID: projectID, Limit: 10})
 	if err != nil {
 		t.Fatalf("GetTopSkills: %v", err)
 	}
@@ -74,7 +75,7 @@ func TestSkillAnalyticsRepo_TopSkillsAndFollowThrough(t *testing.T) {
 		t.Fatalf("provider follow-through = %v, want 0.5", provider.FollowThroughRate)
 	}
 
-	follow, err := repo.GetSelectionFollowThrough(ctx, SkillAnalyticsFilter{ProjectID: projectID, Limit: 10})
+	follow, err := repo.GetSelectionFollowThrough(ctx, persistence.SkillAnalyticsFilter{ProjectID: projectID, Limit: 10})
 	if err != nil {
 		t.Fatalf("GetSelectionFollowThrough: %v", err)
 	}
@@ -109,7 +110,7 @@ func TestSkillAnalyticsRepo_AgentUsageHeatmap(t *testing.T) {
 		skillEvent(projectID, "turn-3", "agent-a", "project", "provider_adapter", "selected", "skill_curator", now),
 	)
 
-	heatmap, err := repo.GetAgentUsage(ctx, SkillAnalyticsFilter{ProjectID: projectID, Limit: 5})
+	heatmap, err := repo.GetAgentUsage(ctx, persistence.SkillAnalyticsFilter{ProjectID: projectID, Limit: 5})
 	if err != nil {
 		t.Fatalf("GetAgentUsage: %v", err)
 	}
@@ -147,7 +148,7 @@ func TestSkillAnalyticsRepo_AgentUsageHeatmapRanksViewedActivity(t *testing.T) {
 		skillEvent(projectID, "select-1", "", models.SkillScopeProject, "selected_once", models.SkillEventSelected, models.SkillEventSourceSkillCurator, now),
 	)
 
-	heatmap, err := repo.GetAgentUsage(ctx, SkillAnalyticsFilter{ProjectID: projectID, Limit: 1})
+	heatmap, err := repo.GetAgentUsage(ctx, persistence.SkillAnalyticsFilter{ProjectID: projectID, Limit: 1})
 	if err != nil {
 		t.Fatalf("GetAgentUsage: %v", err)
 	}
@@ -183,7 +184,7 @@ func TestSkillAnalyticsRepo_AgentUsageHeatmapRanksAgentSkillPairs(t *testing.T) 
 	}
 	recordSkillAnalyticsEvents(t, repo, events...)
 
-	heatmap, err := repo.GetAgentUsage(ctx, SkillAnalyticsFilter{ProjectID: projectID, Limit: 1})
+	heatmap, err := repo.GetAgentUsage(ctx, persistence.SkillAnalyticsFilter{ProjectID: projectID, Limit: 1})
 	if err != nil {
 		t.Fatalf("GetAgentUsage: %v", err)
 	}
@@ -207,7 +208,7 @@ func TestSkillAnalyticsRepo_AgentUsageHeatmapExcludesChangeEventsFromRanking(t *
 	}
 	recordSkillAnalyticsEvents(t, repo, events...)
 
-	heatmap, err := repo.GetAgentUsage(ctx, SkillAnalyticsFilter{ProjectID: projectID, Limit: 1})
+	heatmap, err := repo.GetAgentUsage(ctx, persistence.SkillAnalyticsFilter{ProjectID: projectID, Limit: 1})
 	if err != nil {
 		t.Fatalf("GetAgentUsage: %v", err)
 	}
@@ -226,13 +227,13 @@ func TestSkillAnalyticsRepo_UnderusedSkillsIncludesEnabledSkillsWithNoEvents(t *
 		skillEvent(projectID, "turn-1", "", "global", "active_skill", "selected", "skill_curator", now),
 		skillEvent(projectID, "turn-1", "", "global", "active_skill", "loaded", "skill_curator", now),
 	)
-	enabled := []EnabledSkillInfo{
+	enabled := []persistence.EnabledSkillInfo{
 		{Handle: "never_used", Scope: models.SkillScopeGlobal, Enabled: true},
 		{Handle: "always_guidance", Scope: models.SkillScopeProject, Enabled: true, AlwaysUse: true},
 		{Handle: "active_skill", Scope: models.SkillScopeGlobal, Enabled: true},
 	}
 
-	underused, err := repo.GetUnderusedSkills(ctx, SkillAnalyticsFilter{ProjectID: projectID}, enabled)
+	underused, err := repo.GetUnderusedSkills(ctx, persistence.SkillAnalyticsFilter{ProjectID: projectID}, enabled)
 	if err != nil {
 		t.Fatalf("GetUnderusedSkills: %v", err)
 	}
@@ -280,9 +281,9 @@ func TestSkillAnalyticsRepo_UnderusedSkillsCountsLifecycleHookSelectionsByProjec
 	eventB := skillEvent(projectB.ID, "lifecycle-exec-b", agentB.ID, models.SkillScopeAgentOwned, "evaluate_task_goal", models.SkillEventSelected, models.SkillEventSourceLifecycleHook, now.Add(time.Minute))
 	eventB.Surface = models.SkillSurfaceLifecycleHook
 	recordSkillAnalyticsEvents(t, repo, eventA, eventB)
-	enabled := []EnabledSkillInfo{{Handle: "evaluate_task_goal", Scope: models.SkillScopeAgentOwned, Enabled: true}}
+	enabled := []persistence.EnabledSkillInfo{{Handle: "evaluate_task_goal", Scope: models.SkillScopeAgentOwned, Enabled: true}}
 
-	underusedA, err := repo.GetUnderusedSkills(ctx, SkillAnalyticsFilter{ProjectID: projectA.ID}, enabled)
+	underusedA, err := repo.GetUnderusedSkills(ctx, persistence.SkillAnalyticsFilter{ProjectID: projectA.ID}, enabled)
 	if err != nil {
 		t.Fatalf("GetUnderusedSkills project A: %v", err)
 	}
@@ -291,7 +292,7 @@ func TestSkillAnalyticsRepo_UnderusedSkillsCountsLifecycleHookSelectionsByProjec
 		t.Fatalf("project A metric = %+v", metricA)
 	}
 
-	underusedB, err := repo.GetUnderusedSkills(ctx, SkillAnalyticsFilter{ProjectID: projectB.ID}, enabled)
+	underusedB, err := repo.GetUnderusedSkills(ctx, persistence.SkillAnalyticsFilter{ProjectID: projectB.ID}, enabled)
 	if err != nil {
 		t.Fatalf("GetUnderusedSkills project B: %v", err)
 	}

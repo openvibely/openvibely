@@ -5,7 +5,7 @@ import (
 
 	"github.com/openvibely/openvibely/internal/agentlibrary"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence"
 )
 
 type systemAgentPermissionMode int
@@ -117,7 +117,7 @@ func applySystemAgentDeclaration(agent, want *models.Agent) bool {
 	return changed
 }
 
-func reconcileDeclaredSystemAgentLifecycleHooks(ctx context.Context, lifecycleRepo *repository.LifecycleRepo, agentID string, decl *agentlibrary.SkillDeclaration) (systemAgentLifecycleHookReconcileResult, error) {
+func reconcileDeclaredSystemAgentLifecycleHooks(ctx context.Context, lifecycleRepo persistence.LifecycleStore, agentID string, decl *agentlibrary.SkillDeclaration) (systemAgentLifecycleHookReconcileResult, error) {
 	result := systemAgentLifecycleHookReconcileResult{desired: map[string]struct{}{}}
 	if lifecycleRepo == nil || decl == nil || len(decl.LifecycleHooks) == 0 {
 		return result, nil

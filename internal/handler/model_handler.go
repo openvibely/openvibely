@@ -20,7 +20,7 @@ import (
 	llmmixture "github.com/openvibely/openvibely/internal/llm/mixture"
 	llmprompt "github.com/openvibely/openvibely/internal/llm/prompt"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/web/templates/pages"
 )
@@ -34,8 +34,8 @@ const (
 	openAICompatibleModelIDFieldHeader     = "X-OpenAI-Compatible-Model-ID-Field"
 )
 
-func modelCardListFilter(c echo.Context, page cardPageRequest) repository.ModelCardListFilter {
-	return repository.ModelCardListFilter{
+func modelCardListFilter(c echo.Context, page cardPageRequest) persistence.ModelCardListFilter {
+	return persistence.ModelCardListFilter{
 		Search:     page.Search,
 		Provider:   allowlistedQuery(c, "provider", "", "openai", "anthropic", "ollama", "openai_compatible", "mixture"),
 		Default:    optionalBoolQuery(c, "default"),
@@ -45,7 +45,7 @@ func modelCardListFilter(c echo.Context, page cardPageRequest) repository.ModelC
 	}
 }
 
-func modelCardListState(projectID string, filter repository.ModelCardListFilter) pages.CardListState {
+func modelCardListState(projectID string, filter persistence.ModelCardListFilter) pages.CardListState {
 	return pages.CardListState{
 		ProjectID: projectID,
 		Search:    filter.Search,
@@ -106,35 +106,35 @@ func (h *Handler) ListModels(c echo.Context) error {
 }
 
 type modelEditDetails struct {
-	ID                    string             `json:"id"`
-	Name                  string             `json:"name"`
-	Provider              models.LLMProvider `json:"provider"`
-	Model                 string             `json:"model"`
-	ReasoningEffort       string             `json:"reasoning_effort"`
-	Temperature           float64            `json:"temperature"`
-	IsDefault             bool               `json:"is_default"`
-	APIKey                string             `json:"api_key"`
-	AuthMethod            models.AuthMethod  `json:"auth_method"`
-	OAuthConnectionID     string             `json:"oauth_connection_id"`
-	OAuthConnected        bool               `json:"oauth_connected"`
-	OAuthNeedsReauth      bool               `json:"oauth_needs_reauth"`
-	MaxWorkers            int                `json:"max_workers"`
-	WorkerTimeout         int                `json:"worker_timeout"`
-	OAuthClientID         string             `json:"oauth_client_id"`
-	OAuthClientSecret     string             `json:"oauth_client_secret"`
-	OAuthAuthorizeURL     string             `json:"oauth_authorize_url"`
-	OAuthTokenURL         string             `json:"oauth_token_url"`
-	OAuthScopes           string             `json:"oauth_scopes"`
-	OllamaBaseURL         string             `json:"ollama_base_url"`
-	BaseURL               string             `json:"base_url"`
-	Transport             string             `json:"transport"`
-	PresetSlug            string             `json:"preset_slug"`
-	ModelsURL             string             `json:"models_url"`
-	AuthHeaderName        string             `json:"auth_header_name"`
-	AuthHeaderValuePrefix string             `json:"auth_header_value_prefix"`
-	ExtraHeadersJSON      string             `json:"extra_headers_json"`
-	ExtraBodyJSON         string             `json:"extra_body_json"`
-	CustomAuthConfigJSON  string             `json:"custom_auth_config_json"`
+	ID                      string             `json:"id"`
+	Name                    string             `json:"name"`
+	Provider                models.LLMProvider `json:"provider"`
+	Model                   string             `json:"model"`
+	ReasoningEffort         string             `json:"reasoning_effort"`
+	Temperature             float64            `json:"temperature"`
+	IsDefault               bool               `json:"is_default"`
+	APIKey                  string             `json:"api_key"`
+	AuthMethod              models.AuthMethod  `json:"auth_method"`
+	OAuthConnectionID       string             `json:"oauth_connection_id"`
+	OAuthConnected          bool               `json:"oauth_connected"`
+	OAuthNeedsReauth        bool               `json:"oauth_needs_reauth"`
+	MaxWorkers              int                `json:"max_workers"`
+	WorkerTimeout           int                `json:"worker_timeout"`
+	OAuthClientID           string             `json:"oauth_client_id"`
+	OAuthClientSecret       string             `json:"oauth_client_secret"`
+	OAuthAuthorizeURL       string             `json:"oauth_authorize_url"`
+	OAuthTokenURL           string             `json:"oauth_token_url"`
+	OAuthScopes             string             `json:"oauth_scopes"`
+	OllamaBaseURL           string             `json:"ollama_base_url"`
+	BaseURL                 string             `json:"base_url"`
+	Transport               string             `json:"transport"`
+	PresetSlug              string             `json:"preset_slug"`
+	ModelsURL               string             `json:"models_url"`
+	AuthHeaderName          string             `json:"auth_header_name"`
+	AuthHeaderValuePrefix   string             `json:"auth_header_value_prefix"`
+	ExtraHeadersJSON        string             `json:"extra_headers_json"`
+	ExtraBodyJSON           string             `json:"extra_body_json"`
+	CustomAuthConfigJSON    string             `json:"custom_auth_config_json"`
 	MixtureConfigJSON       string             `json:"mixture_config_json"`
 	AutoStartTasks          bool               `json:"auto_start_tasks"`
 	DefaultMaxTokens        int                `json:"default_max_tokens"`
@@ -165,9 +165,9 @@ func (h *Handler) GetModelEditDetails(c echo.Context) error {
 		OllamaBaseURL: config.OllamaBaseURL, BaseURL: config.BaseURL,
 		Transport: config.Transport, PresetSlug: config.PresetSlug, ModelsURL: config.ModelsURL,
 		AuthHeaderName: config.AuthHeaderName, AuthHeaderValuePrefix: config.AuthHeaderValuePrefix,
-		AutoStartTasks: config.AutoStartTasks,
+		AutoStartTasks:   config.AutoStartTasks,
 		DefaultMaxTokens: config.DefaultMaxTokens, ContextWindow: config.ContextWindow,
-		CompactionThreshold: config.CompactionThreshold,
+		CompactionThreshold:   config.CompactionThreshold,
 		ProviderContextWindow: config.ProviderContextWindow, ProviderMaxOutputTokens: config.ProviderMaxOutputTokens,
 	}
 	if config.Provider == models.ProviderOpenAICompatible &&
@@ -282,9 +282,9 @@ func isLocalOrPrivateHost(host string) bool {
 }
 
 type openAICompatibleModelInfo struct {
-	ID             string `json:"id"`
-	ContextLength  int    `json:"context_length,omitempty"`
-	MaxOutputTokens int   `json:"max_output_tokens,omitempty"`
+	ID              string `json:"id"`
+	ContextLength   int    `json:"context_length,omitempty"`
+	MaxOutputTokens int    `json:"max_output_tokens,omitempty"`
 }
 
 type openAICompatibleModelsResponse struct {
@@ -779,16 +779,16 @@ type modelFormOptions struct {
 }
 
 func isModelValidationError(err error) bool {
-	return errors.Is(err, repository.ErrLLMConfigNameRequired) ||
-		errors.Is(err, repository.ErrLLMConfigNameDuplicate) ||
-		errors.Is(err, repository.ErrLLMConfigModelRequired)
+	return errors.Is(err, persistence.ErrLLMConfigNameRequired) ||
+		errors.Is(err, persistence.ErrLLMConfigNameDuplicate) ||
+		errors.Is(err, persistence.ErrLLMConfigModelRequired)
 }
 
 func validateBrowserRunnableModelSlug(agent *models.LLMConfig) error {
 	switch agent.Provider {
 	case models.ProviderAnthropic, models.ProviderOpenAI, models.ProviderOpenAICompatible, models.ProviderOllama:
 		if strings.TrimSpace(agent.Model) == "" {
-			return repository.ErrLLMConfigModelRequired
+			return persistence.ErrLLMConfigModelRequired
 		}
 	}
 	if !models.BuiltInModelSupportedForAuth(agent.Provider, agent.Model, agent.AuthMethod) {
@@ -976,8 +976,10 @@ func (h *Handler) CreateModel(c echo.Context) error {
 	if err := h.normalizeBrowserModelForm(c.Request().Context(), c, a, modelFormOptions{mode: modelFormCreate}); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
- setupKey, err := h.attachModelOAuthSetup(c,a)
- if err != nil {return err}
+	setupKey, err := h.attachModelOAuthSetup(c, a)
+	if err != nil {
+		return err
+	}
 
 	syncCatalogProviderLimits(a, "")
 	applog.Infof("[handler] CreateModel name=%q provider=%s model=%s auth_method=%s temp=%.1f default=%v",
@@ -985,7 +987,7 @@ func (h *Handler) CreateModel(c echo.Context) error {
 
 	if err := h.llmConfigRepo.Create(c.Request().Context(), a); err != nil {
 		applog.Infof("[handler] CreateModel error: %v", err)
-		if errors.Is(err, repository.ErrOAuthConnectionChanged) {
+		if errors.Is(err, persistence.ErrOAuthConnectionChanged) {
 			return echo.NewHTTPError(http.StatusConflict, err.Error())
 		}
 		if isModelValidationError(err) {
@@ -993,8 +995,10 @@ func (h *Handler) CreateModel(c echo.Context) error {
 		}
 		return err
 	}
-	if setupKey != "" {removeModelOAuthSetup(setupKey)}
- applog.Infof("[handler] CreateModel success id=%s", a.ID)
+	if setupKey != "" {
+		removeModelOAuthSetup(setupKey)
+	}
+	applog.Infof("[handler] CreateModel success id=%s", a.ID)
 	if h.workerSvc != nil {
 		h.workerSvc.DispatchNext()
 	}
@@ -1072,7 +1076,7 @@ func (h *Handler) updateModelByID(c echo.Context, id string) error {
 	applog.Infof("[handler] UpdateModel id=%s name=%q model=%s auth_method=%s max_workers=%d", id, agent.Name, agent.Model, agent.AuthMethod, agent.MaxWorkers)
 	if err := h.llmConfigRepo.Update(c.Request().Context(), agent); err != nil {
 		applog.Infof("[handler] UpdateModel error: %v", err)
-		if errors.Is(err, repository.ErrOAuthConnectionChanged) {
+		if errors.Is(err, persistence.ErrOAuthConnectionChanged) {
 			return echo.NewHTTPError(http.StatusConflict, err.Error())
 		}
 		if isModelValidationError(err) {
@@ -1129,7 +1133,7 @@ func (h *Handler) RenameOAuthConnection(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "OAuth account name must be at most 200 characters")
 	}
 	if err := h.llmConfigRepo.RenameOAuthConnection(c.Request().Context(), c.Param("id"), name); err != nil {
-		if errors.Is(err, repository.ErrOAuthConnectionNotFound) {
+		if errors.Is(err, persistence.ErrOAuthConnectionNotFound) {
 			return echo.NewHTTPError(http.StatusNotFound, "OAuth account not found")
 		}
 		return err
@@ -1164,9 +1168,9 @@ func (h *Handler) MoveModelsToOAuthConnection(c echo.Context) error {
 	}
 	if err := h.llmConfigRepo.MoveModelsToOAuthConnection(c.Request().Context(), modelIDs, c.Param("id")); err != nil {
 		switch {
-		case errors.Is(err, repository.ErrOAuthConnectionNotFound):
+		case errors.Is(err, persistence.ErrOAuthConnectionNotFound):
 			return echo.NewHTTPError(http.StatusNotFound, "OAuth account not found")
-		case errors.Is(err, repository.ErrOAuthConnectionInvalidMove):
+		case errors.Is(err, persistence.ErrOAuthConnectionInvalidMove):
 			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 		default:
 			return err
@@ -1187,7 +1191,7 @@ func (h *Handler) DeleteOAuthConnection(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusConflict, "OAuth account is still linked to models")
 	}
 	if err := h.llmConfigRepo.DeleteOAuthConnection(c.Request().Context(), connection.ID); err != nil {
-		if errors.Is(err, repository.ErrOAuthConnectionLinked) {
+		if errors.Is(err, persistence.ErrOAuthConnectionLinked) {
 			return echo.NewHTTPError(http.StatusConflict, "OAuth account is still linked to models")
 		}
 		return err
@@ -1474,15 +1478,19 @@ func (h *Handler) ListOpenAICompatibleAvailableModels(c echo.Context) error {
 			return c.JSON(http.StatusConflict, map[string]string{"error": "save endpoint changes and reconnect before discovering models"})
 		}
 	}
- if key := c.Request().Header.Get(modelOAuthSetupHeader); key != "" {
-  if configured != nil {return echo.NewHTTPError(http.StatusBadRequest,"Use either a saved model or a sign-in session.")}
-  var err error
-  configured,err=h.modelOAuthSetupConfig(key,true)
-  if err!=nil {return err}
-  if c.QueryParam("base_url")!=configured.BaseURL || c.QueryParam("models_url")!=configured.ModelsURL {
-   return echo.NewHTTPError(http.StatusConflict,"Connection settings changed. Connect OAuth again.")
-  }
- }
+	if key := c.Request().Header.Get(modelOAuthSetupHeader); key != "" {
+		if configured != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, "Use either a saved model or a sign-in session.")
+		}
+		var err error
+		configured, err = h.modelOAuthSetupConfig(key, true)
+		if err != nil {
+			return err
+		}
+		if c.QueryParam("base_url") != configured.BaseURL || c.QueryParam("models_url") != configured.ModelsURL {
+			return echo.NewHTTPError(http.StatusConflict, "Connection settings changed. Connect OAuth again.")
+		}
+	}
 
 	baseURL, modelsURL := c.QueryParam("base_url"), c.QueryParam("models_url")
 	if configured != nil {
@@ -1537,7 +1545,9 @@ func (h *Handler) ListOpenAICompatibleAvailableModels(c echo.Context) error {
 	}
 	discoveryCtx, cancelDiscovery := context.WithTimeout(c.Request().Context(), service.ModelDiscoveryTimeout)
 	defer cancelDiscovery()
- if key := c.Request().Header.Get(modelOAuthSetupHeader); key != "" { discoveryCtx = context.WithValue(discoveryCtx,modelOAuthSetupContextKey{},key) }
+	if key := c.Request().Header.Get(modelOAuthSetupHeader); key != "" {
+		discoveryCtx = context.WithValue(discoveryCtx, modelOAuthSetupContextKey{}, key)
+	}
 	client := llmcustomauth.NewHTTPClient(service.ModelDiscoveryTimeout, requestPrivate)
 	discoveryKey := apiKey
 	if configured != nil && discoveryKey == "" {
@@ -1630,7 +1640,9 @@ func (h *Handler) fetchOpenAICompatibleDiscoveryURL(ctx context.Context, client 
 	if configured != nil && configured.AuthMethod == models.AuthMethodOAuth {
 		modelsFound, err := h.fetchCustomOpenAICompatibleModels(ctx, client, modelsURL, *configured)
 		if errors.Is(err, errCustomOAuthUnauthorized) {
- if configured.ID == "" {return nil,fmt.Errorf("sign-in expired; connect OAuth again")}
+			if configured.ID == "" {
+				return nil, fmt.Errorf("sign-in expired; connect OAuth again")
+			}
 			if refreshErr := h.refreshCustomCompatibleOAuth(ctx, configured, client, configured.OAuthAccessToken); refreshErr == nil {
 				modelsFound, err = h.fetchCustomOpenAICompatibleModels(ctx, client, modelsURL, *configured)
 			} else {
@@ -1763,7 +1775,9 @@ func (h *Handler) fetchCustomOpenAICompatibleModels(ctx context.Context, client 
 }
 
 func (h *Handler) currentCustomOAuthConfig(ctx context.Context, snapshot models.LLMConfig) (*models.LLMConfig, error) {
- if key,ok:=ctx.Value(modelOAuthSetupContextKey{}).(string); ok && snapshot.ID=="" { return h.modelOAuthSetupConfig(key,true) }
+	if key, ok := ctx.Value(modelOAuthSetupContextKey{}).(string); ok && snapshot.ID == "" {
+		return h.modelOAuthSetupConfig(key, true)
+	}
 	current, err := h.llmConfigRepo.GetByID(ctx, snapshot.ID)
 	if err != nil {
 		return nil, err

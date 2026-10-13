@@ -13,7 +13,7 @@ import (
 	"github.com/openvibely/openvibely/internal/builtinskills"
 	"github.com/openvibely/openvibely/internal/memory"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence"
 )
 
 // MemoryService owns storage setup and reconciliation for OpenVibely's
@@ -32,11 +32,11 @@ import (
 //     declaration so route_task / after_complete bindings exist.//   - Create and maintain the visible per-project "System: Memory
 //     Consolidation" scheduled task assigned to the Memory Curator agent.
 type MemoryService struct {
-	taskRepo      *repository.TaskRepo
-	scheduleRepo  *repository.ScheduleRepo
-	agentRepo     *repository.AgentRepo
-	lifecycleRepo *repository.LifecycleRepo
-	projectRepo   *repository.ProjectRepo
+	taskRepo      persistence.TaskStore
+	scheduleRepo  persistence.ScheduleStore
+	agentRepo     persistence.AgentStore
+	lifecycleRepo persistence.LifecycleStore
+	projectRepo   persistence.ProjectStore
 	store         *memory.FileStore
 	pathResolver  *memory.PathResolver
 }
@@ -46,10 +46,10 @@ type MemoryService struct {
 // are required; task-time memory behavior runs through the Memory Curator
 // agent and is independent of this service.
 func NewMemoryService(
-	taskRepo *repository.TaskRepo,
-	scheduleRepo *repository.ScheduleRepo,
-	agentRepo *repository.AgentRepo,
-	projectRepo *repository.ProjectRepo,
+	taskRepo persistence.TaskStore,
+	scheduleRepo persistence.ScheduleStore,
+	agentRepo persistence.AgentStore,
+	projectRepo persistence.ProjectStore,
 	store *memory.FileStore,
 	resolver *memory.PathResolver,
 ) *MemoryService {
@@ -64,7 +64,7 @@ func NewMemoryService(
 }
 
 // SetLifecycleRepo wires lifecycle hook persistence for the built-in Memory Curator agent.
-func (s *MemoryService) SetLifecycleRepo(repo *repository.LifecycleRepo) {
+func (s *MemoryService) SetLifecycleRepo(repo persistence.LifecycleStore) {
 	if s != nil {
 		s.lifecycleRepo = repo
 	}
@@ -309,7 +309,7 @@ func (s *MemoryService) ensureConsolidationTaskSchedule(ctx context.Context, pro
 			CreatedVia:        models.TaskOriginWeb,
 		}
 		if err := s.taskRepo.Create(ctx, task); err != nil {
-			if err != repository.ErrDuplicateTask {
+			if err != persistence.ErrDuplicateTask {
 				return err
 			}
 			task, err = s.taskRepo.GetByProjectAndTitle(ctx, projectID, memoryConsolidationTaskTitle)

@@ -15,20 +15,13 @@ import (
 	"github.com/openvibely/openvibely/internal/automationobs"
 	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 )
 
 var (
-	ErrAutomationScheduleChanged        = errors.New("automation schedule occurrence changed")
-	ErrAutomationNotActive              = errors.New("automation must be active to run now")
-	ErrAutomationNoScheduleEntries      = errors.New("automation has no runnable schedule entries")
-	ErrAutomationDispatchLease          = errors.New("automation dispatch lease is not owned")
-	ErrAutomationTaskBusy               = errors.New("automation task is not available")
-	ErrAutomationExternalReconciliation = errors.New("automation external mutation requires reconciliation")
-	ErrAutomationGitHubIssueDedupBusy   = errors.New("another Automation run is already checking or creating this GitHub issue")
-	githubResourceNamePattern           = regexp.MustCompile(`^[A-Za-z0-9_.-]+$`)
+	ErrAutomationGitHubIssueDedupBusy = errors.New("another Automation run is already checking or creating this GitHub issue")
+	githubResourceNamePattern         = regexp.MustCompile(`^[A-Za-z0-9_.-]+$`)
 )
-
-const AutomationExternalStaleAfter = 15 * time.Minute
 
 const listAutomationsWithStaleExternalPullRequestsSQL = `SELECT DISTINCT a.project_id, a.automation_id
 				FROM task_pull_requests pr INDEXED BY idx_task_pull_requests_updated_at_task_id
@@ -126,26 +119,7 @@ const liveNodeCountsSQL = `WITH operational_state AS (
 				SUM(CASE WHEN state_priority = 1 THEN 1 ELSE 0 END)
 			FROM identity_state GROUP BY node_id`
 
-type AutomationGitHubIssueDedupSource struct {
-	Context        models.AutomationContext               `json:"context"`
-	TaskID         string                                 `json:"task_id"`
-	ExecutionID    string                                 `json:"execution_id"`
-	StableBindings []AutomationGitHubIssueDedupNodeSource `json:"stable_bindings,omitempty"`
-}
-
-type AutomationGitHubIssueDedupNodeSource struct {
-	AutomationID string `json:"automation_id"`
-	NodeKey      string `json:"node_key"`
-	Role         string `json:"role"`
-}
-
-type AutomationGitHubIssueDedupClaim struct {
-	IssueNumber int
-	OwnerToken  string
-	Source      AutomationGitHubIssueDedupSource
-}
-
-func dedupSourceAutomationCounts(source AutomationGitHubIssueDedupSource) map[string]int {
+func dedupSourceAutomationCounts(source persistence.AutomationGitHubIssueDedupSource) map[string]int {
 	counts := make(map[string]int)
 	seen := make(map[string]bool)
 	for _, binding := range source.Context.Bindings {
@@ -165,25 +139,6 @@ func dedupSourceAutomationCounts(source AutomationGitHubIssueDedupSource) map[st
 		counts[automationID]++
 	}
 	return counts
-}
-
-type AutomationProjectionEvent struct {
-	Context        models.AutomationContext
-	Binding        models.AutomationBinding
-	WorkItemKey    string
-	WorkItemKind   string
-	WorkItemTitle  string
-	WorkItemStatus models.AutomationWorkItemStatus
-	ActivityKey    string
-	ActivityType   string
-	ActivityStatus models.AutomationActivityStatus
-	Resources      []models.AutomationActivityResource
-	EventKey       string
-	FromNodeID     string
-	ToNodeID       string
-	EdgeID         string
-	Transition     models.AutomationTransitionState
-	MetadataJSON   string
 }
 
 func (r *AutomationRepo) PublishInvalidation(eventType events.TaskEventType, projectID string, binding models.AutomationBinding) {
@@ -266,7 +221,7 @@ type automationTaskAdmissionResult struct {
 	skippedReason     string
 }
 
-func claimAutomationTaskAdmission(ctx context.Context, conn SQLExecutor, input automationTaskAdmissionInput) (automationTaskAdmissionResult, error) {
+func claimAutomationTaskAdmission(ctx context.Context, conn sqlExecutor, input automationTaskAdmissionInput) (automationTaskAdmissionResult, error) {
 	result := automationTaskAdmissionResult{effectiveCategory: input.taskCategory}
 	normalizeCategory := func() error {
 		result.effectiveCategory = input.taskCategory
@@ -275,7 +230,7 @@ func claimAutomationTaskAdmission(ctx context.Context, conn SQLExecutor, input a
 				if input.taskStatus == models.StatusFailed && input.taskCategory == models.CategoryCompleted {
 					result.effectiveCategory = models.CategoryScheduled
 				} else {
-					return ErrAutomationScheduleChanged
+					return persistence.ErrAutomationScheduleChanged
 				}
 			}
 		} else if result.effectiveCategory != models.CategoryActive && result.effectiveCategory != models.CategoryScheduled {
@@ -368,7 +323,7 @@ func (r *AutomationRepo) ClaimManualAutomationRun(ctx context.Context, projectID
 		return nil, nil, fmt.Errorf("loading Automation for manual run: %w", err)
 	}
 	if lifecycle != models.AutomationActive {
-		return nil, nil, ErrAutomationNotActive
+		return nil, nil, persistence.ErrAutomationNotActive
 	}
 
 	type manualEntry struct {
@@ -407,14 +362,14 @@ func (r *AutomationRepo) ClaimManualAutomationRun(ctx context.Context, projectID
 		return nil, nil, err
 	}
 	if len(entries) == 0 {
-		return nil, nil, ErrAutomationNoScheduleEntries
+		return nil, nil, persistence.ErrAutomationNoScheduleEntries
 	}
 
 	invocations := make([]models.AutomationInvocation, 0, len(entries))
 	dispatches := make([]models.AutomationDispatch, 0, len(entries))
 	boardEvents := make([]events.TaskEvent, 0, len(entries))
 	for _, entry := range entries {
-		occurrenceKey := "manual:" + NewID()
+		occurrenceKey := "manual:" + persistence.NewID()
 		if occurrenceKey == "manual:" {
 			return nil, nil, errors.New("generating Automation manual run identity")
 		}
@@ -466,7 +421,7 @@ func (r *AutomationRepo) ClaimManualAutomationRun(ctx context.Context, projectID
 
 func (r *AutomationRepo) ClaimScheduledOccurrence(ctx context.Context, schedule models.Schedule, now time.Time, nextRun *time.Time) (*models.AutomationInvocation, *models.AutomationDispatch, error) {
 	if schedule.NextRun == nil {
-		return nil, nil, ErrAutomationScheduleChanged
+		return nil, nil, persistence.ErrAutomationScheduleChanged
 	}
 	due := schedule.NextRun.UTC()
 	occurrenceKey := automationOccurrenceKey(schedule.ID, due)
@@ -481,7 +436,7 @@ func (r *AutomationRepo) ClaimScheduledOccurrence(ctx context.Context, schedule 
 		return nil, nil, err
 	}
 	if suppressed {
-		return nil, nil, ErrAutomationScheduleChanged
+		return nil, nil, persistence.ErrAutomationScheduleChanged
 	}
 
 	if existing, dispatch, err := loadInvocationForOccurrence(ctx, conn, schedule.ID, occurrenceKey); err != nil {
@@ -510,7 +465,7 @@ func (r *AutomationRepo) ClaimScheduledOccurrence(ctx context.Context, schedule 
 		Scan(&owner.ScheduleID, &owner.ProjectID, &owner.AutomationID, &owner.VersionID, &owner.NodeID,
 			&owner.OwnershipState, &owner.CreatedAt, &owner.UpdatedAt, &lifecycle, &automationName, &adapterKey)
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, nil, ErrAutomationScheduleChanged
+		return nil, nil, persistence.ErrAutomationScheduleChanged
 	}
 	if err != nil {
 		return nil, nil, fmt.Errorf("loading active trigger ownership: %w", err)
@@ -524,7 +479,7 @@ func (r *AutomationRepo) ClaimScheduledOccurrence(ctx context.Context, schedule 
 		return nil, nil, fmt.Errorf("loading due automation schedule: %w", err)
 	}
 	if !enabled || !currentDue.UTC().Equal(due) || currentDue.After(now) || scheduledTaskProject != owner.ProjectID {
-		return nil, nil, ErrAutomationScheduleChanged
+		return nil, nil, persistence.ErrAutomationScheduleChanged
 	}
 
 	taskID := scheduledTaskID
@@ -537,7 +492,7 @@ func (r *AutomationRepo) ClaimScheduledOccurrence(ctx context.Context, schedule 
 			return nil, nil, err
 		}
 		if scheduledTaskMemberships != 1 {
-			return nil, nil, ErrAutomationScheduleChanged
+			return nil, nil, persistence.ErrAutomationScheduleChanged
 		}
 	}
 
@@ -549,7 +504,7 @@ func (r *AutomationRepo) ClaimScheduledOccurrence(ctx context.Context, schedule 
 		return nil, nil, fmt.Errorf("loading automation dispatch task: %w", err)
 	}
 	if taskProject != owner.ProjectID {
-		return nil, nil, ErrAutomationScheduleChanged
+		return nil, nil, persistence.ErrAutomationScheduleChanged
 	}
 	admission, err := claimAutomationTaskAdmission(ctx, conn, automationTaskAdmissionInput{
 		projectID: owner.ProjectID, automationID: owner.AutomationID, versionID: owner.VersionID,
@@ -570,7 +525,7 @@ func (r *AutomationRepo) ClaimScheduledOccurrence(ctx context.Context, schedule 
 	}
 	changed, _ := result.RowsAffected()
 	if changed != 1 {
-		return nil, nil, ErrAutomationScheduleChanged
+		return nil, nil, persistence.ErrAutomationScheduleChanged
 	}
 	if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
 		return nil, nil, err
@@ -624,7 +579,7 @@ func automationInvocationTerminal(status models.AutomationInvocationStatus) bool
 	}
 }
 
-func loadInvocationForOccurrence(ctx context.Context, exec SQLExecutor, scheduleID, occurrenceKey string) (*models.AutomationInvocation, *models.AutomationDispatch, error) {
+func loadInvocationForOccurrence(ctx context.Context, exec sqlExecutor, scheduleID, occurrenceKey string) (*models.AutomationInvocation, *models.AutomationDispatch, error) {
 	invocation, err := scanAutomationInvocation(exec.QueryRowContext(ctx, `SELECT id, project_id, automation_id, version_id,
 		trigger_node_id, trigger_resource_type, trigger_resource_id, occurrence_key, scheduled_for, status, skipped_reason,
 		started_at, completed_at, created_at, updated_at, error_message FROM automation_invocations
@@ -695,7 +650,7 @@ func (r *AutomationRepo) RenewDispatchLease(ctx context.Context, dispatchID, cla
 		return err
 	}
 	if changed, _ := result.RowsAffected(); changed != 1 {
-		return ErrAutomationDispatchLease
+		return persistence.ErrAutomationDispatchLease
 	}
 	result, err = conn.ExecContext(ctx, `UPDATE automation_task_run_reservations SET lease_expires_at = ?, updated_at = CURRENT_TIMESTAMP
 		WHERE dispatch_id = ? AND state = 'claimed' AND lease_owner = ?`, expires.UTC(), dispatchID, claimant)
@@ -703,7 +658,7 @@ func (r *AutomationRepo) RenewDispatchLease(ctx context.Context, dispatchID, cla
 		return err
 	}
 	if changed, _ := result.RowsAffected(); changed != 1 {
-		return ErrAutomationDispatchLease
+		return persistence.ErrAutomationDispatchLease
 	}
 	if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
 		return err
@@ -720,7 +675,7 @@ func (r *AutomationRepo) MarkDispatchQueued(ctx context.Context, dispatchID, cla
 			return err
 		}
 		if changed, _ := result.RowsAffected(); changed != 1 {
-			return ErrAutomationDispatchLease
+			return persistence.ErrAutomationDispatchLease
 		}
 		return nil
 	})
@@ -946,7 +901,7 @@ func (r *AutomationRepo) MarkDispatchSubmitted(ctx context.Context, dispatchID, 
 			return err
 		}
 		if changed, _ := result.RowsAffected(); changed != 1 {
-			return ErrAutomationDispatchLease
+			return persistence.ErrAutomationDispatchLease
 		}
 		return nil
 	})
@@ -977,7 +932,7 @@ func (r *AutomationRepo) FailDispatch(ctx context.Context, dispatchID, claimant,
 		Scan(&attempts, &invocationID, &taskID, &projectID, &automationID, &versionID, &nodeID,
 			&taskTitle, &taskStatus, &taskCategory, &executionID, &executionStatus); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return ErrAutomationDispatchLease
+			return persistence.ErrAutomationDispatchLease
 		}
 		return err
 	}
@@ -1119,7 +1074,7 @@ func (r *AutomationRepo) GetDispatchEnvelope(ctx context.Context, dispatchID str
 		return nil, errors.New("automation dispatch task project mismatch")
 	}
 	envelope.Task = *task
-	envelope.Context = models.AutomationContext{ProjectID: projectID, Bindings: []models.AutomationBinding{binding}, OriginTask: IsAutomationTaskCreatedVia(task.CreatedVia)}
+	envelope.Context = models.AutomationContext{ProjectID: projectID, Bindings: []models.AutomationBinding{binding}, OriginTask: persistence.IsAutomationTaskCreatedVia(task.CreatedVia)}
 	return &envelope, nil
 }
 
@@ -1375,7 +1330,7 @@ func (r *AutomationRepo) FinalizeExecutionProjection(ctx context.Context, projec
 			if value.adapterKey != "custom" {
 				continue
 			}
-			seed := AutomationProjectionEvent{
+			seed := persistence.AutomationProjectionEvent{
 				Context: models.AutomationContext{ProjectID: projectID, Bindings: []models.AutomationBinding{value.binding}},
 				Binding: value.binding, WorkItemKey: "execution:" + executionID + ":custom-work", WorkItemKind: "task_execution",
 			}
@@ -1395,7 +1350,7 @@ func (r *AutomationRepo) FinalizeExecutionProjection(ctx context.Context, projec
 		if positioned == 0 && !createdTerminalItem {
 			continue
 		}
-		event := AutomationProjectionEvent{
+		event := persistence.AutomationProjectionEvent{
 			Context:    models.AutomationContext{ProjectID: projectID, Bindings: []models.AutomationBinding{value.binding}},
 			Binding:    value.binding,
 			EventKey:   "execution:" + executionID + ":terminal:" + string(status),
@@ -1460,29 +1415,11 @@ func (r *AutomationRepo) FinalizeExecutionProjection(ctx context.Context, projec
 	return nil
 }
 
-type AutomationGitHubIssueTaskCreation struct {
-	ProjectID       string
-	ExecutionID     string
-	IssueResourceID string
-	SourceBinding   models.AutomationBinding
-	TargetNodeID    string
-	Task            *models.Task
-	Goal            *models.TaskGoal
-}
-
-type AutomationGitHubIssueTaskProvenance struct {
-	ProjectID             string
-	AutomationID          string
-	TaskID                string
-	IssueResourceID       string
-	ImplementationNodeKey string
-}
-
 // CreateOrGetGitHubIssueTask validates the exact current inbox discovery and
 // atomically creates its canonical implementation task plus Automation
 // provenance. The stable work-item activity is the durable one-task claim.
-func (r *AutomationRepo) CreateOrGetGitHubIssueTask(ctx context.Context, taskRepo *TaskRepo, in AutomationGitHubIssueTaskCreation) (*models.Task, bool, error) {
-	if r == nil || taskRepo == nil || in.Task == nil || strings.TrimSpace(in.ProjectID) == "" ||
+func (r *AutomationRepo) CreateOrGetGitHubIssueTask(ctx context.Context, in persistence.AutomationGitHubIssueTaskCreation) (*models.Task, bool, error) {
+	if r == nil || in.Task == nil || strings.TrimSpace(in.ProjectID) == "" ||
 		strings.TrimSpace(in.ExecutionID) == "" || strings.TrimSpace(in.IssueResourceID) == "" ||
 		strings.TrimSpace(in.SourceBinding.AutomationID) == "" || strings.TrimSpace(in.SourceBinding.VersionID) == "" ||
 		strings.TrimSpace(in.SourceBinding.InvocationID) == "" || strings.TrimSpace(in.SourceBinding.NodeID) == "" ||
@@ -1554,7 +1491,7 @@ func (r *AutomationRepo) CreateOrGetGitHubIssueTask(ctx context.Context, taskRep
 	}
 
 	in.Task.ProjectID = in.ProjectID
-	if err := taskRepo.createWithExecutor(ctx, conn, in.Task); err != nil {
+	if err := NewTaskRepo(r.db, nil).createWithExecutor(ctx, conn, in.Task); err != nil {
 		return nil, false, err
 	}
 	if in.Goal != nil && strings.TrimSpace(in.Goal.Objective) != "" {
@@ -1565,7 +1502,7 @@ func (r *AutomationRepo) CreateOrGetGitHubIssueTask(ctx context.Context, taskRep
 	targetBinding := binding
 	targetBinding.NodeID = in.TargetNodeID
 	activityKey := "work-item:" + binding.WorkItemID + ":implementation-task"
-	_, _, err = recordProjectionEventWithExecutor(ctx, conn, AutomationProjectionEvent{
+	_, _, err = recordProjectionEventWithExecutor(ctx, conn, persistence.AutomationProjectionEvent{
 		Context: models.AutomationContext{ProjectID: in.ProjectID, Bindings: []models.AutomationBinding{targetBinding}},
 		Binding: targetBinding, ActivityKey: activityKey, ActivityType: "create_task",
 		ActivityStatus: models.AutomationActivityCompleted,
@@ -1589,7 +1526,7 @@ func (r *AutomationRepo) CreateOrGetGitHubIssueTask(ctx context.Context, taskRep
 	return in.Task, true, nil
 }
 
-func (r *AutomationRepo) RecordProjectionEvent(ctx context.Context, in AutomationProjectionEvent) (*models.AutomationWorkItem, *models.AutomationActivity, error) {
+func (r *AutomationRepo) RecordProjectionEvent(ctx context.Context, in persistence.AutomationProjectionEvent) (*models.AutomationWorkItem, *models.AutomationActivity, error) {
 	if in.Context.ProjectID == "" || in.Binding.AutomationID == "" || in.Binding.VersionID == "" || in.Binding.NodeID == "" {
 		return nil, nil, errors.New("complete automation binding is required")
 	}
@@ -1665,7 +1602,7 @@ func (r *AutomationRepo) RecordProjectionEvent(ctx context.Context, in Automatio
 	return workItem, activity, nil
 }
 
-func recordProjectionEventWithExecutor(ctx context.Context, exec SQLExecutor, in AutomationProjectionEvent) (*models.AutomationWorkItem, *models.AutomationActivity, error) {
+func recordProjectionEventWithExecutor(ctx context.Context, exec sqlExecutor, in persistence.AutomationProjectionEvent) (*models.AutomationWorkItem, *models.AutomationActivity, error) {
 	if in.Context.ProjectID == "" || in.Binding.AutomationID == "" || in.Binding.VersionID == "" || in.Binding.NodeID == "" {
 		return nil, nil, errors.New("complete automation binding is required")
 	}
@@ -1707,7 +1644,7 @@ func recordProjectionEventWithExecutor(ctx context.Context, exec SQLExecutor, in
 	return workItem, activity, nil
 }
 
-func upsertAutomationWorkItem(ctx context.Context, exec SQLExecutor, in AutomationProjectionEvent, binding models.AutomationBinding) (*models.AutomationWorkItem, models.AutomationBinding, error) {
+func upsertAutomationWorkItem(ctx context.Context, exec sqlExecutor, in persistence.AutomationProjectionEvent, binding models.AutomationBinding) (*models.AutomationWorkItem, models.AutomationBinding, error) {
 	status := in.WorkItemStatus
 	if status == "" {
 		status = models.AutomationWorkItemActive
@@ -1755,7 +1692,7 @@ func upsertAutomationWorkItem(ctx context.Context, exec SQLExecutor, in Automati
 	return item, binding, nil
 }
 
-func discardStaleAutomationWorkItemProjection(ctx context.Context, exec SQLExecutor, projectID, automationID, workItemKey string) error {
+func discardStaleAutomationWorkItemProjection(ctx context.Context, exec sqlExecutor, projectID, automationID, workItemKey string) error {
 	if strings.TrimSpace(workItemKey) == "" {
 		return nil
 	}
@@ -1812,7 +1749,7 @@ func discardStaleAutomationWorkItemProjection(ctx context.Context, exec SQLExecu
 	return nil
 }
 
-func staleAutomationWorkItemDescendantIDs(ctx context.Context, exec SQLExecutor, projectID, automationID, rootWorkItemID string) ([]string, error) {
+func staleAutomationWorkItemDescendantIDs(ctx context.Context, exec sqlExecutor, projectID, automationID, rootWorkItemID string) ([]string, error) {
 	rows, err := exec.QueryContext(ctx, `WITH RECURSIVE descendants(id, depth) AS (
 		SELECT id, 0 FROM automation_work_items WHERE id = ? AND automation_id = ? AND project_id = ?
 		UNION ALL
@@ -1846,7 +1783,7 @@ func automationWorkItemIDArgs(ids []string) (string, []any) {
 	return placeholders, args
 }
 
-func upsertAutomationActivity(ctx context.Context, exec SQLExecutor, in AutomationProjectionEvent, binding models.AutomationBinding, item *models.AutomationWorkItem) (*models.AutomationActivity, error) {
+func upsertAutomationActivity(ctx context.Context, exec sqlExecutor, in persistence.AutomationProjectionEvent, binding models.AutomationBinding, item *models.AutomationWorkItem) (*models.AutomationActivity, error) {
 	status := in.ActivityStatus
 	if status == "" {
 		status = models.AutomationActivityRunning
@@ -1902,7 +1839,7 @@ func upsertAutomationActivity(ctx context.Context, exec SQLExecutor, in Automati
 	return activity, nil
 }
 
-func syncAutomationLiveActivityState(ctx context.Context, exec SQLExecutor, activityID string) error {
+func syncAutomationLiveActivityState(ctx context.Context, exec sqlExecutor, activityID string) error {
 	if strings.TrimSpace(activityID) == "" {
 		return nil
 	}
@@ -1955,7 +1892,7 @@ func syncAutomationLiveActivityState(ctx context.Context, exec SQLExecutor, acti
 	return nil
 }
 
-func syncAutomationLiveActivityStateRows(ctx context.Context, exec SQLExecutor, rows *sql.Rows) error {
+func syncAutomationLiveActivityStateRows(ctx context.Context, exec sqlExecutor, rows *sql.Rows) error {
 	var activityIDs []string
 	for rows.Next() {
 		var activityID string
@@ -1980,7 +1917,7 @@ func syncAutomationLiveActivityStateRows(ctx context.Context, exec SQLExecutor, 
 	return nil
 }
 
-func recordAutomationArtifactMailboxOwners(ctx context.Context, exec SQLExecutor, in AutomationProjectionEvent, binding models.AutomationBinding) error {
+func recordAutomationArtifactMailboxOwners(ctx context.Context, exec sqlExecutor, in persistence.AutomationProjectionEvent, binding models.AutomationBinding) error {
 	if strings.TrimSpace(in.ActivityType) != "create_notification" {
 		return nil
 	}
@@ -1999,7 +1936,7 @@ func recordAutomationArtifactMailboxOwners(ctx context.Context, exec SQLExecutor
 	return nil
 }
 
-func validateAutomationActivityResource(ctx context.Context, exec SQLExecutor, projectID, resourceType, resourceID string) error {
+func validateAutomationActivityResource(ctx context.Context, exec sqlExecutor, projectID, resourceType, resourceID string) error {
 	resourceType = strings.TrimSpace(resourceType)
 	resourceID = strings.TrimSpace(resourceID)
 	var query string
@@ -2067,7 +2004,7 @@ func validateCanonicalGitHubResourceID(resourceType, resourceID string) error {
 	return nil
 }
 
-func appendAutomationTransition(ctx context.Context, exec SQLExecutor, in AutomationProjectionEvent, binding models.AutomationBinding, item *models.AutomationWorkItem, activity *models.AutomationActivity) error {
+func appendAutomationTransition(ctx context.Context, exec sqlExecutor, in persistence.AutomationProjectionEvent, binding models.AutomationBinding, item *models.AutomationWorkItem, activity *models.AutomationActivity) error {
 	toNodeID := in.ToNodeID
 	if toNodeID == "" {
 		toNodeID = binding.NodeID
@@ -2473,12 +2410,7 @@ func (r *AutomationRepo) GetConnectedNodeByRole(ctx context.Context, projectID, 
 	return &node, err
 }
 
-type CustomAutomationTaskHandoff struct {
-	Node   models.AutomationNode
-	TaskID string
-}
-
-func (r *AutomationRepo) ListCustomTaskHandoffs(ctx context.Context, projectID, automationID, versionID, sourceNodeID string) (bool, []CustomAutomationTaskHandoff, error) {
+func (r *AutomationRepo) ListCustomTaskHandoffs(ctx context.Context, projectID, automationID, versionID, sourceNodeID string) (bool, []persistence.CustomAutomationTaskHandoff, error) {
 	var adapterKey string
 	err := r.db.QueryRowContext(ctx, `SELECT adapter_key FROM automation_versions
 		WHERE project_id = ? AND automation_id = ? AND id = ? AND state = 'published'`,
@@ -2511,9 +2443,9 @@ func (r *AutomationRepo) ListCustomTaskHandoffs(ctx context.Context, projectID, 
 		return true, nil, err
 	}
 	defer rows.Close()
-	handoffs := make([]CustomAutomationTaskHandoff, 0)
+	handoffs := make([]persistence.CustomAutomationTaskHandoff, 0)
 	for rows.Next() {
-		var handoff CustomAutomationTaskHandoff
+		var handoff persistence.CustomAutomationTaskHandoff
 		node := &handoff.Node
 		if err := rows.Scan(&node.ID, &node.ProjectID, &node.AutomationID, &node.VersionID, &node.NodeKey, &node.Name,
 			&node.NodeType, &node.Role, &node.ConfigJSON, &node.PositionX, &node.PositionY, &node.CreatedAt, &node.UpdatedAt,
@@ -2555,12 +2487,12 @@ func (r *AutomationRepo) GetCustomNotificationHandoff(ctx context.Context, proje
 	return &node, err
 }
 
-func enrichGitHubIssueDedupSource(ctx context.Context, exec SQLExecutor, projectID string, source AutomationGitHubIssueDedupSource) (AutomationGitHubIssueDedupSource, error) {
+func enrichGitHubIssueDedupSource(ctx context.Context, exec sqlExecutor, projectID string, source persistence.AutomationGitHubIssueDedupSource) (persistence.AutomationGitHubIssueDedupSource, error) {
 	if len(source.StableBindings) > 0 {
 		return source, nil
 	}
 	for _, binding := range source.Context.Bindings {
-		var stable AutomationGitHubIssueDedupNodeSource
+		var stable persistence.AutomationGitHubIssueDedupNodeSource
 		err := exec.QueryRowContext(ctx, `SELECT automation_id, node_key, role FROM automation_nodes
 			WHERE project_id = ? AND automation_id = ? AND version_id = ? AND id = ?`,
 			projectID, binding.AutomationID, binding.VersionID, binding.NodeID).Scan(&stable.AutomationID, &stable.NodeKey, &stable.Role)
@@ -2575,34 +2507,34 @@ func enrichGitHubIssueDedupSource(ctx context.Context, exec SQLExecutor, project
 	return source, nil
 }
 
-func (r *AutomationRepo) AcquireGitHubIssueDedupLease(ctx context.Context, projectID, repositoryFullName, titleFingerprint, ownerToken string, source AutomationGitHubIssueDedupSource, now time.Time, leaseDuration time.Duration) (AutomationGitHubIssueDedupClaim, error) {
+func (r *AutomationRepo) AcquireGitHubIssueDedupLease(ctx context.Context, projectID, repositoryFullName, titleFingerprint, ownerToken string, source persistence.AutomationGitHubIssueDedupSource, now time.Time, leaseDuration time.Duration) (persistence.AutomationGitHubIssueDedupClaim, error) {
 	projectID = strings.TrimSpace(projectID)
 	repositoryFullName = strings.ToLower(strings.TrimSpace(repositoryFullName))
 	titleFingerprint = strings.TrimSpace(titleFingerprint)
 	ownerToken = strings.TrimSpace(ownerToken)
 	if projectID == "" || repositoryFullName == "" || titleFingerprint == "" || ownerToken == "" || leaseDuration <= 0 {
-		return AutomationGitHubIssueDedupClaim{}, errors.New("complete GitHub issue duplicate lease identity is required")
+		return persistence.AutomationGitHubIssueDedupClaim{}, errors.New("complete GitHub issue duplicate lease identity is required")
 	}
 	if source.Context.ProjectID != projectID || len(source.Context.Bindings) == 0 || strings.TrimSpace(source.TaskID) == "" || strings.TrimSpace(source.ExecutionID) == "" {
-		return AutomationGitHubIssueDedupClaim{}, errors.New("complete GitHub issue projection source is required")
+		return persistence.AutomationGitHubIssueDedupClaim{}, errors.New("complete GitHub issue projection source is required")
 	}
 	for _, binding := range source.Context.Bindings {
 		if strings.TrimSpace(binding.AutomationID) == "" || strings.TrimSpace(binding.VersionID) == "" || strings.TrimSpace(binding.InvocationID) == "" || strings.TrimSpace(binding.NodeID) == "" {
-			return AutomationGitHubIssueDedupClaim{}, errors.New("complete GitHub issue projection binding is required")
+			return persistence.AutomationGitHubIssueDedupClaim{}, errors.New("complete GitHub issue projection binding is required")
 		}
 	}
 	conn, finishImmediate, err := beginImmediateConn(ctx, r.db)
 	if err != nil {
-		return AutomationGitHubIssueDedupClaim{}, err
+		return persistence.AutomationGitHubIssueDedupClaim{}, err
 	}
 	defer finishImmediate()
 	source, err = enrichGitHubIssueDedupSource(ctx, conn, projectID, source)
 	if err != nil {
-		return AutomationGitHubIssueDedupClaim{}, err
+		return persistence.AutomationGitHubIssueDedupClaim{}, err
 	}
 	projectionSourceJSON, err := json.Marshal(source)
 	if err != nil {
-		return AutomationGitHubIssueDedupClaim{}, fmt.Errorf("encoding GitHub issue projection source: %w", err)
+		return persistence.AutomationGitHubIssueDedupClaim{}, fmt.Errorf("encoding GitHub issue projection source: %w", err)
 	}
 	expiresAt := now.UTC().Add(leaseDuration)
 	result, err := conn.ExecContext(ctx, `INSERT INTO automation_github_issue_dedup_leases
@@ -2610,13 +2542,13 @@ func (r *AutomationRepo) AcquireGitHubIssueDedupLease(ctx context.Context, proje
 		VALUES (?, ?, ?, ?, ?, 'reserved', ?) ON CONFLICT(project_id, repository_full_name, title_fingerprint) DO NOTHING`,
 		projectID, repositoryFullName, titleFingerprint, ownerToken, expiresAt, string(projectionSourceJSON))
 	if err != nil {
-		return AutomationGitHubIssueDedupClaim{}, fmt.Errorf("acquiring GitHub issue duplicate lease: %w", err)
+		return persistence.AutomationGitHubIssueDedupClaim{}, fmt.Errorf("acquiring GitHub issue duplicate lease: %w", err)
 	}
 	acquired, err := result.RowsAffected()
 	if err != nil {
-		return AutomationGitHubIssueDedupClaim{}, err
+		return persistence.AutomationGitHubIssueDedupClaim{}, err
 	}
-	claim := AutomationGitHubIssueDedupClaim{OwnerToken: ownerToken, Source: source}
+	claim := persistence.AutomationGitHubIssueDedupClaim{OwnerToken: ownerToken, Source: source}
 	if acquired == 0 {
 		var createdIssueNumber sql.NullInt64
 		var mutationState, existingSourceJSON string
@@ -2625,30 +2557,30 @@ func (r *AutomationRepo) AcquireGitHubIssueDedupLease(ctx context.Context, proje
 			FROM automation_github_issue_dedup_leases
 			WHERE project_id = ? AND repository_full_name = ? AND title_fingerprint = ?`,
 			projectID, repositoryFullName, titleFingerprint).Scan(&createdIssueNumber, &mutationState, &leaseExpiresAt, &claim.OwnerToken, &existingSourceJSON); err != nil {
-			return AutomationGitHubIssueDedupClaim{}, err
+			return persistence.AutomationGitHubIssueDedupClaim{}, err
 		}
 		if strings.TrimSpace(existingSourceJSON) != "" {
 			if err := json.Unmarshal([]byte(existingSourceJSON), &claim.Source); err != nil {
-				return AutomationGitHubIssueDedupClaim{}, fmt.Errorf("decoding GitHub issue projection source: %w", err)
+				return persistence.AutomationGitHubIssueDedupClaim{}, fmt.Errorf("decoding GitHub issue projection source: %w", err)
 			}
 		} else {
-			claim.Source = AutomationGitHubIssueDedupSource{}
+			claim.Source = persistence.AutomationGitHubIssueDedupSource{}
 		}
 		if createdIssueNumber.Valid && createdIssueNumber.Int64 > 0 {
 			if len(dedupSourceAutomationCounts(claim.Source)) == 0 {
-				return AutomationGitHubIssueDedupClaim{}, fmt.Errorf("%w: completed GitHub issue has no trusted Automation source", ErrAutomationExternalReconciliation)
+				return persistence.AutomationGitHubIssueDedupClaim{}, fmt.Errorf("%w: completed GitHub issue has no trusted Automation source", persistence.ErrAutomationExternalReconciliation)
 			}
 			if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
-				return AutomationGitHubIssueDedupClaim{}, err
+				return persistence.AutomationGitHubIssueDedupClaim{}, err
 			}
 			claim.IssueNumber = int(createdIssueNumber.Int64)
 			return claim, nil
 		}
 		if mutationState != "reserved" {
 			if mutationState == "dispatched" && leaseExpiresAt.After(now.UTC()) {
-				return AutomationGitHubIssueDedupClaim{}, ErrAutomationGitHubIssueDedupBusy
+				return persistence.AutomationGitHubIssueDedupClaim{}, ErrAutomationGitHubIssueDedupBusy
 			}
-			return AutomationGitHubIssueDedupClaim{}, fmt.Errorf("%w: prior GitHub issue creation outcome is uncertain", ErrAutomationExternalReconciliation)
+			return persistence.AutomationGitHubIssueDedupClaim{}, fmt.Errorf("%w: prior GitHub issue creation outcome is uncertain", persistence.ErrAutomationExternalReconciliation)
 		}
 		result, err = conn.ExecContext(ctx, `UPDATE automation_github_issue_dedup_leases
 			SET owner_token = ?, lease_expires_at = ?, projection_source_json = ?, updated_at = CURRENT_TIMESTAMP
@@ -2656,21 +2588,21 @@ func (r *AutomationRepo) AcquireGitHubIssueDedupLease(ctx context.Context, proje
 				AND mutation_state = 'reserved' AND created_issue_number IS NULL AND lease_expires_at <= ?`,
 			ownerToken, expiresAt, string(projectionSourceJSON), projectID, repositoryFullName, titleFingerprint, now.UTC())
 		if err != nil {
-			return AutomationGitHubIssueDedupClaim{}, fmt.Errorf("reclaiming GitHub issue duplicate lease: %w", err)
+			return persistence.AutomationGitHubIssueDedupClaim{}, fmt.Errorf("reclaiming GitHub issue duplicate lease: %w", err)
 		}
 		acquired, err = result.RowsAffected()
 		if err != nil {
-			return AutomationGitHubIssueDedupClaim{}, err
+			return persistence.AutomationGitHubIssueDedupClaim{}, err
 		}
 		if acquired == 1 {
-			claim = AutomationGitHubIssueDedupClaim{OwnerToken: ownerToken, Source: source}
+			claim = persistence.AutomationGitHubIssueDedupClaim{OwnerToken: ownerToken, Source: source}
 		}
 	}
 	if acquired != 1 {
-		return AutomationGitHubIssueDedupClaim{}, ErrAutomationGitHubIssueDedupBusy
+		return persistence.AutomationGitHubIssueDedupClaim{}, ErrAutomationGitHubIssueDedupBusy
 	}
 	if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
-		return AutomationGitHubIssueDedupClaim{}, err
+		return persistence.AutomationGitHubIssueDedupClaim{}, err
 	}
 	return claim, nil
 }
@@ -2776,7 +2708,7 @@ func (r *AutomationRepo) ReserveExternalActivity(ctx context.Context, projectID 
 			automationobs.String("version_id", binding.VersionID), automationobs.String("invocation_id", binding.InvocationID),
 			automationobs.String("activity_id", activityID), automationobs.String("node_id", binding.NodeID),
 			automationobs.String("resource_type", resourceType))
-		return "", ErrAutomationExternalReconciliation
+		return "", persistence.ErrAutomationExternalReconciliation
 	}
 	return "", nil
 }
@@ -2966,14 +2898,7 @@ func (r *AutomationRepo) BindingsForExecutionResource(ctx context.Context, proje
 	return result, rows.Err()
 }
 
-type AutomationExecutionProjectionRepair struct {
-	ProjectID   string
-	ExecutionID string
-	Status      models.ExecutionStatus
-	Error       string
-}
-
-func (r *AutomationRepo) ListExecutionProjectionRepairs(ctx context.Context, limit int) ([]AutomationExecutionProjectionRepair, error) {
+func (r *AutomationRepo) ListExecutionProjectionRepairs(ctx context.Context, limit int) ([]persistence.AutomationExecutionProjectionRepair, error) {
 	if limit <= 0 || limit > 100 {
 		limit = 100
 	}
@@ -2999,9 +2924,9 @@ func (r *AutomationRepo) ListExecutionProjectionRepairs(ctx context.Context, lim
 		return nil, err
 	}
 	defer rows.Close()
-	var out []AutomationExecutionProjectionRepair
+	var out []persistence.AutomationExecutionProjectionRepair
 	for rows.Next() {
-		var value AutomationExecutionProjectionRepair
+		var value persistence.AutomationExecutionProjectionRepair
 		if err := rows.Scan(&value.ProjectID, &value.ExecutionID, &value.Status, &value.Error); err != nil {
 			return nil, err
 		}
@@ -3010,7 +2935,7 @@ func (r *AutomationRepo) ListExecutionProjectionRepairs(ctx context.Context, lim
 	return out, rows.Err()
 }
 
-func (r *AutomationRepo) RepairExecutionProjection(ctx context.Context, repair AutomationExecutionProjectionRepair) error {
+func (r *AutomationRepo) RepairExecutionProjection(ctx context.Context, repair persistence.AutomationExecutionProjectionRepair) error {
 	activityStatus := models.AutomationActivityRunning
 	switch repair.Status {
 	case models.ExecCompleted:
@@ -3114,7 +3039,7 @@ func (r *AutomationRepo) ListNodeRuntimeResources(ctx context.Context, projectID
 	if cursor != nil {
 		parts := strings.Split(cursor.ID, ".")
 		if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
-			return models.AutomationNodeResourcePage{}, ErrAutomationCursor
+			return models.AutomationNodeResourcePage{}, persistence.ErrAutomationCursor
 		}
 		query += ` AND (datetime(a.started_at) < datetime(?) OR (datetime(a.started_at) = datetime(?) AND
 			(a.id < ? OR (a.id = ? AND ar.id < ?))))`
@@ -3187,7 +3112,7 @@ func (r *AutomationRepo) BindThreadInput(ctx context.Context, inputID string, au
 	if inputID == "" || automationContext.ProjectID == "" || strings.TrimSpace(bindingKey) == "" || len(automationContext.Bindings) == 0 {
 		return errors.New("thread input and automation bindings are required")
 	}
-	return withImmediateTx(ctx, r.db, func(exec SQLExecutor) error {
+	return withImmediateTx(ctx, r.db, func(exec sqlExecutor) error {
 		return bindAutomationThreadInputWithExecutor(ctx, exec, inputID, automationContext, strings.TrimSpace(bindingKey))
 	})
 }
@@ -3196,7 +3121,7 @@ func (r *AutomationRepo) ContextForTask(ctx context.Context, projectID, taskID s
 	return contextForTaskWithExecutor(ctx, r.db, projectID, taskID)
 }
 
-func recordGitHubIssueTaskProvenanceWithExecutor(ctx context.Context, exec SQLExecutor, projectID, automationID, taskID, issueResourceID, versionID, nodeID string) error {
+func recordGitHubIssueTaskProvenanceWithExecutor(ctx context.Context, exec sqlExecutor, projectID, automationID, taskID, issueResourceID, versionID, nodeID string) error {
 	if strings.TrimSpace(projectID) == "" || strings.TrimSpace(automationID) == "" || strings.TrimSpace(taskID) == "" || strings.TrimSpace(issueResourceID) == "" || strings.TrimSpace(versionID) == "" || strings.TrimSpace(nodeID) == "" {
 		return errors.New("complete Automation GitHub issue task provenance is required")
 	}
@@ -3232,7 +3157,7 @@ func recordGitHubIssueTaskProvenanceWithExecutor(ctx context.Context, exec SQLEx
 // does not depend on replaceable graph-version rows, so legitimate tasks can
 // publish PRs after compatible Automation edits while spoofed created_via values
 // still fail closed.
-func (r *AutomationRepo) GitHubIssueTaskProvenance(ctx context.Context, projectID, taskID string) (*AutomationGitHubIssueTaskProvenance, error) {
+func (r *AutomationRepo) GitHubIssueTaskProvenance(ctx context.Context, projectID, taskID string) (*persistence.AutomationGitHubIssueTaskProvenance, error) {
 	rows, err := r.db.QueryContext(ctx, `SELECT project_id, automation_id, task_id, issue_resource_id, implementation_node_key
 		FROM automation_github_issue_task_provenance WHERE project_id = ? AND task_id = ?
 		UNION
@@ -3252,9 +3177,9 @@ func (r *AutomationRepo) GitHubIssueTaskProvenance(ctx context.Context, projectI
 		return nil, err
 	}
 	defer rows.Close()
-	var out *AutomationGitHubIssueTaskProvenance
+	var out *persistence.AutomationGitHubIssueTaskProvenance
 	for rows.Next() {
-		var candidate AutomationGitHubIssueTaskProvenance
+		var candidate persistence.AutomationGitHubIssueTaskProvenance
 		if err := rows.Scan(&candidate.ProjectID, &candidate.AutomationID, &candidate.TaskID, &candidate.IssueResourceID, &candidate.ImplementationNodeKey); err != nil {
 			return nil, err
 		}
@@ -3307,7 +3232,7 @@ func (r *AutomationRepo) GitHubIssueResourceForTask(ctx context.Context, project
 	return resourceID, rows.Err()
 }
 
-func contextForTaskWithExecutor(ctx context.Context, exec SQLExecutor, projectID, taskID string) (models.AutomationContext, error) {
+func contextForTaskWithExecutor(ctx context.Context, exec sqlExecutor, projectID, taskID string) (models.AutomationContext, error) {
 	rows, err := exec.QueryContext(ctx, `WITH RECURSIVE task_lineage(id, parent_task_id, depth) AS (
 		SELECT id, parent_task_id, 0 FROM tasks WHERE id = ? AND project_id = ?
 		UNION ALL

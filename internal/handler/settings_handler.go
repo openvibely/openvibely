@@ -14,7 +14,7 @@ import (
 	"github.com/openvibely/openvibely/internal/auth"
 	"github.com/openvibely/openvibely/internal/config"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/web/templates/pages"
 )
@@ -22,12 +22,12 @@ import (
 var newTelegramService = func(
 	token string,
 	taskSvc *service.TaskService,
-	projectRepo *repository.ProjectRepo,
-	llmConfigRepo *repository.LLMConfigRepo,
-	taskRepo *repository.TaskRepo,
-	execRepo *repository.ExecutionRepo,
-	scheduleRepo *repository.ScheduleRepo,
-	chatAttachmentRepo *repository.ChatAttachmentRepo,
+	projectRepo persistence.ProjectStore,
+	llmConfigRepo persistence.LLMConfigStore,
+	taskRepo persistence.TaskStore,
+	execRepo persistence.ExecutionStore,
+	scheduleRepo persistence.ScheduleStore,
+	chatAttachmentRepo persistence.ChatAttachmentStore,
 	llmSvc *service.LLMService,
 	workerSvc *service.WorkerService,
 ) (*service.TelegramService, error) {
@@ -45,7 +45,7 @@ type channelSettingReset struct {
 	value string
 }
 
-func applyChannelSettingResets(ctx context.Context, settingsRepo *repository.SettingsRepo, resets []channelSettingReset) error {
+func applyChannelSettingResets(ctx context.Context, settingsRepo persistence.SettingsStore, resets []channelSettingReset) error {
 	for _, reset := range resets {
 		if err := settingsRepo.Set(ctx, reset.key, reset.value); err != nil {
 			return fmt.Errorf("reset channel setting %q: %w", reset.key, err)
@@ -481,7 +481,7 @@ func (h *Handler) handleChannels(c echo.Context) error {
 			enabled = connectionEnabled
 		}
 		if !conflictingEnabledFilters && (channelType == "" || channelType == "webhook") {
-			pageItems, err := h.webhookRepo.ListCardsByProjectPageFiltered(ctx, resolvedProjectID, page.PageSize+1, page.Offset, repository.WebhookCardFilter{Search: page.Search, Enabled: enabled, Sort: channelSort})
+			pageItems, err := h.webhookRepo.ListCardsByProjectPageFiltered(ctx, resolvedProjectID, page.PageSize+1, page.Offset, persistence.WebhookCardFilter{Search: page.Search, Enabled: enabled, Sort: channelSort})
 			if err != nil {
 				return err
 			}
@@ -491,7 +491,7 @@ func (h *Handler) handleChannels(c echo.Context) error {
 	setCardPageResponse(c, webhooksHasMore)
 
 	// Load compact agents for webhook agent selection in the current project.
-	var agentPickerOptions []repository.AgentPickerOption
+	var agentPickerOptions []persistence.AgentPickerOption
 	if h.agentRepo != nil && resolvedProjectID != "" {
 		agentPickerOptions, _ = h.agentRepo.ListPickerOptionsForProject(ctx, resolvedProjectID)
 	}
@@ -1063,7 +1063,7 @@ func (h *Handler) handleEmailConfigure(c echo.Context) error {
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
-	emailAddress := repository.NormalizeEmailAddress(c.FormValue("email_address"))
+	emailAddress := persistence.NormalizeEmailAddress(c.FormValue("email_address"))
 	password := service.NormalizeEmailPasswordForProvider(provider, c.FormValue("email_password"))
 	if password == "" {
 		existing, _ := h.settingsRepo.Get(c.Request().Context(), service.EmailSettingPassword)

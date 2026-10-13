@@ -10,6 +10,7 @@ import (
 	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/lifecycle"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/stretchr/testify/require"
@@ -119,7 +120,7 @@ func TestWorkerService_TaskAdmissionQueuesFollowupAfterPersistedClaim(t *testing
 	if err := inputRepo.ClaimQueuedForTaskExecution(ctx, pending[0].ID, promoted); err != nil {
 		t.Fatalf("promote FIFO head: %v", err)
 	}
-	if err := inputRepo.ClaimQueuedForTaskExecution(ctx, pending[0].ID, &models.Execution{TaskID: task.ID, Status: models.ExecRunning}); err != repository.ErrInputNotPending {
+	if err := inputRepo.ClaimQueuedForTaskExecution(ctx, pending[0].ID, &models.Execution{TaskID: task.ID, Status: models.ExecRunning}); err != persistence.ErrInputNotPending {
 		t.Fatalf("expected exactly-once promotion rejection, got %v", err)
 	}
 	execs, err = execRepo.ListByTaskChronological(ctx, task.ID)
@@ -190,7 +191,7 @@ func TestWorkerService_TaskAdmissionRunsFirstTurnWhenFollowupArrivesBeforeClaim(
 	require.Equal(t, queued.ID, pending[0].ID)
 	promoted := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: queued.Content, IsFollowup: true}
 	require.NoError(t, inputRepo.ClaimQueuedForTaskExecution(ctx, queued.ID, promoted))
-	require.ErrorIs(t, inputRepo.ClaimQueuedForTaskExecution(ctx, queued.ID, &models.Execution{TaskID: task.ID, Status: models.ExecRunning}), repository.ErrInputNotPending)
+	require.ErrorIs(t, inputRepo.ClaimQueuedForTaskExecution(ctx, queued.ID, &models.Execution{TaskID: task.ID, Status: models.ExecRunning}), persistence.ErrInputNotPending)
 	execs, err = execRepo.ListByTaskChronological(ctx, task.ID)
 	require.NoError(t, err)
 	require.Len(t, execs, 2)

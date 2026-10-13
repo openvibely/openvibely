@@ -11,7 +11,7 @@ import (
 	"github.com/openvibely/openvibely/internal/applog"
 	llmoauth "github.com/openvibely/openvibely/internal/llm/oauth"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence"
 )
 
 const (
@@ -23,7 +23,7 @@ const (
 // OAuthRefreshService keeps built-in OAuth model credentials fresh while the
 // models are idle. Credentials are always refreshed and persisted per config.
 type OAuthRefreshService struct {
-	repo             *repository.LLMConfigRepo
+	repo             persistence.LLMConfigStore
 	manager          *llmoauth.Manager
 	anthropicRefresh llmoauth.RefreshFunc
 	openAIRefresh    llmoauth.RefreshFunc
@@ -34,7 +34,7 @@ type OAuthRefreshService struct {
 	wg               sync.WaitGroup
 }
 
-func NewOAuthRefreshService(repo *repository.LLMConfigRepo, manager *llmoauth.Manager) *OAuthRefreshService {
+func NewOAuthRefreshService(repo persistence.LLMConfigStore, manager *llmoauth.Manager) *OAuthRefreshService {
 	if manager == nil {
 		manager = llmoauth.NewManager(repo)
 	}

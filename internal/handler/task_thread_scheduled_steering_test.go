@@ -17,7 +17,7 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/openvibely/openvibely/web/static"
 	"github.com/openvibely/openvibely/web/templates/components"
@@ -174,7 +174,7 @@ func TestHandler_PromoteQueuedTaskThreadInputAfterScheduledCompletion(t *testing
 	}
 	require.NoError(t, h.threadInputRepo.CreateQueued(ctx, queued))
 
-	require.Equal(t, repository.CompleteSuccessCompleted, h.completeWithSuccess(ctx, active.ID, task.ID, "scheduled output", "", 0, 1))
+	require.Equal(t, persistence.CompleteSuccessCompleted, h.completeWithSuccess(ctx, active.ID, task.ID, "scheduled output", "", 0, 1))
 	storedTask, err := h.taskRepo.GetByID(ctx, task.ID)
 	require.NoError(t, err)
 	require.Equal(t, models.StatusCompleted, storedTask.Status)
