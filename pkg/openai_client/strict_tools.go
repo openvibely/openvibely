@@ -12,21 +12,15 @@ import (
 func prepareStrictTools(tools []ToolDefinition) []ToolDefinition {
 	out := append([]ToolDefinition(nil), tools...)
 	for i := range out {
-		t := &out[i]
-		if t.Type == "namespace" {
-			t.Tools = prepareStrictTools(t.Tools)
+		if out[i].Type == "namespace" {
+			out[i].Tools = prepareStrictTools(out[i].Tools)
 			continue
 		}
-		if t.Type != "function" || (t.Strict != nil && !*t.Strict) {
+		if out[i].Type != "function" {
 			continue
 		}
-		schema, err := toolschema.MarshalOpenAI(t.Schema, t.Parameters)
-		strict := err == nil
-		t.Strict = &strict
-		if strict {
-			t.Parameters = schema
-			t.Schema = nil
-		}
+		strict := false
+		out[i].Strict = &strict
 	}
 	return out
 }
