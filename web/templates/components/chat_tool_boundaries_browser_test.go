@@ -86,3 +86,36 @@ func TestBrowserFunctional_PendingToolDetectionPreservesLaterThinking(t *testing
  return {};
  `)
 }
+
+func TestBrowserFunctional_PartialToolQuotesCannotHideRealCalls(t *testing.T) {
+	runIncrementalChatBrowser(t, `
+ const tick=String.fromCharCode(96);
+ const text='Narration '+tick+'unfinished\n[Using tool: bash]\n[Tool bash done]\noutput closes '+tick+'\n[Using tool: read_file]\n';
+ for (const prefix of ['', 'long transcript prose '.repeat(4000)+'\n']) {
+  for (const ending of ['', '\n[/Tool]\nFinished.']) {
+   await window.renderStreamingContent(stream,prefix+text+ending,true);
+   const cards=stream.querySelectorAll('.stream-tool');
+   assert(cards.length===1 && cards[0].textContent.includes('Bash'), 'real Bash call was hidden or output became another call');
+  }
+ }
+ return {};
+ `)
+}
+
+func TestBrowserPerformance_QuotedToolExamplesUseBoundedScans(t *testing.T) {
+	runIncrementalChatBrowser(t, `
+ const tick=String.fromCharCode(96);
+ const originalLines=window.markdownLineRanges;
+ let scanned=0;
+ window.markdownLineRanges=function(text) {scanned+=text.length;return originalLines(text);};
+ const block='Example '+tick+'literal\n[Tool bash done]\ninline'+tick+'\n';
+ for(const count of [100,500,1500,5000]) {
+  const text=block.repeat(count);
+  scanned=0;
+  const ranges=window.codeRanges(text,true);
+  assert(ranges.length===count, 'quoted examples lost');
+  assert(scanned<=2*text.length, 'parser repeatedly rescanned remaining examples');
+ }
+ return {};
+ `)
+}

@@ -2588,6 +2588,10 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				// raw-HTML escaping. Keep this aligned with the Go parser in
 				// internal/llm/transcript/markers.go.
 				window.codeRanges = function(text, transcript) {
+					// A recovery pass receives all candidate quotes together, so each
+					// transcript is scanned at most twice rather than once per example.
+					var quotedToolRanges = arguments[2];
+					var quotedToolIndex = 0;
 					var ranges = [];
 					var plainStart = 0;
 					var fenceStart = -1;
@@ -2654,7 +2658,10 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 								}
 								continue;
 							}
-							if (/^[\t ]*\[(?:Using tool:[^\]\r\n]+|Tool \S+ (?:done|error)(?::[^\]\r\n]*)?)\][\t ]*$/.test(line)) {
+							while (quotedToolRanges && quotedToolIndex < quotedToolRanges.length && quotedToolRanges[quotedToolIndex].end <= lineStart) quotedToolIndex++;
+							var quotedTool = quotedToolRanges && quotedToolIndex < quotedToolRanges.length &&
+								quotedToolRanges[quotedToolIndex].start < lineStart && quotedToolRanges[quotedToolIndex].end > lineStart;
+							if (!quotedTool && /^[\t ]*\[(?:Using tool:[^\]\r\n]+|Tool \S+ (?:done|error)(?::[^\]\r\n]*)?)\][\t ]*$/.test(line)) {
 								toolOutput = /^[\t ]*\[Tool \S+ (?:done|error)\][\t ]*$/.test(line);
 								opaqueRanges.push({start: lineStart, end: toolOutput ? text.length : nextLine});
 								continue;
@@ -2682,28 +2689,23 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 							fenceLength = runLength;
 						}
 					}
-					if (toolOutput) {
-						// An unmatched result opener can itself be a multiline inline-code
-						// example. Reconsider it without allowing earlier command previews
-						// or completed output to supply its backticks.
+					if (toolOutput && !quotedToolRanges) {
 						var pending = opaqueRanges.pop();
 						var savedLength = ranges.length;
 						var savedOpaqueIndex = opaqueIndex;
 						addInlineRanges(plainStart, text.length);
-						var quoted = null;
+						var quotes = [];
+						var callIndex = 0;
 						for (var index = savedLength; index < ranges.length; index++) {
-							if (ranges[index].start < pending.start && ranges[index].end > pending.start) {
-								quoted = ranges[index];
-								ranges.length = index + 1;
-								break;
-							}
+							var candidate = ranges[index];
+							while (callIndex < opaqueRanges.length && opaqueRanges[callIndex].end <= candidate.start) callIndex++;
+							// A quote cannot cross a real call. Otherwise a backtick in its
+							// unfinished output could hide the call and expose literal markers.
+							if (callIndex < opaqueRanges.length && opaqueRanges[callIndex].start < candidate.end) continue;
+							quotes.push(candidate);
 						}
-						if (quoted) {
-							// The closing backtick precedes this suffix on the same line.
-							var tailRanges = window.codeRanges('x' + text.substring(quoted.end), true);
-							return ranges.concat(tailRanges.map(function(range) {
-								return {start: range.start + quoted.end - 1, end: range.end + quoted.end - 1};
-							}));
+						if (quotes.some(function(range) { return range.start < pending.start && range.end > pending.start; })) {
+							return window.codeRanges(text, transcript, quotes);
 						}
 						ranges.length = savedLength;
 						opaqueIndex = savedOpaqueIndex;
