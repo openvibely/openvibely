@@ -22,18 +22,12 @@ func TestTypedProviderSchemasPreserveHandlerContract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	anthropic, cost, err := MarshalAnthropic(s, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if cost.Optional != 3 {
-		t.Fatalf("Anthropic cost: %+v", cost)
-	}
+	original := JSON(s, nil)
 	var oa, an map[string]any
 	if err := json.Unmarshal(openai, &oa); err != nil {
 		t.Fatal(err)
 	}
-	if err := json.Unmarshal(anthropic, &an); err != nil {
+	if err := json.Unmarshal(original, &an); err != nil {
 		t.Fatal(err)
 	}
 	if len(oa["required"].([]any)) != 3 || !reflect.DeepEqual(an["required"], []any{"enabled"}) {
@@ -54,7 +48,7 @@ func TestTypedProviderSchemasPreserveHandlerContract(t *testing.T) {
 		c := newCompilerForTest(t, raw)
 		return c.Validate(value)
 	}
-	if err := validate(anthropic, `{"enabled":false}`); err != nil {
+	if err := validate(original, `{"enabled":false}`); err != nil {
 		t.Fatal(err)
 	}
 	if err := validate(openai, `{"enabled":false}`); err == nil {
@@ -63,8 +57,8 @@ func TestTypedProviderSchemasPreserveHandlerContract(t *testing.T) {
 	if err := validate(openai, `{"enabled":false,"category":null,"items":[{"name":"a","limit":null}]}`); err != nil {
 		t.Fatal(err)
 	}
-	if err := validate(anthropic, `{"enabled":false,"category":null}`); err == nil {
-		t.Fatal("Anthropic optional field became nullable")
+	if err := validate(original, `{"enabled":false,"category":null}`); err == nil {
+		t.Fatal("Original optional field became nullable")
 	}
 	if _, err := ValidateArguments(s, nil, json.RawMessage(`{"enabled":false,"items":[{"name":"a","limit":0}]}`)); err == nil {
 		t.Fatal("handler constraint lost")
@@ -84,9 +78,6 @@ func TestExternalUnsupportedSchemaRemainsUnchanged(t *testing.T) {
 		if _, err := MarshalOpenAI(nil, raw); err == nil {
 			t.Fatal("unsupported schema adapted")
 		}
-		if _, _, err := MarshalAnthropic(nil, raw); err == nil {
-			t.Fatal("unsupported schema adapted")
-		}
 		if string(JSON(nil, raw)) != before {
 			t.Fatal("raw fallback changed")
 		}
@@ -96,22 +87,20 @@ func TestExternalUnsupportedSchemaRemainsUnchanged(t *testing.T) {
 func TestExternalConstantsPreserved(t *testing.T) {
 	for _, constant := range []string{"null", "false", "0", "9007199254740993"} {
 		raw := json.RawMessage(`{"type":"object","properties":{"value":{"type":"integer","const":` + constant + `}},"required":["value"],"additionalProperties":false}`)
-		for _, anthropic := range []bool{false, true} {
-			b, err := strictForTest(raw, anthropic)
-			if err != nil {
-				t.Fatal(err)
-			}
-			var s struct {
-				Properties map[string]struct {
-					Enum []json.RawMessage `json:"enum"`
-				} `json:"properties"`
-			}
-			if err := json.Unmarshal(b, &s); err != nil {
-				t.Fatal(err)
-			}
-			if len(s.Properties["value"].Enum) != 1 || string(s.Properties["value"].Enum[0]) != constant {
-				t.Fatalf("constant lost: %s", b)
-			}
+		b, err := MarshalOpenAI(nil, raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var s struct {
+			Properties map[string]struct {
+				Enum []json.RawMessage `json:"enum"`
+			} `json:"properties"`
+		}
+		if err := json.Unmarshal(b, &s); err != nil {
+			t.Fatal(err)
+		}
+		if len(s.Properties["value"].Enum) != 1 || string(s.Properties["value"].Enum[0]) != constant {
+			t.Fatalf("constant lost: %s", b)
 		}
 	}
 }

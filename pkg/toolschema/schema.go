@@ -101,42 +101,37 @@ func ParseExternal(raw json.RawMessage) (*Schema, error) {
 	return s, nil
 }
 
-type Cost struct {
-	Optional int
-}
 type serializer struct {
-	property    func(map[string]any, bool, *Cost) bool
-	constraints func(map[string]any)
+	property func(map[string]any, bool) bool
 }
 
-func marshalStrict(s *Schema, raw json.RawMessage, rules serializer) (json.RawMessage, Cost, error) {
-	var cost Cost
+func marshalStrict(s *Schema, raw json.RawMessage, rules serializer) (json.RawMessage, error) {
 	if s == nil {
 		var err error
 		s, err = ParseExternal(raw)
 		if err != nil {
-			return nil, cost, err
+			return nil, err
 		}
 	}
 	if s == nil || s.Type != "object" {
-		return nil, cost, fmt.Errorf("tool root must be an object")
+		return nil, fmt.Errorf("tool root must be an object")
 	}
 	properties, enums := 0, 0
-	out, err := build(s, rules, &cost, 0, &properties, &enums)
+	out, err := build(s, rules, 0, &properties, &enums)
 	if err != nil {
-		return nil, cost, err
+		return nil, err
 	}
 	if properties > 5000 || enums > 1000 {
-		return nil, cost, fmt.Errorf("strict schema property or enum limit exceeded")
+		return nil, fmt.Errorf("strict schema property or enum limit exceeded")
 	}
 	data, err := json.Marshal(out)
 	if len(data) > 120000 {
-		return nil, cost, fmt.Errorf("strict schema size limit exceeded")
+		return nil, fmt.Errorf("strict schema size limit exceeded")
 	}
-	return data, cost, err
+	return data, err
 }
 
-func build(s *Schema, rules serializer, cost *Cost, depth int, properties, enums *int) (map[string]any, error) {
+func build(s *Schema, rules serializer, depth int, properties, enums *int) (map[string]any, error) {
 	if s == nil || depth > 9 {
 		return nil, fmt.Errorf("invalid or deeply nested strict schema")
 	}
@@ -177,9 +172,6 @@ func build(s *Schema, rules serializer, cost *Cost, depth int, properties, enums
 	if s.Pattern != "" {
 		out["pattern"] = s.Pattern
 	}
-	if rules.constraints != nil {
-		rules.constraints(out)
-	}
 	switch s.Type {
 	case "object":
 		if s.AdditionalProperties == nil || *s.AdditionalProperties {
@@ -201,12 +193,12 @@ func build(s *Schema, rules serializer, cost *Cost, depth int, properties, enums
 		requiredNames := []string{}
 		*properties += len(names)
 		for _, name := range names {
-			child, err := build(s.Properties[name], rules, cost, depth+1, properties, enums)
+			child, err := build(s.Properties[name], rules, depth+1, properties, enums)
 			if err != nil {
 				return nil, err
 			}
 			previousEnum, _ := child["enum"].([]any)
-			if rules.property(child, required[name], cost) {
+			if rules.property(child, required[name]) {
 				requiredNames = append(requiredNames, name)
 			}
 			if values, ok := child["enum"].([]any); ok {
@@ -218,7 +210,7 @@ func build(s *Schema, rules serializer, cost *Cost, depth int, properties, enums
 		out["required"] = requiredNames
 		out["additionalProperties"] = false
 	case "array":
-		child, err := build(s.Items, rules, cost, depth+1, properties, enums)
+		child, err := build(s.Items, rules, depth+1, properties, enums)
 		if err != nil {
 			return nil, err
 		}
