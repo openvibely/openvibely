@@ -126,7 +126,7 @@ func normalizeScopedFilesPermissions(in []string) scopedFilesPermissionSet {
 
 func (s *scopedFilesToolSession) runtimeTools(skipDefaultTools bool) *llmcontracts.RuntimeTools {
 	return &llmcontracts.RuntimeTools{
-		Definitions:      scopedFilesToolDefinitions(),
+		Definitions:      append([]llmcontracts.RuntimeToolDefinition(nil), scopedFileDefinitions...),
 		Executor:         s.execute,
 		Metadata:         s,
 		SkipDefaultTools: skipDefaultTools,
@@ -141,83 +141,82 @@ func (s *scopedFilesToolSession) runtimeTools(skipDefaultTools bool) *llmcontrac
 	}
 }
 
-func scopedFilesToolDefinitions() []llmcontracts.RuntimeToolDefinition {
-	const scopePrefixDoc = " When multiple scopes are configured, prefix the path with '<scope_label>/' to address a specific scope explicitly; without a prefix the first matching scope is used."
-	return []llmcontracts.RuntimeToolDefinition{
-		{Name: "list_files", Description: "List files inside the configured scoped directory. Paths are relative to that directory." + scopePrefixDoc, Schema: &toolschema.Schema{
-			Type: "object",
-			Properties: map[string]*toolschema.Schema{
-				"path": {
-					Type: "string"},
-				"recursive": {
-					Type: "boolean"},
-				"pattern": {
-					Type: "string"},
-			},
-			AdditionalProperties: toolschema.Pointer(false),
-		}},
-		{Name: "read_file", Description: "Read a file from the configured scoped directory." + scopePrefixDoc, Schema: &toolschema.Schema{
-			Type: "object",
-			Properties: map[string]*toolschema.Schema{
-				"file_path": {
-					Type: "string"},
-				"offset": {
-					Type: "integer"},
-				"limit": {
-					Type: "integer"},
-			},
-			Required:             []string{"file_path"},
-			AdditionalProperties: toolschema.Pointer(false),
-		}},
-		{Name: "write_file", Description: "Write a file inside the configured scoped directory. Overwrites the file." + scopePrefixDoc, Schema: &toolschema.Schema{
-			Type: "object",
-			Properties: map[string]*toolschema.Schema{
-				"file_path": {
-					Type: "string"},
-				"content": {
-					Type: "string"},
-			},
-			Required:             []string{"file_path", "content"},
-			AdditionalProperties: toolschema.Pointer(false),
-		}},
-		{Name: "edit_file", Description: "Edit a file inside the configured scoped directory by replacing old_string with new_string." + scopePrefixDoc, Schema: &toolschema.Schema{
-			Type: "object",
-			Properties: map[string]*toolschema.Schema{
-				"file_path": {
-					Type: "string"},
-				"old_string": {
-					Type: "string"},
-				"new_string": {
-					Type: "string"},
-				"replace_all": {
-					Type: "boolean"},
-			},
-			Required:             []string{"file_path", "old_string", "new_string"},
-			AdditionalProperties: toolschema.Pointer(false),
-		}},
-		{Name: "grep_search", Description: "Search files inside the configured scoped directory with a regular expression." + scopePrefixDoc, Schema: &toolschema.Schema{
-			Type: "object",
-			Properties: map[string]*toolschema.Schema{
-				"pattern": {
-					Type: "string"},
-				"path": {
-					Type: "string"},
-				"include": {
-					Type: "string"},
-			},
-			Required:             []string{"pattern"},
-			AdditionalProperties: toolschema.Pointer(false),
-		}},
-		{Name: "delete_file", Description: "Delete a file inside the configured scoped directory." + scopePrefixDoc, Schema: &toolschema.Schema{
-			Type: "object",
-			Properties: map[string]*toolschema.Schema{
-				"file_path": {
-					Type: "string"},
-			},
-			Required:             []string{"file_path"},
-			AdditionalProperties: toolschema.Pointer(false),
-		}},
-	}
+const scopePrefixDoc = " When multiple scopes are configured, prefix the path with '<scope_label>/' to address a specific scope explicitly; without a prefix the first matching scope is used."
+
+var scopedFileDefinitions = []llmcontracts.RuntimeToolDefinition{
+	{Name: "list_files", Description: "List files inside the configured scoped directory. Paths are relative to that directory." + scopePrefixDoc, Schema: &toolschema.Schema{
+		Type: "object",
+		Properties: map[string]*toolschema.Schema{
+			"path": {
+				Type: "string"},
+			"recursive": {
+				Type: "boolean"},
+			"pattern": {
+				Type: "string"},
+		},
+		AdditionalProperties: toolschema.Pointer(false),
+	}},
+	{Name: "read_file", Description: "Read a file from the configured scoped directory." + scopePrefixDoc, Schema: &toolschema.Schema{
+		Type: "object",
+		Properties: map[string]*toolschema.Schema{
+			"file_path": {
+				Type: "string"},
+			"offset": {
+				Type: "integer"},
+			"limit": {
+				Type: "integer"},
+		},
+		Required:             []string{"file_path"},
+		AdditionalProperties: toolschema.Pointer(false),
+	}},
+	{Name: "write_file", Description: "Write a file inside the configured scoped directory. Overwrites the file." + scopePrefixDoc, Schema: &toolschema.Schema{
+		Type: "object",
+		Properties: map[string]*toolschema.Schema{
+			"file_path": {
+				Type: "string"},
+			"content": {
+				Type: "string"},
+		},
+		Required:             []string{"file_path", "content"},
+		AdditionalProperties: toolschema.Pointer(false),
+	}},
+	{Name: "edit_file", Description: "Edit a file inside the configured scoped directory by replacing old_string with new_string." + scopePrefixDoc, Schema: &toolschema.Schema{
+		Type: "object",
+		Properties: map[string]*toolschema.Schema{
+			"file_path": {
+				Type: "string"},
+			"old_string": {
+				Type: "string"},
+			"new_string": {
+				Type: "string"},
+			"replace_all": {
+				Type: "boolean"},
+		},
+		Required:             []string{"file_path", "old_string", "new_string"},
+		AdditionalProperties: toolschema.Pointer(false),
+	}},
+	{Name: "grep_search", Description: "Search files inside the configured scoped directory with a regular expression." + scopePrefixDoc, Schema: &toolschema.Schema{
+		Type: "object",
+		Properties: map[string]*toolschema.Schema{
+			"pattern": {
+				Type: "string"},
+			"path": {
+				Type: "string"},
+			"include": {
+				Type: "string"},
+		},
+		Required:             []string{"pattern"},
+		AdditionalProperties: toolschema.Pointer(false),
+	}},
+	{Name: "delete_file", Description: "Delete a file inside the configured scoped directory." + scopePrefixDoc, Schema: &toolschema.Schema{
+		Type: "object",
+		Properties: map[string]*toolschema.Schema{
+			"file_path": {
+				Type: "string"},
+		},
+		Required:             []string{"file_path"},
+		AdditionalProperties: toolschema.Pointer(false),
+	}},
 }
 
 func (s *scopedFilesToolSession) execute(ctx context.Context, name string, input json.RawMessage) (string, bool, bool, error) {

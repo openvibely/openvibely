@@ -159,10 +159,6 @@ const skillImportDescription = "Import a standalone skill package into the proje
 	"Accepts a directory containing SKILL.md, a SKILL.md file path, or inline content. " +
 	"The importer normalizes or generates OpenVibely YAML frontmatter with kind, version, skill.key/name/scope/description/enabled, writes skills/<skill>/SKILL.md, copies allowed support files, and updates skills/SKILLS.md."
 
-var skillManageSchema = buildSkillManageSchema()
-var skillImportSchema = buildSkillImportSchema()
-var agentSkillManageSchema = buildAgentSkillManageSchema()
-
 func agentSkillManageDescription(agentKey string) string {
 	return "Create, patch, or manage support files for skills owned by the task's assigned agent `" + agentKey + "`. " +
 		"Use this only for learning specific to that assigned agent's role, workflow, or selected agent-owned skills. " +
@@ -174,167 +170,161 @@ const libraryAgentSkillManageDescription = "Create, patch, or manage support fil
 	"Pass the target agent key in 'agent' and the bare skill key in 'handle'; protected agents are rejected by the backend. " +
 	"Use skill_manage instead for standalone project/global skills."
 
-func buildAgentSkillManageSchema() *toolschema.Schema {
-	return &toolschema.Schema{
-		Type: "object",
-		Properties: map[string]*toolschema.Schema{
-			"action": {
-				Type:        "string",
-				Enum:        []any{"create", "patch", "write_file", "remove_file"},
-				Description: "What to do. 'create' and 'patch' require 'declaration'. 'write_file' and 'remove_file' require 'handle' and 'support'.",
-			},
-			"agent": {
-				Type:        "string",
-				Description: "Target agent key for explicit library maintenance mode. Omit in assigned-agent learning mode, where the backend scopes this tool to the assigned agent.",
-			},
-			"scope": {
-				Type:        "string",
-				Enum:        []any{"global", "project"},
-				Description: "Target root for explicit library maintenance mode. Omit in assigned-agent learning mode, where the backend supplies the assigned agent scope.",
-			},
-			"handle": {
-				Type:        "string",
-				Description: "Agent-owned skill key only, for example 'review_migrations'. Do not include an agent prefix.",
-			},
-			"declaration": {
-				Type:        "string",
-				Description: "REQUIRED for create/patch. Full agent-owned skills/<skill>/SKILL.md content including YAML frontmatter. Required fields: kind=openvibely.agent_skill, version>=1, skill.key. In explicit library maintenance mode, agent.key must either be omitted or match the target agent.",
-			},
-			"support": {
-				Type:        "object",
-				Description: "Required only for action='write_file' or action='remove_file'. Manages a file under references/, templates/, scripts/, or assets/ of the target agent-owned skill.",
-				Properties: map[string]*toolschema.Schema{
-					"kind": {
-						Type: "string",
-						Enum: []any{"references", "templates", "scripts", "assets"},
-					},
-					"path": {
-						Type:        "string",
-						Description: "Path relative to the chosen support directory, for example 'foo.md' or 'nested/foo.md'.",
-					},
-					"content_base64": {
-						Type:        "string",
-						Description: "Base64-encoded file content. Use this OR 'content'.",
-					},
-					"content": {
-						Type:        "string",
-						Description: "Plain-text file content. Use this OR 'content_base64'.",
-					},
+var agentSkillManageSchema = &toolschema.Schema{
+	Type: "object",
+	Properties: map[string]*toolschema.Schema{
+		"action": {
+			Type:        "string",
+			Enum:        []any{"create", "patch", "write_file", "remove_file"},
+			Description: "What to do. 'create' and 'patch' require 'declaration'. 'write_file' and 'remove_file' require 'handle' and 'support'.",
+		},
+		"agent": {
+			Type:        "string",
+			Description: "Target agent key for explicit library maintenance mode. Omit in assigned-agent learning mode, where the backend scopes this tool to the assigned agent.",
+		},
+		"scope": {
+			Type:        "string",
+			Enum:        []any{"global", "project"},
+			Description: "Target root for explicit library maintenance mode. Omit in assigned-agent learning mode, where the backend supplies the assigned agent scope.",
+		},
+		"handle": {
+			Type:        "string",
+			Description: "Agent-owned skill key only, for example 'review_migrations'. Do not include an agent prefix.",
+		},
+		"declaration": {
+			Type:        "string",
+			Description: "REQUIRED for create/patch. Full agent-owned skills/<skill>/SKILL.md content including YAML frontmatter. Required fields: kind=openvibely.agent_skill, version>=1, skill.key. In explicit library maintenance mode, agent.key must either be omitted or match the target agent.",
+		},
+		"support": {
+			Type:        "object",
+			Description: "Required only for action='write_file' or action='remove_file'. Manages a file under references/, templates/, scripts/, or assets/ of the target agent-owned skill.",
+			Properties: map[string]*toolschema.Schema{
+				"kind": {
+					Type: "string",
+					Enum: []any{"references", "templates", "scripts", "assets"},
+				},
+				"path": {
+					Type:        "string",
+					Description: "Path relative to the chosen support directory, for example 'foo.md' or 'nested/foo.md'.",
+				},
+				"content_base64": {
+					Type:        "string",
+					Description: "Base64-encoded file content. Use this OR 'content'.",
+				},
+				"content": {
+					Type:        "string",
+					Description: "Plain-text file content. Use this OR 'content_base64'.",
 				},
 			},
-			"reason": {
-				Type:        "string",
-				Description: "Free-text reason. Recorded in the mutation audit log.",
-			},
 		},
-		Required:             []string{"action"},
-		AdditionalProperties: toolschema.Pointer(false),
-	}
+		"reason": {
+			Type:        "string",
+			Description: "Free-text reason. Recorded in the mutation audit log.",
+		},
+	},
+	Required:             []string{"action"},
+	AdditionalProperties: toolschema.Pointer(false),
 }
 
-func buildSkillImportSchema() *toolschema.Schema {
-	return &toolschema.Schema{
-		Type: "object",
-		Properties: map[string]*toolschema.Schema{
-			"source_path": {
-				Type:        "string",
-				Description: "Local file or directory path to import. Directory sources must contain SKILL.md. File sources must be SKILL.md.",
-			},
-			"content": {
-				Type:        "string",
-				Description: "Inline SKILL.md content to import instead of source_path.",
-			},
-			"package_name": {
-				Type:        "string",
-				Description: "Optional package folder/name used to derive the skill handle when importing inline or standard-format skills.",
-			},
-			"scope": {
-				Type:        "string",
-				Enum:        []any{"global", "project"},
-				Description: "Where to import the skill. Defaults to project.",
-			},
-			"files": {
-				Type:        "array",
-				Description: "Optional inline support files under references/, templates/, scripts/, or assets/.",
-				Items: &toolschema.Schema{
-					Type: "object",
-					Properties: map[string]*toolschema.Schema{
-						"path": {
-							Type: "string"},
-						"content": {
-							Type: "string"},
-						"content_base64": {
-							Type: "string"},
-					},
-					Required:             []string{"path"},
-					AdditionalProperties: toolschema.Pointer(false),
+var skillImportSchema = &toolschema.Schema{
+	Type: "object",
+	Properties: map[string]*toolschema.Schema{
+		"source_path": {
+			Type:        "string",
+			Description: "Local file or directory path to import. Directory sources must contain SKILL.md. File sources must be SKILL.md.",
+		},
+		"content": {
+			Type:        "string",
+			Description: "Inline SKILL.md content to import instead of source_path.",
+		},
+		"package_name": {
+			Type:        "string",
+			Description: "Optional package folder/name used to derive the skill handle when importing inline or standard-format skills.",
+		},
+		"scope": {
+			Type:        "string",
+			Enum:        []any{"global", "project"},
+			Description: "Where to import the skill. Defaults to project.",
+		},
+		"files": {
+			Type:        "array",
+			Description: "Optional inline support files under references/, templates/, scripts/, or assets/.",
+			Items: &toolschema.Schema{
+				Type: "object",
+				Properties: map[string]*toolschema.Schema{
+					"path": {
+						Type: "string"},
+					"content": {
+						Type: "string"},
+					"content_base64": {
+						Type: "string"},
 				},
-			},
-			"reason": {
-				Type:        "string",
-				Description: "Free-text reason. Recorded in the mutation audit log.",
+				Required:             []string{"path"},
+				AdditionalProperties: toolschema.Pointer(false),
 			},
 		},
-		AdditionalProperties: toolschema.Pointer(false),
-	}
+		"reason": {
+			Type:        "string",
+			Description: "Free-text reason. Recorded in the mutation audit log.",
+		},
+	},
+	AdditionalProperties: toolschema.Pointer(false),
 }
 
-func buildSkillManageSchema() *toolschema.Schema {
-	return &toolschema.Schema{
-		Type: "object",
-		Properties: map[string]*toolschema.Schema{
-			"action": {
-				Type:        "string",
-				Enum:        []any{"create", "patch", "write_file", "remove_file", "archive"},
-				Description: "What to do. 'create' and 'patch' require 'declaration'. 'write_file' and 'remove_file' require 'handle' and 'support'. 'archive' requires 'handle'.",
-			},
-			"handle": {
-				Type:        "string",
-				Description: "Standalone <skill_key> handle. Required for write_file, remove_file, and archive.",
-			},
-			"scope": {
-				Type:        "string",
-				Enum:        []any{"global", "project"},
-				Description: "Where to write the skill. Defaults to the scope declared in the declaration's skill.scope or 'project'.",
-			},
-			"declaration": {
-				Type:        "string",
-				Description: "REQUIRED for create/patch. " + skillDeclarationFieldDoc,
-			},
-			"support": {
-				Type:        "object",
-				Description: "Required only for action='write_file' or action='remove_file'. Manages a file under references/, templates/, scripts/, or assets/ of the skill.",
-				Properties: map[string]*toolschema.Schema{
-					"kind": {
-						Type: "string",
-						Enum: []any{"references", "templates", "scripts", "assets"},
-					},
-					"path": {
-						Type:        "string",
-						Description: "Path relative to the chosen support directory, for example 'foo.md' or 'nested/foo.md'. Do not include references/, templates/, scripts/, or assets/.",
-					},
-					"content_base64": {
-						Type:        "string",
-						Description: "Base64-encoded file content. Use this OR 'content'.",
-					},
-					"content": {
-						Type:        "string",
-						Description: "Plain-text file content. Use this OR 'content_base64'.",
-					},
+var skillManageSchema = &toolschema.Schema{
+	Type: "object",
+	Properties: map[string]*toolschema.Schema{
+		"action": {
+			Type:        "string",
+			Enum:        []any{"create", "patch", "write_file", "remove_file", "archive"},
+			Description: "What to do. 'create' and 'patch' require 'declaration'. 'write_file' and 'remove_file' require 'handle' and 'support'. 'archive' requires 'handle'.",
+		},
+		"handle": {
+			Type:        "string",
+			Description: "Standalone <skill_key> handle. Required for write_file, remove_file, and archive.",
+		},
+		"scope": {
+			Type:        "string",
+			Enum:        []any{"global", "project"},
+			Description: "Where to write the skill. Defaults to the scope declared in the declaration's skill.scope or 'project'.",
+		},
+		"declaration": {
+			Type:        "string",
+			Description: "REQUIRED for create/patch. " + skillDeclarationFieldDoc,
+		},
+		"support": {
+			Type:        "object",
+			Description: "Required only for action='write_file' or action='remove_file'. Manages a file under references/, templates/, scripts/, or assets/ of the skill.",
+			Properties: map[string]*toolschema.Schema{
+				"kind": {
+					Type: "string",
+					Enum: []any{"references", "templates", "scripts", "assets"},
+				},
+				"path": {
+					Type:        "string",
+					Description: "Path relative to the chosen support directory, for example 'foo.md' or 'nested/foo.md'. Do not include references/, templates/, scripts/, or assets/.",
+				},
+				"content_base64": {
+					Type:        "string",
+					Description: "Base64-encoded file content. Use this OR 'content'.",
+				},
+				"content": {
+					Type:        "string",
+					Description: "Plain-text file content. Use this OR 'content_base64'.",
 				},
 			},
-			"absorbed_into": {
-				Type:        "string",
-				Description: "Optional. When archiving, the handle of the skill that supersedes this one.",
-			},
-			"reason": {
-				Type:        "string",
-				Description: "Free-text reason. Recorded in the mutation audit log.",
-			},
 		},
-		Required:             []string{"action"},
-		AdditionalProperties: toolschema.Pointer(false),
-	}
+		"absorbed_into": {
+			Type:        "string",
+			Description: "Optional. When archiving, the handle of the skill that supersedes this one.",
+		},
+		"reason": {
+			Type:        "string",
+			Description: "Free-text reason. Recorded in the mutation audit log.",
+		},
+	},
+	Required:             []string{"action"},
+	AdditionalProperties: toolschema.Pointer(false),
 }
 
 type agentSkillManageParams struct {

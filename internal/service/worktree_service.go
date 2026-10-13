@@ -2023,7 +2023,7 @@ func automaticConflictResolutionRuntime(repoDir string, conflictFiles []string) 
 		}
 	}
 	definitions := make([]llmcontracts.RuntimeToolDefinition, 0, 3)
-	for _, definition := range scopedFilesToolDefinitions() {
+	for _, definition := range scopedFileDefinitions {
 		switch definition.Name {
 		case "read_file", "write_file", "edit_file":
 			definitions = append(definitions, definition)
