@@ -2315,7 +2315,7 @@ func TestHandler_ListModels_DeleteConfirmationDialog(t *testing.T) {
 		`onclick="confirmDeleteModel()"`,
 		`class="btn btn-error"`,
 		`modal.showModal()`,
-		`reassignmentFields.classList.toggle('hidden', !isDefault)`,
+		`reassignmentFields.classList.toggle('hidden', !isDefault || !select || select.options.length === 0)`,
 		`deleteURL += '?new_default_id=' + encodeURIComponent(select.value)`,
 		`htmx.ajax('DELETE', modelMutationURL(deleteURL)`,
 	} {
