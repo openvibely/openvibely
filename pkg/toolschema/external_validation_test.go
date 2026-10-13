@@ -29,3 +29,27 @@ func TestExternalUnsupportedValidationPreservesInput(t *testing.T) {
 		t.Fatal("validation failure ignored")
 	}
 }
+
+func TestExternalNullNormalization(t *testing.T) {
+	for _, tc := range []struct {
+		name, schema, input, want string
+		invalid                   bool
+	}{
+		{name: "reference", schema: `{"$schema":"http://json-schema.org/draft-07/schema#","type":"object","definitions":{"nullable":{"type":["string","null"]}},"properties":{"clear":{"$ref":"#/definitions/nullable","type":"string"}}}`, input: `{"clear":null}`, want: `{"clear":null}`},
+		{name: "strict placeholder", schema: `{"type":"object","properties":{"optional":{"type":"string"}},"additionalProperties":false}`, input: `{"optional":null}`, want: `{}`},
+		{name: "unsupported composition", schema: `{"type":"object","properties":{"optional":{"type":"string"}},"allOf":[{"required":["optional"]}]}`, input: `{"optional":null}`, invalid: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := ValidateArguments(nil, json.RawMessage(tc.schema), json.RawMessage(tc.input))
+			if tc.invalid {
+				if err == nil {
+					t.Fatalf("accepted invalid input: %s", got)
+				}
+				return
+			}
+			if err != nil || string(got) != tc.want {
+				t.Fatalf("got %s, %v; want %s", got, err, tc.want)
+			}
+		})
+	}
+}
