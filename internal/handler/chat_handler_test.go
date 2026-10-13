@@ -4962,7 +4962,7 @@ func TestHandler_Chat_RenderChatMarkdown_EscapesRawHTMLLikeTags(t *testing.T) {
 
 	// Regression guard: full-page Chat must use the shared Markdown range grammar,
 	// escape raw tag openers before Marked, and DOM-sanitize Marked output.
-	assert.Contains(t, body, "window.codeRanges = function(text)")
+	assert.Contains(t, body, "window.codeRanges = function(text, transcript)")
 	assert.Contains(t, body, "window.escapeRawHTMLForMarkdown = function(text, ranges)")
 	assert.Contains(t, body, "var escapedText = window.escapeRawHTMLForMarkdown(text);")
 	assert.Contains(t, body, "window.configureChatMarked = function()")
