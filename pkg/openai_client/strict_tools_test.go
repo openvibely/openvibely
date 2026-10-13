@@ -26,8 +26,8 @@ func TestStrictTaskLookupAndValidation(t *testing.T) {
 		return "ok", false, nil
 	}}
 	wire := agenticToolDefinitions(opts, false)
-	if wire[0].Strict == nil || !*wire[0].Strict {
-		t.Fatal("list_tasks not strict")
+	if wire[0].Strict == nil || *wire[0].Strict {
+		t.Fatal("list_tasks must disable strict")
 	}
 	for _, input := range []string{`{"category":"backlog","status":null,"merge_status":null,"limit":null}`, `{"category":"backlog"}`} {
 		if out, bad, _ := runOpenAIToolTask(context.Background(), opts, "list_tasks", json.RawMessage(input)); bad {
@@ -50,7 +50,7 @@ func TestStrictFallbackAndNamespace(t *testing.T) {
 	if got[0].Strict == nil || *got[0].Strict {
 		t.Fatal("unsafe schema strict")
 	}
-	if got[1].Tools[0].Strict == nil || !*got[1].Tools[0].Strict {
+	if got[1].Tools[0].Strict == nil || *got[1].Tools[0].Strict {
 		t.Fatal("namespace not converted")
 	}
 	if defs[1].Tools[0].Strict != nil {
@@ -73,23 +73,19 @@ func TestProviderWireStrictSchemas(t *testing.T) {
 				if completions {
 					tool = tool["function"].(map[string]any)
 				}
-				if mode.strict && tool["strict"] != true {
-					t.Errorf("missing strict flag: %v", tool)
-				}
-				if !mode.strict {
-					if _, exists := tool["strict"]; exists {
-						t.Error("strict flag sent to non-strict endpoint")
-					}
+				if tool["strict"] != false {
+					t.Errorf("strict must be false: %v", tool)
 				}
 				schema := tool["parameters"].(map[string]any)
 				props := schema["properties"].(map[string]any)
 				required, _ := schema["required"].([]any)
-				if schema["additionalProperties"] != false || (mode.strict && len(required) != len(props)) || (!mode.strict && len(required) != 0) {
-					t.Error("not a strict schema")
+				if len(required) != 0 {
+					t.Error("optional filters became required")
 				}
-				if _, ok := props["status"].(map[string]any)["type"].([]any); ok != mode.strict {
-					t.Error("incorrect optional filter nullability")
+				if props["status"].(map[string]any)["type"] != "string" {
+					t.Error("schema rewritten")
 				}
+
 				w.Header().Set("Content-Type", "text/event-stream")
 				if completions {
 					fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"done\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n")
@@ -102,7 +98,7 @@ func TestProviderWireStrictSchemas(t *testing.T) {
 			OpenAIAPIBaseURL = srv.URL + "/"
 			defer func() { OpenAIAPIBaseURL = old }()
 			d := chatcontrol.Get("list_tasks")
-			defs := []ToolDefinition{{Type: "function", Name: d.Name, Schema: d.Schema}}
+			defs := []ToolDefinition{{Type: "function", Name: d.Name, Schema: d.Schema, Strict: toolschema.Pointer(true)}}
 			client := newHTTPTestAPIKeyClient("test")
 			var err error
 			if completions {
@@ -226,5 +222,20 @@ func TestExternalReferenceNullReachesExecutor(t *testing.T) {
 	out, bad, _ := runOpenAIToolTask(context.Background(), opts, "external", input)
 	if bad || out != "executed" || calls != 1 {
 		t.Fatalf("executor calls=%d result=%q error=%v", calls, out, bad)
+	}
+}
+
+func TestStrictDisabledPreservesAllSchemas(t *testing.T) {
+	defs := DefaultTools()
+	for _, d := range chatcontrol.Registry() {
+		defs = append(defs, ToolDefinition{Type: "function", Name: d.Name, Schema: d.Schema, Strict: toolschema.Pointer(true)})
+	}
+	for i, got := range prepareStrictTools(defs) {
+		if got.Strict == nil || *got.Strict {
+			t.Fatalf("strict enabled: %s", got.Name)
+		}
+		if string(got.ParameterSchema()) != string(defs[i].ParameterSchema()) {
+			t.Fatalf("schema changed: %s", got.Name)
+		}
 	}
 }

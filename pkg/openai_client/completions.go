@@ -20,7 +20,7 @@ import (
 
 // CompletionsOptions configures a /v1/chat/completions call with tool use.
 type CompletionsOptions struct {
-	// StrictTools opts compatible endpoints into strict schema conversion.
+	// StrictTools is retained for compatibility; strict tool mode is disabled.
 	StrictTools     bool
 	Model           string
 	MaxOutputTokens int
@@ -117,10 +117,7 @@ func (c *Client) SendCompletions(ctx context.Context, prompt string, opts *Compl
 	}
 
 	tools := make([]map[string]interface{}, 0, len(toolDefs))
-	wireDefs := toolDefs
-	if opts.StrictTools {
-		wireDefs = prepareStrictTools(toolDefs)
-	}
+	wireDefs := prepareStrictTools(toolDefs)
 	for _, td := range wireDefs {
 		function := map[string]interface{}{"name": td.Name, "description": td.Description, "parameters": td.ParameterSchema()}
 		if td.Strict != nil {

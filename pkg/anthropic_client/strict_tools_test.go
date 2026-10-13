@@ -12,72 +12,6 @@ import (
 	"github.com/openvibely/openvibely/pkg/toolschema"
 )
 
-func TestStrictBudgetAndTaskLookup(t *testing.T) {
-	defs := DefaultTools()
-	for _, name := range chatcontrol.AllActionNames() {
-		d := chatcontrol.Get(name)
-		defs = append(defs, ToolDefinition{Name: name, Schema: d.Schema, StrictPriority: d.StrictPriority})
-	}
-	got := prepareStrictTools(defs)
-	count, optional := 0, 0
-	for i, def := range got {
-		if def.Strict == nil {
-			t.Fatal("missing policy")
-		}
-		if *def.Strict {
-			count++
-			var s any
-			if err := json.Unmarshal(def.InputSchema, &s); err != nil {
-				t.Fatal(err)
-			}
-			var walk func(any)
-			walk = func(v any) {
-				switch n := v.(type) {
-				case map[string]any:
-					if props, ok := n["properties"].(map[string]any); ok {
-						required, _ := n["required"].([]any)
-						optional += len(props) - len(required)
-					}
-					for _, c := range n {
-						walk(c)
-					}
-				case []any:
-					for _, c := range n {
-						walk(c)
-					}
-				}
-			}
-			walk(s)
-		}
-		if def.Name == "list_tasks" && !*def.Strict {
-			t.Fatal("list_tasks not prioritized")
-		}
-		if defs[i].Strict != nil {
-			t.Fatal("mutated original")
-		}
-	}
-	if count == 0 || count > maxStrictTools || optional > maxStrictOptional {
-		t.Fatalf("budget: tools=%d optional=%d", count, optional)
-	}
-	if len(got) != len(defs) {
-		t.Fatal("lost tools")
-	}
-	// Exercise the tool-count limit independently of optional-field capacity.
-	var empty []ToolDefinition
-	for i := 0; i < 25; i++ {
-		empty = append(empty, ToolDefinition{Name: fmt.Sprint(i), InputSchema: json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`)})
-	}
-	count = 0
-	for _, d := range prepareStrictTools(empty) {
-		if *d.Strict {
-			count++
-		}
-	}
-	if count != 20 {
-		t.Fatalf("count %d", count)
-	}
-}
-
 func TestTaskLookupValidationBeforeExecution(t *testing.T) {
 	def := chatcontrol.Get("list_tasks")
 	called := 0
@@ -108,19 +42,19 @@ func TestProviderWireStrictSchemas(t *testing.T) {
 		}
 		tools := body["tools"].([]any)
 		tool := tools[0].(map[string]any)
-		if tool["strict"] != true {
+		if tool["strict"] != false {
 			t.Errorf("missing strict flag: %v", tool)
 		}
 		schema := tool["input_schema"].(map[string]any)
 		props := schema["properties"].(map[string]any)
-		if schema["additionalProperties"] != false || len(schema["required"].([]any)) != 0 {
+		if schema["additionalProperties"] != false || len(dRequired(schema)) != 0 {
 			t.Error("not a strict schema")
 		}
 		if props["status"].(map[string]any)["type"] != "string" {
 			t.Error("optional filter rewritten")
 		}
-		if _, ok := props["limit"].(map[string]any)["minimum"]; ok {
-			t.Error("unsupported constraint sent")
+		if _, ok := props["limit"].(map[string]any)["minimum"]; !ok {
+			t.Error("original constraint removed")
 		}
 		w.Header().Set("Content-Type", "text/event-stream")
 		fmt.Fprint(w, "data: {\"type\":\"message_start\",\"message\":{\"id\":\"m1\",\"usage\":{\"input_tokens\":1}}}\n\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":1}}\n\ndata: {\"type\":\"message_stop\"}\n\n")
@@ -173,52 +107,6 @@ func TestDeclaredOpenToolPreservesArguments(t *testing.T) {
 	}
 }
 
-func TestDefaultToolsExplicitlyClosedAndStrict(t *testing.T) {
-	for _, def := range prepareStrictTools(DefaultTools()) {
-		if def.Strict == nil || !*def.Strict {
-			t.Fatalf("local tool %s lost strict support", def.Name)
-		}
-	}
-}
-
-func TestOptionalBudgetAndDefinitionPriority(t *testing.T) {
-	schema := &toolschema.Schema{Type: "object", AdditionalProperties: toolschema.Pointer(false), Properties: map[string]*toolschema.Schema{}}
-	for i := 0; i < 12; i++ {
-		schema.Properties[fmt.Sprint(i)] = &toolschema.Schema{Type: "string"}
-	}
-	defs := []ToolDefinition{
-		{Name: "first", Schema: schema},
-		{Name: "second", Schema: schema},
-		{Name: "important", Schema: schema, StrictPriority: 10},
-		{Name: "no_arguments", Schema: &toolschema.Schema{Type: "object", AdditionalProperties: toolschema.Pointer(false)}},
-	}
-	got := prepareStrictTools(defs)
-	if !*got[0].Strict || *got[1].Strict || !*got[2].Strict || !*got[3].Strict {
-		t.Fatalf("optional budget/priority not respected: %+v", got)
-	}
-	for i, d := range got {
-		if d.Name != defs[i].Name || defs[i].Strict != nil {
-			t.Fatal("source or request order mutated")
-		}
-	}
-	// The tool excluded from strict mode must still marshal its complete typed schema.
-	raw, err := json.Marshal(got[1])
-	if err != nil {
-		t.Fatal(err)
-	}
-	var wire struct {
-		InputSchema struct {
-			Properties map[string]any `json:"properties"`
-		} `json:"input_schema"`
-	}
-	if err := json.Unmarshal(raw, &wire); err != nil {
-		t.Fatal(err)
-	}
-	if len(wire.InputSchema.Properties) != 12 {
-		t.Fatalf("fallback lost schema: %s", raw)
-	}
-}
-
 func TestUnsupportedExternalSchemaReachesExecutor(t *testing.T) {
 	input := json.RawMessage(`{"code":"alice","optional":null}`)
 	calls := 0
@@ -251,71 +139,7 @@ func TestExternalReferenceNullReachesExecutor(t *testing.T) {
 	}
 }
 
-func TestStrictSelectionUsesImpactInsteadOfRegistrationOrder(t *testing.T) {
-	defs := DefaultTools()
-	defs = append(defs, ToolDefinition{Name: "delete_file", Schema: &toolschema.Schema{Type: "object", AdditionalProperties: toolschema.Pointer(false), Properties: map[string]*toolschema.Schema{"file_path": {Type: "string"}}, Required: []string{"file_path"}}})
-	for _, d := range chatcontrol.Registry() {
-		if _, ok := strictToolPriorities[d.Name]; !ok {
-			t.Fatalf("classify new registry tool %s by impact", d.Name)
-		}
-		defs = append(defs, ToolDefinition{Name: d.Name, Schema: d.Schema})
-	}
-	for _, d := range DefaultTools() {
-		if _, ok := strictToolPriorities[d.Name]; !ok {
-			t.Fatalf("unclassified local tool %s", d.Name)
-		}
-	}
-	selected := func(defs []ToolDefinition) map[string]bool {
-		result := map[string]bool{}
-		for i, d := range prepareStrictTools(defs) {
-			if d.Name != defs[i].Name {
-				t.Fatal("changed advertised order")
-			}
-			result[d.Name] = *d.Strict
-		}
-		return result
-	}
-	want := selected(defs)
-	for i, j := 0, len(defs)-1; i < j; i, j = i+1, j-1 {
-		defs[i], defs[j] = defs[j], defs[i]
-	}
-	got := selected(defs)
-	for name, enabled := range want {
-		if got[name] != enabled {
-			t.Fatalf("registration order changed strict for %s", name)
-		}
-	}
-	for _, name := range []string{"list_tasks", "github_replace_pull_request_branch", "delete_file", "delete_automation", "github_close_issue"} {
-		if !want[name] {
-			t.Errorf("high-impact tool %s lost strict capacity", name)
-		}
-	}
-	if want["list_capabilities"] {
-		t.Fatal("informational tool consumed scarce capacity")
-	}
-}
-
-func TestStrictSelectionSkipsIneligibleHighPriorityAndHonorsOverrides(t *testing.T) {
-	schema := &toolschema.Schema{Type: "object", AdditionalProperties: toolschema.Pointer(false)}
-	no := false
-	defs := []ToolDefinition{
-		{Name: "list_tasks", Schema: schema, Strict: &no},
-		{Name: "merge_task", Schema: &toolschema.Schema{Type: "object"}},
-		{Name: "external_override", Schema: schema, StrictPriority: 1000},
-	}
-	for i := 0; i < 21; i++ {
-		defs = append(defs, ToolDefinition{Name: fmt.Sprintf("external_%02d", i), Schema: schema})
-	}
-	got := prepareStrictTools(defs)
-	if *got[0].Strict || *got[1].Strict || !*got[2].Strict {
-		t.Fatal("disabled, unsupported, or override policy lost")
-	}
-	if !*got[3].Strict || *got[len(got)-1].Strict {
-		t.Fatal("fallback ranking or count budget lost")
-	}
-}
-
-func TestStrictImpactPolicyReachesProviderRequest(t *testing.T) {
+func TestStrictDisabledReachesProviderRequest(t *testing.T) {
 	var defs []ToolDefinition
 	for _, d := range chatcontrol.Registry() {
 		defs = append(defs, ToolDefinition{Name: d.Name, Schema: d.Schema, StrictPriority: d.StrictPriority})
@@ -324,7 +148,7 @@ func TestStrictImpactPolicyReachesProviderRequest(t *testing.T) {
 		var body struct {
 			Tools []struct {
 				Name   string `json:"name"`
-				Strict bool   `json:"strict"`
+				Strict *bool  `json:"strict"`
 			} `json:"tools"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -333,15 +157,10 @@ func TestStrictImpactPolicyReachesProviderRequest(t *testing.T) {
 		}
 		selected := map[string]bool{}
 		for _, tool := range body.Tools {
-			selected[tool.Name] = tool.Strict
-		}
-		for _, name := range []string{"list_tasks", "github_replace_pull_request_branch", "github_close_issue", "delete_automation"} {
-			if !selected[name] {
-				t.Errorf("%s not strict on wire", name)
+			if tool.Strict == nil || *tool.Strict {
+				t.Errorf("%s must explicitly disable strict", tool.Name)
 			}
-		}
-		if selected["list_capabilities"] {
-			t.Error("informational tool displaced high-impact tools")
+			selected[tool.Name] = tool.Strict != nil && *tool.Strict
 		}
 		w.Header().Set("Content-Type", "text/event-stream")
 		fmt.Fprint(w, "data: {\"type\":\"message_start\",\"message\":{\"id\":\"m1\",\"usage\":{\"input_tokens\":1}}}\n\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":1}}\n\ndata: {\"type\":\"message_stop\"}\n\n")
@@ -353,5 +172,22 @@ func TestStrictImpactPolicyReachesProviderRequest(t *testing.T) {
 	_, err := NewWithAPIKey("test").SendAgentic(context.Background(), "test", &AgenticOptions{Model: "claude-opus-4-6", MaxTokens: 1024, ExtraTools: defs})
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+func dRequired(schema map[string]any) []any { v, _ := schema["required"].([]any); return v }
+
+func TestStrictDisabledPreservesAllSchemas(t *testing.T) {
+	defs := DefaultTools()
+	for _, d := range chatcontrol.Registry() {
+		defs = append(defs, ToolDefinition{Name: d.Name, Schema: d.Schema, Strict: toolschema.Pointer(true)})
+	}
+	for i, got := range prepareStrictTools(defs) {
+		if got.Strict == nil || *got.Strict {
+			t.Fatalf("strict enabled: %s", got.Name)
+		}
+		if string(got.ParameterSchema()) != string(defs[i].ParameterSchema()) {
+			t.Fatalf("schema changed: %s", got.Name)
+		}
 	}
 }
