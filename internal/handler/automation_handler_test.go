@@ -434,8 +434,7 @@ func TestAutomationWebBuilderKeepsUnsavedChangesBrowserLocal(t *testing.T) {
 	require.NotEmpty(t, saved.Header().Get("HX-Redirect"))
 	require.Equal(t, 1, tableCountHandler(t, tc, "automations"))
 	require.Equal(t, 1, tableCountHandler(t, tc, "automation_versions"))
-	var automationID string
-	require.NoError(t, tc.db.QueryRow(`SELECT id FROM automations WHERE project_id = ?`, project.ID).Scan(&automationID))
+	automationID := onlySavedAutomationHandler(t, tc, project.ID).ID
 
 	edited := tc.HTMX().Post("/automations/" + automationID + "/builder?project_id=" + project.ID).WithForm(url.Values{"project_id": {project.ID}}).Execute()
 	require.Equal(t, http.StatusOK, edited.Code, edited.Body.String())
@@ -452,8 +451,7 @@ func TestAutomationWebBuilderKeepsUnsavedChangesBrowserLocal(t *testing.T) {
 		"project_id": {project.ID}, "candidate_json": {string(rawMalicious)}, "save_changes": {"true"},
 	}.Encode()).Execute()
 	require.Equal(t, http.StatusOK, openedByGET.Code, openedByGET.Body.String())
-	var persistedName string
-	require.NoError(t, tc.db.QueryRow(`SELECT name FROM automations WHERE id = ?`, automationID).Scan(&persistedName))
+	persistedName := storedAutomationHandler(t, tc, project.ID, automationID).Name
 	require.Equal(t, "Saved task automation", persistedName, "hard-refreshable Edit GET must never process mutation form values")
 
 	valid.Name = "Unsaved browser name"
@@ -517,8 +515,8 @@ func TestAutomationWebBuilderKeepsUnsavedChangesBrowserLocal(t *testing.T) {
 	require.Equal(t, 1, savedGraphSequence, "the single current graph must not expose an accumulating version sequence")
 	require.NoError(t, tc.db.QueryRow(`SELECT COUNT(*) FROM automation_versions WHERE automation_id = ? AND state = 'draft'`, automationID).Scan(&draftCount))
 	require.Zero(t, draftCount)
-	var savedName, savedTaskPrompt string
-	require.NoError(t, tc.db.QueryRow(`SELECT name FROM automations WHERE id = ?`, automationID).Scan(&savedName))
+	var savedTaskPrompt string
+	savedName := storedAutomationHandler(t, tc, project.ID, automationID).Name
 	require.Equal(t, "Saved replacement without version token", savedName)
 	require.NoError(t, tc.db.QueryRow(`SELECT prompt FROM tasks WHERE created_via = ?`, persistence.AutomationCompilerTaskCreatedVia(automationID, "review")).Scan(&savedTaskPrompt))
 	require.Equal(t, "Review using the replacement instructions.", savedTaskPrompt)
@@ -633,8 +631,8 @@ func TestAutomationDuplicateOpensUnsavedDraftAndSavesIndependentCopy(t *testing.
 	}).Execute()
 	require.Equal(t, http.StatusNoContent, savedDuplicate.Code, savedDuplicate.Body.String())
 
-	var duplicateAutomationID, duplicateTaskID, duplicateScheduleID string
-	require.NoError(t, tc.db.QueryRow(`SELECT id FROM automations WHERE project_id = ? AND name = ?`, project.ID, duplicateCandidate.Name).Scan(&duplicateAutomationID))
+	var duplicateTaskID, duplicateScheduleID string
+	duplicateAutomationID := savedAutomationByNameHandler(t, tc, project.ID, duplicateCandidate.Name).ID
 	require.NotEqual(t, sourceAutomationID, duplicateAutomationID)
 	require.NoError(t, tc.db.QueryRow(`SELECT resource_id FROM automation_definition_resources
 		WHERE automation_id = ? AND resource_type = 'task'`, duplicateAutomationID).Scan(&duplicateTaskID))
@@ -692,8 +690,7 @@ func TestAutomationDuplicateNameRemainsDistinctAfterPreviewNormalization(t *test
 	}).Execute()
 	require.Equal(t, http.StatusNoContent, savedSource.Code, savedSource.Body.String())
 
-	var sourceAutomationID string
-	require.NoError(t, tc.db.QueryRow(`SELECT id FROM automations WHERE project_id = ? AND name = ?`, project.ID, sourceName).Scan(&sourceAutomationID))
+	sourceAutomationID := savedAutomationByNameHandler(t, tc, project.ID, sourceName).ID
 	opened := tc.HTMX().Get(fmt.Sprintf("/automations/%s/duplicate?project_id=%s", sourceAutomationID, project.ID)).Execute()
 	require.Equal(t, http.StatusOK, opened.Code, opened.Body.String())
 	duplicateName := automationCandidateFromResponse(t, opened).Name
@@ -821,8 +818,7 @@ func TestAutomationTemplateBuilderAddsAndSavesCustomNodes(t *testing.T) {
 	}
 	rawEditCandidate, err := json.Marshal(candidate)
 	require.NoError(t, err)
-	var automationID string
-	require.NoError(t, tc.db.QueryRow(`SELECT id FROM automations WHERE project_id = ?`, project.ID).Scan(&automationID))
+	automationID := onlySavedAutomationHandler(t, tc, project.ID).ID
 	editedPreview := tc.HTMX().Post("/automations/" + automationID + "/builder?project_id=" + project.ID).WithForm(url.Values{
 		"project_id":                        {project.ID},
 		"builder_source":                    {"template"},
@@ -1442,8 +1438,8 @@ func TestAutomationBuilderRejectsUnsafeAndUnsupportedYAMLWithoutSideEffects(t *t
 				"project_id": {project.ID}, "builder_source": {"blank"}, "automation_yaml": {yaml}, "save_changes": {"true"},
 			}).Execute()
 			require.Equal(t, http.StatusNoContent, created.Code, created.Body.String())
-			var automationID, versionID string
-			require.NoError(t, tc.db.QueryRow(`SELECT id, published_version_id FROM automations WHERE project_id = ?`, project.ID).Scan(&automationID, &versionID))
+			saved := onlySavedAutomationHandler(t, tc, project.ID)
+			automationID, versionID := saved.ID, *saved.PublishedVersionID
 			before, err := automationRepo.GetDefinition(context.Background(), project.ID, automationID)
 			require.NoError(t, err)
 			baselineTasks := tableCountHandler(t, tc, "tasks")
@@ -1459,9 +1455,7 @@ func TestAutomationBuilderRejectsUnsafeAndUnsupportedYAMLWithoutSideEffects(t *t
 			require.Equal(t, http.StatusOK, response.Code, response.Body.String())
 			require.Empty(t, response.Header().Get("HX-Redirect"))
 			require.Contains(t, response.Body.String(), testCase.message)
-			var currentVersionID string
-			require.NoError(t, tc.db.QueryRow(`SELECT published_version_id FROM automations WHERE id = ?`, automationID).Scan(&currentVersionID))
-			require.Equal(t, versionID, currentVersionID)
+			require.Equal(t, &versionID, storedAutomationHandler(t, tc, project.ID, automationID).PublishedVersionID)
 			after, err := automationRepo.GetDefinition(context.Background(), project.ID, automationID)
 			require.NoError(t, err)
 			require.Equal(t, before, after)
@@ -1512,8 +1506,8 @@ func TestAutomationBuilderRejectsEmptyYAMLWithoutSideEffects(t *testing.T) {
 			"project_id": {project.ID}, "builder_source": {"template"}, "automation_yaml": {yaml}, "save_changes": {"true"},
 		}).Execute()
 		require.Equal(t, http.StatusNoContent, created.Code, created.Body.String())
-		var automationID, versionID string
-		require.NoError(t, tc.db.QueryRow(`SELECT id, published_version_id FROM automations WHERE project_id = ?`, project.ID).Scan(&automationID, &versionID))
+		saved := onlySavedAutomationHandler(t, tc, project.ID)
+		automationID, versionID := saved.ID, *saved.PublishedVersionID
 		before, err := automationRepo.GetDefinition(context.Background(), project.ID, automationID)
 		require.NoError(t, err)
 
@@ -1525,9 +1519,7 @@ func TestAutomationBuilderRejectsEmptyYAMLWithoutSideEffects(t *testing.T) {
 		require.Empty(t, response.Header().Get("HX-Redirect"))
 		require.Contains(t, response.Body.String(), "YAML did not parse")
 		require.Regexp(t, `(?s)<textarea[^>]*name="automation_yaml"[^>]*>\s*</textarea>`, response.Body.String())
-		var currentVersionID string
-		require.NoError(t, tc.db.QueryRow(`SELECT published_version_id FROM automations WHERE id = ?`, automationID).Scan(&currentVersionID))
-		require.Equal(t, versionID, currentVersionID)
+		require.Equal(t, &versionID, storedAutomationHandler(t, tc, project.ID, automationID).PublishedVersionID)
 		after, err := automationRepo.GetDefinition(context.Background(), project.ID, automationID)
 		require.NoError(t, err)
 		require.Equal(t, before, after)
@@ -1791,9 +1783,8 @@ func TestAutomationLegacyMaintainedTemplateCanReplaceWithLatestRevision(t *testi
 	}).Execute()
 	require.Equal(t, http.StatusNoContent, saved.Code, saved.Body.String())
 
-	var automationID string
-	var templateRevision *int
-	require.NoError(t, tc.db.QueryRowContext(ctx, `SELECT id, template_revision FROM automations WHERE project_id = ?`, project.ID).Scan(&automationID, &templateRevision))
+	stored := onlySavedAutomationHandler(t, tc, project.ID)
+	automationID, templateRevision := stored.ID, stored.TemplateRevision
 	require.NotNil(t, templateRevision)
 	require.Equal(t, service.CurrentAutomationTemplateRevision(service.AutomationAdapterNativeSDLC), *templateRevision)
 
@@ -1823,7 +1814,7 @@ func TestAutomationLegacyMaintainedTemplateCanReplaceWithLatestRevision(t *testi
 		"project_id": {project.ID}, "candidate_json": {automationDraftCandidateJSONForTest(t, withoutVision)}, "save_changes": {"true"},
 	}).Execute()
 	require.Equal(t, http.StatusNoContent, edited.Code, edited.Body.String())
-	require.NoError(t, tc.db.QueryRowContext(ctx, `SELECT template_revision FROM automations WHERE id = ?`, automationID).Scan(&templateRevision))
+	templateRevision = storedAutomationHandler(t, tc, project.ID, automationID).TemplateRevision
 	require.Nil(t, templateRevision, "ordinary edits must not claim a legacy graph matches the latest template")
 
 	opened := tc.HTMX().Post("/automations/" + automationID + "/builder?project_id=" + project.ID).WithForm(url.Values{"project_id": {project.ID}}).Execute()
@@ -1837,7 +1828,7 @@ func TestAutomationLegacyMaintainedTemplateCanReplaceWithLatestRevision(t *testi
 	require.Equal(t, http.StatusNoContent, updated.Code, updated.Body.String())
 	require.NotEmpty(t, updated.Header().Get("HX-Redirect"))
 	require.Equal(t, 1, tableCountHandler(t, tc, "automation_versions"), "template update must replace the graph without adding history")
-	require.NoError(t, tc.db.QueryRowContext(ctx, `SELECT template_revision FROM automations WHERE id = ?`, automationID).Scan(&templateRevision))
+	templateRevision = storedAutomationHandler(t, tc, project.ID, automationID).TemplateRevision
 	require.NotNil(t, templateRevision)
 	require.Equal(t, service.CurrentAutomationTemplateRevision(service.AutomationAdapterNativeSDLC), *templateRevision)
 	definition, err := automationRepo.GetDefinition(ctx, project.ID, automationID)
@@ -1980,9 +1971,8 @@ func TestAutomationGitHubTemplateSaveUsesVisibleGitHubSetupAndBrowserActionField
 	require.NoError(t, tc.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM github_project_inboxes WHERE project_id = ?`, project.ID).Scan(&legacyInboxRows))
 	require.Zero(t, legacyInboxRows, "visible Authorized Users must not require a hidden legacy inbox row")
 
-	var automationID string
-	var templateRevision *int
-	require.NoError(t, tc.db.QueryRowContext(ctx, `SELECT id, template_revision FROM automations WHERE project_id = ?`, project.ID).Scan(&automationID, &templateRevision))
+	stored := onlySavedAutomationHandler(t, tc, project.ID)
+	automationID, templateRevision := stored.ID, stored.TemplateRevision
 	require.NotNil(t, templateRevision)
 	require.Equal(t, service.CurrentAutomationTemplateRevision(service.AutomationAdapterGitHubSDLC), *templateRevision)
 	withoutVision := automationCandidateWithoutNodeHandler(candidate, "vision_suggestions")
@@ -2217,8 +2207,8 @@ func TestAutomationBuilderWebSaveIsBrowserLocalUntilAtomicSaveAndProjectScoped(t
 	}
 	created := tc.HTMX().Post("/automations/builder?project_id=" + project.ID).WithForm(saveValues).Execute()
 	require.Equal(t, http.StatusNoContent, created.Code, created.Body.String())
-	var automationID, versionID string
-	require.NoError(t, tc.db.QueryRow(`SELECT id, published_version_id FROM automations WHERE project_id = ?`, project.ID).Scan(&automationID, &versionID))
+	saved := onlySavedAutomationHandler(t, tc, project.ID)
+	automationID, versionID := saved.ID, *saved.PublishedVersionID
 	require.Equal(t, fmt.Sprintf("/automations/%s?project_id=%s", automationID, project.ID), created.Header().Get("HX-Redirect"))
 	require.NotZero(t, tableCountHandler(t, tc, "tasks"))
 	require.NotZero(t, tableCountHandler(t, tc, "schedules"))
@@ -2298,8 +2288,7 @@ func TestAutomationBuilderRecoversDeletedRetainedNativeResources(t *testing.T) {
 	}).Execute()
 	require.Equal(t, http.StatusNoContent, created.Code, created.Body.String())
 
-	var automationID string
-	require.NoError(t, tc.db.QueryRowContext(context.Background(), `SELECT id FROM automations WHERE project_id = ?`, project.ID).Scan(&automationID))
+	automationID := onlySavedAutomationHandler(t, tc, project.ID).ID
 	edit := tc.HTMX().Post("/automations/" + automationID + "/builder?project_id=" + project.ID).WithForm(url.Values{
 		"project_id": {project.ID},
 	}).Execute()
@@ -2359,6 +2348,36 @@ func TestAutomationBuilderRecoversDeletedRetainedNativeResources(t *testing.T) {
 	require.Contains(t, live.Body.String(), `data-automation-live-node-detail="optimization_finder"`)
 	require.Contains(t, live.Body.String(), "optimization_finder")
 	require.NotContains(t, live.Body.String(), "Save did not apply: schedule for node")
+}
+
+func storedAutomationHandler(t *testing.T, tc *TestContext, projectID, automationID string) models.Automation {
+	t.Helper()
+	definition, err := teststores.Of(tc.db).Automations.GetDefinition(context.Background(), projectID, automationID)
+	require.NoError(t, err)
+	require.NotNil(t, definition)
+	return definition.Automation
+}
+
+func onlySavedAutomationHandler(t *testing.T, tc *TestContext, projectID string) models.Automation {
+	t.Helper()
+	cards, err := teststores.Of(tc.db).Automations.ListPortfolioCards(context.Background(), projectID)
+	require.NoError(t, err)
+	require.Len(t, cards, 1)
+	return cards[0].Automation
+}
+
+func savedAutomationByNameHandler(t *testing.T, tc *TestContext, projectID, name string) models.Automation {
+	t.Helper()
+	cards, err := teststores.Of(tc.db).Automations.ListPortfolioCards(context.Background(), projectID)
+	require.NoError(t, err)
+	var matches []models.Automation
+	for _, card := range cards {
+		if card.Automation.Name == name {
+			matches = append(matches, card.Automation)
+		}
+	}
+	require.Len(t, matches, 1)
+	return matches[0]
 }
 
 func tableCountHandler(t *testing.T, tc *TestContext, table string) int {
@@ -3109,7 +3128,7 @@ func TestAutomationChatUpdateTemplateAppliesNoopsAndRejectsUnsupportedTargets(t 
 	gotAutomation, _ := got["automation"].(map[string]any)
 	require.Equal(t, true, gotAutomation["template_update_available"])
 
-	beforeGraphID := currentAutomationPublishedGraphID(t, tc, automationID)
+	beforeGraphID := currentAutomationPublishedGraphID(t, tc, project.ID, automationID)
 	updated := executeOK(runtime, "update_automation_template", json.RawMessage(fmt.Sprintf(`{"automation_id":%q}`, automationID)))
 	require.Equal(t, true, updated["ok"])
 	require.Equal(t, true, updated["applied"])
@@ -3117,14 +3136,14 @@ func TestAutomationChatUpdateTemplateAppliesNoopsAndRejectsUnsupportedTargets(t 
 	updatedAutomation, _ := updated["automation"].(map[string]any)
 	require.Equal(t, false, updatedAutomation["template_update_available"])
 	require.Equal(t, float64(currentRevision), updatedAutomation["template_revision"])
-	afterGraphID := currentAutomationPublishedGraphID(t, tc, automationID)
+	afterGraphID := currentAutomationPublishedGraphID(t, tc, project.ID, automationID)
 	require.NotEqual(t, beforeGraphID, afterGraphID, "outdated template update should replace the saved graph")
 
 	alreadyCurrent := executeOK(runtime, "update_automation_template", json.RawMessage(fmt.Sprintf(`{"automation_id":%q}`, automationID)))
 	require.Equal(t, true, alreadyCurrent["ok"])
 	require.Equal(t, false, alreadyCurrent["applied"])
 	require.Equal(t, "already_current", alreadyCurrent["reason"])
-	require.Equal(t, afterGraphID, currentAutomationPublishedGraphID(t, tc, automationID), "already-current update must not replace the graph")
+	require.Equal(t, afterGraphID, currentAutomationPublishedGraphID(t, tc, project.ID, automationID), "already-current update must not replace the graph")
 
 	custom := automationChatCustomApprovalCandidate(t, drafts)
 	custom.Name = "Custom approval update guard"
@@ -3134,28 +3153,28 @@ func TestAutomationChatUpdateTemplateAppliesNoopsAndRejectsUnsupportedTargets(t 
 	require.NoError(t, err)
 	customSaved := executeOK(runtime, "save_automation", customPayload)
 	customID, _ := customSaved["automation_id"].(string)
-	customGraphID := currentAutomationPublishedGraphID(t, tc, customID)
+	customGraphID := currentAutomationPublishedGraphID(t, tc, project.ID, customID)
 	unsupported := executeOK(runtime, "update_automation_template", json.RawMessage(`{"name":"Custom approval update guard"}`))
 	require.Equal(t, false, unsupported["applied"])
 	require.Equal(t, "unsupported_template", unsupported["reason"])
-	require.Equal(t, customGraphID, currentAutomationPublishedGraphID(t, tc, customID), "custom Automation update must not mutate")
+	require.Equal(t, customGraphID, currentAutomationPublishedGraphID(t, tc, project.ID, customID), "custom Automation update must not mutate")
 
 	foreignRuntime := tc.handler.buildChatActionToolRuntimeFromDefs(streamingResponseParams{ProjectID: foreign.ID, PrincipalID: "alice"}, newChatActionSummaryCollector(), chatcontrol.ToolDefsForContext(models.ChatModeOrchestrate, chatcontrol.SurfaceWeb, true), models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)
 	foreignSaved := executeOK(foreignRuntime, "save_automation", json.RawMessage(`{"source":"template","template_key":"native_sdlc"}`))
 	foreignID, _ := foreignSaved["automation_id"].(string)
-	foreignGraphID := currentAutomationPublishedGraphID(t, tc, foreignID)
+	foreignGraphID := currentAutomationPublishedGraphID(t, tc, foreign.ID, foreignID)
 	_, handled, isError, err := runtime.Executor(ctx, "update_automation_template", json.RawMessage(fmt.Sprintf(`{"automation_id":%q}`, foreignID)))
 	require.True(t, handled)
 	require.True(t, isError)
 	require.ErrorContains(t, err, "not found in current project")
-	require.Equal(t, foreignGraphID, currentAutomationPublishedGraphID(t, tc, foreignID), "foreign Automation update must not mutate")
+	require.Equal(t, foreignGraphID, currentAutomationPublishedGraphID(t, tc, foreign.ID, foreignID), "foreign Automation update must not mutate")
 }
 
-func currentAutomationPublishedGraphID(t *testing.T, tc *TestContext, automationID string) string {
+func currentAutomationPublishedGraphID(t *testing.T, tc *TestContext, projectID, automationID string) string {
 	t.Helper()
-	var graphID string
-	require.NoError(t, tc.db.QueryRow(`SELECT published_version_id FROM automations WHERE id = ?`, automationID).Scan(&graphID))
-	return graphID
+	graphID := storedAutomationHandler(t, tc, projectID, automationID).PublishedVersionID
+	require.NotNil(t, graphID)
+	return *graphID
 }
 
 func TestAutomationChatLifecycleActionsRejectAmbiguousForeignPlanAndArchivedTargets(t *testing.T) {
@@ -3194,9 +3213,9 @@ func TestAutomationChatLifecycleActionsRejectAmbiguousForeignPlanAndArchivedTarg
 	require.True(t, handled)
 	require.True(t, isError)
 	require.ErrorContains(t, err, "ambiguous")
-	var pausedCount int
-	require.NoError(t, tc.db.QueryRow(`SELECT COUNT(*) FROM automations WHERE project_id = ? AND lifecycle_state = 'paused'`, project.ID).Scan(&pausedCount))
-	require.Zero(t, pausedCount, "ambiguous name must not mutate either Automation")
+	for _, id := range []string{firstID, secondID} {
+		require.NotEqual(t, models.AutomationPaused, storedAutomationHandler(t, tc, project.ID, id).LifecycleState, "ambiguous name must not mutate either Automation")
+	}
 
 	_, handled, isError, err = runtime.Executor(ctx, "pause_automation", json.RawMessage(fmt.Sprintf(`{"automation_id":%q}`, foreignID)))
 	require.True(t, handled)
