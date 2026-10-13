@@ -600,7 +600,7 @@ func TestAdapterToolCallReplaysToolResult(t *testing.T) {
 		if requests == 1 {
 			_, _ = w.Write([]byte(
 				"data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"Need memory.\",\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"type\":\"function\",\"function\":{\"name\":\"memory_view\",\"arguments\":\"{\\\"handle\\\":\"}}]}}]}\n\n" +
-					"data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"usage.md\\\"}\"}}]},\"finish_reason\":\"tool_calls\"}]}\n\n" +
+					"data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"\\\"usage.md\\\"}\"}}]},\"finish_reason\":\"tool_calls\"}]}\n\n" +
 					"data: [DONE]\n\n",
 			))
 			return

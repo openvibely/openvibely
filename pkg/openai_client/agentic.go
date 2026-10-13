@@ -958,6 +958,10 @@ func runOpenAIToolTask(ctx context.Context, opts *AgenticOptions, name string, i
 		// are not cancelled and remain responsible for their normal completion.
 		ctx = llmcontracts.WithMidTurnSteeringWakeup(ctx, opts.LocalSteeringWakeup)
 	}
+	input, validationErr := normalizeToolArguments(opts, name, input)
+	if validationErr != nil {
+		return validationErr.Error(), true, nil
+	}
 	output := ""
 	isError := false
 	var err error
@@ -2503,7 +2507,7 @@ func agenticToolDefinitions(opts *AgenticOptions, includeStandaloneWebSearch boo
 	if includeStandaloneWebSearch {
 		tools = append(tools, standaloneWebSearchTool())
 	}
-	return tools
+	return prepareStrictTools(tools)
 }
 
 func refreshAgenticToolsAtSteeringBoundary(ctx context.Context, opts *AgenticOptions, current []ToolDefinition, includeStandaloneWebSearch bool) ([]ToolDefinition, error) {

@@ -20,7 +20,7 @@ func TestAnthropicFailedContinuationPreservesClaimedSteerAndToolResult(t *testin
 		}
 		events := []string{
 			`{"type":"message_start","message":{"id":"first","model":"claude-opus-4-6","usage":{"input_tokens":20}}}`,
-			`{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"write1","name":"write_file","input":{}}}`,
+			`{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"write1","name":"write_file","input":{"file_path":"test.txt","content":"test"}}}`,
 			`{"type":"content_block_stop","index":0}`,
 			`{"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"output_tokens":8}}`,
 			`{"type":"message_stop"}`,
