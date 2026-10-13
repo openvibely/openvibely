@@ -19,8 +19,13 @@ func Strict(raw json.RawMessage, anthropic bool) (converted json.RawMessage, uni
 		return nil, 0, fmt.Errorf("strict schema size limit exceeded")
 	}
 	var schema map[string]any
-	if err = json.Unmarshal(raw, &schema); err != nil {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	if err = decoder.Decode(&schema); err != nil {
 		return
+	}
+	if err = decoder.Decode(new(any)); err != io.EOF {
+		return nil, 0, fmt.Errorf("invalid trailing tool schema")
 	}
 	properties, enums := schemaSize(schema)
 	if properties > 5000 || enums > 1000 {
@@ -75,11 +80,11 @@ func convert(s map[string]any, anthropic bool, unions *int, depth int) error {
 	}
 	switch kind {
 	case "object":
-		props, hasProps := s["properties"].(map[string]any)
+		props, _ := s["properties"].(map[string]any)
 		if ap, exists := s["additionalProperties"]; exists && ap != false {
 			return fmt.Errorf("open object")
 		}
-		if !hasProps && s["additionalProperties"] != false {
+		if len(props) == 0 && s["additionalProperties"] != false {
 			return fmt.Errorf("arbitrary object")
 		}
 		if props == nil {

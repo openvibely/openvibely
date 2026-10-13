@@ -158,3 +158,11 @@ func TestOpenRootToolStaysNonStrict(t *testing.T) {
 		t.Fatalf("open schema changed: %+v", got)
 	}
 }
+
+func TestEmptyOpenRootToolStaysNonStrict(t *testing.T) {
+	raw := json.RawMessage(`{"type":"object","properties":{}}`)
+	got := prepareStrictTools([]ToolDefinition{{Type: "function", Name: "custom", Parameters: raw}})[0]
+	if got.Strict == nil || *got.Strict || string(got.Parameters) != string(raw) {
+		t.Fatalf("open schema changed: %+v", got)
+	}
+}

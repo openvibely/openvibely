@@ -93,3 +93,36 @@ func TestOpenRootSchemaRemainsNonStrict(t *testing.T) {
 		}
 	}
 }
+
+func TestEmptyPropertiesRemainOpen(t *testing.T) {
+	for _, anthropic := range []bool{false, true} {
+		for _, raw := range []string{`{"type":"object","properties":{}}`, `{"type":"object","properties":{"data":{"type":"object","properties":{}}}}`} {
+			if _, _, err := Strict(json.RawMessage(raw), anthropic); err == nil {
+				t.Fatalf("converted open object: %s", raw)
+			}
+		}
+		if _, _, err := Strict(json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`), anthropic); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestStrictPreservesLargeIntegers(t *testing.T) {
+	for _, anthropic := range []bool{false, true} {
+		for _, constraint := range []string{`"enum":[9007199254740993]`, `"const":9007199254740993`, `"minimum":9007199254740993,"maximum":9007199254740993`} {
+			raw := json.RawMessage(`{"type":"object","properties":{"id":{"type":"integer",` + constraint + `}},"required":["id"],"additionalProperties":false}`)
+			wire, _, err := Strict(raw, anthropic)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(string(wire), "9007199254740993") || strings.Contains(string(wire), "9007199254740992") {
+				t.Fatalf("number changed: %s", wire)
+			}
+			for _, schema := range []json.RawMessage{raw, wire} {
+				if _, err := NormalizeValidate(schema, json.RawMessage(`{"id":9007199254740993}`)); err != nil {
+					t.Fatal(err)
+				}
+			}
+		}
+	}
+}
