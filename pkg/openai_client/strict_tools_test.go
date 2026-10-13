@@ -128,3 +128,33 @@ func TestRegistrySchemasRemainValid(t *testing.T) {
 	}
 	t.Logf("%d/%d registry tools support strict conversion", strictCount, len(chatcontrol.AllActionNames()))
 }
+
+func TestNamespacedArgumentsValidatedBeforeExecution(t *testing.T) {
+	calls := 0
+	opts := &AgenticOptions{SkipDefaultTools: true, ExtraTools: []ToolDefinition{{Type: "namespace", Name: "files", Tools: DefaultTools()}}, ToolExecutor: func(_ context.Context, name string, input json.RawMessage) (string, bool, error) {
+		calls++
+		if name != "files.read_file" || string(input) != `{"file_path":"example.txt"}` {
+			t.Errorf("unexpected execution: %s %s", name, input)
+		}
+		return "ok", false, nil
+	}}
+	if out, bad, _ := runOpenAIToolTask(context.Background(), opts, "files.read_file", json.RawMessage(`{"file_path":"example.txt","offset":null,"limit":null}`)); bad {
+		t.Fatal(out)
+	}
+	for _, input := range []string{`{}`, `{"file_path":3}`, `{"file_path":"example.txt","limit":"bad"}`} {
+		if _, bad, _ := runOpenAIToolTask(context.Background(), opts, "files.read_file", json.RawMessage(input)); !bad {
+			t.Fatalf("accepted %s", input)
+		}
+	}
+	if calls != 1 {
+		t.Fatalf("executor called %d times", calls)
+	}
+}
+
+func TestOpenRootToolStaysNonStrict(t *testing.T) {
+	raw := json.RawMessage(`{"type":"object"}`)
+	got := prepareStrictTools([]ToolDefinition{{Type: "function", Name: "custom", Parameters: raw}})[0]
+	if got.Strict == nil || *got.Strict || string(got.Parameters) != string(raw) {
+		t.Fatalf("open schema changed: %+v", got)
+	}
+}

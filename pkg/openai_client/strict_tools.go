@@ -2,6 +2,7 @@ package openaiclient
 
 import (
 	"encoding/json"
+	"strings"
 
 	"github.com/openvibely/openvibely/pkg/toolschema"
 )
@@ -39,6 +40,12 @@ func normalizeToolArguments(opts *AgenticOptions, name string, input json.RawMes
 
 func normalizeDefinedArguments(defs []ToolDefinition, name string, input json.RawMessage) (json.RawMessage, error) {
 	for _, def := range defs {
+		if def.Type == "namespace" {
+			if childName, ok := strings.CutPrefix(name, def.Name+"."); ok {
+				return normalizeDefinedArguments(def.Tools, childName, input)
+			}
+			continue
+		}
 		if def.Name == name && len(def.Parameters) > 0 {
 			return toolschema.NormalizeValidate(def.Parameters, input)
 		}

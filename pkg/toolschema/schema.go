@@ -29,7 +29,7 @@ func Strict(raw json.RawMessage, anthropic bool) (converted json.RawMessage, uni
 	if schema["type"] != "object" {
 		return nil, 0, fmt.Errorf("tool root must be an object")
 	}
-	err = convert(schema, true, anthropic, &unions, 0)
+	err = convert(schema, anthropic, &unions, 0)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -41,7 +41,7 @@ func Strict(raw json.RawMessage, anthropic bool) (converted json.RawMessage, uni
 	return
 }
 
-func convert(s map[string]any, root, anthropic bool, unions *int, depth int) error {
+func convert(s map[string]any, anthropic bool, unions *int, depth int) error {
 	if depth > 9 {
 		return fmt.Errorf("strict schema nesting limit exceeded")
 	}
@@ -79,7 +79,7 @@ func convert(s map[string]any, root, anthropic bool, unions *int, depth int) err
 		if ap, exists := s["additionalProperties"]; exists && ap != false {
 			return fmt.Errorf("open object")
 		}
-		if !hasProps && !root && s["additionalProperties"] != false {
+		if !hasProps && s["additionalProperties"] != false {
 			return fmt.Errorf("arbitrary object")
 		}
 		if props == nil {
@@ -92,7 +92,7 @@ func convert(s map[string]any, root, anthropic bool, unions *int, depth int) err
 			if !ok {
 				return fmt.Errorf("invalid property")
 			}
-			if err := convert(child, false, anthropic, unions, depth+1); err != nil {
+			if err := convert(child, anthropic, unions, depth+1); err != nil {
 				return err
 			}
 			if !required[name] && child["type"] != "null" {
@@ -111,7 +111,7 @@ func convert(s map[string]any, root, anthropic bool, unions *int, depth int) err
 		if !ok {
 			return fmt.Errorf("untyped array")
 		}
-		return convert(child, false, anthropic, unions, depth+1)
+		return convert(child, anthropic, unions, depth+1)
 	case "string", "integer", "number", "boolean", "null":
 	default:
 		return fmt.Errorf("unsupported type %s", kind)

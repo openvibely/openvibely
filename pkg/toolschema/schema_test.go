@@ -77,3 +77,19 @@ func TestStrictConstantRemainsRequired(t *testing.T) {
 		}
 	}
 }
+
+func TestOpenRootSchemaRemainsNonStrict(t *testing.T) {
+	for _, anthropic := range []bool{false, true} {
+		schema := json.RawMessage(`{"type":"object"}`)
+		if _, _, err := Strict(schema, anthropic); err == nil {
+			t.Fatal("open root converted to an empty closed object")
+		}
+		input := json.RawMessage(`{"custom":"value","metadata":{"x":null}}`)
+		if _, err := NormalizeValidate(schema, input); err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := Strict(json.RawMessage(`{"type":"object","additionalProperties":false}`), anthropic); err != nil {
+			t.Fatalf("explicitly closed empty object: %v", err)
+		}
+	}
+}
