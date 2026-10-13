@@ -5168,15 +5168,28 @@ templ ChatAutoScrollScript() {
 					var codeRanges = [];
 					var transcriptToolRanges = [];
 					var segments = [];
-					function toolBlockRanges(text) {
-						var ranges = [];
-						var pattern = /^[\t ]*\[Tool\s+\S+\s+(?:done|error)\][\t ]*(?:\r\n|\r|\n)?[\s\S]*?\[\/Tool\][\t ]*(?=\r?$)(?:\r\n|\r|\n)?/gm;
-						var block;
-						while ((block = pattern.exec(text)) !== null) ranges.push({ start: block.index, end: block.index + block[0].length });
+					function toolBlockRanges(text, protectedRanges) {
+						var ranges = [], protectedIndex = 0;
+						var opener = /^[\t ]*\[Tool\s+\S+\s+(?:done|error)\][\t ]*(?:\r\n|\r|\n)?/gm;
+						var closer = /\[\/Tool\][\t ]*(?=\r?$)(?:\r\n|\r|\n)?/gm;
+						var block, end;
+						while ((block = opener.exec(text)) !== null) {
+							while (protectedRanges && protectedIndex < protectedRanges.length && protectedRanges[protectedIndex].end <= block.index) protectedIndex++;
+							var quoted = protectedRanges && protectedRanges[protectedIndex];
+							if (quoted && quoted.literalTool && quoted.start <= block.index) {
+								opener.lastIndex = quoted.end;
+								continue;
+							}
+							closer.lastIndex = opener.lastIndex;
+							end = closer.exec(text);
+							if (!end) break;
+							ranges.push({start: block.index, end: closer.lastIndex});
+							opener.lastIndex = closer.lastIndex;
+						}
 						return ranges;
 					}
 					function protectInitialToolBlocks() {
-						rawCodeRanges = rawCodeRanges.concat(toolBlockRanges(textBuffer));
+						rawCodeRanges = rawCodeRanges.concat(toolBlockRanges(textBuffer, rawCodeRanges));
 						// Command previews are opaque to alias normalization as well as Markdown.
 						// Leave malformed legacy invocations available to the normalizer.
 						var headers = /^[\t ]*\[Using tool:\s*[A-Za-z0-9_.:-]+(?: \| [^\]\r\n]*)?\][\t ]*(?=\r?$)/gm;
@@ -5214,6 +5227,7 @@ templ ChatAutoScrollScript() {
 						return true;
 					}
 					function excludeToolBlockCodeRanges(ranges) {
+						transcriptToolRanges = toolBlockRanges(textBuffer, ranges);
 						if (!ranges.length || !transcriptToolRanges.length) return ranges;
 						var filtered = [];
 						var toolIndex = 0;
