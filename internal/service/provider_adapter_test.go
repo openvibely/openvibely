@@ -933,6 +933,72 @@ func TestReportedContextUsageAddsOnlyNewContent(t *testing.T) {
 	}
 }
 
+func TestAnthropicCheckpointOnlyFollowupBudget(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		reportedTokens int
+		wantSummary    bool
+	}{
+		{name: "reported usage includes native state", reportedTokens: 139302},
+		{name: "oversized checkpoint restores transcript", reportedTokens: 190000, wantSummary: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := repository.NewExecutionRepo(testutil.NewTestDB(t))
+			ctx := context.Background()
+			agent := models.LLMConfig{ID: "model", Provider: models.ProviderAnthropic, Model: "claude-opus-5-5", ContextWindow: 200000}
+			state := `[{"type":"text","text":"` + strings.Repeat("x", 274000) + `"}]`
+			req := llmcontracts.AgentRequest{
+				Ctx: ctx, Operation: llmcontracts.OperationStreaming, Followup: true,
+				TransportScope: "chat:project:checkpoint-followup",
+				ProjectID:      "checkpoint-followup", Agent: agent, Message: "continue",
+				ChatHistory: []models.Execution{{ID: "source", PromptSent: "original question", Output: "original answer", Status: models.ExecCompleted}},
+			}
+			if err := repo.UpsertChatCompactionCheckpoint(ctx, models.ChatCompactionCheckpoint{
+				ScopeType: "chat_project", ScopeID: req.ProjectID, ModelConfigID: agent.ID,
+				CompatibilityKey: providerCompatibilityKey(agent), SourceExecutionID: "source",
+				Strategy: "anthropic", ProviderStateJSON: state,
+			}); err != nil {
+				t.Fatal(err)
+			}
+			key := strings.Join([]string{agent.ID, string(agent.Provider), agent.Model, agent.BaseURL, string(agent.AuthMethod)}, "|")
+			if err := repo.SaveChatContextUsage(ctx, "chat_project", req.ProjectID, key, models.ChatContextUsage{
+				SourceExecutionID: "source", ContextTokens: tc.reportedTokens, OverheadTokens: requestContextOverhead(req),
+			}); err != nil {
+				t.Fatal(err)
+			}
+			calls := 0
+			adapter := providerAdapterFunc(func(got llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
+				calls++
+				if tc.wantSummary {
+					if got.NativeCompactionStateJSON != "" {
+						t.Fatal("local summary or continuation retained native state")
+					}
+					if calls == 1 && (got.Operation != llmcontracts.OperationDirect || !strings.Contains(got.Message, "original answer")) {
+						t.Fatal("must summarize original transcript before continuation")
+					}
+					if calls == 2 && (got.Message != req.Message || !strings.Contains(historyCompactionSummary(got.ChatHistory), "text summary")) {
+						t.Fatal("continuation lost pending message or summary")
+					}
+				} else if got.NativeCompactionStateJSON != state || len(got.ChatHistory) != 0 || got.ForceNativeCompaction {
+					t.Fatal("reported usage must not double count native checkpoint or trigger compaction")
+				}
+				return llmcontracts.AgentResult{Output: "text summary"}, nil
+			})
+			svc := NewLLMService(nil, repo, nil, nil, nil, nil)
+			if _, err := svc.callProviderWithContextCompactionFallback(adapter, req); err != nil {
+				t.Fatal(err)
+			}
+			wantCalls := 1
+			if tc.wantSummary {
+				wantCalls = 2
+			}
+			if calls != wantCalls {
+				t.Fatalf("calls=%d, want %d", calls, wantCalls)
+			}
+		})
+	}
+}
+
 func TestNativeCheckpointFailureSummarizesOriginalTranscript(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	repo := repository.NewExecutionRepo(db)

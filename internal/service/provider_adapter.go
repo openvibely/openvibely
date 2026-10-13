@@ -906,7 +906,9 @@ func (s *LLMService) callProviderWithCompaction(adapter ProviderAdapter, req llm
 	locallyCompactedBeforeProvider := false
 	budget := calculateRequestBudget(req)
 	if req.ContextTokenEstimate > 0 {
-		reportedHistory := req.ContextTokenEstimate - budget.FixedTokens - budget.PendingTokens - budget.AttachmentTokens
+		// Reported context already includes the restored native state. Only
+		// attribute the remainder to history so the checkpoint is not counted twice.
+		reportedHistory := req.ContextTokenEstimate - budget.FixedTokens - budget.PendingTokens - budget.AttachmentTokens - budget.NativeStateTokens
 		if reportedHistory > budget.HistoryTokens {
 			budget.HistoryTokens = reportedHistory
 		}
@@ -1196,7 +1198,7 @@ func shouldUseLocalSummaryBeforeProvider(req llmcontracts.AgentRequest) bool {
 }
 
 func shouldUseLocalSummaryBeforeProviderWithBudget(req llmcontracts.AgentRequest, budget requestBudget) bool {
-	if len(req.ChatHistory) == 0 {
+	if len(req.ChatHistory) == 0 && req.NativeCompactionStateJSON == "" {
 		return false
 	}
 	if !providerSupportsNativeCompaction(req.Agent) {
