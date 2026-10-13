@@ -64,6 +64,17 @@ func normalizeValidate(schema, input json.RawMessage, external bool) (json.RawMe
 		}
 		return nil, fmt.Errorf("invalid tool schema: %w", err)
 	}
+	if external {
+		// Valid external arguments belong to the tool server. In particular,
+		// a draft-07 $ref can override a sibling type and allow explicit null.
+		if validationErr := compiled.Validate(value); validationErr == nil {
+			return input, nil
+		} else if _, conversionErr := MarshalOpenAI(nil, schema, true); conversionErr != nil {
+			// Only schemas supported by strict conversion can contain our
+			// nullable placeholders. Do not rewrite other schema dialects.
+			return nil, fmt.Errorf("invalid tool arguments: %w", validationErr)
+		}
+	}
 	normalize(s, value)
 	if err = compiled.Validate(value); err != nil {
 		return nil, fmt.Errorf("invalid tool arguments: %w", err)
