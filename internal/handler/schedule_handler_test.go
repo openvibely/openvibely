@@ -16,7 +16,7 @@ import (
 	"github.com/labstack/echo/v4/middleware"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/openvibely/openvibely/web/templates/pages"
 )
@@ -485,7 +485,7 @@ func TestViewSchedule_UsesCompactAgentScheduleProjection(t *testing.T) {
 	db, counter := testutil.NewStatementCountingTestDB(t)
 	h, e, _ := setupTestHandlerForDB(t, db)
 	project := createProject(t, h, "Schedule Agent Projection")
-	agentRepo := repository.NewAgentRepo(db)
+	agentRepo := sqlite.NewAgentRepo(db)
 	h.SetAgentRepo(agentRepo)
 	agent := &models.Agent{
 		Name:                "Rich Schedule Runner",
@@ -577,7 +577,7 @@ func TestCreateScheduledTaskFromScheduleUsesCompactAgentProjection(t *testing.T)
 	db, counter := testutil.NewStatementCountingTestDB(t)
 	h, e, _ := setupTestHandlerForDB(t, db)
 	project := createProject(t, h, "Schedule Create Projection")
-	agentRepo := repository.NewAgentRepo(db)
+	agentRepo := sqlite.NewAgentRepo(db)
 	h.SetAgentRepo(agentRepo)
 	agent := createScheduleTestAgent(t, agentRepo, "Schedule Create Runner", models.AgentScopeGlobal, "", true)
 	agent.Model = "opus"
@@ -633,8 +633,8 @@ func TestCreateScheduledTaskFromScheduleUsesCompactAgentProjection(t *testing.T)
 
 func BenchmarkScheduleAgentOptionProjectionAndContent(b *testing.B) {
 	db := testutil.NewTestDB(b)
-	agentRepo := repository.NewAgentRepo(db)
-	projectRepo := repository.NewProjectRepo(db)
+	agentRepo := sqlite.NewAgentRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
 	project := &models.Project{Name: "Schedule Benchmark Project"}
 	if err := projectRepo.Create(context.Background(), project); err != nil {
 		b.Fatalf("create benchmark project: %v", err)
@@ -697,7 +697,7 @@ func BenchmarkScheduleAgentOptionProjectionAndContent(b *testing.B) {
 	})
 }
 
-func createScheduleTestAgent(t *testing.T, repo *repository.AgentRepo, name string, scope models.AgentScope, projectID string, selectable bool) *models.Agent {
+func createScheduleTestAgent(t *testing.T, repo *sqlite.AgentRepo, name string, scope models.AgentScope, projectID string, selectable bool) *models.Agent {
 	t.Helper()
 	agent := &models.Agent{
 		Name:                name,
@@ -720,7 +720,7 @@ func TestCreateSchedule_AssignsPrimaryAgent(t *testing.T) {
 	tc := NewTestContext(t)
 	project := tc.CreateProject().Build()
 	task := tc.CreateTask(project.ID).Build()
-	agentRepo := repository.NewAgentRepo(tc.db)
+	agentRepo := sqlite.NewAgentRepo(tc.db)
 	tc.handler.agentRepo = agentRepo
 	agent := createScheduleTestAgent(t, agentRepo, "Schedule Runner", models.AgentScopeProject, project.ID, true)
 
@@ -748,7 +748,7 @@ func TestCreateSchedule_AssignsPrimaryAgent(t *testing.T) {
 func TestCreateSchedule_ExplicitNoAgentClearsPrimaryAgent(t *testing.T) {
 	tc := NewTestContext(t)
 	project := tc.CreateProject().Build()
-	agentRepo := repository.NewAgentRepo(tc.db)
+	agentRepo := sqlite.NewAgentRepo(tc.db)
 	tc.handler.agentRepo = agentRepo
 	agent := createScheduleTestAgent(t, agentRepo, "Existing Runner", models.AgentScopeGlobal, "", true)
 	task := tc.CreateTask(project.ID).Build()
@@ -781,7 +781,7 @@ func TestUpdateSchedule_PersistsAndClearsPrimaryAgentWithoutChangingModel(t *tes
 	taskBuilder.task.AgentID = &model.ID
 	task := taskBuilder.Build()
 	schedule := tc.CreateSchedule(task.ID).Build()
-	agentRepo := repository.NewAgentRepo(tc.db)
+	agentRepo := sqlite.NewAgentRepo(tc.db)
 	tc.handler.agentRepo = agentRepo
 	agent := createScheduleTestAgent(t, agentRepo, "Updated Runner", models.AgentScopeProject, project.ID, true)
 	runAt := time.Now().Add(2 * time.Hour).Format("2006-01-02T15:04")
@@ -819,7 +819,7 @@ func TestUpdateSchedule_RejectsIneligibleAndCrossProjectAgents(t *testing.T) {
 	otherProject := tc.CreateProject().WithName("Other Project").Build()
 	task := tc.CreateTask(project.ID).Build()
 	schedule := tc.CreateSchedule(task.ID).Build()
-	agentRepo := repository.NewAgentRepo(tc.db)
+	agentRepo := sqlite.NewAgentRepo(tc.db)
 	tc.handler.agentRepo = agentRepo
 	ineligible := createScheduleTestAgent(t, agentRepo, "Maintenance Agent", models.AgentScopeGlobal, "", false)
 	otherProjectAgent := createScheduleTestAgent(t, agentRepo, "Other Project Agent", models.AgentScopeProject, otherProject.ID, true)
@@ -847,7 +847,7 @@ func TestViewSchedule_PrimaryAgentOptionsAreEligibleAndProjectScoped(t *testing.
 	tc := NewTestContext(t)
 	project := tc.CreateProject().Build()
 	otherProject := tc.CreateProject().WithName("Other Project").Build()
-	agentRepo := repository.NewAgentRepo(tc.db)
+	agentRepo := sqlite.NewAgentRepo(tc.db)
 	tc.handler.agentRepo = agentRepo
 	global := createScheduleTestAgent(t, agentRepo, "Global Runner", models.AgentScopeGlobal, "", true)
 	projectAgent := createScheduleTestAgent(t, agentRepo, "Project Runner", models.AgentScopeProject, project.ID, true)
@@ -1062,7 +1062,7 @@ func TestCreateScheduledTask_PersistsPrimaryAgentAndExplicitNoAgent(t *testing.T
 		t.Run(tcse.name, func(t *testing.T) {
 			tc := NewTestContext(t)
 			project := tc.CreateProject().Build()
-			agentRepo := repository.NewAgentRepo(tc.db)
+			agentRepo := sqlite.NewAgentRepo(tc.db)
 			tc.handler.agentRepo = agentRepo
 			agent := createScheduleTestAgent(t, agentRepo, "Scheduled Creator", models.AgentScopeProject, project.ID, true)
 			agentID := ""
@@ -1230,7 +1230,7 @@ func TestUpdateSchedule_HTMX_Success(t *testing.T) {
 func TestUpdateSchedule_WithoutAgentFieldPreservesExistingAssignment(t *testing.T) {
 	tc := NewTestContext(t)
 	project := tc.CreateProject().Build()
-	agentRepo := repository.NewAgentRepo(tc.db)
+	agentRepo := sqlite.NewAgentRepo(tc.db)
 	tc.handler.agentRepo = agentRepo
 	protected := createScheduleTestAgent(t, agentRepo, "Protected Scheduled Maintenance", models.AgentScopeGlobal, "", false)
 	task := tc.CreateTask(project.ID).Build()
@@ -1259,7 +1259,7 @@ func TestUpdateSchedule_HTMXResponseHydratesSavedPrimaryAgent(t *testing.T) {
 	project := tc.CreateProject().Build()
 	task := tc.CreateTask(project.ID).Build()
 	schedule := tc.CreateSchedule(task.ID).Build()
-	agentRepo := repository.NewAgentRepo(tc.db)
+	agentRepo := sqlite.NewAgentRepo(tc.db)
 	tc.handler.agentRepo = agentRepo
 	agent := createScheduleTestAgent(t, agentRepo, "HTMX Scheduled Runner", models.AgentScopeProject, project.ID, true)
 	runAt := time.Now().Add(2 * time.Hour).Format("2006-01-02T15:04")
@@ -1289,7 +1289,7 @@ func TestUpdateSchedule_NativeFormMethodOverridePersistsPrimaryAgent(t *testing.
 	project := tc.CreateProject().Build()
 	task := tc.CreateTask(project.ID).Build()
 	schedule := tc.CreateSchedule(task.ID).Build()
-	agentRepo := repository.NewAgentRepo(tc.db)
+	agentRepo := sqlite.NewAgentRepo(tc.db)
 	tc.handler.agentRepo = agentRepo
 	agent := createScheduleTestAgent(t, agentRepo, "Native Scheduled Runner", models.AgentScopeProject, project.ID, true)
 	runAt := time.Now().Add(2 * time.Hour).Format("2006-01-02T15:04")

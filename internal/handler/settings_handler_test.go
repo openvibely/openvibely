@@ -12,7 +12,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/persistence"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -293,8 +293,8 @@ func TestHandleTelegramSaveErrorDoesNotRefreshOrRedirect(t *testing.T) {
 
 func TestHandleTelegramSaveNewServiceWiresSharedRunner(t *testing.T) {
 	h, e, _, db := setupTestHandlerWithDB(t)
-	h.SetAgentRepo(repository.NewAgentRepo(db))
-	h.SetTelegramUserProjectRepo(repository.NewTelegramUserProjectRepo(db))
+	h.SetAgentRepo(sqlite.NewAgentRepo(db))
+	h.SetTelegramUserProjectRepo(sqlite.NewTelegramUserProjectRepo(db))
 
 	createdSvc := &service.TelegramService{}
 	origNewTelegramService := newTelegramService

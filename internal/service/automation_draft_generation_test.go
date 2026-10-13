@@ -8,18 +8,18 @@ import (
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/stretchr/testify/require"
 )
 
 func TestAutomationCapabilitySnapshotIsBoundedDeterministicAndSecretFree(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	projectRepo := repository.NewProjectRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
 	project := automationTestProject(t, projectRepo, "Snapshot")
-	agentRepo := repository.NewAgentRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	settingsRepo := repository.NewSettingsRepo(db)
+	agentRepo := sqlite.NewAgentRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 	agent := models.Agent{Name: "Builder", Key: "builder", Scope: models.AgentScopeProject, ProjectID: project.ID, Enabled: true, SelectableAsPrimary: true, SystemPrompt: "secret prompt", Tools: []string{"Read", "Write"}, Skills: []models.SkillConfig{{Name: "review", Description: "Review code", Content: "private skill body"}}}
 	require.NoError(t, agentRepo.Create(context.Background(), &agent))
 	task := models.Task{ProjectID: project.ID, Title: "Reusable Inbox", Prompt: "private task prompt", Category: models.CategoryBacklog, Priority: 2, Status: models.StatusPending}
@@ -514,14 +514,14 @@ func (s *automationCapabilityGitHubResolverStub) GlobalAPIEndpoint(context.Conte
 func TestAutomationCapabilitySnapshotAcceptsAuthorizedUserAndLocalGitHubRemote(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	projectRepo := repository.NewProjectRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
 	project := automationTestProject(t, projectRepo, "Local GitHub snapshot")
 	project.RepoPath = "/projects/local-github"
 	require.NoError(t, projectRepo.Update(ctx, &project))
-	settingsRepo := repository.NewSettingsRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 	require.NoError(t, settingsRepo.Set(ctx, GitHubSettingAuthMode, GitHubAuthModePAT))
 	require.NoError(t, settingsRepo.Set(ctx, GitHubSettingPAT, "secret-not-rendered"))
-	githubAuthRepo := repository.NewGitHubAuthRepo(db)
+	githubAuthRepo := sqlite.NewGitHubAuthRepo(db)
 	require.NoError(t, githubAuthRepo.UpsertAuthorizedActor(ctx, &models.GitHubAuthorizedActor{GitHubLogin: "automation-bot"}))
 	provider := &automationCapabilityGitHubResolverStub{automationCapabilityGitHubStatusStub: automationCapabilityGitHubStatusStub{
 		status: GitHubConnectionStatus{AuthMode: GitHubAuthModePAT, Configured: true, Connected: true, HasPAT: true},
@@ -540,10 +540,10 @@ func TestAutomationCapabilitySnapshotAcceptsAuthorizedUserAndLocalGitHubRemote(t
 func TestAutomationCapabilitySnapshotRequiresUsableConnectedGitHubMode(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	projectRepo := repository.NewProjectRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
 	project := automationTestProject(t, projectRepo, "GitHub snapshot")
-	settingsRepo := repository.NewSettingsRepo(db)
-	githubAuthRepo := repository.NewGitHubAuthRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
+	githubAuthRepo := sqlite.NewGitHubAuthRepo(db)
 	builder := NewAutomationCapabilitySnapshotBuilder(projectRepo, nil, nil, settingsRepo)
 	builder.SetGitHubAuthRepository(githubAuthRepo)
 
@@ -589,9 +589,9 @@ func TestAutomationCapabilitySnapshotRequiresUsableConnectedGitHubMode(t *testin
 
 func TestAutomationDescriptionGenerationUsesOneRepairAndNoPersistence(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	projectRepo := repository.NewProjectRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
 	project := automationTestProject(t, projectRepo, "Describe")
-	repo := repository.NewAutomationRepo(db)
+	repo := sqlite.NewAutomationRepo(db)
 	svc := NewAutomationDraftService(repo, NewAutomationAdapterRegistry())
 	valid, err := svc.TemplateCandidate(AutomationAdapterVisionDriver)
 	require.NoError(t, err)

@@ -23,7 +23,7 @@ import (
 	"github.com/openvibely/openvibely/internal/lifecycle"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/openvibely/openvibely/web/static"
@@ -32,18 +32,18 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func setupTestHandler(t testing.TB) (*Handler, *echo.Echo, *repository.LLMConfigRepo) {
+func setupTestHandler(t testing.TB) (*Handler, *echo.Echo, *sqlite.LLMConfigRepo) {
 	h, e, llmConfigRepo, _ := setupTestHandlerWithDB(t)
 	return h, e, llmConfigRepo
 }
 
-func setupTestHandlerForDB(t testing.TB, db *sql.DB) (*Handler, *echo.Echo, *repository.LLMConfigRepo) {
+func setupTestHandlerForDB(t testing.TB, db *sql.DB) (*Handler, *echo.Echo, *sqlite.LLMConfigRepo) {
 	t.Helper()
 	env := newTestHandlerEnv(t, db)
 	return env.Handler, env.Echo, env.LLMConfigRepo
 }
 
-func setupTestHandlerWithDB(t testing.TB) (*Handler, *echo.Echo, *repository.LLMConfigRepo, *sql.DB) {
+func setupTestHandlerWithDB(t testing.TB) (*Handler, *echo.Echo, *sqlite.LLMConfigRepo, *sql.DB) {
 	t.Helper()
 	env := newTestHandlerEnv(t, testutil.NewTestDB(t))
 	return env.Handler, env.Echo, env.LLMConfigRepo, env.DB
@@ -745,7 +745,7 @@ func newestHistoryExecutionID(t testing.TB, db *sql.DB, taskID string, offset in
 func TestHandler_GetTaskDetailStatusUsesCompactAgentLabelProjection(t *testing.T) {
 	db, counter := testutil.NewStatementCountingTestDB(t)
 	h, e, llmConfigRepo := setupTestHandlerForDB(t, db)
-	h.SetAgentRepo(repository.NewAgentRepo(db))
+	h.SetAgentRepo(sqlite.NewAgentRepo(db))
 	ctx := context.Background()
 
 	model := createAgent(t, llmConfigRepo)
@@ -815,7 +815,7 @@ func TestHandler_GetTaskDetailStatusUsesCompactAgentLabelProjection(t *testing.T
 func TestHandler_GetTaskDetailStatusPreservesAgentAvailabilityAndTaskStates(t *testing.T) {
 	db, counter := testutil.NewStatementCountingTestDB(t)
 	h, e, llmConfigRepo := setupTestHandlerForDB(t, db)
-	h.SetAgentRepo(repository.NewAgentRepo(db))
+	h.SetAgentRepo(sqlite.NewAgentRepo(db))
 	ctx := context.Background()
 
 	model := createAgent(t, llmConfigRepo)
@@ -1045,7 +1045,7 @@ func TestHandler_GetTaskDetailStatusLargeHistoryUsesNarrowExecutionMetrics(t *te
 	db, counter := testutil.NewStatementCountingTestDB(t)
 	h, e, llmConfigRepo := setupTestHandlerForDB(t, db)
 	ctx := context.Background()
-	agentRepo := repository.NewAgentRepo(db)
+	agentRepo := sqlite.NewAgentRepo(db)
 	h.SetAgentRepo(agentRepo)
 	agent := createAgent(t, llmConfigRepo)
 	agentDef := &models.Agent{
@@ -1109,7 +1109,7 @@ func BenchmarkHandler_GetTaskDetailStatus_MetricsProjection(b *testing.B) {
 		db, counter := testutil.NewStatementCountingTestDB(b)
 		h, e, llmConfigRepo := setupTestHandlerForDB(b, db)
 		ctx := context.Background()
-		agentRepo := repository.NewAgentRepo(db)
+		agentRepo := sqlite.NewAgentRepo(db)
 		h.SetAgentRepo(agentRepo)
 		agent := createAgentTB(b, llmConfigRepo)
 		agentDef := &models.Agent{Name: "Primary Metrics Agent", Key: "primary_metrics_agent", SystemPrompt: "Handle metrics tasks.", Model: "inherit", Enabled: true, SelectableAsPrimary: true}
@@ -1179,7 +1179,7 @@ func BenchmarkHandler_GetTaskDetailStatus_AgentProjection(b *testing.B) {
 	db, counter := testutil.NewStatementCountingTestDB(b)
 	h, e, llmConfigRepo := setupTestHandlerForDB(b, db)
 	ctx := context.Background()
-	agentRepo := repository.NewAgentRepo(db)
+	agentRepo := sqlite.NewAgentRepo(db)
 	h.SetAgentRepo(agentRepo)
 	if _, err := db.ExecContext(ctx, `DELETE FROM agents WHERE id IS NOT NULL`); err != nil {
 		b.Fatalf("clear Agent definitions: %v", err)
@@ -1264,7 +1264,7 @@ func BenchmarkHandler_GetTaskDetailStatus_AgentProjection(b *testing.B) {
 	b.ReportMetric(float64(totalLightweightWait.Nanoseconds())/float64(b.N), "lightweight_db_wait_ns/op")
 }
 
-func createRichTaskDetailBenchmarkAgent(tb testing.TB, repo *repository.AgentRepo, name string) *models.Agent {
+func createRichTaskDetailBenchmarkAgent(tb testing.TB, repo *sqlite.AgentRepo, name string) *models.Agent {
 	tb.Helper()
 	agent := &models.Agent{
 		Name:         name,
@@ -2112,7 +2112,7 @@ func TestHandler_ModelDeletionResetsProtectedAgentOverrides(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			h, e, repo, db := setupTestHandlerWithDB(t)
 			ctx := context.Background()
-			agentRepo := repository.NewAgentRepo(db)
+			agentRepo := sqlite.NewAgentRepo(db)
 
 			target, err := repo.GetDefault(ctx)
 			if err != nil || target == nil {
@@ -3361,7 +3361,7 @@ func TestHandler_UpdateTask_AssignsAndClearsPrimaryAgentDefinition(t *testing.T)
 	tc := NewTestContext(t)
 	ctx := context.Background()
 	project := tc.CreateProject().Build()
-	agentRepo := repository.NewAgentRepo(tc.db)
+	agentRepo := sqlite.NewAgentRepo(tc.db)
 	tc.handler.agentRepo = agentRepo
 	projectAgent := createScheduleTestAgent(t, agentRepo, "Task Edit Runner", models.AgentScopeProject, project.ID, true)
 	globalAgent := createScheduleTestAgent(t, agentRepo, "Task Edit Global Runner", models.AgentScopeGlobal, "", true)
@@ -3388,25 +3388,25 @@ func TestHandler_UpdateTask_AssignsAndClearsPrimaryAgentDefinition(t *testing.T)
 func TestHandler_UpdateTask_RejectsInvalidPrimaryAgentDefinitions(t *testing.T) {
 	cases := []struct {
 		name     string
-		agentID  func(t *testing.T, repo *repository.AgentRepo, projectID, otherProjectID string) string
+		agentID  func(t *testing.T, repo *sqlite.AgentRepo, projectID, otherProjectID string) string
 		wantBody string
 	}{
 		{
 			name: "cross project",
-			agentID: func(t *testing.T, repo *repository.AgentRepo, _, otherProjectID string) string {
+			agentID: func(t *testing.T, repo *sqlite.AgentRepo, _, otherProjectID string) string {
 				return createScheduleTestAgent(t, repo, "Other Project Task Edit Agent", models.AgentScopeProject, otherProjectID, true).ID
 			},
 			wantBody: "invalid primary agent",
 		},
 		{
 			name: "unknown",
-			agentID: func(t *testing.T, _ *repository.AgentRepo, _, _ string) string {
+			agentID: func(t *testing.T, _ *sqlite.AgentRepo, _, _ string) string {
 				return "agent-does-not-exist"
 			},
 		},
 		{
 			name: "disabled",
-			agentID: func(t *testing.T, repo *repository.AgentRepo, projectID, _ string) string {
+			agentID: func(t *testing.T, repo *sqlite.AgentRepo, projectID, _ string) string {
 				agent := createScheduleTestAgent(t, repo, "Disabled Task Edit Agent", models.AgentScopeProject, projectID, true)
 				agent.Enabled = false
 				require.NoError(t, repo.Update(context.Background(), agent))
@@ -3416,7 +3416,7 @@ func TestHandler_UpdateTask_RejectsInvalidPrimaryAgentDefinitions(t *testing.T) 
 		},
 		{
 			name: "archived",
-			agentID: func(t *testing.T, repo *repository.AgentRepo, projectID, _ string) string {
+			agentID: func(t *testing.T, repo *sqlite.AgentRepo, projectID, _ string) string {
 				agent := createScheduleTestAgent(t, repo, "Archived Task Edit Agent", models.AgentScopeProject, projectID, true)
 				agent.GeneratedStatus = models.AgentStatusArchived
 				require.NoError(t, repo.Update(context.Background(), agent))
@@ -3426,7 +3426,7 @@ func TestHandler_UpdateTask_RejectsInvalidPrimaryAgentDefinitions(t *testing.T) 
 		},
 		{
 			name: "non selectable",
-			agentID: func(t *testing.T, repo *repository.AgentRepo, projectID, _ string) string {
+			agentID: func(t *testing.T, repo *sqlite.AgentRepo, projectID, _ string) string {
 				return createScheduleTestAgent(t, repo, "Non Selectable Task Edit Agent", models.AgentScopeProject, projectID, false).ID
 			},
 			wantBody: "invalid primary agent",
@@ -3438,7 +3438,7 @@ func TestHandler_UpdateTask_RejectsInvalidPrimaryAgentDefinitions(t *testing.T) 
 			tc := NewTestContext(t)
 			project := tc.CreateProject().WithName("Project A").Build()
 			otherProject := tc.CreateProject().WithName("Project B").Build()
-			agentRepo := repository.NewAgentRepo(tc.db)
+			agentRepo := sqlite.NewAgentRepo(tc.db)
 			tc.handler.agentRepo = agentRepo
 			previous := createScheduleTestAgent(t, agentRepo, "Existing Task Edit Agent", models.AgentScopeProject, project.ID, true)
 			task := createTask(t, tc.handler, project.ID, "Task Edit Invalid Agent", func(tk *models.Task) {
@@ -5869,7 +5869,7 @@ func TestLayout_UIPreferencesRestoreFromSettings(t *testing.T) {
 func TestLayout_UIPreferencesDoNotReadSettingsForHTMXFragments(t *testing.T) {
 	h, e, _, _ := setupTestHandlerWithDB(t)
 	settingsQueries := 0
-	h.settingsRepo.(*repository.SettingsRepo).SetQueryObserver(func(query string) {
+	h.settingsRepo.(*sqlite.SettingsRepo).SetQueryObserver(func(query string) {
 		if strings.Contains(query, "app_settings") {
 			settingsQueries++
 		}
@@ -6245,12 +6245,12 @@ func TestHandler_TaskThreadSend(t *testing.T) {
 func TestHandler_TaskThreadSend_ClearsStaleCancellationMarkerSoGoalAfterCompleteRuns(t *testing.T) {
 	h, e, llmConfigRepo, db := setupTestHandlerWithDB(t)
 	ctx := context.Background()
-	goalRepo := repository.NewTaskGoalRepo(db)
+	goalRepo := sqlite.NewTaskGoalRepo(db)
 	goalSvc := service.NewTaskGoalService(goalRepo, h.taskRepo, nil)
 	h.SetTaskGoalService(goalSvc)
 	h.taskSvc.SetTaskGoalService(goalSvc)
 	h.workerSvc.SetTaskGoalService(goalSvc)
-	agentRepo := repository.NewAgentRepo(db)
+	agentRepo := sqlite.NewAgentRepo(db)
 	h.SetAgentRepo(agentRepo)
 	h.workerSvc.SetLifecycleAgentRepo(agentRepo)
 
@@ -6558,7 +6558,7 @@ func TestHandler_SwarmFollowupChildQueuesWhenActive(t *testing.T) {
 func TestHandler_SubmitReview_SwarmChildQueuesBehindActiveExecutionWithoutRouting(t *testing.T) {
 	h, e, llmConfigRepo, db := setupTestHandlerWithDB(t)
 	h.workerSvc = nil
-	reviewRepo := repository.NewReviewCommentRepo(db)
+	reviewRepo := sqlite.NewReviewCommentRepo(db)
 	h.SetReviewCommentRepo(reviewRepo)
 	ctx := context.Background()
 	agent := createAgent(t, llmConfigRepo)
@@ -6628,7 +6628,7 @@ func TestHandler_SubmitReview_SwarmChildQueuesBehindActiveExecutionWithoutRoutin
 func TestHandler_SubmitReview_SwarmChildDirectStartAppliesRouting(t *testing.T) {
 	h, e, llmConfigRepo, db := setupTestHandlerWithDB(t)
 	h.workerSvc = nil
-	reviewRepo := repository.NewReviewCommentRepo(db)
+	reviewRepo := sqlite.NewReviewCommentRepo(db)
 	h.SetReviewCommentRepo(reviewRepo)
 	ctx := context.Background()
 	agent := createAgent(t, llmConfigRepo)
@@ -7662,7 +7662,7 @@ func TestHandler_TaskThreadSteer_CreatesPendingSteeringInput(t *testing.T) {
 	if len(execs) != 1 || execs[0].ID != activeExec.ID || execs[0].Status != models.ExecRunning {
 		t.Fatalf("expected active execution to keep running, got %#v", execs)
 	}
-	inputs, err := h.threadInputRepo.(*repository.ThreadInputRepo).ListPendingSteering(ctx, activeExec.ID, activeExec.ID)
+	inputs, err := h.threadInputRepo.(*sqlite.ThreadInputRepo).ListPendingSteering(ctx, activeExec.ID, activeExec.ID)
 	require.NoError(t, err)
 	require.Len(t, inputs, 1)
 	assert.Equal(t, "Stop and use the new interface", inputs[0].Content)
@@ -8590,7 +8590,7 @@ func TestHandler_GetTaskThreadExecutionFragmentRejectsWrongTask(t *testing.T) {
 func TestHandler_GetTaskThread_ShowsPrimaryAgentDefinition(t *testing.T) {
 	h, e, llmConfigRepo, db := setupTestHandlerWithDB(t)
 	ctx := context.Background()
-	agentRepo := repository.NewAgentRepo(db)
+	agentRepo := sqlite.NewAgentRepo(db)
 	h.SetAgentRepo(agentRepo)
 	agent := createAgent(t, llmConfigRepo, func(a *models.LLMConfig) { a.Temperature = 1.0 })
 	agentDef := &models.Agent{
@@ -8625,7 +8625,7 @@ func TestHandler_GetTaskThread_ShowsPrimaryAgentDefinition(t *testing.T) {
 
 func TestHandler_GetTaskThread_HidesLifecycleAgentActivity(t *testing.T) {
 	h, e, llmConfigRepo, db := setupTestHandlerWithDB(t)
-	h.SetLifecycleRepo(repository.NewLifecycleRepo(db))
+	h.SetLifecycleRepo(sqlite.NewLifecycleRepo(db))
 	ctx := context.Background()
 	agent := createAgent(t, llmConfigRepo, func(a *models.LLMConfig) { a.Temperature = 1.0 })
 	project := createProject(t, h, "Lifecycle Thread Project")
@@ -8648,7 +8648,7 @@ func TestHandler_GetTaskThread_HidesLifecycleAgentActivity(t *testing.T) {
 		Status:         models.LifecycleExecCompleted,
 		OutputJSON:     `{"title":"Prepared useful context","content":"private context"}`,
 	}
-	if err := h.lifecycleRepo.(*repository.LifecycleRepo).CreateExecution(ctx, lifeExec); err != nil {
+	if err := h.lifecycleRepo.(*sqlite.LifecycleRepo).CreateExecution(ctx, lifeExec); err != nil {
 		t.Fatalf("create lifecycle execution: %v", err)
 	}
 
@@ -8832,7 +8832,7 @@ func TestHandler_GetTaskThread_RunningPlaceholder_NoLiteralThinkingText(t *testi
 		ex.Status = models.ExecRunning
 		ex.PromptSent = "Thread prompt"
 	})
-	assert.NoError(t, h.execRepo.(*repository.ExecutionRepo).UpdateOutput(ctx, exec.ID, ""))
+	assert.NoError(t, h.execRepo.(*sqlite.ExecutionRepo).UpdateOutput(ctx, exec.ID, ""))
 
 	rec := htmxGet(e, "/tasks/"+task.ID+"/thread")
 	assertCode(t, rec, http.StatusOK)
@@ -8860,7 +8860,7 @@ func TestHandler_GetTaskThread_RunningWithPartialOutput_ShowsStreamingDots(t *te
 		ex.Status = models.ExecRunning
 		ex.PromptSent = "Thread prompt"
 	})
-	assert.NoError(t, h.execRepo.(*repository.ExecutionRepo).UpdateOutput(ctx, exec.ID, "Partial thread output"))
+	assert.NoError(t, h.execRepo.(*sqlite.ExecutionRepo).UpdateOutput(ctx, exec.ID, "Partial thread output"))
 
 	rec := htmxGet(e, "/tasks/"+task.ID+"/thread")
 	assertCode(t, rec, http.StatusOK)
@@ -8907,7 +8907,7 @@ func TestHandler_GetTaskThread_ScheduledTaskExecutionSurvivesStaleRecoverySweep(
 		ex.Status = models.ExecRunning
 		ex.PromptSent = "Consolidate memories"
 	})
-	assert.NoError(t, h.execRepo.(*repository.ExecutionRepo).UpdateOutput(ctx, exec.ID, "partial consolidation output"))
+	assert.NoError(t, h.execRepo.(*sqlite.ExecutionRepo).UpdateOutput(ctx, exec.ID, "partial consolidation output"))
 
 	// Simulate an unrelated concurrent request triggering the stale-execution
 	// recovery sweep while the scheduled task is legitimately still running.
@@ -8951,7 +8951,7 @@ func TestHandler_GetTaskThread_ChannelSwarmChildFollowupSurvivesStaleRecoverySwe
 		tk.AgentID = &agent.ID
 	})
 	exec := &models.Execution{TaskID: worker.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "Continue worker implementation", IsFollowup: true}
-	assert.NoError(t, h.execRepo.(*repository.ExecutionRepo).CreateDirectTaskFollowup(ctx, exec))
+	assert.NoError(t, h.execRepo.(*sqlite.ExecutionRepo).CreateDirectTaskFollowup(ctx, exec))
 	h.StartChannelTaskRun(ctx, service.ChannelTaskRunRequest{
 		ExecID:    exec.ID,
 		TaskID:    worker.ID,
@@ -8970,7 +8970,7 @@ func TestHandler_GetTaskThread_ChannelSwarmChildFollowupSurvivesStaleRecoverySwe
 		stored, err := h.execRepo.GetByID(ctx, exec.ID)
 		return err == nil && stored != nil && stored.Status == models.ExecRunning
 	}, 2*time.Second, 25*time.Millisecond)
-	assert.NoError(t, h.execRepo.(*repository.ExecutionRepo).UpdateOutput(ctx, exec.ID, "partial worker output"))
+	assert.NoError(t, h.execRepo.(*sqlite.ExecutionRepo).UpdateOutput(ctx, exec.ID, "partial worker output"))
 
 	_, err := h.execRepo.RecoverStaleRunningTaskExecutions(ctx)
 	assert.NoError(t, err)
@@ -9101,7 +9101,7 @@ func TestHandler_GetTaskThread_PreservesHistoryAfterFailureAndRetry(t *testing.T
 		ex.IsFollowup = true
 	})
 	streamedFailureOutput := "running go test ./...\n--- FAIL: TestWidget"
-	if err := h.execRepo.(*repository.ExecutionRepo).UpdateOutput(ctx, failedFollowup.ID, streamedFailureOutput); err != nil {
+	if err := h.execRepo.(*sqlite.ExecutionRepo).UpdateOutput(ctx, failedFollowup.ID, streamedFailureOutput); err != nil {
 		t.Fatalf("failed to seed streamed failure output: %v", err)
 	}
 	h.execRepo.Complete(ctx, failedFollowup.ID, models.ExecFailed, "", "go test failed", 0, 120)
@@ -9169,7 +9169,7 @@ func TestHandler_GetTaskThread_PreservesHistoryAfterRateLimitFailure(t *testing.
 		ex.IsFollowup = true
 	})
 	streamedFailureOutput := "starting retry flow..."
-	if err := h.execRepo.(*repository.ExecutionRepo).UpdateOutput(ctx, rateLimited.ID, streamedFailureOutput); err != nil {
+	if err := h.execRepo.(*sqlite.ExecutionRepo).UpdateOutput(ctx, rateLimited.ID, streamedFailureOutput); err != nil {
 		t.Fatalf("failed to seed streamed failure output: %v", err)
 	}
 	rateLimitErr := `API error 429: {"type":"error","error":{"type":"rate_limit_error","message":"This request would exceed your account's rate limit. Please try again later."}}`

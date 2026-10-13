@@ -7,11 +7,11 @@ import (
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/testutil"
 )
 
-func benchmarkSeedCustomPersonalities(b *testing.B, repo *repository.CustomPersonalityRepo, n int) {
+func benchmarkSeedCustomPersonalities(b *testing.B, repo *sqlite.CustomPersonalityRepo, n int) {
 	b.Helper()
 	ctx := context.Background()
 	desc := strings.Repeat("desc ", 20)
@@ -33,7 +33,7 @@ func BenchmarkListPersonalitiesRuntimePage(b *testing.B) {
 	for _, n := range []int{0, 25, 500, 5000} {
 		b.Run(fmt.Sprintf("custom_%d", n), func(b *testing.B) {
 			db := testutil.NewTestDB(b)
-			repo := repository.NewCustomPersonalityRepo(db)
+			repo := sqlite.NewCustomPersonalityRepo(db)
 			benchmarkSeedCustomPersonalities(b, repo, n)
 			ctx := context.Background()
 			page, err := ListPersonalitiesRuntimePage(ctx, repo, PersonalityListDefaultLimit, 0)

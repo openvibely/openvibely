@@ -8,7 +8,7 @@ import (
 
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/testutil"
 )
 
@@ -220,11 +220,11 @@ func TestLLMHookInvoker_PreservesLegacyProviderModelSlug(t *testing.T) {
 func TestRunner_GoalHookAfterConfiguredModelDeletionUsesDefault(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	llmRepo := repository.NewLLMConfigRepo(db)
-	agentRepo := repository.NewAgentRepo(db)
-	lifecycleRepo := repository.NewLifecycleRepo(db)
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
+	llmRepo := sqlite.NewLLMConfigRepo(db)
+	agentRepo := sqlite.NewAgentRepo(db)
+	lifecycleRepo := sqlite.NewLifecycleRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
 
 	project := &models.Project{Name: "Lifecycle model deletion", RepoPath: "/tmp/lifecycle-model-deletion"}
 	if err := projectRepo.Create(ctx, project); err != nil {

@@ -17,7 +17,7 @@ import (
 	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/stretchr/testify/require"
 )
@@ -27,9 +27,9 @@ type automationRuntimeFixture struct {
 	task       models.Task
 	schedule   models.Schedule
 	definition *models.AutomationDefinition
-	repo       *repository.AutomationRepo
-	taskRepo   *repository.TaskRepo
-	schedRepo  *repository.ScheduleRepo
+	repo       *sqlite.AutomationRepo
+	taskRepo   *sqlite.TaskRepo
+	schedRepo  *sqlite.ScheduleRepo
 }
 
 func newAutomationRuntimeFixture(t *testing.T, adapterKey string) automationRuntimeFixture {
@@ -40,10 +40,10 @@ func newAutomationRuntimeFixture(t *testing.T, adapterKey string) automationRunt
 
 func newAutomationRuntimeFixtureWithDB(t *testing.T, db *sql.DB, adapterKey string) automationRuntimeFixture {
 	t.Helper()
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	scheduleRepo := repository.NewScheduleRepo(db)
-	automationRepo := repository.NewAutomationRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	scheduleRepo := sqlite.NewScheduleRepo(db)
+	automationRepo := sqlite.NewAutomationRepo(db)
 	project := automationTestProject(t, projectRepo, "Runtime "+adapterKey)
 	task, schedule := automationTestTaskAndSchedule(t, taskRepo, scheduleRepo, project.ID, "Runtime task")
 	due := time.Now().UTC().Add(-time.Minute)
@@ -85,10 +85,10 @@ func automationNodeByKey(t *testing.T, definition *models.AutomationDefinition, 
 func TestGitHubIssueRuntimeAssignedIssuePaginationPresenceAware(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)
-	projectRepo := repository.NewProjectRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
 	project := models.Project{Name: "GitHub pagination runtime", RepoURL: "https://github.com/openvibely/openvibely"}
 	require.NoError(t, projectRepo.Create(ctx, &project))
-	authRepo := repository.NewGitHubAuthRepo(db)
+	authRepo := sqlite.NewGitHubAuthRepo(db)
 	require.NoError(t, authRepo.UpsertAuthorizedActor(ctx, &models.GitHubAuthorizedActor{GitHubLogin: "openvibely"}))
 
 	issues := make([]GitHubIssue, 101)
@@ -177,7 +177,7 @@ func TestGitHubIssueRuntimeAssignedIssuePaginationPresenceAware(t *testing.T) {
 func TestGitHubIssueRuntimeMyAssignedIssuesValidatesPaginationBeforeRepoResolution(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)
-	projectRepo := repository.NewProjectRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
 	var providerCalls atomic.Int32
 	provider := &fakeGitHubIssueRuntimeProvider{
 		listMyIssuesFn: func(context.Context, *GitHubRepoRef) (*GitHubAuthenticatedUser, []GitHubIssue, error) {
@@ -528,20 +528,20 @@ func TestAutomationRuntimeAtomicOccurrenceDispatchAndRestartRecovery(t *testing.
 	reset, err := fixture.taskRepo.ResetOrphanedRunning(ctx)
 	require.NoError(t, err)
 	require.Zero(t, reset, "generic startup recovery must preserve prepared automation tasks")
-	recovered, err := repository.NewExecutionRepo(fixture.repo.DB()).RecoverStaleRunningTaskExecutions(ctx)
+	recovered, err := sqlite.NewExecutionRepo(fixture.repo.DB()).RecoverStaleRunningTaskExecutions(ctx)
 	require.NoError(t, err)
 	require.Zero(t, recovered, "generic execution recovery must preserve dispatch executions")
-	preRestartRecovered, err := repository.NewExecutionRepo(fixture.repo.DB()).RecoverPreRestartRunningTaskExecutions(ctx)
+	preRestartRecovered, err := sqlite.NewExecutionRepo(fixture.repo.DB()).RecoverPreRestartRunningTaskExecutions(ctx)
 	require.NoError(t, err)
 	require.Zero(t, preRestartRecovered, "pre-restart recovery must preserve dispatch-reserved executions")
-	preserved, err := repository.NewExecutionRepo(fixture.repo.DB()).GetByID(ctx, execution.ID)
+	preserved, err := sqlite.NewExecutionRepo(fixture.repo.DB()).GetByID(ctx, execution.ID)
 	require.NoError(t, err)
 	require.Equal(t, models.ExecRunning, preserved.Status)
 
 	require.NoError(t, fixture.repo.MarkDispatchSubmitted(ctx, dispatch.ID, "owner", execution.ID))
-	require.NoError(t, repository.NewExecutionRepo(fixture.repo.DB()).Complete(ctx, execution.ID, models.ExecCompleted, "ok", "", 1, 1))
+	require.NoError(t, sqlite.NewExecutionRepo(fixture.repo.DB()).Complete(ctx, execution.ID, models.ExecCompleted, "ok", "", 1, 1))
 	require.NoError(t, fixture.taskRepo.UpdateStatus(ctx, fixture.task.ID, models.StatusCompleted))
-	reconciler := NewAutomationReconciler(fixture.repo, repository.NewExecutionRepo(fixture.repo.DB()), NewWorkerService(nil, 1, nil))
+	reconciler := NewAutomationReconciler(fixture.repo, sqlite.NewExecutionRepo(fixture.repo.DB()), NewWorkerService(nil, 1, nil))
 	require.NoError(t, reconciler.ReconcileOnce(ctx))
 	var outboxStatus string
 	require.NoError(t, fixture.repo.DB().QueryRow(`SELECT status FROM automation_dispatch_outbox WHERE id = ?`, dispatch.ID).Scan(&outboxStatus))
@@ -569,7 +569,7 @@ func TestAutomationDeleteRejectsOrdinaryRunningExecution(t *testing.T) {
 		NodeID:       producer.ID,
 	}
 	execution := models.Execution{TaskID: fixture.task.ID, Status: models.ExecRunning, PromptSent: "ordinary automation task"}
-	execRepo := repository.NewExecutionRepo(fixture.repo.DB())
+	execRepo := sqlite.NewExecutionRepo(fixture.repo.DB())
 	require.NoError(t, execRepo.Create(ctx, &execution))
 	require.Empty(t, execution.DispatchID, "ordinary task execution must not depend on scheduler dispatch ownership")
 	require.NoError(t, fixture.taskRepo.UpdateStatus(ctx, fixture.task.ID, models.StatusRunning))
@@ -666,13 +666,13 @@ func TestAutomationDeleteRejectsInFlightDispatchAndPreservesRestartRecovery(t *t
 	require.Equal(t, 1, outboxRows)
 	require.Equal(t, 1, reservationRows)
 	require.Equal(t, 1, executionRows)
-	recovered, err := repository.NewExecutionRepo(fixture.repo.DB()).RecoverStaleRunningTaskExecutions(ctx)
+	recovered, err := sqlite.NewExecutionRepo(fixture.repo.DB()).RecoverStaleRunningTaskExecutions(ctx)
 	require.NoError(t, err)
 	require.Zero(t, recovered, "generic recovery must leave the preserved dispatch to Automation reconciliation")
 
-	require.NoError(t, repository.NewExecutionRepo(fixture.repo.DB()).Complete(ctx, execution.ID, models.ExecCompleted, "ok", "", 1, 1))
+	require.NoError(t, sqlite.NewExecutionRepo(fixture.repo.DB()).Complete(ctx, execution.ID, models.ExecCompleted, "ok", "", 1, 1))
 	require.NoError(t, fixture.taskRepo.UpdateStatus(ctx, fixture.task.ID, models.StatusCompleted))
-	reconciler := NewAutomationReconciler(fixture.repo, repository.NewExecutionRepo(fixture.repo.DB()), NewWorkerService(nil, 1, nil))
+	reconciler := NewAutomationReconciler(fixture.repo, sqlite.NewExecutionRepo(fixture.repo.DB()), NewWorkerService(nil, 1, nil))
 	require.NoError(t, reconciler.ReconcileOnce(ctx))
 	var outboxStatus string
 	require.NoError(t, fixture.repo.DB().QueryRow(`SELECT status FROM automation_dispatch_outbox WHERE id = ?`, dispatch.ID).Scan(&outboxStatus))
@@ -875,7 +875,7 @@ func TestAutomationRuntimeMultipleCapacityQueuedDispatchesDrainFIFOWithoutDuplic
 		VALUES (?, ?, ?, ?, ?, 'active')`, secondSchedule.ID, fixture.project.ID, fixture.definition.Automation.ID, fixture.definition.Version.ID, secondNode.ID)
 	require.NoError(t, err)
 
-	llmConfigRepo := repository.NewLLMConfigRepo(fixture.repo.DB())
+	llmConfigRepo := sqlite.NewLLMConfigRepo(fixture.repo.DB())
 	agent := models.LLMConfig{Name: "Multiple queued Automation worker", Provider: models.ProviderTest, Model: "test", IsDefault: true}
 	require.NoError(t, llmConfigRepo.Create(ctx, &agent))
 	firstPrompt := "first capacity-queued Automation task"
@@ -885,10 +885,10 @@ func TestAutomationRuntimeMultipleCapacityQueuedDispatchesDrainFIFOWithoutDuplic
 	_, err = fixture.repo.DB().ExecContext(ctx, `UPDATE tasks SET prompt = ?, agent_id = ? WHERE id = ?`, secondPrompt, agent.ID, secondTask.ID)
 	require.NoError(t, err)
 
-	projectRepo := repository.NewProjectRepo(fixture.repo.DB())
-	execRepo := repository.NewExecutionRepo(fixture.repo.DB())
+	projectRepo := sqlite.NewProjectRepo(fixture.repo.DB())
+	execRepo := sqlite.NewExecutionRepo(fixture.repo.DB())
 	execRepo.SetAutomationRepo(fixture.repo)
-	llmSvc := NewLLMService(llmConfigRepo, execRepo, fixture.taskRepo, projectRepo, fixture.schedRepo, repository.NewAttachmentRepo(fixture.repo.DB()))
+	llmSvc := NewLLMService(llmConfigRepo, execRepo, fixture.taskRepo, projectRepo, fixture.schedRepo, sqlite.NewAttachmentRepo(fixture.repo.DB()))
 	mockLLM := testutil.NewMockLLMCaller()
 	mockLLM.Response = "multiple queued Automation tasks completed"
 	mockLLM.TextOnly = mockLLM.Response
@@ -1020,7 +1020,7 @@ func TestAutomationRuntimeCapacityQueueRespectsProjectAndModelLimits(t *testing.
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 
-			llmConfigRepo := repository.NewLLMConfigRepo(fixture.repo.DB())
+			llmConfigRepo := sqlite.NewLLMConfigRepo(fixture.repo.DB())
 			agent := models.LLMConfig{Name: "Capacity-limited Automation worker", Provider: models.ProviderTest, Model: "test", IsDefault: true}
 			if !testCase.projectLimited {
 				agent.MaxWorkers = 1
@@ -1028,15 +1028,15 @@ func TestAutomationRuntimeCapacityQueueRespectsProjectAndModelLimits(t *testing.
 			require.NoError(t, llmConfigRepo.Create(ctx, &agent))
 			require.NoError(t, fixture.repo.DB().QueryRow(`UPDATE tasks SET agent_id = ? WHERE id = ? RETURNING id`, agent.ID, fixture.task.ID).Scan(new(string)))
 
-			projectRepo := repository.NewProjectRepo(fixture.repo.DB())
+			projectRepo := sqlite.NewProjectRepo(fixture.repo.DB())
 			if testCase.projectLimited {
 				maxWorkers := 1
 				fixture.project.MaxWorkers = &maxWorkers
 				require.NoError(t, projectRepo.Update(ctx, &fixture.project))
 			}
-			execRepo := repository.NewExecutionRepo(fixture.repo.DB())
+			execRepo := sqlite.NewExecutionRepo(fixture.repo.DB())
 			execRepo.SetAutomationRepo(fixture.repo)
-			llmSvc := NewLLMService(llmConfigRepo, execRepo, fixture.taskRepo, projectRepo, fixture.schedRepo, repository.NewAttachmentRepo(fixture.repo.DB()))
+			llmSvc := NewLLMService(llmConfigRepo, execRepo, fixture.taskRepo, projectRepo, fixture.schedRepo, sqlite.NewAttachmentRepo(fixture.repo.DB()))
 			mockLLM := testutil.NewMockLLMCaller()
 			mockLLM.Response = "capacity-limited Automation completed"
 			mockLLM.TextOnly = mockLLM.Response
@@ -1111,7 +1111,7 @@ func TestAutomationRuntimeModelTransferDoesNotHoldGlobalCapacity(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	llmConfigRepo := repository.NewLLMConfigRepo(fixture.repo.DB())
+	llmConfigRepo := sqlite.NewLLMConfigRepo(fixture.repo.DB())
 	originalAgent := models.LLMConfig{Name: "Original transfer capacity worker", Provider: models.ProviderTest, Model: "original", IsDefault: true, MaxWorkers: 1}
 	blockedAgent := models.LLMConfig{Name: "Blocked transfer capacity worker", Provider: models.ProviderTest, Model: "blocked", MaxWorkers: 1}
 	ordinaryAgent := models.LLMConfig{Name: "Ordinary capacity worker", Provider: models.ProviderTest, Model: "ordinary", MaxWorkers: 1}
@@ -1120,10 +1120,10 @@ func TestAutomationRuntimeModelTransferDoesNotHoldGlobalCapacity(t *testing.T) {
 	require.NoError(t, llmConfigRepo.Create(ctx, &ordinaryAgent))
 	require.NoError(t, fixture.repo.DB().QueryRow(`UPDATE tasks SET agent_id = ? WHERE id = ? RETURNING id`, originalAgent.ID, fixture.task.ID).Scan(new(string)))
 
-	projectRepo := repository.NewProjectRepo(fixture.repo.DB())
-	execRepo := repository.NewExecutionRepo(fixture.repo.DB())
+	projectRepo := sqlite.NewProjectRepo(fixture.repo.DB())
+	execRepo := sqlite.NewExecutionRepo(fixture.repo.DB())
 	execRepo.SetAutomationRepo(fixture.repo)
-	llmSvc := NewLLMService(llmConfigRepo, execRepo, fixture.taskRepo, projectRepo, fixture.schedRepo, repository.NewAttachmentRepo(fixture.repo.DB()))
+	llmSvc := NewLLMService(llmConfigRepo, execRepo, fixture.taskRepo, projectRepo, fixture.schedRepo, sqlite.NewAttachmentRepo(fixture.repo.DB()))
 	mockLLM := testutil.NewMockLLMCaller()
 	mockLLM.Response = "capacity transfer completed"
 	mockLLM.TextOnly = mockLLM.Response
@@ -1233,15 +1233,15 @@ func TestAutomationRuntimeCancelCapacityQueuedDispatchCleansQueueAndReservation(
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	llmConfigRepo := repository.NewLLMConfigRepo(fixture.repo.DB())
+	llmConfigRepo := sqlite.NewLLMConfigRepo(fixture.repo.DB())
 	agent := models.LLMConfig{Name: "Cancellable queued Automation worker", Provider: models.ProviderTest, Model: "test", IsDefault: true}
 	require.NoError(t, llmConfigRepo.Create(ctx, &agent))
 	require.NoError(t, fixture.repo.DB().QueryRow(`UPDATE tasks SET agent_id = ? WHERE id = ? RETURNING id`, agent.ID, fixture.task.ID).Scan(new(string)))
 
-	projectRepo := repository.NewProjectRepo(fixture.repo.DB())
-	execRepo := repository.NewExecutionRepo(fixture.repo.DB())
+	projectRepo := sqlite.NewProjectRepo(fixture.repo.DB())
+	execRepo := sqlite.NewExecutionRepo(fixture.repo.DB())
 	execRepo.SetAutomationRepo(fixture.repo)
-	llmSvc := NewLLMService(llmConfigRepo, execRepo, fixture.taskRepo, projectRepo, fixture.schedRepo, repository.NewAttachmentRepo(fixture.repo.DB()))
+	llmSvc := NewLLMService(llmConfigRepo, execRepo, fixture.taskRepo, projectRepo, fixture.schedRepo, sqlite.NewAttachmentRepo(fixture.repo.DB()))
 	mockLLM := testutil.NewMockLLMCaller()
 	mockLLM.Response = "should not execute"
 	mockLLM.TextOnly = mockLLM.Response
@@ -1269,7 +1269,7 @@ func TestAutomationRuntimeCancelCapacityQueuedDispatchCleansQueueAndReservation(
 	require.True(t, dispatched)
 	require.Equal(t, 1, worker.QueueSize())
 
-	taskSvc := NewTaskService(fixture.taskRepo, repository.NewAttachmentRepo(fixture.repo.DB()), worker)
+	taskSvc := NewTaskService(fixture.taskRepo, sqlite.NewAttachmentRepo(fixture.repo.DB()), worker)
 	require.NoError(t, taskSvc.CancelTask(ctx, fixture.task.ID))
 
 	storedTask, err := fixture.taskRepo.GetByID(ctx, fixture.task.ID)
@@ -1292,15 +1292,15 @@ func TestAutomationRuntimePreparedDispatchWaitsPendingForGlobalCapacity(t *testi
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	llmConfigRepo := repository.NewLLMConfigRepo(fixture.repo.DB())
+	llmConfigRepo := sqlite.NewLLMConfigRepo(fixture.repo.DB())
 	agent := models.LLMConfig{Name: "Automation capacity worker", Provider: models.ProviderTest, Model: "test", IsDefault: true}
 	require.NoError(t, llmConfigRepo.Create(ctx, &agent))
 	require.NoError(t, fixture.repo.DB().QueryRow(`UPDATE tasks SET agent_id = ? WHERE id = ? RETURNING id`, agent.ID, fixture.task.ID).Scan(new(string)))
 
-	projectRepo := repository.NewProjectRepo(fixture.repo.DB())
-	execRepo := repository.NewExecutionRepo(fixture.repo.DB())
+	projectRepo := sqlite.NewProjectRepo(fixture.repo.DB())
+	execRepo := sqlite.NewExecutionRepo(fixture.repo.DB())
 	execRepo.SetAutomationRepo(fixture.repo)
-	llmSvc := NewLLMService(llmConfigRepo, execRepo, fixture.taskRepo, projectRepo, fixture.schedRepo, repository.NewAttachmentRepo(fixture.repo.DB()))
+	llmSvc := NewLLMService(llmConfigRepo, execRepo, fixture.taskRepo, projectRepo, fixture.schedRepo, sqlite.NewAttachmentRepo(fixture.repo.DB()))
 	mockLLM := testutil.NewMockLLMCaller()
 	mockLLM.Response = "automation capacity run completed"
 	mockLLM.TextOnly = mockLLM.Response
@@ -1355,7 +1355,7 @@ func TestAutomationRuntimeCapacityQueuedDispatchUsesEditedTaskAndModelCapacity(t
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	llmConfigRepo := repository.NewLLMConfigRepo(fixture.repo.DB())
+	llmConfigRepo := sqlite.NewLLMConfigRepo(fixture.repo.DB())
 	originalAgent := models.LLMConfig{Name: "Original Automation worker", Provider: models.ProviderTest, Model: "original", IsDefault: true, MaxWorkers: 1}
 	revisedAgent := models.LLMConfig{Name: "Revised Automation worker", Provider: models.ProviderTest, Model: "revised", MaxWorkers: 1}
 	admittedAgent := models.LLMConfig{Name: "Atomically admitted Automation worker", Provider: models.ProviderTest, Model: "admitted", MaxWorkers: 1}
@@ -1364,10 +1364,10 @@ func TestAutomationRuntimeCapacityQueuedDispatchUsesEditedTaskAndModelCapacity(t
 	require.NoError(t, llmConfigRepo.Create(ctx, &admittedAgent))
 	require.NoError(t, fixture.repo.DB().QueryRow(`UPDATE tasks SET agent_id = ? WHERE id = ? RETURNING id`, originalAgent.ID, fixture.task.ID).Scan(new(string)))
 
-	projectRepo := repository.NewProjectRepo(fixture.repo.DB())
-	execRepo := repository.NewExecutionRepo(fixture.repo.DB())
+	projectRepo := sqlite.NewProjectRepo(fixture.repo.DB())
+	execRepo := sqlite.NewExecutionRepo(fixture.repo.DB())
 	execRepo.SetAutomationRepo(fixture.repo)
-	llmSvc := NewLLMService(llmConfigRepo, execRepo, fixture.taskRepo, projectRepo, fixture.schedRepo, repository.NewAttachmentRepo(fixture.repo.DB()))
+	llmSvc := NewLLMService(llmConfigRepo, execRepo, fixture.taskRepo, projectRepo, fixture.schedRepo, sqlite.NewAttachmentRepo(fixture.repo.DB()))
 	mockLLM := testutil.NewMockLLMCaller()
 	mockLLM.Response = "edited automation run completed"
 	mockLLM.TextOnly = mockLLM.Response
@@ -1460,17 +1460,17 @@ func TestAutomationRuntimeCancellationDuringAdmittedModelTransferTerminalizesDis
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	llmConfigRepo := repository.NewLLMConfigRepo(fixture.repo.DB())
+	llmConfigRepo := sqlite.NewLLMConfigRepo(fixture.repo.DB())
 	originalAgent := models.LLMConfig{Name: "Original transfer worker", Provider: models.ProviderTest, Model: "original", IsDefault: true, MaxWorkers: 1}
 	blockedAgent := models.LLMConfig{Name: "Blocked admitted transfer worker", Provider: models.ProviderTest, Model: "blocked", MaxWorkers: 1}
 	require.NoError(t, llmConfigRepo.Create(ctx, &originalAgent))
 	require.NoError(t, llmConfigRepo.Create(ctx, &blockedAgent))
 	require.NoError(t, fixture.repo.DB().QueryRow(`UPDATE tasks SET agent_id = ? WHERE id = ? RETURNING id`, originalAgent.ID, fixture.task.ID).Scan(new(string)))
 
-	projectRepo := repository.NewProjectRepo(fixture.repo.DB())
-	execRepo := repository.NewExecutionRepo(fixture.repo.DB())
+	projectRepo := sqlite.NewProjectRepo(fixture.repo.DB())
+	execRepo := sqlite.NewExecutionRepo(fixture.repo.DB())
 	execRepo.SetAutomationRepo(fixture.repo)
-	llmSvc := NewLLMService(llmConfigRepo, execRepo, fixture.taskRepo, projectRepo, fixture.schedRepo, repository.NewAttachmentRepo(fixture.repo.DB()))
+	llmSvc := NewLLMService(llmConfigRepo, execRepo, fixture.taskRepo, projectRepo, fixture.schedRepo, sqlite.NewAttachmentRepo(fixture.repo.DB()))
 	mockLLM := testutil.NewMockLLMCaller()
 	llmSvc.SetLLMCaller(mockLLM)
 	llmSvc.SetAutomationRepo(fixture.repo)
@@ -1557,15 +1557,15 @@ func TestAutomationRuntimeSetupFailureAfterClaimTerminalizesDispatch(t *testing.
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	llmConfigRepo := repository.NewLLMConfigRepo(fixture.repo.DB())
+	llmConfigRepo := sqlite.NewLLMConfigRepo(fixture.repo.DB())
 	agent := models.LLMConfig{Name: "Removed queued Automation worker", Provider: models.ProviderTest, Model: "removed", IsDefault: true, MaxWorkers: 1}
 	require.NoError(t, llmConfigRepo.Create(ctx, &agent))
 	require.NoError(t, fixture.repo.DB().QueryRow(`UPDATE tasks SET agent_id = ? WHERE id = ? RETURNING id`, agent.ID, fixture.task.ID).Scan(new(string)))
 
-	projectRepo := repository.NewProjectRepo(fixture.repo.DB())
-	execRepo := repository.NewExecutionRepo(fixture.repo.DB())
+	projectRepo := sqlite.NewProjectRepo(fixture.repo.DB())
+	execRepo := sqlite.NewExecutionRepo(fixture.repo.DB())
 	execRepo.SetAutomationRepo(fixture.repo)
-	llmSvc := NewLLMService(llmConfigRepo, execRepo, fixture.taskRepo, projectRepo, fixture.schedRepo, repository.NewAttachmentRepo(fixture.repo.DB()))
+	llmSvc := NewLLMService(llmConfigRepo, execRepo, fixture.taskRepo, projectRepo, fixture.schedRepo, sqlite.NewAttachmentRepo(fixture.repo.DB()))
 	mockLLM := testutil.NewMockLLMCaller()
 	llmSvc.SetLLMCaller(mockLLM)
 	llmSvc.SetAutomationRepo(fixture.repo)
@@ -1633,14 +1633,14 @@ func TestAutomationRuntimePreparedDispatchUsesExistingWorkerPipeline(t *testing.
 	fixture := newAutomationRuntimeFixture(t, AutomationAdapterNativeSDLC)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	llmConfigRepo := repository.NewLLMConfigRepo(fixture.repo.DB())
+	llmConfigRepo := sqlite.NewLLMConfigRepo(fixture.repo.DB())
 	agent := models.LLMConfig{Name: "Automation worker", Provider: models.ProviderTest, Model: "test", IsDefault: true}
 	require.NoError(t, llmConfigRepo.Create(ctx, &agent))
 	require.NoError(t, fixture.repo.DB().QueryRow(`UPDATE tasks SET agent_id = ? WHERE id = ? RETURNING id`, agent.ID, fixture.task.ID).Scan(new(string)))
-	projectRepo := repository.NewProjectRepo(fixture.repo.DB())
-	execRepo := repository.NewExecutionRepo(fixture.repo.DB())
+	projectRepo := sqlite.NewProjectRepo(fixture.repo.DB())
+	execRepo := sqlite.NewExecutionRepo(fixture.repo.DB())
 	execRepo.SetAutomationRepo(fixture.repo)
-	llmSvc := NewLLMService(llmConfigRepo, execRepo, fixture.taskRepo, projectRepo, fixture.schedRepo, repository.NewAttachmentRepo(fixture.repo.DB()))
+	llmSvc := NewLLMService(llmConfigRepo, execRepo, fixture.taskRepo, projectRepo, fixture.schedRepo, sqlite.NewAttachmentRepo(fixture.repo.DB()))
 	mockLLM := testutil.NewMockLLMCaller()
 	mockLLM.Response = "automation run completed"
 	mockLLM.TextOnly = mockLLM.Response
@@ -1728,7 +1728,7 @@ func TestAutomationRuntimeReconcilerAbandonsCancelledCapacityQueuedDispatch(t *t
 	require.NoError(t, fixture.repo.MarkDispatchQueued(ctx, leased.ID, "owner"))
 	require.NoError(t, fixture.taskRepo.UpdateStatus(ctx, fixture.task.ID, models.StatusCancelled))
 
-	reconciler := NewAutomationReconciler(fixture.repo, repository.NewExecutionRepo(fixture.repo.DB()), NewWorkerService(nil, 1, nil))
+	reconciler := NewAutomationReconciler(fixture.repo, sqlite.NewExecutionRepo(fixture.repo.DB()), NewWorkerService(nil, 1, nil))
 	require.NoError(t, reconciler.ReconcileOnce(ctx))
 	var dispatchStatus string
 	require.NoError(t, fixture.repo.DB().QueryRow(`SELECT status FROM automation_dispatch_outbox WHERE id = ?`, dispatch.ID).Scan(&dispatchStatus))
@@ -1757,7 +1757,7 @@ func TestAutomationRuntimeReconcilerCancelsPreparedDispatchForCancelledTask(t *t
 	// Simulate a process loss after TaskService persisted cancellation but before
 	// its in-memory worker cleanup could cancel the prepared execution.
 	require.NoError(t, fixture.taskRepo.UpdateStatus(ctx, fixture.task.ID, models.StatusCancelled))
-	reconciler := NewAutomationReconciler(fixture.repo, repository.NewExecutionRepo(fixture.repo.DB()), NewWorkerService(nil, 1, nil))
+	reconciler := NewAutomationReconciler(fixture.repo, sqlite.NewExecutionRepo(fixture.repo.DB()), NewWorkerService(nil, 1, nil))
 	require.NoError(t, reconciler.ReconcileOnce(ctx))
 
 	var dispatchStatus, invocationStatus, executionStatus string
@@ -1834,7 +1834,7 @@ func TestAutomationRuntimeReconcilerResubmitsCapacityQueuedPreparedDispatch(t *t
 	require.NoError(t, err)
 	require.Equal(t, models.StatusPending, storedTask.Status)
 	worker := NewWorkerService(nil, 1, nil)
-	reconciler := NewAutomationReconciler(fixture.repo, repository.NewExecutionRepo(fixture.repo.DB()), worker)
+	reconciler := NewAutomationReconciler(fixture.repo, sqlite.NewExecutionRepo(fixture.repo.DB()), worker)
 	require.NoError(t, reconciler.ReconcileOnce(ctx))
 	select {
 	case submitted := <-worker.Submitted():
@@ -1859,7 +1859,7 @@ func TestAutomationRuntimeReconcilerResubmitsAcknowledgedPreparedExecution(t *te
 	require.NoError(t, err)
 	require.NoError(t, fixture.repo.MarkDispatchSubmitted(ctx, dispatch.ID, "owner", execution.ID))
 	worker := NewWorkerService(nil, 1, nil)
-	reconciler := NewAutomationReconciler(fixture.repo, repository.NewExecutionRepo(fixture.repo.DB()), worker)
+	reconciler := NewAutomationReconciler(fixture.repo, sqlite.NewExecutionRepo(fixture.repo.DB()), worker)
 	require.NoError(t, reconciler.ReconcileOnce(ctx))
 	select {
 	case submitted := <-worker.Submitted():
@@ -1884,7 +1884,7 @@ func TestAutomationRuntimeReconcilesTerminalExecutionProjectionAfterCrash(t *tes
 	require.NoError(t, err)
 	binding.WorkItemID = item.ID
 	execution := models.Execution{TaskID: fixture.task.ID, Status: models.ExecRunning, PromptSent: "crash recovery"}
-	execRepo := repository.NewExecutionRepo(fixture.repo.DB())
+	execRepo := sqlite.NewExecutionRepo(fixture.repo.DB())
 	require.NoError(t, execRepo.Create(ctx, &execution))
 	_, _, err = fixture.repo.RecordProjectionEvent(ctx, persistence.AutomationProjectionEvent{
 		Context: models.AutomationContext{ProjectID: fixture.project.ID, Bindings: []models.AutomationBinding{binding}}, Binding: binding,
@@ -1941,7 +1941,7 @@ func TestAutomationRuntimeDoesNotRepairCompletedReviewExecutionPosition(t *testi
 	require.NoError(t, err)
 	binding.WorkItemID = item.ID
 	execution := models.Execution{TaskID: fixture.task.ID, Status: models.ExecRunning, PromptSent: "review helper"}
-	execRepo := repository.NewExecutionRepo(fixture.repo.DB())
+	execRepo := sqlite.NewExecutionRepo(fixture.repo.DB())
 	require.NoError(t, execRepo.Create(ctx, &execution))
 	_, _, err = fixture.repo.RecordProjectionEvent(ctx, persistence.AutomationProjectionEvent{
 		Context: models.AutomationContext{ProjectID: fixture.project.ID, Bindings: []models.AutomationBinding{binding}}, Binding: binding,
@@ -2030,9 +2030,9 @@ func TestAutomationRuntimeSkippedOccurrenceAndProjectionIdempotency(t *testing.T
 	require.Zero(t, positions)
 
 	currentContext := models.AutomationContext{ProjectID: fixture.project.ID, Bindings: []models.AutomationBinding{newBinding}}
-	otherProject := automationTestProject(t, repository.NewProjectRepo(fixture.repo.DB()), "Foreign runtime")
+	otherProject := automationTestProject(t, sqlite.NewProjectRepo(fixture.repo.DB()), "Foreign runtime")
 	foreignTask := models.Task{ProjectID: otherProject.ID, Title: "Foreign", Category: models.CategoryBacklog, Status: models.StatusPending, Priority: 2}
-	require.NoError(t, repository.NewTaskRepo(fixture.repo.DB(), nil).Create(ctx, &foreignTask))
+	require.NoError(t, sqlite.NewTaskRepo(fixture.repo.DB(), nil).Create(ctx, &foreignTask))
 	_, _, err = fixture.repo.RecordProjectionEvent(ctx, persistence.AutomationProjectionEvent{
 		Context: currentContext, Binding: newBinding, ActivityKey: "foreign-resource", ActivityType: "test", ActivityStatus: models.AutomationActivityCompleted,
 		Resources: []models.AutomationActivityResource{{ResourceType: "task", ResourceID: foreignTask.ID}},
@@ -2197,10 +2197,10 @@ func TestAutomationRuntimeCompositeConstraintsAndProjectCascade(t *testing.T) {
 		fixture.definition.Version.ID, item.ID, activity.ID, foreignNode.ID)
 	require.Error(t, err, "transition must reject a node from another topology")
 
-	llmRepo := repository.NewLLMConfigRepo(fixture.repo.DB())
+	llmRepo := sqlite.NewLLMConfigRepo(fixture.repo.DB())
 	agent := models.LLMConfig{Name: "Cascade binding model", Provider: models.ProviderTest, Model: "test"}
 	require.NoError(t, llmRepo.Create(ctx, &agent))
-	inputRepo := repository.NewThreadInputRepo(fixture.repo.DB())
+	inputRepo := sqlite.NewThreadInputRepo(fixture.repo.DB())
 	input := models.ThreadInput{Scope: models.ThreadInputScopeTask, ProjectID: fixture.project.ID, TaskID: fixture.task.ID,
 		AgentConfigID: agent.ID, InputMode: models.ThreadInputModeQueued, Content: "cascade binding"}
 	require.NoError(t, inputRepo.CreateQueued(ctx, &input))
@@ -2211,7 +2211,7 @@ func TestAutomationRuntimeCompositeConstraintsAndProjectCascade(t *testing.T) {
 	require.NoError(t, fixture.repo.DB().QueryRow(`SELECT COUNT(*) FROM automation_thread_input_bindings WHERE thread_input_id = ?`, input.ID).Scan(&bindingCount))
 	require.Equal(t, 1, bindingCount)
 
-	require.NoError(t, repository.NewProjectRepo(fixture.repo.DB()).Delete(ctx, fixture.project.ID))
+	require.NoError(t, sqlite.NewProjectRepo(fixture.repo.DB()).Delete(ctx, fixture.project.ID))
 	for _, table := range []string{"automations", "automation_invocations", "automation_dispatch_outbox", "automation_task_run_reservations", "automation_work_items", "automation_work_item_positions", "automation_thread_input_bindings", "automation_activities", "automation_activity_resources", "automation_transitions"} {
 		var count int
 		require.NoError(t, fixture.repo.DB().QueryRow(`SELECT COUNT(*) FROM `+table).Scan(&count))
@@ -2311,7 +2311,7 @@ func TestAutomationRuntimeSharedInboxExecutionPreservesMultipleBindings(t *testi
 	require.NoError(t, err)
 	require.Len(t, taskContext.Bindings, 2)
 	execution := models.Execution{TaskID: fixture.task.ID, Status: models.ExecRunning, PromptSent: "shared inbox"}
-	require.NoError(t, repository.NewExecutionRepo(fixture.repo.DB()).Create(ctx, &execution))
+	require.NoError(t, sqlite.NewExecutionRepo(fixture.repo.DB()).Create(ctx, &execution))
 	for i, binding := range bindings {
 		_, _, err := fixture.repo.RecordProjectionEvent(ctx, persistence.AutomationProjectionEvent{
 			Context: models.AutomationContext{ProjectID: fixture.project.ID, Bindings: bindings}, Binding: binding,
@@ -2329,10 +2329,10 @@ func TestAutomationRuntimeSharedInboxExecutionPreservesMultipleBindings(t *testi
 func TestAutomationRuntimeThreadInputBindingSurvivesPromotion(t *testing.T) {
 	fixture := newAutomationRuntimeFixture(t, AutomationAdapterNativeSDLC)
 	ctx := context.Background()
-	llmRepo := repository.NewLLMConfigRepo(fixture.repo.DB())
+	llmRepo := sqlite.NewLLMConfigRepo(fixture.repo.DB())
 	agent := models.LLMConfig{Name: "Automation queue", Provider: models.ProviderTest, Model: "test", IsDefault: true}
 	require.NoError(t, llmRepo.Create(ctx, &agent))
-	inputRepo := repository.NewThreadInputRepo(fixture.repo.DB())
+	inputRepo := sqlite.NewThreadInputRepo(fixture.repo.DB())
 	input := models.ThreadInput{Scope: models.ThreadInputScopeTask, ProjectID: fixture.project.ID, TaskID: fixture.task.ID, AgentConfigID: agent.ID, InputMode: models.ThreadInputModeQueued, Content: "continue automation"}
 	require.NoError(t, inputRepo.CreateQueued(ctx, &input))
 	inbox := automationNodeByKey(t, fixture.definition, "inbox")
@@ -2361,9 +2361,9 @@ func TestAutomationRuntimeThreadInputBindingSurvivesPromotion(t *testing.T) {
 	require.NoError(t, fixture.repo.DB().QueryRow(`SELECT COUNT(*) FROM automation_thread_input_bindings WHERE thread_input_id = ?`, input.ID).Scan(&remainingBindings))
 	require.Zero(t, remainingBindings, "deleting the authoritative queued input must cascade its causal bindings")
 
-	foreignProject := automationTestProject(t, repository.NewProjectRepo(fixture.repo.DB()), "Foreign queued binding")
+	foreignProject := automationTestProject(t, sqlite.NewProjectRepo(fixture.repo.DB()), "Foreign queued binding")
 	foreignTask := models.Task{ProjectID: foreignProject.ID, Title: "Foreign queue", Category: models.CategoryBacklog, Status: models.StatusPending, Priority: 2}
-	require.NoError(t, repository.NewTaskRepo(fixture.repo.DB(), nil).Create(ctx, &foreignTask))
+	require.NoError(t, sqlite.NewTaskRepo(fixture.repo.DB(), nil).Create(ctx, &foreignTask))
 	foreignInput := models.ThreadInput{Scope: models.ThreadInputScopeTask, ProjectID: foreignProject.ID, TaskID: foreignTask.ID, AgentConfigID: agent.ID, InputMode: models.ThreadInputModeQueued, Content: "foreign"}
 	require.NoError(t, inputRepo.CreateQueued(ctx, &foreignInput))
 	require.ErrorContains(t, fixture.repo.BindThreadInput(ctx, foreignInput.ID, automationContext, "foreign"), "project mismatch")
@@ -2372,7 +2372,7 @@ func TestAutomationRuntimeThreadInputBindingSurvivesPromotion(t *testing.T) {
 func TestAutomationRuntimeAuthorizedAssigneeScanReanchorsStaleIssueProjection(t *testing.T) {
 	fixture := newAutomationRuntimeFixture(t, AutomationAdapterGitHubSDLC)
 	ctx := context.Background()
-	projectRepo := repository.NewProjectRepo(fixture.repo.DB())
+	projectRepo := sqlite.NewProjectRepo(fixture.repo.DB())
 	fixture.project.RepoURL = "https://github.com/example/runtime.git"
 	require.NoError(t, projectRepo.Update(ctx, &fixture.project))
 	repoRef := &GitHubRepoRef{Owner: "example", Name: "runtime", FullName: "example/runtime", HTMLURL: "https://github.com/example/runtime"}
@@ -2429,7 +2429,7 @@ func TestAutomationRuntimeAuthorizedAssigneeScanReanchorsStaleIssueProjection(t 
 			return []GitHubIssue{issue}, nil
 		},
 	}
-	githubAuthRepo := repository.NewGitHubAuthRepo(fixture.repo.DB())
+	githubAuthRepo := sqlite.NewGitHubAuthRepo(fixture.repo.DB())
 	require.NoError(t, githubAuthRepo.UpsertAuthorizedActor(ctx, &models.GitHubAuthorizedActor{GitHubLogin: "dubee"}))
 	handlers := buildGitHubIssueRuntimeHandlers(githubIssueRuntimeOptions{ProjectID: fixture.project.ID, ProjectRepo: projectRepo,
 		TaskRepo: fixture.taskRepo, AutomationRepo: fixture.repo, GitHubAuthRepo: githubAuthRepo, GitHub: provider})
@@ -2459,7 +2459,7 @@ func TestAutomationRuntimeAuthorizedAssigneeScanReanchorsStaleIssueProjection(t 
 func TestAutomationRuntimeGitHubIssueTaskCreationAllowsLaterInboxInvocation(t *testing.T) {
 	fixture := newAutomationRuntimeFixture(t, AutomationAdapterGitHubSDLC)
 	ctx := context.Background()
-	projectRepo := repository.NewProjectRepo(fixture.repo.DB())
+	projectRepo := sqlite.NewProjectRepo(fixture.repo.DB())
 	fixture.project.RepoURL = "https://github.com/example/runtime.git"
 	require.NoError(t, projectRepo.Update(ctx, &fixture.project))
 
@@ -2547,7 +2547,7 @@ func TestAutomationRuntimeGitHubIssueTaskCreationAllowsLaterInboxInvocation(t *t
 	runtime := llmSvc.taskControlRuntimeTools(fixture.task)
 	require.NotNil(t, runtime)
 	wrongExecution := models.Execution{TaskID: fixture.task.ID, Status: models.ExecRunning, PromptSent: "wrong inbox execution"}
-	require.NoError(t, repository.NewExecutionRepo(fixture.repo.DB()).Create(ctx, &wrongExecution))
+	require.NoError(t, sqlite.NewExecutionRepo(fixture.repo.DB()).Create(ctx, &wrongExecution))
 	wrongExecutionCtx := withAutomationExecution(inboxCtx, fixture.task.ID, wrongExecution.ID)
 	_, handled, isErr, err := runtime.Executor(wrongExecutionCtx, "create_task", json.RawMessage(`{
 		"title":"Reject different execution","prompt":"must not persist","category":"backlog",
@@ -2581,13 +2581,13 @@ func TestAutomationRuntimeGitHubIssueTaskCreationAllowsLaterInboxInvocation(t *t
 func TestAutomationRuntimeGitHubIssueInboxAndPRProvenance(t *testing.T) {
 	fixture := newAutomationRuntimeFixture(t, AutomationAdapterGitHubSDLC)
 	ctx := context.Background()
-	projectRepo := repository.NewProjectRepo(fixture.repo.DB())
+	projectRepo := sqlite.NewProjectRepo(fixture.repo.DB())
 	fixture.project.RepoURL = "https://github.example.com/example/runtime.git"
 	fixture.project.RepoPath = t.TempDir()
 	require.NoError(t, projectRepo.Update(ctx, &fixture.project))
 	require.NoError(t, fixture.repo.DB().QueryRow(`UPDATE tasks SET worktree_branch = 'task/runtime' WHERE id = ? RETURNING id`, fixture.task.ID).Scan(new(string)))
 	execution := models.Execution{TaskID: fixture.task.ID, Status: models.ExecRunning, PromptSent: "github runtime"}
-	require.NoError(t, repository.NewExecutionRepo(fixture.repo.DB()).Create(ctx, &execution))
+	require.NoError(t, sqlite.NewExecutionRepo(fixture.repo.DB()).Create(ctx, &execution))
 	bugFinder := automationNodeByKey(t, fixture.definition, "bug_finder")
 	invocation, _, err := fixture.repo.ClaimScheduledOccurrence(ctx, fixture.schedule, time.Now().UTC(), fixture.schedule.ComputeNextRun(time.Now().UTC()))
 	require.NoError(t, err)
@@ -2619,7 +2619,7 @@ func TestAutomationRuntimeGitHubIssueInboxAndPRProvenance(t *testing.T) {
 			return &GitHubPullRequest{Number: 7, URL: "https://github.example.com/example/runtime/pull/7", State: "open", HeadRef: req.Head, HeadRepoFullName: repo.FullName, HeadSHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, nil
 		}}
 	opts := githubIssueRuntimeOptions{ProjectID: fixture.project.ID, ProjectRepo: projectRepo, TaskRepo: fixture.taskRepo,
-		TaskPullRequestRepo: repository.NewTaskPullRequestRepo(fixture.repo.DB()), AutomationRepo: fixture.repo, GitHub: provider}
+		TaskPullRequestRepo: sqlite.NewTaskPullRequestRepo(fixture.repo.DB()), AutomationRepo: fixture.repo, GitHub: provider}
 	handlers := buildGitHubIssueRuntimeHandlers(opts)
 	input := json.RawMessage(`{"title":"Exact issue","body":"body","labels":["bug"]}`)
 	first, err := handlers["github_create_issue"](ctx, input)
@@ -2724,7 +2724,7 @@ func TestAutomationRuntimeGitHubIssueInboxAndPRProvenance(t *testing.T) {
 	localRemoteTask, err := fixture.taskRepo.GetByProjectAndTitle(ctx, fixture.project.ID, "Local remote issue task")
 	require.NoError(t, err)
 	require.Equal(t, models.CategoryActive, localRemoteTask.Category, "GitHub assignment is approval, so the issue-specific task must be admitted immediately")
-	localRemoteGoal, err := repository.NewTaskGoalRepo(fixture.repo.DB()).GetByTaskID(ctx, localRemoteTask.ID)
+	localRemoteGoal, err := sqlite.NewTaskGoalRepo(fixture.repo.DB()).GetByTaskID(ctx, localRemoteTask.ID)
 	require.NoError(t, err)
 	require.NotNil(t, localRemoteGoal)
 	require.Equal(t, "Complete the assigned issue with focused regression coverage.", localRemoteGoal.Objective,
@@ -2925,7 +2925,7 @@ func newAutomationGitHubIssueCausalContext(t *testing.T, fixture automationRunti
 		VALUES (?, ?, ?, ?, 'schedule', ?, ?, 'running', CURRENT_TIMESTAMP) RETURNING id`, fixture.project.ID,
 		definition.Automation.ID, definition.Version.ID, sourceNode.ID, fixture.schedule.ID, occurrence).Scan(&invocationID))
 	execution := models.Execution{TaskID: task.ID, Status: models.ExecRunning, PromptSent: occurrence}
-	require.NoError(t, repository.NewExecutionRepo(fixture.repo.DB()).Create(ctx, &execution))
+	require.NoError(t, sqlite.NewExecutionRepo(fixture.repo.DB()).Create(ctx, &execution))
 	binding := models.AutomationBinding{AutomationID: definition.Automation.ID, VersionID: definition.Version.ID,
 		InvocationID: invocationID, NodeID: sourceNode.ID}
 	causalCtx := WithAutomationContext(ctx, models.AutomationContext{ProjectID: fixture.project.ID, Bindings: []models.AutomationBinding{binding}})
@@ -2935,7 +2935,7 @@ func newAutomationGitHubIssueCausalContext(t *testing.T, fixture automationRunti
 func TestAutomationGitHubPRPublicationUsesDurableTaskProvenanceAfterGraphReplacement(t *testing.T) {
 	fixture := newAutomationRuntimeFixture(t, AutomationAdapterGitHubSDLC)
 	ctx := context.Background()
-	projectRepo := repository.NewProjectRepo(fixture.repo.DB())
+	projectRepo := sqlite.NewProjectRepo(fixture.repo.DB())
 	fixture.project.RepoURL = "https://github.com/example/runtime.git"
 	fixture.project.RepoPath = t.TempDir()
 	require.NoError(t, projectRepo.Update(ctx, &fixture.project))
@@ -2950,10 +2950,10 @@ func TestAutomationGitHubPRPublicationUsesDurableTaskProvenanceAfterGraphReplace
 			return &GitHubPullRequest{Number: 77, URL: "https://github.com/example/runtime/pull/77", State: "open", HeadRef: req.Head, HeadRepoFullName: repo.FullName, HeadSHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, nil
 		}}
 	opts := githubIssueRuntimeOptions{ProjectID: fixture.project.ID, ProjectRepo: projectRepo, TaskRepo: fixture.taskRepo,
-		TaskPullRequestRepo: repository.NewTaskPullRequestRepo(fixture.repo.DB()), AutomationRepo: fixture.repo, GitHub: provider}
+		TaskPullRequestRepo: sqlite.NewTaskPullRequestRepo(fixture.repo.DB()), AutomationRepo: fixture.repo, GitHub: provider}
 	handlers := buildGitHubIssueRuntimeHandlers(opts)
 	execution := models.Execution{TaskID: fixture.task.ID, Status: models.ExecRunning, PromptSent: "github inbox"}
-	require.NoError(t, repository.NewExecutionRepo(fixture.repo.DB()).Create(ctx, &execution))
+	require.NoError(t, sqlite.NewExecutionRepo(fixture.repo.DB()).Create(ctx, &execution))
 	invocation, _, err := fixture.repo.ClaimScheduledOccurrence(ctx, fixture.schedule, time.Now().UTC(), fixture.schedule.ComputeNextRun(time.Now().UTC()))
 	require.NoError(t, err)
 	devInbox := automationNodeByKey(t, fixture.definition, "dev_inbox")
@@ -3001,12 +3001,12 @@ func TestAutomationGitHubPRPublicationUsesDurableTaskProvenanceAfterGraphReplace
 	implementationTask.WorktreePath = worktreePath
 	implementationTask.WorktreeBranch = "task/issue-42-replaced"
 	implementationExecution := models.Execution{TaskID: implementationTask.ID, Status: models.ExecRunning, PromptSent: "implementation"}
-	require.NoError(t, repository.NewExecutionRepo(fixture.repo.DB()).Create(ctx, &implementationExecution))
+	require.NoError(t, sqlite.NewExecutionRepo(fixture.repo.DB()).Create(ctx, &implementationExecution))
 	originCtx := WithAutomationContext(ctx, models.AutomationContext{ProjectID: fixture.project.ID, OriginTask: true})
 	originCtx = withAutomationExecution(originCtx, implementationTask.ID, implementationExecution.ID)
 	staleOriginCtx := WithAutomationContext(ctx, models.AutomationContext{ProjectID: fixture.project.ID, OriginTask: true, Bindings: staleTaskContext.Bindings})
 	staleOriginCtx = withAutomationExecution(staleOriginCtx, implementationTask.ID, implementationExecution.ID)
-	taskGoalSvc := NewTaskGoalService(repository.NewTaskGoalRepo(fixture.repo.DB()), fixture.taskRepo, nil)
+	taskGoalSvc := NewTaskGoalService(sqlite.NewTaskGoalRepo(fixture.repo.DB()), fixture.taskRepo, nil)
 	goal, err := taskGoalSvc.SetGoal(ctx, implementationTask.ID, "Publish a reviewable PR", GoalOptions{Actor: "test"})
 	require.NoError(t, err)
 	for i := 0; i < 3; i++ {
@@ -3014,8 +3014,8 @@ func TestAutomationGitHubPRPublicationUsesDurableTaskProvenanceAfterGraphReplace
 		require.NoError(t, err)
 	}
 	publishSvc := &LLMService{automationRepo: fixture.repo, githubIssueRuntime: provider, projectRepo: projectRepo,
-		taskRepo: fixture.taskRepo, taskPullRequestRepo: opts.TaskPullRequestRepo, githubPRFeedbackRepo: repository.NewGitHubPRFeedbackRepo(fixture.repo.DB()),
-		githubAuthRepo: repository.NewGitHubAuthRepo(fixture.repo.DB()), threadInputRepo: repository.NewThreadInputRepo(fixture.repo.DB()), taskGoalSvc: taskGoalSvc}
+		taskRepo: fixture.taskRepo, taskPullRequestRepo: opts.TaskPullRequestRepo, githubPRFeedbackRepo: sqlite.NewGitHubPRFeedbackRepo(fixture.repo.DB()),
+		githubAuthRepo: sqlite.NewGitHubAuthRepo(fixture.repo.DB()), threadInputRepo: sqlite.NewThreadInputRepo(fixture.repo.DB()), taskGoalSvc: taskGoalSvc}
 	publishRuntime := publishSvc.AutomationGitHubRuntimeTools(staleOriginCtx, *implementationTask, gitHubIssueRuntimeToolDefs(true))
 	require.NotNil(t, publishRuntime)
 	prBody := "## Summary\n- Implements the accepted issue.\n\n## Validation\n- go test ./internal/service\n\nCloses #42"
@@ -3056,7 +3056,7 @@ func TestAutomationGitHubPRPublicationUsesDurableTaskProvenanceAfterGraphReplace
 	require.NoError(t, fixture.taskRepo.UpdateWorktreeInfo(ctx, spoofed.ID, t.TempDir(), "task/spoofed"))
 	spoofed.WorktreeBranch = "task/spoofed"
 	spoofExecution := models.Execution{TaskID: spoofed.ID, Status: models.ExecRunning, PromptSent: "spoof"}
-	require.NoError(t, repository.NewExecutionRepo(fixture.repo.DB()).Create(ctx, &spoofExecution))
+	require.NoError(t, sqlite.NewExecutionRepo(fixture.repo.DB()).Create(ctx, &spoofExecution))
 	spoofCtx := WithAutomationContext(ctx, models.AutomationContext{ProjectID: fixture.project.ID, OriginTask: true})
 	spoofCtx = withAutomationExecution(spoofCtx, spoofed.ID, spoofExecution.ID)
 	spoofRuntime := publishSvc.AutomationGitHubRuntimeTools(spoofCtx, *spoofed, gitHubIssueRuntimeToolDefs(true))
@@ -3073,7 +3073,7 @@ func newAutomationGitHubIssueDedupHarness(t *testing.T, provider GitHubIssueRunt
 	t.Helper()
 	fixture := newAutomationRuntimeFixture(t, AutomationAdapterGitHubSDLC)
 	ctx := context.Background()
-	projectRepo := repository.NewProjectRepo(fixture.repo.DB())
+	projectRepo := sqlite.NewProjectRepo(fixture.repo.DB())
 	fixture.project.RepoURL = "https://github.com/example/runtime.git"
 	fixture.project.RepoPath = t.TempDir()
 	require.NoError(t, projectRepo.Update(ctx, &fixture.project))
@@ -3167,11 +3167,11 @@ func replaceAutomationGitHubIssueGraphWithoutNode(t *testing.T, fixture automati
 func replaceAutomationGitHubIssueGraphWithCandidate(t *testing.T, fixture automationRuntimeFixture, mutate func(*models.AutomationDraftCandidate)) *models.AutomationDefinition {
 	t.Helper()
 	ctx := context.Background()
-	projectRepo := repository.NewProjectRepo(fixture.repo.DB())
-	settingsRepo := repository.NewSettingsRepo(fixture.repo.DB())
+	projectRepo := sqlite.NewProjectRepo(fixture.repo.DB())
+	settingsRepo := sqlite.NewSettingsRepo(fixture.repo.DB())
 	require.NoError(t, settingsRepo.Set(ctx, GitHubSettingAuthMode, GitHubAuthModePAT))
 	require.NoError(t, settingsRepo.Set(ctx, GitHubSettingPAT, "test-token"))
-	githubAuthRepo := repository.NewGitHubAuthRepo(fixture.repo.DB())
+	githubAuthRepo := sqlite.NewGitHubAuthRepo(fixture.repo.DB())
 	require.NoError(t, githubAuthRepo.UpsertAuthorizedActor(ctx, &models.GitHubAuthorizedActor{GitHubLogin: "automation-bot"}))
 	registry := NewAutomationAdapterRegistry()
 	drafts := NewAutomationDraftService(fixture.repo, registry)
@@ -3180,7 +3180,7 @@ func replaceAutomationGitHubIssueGraphWithCandidate(t *testing.T, fixture automa
 	mutate(&candidate)
 	validator := NewAutomationSaveValidator(registry, drafts)
 	validator.SetCapabilityDependencies(projectRepo, settingsRepo, githubAuthRepo)
-	taskSvc := NewTaskService(fixture.taskRepo, repository.NewAttachmentRepo(fixture.repo.DB()), nil)
+	taskSvc := NewTaskService(fixture.taskRepo, sqlite.NewAttachmentRepo(fixture.repo.DB()), nil)
 	compiler := NewAutomationCompiler(fixture.repo, taskSvc, fixture.taskRepo, fixture.schedRepo, validator)
 	saved, err := compiler.Save(ctx, AutomationSaveRequest{ProjectID: fixture.project.ID,
 		AutomationID: fixture.definition.Automation.ID, Source: "manual", CreatedVia: "web", Candidate: candidate})
@@ -3205,7 +3205,7 @@ func TestAutomationGitHubIssueRuntimeListsExistingAutomationIssues(t *testing.T)
 	}
 	fixture := newAutomationRuntimeFixture(t, AutomationAdapterGitHubSDLC)
 	ctx := context.Background()
-	projectRepo := repository.NewProjectRepo(fixture.repo.DB())
+	projectRepo := sqlite.NewProjectRepo(fixture.repo.DB())
 	fixture.project.RepoURL = "https://github.com/example/runtime.git"
 	require.NoError(t, projectRepo.Update(ctx, &fixture.project))
 	handlers := buildGitHubIssueRuntimeHandlers(githubIssueRuntimeOptions{ProjectID: fixture.project.ID, ProjectRepo: projectRepo,
@@ -3244,10 +3244,10 @@ func TestAutomationGitHubIssueRuntimeAssignedIssuesWithPRsPaginates(t *testing.T
 	}
 	fixture := newAutomationRuntimeFixture(t, AutomationAdapterGitHubSDLC)
 	ctx := context.Background()
-	projectRepo := repository.NewProjectRepo(fixture.repo.DB())
+	projectRepo := sqlite.NewProjectRepo(fixture.repo.DB())
 	fixture.project.RepoURL = "https://github.com/example/runtime.git"
 	require.NoError(t, projectRepo.Update(ctx, &fixture.project))
-	githubAuthRepo := repository.NewGitHubAuthRepo(fixture.repo.DB())
+	githubAuthRepo := sqlite.NewGitHubAuthRepo(fixture.repo.DB())
 	require.NoError(t, githubAuthRepo.UpsertAuthorizedActor(ctx, &models.GitHubAuthorizedActor{GitHubLogin: "automation-bot"}))
 	handlers := buildGitHubIssueRuntimeHandlers(githubIssueRuntimeOptions{ProjectID: fixture.project.ID, ProjectRepo: projectRepo,
 		GitHubAuthRepo: githubAuthRepo, GitHub: provider})
@@ -3295,10 +3295,10 @@ func TestAutomationGitHubIssueRuntimeAssignedIssuesWithPRsPaginates(t *testing.T
 func TestAutomationGitHubIssueRuntimeAssignedIssuesWithPRsRecordsTaskCreationProvenance(t *testing.T) {
 	fixture := newAutomationRuntimeFixture(t, AutomationAdapterGitHubSDLC)
 	ctx := context.Background()
-	projectRepo := repository.NewProjectRepo(fixture.repo.DB())
+	projectRepo := sqlite.NewProjectRepo(fixture.repo.DB())
 	fixture.project.RepoURL = "https://github.com/example/runtime.git"
 	require.NoError(t, projectRepo.Update(ctx, &fixture.project))
-	authRepo := repository.NewGitHubAuthRepo(fixture.repo.DB())
+	authRepo := sqlite.NewGitHubAuthRepo(fixture.repo.DB())
 	require.NoError(t, authRepo.UpsertAuthorizedActor(ctx, &models.GitHubAuthorizedActor{GitHubLogin: "dev"}))
 
 	issue := GitHubIssue{Number: 91, URL: "https://github.com/example/runtime/issues/91", Title: "Review linked implementation", State: "open"}
@@ -3351,7 +3351,7 @@ func TestAutomationGitHubIssueRuntimeAssignedIssuesWithPRsRecordsTaskCreationPro
 
 	// Seeing an issue in one execution must not authorize another execution to use it.
 	wrongExecution := models.Execution{TaskID: fixture.task.ID, Status: models.ExecRunning, PromptSent: "different execution"}
-	require.NoError(t, repository.NewExecutionRepo(fixture.repo.DB()).Create(ctx, &wrongExecution))
+	require.NoError(t, sqlite.NewExecutionRepo(fixture.repo.DB()).Create(ctx, &wrongExecution))
 	assertRejected(withAutomationExecution(inboxCtx, fixture.task.ID, wrongExecution.ID))
 
 	output, handled, isErr, err := runtime.Executor(inboxCtx, "create_task", taskInput)
@@ -3542,7 +3542,7 @@ func TestAutomationGitHubIssueProjectionRepairRejectsDeletedSourceGraph(t *testi
 	require.NoError(t, json.Unmarshal([]byte(sourceJSON), &source))
 	replaceAutomationGitHubIssueGraphWithoutNode(t, fixture, "bug_finder")
 
-	projectRepo := repository.NewProjectRepo(fixture.repo.DB())
+	projectRepo := sqlite.NewProjectRepo(fixture.repo.DB())
 	opts := githubIssueRuntimeOptions{ProjectID: fixture.project.ID, ProjectRepo: projectRepo,
 		TaskRepo: fixture.taskRepo, AutomationRepo: fixture.repo, GitHub: provider}
 	_, repairErr := repairAutomationGitHubIssueProjection(opts, &GitHubRepoRef{Owner: "example", Name: "runtime", FullName: "example/runtime"}, title,
@@ -3759,7 +3759,7 @@ func TestAutomationGitHubIssueCreationRepairsPartialMultiBindingProjection(t *te
 			InvocationID: invocationID, NodeID: sourceNode.ID})
 	}
 	execution := models.Execution{TaskID: fixture.task.ID, Status: models.ExecRunning, PromptSent: "partial multi-binding projection"}
-	require.NoError(t, repository.NewExecutionRepo(fixture.repo.DB()).Create(ctx, &execution))
+	require.NoError(t, sqlite.NewExecutionRepo(fixture.repo.DB()).Create(ctx, &execution))
 	causalCtx := WithAutomationContext(ctx, models.AutomationContext{ProjectID: fixture.project.ID, Bindings: bindings})
 	causalCtx = withAutomationExecution(causalCtx, fixture.task.ID, execution.ID)
 	input := json.RawMessage(`{"title":"Partial multi-binding projection","body":"body"}`)
@@ -3816,7 +3816,7 @@ func TestAutomationGitHubIssueCreationUsesLaunchAuthorizationAfterGraphReplaceme
 	activityKey := githubIssueCreationActivityKey(ctx, &GitHubRepoRef{FullName: "example/runtime"}, githubCreateIssueRuntimeInput{
 		Title: "Launch-safe bug", Body: "## Summary\nA user-visible bug.", Labels: []string{"bug"},
 	})
-	llmSvc := &LLMService{automationRepo: fixture.repo, githubIssueRuntime: provider, projectRepo: repository.NewProjectRepo(fixture.repo.DB()), taskRepo: fixture.taskRepo}
+	llmSvc := &LLMService{automationRepo: fixture.repo, githubIssueRuntime: provider, projectRepo: sqlite.NewProjectRepo(fixture.repo.DB()), taskRepo: fixture.taskRepo}
 	runtime := llmSvc.AutomationGitHubRuntimeTools(ctx, fixture.task, gitHubIssueRuntimeToolDefs(true))
 	require.NotNil(t, runtime)
 	output, handled, isErr, err := runtime.Executor(ctx, "github_create_issue", json.RawMessage(`{"title":"Launch-safe bug","body":"## Summary\nA user-visible bug."}`))
@@ -3868,7 +3868,7 @@ func TestMaintainedGitHubSDLCCategoryLabelsAreProvisionedAndVerified(t *testing.
 		t.Run(tt.name, func(t *testing.T) {
 			fixture := newAutomationRuntimeFixture(t, AutomationAdapterGitHubSDLC)
 			ctx := context.Background()
-			projectRepo := repository.NewProjectRepo(fixture.repo.DB())
+			projectRepo := sqlite.NewProjectRepo(fixture.repo.DB())
 			fixture.project.RepoURL = "https://github.com/example/runtime.git"
 			require.NoError(t, projectRepo.Update(ctx, &fixture.project))
 			bugFinder := automationNodeByKey(t, fixture.definition, "bug_finder")
@@ -3879,7 +3879,7 @@ func TestMaintainedGitHubSDLCCategoryLabelsAreProvisionedAndVerified(t *testing.
 				 RETURNING id`, fixture.project.ID, fixture.definition.Automation.ID, fixture.definition.Version.ID,
 				bugFinder.ID, fixture.schedule.ID, "labels:"+tt.name).Scan(&invocationID))
 			execution := models.Execution{TaskID: fixture.task.ID, Status: models.ExecRunning, PromptSent: "category label test"}
-			require.NoError(t, repository.NewExecutionRepo(fixture.repo.DB()).Create(ctx, &execution))
+			require.NoError(t, sqlite.NewExecutionRepo(fixture.repo.DB()).Create(ctx, &execution))
 			binding := models.AutomationBinding{AutomationID: fixture.definition.Automation.ID, VersionID: fixture.definition.Version.ID,
 				InvocationID: invocationID, NodeID: bugFinder.ID}
 			boundCtx := WithAutomationContext(ctx, models.AutomationContext{ProjectID: fixture.project.ID, Bindings: []models.AutomationBinding{binding}})
@@ -3926,14 +3926,14 @@ func TestMaintainedGitHubSDLCCategoryLabelsAreProvisionedAndVerified(t *testing.
 func TestAutomationGitHubIssueCreationDoesNotReadExistingIssuesForDeduplication(t *testing.T) {
 	fixture := newAutomationRuntimeFixture(t, AutomationAdapterGitHubSDLC)
 	ctx := context.Background()
-	projectRepo := repository.NewProjectRepo(fixture.repo.DB())
+	projectRepo := sqlite.NewProjectRepo(fixture.repo.DB())
 	fixture.project.RepoURL = "https://github.com/example/runtime.git"
 	require.NoError(t, projectRepo.Update(ctx, &fixture.project))
 	bugFinder := automationNodeByKey(t, fixture.definition, "bug_finder")
 	invocation, _, err := fixture.repo.ClaimScheduledOccurrence(ctx, fixture.schedule, time.Now().UTC(), fixture.schedule.ComputeNextRun(time.Now().UTC()))
 	require.NoError(t, err)
 	execution := models.Execution{TaskID: fixture.task.ID, Status: models.ExecRunning, PromptSent: "safe issue creation"}
-	require.NoError(t, repository.NewExecutionRepo(fixture.repo.DB()).Create(ctx, &execution))
+	require.NoError(t, sqlite.NewExecutionRepo(fixture.repo.DB()).Create(ctx, &execution))
 	binding := models.AutomationBinding{AutomationID: fixture.definition.Automation.ID, VersionID: fixture.definition.Version.ID,
 		InvocationID: invocation.ID, NodeID: bugFinder.ID}
 	ctx = WithAutomationContext(ctx, models.AutomationContext{ProjectID: fixture.project.ID, Bindings: []models.AutomationBinding{binding}})
@@ -3975,7 +3975,7 @@ func TestAutomationGitHubIssueCreationDoesNotReadExistingIssuesForDeduplication(
 func TestAutomationGitHubIssueCreationSerializesLocalDedupAcrossExecutions(t *testing.T) {
 	fixture := newAutomationRuntimeFixture(t, AutomationAdapterGitHubSDLC)
 	ctx := context.Background()
-	projectRepo := repository.NewProjectRepo(fixture.repo.DB())
+	projectRepo := sqlite.NewProjectRepo(fixture.repo.DB())
 	fixture.project.RepoURL = "https://github.com/example/runtime.git"
 	fixture.project.RepoPath = t.TempDir()
 	require.NoError(t, projectRepo.Update(ctx, &fixture.project))
@@ -3989,7 +3989,7 @@ func TestAutomationGitHubIssueCreationSerializesLocalDedupAcrossExecutions(t *te
 			VALUES (?, ?, ?, ?, 'schedule', ?, ?, 'running', CURRENT_TIMESTAMP) RETURNING id`, fixture.project.ID,
 			fixture.definition.Automation.ID, fixture.definition.Version.ID, bugFinder.ID, fixture.schedule.ID, occurrence).Scan(&invocationID))
 		execution := models.Execution{TaskID: fixture.task.ID, Status: models.ExecRunning, PromptSent: occurrence}
-		require.NoError(t, repository.NewExecutionRepo(fixture.repo.DB()).Create(ctx, &execution))
+		require.NoError(t, sqlite.NewExecutionRepo(fixture.repo.DB()).Create(ctx, &execution))
 		binding := models.AutomationBinding{AutomationID: fixture.definition.Automation.ID, VersionID: fixture.definition.Version.ID,
 			InvocationID: invocationID, NodeID: bugFinder.ID}
 		value := WithAutomationContext(ctx, models.AutomationContext{ProjectID: fixture.project.ID, Bindings: []models.AutomationBinding{binding}})
@@ -4125,7 +4125,7 @@ func TestAutomationObservabilityRecordsSafeLifecycleAndGraphMetrics(t *testing.T
 	blank, err := drafts.BlankCandidate(AutomationAdapterVisionDriver)
 	require.NoError(t, err)
 	planner := NewAutomationSaveValidator(NewAutomationAdapterRegistry(), drafts)
-	compiler := NewAutomationCompiler(fixture.repo, NewTaskService(fixture.taskRepo, repository.NewAttachmentRepo(fixture.repo.DB()), nil), fixture.taskRepo, fixture.schedRepo, planner)
+	compiler := NewAutomationCompiler(fixture.repo, NewTaskService(fixture.taskRepo, sqlite.NewAttachmentRepo(fixture.repo.DB()), nil), fixture.taskRepo, fixture.schedRepo, planner)
 	plan, _, err := compiler.PreviewSave(ctx, fixture.project.ID, blank)
 	require.NoError(t, err)
 	require.NotEmpty(t, plan.Validation)
@@ -4340,8 +4340,8 @@ func TestAutomationLiveDisplayStateShowsRunningWhenMixedWithWaiting(t *testing.T
 func TestAutomationExternalRefreshValidatesIdentityWithoutLoadingDefinition(t *testing.T) {
 	fixture, counter := newCountingAutomationRuntimeFixture(t, AutomationAdapterGitHubSDLC)
 	ctx := context.Background()
-	pullRequests := repository.NewTaskPullRequestRepo(fixture.repo.DB())
-	projectRepo := repository.NewProjectRepo(fixture.repo.DB())
+	pullRequests := sqlite.NewTaskPullRequestRepo(fixture.repo.DB())
+	projectRepo := sqlite.NewProjectRepo(fixture.repo.DB())
 	provider := &fakeAutomationPullRequestProvider{}
 	external := NewAutomationExternalStateService(fixture.repo, pullRequests, projectRepo, provider)
 
@@ -4375,11 +4375,11 @@ func automationDefinitionNodeLoadCount(statements []string) int {
 func TestAutomationExternalRefreshValidationPreservesMissingProjectAndDraftBehavior(t *testing.T) {
 	fixture, counter := newCountingAutomationRuntimeFixture(t, AutomationAdapterGitHubSDLC)
 	ctx := context.Background()
-	projectRepo := repository.NewProjectRepo(fixture.repo.DB())
+	projectRepo := sqlite.NewProjectRepo(fixture.repo.DB())
 	otherProject := models.Project{Name: "External refresh foreign project"}
 	require.NoError(t, projectRepo.Create(ctx, &otherProject))
 	provider := &fakeAutomationPullRequestProvider{}
-	external := NewAutomationExternalStateService(fixture.repo, repository.NewTaskPullRequestRepo(fixture.repo.DB()), projectRepo, provider)
+	external := NewAutomationExternalStateService(fixture.repo, sqlite.NewTaskPullRequestRepo(fixture.repo.DB()), projectRepo, provider)
 
 	assertNotFoundWithoutGitHub := func(name, projectID, automationID string) {
 		t.Helper()
@@ -4414,7 +4414,7 @@ func TestAutomationExternalRefreshValidationPreservesMissingProjectAndDraftBehav
 func TestAutomationExternalRefreshClosedPullRequestWithoutMergeReconcilesFailure(t *testing.T) {
 	fixture := newAutomationRuntimeFixture(t, AutomationAdapterGitHubSDLC)
 	ctx := context.Background()
-	projectRepo := repository.NewProjectRepo(fixture.repo.DB())
+	projectRepo := sqlite.NewProjectRepo(fixture.repo.DB())
 	fixture.project.RepoURL = "https://github.com/example/runtime"
 	require.NoError(t, projectRepo.Update(ctx, &fixture.project))
 
@@ -4430,7 +4430,7 @@ func TestAutomationExternalRefreshClosedPullRequestWithoutMergeReconcilesFailure
 	})
 	require.NoError(t, err)
 
-	pullRequests := repository.NewTaskPullRequestRepo(fixture.repo.DB())
+	pullRequests := sqlite.NewTaskPullRequestRepo(fixture.repo.DB())
 	record := models.TaskPullRequest{TaskID: fixture.task.ID, PRNumber: 77, PRURL: "https://github.com/example/runtime/pull/77", PRState: "open"}
 	require.NoError(t, pullRequests.Upsert(ctx, &record))
 	now := time.Now().UTC().Truncate(time.Second)
@@ -4452,8 +4452,8 @@ func TestAutomationExternalRefreshClosedPullRequestWithoutMergeReconcilesFailure
 func TestAutomationExternalRefreshAndLiveLoadDefinitionOnce(t *testing.T) {
 	fixture, counter := newCountingAutomationRuntimeFixture(t, AutomationAdapterGitHubSDLC)
 	ctx := context.Background()
-	pullRequests := repository.NewTaskPullRequestRepo(fixture.repo.DB())
-	projectRepo := repository.NewProjectRepo(fixture.repo.DB())
+	pullRequests := sqlite.NewTaskPullRequestRepo(fixture.repo.DB())
+	projectRepo := sqlite.NewProjectRepo(fixture.repo.DB())
 	external := NewAutomationExternalStateService(fixture.repo, pullRequests, projectRepo, &fakeAutomationPullRequestProvider{})
 	graphService := NewAutomationGraphService(fixture.repo)
 
@@ -4522,7 +4522,7 @@ func seedAutomationExternalRefreshBenchmark(tb testing.TB, db *sql.DB, nodeCount
 	tb.Helper()
 	ctx := context.Background()
 	project := models.Project{Name: fmt.Sprintf("External refresh benchmark %d nodes", nodeCount)}
-	if err := repository.NewProjectRepo(db).Create(ctx, &project); err != nil {
+	if err := sqlite.NewProjectRepo(db).Create(ctx, &project); err != nil {
 		tb.Fatalf("create benchmark project: %v", err)
 	}
 	automationID := persistence.NewID()
@@ -4564,7 +4564,7 @@ func BenchmarkOptimizationAutomationExternalRefreshDefinitionLoad(b *testing.B) 
 		b.Run(fmt.Sprintf("%d_nodes", nodeCount), func(b *testing.B) {
 			db := testutil.NewTestDB(b)
 			projectID, automationID := seedAutomationExternalRefreshBenchmark(b, db, nodeCount)
-			repo := repository.NewAutomationRepo(db)
+			repo := sqlite.NewAutomationRepo(db)
 
 			b.ReportAllocs()
 			b.ResetTimer()
@@ -4598,15 +4598,15 @@ func seedAutomationExternalRefreshEndToEndFixture(tb testing.TB, db *sql.DB, nod
 		tb.Fatalf("load benchmark graph identity: %v", err)
 	}
 	task := models.Task{ProjectID: projectID, Title: "External refresh benchmark task", Category: models.CategoryActive, Priority: 1, Status: models.StatusPending, Prompt: "benchmark external refresh"}
-	if err := repository.NewTaskRepo(db, nil).Create(ctx, &task); err != nil {
+	if err := sqlite.NewTaskRepo(db, nil).Create(ctx, &task); err != nil {
 		tb.Fatalf("create benchmark task: %v", err)
 	}
 	pull := models.TaskPullRequest{TaskID: task.ID, PRNumber: 7, PRURL: "https://github.com/example/runtime/pull/7", PRState: "open"}
-	pullRepo := repository.NewTaskPullRequestRepo(db)
+	pullRepo := sqlite.NewTaskPullRequestRepo(db)
 	if err := pullRepo.Upsert(ctx, &pull); err != nil {
 		tb.Fatalf("create benchmark pull request: %v", err)
 	}
-	automationRepo := repository.NewAutomationRepo(db)
+	automationRepo := sqlite.NewAutomationRepo(db)
 	binding := models.AutomationBinding{AutomationID: automationID, VersionID: versionID, NodeID: nodeID}
 	if _, _, err := automationRepo.RecordProjectionEvent(ctx, persistence.AutomationProjectionEvent{
 		Context: models.AutomationContext{ProjectID: projectID, Bindings: []models.AutomationBinding{binding}}, Binding: binding,
@@ -4628,10 +4628,10 @@ func resetAutomationExternalRefreshBenchmarkPull(tb testing.TB, db *sql.DB, pull
 
 func newAutomationExternalRefreshBenchmarkServices(db *sql.DB, fixture automationExternalRefreshBenchmarkFixture) (*AutomationExternalStateService, *AutomationGraphService, *AutomationReconciler, *fakeAutomationPullRequestProvider) {
 	provider := &fakeAutomationPullRequestProvider{pull: GitHubPullRequest{Number: 7, URL: "https://github.com/example/runtime/pull/7", State: "open"}}
-	automationRepo := repository.NewAutomationRepo(db)
-	external := NewAutomationExternalStateService(automationRepo, repository.NewTaskPullRequestRepo(db), repository.NewProjectRepo(db), provider)
+	automationRepo := sqlite.NewAutomationRepo(db)
+	external := NewAutomationExternalStateService(automationRepo, sqlite.NewTaskPullRequestRepo(db), sqlite.NewProjectRepo(db), provider)
 	graph := NewAutomationGraphService(automationRepo)
-	reconciler := NewAutomationReconciler(automationRepo, repository.NewExecutionRepo(db), NewWorkerService(nil, 1, nil))
+	reconciler := NewAutomationReconciler(automationRepo, sqlite.NewExecutionRepo(db), NewWorkerService(nil, 1, nil))
 	reconciler.SetAutomationExternalStateService(external)
 	reconciler.SetAutomationLiveViewTracker(NewAutomationLiveViewTracker())
 	reconciler.liveViewTracker.MarkViewed(fixture.projectID, fixture.automationID)
@@ -4682,7 +4682,7 @@ func BenchmarkOptimizationAutomationExternalRefreshEndToEnd(b *testing.B) {
 func TestAutomationExternalPullRequestRefreshIsExplicitCachedAndReconcilesProjection(t *testing.T) {
 	fixture := newAutomationRuntimeFixture(t, AutomationAdapterGitHubSDLC)
 	ctx := context.Background()
-	projectRepo := repository.NewProjectRepo(fixture.repo.DB())
+	projectRepo := sqlite.NewProjectRepo(fixture.repo.DB())
 	fixture.project.RepoURL = "https://github.com/example/runtime"
 	require.NoError(t, projectRepo.Update(ctx, &fixture.project))
 
@@ -4698,7 +4698,7 @@ func TestAutomationExternalPullRequestRefreshIsExplicitCachedAndReconcilesProjec
 	})
 	require.NoError(t, err)
 
-	pullRequests := repository.NewTaskPullRequestRepo(fixture.repo.DB())
+	pullRequests := sqlite.NewTaskPullRequestRepo(fixture.repo.DB())
 	record := models.TaskPullRequest{TaskID: fixture.task.ID, PRNumber: 7, PRURL: "https://github.com/example/runtime/pull/7", PRState: "open"}
 	require.NoError(t, pullRequests.Upsert(ctx, &record))
 	now := time.Now().UTC().Truncate(time.Second)
@@ -4770,7 +4770,7 @@ func TestAutomationExternalPullRequestRefreshIsExplicitCachedAndReconcilesProjec
 func TestAutomationReconcilerRefreshesStaleExternalPullRequestStateInBackground(t *testing.T) {
 	fixture, counter := newCountingAutomationRuntimeFixture(t, AutomationAdapterGitHubSDLC)
 	ctx := context.Background()
-	projectRepo := repository.NewProjectRepo(fixture.repo.DB())
+	projectRepo := sqlite.NewProjectRepo(fixture.repo.DB())
 	fixture.project.RepoURL = "https://github.com/example/runtime"
 	require.NoError(t, projectRepo.Update(ctx, &fixture.project))
 
@@ -4786,7 +4786,7 @@ func TestAutomationReconcilerRefreshesStaleExternalPullRequestStateInBackground(
 	})
 	require.NoError(t, err)
 
-	pullRequests := repository.NewTaskPullRequestRepo(fixture.repo.DB())
+	pullRequests := sqlite.NewTaskPullRequestRepo(fixture.repo.DB())
 	record := models.TaskPullRequest{TaskID: fixture.task.ID, PRNumber: 9, PRURL: "https://github.com/example/runtime/pull/9", PRState: "open"}
 	require.NoError(t, pullRequests.Upsert(ctx, &record))
 	now := time.Now().UTC().Truncate(time.Second)
@@ -4801,7 +4801,7 @@ func TestAutomationReconcilerRefreshesStaleExternalPullRequestStateInBackground(
 
 	provider := &fakeAutomationPullRequestProvider{pull: GitHubPullRequest{Number: 9, URL: record.PRURL, State: "closed", Merged: true}}
 	external := NewAutomationExternalStateService(fixture.repo, pullRequests, projectRepo, provider)
-	reconciler := NewAutomationReconciler(fixture.repo, repository.NewExecutionRepo(fixture.repo.DB()), NewWorkerService(nil, 1, nil))
+	reconciler := NewAutomationReconciler(fixture.repo, sqlite.NewExecutionRepo(fixture.repo.DB()), NewWorkerService(nil, 1, nil))
 	reconciler.SetAutomationExternalStateService(external)
 	counter.Reset()
 	counter.SetEnabled(true)
@@ -4825,7 +4825,7 @@ func TestAutomationReconcilerRefreshesStaleExternalPullRequestStateInBackground(
 func TestAutomationReconcilerSkipsExternalStateRefreshWhenLiveViewNotRecentlyOpen(t *testing.T) {
 	fixture := newAutomationRuntimeFixture(t, AutomationAdapterGitHubSDLC)
 	ctx := context.Background()
-	projectRepo := repository.NewProjectRepo(fixture.repo.DB())
+	projectRepo := sqlite.NewProjectRepo(fixture.repo.DB())
 	fixture.project.RepoURL = "https://github.com/example/runtime"
 	require.NoError(t, projectRepo.Update(ctx, &fixture.project))
 
@@ -4841,7 +4841,7 @@ func TestAutomationReconcilerSkipsExternalStateRefreshWhenLiveViewNotRecentlyOpe
 	})
 	require.NoError(t, err)
 
-	pullRequests := repository.NewTaskPullRequestRepo(fixture.repo.DB())
+	pullRequests := sqlite.NewTaskPullRequestRepo(fixture.repo.DB())
 	record := models.TaskPullRequest{TaskID: fixture.task.ID, PRNumber: 9, PRURL: "https://github.com/example/runtime/pull/9", PRState: "open"}
 	require.NoError(t, pullRequests.Upsert(ctx, &record))
 	now := time.Now().UTC().Truncate(time.Second)
@@ -4852,7 +4852,7 @@ func TestAutomationReconcilerSkipsExternalStateRefreshWhenLiveViewNotRecentlyOpe
 	provider := &fakeAutomationPullRequestProvider{pull: GitHubPullRequest{Number: 9, URL: record.PRURL, State: "closed", Merged: true}}
 	external := NewAutomationExternalStateService(fixture.repo, pullRequests, projectRepo, provider)
 	tracker := NewAutomationLiveViewTracker()
-	reconciler := NewAutomationReconciler(fixture.repo, repository.NewExecutionRepo(fixture.repo.DB()), NewWorkerService(nil, 1, nil))
+	reconciler := NewAutomationReconciler(fixture.repo, sqlite.NewExecutionRepo(fixture.repo.DB()), NewWorkerService(nil, 1, nil))
 	reconciler.SetAutomationExternalStateService(external)
 	reconciler.SetAutomationLiveViewTracker(tracker)
 
@@ -4875,7 +4875,7 @@ func TestAutomationRuntimeNativeNotificationRequiresProducerActionEdge(t *testin
 	})
 	require.NoError(t, err)
 
-	alertRepo := repository.NewAlertRepo(h.db)
+	alertRepo := sqlite.NewAlertRepo(h.db)
 	alertRepo.SetAutomationRepo(h.automationRepo)
 	alertSvc := NewAlertService(alertRepo, nil)
 	create := func(nodeKey, key string) (*models.Alert, error) {
@@ -4994,7 +4994,7 @@ func TestAutomationRuntimeNativeInboxUsesConfiguredImplementationGoal(t *testing
 	})
 	require.NoError(t, err)
 
-	alertRepo := repository.NewAlertRepo(h.db)
+	alertRepo := sqlite.NewAlertRepo(h.db)
 	alertRepo.SetAutomationRepo(h.automationRepo)
 	alertSvc := NewAlertService(alertRepo, nil)
 	producer := automationNodeByKey(t, saved.Definition, "custom_producer")
@@ -5030,7 +5030,7 @@ func TestAutomationRuntimeNativeInboxUsesConfiguredImplementationGoal(t *testing
 	linkedAlert, err := alertSvc.GetByID(ctx, h.project.ID, alert.ID)
 	require.NoError(t, err)
 	require.NotNil(t, linkedAlert.ImplementationTaskID)
-	goal, err := repository.NewTaskGoalRepo(h.db).GetByTaskID(ctx, *linkedAlert.ImplementationTaskID)
+	goal, err := sqlite.NewTaskGoalRepo(h.db).GetByTaskID(ctx, *linkedAlert.ImplementationTaskID)
 	require.NoError(t, err)
 	require.NotNil(t, goal)
 	require.Equal(t, configuredGoal, goal.Objective)
@@ -5044,7 +5044,7 @@ func TestAutomationRuntimeNativeNotificationCreationRepairsStaleProducerBindingA
 	first, err := h.compiler.Save(ctx, AutomationSaveRequest{ProjectID: h.project.ID, Source: "template", CreatedVia: "web", Candidate: candidate})
 	require.NoError(t, err)
 
-	alertRepo := repository.NewAlertRepo(h.db)
+	alertRepo := sqlite.NewAlertRepo(h.db)
 	alertRepo.SetAutomationRepo(h.automationRepo)
 	alertSvc := NewAlertService(alertRepo, nil)
 	producer := automationNodeByKey(t, first.Definition, "vision_suggestions")
@@ -5076,7 +5076,7 @@ func TestAutomationRuntimeNativeNotificationCreationReusesIdempotencyKeyAfterGra
 	first, err := h.compiler.Save(ctx, AutomationSaveRequest{ProjectID: h.project.ID, Source: "manual", CreatedVia: "web", Candidate: candidate})
 	require.NoError(t, err)
 
-	alertRepo := repository.NewAlertRepo(h.db)
+	alertRepo := sqlite.NewAlertRepo(h.db)
 	alertRepo.SetAutomationRepo(h.automationRepo)
 	alertSvc := NewAlertService(alertRepo, nil)
 	createFromProducer := func(definition *models.AutomationDefinition, title string) (*models.Alert, error) {
@@ -5111,7 +5111,7 @@ func TestAutomationRuntimeNativeNotificationCreationAllowsDistinctIdempotencyKey
 	definition, err := h.compiler.Save(ctx, AutomationSaveRequest{ProjectID: h.project.ID, Source: "manual", CreatedVia: "web", Candidate: candidate})
 	require.NoError(t, err)
 
-	alertRepo := repository.NewAlertRepo(h.db)
+	alertRepo := sqlite.NewAlertRepo(h.db)
 	alertRepo.SetAutomationRepo(h.automationRepo)
 	alertSvc := NewAlertService(alertRepo, nil)
 	producer := automationNodeByKey(t, definition.Definition, "custom_producer")
@@ -5134,7 +5134,7 @@ func TestAutomationRuntimeNativeExistingNotificationListScopesToAutomationOwners
 	definition, err := h.compiler.Save(ctx, AutomationSaveRequest{ProjectID: h.project.ID, Source: "manual", CreatedVia: "web", Candidate: candidate})
 	require.NoError(t, err)
 
-	alertRepo := repository.NewAlertRepo(h.db)
+	alertRepo := sqlite.NewAlertRepo(h.db)
 	alertRepo.SetAutomationRepo(h.automationRepo)
 	alertSvc := NewAlertService(alertRepo, nil)
 	producer := automationNodeByKey(t, definition.Definition, "custom_producer")
@@ -5184,7 +5184,7 @@ func TestAutomationRuntimeNativeInboxOwnershipSurvivesCompatibleAutomationUpdate
 	first, err := h.compiler.Save(ctx, AutomationSaveRequest{ProjectID: h.project.ID, Source: "manual", CreatedVia: "web", Candidate: candidate})
 	require.NoError(t, err)
 
-	alertRepo := repository.NewAlertRepo(h.db)
+	alertRepo := sqlite.NewAlertRepo(h.db)
 	alertRepo.SetAutomationRepo(h.automationRepo)
 	alertSvc := NewAlertService(alertRepo, nil)
 	producer := automationNodeByKey(t, first.Definition, "custom_producer")
@@ -5265,13 +5265,13 @@ func customGitHubMailboxCandidate(name string) models.AutomationDraftCandidate {
 func TestAutomationRuntimeGitHubInboxOwnershipSurvivesCompatibleAutomationUpdate(t *testing.T) {
 	h := newAutomationSaveHarness(t, "GitHub ownership replacement")
 	ctx := context.Background()
-	projectRepo := repository.NewProjectRepo(h.db)
+	projectRepo := sqlite.NewProjectRepo(h.db)
 	h.project.RepoURL = "https://github.com/example/runtime.git"
 	require.NoError(t, projectRepo.Update(ctx, &h.project))
-	settingsRepo := repository.NewSettingsRepo(h.db)
+	settingsRepo := sqlite.NewSettingsRepo(h.db)
 	require.NoError(t, settingsRepo.Set(ctx, GitHubSettingAuthMode, GitHubAuthModePAT))
 	require.NoError(t, settingsRepo.Set(ctx, GitHubSettingPAT, "test-token"))
-	githubAuthRepo := repository.NewGitHubAuthRepo(h.db)
+	githubAuthRepo := sqlite.NewGitHubAuthRepo(h.db)
 	require.NoError(t, githubAuthRepo.UpsertAuthorizedActor(ctx, &models.GitHubAuthorizedActor{GitHubLogin: "automation-bot"}))
 	h.compiler.validator.SetCapabilityDependencies(projectRepo, settingsRepo, githubAuthRepo)
 	candidate := customGitHubMailboxCandidate("GitHub ownership replacement")
@@ -5317,7 +5317,7 @@ func TestAutomationRuntimeNativeInboxOwnershipMovesToCurrentRenamedMailbox(t *te
 	first, err := h.compiler.Save(ctx, AutomationSaveRequest{ProjectID: h.project.ID, Source: "manual", CreatedVia: "web", Candidate: candidate})
 	require.NoError(t, err)
 
-	alertRepo := repository.NewAlertRepo(h.db)
+	alertRepo := sqlite.NewAlertRepo(h.db)
 	alertRepo.SetAutomationRepo(h.automationRepo)
 	alertSvc := NewAlertService(alertRepo, nil)
 	producer := automationNodeByKey(t, first.Definition, "custom_producer")
@@ -5369,7 +5369,7 @@ func TestAutomationRuntimeCustomNativeInboxRequiresSameAutomationOwnership(t *te
 	second, err := h.compiler.Save(ctx, AutomationSaveRequest{ProjectID: h.project.ID, Source: "manual", CreatedVia: "web", Candidate: customNativeMailboxCandidate("Second Native mailbox")})
 	require.NoError(t, err)
 
-	alertRepo := repository.NewAlertRepo(h.db)
+	alertRepo := sqlite.NewAlertRepo(h.db)
 	alertRepo.SetAutomationRepo(h.automationRepo)
 	alertSvc := NewAlertService(alertRepo, nil)
 	createApproved := func(definition *models.AutomationDefinition, title, key string) *models.Alert {
@@ -5456,7 +5456,7 @@ func TestAutomationRuntimeCustomNativeMailboxUsesRoleTopologyInsteadOfMaintained
 	require.NoError(t, err)
 	producer := automationNodeByKey(t, saved.Definition, "custom_producer")
 	producerTaskID := automationResourceID(t, saved.Definition, "custom_producer", "task")
-	alertRepo := repository.NewAlertRepo(h.db)
+	alertRepo := sqlite.NewAlertRepo(h.db)
 	alertRepo.SetAutomationRepo(h.automationRepo)
 	alertSvc := NewAlertService(alertRepo, nil)
 	ctx = WithAutomationContext(ctx, models.AutomationContext{ProjectID: h.project.ID, Bindings: []models.AutomationBinding{{AutomationID: saved.Definition.Automation.ID, VersionID: saved.Definition.Version.ID, NodeID: producer.ID}}})
@@ -5498,7 +5498,7 @@ func TestAutomationRuntimeReducedNativeApprovalBranchesEndAtGate(t *testing.T) {
 			saved, err := h.compiler.Save(ctx, AutomationSaveRequest{ProjectID: h.project.ID, Source: "template", CreatedVia: "web", Candidate: candidate})
 			require.NoError(t, err)
 
-			alertRepo := repository.NewAlertRepo(h.db)
+			alertRepo := sqlite.NewAlertRepo(h.db)
 			alertRepo.SetAutomationRepo(h.automationRepo)
 			alertSvc := NewAlertService(alertRepo, nil)
 			producer := automationNodeByKey(t, saved.Definition, "vision_suggestions")
@@ -5520,7 +5520,7 @@ func TestAutomationRuntimeReducedNativeApprovalBranchesEndAtGate(t *testing.T) {
 func TestAutomationRuntimeNativeAlertLifecycleAndLiveProjection(t *testing.T) {
 	fixture := newAutomationRuntimeFixture(t, AutomationAdapterNativeSDLC)
 	ctx := context.Background()
-	alertRepo := repository.NewAlertRepo(fixture.repo.DB())
+	alertRepo := sqlite.NewAlertRepo(fixture.repo.DB())
 	broadcaster := events.NewBroadcaster()
 	fixture.repo.SetBroadcaster(broadcaster)
 	sub, err := broadcaster.Subscribe()
@@ -5531,7 +5531,7 @@ func TestAutomationRuntimeNativeAlertLifecycleAndLiveProjection(t *testing.T) {
 	producer := automationNodeByKey(t, fixture.definition, "vision_suggestions")
 	binding := models.AutomationBinding{AutomationID: fixture.definition.Automation.ID, VersionID: fixture.definition.Version.ID, NodeID: producer.ID}
 	producerExecution := models.Execution{TaskID: fixture.task.ID, Status: models.ExecRunning, PromptSent: "produce exact suggestion"}
-	require.NoError(t, repository.NewExecutionRepo(fixture.repo.DB()).Create(ctx, &producerExecution))
+	require.NoError(t, sqlite.NewExecutionRepo(fixture.repo.DB()).Create(ctx, &producerExecution))
 	ctx = WithAutomationContext(ctx, models.AutomationContext{ProjectID: fixture.project.ID, Bindings: []models.AutomationBinding{binding}})
 	ctx = withAutomationExecution(ctx, fixture.task.ID, producerExecution.ID)
 	alert, err := alertSvc.CreateActionable(ctx, &models.Alert{ProjectID: fixture.project.ID, SourceTaskID: &fixture.task.ID, Type: "product_suggestion", Title: "Follow me", Body: "private body", IdempotencyKey: "follow-me"})
@@ -5597,7 +5597,7 @@ func TestAutomationRuntimeNativeAlertLifecycleAndLiveProjection(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 1, graph.ActiveWorkItems, "inbox processing completion must not masquerade as implementation completion")
 	implementationExecution := models.Execution{TaskID: implementation.ID, Status: models.ExecRunning, PromptSent: "private implementation prompt"}
-	execRepo := repository.NewExecutionRepo(fixture.repo.DB())
+	execRepo := sqlite.NewExecutionRepo(fixture.repo.DB())
 	execRepo.SetAutomationRepo(fixture.repo)
 	require.NoError(t, execRepo.Create(ctx, &implementationExecution))
 	implementationBinding := contextForTask.Bindings[0]

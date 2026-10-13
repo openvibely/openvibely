@@ -1,0 +1,1558 @@
+package sqlite
+
+import (
+	"context"
+	"database/sql"
+	"database/sql/driver"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"reflect"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
+	"github.com/openvibely/openvibely/internal/testutil"
+)
+
+func createLifecycleTestAgent(t testing.TB, agentRepo *AgentRepo) *models.Agent {
+	t.Helper()
+	a := &models.Agent{
+		Name:         "Lifecycle Test Agent",
+		Description:  "fixture",
+		SystemPrompt: "You help with tests.",
+		Model:        "inherit",
+		Tools:        []string{"Read"},
+		Enabled:      true,
+	}
+	if err := agentRepo.Create(context.Background(), a); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	return a
+}
+
+func TestLifecycleRepo_HookCRUDAndQueryByWhen(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	agentRepo := NewAgentRepo(db)
+	repo := NewLifecycleRepo(db)
+	ctx := context.Background()
+
+	agent := createLifecycleTestAgent(t, agentRepo)
+
+	h := &models.AgentLifecycleHook{
+		AgentID:        agent.ID,
+		When:           models.LifecycleAfterComplete,
+		SkillKey:       "memory/observe_task_for_learning",
+		OutputContract: models.OutputContractLearningSummary,
+		Blocking:       true,
+		Enabled:        true,
+	}
+	if err := repo.CreateHook(ctx, h); err != nil {
+		t.Fatalf("create hook: %v", err)
+	}
+	if h.ID == "" {
+		t.Fatalf("expected hook ID set")
+	}
+
+	byAgent, err := repo.HooksByAgent(ctx, agent.ID)
+	if err != nil {
+		t.Fatalf("hooks by agent: %v", err)
+	}
+	if len(byAgent) != 1 {
+		t.Fatalf("expected 1 hook, got %d", len(byAgent))
+	}
+	if byAgent[0].When != models.LifecycleAfterComplete {
+		t.Fatalf("expected after_complete, got %s", byAgent[0].When)
+	}
+	if !byAgent[0].Blocking || !byAgent[0].Enabled {
+		t.Fatalf("expected blocking+enabled to round-trip true, got %+v", byAgent[0])
+	}
+
+	// Seeded system-agent hooks share the after_complete slot, so assert
+	// the test hook is present rather than expecting a single-row result.
+	byWhen, err := repo.HooksForWhen(ctx, models.LifecycleAfterComplete)
+	if err != nil {
+		t.Fatalf("hooks for when: %v", err)
+	}
+	if !containsHookID(byWhen, h.ID) {
+		t.Fatalf("expected hook %s in HooksForWhen result, got %+v", h.ID, byWhen)
+	}
+
+	// Disabling should remove the hook from HooksForWhen results.
+	h.Enabled = false
+	if err := repo.UpdateHook(ctx, h); err != nil {
+		t.Fatalf("update hook: %v", err)
+	}
+	byWhen, err = repo.HooksForWhen(ctx, models.LifecycleAfterComplete)
+	if err != nil {
+		t.Fatalf("hooks for when after disable: %v", err)
+	}
+	if containsHookID(byWhen, h.ID) {
+		t.Fatalf("expected hook %s to be filtered after disable, got %+v", h.ID, byWhen)
+	}
+
+	if err := repo.DeleteHook(ctx, h.ID); err != nil {
+		t.Fatalf("delete hook: %v", err)
+	}
+	byAgent, _ = repo.HooksByAgent(ctx, agent.ID)
+	if len(byAgent) != 0 {
+		t.Fatalf("expected 0 hooks after delete, got %d", len(byAgent))
+	}
+}
+
+func TestLifecycleRepo_HookListPathsPreserveFiltersOrderingAndValues(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	agentRepo := NewAgentRepo(db)
+	repo := NewLifecycleRepo(db)
+	ctx := context.Background()
+
+	agent := createLifecycleTestAgent(t, agentRepo)
+	otherAgent := &models.Agent{
+		Name:         "Lifecycle Test Agent (other)",
+		Description:  "fixture",
+		SystemPrompt: "You help with tests.",
+		Model:        "inherit",
+		Enabled:      true,
+	}
+	if err := agentRepo.Create(ctx, otherAgent); err != nil {
+		t.Fatalf("create other agent: %v", err)
+	}
+
+	before := &models.AgentLifecycleHook{
+		AgentID:         agent.ID,
+		When:            models.LifecycleBeforeRun,
+		SkillKey:        "project_context/load",
+		PromptOverride:  "before prompt",
+		OutputContract:  models.OutputContractContextBlock,
+		Blocking:        true,
+		Enabled:         true,
+		PermissionsJSON: `{"allow":["Read"]}`,
+		RunPolicyJSON:   `{"max_attempts":2}`,
+		ScheduleJSON:    `{"at":"09:00"}`,
+		PayloadJSON:     `{"blocks":["task_context"]}`,
+	}
+	if err := repo.CreateHook(ctx, before); err != nil {
+		t.Fatalf("create enabled hook: %v", err)
+	}
+
+	disabled := &models.AgentLifecycleHook{
+		AgentID:        agent.ID,
+		When:           models.LifecycleBeforeRun,
+		SkillKey:       "disabled/hook",
+		OutputContract: models.OutputContractContextBlock,
+		Enabled:        false,
+	}
+	if err := repo.CreateHook(ctx, disabled); err != nil {
+		t.Fatalf("create disabled hook: %v", err)
+	}
+
+	after := &models.AgentLifecycleHook{
+		AgentID:        agent.ID,
+		When:           models.LifecycleAfterComplete,
+		SkillKey:       "memory/observe_task_for_learning",
+		OutputContract: models.OutputContractLearningSummary,
+		Enabled:        true,
+	}
+	if err := repo.CreateHook(ctx, after); err != nil {
+		t.Fatalf("create after-complete hook: %v", err)
+	}
+
+	otherBefore := &models.AgentLifecycleHook{
+		AgentID:        otherAgent.ID,
+		When:           models.LifecycleBeforeRun,
+		SkillKey:       "other/before",
+		OutputContract: models.OutputContractContextBlock,
+		Enabled:        true,
+	}
+	if err := repo.CreateHook(ctx, otherBefore); err != nil {
+		t.Fatalf("create other agent hook: %v", err)
+	}
+
+	for id, createdAt := range map[string]string{
+		before.ID:      "2024-01-01 00:00:03",
+		disabled.ID:    "2024-01-01 00:00:01",
+		after.ID:       "2024-01-01 00:00:02",
+		otherBefore.ID: "2024-01-01 00:00:04",
+	} {
+		if _, err := db.ExecContext(ctx, `UPDATE agent_lifecycle_hooks SET created_at = ?, updated_at = ? WHERE id = ?`, createdAt, createdAt, id); err != nil {
+			t.Fatalf("set hook timestamp %s: %v", id, err)
+		}
+	}
+
+	byAgent, err := repo.HooksByAgent(ctx, agent.ID)
+	if err != nil {
+		t.Fatalf("hooks by agent: %v", err)
+	}
+	if got := hookIDs(byAgent); !reflect.DeepEqual(got, []string{after.ID, disabled.ID, before.ID}) {
+		t.Fatalf("HooksByAgent IDs = %v, want after/disabled/before order", got)
+	}
+
+	forWhen, err := repo.HooksForWhen(ctx, models.LifecycleBeforeRun)
+	if err != nil {
+		t.Fatalf("hooks for when: %v", err)
+	}
+	expectedForWhen := []string{before.ID, otherBefore.ID}
+	if agent.ID > otherAgent.ID {
+		expectedForWhen[0], expectedForWhen[1] = expectedForWhen[1], expectedForWhen[0]
+	}
+	if got := hookIDs(forWhen); !reflect.DeepEqual(got, expectedForWhen) {
+		t.Fatalf("HooksForWhen IDs = %v, want agent order %v", got, expectedForWhen)
+	}
+
+	var gotBefore *models.AgentLifecycleHook
+	for i := range forWhen {
+		if forWhen[i].ID == before.ID {
+			gotBefore = &forWhen[i]
+			break
+		}
+	}
+	if gotBefore == nil {
+		t.Fatalf("HooksForWhen omitted enabled hook %s", before.ID)
+	}
+	var expectedBefore *models.AgentLifecycleHook
+	for i := range byAgent {
+		if byAgent[i].ID == before.ID {
+			expectedBefore = &byAgent[i]
+			break
+		}
+	}
+	if expectedBefore == nil {
+		t.Fatalf("HooksByAgent omitted hook %s", before.ID)
+	}
+	if !reflect.DeepEqual(*gotBefore, *expectedBefore) {
+		t.Fatalf("hook decoded differently across list paths:\nby agent: %+v\nfor when: %+v", *expectedBefore, *gotBefore)
+	}
+}
+
+func TestLifecycleRepo_HookListPathsReturnScanErrorsUnwrapped(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	agentRepo := NewAgentRepo(db)
+	repo := NewLifecycleRepo(db)
+	ctx := context.Background()
+
+	agent := createLifecycleTestAgent(t, agentRepo)
+	hook := &models.AgentLifecycleHook{
+		AgentID:        agent.ID,
+		When:           models.LifecycleBeforeRun,
+		SkillKey:       "project_context/load",
+		OutputContract: models.OutputContractContextBlock,
+		Enabled:        true,
+	}
+	if err := repo.CreateHook(ctx, hook); err != nil {
+		t.Fatalf("create hook: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE agent_lifecycle_hooks SET blocking = ? WHERE id = ?`, "not-an-integer", hook.ID); err != nil {
+		t.Fatalf("corrupt hook blocking value: %v", err)
+	}
+
+	listers := []struct {
+		name string
+		list func(context.Context) ([]models.AgentLifecycleHook, error)
+	}{
+		{
+			name: "by agent",
+			list: func(ctx context.Context) ([]models.AgentLifecycleHook, error) {
+				return repo.HooksByAgent(ctx, agent.ID)
+			},
+		},
+		{
+			name: "for when",
+			list: func(ctx context.Context) ([]models.AgentLifecycleHook, error) {
+				return repo.HooksForWhen(ctx, models.LifecycleBeforeRun)
+			},
+		},
+	}
+	for _, tc := range listers {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := tc.list(ctx)
+			if err == nil {
+				t.Fatal("expected scan error")
+			}
+			if strings.HasPrefix(err.Error(), "listing hooks") {
+				t.Fatalf("scan error unexpectedly wrapped with query context: %v", err)
+			}
+		})
+	}
+}
+
+func TestLifecycleRepo_HookListPathsReturnPostQueryErrorsUnwrapped(t *testing.T) {
+	listers := []struct {
+		name string
+		list func(*LifecycleRepo, context.Context) ([]models.AgentLifecycleHook, error)
+	}{
+		{
+			name: "by agent",
+			list: func(repo *LifecycleRepo, ctx context.Context) ([]models.AgentLifecycleHook, error) {
+				return repo.HooksByAgent(ctx, "agent")
+			},
+		},
+		{
+			name: "for when",
+			list: func(repo *LifecycleRepo, ctx context.Context) ([]models.AgentLifecycleHook, error) {
+				return repo.HooksForWhen(ctx, models.LifecycleBeforeRun)
+			},
+		},
+	}
+
+	for _, tc := range listers {
+		t.Run(tc.name+" iteration error", func(t *testing.T) {
+			iterationErr := errors.New("iteration failed")
+			db := newLifecycleHookListTestDB(t, &lifecycleHookListTestRows{
+				values:  [][]driver.Value{validLifecycleHookListRow()},
+				nextErr: iterationErr,
+			})
+			repo := NewLifecycleRepo(db)
+
+			_, err := tc.list(repo, context.Background())
+			if !errors.Is(err, iterationErr) {
+				t.Fatalf("error = %v, want iteration error", err)
+			}
+			if strings.HasPrefix(err.Error(), "listing hooks") {
+				t.Fatalf("iteration error unexpectedly wrapped with query context: %v", err)
+			}
+		})
+
+		t.Run(tc.name+" post-query cancellation", func(t *testing.T) {
+			rows := &lifecycleHookListTestRows{
+				waitForCancellation: true,
+				nextStarted:         make(chan struct{}),
+			}
+			db := newLifecycleHookListTestDB(t, rows)
+			repo := NewLifecycleRepo(db)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+
+			type listResult struct {
+				err error
+			}
+			result := make(chan listResult, 1)
+			go func() {
+				_, err := tc.list(repo, ctx)
+				result <- listResult{err: err}
+			}()
+
+			select {
+			case <-rows.nextStarted:
+			case <-time.After(5 * time.Second):
+				t.Fatal("timed out waiting for rows.Next")
+			}
+			cancel()
+
+			select {
+			case got := <-result:
+				if !errors.Is(got.err, context.Canceled) {
+					t.Fatalf("error = %v, want context.Canceled", got.err)
+				}
+				if strings.HasPrefix(got.err.Error(), "listing hooks") {
+					t.Fatalf("post-query cancellation unexpectedly wrapped with query context: %v", got.err)
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatal("timed out waiting for hook list cancellation")
+			}
+		})
+	}
+}
+
+func validLifecycleHookListRow() []driver.Value {
+	return []driver.Value{
+		"hook-id", "agent-id", "before_run", "skill-key", "prompt", "context_block",
+		int64(1), int64(1), "{}", "{}", nil, `{"blocks":["task_context"]}`,
+		time.Date(2024, time.January, 1, 0, 0, 0, 0, time.UTC),
+		time.Date(2024, time.January, 1, 0, 0, 0, 0, time.UTC),
+	}
+}
+
+type lifecycleHookListTestConnector struct {
+	rows *lifecycleHookListTestRows
+}
+
+func (c lifecycleHookListTestConnector) Connect(context.Context) (driver.Conn, error) {
+	return &lifecycleHookListTestConn{rows: c.rows}, nil
+}
+
+func (c lifecycleHookListTestConnector) Driver() driver.Driver {
+	return lifecycleHookListTestDriver{}
+}
+
+type lifecycleHookListTestDriver struct{}
+
+func (lifecycleHookListTestDriver) Open(string) (driver.Conn, error) {
+	return nil, errors.New("lifecycle hook list test driver does not support named databases")
+}
+
+type lifecycleHookListTestConn struct {
+	rows *lifecycleHookListTestRows
+}
+
+func (c *lifecycleHookListTestConn) Prepare(string) (driver.Stmt, error) {
+	return nil, errors.New("lifecycle hook list test connection does not support prepared statements")
+}
+
+func (*lifecycleHookListTestConn) Close() error {
+	return nil
+}
+
+func (*lifecycleHookListTestConn) Begin() (driver.Tx, error) {
+	return nil, errors.New("lifecycle hook list test connection does not support transactions")
+}
+
+func (c *lifecycleHookListTestConn) QueryContext(ctx context.Context, _ string, _ []driver.NamedValue) (driver.Rows, error) {
+	c.rows.ctx = ctx
+	return c.rows, nil
+}
+
+type lifecycleHookListTestRows struct {
+	values              [][]driver.Value
+	nextErr             error
+	waitForCancellation bool
+	nextStarted         chan struct{}
+	ctx                 context.Context
+	closed              chan struct{}
+	closeOnce           sync.Once
+	nextStartedOnce     sync.Once
+}
+
+func (r *lifecycleHookListTestRows) Columns() []string {
+	return []string{
+		"id", "agent_id", "when_slot", "skill_key", "prompt_override", "output_contract",
+		"blocking", "enabled", "permissions_json", "run_policy_json", "schedule_json",
+		"payload_json", "created_at", "updated_at",
+	}
+}
+
+func (r *lifecycleHookListTestRows) Close() error {
+	r.closeOnce.Do(func() {
+		if r.closed == nil {
+			r.closed = make(chan struct{})
+		}
+		close(r.closed)
+	})
+	return nil
+}
+
+func (r *lifecycleHookListTestRows) Next(dest []driver.Value) error {
+	if r.waitForCancellation {
+		if r.nextStarted != nil {
+			r.nextStartedOnce.Do(func() { close(r.nextStarted) })
+		}
+		select {
+		case <-r.ctx.Done():
+			return r.ctx.Err()
+		case <-r.closed:
+			if err := r.ctx.Err(); err != nil {
+				return err
+			}
+			return io.EOF
+		}
+	}
+	if len(r.values) > 0 {
+		copy(dest, r.values[0])
+		r.values = r.values[1:]
+		return nil
+	}
+	if r.nextErr != nil {
+		err := r.nextErr
+		r.nextErr = nil
+		return err
+	}
+	return io.EOF
+}
+
+func newLifecycleHookListTestDB(t *testing.T, rows *lifecycleHookListTestRows) *sql.DB {
+	t.Helper()
+	if rows.closed == nil {
+		rows.closed = make(chan struct{})
+	}
+	db := sql.OpenDB(lifecycleHookListTestConnector{rows: rows})
+	db.SetMaxOpenConns(1)
+	t.Cleanup(func() {
+		_ = db.Close()
+	})
+	return db
+}
+
+func TestLifecycleRepo_HookListPathsPreserveQueryErrorContextAndCancellation(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := NewLifecycleRepo(db)
+
+	listers := []struct {
+		name       string
+		list       func(context.Context) ([]models.AgentLifecycleHook, error)
+		queryError string
+	}{
+		{
+			name:       "by agent",
+			list:       func(ctx context.Context) ([]models.AgentLifecycleHook, error) { return repo.HooksByAgent(ctx, "agent") },
+			queryError: "listing hooks:",
+		},
+		{
+			name: "for when",
+			list: func(ctx context.Context) ([]models.AgentLifecycleHook, error) {
+				return repo.HooksForWhen(ctx, models.LifecycleBeforeRun)
+			},
+			queryError: "listing hooks for before_run:",
+		},
+	}
+
+	for _, tc := range listers {
+		t.Run(tc.name+" cancellation", func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
+
+			_, err := tc.list(ctx)
+			if !errors.Is(err, context.Canceled) {
+				t.Fatalf("error = %v, want context.Canceled", err)
+			}
+			if !strings.HasPrefix(err.Error(), tc.queryError) {
+				t.Fatalf("error = %q, want prefix %q", err, tc.queryError)
+			}
+		})
+	}
+
+	if err := db.Close(); err != nil {
+		t.Fatalf("close database: %v", err)
+	}
+	for _, tc := range listers {
+		t.Run(tc.name+" query error", func(t *testing.T) {
+			_, err := tc.list(context.Background())
+			if err == nil {
+				t.Fatal("expected query error")
+			}
+			if !strings.HasPrefix(err.Error(), tc.queryError) {
+				t.Fatalf("error = %q, want prefix %q", err, tc.queryError)
+			}
+		})
+	}
+}
+
+func containsHookID(hooks []models.AgentLifecycleHook, id string) bool {
+	for _, h := range hooks {
+		if h.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
+func hookIDs(hooks []models.AgentLifecycleHook) []string {
+	ids := make([]string, 0, len(hooks))
+	for _, hook := range hooks {
+		ids = append(ids, hook.ID)
+	}
+	return ids
+}
+
+// TestLifecycleRepo_HooksForWhenExcludesArchivedAgentHooks verifies that
+// hooks owned by archived or disabled agents are filtered out of HooksForWhen.
+//
+// Regression test for duplicate lifecycle activity rows: when a system agent
+// (for example "System: Memory Curator") is renamed/absorbed via
+// AgentRepo.MarkArchived, the old agent stays in the agents table but is
+// flipped to enabled=0/generated_status=archived. Its agent_lifecycle_hooks
+// rows still carry enabled=1, so HooksForWhen used to return both the archived
+// and the canonical agent's hook for the same (when, skill_key) pair, causing
+// the runner to record duplicate before_run/recall_memory and
+// after_complete/update_memory executions per task run.
+func TestLifecycleRepo_HooksForWhenExcludesArchivedAgentHooks(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	agentRepo := NewAgentRepo(db)
+	repo := NewLifecycleRepo(db)
+	ctx := context.Background()
+
+	live := createLifecycleTestAgent(t, agentRepo)
+	live.Enabled = true
+	if err := agentRepo.Update(ctx, live); err != nil {
+		t.Fatalf("enable live agent: %v", err)
+	}
+	archived := &models.Agent{
+		Name:         "Lifecycle Test Agent (archived)",
+		Description:  "fixture",
+		SystemPrompt: "x",
+		Model:        "inherit",
+		Enabled:      true,
+	}
+	if err := agentRepo.Create(ctx, archived); err != nil {
+		t.Fatalf("create archived agent: %v", err)
+	}
+
+	liveHook := &models.AgentLifecycleHook{
+		AgentID:        live.ID,
+		When:           models.LifecycleBeforeRun,
+		SkillKey:       "memory/recall_memory",
+		OutputContract: models.OutputContractContextBlock,
+		Enabled:        true,
+	}
+	if err := repo.CreateHook(ctx, liveHook); err != nil {
+		t.Fatalf("create live hook: %v", err)
+	}
+	archivedHook := &models.AgentLifecycleHook{
+		AgentID:        archived.ID,
+		When:           models.LifecycleBeforeRun,
+		SkillKey:       "memory/recall_memory",
+		OutputContract: models.OutputContractContextBlock,
+		Enabled:        true,
+	}
+	if err := repo.CreateHook(ctx, archivedHook); err != nil {
+		t.Fatalf("create archived hook: %v", err)
+	}
+
+	// Before archive: both hooks are visible.
+	before, err := repo.HooksForWhen(ctx, models.LifecycleBeforeRun)
+	if err != nil {
+		t.Fatalf("hooks for when (pre-archive): %v", err)
+	}
+	if !containsHookID(before, liveHook.ID) || !containsHookID(before, archivedHook.ID) {
+		t.Fatalf("expected both hooks before archive, got %+v", before)
+	}
+
+	if err := agentRepo.MarkArchived(ctx, archived.ID, live.ID, "duplicate"); err != nil {
+		t.Fatalf("mark archived: %v", err)
+	}
+
+	after, err := repo.HooksForWhen(ctx, models.LifecycleBeforeRun)
+	if err != nil {
+		t.Fatalf("hooks for when (post-archive): %v", err)
+	}
+	if !containsHookID(after, liveHook.ID) {
+		t.Fatalf("expected live hook still present, got %+v", after)
+	}
+	if containsHookID(after, archivedHook.ID) {
+		t.Fatalf("expected archived hook filtered from HooksForWhen, got %+v", after)
+	}
+
+	live.Enabled = false
+	if err := agentRepo.Update(ctx, live); err != nil {
+		t.Fatalf("disable live agent: %v", err)
+	}
+	disabled, err := repo.HooksForWhen(ctx, models.LifecycleBeforeRun)
+	if err != nil {
+		t.Fatalf("hooks for when (disabled agent): %v", err)
+	}
+	if containsHookID(disabled, liveHook.ID) {
+		t.Fatalf("expected disabled agent hook filtered from HooksForWhen, got %+v", disabled)
+	}
+}
+
+func TestLifecycleRepo_ExecutionLifecycle(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	agentRepo := NewAgentRepo(db)
+	taskRepo := NewTaskRepo(db, nil)
+	repo := NewLifecycleRepo(db)
+	ctx := context.Background()
+
+	agent := createLifecycleTestAgent(t, agentRepo)
+
+	task := &models.Task{
+		ProjectID: "default",
+		Title:     "Lifecycle Exec Task",
+		Category:  models.CategoryActive,
+		Status:    models.StatusPending,
+		Prompt:    "test prompt",
+	}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	hook := &models.AgentLifecycleHook{
+		AgentID:        agent.ID,
+		When:           models.LifecycleBeforeRun,
+		SkillKey:       "project_context/load",
+		OutputContract: models.OutputContractContextBlock,
+		Enabled:        true,
+	}
+	if err := repo.CreateHook(ctx, hook); err != nil {
+		t.Fatalf("create hook: %v", err)
+	}
+
+	exec := &models.LifecycleExecution{
+		TaskID:          task.ID,
+		TaskRunID:       "run-1",
+		AgentID:         agent.ID,
+		When:            models.LifecycleBeforeRun,
+		LifecycleHookID: &hook.ID,
+		SkillKey:        hook.SkillKey,
+		OutputContract:  hook.OutputContract,
+		Status:          models.LifecycleExecRunning,
+		AttemptCount:    1,
+		InputJSON:       `{"task_id":"t"}`,
+	}
+	if err := repo.CreateExecution(ctx, exec); err != nil {
+		t.Fatalf("create execution: %v", err)
+	}
+	if exec.ID == "" {
+		t.Fatalf("expected execution ID set")
+	}
+
+	completed := time.Now().UTC()
+	exec.Status = models.LifecycleExecCompleted
+	exec.OutputJSON = `{"content":"context"}`
+	exec.CompletedAt = &completed
+	if err := repo.UpdateExecution(ctx, exec); err != nil {
+		t.Fatalf("update execution: %v", err)
+	}
+
+	list, err := repo.ListExecutionsForTask(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("list executions: %v", err)
+	}
+	if len(list) != 1 {
+		t.Fatalf("expected 1 execution, got %d", len(list))
+	}
+	got := list[0]
+	if got.Status != models.LifecycleExecCompleted {
+		t.Fatalf("expected completed status, got %s", got.Status)
+	}
+	if got.OutputJSON != `{"content":"context"}` {
+		t.Fatalf("expected stored output, got %s", got.OutputJSON)
+	}
+	if got.InputJSON != "" {
+		t.Fatalf("expected compact list projection to omit input_json, got %q", got.InputJSON)
+	}
+	if got.TaskRunID != "" || got.LifecycleHookID != nil || got.ParentExecID != nil || got.AttemptCount != 0 || got.Priority != 0 || got.NextRetryAt != nil || got.IdempotencyKey != "" {
+		t.Fatalf("expected compact list projection to omit non-rendered metadata, got %+v", got)
+	}
+	for _, forbidden := range []string{"input_json", "task_run_id", "lifecycle_hook_id", "parent_execution_id", "attempt_count", "priority", "next_retry_at", "idempotency_key"} {
+		if strings.Contains(listExecutionsForTaskSQL, forbidden) {
+			t.Fatalf("lifecycle list SQL must not select %s: %s", forbidden, listExecutionsForTaskSQL)
+		}
+	}
+}
+
+func TestLifecycleRepo_TaskRunFreshnessUsesRunHeadNotLateHookRows(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	agentRepo := NewAgentRepo(db)
+	taskRepo := NewTaskRepo(db, nil)
+	repo := NewLifecycleRepo(db)
+	ctx := context.Background()
+
+	agent := createLifecycleTestAgent(t, agentRepo)
+	task := &models.Task{ProjectID: "default", Title: "Lifecycle Freshness", Category: models.CategoryActive, Status: models.StatusCompleted, Prompt: "p"}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	createExec := func(runID string, when models.LifecycleWhen, skill string) *models.LifecycleExecution {
+		t.Helper()
+		exec := &models.LifecycleExecution{TaskID: task.ID, TaskRunID: runID, AgentID: agent.ID, When: when, SkillKey: skill, OutputContract: models.OutputContractActivitySummary, Status: models.LifecycleExecCompleted}
+		if err := repo.CreateExecution(ctx, exec); err != nil {
+			t.Fatalf("create lifecycle execution %s/%s: %v", runID, skill, err)
+		}
+		return exec
+	}
+
+	oldHead := createExec("run-old", models.LifecycleRouteTask, "route_task")
+	currentHead := createExec("run-current", models.LifecycleRouteTask, "route_task")
+	lateOld := createExec("run-old", models.LifecycleAfterComplete, "observe_task_for_learning")
+
+	current, err := repo.TaskRunFreshness(ctx, task.ID, "run-current")
+	if err != nil {
+		t.Fatalf("current freshness: %v", err)
+	}
+	if current.Stale {
+		t.Fatalf("current latest run should be fresh despite late old hook row: %+v oldHead=%s currentHead=%s lateOld=%s", current, oldHead.ID, currentHead.ID, lateOld.ID)
+	}
+	if current.LatestRunID != "run-current" || current.SourceRunID != "run-current" || current.SourceRowID == 0 || current.LatestRowID == 0 {
+		t.Fatalf("current freshness details not populated correctly: %+v", current)
+	}
+
+	old, err := repo.TaskRunFreshness(ctx, task.ID, "run-old")
+	if err != nil {
+		t.Fatalf("old freshness: %v", err)
+	}
+	if !old.Stale || old.LatestRunID != "run-current" {
+		t.Fatalf("old run should be stale against current latest run, got %+v", old)
+	}
+}
+
+func TestLifecycleRepo_IdempotencyKeyLookup(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	agentRepo := NewAgentRepo(db)
+	taskRepo := NewTaskRepo(db, nil)
+	repo := NewLifecycleRepo(db)
+	ctx := context.Background()
+
+	agent := createLifecycleTestAgent(t, agentRepo)
+	task := &models.Task{ProjectID: "default", Title: "Idemp", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "p"}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	exec := &models.LifecycleExecution{
+		TaskID:         task.ID,
+		TaskRunID:      "run-1",
+		AgentID:        agent.ID,
+		When:           models.LifecycleAfterComplete,
+		SkillKey:       "activity/summarize",
+		OutputContract: models.OutputContractActivitySummary,
+		Status:         models.LifecycleExecCompleted,
+		IdempotencyKey: "run-1:hook-123:deadbeef",
+	}
+	if err := repo.CreateExecution(ctx, exec); err != nil {
+		t.Fatalf("create exec: %v", err)
+	}
+	got, err := repo.FindExecutionByIdempotencyKey(ctx, exec.IdempotencyKey)
+	if err != nil {
+		t.Fatalf("find: %v", err)
+	}
+	if got.ID != exec.ID {
+		t.Fatalf("expected same execution, got %+v", got)
+	}
+	// Empty key returns sql.ErrNoRows so unkeyed rows never collide.
+	if _, err := repo.FindExecutionByIdempotencyKey(ctx, ""); err == nil {
+		t.Fatalf("expected error for empty key")
+	}
+}
+
+func TestLifecycleRepo_ExecutionEvents(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	agentRepo := NewAgentRepo(db)
+	taskRepo := NewTaskRepo(db, nil)
+	repo := NewLifecycleRepo(db)
+	ctx := context.Background()
+
+	agent := createLifecycleTestAgent(t, agentRepo)
+	task := &models.Task{ProjectID: "default", Title: "Trace", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "p"}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	exec := &models.LifecycleExecution{TaskID: task.ID, AgentID: agent.ID, When: models.LifecycleAfterComplete, Status: models.LifecycleExecRunning}
+	if err := repo.CreateExecution(ctx, exec); err != nil {
+		t.Fatalf("create exec: %v", err)
+	}
+
+	first := &models.LifecycleExecutionEvent{LifecycleExecutionID: exec.ID, EventType: "tool_call", PayloadJSON: `{"name":"skills_list"}`}
+	if err := repo.AppendExecutionEvent(ctx, first); err != nil {
+		t.Fatalf("append first event: %v", err)
+	}
+	second := &models.LifecycleExecutionEvent{LifecycleExecutionID: exec.ID, EventType: "tool_result", PayloadJSON: `{"ok":true}`}
+	if err := repo.AppendExecutionEvent(ctx, second); err != nil {
+		t.Fatalf("append second event: %v", err)
+	}
+
+	events, err := repo.ListExecutionEvents(ctx, exec.ID)
+	if err != nil {
+		t.Fatalf("list events: %v", err)
+	}
+	if len(events) != 2 {
+		t.Fatalf("expected 2 events, got %d", len(events))
+	}
+	if events[0].Seq != 1 || events[0].EventType != "tool_call" || events[1].Seq != 2 || events[1].EventType != "tool_result" {
+		t.Fatalf("unexpected ordered events: %+v", events)
+	}
+}
+
+func TestLifecycleRepo_ListExecutionEventsForProjectFiltersOwnership(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	projectRepo := NewProjectRepo(db)
+	agentRepo := NewAgentRepo(db)
+	taskRepo := NewTaskRepo(db, nil)
+	repo := NewLifecycleRepo(db)
+	ctx := context.Background()
+
+	projectA := &models.Project{Name: "Lifecycle Repo Project A"}
+	if err := projectRepo.Create(ctx, projectA); err != nil {
+		t.Fatalf("create project A: %v", err)
+	}
+	projectB := &models.Project{Name: "Lifecycle Repo Project B"}
+	if err := projectRepo.Create(ctx, projectB); err != nil {
+		t.Fatalf("create project B: %v", err)
+	}
+	agent := createLifecycleTestAgent(t, agentRepo)
+	taskA := &models.Task{ProjectID: projectA.ID, Title: "Trace A", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "p"}
+	if err := taskRepo.Create(ctx, taskA); err != nil {
+		t.Fatalf("create task A: %v", err)
+	}
+	execA := &models.LifecycleExecution{TaskID: taskA.ID, AgentID: agent.ID, When: models.LifecycleAfterComplete, Status: models.LifecycleExecRunning}
+	if err := repo.CreateExecution(ctx, execA); err != nil {
+		t.Fatalf("create exec A: %v", err)
+	}
+	if err := repo.AppendExecutionEvent(ctx, &models.LifecycleExecutionEvent{LifecycleExecutionID: execA.ID, EventType: "tool_result", PayloadJSON: `{"project":"a"}`}); err != nil {
+		t.Fatalf("append event A: %v", err)
+	}
+	taskB := &models.Task{ProjectID: projectB.ID, Title: "Trace B", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "p"}
+	if err := taskRepo.Create(ctx, taskB); err != nil {
+		t.Fatalf("create task B: %v", err)
+	}
+	execB := &models.LifecycleExecution{TaskID: taskB.ID, AgentID: agent.ID, When: models.LifecycleAfterComplete, Status: models.LifecycleExecRunning}
+	if err := repo.CreateExecution(ctx, execB); err != nil {
+		t.Fatalf("create exec B: %v", err)
+	}
+
+	events, found, err := repo.ListExecutionEventsForProject(ctx, execA.ID, projectA.ID)
+	if err != nil {
+		t.Fatalf("list project A events: %v", err)
+	}
+	if !found || len(events) != 1 || events[0].PayloadJSON != `{"project":"a"}` {
+		t.Fatalf("expected Project A event, found=%v events=%+v", found, events)
+	}
+	foreignEvents, found, err := repo.ListExecutionEventsForProject(ctx, execA.ID, projectB.ID)
+	if err != nil {
+		t.Fatalf("list foreign events: %v", err)
+	}
+	if found || len(foreignEvents) != 0 {
+		t.Fatalf("expected no foreign events, found=%v events=%+v", found, foreignEvents)
+	}
+	emptyEvents, found, err := repo.ListExecutionEventsForProject(ctx, execB.ID, projectB.ID)
+	if err != nil {
+		t.Fatalf("list empty same-project events: %v", err)
+	}
+	if !found || len(emptyEvents) != 0 {
+		t.Fatalf("expected same-project execution with empty events, found=%v events=%+v", found, emptyEvents)
+	}
+	unknownEvents, found, err := repo.ListExecutionEventsForProject(ctx, "missing-exec", projectB.ID)
+	if err != nil {
+		t.Fatalf("list unknown events: %v", err)
+	}
+	if found || len(unknownEvents) != 0 {
+		t.Fatalf("expected unknown execution to look absent, found=%v events=%+v", found, unknownEvents)
+	}
+}
+
+func TestLifecycleRepo_GetExecutionForTaskProjectFiltersOwnership(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	projectRepo := NewProjectRepo(db)
+	agentRepo := NewAgentRepo(db)
+	taskRepo := NewTaskRepo(db, nil)
+	repo := NewLifecycleRepo(db)
+	ctx := context.Background()
+
+	projectA := &models.Project{Name: "Lifecycle Execution Project A"}
+	if err := projectRepo.Create(ctx, projectA); err != nil {
+		t.Fatalf("create project A: %v", err)
+	}
+	projectB := &models.Project{Name: "Lifecycle Execution Project B"}
+	if err := projectRepo.Create(ctx, projectB); err != nil {
+		t.Fatalf("create project B: %v", err)
+	}
+	agent := createLifecycleTestAgent(t, agentRepo)
+	taskA := &models.Task{ProjectID: projectA.ID, Title: "Execution A", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "p"}
+	if err := taskRepo.Create(ctx, taskA); err != nil {
+		t.Fatalf("create task A: %v", err)
+	}
+	taskB := &models.Task{ProjectID: projectB.ID, Title: "Execution B", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "p"}
+	if err := taskRepo.Create(ctx, taskB); err != nil {
+		t.Fatalf("create task B: %v", err)
+	}
+
+	exec := &models.LifecycleExecution{
+		TaskID:         taskA.ID,
+		AgentID:        agent.ID,
+		When:           models.LifecycleAfterComplete,
+		SkillKey:       "summarize_activity",
+		OutputContract: models.OutputContractActivitySummary,
+		Status:         models.LifecycleExecRunning,
+		InputJSON:      `{"secret":"must not be selected by the handler"}`,
+		OutputJSON:     `{"summary":"running"}`,
+	}
+	if err := repo.CreateExecution(ctx, exec); err != nil {
+		t.Fatalf("create execution: %v", err)
+	}
+	completedAt := time.Date(2026, time.January, 1, 0, 5, 0, 0, time.UTC)
+	exec.Status = models.LifecycleExecCompleted
+	exec.OutputJSON = `{"summary":"finished"}`
+	exec.CompletedAt = &completedAt
+	if err := repo.UpdateExecution(ctx, exec); err != nil {
+		t.Fatalf("update execution: %v", err)
+	}
+
+	got, found, err := repo.GetExecutionForTaskProject(ctx, taskA.ID, exec.ID, projectA.ID)
+	if err != nil {
+		t.Fatalf("get same-project execution: %v", err)
+	}
+	if !found || got == nil || got.ID != exec.ID || got.Status != models.LifecycleExecCompleted || got.OutputJSON != `{"summary":"finished"}` {
+		t.Fatalf("unexpected same-project execution: found=%v execution=%+v", found, got)
+	}
+	if got.CompletedAt == nil || !got.CompletedAt.Equal(completedAt) {
+		t.Fatalf("expected terminal completion timestamp, got %+v", got.CompletedAt)
+	}
+	if got.InputJSON != "" {
+		t.Fatalf("compact execution lookup selected protected input: %q", got.InputJSON)
+	}
+
+	for name, pair := range map[string][2]string{
+		"foreign project":   {taskA.ID, projectB.ID},
+		"foreign task":      {taskB.ID, projectA.ID},
+		"unknown execution": {taskA.ID, projectA.ID},
+	} {
+		taskID, projectID := pair[0], pair[1]
+		executionID := exec.ID
+		if name == "unknown execution" {
+			executionID = "missing-execution"
+		}
+		got, found, err := repo.GetExecutionForTaskProject(ctx, taskID, executionID, projectID)
+		if err != nil {
+			t.Fatalf("get %s: %v", name, err)
+		}
+		if found || got != nil {
+			t.Fatalf("expected %s to be hidden, found=%v execution=%+v", name, found, got)
+		}
+	}
+}
+
+// TestLifecycleRepo_ListExecutionsForTask_NewestFirst verifies that
+// ListExecutionsForTask returns executions in descending started_at order so
+// the newest lifecycle event is visible at the top of the UI without scrolling.
+func TestLifecycleRepo_ListExecutionsForTask_NewestFirst(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	agentRepo := NewAgentRepo(db)
+	taskRepo := NewTaskRepo(db, nil)
+	repo := NewLifecycleRepo(db)
+	ctx := context.Background()
+
+	agent := createLifecycleTestAgent(t, agentRepo)
+	task := &models.Task{ProjectID: "default", Title: "Order Test", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "p"}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	// Insert three executions then explicitly backdate started_at so they have
+	// distinct, known timestamps. SQLite datetime('now') has second precision, so
+	// inserting quickly then updating is more reliable than sleeping.
+	skillKeys := []string{"route_task", "recall_memory", "summarize_activity"}
+	var ids []string
+	for i, skillKey := range skillKeys {
+		e := &models.LifecycleExecution{
+			TaskID:   task.ID,
+			AgentID:  agent.ID,
+			When:     models.LifecycleAfterComplete,
+			SkillKey: skillKey,
+			Status:   models.LifecycleExecCompleted,
+		}
+		if err := repo.CreateExecution(ctx, e); err != nil {
+			t.Fatalf("create exec %d: %v", i, err)
+		}
+		ids = append(ids, e.ID)
+	}
+	// Assign distinct timestamps: route_task is oldest, summarize_activity is newest.
+	timestamps := []string{
+		"2000-01-01 10:00:00", // route_task — oldest
+		"2000-01-01 11:00:00", // recall_memory
+		"2000-01-01 12:00:00", // summarize_activity — newest
+	}
+	for i, id := range ids {
+		if _, err := db.ExecContext(ctx, `UPDATE lifecycle_executions SET started_at = ? WHERE id = ?`, timestamps[i], id); err != nil {
+			t.Fatalf("backdate exec %d: %v", i, err)
+		}
+	}
+
+	list, err := repo.ListExecutionsForTask(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(list) != 3 {
+		t.Fatalf("expected 3 executions, got %d", len(list))
+	}
+	// Newest (summarize_activity) must be first (DESC ordering).
+	if list[0].SkillKey != "summarize_activity" {
+		t.Fatalf("expected newest execution first (summarize_activity), got %s", list[0].SkillKey)
+	}
+	if list[1].SkillKey != "recall_memory" {
+		t.Fatalf("expected second execution (recall_memory) at index 1, got %s", list[1].SkillKey)
+	}
+	if list[2].SkillKey != "route_task" {
+		t.Fatalf("expected oldest execution last (route_task), got %s", list[2].SkillKey)
+	}
+}
+
+func TestLifecycleRepo_ListExecutionsForTaskQueryPlanUsesTaskStartedIndex(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	plan := explainLifecycleRepoQueryPlan(t, db, listExecutionsForTaskSQL, "task-plan")
+	if !strings.Contains(plan, "idx_lifecycle_executions_task_started") {
+		t.Fatalf("lifecycle list plan = %q, want task started index", plan)
+	}
+	if strings.Contains(plan, "USE TEMP B-TREE FOR ORDER BY") {
+		t.Fatalf("lifecycle list plan = %q, want no temporary sort", plan)
+	}
+}
+
+func TestLifecycleRepo_ListExecutionsForTaskPage_BoundedKeysetAndDirection(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	agentRepo := NewAgentRepo(db)
+	taskRepo := NewTaskRepo(db, nil)
+	repo := NewLifecycleRepo(db)
+	ctx := context.Background()
+
+	agent := createLifecycleTestAgent(t, agentRepo)
+	task := &models.Task{ProjectID: "default", Title: "Lifecycle Page Test", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "p"}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	rows := []struct {
+		id string
+		at string
+	}{
+		{id: "exec-a", at: "2000-01-01 10:00:00"},
+		{id: "exec-b", at: "2000-01-01 11:00:00"},
+		{id: "exec-c", at: "2000-01-01 12:00:00"},
+		{id: "exec-d", at: "2000-01-01 12:00:00"},
+		{id: "exec-e", at: "2000-01-01 13:00:00"},
+	}
+	for _, row := range rows {
+		exec := &models.LifecycleExecution{
+			TaskID: task.ID, AgentID: agent.ID, When: models.LifecycleAfterComplete,
+			SkillKey: row.id, OutputContract: models.OutputContractActivitySummary,
+			Status: models.LifecycleExecCompleted, OutputJSON: `{"summary":"compact"}`,
+		}
+		if err := repo.CreateExecution(ctx, exec); err != nil {
+			t.Fatalf("create execution %s: %v", row.id, err)
+		}
+		if _, err := db.ExecContext(ctx, `UPDATE lifecycle_executions SET id = ?, started_at = ? WHERE id = ?`, row.id, row.at, exec.ID); err != nil {
+			t.Fatalf("set execution %s: %v", row.id, err)
+		}
+	}
+
+	first, err := repo.ListExecutionsForTaskPage(ctx, task.ID, 2, "")
+	if err != nil {
+		t.Fatalf("first page: %v", err)
+	}
+	if got := lifecycleExecutionIDs(first.Items); !reflect.DeepEqual(got, []string{"exec-e", "exec-d"}) {
+		t.Fatalf("first page IDs = %v, want newest-first page", got)
+	}
+	if !first.HasMore || first.NextCursor == "" {
+		t.Fatalf("first page = %+v, want older continuation cursor", first)
+	}
+
+	second, err := repo.ListExecutionsForTaskPage(ctx, task.ID, 2, first.NextCursor)
+	if err != nil {
+		t.Fatalf("second page: %v", err)
+	}
+	if got := lifecycleExecutionIDs(second.Items); !reflect.DeepEqual(got, []string{"exec-c", "exec-b"}) {
+		t.Fatalf("second page IDs = %v, want stable tie-break and older order", got)
+	}
+	third, err := repo.ListExecutionsForTaskPage(ctx, task.ID, 2, second.NextCursor)
+	if err != nil {
+		t.Fatalf("third page: %v", err)
+	}
+	if got := lifecycleExecutionIDs(third.Items); !reflect.DeepEqual(got, []string{"exec-a"}) {
+		t.Fatalf("third page IDs = %v, want final row", got)
+	}
+	if third.HasMore || third.NextCursor != "" {
+		t.Fatalf("final page = %+v, want no more results", third)
+	}
+
+	for _, row := range []struct {
+		id string
+		at string
+	}{{id: "exec-f", at: "2000-01-01 14:00:00"}, {id: "exec-g", at: "2000-01-01 15:00:00"}} {
+		exec := &models.LifecycleExecution{
+			TaskID: task.ID, AgentID: agent.ID, When: models.LifecycleAfterComplete,
+			SkillKey: row.id, OutputContract: models.OutputContractActivitySummary,
+			Status: models.LifecycleExecCompleted,
+		}
+		if err := repo.CreateExecution(ctx, exec); err != nil {
+			t.Fatalf("create newer execution %s: %v", row.id, err)
+		}
+		if _, err := db.ExecContext(ctx, `UPDATE lifecycle_executions SET id = ?, started_at = ? WHERE id = ?`, row.id, row.at, exec.ID); err != nil {
+			t.Fatalf("set newer execution %s: %v", row.id, err)
+		}
+	}
+
+	newer, err := repo.ListExecutionsForTaskNewerPage(ctx, task.ID, 1, first.Items[0].ID)
+	if err != nil {
+		t.Fatalf("newer page: %v", err)
+	}
+	if got := lifecycleExecutionIDs(newer.Items); !reflect.DeepEqual(got, []string{"exec-f"}) {
+		t.Fatalf("newer page IDs = %v, want oldest-first inserts", got)
+	}
+	if !newer.HasMore || newer.NextCursor == "" {
+		t.Fatalf("newer page = %+v, want newer continuation cursor", newer)
+	}
+	newest, err := repo.ListExecutionsForTaskNewerPage(ctx, task.ID, 1, newer.NextCursor)
+	if err != nil {
+		t.Fatalf("newer continuation: %v", err)
+	}
+	if got := lifecycleExecutionIDs(newest.Items); !reflect.DeepEqual(got, []string{"exec-g"}) {
+		t.Fatalf("newer continuation IDs = %v, want next insert", got)
+	}
+	if newest.HasMore {
+		t.Fatalf("newer final page = %+v, want no more results", newest)
+	}
+
+	if _, err := repo.ListExecutionsForTaskPage(ctx, task.ID, 2, "not-a-valid-cursor"); !errors.Is(err, persistence.ErrLifecycleExecutionCursor) {
+		t.Fatalf("invalid older cursor error = %v, want %v", err, persistence.ErrLifecycleExecutionCursor)
+	}
+	if _, err := repo.ListExecutionsForTaskNewerPage(ctx, task.ID, 2, first.NextCursor); !errors.Is(err, persistence.ErrLifecycleExecutionCursor) {
+		t.Fatalf("older cursor accepted for newer page: %v", err)
+	}
+	if strings.Contains(listExecutionsForTaskPageSQL, "input_json") || strings.Contains(listExecutionsForTaskPageSQL, "task_run_id") {
+		t.Fatalf("page projection contains protected lifecycle detail columns: %s", listExecutionsForTaskPageSQL)
+	}
+}
+
+func TestLifecycleRepo_ListExecutionsForTaskPage_LimitAndQueryPlan(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	plan := explainLifecycleRepoQueryPlan(t, db, listExecutionsForTaskPageSQL, "large-page-task", 51)
+	if !strings.Contains(plan, "idx_lifecycle_executions_task_started") {
+		t.Fatalf("lifecycle page plan = %q, want task started index", plan)
+	}
+	if strings.Contains(plan, "USE TEMP B-TREE FOR ORDER BY") {
+		t.Fatalf("lifecycle page plan = %q, want no temporary sort", plan)
+	}
+	for name, query := range map[string]string{
+		"older": listExecutionsForTaskOlderPageSQL,
+		"newer": listExecutionsForTaskNewerPageSQL,
+	} {
+		plan := explainLifecycleRepoQueryPlan(t, db, query, "large-page-task", "large-page-task", "cursor", 51)
+		if !strings.Contains(plan, "idx_lifecycle_executions_task_started") || strings.Contains(plan, "USE TEMP B-TREE FOR ORDER BY") {
+			t.Fatalf("lifecycle %s page plan = %q, want task started index without temporary sort", name, plan)
+		}
+	}
+
+	agentRepo := NewAgentRepo(db)
+	taskRepo := NewTaskRepo(db, nil)
+	repo := NewLifecycleRepo(db)
+	ctx := context.Background()
+	agent := createLifecycleTestAgent(t, agentRepo)
+	task := &models.Task{ProjectID: "default", Title: "Large Lifecycle Page", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "p"}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	for i := 0; i < 75; i++ {
+		exec := &models.LifecycleExecution{
+			TaskID: task.ID, AgentID: agent.ID, When: models.LifecycleAfterComplete,
+			SkillKey: fmt.Sprintf("large-%03d", i), OutputContract: models.OutputContractActivitySummary,
+			Status: models.LifecycleExecCompleted,
+		}
+		if err := repo.CreateExecution(ctx, exec); err != nil {
+			t.Fatalf("create large execution %d: %v", i, err)
+		}
+	}
+	page, err := repo.ListExecutionsForTaskPage(ctx, task.ID, 1000, "")
+	if err != nil {
+		t.Fatalf("large page: %v", err)
+	}
+	if len(page.Items) != persistence.LifecycleExecutionPageMaxLimit || !page.HasMore || page.NextCursor == "" {
+		t.Fatalf("large page len=%d has_more=%v cursor=%q, want bounded max page", len(page.Items), page.HasMore, page.NextCursor)
+	}
+}
+
+func lifecycleExecutionIDs(rows []models.LifecycleExecution) []string {
+	ids := make([]string, 0, len(rows))
+	for _, row := range rows {
+		ids = append(ids, row.ID)
+	}
+	return ids
+}
+
+func explainLifecycleRepoQueryPlan(t *testing.T, db *sql.DB, query string, args ...any) string {
+	t.Helper()
+	rows, err := db.Query("EXPLAIN QUERY PLAN "+query, args...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var details []string
+	for rows.Next() {
+		var id, parent, unused int
+		var detail string
+		if err := rows.Scan(&id, &parent, &unused, &detail); err != nil {
+			t.Fatal(err)
+		}
+		details = append(details, detail)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	return strings.Join(details, "; ")
+}
+
+func TestLifecycleRepo_ListExecutionsForTask_DeterministicIDTieBreak(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	agentRepo := NewAgentRepo(db)
+	taskRepo := NewTaskRepo(db, nil)
+	repo := NewLifecycleRepo(db)
+	ctx := context.Background()
+
+	agent := createLifecycleTestAgent(t, agentRepo)
+	task := &models.Task{ProjectID: "default", Title: "Tie Order Test", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "p"}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	ids := []string{"tie-a", "tie-c", "tie-b"}
+	for _, id := range ids {
+		e := &models.LifecycleExecution{
+			TaskID:         task.ID,
+			AgentID:        agent.ID,
+			When:           models.LifecycleAfterComplete,
+			SkillKey:       id,
+			OutputContract: models.OutputContractActivitySummary,
+			Status:         models.LifecycleExecCompleted,
+		}
+		if err := repo.CreateExecution(ctx, e); err != nil {
+			t.Fatalf("create exec %s: %v", id, err)
+		}
+		if _, err := db.ExecContext(ctx, `UPDATE lifecycle_executions SET id = ?, started_at = ? WHERE id = ?`, id, "2000-01-01 12:00:00", e.ID); err != nil {
+			t.Fatalf("set deterministic id %s: %v", id, err)
+		}
+	}
+
+	list, err := repo.ListExecutionsForTask(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(list) != 3 {
+		t.Fatalf("expected 3 executions, got %d", len(list))
+	}
+	want := []string{"tie-c", "tie-b", "tie-a"}
+	for i, wantID := range want {
+		if list[i].ID != wantID {
+			t.Fatalf("list[%d].ID = %s, want %s; list=%+v", i, list[i].ID, wantID, list)
+		}
+	}
+}
+
+func TestLifecycleRepo_IdempotencyAllowsRetryAfterFailure(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	agentRepo := NewAgentRepo(db)
+	taskRepo := NewTaskRepo(db, nil)
+	repo := NewLifecycleRepo(db)
+	ctx := context.Background()
+
+	agent := createLifecycleTestAgent(t, agentRepo)
+	task := &models.Task{ProjectID: "default", Title: "Retry", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "p"}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	key := "run-1:hook-x:abc"
+	// First attempt fails.
+	first := &models.LifecycleExecution{
+		TaskID: task.ID, TaskRunID: "run-1", AgentID: agent.ID,
+		When: models.LifecycleAfterComplete, SkillKey: "x/y",
+		Status: models.LifecycleExecFailed, IdempotencyKey: key,
+	}
+	if err := repo.CreateExecution(ctx, first); err != nil {
+		t.Fatalf("first attempt: %v", err)
+	}
+	// Retry with same key should be allowed because partial unique index
+	// only enforces uniqueness for completed rows.
+	second := &models.LifecycleExecution{
+		TaskID: task.ID, TaskRunID: "run-1", AgentID: agent.ID,
+		When: models.LifecycleAfterComplete, SkillKey: "x/y",
+		Status: models.LifecycleExecRunning, IdempotencyKey: key,
+	}
+	if err := repo.CreateExecution(ctx, second); err != nil {
+		t.Fatalf("retry should be allowed, got %v", err)
+	}
+	// Completing second is OK because no other completed row holds the key.
+	completed := time.Now().UTC()
+	second.Status = models.LifecycleExecCompleted
+	second.CompletedAt = &completed
+	if err := repo.UpdateExecution(ctx, second); err != nil {
+		t.Fatalf("update second: %v", err)
+	}
+	// A third completed row with same key MUST be rejected.
+	third := &models.LifecycleExecution{
+		TaskID: task.ID, TaskRunID: "run-1", AgentID: agent.ID,
+		When: models.LifecycleAfterComplete, SkillKey: "x/y",
+		Status: models.LifecycleExecCompleted, IdempotencyKey: key,
+	}
+	if err := repo.CreateExecution(ctx, third); err == nil {
+		t.Fatalf("expected unique-index violation for second completed row with same key")
+	}
+}
+
+func TestLifecycleRepo_HasNewerTaskRunUsesCreationOrderForSameSecondRuns(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	agentRepo := NewAgentRepo(db)
+	taskRepo := NewTaskRepo(db, nil)
+	repo := NewLifecycleRepo(db)
+	ctx := context.Background()
+
+	agent := createLifecycleTestAgent(t, agentRepo)
+	task := &models.Task{ProjectID: "default", Title: "Run order", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "p"}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	older := &models.LifecycleExecution{TaskID: task.ID, TaskRunID: "run-old", AgentID: agent.ID, When: models.LifecycleAfterComplete, SkillKey: "x", Status: models.LifecycleExecRunning}
+	if err := repo.CreateExecution(ctx, older); err != nil {
+		t.Fatalf("create older: %v", err)
+	}
+	newer := &models.LifecycleExecution{TaskID: task.ID, TaskRunID: "run-new", AgentID: agent.ID, When: models.LifecycleRouteTask, SkillKey: "y", Status: models.LifecycleExecRunning}
+	if err := repo.CreateExecution(ctx, newer); err != nil {
+		t.Fatalf("create newer: %v", err)
+	}
+
+	hasNewer, err := repo.HasNewerTaskRun(ctx, task.ID, "run-old")
+	if err != nil {
+		t.Fatalf("has newer old: %v", err)
+	}
+	if !hasNewer {
+		t.Fatalf("expected run-old to have newer run")
+	}
+	hasNewer, err = repo.HasNewerTaskRun(ctx, task.ID, "run-new")
+	if err != nil {
+		t.Fatalf("has newer new: %v", err)
+	}
+	if hasNewer {
+		t.Fatalf("did not expect run-new to have newer run")
+	}
+}
+
+func BenchmarkLifecycleRepo_ListExecutionsForTaskCompactProjection(b *testing.B) {
+	db := testutil.NewTestDB(b)
+	agentRepo := NewAgentRepo(db)
+	taskRepo := NewTaskRepo(db, nil)
+	repo := NewLifecycleRepo(db)
+	ctx := context.Background()
+
+	agent := createLifecycleTestAgent(b, agentRepo)
+	target := &models.Task{ProjectID: "default", Title: "Lifecycle Benchmark Target", Category: models.CategoryActive, Status: models.StatusCompleted, Prompt: "p"}
+	if err := taskRepo.Create(ctx, target); err != nil {
+		b.Fatalf("create target task: %v", err)
+	}
+	other := &models.Task{ProjectID: "default", Title: "Lifecycle Benchmark Other", Category: models.CategoryActive, Status: models.StatusCompleted, Prompt: "p"}
+	if err := taskRepo.Create(ctx, other); err != nil {
+		b.Fatalf("create other task: %v", err)
+	}
+
+	const rowsPerTask = 2500
+	largeInput := `{"prompt":"` + strings.Repeat("x", 32*1024) + `"}`
+	outputJSON := `{"summary":"` + strings.Repeat("y", 1024) + `"}`
+	seedLifecycleExecutionBenchmarkRows(b, db, target.ID, agent.ID, "target", rowsPerTask, largeInput, outputJSON)
+	seedLifecycleExecutionBenchmarkRows(b, db, other.ID, agent.ID, "other", rowsPerTask, largeInput, outputJSON)
+
+	b.ReportAllocs()
+	var totalStringBytes int64
+	for i := 0; i < b.N; i++ {
+		list, err := repo.ListExecutionsForTask(ctx, target.ID)
+		if err != nil {
+			b.Fatalf("compact list: %v", err)
+		}
+		if len(list) != rowsPerTask {
+			b.Fatalf("compact rows = %d, want %d", len(list), rowsPerTask)
+		}
+		for _, e := range list {
+			totalStringBytes += int64(lifecycleExecutionListStringBytes(e))
+		}
+	}
+	b.ReportMetric(float64(totalStringBytes)/float64(b.N), "scanned_string_bytes/op")
+}
+
+func seedLifecycleExecutionBenchmarkRows(b *testing.B, db *sql.DB, taskID, agentID, prefix string, count int, inputJSON, outputJSON string) {
+	b.Helper()
+	tx, err := db.Begin()
+	if err != nil {
+		b.Fatalf("begin seed tx: %v", err)
+	}
+	defer tx.Rollback()
+	stmt, err := tx.Prepare(`
+		INSERT INTO lifecycle_executions
+			(id, task_id, task_run_id, agent_id, when_slot, skill_key, output_contract, status,
+			 input_json, output_json, error, attempt_count, priority, started_at, completed_at)
+		VALUES (?, ?, ?, ?, 'after_complete', ?, 'activity_summary', 'completed', ?, ?, '', 1, 0, ?, ?)`)
+	if err != nil {
+		b.Fatalf("prepare seed statement: %v", err)
+	}
+	defer stmt.Close()
+	base := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	for i := 0; i < count; i++ {
+		started := base.Add(-time.Duration(i) * time.Second).Format("2006-01-02 15:04:05")
+		id := fmt.Sprintf("bench-%s-%05d", prefix, i)
+		if _, err := stmt.Exec(id, taskID, "run-"+id, agentID, "summarize_activity", inputJSON, outputJSON, started, started); err != nil {
+			b.Fatalf("insert benchmark row %d: %v", i, err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		b.Fatalf("commit seed tx: %v", err)
+	}
+}
+
+func lifecycleExecutionListStringBytes(e models.LifecycleExecution) int {
+	return len(e.ID) + len(e.AgentID) + len(string(e.When)) + len(e.SkillKey) +
+		len(string(e.OutputContract)) + len(string(e.Status)) + len(e.OutputJSON) + len(e.Error)
+}
+
+func TestLifecycleRepo_PatchExecutionOutputSkills(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	agentRepo := NewAgentRepo(db)
+	taskRepo := NewTaskRepo(db, nil)
+	repo := NewLifecycleRepo(db)
+	ctx := context.Background()
+
+	agent := createLifecycleTestAgent(t, agentRepo)
+	task := &models.Task{
+		ProjectID: "default",
+		Title:     "Patch Skills Task",
+		Category:  models.CategoryActive,
+		Status:    models.StatusPending,
+		Prompt:    "test",
+	}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	hook := &models.AgentLifecycleHook{
+		AgentID:        agent.ID,
+		When:           models.LifecycleRouteTask,
+		SkillKey:       "skill_curator/route",
+		OutputContract: models.OutputContractSelectedSkills,
+		Enabled:        true,
+	}
+	if err := repo.CreateHook(ctx, hook); err != nil {
+		t.Fatalf("create hook: %v", err)
+	}
+	exec := &models.LifecycleExecution{
+		TaskID:          task.ID,
+		TaskRunID:       "run-patch-1",
+		AgentID:         agent.ID,
+		When:            models.LifecycleRouteTask,
+		LifecycleHookID: &hook.ID,
+		SkillKey:        hook.SkillKey,
+		OutputContract:  hook.OutputContract,
+		Status:          models.LifecycleExecRunning,
+		AttemptCount:    1,
+	}
+	if err := repo.CreateExecution(ctx, exec); err != nil {
+		t.Fatalf("create execution: %v", err)
+	}
+	now := time.Now().UTC()
+	exec.Status = models.LifecycleExecCompleted
+	exec.OutputJSON = `{"skills":["skill_a"],"confidence":0.9,"reason":"test"}`
+	exec.CompletedAt = &now
+	if err := repo.UpdateExecution(ctx, exec); err != nil {
+		t.Fatalf("update execution: %v", err)
+	}
+
+	// Patch with merged list.
+	if err := repo.PatchExecutionOutputSkills(ctx, exec.ID, []string{"skill_a", "openvibely_project_guidance"}); err != nil {
+		t.Fatalf("patch output skills: %v", err)
+	}
+
+	list, err := repo.ListExecutionsForTask(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("list executions: %v", err)
+	}
+	if len(list) == 0 {
+		t.Fatal("expected at least one execution")
+	}
+	got := list[0]
+
+	var probe map[string]any
+	if err := json.Unmarshal([]byte(got.OutputJSON), &probe); err != nil {
+		t.Fatalf("unmarshal patched output_json: %v", err)
+	}
+	rawSkills, _ := probe["skills"].([]any)
+	if len(rawSkills) != 2 {
+		t.Fatalf("expected 2 skills after patch, got %d: %v", len(rawSkills), rawSkills)
+	}
+	// Other fields must be preserved.
+	if conf, _ := probe["confidence"].(float64); conf != 0.9 {
+		t.Fatalf("expected confidence=0.9 preserved, got %v", conf)
+	}
+	if reason, _ := probe["reason"].(string); reason != "test" {
+		t.Fatalf("expected reason preserved, got %q", reason)
+	}
+
+	// No-op on empty execID must not error.
+	if err := repo.PatchExecutionOutputSkills(ctx, "", []string{"x"}); err != nil {
+		t.Fatalf("expected no-op for empty execID, got: %v", err)
+	}
+
+	// Unknown exec ID must not error (row not found → silent skip).
+	if err := repo.PatchExecutionOutputSkills(ctx, "nonexistent-id", []string{"x"}); err != nil {
+		t.Fatalf("expected no-op for unknown execID, got: %v", err)
+	}
+}

@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/openvibely/openvibely/web/templates/components"
 )
@@ -85,7 +85,7 @@ func BenchmarkTaskRepoListBreadcrumbSelector(b *testing.B) {
 	}
 }
 
-func benchmarkBreadcrumbSelector(b *testing.B, db *sql.DB, repo *repository.TaskRepo, benchmarkCase breadcrumbSelectorBenchmarkCase) {
+func benchmarkBreadcrumbSelector(b *testing.B, db *sql.DB, repo *sqlite.TaskRepo, benchmarkCase breadcrumbSelectorBenchmarkCase) {
 	b.Helper()
 	ctx := context.Background()
 	const limit = 21
@@ -260,7 +260,7 @@ func logBreadcrumbSelectorPlanMatrix(tb testing.TB, db *sql.DB, benchmarkCase br
 func TestTaskRepo_BreadcrumbSelectorWriteStorageScope(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	defer db.Close()
-	repo := repository.NewTaskRepo(db, nil)
+	repo := sqlite.NewTaskRepo(db, nil)
 	ctx := context.Background()
 
 	fingerprint := func() string {
@@ -378,11 +378,11 @@ func breadcrumbSelectorExplain(tb testing.TB, db *sql.DB, query string, args ...
 	return strings.Join(details, "\n")
 }
 
-func newBreadcrumbSelectorBenchmarkRepo(tb testing.TB, taskCount int) (*sql.DB, *repository.TaskRepo) {
+func newBreadcrumbSelectorBenchmarkRepo(tb testing.TB, taskCount int) (*sql.DB, *sqlite.TaskRepo) {
 	return newBreadcrumbSelectorBenchmarkRepoWithSchedules(tb, taskCount, true)
 }
 
-func newBreadcrumbSelectorBenchmarkRepoWithSchedules(tb testing.TB, taskCount int, includeSchedules bool) (*sql.DB, *repository.TaskRepo) {
+func newBreadcrumbSelectorBenchmarkRepoWithSchedules(tb testing.TB, taskCount int, includeSchedules bool) (*sql.DB, *sqlite.TaskRepo) {
 	tb.Helper()
 	db := testutil.NewTestDB(tb)
 	tx, err := db.BeginTx(context.Background(), nil)
@@ -418,7 +418,7 @@ func newBreadcrumbSelectorBenchmarkRepoWithSchedules(tb testing.TB, taskCount in
 		if err := tx.Commit(); err != nil {
 			tb.Fatalf("commit %d-task breadcrumb selector fixture: %v", taskCount, err)
 		}
-		return db, repository.NewTaskRepo(db, nil)
+		return db, sqlite.NewTaskRepo(db, nil)
 	}
 	_, err = tx.ExecContext(context.Background(), `
 		INSERT INTO schedules (id, task_id, run_at, repeat_type, repeat_interval, enabled, next_run)
@@ -443,7 +443,7 @@ func newBreadcrumbSelectorBenchmarkRepoWithSchedules(tb testing.TB, taskCount in
 	if err := tx.Commit(); err != nil {
 		tb.Fatalf("commit breadcrumb selector fixture: %v", err)
 	}
-	return db, repository.NewTaskRepo(db, nil)
+	return db, sqlite.NewTaskRepo(db, nil)
 }
 
 func breadcrumbSelectorBenchmarkTaskID(n int) string {

@@ -15,7 +15,7 @@ import (
 
 	"github.com/openvibely/openvibely/internal/database"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 )
 
 const workerCapacityProjectionSamples = 5
@@ -24,7 +24,7 @@ type workerCapacityProjectionFixture struct {
 	connections *database.Connections
 	h           *Handler
 	e           http.Handler
-	projectRepo *repository.ProjectRepo
+	projectRepo *sqlite.ProjectRepo
 }
 
 type workerCapacityProjectionMeasurement struct {
@@ -103,7 +103,7 @@ func newWorkerCapacityProjectionFixture(tb testing.TB, projectCount int) *worker
 		tb.Fatalf("Workers capacity fixture requires production 1W + 1R topology: reader=%p writer=%p reader_max=%d writer_max=%d",
 			connections.Reader, connections.Writer, connections.Reader.Stats().MaxOpenConnections, connections.Writer.Stats().MaxOpenConnections)
 	}
-	unregister := repository.RegisterDedicatedWriter(connections.Reader, connections.Writer)
+	unregister := sqlite.RegisterDedicatedWriter(connections.Reader, connections.Writer)
 	tb.Cleanup(unregister)
 
 	seedWorkerCapacityProjectionFixture(tb, connections.Writer, projectCount)
@@ -112,7 +112,7 @@ func newWorkerCapacityProjectionFixture(tb testing.TB, projectCount int) *worker
 		connections: connections,
 		h:           h,
 		e:           e,
-		projectRepo: repository.NewProjectRepo(connections.Reader),
+		projectRepo: sqlite.NewProjectRepo(connections.Reader),
 	}
 }
 

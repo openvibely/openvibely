@@ -12,7 +12,7 @@ import (
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/stretchr/testify/require"
 )
@@ -40,18 +40,18 @@ func createHistoryInvocation(t *testing.T, fixture automationRuntimeFixture, suf
 	return invocation
 }
 
-func newAutomationWorkItemHistoryBenchFixture(tb testing.TB, rowCount int) (*sql.DB, *repository.AutomationRepo, string, string) {
+func newAutomationWorkItemHistoryBenchFixture(tb testing.TB, rowCount int) (*sql.DB, *sqlite.AutomationRepo, string, string) {
 	tb.Helper()
 	db := testutil.NewTestDB(tb)
 	projectID, automationID, versionID := createAutomationHistoryBenchDefinition(tb, db, "Automation work item history", "automation-work-items-history", "version-work-items-history")
 	seedAutomationWorkItemHistoryRows(tb, db, projectID, automationID, versionID, rowCount)
-	return db, repository.NewAutomationRepo(db), projectID, automationID
+	return db, sqlite.NewAutomationRepo(db), projectID, automationID
 }
 
 func createAutomationHistoryBenchDefinition(tb testing.TB, db *sql.DB, name, automationID, versionID string) (string, string, string) {
 	tb.Helper()
 	ctx := context.Background()
-	projectRepo := repository.NewProjectRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
 	project := models.Project{Name: name}
 	require.NoError(tb, projectRepo.Create(ctx, &project))
 	_, err := db.ExecContext(ctx, `INSERT INTO automations
@@ -91,12 +91,12 @@ func seedAutomationWorkItemHistoryRows(tb testing.TB, db *sql.DB, projectID, aut
 	require.NoError(tb, tx.Commit())
 }
 
-func newAutomationTransitionHistoryBenchFixture(tb testing.TB, invocationCount, transitionsPerInvocation int) (*sql.DB, *repository.AutomationRepo, string, string, string, string) {
+func newAutomationTransitionHistoryBenchFixture(tb testing.TB, invocationCount, transitionsPerInvocation int) (*sql.DB, *sqlite.AutomationRepo, string, string, string, string) {
 	tb.Helper()
 	db := testutil.NewTestDB(tb)
 	projectID, automationID, versionID := createAutomationHistoryBenchDefinition(tb, db, "Automation transition history", "automation-transition-history", "version-transition-history")
 	targetInvocationID, targetWorkItemID := seedAutomationTransitionHistoryRows(tb, db, projectID, automationID, versionID, invocationCount, transitionsPerInvocation)
-	return db, repository.NewAutomationRepo(db), projectID, automationID, targetInvocationID, targetWorkItemID
+	return db, sqlite.NewAutomationRepo(db), projectID, automationID, targetInvocationID, targetWorkItemID
 }
 
 func seedAutomationTransitionHistoryRows(tb testing.TB, db *sql.DB, projectID, automationID, versionID string, invocationCount, transitionsPerInvocation int) (string, string) {
@@ -681,7 +681,7 @@ func TestAutomationHistoryHealthStableNoChangeSkipsAutomationUpdatesAndReducesSQ
 	for _, count := range []int{100, 500} {
 		t.Run(fmt.Sprintf("%d", count), func(t *testing.T) {
 			db, counter := testutil.NewStatementCountingTestDB(t)
-			repo := repository.NewAutomationRepo(db)
+			repo := sqlite.NewAutomationRepo(db)
 			ctx := context.Background()
 			now := time.Date(2026, time.August, 1, 12, 0, 0, 0, time.UTC)
 			fixture := seedAutomationHealthReconciliationFixture(t, db, count, now)
@@ -775,9 +775,9 @@ func TestAutomationHistoryHealthChangedInputsPersistAffectedRecords(t *testing.T
 
 	t.Run("publication", func(t *testing.T) {
 		db := testutil.NewTestDB(t)
-		repo := repository.NewAutomationRepo(db)
+		repo := sqlite.NewAutomationRepo(db)
 		ctx := context.Background()
-		project := automationTestProject(t, repository.NewProjectRepo(db), "Health publication")
+		project := automationTestProject(t, sqlite.NewProjectRepo(db), "Health publication")
 		automationID, versionID := "health-publication-automation", "health-publication-version"
 		require.NoError(t, insertMinimalAutomationDefinition(ctx, db, project.ID, automationID, versionID, false))
 		require.NoError(t, repo.RecomputeAutomationHealthForAll(ctx, time.Date(2026, time.August, 2, 15, 0, 0, 0, time.UTC), 100))
@@ -801,11 +801,11 @@ type automationHealthReconciliationFixture struct {
 func seedAutomationHealthReconciliationFixture(tb testing.TB, db *sql.DB, automationCount int, now time.Time) automationHealthReconciliationFixture {
 	tb.Helper()
 	ctx := context.Background()
-	projectRepo := repository.NewProjectRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
 	project := models.Project{Name: fmt.Sprintf("Health reconciliation %d", automationCount)}
 	require.NoError(tb, projectRepo.Create(ctx, &project))
-	taskRepo := repository.NewTaskRepo(db, nil)
-	pullRepo := repository.NewTaskPullRequestRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	pullRepo := sqlite.NewTaskPullRequestRepo(db)
 	fixture := automationHealthReconciliationFixture{projectID: project.ID}
 	for i := 0; i < automationCount; i++ {
 		automationID := fmt.Sprintf("health-reconcile-%03d", i)
@@ -920,7 +920,7 @@ func insertAutomationHealthActivityResources(tb testing.TB, db *sql.DB, projectI
 func attachAutomationHealthPullRequest(t *testing.T, fixture automationRuntimeFixture, invocationID string, updatedAt time.Time) {
 	t.Helper()
 	ctx := context.Background()
-	pullRepo := repository.NewTaskPullRequestRepo(fixture.repo.DB())
+	pullRepo := sqlite.NewTaskPullRequestRepo(fixture.repo.DB())
 	pull := models.TaskPullRequest{TaskID: fixture.task.ID, PRNumber: 77, PRURL: "https://github.com/openvibely/openvibely/pull/77", PRState: "open"}
 	require.NoError(t, pullRepo.Upsert(ctx, &pull))
 	trigger := automationNodeByKey(t, fixture.definition, "vision_suggestions")
@@ -984,10 +984,10 @@ type automationHealthMeasurement struct {
 
 type automationHealthBenchmarkPath struct {
 	name    string
-	measure func(testing.TB, *sql.DB, *repository.AutomationRepo, time.Time) error
+	measure func(testing.TB, *sql.DB, *sqlite.AutomationRepo, time.Time) error
 }
 
-func measureAutomationHealthReconciliation(tb testing.TB, db *sql.DB, repo *repository.AutomationRepo, counter *testutil.SQLStatementCounter, now time.Time, measure func(testing.TB, *sql.DB, *repository.AutomationRepo, time.Time) error) automationHealthMeasurement {
+func measureAutomationHealthReconciliation(tb testing.TB, db *sql.DB, repo *sqlite.AutomationRepo, counter *testutil.SQLStatementCounter, now time.Time, measure func(testing.TB, *sql.DB, *sqlite.AutomationRepo, time.Time) error) automationHealthMeasurement {
 	tb.Helper()
 	var beforeMem, afterMem runtime.MemStats
 	runtime.ReadMemStats(&beforeMem)
@@ -1008,7 +1008,7 @@ func measureAutomationHealthReconciliation(tb testing.TB, db *sql.DB, repo *repo
 	}
 }
 
-func measureCurrentAutomationHealthPath(tb testing.TB, _ *sql.DB, repo *repository.AutomationRepo, now time.Time) error {
+func measureCurrentAutomationHealthPath(tb testing.TB, _ *sql.DB, repo *sqlite.AutomationRepo, now time.Time) error {
 	tb.Helper()
 	return repo.RecomputeAutomationHealthForAll(context.Background(), now, 100)
 }
@@ -1034,7 +1034,7 @@ func BenchmarkAutomationHealthReconciliation(b *testing.B) {
 		for _, path := range paths {
 			b.Run(fmt.Sprintf("%s/stable/%d", path.name, count), func(b *testing.B) {
 				db, counter := testutil.NewStatementCountingTestDB(b)
-				repo := repository.NewAutomationRepo(db)
+				repo := sqlite.NewAutomationRepo(db)
 				now := time.Now().UTC()
 				seedAutomationHealthReconciliationFixture(b, db, count, now)
 				require.NoError(b, repo.RecomputeAutomationHealthForAll(context.Background(), now, 100))
@@ -1064,7 +1064,7 @@ func BenchmarkAutomationHealthReconciliation(b *testing.B) {
 			})
 			b.Run(fmt.Sprintf("%s/changed-position/%d", path.name, count), func(b *testing.B) {
 				db, counter := testutil.NewStatementCountingTestDB(b)
-				repo := repository.NewAutomationRepo(db)
+				repo := sqlite.NewAutomationRepo(db)
 				now := time.Now().UTC()
 				fixture := seedAutomationHealthReconciliationFixture(b, db, count, now)
 				require.NoError(b, repo.RecomputeAutomationHealthForAll(context.Background(), now, 100))

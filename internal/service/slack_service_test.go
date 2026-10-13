@@ -21,7 +21,7 @@ import (
 	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/slack-go/slack"
 	"github.com/slack-go/slack/slackevents"
@@ -88,7 +88,7 @@ func cloneURL(u *url.URL) *url.URL {
 
 func TestSlackService_GetConnectionStatus(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	settingsRepo := repository.NewSettingsRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 	require.NoError(t, settingsRepo.Set(context.Background(), SlackSettingClientID, "cid"))
 	require.NoError(t, settingsRepo.Set(context.Background(), SlackSettingClientSecret, "secret"))
 	require.NoError(t, settingsRepo.Set(context.Background(), SlackSettingAppToken, "xapp-1"))
@@ -105,7 +105,7 @@ func TestSlackService_GetConnectionStatus(t *testing.T) {
 
 func TestSlackService_GetConnectionStatus_ManualOverrideSource(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	settingsRepo := repository.NewSettingsRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 	require.NoError(t, settingsRepo.Set(context.Background(), SlackSettingClientID, "cid"))
 	require.NoError(t, settingsRepo.Set(context.Background(), SlackSettingClientSecret, "secret"))
 	require.NoError(t, settingsRepo.Set(context.Background(), SlackSettingAppToken, "xapp-1"))
@@ -123,7 +123,7 @@ func TestSlackService_GetConnectionStatus_ManualOverrideSource(t *testing.T) {
 
 func TestSlackService_ConnectURLStoresState(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	settingsRepo := repository.NewSettingsRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 	require.NoError(t, settingsRepo.Set(context.Background(), SlackSettingClientID, "cid"))
 	require.NoError(t, settingsRepo.Set(context.Background(), SlackSettingClientSecret, "secret"))
 
@@ -140,7 +140,7 @@ func TestSlackService_ConnectURLStoresState(t *testing.T) {
 
 func TestSlackService_HandleOAuthCallback(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	settingsRepo := repository.NewSettingsRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 	require.NoError(t, settingsRepo.Set(context.Background(), SlackSettingClientID, "cid"))
 	require.NoError(t, settingsRepo.Set(context.Background(), SlackSettingClientSecret, "secret"))
 	require.NoError(t, settingsRepo.Set(context.Background(), SlackSettingBotToken, "xoxb-old-oauth"))
@@ -206,7 +206,7 @@ func TestSlackService_HandleOAuthCallbackFailurePreservesPreviousConfiguration(t
 		t.Run(failedKey, func(t *testing.T) {
 			ctx := context.Background()
 			db := testutil.NewTestDB(t)
-			settingsRepo := repository.NewSettingsRepo(db)
+			settingsRepo := sqlite.NewSettingsRepo(db)
 			previous := map[string]string{
 				SlackSettingClientID:         "cid",
 				SlackSettingClientSecret:     "secret",
@@ -268,7 +268,7 @@ func TestSlackService_HandleOAuthCallbackFailurePreservesPreviousConfiguration(t
 func TestSlackService_HandleOAuthCallbackMissingIdentityPreservesPreviousConfiguration(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)
-	settingsRepo := repository.NewSettingsRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 	require.NoError(t, settingsRepo.SetMany(ctx, map[string]string{
 		SlackSettingClientID:         "cid",
 		SlackSettingClientSecret:     "secret",
@@ -299,7 +299,7 @@ func TestSlackService_HandleOAuthCallbackMissingIdentityPreservesPreviousConfigu
 
 func TestSlackService_HandleOAuthCallbackInvalidState(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	settingsRepo := repository.NewSettingsRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 	require.NoError(t, settingsRepo.Set(context.Background(), SlackSettingClientID, "cid"))
 	require.NoError(t, settingsRepo.Set(context.Background(), SlackSettingClientSecret, "secret"))
 	require.NoError(t, settingsRepo.Set(context.Background(), SlackSettingOAuthState, "expected-state"))
@@ -329,26 +329,26 @@ func slackSocketMessageEvent(envelopeID, timestamp string) socketmode.Event {
 	}
 }
 
-func newSlackSocketIngressTestService(t *testing.T) (*SlackService, *sql.DB, *repository.TaskRepo, *repository.ExecutionRepo, *repository.ThreadInputRepo, *repository.SlackInboundReceiptRepo, string) {
+func newSlackSocketIngressTestService(t *testing.T) (*SlackService, *sql.DB, *sqlite.TaskRepo, *sqlite.ExecutionRepo, *sqlite.ThreadInputRepo, *sqlite.SlackInboundReceiptRepo, string) {
 	t.Helper()
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	execRepo := repository.NewExecutionRepo(db)
-	scheduleRepo := repository.NewScheduleRepo(db)
-	attachmentRepo := repository.NewAttachmentRepo(db)
-	settingsRepo := repository.NewSettingsRepo(db)
-	threadInputRepo := repository.NewThreadInputRepo(db)
-	receiptRepo := repository.NewSlackInboundReceiptRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	execRepo := sqlite.NewExecutionRepo(db)
+	scheduleRepo := sqlite.NewScheduleRepo(db)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
+	threadInputRepo := sqlite.NewThreadInputRepo(db)
+	receiptRepo := sqlite.NewSlackInboundReceiptRepo(db)
 	project := &models.Project{Name: "Slack durable handoff"}
 	require.NoError(t, projectRepo.Create(ctx, project))
 	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, scheduleRepo, attachmentRepo)
 	llmSvc.SetLLMCaller(testutil.NewMockLLMCaller())
 	workerSvc := NewWorkerService(llmSvc, 0, nil)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
-	svc := NewSlackService(settingsRepo, projectRepo, llmConfigRepo, taskRepo, execRepo, scheduleRepo, taskSvc, llmSvc, workerSvc, repository.NewSlackUserProjectRepo(db), repository.NewSlackTaskContextRepo(db), nil)
+	svc := NewSlackService(settingsRepo, projectRepo, llmConfigRepo, taskRepo, execRepo, scheduleRepo, taskSvc, llmSvc, workerSvc, sqlite.NewSlackUserProjectRepo(db), sqlite.NewSlackTaskContextRepo(db), nil)
 	svc.SetThreadInputRepo(threadInputRepo)
 	svc.SetSlackInboundReceiptRepo(receiptRepo)
 	svc.setActiveProject(ctx, "T1", "U1", project.ID)
@@ -359,7 +359,7 @@ func newSlackSocketIngressTestService(t *testing.T) (*SlackService, *sql.DB, *re
 func TestSlackInboundReceiptHandoffIsAtomicAndIdempotent(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	receipts := repository.NewSlackInboundReceiptRepo(db)
+	receipts := sqlite.NewSlackInboundReceiptRepo(db)
 	eventKey := "T1|D1|1710000000.100000|U1"
 
 	alreadyHandedOff, err := receipts.WithHandoff(ctx, eventKey, func(persistence.Tx) error {
@@ -391,7 +391,7 @@ func TestSlackInboundReceiptHandoffIsAtomicAndIdempotent(t *testing.T) {
 func TestSlackService_SocketEventAuthorizationFailureRedelivery(t *testing.T) {
 	svc, db, taskRepo, _, _, _, projectID := newSlackSocketIngressTestService(t)
 	ctx := context.Background()
-	svc.slackAuthRepo = repository.NewSlackAuthRepo(db)
+	svc.slackAuthRepo = sqlite.NewSlackAuthRepo(db)
 	require.NoError(t, svc.slackAuthRepo.Create(ctx, &models.SlackAuthorizedUser{
 		ProjectID: projectID, SlackUserID: "U1", DisplayName: "Authorized user", AddedBy: "test",
 	}))
@@ -474,7 +474,7 @@ func TestSlackService_SocketEventFirstTurnAttachmentPersistenceFailureRedelivery
 	require.Len(t, downloadedPaths, 1)
 	require.NoFileExists(t, downloadedPaths[0], "failed atomic handoff must remove the published attachment")
 
-	chatAttachmentRepo := repository.NewChatAttachmentRepo(db)
+	chatAttachmentRepo := sqlite.NewChatAttachmentRepo(db)
 	svc.SetChatAttachmentRepo(chatAttachmentRepo)
 	svc.handleSocketEvent(context.Background(), nil, event)
 	require.Equal(t, 1, acks)
@@ -531,7 +531,7 @@ func TestSlackService_SocketEventRepeatedAttachmentDownloadFailureRedelivery(t *
 	}
 
 	recovered = true
-	chatAttachmentRepo := repository.NewChatAttachmentRepo(db)
+	chatAttachmentRepo := sqlite.NewChatAttachmentRepo(db)
 	svc.SetChatAttachmentRepo(chatAttachmentRepo)
 	svc.handleSocketEvent(context.Background(), nil, event)
 	require.Equal(t, 1, acks)
@@ -863,7 +863,7 @@ func TestSlackService_SocketEventPreACKDeadlineBoundsSettingsAndReceiptReads(t *
 func TestSlackService_FileInfoTokenLookupRespectsRequestCancellation(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	settingsRepo := repository.NewSettingsRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 	require.NoError(t, settingsRepo.Set(ctx, SlackSettingBotTokenSource, SlackBotTokenSourceManual))
 	require.NoError(t, settingsRepo.Set(ctx, SlackSettingBotTokenOverride, "xoxb-test"))
 	svc := NewSlackService(settingsRepo, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
@@ -1215,7 +1215,7 @@ func TestSlackService_SocketEventRestartAfterFirstTurnPartialPersistenceLeavesNo
 	restarted := NewSlackService(svc.settingsRepo, svc.projectRepo, svc.llmConfigRepo, svc.taskRepo, svc.execRepo, svc.scheduleRepo, svc.taskSvc, svc.llmSvc, svc.workerSvc, svc.slackUserProjectRepo, svc.slackTaskContextRepo, svc.slackAuthRepo)
 	restarted.SetThreadInputRepo(threadInputRepo)
 	restarted.SetSlackInboundReceiptRepo(receiptRepo)
-	restarted.SetChatAttachmentRepo(repository.NewChatAttachmentRepo(db))
+	restarted.SetChatAttachmentRepo(sqlite.NewChatAttachmentRepo(db))
 	restarted.postMessageFn = func(string, string, string) (string, error) { return "", nil }
 	restarted.ackSocketRequestFn = func(*socketmode.Client, socketmode.Request) { acks++ }
 	restarted.handleSocketEvent(context.Background(), nil, event)
@@ -1229,8 +1229,8 @@ func TestSlackService_SocketEventRestartAfterFirstTurnPartialPersistenceLeavesNo
 func TestRunChannelChatFirstTurnDeadlineCleanupUsesNonCancelledContext(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
 	project := &models.Project{Name: "deadline cleanup"}
 	require.NoError(t, projectRepo.Create(ctx, project))
 	agent := &models.LLMConfig{ID: "agent-deadline-cleanup"}
@@ -1333,7 +1333,7 @@ func TestSlackService_SocketEventTerminallyAcknowledgesSupportedEventsWithoutSta
 
 func TestSlackService_EventFilteringAcceptsDMAppMentionsAndChannelMessageMentions(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	settingsRepo := repository.NewSettingsRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 	require.NoError(t, settingsRepo.Set(context.Background(), SlackSettingBotUserID, "UBOT"))
 
 	svc := NewSlackService(settingsRepo, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
@@ -1375,7 +1375,7 @@ func TestSlackService_EventFilteringAcceptsDMAppMentionsAndChannelMessageMention
 
 func TestSlackService_EventFilteringDedupesAppMentionAndMessageEventForSameSlackMessage(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	settingsRepo := repository.NewSettingsRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 	require.NoError(t, settingsRepo.Set(context.Background(), SlackSettingBotUserID, "UBOT"))
 
 	svc := NewSlackService(settingsRepo, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
@@ -1404,7 +1404,7 @@ func TestSlackService_EventFilteringDedupesAppMentionAndMessageEventForSameSlack
 
 func TestSlackService_EventFilteringIgnoresBotSelfAndNonDMMessages(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	settingsRepo := repository.NewSettingsRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 	require.NoError(t, settingsRepo.Set(context.Background(), SlackSettingBotUserID, "UBOT"))
 
 	svc := NewSlackService(settingsRepo, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
@@ -1453,15 +1453,15 @@ func TestSlackService_RuntimeCreateTaskTool_CreatedTasksGetSlackOriginAndContext
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
 
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	execRepo := repository.NewExecutionRepo(db)
-	scheduleRepo := repository.NewScheduleRepo(db)
-	attachmentRepo := repository.NewAttachmentRepo(db)
-	settingsRepo := repository.NewSettingsRepo(db)
-	slackUserProjectRepo := repository.NewSlackUserProjectRepo(db)
-	slackTaskContextRepo := repository.NewSlackTaskContextRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	execRepo := sqlite.NewExecutionRepo(db)
+	scheduleRepo := sqlite.NewScheduleRepo(db)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
+	slackUserProjectRepo := sqlite.NewSlackUserProjectRepo(db)
+	slackTaskContextRepo := sqlite.NewSlackTaskContextRepo(db)
 
 	project := &models.Project{Name: "Slack Tool Project"}
 	require.NoError(t, projectRepo.Create(ctx, project))
@@ -1472,7 +1472,7 @@ func TestSlackService_RuntimeCreateTaskTool_CreatedTasksGetSlackOriginAndContext
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 	swarmSvc := NewSwarmService(taskSvc, taskRepo, execRepo, workerSvc)
 	taskSvc.SetSwarmService(swarmSvc)
-	agentRepo := repository.NewAgentRepo(db)
+	agentRepo := sqlite.NewAgentRepo(db)
 	taskSvc.SetAgentRepo(agentRepo)
 	agent := &models.Agent{Name: "Reviewer", Key: "reviewer", Enabled: true, SelectableAsPrimary: true}
 	require.NoError(t, agentRepo.Create(ctx, agent))
@@ -1548,16 +1548,16 @@ func TestSlackService_RuntimeListAlertsTool_Handled(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
 
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	execRepo := repository.NewExecutionRepo(db)
-	scheduleRepo := repository.NewScheduleRepo(db)
-	attachmentRepo := repository.NewAttachmentRepo(db)
-	settingsRepo := repository.NewSettingsRepo(db)
-	slackUserProjectRepo := repository.NewSlackUserProjectRepo(db)
-	slackTaskContextRepo := repository.NewSlackTaskContextRepo(db)
-	alertRepo := repository.NewAlertRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	execRepo := sqlite.NewExecutionRepo(db)
+	scheduleRepo := sqlite.NewScheduleRepo(db)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
+	slackUserProjectRepo := sqlite.NewSlackUserProjectRepo(db)
+	slackTaskContextRepo := sqlite.NewSlackTaskContextRepo(db)
+	alertRepo := sqlite.NewAlertRepo(db)
 
 	project := &models.Project{Name: "Slack Alerts Runtime"}
 	require.NoError(t, projectRepo.Create(ctx, project))
@@ -1583,13 +1583,13 @@ func TestSlackService_RuntimeListAlertsTool_Handled(t *testing.T) {
 func TestSlackService_NotificationLifecycleRuntimeUsesPersistedChannelTask(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
 	project := &models.Project{Name: "Slack Notification Lifecycle"}
 	require.NoError(t, projectRepo.Create(ctx, project))
 	caller := &models.Task{ProjectID: project.ID, Title: "Slack chat", Prompt: "process", Category: models.CategoryChat, Status: models.StatusPending, Priority: 2}
 	require.NoError(t, taskRepo.Create(ctx, caller))
-	alertSvc := NewAlertService(repository.NewAlertRepo(db), nil)
+	alertSvc := NewAlertService(sqlite.NewAlertRepo(db), nil)
 	alert, err := alertSvc.CreateActionable(ctx, &models.Alert{ProjectID: project.ID, Type: "suggestion", Title: "Slack suggestion", Severity: models.SeverityInfo})
 	require.NoError(t, err)
 	require.NoError(t, alertSvc.SetDecision(ctx, project.ID, alert.ID, models.AlertDecisionApproved))
@@ -1610,16 +1610,16 @@ func TestSlackService_RuntimeExecutorHandlesAllDefinedTools(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
 
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	execRepo := repository.NewExecutionRepo(db)
-	scheduleRepo := repository.NewScheduleRepo(db)
-	attachmentRepo := repository.NewAttachmentRepo(db)
-	settingsRepo := repository.NewSettingsRepo(db)
-	slackUserProjectRepo := repository.NewSlackUserProjectRepo(db)
-	slackTaskContextRepo := repository.NewSlackTaskContextRepo(db)
-	alertRepo := repository.NewAlertRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	execRepo := sqlite.NewExecutionRepo(db)
+	scheduleRepo := sqlite.NewScheduleRepo(db)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
+	slackUserProjectRepo := sqlite.NewSlackUserProjectRepo(db)
+	slackTaskContextRepo := sqlite.NewSlackTaskContextRepo(db)
+	alertRepo := sqlite.NewAlertRepo(db)
 
 	project := &models.Project{Name: "Slack Full Runtime"}
 	require.NoError(t, projectRepo.Create(ctx, project))
@@ -1652,16 +1652,16 @@ func TestSlackService_ProcessIncomingMessage_AuthorizationEnforced(t *testing.T)
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
 
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	execRepo := repository.NewExecutionRepo(db)
-	scheduleRepo := repository.NewScheduleRepo(db)
-	attachmentRepo := repository.NewAttachmentRepo(db)
-	settingsRepo := repository.NewSettingsRepo(db)
-	slackUserProjectRepo := repository.NewSlackUserProjectRepo(db)
-	slackTaskContextRepo := repository.NewSlackTaskContextRepo(db)
-	slackAuthRepo := repository.NewSlackAuthRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	execRepo := sqlite.NewExecutionRepo(db)
+	scheduleRepo := sqlite.NewScheduleRepo(db)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
+	slackUserProjectRepo := sqlite.NewSlackUserProjectRepo(db)
+	slackTaskContextRepo := sqlite.NewSlackTaskContextRepo(db)
+	slackAuthRepo := sqlite.NewSlackAuthRepo(db)
 
 	project := &models.Project{Name: "Slack Auth Enforce"}
 	require.NoError(t, projectRepo.Create(ctx, project))
@@ -1707,9 +1707,9 @@ func TestSlackService_CheckAuthorization_FallsBackToAnyProject(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
 
-	projectRepo := repository.NewProjectRepo(db)
-	settingsRepo := repository.NewSettingsRepo(db)
-	slackAuthRepo := repository.NewSlackAuthRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
+	slackAuthRepo := sqlite.NewSlackAuthRepo(db)
 
 	projectA := &models.Project{Name: "Project A"}
 	projectB := &models.Project{Name: "Project B"}
@@ -1732,9 +1732,9 @@ func TestSlackService_CheckAuthorization_FallsBackToAnyProject(t *testing.T) {
 func TestSlackService_CheckAuthorizationRejectedActiveProjectUsesSingleLookup(t *testing.T) {
 	db, counter := testutil.NewStatementCountingTestDB(t)
 	ctx := context.Background()
-	projectRepo := repository.NewProjectRepo(db)
-	settingsRepo := repository.NewSettingsRepo(db)
-	slackAuthRepo := repository.NewSlackAuthRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
+	slackAuthRepo := sqlite.NewSlackAuthRepo(db)
 
 	project := &models.Project{Name: "Slack Single Auth Lookup"}
 	require.NoError(t, projectRepo.Create(ctx, project))
@@ -1755,9 +1755,9 @@ func TestSlackService_CheckAuthorizationRejectedActiveProjectUsesSingleLookup(t 
 func BenchmarkSlackRejectedAuthorizationSingleLookupLargeAllowlist(b *testing.B) {
 	db := testutil.NewTestDB(b)
 	ctx := context.Background()
-	projectRepo := repository.NewProjectRepo(db)
-	settingsRepo := repository.NewSettingsRepo(db)
-	slackAuthRepo := repository.NewSlackAuthRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
+	slackAuthRepo := sqlite.NewSlackAuthRepo(db)
 	project := &models.Project{Name: "Slack Rejected Auth Benchmark"}
 	require.NoError(b, projectRepo.Create(ctx, project))
 	seedChannelAuthorizedUsers(b, db, "slack_authorized_users", "slack_user_id", project.ID, "U_BENCH", 100000)
@@ -1803,9 +1803,9 @@ func TestSlackService_CheckAuthorization_NoUsersConfiguredDenyAll(t *testing.T) 
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
 
-	projectRepo := repository.NewProjectRepo(db)
-	settingsRepo := repository.NewSettingsRepo(db)
-	slackAuthRepo := repository.NewSlackAuthRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
+	slackAuthRepo := sqlite.NewSlackAuthRepo(db)
 
 	project := &models.Project{Name: "Project Empty Auth"}
 	require.NoError(t, projectRepo.Create(ctx, project))
@@ -1820,10 +1820,10 @@ func TestSlackService_SendTaskCompletionNotification(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
 
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	settingsRepo := repository.NewSettingsRepo(db)
-	slackTaskContextRepo := repository.NewSlackTaskContextRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	settingsRepo := sqlite.NewSettingsRepo(db)
+	slackTaskContextRepo := sqlite.NewSlackTaskContextRepo(db)
 
 	project := &models.Project{Name: "Slack Notify Project"}
 	require.NoError(t, projectRepo.Create(ctx, project))
@@ -1880,16 +1880,16 @@ func TestSlackService_ProcessIncomingMessage_QueuesWhenChatActive(t *testing.T) 
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
 
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	execRepo := repository.NewExecutionRepo(db)
-	scheduleRepo := repository.NewScheduleRepo(db)
-	attachmentRepo := repository.NewAttachmentRepo(db)
-	settingsRepo := repository.NewSettingsRepo(db)
-	slackUserProjectRepo := repository.NewSlackUserProjectRepo(db)
-	slackTaskContextRepo := repository.NewSlackTaskContextRepo(db)
-	threadInputRepo := repository.NewThreadInputRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	execRepo := sqlite.NewExecutionRepo(db)
+	scheduleRepo := sqlite.NewScheduleRepo(db)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
+	slackUserProjectRepo := sqlite.NewSlackUserProjectRepo(db)
+	slackTaskContextRepo := sqlite.NewSlackTaskContextRepo(db)
+	threadInputRepo := sqlite.NewThreadInputRepo(db)
 
 	project := &models.Project{Name: "Slack Queue Project"}
 	require.NoError(t, projectRepo.Create(ctx, project))
@@ -1936,15 +1936,15 @@ func TestSlackService_ProcessIncomingMessage_UsesSharedChannelChatRunner(t *test
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
 
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	execRepo := repository.NewExecutionRepo(db)
-	scheduleRepo := repository.NewScheduleRepo(db)
-	attachmentRepo := repository.NewAttachmentRepo(db)
-	settingsRepo := repository.NewSettingsRepo(db)
-	slackUserProjectRepo := repository.NewSlackUserProjectRepo(db)
-	slackTaskContextRepo := repository.NewSlackTaskContextRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	execRepo := sqlite.NewExecutionRepo(db)
+	scheduleRepo := sqlite.NewScheduleRepo(db)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
+	slackUserProjectRepo := sqlite.NewSlackUserProjectRepo(db)
+	slackTaskContextRepo := sqlite.NewSlackTaskContextRepo(db)
 
 	project := &models.Project{Name: "Slack Shared Runner Project"}
 	require.NoError(t, projectRepo.Create(ctx, project))
@@ -1993,16 +1993,16 @@ func TestSlackService_ProcessIncomingMessage_UsesSharedChannelChatRunner(t *test
 func TestSlackService_SendToTaskUsesSharedRunnerAndQueuesActiveTask(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	execRepo := repository.NewExecutionRepo(db)
-	scheduleRepo := repository.NewScheduleRepo(db)
-	attachmentRepo := repository.NewAttachmentRepo(db)
-	settingsRepo := repository.NewSettingsRepo(db)
-	slackUserProjectRepo := repository.NewSlackUserProjectRepo(db)
-	slackTaskContextRepo := repository.NewSlackTaskContextRepo(db)
-	threadInputRepo := repository.NewThreadInputRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	execRepo := sqlite.NewExecutionRepo(db)
+	scheduleRepo := sqlite.NewScheduleRepo(db)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
+	slackUserProjectRepo := sqlite.NewSlackUserProjectRepo(db)
+	slackTaskContextRepo := sqlite.NewSlackTaskContextRepo(db)
+	threadInputRepo := sqlite.NewThreadInputRepo(db)
 	project := &models.Project{Name: "Slack Task Runner Project"}
 	require.NoError(t, projectRepo.Create(ctx, project))
 	agent, err := llmConfigRepo.GetDefault(ctx)
@@ -2059,16 +2059,16 @@ func TestSlackService_SendToTaskUsesSharedRunnerAndQueuesActiveTask(t *testing.T
 func TestSlackService_SendToTask_QueuesDuringStartingFirstTurnBeforeExecutionExists(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	execRepo := repository.NewExecutionRepo(db)
-	scheduleRepo := repository.NewScheduleRepo(db)
-	attachmentRepo := repository.NewAttachmentRepo(db)
-	settingsRepo := repository.NewSettingsRepo(db)
-	slackUserProjectRepo := repository.NewSlackUserProjectRepo(db)
-	slackTaskContextRepo := repository.NewSlackTaskContextRepo(db)
-	threadInputRepo := repository.NewThreadInputRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	execRepo := sqlite.NewExecutionRepo(db)
+	scheduleRepo := sqlite.NewScheduleRepo(db)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
+	slackUserProjectRepo := sqlite.NewSlackUserProjectRepo(db)
+	slackTaskContextRepo := sqlite.NewSlackTaskContextRepo(db)
+	threadInputRepo := sqlite.NewThreadInputRepo(db)
 	project := &models.Project{Name: "Slack Starting First Turn Project"}
 	require.NoError(t, projectRepo.Create(ctx, project))
 	agent, err := llmConfigRepo.GetDefault(ctx)
@@ -2108,10 +2108,10 @@ func TestSlackService_SendToTask_QueuesDuringStartingFirstTurnBeforeExecutionExi
 func TestSlackService_CompleteExecution_FailurePromotesQueuedChat(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	execRepo := repository.NewExecutionRepo(db)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	execRepo := sqlite.NewExecutionRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
 	project := &models.Project{Name: "Slack Failed Promotion Project"}
 	require.NoError(t, projectRepo.Create(ctx, project))
 	agents, err := llmConfigRepo.List(ctx)
@@ -2139,10 +2139,10 @@ func TestSlackService_CompleteExecution_FailurePromotesQueuedChat(t *testing.T) 
 func TestSlackService_SendChatResponse_SendsChatTaskOutput(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	settingsRepo := repository.NewSettingsRepo(db)
-	slackTaskContextRepo := repository.NewSlackTaskContextRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	settingsRepo := sqlite.NewSettingsRepo(db)
+	slackTaskContextRepo := sqlite.NewSlackTaskContextRepo(db)
 	project := &models.Project{Name: "Slack Chat Response Project"}
 	require.NoError(t, projectRepo.Create(ctx, project))
 	task := &models.Task{ProjectID: project.ID, Title: "chat", Category: models.CategoryChat, Status: models.StatusCompleted, Prompt: "prompt", CreatedVia: models.TaskOriginSlack}
@@ -2169,11 +2169,11 @@ func TestSlackService_GoalTools_SetGetClearPauseResume(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
 
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	attachmentRepo := repository.NewAttachmentRepo(db)
-	taskGoalRepo := repository.NewTaskGoalRepo(db)
-	settingsRepo := repository.NewSettingsRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
+	taskGoalRepo := sqlite.NewTaskGoalRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 	workerSvc := NewWorkerService(nil, 0, projectRepo)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 	goalSvc := NewTaskGoalService(taskGoalRepo, taskRepo, nil)
@@ -2234,9 +2234,9 @@ func TestSlackService_GoalTools_UnavailableWithoutService(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
 
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	settingsRepo := repository.NewSettingsRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 
 	project := &models.Project{Name: "Slack Goal Nil Svc", RepoPath: "/tmp/test"}
 	require.NoError(t, projectRepo.Create(ctx, project))
@@ -2262,11 +2262,11 @@ func TestSlackService_GoalTools_MarkAchievedReportBlocked(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
 
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	attachmentRepo := repository.NewAttachmentRepo(db)
-	taskGoalRepo := repository.NewTaskGoalRepo(db)
-	settingsRepo := repository.NewSettingsRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
+	taskGoalRepo := sqlite.NewTaskGoalRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 	workerSvc := NewWorkerService(nil, 0, projectRepo)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 	goalSvc := NewTaskGoalService(taskGoalRepo, taskRepo, nil)
@@ -2340,7 +2340,7 @@ func TestSlackService_SendOutboundDirectMessage_OpensDMBeforePosting(t *testing.
 }
 
 func TestSlackService_SendOutboundMessage_MissingTokenReturnsCleanError(t *testing.T) {
-	svc := NewSlackService(repository.NewSettingsRepo(testutil.NewTestDB(t)), nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	svc := NewSlackService(sqlite.NewSettingsRepo(testutil.NewTestDB(t)), nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	res := svc.SendOutboundMessage(context.Background(), "C123", "", "hello")
 	require.False(t, res.OK)
 	require.Contains(t, res.Error, "slack bot token is not configured")
@@ -2348,7 +2348,7 @@ func TestSlackService_SendOutboundMessage_MissingTokenReturnsCleanError(t *testi
 
 func TestSlackService_ConnectURLIncludesFilesReadScope(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	settingsRepo := repository.NewSettingsRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 	require.NoError(t, settingsRepo.Set(context.Background(), SlackSettingClientID, "cid"))
 	require.NoError(t, settingsRepo.Set(context.Background(), SlackSettingClientSecret, "secret"))
 
@@ -2365,7 +2365,7 @@ func TestSlackService_ConnectURLIncludesFilesReadScope(t *testing.T) {
 
 func TestSlackService_EventFilteringPreservesFileMetadata(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	settingsRepo := repository.NewSettingsRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 	require.NoError(t, settingsRepo.Set(context.Background(), SlackSettingBotUserID, "UBOT"))
 
 	svc := NewSlackService(settingsRepo, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
@@ -2446,7 +2446,7 @@ func TestSlackService_EventFilteringPreservesFileMetadata(t *testing.T) {
 
 func TestSlackService_EventFilteringAcceptsAttachmentOnlyMessages(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	settingsRepo := repository.NewSettingsRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 	require.NoError(t, settingsRepo.Set(context.Background(), SlackSettingBotUserID, "UBOT"))
 
 	svc := NewSlackService(settingsRepo, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
@@ -2491,7 +2491,7 @@ func TestSlackService_EventFilteringAcceptsAttachmentOnlyMessages(t *testing.T) 
 
 func TestSlackService_EventFilteringPreservesAttachmentAndBlockFileReferences(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	settingsRepo := repository.NewSettingsRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 	require.NoError(t, settingsRepo.Set(context.Background(), SlackSettingBotUserID, "UBOT"))
 
 	svc := NewSlackService(settingsRepo, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
@@ -3478,7 +3478,7 @@ func TestSlackService_ProcessIncomingMessage_QueuesSlackFilesInAttachmentSession
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
 	projectRepo, taskRepo, llmConfigRepo, execRepo, scheduleRepo, attachmentRepo, _, settingsRepo, slackUserProjectRepo, slackTaskContextRepo := newSlackAttachmentTestRepos(t, db)
-	threadInputRepo := repository.NewThreadInputRepo(db)
+	threadInputRepo := sqlite.NewThreadInputRepo(db)
 	project := &models.Project{Name: "Slack Queued Attachment Project"}
 	require.NoError(t, projectRepo.Create(ctx, project))
 	require.NoError(t, settingsRepo.Set(ctx, SlackSettingBotTokenOverride, "xoxb-test"))
@@ -3579,7 +3579,7 @@ func TestSlackService_ProcessIncomingMessage_QueuedAttachmentDownloadFailurePers
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
 	projectRepo, taskRepo, llmConfigRepo, execRepo, scheduleRepo, attachmentRepo, _, settingsRepo, slackUserProjectRepo, slackTaskContextRepo := newSlackAttachmentTestRepos(t, db)
-	threadInputRepo := repository.NewThreadInputRepo(db)
+	threadInputRepo := sqlite.NewThreadInputRepo(db)
 	project := &models.Project{Name: "Slack Queued Attachment Failure Project"}
 	require.NoError(t, projectRepo.Create(ctx, project))
 	require.NoError(t, settingsRepo.Set(ctx, SlackSettingBotTokenOverride, "xoxb-test"))
@@ -3658,7 +3658,7 @@ func TestSlackService_ProcessIncomingMessage_QueuedAttachmentStagingFailurePersi
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
 	projectRepo, taskRepo, llmConfigRepo, execRepo, scheduleRepo, attachmentRepo, _, settingsRepo, slackUserProjectRepo, slackTaskContextRepo := newSlackAttachmentTestRepos(t, db)
-	threadInputRepo := repository.NewThreadInputRepo(db)
+	threadInputRepo := sqlite.NewThreadInputRepo(db)
 	project := &models.Project{Name: "Slack Queued Attachment Staging Failure Project"}
 	require.NoError(t, projectRepo.Create(ctx, project))
 	require.NoError(t, settingsRepo.Set(ctx, SlackSettingBotTokenOverride, "xoxb-test"))
@@ -3733,20 +3733,20 @@ func TestSlackService_ProcessIncomingMessage_QueuedAttachmentStagingFailurePersi
 	require.Contains(t, createdExec.ErrorMessage, "unable to store attachment")
 }
 
-func newSlackAttachmentTestRepos(t *testing.T, db interface{}) (*repository.ProjectRepo, *repository.TaskRepo, *repository.LLMConfigRepo, *repository.ExecutionRepo, *repository.ScheduleRepo, *repository.AttachmentRepo, *repository.ChatAttachmentRepo, *repository.SettingsRepo, *repository.SlackUserProjectRepo, *repository.SlackTaskContextRepo) {
+func newSlackAttachmentTestRepos(t *testing.T, db interface{}) (*sqlite.ProjectRepo, *sqlite.TaskRepo, *sqlite.LLMConfigRepo, *sqlite.ExecutionRepo, *sqlite.ScheduleRepo, *sqlite.AttachmentRepo, *sqlite.ChatAttachmentRepo, *sqlite.SettingsRepo, *sqlite.SlackUserProjectRepo, *sqlite.SlackTaskContextRepo) {
 	t.Helper()
 	sqlDB, ok := db.(*sql.DB)
 	require.True(t, ok)
-	projectRepo := repository.NewProjectRepo(sqlDB)
-	taskRepo := repository.NewTaskRepo(sqlDB, nil)
-	llmConfigRepo := repository.NewLLMConfigRepo(sqlDB)
-	execRepo := repository.NewExecutionRepo(sqlDB)
-	scheduleRepo := repository.NewScheduleRepo(sqlDB)
-	attachmentRepo := repository.NewAttachmentRepo(sqlDB)
-	chatAttachmentRepo := repository.NewChatAttachmentRepo(sqlDB)
-	settingsRepo := repository.NewSettingsRepo(sqlDB)
-	slackUserProjectRepo := repository.NewSlackUserProjectRepo(sqlDB)
-	slackTaskContextRepo := repository.NewSlackTaskContextRepo(sqlDB)
+	projectRepo := sqlite.NewProjectRepo(sqlDB)
+	taskRepo := sqlite.NewTaskRepo(sqlDB, nil)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(sqlDB)
+	execRepo := sqlite.NewExecutionRepo(sqlDB)
+	scheduleRepo := sqlite.NewScheduleRepo(sqlDB)
+	attachmentRepo := sqlite.NewAttachmentRepo(sqlDB)
+	chatAttachmentRepo := sqlite.NewChatAttachmentRepo(sqlDB)
+	settingsRepo := sqlite.NewSettingsRepo(sqlDB)
+	slackUserProjectRepo := sqlite.NewSlackUserProjectRepo(sqlDB)
+	slackTaskContextRepo := sqlite.NewSlackTaskContextRepo(sqlDB)
 	return projectRepo, taskRepo, llmConfigRepo, execRepo, scheduleRepo, attachmentRepo, chatAttachmentRepo, settingsRepo, slackUserProjectRepo, slackTaskContextRepo
 }
 
@@ -3761,15 +3761,15 @@ func TestSlackService_RuntimeSwitchProject_PersistsToRepo(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
 
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	execRepo := repository.NewExecutionRepo(db)
-	scheduleRepo := repository.NewScheduleRepo(db)
-	attachmentRepo := repository.NewAttachmentRepo(db)
-	settingsRepo := repository.NewSettingsRepo(db)
-	slackUserProjectRepo := repository.NewSlackUserProjectRepo(db)
-	slackTaskContextRepo := repository.NewSlackTaskContextRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	execRepo := sqlite.NewExecutionRepo(db)
+	scheduleRepo := sqlite.NewScheduleRepo(db)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
+	slackUserProjectRepo := sqlite.NewSlackUserProjectRepo(db)
+	slackTaskContextRepo := sqlite.NewSlackTaskContextRepo(db)
 
 	project1 := &models.Project{Name: "Alpha", RepoPath: "/tmp/alpha", IsDefault: true}
 	require.NoError(t, projectRepo.Create(ctx, project1))
@@ -3818,15 +3818,15 @@ func newSlackProjectSwitchTestService(t *testing.T) (*SlackService, *sql.DB, *mo
 	t.Helper()
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	execRepo := repository.NewExecutionRepo(db)
-	scheduleRepo := repository.NewScheduleRepo(db)
-	attachmentRepo := repository.NewAttachmentRepo(db)
-	settingsRepo := repository.NewSettingsRepo(db)
-	slackUserProjectRepo := repository.NewSlackUserProjectRepo(db)
-	slackTaskContextRepo := repository.NewSlackTaskContextRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	execRepo := sqlite.NewExecutionRepo(db)
+	scheduleRepo := sqlite.NewScheduleRepo(db)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
+	slackUserProjectRepo := sqlite.NewSlackUserProjectRepo(db)
+	slackTaskContextRepo := sqlite.NewSlackTaskContextRepo(db)
 
 	project1 := &models.Project{Name: "Alpha", RepoPath: "/tmp/slack-switch-alpha", IsDefault: true}
 	require.NoError(t, projectRepo.Create(ctx, project1))
@@ -3963,7 +3963,7 @@ func TestSlackTextAndAttachmentHelpers(t *testing.T) {
 func TestSlackServiceSendCompletionThreadAndLifecycleHelpers(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)
-	settingsRepo := repository.NewSettingsRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 	svc := NewSlackService(settingsRepo, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 
 	var posted []string

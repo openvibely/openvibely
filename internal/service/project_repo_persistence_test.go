@@ -11,16 +11,16 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/testutil"
 )
 
 func TestProjectService_DeleteRollsBackTasksWhenLegacyConstraintFails(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	attachmentRepo := repository.NewAttachmentRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
 	projectSvc := NewProjectService(projectRepo)
 	projectSvc.SetTaskService(NewTaskService(taskRepo, attachmentRepo, nil))
 
@@ -89,11 +89,11 @@ func TestProjectService_DeleteRollsBackTasksWhenLegacyConstraintFails(t *testing
 func TestProjectService_DeleteRollbackDoesNotCancelOrMoveRunningTaskWorktree(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
 	workerSvc := NewWorkerService(nil, 0, projectRepo)
 	projectSvc := NewProjectService(projectRepo)
-	projectSvc.SetTaskService(NewTaskService(taskRepo, repository.NewAttachmentRepo(db), workerSvc))
+	projectSvc.SetTaskService(NewTaskService(taskRepo, sqlite.NewAttachmentRepo(db), workerSvc))
 
 	repoDir := filepath.Join(t.TempDir(), "running-repository")
 	if err := os.MkdirAll(repoDir, 0o755); err != nil {
@@ -170,10 +170,10 @@ func TestProjectService_DeleteRollbackDoesNotCancelOrMoveRunningTaskWorktree(t *
 func TestProjectService_DeleteCleansLocalTaskWorktreeAndMutationHistory(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
 	projectSvc := NewProjectService(projectRepo)
-	projectSvc.SetTaskService(NewTaskService(taskRepo, repository.NewAttachmentRepo(db), nil))
+	projectSvc.SetTaskService(NewTaskService(taskRepo, sqlite.NewAttachmentRepo(db), nil))
 
 	repoDir := filepath.Join(t.TempDir(), "user-repository")
 	if err := os.MkdirAll(repoDir, 0o755); err != nil {
@@ -254,12 +254,12 @@ func TestProjectService_DeleteCleansLocalTaskWorktreeAndMutationHistory(t *testi
 func TestProjectService_DeleteCleansManagedCloneAndPreservesUserOwnedGitHubCheckout(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
 	projectSvc := NewProjectService(projectRepo)
-	projectSvc.SetTaskService(NewTaskService(taskRepo, repository.NewAttachmentRepo(db), nil))
+	projectSvc.SetTaskService(NewTaskService(taskRepo, sqlite.NewAttachmentRepo(db), nil))
 	managedRoot := filepath.Join(t.TempDir(), "managed-repositories")
-	projectSvc.SetManagedProjectRepoResolver(NewGitHubService(repository.NewSettingsRepo(db), "", "", "", managedRoot))
+	projectSvc.SetManagedProjectRepoResolver(NewGitHubService(sqlite.NewSettingsRepo(db), "", "", "", managedRoot))
 
 	managed := &models.Project{Name: "Managed clone", RepoURL: "https://github.com/example/managed"}
 	if err := projectRepo.Create(ctx, managed); err != nil {
@@ -340,9 +340,9 @@ func TestProjectService_DeleteCleansManagedCloneAndPreservesUserOwnedGitHubCheck
 func TestProjectService_DeleteFilesystemStagingFailurePreservesRelationalData(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	attachmentRepo := repository.NewAttachmentRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
 	projectSvc := NewProjectService(projectRepo)
 	projectSvc.SetTaskService(NewTaskService(taskRepo, attachmentRepo, nil))
 
@@ -381,7 +381,7 @@ func TestProjectService_DeleteFilesystemStagingFailurePreservesRelationalData(t 
 // container-restart persistence bug.
 func TestValidateRepoPaths_DetectsMissingRepoPath(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	projectRepo := repository.NewProjectRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
 	svc := NewProjectService(projectRepo)
 	ctx := context.Background()
 
@@ -409,7 +409,7 @@ func TestValidateRepoPaths_DetectsMissingRepoPath(t *testing.T) {
 // produce false positives.
 func TestValidateRepoPaths_SkipsExistingPath(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	projectRepo := repository.NewProjectRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
 	svc := NewProjectService(projectRepo)
 	ctx := context.Background()
 
@@ -432,7 +432,7 @@ func TestValidateRepoPaths_SkipsExistingPath(t *testing.T) {
 // (no repo configured) don't produce warnings.
 func TestValidateRepoPaths_SkipsEmptyRepoPath(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	projectRepo := repository.NewProjectRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
 	svc := NewProjectService(projectRepo)
 	ctx := context.Background()
 
@@ -451,7 +451,7 @@ func TestValidateRepoPaths_SkipsEmptyRepoPath(t *testing.T) {
 
 func TestValidateRepoPaths_PreservesWarningContentsForMixedPaths(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	projectRepo := repository.NewProjectRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
 	svc := NewProjectService(projectRepo)
 	ctx := context.Background()
 
@@ -492,12 +492,12 @@ func TestValidateRepoPaths_PreservesWarningContentsForMixedPaths(t *testing.T) {
 // produces a clear failure when the project repo path is gone (post-restart).
 func TestExecuteTaskWithAgent_FailsOnMissingRepoPath(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	execRepo := repository.NewExecutionRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	projectRepo := repository.NewProjectRepo(db)
-	scheduleRepo := repository.NewScheduleRepo(db)
-	attachmentRepo := repository.NewAttachmentRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	execRepo := sqlite.NewExecutionRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	projectRepo := sqlite.NewProjectRepo(db)
+	scheduleRepo := sqlite.NewScheduleRepo(db)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
 	ctx := context.Background()
 
 	mock := testutil.NewMockLLMCaller()
@@ -574,8 +574,8 @@ func TestExecuteTaskWithAgent_FailsOnMissingRepoPath(t *testing.T) {
 func TestProjectService_ValidatesProjectWorkerLimitAgainstGlobal(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	projectRepo := repository.NewProjectRepo(db)
-	workerRepo := repository.NewWorkerRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	workerRepo := sqlite.NewWorkerRepo(db)
 	svc := NewProjectService(projectRepo)
 	svc.SetWorkerRepo(workerRepo)
 
@@ -684,7 +684,7 @@ func TestEnsureRepoRoot_UnderDataVolume(t *testing.T) {
 	dataDir := t.TempDir()
 	repoRoot := filepath.Join(dataDir, "repos")
 
-	settingsRepo := repository.NewSettingsRepo(testutil.NewTestDB(t))
+	settingsRepo := sqlite.NewSettingsRepo(testutil.NewTestDB(t))
 	svc := NewGitHubService(settingsRepo, "", "", "", repoRoot)
 
 	ctx := context.Background()

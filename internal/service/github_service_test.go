@@ -26,7 +26,7 @@ import (
 	"github.com/openvibely/openvibely/internal/chatcontrol"
 	"github.com/openvibely/openvibely/internal/httpretry"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/testutil"
 )
 
@@ -290,7 +290,7 @@ func TestGitHubTokenEnv_UsesBasicAuthHeader(t *testing.T) {
 
 func TestGitAuthEnvForRepo_PATMode(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	settingsRepo := repository.NewSettingsRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 	ctx := context.Background()
 
 	if err := settingsRepo.Set(ctx, GitHubSettingAuthMode, GitHubAuthModePAT); err != nil {
@@ -472,7 +472,7 @@ func TestGitHubServiceLowLevelHelpers(t *testing.T) {
 func TestGitHubServiceConnectionStatusConnectCallbackAndDisconnect(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)
-	settingsRepo := repository.NewSettingsRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 
 	requireNoError(t, settingsRepo.Set(ctx, GitHubSettingAuthMode, GitHubAuthModePAT))
 	requireNoError(t, settingsRepo.Set(ctx, GitHubSettingPAT, " ghp_token "))
@@ -542,7 +542,7 @@ func requireNoError(t *testing.T, err error) {
 
 func TestCloneProjectRepo_NoPATFallsBackToLocalGitCLI(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	settingsRepo := repository.NewSettingsRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 	ctx := context.Background()
 	root := t.TempDir()
 	if err := settingsRepo.Set(ctx, GitHubSettingAuthMode, GitHubAuthModePAT); err != nil {
@@ -586,7 +586,7 @@ func TestCloneProjectRepo_NoPATFallsBackToLocalGitCLI(t *testing.T) {
 
 func TestCloneProjectRepo_NoPATFallbackPreservesSSHCloneURL(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	settingsRepo := repository.NewSettingsRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 	ctx := context.Background()
 	root := t.TempDir()
 	if err := settingsRepo.Set(ctx, GitHubSettingAuthMode, GitHubAuthModePAT); err != nil {
@@ -617,7 +617,7 @@ func TestCloneProjectRepo_NoPATFallbackPreservesSSHCloneURL(t *testing.T) {
 
 func TestCloneProjectRepo_PATConfiguredUsesTokenClone(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	settingsRepo := repository.NewSettingsRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 	ctx := context.Background()
 	root := t.TempDir()
 	if err := settingsRepo.Set(ctx, GitHubSettingAuthMode, GitHubAuthModePAT); err != nil {
@@ -647,7 +647,7 @@ func TestCloneProjectRepo_PATConfiguredUsesTokenClone(t *testing.T) {
 
 func TestCloneProjectRepoWithEndpoint_ScopesPATToEnterpriseHost(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	settingsRepo := repository.NewSettingsRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 	ctx := context.Background()
 	if err := settingsRepo.Set(ctx, GitHubSettingAuthMode, GitHubAuthModePAT); err != nil {
 		t.Fatal(err)
@@ -678,7 +678,7 @@ func TestCloneProjectRepoWithEndpoint_ScopesPATToEnterpriseHost(t *testing.T) {
 
 func TestRecloneProjectRepoWithEndpointReplacesManagedCheckout(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	settingsRepo := repository.NewSettingsRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 	ctx := context.Background()
 	requireNoError(t, settingsRepo.Set(ctx, GitHubSettingAuthMode, GitHubAuthModePAT))
 	requireNoError(t, settingsRepo.Set(ctx, GitHubSettingPAT, "pat"))
@@ -724,7 +724,7 @@ func TestRecloneProjectRepoWithEndpointReplacesManagedCheckout(t *testing.T) {
 
 func TestCloneProjectRepo_LocalGitFallbackFailureIncludesGitFailure(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	settingsRepo := repository.NewSettingsRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 	ctx := context.Background()
 	root := t.TempDir()
 	if err := settingsRepo.Set(ctx, GitHubSettingAuthMode, GitHubAuthModePAT); err != nil {
@@ -754,7 +754,7 @@ func TestCloneProjectRepo_LocalGitFallbackFailureIncludesGitFailure(t *testing.T
 
 func TestCloneProjectRepo_LocalGitNonCredentialFailureOmitsPATContext(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	settingsRepo := repository.NewSettingsRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 	ctx := context.Background()
 	root := t.TempDir()
 	if err := settingsRepo.Set(ctx, GitHubSettingAuthMode, GitHubAuthModePAT); err != nil {
@@ -808,7 +808,7 @@ func envContainsValue(env []string, value string) bool {
 
 func TestGetPullRequestReturnsHeadRefAndMergedStateFromResolvedRepository(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	settingsRepo := repository.NewSettingsRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 	ctx := context.Background()
 	if err := settingsRepo.Set(ctx, GitHubSettingAuthMode, GitHubAuthModePAT); err != nil {
 		t.Fatalf("set auth mode: %v", err)
@@ -1347,12 +1347,12 @@ func newDevInboxGitHubRuntimeHandlers(t *testing.T, apiBaseURL string) map[strin
 	t.Helper()
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	projectRepo := repository.NewProjectRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
 	project := &models.Project{Name: "Dev Inbox GitHub Runtime", RepoURL: "https://github.com/openvibely/openvibely"}
 	if err := projectRepo.Create(ctx, project); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
-	githubAuthRepo := repository.NewGitHubAuthRepo(db)
+	githubAuthRepo := sqlite.NewGitHubAuthRepo(db)
 	for _, login := range []string{"dev-bot", "other-bot"} {
 		if err := githubAuthRepo.UpsertAuthorizedActor(ctx, &models.GitHubAuthorizedActor{GitHubLogin: login}); err != nil {
 			t.Fatalf("authorize github actor %s: %v", login, err)
@@ -1625,7 +1625,7 @@ func TestGitHubServiceUpdatePullRequestBody(t *testing.T) {
 }
 func newPATGitHubService(t *testing.T, apiBaseURL string) *GitHubService {
 	t.Helper()
-	settingsRepo := repository.NewSettingsRepo(testutil.NewTestDB(t))
+	settingsRepo := sqlite.NewSettingsRepo(testutil.NewTestDB(t))
 	ctx := context.Background()
 	if err := settingsRepo.Set(ctx, GitHubSettingAuthMode, GitHubAuthModePAT); err != nil {
 		t.Fatalf("set auth mode: %v", err)
@@ -1640,7 +1640,7 @@ func newPATGitHubService(t *testing.T, apiBaseURL string) *GitHubService {
 
 func TestListAssignedIssuesWithPullRequestsSkipsIssuesWithoutAssociatedPR(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	settingsRepo := repository.NewSettingsRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 	ctx := context.Background()
 	if err := settingsRepo.Set(ctx, GitHubSettingAuthMode, GitHubAuthModePAT); err != nil {
 		t.Fatalf("set auth mode: %v", err)
@@ -1707,7 +1707,7 @@ func TestListAssignedIssuesWithPullRequestsSkipsIssuesWithoutAssociatedPR(t *tes
 
 func TestListAuthenticatedAssignedIssuesUsesConfiguredTokenUser(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	settingsRepo := repository.NewSettingsRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 	ctx := context.Background()
 	if err := settingsRepo.Set(ctx, GitHubSettingAuthMode, GitHubAuthModePAT); err != nil {
 		t.Fatalf("set auth mode: %v", err)
@@ -1773,7 +1773,7 @@ func TestListAuthenticatedAssignedIssuesUsesConfiguredTokenUser(t *testing.T) {
 
 func TestListAuthenticatedCreatedIssuesUsesConfiguredTokenCreator(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	settingsRepo := repository.NewSettingsRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 	ctx := context.Background()
 	if err := settingsRepo.Set(ctx, GitHubSettingAuthMode, GitHubAuthModePAT); err != nil {
 		t.Fatalf("set auth mode: %v", err)
@@ -1832,7 +1832,7 @@ func TestListAuthenticatedCreatedIssuesUsesConfiguredTokenCreator(t *testing.T) 
 
 func TestGetAuthenticatedUserForEnterpriseRepoBypassesGlobalPATLoginCache(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	settingsRepo := repository.NewSettingsRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 	ctx := context.Background()
 	if err := settingsRepo.Set(ctx, GitHubSettingAuthMode, GitHubAuthModePAT); err != nil {
 		t.Fatal(err)
@@ -1891,7 +1891,7 @@ func TestGetAuthenticatedUserForEnterpriseRepoBypassesGlobalPATLoginCache(t *tes
 
 func TestGetAuthenticatedUserForEnterpriseRepoBypassesGlobalGitHubAppLoginCache(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	settingsRepo := repository.NewSettingsRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 	ctx := context.Background()
 	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
@@ -1956,7 +1956,7 @@ func TestGetAuthenticatedUserForEnterpriseRepoBypassesGlobalGitHubAppLoginCache(
 
 func TestListAuthenticatedAssignedIssuesUsesEnterpriseRepoEndpoint(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	settingsRepo := repository.NewSettingsRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 	ctx := context.Background()
 	if err := settingsRepo.Set(ctx, GitHubSettingAuthMode, GitHubAuthModePAT); err != nil {
 		t.Fatal(err)
@@ -1994,7 +1994,7 @@ func TestListAuthenticatedAssignedIssuesUsesEnterpriseRepoEndpoint(t *testing.T)
 
 func TestListAuthenticatedAssignedIssuesRejectsGitHubAppInstallationAccount(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	settingsRepo := repository.NewSettingsRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 	ctx := context.Background()
 	if err := settingsRepo.Set(ctx, GitHubSettingAuthMode, GitHubAuthModeApp); err != nil {
 		t.Fatalf("set auth mode: %v", err)
@@ -2031,7 +2031,7 @@ func TestListAuthenticatedAssignedIssuesRejectsGitHubAppInstallationAccount(t *t
 
 func TestGitHubClientRejectsRedirectWithoutReplayingAuthorization(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	settingsRepo := repository.NewSettingsRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 	ctx := context.Background()
 	if err := settingsRepo.Set(ctx, GitHubSettingAuthMode, GitHubAuthModePAT); err != nil {
 		t.Fatalf("set auth mode: %v", err)
@@ -2082,7 +2082,7 @@ func TestGitHubClientRejectsRedirectWithoutReplayingAuthorization(t *testing.T) 
 
 func TestGitHubIssueLabelsRejectOpenVibelyPrefixBeforeTransport(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	settingsRepo := repository.NewSettingsRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 	ctx := context.Background()
 	if err := settingsRepo.Set(ctx, GitHubSettingAuthMode, GitHubAuthModePAT); err != nil {
 		t.Fatalf("set auth mode: %v", err)
@@ -2115,7 +2115,7 @@ func TestGitHubIssueLabelsRejectOpenVibelyPrefixBeforeTransport(t *testing.T) {
 
 func TestPublishBranchUsesGitHubAPIWithoutGitPush(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	settingsRepo := repository.NewSettingsRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 	ctx := context.Background()
 	if err := settingsRepo.Set(ctx, GitHubSettingAuthMode, GitHubAuthModePAT); err != nil {
 		t.Fatalf("set auth mode: %v", err)
@@ -2225,7 +2225,7 @@ func TestPublishBranchUsesGitHubAPIWithoutGitPush(t *testing.T) {
 
 func TestPublishBranchFiltersDeletionMissingFromTruncatedRemoteBaseTree(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	settingsRepo := repository.NewSettingsRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 	ctx := context.Background()
 	if err := settingsRepo.Set(ctx, GitHubSettingAuthMode, GitHubAuthModePAT); err != nil {
 		t.Fatalf("set auth mode: %v", err)
@@ -2349,7 +2349,7 @@ func TestFilterNoOpGitHubTreeDeletionsRejectsTypeConflict(t *testing.T) {
 
 func TestPublishBranchPublishesCleanCommittedLocalBranchChanges(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	settingsRepo := repository.NewSettingsRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 	ctx := context.Background()
 	if err := settingsRepo.Set(ctx, GitHubSettingAuthMode, GitHubAuthModePAT); err != nil {
 		t.Fatalf("set auth mode: %v", err)
@@ -2469,7 +2469,7 @@ func TestPublishBranchPublishesCleanCommittedLocalBranchChanges(t *testing.T) {
 
 func TestPublishBranchParentsBaseWhenRemoteTaskBranchIsBehind(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	settingsRepo := repository.NewSettingsRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 	ctx := context.Background()
 	if err := settingsRepo.Set(ctx, GitHubSettingAuthMode, GitHubAuthModePAT); err != nil {
 		t.Fatalf("set auth mode: %v", err)
@@ -2559,7 +2559,7 @@ func TestPublishBranchParentsBaseWhenRemoteTaskBranchIsBehind(t *testing.T) {
 
 func TestPublishBranchNoOpsWhenDesiredTreeMatchesRemoteTaskBranch(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	settingsRepo := repository.NewSettingsRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 	ctx := context.Background()
 	if err := settingsRepo.Set(ctx, GitHubSettingAuthMode, GitHubAuthModePAT); err != nil {
 		t.Fatalf("set auth mode: %v", err)
@@ -2616,7 +2616,7 @@ func TestPublishBranchNoOpsWhenDesiredTreeMatchesRemoteTaskBranch(t *testing.T) 
 
 func TestPublishBranchRestoresRemoteTaskBranchToBaseWhenNoChanges(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	settingsRepo := repository.NewSettingsRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 	ctx := context.Background()
 	if err := settingsRepo.Set(ctx, GitHubSettingAuthMode, GitHubAuthModePAT); err != nil {
 		t.Fatalf("set auth mode: %v", err)
@@ -2693,7 +2693,7 @@ func TestPublishBranchRestoresRemoteTaskBranchToBaseWhenNoChanges(t *testing.T) 
 
 func TestPublishBranchCreatesRemoteBranchAtBaseWhenNoChangesAndBranchAbsent(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	settingsRepo := repository.NewSettingsRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 	ctx := context.Background()
 	if err := settingsRepo.Set(ctx, GitHubSettingAuthMode, GitHubAuthModePAT); err != nil {
 		t.Fatalf("set auth mode: %v", err)
@@ -2761,7 +2761,7 @@ func TestPublishBranchCreatesRemoteBranchAtBaseWhenNoChangesAndBranchAbsent(t *t
 
 func TestPublishBranchNoChangesConcurrentBranchCreationSucceeds(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	settingsRepo := repository.NewSettingsRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 	ctx := context.Background()
 	if err := settingsRepo.Set(ctx, GitHubSettingAuthMode, GitHubAuthModePAT); err != nil {
 		t.Fatalf("set auth mode: %v", err)
@@ -2834,7 +2834,7 @@ func TestPublishBranchNoChangesConcurrentBranchCreationSucceeds(t *testing.T) {
 
 func TestPublishBranchNoChangesConcurrentBranchCreationBeforePatchSucceeds(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	settingsRepo := repository.NewSettingsRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 	ctx := context.Background()
 	if err := settingsRepo.Set(ctx, GitHubSettingAuthMode, GitHubAuthModePAT); err != nil {
 		t.Fatalf("set auth mode: %v", err)
@@ -2917,7 +2917,7 @@ func TestPublishBranchNoChangesConcurrentBranchCreationBeforePatchSucceeds(t *te
 
 func TestPublishBranchRetriesWithLatestRemoteBranchParentOnNonFastForward(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	settingsRepo := repository.NewSettingsRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 	ctx := context.Background()
 	if err := settingsRepo.Set(ctx, GitHubSettingAuthMode, GitHubAuthModePAT); err != nil {
 		t.Fatalf("set auth mode: %v", err)
@@ -3026,7 +3026,7 @@ func TestPublishBranchRetriesWithLatestRemoteBranchParentOnNonFastForward(t *tes
 
 func TestPublishBranchRetriesAfterConcurrentBranchCreation(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	settingsRepo := repository.NewSettingsRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 	ctx := context.Background()
 	if err := settingsRepo.Set(ctx, GitHubSettingAuthMode, GitHubAuthModePAT); err != nil {
 		t.Fatalf("set auth mode: %v", err)
@@ -3123,7 +3123,7 @@ func TestPublishBranchRetriesAfterConcurrentBranchCreation(t *testing.T) {
 
 func TestPublishBranchConcurrentBranchCreationNoOpsWhenDesiredTreeMatches(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	settingsRepo := repository.NewSettingsRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 	ctx := context.Background()
 	if err := settingsRepo.Set(ctx, GitHubSettingAuthMode, GitHubAuthModePAT); err != nil {
 		t.Fatalf("set auth mode: %v", err)
@@ -3203,7 +3203,7 @@ func TestPublishBranchConcurrentBranchCreationNoOpsWhenDesiredTreeMatches(t *tes
 
 func TestPublishBranchRaceNoOpsWhenLatestRemoteTreeMatchesDesiredTree(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	settingsRepo := repository.NewSettingsRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 	ctx := context.Background()
 	if err := settingsRepo.Set(ctx, GitHubSettingAuthMode, GitHubAuthModePAT); err != nil {
 		t.Fatalf("set auth mode: %v", err)
@@ -3532,7 +3532,7 @@ func runGitHubBranchFixtureGit(tb testing.TB, dir string, args ...string) string
 
 func TestGitHubIssueAPIMethods(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	settingsRepo := repository.NewSettingsRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 	ctx := context.Background()
 	if err := settingsRepo.Set(ctx, GitHubSettingAuthMode, GitHubAuthModePAT); err != nil {
 		t.Fatalf("set auth mode: %v", err)
@@ -3623,7 +3623,7 @@ func TestGitHubIssueAPIMethods(t *testing.T) {
 
 func TestGitHubServiceEnsureIssueLabelsReusesAndCreatesLabels(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	settingsRepo := repository.NewSettingsRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 	ctx := context.Background()
 	if err := settingsRepo.Set(ctx, GitHubSettingAuthMode, GitHubAuthModePAT); err != nil {
 		t.Fatalf("set auth mode: %v", err)
@@ -3665,7 +3665,7 @@ func TestGitHubServiceEnsureIssueLabelsReusesAndCreatesLabels(t *testing.T) {
 
 func TestGitHubServiceEnsureIssueLabelsFailsOnProvisioningDenial(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	settingsRepo := repository.NewSettingsRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 	ctx := context.Background()
 	if err := settingsRepo.Set(ctx, GitHubSettingAuthMode, GitHubAuthModePAT); err != nil {
 		t.Fatalf("set auth mode: %v", err)
@@ -3695,7 +3695,7 @@ func TestGitHubServiceEnsureIssueLabelsFailsOnProvisioningDenial(t *testing.T) {
 func TestReplaceBranchHeadUsesAtomicForceWithLease(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)
-	settingsRepo := repository.NewSettingsRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 	if err := settingsRepo.Set(ctx, GitHubSettingPAT, "ghp_test"); err != nil {
 		t.Fatalf("set PAT: %v", err)
 	}
@@ -3807,7 +3807,7 @@ func checkoutTestBranch(t *testing.T, repoDir, branch string) {
 func TestReplaceBranchHeadDoesNotBypassFailedLease(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)
-	settingsRepo := repository.NewSettingsRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 	if err := settingsRepo.Set(ctx, GitHubSettingPAT, "ghp_test"); err != nil {
 		t.Fatalf("set PAT: %v", err)
 	}

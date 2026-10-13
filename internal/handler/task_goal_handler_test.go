@@ -13,7 +13,7 @@ import (
 	"github.com/openvibely/openvibely/internal/chatcontrol"
 	"github.com/openvibely/openvibely/internal/lifecycle"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/service"
 )
 
@@ -566,8 +566,8 @@ func TestGoalAgentSendToTaskQueuesCurrentRunWhenOlderAfterCompleteRowsAreLate(t 
 	if _, err := tc.handler.taskGoalSvc.SetGoal(ctx, task.ID, "Audit-only completion required", service.GoalOptions{}); err != nil {
 		t.Fatalf("set goal: %v", err)
 	}
-	tc.handler.lifecycleRepo = repository.NewLifecycleRepo(tc.db)
-	lifecycleAgentRepo := repository.NewAgentRepo(tc.db)
+	tc.handler.lifecycleRepo = sqlite.NewLifecycleRepo(tc.db)
+	lifecycleAgentRepo := sqlite.NewAgentRepo(tc.db)
 	goalAgent := &models.Agent{Name: "Goal Agent", Model: "inherit", Enabled: true, SystemKind: models.AgentSystemKindGoal}
 	if err := lifecycleAgentRepo.Create(ctx, goalAgent); err != nil {
 		t.Fatalf("create goal agent: %v", err)
@@ -575,7 +575,7 @@ func TestGoalAgentSendToTaskQueuesCurrentRunWhenOlderAfterCompleteRowsAreLate(t 
 	createLifecycleExec := func(runID string, when models.LifecycleWhen, skill string) {
 		t.Helper()
 		exec := &models.LifecycleExecution{TaskID: task.ID, TaskRunID: runID, AgentID: goalAgent.ID, When: when, SkillKey: skill, OutputContract: models.OutputContractActivitySummary, Status: models.LifecycleExecCompleted}
-		if err := tc.handler.lifecycleRepo.(*repository.LifecycleRepo).CreateExecution(ctx, exec); err != nil {
+		if err := tc.handler.lifecycleRepo.(*sqlite.LifecycleRepo).CreateExecution(ctx, exec); err != nil {
 			t.Fatalf("create lifecycle execution %s/%s: %v", runID, skill, err)
 		}
 	}
@@ -746,18 +746,18 @@ func TestLifecycleSendToTaskRejectsStaleTaskRunContinuation(t *testing.T) {
 	if err := tc.taskRepo.Create(ctx, task); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
-	tc.handler.lifecycleRepo = repository.NewLifecycleRepo(tc.db)
-	lifecycleAgentRepo := repository.NewAgentRepo(tc.db)
+	tc.handler.lifecycleRepo = sqlite.NewLifecycleRepo(tc.db)
+	lifecycleAgentRepo := sqlite.NewAgentRepo(tc.db)
 	lifecycleAgent := &models.Agent{Name: "Lifecycle Agent", Model: "inherit", Enabled: true}
 	if err := lifecycleAgentRepo.Create(ctx, lifecycleAgent); err != nil {
 		t.Fatalf("create lifecycle agent: %v", err)
 	}
 	older := &models.LifecycleExecution{TaskID: task.ID, TaskRunID: "run-old", AgentID: lifecycleAgent.ID, When: models.LifecycleAfterComplete, SkillKey: "manage_dynamic_loop", OutputContract: models.OutputContractActivitySummary, Status: models.LifecycleExecRunning}
-	if err := tc.handler.lifecycleRepo.(*repository.LifecycleRepo).CreateExecution(ctx, older); err != nil {
+	if err := tc.handler.lifecycleRepo.(*sqlite.LifecycleRepo).CreateExecution(ctx, older); err != nil {
 		t.Fatalf("create older lifecycle execution: %v", err)
 	}
 	newer := &models.LifecycleExecution{TaskID: task.ID, TaskRunID: "run-new", AgentID: lifecycleAgent.ID, When: models.LifecycleRouteTask, SkillKey: "route_task", OutputContract: models.OutputContractSelectedSkills, Status: models.LifecycleExecRunning}
-	if err := tc.handler.lifecycleRepo.(*repository.LifecycleRepo).CreateExecution(ctx, newer); err != nil {
+	if err := tc.handler.lifecycleRepo.(*sqlite.LifecycleRepo).CreateExecution(ctx, newer); err != nil {
 		t.Fatalf("create newer lifecycle execution: %v", err)
 	}
 
@@ -793,22 +793,22 @@ func TestLifecycleSendToTaskAllowsCrossTaskWhenDestinationHasNewerRuns(t *testin
 	if err := tc.taskRepo.Create(ctx, destinationTask); err != nil {
 		t.Fatalf("create destination task: %v", err)
 	}
-	tc.handler.lifecycleRepo = repository.NewLifecycleRepo(tc.db)
-	lifecycleAgentRepo := repository.NewAgentRepo(tc.db)
+	tc.handler.lifecycleRepo = sqlite.NewLifecycleRepo(tc.db)
+	lifecycleAgentRepo := sqlite.NewAgentRepo(tc.db)
 	lifecycleAgent := &models.Agent{Name: "Cross Task Lifecycle Agent", Model: "inherit", Enabled: true}
 	if err := lifecycleAgentRepo.Create(ctx, lifecycleAgent); err != nil {
 		t.Fatalf("create lifecycle agent: %v", err)
 	}
 	sourceRun := &models.LifecycleExecution{TaskID: sourceTask.ID, TaskRunID: "source-run-current", AgentID: lifecycleAgent.ID, When: models.LifecycleAfterComplete, SkillKey: "coordinate", OutputContract: models.OutputContractActivitySummary, Status: models.LifecycleExecRunning}
-	if err := tc.handler.lifecycleRepo.(*repository.LifecycleRepo).CreateExecution(ctx, sourceRun); err != nil {
+	if err := tc.handler.lifecycleRepo.(*sqlite.LifecycleRepo).CreateExecution(ctx, sourceRun); err != nil {
 		t.Fatalf("create source lifecycle execution: %v", err)
 	}
 	destinationOlder := &models.LifecycleExecution{TaskID: destinationTask.ID, TaskRunID: "destination-run-old", AgentID: lifecycleAgent.ID, When: models.LifecycleAfterComplete, SkillKey: "observe", OutputContract: models.OutputContractActivitySummary, Status: models.LifecycleExecCompleted}
-	if err := tc.handler.lifecycleRepo.(*repository.LifecycleRepo).CreateExecution(ctx, destinationOlder); err != nil {
+	if err := tc.handler.lifecycleRepo.(*sqlite.LifecycleRepo).CreateExecution(ctx, destinationOlder); err != nil {
 		t.Fatalf("create destination older lifecycle execution: %v", err)
 	}
 	destinationNewer := &models.LifecycleExecution{TaskID: destinationTask.ID, TaskRunID: "destination-run-new", AgentID: lifecycleAgent.ID, When: models.LifecycleRouteTask, SkillKey: "route", OutputContract: models.OutputContractSelectedSkills, Status: models.LifecycleExecRunning}
-	if err := tc.handler.lifecycleRepo.(*repository.LifecycleRepo).CreateExecution(ctx, destinationNewer); err != nil {
+	if err := tc.handler.lifecycleRepo.(*sqlite.LifecycleRepo).CreateExecution(ctx, destinationNewer); err != nil {
 		t.Fatalf("create destination newer lifecycle execution: %v", err)
 	}
 
@@ -870,7 +870,7 @@ func TestGoalAgentSendToTaskRejectsNonActiveGoalStates(t *testing.T) {
 					t.Fatalf("clear goal: %v", err)
 				}
 			case models.TaskGoalStatusFailed:
-				if _, err := repository.NewTaskGoalRepo(tc.db).UpdateStatus(ctx, task.ID, goal.GoalID, models.TaskGoalStatusFailed, "failed", false); err != nil {
+				if _, err := sqlite.NewTaskGoalRepo(tc.db).UpdateStatus(ctx, task.ID, goal.GoalID, models.TaskGoalStatusFailed, "failed", false); err != nil {
 					t.Fatalf("mark failed: %v", err)
 				}
 			}
@@ -1155,7 +1155,7 @@ func TestGoalSaveUnchangedPreservesState(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			repo := repository.NewTaskGoalRepo(tc.db)
+			repo := sqlite.NewTaskGoalRepo(tc.db)
 			before, err := repo.UpdateStatus(ctx, task.ID, goal.GoalID, status, "reason", false)
 			if err != nil {
 				t.Fatal(err)

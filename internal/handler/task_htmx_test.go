@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 )
 
 func TestHandler_GetTask_HTMXHistoryCacheMissReturnsFullTitledDocument(t *testing.T) {
@@ -459,7 +459,7 @@ func TestHandler_TaskCard_SelectionHandling(t *testing.T) {
 func TestHandler_ListTasks_HTMXUpdate_ShowsAgentDefinitionBadge(t *testing.T) {
 	h, e, _, db := setupTestHandlerWithDB(t)
 	ctx := context.Background()
-	agentRepo := repository.NewAgentRepo(db)
+	agentRepo := sqlite.NewAgentRepo(db)
 	h.SetAgentRepo(agentRepo)
 
 	agentDef := &models.Agent{

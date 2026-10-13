@@ -14,7 +14,7 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/testutil"
 )
 
@@ -141,10 +141,10 @@ func TestParseNumstatLinesNULDelimitedPathsAndRenameCopyRecords(t *testing.T) {
 func TestCollectProducedCommitStatRoundTripsGitSpecialPaths(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	execRepo := repository.NewExecutionRepo(db)
-	statRepo := repository.NewTaskCommitStatRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	execRepo := sqlite.NewExecutionRepo(db)
+	statRepo := sqlite.NewTaskCommitStatRepo(db)
 
 	repoDir := createTestGitRepo(t)
 	project := &models.Project{Name: "Special Commit Paths", RepoPath: repoDir}
@@ -205,7 +205,7 @@ func TestCollectProducedCommitStatRoundTripsGitSpecialPaths(t *testing.T) {
 	if stats[0].FilesChanged != len(wantPaths) {
 		t.Fatalf("files changed = %d, want %d", stats[0].FilesChanged, len(wantPaths))
 	}
-	upcomingSvc := NewUpcomingService(repository.NewUpcomingRepo(db))
+	upcomingSvc := NewUpcomingService(sqlite.NewUpcomingRepo(db))
 	upcomingSvc.SetTaskCommitStatRepo(statRepo)
 	projectChanges, _, err := upcomingSvc.buildProjectChangesFromTaskCommitStats(ctx, project.ID, time.Now().UTC().Add(-time.Minute))
 	if err != nil {
@@ -280,10 +280,10 @@ func TestCollectProducedCommitStatPreservesSpecialRenameAndCopyRecords(t *testin
 func TestCommitTaskWorktreeChangesRecordsProducedCommitStat(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	execRepo := repository.NewExecutionRepo(db)
-	statRepo := repository.NewTaskCommitStatRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	execRepo := sqlite.NewExecutionRepo(db)
+	statRepo := sqlite.NewTaskCommitStatRepo(db)
 
 	repoDir := createTestGitRepo(t)
 	project := &models.Project{Name: "Commit Stats", RepoPath: repoDir}
@@ -334,10 +334,10 @@ func TestCommitTaskWorktreeChangesRecordsProducedCommitStat(t *testing.T) {
 func TestHandlePostExecutionRecordsProducedCommitStat(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	execRepo := repository.NewExecutionRepo(db)
-	statRepo := repository.NewTaskCommitStatRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	execRepo := sqlite.NewExecutionRepo(db)
+	statRepo := sqlite.NewTaskCommitStatRepo(db)
 
 	repoDir := createTestGitRepo(t)
 	project := &models.Project{Name: "Post Execution Stats", RepoPath: repoDir}
@@ -366,7 +366,7 @@ func TestHandlePostExecutionRecordsProducedCommitStat(t *testing.T) {
 		t.Fatalf("write file: %v", err)
 	}
 	llmSvc := &LLMService{execRepo: execRepo, taskCommitStatRepo: statRepo}
-	worktreeSvc := NewWorktreeService(taskRepo, projectRepo, repository.NewSettingsRepo(db))
+	worktreeSvc := NewWorktreeService(taskRepo, projectRepo, sqlite.NewSettingsRepo(db))
 	worktreeSvc.SetLLMService(llmSvc)
 	worktreeSvc.HandlePostExecution(ctx, task, execModel, repoDir)
 
@@ -388,9 +388,9 @@ func TestHandlePostExecutionRecordsProducedCommitStat(t *testing.T) {
 func TestMergeBranchRecordsAppCreatedMergeCommitStat(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	statRepo := repository.NewTaskCommitStatRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	statRepo := sqlite.NewTaskCommitStatRepo(db)
 
 	repoDir := createTestGitRepo(t)
 	project := &models.Project{Name: "Merge Commit Stats", RepoPath: repoDir}
@@ -411,7 +411,7 @@ func TestMergeBranchRecordsAppCreatedMergeCommitStat(t *testing.T) {
 		t.Fatalf("create task: %v", err)
 	}
 	llmSvc := &LLMService{taskCommitStatRepo: statRepo}
-	worktreeSvc := NewWorktreeService(taskRepo, projectRepo, repository.NewSettingsRepo(db))
+	worktreeSvc := NewWorktreeService(taskRepo, projectRepo, sqlite.NewSettingsRepo(db))
 	worktreeSvc.SetLLMService(llmSvc)
 
 	result, err := worktreeSvc.MergeBranch(ctx, task, repoDir, "merge")
@@ -436,9 +436,9 @@ func TestMergeBranchRecordsAppCreatedMergeCommitStat(t *testing.T) {
 func TestTaskCommitStatUpsertDoesNotDoubleCountDuplicateCommit(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	statRepo := repository.NewTaskCommitStatRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	statRepo := sqlite.NewTaskCommitStatRepo(db)
 
 	project := &models.Project{Name: "Duplicate Stats"}
 	if err := projectRepo.Create(ctx, project); err != nil {
@@ -462,7 +462,7 @@ func TestTaskCommitStatUpsertDoesNotDoubleCountDuplicateCommit(t *testing.T) {
 		t.Fatalf("second upsert: %v", err)
 	}
 
-	svc := NewUpcomingService(repository.NewUpcomingRepo(db))
+	svc := NewUpcomingService(sqlite.NewUpcomingRepo(db))
 	svc.SetTaskCommitStatRepo(statRepo)
 	history, err := svc.GenerateHistory(ctx, project.ID, models.TimeRangeWeek)
 	if err != nil {
@@ -476,9 +476,9 @@ func TestTaskCommitStatUpsertDoesNotDoubleCountDuplicateCommit(t *testing.T) {
 func TestTaskCommitStatsCascadeOnTaskDelete(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	statRepo := repository.NewTaskCommitStatRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	statRepo := sqlite.NewTaskCommitStatRepo(db)
 
 	project := &models.Project{Name: "Task Cascade"}
 	if err := projectRepo.Create(ctx, project); err != nil {
@@ -498,9 +498,9 @@ func TestTaskCommitStatsCascadeOnTaskDelete(t *testing.T) {
 func TestTaskCommitStatsCascadeOnProjectDelete(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	statRepo := repository.NewTaskCommitStatRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	statRepo := sqlite.NewTaskCommitStatRepo(db)
 
 	project := &models.Project{Name: "Project Cascade"}
 	if err := projectRepo.Create(ctx, project); err != nil {
@@ -517,7 +517,7 @@ func TestTaskCommitStatsCascadeOnProjectDelete(t *testing.T) {
 	assertTaskCommitStatCount(t, db, 0)
 }
 
-func insertTaskCommitStat(t *testing.T, ctx context.Context, statRepo *repository.TaskCommitStatRepo, projectID, taskID string) {
+func insertTaskCommitStat(t *testing.T, ctx context.Context, statRepo *sqlite.TaskCommitStatRepo, projectID, taskID string) {
 	t.Helper()
 	stat := &models.TaskCommitStat{
 		ProjectID: projectID, TaskID: taskID, CommitSHA: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", ShortSHA: "bbbbbbb",

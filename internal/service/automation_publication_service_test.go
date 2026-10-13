@@ -10,7 +10,7 @@ import (
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/stretchr/testify/require"
 )
@@ -18,9 +18,9 @@ import (
 type automationSaveHarness struct {
 	db             *sql.DB
 	project        models.Project
-	automationRepo *repository.AutomationRepo
-	taskRepo       *repository.TaskRepo
-	scheduleRepo   *repository.ScheduleRepo
+	automationRepo *sqlite.AutomationRepo
+	taskRepo       *sqlite.TaskRepo
+	scheduleRepo   *sqlite.ScheduleRepo
 	drafts         *AutomationDraftService
 	compiler       *AutomationCompiler
 	lifecycle      *AutomationLifecycleService
@@ -38,14 +38,14 @@ func (s *recordingAutomationTaskService) SubmitSavedAutomationTask(task models.T
 func newAutomationSaveHarness(t *testing.T, name string) automationSaveHarness {
 	t.Helper()
 	db := testutil.NewTestDB(t)
-	project := automationTestProject(t, repository.NewProjectRepo(db), name)
-	automationRepo := repository.NewAutomationRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	scheduleRepo := repository.NewScheduleRepo(db)
+	project := automationTestProject(t, sqlite.NewProjectRepo(db), name)
+	automationRepo := sqlite.NewAutomationRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	scheduleRepo := sqlite.NewScheduleRepo(db)
 	registry := NewAutomationAdapterRegistry()
 	drafts := NewAutomationDraftService(automationRepo, registry)
 	planner := NewAutomationSaveValidator(registry, drafts)
-	taskSvc := NewTaskService(taskRepo, repository.NewAttachmentRepo(db), nil)
+	taskSvc := NewTaskService(taskRepo, sqlite.NewAttachmentRepo(db), nil)
 	compiler := NewAutomationCompiler(automationRepo, taskSvc, taskRepo, scheduleRepo, planner)
 	return automationSaveHarness{db: db, project: project, automationRepo: automationRepo, taskRepo: taskRepo,
 		scheduleRepo: scheduleRepo, drafts: drafts, compiler: compiler,
@@ -58,7 +58,7 @@ func TestAutomationSaveDefaultModelSentinelUsesRuntimeDefaultLookup(t *testing.T
 
 	candidate := customTaskOnlyCandidate("Default model execution", "Run with the runtime default model.", models.CategoryActive)
 	candidate.Nodes[0].Config["model_config_id"] = automationDefaultModelConfigID
-	recorder := &recordingAutomationTaskService{TaskService: NewTaskService(h.taskRepo, repository.NewAttachmentRepo(h.db), nil)}
+	recorder := &recordingAutomationTaskService{TaskService: NewTaskService(h.taskRepo, sqlite.NewAttachmentRepo(h.db), nil)}
 	compiler := NewAutomationCompiler(h.automationRepo, recorder, h.taskRepo, h.scheduleRepo, NewAutomationSaveValidator(NewAutomationAdapterRegistry(), h.drafts))
 
 	saved, err := compiler.Save(ctx, AutomationSaveRequest{ProjectID: h.project.ID, Source: "manual", CreatedVia: "web", Candidate: candidate})
@@ -79,16 +79,16 @@ func TestAutomationSaveDefaultModelSentinelUsesRuntimeDefaultLookup(t *testing.T
 func TestAutomationSaveStoresSelectedModelForTaskExecution(t *testing.T) {
 	h := newAutomationSaveHarness(t, "Selected model execution")
 	ctx := context.Background()
-	llmConfigRepo := repository.NewLLMConfigRepo(h.db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(h.db)
 	selectedModel := models.LLMConfig{Name: "Selected automation model", Provider: models.ProviderTest, Model: "selected-model"}
 	require.NoError(t, llmConfigRepo.Create(ctx, &selectedModel))
-	capabilities := NewAutomationCapabilitySnapshotBuilder(repository.NewProjectRepo(h.db), nil, nil, nil)
+	capabilities := NewAutomationCapabilitySnapshotBuilder(sqlite.NewProjectRepo(h.db), nil, nil, nil)
 	capabilities.SetLLMConfigRepository(llmConfigRepo)
 	h.drafts.SetCapabilitySnapshotBuilder(capabilities)
 
 	candidate := customTaskOnlyCandidate("Selected model execution", "Run with the selected model.", models.CategoryActive)
 	candidate.Nodes[0].Config["model_config_id"] = selectedModel.ID
-	recorder := &recordingAutomationTaskService{TaskService: NewTaskService(h.taskRepo, repository.NewAttachmentRepo(h.db), nil)}
+	recorder := &recordingAutomationTaskService{TaskService: NewTaskService(h.taskRepo, sqlite.NewAttachmentRepo(h.db), nil)}
 	compiler := NewAutomationCompiler(h.automationRepo, recorder, h.taskRepo, h.scheduleRepo, NewAutomationSaveValidator(NewAutomationAdapterRegistry(), h.drafts))
 
 	saved, err := compiler.Save(ctx, AutomationSaveRequest{ProjectID: h.project.ID, Source: "manual", CreatedVia: "web", Candidate: candidate})
@@ -206,13 +206,13 @@ func TestMaintainedSDLCSaveRemovesOptionalVisionProducerAndOwnedResources(t *tes
 			h := newAutomationSaveHarness(t, "Optional producer "+adapterKey)
 			ctx := context.Background()
 			if adapterKey == AutomationAdapterGitHubSDLC {
-				projectRepo := repository.NewProjectRepo(h.db)
+				projectRepo := sqlite.NewProjectRepo(h.db)
 				h.project.RepoURL = "https://github.com/example/automation.git"
 				require.NoError(t, projectRepo.Update(ctx, &h.project))
-				settingsRepo := repository.NewSettingsRepo(h.db)
+				settingsRepo := sqlite.NewSettingsRepo(h.db)
 				require.NoError(t, settingsRepo.Set(ctx, GitHubSettingAuthMode, GitHubAuthModePAT))
 				require.NoError(t, settingsRepo.Set(ctx, GitHubSettingPAT, "test-token"))
-				githubAuthRepo := repository.NewGitHubAuthRepo(h.db)
+				githubAuthRepo := sqlite.NewGitHubAuthRepo(h.db)
 				require.NoError(t, githubAuthRepo.UpsertAuthorizedActor(ctx, &models.GitHubAuthorizedActor{GitHubLogin: "automation-bot"}))
 				h.compiler.validator.SetCapabilityDependencies(projectRepo, settingsRepo, githubAuthRepo)
 			}
@@ -448,7 +448,7 @@ func TestAutomationSaveRejectsSemanticRepairsAndPreservesSelectedTaskCategories(
 func TestAutomationQueuedRootClaimsReplacementDispatchStateAtomically(t *testing.T) {
 	h := newAutomationSaveHarness(t, "Atomic queued root dispatch")
 	ctx := context.Background()
-	agentRepo := repository.NewAgentRepo(h.db)
+	agentRepo := sqlite.NewAgentRepo(h.db)
 	staleAgent := models.Agent{Name: "Stale dispatch agent", Key: "stale_dispatch_agent", Scope: models.AgentScopeProject,
 		ProjectID: h.project.ID, Enabled: true, SelectableAsPrimary: true, SystemPrompt: "stale agent must not execute"}
 	replacementAgent := models.Agent{Name: "Replacement dispatch agent", Key: "replacement_dispatch_agent", Scope: models.AgentScopeProject,
@@ -456,7 +456,7 @@ func TestAutomationQueuedRootClaimsReplacementDispatchStateAtomically(t *testing
 	require.NoError(t, agentRepo.Create(ctx, &staleAgent))
 	require.NoError(t, agentRepo.Create(ctx, &replacementAgent))
 	h.drafts.SetCapabilitySnapshotBuilder(NewAutomationCapabilitySnapshotBuilder(
-		repository.NewProjectRepo(h.db), agentRepo, h.taskRepo, repository.NewSettingsRepo(h.db)))
+		sqlite.NewProjectRepo(h.db), agentRepo, h.taskRepo, sqlite.NewSettingsRepo(h.db)))
 	h.compiler.SetAgentRepository(agentRepo)
 	h.compiler.validator.SetAgentRepository(agentRepo)
 	initial := models.AutomationDraftCandidate{SchemaVersion: 1, Name: "Queued root", Description: "Initial graph",
@@ -469,12 +469,12 @@ func TestAutomationQueuedRootClaimsReplacementDispatchStateAtomically(t *testing
 	queuedTask, err := h.taskRepo.GetByID(ctx, taskID)
 	require.NoError(t, err)
 
-	llmConfigRepo := repository.NewLLMConfigRepo(h.db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(h.db)
 	agent := &models.LLMConfig{Name: "Atomic dispatch agent", Provider: models.ProviderTest, Model: "test-model",
 		MaxTokens: 4096, AuthMethod: models.AuthMethodAPIKey, IsDefault: true}
 	require.NoError(t, llmConfigRepo.Create(ctx, agent))
-	execRepo := repository.NewExecutionRepo(h.db)
-	llmSvc := NewLLMService(llmConfigRepo, execRepo, h.taskRepo, repository.NewProjectRepo(h.db), h.scheduleRepo, repository.NewAttachmentRepo(h.db))
+	execRepo := sqlite.NewExecutionRepo(h.db)
+	llmSvc := NewLLMService(llmConfigRepo, execRepo, h.taskRepo, sqlite.NewProjectRepo(h.db), h.scheduleRepo, sqlite.NewAttachmentRepo(h.db))
 	llmSvc.SetAgentRepo(agentRepo)
 	caller := testutil.NewMockLLMCaller()
 	called := make(chan models.AutomationContext, 1)
@@ -483,7 +483,7 @@ func TestAutomationQueuedRootClaimsReplacementDispatchStateAtomically(t *testing
 		called <- automationContext
 	}
 	llmSvc.SetLLMCaller(caller)
-	worker := NewWorkerService(llmSvc, 1, repository.NewProjectRepo(h.db))
+	worker := NewWorkerService(llmSvc, 1, sqlite.NewProjectRepo(h.db))
 	worker.SetTaskRepo(h.taskRepo)
 	worker.SetLLMConfigRepo(llmConfigRepo)
 	worker.SetAutomationRepo(h.automationRepo)
@@ -1057,7 +1057,7 @@ func TestAutomationPauseArchiveAndResumeActivityOnlyIssueTasks(t *testing.T) {
 			require.Equal(t, models.CategoryBacklog, stored.Category)
 			require.Equal(t, models.StatusPending, stored.Status)
 
-			recorder := &recordingAutomationTaskService{TaskService: NewTaskService(h.taskRepo, repository.NewAttachmentRepo(h.db), nil)}
+			recorder := &recordingAutomationTaskService{TaskService: NewTaskService(h.taskRepo, sqlite.NewAttachmentRepo(h.db), nil)}
 			lifecycle := NewAutomationLifecycleService(h.automationRepo, h.scheduleRepo, recorder)
 			if state == models.AutomationPaused {
 				require.NoError(t, lifecycle.Resume(ctx, h.project.ID, saved.Definition.Automation.ID))
@@ -1089,7 +1089,7 @@ func TestAutomationPauseAndResumeGenericActivityOnlyCreatedTask(t *testing.T) {
 	stored, err := h.taskRepo.GetByID(ctx, child.ID)
 	require.NoError(t, err)
 	require.Equal(t, models.CategoryBacklog, stored.Category)
-	recorder := &recordingAutomationTaskService{TaskService: NewTaskService(h.taskRepo, repository.NewAttachmentRepo(h.db), nil)}
+	recorder := &recordingAutomationTaskService{TaskService: NewTaskService(h.taskRepo, sqlite.NewAttachmentRepo(h.db), nil)}
 	require.NoError(t, NewAutomationLifecycleService(h.automationRepo, h.scheduleRepo, recorder).Resume(ctx, h.project.ID, saved.Definition.Automation.ID))
 	require.Len(t, recorder.submitted, 1)
 	require.Equal(t, child.ID, recorder.submitted[0].ID)
@@ -1224,7 +1224,7 @@ func TestAutomationSaveSubmitsExistingRootsThatBecomePendingActive(t *testing.T)
 		t.Run(test.name, func(t *testing.T) {
 			h := newAutomationSaveHarness(t, "Submit existing root "+test.name)
 			ctx := context.Background()
-			recorder := &recordingAutomationTaskService{TaskService: NewTaskService(h.taskRepo, repository.NewAttachmentRepo(h.db), nil)}
+			recorder := &recordingAutomationTaskService{TaskService: NewTaskService(h.taskRepo, sqlite.NewAttachmentRepo(h.db), nil)}
 			h.compiler.taskSvc = recorder
 			candidate := customTaskOnlyCandidate("Runnable root", "Run this root.", models.CategoryActive)
 			first, err := h.compiler.Save(ctx, AutomationSaveRequest{ProjectID: h.project.ID, Source: "manual", CreatedVia: "web", Candidate: candidate})
@@ -1277,13 +1277,13 @@ func TestAutomationCompiledCustomGitHubInboxScopeIsLimitedToItsAssignmentBranch(
 func TestAutomationCustomScheduledGitHubInboxCreatesRuntimeIssueTasksWithoutRelay(t *testing.T) {
 	h := newAutomationSaveHarness(t, "Scheduled GitHub inbox")
 	ctx := context.Background()
-	projectRepo := repository.NewProjectRepo(h.db)
+	projectRepo := sqlite.NewProjectRepo(h.db)
 	h.project.RepoURL = "https://github.com/example/automation.git"
 	require.NoError(t, projectRepo.Update(ctx, &h.project))
-	settingsRepo := repository.NewSettingsRepo(h.db)
+	settingsRepo := sqlite.NewSettingsRepo(h.db)
 	require.NoError(t, settingsRepo.Set(ctx, GitHubSettingAuthMode, GitHubAuthModePAT))
 	require.NoError(t, settingsRepo.Set(ctx, GitHubSettingPAT, "test-token"))
-	githubAuthRepo := repository.NewGitHubAuthRepo(h.db)
+	githubAuthRepo := sqlite.NewGitHubAuthRepo(h.db)
 	require.NoError(t, githubAuthRepo.UpsertAuthorizedActor(ctx, &models.GitHubAuthorizedActor{GitHubLogin: "automation-bot"}))
 	h.compiler.validator.SetCapabilityDependencies(projectRepo, settingsRepo, githubAuthRepo)
 
@@ -1328,13 +1328,13 @@ func TestAutomationCustomScheduledGitHubInboxCreatesRuntimeIssueTasksWithoutRela
 func TestAutomationResumeAdmitsDeferredScheduleGitHubInboxHandoff(t *testing.T) {
 	h := newAutomationSaveHarness(t, "Deferred scheduled GitHub inbox")
 	ctx := context.Background()
-	projectRepo := repository.NewProjectRepo(h.db)
+	projectRepo := sqlite.NewProjectRepo(h.db)
 	h.project.RepoURL = "https://github.com/example/automation.git"
 	require.NoError(t, projectRepo.Update(ctx, &h.project))
-	settingsRepo := repository.NewSettingsRepo(h.db)
+	settingsRepo := sqlite.NewSettingsRepo(h.db)
 	require.NoError(t, settingsRepo.Set(ctx, GitHubSettingAuthMode, GitHubAuthModePAT))
 	require.NoError(t, settingsRepo.Set(ctx, GitHubSettingPAT, "test-token"))
-	githubAuthRepo := repository.NewGitHubAuthRepo(h.db)
+	githubAuthRepo := sqlite.NewGitHubAuthRepo(h.db)
 	require.NoError(t, githubAuthRepo.UpsertAuthorizedActor(ctx, &models.GitHubAuthorizedActor{GitHubLogin: "automation-bot"}))
 	h.compiler.validator.SetCapabilityDependencies(projectRepo, settingsRepo, githubAuthRepo)
 
@@ -1375,7 +1375,7 @@ func TestAutomationResumeAdmitsDeferredScheduleGitHubInboxHandoff(t *testing.T) 
 	require.NoError(t, h.lifecycle.Pause(ctx, h.project.ID, saved.Definition.Automation.ID))
 
 	execution := models.Execution{TaskID: parent.ID, Status: models.ExecRunning, PromptSent: parent.Prompt}
-	require.NoError(t, repository.NewExecutionRepo(h.db).Create(ctx, &execution))
+	require.NoError(t, sqlite.NewExecutionRepo(h.db).Create(ctx, &execution))
 	sourceNode := automationNodeByKey(t, saved.Definition, "schedule")
 	binding := models.AutomationBinding{AutomationID: saved.Definition.Automation.ID, VersionID: saved.Definition.Version.ID, NodeID: sourceNode.ID}
 	causalCtx := WithAutomationContext(ctx, models.AutomationContext{ProjectID: h.project.ID, Bindings: []models.AutomationBinding{binding}})
@@ -1384,7 +1384,7 @@ func TestAutomationResumeAdmitsDeferredScheduleGitHubInboxHandoff(t *testing.T) 
 	require.NoError(t, err)
 	require.Equal(t, string(models.CategoryActive), config.ChildCategory, "Schedule handoffs are effectively runnable even when the saved inbox category is Backlog")
 	llmSvc := &LLMService{taskRepo: h.taskRepo, automationRepo: h.automationRepo,
-		taskSvc: NewTaskService(h.taskRepo, repository.NewAttachmentRepo(h.db), nil)}
+		taskSvc: NewTaskService(h.taskRepo, sqlite.NewAttachmentRepo(h.db), nil)}
 	require.NoError(t, llmSvc.activateCompiledAutomationChild(causalCtx, *parent, "assigned issues discovered\n[STATUS: SUCCESS]", config))
 
 	deferred, err := h.taskRepo.GetByID(ctx, childID)
@@ -1397,7 +1397,7 @@ func TestAutomationResumeAdmitsDeferredScheduleGitHubInboxHandoff(t *testing.T) 
 		automationNodeByKey(t, saved.Definition, "followup").ID).Scan(&entered))
 	require.Equal(t, 1, entered)
 
-	recorder := &recordingAutomationTaskService{TaskService: NewTaskService(h.taskRepo, repository.NewAttachmentRepo(h.db), nil)}
+	recorder := &recordingAutomationTaskService{TaskService: NewTaskService(h.taskRepo, sqlite.NewAttachmentRepo(h.db), nil)}
 	resume := NewAutomationLifecycleService(h.automationRepo, h.scheduleRepo, recorder)
 	require.NoError(t, resume.Resume(ctx, h.project.ID, saved.Definition.Automation.ID))
 	require.Len(t, recorder.submitted, 1)
@@ -1420,14 +1420,14 @@ func TestAutomationPublishedCustomTaskActivationPreservesDownstreamHandoffPrompt
 		tasksBefore := countRows(t, h.db, `SELECT COUNT(*) FROM tasks WHERE project_id = ?`, h.project.ID)
 		require.NoError(t, h.taskRepo.UpdateStatus(ctx, parent.ID, models.StatusRunning))
 		execution := models.Execution{TaskID: parent.ID, Status: models.ExecRunning, PromptSent: parent.Prompt}
-		require.NoError(t, repository.NewExecutionRepo(h.db).Create(ctx, &execution))
+		require.NoError(t, sqlite.NewExecutionRepo(h.db).Create(ctx, &execution))
 		sourceNode := automationNodeByKey(t, saved.Definition, parentKey)
 		binding := models.AutomationBinding{AutomationID: saved.Definition.Automation.ID, VersionID: saved.Definition.Version.ID, NodeID: sourceNode.ID}
 		causalCtx := WithAutomationContext(ctx, models.AutomationContext{ProjectID: h.project.ID, Bindings: []models.AutomationBinding{binding}})
 		causalCtx = withAutomationExecution(causalCtx, parent.ID, execution.ID)
-		worker := NewWorkerService(nil, 1, repository.NewProjectRepo(h.db))
+		worker := NewWorkerService(nil, 1, sqlite.NewProjectRepo(h.db))
 		worker.SetTaskRepo(h.taskRepo)
-		taskSvc := NewTaskService(h.taskRepo, repository.NewAttachmentRepo(h.db), worker)
+		taskSvc := NewTaskService(h.taskRepo, sqlite.NewAttachmentRepo(h.db), worker)
 		llmSvc := &LLMService{taskRepo: h.taskRepo, automationRepo: h.automationRepo, taskSvc: taskSvc}
 		handled, err := llmSvc.activatePublishedCustomAutomationChild(causalCtx, *parent, "upstream result\n[STATUS: SUCCESS]")
 		require.NoError(t, err)
@@ -1448,13 +1448,13 @@ func TestAutomationPublishedCustomTaskActivationPreservesDownstreamHandoffPrompt
 	t.Run("pull request handoff", func(t *testing.T) {
 		h := newAutomationSaveHarness(t, "Custom PR activation")
 		ctx := context.Background()
-		projectRepo := repository.NewProjectRepo(h.db)
+		projectRepo := sqlite.NewProjectRepo(h.db)
 		h.project.RepoURL = "https://github.com/example/automation.git"
 		require.NoError(t, projectRepo.Update(ctx, &h.project))
-		settingsRepo := repository.NewSettingsRepo(h.db)
+		settingsRepo := sqlite.NewSettingsRepo(h.db)
 		require.NoError(t, settingsRepo.Set(ctx, GitHubSettingAuthMode, GitHubAuthModePAT))
 		require.NoError(t, settingsRepo.Set(ctx, GitHubSettingPAT, "test-token"))
-		githubAuthRepo := repository.NewGitHubAuthRepo(h.db)
+		githubAuthRepo := sqlite.NewGitHubAuthRepo(h.db)
 		require.NoError(t, githubAuthRepo.UpsertAuthorizedActor(ctx, &models.GitHubAuthorizedActor{GitHubLogin: "automation-bot"}))
 		h.compiler.validator.SetCapabilityDependencies(projectRepo, settingsRepo, githubAuthRepo)
 		candidate := models.AutomationDraftCandidate{SchemaVersion: 1, Name: "Custom PR activation", AutomationType: "custom", AdapterKey: AutomationAdapterCustom,
@@ -1560,15 +1560,15 @@ func TestAutomationCustomTaskFanoutContinuesAfterBusyBranch(t *testing.T) {
 			require.NoError(t, h.taskRepo.UpdateStatus(ctx, busy.ID, test.busyStatus))
 
 			execution := models.Execution{TaskID: parent.ID, Status: models.ExecRunning, PromptSent: parent.Prompt}
-			require.NoError(t, repository.NewExecutionRepo(h.db).Create(ctx, &execution))
+			require.NoError(t, sqlite.NewExecutionRepo(h.db).Create(ctx, &execution))
 			sourceNode := automationNodeByKey(t, saved.Definition, "parent")
 			binding := models.AutomationBinding{AutomationID: saved.Definition.Automation.ID, VersionID: saved.Definition.Version.ID, NodeID: sourceNode.ID}
 			causalCtx := WithAutomationContext(ctx, models.AutomationContext{ProjectID: h.project.ID, Bindings: []models.AutomationBinding{binding}})
 			causalCtx = withAutomationExecution(causalCtx, parent.ID, execution.ID)
 
-			worker := NewWorkerService(nil, 1, repository.NewProjectRepo(h.db))
+			worker := NewWorkerService(nil, 1, sqlite.NewProjectRepo(h.db))
 			worker.SetTaskRepo(h.taskRepo)
-			taskSvc := NewTaskService(h.taskRepo, repository.NewAttachmentRepo(h.db), worker)
+			taskSvc := NewTaskService(h.taskRepo, sqlite.NewAttachmentRepo(h.db), worker)
 			llmSvc := &LLMService{taskRepo: h.taskRepo, automationRepo: h.automationRepo, taskSvc: taskSvc}
 			handled, err := llmSvc.activatePublishedCustomAutomationChild(causalCtx, *parent, "shared parent result\n[STATUS: SUCCESS]")
 			require.True(t, handled)
@@ -1637,7 +1637,7 @@ func TestAutomationInactiveLifecycleDefersCompiledChildHandoff(t *testing.T) {
 			require.NoError(t, err)
 			require.NoError(t, h.taskRepo.UpdateStatus(ctx, parent.ID, models.StatusRunning))
 			execution := models.Execution{TaskID: parent.ID, Status: models.ExecRunning, PromptSent: parent.Prompt}
-			require.NoError(t, repository.NewExecutionRepo(h.db).Create(ctx, &execution))
+			require.NoError(t, sqlite.NewExecutionRepo(h.db).Create(ctx, &execution))
 			sourceNode := automationNodeByKey(t, saved.Definition, "followup")
 			binding := models.AutomationBinding{AutomationID: saved.Definition.Automation.ID, VersionID: saved.Definition.Version.ID,
 				InvocationID: invocation.ID, NodeID: sourceNode.ID}
@@ -1651,7 +1651,7 @@ func TestAutomationInactiveLifecycleDefersCompiledChildHandoff(t *testing.T) {
 			}
 			config, err := parent.ParseChainConfig()
 			require.NoError(t, err)
-			taskSvc := NewTaskService(h.taskRepo, repository.NewAttachmentRepo(h.db), nil)
+			taskSvc := NewTaskService(h.taskRepo, sqlite.NewAttachmentRepo(h.db), nil)
 			llmSvc := &LLMService{taskRepo: h.taskRepo, automationRepo: h.automationRepo, taskSvc: taskSvc}
 			require.NoError(t, llmSvc.activateCompiledAutomationChild(causalCtx, *parent, "parent result\n[STATUS: SUCCESS]", config))
 
@@ -1729,7 +1729,7 @@ func TestAutomationPauseOrArchiveAfterChildActivationPreventsSubmission(t *testi
 			require.NoError(t, err)
 			require.NoError(t, h.taskRepo.UpdateStatus(ctx, parent.ID, models.StatusRunning))
 			execution := models.Execution{TaskID: parent.ID, Status: models.ExecRunning, PromptSent: parent.Prompt}
-			require.NoError(t, repository.NewExecutionRepo(h.db).Create(ctx, &execution))
+			require.NoError(t, sqlite.NewExecutionRepo(h.db).Create(ctx, &execution))
 			sourceNode := automationNodeByKey(t, saved.Definition, "followup")
 			binding := models.AutomationBinding{AutomationID: saved.Definition.Automation.ID, VersionID: saved.Definition.Version.ID, InvocationID: invocation.ID, NodeID: sourceNode.ID}
 			causalCtx := WithAutomationContext(ctx, models.AutomationContext{ProjectID: h.project.ID, Bindings: []models.AutomationBinding{binding}})
@@ -1737,9 +1737,9 @@ func TestAutomationPauseOrArchiveAfterChildActivationPreventsSubmission(t *testi
 			config, err := parent.ParseChainConfig()
 			require.NoError(t, err)
 
-			worker := NewWorkerService(nil, 1, repository.NewProjectRepo(h.db))
+			worker := NewWorkerService(nil, 1, sqlite.NewProjectRepo(h.db))
 			worker.SetTaskRepo(h.taskRepo)
-			taskSvc := NewTaskService(h.taskRepo, repository.NewAttachmentRepo(h.db), worker)
+			taskSvc := NewTaskService(h.taskRepo, sqlite.NewAttachmentRepo(h.db), worker)
 			llmSvc := &LLMService{taskRepo: h.taskRepo, automationRepo: h.automationRepo, taskSvc: taskSvc}
 			activated := make(chan struct{})
 			release := make(chan struct{})

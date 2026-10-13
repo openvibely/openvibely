@@ -14,7 +14,7 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/events"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/testutil"
 )
 
@@ -36,8 +36,8 @@ func BenchmarkProjectTabNavigationUnderLoad(b *testing.B) {
 			reader, writer, _ := testutil.NewFileBackedSplitStatementCountingTestDB(b)
 			broadcaster := events.NewBroadcaster()
 			env := newTestHandlerEnv(b, reader, withTestBroadcaster(broadcaster))
-			taskWriter := repository.NewTaskRepo(writer, nil)
-			execWriter := repository.NewExecutionRepo(writer)
+			taskWriter := sqlite.NewTaskRepo(writer, nil)
+			execWriter := sqlite.NewExecutionRepo(writer)
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			for p := 0; p < 3; p++ {

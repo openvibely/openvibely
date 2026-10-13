@@ -5,16 +5,16 @@ import (
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/stretchr/testify/require"
 )
 
-func newTaskReferenceTestData(t *testing.T) (*repository.TaskRepo, *models.Project, *models.Task, *models.Task) {
+func newTaskReferenceTestData(t *testing.T) (*sqlite.TaskRepo, *models.Project, *models.Task, *models.Task) {
 	t.Helper()
 	db := testutil.NewTestDB(t)
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
 	project := &models.Project{Name: "Task reference project"}
 	foreignProject := &models.Project{Name: "Foreign task reference project"}
 	require.NoError(t, projectRepo.Create(context.Background(), project))
@@ -75,7 +75,7 @@ func TestResolveTaskReferencePreservesLookupOrderScopeAndErrors(t *testing.T) {
 	require.EqualError(t, err, "no task_id or title provided")
 
 	closedDB := testutil.NewTestDB(t)
-	closedTaskRepo := repository.NewTaskRepo(closedDB, nil)
+	closedTaskRepo := sqlite.NewTaskRepo(closedDB, nil)
 	require.NoError(t, closedDB.Close())
 	_, err = ResolveTaskReference(ctx, closedTaskRepo, project.ID, task.ID, "", TaskReferenceResolutionOptions{})
 	require.ErrorContains(t, err, "error looking up task "+task.ID+":")
@@ -122,7 +122,7 @@ func TestResolveTaskReferenceLiteralTitle(t *testing.T) {
 		t.Run(tt.query, func(t *testing.T) {
 			db := testutil.NewTestDB(t)
 			ctx := context.Background()
-			taskRepo := repository.NewTaskRepo(db, nil)
+			taskRepo := sqlite.NewTaskRepo(db, nil)
 			tasks := []models.Task{
 				{ProjectID: "default", Title: tt.literal, Prompt: "test", Category: models.CategoryBacklog, Status: models.StatusPending},
 				{ProjectID: "default", Title: tt.nonliteral, Prompt: "test", Category: models.CategoryBacklog, Status: models.StatusPending},

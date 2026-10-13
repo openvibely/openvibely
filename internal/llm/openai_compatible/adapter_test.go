@@ -16,7 +16,7 @@ import (
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	llmprompt "github.com/openvibely/openvibely/internal/llm/prompt"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/testutil"
 	openaiclient "github.com/openvibely/openvibely/pkg/openai_client"
 	"github.com/stretchr/testify/require"
@@ -702,7 +702,7 @@ func TestSupportsReasoningContentReplayForKimiOnly(t *testing.T) {
 func TestEnsureFreshOAuthKeepsOpaqueTokenWithUnknownExpiry(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)
-	configRepo := repository.NewLLMConfigRepo(db)
+	configRepo := sqlite.NewLLMConfigRepo(db)
 	agent := &models.LLMConfig{
 		Name:             "Opaque custom OAuth",
 		Provider:         models.ProviderOpenAICompatible,
@@ -724,7 +724,7 @@ func TestEnsureFreshOAuthKeepsOpaqueTokenWithUnknownExpiry(t *testing.T) {
 func TestOAuthRequestRejectsConfigurationChangedAfterClientCreation(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)
-	configRepo := repository.NewLLMConfigRepo(db)
+	configRepo := sqlite.NewLLMConfigRepo(db)
 	agent := &models.LLMConfig{
 		Name:             "Revision guarded OAuth",
 		Provider:         models.ProviderOpenAICompatible,
@@ -772,7 +772,7 @@ func TestOAuthInferenceUsesOnlyConfiguredAccessTokenHeader(t *testing.T) {
 
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)
-	configRepo := repository.NewLLMConfigRepo(db)
+	configRepo := sqlite.NewLLMConfigRepo(db)
 	agent := &models.LLMConfig{
 		Name:             "Custom token header",
 		Provider:         models.ProviderOpenAICompatible,
@@ -804,9 +804,9 @@ func TestOAuthInferenceUsesOnlyConfiguredAccessTokenHeader(t *testing.T) {
 func TestPrepareClientHistoryLoadsReasoningOnlyForKimi(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	agentRepo := repository.NewLLMConfigRepo(db)
-	execRepo := repository.NewExecutionRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	agentRepo := sqlite.NewLLMConfigRepo(db)
+	execRepo := sqlite.NewExecutionRepo(db)
 
 	task := &models.Task{
 		ProjectID: "default",
@@ -848,9 +848,9 @@ func TestPrepareClientHistoryLoadsReasoningOnlyForKimi(t *testing.T) {
 func TestPrepareClientHistoryPreservesSteeringMessageBoundaries(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	agentRepo := repository.NewLLMConfigRepo(db)
-	execRepo := repository.NewExecutionRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	agentRepo := sqlite.NewLLMConfigRepo(db)
+	execRepo := sqlite.NewExecutionRepo(db)
 
 	task := &models.Task{
 		ProjectID: "default",
@@ -909,9 +909,9 @@ func TestPrepareClientHistoryPreservesSteeringMessageBoundaries(t *testing.T) {
 func TestPrepareClientHistoryPreservesToolTranscript(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	agentRepo := repository.NewLLMConfigRepo(db)
-	execRepo := repository.NewExecutionRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	agentRepo := sqlite.NewLLMConfigRepo(db)
+	execRepo := sqlite.NewExecutionRepo(db)
 
 	task := &models.Task{
 		ProjectID: "default",
@@ -961,9 +961,9 @@ func TestPrepareClientHistoryPreservesToolTranscript(t *testing.T) {
 func TestPersistReasoningContentClearsStaleReasoning(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	agentRepo := repository.NewLLMConfigRepo(db)
-	execRepo := repository.NewExecutionRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	agentRepo := sqlite.NewLLMConfigRepo(db)
+	execRepo := sqlite.NewExecutionRepo(db)
 
 	task := &models.Task{
 		ProjectID: "default",

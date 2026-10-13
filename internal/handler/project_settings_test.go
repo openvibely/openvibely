@@ -15,7 +15,7 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/internal/testutil"
 )
@@ -32,14 +32,14 @@ func TestProjectSettings_EndToEnd(t *testing.T) {
 	broadcaster := events.NewBroadcaster()
 
 	// Setup repositories
-	projectRepo := repository.NewProjectRepo(db)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	taskRepo := repository.NewTaskRepo(db, broadcaster)
-	execRepo := repository.NewExecutionRepo(db)
-	scheduleRepo := repository.NewScheduleRepo(db)
-	workerRepo := repository.NewWorkerRepo(db)
-	attachmentRepo := repository.NewAttachmentRepo(db)
-	chatAttachmentRepo := repository.NewChatAttachmentRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, broadcaster)
+	execRepo := sqlite.NewExecutionRepo(db)
+	scheduleRepo := sqlite.NewScheduleRepo(db)
+	workerRepo := sqlite.NewWorkerRepo(db)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
+	chatAttachmentRepo := sqlite.NewChatAttachmentRepo(db)
 
 	// Setup services (need to setup in correct order due to dependencies)
 	projectSvc := service.NewProjectService(projectRepo)
@@ -416,9 +416,9 @@ func TestNewProjectDialog(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
 
-	projectRepo := repository.NewProjectRepo(db)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	workerRepo := repository.NewWorkerRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	workerRepo := sqlite.NewWorkerRepo(db)
 	projectSvc := service.NewProjectService(projectRepo)
 	if err := workerRepo.SetMaxWorkers(ctx, 25); err != nil {
 		t.Fatalf("set global worker limit: %v", err)
@@ -555,8 +555,8 @@ func TestProjectDialogs_GitHubOnlyModeHidesLocalSourceOption(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
 
-	projectRepo := repository.NewProjectRepo(db)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
 	projectSvc := service.NewProjectService(projectRepo)
 
 	e := echo.New()
@@ -689,8 +689,8 @@ func TestUpdateProject_SwitchLocalToGitHub_LocalDisabled(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
 
-	projectRepo := repository.NewProjectRepo(db)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
 	projectSvc := service.NewProjectService(projectRepo)
 
 	e := echo.New()
@@ -808,8 +808,8 @@ func TestProjectCreate_WithDefaultSettings(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
 
-	projectRepo := repository.NewProjectRepo(db)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
 	projectSvc := service.NewProjectService(projectRepo)
 
 	e := echo.New()
@@ -1048,8 +1048,8 @@ func TestProjectCreate_WithSettings(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
 
-	projectRepo := repository.NewProjectRepo(db)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
 	projectSvc := service.NewProjectService(projectRepo)
 
 	e := echo.New()
@@ -1147,14 +1147,14 @@ func TestDeleteProject(t *testing.T) {
 
 	broadcaster := events.NewBroadcaster()
 
-	projectRepo := repository.NewProjectRepo(db)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	taskRepo := repository.NewTaskRepo(db, broadcaster)
-	execRepo := repository.NewExecutionRepo(db)
-	scheduleRepo := repository.NewScheduleRepo(db)
-	workerRepo := repository.NewWorkerRepo(db)
-	attachmentRepo := repository.NewAttachmentRepo(db)
-	chatAttachmentRepo := repository.NewChatAttachmentRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, broadcaster)
+	execRepo := sqlite.NewExecutionRepo(db)
+	scheduleRepo := sqlite.NewScheduleRepo(db)
+	workerRepo := sqlite.NewWorkerRepo(db)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
+	chatAttachmentRepo := sqlite.NewChatAttachmentRepo(db)
 
 	projectSvc := service.NewProjectService(projectRepo)
 	llmSvc := service.NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, scheduleRepo, attachmentRepo)
@@ -1649,9 +1649,9 @@ func TestGlobalPersonality(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
 
-	projectRepo := repository.NewProjectRepo(db)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	settingsRepo := repository.NewSettingsRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 
 	projectSvc := service.NewProjectService(projectRepo)
 
@@ -1921,8 +1921,8 @@ func TestEditProjectDialogShowsRepositoryPathHealth(t *testing.T) {
 
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	projectRepo := repository.NewProjectRepo(db)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
 	projectSvc := service.NewProjectService(projectRepo)
 	h := New(projectSvc, nil, nil, nil, nil, nil, nil, nil, llmConfigRepo, nil, nil, nil, nil, nil, nil, projectRepo, nil, events.NewBroadcaster(), nil, RuntimeStores{})
 	e := echo.New()

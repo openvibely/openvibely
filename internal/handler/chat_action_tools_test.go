@@ -15,7 +15,7 @@ import (
 	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/openvibely/openvibely/internal/update"
@@ -248,7 +248,7 @@ func TestUpdateProjectSettingsCapabilityAndInheritedDefaultModel(t *testing.T) {
 func TestSaveCustomPersonalityRuntimeToolCreatesListsAndSelects(t *testing.T) {
 	h, _, _, db := setupTestHandlerWithDB(t)
 	ctx := context.Background()
-	customRepo := repository.NewCustomPersonalityRepo(db)
+	customRepo := sqlite.NewCustomPersonalityRepo(db)
 	h.SetCustomPersonalityRepo(customRepo)
 	project := createProject(t, h, "Chat Personality Project")
 
@@ -397,11 +397,11 @@ func TestListChannelsPlanModeReturnsPromptSafeStatus(t *testing.T) {
 	ctx := context.Background()
 	project := createProject(t, h, "Channel Status Project")
 
-	webhookRepo := repository.NewWebhookRepo(db)
+	webhookRepo := sqlite.NewWebhookRepo(db)
 	h.SetWebhookRepo(webhookRepo)
-	channelTargetRepo := repository.NewChannelTargetRepo(db)
+	channelTargetRepo := sqlite.NewChannelTargetRepo(db)
 	h.SetChannelTargetRepo(channelTargetRepo)
-	telegramAuthRepo := repository.NewTelegramAuthRepo(db)
+	telegramAuthRepo := sqlite.NewTelegramAuthRepo(db)
 	h.SetTelegramAuthRepo(telegramAuthRepo)
 
 	h.SetGitHubService(&fakeGitHubService{statusFn: func(ctx context.Context) (service.GitHubConnectionStatus, error) {
@@ -538,7 +538,7 @@ func TestListChannelsEmptyOutboundTargetSummaryKeepsEmptyByPlatform(t *testing.T
 	h, _, _, db := setupTestHandlerWithDB(t)
 	ctx := context.Background()
 	project := createProject(t, h, "Empty Channel Status Targets")
-	h.SetChannelTargetRepo(repository.NewChannelTargetRepo(db))
+	h.SetChannelTargetRepo(sqlite.NewChannelTargetRepo(db))
 
 	rt := h.buildChatActionToolRuntimeFromDefs(
 		streamingResponseParams{ProjectID: project.ID, ChatMode: models.ChatModePlan},
@@ -1974,7 +1974,7 @@ func TestViewUsageAnalyticsRuntimeTool_SanitizesAccountLimitSummaries(t *testing
 	used := 91.0
 	window := 300
 	reset := time.Now().UTC().Add(time.Hour).Format(time.RFC3339)
-	require.NoError(t, h.usageRepo.(*repository.UsageRepo).CreateAccountUsageSnapshot(ctx, &models.AccountUsageSnapshot{
+	require.NoError(t, h.usageRepo.(*sqlite.UsageRepo).CreateAccountUsageSnapshot(ctx, &models.AccountUsageSnapshot{
 		Provider:             "openai",
 		AccountID:            cfg.OAuthAccountID,
 		AgentConfigID:        cfg.ID,
@@ -2116,7 +2116,7 @@ func TestCreateSwarmTaskRuntimeTool_PersistsGoalTriageReviewAndAssignments(t *te
 		c.Name = "Explicit Swarm Model"
 		c.IsDefault = false
 	})
-	agentRepo := repository.NewAgentRepo(db)
+	agentRepo := sqlite.NewAgentRepo(db)
 	h.SetAgentRepo(agentRepo)
 	agentDef := &models.Agent{Name: "Swarm Reviewer", Key: "swarm-reviewer", Enabled: true, SelectableAsPrimary: true}
 	require.NoError(t, agentRepo.Create(ctx, agentDef))
@@ -2160,7 +2160,7 @@ func TestCreateSwarmTaskRuntimeTool_PersistsGoalTriageReviewAndAssignments(t *te
 	require.NoError(t, err)
 	require.False(t, cfg.ReviewerEnabled)
 	require.False(t, cfg.MergerEnabled)
-	goal, err := repository.NewTaskGoalRepo(db).GetByTaskID(ctx, parent.ID)
+	goal, err := sqlite.NewTaskGoalRepo(db).GetByTaskID(ctx, parent.ID)
 	require.NoError(t, err)
 	require.NotNil(t, goal)
 	require.Equal(t, "All tests pass", goal.Objective)
@@ -2307,7 +2307,7 @@ func TestCreateTaskRuntimeTool_FailsLoudlyOnPersistenceFailure(t *testing.T) {
 	})
 
 	t.Run("system Memory Curator assignment", func(t *testing.T) {
-		agentRepo := repository.NewAgentRepo(db)
+		agentRepo := sqlite.NewAgentRepo(db)
 		h.SetAgentRepo(agentRepo)
 		memoryCurator := &models.Agent{
 			Name:       "System: Memory Curator",
@@ -2425,7 +2425,7 @@ func TestGitHubOpenPullRequestRuntimeToolCreatesAndPersistsPR(t *testing.T) {
 	if err := h.taskRepo.Create(ctx, task); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
-	h.SetTaskPullRequestRepo(repository.NewTaskPullRequestRepo(db))
+	h.SetTaskPullRequestRepo(sqlite.NewTaskPullRequestRepo(db))
 	var createdReq service.GitHubCreatePullRequestRequest
 	h.SetGitHubService(&fakeGitHubService{
 		resolveRepoFn: func(_ context.Context, repoURL, repoPath string) (*service.GitHubRepoRef, error) {
@@ -2487,7 +2487,7 @@ func TestGitHubReplacePullRequestBranchRuntimeToolUsesLeaseGuard(t *testing.T) {
 	if err := h.taskRepo.Create(ctx, task); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
-	h.SetTaskPullRequestRepo(repository.NewTaskPullRequestRepo(db))
+	h.SetTaskPullRequestRepo(sqlite.NewTaskPullRequestRepo(db))
 	if err := h.taskPullRequestRepo.Upsert(ctx, &models.TaskPullRequest{TaskID: task.ID, PRNumber: 4, PRURL: "https://github.com/openvibely/openvibely/pull/4", PRState: "open"}); err != nil {
 		t.Fatalf("seed PR record: %v", err)
 	}
@@ -2542,7 +2542,7 @@ func TestGitHubReplacePullRequestBranchRuntimeToolRejectsClosedLivePR(t *testing
 	if err := h.taskRepo.Create(ctx, task); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
-	h.SetTaskPullRequestRepo(repository.NewTaskPullRequestRepo(db))
+	h.SetTaskPullRequestRepo(sqlite.NewTaskPullRequestRepo(db))
 	previousHead := strings.Repeat("a", 40)
 	if err := h.taskPullRequestRepo.Upsert(ctx, &models.TaskPullRequest{TaskID: task.ID, PRNumber: 4, PRURL: "https://github.com/openvibely/openvibely/pull/4", PRState: "open", PublishedHeadSHA: previousHead, NeedsRepublish: true}); err != nil {
 		t.Fatalf("seed PR record: %v", err)
@@ -2598,7 +2598,7 @@ func TestGitHubPRRuntimeToolsShareTargetRejections(t *testing.T) {
 	if err := h.taskRepo.Create(ctx, otherTask); err != nil {
 		t.Fatalf("create cross-project task: %v", err)
 	}
-	h.SetTaskPullRequestRepo(repository.NewTaskPullRequestRepo(db))
+	h.SetTaskPullRequestRepo(sqlite.NewTaskPullRequestRepo(db))
 
 	params := streamingResponseParams{ProjectID: project.ID}
 	handlers := h.chatActionHandlers(params, nil, models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)
@@ -2716,7 +2716,7 @@ func TestGitHubAuthAndInboxRuntimeToolsUseConfiguredRepository(t *testing.T) {
 	if err := h.projectSvc.Create(ctx, project); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
-	authRepo := repository.NewGitHubAuthRepo(db)
+	authRepo := sqlite.NewGitHubAuthRepo(db)
 	h.SetGitHubAuthRepo(authRepo)
 	if err := authRepo.UpsertProjectInbox(ctx, &models.GitHubProjectInbox{ProjectID: project.ID, GitHubLogin: "Dev-Bot", Enabled: true}); err != nil {
 		t.Fatalf("configure github inbox: %v", err)
@@ -2979,7 +2979,7 @@ func TestWebChatCreateProjectRuntimeCreatesGitHubBackedProject(t *testing.T) {
 	require.True(t, resp.RepoPathPresent)
 	require.False(t, resp.Switched, "web/API Chat has no persisted project switch callback")
 
-	projectRepo := repository.NewProjectRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
 	created, err := projectRepo.GetByID(ctx, resp.ProjectID)
 	require.NoError(t, err)
 	require.NotNil(t, created)
@@ -3006,7 +3006,7 @@ func TestWebChatCreateProjectRuntimePlanModeBlocked(t *testing.T) {
 func TestCreateAgentRuntimeTool_WebAPIRollsBackFailedMaterialization(t *testing.T) {
 	h, _, _, db := setupTestHandlerWithDB(t)
 	ctx := context.Background()
-	agentRepo := repository.NewAgentRepo(db)
+	agentRepo := sqlite.NewAgentRepo(db)
 	h.SetAgentRepo(agentRepo)
 	h.SetAgentSkillRoot(t.TempDir())
 	project := createProject(t, h, "Runtime Agent Rollback Project")
@@ -3042,7 +3042,7 @@ func TestCreateAgentRuntimeTool_WebAPIRollsBackFailedMaterialization(t *testing.
 func TestCreateAgentRuntimeTool_WebAPIRollsBackPostWriteMaterializationFailure(t *testing.T) {
 	h, _, _, db := setupTestHandlerWithDB(t)
 	ctx := context.Background()
-	agentRepo := repository.NewAgentRepo(db)
+	agentRepo := sqlite.NewAgentRepo(db)
 	h.SetAgentRepo(agentRepo)
 	h.SetAgentSkillRoot(t.TempDir())
 	project := createProject(t, h, "Runtime Agent Post-Write Rollback Project")
@@ -3086,7 +3086,7 @@ func TestCreateAgentRuntimeTool_WebAPIRollsBackPostWriteMaterializationFailure(t
 func TestCreateAgentRuntimeTool_WebAPICreatesProjectScopedAgentAndMaterializes(t *testing.T) {
 	h, _, llmConfigRepo, db := setupTestHandlerWithDB(t)
 	ctx := context.Background()
-	agentRepo := repository.NewAgentRepo(db)
+	agentRepo := sqlite.NewAgentRepo(db)
 	h.SetAgentRepo(agentRepo)
 	h.SetAgentSkillRoot(t.TempDir())
 	project := createProject(t, h, "Runtime Agent Project")

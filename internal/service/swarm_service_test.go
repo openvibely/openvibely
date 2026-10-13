@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/stretchr/testify/require"
 )
@@ -48,7 +48,7 @@ func TestPlannerFollowupEffortUsesSentValueOnlyForMatchingRun(t *testing.T) {
 	require.Equal(t, "medium", agent.ReasoningEffort, "empty effort restores the model default")
 }
 
-func requireFullSwarmTestTask(t testing.TB, repo *repository.TaskRepo, id string) *models.Task {
+func requireFullSwarmTestTask(t testing.TB, repo *sqlite.TaskRepo, id string) *models.Task {
 	t.Helper()
 	task, err := repo.GetByID(context.Background(), id)
 	require.NoError(t, err)
@@ -59,7 +59,7 @@ func requireFullSwarmTestTask(t testing.TB, repo *repository.TaskRepo, id string
 func TestCancelSwarmMarksRunningChildCancellationBeforeRuntimeCancel(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	repo := repository.NewTaskRepo(db, nil)
+	repo := sqlite.NewTaskRepo(db, nil)
 	workerSvc := newTestWorkerService(t)
 	taskSvc := NewTaskService(repo, nil, workerSvc)
 	svc := NewSwarmService(taskSvc, repo, nil, workerSvc)
@@ -86,7 +86,7 @@ func TestCancelSwarmMarksRunningChildCancellationBeforeRuntimeCancel(t *testing.
 func TestCancelSwarmObservedDoesNotCancelNewParentFollowupGeneration(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	repo := repository.NewTaskRepo(db, nil)
+	repo := sqlite.NewTaskRepo(db, nil)
 	workerSvc := newTestWorkerService(t)
 	taskSvc := NewTaskService(repo, nil, workerSvc)
 	svc := NewSwarmService(taskSvc, repo, nil, workerSvc)
@@ -120,8 +120,8 @@ func TestCancelSwarmObservedDoesNotCancelNewParentFollowupGeneration(t *testing.
 func TestCancelSwarmObservedDoesNotCancelNewReviewerAdmissionBeforeRouting(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	repo := repository.NewTaskRepo(db, nil)
-	execRepo := repository.NewExecutionRepo(db)
+	repo := sqlite.NewTaskRepo(db, nil)
+	execRepo := sqlite.NewExecutionRepo(db)
 	workerSvc := newTestWorkerService(t)
 	taskSvc := NewTaskService(repo, nil, workerSvc)
 	svc := NewSwarmService(taskSvc, repo, execRepo, workerSvc)
@@ -156,7 +156,7 @@ func TestCancelSwarmObservedDoesNotCancelNewReviewerAdmissionBeforeRouting(t *te
 func TestStartPlannerClearsCancellationRequestsForRestartedParentAndPlanner(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	repo := repository.NewTaskRepo(db, nil)
+	repo := sqlite.NewTaskRepo(db, nil)
 	workerSvc := newTestWorkerService(t)
 	taskSvc := NewTaskService(repo, nil, workerSvc)
 	svc := NewSwarmService(taskSvc, repo, nil, workerSvc)
@@ -202,7 +202,7 @@ func TestAttachSwarmChildrenPreservesPreviouslyAttachedChildren(t *testing.T) {
 
 func TestSwarmServiceCreateAndApplyPlannerOutput(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	repo := repository.NewTaskRepo(db, nil)
+	repo := sqlite.NewTaskRepo(db, nil)
 	taskSvc := NewTaskService(repo, nil, nil)
 	svc := NewSwarmService(taskSvc, repo, nil, nil)
 
@@ -253,7 +253,7 @@ func TestSwarmServiceCreateAndApplyPlannerOutput(t *testing.T) {
 func TestSwarmServiceApplyPlannerOutputDisambiguatesExistingWorkerTitle(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)
-	repo := repository.NewTaskRepo(db, nil)
+	repo := sqlite.NewTaskRepo(db, nil)
 	taskSvc := NewTaskService(repo, nil, nil)
 	svc := NewSwarmService(taskSvc, repo, nil, nil)
 
@@ -293,7 +293,7 @@ func TestSwarmServiceApplyPlannerOutputDisambiguatesExistingWorkerTitle(t *testi
 func TestSwarmServiceApplyPlannerOutputRecoversPartialCreationAndRepeatedTitleCollisions(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)
-	repo := repository.NewTaskRepo(db, nil)
+	repo := sqlite.NewTaskRepo(db, nil)
 	taskSvc := NewTaskService(repo, nil, nil)
 	svc := NewSwarmService(taskSvc, repo, nil, nil)
 
@@ -358,7 +358,7 @@ func TestSwarmServiceApplyPlannerOutputRecoversPartialCreationAndRepeatedTitleCo
 func TestSwarmServiceStartPlannerDisambiguatesRepeatedTitleCollisions(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)
-	repo := repository.NewTaskRepo(db, nil)
+	repo := sqlite.NewTaskRepo(db, nil)
 	taskSvc := NewTaskService(repo, nil, nil)
 	svc := NewSwarmService(taskSvc, repo, nil, nil)
 
@@ -387,7 +387,7 @@ func TestSwarmServiceStartPlannerDisambiguatesRepeatedTitleCollisions(t *testing
 
 func TestSwarmServiceScheduledStartMarksExistingPlannerBoundary(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	repo := repository.NewTaskRepo(db, nil)
+	repo := sqlite.NewTaskRepo(db, nil)
 	taskSvc := NewTaskService(repo, nil, nil)
 	workerSvc := newTestWorkerService(t)
 	svc := NewSwarmService(taskSvc, repo, nil, nil)
@@ -409,7 +409,7 @@ func TestSwarmServiceScheduledStartMarksExistingPlannerBoundary(t *testing.T) {
 	}
 	svc.workerSvc = workerSvc
 
-	schedules := repository.NewScheduleRepo(db)
+	schedules := sqlite.NewScheduleRepo(db)
 	now := time.Now().UTC().Truncate(time.Second)
 	schedule := &models.Schedule{TaskID: parent.ID, RunAt: now, RepeatType: models.RepeatOnce, RepeatInterval: 1, Enabled: true, ClearContextOnStart: true}
 	require.NoError(t, schedules.Create(context.Background(), schedule))
@@ -435,9 +435,9 @@ func TestSwarmServiceScheduledStartMarksExistingPlannerBoundary(t *testing.T) {
 func TestSwarmServicePlannerCallbackPersistsApplicationError(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)
-	repo := repository.NewTaskRepo(db, nil)
+	repo := sqlite.NewTaskRepo(db, nil)
 	taskSvc := NewTaskService(repo, nil, nil)
-	svc := NewSwarmService(taskSvc, repo, repository.NewExecutionRepo(db), nil)
+	svc := NewSwarmService(taskSvc, repo, sqlite.NewExecutionRepo(db), nil)
 
 	parent, err := svc.CreateSwarmTask(ctx, CreateSwarmTaskRequest{ProjectID: "default", Title: "Planner callback error", Prompt: "Build export", MaxWorkers: 1})
 	if err != nil {
@@ -474,8 +474,8 @@ func TestSwarmServicePlannerCallbackPersistsApplicationError(t *testing.T) {
 func TestSwarmServiceFollowupPlannerApplicationErrorPreservesRetryRouting(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)
-	repo := repository.NewTaskRepo(db, nil)
-	execRepo := repository.NewExecutionRepo(db)
+	repo := sqlite.NewTaskRepo(db, nil)
+	execRepo := sqlite.NewExecutionRepo(db)
 	taskSvc := NewTaskService(repo, nil, nil)
 	svc := NewSwarmService(taskSvc, repo, execRepo, nil)
 
@@ -576,7 +576,7 @@ func TestSwarmServiceFollowupPlannerApplicationErrorPreservesRetryRouting(t *tes
 func TestSwarmServiceHandleParentFollowupPreservesPlannerChainConfig(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)
-	repo := repository.NewTaskRepo(db, nil)
+	repo := sqlite.NewTaskRepo(db, nil)
 	taskSvc := NewTaskService(repo, nil, nil)
 	svc := NewSwarmService(taskSvc, repo, nil, nil)
 
@@ -607,7 +607,7 @@ func TestSwarmServiceHandleParentFollowupPreservesPlannerChainConfig(t *testing.
 func TestSwarmServiceFollowupPlannerRerunDisambiguatesOccupiedWorkerTitle(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)
-	repo := repository.NewTaskRepo(db, nil)
+	repo := sqlite.NewTaskRepo(db, nil)
 	taskSvc := NewTaskService(repo, nil, nil)
 	svc := NewSwarmService(taskSvc, repo, nil, nil)
 
@@ -685,8 +685,8 @@ func TestSwarmServiceFollowupPlannerRerunDisambiguatesOccupiedWorkerTitle(t *tes
 func TestSwarmServiceFollowupPlannerRetryReconcilesPartiallyCreatedWorkers(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)
-	repo := repository.NewTaskRepo(db, nil)
-	execRepo := repository.NewExecutionRepo(db)
+	repo := sqlite.NewTaskRepo(db, nil)
+	execRepo := sqlite.NewExecutionRepo(db)
 	taskSvc := NewTaskService(repo, nil, nil)
 	svc := NewSwarmService(taskSvc, repo, execRepo, nil)
 
@@ -777,9 +777,9 @@ func countSwarmWorkers(children []models.Task) int {
 func TestSwarmServiceCreateAssignsProjectDefaultModelToChildren(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	projectRepo := repository.NewProjectRepo(db)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	projectRepo := sqlite.NewProjectRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
 	taskSvc := NewTaskService(taskRepo, nil, nil)
 	svc := NewSwarmService(taskSvc, taskRepo, nil, nil)
 	svc.SetModelSelectionRepos(llmConfigRepo, projectRepo)
@@ -840,8 +840,8 @@ func TestSwarmServiceCreateAssignsProjectDefaultModelToChildren(t *testing.T) {
 func TestSwarmServiceResolveAssignedAgentIDFallbacks(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)
-	projectRepo := repository.NewProjectRepo(db)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
 	svc := NewSwarmService(nil, nil, nil, nil)
 	svc.SetModelSelectionRepos(llmConfigRepo, projectRepo)
 
@@ -877,8 +877,8 @@ func TestSwarmServiceResolveAssignedAgentIDNoModelPreservesRequestedState(t *tes
 	db := testutil.NewTestDB(t)
 	_, err := db.ExecContext(ctx, `DELETE FROM agent_configs WHERE 1 = 1`)
 	require.NoError(t, err)
-	projectRepo := repository.NewProjectRepo(db)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
 	svc := NewSwarmService(nil, nil, nil, nil)
 	svc.SetModelSelectionRepos(llmConfigRepo, projectRepo)
 	project := &models.Project{Name: "No Model Project"}
@@ -894,8 +894,8 @@ func TestSwarmServiceResolveAssignedAgentIDNoModelPreservesRequestedState(t *tes
 func TestSwarmServiceAssignedAgentIDResolutionUsesCompactProjection(t *testing.T) {
 	ctx := context.Background()
 	db, counter := testutil.NewStatementCountingTestDB(t)
-	projectRepo := repository.NewProjectRepo(db)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
 	svc := NewSwarmService(nil, nil, nil, nil)
 	svc.SetModelSelectionRepos(llmConfigRepo, projectRepo)
 	projectID, projectDefaultID := createWideSwarmModelResolutionFixture(t, ctx, projectRepo, llmConfigRepo)
@@ -921,8 +921,8 @@ func TestSwarmServiceAssignedAgentIDResolutionUsesCompactProjection(t *testing.T
 func BenchmarkSwarmAssignedAgentIDResolution(b *testing.B) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(b)
-	projectRepo := repository.NewProjectRepo(db)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
 	svc := NewSwarmService(nil, nil, nil, nil)
 	svc.SetModelSelectionRepos(llmConfigRepo, projectRepo)
 	projectID, projectDefaultID := createWideSwarmModelResolutionFixture(b, ctx, projectRepo, llmConfigRepo)
@@ -956,7 +956,7 @@ func setStaleProjectDefaultModelForTest(ctx context.Context, db interface {
 	return err
 }
 
-func createWideSwarmModelResolutionFixture(t testing.TB, ctx context.Context, projectRepo *repository.ProjectRepo, llmConfigRepo *repository.LLMConfigRepo) (string, string) {
+func createWideSwarmModelResolutionFixture(t testing.TB, ctx context.Context, projectRepo *sqlite.ProjectRepo, llmConfigRepo *sqlite.LLMConfigRepo) (string, string) {
 	t.Helper()
 	wide := strings.Repeat("wide-payload-", 400)
 	var projectDefaultID string
@@ -998,7 +998,7 @@ func createWideSwarmModelResolutionFixture(t testing.TB, ctx context.Context, pr
 
 func TestSwarmServiceApplyPlannerOutputAllowsOverlappingWorktreeScopes(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	repo := repository.NewTaskRepo(db, nil)
+	repo := sqlite.NewTaskRepo(db, nil)
 	taskSvc := NewTaskService(repo, nil, nil)
 	svc := NewSwarmService(taskSvc, repo, nil, nil)
 
@@ -1039,7 +1039,7 @@ func TestSwarmServiceApplyPlannerOutputAllowsOverlappingWorktreeScopes(t *testin
 
 func TestSwarmServiceCreateSwarmTaskStartsPlannerForActiveCategory(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	repo := repository.NewTaskRepo(db, nil)
+	repo := sqlite.NewTaskRepo(db, nil)
 	taskSvc := NewTaskService(repo, nil, nil)
 	svc := NewSwarmService(taskSvc, repo, nil, nil)
 	startImmediately := false
@@ -1059,7 +1059,7 @@ func TestSwarmServiceCreateSwarmTaskStartsPlannerForActiveCategory(t *testing.T)
 
 func TestSwarmServiceCreateSwarmTaskDefersPlannerForBacklogCategory(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	repo := repository.NewTaskRepo(db, nil)
+	repo := sqlite.NewTaskRepo(db, nil)
 	taskSvc := NewTaskService(repo, nil, nil)
 	svc := NewSwarmService(taskSvc, repo, nil, nil)
 	startImmediately := true
@@ -1098,8 +1098,8 @@ func TestSwarmServiceCreateSwarmTaskDefersPlannerForBacklogCategory(t *testing.T
 
 func TestSwarmServiceAppliesPlannerOutputOnPlannerCompletion(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	repo := repository.NewTaskRepo(db, nil)
-	execRepo := repository.NewExecutionRepo(db)
+	repo := sqlite.NewTaskRepo(db, nil)
+	execRepo := sqlite.NewExecutionRepo(db)
 	taskSvc := NewTaskService(repo, nil, nil)
 	svc := NewSwarmService(taskSvc, repo, execRepo, nil)
 	parent, err := svc.CreateSwarmTask(context.Background(), CreateSwarmTaskRequest{ProjectID: "default", Title: "Build export", Prompt: "Build export", MaxWorkers: 2, ReviewerEnabled: true, MergerEnabled: true})
@@ -1153,8 +1153,8 @@ func TestSwarmServiceAppliesPlannerOutputOnPlannerCompletion(t *testing.T) {
 
 func TestSwarmServiceTerminalizesChildSwarmStatusOnCompletion(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	repo := repository.NewTaskRepo(db, nil)
-	execRepo := repository.NewExecutionRepo(db)
+	repo := sqlite.NewTaskRepo(db, nil)
+	execRepo := sqlite.NewExecutionRepo(db)
 	taskSvc := NewTaskService(repo, nil, nil)
 	svc := NewSwarmService(taskSvc, repo, execRepo, nil)
 	ctx := context.Background()
@@ -1239,8 +1239,8 @@ func TestSwarmServiceTerminalizesChildSwarmStatusOnCompletion(t *testing.T) {
 
 func TestSwarmServiceCompletesReviewerOnlySwarmWithoutMerger(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	repo := repository.NewTaskRepo(db, nil)
-	execRepo := repository.NewExecutionRepo(db)
+	repo := sqlite.NewTaskRepo(db, nil)
+	execRepo := sqlite.NewExecutionRepo(db)
 	taskSvc := NewTaskService(repo, nil, nil)
 	svc := NewSwarmService(taskSvc, repo, execRepo, nil)
 	ctx := context.Background()
@@ -1305,7 +1305,7 @@ func TestSwarmServiceCompletesReviewerOnlySwarmWithoutMerger(t *testing.T) {
 
 func TestSwarmServiceCompletesWorkerOnlySwarmWithoutReviewerOrMerger(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	repo := repository.NewTaskRepo(db, nil)
+	repo := sqlite.NewTaskRepo(db, nil)
 	taskSvc := NewTaskService(repo, nil, nil)
 	svc := NewSwarmService(taskSvc, repo, nil, nil)
 	ctx := context.Background()
@@ -1353,7 +1353,7 @@ func TestSwarmServiceCompletesWorkerOnlySwarmWithoutReviewerOrMerger(t *testing.
 
 func TestSwarmServiceStartsMergerAfterWorkersWhenReviewerDisabled(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	repo := repository.NewTaskRepo(db, nil)
+	repo := sqlite.NewTaskRepo(db, nil)
 	taskSvc := NewTaskService(repo, nil, nil)
 	workerSvc := newTestWorkerService(t)
 	svc := NewSwarmService(taskSvc, repo, nil, workerSvc)
@@ -1525,7 +1525,7 @@ func TestParsePlannerOutputJSONPrefersFinalPlannerObject(t *testing.T) {
 
 func TestSwarmServiceStartPlannerReactivatesExistingPlannerBeforeSubmit(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	repo := repository.NewTaskRepo(db, nil)
+	repo := sqlite.NewTaskRepo(db, nil)
 	taskSvc := NewTaskService(repo, nil, nil)
 	workerSvc := newTestWorkerService(t)
 	svc := NewSwarmService(taskSvc, repo, nil, nil)
@@ -1574,8 +1574,8 @@ func TestSwarmServiceStartPlannerReactivatesExistingPlannerBeforeSubmit(t *testi
 
 func TestSwarmServiceInvalidPlannerExecutionBlocksParent(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	repo := repository.NewTaskRepo(db, nil)
-	execRepo := repository.NewExecutionRepo(db)
+	repo := sqlite.NewTaskRepo(db, nil)
+	execRepo := sqlite.NewExecutionRepo(db)
 	taskSvc := NewTaskService(repo, nil, nil)
 	svc := NewSwarmService(taskSvc, repo, execRepo, nil)
 	parent, err := svc.CreateSwarmTask(context.Background(), CreateSwarmTaskRequest{ProjectID: "default", Title: "Build export", Prompt: "Build export", MaxWorkers: 2, ReviewerEnabled: true, MergerEnabled: true})
@@ -1611,8 +1611,8 @@ func TestSwarmServiceInvalidPlannerExecutionBlocksParent(t *testing.T) {
 
 func TestSwarmServiceMergerCompletionPersistsParentResult(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	repo := repository.NewTaskRepo(db, nil)
-	execRepo := repository.NewExecutionRepo(db)
+	repo := sqlite.NewTaskRepo(db, nil)
+	execRepo := sqlite.NewExecutionRepo(db)
 	taskSvc := NewTaskService(repo, nil, nil)
 	svc := NewSwarmService(taskSvc, repo, execRepo, nil)
 	parent, err := svc.CreateSwarmTask(context.Background(), CreateSwarmTaskRequest{ProjectID: "default", Title: "Build export", Prompt: "Build export", MaxWorkers: 1, ReviewerEnabled: true, MergerEnabled: true})
@@ -1709,7 +1709,7 @@ func TestSwarmServiceMergerCompletionPersistsParentResult(t *testing.T) {
 
 func TestTaskServiceUpdateCategoryNotifiesSwarmChildCancellation(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	repo := repository.NewTaskRepo(db, nil)
+	repo := sqlite.NewTaskRepo(db, nil)
 	taskSvc := NewTaskService(repo, nil, nil)
 	svc := NewSwarmService(taskSvc, repo, nil, nil)
 	taskSvc.SetSwarmService(svc)
@@ -1762,7 +1762,7 @@ func TestTaskServiceUpdateCategoryNotifiesSwarmChildCancellation(t *testing.T) {
 
 func TestTaskServiceUpdateCategoryNotifiesPendingSwarmChildCancellation(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	repo := repository.NewTaskRepo(db, nil)
+	repo := sqlite.NewTaskRepo(db, nil)
 	taskSvc := NewTaskService(repo, nil, nil)
 	svc := NewSwarmService(taskSvc, repo, nil, nil)
 	taskSvc.SetSwarmService(svc)
@@ -1826,7 +1826,7 @@ func TestSwarmServiceChildCancellationSetsRoleSpecificParentState(t *testing.T) 
 	for _, tc := range roles {
 		t.Run(tc.name, func(t *testing.T) {
 			db := testutil.NewTestDB(t)
-			repo := repository.NewTaskRepo(db, nil)
+			repo := sqlite.NewTaskRepo(db, nil)
 			taskSvc := NewTaskService(repo, nil, nil)
 			svc := NewSwarmService(taskSvc, repo, nil, nil)
 			parent, err := svc.CreateSwarmTask(context.Background(), CreateSwarmTaskRequest{ProjectID: "default", Title: "Build export", Prompt: "Build export", MaxWorkers: 1, ReviewerEnabled: true, MergerEnabled: true})
@@ -1864,7 +1864,7 @@ func TestSwarmServiceChildCancellationSetsRoleSpecificParentState(t *testing.T) 
 
 func TestSwarmServiceParentFollowupCoordinatesAffectedWorkers(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	repo := repository.NewTaskRepo(db, nil)
+	repo := sqlite.NewTaskRepo(db, nil)
 	taskSvc := NewTaskService(repo, nil, nil)
 	svc := NewSwarmService(taskSvc, repo, nil, nil)
 	parent, err := svc.CreateSwarmTask(context.Background(), CreateSwarmTaskRequest{ProjectID: "default", Title: "Build export", Prompt: "Build export", MaxWorkers: 3, ReviewerEnabled: true, MergerEnabled: true})
@@ -1995,7 +1995,7 @@ func TestSwarmServiceParentFollowupCoordinatesAffectedWorkers(t *testing.T) {
 
 func TestSwarmServiceStartsReviewerAndMergerOnce(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	repo := repository.NewTaskRepo(db, nil)
+	repo := sqlite.NewTaskRepo(db, nil)
 	taskSvc := NewTaskService(repo, nil, nil)
 	svc := NewSwarmService(taskSvc, repo, nil, nil)
 	parent, err := svc.CreateSwarmTask(context.Background(), CreateSwarmTaskRequest{ProjectID: "default", Title: "Build export", Prompt: "Build export", MaxWorkers: 2, ReviewerEnabled: true, MergerEnabled: true})
@@ -2074,8 +2074,8 @@ func TestSwarmServiceStartsReviewerAndMergerOnce(t *testing.T) {
 
 func TestSwarmServiceRerunReviewerStartsMergerAfterReviewerCompletes(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	repo := repository.NewTaskRepo(db, nil)
-	execRepo := repository.NewExecutionRepo(db)
+	repo := sqlite.NewTaskRepo(db, nil)
+	execRepo := sqlite.NewExecutionRepo(db)
 	taskSvc := NewTaskService(repo, nil, nil)
 	svc := NewSwarmService(taskSvc, repo, execRepo, nil)
 	ctx := context.Background()
@@ -2232,8 +2232,8 @@ func TestSwarmServiceRerunReviewerStartsMergerAfterReviewerCompletes(t *testing.
 func TestSwarmServiceOnChildCompletedIgnoresStaleMergerCompletion(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)
-	repo := repository.NewTaskRepo(db, nil)
-	execRepo := repository.NewExecutionRepo(db)
+	repo := sqlite.NewTaskRepo(db, nil)
+	execRepo := sqlite.NewExecutionRepo(db)
 	taskSvc := NewTaskService(repo, nil, nil)
 	svc := NewSwarmService(taskSvc, repo, execRepo, nil)
 	parent, err := svc.CreateSwarmTask(ctx, CreateSwarmTaskRequest{ProjectID: "default", Title: "Build export", Prompt: "Build export", MaxWorkers: 1, ReviewerEnabled: true, MergerEnabled: true})
@@ -2649,10 +2649,10 @@ func TestSwarmServiceHandleChildFollowupIsRoleSpecific(t *testing.T) {
 	}
 }
 
-func newCompletedSwarmForServiceTest(t *testing.T, ctx context.Context) (*repository.TaskRepo, *SwarmService, *models.Task, map[models.SwarmRole]*models.Task) {
+func newCompletedSwarmForServiceTest(t *testing.T, ctx context.Context) (*sqlite.TaskRepo, *SwarmService, *models.Task, map[models.SwarmRole]*models.Task) {
 	t.Helper()
 	db := testutil.NewTestDB(t)
-	repo := repository.NewTaskRepo(db, nil)
+	repo := sqlite.NewTaskRepo(db, nil)
 	taskSvc := NewTaskService(repo, nil, nil)
 	svc := NewSwarmService(taskSvc, repo, nil, nil)
 	parent, err := svc.CreateSwarmTask(ctx, CreateSwarmTaskRequest{ProjectID: "default", Title: "Build export", Prompt: "Build export", MaxWorkers: 1, ReviewerEnabled: true, MergerEnabled: true})
@@ -2735,8 +2735,8 @@ func newCompletedSwarmForServiceTest(t *testing.T, ctx context.Context) (*reposi
 func TestSwarmServiceRerunRoleRejectsActiveRoleExecutionWithoutRetargeting(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)
-	repo := repository.NewTaskRepo(db, nil)
-	execRepo := repository.NewExecutionRepo(db)
+	repo := sqlite.NewTaskRepo(db, nil)
+	execRepo := sqlite.NewExecutionRepo(db)
 	taskSvc := NewTaskService(repo, nil, nil)
 	svc := NewSwarmService(taskSvc, repo, execRepo, nil)
 	parent, err := svc.CreateSwarmTask(ctx, CreateSwarmTaskRequest{ProjectID: "default", Title: "Build export", Prompt: "Build export", MaxWorkers: 1, ReviewerEnabled: true, MergerEnabled: true})
@@ -2788,8 +2788,8 @@ func TestSwarmServiceRerunRoleRejectsActiveRoleExecutionWithoutRetargeting(t *te
 type failedChildRepairFixture struct {
 	t         *testing.T
 	ctx       context.Context
-	repo      *repository.TaskRepo
-	execRepo  *repository.ExecutionRepo
+	repo      *sqlite.TaskRepo
+	execRepo  *sqlite.ExecutionRepo
 	svc       *SwarmService
 	workerSvc *WorkerService
 	parent    *models.Task
@@ -2802,8 +2802,8 @@ func newFailedChildRepairFixture(t *testing.T, workers int, reviewerEnabled, mer
 	t.Helper()
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)
-	repo := repository.NewTaskRepo(db, nil)
-	execRepo := repository.NewExecutionRepo(db)
+	repo := sqlite.NewTaskRepo(db, nil)
+	execRepo := sqlite.NewExecutionRepo(db)
 	workerSvc := newTestWorkerService(t)
 	svc := NewSwarmService(NewTaskService(repo, nil, nil), repo, execRepo, workerSvc)
 	parent, err := svc.CreateSwarmTask(ctx, CreateSwarmTaskRequest{ProjectID: "default", Title: "Repair failed child", Prompt: "repair", MaxWorkers: workers, ReviewerEnabled: reviewerEnabled, MergerEnabled: mergerEnabled})

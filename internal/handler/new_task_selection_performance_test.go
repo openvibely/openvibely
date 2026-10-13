@@ -19,7 +19,7 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/stretchr/testify/require"
 )
@@ -347,7 +347,7 @@ func seedNewTaskSelectionImage(tb testing.TB, sessionID string) {
 	}
 }
 
-func seedNewTaskSelectionModels(tb testing.TB, repo *repository.LLMConfigRepo, count int, includeVisionModel bool) []*models.LLMConfig {
+func seedNewTaskSelectionModels(tb testing.TB, repo *sqlite.LLMConfigRepo, count int, includeVisionModel bool) []*models.LLMConfig {
 	tb.Helper()
 	catalog := make([]*models.LLMConfig, 0, count)
 	for i := 0; i < count; i++ {

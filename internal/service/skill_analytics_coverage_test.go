@@ -9,17 +9,17 @@ import (
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/testutil"
 )
 
 func TestSkillAnalyticsInstrumentationRecordsSelectionViewAndEditEvents(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	repo := repository.NewSkillAnalyticsRepo(db)
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	agentRepo := repository.NewAgentRepo(db)
+	repo := sqlite.NewSkillAnalyticsRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	agentRepo := sqlite.NewAgentRepo(db)
 	project := &models.Project{Name: "Skill Analytics Project"}
 	if err := projectRepo.Create(ctx, project); err != nil {
 		t.Fatalf("create project: %v", err)

@@ -11,7 +11,7 @@ import (
 	"github.com/openvibely/openvibely/internal/events"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/testutil"
 )
 
@@ -44,7 +44,7 @@ func (a *recordingMixtureAdapter) Requests() []llmcontracts.AgentRequest {
 	return out
 }
 
-func createMixtureTestConfig(t *testing.T, repo *repository.LLMConfigRepo, name string, provider models.LLMProvider, model string) models.LLMConfig {
+func createMixtureTestConfig(t *testing.T, repo *sqlite.LLMConfigRepo, name string, provider models.LLMProvider, model string) models.LLMConfig {
 	t.Helper()
 	cfg := &models.LLMConfig{Name: name, Provider: provider, Model: model, AuthMethod: models.AuthMethodAPIKey}
 	if err := repo.Create(context.Background(), cfg); err != nil {
@@ -53,10 +53,10 @@ func createMixtureTestConfig(t *testing.T, repo *repository.LLMConfigRepo, name 
 	return *cfg
 }
 
-func newMixtureAdapterTestService(t *testing.T) (*LLMService, *repository.LLMConfigRepo, *recordingMixtureAdapter) {
+func newMixtureAdapterTestService(t *testing.T) (*LLMService, *sqlite.LLMConfigRepo, *recordingMixtureAdapter) {
 	t.Helper()
 	db := testutil.NewTestDB(t)
-	repo := repository.NewLLMConfigRepo(db)
+	repo := sqlite.NewLLMConfigRepo(db)
 	recorder := &recordingMixtureAdapter{responses: map[string]llmcontracts.AgentResult{}, errors: map[string]error{}}
 	svc := &LLMService{llmConfigRepo: repo, broadcaster: events.NewBroadcaster()}
 	svc.providerAdapters = map[models.LLMProvider]ProviderAdapter{

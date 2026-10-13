@@ -13,7 +13,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/service"
 )
 
@@ -22,13 +22,13 @@ func TestHandler_GetTaskChangesFile_LoadsRequestedInlineFile(t *testing.T) {
 	defer db.Close()
 
 	ctx := context.Background()
-	projectRepo := repository.NewProjectRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
 	projects, err := projectRepo.List(ctx)
 	if err != nil || len(projects) == 0 {
 		t.Fatalf("expected default project, err=%v", err)
 	}
 	project := projects[0]
-	reviewRepo := repository.NewReviewCommentRepo(db)
+	reviewRepo := sqlite.NewReviewCommentRepo(db)
 	h.SetReviewCommentRepo(reviewRepo)
 
 	task := &models.Task{
@@ -146,7 +146,7 @@ func TestHandlerLoadTaskReviewComments_PreservesOptionalReadContract(t *testing.
 	ctx := context.Background()
 	project := createProject(t, h, "Review comment loader")
 	task := createTask(t, h, project.ID, "Review comment loader task")
-	reviewRepo := repository.NewReviewCommentRepo(db)
+	reviewRepo := sqlite.NewReviewCommentRepo(db)
 	h.SetReviewCommentRepo(reviewRepo)
 	comment := &models.ReviewComment{
 		TaskID:      task.ID,
@@ -486,7 +486,7 @@ func TestHandler_GetTaskChangesFile_InvalidIndexReturnsBadRequest(t *testing.T) 
 	defer db.Close()
 
 	ctx := context.Background()
-	projectRepo := repository.NewProjectRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
 	projects, err := projectRepo.List(ctx)
 	if err != nil || len(projects) == 0 {
 		t.Fatalf("expected default project, err=%v", err)

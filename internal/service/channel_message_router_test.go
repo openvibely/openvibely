@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/stretchr/testify/require"
 )
@@ -54,19 +54,19 @@ func (f *fakeDiscordOutbound) SendOutboundDirectMessage(_ context.Context, userI
 	return SendMessageResult{OK: true, Platform: "discord", Target: formatResolvedMessageTarget("discord", userID, ""), MessageID: "discord-dm-1"}
 }
 
-func setupChannelMessageRouterTest(t *testing.T) (context.Context, *repository.ChannelTargetRepo, *repository.SettingsRepo, *repository.SlackAuthRepo, *repository.TelegramAuthRepo, *repository.EmailAuthRepo, *repository.DiscordAuthRepo, *models.Project, *ChannelMessageRouter, *fakeSlackOutbound, *fakeTelegramOutbound, *fakeEmailOutbound, *fakeDiscordOutbound) {
+func setupChannelMessageRouterTest(t *testing.T) (context.Context, *sqlite.ChannelTargetRepo, *sqlite.SettingsRepo, *sqlite.SlackAuthRepo, *sqlite.TelegramAuthRepo, *sqlite.EmailAuthRepo, *sqlite.DiscordAuthRepo, *models.Project, *ChannelMessageRouter, *fakeSlackOutbound, *fakeTelegramOutbound, *fakeEmailOutbound, *fakeDiscordOutbound) {
 	t.Helper()
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	projectRepo := repository.NewProjectRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
 	project := &models.Project{Name: "Router Project"}
 	require.NoError(t, projectRepo.Create(ctx, project))
-	targetRepo := repository.NewChannelTargetRepo(db)
-	settingsRepo := repository.NewSettingsRepo(db)
-	slackAuthRepo := repository.NewSlackAuthRepo(db)
-	telegramAuthRepo := repository.NewTelegramAuthRepo(db)
-	emailAuthRepo := repository.NewEmailAuthRepo(db)
-	discordAuthRepo := repository.NewDiscordAuthRepo(db)
+	targetRepo := sqlite.NewChannelTargetRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
+	slackAuthRepo := sqlite.NewSlackAuthRepo(db)
+	telegramAuthRepo := sqlite.NewTelegramAuthRepo(db)
+	emailAuthRepo := sqlite.NewEmailAuthRepo(db)
+	discordAuthRepo := sqlite.NewDiscordAuthRepo(db)
 	router := NewChannelMessageRouter(targetRepo, settingsRepo)
 	slack := &fakeSlackOutbound{}
 	telegram := &fakeTelegramOutbound{}

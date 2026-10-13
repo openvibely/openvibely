@@ -6,12 +6,12 @@ import (
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 )
 
 // ensureDefaultAgent creates a default agent if one doesn't exist and returns
 // a copy with ProviderTest so it routes to the mock caller in tests.
-func ensureDefaultAgent(t *testing.T, repo *repository.LLMConfigRepo) *models.LLMConfig {
+func ensureDefaultAgent(t *testing.T, repo *sqlite.LLMConfigRepo) *models.LLMConfig {
 	t.Helper()
 	ctx := context.Background()
 	agent, _ := repo.GetDefault(ctx)

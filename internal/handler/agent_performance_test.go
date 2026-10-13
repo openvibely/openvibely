@@ -15,7 +15,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/internal/testutil"
 )
@@ -24,10 +24,10 @@ type agentRefreshBenchmarkContextKey struct{}
 
 func BenchmarkListAgentsHTMXWarm100(b *testing.B) {
 	db, statementCounter := testutil.NewStatementCountingTestDB(b)
-	agentRepo := repository.NewAgentRepo(db)
-	lifecycleRepo := repository.NewLifecycleRepo(db)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	projectRepo := repository.NewProjectRepo(db)
+	agentRepo := sqlite.NewAgentRepo(db)
+	lifecycleRepo := sqlite.NewLifecycleRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
 	projectSvc := service.NewProjectService(projectRepo)
 	globalRoot := b.TempDir()
 	projectCheckout := b.TempDir()

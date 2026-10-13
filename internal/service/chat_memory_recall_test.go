@@ -13,7 +13,7 @@ import (
 	"github.com/openvibely/openvibely/internal/lifecycle"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/testutil"
 )
 
@@ -22,7 +22,7 @@ type chatRecallHookStore struct {
 	seen  []models.LifecycleWhen
 }
 
-func createChatMemoryProject(t *testing.T, ctx context.Context, projectRepo *repository.ProjectRepo) *models.Project {
+func createChatMemoryProject(t *testing.T, ctx context.Context, projectRepo *sqlite.ProjectRepo) *models.Project {
 	t.Helper()
 	repoPath := t.TempDir()
 	memoryDir := filepath.Join(repoPath, ".openvibely", "memories")
@@ -171,7 +171,7 @@ func TestPrepareRecallOnlyLifecycleTurnInjectsChatMemoryWithoutExtraction(t *tes
 		t.Fatalf("write selected memory: %v", err)
 	}
 	db := testutil.NewTestDB(t)
-	projectRepo := repository.NewProjectRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
 	project := &models.Project{Name: "Project", RepoPath: repoPath}
 	if err := projectRepo.Create(ctx, project); err != nil {
 		t.Fatalf("create project: %v", err)
@@ -237,7 +237,7 @@ func TestPrepareRecallOnlyLifecycleTurnAuthorizesMarkdownLinkedSemanticMemory(t 
 		t.Fatalf("write unrelated memory: %v", err)
 	}
 	db := testutil.NewTestDB(t)
-	projectRepo := repository.NewProjectRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
 	project := &models.Project{Name: "Project", RepoPath: repoPath}
 	if err := projectRepo.Create(ctx, project); err != nil {
 		t.Fatalf("create project: %v", err)
@@ -293,7 +293,7 @@ func TestPrepareRecallOnlyLifecycleTurnHonorsExplicitIndexedMemoryViewRequest(t 
 		t.Fatalf("write unindexed memory: %v", err)
 	}
 	db := testutil.NewTestDB(t)
-	projectRepo := repository.NewProjectRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
 	project := &models.Project{Name: "Project", RepoPath: repoPath}
 	if err := projectRepo.Create(ctx, project); err != nil {
 		t.Fatalf("create project: %v", err)
@@ -340,9 +340,9 @@ func TestPrepareRecallOnlyLifecycleTurnHonorsExplicitIndexedMemoryViewRequest(t 
 func TestPrepareRecallOnlyLifecycleTurnUsesOnlyMemoryCuratorOwner(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)
-	projectRepo := repository.NewProjectRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
 	project := createChatMemoryProject(t, ctx, projectRepo)
-	agentRepo := repository.NewAgentRepo(db)
+	agentRepo := sqlite.NewAgentRepo(db)
 
 	memoryAgent := &models.Agent{Key: models.AgentSystemKindMemoryCurator, Name: "System: Memory Curator", SystemKind: models.AgentSystemKindMemoryCurator, Model: "inherit", Enabled: true, GeneratedStatus: models.AgentStatusProtected}
 	if err := agentRepo.Create(ctx, memoryAgent); err != nil {
@@ -390,12 +390,12 @@ func TestPrepareRecallOnlyLifecycleTurnUsesOnlyMemoryCuratorOwner(t *testing.T) 
 
 func TestLLMHookInvokerMemoryRecallRouteSuppressesDirectAgentScopedFileTools(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	llmRepo := repository.NewLLMConfigRepo(db)
-	execRepo := repository.NewExecutionRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	projectRepo := repository.NewProjectRepo(db)
-	scheduleRepo := repository.NewScheduleRepo(db)
-	attachmentRepo := repository.NewAttachmentRepo(db)
+	llmRepo := sqlite.NewLLMConfigRepo(db)
+	execRepo := sqlite.NewExecutionRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	projectRepo := sqlite.NewProjectRepo(db)
+	scheduleRepo := sqlite.NewScheduleRepo(db)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
 	svc := NewLLMService(llmRepo, execRepo, taskRepo, projectRepo, scheduleRepo, attachmentRepo)
 	capture := &memoryToolIsolationCaptureAdapter{}
 	svc.providerAdapters[models.ProviderTest] = capture
@@ -429,12 +429,12 @@ func TestLLMHookInvokerMemoryRecallRouteSuppressesDirectAgentScopedFileTools(t *
 
 func TestCallAgentDirectWithDefinitionMemoryCuratorCanReadRealMemoryFile(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	llmRepo := repository.NewLLMConfigRepo(db)
-	execRepo := repository.NewExecutionRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	projectRepo := repository.NewProjectRepo(db)
-	scheduleRepo := repository.NewScheduleRepo(db)
-	attachmentRepo := repository.NewAttachmentRepo(db)
+	llmRepo := sqlite.NewLLMConfigRepo(db)
+	execRepo := sqlite.NewExecutionRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	projectRepo := sqlite.NewProjectRepo(db)
+	scheduleRepo := sqlite.NewScheduleRepo(db)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
 	svc := NewLLMService(llmRepo, execRepo, taskRepo, projectRepo, scheduleRepo, attachmentRepo)
 	capture := &memoryReadingCaptureAdapter{}
 	svc.providerAdapters[models.ProviderTest] = capture
@@ -473,12 +473,12 @@ func TestCallAgentDirectWithDefinitionMemoryCuratorCanReadRealMemoryFile(t *test
 
 func TestCallAgentDirectStreamingDetailedIncludesRecallOnlyMemoryInChatContext(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	llmRepo := repository.NewLLMConfigRepo(db)
-	execRepo := repository.NewExecutionRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	projectRepo := repository.NewProjectRepo(db)
-	scheduleRepo := repository.NewScheduleRepo(db)
-	attachmentRepo := repository.NewAttachmentRepo(db)
+	llmRepo := sqlite.NewLLMConfigRepo(db)
+	execRepo := sqlite.NewExecutionRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	projectRepo := sqlite.NewProjectRepo(db)
+	scheduleRepo := sqlite.NewScheduleRepo(db)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
 	svc := NewLLMService(llmRepo, execRepo, taskRepo, projectRepo, scheduleRepo, attachmentRepo)
 	capture := &captureProviderAdapter{}
 	svc.providerAdapters[models.ProviderTest] = capture

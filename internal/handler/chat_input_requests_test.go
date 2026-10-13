@@ -17,7 +17,7 @@ import (
 	llmopenai_compatible "github.com/openvibely/openvibely/internal/llm/openai_compatible"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/stretchr/testify/require"
 )
 
@@ -280,7 +280,7 @@ func TestChatInputRequestRecoveredAfterRestartRendersAndUnblocksChat(t *testing.
 	questionsJSON, err := json.Marshal(questions)
 	require.NoError(t, err)
 	reqID := persistence.NewID()
-	repo := repository.NewChatInputRequestRepo(tc.db)
+	repo := sqlite.NewChatInputRequestRepo(tc.db)
 	require.NoError(t, repo.Create(ctx, persistence.ChatInputRequestRecord{ID: reqID, ProjectID: project.ID, ExecutionID: exec.ID, QuestionsJSON: string(questionsJSON), ExpiresAt: time.Now().Add(time.Hour)}))
 	tc.handler.chatInputRequests = newChatInputRequestBroker()
 
@@ -414,7 +414,7 @@ func TestChatPageLoadsWhenInputRequestsFailToLoad(t *testing.T) {
 	})
 	exec := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecCompleted, PromptSent: "ask me"}
 	require.NoError(t, tc.execRepo.Create(ctx, exec))
-	repo := repository.NewChatInputRequestRepo(tc.db)
+	repo := sqlite.NewChatInputRequestRepo(tc.db)
 	require.NoError(t, repo.Create(ctx, persistence.ChatInputRequestRecord{
 		ID: persistence.NewID(), ProjectID: project.ID, ExecutionID: exec.ID, QuestionsJSON: "{not json", ExpiresAt: time.Now().Add(time.Hour),
 	}))

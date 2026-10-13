@@ -9,19 +9,19 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/service"
 )
 
-func newInsightsHandlerTestContext(t *testing.T) (*TestContext, *repository.InsightsRepo) {
+func newInsightsHandlerTestContext(t *testing.T) (*TestContext, *sqlite.InsightsRepo) {
 	t.Helper()
 	tc := NewTestContext(t)
-	insightsRepo := repository.NewInsightsRepo(tc.db)
+	insightsRepo := sqlite.NewInsightsRepo(tc.db)
 	tc.handler.insightsSvc = service.NewInsightsService(insightsRepo, tc.taskRepo, tc.projectRepo, tc.llmConfigRepo, tc.execRepo)
 	return tc, insightsRepo
 }
 
-func createHandlerTestInsight(t *testing.T, repo *repository.InsightsRepo, projectID string, status models.InsightStatus, title string) *models.Insight {
+func createHandlerTestInsight(t *testing.T, repo *sqlite.InsightsRepo, projectID string, status models.InsightStatus, title string) *models.Insight {
 	t.Helper()
 	insight := &models.Insight{
 		ProjectID:  projectID,

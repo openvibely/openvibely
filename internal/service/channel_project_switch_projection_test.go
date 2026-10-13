@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/stretchr/testify/require"
 )
@@ -30,7 +30,7 @@ func seedChannelSwitchProject(t testing.TB, db *sql.DB, id, name string, isDefau
 
 func TestChannelSwitchProjectUsesCompactProjection(t *testing.T) {
 	db, counter := testutil.NewStatementCountingTestDB(t)
-	projectRepo := repository.NewProjectRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
 	ctx := context.Background()
 
 	description := strings.Repeat("D", 16*1024)
@@ -88,7 +88,7 @@ func TestChannelSwitchProjectUsesCompactProjection(t *testing.T) {
 
 func TestChannelSwitchProjectCompactProjectionPreservesResponses(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	projectRepo := repository.NewProjectRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
 	ctx := context.Background()
 	_, err := db.ExecContext(ctx, `DELETE FROM projects`)
 	require.NoError(t, err)
@@ -120,7 +120,7 @@ func TestChannelSwitchProjectCompactProjectionPreservesResponses(t *testing.T) {
 
 func TestChannelSwitchProjectCompactProjectionQueryPlan(t *testing.T) {
 	db, counter := testutil.NewStatementCountingTestDB(t)
-	projectRepo := repository.NewProjectRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
 	ctx := context.Background()
 	seedChannelSwitchProject(t, db, "switch-alpha", "Alpha", true, "", "", "")
 
@@ -203,7 +203,7 @@ func BenchmarkChannelSwitchProjectHandlerProjection(b *testing.B) {
 		b.Run(fmt.Sprintf("projects=%d", count), func(b *testing.B) {
 			db, counter := testutil.NewStatementCountingTestDB(b)
 			seedChannelSwitchProjectBenchmark(b, db, count)
-			projectRepo := repository.NewProjectRepo(db)
+			projectRepo := sqlite.NewProjectRepo(db)
 			ctx := context.Background()
 			handlers := buildChannelProjectActionHandlers(channelProjectActionHandlerOptions{
 				ProjectID:   "switch-bench-000000",

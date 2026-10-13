@@ -19,7 +19,7 @@ import (
 	llmcustomauth "github.com/openvibely/openvibely/internal/llm/customauth"
 	llmoauth "github.com/openvibely/openvibely/internal/llm/oauth"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/service"
 	anthropicclient "github.com/openvibely/openvibely/pkg/anthropic_client"
 	"github.com/stretchr/testify/require"
@@ -1879,7 +1879,7 @@ func TestHandler_OAuthStatus(t *testing.T) {
 
 		// Update with valid tokens
 		futureExpiry := time.Now().Add(1 * time.Hour).UnixMilli()
-		err = h.llmConfigRepo.(*repository.LLMConfigRepo).UpdateOAuthTokens(context.Background(), modelID, "access-token", "refresh-token", futureExpiry)
+		err = h.llmConfigRepo.(*sqlite.LLMConfigRepo).UpdateOAuthTokens(context.Background(), modelID, "access-token", "refresh-token", futureExpiry)
 		require.NoError(t, err)
 
 		req := httptest.NewRequest(http.MethodGet, "/models/"+modelID+"/oauth/status", nil)
@@ -1917,7 +1917,7 @@ func TestHandler_OAuthStatus(t *testing.T) {
 
 		// Update with expired tokens
 		pastExpiry := time.Now().Add(-1 * time.Hour).UnixMilli()
-		err = h.llmConfigRepo.(*repository.LLMConfigRepo).UpdateOAuthTokens(context.Background(), modelID, "access-token", "refresh-token", pastExpiry)
+		err = h.llmConfigRepo.(*sqlite.LLMConfigRepo).UpdateOAuthTokens(context.Background(), modelID, "access-token", "refresh-token", pastExpiry)
 		require.NoError(t, err)
 
 		req := httptest.NewRequest(http.MethodGet, "/models/"+modelID+"/oauth/status", nil)

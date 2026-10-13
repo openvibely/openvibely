@@ -1,0 +1,295 @@
+package sqlite
+
+import (
+	"context"
+	"fmt"
+	"strings"
+	"testing"
+
+	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+func TestCustomPersonalityRepo_Create(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := NewCustomPersonalityRepo(db)
+	ctx := context.Background()
+
+	personality := &models.CustomPersonality{
+		Name:         "Test Personality",
+		Key:          "test_personality",
+		Description:  "A test personality",
+		SystemPrompt: "You are a test assistant.",
+	}
+
+	err := repo.Create(ctx, personality)
+	require.NoError(t, err)
+	assert.NotEmpty(t, personality.ID)
+	assert.False(t, personality.CreatedAt.IsZero())
+	assert.False(t, personality.UpdatedAt.IsZero())
+}
+
+func TestCustomPersonalityRepo_GetByKey(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := NewCustomPersonalityRepo(db)
+	ctx := context.Background()
+
+	// Create a personality
+	p := &models.CustomPersonality{
+		Name:         "Get Test",
+		Key:          "get_test",
+		Description:  "Description",
+		SystemPrompt: "Test prompt",
+	}
+	require.NoError(t, repo.Create(ctx, p))
+
+	// Get by key
+	got, err := repo.GetByKey(ctx, "get_test")
+	require.NoError(t, err)
+	assert.NotNil(t, got)
+	assert.Equal(t, "Get Test", got.Name)
+	assert.Equal(t, "get_test", got.Key)
+	assert.Equal(t, "Description", got.Description)
+	assert.Equal(t, "Test prompt", got.SystemPrompt)
+
+	// Get non-existent key
+	got, err = repo.GetByKey(ctx, "nonexistent")
+	require.NoError(t, err)
+	assert.Nil(t, got)
+}
+
+func TestCustomPersonalityRepo_List(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := NewCustomPersonalityRepo(db)
+	ctx := context.Background()
+
+	// List should be empty initially
+	list, err := repo.List(ctx)
+	require.NoError(t, err)
+	assert.Empty(t, list)
+
+	// Create some personalities
+	p1 := &models.CustomPersonality{
+		Name:         "Zebra Personality",
+		Key:          "zebra",
+		Description:  "Z comes last",
+		SystemPrompt: "Zebra prompt",
+	}
+	require.NoError(t, repo.Create(ctx, p1))
+
+	p2 := &models.CustomPersonality{
+		Name:         "Alpha Personality",
+		Key:          "alpha",
+		Description:  "A comes first",
+		SystemPrompt: "Alpha prompt",
+	}
+	require.NoError(t, repo.Create(ctx, p2))
+
+	// List should return them ordered by name
+	list, err = repo.List(ctx)
+	require.NoError(t, err)
+	assert.Len(t, list, 2)
+	assert.Equal(t, "Alpha Personality", list[0].Name)
+	assert.Equal(t, "Zebra Personality", list[1].Name)
+}
+
+func TestCustomPersonalityRepo_ListUsesBoundedPromptPreviewProjection(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := NewCustomPersonalityRepo(db)
+	ctx := context.Background()
+
+	promptPrefix := strings.Repeat("visible preview text ", 10)
+	promptTail := "FULL_PROMPT_BODY_SHOULD_ONLY_APPEAR_IN_DETAIL"
+	longPrompt := promptPrefix + strings.Repeat("x", 32*1024-len(promptPrefix)-len(promptTail)) + promptTail
+	for i := 0; i < 100; i++ {
+		require.NoError(t, repo.Create(ctx, &models.CustomPersonality{
+			Name:         fmt.Sprintf("Large Personality %03d", i),
+			Key:          fmt.Sprintf("large_personality_%03d", i),
+			Description:  "Large prompt fixture",
+			SystemPrompt: longPrompt,
+		}))
+	}
+
+	list, err := repo.List(ctx)
+	require.NoError(t, err)
+	require.Len(t, list, 100)
+
+	for _, p := range list {
+		assert.Empty(t, p.SystemPrompt, "list projection must not load full prompt bodies")
+		assert.NotEmpty(t, p.SystemPromptPreview)
+		assert.LessOrEqual(t, len(p.SystemPromptPreview), customPersonalityPromptPreviewLength)
+		assert.NotContains(t, p.SystemPromptPreview, promptTail)
+	}
+
+	detail, err := repo.GetByKey(ctx, "large_personality_000")
+	require.NoError(t, err)
+	require.NotNil(t, detail)
+	assert.Contains(t, detail.SystemPrompt, promptTail)
+}
+
+func BenchmarkCustomPersonalityRepo_List100LargePrompts(b *testing.B) {
+	db := testutil.NewTestDB(b)
+	repo := NewCustomPersonalityRepo(db)
+	ctx := context.Background()
+
+	longPrompt := strings.Repeat("p", 32*1024)
+	for i := 0; i < 100; i++ {
+		require.NoError(b, repo.Create(ctx, &models.CustomPersonality{
+			Name:         fmt.Sprintf("Large Personality %03d", i),
+			Key:          fmt.Sprintf("large_personality_%03d", i),
+			Description:  "Large prompt benchmark fixture",
+			SystemPrompt: longPrompt,
+		}))
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		list, err := repo.List(ctx)
+		if err != nil {
+			b.Fatal(err)
+		}
+		if len(list) != 100 {
+			b.Fatalf("expected 100 personalities, got %d", len(list))
+		}
+	}
+}
+
+func TestCustomPersonalityRepo_Update(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := NewCustomPersonalityRepo(db)
+	ctx := context.Background()
+
+	// Create a personality
+	p := &models.CustomPersonality{
+		Name:         "Original Name",
+		Key:          "update_test",
+		Description:  "Original description",
+		SystemPrompt: "Original prompt",
+	}
+	require.NoError(t, repo.Create(ctx, p))
+
+	// Update it
+	updated := &models.CustomPersonality{
+		Name:         "Updated Name",
+		Description:  "Updated description",
+		SystemPrompt: "Updated prompt",
+	}
+	err := repo.Update(ctx, "update_test", updated)
+	require.NoError(t, err)
+
+	// Verify the update
+	got, err := repo.GetByKey(ctx, "update_test")
+	require.NoError(t, err)
+	assert.Equal(t, "Updated Name", got.Name)
+	assert.Equal(t, "Updated description", got.Description)
+	assert.Equal(t, "Updated prompt", got.SystemPrompt)
+	assert.Equal(t, "update_test", got.Key) // Key should not change
+
+	// Update non-existent should error
+	err = repo.Update(ctx, "nonexistent", updated)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "not found")
+}
+
+func TestCustomPersonalityRepo_Delete(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := NewCustomPersonalityRepo(db)
+	ctx := context.Background()
+
+	// Create a personality
+	p := &models.CustomPersonality{
+		Name:         "To Delete",
+		Key:          "delete_test",
+		Description:  "Will be deleted",
+		SystemPrompt: "Delete prompt",
+	}
+	require.NoError(t, repo.Create(ctx, p))
+
+	// Verify it exists
+	got, err := repo.GetByKey(ctx, "delete_test")
+	require.NoError(t, err)
+	assert.NotNil(t, got)
+
+	// Delete it
+	err = repo.Delete(ctx, "delete_test")
+	require.NoError(t, err)
+
+	// Verify it's gone
+	got, err = repo.GetByKey(ctx, "delete_test")
+	require.NoError(t, err)
+	assert.Nil(t, got)
+
+	// Delete non-existent should error
+	err = repo.Delete(ctx, "nonexistent")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "not found")
+}
+
+func TestCustomPersonalityRepo_CountAndListRuntimePage(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := NewCustomPersonalityRepo(db)
+	ctx := context.Background()
+
+	n, err := repo.Count(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, 0, n)
+
+	page, err := repo.ListRuntimePage(ctx, 10, 0)
+	require.NoError(t, err)
+	assert.Empty(t, page)
+
+	for i := 0; i < 5; i++ {
+		require.NoError(t, repo.Create(ctx, &models.CustomPersonality{
+			Name:         fmt.Sprintf("Runtime %02d", i),
+			Key:          fmt.Sprintf("runtime_%02d", i),
+			Description:  fmt.Sprintf("desc %02d", i),
+			SystemPrompt: "Runtime page prompt text that is long enough.",
+		}))
+	}
+	n, err = repo.Count(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, 5, n)
+
+	first, err := repo.ListRuntimePage(ctx, 2, 0)
+	require.NoError(t, err)
+	require.Len(t, first, 2)
+	assert.Equal(t, "runtime_00", first[0].Key)
+	assert.Equal(t, "runtime_01", first[1].Key)
+	assert.Empty(t, first[0].SystemPrompt)
+
+	second, err := repo.ListRuntimePage(ctx, 2, 2)
+	require.NoError(t, err)
+	require.Len(t, second, 2)
+	assert.Equal(t, "runtime_02", second[0].Key)
+
+	_, err = repo.ListRuntimePage(ctx, 0, 0)
+	assert.Error(t, err)
+}
+
+func TestCustomPersonalityRepo_UniqueKey(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := NewCustomPersonalityRepo(db)
+	ctx := context.Background()
+
+	// Create a personality
+	p1 := &models.CustomPersonality{
+		Name:         "First",
+		Key:          "unique_key",
+		Description:  "First personality",
+		SystemPrompt: "First prompt",
+	}
+	require.NoError(t, repo.Create(ctx, p1))
+
+	// Try to create another with the same key
+	p2 := &models.CustomPersonality{
+		Name:         "Second",
+		Key:          "unique_key",
+		Description:  "Second personality",
+		SystemPrompt: "Second prompt",
+	}
+	err := repo.Create(ctx, p2)
+	assert.Error(t, err)
+}

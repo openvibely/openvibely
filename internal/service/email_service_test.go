@@ -24,7 +24,7 @@ import (
 	messagemail "github.com/emersion/go-message/mail"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -33,7 +33,7 @@ import (
 func TestEmailInboundReceiptRepoExistsBatchUsesBoundedQueries(t *testing.T) {
 	db, counter := testutil.NewStatementCountingTestDB(t)
 	ctx := context.Background()
-	receipts := repository.NewEmailInboundReceiptRepo(db)
+	receipts := sqlite.NewEmailInboundReceiptRepo(db)
 	mailbox := "imap.example.com\x00bot@example.com"
 	messageKeys := make([]string, 501)
 	for i := range messageKeys {
@@ -61,7 +61,7 @@ func TestEmailInboundReceiptRepoExistsBatchUsesBoundedQueries(t *testing.T) {
 func TestEmailInboundReceiptHandoffIsAtomicAndIdempotent(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	receipts := repository.NewEmailInboundReceiptRepo(db)
+	receipts := sqlite.NewEmailInboundReceiptRepo(db)
 	mailbox, messageKey := "imap.example.com\x00bot@example.com", "message-id:<atomic@example.com>"
 
 	alreadyHandedOff, err := receipts.WithHandoff(ctx, mailbox, messageKey, func(persistence.Tx) error {
@@ -155,10 +155,10 @@ type emailPollReceiptTestHarness struct {
 	svc                  *EmailService
 	project              *models.Project
 	agent                *models.LLMConfig
-	taskRepo             *repository.TaskRepo
-	execRepo             *repository.ExecutionRepo
-	threadInputRepo      *repository.ThreadInputRepo
-	emailTaskContextRepo *repository.EmailTaskContextRepo
+	taskRepo             *sqlite.TaskRepo
+	execRepo             *sqlite.ExecutionRepo
+	threadInputRepo      *sqlite.ThreadInputRepo
+	emailTaskContextRepo *sqlite.EmailTaskContextRepo
 	receipts             *countingEmailInboundReceiptStore
 }
 
@@ -166,15 +166,15 @@ func newEmailPollReceiptTestHarness(t *testing.T) *emailPollReceiptTestHarness {
 	t.Helper()
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	settingsRepo := repository.NewSettingsRepo(db)
-	projectRepo := repository.NewProjectRepo(db)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	execRepo := repository.NewExecutionRepo(db)
-	threadInputRepo := repository.NewThreadInputRepo(db)
-	emailAuthRepo := repository.NewEmailAuthRepo(db)
-	emailTaskContextRepo := repository.NewEmailTaskContextRepo(db)
-	emailSenderProjectRepo := repository.NewEmailSenderProjectRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	execRepo := sqlite.NewExecutionRepo(db)
+	threadInputRepo := sqlite.NewThreadInputRepo(db)
+	emailAuthRepo := sqlite.NewEmailAuthRepo(db)
+	emailTaskContextRepo := sqlite.NewEmailTaskContextRepo(db)
+	emailSenderProjectRepo := sqlite.NewEmailSenderProjectRepo(db)
 	project := &models.Project{Name: "Email Receipt Project"}
 	require.NoError(t, projectRepo.Create(ctx, project))
 	require.NoError(t, emailAuthRepo.Create(ctx, &models.EmailAuthorizedSender{ProjectID: project.ID, EmailAddress: "alice@example.com", AddedBy: "test"}))
@@ -183,14 +183,14 @@ func newEmailPollReceiptTestHarness(t *testing.T) *emailPollReceiptTestHarness {
 	require.NoError(t, llmConfigRepo.Create(ctx, agent))
 	require.NoError(t, settingsRepo.Set(ctx, EmailSettingAddress, "bot@example.com"))
 
-	attachmentRepo := repository.NewAttachmentRepo(db)
-	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, repository.NewScheduleRepo(db), attachmentRepo)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
+	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, sqlite.NewScheduleRepo(db), attachmentRepo)
 	llmSvc.SetLLMCaller(testutil.NewMockLLMCaller())
-	svc := NewEmailService(settingsRepo, projectRepo, llmConfigRepo, taskRepo, execRepo, repository.NewScheduleRepo(db), NewTaskService(taskRepo, attachmentRepo, nil), llmSvc, nil, emailAuthRepo, emailTaskContextRepo)
+	svc := NewEmailService(settingsRepo, projectRepo, llmConfigRepo, taskRepo, execRepo, sqlite.NewScheduleRepo(db), NewTaskService(taskRepo, attachmentRepo, nil), llmSvc, nil, emailAuthRepo, emailTaskContextRepo)
 	svc.SetEmailSenderProjectRepo(emailSenderProjectRepo)
 	svc.SetThreadInputRepo(threadInputRepo)
 	svc.SetChannelChatRunner(func(context.Context, ChannelChatRunRequest) {})
-	receipts := &countingEmailInboundReceiptStore{inner: repository.NewEmailInboundReceiptRepo(db)}
+	receipts := &countingEmailInboundReceiptStore{inner: sqlite.NewEmailInboundReceiptRepo(db)}
 	svc.emailInboundReceiptStore = receipts
 	return &emailPollReceiptTestHarness{ctx: ctx, svc: svc, project: project, agent: agent, taskRepo: taskRepo, execRepo: execRepo, threadInputRepo: threadInputRepo, emailTaskContextRepo: emailTaskContextRepo, receipts: receipts}
 }
@@ -218,7 +218,7 @@ func TestEmailPollOnceFailsClosedWhenReceiptBatchFails(t *testing.T) {
 func TestEmailPollOnceUsesPollSnapshotForSelfAddress(t *testing.T) {
 	db, counter := testutil.NewStatementCountingTestDB(t)
 	ctx := context.Background()
-	settingsRepo := repository.NewSettingsRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 	require.NoError(t, settingsRepo.Set(ctx, EmailSettingAddress, "old@example.com"))
 
 	client := newFakeEmailIMAPClient(
@@ -240,7 +240,7 @@ func TestEmailPollOnceUsesPollSnapshotForSelfAddress(t *testing.T) {
 func TestEmailPollOncePreservesFilteringAndAcknowledgement(t *testing.T) {
 	db, counter := testutil.NewStatementCountingTestDB(t)
 	ctx := context.Background()
-	settingsRepo := repository.NewSettingsRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 	require.NoError(t, settingsRepo.Set(ctx, EmailSettingAddress, "old@example.com"))
 	messageWithHeaders := func(id uint32, subject, envelopeFrom, headerFrom, extraHeaders, body string) *imap.Message {
 		msg := testIMAPMessageWithBody(id, subject, envelopeFrom, body)
@@ -277,7 +277,7 @@ func TestEmailPollOnceDoesNotDeduplicateDistinctIdenticalMessagesWithoutMessageI
 	)
 	client.uidValidity = 77
 	processed := 0
-	svc := &EmailService{emailInboundReceiptStore: repository.NewEmailInboundReceiptRepo(db)}
+	svc := &EmailService{emailInboundReceiptStore: sqlite.NewEmailInboundReceiptRepo(db)}
 	svc.processIncomingMessageFn = func(_ context.Context, _ EmailInboundMessage) bool {
 		processed++
 		return true
@@ -294,7 +294,7 @@ func TestEmailPollOnceBatchesReceiptRecoveryWithNewHandoff(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
 	cfg := EmailRuntimeConfig{Address: "bot@example.com", IMAPHost: "imap.example.com"}
-	receipts := repository.NewEmailInboundReceiptRepo(db)
+	receipts := sqlite.NewEmailInboundReceiptRepo(db)
 	mailboxIdentity := emailMailboxIdentity(cfg)
 	require.NoError(t, receipts.Record(ctx, mailboxIdentity, "message-id:<message-1@example.com>"))
 	client := newFakeEmailIMAPClient(
@@ -390,7 +390,7 @@ func TestEmailPollOnceUsesMIMEMessageIDBeforeEnvelopeAndUID(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
 	cfg := EmailRuntimeConfig{Address: "bot@example.com", IMAPHost: "imap.example.com"}
-	receipts := repository.NewEmailInboundReceiptRepo(db)
+	receipts := sqlite.NewEmailInboundReceiptRepo(db)
 	mailboxIdentity := emailMailboxIdentity(cfg)
 	require.NoError(t, receipts.Record(ctx, mailboxIdentity, "message-id:<message-1@example.com>"))
 	message := testIMAPMessageWithBody(1, "already handed off", "alice@example.com", "body")
@@ -419,7 +419,7 @@ func TestEmailPollOnceUsesMIMEMessageIDAfterUIDMetadataFallback(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
 	cfg := EmailRuntimeConfig{Address: "bot@example.com", IMAPHost: "imap.example.com"}
-	receipts := &countingEmailInboundReceiptStore{inner: repository.NewEmailInboundReceiptRepo(db)}
+	receipts := &countingEmailInboundReceiptStore{inner: sqlite.NewEmailInboundReceiptRepo(db)}
 	mailboxIdentity := emailMailboxIdentity(cfg)
 	require.NoError(t, receipts.Record(ctx, mailboxIdentity, "message-id:<message-1@example.com>"))
 	receipts.recordCalls = 0
@@ -493,7 +493,7 @@ func TestEmailPollOnceSkipsReceiptedLargeMIMEBodyBeforeParsing(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
 	cfg := EmailRuntimeConfig{Address: "bot@example.com", IMAPHost: "imap.example.com"}
-	receipts := &countingEmailInboundReceiptStore{inner: repository.NewEmailInboundReceiptRepo(db)}
+	receipts := &countingEmailInboundReceiptStore{inner: sqlite.NewEmailInboundReceiptRepo(db)}
 	mailboxIdentity := emailMailboxIdentity(cfg)
 	require.NoError(t, receipts.Record(ctx, mailboxIdentity, "message-id:<message-1@example.com>"))
 	receipts.recordCalls = 0
@@ -525,7 +525,7 @@ func TestEmailPollOncePreservesUnresolvedMIMEAttachmentAndOrdering(t *testing.T)
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
 	cfg := EmailRuntimeConfig{Address: "bot@example.com", IMAPHost: "imap.example.com"}
-	receipts := repository.NewEmailInboundReceiptRepo(db)
+	receipts := sqlite.NewEmailInboundReceiptRepo(db)
 	mailboxIdentity := emailMailboxIdentity(cfg)
 	require.NoError(t, receipts.Record(ctx, mailboxIdentity, "message-id:<message-1@example.com>"))
 	client := newFakeEmailIMAPClient(
@@ -566,7 +566,7 @@ func TestEmailPollOnceDoesNotRepeatDurableHandoffAfterStoreFailure(t *testing.T)
 		testIMAPMessage(2, "durable-two", "alice@example.com"),
 	)
 	client.storeFailures = 1
-	receipts := repository.NewEmailInboundReceiptRepo(db)
+	receipts := sqlite.NewEmailInboundReceiptRepo(db)
 	processed := 0
 	newService := func() *EmailService {
 		svc := &EmailService{emailInboundReceiptStore: receipts}
@@ -685,13 +685,13 @@ func TestEmailPollOnceSkipsPostSuccessRecordAfterQueuedWithHandoff(t *testing.T)
 func TestEmailPollOnceMixedBatchRetriesRealTaskCreationFailure(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	settingsRepo := repository.NewSettingsRepo(db)
-	projectRepo := repository.NewProjectRepo(db)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	execRepo := repository.NewExecutionRepo(db)
-	emailAuthRepo := repository.NewEmailAuthRepo(db)
-	emailTaskContextRepo := repository.NewEmailTaskContextRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	execRepo := sqlite.NewExecutionRepo(db)
+	emailAuthRepo := sqlite.NewEmailAuthRepo(db)
+	emailTaskContextRepo := sqlite.NewEmailTaskContextRepo(db)
 	projects, err := projectRepo.List(ctx)
 	require.NoError(t, err)
 	require.NotEmpty(t, projects)
@@ -707,13 +707,13 @@ func TestEmailPollOnceMixedBatchRetriesRealTaskCreationFailure(t *testing.T) {
 		return err
 	}())
 
-	attachmentRepo := repository.NewAttachmentRepo(db)
-	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, repository.NewScheduleRepo(db), attachmentRepo)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
+	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, sqlite.NewScheduleRepo(db), attachmentRepo)
 	llmSvc.SetLLMCaller(testutil.NewMockLLMCaller())
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, nil)
-	svc := NewEmailService(settingsRepo, projectRepo, llmConfigRepo, taskRepo, execRepo, repository.NewScheduleRepo(db), taskSvc, llmSvc, nil, emailAuthRepo, emailTaskContextRepo)
+	svc := NewEmailService(settingsRepo, projectRepo, llmConfigRepo, taskRepo, execRepo, sqlite.NewScheduleRepo(db), taskSvc, llmSvc, nil, emailAuthRepo, emailTaskContextRepo)
 	svc.SetChannelChatRunner(func(context.Context, ChannelChatRunRequest) {})
-	svc.SetEmailInboundReceiptRepo(repository.NewEmailInboundReceiptRepo(db))
+	svc.SetEmailInboundReceiptRepo(sqlite.NewEmailInboundReceiptRepo(db))
 	client := newFakeEmailIMAPClient(
 		testIMAPMessageWithBody(1, "successful", "alice@example.com", "normal request"),
 		testIMAPMessageWithBody(2, "retry", "alice@example.com", "transient task failure"),
@@ -743,14 +743,14 @@ func TestEmailPollOnceMixedBatchRetriesRealTaskCreationFailure(t *testing.T) {
 func TestEmailPollOnceMixedBatchRetriesRealQueueWriteFailure(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	settingsRepo := repository.NewSettingsRepo(db)
-	projectRepo := repository.NewProjectRepo(db)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	execRepo := repository.NewExecutionRepo(db)
-	threadInputRepo := repository.NewThreadInputRepo(db)
-	emailAuthRepo := repository.NewEmailAuthRepo(db)
-	emailTaskContextRepo := repository.NewEmailTaskContextRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	execRepo := sqlite.NewExecutionRepo(db)
+	threadInputRepo := sqlite.NewThreadInputRepo(db)
+	emailAuthRepo := sqlite.NewEmailAuthRepo(db)
+	emailTaskContextRepo := sqlite.NewEmailTaskContextRepo(db)
 	projects, err := projectRepo.List(ctx)
 	require.NoError(t, err)
 	require.NotEmpty(t, projects)
@@ -774,13 +774,13 @@ func TestEmailPollOnceMixedBatchRetriesRealQueueWriteFailure(t *testing.T) {
 		return err
 	}())
 
-	attachmentRepo := repository.NewAttachmentRepo(db)
-	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, repository.NewScheduleRepo(db), attachmentRepo)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
+	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, sqlite.NewScheduleRepo(db), attachmentRepo)
 	llmSvc.SetLLMCaller(testutil.NewMockLLMCaller())
-	svc := NewEmailService(settingsRepo, projectRepo, llmConfigRepo, taskRepo, execRepo, repository.NewScheduleRepo(db), NewTaskService(taskRepo, attachmentRepo, nil), llmSvc, nil, emailAuthRepo, emailTaskContextRepo)
+	svc := NewEmailService(settingsRepo, projectRepo, llmConfigRepo, taskRepo, execRepo, sqlite.NewScheduleRepo(db), NewTaskService(taskRepo, attachmentRepo, nil), llmSvc, nil, emailAuthRepo, emailTaskContextRepo)
 	svc.SetThreadInputRepo(threadInputRepo)
 	svc.SetChannelChatRunner(func(context.Context, ChannelChatRunRequest) {})
-	svc.SetEmailInboundReceiptRepo(repository.NewEmailInboundReceiptRepo(db))
+	svc.SetEmailInboundReceiptRepo(sqlite.NewEmailInboundReceiptRepo(db))
 	client := newFakeEmailIMAPClient(
 		testIMAPReplyWithBody(1, "Queue thread", "alice@example.com", rootMessageID, "normal queued request"),
 		testIMAPReplyWithBody(2, "Queue thread", "alice@example.com", rootMessageID, "transient queue failure"),
@@ -1036,7 +1036,7 @@ func BenchmarkEmailPollOnceReceiptDeduplication(b *testing.B) {
 type emailPollAddressSnapshotBenchmarkFixture struct {
 	db           *sql.DB
 	counter      *testutil.SQLStatementCounter
-	settingsRepo *repository.SettingsRepo
+	settingsRepo *sqlite.SettingsRepo
 	svc          *EmailService
 	client       *fakeEmailIMAPClient
 	cfg          EmailRuntimeConfig
@@ -1046,7 +1046,7 @@ func newEmailPollAddressSnapshotBenchmarkFixture(tb testing.TB, messageCount int
 	tb.Helper()
 	db, counter := testutil.NewStatementCountingTestDB(tb)
 	ctx := context.Background()
-	settingsRepo := repository.NewSettingsRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 	if err := settingsRepo.Set(ctx, EmailSettingAddress, "bot@example.com"); err != nil {
 		tb.Fatalf("save email address: %v", err)
 	}
@@ -1717,8 +1717,8 @@ func (c *fakeEmailIMAPClient) seenIDs() []uint32 {
 func TestChannelChatIngressReportsTaskAndQueuePersistenceFailures(t *testing.T) {
 	t.Run("task creation", func(t *testing.T) {
 		db := testutil.NewTestDB(t)
-		taskRepo := repository.NewTaskRepo(db, nil)
-		execRepo := repository.NewExecutionRepo(db)
+		taskRepo := sqlite.NewTaskRepo(db, nil)
+		execRepo := sqlite.NewExecutionRepo(db)
 		require.NoError(t, db.Close())
 
 		handedOff := false
@@ -1738,7 +1738,7 @@ func TestChannelChatIngressReportsTaskAndQueuePersistenceFailures(t *testing.T) 
 
 	t.Run("queue write", func(t *testing.T) {
 		db := testutil.NewTestDB(t)
-		threadInputRepo := repository.NewThreadInputRepo(db)
+		threadInputRepo := sqlite.NewThreadInputRepo(db)
 		require.NoError(t, db.Close())
 
 		handedOff := false
@@ -1759,7 +1759,7 @@ func TestChannelChatIngressReportsTaskAndQueuePersistenceFailures(t *testing.T) 
 func TestEmailService_ProcessIncomingUsesFreshNormalizedAddress(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	settingsRepo := repository.NewSettingsRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 	require.NoError(t, settingsRepo.Set(ctx, EmailSettingAddress, " Bot@Example.com "))
 	svc := &EmailService{settingsRepo: settingsRepo}
 
@@ -1778,9 +1778,9 @@ func TestEmailProcessIncomingAcknowledgesIntentionalIgnores(t *testing.T) {
 	assert.True(t, svc.ProcessIncoming(context.Background(), EmailInboundMessage{FromAddress: "noreply@example.com", Body: "automated"}))
 
 	db := testutil.NewTestDB(t)
-	projectRepo := repository.NewProjectRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
 	require.NoError(t, projectRepo.Create(context.Background(), &models.Project{Name: "Email"}))
-	svc = NewEmailService(nil, projectRepo, repository.NewLLMConfigRepo(db), repository.NewTaskRepo(db, nil), repository.NewExecutionRepo(db), repository.NewScheduleRepo(db), &TaskService{}, &LLMService{}, nil, repository.NewEmailAuthRepo(db), repository.NewEmailTaskContextRepo(db))
+	svc = NewEmailService(nil, projectRepo, sqlite.NewLLMConfigRepo(db), sqlite.NewTaskRepo(db, nil), sqlite.NewExecutionRepo(db), sqlite.NewScheduleRepo(db), &TaskService{}, &LLMService{}, nil, sqlite.NewEmailAuthRepo(db), sqlite.NewEmailTaskContextRepo(db))
 	assert.True(t, svc.ProcessIncoming(context.Background(), EmailInboundMessage{FromAddress: "unauthorized@example.com", Subject: "request", Body: "hello"}))
 }
 
@@ -1792,11 +1792,11 @@ func TestNormalizeEmailPasswordForProvider(t *testing.T) {
 func TestEmailService_LoadConfigNormalizesSavedProviderAppPassword(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	settingsRepo := repository.NewSettingsRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 	require.NoError(t, settingsRepo.Set(ctx, EmailSettingProvider, EmailProviderGmail))
 	require.NoError(t, settingsRepo.Set(ctx, EmailSettingAddress, "bot@example.com"))
 	require.NoError(t, settingsRepo.Set(ctx, EmailSettingPassword, "abcd efgh ijkl mnop"))
-	svc := NewEmailService(settingsRepo, repository.NewProjectRepo(db), repository.NewLLMConfigRepo(db), repository.NewTaskRepo(db, nil), repository.NewExecutionRepo(db), repository.NewScheduleRepo(db), nil, nil, nil, repository.NewEmailAuthRepo(db), repository.NewEmailTaskContextRepo(db))
+	svc := NewEmailService(settingsRepo, sqlite.NewProjectRepo(db), sqlite.NewLLMConfigRepo(db), sqlite.NewTaskRepo(db, nil), sqlite.NewExecutionRepo(db), sqlite.NewScheduleRepo(db), nil, nil, nil, sqlite.NewEmailAuthRepo(db), sqlite.NewEmailTaskContextRepo(db))
 
 	cfg, err := svc.loadConfig(ctx)
 	require.NoError(t, err)
@@ -1814,13 +1814,13 @@ func TestEmailService_IgnoresUnauthorizedAutomatedAndSelfSentMessages(t *testing
 func TestEmailService_AuthorizationRequiresConfiguredSender(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	settingsRepo := repository.NewSettingsRepo(db)
-	projectRepo := repository.NewProjectRepo(db)
-	emailAuthRepo := repository.NewEmailAuthRepo(db)
-	emailSenderProjectRepo := repository.NewEmailSenderProjectRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	emailAuthRepo := sqlite.NewEmailAuthRepo(db)
+	emailSenderProjectRepo := sqlite.NewEmailSenderProjectRepo(db)
 	project := &models.Project{Name: "Email Project"}
 	require.NoError(t, projectRepo.Create(ctx, project))
-	svc := NewEmailService(settingsRepo, projectRepo, repository.NewLLMConfigRepo(db), repository.NewTaskRepo(db, nil), repository.NewExecutionRepo(db), repository.NewScheduleRepo(db), nil, nil, nil, emailAuthRepo, repository.NewEmailTaskContextRepo(db))
+	svc := NewEmailService(settingsRepo, projectRepo, sqlite.NewLLMConfigRepo(db), sqlite.NewTaskRepo(db, nil), sqlite.NewExecutionRepo(db), sqlite.NewScheduleRepo(db), nil, nil, nil, emailAuthRepo, sqlite.NewEmailTaskContextRepo(db))
 	svc.SetEmailSenderProjectRepo(emailSenderProjectRepo)
 
 	assert.Empty(t, svc.resolveAuthorizedProject(ctx, "alice@example.com"))
@@ -1923,18 +1923,18 @@ func TestEmailService_ReplyPathsBoundReferenceChains(t *testing.T) {
 		t.Run(path.name, func(t *testing.T) {
 			db := testutil.NewTestDB(t)
 			ctx := context.Background()
-			settingsRepo := repository.NewSettingsRepo(db)
+			settingsRepo := sqlite.NewSettingsRepo(db)
 			for key, value := range map[string]string{EmailSettingAddress: "bot@example.com", EmailSettingPassword: "secret", EmailSettingIMAPHost: "imap.example.com", EmailSettingSMTPHost: "smtp.example.com", EmailSettingSendResponses: "true"} {
 				require.NoError(t, settingsRepo.Set(ctx, key, value))
 			}
-			projectRepo := repository.NewProjectRepo(db)
+			projectRepo := sqlite.NewProjectRepo(db)
 			projects, err := projectRepo.List(ctx)
 			require.NoError(t, err)
 			task := models.Task{ProjectID: projects[0].ID, Title: "Email task", Prompt: "request", Category: models.CategoryActive, Status: models.StatusCompleted, CreatedVia: models.TaskOriginEmail}
-			require.NoError(t, repository.NewTaskRepo(db, nil).Create(ctx, &task))
-			contextRepo := repository.NewEmailTaskContextRepo(db)
+			require.NoError(t, sqlite.NewTaskRepo(db, nil).Create(ctx, &task))
+			contextRepo := sqlite.NewEmailTaskContextRepo(db)
 			require.NoError(t, contextRepo.Upsert(ctx, &models.EmailTaskContext{TaskID: task.ID, EmailFrom: "alice@example.com", EmailMessageID: "<reply@example.com>", EmailReferences: testEmailReferenceChain(80), EmailSubject: "Question"}))
-			svc := NewEmailService(settingsRepo, projectRepo, repository.NewLLMConfigRepo(db), repository.NewTaskRepo(db, nil), repository.NewExecutionRepo(db), repository.NewScheduleRepo(db), nil, nil, nil, repository.NewEmailAuthRepo(db), contextRepo)
+			svc := NewEmailService(settingsRepo, projectRepo, sqlite.NewLLMConfigRepo(db), sqlite.NewTaskRepo(db, nil), sqlite.NewExecutionRepo(db), sqlite.NewScheduleRepo(db), nil, nil, nil, sqlite.NewEmailAuthRepo(db), contextRepo)
 			var inReplyTo, references string
 			svc.sendMail = func(_ context.Context, _ EmailRuntimeConfig, _, _, _, _, gotInReplyTo, gotReferences string) error {
 				inReplyTo, references = gotInReplyTo, gotReferences
@@ -2026,17 +2026,17 @@ func startTestSMTPServer(t *testing.T) (string, int, <-chan []byte) {
 func TestEmailService_UsesThreadScopedSessionForInReplyToOnlyActiveChatAndHistory(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	settingsRepo := repository.NewSettingsRepo(db)
-	projectRepo := repository.NewProjectRepo(db)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	execRepo := repository.NewExecutionRepo(db)
-	emailAuthRepo := repository.NewEmailAuthRepo(db)
-	emailTaskContextRepo := repository.NewEmailTaskContextRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	execRepo := sqlite.NewExecutionRepo(db)
+	emailAuthRepo := sqlite.NewEmailAuthRepo(db)
+	emailTaskContextRepo := sqlite.NewEmailTaskContextRepo(db)
 	project := &models.Project{Name: "Email In-Reply-To Project"}
 	require.NoError(t, projectRepo.Create(ctx, project))
 	require.NoError(t, emailAuthRepo.Create(ctx, &models.EmailAuthorizedSender{ProjectID: project.ID, EmailAddress: "alice@example.com", AddedBy: "test"}))
-	emailSenderProjectRepo := repository.NewEmailSenderProjectRepo(db)
+	emailSenderProjectRepo := sqlite.NewEmailSenderProjectRepo(db)
 	require.NoError(t, emailSenderProjectRepo.SetSenderProject(ctx, "alice@example.com", project.ID))
 	agent := &models.LLMConfig{Name: "Email Agent", Provider: models.ProviderTest, Model: "test", IsDefault: true}
 	require.NoError(t, llmConfigRepo.Create(ctx, agent))
@@ -2051,14 +2051,14 @@ func TestEmailService_UsesThreadScopedSessionForInReplyToOnlyActiveChatAndHistor
 	otherExec := &models.Execution{TaskID: otherTask.ID, AgentConfigID: agent.ID, Status: models.ExecCompleted, PromptSent: "other prior"}
 	require.NoError(t, execRepo.Create(ctx, otherExec))
 
-	attachmentRepo := repository.NewAttachmentRepo(db)
-	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, repository.NewScheduleRepo(db), attachmentRepo)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
+	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, sqlite.NewScheduleRepo(db), attachmentRepo)
 	llmSvc.SetLLMCaller(testutil.NewMockLLMCaller())
 	workerSvc := NewWorkerService(llmSvc, 0, nil)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
-	svc := NewEmailService(settingsRepo, projectRepo, llmConfigRepo, taskRepo, execRepo, repository.NewScheduleRepo(db), taskSvc, llmSvc, workerSvc, emailAuthRepo, emailTaskContextRepo)
+	svc := NewEmailService(settingsRepo, projectRepo, llmConfigRepo, taskRepo, execRepo, sqlite.NewScheduleRepo(db), taskSvc, llmSvc, workerSvc, emailAuthRepo, emailTaskContextRepo)
 	svc.SetEmailSenderProjectRepo(emailSenderProjectRepo)
-	threadInputRepo := repository.NewThreadInputRepo(db)
+	threadInputRepo := sqlite.NewThreadInputRepo(db)
 	svc.SetThreadInputRepo(threadInputRepo)
 	var runReq ChannelChatRunRequest
 	svc.SetChannelChatRunner(func(_ context.Context, req ChannelChatRunRequest) { runReq = req })
@@ -2086,17 +2086,17 @@ func TestEmailService_UsesThreadScopedSessionForInReplyToOnlyActiveChatAndHistor
 func TestEmailService_UsesOutboundResponseIDForActiveChatQueue(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	settingsRepo := repository.NewSettingsRepo(db)
-	projectRepo := repository.NewProjectRepo(db)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	execRepo := repository.NewExecutionRepo(db)
-	emailAuthRepo := repository.NewEmailAuthRepo(db)
-	emailTaskContextRepo := repository.NewEmailTaskContextRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	execRepo := sqlite.NewExecutionRepo(db)
+	emailAuthRepo := sqlite.NewEmailAuthRepo(db)
+	emailTaskContextRepo := sqlite.NewEmailTaskContextRepo(db)
 	project := &models.Project{Name: "Email Outbound Active Project"}
 	require.NoError(t, projectRepo.Create(ctx, project))
 	require.NoError(t, emailAuthRepo.Create(ctx, &models.EmailAuthorizedSender{ProjectID: project.ID, EmailAddress: "alice@example.com", AddedBy: "test"}))
-	emailSenderProjectRepo := repository.NewEmailSenderProjectRepo(db)
+	emailSenderProjectRepo := sqlite.NewEmailSenderProjectRepo(db)
 	require.NoError(t, emailSenderProjectRepo.SetSenderProject(ctx, "alice@example.com", project.ID))
 	agent := &models.LLMConfig{Name: "Email Agent", Provider: models.ProviderTest, Model: "test", IsDefault: true}
 	require.NoError(t, llmConfigRepo.Create(ctx, agent))
@@ -2108,14 +2108,14 @@ func TestEmailService_UsesOutboundResponseIDForActiveChatQueue(t *testing.T) {
 	require.NoError(t, execRepo.Create(ctx, activeExec))
 	require.NoError(t, emailTaskContextRepo.RecordOutboundMessageRef(ctx, project.ID, "Alice@Example.com", "<bot-response@example.com>", sessionKey))
 
-	attachmentRepo := repository.NewAttachmentRepo(db)
-	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, repository.NewScheduleRepo(db), attachmentRepo)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
+	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, sqlite.NewScheduleRepo(db), attachmentRepo)
 	llmSvc.SetLLMCaller(testutil.NewMockLLMCaller())
 	workerSvc := NewWorkerService(llmSvc, 0, nil)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
-	svc := NewEmailService(settingsRepo, projectRepo, llmConfigRepo, taskRepo, execRepo, repository.NewScheduleRepo(db), taskSvc, llmSvc, workerSvc, emailAuthRepo, emailTaskContextRepo)
+	svc := NewEmailService(settingsRepo, projectRepo, llmConfigRepo, taskRepo, execRepo, sqlite.NewScheduleRepo(db), taskSvc, llmSvc, workerSvc, emailAuthRepo, emailTaskContextRepo)
 	svc.SetEmailSenderProjectRepo(emailSenderProjectRepo)
-	threadInputRepo := repository.NewThreadInputRepo(db)
+	threadInputRepo := sqlite.NewThreadInputRepo(db)
 	svc.SetThreadInputRepo(threadInputRepo)
 	var runReq ChannelChatRunRequest
 	svc.SetChannelChatRunner(func(_ context.Context, req ChannelChatRunRequest) { runReq = req })
@@ -2134,19 +2134,19 @@ func TestEmailService_UsesOutboundResponseIDForActiveChatQueue(t *testing.T) {
 func TestEmailService_UsesOutboundResponseIDForCompletedHistory(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	settingsRepo := repository.NewSettingsRepo(db)
-	projectRepo := repository.NewProjectRepo(db)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	execRepo := repository.NewExecutionRepo(db)
-	emailAuthRepo := repository.NewEmailAuthRepo(db)
-	emailTaskContextRepo := repository.NewEmailTaskContextRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	execRepo := sqlite.NewExecutionRepo(db)
+	emailAuthRepo := sqlite.NewEmailAuthRepo(db)
+	emailTaskContextRepo := sqlite.NewEmailTaskContextRepo(db)
 	project := &models.Project{Name: "Email Outbound History Project"}
 	require.NoError(t, projectRepo.Create(ctx, project))
 	otherProject := &models.Project{Name: "Other Email Project"}
 	require.NoError(t, projectRepo.Create(ctx, otherProject))
 	require.NoError(t, emailAuthRepo.Create(ctx, &models.EmailAuthorizedSender{ProjectID: project.ID, EmailAddress: "alice@example.com", AddedBy: "test"}))
-	emailSenderProjectRepo := repository.NewEmailSenderProjectRepo(db)
+	emailSenderProjectRepo := sqlite.NewEmailSenderProjectRepo(db)
 	require.NoError(t, emailSenderProjectRepo.SetSenderProject(ctx, "alice@example.com", project.ID))
 	agent := &models.LLMConfig{Name: "Email Agent", Provider: models.ProviderTest, Model: "test", IsDefault: true}
 	require.NoError(t, llmConfigRepo.Create(ctx, agent))
@@ -2159,14 +2159,14 @@ func TestEmailService_UsesOutboundResponseIDForCompletedHistory(t *testing.T) {
 	require.NoError(t, emailTaskContextRepo.RecordOutboundMessageRef(ctx, project.ID, "alice@example.com", "<bot-response@example.com>", sessionKey))
 	require.NoError(t, emailTaskContextRepo.RecordOutboundMessageRef(ctx, otherProject.ID, "alice@example.com", "<foreign-bot-response@example.com>", "email:alice@example.com:<foreign@example.com>"))
 
-	attachmentRepo := repository.NewAttachmentRepo(db)
-	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, repository.NewScheduleRepo(db), attachmentRepo)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
+	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, sqlite.NewScheduleRepo(db), attachmentRepo)
 	llmSvc.SetLLMCaller(testutil.NewMockLLMCaller())
 	workerSvc := NewWorkerService(llmSvc, 0, nil)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
-	svc := NewEmailService(settingsRepo, projectRepo, llmConfigRepo, taskRepo, execRepo, repository.NewScheduleRepo(db), taskSvc, llmSvc, workerSvc, emailAuthRepo, emailTaskContextRepo)
+	svc := NewEmailService(settingsRepo, projectRepo, llmConfigRepo, taskRepo, execRepo, sqlite.NewScheduleRepo(db), taskSvc, llmSvc, workerSvc, emailAuthRepo, emailTaskContextRepo)
 	svc.SetEmailSenderProjectRepo(emailSenderProjectRepo)
-	svc.SetThreadInputRepo(repository.NewThreadInputRepo(db))
+	svc.SetThreadInputRepo(sqlite.NewThreadInputRepo(db))
 	var runReq ChannelChatRunRequest
 	svc.SetChannelChatRunner(func(_ context.Context, req ChannelChatRunRequest) { runReq = req })
 
@@ -2188,17 +2188,17 @@ func TestEmailService_UsesOutboundResponseIDForCompletedHistory(t *testing.T) {
 func TestEmailService_UsesThreadScopedSessionForActiveChatAndHistory(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	settingsRepo := repository.NewSettingsRepo(db)
-	projectRepo := repository.NewProjectRepo(db)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	execRepo := repository.NewExecutionRepo(db)
-	emailAuthRepo := repository.NewEmailAuthRepo(db)
-	emailTaskContextRepo := repository.NewEmailTaskContextRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	execRepo := sqlite.NewExecutionRepo(db)
+	emailAuthRepo := sqlite.NewEmailAuthRepo(db)
+	emailTaskContextRepo := sqlite.NewEmailTaskContextRepo(db)
 	project := &models.Project{Name: "Email Session Project"}
 	require.NoError(t, projectRepo.Create(ctx, project))
 	require.NoError(t, emailAuthRepo.Create(ctx, &models.EmailAuthorizedSender{ProjectID: project.ID, EmailAddress: "alice@example.com", AddedBy: "test"}))
-	emailSenderProjectRepo := repository.NewEmailSenderProjectRepo(db)
+	emailSenderProjectRepo := sqlite.NewEmailSenderProjectRepo(db)
 	require.NoError(t, emailSenderProjectRepo.SetSenderProject(ctx, "alice@example.com", project.ID))
 	agent := &models.LLMConfig{Name: "Email Agent", Provider: models.ProviderTest, Model: "test", IsDefault: true}
 	require.NoError(t, llmConfigRepo.Create(ctx, agent))
@@ -2213,14 +2213,14 @@ func TestEmailService_UsesThreadScopedSessionForActiveChatAndHistory(t *testing.
 	completedExec := &models.Execution{TaskID: completedTask.ID, AgentConfigID: agent.ID, Status: models.ExecCompleted, PromptSent: "other prior"}
 	require.NoError(t, execRepo.Create(ctx, completedExec))
 
-	attachmentRepo := repository.NewAttachmentRepo(db)
-	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, repository.NewScheduleRepo(db), attachmentRepo)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
+	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, sqlite.NewScheduleRepo(db), attachmentRepo)
 	llmSvc.SetLLMCaller(testutil.NewMockLLMCaller())
 	workerSvc := NewWorkerService(llmSvc, 0, nil)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
-	svc := NewEmailService(settingsRepo, projectRepo, llmConfigRepo, taskRepo, execRepo, repository.NewScheduleRepo(db), taskSvc, llmSvc, workerSvc, emailAuthRepo, emailTaskContextRepo)
+	svc := NewEmailService(settingsRepo, projectRepo, llmConfigRepo, taskRepo, execRepo, sqlite.NewScheduleRepo(db), taskSvc, llmSvc, workerSvc, emailAuthRepo, emailTaskContextRepo)
 	svc.SetEmailSenderProjectRepo(emailSenderProjectRepo)
-	svc.SetThreadInputRepo(repository.NewThreadInputRepo(db))
+	svc.SetThreadInputRepo(sqlite.NewThreadInputRepo(db))
 	var runReq ChannelChatRunRequest
 	svc.SetChannelChatRunner(func(_ context.Context, req ChannelChatRunRequest) { runReq = req })
 	svc.ProcessIncoming(ctx, EmailInboundMessage{FromAddress: "alice@example.com", Subject: "Other", Body: "continue other", MessageID: "<other-2@example.com>", References: "<other@example.com>"})
@@ -2229,7 +2229,7 @@ func TestEmailService_UsesThreadScopedSessionForActiveChatAndHistory(t *testing.
 	require.Equal(t, "email:alice@example.com:<other@example.com>", runReq.ReplyContext.EmailSessionKey)
 	require.Len(t, runReq.ChatHistory, 1)
 	require.Equal(t, completedExec.ID, runReq.ChatHistory[0].ID)
-	pending, err := repository.NewThreadInputRepo(db).ListPendingForChat(ctx, project.ID)
+	pending, err := sqlite.NewThreadInputRepo(db).ListPendingForChat(ctx, project.ID)
 	require.NoError(t, err)
 	require.Empty(t, pending)
 }
@@ -2237,13 +2237,13 @@ func TestEmailService_UsesThreadScopedSessionForActiveChatAndHistory(t *testing.
 func TestEmailService_SendResponsesDisabledSkipsReplies(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	settingsRepo := repository.NewSettingsRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 	require.NoError(t, settingsRepo.Set(ctx, EmailSettingAddress, "bot@example.com"))
 	require.NoError(t, settingsRepo.Set(ctx, EmailSettingPassword, "secret"))
 	require.NoError(t, settingsRepo.Set(ctx, EmailSettingIMAPHost, "imap.example.com"))
 	require.NoError(t, settingsRepo.Set(ctx, EmailSettingSMTPHost, "smtp.example.com"))
 	require.NoError(t, settingsRepo.Set(ctx, EmailSettingSendResponses, "false"))
-	svc := NewEmailService(settingsRepo, repository.NewProjectRepo(db), repository.NewLLMConfigRepo(db), repository.NewTaskRepo(db, nil), repository.NewExecutionRepo(db), repository.NewScheduleRepo(db), nil, nil, nil, repository.NewEmailAuthRepo(db), repository.NewEmailTaskContextRepo(db))
+	svc := NewEmailService(settingsRepo, sqlite.NewProjectRepo(db), sqlite.NewLLMConfigRepo(db), sqlite.NewTaskRepo(db, nil), sqlite.NewExecutionRepo(db), sqlite.NewScheduleRepo(db), nil, nil, nil, sqlite.NewEmailAuthRepo(db), sqlite.NewEmailTaskContextRepo(db))
 	called := false
 	svc.sendMail = func(context.Context, EmailRuntimeConfig, string, string, string, string, string, string) error {
 		called = true
@@ -2256,11 +2256,11 @@ func TestEmailService_SendResponsesDisabledSkipsReplies(t *testing.T) {
 func TestEmailService_SendTaskCompletionPreservesThreading(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	settingsRepo := repository.NewSettingsRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 	for k, v := range map[string]string{EmailSettingAddress: "bot@example.com", EmailSettingPassword: "secret", EmailSettingIMAPHost: "imap.example.com", EmailSettingSMTPHost: "smtp.example.com", EmailSettingSendResponses: "true"} {
 		require.NoError(t, settingsRepo.Set(ctx, k, v))
 	}
-	svc := NewEmailService(settingsRepo, repository.NewProjectRepo(db), repository.NewLLMConfigRepo(db), repository.NewTaskRepo(db, nil), repository.NewExecutionRepo(db), repository.NewScheduleRepo(db), nil, nil, nil, repository.NewEmailAuthRepo(db), repository.NewEmailTaskContextRepo(db))
+	svc := NewEmailService(settingsRepo, sqlite.NewProjectRepo(db), sqlite.NewLLMConfigRepo(db), sqlite.NewTaskRepo(db, nil), sqlite.NewExecutionRepo(db), sqlite.NewScheduleRepo(db), nil, nil, nil, sqlite.NewEmailAuthRepo(db), sqlite.NewEmailTaskContextRepo(db))
 	var gotTo, gotSubject, gotInReplyTo, gotRefs string
 	svc.sendMail = func(_ context.Context, _ EmailRuntimeConfig, to, subject, body, messageID, inReplyTo, references string) error {
 		gotTo, gotSubject, gotInReplyTo, gotRefs = to, subject, inReplyTo, references
@@ -2277,20 +2277,20 @@ func TestEmailService_SendTaskCompletionPreservesThreading(t *testing.T) {
 func TestEmailService_SendChatResponseRecordsOutboundMessageRef(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	settingsRepo := repository.NewSettingsRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 	for k, v := range map[string]string{EmailSettingAddress: "bot@example.com", EmailSettingPassword: "secret", EmailSettingIMAPHost: "imap.example.com", EmailSettingSMTPHost: "smtp.example.com", EmailSettingSendResponses: "true"} {
 		require.NoError(t, settingsRepo.Set(ctx, k, v))
 	}
-	projectRepo := repository.NewProjectRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
 	project := &models.Project{Name: "Email Outbound Alias Project"}
 	require.NoError(t, projectRepo.Create(ctx, project))
-	taskRepo := repository.NewTaskRepo(db, nil)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
 	task := models.Task{ProjectID: project.ID, Title: "Email chat", Prompt: "request", Category: models.CategoryChat, Status: models.StatusCompleted, CreatedVia: models.TaskOriginEmail}
 	require.NoError(t, taskRepo.Create(ctx, &task))
-	contextRepo := repository.NewEmailTaskContextRepo(db)
+	contextRepo := sqlite.NewEmailTaskContextRepo(db)
 	sessionKey := "email:alice@example.com:<root@example.com>"
 	require.NoError(t, contextRepo.Upsert(ctx, &models.EmailTaskContext{TaskID: task.ID, EmailFrom: "alice@example.com", EmailMessageID: "<root@example.com>", EmailSubject: "Root", EmailSessionKey: sessionKey}))
-	svc := NewEmailService(settingsRepo, projectRepo, repository.NewLLMConfigRepo(db), taskRepo, repository.NewExecutionRepo(db), repository.NewScheduleRepo(db), nil, nil, nil, repository.NewEmailAuthRepo(db), contextRepo)
+	svc := NewEmailService(settingsRepo, projectRepo, sqlite.NewLLMConfigRepo(db), taskRepo, sqlite.NewExecutionRepo(db), sqlite.NewScheduleRepo(db), nil, nil, nil, sqlite.NewEmailAuthRepo(db), contextRepo)
 	var outboundMessageID string
 	svc.sendMail = func(_ context.Context, _ EmailRuntimeConfig, _, _, _, messageID, _, _ string) error {
 		outboundMessageID = messageID
@@ -2308,11 +2308,11 @@ func TestEmailService_SendChatResponseRecordsOutboundMessageRef(t *testing.T) {
 func TestEmailService_SendOutboundMessage_NewEmailUsesSMTPWithoutReplyHeaders(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	settingsRepo := repository.NewSettingsRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 	for k, v := range map[string]string{EmailSettingAddress: "bot@example.com", EmailSettingPassword: "secret", EmailSettingIMAPHost: "imap.example.com", EmailSettingSMTPHost: "smtp.example.com"} {
 		require.NoError(t, settingsRepo.Set(ctx, k, v))
 	}
-	svc := NewEmailService(settingsRepo, repository.NewProjectRepo(db), repository.NewLLMConfigRepo(db), repository.NewTaskRepo(db, nil), repository.NewExecutionRepo(db), repository.NewScheduleRepo(db), nil, nil, nil, repository.NewEmailAuthRepo(db), repository.NewEmailTaskContextRepo(db))
+	svc := NewEmailService(settingsRepo, sqlite.NewProjectRepo(db), sqlite.NewLLMConfigRepo(db), sqlite.NewTaskRepo(db, nil), sqlite.NewExecutionRepo(db), sqlite.NewScheduleRepo(db), nil, nil, nil, sqlite.NewEmailAuthRepo(db), sqlite.NewEmailTaskContextRepo(db))
 	var gotTo, gotSubject, gotBody, gotInReplyTo, gotRefs string
 	svc.sendMail = func(_ context.Context, _ EmailRuntimeConfig, to, subject, body, messageID, inReplyTo, references string) error {
 		gotTo, gotSubject, gotBody, gotInReplyTo, gotRefs = to, subject, body, inReplyTo, references
@@ -2351,23 +2351,23 @@ func TestEmailService_OutboundPathsLoadOneCurrentSettingsSnapshot(t *testing.T) 
 		t.Run(tt.name, func(t *testing.T) {
 			db := testutil.NewTestDB(t)
 			ctx := context.Background()
-			settingsRepo := repository.NewSettingsRepo(db)
+			settingsRepo := sqlite.NewSettingsRepo(db)
 			for key, value := range map[string]string{
 				EmailSettingProvider: EmailProviderCustom, EmailSettingAddress: "bot@example.com", EmailSettingPassword: "secret",
 				EmailSettingIMAPHost: "imap.example.com", EmailSettingSMTPHost: "smtp.example.com", EmailSettingSMTPPort: "2525", EmailSettingSendResponses: "true",
 			} {
 				require.NoError(t, settingsRepo.Set(ctx, key, value))
 			}
-			projectRepo := repository.NewProjectRepo(db)
+			projectRepo := sqlite.NewProjectRepo(db)
 			projects, err := projectRepo.List(ctx)
 			require.NoError(t, err)
 			require.NotEmpty(t, projects)
-			taskRepo := repository.NewTaskRepo(db, nil)
+			taskRepo := sqlite.NewTaskRepo(db, nil)
 			task := models.Task{ProjectID: projects[0].ID, Title: "Email task", Prompt: "request", Category: models.CategoryActive, Status: models.StatusCompleted, CreatedVia: models.TaskOriginEmail}
 			require.NoError(t, taskRepo.Create(ctx, &task))
-			contextRepo := repository.NewEmailTaskContextRepo(db)
+			contextRepo := sqlite.NewEmailTaskContextRepo(db)
 			require.NoError(t, contextRepo.Upsert(ctx, &models.EmailTaskContext{TaskID: task.ID, EmailFrom: "person@example.com", EmailMessageID: "<message@example.com>", EmailReferences: "<root@example.com>", EmailSubject: "Question"}))
-			svc := NewEmailService(settingsRepo, projectRepo, repository.NewLLMConfigRepo(db), taskRepo, repository.NewExecutionRepo(db), repository.NewScheduleRepo(db), nil, nil, nil, repository.NewEmailAuthRepo(db), contextRepo)
+			svc := NewEmailService(settingsRepo, projectRepo, sqlite.NewLLMConfigRepo(db), taskRepo, sqlite.NewExecutionRepo(db), sqlite.NewScheduleRepo(db), nil, nil, nil, sqlite.NewEmailAuthRepo(db), contextRepo)
 
 			var settingsSelects atomic.Int64
 			settingsRepo.SetQueryObserver(func(query string) {
@@ -2399,7 +2399,7 @@ func TestEmailService_OutboundPathsLoadOneCurrentSettingsSnapshot(t *testing.T) 
 func TestEmailService_SettingsSnapshotsArePartialFreshAndPerOperation(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	settingsRepo := repository.NewSettingsRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 	for key, value := range map[string]string{
 		EmailSettingProvider: EmailProviderGmail,
 		EmailSettingAddress:  " Bot@Example.com ",
@@ -2407,7 +2407,7 @@ func TestEmailService_SettingsSnapshotsArePartialFreshAndPerOperation(t *testing
 	} {
 		require.NoError(t, settingsRepo.Set(ctx, key, value))
 	}
-	svc := NewEmailService(settingsRepo, repository.NewProjectRepo(db), repository.NewLLMConfigRepo(db), repository.NewTaskRepo(db, nil), repository.NewExecutionRepo(db), repository.NewScheduleRepo(db), nil, nil, nil, repository.NewEmailAuthRepo(db), repository.NewEmailTaskContextRepo(db))
+	svc := NewEmailService(settingsRepo, sqlite.NewProjectRepo(db), sqlite.NewLLMConfigRepo(db), sqlite.NewTaskRepo(db, nil), sqlite.NewExecutionRepo(db), sqlite.NewScheduleRepo(db), nil, nil, nil, sqlite.NewEmailAuthRepo(db), sqlite.NewEmailTaskContextRepo(db))
 	var configs []EmailRuntimeConfig
 	svc.sendMail = func(_ context.Context, cfg EmailRuntimeConfig, _, _, _, _, _, _ string) error {
 		configs = append(configs, cfg)
@@ -2451,7 +2451,7 @@ func TestEmailService_SettingsSnapshotsArePartialFreshAndPerOperation(t *testing
 
 func TestEmailService_SettingsSnapshotHonorsCancellation(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	svc := NewEmailService(repository.NewSettingsRepo(db), repository.NewProjectRepo(db), repository.NewLLMConfigRepo(db), repository.NewTaskRepo(db, nil), repository.NewExecutionRepo(db), repository.NewScheduleRepo(db), nil, nil, nil, repository.NewEmailAuthRepo(db), repository.NewEmailTaskContextRepo(db))
+	svc := NewEmailService(sqlite.NewSettingsRepo(db), sqlite.NewProjectRepo(db), sqlite.NewLLMConfigRepo(db), sqlite.NewTaskRepo(db, nil), sqlite.NewExecutionRepo(db), sqlite.NewScheduleRepo(db), nil, nil, nil, sqlite.NewEmailAuthRepo(db), sqlite.NewEmailTaskContextRepo(db))
 	called := false
 	svc.sendMail = func(context.Context, EmailRuntimeConfig, string, string, string, string, string, string) error {
 		called = true
@@ -2466,7 +2466,7 @@ func TestEmailService_SettingsSnapshotHonorsCancellation(t *testing.T) {
 
 func TestEmailService_SendOutboundMessage_ValidationAndMissingConfig(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	svc := NewEmailService(repository.NewSettingsRepo(db), repository.NewProjectRepo(db), repository.NewLLMConfigRepo(db), repository.NewTaskRepo(db, nil), repository.NewExecutionRepo(db), repository.NewScheduleRepo(db), nil, nil, nil, repository.NewEmailAuthRepo(db), repository.NewEmailTaskContextRepo(db))
+	svc := NewEmailService(sqlite.NewSettingsRepo(db), sqlite.NewProjectRepo(db), sqlite.NewLLMConfigRepo(db), sqlite.NewTaskRepo(db, nil), sqlite.NewExecutionRepo(db), sqlite.NewScheduleRepo(db), nil, nil, nil, sqlite.NewEmailAuthRepo(db), sqlite.NewEmailTaskContextRepo(db))
 	invalid := svc.SendOutboundMessage(context.Background(), "not-an-email", "Subject", "body")
 	require.False(t, invalid.OK)
 	require.Contains(t, invalid.Error, "invalid email recipient")
@@ -2478,7 +2478,7 @@ func TestEmailService_SendOutboundMessage_ValidationAndMissingConfig(t *testing.
 func TestSettingsQueryAcquiredObserverRunsWhileConnectionIsHeld(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	settingsRepo := repository.NewSettingsRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 	require.NoError(t, settingsRepo.Set(ctx, EmailSettingAddress, "bot@example.com"))
 
 	acquired := make(chan struct{})
@@ -2513,14 +2513,14 @@ func TestSettingsQueryAcquiredObserverRunsWhileConnectionIsHeld(t *testing.T) {
 func BenchmarkEmailServiceSettingsBurst(b *testing.B) {
 	db := testutil.NewTestDB(b)
 	ctx := context.Background()
-	settingsRepo := repository.NewSettingsRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 	for key, value := range map[string]string{
 		EmailSettingProvider: EmailProviderCustom, EmailSettingAddress: "bot@example.com", EmailSettingPassword: "secret",
 		EmailSettingIMAPHost: "imap.example.com", EmailSettingSMTPHost: "smtp.example.com", EmailSettingSendResponses: "true",
 	} {
 		require.NoError(b, settingsRepo.Set(ctx, key, value))
 	}
-	svc := NewEmailService(settingsRepo, repository.NewProjectRepo(db), repository.NewLLMConfigRepo(db), repository.NewTaskRepo(db, nil), repository.NewExecutionRepo(db), repository.NewScheduleRepo(db), nil, nil, nil, repository.NewEmailAuthRepo(db), repository.NewEmailTaskContextRepo(db))
+	svc := NewEmailService(settingsRepo, sqlite.NewProjectRepo(db), sqlite.NewLLMConfigRepo(db), sqlite.NewTaskRepo(db, nil), sqlite.NewExecutionRepo(db), sqlite.NewScheduleRepo(db), nil, nil, nil, sqlite.NewEmailAuthRepo(db), sqlite.NewEmailTaskContextRepo(db))
 	svc.sendMail = func(context.Context, EmailRuntimeConfig, string, string, string, string, string, string) error {
 		return nil
 	}
@@ -2553,14 +2553,14 @@ func BenchmarkEmailServiceSettingsContention(b *testing.B) {
 	b.Run("current", func(b *testing.B) {
 		db := testutil.NewTestDB(b)
 		ctx := context.Background()
-		settingsRepo := repository.NewSettingsRepo(db)
+		settingsRepo := sqlite.NewSettingsRepo(db)
 		for key, value := range map[string]string{
 			EmailSettingProvider: EmailProviderCustom, EmailSettingAddress: "bot@example.com", EmailSettingPassword: "secret",
 			EmailSettingIMAPHost: "imap.example.com", EmailSettingSMTPHost: "smtp.example.com", EmailSettingSendResponses: "true",
 		} {
 			require.NoError(b, settingsRepo.Set(ctx, key, value))
 		}
-		svc := NewEmailService(settingsRepo, repository.NewProjectRepo(db), repository.NewLLMConfigRepo(db), repository.NewTaskRepo(db, nil), repository.NewExecutionRepo(db), repository.NewScheduleRepo(db), nil, nil, nil, repository.NewEmailAuthRepo(db), repository.NewEmailTaskContextRepo(db))
+		svc := NewEmailService(settingsRepo, sqlite.NewProjectRepo(db), sqlite.NewLLMConfigRepo(db), sqlite.NewTaskRepo(db, nil), sqlite.NewExecutionRepo(db), sqlite.NewScheduleRepo(db), nil, nil, nil, sqlite.NewEmailAuthRepo(db), sqlite.NewEmailTaskContextRepo(db))
 		var settingsSelects atomic.Int64
 		settingsRepo.SetQueryObserver(func(query string) {
 			if strings.Contains(query, "FROM app_settings") {
@@ -2913,7 +2913,7 @@ func TestEmailServiceRemovalFencesBlockedPoll(t *testing.T) {
 		PollInterval: time.Hour,
 	}
 	client := newBlockingEmailIMAPClient(testIMAPMessageWithBody(1, "removed account", "alice@example.com", "old body"))
-	receipts := &countingEmailInboundReceiptStore{inner: repository.NewEmailInboundReceiptRepo(db)}
+	receipts := &countingEmailInboundReceiptStore{inner: sqlite.NewEmailInboundReceiptRepo(db)}
 	var processed atomic.Int32
 	svc := &EmailService{emailInboundReceiptStore: receipts}
 	svc.configLoader = func(context.Context) (EmailRuntimeConfig, error) { return cfg, nil }
@@ -3129,11 +3129,11 @@ func TestEmailServiceStartWaitsForConcurrentStopFence(t *testing.T) {
 func TestEmailService_CompleteExecutionUsesSharedChatPromotion(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	taskRepo := repository.NewTaskRepo(db, nil)
-	execRepo := repository.NewExecutionRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	execRepo := sqlite.NewExecutionRepo(db)
 	project := &models.Project{Name: "Email Promotion Project"}
-	require.NoError(t, repository.NewProjectRepo(db).Create(ctx, project))
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	require.NoError(t, sqlite.NewProjectRepo(db).Create(ctx, project))
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
 	agent := &models.LLMConfig{Name: "Email Promotion Agent", Provider: models.ProviderTest, Model: "test", IsDefault: true}
 	require.NoError(t, llmConfigRepo.Create(ctx, agent))
 	agentID := agent.ID
@@ -3165,14 +3165,14 @@ func TestEmailService_CompleteExecutionUsesSharedChatPromotion(t *testing.T) {
 func TestEmailServiceProcessIncomingPassesChannelRuntimeTools(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	settingsRepo := repository.NewSettingsRepo(db)
-	projectRepo := repository.NewProjectRepo(db)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	execRepo := repository.NewExecutionRepo(db)
-	emailAuthRepo := repository.NewEmailAuthRepo(db)
-	emailTaskContextRepo := repository.NewEmailTaskContextRepo(db)
-	emailSenderProjectRepo := repository.NewEmailSenderProjectRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	execRepo := sqlite.NewExecutionRepo(db)
+	emailAuthRepo := sqlite.NewEmailAuthRepo(db)
+	emailTaskContextRepo := sqlite.NewEmailTaskContextRepo(db)
+	emailSenderProjectRepo := sqlite.NewEmailSenderProjectRepo(db)
 
 	project := &models.Project{Name: "Email RT Project"}
 	require.NoError(t, projectRepo.Create(ctx, project))
@@ -3181,12 +3181,12 @@ func TestEmailServiceProcessIncomingPassesChannelRuntimeTools(t *testing.T) {
 	agent := &models.LLMConfig{Name: "Email Agent", Provider: models.ProviderTest, Model: "test", IsDefault: true}
 	require.NoError(t, llmConfigRepo.Create(ctx, agent))
 
-	attachmentRepo := repository.NewAttachmentRepo(db)
-	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, repository.NewScheduleRepo(db), attachmentRepo)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
+	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, sqlite.NewScheduleRepo(db), attachmentRepo)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, nil)
-	svc := NewEmailService(settingsRepo, projectRepo, llmConfigRepo, taskRepo, execRepo, repository.NewScheduleRepo(db), taskSvc, llmSvc, nil, emailAuthRepo, emailTaskContextRepo)
+	svc := NewEmailService(settingsRepo, projectRepo, llmConfigRepo, taskRepo, execRepo, sqlite.NewScheduleRepo(db), taskSvc, llmSvc, nil, emailAuthRepo, emailTaskContextRepo)
 	svc.SetEmailSenderProjectRepo(emailSenderProjectRepo)
-	svc.SetThreadInputRepo(repository.NewThreadInputRepo(db))
+	svc.SetThreadInputRepo(sqlite.NewThreadInputRepo(db))
 
 	var got ChannelChatRunRequest
 	svc.SetChannelChatRunner(func(_ context.Context, req ChannelChatRunRequest) { got = req })
@@ -3209,14 +3209,14 @@ func TestEmailServiceProcessIncomingPassesChannelRuntimeTools(t *testing.T) {
 func TestEmailServiceSwitchProjectViaRuntimeToolsPersists(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	settingsRepo := repository.NewSettingsRepo(db)
-	projectRepo := repository.NewProjectRepo(db)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	execRepo := repository.NewExecutionRepo(db)
-	emailAuthRepo := repository.NewEmailAuthRepo(db)
-	emailTaskContextRepo := repository.NewEmailTaskContextRepo(db)
-	emailSenderProjectRepo := repository.NewEmailSenderProjectRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	execRepo := sqlite.NewExecutionRepo(db)
+	emailAuthRepo := sqlite.NewEmailAuthRepo(db)
+	emailTaskContextRepo := sqlite.NewEmailTaskContextRepo(db)
+	emailSenderProjectRepo := sqlite.NewEmailSenderProjectRepo(db)
 
 	project1 := &models.Project{Name: "Default Email Project"}
 	project2 := &models.Project{Name: "Target Email Project"}
@@ -3227,12 +3227,12 @@ func TestEmailServiceSwitchProjectViaRuntimeToolsPersists(t *testing.T) {
 	agent := &models.LLMConfig{Name: "Email Agent", Provider: models.ProviderTest, Model: "test", IsDefault: true}
 	require.NoError(t, llmConfigRepo.Create(ctx, agent))
 
-	attachmentRepo := repository.NewAttachmentRepo(db)
-	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, repository.NewScheduleRepo(db), attachmentRepo)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
+	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, sqlite.NewScheduleRepo(db), attachmentRepo)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, nil)
-	svc := NewEmailService(settingsRepo, projectRepo, llmConfigRepo, taskRepo, execRepo, repository.NewScheduleRepo(db), taskSvc, llmSvc, nil, emailAuthRepo, emailTaskContextRepo)
+	svc := NewEmailService(settingsRepo, projectRepo, llmConfigRepo, taskRepo, execRepo, sqlite.NewScheduleRepo(db), taskSvc, llmSvc, nil, emailAuthRepo, emailTaskContextRepo)
 	svc.SetEmailSenderProjectRepo(emailSenderProjectRepo)
-	svc.SetThreadInputRepo(repository.NewThreadInputRepo(db))
+	svc.SetThreadInputRepo(sqlite.NewThreadInputRepo(db))
 
 	var got ChannelChatRunRequest
 	svc.SetChannelChatRunner(func(_ context.Context, req ChannelChatRunRequest) { got = req })
@@ -3262,14 +3262,14 @@ func TestEmailServiceSwitchProjectViaRuntimeToolsPersists(t *testing.T) {
 func TestEmailServiceSwitchProjectViaRuntimeToolsNormalizesDisplayNameSender(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	settingsRepo := repository.NewSettingsRepo(db)
-	projectRepo := repository.NewProjectRepo(db)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	execRepo := repository.NewExecutionRepo(db)
-	emailAuthRepo := repository.NewEmailAuthRepo(db)
-	emailTaskContextRepo := repository.NewEmailTaskContextRepo(db)
-	emailSenderProjectRepo := repository.NewEmailSenderProjectRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	execRepo := sqlite.NewExecutionRepo(db)
+	emailAuthRepo := sqlite.NewEmailAuthRepo(db)
+	emailTaskContextRepo := sqlite.NewEmailTaskContextRepo(db)
+	emailSenderProjectRepo := sqlite.NewEmailSenderProjectRepo(db)
 
 	project1 := &models.Project{Name: "Default Display Email Project"}
 	project2 := &models.Project{Name: "Target Display Email Project"}
@@ -3280,12 +3280,12 @@ func TestEmailServiceSwitchProjectViaRuntimeToolsNormalizesDisplayNameSender(t *
 	agent := &models.LLMConfig{Name: "Email Agent", Provider: models.ProviderTest, Model: "test", IsDefault: true}
 	require.NoError(t, llmConfigRepo.Create(ctx, agent))
 
-	attachmentRepo := repository.NewAttachmentRepo(db)
-	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, repository.NewScheduleRepo(db), attachmentRepo)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
+	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, sqlite.NewScheduleRepo(db), attachmentRepo)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, nil)
-	svc := NewEmailService(settingsRepo, projectRepo, llmConfigRepo, taskRepo, execRepo, repository.NewScheduleRepo(db), taskSvc, llmSvc, nil, emailAuthRepo, emailTaskContextRepo)
+	svc := NewEmailService(settingsRepo, projectRepo, llmConfigRepo, taskRepo, execRepo, sqlite.NewScheduleRepo(db), taskSvc, llmSvc, nil, emailAuthRepo, emailTaskContextRepo)
 	svc.SetEmailSenderProjectRepo(emailSenderProjectRepo)
-	svc.SetThreadInputRepo(repository.NewThreadInputRepo(db))
+	svc.SetThreadInputRepo(sqlite.NewThreadInputRepo(db))
 
 	var got ChannelChatRunRequest
 	svc.SetChannelChatRunner(func(_ context.Context, req ChannelChatRunRequest) { got = req })
@@ -3316,14 +3316,14 @@ func TestEmailServiceSwitchProjectViaRuntimeToolsNormalizesDisplayNameSender(t *
 func TestEmailServiceSwitchProjectViaRuntimeToolsAllowsSystemAuthorizedSenderAcrossProjects(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	settingsRepo := repository.NewSettingsRepo(db)
-	projectRepo := repository.NewProjectRepo(db)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	execRepo := repository.NewExecutionRepo(db)
-	emailAuthRepo := repository.NewEmailAuthRepo(db)
-	emailTaskContextRepo := repository.NewEmailTaskContextRepo(db)
-	emailSenderProjectRepo := repository.NewEmailSenderProjectRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	execRepo := sqlite.NewExecutionRepo(db)
+	emailAuthRepo := sqlite.NewEmailAuthRepo(db)
+	emailTaskContextRepo := sqlite.NewEmailTaskContextRepo(db)
+	emailSenderProjectRepo := sqlite.NewEmailSenderProjectRepo(db)
 
 	project1 := &models.Project{Name: "openvibely"}
 	project2 := &models.Project{Name: "Default Project"}
@@ -3334,12 +3334,12 @@ func TestEmailServiceSwitchProjectViaRuntimeToolsAllowsSystemAuthorizedSenderAcr
 	agent := &models.LLMConfig{Name: "Email Agent", Provider: models.ProviderTest, Model: "test", IsDefault: true}
 	require.NoError(t, llmConfigRepo.Create(ctx, agent))
 
-	attachmentRepo := repository.NewAttachmentRepo(db)
-	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, repository.NewScheduleRepo(db), attachmentRepo)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
+	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, sqlite.NewScheduleRepo(db), attachmentRepo)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, nil)
-	svc := NewEmailService(settingsRepo, projectRepo, llmConfigRepo, taskRepo, execRepo, repository.NewScheduleRepo(db), taskSvc, llmSvc, nil, emailAuthRepo, emailTaskContextRepo)
+	svc := NewEmailService(settingsRepo, projectRepo, llmConfigRepo, taskRepo, execRepo, sqlite.NewScheduleRepo(db), taskSvc, llmSvc, nil, emailAuthRepo, emailTaskContextRepo)
 	svc.SetEmailSenderProjectRepo(emailSenderProjectRepo)
-	svc.SetThreadInputRepo(repository.NewThreadInputRepo(db))
+	svc.SetThreadInputRepo(sqlite.NewThreadInputRepo(db))
 
 	var got ChannelChatRunRequest
 	svc.SetChannelChatRunner(func(_ context.Context, req ChannelChatRunRequest) { got = req })
@@ -3370,10 +3370,10 @@ func TestEmailServiceSwitchProjectViaRuntimeToolsAllowsSystemAuthorizedSenderAcr
 func TestEmailServiceResolveAuthorizedProjectUsesSavedSelection(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	settingsRepo := repository.NewSettingsRepo(db)
-	projectRepo := repository.NewProjectRepo(db)
-	emailAuthRepo := repository.NewEmailAuthRepo(db)
-	emailSenderProjectRepo := repository.NewEmailSenderProjectRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	emailAuthRepo := sqlite.NewEmailAuthRepo(db)
+	emailSenderProjectRepo := sqlite.NewEmailSenderProjectRepo(db)
 
 	project1 := &models.Project{Name: "First Project"}
 	project2 := &models.Project{Name: "Second Project"}
@@ -3504,7 +3504,7 @@ func TestEmailService_InboundInlineTextAttachmentHonorsSkipSetting(t *testing.T)
 		tasks, err := svc.taskRepo.ListByProject(ctx, project.ID, "")
 		require.NoError(t, err)
 		require.Empty(t, tasks, "skipped attachment-only email must not create a task")
-		executions, err := svc.execRepo.(*repository.ExecutionRepo).ListByProject(ctx, project.ID, 10)
+		executions, err := svc.execRepo.(*sqlite.ExecutionRepo).ListByProject(ctx, project.ID, 10)
 		require.NoError(t, err)
 		require.Empty(t, executions, "skipped attachment-only email must not create an execution")
 	})
@@ -3532,36 +3532,36 @@ func TestEmailService_InboundInlineTextAttachmentHonorsSkipSetting(t *testing.T)
 	})
 }
 
-func newEmailAttachmentTestService(t *testing.T) (*EmailService, *repository.ChatAttachmentRepo, *repository.ThreadInputRepo, *models.Project, *models.LLMConfig, *models.LLMConfig) {
+func newEmailAttachmentTestService(t *testing.T) (*EmailService, *sqlite.ChatAttachmentRepo, *sqlite.ThreadInputRepo, *models.Project, *models.LLMConfig, *models.LLMConfig) {
 	t.Helper()
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	settingsRepo := repository.NewSettingsRepo(db)
-	projectRepo := repository.NewProjectRepo(db)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	execRepo := repository.NewExecutionRepo(db)
-	emailAuthRepo := repository.NewEmailAuthRepo(db)
-	emailTaskContextRepo := repository.NewEmailTaskContextRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	execRepo := sqlite.NewExecutionRepo(db)
+	emailAuthRepo := sqlite.NewEmailAuthRepo(db)
+	emailTaskContextRepo := sqlite.NewEmailTaskContextRepo(db)
 	project := &models.Project{Name: "Email Attachment Project", IsDefault: true}
 	require.NoError(t, projectRepo.Create(ctx, project))
 	require.NoError(t, emailAuthRepo.Create(ctx, &models.EmailAuthorizedSender{ProjectID: project.ID, EmailAddress: "alice@example.com", AddedBy: "test"}))
-	emailSenderProjectRepo := repository.NewEmailSenderProjectRepo(db)
+	emailSenderProjectRepo := sqlite.NewEmailSenderProjectRepo(db)
 	require.NoError(t, emailSenderProjectRepo.SetSenderProject(ctx, "alice@example.com", project.ID))
 	defaultAgent := &models.LLMConfig{Name: "text-only", Provider: models.ProviderOpenAICompatible, AuthMethod: models.AuthMethodAPIKey, Model: "text-only", IsDefault: true}
 	require.NoError(t, llmConfigRepo.Create(ctx, defaultAgent))
 	visionAgent := &models.LLMConfig{Name: "vision", Provider: models.ProviderAnthropic, AuthMethod: models.AuthMethodAPIKey, Model: "claude-sonnet-5", APIKey: "key"}
 	require.NoError(t, llmConfigRepo.Create(ctx, visionAgent))
-	attachmentRepo := repository.NewAttachmentRepo(db)
-	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, repository.NewScheduleRepo(db), attachmentRepo)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
+	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, sqlite.NewScheduleRepo(db), attachmentRepo)
 	llmSvc.SetLLMCaller(testutil.NewMockLLMCaller())
 	workerSvc := NewWorkerService(llmSvc, 0, nil)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
-	svc := NewEmailService(settingsRepo, projectRepo, llmConfigRepo, taskRepo, execRepo, repository.NewScheduleRepo(db), taskSvc, llmSvc, workerSvc, emailAuthRepo, emailTaskContextRepo)
+	svc := NewEmailService(settingsRepo, projectRepo, llmConfigRepo, taskRepo, execRepo, sqlite.NewScheduleRepo(db), taskSvc, llmSvc, workerSvc, emailAuthRepo, emailTaskContextRepo)
 	svc.SetEmailSenderProjectRepo(emailSenderProjectRepo)
-	threadInputRepo := repository.NewThreadInputRepo(db)
+	threadInputRepo := sqlite.NewThreadInputRepo(db)
 	svc.SetThreadInputRepo(threadInputRepo)
-	chatAttachmentRepo := repository.NewChatAttachmentRepo(db)
+	chatAttachmentRepo := sqlite.NewChatAttachmentRepo(db)
 	svc.SetChatAttachmentRepo(chatAttachmentRepo)
 	svc.SetUploadsDir(t.TempDir())
 	return svc, chatAttachmentRepo, threadInputRepo, project, defaultAgent, visionAgent

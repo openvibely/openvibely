@@ -16,7 +16,7 @@ import (
 
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/testutil"
 )
 
@@ -650,9 +650,9 @@ func TestWorktreeGitStateHelpersDetectMergedBranchesAndConflicts(t *testing.T) {
 func TestClearStaleConflictStatusIfCleanUpdatesTask(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	taskRepo := repository.NewTaskRepo(db, nil)
-	settingsRepo := repository.NewSettingsRepo(db)
-	ws := NewWorktreeService(taskRepo, repository.NewProjectRepo(db), settingsRepo)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	settingsRepo := sqlite.NewSettingsRepo(db)
+	ws := NewWorktreeService(taskRepo, sqlite.NewProjectRepo(db), settingsRepo)
 	repoDir := createTestGitRepo(t)
 
 	if err := settingsRepo.Set(ctx, "worktree_auto_merge", "true"); err != nil {
@@ -709,9 +709,9 @@ func TestClearStaleConflictStatusIfCleanUpdatesTask(t *testing.T) {
 
 func TestSetupWorktree(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	projectRepo := repository.NewProjectRepo(db)
-	settingsRepo := repository.NewSettingsRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	projectRepo := sqlite.NewProjectRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 	ctx := context.Background()
 
 	repoDir := createTestGitRepo(t)
@@ -766,8 +766,8 @@ func TestSetupWorktree(t *testing.T) {
 
 func TestSetupWorktree_ReusesStoredWorktreeWhenBaseNoLongerExists(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	ws := NewWorktreeService(taskRepo, repository.NewProjectRepo(db), repository.NewSettingsRepo(db))
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	ws := NewWorktreeService(taskRepo, sqlite.NewProjectRepo(db), sqlite.NewSettingsRepo(db))
 	ctx := context.Background()
 	repoDir := createTestGitRepo(t)
 	task := &models.Task{
@@ -799,8 +799,8 @@ func TestSetupWorktree_ReusesStoredWorktreeWhenBaseNoLongerExists(t *testing.T) 
 
 func TestSetupWorktree_PreservesOperationalBaseVerificationError(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	ws := NewWorktreeService(taskRepo, repository.NewProjectRepo(db), repository.NewSettingsRepo(db))
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	ws := NewWorktreeService(taskRepo, sqlite.NewProjectRepo(db), sqlite.NewSettingsRepo(db))
 	repoDir := createTestGitRepo(t)
 	task := &models.Task{
 		ProjectID:         "default",
@@ -826,9 +826,9 @@ func TestSetupWorktree_PreservesOperationalBaseVerificationError(t *testing.T) {
 
 func TestSetupWorktree_NotGitRepo(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	projectRepo := repository.NewProjectRepo(db)
-	settingsRepo := repository.NewSettingsRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	projectRepo := sqlite.NewProjectRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 	ctx := context.Background()
 
 	ws := NewWorktreeService(taskRepo, projectRepo, settingsRepo)
@@ -852,9 +852,9 @@ func TestSetupWorktree_NotGitRepo(t *testing.T) {
 
 func TestSyncWorktreeFromMainAtStart_CleanWorktreeAutoMergeSuccess(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	projectRepo := repository.NewProjectRepo(db)
-	settingsRepo := repository.NewSettingsRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	projectRepo := sqlite.NewProjectRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 	ctx := context.Background()
 
 	repoDir := createTestGitRepo(t)
@@ -928,9 +928,9 @@ func TestSyncWorktreeFromMainAtStart_CleanWorktreeAutoMergeSuccess(t *testing.T)
 
 func TestSyncWorktreeFromMainAtStart_DirtyWorktreeSkipsAutoMerge(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	projectRepo := repository.NewProjectRepo(db)
-	settingsRepo := repository.NewSettingsRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	projectRepo := sqlite.NewProjectRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 	ctx := context.Background()
 
 	repoDir := createTestGitRepo(t)
@@ -990,9 +990,9 @@ func TestSyncWorktreeFromMainAtStart_DirtyWorktreeSkipsAutoMerge(t *testing.T) {
 
 func TestSyncWorktreeFromMainAtStart_ConflictFailsGracefully(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	projectRepo := repository.NewProjectRepo(db)
-	settingsRepo := repository.NewSettingsRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	projectRepo := sqlite.NewProjectRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 	ctx := context.Background()
 
 	repoDir := createTestGitRepo(t)
@@ -1083,9 +1083,9 @@ func TestSyncWorktreeFromMainAtStart_ConflictFailsGracefully(t *testing.T) {
 
 func TestSyncWorktreeFromMainAtStart_OriginMainDivergenceDoesNotCauseStartupConflictByDefault(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	projectRepo := repository.NewProjectRepo(db)
-	settingsRepo := repository.NewSettingsRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	projectRepo := sqlite.NewProjectRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 	ctx := context.Background()
 
 	bare := createBareTestGitRepo(t)
@@ -1143,9 +1143,9 @@ func TestSyncWorktreeFromMainAtStart_OriginMainDivergenceDoesNotCauseStartupConf
 
 func TestSyncWorktreeFromMainAtStart_OriginMainExistenceAloneDoesNotChangeSyncSource(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	projectRepo := repository.NewProjectRepo(db)
-	settingsRepo := repository.NewSettingsRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	projectRepo := sqlite.NewProjectRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 	ctx := context.Background()
 
 	bare := createBareTestGitRepo(t)
@@ -1192,9 +1192,9 @@ func TestSyncWorktreeFromMainAtStart_OriginMainExistenceAloneDoesNotChangeSyncSo
 
 func TestSyncWorktreeFromMainAtStart_BrokenOriginStillUsesLocalBranch(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	projectRepo := repository.NewProjectRepo(db)
-	settingsRepo := repository.NewSettingsRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	projectRepo := sqlite.NewProjectRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 	ctx := context.Background()
 
 	repoDir := createTestGitRepo(t)
@@ -1233,9 +1233,9 @@ func TestSyncWorktreeFromMainAtStart_BrokenOriginStillUsesLocalBranch(t *testing
 
 func TestSyncWorktreeFromMainAtStart_UpstreamOnlyUsesLocalBranch(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	projectRepo := repository.NewProjectRepo(db)
-	settingsRepo := repository.NewSettingsRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	projectRepo := sqlite.NewProjectRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 	ctx := context.Background()
 
 	repoDir := createTestGitRepo(t)
@@ -1275,9 +1275,9 @@ func TestSyncWorktreeFromMainAtStart_UpstreamOnlyUsesLocalBranch(t *testing.T) {
 
 func TestSyncWorktreeFromMainAtStart_UsesMergeTargetBranchWhenSet(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	projectRepo := repository.NewProjectRepo(db)
-	settingsRepo := repository.NewSettingsRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	projectRepo := sqlite.NewProjectRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 	ctx := context.Background()
 
 	repoDir := createTestGitRepo(t)
@@ -1326,9 +1326,9 @@ func TestSyncWorktreeFromMainAtStart_UsesMergeTargetBranchWhenSet(t *testing.T) 
 
 func TestSetupFollowupWorktree_CompletedMergedTaskStartsFreshFromCurrentTarget(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	projectRepo := repository.NewProjectRepo(db)
-	settingsRepo := repository.NewSettingsRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	projectRepo := sqlite.NewProjectRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 	ctx := context.Background()
 
 	repoDir := createTestGitRepo(t)
@@ -1377,9 +1377,9 @@ func TestSetupFollowupWorktree_CompletedMergedTaskStartsFreshFromCurrentTarget(t
 
 func TestSetupFollowupWorktree_FailedConflictRetryStartsFreshFromCurrentTarget(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	projectRepo := repository.NewProjectRepo(db)
-	settingsRepo := repository.NewSettingsRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	projectRepo := sqlite.NewProjectRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 	ctx := context.Background()
 
 	repoDir := createTestGitRepo(t)
@@ -1432,9 +1432,9 @@ func TestSetupFollowupWorktree_FailedConflictRetryStartsFreshFromCurrentTarget(t
 
 func TestSetupFollowupWorktree_ReusesStoredFollowupWorktree(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	projectRepo := repository.NewProjectRepo(db)
-	settingsRepo := repository.NewSettingsRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	projectRepo := sqlite.NewProjectRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 	ctx := context.Background()
 
 	repoDir := createTestGitRepo(t)
@@ -1475,9 +1475,9 @@ func TestSetupFollowupWorktree_ReusesStoredFollowupWorktree(t *testing.T) {
 
 func TestSetupFollowupWorktree_DoesNotReuseStaleCommittedFollowupWorktree(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	projectRepo := repository.NewProjectRepo(db)
-	settingsRepo := repository.NewSettingsRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	projectRepo := sqlite.NewProjectRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 	ctx := context.Background()
 
 	repoDir := createTestGitRepo(t)
@@ -1529,9 +1529,9 @@ func TestSetupFollowupWorktree_DoesNotReuseStaleCommittedFollowupWorktree(t *tes
 
 func TestSetupFollowupWorktree_PreservesDirtyStoredFollowupWorktree(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	projectRepo := repository.NewProjectRepo(db)
-	settingsRepo := repository.NewSettingsRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	projectRepo := sqlite.NewProjectRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 	ctx := context.Background()
 
 	repoDir := createTestGitRepo(t)
@@ -1575,9 +1575,9 @@ func TestSetupFollowupWorktree_PreservesDirtyStoredFollowupWorktree(t *testing.T
 
 func TestSetupFollowupWorktree_CurrentTargetPersistsResolvedMergeTarget(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	projectRepo := repository.NewProjectRepo(db)
-	settingsRepo := repository.NewSettingsRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	projectRepo := sqlite.NewProjectRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 	ctx := context.Background()
 
 	repoDir := createTestGitRepo(t)
@@ -1618,9 +1618,9 @@ func TestSetupFollowupWorktree_CurrentTargetPersistsResolvedMergeTarget(t *testi
 
 func TestSyncWorktreeFromMainAtStart_DoesNotClearDirtyConflictStatus(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	projectRepo := repository.NewProjectRepo(db)
-	settingsRepo := repository.NewSettingsRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	projectRepo := sqlite.NewProjectRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 	ctx := context.Background()
 
 	repoDir := createTestGitRepo(t)
@@ -1741,7 +1741,7 @@ func TestSummarizeWorktreeCommitDiff_UsesActualDiffHunks(t *testing.T) {
 	}
 
 	db := testutil.NewTestDB(t)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
 	svc := NewLLMService(llmConfigRepo, nil, nil, nil, nil, nil)
 	mock := &testutil.MockLLMCaller{Response: `{"subject":"docs: document serve command usage"}`}
 	svc.SetLLMCaller(mock)
@@ -1804,7 +1804,7 @@ func TestSummarizeWorktreeCommitDiffRejectsUnstructuredModelOutput(t *testing.T)
 	}
 
 	db := testutil.NewTestDB(t)
-	svc := NewLLMService(repository.NewLLMConfigRepo(db), nil, nil, nil, nil, nil)
+	svc := NewLLMService(sqlite.NewLLMConfigRepo(db), nil, nil, nil, nil, nil)
 	svc.SetLLMCaller(&testutil.MockLLMCaller{Response: "I'll inspect the worktree diff first."})
 	agent := models.LLMConfig{Provider: models.ProviderTest, Model: "test-model", Name: "Test Agent"}
 
@@ -1829,7 +1829,7 @@ func TestSummarizeWorktreeCommitDiff_DoesNotReadUntrackedSymlinkTargets(t *testi
 	}
 
 	db := testutil.NewTestDB(t)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
 	svc := NewLLMService(llmConfigRepo, nil, nil, nil, nil, nil)
 	mock := &testutil.MockLLMCaller{Response: `{"subject":"Add safe symlink placeholder"}`}
 	svc.SetLLMCaller(mock)
@@ -2263,7 +2263,7 @@ func TestGetWorktreeFileStatsWithUncommittedIncludesLiveWorktreeChanges(t *testi
 
 func TestWorktreeRepo_UpdateAndClear(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	repo := repository.NewTaskRepo(db, nil)
+	repo := sqlite.NewTaskRepo(db, nil)
 	ctx := context.Background()
 
 	task := &models.Task{
@@ -2325,8 +2325,8 @@ func TestWorktreeRepo_UpdateAndClear(t *testing.T) {
 
 func TestMergeBranchRevalidatesWhileRepositoryLeaseIsHeld(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	ws := NewWorktreeService(taskRepo, repository.NewProjectRepo(db), repository.NewSettingsRepo(db))
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	ws := NewWorktreeService(taskRepo, sqlite.NewProjectRepo(db), sqlite.NewSettingsRepo(db))
 	ctx := context.Background()
 	repoDir := createTestGitRepo(t)
 	target := GetCurrentBranch(repoDir)
@@ -2386,9 +2386,9 @@ func TestMergeBranchRevalidatesWhileRepositoryLeaseIsHeld(t *testing.T) {
 
 func TestMergeBranchRejectsConcurrentRepositoryMutations(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	projectRepo := repository.NewProjectRepo(db)
-	settingsRepo := repository.NewSettingsRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	projectRepo := sqlite.NewProjectRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 	ctx := context.Background()
 
 	repoDir := createTestGitRepo(t)
@@ -2494,8 +2494,8 @@ func TestMergeBranchRejectsConcurrentRepositoryMutations(t *testing.T) {
 func TestAbortMergeForTaskValidatedPersistsStatusUnderRepositoryLease(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	taskRepo := repository.NewTaskRepo(db, nil)
-	ws := NewWorktreeService(taskRepo, repository.NewProjectRepo(db), repository.NewSettingsRepo(db))
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	ws := NewWorktreeService(taskRepo, sqlite.NewProjectRepo(db), sqlite.NewSettingsRepo(db))
 	repoDir := createTestGitRepo(t)
 
 	writeAndCommitTestFile(t, repoDir, "abort-status.txt", "base\n", "abort status base")
@@ -2540,9 +2540,9 @@ func TestAbortMergeForTaskValidatedPersistsStatusUnderRepositoryLease(t *testing
 func TestAutoConflictRecoveryValidationRejectsForeignMergeHead(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	taskRepo := repository.NewTaskRepo(db, nil)
-	projectRepo := repository.NewProjectRepo(db)
-	ws := NewWorktreeService(taskRepo, projectRepo, repository.NewSettingsRepo(db))
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	projectRepo := sqlite.NewProjectRepo(db)
+	ws := NewWorktreeService(taskRepo, projectRepo, sqlite.NewSettingsRepo(db))
 	repoDir := createTestGitRepo(t)
 	project := &models.Project{Name: "Auto recovery owner project", RepoPath: repoDir}
 	if err := projectRepo.Create(ctx, project); err != nil {
@@ -2590,7 +2590,7 @@ func TestAutoConflictRecoveryValidationRejectsForeignMergeHead(t *testing.T) {
 
 func TestConflictRecoverySharesRepositoryMutationLease(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	ws := NewWorktreeService(repository.NewTaskRepo(db, nil), repository.NewProjectRepo(db), repository.NewSettingsRepo(db))
+	ws := NewWorktreeService(sqlite.NewTaskRepo(db, nil), sqlite.NewProjectRepo(db), sqlite.NewSettingsRepo(db))
 	repoDir := createTestGitRepo(t)
 	stopValidation := errors.New("stop after recovery lease test")
 
@@ -2647,9 +2647,9 @@ func TestConflictRecoverySharesRepositoryMutationLease(t *testing.T) {
 
 func TestRepositoryMutationLeaseCanonicalizesAliasesAcrossServices(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	projectRepo := repository.NewProjectRepo(db)
-	settingsRepo := repository.NewSettingsRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	projectRepo := sqlite.NewProjectRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 
 	assertAliasBlocked := func(t *testing.T, repoDir, aliasDir string) {
 		t.Helper()
@@ -2756,8 +2756,8 @@ func TestGitPathDiscoveryPreservesWhitespaceAndNewlines(t *testing.T) {
 
 func TestMergeBranchSquashPreservesUnusualFilename(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	ws := NewWorktreeService(taskRepo, repository.NewProjectRepo(db), repository.NewSettingsRepo(db))
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	ws := NewWorktreeService(taskRepo, sqlite.NewProjectRepo(db), sqlite.NewSettingsRepo(db))
 	ctx := context.Background()
 	repoDir := createTestGitRepo(t)
 	task := &models.Task{
@@ -2797,9 +2797,9 @@ func TestMergeBranchSquashPreservesUnusualFilename(t *testing.T) {
 
 func TestMergeBranch(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	projectRepo := repository.NewProjectRepo(db)
-	settingsRepo := repository.NewSettingsRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	projectRepo := sqlite.NewProjectRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 	ctx := context.Background()
 
 	repoDir := createTestGitRepo(t)
@@ -2857,9 +2857,9 @@ func TestMergeBranch(t *testing.T) {
 
 func TestMergeBranch_ReturnsErrorWhenAutoCommitFails(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	projectRepo := repository.NewProjectRepo(db)
-	settingsRepo := repository.NewSettingsRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	projectRepo := sqlite.NewProjectRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 	ctx := context.Background()
 
 	repoDir := createTestGitRepo(t)
@@ -2906,9 +2906,9 @@ func TestMergeBranch_ReturnsErrorWhenAutoCommitFails(t *testing.T) {
 
 func TestMergeBranch_UnrelatedDirtyTargetFileCanMerge(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	projectRepo := repository.NewProjectRepo(db)
-	settingsRepo := repository.NewSettingsRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	projectRepo := sqlite.NewProjectRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 	ctx := context.Background()
 
 	repoDir := createTestGitRepo(t)
@@ -2966,9 +2966,9 @@ func TestMergeBranch_UnrelatedDirtyTargetFileCanMerge(t *testing.T) {
 
 func TestMergeBranch_OverlappingDirtyTargetFileFails(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	projectRepo := repository.NewProjectRepo(db)
-	settingsRepo := repository.NewSettingsRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	projectRepo := sqlite.NewProjectRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 	ctx := context.Background()
 
 	repoDir := createTestGitRepo(t)
@@ -3026,9 +3026,9 @@ func TestMergeBranch_OverlappingDirtyTargetFileFails(t *testing.T) {
 
 func TestRebaseBranch_RebasesOntoTarget(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	projectRepo := repository.NewProjectRepo(db)
-	settingsRepo := repository.NewSettingsRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	projectRepo := sqlite.NewProjectRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 	ctx := context.Background()
 
 	repoDir := createTestGitRepo(t)
@@ -3091,9 +3091,9 @@ func TestRebaseBranch_RebasesOntoTarget(t *testing.T) {
 
 func TestRebaseBranch_AlreadyUpToDate(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	projectRepo := repository.NewProjectRepo(db)
-	settingsRepo := repository.NewSettingsRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	projectRepo := sqlite.NewProjectRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 	ctx := context.Background()
 
 	repoDir := createTestGitRepo(t)
@@ -3126,9 +3126,9 @@ func TestRebaseBranch_AlreadyUpToDate(t *testing.T) {
 
 func TestRebaseBranch_ConflictAborts(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	projectRepo := repository.NewProjectRepo(db)
-	settingsRepo := repository.NewSettingsRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	projectRepo := sqlite.NewProjectRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 	ctx := context.Background()
 
 	repoDir := createTestGitRepo(t)
@@ -3195,9 +3195,9 @@ func TestRebaseBranch_ConflictAborts(t *testing.T) {
 
 func TestMergeBranch_FastForward(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	projectRepo := repository.NewProjectRepo(db)
-	settingsRepo := repository.NewSettingsRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	projectRepo := sqlite.NewProjectRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 	ctx := context.Background()
 
 	repoDir := createTestGitRepo(t)
@@ -3253,9 +3253,9 @@ func TestMergeBranch_FastForward(t *testing.T) {
 
 func TestMergeBranch_FastForward_SkipsAutoRebaseWhenAlreadyFastForwardable(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	projectRepo := repository.NewProjectRepo(db)
-	settingsRepo := repository.NewSettingsRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	projectRepo := sqlite.NewProjectRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 	ctx := context.Background()
 
 	repoDir := createTestGitRepo(t)
@@ -3314,9 +3314,9 @@ func TestMergeBranch_FastForward_SkipsAutoRebaseWhenAlreadyFastForwardable(t *te
 
 func TestMergeBranch_FastForward_SequentialMergesAutoRebaseSecondTask(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	projectRepo := repository.NewProjectRepo(db)
-	settingsRepo := repository.NewSettingsRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	projectRepo := sqlite.NewProjectRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 	ctx := context.Background()
 
 	repoDir := createTestGitRepo(t)
@@ -3401,9 +3401,9 @@ func TestMergeBranch_FastForward_SequentialMergesAutoRebaseSecondTask(t *testing
 
 func TestMergeBranch_FastForward_SequentialMergesRebaseConflictPreserved(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	projectRepo := repository.NewProjectRepo(db)
-	settingsRepo := repository.NewSettingsRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	projectRepo := sqlite.NewProjectRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 	ctx := context.Background()
 
 	repoDir := createTestGitRepo(t)
@@ -3521,9 +3521,9 @@ func TestMergeBranch_FastForward_SequentialMergesRebaseConflictPreserved(t *test
 
 func TestMergeBranch_FastForward_DirtyWorktreeRejected(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	projectRepo := repository.NewProjectRepo(db)
-	settingsRepo := repository.NewSettingsRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	projectRepo := sqlite.NewProjectRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 	ctx := context.Background()
 
 	repoDir := createTestGitRepo(t)
@@ -3558,9 +3558,9 @@ func TestMergeBranch_FastForward_DirtyWorktreeRejected(t *testing.T) {
 
 func TestMergeBranch_FastForward_WrongTaskWorktreeBranchRejected(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	projectRepo := repository.NewProjectRepo(db)
-	settingsRepo := repository.NewSettingsRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	projectRepo := sqlite.NewProjectRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 	ctx := context.Background()
 
 	repoDir := createTestGitRepo(t)
@@ -3590,9 +3590,9 @@ func TestMergeBranch_FastForward_WrongTaskWorktreeBranchRejected(t *testing.T) {
 
 func TestMergeBranch_FastForward_CheckedOutTargetVerifiesMergedHead(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	projectRepo := repository.NewProjectRepo(db)
-	settingsRepo := repository.NewSettingsRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	projectRepo := sqlite.NewProjectRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 	ctx := context.Background()
 
 	repoDir := createTestGitRepo(t)
@@ -3662,9 +3662,9 @@ func TestMergeBranch_FastForward_CheckedOutTargetVerifiesMergedHead(t *testing.T
 
 func TestMergeBranch_FastForward_UncheckedOutTargetUsesUpdateRef(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	projectRepo := repository.NewProjectRepo(db)
-	settingsRepo := repository.NewSettingsRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	projectRepo := sqlite.NewProjectRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 	ctx := context.Background()
 
 	repoDir := createTestGitRepo(t)
@@ -3706,9 +3706,9 @@ func TestMergeBranch_FastForward_UncheckedOutTargetUsesUpdateRef(t *testing.T) {
 
 func TestMergeBranch_FastForward_StaleMainUpdateRefRejected(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	projectRepo := repository.NewProjectRepo(db)
-	settingsRepo := repository.NewSettingsRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	projectRepo := sqlite.NewProjectRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 	ctx := context.Background()
 
 	repoDir := createTestGitRepo(t)
@@ -3787,9 +3787,9 @@ func TestMergeBranch_FastForward_DetachedTargetCommitUsesUpdateRefFallback(t *te
 
 func TestMergeBranch_SquashAllowsUnrelatedStagedUserChanges(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	projectRepo := repository.NewProjectRepo(db)
-	settingsRepo := repository.NewSettingsRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	projectRepo := sqlite.NewProjectRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 	ctx := context.Background()
 
 	repoDir := createTestGitRepo(t)
@@ -3864,9 +3864,9 @@ func TestMergeBranch_SquashAllowsUnrelatedStagedUserChanges(t *testing.T) {
 
 func TestMergeBranch_SquashCommitFailureMarksMergeFailedAndDoesNotUseHardReset(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	projectRepo := repository.NewProjectRepo(db)
-	settingsRepo := repository.NewSettingsRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	projectRepo := sqlite.NewProjectRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 	ctx := context.Background()
 
 	repoDir := createTestGitRepo(t)
@@ -3954,8 +3954,8 @@ func TestMergeBranch_SquashCommitFailureMarksMergeFailedAndDoesNotUseHardReset(t
 
 func TestMergeBranch_SquashConflictCleansToRetryableConflict(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	ws := NewWorktreeService(taskRepo, repository.NewProjectRepo(db), repository.NewSettingsRepo(db))
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	ws := NewWorktreeService(taskRepo, sqlite.NewProjectRepo(db), sqlite.NewSettingsRepo(db))
 	ctx := context.Background()
 	repoDir := createTestGitRepo(t)
 	target := GetCurrentBranch(repoDir)
@@ -4089,9 +4089,9 @@ func TestAbortMergeForTaskRestoresSquashConflictWithoutMergeHead(t *testing.T) {
 
 func TestResolveConflictsWithAI_NoActiveConflictsClearsStaleConflictStatus(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	projectRepo := repository.NewProjectRepo(db)
-	settingsRepo := repository.NewSettingsRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	projectRepo := sqlite.NewProjectRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 	ctx := context.Background()
 
 	repoDir := createTestGitRepo(t)
@@ -4131,9 +4131,9 @@ func TestResolveConflictsWithAI_NoActiveConflictsClearsStaleConflictStatus(t *te
 
 func TestMergeBranch_Squash(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	projectRepo := repository.NewProjectRepo(db)
-	settingsRepo := repository.NewSettingsRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	projectRepo := sqlite.NewProjectRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 	ctx := context.Background()
 
 	repoDir := createTestGitRepo(t)
@@ -4176,9 +4176,9 @@ func TestMergeBranch_Squash(t *testing.T) {
 
 func TestCleanupWorktree(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	projectRepo := repository.NewProjectRepo(db)
-	settingsRepo := repository.NewSettingsRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	projectRepo := sqlite.NewProjectRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 	ctx := context.Background()
 
 	repoDir := createTestGitRepo(t)
@@ -4232,9 +4232,9 @@ func TestCleanupWorktree(t *testing.T) {
 func TestGoalAchievedAutoMergeUsesCanonicalFlowAndIsIdempotentWithCompletion(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	taskRepo := repository.NewTaskRepo(db, nil)
-	projectRepo := repository.NewProjectRepo(db)
-	settingsRepo := repository.NewSettingsRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	projectRepo := sqlite.NewProjectRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 	repoDir := createTestGitRepo(t)
 	target := GetDefaultBranch(repoDir)
 	project := &models.Project{Name: "Goal merge project", RepoPath: repoDir}
@@ -4242,7 +4242,7 @@ func TestGoalAchievedAutoMergeUsesCanonicalFlowAndIsIdempotentWithCompletion(t *
 		t.Fatalf("create project: %v", err)
 	}
 	ws := NewWorktreeService(taskRepo, projectRepo, settingsRepo)
-	goalSvc := NewTaskGoalService(repository.NewTaskGoalRepo(db), taskRepo, nil)
+	goalSvc := NewTaskGoalService(sqlite.NewTaskGoalRepo(db), taskRepo, nil)
 	ws.SetTaskGoalService(goalSvc)
 	goalSvc.SetGoalAchievedHandler(ws.AutoMergeOnGoalAchieved)
 
@@ -4402,10 +4402,10 @@ func TestAutomaticConflictResolutionRuntimeRestrictsPathsToExactConflictFiles(t 
 func TestGoalAutoMergeReconciliationRejectsOwnedSourceConflictOnWrongTarget(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	taskRepo := repository.NewTaskRepo(db, nil)
-	projectRepo := repository.NewProjectRepo(db)
-	settingsRepo := repository.NewSettingsRepo(db)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	projectRepo := sqlite.NewProjectRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
 	repoDir := createTestGitRepo(t)
 	target := GetDefaultBranch(repoDir)
 	writeAndCommitTestFile(t, repoDir, "wrong-target-conflict.txt", "base\n", "Add wrong-target conflict base")
@@ -4441,7 +4441,7 @@ func TestGoalAutoMergeReconciliationRejectsOwnedSourceConflictOnWrongTarget(t *t
 		t.Fatalf("wrong-target conflict ownership fixture is invalid: source=%v target=%q", ActiveMergeMatchesBranch(repoDir, branch), GetCurrentBranch(repoDir))
 	}
 
-	goalSvc := NewTaskGoalService(repository.NewTaskGoalRepo(db), taskRepo, nil)
+	goalSvc := NewTaskGoalService(sqlite.NewTaskGoalRepo(db), taskRepo, nil)
 	ws.SetTaskGoalService(goalSvc)
 	goal, err := goalSvc.SetGoal(ctx, task.ID, "do not recover into wrong target", GoalOptions{})
 	if err != nil {
@@ -4490,10 +4490,10 @@ func TestGoalAutoMergeReconciliationRejectsOwnedSourceConflictOnWrongTarget(t *t
 func TestGoalAutoMergeReconciliationResumesOwnedConflictAfterBusyLease(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	taskRepo := repository.NewTaskRepo(db, nil)
-	projectRepo := repository.NewProjectRepo(db)
-	settingsRepo := repository.NewSettingsRepo(db)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	projectRepo := sqlite.NewProjectRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
 	repoDir := createTestGitRepo(t)
 	target := GetDefaultBranch(repoDir)
 	writeAndCommitTestFile(t, repoDir, "handoff-conflict.txt", "base\n", "Add handoff conflict base")
@@ -4519,7 +4519,7 @@ func TestGoalAutoMergeReconciliationResumesOwnedConflictAfterBusyLease(t *testin
 	writeAndCommitTestFile(t, repoDir, "handoff-conflict.txt", "target\n", "Change handoff conflict on target")
 	targetBefore := strings.TrimSpace(string(runGitTest(t, repoDir, "rev-parse", target)))
 
-	goalSvc := NewTaskGoalService(repository.NewTaskGoalRepo(db), taskRepo, nil)
+	goalSvc := NewTaskGoalService(sqlite.NewTaskGoalRepo(db), taskRepo, nil)
 	ws.SetTaskGoalService(goalSvc)
 	goal, err := goalSvc.SetGoal(ctx, task.ID, "resolve durable conflict", GoalOptions{})
 	if err != nil {
@@ -4587,17 +4587,17 @@ func TestGoalAutoMergeReconciliationResumesOwnedConflictAfterBusyLease(t *testin
 func TestGoalAutoMergeConflictRecoveryRevalidatesLifecycleBeforeCommit(t *testing.T) {
 	tests := []struct {
 		name   string
-		mutate func(context.Context, *repository.TaskRepo, *TaskGoalService, *models.Task) error
+		mutate func(context.Context, *sqlite.TaskRepo, *TaskGoalService, *models.Task) error
 	}{
 		{
 			name: "task cancelled",
-			mutate: func(ctx context.Context, taskRepo *repository.TaskRepo, _ *TaskGoalService, task *models.Task) error {
+			mutate: func(ctx context.Context, taskRepo *sqlite.TaskRepo, _ *TaskGoalService, task *models.Task) error {
 				return taskRepo.UpdateStatus(ctx, task.ID, models.StatusCancelled)
 			},
 		},
 		{
 			name: "goal auto merge disabled",
-			mutate: func(ctx context.Context, taskRepo *repository.TaskRepo, _ *TaskGoalService, task *models.Task) error {
+			mutate: func(ctx context.Context, taskRepo *sqlite.TaskRepo, _ *TaskGoalService, task *models.Task) error {
 				fresh, err := taskRepo.GetByID(ctx, task.ID)
 				if err != nil {
 					return err
@@ -4608,7 +4608,7 @@ func TestGoalAutoMergeConflictRecoveryRevalidatesLifecycleBeforeCommit(t *testin
 		},
 		{
 			name: "goal replaced",
-			mutate: func(ctx context.Context, _ *repository.TaskRepo, goalSvc *TaskGoalService, task *models.Task) error {
+			mutate: func(ctx context.Context, _ *sqlite.TaskRepo, goalSvc *TaskGoalService, task *models.Task) error {
 				_, err := goalSvc.SetGoal(ctx, task.ID, "replacement goal", GoalOptions{})
 				return err
 			},
@@ -4619,10 +4619,10 @@ func TestGoalAutoMergeConflictRecoveryRevalidatesLifecycleBeforeCommit(t *testin
 		t.Run(tt.name, func(t *testing.T) {
 			db := testutil.NewTestDB(t)
 			ctx := context.Background()
-			taskRepo := repository.NewTaskRepo(db, nil)
-			projectRepo := repository.NewProjectRepo(db)
-			settingsRepo := repository.NewSettingsRepo(db)
-			llmConfigRepo := repository.NewLLMConfigRepo(db)
+			taskRepo := sqlite.NewTaskRepo(db, nil)
+			projectRepo := sqlite.NewProjectRepo(db)
+			settingsRepo := sqlite.NewSettingsRepo(db)
+			llmConfigRepo := sqlite.NewLLMConfigRepo(db)
 			repoDir := createTestGitRepo(t)
 			target := GetDefaultBranch(repoDir)
 			writeAndCommitTestFile(t, repoDir, "goal-conflict.txt", "base\n", "goal conflict base")
@@ -4649,7 +4649,7 @@ func TestGoalAutoMergeConflictRecoveryRevalidatesLifecycleBeforeCommit(t *testin
 			writeAndCommitTestFile(t, repoDir, "goal-conflict.txt", "target\n", "change goal conflict on target")
 			targetBefore := strings.TrimSpace(string(runGitTest(t, repoDir, "rev-parse", target)))
 
-			goalSvc := NewTaskGoalService(repository.NewTaskGoalRepo(db), taskRepo, nil)
+			goalSvc := NewTaskGoalService(sqlite.NewTaskGoalRepo(db), taskRepo, nil)
 			ws := NewWorktreeService(taskRepo, projectRepo, settingsRepo)
 			ws.SetTaskGoalService(goalSvc)
 			goalSvc.SetGoalAchievedHandler(ws.AutoMergeOnGoalAchieved)
@@ -4725,10 +4725,10 @@ func TestGoalAutoMergeConflictRecoveryRevalidatesLifecycleBeforeCommit(t *testin
 func TestAutomaticConflictRecoveryRevalidatesAfterApplicationStaging(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	taskRepo := repository.NewTaskRepo(db, nil)
-	projectRepo := repository.NewProjectRepo(db)
-	settingsRepo := repository.NewSettingsRepo(db)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	projectRepo := sqlite.NewProjectRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
 	repoDir := createTestGitRepo(t)
 	target := GetDefaultBranch(repoDir)
 	writeAndCommitTestFile(t, repoDir, "staged-conflict.txt", "base\n", "staged conflict base")
@@ -4756,7 +4756,7 @@ func TestAutomaticConflictRecoveryRevalidatesAfterApplicationStaging(t *testing.
 	writeAndCommitTestFile(t, repoDir, "staged-conflict.txt", "target\n", "Change staged conflict on target")
 	targetBefore := strings.TrimSpace(string(runGitTest(t, repoDir, "rev-parse", target)))
 
-	goalSvc := NewTaskGoalService(repository.NewTaskGoalRepo(db), taskRepo, nil)
+	goalSvc := NewTaskGoalService(sqlite.NewTaskGoalRepo(db), taskRepo, nil)
 	ws := NewWorktreeService(taskRepo, projectRepo, settingsRepo)
 	ws.SetTaskGoalService(goalSvc)
 	agent := &models.LLMConfig{Name: "Post-stage resolver", Provider: models.ProviderTest, Model: "test", IsDefault: true}
@@ -4819,11 +4819,11 @@ func TestAutomaticConflictRecoveryRevalidatesAfterApplicationStaging(t *testing.
 func TestGoalAutoMergeIntegratesDirtyAlreadyReachableWorktreeBeforeReconciliation(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	taskRepo := repository.NewTaskRepo(db, nil)
-	projectRepo := repository.NewProjectRepo(db)
-	settingsRepo := repository.NewSettingsRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	projectRepo := sqlite.NewProjectRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 	ws := NewWorktreeService(taskRepo, projectRepo, settingsRepo)
-	goalSvc := NewTaskGoalService(repository.NewTaskGoalRepo(db), taskRepo, nil)
+	goalSvc := NewTaskGoalService(sqlite.NewTaskGoalRepo(db), taskRepo, nil)
 	ws.SetTaskGoalService(goalSvc)
 	goalSvc.SetGoalAchievedHandler(ws.AutoMergeOnGoalAchieved)
 	repoDir := createTestGitRepo(t)
@@ -4878,9 +4878,9 @@ func TestGoalAutoMergeIntegratesDirtyAlreadyReachableWorktreeBeforeReconciliatio
 func TestHandlePostExecutionAutoMergeUsesRunningFinalizationState(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	taskRepo := repository.NewTaskRepo(db, nil)
-	projectRepo := repository.NewProjectRepo(db)
-	ws := NewWorktreeService(taskRepo, projectRepo, repository.NewSettingsRepo(db))
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	projectRepo := sqlite.NewProjectRepo(db)
+	ws := NewWorktreeService(taskRepo, projectRepo, sqlite.NewSettingsRepo(db))
 	repoDir := createTestGitRepo(t)
 	target := GetDefaultBranch(repoDir)
 	project := &models.Project{Name: "Completion merge project", RepoPath: repoDir}
@@ -4918,10 +4918,10 @@ func TestHandlePostExecutionAutoMergeUsesRunningFinalizationState(t *testing.T) 
 func TestGoalAchievedAutoMergeReconcilesAfterBusyPreCompletionEvent(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	taskRepo := repository.NewTaskRepo(db, nil)
-	projectRepo := repository.NewProjectRepo(db)
-	ws := NewWorktreeService(taskRepo, projectRepo, repository.NewSettingsRepo(db))
-	goalSvc := NewTaskGoalService(repository.NewTaskGoalRepo(db), taskRepo, nil)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	projectRepo := sqlite.NewProjectRepo(db)
+	ws := NewWorktreeService(taskRepo, projectRepo, sqlite.NewSettingsRepo(db))
+	goalSvc := NewTaskGoalService(sqlite.NewTaskGoalRepo(db), taskRepo, nil)
 	ws.SetTaskGoalService(goalSvc)
 	goalSvc.SetGoalAchievedHandler(ws.AutoMergeOnGoalAchieved)
 	repoDir := createTestGitRepo(t)
@@ -4983,11 +4983,11 @@ func TestAutoMergeNoOpPreservesStatus(t *testing.T) {
 			t.Run(trigger+"/"+scenario, func(t *testing.T) {
 				db := testutil.NewTestDB(t)
 				ctx := context.Background()
-				taskRepo := repository.NewTaskRepo(db, nil)
-				projectRepo := repository.NewProjectRepo(db)
-				settingsRepo := repository.NewSettingsRepo(db)
+				taskRepo := sqlite.NewTaskRepo(db, nil)
+				projectRepo := sqlite.NewProjectRepo(db)
+				settingsRepo := sqlite.NewSettingsRepo(db)
 				ws := NewWorktreeService(taskRepo, projectRepo, settingsRepo)
-				goalSvc := NewTaskGoalService(repository.NewTaskGoalRepo(db), taskRepo, nil)
+				goalSvc := NewTaskGoalService(sqlite.NewTaskGoalRepo(db), taskRepo, nil)
 				ws.SetTaskGoalService(goalSvc)
 				goalSvc.SetGoalAchievedHandler(ws.AutoMergeOnGoalAchieved)
 				repoDir := createTestGitRepo(t)
@@ -5065,7 +5065,7 @@ func TestAutoMergeNoOpPreservesStatus(t *testing.T) {
 
 func TestCreateTaskWithAutoMerge(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	repo := repository.NewTaskRepo(db, nil)
+	repo := sqlite.NewTaskRepo(db, nil)
 	ctx := context.Background()
 
 	task := &models.Task{
@@ -5147,9 +5147,9 @@ func TestIsBranchMerged(t *testing.T) {
 
 func TestCleanupMergedWorktrees(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	projectRepo := repository.NewProjectRepo(db)
-	settingsRepo := repository.NewSettingsRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	projectRepo := sqlite.NewProjectRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 	ctx := context.Background()
 
 	// Create a test git repo
@@ -5259,9 +5259,9 @@ func TestCleanupMergedWorktrees(t *testing.T) {
 
 func TestCleanupMergedWorktrees_EmptyMergeTargetSkipsBranchDeletionWithNonTerminalDescendant(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	projectRepo := repository.NewProjectRepo(db)
-	settingsRepo := repository.NewSettingsRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	projectRepo := sqlite.NewProjectRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 	ctx := context.Background()
 
 	repoDir := createTestGitRepo(t)
@@ -5358,9 +5358,9 @@ func TestCleanupMergedWorktrees_EmptyMergeTargetSkipsBranchDeletionWithNonTermin
 
 func TestCleanupMergedWorktrees_KeepPolicy(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	projectRepo := repository.NewProjectRepo(db)
-	settingsRepo := repository.NewSettingsRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	projectRepo := sqlite.NewProjectRepo(db)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 	ctx := context.Background()
 
 	// Set cleanup policy to "keep"
@@ -5380,9 +5380,9 @@ func TestCleanupOrphanedWorktrees(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)
 
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	settingsRepo := repository.NewSettingsRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 	worktreeSvc := NewWorktreeService(taskRepo, projectRepo, settingsRepo)
 
 	// Create a test project with a git repo
@@ -5477,9 +5477,9 @@ func TestCleanupOrphanedWorktrees_SkipsWhenTaskStillExists(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)
 
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	settingsRepo := repository.NewSettingsRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 	worktreeSvc := NewWorktreeService(taskRepo, projectRepo, settingsRepo)
 
 	repoDir := createTestGitRepo(t)
@@ -5540,9 +5540,9 @@ func TestCleanupOrphanedWorktrees_SkipsFollowupWhenTaskStillExistsWithStaleMetad
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)
 
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	settingsRepo := repository.NewSettingsRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 	worktreeSvc := NewWorktreeService(taskRepo, projectRepo, settingsRepo)
 
 	repoDir := createTestGitRepo(t)
@@ -5620,9 +5620,9 @@ func TestCleanupOrphanedWorktrees_SkipsDirtyOrUnmergedOrphanedWorktrees(t *testi
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)
 
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	settingsRepo := repository.NewSettingsRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	settingsRepo := sqlite.NewSettingsRepo(db)
 	worktreeSvc := NewWorktreeService(taskRepo, projectRepo, settingsRepo)
 
 	repoDir := createTestGitRepo(t)
@@ -6336,9 +6336,9 @@ func TestCleanupMergedWorktreesDoesNotInventMerge(t *testing.T) {
 		t.Run(scenario, func(t *testing.T) {
 			ctx := context.Background()
 			db := testutil.NewTestDB(t)
-			tasks := repository.NewTaskRepo(db, nil)
-			projects := repository.NewProjectRepo(db)
-			settings := repository.NewSettingsRepo(db)
+			tasks := sqlite.NewTaskRepo(db, nil)
+			projects := sqlite.NewProjectRepo(db)
+			settings := sqlite.NewSettingsRepo(db)
 			repoDir := createTestGitRepo(t)
 			project := &models.Project{Name: "Cleanup evidence", RepoPath: repoDir}
 			if err := projects.Create(ctx, project); err != nil {

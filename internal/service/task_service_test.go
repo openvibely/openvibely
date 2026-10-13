@@ -12,7 +12,7 @@ import (
 	"github.com/openvibely/openvibely/internal/attachmentsession"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -34,8 +34,8 @@ func newTestWorkerService(t *testing.T) *WorkerService {
 
 func TestTaskService_ListNormalizesActiveTerminalTasks(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	attachmentRepo := repository.NewAttachmentRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
 	svc := NewTaskService(taskRepo, attachmentRepo, nil)
 	ctx := context.Background()
 
@@ -83,7 +83,7 @@ func TestTaskService_ListNormalizesActiveTerminalTasks(t *testing.T) {
 
 func TestTaskService_UpdateCategoryStartsPlannerForBacklogSwarmParent(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
 	workerSvc := newTestWorkerService(t)
 	taskSvc := NewTaskService(taskRepo, nil, workerSvc)
 	swarmSvc := NewSwarmService(taskSvc, taskRepo, nil, workerSvc)
@@ -121,9 +121,9 @@ func TestTaskService_UpdateCategoryStartsPlannerForBacklogSwarmParent(t *testing
 
 func TestTaskService_Create_DefaultsStatus(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
 	workerSvc := newTestWorkerService(t)
-	attachmentRepo := repository.NewAttachmentRepo(db)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
 	svc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 	ctx := context.Background()
 
@@ -147,8 +147,8 @@ func TestTaskService_Create_DefaultsStatus(t *testing.T) {
 
 func TestTaskService_Create_NormalizesPriority(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	svc := NewTaskService(taskRepo, repository.NewAttachmentRepo(db), nil)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	svc := NewTaskService(taskRepo, sqlite.NewAttachmentRepo(db), nil)
 	ctx := context.Background()
 
 	cases := []struct {
@@ -188,8 +188,8 @@ func TestTaskService_Create_NormalizesPriority(t *testing.T) {
 
 func TestTaskService_Update_RejectsInvalidPriority(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	svc := NewTaskService(taskRepo, repository.NewAttachmentRepo(db), nil)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	svc := NewTaskService(taskRepo, sqlite.NewAttachmentRepo(db), nil)
 	ctx := context.Background()
 
 	for _, priority := range []int{0, -1, 5} {
@@ -220,8 +220,8 @@ func TestTaskService_Update_RejectsInvalidPriority(t *testing.T) {
 
 func TestTaskService_Update_PersistsValidPriorities(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	svc := NewTaskService(taskRepo, repository.NewAttachmentRepo(db), nil)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	svc := NewTaskService(taskRepo, sqlite.NewAttachmentRepo(db), nil)
 	ctx := context.Background()
 
 	for priority := 1; priority <= 4; priority++ {
@@ -253,8 +253,8 @@ func TestTaskService_Update_PersistsValidPriorities(t *testing.T) {
 
 func TestTaskService_Create_NormalizesTitlePromptAndDuplicateCheck(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	svc := NewTaskService(taskRepo, repository.NewAttachmentRepo(db), nil)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	svc := NewTaskService(taskRepo, sqlite.NewAttachmentRepo(db), nil)
 	ctx := context.Background()
 
 	first := &models.Task{
@@ -293,8 +293,8 @@ func TestTaskService_Create_NormalizesTitlePromptAndDuplicateCheck(t *testing.T)
 
 func TestTaskService_CreateAndUpdateRejectNormalizedBlankTitlePrompt(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	svc := NewTaskService(taskRepo, repository.NewAttachmentRepo(db), nil)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	svc := NewTaskService(taskRepo, sqlite.NewAttachmentRepo(db), nil)
 	ctx := context.Background()
 
 	for _, tt := range []struct {
@@ -337,8 +337,8 @@ func TestTaskService_CreateAndUpdateRejectNormalizedBlankTitlePrompt(t *testing.
 
 func TestTaskService_Update_NormalizesTitlePromptAndDuplicateCheck(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	svc := NewTaskService(taskRepo, repository.NewAttachmentRepo(db), nil)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	svc := NewTaskService(taskRepo, sqlite.NewAttachmentRepo(db), nil)
 	ctx := context.Background()
 
 	existing := &models.Task{ProjectID: "default", Title: "Existing title", Prompt: "existing prompt", Category: models.CategoryBacklog, Status: models.StatusPending}
@@ -365,9 +365,9 @@ func TestTaskService_Update_NormalizesTitlePromptAndDuplicateCheck(t *testing.T)
 
 func TestTaskService_Create_ActiveAutoSubmits(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
 	workerSvc := newTestWorkerService(t)
-	attachmentRepo := repository.NewAttachmentRepo(db)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
 	svc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 	ctx := context.Background()
 
@@ -393,9 +393,9 @@ func TestTaskService_Create_ActiveAutoSubmits(t *testing.T) {
 
 func TestTaskService_Create_NonActiveDoesNotSubmit(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
 	workerSvc := newTestWorkerService(t)
-	attachmentRepo := repository.NewAttachmentRepo(db)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
 	svc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 	ctx := context.Background()
 
@@ -418,10 +418,10 @@ func TestTaskService_Create_NonActiveDoesNotSubmit(t *testing.T) {
 
 func TestTaskService_RunTask_ResumesGoalPausedByUserStop(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
 	workerSvc := newTestWorkerService(t)
-	attachmentRepo := repository.NewAttachmentRepo(db)
-	goalSvc := NewTaskGoalService(repository.NewTaskGoalRepo(db), taskRepo, nil)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
+	goalSvc := NewTaskGoalService(sqlite.NewTaskGoalRepo(db), taskRepo, nil)
 	svc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 	svc.SetTaskGoalService(goalSvc)
 	ctx := context.Background()
@@ -444,10 +444,10 @@ func TestTaskService_RunTask_ResumesGoalPausedByUserStop(t *testing.T) {
 
 func TestTaskService_RunTask_DoesNotResumeExplicitlyPausedGoal(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
 	workerSvc := newTestWorkerService(t)
-	attachmentRepo := repository.NewAttachmentRepo(db)
-	goalSvc := NewTaskGoalService(repository.NewTaskGoalRepo(db), taskRepo, nil)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
+	goalSvc := NewTaskGoalService(sqlite.NewTaskGoalRepo(db), taskRepo, nil)
 	svc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 	svc.SetTaskGoalService(goalSvc)
 	ctx := context.Background()
@@ -469,10 +469,10 @@ func TestTaskService_RunTask_DoesNotResumeExplicitlyPausedGoal(t *testing.T) {
 
 func TestTaskService_UpdateStatus_RunningActiveResumesGoalPausedByUserStop(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
 	workerSvc := newTestWorkerService(t)
-	attachmentRepo := repository.NewAttachmentRepo(db)
-	goalSvc := NewTaskGoalService(repository.NewTaskGoalRepo(db), taskRepo, nil)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
+	goalSvc := NewTaskGoalService(sqlite.NewTaskGoalRepo(db), taskRepo, nil)
 	svc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 	svc.SetTaskGoalService(goalSvc)
 	ctx := context.Background()
@@ -500,9 +500,9 @@ func TestTaskService_UpdateStatus_RunningActiveResumesGoalPausedByUserStop(t *te
 
 func TestTaskService_UpdateCategory_ToActiveAutoSubmits(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
 	workerSvc := newTestWorkerService(t)
-	attachmentRepo := repository.NewAttachmentRepo(db)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
 	svc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 	ctx := context.Background()
 
@@ -695,12 +695,12 @@ func TestWorkerService_Resize_DecreasesWorkerCount(t *testing.T) {
 func TestTaskService_UpdateCategory_PromotesQueuedTaskThreadFollowupBeforeOriginalPrompt(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	attachmentRepo := repository.NewAttachmentRepo(db)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	execRepo := repository.NewExecutionRepo(db)
-	threadInputRepo := repository.NewThreadInputRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	execRepo := sqlite.NewExecutionRepo(db)
+	threadInputRepo := sqlite.NewThreadInputRepo(db)
 	project := &models.Project{Name: "Manual Active Promotion Project"}
 	require.NoError(t, projectRepo.Create(ctx, project))
 	agent := &models.LLMConfig{Name: "Test Agent", Provider: models.ProviderTest, Model: "test-model", IsDefault: true}
@@ -737,10 +737,10 @@ func TestTaskService_UpdateCategory_PromotesQueuedTaskThreadFollowupBeforeOrigin
 func TestTaskService_MoveTasksToActiveLaneRoutesSingleQueuedFollowupAndReturnsLaneConflict(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	threadRepo := repository.NewThreadInputRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	threadRepo := sqlite.NewThreadInputRepo(db)
 	worker := newTestWorkerService(t)
-	svc := NewTaskService(taskRepo, repository.NewAttachmentRepo(db), worker)
+	svc := NewTaskService(taskRepo, sqlite.NewAttachmentRepo(db), worker)
 	task := &models.Task{ProjectID: "default", Title: "Queued followup lane move", Category: models.CategoryBacklog, Status: models.StatusPending, Prompt: "original prompt"}
 	require.NoError(t, taskRepo.Create(ctx, task))
 	input := &models.ThreadInput{Scope: models.ThreadInputScopeTask, ProjectID: "default", TaskID: task.ID, InputMode: models.ThreadInputModeQueued, InputStatus: models.ThreadInputPending, Content: "queued followup"}
@@ -770,10 +770,10 @@ func TestTaskService_MoveTasksToActiveLaneRoutesSingleQueuedFollowupAndReturnsLa
 func TestTaskService_MoveTasksToActiveLaneRoutesSingleFailedFollowupAndReturnsLaneConflict(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	execRepo := repository.NewExecutionRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	execRepo := sqlite.NewExecutionRepo(db)
 	worker := newTestWorkerService(t)
-	svc := NewTaskService(taskRepo, repository.NewAttachmentRepo(db), worker)
+	svc := NewTaskService(taskRepo, sqlite.NewAttachmentRepo(db), worker)
 	task := &models.Task{ProjectID: "default", Title: "Failed followup lane move", Category: models.CategoryBacklog, Status: models.StatusFailed, Prompt: "original prompt"}
 	require.NoError(t, taskRepo.Create(ctx, task))
 	require.NoError(t, execRepo.Create(ctx, &models.Execution{TaskID: task.ID, Status: models.ExecFailed, PromptSent: "failed followup", IsFollowup: true}))
@@ -802,10 +802,10 @@ func TestTaskService_MoveTasksToActiveLaneRoutesSingleFailedFollowupAndReturnsLa
 func TestTaskService_MoveTasksToActiveLaneFencesConcurrentLifecycleOwnedTransition(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	threadRepo := repository.NewThreadInputRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	threadRepo := sqlite.NewThreadInputRepo(db)
 	worker := newTestWorkerService(t)
-	svc := NewTaskService(taskRepo, repository.NewAttachmentRepo(db), worker)
+	svc := NewTaskService(taskRepo, sqlite.NewAttachmentRepo(db), worker)
 	task := &models.Task{ProjectID: "default", Title: "Concurrent lifecycle lane move", Category: models.CategoryBacklog, Status: models.StatusPending, Prompt: "original prompt"}
 	require.NoError(t, taskRepo.Create(ctx, task))
 	input := &models.ThreadInput{Scope: models.ThreadInputScopeTask, ProjectID: "default", TaskID: task.ID, InputMode: models.ThreadInputModeQueued, InputStatus: models.ThreadInputPending, Content: "queued followup"}
@@ -838,10 +838,10 @@ func TestTaskService_MoveTasksToActiveLaneFencesConcurrentLifecycleOwnedTransiti
 func TestTaskService_MoveTasksToActiveLaneFencesConcurrentFailedFollowupTransition(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	execRepo := repository.NewExecutionRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	execRepo := sqlite.NewExecutionRepo(db)
 	worker := newTestWorkerService(t)
-	svc := NewTaskService(taskRepo, repository.NewAttachmentRepo(db), worker)
+	svc := NewTaskService(taskRepo, sqlite.NewAttachmentRepo(db), worker)
 	task := &models.Task{ProjectID: "default", Title: "Concurrent failed followup lane move", Category: models.CategoryBacklog, Status: models.StatusFailed, Prompt: "original prompt"}
 	require.NoError(t, taskRepo.Create(ctx, task))
 	failed := &models.Execution{TaskID: task.ID, Status: models.ExecFailed, PromptSent: "failed followup", IsFollowup: true}
@@ -869,10 +869,10 @@ func TestTaskService_MoveTasksToActiveLaneFencesConcurrentFailedFollowupTransiti
 func TestTaskService_MoveTasksToActiveLaneRejectsLifecycleOwnedGroupBeforeSubmission(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	threadRepo := repository.NewThreadInputRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	threadRepo := sqlite.NewThreadInputRepo(db)
 	worker := newTestWorkerService(t)
-	svc := NewTaskService(taskRepo, repository.NewAttachmentRepo(db), worker)
+	svc := NewTaskService(taskRepo, sqlite.NewAttachmentRepo(db), worker)
 	ordinary := &models.Task{ProjectID: "default", Title: "Ordinary lifecycle group card", Category: models.CategoryBacklog, Status: models.StatusPending}
 	owned := &models.Task{ProjectID: "default", Title: "Owned lifecycle group card", Category: models.CategoryBacklog, Status: models.StatusPending}
 	for _, task := range []*models.Task{ordinary, owned} {
@@ -898,8 +898,8 @@ func TestTaskService_MoveTasksToActiveLaneRejectsLifecycleOwnedGroupBeforeSubmis
 func TestTaskService_UpdateCategory_RollsBackDeferredActivationWhenReloadFails(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	svc := NewTaskService(taskRepo, repository.NewAttachmentRepo(db), newTestWorkerService(t))
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	svc := NewTaskService(taskRepo, sqlite.NewAttachmentRepo(db), newTestWorkerService(t))
 	task := &models.Task{
 		ProjectID: "default",
 		Title:     "Deferred activation reload failure",
@@ -922,8 +922,8 @@ func TestTaskService_UpdateCategory_RollsBackDeferredActivationWhenReloadFails(t
 func TestTaskService_UpdateCategory_RollsBackDeferredActivationWhenReloadContextIsCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	svc := NewTaskService(taskRepo, repository.NewAttachmentRepo(db), newTestWorkerService(t))
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	svc := NewTaskService(taskRepo, sqlite.NewAttachmentRepo(db), newTestWorkerService(t))
 	task := &models.Task{
 		ProjectID: "default",
 		Title:     "Deferred activation cancelled reload",
@@ -947,13 +947,13 @@ func TestTaskService_UpdateCategory_RollsBackDeferredActivationWhenReloadContext
 func TestTaskService_UpdateCategory_QueuedFollowupRetryCreatesOneExecutionAfterActivationFailure(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	execRepo := repository.NewExecutionRepo(db)
-	threadInputRepo := repository.NewThreadInputRepo(db)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	execRepo := sqlite.NewExecutionRepo(db)
+	threadInputRepo := sqlite.NewThreadInputRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
 	workerSvc := newTestWorkerService(t)
-	svc := NewTaskService(taskRepo, repository.NewAttachmentRepo(db), workerSvc)
+	svc := NewTaskService(taskRepo, sqlite.NewAttachmentRepo(db), workerSvc)
 	project := &models.Project{Name: "Deferred queued retry project"}
 	require.NoError(t, projectRepo.Create(ctx, project))
 	agent := &models.LLMConfig{Name: "Deferred queued retry model", Provider: models.ProviderTest, Model: "test-model"}
@@ -1012,12 +1012,12 @@ func TestTaskService_UpdateCategory_QueuedFollowupRetryCreatesOneExecutionAfterA
 func TestTaskService_UpdateCategory_FailedFollowupRetryCreatesOneExecutionAfterActivationFailure(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	execRepo := repository.NewExecutionRepo(db)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	execRepo := sqlite.NewExecutionRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
 	workerSvc := newTestWorkerService(t)
-	svc := NewTaskService(taskRepo, repository.NewAttachmentRepo(db), workerSvc)
+	svc := NewTaskService(taskRepo, sqlite.NewAttachmentRepo(db), workerSvc)
 	project := &models.Project{Name: "Deferred failed retry project"}
 	require.NoError(t, projectRepo.Create(ctx, project))
 	agent := &models.LLMConfig{Name: "Deferred failed retry model", Provider: models.ProviderTest, Model: "test-model"}
@@ -1074,12 +1074,12 @@ func TestTaskService_UpdateCategory_FailedFollowupRetryCreatesOneExecutionAfterA
 func TestTaskService_RunTask_PromotesQueuedTaskThreadFollowupBeforeOriginalPrompt(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	attachmentRepo := repository.NewAttachmentRepo(db)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	execRepo := repository.NewExecutionRepo(db)
-	threadInputRepo := repository.NewThreadInputRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	execRepo := sqlite.NewExecutionRepo(db)
+	threadInputRepo := sqlite.NewThreadInputRepo(db)
 	project := &models.Project{Name: "Manual Run Promotion Project"}
 	require.NoError(t, projectRepo.Create(ctx, project))
 	agent := &models.LLMConfig{Name: "Test Agent", Provider: models.ProviderTest, Model: "test-model", IsDefault: true}
@@ -1120,9 +1120,9 @@ func TestTaskService_RunTask_PromotesQueuedTaskThreadFollowupBeforeOriginalPromp
 func TestTaskService_UpdateCategory_RetriesFailedTaskThreadFollowupBeforeOriginalPrompt(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	attachmentRepo := repository.NewAttachmentRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
 	project := &models.Project{Name: "Manual Active Failed Followup Retry Project"}
 	require.NoError(t, projectRepo.Create(ctx, project))
 	workerSvc := NewWorkerService(nil, 0, nil)
@@ -1153,8 +1153,8 @@ func TestTaskService_UpdateCategory_RetriesFailedTaskThreadFollowupBeforeOrigina
 func TestTaskService_RunTask_DoesNotRerunOriginalPromptWhenQueuedFollowupPromotionFails(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	attachmentRepo := repository.NewAttachmentRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
 	workerSvc := NewWorkerService(nil, 0, nil)
 	svc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 	task := &models.Task{ProjectID: "default", Title: "Promotion Failure", Category: models.CategoryCompleted, Status: models.StatusCompleted, Prompt: "original prompt"}
@@ -1178,9 +1178,9 @@ func TestTaskService_RunTask_DoesNotRerunOriginalPromptWhenQueuedFollowupPromoti
 
 func TestTaskService_RunTask_ResetsStatusAndSubmits(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
 	workerSvc := newTestWorkerService(t)
-	attachmentRepo := repository.NewAttachmentRepo(db)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
 	svc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 	ctx := context.Background()
 
@@ -1223,9 +1223,9 @@ func TestTaskService_RunTask_ResetsStatusAndSubmits(t *testing.T) {
 
 func TestTaskService_RunTask_MovesBacklogToActive(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
 	workerSvc := newTestWorkerService(t)
-	attachmentRepo := repository.NewAttachmentRepo(db)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
 	svc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 	ctx := context.Background()
 
@@ -1269,9 +1269,9 @@ func TestTaskService_RunTask_MovesBacklogToActive(t *testing.T) {
 
 func TestTaskService_RunTask_KeepsActiveCategory(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
 	workerSvc := newTestWorkerService(t)
-	attachmentRepo := repository.NewAttachmentRepo(db)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
 	svc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 	ctx := context.Background()
 
@@ -1312,9 +1312,9 @@ func TestTaskService_RunTask_KeepsActiveCategory(t *testing.T) {
 
 func TestTaskService_RunTask_RunningNoOpDoesNotSubmit(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
 	workerSvc := newTestWorkerService(t)
-	attachmentRepo := repository.NewAttachmentRepo(db)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
 	svc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 	ctx := context.Background()
 
@@ -1352,9 +1352,9 @@ func TestTaskService_RunTask_RunningNoOpDoesNotSubmit(t *testing.T) {
 
 func TestTaskService_RunTask_QueuedNoOpDoesNotSubmit(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
 	workerSvc := newTestWorkerService(t)
-	attachmentRepo := repository.NewAttachmentRepo(db)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
 	svc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 	ctx := context.Background()
 
@@ -1392,14 +1392,14 @@ func TestTaskService_RunTask_QueuedNoOpDoesNotSubmit(t *testing.T) {
 
 func TestTaskService_MoveCompletedActiveToCompleted(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
 	workerSvc := newTestWorkerService(t)
-	attachmentRepo := repository.NewAttachmentRepo(db)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
 	svc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 	ctx := context.Background()
 
 	projectB := &models.Project{Name: "Move completed service project B"}
-	require.NoError(t, repository.NewProjectRepo(db).Create(ctx, projectB))
+	require.NoError(t, sqlite.NewProjectRepo(db).Create(ctx, projectB))
 
 	// Create tasks in various states
 	completedActive := &models.Task{
@@ -1468,9 +1468,9 @@ func TestTaskService_MoveCompletedActiveToCompleted(t *testing.T) {
 
 func TestTaskService_Create_DuplicateTitle(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
 	workerSvc := newTestWorkerService(t)
-	attachmentRepo := repository.NewAttachmentRepo(db)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
 	svc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 	ctx := context.Background()
 
@@ -1505,9 +1505,9 @@ func TestTaskService_Create_DuplicateTitle(t *testing.T) {
 
 func TestTaskService_Update_DuplicateTitle(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
 	workerSvc := newTestWorkerService(t)
-	attachmentRepo := repository.NewAttachmentRepo(db)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
 	svc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 	ctx := context.Background()
 
@@ -1544,7 +1544,7 @@ func TestTaskService_Update_DuplicateTitle(t *testing.T) {
 
 func TestTaskService_Delete_TerminalizesRetainedSwarmChildren(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
 	workerSvc := newTestWorkerService(t)
 	svc := NewTaskService(taskRepo, nil, workerSvc)
 	ctx := context.Background()
@@ -1585,8 +1585,8 @@ func TestTaskService_Delete_TerminalizesRetainedSwarmChildren(t *testing.T) {
 
 func TestTaskService_Delete_PreservesAttachmentsWhenDurableDeleteFails(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	attachmentRepo := repository.NewAttachmentRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
 	svc := NewTaskService(taskRepo, attachmentRepo, newTestWorkerService(t))
 	ctx := context.Background()
 	task := &models.Task{ProjectID: "default", Title: "Delete failure", Category: models.CategoryBacklog, Status: models.StatusPending, Prompt: "test"}
@@ -1610,10 +1610,10 @@ func TestTaskService_Delete_PreservesAttachmentsWhenDurableDeleteFails(t *testin
 
 func TestTaskService_Delete_RollsBackPendingSessionRetirementWhenDeleteFails(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	threadInputRepo := repository.NewThreadInputRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	threadInputRepo := sqlite.NewThreadInputRepo(db)
 	uploadsDir := filepath.Join(t.TempDir(), "uploads")
-	svc := NewTaskService(taskRepo, repository.NewAttachmentRepo(db), newTestWorkerService(t))
+	svc := NewTaskService(taskRepo, sqlite.NewAttachmentRepo(db), newTestWorkerService(t))
 	svc.SetDeletionUploadsDir(uploadsDir)
 	ctx := context.Background()
 	task := &models.Task{ProjectID: "default", Title: "Failed delete pending owner", Category: models.CategoryBacklog, Status: models.StatusPending, Prompt: "test"}
@@ -1643,9 +1643,9 @@ func TestTaskService_Delete_RollsBackPendingSessionRetirementWhenDeleteFails(t *
 
 func TestTaskService_Delete_PreventsUploadMetadataRaceFromLeakingFile(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	attachmentRepo := repository.NewAttachmentRepo(db)
-	chatAttachmentRepo := repository.NewChatAttachmentRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
+	chatAttachmentRepo := sqlite.NewChatAttachmentRepo(db)
 	workerSvc := newTestWorkerService(t)
 	svc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 	svc.SetDeletionUploadsDir(filepath.Join(t.TempDir(), "uploads"))
@@ -1680,10 +1680,10 @@ func TestTaskService_Delete_PreventsUploadMetadataRaceFromLeakingFile(t *testing
 
 func TestTaskService_Delete_SerializesPendingPublicationAfterRetirement(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	threadInputRepo := repository.NewThreadInputRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	threadInputRepo := sqlite.NewThreadInputRepo(db)
 	uploadsDir := filepath.Join(t.TempDir(), "uploads")
-	svc := NewTaskService(taskRepo, repository.NewAttachmentRepo(db), newTestWorkerService(t))
+	svc := NewTaskService(taskRepo, sqlite.NewAttachmentRepo(db), newTestWorkerService(t))
 	svc.SetDeletionUploadsDir(uploadsDir)
 	ctx := context.Background()
 	task := &models.Task{ProjectID: "default", Title: "Retired publication", Category: models.CategoryBacklog, Status: models.StatusPending, Prompt: "test"}
@@ -1744,10 +1744,10 @@ func TestTaskService_Delete_SerializesPendingPublicationAfterRetirement(t *testi
 
 func TestTaskService_Delete_RejectsPendingSessionOwnerAcquiredAfterCommitBeforeRemoval(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	threadInputRepo := repository.NewThreadInputRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	threadInputRepo := sqlite.NewThreadInputRepo(db)
 	uploadsDir := filepath.Join(t.TempDir(), "uploads")
-	svc := NewTaskService(taskRepo, repository.NewAttachmentRepo(db), newTestWorkerService(t))
+	svc := NewTaskService(taskRepo, sqlite.NewAttachmentRepo(db), newTestWorkerService(t))
 	svc.SetDeletionUploadsDir(uploadsDir)
 	ctx := context.Background()
 	deletedTask := &models.Task{ProjectID: "default", Title: "Deleted pending owner", Category: models.CategoryBacklog, Status: models.StatusPending, Prompt: "test"}
@@ -1784,8 +1784,8 @@ func TestTaskService_Delete_RejectsPendingSessionOwnerAcquiredAfterCommitBeforeR
 
 func TestTaskService_Delete_RejectsUnsafePendingUploadSessionBeforeCancellation(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	attachmentRepo := repository.NewAttachmentRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
 	workerSvc := newTestWorkerService(t)
 	svc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 	svc.SetDeletionUploadsDir(filepath.Join(t.TempDir(), "uploads"))
@@ -1809,9 +1809,9 @@ func TestTaskService_Delete_RejectsUnsafePendingUploadSessionBeforeCancellation(
 
 func TestTaskService_Delete_RejectsPendingUploadsWithoutConfiguredRoot(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
 	workerSvc := newTestWorkerService(t)
-	svc := NewTaskService(taskRepo, repository.NewAttachmentRepo(db), workerSvc)
+	svc := NewTaskService(taskRepo, sqlite.NewAttachmentRepo(db), workerSvc)
 	ctx := context.Background()
 	task := &models.Task{ProjectID: "default", Title: "Missing upload root", Category: models.CategoryBacklog, Status: models.StatusPending, Prompt: "test"}
 	require.NoError(t, taskRepo.Create(ctx, task))
@@ -1832,8 +1832,8 @@ func TestTaskService_Delete_RejectsPendingUploadsWithoutConfiguredRoot(t *testin
 
 func TestTaskService_Delete_PreservesFilesStillReferencedByAnotherTask(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	attachmentRepo := repository.NewAttachmentRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
 	uploadsDir := filepath.Join(t.TempDir(), "uploads")
 	svc := NewTaskService(taskRepo, attachmentRepo, newTestWorkerService(t))
 	svc.SetDeletionUploadsDir(uploadsDir)
@@ -1868,9 +1868,9 @@ func TestTaskService_Delete_PreservesFilesStillReferencedByAnotherTask(t *testin
 
 func TestTaskService_Delete_PreservesExecutionLinkedSessionOwnedByAnotherProject(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
 	uploadsDir := filepath.Join(t.TempDir(), "uploads")
-	svc := NewTaskService(taskRepo, repository.NewAttachmentRepo(db), newTestWorkerService(t))
+	svc := NewTaskService(taskRepo, sqlite.NewAttachmentRepo(db), newTestWorkerService(t))
 	svc.SetDeletionUploadsDir(uploadsDir)
 	ctx := context.Background()
 	require.NoError(t, func() error {
@@ -1902,8 +1902,8 @@ func TestTaskService_Delete_PreservesExecutionLinkedSessionOwnedByAnotherProject
 
 func TestTaskService_Delete_SurfacesPostDeleteAttachmentCleanupFailure(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	attachmentRepo := repository.NewAttachmentRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
 	svc := NewTaskService(taskRepo, attachmentRepo, newTestWorkerService(t))
 	ctx := context.Background()
 	task := &models.Task{ProjectID: "default", Title: "Cleanup failure", Category: models.CategoryBacklog, Status: models.StatusPending, Prompt: "test"}
@@ -1923,12 +1923,12 @@ func TestTaskService_Delete_SurfacesPostDeleteAttachmentCleanupFailure(t *testin
 
 func TestTaskService_Delete_DeletesAttachments(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	attachmentRepo := repository.NewAttachmentRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
 	workerSvc := newTestWorkerService(t)
 	svc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 	ctx := context.Background()
-	chatAttachmentRepo := repository.NewChatAttachmentRepo(db)
+	chatAttachmentRepo := sqlite.NewChatAttachmentRepo(db)
 	uploadsDir := filepath.Join(t.TempDir(), "uploads")
 	svc.SetDeletionUploadsDir(uploadsDir)
 	cancelled := make(chan struct{})
@@ -2053,9 +2053,9 @@ func TestTaskService_Delete_DeletesAttachments(t *testing.T) {
 
 func TestTaskService_UpdateCategory_FromCompletedToActiveResetsStatus(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
 	workerSvc := newTestWorkerService(t)
-	attachmentRepo := repository.NewAttachmentRepo(db)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
 	svc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 	ctx := context.Background()
 
@@ -2120,10 +2120,10 @@ func TestTaskService_UpdateCategory_NonActiveRunningOrQueuedDoesNotCancel(t *tes
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			db := testutil.NewTestDB(t)
-			taskRepo := repository.NewTaskRepo(db, nil)
+			taskRepo := sqlite.NewTaskRepo(db, nil)
 			workerSvc := newTestWorkerService(t)
-			goalSvc := NewTaskGoalService(repository.NewTaskGoalRepo(db), taskRepo, nil)
-			svc := NewTaskService(taskRepo, repository.NewAttachmentRepo(db), workerSvc)
+			goalSvc := NewTaskGoalService(sqlite.NewTaskGoalRepo(db), taskRepo, nil)
+			svc := NewTaskService(taskRepo, sqlite.NewAttachmentRepo(db), workerSvc)
 			svc.SetTaskGoalService(goalSvc)
 			ctx := context.Background()
 
@@ -2167,9 +2167,9 @@ func TestTaskService_UpdateCategory_NonActiveRunningOrQueuedDoesNotCancel(t *tes
 
 func TestTaskService_CancelTask_AllowsActivePendingTask(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
 	workerSvc := newTestWorkerService(t)
-	attachmentRepo := repository.NewAttachmentRepo(db)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
 	svc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 	ctx := context.Background()
 
@@ -2193,9 +2193,9 @@ func TestTaskService_CancelTask_AllowsActivePendingTask(t *testing.T) {
 
 func TestTaskService_CancelTask_DoesNotAllowOrdinaryScheduledPendingTask(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
 	workerSvc := newTestWorkerService(t)
-	svc := NewTaskService(taskRepo, repository.NewAttachmentRepo(db), workerSvc)
+	svc := NewTaskService(taskRepo, sqlite.NewAttachmentRepo(db), workerSvc)
 	ctx := context.Background()
 
 	task := &models.Task{
@@ -2219,10 +2219,10 @@ func TestTaskService_CancelTask_DoesNotAllowOrdinaryScheduledPendingTask(t *test
 
 func TestTaskService_CancelTask_RunningTaskPreservesCancellationOrdering(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
 	workerSvc := newTestWorkerService(t)
-	goalSvc := NewTaskGoalService(repository.NewTaskGoalRepo(db), taskRepo, nil)
-	svc := NewTaskService(taskRepo, repository.NewAttachmentRepo(db), workerSvc)
+	goalSvc := NewTaskGoalService(sqlite.NewTaskGoalRepo(db), taskRepo, nil)
+	svc := NewTaskService(taskRepo, sqlite.NewAttachmentRepo(db), workerSvc)
 	svc.SetTaskGoalService(goalSvc)
 	ctx := context.Background()
 
@@ -2286,9 +2286,9 @@ func TestTaskService_CancelTask_RunningTaskPreservesCancellationOrdering(t *test
 
 func TestTaskService_CancelTask_AllowsQueuedTask(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
 	workerSvc := newTestWorkerService(t)
-	attachmentRepo := repository.NewAttachmentRepo(db)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
 	svc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 	ctx := context.Background()
 
@@ -2321,10 +2321,10 @@ func TestTaskService_CancelTask_AllowsQueuedTask(t *testing.T) {
 
 func TestTaskService_CancelTaskObservedDoesNotCancelNewFollowup(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	execRepo := repository.NewExecutionRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	execRepo := sqlite.NewExecutionRepo(db)
 	worker := newTestWorkerService(t)
-	svc := NewTaskService(taskRepo, repository.NewAttachmentRepo(db), worker)
+	svc := NewTaskService(taskRepo, sqlite.NewAttachmentRepo(db), worker)
 	ctx := context.Background()
 	task := &models.Task{ProjectID: "default", Title: "Superseded Stop", Prompt: "test", Status: models.StatusRunning, Category: models.CategoryActive}
 	require.NoError(t, taskRepo.Create(ctx, task))
@@ -2344,7 +2344,7 @@ func TestTaskService_CancelTaskObservedDoesNotCancelNewFollowup(t *testing.T) {
 	started, err := execRepo.CreateDirectTaskFollowupOrQueue(ctx, next, &models.ThreadInput{Content: "new"})
 	require.NoError(t, err)
 	require.True(t, started)
-	inputRepo := repository.NewThreadInputRepo(db)
+	inputRepo := sqlite.NewThreadInputRepo(db)
 	queued := &models.ThreadInput{Scope: models.ThreadInputScopeTask, ProjectID: "default", TaskID: task.ID, Content: "another follow-up"}
 	require.NoError(t, inputRepo.CreateQueued(ctx, queued))
 	cancelled := make(chan struct{}, 1)
@@ -2377,9 +2377,9 @@ func TestTaskService_CancelTaskObservedDoesNotCancelNewFollowup(t *testing.T) {
 
 func TestTaskService_ObserveTaskCancellationKeepsTaskAndCutoffTogether(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	execRepo := repository.NewExecutionRepo(db)
-	svc := NewTaskService(taskRepo, repository.NewAttachmentRepo(db), nil)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	execRepo := sqlite.NewExecutionRepo(db)
+	svc := NewTaskService(taskRepo, sqlite.NewAttachmentRepo(db), nil)
 	ctx := context.Background()
 	task := &models.Task{ProjectID: "default", Title: "Atomic Stop Observation", Prompt: "test", Status: models.StatusRunning, Category: models.CategoryActive}
 	require.NoError(t, taskRepo.Create(ctx, task))
@@ -2429,9 +2429,9 @@ func TestTaskService_ObserveTaskCancellationKeepsTaskAndCutoffTogether(t *testin
 
 func TestTaskService_CancelTaskDoesNotPurgeRerunSubmittedDuringStop(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
 	worker := newTestWorkerService(t)
-	svc := NewTaskService(taskRepo, repository.NewAttachmentRepo(db), worker)
+	svc := NewTaskService(taskRepo, sqlite.NewAttachmentRepo(db), worker)
 	ctx := context.Background()
 	task := &models.Task{ProjectID: "default", Title: "Rerun During Stop", Prompt: "test", Status: models.StatusRunning, Category: models.CategoryActive}
 	require.NoError(t, taskRepo.Create(ctx, task))
@@ -2470,9 +2470,9 @@ func TestTaskService_CancelTaskDoesNotPurgeRerunSubmittedDuringStop(t *testing.T
 
 func TestTaskService_CancelTask_ReturnsCategoryUpdateFailure(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
 	workerSvc := newTestWorkerService(t)
-	attachmentRepo := repository.NewAttachmentRepo(db)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
 	svc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 	ctx := context.Background()
 
@@ -2508,10 +2508,10 @@ func TestTaskService_CancelTask_ReturnsCategoryUpdateFailure(t *testing.T) {
 
 func TestTaskService_UpdateCategory_FromActiveToCompletedCancelsRunning(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
 	workerSvc := newTestWorkerService(t)
-	attachmentRepo := repository.NewAttachmentRepo(db)
-	goalSvc := NewTaskGoalService(repository.NewTaskGoalRepo(db), taskRepo, nil)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
+	goalSvc := NewTaskGoalService(sqlite.NewTaskGoalRepo(db), taskRepo, nil)
 	svc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 	svc.SetTaskGoalService(goalSvc)
 	ctx := context.Background()
@@ -2554,10 +2554,10 @@ func TestTaskService_UpdateCategory_FromActiveToCompletedCancelsRunning(t *testi
 
 func TestTaskService_UpdateCategoryDemotionDoesNotCancelConcurrentFollowup(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	execRepo := repository.NewExecutionRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	execRepo := sqlite.NewExecutionRepo(db)
 	worker := newTestWorkerService(t)
-	svc := NewTaskService(taskRepo, repository.NewAttachmentRepo(db), worker)
+	svc := NewTaskService(taskRepo, sqlite.NewAttachmentRepo(db), worker)
 	ctx := context.Background()
 	task := &models.Task{ProjectID: "default", Title: "Demotion Follow-up", Prompt: "test", Status: models.StatusRunning, Category: models.CategoryActive}
 	require.NoError(t, taskRepo.Create(ctx, task))
@@ -2608,10 +2608,10 @@ func TestTaskService_UpdateCategoryDemotionDoesNotCancelConcurrentFollowup(t *te
 
 func TestTaskService_UpdateCategory_FromActiveToCompletedCancelsQueued(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
 	workerSvc := newTestWorkerService(t)
-	attachmentRepo := repository.NewAttachmentRepo(db)
-	goalSvc := NewTaskGoalService(repository.NewTaskGoalRepo(db), taskRepo, nil)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
+	goalSvc := NewTaskGoalService(sqlite.NewTaskGoalRepo(db), taskRepo, nil)
 	svc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 	svc.SetTaskGoalService(goalSvc)
 	ctx := context.Background()
@@ -2651,10 +2651,10 @@ func TestTaskService_UpdateCategory_FromActiveToCompletedCancelsQueued(t *testin
 
 func TestTaskService_UpdateCategory_FromActiveToBacklogCancelsQueued(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
 	workerSvc := newTestWorkerService(t)
-	attachmentRepo := repository.NewAttachmentRepo(db)
-	goalSvc := NewTaskGoalService(repository.NewTaskGoalRepo(db), taskRepo, nil)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
+	goalSvc := NewTaskGoalService(sqlite.NewTaskGoalRepo(db), taskRepo, nil)
 	svc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 	svc.SetTaskGoalService(goalSvc)
 	ctx := context.Background()
@@ -2694,10 +2694,10 @@ func TestTaskService_UpdateCategory_FromActiveToBacklogCancelsQueued(t *testing.
 
 func TestTaskService_UpdateCategory_ToActiveResumesGoalPausedByUserStop(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
 	workerSvc := newTestWorkerService(t)
-	attachmentRepo := repository.NewAttachmentRepo(db)
-	goalSvc := NewTaskGoalService(repository.NewTaskGoalRepo(db), taskRepo, nil)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
+	goalSvc := NewTaskGoalService(sqlite.NewTaskGoalRepo(db), taskRepo, nil)
 	svc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 	svc.SetTaskGoalService(goalSvc)
 	ctx := context.Background()
@@ -2726,9 +2726,9 @@ func TestTaskService_UpdateCategory_ToActiveResumesGoalPausedByUserStop(t *testi
 
 func TestTaskService_UpdateCategory_FromRunningToActiveResetsStatus(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
 	workerSvc := newTestWorkerService(t)
-	attachmentRepo := repository.NewAttachmentRepo(db)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
 	svc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 	ctx := context.Background()
 
@@ -2769,7 +2769,7 @@ func TestTaskService_UpdateCategory_FromRunningToActiveResetsStatus(t *testing.T
 
 func TestTaskService_ActiveTaskWithCompletedStatusIsNotDeleted(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
 	ctx := context.Background()
 
 	// Create a task in the active category
@@ -2841,9 +2841,9 @@ func TestTaskService_DeleteAll_CleansEveryUploadOwner(t *testing.T) {
 	for i, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			db := testutil.NewTestDB(t)
-			taskRepo := repository.NewTaskRepo(db, nil)
-			attachmentRepo := repository.NewAttachmentRepo(db)
-			chatAttachmentRepo := repository.NewChatAttachmentRepo(db)
+			taskRepo := sqlite.NewTaskRepo(db, nil)
+			attachmentRepo := sqlite.NewAttachmentRepo(db)
+			chatAttachmentRepo := sqlite.NewChatAttachmentRepo(db)
 			uploadsDir := filepath.Join(t.TempDir(), "uploads")
 			svc := NewTaskService(taskRepo, attachmentRepo, newTestWorkerService(t))
 			svc.SetDeletionUploadsDir(uploadsDir)
@@ -2885,8 +2885,8 @@ func TestTaskService_DeleteAll_CleansEveryUploadOwner(t *testing.T) {
 
 func TestTaskService_DeleteAll_PreservesFilesWhenDurableDeleteFails(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	attachmentRepo := repository.NewAttachmentRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
 	svc := NewTaskService(taskRepo, attachmentRepo, newTestWorkerService(t))
 	ctx := context.Background()
 	task := &models.Task{ProjectID: "default", Title: "Bulk delete failure", Category: models.CategoryCompleted, Status: models.StatusCompleted, Prompt: "test"}
@@ -2908,8 +2908,8 @@ func TestTaskService_DeleteAll_PreservesFilesWhenDurableDeleteFails(t *testing.T
 
 func TestTaskService_DeleteAll_SurfacesCleanupFailureAfterDurableDelete(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	attachmentRepo := repository.NewAttachmentRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
 	svc := NewTaskService(taskRepo, attachmentRepo, newTestWorkerService(t))
 	ctx := context.Background()
 	task := &models.Task{ProjectID: "default", Title: "Bulk cleanup failure", Category: models.CategoryBacklog, Status: models.StatusPending, Prompt: "test"}
@@ -2929,10 +2929,10 @@ func TestTaskService_DeleteAll_SurfacesCleanupFailureAfterDurableDelete(t *testi
 
 func TestTaskService_DeleteAllCompleted(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	projectRepo := sqlite.NewProjectRepo(db)
 	workerSvc := newTestWorkerService(t)
-	attachmentRepo := repository.NewAttachmentRepo(db)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
 	svc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 	ctx := context.Background()
 
@@ -3024,10 +3024,10 @@ func TestTaskService_DeleteAllCompleted(t *testing.T) {
 
 func TestTaskService_DeleteAllBacklog(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	projectRepo := sqlite.NewProjectRepo(db)
 	workerSvc := newTestWorkerService(t)
-	attachmentRepo := repository.NewAttachmentRepo(db)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
 	svc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 	ctx := context.Background()
 
@@ -3119,10 +3119,10 @@ func TestTaskService_DeleteAllBacklog(t *testing.T) {
 
 func TestTaskService_ActivateAllBacklog(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	projectRepo := sqlite.NewProjectRepo(db)
 	workerSvc := newTestWorkerService(t)
-	attachmentRepo := repository.NewAttachmentRepo(db)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
 	svc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 	ctx := context.Background()
 
@@ -3205,11 +3205,11 @@ func TestTaskService_ActivateAllBacklog(t *testing.T) {
 
 func TestTaskService_ActivateAllBacklog_ResumesGoalPausedByUserStop(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	projectRepo := sqlite.NewProjectRepo(db)
 	workerSvc := newTestWorkerService(t)
-	attachmentRepo := repository.NewAttachmentRepo(db)
-	goalSvc := NewTaskGoalService(repository.NewTaskGoalRepo(db), taskRepo, nil)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
+	goalSvc := NewTaskGoalService(sqlite.NewTaskGoalRepo(db), taskRepo, nil)
 	svc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 	svc.SetTaskGoalService(goalSvc)
 	ctx := context.Background()
@@ -3278,9 +3278,9 @@ func TestWorkerService_Submit_SkipsChatTasks(t *testing.T) {
 
 func TestTaskService_ExecuteBacklogTasks_All(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
 	workerSvc := newTestWorkerService(t)
-	attachmentRepo := repository.NewAttachmentRepo(db)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
 	svc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 	ctx := context.Background()
 
@@ -3353,10 +3353,10 @@ func TestTaskService_ExecuteBacklogTasks_All(t *testing.T) {
 
 func TestTaskService_ExecuteBacklogTasks_ResumesGoalPausedByUserStop(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
 	workerSvc := newTestWorkerService(t)
-	attachmentRepo := repository.NewAttachmentRepo(db)
-	goalSvc := NewTaskGoalService(repository.NewTaskGoalRepo(db), taskRepo, nil)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
+	goalSvc := NewTaskGoalService(sqlite.NewTaskGoalRepo(db), taskRepo, nil)
 	svc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 	svc.SetTaskGoalService(goalSvc)
 	ctx := context.Background()
@@ -3387,9 +3387,9 @@ func TestTaskService_ExecuteBacklogTasks_ResumesGoalPausedByUserStop(t *testing.
 
 func TestTaskService_ExecuteBacklogTasks_FilterByPriority(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
 	workerSvc := newTestWorkerService(t)
-	attachmentRepo := repository.NewAttachmentRepo(db)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
 	svc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 	ctx := context.Background()
 
@@ -3463,9 +3463,9 @@ func TestTaskService_ExecuteBacklogTasks_FilterByPriority(t *testing.T) {
 
 func TestTaskService_ExecuteBacklogTasks_ReExecutesFailedTasks(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
 	workerSvc := newTestWorkerService(t)
-	attachmentRepo := repository.NewAttachmentRepo(db)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
 	svc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 	ctx := context.Background()
 
@@ -3504,9 +3504,9 @@ func TestTaskService_ExecuteBacklogTasks_ReExecutesFailedTasks(t *testing.T) {
 
 func TestTaskService_ExecuteBacklogTasks_SkipsRunningTasks(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
 	workerSvc := newTestWorkerService(t)
-	attachmentRepo := repository.NewAttachmentRepo(db)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
 	svc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 	ctx := context.Background()
 
@@ -3536,9 +3536,9 @@ func TestTaskService_ExecuteBacklogTasks_SkipsRunningTasks(t *testing.T) {
 
 func TestTaskService_ExecuteBacklogTasks_EmptyBacklog(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
 	workerSvc := newTestWorkerService(t)
-	attachmentRepo := repository.NewAttachmentRepo(db)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
 	svc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 	ctx := context.Background()
 
@@ -3557,9 +3557,9 @@ func TestTaskService_ExecuteBacklogTasks_EmptyBacklog(t *testing.T) {
 
 func TestTaskService_ExecuteBacklogTasks_ReExecutesCompletedTasks(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
 	workerSvc := newTestWorkerService(t)
-	attachmentRepo := repository.NewAttachmentRepo(db)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
 	svc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 	ctx := context.Background()
 
@@ -3599,7 +3599,7 @@ func TestTaskService_ExecuteBacklogTasks_ReExecutesCompletedTasks(t *testing.T) 
 
 func TestTaskRepo_CountBacklogByPriority(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
 	ctx := context.Background()
 
 	// Create backlog tasks with different priorities
@@ -3638,9 +3638,9 @@ func TestTaskRepo_CountBacklogByPriority(t *testing.T) {
 
 func TestTaskService_Create_ChatTaskDoesNotAutoSubmit(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
 	workerSvc := newTestWorkerService(t)
-	attachmentRepo := repository.NewAttachmentRepo(db)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
 	svc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 	ctx := context.Background()
 
@@ -3666,7 +3666,7 @@ func TestTaskService_Create_ChatTaskDoesNotAutoSubmit(t *testing.T) {
 
 func TestWorkerService_ProjectConcurrency_Tracking(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	projectRepo := repository.NewProjectRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
 	ctx := context.Background()
 
 	// Create a project with max_workers = 2
@@ -3733,7 +3733,7 @@ func TestWorkerService_ProjectConcurrency_Tracking(t *testing.T) {
 
 func TestWorkerService_ProjectConcurrency_NoLimit(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	projectRepo := repository.NewProjectRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
 
 	ws := NewWorkerService(nil, 0, projectRepo)
 
@@ -3776,7 +3776,7 @@ func TestWorkerService_ProjectConcurrency_NilProjectRepo(t *testing.T) {
 
 func TestWorkerService_ProjectConcurrency_MultipleProjects(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	projectRepo := repository.NewProjectRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
 	ctx := context.Background()
 
 	// Project A: max 1 worker
@@ -3837,7 +3837,7 @@ func TestWorkerService_StartReconcilesDurableActiveLaneReservationWhileCapacityF
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
 	task := &models.Task{ProjectID: "default", Title: "Restart reserved worker task", Category: models.CategoryBacklog, Status: models.StatusPending}
 	require.NoError(t, taskRepo.Create(ctx, task))
 	admissions, err := taskRepo.MoveTasksToActiveLane(ctx, "default", []persistence.ActiveLaneTaskMove{{ID: task.ID, ExpectedCategory: models.CategoryBacklog, ExpectedStatus: models.StatusPending}}, models.StatusRunning)
@@ -3864,9 +3864,9 @@ func TestWorkerService_ReservedDispatchRefreshesMetadataAfterCapacityWait(t *tes
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	execRepo := repository.NewExecutionRepo(db)
-	modelRepo := repository.NewLLMConfigRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	execRepo := sqlite.NewExecutionRepo(db)
+	modelRepo := sqlite.NewLLMConfigRepo(db)
 	firstModel := &models.LLMConfig{Name: "Capacity original model", Provider: models.ProviderTest, Model: "original-model"}
 	secondModel := &models.LLMConfig{Name: "Capacity current model", Provider: models.ProviderTest, Model: "current-model"}
 	require.NoError(t, modelRepo.Create(ctx, firstModel))
@@ -3880,7 +3880,7 @@ func TestWorkerService_ReservedDispatchRefreshesMetadataAfterCapacityWait(t *tes
 	_, err = db.ExecContext(ctx, `UPDATE projects SET max_workers = 1 WHERE id = 'default'`)
 	require.NoError(t, err)
 	worker := NewWorkerService(nil, 2, nil)
-	worker.SetProjectRepo(repository.NewProjectRepo(db))
+	worker.SetProjectRepo(sqlite.NewProjectRepo(db))
 	worker.SetTaskRepo(taskRepo)
 	worker.SetExecutionRepo(execRepo)
 	worker.SetLLMConfigRepo(modelRepo)
@@ -3920,8 +3920,8 @@ func TestWorkerService_RetriesTransientReservedClaimFailureWithSameExecution(t *
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	execRepo := repository.NewExecutionRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	execRepo := sqlite.NewExecutionRepo(db)
 	task := &models.Task{ProjectID: "default", Title: "Retry reserved claim", Category: models.CategoryBacklog, Status: models.StatusPending, Prompt: "run once"}
 	require.NoError(t, taskRepo.Create(ctx, task))
 	admissions, err := taskRepo.MoveTasksToActiveLane(ctx, "default", []persistence.ActiveLaneTaskMove{{ID: task.ID, ExpectedCategory: models.CategoryBacklog, ExpectedStatus: models.StatusPending}}, models.StatusRunning)
@@ -3952,8 +3952,8 @@ func TestWorkerService_RetriesTransientReservedClaimFailureWithSameExecution(t *
 func TestWorkerService_PrunesAndCancelsStaleDurableReservation(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	execRepo := repository.NewExecutionRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	execRepo := sqlite.NewExecutionRepo(db)
 	task := &models.Task{ProjectID: "default", Title: "Cancelled reserved worker task", Category: models.CategoryBacklog, Status: models.StatusPending}
 	require.NoError(t, taskRepo.Create(ctx, task))
 	admissions, err := taskRepo.MoveTasksToActiveLane(ctx, "default", []persistence.ActiveLaneTaskMove{{ID: task.ID, ExpectedCategory: models.CategoryBacklog, ExpectedStatus: models.StatusPending}}, models.StatusRunning)
@@ -3980,8 +3980,8 @@ func TestWorkerService_DispatchPrunesNonPendingTasks(t *testing.T) {
 	// When dispatchNext scans the queue, tasks whose status changed to
 	// completed should be pruned from the queue instead of being dispatched.
 	db := testutil.NewTestDB(t)
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
 	ctx := context.Background()
 
 	project := &models.Project{Name: "Test Project"}
@@ -4035,8 +4035,8 @@ func TestWorkerService_DispatchPrunesNonActiveCategoryTasks(t *testing.T) {
 	// When a task's category is changed away from active/scheduled,
 	// dispatchNext should prune it from the queue.
 	db := testutil.NewTestDB(t)
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
 	ctx := context.Background()
 
 	project := &models.Project{Name: "Test Project"}
@@ -4085,7 +4085,7 @@ func TestWorkerService_DispatchPrunesNonActiveCategoryTasks(t *testing.T) {
 }
 func TestTaskService_MoveTasksToActiveLaneRoutesSingleSwarmPlannerAndReturnsLaneConflict(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
 	workerSvc := newTestWorkerService(t)
 	taskSvc := NewTaskService(taskRepo, nil, workerSvc)
 	swarmSvc := NewSwarmService(taskSvc, taskRepo, nil, workerSvc)
@@ -4102,7 +4102,7 @@ func TestTaskService_MoveTasksToActiveLaneRoutesSingleSwarmPlannerAndReturnsLane
 
 func TestTaskService_MoveTasksToActiveLaneFencesConcurrentSwarmParentTransition(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
 	workerSvc := newTestWorkerService(t)
 	taskSvc := NewTaskService(taskRepo, nil, workerSvc)
 	swarmSvc := NewSwarmService(taskSvc, taskRepo, nil, workerSvc)
@@ -4128,8 +4128,8 @@ func TestTaskService_MoveTasksToActiveLaneFencesConcurrentSwarmParentTransition(
 
 func TestTaskService_ActivateAllBacklogStartsSwarmPlanner(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	projectRepo := sqlite.NewProjectRepo(db)
 	workerSvc := newTestWorkerService(t)
 	taskSvc := NewTaskService(taskRepo, nil, workerSvc)
 	swarmSvc := NewSwarmService(taskSvc, taskRepo, nil, workerSvc)
@@ -4150,7 +4150,7 @@ func TestTaskService_ActivateAllBacklogStartsSwarmPlanner(t *testing.T) {
 
 func TestTaskService_ExecuteBacklogTasksStartsSwarmPlanner(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
 	workerSvc := newTestWorkerService(t)
 	taskSvc := NewTaskService(taskRepo, nil, workerSvc)
 	swarmSvc := NewSwarmService(taskSvc, taskRepo, nil, workerSvc)
@@ -4169,7 +4169,7 @@ func TestTaskService_ExecuteBacklogTasksStartsSwarmPlanner(t *testing.T) {
 
 func TestTaskService_ExecuteTasksByTagsStartsSwarmPlanner(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
 	workerSvc := newTestWorkerService(t)
 	taskSvc := NewTaskService(taskRepo, nil, workerSvc)
 	swarmSvc := NewSwarmService(taskSvc, taskRepo, nil, workerSvc)
@@ -4188,7 +4188,7 @@ func TestTaskService_ExecuteTasksByTagsStartsSwarmPlanner(t *testing.T) {
 
 func TestTaskService_UpdateStatusPendingStartsSwarmPlanner(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
 	workerSvc := newTestWorkerService(t)
 	taskSvc := NewTaskService(taskRepo, nil, workerSvc)
 	swarmSvc := NewSwarmService(taskSvc, taskRepo, nil, workerSvc)
@@ -4205,7 +4205,7 @@ func TestTaskService_UpdateStatusPendingStartsSwarmPlanner(t *testing.T) {
 	assertPlannerSubmittedForParent(t, taskRepo, workerSvc, parent.ID)
 }
 
-func assertPlannerSubmittedForParent(t *testing.T, taskRepo *repository.TaskRepo, workerSvc *WorkerService, parentID string) {
+func assertPlannerSubmittedForParent(t *testing.T, taskRepo *sqlite.TaskRepo, workerSvc *WorkerService, parentID string) {
 	t.Helper()
 	planner, err := taskRepo.FindSwarmChildByRole(context.Background(), parentID, models.SwarmRolePlanner)
 	require.NoError(t, err)

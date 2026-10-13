@@ -7,15 +7,15 @@ import (
 
 	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/testutil"
 )
 
 func TestAlertService_GetByIDPreservesMarkdownDetailAndProjectScope(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	alertRepo := repository.NewAlertRepo(db)
-	projectRepo := repository.NewProjectRepo(db)
+	alertRepo := sqlite.NewAlertRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
 	alertSvc := NewAlertService(alertRepo, nil)
 
 	project := &models.Project{Name: "Markdown detail project"}
@@ -65,11 +65,11 @@ func TestAlertService_GetByIDPreservesMarkdownDetailAndProjectScope(t *testing.T
 
 func TestAlertService_CreateTaskFailedAlert(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	alertRepo := repository.NewAlertRepo(db)
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	execRepo := repository.NewExecutionRepo(db)
+	alertRepo := sqlite.NewAlertRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	execRepo := sqlite.NewExecutionRepo(db)
 	alertSvc := NewAlertService(alertRepo, nil)
 
 	// Create a project
@@ -132,8 +132,8 @@ func TestAlertService_CreateTaskFailedAlert(t *testing.T) {
 
 func TestAlertService_CountUnread(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	alertRepo := repository.NewAlertRepo(db)
-	projectRepo := repository.NewProjectRepo(db)
+	alertRepo := sqlite.NewAlertRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
 	alertSvc := NewAlertService(alertRepo, nil)
 
 	p := &models.Project{Name: "Test Project"}
@@ -179,8 +179,8 @@ func TestAlertService_CountUnread(t *testing.T) {
 
 func TestAlertService_PublishesEventOnCreate(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	alertRepo := repository.NewAlertRepo(db)
-	projectRepo := repository.NewProjectRepo(db)
+	alertRepo := sqlite.NewAlertRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
 	broadcaster := events.NewBroadcaster()
 	alertSvc := NewAlertService(alertRepo, broadcaster)
 
@@ -229,8 +229,8 @@ func TestAlertService_PublishesEventOnCreate(t *testing.T) {
 func TestAlertService_PublishesProjectScopedEventsForLifecycleMutations(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
 	project := &models.Project{Name: "Lifecycle Events"}
 	if err := projectRepo.Create(ctx, project); err != nil {
 		t.Fatal(err)
@@ -245,7 +245,7 @@ func TestAlertService_PublishesProjectScopedEventsForLifecycleMutations(t *testi
 		t.Fatal(err)
 	}
 	defer broadcaster.Unsubscribe(sub)
-	svc := NewAlertService(repository.NewAlertRepo(db), broadcaster)
+	svc := NewAlertService(sqlite.NewAlertRepo(db), broadcaster)
 	alert, err := svc.CreateActionable(ctx, &models.Alert{ProjectID: project.ID, Type: "suggestion", Title: "Lifecycle", Severity: models.SeverityInfo})
 	if err != nil {
 		t.Fatal(err)
@@ -334,8 +334,8 @@ func TestAlertService_PublishesProjectScopedEventsForLifecycleMutations(t *testi
 
 func TestAlertService_DeleteAll(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	alertRepo := repository.NewAlertRepo(db)
-	projectRepo := repository.NewProjectRepo(db)
+	alertRepo := sqlite.NewAlertRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
 	alertSvc := NewAlertService(alertRepo, nil)
 
 	p := &models.Project{Name: "Test Project"}

@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/openvibely/openvibely/internal/util"
 )
@@ -17,14 +17,14 @@ import (
 func TestInsightsService_ResolveDirectAnalysisContext(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	projectRepo := repository.NewProjectRepo(db)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
 	svc := NewInsightsService(
-		repository.NewInsightsRepo(db),
-		repository.NewTaskRepo(db, nil),
+		sqlite.NewInsightsRepo(db),
+		sqlite.NewTaskRepo(db, nil),
 		projectRepo,
 		llmConfigRepo,
-		repository.NewExecutionRepo(db),
+		sqlite.NewExecutionRepo(db),
 	)
 
 	project := &models.Project{Name: "Direct analysis context", RepoPath: t.TempDir()}
@@ -66,12 +66,12 @@ func TestInsightsService_DirectAnalysisReportsPreserveSetupErrors(t *testing.T) 
 	t.Run("missing project", func(t *testing.T) {
 		db := testutil.NewTestDB(t)
 		ctx := context.Background()
-		projectRepo := repository.NewProjectRepo(db)
-		taskRepo := repository.NewTaskRepo(db, nil)
-		insightsRepo := repository.NewInsightsRepo(db)
-		llmConfigRepo := repository.NewLLMConfigRepo(db)
-		execRepo := repository.NewExecutionRepo(db)
-		llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, repository.NewScheduleRepo(db), repository.NewAttachmentRepo(db))
+		projectRepo := sqlite.NewProjectRepo(db)
+		taskRepo := sqlite.NewTaskRepo(db, nil)
+		insightsRepo := sqlite.NewInsightsRepo(db)
+		llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+		execRepo := sqlite.NewExecutionRepo(db)
+		llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, sqlite.NewScheduleRepo(db), sqlite.NewAttachmentRepo(db))
 		mock := testutil.NewMockLLMCaller()
 		llmSvc.SetLLMCaller(mock)
 		svc := NewInsightsService(insightsRepo, taskRepo, projectRepo, llmConfigRepo, execRepo)
@@ -99,12 +99,12 @@ func TestInsightsService_DirectAnalysisReportsPreserveSetupErrors(t *testing.T) 
 	t.Run("missing default agent", func(t *testing.T) {
 		db := testutil.NewTestDB(t)
 		ctx := context.Background()
-		projectRepo := repository.NewProjectRepo(db)
-		taskRepo := repository.NewTaskRepo(db, nil)
-		insightsRepo := repository.NewInsightsRepo(db)
-		llmConfigRepo := repository.NewLLMConfigRepo(db)
-		execRepo := repository.NewExecutionRepo(db)
-		llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, repository.NewScheduleRepo(db), repository.NewAttachmentRepo(db))
+		projectRepo := sqlite.NewProjectRepo(db)
+		taskRepo := sqlite.NewTaskRepo(db, nil)
+		insightsRepo := sqlite.NewInsightsRepo(db)
+		llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+		execRepo := sqlite.NewExecutionRepo(db)
+		llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, sqlite.NewScheduleRepo(db), sqlite.NewAttachmentRepo(db))
 		mock := testutil.NewMockLLMCaller()
 		llmSvc.SetLLMCaller(mock)
 		svc := NewInsightsService(insightsRepo, taskRepo, projectRepo, llmConfigRepo, execRepo)
@@ -147,11 +147,11 @@ func TestInsightsService_DirectAnalysisReportsPreserveNilLLMBehavior(t *testing.
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
 	svc := NewInsightsService(
-		repository.NewInsightsRepo(db),
-		repository.NewTaskRepo(db, nil),
-		repository.NewProjectRepo(db),
-		repository.NewLLMConfigRepo(db),
-		repository.NewExecutionRepo(db),
+		sqlite.NewInsightsRepo(db),
+		sqlite.NewTaskRepo(db, nil),
+		sqlite.NewProjectRepo(db),
+		sqlite.NewLLMConfigRepo(db),
+		sqlite.NewExecutionRepo(db),
 	)
 
 	knowledge, err := svc.ExtractKnowledge(ctx, "missing-project")
@@ -170,11 +170,11 @@ func TestInsightsService_GetDashboard(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
 
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	insightsRepo := repository.NewInsightsRepo(db)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	execRepo := repository.NewExecutionRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	insightsRepo := sqlite.NewInsightsRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	execRepo := sqlite.NewExecutionRepo(db)
 
 	svc := NewInsightsService(insightsRepo, taskRepo, projectRepo, llmConfigRepo, execRepo)
 
@@ -221,11 +221,11 @@ func TestInsightsService_DetectBugPatterns(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
 
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	insightsRepo := repository.NewInsightsRepo(db)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	execRepo := repository.NewExecutionRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	insightsRepo := sqlite.NewInsightsRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	execRepo := sqlite.NewExecutionRepo(db)
 
 	svc := NewInsightsService(insightsRepo, taskRepo, projectRepo, llmConfigRepo, execRepo)
 
@@ -301,11 +301,11 @@ func TestInsightsService_RunAnalysisCreatesReportAcrossDetectors(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
 
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	insightsRepo := repository.NewInsightsRepo(db)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	execRepo := repository.NewExecutionRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	insightsRepo := sqlite.NewInsightsRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	execRepo := sqlite.NewExecutionRepo(db)
 	svc := NewInsightsService(insightsRepo, taskRepo, projectRepo, llmConfigRepo, execRepo)
 
 	project := &models.Project{Name: "Run Analysis Project"}
@@ -413,10 +413,10 @@ func TestInsightsService_RunAnalysisStalePendingTasks(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			db := testutil.NewTestDB(t)
 			ctx := context.Background()
-			projectRepo := repository.NewProjectRepo(db)
-			taskRepo := repository.NewTaskRepo(db, nil)
-			insightsRepo := repository.NewInsightsRepo(db)
-			svc := NewInsightsService(insightsRepo, taskRepo, projectRepo, repository.NewLLMConfigRepo(db), repository.NewExecutionRepo(db))
+			projectRepo := sqlite.NewProjectRepo(db)
+			taskRepo := sqlite.NewTaskRepo(db, nil)
+			insightsRepo := sqlite.NewInsightsRepo(db)
+			svc := NewInsightsService(insightsRepo, taskRepo, projectRepo, sqlite.NewLLMConfigRepo(db), sqlite.NewExecutionRepo(db))
 			project := &models.Project{Name: "Stale pending analysis"}
 			if err := projectRepo.Create(ctx, project); err != nil {
 				t.Fatalf("create project: %v", err)
@@ -493,12 +493,12 @@ func TestInsightsService_GenerateProactiveSuggestionsParsesAndDeduplicates(t *te
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
 
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	insightsRepo := repository.NewInsightsRepo(db)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	execRepo := repository.NewExecutionRepo(db)
-	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, repository.NewScheduleRepo(db), repository.NewAttachmentRepo(db))
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	insightsRepo := sqlite.NewInsightsRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	execRepo := sqlite.NewExecutionRepo(db)
+	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, sqlite.NewScheduleRepo(db), sqlite.NewAttachmentRepo(db))
 	mock := testutil.NewMockLLMCaller()
 	mock.Response = `[{"title":"Split deployment checks","description":"Deployment work is failing often.","suggestion":"Split smoke tests from release steps.","impact":"Faster diagnosis","severity":"high","confidence":0.95},{"title":"Document retry limits","description":"Retries are implicit.","suggestion":"Write down retry boundaries.","impact":"Fewer duplicate side effects","severity":"medium","confidence":2}]`
 	llmSvc.SetLLMCaller(mock)
@@ -541,13 +541,13 @@ func TestInsightsService_AIBackedWorkflowsPersistAndListResults(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
 
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	insightsRepo := repository.NewInsightsRepo(db)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	execRepo := repository.NewExecutionRepo(db)
-	attachmentRepo := repository.NewAttachmentRepo(db)
-	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, repository.NewScheduleRepo(db), attachmentRepo)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	insightsRepo := sqlite.NewInsightsRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	execRepo := sqlite.NewExecutionRepo(db)
+	attachmentRepo := sqlite.NewAttachmentRepo(db)
+	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, sqlite.NewScheduleRepo(db), attachmentRepo)
 	mock := testutil.NewMockLLMCaller()
 	var directUsageProjectIDs []string
 	mock.OnCall = func(ctx context.Context, _ testutil.MockLLMCall) {
@@ -691,11 +691,11 @@ func TestInsightsService_UpdateAndAcceptInsight(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
 
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	insightsRepo := repository.NewInsightsRepo(db)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	execRepo := repository.NewExecutionRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	insightsRepo := sqlite.NewInsightsRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	execRepo := sqlite.NewExecutionRepo(db)
 
 	svc := NewInsightsService(insightsRepo, taskRepo, projectRepo, llmConfigRepo, execRepo)
 
@@ -740,11 +740,11 @@ func TestInsightsService_ProjectScopedMutations(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
 
-	projectRepo := repository.NewProjectRepo(db)
-	insightsRepo := repository.NewInsightsRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	execRepo := repository.NewExecutionRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	insightsRepo := sqlite.NewInsightsRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	execRepo := sqlite.NewExecutionRepo(db)
 	svc := NewInsightsService(insightsRepo, taskRepo, projectRepo, llmConfigRepo, execRepo)
 
 	projectA := &models.Project{Name: "Project A"}
@@ -969,11 +969,11 @@ func TestInsightsService_HealthCheckDashboardIntegration(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
 
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	insightsRepo := repository.NewInsightsRepo(db)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	execRepo := repository.NewExecutionRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	insightsRepo := sqlite.NewInsightsRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	execRepo := sqlite.NewExecutionRepo(db)
 
 	svc := NewInsightsService(insightsRepo, taskRepo, projectRepo, llmConfigRepo, execRepo)
 
@@ -1103,11 +1103,11 @@ func TestInsightsService_IdeaGradeDashboardIntegration(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
 
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	insightsRepo := repository.NewInsightsRepo(db)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	execRepo := repository.NewExecutionRepo(db)
+	projectRepo := sqlite.NewProjectRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
+	insightsRepo := sqlite.NewInsightsRepo(db)
+	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	execRepo := sqlite.NewExecutionRepo(db)
 
 	svc := NewInsightsService(insightsRepo, taskRepo, projectRepo, llmConfigRepo, execRepo)
 

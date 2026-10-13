@@ -16,7 +16,7 @@ import (
 	"github.com/openvibely/openvibely/internal/database"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 )
 
 const taskUIAgentPerformanceSamples = 5
@@ -25,7 +25,7 @@ type taskUIAgentRenderFixture struct {
 	connections       *database.Connections
 	h                 *Handler
 	e                 http.Handler
-	agentRepo         *repository.AgentRepo
+	agentRepo         *sqlite.AgentRepo
 	projectID         string
 	detailTask        string
 	noAgentDetailTask string
@@ -80,11 +80,11 @@ func newTaskUIAgentRenderFixture(tb testing.TB) *taskUIAgentRenderFixture {
 		tb.Fatalf("Task UI performance fixture must use production 1W + 1R topology: reader=%p writer=%p reader_max=%d writer_max=%d",
 			connections.Reader, connections.Writer, connections.Reader.Stats().MaxOpenConnections, connections.Writer.Stats().MaxOpenConnections)
 	}
-	unregister := repository.RegisterDedicatedWriter(connections.Reader, connections.Writer)
+	unregister := sqlite.RegisterDedicatedWriter(connections.Reader, connections.Writer)
 	tb.Cleanup(unregister)
 
 	ctx := context.Background()
-	writerAgentRepo := repository.NewAgentRepo(connections.Writer)
+	writerAgentRepo := sqlite.NewAgentRepo(connections.Writer)
 	var assignedID, fallbackID string
 	for i := 0; i < 1000; i++ {
 		agent := newProductionTaskUIAgent(fmt.Sprintf("Task UI Performance Agent %04d", i))
@@ -103,7 +103,7 @@ func newTaskUIAgentRenderFixture(tb testing.TB) *taskUIAgentRenderFixture {
 		}
 	}
 
-	writerTaskRepo := repository.NewTaskRepo(connections.Writer, nil)
+	writerTaskRepo := sqlite.NewTaskRepo(connections.Writer, nil)
 	boardTask := &models.Task{
 		ProjectID:         "default",
 		Title:             "Task UI Performance Board Badge",
@@ -141,12 +141,12 @@ func newTaskUIAgentRenderFixture(tb testing.TB) *taskUIAgentRenderFixture {
 	}
 
 	h, e, _ := setupTestHandlerForDB(tb, connections.Reader)
-	h.SetAgentRepo(repository.NewAgentRepo(connections.Reader))
+	h.SetAgentRepo(sqlite.NewAgentRepo(connections.Reader))
 	return &taskUIAgentRenderFixture{
 		connections:       connections,
 		h:                 h,
 		e:                 e,
-		agentRepo:         repository.NewAgentRepo(connections.Reader),
+		agentRepo:         sqlite.NewAgentRepo(connections.Reader),
 		projectID:         "default",
 		detailTask:        detailTask.ID,
 		noAgentDetailTask: noAgentDetailTask.ID,

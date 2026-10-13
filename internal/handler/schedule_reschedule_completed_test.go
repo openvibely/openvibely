@@ -11,7 +11,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/internal/testutil"
 )
@@ -22,8 +22,8 @@ import (
 // completed tasks wouldn't re-run after schedule changes.
 func TestUpdateSchedule_CompletedTaskToFuture(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	scheduleRepo := repository.NewScheduleRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
+	scheduleRepo := sqlite.NewScheduleRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
 
 	// Create a task with completed status (simulating a task that already ran)
 	task := &models.Task{

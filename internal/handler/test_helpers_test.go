@@ -13,7 +13,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/testutil"
 )
 
@@ -23,16 +23,16 @@ type TestContext struct {
 	handler        *Handler
 	echo           *echo.Echo
 	db             *sql.DB
-	llmConfigRepo  *repository.LLMConfigRepo
-	projectRepo    *repository.ProjectRepo
-	taskRepo       *repository.TaskRepo
-	execRepo       *repository.ExecutionRepo
-	usageRepo      *repository.UsageRepo
-	scheduleRepo   *repository.ScheduleRepo
-	workerRepo     *repository.WorkerRepo
-	attachmentRepo *repository.AttachmentRepo
-	alertRepo      *repository.AlertRepo
-	settingsRepo   *repository.SettingsRepo
+	llmConfigRepo  *sqlite.LLMConfigRepo
+	projectRepo    *sqlite.ProjectRepo
+	taskRepo       *sqlite.TaskRepo
+	execRepo       *sqlite.ExecutionRepo
+	usageRepo      *sqlite.UsageRepo
+	scheduleRepo   *sqlite.ScheduleRepo
+	workerRepo     *sqlite.WorkerRepo
+	attachmentRepo *sqlite.AttachmentRepo
+	alertRepo      *sqlite.AlertRepo
+	settingsRepo   *sqlite.SettingsRepo
 }
 
 // NewTestContext creates a new test context with all dependencies initialized
@@ -48,7 +48,7 @@ func NewTestContext(t *testing.T) *TestContext {
 		projectRepo:    env.ProjectRepo,
 		taskRepo:       env.TaskRepo,
 		execRepo:       env.ExecRepo,
-		usageRepo:      repository.NewUsageRepo(env.DB),
+		usageRepo:      sqlite.NewUsageRepo(env.DB),
 		scheduleRepo:   env.ScheduleRepo,
 		workerRepo:     env.WorkerRepo,
 		attachmentRepo: env.AttachmentRepo,

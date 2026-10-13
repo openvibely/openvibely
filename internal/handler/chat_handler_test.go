@@ -20,7 +20,7 @@ import (
 	"github.com/openvibely/openvibely/internal/events"
 	llmprompt "github.com/openvibely/openvibely/internal/llm/prompt"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/openvibely/openvibely/web/static"
 	"github.com/stretchr/testify/assert"
@@ -450,7 +450,7 @@ func TestHandler_ChatSend_HydratesSelectedModelWithoutEagerCatalogs(t *testing.T
 	projectID := projects[0].ID
 	queuedTask := &models.Task{ProjectID: projectID, Title: "must-not-enter-chat-task-catalog", Prompt: "must-not-enter-chat-task-prompt", Status: models.StatusPending, Category: models.CategoryBacklog}
 	require.NoError(t, h.taskRepo.Create(ctx, queuedTask))
-	h.SetAgentRepo(repository.NewAgentRepo(db))
+	h.SetAgentRepo(sqlite.NewAgentRepo(db))
 	agentDefinition := &models.Agent{Name: "must-not-enter-chat-agent-catalog", Key: "no-eager-chat-agent", Enabled: true, SelectableAsPrimary: true}
 	require.NoError(t, h.agentRepo.Create(ctx, agentDefinition))
 
@@ -1042,7 +1042,7 @@ func TestHandler_Chat_LoadsRunningExecutions(t *testing.T) {
 	}
 
 	// Simulate partial output being written
-	err = h.execRepo.(*repository.ExecutionRepo).UpdateOutput(ctx, exec.ID, "This is a partial response...")
+	err = h.execRepo.(*sqlite.ExecutionRepo).UpdateOutput(ctx, exec.ID, "This is a partial response...")
 	if err != nil {
 		t.Fatalf("failed to update output: %v", err)
 	}
@@ -1658,7 +1658,7 @@ func TestHandler_ChatStreamSSE_EmitsDoneForCancelledExecution(t *testing.T) {
 		ex.Status = models.ExecCancelled
 		ex.PromptSent = "stopped chat"
 	})
-	require.NoError(t, h.execRepo.(*repository.ExecutionRepo).UpdateOutput(ctx, exec.ID, "partial output"))
+	require.NoError(t, h.execRepo.(*sqlite.ExecutionRepo).UpdateOutput(ctx, exec.ID, "partial output"))
 
 	req := httptest.NewRequest(http.MethodGet, "/events/chat/"+exec.ID, nil)
 	rec := httptest.NewRecorder()
@@ -1682,7 +1682,7 @@ func TestHandler_ChatStop_CancelsActiveChatTurn(t *testing.T) {
 		ex.Status = models.ExecRunning
 		ex.PromptSent = "active chat"
 	})
-	require.NoError(t, h.execRepo.(*repository.ExecutionRepo).UpdateOutput(ctx, activeExec.ID, "partial output"))
+	require.NoError(t, h.execRepo.(*sqlite.ExecutionRepo).UpdateOutput(ctx, activeExec.ID, "partial output"))
 	hub := events.NewExecutionStreamHub()
 	h.SetExecutionStreamHub(hub)
 	sub, _, err := hub.Subscribe(activeExec.ID)
@@ -2135,7 +2135,7 @@ func TestHandler_ChatSteer_CreatesPendingSteeringInput(t *testing.T) {
 	history, err := h.execRepo.ListChatHistory(ctx, project.ID, 10)
 	require.NoError(t, err)
 	require.Len(t, history, 1)
-	inputs, err := h.threadInputRepo.(*repository.ThreadInputRepo).ListPendingSteering(ctx, activeExec.ID, activeExec.ID)
+	inputs, err := h.threadInputRepo.(*sqlite.ThreadInputRepo).ListPendingSteering(ctx, activeExec.ID, activeExec.ID)
 	require.NoError(t, err)
 	require.Len(t, inputs, 1)
 	assert.Equal(t, "Actually answer about queues", inputs[0].Content)
@@ -2181,7 +2181,7 @@ func TestHandler_ChatSteer_FailurePreservesAttachmentSessionForRetry(t *testing.
 	assertContains(t, retried, `aria-label="Attachments included with this steering instruction"`)
 	require.FileExists(t, attachmentPath, "successful steering keeps pending files until the steering input is consumed")
 
-	inputs, err := h.threadInputRepo.(*repository.ThreadInputRepo).ListPendingSteering(ctx, activeExec.ID, activeExec.ID)
+	inputs, err := h.threadInputRepo.(*sqlite.ThreadInputRepo).ListPendingSteering(ctx, activeExec.ID, activeExec.ID)
 	require.NoError(t, err)
 	require.Len(t, inputs, 1)
 	assert.Equal(t, sessionID, inputs[0].AttachmentSessionID)
@@ -3302,7 +3302,7 @@ func TestRollbackAttachmentPublications_MetadataDeleteFailureRetainsReferencedFi
 			return errors.New("injected chat metadata delete failure")
 		})
 		require.Len(t, errs, 1)
-		persisted, err := h.chatAttachmentRepo.(*repository.ChatAttachmentRepo).GetByID(ctx, attachment.ID)
+		persisted, err := h.chatAttachmentRepo.(*sqlite.ChatAttachmentRepo).GetByID(ctx, attachment.ID)
 		require.NoError(t, err)
 		require.NotNil(t, persisted)
 		require.FileExists(t, persisted.FilePath, "rollback must retain a file while ChatAttachment metadata still references it")

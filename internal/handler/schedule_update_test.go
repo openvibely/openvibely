@@ -11,7 +11,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/testutil"
 )
 
@@ -19,8 +19,8 @@ import (
 // that has already run doesn't reset NextRun to the past
 func TestUpdateSchedule_RecurringAfterRun(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	scheduleRepo := repository.NewScheduleRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
+	scheduleRepo := sqlite.NewScheduleRepo(db)
+	taskRepo := sqlite.NewTaskRepo(db, nil)
 
 	// Create a task
 	task := &models.Task{
