@@ -19,7 +19,7 @@ func TestStrictBudgetAndTaskLookup(t *testing.T) {
 		defs = append(defs, ToolDefinition{Name: name, Schema: d.Schema, StrictPriority: d.StrictPriority})
 	}
 	got := prepareStrictTools(defs)
-	count, unions := 0, 0
+	count, optional := 0, 0
 	for i, def := range got {
 		if def.Strict == nil {
 			t.Fatal("missing policy")
@@ -34,8 +34,9 @@ func TestStrictBudgetAndTaskLookup(t *testing.T) {
 			walk = func(v any) {
 				switch n := v.(type) {
 				case map[string]any:
-					if _, ok := n["type"].([]any); ok {
-						unions++
+					if props, ok := n["properties"].(map[string]any); ok {
+						required, _ := n["required"].([]any)
+						optional += len(props) - len(required)
 					}
 					for _, c := range n {
 						walk(c)
@@ -55,13 +56,13 @@ func TestStrictBudgetAndTaskLookup(t *testing.T) {
 			t.Fatal("mutated original")
 		}
 	}
-	if count == 0 || count > 20 || unions > 16 {
-		t.Fatalf("budget: tools=%d unions=%d", count, unions)
+	if count == 0 || count > maxStrictTools || optional > maxStrictOptional {
+		t.Fatalf("budget: tools=%d optional=%d", count, optional)
 	}
 	if len(got) != len(defs) {
 		t.Fatal("lost tools")
 	}
-	// Exercise the tool-count limit independently of union capacity.
+	// Exercise the tool-count limit independently of optional-field capacity.
 	var empty []ToolDefinition
 	for i := 0; i < 25; i++ {
 		empty = append(empty, ToolDefinition{Name: fmt.Sprint(i), InputSchema: json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`)})

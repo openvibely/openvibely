@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/santhosh-tekuri/jsonschema/v5"
+
 	"github.com/openvibely/openvibely/internal/chatcontrol"
 	"github.com/openvibely/openvibely/pkg/toolschema"
 )
@@ -119,14 +121,14 @@ func TestRegistrySchemasRemainValid(t *testing.T) {
 	strictCount := 0
 	for _, name := range chatcontrol.AllActionNames() {
 		def := chatcontrol.Get(name)
-		_, err := toolschema.NormalizeValidate(def.ParameterSchema(), json.RawMessage(`{}`))
+		_, err := toolschema.ValidateArguments(def.Schema, nil, json.RawMessage(`{}`))
 		if err != nil && !strings.Contains(err.Error(), "invalid tool arguments:") {
 			t.Errorf("%s: %v", name, err)
 		}
-		if wire, err := toolschema.MarshalOpenAI(def.Schema, nil, true); err == nil {
+		if wire, err := toolschema.MarshalOpenAI(def.Schema, nil); err == nil {
 			strictCount++
-			_, err = toolschema.NormalizeValidate(wire, json.RawMessage(`{}`))
-			if err != nil && !strings.Contains(err.Error(), "invalid tool arguments:") {
+			_, err = jsonschema.CompileString("https://tools.invalid/test", string(wire))
+			if err != nil {
 				t.Errorf("converted %s: %v", name, err)
 			}
 		} else {

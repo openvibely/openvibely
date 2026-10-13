@@ -11,7 +11,6 @@ import (
 // https://platform.claude.com/docs/en/build-with-claude/structured-outputs
 const maxStrictTools = 20
 const maxStrictOptional = 24
-const maxStrictUnions = 16
 
 func prepareStrictTools(tools []ToolDefinition) []ToolDefinition {
 	out := append([]ToolDefinition(nil), tools...)
@@ -20,7 +19,7 @@ func prepareStrictTools(tools []ToolDefinition) []ToolDefinition {
 		order[i] = i
 	}
 	sort.SliceStable(order, func(i, j int) bool { return out[order[i]].StrictPriority > out[order[j]].StrictPriority })
-	count, optional, unions := 0, 0, 0
+	count, optional := 0, 0
 	for _, i := range order {
 		t := &out[i]
 		disabled := t.Strict != nil && !*t.Strict
@@ -29,8 +28,8 @@ func prepareStrictTools(tools []ToolDefinition) []ToolDefinition {
 		if disabled || count >= maxStrictTools {
 			continue
 		}
-		schema, cost, err := toolschema.MarshalAnthropic(t.Schema, t.InputSchema, true)
-		if err != nil || optional+cost.Optional > maxStrictOptional || unions+cost.Unions > maxStrictUnions {
+		schema, cost, err := toolschema.MarshalAnthropic(t.Schema, t.InputSchema)
+		if err != nil || optional+cost.Optional > maxStrictOptional {
 			continue
 		}
 		strict = true
@@ -38,7 +37,6 @@ func prepareStrictTools(tools []ToolDefinition) []ToolDefinition {
 		t.Schema = nil
 		count++
 		optional += cost.Optional
-		unions += cost.Unions
 	}
 	return out
 }
