@@ -2428,8 +2428,11 @@ func TestHandler_ListModels_IncludesToastModalStackingHooks(t *testing.T) {
 	if !strings.Contains(body, "id=\"new_model_modal\" class=\"modal\" onclose=\"finishModelOAuthModal(); if (typeof syncToastContainerHost === 'function') syncToastContainerHost()\"") {
 		t.Errorf("expected new model modal to resync toast host on close")
 	}
-	if !strings.Contains(body, "id=\"reassign_default_modal\" class=\"modal\" onclose=\"if (typeof syncToastContainerHost === 'function') syncToastContainerHost()\"") {
-		t.Errorf("expected reassign-default modal to resync toast host on close")
+	if !strings.Contains(body, `id="delete_model_confirm_modal" class="modal" data-destructive-confirm-dialog`) {
+		t.Errorf("expected model delete confirmation modal to use shared modal close handling")
+	}
+	if !strings.Contains(body, "document.addEventListener('close', function(event)") || !strings.Contains(body, "event.target.matches('dialog.modal')") {
+		t.Errorf("expected modal close events to resync the toast host")
 	}
 	if !strings.Contains(body, "dialog.modal > .modal-box") {
 		t.Errorf("expected modal z-index layering rules for modal box")
