@@ -404,7 +404,7 @@ func TestModelsContent_ModelMutationsPreserveActiveProject(t *testing.T) {
 		"var deleteURL = '/models/' + _deleteModelId;",
 		"deleteURL += '?new_default_id=' + encodeURIComponent(select.value);",
 		"htmx.ajax('DELETE', modelMutationURL(deleteURL)",
-		"href = modelMutationURL(href);",
+		"anchor.href = modelMutationURL(path);",
 		"fetch(modelMutationURL('/models/oauth/manual-complete')",
 		"window.location.href = modelMutationURL('/models');",
 	} {
@@ -1398,13 +1398,10 @@ func TestModelsContent_EditorOAuthActionUsesRuntimeSpecificLaunch(t *testing.T) 
 	if strings.Contains(out, "getAttribute('data-runtime')") {
 		t.Fatal("expected OAuth launch mode not to depend on client-side runtime detection")
 	}
-	if !strings.Contains(out, "external=1") {
-		t.Fatal("expected desktop OAuth launcher to request backend external launch mode")
-	}
-	if !strings.Contains(out, "fetch(externalURL") {
+	if !strings.Contains(out, "fetch(modelMutationURL(path), {headers:{Accept:'application/json'}})") {
 		t.Fatal("expected desktop OAuth launcher to call backend in background via fetch")
 	}
-	if strings.Contains(out, "window.location.href = externalURL") {
+	if strings.Contains(out, "window.location.href = externalURL") || strings.Contains(out, "window.location.href = modelMutationURL(path)") {
 		t.Fatal("expected desktop OAuth launcher to avoid WebView navigation")
 	}
 
