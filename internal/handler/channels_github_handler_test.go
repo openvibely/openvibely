@@ -556,7 +556,7 @@ func TestChannelsPageRendersGitHubRuntimeSettingsLazyHook(t *testing.T) {
 	}
 	runtimeIdx := strings.Index(body, `id="github-runtime-settings"`)
 	saveIdx := strings.Index(body, "Save GitHub Settings")
-	cancelIdx := strings.Index(body, `onclick="closeGitHubConfigModal()">Cancel`)
+	cancelIdx := strings.Index(body, `onclick="closeChannelConfigModal('github_config_modal')">Cancel`)
 	if runtimeIdx == -1 || saveIdx == -1 || cancelIdx == -1 {
 		t.Fatalf("expected github modal runtime settings plus cancel/save actions")
 	}
