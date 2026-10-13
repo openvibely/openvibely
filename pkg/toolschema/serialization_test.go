@@ -18,15 +18,15 @@ func TestTypedProviderSchemasPreserveHandlerContract(t *testing.T) {
 		}}},
 	}}
 	before := string(JSON(s, nil))
-	openai, err := MarshalOpenAI(s, nil, true)
+	openai, err := MarshalOpenAI(s, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	anthropic, cost, err := MarshalAnthropic(s, nil, true)
+	anthropic, cost, err := MarshalAnthropic(s, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cost.Optional != 3 || cost.Unions != 0 {
+	if cost.Optional != 3 {
 		t.Fatalf("Anthropic cost: %+v", cost)
 	}
 	var oa, an map[string]any
@@ -66,14 +66,8 @@ func TestTypedProviderSchemasPreserveHandlerContract(t *testing.T) {
 	if err := validate(anthropic, `{"enabled":false,"category":null}`); err == nil {
 		t.Fatal("Anthropic optional field became nullable")
 	}
-	if _, err := NormalizeValidate(JSON(s, nil), json.RawMessage(`{"enabled":false,"items":[{"name":"a","limit":0}]}`)); err == nil {
+	if _, err := ValidateArguments(s, nil, json.RawMessage(`{"enabled":false,"items":[{"name":"a","limit":0}]}`)); err == nil {
 		t.Fatal("handler constraint lost")
-	}
-	for _, marshal := range []func() (json.RawMessage, error){func() (json.RawMessage, error) { return MarshalOpenAI(s, nil, false) }, func() (json.RawMessage, error) { b, _, e := MarshalAnthropic(s, nil, false); return b, e }} {
-		raw, err := marshal()
-		if err != nil || string(raw) != before {
-			t.Fatalf("non-strict schema changed: %s %v", raw, err)
-		}
 	}
 	if string(JSON(s, nil)) != before {
 		t.Fatal("shared definition mutated")
@@ -87,18 +81,13 @@ func TestExternalUnsupportedSchemaRemainsUnchanged(t *testing.T) {
 		json.RawMessage(`{"type":"object","properties":{"value":{"$ref":"https://example.invalid/schema"}},"additionalProperties":false}`),
 	} {
 		before := string(raw)
-		if _, err := MarshalOpenAI(nil, raw, true); err == nil {
+		if _, err := MarshalOpenAI(nil, raw); err == nil {
 			t.Fatal("unsupported schema adapted")
 		}
-		if _, _, err := MarshalAnthropic(nil, raw, true); err == nil {
+		if _, _, err := MarshalAnthropic(nil, raw); err == nil {
 			t.Fatal("unsupported schema adapted")
 		}
-		a, err := MarshalOpenAI(nil, raw, false)
-		if err != nil || string(a) != before {
-			t.Fatal("raw fallback changed")
-		}
-		b, _, err := MarshalAnthropic(nil, raw, false)
-		if err != nil || string(b) != before {
+		if string(JSON(nil, raw)) != before {
 			t.Fatal("raw fallback changed")
 		}
 	}
@@ -108,7 +97,7 @@ func TestExternalConstantsPreserved(t *testing.T) {
 	for _, constant := range []string{"null", "false", "0", "9007199254740993"} {
 		raw := json.RawMessage(`{"type":"object","properties":{"value":{"type":"integer","const":` + constant + `}},"required":["value"],"additionalProperties":false}`)
 		for _, anthropic := range []bool{false, true} {
-			b, _, err := strictForTest(raw, anthropic)
+			b, err := strictForTest(raw, anthropic)
 			if err != nil {
 				t.Fatal(err)
 			}

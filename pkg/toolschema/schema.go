@@ -103,7 +103,6 @@ func ParseExternal(raw json.RawMessage) (*Schema, error) {
 
 type Cost struct {
 	Optional int
-	Unions   int
 }
 type serializer struct {
 	property    func(map[string]any, bool, *Cost) bool

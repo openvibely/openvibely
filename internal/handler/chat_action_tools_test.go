@@ -3249,9 +3249,9 @@ func TestListTasksStrictNullFiltersPreserveBacklogResults(t *testing.T) {
 	pending := createTask(t, h, project.ID, "Pending backlog", func(task *models.Task) { task.Category = models.CategoryBacklog; task.Status = models.StatusPending })
 	failed := createTask(t, h, project.ID, "Failed backlog", func(task *models.Task) { task.Category = models.CategoryBacklog; task.Status = models.StatusFailed })
 	handler := h.chatActionHandlers(streamingResponseParams{ProjectID: project.ID}, nil, models.ChatModePlan, chatcontrol.SurfaceWeb)["list_tasks"]
-	source := chatcontrol.Get("list_tasks").ParameterSchema()
+	source := chatcontrol.Get("list_tasks").Schema
 	for _, input := range []string{`{"category":"backlog"}`, `{"category":"backlog","query":null,"status":null,"merge_status":null,"limit":null,"offset":null}`} {
-		normalized, err := toolschema.NormalizeValidate(source, json.RawMessage(input))
+		normalized, err := toolschema.ValidateArguments(source, nil, json.RawMessage(input))
 		require.NoError(t, err)
 		out, err := handler(context.Background(), normalized)
 		require.NoError(t, err)

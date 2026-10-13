@@ -20,7 +20,7 @@ func prepareStrictTools(tools []ToolDefinition) []ToolDefinition {
 		if t.Type != "function" || (t.Strict != nil && !*t.Strict) {
 			continue
 		}
-		schema, err := toolschema.MarshalOpenAI(t.Schema, t.Parameters, true)
+		schema, err := toolschema.MarshalOpenAI(t.Schema, t.Parameters)
 		strict := err == nil
 		t.Strict = &strict
 		if strict {

@@ -21,13 +21,6 @@ func requiredFields(s map[string]any) map[string]bool {
 	return result
 }
 
-// NormalizeValidate removes null placeholders only from optional, non-nullable
-// declared properties. Explicit nulls in arbitrary data are left untouched.
-// Validation uses the original schema, including constraints omitted on the wire.
-func NormalizeValidate(schema, input json.RawMessage) (json.RawMessage, error) {
-	return normalizeValidate(schema, input, false)
-}
-
 // ValidateArguments leaves unsupported external schemas to their tool server.
 // Built-in schema errors and validation failures always reject the call.
 func ValidateArguments(schema *Schema, raw, input json.RawMessage) (json.RawMessage, error) {
@@ -69,7 +62,7 @@ func normalizeValidate(schema, input json.RawMessage, external bool) (json.RawMe
 		// a draft-07 $ref can override a sibling type and allow explicit null.
 		if validationErr := compiled.Validate(value); validationErr == nil {
 			return input, nil
-		} else if _, conversionErr := MarshalOpenAI(nil, schema, true); conversionErr != nil {
+		} else if _, conversionErr := MarshalOpenAI(nil, schema); conversionErr != nil {
 			// Only schemas supported by strict conversion can contain our
 			// nullable placeholders. Do not rewrite other schema dialects.
 			return nil, fmt.Errorf("invalid tool arguments: %w", validationErr)
