@@ -582,22 +582,7 @@ func artifactReaderRuntime(path string) *llmcontracts.RuntimeTools {
 		Definitions: []llmcontracts.RuntimeToolDefinition{{
 			Name: oversizedInputReaderTool, Access: llmcontracts.RuntimeToolAccessRead,
 			Description: "Read one bounded byte range from the oversized current input artifact. Use targeted offsets and never request the entire file.",
-			Schema: &toolschema.Schema{
-				Type: "object",
-				Properties: map[string]*toolschema.Schema{
-					"offset": {
-						Type:    "integer",
-						Minimum: toolschema.Number("0"),
-					},
-					"limit": {
-						Type:    "integer",
-						Minimum: toolschema.Number("1"),
-						Maximum: toolschema.Number("65536"),
-					},
-				},
-				Required:             []string{"offset", "limit"},
-				AdditionalProperties: toolschema.Pointer(false),
-			},
+			Schema:      artifactReaderSchema,
 		}},
 		Executor: func(_ context.Context, name string, input json.RawMessage) (string, bool, bool, error) {
 			if name != oversizedInputReaderTool {
@@ -2025,4 +2010,21 @@ func (a *testProviderAdapter) Call(req llmcontracts.AgentRequest) (llmcontracts.
 	}
 	output, textOnly, tokens, err := a.svc.llmCaller.CallModel(req.Ctx, req.Message, req.Attachments, req.Agent, req.ExecID, req.WorkDir)
 	return canonicalResult(output, textOnly, llmusage.FromTotal(tokens), err)
+}
+
+var artifactReaderSchema = &toolschema.Schema{
+	Type: "object",
+	Properties: map[string]*toolschema.Schema{
+		"offset": {
+			Type:    "integer",
+			Minimum: toolschema.Number("0"),
+		},
+		"limit": {
+			Type:    "integer",
+			Minimum: toolschema.Number("1"),
+			Maximum: toolschema.Number("65536"),
+		},
+	},
+	Required:             []string{"offset", "limit"},
+	AdditionalProperties: toolschema.Pointer(false),
 }

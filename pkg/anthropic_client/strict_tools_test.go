@@ -217,3 +217,19 @@ func TestOptionalBudgetAndDefinitionPriority(t *testing.T) {
 		t.Fatalf("fallback lost schema: %s", raw)
 	}
 }
+
+func TestUnsupportedExternalSchemaReachesExecutor(t *testing.T) {
+	input := json.RawMessage(`{"code":"alice","optional":null}`)
+	calls := 0
+	opts := &AgenticOptions{SkipDefaultTools: true, ExtraTools: []ToolDefinition{{Name: "external", InputSchema: json.RawMessage(`{"type":"object","properties":{"code":{"type":"string","pattern":"^(?!admin$)[a-z]+$"},"optional":{"type":"string"}}}`)}}, ToolExecutor: func(_ context.Context, _ string, got json.RawMessage) (string, bool, error) {
+		calls++
+		if string(got) != string(input) {
+			t.Errorf("changed external arguments: %s", got)
+		}
+		return "executed", false, nil
+	}}
+	out, bad := runAnthropicToolUse(context.Background(), opts, "external", input)
+	if bad || out != "executed" || calls != 1 {
+		t.Fatalf("executor calls=%d result=%q error=%v", calls, out, bad)
+	}
+}

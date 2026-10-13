@@ -358,51 +358,8 @@ func (s *LLMService) automationBootstrapRuntimeTools(ctx context.Context, task m
 	if len(allowedAdapters) == 0 {
 		return nil
 	}
-	definition := llmcontracts.RuntimeToolDefinition{
-		Name:        "register_automation_resources",
-		Description: "Register the visible tasks and schedules created by this maintained bootstrap as a published Automation. Use actual resource IDs and canonical node keys; the current task project is enforced server-side.",
-		Access:      llmcontracts.RuntimeToolAccessWrite,
-		Schema: &toolschema.Schema{
-			Type: "object",
-			Properties: map[string]*toolschema.Schema{
-				"adapter_key": {
-					Type: "string",
-					Enum: []any{"native_sdlc", "github_sdlc"},
-				},
-				"stable_key": {
-					Type: "string"},
-				"name": {
-					Type: "string"},
-				"resources": {
-					Type:     "array",
-					MinItems: toolschema.Pointer(2),
-					MaxItems: toolschema.Pointer(100),
-					Items: &toolschema.Schema{
-						Type: "object",
-						Properties: map[string]*toolschema.Schema{
-							"node_key": {
-								Type: "string"},
-							"resource_type": {
-								Type: "string",
-								Enum: []any{"task", "schedule"},
-							},
-							"resource_id": {
-								Type: "string"},
-							"relation": {
-								Type: "string",
-								Enum: []any{"owned", "shared"},
-							},
-						},
-						Required:             []string{"node_key", "resource_type", "resource_id"},
-						AdditionalProperties: toolschema.Pointer(false),
-					},
-				},
-			},
-			Required:             []string{"adapter_key", "stable_key", "resources"},
-			AdditionalProperties: toolschema.Pointer(false),
-		},
-	}
-	return &llmcontracts.RuntimeTools{Definitions: []llmcontracts.RuntimeToolDefinition{definition}, Executor: func(toolCtx context.Context, name string, input json.RawMessage) (string, bool, bool, error) {
+
+	return &llmcontracts.RuntimeTools{Definitions: []llmcontracts.RuntimeToolDefinition{automationRegistrationDefinition}, Executor: func(toolCtx context.Context, name string, input json.RawMessage) (string, bool, bool, error) {
 		if name != "register_automation_resources" {
 			return "", false, false, nil
 		}
@@ -2742,4 +2699,49 @@ func withTaskPreClaimed(ctx context.Context) context.Context {
 func isTaskPreClaimed(ctx context.Context) bool {
 	v, _ := ctx.Value(taskPreClaimedKey{}).(bool)
 	return v
+}
+
+var automationRegistrationDefinition = llmcontracts.RuntimeToolDefinition{
+	Name:        "register_automation_resources",
+	Description: "Register the visible tasks and schedules created by this maintained bootstrap as a published Automation. Use actual resource IDs and canonical node keys; the current task project is enforced server-side.",
+	Access:      llmcontracts.RuntimeToolAccessWrite,
+	Schema: &toolschema.Schema{
+		Type: "object",
+		Properties: map[string]*toolschema.Schema{
+			"adapter_key": {
+				Type: "string",
+				Enum: []any{"native_sdlc", "github_sdlc"},
+			},
+			"stable_key": {
+				Type: "string"},
+			"name": {
+				Type: "string"},
+			"resources": {
+				Type:     "array",
+				MinItems: toolschema.Pointer(2),
+				MaxItems: toolschema.Pointer(100),
+				Items: &toolschema.Schema{
+					Type: "object",
+					Properties: map[string]*toolschema.Schema{
+						"node_key": {
+							Type: "string"},
+						"resource_type": {
+							Type: "string",
+							Enum: []any{"task", "schedule"},
+						},
+						"resource_id": {
+							Type: "string"},
+						"relation": {
+							Type: "string",
+							Enum: []any{"owned", "shared"},
+						},
+					},
+					Required:             []string{"node_key", "resource_type", "resource_id"},
+					AdditionalProperties: toolschema.Pointer(false),
+				},
+			},
+		},
+		Required:             []string{"adapter_key", "stable_key", "resources"},
+		AdditionalProperties: toolschema.Pointer(false),
+	},
 }
