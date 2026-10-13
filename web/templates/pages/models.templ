@@ -1067,7 +1067,11 @@ templ modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, 
                 if (anchor.dataset.oauthWaiting === 'true') return false;
                 anchor.dataset.oauthWaiting = 'true';
                 anchor.setAttribute('aria-disabled', 'true');
-                var originalText = anchor.textContent;
+                var originalText = anchor.dataset.oauthOriginalText || anchor.textContent;
+                anchor.dataset.oauthOriginalText = originalText;
+                var attempt = {};
+                anchor.oauthAttempt = attempt;
+                function current() {return anchor.isConnected && anchor.oauthAttempt === attempt;}
                 anchor.textContent = 'Connecting…';
                 var deadline = Date.now() + 10 * 60 * 1000;
                 async function connect() {
@@ -1075,12 +1079,16 @@ templ modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, 
                         var response = await fetch(modelMutationURL(path), {headers:{Accept:'application/json'}});
                         if (!response.ok) throw Error('Failed to open OAuth in browser');
                         await response.json();
+                        if (!current()) return;
+                        delete anchor.dataset.oauthWaiting;
+                        anchor.removeAttribute('aria-disabled');
+                        anchor.textContent = 'Retry OAuth';
                         var statusPath = path.replace(/\/initiate$/, '/status');
-                        while (anchor.isConnected && Date.now() < deadline) {
+                        while (current() && Date.now() < deadline) {
                             var result = await fetch(modelMutationURL(statusPath), {cache:'no-store'});
                             if (!result.ok) throw Error('Could not check OAuth connection. Try again.');
                             var state = await result.json();
-                            if (!anchor.isConnected) return;
+                            if (!current()) return;
                             if (state.status === 'connected') {
                                 var badge = anchor.parentElement.querySelector('.badge');
                                 if (badge) {badge.textContent = 'Connected'; badge.className = 'badge badge-sm badge-success';}
@@ -1090,13 +1098,17 @@ templ modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, 
                             }
                             await new Promise(function(resolve) {setTimeout(resolve, 1000);});
                         }
-                        if (anchor.isConnected) throw Error('Sign-in timed out. Connect OAuth again to retry.');
+                        if (current()) throw Error('Sign-in timed out. Connect OAuth again to retry.');
                     } catch (error) {
-                        if (anchor.isConnected && window.showToast) window.showToast(error.message, 'failed');
+                        if (current() && window.showToast) window.showToast(error.message, 'failed');
                     } finally {
-                        delete anchor.dataset.oauthWaiting;
-                        anchor.removeAttribute('aria-disabled');
-                        anchor.textContent = originalText;
+                        if (anchor.oauthAttempt === attempt) {
+                            delete anchor.oauthAttempt;
+                            delete anchor.dataset.oauthWaiting;
+                            delete anchor.dataset.oauthOriginalText;
+                            anchor.removeAttribute('aria-disabled');
+                            anchor.textContent = originalText;
+                        }
                     }
                 }
                 connect();
