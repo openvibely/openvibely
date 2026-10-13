@@ -12,16 +12,27 @@ import (
 	"time"
 )
 
+const (
+	chatRevisionOffset64 = uint64(14695981039346656037)
+	chatRevisionPrime64 = uint64(1099511628211)
+)
+
+func chatRevisionWrite(hash uint64, value string) uint64 {
+	for i := 0; i < len(value); i++ {
+		hash ^= uint64(value[i])
+		hash *= chatRevisionPrime64
+	}
+	return hash
+}
+
+func chatRevisionWriteField(hash uint64, value string) uint64 {
+	return chatRevisionWrite(chatRevisionWrite(hash, value), "\xff")
+}
+
 // chatContentRevision returns a compact fingerprint for comparing rendered
 // transcript snapshots without repeatedly comparing the full response text.
 func chatContentRevision(content string) string {
-	const offset64 = uint64(14695981039346656037)
-	const prime64 = uint64(1099511628211)
-	hash := offset64
-	for i := 0; i < len(content); i++ {
-		hash ^= uint64(content[i])
-		hash *= prime64
-	}
+	hash := chatRevisionWrite(chatRevisionOffset64, content)
 	return fmt.Sprintf("%x-%016x", len(content), hash)
 }
 
@@ -29,16 +40,9 @@ func chatContentRevision(content string) string {
 // Browsers use it to prove unchanged pairs still match an authoritative snapshot
 // before advancing the root transcript revision after live DOM reconciliation.
 func ChatExecutionRevision(exec models.Execution) string {
-	const offset64 = uint64(14695981039346656037)
-	const prime64 = uint64(1099511628211)
-	hash := offset64
+	hash := chatRevisionOffset64
 	write := func(value string) {
-		for i := 0; i < len(value); i++ {
-			hash ^= uint64(value[i])
-			hash *= prime64
-		}
-		hash ^= 0xff
-		hash *= prime64
+		hash = chatRevisionWriteField(hash, value)
 	}
 	write(exec.ID)
 	write(string(exec.Status))
@@ -53,16 +57,9 @@ func ChatExecutionRevision(exec models.Execution) string {
 // state so polling/reconnect paths can reject authoritative no-op responses before
 // touching the live DOM.
 func ChatTranscriptRevision(executions []models.Execution, pendingInputs []models.ThreadInput, extra string) string {
-	const offset64 = uint64(14695981039346656037)
-	const prime64 = uint64(1099511628211)
-	hash := offset64
+	hash := chatRevisionOffset64
 	write := func(value string) {
-		for i := 0; i < len(value); i++ {
-			hash ^= uint64(value[i])
-			hash *= prime64
-		}
-		hash ^= 0xff
-		hash *= prime64
+		hash = chatRevisionWriteField(hash, value)
 	}
 	write(extra)
 	for _, exec := range executions {
