@@ -15,6 +15,7 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/service"
+	"github.com/openvibely/openvibely/pkg/toolschema"
 )
 
 func TestTaskGoalRoutes_HTMXEditPauseResumeClear(t *testing.T) {
@@ -1169,5 +1170,78 @@ func TestGoalSaveUnchangedPreservesState(t *testing.T) {
 				t.Fatalf("goal changed: before=%+v after=%+v err=%v", before, after, err)
 			}
 		})
+	}
+}
+
+func TestGoalToolSchemasAllowHandlerTaskReferences(t *testing.T) {
+	for _, name := range []string{"set_task_goal", "clear_task_goal", "get_task_goal", "pause_task_goal", "resume_task_goal", "mark_task_goal_achieved", "report_task_goal_blocked"} {
+		for _, reference := range []string{"omitted", "null", "current", "title"} {
+			t.Run(name+"/"+reference, func(t *testing.T) {
+				tc := NewTestContext(t)
+				ctx := context.Background()
+				project := tc.CreateProject().Build()
+				task := &models.Task{ProjectID: project.ID, Title: "Goal reference", Category: models.CategoryBacklog, Status: models.StatusPending, Prompt: "prompt", Priority: 2}
+				if err := tc.taskRepo.Create(ctx, task); err != nil {
+					t.Fatal(err)
+				}
+				goal, err := tc.handler.taskGoalSvc.SetGoal(ctx, task.ID, "original", service.GoalOptions{Actor: "test"})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if name == "resume_task_goal" {
+					if err := tc.handler.taskGoalSvc.PauseGoal(ctx, task.ID, "test"); err != nil {
+						t.Fatal(err)
+					}
+				}
+				args := map[string]any{}
+				switch name {
+				case "set_task_goal":
+					args["goal"] = "replacement"
+				case "mark_task_goal_achieved", "report_task_goal_blocked":
+					args["goal_id"] = goal.GoalID
+					args["reason"] = "verified"
+				}
+				if name == "report_task_goal_blocked" {
+					args["blocker_key"] = "missing-input"
+				}
+				params := streamingResponseParams{ProjectID: project.ID, TaskID: task.ID, IsTaskFollowup: true, AgentDefinition: &models.Agent{Tools: []string{name}}}
+				switch reference {
+				case "null":
+					args["task_id"] = nil
+					args["title"] = nil
+				case "current":
+					args["task_id"] = "current"
+				case "title":
+					args["title"] = task.Title
+					params.IsTaskFollowup = false
+					params.TaskID = ""
+				}
+				raw, _ := json.Marshal(args)
+				normalized, err := toolschema.ValidateArguments(chatcontrol.Get(name).Schema, nil, raw)
+				if err != nil {
+					t.Fatalf("schema blocked handler reference: %v", err)
+				}
+				out, err := tc.handler.chatActionHandlers(params, nil, models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)[name](ctx, normalized)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !strings.Contains(out, task.ID) {
+					t.Fatalf("wrong task: %s", out)
+				}
+				// Optional schema fields do not authorize a missing task outside a follow-up.
+				delete(args, "task_id")
+				delete(args, "title")
+				raw, _ = json.Marshal(args)
+				normalized, err = toolschema.ValidateArguments(chatcontrol.Get(name).Schema, nil, raw)
+				if err != nil {
+					t.Fatal(err)
+				}
+				params.IsTaskFollowup = false
+				params.TaskID = ""
+				if _, err := tc.handler.chatActionHandlers(params, nil, models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)[name](ctx, normalized); err == nil {
+					t.Fatal("missing task accepted outside follow-up")
+				}
+			})
+		}
 	}
 }
