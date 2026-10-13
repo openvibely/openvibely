@@ -242,7 +242,7 @@ func StreamTurnRetryDelay(retry int, err error, now ...time.Time) time.Duration 
 			current = now[0]
 		}
 		delay := Backoff(retry-1, &http.Response{StatusCode: responseErr.StatusCode, Header: responseErr.Header}, StreamTurnBaseDelay, current)
-		if delay > StreamTurnMaxBackoff {
+		if delay > StreamTurnMaxBackoff || delay < 0 {
 			return StreamTurnMaxBackoff
 		}
 		return delay
@@ -365,10 +365,16 @@ func streamTurnNotifyPolicy(policy StreamTurnPolicy) Policy {
 }
 
 func Backoff(retry int, resp *http.Response, baseDelay time.Duration, now ...time.Time) time.Duration {
+	const maxDuration = time.Duration(1<<63 - 1)
 	if resp != nil {
 		retryAfter := strings.TrimSpace(resp.Header.Get("Retry-After"))
-		if seconds, err := strconv.Atoi(retryAfter); err == nil && seconds > 0 {
+		if seconds, err := strconv.ParseInt(retryAfter, 10, 64); err == nil && seconds > 0 {
+			if time.Duration(seconds) > maxDuration/time.Second {
+				return maxDuration
+			}
 			return time.Duration(seconds) * time.Second
+		} else if errors.Is(err, strconv.ErrRange) && !strings.HasPrefix(retryAfter, "-") {
+			return maxDuration
 		}
 		if at, err := http.ParseTime(retryAfter); err == nil {
 			current := time.Now()
@@ -386,7 +392,6 @@ func Backoff(retry int, resp *http.Response, baseDelay time.Duration, now ...tim
 	if retry < 0 {
 		retry = 0
 	}
-	const maxDuration = time.Duration(1<<63 - 1)
 	if retry >= 63 {
 		return maxDuration
 	}
@@ -438,7 +443,7 @@ func Do(ctx context.Context, client Doer, buildReq func() (*http.Request, error)
 			return resp, nil
 		}
 		delay := Backoff(attempt, resp, policy.BaseDelay, policy.Now())
-		if delay > policy.MaxBackoff {
+		if delay > policy.MaxBackoff || delay < 0 {
 			return resp, nil
 		}
 		drainAndClose(resp.Body)
