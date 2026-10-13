@@ -1058,35 +1058,51 @@ templ modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, 
                     setModelSection(tabs[index].dataset.modelTab);
                     tabs[index].focus();
                 }
-			function launchOAuthInSystemBrowser(path, anchor) {
-						var href = path || '';
-						if (!href) return false;
-						href = modelMutationURL(href);
-						if (!anchor || anchor.dataset.oauthExternal !== 'true') {
-							if (anchor) anchor.href = href;
-							return true;
-						}
-						var externalURL = href;
-						if (externalURL.indexOf('?') === -1) {
-							externalURL += '?external=1';
-						} else if (externalURL.indexOf('external=') === -1) {
-							externalURL += '&external=1';
-						}
-						fetch(externalURL, {
-							method: 'GET',
-							headers: {
-								'X-Requested-With': 'XMLHttpRequest'
-							}
-						}).then(function(resp) {
-							if (!resp.ok) {
-								throw new Error('Failed to open OAuth in browser');
-							}
-							if (window.showToast) window.showToast('Opened browser for OAuth', 'completed');
-						}).catch(function(err) {
-							if (window.showToast) window.showToast(err.message || 'Failed to open OAuth in browser', 'failed');
-						});
-						return false;
-					}
+            function launchOAuthInSystemBrowser(path, anchor) {
+                if (!path) return false;
+                if (!anchor || anchor.dataset.oauthExternal !== 'true') {
+                    if (anchor) anchor.href = modelMutationURL(path);
+                    return true;
+                }
+                if (anchor.dataset.oauthWaiting === 'true') return false;
+                anchor.dataset.oauthWaiting = 'true';
+                anchor.setAttribute('aria-disabled', 'true');
+                var originalText = anchor.textContent;
+                anchor.textContent = 'Connecting…';
+                var deadline = Date.now() + 10 * 60 * 1000;
+                async function connect() {
+                    try {
+                        var response = await fetch(modelMutationURL(path), {headers:{Accept:'application/json'}});
+                        if (!response.ok) throw Error('Failed to open OAuth in browser');
+                        await response.json();
+                        var statusPath = path.replace(/\/initiate$/, '/status');
+                        while (anchor.isConnected && Date.now() < deadline) {
+                            var result = await fetch(modelMutationURL(statusPath), {cache:'no-store'});
+                            if (!result.ok) throw Error('Could not check OAuth connection. Try again.');
+                            var state = await result.json();
+                            if (!anchor.isConnected) return;
+                            if (state.status === 'connected') {
+                                var badge = anchor.parentElement.querySelector('.badge');
+                                if (badge) {badge.textContent = 'Connected'; badge.className = 'badge badge-sm badge-success';}
+                                anchor.remove();
+                                if (window.showToast) window.showToast('OAuth connected', 'completed');
+                                return;
+                            }
+                            await new Promise(function(resolve) {setTimeout(resolve, 1000);});
+                        }
+                        if (anchor.isConnected) throw Error('Sign-in timed out. Connect OAuth again to retry.');
+                    } catch (error) {
+                        if (anchor.isConnected && window.showToast) window.showToast(error.message, 'failed');
+                    } finally {
+                        delete anchor.dataset.oauthWaiting;
+                        anchor.removeAttribute('aria-disabled');
+                        anchor.textContent = originalText;
+                    }
+                }
+                connect();
+                return false;
+            }
+
 
 
 						function syncModelAPIKeySubmitValue() {
