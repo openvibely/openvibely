@@ -6,16 +6,19 @@ import (
 	"strings"
 
 	"github.com/openvibely/openvibely/pkg/agenttools"
+	"github.com/openvibely/openvibely/pkg/toolschema"
 )
 
 type ToolDefinition struct {
-	Type        string           `json:"type"`
-	Name        string           `json:"name"`
-	Description string           `json:"description"`
-	Parameters  json.RawMessage  `json:"parameters,omitempty"`
-	Tools       []ToolDefinition `json:"tools,omitempty"`
-	Async       bool             `json:"async,omitempty"`
-	Strict      *bool            `json:"strict,omitempty"`
+	Schema         *toolschema.Schema `json:"-"`
+	StrictPriority int                `json:"-"`
+	Type           string             `json:"type"`
+	Name           string             `json:"name"`
+	Description    string             `json:"description"`
+	Parameters     json.RawMessage    `json:"parameters,omitempty"`
+	Tools          []ToolDefinition   `json:"tools,omitempty"`
+	Async          bool               `json:"async,omitempty"`
+	Strict         *bool              `json:"strict,omitempty"`
 }
 
 // ToolCall records a single tool invocation and its result.
@@ -29,14 +32,12 @@ type ToolCall struct {
 // DefaultTools returns the standard set of tool definitions for agentic use
 // in OpenAI's function calling format.
 func DefaultTools() []ToolDefinition {
-	return []ToolDefinition{
-		readFileTool(),
-		writeFileTool(),
-		editFileTool(),
-		bashTool(),
-		listFilesTool(),
-		grepSearchTool(),
+	var out []ToolDefinition
+	for _, d := range agenttools.Definitions(agenttools.BashPolicy{DefaultTimeoutSeconds: 120, MaxTimeoutSeconds: 600}) {
+		out = append(out, ToolDefinition{
+			Type: "function", Name: d.Name, Description: d.Description, Schema: d.Schema})
 	}
+	return out
 }
 
 func filterToolDefinitions(tools []ToolDefinition, filter func(string) bool) []ToolDefinition {
@@ -52,112 +53,6 @@ func filterToolDefinitions(tools []ToolDefinition, filter func(string) bool) []T
 	return out
 }
 
-func readFileTool() ToolDefinition {
-	return ToolDefinition{
-		Type:        "function",
-		Name:        "read_file",
-		Description: "Read the contents of a file. Returns the file content as text. For large files, use offset and limit to read specific portions.",
-		Parameters: json.RawMessage(`{
-			"type": "object",
-			"properties": {
-				"file_path": {"type": "string", "description": "The path to the file to read. Relative paths are resolved against the working directory."},
-				"offset": {"type": "integer", "description": "Line number to start reading from (0-based). Default: 0"},
-				"limit": {"type": "integer", "description": "Maximum number of lines to read. Default: 5000, Max: 10000"}
-			},
-			"required": ["file_path"],
-			"additionalProperties": false
-		}`),
-	}
-}
-
-func writeFileTool() ToolDefinition {
-	return ToolDefinition{
-		Type:        "function",
-		Name:        "write_file",
-		Description: "Write content to a file. Creates the file and any parent directories if they don't exist. Overwrites existing files.",
-		Parameters: json.RawMessage(`{
-			"type": "object",
-			"properties": {
-				"file_path": {"type": "string", "description": "The path to the file to write. Relative paths are resolved against the working directory."},
-				"content": {"type": "string", "description": "The content to write to the file."}
-			},
-			"required": ["file_path", "content"],
-			"additionalProperties": false
-		}`),
-	}
-}
-
-func editFileTool() ToolDefinition {
-	return ToolDefinition{
-		Type:        "function",
-		Name:        "edit_file",
-		Description: "Edit a file by replacing old_string with new_string. Tries exact match first, then whitespace-tolerant line matching (Codex-style) if exact match fails. Use this for surgical edits rather than rewriting entire files.",
-		Parameters: json.RawMessage(`{
-			"type": "object",
-			"properties": {
-				"file_path": {"type": "string", "description": "The path to the file to edit. Relative paths are resolved against the working directory."},
-				"old_string": {"type": "string", "description": "The exact string to find and replace. Must be unique within the file."},
-				"new_string": {"type": "string", "description": "The replacement string."},
-				"replace_all": {"type": "boolean", "description": "If true, replace all occurrences. Default: false"}
-			},
-			"required": ["file_path", "old_string", "new_string"],
-			"additionalProperties": false
-		}`),
-	}
-}
-
-func bashTool() ToolDefinition {
-	return ToolDefinition{
-		Type:        "function",
-		Name:        "bash",
-		Description: "Execute a bash command and return its stdout and stderr. The command runs in the working directory. Use this for running tests, builds, git commands, and other shell operations. Commands have a default timeout of 120 seconds.",
-		Parameters: json.RawMessage(`{
-			"type": "object",
-			"properties": {
-				"command": {"type": "string", "description": "The bash command to execute."},
-				"timeout": {"type": "integer", "description": "Timeout in seconds. Default: 120, Max: 600"}
-			},
-			"required": ["command"],
-			"additionalProperties": false
-		}`),
-	}
-}
-
-func listFilesTool() ToolDefinition {
-	return ToolDefinition{
-		Type:        "function",
-		Name:        "list_files",
-		Description: "List files and directories at a given path. Returns file names with '/' suffix for directories. Useful for exploring project structure.",
-		Parameters: json.RawMessage(`{
-			"type": "object",
-			"properties": {
-				"path": {"type": "string", "description": "Directory path to list. Relative paths are resolved against the working directory. Default: current working directory."},
-				"recursive": {"type": "boolean", "description": "If true, list files recursively (max depth 4, max 500 entries). Default: false"},
-				"pattern": {"type": "string", "description": "Glob pattern to filter results (e.g. '*.go', '*.ts'). Only applies to filenames, not paths."}
-			},
-			"additionalProperties": false
-		}`),
-	}
-}
-
-func grepSearchTool() ToolDefinition {
-	return ToolDefinition{
-		Type:        "function",
-		Name:        "grep_search",
-		Description: "Search file contents using a regular expression pattern. Returns matching lines with file paths and line numbers. Useful for finding function definitions, imports, references, etc.",
-		Parameters: json.RawMessage(`{
-			"type": "object",
-			"properties": {
-				"pattern": {"type": "string", "description": "Regular expression pattern to search for."},
-				"path": {"type": "string", "description": "Directory or file to search in. Default: working directory."},
-				"include": {"type": "string", "description": "Glob pattern to filter files (e.g. '*.go', '*.ts'). Default: all files."}
-			},
-			"required": ["pattern"],
-			"additionalProperties": false
-		}`),
-	}
-}
-
 // ExecuteTool runs a tool locally and returns the output string.
 // It resolves relative paths against workDir.
 func ExecuteTool(ctx context.Context, workDir, name string, input json.RawMessage) (string, error) {
@@ -165,4 +60,15 @@ func ExecuteTool(ctx context.Context, workDir, name string, input json.RawMessag
 		DefaultTimeoutSeconds: 120,
 		MaxTimeoutSeconds:     600,
 	})
+}
+
+func (t ToolDefinition) ParameterSchema() json.RawMessage {
+	return toolschema.JSON(t.Schema, t.Parameters)
+}
+
+func (t ToolDefinition) MarshalJSON() ([]byte, error) {
+	type wire ToolDefinition
+	v := wire(t)
+	v.Parameters = t.ParameterSchema()
+	return json.Marshal(v)
 }

@@ -25,7 +25,7 @@ func TestStandaloneWebSearchReservedSchema(t *testing.T) {
 		t.Fatalf("web.run must explicitly use strict=false: %#v", run)
 	}
 	var schema any
-	if err := json.Unmarshal(run.Parameters, &schema); err != nil {
+	if err := json.Unmarshal(run.ParameterSchema(), &schema); err != nil {
 		t.Fatal(err)
 	}
 	canonical, err := json.Marshal(schema)

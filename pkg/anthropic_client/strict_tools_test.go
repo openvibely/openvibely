@@ -9,13 +9,14 @@ import (
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/chatcontrol"
+	"github.com/openvibely/openvibely/pkg/toolschema"
 )
 
 func TestStrictBudgetAndTaskLookup(t *testing.T) {
 	defs := DefaultTools()
 	for _, name := range chatcontrol.AllActionNames() {
 		d := chatcontrol.Get(name)
-		defs = append(defs, ToolDefinition{Name: name, InputSchema: d.Parameters})
+		defs = append(defs, ToolDefinition{Name: name, Schema: d.Schema, StrictPriority: d.StrictPriority})
 	}
 	got := prepareStrictTools(defs)
 	count, unions := 0, 0
@@ -79,7 +80,7 @@ func TestStrictBudgetAndTaskLookup(t *testing.T) {
 func TestTaskLookupValidationBeforeExecution(t *testing.T) {
 	def := chatcontrol.Get("list_tasks")
 	called := 0
-	opts := &AgenticOptions{SkipDefaultTools: true, ExtraTools: []ToolDefinition{{Name: def.Name, InputSchema: def.Parameters}}, ToolExecutor: func(_ context.Context, _ string, input json.RawMessage) (string, bool, error) {
+	opts := &AgenticOptions{SkipDefaultTools: true, ExtraTools: []ToolDefinition{{Name: def.Name, Schema: def.Schema, StrictPriority: def.StrictPriority}}, ToolExecutor: func(_ context.Context, _ string, input json.RawMessage) (string, bool, error) {
 		called++
 		if string(input) != `{"category":"backlog"}` {
 			t.Errorf("unexpected filters %s", input)
@@ -111,11 +112,11 @@ func TestProviderWireStrictSchemas(t *testing.T) {
 		}
 		schema := tool["input_schema"].(map[string]any)
 		props := schema["properties"].(map[string]any)
-		if schema["additionalProperties"] != false || len(schema["required"].([]any)) != len(props) {
+		if schema["additionalProperties"] != false || len(schema["required"].([]any)) != 0 {
 			t.Error("not a strict schema")
 		}
-		if _, ok := props["status"].(map[string]any)["type"].([]any); !ok {
-			t.Error("optional filter not nullable")
+		if props["status"].(map[string]any)["type"] != "string" {
+			t.Error("optional filter rewritten")
 		}
 		if _, ok := props["limit"].(map[string]any)["minimum"]; ok {
 			t.Error("unsupported constraint sent")
@@ -128,7 +129,7 @@ func TestProviderWireStrictSchemas(t *testing.T) {
 	AnthropicAPIHost = srv.URL
 	defer func() { AnthropicAPIHost = old }()
 	d := chatcontrol.Get("list_tasks")
-	_, err := NewWithAPIKey("test").SendAgentic(context.Background(), "backlog", &AgenticOptions{Model: "claude-opus-4-6", MaxTokens: 1024, SkipDefaultTools: true, ExtraTools: []ToolDefinition{{Name: d.Name, InputSchema: d.Parameters}}})
+	_, err := NewWithAPIKey("test").SendAgentic(context.Background(), "backlog", &AgenticOptions{Model: "claude-opus-4-6", MaxTokens: 1024, SkipDefaultTools: true, ExtraTools: []ToolDefinition{{Name: d.Name, Schema: d.Schema, StrictPriority: d.StrictPriority}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -176,5 +177,43 @@ func TestDefaultToolsExplicitlyClosedAndStrict(t *testing.T) {
 		if def.Strict == nil || !*def.Strict {
 			t.Fatalf("local tool %s lost strict support", def.Name)
 		}
+	}
+}
+
+func TestOptionalBudgetAndDefinitionPriority(t *testing.T) {
+	schema := &toolschema.Schema{Type: "object", AdditionalProperties: toolschema.Pointer(false), Properties: map[string]*toolschema.Schema{}}
+	for i := 0; i < 12; i++ {
+		schema.Properties[fmt.Sprint(i)] = &toolschema.Schema{Type: "string"}
+	}
+	defs := []ToolDefinition{
+		{Name: "first", Schema: schema},
+		{Name: "second", Schema: schema},
+		{Name: "important", Schema: schema, StrictPriority: 10},
+		{Name: "no_arguments", Schema: &toolschema.Schema{Type: "object", AdditionalProperties: toolschema.Pointer(false)}},
+	}
+	got := prepareStrictTools(defs)
+	if !*got[0].Strict || *got[1].Strict || !*got[2].Strict || !*got[3].Strict {
+		t.Fatalf("optional budget/priority not respected: %+v", got)
+	}
+	for i, d := range got {
+		if d.Name != defs[i].Name || defs[i].Strict != nil {
+			t.Fatal("source or request order mutated")
+		}
+	}
+	// The tool excluded from strict mode must still marshal its complete typed schema.
+	raw, err := json.Marshal(got[1])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wire struct {
+		InputSchema struct {
+			Properties map[string]any `json:"properties"`
+		} `json:"input_schema"`
+	}
+	if err := json.Unmarshal(raw, &wire); err != nil {
+		t.Fatal(err)
+	}
+	if len(wire.InputSchema.Properties) != 12 {
+		t.Fatalf("fallback lost schema: %s", raw)
 	}
 }

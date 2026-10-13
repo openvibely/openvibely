@@ -4,19 +4,19 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/openvibely/openvibely/pkg/toolschema"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/chatcontrol"
+	"github.com/openvibely/openvibely/pkg/toolschema"
 )
 
 func TestStrictTaskLookupAndValidation(t *testing.T) {
 	def := chatcontrol.Get("list_tasks")
 	called := 0
-	opts := &AgenticOptions{SkipDefaultTools: true, ExtraTools: []ToolDefinition{{Type: "function", Name: def.Name, Parameters: def.Parameters}}, ToolExecutor: func(_ context.Context, _ string, input json.RawMessage) (string, bool, error) {
+	opts := &AgenticOptions{SkipDefaultTools: true, ExtraTools: []ToolDefinition{{Type: "function", Name: def.Name, Schema: def.Schema, StrictPriority: def.StrictPriority}}, ToolExecutor: func(_ context.Context, _ string, input json.RawMessage) (string, bool, error) {
 		called++
 		if string(input) != `{"category":"backlog"}` {
 			t.Errorf("unexpected filters: %s", input)
@@ -57,8 +57,9 @@ func TestStrictFallbackAndNamespace(t *testing.T) {
 }
 
 func TestProviderWireStrictSchemas(t *testing.T) {
-	for _, completions := range []bool{false, true} {
-		t.Run(fmt.Sprint(completions), func(t *testing.T) {
+	for _, mode := range []struct{ completions, strict bool }{{false, true}, {true, true}, {true, false}} {
+		completions := mode.completions
+		t.Run(fmt.Sprint(mode), func(t *testing.T) {
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				var body map[string]any
 				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -70,16 +71,22 @@ func TestProviderWireStrictSchemas(t *testing.T) {
 				if completions {
 					tool = tool["function"].(map[string]any)
 				}
-				if tool["strict"] != true {
+				if mode.strict && tool["strict"] != true {
 					t.Errorf("missing strict flag: %v", tool)
+				}
+				if !mode.strict {
+					if _, exists := tool["strict"]; exists {
+						t.Error("strict flag sent to non-strict endpoint")
+					}
 				}
 				schema := tool["parameters"].(map[string]any)
 				props := schema["properties"].(map[string]any)
-				if schema["additionalProperties"] != false || len(schema["required"].([]any)) != len(props) {
+				required, _ := schema["required"].([]any)
+				if schema["additionalProperties"] != false || (mode.strict && len(required) != len(props)) || (!mode.strict && len(required) != 0) {
 					t.Error("not a strict schema")
 				}
-				if _, ok := props["status"].(map[string]any)["type"].([]any); !ok {
-					t.Error("optional filter not nullable")
+				if _, ok := props["status"].(map[string]any)["type"].([]any); ok != mode.strict {
+					t.Error("incorrect optional filter nullability")
 				}
 				w.Header().Set("Content-Type", "text/event-stream")
 				if completions {
@@ -93,11 +100,11 @@ func TestProviderWireStrictSchemas(t *testing.T) {
 			OpenAIAPIBaseURL = srv.URL + "/"
 			defer func() { OpenAIAPIBaseURL = old }()
 			d := chatcontrol.Get("list_tasks")
-			defs := []ToolDefinition{{Type: "function", Name: d.Name, Parameters: d.Parameters}}
+			defs := []ToolDefinition{{Type: "function", Name: d.Name, Schema: d.Schema, StrictPriority: d.StrictPriority}}
 			client := newHTTPTestAPIKeyClient("test")
 			var err error
 			if completions {
-				_, err = client.SendCompletions(context.Background(), "backlog", &CompletionsOptions{Model: "test", StrictTools: true, SkipDefaultTools: true, ExtraTools: defs})
+				_, err = client.SendCompletions(context.Background(), "backlog", &CompletionsOptions{Model: "test", StrictTools: mode.strict, SkipDefaultTools: true, ExtraTools: defs})
 			} else {
 				_, err = client.SendAgentic(context.Background(), "backlog", &AgenticOptions{Model: "test", SkipDefaultTools: true, ExtraTools: defs})
 			}
@@ -112,11 +119,11 @@ func TestRegistrySchemasRemainValid(t *testing.T) {
 	strictCount := 0
 	for _, name := range chatcontrol.AllActionNames() {
 		def := chatcontrol.Get(name)
-		_, err := toolschema.NormalizeValidate(def.Parameters, json.RawMessage(`{}`))
+		_, err := toolschema.NormalizeValidate(def.ParameterSchema(), json.RawMessage(`{}`))
 		if err != nil && !strings.Contains(err.Error(), "invalid tool arguments:") {
 			t.Errorf("%s: %v", name, err)
 		}
-		if wire, _, err := toolschema.Strict(def.Parameters, false); err == nil {
+		if wire, err := toolschema.MarshalOpenAI(def.Schema, nil, true); err == nil {
 			strictCount++
 			_, err = toolschema.NormalizeValidate(wire, json.RawMessage(`{}`))
 			if err != nil && !strings.Contains(err.Error(), "invalid tool arguments:") {
@@ -154,7 +161,7 @@ func TestNamespacedArgumentsValidatedBeforeExecution(t *testing.T) {
 func TestOpenRootToolStaysNonStrict(t *testing.T) {
 	raw := json.RawMessage(`{"type":"object"}`)
 	got := prepareStrictTools([]ToolDefinition{{Type: "function", Name: "custom", Parameters: raw}})[0]
-	if got.Strict == nil || *got.Strict || string(got.Parameters) != string(raw) {
+	if got.Strict == nil || *got.Strict || string(got.ParameterSchema()) != string(raw) {
 		t.Fatalf("open schema changed: %+v", got)
 	}
 }
@@ -162,7 +169,7 @@ func TestOpenRootToolStaysNonStrict(t *testing.T) {
 func TestEmptyOpenRootToolStaysNonStrict(t *testing.T) {
 	raw := json.RawMessage(`{"type":"object","properties":{}}`)
 	got := prepareStrictTools([]ToolDefinition{{Type: "function", Name: "custom", Parameters: raw}})[0]
-	if got.Strict == nil || *got.Strict || string(got.Parameters) != string(raw) {
+	if got.Strict == nil || *got.Strict || string(got.ParameterSchema()) != string(raw) {
 		t.Fatalf("open schema changed: %+v", got)
 	}
 }
@@ -170,7 +177,7 @@ func TestEmptyOpenRootToolStaysNonStrict(t *testing.T) {
 func TestDeclaredOpenToolPreservesArguments(t *testing.T) {
 	raw := json.RawMessage(`{"type":"object","properties":{"label":{"type":"string"}}}`)
 	got := prepareStrictTools([]ToolDefinition{{Type: "function", Name: "custom", Parameters: raw}})[0]
-	if got.Strict == nil || *got.Strict || string(got.Parameters) != string(raw) {
+	if got.Strict == nil || *got.Strict || string(got.ParameterSchema()) != string(raw) {
 		t.Fatalf("open schema changed: %+v", got)
 	}
 	input := json.RawMessage(`{"label":"example","custom":42}`)

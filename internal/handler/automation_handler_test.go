@@ -3399,8 +3399,8 @@ func TestAutomationChatAndWebCreationHaveNoDraftSurfaceBeforeSave(t *testing.T) 
 	}
 	saveDef := chatcontrol.Get("save_automation")
 	require.NotNil(t, saveDef)
-	require.NotContains(t, strings.ToLower(string(saveDef.Parameters)), "confirmation")
-	for _, encoded := range []string{saveDef.Description, string(saveDef.Parameters)} {
+	require.NotContains(t, strings.ToLower(string(saveDef.ParameterSchema())), "confirmation")
+	for _, encoded := range []string{saveDef.Description, string(saveDef.ParameterSchema())} {
 		require.NotContains(t, strings.ToLower(encoded), "draft")
 		require.NotContains(t, encoded, "version_id")
 		require.NotContains(t, encoded, "automation_id")

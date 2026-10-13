@@ -39,7 +39,7 @@ func TestDefaultTools_ValidJSON(t *testing.T) {
 	for _, tool := range DefaultTools() {
 		// Verify the parameters field is valid JSON
 		var params map[string]any
-		if err := json.Unmarshal(tool.Parameters, &params); err != nil {
+		if err := json.Unmarshal(tool.ParameterSchema(), &params); err != nil {
 			t.Errorf("tool %s: invalid parameters JSON: %v", tool.Name, err)
 		}
 		if params["type"] != "object" {

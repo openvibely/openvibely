@@ -439,7 +439,7 @@ func TestDefaultTools(t *testing.T) {
 		names[tool.Name] = true
 		// Verify input_schema is valid JSON
 		var schema map[string]interface{}
-		if err := json.Unmarshal(tool.InputSchema, &schema); err != nil {
+		if err := json.Unmarshal(tool.ParameterSchema(), &schema); err != nil {
 			t.Errorf("tool %s has invalid input_schema: %v", tool.Name, err)
 		}
 	}
