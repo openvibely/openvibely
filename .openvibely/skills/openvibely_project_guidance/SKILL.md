@@ -35,7 +35,7 @@ Use this project-managed skill for coding-agent work in the OpenVibely repositor
 - Never delete, truncate, or overwrite `openvibely.db`; it contains user data.
 - Never run `DROP TABLE` on production tables except in goose migrations.
 - Never run `DELETE FROM` without a `WHERE` clause on production tables.
-- Do not change `busy_timeout`, `MaxOpenConns`, or `_loc=UTC` in `internal/database/database.go` casually. An explicitly authorized SQLite pool architectural change may change them only with per-connection coverage, duration-based benchmark evidence, transaction audit, and updated guidance; preserve the 5000 busy timeout, UTC behavior, and isolated `:memory:` one-connection fixtures. File-backed production currently uses one dedicated writer and one query-only reader (`1W+1R`), selected by the duration-based benchmark; any future topology change must remeasure rather than assume the former two-reader result. Every mutation and read-write transaction must route through the writer handle, while ordinary reads use the reader handle. The background incremental-vacuum writer must use the writer handle with bounded same-connection timeout handling and restore or discard the connection before reuse.
+- Do not change `busy_timeout`, `MaxOpenConns`, or `_loc=UTC` in `internal/persistence/sqlite/database/database.go` casually. An explicitly authorized SQLite pool architectural change may change them only with per-connection coverage, duration-based benchmark evidence, transaction audit, and updated guidance; preserve the 5000 busy timeout, UTC behavior, and isolated `:memory:` one-connection fixtures. File-backed production currently uses one dedicated writer and one query-only reader (`1W+1R`), selected by the duration-based benchmark; any future topology change must remeasure rather than assume the former two-reader result. Every mutation and read-write transaction must route through the writer handle, while ordinary reads use the reader handle. The background incremental-vacuum writer must use the writer handle with bounded same-connection timeout handling and restore or discard the connection before reuse.
 - Never write tests that hit real LLM APIs. Use `models.ProviderTest` with `SetLLMCaller(testutil.NewMockLLMCaller())`; retired OpenAI/Anthropic model CLI auth should be covered as unsupported legacy state without spawning subprocesses.
 - Do not reintroduce OpenAI/Anthropic model CLI subprocess transports; `AuthMethodCLI` is legacy data compatibility only.
 - Never persist or log GitHub App installation access tokens, GitHub PATs, private-key material, OAuth tokens, API keys, or webhook secrets. Mint operation tokens per operation and keep token use in process.
@@ -87,7 +87,7 @@ Use this project-managed skill for coding-agent work in the OpenVibely repositor
 
 ## Adding Features
 
-- New tables or columns require a new migration in `internal/database/migrations/` using the existing goose numbering pattern.
+- New tables or columns require a new migration in `internal/persistence/sqlite/database/migrations/` using the existing goose numbering pattern.
 - New models belong in `internal/models/`, store interfaces in `internal/persistence/`, SQLite implementations in `internal/persistence/sqlite/`, services in `internal/service/`, and handlers in `internal/handler/`.
 - Register new handlers and routes in `internal/handler/handler.go`.
 - Update templates under `web/templates/**/*.templ` when UI changes are needed, then run `templ generate`.
@@ -124,8 +124,8 @@ go test ./internal/... -count=1 -timeout 60s  # Focused/internal tests; use the 
 | What | Where |
 |------|-------|
 | Entry point | `cmd/server/main.go` |
-| Database setup | `internal/database/database.go` |
-| Migrations | `internal/database/migrations/*.sql` |
+| Database setup | `internal/persistence/sqlite/database/database.go` |
+| Migrations | `internal/persistence/sqlite/database/migrations/*.sql` |
 | Models | `internal/models/*.go` |
 | Repositories | `internal/persistence/*.go` (interfaces), `internal/persistence/sqlite/*_repo.go` (SQLite) |
 | Services | `internal/service/*_service.go` |

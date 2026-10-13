@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"sync"
 
-	"github.com/openvibely/openvibely/internal/database"
+	"github.com/openvibely/openvibely/internal/persistence/sqlite/database"
 )
 
 type sqlExecutor interface {

@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/openvibely/openvibely/internal/database"
 	"github.com/openvibely/openvibely/internal/persistence"
+	"github.com/openvibely/openvibely/internal/persistence/sqlite/database"
 	"github.com/stretchr/testify/require"
 	_ "modernc.org/sqlite"
 )

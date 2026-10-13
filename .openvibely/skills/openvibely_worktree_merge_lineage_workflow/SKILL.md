@@ -157,7 +157,7 @@ git log --oneline main..HEAD
 
 - If accidental edits land in the main checkout while a task has an assigned worktree, inspect both statuses/diffs, move or recreate the relevant changes in the task worktree, then restore main only after confirming nothing will be lost.
 - For conflict triage, check actual merge direction. `main -> task` may report already up to date while `task -> main` or cherry-picking a follow-up commit can still conflict.
-- Because `internal/database/migrations/068_baseline.sql` seeds `worktree_merge_target` as `main`, tests that create temporary Git repos for worktree setup/cleanup paths should ensure those repos have a `main` branch.
+- Because `internal/persistence/sqlite/database/migrations/068_baseline.sql` seeds `worktree_merge_target` as `main`, tests that create temporary Git repos for worktree setup/cleanup paths should ensure those repos have a `main` branch.
 - **"Where are the changes" / "no merge option" triage.** Do not assume the currently checked-out branch in the assigned worktree is the one holding the implementation. First check whether it is empty relative to the target:
   ```bash
   git status --short --branch

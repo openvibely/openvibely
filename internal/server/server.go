@@ -26,7 +26,6 @@ import (
 	"github.com/openvibely/openvibely/internal/buildinfo"
 	"github.com/openvibely/openvibely/internal/builtinskills"
 	"github.com/openvibely/openvibely/internal/config"
-	"github.com/openvibely/openvibely/internal/database"
 	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/handler"
 	"github.com/openvibely/openvibely/internal/lifecycle"
@@ -55,8 +54,9 @@ type Instance struct {
 }
 
 var (
-	newDatabaseConnections           = database.NewReadWrite
-	registerDedicatedWriter          = sqlite.RegisterDedicatedWriter
+	openPersistence = func(path string, broadcaster *events.Broadcaster) (persistence.Backend, error) {
+		return sqlite.Open(path, broadcaster)
+	}
 	loadAutomationConfirmationSecret = service.LoadOrCreateAutomationConfirmationSecret
 )
 
@@ -474,54 +474,46 @@ func Start(ctx context.Context, cfg *config.Config, options ...Options) (*Instan
 	uploadsPath := filepath.Join(cfg.AppDataDir, "uploads")
 	handler.SetUploadsDir(uploadsPath)
 
-	// Database
-	databaseConnections, err := newDatabaseConnections(cfg.DatabasePath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to initialize database: %w", err)
-	}
-	db := databaseConnections.Reader
-	writeDB := databaseConnections.Writer
-	unregisterDedicatedWriter := registerDedicatedWriter(db, writeDB)
-	closeDatabase := func() {
-		unregisterDedicatedWriter()
-		_ = databaseConnections.Close()
-	}
-	applog.Infof("database initialized")
-	databaseSchema, err := database.SchemaVersion(ctx, db)
-	if err != nil {
-		closeDatabase()
-		return nil, fmt.Errorf("reading database schema version: %w", err)
-	}
-
 	// Event broadcasters for real-time UI updates
 	broadcaster := events.NewBroadcaster()
 	chatBroadcaster := events.NewChatBroadcaster()
 	fileChangeBroadcaster := events.NewFileChangeBroadcaster()
 	executionStreamHub := events.NewExecutionStreamHub()
 
-	// Repositories
-	projectRepo := sqlite.NewProjectRepo(db)
-	taskRepo := sqlite.NewTaskRepo(db, broadcaster)
-	taskGoalRepo := sqlite.NewTaskGoalRepo(db)
-	llmConfigRepo := sqlite.NewLLMConfigRepo(db)
+	// Database
+	backend, err := openPersistence(cfg.DatabasePath, broadcaster)
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize database: %w", err)
+	}
+	closeDatabase := func() { _ = backend.Close() }
+	applog.Infof("database initialized")
+	databaseSchema, err := backend.SchemaVersion(ctx)
+	if err != nil {
+		closeDatabase()
+		return nil, fmt.Errorf("reading database schema version: %w", err)
+	}
+
+	// Stores
+	stores := backend.Stores()
+	projectRepo := stores.Projects
+	taskRepo := stores.Tasks
+	taskGoalRepo := stores.TaskGoals
+	llmConfigRepo := stores.LLMConfigs
 	if presence, listErr := llmConfigRepo.OAuthProviderPresence(context.Background()); listErr != nil {
 		applog.Infof("warning: unable to check OAuth model configuration for APP_BASE_URL validation: %v", listErr)
 	} else {
 		logStartupOAuthWarnings(cfg.AppBaseURL, presence, os.Getenv)
 	}
-	execRepo := sqlite.NewExecutionRepo(db)
-	scheduleRepo := sqlite.NewScheduleRepo(db)
-	workerRepo := sqlite.NewWorkerRepo(db)
-	attachmentRepo := sqlite.NewAttachmentRepo(db)
-	chatAttachmentRepo := sqlite.NewChatAttachmentRepo(db)
-	agentRepo := sqlite.NewAgentRepo(db)
-	alertRepo := sqlite.NewAlertRepo(db)
-	taskCommitStatRepo := sqlite.NewTaskCommitStatRepo(db)
-	automationRepo := sqlite.NewAutomationRepo(db)
-	automationRepo.SetBroadcaster(broadcaster)
-	execRepo.SetAutomationRepo(automationRepo)
-	alertRepo.SetAutomationRepo(automationRepo)
-	upcomingRepo := sqlite.NewUpcomingRepo(db)
+	execRepo := stores.Executions
+	scheduleRepo := stores.Schedules
+	workerRepo := stores.Workers
+	attachmentRepo := stores.Attachments
+	chatAttachmentRepo := stores.ChatAttachments
+	agentRepo := stores.Agents
+	alertRepo := stores.Alerts
+	taskCommitStatRepo := stores.TaskCommitStats
+	automationRepo := stores.Automations
+	upcomingRepo := stores.Upcoming
 
 	// Services
 	llmSvc := service.NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, scheduleRepo, attachmentRepo)
@@ -663,7 +655,7 @@ func Start(ctx context.Context, cfg *config.Config, options ...Options) (*Instan
 	llmSvc.SetAutomationRegistrationService(automationRegistrationSvc)
 	llmSvc.SetAutomationRepo(automationRepo)
 	upcomingSvc := service.NewUpcomingService(upcomingRepo)
-	insightsRepo := sqlite.NewInsightsRepo(db)
+	insightsRepo := stores.Insights
 	insightsSvc := service.NewInsightsService(insightsRepo, taskRepo, projectRepo, llmConfigRepo, execRepo)
 	insightsSvc.SetLLMService(llmSvc)
 	upcomingSvc.SetProjectRepo(projectRepo)
@@ -674,36 +666,38 @@ func Start(ctx context.Context, cfg *config.Config, options ...Options) (*Instan
 	llmSvc.SetUpcomingService(upcomingSvc)
 	llmSvc.SetAlertService(alertSvc)
 	llmSvc.SetTaskService(taskSvc)
-	llmSvc.SetThreadInputRepo(sqlite.NewThreadInputRepo(db))
+	llmSvc.SetThreadInputRepo(stores.ThreadInputs)
+	llmSvc.SetOpenAIAsyncToolCallStore(stores.OpenAIAsyncToolCalls)
+	usageAnalyticsSvc := service.NewUsageAnalyticsService(stores.Usage, llmConfigRepo)
 	llmSvc.SetBroadcaster(broadcaster)
 
 	// Code review comments
-	reviewCommentRepo := sqlite.NewReviewCommentRepo(db)
+	reviewCommentRepo := stores.ReviewComments
 
 	// Telegram user authorization
-	telegramAuthRepo := sqlite.NewTelegramAuthRepo(db)
+	telegramAuthRepo := stores.TelegramAuth
 
 	// Telegram user project persistence
-	telegramUserProjectRepo := sqlite.NewTelegramUserProjectRepo(db)
-	slackUserProjectRepo := sqlite.NewSlackUserProjectRepo(db)
-	slackTaskContextRepo := sqlite.NewSlackTaskContextRepo(db)
-	slackAuthRepo := sqlite.NewSlackAuthRepo(db)
-	emailAuthRepo := sqlite.NewEmailAuthRepo(db)
-	emailTaskContextRepo := sqlite.NewEmailTaskContextRepo(db)
-	emailSenderProjectRepo := sqlite.NewEmailSenderProjectRepo(db)
-	discordAuthRepo := sqlite.NewDiscordAuthRepo(db)
-	discordTaskContextRepo := sqlite.NewDiscordTaskContextRepo(db)
-	discordUserProjectRepo := sqlite.NewDiscordUserProjectRepo(db)
-	xAuthRepo := sqlite.NewXAuthRepo(db)
-	xUserProjectRepo := sqlite.NewXUserProjectRepo(db)
-	xTaskContextRepo := sqlite.NewXTaskContextRepo(db)
-	xInboundReceiptRepo := sqlite.NewXInboundReceiptRepo(db)
-	channelTargetRepo := sqlite.NewChannelTargetRepo(db)
+	telegramUserProjectRepo := stores.TelegramUserProjects
+	slackUserProjectRepo := stores.SlackUserProjects
+	slackTaskContextRepo := stores.SlackTaskContexts
+	slackAuthRepo := stores.SlackAuth
+	emailAuthRepo := stores.EmailAuth
+	emailTaskContextRepo := stores.EmailTaskContexts
+	emailSenderProjectRepo := stores.EmailSenderProjects
+	discordAuthRepo := stores.DiscordAuth
+	discordTaskContextRepo := stores.DiscordTaskContexts
+	discordUserProjectRepo := stores.DiscordUserProjects
+	xAuthRepo := stores.XAuth
+	xUserProjectRepo := stores.XUserProjects
+	xTaskContextRepo := stores.XTaskContexts
+	xInboundReceiptRepo := stores.XInboundReceipts
+	channelTargetRepo := stores.ChannelTargets
 
 	// Custom personalities
-	customPersonalityRepo := sqlite.NewCustomPersonalityRepo(db)
+	customPersonalityRepo := stores.CustomPersonalities
 
-	settingsRepo := sqlite.NewSettingsRepo(db)
+	settingsRepo := stores.Settings
 	automationDraftSvc := service.NewAutomationDraftService(automationRepo, automationRegistry)
 	automationCapabilitySvc := service.NewAutomationCapabilitySnapshotBuilder(projectRepo, agentRepo, taskRepo, settingsRepo)
 	automationCapabilitySvc.SetLLMConfigRepository(llmConfigRepo)
@@ -719,12 +713,12 @@ func Start(ctx context.Context, cfg *config.Config, options ...Options) (*Instan
 		return nil, fmt.Errorf("initializing automation confirmation secret: %w", confirmationSecretErr)
 	}
 	automationConfirmationSvc := service.NewAutomationConfirmationService(automationRepo, execRepo, automationConfirmationSecret)
-	taskPullRequestRepo := sqlite.NewTaskPullRequestRepo(db)
-	githubPRFeedbackRepo := sqlite.NewGitHubPRFeedbackRepo(db)
-	githubAuthRepo := sqlite.NewGitHubAuthRepo(db)
+	taskPullRequestRepo := stores.TaskPullRequests
+	githubPRFeedbackRepo := stores.GitHubPRFeedback
+	githubAuthRepo := stores.GitHubAuth
 	automationCapabilitySvc.SetGitHubAuthRepository(githubAuthRepo)
 	automationSaveValidator.SetCapabilityDependencies(projectRepo, settingsRepo, githubAuthRepo)
-	webhookRepo := sqlite.NewWebhookRepo(db)
+	webhookRepo := stores.Webhooks
 
 	// Seed Slack settings from env when provided (useful for bootstrapping local setup).
 	if cfg.SlackClientID != "" {
@@ -793,15 +787,16 @@ func Start(ctx context.Context, cfg *config.Config, options ...Options) (*Instan
 	slackSvc.SetAlertService(alertSvc)
 	slackSvc.SetTaskGoalService(taskGoalSvc)
 	slackSvc.SetUpcomingService(upcomingSvc)
-	slackSvc.SetThreadInputRepo(sqlite.NewThreadInputRepo(db))
-	slackSvc.SetSlackInboundReceiptRepo(sqlite.NewSlackInboundReceiptRepo(db))
+	slackSvc.SetThreadInputRepo(stores.ThreadInputs)
+	slackSvc.SetUsageAnalyticsService(usageAnalyticsSvc)
+	slackSvc.SetSlackInboundReceiptRepo(stores.SlackInboundReceipts)
 	slackSvc.SetAgentRepo(agentRepo)
 	emailSvc := service.NewEmailService(settingsRepo, projectRepo, llmConfigRepo, taskRepo, execRepo, scheduleRepo, taskSvc, llmSvc, workerSvc, emailAuthRepo, emailTaskContextRepo)
 	channelMessageRouter := service.NewChannelMessageRouter(channelTargetRepo, settingsRepo)
 	xSettingValues, _ := settingsRepo.GetMany(context.Background(), []string{service.XSettingConsumerKey, service.XSettingConsumerSecret, service.XSettingAccessToken, service.XSettingAccessTokenSecret, service.XSettingPollIntervalSeconds})
 	xCredentials := service.XCredentials{ConsumerKey: xSettingValues[service.XSettingConsumerKey], ConsumerSecret: xSettingValues[service.XSettingConsumerSecret], AccessToken: xSettingValues[service.XSettingAccessToken], AccessTokenSecret: xSettingValues[service.XSettingAccessTokenSecret]}
 	xSvc := service.NewXService(xCredentials, settingsRepo, projectRepo, llmConfigRepo, taskRepo, execRepo, scheduleRepo, taskSvc)
-	xSvc.SetRepositories(xAuthRepo, xUserProjectRepo, xTaskContextRepo, xInboundReceiptRepo, sqlite.NewThreadInputRepo(db))
+	xSvc.SetRepositories(xAuthRepo, xUserProjectRepo, xTaskContextRepo, xInboundReceiptRepo, stores.ThreadInputs)
 	if seconds, err := strconv.Atoi(strings.TrimSpace(xSettingValues[service.XSettingPollIntervalSeconds])); err == nil {
 		xSvc.SetPollInterval(time.Duration(seconds) * time.Second)
 	}
@@ -818,8 +813,8 @@ func Start(ctx context.Context, cfg *config.Config, options ...Options) (*Instan
 	emailSvc.SetChatAttachmentRepo(chatAttachmentRepo)
 	emailSvc.SetChatBroadcaster(chatBroadcaster)
 	emailSvc.SetExecutionStreamHub(executionStreamHub)
-	emailSvc.SetThreadInputRepo(sqlite.NewThreadInputRepo(db))
-	emailSvc.SetEmailInboundReceiptRepo(sqlite.NewEmailInboundReceiptRepo(db))
+	emailSvc.SetThreadInputRepo(stores.ThreadInputs)
+	emailSvc.SetEmailInboundReceiptRepo(stores.EmailInboundReceipts)
 	emailSvc.SetAgentRepo(agentRepo)
 	discordSvc := service.NewDiscordService(
 		settingsRepo,
@@ -842,7 +837,8 @@ func Start(ctx context.Context, cfg *config.Config, options ...Options) (*Instan
 	discordSvc.SetAlertService(alertSvc)
 	discordSvc.SetTaskGoalService(taskGoalSvc)
 	discordSvc.SetUpcomingService(upcomingSvc)
-	discordSvc.SetThreadInputRepo(sqlite.NewThreadInputRepo(db))
+	discordSvc.SetThreadInputRepo(stores.ThreadInputs)
+	discordSvc.SetUsageAnalyticsService(usageAnalyticsSvc)
 	discordSvc.SetAgentRepo(agentRepo)
 	discordSvc.SetChannelMessageRouter(channelMessageRouter)
 	discordSvc.SetDiscordUserProjectRepo(discordUserProjectRepo)
@@ -860,8 +856,8 @@ func Start(ctx context.Context, cfg *config.Config, options ...Options) (*Instan
 	// Lifecycle runner: dispatches route_task/before_run/after_complete hook
 	// slots around normal task execution. Scheduled agent maintenance uses the
 	// existing task scheduler, not a second lifecycle scheduler.
-	lifecycleRepo := sqlite.NewLifecycleRepo(db)
-	mutationRepo := sqlite.NewAgentMutationRepo(db)
+	lifecycleRepo := stores.Lifecycle
+	mutationRepo := stores.AgentMutations
 
 	// Auto-memory subsystem. Each project stores managed memory under its configured
 	// local repo path; Memory Curator lifecycle hooks select and update task-turn
@@ -995,7 +991,8 @@ func Start(ctx context.Context, cfg *config.Config, options ...Options) (*Instan
 			telegramSvc.SetAlertService(alertSvc)
 			telegramSvc.SetTaskGoalService(taskGoalSvc)
 			telegramSvc.SetUpcomingService(upcomingSvc)
-			telegramSvc.SetThreadInputRepo(sqlite.NewThreadInputRepo(db))
+			telegramSvc.SetThreadInputRepo(stores.ThreadInputs)
+			telegramSvc.SetUsageAnalyticsService(usageAnalyticsSvc)
 			telegramSvc.SetChannelMessageRouter(channelMessageRouter)
 			telegramSvc.SetProjectCreationServices(projectSvc, githubSvc, memorySvc, agentLibraryMaintenanceSvc)
 			channelMessageRouter.SetTelegramService(telegramSvc)
@@ -1077,7 +1074,7 @@ func Start(ctx context.Context, cfg *config.Config, options ...Options) (*Instan
 		hostedPendingStore = auth.NewPendingStore(srvCtx, time.Now)
 	}
 
-	database.StartIncrementalVacuum(srvCtx, writeDB)
+	backend.StartMaintenance(srvCtx)
 	updateDrain.StartExpirySupervisor(srvCtx)
 	workerSvc.Start(srvCtx)
 	automationReconciler.Start(srvCtx)
@@ -1112,11 +1109,11 @@ func Start(ctx context.Context, cfg *config.Config, options ...Options) (*Instan
 		projectSvc, taskSvc, llmSvc, workerSvc, schedulerSvc, alertSvc, upcomingSvc, insightsSvc,
 		llmConfigRepo, taskRepo, scheduleRepo, execRepo, workerRepo, attachmentRepo, chatAttachmentRepo, projectRepo, settingsRepo, broadcaster, telegramSvc,
 		handler.RuntimeStores{
-			ThreadInputs:      sqlite.NewThreadInputRepo(db),
-			Usage:             sqlite.NewUsageRepo(db),
-			SkillAnalytics:    sqlite.NewSkillAnalyticsRepo(db),
+			ThreadInputs:      stores.ThreadInputs,
+			Usage:             stores.Usage,
+			SkillAnalytics:    stores.SkillAnalytics,
 			TaskCommitStats:   taskCommitStatRepo,
-			ChatInputRequests: sqlite.NewChatInputRequestRepo(db),
+			ChatInputRequests: stores.ChatInputRequests,
 		},
 	)
 	for _, option := range options {

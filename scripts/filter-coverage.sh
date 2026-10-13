@@ -9,6 +9,6 @@ fi
 input=$1
 output=$2
 
-coverage_exclusion_pattern='(_templ\.go:|^github.com/openvibely/openvibely/cmd/|^github.com/openvibely/openvibely/docs/|^github.com/openvibely/openvibely/internal/database/migrations/|^github.com/openvibely/openvibely/internal/update/testfixture/|^github.com/openvibely/openvibely/internal/service/workflow_service\.go:)'
+coverage_exclusion_pattern='(_templ\.go:|^github.com/openvibely/openvibely/cmd/|^github.com/openvibely/openvibely/docs/|^github.com/openvibely/openvibely/internal/persistence/sqlite/database/migrations/|^github.com/openvibely/openvibely/internal/update/testfixture/|^github.com/openvibely/openvibely/internal/service/workflow_service\.go:)'
 
 grep -Ev "${coverage_exclusion_pattern}" "${input}" > "${output}"

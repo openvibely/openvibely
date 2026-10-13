@@ -633,6 +633,9 @@ func (h *Handler) handleTelegramSave(c echo.Context) error {
 		}
 		svc.SetTelegramAuthRepo(h.telegramAuthRepo)
 		svc.SetTelegramUserProjectRepo(h.telegramUserProjectRepo)
+		if h.usageAnalyticsSvc != nil {
+			svc.SetUsageAnalyticsService(h.usageAnalyticsSvc)
+		}
 		if h.agentRepo != nil {
 			svc.SetAgentRepo(h.agentRepo)
 		}

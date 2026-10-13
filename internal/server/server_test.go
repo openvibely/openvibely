@@ -23,10 +23,11 @@ import (
 
 	"github.com/openvibely/openvibely/internal/auth"
 	"github.com/openvibely/openvibely/internal/config"
-	"github.com/openvibely/openvibely/internal/database"
+	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/persistence/sqlite"
+	"github.com/openvibely/openvibely/internal/persistence/sqlite/database"
 	openaiclient "github.com/openvibely/openvibely/pkg/openai_client"
 )
 
@@ -533,29 +534,32 @@ func TestStart_HostedSSOWiringRedirectsDirectNavigation(t *testing.T) {
 	}
 }
 
+type closeTrackingBackend struct {
+	*sqlite.Backend
+	closed bool
+}
+
+func (b *closeTrackingBackend) Close() error {
+	b.closed = true
+	return b.Backend.Close()
+}
+
 func TestStart_ClosesSplitDatabaseAfterConfirmationSecretFailure(t *testing.T) {
-	originalNewDatabaseConnections := newDatabaseConnections
-	originalRegisterDedicatedWriter := registerDedicatedWriter
+	originalOpenPersistence := openPersistence
 	originalLoadAutomationConfirmationSecret := loadAutomationConfirmationSecret
 	defer func() {
-		newDatabaseConnections = originalNewDatabaseConnections
-		registerDedicatedWriter = originalRegisterDedicatedWriter
+		openPersistence = originalOpenPersistence
 		loadAutomationConfirmationSecret = originalLoadAutomationConfirmationSecret
 	}()
 
-	var connections *database.Connections
-	newDatabaseConnections = func(dsn string) (*database.Connections, error) {
-		opened, err := database.NewReadWrite(dsn)
-		connections = opened
-		return opened, err
-	}
-	unregistered := false
-	registerDedicatedWriter = func(reader, writer *sql.DB) func() {
-		unregister := sqlite.RegisterDedicatedWriter(reader, writer)
-		return func() {
-			unregistered = true
-			unregister()
+	var opened *closeTrackingBackend
+	openPersistence = func(path string, broadcaster *events.Broadcaster) (persistence.Backend, error) {
+		backend, err := sqlite.Open(path, broadcaster)
+		if err != nil {
+			return nil, err
 		}
+		opened = &closeTrackingBackend{Backend: backend}
+		return opened, nil
 	}
 	loadAutomationConfirmationSecret = func(context.Context, persistence.SettingsStore) ([]byte, error) {
 		return nil, errors.New("forced confirmation secret failure")
@@ -575,17 +579,14 @@ func TestStart_ClosesSplitDatabaseAfterConfirmationSecretFailure(t *testing.T) {
 	if instance != nil || err == nil || !strings.Contains(err.Error(), "initializing automation confirmation secret") {
 		t.Fatalf("Start() = (%#v, %v), want confirmation secret failure", instance, err)
 	}
-	if connections == nil {
-		t.Fatal("database connections were not opened")
+	if opened == nil {
+		t.Fatal("database backend was not opened")
 	}
-	if !unregistered {
-		t.Fatal("dedicated writer registration was not removed")
+	if !opened.closed {
+		t.Fatal("database backend remains open")
 	}
-	if err := connections.Reader.Ping(); err == nil {
-		t.Fatal("reader database remains open")
-	}
-	if err := connections.Writer.Ping(); err == nil {
-		t.Fatal("writer database remains open")
+	if _, err := opened.SchemaVersion(context.Background()); err == nil {
+		t.Fatal("database connections remain usable after close")
 	}
 }
 

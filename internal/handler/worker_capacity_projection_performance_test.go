@@ -13,9 +13,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/openvibely/openvibely/internal/database"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence/sqlite"
+	"github.com/openvibely/openvibely/internal/persistence/sqlite/database"
 )
 
 const workerCapacityProjectionSamples = 5
