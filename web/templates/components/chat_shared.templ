@@ -3582,6 +3582,7 @@ templ ChatAutoScrollScript() {
 					// up is the direction of the user's input when it is known (wheel, touch,
 					// navigation keys) and null otherwise (scrollbar drags).
 					function markInteracting(event, up) {
+						self._bubbleJump = null;
 						self._userInteracting = true;
 						self._interactionUp = up === undefined ? null : up;
 						if (self._userInteractTimeout) clearTimeout(self._userInteractTimeout);
@@ -3621,6 +3622,45 @@ templ ChatAutoScrollScript() {
 				this._handlers.pointercancel = endPointerInteraction;
 				this._handlers.blur = endPointerInteraction;
 				this._handlers.keydown = function(e) {
+					if (e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey && !e.isComposing &&
+						!e.defaultPrevented && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+						var el = self.element;
+						if (!el || !el.isConnected || !el.getClientRects().length ||
+							el.closest('[data-workspace-hidden="true"]') || document.querySelector('dialog[open]')) return;
+						var target = e.target;
+						var form = target && target.closest ? target.closest('form[data-input-id]') : null;
+						if (form && form.getAttribute('hx-target') !== '#' + el.id) return;
+						if (!form && target && target !== document.body && target !== document.documentElement && !el.contains(target)) return;
+						var bubbles = Array.from(el.querySelectorAll('.chat-bubble-user-msg, .chat-bubble-assistant-msg')).filter(function(bubble) {
+							return bubble.getClientRects().length && getComputedStyle(bubble).visibility !== 'hidden';
+						});
+						if (!bubbles.length) return;
+						e.preventDefault();
+						var direction = e.key === 'ArrowUp' ? -1 : 1;
+						var last = self._bubbleJump;
+						var index = last && Math.abs(last.scrollTop - el.scrollTop) < 1 ? bubbles.indexOf(last.bubble) : -1;
+						var bubble;
+						if (index >= 0) {
+							bubble = bubbles[Math.max(0, Math.min(bubbles.length - 1, index + direction))];
+						} else {
+							var top = el.getBoundingClientRect().top + el.clientTop;
+							var ordered = direction < 0 ? bubbles.slice().reverse() : bubbles;
+							bubble = ordered.find(function(item) {
+								var offset = item.getBoundingClientRect().top - top;
+								return direction < 0 ? offset < -1 : offset > 1;
+							}) || (direction < 0 ? bubbles[0] : bubbles[bubbles.length - 1]);
+						}
+						// Park before scrolling so streaming and pending send intents cannot undo the jump.
+						self._userInteracting = false;
+						self.userScrolledUp = true;
+						window._chatScrollIntentRevision = (window._chatScrollIntentRevision || 0) + 1;
+						window.advanceChatSendIntentScopeRevision(el);
+						self.intentRevision = window._chatScrollIntentRevision;
+						el.scrollTo({top: el.scrollTop + bubble.getBoundingClientRect().top - el.getBoundingClientRect().top - el.clientTop, behavior: 'instant'});
+						self._bubbleJump = {bubble: bubble, scrollTop: el.scrollTop};
+						if (typeof self.onIntentChange === 'function') self.onIntentChange();
+						return;
+					}
 					// Treat scroll-navigation keys as user scroll intent.
 					// Only count when focus is inside the scroll container or on body
 					// (avoids triggering on textarea typing — typing doesn't scroll).
@@ -3662,7 +3702,7 @@ templ ChatAutoScrollScript() {
 				// keydown is attached to window so PageUp/PageDown work even when the
 				// scroll container isn't focused. pointerup/cancel are also window-level
 				// because scrollbar drags can end outside the scroll element.
-				window.addEventListener('keydown', this._handlers.keydown, { passive: true });
+				window.addEventListener('keydown', this._handlers.keydown);
 				window.addEventListener('pointerup', this._handlers.pointerup, { passive: true });
 				window.addEventListener('pointercancel', this._handlers.pointercancel, { passive: true });
 				window.addEventListener('blur', this._handlers.blur);
@@ -3706,6 +3746,7 @@ templ ChatAutoScrollScript() {
 			},
 
 				returnToLatest: function(smooth) {
+					this._bubbleJump = null;
 					this.userScrolledUp = false;
 					window._chatScrollIntentRevision = (window._chatScrollIntentRevision || 0) + 1;
 					if (window.advanceChatSendIntentScopeRevision) window.advanceChatSendIntentScopeRevision(this.element);
