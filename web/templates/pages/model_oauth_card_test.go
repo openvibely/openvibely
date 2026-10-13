@@ -60,6 +60,32 @@ global.fetch = async (path, options) => {
  await new Promise(setImmediate);
  assert.equal(calls,2);
  assert.equal(removed,false);
+ // A cancelled/failed browser flow leaves status expired. Retry immediately,
+ // including while the old status request is still in flight.
+ anchor.isConnected=true; badge.textContent='Token expired'; timers=[];
+ let starts=0, polls=0, finishOld;
+ global.fetch=async(path)=>{
+  if(path.includes('/initiate')) {starts++; return {ok:true,json:async()=>({opened:true})};}
+  polls++;
+  if(polls===1) return new Promise(resolve=>{finishOld=()=>resolve({ok:true,json:async()=>({status:'connected'})});});
+  return {ok:true,json:async()=>({status:polls===2?'expired':'connected'})};
+ };
+ launchOAuthInSystemBrowser('/models/test/oauth/initiate',anchor);
+ await new Promise(setImmediate);
+ assert.equal(anchor.textContent,'Retry OAuth');
+ assert.equal(anchor.dataset.oauthWaiting,undefined);
+ launchOAuthInSystemBrowser('/models/test/oauth/initiate',anchor);
+ await new Promise(setImmediate);
+ assert.equal(starts,2);
+ finishOld();
+ await new Promise(setImmediate);
+ assert.equal(removed,false);
+ assert.equal(badge.textContent,'Token expired');
+ assert.equal(anchor.textContent,'Retry OAuth');
+ timers.shift()();
+ await new Promise(setImmediate);
+ assert.equal(removed,true);
+ assert.equal(badge.textContent,'Connected');
 })().catch(error=>{console.error(error);process.exitCode=1;});
 `
 	cmd := exec.Command(node, "-e", script)
