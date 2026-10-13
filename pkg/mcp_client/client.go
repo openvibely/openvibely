@@ -447,8 +447,11 @@ func (s *MCPServer) call(ctx context.Context, method string, params interface{})
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	if s.kind == "stdio" {
+		// Shared streams require each request and response to finish together.
+		s.mu.Lock()
+		defer s.mu.Unlock()
+	}
 
 	id := s.nextID.Add(1)
 	req := jsonRPCRequest{

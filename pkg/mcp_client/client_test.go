@@ -351,3 +351,98 @@ func TestHTTPMCPToolCallIsNotSentWhenCallerContextAlreadyCanceled(t *testing.T) 
 		t.Fatalf("tools/call reached the server %d times after cancellation", toolCalls)
 	}
 }
+
+func TestHTTPMCPConcurrentToolCalls(t *testing.T) {
+	for _, cancelSecond := range []bool{false, true} {
+		name := "second_completes_while_first_blocked"
+		if cancelSecond {
+			name = "cancel_second_without_canceling_first"
+		}
+		t.Run(name, func(t *testing.T) {
+			firstStarted := make(chan int64, 1)
+			secondStarted := make(chan int64, 1)
+			releaseFirst := make(chan struct{})
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var req jsonRPCRequest
+				if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+					t.Errorf("decode request: %v", err)
+					return
+				}
+				params, _ := req.Params.(map[string]interface{})
+				if params["name"] == "first" {
+					firstStarted <- req.ID
+					select {
+					case <-releaseFirst:
+					case <-r.Context().Done():
+						return
+					}
+				} else {
+					secondStarted <- req.ID
+					if cancelSecond {
+						<-r.Context().Done()
+						return
+					}
+				}
+				_ = json.NewEncoder(w).Encode(jsonRPCResponse{JSONRPC: "2.0", ID: req.ID, Result: json.RawMessage(`{"content":[{"type":"text","text":"ok"}]}`)})
+			}))
+			defer srv.Close()
+			firstCtx, cancelFirst := context.WithCancel(context.Background())
+			defer cancelFirst()
+			secondCtx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			server := &MCPServer{kind: "http", url: srv.URL, httpClient: &http.Client{Timeout: 60 * time.Second}}
+			execute := func(ctx context.Context, tool string) <-chan error {
+				done := make(chan error, 1)
+				go func() {
+					out, isErr, err := server.Execute(ctx, tool, nil)
+					if err == nil && (out != "ok" || isErr) {
+						t.Errorf("%s: output=%q isErr=%v", tool, out, isErr)
+					}
+					done <- err
+				}()
+				return done
+			}
+			awaitStart := func(started <-chan int64) int64 {
+				t.Helper()
+				select {
+				case id := <-started:
+					return id
+				case <-time.After(5 * time.Second):
+					t.Fatal("call did not reach server while first call was blocked")
+					return 0
+				}
+			}
+			awaitResult := func(done <-chan error, want error) {
+				t.Helper()
+				select {
+				case err := <-done:
+					if !errors.Is(err, want) {
+						t.Fatalf("call error=%v, want %v", err, want)
+					}
+				case <-time.After(5 * time.Second):
+					t.Fatal("call did not return promptly")
+				}
+			}
+			firstDone := execute(firstCtx, "first")
+			firstID := awaitStart(firstStarted)
+			secondDone := execute(secondCtx, "second")
+			secondID := awaitStart(secondStarted)
+			if firstID == secondID || firstID == 0 || secondID == 0 {
+				t.Fatalf("invalid request IDs: %d, %d", firstID, secondID)
+			}
+			var want error
+			if cancelSecond {
+				cancel()
+				want = context.Canceled
+			}
+			awaitResult(secondDone, want)
+			select {
+			case err := <-firstDone:
+				t.Fatalf("first call returned before release: %v", err)
+			default:
+			}
+			close(releaseFirst)
+			awaitResult(firstDone, nil)
+		})
+	}
+}
