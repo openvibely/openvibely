@@ -431,7 +431,7 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 		if len(opts.ExtraTools) > 0 {
 			tools = append(tools, opts.ExtraTools...)
 		}
-		tools = filterToolDefinitions(tools, opts.ToolFilter)
+		tools = prepareStrictTools(filterToolDefinitions(tools, opts.ToolFilter))
 	}
 
 	// Build initial messages from a compatible native checkpoint, history, and new prompt.
@@ -849,74 +849,6 @@ func inferProviderResultToolName(content json.RawMessage) string {
 	}
 }
 
-func isAnthropicCodeExecutionToolName(name string) bool {
-	switch strings.ToLower(strings.TrimSpace(name)) {
-	case "code_execution",
-		"code_execution_20250522", "code_execution_20250825", "code_execution_20260120",
-		"bash_code_execution":
-		return true
-	default:
-		return false
-	}
-}
-
-func anthropicTurnHasWebToolActivity(blocks []agenticBlock) bool {
-	for _, block := range blocks {
-		name := strings.TrimSpace(block.Name)
-		switch block.Type {
-		case "tool_use", "server_tool_use", "server_tool_result":
-			if name == "" && block.Type == "server_tool_result" {
-				name = inferProviderResultToolName(block.Content)
-			}
-			if isAnthropicProviderNativeToolName(name) {
-				return true
-			}
-		default:
-			if !isAnthropicProviderToolResultBlockType(block.Type) {
-				continue
-			}
-			name = anthropicProviderToolResultName(block)
-			if name == "" {
-				name = inferProviderResultToolName(block.Content)
-			}
-			if isAnthropicProviderNativeToolName(name) {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-func anthropicTurnHasCodeExecutionTooManyRequests(blocks []agenticBlock) bool {
-	for _, block := range blocks {
-		if !(block.Type == "server_tool_result" || isAnthropicProviderToolResultBlockType(block.Type)) {
-			continue
-		}
-		name := strings.TrimSpace(block.Name)
-		if name == "" {
-			name = anthropicProviderToolResultName(block)
-		}
-		if name == "" {
-			name = inferProviderResultToolName(block.Content)
-		}
-		rawLower := bytes.ToLower(bytes.TrimSpace(block.Content))
-		if len(rawLower) == 0 {
-			continue
-		}
-
-		isCodeExec := isAnthropicCodeExecutionToolName(name) ||
-			bytes.Contains(rawLower, []byte("code_execution")) ||
-			bytes.Contains(rawLower, []byte("bash_code_execution"))
-		if !isCodeExec {
-			continue
-		}
-		if bytes.Contains(rawLower, []byte("too_many_requests")) {
-			return true
-		}
-	}
-	return false
-}
-
 type anthropicToolExecutionResult struct {
 	block   agenticBlock
 	output  string
@@ -984,6 +916,10 @@ func exclusiveAnthropicRequestUserInput(blocks []agenticBlock) int {
 
 func runAnthropicToolUse(ctx context.Context, opts *AgenticOptions, name string, input json.RawMessage) (string, bool) {
 	applog.Debugf("[anthropicclient] executing tool %s", name)
+	input, validationErr := normalizeToolArguments(opts, name, input)
+	if validationErr != nil {
+		return validationErr.Error(), true
+	}
 	output := ""
 	isError := false
 	var err error

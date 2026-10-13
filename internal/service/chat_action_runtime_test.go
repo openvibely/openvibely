@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/openvibely/openvibely/pkg/toolschema"
+
 	"github.com/openvibely/openvibely/internal/chatcontrol"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/models"
@@ -1277,7 +1279,7 @@ func TestTaskControlRuntimeListAlertsUsesPersistedProjectAcrossReadStates(t *tes
 	}
 	for _, definition := range runtime.Definitions {
 		if definition.Name == "list_alerts" {
-			require.NoError(t, json.Unmarshal(definition.Parameters, &listSchema))
+			require.NoError(t, json.Unmarshal(definition.ParameterSchema(), &listSchema))
 			break
 		}
 	}
@@ -1302,7 +1304,7 @@ func TestTaskControlRuntimeListAlertsUsesPersistedProjectAcrossReadStates(t *tes
 		var ordinarySchema struct {
 			Properties map[string]json.RawMessage `json:"properties"`
 		}
-		require.NoError(t, json.Unmarshal(definition.Parameters, &ordinarySchema))
+		require.NoError(t, json.Unmarshal(definition.ParameterSchema(), &ordinarySchema))
 		require.Contains(t, ordinarySchema.Properties, "project_id")
 		require.Contains(t, ordinarySchema.Properties, "read")
 		return
@@ -4009,4 +4011,55 @@ func TestChannelScheduleToolsMakeConversationTasksRunnable(t *testing.T) {
 	all, err := schedules.ListByTask(ctx, task.ID)
 	require.NoError(t, err)
 	require.Len(t, all, 3)
+}
+
+func TestBackgroundGoalToolsResolveCallerTask(t *testing.T) {
+	db := teststores.NewDB(t)
+	ctx := context.Background()
+	projects := teststores.Of(db).Projects
+	tasks := teststores.Of(db).Tasks
+	project := &models.Project{Name: "Goal runtime"}
+	require.NoError(t, projects.Create(ctx, project))
+	task := &models.Task{ProjectID: project.ID, Title: "Caller", Prompt: "prompt", Category: models.CategoryBacklog, Status: models.StatusPending, Priority: 2}
+	require.NoError(t, tasks.Create(ctx, task))
+	goals := NewTaskGoalService(teststores.Of(db).TaskGoals, tasks, nil)
+	svc := &LLMService{taskRepo: tasks, taskGoalSvc: goals}
+	runtime := svc.taskControlRuntimeTools(*task)
+	for _, reference := range []string{`{}`, `{"task_id":null,"title":null}`, `{"task_id":"current"}`, `{"title":"Caller"}`} {
+		for _, name := range []string{"set_task_goal", "get_task_goal", "pause_task_goal", "resume_task_goal", "clear_task_goal"} {
+			t.Run(name+reference, func(t *testing.T) {
+				_, err := goals.SetGoal(ctx, task.ID, "original", GoalOptions{})
+				require.NoError(t, err)
+				if name == "resume_task_goal" {
+					require.NoError(t, goals.PauseGoal(ctx, task.ID, "test"))
+				}
+				var args map[string]any
+				require.NoError(t, json.Unmarshal([]byte(reference), &args))
+				if name == "set_task_goal" {
+					args["goal"] = "replacement"
+				}
+				raw, err := json.Marshal(args)
+				require.NoError(t, err)
+				raw, err = toolschema.ValidateArguments(chatcontrol.Get(name).Schema, nil, raw)
+				require.NoError(t, err)
+				out, handled, bad, err := runtime.Executor(ctx, name, raw)
+				require.NoError(t, err)
+				require.True(t, handled)
+				require.False(t, bad)
+				require.Contains(t, out, task.ID)
+			})
+		}
+	}
+	plain := buildChannelGoalActionHandlers(channelGoalActionHandlerOptions{ProjectID: project.ID, TaskRepo: tasks, TaskGoalSvc: goals})
+	for _, raw := range []string{`{}`, `{"task_id":"current"}`} {
+		_, err := plain["get_task_goal"](ctx, json.RawMessage(raw))
+		require.Error(t, err)
+	}
+	foreignProject := &models.Project{Name: "Foreign"}
+	require.NoError(t, projects.Create(ctx, foreignProject))
+	foreign := &models.Task{ProjectID: foreignProject.ID, Title: "Foreign", Prompt: "prompt", Category: models.CategoryBacklog, Status: models.StatusPending, Priority: 2}
+	require.NoError(t, tasks.Create(ctx, foreign))
+	raw, _ := json.Marshal(map[string]string{"task_id": foreign.ID})
+	_, _, bad, err := runtime.Executor(ctx, "get_task_goal", raw)
+	require.True(t, bad || err != nil)
 }

@@ -47,6 +47,7 @@ import (
 
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/pkg/toolschema"
 )
 
 // Surface identifies a chat entry point.
@@ -129,47 +130,854 @@ type ActionDef struct {
 	// protected lifecycle agents to request it explicitly.
 	LifecycleOnly bool
 
-	// Parameters is the JSON Schema for the tool's input parameters.
-	Parameters json.RawMessage
+	// Schema is the provider-independent definition of the tool input.
+	Schema *toolschema.Schema
+	Strict *bool
 }
 
 // chainSchemaProperties is the JSON Schema for the chain configuration object.
 // Fully specifies all ChainConfiguration fields so the LLM can configure chaining
 // in a single create_task call without needing a follow-up edit_task.
-const chainSchemaProperties = `{"type":"object","properties":{"enabled":{"type":"boolean","description":"true to enable chaining, false to disable"},"trigger":{"type":"string","enum":["on_completion","on_planning_complete"],"description":"When to trigger the child task"},"child_title":{"type":"string","description":"Title for the child task (defaults to '{parent title} (Implementation)')"},"child_prompt_prefix":{"type":"string","description":"Text prepended to parent output to form the child prompt"},"child_category":{"type":"string","enum":["active","backlog"],"description":"Category for child task (defaults to parent category)"},"child_agent_id":{"type":"string","description":"Agent/model config ID for the child task"},"child_chain_config":{"type":"object","description":"Nested chain config for multi-step sequences"}},"required":["enabled"]}`
+var chainSchemaProperties = &toolschema.Schema{
+	Type: "object",
+	Properties: map[string]*toolschema.Schema{
+		"enabled": {
+			Type:        "boolean",
+			Description: "true to enable chaining, false to disable",
+		},
+		"trigger": {
+			Type:        "string",
+			Enum:        []any{"on_completion", "on_planning_complete"},
+			Description: "When to trigger the child task",
+		},
+		"child_title": {
+			Type:        "string",
+			Description: "Title for the child task (defaults to '{parent title} (Implementation)')",
+		},
+		"child_prompt_prefix": {
+			Type:        "string",
+			Description: "Text prepended to parent output to form the child prompt",
+		},
+		"child_category": {
+			Type:        "string",
+			Enum:        []any{"active", "backlog"},
+			Description: "Category for child task (defaults to parent category)",
+		},
+		"child_agent_id": {
+			Type:        "string",
+			Description: "Agent/model config ID for the child task",
+		},
+		"child_chain_config": {
+			Type:        "object",
+			Description: "Nested chain config for multi-step sequences",
+		},
+	},
+	Required: []string{"enabled"},
+}
 
 // createTaskParams is the full JSON Schema for the create_task tool.
-const createTaskParams = `{"type":"object","properties":{"title":{"type":"string"},"prompt":{"type":"string"},"goal":{"type":"string","description":"Optional completion condition for the task. If set, the Goal Agent may continue the task across turns until this condition is satisfied."},"category":{"type":"string","enum":["active","backlog"]},"priority":{"type":"integer","minimum":1,"maximum":4},"agent_id":{"type":"string","description":"Internal model config ID. Do not use for Agent definitions from the Agents page."},"agent_definition_id":{"type":"string","description":"Agent definition ID when already known."},"agent":{"type":"string","description":"Exact name of an enabled selectable Agent definition from the Agents page, e.g. natural requests like 'Have <agent name>...' use agent: '<agent name>'."},"chain":` + chainSchemaProperties + `,"auto_merge":{"type":"boolean","description":"Auto-merge to the target branch on successful execution completion."},"auto_merge_on_goal_achieved":{"type":"boolean","description":"Auto-merge to the target branch when the stored task goal becomes achieved."},"merge_target_branch":{"type":"string","description":"Optional local target branch for automatic merge."},"source_github_issue_number":{"type":"integer","minimum":1,"description":"For a GitHub Dev Inbox implementation task, the exact assigned issue number returned by this execution."},"source_github_repo_url":{"type":"string","description":"Optional repository URL for source_github_issue_number. Defaults to the current project repository."}},"required":["title","prompt"],"additionalProperties":false}`
+var createTaskParams = &toolschema.Schema{
+	Type: "object",
+	Properties: map[string]*toolschema.Schema{
+		"title": {
+			Type: "string"},
+		"prompt": {
+			Type: "string"},
+		"goal": {
+			Type:        "string",
+			Description: "Optional completion condition for the task. If set, the Goal Agent may continue the task across turns until this condition is satisfied.",
+		},
+		"category": {
+			Type: "string",
+			Enum: []any{"active", "backlog"},
+		},
+		"priority": {
+			Type:    "integer",
+			Minimum: toolschema.Number("1"),
+			Maximum: toolschema.Number("4"),
+		},
+		"agent_id": {
+			Type:        "string",
+			Description: "Internal model config ID. Do not use for Agent definitions from the Agents page.",
+		},
+		"agent_definition_id": {
+			Type:        "string",
+			Description: "Agent definition ID when already known.",
+		},
+		"agent": {
+			Type:        "string",
+			Description: "Exact name of an enabled selectable Agent definition from the Agents page, e.g. natural requests like 'Have <agent name>...' use agent: '<agent name>'.",
+		},
+		"chain": chainSchemaProperties,
 
-const createAgentParams = `{"type":"object","properties":{"name":{"type":"string","description":"Display name for the reusable Agent profile."},"description":{"type":"string","description":"Short summary shown on the Agents page and selection surfaces."},"system_prompt":{"type":"string","description":"System prompt/persona for this user-managed Agent."},"model":{"type":"string","description":"Optional model override by configured model id/name, or inherit. Defaults to inherit."},"tools":{"type":"array","items":{"type":"string"},"description":"Optional allowed tool names from the safe Agent tool catalog. Unknown tools are rejected."},"scoped_files":{"type":"array","items":{"type":"object","properties":{"directory":{"type":"string","description":"Project-relative directory."},"permissions":{"type":"array","items":{"type":"string","enum":["read","write","delete"]}}},"required":["directory"],"additionalProperties":false},"description":"Optional safe scoped-file grants. Secret-bearing MCP env/header values are not supported."},"scope":{"type":"string","enum":["project","global"],"description":"Agent scope. Defaults to project."},"project_id":{"type":"string","description":"Optional assertion matching the current project for project-scoped Agents."},"enabled":{"type":"boolean","description":"Whether the Agent is enabled. Defaults to true."},"selectable_as_primary":{"type":"boolean","description":"Whether the Agent can be assigned as a primary Agent for tasks. Defaults to true."}},"required":["name","system_prompt"],"additionalProperties":false}`
-const updateAgentParams = `{"type":"object","properties":{"agent_id":{"type":"string","description":"Existing Agent ID to update."},"agent_name":{"type":"string","description":"Exact existing Agent name to update when agent_id/key are not known."},"key":{"type":"string","description":"Existing Agent key to update."},"project_id":{"type":"string","description":"Optional assertion matching the current project for project-scoped Agents."},"name":{"type":"string","description":"Replacement display name. Duplicate enabled selectable names are rejected."},"description":{"type":"string","description":"Replacement description. Use an empty string to clear it."},"system_prompt":{"type":"string","description":"Replacement system prompt/persona for this user-managed Agent."},"model":{"type":"string","description":"Replacement model override by configured model id/name, or inherit to clear the override."},"tools":{"type":"array","items":{"type":"string"},"description":"Replacement allowed tool names from the safe Agent tool catalog. Unknown tools are rejected."},"scoped_files":{"type":"array","items":{"type":"object","properties":{"directory":{"type":"string","description":"Project-relative directory."},"permissions":{"type":"array","items":{"type":"string","enum":["read","write","delete"]}}},"required":["directory"],"additionalProperties":false},"description":"Replacement safe scoped-file grants. Secret-bearing MCP env/header values are not supported."},"enabled":{"type":"boolean","description":"Whether the Agent is enabled."},"selectable_as_primary":{"type":"boolean","description":"Whether the Agent can be assigned as a primary Agent for tasks."}},"additionalProperties":false}`
-const saveCustomPersonalityParams = `{"type":"object","properties":{"mode":{"type":"string","enum":["create","update"],"description":"Use create for a new custom personality and update for an existing custom personality."},"name":{"type":"string","description":"Display name for the custom personality."},"key":{"type":"string","description":"Optional key for create; required exact existing custom key for update."},"description":{"type":"string","description":"Short description shown in Personality settings and list_personalities."},"system_prompt":{"type":"string","description":"Custom personality system prompt. Must satisfy the same length validation as Settings."},"activate":{"type":"boolean","description":"Set this custom personality as active after the save succeeds."}},"required":["mode","name","system_prompt"],"additionalProperties":false}`
-const createProjectParams = `{"type":"object","properties":{"name":{"type":"string","description":"Project name."},"repo_url":{"type":"string","description":"GitHub repository URL to clone for the new project. Local filesystem paths and create-directory behavior are not supported."},"description":{"type":"string","description":"Optional project description."},"default_agent_config_id":{"type":"string","description":"Optional default model config ID for the project."},"max_workers":{"type":"integer","minimum":1,"description":"Optional positive per-project worker limit. It must not exceed the configured finite global worker limit."},"switch_after_create":{"type":"boolean","description":"Request switching the current Chat/channel context to the new project when the surface supports it."}},"required":["name","repo_url"],"additionalProperties":false}`
-const updateProjectSettingsParams = `{"type":"object","properties":{"project_id":{"type":"string","description":"Optional assertion matching the current project ID. The action updates only the current project."},"project_name":{"type":"string","description":"Optional assertion matching the current project name exactly, case-insensitive. The action updates only the current project."},"new_name":{"type":"string","description":"Optional new project display name. Must be nonblank after trimming."},"description":{"type":"string","description":"Optional replacement project description. Use an empty string to clear it."},"default_model":{"type":"string","description":"Optional project default model to set, by exact model config ID first or unambiguous exact model name."},"default_model_id":{"type":"string","description":"Optional project default model config ID to set. Use either default_model or default_model_id, not both."},"clear_default_model":{"type":"boolean","description":"Clear the project-specific default model so future tasks inherit the global default."},"max_workers":{"type":"integer","minimum":0,"description":"Optional project worker limit. Use 0 to clear the project-specific limit; a finite value must not exceed the configured finite global worker limit."},"clear_max_workers":{"type":"boolean","description":"Clear the project-specific worker limit, equivalent to max_workers=0."}},"additionalProperties":false}`
-const createSwarmTaskParams = `{"type":"object","properties":{"title":{"type":"string"},"prompt":{"type":"string"},"goal":{"type":"string","description":"Optional completion condition for the swarm parent. If set, the Goal Agent may continue the parent task until this condition is satisfied."},"project_id":{"type":"string","description":"Optional project id; defaults to current project."},"category":{"type":"string","enum":["active","backlog"],"description":"Active starts the planner now; backlog defers planning until the swarm parent is run or moved to Active."},"priority":{"type":"integer","minimum":1,"maximum":4},"agent_id":{"type":"string","description":"Internal model config ID for the swarm parent/children. Do not use for Agent definitions from the Agents page."},"agent_definition_id":{"type":"string","description":"Agent definition ID when already known."},"agent":{"type":"string","description":"Exact name of an enabled selectable Agent definition from the Agents page, e.g. natural requests like 'Have <agent name>...' use agent: '<agent name>'."},"tag":{"type":"string","enum":["bug","feature"]},"max_workers":{"type":"integer","minimum":1,"maximum":8},"worker_isolation":{"type":"string","enum":["worktree","read_only","shared"]},"reviewer_enabled":{"type":"boolean","description":"Whether the swarm should create and run a reviewer stage. Defaults to true."},"merger_enabled":{"type":"boolean","description":"Whether the swarm should create and run a merger stage. Defaults to true."},"auto_merge":{"type":"boolean","description":"Auto-merge the swarm task branch on successful completion."},"auto_merge_on_goal_achieved":{"type":"boolean","description":"Auto-merge the swarm task branch when its stored goal is achieved."},"merge_target_branch":{"type":"string","description":"Optional merge target branch for swarm output."}},"required":["title","prompt"],"additionalProperties":false}`
-const viewSwarmParams = `{"type":"object","properties":{"task_id":{"type":"string","description":"Swarm parent or child task ID, or 'current' in a persisted task-thread follow-up."},"title":{"type":"string","description":"Exact swarm parent or child task title in the current project when task_id is not known."}},"additionalProperties":false}`
-const cancelTaskParams = `{"type":"object","properties":{"task_id":{"type":"string","description":"Task ID to cancel, or 'current' in a persisted task-thread follow-up."},"title":{"type":"string","description":"Exact current-project task title when task_id is not known."}},"additionalProperties":false}`
+		"auto_merge": {
+			Type:        "boolean",
+			Description: "Auto-merge to the target branch on successful execution completion.",
+		},
+		"auto_merge_on_goal_achieved": {
+			Type:        "boolean",
+			Description: "Auto-merge to the target branch when the stored task goal becomes achieved.",
+		},
+		"merge_target_branch": {
+			Type:        "string",
+			Description: "Optional local target branch for automatic merge.",
+		},
+		"source_github_issue_number": {
+			Type:        "integer",
+			Minimum:     toolschema.Number("1"),
+			Description: "For a GitHub Dev Inbox implementation task, the exact assigned issue number returned by this execution.",
+		},
+		"source_github_repo_url": {
+			Type:        "string",
+			Description: "Optional repository URL for source_github_issue_number. Defaults to the current project repository.",
+		},
+	},
+	Required:             []string{"title", "prompt"},
+	AdditionalProperties: toolschema.Pointer(false),
+}
+
+var createAgentParams = &toolschema.Schema{
+	Type: "object",
+	Properties: map[string]*toolschema.Schema{
+		"name": {
+			Type:        "string",
+			Description: "Display name for the reusable Agent profile.",
+		},
+		"description": {
+			Type:        "string",
+			Description: "Short summary shown on the Agents page and selection surfaces.",
+		},
+		"system_prompt": {
+			Type:        "string",
+			Description: "System prompt/persona for this user-managed Agent.",
+		},
+		"model": {
+			Type:        "string",
+			Description: "Optional model override by configured model id/name, or inherit. Defaults to inherit.",
+		},
+		"tools": {
+			Type: "array",
+			Items: &toolschema.Schema{
+				Type: "string"},
+			Description: "Optional allowed tool names from the safe Agent tool catalog. Unknown tools are rejected.",
+		},
+		"scoped_files": {
+			Type: "array",
+			Items: &toolschema.Schema{
+				Type: "object",
+				Properties: map[string]*toolschema.Schema{
+					"directory": {
+						Type:        "string",
+						Description: "Project-relative directory.",
+					},
+					"permissions": {
+						Type: "array",
+						Items: &toolschema.Schema{
+							Type: "string",
+							Enum: []any{"read", "write", "delete"},
+						},
+					},
+				},
+				Required:             []string{"directory"},
+				AdditionalProperties: toolschema.Pointer(false),
+			},
+			Description: "Optional safe scoped-file grants. Secret-bearing MCP env/header values are not supported.",
+		},
+		"scope": {
+			Type:        "string",
+			Enum:        []any{"project", "global"},
+			Description: "Agent scope. Defaults to project.",
+		},
+		"project_id": {
+			Type:        "string",
+			Description: "Optional assertion matching the current project for project-scoped Agents.",
+		},
+		"enabled": {
+			Type:        "boolean",
+			Description: "Whether the Agent is enabled. Defaults to true.",
+		},
+		"selectable_as_primary": {
+			Type:        "boolean",
+			Description: "Whether the Agent can be assigned as a primary Agent for tasks. Defaults to true.",
+		},
+	},
+	Required:             []string{"name", "system_prompt"},
+	AdditionalProperties: toolschema.Pointer(false),
+}
+var updateAgentParams = &toolschema.Schema{
+	Type: "object",
+	Properties: map[string]*toolschema.Schema{
+		"agent_id": {
+			Type:        "string",
+			Description: "Existing Agent ID to update.",
+		},
+		"agent_name": {
+			Type:        "string",
+			Description: "Exact existing Agent name to update when agent_id/key are not known.",
+		},
+		"key": {
+			Type:        "string",
+			Description: "Existing Agent key to update.",
+		},
+		"project_id": {
+			Type:        "string",
+			Description: "Optional assertion matching the current project for project-scoped Agents.",
+		},
+		"name": {
+			Type:        "string",
+			Description: "Replacement display name. Duplicate enabled selectable names are rejected.",
+		},
+		"description": {
+			Type:        "string",
+			Description: "Replacement description. Use an empty string to clear it.",
+		},
+		"system_prompt": {
+			Type:        "string",
+			Description: "Replacement system prompt/persona for this user-managed Agent.",
+		},
+		"model": {
+			Type:        "string",
+			Description: "Replacement model override by configured model id/name, or inherit to clear the override.",
+		},
+		"tools": {
+			Type: "array",
+			Items: &toolschema.Schema{
+				Type: "string"},
+			Description: "Replacement allowed tool names from the safe Agent tool catalog. Unknown tools are rejected.",
+		},
+		"scoped_files": {
+			Type: "array",
+			Items: &toolschema.Schema{
+				Type: "object",
+				Properties: map[string]*toolschema.Schema{
+					"directory": {
+						Type:        "string",
+						Description: "Project-relative directory.",
+					},
+					"permissions": {
+						Type: "array",
+						Items: &toolschema.Schema{
+							Type: "string",
+							Enum: []any{"read", "write", "delete"},
+						},
+					},
+				},
+				Required:             []string{"directory"},
+				AdditionalProperties: toolschema.Pointer(false),
+			},
+			Description: "Replacement safe scoped-file grants. Secret-bearing MCP env/header values are not supported.",
+		},
+		"enabled": {
+			Type:        "boolean",
+			Description: "Whether the Agent is enabled.",
+		},
+		"selectable_as_primary": {
+			Type:        "boolean",
+			Description: "Whether the Agent can be assigned as a primary Agent for tasks.",
+		},
+	},
+	AdditionalProperties: toolschema.Pointer(false),
+}
+var saveCustomPersonalityParams = &toolschema.Schema{
+	Type: "object",
+	Properties: map[string]*toolschema.Schema{
+		"mode": {
+			Type:        "string",
+			Enum:        []any{"create", "update"},
+			Description: "Use create for a new custom personality and update for an existing custom personality.",
+		},
+		"name": {
+			Type:        "string",
+			Description: "Display name for the custom personality.",
+		},
+		"key": {
+			Type:        "string",
+			Description: "Optional key for create; required exact existing custom key for update.",
+		},
+		"description": {
+			Type:        "string",
+			Description: "Short description shown in Personality settings and list_personalities.",
+		},
+		"system_prompt": {
+			Type:        "string",
+			Description: "Custom personality system prompt. Must satisfy the same length validation as Settings.",
+		},
+		"activate": {
+			Type:        "boolean",
+			Description: "Set this custom personality as active after the save succeeds.",
+		},
+	},
+	Required:             []string{"mode", "name", "system_prompt"},
+	AdditionalProperties: toolschema.Pointer(false),
+}
+var createProjectParams = &toolschema.Schema{
+	Type: "object",
+	Properties: map[string]*toolschema.Schema{
+		"name": {
+			Type:        "string",
+			Description: "Project name.",
+		},
+		"repo_url": {
+			Type:        "string",
+			Description: "GitHub repository URL to clone for the new project. Local filesystem paths and create-directory behavior are not supported.",
+		},
+		"description": {
+			Type:        "string",
+			Description: "Optional project description.",
+		},
+		"default_agent_config_id": {
+			Type:        "string",
+			Description: "Optional default model config ID for the project.",
+		},
+		"max_workers": {
+			Type:        "integer",
+			Minimum:     toolschema.Number("1"),
+			Description: "Optional positive per-project worker limit. It must not exceed the configured finite global worker limit.",
+		},
+		"switch_after_create": {
+			Type:        "boolean",
+			Description: "Request switching the current Chat/channel context to the new project when the surface supports it.",
+		},
+	},
+	Required:             []string{"name", "repo_url"},
+	AdditionalProperties: toolschema.Pointer(false),
+}
+var updateProjectSettingsParams = &toolschema.Schema{
+	Type: "object",
+	Properties: map[string]*toolschema.Schema{
+		"project_id": {
+			Type:        "string",
+			Description: "Optional assertion matching the current project ID. The action updates only the current project.",
+		},
+		"project_name": {
+			Type:        "string",
+			Description: "Optional assertion matching the current project name exactly, case-insensitive. The action updates only the current project.",
+		},
+		"new_name": {
+			Type:        "string",
+			Description: "Optional new project display name. Must be nonblank after trimming.",
+		},
+		"description": {
+			Type:        "string",
+			Description: "Optional replacement project description. Use an empty string to clear it.",
+		},
+		"default_model": {
+			Type:        "string",
+			Description: "Optional project default model to set, by exact model config ID first or unambiguous exact model name.",
+		},
+		"default_model_id": {
+			Type:        "string",
+			Description: "Optional project default model config ID to set. Use either default_model or default_model_id, not both.",
+		},
+		"clear_default_model": {
+			Type:        "boolean",
+			Description: "Clear the project-specific default model so future tasks inherit the global default.",
+		},
+		"max_workers": {
+			Type:        "integer",
+			Minimum:     toolschema.Number("0"),
+			Description: "Optional project worker limit. Use 0 to clear the project-specific limit; a finite value must not exceed the configured finite global worker limit.",
+		},
+		"clear_max_workers": {
+			Type:        "boolean",
+			Description: "Clear the project-specific worker limit, equivalent to max_workers=0.",
+		},
+	},
+	AdditionalProperties: toolschema.Pointer(false),
+}
+var createSwarmTaskParams = &toolschema.Schema{
+	Type: "object",
+	Properties: map[string]*toolschema.Schema{
+		"title": {
+			Type: "string"},
+		"prompt": {
+			Type: "string"},
+		"goal": {
+			Type:        "string",
+			Description: "Optional completion condition for the swarm parent. If set, the Goal Agent may continue the parent task until this condition is satisfied.",
+		},
+		"project_id": {
+			Type:        "string",
+			Description: "Optional project id; defaults to current project.",
+		},
+		"category": {
+			Type:        "string",
+			Enum:        []any{"active", "backlog"},
+			Description: "Active starts the planner now; backlog defers planning until the swarm parent is run or moved to Active.",
+		},
+		"priority": {
+			Type:    "integer",
+			Minimum: toolschema.Number("1"),
+			Maximum: toolschema.Number("4"),
+		},
+		"agent_id": {
+			Type:        "string",
+			Description: "Internal model config ID for the swarm parent/children. Do not use for Agent definitions from the Agents page.",
+		},
+		"agent_definition_id": {
+			Type:        "string",
+			Description: "Agent definition ID when already known.",
+		},
+		"agent": {
+			Type:        "string",
+			Description: "Exact name of an enabled selectable Agent definition from the Agents page, e.g. natural requests like 'Have <agent name>...' use agent: '<agent name>'.",
+		},
+		"tag": {
+			Type: "string",
+			Enum: []any{"bug", "feature"},
+		},
+		"max_workers": {
+			Type:    "integer",
+			Minimum: toolschema.Number("1"),
+			Maximum: toolschema.Number("8"),
+		},
+		"worker_isolation": {
+			Type: "string",
+			Enum: []any{"worktree", "read_only", "shared"},
+		},
+		"reviewer_enabled": {
+			Type:        "boolean",
+			Description: "Whether the swarm should create and run a reviewer stage. Defaults to true.",
+		},
+		"merger_enabled": {
+			Type:        "boolean",
+			Description: "Whether the swarm should create and run a merger stage. Defaults to true.",
+		},
+		"auto_merge": {
+			Type:        "boolean",
+			Description: "Auto-merge the swarm task branch on successful completion.",
+		},
+		"auto_merge_on_goal_achieved": {
+			Type:        "boolean",
+			Description: "Auto-merge the swarm task branch when its stored goal is achieved.",
+		},
+		"merge_target_branch": {
+			Type:        "string",
+			Description: "Optional merge target branch for swarm output.",
+		},
+	},
+	Required:             []string{"title", "prompt"},
+	AdditionalProperties: toolschema.Pointer(false),
+}
+var viewSwarmParams = &toolschema.Schema{
+	Type: "object",
+	Properties: map[string]*toolschema.Schema{
+		"task_id": {
+			Type:        "string",
+			Description: "Swarm parent or child task ID, or 'current' in a persisted task-thread follow-up.",
+		},
+		"title": {
+			Type:        "string",
+			Description: "Exact swarm parent or child task title in the current project when task_id is not known.",
+		},
+	},
+	AdditionalProperties: toolschema.Pointer(false),
+}
+var cancelTaskParams = &toolschema.Schema{
+	Type: "object",
+	Properties: map[string]*toolschema.Schema{
+		"task_id": {
+			Type:        "string",
+			Description: "Task ID to cancel, or 'current' in a persisted task-thread follow-up.",
+		},
+		"title": {
+			Type:        "string",
+			Description: "Exact current-project task title when task_id is not known.",
+		},
+	},
+	AdditionalProperties: toolschema.Pointer(false),
+}
 
 // editTaskParams is the full JSON Schema for the edit_task tool.
-const editTaskParams = `{"type":"object","properties":{"id":{"type":"string"},"title":{"type":"string"},"prompt":{"type":"string"},"category":{"type":"string","enum":["active","backlog","scheduled"]},"priority":{"type":"integer","minimum":1,"maximum":4},"tag":{"type":"string"},"agent_id":{"type":"string","description":"Internal model config ID. Do not use for Agent definitions from the Agents page."},"agent_config_id":{"type":"string","description":"Alias for agent_id; selects the LLM model config only."},"agent_definition_id":{"type":"string","description":"Primary Agent definition ID when already known."},"agent":{"type":"string","description":"Exact name of an enabled selectable Agent definition from the Agents page. Use this when only the Agent name is known."},"clear_agent_definition":{"type":"boolean","description":"Clear the primary Agent assignment without clearing or changing the model config."},"chain":` + chainSchemaProperties + `,"auto_merge":{"type":"boolean","description":"Set the successful-completion auto-merge option."},"auto_merge_on_goal_achieved":{"type":"boolean","description":"Set the goal-achievement auto-merge option."},"merge_target_branch":{"type":"string","description":"Set or clear the local automatic-merge target branch."},"attachments":{"type":"array","items":{"type":"string"}}},"required":["id"],"additionalProperties":false}`
+var editTaskParams = &toolschema.Schema{
+	Type: "object",
+	Properties: map[string]*toolschema.Schema{
+		"id": {
+			Type: "string"},
+		"title": {
+			Type: "string"},
+		"prompt": {
+			Type: "string"},
+		"category": {
+			Type: "string",
+			Enum: []any{"active", "backlog", "scheduled"},
+		},
+		"priority": {
+			Type:    "integer",
+			Minimum: toolschema.Number("1"),
+			Maximum: toolschema.Number("4"),
+		},
+		"tag": {
+			Type: "string"},
+		"agent_id": {
+			Type:        "string",
+			Description: "Internal model config ID. Do not use for Agent definitions from the Agents page.",
+		},
+		"agent_config_id": {
+			Type:        "string",
+			Description: "Alias for agent_id; selects the LLM model config only.",
+		},
+		"agent_definition_id": {
+			Type:        "string",
+			Description: "Primary Agent definition ID when already known.",
+		},
+		"agent": {
+			Type:        "string",
+			Description: "Exact name of an enabled selectable Agent definition from the Agents page. Use this when only the Agent name is known.",
+		},
+		"clear_agent_definition": {
+			Type:        "boolean",
+			Description: "Clear the primary Agent assignment without clearing or changing the model config.",
+		},
+		"chain": chainSchemaProperties,
 
-const sendMessageParams = `{"type":"object","properties":{"action":{"type":"string","enum":["send","list"],"description":"send delivers a message. list returns a bounded page of configured outbound targets including their target_kind."},"target":{"type":"string","description":"Delivery target. Format: platform, platform:#target-name, platform:target_id, or platform:target_id:thread_id. Saved outbound targets and home targets are preferred first. Authorized channel users/senders can be used as direct recipients, including email:person@example.com for an authorized Email sender, telegram:123456789 for an authorized Telegram numeric user ID, and slack:user:U123... or discord:user:1518288288572641398 for direct messages. Arbitrary unsaved explicit targets require the project policy. For Discord channel sends use discord:channel:<channel_id> or discord:channel:<channel_id>:<thread_id>. Prefer saved/named targets; call action=list to see configured targets."},"message":{"type":"string","description":"Text to send."},"subject":{"type":"string","description":"Optional subject for email targets. Ignored by chat platforms."},"limit":{"type":"integer","minimum":1,"maximum":100,"description":"Maximum targets to return for action=list; defaults to 20 and is capped at 100."},"offset":{"type":"integer","minimum":0,"description":"Number of targets to skip for action=list; use next_offset from the previous response."}},"additionalProperties":false}`
-const requestUserInputParams = `{"type":"object","properties":{"questions":{"type":"array","description":"Ask 1 to 3 questions. Put the recommended/default answer first for each question. Do not add a generic per-question move-forward option unless it is a real answer to that specific question; the Chat UI provides a separate Recommended and move forward shortcut for submitting all first-option recommendations. These choices are not answers until the user explicitly selects them.","minItems":1,"maxItems":3,"items":{"type":"object","properties":{"id":{"type":"string","description":"Stable question id used in the answer result."},"question":{"type":"string","description":"Plain-text question to show to the user."},"options":{"type":"array","description":"Clickable choices. The first option must be the recommended/default answer. Do not treat any option as selected until the user clicks it or explicitly chooses the global Recommended and move forward shortcut.","minItems":2,"maxItems":3,"items":{"type":"object","properties":{"label":{"type":"string","description":"Clickable option label returned exactly when selected."},"description":{"type":"string","description":"Short plain-text explanation shown under the label."}},"required":["label","description"],"additionalProperties":false}}},"required":["id","question","options"],"additionalProperties":false}}},"required":["questions"],"additionalProperties":false}`
+		"auto_merge": {
+			Type:        "boolean",
+			Description: "Set the successful-completion auto-merge option.",
+		},
+		"auto_merge_on_goal_achieved": {
+			Type:        "boolean",
+			Description: "Set the goal-achievement auto-merge option.",
+		},
+		"merge_target_branch": {
+			Type:        "string",
+			Description: "Set or clear the local automatic-merge target branch.",
+		},
+		"attachments": {
+			Type: "array",
+			Items: &toolschema.Schema{
+				Type: "string"},
+		},
+	},
+	Required:             []string{"id"},
+	AdditionalProperties: toolschema.Pointer(false),
+}
 
-const githubRepoURLProperty = `"repo_url":{"type":"string","description":"Optional GitHub repository URL. Defaults to the current project repository."}`
-const githubCreateIssueParams = `{"type":"object","properties":{"title":{"type":"string"},"body":{"type":"string"},"labels":{"type":"array","items":{"type":"string"},"description":"Plain GitHub labels such as suggestion, bug, approved, in-progress. Do not use an openvibely: prefix."},"assignees":{"type":"array","items":{"type":"string"}},` + githubRepoURLProperty + `},"required":["title"],"additionalProperties":false}`
-const githubIssueNumberParams = `{"type":"object","properties":{"issue_number":{"type":"integer","minimum":1},` + githubRepoURLProperty + `},"required":["issue_number"],"additionalProperties":false}`
-const githubAssignedIssuePaginationProperties = `,"limit":{"type":"integer","minimum":1,"maximum":100,"description":"Maximum number of assigned issues to return for this page; defaults to 100."},"offset":{"type":"integer","minimum":0,"description":"Number of assigned issues to skip for pagination; use next_offset from the previous response."}`
-const githubListAssignedIssuesParams = `{"type":"object","properties":{"assignee":{"type":"string","description":"GitHub login whose assigned open issues should be listed."},` + githubRepoURLProperty + githubAssignedIssuePaginationProperties + `},"required":["assignee"],"additionalProperties":false}`
-const githubListMyAssignedIssuesParams = `{"type":"object","properties":{` + githubRepoURLProperty + githubAssignedIssuePaginationProperties + `},"additionalProperties":false}`
-const githubListExistingAutomationIssuesParams = `{"type":"object","properties":{` + githubRepoURLProperty + `,"limit":{"type":"integer","minimum":1,"maximum":100,"description":"Maximum number of newest issues to return for this page; defaults to 50."},"offset":{"type":"integer","minimum":0,"description":"Number of newest matching issues to skip for pagination; use next_offset from the previous response."}},"additionalProperties":false}`
-const githubCommentIssueParams = `{"type":"object","properties":{"issue_number":{"type":"integer","minimum":1},"body":{"type":"string"},` + githubRepoURLProperty + `},"required":["issue_number","body"],"additionalProperties":false}`
-const githubAddLabelsParams = `{"type":"object","properties":{"issue_number":{"type":"integer","minimum":1},"labels":{"type":"array","items":{"type":"string"},"description":"Plain GitHub labels such as approved, in-progress, pr-opened. Do not use an openvibely: prefix."},` + githubRepoURLProperty + `},"required":["issue_number","labels"],"additionalProperties":false}`
-const githubOpenPullRequestParams = `{"type":"object","properties":{"task_id":{"type":"string"},"title":{"type":"string","description":"Task title to resolve when task_id is omitted."},"pr_title":{"type":"string","description":"Optional pull request title. Defaults to the task title."},"pr_body":{"type":"string","description":"Optional pull request body. For GitHub SDLC work, provide a concise factual Markdown summary of the changes and validation plus a closing reference to the source issue. Defaults to a concise summary and closes the supplied issue."},"base":{"type":"string","description":"Optional target branch. Defaults to the task merge target or repository default branch."},"draft":{"type":"boolean"},"issue_number":{"type":"integer","minimum":1,"description":"Optional GitHub issue number to persist on the task PR record."},"issue_url":{"type":"string","description":"Optional GitHub issue URL to persist on the task PR record."}},"additionalProperties":false}`
-const githubReplacePullRequestBranchParams = `{"type":"object","properties":{"task_id":{"type":"string"},"title":{"type":"string","description":"Task title to resolve when task_id is omitted."},"expected_head_sha":{"type":"string","pattern":"^[0-9a-fA-F]{40}$","description":"Exact current remote PR branch commit SHA used as the atomic lease guard."},"confirm_history_rewrite":{"type":"boolean","const":true,"description":"Must be true to explicitly confirm replacing shared pull request branch history."}},"required":["expected_head_sha","confirm_history_rewrite"],"additionalProperties":false}`
-const githubForwardPRFeedbackParams = `{"type":"object","properties":{"repo_url":{"type":"string","description":"Optional GitHub repository URL. Defaults to the current project repository."}},"additionalProperties":false}`
-const githubActorAuthorizedParams = `{"type":"object","properties":{"github_login":{"type":"string","description":"GitHub login to check against the configured authorized actor list."}},"required":["github_login"],"additionalProperties":false}`
-const automationLifecycleParams = `{"type":"object","properties":{"automation_id":{"type":"string","description":"Saved Automation ID. Use this when known."},"name":{"type":"string","description":"Exact saved Automation name to resolve within the current project when automation_id is not known."}},"additionalProperties":false}`
+var sendMessageParams = &toolschema.Schema{
+	Type: "object",
+	Properties: map[string]*toolschema.Schema{
+		"action": {
+			Type:        "string",
+			Enum:        []any{"send", "list"},
+			Description: "send delivers a message. list returns a bounded page of configured outbound targets including their target_kind.",
+		},
+		"target": {
+			Type:        "string",
+			Description: "Delivery target. Format: platform, platform:#target-name, platform:target_id, or platform:target_id:thread_id. Saved outbound targets and home targets are preferred first. Authorized channel users/senders can be used as direct recipients, including email:person@example.com for an authorized Email sender, telegram:123456789 for an authorized Telegram numeric user ID, and slack:user:U123... or discord:user:1518288288572641398 for direct messages. Arbitrary unsaved explicit targets require the project policy. For Discord channel sends use discord:channel:<channel_id> or discord:channel:<channel_id>:<thread_id>. Prefer saved/named targets; call action=list to see configured targets.",
+		},
+		"message": {
+			Type:        "string",
+			Description: "Text to send.",
+		},
+		"subject": {
+			Type:        "string",
+			Description: "Optional subject for email targets. Ignored by chat platforms.",
+		},
+		"limit": {
+			Type:        "integer",
+			Minimum:     toolschema.Number("1"),
+			Maximum:     toolschema.Number("100"),
+			Description: "Maximum targets to return for action=list; defaults to 20 and is capped at 100.",
+		},
+		"offset": {
+			Type:        "integer",
+			Minimum:     toolschema.Number("0"),
+			Description: "Number of targets to skip for action=list; use next_offset from the previous response.",
+		},
+	},
+	AdditionalProperties: toolschema.Pointer(false),
+}
+var requestUserInputParams = &toolschema.Schema{
+	Type: "object",
+	Properties: map[string]*toolschema.Schema{
+		"questions": {
+			Type:        "array",
+			Description: "Ask 1 to 3 questions. Put the recommended/default answer first for each question. Do not add a generic per-question move-forward option unless it is a real answer to that specific question; the Chat UI provides a separate Recommended and move forward shortcut for submitting all first-option recommendations. These choices are not answers until the user explicitly selects them.",
+			MinItems:    toolschema.Pointer(1),
+			MaxItems:    toolschema.Pointer(3),
+			Items: &toolschema.Schema{
+				Type: "object",
+				Properties: map[string]*toolschema.Schema{
+					"id": {
+						Type:        "string",
+						Description: "Stable question id used in the answer result.",
+					},
+					"question": {
+						Type:        "string",
+						Description: "Plain-text question to show to the user.",
+					},
+					"options": {
+						Type:        "array",
+						Description: "Clickable choices. The first option must be the recommended/default answer. Do not treat any option as selected until the user clicks it or explicitly chooses the global Recommended and move forward shortcut.",
+						MinItems:    toolschema.Pointer(2),
+						MaxItems:    toolschema.Pointer(3),
+						Items: &toolschema.Schema{
+							Type: "object",
+							Properties: map[string]*toolschema.Schema{
+								"label": {
+									Type:        "string",
+									Description: "Clickable option label returned exactly when selected.",
+								},
+								"description": {
+									Type:        "string",
+									Description: "Short plain-text explanation shown under the label.",
+								},
+							},
+							Required:             []string{"label", "description"},
+							AdditionalProperties: toolschema.Pointer(false),
+						},
+					},
+				},
+				Required:             []string{"id", "question", "options"},
+				AdditionalProperties: toolschema.Pointer(false),
+			},
+		},
+	},
+	Required:             []string{"questions"},
+	AdditionalProperties: toolschema.Pointer(false),
+}
+
+var githubCreateIssueParams = &toolschema.Schema{
+	Type: "object",
+	Properties: map[string]*toolschema.Schema{
+		"title": {
+			Type: "string"},
+		"body": {
+			Type: "string"},
+		"labels": {
+			Type: "array",
+			Items: &toolschema.Schema{
+				Type: "string"},
+			Description: "Plain GitHub labels such as suggestion, bug, approved, in-progress. Do not use an openvibely: prefix.",
+		},
+		"assignees": {
+			Type: "array",
+			Items: &toolschema.Schema{
+				Type: "string"},
+		},
+		"repo_url": {
+			Type:        "string",
+			Description: "Optional GitHub repository URL. Defaults to the current project repository.",
+		},
+	},
+	Required:             []string{"title"},
+	AdditionalProperties: toolschema.Pointer(false),
+}
+var githubIssueNumberParams = &toolschema.Schema{
+	Type: "object",
+	Properties: map[string]*toolschema.Schema{
+		"issue_number": {
+			Type:    "integer",
+			Minimum: toolschema.Number("1"),
+		},
+		"repo_url": {
+			Type:        "string",
+			Description: "Optional GitHub repository URL. Defaults to the current project repository.",
+		},
+	},
+	Required:             []string{"issue_number"},
+	AdditionalProperties: toolschema.Pointer(false),
+}
+
+var githubListAssignedIssuesParams = &toolschema.Schema{
+	Type: "object",
+	Properties: map[string]*toolschema.Schema{
+		"assignee": {
+			Type:        "string",
+			Description: "GitHub login whose assigned open issues should be listed.",
+		},
+		"repo_url": {
+			Type:        "string",
+			Description: "Optional GitHub repository URL. Defaults to the current project repository.",
+		},
+		"limit": {
+			Type:        "integer",
+			Minimum:     toolschema.Number("1"),
+			Maximum:     toolschema.Number("100"),
+			Description: "Maximum number of assigned issues to return for this page; defaults to 100.",
+		},
+		"offset": {
+			Type:        "integer",
+			Minimum:     toolschema.Number("0"),
+			Description: "Number of assigned issues to skip for pagination; use next_offset from the previous response.",
+		},
+	},
+	Required:             []string{"assignee"},
+	AdditionalProperties: toolschema.Pointer(false),
+}
+var githubListMyAssignedIssuesParams = &toolschema.Schema{
+	Type: "object",
+	Properties: map[string]*toolschema.Schema{
+		"repo_url": {
+			Type:        "string",
+			Description: "Optional GitHub repository URL. Defaults to the current project repository.",
+		},
+		"limit": {
+			Type:        "integer",
+			Minimum:     toolschema.Number("1"),
+			Maximum:     toolschema.Number("100"),
+			Description: "Maximum number of assigned issues to return for this page; defaults to 100.",
+		},
+		"offset": {
+			Type:        "integer",
+			Minimum:     toolschema.Number("0"),
+			Description: "Number of assigned issues to skip for pagination; use next_offset from the previous response.",
+		},
+	},
+	AdditionalProperties: toolschema.Pointer(false),
+}
+var githubListExistingAutomationIssuesParams = &toolschema.Schema{
+	Type: "object",
+	Properties: map[string]*toolschema.Schema{
+		"repo_url": {
+			Type:        "string",
+			Description: "Optional GitHub repository URL. Defaults to the current project repository.",
+		},
+		"limit": {
+			Type:        "integer",
+			Minimum:     toolschema.Number("1"),
+			Maximum:     toolschema.Number("100"),
+			Description: "Maximum number of newest issues to return for this page; defaults to 50.",
+		},
+		"offset": {
+			Type:        "integer",
+			Minimum:     toolschema.Number("0"),
+			Description: "Number of newest matching issues to skip for pagination; use next_offset from the previous response.",
+		},
+	},
+	AdditionalProperties: toolschema.Pointer(false),
+}
+var githubCommentIssueParams = &toolschema.Schema{
+	Type: "object",
+	Properties: map[string]*toolschema.Schema{
+		"issue_number": {
+			Type:    "integer",
+			Minimum: toolschema.Number("1"),
+		},
+		"body": {
+			Type: "string"},
+		"repo_url": {
+			Type:        "string",
+			Description: "Optional GitHub repository URL. Defaults to the current project repository.",
+		},
+	},
+	Required:             []string{"issue_number", "body"},
+	AdditionalProperties: toolschema.Pointer(false),
+}
+var githubAddLabelsParams = &toolschema.Schema{
+	Type: "object",
+	Properties: map[string]*toolschema.Schema{
+		"issue_number": {
+			Type:    "integer",
+			Minimum: toolschema.Number("1"),
+		},
+		"labels": {
+			Type: "array",
+			Items: &toolschema.Schema{
+				Type: "string"},
+			Description: "Plain GitHub labels such as approved, in-progress, pr-opened. Do not use an openvibely: prefix.",
+		},
+		"repo_url": {
+			Type:        "string",
+			Description: "Optional GitHub repository URL. Defaults to the current project repository.",
+		},
+	},
+	Required:             []string{"issue_number", "labels"},
+	AdditionalProperties: toolschema.Pointer(false),
+}
+var githubOpenPullRequestParams = &toolschema.Schema{
+	Type: "object",
+	Properties: map[string]*toolschema.Schema{
+		"task_id": {
+			Type: "string"},
+		"title": {
+			Type:        "string",
+			Description: "Task title to resolve when task_id is omitted.",
+		},
+		"pr_title": {
+			Type:        "string",
+			Description: "Optional pull request title. Defaults to the task title.",
+		},
+		"pr_body": {
+			Type:        "string",
+			Description: "Optional pull request body. For GitHub SDLC work, provide a concise factual Markdown summary of the changes and validation plus a closing reference to the source issue. Defaults to a concise summary and closes the supplied issue.",
+		},
+		"base": {
+			Type:        "string",
+			Description: "Optional target branch. Defaults to the task merge target or repository default branch.",
+		},
+		"draft": {
+			Type: "boolean"},
+		"issue_number": {
+			Type:        "integer",
+			Minimum:     toolschema.Number("1"),
+			Description: "Optional GitHub issue number to persist on the task PR record.",
+		},
+		"issue_url": {
+			Type:        "string",
+			Description: "Optional GitHub issue URL to persist on the task PR record.",
+		},
+	},
+	AdditionalProperties: toolschema.Pointer(false),
+}
+var githubReplacePullRequestBranchParams = &toolschema.Schema{
+	Type: "object",
+	Properties: map[string]*toolschema.Schema{
+		"task_id": {
+			Type: "string"},
+		"title": {
+			Type:        "string",
+			Description: "Task title to resolve when task_id is omitted.",
+		},
+		"expected_head_sha": {
+			Type:        "string",
+			Pattern:     "^[0-9a-fA-F]{40}$",
+			Description: "Exact current remote PR branch commit SHA used as the atomic lease guard.",
+		},
+		"confirm_history_rewrite": {
+			Type:        "boolean",
+			Const:       toolschema.Literal(true),
+			Description: "Must be true to explicitly confirm replacing shared pull request branch history.",
+		},
+	},
+	Required:             []string{"expected_head_sha", "confirm_history_rewrite"},
+	AdditionalProperties: toolschema.Pointer(false),
+}
+var githubForwardPRFeedbackParams = &toolschema.Schema{
+	Type: "object",
+	Properties: map[string]*toolschema.Schema{
+		"repo_url": {
+			Type:        "string",
+			Description: "Optional GitHub repository URL. Defaults to the current project repository.",
+		},
+	},
+	AdditionalProperties: toolschema.Pointer(false),
+}
+var githubActorAuthorizedParams = &toolschema.Schema{
+	Type: "object",
+	Properties: map[string]*toolschema.Schema{
+		"github_login": {
+			Type:        "string",
+			Description: "GitHub login to check against the configured authorized actor list.",
+		},
+	},
+	Required:             []string{"github_login"},
+	AdditionalProperties: toolschema.Pointer(false),
+}
+var automationLifecycleParams = &toolschema.Schema{
+	Type: "object",
+	Properties: map[string]*toolschema.Schema{
+		"automation_id": {
+			Type:        "string",
+			Description: "Saved Automation ID. Use this when known.",
+		},
+		"name": {
+			Type:        "string",
+			Description: "Exact saved Automation name to resolve within the current project when automation_id is not known.",
+		},
+	},
+	AdditionalProperties: toolschema.Pointer(false),
+}
 
 // registry is the canonical list of all chat-controllable actions.
 // Order matters for prompt/documentation consistency.
@@ -184,7 +992,7 @@ var registry = []ActionDef{
 		AllowedModes:       []models.ChatMode{models.ChatModeOrchestrate},
 		Surfaces:           []Surface{SurfaceWeb},
 		IncludeThreadTools: false,
-		Parameters:         json.RawMessage(requestUserInputParams),
+		Schema:             requestUserInputParams,
 	},
 	// --- Tasks domain (RW in orchestrate) ---
 	{
@@ -196,7 +1004,7 @@ var registry = []ActionDef{
 		AllowedModes:       []models.ChatMode{models.ChatModeOrchestrate},
 		Surfaces:           allSurfaces(),
 		IncludeThreadTools: false,
-		Parameters:         json.RawMessage(createTaskParams),
+		Schema:             createTaskParams,
 	},
 	{
 		Name:               "create_swarm_task",
@@ -207,7 +1015,7 @@ var registry = []ActionDef{
 		AllowedModes:       []models.ChatMode{models.ChatModeOrchestrate},
 		Surfaces:           allSurfaces(),
 		IncludeThreadTools: false,
-		Parameters:         json.RawMessage(createSwarmTaskParams),
+		Schema:             createSwarmTaskParams,
 	},
 	{
 		Name:               "edit_task",
@@ -218,7 +1026,7 @@ var registry = []ActionDef{
 		AllowedModes:       []models.ChatMode{models.ChatModeOrchestrate},
 		Surfaces:           allSurfaces(),
 		IncludeThreadTools: false,
-		Parameters:         json.RawMessage(editTaskParams),
+		Schema:             editTaskParams,
 	},
 	{
 		Name:               "execute_tasks",
@@ -229,7 +1037,28 @@ var registry = []ActionDef{
 		AllowedModes:       []models.ChatMode{models.ChatModeOrchestrate},
 		Surfaces:           allSurfaces(),
 		IncludeThreadTools: false,
-		Parameters:         json.RawMessage(`{"type":"object","properties":{"task_id":{"type":"string"},"title":{"type":"string"},"tags":{"type":"array","items":{"type":"string"}},"min_priority":{"type":"integer","minimum":1,"maximum":4},"include_completed":{"type":"boolean"}},"additionalProperties":false}`),
+		Schema: &toolschema.Schema{
+			Type: "object",
+			Properties: map[string]*toolschema.Schema{
+				"task_id": {
+					Type: "string"},
+				"title": {
+					Type: "string"},
+				"tags": {
+					Type: "array",
+					Items: &toolschema.Schema{
+						Type: "string"},
+				},
+				"min_priority": {
+					Type:    "integer",
+					Minimum: toolschema.Number("1"),
+					Maximum: toolschema.Number("4"),
+				},
+				"include_completed": {
+					Type: "boolean"},
+			},
+			AdditionalProperties: toolschema.Pointer(false),
+		},
 	},
 	{
 		Name:               "cancel_task",
@@ -241,7 +1070,7 @@ var registry = []ActionDef{
 		AllowedModes:       []models.ChatMode{models.ChatModeOrchestrate},
 		Surfaces:           allSurfaces(),
 		IncludeThreadTools: true,
-		Parameters:         json.RawMessage(cancelTaskParams),
+		Schema:             cancelTaskParams,
 	},
 	{
 		Name:               "list_tasks",
@@ -252,7 +1081,42 @@ var registry = []ActionDef{
 		AllowedModes:       bothModes(),
 		Surfaces:           allSurfaces(),
 		IncludeThreadTools: false,
-		Parameters:         json.RawMessage(`{"type":"object","properties":{"query":{"type":"string","description":"Optional partial (case-insensitive substring) title match."},"category":{"type":"string","enum":["active","backlog","scheduled","completed"],"description":"Optional category filter. Internal chat rows are always excluded."},"status":{"type":"string","enum":["pending","queued","running","completed","failed","cancelled","blocked"],"description":"Optional task status filter."},"merge_status":{"type":"string","enum":["unmerged","pending","merged","conflict","failed"],"description":"Optional filter on the task branch's recorded merge status. 'unmerged' matches every task with a branch that is not merged."},"limit":{"type":"integer","minimum":1,"maximum":50,"description":"Max results to return (default 20, capped at 50)."},"offset":{"type":"integer","minimum":0,"description":"Number of results to skip for pagination."}},"additionalProperties":false}`),
+		Schema: &toolschema.Schema{
+			Type: "object",
+			Properties: map[string]*toolschema.Schema{
+				"query": {
+					Type:        "string",
+					Description: "Optional partial (case-insensitive substring) title match.",
+				},
+				"category": {
+					Type:        "string",
+					Enum:        []any{"active", "backlog", "scheduled", "completed"},
+					Description: "Optional category filter. Internal chat rows are always excluded.",
+				},
+				"status": {
+					Type:        "string",
+					Enum:        []any{"pending", "queued", "running", "completed", "failed", "cancelled", "blocked"},
+					Description: "Optional task status filter.",
+				},
+				"merge_status": {
+					Type:        "string",
+					Enum:        []any{"unmerged", "pending", "merged", "conflict", "failed"},
+					Description: "Optional filter on the task branch's recorded merge status. 'unmerged' matches every task with a branch that is not merged.",
+				},
+				"limit": {
+					Type:        "integer",
+					Minimum:     toolschema.Number("1"),
+					Maximum:     toolschema.Number("50"),
+					Description: "Max results to return (default 20, capped at 50).",
+				},
+				"offset": {
+					Type:        "integer",
+					Minimum:     toolschema.Number("0"),
+					Description: "Number of results to skip for pagination.",
+				},
+			},
+			AdditionalProperties: toolschema.Pointer(false),
+		},
 	},
 	{
 		Name:               "view_swarm",
@@ -263,7 +1127,7 @@ var registry = []ActionDef{
 		AllowedModes:       bothModes(),
 		Surfaces:           allSurfaces(),
 		IncludeThreadTools: false,
-		Parameters:         json.RawMessage(viewSwarmParams),
+		Schema:             viewSwarmParams,
 	},
 	{
 		Name:               "view_task_thread",
@@ -274,7 +1138,24 @@ var registry = []ActionDef{
 		AllowedModes:       bothModes(),
 		Surfaces:           allSurfaces(),
 		IncludeThreadTools: true,
-		Parameters:         json.RawMessage(`{"type":"object","properties":{"task_id":{"type":"string"},"title":{"type":"string"},"offset":{"type":"integer","description":"Execution index to start from (0-based). Use the offset value from the pagination note to fetch the next page."},"limit":{"type":"integer","description":"Max number of executions to return. 0 or omitted returns all that fit within the size budget."}},"additionalProperties":false}`),
+		Schema: &toolschema.Schema{
+			Type: "object",
+			Properties: map[string]*toolschema.Schema{
+				"task_id": {
+					Type: "string"},
+				"title": {
+					Type: "string"},
+				"offset": {
+					Type:        "integer",
+					Description: "Execution index to start from (0-based). Use the offset value from the pagination note to fetch the next page.",
+				},
+				"limit": {
+					Type:        "integer",
+					Description: "Max number of executions to return. 0 or omitted returns all that fit within the size budget.",
+				},
+			},
+			AdditionalProperties: toolschema.Pointer(false),
+		},
 	},
 	{
 		Name:               "send_to_task",
@@ -285,7 +1166,23 @@ var registry = []ActionDef{
 		AllowedModes:       []models.ChatMode{models.ChatModeOrchestrate},
 		Surfaces:           allSurfaces(),
 		IncludeThreadTools: true,
-		Parameters:         json.RawMessage(`{"type":"object","properties":{"task_id":{"type":"string"},"title":{"type":"string"},"message":{"type":"string"},"origin":{"type":"string"},"origin_agent":{"type":"string"}},"required":["message"],"additionalProperties":false}`),
+		Schema: &toolschema.Schema{
+			Type: "object",
+			Properties: map[string]*toolschema.Schema{
+				"task_id": {
+					Type: "string"},
+				"title": {
+					Type: "string"},
+				"message": {
+					Type: "string"},
+				"origin": {
+					Type: "string"},
+				"origin_agent": {
+					Type: "string"},
+			},
+			Required:             []string{"message"},
+			AdditionalProperties: toolschema.Pointer(false),
+		},
 	},
 	{
 		Name:               "merge_task",
@@ -297,7 +1194,25 @@ var registry = []ActionDef{
 		AllowedModes:       []models.ChatMode{models.ChatModeOrchestrate},
 		Surfaces:           webAPISurfaces(),
 		IncludeThreadTools: false,
-		Parameters:         json.RawMessage(`{"type":"object","properties":{"task_id":{"type":"string","description":"Task ID to merge, or 'current' in a persisted task-thread follow-up."},"title":{"type":"string","description":"Exact current-project task title when task_id is not known."},"action":{"type":"string","enum":["merge","squash","fast_forward","rebase"],"description":"Merge mode, or rebase to update the task branch onto its target without merging. Defaults to merge."}},"additionalProperties":false}`),
+		Schema: &toolschema.Schema{
+			Type: "object",
+			Properties: map[string]*toolschema.Schema{
+				"task_id": {
+					Type:        "string",
+					Description: "Task ID to merge, or 'current' in a persisted task-thread follow-up.",
+				},
+				"title": {
+					Type:        "string",
+					Description: "Exact current-project task title when task_id is not known.",
+				},
+				"action": {
+					Type:        "string",
+					Enum:        []any{"merge", "squash", "fast_forward", "rebase"},
+					Description: "Merge mode, or rebase to update the task branch onto its target without merging. Defaults to merge.",
+				},
+			},
+			AdditionalProperties: toolschema.Pointer(false),
+		},
 	},
 	{
 		Name:               "set_task_goal",
@@ -308,7 +1223,23 @@ var registry = []ActionDef{
 		AllowedModes:       []models.ChatMode{models.ChatModeOrchestrate},
 		Surfaces:           allSurfaces(),
 		IncludeThreadTools: true,
-		Parameters:         json.RawMessage(`{"type":"object","properties":{"task_id":{"type":"string","description":"Task id, or 'current' in a task thread."},"goal":{"type":"string"}},"required":["task_id","goal"],"additionalProperties":false}`),
+		Schema: &toolschema.Schema{
+			Type: "object",
+			Properties: map[string]*toolschema.Schema{
+				"task_id": {
+					Type:        "string",
+					Description: "Task ID or 'current'. Omit with title, or to use the current task in a task-thread follow-up.",
+				},
+				"title": {
+					Type:        "string",
+					Description: "Task title when task_id is not known.",
+				},
+				"goal": {
+					Type: "string"},
+			},
+			Required:             []string{"goal"},
+			AdditionalProperties: toolschema.Pointer(false),
+		},
 	},
 	{
 		Name:               "clear_task_goal",
@@ -319,7 +1250,19 @@ var registry = []ActionDef{
 		AllowedModes:       []models.ChatMode{models.ChatModeOrchestrate},
 		Surfaces:           allSurfaces(),
 		IncludeThreadTools: true,
-		Parameters:         json.RawMessage(`{"type":"object","properties":{"task_id":{"type":"string"}},"required":["task_id"],"additionalProperties":false}`),
+		Schema: &toolschema.Schema{
+			Type: "object",
+			Properties: map[string]*toolschema.Schema{
+				"task_id": {
+					Type:        "string",
+					Description: "Task ID or 'current'. Omit with title, or to use the current task in a task-thread follow-up.",
+				},
+				"title": {
+					Type:        "string",
+					Description: "Task title when task_id is not known.",
+				}},
+			AdditionalProperties: toolschema.Pointer(false),
+		},
 	},
 	{
 		Name:               "get_task_goal",
@@ -330,7 +1273,19 @@ var registry = []ActionDef{
 		AllowedModes:       bothModes(),
 		Surfaces:           allSurfaces(),
 		IncludeThreadTools: true,
-		Parameters:         json.RawMessage(`{"type":"object","properties":{"task_id":{"type":"string"}},"required":["task_id"],"additionalProperties":false}`),
+		Schema: &toolschema.Schema{
+			Type: "object",
+			Properties: map[string]*toolschema.Schema{
+				"task_id": {
+					Type:        "string",
+					Description: "Task ID or 'current'. Omit with title, or to use the current task in a task-thread follow-up.",
+				},
+				"title": {
+					Type:        "string",
+					Description: "Task title when task_id is not known.",
+				}},
+			AdditionalProperties: toolschema.Pointer(false),
+		},
 	},
 	{
 		Name:               "pause_task_goal",
@@ -341,7 +1296,19 @@ var registry = []ActionDef{
 		AllowedModes:       []models.ChatMode{models.ChatModeOrchestrate},
 		Surfaces:           allSurfaces(),
 		IncludeThreadTools: true,
-		Parameters:         json.RawMessage(`{"type":"object","properties":{"task_id":{"type":"string"}},"required":["task_id"],"additionalProperties":false}`),
+		Schema: &toolschema.Schema{
+			Type: "object",
+			Properties: map[string]*toolschema.Schema{
+				"task_id": {
+					Type:        "string",
+					Description: "Task ID or 'current'. Omit with title, or to use the current task in a task-thread follow-up.",
+				},
+				"title": {
+					Type:        "string",
+					Description: "Task title when task_id is not known.",
+				}},
+			AdditionalProperties: toolschema.Pointer(false),
+		},
 	},
 	{
 		Name:               "resume_task_goal",
@@ -352,7 +1319,19 @@ var registry = []ActionDef{
 		AllowedModes:       []models.ChatMode{models.ChatModeOrchestrate},
 		Surfaces:           allSurfaces(),
 		IncludeThreadTools: true,
-		Parameters:         json.RawMessage(`{"type":"object","properties":{"task_id":{"type":"string"}},"required":["task_id"],"additionalProperties":false}`),
+		Schema: &toolschema.Schema{
+			Type: "object",
+			Properties: map[string]*toolschema.Schema{
+				"task_id": {
+					Type:        "string",
+					Description: "Task ID or 'current'. Omit with title, or to use the current task in a task-thread follow-up.",
+				},
+				"title": {
+					Type:        "string",
+					Description: "Task title when task_id is not known.",
+				}},
+			AdditionalProperties: toolschema.Pointer(false),
+		},
 	},
 	{
 		Name:               "mark_task_goal_achieved",
@@ -363,7 +1342,25 @@ var registry = []ActionDef{
 		AllowedModes:       []models.ChatMode{models.ChatModeOrchestrate},
 		Surfaces:           allSurfaces(),
 		IncludeThreadTools: true,
-		Parameters:         json.RawMessage(`{"type":"object","properties":{"task_id":{"type":"string"},"goal_id":{"type":"string"},"reason":{"type":"string"}},"required":["task_id","goal_id","reason"],"additionalProperties":false}`),
+		Schema: &toolschema.Schema{
+			Type: "object",
+			Properties: map[string]*toolschema.Schema{
+				"task_id": {
+					Type:        "string",
+					Description: "Task ID or 'current'. Omit with title, or to use the current task in a task-thread follow-up.",
+				},
+				"title": {
+					Type:        "string",
+					Description: "Task title when task_id is not known.",
+				},
+				"goal_id": {
+					Type: "string"},
+				"reason": {
+					Type: "string"},
+			},
+			Required:             []string{"goal_id", "reason"},
+			AdditionalProperties: toolschema.Pointer(false),
+		},
 	},
 	{
 		Name:               "report_task_goal_blocked",
@@ -374,7 +1371,27 @@ var registry = []ActionDef{
 		AllowedModes:       []models.ChatMode{models.ChatModeOrchestrate},
 		Surfaces:           allSurfaces(),
 		IncludeThreadTools: true,
-		Parameters:         json.RawMessage(`{"type":"object","properties":{"task_id":{"type":"string"},"goal_id":{"type":"string"},"blocker_key":{"type":"string"},"reason":{"type":"string"}},"required":["task_id","goal_id","blocker_key","reason"],"additionalProperties":false}`),
+		Schema: &toolschema.Schema{
+			Type: "object",
+			Properties: map[string]*toolschema.Schema{
+				"task_id": {
+					Type:        "string",
+					Description: "Task ID or 'current'. Omit with title, or to use the current task in a task-thread follow-up.",
+				},
+				"title": {
+					Type:        "string",
+					Description: "Task title when task_id is not known.",
+				},
+				"goal_id": {
+					Type: "string"},
+				"blocker_key": {
+					Type: "string"},
+				"reason": {
+					Type: "string"},
+			},
+			Required:             []string{"goal_id", "blocker_key", "reason"},
+			AdditionalProperties: toolschema.Pointer(false),
+		},
 	},
 
 	// --- Messaging domain (RW in orchestrate) ---
@@ -386,7 +1403,7 @@ var registry = []ActionDef{
 		Sensitivity:  SensitivityNormal,
 		AllowedModes: []models.ChatMode{models.ChatModeOrchestrate},
 		Surfaces:     allSurfaces(),
-		Parameters:   json.RawMessage(sendMessageParams),
+		Schema:       sendMessageParams,
 	},
 	// --- GitHub domain ---
 	{
@@ -397,7 +1414,7 @@ var registry = []ActionDef{
 		Sensitivity:  SensitivityNormal,
 		AllowedModes: []models.ChatMode{models.ChatModeOrchestrate},
 		Surfaces:     webAPISurfaces(),
-		Parameters:   json.RawMessage(githubCreateIssueParams),
+		Schema:       githubCreateIssueParams,
 	},
 	{
 		Name:         "github_get_issue",
@@ -407,7 +1424,7 @@ var registry = []ActionDef{
 		Sensitivity:  SensitivityNormal,
 		AllowedModes: bothModes(),
 		Surfaces:     webAPISurfaces(),
-		Parameters:   json.RawMessage(githubIssueNumberParams),
+		Schema:       githubIssueNumberParams,
 	},
 	{
 		Name:         "github_get_project_inbox",
@@ -417,7 +1434,11 @@ var registry = []ActionDef{
 		Sensitivity:  SensitivityNormal,
 		AllowedModes: bothModes(),
 		Surfaces:     webAPISurfaces(),
-		Parameters:   json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`),
+		Schema: &toolschema.Schema{
+			Type:                 "object",
+			Properties:           map[string]*toolschema.Schema{},
+			AdditionalProperties: toolschema.Pointer(false),
+		},
 	},
 	{
 		Name:         "github_is_actor_authorized",
@@ -427,7 +1448,7 @@ var registry = []ActionDef{
 		Sensitivity:  SensitivityNormal,
 		AllowedModes: bothModes(),
 		Surfaces:     webAPISurfaces(),
-		Parameters:   json.RawMessage(githubActorAuthorizedParams),
+		Schema:       githubActorAuthorizedParams,
 	},
 	{
 		Name:         "github_list_my_assigned_issues",
@@ -437,7 +1458,7 @@ var registry = []ActionDef{
 		Sensitivity:  SensitivityNormal,
 		AllowedModes: bothModes(),
 		Surfaces:     webAPISurfaces(),
-		Parameters:   json.RawMessage(githubListMyAssignedIssuesParams),
+		Schema:       githubListMyAssignedIssuesParams,
 	},
 	{
 		Name:         "github_list_existing_automation_issues",
@@ -447,7 +1468,7 @@ var registry = []ActionDef{
 		Sensitivity:  SensitivityNormal,
 		AllowedModes: bothModes(),
 		Surfaces:     webAPISurfaces(),
-		Parameters:   json.RawMessage(githubListExistingAutomationIssuesParams),
+		Schema:       githubListExistingAutomationIssuesParams,
 	},
 	{
 		Name:         "github_list_assigned_issues",
@@ -457,7 +1478,7 @@ var registry = []ActionDef{
 		Sensitivity:  SensitivityNormal,
 		AllowedModes: bothModes(),
 		Surfaces:     webAPISurfaces(),
-		Parameters:   json.RawMessage(githubListAssignedIssuesParams),
+		Schema:       githubListAssignedIssuesParams,
 	},
 	{Name: "github_list_assigned_issues_with_prs",
 		Description:  "List open GitHub issues assigned to a login only when each issue already has an associated pull request, defaulting to the current project repository. Pass repo_url for a specific GitHub repository URL. Assigned issues without an associated PR are skipped by automation.",
@@ -466,7 +1487,7 @@ var registry = []ActionDef{
 		Sensitivity:  SensitivityNormal,
 		AllowedModes: bothModes(),
 		Surfaces:     webAPISurfaces(),
-		Parameters:   json.RawMessage(githubListAssignedIssuesParams),
+		Schema:       githubListAssignedIssuesParams,
 	},
 	{
 		Name:         "github_comment_on_issue",
@@ -476,7 +1497,7 @@ var registry = []ActionDef{
 		Sensitivity:  SensitivityNormal,
 		AllowedModes: []models.ChatMode{models.ChatModeOrchestrate},
 		Surfaces:     webAPISurfaces(),
-		Parameters:   json.RawMessage(githubCommentIssueParams),
+		Schema:       githubCommentIssueParams,
 	},
 	{
 		Name:         "github_add_issue_labels",
@@ -486,7 +1507,7 @@ var registry = []ActionDef{
 		Sensitivity:  SensitivityNormal,
 		AllowedModes: []models.ChatMode{models.ChatModeOrchestrate},
 		Surfaces:     webAPISurfaces(),
-		Parameters:   json.RawMessage(githubAddLabelsParams),
+		Schema:       githubAddLabelsParams,
 	},
 	{
 		Name:         "github_close_issue",
@@ -496,7 +1517,7 @@ var registry = []ActionDef{
 		Sensitivity:  SensitivityNormal,
 		AllowedModes: []models.ChatMode{models.ChatModeOrchestrate},
 		Surfaces:     webAPISurfaces(),
-		Parameters:   json.RawMessage(githubIssueNumberParams),
+		Schema:       githubIssueNumberParams,
 	},
 	{
 		Name: "github_open_pull_request", Description: "Open or reuse a GitHub pull request for an existing OpenVibely task worktree branch by publishing the branch through the configured GitHub channel token/API, then persist the task PR record.",
@@ -505,7 +1526,7 @@ var registry = []ActionDef{
 		Sensitivity:  SensitivityNormal,
 		AllowedModes: []models.ChatMode{models.ChatModeOrchestrate},
 		Surfaces:     webAPISurfaces(),
-		Parameters:   json.RawMessage(githubOpenPullRequestParams),
+		Schema:       githubOpenPullRequestParams,
 	},
 	{
 		Name:              "github_replace_pull_request_branch",
@@ -516,7 +1537,7 @@ var registry = []ActionDef{
 		NeedsConfirmation: true,
 		AllowedModes:      []models.ChatMode{models.ChatModeOrchestrate},
 		Surfaces:          webAPISurfaces(),
-		Parameters:        json.RawMessage(githubReplacePullRequestBranchParams),
+		Schema:            githubReplacePullRequestBranchParams,
 	},
 	{
 		Name:         "github_forward_pr_feedback_to_tasks",
@@ -526,7 +1547,7 @@ var registry = []ActionDef{
 		Sensitivity:  SensitivityNormal,
 		AllowedModes: []models.ChatMode{models.ChatModeOrchestrate},
 		Surfaces:     webAPISurfaces(),
-		Parameters:   json.RawMessage(githubForwardPRFeedbackParams),
+		Schema:       githubForwardPRFeedbackParams,
 	}, // --- Schedules domain (RW in orchestrate) ---
 	{
 		Name:         "list_schedules",
@@ -536,7 +1557,35 @@ var registry = []ActionDef{
 		Sensitivity:  SensitivityNormal,
 		AllowedModes: bothModes(),
 		Surfaces:     allSurfaces(),
-		Parameters:   json.RawMessage(`{"type":"object","properties":{"task_id":{"type":"string","description":"Optional: restrict to schedules bound to this task ID."},"title":{"type":"string","description":"Optional partial (case-insensitive substring) task title match."},"enabled":{"type":"boolean","description":"Optional: filter by enabled (true) or disabled (false) schedules."},"limit":{"type":"integer","minimum":1,"maximum":50,"description":"Max results to return (default 20, capped at 50)."},"offset":{"type":"integer","minimum":0,"description":"Number of results to skip for pagination."}},"additionalProperties":false}`),
+		Schema: &toolschema.Schema{
+			Type: "object",
+			Properties: map[string]*toolschema.Schema{
+				"task_id": {
+					Type:        "string",
+					Description: "Optional: restrict to schedules bound to this task ID.",
+				},
+				"title": {
+					Type:        "string",
+					Description: "Optional partial (case-insensitive substring) task title match.",
+				},
+				"enabled": {
+					Type:        "boolean",
+					Description: "Optional: filter by enabled (true) or disabled (false) schedules.",
+				},
+				"limit": {
+					Type:        "integer",
+					Minimum:     toolschema.Number("1"),
+					Maximum:     toolschema.Number("50"),
+					Description: "Max results to return (default 20, capped at 50).",
+				},
+				"offset": {
+					Type:        "integer",
+					Minimum:     toolschema.Number("0"),
+					Description: "Number of results to skip for pagination.",
+				},
+			},
+			AdditionalProperties: toolschema.Pointer(false),
+		},
 	},
 	{
 		Name:         "view_pulse",
@@ -546,7 +1595,11 @@ var registry = []ActionDef{
 		Sensitivity:  SensitivityNormal,
 		AllowedModes: bothModes(),
 		Surfaces:     chatSurfacesExceptEmail(),
-		Parameters:   json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`),
+		Schema: &toolschema.Schema{
+			Type:                 "object",
+			Properties:           map[string]*toolschema.Schema{},
+			AdditionalProperties: toolschema.Pointer(false),
+		},
 	},
 	{
 		Name:         "schedule_task",
@@ -556,7 +1609,43 @@ var registry = []ActionDef{
 		Sensitivity:  SensitivityNormal,
 		AllowedModes: []models.ChatMode{models.ChatModeOrchestrate},
 		Surfaces:     allSurfaces(),
-		Parameters:   json.RawMessage(`{"type":"object","properties":{"task_id":{"type":"string"},"title":{"type":"string"},"time":{"type":"string","pattern":"^(?:[01][0-9]|2[0-3]):[0-5][0-9]$","description":"Time in exact 24-hour HH:MM format (00:00-23:59)."},"repeat":{"type":"string","enum":["once","daily","weekly","monthly","hours","hourly","minutes","seconds"]},"interval":{"type":"integer","minimum":1},"days":{"type":"array","maxItems":1,"description":"For weekly schedules, provide at most one weekday. Accepted spellings are sun, mon, tue, wed, thu, fri, and sat.","items":{"type":"string","enum":["sun","mon","tue","wed","thu","fri","sat"]}},"clear_context_on_start":{"type":"boolean","description":"Clear prior model conversation context when each scheduled run starts; defaults to true."}},"required":["time"],"additionalProperties":false}`),
+		Schema: &toolschema.Schema{
+			Type: "object",
+			Properties: map[string]*toolschema.Schema{
+				"task_id": {
+					Type: "string"},
+				"title": {
+					Type: "string"},
+				"time": {
+					Type:        "string",
+					Pattern:     "^(?:[01][0-9]|2[0-3]):[0-5][0-9]$",
+					Description: "Time in exact 24-hour HH:MM format (00:00-23:59).",
+				},
+				"repeat": {
+					Type: "string",
+					Enum: []any{"once", "daily", "weekly", "monthly", "hours", "hourly", "minutes", "seconds"},
+				},
+				"interval": {
+					Type:    "integer",
+					Minimum: toolschema.Number("1"),
+				},
+				"days": {
+					Type:        "array",
+					MaxItems:    toolschema.Pointer(1),
+					Description: "For weekly schedules, provide at most one weekday. Accepted spellings are sun, mon, tue, wed, thu, fri, and sat.",
+					Items: &toolschema.Schema{
+						Type: "string",
+						Enum: []any{"sun", "mon", "tue", "wed", "thu", "fri", "sat"},
+					},
+				},
+				"clear_context_on_start": {
+					Type:        "boolean",
+					Description: "Clear prior model conversation context when each scheduled run starts; defaults to true.",
+				},
+			},
+			Required:             []string{"time"},
+			AdditionalProperties: toolschema.Pointer(false),
+		},
 	},
 	{
 		Name:              "delete_schedule",
@@ -567,7 +1656,18 @@ var registry = []ActionDef{
 		NeedsConfirmation: true,
 		AllowedModes:      []models.ChatMode{models.ChatModeOrchestrate},
 		Surfaces:          allSurfaces(),
-		Parameters:        json.RawMessage(`{"type":"object","properties":{"schedule_id":{"type":"string"},"task_id":{"type":"string"},"title":{"type":"string"}},"additionalProperties":false}`),
+		Schema: &toolschema.Schema{
+			Type: "object",
+			Properties: map[string]*toolschema.Schema{
+				"schedule_id": {
+					Type: "string"},
+				"task_id": {
+					Type: "string"},
+				"title": {
+					Type: "string"},
+			},
+			AdditionalProperties: toolschema.Pointer(false),
+		},
 	},
 	{
 		Name:         "modify_schedule",
@@ -577,7 +1677,46 @@ var registry = []ActionDef{
 		Sensitivity:  SensitivityNormal,
 		AllowedModes: []models.ChatMode{models.ChatModeOrchestrate},
 		Surfaces:     allSurfaces(),
-		Parameters:   json.RawMessage(`{"type":"object","properties":{"schedule_id":{"type":"string"},"task_id":{"type":"string"},"title":{"type":"string"},"time":{"type":"string","pattern":"^(?:[01][0-9]|2[0-3]):[0-5][0-9]$","description":"Time in exact 24-hour HH:MM format (00:00-23:59)."},"repeat":{"type":"string","enum":["once","daily","weekly","monthly","hours","hourly","minutes","seconds"]},"interval":{"type":"integer","minimum":1},"days":{"type":"array","maxItems":1,"description":"For weekly schedules, provide at most one weekday. Accepted spellings are sun, mon, tue, wed, thu, fri, and sat.","items":{"type":"string","enum":["sun","mon","tue","wed","thu","fri","sat"]}},"enabled":{"type":"boolean"},"clear_context_on_start":{"type":"boolean","description":"Whether each scheduled start clears prior model conversation context."}},"additionalProperties":false}`),
+		Schema: &toolschema.Schema{
+			Type: "object",
+			Properties: map[string]*toolschema.Schema{
+				"schedule_id": {
+					Type: "string"},
+				"task_id": {
+					Type: "string"},
+				"title": {
+					Type: "string"},
+				"time": {
+					Type:        "string",
+					Pattern:     "^(?:[01][0-9]|2[0-3]):[0-5][0-9]$",
+					Description: "Time in exact 24-hour HH:MM format (00:00-23:59).",
+				},
+				"repeat": {
+					Type: "string",
+					Enum: []any{"once", "daily", "weekly", "monthly", "hours", "hourly", "minutes", "seconds"},
+				},
+				"interval": {
+					Type:    "integer",
+					Minimum: toolschema.Number("1"),
+				},
+				"days": {
+					Type:        "array",
+					MaxItems:    toolschema.Pointer(1),
+					Description: "For weekly schedules, provide at most one weekday. Accepted spellings are sun, mon, tue, wed, thu, fri, and sat.",
+					Items: &toolschema.Schema{
+						Type: "string",
+						Enum: []any{"sun", "mon", "tue", "wed", "thu", "fri", "sat"},
+					},
+				},
+				"enabled": {
+					Type: "boolean"},
+				"clear_context_on_start": {
+					Type:        "boolean",
+					Description: "Whether each scheduled start clears prior model conversation context.",
+				},
+			},
+			AdditionalProperties: toolschema.Pointer(false),
+		},
 	},
 
 	// --- Alerts and actionable notifications domain ---
@@ -589,7 +1728,48 @@ var registry = []ActionDef{
 		Sensitivity:  SensitivityNormal,
 		AllowedModes: bothModes(),
 		Surfaces:     allSurfaces(),
-		Parameters:   json.RawMessage(`{"type":"object","properties":{"project_id":{"type":"string","description":"Optional same-project assertion. Omit it to use the persisted caller task's project context; never discover or reuse a project ID."},"decision_state":{"type":"string","enum":["not_required","pending","approved","rejected","dismissed"]},"processing_state":{"type":"string","enum":["not_applicable","unclaimed","claimed","implementation_task_linked","completed","failed"],"description":"Optional processing-state filter. Omit it to include all processing states."},"type":{"type":"string","description":"Optional notification-type filter. Omit it to include all types."},"source":{"type":"string","description":"Optional notification-source filter. Omit it to include all sources."},"read":{"type":"boolean","description":"Optional read-state filter. Omit it to include both read and unread alerts."},"implementation_task_linked":{"type":"boolean"},"limit":{"type":"integer","minimum":1,"maximum":100},"offset":{"type":"integer","minimum":0}},"additionalProperties":false}`),
+		Schema: &toolschema.Schema{
+			Type: "object",
+			Properties: map[string]*toolschema.Schema{
+				"project_id": {
+					Type:        "string",
+					Description: "Optional same-project assertion. Omit it to use the persisted caller task's project context; never discover or reuse a project ID.",
+				},
+				"decision_state": {
+					Type: "string",
+					Enum: []any{"not_required", "pending", "approved", "rejected", "dismissed"},
+				},
+				"processing_state": {
+					Type:        "string",
+					Enum:        []any{"not_applicable", "unclaimed", "claimed", "implementation_task_linked", "completed", "failed"},
+					Description: "Optional processing-state filter. Omit it to include all processing states.",
+				},
+				"type": {
+					Type:        "string",
+					Description: "Optional notification-type filter. Omit it to include all types.",
+				},
+				"source": {
+					Type:        "string",
+					Description: "Optional notification-source filter. Omit it to include all sources.",
+				},
+				"read": {
+					Type:        "boolean",
+					Description: "Optional read-state filter. Omit it to include both read and unread alerts.",
+				},
+				"implementation_task_linked": {
+					Type: "boolean"},
+				"limit": {
+					Type:    "integer",
+					Minimum: toolschema.Number("1"),
+					Maximum: toolschema.Number("100"),
+				},
+				"offset": {
+					Type:    "integer",
+					Minimum: toolschema.Number("0"),
+				},
+			},
+			AdditionalProperties: toolschema.Pointer(false),
+		},
 	},
 	{
 		Name:         "get_alert",
@@ -599,7 +1779,17 @@ var registry = []ActionDef{
 		Sensitivity:  SensitivityNormal,
 		AllowedModes: bothModes(),
 		Surfaces:     allSurfaces(),
-		Parameters:   json.RawMessage(`{"type":"object","properties":{"project_id":{"type":"string"},"alert_id":{"type":"string"}},"required":["alert_id"],"additionalProperties":false}`),
+		Schema: &toolschema.Schema{
+			Type: "object",
+			Properties: map[string]*toolschema.Schema{
+				"project_id": {
+					Type: "string"},
+				"alert_id": {
+					Type: "string"},
+			},
+			Required:             []string{"alert_id"},
+			AdditionalProperties: toolschema.Pointer(false),
+		},
 	},
 	{
 		Name:         "list_existing_automation_notifications",
@@ -609,7 +1799,22 @@ var registry = []ActionDef{
 		Sensitivity:  SensitivityNormal,
 		AllowedModes: bothModes(),
 		Surfaces:     allSurfaces(),
-		Parameters:   json.RawMessage(`{"type":"object","properties":{"limit":{"type":"integer","minimum":1,"maximum":100,"description":"Max notifications to return; defaults to 50."},"offset":{"type":"integer","minimum":0}},"additionalProperties":false}`),
+		Schema: &toolschema.Schema{
+			Type: "object",
+			Properties: map[string]*toolschema.Schema{
+				"limit": {
+					Type:        "integer",
+					Minimum:     toolschema.Number("1"),
+					Maximum:     toolschema.Number("100"),
+					Description: "Max notifications to return; defaults to 50.",
+				},
+				"offset": {
+					Type:    "integer",
+					Minimum: toolschema.Number("0"),
+				},
+			},
+			AdditionalProperties: toolschema.Pointer(false),
+		},
 	},
 	{
 		Name:         "create_alert",
@@ -619,7 +1824,27 @@ var registry = []ActionDef{
 		Sensitivity:  SensitivityNormal,
 		AllowedModes: []models.ChatMode{models.ChatModeOrchestrate},
 		Surfaces:     allSurfaces(),
-		Parameters:   json.RawMessage(`{"type":"object","properties":{"title":{"type":"string"},"message":{"type":"string"},"severity":{"type":"string","enum":["info","warning","error"]},"type":{"type":"string","enum":["custom","task_failed","task_needs_followup"]},"task_id":{"type":"string"}},"required":["title"],"additionalProperties":false}`),
+		Schema: &toolschema.Schema{
+			Type: "object",
+			Properties: map[string]*toolschema.Schema{
+				"title": {
+					Type: "string"},
+				"message": {
+					Type: "string"},
+				"severity": {
+					Type: "string",
+					Enum: []any{"info", "warning", "error"},
+				},
+				"type": {
+					Type: "string",
+					Enum: []any{"custom", "task_failed", "task_needs_followup"},
+				},
+				"task_id": {
+					Type: "string"},
+			},
+			Required:             []string{"title"},
+			AdditionalProperties: toolschema.Pointer(false),
+		},
 	},
 	{
 		Name:         "create_notification",
@@ -629,7 +1854,41 @@ var registry = []ActionDef{
 		Sensitivity:  SensitivityNormal,
 		AllowedModes: []models.ChatMode{models.ChatModeOrchestrate},
 		Surfaces:     allSurfaces(),
-		Parameters:   json.RawMessage(`{"type":"object","properties":{"project_id":{"type":"string"},"type":{"type":"string","maxLength":100},"title":{"type":"string","maxLength":200},"message":{"type":"string","maxLength":2000},"body":{"type":"string","maxLength":20000},"severity":{"type":"string","enum":["info","warning","error"]},"source":{"type":"string","maxLength":100},"metadata":{"type":"object"}},"required":["type","title"],"additionalProperties":false}`),
+		Schema: &toolschema.Schema{
+			Type: "object",
+			Properties: map[string]*toolschema.Schema{
+				"project_id": {
+					Type: "string"},
+				"type": {
+					Type:      "string",
+					MaxLength: toolschema.Pointer(100),
+				},
+				"title": {
+					Type:      "string",
+					MaxLength: toolschema.Pointer(200),
+				},
+				"message": {
+					Type:      "string",
+					MaxLength: toolschema.Pointer(2000),
+				},
+				"body": {
+					Type:      "string",
+					MaxLength: toolschema.Pointer(20000),
+				},
+				"severity": {
+					Type: "string",
+					Enum: []any{"info", "warning", "error"},
+				},
+				"source": {
+					Type:      "string",
+					MaxLength: toolschema.Pointer(100),
+				},
+				"metadata": {
+					Type: "object"},
+			},
+			Required:             []string{"type", "title"},
+			AdditionalProperties: toolschema.Pointer(false),
+		},
 	},
 	{
 		Name:         "decide_alert",
@@ -639,7 +1898,23 @@ var registry = []ActionDef{
 		Sensitivity:  SensitivityNormal,
 		AllowedModes: []models.ChatMode{models.ChatModeOrchestrate},
 		Surfaces:     allSurfaces(),
-		Parameters:   json.RawMessage(`{"type":"object","properties":{"project_id":{"type":"string","description":"Optional same-project assertion. The action always uses the caller's current project."},"alert_id":{"type":"string"},"decision":{"type":"string","enum":["approved","rejected","dismissed"]}},"required":["alert_id","decision"],"additionalProperties":false}`),
+		Schema: &toolschema.Schema{
+			Type: "object",
+			Properties: map[string]*toolschema.Schema{
+				"project_id": {
+					Type:        "string",
+					Description: "Optional same-project assertion. The action always uses the caller's current project.",
+				},
+				"alert_id": {
+					Type: "string"},
+				"decision": {
+					Type: "string",
+					Enum: []any{"approved", "rejected", "dismissed"},
+				},
+			},
+			Required:             []string{"alert_id", "decision"},
+			AdditionalProperties: toolschema.Pointer(false),
+		},
 	},
 	{
 		Name:         "claim_alert",
@@ -649,7 +1924,22 @@ var registry = []ActionDef{
 		Sensitivity:  SensitivityNormal,
 		AllowedModes: []models.ChatMode{models.ChatModeOrchestrate},
 		Surfaces:     allSurfaces(),
-		Parameters:   json.RawMessage(`{"type":"object","properties":{"project_id":{"type":"string"},"alert_id":{"type":"string"},"lease_seconds":{"type":"integer","minimum":1,"maximum":86400}},"required":["alert_id"],"additionalProperties":false}`),
+		Schema: &toolschema.Schema{
+			Type: "object",
+			Properties: map[string]*toolschema.Schema{
+				"project_id": {
+					Type: "string"},
+				"alert_id": {
+					Type: "string"},
+				"lease_seconds": {
+					Type:    "integer",
+					Minimum: toolschema.Number("1"),
+					Maximum: toolschema.Number("86400"),
+				},
+			},
+			Required:             []string{"alert_id"},
+			AdditionalProperties: toolschema.Pointer(false),
+		},
 	},
 	{
 		Name:         "create_alert_implementation_task",
@@ -659,7 +1949,34 @@ var registry = []ActionDef{
 		Sensitivity:  SensitivityNormal,
 		AllowedModes: []models.ChatMode{models.ChatModeOrchestrate},
 		Surfaces:     allSurfaces(),
-		Parameters:   json.RawMessage(`{"type":"object","properties":{"project_id":{"type":"string"},"alert_id":{"type":"string"},"title":{"type":"string"},"prompt":{"type":"string"},"goal":{"type":"string","maxLength":2000},"priority":{"type":"integer","minimum":1,"maximum":4},"tag":{"type":"string","enum":["","feature","bug"]}},"required":["alert_id","title","prompt"],"additionalProperties":false}`),
+		Schema: &toolschema.Schema{
+			Type: "object",
+			Properties: map[string]*toolschema.Schema{
+				"project_id": {
+					Type: "string"},
+				"alert_id": {
+					Type: "string"},
+				"title": {
+					Type: "string"},
+				"prompt": {
+					Type: "string"},
+				"goal": {
+					Type:      "string",
+					MaxLength: toolschema.Pointer(2000),
+				},
+				"priority": {
+					Type:    "integer",
+					Minimum: toolschema.Number("1"),
+					Maximum: toolschema.Number("4"),
+				},
+				"tag": {
+					Type: "string",
+					Enum: []any{"", "feature", "bug"},
+				},
+			},
+			Required:             []string{"alert_id", "title", "prompt"},
+			AdditionalProperties: toolschema.Pointer(false),
+		},
 	},
 	{
 		Name:         "link_alert_implementation_task",
@@ -669,7 +1986,19 @@ var registry = []ActionDef{
 		Sensitivity:  SensitivityNormal,
 		AllowedModes: []models.ChatMode{models.ChatModeOrchestrate},
 		Surfaces:     allSurfaces(),
-		Parameters:   json.RawMessage(`{"type":"object","properties":{"project_id":{"type":"string"},"alert_id":{"type":"string"},"task_id":{"type":"string"}},"required":["alert_id","task_id"],"additionalProperties":false}`),
+		Schema: &toolschema.Schema{
+			Type: "object",
+			Properties: map[string]*toolschema.Schema{
+				"project_id": {
+					Type: "string"},
+				"alert_id": {
+					Type: "string"},
+				"task_id": {
+					Type: "string"},
+			},
+			Required:             []string{"alert_id", "task_id"},
+			AdditionalProperties: toolschema.Pointer(false),
+		},
 	},
 	{
 		Name:         "complete_alert_processing",
@@ -679,7 +2008,21 @@ var registry = []ActionDef{
 		Sensitivity:  SensitivityNormal,
 		AllowedModes: []models.ChatMode{models.ChatModeOrchestrate},
 		Surfaces:     allSurfaces(),
-		Parameters:   json.RawMessage(`{"type":"object","properties":{"project_id":{"type":"string"},"alert_id":{"type":"string"},"message":{"type":"string","maxLength":2000}},"required":["alert_id"],"additionalProperties":false}`),
+		Schema: &toolschema.Schema{
+			Type: "object",
+			Properties: map[string]*toolschema.Schema{
+				"project_id": {
+					Type: "string"},
+				"alert_id": {
+					Type: "string"},
+				"message": {
+					Type:      "string",
+					MaxLength: toolschema.Pointer(2000),
+				},
+			},
+			Required:             []string{"alert_id"},
+			AdditionalProperties: toolschema.Pointer(false),
+		},
 	},
 	{
 		Name:         "fail_alert_processing",
@@ -689,7 +2032,21 @@ var registry = []ActionDef{
 		Sensitivity:  SensitivityNormal,
 		AllowedModes: []models.ChatMode{models.ChatModeOrchestrate},
 		Surfaces:     allSurfaces(),
-		Parameters:   json.RawMessage(`{"type":"object","properties":{"project_id":{"type":"string"},"alert_id":{"type":"string"},"message":{"type":"string","maxLength":2000}},"required":["alert_id"],"additionalProperties":false}`),
+		Schema: &toolschema.Schema{
+			Type: "object",
+			Properties: map[string]*toolschema.Schema{
+				"project_id": {
+					Type: "string"},
+				"alert_id": {
+					Type: "string"},
+				"message": {
+					Type:      "string",
+					MaxLength: toolschema.Pointer(2000),
+				},
+			},
+			Required:             []string{"alert_id"},
+			AdditionalProperties: toolschema.Pointer(false),
+		},
 	},
 	{
 		Name:         "release_alert_claim",
@@ -699,7 +2056,17 @@ var registry = []ActionDef{
 		Sensitivity:  SensitivityNormal,
 		AllowedModes: []models.ChatMode{models.ChatModeOrchestrate},
 		Surfaces:     allSurfaces(),
-		Parameters:   json.RawMessage(`{"type":"object","properties":{"project_id":{"type":"string"},"alert_id":{"type":"string"}},"required":["alert_id"],"additionalProperties":false}`),
+		Schema: &toolschema.Schema{
+			Type: "object",
+			Properties: map[string]*toolschema.Schema{
+				"project_id": {
+					Type: "string"},
+				"alert_id": {
+					Type: "string"},
+			},
+			Required:             []string{"alert_id"},
+			AdditionalProperties: toolschema.Pointer(false),
+		},
 	},
 	{
 		Name:              "delete_alert",
@@ -710,7 +2077,14 @@ var registry = []ActionDef{
 		NeedsConfirmation: true,
 		AllowedModes:      []models.ChatMode{models.ChatModeOrchestrate},
 		Surfaces:          allSurfaces(),
-		Parameters:        json.RawMessage(`{"type":"object","properties":{"alert_id":{"type":"string"}},"required":["alert_id"],"additionalProperties":false}`),
+		Schema: &toolschema.Schema{
+			Type: "object",
+			Properties: map[string]*toolschema.Schema{
+				"alert_id": {
+					Type: "string"}},
+			Required:             []string{"alert_id"},
+			AdditionalProperties: toolschema.Pointer(false),
+		},
 	},
 	{
 		Name:         "toggle_alert",
@@ -720,7 +2094,14 @@ var registry = []ActionDef{
 		Sensitivity:  SensitivityNormal,
 		AllowedModes: []models.ChatMode{models.ChatModeOrchestrate},
 		Surfaces:     allSurfaces(),
-		Parameters:   json.RawMessage(`{"type":"object","properties":{"alert_id":{"type":"string"}},"required":["alert_id"],"additionalProperties":false}`),
+		Schema: &toolschema.Schema{
+			Type: "object",
+			Properties: map[string]*toolschema.Schema{
+				"alert_id": {
+					Type: "string"}},
+			Required:             []string{"alert_id"},
+			AdditionalProperties: toolschema.Pointer(false),
+		},
 	},
 
 	// --- Personality domain ---
@@ -732,7 +2113,23 @@ var registry = []ActionDef{
 		Sensitivity:  SensitivityNormal,
 		AllowedModes: bothModes(),
 		Surfaces:     allSurfaces(),
-		Parameters:   json.RawMessage(`{"type":"object","properties":{"limit":{"type":"integer","minimum":1,"maximum":50,"description":"Maximum personalities to return. Defaults to 20 and caps at 50."},"offset":{"type":"integer","minimum":0,"description":"Number of personalities to skip; use next_offset from the previous response."}},"additionalProperties":false}`),
+		Schema: &toolschema.Schema{
+			Type: "object",
+			Properties: map[string]*toolschema.Schema{
+				"limit": {
+					Type:        "integer",
+					Minimum:     toolschema.Number("1"),
+					Maximum:     toolschema.Number("50"),
+					Description: "Maximum personalities to return. Defaults to 20 and caps at 50.",
+				},
+				"offset": {
+					Type:        "integer",
+					Minimum:     toolschema.Number("0"),
+					Description: "Number of personalities to skip; use next_offset from the previous response.",
+				},
+			},
+			AdditionalProperties: toolschema.Pointer(false),
+		},
 	},
 	{
 		Name:         "get_personality",
@@ -742,7 +2139,11 @@ var registry = []ActionDef{
 		Sensitivity:  SensitivityNormal,
 		AllowedModes: bothModes(),
 		Surfaces:     allSurfaces(),
-		Parameters:   json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`),
+		Schema: &toolschema.Schema{
+			Type:                 "object",
+			Properties:           map[string]*toolschema.Schema{},
+			AdditionalProperties: toolschema.Pointer(false),
+		},
 	},
 	{
 		Name:         "set_personality",
@@ -752,7 +2153,14 @@ var registry = []ActionDef{
 		Sensitivity:  SensitivitySystemWide,
 		AllowedModes: []models.ChatMode{models.ChatModeOrchestrate},
 		Surfaces:     allSurfaces(),
-		Parameters:   json.RawMessage(`{"type":"object","properties":{"personality":{"type":"string"}},"required":["personality"],"additionalProperties":false}`),
+		Schema: &toolschema.Schema{
+			Type: "object",
+			Properties: map[string]*toolschema.Schema{
+				"personality": {
+					Type: "string"}},
+			Required:             []string{"personality"},
+			AdditionalProperties: toolschema.Pointer(false),
+		},
 	},
 	{
 		Name:         "save_custom_personality",
@@ -762,7 +2170,7 @@ var registry = []ActionDef{
 		Sensitivity:  SensitivitySystemWide,
 		AllowedModes: []models.ChatMode{models.ChatModeOrchestrate},
 		Surfaces:     allSurfaces(),
-		Parameters:   json.RawMessage(saveCustomPersonalityParams),
+		Schema:       saveCustomPersonalityParams,
 	},
 
 	// --- Models domain (read-only from chat) ---
@@ -774,7 +2182,11 @@ var registry = []ActionDef{
 		Sensitivity:  SensitivityNormal,
 		AllowedModes: bothModes(),
 		Surfaces:     allSurfaces(),
-		Parameters:   json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`),
+		Schema: &toolschema.Schema{
+			Type:                 "object",
+			Properties:           map[string]*toolschema.Schema{},
+			AdditionalProperties: toolschema.Pointer(false),
+		},
 	},
 	{
 		Name:         "get_model",
@@ -784,7 +2196,16 @@ var registry = []ActionDef{
 		Sensitivity:  SensitivityNormal,
 		AllowedModes: bothModes(),
 		Surfaces:     allSurfaces(),
-		Parameters:   json.RawMessage(`{"type":"object","properties":{"model_id":{"type":"string"},"name":{"type":"string"}},"additionalProperties":false}`),
+		Schema: &toolschema.Schema{
+			Type: "object",
+			Properties: map[string]*toolschema.Schema{
+				"model_id": {
+					Type: "string"},
+				"name": {
+					Type: "string"},
+			},
+			AdditionalProperties: toolschema.Pointer(false),
+		},
 	},
 
 	// --- Analytics domain (read-only from chat) ---
@@ -796,7 +2217,46 @@ var registry = []ActionDef{
 		Sensitivity:  SensitivityNormal,
 		AllowedModes: bothModes(),
 		Surfaces:     allSurfaces(),
-		Parameters:   json.RawMessage(`{"type":"object","properties":{"range":{"type":"string","enum":["7d","30d","90d","365d","month","all"],"description":"Convenience range matching Analytics API; defaults to 30d."},"provider":{"type":"string","description":"Optional provider filter, e.g. openai, anthropic, openai_compatible."},"group_by":{"type":"string","enum":["hour","day","week","month"],"description":"Recent usage bucket grouping; defaults to day."},"date_from":{"type":"string","description":"Optional RFC3339 or YYYY-MM-DD start time."},"date_to":{"type":"string","description":"Optional RFC3339 or YYYY-MM-DD end time."},"top_limit":{"type":"integer","minimum":1,"maximum":10,"description":"Maximum top model/provider rows to return; defaults to 5."},"recent_bucket_limit":{"type":"integer","minimum":0,"maximum":24,"description":"Maximum recent usage buckets to return; defaults to 8. Use 0 to omit buckets."}},"additionalProperties":false}`),
+		Schema: &toolschema.Schema{
+			Type: "object",
+			Properties: map[string]*toolschema.Schema{
+				"range": {
+					Type:        "string",
+					Enum:        []any{"7d", "30d", "90d", "365d", "month", "all"},
+					Description: "Convenience range matching Analytics API; defaults to 30d.",
+				},
+				"provider": {
+					Type:        "string",
+					Description: "Optional provider filter, e.g. openai, anthropic, openai_compatible.",
+				},
+				"group_by": {
+					Type:        "string",
+					Enum:        []any{"hour", "day", "week", "month"},
+					Description: "Recent usage bucket grouping; defaults to day.",
+				},
+				"date_from": {
+					Type:        "string",
+					Description: "Optional RFC3339 or YYYY-MM-DD start time.",
+				},
+				"date_to": {
+					Type:        "string",
+					Description: "Optional RFC3339 or YYYY-MM-DD end time.",
+				},
+				"top_limit": {
+					Type:        "integer",
+					Minimum:     toolschema.Number("1"),
+					Maximum:     toolschema.Number("10"),
+					Description: "Maximum top model/provider rows to return; defaults to 5.",
+				},
+				"recent_bucket_limit": {
+					Type:        "integer",
+					Minimum:     toolschema.Number("0"),
+					Maximum:     toolschema.Number("24"),
+					Description: "Maximum recent usage buckets to return; defaults to 8. Use 0 to omit buckets.",
+				},
+			},
+			AdditionalProperties: toolschema.Pointer(false),
+		},
 	},
 
 	// --- Agents domain (read-only from chat) ---
@@ -808,7 +2268,11 @@ var registry = []ActionDef{
 		Sensitivity:  SensitivityNormal,
 		AllowedModes: bothModes(),
 		Surfaces:     allSurfaces(),
-		Parameters:   json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`),
+		Schema: &toolschema.Schema{
+			Type:                 "object",
+			Properties:           map[string]*toolschema.Schema{},
+			AdditionalProperties: toolschema.Pointer(false),
+		},
 	},
 	{
 		Name:         "create_agent",
@@ -818,7 +2282,7 @@ var registry = []ActionDef{
 		Sensitivity:  SensitivityNormal,
 		AllowedModes: []models.ChatMode{models.ChatModeOrchestrate},
 		Surfaces:     allSurfaces(),
-		Parameters:   json.RawMessage(createAgentParams),
+		Schema:       createAgentParams,
 	},
 	{
 		Name:         "update_agent",
@@ -828,7 +2292,7 @@ var registry = []ActionDef{
 		Sensitivity:  SensitivityNormal,
 		AllowedModes: []models.ChatMode{models.ChatModeOrchestrate},
 		Surfaces:     allSurfaces(),
-		Parameters:   json.RawMessage(updateAgentParams),
+		Schema:       updateAgentParams,
 	},
 	// --- Projects domain ---
 	{
@@ -839,7 +2303,11 @@ var registry = []ActionDef{
 		Sensitivity:  SensitivityNormal,
 		AllowedModes: bothModes(),
 		Surfaces:     allSurfaces(),
-		Parameters:   json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`),
+		Schema: &toolschema.Schema{
+			Type:                 "object",
+			Properties:           map[string]*toolschema.Schema{},
+			AdditionalProperties: toolschema.Pointer(false),
+		},
 	},
 	{
 		Name:         "project_info",
@@ -849,7 +2317,11 @@ var registry = []ActionDef{
 		Sensitivity:  SensitivityNormal,
 		AllowedModes: bothModes(),
 		Surfaces:     allSurfaces(),
-		Parameters:   json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`),
+		Schema: &toolschema.Schema{
+			Type:                 "object",
+			Properties:           map[string]*toolschema.Schema{},
+			AdditionalProperties: toolschema.Pointer(false),
+		},
 	},
 	{
 		Name:         "get_current_project",
@@ -859,7 +2331,11 @@ var registry = []ActionDef{
 		Sensitivity:  SensitivityNormal,
 		AllowedModes: bothModes(),
 		Surfaces:     allSurfaces(),
-		Parameters:   json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`),
+		Schema: &toolschema.Schema{
+			Type:                 "object",
+			Properties:           map[string]*toolschema.Schema{},
+			AdditionalProperties: toolschema.Pointer(false),
+		},
 	},
 	{
 		Name:         "create_project",
@@ -869,7 +2345,7 @@ var registry = []ActionDef{
 		Sensitivity:  SensitivityNormal,
 		AllowedModes: []models.ChatMode{models.ChatModeOrchestrate},
 		Surfaces:     allSurfaces(),
-		Parameters:   json.RawMessage(createProjectParams),
+		Schema:       createProjectParams,
 	},
 	{
 		Name:         "update_project_settings",
@@ -879,7 +2355,7 @@ var registry = []ActionDef{
 		Sensitivity:  SensitivityNormal,
 		AllowedModes: []models.ChatMode{models.ChatModeOrchestrate},
 		Surfaces:     allSurfaces(),
-		Parameters:   json.RawMessage(updateProjectSettingsParams),
+		Schema:       updateProjectSettingsParams,
 	},
 	{
 		Name: "switch_project", Description: "Switch active project by id or name.",
@@ -888,7 +2364,14 @@ var registry = []ActionDef{
 		Sensitivity:  SensitivityNormal,
 		AllowedModes: []models.ChatMode{models.ChatModeOrchestrate},
 		Surfaces:     allSurfaces(),
-		Parameters:   json.RawMessage(`{"type":"object","properties":{"project":{"type":"string"}},"required":["project"],"additionalProperties":false}`),
+		Schema: &toolschema.Schema{
+			Type: "object",
+			Properties: map[string]*toolschema.Schema{
+				"project": {
+					Type: "string"}},
+			Required:             []string{"project"},
+			AdditionalProperties: toolschema.Pointer(false),
+		},
 	},
 
 	// --- Settings domain (read-only from chat) ---
@@ -900,7 +2383,11 @@ var registry = []ActionDef{
 		Sensitivity:  SensitivityNormal,
 		AllowedModes: bothModes(),
 		Surfaces:     allSurfaces(),
-		Parameters:   json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`),
+		Schema: &toolschema.Schema{
+			Type:                 "object",
+			Properties:           map[string]*toolschema.Schema{},
+			AdditionalProperties: toolschema.Pointer(false),
+		},
 	},
 	{
 		Name:         "list_channels",
@@ -910,7 +2397,11 @@ var registry = []ActionDef{
 		Sensitivity:  SensitivityNormal,
 		AllowedModes: bothModes(),
 		Surfaces:     allSurfaces(),
-		Parameters:   json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`),
+		Schema: &toolschema.Schema{
+			Type:                 "object",
+			Properties:           map[string]*toolschema.Schema{},
+			AdditionalProperties: toolschema.Pointer(false),
+		},
 	},
 	{
 		Name:         "view_system_update",
@@ -920,7 +2411,11 @@ var registry = []ActionDef{
 		Sensitivity:  SensitivityNormal,
 		AllowedModes: bothModes(),
 		Surfaces:     webAPISurfaces(),
-		Parameters:   json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`),
+		Schema: &toolschema.Schema{
+			Type:                 "object",
+			Properties:           map[string]*toolschema.Schema{},
+			AdditionalProperties: toolschema.Pointer(false),
+		},
 	},
 
 	// --- Memory domain (read-only, scoped by selected-memory runtime tools) ---
@@ -932,7 +2427,17 @@ var registry = []ActionDef{
 		Sensitivity:  SensitivityNormal,
 		AllowedModes: bothModes(),
 		Surfaces:     allSurfaces(),
-		Parameters:   json.RawMessage(`{"type":"object","properties":{"handle":{"type":"string","description":"Selected memory handle/file, e.g. provider_architecture.md"}},"required":["handle"],"additionalProperties":false}`),
+		Schema: &toolschema.Schema{
+			Type: "object",
+			Properties: map[string]*toolschema.Schema{
+				"handle": {
+					Type:        "string",
+					Description: "Selected memory handle/file, e.g. provider_architecture.md",
+				},
+			},
+			Required:             []string{"handle"},
+			AdditionalProperties: toolschema.Pointer(false),
+		},
 	},
 
 	// --- Automations domain (project-scoped definition control) ---
@@ -944,7 +2449,27 @@ var registry = []ActionDef{
 		Sensitivity:  SensitivityNormal,
 		AllowedModes: bothModes(),
 		Surfaces:     allSurfaces(),
-		Parameters:   json.RawMessage(`{"type":"object","properties":{"project_id":{"type":"string","description":"Optional project ID equality assertion."},"limit":{"type":"integer","minimum":1,"maximum":50,"description":"Maximum summaries to return. Defaults to 20 and caps at 50."},"offset":{"type":"integer","minimum":0,"description":"Number of summaries to skip before returning the page."}},"additionalProperties":false}`),
+		Schema: &toolschema.Schema{
+			Type: "object",
+			Properties: map[string]*toolschema.Schema{
+				"project_id": {
+					Type:        "string",
+					Description: "Optional project ID equality assertion.",
+				},
+				"limit": {
+					Type:        "integer",
+					Minimum:     toolschema.Number("1"),
+					Maximum:     toolschema.Number("50"),
+					Description: "Maximum summaries to return. Defaults to 20 and caps at 50.",
+				},
+				"offset": {
+					Type:        "integer",
+					Minimum:     toolschema.Number("0"),
+					Description: "Number of summaries to skip before returning the page.",
+				},
+			},
+			AdditionalProperties: toolschema.Pointer(false),
+		},
 	},
 	{
 		Name:         "get_automation",
@@ -954,7 +2479,21 @@ var registry = []ActionDef{
 		Sensitivity:  SensitivityNormal,
 		AllowedModes: bothModes(),
 		Surfaces:     allSurfaces(),
-		Parameters:   json.RawMessage(`{"type":"object","properties":{"automation_id":{"type":"string","description":"ID of the Automation to retrieve."},"project_id":{"type":"string","description":"Optional project ID equality assertion."}},"required":["automation_id"],"additionalProperties":false}`),
+		Schema: &toolschema.Schema{
+			Type: "object",
+			Properties: map[string]*toolschema.Schema{
+				"automation_id": {
+					Type:        "string",
+					Description: "ID of the Automation to retrieve.",
+				},
+				"project_id": {
+					Type:        "string",
+					Description: "Optional project ID equality assertion.",
+				},
+			},
+			Required:             []string{"automation_id"},
+			AdditionalProperties: toolschema.Pointer(false),
+		},
 	},
 	{
 		Name:         "preview_automation_description",
@@ -964,7 +2503,18 @@ var registry = []ActionDef{
 		Sensitivity:  SensitivityNormal,
 		AllowedModes: bothModes(),
 		Surfaces:     allSurfaces(),
-		Parameters:   json.RawMessage(`{"type":"object","properties":{"description":{"type":"string","minLength":1,"maxLength":4000}},"required":["description"],"additionalProperties":false}`),
+		Schema: &toolschema.Schema{
+			Type: "object",
+			Properties: map[string]*toolschema.Schema{
+				"description": {
+					Type:      "string",
+					MinLength: toolschema.Pointer(1),
+					MaxLength: toolschema.Pointer(4000),
+				},
+			},
+			Required:             []string{"description"},
+			AdditionalProperties: toolschema.Pointer(false),
+		},
 	},
 	{
 		Name:         "save_automation",
@@ -974,7 +2524,31 @@ var registry = []ActionDef{
 		Sensitivity:  SensitivityNormal,
 		AllowedModes: []models.ChatMode{models.ChatModeOrchestrate},
 		Surfaces:     allSurfaces(),
-		Parameters:   json.RawMessage(`{"type":"object","properties":{"source":{"type":"string","enum":["template","describe","blank","yaml"]},"template_key":{"type":"string","enum":["native_sdlc","github_sdlc"]},"description":{"type":"string","maxLength":4000},"automation_yaml":{"type":"string","description":"Canonical Automation YAML document to save when source is yaml.","minLength":1,"maxLength":65536}},"required":["source"],"additionalProperties":false}`),
+		Schema: &toolschema.Schema{
+			Type: "object",
+			Properties: map[string]*toolschema.Schema{
+				"source": {
+					Type: "string",
+					Enum: []any{"template", "describe", "blank", "yaml"},
+				},
+				"template_key": {
+					Type: "string",
+					Enum: []any{"native_sdlc", "github_sdlc"},
+				},
+				"description": {
+					Type:      "string",
+					MaxLength: toolschema.Pointer(4000),
+				},
+				"automation_yaml": {
+					Type:        "string",
+					Description: "Canonical Automation YAML document to save when source is yaml.",
+					MinLength:   toolschema.Pointer(1),
+					MaxLength:   toolschema.Pointer(65536),
+				},
+			},
+			Required:             []string{"source"},
+			AdditionalProperties: toolschema.Pointer(false),
+		},
 	},
 	{
 		Name:         "update_automation_template",
@@ -984,7 +2558,7 @@ var registry = []ActionDef{
 		Sensitivity:  SensitivityNormal,
 		AllowedModes: []models.ChatMode{models.ChatModeOrchestrate},
 		Surfaces:     allSurfaces(),
-		Parameters:   json.RawMessage(automationLifecycleParams),
+		Schema:       automationLifecycleParams,
 	},
 	{
 		Name:         "run_automation_now",
@@ -994,7 +2568,7 @@ var registry = []ActionDef{
 		Sensitivity:  SensitivityNormal,
 		AllowedModes: []models.ChatMode{models.ChatModeOrchestrate},
 		Surfaces:     allSurfaces(),
-		Parameters:   json.RawMessage(automationLifecycleParams),
+		Schema:       automationLifecycleParams,
 	},
 	{
 		Name:         "pause_automation",
@@ -1004,7 +2578,7 @@ var registry = []ActionDef{
 		Sensitivity:  SensitivityNormal,
 		AllowedModes: []models.ChatMode{models.ChatModeOrchestrate},
 		Surfaces:     allSurfaces(),
-		Parameters:   json.RawMessage(automationLifecycleParams),
+		Schema:       automationLifecycleParams,
 	},
 	{
 		Name:         "resume_automation",
@@ -1014,7 +2588,7 @@ var registry = []ActionDef{
 		Sensitivity:  SensitivityNormal,
 		AllowedModes: []models.ChatMode{models.ChatModeOrchestrate},
 		Surfaces:     allSurfaces(),
-		Parameters:   json.RawMessage(automationLifecycleParams),
+		Schema:       automationLifecycleParams,
 	},
 	{
 		Name:              "delete_automation",
@@ -1025,7 +2599,7 @@ var registry = []ActionDef{
 		NeedsConfirmation: true,
 		AllowedModes:      []models.ChatMode{models.ChatModeOrchestrate},
 		Surfaces:          allSurfaces(),
-		Parameters:        json.RawMessage(automationLifecycleParams),
+		Schema:            automationLifecycleParams,
 	},
 	// --- Chat domain ---
 	{
@@ -1036,7 +2610,11 @@ var registry = []ActionDef{
 		Sensitivity:  SensitivityNormal,
 		AllowedModes: bothModes(),
 		Surfaces:     allSurfaces(),
-		Parameters:   json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`),
+		Schema: &toolschema.Schema{
+			Type:                 "object",
+			Properties:           map[string]*toolschema.Schema{},
+			AdditionalProperties: toolschema.Pointer(false),
+		},
 	},
 	{
 		Name:         "set_chat_mode",
@@ -1046,7 +2624,17 @@ var registry = []ActionDef{
 		Sensitivity:  SensitivityNormal,
 		AllowedModes: []models.ChatMode{models.ChatModeOrchestrate},
 		Surfaces:     allSurfaces(),
-		Parameters:   json.RawMessage(`{"type":"object","properties":{"mode":{"type":"string","enum":["orchestrate","plan"]}},"required":["mode"],"additionalProperties":false}`),
+		Schema: &toolschema.Schema{
+			Type: "object",
+			Properties: map[string]*toolschema.Schema{
+				"mode": {
+					Type: "string",
+					Enum: []any{"orchestrate", "plan"},
+				},
+			},
+			Required:             []string{"mode"},
+			AdditionalProperties: toolschema.Pointer(false),
+		},
 	},
 	{
 		Name:         "list_capabilities",
@@ -1056,7 +2644,11 @@ var registry = []ActionDef{
 		Sensitivity:  SensitivityNormal,
 		AllowedModes: bothModes(),
 		Surfaces:     allSurfaces(),
-		Parameters:   json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`),
+		Schema: &toolschema.Schema{
+			Type:                 "object",
+			Properties:           map[string]*toolschema.Schema{},
+			AdditionalProperties: toolschema.Pointer(false),
+		},
 	},
 }
 
@@ -1144,7 +2736,8 @@ func toolDefsForContext(mode models.ChatMode, surface Surface, includeThreadTool
 			defs = append(defs, llmcontracts.RuntimeToolDefinition{
 				Name:        a.Name,
 				Description: a.Description,
-				Parameters:  a.Parameters,
+				Schema:      a.Schema,
+				Strict:      a.Strict,
 				Access:      runtimeToolAccessForAction(a.Access),
 			})
 		}
@@ -1271,3 +2864,6 @@ func runtimeToolAccessForAction(access AccessLevel) llmcontracts.RuntimeToolAcce
 	}
 	return llmcontracts.RuntimeToolAccessWrite
 }
+
+// ParameterSchema returns the handler contract as ordinary JSON Schema.
+func (a ActionDef) ParameterSchema() json.RawMessage { return toolschema.JSON(a.Schema, nil) }

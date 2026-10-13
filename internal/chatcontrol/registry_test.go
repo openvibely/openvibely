@@ -16,7 +16,7 @@ import (
 func TestRegistry_AllActionsHaveValidJSON(t *testing.T) {
 	for _, a := range Registry() {
 		var m map[string]interface{}
-		if err := json.Unmarshal(a.Parameters, &m); err != nil {
+		if err := json.Unmarshal(a.ParameterSchema(), &m); err != nil {
 			t.Errorf("action %q has invalid Parameters JSON: %v", a.Name, err)
 		}
 	}
@@ -54,7 +54,7 @@ func TestRegistry_SendMessageTargetDescriptionMentionsAuthorizedRecipients(t *te
 			Description string `json:"description"`
 		} `json:"properties"`
 	}
-	if err := json.Unmarshal(def.Parameters, &schema); err != nil {
+	if err := json.Unmarshal(def.ParameterSchema(), &schema); err != nil {
 		t.Fatalf("decode send_message schema: %v", err)
 	}
 	desc := schema.Properties["target"].Description
@@ -154,17 +154,17 @@ func TestRegistry_AutomationActionsEnforceModeAndSurfacePolicies(t *testing.T) {
 			} `json:"source"`
 		} `json:"properties"`
 	}
-	if err := json.Unmarshal(save.Parameters, &schema); err != nil {
+	if err := json.Unmarshal(save.ParameterSchema(), &schema); err != nil {
 		t.Fatalf("decode Automation save schema: %v", err)
 	}
 	want := []string{"template", "describe", "blank", "yaml"}
 	if !reflect.DeepEqual(want, schema.Properties.Source.Enum) {
 		t.Fatalf("Automation save source enum = %v, want %v", schema.Properties.Source.Enum, want)
 	}
-	if !strings.Contains(string(save.Parameters), `"automation_yaml"`) || !strings.Contains(strings.ToLower(save.Description), "yaml") {
+	if !strings.Contains(string(save.ParameterSchema()), `"automation_yaml"`) || !strings.Contains(strings.ToLower(save.Description), "yaml") {
 		t.Fatal("public Automation save action must advertise the canonical YAML input path")
 	}
-	if strings.Contains(string(save.Parameters), `"candidate"`) || strings.Contains(save.Description, "structured candidate") {
+	if strings.Contains(string(save.ParameterSchema()), `"candidate"`) || strings.Contains(save.Description, "structured candidate") {
 		t.Fatal("public Automation save action must not expose a candidate creation identity")
 	}
 	for _, name := range []string{"update_automation_template", "run_automation_now", "pause_automation", "resume_automation"} {
@@ -172,7 +172,7 @@ func TestRegistry_AutomationActionsEnforceModeAndSurfacePolicies(t *testing.T) {
 		if def == nil {
 			t.Fatalf("%s is not registered", name)
 		}
-		if !strings.Contains(string(def.Parameters), `"automation_id"`) || !strings.Contains(string(def.Parameters), `"name"`) {
+		if !strings.Contains(string(def.ParameterSchema()), `"automation_id"`) || !strings.Contains(string(def.ParameterSchema()), `"name"`) {
 			t.Fatalf("%s must accept automation_id and name selectors", name)
 		}
 		if strings.Contains(strings.ToLower(def.Name), "delete") || strings.Contains(strings.ToLower(def.Description), "delete") {
@@ -186,7 +186,7 @@ func TestRegistry_AutomationActionsEnforceModeAndSurfacePolicies(t *testing.T) {
 	if deleteAutomation.Access != AccessWrite || deleteAutomation.Sensitivity != SensitivityDestructive || !deleteAutomation.NeedsConfirmation {
 		t.Fatalf("delete_automation policy = access=%q sensitivity=%q confirmation=%v, want write/destructive/true", deleteAutomation.Access, deleteAutomation.Sensitivity, deleteAutomation.NeedsConfirmation)
 	}
-	if !strings.Contains(string(deleteAutomation.Parameters), `"automation_id"`) || !strings.Contains(string(deleteAutomation.Parameters), `"name"`) {
+	if !strings.Contains(string(deleteAutomation.ParameterSchema()), `"automation_id"`) || !strings.Contains(string(deleteAutomation.ParameterSchema()), `"name"`) {
 		t.Fatal("delete_automation must accept automation_id and name selectors")
 	}
 	if !strings.Contains(strings.ToLower(deleteAutomation.Description), "explicit confirmation") {
@@ -289,7 +289,7 @@ func TestSaveCustomPersonalityRegisteredOrchestrateOnly(t *testing.T) {
 		Required   []string                   `json:"required"`
 		Properties map[string]json.RawMessage `json:"properties"`
 	}
-	if err := json.Unmarshal(def.Parameters, &schema); err != nil {
+	if err := json.Unmarshal(def.ParameterSchema(), &schema); err != nil {
 		t.Fatalf("decode schema: %v", err)
 	}
 	for _, name := range []string{"mode", "name", "system_prompt", "key", "description", "activate"} {
@@ -331,7 +331,7 @@ func TestDecideAlertRegisteredOrchestrateOnly(t *testing.T) {
 			Enum []string `json:"enum"`
 		} `json:"properties"`
 	}
-	if err := json.Unmarshal(def.Parameters, &schema); err != nil {
+	if err := json.Unmarshal(def.ParameterSchema(), &schema); err != nil {
 		t.Fatalf("decode schema: %v", err)
 	}
 	required := map[string]bool{}
@@ -365,7 +365,7 @@ func TestCreateProjectRegisteredOrchestrateOnly(t *testing.T) {
 	var schema struct {
 		Properties map[string]json.RawMessage `json:"properties"`
 	}
-	if err := json.Unmarshal(def.Parameters, &schema); err != nil {
+	if err := json.Unmarshal(def.ParameterSchema(), &schema); err != nil {
 		t.Fatalf("decode schema: %v", err)
 	}
 	if _, ok := schema.Properties["repo_path"]; ok {
@@ -407,7 +407,7 @@ func TestUpdateProjectSettingsRegisteredOrchestrateOnly(t *testing.T) {
 	var schema struct {
 		Properties map[string]json.RawMessage `json:"properties"`
 	}
-	if err := json.Unmarshal(def.Parameters, &schema); err != nil {
+	if err := json.Unmarshal(def.ParameterSchema(), &schema); err != nil {
 		t.Fatalf("decode schema: %v", err)
 	}
 	for _, name := range []string{"project_id", "project_name", "default_model", "default_model_id", "clear_default_model", "max_workers", "clear_max_workers"} {
@@ -643,7 +643,7 @@ func TestScheduleMutationSchemasDocumentAcceptedInputGrammar(t *testing.T) {
 				} `json:"items"`
 			} `json:"properties"`
 		}
-		if err := json.Unmarshal(def.Parameters, &schema); err != nil {
+		if err := json.Unmarshal(def.ParameterSchema(), &schema); err != nil {
 			t.Fatalf("decode %s schema: %v", name, err)
 		}
 		if got := schema.Properties["time"].Pattern; got != `^(?:[01][0-9]|2[0-3]):[0-5][0-9]$` {
@@ -859,7 +859,7 @@ func TestRegistry_AlertFlowActions(t *testing.T) {
 			Description string          `json:"description"`
 		} `json:"properties"`
 	}
-	if err := json.Unmarshal(Get("list_alerts").Parameters, &schema); err != nil {
+	if err := json.Unmarshal(Get("list_alerts").ParameterSchema(), &schema); err != nil {
 		t.Fatalf("decode list_alerts schema: %v", err)
 	}
 	if len(schema.Required) != 0 {
@@ -1006,7 +1006,7 @@ func TestRegistry_CreateTaskChainSchemaHasProperties(t *testing.T) {
 	}
 
 	var schema map[string]interface{}
-	if err := json.Unmarshal(def.Parameters, &schema); err != nil {
+	if err := json.Unmarshal(def.ParameterSchema(), &schema); err != nil {
 		t.Fatalf("invalid Parameters JSON: %v", err)
 	}
 
@@ -1053,7 +1053,7 @@ func TestRegistry_EditTaskChainSchemaHasProperties(t *testing.T) {
 	}
 
 	var schema map[string]interface{}
-	if err := json.Unmarshal(def.Parameters, &schema); err != nil {
+	if err := json.Unmarshal(def.ParameterSchema(), &schema); err != nil {
 		t.Fatalf("invalid Parameters JSON: %v", err)
 	}
 
@@ -1088,7 +1088,7 @@ func TestRegistry_EditTaskSchemaDistinguishesAgentDefinitionFromModelConfig(t *t
 	}
 
 	var schema map[string]interface{}
-	if err := json.Unmarshal(def.Parameters, &schema); err != nil {
+	if err := json.Unmarshal(def.ParameterSchema(), &schema); err != nil {
 		t.Fatalf("invalid Parameters JSON: %v", err)
 	}
 	props, ok := schema["properties"].(map[string]interface{})
@@ -1133,7 +1133,7 @@ func TestRegistry_CreateTaskSchemaDistinguishesAgentDefinitionFromModelConfig(t 
 	}
 
 	var schema map[string]interface{}
-	if err := json.Unmarshal(def.Parameters, &schema); err != nil {
+	if err := json.Unmarshal(def.ParameterSchema(), &schema); err != nil {
 		t.Fatalf("invalid Parameters JSON: %v", err)
 	}
 	props, ok := schema["properties"].(map[string]interface{})
@@ -1165,7 +1165,7 @@ func TestRegistry_CreateSwarmTaskSchemaIncludesMetadataOptions(t *testing.T) {
 	}
 
 	var schema map[string]any
-	if err := json.Unmarshal(def.Parameters, &schema); err != nil {
+	if err := json.Unmarshal(def.ParameterSchema(), &schema); err != nil {
 		t.Fatalf("invalid Parameters JSON: %v", err)
 	}
 	props, ok := schema["properties"].(map[string]any)
@@ -1260,7 +1260,7 @@ func TestRegistry_TaskGoalToolsAndCreateTaskGoalSchema(t *testing.T) {
 		t.Fatal("missing create_task")
 	}
 	var schema map[string]any
-	if err := json.Unmarshal(def.Parameters, &schema); err != nil {
+	if err := json.Unmarshal(def.ParameterSchema(), &schema); err != nil {
 		t.Fatalf("schema unmarshal: %v", err)
 	}
 	props := schema["properties"].(map[string]any)
@@ -1280,8 +1280,8 @@ func TestCreateAgentRegistryModesAndSurfaces(t *testing.T) {
 		foundUpdate := false
 		for _, def := range ToolDefsForContext(models.ChatModeOrchestrate, surface, false) {
 			if def.Name == "create_agent" || def.Name == "update_agent" {
-				if strings.Contains(string(def.Parameters), "mcp_servers") || strings.Contains(string(def.Parameters), "api_key") || strings.Contains(string(def.Parameters), "oauth") || strings.Contains(string(def.Parameters), "plugins") || strings.Contains(string(def.Parameters), "skills") || strings.Contains(string(def.Parameters), "lifecycle") {
-					t.Fatalf("%s schema for surface %s exposes unsupported fields: %s", def.Name, surface, string(def.Parameters))
+				if strings.Contains(string(def.ParameterSchema()), "mcp_servers") || strings.Contains(string(def.ParameterSchema()), "api_key") || strings.Contains(string(def.ParameterSchema()), "oauth") || strings.Contains(string(def.ParameterSchema()), "plugins") || strings.Contains(string(def.ParameterSchema()), "skills") || strings.Contains(string(def.ParameterSchema()), "lifecycle") {
+					t.Fatalf("%s schema for surface %s exposes unsupported fields: %s", def.Name, surface, string(def.ParameterSchema()))
 				}
 			}
 			if def.Name == "create_agent" {

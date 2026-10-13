@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
+	"github.com/openvibely/openvibely/pkg/toolschema"
 )
 
 // SelectedMemory identifies one memory entry selected for the current model turn.
@@ -50,13 +51,13 @@ func SelectedMemoryRuntimeTools(repoPath string, memories []SelectedMemory) *llm
 	if strings.TrimSpace(repoPath) == "" || len(authorized) == 0 {
 		return nil
 	}
-	params := json.RawMessage(`{"type":"object","properties":{"handle":{"type":"string","description":"Selected memory handle/file, e.g. provider_architecture.md"}},"required":["handle"],"additionalProperties":false}`)
+
 	return &llmcontracts.RuntimeTools{
 		Definitions: []llmcontracts.RuntimeToolDefinition{
 			{
 				Name:        "memory_view",
 				Description: "Load an authorized managed memory selected for this turn. Use only handles listed in <selected_memories>, for example memory_view(\"provider_architecture.md\").",
-				Parameters:  params,
+				Schema:      memoryViewSchema,
 				Access:      llmcontracts.RuntimeToolAccessRead,
 			},
 		},
@@ -276,4 +277,16 @@ func cleanMemoryHandle(handle string) string {
 		return ""
 	}
 	return filepath.ToSlash(filepath.Clean(handle))
+}
+
+var memoryViewSchema = &toolschema.Schema{
+	Type: "object",
+	Properties: map[string]*toolschema.Schema{
+		"handle": {
+			Type:        "string",
+			Description: "Selected memory handle/file, e.g. provider_architecture.md",
+		},
+	},
+	Required:             []string{"handle"},
+	AdditionalProperties: toolschema.Pointer(false),
 }

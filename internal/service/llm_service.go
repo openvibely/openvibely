@@ -21,6 +21,7 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/update"
+	"github.com/openvibely/openvibely/pkg/toolschema"
 )
 
 // LLMCaller abstracts model provider calls so tests can inject a mock
@@ -363,13 +364,8 @@ func (s *LLMService) automationBootstrapRuntimeTools(ctx context.Context, task m
 	if len(allowedAdapters) == 0 {
 		return nil
 	}
-	definition := llmcontracts.RuntimeToolDefinition{
-		Name:        "register_automation_resources",
-		Description: "Register the visible tasks and schedules created by this maintained bootstrap as a published Automation. Use actual resource IDs and canonical node keys; the current task project is enforced server-side.",
-		Access:      llmcontracts.RuntimeToolAccessWrite,
-		Parameters:  json.RawMessage(`{"type":"object","properties":{"adapter_key":{"type":"string","enum":["native_sdlc","github_sdlc"]},"stable_key":{"type":"string"},"name":{"type":"string"},"resources":{"type":"array","minItems":2,"maxItems":100,"items":{"type":"object","properties":{"node_key":{"type":"string"},"resource_type":{"type":"string","enum":["task","schedule"]},"resource_id":{"type":"string"},"relation":{"type":"string","enum":["owned","shared"]}},"required":["node_key","resource_type","resource_id"],"additionalProperties":false}}},"required":["adapter_key","stable_key","resources"],"additionalProperties":false}`),
-	}
-	return &llmcontracts.RuntimeTools{Definitions: []llmcontracts.RuntimeToolDefinition{definition}, Executor: func(toolCtx context.Context, name string, input json.RawMessage) (string, bool, bool, error) {
+
+	return &llmcontracts.RuntimeTools{Definitions: []llmcontracts.RuntimeToolDefinition{automationRegistrationDefinition}, Executor: func(toolCtx context.Context, name string, input json.RawMessage) (string, bool, bool, error) {
 		if name != "register_automation_resources" {
 			return "", false, false, nil
 		}
@@ -448,18 +444,7 @@ func (s *LLMService) taskControlRuntimeTools(task models.Task) *llmcontracts.Run
 			continue
 		}
 		if name == "list_alerts" && task.Category == models.CategoryScheduled {
-			var schema map[string]json.RawMessage
-			var properties map[string]json.RawMessage
-			if json.Unmarshal(def.Parameters, &schema) == nil && json.Unmarshal(schema["properties"], &properties) == nil {
-				delete(properties, "project_id")
-				delete(properties, "read")
-				if encodedProperties, err := json.Marshal(properties); err == nil {
-					schema["properties"] = encodedProperties
-					if encodedSchema, err := json.Marshal(schema); err == nil {
-						def.Parameters = encodedSchema
-					}
-				}
-			}
+			def.Schema = def.Schema.WithoutProperties("project_id", "read")
 			def.Description += " Uses the persisted caller task's project and includes both read and unread alerts."
 		}
 		filtered = append(filtered, def)
@@ -486,9 +471,10 @@ func (s *LLMService) taskControlRuntimeTools(task models.Task) *llmcontracts.Run
 		},
 	})
 	mergeChannelRuntimeActionHandlers(handlers, buildChannelGoalActionHandlers(channelGoalActionHandlerOptions{
-		ProjectID:   task.ProjectID,
-		TaskRepo:    s.taskRepo,
-		TaskGoalSvc: s.taskGoalSvc,
+		CallerTaskID: task.ID,
+		ProjectID:    task.ProjectID,
+		TaskRepo:     s.taskRepo,
+		TaskGoalSvc:  s.taskGoalSvc,
 	}))
 	var usageAnalyticsSvc *UsageAnalyticsService
 	if s.usageRepo != nil {
@@ -2442,16 +2428,6 @@ func cleanProjectUsagePath(path string) string {
 	return filepath.Clean(filepath.FromSlash(path))
 }
 
-func projectWorkDirMatches(repoPath string, workDir string) bool {
-	repo := strings.TrimSpace(repoPath)
-	if repo == "" || strings.TrimSpace(workDir) == "" {
-		return false
-	}
-	repo = cleanProjectUsagePath(repo)
-	want := cleanProjectUsagePath(workDir)
-	return cleanProjectWorkDirMatches(repo, want)
-}
-
 func cleanProjectWorkDirMatches(repo string, workDir string) bool {
 	if repo == workDir {
 		return true
@@ -2720,4 +2696,49 @@ func withTaskPreClaimed(ctx context.Context) context.Context {
 func isTaskPreClaimed(ctx context.Context) bool {
 	v, _ := ctx.Value(taskPreClaimedKey{}).(bool)
 	return v
+}
+
+var automationRegistrationDefinition = llmcontracts.RuntimeToolDefinition{
+	Name:        "register_automation_resources",
+	Description: "Register the visible tasks and schedules created by this maintained bootstrap as a published Automation. Use actual resource IDs and canonical node keys; the current task project is enforced server-side.",
+	Access:      llmcontracts.RuntimeToolAccessWrite,
+	Schema: &toolschema.Schema{
+		Type: "object",
+		Properties: map[string]*toolschema.Schema{
+			"adapter_key": {
+				Type: "string",
+				Enum: []any{"native_sdlc", "github_sdlc"},
+			},
+			"stable_key": {
+				Type: "string"},
+			"name": {
+				Type: "string"},
+			"resources": {
+				Type:     "array",
+				MinItems: toolschema.Pointer(2),
+				MaxItems: toolschema.Pointer(100),
+				Items: &toolschema.Schema{
+					Type: "object",
+					Properties: map[string]*toolschema.Schema{
+						"node_key": {
+							Type: "string"},
+						"resource_type": {
+							Type: "string",
+							Enum: []any{"task", "schedule"},
+						},
+						"resource_id": {
+							Type: "string"},
+						"relation": {
+							Type: "string",
+							Enum: []any{"owned", "shared"},
+						},
+					},
+					Required:             []string{"node_key", "resource_type", "resource_id"},
+					AdditionalProperties: toolschema.Pointer(false),
+				},
+			},
+		},
+		Required:             []string{"adapter_key", "stable_key", "resources"},
+		AdditionalProperties: toolschema.Pointer(false),
+	},
 }

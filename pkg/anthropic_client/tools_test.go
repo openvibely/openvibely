@@ -276,17 +276,17 @@ func TestNormalizeExecBashTimeout(t *testing.T) {
 		in   int
 		want int
 	}{
-		{name: "default zero", in: 0, want: defaultExecBashTimeoutSeconds},
-		{name: "negative", in: -1, want: defaultExecBashTimeoutSeconds},
-		{name: "below default positive", in: defaultExecBashTimeoutSeconds - 1, want: defaultExecBashTimeoutSeconds - 1},
+		{name: "default zero", in: 0, want: agenttools.DefaultBashTimeoutSeconds},
+		{name: "negative", in: -1, want: agenttools.DefaultBashTimeoutSeconds},
+		{name: "below default positive", in: agenttools.DefaultBashTimeoutSeconds - 1, want: agenttools.DefaultBashTimeoutSeconds - 1},
 		{name: "short positive", in: 1, want: 1},
-		{name: "exact default", in: defaultExecBashTimeoutSeconds, want: defaultExecBashTimeoutSeconds},
-		{name: "above default", in: defaultExecBashTimeoutSeconds + 1, want: defaultExecBashTimeoutSeconds + 1},
+		{name: "exact default", in: agenttools.DefaultBashTimeoutSeconds, want: agenttools.DefaultBashTimeoutSeconds},
+		{name: "above default", in: agenttools.DefaultBashTimeoutSeconds + 1, want: agenttools.DefaultBashTimeoutSeconds + 1},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := agenttools.NormalizeBashTimeout(tt.in, agenttools.BashPolicy{DefaultTimeoutSeconds: defaultExecBashTimeoutSeconds}); got != tt.want {
+			if got := agenttools.NormalizeBashTimeout(tt.in); got != tt.want {
 				t.Fatalf("NormalizeBashTimeout(%d) = %d, want %d", tt.in, got, tt.want)
 			}
 		})
@@ -439,7 +439,7 @@ func TestDefaultTools(t *testing.T) {
 		names[tool.Name] = true
 		// Verify input_schema is valid JSON
 		var schema map[string]interface{}
-		if err := json.Unmarshal(tool.InputSchema, &schema); err != nil {
+		if err := json.Unmarshal(tool.ParameterSchema(), &schema); err != nil {
 			t.Errorf("tool %s has invalid input_schema: %v", tool.Name, err)
 		}
 	}

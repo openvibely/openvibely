@@ -32,6 +32,7 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 	anthropicclient "github.com/openvibely/openvibely/pkg/anthropic_client"
 	openaiclient "github.com/openvibely/openvibely/pkg/openai_client"
+	"github.com/openvibely/openvibely/pkg/toolschema"
 )
 
 // ProviderAdapter isolates provider-specific call routing from core orchestration.
@@ -386,10 +387,6 @@ func contextFailureCategory(err error) string {
 	return string(category)
 }
 
-func logContextDecision(originalHistory []models.Execution, req llmcontracts.AgentRequest, strategy string, externalized bool, trigger error) {
-	logContextDecisionWithBudget(originalHistory, req, strategy, externalized, trigger, calculateRequestBudget(req))
-}
-
 func logContextDecisionWithBudget(originalHistory []models.Execution, req llmcontracts.AgentRequest, strategy string, externalized bool, trigger error, budget requestBudget) {
 	retained, removed := historyRetentionCounts(originalHistory, req.ChatHistory)
 	logf := applog.Infof
@@ -397,10 +394,6 @@ func logContextDecisionWithBudget(originalHistory []models.Execution, req llmcon
 		logf = applog.Debugf
 	}
 	logf("[agent-svc] context decision provider=%s model=%s transport=%s context_window=%d safe_input_limit=%d fixed_tokens=%d history_tokens=%d pending_tokens=%d attachment_tokens=%d reserved_output_tokens=%d safety_margin=%d strategy=%s externalized=%t history_retained=%d history_removed=%d retry_source_execution_id=%s failure_category=%s", req.Agent.Provider, req.Agent.Model, providerTransport(req), budget.ContextWindow, budget.SafeInputLimit, budget.FixedTokens, budget.HistoryTokens+budget.NativeStateTokens, budget.PendingTokens, budget.AttachmentTokens, budget.ReservedOutputTokens, budget.SafetyMargin, strategy, externalized, retained, removed, req.RetrySourceExecutionID, contextFailureCategory(trigger))
-}
-
-func logContextFailure(req llmcontracts.AgentRequest, err error) {
-	logContextFailureWithBudget(req, err, calculateRequestBudget(req))
 }
 
 func logContextFailureWithBudget(req llmcontracts.AgentRequest, err error, budget requestBudget) {
@@ -581,7 +574,7 @@ func artifactReaderRuntime(path string) *llmcontracts.RuntimeTools {
 		Definitions: []llmcontracts.RuntimeToolDefinition{{
 			Name: oversizedInputReaderTool, Access: llmcontracts.RuntimeToolAccessRead,
 			Description: "Read one bounded byte range from the oversized current input artifact. Use targeted offsets and never request the entire file.",
-			Parameters:  json.RawMessage(`{"type":"object","properties":{"offset":{"type":"integer","minimum":0},"limit":{"type":"integer","minimum":1,"maximum":65536}},"required":["offset","limit"],"additionalProperties":false}`),
+			Schema:      artifactReaderSchema,
 		}},
 		Executor: func(_ context.Context, name string, input json.RawMessage) (string, bool, bool, error) {
 			if name != oversizedInputReaderTool {
@@ -619,10 +612,6 @@ func artifactReaderRuntime(path string) *llmcontracts.RuntimeTools {
 			return false, false
 		},
 	}
-}
-
-func (s *LLMService) preparePendingInput(req llmcontracts.AgentRequest) (llmcontracts.AgentRequest, bool, func(), error) {
-	return s.preparePendingInputWithBudget(req, calculateRequestBudget(req))
 }
 
 func (s *LLMService) preparePendingInputWithBudget(req llmcontracts.AgentRequest, budget requestBudget) (llmcontracts.AgentRequest, bool, func(), error) {
@@ -680,10 +669,6 @@ func (s *LLMService) preparePendingInputWithBudget(req llmcontracts.AgentRequest
 	return req, true, cleanup, nil
 }
 
-func ensureRequestFits(req llmcontracts.AgentRequest, op string) error {
-	return ensureRequestFitsWithBudget(req, calculateRequestBudget(req), op)
-}
-
 func ensureRequestFitsWithBudget(req llmcontracts.AgentRequest, budget requestBudget, op string) error {
 	if budget.TotalInputTokens() <= budget.SafeInputLimit {
 		return nil
@@ -696,15 +681,6 @@ func openAIContextWindow(model string) int {
 		return spec.ContextWindow
 	}
 	return defaultOpenAIContextWindow
-}
-
-func shouldTriggerContextCompaction(req llmcontracts.AgentRequest) (bool, compactionLimits, int) {
-	limits := compactionLimitsForAgent(req.Agent)
-	used := estimateModelVisibleRequestTokens(req)
-	if req.ContextTokenEstimate > 0 {
-		used = req.ContextTokenEstimate
-	}
-	return used >= limits.TriggerLimit || used >= limits.EffectiveHardLimit, limits, used
 }
 
 func estimateModelVisibleRequestTokens(req llmcontracts.AgentRequest) int {
@@ -776,7 +752,7 @@ func estimateRuntimeToolDefinitionTokens(rt *llmcontracts.RuntimeTools) int {
 	}
 	total := 0
 	for _, def := range rt.Definitions {
-		total += estimatedUTF8Tokens(def.Name) + estimatedUTF8Tokens(def.Description) + estimatedUTF8Tokens(string(def.Parameters)) + estimatedUTF8Tokens(string(def.Access))
+		total += estimatedUTF8Tokens(def.Name) + estimatedUTF8Tokens(def.Description) + estimatedUTF8Tokens(string(def.ParameterSchema())) + estimatedUTF8Tokens(string(def.Access))
 	}
 	return total
 }
@@ -1191,10 +1167,6 @@ func parseCompactionTransportScope(scope string) (compactionScope, bool) {
 		return compactionScope{Type: "chat_project", ID: id}, id != ""
 	}
 	return compactionScope{}, false
-}
-
-func shouldUseLocalSummaryBeforeProvider(req llmcontracts.AgentRequest) bool {
-	return shouldUseLocalSummaryBeforeProviderWithBudget(req, calculateRequestBudget(req))
 }
 
 func shouldUseLocalSummaryBeforeProviderWithBudget(req llmcontracts.AgentRequest, budget requestBudget) bool {
@@ -2009,4 +1981,21 @@ func (a *testProviderAdapter) Call(req llmcontracts.AgentRequest) (llmcontracts.
 	}
 	output, textOnly, tokens, err := a.svc.llmCaller.CallModel(req.Ctx, req.Message, req.Attachments, req.Agent, req.ExecID, req.WorkDir)
 	return canonicalResult(output, textOnly, llmusage.FromTotal(tokens), err)
+}
+
+var artifactReaderSchema = &toolschema.Schema{
+	Type: "object",
+	Properties: map[string]*toolschema.Schema{
+		"offset": {
+			Type:    "integer",
+			Minimum: toolschema.Number("0"),
+		},
+		"limit": {
+			Type:    "integer",
+			Minimum: toolschema.Number("1"),
+			Maximum: toolschema.Number("65536"),
+		},
+	},
+	Required:             []string{"offset", "limit"},
+	AdditionalProperties: toolschema.Pointer(false),
 }

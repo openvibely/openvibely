@@ -20,6 +20,7 @@ import (
 	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/openvibely/openvibely/internal/testutil/teststores"
 	"github.com/openvibely/openvibely/internal/update"
+	"github.com/openvibely/openvibely/pkg/toolschema"
 	"github.com/stretchr/testify/require"
 )
 
@@ -3242,4 +3243,21 @@ func TestListChannelsDirectGitHubAppConfiguredNotConnected(t *testing.T) {
 	require.Equal(t, "Organization", summary.GitHub.AccountType)
 	require.True(t, summary.GitHub.AppConfigured)
 	require.False(t, summary.GitHub.PATConfigured)
+}
+
+func TestListTasksStrictNullFiltersPreserveBacklogResults(t *testing.T) {
+	h, _, _, _ := setupTestHandlerWithDB(t)
+	project := createProject(t, h, "Strict task lookup")
+	pending := createTask(t, h, project.ID, "Pending backlog", func(task *models.Task) { task.Category = models.CategoryBacklog; task.Status = models.StatusPending })
+	failed := createTask(t, h, project.ID, "Failed backlog", func(task *models.Task) { task.Category = models.CategoryBacklog; task.Status = models.StatusFailed })
+	handler := h.chatActionHandlers(streamingResponseParams{ProjectID: project.ID}, nil, models.ChatModePlan, chatcontrol.SurfaceWeb)["list_tasks"]
+	source := chatcontrol.Get("list_tasks").Schema
+	for _, input := range []string{`{"category":"backlog"}`, `{"category":"backlog","query":null,"status":null,"merge_status":null,"limit":null,"offset":null}`} {
+		normalized, err := toolschema.ValidateArguments(source, nil, json.RawMessage(input))
+		require.NoError(t, err)
+		out, err := handler(context.Background(), normalized)
+		require.NoError(t, err)
+		require.Contains(t, out, pending.ID)
+		require.Contains(t, out, failed.ID)
+	}
 }

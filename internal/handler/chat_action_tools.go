@@ -1234,6 +1234,9 @@ func (h *Handler) normalizeScheduleToolTaskReference(ctx context.Context, params
 
 func (h *Handler) resolveTaskIDForTool(ctx context.Context, params streamingResponseParams, taskID, title string) (string, error) {
 	taskID = strings.TrimSpace(taskID)
+	if taskID == "" && strings.TrimSpace(title) == "" && params.IsTaskFollowup && params.TaskID != "" {
+		taskID = "current"
+	}
 	if taskID == "current" {
 		if !params.IsTaskFollowup || params.TaskID == "" {
 			return "", fmt.Errorf("task_id current is only valid in a persisted task thread")

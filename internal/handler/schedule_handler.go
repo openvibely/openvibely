@@ -101,6 +101,10 @@ func scheduleFormHTTPError(err error) error {
 	if errors.As(err, &parseErr) {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid date/time format")
 	}
+	var actionErr *service.ScheduleActionError
+	if errors.As(err, &actionErr) && actionErr.Kind == service.ScheduleActionTimeError {
+		return echo.NewHTTPError(http.StatusBadRequest, actionErr.Error())
+	}
 	return err
 }
 
@@ -294,6 +298,12 @@ func (h *Handler) UpdateSchedule(c echo.Context) error {
 		if err := validatePanelScheduleStart(formValues.runAt); err != nil {
 			return err
 		}
+	}
+
+	// The form only carries minutes; retain the exact historical one-time anchor
+	// when the user has not changed the displayed time.
+	if formValues.repeatType == models.RepeatOnce && formValues.runAt.Equal(schedule.RunAt.Truncate(time.Minute)) {
+		formValues.runAt = schedule.RunAt
 	}
 
 	var clearContextOnStart *bool

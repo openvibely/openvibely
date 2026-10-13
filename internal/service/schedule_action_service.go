@@ -174,7 +174,14 @@ func (s *ScheduleActionService) ModifyAbsolute(ctx context.Context, req ModifyAb
 	if err := models.ValidateScheduleRepeatInterval(req.RepeatInterval); err != nil {
 		return result, actionError(ScheduleActionIntervalError, fmt.Sprintf("%d", req.RepeatInterval), err)
 	}
-	timingChanged := !schedule.RunAt.Equal(req.RunAt) || schedule.RepeatType != req.RepeatType || schedule.RepeatInterval != req.RepeatInterval
+	timingChanged := !schedule.RunAt.Equal(req.RunAt) || schedule.RepeatType != req.RepeatType
+	if req.RepeatType != models.RepeatOnce {
+		timingChanged = timingChanged || schedule.RepeatInterval != req.RepeatInterval
+	}
+	now := time.Now()
+	if timingChanged && req.RepeatType == models.RepeatOnce && !req.RunAt.After(now) {
+		return result, actionError(ScheduleActionTimeError, "", fmt.Errorf("Run at must be in the future. Check the date and AM/PM."))
+	}
 	schedule.RunAt = req.RunAt
 	schedule.RepeatType = req.RepeatType
 	schedule.RepeatInterval = req.RepeatInterval
@@ -183,8 +190,8 @@ func (s *ScheduleActionService) ModifyAbsolute(ctx context.Context, req ModifyAb
 	}
 	if timingChanged {
 		schedule.NextRun = &req.RunAt
-		if !req.RunAt.After(time.Now()) {
-			schedule.NextRun = schedule.ComputeNextRun(time.Now())
+		if schedule.RepeatType != models.RepeatOnce && !req.RunAt.After(now) {
+			schedule.NextRun = schedule.ComputeNextRun(now)
 		}
 	}
 	result.Changes = []string{"absolute_form"}

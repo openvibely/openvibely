@@ -958,6 +958,10 @@ func runOpenAIToolTask(ctx context.Context, opts *AgenticOptions, name string, i
 		// are not cancelled and remain responsible for their normal completion.
 		ctx = llmcontracts.WithMidTurnSteeringWakeup(ctx, opts.LocalSteeringWakeup)
 	}
+	input, validationErr := normalizeToolArguments(opts, name, input)
+	if validationErr != nil {
+		return validationErr.Error(), true, nil
+	}
 	output := ""
 	isError := false
 	var err error
@@ -1001,13 +1005,6 @@ func allOpenAIToolsReadOnly(tasks []openAIToolExecutionTask) bool {
 		}
 	}
 	return true
-}
-
-func shouldAutoCompactInputItems(inputItems []any, threshold int) bool {
-	if len(inputItems) == 0 {
-		return false
-	}
-	return estimateInputItemsTokens(inputItems) >= normalizedCompactionThreshold(threshold)
 }
 
 func isContextLengthExceededError(err error) bool {
@@ -1544,13 +1541,6 @@ func approxOpenAIBytesForTokens(tokens int) int {
 	return tokenestimate.ByteBudget(tokens)
 }
 
-func normalizedCompactionThreshold(threshold int) int {
-	if threshold <= 0 {
-		return DefaultCompactionThreshold
-	}
-	return threshold
-}
-
 func normalizedCompactionThresholdForModel(threshold int, model string) int {
 	limit := openAIAutoCompactionTokenLimit(model)
 	if threshold <= 0 {
@@ -1912,10 +1902,6 @@ func openAICompactionV2Instructions(opts *AgenticOptions, isChatGPTOAuth bool) s
 	return ""
 }
 
-func openAIModelSupportsParallelToolCalls(model string) bool {
-	return !isResponsesLiteWebsocketModel(model)
-}
-
 func compactionInstructions(opts *AgenticOptions) string {
 	if opts != nil {
 		if prompt := strings.TrimSpace(opts.CompactionPrompt); prompt != "" {
@@ -2242,16 +2228,6 @@ func extractCompactionSummaryFromOutputItems(items []any) string {
 	return ""
 }
 
-func openAICompactionOutputTokens(maxOutputTokens int) int {
-	if maxOutputTokens <= 0 || maxOutputTokens > 4096 {
-		maxOutputTokens = 4096
-	}
-	if maxOutputTokens < 512 {
-		return 512
-	}
-	return maxOutputTokens
-}
-
 func openAIInputItemsTranscript(inputItems []any) string {
 	var sb strings.Builder
 	for _, raw := range inputItems {
@@ -2503,7 +2479,7 @@ func agenticToolDefinitions(opts *AgenticOptions, includeStandaloneWebSearch boo
 	if includeStandaloneWebSearch {
 		tools = append(tools, standaloneWebSearchTool())
 	}
-	return tools
+	return prepareStrictTools(tools)
 }
 
 func refreshAgenticToolsAtSteeringBoundary(ctx context.Context, opts *AgenticOptions, current []ToolDefinition, includeStandaloneWebSearch bool) ([]ToolDefinition, error) {
