@@ -25,7 +25,7 @@ func TestCoverageFilterPolicySharedByLocalAndCI(t *testing.T) {
 		`_templ\.go:`,
 		`^github.com/openvibely/openvibely/cmd/`,
 		`^github.com/openvibely/openvibely/docs/`,
-		`^github.com/openvibely/openvibely/internal/database/migrations/`,
+		`^github.com/openvibely/openvibely/internal/persistence/sqlite/database/migrations/`,
 		`^github.com/openvibely/openvibely/internal/update/testfixture/`,
 		`^github.com/openvibely/openvibely/internal/service/workflow_service\.go:`,
 	} {
@@ -42,7 +42,7 @@ func TestCoverageFilterPolicySharedByLocalAndCI(t *testing.T) {
 		"github.com/openvibely/openvibely/web/templates/pages/page_templ.go:1.1,2.1 1 1",
 		"github.com/openvibely/openvibely/cmd/server/main.go:1.1,2.1 1 1",
 		"github.com/openvibely/openvibely/docs/docs.go:1.1,2.1 1 1",
-		"github.com/openvibely/openvibely/internal/database/migrations/001_init.go:1.1,2.1 1 1",
+		"github.com/openvibely/openvibely/internal/persistence/sqlite/database/migrations/001_init.go:1.1,2.1 1 1",
 		"github.com/openvibely/openvibely/internal/update/testfixture/fixture.go:1.1,2.1 1 1",
 		"github.com/openvibely/openvibely/internal/service/workflow_service.go:1.1,2.1 1 1",
 		"github.com/openvibely/openvibely/internal/service/task_service.go:1.1,2.1 1 1",
@@ -73,7 +73,7 @@ func TestCoverageFilterPolicySharedByLocalAndCI(t *testing.T) {
 		"page_templ.go",
 		"cmd/server/main.go",
 		"docs/docs.go",
-		"internal/database/migrations/001_init.go",
+		"internal/persistence/sqlite/database/migrations/001_init.go",
 		"internal/update/testfixture/fixture.go",
 		"internal/service/workflow_service.go",
 	} {

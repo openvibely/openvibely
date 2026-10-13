@@ -12,7 +12,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/openvibely/openvibely/internal/database"
+	"github.com/openvibely/openvibely/internal/persistence/sqlite/database"
 	"modernc.org/sqlite"
 )
 

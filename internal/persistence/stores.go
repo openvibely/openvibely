@@ -167,8 +167,14 @@ type AutomationStore interface {
 
 // ChannelTargetStore persists saved outbound channel targets.
 type ChannelTargetStore interface {
+	FindByName(ctx context.Context, projectID string, platform string, name string) (*models.ChannelTarget, error)
+	FindByTarget(ctx context.Context, projectID string, platform string, targetID string, threadID string) (*models.ChannelTarget, error)
+	FindByTargetAndKind(ctx context.Context, projectID string, platform string, targetID string, threadID string, targetKind string) (*models.ChannelTarget, error)
+	FindHome(ctx context.Context, projectID string, platform string) (*models.ChannelTarget, error)
 	GetByID(ctx context.Context, id string) (*models.ChannelTarget, error)
 	ListByProject(ctx context.Context, projectID string) ([]models.ChannelTarget, error)
+	ListByProjectPage(ctx context.Context, projectID string, limit int, offset int) ([]models.ChannelTarget, error)
+	RecordSend(ctx context.Context, send models.ChannelMessageSend) error
 	ReplaceProjectTargets(ctx context.Context, projectID string, targets []models.ChannelTarget) error
 	SummarizeByProject(ctx context.Context, projectID string) (ChannelTargetProjectSummary, error)
 }
@@ -213,6 +219,7 @@ type DiscordAuthStore interface {
 	DeleteByProject(ctx context.Context, projectID string) error
 	DeleteForProject(ctx context.Context, projectID string, id string) error
 	GetByID(ctx context.Context, id string) (*models.DiscordAuthorizedUser, error)
+	IsAuthorized(ctx context.Context, projectID string, discordUserID string) (bool, error)
 	IsAuthorizedAnywhere(ctx context.Context, discordUserID string) (bool, error)
 	ListByProject(ctx context.Context, projectID string) ([]models.DiscordAuthorizedUser, error)
 }
@@ -454,15 +461,19 @@ type LLMConfigStore interface {
 
 // LifecycleStore persists lifecycle runs, steps, and approvals.
 type LifecycleStore interface {
+	CreateExecution(ctx context.Context, e *models.LifecycleExecution) error
 	CreateHook(ctx context.Context, h *models.AgentLifecycleHook) error
 	DeleteHook(ctx context.Context, id string) error
+	FindExecutionByIdempotencyKey(ctx context.Context, key string) (*models.LifecycleExecution, error)
 	GetExecutionForTaskProject(ctx context.Context, taskID string, executionID string, projectID string) (*models.LifecycleExecution, bool, error)
 	HooksByAgent(ctx context.Context, agentID string) ([]models.AgentLifecycleHook, error)
+	HooksForWhen(ctx context.Context, when models.LifecycleWhen) ([]models.AgentLifecycleHook, error)
 	ListExecutionEventsForProject(ctx context.Context, lifecycleExecutionID string, projectID string) ([]models.LifecycleExecutionEvent, bool, error)
 	ListExecutionsForTaskNewerPage(ctx context.Context, taskID string, limit int, afterValue string) (models.LifecycleExecutionPage, error)
 	ListExecutionsForTaskPage(ctx context.Context, taskID string, limit int, cursorValue string) (models.LifecycleExecutionPage, error)
 	PatchExecutionOutputSkills(ctx context.Context, execID string, handles []string) error
 	TaskRunFreshness(ctx context.Context, taskID string, taskRunID string) (LifecycleTaskRunFreshness, error)
+	UpdateExecution(ctx context.Context, e *models.LifecycleExecution) error
 	UpdateHook(ctx context.Context, h *models.AgentLifecycleHook) error
 }
 
@@ -551,6 +562,7 @@ type SlackAuthStore interface {
 	Create(ctx context.Context, u *models.SlackAuthorizedUser) error
 	DeleteForProject(ctx context.Context, projectID string, id string) error
 	GetByID(ctx context.Context, id string) (*models.SlackAuthorizedUser, error)
+	IsAuthorized(ctx context.Context, projectID string, slackUserID string) (bool, error)
 	IsAuthorizedAnywhere(ctx context.Context, slackUserID string) (bool, error)
 	ListByProject(ctx context.Context, projectID string) ([]models.SlackAuthorizedUser, error)
 }

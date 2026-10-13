@@ -2,6 +2,6 @@ ignore:
   - "**/*_templ.go"
   - "cmd/**"
   - "docs/**"
-  - "internal/database/migrations/**"
+  - "internal/persistence/sqlite/database/migrations/**"
   - "internal/update/testfixture/**"
   - "internal/service/workflow_service.go"

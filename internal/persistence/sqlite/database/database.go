@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"github.com/openvibely/openvibely/internal/applog"
-	"github.com/openvibely/openvibely/internal/database/migrations"
+	"github.com/openvibely/openvibely/internal/persistence/sqlite/database/migrations"
 	"github.com/pressly/goose/v3"
 	_ "modernc.org/sqlite"
 )
