@@ -448,34 +448,19 @@ templ modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, 
 			</div>
 			@CardPaginationStatusWithBoundary(hasMore)
 
-			<!-- Reassign Default Modal -->		<dialog id="reassign_default_modal" class="modal" onclose="if (typeof syncToastContainerHost === 'function') syncToastContainerHost()">
-			<div class="modal-box">
-				@ModalCloseButton("reassign_default_modal", "Close reassign default model dialog")
-				<h3 class="font-bold text-lg mb-2 pr-10">Reassign Default Model</h3>
-				<p class="text-sm opacity-70 mb-4">You are deleting the default model. Please select a new default before proceeding.</p>
-				<div class="form-control mb-4">
-					<label class="label"><span class="label-text">New Default Model</span></label>
-					<select id="reassign_default_select" class="select select-bordered w-full">
-for _, agent := range modelOptions {
-							if !agent.IsDefault && !modelCardUnsupported(agent) {
-								<option value={ agent.ID }>{ agent.Name }</option>
+				<!-- Delete Model Modal -->		@DestructiveConfirmDialog("delete_model_confirm_modal", "Close delete model confirmation", "Delete Model", "Are you sure you want to delete ", "delete_model_confirm_name", "", "? This action cannot be undone.", templ.ComponentScript{Call: "delete_model_confirm_modal.close()"}, templ.ComponentScript{Call: "confirmDeleteModel()"}) {
+					<div id="delete_model_reassign_fields" class="form-control mb-3 hidden">
+						<label for="reassign_default_select" class="label"><span class="label-text">New Default Model</span></label>
+						<select id="reassign_default_select" class="select select-bordered w-full">
+							for _, agent := range modelOptions {
+								if !agent.IsDefault && !modelCardUnsupported(agent) {
+									<option value={ agent.ID }>{ agent.Name }</option>
+								}
 							}
-						}
-					</select>
-				</div>
-				<div class="modal-action">
-					<button type="button" class="btn" onclick="reassign_default_modal.close()">Cancel</button>
-					<button type="button" class="btn btn-error" onclick="confirmDeleteDefault()">Delete &amp; Reassign</button>
-				</div>
-			</div>
-			<form method="dialog" class="modal-backdrop">
-				<button>close</button>
-			</form>
-		</dialog>
-				@DestructiveConfirmDialog("delete_model_confirm_modal", "Close delete model confirmation", "Delete Model", "Are you sure you want to delete ", "delete_model_confirm_name", "", "? This action cannot be undone.", templ.ComponentScript{Call: "delete_model_confirm_modal.close()"}, templ.ComponentScript{Call: "confirmDeleteModel()"}) {
-					Tasks using this model will no longer be able to select it.
+						</select>
+					</div>
+					<p>Tasks using this model will no longer be able to select it.</p>
 				}
-
 			<!-- Model Modal (for both create and edit) -->		<dialog id="new_model_modal" class="modal" onclose="finishModelOAuthModal(); if (typeof syncToastContainerHost === 'function') syncToastContainerHost()">
 			<div class="modal-box">
 				<button data-tooltip-disabled type="button" class="btn btn-circle btn-ghost btn-xs ov-modal-close" onclick="closeModelModal()" aria-label="Close model configuration">
@@ -2273,21 +2258,28 @@ for _, agent := range modelOptions {
 					_deleteModelId = id;
 					_deleteModelName = name || 'this model';
 					_deleteModelIsDefault = isDefault;
-						window.openDestructiveConfirmDialog('delete_model_confirm_modal', 'delete_model_confirm_name', _deleteModelName);
+					var reassignmentFields = document.getElementById('delete_model_reassign_fields');
+					var select = document.getElementById('reassign_default_select');
+					if (reassignmentFields) reassignmentFields.classList.toggle('hidden', !isDefault || !select || select.options.length === 0);
+					window.openDestructiveConfirmDialog('delete_model_confirm_modal', 'delete_model_confirm_name', _deleteModelName);
 				}
 
 				function confirmDeleteModel() {
 					if (!_deleteModelId) return;
-					var confirmModal = document.getElementById('delete_model_confirm_modal');
-					if (confirmModal) confirmModal.close();
+					var deleteURL = '/models/' + _deleteModelId;
 					if (_deleteModelIsDefault) {
 						var select = document.getElementById('reassign_default_select');
 						if (select && select.options.length > 0) {
-							reassign_default_modal.showModal();
-							return;
+							if (!select.value) {
+								alert('Please select a new default model.');
+								return;
+							}
+							deleteURL += '?new_default_id=' + encodeURIComponent(select.value);
 						}
 					}
-					htmx.ajax('DELETE', modelMutationURL('/models/' + _deleteModelId), {
+					var confirmModal = document.getElementById('delete_model_confirm_modal');
+					if (confirmModal) confirmModal.close();
+					htmx.ajax('DELETE', modelMutationURL(deleteURL), {
 						target: '#models-container',
 						swap: 'outerHTML'
 					}).catch(function(xhr) {
@@ -2299,26 +2291,6 @@ for _, agent := range modelOptions {
 						alert(msg);
 					});
 				}
-
-			function confirmDeleteDefault() {
-				var newDefaultId = document.getElementById('reassign_default_select').value;
-				if (!newDefaultId) {
-					alert('Please select a new default model.');
-					return;
-				}
-				reassign_default_modal.close();
-				htmx.ajax('DELETE', modelMutationURL('/models/' + _deleteModelId + '?new_default_id=' + encodeURIComponent(newDefaultId)), {
-					target: '#models-container',
-					swap: 'outerHTML'
-				}).catch(function(xhr) {
-					var msg = 'Failed to delete model.';
-					try {
-						var data = JSON.parse(xhr.responseText);
-						if (data.message) msg = data.message;
-					} catch(e) {}
-					alert(msg);
-				});
-			}
 
 				function setDefaultModel(button) {
 					var path = button.dataset.modelSetDefaultUrl;

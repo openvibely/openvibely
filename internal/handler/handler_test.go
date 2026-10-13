@@ -2308,18 +2308,23 @@ func TestHandler_ListModels_DeleteConfirmationDialog(t *testing.T) {
 		`id="delete_model_confirm_modal" class="modal"`,
 		`id="delete_model_confirm_name"`,
 		`data-destructive-confirm-dialog`,
+		`id="delete_model_reassign_fields"`,
+		`id="reassign_default_select"`,
 		`openDestructiveConfirmDialog('delete_model_confirm_modal', 'delete_model_confirm_name', _deleteModelName)`,
 		`onclick="delete_model_confirm_modal.close()"`,
 		`onclick="confirmDeleteModel()"`,
 		`class="btn btn-error"`,
 		`modal.showModal()`,
-		`if (_deleteModelIsDefault)`,
-		`reassign_default_modal.showModal();`,
-		`htmx.ajax('DELETE', modelMutationURL('/models/' + _deleteModelId)`,
+		`reassignmentFields.classList.toggle('hidden', !isDefault)`,
+		`deleteURL += '?new_default_id=' + encodeURIComponent(select.value)`,
+		`htmx.ajax('DELETE', modelMutationURL(deleteURL)`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("expected models delete confirmation markup/script to contain %q", want)
 		}
+	}
+	if strings.Contains(body, `id="reassign_default_modal"`) || strings.Contains(body, `reassign_default_modal.showModal()`) {
+		t.Fatal("expected default model deletion and reassignment to use a single confirmation modal")
 	}
 	if strings.Contains(body, `confirm('Delete model`) {
 		t.Fatal("expected model delete flow to avoid browser confirm()")
