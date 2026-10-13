@@ -245,6 +245,90 @@ func TestDoSkipsExcessiveRetryAfter(t *testing.T) {
 	}
 }
 
+func TestBackoffRetryAfterOverflowBoundary(t *testing.T) {
+	const maxDuration = time.Duration(1<<63 - 1)
+
+	resp := &http.Response{StatusCode: http.StatusTooManyRequests, Header: http.Header{"Retry-After": []string{"2147483647"}}}
+	if got := Backoff(0, resp, time.Second); got != 2147483647*time.Second {
+		t.Fatalf("at math.MaxInt32 = %v, want %v", got, 2147483647*time.Second)
+	}
+
+	// 3 billion seconds exceeds math.MaxInt32 (2,147,483,647) but is fully representable in 64-bit time.Duration.
+	// On 32-bit architectures, this must NOT be prematurely saturated to maxDuration.
+	resp.Header.Set("Retry-After", "3000000000")
+	if got := Backoff(0, resp, time.Second); got != 3000000000*time.Second {
+		t.Fatalf("32-bit representable duration = %v, want %v", got, 3000000000*time.Second)
+	}
+
+	// Largest representable whole-second duration in time.Duration (math.MaxInt64 / 1e9).
+	resp.Header.Set("Retry-After", "9223372036")
+	if got := Backoff(0, resp, time.Second); got != 9223372036*time.Second {
+		t.Fatalf("at max duration boundary = %v, want %v", got, 9223372036*time.Second)
+	}
+
+	// Overflowing numeric seconds must saturate exactly to maxDuration.
+	resp.Header.Set("Retry-After", "9223372037")
+	if got := Backoff(0, resp, time.Second); got != maxDuration {
+		t.Fatalf("above boundary = %v, want max duration %v", got, maxDuration)
+	}
+
+	// Largest int64 seconds must saturate exactly to maxDuration.
+	resp.Header.Set("Retry-After", "9223372036854775807")
+	if got := Backoff(0, resp, time.Second); got != maxDuration {
+		t.Fatalf("max int64 = %v, want max duration %v", got, maxDuration)
+	}
+
+	// Values exceeding int64 range must saturate exactly to maxDuration.
+	resp.Header.Set("Retry-After", "99999999999999999999")
+	if got := Backoff(0, resp, time.Second); got != maxDuration {
+		t.Fatalf("range overflow = %v, want max duration %v", got, maxDuration)
+	}
+}
+
+func TestStreamTurnRetryDelayNumericOverflow(t *testing.T) {
+	resp := &http.Response{
+		StatusCode: http.StatusTooManyRequests,
+		Header:     http.Header{"Retry-After": []string{"9223372037"}},
+	}
+	err := NewResponseError(resp, errors.New("rate limited"))
+	got := StreamTurnRetryDelay(1, err)
+	if got <= 0 || got > StreamTurnMaxBackoff {
+		t.Fatalf("got = %v, want positive delay <= %v", got, StreamTurnMaxBackoff)
+	}
+	if got != StreamTurnMaxBackoff {
+		t.Fatalf("got = %v, want %v", got, StreamTurnMaxBackoff)
+	}
+}
+
+func TestDoSkipsOverflowingRetryAfter(t *testing.T) {
+	attempts := 0
+	client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		attempts++
+		return &http.Response{
+			StatusCode: http.StatusServiceUnavailable,
+			Header:     http.Header{"Retry-After": []string{"9223372037"}},
+			Body:       io.NopCloser(strings.NewReader("service unavailable")),
+		}, nil
+	})}
+	resp, err := Do(context.Background(), client, func() (*http.Request, error) {
+		return http.NewRequest(http.MethodPost, "https://external.test", nil)
+	}, instantPolicy())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if attempts != 1 || resp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("attempts/status = %d/%d, want 1/503", attempts, resp.StatusCode)
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	if string(body) != "service unavailable" {
+		t.Fatalf("body = %q, want %q", string(body), "service unavailable")
+	}
+}
+
 func TestDoStreamRetriesOnlyBeforeOutput(t *testing.T) {
 	t.Run("before output", func(t *testing.T) {
 		attempts := 0
