@@ -3938,7 +3938,7 @@ func TestSendAgentic_ToolOutputTruncatedOnlyForModelInput(t *testing.T) {
 	}
 }
 
-func TestShouldAutoCompactInputItems_CompactsLargeTranscript(t *testing.T) {
+func TestEstimateInputItemsTokens_LargeTranscript(t *testing.T) {
 	inputItems := []any{
 		agenticInputItem{
 			"type":    "message",
@@ -3950,12 +3950,9 @@ func TestShouldAutoCompactInputItems_CompactsLargeTranscript(t *testing.T) {
 	if tokens := estimateInputItemsTokens(inputItems); tokens < DefaultCompactionThreshold {
 		t.Fatalf("expected large transcript estimate, got %d tokens", tokens)
 	}
-	if !shouldAutoCompactInputItems(inputItems, DefaultCompactionThreshold) {
-		t.Fatal("expected large transcript to trigger compaction")
-	}
 }
 
-func TestShouldAutoCompactInputItems_DoesNotCompactSmallTranscript(t *testing.T) {
+func TestEstimateInputItemsTokens_SmallTranscript(t *testing.T) {
 	inputItems := []any{
 		agenticInputItem{
 			"type":    "message",
@@ -3964,7 +3961,7 @@ func TestShouldAutoCompactInputItems_DoesNotCompactSmallTranscript(t *testing.T)
 		},
 	}
 
-	if shouldAutoCompactInputItems(inputItems, DefaultCompactionThreshold) {
+	if estimateInputItemsTokens(inputItems) >= DefaultCompactionThreshold {
 		t.Fatal("did not expect compaction for a small transcript")
 	}
 }
@@ -5057,18 +5054,6 @@ func TestExternallyManagedOAuthSkipsPackagePreflightRefresh(t *testing.T) {
 }
 
 func TestOpenAIAgenticCompactionTranscriptAndImageHelpers(t *testing.T) {
-	if got := openAICompactionOutputTokens(0); got != 4096 {
-		t.Fatalf("default compaction tokens = %d", got)
-	}
-	if got := openAICompactionOutputTokens(128); got != 512 {
-		t.Fatalf("minimum compaction tokens = %d", got)
-	}
-	if got := openAICompactionOutputTokens(2048); got != 2048 {
-		t.Fatalf("explicit compaction tokens = %d", got)
-	}
-	if got := openAICompactionOutputTokens(9999); got != 4096 {
-		t.Fatalf("max compaction tokens = %d", got)
-	}
 
 	transcript := openAIInputItemsTranscript([]any{
 		map[string]any{"type": "message", "role": "system", "content": "system note"},

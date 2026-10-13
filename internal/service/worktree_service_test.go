@@ -450,8 +450,8 @@ func TestWorktreeCommitLabelHelpers(t *testing.T) {
 	}
 }
 
-func TestParseGitStatusFileStats(t *testing.T) {
-	stats := parseGitStatusFileStats([]byte(" M internal/service/foo.go\nA  new/file.go\nR  old.go -> newer.go\n?? scratch.txt\nD  removed.go\n"))
+func TestParseWorktreeFileStats_StatusMapping(t *testing.T) {
+	stats := parseWorktreeFileStats([]byte("M\tinternal/service/foo.go\nA\tnew/file.go\nR100\told.go\tnewer.go\nA\tscratch.txt\nD\tremoved.go\n"))
 	if len(stats) != 5 {
 		t.Fatalf("stats length = %d, want 5: %#v", len(stats), stats)
 	}

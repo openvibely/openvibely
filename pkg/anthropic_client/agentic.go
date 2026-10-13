@@ -860,63 +860,6 @@ func isAnthropicCodeExecutionToolName(name string) bool {
 	}
 }
 
-func anthropicTurnHasWebToolActivity(blocks []agenticBlock) bool {
-	for _, block := range blocks {
-		name := strings.TrimSpace(block.Name)
-		switch block.Type {
-		case "tool_use", "server_tool_use", "server_tool_result":
-			if name == "" && block.Type == "server_tool_result" {
-				name = inferProviderResultToolName(block.Content)
-			}
-			if isAnthropicProviderNativeToolName(name) {
-				return true
-			}
-		default:
-			if !isAnthropicProviderToolResultBlockType(block.Type) {
-				continue
-			}
-			name = anthropicProviderToolResultName(block)
-			if name == "" {
-				name = inferProviderResultToolName(block.Content)
-			}
-			if isAnthropicProviderNativeToolName(name) {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-func anthropicTurnHasCodeExecutionTooManyRequests(blocks []agenticBlock) bool {
-	for _, block := range blocks {
-		if !(block.Type == "server_tool_result" || isAnthropicProviderToolResultBlockType(block.Type)) {
-			continue
-		}
-		name := strings.TrimSpace(block.Name)
-		if name == "" {
-			name = anthropicProviderToolResultName(block)
-		}
-		if name == "" {
-			name = inferProviderResultToolName(block.Content)
-		}
-		rawLower := bytes.ToLower(bytes.TrimSpace(block.Content))
-		if len(rawLower) == 0 {
-			continue
-		}
-
-		isCodeExec := isAnthropicCodeExecutionToolName(name) ||
-			bytes.Contains(rawLower, []byte("code_execution")) ||
-			bytes.Contains(rawLower, []byte("bash_code_execution"))
-		if !isCodeExec {
-			continue
-		}
-		if bytes.Contains(rawLower, []byte("too_many_requests")) {
-			return true
-		}
-	}
-	return false
-}
-
 type anthropicToolExecutionResult struct {
 	block   agenticBlock
 	output  string
