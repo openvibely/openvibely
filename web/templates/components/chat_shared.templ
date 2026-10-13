@@ -4898,7 +4898,7 @@ templ ChatAutoScrollScript() {
 				if (text.length < 8192) return 0;
 				// Legacy XML controls can span Markdown blocks; reconcile them as one tail.
 				if (/<\s*\/?\s*thinking\s*>|<parameter\s/i.test(text)) return 0;
-				var ranges = preparedRanges || (window.codeRanges ? window.codeRanges(text) : []);
+				var ranges = preparedRanges || (window.codeRanges ? window.codeRanges(text, true) : []);
 				var controls = /^[\t ]*\[(Thinking|\/Thinking|Using tool:[^\]\r\n]+|Tool [^\]\r\n]+|\/Tool|Compaction [^\]\r\n]+)\][\t ]*(?=\r?$)/gm;
 				var thinking = false, tool = false, pending = 0, compaction = false;
 				var calls = Object.create(null), resultName = '';
@@ -4966,7 +4966,7 @@ templ ChatAutoScrollScript() {
 				var suffix = text.slice(state.offset);
 				var ranges;
 				if (suffix.length >= 64 * 1024 && yieldBetweenBatches !== false && window.codeRangesAsync) {
-					ranges = await window.codeRangesAsync(suffix, state.tail);
+					ranges = await window.codeRangesAsync(suffix, state.tail, true);
 					if (container._incrementalChat !== state || state.generation !== generation) return false;
 				}
 				var boundary = ranges === null ? 0 : window.chatStreamStableBoundary(suffix, ranges);
@@ -5245,7 +5245,7 @@ templ ChatAutoScrollScript() {
 					}
 						function prepareInitialCodeRanges() {
 							if (shouldYieldPreparation && window.codeRangesAsync) {
-								return window.codeRangesAsync(textBuffer, container).then(function(result) {
+								return window.codeRangesAsync(textBuffer, container, true).then(function(result) {
 									// Never repeat a failed multi-megabyte worker scan on the UI thread.
 									// Reject into the queued renderer's escaped plaintext fallback.
 									if (result === null) throw new Error('code-range worker unavailable');
@@ -5253,18 +5253,18 @@ templ ChatAutoScrollScript() {
 									return true;
 								});
 							}
-							rawCodeRanges = window.codeRanges ? window.codeRanges(textBuffer) : [];
+							rawCodeRanges = window.codeRanges ? window.codeRanges(textBuffer, true) : [];
 							return true;
 						}
 						function prepareCodeRanges() {
 							if (shouldYieldPreparation && window.codeRangesAsync) {
-								return window.codeRangesAsync(textBuffer, container).then(function(result) {
+								return window.codeRangesAsync(textBuffer, container, true).then(function(result) {
 									if (result === null) throw new Error('code-range worker unavailable');
 									codeRanges = excludeToolBlockCodeRanges(result);
 									return true;
 								});
 							}
-							codeRanges = excludeToolBlockCodeRanges(window.codeRanges ? window.codeRanges(textBuffer) : []);
+							codeRanges = excludeToolBlockCodeRanges(window.codeRanges ? window.codeRanges(textBuffer, true) : []);
 							return true;
 						}
 						function preparationBudgetExpired(startedAt, processed) {

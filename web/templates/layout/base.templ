@@ -2587,15 +2587,23 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				// Shared Markdown code-range parser used by transcript processing and
 				// raw-HTML escaping. Keep this aligned with the Go parser in
 				// internal/llm/transcript/markers.go.
-				window.codeRanges = function(text) {
+				window.codeRanges = function(text, transcript) {
 					var ranges = [];
 					var plainStart = 0;
 					var fenceStart = -1;
 					var fenceChar = '';
 					var fenceLength = 0;
+					var toolOutput = false;
+					var opaqueRanges = [];
+					var opaqueIndex = 0;
 					function addInlineRanges(start, end) {
 						var runs = [];
 						for (var i = start; i < end;) {
+							while (opaqueIndex < opaqueRanges.length && opaqueRanges[opaqueIndex].end <= i) opaqueIndex++;
+							if (opaqueIndex < opaqueRanges.length && opaqueRanges[opaqueIndex].start <= i) {
+								i = opaqueRanges[opaqueIndex].end;
+								continue;
+							}
 							if (text.charAt(i) !== '`') { i++; continue; }
 							var runStart = i;
 							while (i < end && text.charAt(i) === '`') i++;
@@ -2635,6 +2643,23 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						var lineEnd = sourceLine.end;
 						var nextLine = sourceLine.next;
 						var line = text.substring(lineStart, lineEnd);
+						// Tool metadata/output is opaque, not Markdown belonging to the response.
+						// Exclude their delimiters before scanning so truncated commands cannot steal a
+						// delimiter from later prose. Fenced examples remain literal.
+						if (transcript && fenceStart === -1) {
+							if (toolOutput) {
+								if (/^[\t ]*\[\/Tool\][\t ]*$/.test(line)) {
+									toolOutput = false;
+									opaqueRanges[opaqueRanges.length - 1].end = nextLine;
+								}
+								continue;
+							}
+							if (/^[\t ]*\[(?:Using tool:[^\]\r\n]+|Tool \S+ (?:done|error)(?::[^\]\r\n]*)?)\][\t ]*$/.test(line)) {
+								toolOutput = /^[\t ]*\[Tool \S+ (?:done|error)\][\t ]*$/.test(line);
+								opaqueRanges.push({start: lineStart, end: toolOutput ? text.length : nextLine});
+								continue;
+							}
+						}
 						var indent = 0;
 						while (indent < line.length && indent < 3 && line.charAt(indent) === ' ') indent++;
 						var marker = line.charAt(indent);
@@ -2664,9 +2689,9 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					}
 					return ranges;
 				};
-				window.codeRangesAsync = function(text, owner) {
+				window.codeRangesAsync = function(text, owner, transcript) {
 					if (!text || text.length < 64 * 1024) {
-						return Promise.resolve(window.codeRanges(text || ''));
+						return Promise.resolve(window.codeRanges(text || '', transcript));
 					}
 					if (typeof Worker === 'undefined' || typeof Blob === 'undefined' || !window.URL || !window.URL.createObjectURL) {
 						return Promise.resolve(null);
@@ -2678,7 +2703,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						if (!window._codeRangeWorkerURL) {
 							var workerSource = 'var window=self;window.markdownLineRanges=' + window.markdownLineRanges.toString() +
 								';window.codeRanges=' + window.codeRanges.toString() +
-								';self.onmessage=function(event){try{self.postMessage({ranges:window.codeRanges(event.data)});}catch(err){self.postMessage({error:String(err&&err.message||err)});}};';
+								';self.onmessage=function(event){try{self.postMessage({ranges:window.codeRanges(event.data.text, event.data.transcript)});}catch(err){self.postMessage({error:String(err&&err.message||err)});}};';
 							window._codeRangeWorkerURL = window.URL.createObjectURL(new Blob([workerSource], { type: 'text/javascript' }));
 						}
 						return new Promise(function(resolve) {
@@ -2699,7 +2724,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 							worker.onerror = function() { finish(null); };
 							// Slow work remains off the UI thread. The owning render deadline
 							// cancels this worker if it never completes.
-							worker.postMessage(text);
+							worker.postMessage({text: text, transcript: !!transcript});
 						});
 					} catch (err) {
 						return Promise.resolve(null);

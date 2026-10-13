@@ -65,7 +65,7 @@ func TestChatRenderingPathsUseBaseSafeMarkdownRenderer(t *testing.T) {
 	}
 	baseHelpers := renderedBaseMarkdownCodeHelpers(t)
 	for _, required := range []string{
-		"window.codeRanges = function(text)",
+		"window.codeRanges = function(text, transcript)",
 		"var backslashCount = 0",
 		"if (backslashCount % 2 === 1)",
 		"if (closeIndex === -1) { openIndex++; continue; }",
@@ -1438,7 +1438,7 @@ func TestBrowserPerformance_CodeRangeWorkerCanCompleteAfterFormerTimeoutInChrome
 	      } catch (_) {}
 	    }
 	    var productionCodeRanges = window.codeRanges;
-	    var workerSource = "var window=self;window.markdownLineRanges=" + window.markdownLineRanges.toString() + ";window.codeRanges=" + productionCodeRanges.toString() + ";self.onmessage=function(event){setTimeout(function(){try{self.postMessage({ranges:window.codeRanges(event.data)});}catch(err){self.postMessage({error:String(err&&err.message||err)});}},3500);};";
+	    var workerSource = "var window=self;window.markdownLineRanges=" + window.markdownLineRanges.toString() + ";window.codeRanges=" + productionCodeRanges.toString() + ";self.onmessage=function(event){setTimeout(function(){try{self.postMessage({ranges:window.codeRanges(event.data.text, event.data.transcript)});}catch(err){self.postMessage({error:String(err&&err.message||err)});}},3500);};";
 	    window._codeRangeWorkerURL = window.URL.createObjectURL(new Blob([workerSource], {type: 'text/javascript'}));
 	    window.codeRanges = function() { throw new Error('code-range scanner ran on the main thread'); };
 	    var owner = {};
@@ -3204,7 +3204,7 @@ func TestSharedTaskResultLinkConversionAvailableOnDirectTaskThreadLoad(t *testin
 	normalizeToolTextDefinition := strings.Index(content, "window.normalizeTaskResultToolOutputTextNodes = function(messageElement)")
 	createDefinition := strings.Index(content, "window.convertTaskLinksInMessage = function(messageElement)")
 	editDefinition := strings.Index(content, "window.convertTaskEditLinksInMessage = function(messageElement)")
-	codeDefinition := strings.Index(content, "window.codeRanges = function(text)")
+	codeDefinition := strings.Index(content, "window.codeRanges = function(text, transcript)")
 	normalizeDefinition := strings.Index(content, "window.normalizeTranscriptMarkers = function(text, ranges)")
 	hydration := strings.Index(content, "// Apply cleaning and scroll on load")
 	if normalizeToolTextDefinition == -1 || createDefinition == -1 || editDefinition == -1 || codeDefinition == -1 || normalizeDefinition == -1 {
@@ -3633,7 +3633,7 @@ func TestCleanTranscriptControls_PreservesCodeExamples(t *testing.T) {
 		t.Fatal("rendered script must define transcript normalization and cleaning helpers")
 	}
 	codeHelpers := renderedBaseMarkdownCodeHelpers(t)
-	if strings.Count(content, "window.codeRanges(textBuffer)") != 2 {
+	if strings.Count(content, "window.codeRanges(textBuffer, true)") != 2 {
 		t.Fatal("streaming renderer must synchronously calculate code ranges only for small inputs")
 	}
 	if strings.Contains(content, "result !== null ? result : (window.codeRanges") {
@@ -3915,7 +3915,7 @@ func TestTranscriptCodeProtectionGeneratedParity(t *testing.T) {
 	content := string(baseGenerated) + string(generated)
 	for _, snippet := range []string{
 		"window.markdownLineRanges = function(text)",
-		"window.codeRanges = function(text)",
+		"window.codeRanges = function(text, transcript)",
 		"function addInlineRanges(start, end)",
 		"var backslashCount = 0",
 		"if (backslashCount % 2 === 1)",
@@ -3948,7 +3948,7 @@ func TestTranscriptCodeProtectionGeneratedParity(t *testing.T) {
 	if strings.Contains(string(generated), "function addInlineRanges(start, end)") || strings.Contains(string(generated), "window.isInsideCode = function") {
 		t.Fatal("generated Chat component must use the base layout's shared Markdown helpers instead of defining duplicates")
 	}
-	if strings.Count(content, "window.codeRanges(textBuffer)") != 2 {
+	if strings.Count(content, "window.codeRanges(textBuffer, true)") != 2 {
 		t.Fatal("generated streaming renderer must synchronously scan only small inputs")
 	}
 	if strings.Contains(content, "result !== null ? result : (window.codeRanges") {
@@ -4077,7 +4077,7 @@ func TestRenderStreamingContent_RemovesWhitespacePreWrap(t *testing.T) {
 	}
 	for _, snippet := range []string{
 		"var shouldYieldPreparation = yieldBetweenBatches !== false && textBuffer.length >= 64 * 1024",
-		"window.codeRangesAsync(textBuffer, container)",
+		"window.codeRangesAsync(textBuffer, container, true)",
 		"targetProperty = 'thinkingRenderedContent'",
 		"pendingThinkingRenderedContent = seg.thinkingRenderedContent",
 		"var preparationPhases = [",
