@@ -5177,6 +5177,13 @@ templ ChatAutoScrollScript() {
 					}
 					function protectInitialToolBlocks() {
 						rawCodeRanges = rawCodeRanges.concat(toolBlockRanges(textBuffer));
+						// Command previews are opaque to alias normalization as well as Markdown.
+						// Leave malformed legacy invocations available to the normalizer.
+						var headers = /^[\t ]*\[Using tool:\s*[A-Za-z0-9_.:-]+(?: \| [^\]\r\n]*)?\][\t ]*(?=\r?$)/gm;
+						var header;
+						while ((header = headers.exec(textBuffer)) !== null) {
+							rawCodeRanges.push({start: header.index, end: header.index + header[0].length});
+						}
 						rawCodeRanges.sort(function(a, b) { return a.start - b.start; });
 						var mergedRanges = [];
 						rawCodeRanges.forEach(function(range) {
