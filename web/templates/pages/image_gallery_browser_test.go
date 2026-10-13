@@ -70,6 +70,22 @@ func TestBrowserFunctional_SharedImageGallery(t *testing.T) {
 		b.waitFor("gallery entries", `String(!!document.querySelector("#attachment-list [data-image-gallery-item]") && !!window.imageGallery)`, "true")
 		b.click(`#attachment-list [data-image-gallery-item]`)
 		b.waitFor("task gallery loaded", `document.querySelector('[data-gallery-count]').textContent+':'+document.querySelector('[data-gallery-status]').textContent`, "1 / 2:")
+		for _, theme := range []string{"dark", "light"} {
+			b.evaluate(`document.documentElement.dataset.theme='` + theme + `';document.documentElement.dataset.colorTheme='openvibely-` + theme + `';'set'`)
+			for _, control := range []string{"close", "next", "plus"} {
+				var point struct {
+					X float64 `json:"x"`
+					Y float64 `json:"y"`
+				}
+				json.Unmarshal([]byte(b.evaluate(`JSON.stringify((()=>{const r=document.querySelector('[data-gallery-`+control+`]').getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})())`)), &point)
+				b.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseMoved", "x": point.X, "y": point.Y}, nil)
+				background := "rgba(0, 0, 0, 0.7)"
+				if control == "plus" {
+					background = "rgba(0, 0, 0, 0)"
+				}
+				b.waitFor(theme+" "+control+" single hover layer", `String((()=>{const s=getComputedStyle(document.querySelector('[data-gallery-`+control+`]'));return s.backgroundColor==='`+background+`' && s.backgroundImage==='linear-gradient(rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0.12))';})())`, "true")
+			}
+		}
 		b.waitFor("fullscreen transparent preview", `String((()=>{const d=document.getElementById('image-gallery'),r=d.getBoundingClientRect();return r.left===0 && r.top===0 && Math.abs(r.width-innerWidth)<1 && Math.abs(r.height-innerHeight)<1 && getComputedStyle(d).backgroundColor==='rgba(0, 0, 0, 0)';})())`, "true")
 		b.click(`[data-gallery-image]`)
 		b.waitFor("image click keeps preview open", `String(document.getElementById('image-gallery').open)`, "true")
