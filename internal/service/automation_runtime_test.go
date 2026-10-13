@@ -67,6 +67,30 @@ func newAutomationRuntimeFixtureWithDB(t *testing.T, db *sql.DB, adapterKey stri
 	return automationRuntimeFixture{db: db, project: project, task: task, schedule: schedule, definition: definition, repo: automationRepo, taskRepo: taskRepo, schedRepo: scheduleRepo}
 }
 
+func (f automationRuntimeFixture) invocationStatus(t *testing.T, invocationID string) string {
+	t.Helper()
+	invocation, err := f.repo.GetAutomationInvocation(context.Background(), f.project.ID, f.definition.Automation.ID, invocationID)
+	require.NoError(t, err)
+	require.NotNil(t, invocation)
+	return string(invocation.Status)
+}
+
+func (f automationRuntimeFixture) workItemStatus(t *testing.T, workItemID string) string {
+	t.Helper()
+	item, err := f.repo.GetAutomationWorkItem(context.Background(), f.project.ID, f.definition.Automation.ID, workItemID)
+	require.NoError(t, err)
+	require.NotNil(t, item)
+	return string(item.Status)
+}
+
+func (f automationRuntimeFixture) automation(t *testing.T) models.Automation {
+	t.Helper()
+	definition, err := f.repo.GetDefinition(context.Background(), f.project.ID, f.definition.Automation.ID)
+	require.NoError(t, err)
+	require.NotNil(t, definition)
+	return definition.Automation
+}
+
 func newCountingAutomationRuntimeFixture(t *testing.T, adapterKey string) (automationRuntimeFixture, *testutil.SQLStatementCounter) {
 	t.Helper()
 	db, counter := testutil.NewStatementCountingTestDB(t)
@@ -548,13 +572,12 @@ func TestAutomationRuntimeAtomicOccurrenceDispatchAndRestartRecovery(t *testing.
 	var outboxStatus string
 	require.NoError(t, fixture.db.QueryRow(`SELECT status FROM automation_dispatch_outbox WHERE id = ?`, dispatch.ID).Scan(&outboxStatus))
 	require.Equal(t, "completed", outboxStatus)
-	var invocationStatus string
-	require.NoError(t, fixture.db.QueryRow(`SELECT status FROM automation_invocations WHERE id = ?`, invocation.ID).Scan(&invocationStatus))
+	invocationStatus := fixture.invocationStatus(t, invocation.ID)
 	require.Equal(t, "running", invocationStatus, "terminal execution must not close an invocation with pending owned activity")
 	_, err = fixture.db.Exec(`UPDATE automation_activities SET status = 'completed', completed_at = CURRENT_TIMESTAMP WHERE id = ?`, pendingActivity.ID)
 	require.NoError(t, err)
 	require.NoError(t, reconciler.ReconcileOnce(ctx))
-	require.NoError(t, fixture.db.QueryRow(`SELECT status FROM automation_invocations WHERE id = ?`, invocation.ID).Scan(&invocationStatus))
+	invocationStatus = fixture.invocationStatus(t, invocation.ID)
 	require.Equal(t, "completed", invocationStatus)
 	var reservations int
 	require.NoError(t, fixture.db.QueryRow(`SELECT COUNT(*) FROM automation_task_run_reservations WHERE dispatch_id = ?`, dispatch.ID).Scan(&reservations))
@@ -624,8 +647,7 @@ func TestAutomationDeleteAllowsOrphanedRunningInvocationAfterTaskDeletion(t *tes
 	require.NoError(t, err)
 
 	require.NoError(t, fixture.taskRepo.Delete(ctx, fixture.task.ID), "ordinary task deletion reproduces the orphaned invocation in existing databases")
-	var invocationStatus string
-	require.NoError(t, fixture.db.QueryRow(`SELECT status FROM automation_invocations WHERE id = ?`, invocation.ID).Scan(&invocationStatus))
+	invocationStatus := fixture.invocationStatus(t, invocation.ID)
 	require.Equal(t, "running", invocationStatus)
 	var dispatchRows, executionRows int
 	require.NoError(t, fixture.db.QueryRow(`SELECT COUNT(*) FROM automation_dispatch_outbox WHERE invocation_id = ?`, invocation.ID).Scan(&dispatchRows))
@@ -1735,8 +1757,7 @@ func TestAutomationRuntimeReconcilerAbandonsCancelledCapacityQueuedDispatch(t *t
 	var dispatchStatus string
 	require.NoError(t, fixture.db.QueryRow(`SELECT status FROM automation_dispatch_outbox WHERE id = ?`, dispatch.ID).Scan(&dispatchStatus))
 	require.Equal(t, "failed", dispatchStatus)
-	var invocationStatus string
-	require.NoError(t, fixture.db.QueryRow(`SELECT status FROM automation_invocations WHERE id = ?`, dispatch.InvocationID).Scan(&invocationStatus))
+	invocationStatus := fixture.invocationStatus(t, dispatch.InvocationID)
 	require.Equal(t, "cancelled", invocationStatus)
 	var reservations int
 	require.NoError(t, fixture.db.QueryRow(`SELECT COUNT(*) FROM automation_task_run_reservations WHERE dispatch_id = ?`, dispatch.ID).Scan(&reservations))
@@ -1904,8 +1925,7 @@ func TestAutomationRuntimeReconcilesTerminalExecutionProjectionAfterCrash(t *tes
 	require.NoError(t, err, "simulate process loss after authoritative execution write and before projection update")
 	reconciler := NewAutomationReconciler(fixture.repo, execRepo, NewWorkerService(nil, 1, nil))
 	require.NoError(t, reconciler.ReconcileOnce(ctx))
-	var status string
-	require.NoError(t, fixture.db.QueryRow(`SELECT status FROM automation_work_items WHERE id = ?`, item.ID).Scan(&status))
+	status := fixture.workItemStatus(t, item.ID)
 	require.Equal(t, "completed", status)
 	var activityStatus string
 	require.NoError(t, fixture.db.QueryRow(`SELECT status FROM automation_activities WHERE activity_key = ?`, "execution:"+execution.ID+":run").Scan(&activityStatus))
@@ -2024,8 +2044,7 @@ func TestAutomationRuntimeSkippedOccurrenceAndProjectionIdempotency(t *testing.T
 		EventKey: "alert:stable:current-graph-completed", FromNodeID: newApproval.ID, ToNodeID: newCompleted.ID, Transition: models.AutomationTransitionCompleted,
 	})
 	require.NoError(t, err)
-	var itemStatus string
-	require.NoError(t, fixture.db.QueryRow(`SELECT status FROM automation_work_items WHERE id = ?`, mappedItem.ID).Scan(&itemStatus))
+	itemStatus := fixture.workItemStatus(t, mappedItem.ID)
 	require.Equal(t, "completed", itemStatus)
 	var positions int
 	require.NoError(t, fixture.db.QueryRow(`SELECT COUNT(*) FROM automation_work_item_positions WHERE work_item_id = ?`, mappedItem.ID).Scan(&positions))
@@ -2147,8 +2166,7 @@ func TestAutomationRuntimeCompletedBranchDoesNotCloseParallelWork(t *testing.T) 
 		EventKey: "parallel:approval:done", FromNodeID: approval.ID, ToNodeID: completed.ID, Transition: models.AutomationTransitionCompleted,
 	})
 	require.NoError(t, err)
-	var status string
-	require.NoError(t, fixture.db.QueryRow(`SELECT status FROM automation_work_items WHERE id = ?`, item.ID).Scan(&status))
+	status := fixture.workItemStatus(t, item.ID)
 	require.Equal(t, "active", status)
 	var positions int
 	require.NoError(t, fixture.db.QueryRow(`SELECT COUNT(*) FROM automation_work_item_positions WHERE work_item_id = ?`, item.ID).Scan(&positions))
@@ -2160,7 +2178,7 @@ func TestAutomationRuntimeCompletedBranchDoesNotCloseParallelWork(t *testing.T) 
 		EventKey: "parallel:inbox:done", FromNodeID: inbox.ID, ToNodeID: completed.ID, Transition: models.AutomationTransitionCompleted,
 	})
 	require.NoError(t, err)
-	require.NoError(t, fixture.db.QueryRow(`SELECT status FROM automation_work_items WHERE id = ?`, item.ID).Scan(&status))
+	status = fixture.workItemStatus(t, item.ID)
 	require.Equal(t, "completed", status)
 }
 
@@ -2277,8 +2295,7 @@ func TestAutomationRuntimeDispatchFailureBackoffIsOwnerOnlyAndTerminal(t *testin
 	require.ErrorIs(t, fixture.repo.FailDispatch(ctx, dispatch.ID, "owner", "duplicate terminal retry", 2, nextAttempt.Add(2*time.Millisecond)), persistence.ErrAutomationDispatchLease)
 	require.NoError(t, fixture.db.QueryRow(`SELECT status FROM automation_dispatch_outbox WHERE id = ?`, dispatch.ID).Scan(&status))
 	require.Equal(t, "failed", status)
-	var invocationStatus string
-	require.NoError(t, fixture.db.QueryRow(`SELECT status FROM automation_invocations WHERE id = ?`, dispatch.InvocationID).Scan(&invocationStatus))
+	invocationStatus := fixture.invocationStatus(t, dispatch.InvocationID)
 	require.Equal(t, "failed", invocationStatus)
 	var reservations int
 	require.NoError(t, fixture.db.QueryRow(`SELECT COUNT(*) FROM automation_task_run_reservations WHERE dispatch_id = ?`, dispatch.ID).Scan(&reservations))
@@ -4734,12 +4751,9 @@ func TestAutomationExternalPullRequestRefreshIsExplicitCachedAndReconcilesProjec
 	stored, err := pullRequests.GetByTaskID(ctx, fixture.task.ID)
 	require.NoError(t, err)
 	require.Equal(t, "merged", stored.PRState)
-	var storedHealth, storedHealthReason string
-	require.NoError(t, fixture.db.QueryRowContext(ctx, `SELECT health_state, health_reason FROM automations WHERE id = ?`, fixture.definition.Automation.ID).Scan(&storedHealth, &storedHealthReason))
-	require.Equal(t, string(models.AutomationHealthHealthy), storedHealth, "successful refresh must persistently clear stale external degradation")
-	var lifecycle string
-	require.NoError(t, fixture.db.QueryRowContext(ctx, `SELECT lifecycle_state FROM automations WHERE id = ?`, fixture.definition.Automation.ID).Scan(&lifecycle))
-	require.Equal(t, "active", lifecycle, "external health evaluation must never change lifecycle")
+	storedAutomation := fixture.automation(t)
+	require.Equal(t, models.AutomationHealthHealthy, storedAutomation.HealthState, "successful refresh must persistently clear stale external degradation")
+	require.Equal(t, models.AutomationActive, storedAutomation.LifecycleState, "external health evaluation must never change lifecycle")
 	var completed int
 	require.NoError(t, fixture.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM automation_work_items WHERE automation_id = ? AND status = 'completed'`, fixture.definition.Automation.ID).Scan(&completed))
 	require.Equal(t, 1, completed, "merged PR state must advance the persisted Automation projection")

@@ -375,10 +375,9 @@ func TestAutomationHistoryMetricsAndHealthUsePersistedEvents(t *testing.T) {
 		}
 	}
 	require.Equal(t, 3, recentTriggerFailures)
-	var lifecycle, storedHealth string
-	require.NoError(t, fixture.db.QueryRow(`SELECT lifecycle_state, health_state FROM automations WHERE id = ?`, fixture.definition.Automation.ID).Scan(&lifecycle, &storedHealth))
-	require.Equal(t, "active", lifecycle)
-	require.Equal(t, "unhealthy", storedHealth)
+	stored := storedAutomation(t, fixture.repo, fixture.project.ID, fixture.definition.Automation.ID)
+	require.Equal(t, models.AutomationActive, stored.LifecycleState)
+	require.Equal(t, models.AutomationHealthUnhealthy, stored.HealthState)
 }
 
 func TestAutomationHistoryReplayPaginationSeedsPersistedPriorState(t *testing.T) {
@@ -672,9 +671,7 @@ func TestAutomationHistoryHealthIgnoresStaleFailureAfterRecentSuccesses(t *testi
 	health, err = fixture.repo.RecomputeAutomationHealth(ctx, fixture.project.ID, fixture.definition.Automation.ID, now)
 	require.NoError(t, err)
 	require.Equal(t, models.AutomationHealthHealthy, health.State)
-	var lifecycle string
-	require.NoError(t, fixture.db.QueryRow(`SELECT lifecycle_state FROM automations WHERE id = ?`, fixture.definition.Automation.ID).Scan(&lifecycle))
-	require.Equal(t, "active", lifecycle)
+	require.Equal(t, models.AutomationActive, storedAutomation(t, fixture.repo, fixture.project.ID, fixture.definition.Automation.ID).LifecycleState)
 }
 
 func TestAutomationHistoryHealthStableNoChangeSkipsAutomationUpdatesAndReducesSQL(t *testing.T) {
@@ -698,7 +695,7 @@ func TestAutomationHistoryHealthStableNoChangeSkipsAutomationUpdatesAndReducesSQ
 			require.Zero(t, updates, "stable published Automations must not issue unchanged UPDATE automations statements")
 			require.LessOrEqual(t, len(statements), baselineStatements/10, "stable health SQL should drop by at least 90%% versus the former per-Automation path")
 			requireAutomationHealthEvaluatedCount(t, db, fixture.projectID, count)
-			requireAutomationHealthUnevaluated(t, db, fixture.unpublishedAutomationID)
+			requireAutomationHealthUnevaluated(t, repo, fixture.projectID, fixture.unpublishedAutomationID)
 		})
 	}
 }
@@ -712,7 +709,7 @@ func TestAutomationHistoryHealthChangedInputsPersistAffectedRecords(t *testing.T
 		_, err := fixture.db.ExecContext(ctx, `UPDATE automation_invocations SET completed_at = ?, updated_at = ? WHERE id = ?`, now, now, completed.ID)
 		require.NoError(t, err)
 		require.NoError(t, fixture.repo.RecomputeAutomationHealthForAll(ctx, now, 100))
-		requireAutomationHealthState(t, fixture.db, fixture.definition.Automation.ID, models.AutomationHealthHealthy, "Recent triggers")
+		requireAutomationHealthState(t, fixture.repo, fixture.project.ID, fixture.definition.Automation.ID, models.AutomationHealthHealthy, "Recent triggers")
 
 		producer := automationNodeByKey(t, fixture.definition, "vision_suggestions")
 		gate := automationNodeByKey(t, fixture.definition, "approval")
@@ -732,7 +729,7 @@ func TestAutomationHistoryHealthChangedInputsPersistAffectedRecords(t *testing.T
 		require.NoError(t, err)
 
 		require.NoError(t, fixture.repo.RecomputeAutomationHealthForAll(ctx, now.Add(time.Minute), 100))
-		requireAutomationHealthState(t, fixture.db, fixture.definition.Automation.ID, models.AutomationHealthDegraded, "1 blocked or failed position")
+		requireAutomationHealthState(t, fixture.repo, fixture.project.ID, fixture.definition.Automation.ID, models.AutomationHealthDegraded, "1 blocked or failed position")
 	})
 
 	t.Run("recent failure", func(t *testing.T) {
@@ -743,13 +740,13 @@ func TestAutomationHistoryHealthChangedInputsPersistAffectedRecords(t *testing.T
 		_, err := fixture.db.ExecContext(ctx, `UPDATE automation_invocations SET completed_at = ?, updated_at = ? WHERE id = ?`, now, now, completed.ID)
 		require.NoError(t, err)
 		require.NoError(t, fixture.repo.RecomputeAutomationHealthForAll(ctx, now, 100))
-		requireAutomationHealthState(t, fixture.db, fixture.definition.Automation.ID, models.AutomationHealthHealthy, "Recent triggers")
+		requireAutomationHealthState(t, fixture.repo, fixture.project.ID, fixture.definition.Automation.ID, models.AutomationHealthHealthy, "Recent triggers")
 
 		failed := createHistoryInvocation(t, fixture, "fresh-failure", "failed")
 		_, err = fixture.db.ExecContext(ctx, `UPDATE automation_invocations SET completed_at = ?, updated_at = ? WHERE id = ?`, now.Add(time.Minute), now.Add(time.Minute), failed.ID)
 		require.NoError(t, err)
 		require.NoError(t, fixture.repo.RecomputeAutomationHealthForAll(ctx, now.Add(2*time.Minute), 100))
-		requireAutomationHealthState(t, fixture.db, fixture.definition.Automation.ID, models.AutomationHealthDegraded, "1 recent failed invocation")
+		requireAutomationHealthState(t, fixture.repo, fixture.project.ID, fixture.definition.Automation.ID, models.AutomationHealthDegraded, "1 recent failed invocation")
 	})
 
 	t.Run("stale external state", func(t *testing.T) {
@@ -761,7 +758,7 @@ func TestAutomationHistoryHealthChangedInputsPersistAffectedRecords(t *testing.T
 		require.NoError(t, err)
 		attachAutomationHealthPullRequest(t, fixture, completed.ID, now)
 		require.NoError(t, fixture.repo.RecomputeAutomationHealthForAll(ctx, now, 100))
-		requireAutomationHealthState(t, fixture.db, fixture.definition.Automation.ID, models.AutomationHealthHealthy, "Recent triggers")
+		requireAutomationHealthState(t, fixture.repo, fixture.project.ID, fixture.definition.Automation.ID, models.AutomationHealthHealthy, "Recent triggers")
 
 		_, err = fixture.db.ExecContext(ctx, `UPDATE task_pull_requests SET updated_at = ? WHERE task_id = ?`, now.Add(-2*persistence.AutomationExternalStaleAfter).UTC().Format("2006-01-02 15:04:05"), fixture.task.ID)
 		require.NoError(t, err)
@@ -770,7 +767,7 @@ func TestAutomationHistoryHealthChangedInputsPersistAffectedRecords(t *testing.T
 		require.Equal(t, 1, externalState.TrackedResources)
 		require.True(t, externalState.Stale)
 		require.NoError(t, fixture.repo.RecomputeAutomationHealthForAll(ctx, now.Add(time.Minute), 100))
-		requireAutomationHealthState(t, fixture.db, fixture.definition.Automation.ID, models.AutomationHealthDegraded, "external GitHub state is stale")
+		requireAutomationHealthState(t, fixture.repo, fixture.project.ID, fixture.definition.Automation.ID, models.AutomationHealthDegraded, "external GitHub state is stale")
 	})
 
 	t.Run("publication", func(t *testing.T) {
@@ -781,12 +778,12 @@ func TestAutomationHistoryHealthChangedInputsPersistAffectedRecords(t *testing.T
 		automationID, versionID := "health-publication-automation", "health-publication-version"
 		require.NoError(t, insertMinimalAutomationDefinition(ctx, db, project.ID, automationID, versionID, false))
 		require.NoError(t, repo.RecomputeAutomationHealthForAll(ctx, time.Date(2026, time.August, 2, 15, 0, 0, 0, time.UTC), 100))
-		requireAutomationHealthUnevaluated(t, db, automationID)
+		requireAutomationHealthUnevaluated(t, repo, project.ID, automationID)
 
 		_, err := db.ExecContext(ctx, `UPDATE automations SET published_version_id = ? WHERE id = ?`, versionID, automationID)
 		require.NoError(t, err)
 		require.NoError(t, repo.RecomputeAutomationHealthForAll(ctx, time.Date(2026, time.August, 2, 15, 1, 0, 0, time.UTC), 100))
-		requireAutomationHealthState(t, db, automationID, models.AutomationHealthUnknown, "No terminal invocation yet")
+		requireAutomationHealthState(t, repo, project.ID, automationID, models.AutomationHealthUnknown, "No terminal invocation yet")
 	})
 }
 
@@ -954,22 +951,25 @@ func requireAutomationHealthEvaluatedCount(t *testing.T, db *sql.DB, projectID s
 	require.Equal(t, expected, evaluated)
 }
 
-func requireAutomationHealthUnevaluated(t *testing.T, db *sql.DB, automationID string) {
+func storedAutomation(t *testing.T, repo persistence.AutomationStore, projectID, automationID string) models.Automation {
 	t.Helper()
-	var evaluated sql.NullString
-	require.NoError(t, db.QueryRow(`SELECT health_evaluated_at FROM automations WHERE id = ?`, automationID).Scan(&evaluated))
-	require.False(t, evaluated.Valid)
+	definition, err := repo.GetDefinition(context.Background(), projectID, automationID)
+	require.NoError(t, err)
+	require.NotNil(t, definition)
+	return definition.Automation
 }
 
-func requireAutomationHealthState(t *testing.T, db *sql.DB, automationID string, expected models.AutomationHealthState, reasonContains string) {
+func requireAutomationHealthUnevaluated(t *testing.T, repo persistence.AutomationStore, projectID, automationID string) {
 	t.Helper()
-	var state models.AutomationHealthState
-	var reason string
-	var evaluated sql.NullString
-	require.NoError(t, db.QueryRow(`SELECT health_state, health_reason, health_evaluated_at FROM automations WHERE id = ?`, automationID).Scan(&state, &reason, &evaluated))
-	require.Equal(t, expected, state)
-	require.Contains(t, reason, reasonContains)
-	require.True(t, evaluated.Valid)
+	require.Nil(t, storedAutomation(t, repo, projectID, automationID).HealthEvaluatedAt)
+}
+
+func requireAutomationHealthState(t *testing.T, repo persistence.AutomationStore, projectID, automationID string, expected models.AutomationHealthState, reasonContains string) {
+	t.Helper()
+	automation := storedAutomation(t, repo, projectID, automationID)
+	require.Equal(t, expected, automation.HealthState)
+	require.Contains(t, automation.HealthReason, reasonContains)
+	require.NotNil(t, automation.HealthEvaluatedAt)
 }
 
 type automationHealthMeasurement struct {
