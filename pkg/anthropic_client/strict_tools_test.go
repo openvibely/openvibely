@@ -250,3 +250,108 @@ func TestExternalReferenceNullReachesExecutor(t *testing.T) {
 		t.Fatalf("executor calls=%d result=%q error=%v", calls, out, bad)
 	}
 }
+
+func TestStrictSelectionUsesImpactInsteadOfRegistrationOrder(t *testing.T) {
+	defs := DefaultTools()
+	defs = append(defs, ToolDefinition{Name: "delete_file", Schema: &toolschema.Schema{Type: "object", AdditionalProperties: toolschema.Pointer(false), Properties: map[string]*toolschema.Schema{"file_path": {Type: "string"}}, Required: []string{"file_path"}}})
+	for _, d := range chatcontrol.Registry() {
+		if _, ok := strictToolPriorities[d.Name]; !ok {
+			t.Fatalf("classify new registry tool %s by impact", d.Name)
+		}
+		defs = append(defs, ToolDefinition{Name: d.Name, Schema: d.Schema})
+	}
+	for _, d := range DefaultTools() {
+		if _, ok := strictToolPriorities[d.Name]; !ok {
+			t.Fatalf("unclassified local tool %s", d.Name)
+		}
+	}
+	selected := func(defs []ToolDefinition) map[string]bool {
+		result := map[string]bool{}
+		for i, d := range prepareStrictTools(defs) {
+			if d.Name != defs[i].Name {
+				t.Fatal("changed advertised order")
+			}
+			result[d.Name] = *d.Strict
+		}
+		return result
+	}
+	want := selected(defs)
+	for i, j := 0, len(defs)-1; i < j; i, j = i+1, j-1 {
+		defs[i], defs[j] = defs[j], defs[i]
+	}
+	got := selected(defs)
+	for name, enabled := range want {
+		if got[name] != enabled {
+			t.Fatalf("registration order changed strict for %s", name)
+		}
+	}
+	for _, name := range []string{"list_tasks", "github_replace_pull_request_branch", "delete_file", "delete_automation", "github_close_issue"} {
+		if !want[name] {
+			t.Errorf("high-impact tool %s lost strict capacity", name)
+		}
+	}
+	if want["list_capabilities"] {
+		t.Fatal("informational tool consumed scarce capacity")
+	}
+}
+
+func TestStrictSelectionSkipsIneligibleHighPriorityAndHonorsOverrides(t *testing.T) {
+	schema := &toolschema.Schema{Type: "object", AdditionalProperties: toolschema.Pointer(false)}
+	no := false
+	defs := []ToolDefinition{
+		{Name: "list_tasks", Schema: schema, Strict: &no},
+		{Name: "merge_task", Schema: &toolschema.Schema{Type: "object"}},
+		{Name: "external_override", Schema: schema, StrictPriority: 1000},
+	}
+	for i := 0; i < 21; i++ {
+		defs = append(defs, ToolDefinition{Name: fmt.Sprintf("external_%02d", i), Schema: schema})
+	}
+	got := prepareStrictTools(defs)
+	if *got[0].Strict || *got[1].Strict || !*got[2].Strict {
+		t.Fatal("disabled, unsupported, or override policy lost")
+	}
+	if !*got[3].Strict || *got[len(got)-1].Strict {
+		t.Fatal("fallback ranking or count budget lost")
+	}
+}
+
+func TestStrictImpactPolicyReachesProviderRequest(t *testing.T) {
+	var defs []ToolDefinition
+	for _, d := range chatcontrol.Registry() {
+		defs = append(defs, ToolDefinition{Name: d.Name, Schema: d.Schema, StrictPriority: d.StrictPriority})
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Tools []struct {
+				Name   string `json:"name"`
+				Strict bool   `json:"strict"`
+			} `json:"tools"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Error(err)
+			return
+		}
+		selected := map[string]bool{}
+		for _, tool := range body.Tools {
+			selected[tool.Name] = tool.Strict
+		}
+		for _, name := range []string{"list_tasks", "github_replace_pull_request_branch", "github_close_issue", "delete_automation"} {
+			if !selected[name] {
+				t.Errorf("%s not strict on wire", name)
+			}
+		}
+		if selected["list_capabilities"] {
+			t.Error("informational tool displaced high-impact tools")
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, "data: {\"type\":\"message_start\",\"message\":{\"id\":\"m1\",\"usage\":{\"input_tokens\":1}}}\n\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":1}}\n\ndata: {\"type\":\"message_stop\"}\n\n")
+	}))
+	defer srv.Close()
+	old := AnthropicAPIHost
+	AnthropicAPIHost = srv.URL
+	defer func() { AnthropicAPIHost = old }()
+	_, err := NewWithAPIKey("test").SendAgentic(context.Background(), "test", &AgenticOptions{Model: "claude-opus-4-6", MaxTokens: 1024, ExtraTools: defs})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
