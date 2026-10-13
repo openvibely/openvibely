@@ -1916,10 +1916,6 @@ func openAICompactionV2Instructions(opts *AgenticOptions, isChatGPTOAuth bool) s
 	return ""
 }
 
-func openAIModelSupportsParallelToolCalls(model string) bool {
-	return !isResponsesLiteWebsocketModel(model)
-}
-
 func compactionInstructions(opts *AgenticOptions) string {
 	if opts != nil {
 		if prompt := strings.TrimSpace(opts.CompactionPrompt); prompt != "" {

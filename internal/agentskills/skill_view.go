@@ -480,14 +480,6 @@ func resolveAgentView(ctx context.Context, inspector AgentInspector, input json.
 	return string(b), nil
 }
 
-func readIfExists(path string) (string, bool) {
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return "", false
-	}
-	return string(b), true
-}
-
 var skillView = llmcontracts.RuntimeToolDefinition{
 	Name:        "skill_view",
 	Description: "Load an authorized skill for this turn. Use a selected bare handle when only selected skills are available, or a qualified view handle such as standalone:<skill> or agent:<agent>/<skill> when library tools return one. With file_path, loads one support file under references/, templates/, scripts/, or assets/.",
