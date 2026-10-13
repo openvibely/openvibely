@@ -2687,6 +2687,12 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					} else {
 						addInlineRanges(plainStart, text.length);
 					}
+					// A result still arriving has no closing marker for the renderer to
+					// extract yet. Protect its contents until that marker arrives.
+					if (toolOutput) {
+						var pendingOutput = opaqueRanges[opaqueRanges.length - 1];
+						ranges.push({start: pendingOutput.start, end: pendingOutput.end});
+					}
 					return ranges;
 				};
 				window.codeRangesAsync = function(text, owner, transcript) {

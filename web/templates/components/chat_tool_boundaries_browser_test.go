@@ -34,3 +34,31 @@ func TestBrowserFunctional_ChatToolBackticksStayWithinBoundaries(t *testing.T) {
  return {};
 `)
 }
+
+func TestBrowserFunctional_ToolMetadataAndPartialOutputStayLiteral(t *testing.T) {
+	runIncrementalChatBrowser(t, `
+ const tick = String.fromCharCode(96), response = stream;
+ for (const prefix of ['', 'long transcript prose '.repeat(4000)+'\n']) {
+  const command = '$ echo '+tick+'<thinking>'+tick;
+  const call = '[Using tool: bash | '+command+']\n';
+  const complete = call+'[Tool bash done]\nok\n[/Tool]\nFinal answer.';
+  await window.renderStreamingContent(response, prefix+complete, true);
+  assert(response.querySelectorAll('.stream-tool').length === 1, 'command alias broke tool card');
+  assert(response.querySelector('.stream-tool').textContent.includes(command), 'command preview changed');
+  assert(!response.querySelector('.stream-thinking'), 'command alias became thinking');
+  const output = fence+'text\n[Using tool: read_file]\n[Thinking]\n<thinking>\n[Compaction started]\n'+fence;
+  const partial = call+'[Tool bash done]\n'+output;
+  for (const ending of ['', '\n[/To', '\n[/Tool]\nFinal answer.']) {
+   await window.renderStreamingContent(response, prefix+partial+ending, true);
+   assert(response.querySelectorAll('.stream-tool').length === 1, 'literal output created another tool card');
+   assert(!response.querySelector('.stream-thinking'), 'literal output became thinking');
+   assert(!response.querySelector('[data-compaction-state]'), 'literal output became compaction');
+   if (ending.includes('Final answer.')) assert(response.querySelector('.stream-tool').textContent.includes(output), 'completed tool output changed');
+  }
+ }
+ const quoted = fence+'text\n[Tool bash done]\n[Using tool: read_file]\n'+fence;
+ await window.renderStreamingContent(response, quoted, false);
+ assert(!response.querySelector('.stream-tool'), 'quoted unfinished output became a tool');
+ return {};
+ `)
+}
