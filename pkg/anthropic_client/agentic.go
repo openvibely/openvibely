@@ -849,17 +849,6 @@ func inferProviderResultToolName(content json.RawMessage) string {
 	}
 }
 
-func isAnthropicCodeExecutionToolName(name string) bool {
-	switch strings.ToLower(strings.TrimSpace(name)) {
-	case "code_execution",
-		"code_execution_20250522", "code_execution_20250825", "code_execution_20260120",
-		"bash_code_execution":
-		return true
-	default:
-		return false
-	}
-}
-
 type anthropicToolExecutionResult struct {
 	block   agenticBlock
 	output  string
