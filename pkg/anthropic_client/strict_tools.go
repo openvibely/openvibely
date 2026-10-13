@@ -18,7 +18,13 @@ func prepareStrictTools(tools []ToolDefinition) []ToolDefinition {
 	for i := range order {
 		order[i] = i
 	}
-	sort.SliceStable(order, func(i, j int) bool { return out[order[i]].StrictPriority > out[order[j]].StrictPriority })
+	sort.SliceStable(order, func(i, j int) bool {
+		a, b := out[order[i]], out[order[j]]
+		if pa, pb := strictToolPriority(a), strictToolPriority(b); pa != pb {
+			return pa > pb
+		}
+		return a.Name < b.Name
+	})
 	count, optional := 0, 0
 	for _, i := range order {
 		t := &out[i]
