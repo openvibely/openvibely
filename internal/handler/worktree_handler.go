@@ -171,11 +171,11 @@ func (h *Handler) UpdateTaskAutoMerge(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusNotFound, "task not found")
 	}
 
-	autoMerge := c.FormValue("auto_merge") == "on" || c.FormValue("auto_merge") == "true"
-	var autoMergeOnGoalAchieved *bool
 	goalValue := c.FormValue("auto_merge_on_goal_achieved")
+	autoMerge := formBoolEnabled(c, "auto_merge", false)
+	var autoMergeOnGoalAchieved *bool
 	if goalValue != "" || c.FormValue("auto_merge_on_goal_achieved_present") != "" {
-		enabled := goalValue == "on" || goalValue == "true"
+		enabled := formBoolEnabled(c, "auto_merge_on_goal_achieved", false)
 		autoMergeOnGoalAchieved = &enabled
 	}
 	targetBranch := c.FormValue("merge_target_branch")
