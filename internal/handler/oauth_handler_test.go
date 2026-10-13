@@ -2718,3 +2718,38 @@ func Test_cancelOpenAIOAuthCallbackServer(t *testing.T) {
 		require.Error(t, err)
 	})
 }
+
+func TestDesktopOAuthErrorsReturnToApp(t *testing.T) {
+	for _, desktop := range []bool{false, true} {
+		for _, scenario := range []string{"denied", "missing", "expired", "exchange"} {
+			t.Run(fmt.Sprintf("%t/%s", desktop, scenario), func(t *testing.T) {
+				h, _, _ := setupTestHandler(t)
+				h.SetDesktopMode(desktop)
+				tokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusBadRequest) }))
+				defer tokenServer.Close()
+				state := "error-" + scenario
+				query := "?state=" + state
+				switch scenario {
+				case "denied":
+					query += "&error=access_denied"
+				case "expired", "exchange":
+					query += "&code=test"
+				}
+				if scenario != "expired" {
+					oauthFlowsMu.Lock()
+					oauthFlows[state] = &oauthPendingFlow{State: state, CreatedAt: time.Now(), Provider: models.ProviderAnthropic, TokenURL: tokenServer.URL}
+					oauthFlowsMu.Unlock()
+				}
+				rec := httptest.NewRecorder()
+				h.handleOAuthCallbackResponse(rec, httptest.NewRequest(http.MethodGet, "http://localhost:54321/callback"+query, nil), "http://localhost/models", nil)
+				require.Empty(t, rec.Header().Get("Location"))
+				if desktop {
+					require.Contains(t, rec.Body.String(), "Return to the OpenVibely desktop app")
+					require.NotContains(t, rec.Body.String(), "href=")
+				} else {
+					require.Contains(t, rec.Body.String(), `href="http://localhost/models"`)
+				}
+			})
+		}
+	}
+}

@@ -582,30 +582,16 @@ func (h *Handler) handleOAuthCallbackResponse(w http.ResponseWriter, r *http.Req
 
 	if oauthErr := r.URL.Query().Get("error"); oauthErr != "" {
 		if !ok {
-			applog.Infof("[handler] OAuthCallback rejected provider error without a valid state")
-			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			fmt.Fprint(w, `<html><body>
-				<h2>Session Expired</h2>
-				<p>The OAuth session has expired. Please try again.</p>
-			</body></html>`)
+			h.renderOAuthCallbackError(w, "Session Expired", "The OAuth session has expired. Please try again.", modelsURL)
 			return
 		}
 		applog.Infof("[handler] OAuthCallback provider rejected authorization provider=%s", flow.Provider)
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		fmt.Fprintf(w, `<html><body>
-				<h2>OAuth Failed</h2>
-				<p>%s</p>
-				<p><a href="%s">Return to Models</a></p>
-			</body></html>`, publicOAuthProviderError, htmltemplate.HTMLEscapeString(modelsURL))
+		h.renderOAuthCallbackError(w, "OAuth Failed", publicOAuthProviderError, modelsURL)
 		return
 	}
 
 	if state == "" || code == "" {
-		fmt.Fprintf(w, `<html><body>
-			<h2>Invalid Callback</h2>
-			<p>Missing state or code parameter.</p>
-			<p><a href="%s">Return to Models</a></p>
-		</body></html>`, htmltemplate.HTMLEscapeString(modelsURL))
+		h.renderOAuthCallbackError(w, "Invalid Callback", "Missing state or code parameter.", modelsURL)
 		return
 	}
 
@@ -614,21 +600,12 @@ func (h *Handler) handleOAuthCallbackResponse(w http.ResponseWriter, r *http.Req
 		modelsURL = modelsReturnURLFromRequest(r, result.Flow.ProjectID, modelsURL)
 	}
 	if result.Outcome == oauthCompletionInvalidState {
-		applog.Infof("[handler] OAuthCallback state not found or expired")
-		fmt.Fprintf(w, `<html><body>
-			<h2>Session Expired</h2>
-			<p>The OAuth session has expired. Please try again.</p>
-			<p><a href="%s">Return to Models</a></p>
-		</body></html>`, htmltemplate.HTMLEscapeString(modelsURL))
+		h.renderOAuthCallbackError(w, "Session Expired", "The OAuth session has expired. Please try again.", modelsURL)
 		return
 	}
 	if result.Outcome == oauthCompletionExchangeFailed {
 		applog.Infof("[handler] OAuthCallback exchange/save error: %v", result.Err)
-		fmt.Fprintf(w, `<html><body>
-			<h2>Token Exchange Failed</h2>
-			<p>%s</p>
-			<p><a href="%s">Return to Models</a></p>
-		</body></html>`, htmltemplate.HTMLEscapeString(publicOAuthExchangeError(result.Err)), htmltemplate.HTMLEscapeString(modelsURL))
+		h.renderOAuthCallbackError(w, "Token Exchange Failed", publicOAuthExchangeError(result.Err), modelsURL)
 		return
 	}
 
@@ -644,6 +621,17 @@ func (h *Handler) handleOAuthCallbackResponse(w http.ResponseWriter, r *http.Req
 		return
 	}
 	http.Redirect(w, r, modelsURL, http.StatusTemporaryRedirect)
+}
+
+func (h *Handler) renderOAuthCallbackError(w http.ResponseWriter, title, message, modelsURL string) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	fmt.Fprintf(w, `<html><body><h2>%s</h2><p>%s</p>`, htmltemplate.HTMLEscapeString(title), htmltemplate.HTMLEscapeString(message))
+	if h.desktopMode {
+		fmt.Fprint(w, `<p>Return to the OpenVibely desktop app to try again.</p>`)
+	} else {
+		fmt.Fprintf(w, `<p><a href="%s">Return to Models</a></p>`, htmltemplate.HTMLEscapeString(modelsURL))
+	}
+	fmt.Fprint(w, `</body></html>`)
 }
 
 func (h *Handler) completeOAuthFlow(state, code string) oauthCompletionResult {
