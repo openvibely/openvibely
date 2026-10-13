@@ -431,7 +431,7 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 		if len(opts.ExtraTools) > 0 {
 			tools = append(tools, opts.ExtraTools...)
 		}
-		tools = filterToolDefinitions(tools, opts.ToolFilter)
+		tools = prepareStrictTools(filterToolDefinitions(tools, opts.ToolFilter))
 	}
 
 	// Build initial messages from a compatible native checkpoint, history, and new prompt.
@@ -984,6 +984,10 @@ func exclusiveAnthropicRequestUserInput(blocks []agenticBlock) int {
 
 func runAnthropicToolUse(ctx context.Context, opts *AgenticOptions, name string, input json.RawMessage) (string, bool) {
 	applog.Debugf("[anthropicclient] executing tool %s", name)
+	input, validationErr := normalizeToolArguments(opts, name, input)
+	if validationErr != nil {
+		return validationErr.Error(), true
+	}
 	output := ""
 	isError := false
 	var err error

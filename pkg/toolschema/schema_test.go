@@ -1,0 +1,79 @@
+package toolschema
+
+import (
+	"encoding/json"
+	"strings"
+	"testing"
+)
+
+func TestStrictAndNormalizeNestedArguments(t *testing.T) {
+	schema := json.RawMessage(`{"type":"object","properties":{"category":{"type":"string","enum":["backlog"]},"status":{"type":"string","enum":["pending"]},"items":{"type":"array","items":{"type":"object","properties":{"enabled":{"type":"boolean"},"limit":{"type":"integer","minimum":1}},"required":["enabled"]}}},"required":["category"],"additionalProperties":false}`)
+	for _, anthropic := range []bool{false, true} {
+		wire, cost, err := Strict(schema, anthropic)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cost != 3 {
+			t.Fatalf("union cost %d", cost)
+		}
+		if !strings.Contains(string(wire), `"pending",null`) {
+			t.Fatalf("enum missing null: %s", wire)
+		}
+		if strings.Contains(string(schema), "null") {
+			t.Fatal("source mutated")
+		}
+	}
+	for _, input := range []string{`{"category":"backlog","status":null,"items":[{"enabled":false,"limit":null}]}`, `{"category":"backlog","items":[{"enabled":false}]}`} {
+		got, err := NormalizeValidate(schema, json.RawMessage(input))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(got) != `{"category":"backlog","items":[{"enabled":false}]}` {
+			t.Fatalf("got %s", got)
+		}
+	}
+	for _, input := range []string{`{}`, `{"category":null}`, `{"category":"wrong"}`, `{"category":"backlog","items":[{"enabled":false,"limit":0}]}`, `{"category":"backlog","status":7}`, `{"category":"backlog","extra":true}`, `null`, `{} {}`} {
+		if _, err := NormalizeValidate(schema, json.RawMessage(input)); err == nil {
+			t.Fatalf("accepted %s", input)
+		}
+	}
+}
+
+func TestArbitraryObjectsAndExplicitNullsPreserved(t *testing.T) {
+	schema := json.RawMessage(`{"type":"object","properties":{"metadata":{"type":"object"},"clear":{"type":["string","null"]}}}`)
+	if _, _, err := Strict(schema, false); err == nil {
+		t.Fatal("arbitrary object converted")
+	}
+	input := json.RawMessage(`{"metadata":{"x":null,"enabled":false},"clear":null}`)
+	got, err := NormalizeValidate(schema, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(got), `"x":null`) || !strings.Contains(string(got), `"clear":null`) {
+		t.Fatalf("lost values: %s", got)
+	}
+}
+
+func TestStrictRejectsUnsupportedSchemas(t *testing.T) {
+	for _, schema := range []string{`{"type":"object","additionalProperties":true}`, `{"type":"object","properties":{"x":{"$ref":"https://example.com/schema"}}}`, `{"type":"object","properties":{"x":{}}}`} {
+		if _, _, err := Strict(json.RawMessage(schema), false); err == nil {
+			t.Fatalf("accepted %s", schema)
+		}
+	}
+}
+
+func TestStrictConstantRemainsRequired(t *testing.T) {
+	schema := json.RawMessage(`{"type":"object","properties":{"confirm":{"type":"boolean","const":true}},"required":["confirm"]}`)
+	for _, anthropic := range []bool{false, true} {
+		wire, _, err := Strict(schema, anthropic)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := NormalizeValidate(wire, json.RawMessage(`{"confirm":false}`)); err == nil {
+			t.Fatal("constant weakened")
+		}
+		if _, err := NormalizeValidate(wire, json.RawMessage(`{"confirm":null}`)); err == nil {
+			t.Fatal("required confirmation made nullable")
+		}
+	}
+}

@@ -828,6 +828,7 @@ func (a *Adapter) CallCompletionsStreaming(ctx context.Context, prompt string, a
 
 	skipDefaultTools := agentSkipDefaultTools(agentDef) || llmcontracts.RuntimeSkipDefaultTools(rt)
 	resp, err := client.SendCompletions(ctx, fullPrompt, &openaiclient.CompletionsOptions{
+		StrictTools:      true,
 		Model:            agent.Model,
 		ReasoningEffort:  reasoningEffort(agent.Model, agent.ReasoningEffort),
 		FirstPartyOpenAI: true,
@@ -913,6 +914,7 @@ func (a *Adapter) CallCompletionsChatStreaming(ctx context.Context, message stri
 	disableTools := !isTaskFollowup && chatMode != models.ChatModePlan && rt == nil
 	skipDefaultTools := agentSkipDefaultTools(agentDef) || llmcontracts.RuntimeSkipDefaultTools(rt)
 	resp, err := client.SendCompletions(ctx, message, &openaiclient.CompletionsOptions{
+		StrictTools:      true,
 		Model:            agent.Model,
 		ReasoningEffort:  reasoningEffort(agent.Model, agent.ReasoningEffort),
 		FirstPartyOpenAI: true,

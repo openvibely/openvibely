@@ -9,6 +9,7 @@ import (
 )
 
 type ToolDefinition struct {
+	Strict      *bool           `json:"strict,omitempty"`
 	Name        string          `json:"name"`
 	Description string          `json:"description"`
 	InputSchema json.RawMessage `json:"input_schema"`
