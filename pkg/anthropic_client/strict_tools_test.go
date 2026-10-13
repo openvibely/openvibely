@@ -63,7 +63,7 @@ func TestStrictBudgetAndTaskLookup(t *testing.T) {
 	// Exercise the tool-count limit independently of union capacity.
 	var empty []ToolDefinition
 	for i := 0; i < 25; i++ {
-		empty = append(empty, ToolDefinition{Name: fmt.Sprint(i), InputSchema: json.RawMessage(`{"type":"object","properties":{}}`)})
+		empty = append(empty, ToolDefinition{Name: fmt.Sprint(i), InputSchema: json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`)})
 	}
 	count = 0
 	for _, d := range prepareStrictTools(empty) {
@@ -136,6 +136,14 @@ func TestProviderWireStrictSchemas(t *testing.T) {
 
 func TestOpenRootToolStaysNonStrict(t *testing.T) {
 	raw := json.RawMessage(`{"type":"object"}`)
+	got := prepareStrictTools([]ToolDefinition{{Name: "custom", InputSchema: raw}})[0]
+	if got.Strict == nil || *got.Strict || string(got.InputSchema) != string(raw) {
+		t.Fatalf("open schema changed: %+v", got)
+	}
+}
+
+func TestEmptyOpenRootToolStaysNonStrict(t *testing.T) {
+	raw := json.RawMessage(`{"type":"object","properties":{}}`)
 	got := prepareStrictTools([]ToolDefinition{{Name: "custom", InputSchema: raw}})[0]
 	if got.Strict == nil || *got.Strict || string(got.InputSchema) != string(raw) {
 		t.Fatalf("open schema changed: %+v", got)
