@@ -12,16 +12,27 @@ import (
 	"time"
 )
 
+const (
+	chatRevisionOffset64 = uint64(14695981039346656037)
+	chatRevisionPrime64 = uint64(1099511628211)
+)
+
+func chatRevisionWrite(hash uint64, value string) uint64 {
+	for i := 0; i < len(value); i++ {
+		hash ^= uint64(value[i])
+		hash *= chatRevisionPrime64
+	}
+	return hash
+}
+
+func chatRevisionWriteField(hash uint64, value string) uint64 {
+	return chatRevisionWrite(chatRevisionWrite(hash, value), "\xff")
+}
+
 // chatContentRevision returns a compact fingerprint for comparing rendered
 // transcript snapshots without repeatedly comparing the full response text.
 func chatContentRevision(content string) string {
-	const offset64 = uint64(14695981039346656037)
-	const prime64 = uint64(1099511628211)
-	hash := offset64
-	for i := 0; i < len(content); i++ {
-		hash ^= uint64(content[i])
-		hash *= prime64
-	}
+	hash := chatRevisionWrite(chatRevisionOffset64, content)
 	return fmt.Sprintf("%x-%016x", len(content), hash)
 }
 
@@ -29,16 +40,9 @@ func chatContentRevision(content string) string {
 // Browsers use it to prove unchanged pairs still match an authoritative snapshot
 // before advancing the root transcript revision after live DOM reconciliation.
 func ChatExecutionRevision(exec models.Execution) string {
-	const offset64 = uint64(14695981039346656037)
-	const prime64 = uint64(1099511628211)
-	hash := offset64
+	hash := chatRevisionOffset64
 	write := func(value string) {
-		for i := 0; i < len(value); i++ {
-			hash ^= uint64(value[i])
-			hash *= prime64
-		}
-		hash ^= 0xff
-		hash *= prime64
+		hash = chatRevisionWriteField(hash, value)
 	}
 	write(exec.ID)
 	write(string(exec.Status))
@@ -53,16 +57,9 @@ func ChatExecutionRevision(exec models.Execution) string {
 // state so polling/reconnect paths can reject authoritative no-op responses before
 // touching the live DOM.
 func ChatTranscriptRevision(executions []models.Execution, pendingInputs []models.ThreadInput, extra string) string {
-	const offset64 = uint64(14695981039346656037)
-	const prime64 = uint64(1099511628211)
-	hash := offset64
+	hash := chatRevisionOffset64
 	write := func(value string) {
-		for i := 0; i < len(value); i++ {
-			hash ^= uint64(value[i])
-			hash *= prime64
-		}
-		hash ^= 0xff
-		hash *= prime64
+		hash = chatRevisionWriteField(hash, value)
 	}
 	write(extra)
 	for _, exec := range executions {
@@ -3582,6 +3579,7 @@ templ ChatAutoScrollScript() {
 					// up is the direction of the user's input when it is known (wheel, touch,
 					// navigation keys) and null otherwise (scrollbar drags).
 					function markInteracting(event, up) {
+						self._bubbleJump = null;
 						self._userInteracting = true;
 						self._interactionUp = up === undefined ? null : up;
 						if (self._userInteractTimeout) clearTimeout(self._userInteractTimeout);
@@ -3621,6 +3619,45 @@ templ ChatAutoScrollScript() {
 				this._handlers.pointercancel = endPointerInteraction;
 				this._handlers.blur = endPointerInteraction;
 				this._handlers.keydown = function(e) {
+					if (e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey && !e.isComposing &&
+						!e.defaultPrevented && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+						var el = self.element;
+						if (!el || !el.isConnected || !el.getClientRects().length ||
+							el.closest('[data-workspace-hidden="true"]') || document.querySelector('dialog[open]')) return;
+						var target = e.target;
+						var form = target && target.closest ? target.closest('form[data-input-id]') : null;
+						if (form && form.getAttribute('hx-target') !== '#' + el.id) return;
+						if (!form && target && target !== document.body && target !== document.documentElement && !el.contains(target)) return;
+						var bubbles = Array.from(el.querySelectorAll('.chat-bubble-user-msg, .chat-bubble-assistant-msg')).filter(function(bubble) {
+							return bubble.getClientRects().length && getComputedStyle(bubble).visibility !== 'hidden';
+						});
+						if (!bubbles.length) return;
+						e.preventDefault();
+						var direction = e.key === 'ArrowUp' ? -1 : 1;
+						var last = self._bubbleJump;
+						var index = last && Math.abs(last.scrollTop - el.scrollTop) < 1 ? bubbles.indexOf(last.bubble) : -1;
+						var bubble;
+						if (index >= 0) {
+							bubble = bubbles[Math.max(0, Math.min(bubbles.length - 1, index + direction))];
+						} else {
+							var top = el.getBoundingClientRect().top + el.clientTop;
+							var ordered = direction < 0 ? bubbles.slice().reverse() : bubbles;
+							bubble = ordered.find(function(item) {
+								var offset = item.getBoundingClientRect().top - top;
+								return direction < 0 ? offset < -1 : offset > 1;
+							}) || (direction < 0 ? bubbles[0] : bubbles[bubbles.length - 1]);
+						}
+						// Park before scrolling so streaming and pending send intents cannot undo the jump.
+						self._userInteracting = false;
+						self.userScrolledUp = true;
+						window._chatScrollIntentRevision = (window._chatScrollIntentRevision || 0) + 1;
+						window.advanceChatSendIntentScopeRevision(el);
+						self.intentRevision = window._chatScrollIntentRevision;
+						el.scrollTo({top: el.scrollTop + bubble.getBoundingClientRect().top - el.getBoundingClientRect().top - el.clientTop, behavior: 'instant'});
+						self._bubbleJump = {bubble: bubble, scrollTop: el.scrollTop};
+						if (typeof self.onIntentChange === 'function') self.onIntentChange();
+						return;
+					}
 					// Treat scroll-navigation keys as user scroll intent.
 					// Only count when focus is inside the scroll container or on body
 					// (avoids triggering on textarea typing — typing doesn't scroll).
@@ -3662,7 +3699,7 @@ templ ChatAutoScrollScript() {
 				// keydown is attached to window so PageUp/PageDown work even when the
 				// scroll container isn't focused. pointerup/cancel are also window-level
 				// because scrollbar drags can end outside the scroll element.
-				window.addEventListener('keydown', this._handlers.keydown, { passive: true });
+				window.addEventListener('keydown', this._handlers.keydown);
 				window.addEventListener('pointerup', this._handlers.pointerup, { passive: true });
 				window.addEventListener('pointercancel', this._handlers.pointercancel, { passive: true });
 				window.addEventListener('blur', this._handlers.blur);
@@ -3706,6 +3743,7 @@ templ ChatAutoScrollScript() {
 			},
 
 				returnToLatest: function(smooth) {
+					this._bubbleJump = null;
 					this.userScrolledUp = false;
 					window._chatScrollIntentRevision = (window._chatScrollIntentRevision || 0) + 1;
 					if (window.advanceChatSendIntentScopeRevision) window.advanceChatSendIntentScopeRevision(this.element);
@@ -4898,7 +4936,7 @@ templ ChatAutoScrollScript() {
 				if (text.length < 8192) return 0;
 				// Legacy XML controls can span Markdown blocks; reconcile them as one tail.
 				if (/<\s*\/?\s*thinking\s*>|<parameter\s/i.test(text)) return 0;
-				var ranges = preparedRanges || (window.codeRanges ? window.codeRanges(text) : []);
+				var ranges = preparedRanges || (window.codeRanges ? window.codeRanges(text, true) : []);
 				var controls = /^[\t ]*\[(Thinking|\/Thinking|Using tool:[^\]\r\n]+|Tool [^\]\r\n]+|\/Tool|Compaction [^\]\r\n]+)\][\t ]*(?=\r?$)/gm;
 				var thinking = false, tool = false, pending = 0, compaction = false;
 				var calls = Object.create(null), resultName = '';
@@ -4966,7 +5004,7 @@ templ ChatAutoScrollScript() {
 				var suffix = text.slice(state.offset);
 				var ranges;
 				if (suffix.length >= 64 * 1024 && yieldBetweenBatches !== false && window.codeRangesAsync) {
-					ranges = await window.codeRangesAsync(suffix, state.tail);
+					ranges = await window.codeRangesAsync(suffix, state.tail, true);
 					if (container._incrementalChat !== state || state.generation !== generation) return false;
 				}
 				var boundary = ranges === null ? 0 : window.chatStreamStableBoundary(suffix, ranges);
@@ -5168,15 +5206,35 @@ templ ChatAutoScrollScript() {
 					var codeRanges = [];
 					var transcriptToolRanges = [];
 					var segments = [];
-					function toolBlockRanges(text) {
-						var ranges = [];
-						var pattern = /^[\t ]*\[Tool\s+\S+\s+(?:done|error)\][\t ]*(?:\r\n|\r|\n)?[\s\S]*?\[\/Tool\][\t ]*(?=\r?$)(?:\r\n|\r|\n)?/gm;
-						var block;
-						while ((block = pattern.exec(text)) !== null) ranges.push({ start: block.index, end: block.index + block[0].length });
+					function toolBlockRanges(text, protectedRanges) {
+						var ranges = [], protectedIndex = 0;
+						var opener = /^[\t ]*\[Tool\s+\S+\s+(?:done|error)\][\t ]*(?:\r\n|\r|\n)?/gm;
+						var closer = /\[\/Tool\][\t ]*(?=\r?$)(?:\r\n|\r|\n)?/gm;
+						var block, end;
+						while ((block = opener.exec(text)) !== null) {
+							while (protectedRanges && protectedIndex < protectedRanges.length && protectedRanges[protectedIndex].end <= block.index) protectedIndex++;
+							var quoted = protectedRanges && protectedRanges[protectedIndex];
+							if (quoted && quoted.literalTool && quoted.start <= block.index) {
+								opener.lastIndex = quoted.end;
+								continue;
+							}
+							closer.lastIndex = opener.lastIndex;
+							end = closer.exec(text);
+							if (!end) break;
+							ranges.push({start: block.index, end: closer.lastIndex});
+							opener.lastIndex = closer.lastIndex;
+						}
 						return ranges;
 					}
 					function protectInitialToolBlocks() {
-						rawCodeRanges = rawCodeRanges.concat(toolBlockRanges(textBuffer));
+						rawCodeRanges = rawCodeRanges.concat(toolBlockRanges(textBuffer, rawCodeRanges));
+						// Command previews are opaque to alias normalization as well as Markdown.
+						// Leave malformed legacy invocations available to the normalizer.
+						var headers = /^[\t ]*\[Using tool:\s*[A-Za-z0-9_.:-]+(?: \| [^\]\r\n]*)?\][\t ]*(?=\r?$)/gm;
+						var header;
+						while ((header = headers.exec(textBuffer)) !== null) {
+							rawCodeRanges.push({start: header.index, end: header.index + header[0].length});
+						}
 						rawCodeRanges.sort(function(a, b) { return a.start - b.start; });
 						var mergedRanges = [];
 						rawCodeRanges.forEach(function(range) {
@@ -5207,6 +5265,7 @@ templ ChatAutoScrollScript() {
 						return true;
 					}
 					function excludeToolBlockCodeRanges(ranges) {
+						transcriptToolRanges = toolBlockRanges(textBuffer, ranges);
 						if (!ranges.length || !transcriptToolRanges.length) return ranges;
 						var filtered = [];
 						var toolIndex = 0;
@@ -5245,7 +5304,7 @@ templ ChatAutoScrollScript() {
 					}
 						function prepareInitialCodeRanges() {
 							if (shouldYieldPreparation && window.codeRangesAsync) {
-								return window.codeRangesAsync(textBuffer, container).then(function(result) {
+								return window.codeRangesAsync(textBuffer, container, true).then(function(result) {
 									// Never repeat a failed multi-megabyte worker scan on the UI thread.
 									// Reject into the queued renderer's escaped plaintext fallback.
 									if (result === null) throw new Error('code-range worker unavailable');
@@ -5253,18 +5312,18 @@ templ ChatAutoScrollScript() {
 									return true;
 								});
 							}
-							rawCodeRanges = window.codeRanges ? window.codeRanges(textBuffer) : [];
+							rawCodeRanges = window.codeRanges ? window.codeRanges(textBuffer, true) : [];
 							return true;
 						}
 						function prepareCodeRanges() {
 							if (shouldYieldPreparation && window.codeRangesAsync) {
-								return window.codeRangesAsync(textBuffer, container).then(function(result) {
+								return window.codeRangesAsync(textBuffer, container, true).then(function(result) {
 									if (result === null) throw new Error('code-range worker unavailable');
 									codeRanges = excludeToolBlockCodeRanges(result);
 									return true;
 								});
 							}
-							codeRanges = excludeToolBlockCodeRanges(window.codeRanges ? window.codeRanges(textBuffer) : []);
+							codeRanges = excludeToolBlockCodeRanges(window.codeRanges ? window.codeRanges(textBuffer, true) : []);
 							return true;
 						}
 						function preparationBudgetExpired(startedAt, processed) {
