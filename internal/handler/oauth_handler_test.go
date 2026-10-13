@@ -2030,6 +2030,61 @@ func TestHandler_OAuthCallback(t *testing.T) {
 		require.Contains(t, replayRec.Body.String(), "Session Expired")
 	})
 
+	t.Run("shows completion page in desktop mode instead of redirecting to models", func(t *testing.T) {
+		t.Setenv("APP_BASE_URL", "")
+		h, e, llmConfigRepo := setupTestHandler(t)
+		h.SetDesktopMode(true)
+
+		model := &models.LLMConfig{
+			Name:       "Desktop Callback Anthropic",
+			Provider:   models.ProviderAnthropic,
+			AuthMethod: models.AuthMethodOAuth,
+			Model:      "claude-3.5-sonnet",
+		}
+		require.NoError(t, llmConfigRepo.Create(context.Background(), model))
+
+		tokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			require.Equal(t, http.MethodPost, r.Method)
+			require.Equal(t, "application/json", r.Header.Get("Content-Type"))
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(map[string]any{
+				"access_token":  "desktop-access-token",
+				"refresh_token": "desktop-refresh-token",
+				"expires_in":    3600,
+			})
+		}))
+		defer tokenServer.Close()
+
+		const testState = "desktop-anthropic-state"
+		oauthFlowsMu.Lock()
+		oauthFlows[testState] = &oauthPendingFlow{
+			ConfigID:    model.ID,
+			Verifier:    "desktop-verifier",
+			State:       testState,
+			RedirectURI: "http://localhost:54321/callback",
+			CreatedAt:   time.Now(),
+			Provider:    models.ProviderAnthropic,
+			ClientID:    oauthClientID,
+			TokenURL:    tokenServer.URL,
+		}
+		oauthFlowsMu.Unlock()
+
+		req := httptest.NewRequest(http.MethodGet, "/callback?code=desktop-code&state="+testState, nil)
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, req)
+
+		require.Equal(t, http.StatusOK, rec.Code)
+		require.Empty(t, rec.Header().Get("Location"))
+		require.Contains(t, rec.Body.String(), "OAuth Connected")
+		require.Contains(t, rec.Body.String(), "Return to the OpenVibely desktop app")
+		require.NotContains(t, rec.Body.String(), "http://localhost/models")
+
+		updatedModel, err := llmConfigRepo.GetByID(context.Background(), model.ID)
+		require.NoError(t, err)
+		require.Equal(t, "desktop-access-token", updatedModel.OAuthAccessToken)
+		require.Equal(t, "desktop-refresh-token", updatedModel.OAuthRefreshToken)
+	})
+
 	t.Run("preserves project context in provider error return link", func(t *testing.T) {
 		_, e, llmConfigRepo := setupTestHandler(t)
 

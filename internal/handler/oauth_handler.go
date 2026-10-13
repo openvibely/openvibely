@@ -638,6 +638,11 @@ func (h *Handler) handleOAuthCallbackResponse(w http.ResponseWriter, r *http.Req
 		return
 	}
 	applog.Infof("[handler] OAuthCallback success config=%s provider=%s expires=%s", result.Flow.ConfigID, result.Flow.Provider, time.UnixMilli(result.ExpiresAt).Format(time.RFC3339))
+	if h.desktopMode {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		fmt.Fprint(w, `<html><body><h2>OAuth Connected</h2><p>OAuth was connected successfully. Return to the OpenVibely desktop app.</p></body></html>`)
+		return
+	}
 	http.Redirect(w, r, modelsURL, http.StatusTemporaryRedirect)
 }
 
