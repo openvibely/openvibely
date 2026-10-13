@@ -246,8 +246,8 @@ func TestCalendarPlannerAdmissionRecovery(t *testing.T) {
 			_, started, err = tasks.ClaimReservedTaskForDispatch(ctx, admission.Task.ID, admission.ExecutionID)
 			require.NoError(t, err)
 			require.False(t, started)
-			var executions int
-			require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM executions WHERE task_id = ?`, admission.Task.ID).Scan(&executions))
+			executions, err := teststores.Of(db).Executions.CountByTask(ctx, admission.Task.ID)
+			require.NoError(t, err)
 			require.Equal(t, 1, executions)
 		})
 	}
@@ -285,9 +285,9 @@ func TestCalendarPlannerCancelledHandoff(t *testing.T) {
 				// Parent withdrawal must cancel the durable planner reservation
 				// even before the service cascades cancellation to its children.
 				require.NoError(t, tasks.UpdateStatus(ctx, parent.ID, models.StatusCancelled))
-				var status string
-				require.NoError(t, db.QueryRow(`SELECT status FROM executions WHERE id = ?`, queued.ExecutionID).Scan(&status))
-				require.Equal(t, string(models.ExecCancelled), status)
+				reserved, err := teststores.Of(db).Executions.GetByID(ctx, queued.ExecutionID)
+				require.NoError(t, err)
+				require.Equal(t, models.ExecCancelled, reserved.Status)
 				child, err := tasks.GetByID(ctx, queued.Task.ID)
 				require.NoError(t, err)
 				require.Equal(t, models.StatusCancelled, child.Status)
@@ -348,8 +348,9 @@ func TestCalendarDeletedScheduleCannotRecoverPlanner(t *testing.T) {
 			require.NoError(t, schedules.Delete(ctx, schedule.ID))
 			child, err := tasks.GetByID(ctx, admission.Task.ID)
 			require.NoError(t, err)
-			var status string
-			require.NoError(t, db.QueryRowContext(ctx, `SELECT status FROM executions WHERE id = ?`, admission.ExecutionID).Scan(&status))
+			reserved, err := teststores.Of(db).Executions.GetByID(ctx, admission.ExecutionID)
+			require.NoError(t, err)
+			status := string(reserved.Status)
 			if started {
 				require.Equal(t, models.StatusRunning, child.Status)
 				require.Equal(t, string(models.ExecRunning), status)

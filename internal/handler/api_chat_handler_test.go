@@ -21,6 +21,7 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/openvibely/openvibely/internal/testutil/teststores"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -791,8 +792,7 @@ func TestAPIChatMessage_HydratesSingleConfiguredModelWithoutEmbeddingCatalog(t *
 	db, counter := testutil.NewStatementCountingTestDB(t)
 	h, e, llmConfigRepo := setupTestHandlerForDB(t, db)
 	ctx := context.Background()
-	_, err := db.Exec(`DELETE FROM agent_configs`)
-	require.NoError(t, err)
+	teststores.ClearLLMConfigs(t, teststores.Of(db).LLMConfigs)
 
 	largeProviderJSON := strings.Repeat("large-provider-json", 4096)
 	agent := &models.LLMConfig{
@@ -861,8 +861,7 @@ func TestAPIChatMessage_HydratesSingleConfiguredModelWithoutEmbeddingCatalog(t *
 func TestAPIChatMessage_MultipleModelsDefaultFallbackHydratesSelectedModel(t *testing.T) {
 	h, e, llmConfigRepo, db := setupTestHandlerWithDB(t)
 	ctx := context.Background()
-	_, err := db.Exec(`DELETE FROM agent_configs`)
-	require.NoError(t, err)
+	teststores.ClearLLMConfigs(t, teststores.Of(db).LLMConfigs)
 
 	nonDefault := &models.LLMConfig{
 		Name: "API Chat Non Default Opus", Provider: models.ProviderTest, Model: "claude-opus-non-default",
@@ -910,8 +909,7 @@ func TestAPIChatMessage_QueuedBehindActiveTurnStoresSelectedModelWithoutFullList
 	db, counter := testutil.NewStatementCountingTestDB(t)
 	h, e, llmConfigRepo := setupTestHandlerForDB(t, db)
 	ctx := context.Background()
-	_, err := db.Exec(`DELETE FROM agent_configs`)
-	require.NoError(t, err)
+	teststores.ClearLLMConfigs(t, teststores.Of(db).LLMConfigs)
 
 	agent := &models.LLMConfig{
 		Name: "Queued API Chat Model", Provider: models.ProviderTest, Model: "claude-sonnet-queued",
@@ -955,8 +953,7 @@ func TestAPIChatMessage_QueuedPromotionHydratesSelectedModelWithoutEmbeddingCata
 	db, counter := testutil.NewStatementCountingTestDB(t)
 	h, e, llmConfigRepo := setupTestHandlerForDB(t, db)
 	ctx := context.Background()
-	_, err := db.Exec(`DELETE FROM agent_configs`)
-	require.NoError(t, err)
+	teststores.ClearLLMConfigs(t, teststores.Of(db).LLMConfigs)
 
 	largeProviderJSON := strings.Repeat("queued-promotion-large", 4096)
 	agent := &models.LLMConfig{
@@ -1884,8 +1881,11 @@ func setupAPIChatStatusMarkerFixture(tb testing.TB, h *Handler, db *sql.DB, mark
 func setAPIChatStatusHeavyExecutionFields(ctx context.Context, db *sql.DB, execID string) error {
 	largeReasoning := strings.Repeat("large reasoning content ", 8192)
 	largeDiff := strings.Repeat("large diff output ", 8192)
-	_, err := db.ExecContext(ctx, `UPDATE executions SET reasoning_content = ?, diff_output = ? WHERE id = ?`, largeReasoning, largeDiff, execID)
-	return err
+	execs := teststores.Of(db).Executions
+	if err := execs.ReplaceReasoningReplay(ctx, execID, largeReasoning, nil); err != nil {
+		return err
+	}
+	return execs.UpdateDiffOutput(ctx, execID, largeDiff)
 }
 
 func serveAPIChatMessageStatusCompact(tb testing.TB, h *Handler, e *echo.Echo, execID string) *httptest.ResponseRecorder {

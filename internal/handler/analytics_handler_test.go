@@ -997,9 +997,7 @@ func TestParseSkillAnalyticsFilter_WhitespaceRangeFallsBackToDefault(t *testing.
 func TestGetSkillAnalyticsUsesCompactAgentCatalogProjectionAndPreservesEnabledSkills(t *testing.T) {
 	db, counter := testutil.NewStatementCountingTestDB(t)
 	ctx := context.Background()
-	if _, err := db.ExecContext(ctx, `DELETE FROM agents WHERE id IS NOT NULL`); err != nil {
-		t.Fatalf("clear agents: %v", err)
-	}
+	teststores.ClearAgents(t, teststores.Of(db).Agents)
 
 	projectRepo := teststores.Of(db).Projects
 	agentRepo := teststores.Of(db).Agents

@@ -1633,9 +1633,9 @@ func TestTaskService_Delete_RollsBackPendingSessionRetirementWhenDeleteFails(t *
 	err = svc.Delete(ctx, task.ID)
 	require.ErrorContains(t, err, "injected pending delete failure")
 	require.DirExists(t, sessionDir)
-	var retired int
-	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM retired_attachment_sessions WHERE session_id = ?`, sessionID).Scan(&retired))
-	require.Zero(t, retired, "failed durable deletion must roll back session retirement")
+	retired, err := threadInputRepo.IsAttachmentSessionRetired(ctx, sessionID)
+	require.NoError(t, err)
+	require.False(t, retired, "failed durable deletion must roll back session retirement")
 	stored, getErr := taskRepo.GetByID(ctx, task.ID)
 	require.NoError(t, getErr)
 	require.NotNil(t, stored)
@@ -1652,8 +1652,7 @@ func TestTaskService_Delete_PreventsUploadMetadataRaceFromLeakingFile(t *testing
 	ctx := context.Background()
 	task := &models.Task{ProjectID: "default", Title: "Concurrent upload", Category: models.CategoryBacklog, Status: models.StatusRunning, Prompt: "test"}
 	require.NoError(t, taskRepo.Create(ctx, task))
-	_, err := db.Exec(`INSERT INTO executions(id, task_id, status, prompt_sent) VALUES ('race-exec', ?, 'running', 'prompt')`, task.ID)
-	require.NoError(t, err)
+	require.NoError(t, teststores.Of(db).Executions.Create(ctx, &models.Execution{ID: "race-exec", TaskID: task.ID, Status: models.ExecRunning, PromptSent: "prompt"}))
 
 	latePath := filepath.Join(t.TempDir(), "late-upload.txt")
 	require.NoError(t, os.WriteFile(latePath, []byte("late"), 0o600))
@@ -1792,14 +1791,13 @@ func TestTaskService_Delete_RejectsUnsafePendingUploadSessionBeforeCancellation(
 	ctx := context.Background()
 	task := &models.Task{ProjectID: "default", Title: "Unsafe pending upload", Category: models.CategoryBacklog, Status: models.StatusPending, Prompt: "test"}
 	require.NoError(t, taskRepo.Create(ctx, task))
-	_, err := db.Exec(`INSERT INTO thread_inputs
-		(id, scope, project_id, task_id, input_mode, input_status, content, attachment_session_id, queue_position)
-		VALUES ('unsafe-delete-input', 'task_thread', 'default', ?, 'queued', 'pending', 'follow up', '../outside', 1)`, task.ID)
-	require.NoError(t, err)
+	require.NoError(t, teststores.Of(db).ThreadInputs.CreateQueued(ctx, &models.ThreadInput{
+		Scope: models.ThreadInputScopeTask, ProjectID: "default", TaskID: task.ID, Content: "follow up", AttachmentSessionID: "../outside",
+	}))
 	cancelled := false
 	workerSvc.RegisterCancel(task.ID, func() { cancelled = true })
 
-	err = svc.Delete(ctx, task.ID)
+	err := svc.Delete(ctx, task.ID)
 	require.ErrorContains(t, err, "invalid pending attachment session")
 	require.False(t, cancelled)
 	stored, getErr := taskRepo.GetByID(ctx, task.ID)
@@ -1815,14 +1813,13 @@ func TestTaskService_Delete_RejectsPendingUploadsWithoutConfiguredRoot(t *testin
 	ctx := context.Background()
 	task := &models.Task{ProjectID: "default", Title: "Missing upload root", Category: models.CategoryBacklog, Status: models.StatusPending, Prompt: "test"}
 	require.NoError(t, taskRepo.Create(ctx, task))
-	_, err := db.Exec(`INSERT INTO thread_inputs
-		(id, scope, project_id, task_id, input_mode, input_status, content, attachment_session_id, queue_position)
-		VALUES ('missing-root-input', 'task_thread', 'default', ?, 'queued', 'pending', 'follow up', 'abcdefabcdefabcdefabcdefabcdefab', 1)`, task.ID)
-	require.NoError(t, err)
+	require.NoError(t, teststores.Of(db).ThreadInputs.CreateQueued(ctx, &models.ThreadInput{
+		Scope: models.ThreadInputScopeTask, ProjectID: "default", TaskID: task.ID, Content: "follow up", AttachmentSessionID: "abcdefabcdefabcdefabcdefabcdefab",
+	}))
 	cancelled := false
 	workerSvc.RegisterCancel(task.ID, func() { cancelled = true })
 
-	err = svc.Delete(ctx, task.ID)
+	err := svc.Delete(ctx, task.ID)
 	require.ErrorContains(t, err, "uploads directory is not configured")
 	require.False(t, cancelled)
 	stored, getErr := taskRepo.GetByID(ctx, task.ID)
@@ -1851,11 +1848,10 @@ func TestTaskService_Delete_PreservesFilesStillReferencedByAnotherTask(t *testin
 	sharedDir := filepath.Join(uploadsDir, "chat", "pending", sharedSession)
 	require.NoError(t, os.MkdirAll(sharedDir, 0o700))
 	require.NoError(t, os.WriteFile(filepath.Join(sharedDir, "pending.txt"), []byte("pending"), 0o600))
-	for i, task := range []*models.Task{first, second} {
-		_, err := db.Exec(`INSERT INTO thread_inputs
-			(id, scope, project_id, task_id, input_mode, input_status, content, attachment_session_id, queue_position)
-			VALUES (?, 'task_thread', 'default', ?, 'queued', 'pending', 'follow up', ?, 1)`, fmt.Sprintf("shared-input-%d", i), task.ID, sharedSession)
-		require.NoError(t, err)
+	for _, task := range []*models.Task{first, second} {
+		require.NoError(t, teststores.Of(db).ThreadInputs.CreateQueued(ctx, &models.ThreadInput{
+			Scope: models.ThreadInputScopeTask, ProjectID: "default", TaskID: task.ID, Content: "follow up", AttachmentSessionID: sharedSession,
+		}))
 	}
 
 	require.NoError(t, svc.Delete(ctx, first.ID))
@@ -1873,25 +1869,29 @@ func TestTaskService_Delete_PreservesExecutionLinkedSessionOwnedByAnotherProject
 	svc := NewTaskService(taskRepo, teststores.Of(db).Attachments, newTestWorkerService(t))
 	svc.SetDeletionUploadsDir(uploadsDir)
 	ctx := context.Background()
-	require.NoError(t, func() error {
-		_, err := db.Exec(`INSERT INTO projects(id, name) VALUES ('other-project', 'Other project')`)
-		return err
-	}())
+	stores := teststores.Of(db)
+	otherProject := &models.Project{Name: "Other project"}
+	require.NoError(t, stores.Projects.Create(ctx, otherProject))
 	first := &models.Task{ProjectID: "default", Title: "First chat owner", Category: models.CategoryChat, Status: models.StatusCompleted, Prompt: "test"}
-	second := &models.Task{ProjectID: "other-project", Title: "Second chat owner", Category: models.CategoryChat, Status: models.StatusCompleted, Prompt: "test"}
+	second := &models.Task{ProjectID: otherProject.ID, Title: "Second chat owner", Category: models.CategoryChat, Status: models.StatusCompleted, Prompt: "test"}
 	require.NoError(t, taskRepo.Create(ctx, first))
 	require.NoError(t, taskRepo.Create(ctx, second))
-	_, err := db.Exec(`INSERT INTO executions(id, task_id, status, prompt_sent) VALUES ('first-shared-exec', ?, 'completed', 'first'), ('second-shared-exec', ?, 'completed', 'second')`, first.ID, second.ID)
-	require.NoError(t, err)
+	firstExec := &models.Execution{TaskID: first.ID, Status: models.ExecCompleted, PromptSent: "first"}
+	secondExec := &models.Execution{TaskID: second.ID, Status: models.ExecCompleted, PromptSent: "second"}
+	require.NoError(t, stores.Executions.Create(ctx, firstExec))
+	require.NoError(t, stores.Executions.Create(ctx, secondExec))
 	const sharedSession = "abcdef0123456789abcdef0123456789"
 	sharedDir := filepath.Join(uploadsDir, "chat", "pending", sharedSession)
 	require.NoError(t, os.MkdirAll(sharedDir, 0o700))
 	require.NoError(t, os.WriteFile(filepath.Join(sharedDir, "pending.txt"), []byte("pending"), 0o600))
-	_, err = db.Exec(`INSERT INTO thread_inputs
-		(id, scope, project_id, run_execution_id, input_mode, input_status, content, attachment_session_id, queue_position)
-		VALUES ('first-shared-chat-input', 'chat', 'default', 'first-shared-exec', 'queued', 'cancelled', 'first', ?, 1),
-		       ('second-shared-chat-input', 'chat', 'other-project', 'second-shared-exec', 'queued', 'pending', 'second', ?, 1)`, sharedSession, sharedSession)
-	require.NoError(t, err)
+	require.NoError(t, stores.ThreadInputs.CreateQueued(ctx, &models.ThreadInput{
+		Scope: models.ThreadInputScopeChat, ProjectID: "default", RunExecutionID: firstExec.ID,
+		InputStatus: models.ThreadInputCancelled, Content: "first", AttachmentSessionID: sharedSession,
+	}))
+	require.NoError(t, stores.ThreadInputs.CreateQueued(ctx, &models.ThreadInput{
+		Scope: models.ThreadInputScopeChat, ProjectID: otherProject.ID, RunExecutionID: secondExec.ID,
+		Content: "second", AttachmentSessionID: sharedSession,
+	}))
 
 	require.NoError(t, svc.Delete(ctx, first.ID))
 	require.DirExists(t, sharedDir)
@@ -1975,8 +1975,7 @@ func TestTaskService_Delete_DeletesAttachments(t *testing.T) {
 	executionAttachmentPath := filepath.Join(uploadsDir, "chat", "delete-exec", "execution.txt")
 	require.NoError(t, os.MkdirAll(filepath.Dir(executionAttachmentPath), 0o700))
 	require.NoError(t, os.WriteFile(executionAttachmentPath, []byte("execution attachment"), 0o600))
-	_, err = db.Exec(`INSERT INTO executions(id, task_id, status, prompt_sent) VALUES ('delete-exec', ?, 'completed', 'prompt')`, task.ID)
-	require.NoError(t, err)
+	require.NoError(t, teststores.Of(db).Executions.Create(ctx, &models.Execution{ID: "delete-exec", TaskID: task.ID, Status: models.ExecCompleted, PromptSent: "prompt"}))
 	require.NoError(t, chatAttachmentRepo.Create(ctx, &models.ChatAttachment{
 		ExecutionID: "delete-exec",
 		FileName:    "execution.txt",
@@ -1989,10 +1988,9 @@ func TestTaskService_Delete_DeletesAttachments(t *testing.T) {
 	pendingUploadDir := filepath.Join(uploadsDir, "chat", "pending", pendingSessionID)
 	require.NoError(t, os.MkdirAll(pendingUploadDir, 0o700))
 	require.NoError(t, os.WriteFile(filepath.Join(pendingUploadDir, "pending.txt"), []byte("pending"), 0o600))
-	_, err = db.Exec(`INSERT INTO thread_inputs
-		(id, scope, project_id, task_id, input_mode, input_status, content, attachment_session_id, queue_position)
-		VALUES ('delete-thread-input', 'task_thread', 'default', ?, 'queued', 'pending', 'follow up', ?, 1)`, task.ID, pendingSessionID)
-	require.NoError(t, err)
+	require.NoError(t, teststores.Of(db).ThreadInputs.CreateQueued(ctx, &models.ThreadInput{
+		Scope: models.ThreadInputScopeTask, ProjectID: "default", TaskID: task.ID, Content: "follow up", AttachmentSessionID: pendingSessionID,
+	}))
 
 	// Verify attachment exists in DB
 	attachments, err := attachmentRepo.ListByTask(ctx, task.ID)
@@ -2337,8 +2335,7 @@ func TestTaskService_CancelTaskObservedDoesNotCancelNewFollowup(t *testing.T) {
 
 	// The old turn completes and a direct follow-up is admitted before Stop
 	// reaches the callback and durable task status update.
-	_, err = db.ExecContext(ctx, `UPDATE executions SET status = 'completed' WHERE id = ?`, old.ID)
-	require.NoError(t, err)
+	require.NoError(t, execRepo.Complete(ctx, old.ID, models.ExecCompleted, "", "", 0, 0))
 	require.NoError(t, taskRepo.UpdateStatus(ctx, task.ID, models.StatusCompleted))
 	next := &models.Execution{TaskID: task.ID, IsFollowup: true, PromptSent: "new"}
 	started, err := execRepo.CreateDirectTaskFollowupOrQueue(ctx, next, &models.ThreadInput{Content: "new"})
@@ -2389,8 +2386,7 @@ func TestTaskService_ObserveTaskCancellationKeepsTaskAndCutoffTogether(t *testin
 	require.NoError(t, err)
 
 	unlock := persistence.LockTaskLifecycle(task.ID)
-	_, err = db.ExecContext(ctx, `UPDATE executions SET status = 'completed' WHERE id = ?`, old.ID)
-	require.NoError(t, err)
+	require.NoError(t, execRepo.Complete(ctx, old.ID, models.ExecCompleted, "", "", 0, 0))
 	require.NoError(t, taskRepo.UpdateStatus(ctx, task.ID, models.StatusCompleted))
 	next := &models.Execution{TaskID: task.ID, IsFollowup: true, PromptSent: "new"}
 	admitted := make(chan error, 1)
@@ -2577,8 +2573,7 @@ func TestTaskService_UpdateCategoryDemotionDoesNotCancelConcurrentFollowup(t *te
 	case <-time.After(time.Second):
 		t.Fatal("category demotion did not reach its loader")
 	}
-	_, err := db.ExecContext(ctx, `UPDATE executions SET status = 'completed' WHERE id = ?`, old.ID)
-	require.NoError(t, err)
+	require.NoError(t, execRepo.Complete(ctx, old.ID, models.ExecCompleted, "", "", 0, 0))
 	require.NoError(t, taskRepo.UpdateStatus(ctx, task.ID, models.StatusCompleted))
 	next := &models.Execution{TaskID: task.ID, IsFollowup: true, PromptSent: "new"}
 	admitted := make(chan error, 1)
@@ -2855,8 +2850,7 @@ func TestTaskService_DeleteAll_CleansEveryUploadOwner(t *testing.T) {
 			require.NoError(t, os.WriteFile(taskPath, []byte("task"), 0o600))
 			require.NoError(t, attachmentRepo.Create(ctx, &models.Attachment{TaskID: task.ID, FileName: "task.txt", FilePath: taskPath, MediaType: "text/plain", FileSize: 4}))
 			execID := fmt.Sprintf("bulk-exec-%d", i)
-			_, err := db.Exec(`INSERT INTO executions(id, task_id, status, prompt_sent) VALUES (?, ?, 'completed', 'prompt')`, execID, task.ID)
-			require.NoError(t, err)
+			require.NoError(t, teststores.Of(db).Executions.Create(ctx, &models.Execution{ID: execID, TaskID: task.ID, Status: models.ExecCompleted, PromptSent: "prompt"}))
 			execPath := filepath.Join(uploadsDir, "chat", execID, "execution.txt")
 			require.NoError(t, os.MkdirAll(filepath.Dir(execPath), 0o700))
 			require.NoError(t, os.WriteFile(execPath, []byte("execution"), 0o600))
@@ -2865,14 +2859,11 @@ func TestTaskService_DeleteAll_CleansEveryUploadOwner(t *testing.T) {
 			pendingDir := filepath.Join(uploadsDir, "chat", "pending", sessionID)
 			require.NoError(t, os.MkdirAll(pendingDir, 0o700))
 			require.NoError(t, os.WriteFile(filepath.Join(pendingDir, "pending.txt"), []byte("pending"), 0o600))
+			input := &models.ThreadInput{Scope: models.ThreadInputScopeTask, ProjectID: "default", TaskID: task.ID, Content: "follow up", AttachmentSessionID: sessionID}
 			if tt.category == models.CategoryChat {
-				_, err = db.Exec(`INSERT INTO thread_inputs(id, scope, project_id, run_execution_id, input_mode, input_status, content, attachment_session_id, queue_position)
-						VALUES (?, 'chat', 'default', ?, 'queued', 'pending', 'follow up', ?, 1)`, "bulk-input-"+tt.name, execID, sessionID)
-			} else {
-				_, err = db.Exec(`INSERT INTO thread_inputs(id, scope, project_id, task_id, input_mode, input_status, content, attachment_session_id, queue_position)
-						VALUES (?, 'task_thread', 'default', ?, 'queued', 'pending', 'follow up', ?, 1)`, "bulk-input-"+tt.name, task.ID, sessionID)
+				input = &models.ThreadInput{Scope: models.ThreadInputScopeChat, ProjectID: "default", RunExecutionID: execID, Content: "follow up", AttachmentSessionID: sessionID}
 			}
-			require.NoError(t, err)
+			require.NoError(t, teststores.Of(db).ThreadInputs.CreateQueued(ctx, input))
 			count, err := tt.delete(svc, ctx, "default")
 			require.NoError(t, err)
 			require.Equal(t, 1, count)
@@ -3838,6 +3829,7 @@ func TestWorkerService_StartReconcilesDurableActiveLaneReservationWhileCapacityF
 	defer cancel()
 	db := teststores.NewDB(t)
 	taskRepo := teststores.Of(db).Tasks
+	execRepo := teststores.Of(db).Executions
 	task := &models.Task{ProjectID: "default", Title: "Restart reserved worker task", Category: models.CategoryBacklog, Status: models.StatusPending}
 	require.NoError(t, taskRepo.Create(ctx, task))
 	admissions, err := taskRepo.MoveTasksToActiveLane(ctx, "default", []persistence.ActiveLaneTaskMove{{ID: task.ID, ExpectedCategory: models.CategoryBacklog, ExpectedStatus: models.StatusPending}}, models.StatusRunning)
@@ -3855,9 +3847,9 @@ func TestWorkerService_StartReconcilesDurableActiveLaneReservationWhileCapacityF
 	require.True(t, worker.pending[task.ID])
 	require.Equal(t, admissions[0].ExecutionID, worker.reserved[task.ID])
 	require.Len(t, worker.queue, 1)
-	var status models.ExecutionStatus
-	require.NoError(t, db.QueryRowContext(ctx, `SELECT status FROM executions WHERE id = ?`, admissions[0].ExecutionID).Scan(&status))
-	require.Equal(t, models.ExecQueued, status)
+	reserved, err := execRepo.GetByID(ctx, admissions[0].ExecutionID)
+	require.NoError(t, err)
+	require.Equal(t, models.ExecQueued, reserved.Status)
 }
 
 func TestWorkerService_ReservedDispatchRefreshesMetadataAfterCapacityWait(t *testing.T) {
@@ -3877,8 +3869,11 @@ func TestWorkerService_ReservedDispatchRefreshesMetadataAfterCapacityWait(t *tes
 	require.NoError(t, err)
 	require.Len(t, admissions, 1)
 
-	_, err = db.ExecContext(ctx, `UPDATE projects SET max_workers = 1 WHERE id = 'default'`)
+	defaultProject, err := teststores.Of(db).Projects.GetByID(ctx, "default")
 	require.NoError(t, err)
+	maxWorkers := 1
+	defaultProject.MaxWorkers = &maxWorkers
+	require.NoError(t, teststores.Of(db).Projects.Update(ctx, defaultProject))
 	worker := NewWorkerService(nil, 2, nil)
 	worker.SetProjectRepo(teststores.Of(db).Projects)
 	worker.SetTaskRepo(taskRepo)
@@ -3911,8 +3906,8 @@ func TestWorkerService_ReservedDispatchRefreshesMetadataAfterCapacityWait(t *tes
 	require.NoError(t, err)
 	require.Equal(t, "current prompt", execution.PromptSent)
 	require.Equal(t, secondModel.ID, execution.AgentConfigID)
-	var count int
-	require.NoError(t, db.QueryRowContext(ctx, `SELECT COUNT(*) FROM executions WHERE task_id = ?`, task.ID).Scan(&count))
+	count, err := execRepo.CountByTask(ctx, task.ID)
+	require.NoError(t, err)
 	require.Equal(t, 1, count)
 }
 
@@ -3944,8 +3939,8 @@ func TestWorkerService_RetriesTransientReservedClaimFailureWithSameExecution(t *
 		execution, getErr := execRepo.GetByID(ctx, admissions[0].ExecutionID)
 		return getErr == nil && execution != nil && execution.Status != models.ExecQueued && attempts.Load() >= 2
 	}, 3*time.Second, 10*time.Millisecond)
-	var count int
-	require.NoError(t, db.QueryRowContext(ctx, `SELECT COUNT(*) FROM executions WHERE task_id = ?`, task.ID).Scan(&count))
+	count, err := execRepo.CountByTask(ctx, task.ID)
+	require.NoError(t, err)
 	require.Equal(t, 1, count, "retry must reuse the durable execution reservation")
 }
 

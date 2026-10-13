@@ -641,9 +641,7 @@ func BenchmarkScheduleAgentOptionProjectionAndContent(b *testing.B) {
 	if err := projectRepo.Create(context.Background(), project); err != nil {
 		b.Fatalf("create benchmark project: %v", err)
 	}
-	if _, err := db.ExecContext(context.Background(), `DELETE FROM agents WHERE id IS NOT NULL`); err != nil {
-		b.Fatalf("clear benchmark agents: %v", err)
-	}
+	teststores.ClearAgents(b, teststores.Of(db).Agents)
 	for i := 0; i < 1000; i++ {
 		agent := &models.Agent{
 			Name:                fmt.Sprintf("Schedule Agent %04d", i),

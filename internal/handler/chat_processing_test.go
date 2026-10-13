@@ -7067,13 +7067,9 @@ func BenchmarkBrowserTaskThreadAutoSelection(b *testing.B) {
 	})
 }
 
-func clearModelConfigs(tb testing.TB, db interface {
-	Exec(query string, args ...any) (sql.Result, error)
-}) {
+func clearModelConfigs(tb testing.TB, db *sql.DB) {
 	tb.Helper()
-	if _, err := db.Exec(`DELETE FROM agent_configs`); err != nil {
-		tb.Fatalf("clear model configs: %v", err)
-	}
+	teststores.ClearLLMConfigs(tb, teststores.Of(db).LLMConfigs)
 }
 
 func richAutoSelectionConfig(name string, provider models.LLMProvider, authMethod models.AuthMethod, model string, isDefault bool) *models.LLMConfig {
@@ -8889,9 +8885,7 @@ func TestExecuteListAgentsUsesRuntimeSummariesAndPreservesOutput(t *testing.T) {
 	ctx := context.Background()
 	agentRepo := teststores.Of(db).Agents
 	h.SetAgentRepo(agentRepo)
-	if _, err := db.ExecContext(ctx, `DELETE FROM agents WHERE id IS NOT NULL`); err != nil {
-		t.Fatalf("clear agents: %v", err)
-	}
+	teststores.ClearAgents(t, teststores.Of(db).Agents)
 
 	agents := []*models.Agent{
 		{Name: "Alpha Agent", Description: "alpha description", Model: "inherit", Skills: []models.SkillConfig{{Name: "one"}, {Name: "two"}}, MCPServers: []models.MCPServerConfig{{Name: "browser"}}, Enabled: true, SelectableAsPrimary: true},
@@ -8917,9 +8911,7 @@ func TestExecuteListAgentsUsesRuntimeSummariesAndPreservesOutput(t *testing.T) {
 	require.Equal(t, "Configured Agents:\nAgent definitions not available.", strings.TrimSpace(h.executeListAgents(ctx)))
 
 	h.SetAgentRepo(agentRepo)
-	if _, err := db.ExecContext(ctx, `DELETE FROM agents WHERE id IS NOT NULL`); err != nil {
-		t.Fatalf("clear agents for empty result: %v", err)
-	}
+	teststores.ClearAgents(t, teststores.Of(db).Agents)
 	require.Contains(t, h.executeListAgents(ctx), "No agents configured.")
 }
 

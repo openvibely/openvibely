@@ -12,6 +12,7 @@ import (
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/openvibely/openvibely/internal/testutil/teststores"
 )
 
 // ---- Home ----
@@ -488,9 +489,7 @@ func TestViewSchedule_UsesCompactModelProjection(t *testing.T) {
 	project := createProject(t, h, "Schedule Projection")
 	ctx := context.Background()
 
-	if _, err := db.Exec(`DELETE FROM agent_configs`); err != nil {
-		t.Fatalf("clear model configs: %v", err)
-	}
+	teststores.ClearLLMConfigs(t, teststores.Of(db).LLMConfigs)
 	largeBody := strings.Repeat("x", 1024*1024)
 	defaultModel := &models.LLMConfig{
 		Name:                 "Schedule Default",

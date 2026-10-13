@@ -258,8 +258,14 @@ func TestActiveLaneGroupedDragUsesRealHandlerPersistenceAndRollbackInChrome(t *t
 		t.Fatalf("active lane browser: %s\n%s", outcome, data)
 	}
 	for _, task := range []*models.Task{first, second} {
-		var queuedExecutions int
-		if err := tc.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM executions WHERE task_id = ? AND status = 'queued'`, task.ID).Scan(&queuedExecutions); err != nil || queuedExecutions != 1 {
+		execs, err := tc.execRepo.ListByTask(ctx, task.ID)
+		queuedExecutions := 0
+		for _, exec := range execs {
+			if exec.Status == models.ExecQueued {
+				queuedExecutions++
+			}
+		}
+		if err != nil || queuedExecutions != 1 {
 			t.Fatalf("reserved execution changed after reorder: count=%d err=%v", queuedExecutions, err)
 		}
 		loaded, _ := tc.taskRepo.GetByID(ctx, task.ID)

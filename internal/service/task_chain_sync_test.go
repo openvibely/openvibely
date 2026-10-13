@@ -98,8 +98,14 @@ func TestExecuteTaskEditsDoesNotRewriteOrDuplicateStartedChainChild(t *testing.T
 	require.NoError(t, err)
 	require.Nil(t, blockedChild)
 
-	var childCount int
-	require.NoError(t, db.QueryRowContext(ctx, `SELECT COUNT(*) FROM tasks WHERE parent_task_id = ?`, parent.ID).Scan(&childCount))
+	projectTasks, err := taskRepo.ListByProject(ctx, project.ID, "")
+	require.NoError(t, err)
+	childCount := 0
+	for _, task := range projectTasks {
+		if task.ParentTaskID != nil && *task.ParentTaskID == parent.ID {
+			childCount++
+		}
+	}
 	require.Equal(t, 1, childCount)
 	require.False(t, strings.Contains(summary, "Edited child"))
 }

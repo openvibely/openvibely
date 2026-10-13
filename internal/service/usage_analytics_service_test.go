@@ -358,11 +358,12 @@ func TestRecordUsageFromResult_PersistsOpenAICompatibleUsageAndAggregates(t *tes
 
 	RecordUsageFromResult(ctx, repo, UsageCapture{Operation: "chat", Status: "completed", LatencyMs: 150, OccurredAt: time.Now().UTC()}, compatible, llmcontracts.AgentResult{Usage: llmusage.FromOpenAI(120, 45, 20, 8)})
 
-	var provider, model string
-	var inputTokens, outputTokens, cachedTokens, reasoningTokens, totalTokens int
-	if err := db.QueryRowContext(ctx, `SELECT provider, model, input_tokens, output_tokens, cached_input_tokens, reasoning_output_tokens, total_tokens FROM llm_usage_events`).Scan(&provider, &model, &inputTokens, &outputTokens, &cachedTokens, &reasoningTokens, &totalTokens); err != nil {
-		t.Fatalf("scan compatible usage event: %v", err)
+	stored, err := repo.GetModelUsageBreakdown(ctx, persistence.UsageFilter{})
+	if err != nil || len(stored) != 1 {
+		t.Fatalf("load compatible usage event: rows=%+v err=%v", stored, err)
 	}
+	provider, model := stored[0].Provider, stored[0].Model
+	inputTokens, outputTokens, cachedTokens, reasoningTokens, totalTokens := stored[0].InputTokens, stored[0].OutputTokens, stored[0].CacheTokens, stored[0].ReasoningOutputTokens, stored[0].TotalTokens
 	if provider != string(models.ProviderOpenAICompatible) || model != "deepseek/deepseek-chat-v3.1:free" {
 		t.Fatalf("expected exact compatible provider/model, got provider=%q model=%q", provider, model)
 	}
@@ -409,28 +410,28 @@ func TestRecordUsageFromResult_PersistsAnthropicAndOpenAIDetails(t *testing.T) {
 	RecordUsageFromResult(ctx, repo, UsageCapture{Operation: "streaming", Status: "completed", LatencyMs: 200, OccurredAt: time.Now().UTC()}, openai, llmcontracts.AgentResult{Usage: llmusage.FromOpenAI(80, 20, 30, 4)})
 	RecordUsageFromResult(ctx, repo, UsageCapture{ExecutionID: "exec-unsupported", Operation: "task", Status: "completed", LatencyMs: 1, OccurredAt: time.Now().UTC()}, models.LLMConfig{Provider: models.ProviderAnthropic, AuthMethod: "unsupported", Model: "claude"}, llmcontracts.AgentResult{Usage: llmusage.FromTotal(999)})
 
-	var count int
-	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM llm_usage_events`).Scan(&count); err != nil {
+	all, err := repo.GetUsageTotals(ctx, persistence.UsageFilter{})
+	if err != nil {
 		t.Fatalf("count usage events: %v", err)
 	}
-	if count != 2 {
-		t.Fatalf("expected two persisted API/OAuth events, got %d", count)
+	if all.CallCount != 2 {
+		t.Fatalf("expected two persisted API/OAuth events, got %d", all.CallCount)
 	}
 
-	var cacheCreate, cacheRead int
-	if err := db.QueryRowContext(ctx, `SELECT cache_creation_input_tokens, cache_read_input_tokens FROM llm_usage_events WHERE provider = 'anthropic'`).Scan(&cacheCreate, &cacheRead); err != nil {
-		t.Fatalf("scan anthropic cache usage: %v", err)
+	anthropicTotals, err := repo.GetUsageTotals(ctx, persistence.UsageFilter{Provider: "anthropic"})
+	if err != nil || anthropicTotals.CallCount != 1 {
+		t.Fatalf("load anthropic cache usage: totals=%+v err=%v", anthropicTotals, err)
 	}
-	if cacheCreate != 11 || cacheRead != 7 {
-		t.Fatalf("unexpected anthropic cache usage create=%d read=%d", cacheCreate, cacheRead)
+	if anthropicTotals.CacheCreationInputTokens != 11 || anthropicTotals.CacheReadInputTokens != 7 {
+		t.Fatalf("unexpected anthropic cache usage create=%d read=%d", anthropicTotals.CacheCreationInputTokens, anthropicTotals.CacheReadInputTokens)
 	}
 
-	var cached, reasoning int
-	if err := db.QueryRowContext(ctx, `SELECT cached_input_tokens, reasoning_output_tokens FROM llm_usage_events WHERE provider = 'openai'`).Scan(&cached, &reasoning); err != nil {
-		t.Fatalf("scan openai usage: %v", err)
+	openaiTotals, err := repo.GetUsageTotals(ctx, persistence.UsageFilter{Provider: "openai"})
+	if err != nil || openaiTotals.CallCount != 1 {
+		t.Fatalf("load openai usage: totals=%+v err=%v", openaiTotals, err)
 	}
-	if cached != 30 || reasoning != 4 {
-		t.Fatalf("unexpected openai usage cached=%d reasoning=%d", cached, reasoning)
+	if openaiTotals.CachedInputTokens != 30 || openaiTotals.ReasoningOutputTokens != 4 {
+		t.Fatalf("unexpected openai usage cached=%d reasoning=%d", openaiTotals.CachedInputTokens, openaiTotals.ReasoningOutputTokens)
 	}
 }
 

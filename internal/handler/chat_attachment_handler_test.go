@@ -358,8 +358,9 @@ func TestUploadChatAttachment_RejectsRetiredSessionWithoutRecreatingDirectory(t 
 	}
 	e := echo.New()
 	const sessionID = "dddddddddddddddddddddddddddddddd"
-	_, err := db.Exec(`INSERT INTO retired_attachment_sessions(session_id) VALUES (?)`, sessionID)
+	retired, err := threadInputRepo.RetireAttachmentSessionIfUnowned(context.Background(), sessionID)
 	require.NoError(t, err)
+	require.True(t, retired)
 
 	body := &bytes.Buffer{}
 	writer := multipart.NewWriter(body)

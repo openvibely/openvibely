@@ -778,9 +778,7 @@ func TestHandler_GetModelCapacitiesUsesCompactWorkerProjection(t *testing.T) {
 	db, counter := testutil.NewStatementCountingTestDB(t)
 	h, e, llmConfigRepo := setupTestHandlerForDB(t, db)
 	ctx := context.Background()
-	if _, err := db.ExecContext(ctx, `DELETE FROM agent_configs`); err != nil {
-		t.Fatalf("clear model configs: %v", err)
-	}
+	teststores.ClearLLMConfigs(t, teststores.Of(db).LLMConfigs)
 
 	alpha := &models.LLMConfig{
 		Name: "Worker Alpha", Provider: models.ProviderOpenAICompatible, AuthMethod: models.AuthMethodOAuth,
@@ -980,7 +978,7 @@ func TestHandler_GetModelCapacity_NoLimit(t *testing.T) {
 }
 
 func TestHandler_GetModelCapacity_OverCapacityClampsAvailableSlots(t *testing.T) {
-	h, e, llmConfigRepo, db := setupTestHandlerWithDB(t)
+	h, e, llmConfigRepo, _ := setupTestHandlerWithDB(t)
 	ctx := context.Background()
 
 	agent := &models.LLMConfig{
@@ -1001,8 +999,10 @@ func TestHandler_GetModelCapacity_OverCapacityClampsAvailableSlots(t *testing.T)
 		}
 	}()
 
-	_, err := db.ExecContext(ctx, `UPDATE agent_configs SET max_workers = ? WHERE id = ?`, 2, agent.ID)
+	stored, err := llmConfigRepo.GetByID(ctx, agent.ID)
 	require.NoError(t, err)
+	stored.MaxWorkers = 2
+	require.NoError(t, llmConfigRepo.Update(ctx, stored))
 
 	listReq := httptest.NewRequest(http.MethodGet, "/api/capacity/models", nil)
 	listRec := httptest.NewRecorder()

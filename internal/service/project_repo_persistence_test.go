@@ -128,7 +128,7 @@ func TestProjectService_DeleteRollbackDoesNotCancelOrMoveRunningTaskWorktree(t *
 		t.Fatal(err)
 	}
 	runGit("worktree", "add", "-b", "task/"+task.ID[:8]+"-running", worktreePath)
-	if _, err := db.ExecContext(ctx, `UPDATE tasks SET worktree_path = ? WHERE id = ?`, worktreePath, task.ID); err != nil {
+	if err := taskRepo.UpdateWorktreeInfo(ctx, task.ID, worktreePath, task.WorktreeBranch); err != nil {
 		t.Fatal(err)
 	}
 	runCtx, cancel := context.WithCancel(context.Background())
@@ -209,13 +209,13 @@ func TestProjectService_DeleteCleansLocalTaskWorktreeAndMutationHistory(t *testi
 		t.Fatal(err)
 	}
 	runGit(repoDir, "worktree", "add", "-b", branch, worktreePath)
-	if _, err := db.ExecContext(ctx, `UPDATE tasks SET worktree_path = ?, worktree_branch = ? WHERE id = ?`, worktreePath, branch, task.ID); err != nil {
+	if err := taskRepo.UpdateWorktreeInfo(ctx, task.ID, worktreePath, branch); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO agent_config_mutations
-			(id, task_run_id, project_id, target_type, target_key, action, idempotency_key)
-		VALUES ('project-delete-mutation', 'run', ?, 'skill', 'example', 'delete', 'project-delete-mutation')`, project.ID); err != nil {
+	if err := teststores.Of(db).AgentMutations.Create(ctx, &models.AgentConfigMutation{
+		TaskRunID: "run", ProjectID: project.ID, TargetType: models.MutationTargetSkill, TargetKey: "example",
+		Action: "delete", IdempotencyKey: "project-delete-mutation",
+	}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -315,7 +315,7 @@ func TestProjectService_DeleteCleansManagedCloneAndPreservesUserOwnedGitHubCheck
 	}
 	unownedBranch := "task/" + unownedTask.ID[:8] + "-cleanup"
 	runGit("worktree", "add", "-b", unownedBranch, unownedWorktree)
-	if _, err := db.ExecContext(ctx, `UPDATE tasks SET worktree_path = ?, worktree_branch = ? WHERE id = ?`, unownedWorktree, unownedBranch, unownedTask.ID); err != nil {
+	if err := taskRepo.UpdateWorktreeInfo(ctx, unownedTask.ID, unownedWorktree, unownedBranch); err != nil {
 		t.Fatal(err)
 	}
 	if err := projectSvc.Delete(ctx, unowned.ID); err != nil {

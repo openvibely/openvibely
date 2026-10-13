@@ -706,8 +706,8 @@ func assertFreshSystemSeedState(t *testing.T, dbPath string) {
 	assertSingleScheduledSystemTask(t, db, "System: Memory Consolidation", "memory_curator")
 	assertSingleScheduledSystemTask(t, db, "System: Skill Library Maintenance", "skill_curator")
 
-	var maxWorkers int
-	if err := db.QueryRow("SELECT max_workers FROM worker_settings WHERE id='singleton'").Scan(&maxWorkers); err != nil {
+	maxWorkers, err := teststores.Of(db).Workers.GetMaxWorkers(context.Background())
+	if err != nil {
 		t.Fatalf("read global worker limit after startup: %v", err)
 	}
 	if maxWorkers != 0 {

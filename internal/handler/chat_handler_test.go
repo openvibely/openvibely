@@ -430,8 +430,7 @@ func TestHandler_ChatSend_HydratesSelectedModelWithoutEagerCatalogs(t *testing.T
 	db, counter := testutil.NewStatementCountingTestDB(t)
 	h, e, llmConfigRepo := setupTestHandlerForDB(t, db)
 	ctx := context.Background()
-	_, err := db.Exec(`DELETE FROM agent_configs`)
-	require.NoError(t, err)
+	teststores.ClearLLMConfigs(t, teststores.Of(db).LLMConfigs)
 
 	largeProviderJSON := strings.Repeat("large-browser-chat-provider-json", 4096)
 	agent := &models.LLMConfig{
@@ -1953,9 +1952,9 @@ func TestCleanupUnpublishedPendingAttachmentSession_PreservesAlreadyOwnedSession
 	require.NoError(t, h.cleanupUnpublishedPendingAttachmentSession(context.Background(), sessionID))
 	require.FileExists(t, pendingFile)
 
-	var retiredCount int
-	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM retired_attachment_sessions WHERE session_id = ?`, sessionID).Scan(&retiredCount))
-	require.Zero(t, retiredCount)
+	retired, err := teststores.Of(db).ThreadInputs.IsAttachmentSessionRetired(context.Background(), sessionID)
+	require.NoError(t, err)
+	require.False(t, retired)
 }
 
 func TestHandler_DirectBrowserAttachmentFailureRemovesUnpublishedSession(t *testing.T) {
