@@ -40,6 +40,11 @@ global.fetch = async (path, options) => {
  return {ok:true,json:async()=>({status:calls===2?'expired':'connected'})};
 };
 (async()=>{
+ // Browser links navigate normally and preserve the selected project without fetching.
+ const browserAnchor = {dataset:{oauthExternal:'false'},href:''};
+ assert.equal(launchOAuthInSystemBrowser('/models/test/oauth/initiate',browserAnchor),true);
+ assert.equal(browserAnchor.href,'/models/test/oauth/initiate?project_id=test');
+ assert.equal(calls,0);
  assert.equal(launchOAuthInSystemBrowser('/models/test/oauth/initiate',anchor),false);
  launchOAuthInSystemBrowser('/models/test/oauth/initiate',anchor);
  await new Promise(setImmediate);
