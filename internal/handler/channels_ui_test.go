@@ -241,7 +241,7 @@ func TestChannelsPageRendersCardLayout(t *testing.T) {
 	if !strings.Contains(body, `var requestConfig = detail.requestConfig || {}`) ||
 		!strings.Contains(body, `var rawPath = requestConfig.path || (detail.pathInfo && detail.pathInfo.requestPath) || detail.path || ''`) ||
 		!strings.Contains(body, `var rp = String(rawPath).split('?')[0]`) ||
-		!strings.Contains(body, `rp === '/channels/discord/configure' && detail.successful`) ||
+		!strings.Contains(body, `'/channels/discord/configure': 'discord_config_modal'`) ||
 		!strings.Contains(body, `document.getElementById('discord_config_modal')`) {
 		t.Error("expected Discord configuration modal to close after successful configure save using robust HTMX request path detection")
 	}
