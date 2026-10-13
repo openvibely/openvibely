@@ -116,14 +116,13 @@ func runtimeOpenAITools(rt *llmcontracts.RuntimeTools, enableAsync bool) []opena
 			continue
 		}
 		out = append(out, openaiclient.ToolDefinition{
-			Type:           "function",
-			Name:           name,
-			Description:    strings.TrimSpace(def.Description),
-			Parameters:     def.Parameters,
-			Schema:         def.Schema,
-			Strict:         def.Strict,
-			StrictPriority: def.StrictPriority,
-			Async:          enableAsync && openAIRuntimeToolAsyncAllowed(def),
+			Type:        "function",
+			Name:        name,
+			Description: strings.TrimSpace(def.Description),
+			Parameters:  def.Parameters,
+			Schema:      def.Schema,
+			Strict:      def.Strict,
+			Async:       enableAsync && openAIRuntimeToolAsyncAllowed(def),
 		})
 	}
 	return out

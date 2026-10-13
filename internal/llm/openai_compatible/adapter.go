@@ -604,13 +604,12 @@ func runtimeTools(ctx context.Context) []openaiclient.ToolDefinition {
 			continue
 		}
 		out = append(out, openaiclient.ToolDefinition{
-			Type:           "function",
-			Name:           name,
-			Description:    strings.TrimSpace(def.Description),
-			Parameters:     def.Parameters,
-			Schema:         def.Schema,
-			Strict:         def.Strict,
-			StrictPriority: def.StrictPriority,
+			Type:        "function",
+			Name:        name,
+			Description: strings.TrimSpace(def.Description),
+			Parameters:  def.Parameters,
+			Schema:      def.Schema,
+			Strict:      def.Strict,
 		})
 	}
 	return out

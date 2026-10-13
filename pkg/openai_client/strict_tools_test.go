@@ -18,7 +18,7 @@ import (
 func TestStrictTaskLookupAndValidation(t *testing.T) {
 	def := chatcontrol.Get("list_tasks")
 	called := 0
-	opts := &AgenticOptions{SkipDefaultTools: true, ExtraTools: []ToolDefinition{{Type: "function", Name: def.Name, Schema: def.Schema, StrictPriority: def.StrictPriority}}, ToolExecutor: func(_ context.Context, _ string, input json.RawMessage) (string, bool, error) {
+	opts := &AgenticOptions{SkipDefaultTools: true, ExtraTools: []ToolDefinition{{Type: "function", Name: def.Name, Schema: def.Schema}}, ToolExecutor: func(_ context.Context, _ string, input json.RawMessage) (string, bool, error) {
 		called++
 		if string(input) != `{"category":"backlog"}` {
 			t.Errorf("unexpected filters: %s", input)
@@ -102,7 +102,7 @@ func TestProviderWireStrictSchemas(t *testing.T) {
 			OpenAIAPIBaseURL = srv.URL + "/"
 			defer func() { OpenAIAPIBaseURL = old }()
 			d := chatcontrol.Get("list_tasks")
-			defs := []ToolDefinition{{Type: "function", Name: d.Name, Schema: d.Schema, StrictPriority: d.StrictPriority}}
+			defs := []ToolDefinition{{Type: "function", Name: d.Name, Schema: d.Schema}}
 			client := newHTTPTestAPIKeyClient("test")
 			var err error
 			if completions {
