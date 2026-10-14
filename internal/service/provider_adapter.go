@@ -532,6 +532,9 @@ func estimateHistoryTokens(provider models.LLMProvider, history []models.Executi
 	if provider == models.ProviderOpenAI {
 		return llmopenai.EstimateHistoryTokens(history)
 	}
+	if provider == models.ProviderAnthropic {
+		return llmanthropic.EstimateHistoryTokens(history)
+	}
 	total := 0
 	for _, exec := range history {
 		total += estimateExecutionTokens(exec)
@@ -852,7 +855,7 @@ func (s *LLMService) callProviderWithCompaction(adapter ProviderAdapter, req llm
 	req = resolveProviderRequestForBudget(req)
 	req = trackSteeringRecovery(req)
 	var replayErr error
-	req, replayErr = s.loadOpenAIReplayHistory(req)
+	req, replayErr = s.loadProviderReplayHistory(req)
 	if replayErr != nil {
 		return llmcontracts.AgentResult{}, replayErr
 	}
@@ -1273,8 +1276,8 @@ func (s *LLMService) callProviderWithLastResortTruncation(adapter ProviderAdapte
 }
 
 // Hydrate once at the budget boundary, never after history has been trimmed.
-func (s *LLMService) loadOpenAIReplayHistory(req llmcontracts.AgentRequest) (llmcontracts.AgentRequest, error) {
-	if req.Agent.Provider != models.ProviderOpenAI || s == nil || s.execRepo == nil || len(req.ChatHistory) == 0 {
+func (s *LLMService) loadProviderReplayHistory(req llmcontracts.AgentRequest) (llmcontracts.AgentRequest, error) {
+	if (req.Agent.Provider != models.ProviderOpenAI && req.Agent.Provider != models.ProviderAnthropic) || s == nil || s.execRepo == nil || len(req.ChatHistory) == 0 {
 		return req, nil
 	}
 	ids := make([]string, 0, len(req.ChatHistory))
