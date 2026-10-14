@@ -17,9 +17,9 @@ import (
 )
 
 func TestScheduleCalendarActionBulkSelectionAndProjectIsolation(t *testing.T) {
-	db := teststores.NewDB(t)
-	repo := teststores.Of(db).Schedules
-	tasks := teststores.Of(db).Tasks
+	storeEnv := teststores.New(t)
+	repo := storeEnv.Stores.Schedules
+	tasks := storeEnv.Stores.Tasks
 	h := &Handler{scheduleRepo: repo}
 	ctx := context.Background()
 	var ids []string

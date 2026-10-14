@@ -55,8 +55,8 @@ func createMixtureTestConfig(t *testing.T, repo persistence.LLMConfigStore, name
 
 func newMixtureAdapterTestService(t *testing.T) (*LLMService, persistence.LLMConfigStore, *recordingMixtureAdapter) {
 	t.Helper()
-	db := teststores.NewDB(t)
-	repo := teststores.Of(db).LLMConfigs
+	storeEnv := teststores.New(t)
+	repo := storeEnv.Stores.LLMConfigs
 	recorder := &recordingMixtureAdapter{responses: map[string]llmcontracts.AgentResult{}, errors: map[string]error{}}
 	svc := &LLMService{llmConfigRepo: repo, broadcaster: events.NewBroadcaster()}
 	svc.providerAdapters = map[models.LLMProvider]ProviderAdapter{

@@ -115,8 +115,8 @@ func TestIsPresetPersonality(t *testing.T) {
 }
 
 func TestIsAvailablePersonalityKey(t *testing.T) {
-	db := teststores.NewDB(t)
-	repo := teststores.Of(db).CustomPersonalities
+	storeEnv := teststores.New(t)
+	repo := storeEnv.Stores.CustomPersonalities
 	ctx := context.Background()
 	cp := &models.CustomPersonality{
 		Name:         "Available Custom",
@@ -143,8 +143,8 @@ func TestIsAvailablePersonalityKey(t *testing.T) {
 }
 
 func TestAllPersonalitiesWithCustom(t *testing.T) {
-	db := teststores.NewDB(t)
-	repo := teststores.Of(db).CustomPersonalities
+	storeEnv := teststores.New(t)
+	repo := storeEnv.Stores.CustomPersonalities
 	ctx := context.Background()
 
 	// Without custom personalities, should return same as AllPersonalities
@@ -187,10 +187,10 @@ func TestAllPersonalitiesWithCustom_NilRepo(t *testing.T) {
 }
 
 func TestExecuteSaveCustomPersonalityRuntime_CreateUpdateAndActivate(t *testing.T) {
-	db := teststores.NewDB(t)
+	storeEnv := teststores.New(t)
 	ctx := context.Background()
-	customRepo := teststores.Of(db).CustomPersonalities
-	settingsRepo := teststores.Of(db).Settings
+	customRepo := storeEnv.Stores.CustomPersonalities
+	settingsRepo := storeEnv.Stores.Settings
 
 	out, err := ExecuteSaveCustomPersonalityRuntime(ctx, CustomPersonalitySaveOptions{
 		Input:                 json.RawMessage(`{"mode":"create","name":" Release Notes Reviewer ","description":" Concise release-note review ","system_prompt":" You review release notes with concise, user-facing clarity. ","activate":true}`),
@@ -246,10 +246,10 @@ func TestExecuteSaveCustomPersonalityRuntime_CreateUpdateAndActivate(t *testing.
 }
 
 func TestExecuteSaveCustomPersonalityRuntime_RejectsInvalidInputsWithoutPartialWrites(t *testing.T) {
-	db := teststores.NewDB(t)
+	storeEnv := teststores.New(t)
 	ctx := context.Background()
-	customRepo := teststores.Of(db).CustomPersonalities
-	settingsRepo := teststores.Of(db).Settings
+	customRepo := storeEnv.Stores.CustomPersonalities
+	settingsRepo := storeEnv.Stores.Settings
 	if err := customRepo.Create(ctx, &models.CustomPersonality{
 		Name:         "Existing Custom",
 		Key:          "existing_custom",
@@ -305,8 +305,8 @@ func TestExecuteSaveCustomPersonalityRuntime_RejectsInvalidInputsWithoutPartialW
 }
 
 func TestGetPersonalityPromptWithCustom(t *testing.T) {
-	db := teststores.NewDB(t)
-	repo := teststores.Of(db).CustomPersonalities
+	storeEnv := teststores.New(t)
+	repo := storeEnv.Stores.CustomPersonalities
 	ctx := context.Background()
 
 	// Create a custom personality

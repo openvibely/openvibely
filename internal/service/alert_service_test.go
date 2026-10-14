@@ -11,10 +11,10 @@ import (
 )
 
 func TestAlertService_GetByIDPreservesMarkdownDetailAndProjectScope(t *testing.T) {
-	db := teststores.NewDB(t)
+	storeEnv := teststores.New(t)
 	ctx := context.Background()
-	alertRepo := teststores.Of(db).Alerts
-	projectRepo := teststores.Of(db).Projects
+	alertRepo := storeEnv.Stores.Alerts
+	projectRepo := storeEnv.Stores.Projects
 	alertSvc := NewAlertService(alertRepo, nil)
 
 	project := &models.Project{Name: "Markdown detail project"}
@@ -63,12 +63,12 @@ func TestAlertService_GetByIDPreservesMarkdownDetailAndProjectScope(t *testing.T
 }
 
 func TestAlertService_CreateTaskFailedAlert(t *testing.T) {
-	db := teststores.NewDB(t)
-	alertRepo := teststores.Of(db).Alerts
-	projectRepo := teststores.Of(db).Projects
-	taskRepo := teststores.Of(db).Tasks
-	llmConfigRepo := teststores.Of(db).LLMConfigs
-	execRepo := teststores.Of(db).Executions
+	storeEnv := teststores.New(t)
+	alertRepo := storeEnv.Stores.Alerts
+	projectRepo := storeEnv.Stores.Projects
+	taskRepo := storeEnv.Stores.Tasks
+	llmConfigRepo := storeEnv.Stores.LLMConfigs
+	execRepo := storeEnv.Stores.Executions
 	alertSvc := NewAlertService(alertRepo, nil)
 
 	// Create a project
@@ -130,9 +130,9 @@ func TestAlertService_CreateTaskFailedAlert(t *testing.T) {
 }
 
 func TestAlertService_CountUnread(t *testing.T) {
-	db := teststores.NewDB(t)
-	alertRepo := teststores.Of(db).Alerts
-	projectRepo := teststores.Of(db).Projects
+	storeEnv := teststores.New(t)
+	alertRepo := storeEnv.Stores.Alerts
+	projectRepo := storeEnv.Stores.Projects
 	alertSvc := NewAlertService(alertRepo, nil)
 
 	p := &models.Project{Name: "Test Project"}
@@ -177,9 +177,9 @@ func TestAlertService_CountUnread(t *testing.T) {
 }
 
 func TestAlertService_PublishesEventOnCreate(t *testing.T) {
-	db := teststores.NewDB(t)
-	alertRepo := teststores.Of(db).Alerts
-	projectRepo := teststores.Of(db).Projects
+	storeEnv := teststores.New(t)
+	alertRepo := storeEnv.Stores.Alerts
+	projectRepo := storeEnv.Stores.Projects
 	broadcaster := events.NewBroadcaster()
 	alertSvc := NewAlertService(alertRepo, broadcaster)
 
@@ -226,10 +226,10 @@ func TestAlertService_PublishesEventOnCreate(t *testing.T) {
 }
 
 func TestAlertService_PublishesProjectScopedEventsForLifecycleMutations(t *testing.T) {
-	db := teststores.NewDB(t)
+	storeEnv := teststores.New(t)
 	ctx := context.Background()
-	projectRepo := teststores.Of(db).Projects
-	taskRepo := teststores.Of(db).Tasks
+	projectRepo := storeEnv.Stores.Projects
+	taskRepo := storeEnv.Stores.Tasks
 	project := &models.Project{Name: "Lifecycle Events"}
 	if err := projectRepo.Create(ctx, project); err != nil {
 		t.Fatal(err)
@@ -244,7 +244,7 @@ func TestAlertService_PublishesProjectScopedEventsForLifecycleMutations(t *testi
 		t.Fatal(err)
 	}
 	defer broadcaster.Unsubscribe(sub)
-	svc := NewAlertService(teststores.Of(db).Alerts, broadcaster)
+	svc := NewAlertService(storeEnv.Stores.Alerts, broadcaster)
 	alert, err := svc.CreateActionable(ctx, &models.Alert{ProjectID: project.ID, Type: "suggestion", Title: "Lifecycle", Severity: models.SeverityInfo})
 	if err != nil {
 		t.Fatal(err)
@@ -332,9 +332,9 @@ func TestAlertService_PublishesProjectScopedEventsForLifecycleMutations(t *testi
 }
 
 func TestAlertService_DeleteAll(t *testing.T) {
-	db := teststores.NewDB(t)
-	alertRepo := teststores.Of(db).Alerts
-	projectRepo := teststores.Of(db).Projects
+	storeEnv := teststores.New(t)
+	alertRepo := storeEnv.Stores.Alerts
+	projectRepo := storeEnv.Stores.Projects
 	alertSvc := NewAlertService(alertRepo, nil)
 
 	p := &models.Project{Name: "Test Project"}

@@ -117,11 +117,11 @@ func TestBroadcastDiffSnapshotsNonWorktreeUsesHeadBase(t *testing.T) {
 		t.Fatalf("write pending file: %v", err)
 	}
 
-	db := teststores.NewDB(t)
-	llmConfigRepo := teststores.Of(db).LLMConfigs
-	execRepo := teststores.Of(db).Executions
-	taskRepo := teststores.Of(db).Tasks
-	projectRepo := teststores.Of(db).Projects
+	storeEnv := teststores.New(t)
+	llmConfigRepo := storeEnv.Stores.LLMConfigs
+	execRepo := storeEnv.Stores.Executions
+	taskRepo := storeEnv.Stores.Tasks
+	projectRepo := storeEnv.Stores.Projects
 	agent := ensureDefaultAgent(t, llmConfigRepo)
 	project := &models.Project{Name: "Non-worktree snapshot project", RepoPath: repoDir}
 	if err := projectRepo.Create(ctx, project); err != nil {
@@ -148,7 +148,7 @@ func TestBroadcastDiffSnapshotsNonWorktreeUsesHeadBase(t *testing.T) {
 		t.Fatalf("create execution: %v", err)
 	}
 
-	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, teststores.Of(db).Schedules, teststores.Of(db).Attachments)
+	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, storeEnv.Stores.Schedules, storeEnv.Stores.Attachments)
 	stop := make(chan struct{})
 	done := make(chan struct{})
 	go func() {

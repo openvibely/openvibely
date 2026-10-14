@@ -170,8 +170,8 @@ func TestPrepareRecallOnlyLifecycleTurnInjectsChatMemoryWithoutExtraction(t *tes
 	if err := os.WriteFile(filepath.Join(memoryDir, "chat_memory.md"), []byte("# Chat Memory\n\nRecall-only selected memory body."), 0o644); err != nil {
 		t.Fatalf("write selected memory: %v", err)
 	}
-	db := teststores.NewDB(t)
-	projectRepo := teststores.Of(db).Projects
+	storeEnv := teststores.New(t)
+	projectRepo := storeEnv.Stores.Projects
 	project := &models.Project{Name: "Project", RepoPath: repoPath}
 	if err := projectRepo.Create(ctx, project); err != nil {
 		t.Fatalf("create project: %v", err)
@@ -236,8 +236,8 @@ func TestPrepareRecallOnlyLifecycleTurnAuthorizesMarkdownLinkedSemanticMemory(t 
 	if err := os.WriteFile(filepath.Join(memoryDir, "unrelated.md"), []byte("unrelated body"), 0o644); err != nil {
 		t.Fatalf("write unrelated memory: %v", err)
 	}
-	db := teststores.NewDB(t)
-	projectRepo := teststores.Of(db).Projects
+	storeEnv := teststores.New(t)
+	projectRepo := storeEnv.Stores.Projects
 	project := &models.Project{Name: "Project", RepoPath: repoPath}
 	if err := projectRepo.Create(ctx, project); err != nil {
 		t.Fatalf("create project: %v", err)
@@ -292,8 +292,8 @@ func TestPrepareRecallOnlyLifecycleTurnHonorsExplicitIndexedMemoryViewRequest(t 
 	if err := os.WriteFile(filepath.Join(memoryDir, "unindexed_chat.md"), []byte("Unindexed body must not be authorized."), 0o644); err != nil {
 		t.Fatalf("write unindexed memory: %v", err)
 	}
-	db := teststores.NewDB(t)
-	projectRepo := teststores.Of(db).Projects
+	storeEnv := teststores.New(t)
+	projectRepo := storeEnv.Stores.Projects
 	project := &models.Project{Name: "Project", RepoPath: repoPath}
 	if err := projectRepo.Create(ctx, project); err != nil {
 		t.Fatalf("create project: %v", err)
@@ -339,10 +339,10 @@ func TestPrepareRecallOnlyLifecycleTurnHonorsExplicitIndexedMemoryViewRequest(t 
 
 func TestPrepareRecallOnlyLifecycleTurnUsesOnlyMemoryCuratorOwner(t *testing.T) {
 	ctx := context.Background()
-	db := teststores.NewDB(t)
-	projectRepo := teststores.Of(db).Projects
+	storeEnv := teststores.New(t)
+	projectRepo := storeEnv.Stores.Projects
 	project := createChatMemoryProject(t, ctx, projectRepo)
-	agentRepo := teststores.Of(db).Agents
+	agentRepo := storeEnv.Stores.Agents
 
 	memoryAgent := &models.Agent{Key: models.AgentSystemKindMemoryCurator, Name: "System: Memory Curator", SystemKind: models.AgentSystemKindMemoryCurator, Model: "inherit", Enabled: true, GeneratedStatus: models.AgentStatusProtected}
 	if err := agentRepo.Create(ctx, memoryAgent); err != nil {
@@ -389,13 +389,13 @@ func TestPrepareRecallOnlyLifecycleTurnUsesOnlyMemoryCuratorOwner(t *testing.T) 
 }
 
 func TestLLMHookInvokerMemoryRecallRouteSuppressesDirectAgentScopedFileTools(t *testing.T) {
-	db := teststores.NewDB(t)
-	llmRepo := teststores.Of(db).LLMConfigs
-	execRepo := teststores.Of(db).Executions
-	taskRepo := teststores.Of(db).Tasks
-	projectRepo := teststores.Of(db).Projects
-	scheduleRepo := teststores.Of(db).Schedules
-	attachmentRepo := teststores.Of(db).Attachments
+	storeEnv := teststores.New(t)
+	llmRepo := storeEnv.Stores.LLMConfigs
+	execRepo := storeEnv.Stores.Executions
+	taskRepo := storeEnv.Stores.Tasks
+	projectRepo := storeEnv.Stores.Projects
+	scheduleRepo := storeEnv.Stores.Schedules
+	attachmentRepo := storeEnv.Stores.Attachments
 	svc := NewLLMService(llmRepo, execRepo, taskRepo, projectRepo, scheduleRepo, attachmentRepo)
 	capture := &memoryToolIsolationCaptureAdapter{}
 	svc.providerAdapters[models.ProviderTest] = capture
@@ -428,13 +428,13 @@ func TestLLMHookInvokerMemoryRecallRouteSuppressesDirectAgentScopedFileTools(t *
 }
 
 func TestCallAgentDirectWithDefinitionMemoryCuratorCanReadRealMemoryFile(t *testing.T) {
-	db := teststores.NewDB(t)
-	llmRepo := teststores.Of(db).LLMConfigs
-	execRepo := teststores.Of(db).Executions
-	taskRepo := teststores.Of(db).Tasks
-	projectRepo := teststores.Of(db).Projects
-	scheduleRepo := teststores.Of(db).Schedules
-	attachmentRepo := teststores.Of(db).Attachments
+	storeEnv := teststores.New(t)
+	llmRepo := storeEnv.Stores.LLMConfigs
+	execRepo := storeEnv.Stores.Executions
+	taskRepo := storeEnv.Stores.Tasks
+	projectRepo := storeEnv.Stores.Projects
+	scheduleRepo := storeEnv.Stores.Schedules
+	attachmentRepo := storeEnv.Stores.Attachments
 	svc := NewLLMService(llmRepo, execRepo, taskRepo, projectRepo, scheduleRepo, attachmentRepo)
 	capture := &memoryReadingCaptureAdapter{}
 	svc.providerAdapters[models.ProviderTest] = capture
@@ -472,13 +472,13 @@ func TestCallAgentDirectWithDefinitionMemoryCuratorCanReadRealMemoryFile(t *test
 }
 
 func TestCallAgentDirectStreamingDetailedIncludesRecallOnlyMemoryInChatContext(t *testing.T) {
-	db := teststores.NewDB(t)
-	llmRepo := teststores.Of(db).LLMConfigs
-	execRepo := teststores.Of(db).Executions
-	taskRepo := teststores.Of(db).Tasks
-	projectRepo := teststores.Of(db).Projects
-	scheduleRepo := teststores.Of(db).Schedules
-	attachmentRepo := teststores.Of(db).Attachments
+	storeEnv := teststores.New(t)
+	llmRepo := storeEnv.Stores.LLMConfigs
+	execRepo := storeEnv.Stores.Executions
+	taskRepo := storeEnv.Stores.Tasks
+	projectRepo := storeEnv.Stores.Projects
+	scheduleRepo := storeEnv.Stores.Schedules
+	attachmentRepo := storeEnv.Stores.Attachments
 	svc := NewLLMService(llmRepo, execRepo, taskRepo, projectRepo, scheduleRepo, attachmentRepo)
 	capture := &captureProviderAdapter{}
 	svc.providerAdapters[models.ProviderTest] = capture

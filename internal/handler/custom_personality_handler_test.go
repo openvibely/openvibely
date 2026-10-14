@@ -24,12 +24,12 @@ import (
 
 func setupCustomPersonalityHandler(t *testing.T) (*Handler, *echo.Echo, persistence.CustomPersonalityStore, persistence.SettingsStore) {
 	t.Helper()
-	db := teststores.NewDB(t)
+	storeEnv := teststores.New(t)
 
-	projectRepo := teststores.Of(db).Projects
-	customPersonalityRepo := teststores.Of(db).CustomPersonalities
-	llmConfigRepo := teststores.Of(db).LLMConfigs
-	settingsRepo := teststores.Of(db).Settings
+	projectRepo := storeEnv.Stores.Projects
+	customPersonalityRepo := storeEnv.Stores.CustomPersonalities
+	llmConfigRepo := storeEnv.Stores.LLMConfigs
+	settingsRepo := storeEnv.Stores.Settings
 	projectSvc := service.NewProjectService(projectRepo)
 
 	h := New(

@@ -30,8 +30,8 @@ func TestHandler_GetAgentSkills_MigratesLegacyEmbeddedSkills(t *testing.T) {
 		t.Fatalf("standalone skill key = %q, want legacy_debug", standaloneDecl.Skill.Key)
 	}
 
-	db := teststores.NewDB(t)
-	repo := teststores.Of(db).Agents
+	storeEnv := teststores.New(t)
+	repo := storeEnv.Stores.Agents
 	agent := &models.Agent{
 		Name:    "Skill Agent",
 		Key:     "skill_agent",
@@ -105,8 +105,8 @@ func TestHandler_GetAgentSkills_MigratesLegacyEmbeddedSkills(t *testing.T) {
 }
 
 func TestHandler_GetAgentSkills_MigratesUnscopedLegacyAgentSkillsToGlobalRoot(t *testing.T) {
-	db := teststores.NewDB(t)
-	repo := teststores.Of(db).Agents
+	storeEnv := teststores.New(t)
+	repo := storeEnv.Stores.Agents
 	agent := &models.Agent{
 		Name:    "Claudia",
 		Key:     "claudia",
@@ -122,7 +122,7 @@ func TestHandler_GetAgentSkills_MigratesUnscopedLegacyAgentSkillsToGlobalRoot(t 
 	globalRoot := t.TempDir()
 	repoPath := t.TempDir()
 	projectRoot := filepath.Join(repoPath, ".openvibely")
-	projectRepo := teststores.Of(db).Projects
+	projectRepo := storeEnv.Stores.Projects
 	project := &models.Project{Name: "Project", RepoPath: repoPath}
 	if err := projectRepo.Create(t.Context(), project); err != nil {
 		t.Fatal(err)
@@ -143,8 +143,8 @@ func TestHandler_GetAgentSkills_MigratesUnscopedLegacyAgentSkillsToGlobalRoot(t 
 }
 
 func TestHandler_GetAgentSkills_ProjectSkillOverridesGlobalScope(t *testing.T) {
-	db := teststores.NewDB(t)
-	repo := teststores.Of(db).Agents
+	storeEnv := teststores.New(t)
+	repo := storeEnv.Stores.Agents
 	agent := &models.Agent{Name: "Reviewer", Key: "reviewer", Scope: models.AgentScopeProject, Enabled: true}
 	if err := repo.Create(t.Context(), agent); err != nil {
 		t.Fatal(err)
@@ -152,7 +152,7 @@ func TestHandler_GetAgentSkills_ProjectSkillOverridesGlobalScope(t *testing.T) {
 	globalRoot := t.TempDir()
 	repoPath := t.TempDir()
 	projectRoot := filepath.Join(repoPath, ".openvibely")
-	projectRepo := teststores.Of(db).Projects
+	projectRepo := storeEnv.Stores.Projects
 	project := &models.Project{Name: "Project", RepoPath: repoPath}
 	if err := projectRepo.Create(t.Context(), project); err != nil {
 		t.Fatal(err)
@@ -181,10 +181,10 @@ func TestHandler_GetAgentSkills_ProjectSkillOverridesGlobalScope(t *testing.T) {
 }
 
 func TestHandler_AgentOwnedSkillRoutesRejectMismatchedProjectAndUseAgentProjectWhenOmitted(t *testing.T) {
-	db := teststores.NewDB(t)
-	repo := teststores.Of(db).Agents
-	lifecycleRepo := teststores.Of(db).Lifecycle
-	projectRepo := teststores.Of(db).Projects
+	storeEnv := teststores.New(t)
+	repo := storeEnv.Stores.Agents
+	lifecycleRepo := storeEnv.Stores.Lifecycle
+	projectRepo := storeEnv.Stores.Projects
 	projectARepoPath := t.TempDir()
 	projectBRepoPath := t.TempDir()
 	projectA := &models.Project{Name: "Project A", RepoPath: projectARepoPath}
@@ -251,10 +251,10 @@ func TestHandler_AgentOwnedSkillRoutesRejectMismatchedProjectAndUseAgentProjectW
 }
 
 func TestHandler_CreateAgentOwnedSkill_WritesIndexedSkill(t *testing.T) {
-	db := teststores.NewDB(t)
-	repo := teststores.Of(db).Agents
-	lifecycleRepo := teststores.Of(db).Lifecycle
-	projectRepo := teststores.Of(db).Projects
+	storeEnv := teststores.New(t)
+	repo := storeEnv.Stores.Agents
+	lifecycleRepo := storeEnv.Stores.Lifecycle
+	projectRepo := storeEnv.Stores.Projects
 	agent := &models.Agent{Name: "Reviewer", Key: "reviewer", Scope: models.AgentScopeProject, Enabled: true}
 	if err := repo.Create(t.Context(), agent); err != nil {
 		t.Fatal(err)
@@ -287,9 +287,9 @@ func TestHandler_CreateAgentOwnedSkill_WritesIndexedSkill(t *testing.T) {
 }
 
 func TestHandler_CreateAgentOwnedSkill_RawBodyUsesSharedMetadataNormalization(t *testing.T) {
-	db := teststores.NewDB(t)
-	repo := teststores.Of(db).Agents
-	projectRepo := teststores.Of(db).Projects
+	storeEnv := teststores.New(t)
+	repo := storeEnv.Stores.Agents
+	projectRepo := storeEnv.Stores.Projects
 	agent := &models.Agent{Name: "Reviewer", Key: "reviewer", Scope: models.AgentScopeProject, Enabled: true}
 	if err := repo.Create(t.Context(), agent); err != nil {
 		t.Fatal(err)
@@ -322,9 +322,9 @@ func TestHandler_CreateAgentOwnedSkill_RawBodyUsesSharedMetadataNormalization(t 
 }
 
 func TestHandler_UpdateAgentOwnedSkill_ClearsFrontmatterMetadata(t *testing.T) {
-	db := teststores.NewDB(t)
-	repo := teststores.Of(db).Agents
-	projectRepo := teststores.Of(db).Projects
+	storeEnv := teststores.New(t)
+	repo := storeEnv.Stores.Agents
+	projectRepo := storeEnv.Stores.Projects
 	agent := &models.Agent{Name: "Reviewer", Key: "reviewer", Scope: models.AgentScopeProject, Enabled: true}
 	if err := repo.Create(t.Context(), agent); err != nil {
 		t.Fatal(err)
@@ -364,9 +364,9 @@ func TestHandler_UpdateAgentOwnedSkill_ClearsFrontmatterMetadata(t *testing.T) {
 }
 
 func TestHandler_UpdateAgentOwnedSkill_RejectsFrontmatterSkillKeyMismatch(t *testing.T) {
-	db := teststores.NewDB(t)
-	repo := teststores.Of(db).Agents
-	projectRepo := teststores.Of(db).Projects
+	storeEnv := teststores.New(t)
+	repo := storeEnv.Stores.Agents
+	projectRepo := storeEnv.Stores.Projects
 	agent := &models.Agent{Name: "Reviewer", Key: "reviewer", Scope: models.AgentScopeProject, Enabled: true}
 	if err := repo.Create(t.Context(), agent); err != nil {
 		t.Fatal(err)
@@ -394,9 +394,9 @@ func TestHandler_UpdateAgentOwnedSkill_RejectsFrontmatterSkillKeyMismatch(t *tes
 }
 
 func TestHandler_UpdateAgentOwnedSkill_RejectsMismatchedFrontmatterAgentKey(t *testing.T) {
-	db := teststores.NewDB(t)
-	repo := teststores.Of(db).Agents
-	projectRepo := teststores.Of(db).Projects
+	storeEnv := teststores.New(t)
+	repo := storeEnv.Stores.Agents
+	projectRepo := storeEnv.Stores.Projects
 	agent := &models.Agent{Name: "Reviewer", Key: "reviewer", Scope: models.AgentScopeProject, Enabled: true}
 	if err := repo.Create(t.Context(), agent); err != nil {
 		t.Fatal(err)
@@ -424,9 +424,9 @@ func TestHandler_UpdateAgentOwnedSkill_RejectsMismatchedFrontmatterAgentKey(t *t
 }
 
 func TestHandler_ArchiveAgentOwnedSkill_MarksFrontmatterArchived(t *testing.T) {
-	db := teststores.NewDB(t)
-	repo := teststores.Of(db).Agents
-	projectRepo := teststores.Of(db).Projects
+	storeEnv := teststores.New(t)
+	repo := storeEnv.Stores.Agents
+	projectRepo := storeEnv.Stores.Projects
 	agent := &models.Agent{Name: "Reviewer", Key: "reviewer", Scope: models.AgentScopeProject, Enabled: true}
 	if err := repo.Create(t.Context(), agent); err != nil {
 		t.Fatal(err)
@@ -458,8 +458,8 @@ func TestHandler_ArchiveAgentOwnedSkill_MarksFrontmatterArchived(t *testing.T) {
 }
 
 func TestHandler_CreateAgentOwnedSkill_RejectsProjectScopeWithoutProjectRoot(t *testing.T) {
-	db := teststores.NewDB(t)
-	repo := teststores.Of(db).Agents
+	storeEnv := teststores.New(t)
+	repo := storeEnv.Stores.Agents
 	agent := &models.Agent{Name: "Reviewer", Key: "reviewer", Scope: models.AgentScopeProject, Enabled: true}
 	if err := repo.Create(t.Context(), agent); err != nil {
 		t.Fatal(err)
@@ -477,8 +477,8 @@ func TestHandler_CreateAgentOwnedSkill_RejectsProjectScopeWithoutProjectRoot(t *
 }
 
 func TestHandler_CreateAgentOwnedSkill_RejectsProtectedAgent(t *testing.T) {
-	db := teststores.NewDB(t)
-	repo := teststores.Of(db).Agents
+	storeEnv := teststores.New(t)
+	repo := storeEnv.Stores.Agents
 	agent := &models.Agent{Name: "Protected Custom", Key: "protected_custom", Enabled: true, GeneratedStatus: models.AgentStatusProtected}
 	if err := repo.Create(t.Context(), agent); err != nil {
 		t.Fatal(err)

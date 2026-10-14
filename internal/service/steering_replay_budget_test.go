@@ -12,11 +12,11 @@ import (
 )
 
 func TestOpenAIReplayLoadedBeforeBudgetAndTrimming(t *testing.T) {
-	db := teststores.NewDB(t)
+	storeEnv := teststores.New(t)
 	ctx := context.Background()
 	task := &models.Task{ProjectID: "default", Title: "steering replay", Category: models.CategoryBacklog, Status: models.StatusCompleted}
-	require.NoError(t, teststores.Of(db).Tasks.Create(ctx, task))
-	repo := teststores.Of(db).Executions
+	require.NoError(t, storeEnv.Stores.Tasks.Create(ctx, task))
+	repo := storeEnv.Stores.Executions
 	require.NoError(t, repo.Create(ctx, &models.Execution{ID: "steered", TaskID: task.ID, Status: models.ExecCompleted, PromptSent: "small prompt"}))
 	replay := []models.ExecutionReplayMessage{{TranscriptJSON: `{"responses_input":[{"type":"message","role":"user","content":"` + strings.Repeat("x", 200000) + `"}]}`}}
 	require.NoError(t, repo.ReplaceReasoningReplay(ctx, "steered", "", replay))

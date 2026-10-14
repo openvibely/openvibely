@@ -59,8 +59,8 @@ func TestPersonalityListPageArgs(t *testing.T) {
 }
 
 func TestListPersonalitiesRuntimePage_DefaultFirstPageAndOffset(t *testing.T) {
-	db := teststores.NewDB(t)
-	repo := teststores.Of(db).CustomPersonalities
+	storeEnv := teststores.New(t)
+	repo := storeEnv.Stores.CustomPersonalities
 	ctx := context.Background()
 	seedCustomPersonalities(t, repo, 25)
 
@@ -103,8 +103,8 @@ func TestListPersonalitiesRuntimePage_DefaultFirstPageAndOffset(t *testing.T) {
 }
 
 func TestListPersonalitiesRuntimePage_PageSizeCapAndEmptyCatalog(t *testing.T) {
-	db := teststores.NewDB(t)
-	repo := teststores.Of(db).CustomPersonalities
+	storeEnv := teststores.New(t)
+	repo := storeEnv.Stores.CustomPersonalities
 	ctx := context.Background()
 
 	page, err := ListPersonalitiesRuntimePage(ctx, repo, 50, 0)
@@ -120,8 +120,8 @@ func TestListPersonalitiesRuntimePage_PageSizeCapAndEmptyCatalog(t *testing.T) {
 }
 
 func TestFindPersonality_ExactKeyWithoutFullCatalog(t *testing.T) {
-	db := teststores.NewDB(t)
-	repo := teststores.Of(db).CustomPersonalities
+	storeEnv := teststores.New(t)
+	repo := storeEnv.Stores.CustomPersonalities
 	ctx := context.Background()
 	seedCustomPersonalities(t, repo, 3)
 
@@ -139,10 +139,10 @@ func TestFindPersonality_ExactKeyWithoutFullCatalog(t *testing.T) {
 }
 
 func TestExecuteListPersonalitiesTool_SelectedPersonalityAndUnknownKey(t *testing.T) {
-	db := teststores.NewDB(t)
+	storeEnv := teststores.New(t)
 	ctx := context.Background()
-	customRepo := teststores.Of(db).CustomPersonalities
-	settingsRepo := teststores.Of(db).Settings
+	customRepo := storeEnv.Stores.CustomPersonalities
+	settingsRepo := storeEnv.Stores.Settings
 	seedCustomPersonalities(t, customRepo, 8)
 	if err := settingsRepo.Set(ctx, "personality", "custom_007"); err != nil {
 		t.Fatal(err)

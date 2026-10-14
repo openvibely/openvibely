@@ -12,9 +12,9 @@ import (
 
 func newTaskReferenceTestData(t *testing.T) (persistence.TaskStore, *models.Project, *models.Task, *models.Task) {
 	t.Helper()
-	db := teststores.NewDB(t)
-	projectRepo := teststores.Of(db).Projects
-	taskRepo := teststores.Of(db).Tasks
+	storeEnv := teststores.New(t)
+	projectRepo := storeEnv.Stores.Projects
+	taskRepo := storeEnv.Stores.Tasks
 	project := &models.Project{Name: "Task reference project"}
 	foreignProject := &models.Project{Name: "Foreign task reference project"}
 	require.NoError(t, projectRepo.Create(context.Background(), project))
@@ -120,9 +120,9 @@ func TestResolveTaskReferenceLiteralTitle(t *testing.T) {
 		{"deploy", "Deploy service", "Redeploy web"},
 	} {
 		t.Run(tt.query, func(t *testing.T) {
-			db := teststores.NewDB(t)
+			storeEnv := teststores.New(t)
 			ctx := context.Background()
-			taskRepo := teststores.Of(db).Tasks
+			taskRepo := storeEnv.Stores.Tasks
 			tasks := []models.Task{
 				{ProjectID: "default", Title: tt.literal, Prompt: "test", Category: models.CategoryBacklog, Status: models.StatusPending},
 				{ProjectID: "default", Title: tt.nonliteral, Prompt: "test", Category: models.CategoryBacklog, Status: models.StatusPending},

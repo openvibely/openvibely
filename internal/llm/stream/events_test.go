@@ -10,8 +10,8 @@ import (
 )
 
 func TestWriteEvent_ToolUseAndSessionAndError(t *testing.T) {
-	db := teststores.NewDB(t)
-	execRepo := teststores.Of(db).Executions
+	storeEnv := teststores.New(t)
+	execRepo := storeEnv.Stores.Executions
 	sw := NewWriter("", "", execRepo, context.Background(), time.Hour)
 	defer sw.Stop()
 

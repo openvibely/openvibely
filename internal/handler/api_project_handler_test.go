@@ -14,8 +14,8 @@ import (
 )
 
 func TestAPIGetProjects_Success(t *testing.T) {
-	db := teststores.NewDB(t)
-	projectRepo := teststores.Of(db).Projects
+	storeEnv := teststores.New(t)
+	projectRepo := storeEnv.Stores.Projects
 	projectSvc := service.NewProjectService(projectRepo)
 	ctx := context.Background()
 
@@ -107,8 +107,8 @@ func TestAPIGetProjects_Success(t *testing.T) {
 }
 
 func TestAPIGetProjects_EmptyList(t *testing.T) {
-	db := teststores.NewDB(t)
-	projectRepo := teststores.Of(db).Projects
+	storeEnv := teststores.New(t)
+	projectRepo := storeEnv.Stores.Projects
 	projectSvc := service.NewProjectService(projectRepo)
 
 	// Don't create any additional projects (only default from migration exists)
@@ -148,8 +148,8 @@ func TestAPIGetProjects_EmptyList(t *testing.T) {
 }
 
 func TestAPIGetProjects_JSONFormat(t *testing.T) {
-	db := teststores.NewDB(t)
-	projectRepo := teststores.Of(db).Projects
+	storeEnv := teststores.New(t)
+	projectRepo := storeEnv.Stores.Projects
 	projectSvc := service.NewProjectService(projectRepo)
 	ctx := context.Background()
 

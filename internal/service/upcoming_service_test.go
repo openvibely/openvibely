@@ -19,13 +19,13 @@ import (
 
 func setupUpcomingTest(t *testing.T) (*UpcomingService, persistence.TaskStore, persistence.LLMConfigStore, persistence.ExecutionStore, string) {
 	t.Helper()
-	db := teststores.NewDB(t)
+	storeEnv := teststores.New(t)
 
-	projectRepo := teststores.Of(db).Projects
-	taskRepo := teststores.Of(db).Tasks
-	llmConfigRepo := teststores.Of(db).LLMConfigs
-	execRepo := teststores.Of(db).Executions
-	upcomingRepo := teststores.Of(db).Upcoming
+	projectRepo := storeEnv.Stores.Projects
+	taskRepo := storeEnv.Stores.Tasks
+	llmConfigRepo := storeEnv.Stores.LLMConfigs
+	execRepo := storeEnv.Stores.Executions
+	upcomingRepo := storeEnv.Stores.Upcoming
 
 	upcomingSvc := NewUpcomingService(upcomingRepo)
 
@@ -296,14 +296,14 @@ func TestUpcomingService_GenerateHistory_TimeRanges(t *testing.T) {
 }
 
 func TestUpcomingService_AISummariesBuildPromptsAndTrimOutput(t *testing.T) {
-	db := teststores.NewDB(t)
+	storeEnv := teststores.New(t)
 	ctx := context.Background()
-	projectRepo := teststores.Of(db).Projects
-	taskRepo := teststores.Of(db).Tasks
-	llmConfigRepo := teststores.Of(db).LLMConfigs
-	execRepo := teststores.Of(db).Executions
-	attachmentRepo := teststores.Of(db).Attachments
-	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, teststores.Of(db).Schedules, attachmentRepo)
+	projectRepo := storeEnv.Stores.Projects
+	taskRepo := storeEnv.Stores.Tasks
+	llmConfigRepo := storeEnv.Stores.LLMConfigs
+	execRepo := storeEnv.Stores.Executions
+	attachmentRepo := storeEnv.Stores.Attachments
+	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, storeEnv.Stores.Schedules, attachmentRepo)
 	mock := testutil.NewMockLLMCaller()
 	llmSvc.SetLLMCaller(mock)
 
@@ -316,7 +316,7 @@ func TestUpcomingService_AISummariesBuildPromptsAndTrimOutput(t *testing.T) {
 		t.Fatalf("create agent: %v", err)
 	}
 
-	svc := NewUpcomingService(teststores.Of(db).Upcoming)
+	svc := NewUpcomingService(storeEnv.Stores.Upcoming)
 	svc.SetProjectRepo(projectRepo)
 	svc.SetLLMConfigRepo(llmConfigRepo)
 	svc.SetLLMService(llmSvc)
@@ -480,10 +480,10 @@ README.md
 
 func TestGenerateHistoryUsesTaskCommitStatsForProjectChanges(t *testing.T) {
 	ctx := context.Background()
-	db := teststores.NewDB(t)
-	projectRepo := teststores.Of(db).Projects
-	taskRepo := teststores.Of(db).Tasks
-	statRepo := teststores.Of(db).TaskCommitStats
+	storeEnv := teststores.New(t)
+	projectRepo := storeEnv.Stores.Projects
+	taskRepo := storeEnv.Stores.Tasks
+	statRepo := storeEnv.Stores.TaskCommitStats
 
 	project := &models.Project{Name: "Reflection Stats"}
 	if err := projectRepo.Create(ctx, project); err != nil {
@@ -504,7 +504,7 @@ func TestGenerateHistoryUsesTaskCommitStatsForProjectChanges(t *testing.T) {
 		}
 	}
 
-	svc := NewUpcomingService(teststores.Of(db).Upcoming)
+	svc := NewUpcomingService(storeEnv.Stores.Upcoming)
 	svc.SetTaskCommitStatRepo(statRepo)
 	history, err := svc.GenerateHistory(ctx, project.ID, models.TimeRangeDay)
 	if err != nil {
@@ -534,10 +534,10 @@ func TestGenerateHistoryUsesTaskCommitStatsForProjectChanges(t *testing.T) {
 
 func TestGenerateHistoryTaskCommitStatsCompactPreviewPreservesTotals(t *testing.T) {
 	ctx := context.Background()
-	db := teststores.NewDB(t)
-	projectRepo := teststores.Of(db).Projects
-	taskRepo := teststores.Of(db).Tasks
-	statRepo := teststores.Of(db).TaskCommitStats
+	storeEnv := teststores.New(t)
+	projectRepo := storeEnv.Stores.Projects
+	taskRepo := storeEnv.Stores.Tasks
+	statRepo := storeEnv.Stores.TaskCommitStats
 
 	project := &models.Project{Name: "Reflection Compact Stats"}
 	if err := projectRepo.Create(ctx, project); err != nil {
@@ -585,7 +585,7 @@ func TestGenerateHistoryTaskCommitStatsCompactPreviewPreservesTotals(t *testing.
 		}
 	}
 
-	svc := NewUpcomingService(teststores.Of(db).Upcoming)
+	svc := NewUpcomingService(storeEnv.Stores.Upcoming)
 	svc.SetTaskCommitStatRepo(statRepo)
 	for _, tr := range []models.TimeRange{models.TimeRangeHour, models.TimeRangeDay, models.TimeRangeWeek} {
 		history, err := svc.GenerateHistory(ctx, project.ID, tr)
@@ -631,10 +631,10 @@ func TestGenerateHistoryTaskCommitStatsCompactPreviewPreservesTotals(t *testing.
 
 func TestGenerateHistoryCombinesFallbackBeforeFirstTaskCommitStat(t *testing.T) {
 	ctx := context.Background()
-	db := teststores.NewDB(t)
-	projectRepo := teststores.Of(db).Projects
-	taskRepo := teststores.Of(db).Tasks
-	statRepo := teststores.Of(db).TaskCommitStats
+	storeEnv := teststores.New(t)
+	projectRepo := storeEnv.Stores.Projects
+	taskRepo := storeEnv.Stores.Tasks
+	statRepo := storeEnv.Stores.TaskCommitStats
 	repoDir := t.TempDir()
 	runGit(t, repoDir, nil, "init", "-b", "main")
 	runGit(t, repoDir, nil, "config", "user.name", "Test User")
@@ -669,7 +669,7 @@ func TestGenerateHistoryCombinesFallbackBeforeFirstTaskCommitStat(t *testing.T) 
 		t.Fatalf("upsert stat: %v", err)
 	}
 
-	svc := NewUpcomingService(teststores.Of(db).Upcoming)
+	svc := NewUpcomingService(storeEnv.Stores.Upcoming)
 	svc.SetProjectRepo(projectRepo)
 	svc.SetTaskCommitStatRepo(statRepo)
 	history, err := svc.GenerateHistory(ctx, project.ID, models.TimeRangeDay)
@@ -694,10 +694,10 @@ func TestGenerateHistoryCombinesFallbackBeforeFirstTaskCommitStat(t *testing.T) 
 
 func TestGenerateHistoryDoesNotFallbackDuringCoveredQuietGap(t *testing.T) {
 	ctx := context.Background()
-	db := teststores.NewDB(t)
-	projectRepo := teststores.Of(db).Projects
-	taskRepo := teststores.Of(db).Tasks
-	statRepo := teststores.Of(db).TaskCommitStats
+	storeEnv := teststores.New(t)
+	projectRepo := storeEnv.Stores.Projects
+	taskRepo := storeEnv.Stores.Tasks
+	statRepo := storeEnv.Stores.TaskCommitStats
 	repoDir := t.TempDir()
 	runGit(t, repoDir, nil, "init", "-b", "main")
 	runGit(t, repoDir, nil, "config", "user.name", "Test User")
@@ -741,7 +741,7 @@ func TestGenerateHistoryDoesNotFallbackDuringCoveredQuietGap(t *testing.T) {
 		}
 	}
 
-	svc := NewUpcomingService(teststores.Of(db).Upcoming)
+	svc := NewUpcomingService(storeEnv.Stores.Upcoming)
 	svc.SetProjectRepo(projectRepo)
 	svc.SetTaskCommitStatRepo(statRepo)
 	history, err := svc.GenerateHistory(ctx, project.ID, models.TimeRangeDay)
@@ -782,10 +782,10 @@ func BenchmarkTaskCommitStatHistoryProjection(b *testing.B) {
 func setupTaskCommitStatHistoryBenchmarkFixture(tb testing.TB, rows, pathsPerCommit int) (*UpcomingService, persistence.TaskCommitStatStore, string, time.Time) {
 	tb.Helper()
 	ctx := context.Background()
-	db := teststores.NewDB(tb)
-	projectRepo := teststores.Of(db).Projects
-	taskRepo := teststores.Of(db).Tasks
-	statRepo := teststores.Of(db).TaskCommitStats
+	storeEnv := teststores.New(tb)
+	projectRepo := storeEnv.Stores.Projects
+	taskRepo := storeEnv.Stores.Tasks
+	statRepo := storeEnv.Stores.TaskCommitStats
 
 	project := &models.Project{Name: "Reflection Benchmark"}
 	if err := projectRepo.Create(ctx, project); err != nil {
@@ -823,7 +823,7 @@ func setupTaskCommitStatHistoryBenchmarkFixture(tb testing.TB, rows, pathsPerCom
 		}
 	}
 
-	svc := NewUpcomingService(teststores.Of(db).Upcoming)
+	svc := NewUpcomingService(storeEnv.Stores.Upcoming)
 	svc.SetTaskCommitStatRepo(statRepo)
 	return svc, statRepo, project.ID, baseTime.Add(-time.Duration(rows+1) * time.Second)
 }

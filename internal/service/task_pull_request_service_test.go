@@ -97,8 +97,8 @@ func TestTaskPullRequestServiceOpenForTaskUsesCanonicalRepositoryMutationBoundar
 	if err := os.Symlink(repoDir, alias); err != nil {
 		t.Skipf("symlink repository alias: %v", err)
 	}
-	db := teststores.NewDB(t)
-	prRepo := teststores.Of(db).TaskPullRequests
+	storeEnv := teststores.New(t)
+	prRepo := storeEnv.Stores.TaskPullRequests
 	publishEntered := make(chan struct{}, 1)
 	github := &fakeTaskPullRequestGitHubProvider{
 		publishBranchFn: func(context.Context, *GitHubRepoRef, GitHubPublishBranchRequest) (*GitHubPublishBranchResult, error) {
@@ -166,10 +166,10 @@ func TestTaskPullRequestServiceOpenForTaskUsesCanonicalRepositoryMutationBoundar
 
 func TestTaskPullRequestServiceReplaceBranchHeadForTaskUsesLinkedPRAndTaskBranch(t *testing.T) {
 	ctx := context.Background()
-	db := teststores.NewDB(t)
-	projectRepo := teststores.Of(db).Projects
-	taskRepo := teststores.Of(db).Tasks
-	prRepo := teststores.Of(db).TaskPullRequests
+	storeEnv := teststores.New(t)
+	projectRepo := storeEnv.Stores.Projects
+	taskRepo := storeEnv.Stores.Tasks
+	prRepo := storeEnv.Stores.TaskPullRequests
 	project := &models.Project{Name: "Replacement Project", RepoPath: t.TempDir(), RepoURL: "https://github.com/openvibely/openvibely"}
 	if err := projectRepo.Create(ctx, project); err != nil {
 		t.Fatalf("create project: %v", err)
@@ -226,10 +226,10 @@ func TestTaskPullRequestServiceReplaceBranchHeadForTaskDoesNotPersistHeadWhenRep
 		{name: "force with lease", replace: errors.New("lease-guarded branch replacement failed")},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			db := teststores.NewDB(t)
-			projectRepo := teststores.Of(db).Projects
-			taskRepo := teststores.Of(db).Tasks
-			prRepo := teststores.Of(db).TaskPullRequests
+			storeEnv := teststores.New(t)
+			projectRepo := storeEnv.Stores.Projects
+			taskRepo := storeEnv.Stores.Tasks
+			prRepo := storeEnv.Stores.TaskPullRequests
 			project := &models.Project{Name: "Replacement failure", RepoPath: t.TempDir(), RepoURL: "https://github.com/openvibely/openvibely"}
 			if err := projectRepo.Create(ctx, project); err != nil {
 				t.Fatalf("create project: %v", err)
@@ -268,10 +268,10 @@ func TestTaskPullRequestServiceReplaceBranchHeadForTaskDoesNotPersistHeadWhenRep
 
 func TestTaskPullRequestServiceReplaceBranchHeadForTaskRejectsLinkedPRHeadMismatch(t *testing.T) {
 	ctx := context.Background()
-	db := teststores.NewDB(t)
-	projectRepo := teststores.Of(db).Projects
-	taskRepo := teststores.Of(db).Tasks
-	prRepo := teststores.Of(db).TaskPullRequests
+	storeEnv := teststores.New(t)
+	projectRepo := storeEnv.Stores.Projects
+	taskRepo := storeEnv.Stores.Tasks
+	prRepo := storeEnv.Stores.TaskPullRequests
 	project := &models.Project{Name: "Replacement Guard Project", RepoPath: t.TempDir(), RepoURL: "https://github.com/openvibely/openvibely"}
 	if err := projectRepo.Create(ctx, project); err != nil {
 		t.Fatalf("create project: %v", err)
@@ -313,10 +313,10 @@ func TestTaskPullRequestServiceReplaceBranchHeadForTaskRejectsLinkedPRHeadMismat
 
 func TestTaskPullRequestServiceReplaceBranchHeadForTaskRejectsLinkedPRHeadRepositoryMismatch(t *testing.T) {
 	ctx := context.Background()
-	db := teststores.NewDB(t)
-	projectRepo := teststores.Of(db).Projects
-	taskRepo := teststores.Of(db).Tasks
-	prRepo := teststores.Of(db).TaskPullRequests
+	storeEnv := teststores.New(t)
+	projectRepo := storeEnv.Stores.Projects
+	taskRepo := storeEnv.Stores.Tasks
+	prRepo := storeEnv.Stores.TaskPullRequests
 	project := &models.Project{Name: "Fork Guard Project", RepoPath: t.TempDir(), RepoURL: "https://github.com/openvibely/openvibely"}
 	if err := projectRepo.Create(ctx, project); err != nil {
 		t.Fatalf("create project: %v", err)
@@ -358,10 +358,10 @@ func TestTaskPullRequestServiceReplaceBranchHeadForTaskRejectsLinkedPRHeadReposi
 
 func TestTaskPullRequestServiceReplaceBranchHeadForTaskRejectsClosedLinkedPRWithoutReplacing(t *testing.T) {
 	ctx := context.Background()
-	db := teststores.NewDB(t)
-	projectRepo := teststores.Of(db).Projects
-	taskRepo := teststores.Of(db).Tasks
-	prRepo := teststores.Of(db).TaskPullRequests
+	storeEnv := teststores.New(t)
+	projectRepo := storeEnv.Stores.Projects
+	taskRepo := storeEnv.Stores.Tasks
+	prRepo := storeEnv.Stores.TaskPullRequests
 	project := &models.Project{Name: "Closed PR Guard Project", RepoPath: t.TempDir(), RepoURL: "https://github.com/openvibely/openvibely"}
 	if err := projectRepo.Create(ctx, project); err != nil {
 		t.Fatalf("create project: %v", err)
@@ -403,10 +403,10 @@ func TestTaskPullRequestServiceReplaceBranchHeadForTaskRejectsClosedLinkedPRWith
 
 func TestTaskPullRequestServiceReplaceBranchHeadForTaskFailsClosedWhenLinkedPRCannotBeFetched(t *testing.T) {
 	ctx := context.Background()
-	db := teststores.NewDB(t)
-	projectRepo := teststores.Of(db).Projects
-	taskRepo := teststores.Of(db).Tasks
-	prRepo := teststores.Of(db).TaskPullRequests
+	storeEnv := teststores.New(t)
+	projectRepo := storeEnv.Stores.Projects
+	taskRepo := storeEnv.Stores.Tasks
+	prRepo := storeEnv.Stores.TaskPullRequests
 	project := &models.Project{Name: "Replacement Guard Project", RepoPath: t.TempDir(), RepoURL: "https://github.com/openvibely/openvibely"}
 	if err := projectRepo.Create(ctx, project); err != nil {
 		t.Fatalf("create project: %v", err)
@@ -437,8 +437,8 @@ func TestTaskPullRequestServiceReplaceBranchHeadForTaskFailsClosedWhenLinkedPRCa
 
 func TestTaskPullRequestServiceReplaceBranchHeadForTaskRequiresLinkedPR(t *testing.T) {
 	ctx := context.Background()
-	db := teststores.NewDB(t)
-	prRepo := teststores.Of(db).TaskPullRequests
+	storeEnv := teststores.New(t)
+	prRepo := storeEnv.Stores.TaskPullRequests
 	project := &models.Project{RepoPath: t.TempDir(), RepoURL: "https://github.com/openvibely/openvibely"}
 	task := &models.Task{ID: "task-id", WorktreePath: t.TempDir(), WorktreeBranch: "task/clean-history"}
 	svc := NewTaskPullRequestService(&fakeTaskPullRequestGitHubProvider{}, prRepo)
@@ -473,10 +473,10 @@ func TestTaskPullRequestServiceBuildCreatePullRequestRequestUsesGenericFallbackW
 
 func TestTaskPullRequestServiceOpenForTaskCreatesAndPersistsPR(t *testing.T) {
 	ctx := context.Background()
-	db := teststores.NewDB(t)
-	projectRepo := teststores.Of(db).Projects
-	taskRepo := teststores.Of(db).Tasks
-	prRepo := teststores.Of(db).TaskPullRequests
+	storeEnv := teststores.New(t)
+	projectRepo := storeEnv.Stores.Projects
+	taskRepo := storeEnv.Stores.Tasks
+	prRepo := storeEnv.Stores.TaskPullRequests
 	var publishedReq GitHubPublishBranchRequest
 	var createdReq GitHubCreatePullRequestRequest
 	svc := NewTaskPullRequestService(&fakeTaskPullRequestGitHubProvider{
@@ -526,11 +526,11 @@ func TestTaskPullRequestServiceOpenForTaskCreatesAndPersistsPR(t *testing.T) {
 
 func TestTaskPullRequestServiceOpenForTaskFallbackRoundTripsGitSpecialPaths(t *testing.T) {
 	ctx := context.Background()
-	db := teststores.NewDB(t)
-	projectRepo := teststores.Of(db).Projects
-	taskRepo := teststores.Of(db).Tasks
-	prRepo := teststores.Of(db).TaskPullRequests
-	statRepo := teststores.Of(db).TaskCommitStats
+	storeEnv := teststores.New(t)
+	projectRepo := storeEnv.Stores.Projects
+	taskRepo := storeEnv.Stores.Tasks
+	prRepo := storeEnv.Stores.TaskPullRequests
+	statRepo := storeEnv.Stores.TaskCommitStats
 
 	repoDir := createTestGitRepo(t)
 	if out, err := gitOutput(repoDir, "checkout", "-b", "task/publish-special-paths"); err != nil {
@@ -611,11 +611,11 @@ func TestTaskPullRequestServiceOpenForTaskFallbackRoundTripsGitSpecialPaths(t *t
 
 func TestTaskPullRequestServiceOpenForTaskRecordsPublishedCommitStat(t *testing.T) {
 	ctx := context.Background()
-	db := teststores.NewDB(t)
-	projectRepo := teststores.Of(db).Projects
-	taskRepo := teststores.Of(db).Tasks
-	prRepo := teststores.Of(db).TaskPullRequests
-	statRepo := teststores.Of(db).TaskCommitStats
+	storeEnv := teststores.New(t)
+	projectRepo := storeEnv.Stores.Projects
+	taskRepo := storeEnv.Stores.Tasks
+	prRepo := storeEnv.Stores.TaskPullRequests
+	statRepo := storeEnv.Stores.TaskCommitStats
 
 	repoDir := createTestGitRepo(t)
 	if out, err := gitOutput(repoDir, "checkout", "-b", "task/publish-stat"); err != nil {
@@ -670,11 +670,11 @@ func TestTaskPullRequestServiceOpenForTaskRecordsPublishedCommitStat(t *testing.
 
 func TestTaskPullRequestServiceOpenForTaskRecordsPublishedUpdateCommitStat(t *testing.T) {
 	ctx := context.Background()
-	db := teststores.NewDB(t)
-	projectRepo := teststores.Of(db).Projects
-	taskRepo := teststores.Of(db).Tasks
-	prRepo := teststores.Of(db).TaskPullRequests
-	statRepo := teststores.Of(db).TaskCommitStats
+	storeEnv := teststores.New(t)
+	projectRepo := storeEnv.Stores.Projects
+	taskRepo := storeEnv.Stores.Tasks
+	prRepo := storeEnv.Stores.TaskPullRequests
+	statRepo := storeEnv.Stores.TaskCommitStats
 
 	repoDir := createTestGitRepo(t)
 	if out, err := gitOutput(repoDir, "checkout", "-b", "task/publish-update-stat"); err != nil {
@@ -742,10 +742,10 @@ func TestTaskPullRequestServiceOpenForTaskRecordsPublishedUpdateCommitStat(t *te
 
 func TestTaskPullRequestServiceOpenForTaskReusesExistingRecord(t *testing.T) {
 	ctx := context.Background()
-	db := teststores.NewDB(t)
-	projectRepo := teststores.Of(db).Projects
-	taskRepo := teststores.Of(db).Tasks
-	prRepo := teststores.Of(db).TaskPullRequests
+	storeEnv := teststores.New(t)
+	projectRepo := storeEnv.Stores.Projects
+	taskRepo := storeEnv.Stores.Tasks
+	prRepo := storeEnv.Stores.TaskPullRequests
 	project := &models.Project{Name: "Existing PR Project", RepoPath: t.TempDir(), RepoURL: "https://github.com/openvibely/openvibely"}
 	if err := projectRepo.Create(ctx, project); err != nil {
 		t.Fatalf("create project: %v", err)
@@ -805,10 +805,10 @@ func TestTaskPullRequestServiceOpenForTaskReusesExistingRecord(t *testing.T) {
 
 func TestTaskPullRequestServiceOpenForTaskRejectsOldOpenPullRequestHead(t *testing.T) {
 	ctx := context.Background()
-	db := teststores.NewDB(t)
-	projectRepo := teststores.Of(db).Projects
-	taskRepo := teststores.Of(db).Tasks
-	prRepo := teststores.Of(db).TaskPullRequests
+	storeEnv := teststores.New(t)
+	projectRepo := storeEnv.Stores.Projects
+	taskRepo := storeEnv.Stores.Tasks
+	prRepo := storeEnv.Stores.TaskPullRequests
 	project := &models.Project{Name: "Old Head PR Project", RepoPath: t.TempDir(), RepoURL: "https://github.com/openvibely/openvibely"}
 	if err := projectRepo.Create(ctx, project); err != nil {
 		t.Fatalf("create project: %v", err)
@@ -861,10 +861,10 @@ func TestTaskPullRequestServiceOpenForTaskRejectsOldOpenPullRequestHead(t *testi
 
 func TestTaskPullRequestServiceOpenForTaskReplacesStaleOpenRecordWithOpenPR(t *testing.T) {
 	ctx := context.Background()
-	db := teststores.NewDB(t)
-	projectRepo := teststores.Of(db).Projects
-	taskRepo := teststores.Of(db).Tasks
-	prRepo := teststores.Of(db).TaskPullRequests
+	storeEnv := teststores.New(t)
+	projectRepo := storeEnv.Stores.Projects
+	taskRepo := storeEnv.Stores.Tasks
+	prRepo := storeEnv.Stores.TaskPullRequests
 	project := &models.Project{Name: "Stale Open PR Project", RepoPath: t.TempDir(), RepoURL: "https://github.com/openvibely/openvibely"}
 	if err := projectRepo.Create(ctx, project); err != nil {
 		t.Fatalf("create project: %v", err)
@@ -915,10 +915,10 @@ func TestTaskPullRequestServiceOpenForTaskReplacesStaleOpenRecordWithOpenPR(t *t
 
 func TestTaskPullRequestServiceOpenForTaskReplacesClosedRecordWithOpenPR(t *testing.T) {
 	ctx := context.Background()
-	db := teststores.NewDB(t)
-	projectRepo := teststores.Of(db).Projects
-	taskRepo := teststores.Of(db).Tasks
-	prRepo := teststores.Of(db).TaskPullRequests
+	storeEnv := teststores.New(t)
+	projectRepo := storeEnv.Stores.Projects
+	taskRepo := storeEnv.Stores.Tasks
+	prRepo := storeEnv.Stores.TaskPullRequests
 	project := &models.Project{Name: "Closed PR Project", RepoPath: t.TempDir(), RepoURL: "https://github.com/openvibely/openvibely"}
 	if err := projectRepo.Create(ctx, project); err != nil {
 		t.Fatalf("create project: %v", err)
@@ -972,10 +972,10 @@ func TestTaskPullRequestServiceOpenForTaskReplacesClosedRecordWithOpenPR(t *test
 
 func TestTaskPullRequestServiceStartupReconciliationNeverReplacesClosedPR(t *testing.T) {
 	ctx := context.Background()
-	db := teststores.NewDB(t)
-	projectRepo := teststores.Of(db).Projects
-	taskRepo := teststores.Of(db).Tasks
-	prRepo := teststores.Of(db).TaskPullRequests
+	storeEnv := teststores.New(t)
+	projectRepo := storeEnv.Stores.Projects
+	taskRepo := storeEnv.Stores.Tasks
+	prRepo := storeEnv.Stores.TaskPullRequests
 	project := &models.Project{Name: "Closed startup PR", RepoPath: t.TempDir(), RepoURL: "https://github.com/openvibely/openvibely"}
 	if err := projectRepo.Create(ctx, project); err != nil {
 		t.Fatal(err)
@@ -1017,10 +1017,10 @@ func TestTaskPullRequestServiceStartupReconciliationNeverReplacesClosedPR(t *tes
 
 func TestTaskPullRequestServiceStartupReconciliationTrustsSuccessfulPublication(t *testing.T) {
 	ctx := context.Background()
-	db := teststores.NewDB(t)
-	projectRepo := teststores.Of(db).Projects
-	taskRepo := teststores.Of(db).Tasks
-	prRepo := teststores.Of(db).TaskPullRequests
+	storeEnv := teststores.New(t)
+	projectRepo := storeEnv.Stores.Projects
+	taskRepo := storeEnv.Stores.Tasks
+	prRepo := storeEnv.Stores.TaskPullRequests
 	project := &models.Project{Name: "Startup PR publication", RepoPath: t.TempDir(), RepoURL: "https://github.com/openvibely/openvibely"}
 	if err := projectRepo.Create(ctx, project); err != nil {
 		t.Fatal(err)
@@ -1074,10 +1074,10 @@ func TestTaskPullRequestServiceStartupReconciliationTrustsSuccessfulPublication(
 
 func TestTaskPullRequestServiceOpenForTaskReusesExistingRecordAndPersistsIssueMetadata(t *testing.T) {
 	ctx := context.Background()
-	db := teststores.NewDB(t)
-	projectRepo := teststores.Of(db).Projects
-	taskRepo := teststores.Of(db).Tasks
-	prRepo := teststores.Of(db).TaskPullRequests
+	storeEnv := teststores.New(t)
+	projectRepo := storeEnv.Stores.Projects
+	taskRepo := storeEnv.Stores.Tasks
+	prRepo := storeEnv.Stores.TaskPullRequests
 	project := &models.Project{Name: "Existing PR Metadata Project", RepoPath: t.TempDir(), RepoURL: "https://github.com/openvibely/openvibely"}
 	if err := projectRepo.Create(ctx, project); err != nil {
 		t.Fatalf("create project: %v", err)
@@ -1125,10 +1125,10 @@ func TestTaskPullRequestServiceOpenForTaskReusesExistingRecordAndPersistsIssueMe
 
 func TestTaskPullRequestServiceOpenForTaskClearsStaleIssueURLWhenIssueNumberChanges(t *testing.T) {
 	ctx := context.Background()
-	db := teststores.NewDB(t)
-	projectRepo := teststores.Of(db).Projects
-	taskRepo := teststores.Of(db).Tasks
-	prRepo := teststores.Of(db).TaskPullRequests
+	storeEnv := teststores.New(t)
+	projectRepo := storeEnv.Stores.Projects
+	taskRepo := storeEnv.Stores.Tasks
+	prRepo := storeEnv.Stores.TaskPullRequests
 	project := &models.Project{Name: "Existing PR Stale Issue URL Project", RepoPath: t.TempDir(), RepoURL: "https://github.com/openvibely/openvibely"}
 	if err := projectRepo.Create(ctx, project); err != nil {
 		t.Fatalf("create project: %v", err)
@@ -1181,10 +1181,10 @@ func TestTaskPullRequestServiceOpenForTaskClearsStaleIssueURLWhenIssueNumberChan
 
 func TestTaskPullRequestServiceOpenForTaskClearsStaleIssueNumberWhenIssueURLChanges(t *testing.T) {
 	ctx := context.Background()
-	db := teststores.NewDB(t)
-	projectRepo := teststores.Of(db).Projects
-	taskRepo := teststores.Of(db).Tasks
-	prRepo := teststores.Of(db).TaskPullRequests
+	storeEnv := teststores.New(t)
+	projectRepo := storeEnv.Stores.Projects
+	taskRepo := storeEnv.Stores.Tasks
+	prRepo := storeEnv.Stores.TaskPullRequests
 	project := &models.Project{Name: "Existing PR Stale Issue Number Project", RepoPath: t.TempDir(), RepoURL: "https://github.com/openvibely/openvibely"}
 	if err := projectRepo.Create(ctx, project); err != nil {
 		t.Fatalf("create project: %v", err)
@@ -1227,10 +1227,10 @@ func TestTaskPullRequestServiceOpenForTaskClearsStaleIssueNumberWhenIssueURLChan
 
 func TestTaskPullRequestServiceOpenForTaskRecoversAlreadyExistsByFindingPR(t *testing.T) {
 	ctx := context.Background()
-	db := teststores.NewDB(t)
-	projectRepo := teststores.Of(db).Projects
-	taskRepo := teststores.Of(db).Tasks
-	prRepo := teststores.Of(db).TaskPullRequests
+	storeEnv := teststores.New(t)
+	projectRepo := storeEnv.Stores.Projects
+	taskRepo := storeEnv.Stores.Tasks
+	prRepo := storeEnv.Stores.TaskPullRequests
 	project := &models.Project{Name: "Recovered PR Project", RepoPath: t.TempDir(), RepoURL: "https://github.com/openvibely/openvibely"}
 	if err := projectRepo.Create(ctx, project); err != nil {
 		t.Fatalf("create project: %v", err)
@@ -1282,10 +1282,10 @@ func TestTaskPullRequestServiceOpenForTaskRecoversAlreadyExistsByFindingPR(t *te
 func TestTaskPullRequestServiceAutomationOperationsUseProjectURLOrLocalGitRemote(t *testing.T) {
 	ctx := context.Background()
 	t.Run("open", func(t *testing.T) {
-		db := teststores.NewDB(t)
-		projectRepo := teststores.Of(db).Projects
-		taskRepo := teststores.Of(db).Tasks
-		prRepo := teststores.Of(db).TaskPullRequests
+		storeEnv := teststores.New(t)
+		projectRepo := storeEnv.Stores.Projects
+		taskRepo := storeEnv.Stores.Tasks
+		prRepo := storeEnv.Stores.TaskPullRequests
 		project := &models.Project{Name: "Automation PR Project", RepoPath: t.TempDir(), RepoURL: "https://github.com/openvibely/openvibely"}
 		if err := projectRepo.Create(ctx, project); err != nil {
 			t.Fatalf("create project: %v", err)
@@ -1336,10 +1336,10 @@ func TestTaskPullRequestServiceAutomationOperationsUseProjectURLOrLocalGitRemote
 	})
 
 	t.Run("replace branch", func(t *testing.T) {
-		db := teststores.NewDB(t)
-		projectRepo := teststores.Of(db).Projects
-		taskRepo := teststores.Of(db).Tasks
-		prRepo := teststores.Of(db).TaskPullRequests
+		storeEnv := teststores.New(t)
+		projectRepo := storeEnv.Stores.Projects
+		taskRepo := storeEnv.Stores.Tasks
+		prRepo := storeEnv.Stores.TaskPullRequests
 		project := &models.Project{Name: "Automation Replace Project", RepoPath: t.TempDir(), RepoURL: "https://github.com/openvibely/openvibely"}
 		if err := projectRepo.Create(ctx, project); err != nil {
 			t.Fatalf("create project: %v", err)
@@ -1390,8 +1390,8 @@ func TestTaskPullRequestServiceAutomationOperationsUseProjectURLOrLocalGitRemote
 
 func TestTaskPullRequestServiceOpenForTaskRequiresWorktreeBranch(t *testing.T) {
 	ctx := context.Background()
-	db := teststores.NewDB(t)
-	svc := NewTaskPullRequestService(&fakeTaskPullRequestGitHubProvider{}, teststores.Of(db).TaskPullRequests)
+	storeEnv := teststores.New(t)
+	svc := NewTaskPullRequestService(&fakeTaskPullRequestGitHubProvider{}, storeEnv.Stores.TaskPullRequests)
 	project := &models.Project{ID: "project-1", RepoPath: t.TempDir(), RepoURL: "https://github.com/openvibely/openvibely"}
 	task := &models.Task{ID: "task-1", ProjectID: project.ID, Title: "No Branch"}
 
@@ -1403,10 +1403,10 @@ func TestTaskPullRequestServiceOpenForTaskRequiresWorktreeBranch(t *testing.T) {
 
 func TestTaskPullRequestServiceOpenForTaskReusedRecordAppliesDefaultIssueBody(t *testing.T) {
 	ctx := context.Background()
-	db := teststores.NewDB(t)
-	projectRepo := teststores.Of(db).Projects
-	taskRepo := teststores.Of(db).Tasks
-	prRepo := teststores.Of(db).TaskPullRequests
+	storeEnv := teststores.New(t)
+	projectRepo := storeEnv.Stores.Projects
+	taskRepo := storeEnv.Stores.Tasks
+	prRepo := storeEnv.Stores.TaskPullRequests
 	project := &models.Project{Name: "Existing PR Default Body", RepoPath: t.TempDir(), RepoURL: "https://github.com/openvibely/openvibely"}
 	if err := projectRepo.Create(ctx, project); err != nil {
 		t.Fatalf("create project: %v", err)
@@ -1440,10 +1440,10 @@ func TestTaskPullRequestServiceOpenForTaskReusedRecordAppliesDefaultIssueBody(t 
 
 func TestTaskPullRequestServiceOpenForTaskReusedRemoteAppliesDefaultIssueBody(t *testing.T) {
 	ctx := context.Background()
-	db := teststores.NewDB(t)
-	projectRepo := teststores.Of(db).Projects
-	taskRepo := teststores.Of(db).Tasks
-	prRepo := teststores.Of(db).TaskPullRequests
+	storeEnv := teststores.New(t)
+	projectRepo := storeEnv.Stores.Projects
+	taskRepo := storeEnv.Stores.Tasks
+	prRepo := storeEnv.Stores.TaskPullRequests
 	project := &models.Project{Name: "Remote PR Default Body", RepoPath: t.TempDir(), RepoURL: "https://github.com/openvibely/openvibely"}
 	if err := projectRepo.Create(ctx, project); err != nil {
 		t.Fatalf("create project: %v", err)

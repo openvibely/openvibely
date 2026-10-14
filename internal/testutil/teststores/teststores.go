@@ -14,6 +14,8 @@ import (
 	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/openvibely/openvibely/internal/testutil/sqlitefixtures"
+	"github.com/openvibely/openvibely/internal/testutil/storefixture"
 )
 
 // DriverEnv selects the backend tests run against. Defaults to sqlite.
@@ -69,15 +71,25 @@ func Of(db *sql.DB, opts ...Option) persistence.Stores {
 
 // Env is a fresh test database and the stores built on it.
 type Env struct {
-	DB *sql.DB
+	Fixtures storefixture.Fixtures
 	persistence.Stores
 }
 
 // New opens a fresh database for the selected backend and builds its stores.
 func New(tb testing.TB, opts ...Option) *Env {
 	tb.Helper()
-	db := NewDB(tb)
-	return &Env{DB: db, Stores: Of(db, opts...)}
+	var o options
+	for _, opt := range opts {
+		opt(&o)
+	}
+	switch driver := Driver(); driver {
+	case config.DatabaseDriverSQLite:
+		db := testutil.NewTestDB(tb)
+		return &Env{Fixtures: sqlitefixtures.New(db), Stores: sqlite.NewStores(db, o.broadcaster)}
+	default:
+		tb.Fatalf("unsupported %s %q (supported: %s)", DriverEnv, driver, config.DatabaseDriverSQLite)
+		return nil
+	}
 }
 
 // RequireSQLite skips tests that depend on SQLite internals (statement
