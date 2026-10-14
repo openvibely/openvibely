@@ -28,6 +28,8 @@ type ExecutionUsageRecord struct {
 
 // Fixtures describes test domain state, never tables, query text, or connections.
 type Fixtures interface {
+	// SetExecutionTerminalState constructs an execution completed before dispatch reconciliation.
+	SetExecutionTerminalState(context.Context, string, models.ExecutionStatus, time.Time) error
 	ExecutionUsage(context.Context, string) ([]ExecutionUsageRecord, error)
 	SetExecutionReasoning(context.Context, string, string) error
 	FailTaskCompletion(context.Context) error
