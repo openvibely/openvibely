@@ -19,6 +19,9 @@ func (c *ioCounter) Snapshot() storefixture.IOStats {
 	stats := storefixture.IOStats{Requests: len(statements), ReadTextBytes: c.counter.SelectedTextBytes()}
 	for _, statement := range statements {
 		q := strings.ToLower(strings.Join(strings.Fields(statement), " "))
+		if strings.HasPrefix(q, "select ") && strings.Contains(q, "from slack_authorized_users") {
+			stats.SlackAuthorizationReads++
+		}
 		if strings.HasPrefix(q, "select ") && strings.Contains(q, "from app_settings where key =") {
 			stats.SettingsSingleReads++
 		}

@@ -205,8 +205,8 @@ func TestSlackService_HandleOAuthCallbackFailurePreservesPreviousConfiguration(t
 	for _, failedKey := range failedKeys {
 		t.Run(failedKey, func(t *testing.T) {
 			ctx := context.Background()
-			db := teststores.NewDB(t)
-			settingsRepo := teststores.Of(db).Settings
+			db := teststores.New(t)
+			settingsRepo := db.Settings
 			previous := map[string]string{
 				SlackSettingClientID:         "cid",
 				SlackSettingClientSecret:     "secret",
@@ -224,14 +224,7 @@ func TestSlackService_HandleOAuthCallbackFailurePreservesPreviousConfiguration(t
 			}
 			require.NoError(t, settingsRepo.SetMany(ctx, previous))
 
-			triggerEvent := "UPDATE"
-			if failedKey == SlackSettingSendResponses {
-				triggerEvent = "INSERT"
-			}
-			_, err := db.ExecContext(ctx, fmt.Sprintf(`CREATE TRIGGER reject_slack_oauth_%s BEFORE %s ON app_settings
-				WHEN NEW.key = '%s' BEGIN SELECT RAISE(ABORT, 'forced Slack OAuth settings failure'); END`,
-				strings.ReplaceAll(failedKey, "_", ""), triggerEvent, failedKey))
-			require.NoError(t, err)
+			require.NoError(t, db.Fixtures.FailSettingWrites(ctx, failedKey))
 
 			oauthSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				fmt.Fprint(w, `{"ok":true,"access_token":"xoxb-new","bot_user_id":"U-new","team":{"id":"T-new","name":"New Workspace"}}`)
@@ -240,7 +233,7 @@ func TestSlackService_HandleOAuthCallbackFailurePreservesPreviousConfiguration(t
 
 			svc := NewSlackService(settingsRepo, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 			svc.oauthBaseURL = oauthSrv.URL
-			err = svc.HandleOAuthCallback(ctx, "code-1", "state-123", "http://localhost:8080/channels/slack/callback")
+			err := svc.HandleOAuthCallback(ctx, "code-1", "state-123", "http://localhost:8080/channels/slack/callback")
 			require.Error(t, err)
 			require.ErrorContains(t, err, "save slack oauth settings")
 
@@ -1730,15 +1723,16 @@ func TestSlackService_CheckAuthorization_FallsBackToAnyProject(t *testing.T) {
 }
 
 func TestSlackService_CheckAuthorizationRejectedActiveProjectUsesSingleLookup(t *testing.T) {
-	db, counter := testutil.NewStatementCountingTestDB(t)
+	db := teststores.New(t, teststores.WithIOCounting())
+	counter := db.IO
 	ctx := context.Background()
-	projectRepo := teststores.Of(db).Projects
-	settingsRepo := teststores.Of(db).Settings
-	slackAuthRepo := teststores.Of(db).SlackAuth
+	projectRepo := db.Projects
+	settingsRepo := db.Settings
+	slackAuthRepo := db.SlackAuth
 
 	project := &models.Project{Name: "Slack Single Auth Lookup"}
 	require.NoError(t, projectRepo.Create(ctx, project))
-	seedChannelAuthorizedUsers(t, db, "slack_authorized_users", "slack_user_id", project.ID, "U_SEEDED", 1000)
+	seedSlackAuthorizedUsers(t, db, project.ID, "U_SEEDED", 1000)
 
 	svc := NewSlackService(settingsRepo, projectRepo, nil, nil, nil, nil, nil, nil, nil, nil, nil, slackAuthRepo)
 	counter.Reset()
@@ -1747,20 +1741,21 @@ func TestSlackService_CheckAuthorizationRejectedActiveProjectUsesSingleLookup(t 
 	counter.SetEnabled(false)
 
 	require.False(t, authorized)
-	statements := counter.Statements()
-	require.Len(t, statements, 1, "rejected active-project authorization should issue one statement: %q", statements)
-	require.Equal(t, 1, countChannelAuthTableStatements(statements, "slack_authorized_users"), "statements: %q", statements)
+	stats := counter.Snapshot()
+	require.Equal(t, 1, stats.Requests, "rejected authorization must issue one physical request")
+	require.Equal(t, 1, stats.SlackAuthorizationReads)
+
 }
 
 func BenchmarkSlackRejectedAuthorizationSingleLookupLargeAllowlist(b *testing.B) {
-	db := teststores.NewDB(b)
+	db := teststores.New(b)
 	ctx := context.Background()
-	projectRepo := teststores.Of(db).Projects
-	settingsRepo := teststores.Of(db).Settings
-	slackAuthRepo := teststores.Of(db).SlackAuth
+	projectRepo := db.Projects
+	settingsRepo := db.Settings
+	slackAuthRepo := db.SlackAuth
 	project := &models.Project{Name: "Slack Rejected Auth Benchmark"}
 	require.NoError(b, projectRepo.Create(ctx, project))
-	seedChannelAuthorizedUsers(b, db, "slack_authorized_users", "slack_user_id", project.ID, "U_BENCH", 100000)
+	seedSlackAuthorizedUsers(b, db, project.ID, "U_BENCH", 100000)
 	svc := NewSlackService(settingsRepo, projectRepo, nil, nil, nil, nil, nil, nil, nil, nil, nil, slackAuthRepo)
 
 	b.ReportAllocs()
@@ -1772,31 +1767,13 @@ func BenchmarkSlackRejectedAuthorizationSingleLookupLargeAllowlist(b *testing.B)
 	}
 }
 
-func seedChannelAuthorizedUsers(tb testing.TB, db *sql.DB, table, userColumn, projectID, userPrefix string, count int) {
+func seedSlackAuthorizedUsers(tb testing.TB, env *teststores.Env, projectID, userPrefix string, count int) {
 	tb.Helper()
-	tx, err := db.Begin()
-	require.NoError(tb, err)
-	stmt, err := tx.Prepare(fmt.Sprintf(`INSERT INTO %s (project_id, %s, display_name, added_by) VALUES (?, ?, ?, ?)`, table, userColumn))
-	require.NoError(tb, err)
-	for i := 0; i < count; i++ {
-		userID := fmt.Sprintf("%s_%06d", userPrefix, i)
-		_, err = stmt.Exec(projectID, userID, "Benchmark User", "test")
-		require.NoError(tb, err)
+	users := make([]models.SlackAuthorizedUser, count)
+	for i := range users {
+		users[i] = models.SlackAuthorizedUser{ProjectID: projectID, SlackUserID: fmt.Sprintf("%s_%06d", userPrefix, i), DisplayName: "Benchmark User", AddedBy: "test"}
 	}
-	require.NoError(tb, stmt.Close())
-	require.NoError(tb, tx.Commit())
-}
-
-func countChannelAuthTableStatements(statements []string, table string) int {
-	needle := " from " + strings.ToLower(table) + " where "
-	count := 0
-	for _, statement := range statements {
-		normalized := " " + strings.Join(strings.Fields(strings.ToLower(statement)), " ") + " "
-		if strings.Contains(normalized, needle) {
-			count++
-		}
-	}
-	return count
+	require.NoError(tb, env.Fixtures.SeedSlackAuthorizedUsers(context.Background(), users))
 }
 
 func TestSlackService_CheckAuthorization_NoUsersConfiguredDenyAll(t *testing.T) {
@@ -3812,19 +3789,19 @@ func TestSlackService_RuntimeSwitchProject_PersistsToRepo(t *testing.T) {
 		"getActiveProject must return the newly-persisted project on next session")
 }
 
-func newSlackProjectSwitchTestService(t *testing.T) (*SlackService, *sql.DB, *models.Project, *models.Project) {
+func newSlackProjectSwitchTestService(t *testing.T) (*SlackService, *teststores.Env, *models.Project, *models.Project) {
 	t.Helper()
-	db := teststores.NewDB(t)
+	db := teststores.New(t)
 	ctx := context.Background()
-	projectRepo := teststores.Of(db).Projects
-	taskRepo := teststores.Of(db).Tasks
-	llmConfigRepo := teststores.Of(db).LLMConfigs
-	execRepo := teststores.Of(db).Executions
-	scheduleRepo := teststores.Of(db).Schedules
-	attachmentRepo := teststores.Of(db).Attachments
-	settingsRepo := teststores.Of(db).Settings
-	slackUserProjectRepo := teststores.Of(db).SlackUserProjects
-	slackTaskContextRepo := teststores.Of(db).SlackTaskContexts
+	projectRepo := db.Projects
+	taskRepo := db.Tasks
+	llmConfigRepo := db.LLMConfigs
+	execRepo := db.Executions
+	scheduleRepo := db.Schedules
+	attachmentRepo := db.Attachments
+	settingsRepo := db.Settings
+	slackUserProjectRepo := db.SlackUserProjects
+	slackTaskContextRepo := db.SlackTaskContexts
 
 	project1 := &models.Project{Name: "Alpha", RepoPath: "/tmp/slack-switch-alpha", IsDefault: true}
 	require.NoError(t, projectRepo.Create(ctx, project1))
@@ -3849,15 +3826,13 @@ func TestSlackService_RuntimeSwitchProjectPersistenceFailurePreservesCacheAndInb
 	require.NoError(t, svc.slackUserProjectRepo.SetUserProject(ctx, teamID, userID, project1.ID))
 	require.NoError(t, svc.setActiveProject(ctx, teamID, userID, project1.ID))
 
-	_, err := db.ExecContext(ctx, `ALTER TABLE slack_user_projects RENAME TO slack_user_projects_unavailable`)
-	require.NoError(t, err)
+	require.NoError(t, db.Fixtures.SetSlackProjectSelectionUnavailable(ctx, true))
 	runtime := svc.buildSlackActionToolRuntime(project1.ID, slackActionContext{TeamID: teamID, ChannelID: "C1", UserID: userID}, nil)
 	_, handled, isErr, err := runtime.Executor(ctx, "switch_project", json.RawMessage(`{"project":"Beta"}`))
 	require.True(t, handled)
 	require.True(t, isErr)
 	require.Error(t, err)
-	_, err = db.ExecContext(ctx, `ALTER TABLE slack_user_projects_unavailable RENAME TO slack_user_projects`)
-	require.NoError(t, err)
+	require.NoError(t, db.Fixtures.SetSlackProjectSelectionUnavailable(ctx, false))
 
 	svc.mu.RLock()
 	cachedID := svc.userProjects[slackUserProjectKey(teamID, userID)]
@@ -3892,15 +3867,13 @@ func TestSlackService_RuntimeSwitchProjectPersistenceFailureWithoutCacheUsesDura
 	const userID = "uncached-user"
 
 	require.NoError(t, svc.slackUserProjectRepo.SetUserProject(ctx, teamID, userID, project1.ID))
-	_, err := db.ExecContext(ctx, `ALTER TABLE slack_user_projects RENAME TO slack_user_projects_unavailable`)
-	require.NoError(t, err)
+	require.NoError(t, db.Fixtures.SetSlackProjectSelectionUnavailable(ctx, true))
 	runtime := svc.buildSlackActionToolRuntime(project1.ID, slackActionContext{TeamID: teamID, ChannelID: "C1", UserID: userID}, nil)
 	_, handled, isErr, err := runtime.Executor(ctx, "switch_project", json.RawMessage(`{"project":"Beta"}`))
 	require.True(t, handled)
 	require.True(t, isErr)
 	require.Error(t, err)
-	_, err = db.ExecContext(ctx, `ALTER TABLE slack_user_projects_unavailable RENAME TO slack_user_projects`)
-	require.NoError(t, err)
+	require.NoError(t, db.Fixtures.SetSlackProjectSelectionUnavailable(ctx, false))
 
 	svc.mu.RLock()
 	_, cached := svc.userProjects[slackUserProjectKey(teamID, userID)]
