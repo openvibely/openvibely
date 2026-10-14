@@ -166,6 +166,15 @@ void ovSetLinuxCaptionHidden(void *native_window, int hidden) {
  gtk_widget_set_opacity(c->right, hidden ? 0 : 1);
  gtk_widget_set_sensitive(c->left, !hidden);
  gtk_widget_set_sensitive(c->right, !hidden);
+ // Transparent, insensitive widgets still occupy the native input layer.
+ // Let the webview receive pointer events while preserving caption geometry.
+#if GTK_MAJOR_VERSION < 4
+ gtk_overlay_set_overlay_pass_through(GTK_OVERLAY(c->overlay), c->left, hidden != 0);
+ gtk_overlay_set_overlay_pass_through(GTK_OVERLAY(c->overlay), c->right, hidden != 0);
+#else
+ gtk_widget_set_can_target(c->left, !hidden);
+ gtk_widget_set_can_target(c->right, !hidden);
+#endif
  gtk_widget_queue_draw(c->overlay);
 }
 
