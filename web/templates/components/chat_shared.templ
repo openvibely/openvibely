@@ -4001,10 +4001,9 @@ templ ChatAutoScrollScript() {
 			}, { passive: true });
 			container.addEventListener('wheel', function(event) {
 				if (event.deltaY < 0) {
-					var now = Date.now();
-					var lastWheelAt = parseInt(container.dataset.earlierLastWheelAt || '0', 10) || 0;
-					container.dataset.earlierLastWheelAt = String(now);
-					if (now - lastWheelAt > 500 && !resetGestureForNewUserIntent()) return;
+					// Continued upward input can request the next page once the previous
+					// request and anchor restoration finish; no gesture pause is required.
+					if (!resetGestureForNewUserIntent()) return;
 					maybeLoadEarlier();
 				}
 			}, { passive: true });
@@ -4017,6 +4016,7 @@ templ ChatAutoScrollScript() {
 			container.addEventListener('touchmove', function(event) {
 				var startY = parseFloat(container.dataset.earlierTouchY || '0') || 0;
 				if (event.touches && event.touches.length > 0 && event.touches[0].clientY > startY + 4) {
+					if (!resetGestureForNewUserIntent()) return;
 					maybeLoadEarlier();
 				}
 			}, { passive: true });

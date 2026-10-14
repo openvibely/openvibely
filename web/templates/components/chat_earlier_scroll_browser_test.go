@@ -107,3 +107,74 @@ func TestBrowserFunctional_EarlierPrependPreservesMovingReader(t *testing.T) {
 		}
 	}
 }
+
+func TestBrowserFunctional_EarlierLoaderContinuousUpwardInput(t *testing.T) {
+	chrome := testChromePath(t)
+	for _, id := range []string{"chat-messages", "task-thread-messages"} {
+		for _, input := range []string{"wheel", "touch"} {
+			t.Run(id+"/"+input, func(t *testing.T) {
+				var script, loader bytes.Buffer
+				if err := ChatAutoScrollScript().Render(context.Background(), &script); err != nil {
+					t.Fatal(err)
+				}
+				if err := ChatEarlierMessagesLoader(id, "/earlier", 20).Render(context.Background(), &loader); err != nil {
+					t.Fatal(err)
+				}
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					if static.ServeAsset(w, r) {
+						return
+					}
+					w.Header().Set("Content-Type", "text/html")
+					if r.URL.Path == "/earlier" {
+						fmt.Fprint(w, loader.String()+`<div data-execution-pair="true" style="height:400px">Older</div>`)
+						return
+					}
+					fmt.Fprintf(w, `<!doctype html><html><head><style>.hidden{display:none}</style></head>
+<body data-test-result="pending"><script src="/static/vendor/htmx.min.js"></script>
+<div id="%s" style="height:240px;overflow:auto">%s<div data-execution-pair="true" style="height:800px">Latest</div></div>%s<script>
+window.addEventListener('load', async () => {
+ try {
+  const messages = document.getElementById(%q);
+  const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+  const until = async check => { for(let i=0;i<100;i++){ if(check())return; await wait(10); } throw new Error('timed out'); };
+  window.resolveScrollTracker('scrollTracker_'+messages.id, messages);
+  window.initChatEarlierLoader(messages);
+  let requests=0, finishHydration;
+  document.body.addEventListener('htmx:beforeRequest', () => requests++);
+  window.applyChatBubbleTransforms = () => new Promise(resolve => { finishHydration=resolve; });
+  // Keep every wheel event in one continuous gesture, without depending on CPU speed.
+  const realNow = Date.now;
+  Date.now = () => 10000;
+  const input = %q;
+  const touchEvent = (type, y) => { const event = new Event(type); Object.defineProperty(event, 'touches', {value:[{clientY:y}]}); messages.dispatchEvent(event); };
+  let touchY=0;
+  if(input==='touch') touchEvent('touchstart', touchY);
+  const up = () => input==='wheel' ? messages.dispatchEvent(new WheelEvent('wheel', {deltaY:-100})) : touchEvent('touchmove', touchY+=10);
+  up();
+  await until(() => !!finishHydration);
+  // Reach the next boundary while hydration is still active. No downward scroll,
+  // click, or pause occurs between the two requests.
+  messages.scrollTop=0;
+  for(let i=0;i<5;i++){ up(); await wait(10); }
+  if(requests!==1) throw new Error('overlapping earlier requests');
+  finishHydration();
+  await until(() => messages.dataset.earlierAnchorRestoring==='false');
+  for(let i=0;i<5;i++){ messages.dispatchEvent(new Event('scroll')); await wait(10); }
+  if(requests!==1) throw new Error('loaded another page without further input');
+  finishHydration=null;
+  for(let i=0;i<10 && requests===1;i++){ up(); await wait(20); }
+  if(requests!==2) throw new Error('continuous upward input stuck at loader: '+requests+' requests');
+  await until(() => !!finishHydration);
+  finishHydration();
+  await until(() => messages.dataset.earlierAnchorRestoring==='false');
+  Date.now=realNow;
+  document.body.dataset.testResult='pass';
+ } catch(error) { document.body.dataset.testResult='fail'; document.body.dataset.testError=String(error); }
+});</script></body></html>`, id, loader.String(), script.String(), id, input)
+				}))
+				defer server.Close()
+				runHeadlessChromeCDPFixture(t, chrome, server.URL, "continuous earlier scrolling", 1000, 800, 20*time.Second)
+			})
+		}
+	}
+}
