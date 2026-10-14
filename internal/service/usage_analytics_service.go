@@ -70,10 +70,6 @@ func (s *UsageAnalyticsService) SetAccountUsageFetcher(fetcher accountUsageFetch
 	s.accountFetcher = fetcher
 }
 
-func (s *UsageAnalyticsService) SetOAuthRecoveryManager(manager *llmoauth.Manager) {
-	s.oauthRecovery = manager
-}
-
 func (s *UsageAnalyticsService) SetOAuthRefreshers(anthropicRefresh, openAIRefresh oauthRefreshFunc) {
 	if anthropicRefresh != nil {
 		s.anthropicOAuthRefresher = anthropicRefresh

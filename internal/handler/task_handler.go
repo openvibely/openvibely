@@ -300,21 +300,6 @@ func taskCardWorktreePath(path string) string {
 	return filepath.Clean(path)
 }
 
-func taskCardWorktreeLocks(ctx context.Context, project *models.Project) map[string]bool {
-	locks := make(map[string]bool)
-	if project == nil || strings.TrimSpace(project.RepoPath) == "" {
-		return locks
-	}
-	worktrees, err := service.ListGitWorktreesContext(ctx, project.RepoPath)
-	if err != nil {
-		return locks
-	}
-	for _, worktree := range worktrees {
-		locks[taskCardWorktreePath(worktree.Path)] = worktree.Locked
-	}
-	return locks
-}
-
 func taskCardWorktreeLocked(project *models.Project, task *models.Task, locks map[string]bool) bool {
 	if task == nil || strings.TrimSpace(task.WorktreePath) == "" {
 		return false
@@ -1376,15 +1361,6 @@ func gitRefExists(repoDir, ref string) bool {
 		return false
 	}
 	cmd := exec.Command("git", "rev-parse", "--verify", ref)
-	cmd.Dir = repoDir
-	return cmd.Run() == nil
-}
-
-func gitIsAncestor(repoDir, ancestorRef, descendantRef string) bool {
-	if repoDir == "" || ancestorRef == "" || descendantRef == "" {
-		return false
-	}
-	cmd := exec.Command("git", "merge-base", "--is-ancestor", ancestorRef, descendantRef)
 	cmd.Dir = repoDir
 	return cmd.Run() == nil
 }

@@ -634,14 +634,6 @@ func shouldPromotePreExecutionChannelTaskInput(ctx context.Context, execRepo per
 	return true, nil
 }
 
-func channelTaskThreadQueuedResult(task *models.Task) string {
-	return fmt.Sprintf("Queued message to task %q [TASK_ID:%s]. It will run after the active thread turn finishes.", task.Title, task.ID)
-}
-
-func channelTaskThreadStartedResult(task *models.Task) string {
-	return fmt.Sprintf("Sent message to task %q [TASK_ID:%s] and started processing.", task.Title, task.ID)
-}
-
 func channelChatLogPlatform(platform string) string {
 	platform = strings.TrimSpace(platform)
 	if platform == "" {

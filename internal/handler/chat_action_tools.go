@@ -739,10 +739,6 @@ type githubCreateIssueToolInput struct {
 	RepoURL   string   `json:"repo_url"`
 }
 
-func (h *Handler) resolveGitHubRepoForTool(ctx context.Context, projectID string) (*service.GitHubRepoRef, error) {
-	return h.resolveGitHubRepoForToolURL(ctx, projectID, "")
-}
-
 func (h *Handler) resolveGitHubRepoForToolURL(ctx context.Context, projectID, repoURL string) (*service.GitHubRepoRef, error) {
 	if h.githubSvc == nil {
 		return nil, fmt.Errorf("github service unavailable")

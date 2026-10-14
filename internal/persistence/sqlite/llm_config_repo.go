@@ -1141,15 +1141,6 @@ func (r *LLMConfigRepo) MarkOAuthNeedsReauthIfRevision(ctx context.Context, id s
 	return changed == 1, nil
 }
 
-func (r *LLMConfigRepo) UpdateCustomAuthState(ctx context.Context, id, stateJSON string) error {
-	if _, err := execBoundSQLite(ctx, r.db,
-		`UPDATE agent_configs SET custom_auth_state_json = ?, updated_at = datetime('now') WHERE id = ?`,
-		stateJSON, id); err != nil {
-		return fmt.Errorf("updating custom authentication state: %w", err)
-	}
-	return nil
-}
-
 // UpdateCustomOAuthConnection atomically persists tokens and the provider state
 // required to use them, so a connected token is never stored without its
 // mandatory request metadata.

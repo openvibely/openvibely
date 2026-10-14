@@ -707,29 +707,6 @@ func (s *TaskService) DeleteObservedTask(ctx context.Context, task *models.Task)
 	return err
 }
 
-func (s *TaskService) DeleteProjectTasks(ctx context.Context, projectID string) error {
-	for {
-		tasks, err := s.repo.ListByProject(ctx, projectID, "")
-		if err != nil {
-			return fmt.Errorf("listing project tasks for deletion: %w", err)
-		}
-		if len(tasks) == 0 {
-			return nil
-		}
-		deletedAny := false
-		for _, task := range tasks {
-			deleted, err := s.deleteTask(ctx, task.ID, projectID, task.Category)
-			if err != nil {
-				return err
-			}
-			deletedAny = deletedAny || deleted
-		}
-		if !deletedAny {
-			return fmt.Errorf("project tasks changed during deletion")
-		}
-	}
-}
-
 func (s *TaskService) validateDeletion(manifest persistence.TaskDeletionManifest) error {
 	if len(manifest.PendingUploadSessionIDs) > 0 && strings.TrimSpace(s.uploadsDir) == "" {
 		return errors.New("uploads directory is not configured for pending upload cleanup")

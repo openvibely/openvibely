@@ -1181,17 +1181,6 @@ func (r *ExecutionRepo) UpsertChatProviderSessionState(ctx context.Context, chec
 	return nil
 }
 
-func (r *ExecutionRepo) DeleteChatCompactionCheckpoint(ctx context.Context, scopeType, scopeID string) error {
-	if r == nil || r.db == nil || strings.TrimSpace(scopeType) == "" || strings.TrimSpace(scopeID) == "" {
-		return nil
-	}
-	_, err := execBoundSQLite(ctx, r.db, `DELETE FROM chat_compaction_checkpoints WHERE scope_type = ? AND scope_id = ?`, scopeType, scopeID)
-	if err != nil {
-		return fmt.Errorf("deleting chat compaction checkpoint: %w", err)
-	}
-	return nil
-}
-
 // ListChatHistoryBefore returns the latest chat executions older than beforeExecID,
 // ordered chronologically for prepending into a visible transcript window.
 func (r *ExecutionRepo) ListChatHistoryBefore(ctx context.Context, projectID, beforeExecID string, limit int) ([]models.Execution, error) {
@@ -1440,15 +1429,6 @@ func (r *ExecutionRepo) GetLatestNonEmptyDiffOutput(ctx context.Context, taskID 
 		return "", fmt.Errorf("getting latest non-empty diff output: %w", err)
 	}
 	return diffOutput, nil
-}
-
-func (r *ExecutionRepo) UpdateCliSessionID(ctx context.Context, id string, sessionID string) error {
-	_, err := execBoundSQLite(ctx, r.db,
-		`UPDATE executions SET cli_session_id = ? WHERE id = ?`, sessionID, id)
-	if err != nil {
-		return fmt.Errorf("updating execution cli_session_id: %w", err)
-	}
-	return nil
 }
 
 // Analytics queries

@@ -901,24 +901,12 @@ type preparedSteeringBatch struct {
 	inputs []models.ThreadInput
 }
 
-type committedSteeringError interface {
-	CommittedSteeringIDs() []string
-}
-
 type ambiguousSteeringError interface {
 	AmbiguousSteeringIDs() []string
 }
 
 type failedSteeringError interface {
 	FailedSteeringIDs() []string
-}
-
-func committedSteeringIDs(err error) []string {
-	var target committedSteeringError
-	if err == nil || !errors.As(err, &target) {
-		return nil
-	}
-	return target.CommittedSteeringIDs()
 }
 
 func ambiguousSteeringIDs(err error) []string {

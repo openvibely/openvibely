@@ -937,14 +937,6 @@ func (s *GitHubService) githubCommitStats(ctx context.Context, token string, rep
 	}, nil
 }
 
-func (s *GitHubService) publishExistingLocalCommit(ctx context.Context, repo *GitHubRepoRef, branch, sha string, force bool) error {
-	token, err := s.createOperationAccessToken(ctx, githubAPIBaseURLForRepo(repo, s.apiBaseURL))
-	if err != nil {
-		return err
-	}
-	return s.publishExistingLocalCommitWithToken(ctx, token, repo, branch, sha, force)
-}
-
 func (s *GitHubService) publishExistingLocalCommitWithToken(ctx context.Context, token string, repo *GitHubRepoRef, branch, sha string, force bool) error {
 	branch = strings.TrimSpace(branch)
 	sha = strings.TrimSpace(sha)

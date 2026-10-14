@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -255,20 +254,6 @@ func automationUsesGitHub(candidate models.AutomationDraftCandidate) bool {
 	return false
 }
 
-func equalOptionalString(left, right *string) bool {
-	if left == nil || right == nil {
-		return left == nil && right == nil
-	}
-	return *left == *right
-}
-
-func normalizedChainConfig(value string) string {
-	if strings.TrimSpace(value) == "" {
-		return "{}"
-	}
-	return value
-}
-
 func customAutomationTaskNeighbors(candidate models.AutomationDraftCandidate, nodeKey string) (string, *models.AutomationDraftNode) {
 	nodes := make(map[string]models.AutomationDraftNode, len(candidate.Nodes))
 	for _, node := range candidate.Nodes {
@@ -293,28 +278,6 @@ func customAutomationTaskNeighbors(candidate models.AutomationDraftCandidate, no
 		}
 	}
 	return parentKey, child
-}
-
-func customAutomationTaskChainConfig(automation models.Automation, candidate models.AutomationDraftCandidate, child models.AutomationDraftNode, childTaskID string) (string, error) {
-	config := models.ChainConfiguration{
-		Enabled: true, Trigger: "on_completion", ChildTaskID: childTaskID, ChildAutomationNodeKey: child.Key,
-		ChildTitle: automationTaskTitle(automation, child), ChildPromptPrefix: automationCompiledTaskPrompt(candidate, child),
-	}
-	category, _ := child.Config["category"].(string)
-	if parentKey, _ := customAutomationTaskNeighbors(candidate, child.Key); parentKey != "" {
-		for _, node := range candidate.Nodes {
-			if node.Key == parentKey && node.Type == models.AutomationNodeTrigger {
-				category = string(models.CategoryActive)
-				break
-			}
-		}
-	}
-	config.ChildCategory = category
-	encoded, err := json.Marshal(config)
-	if err != nil {
-		return "", err
-	}
-	return string(encoded), nil
 }
 
 func automationNodeTaskConfiguration(candidate models.AutomationDraftCandidate, node models.AutomationDraftNode) (string, models.TaskCategory, int) {
@@ -479,30 +442,12 @@ func automationCompiledGitHubIssueTaskPrompt(candidate models.AutomationDraftCan
 	return prompt
 }
 
-func automationSkillNames(refs []string) []string {
-	names := make([]string, len(refs))
-	for i, ref := range refs {
-		names[i] = ref
-		if separator := strings.Index(ref, ":"); separator >= 0 && separator+1 < len(ref) {
-			names[i] = ref[separator+1:]
-		}
-	}
-	return names
-}
-
 func automationTaskTitle(automation models.Automation, node models.AutomationDraftNode) string {
 	suffix := automation.ID
 	if len(suffix) > 8 {
 		suffix = suffix[:8]
 	}
 	return fmt.Sprintf("%s: %s [%s]", automation.Name, node.Name, suffix)
-}
-
-func nilString(value *string) any {
-	if value == nil {
-		return nil
-	}
-	return *value
 }
 
 func findDraftNode(candidate models.AutomationDraftCandidate, key string) (models.AutomationDraftNode, bool) {

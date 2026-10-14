@@ -19,7 +19,3 @@ func NormalizeChatMode(raw string) ChatMode {
 		return ChatModeOrchestrate
 	}
 }
-
-func (m ChatMode) IsPlan() bool {
-	return m == ChatModePlan
-}

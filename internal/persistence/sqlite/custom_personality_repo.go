@@ -169,10 +169,6 @@ func (r *CustomPersonalityRepo) ListPageExcludingKeys(ctx context.Context, limit
 	return r.listPage(ctx, limit, offset, search, excludedKeys)
 }
 
-func (r *CustomPersonalityRepo) ListPageExcludingKeysFiltered(ctx context.Context, limit, offset int, filter persistence.CustomPersonalityPageFilter, excludedKeys []string) ([]models.CustomPersonality, error) {
-	return r.listPageFiltered(ctx, limit, offset, filter, excludedKeys)
-}
-
 func (r *CustomPersonalityRepo) listPage(ctx context.Context, limit, offset int, search string, excludedKeys []string) ([]models.CustomPersonality, error) {
 	return r.listPageFiltered(ctx, limit, offset, persistence.CustomPersonalityPageFilter{Search: search}, excludedKeys)
 }
