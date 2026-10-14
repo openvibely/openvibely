@@ -361,7 +361,7 @@ func TestAutomationBrowserSaveRejectsExplicitInvalidSemanticConfiguration(t *tes
 }
 
 func TestAutomationWebBuilderKeepsUnsavedChangesBrowserLocal(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	project := tc.CreateProject().WithName("Browser Local Builder Project").Build()
 	automationRepo := tc.stores.Automations
 	registry := service.NewAutomationAdapterRegistry()
@@ -375,8 +375,8 @@ func TestAutomationWebBuilderKeepsUnsavedChangesBrowserLocal(t *testing.T) {
 		"project_id": {project.ID}, "source": {"blank"},
 	}).Execute()
 	require.Equal(t, http.StatusOK, opened.Code, opened.Body.String())
-	require.Zero(t, tableCountHandler(t, tc, "automations"), "opening a new builder must not persist an Automation")
-	require.Zero(t, tableCountHandler(t, tc, "automation_versions"), "opening a new builder must not persist a draft version")
+	require.Zero(t, automationHandlerState(t, tc).Automations, "opening a new builder must not persist an Automation")
+	require.Zero(t, automationHandlerState(t, tc).Versions, "opening a new builder must not persist a draft version")
 	require.NotContains(t, opened.Body.String(), `data-delete-automation-open`, "an unsaved Automation does not exist yet")
 
 	candidate, err := drafts.BlankCandidate("")
@@ -389,8 +389,8 @@ func TestAutomationWebBuilderKeepsUnsavedChangesBrowserLocal(t *testing.T) {
 	}).Execute()
 	require.Equal(t, http.StatusOK, added.Code, added.Body.String())
 	require.Contains(t, added.Body.String(), `data-node-key="review_support_queue"`)
-	require.Zero(t, tableCountHandler(t, tc, "automations"), "adding a node must remain browser-local")
-	require.Zero(t, tableCountHandler(t, tc, "automation_versions"), "adding a node must not create an editable draft")
+	require.Zero(t, automationHandlerState(t, tc).Automations, "adding a node must remain browser-local")
+	require.Zero(t, automationHandlerState(t, tc).Versions, "adding a node must not create an editable draft")
 
 	invalid := candidate
 	invalid.Nodes = []models.AutomationDraftNode{{Key: "bad", Name: "Bad", Type: models.AutomationNodeAction, Role: "create_notification", Config: map[string]any{"notification_type": "approval_request", "instructions": "Review"}}}
@@ -401,8 +401,8 @@ func TestAutomationWebBuilderKeepsUnsavedChangesBrowserLocal(t *testing.T) {
 	}).Execute()
 	require.Equal(t, http.StatusOK, failedSave.Code, failedSave.Body.String())
 	require.Empty(t, failedSave.Header().Get("HX-Redirect"))
-	require.Zero(t, tableCountHandler(t, tc, "automations"), "invalid Save must not persist an Automation")
-	require.Zero(t, tableCountHandler(t, tc, "automation_versions"), "invalid Save must not persist a draft version")
+	require.Zero(t, automationHandlerState(t, tc).Automations, "invalid Save must not persist an Automation")
+	require.Zero(t, automationHandlerState(t, tc).Versions, "invalid Save must not persist a draft version")
 
 	plannerInvalid := candidate
 	plannerInvalid.Name = "Unavailable GitHub automation"
@@ -420,8 +420,8 @@ func TestAutomationWebBuilderKeepsUnsavedChangesBrowserLocal(t *testing.T) {
 	require.Equal(t, http.StatusOK, failedPlan.Code, failedPlan.Body.String())
 	require.Empty(t, failedPlan.Header().Get("HX-Redirect"))
 	require.Contains(t, failedPlan.Body.String(), "GitHub")
-	require.Zero(t, tableCountHandler(t, tc, "automations"), "planner rejection must discard its temporary Automation")
-	require.Zero(t, tableCountHandler(t, tc, "automation_versions"), "planner rejection must discard its temporary version")
+	require.Zero(t, automationHandlerState(t, tc).Automations, "planner rejection must discard its temporary Automation")
+	require.Zero(t, automationHandlerState(t, tc).Versions, "planner rejection must discard its temporary version")
 
 	valid := candidate
 	valid.Name = "Saved task automation"
@@ -433,16 +433,22 @@ func TestAutomationWebBuilderKeepsUnsavedChangesBrowserLocal(t *testing.T) {
 	}).Execute()
 	require.Equal(t, http.StatusNoContent, saved.Code, saved.Body.String())
 	require.NotEmpty(t, saved.Header().Get("HX-Redirect"))
-	require.Equal(t, 1, tableCountHandler(t, tc, "automations"))
-	require.Equal(t, 1, tableCountHandler(t, tc, "automation_versions"))
+	require.Equal(t, 1, automationHandlerState(t, tc).Automations)
+	require.Equal(t, 1, automationHandlerState(t, tc).Versions)
 	automationID := onlySavedAutomationHandler(t, tc, project.ID).ID
 
 	edited := tc.HTMX().Post("/automations/" + automationID + "/builder?project_id=" + project.ID).WithForm(url.Values{"project_id": {project.ID}}).Execute()
 	require.Equal(t, http.StatusOK, edited.Code, edited.Body.String())
 	require.Contains(t, edited.Body.String(), "Saved task automation")
-	var draftCount int
-	require.NoError(t, tc.db.QueryRow(`SELECT COUNT(*) FROM automation_versions WHERE automation_id = ? AND state = 'draft'`, automationID).Scan(&draftCount))
-	require.Zero(t, draftCount, "opening Edit automation must not clone a persisted draft")
+	assertNoDraft := func() {
+		t.Helper()
+		versions, err := tc.stores.Fixtures.AutomationVersions(context.Background(), automationID)
+		require.NoError(t, err)
+		for _, v := range versions {
+			require.NotEqualValues(t, "draft", v.State)
+		}
+	}
+	assertNoDraft()
 
 	malicious := valid
 	malicious.Name = "GET must not save this name"
@@ -464,23 +470,19 @@ func TestAutomationWebBuilderKeepsUnsavedChangesBrowserLocal(t *testing.T) {
 	}).Execute()
 	require.Equal(t, http.StatusOK, mutated.Code, mutated.Body.String())
 	require.Contains(t, mutated.Body.String(), "Unsaved browser name")
-	require.NoError(t, tc.db.QueryRow(`SELECT COUNT(*) FROM automation_versions WHERE automation_id = ? AND state = 'draft'`, automationID).Scan(&draftCount))
-	require.Zero(t, draftCount, "builder mutations must not persist a draft")
+	assertNoDraft()
 
 	refreshed := tc.HTMX().Post("/automations/" + automationID + "/builder?project_id=" + project.ID).WithForm(url.Values{"project_id": {project.ID}}).Execute()
 	require.Equal(t, http.StatusOK, refreshed.Code, refreshed.Body.String())
 	require.Contains(t, refreshed.Body.String(), "Saved task automation")
 	require.NotContains(t, refreshed.Body.String(), "Unsaved browser name", "refresh/re-entry must restore the published graph")
 
-	var priorVersionID, priorNodeID string
-	require.NoError(t, tc.db.QueryRow(`SELECT a.published_version_id, n.id
-		FROM automations a JOIN automation_nodes n ON n.version_id = a.published_version_id
-		WHERE a.id = ? AND n.node_key = 'review'`, automationID).Scan(&priorVersionID, &priorNodeID))
-	_, err = tc.db.Exec(`INSERT INTO automation_invocations
-		(project_id, automation_id, version_id, trigger_node_id, trigger_resource_type, trigger_resource_id, occurrence_key, status)
-		VALUES (?, ?, ?, ?, 'task', 'running-task', 'save-while-running', 'running')`,
-		project.ID, automationID, priorVersionID, priorNodeID)
+	priorGraph, err := automationRepo.GetDefinition(context.Background(), project.ID, automationID)
 	require.NoError(t, err)
+	require.NotNil(t, priorGraph)
+	priorNode := automationNodeByKeyHandler(priorGraph.Nodes, "review")
+	require.NotNil(t, priorNode)
+	require.NoError(t, tc.stores.Fixtures.SeedAutomationInvocation(context.Background(), models.AutomationInvocation{ID: "save-while-running", ProjectID: project.ID, AutomationID: automationID, VersionID: priorGraph.Version.ID, TriggerNodeID: priorNode.ID, TriggerResourceType: "task", TriggerResourceID: "running-task", OccurrenceKey: "save-while-running", Status: "running"}))
 
 	valid.Name = "Saved replacement without version token"
 	valid.Nodes[0].Config["prompt"] = "Review using the replacement instructions."
@@ -491,10 +493,10 @@ func TestAutomationWebBuilderKeepsUnsavedChangesBrowserLocal(t *testing.T) {
 	}).Execute()
 	require.Equal(t, http.StatusNoContent, savedEdit.Code, savedEdit.Body.String())
 	require.NotEmpty(t, savedEdit.Header().Get("HX-Redirect"))
-	require.Equal(t, 1, tableCountHandler(t, tc, "automation_versions"), "Save must replace the prior graph instead of retaining version history")
-	var invocationCount int
-	require.NoError(t, tc.db.QueryRow(`SELECT COUNT(*) FROM automation_invocations WHERE automation_id = ?`, automationID).Scan(&invocationCount))
-	require.Zero(t, invocationCount, "Save while running must discard runtime rows tied to the replaced graph")
+	require.Equal(t, 1, automationHandlerState(t, tc).Versions, "Save must replace the prior graph instead of retaining version history")
+	history, err := automationRepo.ListAutomationInvocations(context.Background(), project.ID, automationID, 1, "")
+	require.NoError(t, err)
+	require.Empty(t, history.Items, "Save must discard runtime rows tied to the replaced graph")
 
 	invalidEdit := valid
 	invalidEdit.Nodes = nil
@@ -506,25 +508,28 @@ func TestAutomationWebBuilderKeepsUnsavedChangesBrowserLocal(t *testing.T) {
 	}).Execute()
 	require.Equal(t, http.StatusOK, failedEditSave.Code, failedEditSave.Body.String())
 	require.Empty(t, failedEditSave.Header().Get("HX-Redirect"))
-	require.Equal(t, 1, tableCountHandler(t, tc, "automation_versions"), "an invalid replacement must leave the current saved graph unchanged")
+	require.Equal(t, 1, automationHandlerState(t, tc).Versions, "an invalid replacement must leave the current saved graph unchanged")
 
-	var publishedCount int
-	require.NoError(t, tc.db.QueryRow(`SELECT COUNT(*) FROM automation_versions WHERE automation_id = ? AND state = 'published'`, automationID).Scan(&publishedCount))
-	require.Equal(t, 1, publishedCount)
-	var savedGraphSequence int
-	require.NoError(t, tc.db.QueryRow(`SELECT version FROM automation_versions WHERE automation_id = ?`, automationID).Scan(&savedGraphSequence))
-	require.Equal(t, 1, savedGraphSequence, "the single current graph must not expose an accumulating version sequence")
-	require.NoError(t, tc.db.QueryRow(`SELECT COUNT(*) FROM automation_versions WHERE automation_id = ? AND state = 'draft'`, automationID).Scan(&draftCount))
-	require.Zero(t, draftCount)
-	var savedTaskPrompt string
+	versions, err := tc.stores.Fixtures.AutomationVersions(context.Background(), automationID)
+	require.NoError(t, err)
+	require.Len(t, versions, 1)
+	require.EqualValues(t, "published", versions[0].State)
+	require.Equal(t, 1, versions[0].Version)
+	assertNoDraft()
 	savedName := storedAutomationHandler(t, tc, project.ID, automationID).Name
 	require.Equal(t, "Saved replacement without version token", savedName)
-	require.NoError(t, tc.db.QueryRow(`SELECT prompt FROM tasks WHERE created_via = ?`, persistence.AutomationCompilerTaskCreatedVia(automationID, "review")).Scan(&savedTaskPrompt))
-	require.Equal(t, "Review using the replacement instructions.", savedTaskPrompt)
+	graph, err := automationRepo.GetDefinition(context.Background(), project.ID, automationID)
+	require.NoError(t, err)
+	require.NotNil(t, graph)
+	task, err := tc.taskRepo.GetByID(context.Background(), persistedAutomationResourceID(t, graph, "review", "task"))
+	require.NoError(t, err)
+	require.NotNil(t, task)
+	require.Equal(t, persistence.AutomationCompilerTaskCreatedVia(automationID, "review"), task.CreatedVia)
+	require.Equal(t, "Review using the replacement instructions.", task.Prompt)
 }
 
 func TestAutomationDuplicateOpensUnsavedDraftAndSavesIndependentCopy(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	project := tc.CreateProject().WithName("Duplicate Automation Project").Build()
 	foreignProject := tc.CreateProject().WithName("Foreign Duplicate Project").Build()
 	automationRepo := tc.stores.Automations
@@ -554,19 +559,15 @@ func TestAutomationDuplicateOpensUnsavedDraftAndSavesIndependentCopy(t *testing.
 	}).Execute()
 	require.Equal(t, http.StatusNoContent, savedSource.Code, savedSource.Body.String())
 
-	var sourceAutomationID, sourceVersionID, sourceNodeID, sourceTaskID, sourceScheduleID string
-	require.NoError(t, tc.db.QueryRow(`SELECT a.id, a.published_version_id, n.id
-		FROM automations a JOIN automation_nodes n ON n.version_id = a.published_version_id
-		WHERE a.project_id = ? AND n.node_key = 'schedule'`, project.ID).Scan(&sourceAutomationID, &sourceVersionID, &sourceNodeID))
-	require.NoError(t, tc.db.QueryRow(`SELECT resource_id FROM automation_definition_resources
-		WHERE automation_id = ? AND resource_type = 'task'`, sourceAutomationID).Scan(&sourceTaskID))
-	require.NoError(t, tc.db.QueryRow(`SELECT resource_id FROM automation_definition_resources
-		WHERE automation_id = ? AND resource_type = 'schedule'`, sourceAutomationID).Scan(&sourceScheduleID))
-	_, err = tc.db.Exec(`INSERT INTO automation_invocations
-		(project_id, automation_id, version_id, trigger_node_id, trigger_resource_type, trigger_resource_id, occurrence_key, status)
-		VALUES (?, ?, ?, ?, 'schedule', ?, 'duplicate-source-history', 'completed')`,
-		project.ID, sourceAutomationID, sourceVersionID, sourceNodeID, sourceScheduleID)
+	sourceAutomationID := savedAutomationByNameHandler(t, tc, project.ID, sourceCandidate.Name).ID
+	sourceGraph, err := automationRepo.GetDefinition(context.Background(), project.ID, sourceAutomationID)
 	require.NoError(t, err)
+	require.NotNil(t, sourceGraph)
+	sourceNode := automationNodeByKeyHandler(sourceGraph.Nodes, "schedule")
+	require.NotNil(t, sourceNode)
+	sourceTaskID := persistedAutomationResourceID(t, sourceGraph, "schedule", "task")
+	sourceScheduleID := persistedAutomationResourceID(t, sourceGraph, "schedule", "schedule")
+	require.NoError(t, tc.stores.Fixtures.SeedAutomationInvocation(context.Background(), models.AutomationInvocation{ID: "duplicate-source-history", ProjectID: project.ID, AutomationID: sourceAutomationID, VersionID: sourceGraph.Version.ID, TriggerNodeID: sourceNode.ID, TriggerResourceType: "schedule", TriggerResourceID: sourceScheduleID, OccurrenceKey: "duplicate-source-history", Status: "completed"}))
 	sourceBefore, err := drafts.LoadCurrentCandidate(context.Background(), project.ID, sourceAutomationID)
 	require.NoError(t, err)
 
@@ -578,10 +579,7 @@ func TestAutomationDuplicateOpensUnsavedDraftAndSavesIndependentCopy(t *testing.
 	require.Equal(t, http.StatusOK, live.Code, live.Body.String())
 	require.Contains(t, live.Body.String(), `data-automation-live-duplicate`)
 
-	beforeCounts := map[string]int{}
-	for _, table := range []string{"automations", "automation_versions", "automation_definition_resources", "tasks", "schedules", "automation_invocations", "automation_work_items", "automation_activities"} {
-		beforeCounts[table] = tableCountHandler(t, tc, table)
-	}
+	beforeCounts := automationHandlerState(t, tc)
 	duplicateURL := fmt.Sprintf("/automations/%s/duplicate?project_id=%s", sourceAutomationID, project.ID)
 	opened := tc.HTMX().Get(duplicateURL).Execute()
 	require.Equal(t, http.StatusOK, opened.Code, opened.Body.String())
@@ -601,16 +599,12 @@ func TestAutomationDuplicateOpensUnsavedDraftAndSavesIndependentCopy(t *testing.
 	rawOpenedDuplicate, err := json.Marshal(duplicateCandidate)
 	require.NoError(t, err)
 	require.JSONEq(t, string(rawExpectedDuplicate), string(rawOpenedDuplicate))
-	for table, count := range beforeCounts {
-		require.Equal(t, count, tableCountHandler(t, tc, table), "opening a duplicate must not change %s", table)
-	}
+	require.Equal(t, beforeCounts, automationHandlerState(t, tc), "duplicate preview and rejected save must preserve state")
 
 	refreshed := tc.HTTP().Get(duplicateURL).Execute()
 	require.Equal(t, http.StatusOK, refreshed.Code, refreshed.Body.String())
 	require.Equal(t, duplicateCandidate, automationCandidateFromResponse(t, refreshed))
-	for table, count := range beforeCounts {
-		require.Equal(t, count, tableCountHandler(t, tc, table), "refreshing a duplicate must not change %s", table)
-	}
+	require.Equal(t, beforeCounts, automationHandlerState(t, tc), "duplicate preview and rejected save must preserve state")
 
 	invalidCandidate := duplicateCandidate
 	invalidCandidate.Nodes = nil
@@ -621,9 +615,7 @@ func TestAutomationDuplicateOpensUnsavedDraftAndSavesIndependentCopy(t *testing.
 	}).Execute()
 	require.Equal(t, http.StatusOK, invalidSave.Code, invalidSave.Body.String())
 	require.Empty(t, invalidSave.Header().Get("HX-Redirect"))
-	for table, count := range beforeCounts {
-		require.Equal(t, count, tableCountHandler(t, tc, table), "invalid duplicate Save must not change %s", table)
-	}
+	require.Equal(t, beforeCounts, automationHandlerState(t, tc), "duplicate preview and rejected save must preserve state")
 
 	rawDuplicate, err := json.Marshal(duplicateCandidate)
 	require.NoError(t, err)
@@ -632,24 +624,25 @@ func TestAutomationDuplicateOpensUnsavedDraftAndSavesIndependentCopy(t *testing.
 	}).Execute()
 	require.Equal(t, http.StatusNoContent, savedDuplicate.Code, savedDuplicate.Body.String())
 
-	var duplicateTaskID, duplicateScheduleID string
 	duplicateAutomationID := savedAutomationByNameHandler(t, tc, project.ID, duplicateCandidate.Name).ID
 	require.NotEqual(t, sourceAutomationID, duplicateAutomationID)
-	require.NoError(t, tc.db.QueryRow(`SELECT resource_id FROM automation_definition_resources
-		WHERE automation_id = ? AND resource_type = 'task'`, duplicateAutomationID).Scan(&duplicateTaskID))
-	require.NoError(t, tc.db.QueryRow(`SELECT resource_id FROM automation_definition_resources
-		WHERE automation_id = ? AND resource_type = 'schedule'`, duplicateAutomationID).Scan(&duplicateScheduleID))
+	duplicateGraph, err := automationRepo.GetDefinition(context.Background(), project.ID, duplicateAutomationID)
+	require.NoError(t, err)
+	require.NotNil(t, duplicateGraph)
+	duplicateTaskID := persistedAutomationResourceID(t, duplicateGraph, "schedule", "task")
+	duplicateScheduleID := persistedAutomationResourceID(t, duplicateGraph, "schedule", "schedule")
 	require.NotEqual(t, sourceTaskID, duplicateTaskID)
 	require.NotEqual(t, sourceScheduleID, duplicateScheduleID)
 
 	sourceAfter, err := drafts.LoadCurrentCandidate(context.Background(), project.ID, sourceAutomationID)
 	require.NoError(t, err)
 	require.Equal(t, sourceBefore.Candidate, sourceAfter.Candidate)
-	var sourceInvocationCount, duplicateInvocationCount int
-	require.NoError(t, tc.db.QueryRow(`SELECT COUNT(*) FROM automation_invocations WHERE automation_id = ?`, sourceAutomationID).Scan(&sourceInvocationCount))
-	require.Equal(t, 1, sourceInvocationCount)
-	require.NoError(t, tc.db.QueryRow(`SELECT COUNT(*) FROM automation_invocations WHERE automation_id = ?`, duplicateAutomationID).Scan(&duplicateInvocationCount))
-	require.Zero(t, duplicateInvocationCount)
+	sourceHistory, err := automationRepo.ListAutomationInvocations(context.Background(), project.ID, sourceAutomationID, 2, "")
+	require.NoError(t, err)
+	require.Len(t, sourceHistory.Items, 1)
+	duplicateHistory, err := automationRepo.ListAutomationInvocations(context.Background(), project.ID, duplicateAutomationID, 1, "")
+	require.NoError(t, err)
+	require.Empty(t, duplicateHistory.Items)
 
 	for _, response := range []*httptest.ResponseRecorder{
 		tc.HTTP().Get(fmt.Sprintf("/automations/%s/duplicate?project_id=%s", sourceAutomationID, foreignProject.ID)).Execute(),
@@ -2840,7 +2833,7 @@ func TestAutomationChatReadToolsUseBoundedRuntimePageAndDirectLookup(t *testing.
 }
 
 func TestAutomationChatLifecycleActionsRunPauseAndResumeSavedAutomation(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	ctx := context.Background()
 	project := tc.CreateProject().WithName("Automation lifecycle Chat").Build()
 	drafts := configureAutomationChatRuntimeTestServices(t, tc)
@@ -2878,14 +2871,33 @@ func TestAutomationChatLifecycleActionsRunPauseAndResumeSavedAutomation(t *testi
 
 	pause := executeOK("pause_automation", json.RawMessage(fmt.Sprintf(`{"automation_id":%q,"name":" NIGHTLY REVIEW LOOP "}`, automationID)))
 	require.Equal(t, string(models.AutomationPaused), pause["lifecycle_state"])
-	var enabled bool
-	require.NoError(t, tc.db.QueryRow(`SELECT enabled FROM schedules WHERE id IN (SELECT schedule_id FROM automation_trigger_owners WHERE automation_id = ?)`, automationID).Scan(&enabled))
-	require.False(t, enabled, "pausing from Chat must disable the Automation-owned trigger schedule")
+	graph, err := tc.stores.Automations.GetDefinition(ctx, project.ID, automationID)
+	require.NoError(t, err)
+	require.NotNil(t, graph)
+	assertSchedulesEnabled := func(want bool) {
+		t.Helper()
+		count := 0
+		for _, resource := range graph.Resources {
+			if resource.ResourceType != "schedule" {
+				continue
+			}
+			count++
+			owner, err := tc.stores.Automations.GetTriggerOwner(ctx, resource.ResourceID)
+			require.NoError(t, err)
+			require.NotNil(t, owner)
+			require.Equal(t, automationID, owner.AutomationID)
+			schedule, err := tc.scheduleRepo.GetByID(ctx, resource.ResourceID)
+			require.NoError(t, err)
+			require.NotNil(t, schedule)
+			require.Equal(t, want, schedule.Enabled)
+		}
+		require.Positive(t, count)
+	}
+	assertSchedulesEnabled(false)
 
 	resume := executeOK("resume_automation", json.RawMessage(fmt.Sprintf(`{"automation_id":%q}`, automationID)))
 	require.Equal(t, string(models.AutomationActive), resume["lifecycle_state"])
-	require.NoError(t, tc.db.QueryRow(`SELECT enabled FROM schedules WHERE id IN (SELECT schedule_id FROM automation_trigger_owners WHERE automation_id = ?)`, automationID).Scan(&enabled))
-	require.True(t, enabled, "resuming from Chat must re-enable the Automation-owned trigger schedule")
+	assertSchedulesEnabled(true)
 
 	get := executeOK("get_automation", json.RawMessage(fmt.Sprintf(`{"automation_id":%q}`, automationID)))
 	automation, _ := get["automation"].(map[string]any)
@@ -3564,7 +3576,7 @@ func TestAutomationDescribePreviewUsesEditShell(t *testing.T) {
 }
 
 func TestAutomationCanonicalChatRuntimeExecutesPreviewAndDirectSave(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	ctx := context.Background()
 	project := tc.CreateProject().WithName("Automation runtime actions").Build()
 	automationRepo := tc.stores.Automations
@@ -3589,8 +3601,7 @@ func TestAutomationCanonicalChatRuntimeExecutesPreviewAndDirectSave(t *testing.T
 	require.NoError(t, tc.taskRepo.Create(ctx, &chatTask))
 	planExecution := models.Execution{TaskID: chatTask.ID, Status: models.ExecRunning, PromptSent: "plan automation"}
 	require.NoError(t, tc.execRepo.Create(ctx, &planExecution))
-	_, err = tc.db.Exec(`UPDATE executions SET started_at = ? WHERE id = ?`, time.Now().UTC().Add(-time.Minute), planExecution.ID)
-	require.NoError(t, err)
+	require.NoError(t, tc.stores.Fixtures.SetExecutionStartedAt(ctx, planExecution.ID, time.Now().UTC().Add(-time.Minute)))
 	params := streamingResponseParams{ProjectID: project.ID, TaskID: chatTask.ID, ExecID: planExecution.ID, PrincipalID: "alice"}
 	collector := newChatActionSummaryCollector()
 	defs := chatcontrol.ToolDefsForContext(models.ChatModeOrchestrate, chatcontrol.SurfaceWeb, true)
@@ -3627,9 +3638,9 @@ func TestAutomationCanonicalChatRuntimeExecutesPreviewAndDirectSave(t *testing.T
 	require.NotContains(t, savedOutput, `"version_id"`)
 	require.NotContains(t, strings.ToLower(savedOutput), "confirmation")
 	require.Contains(t, savedOutput, `"url":"/automations/`)
-	require.Equal(t, 3, tableCountHandler(t, tc, "tasks"), "Save creates the Schedule-owned task and its explicit downstream Task beside the Chat thread")
-	require.Equal(t, 1, tableCountHandler(t, tc, "schedules"))
-	require.Zero(t, tableCountHandler(t, tc, "automation_chat_confirmation_receipts"))
+	require.Equal(t, 3, automationHandlerState(t, tc).Tasks, "Save creates the Schedule-owned task and its explicit downstream Task beside the Chat thread")
+	require.Equal(t, 1, automationHandlerState(t, tc).Schedules)
+	require.Zero(t, automationHandlerState(t, tc).ChatConfirmations)
 }
 
 func TestAutomationTaskFollowupGitHubToolsUseHardenedRuntime(t *testing.T) {
@@ -4219,4 +4230,17 @@ func automationHandlerState(t *testing.T, tc *TestContext) storefixture.Automati
 	state, err := tc.stores.Fixtures.AutomationState(context.Background())
 	require.NoError(t, err)
 	return state
+}
+
+// persistedAutomationResourceID rejects missing or duplicate bindings rather than selecting an arbitrary row.
+func persistedAutomationResourceID(t *testing.T, graph *models.AutomationDefinition, nodeKey, kind string) string {
+	t.Helper()
+	var ids []string
+	for _, r := range graph.Resources {
+		if r.NodeKey == nodeKey && r.ResourceType == kind {
+			ids = append(ids, r.ResourceID)
+		}
+	}
+	require.Len(t, ids, 1)
+	return ids[0]
 }
