@@ -44,7 +44,7 @@ func TestSendAgenticRepairsInterruptedSteeringReplay(t *testing.T) {
 	_, err := client.SendAgentic(context.Background(), "follow up", &AgenticOptions{Model: "gpt-test", DisableTools: true})
 	require.NoError(t, err)
 	input := received["input"].([]any)
-	require.Len(t, input, 3)
+	require.Len(t, input, 4)
 	require.Equal(t, "aborted", input[1].(map[string]any)["output"])
 }
 
@@ -183,5 +183,5 @@ func TestHistoryContinuationDoesNotAppendConsumedPrompt(t *testing.T) {
 	client.History = []Message{{Role: "user", Content: "recorded steer"}, {Role: "assistant", Content: "recorded result"}}
 	_, err := client.SendAgentic(context.Background(), "", &AgenticOptions{Model: "gpt-test", DisableTools: true, ContinueFromHistory: true})
 	require.NoError(t, err)
-	require.Len(t, received["input"].([]any), 2, "do not append an empty user message when resuming recorded history")
+	require.Len(t, received["input"].([]any), 3, "do not append an empty user message when resuming recorded history")
 }

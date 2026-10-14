@@ -70,14 +70,15 @@ const (
 
 // AgenticOptions configures an agentic send with tool use.
 type AgenticOptions struct {
-	Model         string
-	MaxTokens     int
-	ContextWindow int    // complete-request admission window; defaults conservatively when zero
-	Effort        string // output_config.effort; empty preserves the provider default
-	System        string
-	WorkDir       string // working directory for tool execution
-	MaxTurns      int    // max agentic loop iterations (default 25)
-	DisableTools  bool   // when true, no tools are sent (chat orchestrator mode)
+	Model                    string
+	MaxTokens                int
+	ContextWindow            int    // complete-request admission window; defaults conservatively when zero
+	Effort                   string // output_config.effort; empty preserves the provider default
+	System                   string
+	WorkDir                  string // working directory for tool execution
+	MaxTurns                 int    // max agentic loop iterations (default 25)
+	OmitExecutionEnvironment bool   // Raw utility requests may omit coding environment context.
+	DisableTools             bool   // when true, no tools are sent (chat orchestrator mode)
 	// ToolOutputTokenLimit bounds each local tool result replayed to the model;
 	// callbacks and the returned ToolCalls retain the complete output.
 	ToolOutputTokenLimit int
@@ -447,7 +448,7 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 		messages = append(messages, agenticMessage{Role: msg.Role, Content: msg.Content})
 	}
 
-	if !opts.DisableTools {
+	if !opts.OmitExecutionEnvironment {
 		messages = ensureExecutionEnvironment(messages, opts.WorkDir)
 	}
 	// If attachments are present, build multimodal content blocks for the prompt
@@ -472,7 +473,7 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 	hasDurableCompactionState := false
 
 	for turn := 0; turn < opts.MaxTurns; turn++ {
-		if !opts.DisableTools {
+		if !opts.OmitExecutionEnvironment {
 			messages = ensureExecutionEnvironment(messages, opts.WorkDir)
 		}
 		// Send request (streaming)
@@ -661,6 +662,9 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 	result.Text = allText.String()
 
 	// Update client history with the final state
+	if !opts.OmitExecutionEnvironment {
+		c.History = ensureHistoryEnvironment(c.History, opts.WorkDir)
+	}
 	c.History = append(c.History, Message{Role: "user", Content: prompt})
 	c.History = append(c.History, Message{Role: "assistant", Content: result.Text})
 

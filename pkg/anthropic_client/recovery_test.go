@@ -63,7 +63,7 @@ func TestAnthropicRecoveryUsesReplacementHistoryAndReturnsFailedRequest(t *testi
 		if err := json.Unmarshal(raw, &body); err != nil {
 			t.Fatal(err)
 		}
-		if len(body.Messages) != 2 || body.Messages[0].Content != "retained steer" || body.Messages[1].Content != "file already written" {
+		if len(body.Messages) != 3 || body.Messages[1].Content != "retained steer" || body.Messages[2].Content != "file already written" {
 			t.Fatalf("wrong recovery history: %s", raw)
 		}
 		return &http.Response{StatusCode: 400, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"error":{"type":"request_too_large","message":"too many tokens"}}`))}, nil

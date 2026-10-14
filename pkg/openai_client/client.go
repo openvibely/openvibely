@@ -525,6 +525,9 @@ func (c *Client) Send(ctx context.Context, prompt string, opts *SendOptions) (*R
 		return nil, err
 	}
 
+	if opts.EnvironmentWorkDir != "" {
+		c.History = ensureHistoryEnvironment(c.History, opts.EnvironmentWorkDir)
+	}
 	c.History = append(c.History, Message{Role: "user", Content: prompt})
 
 	inputItems, err := buildInputItems(c.History, opts.Attachments)

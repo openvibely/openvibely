@@ -1655,12 +1655,12 @@ func TestSendAgentic_PauseTurnEchoesToolUseInputWhenMissingFromStream(t *testing
 			if !ok || len(msgs) < 2 {
 				t.Fatalf("turn 2 expected >=2 messages, got %#v", reqBody["messages"])
 			}
-			assistant, ok := msgs[1].(map[string]interface{})
+			assistant, ok := msgs[2].(map[string]interface{})
 			if !ok {
-				t.Fatalf("turn 2 message 1 type mismatch: %#v", msgs[1])
+				t.Fatalf("turn 2 message 2 type mismatch: %#v", msgs[2])
 			}
 			if role, _ := assistant["role"].(string); role != "assistant" {
-				t.Fatalf("turn 2 message 1 role = %q, want assistant", role)
+				t.Fatalf("turn 2 message 2 role = %q, want assistant", role)
 			}
 			blocks, ok := assistant["content"].([]interface{})
 			if !ok || len(blocks) < 2 {

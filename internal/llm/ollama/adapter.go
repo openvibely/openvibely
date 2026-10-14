@@ -209,7 +209,7 @@ func (a *Adapter) callChat(ctx context.Context, message string, attachments []mo
 	if images := encodeImageAttachments(attachments); len(images) > 0 {
 		userMsg.Images = images
 	}
-	messages = append(messages, chatMessage{Role: "user", Content: executionenv.Context(workDir)})
+	messages = ensureExecutionEnvironment(messages, workDir)
 	messages = append(messages, userMsg)
 
 	opts := ollamaRequestOptions(agent)
@@ -268,7 +268,7 @@ func (a *Adapter) callStreaming(ctx context.Context, prompt string, attachments 
 	if images := encodeImageAttachments(attachments); len(images) > 0 {
 		userMsg.Images = images
 	}
-	messages = append(messages, chatMessage{Role: "user", Content: executionenv.Context(workDir)})
+	messages = ensureExecutionEnvironment(messages, workDir)
 	messages = append(messages, userMsg)
 
 	reqBody := chatRequest{
@@ -505,4 +505,10 @@ func encodeImageAttachments(attachments []models.Attachment) []string {
 		applog.Infof("[ollama] added image attachment %s (%s, %d bytes)", att.FileName, att.MediaType, len(data))
 	}
 	return images
+}
+
+func ensureExecutionEnvironment(messages []chatMessage, workDir string) []chatMessage {
+	return executionenv.Ensure(messages, workDir, func(m chatMessage) (string, string) {
+		return m.Role, m.Content
+	}, func(text string) chatMessage { return chatMessage{Role: "user", Content: text} })
 }
