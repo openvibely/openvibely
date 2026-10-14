@@ -833,7 +833,7 @@ func (h *Handler) executeGitHubCloseIssueTool(ctx context.Context, projectID str
 }
 
 func (h *Handler) executeGitHubForwardPRFeedbackToTasksTool(ctx context.Context, projectID string, input json.RawMessage) (string, error) {
-	if h.taskPullRequestRepo == nil || h.githubPRFeedbackRepo == nil || h.githubAuthRepo == nil || h.threadInputRepo == nil {
+	if h.taskPullRequestRepo == nil || h.githubPRFeedbackRepo == nil || h.githubAuthRepo == nil {
 		return "", fmt.Errorf("github pr feedback forwarding dependencies unavailable")
 	}
 	var req service.GitHubIssueActionRequest
@@ -844,7 +844,7 @@ func (h *Handler) executeGitHubForwardPRFeedbackToTasksTool(ctx context.Context,
 	if err != nil {
 		return "", err
 	}
-	result, err := service.NewGitHubPRFeedbackForwarder(h.githubSvc, h.taskPullRequestRepo, h.githubPRFeedbackRepo, h.githubAuthRepo, h.threadInputRepo).ForwardAuthorizedFeedback(ctx, projectID, repo)
+	result, err := service.NewGitHubPRFeedbackForwarder(h.githubSvc, h.taskPullRequestRepo, h.githubPRFeedbackRepo, h.githubAuthRepo).ForwardAuthorizedFeedback(ctx, projectID, repo)
 	if err != nil {
 		return "", err
 	}

@@ -4638,7 +4638,6 @@ func TestGitHubIssueRuntimeToolsExposeDefaultTaskToolsAndPreserveSafetyRules(t *
 	taskRepo := env.Tasks
 	prRepo := env.TaskPullRequests
 	feedbackRepo := env.GitHubPRFeedback
-	threadInputRepo := env.ThreadInputs
 	project := &models.Project{Name: "GitHub Runtime Project", RepoPath: t.TempDir(), RepoURL: "https://github.com/openvibely/openvibely.git"}
 	if err := projectRepo.Create(ctx, project); err != nil {
 		t.Fatalf("create project: %v", err)
@@ -4731,7 +4730,6 @@ func TestGitHubIssueRuntimeToolsExposeDefaultTaskToolsAndPreserveSafetyRules(t *
 		TaskPullRequestRepo:  prRepo,
 		GitHubPRFeedbackRepo: feedbackRepo,
 		GitHubAuthRepo:       githubAuthRepo,
-		ThreadInputRepo:      threadInputRepo,
 		GitHub:               provider,
 	})
 	for _, name := range []string{"github_create_issue", "github_get_issue", "github_get_project_inbox", "github_is_actor_authorized", "github_list_my_assigned_issues", "github_list_assigned_issues", "github_add_issue_labels", "github_close_issue", "github_open_pull_request", "github_replace_pull_request_branch", "github_forward_pr_feedback_to_tasks"} {
@@ -4946,7 +4944,6 @@ func TestGitHubIssueRuntimeForwardPRFeedbackPromotesLinkedTasks(t *testing.T) {
 		TaskPullRequestRepo:      prRepo,
 		GitHubPRFeedbackRepo:     feedbackRepo,
 		GitHubAuthRepo:           githubAuthRepo,
-		ThreadInputRepo:          threadInputRepo,
 		GitHub:                   provider,
 		AfterPRFeedbackForwarded: func(taskID string) { promoted = append(promoted, taskID) },
 	})

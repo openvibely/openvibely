@@ -18,11 +18,10 @@ type GitHubPRFeedbackProvider interface {
 }
 
 type GitHubPRFeedbackForwarder struct {
-	github          GitHubPRFeedbackProvider
-	prRepo          persistence.TaskPullRequestStore
-	feedbackRepo    persistence.GitHubPRFeedbackStore
-	authRepo        persistence.GitHubAuthStore
-	threadInputRepo persistence.ThreadInputStore
+	github       GitHubPRFeedbackProvider
+	prRepo       persistence.TaskPullRequestStore
+	feedbackRepo persistence.GitHubPRFeedbackStore
+	authRepo     persistence.GitHubAuthStore
 }
 
 type GitHubPRFeedbackForwardResult struct {
@@ -45,8 +44,8 @@ type GitHubPRFeedbackForwardedResult struct {
 	URL               string `json:"url"`
 }
 
-func NewGitHubPRFeedbackForwarder(github GitHubPRFeedbackProvider, prRepo persistence.TaskPullRequestStore, feedbackRepo persistence.GitHubPRFeedbackStore, authRepo persistence.GitHubAuthStore, threadInputRepo persistence.ThreadInputStore) *GitHubPRFeedbackForwarder {
-	return &GitHubPRFeedbackForwarder{github: github, prRepo: prRepo, feedbackRepo: feedbackRepo, authRepo: authRepo, threadInputRepo: threadInputRepo}
+func NewGitHubPRFeedbackForwarder(github GitHubPRFeedbackProvider, prRepo persistence.TaskPullRequestStore, feedbackRepo persistence.GitHubPRFeedbackStore, authRepo persistence.GitHubAuthStore) *GitHubPRFeedbackForwarder {
+	return &GitHubPRFeedbackForwarder{github: github, prRepo: prRepo, feedbackRepo: feedbackRepo, authRepo: authRepo}
 }
 
 func (f *GitHubPRFeedbackForwarder) ForwardAuthorizedFeedback(ctx context.Context, projectID string, repo *GitHubRepoRef) (*GitHubPRFeedbackForwardResult, error) {
@@ -59,7 +58,7 @@ func (f *GitHubPRFeedbackForwarder) forwardAuthorizedFeedback(ctx context.Contex
 	if f == nil || f.github == nil {
 		return nil, fmt.Errorf("github feedback provider unavailable")
 	}
-	if f.prRepo == nil || f.feedbackRepo == nil || f.authRepo == nil || f.threadInputRepo == nil {
+	if f.prRepo == nil || f.feedbackRepo == nil || f.authRepo == nil {
 		return nil, fmt.Errorf("github pr feedback forwarding dependencies unavailable")
 	}
 	if repo == nil {

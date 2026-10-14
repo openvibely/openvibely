@@ -19,7 +19,6 @@ type AutomationRepo struct {
 }
 
 func NewAutomationRepo(db *sql.DB) *AutomationRepo { return &AutomationRepo{db: db} }
-func (r *AutomationRepo) DB() *sql.DB              { return r.db }
 func (r *AutomationRepo) SetBroadcaster(b *events.Broadcaster) {
 	r.broadcaster = b
 }

@@ -53,7 +53,6 @@ type githubIssueRuntimeOptions struct {
 	TaskCommitStatRepo       persistence.TaskCommitStatStore
 	GitHubPRFeedbackRepo     persistence.GitHubPRFeedbackStore
 	GitHubAuthRepo           persistence.GitHubAuthStore
-	ThreadInputRepo          persistence.ThreadInputStore
 	AutomationRepo           persistence.AutomationStore
 	GitHub                   GitHubIssueRuntimeProvider
 	AfterPRFeedbackForwarded func(taskID string)
@@ -528,7 +527,7 @@ func buildGitHubIssueRuntimeHandlers(opts githubIssueRuntimeOptions) map[string]
 			})
 		},
 		"github_forward_pr_feedback_to_tasks": func(ctx context.Context, input json.RawMessage) (string, error) {
-			if opts.TaskPullRequestRepo == nil || opts.GitHubPRFeedbackRepo == nil || opts.GitHubAuthRepo == nil || opts.ThreadInputRepo == nil {
+			if opts.TaskPullRequestRepo == nil || opts.GitHubPRFeedbackRepo == nil || opts.GitHubAuthRepo == nil {
 				return "", fmt.Errorf("github pr feedback forwarding dependencies unavailable")
 			}
 			var req GitHubIssueActionRequest
@@ -539,7 +538,7 @@ func buildGitHubIssueRuntimeHandlers(opts githubIssueRuntimeOptions) map[string]
 			if err != nil {
 				return "", err
 			}
-			result, err := NewGitHubPRFeedbackForwarder(opts.GitHub, opts.TaskPullRequestRepo, opts.GitHubPRFeedbackRepo, opts.GitHubAuthRepo, opts.ThreadInputRepo).ForwardAuthorizedFeedback(ctx, opts.ProjectID, repo)
+			result, err := NewGitHubPRFeedbackForwarder(opts.GitHub, opts.TaskPullRequestRepo, opts.GitHubPRFeedbackRepo, opts.GitHubAuthRepo).ForwardAuthorizedFeedback(ctx, opts.ProjectID, repo)
 			if err != nil {
 				return "", err
 			}

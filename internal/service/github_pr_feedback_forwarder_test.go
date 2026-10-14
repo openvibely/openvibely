@@ -136,7 +136,6 @@ func TestGitHubPRFeedbackForwarderResolvesPATIdentityThroughEnterpriseEndpoint(t
 		prRepo,
 		env.GitHubPRFeedback,
 		env.GitHubAuth,
-		env.ThreadInputs,
 	)
 	_, err := forwarder.ForwardAuthorizedFeedback(ctx, project.ID, &GitHubRepoRef{
 		Owner:      "acme",
@@ -189,7 +188,7 @@ func TestGitHubPRFeedbackForwarderQueuesAuthorizedFeedbackOnce(t *testing.T) {
 		{Kind: "review", ID: "103", AuthorLogin: "ci-bot", AuthorType: "Bot", Body: "Automated review", State: "commented", URL: "https://github.com/openvibely/openvibely/pull/42#pullrequestreview-103", CreatedAt: time.Date(2026, 7, 9, 13, 0, 0, 0, time.UTC)},
 	}}
 
-	forwarder := NewGitHubPRFeedbackForwarder(provider, prRepo, feedbackRepo, authRepo, threadInputRepo)
+	forwarder := NewGitHubPRFeedbackForwarder(provider, prRepo, feedbackRepo, authRepo)
 	result, err := forwarder.ForwardAuthorizedFeedback(ctx, project.ID, &GitHubRepoRef{Owner: "openvibely", Name: "openvibely", FullName: "openvibely/openvibely"})
 	if err != nil {
 		t.Fatalf("forward feedback: %v", err)
@@ -256,7 +255,7 @@ func TestGitHubPRFeedbackForwarderDeduplicatesPreexistingMixedCaseRepository(t *
 	provider := &fakePRFeedbackProvider{items: []GitHubPullRequestFeedback{{
 		Kind: "issue_comment", ID: "mixed-case-existing", AuthorLogin: "alice", AuthorType: "User", Body: "Already forwarded.",
 	}}}
-	forwarder := NewGitHubPRFeedbackForwarder(provider, prRepo, feedbackRepo, authRepo, threadInputRepo)
+	forwarder := NewGitHubPRFeedbackForwarder(provider, prRepo, feedbackRepo, authRepo)
 	result, err := forwarder.ForwardAuthorizedFeedback(ctx, project.ID, &GitHubRepoRef{Owner: "owner", Name: "repo", FullName: "owner/repo"})
 	if err != nil {
 		t.Fatalf("forward feedback: %v", err)
@@ -354,7 +353,7 @@ func TestGitHubPRFeedbackForwarderDoesNotFetchPersistedPRFromSelectedRepository(
 	provider := &fakePRFeedbackProvider{itemsByCall: map[prFeedbackCall][]GitHubPullRequestFeedback{
 		{repoFullName: "example/repo-b", prNumber: 42}: {{Kind: "issue_comment", ID: "repo-b-feedback", AuthorLogin: "alice", AuthorType: "User", Body: "Feedback from the wrong repository."}},
 	}}
-	forwarder := NewGitHubPRFeedbackForwarder(provider, prRepo, feedbackRepo, authRepo, threadInputRepo)
+	forwarder := NewGitHubPRFeedbackForwarder(provider, prRepo, feedbackRepo, authRepo)
 	result, err := forwarder.ForwardAuthorizedFeedback(ctx, project.ID, &GitHubRepoRef{Owner: "example", Name: "repo-b", FullName: "example/repo-b"})
 	if err != nil {
 		t.Fatalf("forward feedback: %v", err)
@@ -401,7 +400,6 @@ func TestGitHubPRFeedbackForwarderUsesEnterpriseHostAndAPIEndpoint(t *testing.T)
 	prRepo := env.TaskPullRequests
 	feedbackRepo := env.GitHubPRFeedback
 	authRepo := env.GitHubAuth
-	threadInputRepo := env.ThreadInputs
 
 	project := &models.Project{ID: "proj-enterprise-pr-feedback", Name: "Enterprise PR Feedback", RepoPath: t.TempDir(), RepoURL: "https://github.example.com:8443/acme/widgets"}
 	if err := projectRepo.Create(ctx, project); err != nil {
@@ -445,7 +443,7 @@ func TestGitHubPRFeedbackForwarderUsesEnterpriseHostAndAPIEndpoint(t *testing.T)
 		t.Fatalf("configure selected repository endpoint: %v", err)
 	}
 	selectedRepo := &parsedRepo
-	forwarder := NewGitHubPRFeedbackForwarder(provider, prRepo, feedbackRepo, authRepo, threadInputRepo)
+	forwarder := NewGitHubPRFeedbackForwarder(provider, prRepo, feedbackRepo, authRepo)
 	result, err := forwarder.ForwardAuthorizedFeedback(ctx, project.ID, selectedRepo)
 	if err != nil {
 		t.Fatalf("forward feedback: %v", err)
@@ -502,7 +500,7 @@ func TestGitHubPRFeedbackForwarderUsesPersistedRepositoryForEachPR(t *testing.T)
 		{repoFullName: "example/repo-a", prNumber: 42}: {{Kind: "issue_comment", ID: "shared-feedback-id", AuthorLogin: "alice", AuthorType: "User", Body: "Repo A feedback."}},
 		{repoFullName: "example/repo-b", prNumber: 42}: {{Kind: "issue_comment", ID: "shared-feedback-id", AuthorLogin: "alice", AuthorType: "User", Body: "Repo B feedback."}},
 	}}
-	forwarder := NewGitHubPRFeedbackForwarder(provider, prRepo, feedbackRepo, authRepo, threadInputRepo)
+	forwarder := NewGitHubPRFeedbackForwarder(provider, prRepo, feedbackRepo, authRepo)
 	result, err := forwarder.ForwardAuthorizedFeedback(ctx, project.ID, &GitHubRepoRef{Owner: "example", Name: "current", FullName: "example/current"})
 	if err != nil {
 		t.Fatalf("forward feedback: %v", err)
@@ -848,7 +846,7 @@ func newGitHubPRFeedbackForwarderFixture(tb testing.TB, authorizedLogins []strin
 		env:             env,
 		project:         project,
 		task:            task,
-		forwarder:       NewGitHubPRFeedbackForwarder(provider, prRepo, feedbackRepo, authRepo, threadInputRepo),
+		forwarder:       NewGitHubPRFeedbackForwarder(provider, prRepo, feedbackRepo, authRepo),
 		provider:        provider,
 		counter:         counter,
 		threadInputRepo: threadInputRepo,
