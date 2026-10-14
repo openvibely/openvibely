@@ -158,8 +158,8 @@ func TestBrowserFunctional_ProjectTabsAndBrowserScope(t *testing.T) {
 				}
 				browser.call("Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": "ArrowRight", "code": "ArrowRight"}, nil)
 				browser.call("Input.dispatchKeyEvent", map[string]any{"type": "keyUp", "key": "ArrowRight", "code": "ArrowRight"}, nil)
-				if got := browser.evaluate(`getComputedStyle(document.activeElement).outlineStyle`); got != "solid" {
-					t.Fatal("keyboard tab navigation must retain a focus outline", got)
+				if got := browser.evaluate(`getComputedStyle(document.activeElement).outlineStyle`); got != "none" {
+					t.Fatal("keyboard tab navigation must not show a selection-like focus outline", got)
 				}
 				// Selection happens on press, before release or drag movement.
 				for _, id := range []string{"p01", "p00"} {
