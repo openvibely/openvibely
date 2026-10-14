@@ -39,6 +39,17 @@ static GtkWidget *find_button(GtkWidget *root, const char *style) {
  return NULL;
 #endif
 }
+// Check the input-routing contract separately from opacity and sensitivity:
+// insensitive overlays can still swallow clicks intended for the webview.
+static gboolean caption_passes_input(OVCaption *c, gboolean hidden) {
+#if GTK_MAJOR_VERSION < 4
+ return gtk_overlay_get_overlay_pass_through(GTK_OVERLAY(c->overlay), c->left) == hidden &&
+  gtk_overlay_get_overlay_pass_through(GTK_OVERLAY(c->overlay), c->right) == hidden;
+#else
+ return gtk_widget_get_can_target(c->left) == !hidden &&
+  gtk_widget_get_can_target(c->right) == !hidden;
+#endif
+}
 static gboolean sample_corners(GtkWidget *window, gboolean rounded, gboolean report) {
 #if GTK_MAJOR_VERSION < 4
  // Match the production fallback on desktops without alpha compositing.
@@ -121,6 +132,7 @@ int main(int argc,char **argv) {
  webkit_web_view_load_html(WEBKIT_WEB_VIEW(content), "<html style='background:#234567'><body>Shared header and webview content</body></html>", NULL);
  gtk_window_set_default_size(GTK_WINDOW(window),800,400);
  g_object_set(gtk_settings_get_default(),"gtk-decoration-layout",":minimize,maximize,close",NULL);
+ ovSetLinuxCaptionHidden(window, 1);
  ovInstallLinuxCaption(window);
  gtk_window_present(GTK_WINDOW(window)); settle();
  gint64 load_deadline = g_get_monotonic_time() + 10 * G_TIME_SPAN_SECOND;
@@ -131,6 +143,17 @@ int main(int argc,char **argv) {
  if (!content_loaded) { g_printerr("WebKit content did not finish loading\n"); return 28; }
  OVCaption *c=g_object_get_data(G_OBJECT(window),"ov-caption");
  if (!c || !gtk_widget_get_parent(content)) return 10;
+ if (gtk_widget_get_opacity(c->left) != 0 || gtk_widget_get_opacity(c->right) != 0 || gtk_widget_get_sensitive(c->right)) return 29;
+ if (!caption_passes_input(c, TRUE)) return 32;
+ ovSetLinuxCaptionHidden(window, 0); settle();
+ if (!caption_passes_input(c, FALSE)) return 33;
+ if (gtk_widget_get_opacity(c->right) != 1 || !gtk_widget_get_sensitive(c->right)) return 30;
+ ovSetLinuxCaptionHidden(window, 1);
+ ovSetLinuxCaptionDark(1); settle();
+ if (gtk_widget_get_opacity(c->right) != 0 || gtk_widget_get_sensitive(c->right)) return 31;
+ if (!caption_passes_input(c, TRUE)) return 32;
+ ovSetLinuxCaptionHidden(window, 0); settle();
+ if (!caption_passes_input(c, FALSE)) return 33;
  if (!corners_match(window, TRUE)) return 23;
 #if GTK_MAJOR_VERSION < 4
  // Wails shows the hierarchy after the caption is installed. Empty groups

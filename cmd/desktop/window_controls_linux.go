@@ -36,6 +36,16 @@ func registerPlatformWindowControls(app *application.App, window *application.We
 	linuxCaptionState.Lock()
 	linuxCaptionState.app = app
 	linuxCaptionState.Unlock()
+	visibility := &captionVisibility{}
+	app.Event.On("desktop:controls-visibility", func(event *application.CustomEvent) {
+		visibility.handle(event, application.InvokeAsync, func(hidden bool) {
+			value := C.int(0)
+			if hidden {
+				value = 1
+			}
+			C.ovSetLinuxCaptionHidden(window.NativeWindow(), value)
+		})
+	})
 	app.Event.On("desktop:controls-theme", func(event *application.CustomEvent) {
 		if event.Sender != "main" {
 			return

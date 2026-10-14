@@ -107,6 +107,12 @@ int main(void) {
   window.testFullscreen = NO;
   [controls refresh];
   if (![(NSButton *)controls.subviews[1] isEnabled]) return 11;
+  ovSetTrafficLightsHidden(1);
+  if (!controls.hidden || [controls _mouseInGroup:button]) return 16;
+  [controls refresh];
+  if (!controls.hidden) return 17;
+  ovSetTrafficLightsHidden(0);
+  if (controls.hidden) return 18;
   [controls release];
   [window release];
  }

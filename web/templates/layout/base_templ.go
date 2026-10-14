@@ -372,7 +372,7 @@ func Base(title string, projects []models.Project, currentProjectID string) temp
 			return templ_7745c5c3_Err
 		}
 		if serverRuntimeMode(ctx) == "desktop" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 22, "<script type=\"module\">\n\t\t\t\t\timport * as runtime from '/wails/runtime.js';\n\t\t\t\t\twindow.wails = runtime;\n\t\t\t\t\twindow.openVibelyInstallWindowControls && window.openVibelyInstallWindowControls(runtime);\n\t\t\t\t\tif (document.querySelector('#desktop-project-titlebar[data-platform=\"darwin\"]') && runtime.Events && runtime.Events.Emit) {\n\t\t\t\t\t\tconst syncNativeTheme = () => runtime.Events.Emit('desktop:controls-theme', {dark: document.documentElement.getAttribute('data-theme') === 'dark'});\n\t\t\t\t\t\tnew MutationObserver(syncNativeTheme).observe(document.documentElement, {attributes: true, attributeFilter: ['data-theme']});\n\t\t\t\t\t\tsyncNativeTheme();\n\t\t\t\t\t}\n\t\t\t\t\twindow.__ov_applyRuntimeMode && window.__ov_applyRuntimeMode();\n\t\t\t\t</script>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 22, "<script type=\"module\">\n\t\t\t\t\timport * as runtime from '/wails/runtime.js';\n\t\t\t\t\twindow.wails = runtime;\n\t\t\t\t\twindow.openVibelyInstallWindowControls && window.openVibelyInstallWindowControls(runtime);\n\t\t\t\t\tif (document.querySelector('#desktop-project-titlebar:is([data-platform=\"darwin\"], [data-platform=\"linux\"])') && runtime.Events && runtime.Events.Emit) {\n\t\t\t\t\t\tconst syncNativeTheme = () => runtime.Events.Emit('desktop:controls-theme', {dark: document.documentElement.getAttribute('data-theme') === 'dark'});\n\t\t\t\t\t\tnew MutationObserver(syncNativeTheme).observe(document.documentElement, {attributes: true, attributeFilter: ['data-theme']});\n\t\t\t\t\t\tsyncNativeTheme();\n\t\t\t\t\t\tconst preview = document.getElementById('image-gallery');\n\t\t\t\t\t\tlet visibilitySequence = 0;\n\t\t\t\t\t\tconst syncNativeVisibility = () => runtime.Events.Emit('desktop:controls-visibility', {hidden: !!preview?.open, page: performance.timeOrigin, sequence: ++visibilitySequence});\n\t\t\t\t\t\tif (preview) new MutationObserver(syncNativeVisibility).observe(preview, {attributes: true, attributeFilter: ['open']});\n\t\t\t\t\t\tsyncNativeVisibility();\n\t\t\t\t\t}\n\t\t\t\t\twindow.__ov_applyRuntimeMode && window.__ov_applyRuntimeMode();\n\t\t\t\t</script>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -392,7 +392,7 @@ func Base(title string, projects []models.Project, currentProjectID string) temp
 		var templ_7745c5c3_Var21 templ.SafeURL
 		templ_7745c5c3_Var21, templ_7745c5c3_Err = templ.JoinURLErrs(static.URL("app-utilities.css"))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/base.templ`, Line: 4810, Col: 47}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/base.templ`, Line: 4815, Col: 47}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var21))
 		if templ_7745c5c3_Err != nil {

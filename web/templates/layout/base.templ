@@ -404,10 +404,15 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					import * as runtime from '/wails/runtime.js';
 					window.wails = runtime;
 					window.openVibelyInstallWindowControls && window.openVibelyInstallWindowControls(runtime);
-					if (document.querySelector('#desktop-project-titlebar[data-platform="darwin"]') && runtime.Events && runtime.Events.Emit) {
+					if (document.querySelector('#desktop-project-titlebar:is([data-platform="darwin"], [data-platform="linux"])') && runtime.Events && runtime.Events.Emit) {
 						const syncNativeTheme = () => runtime.Events.Emit('desktop:controls-theme', {dark: document.documentElement.getAttribute('data-theme') === 'dark'});
 						new MutationObserver(syncNativeTheme).observe(document.documentElement, {attributes: true, attributeFilter: ['data-theme']});
 						syncNativeTheme();
+						const preview = document.getElementById('image-gallery');
+						let visibilitySequence = 0;
+						const syncNativeVisibility = () => runtime.Events.Emit('desktop:controls-visibility', {hidden: !!preview?.open, page: performance.timeOrigin, sequence: ++visibilitySequence});
+						if (preview) new MutationObserver(syncNativeVisibility).observe(preview, {attributes: true, attributeFilter: ['open']});
+						syncNativeVisibility();
 					}
 					window.__ov_applyRuntimeMode && window.__ov_applyRuntimeMode();
 				</script>
