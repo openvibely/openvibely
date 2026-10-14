@@ -22,6 +22,10 @@ type SkillEventFilter struct {
 
 // Fixtures describes test domain state, never tables, query text, or connections.
 type Fixtures interface {
+	FailExecutionCancellation(context.Context, string) error
+	FailTaskAttachmentCreation(context.Context) error
+	FailTaskActiveLaneMove(context.Context, string) error
+	SetAgentArchivedAt(context.Context, string, time.Time) error
 	RenewAutomationDispatchLease(context.Context, string, string, time.Time) error
 	AutomationDispatchState(context.Context, string) (AutomationDispatchState, error)
 	CompleteAutomationActivity(context.Context, string, time.Time) error

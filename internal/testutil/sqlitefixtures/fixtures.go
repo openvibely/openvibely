@@ -320,3 +320,21 @@ func (f *fixtures) SetLegacyModelName(ctx context.Context, id, name string) erro
 	_, err := f.db.ExecContext(ctx, `UPDATE agent_configs SET name=? WHERE id=?`, name, id)
 	return err
 }
+
+func (f *fixtures) FailTaskActiveLaneMove(ctx context.Context, id string) error {
+	_, err := f.db.ExecContext(ctx, `CREATE TRIGGER fail_fixture_active_lane BEFORE UPDATE ON tasks WHEN OLD.id = `+sqliteLiteral(id)+` AND NEW.category = 'active' BEGIN SELECT RAISE(FAIL, 'forced handler later move failure'); END`)
+	return err
+}
+func (f *fixtures) SetAgentArchivedAt(ctx context.Context, id string, at time.Time) error {
+	return f.setTime(ctx, `UPDATE agents SET archived_at = ? WHERE id = ?`, id, at)
+}
+
+func (f *fixtures) FailTaskAttachmentCreation(ctx context.Context) error {
+	_, err := f.db.ExecContext(ctx, `CREATE TRIGGER fail_fixture_attachment_insert BEFORE INSERT ON task_attachments BEGIN SELECT RAISE(ABORT, 'forced attachment insert failure'); END`)
+	return err
+}
+
+func (f *fixtures) FailExecutionCancellation(ctx context.Context, id string) error {
+	_, err := f.db.ExecContext(ctx, `CREATE TRIGGER fail_fixture_execution_cancel BEFORE UPDATE OF status ON executions WHEN OLD.id = `+sqliteLiteral(id)+` AND NEW.status = 'cancelled' BEGIN SELECT RAISE(ABORT, 'forced execution cancellation failure'); END`)
+	return err
+}

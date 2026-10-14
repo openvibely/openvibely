@@ -709,16 +709,10 @@ func TestTaskAttachmentUploadsCleanPartialFilesOnCopyFailureAcrossSurfaces(t *te
 func TestTaskAttachmentUploadsCleanFilesOnRepositoryFailureAcrossSurfaces(t *testing.T) {
 	for _, surface := range taskAttachmentUploadSurfaces() {
 		t.Run(surface.name, func(t *testing.T) {
-			tc := NewTestContext(t)
+			tc := NewStoreTestContext(t)
 			project := tc.CreateProject().Build()
 			uploadsRoot := withTaskAttachmentUploadsDir(t)
-			if _, err := tc.db.ExecContext(context.Background(), `
-				CREATE TRIGGER fail_task_attachment_insert
-				BEFORE INSERT ON task_attachments
-				BEGIN
-					SELECT RAISE(ABORT, 'forced attachment insert failure');
-				END;
-			`); err != nil {
+			if err := tc.stores.Fixtures.FailTaskAttachmentCreation(context.Background()); err != nil {
 				t.Fatalf("create failure trigger: %v", err)
 			}
 
@@ -1162,20 +1156,14 @@ func TestTaskAttachmentDuplicateDeletionPreservesSurvivorForExecutionReconciliat
 }
 
 func TestTaskAttachmentCollidingRepositoryFailurePreservesExistingPublication(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	project := tc.CreateProject().Build()
 	task := tc.CreateTask(project.ID).WithCategory(models.CategoryBacklog).Build()
 	uploadsRoot := withTaskAttachmentUploadsDir(t)
 	if rec := uploadTaskAttachmentFilesForTest(t, tc, http.MethodPost, "/tasks/"+task.ID+"/attachments", nil, []taskAttachmentTestFile{{name: "same.txt", content: []byte("original")}}); rec.Code != http.StatusOK {
 		t.Fatalf("initial upload status=%d body=%s", rec.Code, rec.Body.String())
 	}
-	if _, err := tc.db.ExecContext(context.Background(), `
-		CREATE TRIGGER fail_duplicate_task_attachment_insert
-		BEFORE INSERT ON task_attachments
-		BEGIN
-			SELECT RAISE(ABORT, 'forced duplicate attachment insert failure');
-		END;
-	`); err != nil {
+	if err := tc.stores.Fixtures.FailTaskAttachmentCreation(context.Background()); err != nil {
 		t.Fatalf("create failure trigger: %v", err)
 	}
 

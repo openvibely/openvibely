@@ -410,7 +410,7 @@ func TestUpdateTaskCategoryQueuedToRunningRejectsStaleTerminalState(t *testing.T
 }
 
 func TestBatchUpdateTaskCategoryActiveLaneRollsBackLaterWriteFailure(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	ctx := context.Background()
 	project := tc.CreateProject().WithName("Atomic Active lane rollback project").Build()
 	tc.CreateLLMConfig().WithName("Atomic lane model").WithProvider(models.ProviderTest).WithModel("test-model").AsDefault().Build()
@@ -420,9 +420,7 @@ func TestBatchUpdateTaskCategoryActiveLaneRollsBackLaterWriteFailure(t *testing.
 	require.NoError(t, err)
 	secondBefore, err := tc.taskRepo.GetByID(ctx, second.ID)
 	require.NoError(t, err)
-	_, err = tc.db.ExecContext(ctx, `CREATE TRIGGER fail_handler_second_active_lane BEFORE UPDATE ON tasks
-		WHEN OLD.id = '`+second.ID+`' AND NEW.category = 'active'
-		BEGIN SELECT RAISE(FAIL, 'forced handler later move failure'); END`)
+	err = tc.stores.Fixtures.FailTaskActiveLaneMove(ctx, second.ID)
 	require.NoError(t, err)
 
 	response := tc.HTMX().Patch("/tasks/batch-category").WithForm(url.Values{
@@ -1103,7 +1101,7 @@ func TestPrimaryAgentSelectabilityMatchesTaskUIProjection(t *testing.T) {
 }
 
 func TestTaskFormAndAgentSelectionHelpers(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	ctx := context.Background()
 	project := tc.CreateProject().WithName("Agent helper project").Build()
 	otherProject := tc.CreateProject().WithName("Other helper project").Build()
@@ -1123,7 +1121,7 @@ func TestTaskFormAndAgentSelectionHelpers(t *testing.T) {
 	for i := range agents {
 		require.NoError(t, agentRepo.Create(ctx, &agents[i]))
 	}
-	_, err := tc.db.ExecContext(ctx, `UPDATE agents SET archived_at = ? WHERE id = ?`, archivedAt, agents[6].ID)
+	err := tc.stores.Fixtures.SetAgentArchivedAt(ctx, agents[6].ID, archivedAt)
 	require.NoError(t, err)
 
 	agentDefs := tc.handler.listAgentDefinitions(ctx)
