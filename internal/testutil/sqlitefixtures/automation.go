@@ -175,7 +175,7 @@ func (f *fixtures) SetAutomationCandidate(ctx context.Context, id string, candid
 
 func (f *fixtures) AutomationState(ctx context.Context) (storefixture.AutomationStateCounts, error) {
 	var state storefixture.AutomationStateCounts
-	err := f.db.QueryRowContext(ctx, `SELECT (SELECT COUNT(*) FROM automations),(SELECT COUNT(*) FROM automation_versions),(SELECT COUNT(*) FROM automation_nodes),(SELECT COUNT(*) FROM automation_edges),(SELECT COUNT(*) FROM automation_definition_resources),(SELECT COUNT(*) FROM tasks),(SELECT COUNT(*) FROM schedules),(SELECT COUNT(*) FROM automation_invocations),(SELECT COUNT(*) FROM automation_work_items),(SELECT COUNT(*) FROM automation_activities),(SELECT COUNT(*) FROM automation_chat_confirmation_receipts)`).Scan(&state.Automations, &state.Versions, &state.Nodes, &state.Edges, &state.Resources, &state.Tasks, &state.Schedules, &state.Invocations, &state.WorkItems, &state.Activities, &state.ChatConfirmations)
+	err := f.db.QueryRowContext(ctx, `SELECT (SELECT COUNT(*) FROM automations),(SELECT COUNT(*) FROM automation_versions),(SELECT COUNT(*) FROM automation_nodes),(SELECT COUNT(*) FROM automation_edges),(SELECT COUNT(*) FROM automation_definition_resources),(SELECT COUNT(*) FROM tasks),(SELECT COUNT(*) FROM schedules),(SELECT COUNT(*) FROM automation_invocations),(SELECT COUNT(*) FROM automation_work_items),(SELECT COUNT(*) FROM automation_activities),(SELECT COUNT(*) FROM automation_chat_confirmation_receipts),(SELECT COUNT(*) FROM automation_dispatch_outbox)`).Scan(&state.Automations, &state.Versions, &state.Nodes, &state.Edges, &state.Resources, &state.Tasks, &state.Schedules, &state.Invocations, &state.WorkItems, &state.Activities, &state.ChatConfirmations, &state.Dispatches)
 	return state, err
 }
 func (f *fixtures) FailScheduleCreation(ctx context.Context) error {
@@ -223,4 +223,10 @@ func (f *fixtures) CountAutomationTriggerOwners(ctx context.Context, project, au
 	var n int
 	err := f.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM automation_trigger_owners WHERE project_id = ? AND automation_id = ? AND node_id = ?`, project, automation, node).Scan(&n)
 	return n, err
+}
+
+func (f *fixtures) CountAutomationInvocations(ctx context.Context, projectID, automationID, triggerID string) (int, error) {
+	var count int
+	err := f.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM automation_invocations WHERE project_id=? AND automation_id=? AND (?='' OR trigger_resource_id=?)`, projectID, automationID, triggerID, triggerID).Scan(&count)
+	return count, err
 }

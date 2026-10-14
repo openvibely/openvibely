@@ -30,7 +30,7 @@ type ExecutionUsageRecord struct {
 type ChannelProjectSelectionCounts struct{ Discord, Slack, Telegram, Email int }
 
 // AutomationStateCounts includes retained graphs and unbound resources, so failed saves cannot hide orphaned state.
-type AutomationStateCounts struct{ Automations, Versions, Nodes, Edges, Resources, Tasks, Schedules, Invocations, WorkItems, Activities, ChatConfirmations int }
+type AutomationStateCounts struct{ Automations, Versions, Nodes, Edges, Resources, Tasks, Schedules, Invocations, WorkItems, Activities, ChatConfirmations, Dispatches int }
 
 type ProjectAutomationState struct{ Automations, Tasks, Schedules int }
 
@@ -41,6 +41,8 @@ type TaskDiscoveryWorkload struct {
 }
 
 type Fixtures interface {
+	// CountAutomationInvocations includes all retained history; an empty trigger ID includes every trigger.
+	CountAutomationInvocations(context.Context, string, string, string) (int, error)
 	SeedTaskDiscoveryWorkload(context.Context, TaskDiscoveryWorkload) error
 	// SetAutomationLifecycleSnapshot bypasses queue pruning to construct a stale dispatch candidate.
 	SetAutomationLifecycleSnapshot(context.Context, string, string, models.AutomationLifecycleState) error
