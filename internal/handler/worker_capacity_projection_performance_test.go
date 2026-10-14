@@ -2,11 +2,9 @@ package handler
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"runtime"
 	"slices"
 	"strings"
@@ -15,15 +13,12 @@ import (
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
-	"github.com/openvibely/openvibely/internal/persistence/sqlite"
-	"github.com/openvibely/openvibely/internal/persistence/sqlite/database"
 	"github.com/openvibely/openvibely/internal/testutil/teststores"
 )
 
 const workerCapacityProjectionSamples = 5
 
 type workerCapacityProjectionFixture struct {
-	connections *database.Connections
 	h           *Handler
 	e           http.Handler
 	projectRepo persistence.ProjectStore
@@ -92,85 +87,47 @@ func BenchmarkHandlerProjectWorkerCapacityProjection(b *testing.B) {
 
 func newWorkerCapacityProjectionFixture(tb testing.TB, projectCount int) *workerCapacityProjectionFixture {
 	tb.Helper()
-	connections, err := database.NewReadWrite(filepath.Join(tb.TempDir(), "worker-capacity-projection.db"))
-	if err != nil {
-		tb.Fatalf("open file-backed production database: %v", err)
+	stores := teststores.New(tb, teststores.WithProductionTopology(), teststores.WithIOCounting())
+	if err := stores.Fixtures.ClearProjects(tb.Context()); err != nil {
+		tb.Fatal(err)
 	}
-	tb.Cleanup(func() {
-		if err := connections.Close(); err != nil {
-			tb.Errorf("close file-backed production database: %v", err)
-		}
-	})
-	if connections.Reader == connections.Writer || connections.Reader.Stats().MaxOpenConnections != 1 || connections.Writer.Stats().MaxOpenConnections != 1 {
-		tb.Fatalf("Workers capacity fixture requires production 1W + 1R topology: reader=%p writer=%p reader_max=%d writer_max=%d",
-			connections.Reader, connections.Writer, connections.Reader.Stats().MaxOpenConnections, connections.Writer.Stats().MaxOpenConnections)
-	}
-	unregister := sqlite.RegisterDedicatedWriter(connections.Reader, connections.Writer)
-	tb.Cleanup(unregister)
-
-	seedWorkerCapacityProjectionFixture(tb, connections.Writer, projectCount)
-	h, e, _ := setupTestHandlerForDB(tb, connections.Reader)
-	return &workerCapacityProjectionFixture{
-		connections: connections,
-		h:           h,
-		e:           e,
-		projectRepo: teststores.Of(connections.Reader).Projects,
-	}
+	seedWorkerCapacityProjectionFixture(tb, stores, projectCount)
+	env := wireTestHandler(tb, stores.Stores, testHandlerOptions{})
+	h, e := env.Handler, env.Echo
+	h.workerSvc.SetProjectRepo(h.projectRepo)
+	return &workerCapacityProjectionFixture{h: h, e: e, projectRepo: stores.Projects}
 }
-
-func seedWorkerCapacityProjectionFixture(tb testing.TB, db *sql.DB, projectCount int) {
+func seedWorkerCapacityProjectionFixture(tb testing.TB, stores *teststores.Env, projectCount int) {
 	tb.Helper()
-	ctx := context.Background()
-	tx, err := db.BeginTx(ctx, nil)
-	if err != nil {
-		tb.Fatalf("begin fixture transaction: %v", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-	if _, err := tx.ExecContext(ctx, `DELETE FROM projects`); err != nil {
-		tb.Fatalf("clear default project: %v", err)
-	}
-	projectStmt, err := tx.PrepareContext(ctx, `INSERT INTO projects
-		(id, name, description, repo_path, repo_url, is_default, max_workers)
-		VALUES (?, ?, ?, ?, ?, ?, ?)`)
-	if err != nil {
-		tb.Fatalf("prepare project fixture: %v", err)
-	}
-	defer projectStmt.Close()
-	taskStmt, err := tx.PrepareContext(ctx, `INSERT INTO tasks
-		(id, project_id, title, prompt, category, status)
-		VALUES (?, ?, ?, ?, 'active', ?)`)
-	if err != nil {
-		tb.Fatalf("prepare task fixture: %v", err)
-	}
-	defer taskStmt.Close()
-
-	largeDescription := strings.Repeat("production-shaped Workers project description ", 384)
-	largePath := "/private/workspaces/" + strings.Repeat("nested-local-repository/", 96)
-	largeURL := "https://github.example.test/openvibely/" + strings.Repeat("workers-capacity-repository/", 96)
-	for i := range projectCount {
-		projectID := fmt.Sprintf("worker-capacity-project-%04d", i)
-		var maxWorkers any
+	ctx := tb.Context()
+	var projects []models.Project
+	for i := 0; i < projectCount; i++ {
+		var maxWorkers *int
 		switch i % 3 {
 		case 1:
-			maxWorkers = 3
+			v := 3
+			maxWorkers = &v
 		case 2:
-			maxWorkers = 9
+			v := 9
+			maxWorkers = &v
 		}
-		if _, err := projectStmt.ExecContext(ctx, projectID, fmt.Sprintf("Workers Capacity Project %04d", i),
-			largeDescription, largePath, largeURL, i == 0, maxWorkers); err != nil {
-			tb.Fatalf("insert project %d: %v", i, err)
-		}
-		status := "pending"
-		if i%2 == 1 {
-			status = "queued"
-		}
-		if _, err := taskStmt.ExecContext(ctx, fmt.Sprintf("worker-capacity-task-%04d", i), projectID,
-			"Workers capacity pending task", "representative queued work", status); err != nil {
-			tb.Fatalf("insert pending task %d: %v", i, err)
-		}
+		projects = append(projects, models.Project{ID: fmt.Sprintf("worker-capacity-project-%04d", i), Name: fmt.Sprintf("Workers Capacity Project %04d", i), Description: strings.Repeat("production-shaped Workers project description ", 384), RepoPath: "/private/workspaces/" + strings.Repeat("nested-local-repository/", 96), RepoURL: "https://github.example.test/openvibely/" + strings.Repeat("workers-capacity-repository/", 96), IsDefault: i == 0, MaxWorkers: maxWorkers})
 	}
-	if err := tx.Commit(); err != nil {
-		tb.Fatalf("commit fixture transaction: %v", err)
+	if err := stores.Fixtures.SeedProjects(ctx, projects); err != nil {
+		tb.Fatal(err)
+	}
+	for i, p := range projects {
+		status := models.StatusPending
+		if i%2 == 1 {
+			status = models.StatusQueued
+		}
+		tasks := []models.Task{{ProjectID: p.ID, Title: "Workers capacity pending task", Prompt: "representative queued work", Category: models.CategoryActive, Status: status}}
+
+		for _, task := range tasks {
+			if err := stores.Tasks.Create(ctx, &task); err != nil {
+				tb.Fatal(err)
+			}
+		}
 	}
 }
 

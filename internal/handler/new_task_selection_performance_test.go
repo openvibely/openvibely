@@ -19,7 +19,6 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
-	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/openvibely/openvibely/internal/testutil/teststores"
 	"github.com/stretchr/testify/require"
 )
@@ -95,8 +94,9 @@ func TestHandler_NewTaskSelectionHandoffDoesNotRepeatModelLookups(t *testing.T) 
 		{name: "default", agentID: "default", expectedSQL: 1},
 	} {
 		t.Run(scenario.name, func(t *testing.T) {
-			db, counter := testutil.NewStatementCountingTestDB(t)
-			env := newTestHandlerEnv(t, db)
+			stores := teststores.New(t, teststores.WithIOCounting())
+			counter := stores.IO
+			env := wireTestHandler(t, stores.Stores, testHandlerOptions{})
 			env.Handler.startStreamingResponseOverride = func(streamingResponseParams) error { return nil }
 			project := createProjectTB(t, env.Handler, "Selection handoff "+scenario.name)
 			clearModelConfigs(t, env.LLMConfigRepo)
@@ -120,7 +120,7 @@ func TestHandler_NewTaskSelectionHandoffDoesNotRepeatModelLookups(t *testing.T) 
 			counter.SetEnabled(false)
 			require.NoError(t, err)
 			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
-			require.Equal(t, scenario.expectedSQL, countNewTaskSelectionQueries(counter.Statements()), "selection SQL statements: %q", counter.Statements())
+			require.Equal(t, scenario.expectedSQL, counter.Snapshot().NewTaskSelectionReads, "physical selection requests")
 			executions, err := env.ExecRepo.ListByTask(context.Background(), rec.Header().Get("X-Created-Task-ID"))
 			require.NoError(t, err)
 			require.Len(t, executions, 1)
@@ -141,8 +141,8 @@ func TestHandler_NewTaskModelSelectionFailuresAreRejectedBeforePersistence(t *te
 		{name: "invalid_explicit_model", seedModels: true, agentID: "missing-model"},
 	} {
 		t.Run(scenario.name, func(t *testing.T) {
-			db, _ := testutil.NewStatementCountingTestDB(t)
-			env := newTestHandlerEnv(t, db)
+			stores := teststores.New(t)
+			env := wireTestHandler(t, stores.Stores, testHandlerOptions{})
 			project := createProjectTB(t, env.Handler, "Rejected new task model")
 			clearModelConfigs(t, env.LLMConfigRepo)
 			if scenario.seedModels {
@@ -163,8 +163,9 @@ func TestHandler_NewTaskModelSelectionFailuresAreRejectedBeforePersistence(t *te
 }
 
 func TestHandler_DirectTaskThreadStillSelectsFromRequest(t *testing.T) {
-	db, counter := testutil.NewStatementCountingTestDB(t)
-	env := newTestHandlerEnv(t, db)
+	stores := teststores.New(t, teststores.WithIOCounting())
+	counter := stores.IO
+	env := wireTestHandler(t, stores.Stores, testHandlerOptions{})
 	env.Handler.startStreamingResponseOverride = func(streamingResponseParams) error { return nil }
 	project := createProjectTB(t, env.Handler, "Direct thread selection")
 	clearModelConfigs(t, env.LLMConfigRepo)
@@ -181,7 +182,7 @@ func TestHandler_DirectTaskThreadStillSelectsFromRequest(t *testing.T) {
 	env.Echo.ServeHTTP(rec, req)
 	counter.SetEnabled(false)
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
-	require.Equal(t, 1, countNewTaskSelectionQueries(counter.Statements()), "direct follow-up must make its own explicit model lookup")
+	require.Equal(t, 1, counter.Snapshot().NewTaskSelectionReads, "direct follow-up must make its own explicit model lookup")
 	executions, err := env.ExecRepo.ListByTask(context.Background(), task.ID)
 	require.NoError(t, err)
 	require.Len(t, executions, 1)
@@ -195,8 +196,9 @@ func BenchmarkNewTaskFirstSubmitHandlerPath(b *testing.B) {
 
 	for _, catalogSize := range []int{1, 50, 200} {
 		b.Run(fmt.Sprintf("models_%d", catalogSize), func(b *testing.B) {
-			db, counter := testutil.NewStatementCountingTestDB(b)
-			env := newTestHandlerEnv(b, db)
+			stores := teststores.New(b, teststores.WithIOCounting())
+			counter := stores.IO
+			env := wireTestHandler(b, stores.Stores, testHandlerOptions{})
 			h := env.Handler
 			project := createProjectTB(b, h, "New task first-submit benchmark")
 			clearModelConfigs(b, env.LLMConfigRepo)
@@ -272,17 +274,17 @@ func BenchmarkNewTaskFirstSubmitHandlerPath(b *testing.B) {
 							if err != nil || len(executions) != 1 {
 								b.Fatalf("first-submit executions = %d, err=%v; want one", len(executions), err)
 							}
-							statements := counter.Statements()
+							selectionReads := counter.Snapshot().NewTaskSelectionReads
 							if forceReselection {
 								pairBefore = latency
 								beforeBytes += memAfter.TotalAlloc - memBefore.TotalAlloc
 								beforeAllocs += memAfter.Mallocs - memBefore.Mallocs
-								beforeSQL += int64(countNewTaskSelectionQueries(statements))
+								beforeSQL += int64(selectionReads)
 							} else {
 								pairAfter = latency
 								afterBytes += memAfter.TotalAlloc - memBefore.TotalAlloc
 								afterAllocs += memAfter.Mallocs - memBefore.Mallocs
-								afterSQL += int64(countNewTaskSelectionQueries(statements))
+								afterSQL += int64(selectionReads)
 							}
 							if err := env.TaskRepo.Delete(context.Background(), taskID); err != nil {
 								b.Fatalf("delete benchmark task: %v", err)
@@ -371,17 +373,4 @@ func seedNewTaskSelectionModels(tb testing.TB, repo persistence.LLMConfigStore, 
 		catalog = append(catalog, config)
 	}
 	return catalog
-}
-
-func countNewTaskSelectionQueries(statements []string) int {
-	count := 0
-	for _, statement := range statements {
-		normalized := strings.ToLower(strings.Join(strings.Fields(statement), " "))
-		if strings.HasPrefix(normalized, "select id, name, provider, model, is_default, auth_method from agent_configs order by is_default desc, name asc") ||
-			strings.HasPrefix(normalized, "select id, name, provider, model, auth_method, is_default, case when coalesce(api_key, '')") ||
-			strings.HasPrefix(normalized, "select a.id, a.name, a.provider, a.model, a.reasoning_effort,") {
-			count++
-		}
-	}
-	return count
 }

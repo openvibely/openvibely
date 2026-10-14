@@ -10,8 +10,10 @@ import (
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/openvibely/openvibely/internal/testutil/storefixture"
+	"github.com/openvibely/openvibely/internal/testutil/teststores"
 	"github.com/openvibely/openvibely/web/templates/pages"
+	"github.com/stretchr/testify/require"
 )
 
 // Worker capacity polls read the compact project list, pending task counts, and
@@ -22,8 +24,8 @@ const workerCapacityPollSQLStatementCount = 3
 // Workers render that constructs capacity rows. Large project-only metadata
 // must remain available to detail reads without being loaded for this table.
 func TestHandlerWorkerCapacityRowsUseCompactProjectProjection(t *testing.T) {
-	db, counter := testutil.NewStatementCountingTestDB(t)
-	h, e, _ := setupTestHandlerForDB(t, db)
+	h, e, _, stores := setupTestHandlerWithStores(t, teststores.WithIOCounting())
+	counter := stores.IO
 	ctx := context.Background()
 
 	limit := 3
@@ -90,7 +92,7 @@ func TestHandlerWorkerCapacityRowsUseCompactProjectProjection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("render full-row baseline: %v", err)
 	}
-	fullStatementCount := len(counter.Statements())
+	fullStatementCount := counter.Snapshot().Requests
 	if fullStatementCount != workerCapacityPollSQLStatementCount {
 		t.Fatalf("full-row baseline statements = %d, want %d", fullStatementCount, workerCapacityPollSQLStatementCount)
 	}
@@ -105,7 +107,7 @@ func TestHandlerWorkerCapacityRowsUseCompactProjectProjection(t *testing.T) {
 	if compactTable.Body.String() != fullTable {
 		t.Fatalf("compact poll fragment changed:\ncompact=%s\nfull=%s", compactTable.Body.String(), fullTable)
 	}
-	if compactStatementCount := len(counter.Statements()); compactStatementCount != fullStatementCount {
+	if compactStatementCount := counter.Snapshot().Requests; compactStatementCount != fullStatementCount {
 		t.Fatalf("compact poll statements = %d, full-row baseline statements = %d", compactStatementCount, fullStatementCount)
 	}
 	assertWorkerCapacityProjectProjection(t, counter)
@@ -146,27 +148,8 @@ func renderFullProjectWorkerStats(ctx context.Context, h *Handler) (string, erro
 	return body.String(), nil
 }
 
-func assertWorkerCapacityProjectProjection(t *testing.T, counter *testutil.SQLStatementCounter) {
+func assertWorkerCapacityProjectProjection(t *testing.T, counter storefixture.IOCounter) {
 	t.Helper()
-	const compact = "select id, name, max_workers from projects order by is_default desc, name asc"
-	const selector = "select id, name, is_default from projects order by is_default desc, name asc, id asc"
-
-	compactCount := 0
-	for _, statement := range counter.Statements() {
-		query := strings.ToLower(strings.Join(strings.Fields(statement), " "))
-		if !strings.Contains(query, "from projects") || !strings.Contains(query, "order by is_default desc, name asc") {
-			continue
-		}
-		switch query {
-		case compact:
-			compactCount++
-		case selector:
-			// The initial full-page render separately loads the sidebar selector.
-		default:
-			t.Fatalf("Workers capacity render used an unexpected ordered project query: %q", query)
-		}
-	}
-	if compactCount != 1 {
-		t.Fatalf("Workers capacity render used %d compact project queries, want 1; statements: %q", compactCount, counter.Statements())
-	}
+	require.Equal(t, 1, counter.Snapshot().ProjectCapacityReads)
+	require.Equal(t, 0, counter.Snapshot().ProjectOtherOrderedReads)
 }

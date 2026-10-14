@@ -304,6 +304,9 @@ type Fixtures interface {
 // SQLite counts executed statements; other backends must count their database
 // requests, including requests made inside a single store method.
 type IOStats struct {
+	ExecutionReads                                                                                                     int
+	AgentTaskUIReads, ProjectCapacityReads, ProjectOtherOrderedReads, PendingProjectCountReads                         int
+	ModelWorkerReads, ModelBadgeReads, ModelDetailReads, NewTaskSelectionReads                                         int
 	TaskReads, TaskActionReads                                                                                         int
 	AutomationIdentityReads, AutomationGraphReads, AutomationDefinitionNodeReads                                       int
 	AutomationPageReads, AutomationDirectReads, AutomationSelectedMetricsReads                                         int

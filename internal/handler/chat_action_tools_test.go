@@ -16,7 +16,6 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/service"
-	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/openvibely/openvibely/internal/testutil/teststores"
 	"github.com/openvibely/openvibely/internal/update"
 	"github.com/openvibely/openvibely/pkg/toolschema"
@@ -1296,10 +1295,10 @@ func TestCreateTaskRuntimeToolNormalizesAndDecodesInput(t *testing.T) {
 }
 
 func TestCreateTaskRuntimeToolUsesCompactModelSelection(t *testing.T) {
-	db, counter := testutil.NewStatementCountingTestDB(t)
-	h, _, llmConfigRepo := setupTestHandlerForDB(t, db)
+	h, _, llmConfigRepo, stores := setupTestHandlerWithStores(t, teststores.WithIOCounting())
+	counter := stores.IO
 	ctx := context.Background()
-	teststores.ClearLLMConfigs(t, teststores.Of(db).LLMConfigs)
+	teststores.ClearLLMConfigs(t, stores.LLMConfigs)
 	project := createProject(t, h, "Runtime Compact Create Task")
 	largeProviderJSON := strings.Repeat("large-provider-json", 4096)
 	agent := &models.LLMConfig{
@@ -1330,7 +1329,8 @@ func TestCreateTaskRuntimeToolUsesCompactModelSelection(t *testing.T) {
 	require.NotNil(t, created)
 	require.NotNil(t, created.AgentID)
 	require.Equal(t, agent.ID, *created.AgentID)
-	assertCreateTaskRuntimeUsesCompactModelSelection(t, counter.Statements())
+	require.Equal(t, 1, counter.Snapshot().ModelReads)
+	require.Equal(t, 1, counter.Snapshot().ModelCreationSelectionReads)
 }
 
 func TestCreateTaskRuntimeToolDefersAutoStartUntilChatAttachmentsActivate(t *testing.T) {
@@ -1395,32 +1395,6 @@ func TestDeferActiveTasksWithAttachmentsUsesCompactAutoStartRows(t *testing.T) {
 
 	require.Equal(t, map[int]bool{0: true}, deferred)
 	require.Equal(t, string(models.CategoryBacklog), requests[0].Category)
-}
-
-func assertCreateTaskRuntimeUsesCompactModelSelection(t *testing.T, statements []string) {
-	t.Helper()
-	compactQueries := 0
-	for _, raw := range statements {
-		stmt := strings.ToLower(strings.Join(strings.Fields(raw), " "))
-		if !strings.Contains(stmt, " from agent_configs") {
-			continue
-		}
-		projection := strings.Split(stmt, " from agent_configs")[0]
-		for _, forbidden := range []string{"api_key", "oauth_access_token", "oauth_refresh_token", "oauth_client_id", "oauth_client_secret", "oauth_authorize_url", "oauth_token_url", "oauth_scopes", "ollama_base_url", "base_url", "transport", "preset_slug", "models_url", "auth_header_name", "auth_header_value_prefix", "extra_headers_json", "extra_body_json", "custom_auth_config_json", "custom_auth_state_json", "mixture_config_json", "max_workers", "worker_timeout"} {
-			if strings.Contains(projection, forbidden) {
-				t.Fatalf("create_task model query selected forbidden column %q: %s", forbidden, raw)
-			}
-		}
-		if strings.Contains(projection, "select id, name, provider, model, reasoning_effort") {
-			t.Fatalf("create_task used full model list query: %s", raw)
-		}
-		if projection == "select id, name, provider, model, is_default, auto_start_tasks, auth_method" && strings.Contains(stmt, "order by is_default desc, name asc") {
-			compactQueries++
-		}
-	}
-	if compactQueries != 1 {
-		t.Fatalf("compact task creation model query count = %d, want 1; statements: %#v", compactQueries, statements)
-	}
 }
 
 func TestCreateTaskRuntimeToolDecodesTypedChainConfigDirectly(t *testing.T) {

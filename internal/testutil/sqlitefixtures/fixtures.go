@@ -572,7 +572,7 @@ func (f *fixtures) SeedProjects(ctx context.Context, projects []models.Project) 
 	}
 	defer tx.Rollback()
 	for _, p := range projects {
-		if _, err := tx.ExecContext(ctx, `INSERT INTO projects (id,name,description,repo_path,repo_url,is_default) VALUES (?,?,?,?,?,?)`, p.ID, p.Name, p.Description, p.RepoPath, p.RepoURL, p.IsDefault); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO projects (id,name,description,repo_path,repo_url,is_default,max_workers) VALUES (?,?,?,?,?,?,?)`, p.ID, p.Name, p.Description, p.RepoPath, p.RepoURL, p.IsDefault, p.MaxWorkers); err != nil {
 			return err
 		}
 	}

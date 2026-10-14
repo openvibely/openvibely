@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/stretchr/testify/require"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -11,7 +12,6 @@ import (
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/openvibely/openvibely/internal/testutil/teststores"
 )
 
@@ -484,12 +484,12 @@ func TestViewSchedule_HTMX(t *testing.T) {
 }
 
 func TestViewSchedule_UsesCompactModelProjection(t *testing.T) {
-	db, counter := testutil.NewStatementCountingTestDB(t)
-	h, e, llmConfigRepo := setupTestHandlerForDB(t, db)
+	h, e, llmConfigRepo, stores := setupTestHandlerWithStores(t, teststores.WithIOCounting())
+	counter := stores.IO
 	project := createProject(t, h, "Schedule Projection")
 	ctx := context.Background()
 
-	teststores.ClearLLMConfigs(t, teststores.Of(db).LLMConfigs)
+	teststores.ClearLLMConfigs(t, stores.LLMConfigs)
 	largeBody := strings.Repeat("x", 1024*1024)
 	defaultModel := &models.LLMConfig{
 		Name:                 "Schedule Default",
@@ -564,30 +564,9 @@ func TestViewSchedule_UsesCompactModelProjection(t *testing.T) {
 				t.Fatal("schedule response exposed full model configuration")
 			}
 
-			var modelQueries []string
-			for _, statement := range counter.Statements() {
-				normalized := strings.Join(strings.Fields(statement), " ")
-				if strings.Contains(normalized, "FROM agent_configs ORDER BY is_default DESC, name ASC") {
-					modelQueries = append(modelQueries, normalized)
-				}
-			}
-			if len(modelQueries) != 1 {
-				t.Fatalf("expected exactly one schedule model query, got %d in %q", len(modelQueries), counter.Statements())
-			}
-			projection := strings.ToLower(strings.Split(modelQueries[0], " from agent_configs ")[0])
-			if !strings.Contains(projection, "select id, name, model, is_default") {
-				t.Fatalf("schedule model query does not use compact badge projection: %s", modelQueries[0])
-			}
-			for _, forbidden := range []string{
-				"api_key", "oauth_access_token", "oauth_refresh_token", "oauth_client_secret",
-				"oauth_authorize_url", "oauth_token_url", "ollama_base_url", "base_url", "models_url",
-				"extra_headers_json", "extra_body_json", "custom_auth_config_json", "custom_auth_state_json",
-				"mixture_config_json", "created_at", "updated_at", "max_workers", "worker_timeout",
-			} {
-				if strings.Contains(projection, forbidden) {
-					t.Fatalf("schedule model query selected forbidden column %q: %s", forbidden, modelQueries[0])
-				}
-			}
+			require.Equal(t, 1, counter.Snapshot().ModelReads)
+			require.Equal(t, 1, counter.Snapshot().ModelBadgeReads)
+			require.Less(t, counter.Snapshot().ReadTextBytes, 50*1024)
 		})
 	}
 }

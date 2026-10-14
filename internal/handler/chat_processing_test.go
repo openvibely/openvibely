@@ -6935,8 +6935,8 @@ func TestSelectAgent_AutoStillWorks(t *testing.T) {
 }
 
 func TestSelectAgent_AutoUsesCompactCatalogAndHydratesSelectedModel(t *testing.T) {
-	db, counter := testutil.NewStatementCountingTestDB(t)
-	h, _, llmConfigRepo := setupTestHandlerForDB(t, db)
+	h, _, llmConfigRepo, stores := setupTestHandlerWithStores(t, teststores.WithIOCounting())
+	counter := stores.IO
 	ctx := context.Background()
 	clearModelConfigs(t, llmConfigRepo)
 
@@ -6959,12 +6959,14 @@ func TestSelectAgent_AutoUsesCompactCatalogAndHydratesSelectedModel(t *testing.T
 		t.Fatalf("selected ID = %s, want %s", selected.ID, sonnet.ID)
 	}
 	assertSelectedModelFullyHydrated(t, selected)
-	assertAutoSelectionQueryShape(t, counter.Statements(), false)
+	require.Equal(t, 2, counter.Snapshot().ModelReads)
+	require.Equal(t, 1, counter.Snapshot().ModelSelectionReads)
+	require.Equal(t, 1, counter.Snapshot().ModelDetailReads)
 }
 
 func TestSelectAgent_AutoWithImagesUsesVisionCatalogAndHydratesEligibleModel(t *testing.T) {
-	db, counter := testutil.NewStatementCountingTestDB(t)
-	h, _, llmConfigRepo := setupTestHandlerForDB(t, db)
+	h, _, llmConfigRepo, stores := setupTestHandlerWithStores(t, teststores.WithIOCounting())
+	counter := stores.IO
 	ctx := context.Background()
 	clearModelConfigs(t, llmConfigRepo)
 
@@ -6994,7 +6996,9 @@ func TestSelectAgent_AutoWithImagesUsesVisionCatalogAndHydratesEligibleModel(t *
 		t.Fatalf("selected OAuth model was not fully hydrated: %#v", selected)
 	}
 	assertSelectedModelFullyHydrated(t, selected)
-	assertAutoSelectionQueryShape(t, counter.Statements(), true)
+	require.Equal(t, 2, counter.Snapshot().ModelReads)
+	require.Equal(t, 1, counter.Snapshot().ModelSelectionReads)
+	require.Equal(t, 1, counter.Snapshot().ModelDetailReads)
 }
 
 func TestSelectAgent_AutoCompactSelectionLargeFixture(t *testing.T) {
@@ -7083,63 +7087,6 @@ func assertSelectedModelFullyHydrated(tb testing.TB, selected *models.LLMConfig)
 	if selected.ExtraBodyJSON == "" || selected.MixtureConfigJSON == "" || selected.BaseURL == "" || selected.Transport == "" || selected.CustomAuthConfigJSON == "" || selected.CustomAuthStateJSON == "" || selected.OAuthClientSecret == "" || selected.MaxWorkers == 0 || selected.WorkerTimeout == 0 {
 		tb.Fatalf("selected model was not fully hydrated: %#v", selected)
 	}
-}
-
-func assertAutoSelectionQueryShape(t *testing.T, statements []string, hasImages bool) {
-	t.Helper()
-	var modelSelects []string
-	for _, stmt := range statements {
-		normalized := strings.ToLower(strings.Join(strings.Fields(stmt), " "))
-		if strings.HasPrefix(normalized, "select ") && strings.Contains(normalized, " from agent_configs") {
-			modelSelects = append(modelSelects, normalized)
-		}
-	}
-	if len(modelSelects) != 2 {
-		t.Fatalf("model select statements = %#v, want compact catalog plus selected GetByID", statements)
-	}
-	catalog, hydrate := modelSelects[0], modelSelects[1]
-	if strings.Contains(catalog, "left join") || strings.Contains(catalog, " from agent_configs a") {
-		t.Fatalf("auto-selection catalog query used full model shape: %s", catalog)
-	}
-	if !strings.Contains(catalog, "order by is_default desc, name asc") {
-		t.Fatalf("auto-selection catalog query lost default/name ordering: %s", catalog)
-	}
-	if hasImages {
-		wantProjection := "select id, name, provider, model, auth_method, is_default, case when coalesce(api_key, '') != '' then 1 else 0 end, case when coalesce(oauth_connection_id, '') != '' then exists(select 1 from oauth_connections c where c.id = oauth_connection_id and c.oauth_access_token != '') else coalesce(oauth_access_token, '') != '' end"
-		projection := strings.Split(catalog, " from agent_configs ")[0]
-		if projection != wantProjection {
-			t.Fatalf("vision auto-selection projection = %q, want %q", projection, wantProjection)
-		}
-	} else {
-		wantProjection := "select id, name, provider, model, is_default, auth_method"
-		projection := strings.Split(catalog, " from agent_configs ")[0]
-		if projection != wantProjection {
-			t.Fatalf("chat auto-selection projection = %q, want %q", projection, wantProjection)
-		}
-	}
-	for _, forbidden := range autoSelectionCatalogForbiddenColumns(hasImages) {
-		if strings.Contains(catalog, forbidden) {
-			t.Fatalf("auto-selection catalog selected forbidden column %q: %s", forbidden, catalog)
-		}
-	}
-	if !strings.Contains(hydrate, "left join oauth_connections") || !strings.Contains(hydrate, "extra_body_json") || !strings.Contains(hydrate, "mixture_config_json") || !strings.Contains(hydrate, "oauth_client_secret") {
-		t.Fatalf("selected model hydration query was not full GetByID shape: %s", hydrate)
-	}
-}
-
-func autoSelectionCatalogForbiddenColumns(hasImages bool) []string {
-	forbidden := []string{
-		"oauth_refresh_token", "oauth_client_id", "oauth_client_secret", "oauth_authorize_url", "oauth_token_url", "oauth_scopes",
-		"ollama_base_url", "base_url", "transport", "preset_slug", "models_url", "auth_header_name", "auth_header_value_prefix",
-		"extra_headers_json", "extra_body_json", "default_max_tokens", "context_window", "compaction_threshold",
-		"token_exchange_format", "token_refresh_format", "custom_auth_config_json", "custom_auth_state_json", "oauth_config_revision",
-		"mixture_config_json", "auto_start_tasks", "created_at", "updated_at", "max_tokens", "temperature", "reasoning_effort",
-		"max_workers", "worker_timeout",
-	}
-	if !hasImages {
-		forbidden = append(forbidden, "api_key", "oauth_access_token", "oauth_connection_id")
-	}
-	return forbidden
 }
 
 func TestSelectAgent_ExplicitIDStillWorks(t *testing.T) {
@@ -8953,8 +8900,8 @@ func TestChannelReplyAndQueuedAgentResolutionBranches(t *testing.T) {
 }
 
 func TestExecuteViewTaskThreadUsesBoundedExecutionReads(t *testing.T) {
-	db, counter := testutil.NewStatementCountingTestDB(t)
-	h, _, agentRepo := setupTestHandlerForDB(t, db)
+	h, _, agentRepo, stores := setupTestHandlerWithStores(t, teststores.WithIOCounting())
+	counter := stores.IO
 	project := createProject(t, h, "Bounded Thread Project")
 	agent := createAgent(t, agentRepo)
 	task := createTask(t, h, project.ID, "Bounded Thread Task", func(tk *models.Task) {
@@ -8991,15 +8938,9 @@ func TestExecuteViewTaskThreadUsesBoundedExecutionReads(t *testing.T) {
 	require.NotContains(t, transcript, "prompt-08")
 	require.Contains(t, transcript, "Showing executions 6–8 of 40")
 
-	var executionQueries []string
-	for _, statement := range counter.Statements() {
-		if strings.Contains(strings.ToLower(statement), "from executions") {
-			executionQueries = append(executionQueries, statement)
-		}
-	}
-	require.Len(t, executionQueries, 2)
-	require.Contains(t, executionQueries[0], "COUNT(*)")
-	require.Contains(t, executionQueries[1], "ORDER BY started_at ASC, rowid ASC LIMIT ? OFFSET ?")
+	require.Equal(t, 2, counter.Snapshot().ExecutionReads)
+	require.Equal(t, 1, counter.Snapshot().ExecutionCountReads)
+	require.Equal(t, 1, counter.Snapshot().ExecutionPageReads)
 
 	counter.Reset()
 	counter.SetEnabled(true)
@@ -9014,15 +8955,10 @@ func TestExecuteViewTaskThreadUsesBoundedExecutionReads(t *testing.T) {
 	require.Contains(t, transcript, "output-00")
 	require.NotContains(t, transcript, "prompt-20")
 
-	executionQueries = nil
-	for _, statement := range counter.Statements() {
-		if strings.Contains(strings.ToLower(statement), "from executions") {
-			executionQueries = append(executionQueries, statement)
-		}
-	}
-	require.Len(t, executionQueries, 2)
-	require.Contains(t, executionQueries[0], "COUNT(*)")
-	require.Contains(t, executionQueries[1], "ORDER BY started_at ASC, rowid ASC LIMIT ? OFFSET ?")
+	require.Equal(t, 2, counter.Snapshot().ExecutionReads)
+	require.Equal(t, 1, counter.Snapshot().ExecutionCountReads)
+	require.Equal(t, 1, counter.Snapshot().ExecutionPageReads)
+
 }
 
 func TestExecuteViewTaskThreadPreservesBrowserFormattingContract(t *testing.T) {
