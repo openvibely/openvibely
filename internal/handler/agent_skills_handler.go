@@ -418,32 +418,6 @@ func (h *Handler) dialogSkillScope(c echo.Context, agent *models.Agent, requeste
 	return "project"
 }
 
-func (h *Handler) materializeDBAgentsToDisk(c echo.Context, agents []models.Agent) (bool, error) {
-	if h == nil || h.agentRepo == nil || h.agentSkillRoot == "" {
-		return false, nil
-	}
-	projectRoot := h.currentProjectSkillRoot(c)
-	usedKeys := h.usedAgentKeys(agents, projectRoot)
-	persistenceChanged := false
-	for i := range agents {
-		agent := agents[i]
-		agentProjectRoot := h.projectRootForAgentMaterialization(c, &agent)
-		originalKey := agent.Key
-		originalSkillCount := len(agent.Skills)
-		originalSelectable := agent.SelectableAsPrimary
-		if err := h.materializeAgentToDiskWithUsedKeys(c, &agent, agentProjectRoot, usedKeys, false); err != nil {
-			return persistenceChanged, err
-		}
-		if err := h.migrateLegacyAgentSkills(c, &agent, agentProjectRoot); err != nil {
-			return persistenceChanged, err
-		}
-		if agent.Key != originalKey || len(agent.Skills) != originalSkillCount || agent.SelectableAsPrimary != originalSelectable {
-			persistenceChanged = true
-		}
-	}
-	return persistenceChanged, nil
-}
-
 func (h *Handler) projectRootForAgentMaterialization(c echo.Context, agent *models.Agent) string {
 	if agent != nil && agent.Scope == models.AgentScopeProject && strings.TrimSpace(agent.ProjectID) != "" {
 		return h.projectSkillRootForAgent(c, agent)
@@ -737,10 +711,6 @@ func agentStableKey(agent *models.Agent) string {
 		return strings.TrimSpace(agent.Key)
 	}
 	return strings.TrimSpace(agent.ID)
-}
-
-func (h *Handler) scopeForAgentSkillPath(c echo.Context, path string) string {
-	return h.scopeForAgentSkillPathWithProjectRoot(path, h.currentProjectSkillRoot(c))
 }
 
 func (h *Handler) scopeForAgentSkillPathWithProjectRoot(path, projectRoot string) string {

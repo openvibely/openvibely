@@ -2652,14 +2652,6 @@ func channelGetPersonalityResult(ctx context.Context, settingsRepo persistence.S
 	return fmt.Sprintf("Current personality: %s", current)
 }
 
-func channelListPersonalitiesResult(ctx context.Context, settingsRepo persistence.SettingsStore, customRepo persistence.CustomPersonalityStore, input json.RawMessage) string {
-	out, err := ExecuteListPersonalitiesTool(ctx, customRepo, settingsRepo, input, false)
-	if err != nil {
-		return err.Error()
-	}
-	return out
-}
-
 func channelSetPersonalityResult(ctx context.Context, settingsRepo persistence.SettingsStore, customRepo persistence.CustomPersonalityStore, input json.RawMessage) string {
 	var req struct {
 		Personality string `json:"personality"`

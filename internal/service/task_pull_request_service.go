@@ -644,10 +644,3 @@ func mergeTaskPullRequestIssueMetadata(record *models.TaskPullRequest, opts Open
 	}
 	return changed
 }
-
-func taskPullRequestRecordToGitHubPR(record *models.TaskPullRequest) *GitHubPullRequest {
-	if record == nil {
-		return nil
-	}
-	return &GitHubPullRequest{Number: record.PRNumber, URL: record.PRURL, State: record.PRState, HeadSHA: record.PublishedHeadSHA}
-}

@@ -1332,10 +1332,6 @@ func (s *DiscordService) linkAttachmentsToExecution(ctx context.Context, execID 
 	})
 }
 
-func cleanupDiscordAttachmentSourceDirs(attachments []models.ChatAttachment) {
-	cleanupChannelChatAttachmentSourceDirs(attachments)
-}
-
 func discordImageAttachmentsFromChatAttachments(chatAttachments []models.ChatAttachment) []models.Attachment {
 	if len(chatAttachments) == 0 {
 		return nil

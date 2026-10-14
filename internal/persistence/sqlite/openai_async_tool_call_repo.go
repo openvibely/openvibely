@@ -154,14 +154,6 @@ func (r *OpenAIAsyncToolCallRepo) MarkCompleted(ctx context.Context, id, result 
 	return nil
 }
 
-func (r *OpenAIAsyncToolCallRepo) MarkFailed(ctx context.Context, id, message string, now time.Time) error {
-	_, err := execBoundSQLite(ctx, r.db, `UPDATE openai_async_tool_calls SET status = 'failed', is_error = 1, error_message = ?, updated_at = ? WHERE id = ? AND status IN ('pending', 'running')`, message, now, id)
-	if err != nil {
-		return fmt.Errorf("failing OpenAI async tool call: %w", err)
-	}
-	return nil
-}
-
 func (r *OpenAIAsyncToolCallRepo) MarkDelivered(ctx context.Context, id string, now time.Time) (bool, error) {
 	res, err := execBoundSQLite(ctx, r.db, `UPDATE openai_async_tool_calls SET status = 'delivered', delivered_at = ?, deliver_attempts = deliver_attempts + 1, updated_at = ? WHERE id = ? AND status = 'completed'`, now, now, id)
 	if err != nil {

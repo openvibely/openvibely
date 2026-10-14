@@ -496,11 +496,3 @@ type AutomationHealth struct {
 	Reason      string                `json:"reason"`
 	EvaluatedAt time.Time             `json:"evaluated_at"`
 }
-
-type AutomationHistoryDashboard struct {
-	Automation  Automation               `json:"automation"`
-	Invocations AutomationInvocationPage `json:"invocations"`
-	WorkItems   AutomationWorkItemPage   `json:"work_items"`
-	Metrics     AutomationMetrics        `json:"metrics"`
-	Health      AutomationHealth         `json:"health"`
-}

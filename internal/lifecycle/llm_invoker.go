@@ -330,10 +330,6 @@ func contextWithHookRuntimeTools(ctx context.Context, hook models.AgentLifecycle
 	return llmcontracts.WithRuntimeTools(ctx, filtered)
 }
 
-func contextWithAgentRuntimeTools(ctx context.Context, agentDef *models.Agent) context.Context {
-	return contextWithHookRuntimeTools(ctx, models.AgentLifecycleHook{}, agentDef)
-}
-
 func filterRuntimeToolsForAgent(rt *llmcontracts.RuntimeTools, agentDef *models.Agent) *llmcontracts.RuntimeTools {
 	if rt == nil || agentDef == nil {
 		return rt

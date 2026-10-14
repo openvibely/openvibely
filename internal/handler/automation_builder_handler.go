@@ -647,16 +647,6 @@ func (h *Handler) applyAutomationBuilderAction(c echo.Context, candidate *models
 	}
 }
 
-func automationDraftEditableNodeType(nodeType models.AutomationNodeType) bool {
-	switch nodeType {
-	case models.AutomationNodeTrigger, models.AutomationNodeAgentTask, models.AutomationNodeHumanGate,
-		models.AutomationNodeAction, models.AutomationNodeCondition, models.AutomationNodeOutcome:
-		return true
-	default:
-		return false
-	}
-}
-
 func automationDraftKey(value, fallback string) string {
 	var key strings.Builder
 	lastUnderscore := false

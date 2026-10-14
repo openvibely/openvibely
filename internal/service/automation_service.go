@@ -629,31 +629,3 @@ func (s *AutomationGraphService) GetWorkItemHistory(ctx context.Context, project
 	return &models.AutomationWorkItemHistory{WorkItem: *item, Definition: *definition, Activities: activities,
 		Transitions: transitions, Replay: replay}, nil
 }
-
-func (s *AutomationGraphService) GetHistoryDashboard(ctx context.Context, projectID, automationID, invocationCursor, workItemStatus, workItemCursor string, now time.Time) (*models.AutomationHistoryDashboard, error) {
-	definition, err := s.repo.GetDefinition(ctx, projectID, automationID)
-	if err != nil || definition == nil {
-		return nil, err
-	}
-	invocations, err := s.repo.ListAutomationInvocations(ctx, projectID, automationID, 20, invocationCursor)
-	if err != nil {
-		return nil, err
-	}
-	workItems, err := s.repo.ListAutomationWorkItems(ctx, projectID, automationID, workItemStatus, 20, workItemCursor)
-	if err != nil {
-		return nil, err
-	}
-	metrics, err := s.repo.GetAutomationMetrics(ctx, projectID, automationID, definition.Version.ID, now)
-	if err != nil {
-		return nil, err
-	}
-	health, err := s.repo.RecomputeAutomationHealth(ctx, projectID, automationID, now)
-	if err != nil {
-		return nil, err
-	}
-	definition.Automation.HealthState = health.State
-	definition.Automation.HealthReason = health.Reason
-	definition.Automation.HealthEvaluatedAt = &health.EvaluatedAt
-	return &models.AutomationHistoryDashboard{Automation: definition.Automation, Invocations: invocations,
-		WorkItems: workItems, Metrics: metrics, Health: health}, nil
-}

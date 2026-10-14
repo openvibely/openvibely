@@ -244,15 +244,6 @@ func (r *ChatAttachmentRepo) DeleteByIDForProject(ctx context.Context, id, proje
 	return nil
 }
 
-func (r *ChatAttachmentRepo) DeleteByExecution(ctx context.Context, executionID string) error {
-	query := `DELETE FROM chat_attachments WHERE execution_id = ?`
-	_, err := execBoundSQLite(ctx, r.db, query, executionID)
-	if err != nil {
-		return fmt.Errorf("deleting chat attachments by execution: %w", err)
-	}
-	return nil
-}
-
 const selectAllChatAttachmentFilePathsSQL = `SELECT file_path FROM chat_attachments`
 
 // GetAllFilePaths returns all file paths currently in the database

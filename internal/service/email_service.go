@@ -613,10 +613,6 @@ func (s *EmailService) pollLoop(run *emailPollRun, cfg EmailRuntimeConfig) {
 	}
 }
 
-func (s *EmailService) markUnreadSeen(ctx context.Context, cfg EmailRuntimeConfig) error {
-	return s.markUnreadSeenForRun(ctx, cfg, nil)
-}
-
 func (s *EmailService) markUnreadSeenForRun(ctx context.Context, cfg EmailRuntimeConfig, run *emailPollRun) error {
 	if !s.pollRunCanContinue(ctx, run) {
 		return ctx.Err()

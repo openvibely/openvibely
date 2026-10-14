@@ -57,30 +57,6 @@ const oauthConnectionSummaryColumns = `c.id, c.provider, ` + oauthConnectionAcco
 		c.created_at, c.updated_at,
 		(SELECT COUNT(*) FROM agent_configs linked WHERE linked.oauth_connection_id = c.id)`
 
-func (r *LLMConfigRepo) CreateOAuthConnection(ctx context.Context, connection *models.OAuthConnection) error {
-	if connection == nil {
-		return fmt.Errorf("OAuth connection is required")
-	}
-	if connection.Provider != models.ProviderOpenAI && connection.Provider != models.ProviderAnthropic {
-		return fmt.Errorf("OAuth connections require OpenAI or Anthropic provider")
-	}
-	connection.Name = strings.TrimSpace(connection.Name)
-	if connection.Name == "" {
-		connection.Name = string(connection.Provider) + " account"
-	}
-	return queryRowBoundSQLite(ctx, r.db, `
-			INSERT INTO oauth_connections (
-				provider, name, oauth_access_token, oauth_refresh_token, oauth_expires_at,
-				oauth_account_id, oauth_provider_display_name, oauth_principal_hash, oauth_principal_verified,
-				oauth_needs_reauth, oauth_revision
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		RETURNING id, created_at, updated_at`,
-		connection.Provider, connection.Name, connection.AccessToken, connection.RefreshToken,
-		connection.ExpiresAt, connection.AccountID, connection.ProviderDisplayName,
-		connection.PrincipalHash, connection.PrincipalVerified, connection.NeedsReauth, connection.Revision,
-	).Scan(&connection.ID, &connection.CreatedAt, &connection.UpdatedAt)
-}
-
 func (r *LLMConfigRepo) GetOAuthConnectionByID(ctx context.Context, id string) (*models.OAuthConnection, error) {
 	var connection models.OAuthConnection
 	err := scanOAuthConnection(r.db.QueryRowContext(ctx, `SELECT `+oauthConnectionColumns+` FROM oauth_connections c WHERE c.id = ?`, id), &connection)
@@ -208,10 +184,6 @@ func (r *LLMConfigRepo) LinkOAuthConnection(ctx context.Context, modelID, connec
 		return fmt.Errorf("linking OAuth connection: %w", err)
 	}
 	return tx.Commit()
-}
-
-func (r *LLMConfigRepo) ReplaceLinkedOAuthConnectionIfRevision(ctx context.Context, modelID, connectionID string, expectedRevision int64, provider models.LLMProvider, accessToken, refreshToken string, expiresAt int64, accountID string) (bool, error) {
-	return r.ReplaceLinkedOAuthConnectionWithProfileIfRevision(ctx, modelID, connectionID, expectedRevision, provider, accessToken, refreshToken, expiresAt, accountID, "", "")
 }
 
 // ReplaceLinkedOAuthConnectionWithProfileIfRevision atomically replaces one

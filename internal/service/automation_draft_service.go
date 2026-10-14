@@ -1651,15 +1651,6 @@ func draftInt(value any) (int, bool) {
 	}
 }
 
-func adapterNodeAccepts(adapter AutomationAdapter, nodeKey, resourceType string) bool {
-	for _, node := range adapter.Nodes {
-		if node.Key == nodeKey {
-			return node.AllowedResources[resourceType]
-		}
-	}
-	return false
-}
-
 func adapterScheduleTarget(adapter AutomationAdapter, triggerKey string) string {
 	for _, node := range adapter.Nodes {
 		if node.Key == triggerKey && node.AllowedResources["schedule"] && node.AllowedResources["task"] {

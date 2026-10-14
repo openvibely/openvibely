@@ -96,35 +96,6 @@ func (s *AutomationConfirmationService) PrepareChatConfirmation(ctx context.Cont
 		ConfirmingUserInputID: inputID, AutomationName: automationName, Source: receipt.Source}, nil
 }
 
-func (s *AutomationConfirmationService) ResolveChatConfirmation(ctx context.Context, token, projectID, principalID, threadID string) (*AutomationChatConfirmationContext, error) {
-	if s == nil || s.repo == nil || len(s.secret) < 16 {
-		return nil, errors.New("automation confirmation service is unavailable")
-	}
-	tokenID, err := s.verifyToken(token)
-	if err != nil {
-		return nil, err
-	}
-	receipt, err := s.repo.GetAutomationConfirmationReceipt(ctx, tokenID)
-	if err != nil {
-		return nil, err
-	}
-	if receipt == nil {
-		return nil, errors.New("automation confirmation receipt not found")
-	}
-	if receipt.ProjectID != projectID || receipt.PrincipalID != principalID || receipt.ThreadID != threadID {
-		return nil, errors.New("automation confirmation receipt scope does not match")
-	}
-	if !s.now().UTC().Before(receipt.ExpiresAt) {
-		return nil, errors.New("automation confirmation receipt expired")
-	}
-	var candidate models.AutomationDraftCandidate
-	if err := json.Unmarshal([]byte(receipt.CandidateJSON), &candidate); err != nil {
-		return nil, errors.New("pending Automation save is invalid")
-	}
-	return &AutomationChatConfirmationContext{Token: token, TokenID: tokenID, AutomationName: receipt.AutomationName,
-		Source: receipt.Source, Candidate: candidate}, nil
-}
-
 type AutomationChatConfirmation struct {
 	Token                 string
 	ProjectID             string

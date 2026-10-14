@@ -2239,10 +2239,6 @@ func (s *SlackService) linkAttachmentsToExecution(ctx context.Context, execID st
 	})
 }
 
-func (s *SlackService) cleanupLinkedSlackAttachments(ctx context.Context, attachments []models.ChatAttachment) {
-	cleanupLinkedChannelChatAttachments(ctx, s.chatAttachmentRepo, "slack", attachments)
-}
-
 func cleanupSlackAttachmentSourceDirs(attachments []models.ChatAttachment) {
 	cleanupChannelChatAttachmentSourceDirs(attachments)
 }
