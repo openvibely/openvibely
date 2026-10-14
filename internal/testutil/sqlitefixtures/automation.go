@@ -2,6 +2,7 @@ package sqlitefixtures
 
 import (
 	"context"
+	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
 )
@@ -37,5 +38,36 @@ func (f *fixtures) SetAutomationNodeConfig(ctx context.Context, id, config strin
 
 func (f *fixtures) SetAutomationTemplateRevision(ctx context.Context, projectID, id string, revision int) error {
 	_, err := f.db.ExecContext(ctx, `UPDATE automations SET template_revision=? WHERE id=? AND project_id=?`, revision, id, projectID)
+	return err
+}
+
+func (f *fixtures) SeedAutomationInvocation(ctx context.Context, v models.AutomationInvocation) error {
+	_, err := f.db.ExecContext(ctx, `INSERT INTO automation_invocations (id,project_id,automation_id,version_id,trigger_node_id,trigger_resource_type,trigger_resource_id,occurrence_key,status,completed_at) VALUES (?,?,?,?,?,?,?,?,?,?)`, v.ID, v.ProjectID, v.AutomationID, v.VersionID, v.TriggerNodeID, v.TriggerResourceType, v.TriggerResourceID, v.OccurrenceKey, v.Status, v.CompletedAt)
+	return err
+}
+func (f *fixtures) SeedRetainedScheduleOwnership(ctx context.Context, n models.AutomationNode, scheduleID string) error {
+	tx, err := f.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err = tx.ExecContext(ctx, `INSERT INTO automation_nodes(id,project_id,automation_id,version_id,node_key,name,node_type,role) VALUES(?,?,?,?,?,?,?,?)`, n.ID, n.ProjectID, n.AutomationID, n.VersionID, n.NodeKey, n.Name, n.NodeType, n.Role); err != nil {
+		return err
+	}
+	if _, err = tx.ExecContext(ctx, `INSERT INTO automation_definition_resources(project_id,automation_id,version_id,node_id,resource_type,resource_id,relation) VALUES(?,?,?,?,'schedule',?,'owned')`, n.ProjectID, n.AutomationID, n.VersionID, n.ID, scheduleID); err != nil {
+		return err
+	}
+	if _, err = tx.ExecContext(ctx, `INSERT INTO automation_trigger_owners(schedule_id,project_id,automation_id,version_id,node_id,ownership_state) VALUES(?,?,?,?,?,'active')`, scheduleID, n.ProjectID, n.AutomationID, n.VersionID, n.ID); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (f *fixtures) SetAutomationUpdatedAt(ctx context.Context, id string, at time.Time) error {
+	return f.setTime(ctx, `UPDATE automations SET updated_at=? WHERE id=?`, id, at)
+}
+
+func (f *fixtures) SeedAutomationNode(ctx context.Context, n models.AutomationNode) error {
+	_, err := f.db.ExecContext(ctx, `INSERT INTO automation_nodes(id,project_id,automation_id,version_id,node_key,name,node_type,role,config_json,position_x,position_y) VALUES(?,?,?,?,?,?,?,?,?,?,?)`, n.ID, n.ProjectID, n.AutomationID, n.VersionID, n.NodeKey, n.Name, n.NodeType, n.Role, n.ConfigJSON, n.PositionX, n.PositionY)
 	return err
 }

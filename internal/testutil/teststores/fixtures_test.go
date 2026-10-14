@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/testutil/storefixture"
@@ -129,5 +130,44 @@ func TestSkillEventFixturePreservesIdentityAndFilters(t *testing.T) {
 	absent, err := env.Fixtures.SkillEvents(ctx, storefixture.SkillEventFilter{ProjectID: project.ID, SkillHandle: "missing"})
 	if err != nil || len(absent) != 0 {
 		t.Fatalf("missing event filter: %+v, %v", absent, err)
+	}
+}
+
+func TestRetainedScheduleFixtureRollsBackAndSharesStoreState(t *testing.T) {
+	for _, production := range []bool{false, true} {
+		t.Run(map[bool]string{false: "isolated", true: "production"}[production], func(t *testing.T) {
+			var options []teststores.Option
+			if production {
+				options = append(options, teststores.WithProductionTopology())
+			}
+			env := teststores.New(t, options...)
+			ctx := context.Background()
+			a := models.Automation{ID: "retained", ProjectID: "default", StableKey: "retained", Name: "Retained", AutomationType: "custom", LifecycleState: "active"}
+			require.NoError(t, env.Fixtures.SeedAutomation(ctx, a))
+			v := models.AutomationVersion{ID: "retained-version", ProjectID: a.ProjectID, AutomationID: a.ID, Version: 2, State: "draft", Source: "bootstrap", AdapterKey: "custom"}
+			require.NoError(t, env.Fixtures.SeedAutomationVersion(ctx, v))
+			n := models.AutomationNode{ID: "retained-trigger", ProjectID: a.ProjectID, AutomationID: a.ID, VersionID: v.ID, NodeKey: "schedule", Name: "Schedule", NodeType: "trigger", Role: "schedule"}
+			require.Error(t, env.Fixtures.SeedRetainedScheduleOwnership(ctx, n, "missing-schedule"))
+			graph, err := env.Automations.GetDefinitionVersion(ctx, a.ProjectID, a.ID, v.ID)
+			require.NoError(t, err)
+			require.NotNil(t, graph)
+			require.Empty(t, graph.Nodes)
+			require.Empty(t, graph.Resources)
+			task := models.Task{ProjectID: a.ProjectID, Title: "retained", Category: models.CategoryScheduled, Status: models.StatusPending}
+			require.NoError(t, env.Tasks.Create(ctx, &task))
+			schedule := models.Schedule{TaskID: task.ID, RunAt: time.Now().Add(time.Hour), RepeatType: models.RepeatOnce, RepeatInterval: 1}
+			require.NoError(t, env.Schedules.Create(ctx, &schedule))
+			require.NoError(t, env.Fixtures.SeedRetainedScheduleOwnership(ctx, n, schedule.ID))
+			owner, err := env.Automations.GetTriggerOwner(ctx, schedule.ID)
+			require.NoError(t, err)
+			require.NotNil(t, owner)
+			require.Equal(t, v.ID, owner.VersionID)
+			require.Equal(t, n.ID, owner.NodeID)
+			graph, err = env.Automations.GetDefinitionVersion(ctx, a.ProjectID, a.ID, v.ID)
+			require.NoError(t, err)
+			require.Len(t, graph.Nodes, 1)
+			require.Len(t, graph.Resources, 1)
+			require.Equal(t, schedule.ID, graph.Resources[0].ResourceID)
+		})
 	}
 }

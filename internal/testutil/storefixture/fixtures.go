@@ -22,6 +22,12 @@ type SkillEventFilter struct {
 
 // Fixtures describes test domain state, never tables, query text, or connections.
 type Fixtures interface {
+	SeedAutomationNode(context.Context, models.AutomationNode) error
+	SetAutomationUpdatedAt(context.Context, string, time.Time) error
+	SeedAutomationInvocation(context.Context, models.AutomationInvocation) error
+	// SeedRetainedScheduleOwnership attaches a schedule to a retained graph without publication.
+	SeedRetainedScheduleOwnership(context.Context, models.AutomationNode, string) error
+
 	// SetLegacyModelName bypasses current uniqueness validation for pre-validation records.
 	SetLegacyModelName(context.Context, string, string) error
 	SetAutomationTemplateRevision(context.Context, string, string, int) error
