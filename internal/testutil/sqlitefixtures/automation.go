@@ -186,3 +186,16 @@ func (f *fixtures) FailScheduleUpdate(ctx context.Context) error {
 	_, err := f.db.ExecContext(ctx, `CREATE TRIGGER fail_atomic_automation_schedule_update BEFORE UPDATE ON schedules BEGIN SELECT RAISE(ABORT, 'injected schedule update failure'); END`)
 	return err
 }
+
+func (f *fixtures) SeedAutomationEdge(ctx context.Context, e models.AutomationEdge) error {
+	_, err := f.db.ExecContext(ctx, `INSERT INTO automation_edges(project_id,automation_id,version_id,source_node_id,target_node_id,edge_key,label,condition_json) VALUES(?,?,?,?,?,?,?,?)`, e.ProjectID, e.AutomationID, e.VersionID, e.SourceNodeID, e.TargetNodeID, e.EdgeKey, e.Label, e.ConditionJSON)
+	return err
+}
+func (f *fixtures) SeedAutomationResource(ctx context.Context, r models.AutomationDefinitionResource) error {
+	_, err := f.db.ExecContext(ctx, `INSERT INTO automation_definition_resources(project_id,automation_id,version_id,node_id,resource_type,resource_id,relation) VALUES(?,?,?,?,?,?,?)`, r.ProjectID, r.AutomationID, r.VersionID, r.NodeID, r.ResourceType, r.ResourceID, r.Relation)
+	return err
+}
+func (f *fixtures) SetAutomationHealth(ctx context.Context, id string, state models.AutomationHealthState, reason string) error {
+	_, err := f.db.ExecContext(ctx, `UPDATE automations SET health_state=?,health_reason=? WHERE id=?`, state, reason, id)
+	return err
+}
