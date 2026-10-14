@@ -81,6 +81,8 @@ func TestBrowserFunctional_SharedImageGallery(t *testing.T) {
 		b.waitFor("task gallery loaded", `document.querySelector('[data-gallery-count]').textContent+':'+document.querySelector('[data-gallery-status]').textContent`, "1 / 2:")
 		if runtime.GOOS == "darwin" || runtime.GOOS == "linux" {
 			b.waitFor("preview hides native controls", `String(window.nativeControlEvents?.['desktop:controls-visibility']?.hidden)`, "true")
+			b.waitFor("visibility events carry page and increasing sequence", `String((()=>{const e=window.nativeControlEvents['desktop:controls-visibility'];return e.page===performance.timeOrigin && e.sequence>=2;})())`, "true")
+			b.evaluate(`window.previewVisibilitySequence=window.nativeControlEvents['desktop:controls-visibility'].sequence;'saved'`)
 		}
 		for _, theme := range []string{"dark", "light"} {
 			b.evaluate(`document.documentElement.dataset.theme='` + theme + `';document.documentElement.dataset.colorTheme='openvibely-` + theme + `';'set'`)
@@ -152,6 +154,7 @@ func TestBrowserFunctional_SharedImageGallery(t *testing.T) {
 		b.waitFor("closed and focus restored", `String(!document.getElementById('image-gallery').open && document.activeElement.hasAttribute('data-image-gallery-item'))`, "true")
 		if runtime.GOOS == "darwin" || runtime.GOOS == "linux" {
 			b.waitFor("closing restores native controls", `String(window.nativeControlEvents?.['desktop:controls-visibility']?.hidden)`, "false")
+			b.waitFor("restore supersedes hide", `String(window.nativeControlEvents['desktop:controls-visibility'].sequence>window.previewVisibilitySequence)`, "true")
 		}
 		b.click(`[data-image-name="message.svg"]`)
 		b.waitFor("message scoped gallery", `document.querySelector('[data-gallery-count]').textContent`, "1 / 1")
