@@ -300,3 +300,23 @@ func (f *fixtures) SeedSavedChannelTargets(ctx context.Context, targets []models
 	}
 	return tx.Commit()
 }
+
+func (f *fixtures) CountAlertsWithIdempotencyKey(ctx context.Context, projectID, key string) (int, error) {
+	var n int
+	err := f.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM alerts WHERE project_id=? AND idempotency_key=?`, projectID, key).Scan(&n)
+	return n, err
+}
+func (f *fixtures) PublishedAutomationVersionID(ctx context.Context, id string) (string, error) {
+	var version string
+	err := f.db.QueryRowContext(ctx, `SELECT published_version_id FROM automations WHERE id=?`, id).Scan(&version)
+	return version, err
+}
+func (f *fixtures) SetScheduleNextRun(ctx context.Context, id string, next *time.Time) error {
+	_, err := f.db.ExecContext(ctx, `UPDATE schedules SET next_run=? WHERE id=?`, next, id)
+	return err
+}
+
+func (f *fixtures) SetLegacyModelName(ctx context.Context, id, name string) error {
+	_, err := f.db.ExecContext(ctx, `UPDATE agent_configs SET name=? WHERE id=?`, name, id)
+	return err
+}

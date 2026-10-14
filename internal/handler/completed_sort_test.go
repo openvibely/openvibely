@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/models"
@@ -123,7 +124,7 @@ func TestSetCompletedSort_ActualSorting(t *testing.T) {
 }
 
 func TestCompletedSort_SortsByCompletionDate(t *testing.T) {
-	h, e, _, db := setupTestHandlerWithDB(t)
+	h, e, _, db := setupTestHandlerWithStores(t)
 	ctx := context.Background()
 
 	// Create three tasks in the completed category.  They will all get the same
@@ -153,11 +154,21 @@ func TestCompletedSort_SortsByCompletionDate(t *testing.T) {
 		if err := h.taskSvc.Create(ctx, task); err != nil {
 			t.Fatalf("Create task %s: %v", s.title, err)
 		}
-		if _, err := db.ExecContext(ctx,
-			`UPDATE tasks SET completed_at = ?, updated_at = ? WHERE id = ?`,
-			s.completedAt, s.updatedAt, task.ID); err != nil {
-			t.Fatalf("Set timestamps for %s: %v", s.title, err)
+		completed, err := time.Parse("2006-01-02 15:04:05", s.completedAt)
+		if err != nil {
+			t.Fatal(err)
 		}
+		updated, err := time.Parse("2006-01-02 15:04:05", s.updatedAt)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := db.Fixtures.SetTaskCompletedAt(ctx, task.ID, completed); err != nil {
+			t.Fatal(err)
+		}
+		if err := db.Fixtures.SetTaskUpdatedAt(ctx, task.ID, updated); err != nil {
+			t.Fatal(err)
+		}
+
 	}
 
 	assertOrder := func(sortKey string, wantOrder []string) {

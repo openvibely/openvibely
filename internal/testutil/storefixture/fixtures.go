@@ -22,6 +22,13 @@ type SkillEventFilter struct {
 
 // Fixtures describes test domain state, never tables, query text, or connections.
 type Fixtures interface {
+	// SetLegacyModelName bypasses current uniqueness validation for pre-validation records.
+	SetLegacyModelName(context.Context, string, string) error
+	SetAutomationTemplateRevision(context.Context, string, string, int) error
+	CountAlertsWithIdempotencyKey(context.Context, string, string) (int, error)
+	PublishedAutomationVersionID(context.Context, string) (string, error)
+	SetScheduleNextRun(context.Context, string, *time.Time) error
+
 	// RemoveAllProjects constructs the empty-installation state, including removal of the protected default.
 	RemoveAllProjects(context.Context) error
 	// SeedSavedChannelTargets preserves historical timestamps and home flags without applying save transitions.

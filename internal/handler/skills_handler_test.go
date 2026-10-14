@@ -327,7 +327,7 @@ func TestDeleteProjectSkillClearsOnlyProjectAlwaysUsePreference(t *testing.T) {
 }
 
 func TestDeleteSkillRemovesStandaloneSkillAndReturnsCards(t *testing.T) {
-	h, e, _, db := setupTestHandlerWithDB(t)
+	h, e, _, db := setupTestHandlerWithStores(t)
 	root := t.TempDir()
 	h.SetAgentSkillRoot(root)
 	project := createProject(t, h, "Delete Skill Analytics Project")
@@ -783,7 +783,7 @@ func TestCreateSkillResponseIncludesFreshSearchText(t *testing.T) {
 }
 
 func TestUpdateSkillResponseSearchTextReflectsClearedFields(t *testing.T) {
-	h, e, _, db := setupTestHandlerWithDB(t)
+	h, e, _, db := setupTestHandlerWithStores(t)
 	root := t.TempDir()
 	h.SetAgentSkillRoot(root)
 	writeStandaloneSkill(t, root, "no_longer_matching", "Test Skill", "test description", "global")
