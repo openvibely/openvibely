@@ -635,3 +635,12 @@ func (f *fixtures) SetSlackAuthorizationUnavailable(ctx context.Context, unavail
 	_, err := f.db.ExecContext(ctx, query)
 	return err
 }
+
+func (f *fixtures) AsyncToolCallStatus(ctx context.Context, id string) (string, error) {
+	var status string
+	err := f.db.QueryRowContext(ctx, `SELECT status FROM openai_async_tool_calls WHERE id = ?`, id).Scan(&status)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", persistence.ErrNotFound
+	}
+	return status, err
+}
