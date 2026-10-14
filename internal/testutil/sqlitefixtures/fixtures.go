@@ -540,3 +540,40 @@ func (f *fixtures) FailSettingWrites(ctx context.Context, key string) error {
 func (f *fixtures) ProjectExecutions(ctx context.Context, projectID string, limit int) ([]models.Execution, error) {
 	return sqlite.NewExecutionRepo(f.db).ListByProject(ctx, projectID, limit)
 }
+
+func (f *fixtures) SetTaskPromptCreationFailure(ctx context.Context, fragment string, enabled bool) error {
+	if _, err := f.db.ExecContext(ctx, `DROP TRIGGER IF EXISTS fixture_SetTaskPromptCreationFailure`); err != nil {
+		return err
+	}
+	if !enabled {
+		return nil
+	}
+	_, err := f.db.ExecContext(ctx, `CREATE TRIGGER fixture_SetTaskPromptCreationFailure BEFORE INSERT ON tasks WHEN instr(NEW.prompt, '`+strings.ReplaceAll(fragment, "'", "''")+`') > 0 BEGIN SELECT RAISE(FAIL, 'forced durable creation failure'); END`)
+	return err
+}
+
+func (f *fixtures) SetQueuedInputCreationFailure(ctx context.Context, fragment string, enabled bool) error {
+	if _, err := f.db.ExecContext(ctx, `DROP TRIGGER IF EXISTS fixture_SetQueuedInputCreationFailure`); err != nil {
+		return err
+	}
+	if !enabled {
+		return nil
+	}
+	_, err := f.db.ExecContext(ctx, `CREATE TRIGGER fixture_SetQueuedInputCreationFailure BEFORE INSERT ON thread_inputs WHEN instr(NEW.content, '`+strings.ReplaceAll(fragment, "'", "''")+`') > 0 BEGIN SELECT RAISE(FAIL, 'forced durable creation failure'); END`)
+	return err
+}
+
+// SeedProjects preserves supplied identities and default flags for historical/test catalogs.
+func (f *fixtures) SeedProjects(ctx context.Context, projects []models.Project) error {
+	tx, err := f.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for _, p := range projects {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO projects (id,name,description,repo_path,repo_url,is_default) VALUES (?,?,?,?,?,?)`, p.ID, p.Name, p.Description, p.RepoPath, p.RepoURL, p.IsDefault); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}

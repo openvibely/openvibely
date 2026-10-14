@@ -684,15 +684,15 @@ func TestEmailPollOnceSkipsPostSuccessRecordAfterQueuedWithHandoff(t *testing.T)
 }
 
 func TestEmailPollOnceMixedBatchRetriesRealTaskCreationFailure(t *testing.T) {
-	db := teststores.NewDB(t)
+	db := teststores.New(t)
 	ctx := context.Background()
-	settingsRepo := teststores.Of(db).Settings
-	projectRepo := teststores.Of(db).Projects
-	llmConfigRepo := teststores.Of(db).LLMConfigs
-	taskRepo := teststores.Of(db).Tasks
-	execRepo := teststores.Of(db).Executions
-	emailAuthRepo := teststores.Of(db).EmailAuth
-	emailTaskContextRepo := teststores.Of(db).EmailTaskContexts
+	settingsRepo := db.Settings
+	projectRepo := db.Projects
+	llmConfigRepo := db.LLMConfigs
+	taskRepo := db.Tasks
+	execRepo := db.Executions
+	emailAuthRepo := db.EmailAuth
+	emailTaskContextRepo := db.EmailTaskContexts
 	projects, err := projectRepo.List(ctx)
 	require.NoError(t, err)
 	require.NotEmpty(t, projects)
@@ -701,20 +701,15 @@ func TestEmailPollOnceMixedBatchRetriesRealTaskCreationFailure(t *testing.T) {
 	agent := &models.LLMConfig{Name: "Email Poll Agent", Provider: models.ProviderTest, Model: "test", IsDefault: true}
 	require.NoError(t, llmConfigRepo.Create(ctx, agent))
 	require.NoError(t, settingsRepo.Set(ctx, EmailSettingAddress, "bot@example.com"))
-	require.NoError(t, func() error {
-		_, err := db.Exec(`CREATE TRIGGER fail_email_task_insert BEFORE INSERT ON tasks
-			WHEN NEW.prompt LIKE '%transient task failure%'
-			BEGIN SELECT RAISE(FAIL, 'transient task failure'); END`)
-		return err
-	}())
+	require.NoError(t, db.Fixtures.SetTaskPromptCreationFailure(ctx, "transient task failure", true))
 
-	attachmentRepo := teststores.Of(db).Attachments
-	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, teststores.Of(db).Schedules, attachmentRepo)
+	attachmentRepo := db.Attachments
+	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, db.Schedules, attachmentRepo)
 	llmSvc.SetLLMCaller(testutil.NewMockLLMCaller())
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, nil)
-	svc := NewEmailService(settingsRepo, projectRepo, llmConfigRepo, taskRepo, execRepo, teststores.Of(db).Schedules, taskSvc, llmSvc, nil, emailAuthRepo, emailTaskContextRepo)
+	svc := NewEmailService(settingsRepo, projectRepo, llmConfigRepo, taskRepo, execRepo, db.Schedules, taskSvc, llmSvc, nil, emailAuthRepo, emailTaskContextRepo)
 	svc.SetChannelChatRunner(func(context.Context, ChannelChatRunRequest) {})
-	svc.SetEmailInboundReceiptRepo(teststores.Of(db).EmailInboundReceipts)
+	svc.SetEmailInboundReceiptRepo(db.EmailInboundReceipts)
 	client := newFakeEmailIMAPClient(
 		testIMAPMessageWithBody(1, "successful", "alice@example.com", "normal request"),
 		testIMAPMessageWithBody(2, "retry", "alice@example.com", "transient task failure"),
@@ -730,8 +725,7 @@ func TestEmailPollOnceMixedBatchRetriesRealTaskCreationFailure(t *testing.T) {
 	require.Len(t, tasks, 1)
 	require.Contains(t, tasks[0].Prompt, "normal request")
 
-	_, err = db.Exec(`DROP TRIGGER fail_email_task_insert`)
-	require.NoError(t, err)
+	require.NoError(t, db.Fixtures.SetTaskPromptCreationFailure(ctx, "", false))
 	client.setMessage(testIMAPMessageWithBody(2, "retry", "alice@example.com", "transient task failure"))
 	svc.pollOnce(ctx, cfg)
 	assert.Equal(t, []uint32{1, 2}, client.seenIDs())
@@ -742,16 +736,16 @@ func TestEmailPollOnceMixedBatchRetriesRealTaskCreationFailure(t *testing.T) {
 }
 
 func TestEmailPollOnceMixedBatchRetriesRealQueueWriteFailure(t *testing.T) {
-	db := teststores.NewDB(t)
+	db := teststores.New(t)
 	ctx := context.Background()
-	settingsRepo := teststores.Of(db).Settings
-	projectRepo := teststores.Of(db).Projects
-	llmConfigRepo := teststores.Of(db).LLMConfigs
-	taskRepo := teststores.Of(db).Tasks
-	execRepo := teststores.Of(db).Executions
-	threadInputRepo := teststores.Of(db).ThreadInputs
-	emailAuthRepo := teststores.Of(db).EmailAuth
-	emailTaskContextRepo := teststores.Of(db).EmailTaskContexts
+	settingsRepo := db.Settings
+	projectRepo := db.Projects
+	llmConfigRepo := db.LLMConfigs
+	taskRepo := db.Tasks
+	execRepo := db.Executions
+	threadInputRepo := db.ThreadInputs
+	emailAuthRepo := db.EmailAuth
+	emailTaskContextRepo := db.EmailTaskContexts
 	projects, err := projectRepo.List(ctx)
 	require.NoError(t, err)
 	require.NotEmpty(t, projects)
@@ -768,20 +762,15 @@ func TestEmailPollOnceMixedBatchRetriesRealQueueWriteFailure(t *testing.T) {
 	activeExec := &models.Execution{TaskID: activeTask.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "root"}
 	require.NoError(t, execRepo.Create(ctx, activeExec))
 	require.NoError(t, emailTaskContextRepo.Upsert(ctx, &models.EmailTaskContext{TaskID: activeTask.ID, EmailFrom: "alice@example.com", EmailMessageID: rootMessageID, EmailSubject: "Queue thread", EmailSessionKey: sessionKey}))
-	require.NoError(t, func() error {
-		_, err := db.Exec(`CREATE TRIGGER fail_email_queue_insert BEFORE INSERT ON thread_inputs
-			WHEN NEW.content LIKE '%transient queue failure%'
-			BEGIN SELECT RAISE(FAIL, 'transient queue failure'); END`)
-		return err
-	}())
+	require.NoError(t, db.Fixtures.SetQueuedInputCreationFailure(ctx, "transient queue failure", true))
 
-	attachmentRepo := teststores.Of(db).Attachments
-	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, teststores.Of(db).Schedules, attachmentRepo)
+	attachmentRepo := db.Attachments
+	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, db.Schedules, attachmentRepo)
 	llmSvc.SetLLMCaller(testutil.NewMockLLMCaller())
-	svc := NewEmailService(settingsRepo, projectRepo, llmConfigRepo, taskRepo, execRepo, teststores.Of(db).Schedules, NewTaskService(taskRepo, attachmentRepo, nil), llmSvc, nil, emailAuthRepo, emailTaskContextRepo)
+	svc := NewEmailService(settingsRepo, projectRepo, llmConfigRepo, taskRepo, execRepo, db.Schedules, NewTaskService(taskRepo, attachmentRepo, nil), llmSvc, nil, emailAuthRepo, emailTaskContextRepo)
 	svc.SetThreadInputRepo(threadInputRepo)
 	svc.SetChannelChatRunner(func(context.Context, ChannelChatRunRequest) {})
-	svc.SetEmailInboundReceiptRepo(teststores.Of(db).EmailInboundReceipts)
+	svc.SetEmailInboundReceiptRepo(db.EmailInboundReceipts)
 	client := newFakeEmailIMAPClient(
 		testIMAPReplyWithBody(1, "Queue thread", "alice@example.com", rootMessageID, "normal queued request"),
 		testIMAPReplyWithBody(2, "Queue thread", "alice@example.com", rootMessageID, "transient queue failure"),
@@ -796,8 +785,7 @@ func TestEmailPollOnceMixedBatchRetriesRealQueueWriteFailure(t *testing.T) {
 	require.Len(t, inputs, 1)
 	assert.Contains(t, inputs[0].Content, "normal queued request")
 
-	_, err = db.Exec(`DROP TRIGGER fail_email_queue_insert`)
-	require.NoError(t, err)
+	require.NoError(t, db.Fixtures.SetQueuedInputCreationFailure(ctx, "", false))
 	client.setMessage(testIMAPReplyWithBody(2, "Queue thread", "alice@example.com", rootMessageID, "transient queue failure"))
 	svc.pollOnce(ctx, cfg)
 	assert.Equal(t, []uint32{1, 2}, client.seenIDs())

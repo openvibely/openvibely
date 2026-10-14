@@ -442,3 +442,48 @@ func TestSlackFixtureFaultsAndPhysicalReads(t *testing.T) {
 		})
 	}
 }
+
+func TestCatalogAndInboundFaultFixturesShareBackend(t *testing.T) {
+	for _, production := range []bool{false, true} {
+		name := "isolated"
+		if production {
+			name = "production"
+		}
+		t.Run(name, func(t *testing.T) {
+			var opts []teststores.Option
+			if production {
+				opts = append(opts, teststores.WithProductionTopology())
+			}
+			env := teststores.New(t, opts...)
+			ctx := t.Context()
+			require.NoError(t, env.Fixtures.SeedProjects(ctx, []models.Project{{ID: "fixture-project", Name: "fixture"}}))
+			project, err := env.Projects.GetByID(ctx, "fixture-project")
+			require.NoError(t, err)
+			require.NotNil(t, project)
+			require.Error(t, env.Fixtures.SeedProjects(ctx, []models.Project{{ID: "rolled-back-project", Name: "rollback"}, {ID: project.ID, Name: "duplicate"}}))
+			missing, err := env.Projects.GetByID(ctx, "rolled-back-project")
+			require.NoError(t, err)
+			require.Nil(t, missing)
+			require.NoError(t, env.Fixtures.SetTaskPromptCreationFailure(ctx, "reject 'this'", true))
+			task := models.Task{ProjectID: project.ID, Title: "retry", Prompt: "please reject 'this' now", Category: models.CategoryBacklog, Status: models.StatusPending}
+			require.Error(t, env.Tasks.Create(ctx, &task))
+			tasks, err := env.Tasks.ListByProject(ctx, project.ID, "")
+			require.NoError(t, err)
+			require.Empty(t, tasks)
+			require.NoError(t, env.Fixtures.SetTaskPromptCreationFailure(ctx, "", false))
+			require.NoError(t, env.Tasks.Create(ctx, &task))
+			require.NoError(t, env.Fixtures.SetQueuedInputCreationFailure(ctx, "reject 'this'", true))
+			input := models.ThreadInput{Scope: models.ThreadInputScopeTask, ProjectID: project.ID, TaskID: task.ID, Content: "reject 'this'", InputMode: models.ThreadInputModeQueued}
+			require.Error(t, env.ThreadInputs.CreateQueued(ctx, &input))
+			require.NoError(t, env.Fixtures.SetQueuedInputCreationFailure(ctx, "", false))
+			require.NoError(t, env.ThreadInputs.CreateQueued(ctx, &input))
+			stored, err := env.ThreadInputs.GetByID(ctx, input.ID)
+			require.NoError(t, err)
+			require.NotNil(t, stored)
+			other := teststores.New(t, opts...)
+			missing, err = other.Projects.GetByID(ctx, project.ID)
+			require.NoError(t, err)
+			require.Nil(t, missing)
+		})
+	}
+}
