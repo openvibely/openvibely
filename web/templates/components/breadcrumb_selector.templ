@@ -22,7 +22,7 @@ templ BreadcrumbSelector(config models.BreadcrumbSelector) {
 		[data-breadcrumb-title]:disabled { cursor:default; }
 		[data-breadcrumb-title]:is(a, button:not(:disabled)) { color:oklch(var(--bc) / .5); font-weight:400; }
 		[data-breadcrumb-title]:is(a, button:not(:disabled)):hover { color:oklch(var(--bc) / .8); text-decoration:none; }
-		[data-breadcrumb-title]:focus-visible { outline:2px solid oklch(var(--p)); outline-offset:2px; border-radius:6px; }
+		[data-breadcrumb-title]:focus-visible { outline:1px solid oklch(var(--bc) / .5); outline-offset:2px; border-radius:6px; }
 		@supports not (color: oklch(0 0 0)) {
 			[data-breadcrumb-title]:is(a, button:not(:disabled)) { color:inherit; opacity:.5; }
 			[data-breadcrumb-title]:is(a, button:not(:disabled)):hover { color:inherit; opacity:.8; }

@@ -1502,7 +1502,7 @@ func TestAutomationBuilderUsesInteractiveGraphAndYAMLEditor(t *testing.T) {
 		t.Fatalf("render Automation YAML builder: %v", err)
 	}
 	body := out.String()
-	for _, want := range []string{`aria-label="Automation graph builder"`, `data-automation-graph-panel`, `data-automation-yaml-panel`, `data-automation-yaml-editor`, `data-automation-zoom-in`, `data-automation-fit`, `data-automation-reset`, `data-automation-node-tool`} {
+	for _, want := range []string{`[data-automation-yaml-fold]:focus-visible { outline: 1px solid oklch(var(--bc) / .5);`, `aria-label="Automation graph builder"`, `data-automation-graph-panel`, `data-automation-yaml-panel`, `data-automation-yaml-editor`, `data-automation-zoom-in`, `data-automation-fit`, `data-automation-reset`, `data-automation-node-tool`} {
 		if !strings.Contains(body, want) {
 			t.Errorf("expected interactive YAML builder to contain %q", want)
 		}

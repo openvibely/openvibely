@@ -95,7 +95,7 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
   /* sRGB equivalent of the light theme's base-300 color for older WebKit. */
   [data-theme="light"] #desktop-project-titlebar { background-color: #E8E8E8; }
   #desktop-project-titlebar button, #desktop-project-titlebar [data-project-selector], #desktop-project-titlebar dialog { --wails-draggable: no-drag; }
-  #desktop-project-titlebar button:focus-visible:not([data-project-tab]) { outline: 2px solid oklch(var(--p)); outline-offset: -2px; }
+  #desktop-project-titlebar button:focus-visible:not([data-project-tab]) { outline: 1px solid oklch(var(--bc) / .5); outline-offset: -2px; }
   /* The project selector already communicates focus through its hover/open surface. */
   #desktop-project-titlebar #project-selector-trigger:focus-visible { outline: none; }
   #desktop-project-titlebar [data-project-tab]:focus-visible { outline: none; }

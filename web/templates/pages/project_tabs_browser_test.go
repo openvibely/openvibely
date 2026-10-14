@@ -161,6 +161,9 @@ func TestBrowserFunctional_ProjectTabsAndBrowserScope(t *testing.T) {
 				if got := browser.evaluate(`getComputedStyle(document.activeElement).outlineStyle`); got != "none" {
 					t.Fatal("keyboard tab navigation must not show a selection-like focus outline", got)
 				}
+				if got := browser.evaluate(`(function(){var reference=document.createElement('span');reference.style.outline='1px solid oklch(var(--bc) / .5)';document.body.append(reference);var neutral=getComputedStyle(reference).outlineColor;reference.remove();var controls=Array.from(document.querySelectorAll('#desktop-project-titlebar button:not([data-project-tab]):not(#project-selector-trigger)')).filter(e=>e.getClientRects().length&&!e.disabled);return String(controls.length>0&&controls.every(e=>{e.focus({preventScroll:true});var s=getComputedStyle(e);return e.matches(':focus-visible')&&s.outlineWidth==='1px'&&s.outlineColor===neutral}));})()`); got != "true" {
+					t.Fatal("title-bar controls must have thin neutral keyboard focus", got)
+				}
 				// Selection happens on press, before release or drag movement.
 				for _, id := range []string{"p01", "p00"} {
 					var point struct{ X, Y float64 }
