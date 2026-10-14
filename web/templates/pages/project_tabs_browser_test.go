@@ -104,6 +104,8 @@ func TestBrowserFunctional_ProjectTabsAndBrowserScope(t *testing.T) {
 			defer server.Close()
 			runComposerFocusCDP(t, chrome, server.URL+"/tasks?view=board#keep", "project-tabs", func(browser *composerFocusCDP) {
 				browser.waitFor("initial scope", `new URL(location.href).searchParams.get('project_id') || ''`, "p00")
+				// Tab setup moves the selector on DOMContentLoaded, which would demote an already-open modal menu.
+				browser.waitFor("page initialized", `String(document.readyState === 'complete' && typeof window.openVibelyProjectTabsSync === 'function')`, "true")
 				if got := browser.evaluate(`String(location.hash === '#keep' && new URL(location.href).searchParams.get('view') === 'board')`); got != "true" {
 					t.Fatal("initial URL lost route state", got)
 				}
