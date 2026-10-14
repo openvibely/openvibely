@@ -1071,6 +1071,9 @@ func automationBuilderPageTitle(page models.AutomationBuilderPage) string {
 }
 
 templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectID string) {
+	<style>
+		[data-automation-yaml-fold]:focus-visible { outline: 1px solid oklch(var(--bc) / .5); outline-offset: 2px; }
+	</style>
 	@automationViewStateScript()
 	@automationYAMLSharedScript()
 	<div id="automation-builder" class="flex h-full min-w-0 max-w-full flex-col overflow-y-auto" data-automation-draft data-automation-yaml-builder data-automation-unsaved-changes={ fmt.Sprint(page.UnsavedChanges) }>
@@ -1585,7 +1588,7 @@ var lines = yamlSourceValue.split('\n'), ranges = yamlFoldRanges(lines), highlig
 							displayLines.push(lines[index]);
 							lineNumbers.push('<span class="block min-h-6" data-automation-yaml-line-number data-yaml-line="' + (index + 1) + '">' + (index + 1) + '</span>');								if (canFold && yamlFoldingEnabled) {
 									var visibilityClass = isFolded ? '' : ' opacity-0 group-hover:opacity-100 focus-visible:opacity-100';
-									controls.push('<button class="pointer-events-auto absolute right-1 inline-flex h-6 w-6 items-center justify-center rounded bg-transparent p-0 text-base-content/60 transition-opacity hover:bg-transparent hover:text-base-content/60 focus-visible:bg-transparent focus-visible:text-base-content/60 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary' + visibilityClass + '" style="top:0" type="button" data-automation-yaml-fold data-yaml-line="' + (index + 1) + '" data-yaml-indent="' + indent + '" aria-label="' + (isFolded ? 'Expand' : 'Collapse') + ' YAML section starting on line ' + (index + 1) + '"><svg class="h-5 w-5 transition-transform' + (isFolded ? ' -rotate-90' : '') + '" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 7.5 10 12.5 15 7.5"></path></svg></button>');
+									controls.push('<button class="pointer-events-auto absolute right-1 inline-flex h-6 w-6 items-center justify-center rounded bg-transparent p-0 text-base-content/60 transition-opacity hover:bg-transparent hover:text-base-content/60 focus-visible:bg-transparent focus-visible:text-base-content/60' + visibilityClass + '" style="top:0" type="button" data-automation-yaml-fold data-yaml-line="' + (index + 1) + '" data-yaml-indent="' + indent + '" aria-label="' + (isFolded ? 'Expand' : 'Collapse') + ' YAML section starting on line ' + (index + 1) + '"><svg class="h-5 w-5 transition-transform' + (isFolded ? ' -rotate-90' : '') + '" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 7.5 10 12.5 15 7.5"></path></svg></button>');
 								}
 								highlighted.push(yamlShared.renderLineSpan(lines[index], index + 1, {diagnosticLine: yamlDiagnosticLine, folded: isFolded}));								if (isFolded) index = foldEnd + 1; else index++;
 							}

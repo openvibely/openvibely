@@ -1116,7 +1116,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					outline: none !important;
 				}
 				.chat-input-option-btn:focus-visible {
-					outline: 2px solid rgb(116 128 255 / 0.75);
+					outline: 1px solid oklch(var(--bc) / .5);
 					outline-offset: 2px;
 				}
 				[data-theme="light"] .chat-input-option-btn {
@@ -2310,7 +2310,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				}
 				.stream-thinking summary::-webkit-details-marker { display: none; }
 				.stream-thinking summary:focus-visible {
-					outline: 2px solid var(--ov-link-color);
+					outline: 1px solid oklch(var(--bc) / .5);
 					outline-offset: 2px;
 					border-radius: 0.2rem;
 				}
@@ -2426,7 +2426,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					transition: background-color 120ms ease, color 120ms ease;
 				}
 				.stream-tool-output-toggle:focus-visible {
-					outline: 2px solid var(--ov-link-color);
+					outline: 1px solid oklch(var(--bc) / .5);
 					outline-offset: 2px;
 				}
 				.stream-tool-body-scroll + .stream-tool-output-toggle {

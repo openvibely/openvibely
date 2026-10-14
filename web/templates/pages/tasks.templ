@@ -622,14 +622,14 @@ templ kanbanSearch() {
 		.kanban-search { display:flex; align-items:center; flex:0 1 auto; min-width:2rem; max-width:100%; height:2rem; width:2rem; border-radius:var(--rounded-btn,.5rem); overflow:hidden; transition:width .25s ease, background-color .25s ease, box-shadow .25s ease; }
 		.kanban-search[data-open="true"] { width:16rem; height:38px; border:1px solid oklch(var(--b3)); border-radius:var(--rounded-box,1rem); background:oklch(var(--b1)); box-shadow:0 1px 2px 0 rgb(0 0 0 / .05); }
 		.kanban-search-toggle { flex:0 0 2rem; }
-		.kanban-search-toggle:focus-visible { outline:none; opacity:1; box-shadow:inset 0 0 0 2px oklch(var(--p)); }
+		.kanban-search-toggle:focus-visible { outline:none; opacity:1; box-shadow:inset 0 0 0 1px oklch(var(--bc) / .5); }
 		.kanban-search[data-open="true"] .kanban-search-toggle:hover { background:transparent; }
 		.kanban-search-input { flex:1 1 auto; min-width:0; height:100%; padding-right:.75rem; background:transparent; border:0; outline:none; font-size:.875rem; opacity:0; transition:opacity .2s ease; }
 		.kanban-search[data-open="true"] .kanban-search-input { opacity:1; }
 		.kanban-search-input::-webkit-search-cancel-button { -webkit-appearance:none; appearance:none; }
 		.kanban-search-clear { flex:0 0 1.75rem; height:1.75rem; margin-right:.125rem; display:inline-flex; align-items:center; justify-content:center; border-radius:calc(var(--rounded-btn,.5rem) - .125rem); opacity:.6; transition:opacity .15s ease, background-color .15s ease; }
 		@media (hover: hover) { .kanban-search-clear:hover { opacity:1; background:oklch(var(--bc) / .08); } }
-		.kanban-search-clear:focus-visible { outline:none; opacity:1; box-shadow:inset 0 0 0 2px oklch(var(--p)); }
+		.kanban-search-clear:focus-visible { outline:none; opacity:1; box-shadow:inset 0 0 0 1px oklch(var(--bc) / .5); }
 		.kanban-search[data-open="false"] .kanban-search-clear, .kanban-search-input:placeholder-shown + .kanban-search-clear { display:none; }
 		.kanban-search-input:not(:placeholder-shown) { padding-right:0; }
 		@media (max-width: 639px) { .kanban-search-input { font-size:1rem; } }

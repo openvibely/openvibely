@@ -88,8 +88,8 @@ func TestProjectTabsDoNotHighlightSelectedTabWithPrimaryFocusRing(t *testing.T) 
 		t.Fatal(err)
 	}
 	html := buf.String()
-	if !strings.Contains(html, `button:focus-visible:not([data-project-tab]) { outline: 2px solid oklch(var(--p));`) {
-		t.Error("non-tab controls must retain the primary focus ring")
+	if !strings.Contains(html, `button:focus-visible:not([data-project-tab]) { outline: 1px solid oklch(var(--bc) / .5);`) {
+		t.Error("non-tab controls must use a thin neutral focus outline")
 	}
 	if !strings.Contains(html, `#desktop-project-titlebar [data-project-tab]:focus-visible { outline: none; }`) {
 		t.Error("selected project tabs must not show the primary focus ring")
