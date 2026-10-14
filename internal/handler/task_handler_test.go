@@ -389,7 +389,7 @@ func TestHandler_CancelRunningExecutionRepositoryErrorIsBestEffortForTaskAndChat
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			tc := NewTestContext(t)
+			tc := NewStoreTestContext(t)
 			ctx := context.Background()
 			project := tc.CreateProject().Build()
 			agent := tc.CreateLLMConfig().Build()
@@ -398,14 +398,7 @@ func TestHandler_CancelRunningExecutionRepositoryErrorIsBestEffortForTaskAndChat
 				WithCategory(test.category).
 				Build()
 			exec := tc.CreateExecution(task.ID, agent.ID).WithStatus(models.ExecRunning).Build()
-			if _, err := tc.db.ExecContext(ctx, `
-				CREATE TRIGGER fail_running_execution_cancel
-				BEFORE UPDATE OF status ON executions
-				WHEN OLD.id = '`+exec.ID+`' AND NEW.status = 'cancelled'
-				BEGIN
-					SELECT RAISE(ABORT, 'forced execution cancellation failure');
-				END;
-			`); err != nil {
+			if err := tc.stores.Fixtures.FailExecutionCancellation(ctx, exec.ID); err != nil {
 				t.Fatalf("create failure trigger: %v", err)
 			}
 
