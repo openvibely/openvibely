@@ -17,7 +17,6 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
-	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/persistence/sqlite/database"
 	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/openvibely/openvibely/internal/testutil/teststores"
@@ -69,7 +68,7 @@ func TestAnalyticsSupportingEvidenceRequiresProject(t *testing.T) {
 }
 
 func TestGetAnalyticsUsage_AccountLimitsProjectionOmitsFullUsageSections(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	ctx := context.Background()
 	cfg := &models.LLMConfig{
 		Name:             "OpenAI OAuth",
@@ -83,7 +82,7 @@ func TestGetAnalyticsUsage_AccountLimitsProjectionOmitsFullUsageSections(t *test
 		t.Fatalf("create oauth config: %v", err)
 	}
 	usedPercent := 12.5
-	if err := tc.usageRepo.(*sqlite.UsageRepo).CreateAccountUsageSnapshot(ctx, &models.AccountUsageSnapshot{
+	if err := tc.stores.Fixtures.SeedAccountUsageSnapshot(ctx, &models.AccountUsageSnapshot{
 		Provider:           "openai",
 		AccountID:          cfg.OAuthAccountID,
 		AgentConfigID:      cfg.ID,
@@ -152,7 +151,7 @@ func TestGetAnalyticsUsage_AccountLimitsProjectionOmitsFullUsageSections(t *test
 }
 
 func TestGetAnalyticsUsage_AccountLimitsAreOrderedAndPrivate(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	ctx := context.Background()
 	cfg := &models.LLMConfig{
 		Name:              "OpenAI OAuth",
@@ -170,7 +169,7 @@ func TestGetAnalyticsUsage_AccountLimitsAreOrderedAndPrivate(t *testing.T) {
 	fiveHourPercent := 4.0
 	weeklyMinutes := 10080
 	fiveHourMinutes := 300
-	if err := tc.usageRepo.(*sqlite.UsageRepo).CreateAccountUsageSnapshot(ctx, &models.AccountUsageSnapshot{
+	if err := tc.stores.Fixtures.SeedAccountUsageSnapshot(ctx, &models.AccountUsageSnapshot{
 		Provider:               "openai",
 		AccountID:              cfg.OAuthAccountID,
 		AgentConfigID:          cfg.ID,

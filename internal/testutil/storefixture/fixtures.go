@@ -28,6 +28,10 @@ type ExecutionUsageRecord struct {
 
 // Fixtures describes test domain state, never tables, query text, or connections.
 type Fixtures interface {
+	ProjectExecutions(context.Context, string, int) ([]models.Execution, error)
+	SeedSlackAuthorizedUsers(context.Context, []models.SlackAuthorizedUser) error
+	SetSlackProjectSelectionUnavailable(context.Context, bool) error
+	FailSettingWrites(context.Context, string) error
 	// SetExecutionTerminalState constructs an execution completed before dispatch reconciliation.
 	SetExecutionTerminalState(context.Context, string, models.ExecutionStatus, time.Time) error
 	ExecutionUsage(context.Context, string) ([]ExecutionUsageRecord, error)
@@ -141,6 +145,8 @@ type Fixtures interface {
 // SQLite counts executed statements; other backends must count their database
 // requests, including requests made inside a single store method.
 type IOStats struct {
+	// SlackAuthorizationReads counts physical reads checking Slack authorization.
+	SlackAuthorizationReads int
 	// SettingsSingleReads counts physical reads loading one setting by key.
 	SettingsSingleReads int
 	// SettingsSnapshotReads counts physical reads loading a group of settings.

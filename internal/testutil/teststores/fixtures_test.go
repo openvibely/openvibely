@@ -390,3 +390,55 @@ func TestSettingsPhysicalReadCounters(t *testing.T) {
 		})
 	}
 }
+
+func TestSlackFixtureFaultsAndPhysicalReads(t *testing.T) {
+	for _, production := range []bool{false, true} {
+		name := "isolated"
+		if production {
+			name = "production"
+		}
+		t.Run(name, func(t *testing.T) {
+			opts := []teststores.Option{teststores.WithIOCounting()}
+			if production {
+				opts = append(opts, teststores.WithProductionTopology())
+			}
+			env := teststores.New(t, opts...)
+			ctx := t.Context()
+			require.NoError(t, env.Fixtures.SeedSlackAuthorizedUsers(ctx, []models.SlackAuthorizedUser{{ProjectID: "default", SlackUserID: "U1", DisplayName: "one", AddedBy: "test"}}))
+			env.IO.Reset()
+			env.IO.SetEnabled(true)
+			for i := 0; i < 2; i++ {
+				ok, err := env.SlackAuth.IsAuthorized(ctx, "default", "U1")
+				require.NoError(t, err)
+				require.True(t, ok)
+			}
+			env.IO.SetEnabled(false)
+			measured := env.IO.Snapshot()
+			require.Equal(t, 2, measured.Requests)
+			require.Equal(t, 2, measured.SlackAuthorizationReads)
+			_, err := env.SlackAuth.IsAuthorized(ctx, "default", "U1")
+			require.NoError(t, err)
+			require.Equal(t, measured, env.IO.Snapshot())
+			env.IO.Reset()
+			require.Zero(t, env.IO.Snapshot().SlackAuthorizationReads)
+			require.NoError(t, env.SlackUserProjects.SetUserProject(ctx, "T1", "U1", "default"))
+			require.NoError(t, env.Fixtures.SetSlackProjectSelectionUnavailable(ctx, true))
+			require.Error(t, env.SlackUserProjects.SetUserProject(ctx, "T1", "U1", "default"))
+			require.NoError(t, env.Fixtures.SetSlackProjectSelectionUnavailable(ctx, false))
+			selected, err := env.SlackUserProjects.GetUserProject(ctx, "T1", "U1")
+			require.NoError(t, err)
+			require.Equal(t, "default", selected)
+			require.NoError(t, env.Settings.Set(ctx, "failing-setting", "original"))
+			require.NoError(t, env.Fixtures.FailSettingWrites(ctx, "failing-setting"))
+			require.Error(t, env.Settings.SetMany(ctx, map[string]string{"other-setting": "changed", "failing-setting": "replacement"}))
+			values, err := env.Settings.GetMany(ctx, []string{"other-setting", "failing-setting"})
+			require.NoError(t, err)
+			require.Empty(t, values["other-setting"])
+			require.Equal(t, "original", values["failing-setting"])
+			other := teststores.New(t)
+			allowed, err := other.SlackAuth.IsAuthorized(ctx, "default", "U1")
+			require.NoError(t, err)
+			require.False(t, allowed)
+		})
+	}
+}

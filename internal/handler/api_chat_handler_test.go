@@ -19,7 +19,6 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/openvibely/openvibely/internal/testutil/teststores"
 	"github.com/stretchr/testify/assert"
@@ -62,7 +61,7 @@ func TestAPIChatMessage_RejectsWhitespaceOnlyMessageBeforeIdleAdmission(t *testi
 
 	for _, tc := range whitespaceMessages {
 		t.Run(tc.name, func(t *testing.T) {
-			h, e, llmConfigRepo := setupTestHandler(t)
+			h, e, llmConfigRepo, env := setupTestHandlerWithStores(t)
 			ctx := context.Background()
 			createAgent(t, llmConfigRepo)
 			project := createProject(t, h, "API Chat Whitespace Project")
@@ -81,7 +80,7 @@ func TestAPIChatMessage_RejectsWhitespaceOnlyMessageBeforeIdleAdmission(t *testi
 			tasks, err := h.taskRepo.ListByProject(ctx, project.ID, "")
 			require.NoError(t, err)
 			assert.Empty(t, tasks)
-			executions, err := h.execRepo.(*sqlite.ExecutionRepo).ListByProject(ctx, project.ID, 50)
+			executions, err := env.Fixtures.ProjectExecutions(ctx, project.ID, 50)
 			require.NoError(t, err)
 			assert.Empty(t, executions)
 			inputs, err := h.threadInputRepo.ListPendingForChat(ctx, project.ID)
@@ -93,7 +92,7 @@ func TestAPIChatMessage_RejectsWhitespaceOnlyMessageBeforeIdleAdmission(t *testi
 }
 
 func TestAPIChatMessage_RejectsWhitespaceOnlyMultipartWithoutStagingAttachments(t *testing.T) {
-	h, e, llmConfigRepo := setupTestHandler(t)
+	h, e, llmConfigRepo, env := setupTestHandlerWithStores(t)
 	ctx := context.Background()
 	agent := createAgent(t, llmConfigRepo)
 	project := createProject(t, h, "API Chat Multipart Whitespace Project")
@@ -110,7 +109,7 @@ func TestAPIChatMessage_RejectsWhitespaceOnlyMultipartWithoutStagingAttachments(
 	h.llmSvc.SetLLMCaller(mock)
 	beforeTasks, err := h.taskRepo.ListByProject(ctx, project.ID, "")
 	require.NoError(t, err)
-	beforeExecutions, err := h.execRepo.(*sqlite.ExecutionRepo).ListByProject(ctx, project.ID, 50)
+	beforeExecutions, err := env.Fixtures.ProjectExecutions(ctx, project.ID, 50)
 	require.NoError(t, err)
 	beforeInputs, err := h.threadInputRepo.ListPendingForChat(ctx, project.ID)
 	require.NoError(t, err)
@@ -145,7 +144,7 @@ func TestAPIChatMessage_RejectsWhitespaceOnlyMultipartWithoutStagingAttachments(
 			tasks, err := h.taskRepo.ListByProject(ctx, project.ID, "")
 			require.NoError(t, err)
 			assert.Equal(t, beforeTasks, tasks)
-			executions, err := h.execRepo.(*sqlite.ExecutionRepo).ListByProject(ctx, project.ID, 50)
+			executions, err := env.Fixtures.ProjectExecutions(ctx, project.ID, 50)
 			require.NoError(t, err)
 			assert.Equal(t, beforeExecutions, executions)
 			inputs, err := h.threadInputRepo.ListPendingForChat(ctx, project.ID)
@@ -164,7 +163,7 @@ func TestAPIChatMessage_RejectsWhitespaceOnlyMultipartWithoutStagingAttachments(
 }
 
 func TestAPIChatMessage_RejectsWhitespaceOnlyMessageWithActiveTurn(t *testing.T) {
-	h, e, llmConfigRepo := setupTestHandler(t)
+	h, e, llmConfigRepo, env := setupTestHandlerWithStores(t)
 	ctx := context.Background()
 	agent := createAgent(t, llmConfigRepo)
 	project := createProject(t, h, "API Chat Active Whitespace Project")
@@ -193,7 +192,7 @@ func TestAPIChatMessage_RejectsWhitespaceOnlyMessageWithActiveTurn(t *testing.T)
 
 	beforeTasks, err := h.taskRepo.ListByProject(ctx, project.ID, "")
 	require.NoError(t, err)
-	beforeExecutions, err := h.execRepo.(*sqlite.ExecutionRepo).ListByProject(ctx, project.ID, 50)
+	beforeExecutions, err := env.Fixtures.ProjectExecutions(ctx, project.ID, 50)
 	require.NoError(t, err)
 	beforeInputs, err := h.threadInputRepo.ListPendingForChat(ctx, project.ID)
 	require.NoError(t, err)
@@ -221,7 +220,7 @@ func TestAPIChatMessage_RejectsWhitespaceOnlyMessageWithActiveTurn(t *testing.T)
 			tasks, err := h.taskRepo.ListByProject(ctx, project.ID, "")
 			require.NoError(t, err)
 			assert.Equal(t, beforeTasks, tasks)
-			executions, err := h.execRepo.(*sqlite.ExecutionRepo).ListByProject(ctx, project.ID, 50)
+			executions, err := env.Fixtures.ProjectExecutions(ctx, project.ID, 50)
 			require.NoError(t, err)
 			assert.Equal(t, beforeExecutions, executions)
 			inputs, err := h.threadInputRepo.ListPendingForChat(ctx, project.ID)

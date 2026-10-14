@@ -505,3 +505,38 @@ func (f *fixtures) SetExecutionTerminalState(ctx context.Context, id string, sta
 	_, err := f.db.ExecContext(ctx, `UPDATE executions SET status = ?, completed_at = ? WHERE id = ?`, status, completedAt, id)
 	return err
 }
+
+func (f *fixtures) SeedSlackAuthorizedUsers(ctx context.Context, users []models.SlackAuthorizedUser) error {
+	tx, err := f.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for _, u := range users {
+		if _, err = tx.ExecContext(ctx, `INSERT INTO slack_authorized_users(project_id,slack_user_id,display_name,added_by) VALUES (?,?,?,?)`, u.ProjectID, u.SlackUserID, u.DisplayName, u.AddedBy); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+func (f *fixtures) SetSlackProjectSelectionUnavailable(ctx context.Context, unavailable bool) error {
+	query := `ALTER TABLE slack_user_projects_unavailable RENAME TO slack_user_projects`
+	if unavailable {
+		query = `ALTER TABLE slack_user_projects RENAME TO slack_user_projects_unavailable`
+	}
+	_, err := f.db.ExecContext(ctx, query)
+	return err
+}
+func (f *fixtures) FailSettingWrites(ctx context.Context, key string) error {
+	for _, event := range []string{"INSERT", "UPDATE"} {
+		_, err := f.db.ExecContext(ctx, `CREATE TRIGGER fixture_fail_setting_`+event+` BEFORE `+event+` ON app_settings WHEN NEW.key = '`+strings.ReplaceAll(key, "'", "''")+`' BEGIN SELECT RAISE(ABORT, 'forced settings write failure'); END`)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (f *fixtures) ProjectExecutions(ctx context.Context, projectID string, limit int) ([]models.Execution, error) {
+	return sqlite.NewExecutionRepo(f.db).ListByProject(ctx, projectID, limit)
+}
