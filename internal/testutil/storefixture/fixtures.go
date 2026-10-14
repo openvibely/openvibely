@@ -34,7 +34,14 @@ type AutomationStateCounts struct{ Automations, Versions, Nodes, Edges, Resource
 
 type ProjectAutomationState struct{ Automations, Tasks, Schedules int }
 
+// TaskDiscoveryWorkload describes mixed active/chat tasks with deterministic ordering and large hidden payloads.
+type TaskDiscoveryWorkload struct {
+	ProjectID                              string
+	Count, PromptBytes, ConfigurationBytes int
+}
+
 type Fixtures interface {
+	SeedTaskDiscoveryWorkload(context.Context, TaskDiscoveryWorkload) error
 	// SetAutomationLifecycleSnapshot bypasses queue pruning to construct a stale dispatch candidate.
 	SetAutomationLifecycleSnapshot(context.Context, string, string, models.AutomationLifecycleState) error
 	SetTaskCreationOrigin(context.Context, string, string) error

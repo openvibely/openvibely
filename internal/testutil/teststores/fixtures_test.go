@@ -825,3 +825,42 @@ func TestAutomationFixtureOriginAndLifecycleScopes(t *testing.T) {
 		})
 	}
 }
+
+func TestTaskDiscoveryWorkloadPreservesPayloadAndOrdering(t *testing.T) {
+	for _, production := range []bool{false, true} {
+		name := "isolated"
+		if production {
+			name = "production"
+		}
+		t.Run(name, func(t *testing.T) {
+			var opts []teststores.Option
+			if production {
+				opts = append(opts, teststores.WithProductionTopology())
+			}
+			env := teststores.New(t, opts...)
+			ctx := t.Context()
+			other := models.Project{Name: "Other discovery project"}
+			require.NoError(t, env.Projects.Create(ctx, &other))
+			for _, projectID := range []string{"default", other.ID} {
+				require.NoError(t, env.Fixtures.SeedTaskDiscoveryWorkload(ctx, storefixture.TaskDiscoveryWorkload{ProjectID: projectID, Count: 40, PromptBytes: 1024, ConfigurationBytes: 128}))
+				rows, total, err := env.Tasks.ListTasksForDiscovery(ctx, projectID, persistence.TaskDiscoveryFilter{Limit: 50})
+				require.NoError(t, err)
+				require.Equal(t, 38, total)
+				require.Len(t, rows, 38)
+				require.Equal(t, "Discovery benchmark task 00039", rows[0].Title)
+				for i, row := range rows {
+					require.Equal(t, models.CategoryActive, row.Category)
+					if i > 0 {
+						require.True(t, rows[i-1].UpdatedAt.After(row.UpdatedAt))
+					}
+					full, err := env.Tasks.GetByID(ctx, row.ID)
+					require.NoError(t, err)
+					require.Equal(t, projectID, full.ProjectID)
+					require.Len(t, full.Prompt, 1024)
+					require.Len(t, full.ChainConfig, 142)
+					require.Len(t, full.SwarmConfig, 142)
+				}
+			}
+		})
+	}
+}
