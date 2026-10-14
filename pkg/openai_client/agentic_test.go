@@ -3042,6 +3042,10 @@ func TestSendAgentic_AutoCompactionMidTurn_APIKey(t *testing.T) {
 		case 3:
 			w.Header().Set("Content-Type", "text/event-stream")
 			input := body["input"].([]any)
+			encodedContext, _ := json.Marshal(input)
+			if !strings.Contains(string(encodedContext), "openvibely_execution_environment") || !strings.Contains(string(encodedContext), "Shell executable:") {
+				t.Fatalf("environment not restored after compaction: %s", encodedContext)
+			}
 			if len(input) < 2 {
 				t.Fatalf("input len = %d, want at least 2 after compaction", len(input))
 			}

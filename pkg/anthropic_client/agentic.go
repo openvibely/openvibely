@@ -447,6 +447,9 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 		messages = append(messages, agenticMessage{Role: msg.Role, Content: msg.Content})
 	}
 
+	if !opts.DisableTools {
+		messages = ensureExecutionEnvironment(messages, opts.WorkDir)
+	}
 	// If attachments are present, build multimodal content blocks for the prompt
 	if len(opts.Attachments) > 0 {
 		contentBlocks, blockErr := buildContentBlocks(prompt, opts.Attachments)
@@ -469,6 +472,9 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 	hasDurableCompactionState := false
 
 	for turn := 0; turn < opts.MaxTurns; turn++ {
+		if !opts.DisableTools {
+			messages = ensureExecutionEnvironment(messages, opts.WorkDir)
+		}
 		// Send request (streaming)
 		resp, err := httpretry.DoStreamTurn(ctx, httpretry.StreamTurnPolicy{
 			OnRetry: func(event httpretry.RetryEvent) {

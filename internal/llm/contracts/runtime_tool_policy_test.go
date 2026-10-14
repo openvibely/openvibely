@@ -166,3 +166,25 @@ func TestAllowsBuiltInToolSharedPolicy(t *testing.T) {
 		t.Fatal("unmapped tools should pass through")
 	}
 }
+
+func TestShellPermissionCompatibility(t *testing.T) {
+	mapper := func(name string) string {
+		if name == "shell" || name == "bash" {
+			return "Bash"
+		}
+		return ""
+	}
+	for _, name := range []string{"shell", "bash"} {
+		for _, grant := range []string{"Bash", "Shell"} {
+			if !AllowsBuiltInTool(name, BuiltInToolPolicyOptions{ConfiguredTools: []string{grant}, MapToolName: mapper}) {
+				t.Fatalf("%s did not allow %s", grant, name)
+			}
+		}
+		if AllowsBuiltInTool(name, BuiltInToolPolicyOptions{ConfiguredTools: []string{"Read"}, MapToolName: mapper}) {
+			t.Fatalf("read-only grant allowed %s", name)
+		}
+		if ComposeRuntimeToolFilter(nil, nil, RuntimeToolPolicyOptions{ChatMode: models.ChatModePlan})(name) {
+			t.Fatalf("plan allowed %s", name)
+		}
+	}
+}

@@ -76,7 +76,7 @@ func mapBuiltInToolName(name string) string {
 		return "Write"
 	case "edit_file":
 		return "Edit"
-	case "bash":
+	case "bash", "shell":
 		return "Bash"
 	case "list_files":
 		return "Glob"
@@ -497,7 +497,12 @@ func (a *Adapter) CallDirect(ctx context.Context, prompt string, attachments []m
 		return resp.Text, usage, nil
 	}
 
+	environmentWorkDir := effectiveWorkDir
+	if rawDirectPrompt {
+		environmentWorkDir = ""
+	}
 	resp, err := client.Send(ctx, fullPrompt, &openaiclient.SendOptions{
+		EnvironmentWorkDir:  environmentWorkDir,
 		Model:               agent.Model,
 		MaxOutputTokens:     openAIDirectOutputBudget,
 		System:              systemPrompt,
@@ -667,7 +672,6 @@ func (a *Adapter) CallChatStreaming(ctx context.Context, message string, attachm
 	client.History = append(client.History, buildClientHistory(chatHistory)...)
 	rt := llmcontracts.RuntimeToolsFromContext(ctx)
 	systemPromptStr := llmprompt.BuildCodexChatSystemPrompt(agent.Model, isTaskFollowup, chatMode, chatSystemContext, false)
-	systemPromptStr = llmprompt.AppendWorktreeContextPrompt(systemPromptStr, workDir)
 	if !isTaskFollowup {
 		systemPromptStr = applyOpenAIOAuthSystemPrompt(systemPromptStr, agent)
 	}
@@ -887,7 +891,6 @@ func (a *Adapter) CallCompletionsChatStreaming(ctx context.Context, message stri
 	client.History = append(client.History, buildClientHistory(chatHistory)...)
 	rt := llmcontracts.RuntimeToolsFromContext(ctx)
 	systemPromptStr := llmprompt.BuildCodexChatSystemPrompt(agent.Model, isTaskFollowup, chatMode, chatSystemContext, false)
-	systemPromptStr = llmprompt.AppendWorktreeContextPrompt(systemPromptStr, workDir)
 	if !isTaskFollowup {
 		systemPromptStr = applyOpenAIOAuthSystemPrompt(systemPromptStr, agent)
 	}
@@ -1333,7 +1336,7 @@ func toolSecondaryInfo(name string, input json.RawMessage) string {
 			parts := strings.Split(fp, "/")
 			return parts[len(parts)-1]
 		}
-	case "bash":
+	case "bash", "shell":
 		if cmd, ok := m["command"].(string); ok {
 			cmd = truncateToolSecondary(cmd, 320)
 			return "$ " + cmd

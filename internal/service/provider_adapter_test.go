@@ -918,7 +918,7 @@ func TestReportedContextUsagePersistsAndTriggersNextTurn(t *testing.T) {
 
 func TestReportedContextUsageAddsOnlyNewContent(t *testing.T) {
 	req := llmcontracts.AgentRequest{Message: "12345678", ChatHistory: []models.Execution{{ID: "source", Output: strings.Repeat("x", 10000)}}}
-	baseline := models.ChatContextUsage{SourceExecutionID: "source", ContextTokens: 120000}
+	baseline := models.ChatContextUsage{SourceExecutionID: "source", ContextTokens: 120000, OverheadTokens: requestContextOverhead(req)}
 	if got := estimateContextFromReportedUsage(req, baseline); got != 120002 {
 		t.Fatalf("got %d, want 120002", got)
 	}
@@ -1091,13 +1091,13 @@ func TestProviderContextCompactionLimits_TriggerMathAndConfiguredClamp(t *testin
 
 	req := llmcontracts.AgentRequest{Agent: models.LLMConfig{Provider: models.ProviderOpenAICompatible, ProviderContextWindow: 1000}, Message: strings.Repeat("a", 3600)}
 	used := estimateModelVisibleRequestTokens(req)
-	if used != 900 {
+	if used != 900+requestContextOverhead(req) {
 		t.Fatalf("used=%d, want bytes/4 estimate", used)
 	}
 	req.Message = strings.Repeat("a", 3800)
 	req.Agent.CompactionThreshold = 2000
 	used = estimateModelVisibleRequestTokens(req)
-	if used != 950 {
+	if used != 950+requestContextOverhead(req) {
 		t.Fatalf("used=%d, want bytes/4 estimate", used)
 	}
 

@@ -32,7 +32,7 @@ func toolSecondaryInfo(name string, input json.RawMessage) string {
 			parts := splitPath(fp)
 			return parts[len(parts)-1]
 		}
-	case "bash", "Bash":
+	case "bash", "Bash", "shell":
 		if cmd, ok := m["command"].(string); ok {
 			if len(cmd) > 60 {
 				cmd = cmd[:60] + "…"

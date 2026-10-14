@@ -23,7 +23,6 @@ func TestProviderPromptBudgetUsesProviderBase(t *testing.T) {
 				if provider == models.ProviderAnthropic {
 					want = llmprompt.BuildAnthropicChatSystemPrompt(req.Agent.Model, true, req.ChatMode, req.ChatSystemContext, false)
 				}
-				want = llmprompt.AppendWorktreeContextPrompt(want, req.WorkDir)
 			}
 			if got := estimateProviderSystemPromptTokens(req); got != estimatedUTF8Tokens(want) {
 				t.Fatalf("%s followup=%v: got %d want %d", provider, followup, got, estimatedUTF8Tokens(want))
@@ -48,7 +47,6 @@ func TestProviderPromptBudgetIncludesRuntimeActionMode(t *testing.T) {
 						if provider == models.ProviderAnthropic {
 							base = llmprompt.BuildAnthropicChatSystemPrompt(req.Agent.Model, followup, mode, req.ChatSystemContext, false)
 						}
-						base = llmprompt.AppendWorktreeContextPrompt(base, req.WorkDir)
 						if provider == models.ProviderOpenAI && auth == models.AuthMethodOAuth && !followup {
 							base = llmprompt.BuildOpenAIOAuthSystemPrompt(base)
 						}

@@ -41,7 +41,7 @@ func adaptCodexTools(base string) string {
 		case strings.Contains(line, "request_user_input_async"):
 			lines[i] = "When clarification is needed, use request_user_input if it is provided. Follow its schema and wait for the user's answer; otherwise ask the user in your response. Never assume an unanswered question grants approval."
 		default:
-			lines[i] = strings.NewReplacer("`apply_patch`", "`edit_file` or `write_file`", "exec_command", "bash").Replace(line)
+			lines[i] = strings.NewReplacer("`apply_patch`", "`edit_file` or `write_file`", "exec_command", "shell").Replace(line)
 		}
 	}
 	return strings.Join(lines, "\n") + "\n\nUse only tools attached to this request, with their actual names and schemas. For file inspection use read_file, list_files, and grep_search when available. Do not assume Codex-specific tools, connectors, or plugin discovery are installed."
