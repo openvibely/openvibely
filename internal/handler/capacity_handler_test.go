@@ -609,9 +609,9 @@ func TestHandler_ProjectCapacityPendingCountFailureFallsBackToEmptyCounts(t *tes
 	require.NoError(t, h.projectSvc.Create(ctx, project))
 	h.workerSvc.SetProjectRepo(h.projectRepo)
 
-	closedDB := teststores.NewDB(t)
+	closedDB := teststores.New(t)
 	require.NoError(t, closedDB.Close())
-	h.taskRepo = teststores.Of(closedDB).Tasks
+	h.taskRepo = closedDB.Tasks
 
 	collectionReq := httptest.NewRequest(http.MethodGet, "/api/capacity/projects", nil)
 	collectionRec := httptest.NewRecorder()

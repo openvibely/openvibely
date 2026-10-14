@@ -74,8 +74,8 @@ func TestResolveTaskReferencePreservesLookupOrderScopeAndErrors(t *testing.T) {
 	_, err = ResolveTaskReference(ctx, taskRepo, project.ID, "", "", TaskReferenceResolutionOptions{})
 	require.EqualError(t, err, "no task_id or title provided")
 
-	closedDB := teststores.NewDB(t)
-	closedTaskRepo := teststores.Of(closedDB).Tasks
+	closedDB := teststores.New(t)
+	closedTaskRepo := closedDB.Tasks
 	require.NoError(t, closedDB.Close())
 	_, err = ResolveTaskReference(ctx, closedTaskRepo, project.ID, task.ID, "", TaskReferenceResolutionOptions{})
 	require.ErrorContains(t, err, "error looking up task "+task.ID+":")

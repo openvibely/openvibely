@@ -2,7 +2,6 @@ package handler
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -216,20 +215,20 @@ func TestCreateTaskPullRequest_TaskCardOwnershipFailuresAreIndistinguishable(t *
 func TestCreateTaskPullRequest_TaskCardRevalidatesProjectContextInsideRepositoryLease(t *testing.T) {
 	for _, tt := range []struct {
 		name   string
-		mutate func(context.Context, *testing.T, *models.Project, *models.Project, *models.Task, *sql.DB)
+		mutate func(context.Context, *testing.T, *models.Project, *models.Project, *models.Task, *teststores.Env)
 	}{
 		{
 			name: "task moved to another project",
-			mutate: func(ctx context.Context, t *testing.T, _ *models.Project, foreign *models.Project, task *models.Task, db *sql.DB) {
-				if _, err := db.ExecContext(ctx, "UPDATE tasks SET project_id = ? WHERE id = ?", foreign.ID, task.ID); err != nil {
+			mutate: func(ctx context.Context, t *testing.T, _ *models.Project, foreign *models.Project, task *models.Task, db *teststores.Env) {
+				if err := db.Fixtures.SetTaskProject(ctx, task.ID, foreign.ID); err != nil {
 					t.Fatal(err)
 				}
 			},
 		},
 		{
 			name: "project repository changed",
-			mutate: func(ctx context.Context, t *testing.T, project, _ *models.Project, _ *models.Task, db *sql.DB) {
-				projects := teststores.Of(db).Projects
+			mutate: func(ctx context.Context, t *testing.T, project, _ *models.Project, _ *models.Task, db *teststores.Env) {
+				projects := db.Projects
 				stored, err := projects.GetByID(ctx, project.ID)
 				if err != nil {
 					t.Fatal(err)
@@ -243,8 +242,8 @@ func TestCreateTaskPullRequest_TaskCardRevalidatesProjectContextInsideRepository
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx := context.Background()
-			h, e, _, db := setupTestHandlerWithDB(t)
-			h.SetTaskPullRequestRepo(teststores.Of(db).TaskPullRequests)
+			h, e, _, db := setupTestHandlerWithStores(t)
+			h.SetTaskPullRequestRepo(db.TaskPullRequests)
 			repositoryCalls := 0
 			h.SetGitHubService(&fakeGitHubService{
 				resolveRepoFn: func(context.Context, string, string) (*service.GitHubRepoRef, error) {

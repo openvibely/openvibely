@@ -338,3 +338,18 @@ func (f *fixtures) FailExecutionCancellation(ctx context.Context, id string) err
 	_, err := f.db.ExecContext(ctx, `CREATE TRIGGER fail_fixture_execution_cancel BEFORE UPDATE OF status ON executions WHEN OLD.id = `+sqliteLiteral(id)+` AND NEW.status = 'cancelled' BEGIN SELECT RAISE(ABORT, 'forced execution cancellation failure'); END`)
 	return err
 }
+
+func (f *fixtures) SetTaskProject(ctx context.Context, id, projectID string) error {
+	result, err := f.db.ExecContext(ctx, `UPDATE tasks SET project_id = ? WHERE id = ?`, projectID, id)
+	if err != nil {
+		return err
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return persistence.ErrNotFound
+	}
+	return nil
+}
