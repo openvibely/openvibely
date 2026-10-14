@@ -30,6 +30,10 @@ type ExecutionUsageRecord struct {
 type ChannelProjectSelectionCounts struct{ Discord, Slack, Telegram, Email int }
 
 type Fixtures interface {
+	// SeedAutomationActivity preserves historical resource identities without current normalization.
+	SeedAutomationActivity(context.Context, models.AutomationActivity, []models.AutomationActivityResource) error
+	SetAutomationInvocationCompletionTime(context.Context, string, time.Time) error
+	SetTaskPullRequestUpdatedAt(context.Context, string, time.Time) error
 	// SetTaskCategory constructs board state without publishing application events.
 	SetTaskCategory(context.Context, string, models.TaskCategory) error
 	// FailLatestActiveAutomationInvocation simulates a terminal runtime failure before projection reconciliation.

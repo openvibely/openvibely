@@ -19,6 +19,7 @@ import (
 	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/openvibely/openvibely/internal/testutil/sqlitefixtures"
 	"github.com/openvibely/openvibely/internal/testutil/teststores"
 	"github.com/stretchr/testify/require"
 )
@@ -43,7 +44,7 @@ func newAutomationRuntimeFixture(t *testing.T, adapterKey string) automationRunt
 
 func newAutomationRuntimeFixtureWithDB(t *testing.T, db *sql.DB, adapterKey string) automationRuntimeFixture {
 	t.Helper()
-	fixture := buildAutomationRuntimeFixture(t, &teststores.Env{Stores: teststores.Of(db)}, adapterKey)
+	fixture := buildAutomationRuntimeFixture(t, &teststores.Env{Stores: teststores.Of(db), Fixtures: sqlitefixtures.New(db)}, adapterKey)
 	fixture.db = db
 	return fixture
 }
