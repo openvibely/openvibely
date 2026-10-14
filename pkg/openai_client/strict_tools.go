@@ -41,7 +41,7 @@ func normalizeDefinedArguments(defs []ToolDefinition, name string, input json.Ra
 			}
 			continue
 		}
-		if def.Name == name && len(def.ParameterSchema()) > 0 {
+		if (def.Name == name || def.Name == "shell" && (name == "bash" || name == "Bash")) && len(def.ParameterSchema()) > 0 {
 			return toolschema.ValidateArguments(def.Schema, def.Parameters, input)
 		}
 	}

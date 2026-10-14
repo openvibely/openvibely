@@ -31,6 +31,7 @@ import (
 	llmusage "github.com/openvibely/openvibely/internal/llm/usage"
 	"github.com/openvibely/openvibely/internal/models"
 	anthropicclient "github.com/openvibely/openvibely/pkg/anthropic_client"
+	"github.com/openvibely/openvibely/pkg/executionenv"
 	openaiclient "github.com/openvibely/openvibely/pkg/openai_client"
 	"github.com/openvibely/openvibely/pkg/toolschema"
 )
@@ -531,6 +532,9 @@ func estimateHistoryTokens(provider models.LLMProvider, history []models.Executi
 	if provider == models.ProviderOpenAI {
 		return llmopenai.EstimateHistoryTokens(history)
 	}
+	if provider == models.ProviderAnthropic {
+		return llmanthropic.EstimateHistoryTokens(history)
+	}
 	total := 0
 	for _, exec := range history {
 		total += estimateExecutionTokens(exec)
@@ -686,6 +690,9 @@ func openAIContextWindow(model string) int {
 func estimateModelVisibleRequestTokens(req llmcontracts.AgentRequest) int {
 	total := estimatedUTF8Tokens(req.Message) + estimatedUTF8Tokens(req.NativeCompactionStateJSON)
 	total += estimateProviderSystemPromptTokens(req)
+	if !req.RawDirectPrompt && !req.LifecycleHookCall {
+		total += estimatedUTF8Tokens(executionenv.Context(req.WorkDir))
+	}
 	total += estimateRuntimeToolDefinitionTokens(llmcontracts.RuntimeToolsFromContext(req.Ctx))
 	total += estimateAgentDefinitionTokens(req.AgentDefinition)
 	for _, att := range req.Attachments {
@@ -719,7 +726,6 @@ func estimateProviderSystemPromptTokens(req llmcontracts.AgentRequest) int {
 			case models.ProviderAnthropic:
 				base = llmprompt.BuildAnthropicChatSystemPrompt(req.Agent.Model, req.Followup, req.ChatMode, req.ChatSystemContext, false)
 			}
-			base = llmprompt.AppendWorktreeContextPrompt(base, req.WorkDir)
 			if req.ChatMode == models.ChatModeOrchestrate && !req.Followup && (req.Agent.Provider == models.ProviderOpenAI || req.Agent.Provider == models.ProviderAnthropic) {
 				rt := llmcontracts.RuntimeToolsFromContext(req.Ctx)
 				base = llmprompt.ApplyChatActionToolMode(base, rt.DefinitionNames())
@@ -849,7 +855,7 @@ func (s *LLMService) callProviderWithCompaction(adapter ProviderAdapter, req llm
 	req = resolveProviderRequestForBudget(req)
 	req = trackSteeringRecovery(req)
 	var replayErr error
-	req, replayErr = s.loadOpenAIReplayHistory(req)
+	req, replayErr = s.loadProviderReplayHistory(req)
 	if replayErr != nil {
 		return llmcontracts.AgentResult{}, replayErr
 	}
@@ -1270,8 +1276,8 @@ func (s *LLMService) callProviderWithLastResortTruncation(adapter ProviderAdapte
 }
 
 // Hydrate once at the budget boundary, never after history has been trimmed.
-func (s *LLMService) loadOpenAIReplayHistory(req llmcontracts.AgentRequest) (llmcontracts.AgentRequest, error) {
-	if req.Agent.Provider != models.ProviderOpenAI || s == nil || s.execRepo == nil || len(req.ChatHistory) == 0 {
+func (s *LLMService) loadProviderReplayHistory(req llmcontracts.AgentRequest) (llmcontracts.AgentRequest, error) {
+	if (req.Agent.Provider != models.ProviderOpenAI && req.Agent.Provider != models.ProviderAnthropic) || s == nil || s.execRepo == nil || len(req.ChatHistory) == 0 {
 		return req, nil
 	}
 	ids := make([]string, 0, len(req.ChatHistory))
@@ -1450,7 +1456,7 @@ func buildLocalSummaryCompactionPrompt(history []models.Execution) string {
 			sb.WriteString("\n\n")
 		}
 		writeExecutionReplayForCompaction(&sb, exec)
-		if len(exec.ReplayMessages) == 0 {
+		if len(exec.ReplayMessages) == 0 || environmentReplayMissingAnswer(exec.ReplayMessages) {
 			if replay := llmprompt.ReplayAssistantContent(exec); strings.TrimSpace(replay) != "" {
 				sb.WriteString("Assistant: ")
 				sb.WriteString(strings.TrimSpace(replay))
@@ -1463,6 +1469,34 @@ func buildLocalSummaryCompactionPrompt(history []models.Execution) string {
 	}
 	sb.WriteString(localContextCompactionInstruction)
 	return sb.String()
+}
+
+// Environment snapshots can be written after a stream fails, when the adapter
+// returns no answer even though the stream writer already persisted output.
+// Such snapshots must not hide that output (or the execution's failure reason).
+func environmentReplayMissingAnswer(replays []models.ExecutionReplayMessage) bool {
+	for _, replay := range replays {
+		var snapshot struct {
+			Environment string `json:"anthropic_execution_environment"`
+			Messages    []struct {
+				Role    string `json:"role"`
+				Content string `json:"content"`
+			} `json:"messages"`
+		}
+		if json.Unmarshal([]byte(replay.TranscriptJSON), &snapshot) != nil || snapshot.Environment == "" {
+			continue
+		}
+		hasAnswer := false
+		for _, message := range snapshot.Messages {
+			if message.Role == "assistant" && strings.TrimSpace(message.Content) != "" {
+				hasAnswer = true
+			}
+		}
+		if !hasAnswer {
+			return true
+		}
+	}
+	return false
 }
 
 func writeExecutionReplayForCompaction(sb *strings.Builder, exec models.Execution) {

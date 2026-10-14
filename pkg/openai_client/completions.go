@@ -32,12 +32,13 @@ type CompletionsOptions struct {
 	Temperature float64
 	// ReasoningEffort is sent for first-party GPT-6 Sol/Luna requests. When
 	// function tools are present those models require none on Chat Completions.
-	ReasoningEffort  string
-	FirstPartyOpenAI bool
-	System           string
-	WorkDir          string
-	MaxTurns         int
-	DisableTools     bool
+	ReasoningEffort          string
+	FirstPartyOpenAI         bool
+	System                   string
+	WorkDir                  string
+	MaxTurns                 int
+	OmitExecutionEnvironment bool // Raw utility requests may omit coding environment context.
+	DisableTools             bool
 	// SkipDefaultTools suppresses built-in local tools while still allowing
 	// ExtraTools (for example request-scoped runtime tools) to be sent.
 	SkipDefaultTools bool
@@ -136,6 +137,14 @@ func (c *Client) SendCompletions(ctx context.Context, prompt string, opts *Compl
 			})
 		}
 	}
+	var environmentUpdate []CompletionsHistoryMessage
+	if !opts.OmitExecutionEnvironment {
+		before := len(existingCompletionsHistory)
+		existingCompletionsHistory = ensureCompletionsHistoryEnvironment(existingCompletionsHistory, opts.WorkDir)
+		if len(existingCompletionsHistory) != before {
+			environmentUpdate = ensureCompletionsHistoryEnvironment(nil, opts.WorkDir)
+		}
+	}
 	if opts.System != "" {
 		messages = append(messages, completionsMessage{
 			Role:    "system",
@@ -210,6 +219,9 @@ func (c *Client) SendCompletions(ctx context.Context, prompt string, opts *Compl
 		})
 	}
 
+	if !opts.OmitExecutionEnvironment {
+		messages = ensureCompletionsEnvironment(messages, opts.WorkDir)
+	}
 	result := &AgenticResponse{Model: opts.Model}
 	var allText strings.Builder
 	finalReasoningContent := ""
@@ -348,11 +360,14 @@ func (c *Client) SendCompletions(ctx context.Context, prompt string, opts *Compl
 	result.Text = allText.String()
 
 	// Update client history
+	if !opts.OmitExecutionEnvironment {
+		c.History = ensureHistoryEnvironment(c.History, opts.WorkDir)
+	}
 	c.History = append(c.History, Message{Role: "user", Content: prompt})
 	c.History = append(c.History, Message{Role: "assistant", Content: result.Text})
 	c.completionsHistory = append(existingCompletionsHistory, cloneCompletionsHistory(currentTranscript)...)
 	c.lastCompletionsReasoning = finalReasoningContent
-	c.lastCompletionsTranscript = cloneCompletionsHistory(currentTranscript)
+	c.lastCompletionsTranscript = append(environmentUpdate, cloneCompletionsHistory(currentTranscript)...)
 
 	return result, nil
 }

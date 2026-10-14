@@ -17,7 +17,6 @@ func TestAnthropicAgentSystemPrompt(t *testing.T) {
 		"start the dev server and use the feature in a browser",
 		"read_file, edit_file, write_file, list_files, grep_search",
 		"PROJECT_CONTEXT",
-		BuildWorktreeContextSentence("/tmp/.worktrees/task_123"),
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("missing instruction %q", want)

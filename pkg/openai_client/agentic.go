@@ -24,6 +24,7 @@ import (
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/llm/tokenestimate"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/pkg/executionenv"
 )
 
 // DefaultCompactionThreshold is the default approximate token count that
@@ -57,10 +58,11 @@ type AgenticOptions struct {
 	// CompactionPrompt overrides the instruction text used by standalone
 	// /responses/compact. When empty, supported providers/models follow Codex
 	// remote V2 compaction through a compaction_trigger.
-	CompactionPrompt string
-	WorkDir          string // working directory for tool execution
-	MaxTurns         int    // max agentic loop iterations (0 means no limit)
-	DisableTools     bool   // when true, no tools are sent (chat orchestrator mode)
+	CompactionPrompt         string
+	WorkDir                  string // working directory for tool execution
+	MaxTurns                 int    // max agentic loop iterations (0 means no limit)
+	OmitExecutionEnvironment bool   // Raw utility requests may omit coding environment context.
+	DisableTools             bool   // when true, no tools are sent (chat orchestrator mode)
 	// SkipDefaultTools suppresses built-in local tools while still allowing
 	// ExtraTools (for example request-scoped runtime tools) to be sent.
 	SkipDefaultTools bool
@@ -340,7 +342,7 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 			continue
 		}
 		role := roleForMessage(msg.Role)
-		if role == "user" {
+		if role == "user" && !strings.HasPrefix(msg.Content, executionenv.Marker+"\n") {
 			for configurationIndex < len(astraConfigurationHistory) && astraConfigurationHistory[configurationIndex].UserHistoryIndex <= userHistoryIndex {
 				if astraConfigurationHistory[configurationIndex].UserHistoryIndex == userHistoryIndex {
 					inputItems = append(inputItems, astraConfigurationUpdateItem(astraConfigurationHistory[configurationIndex].Effort))
@@ -408,6 +410,9 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 		if opts.OnCompaction != nil {
 			opts.OnCompaction(strings.TrimSpace(summary))
 		}
+		if !opts.OmitExecutionEnvironment {
+			compactedItems = ensureExecutionEnvironment(compactedItems, opts.WorkDir)
+		}
 		// Explicit compaction retires prior configuration updates. Re-establish
 		// the selected effort after the compaction item so the request-level
 		// effort can remain pinned to the original cacheable baseline.
@@ -430,6 +435,9 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 		if err != nil {
 			return nil, fmt.Errorf("pre-turn compaction: %w", err)
 		}
+	}
+	if !opts.OmitExecutionEnvironment {
+		inputItems = ensureExecutionEnvironment(inputItems, opts.WorkDir)
 	}
 	if astraConfigurationUpdateEffort != "" {
 		// The update must immediately precede the next user message. Waiting until
@@ -471,6 +479,9 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 	persistSteeringHistory := opts.InitialInputCommit
 	pendingAsyncDeliveries := append([]AsyncToolCallRecord(nil), recoveredAsyncDeliveries...)
 	for turn := 0; turn < opts.MaxTurns; turn++ {
+		if !opts.OmitExecutionEnvironment {
+			inputItems = ensureExecutionEnvironment(inputItems, opts.WorkDir)
+		}
 		if persistSteeringHistory != nil {
 			if err := persistSteeringHistory(ctx, inputItems); err != nil {
 				return nil, err
@@ -757,6 +768,9 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 	}
 
 	// Update client history
+	if !opts.OmitExecutionEnvironment {
+		c.History = ensureHistoryEnvironment(c.History, opts.WorkDir)
+	}
 	c.History = append(c.History, Message{Role: "user", Content: prompt})
 	c.History = append(c.History, Message{Role: "assistant", Content: result.Text})
 	if c.responsesTransportState != nil && isGPT6WorkflowModel(opts.Model) && finalReasoningEffort != "" {

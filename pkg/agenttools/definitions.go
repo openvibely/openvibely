@@ -3,6 +3,7 @@ package agenttools
 import (
 	"fmt"
 
+	"github.com/openvibely/openvibely/pkg/executionenv"
 	"github.com/openvibely/openvibely/pkg/toolschema"
 )
 
@@ -14,10 +15,20 @@ type Definition struct {
 
 // Definitions returns a fresh slice around shared, read-only schemas.
 func Definitions() []Definition {
-	return append([]Definition(nil), definitions...)
+	out := append([]Definition(nil), definitions...)
+	for i := range out {
+		if out[i].Name == "shell" {
+			if shell, err := executionenv.Resolve(); err == nil {
+				out[i].Description += " Selected shell: " + shell.DisplayName() + ". " + shell.Instruction()
+			} else {
+				out[i].Description += " Shell unavailable: " + err.Error()
+			}
+		}
+	}
+	return out
 }
 
-var definitions = []Definition{readFileTool, writeFileTool, editFileTool, bashTool, listFilesTool, grepSearchTool}
+var definitions = []Definition{readFileTool, writeFileTool, editFileTool, bashTool, interactProcessTool, listFilesTool, grepSearchTool}
 
 var readFileTool = Definition{
 	Name:        "read_file",
@@ -92,14 +103,18 @@ var editFileTool = Definition{
 }
 
 var bashTool = Definition{
-	Name:        "bash",
-	Description: fmt.Sprintf("Execute a bash command and return its stdout and stderr. The command runs in the working directory. Use this for running tests, builds, git commands, and other shell operations. Commands have a default timeout of %d seconds.", DefaultBashTimeoutSeconds),
+	Name:        "shell",
+	Description: fmt.Sprintf("Execute a shell command and return its stdout and stderr. The command runs in the working directory. Use this for running tests, builds, git commands, and other shell operations. Commands have a default total runtime timeout of %d seconds. If still running after yield_time_ms, returns a session_id; use interact_process to read output, send stdin input, or stop it. Sessions use pipes, not a terminal (no TTY).", DefaultBashTimeoutSeconds),
 	Schema: &toolschema.Schema{
 		Type: "object",
 		Properties: map[string]*toolschema.Schema{
 			"command": {
 				Type:        "string",
-				Description: "The bash command to execute.",
+				Description: "The command to execute using the selected shell.",
+			},
+			"yield_time_ms": {
+				Type:        "integer",
+				Description: "Initial wait in milliseconds before returning a running session. Default: 10000. Clamped to 250..30000. Does not change the total runtime timeout.",
 			},
 			"timeout": {
 				Type:        "integer",
@@ -154,6 +169,23 @@ var grepSearchTool = Definition{
 			},
 		},
 		Required:             []string{"pattern"},
+		AdditionalProperties: toolschema.Pointer(false),
+	},
+}
+
+var interactProcessTool = Definition{
+	Name:        "interact_process",
+	Description: "Interact with a running shell session returned by shell. With no input, wait for new stdout/stderr or completion. Optionally send input (include a newline to submit a line), close stdin, or terminate the process. Does not start a new command. Returns unread output, running status and session_id, or final exit_code. Sessions are restricted to their original working directory, expire five minutes after completion, and are removed after final output is read. Output is bounded; truncation is reported. Interactive programs requiring a TTY are unsupported.",
+	Schema: &toolschema.Schema{
+		Type: "object",
+		Properties: map[string]*toolschema.Schema{
+			"session_id":    {Type: "string", Description: "The session_id returned by shell."},
+			"input":         {Type: "string", Description: "Optional stdin text, up to 65536 bytes. Empty or omitted means poll only. Include a newline when answering a prompt."},
+			"yield_time_ms": {Type: "integer", Description: "Maximum wait for output or completion, in milliseconds. Default: 10000 for polling, 250 with input. Clamped to 250..30000."},
+			"close_stdin":   {Type: "boolean", Description: "Close stdin after sending any input, delivering EOF. Default: false."},
+			"terminate":     {Type: "boolean", Description: "Stop the running process. Cannot be combined with input or close_stdin. Default: false."},
+		},
+		Required:             []string{"session_id"},
 		AdditionalProperties: toolschema.Pointer(false),
 	},
 }

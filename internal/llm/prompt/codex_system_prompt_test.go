@@ -46,7 +46,7 @@ func TestEveryCatalogCodexPromptProfileIsEmbedded(t *testing.T) {
 func TestCodexPromptContextAndModes(t *testing.T) {
 	base := CodexSystemPrompt("gpt-6-astra")
 	got := BuildCodexAgentSystemPrompt("gpt-6-astra", "PROJECT_CONTEXT", "/tmp/.worktrees/task_123")
-	for _, want := range []string{base, "PROJECT_CONTEXT", BuildWorktreeContextSentence("/tmp/.worktrees/task_123")} {
+	for _, want := range []string{base, "PROJECT_CONTEXT"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("missing %q", want)
 		}

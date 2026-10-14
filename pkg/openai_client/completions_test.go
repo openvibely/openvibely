@@ -360,7 +360,7 @@ func TestSendCompletionsPreservesReasoningAcrossRequests(t *testing.T) {
 	if len(messages) < 3 {
 		t.Fatalf("messages = %#v", messages)
 	}
-	assistant, _ := messages[1].(map[string]any)
+	assistant, _ := messages[2].(map[string]any)
 	if assistant["reasoning_content"] != "prior thought" {
 		t.Fatalf("reasoning_content = %#v, want prior thought", assistant["reasoning_content"])
 	}
@@ -446,7 +446,7 @@ func TestSendCompletionsBoundsDenseToolOutputForModelButPreservesTranscript(t *t
 		t.Fatalf("model tool result was not bounded: bytes=%d", len(modelToolResult))
 	}
 	transcript := client.LastCompletionsTranscript()
-	if len(transcript) < 3 || transcript[2].ToolCallID != "call_dense" || transcript[2].Content != full {
+	if len(transcript) < 4 || transcript[3].ToolCallID != "call_dense" || transcript[3].Content != full {
 		t.Fatal("durable transcript did not preserve complete paired tool output")
 	}
 }
@@ -488,9 +488,13 @@ func TestSendCompletionsCapturesCompleteToolTranscript(t *testing.T) {
 	}
 
 	transcript := client.LastCompletionsTranscript()
-	if len(transcript) != 4 {
-		t.Fatalf("transcript = %#v, want four messages", transcript)
+	if len(transcript) != 5 {
+		t.Fatalf("transcript = %#v, want five messages", transcript)
 	}
+	if !strings.HasPrefix(transcript[0].Content, "<openvibely_execution_environment>") {
+		t.Fatal("missing persisted environment")
+	}
+	transcript = transcript[1:]
 	if transcript[0].Role != "user" || transcript[0].Content != "question" {
 		t.Fatalf("user transcript = %#v", transcript[0])
 	}
@@ -696,7 +700,7 @@ func TestSendCompletions_ImageAttachment(t *testing.T) {
 				var body struct {
 					Messages []struct {
 						Role    string
-						Content []map[string]any
+						Content json.RawMessage
 					}
 				}
 				if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
@@ -706,7 +710,14 @@ func TestSendCompletions_ImageAttachment(t *testing.T) {
 					{"type": "text", "text": "describe screenshot"},
 					{"type": "image_url", "image_url": map[string]any{"url": "data:image/png;base64,ZmFrZS1wbmctZGF0YQ=="}},
 				}
-				if len(body.Messages) != 1 || body.Messages[0].Role != "user" || !reflect.DeepEqual(body.Messages[0].Content, want) {
+				var content []map[string]any
+				if len(body.Messages) != 2 {
+					t.Fatalf("unexpected messages: %#v", body.Messages)
+				}
+				if err := json.Unmarshal(body.Messages[1].Content, &content); err != nil {
+					t.Fatal(err)
+				}
+				if body.Messages[1].Role != "user" || !reflect.DeepEqual(content, want) {
 					t.Fatalf("unexpected messages: %#v", body.Messages)
 				}
 				return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader("data: [DONE]\n\n"))}, nil
