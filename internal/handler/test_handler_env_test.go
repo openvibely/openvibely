@@ -74,9 +74,9 @@ func newTestHandlerEnv(t testing.TB, db *sql.DB, opts ...testHandlerOption) *tes
 	return env
 }
 
-func setupTestHandlerWithStores(t testing.TB) (*Handler, *echo.Echo, persistence.LLMConfigStore, *teststores.Env) {
+func setupTestHandlerWithStores(t testing.TB, options ...teststores.Option) (*Handler, *echo.Echo, persistence.LLMConfigStore, *teststores.Env) {
 	t.Helper()
-	stores := teststores.New(t)
+	stores := teststores.New(t, options...)
 	env := wireTestHandler(t, stores.Stores, testHandlerOptions{})
 	return env.Handler, env.Echo, env.LLMConfigRepo, stores
 }

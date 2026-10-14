@@ -961,3 +961,43 @@ func TestHistoryIOCountersDistinguishBoundedAndUnboundedReads(t *testing.T) {
 		})
 	}
 }
+
+func TestModelIOCountersDistinguishCompactAndFullCatalogs(t *testing.T) {
+	for _, production := range []bool{false, true} {
+		name := "isolated"
+		if production {
+			name = "production"
+		}
+		t.Run(name, func(t *testing.T) {
+			opts := []teststores.Option{teststores.WithIOCounting()}
+			if production {
+				opts = append(opts, teststores.WithProductionTopology())
+			}
+			env := teststores.New(t, opts...)
+			ctx := context.Background()
+			for _, tc := range []struct {
+				name                    string
+				read                    func(context.Context) ([]models.LLMConfig, error)
+				picker, selection, full int
+			}{
+				{"picker", env.LLMConfigs.ListPickerOptions, 1, 0, 0},
+				{"selection", env.LLMConfigs.ListChatSelectionOptions, 0, 1, 0},
+				{"full", env.LLMConfigs.List, 0, 0, 1},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					env.IO.Reset()
+					env.IO.SetEnabled(true)
+					_, err := tc.read(ctx)
+					env.IO.SetEnabled(false)
+					require.NoError(t, err)
+					stats := env.IO.Snapshot()
+					require.Equal(t, 1, stats.Requests)
+					require.Equal(t, 1, stats.ModelCatalogReads)
+					require.Equal(t, tc.picker, stats.ModelPickerReads)
+					require.Equal(t, tc.selection, stats.ModelSelectionReads)
+					require.Equal(t, tc.full, stats.ModelFullCatalogReads)
+				})
+			}
+		})
+	}
+}

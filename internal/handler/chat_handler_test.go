@@ -104,8 +104,10 @@ func TestHandler_Chat_HTMX(t *testing.T) {
 }
 
 func TestHandler_ChatRenderRoutesUseCompactModelPickerProjection(t *testing.T) {
-	db, counter := testutil.NewStatementCountingTestDB(t)
-	h, e, llmConfigRepo := setupTestHandlerForDB(t, db)
+	db := teststores.New(t, teststores.WithIOCounting())
+	counter := db.IO
+	wired := wireTestHandler(t, db.Stores, testHandlerOptions{})
+	h, e, llmConfigRepo := wired.Handler, wired.Echo, wired.LLMConfigRepo
 	ctx := context.Background()
 	projects, err := h.projectSvc.List(ctx)
 	if err != nil || len(projects) == 0 {
@@ -140,7 +142,9 @@ func TestHandler_ChatRenderRoutesUseCompactModelPickerProjection(t *testing.T) {
 	}
 	assertNotContains(t, chatRec, largePayload)
 	assertNotContains(t, chatRec, "secret-api-key")
-	assertChatModelPickerQuery(t, counter.Statements())
+	require.Equal(t, 1, counter.Snapshot().ModelPickerReads)
+	require.Equal(t, 1, counter.Snapshot().ModelCatalogReads)
+	require.Zero(t, counter.Snapshot().ModelFullCatalogReads)
 
 	counter.Reset()
 	counter.SetEnabled(true)
@@ -155,7 +159,9 @@ func TestHandler_ChatRenderRoutesUseCompactModelPickerProjection(t *testing.T) {
 	}
 	assertNotContains(t, clearRec, largePayload)
 	assertNotContains(t, clearRec, "secret-api-key")
-	assertChatModelPickerQuery(t, counter.Statements())
+	require.Equal(t, 1, counter.Snapshot().ModelPickerReads)
+	require.Equal(t, 1, counter.Snapshot().ModelCatalogReads)
+	require.Zero(t, counter.Snapshot().ModelFullCatalogReads)
 
 	full, err := llmConfigRepo.GetByID(ctx, largeCustom.ID)
 	if err != nil {
@@ -163,43 +169,6 @@ func TestHandler_ChatRenderRoutesUseCompactModelPickerProjection(t *testing.T) {
 	}
 	if full == nil || full.APIKey != "secret-api-key" || full.OAuthAccessToken != "secret-oauth-token" || full.ExtraBodyJSON != largePayload || full.CustomAuthStateJSON == "" {
 		t.Fatalf("execution/detail model read lost full provider fields: %#v", full)
-	}
-}
-
-func assertChatModelPickerQuery(t *testing.T, statements []string) {
-	t.Helper()
-	var pickerStatements []string
-	for _, statement := range statements {
-		normalized := strings.Join(strings.Fields(statement), " ")
-		if strings.Contains(normalized, "FROM agent_configs ORDER BY is_default DESC, name ASC") {
-			pickerStatements = append(pickerStatements, normalized)
-		}
-	}
-	if len(pickerStatements) != 1 {
-		t.Fatalf("expected exactly one Chat model-picker query, got %d in statements: %q", len(pickerStatements), statements)
-	}
-	picker := pickerStatements[0]
-	projection := strings.Split(strings.ToLower(picker), " from agent_configs ")[0]
-	if !strings.Contains(projection, "select id, name, model, provider, preset_slug, reasoning_effort, is_default") {
-		t.Fatalf("Chat picker query does not include model identity, grouping, and effort metadata: %s", picker)
-	}
-	for _, forbidden := range []string{"api_key", "oauth_access_token", "oauth_refresh_token", "oauth_client_secret", "oauth_authorize_url", "oauth_token_url", "ollama_base_url", "base_url", "models_url", "extra_headers_json", "extra_body_json", "custom_auth_config_json", "custom_auth_state_json", "mixture_config_json"} {
-		if strings.Contains(projection, forbidden) {
-			t.Fatalf("Chat picker query selected forbidden column %q: %s", forbidden, picker)
-		}
-	}
-}
-
-func assertNoBrowserChatCatalogStatements(t *testing.T, statements []string) {
-	t.Helper()
-	for _, statement := range statements {
-		normalized := strings.ToLower(strings.Join(strings.Fields(statement), " "))
-		if strings.Contains(normalized, "from agent_configs order by is_default desc, name asc") {
-			t.Fatalf("browser Chat loaded the model catalog: %s", statement)
-		}
-		if strings.Contains(normalized, " from schedules ") || strings.Contains(normalized, " from agents ") {
-			t.Fatalf("browser Chat loaded an eager project catalog: %s", statement)
-		}
 	}
 }
 
@@ -426,10 +395,12 @@ func TestHandler_ChatSend(t *testing.T) {
 }
 
 func TestHandler_ChatSend_HydratesSelectedModelWithoutEagerCatalogs(t *testing.T) {
-	db, counter := testutil.NewStatementCountingTestDB(t)
-	h, e, llmConfigRepo := setupTestHandlerForDB(t, db)
+	db := teststores.New(t, teststores.WithIOCounting())
+	counter := db.IO
+	wired := wireTestHandler(t, db.Stores, testHandlerOptions{})
+	h, e, llmConfigRepo := wired.Handler, wired.Echo, wired.LLMConfigRepo
 	ctx := context.Background()
-	teststores.ClearLLMConfigs(t, teststores.Of(db).LLMConfigs)
+	teststores.ClearLLMConfigs(t, db.LLMConfigs)
 
 	largeProviderJSON := strings.Repeat("large-browser-chat-provider-json", 4096)
 	agent := &models.LLMConfig{
@@ -449,7 +420,7 @@ func TestHandler_ChatSend_HydratesSelectedModelWithoutEagerCatalogs(t *testing.T
 	projectID := projects[0].ID
 	queuedTask := &models.Task{ProjectID: projectID, Title: "must-not-enter-chat-task-catalog", Prompt: "must-not-enter-chat-task-prompt", Status: models.StatusPending, Category: models.CategoryBacklog}
 	require.NoError(t, h.taskRepo.Create(ctx, queuedTask))
-	h.SetAgentRepo(teststores.Of(db).Agents)
+	h.SetAgentRepo(db.Agents)
 	agentDefinition := &models.Agent{Name: "must-not-enter-chat-agent-catalog", Key: "no-eager-chat-agent", Enabled: true, SelectableAsPrimary: true}
 	require.NoError(t, h.agentRepo.Create(ctx, agentDefinition))
 
@@ -480,7 +451,9 @@ func TestHandler_ChatSend_HydratesSelectedModelWithoutEagerCatalogs(t *testing.T
 		t.Fatal("timed out waiting for mock provider call")
 	}
 
-	assertNoBrowserChatCatalogStatements(t, counter.Statements())
+	require.Zero(t, counter.Snapshot().ModelCatalogReads)
+	require.Zero(t, counter.Snapshot().ScheduleReads)
+	require.Zero(t, counter.Snapshot().AgentReads)
 	call := mock.LastCall()
 	require.Equal(t, agent.ID, call.Agent.ID)
 	require.Equal(t, "browser-secret-api-key", call.Agent.APIKey)
@@ -1787,112 +1760,134 @@ func TestHandler_Chat_HidesComposerSteeringAffordanceWhileActive(t *testing.T) {
 }
 
 func TestHandler_BrowserPendingAttachmentMetadataFailureRemovesSession(t *testing.T) {
-	tests := []struct {
-		name string
-		send func(t *testing.T, h *Handler, e *echo.Echo, project *models.Project, task *models.Task, exec *models.Execution, agent *models.LLMConfig, sessionID string) *httptest.ResponseRecorder
-	}{
-		{
-			name: "queued chat",
-			send: func(t *testing.T, _ *Handler, e *echo.Echo, project *models.Project, _ *models.Task, _ *models.Execution, agent *models.LLMConfig, sessionID string) *httptest.ResponseRecorder {
-				form := url.Values{}
-				form.Set("message", "queued chat with attachment")
-				form.Set("agent_id", agent.ID)
-				form.Set("attachment_session_id", sessionID)
-				return htmxPost(e, "/chat/send?project_id="+project.ID, form)
-			},
-		},
-		{
-			name: "queued task thread",
-			send: func(t *testing.T, _ *Handler, e *echo.Echo, _ *models.Project, task *models.Task, _ *models.Execution, agent *models.LLMConfig, sessionID string) *httptest.ResponseRecorder {
-				form := url.Values{}
-				form.Set("message", "queued task follow-up with attachment")
-				form.Set("agent_id", agent.ID)
-				form.Set("attachment_session_id", sessionID)
-				return htmxPost(e, "/tasks/"+task.ID+"/thread", form)
-			},
-		},
-	}
-
-	for i, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			h, e, llmConfigRepo, db := setupTestHandlerWithDB(t)
-			agent := createAgent(t, llmConfigRepo)
-			project := createProject(t, h, "Pending attachment rollback "+tc.name)
-			category := models.CategoryChat
-			if tc.name == "queued task thread" {
-				category = models.CategoryActive
+	for _, production := range []bool{false, true} {
+		name := "isolated"
+		if production {
+			name = "production"
+		}
+		t.Run(name, func(t *testing.T) {
+			var options []teststores.Option
+			if production {
+				options = append(options, teststores.WithProductionTopology())
 			}
-			task := createTask(t, h, project.ID, "Active "+tc.name, func(task *models.Task) {
-				task.Category = category
-				task.Status = models.StatusRunning
-				task.AgentID = &agent.ID
-			})
-			exec := createExec(t, h, task.ID, agent.ID, func(exec *models.Execution) {
-				exec.Status = models.ExecRunning
-				exec.PromptSent = "active turn"
-			})
-			sessionID := fmt.Sprintf("%032x", i+1)
-			sessionDir := filepath.Join(uploadsDir, "chat", "pending", sessionID)
-			require.NoError(t, os.MkdirAll(sessionDir, 0o755))
-			require.NoError(t, os.WriteFile(filepath.Join(sessionDir, "queued.txt"), []byte("content"), 0o600))
-			_, err := db.Exec(`CREATE TRIGGER fail_browser_thread_input BEFORE INSERT ON thread_inputs BEGIN SELECT RAISE(ABORT, 'injected browser metadata failure'); END`)
-			require.NoError(t, err)
+			tests := []struct {
+				name string
+				send func(t *testing.T, h *Handler, e *echo.Echo, project *models.Project, task *models.Task, exec *models.Execution, agent *models.LLMConfig, sessionID string) *httptest.ResponseRecorder
+			}{
+				{
+					name: "queued chat",
+					send: func(t *testing.T, _ *Handler, e *echo.Echo, project *models.Project, _ *models.Task, _ *models.Execution, agent *models.LLMConfig, sessionID string) *httptest.ResponseRecorder {
+						form := url.Values{}
+						form.Set("message", "queued chat with attachment")
+						form.Set("agent_id", agent.ID)
+						form.Set("attachment_session_id", sessionID)
+						return htmxPost(e, "/chat/send?project_id="+project.ID, form)
+					},
+				},
+				{
+					name: "queued task thread",
+					send: func(t *testing.T, _ *Handler, e *echo.Echo, _ *models.Project, task *models.Task, _ *models.Execution, agent *models.LLMConfig, sessionID string) *httptest.ResponseRecorder {
+						form := url.Values{}
+						form.Set("message", "queued task follow-up with attachment")
+						form.Set("agent_id", agent.ID)
+						form.Set("attachment_session_id", sessionID)
+						return htmxPost(e, "/tasks/"+task.ID+"/thread", form)
+					},
+				},
+			}
 
-			rec := tc.send(t, h, e, project, task, exec, agent, sessionID)
-			require.Equal(t, http.StatusInternalServerError, rec.Code)
-			_, statErr := os.Stat(sessionDir)
-			require.ErrorIs(t, statErr, os.ErrNotExist, "failed browser metadata publication must remove its pending session")
+			for i, tc := range tests {
+				t.Run(tc.name, func(t *testing.T) {
+					h, e, llmConfigRepo, db := setupTestHandlerWithStores(t, options...)
+					agent := createAgent(t, llmConfigRepo)
+					project := createProject(t, h, "Pending attachment rollback "+tc.name)
+					category := models.CategoryChat
+					if tc.name == "queued task thread" {
+						category = models.CategoryActive
+					}
+					task := createTask(t, h, project.ID, "Active "+tc.name, func(task *models.Task) {
+						task.Category = category
+						task.Status = models.StatusRunning
+						task.AgentID = &agent.ID
+					})
+					exec := createExec(t, h, task.ID, agent.ID, func(exec *models.Execution) {
+						exec.Status = models.ExecRunning
+						exec.PromptSent = "active turn"
+					})
+					sessionID := fmt.Sprintf("%032x", i+1)
+					sessionDir := filepath.Join(uploadsDir, "chat", "pending", sessionID)
+					require.NoError(t, os.MkdirAll(sessionDir, 0o755))
+					require.NoError(t, os.WriteFile(filepath.Join(sessionDir, "queued.txt"), []byte("content"), 0o600))
+					require.NoError(t, db.Fixtures.SetQueuedInputCreationFailure(context.Background(), "", true))
+
+					rec := tc.send(t, h, e, project, task, exec, agent, sessionID)
+					require.Equal(t, http.StatusInternalServerError, rec.Code)
+					_, statErr := os.Stat(sessionDir)
+					require.ErrorIs(t, statErr, os.ErrNotExist, "failed browser metadata publication must remove its pending session")
+				})
+			}
 		})
 	}
 }
 
 func TestHandler_BrowserPendingAttachmentMetadataFailurePreservesReferencedSession(t *testing.T) {
-	h, e, llmConfigRepo, db := setupTestHandlerWithDB(t)
-	agent := createAgent(t, llmConfigRepo)
-	project := createProject(t, h, "Pending attachment failed publisher")
-	activeTask := createTask(t, h, project.ID, "Active failed publisher", func(task *models.Task) {
-		task.Category = models.CategoryChat
-		task.Status = models.StatusRunning
-		task.AgentID = &agent.ID
-	})
-	activeExec := createExec(t, h, activeTask.ID, agent.ID, func(exec *models.Execution) {
-		exec.Status = models.ExecRunning
-		exec.PromptSent = "active turn"
-	})
+	for _, production := range []bool{false, true} {
+		name := "isolated"
+		if production {
+			name = "production"
+		}
+		t.Run(name, func(t *testing.T) {
+			var options []teststores.Option
+			if production {
+				options = append(options, teststores.WithProductionTopology())
+			}
+			h, e, llmConfigRepo, db := setupTestHandlerWithStores(t, options...)
+			agent := createAgent(t, llmConfigRepo)
+			project := createProject(t, h, "Pending attachment failed publisher")
+			activeTask := createTask(t, h, project.ID, "Active failed publisher", func(task *models.Task) {
+				task.Category = models.CategoryChat
+				task.Status = models.StatusRunning
+				task.AgentID = &agent.ID
+			})
+			activeExec := createExec(t, h, activeTask.ID, agent.ID, func(exec *models.Execution) {
+				exec.Status = models.ExecRunning
+				exec.PromptSent = "active turn"
+			})
 
-	otherProject := createProject(t, h, "Pending attachment durable owner")
-	otherTask := createTask(t, h, otherProject.ID, "Durable session owner", func(task *models.Task) {
-		task.Category = models.CategoryBacklog
-		task.Status = models.StatusPending
-	})
-	sessionID := "ffffffffffffffffffffffffffffffff"
-	owner := &models.ThreadInput{
-		Scope:               models.ThreadInputScopeTask,
-		ProjectID:           otherProject.ID,
-		TaskID:              otherTask.ID,
-		InputMode:           models.ThreadInputModeQueued,
-		InputStatus:         models.ThreadInputPending,
-		Content:             "durable owner",
-		AttachmentSessionID: sessionID,
+			otherProject := createProject(t, h, "Pending attachment durable owner")
+			otherTask := createTask(t, h, otherProject.ID, "Durable session owner", func(task *models.Task) {
+				task.Category = models.CategoryBacklog
+				task.Status = models.StatusPending
+			})
+			sessionID := "ffffffffffffffffffffffffffffffff"
+			owner := &models.ThreadInput{
+				Scope:               models.ThreadInputScopeTask,
+				ProjectID:           otherProject.ID,
+				TaskID:              otherTask.ID,
+				InputMode:           models.ThreadInputModeQueued,
+				InputStatus:         models.ThreadInputPending,
+				Content:             "durable owner",
+				AttachmentSessionID: sessionID,
+			}
+			require.NoError(t, h.threadInputRepo.CreateQueued(context.Background(), owner))
+			sessionDir := filepath.Join(uploadsDir, "chat", "pending", sessionID)
+			require.NoError(t, os.MkdirAll(sessionDir, 0o755))
+			require.NoError(t, os.WriteFile(filepath.Join(sessionDir, "shared.txt"), []byte("content"), 0o600))
+			require.NoError(t, db.Fixtures.SetQueuedInputCreationFailure(context.Background(), "", true))
+
+			form := url.Values{}
+			form.Set("message", "queued chat with shared attachment")
+			form.Set("agent_id", agent.ID)
+			form.Set("attachment_session_id", sessionID)
+			rec := htmxPost(e, "/chat/send?project_id="+project.ID, form)
+			require.Equal(t, http.StatusInternalServerError, rec.Code)
+			require.FileExists(t, filepath.Join(sessionDir, "shared.txt"))
+
+			storedExec, err := h.execRepo.GetByID(context.Background(), activeExec.ID)
+			require.NoError(t, err)
+			require.NotNil(t, storedExec)
+		})
 	}
-	require.NoError(t, h.threadInputRepo.CreateQueued(context.Background(), owner))
-	sessionDir := filepath.Join(uploadsDir, "chat", "pending", sessionID)
-	require.NoError(t, os.MkdirAll(sessionDir, 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(sessionDir, "shared.txt"), []byte("content"), 0o600))
-	_, err := db.Exec(`CREATE TRIGGER fail_browser_thread_input BEFORE INSERT ON thread_inputs BEGIN SELECT RAISE(ABORT, 'injected browser metadata failure'); END`)
-	require.NoError(t, err)
-
-	form := url.Values{}
-	form.Set("message", "queued chat with shared attachment")
-	form.Set("agent_id", agent.ID)
-	form.Set("attachment_session_id", sessionID)
-	rec := htmxPost(e, "/chat/send?project_id="+project.ID, form)
-	require.Equal(t, http.StatusInternalServerError, rec.Code)
-	require.FileExists(t, filepath.Join(sessionDir, "shared.txt"))
-
-	storedExec, err := h.execRepo.GetByID(context.Background(), activeExec.ID)
-	require.NoError(t, err)
-	require.NotNil(t, storedExec)
 }
 
 func TestCleanupUnpublishedPendingAttachmentSession_RejectsOwnerAcquiredBeforeRemoval(t *testing.T) {
@@ -1957,143 +1952,167 @@ func TestCleanupUnpublishedPendingAttachmentSession_PreservesAlreadyOwnedSession
 }
 
 func TestHandler_DirectBrowserAttachmentFailureRemovesUnpublishedSession(t *testing.T) {
-	tests := []struct {
-		name       string
-		setup      func(t *testing.T, h *Handler, project *models.Project, agent *models.LLMConfig) string
-		send       func(e *echo.Echo, projectID, taskID, agentID, sessionID string) *httptest.ResponseRecorder
-		wantCode   int
-		triggerSQL string
-	}{
-		{
-			name: "direct chat task creation",
-			setup: func(t *testing.T, _ *Handler, _ *models.Project, _ *models.LLMConfig) string {
-				return ""
-			},
-			send: func(e *echo.Echo, projectID, _ string, agentID, sessionID string) *httptest.ResponseRecorder {
-				form := url.Values{}
-				form.Set("message", "direct chat with attachment")
-				form.Set("agent_id", agentID)
-				form.Set("attachment_session_id", sessionID)
-				return htmxPost(e, "/chat/send?project_id="+projectID, form)
-			},
-			wantCode:   http.StatusInternalServerError,
-			triggerSQL: `CREATE TRIGGER fail_direct_task BEFORE INSERT ON tasks BEGIN SELECT RAISE(ABORT, 'injected direct task failure'); END`,
-		},
-		{
-			name: "direct chat task claim",
-			setup: func(t *testing.T, _ *Handler, _ *models.Project, _ *models.LLMConfig) string {
-				return ""
-			},
-			send: func(e *echo.Echo, projectID, _ string, agentID, sessionID string) *httptest.ResponseRecorder {
-				form := url.Values{}
-				form.Set("message", "direct chat with attachment")
-				form.Set("agent_id", agentID)
-				form.Set("attachment_session_id", sessionID)
-				return htmxPost(e, "/chat/send?project_id="+projectID, form)
-			},
-			wantCode:   http.StatusInternalServerError,
-			triggerSQL: `CREATE TRIGGER fail_direct_claim BEFORE UPDATE ON tasks WHEN NEW.status = 'running' BEGIN SELECT RAISE(ABORT, 'injected direct claim failure'); END`,
-		},
-		{
-			name:  "direct chat execution creation",
-			setup: func(t *testing.T, _ *Handler, _ *models.Project, _ *models.LLMConfig) string { return "" },
-			send: func(e *echo.Echo, projectID, _ string, agentID, sessionID string) *httptest.ResponseRecorder {
-				form := url.Values{}
-				form.Set("message", "direct chat with attachment")
-				form.Set("agent_id", agentID)
-				form.Set("attachment_session_id", sessionID)
-				return htmxPost(e, "/chat/send?project_id="+projectID, form)
-			},
-			wantCode:   http.StatusInternalServerError,
-			triggerSQL: `CREATE TRIGGER fail_direct_execution BEFORE INSERT ON executions BEGIN SELECT RAISE(ABORT, 'injected direct execution failure'); END`,
-		},
-		{
-			name: "direct task thread execution creation",
-			setup: func(t *testing.T, h *Handler, project *models.Project, agent *models.LLMConfig) string {
-				task := createTask(t, h, project.ID, "Completed direct follow-up", func(task *models.Task) {
-					task.Category = models.CategoryCompleted
-					task.Status = models.StatusCompleted
-					task.AgentID = &agent.ID
-				})
-				return task.ID
-			},
-			send: func(e *echo.Echo, _ string, taskID, agentID, sessionID string) *httptest.ResponseRecorder {
-				form := url.Values{}
-				form.Set("message", "direct task follow-up with attachment")
-				form.Set("agent_id", agentID)
-				form.Set("attachment_session_id", sessionID)
-				return htmxPost(e, "/tasks/"+taskID+"/thread", form)
-			},
-			wantCode:   http.StatusInternalServerError,
-			triggerSQL: `CREATE TRIGGER fail_direct_execution BEFORE INSERT ON executions BEGIN SELECT RAISE(ABORT, 'injected direct execution failure'); END`,
-		},
-		{
-			name: "stale task thread",
-			setup: func(t *testing.T, _ *Handler, _ *models.Project, _ *models.LLMConfig) string {
-				return "missing-task"
-			},
-			send: func(e *echo.Echo, _ string, taskID, agentID, sessionID string) *httptest.ResponseRecorder {
-				form := url.Values{}
-				form.Set("message", "stale task follow-up with attachment")
-				form.Set("agent_id", agentID)
-				form.Set("attachment_session_id", sessionID)
-				return htmxPost(e, "/tasks/"+taskID+"/thread", form)
-			},
-			wantCode: http.StatusNotFound,
-		},
-	}
-
-	for i, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			h, e, llmConfigRepo, db := setupTestHandlerWithDB(t)
-			agent := createAgent(t, llmConfigRepo)
-			project := createProject(t, h, "Direct attachment rollback "+tc.name)
-			taskID := tc.setup(t, h, project, agent)
-			sessionID := fmt.Sprintf("%032x", i+101)
-			sessionDir := filepath.Join(uploadsDir, "chat", "pending", sessionID)
-			require.NoError(t, os.MkdirAll(sessionDir, 0o755))
-			require.NoError(t, os.WriteFile(filepath.Join(sessionDir, "direct.txt"), []byte("content"), 0o600))
-			if tc.triggerSQL != "" {
-				_, err := db.Exec(tc.triggerSQL)
-				require.NoError(t, err)
+	for _, production := range []bool{false, true} {
+		name := "isolated"
+		if production {
+			name = "production"
+		}
+		t.Run(name, func(t *testing.T) {
+			var options []teststores.Option
+			if production {
+				options = append(options, teststores.WithProductionTopology())
+			}
+			tests := []struct {
+				name          string
+				setup         func(t *testing.T, h *Handler, project *models.Project, agent *models.LLMConfig) string
+				send          func(e *echo.Echo, projectID, taskID, agentID, sessionID string) *httptest.ResponseRecorder
+				wantCode      int
+				injectFailure func(*teststores.Env) error
+			}{
+				{
+					name: "direct chat task creation",
+					setup: func(t *testing.T, _ *Handler, _ *models.Project, _ *models.LLMConfig) string {
+						return ""
+					},
+					send: func(e *echo.Echo, projectID, _ string, agentID, sessionID string) *httptest.ResponseRecorder {
+						form := url.Values{}
+						form.Set("message", "direct chat with attachment")
+						form.Set("agent_id", agentID)
+						form.Set("attachment_session_id", sessionID)
+						return htmxPost(e, "/chat/send?project_id="+projectID, form)
+					},
+					wantCode: http.StatusInternalServerError,
+					injectFailure: func(env *teststores.Env) error {
+						return env.Fixtures.SetTaskPromptCreationFailure(context.Background(), "", true)
+					},
+				},
+				{
+					name: "direct chat task claim",
+					setup: func(t *testing.T, _ *Handler, _ *models.Project, _ *models.LLMConfig) string {
+						return ""
+					},
+					send: func(e *echo.Echo, projectID, _ string, agentID, sessionID string) *httptest.ResponseRecorder {
+						form := url.Values{}
+						form.Set("message", "direct chat with attachment")
+						form.Set("agent_id", agentID)
+						form.Set("attachment_session_id", sessionID)
+						return htmxPost(e, "/chat/send?project_id="+projectID, form)
+					},
+					wantCode:      http.StatusInternalServerError,
+					injectFailure: func(env *teststores.Env) error { return env.Fixtures.FailTaskClaim(context.Background()) },
+				},
+				{
+					name:  "direct chat execution creation",
+					setup: func(t *testing.T, _ *Handler, _ *models.Project, _ *models.LLMConfig) string { return "" },
+					send: func(e *echo.Echo, projectID, _ string, agentID, sessionID string) *httptest.ResponseRecorder {
+						form := url.Values{}
+						form.Set("message", "direct chat with attachment")
+						form.Set("agent_id", agentID)
+						form.Set("attachment_session_id", sessionID)
+						return htmxPost(e, "/chat/send?project_id="+projectID, form)
+					},
+					wantCode:      http.StatusInternalServerError,
+					injectFailure: func(env *teststores.Env) error { return env.Fixtures.FailExecutionCreation(context.Background()) },
+				},
+				{
+					name: "direct task thread execution creation",
+					setup: func(t *testing.T, h *Handler, project *models.Project, agent *models.LLMConfig) string {
+						task := createTask(t, h, project.ID, "Completed direct follow-up", func(task *models.Task) {
+							task.Category = models.CategoryCompleted
+							task.Status = models.StatusCompleted
+							task.AgentID = &agent.ID
+						})
+						return task.ID
+					},
+					send: func(e *echo.Echo, _ string, taskID, agentID, sessionID string) *httptest.ResponseRecorder {
+						form := url.Values{}
+						form.Set("message", "direct task follow-up with attachment")
+						form.Set("agent_id", agentID)
+						form.Set("attachment_session_id", sessionID)
+						return htmxPost(e, "/tasks/"+taskID+"/thread", form)
+					},
+					wantCode:      http.StatusInternalServerError,
+					injectFailure: func(env *teststores.Env) error { return env.Fixtures.FailExecutionCreation(context.Background()) },
+				},
+				{
+					name: "stale task thread",
+					setup: func(t *testing.T, _ *Handler, _ *models.Project, _ *models.LLMConfig) string {
+						return "missing-task"
+					},
+					send: func(e *echo.Echo, _ string, taskID, agentID, sessionID string) *httptest.ResponseRecorder {
+						form := url.Values{}
+						form.Set("message", "stale task follow-up with attachment")
+						form.Set("agent_id", agentID)
+						form.Set("attachment_session_id", sessionID)
+						return htmxPost(e, "/tasks/"+taskID+"/thread", form)
+					},
+					wantCode: http.StatusNotFound,
+				},
 			}
 
-			rec := tc.send(e, project.ID, taskID, agent.ID, sessionID)
-			require.Equal(t, tc.wantCode, rec.Code)
-			require.NoDirExists(t, sessionDir)
+			for i, tc := range tests {
+				t.Run(tc.name, func(t *testing.T) {
+					h, e, llmConfigRepo, db := setupTestHandlerWithStores(t, options...)
+					agent := createAgent(t, llmConfigRepo)
+					project := createProject(t, h, "Direct attachment rollback "+tc.name)
+					taskID := tc.setup(t, h, project, agent)
+					sessionID := fmt.Sprintf("%032x", i+101)
+					sessionDir := filepath.Join(uploadsDir, "chat", "pending", sessionID)
+					require.NoError(t, os.MkdirAll(sessionDir, 0o755))
+					require.NoError(t, os.WriteFile(filepath.Join(sessionDir, "direct.txt"), []byte("content"), 0o600))
+					if tc.injectFailure != nil {
+						require.NoError(t, tc.injectFailure(db))
+					}
+
+					rec := tc.send(e, project.ID, taskID, agent.ID, sessionID)
+					require.Equal(t, tc.wantCode, rec.Code)
+					require.NoDirExists(t, sessionDir)
+				})
+			}
 		})
 	}
 }
 
 func TestHandler_DirectBrowserAttachmentFailurePreservesReferencedSession(t *testing.T) {
-	h, e, llmConfigRepo, db := setupTestHandlerWithDB(t)
-	agent := createAgent(t, llmConfigRepo)
-	project := createProject(t, h, "Direct failed publisher")
-	otherProject := createProject(t, h, "Direct durable owner")
-	otherTask := createTask(t, h, otherProject.ID, "Direct durable owner task", func(task *models.Task) {
-		task.Category = models.CategoryBacklog
-		task.Status = models.StatusPending
-	})
-	const sessionID = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
-	owner := &models.ThreadInput{
-		Scope: models.ThreadInputScopeTask, ProjectID: otherProject.ID, TaskID: otherTask.ID,
-		InputMode: models.ThreadInputModeQueued, InputStatus: models.ThreadInputPending,
-		Content: "durable owner", AttachmentSessionID: sessionID,
-	}
-	require.NoError(t, h.threadInputRepo.CreateQueued(context.Background(), owner))
-	sessionDir := filepath.Join(uploadsDir, "chat", "pending", sessionID)
-	require.NoError(t, os.MkdirAll(sessionDir, 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(sessionDir, "shared.txt"), []byte("content"), 0o600))
-	_, err := db.Exec(`CREATE TRIGGER fail_direct_execution BEFORE INSERT ON executions BEGIN SELECT RAISE(ABORT, 'injected direct execution failure'); END`)
-	require.NoError(t, err)
+	for _, production := range []bool{false, true} {
+		name := "isolated"
+		if production {
+			name = "production"
+		}
+		t.Run(name, func(t *testing.T) {
+			var options []teststores.Option
+			if production {
+				options = append(options, teststores.WithProductionTopology())
+			}
+			h, e, llmConfigRepo, db := setupTestHandlerWithStores(t, options...)
+			agent := createAgent(t, llmConfigRepo)
+			project := createProject(t, h, "Direct failed publisher")
+			otherProject := createProject(t, h, "Direct durable owner")
+			otherTask := createTask(t, h, otherProject.ID, "Direct durable owner task", func(task *models.Task) {
+				task.Category = models.CategoryBacklog
+				task.Status = models.StatusPending
+			})
+			const sessionID = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+			owner := &models.ThreadInput{
+				Scope: models.ThreadInputScopeTask, ProjectID: otherProject.ID, TaskID: otherTask.ID,
+				InputMode: models.ThreadInputModeQueued, InputStatus: models.ThreadInputPending,
+				Content: "durable owner", AttachmentSessionID: sessionID,
+			}
+			require.NoError(t, h.threadInputRepo.CreateQueued(context.Background(), owner))
+			sessionDir := filepath.Join(uploadsDir, "chat", "pending", sessionID)
+			require.NoError(t, os.MkdirAll(sessionDir, 0o755))
+			require.NoError(t, os.WriteFile(filepath.Join(sessionDir, "shared.txt"), []byte("content"), 0o600))
+			require.NoError(t, db.Fixtures.FailExecutionCreation(context.Background()))
 
-	form := url.Values{}
-	form.Set("message", "direct chat with shared attachment")
-	form.Set("agent_id", agent.ID)
-	form.Set("attachment_session_id", sessionID)
-	rec := htmxPost(e, "/chat/send?project_id="+project.ID, form)
-	require.Equal(t, http.StatusInternalServerError, rec.Code)
-	require.FileExists(t, filepath.Join(sessionDir, "shared.txt"))
+			form := url.Values{}
+			form.Set("message", "direct chat with shared attachment")
+			form.Set("agent_id", agent.ID)
+			form.Set("attachment_session_id", sessionID)
+			rec := htmxPost(e, "/chat/send?project_id="+project.ID, form)
+			require.Equal(t, http.StatusInternalServerError, rec.Code)
+			require.FileExists(t, filepath.Join(sessionDir, "shared.txt"))
+		})
+	}
 }
 
 func TestHandler_ChatSteer_CreatesPendingSteeringInput(t *testing.T) {

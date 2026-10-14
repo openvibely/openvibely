@@ -57,6 +57,10 @@ type ExecutionHistoryEntry struct {
 type TaskPayload struct{ Prompt, ChainConfig, SwarmConfig string }
 
 type Fixtures interface {
+	FailChatAttachmentCreation(context.Context) error
+	FailTaskClaim(context.Context) error
+	RetiredAttachmentSessions(context.Context) ([]string, error)
+
 	SetTaskPayload(context.Context, string, TaskPayload) error
 	SeedExecutionHistory(context.Context, []ExecutionHistoryEntry) error
 	AsyncToolCallStatus(context.Context, string) (string, error)
@@ -233,6 +237,9 @@ type IOStats struct {
 	ModelReads, TaskContextReads int
 	// ModelSelectionReads counts physical compact model-selection reads, excluding full detail hydration.
 	ModelSelectionReads int
+	// ModelFullCatalogReads counts physical model catalog reads including credentials/configuration.
+	ModelFullCatalogReads                              int
+	ModelCatalogReads, ModelPickerReads, ScheduleReads int
 	// TaskWrites and ExecutionWrites count physical mutation requests, including batched requests.
 	TaskWrites, ExecutionWrites int
 	// SlackAuthorizationReads counts physical reads checking Slack authorization.
