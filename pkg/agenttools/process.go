@@ -262,7 +262,7 @@ func (s *processSession) readResult(note string) (string, bool, bool) {
 		}
 		output += "[/process]"
 	} else {
-		output += "\n[process]\nsession_id: " + s.id + "\nstatus: running\nnext: call interact_process with this session_id to read output or send input\n[/process]"
+		output += "\n[process]\nsession_id: " + s.id + "\nstatus: running\nnext: call process with this session_id to read output or send input\n[/process]"
 	}
 	return output, s.finished, s.timedOut
 }
@@ -279,7 +279,7 @@ func (m *processManager) interact(ctx context.Context, dir, id, input string, cl
 		return "", fmt.Errorf("unknown or expired process session for this working directory")
 	}
 	if !s.interaction.TryLock() {
-		return "", fmt.Errorf("another interact_process call is using this session; retry after it returns")
+		return "", fmt.Errorf("another process call is using this session; retry after it returns")
 	}
 	defer s.interaction.Unlock()
 	if err := ctx.Err(); err != nil {
@@ -358,7 +358,7 @@ func execBash(ctx context.Context, workDir string, input json.RawMessage) (strin
 	return shellProcesses.start(ctx, workDir, p.Command, NormalizeBashTimeout(p.Timeout), processYield(p.Yield, 10000))
 }
 
-func execInteractProcess(ctx context.Context, workDir string, input json.RawMessage) (string, error) {
+func execProcess(ctx context.Context, workDir string, input json.RawMessage) (string, error) {
 	var p struct {
 		SessionID  string `json:"session_id"`
 		Input      string `json:"input"`
