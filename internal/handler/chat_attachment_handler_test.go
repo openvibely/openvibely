@@ -178,6 +178,53 @@ func TestDownloadChatAttachmentServesSameProjectAttachment(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusOK, rec.Code)
 	assert.Equal(t, string(fixture.fileContent), rec.Body.String())
+	assert.Equal(t, "nosniff", rec.Header().Get("X-Content-Type-Options"))
+	assert.Equal(t, "sandbox", rec.Header().Get("Content-Security-Policy"))
+}
+
+func TestDownloadChatAttachmentSandboxesActiveContent(t *testing.T) {
+	cases := []struct {
+		name      string
+		fileName  string
+		mediaType string
+		content   []byte
+	}{
+		{"html", "payload.html", "text/html", []byte(`<html><body><script>fetch('/api/secret')</script></body></html>`)},
+		{"svg", "payload.svg", "image/svg+xml", []byte(`<svg xmlns="http://www.w3.org/2000/svg"><script>alert(document.cookie)</script></svg>`)},
+		{"png", "image.png", "image/png", []byte("\x89PNG\r\n\x1a\nfake-image-bytes")},
+		{"pdf", "doc.pdf", "application/pdf", []byte("%PDF-1.4 fake document")},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fixture := setupChatAttachmentOwnershipFixture(t)
+			ctx := context.Background()
+			filePath := filepath.Join(filepath.Dir(fixture.attachment.FilePath), tc.fileName)
+			require.NoError(t, os.WriteFile(filePath, tc.content, 0644))
+			attachment := &models.ChatAttachment{
+				ExecutionID: fixture.attachment.ExecutionID,
+				FileName:    tc.fileName,
+				FilePath:    filePath,
+				MediaType:   tc.mediaType,
+				FileSize:    int64(len(tc.content)),
+			}
+			require.NoError(t, fixture.chatAttachmentRepo.Create(ctx, attachment))
+
+			c, rec := newChatAttachmentContext(t, fixture.e, http.MethodGet, attachment.ID, fixture.owningProject.ID)
+			require.NoError(t, fixture.h.DownloadChatAttachment(c))
+			assert.Equal(t, http.StatusOK, rec.Code)
+			assert.Equal(t, string(tc.content), rec.Body.String())
+			assert.Equal(t, "nosniff", rec.Header().Get("X-Content-Type-Options"))
+			assert.Equal(t, "sandbox", rec.Header().Get("Content-Security-Policy"))
+
+			c, rec = newChatAttachmentContext(t, fixture.e, http.MethodGet, attachment.ID, fixture.foreignProject.ID)
+			err := fixture.h.DownloadChatAttachment(c)
+			require.Error(t, err)
+			httpErr, ok := err.(*echo.HTTPError)
+			require.True(t, ok)
+			assert.Equal(t, http.StatusNotFound, httpErr.Code)
+			assert.NotContains(t, rec.Body.String(), string(tc.content))
+		})
+	}
 }
 
 func TestDeleteChatAttachmentRejectsCrossProjectAttachment(t *testing.T) {
