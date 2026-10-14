@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -1390,6 +1391,91 @@ func TestPerformanceProjectionCountersAndProjectLimits(t *testing.T) {
 			require.Zero(t, stats.ModelBadgeReads)
 			require.Zero(t, stats.ProjectCapacityReads)
 			require.Equal(t, 1, stats.ProjectOtherOrderedReads)
+		})
+	}
+}
+
+func TestDetailReadObserversAndHistoricalState(t *testing.T) {
+	for _, production := range []bool{false, true} {
+		name := "isolated"
+		if production {
+			name = "production"
+		}
+		t.Run(name, func(t *testing.T) {
+			opts := []teststores.Option{teststores.WithIOCounting()}
+			if production {
+				opts = append(opts, teststores.WithProductionTopology())
+			}
+			env := teststores.New(t, opts...)
+			ctx := t.Context()
+			task := models.Task{ProjectID: "default", Title: "Detail", Category: models.CategoryBacklog, Status: models.StatusPending, Prompt: "instructions"}
+			require.NoError(t, env.Tasks.Create(ctx, &task))
+			agent := models.Agent{Name: "Detail agent", Key: "detail-agent", Model: "inherit", Enabled: true, SelectableAsPrimary: true, SystemPrompt: strings.Repeat("hidden", 4096)}
+			require.NoError(t, env.Agents.Create(ctx, &agent))
+			at := time.Date(2026, 8, 13, 12, 0, 0, 0, time.UTC)
+			require.NoError(t, env.Fixtures.SeedExecutionHistory(ctx, []storefixture.ExecutionHistoryEntry{{ID: "history", TaskID: task.ID, Status: models.ExecRunning, StartedAt: at, PromptSent: strings.Repeat("hidden prompt", 4096), Output: strings.Repeat("hidden output", 4096)}}))
+			require.NoError(t, env.Fixtures.SetHistoricalExecutionCompletion(ctx, "history", at.Add(time.Minute), 65000))
+			execution, err := env.Executions.GetByID(ctx, "history")
+			require.NoError(t, err)
+			require.Equal(t, models.ExecCompleted, execution.Status)
+			require.EqualValues(t, 65000, execution.DurationMs)
+			require.True(t, execution.CompletedAt.Equal(at.Add(time.Minute)))
+			stored, err := env.Tasks.GetByID(ctx, task.ID)
+			require.NoError(t, err)
+			require.Equal(t, models.StatusPending, stored.Status)
+			for _, kind := range []storefixture.ReadOperation{storefixture.ExecutionMetricsRead, storefixture.AgentRead, storefixture.ExecutionWindowRead} {
+				calls := 0
+				env.IO.ObserveReads(kind, func(context.Context) { calls++ })
+				_, err = env.Projects.GetIdentityByID(ctx, "default")
+				require.NoError(t, err)
+				require.Zero(t, calls)
+				env.IO.Reset()
+				env.IO.SetEnabled(true)
+				if kind == storefixture.ExecutionMetricsRead {
+					_, err = env.Executions.GetTaskExecutionMetrics(ctx, task.ID)
+				} else if kind == storefixture.ExecutionWindowRead {
+					_, err = env.Executions.ListByTaskChronologicalLimit(ctx, task.ID, 1)
+				} else {
+					_, err = env.Agents.GetTaskDetailAgentLabel(ctx, "default", agent.ID)
+				}
+				env.IO.SetEnabled(false)
+				require.NoError(t, err)
+				require.Equal(t, 1, calls)
+				stats := env.IO.Snapshot()
+				require.Equal(t, 1, stats.Requests)
+				if kind != storefixture.ExecutionWindowRead {
+					require.Zero(t, stats.ExecutionPayloadReads)
+				} else {
+					require.Equal(t, 1, stats.ExecutionWindowReads)
+					require.Equal(t, 1, stats.ExecutionPayloadReads)
+				}
+				require.Zero(t, stats.AgentDetailReads)
+				if kind == storefixture.ExecutionMetricsRead {
+					require.Equal(t, 1, stats.ExecutionMetricsReads)
+				} else if kind == storefixture.AgentRead {
+					require.Equal(t, 1, stats.AgentLabelReads)
+				}
+				env.IO.ObserveReads(kind, nil)
+			}
+			require.NoError(t, env.Fixtures.SetDanglingTaskAgent(ctx, task.ID, "missing-agent"))
+			stored, err = env.Tasks.GetByID(ctx, task.ID)
+			require.NoError(t, err)
+			require.Equal(t, "missing-agent", *stored.AgentDefinitionID)
+			invalid := models.Task{ProjectID: "default", Title: "Must enforce FK", Category: models.CategoryBacklog, Status: models.StatusPending, AgentDefinitionID: stored.AgentDefinitionID}
+			require.Error(t, env.Tasks.Create(ctx, &invalid), "legacy fixture must restore foreign-key enforcement")
+			env.IO.Reset()
+			env.IO.SetEnabled(true)
+			_, err = env.Tasks.GetThreadRenderMetadata(ctx, task.ID)
+			require.NoError(t, err)
+			env.IO.SetEnabled(false)
+			require.Equal(t, 1, env.IO.Snapshot().ThreadMetadataReads)
+			require.Zero(t, env.IO.Snapshot().TaskPayloadReads)
+			env.IO.Reset()
+			env.IO.SetEnabled(true)
+			_, err = env.Tasks.GetByID(ctx, task.ID)
+			require.NoError(t, err)
+			env.IO.SetEnabled(false)
+			require.Positive(t, env.IO.Snapshot().TaskPayloadReads)
 		})
 	}
 }

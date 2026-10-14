@@ -2,7 +2,7 @@ package handler
 
 import (
 	"context"
-	"database/sql"
+
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -16,15 +16,14 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/service"
-	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/openvibely/openvibely/internal/testutil/storefixture"
 	"github.com/openvibely/openvibely/internal/testutil/teststores"
 )
 
 const apiProjectProjectionSamples = 5
 
 type apiProjectProjectionFixture struct {
-	db          *sql.DB
-	counter     *testutil.SQLStatementCounter
+	counter     storefixture.IOCounter
 	projectRepo persistence.ProjectStore
 	h           *Handler
 	e           *echo.Echo
@@ -91,12 +90,13 @@ func BenchmarkAPIGetProjectsProjection(b *testing.B) {
 
 func newAPIProjectProjectionFixture(tb testing.TB, projectCount int) *apiProjectProjectionFixture {
 	tb.Helper()
-	db, counter := testutil.NewStatementCountingTestDB(tb)
-	seedAPIProjectionProjects(tb, db, projectCount)
-	repo := teststores.Of(db).Projects
+	env := teststores.New(tb, teststores.WithIOCounting())
+	counter := env.IO
+	seedAPIProjectionProjects(tb, env, projectCount)
+	repo := env.Projects
 	projectSvc := service.NewProjectService(repo)
 	return &apiProjectProjectionFixture{
-		db:          db,
+
 		counter:     counter,
 		projectRepo: repo,
 		h:           &Handler{projectSvc: projectSvc},
@@ -104,30 +104,21 @@ func newAPIProjectProjectionFixture(tb testing.TB, projectCount int) *apiProject
 	}
 }
 
-func seedAPIProjectionProjects(tb testing.TB, db *sql.DB, projectCount int) {
+func seedAPIProjectionProjects(tb testing.TB, env *teststores.Env, projectCount int) {
 	tb.Helper()
 	ctx := context.Background()
-	tx, err := db.BeginTx(ctx, nil)
-	if err != nil {
-		tb.Fatalf("begin API project fixture: %v", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-	if _, err := tx.ExecContext(ctx, `DELETE FROM projects`); err != nil {
-		tb.Fatalf("clear projects: %v", err)
+	if err := env.Fixtures.ClearProjects(ctx); err != nil {
+		tb.Fatal(err)
 	}
 	largeDescription := strings.Repeat("production-shaped project description ", 4096)
 	largePath := "/private/workspaces/" + strings.Repeat("nested-local-repository/", 64)
 	largeURL := "https://github.example.test/openvibely/" + strings.Repeat("repository-configuration/", 64)
+	var projects []models.Project
 	for i := 0; i < projectCount; i++ {
-		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO projects (id, name, description, repo_path, repo_url, is_default) VALUES (?, ?, ?, ?, ?, ?)`,
-			fmt.Sprintf("api-projection-project-%04d", i), fmt.Sprintf("API Projection Project %04d", i),
-			largeDescription, largePath, largeURL, i == 0); err != nil {
-			tb.Fatalf("insert API project %d: %v", i, err)
-		}
+		projects = append(projects, models.Project{ID: fmt.Sprintf("api-projection-project-%04d", i), Name: fmt.Sprintf("API Projection Project %04d", i), Description: largeDescription, RepoPath: largePath, RepoURL: largeURL, IsDefault: i == 0})
 	}
-	if err := tx.Commit(); err != nil {
-		tb.Fatalf("commit API project fixture: %v", err)
+	if err := env.Fixtures.SeedProjects(ctx, projects); err != nil {
+		tb.Fatal(err)
 	}
 }
 
@@ -202,7 +193,7 @@ func (fixture *apiProjectProjectionFixture) queryMetrics(tb testing.TB, render f
 	if err != nil {
 		tb.Fatalf("query-metric render: %v", err)
 	}
-	return len(body), len(fixture.counter.Statements())
+	return len(body), fixture.counter.Snapshot().Requests
 }
 
 func (fixture *apiProjectProjectionFixture) selectedRowBytes(tb testing.TB) int {

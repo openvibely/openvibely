@@ -2,7 +2,10 @@ package sqlitefixtures
 
 import (
 	"context"
+	"database/sql/driver"
+	"errors"
 	"github.com/openvibely/openvibely/internal/testutil/storefixture"
+	"time"
 )
 
 func (f *fixtures) SeedExecutionHistory(ctx context.Context, entries []storefixture.ExecutionHistoryEntry) error {
@@ -46,4 +49,30 @@ func (f *fixtures) SeedPendingTasks(ctx context.Context, tasks []storefixture.Pe
 		}
 	}
 	return tx.Commit()
+}
+
+func (f *fixtures) SetHistoricalExecutionCompletion(ctx context.Context, id string, at time.Time, duration int64) error {
+	_, err := f.db.ExecContext(ctx, `UPDATE executions SET status='completed',duration_ms=?,completed_at=? WHERE id=?`, duration, at.UTC().Format("2006-01-02 15:04:05"), id)
+	return err
+}
+
+// SetDanglingTaskAgent models legacy references while restoring enforcement on the same connection.
+func (f *fixtures) SetDanglingTaskAgent(ctx context.Context, taskID, agentID string) (err error) {
+	conn, err := f.db.Conn(ctx)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	if _, err = conn.ExecContext(ctx, `PRAGMA foreign_keys=OFF`); err != nil {
+		return err
+	}
+	defer func() {
+		_, restoreErr := conn.ExecContext(context.Background(), `PRAGMA foreign_keys=ON`)
+		err = errors.Join(err, restoreErr)
+		if restoreErr != nil {
+			_ = conn.Raw(func(any) error { return driver.ErrBadConn })
+		}
+	}()
+	_, err = conn.ExecContext(ctx, `UPDATE tasks SET agent_definition_id=? WHERE id=?`, agentID, taskID)
+	return err
 }

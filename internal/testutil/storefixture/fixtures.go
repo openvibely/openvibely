@@ -79,6 +79,9 @@ type GitHubIssueClaim struct {
 }
 type IssueProjectionFailure struct{ AutomationID, AssignmentEventKey string }
 type Fixtures interface {
+	SetHistoricalExecutionCompletion(context.Context, string, time.Time, int64) error
+	SetDanglingTaskAgent(context.Context, string, string) error
+
 	SetDefaultProject(context.Context, string) error
 	FailClearingSetting(context.Context, string) error
 	FailConflictStatus(context.Context) error
@@ -304,6 +307,8 @@ type Fixtures interface {
 // SQLite counts executed statements; other backends must count their database
 // requests, including requests made inside a single store method.
 type IOStats struct {
+	ExecutionMetricsReads, ExecutionPayloadReads, AgentLabelReads, ThreadMetadataReads, TaskPayloadReads int
+
 	ExecutionReads                                                                                                     int
 	AgentTaskUIReads, ProjectCapacityReads, ProjectOtherOrderedReads, PendingProjectCountReads                         int
 	ModelWorkerReads, ModelBadgeReads, ModelDetailReads, NewTaskSelectionReads                                         int
@@ -348,7 +353,17 @@ type IOStats struct {
 	ReadTextBytes         int
 }
 
+type ReadOperation string
+
+const (
+	ExecutionWindowRead  ReadOperation = "execution_window"
+	ExecutionMetricsRead ReadOperation = "execution_metrics"
+	AgentRead            ReadOperation = "agent"
+)
+
 type IOCounter interface {
+	ObserveReads(ReadOperation, func(context.Context))
+
 	// ObserveRequests observes requests at the backend driver boundary, including uncounted requests.
 	ObserveRequests(func(context.Context))
 
