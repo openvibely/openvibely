@@ -337,7 +337,7 @@ func TestExecBash(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		out = strings.TrimSpace(out)
+		out = strings.TrimSpace(strings.Split(out, "[process]")[0])
 		if out != "" {
 			t.Errorf("CLAUDECODE should be stripped, got: %q", out)
 		}
@@ -444,7 +444,7 @@ func TestDefaultTools(t *testing.T) {
 		}
 	}
 
-	expected := []string{"read_file", "write_file", "edit_file", "shell", "list_files", "grep_search"}
+	expected := []string{"read_file", "write_file", "edit_file", "shell", "interact_process", "list_files", "grep_search"}
 	for _, name := range expected {
 		if !names[name] {
 			t.Errorf("missing tool: %s", name)

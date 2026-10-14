@@ -5,13 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
-	"time"
-
-	"github.com/openvibely/openvibely/pkg/executionenv"
 )
 
 // Bash timeouts are shared by every provider.
@@ -32,6 +28,8 @@ func Execute(ctx context.Context, workDir, name string, input json.RawMessage) (
 		return execEditFile(workDir, input)
 	case "bash", "Bash", "shell":
 		return execBash(ctx, workDir, input)
+	case "interact_process":
+		return execInteractProcess(ctx, workDir, input)
 	case "list_files":
 		return execListFiles(workDir, input)
 	case "grep_search":
@@ -323,57 +321,6 @@ func normalizeLineForMatch(s string) string {
 		}
 	}
 	return b.String()
-}
-
-func execBash(ctx context.Context, workDir string, input json.RawMessage) (string, error) {
-	var params struct {
-		Command string `json:"command"`
-		Timeout int    `json:"timeout"`
-	}
-	if err := json.Unmarshal(input, &params); err != nil {
-		return "", fmt.Errorf("parse input: %w", err)
-	}
-	if params.Command == "" {
-		return "", fmt.Errorf("command is required")
-	}
-	params.Timeout = NormalizeBashTimeout(params.Timeout)
-
-	timeout := time.Duration(params.Timeout) * time.Second
-	cmdCtx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-
-	shell, err := executionenv.Resolve()
-	if err != nil {
-		return "", err
-	}
-	cmd := exec.CommandContext(cmdCtx, shell.Path, shell.Args(params.Command)...)
-	cmd.Dir = workDir
-
-	env := os.Environ()
-	filtered := make([]string, 0, len(env))
-	for _, e := range env {
-		if !strings.HasPrefix(e, "CLAUDECODE=") {
-			filtered = append(filtered, e)
-		}
-	}
-	cmd.Env = filtered
-
-	output, err := cmd.CombinedOutput()
-	result := string(output)
-
-	const maxOutput = 50000
-	if len(result) > maxOutput {
-		result = result[:maxOutput] + "\n... (output truncated)"
-	}
-
-	if err != nil {
-		if cmdCtx.Err() == context.DeadlineExceeded {
-			return result + fmt.Sprintf("\n(command timed out after %ds)", params.Timeout), fmt.Errorf("command timed out")
-		}
-		return result + fmt.Sprintf("\n(exit code: %v)", err), nil
-	}
-
-	return result, nil
 }
 
 func execListFiles(workDir string, input json.RawMessage) (string, error) {

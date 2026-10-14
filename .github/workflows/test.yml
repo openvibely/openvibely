@@ -281,7 +281,7 @@ jobs:
       - name: Test native shell selection and execution
         run: |
           go test ./pkg/executionenv -count=1 -timeout 60s
-          go test ./pkg/agenttools -run TestNativeShellToolAndLegacyAlias -count=1 -timeout 60s
+          go test ./pkg/agenttools -run "TestNativeShellToolAndLegacyAlias|TestProcess" -count=1 -timeout 60s
 
       - name: Run native packaged-update tests
         shell: bash
