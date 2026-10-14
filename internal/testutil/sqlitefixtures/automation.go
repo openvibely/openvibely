@@ -45,7 +45,7 @@ func (f *fixtures) SetAutomationTemplateRevision(ctx context.Context, projectID,
 }
 
 func (f *fixtures) SeedAutomationInvocation(ctx context.Context, v models.AutomationInvocation) error {
-	_, err := f.db.ExecContext(ctx, `INSERT INTO automation_invocations (id,project_id,automation_id,version_id,trigger_node_id,trigger_resource_type,trigger_resource_id,occurrence_key,status,completed_at) VALUES (?,?,?,?,?,?,?,?,?,?)`, v.ID, v.ProjectID, v.AutomationID, v.VersionID, v.TriggerNodeID, v.TriggerResourceType, v.TriggerResourceID, v.OccurrenceKey, v.Status, v.CompletedAt)
+	_, err := f.db.ExecContext(ctx, `INSERT INTO automation_invocations (id,project_id,automation_id,version_id,trigger_node_id,trigger_resource_type,trigger_resource_id,occurrence_key,status,completed_at,started_at,error_message) VALUES (?,?,?,?,?,?,?,?,?,?,COALESCE(?,CURRENT_TIMESTAMP),?)`, v.ID, v.ProjectID, v.AutomationID, v.VersionID, v.TriggerNodeID, v.TriggerResourceType, v.TriggerResourceID, v.OccurrenceKey, v.Status, v.CompletedAt, v.StartedAt, v.ErrorMessage)
 	return err
 }
 func (f *fixtures) SeedRetainedScheduleOwnership(ctx context.Context, n models.AutomationNode, scheduleID string) error {
@@ -97,4 +97,31 @@ func (f *fixtures) FailLatestActiveAutomationInvocation(ctx context.Context, pro
 	var id string
 	err := f.db.QueryRowContext(ctx, `UPDATE automation_invocations SET status = 'failed', completed_at = CURRENT_TIMESTAMP WHERE id = (SELECT id FROM automation_invocations WHERE project_id = ? AND automation_id = ? AND status IN ('claimed','dispatched','running') ORDER BY rowid DESC LIMIT 1) RETURNING id`, projectID, automationID).Scan(&id)
 	return id, err
+}
+
+func (f *fixtures) SetAutomationInvocationCompletionTime(ctx context.Context, id string, at time.Time) error {
+	_, err := f.db.ExecContext(ctx, `UPDATE automation_invocations SET completed_at = ?, updated_at = ? WHERE id = ?`, at, at, id)
+	return err
+}
+func (f *fixtures) SetTaskPullRequestUpdatedAt(ctx context.Context, id string, at time.Time) error {
+	_, err := f.db.ExecContext(ctx, `UPDATE task_pull_requests SET updated_at = ? WHERE task_id = ?`, at.UTC().Format("2006-01-02 15:04:05"), id)
+	return err
+}
+
+func (f *fixtures) SeedAutomationActivity(ctx context.Context, a models.AutomationActivity, resources []models.AutomationActivityResource) error {
+	tx, err := f.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	_, err = tx.ExecContext(ctx, `INSERT INTO automation_activities(id,project_id,automation_id,version_id,node_id,invocation_id,activity_key,activity_type,status) VALUES(?,?,?,?,?,?,?,?,?)`, a.ID, a.ProjectID, a.AutomationID, a.VersionID, a.NodeID, a.InvocationID, a.ActivityKey, a.ActivityType, a.Status)
+	if err != nil {
+		return err
+	}
+	for _, r := range resources {
+		if _, err = tx.ExecContext(ctx, `INSERT INTO automation_activity_resources(activity_id,resource_type,resource_id,relation) VALUES(?,?,?,?)`, a.ID, r.ResourceType, r.ResourceID, r.Relation); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }

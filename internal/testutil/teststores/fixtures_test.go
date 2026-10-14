@@ -626,3 +626,34 @@ func TestFailLatestActiveInvocationPreservesScopeAndTerminalHistory(t *testing.T
 		})
 	}
 }
+
+func TestLegacyAutomationActivityFixtureIsAtomic(t *testing.T) {
+	for _, production := range []bool{false, true} {
+		name := "isolated"
+		if production {
+			name = "production"
+		}
+		t.Run(name, func(t *testing.T) {
+			var opts []teststores.Option
+			if production {
+				opts = append(opts, teststores.WithProductionTopology())
+			}
+			env := teststores.New(t, opts...)
+			ctx := t.Context()
+			require.NoError(t, env.Fixtures.SeedAutomation(ctx, models.Automation{ID: "history", ProjectID: "default", StableKey: "history", Name: "History", AutomationType: "custom", LifecycleState: "active"}))
+			require.NoError(t, env.Fixtures.SeedAutomationVersion(ctx, models.AutomationVersion{ID: "version", ProjectID: "default", AutomationID: "history", Version: 1, State: "published", Source: "manual", AdapterKey: "custom"}))
+			require.NoError(t, env.Fixtures.SeedAutomationNode(ctx, models.AutomationNode{ID: "node", ProjectID: "default", AutomationID: "history", VersionID: "version", NodeKey: "task", Name: "Task", NodeType: "agent_task", Role: "task", ConfigJSON: "{}"}))
+			require.NoError(t, env.Fixtures.SeedAutomationInvocation(ctx, models.AutomationInvocation{ID: "invocation", ProjectID: "default", AutomationID: "history", VersionID: "version", TriggerNodeID: "node", TriggerResourceType: "manual", TriggerResourceID: "resource", OccurrenceKey: "occurrence", Status: "completed"}))
+			activity := models.AutomationActivity{InvocationID: "invocation", ID: "activity", ProjectID: "default", AutomationID: "history", VersionID: "version", NodeID: "node", ActivityKey: "activity", ActivityType: "pull_request", Status: models.AutomationActivityCompleted}
+			resource := models.AutomationActivityResource{ResourceType: "pull_request", ResourceID: "legacy-id", Relation: "subject"}
+			require.Error(t, env.Fixtures.SeedAutomationActivity(ctx, activity, []models.AutomationActivityResource{resource, resource}))
+			page, err := env.Automations.ListAutomationActivities(ctx, "default", "history", "", "", 10, "")
+			require.NoError(t, err)
+			require.Empty(t, page.Items)
+			require.NoError(t, env.Fixtures.SeedAutomationActivity(ctx, activity, []models.AutomationActivityResource{resource}))
+			page, err = env.Automations.ListAutomationActivities(ctx, "default", "history", "", "", 10, "")
+			require.NoError(t, err)
+			require.Len(t, page.Items, 1)
+		})
+	}
+}

@@ -20,23 +20,21 @@ import (
 func createHistoryInvocation(t *testing.T, fixture automationRuntimeFixture, suffix, status string) models.AutomationInvocation {
 	t.Helper()
 	trigger := automationNodeByKey(t, fixture.definition, "vision_suggestions")
-	var invocation models.AutomationInvocation
-	err := fixture.db.QueryRow(`INSERT INTO automation_invocations
-		(project_id, automation_id, version_id, trigger_node_id, trigger_resource_type, trigger_resource_id,
-		 occurrence_key, status, started_at, completed_at, error_message)
-		VALUES (?, ?, ?, ?, 'schedule', ?, ?, ?, CURRENT_TIMESTAMP,
-		 CASE WHEN ? IN ('completed','failed','cancelled','skipped') THEN CURRENT_TIMESTAMP ELSE NULL END,
-		 CASE WHEN ? = 'failed' THEN 'dispatch failed' ELSE '' END)
-		RETURNING id, project_id, automation_id, version_id, trigger_node_id, trigger_resource_type,
-		 trigger_resource_id, occurrence_key, scheduled_for, status, skipped_reason, started_at, completed_at,
-		 created_at, updated_at, error_message`, fixture.project.ID, fixture.definition.Automation.ID,
-		fixture.definition.Version.ID, trigger.ID, fixture.schedule.ID, "history-"+suffix, status, status, status).
-		Scan(&invocation.ID, &invocation.ProjectID, &invocation.AutomationID, &invocation.VersionID,
-			&invocation.TriggerNodeID, &invocation.TriggerResourceType, &invocation.TriggerResourceID,
-			&invocation.OccurrenceKey, &invocation.ScheduledFor, &invocation.Status, &invocation.SkippedReason,
-			&invocation.StartedAt, &invocation.CompletedAt, &invocation.CreatedAt, &invocation.UpdatedAt,
-			&invocation.ErrorMessage)
+	now := time.Now().UTC()
+	invocation := models.AutomationInvocation{ID: persistence.NewID(), ProjectID: fixture.project.ID, AutomationID: fixture.definition.Automation.ID, VersionID: fixture.definition.Version.ID, TriggerNodeID: trigger.ID, TriggerResourceType: "schedule", TriggerResourceID: fixture.schedule.ID, OccurrenceKey: "history-" + suffix, Status: models.AutomationInvocationStatus(status), StartedAt: &now}
+	switch status {
+	case "completed", "failed", "cancelled", "skipped":
+		invocation.CompletedAt = &now
+	}
+	if status == "failed" {
+		invocation.ErrorMessage = "dispatch failed"
+	}
+	require.NoError(t, fixture.stores.Fixtures.SeedAutomationInvocation(t.Context(), invocation))
+	stored, err := fixture.repo.GetAutomationInvocation(t.Context(), invocation.ProjectID, invocation.AutomationID, invocation.ID)
 	require.NoError(t, err)
+	require.NotNil(t, stored)
+	invocation = *stored
+
 	return invocation
 }
 
@@ -651,7 +649,7 @@ func TestAutomationHistoryHealthReconciliationCoversEverySavedAutomationBeyondOn
 }
 
 func TestAutomationHistoryHealthIgnoresStaleFailureAfterRecentSuccesses(t *testing.T) {
-	fixture := newAutomationRuntimeFixture(t, AutomationAdapterNativeSDLC)
+	fixture := newAutomationRuntimeStoreFixture(t, AutomationAdapterNativeSDLC)
 	ctx := context.Background()
 	now := time.Date(2026, time.July, 18, 12, 0, 0, 0, time.UTC)
 
@@ -660,12 +658,10 @@ func TestAutomationHistoryHealthIgnoresStaleFailureAfterRecentSuccesses(t *testi
 	require.Equal(t, models.AutomationHealthUnknown, health.State)
 
 	staleFailure := createHistoryInvocation(t, fixture, "stale-failure", "failed")
-	_, err = fixture.db.Exec(`UPDATE automation_invocations SET completed_at = '2025-01-01 00:00:00', updated_at = '2025-01-01 00:00:00' WHERE id = ?`, staleFailure.ID)
-	require.NoError(t, err)
+	require.NoError(t, fixture.stores.Fixtures.SetAutomationInvocationCompletionTime(ctx, staleFailure.ID, time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)))
 	for i := 0; i < 3; i++ {
 		completed := createHistoryInvocation(t, fixture, fmt.Sprintf("recent-success-%d", i), "completed")
-		_, err = fixture.db.Exec(`UPDATE automation_invocations SET completed_at = ?, updated_at = ? WHERE id = ?`, now.Add(time.Duration(i)*time.Minute), now.Add(time.Duration(i)*time.Minute), completed.ID)
-		require.NoError(t, err)
+		require.NoError(t, fixture.stores.Fixtures.SetAutomationInvocationCompletionTime(ctx, completed.ID, now.Add(time.Duration(i)*time.Minute)))
 	}
 
 	health, err = fixture.repo.RecomputeAutomationHealth(ctx, fixture.project.ID, fixture.definition.Automation.ID, now)
@@ -702,12 +698,11 @@ func TestAutomationHistoryHealthStableNoChangeSkipsAutomationUpdatesAndReducesSQ
 
 func TestAutomationHistoryHealthChangedInputsPersistAffectedRecords(t *testing.T) {
 	t.Run("blocked position", func(t *testing.T) {
-		fixture := newAutomationRuntimeFixture(t, AutomationAdapterNativeSDLC)
+		fixture := newAutomationRuntimeStoreFixture(t, AutomationAdapterNativeSDLC)
 		ctx := context.Background()
 		now := time.Date(2026, time.August, 2, 12, 0, 0, 0, time.UTC)
 		completed := createHistoryInvocation(t, fixture, "blocked-baseline", "completed")
-		_, err := fixture.db.ExecContext(ctx, `UPDATE automation_invocations SET completed_at = ?, updated_at = ? WHERE id = ?`, now, now, completed.ID)
-		require.NoError(t, err)
+		require.NoError(t, fixture.stores.Fixtures.SetAutomationInvocationCompletionTime(ctx, completed.ID, now))
 		require.NoError(t, fixture.repo.RecomputeAutomationHealthForAll(ctx, now, 100))
 		requireAutomationHealthState(t, fixture.repo, fixture.project.ID, fixture.definition.Automation.ID, models.AutomationHealthHealthy, "Recent triggers")
 
@@ -733,35 +728,31 @@ func TestAutomationHistoryHealthChangedInputsPersistAffectedRecords(t *testing.T
 	})
 
 	t.Run("recent failure", func(t *testing.T) {
-		fixture := newAutomationRuntimeFixture(t, AutomationAdapterNativeSDLC)
+		fixture := newAutomationRuntimeStoreFixture(t, AutomationAdapterNativeSDLC)
 		ctx := context.Background()
 		now := time.Date(2026, time.August, 2, 13, 0, 0, 0, time.UTC)
 		completed := createHistoryInvocation(t, fixture, "failure-baseline", "completed")
-		_, err := fixture.db.ExecContext(ctx, `UPDATE automation_invocations SET completed_at = ?, updated_at = ? WHERE id = ?`, now, now, completed.ID)
-		require.NoError(t, err)
+		require.NoError(t, fixture.stores.Fixtures.SetAutomationInvocationCompletionTime(ctx, completed.ID, now))
 		require.NoError(t, fixture.repo.RecomputeAutomationHealthForAll(ctx, now, 100))
 		requireAutomationHealthState(t, fixture.repo, fixture.project.ID, fixture.definition.Automation.ID, models.AutomationHealthHealthy, "Recent triggers")
 
 		failed := createHistoryInvocation(t, fixture, "fresh-failure", "failed")
-		_, err = fixture.db.ExecContext(ctx, `UPDATE automation_invocations SET completed_at = ?, updated_at = ? WHERE id = ?`, now.Add(time.Minute), now.Add(time.Minute), failed.ID)
-		require.NoError(t, err)
+		require.NoError(t, fixture.stores.Fixtures.SetAutomationInvocationCompletionTime(ctx, failed.ID, now.Add(time.Minute)))
 		require.NoError(t, fixture.repo.RecomputeAutomationHealthForAll(ctx, now.Add(2*time.Minute), 100))
 		requireAutomationHealthState(t, fixture.repo, fixture.project.ID, fixture.definition.Automation.ID, models.AutomationHealthDegraded, "1 recent failed invocation")
 	})
 
 	t.Run("stale external state", func(t *testing.T) {
-		fixture := newAutomationRuntimeFixture(t, AutomationAdapterNativeSDLC)
+		fixture := newAutomationRuntimeStoreFixture(t, AutomationAdapterNativeSDLC)
 		ctx := context.Background()
 		now := time.Date(2026, time.August, 2, 14, 0, 0, 0, time.UTC)
 		completed := createHistoryInvocation(t, fixture, "external-baseline", "completed")
-		_, err := fixture.db.ExecContext(ctx, `UPDATE automation_invocations SET completed_at = ?, updated_at = ? WHERE id = ?`, now, now, completed.ID)
-		require.NoError(t, err)
+		require.NoError(t, fixture.stores.Fixtures.SetAutomationInvocationCompletionTime(ctx, completed.ID, now))
 		attachAutomationHealthPullRequest(t, fixture, completed.ID, now)
 		require.NoError(t, fixture.repo.RecomputeAutomationHealthForAll(ctx, now, 100))
 		requireAutomationHealthState(t, fixture.repo, fixture.project.ID, fixture.definition.Automation.ID, models.AutomationHealthHealthy, "Recent triggers")
 
-		_, err = fixture.db.ExecContext(ctx, `UPDATE task_pull_requests SET updated_at = ? WHERE task_id = ?`, now.Add(-2*persistence.AutomationExternalStaleAfter).UTC().Format("2006-01-02 15:04:05"), fixture.task.ID)
-		require.NoError(t, err)
+		require.NoError(t, fixture.stores.Fixtures.SetTaskPullRequestUpdatedAt(ctx, fixture.task.ID, now.Add(-2*persistence.AutomationExternalStaleAfter)))
 		externalState, err := fixture.repo.AutomationExternalState(ctx, fixture.project.ID, fixture.definition.Automation.ID, now.Add(time.Minute).Add(-persistence.AutomationExternalStaleAfter))
 		require.NoError(t, err)
 		require.Equal(t, 1, externalState.TrackedResources)
@@ -916,14 +907,14 @@ func insertAutomationHealthActivityResources(tb testing.TB, db *sql.DB, projectI
 
 func attachAutomationHealthPullRequest(t *testing.T, fixture automationRuntimeFixture, invocationID string, updatedAt time.Time) {
 	t.Helper()
-	ctx := context.Background()
-	pullRepo := teststores.Of(fixture.db).TaskPullRequests
+	ctx := t.Context()
 	pull := models.TaskPullRequest{TaskID: fixture.task.ID, PRNumber: 77, PRURL: "https://github.com/openvibely/openvibely/pull/77", PRState: "open"}
-	require.NoError(t, pullRepo.Upsert(ctx, &pull))
+	require.NoError(t, fixture.stores.TaskPullRequests.Upsert(ctx, &pull))
 	trigger := automationNodeByKey(t, fixture.definition, "vision_suggestions")
-	insertAutomationHealthActivityResources(t, fixture.db, fixture.project.ID, fixture.definition.Automation.ID, fixture.definition.Version.ID, trigger.ID, invocationID, fixture.task.ID, pull.ID, 77)
-	_, err := fixture.db.ExecContext(ctx, `UPDATE task_pull_requests SET updated_at = ? WHERE task_id = ?`, updatedAt.UTC().Format("2006-01-02 15:04:05"), fixture.task.ID)
-	require.NoError(t, err)
+	activityID := fixture.definition.Automation.ID + "-activity-077"
+	require.NoError(t, fixture.stores.Fixtures.SeedAutomationActivity(ctx, models.AutomationActivity{ID: activityID, ProjectID: fixture.project.ID, AutomationID: fixture.definition.Automation.ID, VersionID: fixture.definition.Version.ID, NodeID: trigger.ID, InvocationID: invocationID, ActivityKey: activityID, ActivityType: "pull_request", Status: models.AutomationActivityCompleted}, []models.AutomationActivityResource{{ResourceType: "task", ResourceID: fixture.task.ID, Relation: "subject"}, {ResourceType: "pull_request", ResourceID: pull.ID, Relation: "subject"}}))
+
+	require.NoError(t, fixture.stores.Fixtures.SetTaskPullRequestUpdatedAt(ctx, fixture.task.ID, updatedAt))
 }
 
 func countAutomationHealthUpdates(statements []string) int {
