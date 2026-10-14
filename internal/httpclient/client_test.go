@@ -1,11 +1,16 @@
 package httpclient
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/http/httptrace"
+	"strings"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -53,6 +58,9 @@ func TestModelTimeouts(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				client := NewModel(roundTripFunc(func(r *http.Request) (*http.Response, error) {
+					if trace := httptrace.ContextClientTrace(r.Context()); trace != nil && trace.WroteRequest != nil {
+						trace.WroteRequest(httptrace.WroteRequestInfo{})
+					}
 					select {
 					case <-r.Context().Done():
 						return nil, r.Context().Err()
@@ -194,4 +202,205 @@ func TestNewClientAfterDefaultTransportOverride(t *testing.T) {
 	if err != nil || string(data) != "ok" {
 		t.Fatalf("response=%q err=%v", data, err)
 	}
+}
+
+func TestNonStreamingDeadlineSurvivesRedirects(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		header, body time.Duration
+		wantTimeout  bool
+	}{
+		{"headers exceed total", 6 * time.Minute, 0, true},
+		{"body exceeds total", 4 * time.Minute, 3 * time.Minute, true},
+		{"redirect succeeds within total", 3 * time.Minute, time.Minute, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				calls := 0
+				start := time.Now()
+				client := NewModel(roundTripFunc(func(r *http.Request) (*http.Response, error) {
+					calls++
+					if r.Method != "POST" {
+						t.Errorf("redirect changed method: %s", r.Method)
+					}
+					select {
+					case <-time.After(tc.header):
+					case <-r.Context().Done():
+						return nil, r.Context().Err()
+					}
+					resp := &http.Response{StatusCode: 200, Header: make(http.Header), Body: &slowBody{r.Context(), tc.body, 1}}
+					if calls == 1 {
+						resp.StatusCode = 307
+						resp.Header.Set("Location", "/second")
+						resp.Body = io.NopCloser(strings.NewReader("redirect"))
+					}
+					return resp, nil
+				}))
+				req, _ := http.NewRequest("POST", "https://model.test/first", strings.NewReader("{}"))
+				resp, err := client.Do(req)
+				if err == nil {
+					_, err = io.ReadAll(resp.Body)
+					resp.Body.Close()
+				}
+				if calls != 2 {
+					t.Fatalf("calls=%d", calls)
+				}
+				if tc.wantTimeout {
+					if !errors.Is(err, context.DeadlineExceeded) || time.Since(start) != ModelRequestTimeout {
+						t.Fatalf("elapsed=%v err=%v", time.Since(start), err)
+					}
+				} else if err != nil {
+					t.Fatal(err)
+				}
+			})
+		})
+	}
+}
+
+func TestHeaderWaitStartsAfterRequestWrite(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		header      time.Duration
+		wantTimeout bool
+		replay      bool
+	}{
+		{"full header allowance", 4 * time.Minute, false, false},
+		{"replayed upload", 4 * time.Minute, false, true},
+		{"stalled headers", 6 * time.Minute, true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				start := time.Now()
+				client := NewModel(roundTripFunc(func(r *http.Request) (*http.Response, error) {
+					if tc.replay {
+						r.Body.Close()
+						body, err := r.GetBody()
+						if err != nil {
+							return nil, err
+						}
+						r.Body = body
+					}
+					defer r.Body.Close()
+					// An active six-minute upload must not consume the header allowance.
+					for range 3 {
+						select {
+						case <-time.After(2 * time.Minute):
+						case <-r.Context().Done():
+							return nil, r.Context().Err()
+						}
+						if _, err := io.ReadFull(r.Body, make([]byte, 1)); err != nil {
+							return nil, err
+						}
+					}
+					httptrace.ContextClientTrace(r.Context()).WroteRequest(httptrace.WroteRequestInfo{})
+					select {
+					case <-time.After(tc.header):
+					case <-r.Context().Done():
+						return nil, r.Context().Err()
+					}
+					return &http.Response{StatusCode: 200, Header: make(http.Header), Body: &slowBody{r.Context(), 4 * time.Minute, 3}}, nil
+				}))
+				req, _ := http.NewRequestWithContext(Streaming(context.Background()), "POST", "https://model.test", strings.NewReader("{} "))
+				resp, err := client.Do(req)
+				if err == nil {
+					_, err = io.ReadAll(resp.Body)
+					resp.Body.Close()
+				}
+				if tc.wantTimeout {
+					if !errors.Is(err, context.DeadlineExceeded) || time.Since(start) != 6*time.Minute+ModelHeaderTimeout {
+						t.Fatalf("elapsed=%v err=%v", time.Since(start), err)
+					}
+				} else if err != nil {
+					t.Fatal(err)
+				}
+			})
+		})
+	}
+}
+
+func TestRealHTTPHeaderTimeout(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { <-r.Context().Done() }))
+	defer server.Close()
+	transport := NewTransport()
+	defer transport.CloseIdleConnections()
+	client := &http.Client{Transport: &modelTransport{base: transport, header: 30 * time.Millisecond, idle: time.Second, total: time.Second}}
+	req, _ := http.NewRequestWithContext(Streaming(context.Background()), "GET", server.URL, nil)
+	_, err := client.Do(req)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("got %v", err)
+	}
+}
+
+// Exercise a real HTTP transport blocked writing to a peer that stops reading.
+func TestStalledUploadTimeout(t *testing.T) {
+	clientConn, serverConn := net.Pipe()
+	defer serverConn.Close()
+	headersRead := make(chan struct{})
+	go func() {
+		reader := bufio.NewReader(serverConn)
+		for {
+			line, err := reader.ReadString('\n')
+			if err != nil {
+				return
+			}
+			if line == "\r\n" {
+				close(headersRead)
+				return
+			}
+		}
+	}()
+	base := NewDirectTransport()
+	base.DialContext = func(context.Context, string, string) (net.Conn, error) { return clientConn, nil }
+	defer base.CloseIdleConnections()
+	client := &http.Client{Transport: &modelTransport{base: base, header: time.Second, idle: 50 * time.Millisecond, total: time.Second}}
+	ctx, cancel := context.WithCancel(Streaming(context.Background()))
+	defer cancel()
+	req, _ := http.NewRequestWithContext(ctx, "POST", "http://model.test", bytes.NewReader(make([]byte, 1024*1024)))
+	done := make(chan error, 1)
+	go func() {
+		resp, err := client.Do(req)
+		if resp != nil {
+			resp.Body.Close()
+		}
+		done <- err
+	}()
+	select {
+	case <-headersRead:
+	case <-time.After(2 * time.Second):
+		t.Fatal("request headers were not sent")
+	}
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("got %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("stalled upload did not time out")
+	}
+}
+
+func TestEarlyResponseIgnoresLateUploadActivity(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		start := time.Now()
+		base := roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			go func() {
+				time.Sleep(time.Minute)
+				io.Copy(io.Discard, r.Body)
+				r.Body.Close()
+				httptrace.ContextClientTrace(r.Context()).WroteRequest(httptrace.WroteRequestInfo{})
+			}()
+			return &http.Response{StatusCode: 200, Header: make(http.Header), Body: &slowBody{r.Context(), 3 * time.Minute, 1}}, nil
+		})
+		client := &http.Client{Transport: &modelTransport{base: base, header: 5 * time.Minute, idle: 2 * time.Minute, total: 10 * time.Minute}}
+		req, _ := http.NewRequestWithContext(Streaming(context.Background()), "POST", "https://model.test", strings.NewReader("{}"))
+		resp, err := client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		_, err = io.ReadAll(resp.Body)
+		if !errors.Is(err, context.DeadlineExceeded) || time.Since(start) != 2*time.Minute {
+			t.Fatalf("late upload changed response deadline: elapsed=%v err=%v", time.Since(start), err)
+		}
+	})
 }

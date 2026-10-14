@@ -6,6 +6,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptrace"
 	"strings"
 	"sync"
 	"time"
@@ -95,18 +96,83 @@ func (t *modelTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	streaming, _ := req.Context().Value(streamingKey{}).(bool)
 	streaming = streaming || strings.Contains(req.Header.Get("Accept"), "text/event-stream")
 	if !streaming {
-		ctx, cancel := context.WithTimeout(req.Context(), t.total)
-		resp, err := t.base.RoundTrip(req.Clone(ctx))
+		// Redirect requests carry the preceding response. Preserve its absolute
+		// deadline without inheriting the cancellation from closing its body.
+		deadline := time.Now().Add(t.total)
+		if previous := req.Response; previous != nil && previous.Request != nil {
+			if inherited, ok := previous.Request.Context().Deadline(); ok && inherited.Before(deadline) {
+				deadline = inherited
+			}
+		}
+		ctx, cancel := context.WithDeadline(req.Context(), deadline)
+		request := req.Clone(ctx)
+		resp, err := t.base.RoundTrip(request)
 		if err != nil {
 			cancel()
 			return nil, err
 		}
+		// Also populate Request for custom RoundTrippers, so redirects always
+		// have access to the same deadline.
+		resp.Request = request
 		resp.Body = &deadlineBody{ReadCloser: resp.Body, ctx: ctx, close: cancel}
 		return resp, nil
 	}
-	// This timer covers the request through response headers, including uploads.
-	ctx, activity, stop := WithActivityTimeout(req.Context(), t.header)
-	resp, err := t.base.RoundTrip(req.Clone(ctx))
+	// Bound upload inactivity separately from the subsequent header wait.
+	// Connection establishment is also bounded by the dial/TLS limits.
+	ctx, activity, stop := WithActivityTimeout(req.Context(), t.idle)
+	var phaseMu sync.Mutex
+	headersReceived := false
+	uploading := true
+	uploadActivity := func() {
+		phaseMu.Lock()
+		defer phaseMu.Unlock()
+		if uploading && !headersReceived {
+			activity(t.idle)
+		}
+	}
+	ctx = httptrace.WithClientTrace(ctx, &httptrace.ClientTrace{
+		GotConn: func(httptrace.GotConnInfo) {
+			phaseMu.Lock()
+			defer phaseMu.Unlock()
+			if !headersReceived {
+				uploading = true // The transport may replay a request on a new connection.
+				activity(t.idle)
+			}
+		},
+		WroteRequest: func(info httptrace.WroteRequestInfo) {
+			if info.Err != nil {
+				return
+			}
+			phaseMu.Lock()
+			defer phaseMu.Unlock()
+			if !headersReceived {
+				uploading = false
+				activity(t.header)
+			}
+		},
+	})
+	request := req.Clone(ctx)
+	wrapUpload := func(body io.ReadCloser) io.ReadCloser {
+		if body == nil || body == http.NoBody {
+			return body
+		}
+		// Do not cancel on EOF or Close: header and response-body waits follow.
+		return struct {
+			io.Reader
+			io.Closer
+		}{activityReader{body, uploadActivity}, body}
+	}
+	request.Body = wrapUpload(request.Body)
+	if req.GetBody != nil {
+		request.GetBody = func() (io.ReadCloser, error) {
+			body, err := req.GetBody()
+			if err != nil {
+				return nil, err
+			}
+			return wrapUpload(body), nil
+		}
+	}
+	resp, err := t.base.RoundTrip(request)
 	if err != nil {
 		if cause := context.Cause(ctx); cause != nil {
 			err = cause
@@ -114,25 +180,32 @@ func (t *modelTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		stop()
 		return nil, err
 	}
+	phaseMu.Lock()
+	headersReceived = true
 	activity(t.idle)
+	phaseMu.Unlock()
 	resp.Body = &deadlineBody{ReadCloser: resp.Body, ctx: ctx, touch: func() { activity(t.idle) }, close: stop}
 	return resp, nil
 }
 
 // WithActivityTimeout provides a resettable inactivity deadline. Activity sets
 // the next deadline; stop releases the timer and cancels the derived context.
+// A nonpositive initial timeout leaves it disarmed until the first activity.
 // It is shared by HTTP bodies and WebSocket message reads.
 func WithActivityTimeout(parent context.Context, timeout time.Duration) (context.Context, func(time.Duration), func()) {
 	ctx, cancel := context.WithCancelCause(parent)
 	var mu sync.Mutex
-	deadline := time.Now().Add(timeout)
+	var deadline time.Time
+	if timeout > 0 {
+		deadline = time.Now().Add(timeout)
+	}
 	stopped := false
 	var timer *time.Timer
 	mu.Lock()
 	timer = time.AfterFunc(timeout, func() {
 		mu.Lock()
 		defer mu.Unlock()
-		if stopped {
+		if stopped || deadline.IsZero() {
 			return
 		}
 		if remaining := time.Until(deadline); remaining > 0 {
@@ -142,6 +215,9 @@ func WithActivityTimeout(parent context.Context, timeout time.Duration) (context
 		stopped = true
 		cancel(context.DeadlineExceeded)
 	})
+	if timeout <= 0 {
+		timer.Stop()
+	}
 	mu.Unlock()
 	touch := func(timeout time.Duration) {
 		mu.Lock()
