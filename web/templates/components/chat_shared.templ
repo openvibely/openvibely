@@ -3964,6 +3964,7 @@ templ ChatAutoScrollScript() {
 			}
 
 			function recoverIdleEarlierRequest() {
+				if (container.dataset.earlierAnchorRestoring === 'true') return false;
 				if (container.dataset.earlierRequestLoading !== 'true') return true;
 				var busyLoader = container.querySelector('[data-earlier-loader="true"][data-loading="true"]');
 				if (busyLoader) return false;
@@ -4029,7 +4030,7 @@ templ ChatAutoScrollScript() {
 					if (!['ArrowUp', 'PageUp', 'Home'].includes(event.key)) return;
 					if (event.repeat) return;
 					document.querySelectorAll('#chat-messages, #task-thread-messages').forEach(function(container) {
-						if (container.dataset.earlierLoaderBound !== 'true' || container.scrollTop > 12) return;
+						if (container.dataset.earlierLoaderBound !== 'true' || container.scrollTop > 12 || container.dataset.earlierAnchorRestoring === 'true') return;
 						if (container.dataset.earlierRequestLoading === 'true' && container.querySelector('[data-earlier-loader="true"][data-loading="true"]')) return;
 						container.dataset.earlierRequestLoading = 'false';
 						container.dataset.earlierGestureLocked = 'false';
@@ -4069,22 +4070,37 @@ templ ChatAutoScrollScript() {
 
 			window.prepareChatEarlierSwap = function(loader) {
 				var container = getEarlierContainerForElement(loader);
-				if (!container || container.dataset.earlierSwapPrepared === 'true') return;
-				container.dataset.earlierSwapPrepared = 'true';
-				container.dataset.earlierPrevScrollHeight = String(container.scrollHeight || 0);
-				container.dataset.earlierPrevScrollTop = String(container.scrollTop || 0);
-				container.dataset.earlierPrevBottomDistance = String((container.scrollHeight || 0) - (container.scrollTop || 0));
-				var tracker = container.id ? window['scrollTracker_' + container.id] : null;
-				container.dataset.earlierIntentRevision = String(tracker ? (tracker.intentRevision || 0) : (window._chatScrollIntentRevision || 0));
+				if (!container || container._earlierAnchor) return;
 				var anchor = getFirstVisibleExecutionPair(container);
-				if (anchor && anchor.pair) {
-					container.dataset.earlierAnchorExecId = anchor.pair.getAttribute('data-exec-id') || '';
-					container.dataset.earlierAnchorOffsetTop = String(anchor.offset || 0);
-				} else {
-					delete container.dataset.earlierAnchorExecId;
-					delete container.dataset.earlierAnchorOffsetTop;
-				}
+				var tracker = container.id ? window['scrollTracker_' + container.id] : null;
+				container._earlierAnchor = {
+					pair: anchor && anchor.pair,
+					position: anchor ? anchor.offset + container.scrollTop : container.scrollHeight,
+					intentRevision: tracker ? tracker.intentRevision : 0,
+					overflowAnchor: container.style.overflowAnchor
+				};
+				// Own compensation for this transaction; native anchoring must not
+				// apply the same prepend delta a second time.
+				container.style.overflowAnchor = 'none';
 			};
+
+			function compensateChatEarlierLayout(container) {
+				var anchor = container._earlierAnchor;
+				if (!anchor || !container.isConnected) return;
+				var tracker = container.id ? window['scrollTracker_' + container.id] : null;
+				var position = anchor.pair && anchor.pair.isConnected
+					? anchor.pair.getBoundingClientRect().top - container.getBoundingClientRect().top + container.scrollTop
+					: container.scrollHeight;
+				// Apply only layout movement above the reader, retaining all wheel,
+				// touch and scrollbar movement made while the request was pending.
+				// An explicit return to latest (including send) still takes precedence.
+				if (tracker && tracker.intentRevision !== anchor.intentRevision && tracker.shouldAutoScroll()) {
+					window.chatAutoScroll.scrollToBottom(container, false);
+				} else {
+					container.scrollTop += position - anchor.position;
+				}
+				anchor.position = position;
+			}
 
 			function setAllEarlierLoadersIdle(container) {
 				container.querySelectorAll('[data-earlier-loader="true"]').forEach(function(loader) {
@@ -4100,13 +4116,22 @@ templ ChatAutoScrollScript() {
 				var container = getEarlierContainerForElement(swapped);
 				if (!container) return;
 				container.dataset.earlierRequestLoading = 'false';
-				delete container.dataset.earlierSwapPrepared;
+				clearChatEarlierRestoreState(container);
 				setAllEarlierLoadersIdle(container);
 			};
 
 			window.afterChatEarlierSwap = function(swapped) {
 				var container = getEarlierContainerForElement(swapped);
 				if (!container) return;
+				if (container._earlierAnchor && container._earlierAnchor.started) return;
+				if (container._earlierAnchor) container._earlierAnchor.started = true;
+				container.dataset.earlierAnchorRestoring = 'true';
+				compensateChatEarlierLayout(container);
+				var anchor = container._earlierAnchor;
+				if (anchor && !anchor.observer && window.ResizeObserver) {
+					anchor.observer = new ResizeObserver(function() { compensateChatEarlierLayout(container); });
+					Array.prototype.forEach.call(container.children, function(child) { anchor.observer.observe(child); });
+				}
 				setAllEarlierLoadersIdle(container);
 				if (window.htmx) htmx.process(container);
 					var hydrationPromise = null;
@@ -4114,6 +4139,7 @@ templ ChatAutoScrollScript() {
 					else if (window.cleanAssistantMessages) hydrationPromise = window.cleanAssistantMessages(container);
 					container._chatEarlierHydrationPromise = Promise.resolve(hydrationPromise).catch(function() { return false; });
 				if (window._initThreadStreaming) window._initThreadStreaming();
+				compensateChatEarlierLayout(container);
 			};
 
 			window.bindChatEarlierHTMXLifecycle = function() {
@@ -4151,69 +4177,29 @@ templ ChatAutoScrollScript() {
 			};
 
 			function clearChatEarlierRestoreState(container) {
-				delete container.dataset.earlierPrevScrollHeight;
-				delete container.dataset.earlierPrevScrollTop;
-				delete container.dataset.earlierPrevBottomDistance;
-				delete container.dataset.earlierAnchorExecId;
-				delete container.dataset.earlierAnchorOffsetTop;
-				delete container.dataset.earlierIntentRevision;
-				delete container.dataset.earlierSwapPrepared;
+				var anchor = container._earlierAnchor;
+				if (anchor) {
+					if (anchor.observer) anchor.observer.disconnect();
+					container.style.overflowAnchor = anchor.overflowAnchor;
+					delete container._earlierAnchor;
+				}
+				container.dataset.earlierAnchorRestoring = 'false';
+				container.dataset.earlierRequestLoading = 'false';
 			}
 
 			window.restoreChatEarlierScroll = function(container) {
 				if (!container) return;
-				var prevHeight = parseInt(container.dataset.earlierPrevScrollHeight || '0', 10) || 0;
-				var prevTop = parseInt(container.dataset.earlierPrevScrollTop || '0', 10) || 0;
-				var prevBottomDistance = parseInt(container.dataset.earlierPrevBottomDistance || '0', 10) || 0;
-				var anchorExecID = container.dataset.earlierAnchorExecId || '';
-				var anchorOffsetTop = parseFloat(container.dataset.earlierAnchorOffsetTop || '0') || 0;
-				var preparedIntentRevision = parseInt(container.dataset.earlierIntentRevision || '0', 10) || 0;
-				if (prevHeight <= 0) {
-					container.dataset.earlierRequestLoading = 'false';
-					clearChatEarlierRestoreState(container);
-					return;
-				}
-					container.dataset.earlierAnchorRestoring = 'true';
-					var hydrationPromise = container._chatEarlierHydrationPromise || Promise.resolve();
-					Promise.resolve(hydrationPromise).then(function() {
-						delete container._chatEarlierHydrationPromise;
-						requestAnimationFrame(function() {
-					var tracker = container.id ? window['scrollTracker_' + container.id] : null;
-					var currentIntentRevision = tracker ? (tracker.intentRevision || 0) : (window._chatScrollIntentRevision || 0);
-					if (currentIntentRevision !== preparedIntentRevision) {
-						if (tracker && tracker.shouldAutoScroll()) window.chatAutoScroll.scrollToBottom(container, false);
-						clearChatEarlierRestoreState(container);
-						requestAnimationFrame(function() {
-							container.dataset.earlierAnchorRestoring = 'false';
-							container.dataset.earlierRequestLoading = 'false';
-						});
-						return;
-					}
-					var restored = false;
-					if (prevBottomDistance > 0) {
-						container.scrollTop = Math.max(0, (container.scrollHeight || 0) - prevBottomDistance);
-						restored = true;
-					}
-					if (!restored && anchorExecID) {
-						var anchorPair = container.querySelector(':scope > [data-exec-id="' + anchorExecID.replace(/"/g, '\\"') + '"]');
-						if (anchorPair) {
-							var containerTop = container.getBoundingClientRect().top;
-							var currentOffset = anchorPair.getBoundingClientRect().top - containerTop;
-							container.scrollTop += currentOffset - anchorOffsetTop;
-							restored = true;
-						}
-					}
-					if (!restored) {
-						container.scrollTop = prevTop + Math.max(0, (container.scrollHeight || 0) - prevHeight);
-					}
-					clearChatEarlierRestoreState(container);
+				var anchor = container._earlierAnchor;
+				var hydrationPromise = container._chatEarlierHydrationPromise || Promise.resolve();
+				Promise.resolve(hydrationPromise).then(function() {
 					requestAnimationFrame(function() {
-						container.dataset.earlierAnchorRestoring = 'false';
-						container.dataset.earlierRequestLoading = 'false';
+						if (container._earlierAnchor !== anchor) return;
+						compensateChatEarlierLayout(container);
+						delete container._chatEarlierHydrationPromise;
+						clearChatEarlierRestoreState(container);
 					});
-						});
-					});
-				};
+				});
+			};
 
 				window.pruneChatExecutionWindow = function(containerOrID) {
 				var container = typeof containerOrID === 'string' ? document.getElementById(containerOrID) : containerOrID;
