@@ -11,7 +11,7 @@ func (f *fixtures) SeedExecutionHistory(ctx context.Context, entries []storefixt
 		return err
 	}
 	defer tx.Rollback()
-	stmt, err := tx.PrepareContext(ctx, `INSERT INTO executions (id,task_id,agent_config_id,status,prompt_sent,output,error_message,tokens_used,duration_ms,started_at,completed_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)`)
+	stmt, err := tx.PrepareContext(ctx, `INSERT INTO executions (id,task_id,agent_config_id,status,prompt_sent,output,error_message,tokens_used,duration_ms,started_at,completed_at) VALUES (?,?,NULLIF(?,''),?,?,?,?,?,?,?,?)`)
 	if err != nil {
 		return err
 	}
@@ -32,4 +32,18 @@ func (f *fixtures) SeedExecutionHistory(ctx context.Context, entries []storefixt
 func (f *fixtures) SetTaskPayload(ctx context.Context, taskID string, payload storefixture.TaskPayload) error {
 	_, err := f.db.ExecContext(ctx, `UPDATE tasks SET prompt=?, chain_config=?, swarm_config=? WHERE id=?`, payload.Prompt, payload.ChainConfig, payload.SwarmConfig, taskID)
 	return err
+}
+
+func (f *fixtures) SeedPendingTasks(ctx context.Context, tasks []storefixture.PendingTask) error {
+	tx, err := f.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for _, task := range tasks {
+		if _, err = tx.ExecContext(ctx, `INSERT INTO tasks(id,project_id,title,prompt,category,status) VALUES(?,?,?,?,?,'pending')`, task.ID, task.ProjectID, task.Title, task.Prompt, task.Category); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }

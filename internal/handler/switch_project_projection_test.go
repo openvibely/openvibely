@@ -2,7 +2,6 @@ package handler
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"sort"
 	"strings"
@@ -10,25 +9,23 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/openvibely/openvibely/internal/testutil/teststores"
 	"github.com/stretchr/testify/require"
 )
 
-func seedSwitchProject(t testing.TB, db *sql.DB, id, name string, isDefault bool, description, repoPath, repoURL string) {
+func seedSwitchProject(t testing.TB, db *teststores.Env, id, name string, isDefault bool, description, repoPath, repoURL string) {
 	t.Helper()
-	defaultValue := 0
-	if isDefault {
-		defaultValue = 1
-	}
-	_, err := db.ExecContext(context.Background(),
-		`INSERT INTO projects (id, name, description, repo_path, repo_url, is_default) VALUES (?, ?, ?, ?, ?, ?)`,
-		id, name, description, repoPath, repoURL, defaultValue)
-	require.NoError(t, err)
+	require.NoError(t, db.Fixtures.SeedProjects(context.Background(), []models.Project{{ID: id, Name: name, IsDefault: isDefault, Description: description, RepoPath: repoPath, RepoURL: repoURL}}))
+}
+func clearSwitchProjects(t testing.TB, db *teststores.Env) {
+	t.Helper()
+	require.NoError(t, db.Fixtures.ClearProjects(context.Background()))
 }
 
 func TestWebAPISwitchProjectUsesCompactProjection(t *testing.T) {
-	db, counter := testutil.NewStatementCountingTestDB(t)
-	h, _, _ := setupTestHandlerForDB(t, db)
+	db := teststores.New(t, teststores.WithIOCounting())
+	counter := db.IO
+	h := wireTestHandler(t, db.Stores, testHandlerOptions{}).Handler
 	ctx := context.Background()
 
 	project := &models.Project{
@@ -46,12 +43,8 @@ func TestWebAPISwitchProjectUsesCompactProjection(t *testing.T) {
 	counter.SetEnabled(false)
 
 	require.Contains(t, result, "Switched to project: Heavy Switch Project (id: switch-heavy)")
-	statements := counter.Statements()
-	require.Len(t, statements, 1)
-	require.Equal(t,
-		"select id, name, is_default from projects order by is_default desc, name asc, id asc",
-		normalizeSwitchProjectSQL(statements[0]),
-	)
+	require.Equal(t, 1, counter.Snapshot().Requests)
+	require.Equal(t, 1, counter.Snapshot().ProjectCatalogReads)
 
 	full, err := h.projectRepo.GetByID(ctx, project.ID)
 	require.NoError(t, err)
@@ -61,11 +54,9 @@ func TestWebAPISwitchProjectUsesCompactProjection(t *testing.T) {
 }
 
 func TestWebAPISwitchProjectPreservesLookupSemantics(t *testing.T) {
-	h, _, _, db := setupTestHandlerWithDB(t)
+	h, _, _, db := setupTestHandlerWithStores(t)
 	ctx := context.Background()
-	if _, err := db.ExecContext(ctx, `DELETE FROM projects`); err != nil {
-		t.Fatalf("clear projects: %v", err)
-	}
+	clearSwitchProjects(t, db)
 	seedSwitchProject(t, db, "switch-default", "Default", true, "", "", "")
 	seedSwitchProject(t, db, "switch-z", "Duplicate", false, "", "", "")
 	seedSwitchProject(t, db, "switch-a", "Duplicate", false, "", "", "")
@@ -102,55 +93,21 @@ func TestWebAPISwitchProjectPreservesLookupSemantics(t *testing.T) {
 		})
 	}
 
-	if _, err := db.ExecContext(ctx, `DELETE FROM projects`); err != nil {
-		t.Fatalf("clear projects for empty workspace: %v", err)
-	}
+	clearSwitchProjects(t, db)
 	require.Equal(t,
 		`Project not found: "missing". Available projects: `,
 		h.executeSwitchProject(ctx, "", []byte(`{"project":"missing"}`)),
 	)
 }
 
-func normalizeSwitchProjectSQL(statement string) string {
-	return strings.ToLower(strings.Join(strings.Fields(statement), " "))
-}
-
-func seedSwitchProjectBenchmark(t testing.TB, db *sql.DB, count int) {
+func seedSwitchProjectBenchmark(t testing.TB, db *teststores.Env, count int) {
 	t.Helper()
-	ctx := context.Background()
-	if _, err := db.ExecContext(ctx, `DELETE FROM projects`); err != nil {
-		t.Fatalf("clear benchmark projects: %v", err)
-	}
-
-	description := strings.Repeat("D", 16*1024)
-	repoPath := strings.Repeat("p", 2*1024)
-	repoURL := strings.Repeat("u", 2*1024)
-	tx, err := db.BeginTx(ctx, nil)
-	if err != nil {
-		t.Fatalf("begin benchmark seed: %v", err)
-	}
-	stmt, err := tx.PrepareContext(ctx,
-		`INSERT INTO projects (id, name, description, repo_path, repo_url, is_default) VALUES (?, ?, ?, ?, ?, 0)`)
-	if err != nil {
-		tx.Rollback()
-		t.Fatalf("prepare benchmark seed: %v", err)
-	}
+	clearSwitchProjects(t, db)
+	var projects []models.Project
 	for i := 0; i < count; i++ {
-		id := fmt.Sprintf("switch-bench-%06d", i)
-		name := fmt.Sprintf("Switch Project %06d", i)
-		if _, err := stmt.ExecContext(ctx, id, name, description, repoPath, repoURL); err != nil {
-			stmt.Close()
-			tx.Rollback()
-			t.Fatalf("seed benchmark project %d: %v", i, err)
-		}
+		projects = append(projects, models.Project{ID: fmt.Sprintf("switch-bench-%06d", i), Name: fmt.Sprintf("Switch Project %06d", i), Description: strings.Repeat("D", 16*1024), RepoPath: strings.Repeat("p", 2*1024), RepoURL: strings.Repeat("u", 2*1024)})
 	}
-	if err := stmt.Close(); err != nil {
-		tx.Rollback()
-		t.Fatalf("close benchmark seed: %v", err)
-	}
-	if err := tx.Commit(); err != nil {
-		t.Fatalf("commit benchmark seed: %v", err)
-	}
+	require.NoError(t, db.Fixtures.SeedProjects(context.Background(), projects))
 }
 
 func switchProjectBenchmarkCases(count int) []struct {
@@ -195,9 +152,10 @@ func measureSwitchProjectMedian(t testing.TB, h *Handler, ctx context.Context, i
 func BenchmarkExecuteSwitchProjectProjection(b *testing.B) {
 	for _, count := range []int{1, 50, 500} {
 		b.Run(fmt.Sprintf("projects=%d", count), func(b *testing.B) {
-			db, counter := testutil.NewStatementCountingTestDB(b)
+			db := teststores.New(b, teststores.WithIOCounting())
+			counter := db.IO
 			seedSwitchProjectBenchmark(b, db, count)
-			h, _, _ := setupTestHandlerForDB(b, db)
+			h := wireTestHandler(b, db.Stores, testHandlerOptions{}).Handler
 			ctx := context.Background()
 
 			for _, tc := range switchProjectBenchmarkCases(count) {
@@ -207,7 +165,7 @@ func BenchmarkExecuteSwitchProjectProjection(b *testing.B) {
 					counter.SetEnabled(true)
 					want := runSwitchProjectLookup(h, ctx, []byte(tc.input))
 					counter.SetEnabled(false)
-					if statements := len(counter.Statements()); statements != 1 {
+					if statements := counter.Snapshot().Requests; statements != 1 {
 						b.Fatalf("lookup statements = %d, want 1", statements)
 					}
 
@@ -230,9 +188,10 @@ func BenchmarkExecuteSwitchProjectProjection(b *testing.B) {
 }
 
 func TestWebAPISwitchProjectUsesCompactProjectionOnLargeFixture(t *testing.T) {
-	db, counter := testutil.NewStatementCountingTestDB(t)
+	db := teststores.New(t, teststores.WithIOCounting())
+	counter := db.IO
 	seedSwitchProjectBenchmark(t, db, 500)
-	h, _, _ := setupTestHandlerForDB(t, db)
+	h := wireTestHandler(t, db.Stores, testHandlerOptions{}).Handler
 	ctx := context.Background()
 	input := []byte(`{"project":"missing project"}`)
 
@@ -240,7 +199,7 @@ func TestWebAPISwitchProjectUsesCompactProjectionOnLargeFixture(t *testing.T) {
 	counter.SetEnabled(true)
 	compactResponse := runSwitchProjectLookup(h, ctx, input)
 	counter.SetEnabled(false)
-	require.Len(t, counter.Statements(), 1, "compact lookup statement count")
+	require.Equal(t, 1, counter.Snapshot().Requests, "compact lookup statement count")
 	require.Contains(t, compactResponse, "Available projects:")
-	require.Less(t, counter.SelectedTextBytes(), 64*1024, "compact selector should keep selected text bounded")
+	require.Less(t, counter.Snapshot().ReadTextBytes, 64*1024, "compact selector should keep selected text bounded")
 }

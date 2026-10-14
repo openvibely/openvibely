@@ -56,7 +56,19 @@ type ExecutionHistoryEntry struct {
 // TaskPayload captures task instructions and orchestration configuration without lifecycle changes.
 type TaskPayload struct{ Prompt, ChainConfig, SwarmConfig string }
 
+// PendingTask describes initial state with a stable identity for load fixtures.
+type PendingTask struct {
+	ID, ProjectID, Title, Prompt string
+	Category                     models.TaskCategory
+}
 type Fixtures interface {
+	// ClearProjects removes default and user projects to construct an empty workspace.
+	ClearProjects(context.Context) error
+	SeedPendingTasks(context.Context, []PendingTask) error
+
+	SeedAnalyticsWorkload(context.Context, AnalyticsWorkload) (string, error)
+	SeedTaskFrequencyWorkload(context.Context, string, string, int) ([]string, error)
+
 	FailChatAttachmentCreation(context.Context) error
 	FailTaskClaim(context.Context) error
 	RetiredAttachmentSessions(context.Context) ([]string, error)
@@ -227,6 +239,8 @@ type Fixtures interface {
 // SQLite counts executed statements; other backends must count their database
 // requests, including requests made inside a single store method.
 type IOStats struct {
+	AgentPageReads, UnboundedAgentListReads, MutationRequests, AgentDeclarationMutationRequests int
+
 	// ExecutionWindowReads counts bounded newest-first history requests; UnboundedExecutionHistoryReads counts full chronological history requests.
 	ExecutionWindowReads, UnboundedExecutionHistoryReads int
 	// AgentReads counts physical reads of saved agent definitions.
@@ -261,6 +275,9 @@ type IOStats struct {
 }
 
 type IOCounter interface {
+	// ObserveRequests observes requests at the backend driver boundary, including uncounted requests.
+	ObserveRequests(func(context.Context))
+
 	Reset()
 	SetEnabled(bool)
 	Snapshot() IOStats
@@ -277,3 +294,20 @@ type AutomationDispatchState struct {
 type AutomationIssueTaskOrigin struct {
 	ProjectID, AutomationID, TaskID, IssueResourceID, ImplementationNodeKey string
 }
+
+// BackendContention reports physical backend admission and waiting, never store calls.
+type BackendContention struct{ Reads, Writes IOContention }
+type IOContention struct {
+	Capacity, InUse int
+	WaitCount       int64
+	WaitDuration    time.Duration
+}
+
+// AnalyticsWorkload selects reproducible dashboard histories at production-scale sizes.
+type AnalyticsWorkload string
+
+const (
+	AnalyticsContention    AnalyticsWorkload = "contention"
+	AnalyticsAgentEvidence AnalyticsWorkload = "agent_evidence"
+	AnalyticsOverview      AnalyticsWorkload = "overview"
+)

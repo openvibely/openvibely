@@ -83,12 +83,29 @@ func Of(db *sql.DB, opts ...Option) persistence.Stores {
 
 // Env is a fresh test database and the stores built on it.
 type Env struct {
+	observeSettingsReads func(func(), func())
+	holdProjectRead      func(context.Context) (func() error, error)
+
+	contention   func() storefixture.BackendContention
 	closeBackend func() error
 	suspendIO    func(context.Context) (func() error, error)
 	IO           storefixture.IOCounter
 	Fixtures     storefixture.Fixtures
 	persistence.Stores
 }
+
+// ObserveSettingsReads installs backend request/acquisition observers for settings reads.
+func (e *Env) ObserveSettingsReads(requested, acquired func()) {
+	e.observeSettingsReads(requested, acquired)
+}
+
+// HoldProjectRead leaves a physical read in progress until released for contention tests.
+func (e *Env) HoldProjectRead(ctx context.Context) (func() error, error) {
+	return e.holdProjectRead(ctx)
+}
+
+// Contention reports actual backend capacity usage and waits.
+func (e *Env) Contention() storefixture.BackendContention { return e.contention() }
 
 // SuspendIO prevents backend I/O until the returned idempotent release is called.
 // Stores still perform real requests, allowing tests to exercise cancellation while blocked.
@@ -128,7 +145,8 @@ func New(tb testing.TB, opts ...Option) *Env {
 			if o.countIO {
 				counter = sqlitefixtures.NewIOCounter(sqliteCounter)
 			}
-			return &Env{suspendIO: sqlitefixtures.SuspendIO(reader, writer), closeBackend: func() error { return errors.Join(reader.Close(), writer.Close()) }, Fixtures: sqlitefixtures.New(writer), Stores: sqlite.NewStores(reader, o.broadcaster), IO: counter}
+			stores := sqlite.NewStores(reader, o.broadcaster)
+			return &Env{holdProjectRead: sqlitefixtures.HoldProjectRead(reader), observeSettingsReads: sqlitefixtures.SettingsReadObservers(stores.Settings), contention: sqlitefixtures.Contention(reader, writer), suspendIO: sqlitefixtures.SuspendIO(reader, writer), closeBackend: func() error { return errors.Join(reader.Close(), writer.Close()) }, Fixtures: sqlitefixtures.New(writer), Stores: stores, IO: counter}
 		} else if o.countIO {
 			var sqliteCounter *testutil.SQLStatementCounter
 			db, sqliteCounter = testutil.NewStatementCountingTestDB(tb)
@@ -136,7 +154,8 @@ func New(tb testing.TB, opts ...Option) *Env {
 		} else {
 			db = testutil.NewTestDB(tb)
 		}
-		return &Env{suspendIO: sqlitefixtures.SuspendIO(db), closeBackend: db.Close, Fixtures: sqlitefixtures.New(db), Stores: sqlite.NewStores(db, o.broadcaster), IO: counter}
+		stores := sqlite.NewStores(db, o.broadcaster)
+		return &Env{holdProjectRead: sqlitefixtures.HoldProjectRead(db), observeSettingsReads: sqlitefixtures.SettingsReadObservers(stores.Settings), contention: sqlitefixtures.Contention(db, db), suspendIO: sqlitefixtures.SuspendIO(db), closeBackend: db.Close, Fixtures: sqlitefixtures.New(db), Stores: stores, IO: counter}
 	default:
 		tb.Fatalf("unsupported %s %q (supported: %s)", DriverEnv, driver, config.DatabaseDriverSQLite)
 		return nil

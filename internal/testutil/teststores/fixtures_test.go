@@ -1001,3 +1001,97 @@ func TestModelIOCountersDistinguishCompactAndFullCatalogs(t *testing.T) {
 		})
 	}
 }
+
+func TestContentionObservationsUsePhysicalBackendCapacity(t *testing.T) {
+	for _, production := range []bool{false, true} {
+		name := "isolated"
+		if production {
+			name = "production"
+		}
+		t.Run(name, func(t *testing.T) {
+			opts := []teststores.Option{teststores.WithIOCounting()}
+			if production {
+				opts = append(opts, teststores.WithProductionTopology())
+			}
+			env := teststores.New(t, opts...)
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			require.Equal(t, 1, env.Contention().Reads.Capacity)
+			require.Equal(t, 1, env.Contention().Writes.Capacity)
+			requested, acquired := 0, 0
+			env.ObserveSettingsReads(func() { requested++ }, func() { acquired++ })
+			_, err := env.Settings.Get(ctx, "fixture_missing_setting")
+			require.NoError(t, err)
+			require.Equal(t, 1, requested)
+			require.Equal(t, 1, acquired)
+			env.ObserveSettingsReads(nil, nil)
+			release, err := env.HoldProjectRead(ctx)
+			require.NoError(t, err)
+			defer release()
+			require.Equal(t, 1, env.Contention().Reads.InUse)
+			before := env.Contention().Reads
+			finished := make(chan error, 1)
+			go func() { _, err := env.Projects.GetIdentityByID(ctx, "default"); finished <- err }()
+			require.Eventually(t, func() bool { return env.Contention().Reads.WaitCount > before.WaitCount }, time.Second, time.Millisecond)
+			select {
+			case err := <-finished:
+				t.Fatalf("competing read completed before release: %v", err)
+			default:
+			}
+			require.NoError(t, release())
+			require.NoError(t, <-finished)
+			require.Greater(t, env.Contention().Reads.WaitDuration, before.WaitDuration)
+			calls := 0
+			env.IO.ObserveRequests(func(context.Context) { calls++ })
+			_, err = env.Projects.GetIdentityByID(ctx, "default")
+			require.NoError(t, err)
+			env.IO.ObserveRequests(nil)
+			require.Equal(t, 1, calls, "observation is active at the driver even without counting enabled")
+		})
+	}
+}
+
+func TestBulkHistoryFixturesShareStateAndRollbackInvalidReferences(t *testing.T) {
+	for _, production := range []bool{false, true} {
+		name := "isolated"
+		if production {
+			name = "production"
+		}
+		t.Run(name, func(t *testing.T) {
+			var opts []teststores.Option
+			if production {
+				opts = append(opts, teststores.WithProductionTopology())
+			}
+			env := teststores.New(t, opts...)
+			ctx := context.Background()
+			require.NoError(t, env.Fixtures.SeedPendingTasks(ctx, []storefixture.PendingTask{{ID: "fixture-pending", ProjectID: "default", Title: "fixture pending", Category: models.CategoryActive}}))
+			require.NoError(t, env.Fixtures.SeedExecutionHistory(ctx, []storefixture.ExecutionHistoryEntry{{ID: "fixture-no-model", TaskID: "fixture-pending", Status: models.ExecRunning, StartedAt: time.Now().UTC()}}))
+			executions, err := env.Executions.ListByTask(ctx, "fixture-pending")
+			require.NoError(t, err)
+			require.Len(t, executions, 1)
+			require.Empty(t, executions[0].AgentConfigID)
+			err = env.Fixtures.SeedPendingTasks(ctx, []storefixture.PendingTask{{ID: "must-rollback", ProjectID: "default", Title: "must rollback", Category: models.CategoryActive}, {ID: "invalid-project", ProjectID: "missing-project", Title: "invalid", Category: models.CategoryActive}})
+			require.Error(t, err)
+			task, err := env.Tasks.GetByID(ctx, "must-rollback")
+			require.NoError(t, err)
+			require.Nil(t, task)
+			_, err = env.Fixtures.SeedTaskFrequencyWorkload(ctx, "default", "missing-model", 2)
+			require.Error(t, err)
+			tasks, err := env.Tasks.ListByProject(ctx, "default", "")
+			require.NoError(t, err)
+			require.Len(t, tasks, 1, "failed workload must roll back its task as well as execution")
+			model := models.LLMConfig{Name: "fixture model", Provider: models.ProviderTest, Model: "test"}
+			require.NoError(t, env.LLMConfigs.Create(ctx, &model))
+			ids, err := env.Fixtures.SeedTaskFrequencyWorkload(ctx, "default", model.ID, 3)
+			require.NoError(t, err)
+			require.Len(t, ids, 3)
+			rows, err := env.Executions.GetMostFrequentTasks(ctx, "default", 0)
+			require.NoError(t, err)
+			require.Len(t, rows, 4)
+			require.NoError(t, env.Fixtures.ClearProjects(ctx))
+			projects, err := env.Projects.List(ctx)
+			require.NoError(t, err)
+			require.Empty(t, projects)
+		})
+	}
+}
