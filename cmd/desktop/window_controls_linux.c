@@ -155,6 +155,29 @@ static void ovInstallWindowCorners(GtkWidget *window) {
 #endif
 }
 
+// Preserve caption layout while preventing native widgets from painting or
+// receiving input above a webview preview. Remember early calls until install.
+void ovSetLinuxCaptionHidden(void *native_window, int hidden) {
+ if (!native_window || !GTK_IS_WINDOW(native_window)) return;
+ g_object_set_data(G_OBJECT(native_window), "ov-caption-hidden", GINT_TO_POINTER(hidden != 0));
+ OVCaption *c = g_object_get_data(G_OBJECT(native_window), "ov-caption");
+ if (!c) return;
+ gtk_widget_set_opacity(c->left, hidden ? 0 : 1);
+ gtk_widget_set_opacity(c->right, hidden ? 0 : 1);
+ gtk_widget_set_sensitive(c->left, !hidden);
+ gtk_widget_set_sensitive(c->right, !hidden);
+ // Transparent, insensitive widgets still occupy the native input layer.
+ // Let the webview receive pointer events while preserving caption geometry.
+#if GTK_MAJOR_VERSION < 4
+ gtk_overlay_set_overlay_pass_through(GTK_OVERLAY(c->overlay), c->left, hidden != 0);
+ gtk_overlay_set_overlay_pass_through(GTK_OVERLAY(c->overlay), c->right, hidden != 0);
+#else
+ gtk_widget_set_can_target(c->left, !hidden);
+ gtk_widget_set_can_target(c->right, !hidden);
+#endif
+ gtk_widget_queue_draw(c->overlay);
+}
+
 void ovInstallLinuxCaption(void *native_window) {
  if (!native_window || !GTK_IS_WINDOW(native_window)) return;
  GtkWidget *window = GTK_WIDGET(native_window);
@@ -216,6 +239,7 @@ void ovInstallLinuxCaption(void *native_window) {
  gtk_overlay_add_overlay(GTK_OVERLAY(overlay), c->left);
  gtk_overlay_add_overlay(GTK_OVERLAY(overlay), c->right);
  g_object_set_data_full(G_OBJECT(window), "ov-caption", c, ovCaptionFree);
+ ovSetLinuxCaptionHidden(window, GPOINTER_TO_INT(g_object_get_data(G_OBJECT(window), "ov-caption-hidden")));
 #if GTK_MAJOR_VERSION < 4
  gtk_widget_show_all(overlay);
  g_signal_connect(gtk_settings_get_default(), "notify::gtk-decoration-layout", G_CALLBACK(ovCaptionSettings), c);
