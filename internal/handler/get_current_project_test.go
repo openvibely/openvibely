@@ -2,7 +2,7 @@ package handler
 
 import (
 	"context"
-	"database/sql"
+
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -15,14 +15,15 @@ import (
 
 func setupProjectTestHandler(t *testing.T) (*Handler, *service.ProjectService) {
 	t.Helper()
-	h, projectSvc, _ := setupProjectTestHandlerWithDB(t)
+	h, projectSvc, _ := setupProjectTestHandlerWithStores(t)
 	return h, projectSvc
 }
 
-func setupProjectTestHandlerWithDB(t *testing.T) (*Handler, *service.ProjectService, *sql.DB) {
+func setupProjectTestHandlerWithStores(t *testing.T) (*Handler, *service.ProjectService, *teststores.Env) {
 	t.Helper()
-	env := newTestHandlerEnv(t, teststores.NewDB(t))
-	return env.Handler, env.ProjectSvc, env.DB
+	stores := teststores.New(t)
+	env := wireTestHandler(t, stores.Stores, testHandlerOptions{})
+	return env.Handler, env.ProjectSvc, stores
 }
 
 func TestMutationProjectID(t *testing.T) {
@@ -33,7 +34,7 @@ func TestMutationProjectID(t *testing.T) {
 	}
 
 	t.Run("explicit project is trimmed and wins", func(t *testing.T) {
-		h, _, _ := setupProjectTestHandlerWithDB(t)
+		h, _, _ := setupProjectTestHandlerWithStores(t)
 		if err := h.settingsRepo.Set(context.Background(), uiPreferenceSelectedProjectIDKey, " saved-project "); err != nil {
 			t.Fatalf("failed to save selected project preference: %v", err)
 		}
@@ -45,7 +46,7 @@ func TestMutationProjectID(t *testing.T) {
 	})
 
 	t.Run("saved project is trimmed", func(t *testing.T) {
-		h, _, _ := setupProjectTestHandlerWithDB(t)
+		h, _, _ := setupProjectTestHandlerWithStores(t)
 		if err := h.settingsRepo.Set(context.Background(), uiPreferenceSelectedProjectIDKey, " saved-project "); err != nil {
 			t.Fatalf("failed to save selected project preference: %v", err)
 		}
@@ -57,7 +58,7 @@ func TestMutationProjectID(t *testing.T) {
 	})
 
 	t.Run("missing settings returns empty scope", func(t *testing.T) {
-		h, _, _ := setupProjectTestHandlerWithDB(t)
+		h, _, _ := setupProjectTestHandlerWithStores(t)
 		h.settingsRepo = nil
 
 		if got := h.mutationProjectID(newContext("/")); got != "" {
@@ -66,7 +67,7 @@ func TestMutationProjectID(t *testing.T) {
 	})
 
 	t.Run("preference read errors return empty scope", func(t *testing.T) {
-		h, _, db := setupProjectTestHandlerWithDB(t)
+		h, _, db := setupProjectTestHandlerWithStores(t)
 		if err := db.Close(); err != nil {
 			t.Fatalf("close test database: %v", err)
 		}
@@ -151,7 +152,7 @@ func TestGetCurrentProjectID_EmptyFallsBackToFirst(t *testing.T) {
 }
 
 func TestGetCurrentProjectID_EmptyFallbackUsesSelectorProjection(t *testing.T) {
-	h, projectSvc, db := setupProjectTestHandlerWithDB(t)
+	h, projectSvc, db := setupProjectTestHandlerWithStores(t)
 	ctx := context.Background()
 
 	projects, err := projectSvc.ListSelectorOptions(ctx)
@@ -163,7 +164,7 @@ func TestGetCurrentProjectID_EmptyFallbackUsesSelectorProjection(t *testing.T) {
 	}
 	firstID := projects[0].ID
 
-	if _, err := db.ExecContext(ctx, `UPDATE projects SET created_at = 'not-a-timestamp', updated_at = 'not-a-timestamp' WHERE id = ?`, firstID); err != nil {
+	if err := db.Fixtures.MakeProjectDetailsUnreadable(ctx, firstID); err != nil {
 		t.Fatalf("poison full-detail-only timestamp columns: %v", err)
 	}
 

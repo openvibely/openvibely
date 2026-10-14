@@ -227,7 +227,7 @@ func boolPtr(b bool) *bool { return &b }
 
 func setupTestHandlerWithInsights(t *testing.T) (*Handler, *echo.Echo) {
 	t.Helper()
-	env := newTestHandlerEnv(t, teststores.NewDB(t), withTestInsights())
+	env := wireTestHandler(t, teststores.New(t).Stores, testHandlerOptions{insights: true})
 	return env.Handler, env.Echo
 }
 

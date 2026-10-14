@@ -2338,32 +2338,28 @@ func TestEmailService_OutboundPathsLoadOneCurrentSettingsSnapshot(t *testing.T) 
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			db := teststores.NewDB(t)
+			db := teststores.New(t, teststores.WithIOCounting())
 			ctx := context.Background()
-			settingsRepo := teststores.Of(db).Settings
+			settingsRepo := db.Settings
 			for key, value := range map[string]string{
 				EmailSettingProvider: EmailProviderCustom, EmailSettingAddress: "bot@example.com", EmailSettingPassword: "secret",
 				EmailSettingIMAPHost: "imap.example.com", EmailSettingSMTPHost: "smtp.example.com", EmailSettingSMTPPort: "2525", EmailSettingSendResponses: "true",
 			} {
 				require.NoError(t, settingsRepo.Set(ctx, key, value))
 			}
-			projectRepo := teststores.Of(db).Projects
+			projectRepo := db.Projects
 			projects, err := projectRepo.List(ctx)
 			require.NoError(t, err)
 			require.NotEmpty(t, projects)
-			taskRepo := teststores.Of(db).Tasks
+			taskRepo := db.Tasks
 			task := models.Task{ProjectID: projects[0].ID, Title: "Email task", Prompt: "request", Category: models.CategoryActive, Status: models.StatusCompleted, CreatedVia: models.TaskOriginEmail}
 			require.NoError(t, taskRepo.Create(ctx, &task))
-			contextRepo := teststores.Of(db).EmailTaskContexts
+			contextRepo := db.EmailTaskContexts
 			require.NoError(t, contextRepo.Upsert(ctx, &models.EmailTaskContext{TaskID: task.ID, EmailFrom: "person@example.com", EmailMessageID: "<message@example.com>", EmailReferences: "<root@example.com>", EmailSubject: "Question"}))
-			svc := NewEmailService(settingsRepo, projectRepo, teststores.Of(db).LLMConfigs, taskRepo, teststores.Of(db).Executions, teststores.Of(db).Schedules, nil, nil, nil, teststores.Of(db).EmailAuth, contextRepo)
+			svc := NewEmailService(settingsRepo, projectRepo, db.LLMConfigs, taskRepo, db.Executions, db.Schedules, nil, nil, nil, db.EmailAuth, contextRepo)
 
-			var settingsSelects atomic.Int64
-			settingsRepo.(*sqlite.SettingsRepo).SetQueryObserver(func(query string) {
-				if strings.Contains(query, "FROM app_settings") {
-					settingsSelects.Add(1)
-				}
-			})
+			db.IO.Reset()
+			db.IO.SetEnabled(true)
 			var smtpCalls atomic.Int64
 			svc.sendMail = func(_ context.Context, cfg EmailRuntimeConfig, to, subject, body, messageID, inReplyTo, references string) error {
 				smtpCalls.Add(1)
@@ -2380,7 +2376,9 @@ func TestEmailService_OutboundPathsLoadOneCurrentSettingsSnapshot(t *testing.T) 
 
 			tt.send(svc, task)
 			assert.Equal(t, int64(1), smtpCalls.Load())
-			assert.Equal(t, int64(1), settingsSelects.Load())
+			db.IO.SetEnabled(false)
+			assert.Equal(t, 1, db.IO.Snapshot().SettingsSnapshotReads)
+			assert.Zero(t, db.IO.Snapshot().SettingsSingleReads)
 		})
 	}
 }
@@ -2465,25 +2463,21 @@ func TestEmailService_SendOutboundMessage_ValidationAndMissingConfig(t *testing.
 }
 
 func BenchmarkEmailServiceSettingsBurst(b *testing.B) {
-	db := teststores.NewDB(b)
+	db := teststores.New(b, teststores.WithIOCounting())
 	ctx := context.Background()
-	settingsRepo := teststores.Of(db).Settings
+	settingsRepo := db.Settings
 	for key, value := range map[string]string{
 		EmailSettingProvider: EmailProviderCustom, EmailSettingAddress: "bot@example.com", EmailSettingPassword: "secret",
 		EmailSettingIMAPHost: "imap.example.com", EmailSettingSMTPHost: "smtp.example.com", EmailSettingSendResponses: "true",
 	} {
 		require.NoError(b, settingsRepo.Set(ctx, key, value))
 	}
-	svc := NewEmailService(settingsRepo, teststores.Of(db).Projects, teststores.Of(db).LLMConfigs, teststores.Of(db).Tasks, teststores.Of(db).Executions, teststores.Of(db).Schedules, nil, nil, nil, teststores.Of(db).EmailAuth, teststores.Of(db).EmailTaskContexts)
+	svc := NewEmailService(settingsRepo, db.Projects, db.LLMConfigs, db.Tasks, db.Executions, db.Schedules, nil, nil, nil, db.EmailAuth, db.EmailTaskContexts)
 	svc.sendMail = func(context.Context, EmailRuntimeConfig, string, string, string, string, string, string) error {
 		return nil
 	}
-	var settingsSelects atomic.Int64
-	settingsRepo.(*sqlite.SettingsRepo).SetQueryObserver(func(query string) {
-		if strings.Contains(query, "FROM app_settings") {
-			settingsSelects.Add(1)
-		}
-	})
+	db.IO.Reset()
+	db.IO.SetEnabled(true)
 
 	b.ReportAllocs()
 	b.ResetTimer()
@@ -2496,7 +2490,11 @@ func BenchmarkEmailServiceSettingsBurst(b *testing.B) {
 		}
 	}
 	b.StopTimer()
-	b.ReportMetric(float64(settingsSelects.Load())/float64(b.N), "settings_selects/op")
+	db.IO.SetEnabled(false)
+	stats := db.IO.Snapshot()
+	require.Equal(b, 200*b.N, stats.SettingsSnapshotReads)
+	require.Zero(b, stats.SettingsSingleReads)
+	b.ReportMetric(float64(stats.SettingsSnapshotReads)/float64(b.N), "settings_selects/op")
 }
 
 func BenchmarkEmailServiceSettingsContention(b *testing.B) {

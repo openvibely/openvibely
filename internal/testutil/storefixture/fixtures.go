@@ -30,6 +30,8 @@ type ExecutionUsageRecord struct {
 type ChannelProjectSelectionCounts struct{ Discord, Slack, Telegram, Email int }
 
 type Fixtures interface {
+	// MakeProjectDetailsUnreadable constructs damaged detail metadata while preserving selector identity.
+	MakeProjectDetailsUnreadable(context.Context, string) error
 	ChannelProjectSelections(context.Context) (ChannelProjectSelectionCounts, error)
 	PendingSteering(context.Context, string, string) ([]models.ThreadInput, error)
 	SetTaskDisplayOrder(context.Context, string, int) error
