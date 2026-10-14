@@ -57,7 +57,7 @@ func TestAutomationPortfolioUsesSearchableSingleColumnCards(t *testing.T) {
 		`placeholder="Search automations..."`,
 		`data-search-no-results`,
 		`class="grid grid-cols-1 gap-4`,
-		`class="card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40 hover:shadow-md transition-all w-full min-w-0 max-w-full focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-inset"`,
+		`class="card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40 hover:shadow-md transition-all w-full min-w-0 max-w-full focus:outline-none focus-visible:ring-1 focus-visible:ring-base-content/50 focus-visible:ring-inset"`,
 		`role="link" tabindex="0" aria-label="Open Automation Native Delivery"`,
 		`role="link" tabindex="0" aria-label="Open Automation Paused Delivery"`,
 		`data-automation-url="/automations/automation-native?project_id=project-search"`,
@@ -128,7 +128,7 @@ func TestAutomationPortfolioUsesSearchableSingleColumnCards(t *testing.T) {
 		`data-card-search-initial="Paused Delivery"`,
 		`data-automation-url="/automations/automation-paused?project_id=project-search"`,
 		`role="link" tabindex="0" aria-label="Open Automation Paused Delivery"`,
-		`focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-inset`,
+		`focus:outline-none focus-visible:ring-1 focus-visible:ring-base-content/50 focus-visible:ring-inset`,
 	} {
 		if !strings.Contains(filteredBody, want) {
 			t.Errorf("expected filtered paginated Automation portfolio to contain %q", want)
@@ -190,8 +190,8 @@ func TestBrowserFunctional_CatalogCardsSuppressPointerFocusFlashButKeepKeyboardF
 		.card-body { padding: 16px; }
 		.hidden { display: none !important; }
 		.focus\:outline-none:focus { outline: 2px solid transparent; outline-offset: 2px; }
-		.focus-visible\:ring-2:focus-visible { --tw-ring-shadow: 0 0 0 2px rgb(116, 128, 255) inset; box-shadow: var(--tw-ring-offset-shadow, 0 0 #0000), var(--tw-ring-shadow, 0 0 #0000), var(--tw-shadow, 0 0 #0000); }
-		.focus-visible\:ring-primary:focus-visible { --tw-ring-color: rgb(116, 128, 255); }
+		.focus-visible\:ring-1:focus-visible { --tw-ring-shadow: 0 0 0 1px var(--tw-ring-color) inset; box-shadow: var(--tw-ring-offset-shadow, 0 0 #0000), var(--tw-ring-shadow, 0 0 #0000), var(--tw-shadow, 0 0 #0000); }
+		.focus-visible\:ring-base-content\/50:focus-visible { --tw-ring-color: rgb(160 160 160 / .5); }
 		.dropdown-content { display: none; }
 	</style></head>`, 1)
 
@@ -460,7 +460,7 @@ func TestBrowserFunctional_AutomationPortfolioCardsSupportKeyboardNavigationAcro
 			got := browser.evaluate(fmt.Sprintf(`(function() {
 				var card = document.querySelector(%q);
 				if (!card) return 'missing';
-				return [card.getAttribute('role'), card.getAttribute('tabindex'), card.getAttribute('aria-label'), card.classList.contains('focus-visible:ring-2'), card.classList.contains('focus-visible:ring-primary'), card.dataset.automationUrl].join('|');
+				return [card.getAttribute('role'), card.getAttribute('tabindex'), card.getAttribute('aria-label'), card.classList.contains('focus-visible:ring-1'), card.classList.contains('focus-visible:ring-base-content/50'), card.dataset.automationUrl].join('|');
 			})()`, selector))
 			if got != want {
 				t.Fatalf("card %s accessibility state = %q, want %q", id, got, want)

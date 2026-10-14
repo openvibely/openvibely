@@ -49,7 +49,7 @@ templ ScheduleDateTime(value string) {
   .schedule-datetime-days button[data-other-month] { opacity:.4; }
   .schedule-datetime-popup button:hover { background:oklch(var(--bc) / .1); }
   .schedule-datetime-popup [aria-pressed=true],.schedule-datetime-popup [data-time-selected=true] { background:oklch(var(--p)) !important; color:oklch(var(--pc)); opacity:1 !important; }
-  .schedule-datetime-popup :focus-visible { outline:2px solid oklch(var(--p)); outline-offset:-2px; }
+  .schedule-datetime-popup :focus-visible { outline:1px solid oklch(var(--bc) / .5); outline-offset:-2px; }
   .schedule-datetime-time { text-align:center; min-width:0; }
   .schedule-datetime-time [role=listbox] { height:240px; overflow-y:auto; overscroll-behavior:contain; scrollbar-width:none; overflow-anchor:none; }
   .schedule-datetime-time [role=listbox]::-webkit-scrollbar { display:none; }

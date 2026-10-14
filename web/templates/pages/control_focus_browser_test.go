@@ -31,7 +31,7 @@ func TestBrowserFunctional_NeutralControlFocus(t *testing.T) {
 		_ = components.TaskChangeActivity("audit").Render(r.Context(), w)
 		_ = kanbanSearch().Render(r.Context(), w)
 		_ = automationBreadcrumb("audit-project", "automation", "Audit automation", "History", false).Render(r.Context(), w)
-		fmt.Fprint(w, `<div id="audit-examples"><button class="chat-input-option-btn">Choice</button><details class="stream-thinking"><summary>Thinking</summary></details><button class="stream-tool-output-toggle">Tool output</button></div>`)
+		fmt.Fprint(w, `<div id="audit-examples"><span class="chat-markdown"><a href="#chat-link">Chat link</a></span><a class="ov-task-result-link" href="#task-link">Task link</a><button class="chat-input-option-btn">Choice</button><details class="stream-thinking"><summary>Thinking</summary></details><button class="stream-tool-output-toggle">Tool output</button></div>`)
 	}))
 	defer server.Close()
 	runComposerFocusCDP(t, chrome, server.URL+"/tasks/audit", "neutral-focus", func(b *composerFocusCDP) {
@@ -50,7 +50,7 @@ func TestBrowserFunctional_NeutralControlFocus(t *testing.T) {
 				b.waitFor("thin neutral keyboard feedback in "+theme+" "+workspace, `(function(){
      const reference=document.createElement('span');reference.style.outline='1px solid oklch(var(--bc) / .5)';document.body.append(reference);
      const neutral=getComputedStyle(reference).outlineColor;reference.remove();
-     const selectors=['#task-resource-selector-button','#task-details-opener','#task-change-activity button','.kanban-search-toggle','.kanban-search-clear','[data-breadcrumb-title]','#audit-examples .chat-input-option-btn','#audit-examples summary','#audit-examples .stream-tool-output-toggle','#task-workspace-back'];
+     const selectors=['#task-resource-selector-button','#task-details-opener','#task-change-activity button','.kanban-search-toggle','.kanban-search-clear','[data-breadcrumb-title]','#audit-examples .chat-input-option-btn','#audit-examples summary','#audit-examples a','#audit-examples .stream-tool-output-toggle','#task-workspace-back'];
      const controls=Array.from(document.querySelectorAll(selectors.join(','))).filter(e=>e.getClientRects().length&&!e.disabled);
      if(controls.length<8)return 'missing controls';
      return controls.map(e=>{e.focus();const s=getComputedStyle(e);if(document.activeElement!==e||!e.matches(':focus-visible'))return e.outerHTML+' not keyboard focused';
