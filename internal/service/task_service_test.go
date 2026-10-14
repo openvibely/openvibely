@@ -12,7 +12,6 @@ import (
 	"github.com/openvibely/openvibely/internal/attachmentsession"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
-	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/testutil/teststores"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -694,13 +693,13 @@ func TestWorkerService_Resize_DecreasesWorkerCount(t *testing.T) {
 
 func TestTaskService_UpdateCategory_PromotesQueuedTaskThreadFollowupBeforeOriginalPrompt(t *testing.T) {
 	ctx := context.Background()
-	db := teststores.NewDB(t)
-	projectRepo := teststores.Of(db).Projects
-	taskRepo := teststores.Of(db).Tasks
-	attachmentRepo := teststores.Of(db).Attachments
-	llmConfigRepo := teststores.Of(db).LLMConfigs
-	execRepo := teststores.Of(db).Executions
-	threadInputRepo := teststores.Of(db).ThreadInputs
+	env := teststores.New(t)
+	projectRepo := env.Projects
+	taskRepo := env.Tasks
+	attachmentRepo := env.Attachments
+	llmConfigRepo := env.LLMConfigs
+	execRepo := env.Executions
+	threadInputRepo := env.ThreadInputs
 	project := &models.Project{Name: "Manual Active Promotion Project"}
 	require.NoError(t, projectRepo.Create(ctx, project))
 	agent := &models.LLMConfig{Name: "Test Agent", Provider: models.ProviderTest, Model: "test-model", IsDefault: true}
@@ -716,7 +715,7 @@ func TestTaskService_UpdateCategory_PromotesQueuedTaskThreadFollowupBeforeOrigin
 		require.NoError(t, err)
 		require.NotNil(t, pending)
 		exec := &models.Execution{TaskID: taskID, AgentConfigID: pending.AgentConfigID, Status: models.ExecRunning, PromptSent: pending.Content, IsFollowup: true}
-		require.NoError(t, threadInputRepo.(*sqlite.ThreadInputRepo).ClaimQueuedForTaskExecution(ctx, pending.ID, exec))
+		require.NoError(t, env.Fixtures.PromoteQueuedTaskInput(ctx, pending.ID, exec))
 		require.NoError(t, taskRepo.UpdateStatus(ctx, taskID, models.StatusQueued))
 		return true, nil
 	})
@@ -801,18 +800,18 @@ func TestTaskService_MoveTasksToActiveLaneRoutesSingleFailedFollowupAndReturnsLa
 
 func TestTaskService_MoveTasksToActiveLaneFencesConcurrentLifecycleOwnedTransition(t *testing.T) {
 	ctx := context.Background()
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
-	threadRepo := teststores.Of(db).ThreadInputs
+	env := teststores.New(t)
+	taskRepo := env.Tasks
+	threadRepo := env.ThreadInputs
 	worker := newTestWorkerService(t)
-	svc := NewTaskService(taskRepo, teststores.Of(db).Attachments, worker)
+	svc := NewTaskService(taskRepo, env.Attachments, worker)
 	task := &models.Task{ProjectID: "default", Title: "Concurrent lifecycle lane move", Category: models.CategoryBacklog, Status: models.StatusPending, Prompt: "original prompt"}
 	require.NoError(t, taskRepo.Create(ctx, task))
 	input := &models.ThreadInput{Scope: models.ThreadInputScopeTask, ProjectID: "default", TaskID: task.ID, InputMode: models.ThreadInputModeQueued, InputStatus: models.ThreadInputPending, Content: "queued followup"}
 	require.NoError(t, threadRepo.CreateQueued(ctx, input))
 	svc.SetQueuedTaskThreadFollowupHook(func(routeCtx context.Context, taskID string) (bool, error) {
 		exec := &models.Execution{TaskID: taskID, Status: models.ExecQueued, PromptSent: input.Content, IsFollowup: true}
-		err := threadRepo.(*sqlite.ThreadInputRepo).ClaimQueuedForTaskExecution(routeCtx, input.ID, exec)
+		err := env.Fixtures.PromoteQueuedTaskInput(routeCtx, input.ID, exec)
 		return true, err
 	})
 	svc.beforeActiveLaneLifecycleRoute = func() {
@@ -946,14 +945,14 @@ func TestTaskService_UpdateCategory_RollsBackDeferredActivationWhenReloadContext
 
 func TestTaskService_UpdateCategory_QueuedFollowupRetryCreatesOneExecutionAfterActivationFailure(t *testing.T) {
 	ctx := context.Background()
-	db := teststores.NewDB(t)
-	projectRepo := teststores.Of(db).Projects
-	taskRepo := teststores.Of(db).Tasks
-	execRepo := teststores.Of(db).Executions
-	threadInputRepo := teststores.Of(db).ThreadInputs
-	llmConfigRepo := teststores.Of(db).LLMConfigs
+	env := teststores.New(t)
+	projectRepo := env.Projects
+	taskRepo := env.Tasks
+	execRepo := env.Executions
+	threadInputRepo := env.ThreadInputs
+	llmConfigRepo := env.LLMConfigs
 	workerSvc := newTestWorkerService(t)
-	svc := NewTaskService(taskRepo, teststores.Of(db).Attachments, workerSvc)
+	svc := NewTaskService(taskRepo, env.Attachments, workerSvc)
 	project := &models.Project{Name: "Deferred queued retry project"}
 	require.NoError(t, projectRepo.Create(ctx, project))
 	agent := &models.LLMConfig{Name: "Deferred queued retry model", Provider: models.ProviderTest, Model: "test-model"}
@@ -977,7 +976,7 @@ func TestTaskService_UpdateCategory_QueuedFollowupRetryCreatesOneExecutionAfterA
 			return true, nil
 		}
 		exec := &models.Execution{TaskID: taskID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: queued.Content, IsFollowup: true}
-		return true, threadInputRepo.(*sqlite.ThreadInputRepo).ClaimQueuedForTaskExecution(ctx, queued.ID, exec)
+		return true, env.Fixtures.PromoteQueuedTaskInput(ctx, queued.ID, exec)
 	})
 
 	require.ErrorIs(t, svc.UpdateCategory(ctx, task.ID, models.CategoryActive), assert.AnError)
@@ -1011,13 +1010,13 @@ func TestTaskService_UpdateCategory_QueuedFollowupRetryCreatesOneExecutionAfterA
 
 func TestTaskService_UpdateCategory_FailedFollowupRetryCreatesOneExecutionAfterActivationFailure(t *testing.T) {
 	ctx := context.Background()
-	db := teststores.NewDB(t)
-	projectRepo := teststores.Of(db).Projects
-	taskRepo := teststores.Of(db).Tasks
-	execRepo := teststores.Of(db).Executions
-	llmConfigRepo := teststores.Of(db).LLMConfigs
+	env := teststores.New(t)
+	projectRepo := env.Projects
+	taskRepo := env.Tasks
+	execRepo := env.Executions
+	llmConfigRepo := env.LLMConfigs
 	workerSvc := newTestWorkerService(t)
-	svc := NewTaskService(taskRepo, teststores.Of(db).Attachments, workerSvc)
+	svc := NewTaskService(taskRepo, env.Attachments, workerSvc)
 	project := &models.Project{Name: "Deferred failed retry project"}
 	require.NoError(t, projectRepo.Create(ctx, project))
 	agent := &models.LLMConfig{Name: "Deferred failed retry model", Provider: models.ProviderTest, Model: "test-model"}
@@ -1038,7 +1037,9 @@ func TestTaskService_UpdateCategory_FailedFollowupRetryCreatesOneExecutionAfterA
 			return active, err
 		}
 		retry := &models.Execution{TaskID: taskID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: failed.PromptSent, IsFollowup: true}
-		return true, execRepo.(*sqlite.ExecutionRepo).CreateDirectTaskFollowup(ctx, retry)
+		started, err := execRepo.CreateDirectTaskFollowupOrQueue(ctx, retry, &models.ThreadInput{AgentConfigID: retry.AgentConfigID, Content: retry.PromptSent})
+		require.True(t, started, "retry must be admitted directly")
+		return true, err
 	})
 
 	require.ErrorIs(t, svc.UpdateCategory(ctx, task.ID, models.CategoryActive), assert.AnError)
@@ -1073,13 +1074,13 @@ func TestTaskService_UpdateCategory_FailedFollowupRetryCreatesOneExecutionAfterA
 
 func TestTaskService_RunTask_PromotesQueuedTaskThreadFollowupBeforeOriginalPrompt(t *testing.T) {
 	ctx := context.Background()
-	db := teststores.NewDB(t)
-	projectRepo := teststores.Of(db).Projects
-	taskRepo := teststores.Of(db).Tasks
-	attachmentRepo := teststores.Of(db).Attachments
-	llmConfigRepo := teststores.Of(db).LLMConfigs
-	execRepo := teststores.Of(db).Executions
-	threadInputRepo := teststores.Of(db).ThreadInputs
+	env := teststores.New(t)
+	projectRepo := env.Projects
+	taskRepo := env.Tasks
+	attachmentRepo := env.Attachments
+	llmConfigRepo := env.LLMConfigs
+	execRepo := env.Executions
+	threadInputRepo := env.ThreadInputs
 	project := &models.Project{Name: "Manual Run Promotion Project"}
 	require.NoError(t, projectRepo.Create(ctx, project))
 	agent := &models.LLMConfig{Name: "Test Agent", Provider: models.ProviderTest, Model: "test-model", IsDefault: true}
@@ -1097,7 +1098,7 @@ func TestTaskService_RunTask_PromotesQueuedTaskThreadFollowupBeforeOriginalPromp
 			return false, nil
 		}
 		exec := &models.Execution{TaskID: taskID, AgentConfigID: pending.AgentConfigID, Status: models.ExecRunning, PromptSent: pending.Content, IsFollowup: true}
-		if err := threadInputRepo.(*sqlite.ThreadInputRepo).ClaimQueuedForTaskExecution(ctx, pending.ID, exec); err != nil {
+		if err := env.Fixtures.PromoteQueuedTaskInput(ctx, pending.ID, exec); err != nil {
 			return true, err
 		}
 		require.NoError(t, taskRepo.UpdateStatus(ctx, taskID, models.StatusQueued))
@@ -1584,9 +1585,9 @@ func TestTaskService_Delete_TerminalizesRetainedSwarmChildren(t *testing.T) {
 }
 
 func TestTaskService_Delete_PreservesAttachmentsWhenDurableDeleteFails(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
-	attachmentRepo := teststores.Of(db).Attachments
+	env := teststores.New(t)
+	taskRepo := env.Tasks
+	attachmentRepo := env.Attachments
 	svc := NewTaskService(taskRepo, attachmentRepo, newTestWorkerService(t))
 	ctx := context.Background()
 	task := &models.Task{ProjectID: "default", Title: "Delete failure", Category: models.CategoryBacklog, Status: models.StatusPending, Prompt: "test"}
@@ -1594,7 +1595,7 @@ func TestTaskService_Delete_PreservesAttachmentsWhenDurableDeleteFails(t *testin
 	path := filepath.Join(t.TempDir(), "attachment.txt")
 	require.NoError(t, os.WriteFile(path, []byte("content"), 0o600))
 	require.NoError(t, attachmentRepo.Create(ctx, &models.Attachment{TaskID: task.ID, FileName: "attachment.txt", FilePath: path, MediaType: "text/plain", FileSize: 7}))
-	_, err := db.Exec(`CREATE TRIGGER fail_task_delete BEFORE DELETE ON tasks WHEN OLD.id = '` + task.ID + `' BEGIN SELECT RAISE(ABORT, 'injected delete failure'); END`)
+	err := env.Fixtures.FailTaskDeletion(ctx, task.ID, "injected delete failure")
 	require.NoError(t, err)
 
 	err = svc.Delete(ctx, task.ID)
@@ -1609,11 +1610,11 @@ func TestTaskService_Delete_PreservesAttachmentsWhenDurableDeleteFails(t *testin
 }
 
 func TestTaskService_Delete_RollsBackPendingSessionRetirementWhenDeleteFails(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
-	threadInputRepo := teststores.Of(db).ThreadInputs
+	env := teststores.New(t)
+	taskRepo := env.Tasks
+	threadInputRepo := env.ThreadInputs
 	uploadsDir := filepath.Join(t.TempDir(), "uploads")
-	svc := NewTaskService(taskRepo, teststores.Of(db).Attachments, newTestWorkerService(t))
+	svc := NewTaskService(taskRepo, env.Attachments, newTestWorkerService(t))
 	svc.SetDeletionUploadsDir(uploadsDir)
 	ctx := context.Background()
 	task := &models.Task{ProjectID: "default", Title: "Failed delete pending owner", Category: models.CategoryBacklog, Status: models.StatusPending, Prompt: "test"}
@@ -1627,7 +1628,7 @@ func TestTaskService_Delete_RollsBackPendingSessionRetirementWhenDeleteFails(t *
 	sessionDir := filepath.Join(uploadsDir, "chat", "pending", sessionID)
 	require.NoError(t, os.MkdirAll(sessionDir, 0o700))
 	require.NoError(t, os.WriteFile(filepath.Join(sessionDir, "pending.txt"), []byte("pending"), 0o600))
-	_, err := db.Exec(`CREATE TRIGGER fail_pending_task_delete BEFORE DELETE ON tasks WHEN OLD.id = '` + task.ID + `' BEGIN SELECT RAISE(ABORT, 'injected pending delete failure'); END`)
+	err := env.Fixtures.FailTaskDeletion(ctx, task.ID, "injected pending delete failure")
 	require.NoError(t, err)
 
 	err = svc.Delete(ctx, task.ID)
@@ -1863,13 +1864,13 @@ func TestTaskService_Delete_PreservesFilesStillReferencedByAnotherTask(t *testin
 }
 
 func TestTaskService_Delete_PreservesExecutionLinkedSessionOwnedByAnotherProject(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
+	env := teststores.New(t)
+	taskRepo := env.Tasks
 	uploadsDir := filepath.Join(t.TempDir(), "uploads")
-	svc := NewTaskService(taskRepo, teststores.Of(db).Attachments, newTestWorkerService(t))
+	svc := NewTaskService(taskRepo, env.Attachments, newTestWorkerService(t))
 	svc.SetDeletionUploadsDir(uploadsDir)
 	ctx := context.Background()
-	stores := teststores.Of(db)
+	stores := env.Stores
 	otherProject := &models.Project{Name: "Other project"}
 	require.NoError(t, stores.Projects.Create(ctx, otherProject))
 	first := &models.Task{ProjectID: "default", Title: "First chat owner", Category: models.CategoryChat, Status: models.StatusCompleted, Prompt: "test"}
@@ -2465,10 +2466,10 @@ func TestTaskService_CancelTaskDoesNotPurgeRerunSubmittedDuringStop(t *testing.T
 }
 
 func TestTaskService_CancelTask_ReturnsCategoryUpdateFailure(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
+	env := teststores.New(t)
+	taskRepo := env.Tasks
 	workerSvc := newTestWorkerService(t)
-	attachmentRepo := teststores.Of(db).Attachments
+	attachmentRepo := env.Attachments
 	svc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 	ctx := context.Background()
 
@@ -2480,15 +2481,7 @@ func TestTaskService_CancelTask_ReturnsCategoryUpdateFailure(t *testing.T) {
 		Category:  models.CategoryActive,
 	}
 	require.NoError(t, taskRepo.Create(ctx, task))
-	t.Cleanup(func() { _, _ = db.ExecContext(context.Background(), `DROP TRIGGER IF EXISTS fail_cancel_backlog_move`) })
-	_, err := db.ExecContext(ctx, `
-		CREATE TRIGGER fail_cancel_backlog_move
-		BEFORE UPDATE OF category ON tasks
-		WHEN NEW.title = 'Category Failure Cancel Task' AND NEW.category = 'backlog'
-		BEGIN
-			SELECT RAISE(FAIL, 'forced category update failure');
-		END;
-	`)
+	err := env.Fixtures.FailTaskBacklogMove(ctx, task.ID)
 	require.NoError(t, err)
 
 	err = svc.CancelTask(ctx, task.ID)
@@ -2875,9 +2868,9 @@ func TestTaskService_DeleteAll_CleansEveryUploadOwner(t *testing.T) {
 }
 
 func TestTaskService_DeleteAll_PreservesFilesWhenDurableDeleteFails(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
-	attachmentRepo := teststores.Of(db).Attachments
+	env := teststores.New(t)
+	taskRepo := env.Tasks
+	attachmentRepo := env.Attachments
 	svc := NewTaskService(taskRepo, attachmentRepo, newTestWorkerService(t))
 	ctx := context.Background()
 	task := &models.Task{ProjectID: "default", Title: "Bulk delete failure", Category: models.CategoryCompleted, Status: models.StatusCompleted, Prompt: "test"}
@@ -2885,7 +2878,7 @@ func TestTaskService_DeleteAll_PreservesFilesWhenDurableDeleteFails(t *testing.T
 	path := filepath.Join(t.TempDir(), "attachment.txt")
 	require.NoError(t, os.WriteFile(path, []byte("content"), 0o600))
 	require.NoError(t, attachmentRepo.Create(ctx, &models.Attachment{TaskID: task.ID, FileName: "attachment.txt", FilePath: path, MediaType: "text/plain", FileSize: 7}))
-	_, err := db.Exec(`CREATE TRIGGER fail_bulk_task_delete BEFORE DELETE ON tasks WHEN OLD.id = '` + task.ID + `' BEGIN SELECT RAISE(ABORT, 'injected bulk delete failure'); END`)
+	err := env.Fixtures.FailTaskDeletion(ctx, task.ID, "injected bulk delete failure")
 	require.NoError(t, err)
 
 	count, err := svc.DeleteAllCompleted(ctx, "default")
@@ -3946,14 +3939,14 @@ func TestWorkerService_RetriesTransientReservedClaimFailureWithSameExecution(t *
 
 func TestWorkerService_PrunesAndCancelsStaleDurableReservation(t *testing.T) {
 	ctx := context.Background()
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
-	execRepo := teststores.Of(db).Executions
+	env := teststores.New(t)
+	taskRepo := env.Tasks
+	execRepo := env.Executions
 	task := &models.Task{ProjectID: "default", Title: "Cancelled reserved worker task", Category: models.CategoryBacklog, Status: models.StatusPending}
 	require.NoError(t, taskRepo.Create(ctx, task))
 	admissions, err := taskRepo.MoveTasksToActiveLane(ctx, "default", []persistence.ActiveLaneTaskMove{{ID: task.ID, ExpectedCategory: models.CategoryBacklog, ExpectedStatus: models.StatusPending}}, models.StatusRunning)
 	require.NoError(t, err)
-	_, err = db.ExecContext(ctx, `UPDATE tasks SET status = 'cancelled' WHERE id = ?`, task.ID)
+	err = env.Fixtures.SetTaskStatus(ctx, task.ID, models.StatusCancelled)
 	require.NoError(t, err)
 
 	worker := NewWorkerService(nil, 1, nil)

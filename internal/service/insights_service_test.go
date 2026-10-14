@@ -7,9 +7,9 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/openvibely/openvibely/internal/testutil/teststores"
 	"github.com/openvibely/openvibely/internal/util"
@@ -299,14 +299,14 @@ func TestInsightsService_DetectBugPatterns(t *testing.T) {
 }
 
 func TestInsightsService_RunAnalysisCreatesReportAcrossDetectors(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
 
-	projectRepo := teststores.Of(db).Projects
-	taskRepo := teststores.Of(db).Tasks
-	insightsRepo := teststores.Of(db).Insights
-	llmConfigRepo := teststores.Of(db).LLMConfigs
-	execRepo := teststores.Of(db).Executions
+	projectRepo := env.Projects
+	taskRepo := env.Tasks
+	insightsRepo := env.Insights
+	llmConfigRepo := env.LLMConfigs
+	execRepo := env.Executions
 	svc := NewInsightsService(insightsRepo, taskRepo, projectRepo, llmConfigRepo, execRepo)
 
 	project := &models.Project{Name: "Run Analysis Project"}
@@ -343,7 +343,7 @@ func TestInsightsService_RunAnalysisCreatesReportAcrossDetectors(t *testing.T) {
 		if err := taskRepo.Create(ctx, task); err != nil {
 			t.Fatalf("create stale task: %v", err)
 		}
-		if _, err := db.ExecContext(ctx, `UPDATE tasks SET created_at = datetime('now', '-96 hours') WHERE id = ?`, task.ID); err != nil {
+		if err := env.Fixtures.SetTaskCreatedAt(ctx, task.ID, time.Now().UTC().Add(-96*time.Hour)); err != nil {
 			t.Fatalf("age stale task: %v", err)
 		}
 	}
@@ -359,7 +359,11 @@ func TestInsightsService_RunAnalysisCreatesReportAcrossDetectors(t *testing.T) {
 		if err := execRepo.Complete(ctx, exec.ID, models.ExecCompleted, "done", "", 0, 0); err != nil {
 			t.Fatalf("complete slow exec: %v", err)
 		}
-		if _, err := db.ExecContext(ctx, `UPDATE executions SET started_at = datetime('now', '-10 minutes'), completed_at = datetime('now') WHERE id = ?`, exec.ID); err != nil {
+		completedAt := time.Now().UTC()
+		if err := env.Fixtures.SetExecutionStartedAt(ctx, exec.ID, completedAt.Add(-10*time.Minute)); err != nil {
+			t.Fatal(err)
+		}
+		if err := env.Fixtures.SetExecutionCompletedAt(ctx, exec.ID, completedAt); err != nil {
 			t.Fatalf("slow exec timestamps: %v", err)
 		}
 	}
@@ -412,12 +416,12 @@ func TestInsightsService_RunAnalysisStalePendingTasks(t *testing.T) {
 		{name: "backlog pending excluded", pending: 3, backlogPending: 4},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			db := teststores.NewDB(t)
+			env := teststores.New(t)
 			ctx := context.Background()
-			projectRepo := teststores.Of(db).Projects
-			taskRepo := teststores.Of(db).Tasks
-			insightsRepo := teststores.Of(db).Insights
-			svc := NewInsightsService(insightsRepo, taskRepo, projectRepo, teststores.Of(db).LLMConfigs, teststores.Of(db).Executions)
+			projectRepo := env.Projects
+			taskRepo := env.Tasks
+			insightsRepo := env.Insights
+			svc := NewInsightsService(insightsRepo, taskRepo, projectRepo, env.LLMConfigs, env.Executions)
 			project := &models.Project{Name: "Stale pending analysis"}
 			if err := projectRepo.Create(ctx, project); err != nil {
 				t.Fatalf("create project: %v", err)
@@ -426,19 +430,19 @@ func TestInsightsService_RunAnalysisStalePendingTasks(t *testing.T) {
 				count    int
 				status   models.TaskStatus
 				category models.TaskCategory
-				age      string
+				age      time.Duration
 			}{
-				{tc.pending, models.StatusPending, models.CategoryActive, "-96 hours"},
-				{tc.running, models.StatusRunning, models.CategoryActive, "-96 hours"},
-				{tc.recentPending, models.StatusPending, models.CategoryActive, "-48 hours"},
-				{tc.backlogPending, models.StatusPending, models.CategoryBacklog, "-96 hours"},
+				{tc.pending, models.StatusPending, models.CategoryActive, -96 * time.Hour},
+				{tc.running, models.StatusRunning, models.CategoryActive, -96 * time.Hour},
+				{tc.recentPending, models.StatusPending, models.CategoryActive, -48 * time.Hour},
+				{tc.backlogPending, models.StatusPending, models.CategoryBacklog, -96 * time.Hour},
 			} {
 				for i := 0; i < group.count; i++ {
 					task := &models.Task{ProjectID: project.ID, Title: fmt.Sprintf("%s %s %s task %d", group.category, group.status, group.age, i), Prompt: "finish", Category: group.category, Status: group.status, Priority: 2}
 					if err := taskRepo.Create(ctx, task); err != nil {
 						t.Fatalf("create task: %v", err)
 					}
-					if _, err := db.ExecContext(ctx, `UPDATE tasks SET created_at = datetime('now', ?) WHERE id = ?`, group.age, task.ID); err != nil {
+					if err := env.Fixtures.SetTaskCreatedAt(ctx, task.ID, time.Now().UTC().Add(group.age)); err != nil {
 						t.Fatalf("age task: %v", err)
 					}
 				}
@@ -539,16 +543,16 @@ func TestInsightsService_GenerateProactiveSuggestionsParsesAndDeduplicates(t *te
 }
 
 func TestInsightsService_AIBackedWorkflowsPersistAndListResults(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
 
-	projectRepo := teststores.Of(db).Projects
-	taskRepo := teststores.Of(db).Tasks
-	insightsRepo := teststores.Of(db).Insights
-	llmConfigRepo := teststores.Of(db).LLMConfigs
-	execRepo := teststores.Of(db).Executions
-	attachmentRepo := teststores.Of(db).Attachments
-	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, teststores.Of(db).Schedules, attachmentRepo)
+	projectRepo := env.Projects
+	taskRepo := env.Tasks
+	insightsRepo := env.Insights
+	llmConfigRepo := env.LLMConfigs
+	execRepo := env.Executions
+	attachmentRepo := env.Attachments
+	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, env.Schedules, attachmentRepo)
 	mock := testutil.NewMockLLMCaller()
 	var directUsageProjectIDs []string
 	mock.OnCall = func(ctx context.Context, _ testutil.MockLLMCall) {
@@ -663,7 +667,7 @@ func TestInsightsService_AIBackedWorkflowsPersistAndListResults(t *testing.T) {
 	if err := svc.DeleteKnowledge(ctx, project.ID, knowledge[0].ID); err != nil {
 		t.Fatalf("DeleteKnowledge: %v", err)
 	}
-	if deleted, err := insightsRepo.(*sqlite.InsightsRepo).GetKnowledge(ctx, project.ID, knowledge[0].ID); err != nil || deleted != nil {
+	if deleted, err := env.Fixtures.KnowledgeEntry(ctx, project.ID, knowledge[0].ID); err != nil || deleted != nil {
 		t.Fatalf("knowledge should be deleted, got %#v err=%v", deleted, err)
 	}
 
@@ -738,14 +742,14 @@ func TestInsightsService_UpdateAndAcceptInsight(t *testing.T) {
 }
 
 func TestInsightsService_ProjectScopedMutations(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
 
-	projectRepo := teststores.Of(db).Projects
-	insightsRepo := teststores.Of(db).Insights
-	taskRepo := teststores.Of(db).Tasks
-	llmConfigRepo := teststores.Of(db).LLMConfigs
-	execRepo := teststores.Of(db).Executions
+	projectRepo := env.Projects
+	insightsRepo := env.Insights
+	taskRepo := env.Tasks
+	llmConfigRepo := env.LLMConfigs
+	execRepo := env.Executions
 	svc := NewInsightsService(insightsRepo, taskRepo, projectRepo, llmConfigRepo, execRepo)
 
 	projectA := &models.Project{Name: "Project A"}
@@ -824,7 +828,7 @@ func TestInsightsService_ProjectScopedMutations(t *testing.T) {
 	if err := svc.DeleteKnowledge(ctx, projectA.ID, knowledge.ID); !errors.Is(err, ErrKnowledgeNotFound) {
 		t.Fatalf("foreign knowledge delete error = %v, want %v", err, ErrKnowledgeNotFound)
 	}
-	if stillThere, err := insightsRepo.(*sqlite.InsightsRepo).GetKnowledge(ctx, projectB.ID, knowledge.ID); err != nil || stillThere == nil {
+	if stillThere, err := env.Fixtures.KnowledgeEntry(ctx, projectB.ID, knowledge.ID); err != nil || stillThere == nil {
 		t.Fatalf("foreign knowledge disappeared after rejected service delete: %#v err=%v", stillThere, err)
 	}
 	if err := svc.DeleteKnowledge(ctx, projectB.ID, knowledge.ID); err != nil {

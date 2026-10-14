@@ -11,7 +11,6 @@ import (
 
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/testutil/teststores"
 )
 
@@ -53,7 +52,7 @@ func TestUpdateSchedule_RecurringAfterRun(t *testing.T) {
 	// Simulate the scheduler having run it
 	now := time.Now()
 	nextRun := schedule.ComputeNextRun(now)
-	if err := scheduleRepo.(*sqlite.ScheduleRepo).MarkRan(context.Background(), schedule.ID, now, nextRun); err != nil {
+	if err := storeEnv.Fixtures.SetScheduleRunTimes(context.Background(), schedule.ID, now, nextRun); err != nil {
 		t.Fatalf("failed to mark as ran: %v", err)
 	}
 

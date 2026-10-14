@@ -20,7 +20,6 @@ import (
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
-	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/openvibely/openvibely/internal/testutil/teststores"
 	"github.com/stretchr/testify/require"
@@ -135,21 +134,21 @@ func (a *taskSteeringProviderAdapter) Call(req llmcontracts.AgentRequest) (llmco
 }
 
 func TestLLMService_ExecuteTaskWithAgent_PublishesInitialThreadExecutionStarted(t *testing.T) {
-	db := teststores.NewDB(t)
-	ctx := context.Background()
 	broadcaster := events.NewBroadcaster()
+	env := teststores.New(t, teststores.WithBroadcaster(broadcaster))
+	ctx := context.Background()
 	sub, err := broadcaster.Subscribe()
 	if err != nil {
 		t.Fatalf("Subscribe: %v", err)
 	}
 	defer broadcaster.Unsubscribe(sub)
 
-	llmConfigRepo := teststores.Of(db).LLMConfigs
-	execRepo := teststores.Of(db).Executions
-	taskRepo := teststores.Of(db, teststores.WithBroadcaster(broadcaster)).Tasks
-	projectRepo := teststores.Of(db).Projects
-	scheduleRepo := teststores.Of(db).Schedules
-	attachmentRepo := teststores.Of(db).Attachments
+	llmConfigRepo := env.LLMConfigs
+	execRepo := env.Executions
+	taskRepo := env.Tasks
+	projectRepo := env.Projects
+	scheduleRepo := env.Schedules
+	attachmentRepo := env.Attachments
 	agent := ensureDefaultAgent(t, llmConfigRepo)
 	project := &models.Project{Name: "Initial Thread Event Project", RepoPath: t.TempDir()}
 	if err := projectRepo.Create(ctx, project); err != nil {
@@ -3679,15 +3678,15 @@ func TestLLMService_ExecuteTaskWithAgent_MovesRepeatOnceToCompleted(t *testing.T
 }
 
 func TestLLMService_ExecuteTaskWithAgent_CommitsWorktreeEditsAndPersistsDiff(t *testing.T) {
-	db := teststores.NewDB(t)
-	llmConfigRepo := teststores.Of(db).LLMConfigs
-	execRepo := teststores.Of(db).Executions
-	taskRepo := teststores.Of(db).Tasks
-	projectRepo := teststores.Of(db).Projects
-	statRepo := teststores.Of(db).TaskCommitStats
-	scheduleRepo := teststores.Of(db).Schedules
-	attachmentRepo := teststores.Of(db).Attachments
-	settingsRepo := teststores.Of(db).Settings
+	env := teststores.New(t)
+	llmConfigRepo := env.LLMConfigs
+	execRepo := env.Executions
+	taskRepo := env.Tasks
+	projectRepo := env.Projects
+	statRepo := env.TaskCommitStats
+	scheduleRepo := env.Schedules
+	attachmentRepo := env.Attachments
+	settingsRepo := env.Settings
 	ctx := context.Background()
 
 	repoDir := createTestGitRepo(t)
@@ -3754,7 +3753,7 @@ func TestLLMService_ExecuteTaskWithAgent_CommitsWorktreeEditsAndPersistsDiff(t *
 	if updatedTask.MergeStatus != models.MergeStatusPending {
 		t.Fatalf("merge status = %q, want pending", updatedTask.MergeStatus)
 	}
-	stats, err := statRepo.(*sqlite.TaskCommitStatRepo).ListProducedCommitStats(ctx, project.ID, time.Now().Add(-time.Hour))
+	stats, err := env.Fixtures.ProducedCommitStats(ctx, project.ID, time.Now().Add(-time.Hour))
 	if err != nil {
 		t.Fatalf("list produced commit stats: %v", err)
 	}
@@ -3767,15 +3766,15 @@ func TestLLMService_ExecuteTaskWithAgent_CommitsWorktreeEditsAndPersistsDiff(t *
 }
 
 func TestLLMService_ExecuteTaskWithAgent_AllowsCompletionWithoutCodeChanges(t *testing.T) {
-	db := teststores.NewDB(t)
-	llmConfigRepo := teststores.Of(db).LLMConfigs
-	execRepo := teststores.Of(db).Executions
-	taskRepo := teststores.Of(db).Tasks
-	projectRepo := teststores.Of(db).Projects
-	statRepo := teststores.Of(db).TaskCommitStats
-	scheduleRepo := teststores.Of(db).Schedules
-	attachmentRepo := teststores.Of(db).Attachments
-	settingsRepo := teststores.Of(db).Settings
+	env := teststores.New(t)
+	llmConfigRepo := env.LLMConfigs
+	execRepo := env.Executions
+	taskRepo := env.Tasks
+	projectRepo := env.Projects
+	statRepo := env.TaskCommitStats
+	scheduleRepo := env.Schedules
+	attachmentRepo := env.Attachments
+	settingsRepo := env.Settings
 	ctx := context.Background()
 
 	mock := testutil.NewMockLLMCaller()
@@ -3845,7 +3844,7 @@ func TestLLMService_ExecuteTaskWithAgent_AllowsCompletionWithoutCodeChanges(t *t
 	if commitCount := runGitTest(t, repoDir, "rev-list", "--count", targetBranch+".."+updatedTask.WorktreeBranch); commitCount != "0" {
 		t.Fatalf("no-change task branch produced commits = %s, want 0", commitCount)
 	}
-	stats, err := statRepo.(*sqlite.TaskCommitStatRepo).ListProducedCommitStats(ctx, project.ID, time.Now().Add(-time.Hour))
+	stats, err := env.Fixtures.ProducedCommitStats(ctx, project.ID, time.Now().Add(-time.Hour))
 	if err != nil {
 		t.Fatalf("list produced commit stats: %v", err)
 	}

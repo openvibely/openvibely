@@ -10,7 +10,6 @@ import (
 	"github.com/openvibely/openvibely/internal/memory"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
-	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/testutil/teststores"
 )
 
@@ -550,11 +549,14 @@ func TestMemoryServiceEnsureProjectRepairsLegacyMemoryAgents(t *testing.T) {
 	if containsMemoryScheduleHookID(hooks, legacyHook.ID) || containsMemoryScheduleHookID(hooks, archivedLegacyHook.ID) {
 		t.Fatalf("legacy memory hooks should be deleted with the agents, got %+v", hooks)
 	}
-	allAgents, err := repos.agents.(*sqlite.AgentRepo).List(ctx)
+	allAgents, err := repos.agents.ListIncludingArchived(ctx)
 	if err != nil {
 		t.Fatalf("list live agents: %v", err)
 	}
 	for _, agent := range allAgents {
+		if agent.GeneratedStatus == "archived" {
+			continue
+		}
 		if agent.ID == orphanDuplicate.ID || agent.ID == orphanConsolidator.ID || agent.ID == consolidator.ID || agent.ID == legacy.ID {
 			t.Fatalf("legacy/duplicate memory agent should be hidden from live list: %#v", agent)
 		}

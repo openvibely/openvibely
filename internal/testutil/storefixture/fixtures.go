@@ -22,6 +22,23 @@ type SkillEventFilter struct {
 
 // Fixtures describes test domain state, never tables, query text, or connections.
 type Fixtures interface {
+	CountProducedCommitStats(context.Context) (int, error)
+	LatestExecution(context.Context) (*models.Execution, error)
+	SeedDiscordAuthorizedUsers(context.Context, []models.DiscordAuthorizedUser) error
+	// WriteExecutionSnapshotBaseline performs the legacy full-output overwrite,
+	// without chunk compaction, for comparison against incremental persistence.
+	WriteExecutionSnapshotBaseline(context.Context, string, string) error
+	SeedOrphanSchedule(context.Context, string, string, time.Time) error
+	SeedOverflowSchedule(context.Context, string, string, time.Time) error
+	// FailTaskDeletion aborts durable deletion, including the enclosing transaction.
+	FailTaskDeletion(context.Context, string, string) error
+	FailTaskBacklogMove(context.Context, string) error
+	// SetTaskStatus bypasses lifecycle cleanup to construct stale reservations.
+	SetTaskStatus(context.Context, string, models.TaskStatus) error
+	SetVerifiedOAuthPrincipal(context.Context, string, string) error
+	SetTaskCreatedAt(context.Context, string, time.Time) error
+	SetExecutionCompletedAt(context.Context, string, time.Time) error
+	KnowledgeEntry(context.Context, string, string) (*models.KnowledgeEntry, error)
 	// PromoteQueuedTaskInput atomically reserves an input and execution without model-selection validation.
 	PromoteQueuedTaskInput(context.Context, string, *models.Execution) error
 	// SetModelOAuthTokens simulates credential replacement by a competing refresher.

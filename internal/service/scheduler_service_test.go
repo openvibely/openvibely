@@ -9,8 +9,8 @@ import (
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
-	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/openvibely/openvibely/internal/testutil/storefixture"
 	"github.com/openvibely/openvibely/internal/testutil/teststores"
 	"github.com/stretchr/testify/require"
 )
@@ -113,21 +113,15 @@ func TestSchedulerService_CheckDueTasksClearsCancellationRequestBeforeSubmit(t *
 }
 
 func TestSchedulerService_CheckDueTasksDeletesOrphanedDueSchedule(t *testing.T) {
-	db := teststores.NewDB(t)
-	scheduleRepo := teststores.Of(db).Schedules
-	taskRepo := teststores.Of(db).Tasks
+	env := teststores.New(t)
+	scheduleRepo := env.Schedules
+	taskRepo := env.Tasks
 	workerSvc := newTestWorkerService(t)
 	ctx := context.Background()
 	svc := NewSchedulerService(scheduleRepo, taskRepo, workerSvc)
 
-	_, err := db.Exec(`PRAGMA foreign_keys = OFF`)
-	require.NoError(t, err)
 	dueAt := time.Now().UTC().Add(-time.Minute)
-	_, err = db.Exec(`INSERT INTO schedules (id, task_id, run_at, repeat_type, repeat_interval, enabled, next_run)
-		VALUES ('orphan-schedule', 'missing-task', ?, 'once', 1, 1, ?)`, dueAt, dueAt)
-	require.NoError(t, err)
-	_, err = db.Exec(`PRAGMA foreign_keys = ON`)
-	require.NoError(t, err)
+	require.NoError(t, env.Fixtures.SeedOrphanSchedule(ctx, "orphan-schedule", "missing-task", dueAt))
 
 	svc.checkDueTasks(ctx)
 
@@ -238,9 +232,9 @@ func TestSchedulerService_ModifyRecurringScheduleToOnceUsesUpcomingOccurrence(t 
 			name = "prior recurring run"
 		}
 		t.Run(name, func(t *testing.T) {
-			db := teststores.NewDB(t)
-			scheduleRepo := teststores.Of(db).Schedules
-			taskRepo := teststores.Of(db).Tasks
+			env := teststores.New(t)
+			scheduleRepo := env.Schedules
+			taskRepo := env.Tasks
 			workerSvc := newTestWorkerService(t)
 			ctx := context.Background()
 			now := time.Now().UTC().Truncate(time.Second)
@@ -268,7 +262,7 @@ func TestSchedulerService_ModifyRecurringScheduleToOnceUsesUpcomingOccurrence(t 
 			if priorRun {
 				lastRun := now.Add(-24 * time.Hour)
 				historicalRun = &lastRun
-				require.NoError(t, scheduleRepo.(*sqlite.ScheduleRepo).MarkRan(ctx, schedule.ID, lastRun, &upcoming))
+				require.NoError(t, env.Fixtures.SetScheduleRunTimes(ctx, schedule.ID, lastRun, &upcoming))
 			}
 
 			modified, err := NewScheduleActionService(taskRepo, scheduleRepo).Modify(ctx, "default", ModifyScheduleRequest{
@@ -337,9 +331,9 @@ func TestSchedulerService_ModifyRecurringScheduleToOnceUsesUpcomingOccurrence(t 
 }
 
 func TestSchedulerService_CheckDueTasksDoesNotReplayDispatchedOneTimeSchedule(t *testing.T) {
-	db := teststores.NewDB(t)
-	scheduleRepo := teststores.Of(db).Schedules
-	taskRepo := teststores.Of(db).Tasks
+	env := teststores.New(t)
+	scheduleRepo := env.Schedules
+	taskRepo := env.Tasks
 	workerSvc := newTestWorkerService(t)
 	ctx := context.Background()
 
@@ -362,7 +356,7 @@ func TestSchedulerService_CheckDueTasksDoesNotReplayDispatchedOneTimeSchedule(t 
 	require.NoError(t, scheduleRepo.Create(ctx, schedule))
 
 	previousRun := runAt.Add(time.Minute)
-	require.NoError(t, scheduleRepo.(*sqlite.ScheduleRepo).MarkRan(ctx, schedule.ID, previousRun, nil))
+	require.NoError(t, env.Fixtures.SetScheduleRunTimes(ctx, schedule.ID, previousRun, nil))
 	stored, err := scheduleRepo.GetByID(ctx, schedule.ID)
 	require.NoError(t, err)
 	require.NotNil(t, stored.LastRun)
@@ -381,9 +375,9 @@ func TestSchedulerService_CheckDueTasksDoesNotReplayDispatchedOneTimeSchedule(t 
 }
 
 func TestSchedulerService_MalformedScheduleDoesNotBlockLaterValidSchedule(t *testing.T) {
-	db := teststores.NewDB(t)
-	scheduleRepo := teststores.Of(db).Schedules
-	taskRepo := teststores.Of(db).Tasks
+	env := teststores.New(t)
+	scheduleRepo := env.Schedules
+	taskRepo := env.Tasks
 	workerSvc := newTestWorkerService(t)
 	ctx := context.Background()
 	svc := NewSchedulerService(scheduleRepo, taskRepo, workerSvc)
@@ -397,10 +391,7 @@ func TestSchedulerService_MalformedScheduleDoesNotBlockLaterValidSchedule(t *tes
 	if err := taskRepo.Create(ctx, validTask); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.ExecContext(ctx, `INSERT INTO schedules
-		(id, task_id, run_at, repeat_type, repeat_interval, enabled, next_run)
-		VALUES (?, ?, ?, ?, ?, 1, ?)`,
-		"corrupt-interval", malformedTask.ID, now.Add(-2*time.Minute), models.RepeatSeconds, 9223372036854775807, now.Add(-2*time.Minute)); err != nil {
+	if err := env.Fixtures.SeedOverflowSchedule(ctx, "corrupt-interval", malformedTask.ID, now.Add(-2*time.Minute)); err != nil {
 		t.Fatal(err)
 	}
 	valid := &models.Schedule{TaskID: validTask.ID, RunAt: now.Add(-time.Minute), RepeatType: models.RepeatOnce, RepeatInterval: 1, Enabled: true}
@@ -893,9 +884,10 @@ func TestSchedulerService_CheckActiveTasksSubmitsAdmissionWithoutPayload(t *test
 }
 
 func TestSchedulerService_CheckActiveTasksUsesBoundedAdmissionQuery(t *testing.T) {
-	db, counter := testutil.NewStatementCountingTestDB(t)
+	env := teststores.New(t, teststores.WithIOCounting())
+	counter := env.IO
 	ctx := context.Background()
-	taskRepo := teststores.Of(db).Tasks
+	taskRepo := env.Tasks
 	workerSvc := newTestWorkerService(t)
 	task := &models.Task{
 		ProjectID:   "default",
@@ -912,30 +904,12 @@ func TestSchedulerService_CheckActiveTasksUsesBoundedAdmissionQuery(t *testing.T
 
 	counter.Reset()
 	counter.SetEnabled(true)
-	NewSchedulerService(teststores.Of(db).Schedules, taskRepo, workerSvc).checkActiveTasks(ctx)
+	NewSchedulerService(env.Schedules, taskRepo, workerSvc).checkActiveTasks(ctx)
 	counter.SetEnabled(false)
 
-	statements := counter.Statements()
-	admissionQueries := 0
-	for _, statement := range statements {
-		query := strings.ToLower(statement)
-		if strings.Contains(query, "from tasks where category = 'active' and status = 'pending'") {
-			admissionQueries++
-			projection := strings.SplitN(query, " from ", 2)[0]
-			if strings.Contains(projection, "prompt") || strings.Contains(projection, "chain_config") || strings.Contains(projection, "swarm_config") {
-				t.Fatalf("scheduler admission query selected full payload: %s", statement)
-			}
-		}
-		if strings.Contains(query, "where id = ?") {
-			t.Fatalf("scheduler admission introduced a per-task read: %s", statement)
-		}
-	}
-	if admissionQueries != 1 {
-		t.Fatalf("expected one scheduler admission query, got %d: %#v", admissionQueries, statements)
-	}
-	if len(statements) != 2 {
-		t.Fatalf("expected one admission query plus one stale-queue query, got %d: %#v", len(statements), statements)
-	}
+	stats := counter.Snapshot()
+	require.Equal(t, 2, stats.Requests, "one admission request and one stale-queue request; no per-task reads")
+	require.Less(t, stats.ReadTextBytes, 4096, "scheduler admission must not retrieve execution payloads")
 }
 
 func BenchmarkWorkerSchedulerActivePendingProjection(b *testing.B) {
@@ -956,8 +930,9 @@ func BenchmarkWorkerSchedulerActivePendingProjection(b *testing.B) {
 	for _, fixture := range fixtures {
 		fixture := fixture
 		b.Run(fixture.name, func(b *testing.B) {
-			db, counter := testutil.NewStatementCountingTestDB(b)
-			repo := teststores.Of(db).Tasks
+			env := teststores.New(b, teststores.WithIOCounting())
+			counter := env.IO
+			repo := env.Tasks
 			seedActivePendingProjectionBenchmark(b, repo, fixture.taskCount, fixture.promptSize, fixture.workflowSize)
 
 			admissionRows, admissionPayload, admissionStatements := measureActivePendingAdmissionProjection(b, repo, counter)
@@ -998,7 +973,7 @@ func seedActivePendingProjectionBenchmark(b *testing.B, repo persistence.TaskSto
 	}
 }
 
-func measureActivePendingAdmissionProjection(b *testing.B, repo persistence.TaskStore, counter *testutil.SQLStatementCounter) (int, int64, int) {
+func measureActivePendingAdmissionProjection(b *testing.B, repo persistence.TaskStore, counter storefixture.IOCounter) (int, int64, int) {
 	b.Helper()
 	counter.Reset()
 	counter.SetEnabled(true)
@@ -1007,7 +982,8 @@ func measureActivePendingAdmissionProjection(b *testing.B, repo persistence.Task
 	if err != nil {
 		b.Fatalf("measure active pending admission projection: %v", err)
 	}
-	return len(admissions), 0, len(counter.Statements())
+	stats := counter.Snapshot()
+	return len(admissions), int64(stats.ReadTextBytes), stats.Requests
 }
 
 func benchmarkActivePendingAdmissionProjection(b *testing.B, repo persistence.TaskStore, selectedPayloadBytes int64, expectedRows, statementCount int) {
@@ -1029,7 +1005,7 @@ func benchmarkActivePendingAdmissionProjection(b *testing.B, repo persistence.Ta
 	}
 	b.ReportMetric(float64(rows), "rows/op")
 	b.ReportMetric(float64(selectedPayloadBytes), "selected_payload_bytes/op")
-	b.ReportMetric(float64(statementCount), "sql_statements/op")
+	b.ReportMetric(float64(statementCount), "backend_requests/op")
 }
 
 func TestSchedulerService_CheckActiveTasks(t *testing.T) {
@@ -1367,9 +1343,9 @@ func TestSchedulerService_StartupCatchesMissedSchedules(t *testing.T) {
 }
 
 func TestSchedulerService_DragDropReschedule_DoesNotExecuteCompletedTask(t *testing.T) {
-	db := teststores.NewDB(t)
-	scheduleRepo := teststores.Of(db).Schedules
-	taskRepo := teststores.Of(db).Tasks
+	env := teststores.New(t)
+	scheduleRepo := env.Schedules
+	taskRepo := env.Tasks
 	workerSvc := newTestWorkerService(t)
 	ctx := context.Background()
 
@@ -1396,7 +1372,7 @@ func TestSchedulerService_DragDropReschedule_DoesNotExecuteCompletedTask(t *test
 	}
 	scheduleRepo.Create(ctx, sched)
 	previousRun := now.Add(-2 * time.Hour)
-	require.NoError(t, scheduleRepo.(*sqlite.ScheduleRepo).MarkRan(ctx, sched.ID, previousRun, nil))
+	require.NoError(t, env.Fixtures.SetScheduleRunTimes(ctx, sched.ID, previousRun, nil))
 	storedSchedule, err := scheduleRepo.GetByID(ctx, sched.ID)
 	require.NoError(t, err)
 	pastTime := now.Add(-30 * time.Minute)
@@ -1528,12 +1504,12 @@ func TestSchedulerService_RecoverStaleQueuedTasks(t *testing.T) {
 }
 
 func TestSchedulerService_RestartRecoveryPromotesQueuedFollowupBeforeOriginalPrompt(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
-	taskRepo := teststores.Of(db).Tasks
-	inputRepo := teststores.Of(db).ThreadInputs
+	taskRepo := env.Tasks
+	inputRepo := env.ThreadInputs
 	workerSvc := newTestWorkerService(t)
-	svc := NewSchedulerService(teststores.Of(db).Schedules, taskRepo, workerSvc)
+	svc := NewSchedulerService(env.Schedules, taskRepo, workerSvc)
 
 	task := &models.Task{ProjectID: "default", Title: "restart admission", Category: models.CategoryActive, Status: models.StatusRunning, Prompt: "stored original prompt"}
 	if err := taskRepo.Create(ctx, task); err != nil {
@@ -1561,12 +1537,12 @@ func TestSchedulerService_RestartRecoveryPromotesQueuedFollowupBeforeOriginalPro
 	case <-time.After(100 * time.Millisecond):
 	}
 
-	agent, err := teststores.Of(db).LLMConfigs.GetDefault(ctx)
+	agent, err := env.LLMConfigs.GetDefault(ctx)
 	if err != nil || agent == nil {
 		t.Fatalf("load default model: %#v err=%v", agent, err)
 	}
 	promoted := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: queued.Content, IsFollowup: true}
-	if err := inputRepo.(*sqlite.ThreadInputRepo).ClaimQueuedForTaskExecution(ctx, queued.ID, promoted); err != nil {
+	if err := env.Fixtures.PromoteQueuedTaskInput(ctx, queued.ID, promoted); err != nil {
 		t.Fatalf("promote durable follow-up after restart: %v", err)
 	}
 	if promoted.PromptSent != "durable follow-up" {
@@ -1664,9 +1640,9 @@ func TestSchedulerService_WorktreeCleanupIntegration(t *testing.T) {
 }
 
 func TestSchedulerService_CheckDueTasks_SkipsDisabledSchedule(t *testing.T) {
-	db := teststores.NewDB(t)
-	scheduleRepo := teststores.Of(db).Schedules
-	taskRepo := teststores.Of(db).Tasks
+	env := teststores.New(t)
+	scheduleRepo := env.Schedules
+	taskRepo := env.Tasks
 	workerSvc := newTestWorkerService(t)
 	ctx := context.Background()
 
@@ -1691,7 +1667,8 @@ func TestSchedulerService_CheckDueTasks_SkipsDisabledSchedule(t *testing.T) {
 	}
 	scheduleRepo.Create(ctx, sched)
 	// Disable the schedule
-	scheduleRepo.(*sqlite.ScheduleRepo).ToggleEnabled(ctx, sched.ID, false)
+	_, err := scheduleRepo.SetEnabledForTask(ctx, sched.ID, task.ID, false)
+	require.NoError(t, err)
 
 	svc.checkDueTasks(ctx)
 
@@ -1704,9 +1681,9 @@ func TestSchedulerService_CheckDueTasks_SkipsDisabledSchedule(t *testing.T) {
 }
 
 func TestSchedulerService_CheckDueTasks_ReenabledScheduleRuns(t *testing.T) {
-	db := teststores.NewDB(t)
-	scheduleRepo := teststores.Of(db).Schedules
-	taskRepo := teststores.Of(db).Tasks
+	env := teststores.New(t)
+	scheduleRepo := env.Schedules
+	taskRepo := env.Tasks
 	workerSvc := newTestWorkerService(t)
 	ctx := context.Background()
 
@@ -1741,7 +1718,8 @@ func TestSchedulerService_CheckDueTasks_ReenabledScheduleRuns(t *testing.T) {
 	}
 
 	// Re-enable
-	scheduleRepo.(*sqlite.ScheduleRepo).ToggleEnabled(ctx, sched.ID, true)
+	_, err := scheduleRepo.SetEnabledForTask(ctx, sched.ID, task.ID, true)
+	require.NoError(t, err)
 
 	// Now it should run
 	svc.checkDueTasks(ctx)

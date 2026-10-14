@@ -3,7 +3,6 @@ package service
 import (
 	"bytes"
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -21,19 +20,17 @@ import (
 	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
-	"github.com/openvibely/openvibely/internal/persistence/sqlite"
-	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/openvibely/openvibely/internal/testutil/teststores"
 )
 
-func newDiscordServiceForTest(t *testing.T) (*DiscordService, *sql.DB, persistence.SettingsStore, persistence.ProjectStore, persistence.TaskStore, persistence.DiscordAuthStore, persistence.DiscordTaskContextStore) {
+func newDiscordServiceForTest(t *testing.T) (*DiscordService, *teststores.Env, persistence.SettingsStore, persistence.ProjectStore, persistence.TaskStore, persistence.DiscordAuthStore, persistence.DiscordTaskContextStore) {
 	t.Helper()
-	db := teststores.NewDB(t)
-	settingsRepo := teststores.Of(db).Settings
-	projectRepo := teststores.Of(db).Projects
-	taskRepo := teststores.Of(db).Tasks
-	discordAuthRepo := teststores.Of(db).DiscordAuth
-	discordTaskContextRepo := teststores.Of(db).DiscordTaskContexts
+	db := teststores.New(t)
+	settingsRepo := db.Settings
+	projectRepo := db.Projects
+	taskRepo := db.Tasks
+	discordAuthRepo := db.DiscordAuth
+	discordTaskContextRepo := db.DiscordTaskContexts
 	svc := NewDiscordService(settingsRepo, projectRepo, nil, taskRepo, nil, nil, nil, nil, nil, discordAuthRepo, discordTaskContextRepo)
 	return svc, db, settingsRepo, projectRepo, taskRepo, discordAuthRepo, discordTaskContextRepo
 }
@@ -65,16 +62,17 @@ func TestDiscordService_CheckAuthorizationPreservesAnyProjectBehavior(t *testing
 }
 
 func TestDiscordService_CheckAuthorizationRejectedActiveProjectUsesSingleLookup(t *testing.T) {
-	db, counter := testutil.NewStatementCountingTestDB(t)
+	db := teststores.New(t, teststores.WithIOCounting())
+	counter := db.IO
 	ctx := context.Background()
-	settingsRepo := teststores.Of(db).Settings
-	projectRepo := teststores.Of(db).Projects
-	discordAuthRepo := teststores.Of(db).DiscordAuth
+	settingsRepo := db.Settings
+	projectRepo := db.Projects
+	discordAuthRepo := db.DiscordAuth
 	project := &models.Project{Name: "Discord Single Auth Lookup"}
 	if err := projectRepo.Create(ctx, project); err != nil {
 		t.Fatal(err)
 	}
-	seedChannelAuthorizedUsers(t, db, "discord_authorized_users", "discord_user_id", project.ID, "151828828857", 1000)
+	seedDiscordAuthUsers(t, db, project.ID, 1000)
 	svc := NewDiscordService(settingsRepo, projectRepo, nil, nil, nil, nil, nil, nil, nil, discordAuthRepo, nil)
 
 	counter.Reset()
@@ -85,26 +83,22 @@ func TestDiscordService_CheckAuthorizationRejectedActiveProjectUsesSingleLookup(
 	if authorized {
 		t.Fatal("expected rejected Discord user to remain unauthorized")
 	}
-	statements := counter.Statements()
-	if len(statements) != 1 {
-		t.Fatalf("rejected active-project authorization statements = %q, want one", statements)
-	}
-	if got := countChannelAuthTableStatements(statements, "discord_authorized_users"); got != 1 {
-		t.Fatalf("discord auth table lookup statements = %d, want one; statements: %q", got, statements)
+	if stats := counter.Snapshot(); stats.Requests != 1 {
+		t.Fatalf("rejected authorization must use one physical database request, got %+v", stats)
 	}
 }
 
 func BenchmarkDiscordRejectedAuthorizationSingleLookupLargeAllowlist(b *testing.B) {
-	db := teststores.NewDB(b)
+	db := teststores.New(b)
 	ctx := context.Background()
-	settingsRepo := teststores.Of(db).Settings
-	projectRepo := teststores.Of(db).Projects
-	discordAuthRepo := teststores.Of(db).DiscordAuth
+	settingsRepo := db.Settings
+	projectRepo := db.Projects
+	discordAuthRepo := db.DiscordAuth
 	project := &models.Project{Name: "Discord Rejected Auth Benchmark"}
 	if err := projectRepo.Create(ctx, project); err != nil {
 		b.Fatal(err)
 	}
-	seedChannelAuthorizedUsers(b, db, "discord_authorized_users", "discord_user_id", project.ID, "151828828857", 100000)
+	seedDiscordAuthUsers(b, db, project.ID, 100000)
 	svc := NewDiscordService(settingsRepo, projectRepo, nil, nil, nil, nil, nil, nil, nil, discordAuthRepo, nil)
 
 	b.ReportAllocs()
@@ -127,7 +121,7 @@ func TestDiscordService_NotificationLifecycleRuntimeUsesPersistedChannelTask(t *
 	if err := taskRepo.Create(ctx, caller); err != nil {
 		t.Fatal(err)
 	}
-	alertSvc := NewAlertService(teststores.Of(db).Alerts, nil)
+	alertSvc := NewAlertService(db.Alerts, nil)
 	svc.SetAlertService(alertSvc)
 	alert, err := alertSvc.CreateActionable(ctx, &models.Alert{ProjectID: project.ID, Type: "suggestion", Title: "Discord suggestion", Severity: models.SeverityInfo})
 	if err != nil {
@@ -232,21 +226,21 @@ func TestDiscordActionHandlersCoverAdvertisedRuntimeTools(t *testing.T) {
 	if err := projectRepo.Create(ctx, project); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
-	llmConfigRepo := teststores.Of(db).LLMConfigs
-	execRepo := teststores.Of(db).Executions
-	scheduleRepo := teststores.Of(db).Schedules
-	attachmentRepo := teststores.Of(db).Attachments
+	llmConfigRepo := db.LLMConfigs
+	execRepo := db.Executions
+	scheduleRepo := db.Schedules
+	attachmentRepo := db.Attachments
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, nil)
 	swarmSvc := NewSwarmService(taskSvc, taskRepo, execRepo, nil)
 	taskSvc.SetSwarmService(swarmSvc)
-	taskSvc.SetAgentRepo(teststores.Of(db).Agents)
+	taskSvc.SetAgentRepo(db.Agents)
 	svc.llmConfigRepo = llmConfigRepo
 	svc.execRepo = execRepo
 	svc.scheduleRepo = scheduleRepo
 	svc.taskSvc = taskSvc
-	svc.SetThreadInputRepo(teststores.Of(db).ThreadInputs)
-	svc.SetAgentRepo(teststores.Of(db).Agents)
-	svc.SetAlertService(NewAlertService(teststores.Of(db).Alerts, nil))
+	svc.SetThreadInputRepo(db.ThreadInputs)
+	svc.SetAgentRepo(db.Agents)
+	svc.SetAlertService(NewAlertService(db.Alerts, nil))
 
 	rt := svc.buildDiscordActionToolRuntime(project.ID, discordActionContext{ChannelID: "chan-1", ThreadID: "thread-1", MessageID: "msg-1", UserID: "user-1"}, nil)
 	if rt == nil {
@@ -308,12 +302,12 @@ func TestDiscordActionHandlersSendMessageUsesChannelRouter(t *testing.T) {
 	if err := projectRepo.Create(ctx, project); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
-	targetRepo := teststores.Of(db).ChannelTargets
-	settingsRepo := teststores.Of(db).Settings
+	targetRepo := db.ChannelTargets
+	settingsRepo := db.Settings
 	router := NewChannelMessageRouter(targetRepo, settingsRepo)
 	router.SetDiscordService(svc)
 	svc.SetChannelMessageRouter(router)
-	if err := targetRepo.(*sqlite.ChannelTargetRepo).Upsert(ctx, models.ChannelTarget{ID: "discord-target", ProjectID: project.ID, Platform: "discord", Name: "ops", TargetID: "chan-1", ThreadID: "thread-1"}); err != nil {
+	if err := db.Fixtures.SeedChannelTarget(ctx, models.ChannelTarget{ID: "discord-target", ProjectID: project.ID, Platform: "discord", Name: "ops", TargetID: "chan-1", ThreadID: "thread-1"}); err != nil {
 		t.Fatalf("save target: %v", err)
 	}
 	var gotChannelID, gotMessageID, gotText string
@@ -432,8 +426,8 @@ func TestDiscordHandleMessageCreateIgnoresUnmentionedGuildMessageEvenWithLegacyF
 func TestDiscordSendToTaskUsesConfiguredChannelTaskRunner(t *testing.T) {
 	svc, db, _, projectRepo, taskRepo, _, _ := newDiscordServiceForTest(t)
 	ctx := context.Background()
-	llmConfigRepo := teststores.Of(db).LLMConfigs
-	execRepo := teststores.Of(db).Executions
+	llmConfigRepo := db.LLMConfigs
+	execRepo := db.Executions
 	svc.llmConfigRepo = llmConfigRepo
 	svc.execRepo = execRepo
 
@@ -489,7 +483,7 @@ func TestDiscordFailedSwitchProjectPreservesPriorCacheAndInboundRouting(t *testi
 		t.Fatalf("create target project: %v", err)
 	}
 	userID := "user-failed-switch"
-	userProjectRepo := teststores.Of(db).DiscordUserProjects
+	userProjectRepo := db.DiscordUserProjects
 	svc.SetDiscordUserProjectRepo(userProjectRepo)
 	if err := userProjectRepo.SetUserProject(ctx, userID, defaultProject.ID); err != nil {
 		t.Fatalf("persist default project: %v", err)
@@ -503,18 +497,18 @@ func TestDiscordFailedSwitchProjectPreservesPriorCacheAndInboundRouting(t *testi
 	if err := settingsRepo.Set(ctx, DiscordSettingSendResponses, "true"); err != nil {
 		t.Fatalf("set responses: %v", err)
 	}
-	agentRepo := teststores.Of(db).LLMConfigs
+	agentRepo := db.LLMConfigs
 	agent := &models.LLMConfig{Name: "test", Provider: models.ProviderOpenAI, Model: "gpt-4o", APIKey: "key", IsDefault: true}
 	if err := agentRepo.Create(ctx, agent); err != nil {
 		t.Fatalf("create agent: %v", err)
 	}
-	execRepo := teststores.Of(db).Executions
-	scheduleRepo := teststores.Of(db).Schedules
+	execRepo := db.Executions
+	scheduleRepo := db.Schedules
 	svc.llmConfigRepo = agentRepo
 	svc.execRepo = execRepo
 	svc.scheduleRepo = scheduleRepo
-	svc.taskSvc = NewTaskService(taskRepo, teststores.Of(db).Attachments, nil)
-	svc.llmSvc = NewLLMService(agentRepo, execRepo, taskRepo, projectRepo, scheduleRepo, teststores.Of(db).Attachments)
+	svc.taskSvc = NewTaskService(taskRepo, db.Attachments, nil)
+	svc.llmSvc = NewLLMService(agentRepo, execRepo, taskRepo, projectRepo, scheduleRepo, db.Attachments)
 	svc.sendMessageFunc = func(channelID, messageID, text string) (string, error) { return "ack-1", nil }
 
 	// Load the durable selection into the live cache before forcing a failed switch.
@@ -564,7 +558,7 @@ func TestDiscordSetActiveProjectFailureDoesNotCreateCacheEntry(t *testing.T) {
 		t.Fatalf("create rejected project: %v", err)
 	}
 	const userID = "uncached-user"
-	userProjectRepo := teststores.Of(db).DiscordUserProjects
+	userProjectRepo := db.DiscordUserProjects
 	svc.SetDiscordUserProjectRepo(userProjectRepo)
 	if err := authRepo.Create(ctx, &models.DiscordAuthorizedUser{ProjectID: defaultProject.ID, DiscordUserID: userID, DisplayName: "Discord User", AddedBy: "test"}); err != nil {
 		t.Fatalf("authorize default project: %v", err)
@@ -572,18 +566,18 @@ func TestDiscordSetActiveProjectFailureDoesNotCreateCacheEntry(t *testing.T) {
 	if err := settingsRepo.Set(ctx, DiscordSettingSendResponses, "true"); err != nil {
 		t.Fatalf("set responses: %v", err)
 	}
-	agentRepo := teststores.Of(db).LLMConfigs
+	agentRepo := db.LLMConfigs
 	agent := &models.LLMConfig{Name: "test", Provider: models.ProviderOpenAI, Model: "gpt-4o", APIKey: "key", IsDefault: true}
 	if err := agentRepo.Create(ctx, agent); err != nil {
 		t.Fatalf("create agent: %v", err)
 	}
-	execRepo := teststores.Of(db).Executions
-	scheduleRepo := teststores.Of(db).Schedules
+	execRepo := db.Executions
+	scheduleRepo := db.Schedules
 	svc.llmConfigRepo = agentRepo
 	svc.execRepo = execRepo
 	svc.scheduleRepo = scheduleRepo
-	svc.taskSvc = NewTaskService(taskRepo, teststores.Of(db).Attachments, nil)
-	svc.llmSvc = NewLLMService(agentRepo, execRepo, taskRepo, projectRepo, scheduleRepo, teststores.Of(db).Attachments)
+	svc.taskSvc = NewTaskService(taskRepo, db.Attachments, nil)
+	svc.llmSvc = NewLLMService(agentRepo, execRepo, taskRepo, projectRepo, scheduleRepo, db.Attachments)
 	svc.sendMessageFunc = func(channelID, messageID, text string) (string, error) { return "ack-1", nil }
 
 	failedCtx, cancel := context.WithCancel(ctx)
@@ -614,7 +608,7 @@ func TestDiscordSwitchProjectPersistsForSubsequentMessages(t *testing.T) {
 	if err := projectRepo.Create(ctx, targetProject); err != nil {
 		t.Fatalf("create target project: %v", err)
 	}
-	userProjectRepo := teststores.Of(db).DiscordUserProjects
+	userProjectRepo := db.DiscordUserProjects
 	svc.SetDiscordUserProjectRepo(userProjectRepo)
 	if err := authRepo.Create(ctx, &models.DiscordAuthorizedUser{ProjectID: targetProject.ID, DiscordUserID: "1518288288572641398", DisplayName: "James", AddedBy: "test"}); err != nil {
 		t.Fatalf("authorize user: %v", err)
@@ -622,18 +616,18 @@ func TestDiscordSwitchProjectPersistsForSubsequentMessages(t *testing.T) {
 	if err := settingsRepo.Set(ctx, DiscordSettingSendResponses, "true"); err != nil {
 		t.Fatalf("set responses: %v", err)
 	}
-	agentRepo := teststores.Of(db).LLMConfigs
+	agentRepo := db.LLMConfigs
 	agent := &models.LLMConfig{Name: "test", Provider: models.ProviderOpenAI, Model: "gpt-4o", APIKey: "key", IsDefault: true}
 	if err := agentRepo.Create(ctx, agent); err != nil {
 		t.Fatalf("create agent: %v", err)
 	}
-	execRepo := teststores.Of(db).Executions
-	scheduleRepo := teststores.Of(db).Schedules
+	execRepo := db.Executions
+	scheduleRepo := db.Schedules
 	svc.llmConfigRepo = agentRepo
 	svc.execRepo = execRepo
 	svc.scheduleRepo = scheduleRepo
-	svc.taskSvc = NewTaskService(taskRepo, teststores.Of(db).Attachments, nil)
-	svc.llmSvc = NewLLMService(agentRepo, execRepo, taskRepo, projectRepo, scheduleRepo, teststores.Of(db).Attachments)
+	svc.taskSvc = NewTaskService(taskRepo, db.Attachments, nil)
+	svc.llmSvc = NewLLMService(agentRepo, execRepo, taskRepo, projectRepo, scheduleRepo, db.Attachments)
 	svc.sendMessageFunc = func(channelID, messageID, text string) (string, error) { return "ack-1", nil }
 
 	handlers := svc.discordActionHandlers(defaultProject.ID, discordActionContext{ChannelID: "chan-1", MessageID: "msg-1", UserID: "1518288288572641398"}, nil)
@@ -683,18 +677,18 @@ func TestDiscordProcessIncomingMessagePassesChannelRuntimeTools(t *testing.T) {
 	if err := settingsRepo.Set(ctx, DiscordSettingSendResponses, "true"); err != nil {
 		t.Fatalf("set responses: %v", err)
 	}
-	agentRepo := teststores.Of(db).LLMConfigs
+	agentRepo := db.LLMConfigs
 	agent := &models.LLMConfig{Name: "test", Provider: models.ProviderOpenAI, Model: "gpt-4o", APIKey: "key", IsDefault: true}
 	if err := agentRepo.Create(ctx, agent); err != nil {
 		t.Fatalf("create agent: %v", err)
 	}
-	execRepo := teststores.Of(db).Executions
-	scheduleRepo := teststores.Of(db).Schedules
+	execRepo := db.Executions
+	scheduleRepo := db.Schedules
 	svc.llmConfigRepo = agentRepo
 	svc.execRepo = execRepo
 	svc.scheduleRepo = scheduleRepo
-	svc.taskSvc = NewTaskService(taskRepo, teststores.Of(db).Attachments, nil)
-	svc.llmSvc = NewLLMService(agentRepo, execRepo, taskRepo, projectRepo, scheduleRepo, teststores.Of(db).Attachments)
+	svc.taskSvc = NewTaskService(taskRepo, db.Attachments, nil)
+	svc.llmSvc = NewLLMService(agentRepo, execRepo, taskRepo, projectRepo, scheduleRepo, db.Attachments)
 	svc.sendMessageFunc = func(channelID, messageID, text string) (string, error) { return "ack-1", nil }
 
 	var got ChannelChatRunRequest
@@ -732,7 +726,7 @@ func TestDiscordProcessIncomingMessageSwitchProjectViaRuntimeToolsPersists(t *te
 	if err := projectRepo.Create(ctx, project2); err != nil {
 		t.Fatalf("create project2: %v", err)
 	}
-	userProjectRepo := teststores.Of(db).DiscordUserProjects
+	userProjectRepo := db.DiscordUserProjects
 	svc.SetDiscordUserProjectRepo(userProjectRepo)
 	if err := authRepo.Create(ctx, &models.DiscordAuthorizedUser{ProjectID: project1.ID, DiscordUserID: "user-rt2", DisplayName: "RT2", AddedBy: "test"}); err != nil {
 		t.Fatalf("authorize user for project1: %v", err)
@@ -743,18 +737,18 @@ func TestDiscordProcessIncomingMessageSwitchProjectViaRuntimeToolsPersists(t *te
 	if err := settingsRepo.Set(ctx, DiscordSettingSendResponses, "true"); err != nil {
 		t.Fatalf("set responses: %v", err)
 	}
-	agentRepo := teststores.Of(db).LLMConfigs
+	agentRepo := db.LLMConfigs
 	agent := &models.LLMConfig{Name: "test", Provider: models.ProviderOpenAI, Model: "gpt-4o", APIKey: "key", IsDefault: true}
 	if err := agentRepo.Create(ctx, agent); err != nil {
 		t.Fatalf("create agent: %v", err)
 	}
-	execRepo := teststores.Of(db).Executions
-	scheduleRepo := teststores.Of(db).Schedules
+	execRepo := db.Executions
+	scheduleRepo := db.Schedules
 	svc.llmConfigRepo = agentRepo
 	svc.execRepo = execRepo
 	svc.scheduleRepo = scheduleRepo
-	svc.taskSvc = NewTaskService(taskRepo, teststores.Of(db).Attachments, nil)
-	svc.llmSvc = NewLLMService(agentRepo, execRepo, taskRepo, projectRepo, scheduleRepo, teststores.Of(db).Attachments)
+	svc.taskSvc = NewTaskService(taskRepo, db.Attachments, nil)
+	svc.llmSvc = NewLLMService(agentRepo, execRepo, taskRepo, projectRepo, scheduleRepo, db.Attachments)
 	svc.sendMessageFunc = func(channelID, messageID, text string) (string, error) { return "ack-1", nil }
 
 	var got ChannelChatRunRequest
@@ -810,18 +804,18 @@ func TestDiscordProcessIncomingMessagePassesReplyContextToSharedChatRunner(t *te
 	if err := settingsRepo.Set(ctx, DiscordSettingSendResponses, "true"); err != nil {
 		t.Fatalf("set responses: %v", err)
 	}
-	agentRepo := teststores.Of(db).LLMConfigs
+	agentRepo := db.LLMConfigs
 	agent := &models.LLMConfig{Name: "test", Provider: models.ProviderOpenAI, Model: "gpt-4o", APIKey: "key", IsDefault: true}
 	if err := agentRepo.Create(ctx, agent); err != nil {
 		t.Fatalf("create agent: %v", err)
 	}
-	execRepo := teststores.Of(db).Executions
-	scheduleRepo := teststores.Of(db).Schedules
+	execRepo := db.Executions
+	scheduleRepo := db.Schedules
 	svc.llmConfigRepo = agentRepo
 	svc.execRepo = execRepo
 	svc.scheduleRepo = scheduleRepo
-	svc.taskSvc = NewTaskService(taskRepo, teststores.Of(db).Attachments, nil)
-	svc.llmSvc = NewLLMService(agentRepo, execRepo, taskRepo, projectRepo, scheduleRepo, teststores.Of(db).Attachments)
+	svc.taskSvc = NewTaskService(taskRepo, db.Attachments, nil)
+	svc.llmSvc = NewLLMService(agentRepo, execRepo, taskRepo, projectRepo, scheduleRepo, db.Attachments)
 	svc.sendMessageFunc = func(channelID, messageID, text string) (string, error) { return "ack-1", nil }
 	var got ChannelChatRunRequest
 	svc.SetChannelChatRunner(func(_ context.Context, req ChannelChatRunRequest) {
@@ -864,7 +858,7 @@ func TestDiscordProcessIncomingMessageDownloadsPersistsAndPassesImageAttachment(
 	if err := settingsRepo.Set(ctx, DiscordSettingSendResponses, "true"); err != nil {
 		t.Fatalf("set responses: %v", err)
 	}
-	agentRepo := teststores.Of(db).LLMConfigs
+	agentRepo := db.LLMConfigs
 	defaultAgent := &models.LLMConfig{Name: "text-only", Provider: models.ProviderOpenAICompatible, AuthMethod: models.AuthMethodAPIKey, Model: "text-only", IsDefault: true}
 	if err := agentRepo.Create(ctx, defaultAgent); err != nil {
 		t.Fatalf("create default agent: %v", err)
@@ -873,10 +867,10 @@ func TestDiscordProcessIncomingMessageDownloadsPersistsAndPassesImageAttachment(
 	if err := agentRepo.Create(ctx, visionAgent); err != nil {
 		t.Fatalf("create vision agent: %v", err)
 	}
-	execRepo := teststores.Of(db).Executions
-	scheduleRepo := teststores.Of(db).Schedules
-	attachmentRepo := teststores.Of(db).Attachments
-	chatAttachmentRepo := teststores.Of(db).ChatAttachments
+	execRepo := db.Executions
+	scheduleRepo := db.Schedules
+	attachmentRepo := db.Attachments
+	chatAttachmentRepo := db.ChatAttachments
 	svc.llmConfigRepo = agentRepo
 	svc.execRepo = execRepo
 	svc.scheduleRepo = scheduleRepo
@@ -960,15 +954,15 @@ func TestDiscordProcessIncomingMessageKeepsDuplicateAttachmentFilenamesDistinct(
 	if err := settingsRepo.Set(ctx, DiscordSettingSendResponses, "true"); err != nil {
 		t.Fatalf("set responses: %v", err)
 	}
-	agentRepo := teststores.Of(db).LLMConfigs
+	agentRepo := db.LLMConfigs
 	agent := &models.LLMConfig{Name: "vision", Provider: models.ProviderOpenAI, Model: "gpt-4o", APIKey: "key", IsDefault: true}
 	if err := agentRepo.Create(ctx, agent); err != nil {
 		t.Fatalf("create agent: %v", err)
 	}
-	execRepo := teststores.Of(db).Executions
-	scheduleRepo := teststores.Of(db).Schedules
-	attachmentRepo := teststores.Of(db).Attachments
-	chatAttachmentRepo := teststores.Of(db).ChatAttachments
+	execRepo := db.Executions
+	scheduleRepo := db.Schedules
+	attachmentRepo := db.Attachments
+	chatAttachmentRepo := db.ChatAttachments
 	svc.llmConfigRepo = agentRepo
 	svc.execRepo = execRepo
 	svc.scheduleRepo = scheduleRepo
@@ -1031,20 +1025,20 @@ func TestDiscordProcessIncomingMessageFailsWhenAttachmentLinkFails(t *testing.T)
 	if err := settingsRepo.Set(ctx, DiscordSettingSendResponses, "true"); err != nil {
 		t.Fatalf("set responses: %v", err)
 	}
-	agentRepo := teststores.Of(db).LLMConfigs
+	agentRepo := db.LLMConfigs
 	agent := &models.LLMConfig{Name: "test", Provider: models.ProviderOpenAI, Model: "gpt-4o", APIKey: "key", IsDefault: true}
 	if err := agentRepo.Create(ctx, agent); err != nil {
 		t.Fatalf("create agent: %v", err)
 	}
-	execRepo := teststores.Of(db).Executions
-	scheduleRepo := teststores.Of(db).Schedules
-	attachmentRepo := teststores.Of(db).Attachments
+	execRepo := db.Executions
+	scheduleRepo := db.Schedules
+	attachmentRepo := db.Attachments
 	svc.llmConfigRepo = agentRepo
 	svc.execRepo = execRepo
 	svc.scheduleRepo = scheduleRepo
 	svc.taskSvc = NewTaskService(taskRepo, attachmentRepo, nil)
 	svc.llmSvc = NewLLMService(agentRepo, execRepo, taskRepo, projectRepo, scheduleRepo, attachmentRepo)
-	svc.SetChatAttachmentRepo(teststores.Of(teststores.NewDB(t)).ChatAttachments)
+	svc.SetChatAttachmentRepo(teststores.New(t).ChatAttachments)
 	svc.SetUploadsDir(t.TempDir())
 	var sentMessages []string
 	svc.sendMessageFunc = func(channelID, messageID, text string) (string, error) {
@@ -1086,10 +1080,11 @@ func TestDiscordProcessIncomingMessageFailsWhenAttachmentLinkFails(t *testing.T)
 	if strings.Contains(sentMessages[0], "FOREIGN KEY") || strings.Contains(sentMessages[0], "constraint failed") || strings.Contains(sentMessages[0], "note.txt") {
 		t.Fatalf("expected generic user-facing attachment warning, got %q", sentMessages[0])
 	}
-	var status, errorMessage string
-	if err := db.QueryRowContext(ctx, `SELECT status, error_message FROM executions ORDER BY started_at DESC, rowid DESC LIMIT 1`).Scan(&status, &errorMessage); err != nil {
-		t.Fatalf("get latest execution: %v", err)
+	latest, err := db.Fixtures.LatestExecution(ctx)
+	if err != nil || latest == nil {
+		t.Fatalf("get latest execution: %v, %v", latest, err)
 	}
+	status, errorMessage := string(latest.Status), latest.ErrorMessage
 	if status != string(models.ExecFailed) || !strings.Contains(errorMessage, "Failed to process attachment") {
 		t.Fatalf("expected failed execution for attachment link error, status=%q error=%q", status, errorMessage)
 	}
@@ -1129,15 +1124,15 @@ func TestDiscordProcessIncomingMessageUsesGenericDownloadError(t *testing.T) {
 	if err := settingsRepo.Set(ctx, DiscordSettingSendResponses, "true"); err != nil {
 		t.Fatalf("set responses: %v", err)
 	}
-	agentRepo := teststores.Of(db).LLMConfigs
+	agentRepo := db.LLMConfigs
 	agent := &models.LLMConfig{Name: "test", Provider: models.ProviderOpenAI, Model: "gpt-4o", APIKey: "key", IsDefault: true}
 	if err := agentRepo.Create(ctx, agent); err != nil {
 		t.Fatalf("create agent: %v", err)
 	}
-	execRepo := teststores.Of(db).Executions
-	scheduleRepo := teststores.Of(db).Schedules
-	attachmentRepo := teststores.Of(db).Attachments
-	chatAttachmentRepo := teststores.Of(db).ChatAttachments
+	execRepo := db.Executions
+	scheduleRepo := db.Schedules
+	attachmentRepo := db.Attachments
+	chatAttachmentRepo := db.ChatAttachments
 	svc.llmConfigRepo = agentRepo
 	svc.execRepo = execRepo
 	svc.scheduleRepo = scheduleRepo
@@ -1178,14 +1173,14 @@ func TestDiscordProcessIncomingMessageUsesGenericDownloadError(t *testing.T) {
 func TestDiscordLinkAttachmentsReturnsOnlySuccessfullyPersistedAttachments(t *testing.T) {
 	svc, db, _, projectRepo, taskRepo, _, _ := newDiscordServiceForTest(t)
 	ctx := context.Background()
-	svc.SetChatAttachmentRepo(teststores.Of(db).ChatAttachments)
+	svc.SetChatAttachmentRepo(db.ChatAttachments)
 	uploadRoot := t.TempDir()
 	svc.SetUploadsDir(uploadRoot)
 	project := &models.Project{Name: "Discord Link Attachments"}
 	if err := projectRepo.Create(ctx, project); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
-	agentRepo := teststores.Of(db).LLMConfigs
+	agentRepo := db.LLMConfigs
 	agent := &models.LLMConfig{Name: "test", Provider: models.ProviderOpenAI, Model: "gpt-4o", APIKey: "key", IsDefault: true}
 	if err := agentRepo.Create(ctx, agent); err != nil {
 		t.Fatalf("create agent: %v", err)
@@ -1194,7 +1189,7 @@ func TestDiscordLinkAttachmentsReturnsOnlySuccessfullyPersistedAttachments(t *te
 	if err := taskRepo.Create(ctx, task); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
-	execRepo := teststores.Of(db).Executions
+	execRepo := db.Executions
 	exec := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "attach"}
 	if err := execRepo.Create(ctx, exec); err != nil {
 		t.Fatalf("create execution: %v", err)
@@ -1263,7 +1258,7 @@ func TestDiscordLinkAttachmentsFailsWhenAttachmentRepoMissing(t *testing.T) {
 func TestDiscordLinkAttachmentsCleansUpSourceWhenExecDirCreateFails(t *testing.T) {
 	svc, _, _, _, _, _, _ := newDiscordServiceForTest(t)
 	ctx := context.Background()
-	svc.SetChatAttachmentRepo(teststores.Of(teststores.NewDB(t)).ChatAttachments)
+	svc.SetChatAttachmentRepo(teststores.New(t).ChatAttachments)
 	uploadRootFile := filepath.Join(t.TempDir(), "uploads-file")
 	if err := os.WriteFile(uploadRootFile, []byte("not a directory"), 0644); err != nil {
 		t.Fatalf("write upload root file: %v", err)
@@ -1297,7 +1292,7 @@ func TestDiscordLinkAttachmentsCleansUpSourceWhenExecDirCreateFails(t *testing.T
 func TestDiscordLinkAttachmentsCleansUpMovedFileWhenPersistFails(t *testing.T) {
 	svc, _, _, _, _, _, _ := newDiscordServiceForTest(t)
 	ctx := context.Background()
-	svc.SetChatAttachmentRepo(teststores.Of(teststores.NewDB(t)).ChatAttachments)
+	svc.SetChatAttachmentRepo(teststores.New(t).ChatAttachments)
 	uploadRoot := t.TempDir()
 	svc.SetUploadsDir(uploadRoot)
 
@@ -1388,7 +1383,7 @@ func TestDiscordQueueChatInputSelectsVisionAgentFromDownloadedAttachment(t *test
 	if err := projectRepo.Create(ctx, project); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
-	agentRepo := teststores.Of(db).LLMConfigs
+	agentRepo := db.LLMConfigs
 	defaultAgent := &models.LLMConfig{Name: "text-only", Provider: models.ProviderOpenAICompatible, AuthMethod: models.AuthMethodAPIKey, Model: "text-only", IsDefault: true}
 	if err := agentRepo.Create(ctx, defaultAgent); err != nil {
 		t.Fatalf("create default agent: %v", err)
@@ -1399,7 +1394,7 @@ func TestDiscordQueueChatInputSelectsVisionAgentFromDownloadedAttachment(t *test
 	}
 	svc.llmConfigRepo = agentRepo
 	svc.SetUploadsDir(t.TempDir())
-	threadInputRepo := teststores.Of(db).ThreadInputs
+	threadInputRepo := db.ThreadInputs
 	svc.SetThreadInputRepo(threadInputRepo)
 
 	activeTask := &models.Task{ProjectID: project.ID, Title: "Active chat", Prompt: "active", Status: models.StatusRunning, Category: models.CategoryChat, AgentID: &defaultAgent.ID, CreatedVia: models.TaskOriginDiscord}
@@ -1407,7 +1402,7 @@ func TestDiscordQueueChatInputSelectsVisionAgentFromDownloadedAttachment(t *test
 		t.Fatalf("create active chat task: %v", err)
 	}
 	activeExec := &models.Execution{TaskID: activeTask.ID, AgentConfigID: defaultAgent.ID, Status: models.ExecRunning, PromptSent: "active"}
-	if err := teststores.Of(db).Executions.Create(ctx, activeExec); err != nil {
+	if err := db.Executions.Create(ctx, activeExec); err != nil {
 		t.Fatalf("create active execution: %v", err)
 	}
 
@@ -1470,7 +1465,7 @@ func TestDiscordQueueChatInputSelectsVisionAgentFromDownloadedAttachment(t *test
 func TestDiscordQueueChatInputCleansPendingAttachmentsWhenQueueInsertFails(t *testing.T) {
 	svc, db, _, _, _, _, _ := newDiscordServiceForTest(t)
 	ctx := context.Background()
-	agentRepo := teststores.Of(db).LLMConfigs
+	agentRepo := db.LLMConfigs
 	agent := &models.LLMConfig{Name: "test", Provider: models.ProviderOpenAI, Model: "gpt-4o", APIKey: "key", IsDefault: true}
 	if err := agentRepo.Create(ctx, agent); err != nil {
 		t.Fatalf("create agent: %v", err)
@@ -1478,8 +1473,8 @@ func TestDiscordQueueChatInputCleansPendingAttachmentsWhenQueueInsertFails(t *te
 	svc.llmConfigRepo = agentRepo
 	uploadRoot := t.TempDir()
 	svc.SetUploadsDir(uploadRoot)
-	queueDB := teststores.NewDB(t)
-	svc.SetThreadInputRepo(teststores.Of(queueDB).ThreadInputs)
+	queueDB := teststores.New(t)
+	svc.SetThreadInputRepo(queueDB.ThreadInputs)
 	if err := queueDB.Close(); err != nil {
 		t.Fatalf("close queue db: %v", err)
 	}
@@ -1535,15 +1530,15 @@ func TestDiscordQueueChatInputUsesGenericDownloadError(t *testing.T) {
 	if err := projectRepo.Create(ctx, project); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
-	agentRepo := teststores.Of(db).LLMConfigs
+	agentRepo := db.LLMConfigs
 	agent := &models.LLMConfig{Name: "test", Provider: models.ProviderOpenAI, Model: "gpt-4o", APIKey: "key", IsDefault: true}
 	if err := agentRepo.Create(ctx, agent); err != nil {
 		t.Fatalf("create agent: %v", err)
 	}
-	execRepo := teststores.Of(db).Executions
+	execRepo := db.Executions
 	svc.llmConfigRepo = agentRepo
 	svc.execRepo = execRepo
-	svc.SetThreadInputRepo(teststores.Of(db).ThreadInputs)
+	svc.SetThreadInputRepo(db.ThreadInputs)
 	svc.SetChatBroadcaster(events.NewChatBroadcaster())
 	sub, err := svc.chatBroadcaster.Subscribe()
 	if err != nil {
@@ -1605,15 +1600,15 @@ func TestDiscordQueueChatInputRecordsFailedMessageWhenAttachmentStagingFails(t *
 	if err := projectRepo.Create(ctx, project); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
-	agentRepo := teststores.Of(db).LLMConfigs
+	agentRepo := db.LLMConfigs
 	agent := &models.LLMConfig{Name: "test", Provider: models.ProviderOpenAI, Model: "gpt-4o", APIKey: "key", IsDefault: true}
 	if err := agentRepo.Create(ctx, agent); err != nil {
 		t.Fatalf("create agent: %v", err)
 	}
-	execRepo := teststores.Of(db).Executions
+	execRepo := db.Executions
 	svc.llmConfigRepo = agentRepo
 	svc.execRepo = execRepo
-	svc.SetThreadInputRepo(teststores.Of(db).ThreadInputs)
+	svc.SetThreadInputRepo(db.ThreadInputs)
 	uploadRootFile := filepath.Join(t.TempDir(), "uploads-file")
 	if err := os.WriteFile(uploadRootFile, []byte("not a directory"), 0644); err != nil {
 		t.Fatalf("write upload root file: %v", err)
@@ -2099,5 +2094,16 @@ func TestDiscordServiceEditOrSendAndLifecycleHelpers(t *testing.T) {
 	}
 	if len(sent) != 1 || sent[0] != "chan|reply|body" {
 		t.Fatalf("expected fallback send through injected sender, got %#v", sent)
+	}
+}
+
+func seedDiscordAuthUsers(tb testing.TB, env *teststores.Env, projectID string, count int) {
+	tb.Helper()
+	users := make([]models.DiscordAuthorizedUser, count)
+	for i := range users {
+		users[i] = models.DiscordAuthorizedUser{ProjectID: projectID, DiscordUserID: fmt.Sprintf("151828828857_%06d", i), DisplayName: "Benchmark User", AddedBy: "test"}
+	}
+	if err := env.Fixtures.SeedDiscordAuthorizedUsers(context.Background(), users); err != nil {
+		tb.Fatal(err)
 	}
 }

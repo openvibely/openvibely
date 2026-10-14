@@ -3,7 +3,6 @@ package service
 import (
 	"bufio"
 	"context"
-	"database/sql"
 	"encoding/json"
 	"os"
 	"os/exec"
@@ -15,7 +14,6 @@ import (
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
-	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/testutil/teststores"
 )
 
@@ -141,11 +139,11 @@ func TestParseNumstatLinesNULDelimitedPathsAndRenameCopyRecords(t *testing.T) {
 
 func TestCollectProducedCommitStatRoundTripsGitSpecialPaths(t *testing.T) {
 	ctx := context.Background()
-	db := teststores.NewDB(t)
-	projectRepo := teststores.Of(db).Projects
-	taskRepo := teststores.Of(db).Tasks
-	execRepo := teststores.Of(db).Executions
-	statRepo := teststores.Of(db).TaskCommitStats
+	env := teststores.New(t)
+	projectRepo := env.Projects
+	taskRepo := env.Tasks
+	execRepo := env.Executions
+	statRepo := env.TaskCommitStats
 
 	repoDir := createTestGitRepo(t)
 	project := &models.Project{Name: "Special Commit Paths", RepoPath: repoDir}
@@ -181,7 +179,7 @@ func TestCollectProducedCommitStatRoundTripsGitSpecialPaths(t *testing.T) {
 	if err := llmSvc.CommitTaskWorktreeChanges(ctx, task, execModel, repoDir, "Add special path files"); err != nil {
 		t.Fatalf("CommitTaskWorktreeChanges: %v", err)
 	}
-	stats, err := statRepo.(*sqlite.TaskCommitStatRepo).ListProducedCommitStats(ctx, project.ID, time.Now().UTC().Add(-time.Minute))
+	stats, err := env.Fixtures.ProducedCommitStats(ctx, project.ID, time.Now().UTC().Add(-time.Minute))
 	if err != nil {
 		t.Fatalf("list stats: %v", err)
 	}
@@ -206,7 +204,7 @@ func TestCollectProducedCommitStatRoundTripsGitSpecialPaths(t *testing.T) {
 	if stats[0].FilesChanged != len(wantPaths) {
 		t.Fatalf("files changed = %d, want %d", stats[0].FilesChanged, len(wantPaths))
 	}
-	upcomingSvc := NewUpcomingService(teststores.Of(db).Upcoming)
+	upcomingSvc := NewUpcomingService(env.Upcoming)
 	upcomingSvc.SetTaskCommitStatRepo(statRepo)
 	projectChanges, _, err := upcomingSvc.buildProjectChangesFromTaskCommitStats(ctx, project.ID, time.Now().UTC().Add(-time.Minute))
 	if err != nil {
@@ -280,11 +278,11 @@ func TestCollectProducedCommitStatPreservesSpecialRenameAndCopyRecords(t *testin
 
 func TestCommitTaskWorktreeChangesRecordsProducedCommitStat(t *testing.T) {
 	ctx := context.Background()
-	db := teststores.NewDB(t)
-	projectRepo := teststores.Of(db).Projects
-	taskRepo := teststores.Of(db).Tasks
-	execRepo := teststores.Of(db).Executions
-	statRepo := teststores.Of(db).TaskCommitStats
+	env := teststores.New(t)
+	projectRepo := env.Projects
+	taskRepo := env.Tasks
+	execRepo := env.Executions
+	statRepo := env.TaskCommitStats
 
 	repoDir := createTestGitRepo(t)
 	project := &models.Project{Name: "Commit Stats", RepoPath: repoDir}
@@ -310,7 +308,7 @@ func TestCommitTaskWorktreeChangesRecordsProducedCommitStat(t *testing.T) {
 		t.Fatalf("CommitTaskWorktreeChanges: %v", err)
 	}
 
-	stats, err := statRepo.(*sqlite.TaskCommitStatRepo).ListProducedCommitStats(ctx, project.ID, completedAt.Add(-time.Minute))
+	stats, err := env.Fixtures.ProducedCommitStats(ctx, project.ID, completedAt.Add(-time.Minute))
 	if err != nil {
 		t.Fatalf("list stats: %v", err)
 	}
@@ -334,11 +332,11 @@ func TestCommitTaskWorktreeChangesRecordsProducedCommitStat(t *testing.T) {
 
 func TestHandlePostExecutionRecordsProducedCommitStat(t *testing.T) {
 	ctx := context.Background()
-	db := teststores.NewDB(t)
-	projectRepo := teststores.Of(db).Projects
-	taskRepo := teststores.Of(db).Tasks
-	execRepo := teststores.Of(db).Executions
-	statRepo := teststores.Of(db).TaskCommitStats
+	env := teststores.New(t)
+	projectRepo := env.Projects
+	taskRepo := env.Tasks
+	execRepo := env.Executions
+	statRepo := env.TaskCommitStats
 
 	repoDir := createTestGitRepo(t)
 	project := &models.Project{Name: "Post Execution Stats", RepoPath: repoDir}
@@ -367,11 +365,11 @@ func TestHandlePostExecutionRecordsProducedCommitStat(t *testing.T) {
 		t.Fatalf("write file: %v", err)
 	}
 	llmSvc := &LLMService{execRepo: execRepo, taskCommitStatRepo: statRepo}
-	worktreeSvc := NewWorktreeService(taskRepo, projectRepo, teststores.Of(db).Settings)
+	worktreeSvc := NewWorktreeService(taskRepo, projectRepo, env.Settings)
 	worktreeSvc.SetLLMService(llmSvc)
 	worktreeSvc.HandlePostExecution(ctx, task, execModel, repoDir)
 
-	stats, err := statRepo.(*sqlite.TaskCommitStatRepo).ListProducedCommitStats(ctx, project.ID, completedAt.Add(-time.Minute))
+	stats, err := env.Fixtures.ProducedCommitStats(ctx, project.ID, completedAt.Add(-time.Minute))
 	if err != nil {
 		t.Fatalf("list stats: %v", err)
 	}
@@ -388,10 +386,10 @@ func TestHandlePostExecutionRecordsProducedCommitStat(t *testing.T) {
 
 func TestMergeBranchRecordsAppCreatedMergeCommitStat(t *testing.T) {
 	ctx := context.Background()
-	db := teststores.NewDB(t)
-	projectRepo := teststores.Of(db).Projects
-	taskRepo := teststores.Of(db).Tasks
-	statRepo := teststores.Of(db).TaskCommitStats
+	env := teststores.New(t)
+	projectRepo := env.Projects
+	taskRepo := env.Tasks
+	statRepo := env.TaskCommitStats
 
 	repoDir := createTestGitRepo(t)
 	project := &models.Project{Name: "Merge Commit Stats", RepoPath: repoDir}
@@ -412,7 +410,7 @@ func TestMergeBranchRecordsAppCreatedMergeCommitStat(t *testing.T) {
 		t.Fatalf("create task: %v", err)
 	}
 	llmSvc := &LLMService{taskCommitStatRepo: statRepo}
-	worktreeSvc := NewWorktreeService(taskRepo, projectRepo, teststores.Of(db).Settings)
+	worktreeSvc := NewWorktreeService(taskRepo, projectRepo, env.Settings)
 	worktreeSvc.SetLLMService(llmSvc)
 
 	result, err := worktreeSvc.MergeBranch(ctx, task, repoDir, "merge")
@@ -422,7 +420,7 @@ func TestMergeBranchRecordsAppCreatedMergeCommitStat(t *testing.T) {
 	if result == nil || !result.Success || result.MergeCommit == "" {
 		t.Fatalf("merge result = %#v, want success with merge commit", result)
 	}
-	stats, err := statRepo.(*sqlite.TaskCommitStatRepo).ListProducedCommitStats(ctx, project.ID, time.Now().UTC().Add(-time.Minute))
+	stats, err := env.Fixtures.ProducedCommitStats(ctx, project.ID, time.Now().UTC().Add(-time.Minute))
 	if err != nil {
 		t.Fatalf("list stats: %v", err)
 	}
@@ -476,10 +474,10 @@ func TestTaskCommitStatUpsertDoesNotDoubleCountDuplicateCommit(t *testing.T) {
 
 func TestTaskCommitStatsCascadeOnTaskDelete(t *testing.T) {
 	ctx := context.Background()
-	db := teststores.NewDB(t)
-	projectRepo := teststores.Of(db).Projects
-	taskRepo := teststores.Of(db).Tasks
-	statRepo := teststores.Of(db).TaskCommitStats
+	env := teststores.New(t)
+	projectRepo := env.Projects
+	taskRepo := env.Tasks
+	statRepo := env.TaskCommitStats
 
 	project := &models.Project{Name: "Task Cascade"}
 	if err := projectRepo.Create(ctx, project); err != nil {
@@ -493,15 +491,15 @@ func TestTaskCommitStatsCascadeOnTaskDelete(t *testing.T) {
 	if err := taskRepo.Delete(ctx, task.ID); err != nil {
 		t.Fatalf("delete task: %v", err)
 	}
-	assertTaskCommitStatCount(t, db, 0)
+	assertTaskCommitStatCount(t, env, 0)
 }
 
 func TestTaskCommitStatsCascadeOnProjectDelete(t *testing.T) {
 	ctx := context.Background()
-	db := teststores.NewDB(t)
-	projectRepo := teststores.Of(db).Projects
-	taskRepo := teststores.Of(db).Tasks
-	statRepo := teststores.Of(db).TaskCommitStats
+	env := teststores.New(t)
+	projectRepo := env.Projects
+	taskRepo := env.Tasks
+	statRepo := env.TaskCommitStats
 
 	project := &models.Project{Name: "Project Cascade"}
 	if err := projectRepo.Create(ctx, project); err != nil {
@@ -512,10 +510,10 @@ func TestTaskCommitStatsCascadeOnProjectDelete(t *testing.T) {
 		t.Fatalf("create task: %v", err)
 	}
 	insertTaskCommitStat(t, ctx, statRepo, project.ID, task.ID)
-	if err := projectRepo.(*sqlite.ProjectRepo).Delete(ctx, project.ID); err != nil {
+	if _, _, err := projectRepo.DeleteWithCleanupManifest(ctx, project.ID, nil); err != nil {
 		t.Fatalf("delete project: %v", err)
 	}
-	assertTaskCommitStatCount(t, db, 0)
+	assertTaskCommitStatCount(t, env, 0)
 }
 
 func insertTaskCommitStat(t *testing.T, ctx context.Context, statRepo persistence.TaskCommitStatStore, projectID, taskID string) {
@@ -530,12 +528,10 @@ func insertTaskCommitStat(t *testing.T, ctx context.Context, statRepo persistenc
 	}
 }
 
-func assertTaskCommitStatCount(t *testing.T, db interface {
-	QueryRowContext(context.Context, string, ...any) *sql.Row
-}, want int) {
+func assertTaskCommitStatCount(t *testing.T, env *teststores.Env, want int) {
 	t.Helper()
-	var count int
-	if err := db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM task_commit_stats`).Scan(&count); err != nil {
+	count, err := env.Fixtures.CountProducedCommitStats(context.Background())
+	if err != nil {
 		t.Fatalf("count stats: %v", err)
 	}
 	if count != want {

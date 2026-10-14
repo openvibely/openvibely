@@ -5,6 +5,7 @@ package teststores
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"os"
 	"strings"
 	"testing"
@@ -44,11 +45,16 @@ func NewDB(tb testing.TB) *sql.DB {
 }
 
 type options struct {
-	countIO     bool
-	broadcaster *events.Broadcaster
+	productionTopology bool
+	countIO            bool
+	broadcaster        *events.Broadcaster
 }
 
 type Option func(*options)
+
+// WithProductionTopology uses isolated durable storage and the backend's normal
+// reader/writer routing, for contention and I/O performance tests.
+func WithProductionTopology() Option { return func(o *options) { o.productionTopology = true } }
 
 // WithIOCounting instruments real backend requests and data read by the driver.
 func WithIOCounting() Option {
@@ -77,10 +83,14 @@ func Of(db *sql.DB, opts ...Option) persistence.Stores {
 
 // Env is a fresh test database and the stores built on it.
 type Env struct {
-	IO       storefixture.IOCounter
-	Fixtures storefixture.Fixtures
+	closeBackend func() error
+	IO           storefixture.IOCounter
+	Fixtures     storefixture.Fixtures
 	persistence.Stores
 }
+
+// Close makes the backend unavailable for failure-path tests without exposing handles.
+func (e *Env) Close() error { return e.closeBackend() }
 
 // New opens a fresh database for the selected backend and builds its stores.
 func New(tb testing.TB, opts ...Option) *Env {
@@ -93,14 +103,21 @@ func New(tb testing.TB, opts ...Option) *Env {
 	case config.DatabaseDriverSQLite:
 		var db *sql.DB
 		var counter storefixture.IOCounter
-		if o.countIO {
+		if o.productionTopology {
+			reader, writer, sqliteCounter := testutil.NewFileBackedSplitStatementCountingTestDB(tb)
+			tb.Cleanup(sqlite.RegisterDedicatedWriter(reader, writer))
+			if o.countIO {
+				counter = sqlitefixtures.NewIOCounter(sqliteCounter)
+			}
+			return &Env{closeBackend: func() error { return errors.Join(reader.Close(), writer.Close()) }, Fixtures: sqlitefixtures.New(writer), Stores: sqlite.NewStores(reader, o.broadcaster), IO: counter}
+		} else if o.countIO {
 			var sqliteCounter *testutil.SQLStatementCounter
 			db, sqliteCounter = testutil.NewStatementCountingTestDB(tb)
 			counter = sqlitefixtures.NewIOCounter(sqliteCounter)
 		} else {
 			db = testutil.NewTestDB(tb)
 		}
-		return &Env{Fixtures: sqlitefixtures.New(db), Stores: sqlite.NewStores(db, o.broadcaster), IO: counter}
+		return &Env{closeBackend: db.Close, Fixtures: sqlitefixtures.New(db), Stores: sqlite.NewStores(db, o.broadcaster), IO: counter}
 	default:
 		tb.Fatalf("unsupported %s %q (supported: %s)", DriverEnv, driver, config.DatabaseDriverSQLite)
 		return nil

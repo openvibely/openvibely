@@ -13,7 +13,17 @@ import (
 )
 
 func TestFixturesShareStoreStateWithoutApplyingTransitions(t *testing.T) {
-	env := teststores.New(t)
+	for _, tc := range []struct {
+		name    string
+		options []teststores.Option
+	}{
+		{name: "isolated"}, {name: "production", options: []teststores.Option{teststores.WithProductionTopology()}},
+	} {
+		t.Run(tc.name, func(t *testing.T) { testFixtureSharing(t, tc.options...) })
+	}
+}
+func testFixtureSharing(t *testing.T, options ...teststores.Option) {
+	env := teststores.New(t, options...)
 	ctx := context.Background()
 	task := models.Task{ProjectID: "default", Title: "Fixture state", Category: models.CategoryBacklog, Status: models.StatusPending}
 	if err := env.Tasks.Create(ctx, &task); err != nil {
@@ -54,7 +64,7 @@ func TestFixturesShareStoreStateWithoutApplyingTransitions(t *testing.T) {
 	if err != nil || count != 0 {
 		t.Fatalf("automation count: %d, %v", count, err)
 	}
-	other := teststores.New(t)
+	other := teststores.New(t, options...)
 	absent, err := other.Tasks.GetByID(ctx, task.ID)
 	if err != nil || absent != nil {
 		t.Fatalf("test databases are not isolated: %v, %v", absent, err)

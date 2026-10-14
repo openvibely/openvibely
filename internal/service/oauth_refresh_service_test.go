@@ -9,7 +9,6 @@ import (
 
 	llmoauth "github.com/openvibely/openvibely/internal/llm/oauth"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/testutil/teststores"
 )
 
@@ -217,8 +216,8 @@ func TestOAuthRefreshServiceRunOnceLinksExpiredOpenAIJWTWithMatchingIdentity(t *
 }
 
 func TestOAuthRefreshServiceRunOnceUsesPersistedVerifiedOpenAIPrincipalAfterKeyRetirement(t *testing.T) {
-	db := teststores.NewDB(t)
-	repo := teststores.Of(db).LLMConfigs
+	env := teststores.New(t)
+	repo := env.LLMConfigs
 	ctx := context.Background()
 	healthy := &models.LLMConfig{Name: "Current Codex", Provider: models.ProviderOpenAI, Model: "codex-current", AuthMethod: models.AuthMethodOAuth, OAuthAccessToken: "current-token", OAuthRefreshToken: "current-refresh", OAuthExpiresAt: time.Now().Add(3 * time.Hour).UnixMilli()}
 	stale := &models.LLMConfig{Name: "Old Codex", Provider: models.ProviderOpenAI, Model: "codex-old", AuthMethod: models.AuthMethodOAuth, OAuthAccessToken: "retired-key-token", OAuthRefreshToken: "old-refresh", OAuthNeedsReauth: true}
@@ -227,8 +226,10 @@ func TestOAuthRefreshServiceRunOnceUsesPersistedVerifiedOpenAIPrincipalAfterKeyR
 			t.Fatal(err)
 		}
 	}
-	if _, err := db.Exec(`UPDATE oauth_connections SET oauth_principal_hash = 'persisted-verified-principal', oauth_principal_verified = 1 WHERE id IN (?, ?)`, healthy.OAuthConnectionID, stale.OAuthConnectionID); err != nil {
-		t.Fatal(err)
+	for _, cfg := range []*models.LLMConfig{healthy, stale} {
+		if err := env.Fixtures.SetVerifiedOAuthPrincipal(ctx, cfg.OAuthConnectionID, "persisted-verified-principal"); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	worker := NewOAuthRefreshService(repo, llmoauth.NewManager(repo))
@@ -302,8 +303,8 @@ func TestOAuthRefreshServiceRunOnceRefreshesEachExpiringConfigIndependently(t *t
 func TestOAuthRefreshServiceRunOnceRefreshesSharedConnectionOnce(t *testing.T) {
 	for _, provider := range []models.LLMProvider{models.ProviderOpenAI, models.ProviderAnthropic} {
 		t.Run(string(provider), func(t *testing.T) {
-			db := teststores.NewDB(t)
-			repo := teststores.Of(db).LLMConfigs
+			env := teststores.New(t)
+			repo := env.LLMConfigs
 			ctx := context.Background()
 			expiresSoon := time.Now().Add(5 * time.Minute).UnixMilli()
 			first := &models.LLMConfig{Name: "Shared first", Provider: provider, Model: "model-one", AuthMethod: models.AuthMethodOAuth, OAuthAccessToken: "shared-old", OAuthRefreshToken: "shared-refresh", OAuthExpiresAt: expiresSoon}
@@ -314,7 +315,7 @@ func TestOAuthRefreshServiceRunOnceRefreshesSharedConnectionOnce(t *testing.T) {
 					t.Fatalf("create %s: %v", cfg.Name, err)
 				}
 			}
-			if err := repo.(*sqlite.LLMConfigRepo).LinkOAuthConnection(ctx, second.ID, first.OAuthConnectionID); err != nil {
+			if err := env.Fixtures.LinkModelOAuthConnection(ctx, second.ID, first.OAuthConnectionID); err != nil {
 				t.Fatalf("link shared connection: %v", err)
 			}
 
