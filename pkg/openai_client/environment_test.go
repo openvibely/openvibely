@@ -21,7 +21,7 @@ func TestEnvironmentOnResponsesAndCompletionsWire(t *testing.T) {
 		t.Fatal(items)
 	}
 	wire, _ := json.Marshal(map[string]any{"input": items})
-	if !strings.Contains(string(wire), "Shell executable:") || !strings.Contains(string(wire), dir) {
+	if !strings.Contains(string(wire), "Shell:") || strings.Contains(string(wire), "Shell executable:") || !strings.Contains(string(wire), dir) {
 		t.Fatal(string(wire))
 	}
 	compacted := ensureExecutionEnvironment([]any{map[string]any{"type": "compaction", "encrypted_content": "opaque"}}, dir)

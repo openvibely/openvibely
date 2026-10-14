@@ -19,7 +19,7 @@ func Definitions() []Definition {
 	for i := range out {
 		if out[i].Name == "shell" {
 			if shell, err := executionenv.Resolve(); err == nil {
-				out[i].Description += " Selected shell: " + shell.Name + ". " + shell.Instruction()
+				out[i].Description += " Selected shell: " + shell.DisplayName() + ". " + shell.Instruction()
 			} else {
 				out[i].Description += " Shell unavailable: " + err.Error()
 			}
