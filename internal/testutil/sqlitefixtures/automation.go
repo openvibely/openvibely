@@ -124,7 +124,7 @@ func (f *fixtures) SeedAutomationActivity(ctx context.Context, a models.Automati
 		return err
 	}
 	defer tx.Rollback()
-	_, err = tx.ExecContext(ctx, `INSERT INTO automation_activities(id,project_id,automation_id,version_id,node_id,invocation_id,work_item_id,activity_key,activity_type,status) VALUES(?,?,?,?,?,NULLIF(?, ''),NULLIF(?, ''),?,?,?)`, a.ID, a.ProjectID, a.AutomationID, a.VersionID, a.NodeID, a.InvocationID, a.WorkItemID, a.ActivityKey, a.ActivityType, a.Status)
+	_, err = tx.ExecContext(ctx, `INSERT INTO automation_activities(id,project_id,automation_id,version_id,node_id,invocation_id,work_item_id,activity_key,activity_type,status,started_at,completed_at,error_message) VALUES(?,?,?,?,?,NULLIF(?, ''),NULLIF(?, ''),?,?,?,COALESCE(?,CURRENT_TIMESTAMP),?,?)`, a.ID, a.ProjectID, a.AutomationID, a.VersionID, a.NodeID, a.InvocationID, a.WorkItemID, a.ActivityKey, a.ActivityType, a.Status, optionalActivityStart(a.StartedAt), a.CompletedAt, a.ErrorMessage)
 	if err != nil {
 		return err
 	}
@@ -386,4 +386,11 @@ func (f *fixtures) CountTaskAutomationReservations(ctx context.Context, ids []st
 	var n int
 	err := f.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM automation_task_run_reservations WHERE task_id IN (`+strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")+`)`, args...).Scan(&n)
 	return n, err
+}
+
+func optionalActivityStart(at time.Time) any {
+	if at.IsZero() {
+		return nil
+	}
+	return at.UTC().Format("2006-01-02 15:04:05")
 }

@@ -61,7 +61,28 @@ type PendingTask struct {
 	ID, ProjectID, Title, Prompt string
 	Category                     models.TaskCategory
 }
+
+// Projection matches describe domain identities and state; empty fields leave that identity unconstrained.
+type ActivityMatch struct {
+	ProjectID, AutomationID, VersionID, ID, Key, Type, Status, WorkItemID string
+	HasWorkItem                                                           bool
+}
+type WorkItemMatch struct{ ProjectID, AutomationID, VersionID, ID, Key, Kind, Status string }
+type PositionMatch struct{ ProjectID, AutomationID, VersionID, WorkItemID, NodeID, NodeKey, State, WorkItemKey string }
+type TransitionMatch struct{ ProjectID, AutomationID, VersionID, WorkItemID, EdgeKey, State string }
+
 type Fixtures interface {
+	AutomationActivityResources(context.Context, ActivityMatch) ([]models.AutomationActivityResource, error)
+
+	CountMatchingActivities(context.Context, ActivityMatch) (int, error)
+	CountMatchingWorkItems(context.Context, WorkItemMatch) (int, error)
+	CountMatchingPositions(context.Context, PositionMatch) (int, error)
+	CountMatchingTransitions(context.Context, TransitionMatch) (int, error)
+	AutomationActivityStatus(context.Context, string) (models.AutomationActivityStatus, error)
+	SeedAutomationPosition(context.Context, models.AutomationWorkItemPosition) error
+	SeedAutomationWorkItem(context.Context, models.AutomationWorkItem) error
+	SetLiveAutomationActivity(context.Context, string, string) error
+
 	SeedAutomationTriggerOwnership(context.Context, models.AutomationNode, string, string) error
 	AutomationDispatchOrder(context.Context, []string) ([]string, error)
 	CountTaskAutomationReservations(context.Context, []string) (int, error)

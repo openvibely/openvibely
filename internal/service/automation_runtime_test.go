@@ -1933,7 +1933,7 @@ func TestAutomationRuntimeReconcilerResubmitsAcknowledgedPreparedExecution(t *te
 
 func TestAutomationRuntimeReconcilesTerminalExecutionProjectionAfterCrash(t *testing.T) {
 	automationobs.ResetForTest()
-	fixture := newAutomationRuntimeFixture(t, AutomationAdapterNativeSDLC)
+	fixture := newAutomationRuntimeStoreFixture(t, AutomationAdapterNativeSDLC)
 	ctx := context.Background()
 	inbox := automationNodeByKey(t, fixture.definition, "inbox")
 	implementation := automationNodeByKey(t, fixture.definition, "implementation")
@@ -1967,29 +1967,38 @@ func TestAutomationRuntimeReconcilesTerminalExecutionProjectionAfterCrash(t *tes
 	status := fixture.workItemStatus(t, item.ID)
 	require.Equal(t, "completed", status)
 	var activityStatus string
-	require.NoError(t, fixture.db.QueryRow(`SELECT status FROM automation_activities WHERE activity_key = ?`, "execution:"+execution.ID+":run").Scan(&activityStatus))
+	{
+		state, err := fixture.stores.Fixtures.AutomationActivityStatus(ctx, "execution:"+execution.ID+":run")
+		require.NoError(t, err)
+		activityStatus = string(state)
+	}
 	require.Equal(t, "completed", activityStatus)
 	var externalStatus string
-	require.NoError(t, fixture.db.QueryRow(`SELECT status FROM automation_activities WHERE activity_key = ?`, "execution:"+execution.ID+":external-action").Scan(&externalStatus))
+	{
+		state, err := fixture.stores.Fixtures.AutomationActivityStatus(ctx, "execution:"+execution.ID+":external-action")
+		require.NoError(t, err)
+		externalStatus = string(state)
+	}
 	require.Equal(t, "completed", externalStatus, "execution reconciliation must not rewrite a successful domain action")
 	require.Greater(t, automationobs.Snapshot()["automation.reconciliation.projection_repaired"].Count, uint64(0))
 
-	_, err = fixture.db.Exec(`INSERT OR IGNORE INTO automation_work_item_positions
-		(work_item_id, project_id, automation_id, version_id, node_id, state, entered_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, 'active', datetime('now', '-1 minute'), datetime('now', '-1 minute'))`,
-		item.ID, fixture.project.ID, fixture.definition.Automation.ID, fixture.definition.Version.ID, implementation.ID)
+	err = fixture.stores.Fixtures.SeedAutomationPosition(ctx, models.AutomationWorkItemPosition{WorkItemID: item.ID, ProjectID: fixture.project.ID, AutomationID: fixture.definition.Automation.ID, VersionID: fixture.definition.Version.ID, NodeID: implementation.ID, State: models.AutomationPositionActive, EnteredAt: time.Now().UTC().Add(-time.Minute), UpdatedAt: time.Now().UTC().Add(-time.Minute)})
 	require.NoError(t, err, "simulate stale active position left behind after terminal transition")
 	repairs, err := fixture.repo.ListExecutionProjectionRepairs(ctx, 100)
 	require.NoError(t, err)
 	require.Empty(t, repairs, "terminal execution projection with an existing terminal transition must not repair forever")
 	require.NoError(t, reconciler.ReconcileOnce(ctx))
 	var positions int
-	require.NoError(t, fixture.db.QueryRow(`SELECT COUNT(*) FROM automation_work_item_positions WHERE work_item_id = ? AND node_id = ?`, item.ID, implementation.ID).Scan(&positions))
+	{
+		value, err := fixture.stores.Fixtures.CountMatchingPositions(context.Background(), storefixture.PositionMatch{WorkItemID: item.ID, NodeID: implementation.ID})
+		require.NoError(t, err)
+		positions = value
+	}
 	require.Zero(t, positions, "stale completed terminal positions must be pruned from live counts")
 }
 
 func TestAutomationRuntimeDoesNotRepairCompletedReviewExecutionPosition(t *testing.T) {
-	fixture := newAutomationRuntimeFixture(t, AutomationAdapterGitHubSDLC)
+	fixture := newAutomationRuntimeStoreFixture(t, AutomationAdapterGitHubSDLC)
 	ctx := context.Background()
 	openPR := automationNodeByKey(t, fixture.definition, "open_pr")
 	review := automationNodeByKey(t, fixture.definition, "review")
@@ -2019,7 +2028,7 @@ func TestAutomationRuntimeDoesNotRepairCompletedReviewExecutionPosition(t *testi
 }
 
 func TestAutomationRuntimeSkippedOccurrenceAndProjectionIdempotency(t *testing.T) {
-	fixture := newAutomationRuntimeFixture(t, AutomationAdapterNativeSDLC)
+	fixture := newAutomationRuntimeStoreFixture(t, AutomationAdapterNativeSDLC)
 	ctx := context.Background()
 	require.NoError(t, fixture.taskRepo.UpdateStatus(ctx, fixture.task.ID, models.StatusRunning))
 	now := time.Now().UTC()
@@ -2043,7 +2052,11 @@ func TestAutomationRuntimeSkippedOccurrenceAndProjectionIdempotency(t *testing.T
 	require.NoError(t, err)
 	require.Equal(t, item.ID, again.ID)
 	var transitions int
-	require.NoError(t, fixture.db.QueryRow(`SELECT COUNT(*) FROM automation_transitions WHERE work_item_id = ?`, item.ID).Scan(&transitions))
+	{
+		value, err := fixture.stores.Fixtures.CountMatchingTransitions(context.Background(), storefixture.TransitionMatch{WorkItemID: item.ID})
+		require.NoError(t, err)
+		transitions = value
+	}
 	require.Equal(t, 1, transitions)
 
 	newTask, newSchedule := automationTestTaskAndSchedule(t, fixture.taskRepo, fixture.schedRepo, fixture.project.ID, "New topology worker")
@@ -2066,7 +2079,11 @@ func TestAutomationRuntimeSkippedOccurrenceAndProjectionIdempotency(t *testing.T
 	require.Equal(t, item.ID, mappedItem.ID, "setup reruns must keep work on the saved graph projection")
 	require.Equal(t, newDefinition.Version.ID, mappedActivity.VersionID)
 	var preservedProjectionRows int
-	require.NoError(t, fixture.db.QueryRow(`SELECT COUNT(*) FROM automation_work_items WHERE id = ?`, item.ID).Scan(&preservedProjectionRows))
+	{
+		value, err := fixture.stores.Fixtures.CountMatchingWorkItems(context.Background(), storefixture.WorkItemMatch{ID: item.ID})
+		require.NoError(t, err)
+		preservedProjectionRows = value
+	}
 	require.Equal(t, 1, preservedProjectionRows, "setup reruns must preserve current runtime projection")
 	liveCurrentGraph, err := NewAutomationGraphService(fixture.repo).GetLive(ctx, fixture.project.ID, fixture.definition.Automation.ID, time.Now())
 	require.NoError(t, err)
@@ -2086,7 +2103,11 @@ func TestAutomationRuntimeSkippedOccurrenceAndProjectionIdempotency(t *testing.T
 	itemStatus := fixture.workItemStatus(t, mappedItem.ID)
 	require.Equal(t, "completed", itemStatus)
 	var positions int
-	require.NoError(t, fixture.db.QueryRow(`SELECT COUNT(*) FROM automation_work_item_positions WHERE work_item_id = ?`, mappedItem.ID).Scan(&positions))
+	{
+		value, err := fixture.stores.Fixtures.CountMatchingPositions(context.Background(), storefixture.PositionMatch{WorkItemID: mappedItem.ID})
+		require.NoError(t, err)
+		positions = value
+	}
 	require.Zero(t, positions)
 
 	currentContext := models.AutomationContext{ProjectID: fixture.project.ID, Bindings: []models.AutomationBinding{newBinding}}
@@ -2178,7 +2199,7 @@ func TestAutomationRuntimeSkippedOneTimeAndSharedTaskReservation(t *testing.T) {
 }
 
 func TestAutomationRuntimeCompletedBranchDoesNotCloseParallelWork(t *testing.T) {
-	fixture := newAutomationRuntimeFixture(t, AutomationAdapterNativeSDLC)
+	fixture := newAutomationRuntimeStoreFixture(t, AutomationAdapterNativeSDLC)
 	ctx := context.Background()
 	approval := automationNodeByKey(t, fixture.definition, "approval")
 	inbox := automationNodeByKey(t, fixture.definition, "inbox")
@@ -2208,7 +2229,11 @@ func TestAutomationRuntimeCompletedBranchDoesNotCloseParallelWork(t *testing.T) 
 	status := fixture.workItemStatus(t, item.ID)
 	require.Equal(t, "active", status)
 	var positions int
-	require.NoError(t, fixture.db.QueryRow(`SELECT COUNT(*) FROM automation_work_item_positions WHERE work_item_id = ?`, item.ID).Scan(&positions))
+	{
+		value, err := fixture.stores.Fixtures.CountMatchingPositions(context.Background(), storefixture.PositionMatch{WorkItemID: item.ID})
+		require.NoError(t, err)
+		positions = value
+	}
 	require.Equal(t, 1, positions)
 	binding.NodeID = inbox.ID
 	_, _, err = fixture.repo.RecordProjectionEvent(ctx, persistence.AutomationProjectionEvent{
@@ -2406,15 +2431,27 @@ func TestAutomationRuntimeAuthorizedAssigneeScanReanchorsStaleIssueProjection(t 
 	require.Equal(t, fixture.definition.Version.ID, originVersionID)
 	require.Equal(t, issue.Title, title)
 	var staleRows int
-	require.NoError(t, fixture.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM automation_work_items WHERE id = 'stale-github-issue-work-item'`).Scan(&staleRows))
+	{
+		value, err := fixture.stores.Fixtures.CountMatchingWorkItems(context.Background(), storefixture.WorkItemMatch{ID: "stale-github-issue-work-item"})
+		require.NoError(t, err)
+		staleRows = value
+	}
 	require.Zero(t, staleRows)
-	require.NoError(t, fixture.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM automation_activities WHERE id = 'stale-github-issue-activity'`).Scan(&staleRows))
+	{
+		value, err := fixture.stores.Fixtures.CountMatchingActivities(context.Background(), storefixture.ActivityMatch{ID: "stale-github-issue-activity"})
+		require.NoError(t, err)
+		staleRows = value
+	}
 	require.Zero(t, staleRows)
 	require.NoError(t, fixture.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM automation_transitions WHERE event_key = 'stale-transition'`).Scan(&staleRows))
 	require.Zero(t, staleRows)
 	require.NoError(t, fixture.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM automation_thread_input_bindings WHERE id = 'stale-thread-input-binding'`).Scan(&staleRows))
 	require.Zero(t, staleRows)
-	require.NoError(t, fixture.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM automation_work_items WHERE id = 'stale-child-work-item'`).Scan(&staleRows))
+	{
+		value, err := fixture.stores.Fixtures.CountMatchingWorkItems(context.Background(), storefixture.WorkItemMatch{ID: "stale-child-work-item"})
+		require.NoError(t, err)
+		staleRows = value
+	}
 	require.Zero(t, staleRows)
 }
 
@@ -2541,13 +2578,13 @@ func TestAutomationRuntimeGitHubIssueTaskCreationAllowsLaterInboxInvocation(t *t
 }
 
 func TestAutomationRuntimeGitHubIssueInboxAndPRProvenance(t *testing.T) {
-	fixture := newAutomationRuntimeFixture(t, AutomationAdapterGitHubSDLC)
+	fixture := newAutomationRuntimeStoreFixture(t, AutomationAdapterGitHubSDLC)
 	ctx := context.Background()
 	projectRepo := fixture.stores.Projects
 	fixture.project.RepoURL = "https://github.example.com/example/runtime.git"
 	fixture.project.RepoPath = t.TempDir()
 	require.NoError(t, projectRepo.Update(ctx, &fixture.project))
-	require.NoError(t, fixture.db.QueryRow(`UPDATE tasks SET worktree_branch = 'task/runtime' WHERE id = ? RETURNING id`, fixture.task.ID).Scan(new(string)))
+	require.NoError(t, fixture.taskRepo.UpdateWorktreeInfo(ctx, fixture.task.ID, fixture.task.WorktreePath, "task/runtime"))
 	execution := models.Execution{TaskID: fixture.task.ID, Status: models.ExecRunning, PromptSent: "github runtime"}
 	require.NoError(t, fixture.stores.Executions.Create(ctx, &execution))
 	bugFinder := automationNodeByKey(t, fixture.definition, "bug_finder")
@@ -2622,7 +2659,11 @@ func TestAutomationRuntimeGitHubIssueInboxAndPRProvenance(t *testing.T) {
 	require.Contains(t, assignedOutput, `"number":44`)
 	require.Contains(t, assignedOutput, `"number":45`)
 	var issueItems int
-	require.NoError(t, fixture.db.QueryRow(`SELECT COUNT(*) FROM automation_work_items WHERE automation_id = ? AND kind = 'github_issue'`, fixture.definition.Automation.ID).Scan(&issueItems))
+	{
+		value, err := fixture.stores.Fixtures.CountMatchingWorkItems(context.Background(), storefixture.WorkItemMatch{AutomationID: fixture.definition.Automation.ID, Kind: "github_issue"})
+		require.NoError(t, err)
+		issueItems = value
+	}
 	require.Equal(t, 4, issueItems, "the inbox must record every issue returned by an authorized assignment scan, including manually created issues")
 
 	workerSvc := newTestWorkerService(t)
@@ -2633,7 +2674,7 @@ func TestAutomationRuntimeGitHubIssueInboxAndPRProvenance(t *testing.T) {
 	implementationConfig["goal"] = "Complete the assigned issue with focused regression coverage."
 	updatedImplementationConfig, err := json.Marshal(implementationConfig)
 	require.NoError(t, err)
-	require.NoError(t, fixture.db.QueryRow(`UPDATE automation_nodes SET config_json = ? WHERE id = ? RETURNING id`, string(updatedImplementationConfig), implementationNode.ID).Scan(new(string)))
+	require.NoError(t, fixture.stores.Fixtures.SetAutomationNodeConfig(ctx, implementationNode.ID, string(updatedImplementationConfig)))
 	llmSvc := &LLMService{automationRepo: fixture.repo, githubIssueRuntime: provider, projectRepo: projectRepo,
 		taskRepo: fixture.taskRepo, taskSvc: taskSvc}
 	runtime := llmSvc.taskControlRuntimeTools(fixture.task)
@@ -2823,8 +2864,7 @@ func TestAutomationRuntimeGitHubIssueInboxAndPRProvenance(t *testing.T) {
 	_, err = handlers["github_open_pull_request"](ctx, json.RawMessage(fmt.Sprintf(`{"task_id":%q,"issue_number":42,"pr_title":"PR"}`, implementationTask.ID)))
 	require.ErrorContains(t, err, "cannot mutate a different task")
 	implementationWorktree := t.TempDir()
-	require.NoError(t, fixture.db.QueryRowContext(ctx, `UPDATE tasks SET worktree_path = ?, worktree_branch = ? WHERE id = ? RETURNING id`,
-		implementationWorktree, "task/issue-42", implementationTask.ID).Scan(&implementationTask.ID))
+	require.NoError(t, fixture.taskRepo.UpdateWorktreeInfo(ctx, implementationTask.ID, implementationWorktree, "task/issue-42"))
 	implementationTask.WorktreePath = implementationWorktree
 	implementationTask.WorktreeBranch = "task/issue-42"
 	implementationCtx := WithAutomationContext(context.Background(), implementationContext)
@@ -2848,7 +2888,10 @@ func TestAutomationRuntimeGitHubIssueInboxAndPRProvenance(t *testing.T) {
 		return &GitHubPullRequest{Number: 7, URL: "https://github.example.com/example/runtime/pull/7", State: "open", HeadRef: implementationTask.WorktreeBranch, HeadRepoFullName: "example/runtime", HeadSHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, nil
 	}
 	var recordedIssueURL string
-	require.NoError(t, fixture.db.QueryRow(`SELECT issue_url FROM task_pull_requests WHERE task_id = ?`, implementationTask.ID).Scan(&recordedIssueURL))
+	record, err := fixture.stores.TaskPullRequests.GetByTaskID(ctx, implementationTask.ID)
+	require.NoError(t, err)
+	require.NotNil(t, record)
+	recordedIssueURL = record.IssueURL
 	require.Equal(t, "https://github.example.com/example/runtime/issues/42", recordedIssueURL)
 	reusedOutput, err := handlers["github_open_pull_request"](implementationCtx, json.RawMessage(fmt.Sprintf(`{"task_id":"current","issue_number":42,"pr_title":"PR","pr_body":%q}`, prBody)))
 	require.NoError(t, err)
@@ -2859,7 +2902,8 @@ func TestAutomationRuntimeGitHubIssueInboxAndPRProvenance(t *testing.T) {
 	_, err = handlers["github_replace_pull_request_branch"](implementationCtx, json.RawMessage(fmt.Sprintf(`{"task_id":%q,"expected_head_sha":%q,"confirm_history_rewrite":true}`, fixture.task.ID, strings.Repeat("a", 40))))
 	require.ErrorContains(t, err, "cannot mutate a different task")
 	var prResources int
-	require.NoError(t, fixture.db.QueryRow(`SELECT COUNT(*) FROM automation_activity_resources WHERE resource_type = 'pull_request' AND resource_id = 'github:example/runtime:pull:7'`).Scan(&prResources))
+	prResources, err = fixture.stores.Fixtures.CountAutomationResourceLinks(ctx, "pull_request", "github:example/runtime:pull:7")
+	require.NoError(t, err)
 	require.Equal(t, 1, prResources)
 	edgeExpectations := map[string]int{
 		"bug_to_issue": 3, "issue_to_assignment": 3, "assignment_to_inbox": 4,
@@ -2867,13 +2911,19 @@ func TestAutomationRuntimeGitHubIssueInboxAndPRProvenance(t *testing.T) {
 	}
 	for edgeKey, expected := range edgeExpectations {
 		var edgeTransitions int
-		require.NoError(t, fixture.db.QueryRow(`SELECT COUNT(*) FROM automation_transitions tr
-			JOIN automation_edges e ON e.id = tr.edge_id WHERE tr.automation_id = ? AND e.edge_key = ?`,
-			fixture.definition.Automation.ID, edgeKey).Scan(&edgeTransitions))
+		{
+			value, err := fixture.stores.Fixtures.CountMatchingTransitions(context.Background(), storefixture.TransitionMatch{AutomationID: fixture.definition.Automation.ID, EdgeKey: edgeKey})
+			require.NoError(t, err)
+			edgeTransitions = value
+		}
 		require.Equal(t, expected, edgeTransitions, edgeKey+" must be represented by exact persisted provenance")
 	}
 	var waitingReview int
-	require.NoError(t, fixture.db.QueryRow(`SELECT COUNT(*) FROM automation_work_item_positions p JOIN automation_nodes n ON n.id = p.node_id WHERE p.automation_id = ? AND n.node_key = 'review' AND p.state = 'waiting'`, fixture.definition.Automation.ID).Scan(&waitingReview))
+	{
+		value, err := fixture.stores.Fixtures.CountMatchingPositions(context.Background(), storefixture.PositionMatch{AutomationID: fixture.definition.Automation.ID, NodeKey: "review", State: "waiting"})
+		require.NoError(t, err)
+		waitingReview = value
+	}
 	require.Equal(t, 1, waitingReview)
 }
 
@@ -3058,47 +3108,54 @@ func assertAutomationGitHubIssueProjectionForDefinition(t *testing.T, fixture au
 	t.Helper()
 	resourceID := fmt.Sprintf("github:example/runtime:issue:%d", issueNumber)
 	var workItems int
-	require.NoError(t, fixture.db.QueryRow(`SELECT COUNT(*) FROM automation_work_items
-		WHERE project_id = ? AND automation_id = ? AND work_item_key = ? AND kind = 'github_issue' AND status = 'waiting'`,
-		fixture.project.ID, definition.Automation.ID, resourceID).Scan(&workItems))
+	{
+		value, err := fixture.stores.Fixtures.CountMatchingWorkItems(context.Background(), storefixture.WorkItemMatch{ProjectID: fixture.project.ID, AutomationID: definition.Automation.ID, Key: resourceID, Kind: "github_issue", Status: "waiting"})
+		require.NoError(t, err)
+		workItems = value
+	}
 	require.Equal(t, 1, workItems, "the created issue must have one waiting Automation work item")
 
 	var activities int
-	require.NoError(t, fixture.db.QueryRow(`SELECT COUNT(*) FROM automation_activities
-		WHERE project_id = ? AND automation_id = ? AND version_id = ? AND activity_key = ?
-			AND activity_type = 'create_github_issue' AND status = 'completed' AND work_item_id IS NOT NULL`,
-		fixture.project.ID, definition.Automation.ID, definition.Version.ID, activityKey).Scan(&activities))
+	{
+		value, err := fixture.stores.Fixtures.CountMatchingActivities(context.Background(), storefixture.ActivityMatch{ProjectID: fixture.project.ID, AutomationID: definition.Automation.ID, VersionID: definition.Version.ID, Key: activityKey, Type: "create_github_issue", Status: "completed", HasWorkItem: true})
+		require.NoError(t, err)
+		activities = value
+	}
 	require.Equal(t, 1, activities, "the original issue activity must be completed against the work item")
 	var totalActivities int
-	require.NoError(t, fixture.db.QueryRow(`SELECT COUNT(*) FROM automation_activities
-		WHERE project_id = ? AND automation_id = ? AND version_id = ? AND activity_type = 'create_github_issue'`,
-		fixture.project.ID, definition.Automation.ID, definition.Version.ID).Scan(&totalActivities))
+	{
+		value, err := fixture.stores.Fixtures.CountMatchingActivities(context.Background(), storefixture.ActivityMatch{ProjectID: fixture.project.ID, AutomationID: definition.Automation.ID, VersionID: definition.Version.ID, Type: "create_github_issue"})
+		require.NoError(t, err)
+		totalActivities = value
+	}
 	require.Equal(t, 1, totalActivities, "retries must not leave duplicate or pending issue activities")
 
 	var resources int
-	require.NoError(t, fixture.db.QueryRow(`SELECT COUNT(*) FROM automation_activity_resources ar
-		JOIN automation_activities a ON a.id = ar.activity_id
-		WHERE a.project_id = ? AND a.automation_id = ? AND a.version_id = ? AND a.activity_key = ?
-			AND ((ar.resource_type = 'github_issue' AND ar.resource_id = ?)
-				OR ar.resource_type = 'task' OR ar.resource_type = 'execution')`, fixture.project.ID,
-		definition.Automation.ID, definition.Version.ID, activityKey, resourceID).Scan(&resources))
+	links, err := fixture.stores.Fixtures.AutomationActivityResources(t.Context(), storefixture.ActivityMatch{ProjectID: fixture.project.ID, AutomationID: definition.Automation.ID, VersionID: definition.Version.ID, Key: activityKey})
+	require.NoError(t, err)
+	for _, link := range links {
+		if (link.ResourceType == "github_issue" && link.ResourceID == resourceID) || link.ResourceType == "task" || link.ResourceType == "execution" {
+			resources++
+		}
+	}
+
 	require.Equal(t, 3, resources, "the repaired activity must retain issue, task, and execution provenance")
 
 	for edgeKey, state := range map[string]string{"bug_to_issue": "entered", "issue_to_assignment": "waiting"} {
 		var transitions int
-		require.NoError(t, fixture.db.QueryRow(`SELECT COUNT(*) FROM automation_transitions tr
-			JOIN automation_edges e ON e.id = tr.edge_id
-			WHERE tr.project_id = ? AND tr.automation_id = ? AND tr.version_id = ? AND e.edge_key = ? AND tr.state = ?`,
-			fixture.project.ID, definition.Automation.ID, definition.Version.ID, edgeKey, state).Scan(&transitions))
+		{
+			value, err := fixture.stores.Fixtures.CountMatchingTransitions(context.Background(), storefixture.TransitionMatch{ProjectID: fixture.project.ID, AutomationID: definition.Automation.ID, VersionID: definition.Version.ID, EdgeKey: edgeKey, State: state})
+			require.NoError(t, err)
+			transitions = value
+		}
 		require.Equal(t, 1, transitions, edgeKey+" must be recorded exactly once")
 	}
 	var waitingAssignment int
-	require.NoError(t, fixture.db.QueryRow(`SELECT COUNT(*) FROM automation_work_item_positions p
-		JOIN automation_nodes n ON n.id = p.node_id
-		JOIN automation_work_items wi ON wi.id = p.work_item_id
-		WHERE p.project_id = ? AND p.automation_id = ? AND p.version_id = ? AND n.node_key = 'assignment'
-			AND p.state = 'waiting' AND wi.work_item_key = ?`, fixture.project.ID, definition.Automation.ID,
-		definition.Version.ID, resourceID).Scan(&waitingAssignment))
+	{
+		value, err := fixture.stores.Fixtures.CountMatchingPositions(context.Background(), storefixture.PositionMatch{ProjectID: fixture.project.ID, AutomationID: definition.Automation.ID, VersionID: definition.Version.ID, NodeKey: "assignment", State: "waiting", WorkItemKey: resourceID})
+		require.NoError(t, err)
+		waitingAssignment = value
+	}
 	require.Equal(t, 1, waitingAssignment, "the issue must wait at the human assignment gate")
 }
 
@@ -3440,9 +3497,11 @@ func TestAutomationGitHubIssueCreationReusesCompletedClaimFromDifferentAutomatio
 	require.Contains(t, secondOutput, `"reused":true`)
 	require.Equal(t, int32(1), createCalls.Load(), "a duplicate finding from another saved Automation must reuse the existing local issue claim")
 	var secondActivities int
-	require.NoError(t, fixture.db.QueryRow(`SELECT COUNT(*) FROM automation_activities
-		WHERE project_id = ? AND automation_id = ? AND activity_type = 'create_github_issue'`,
-		fixture.project.ID, secondDefinition.Automation.ID).Scan(&secondActivities))
+	{
+		value, err := fixture.stores.Fixtures.CountMatchingActivities(context.Background(), storefixture.ActivityMatch{ProjectID: fixture.project.ID, AutomationID: secondDefinition.Automation.ID, Type: "create_github_issue"})
+		require.NoError(t, err)
+		secondActivities = value
+	}
 	require.Zero(t, secondActivities, "the second Automation must not adopt the original issue projection while suppressing duplicate GitHub creation")
 }
 
@@ -3464,7 +3523,11 @@ func TestAutomationGitHubIssueCreationReusesCompletedClaimAfterGraphReplacement(
 	oldVersionID := fixture.definition.Version.ID
 	replacement := replaceAutomationGitHubIssueGraph(t, fixture)
 	var oldVersions int
-	require.NoError(t, fixture.db.QueryRow(`SELECT COUNT(*) FROM automation_versions WHERE id = ?`, oldVersionID).Scan(&oldVersions))
+	oldVersion, err := fixture.repo.GetDefinitionVersion(t.Context(), fixture.project.ID, fixture.definition.Automation.ID, oldVersionID)
+	require.NoError(t, err)
+	if oldVersion != nil {
+		oldVersions++
+	}
 	require.Zero(t, oldVersions, "Save must delete the original graph before the retry")
 	replacementTaskID := automationResourceID(t, replacement, "bug_finder", "task")
 	replacementTask, err := fixture.taskRepo.GetByID(context.Background(), replacementTaskID)
@@ -3476,9 +3539,7 @@ func TestAutomationGitHubIssueCreationReusesCompletedClaimAfterGraphReplacement(
 	require.NoError(t, retryErr)
 	require.Contains(t, retry, `"reused":true`)
 	require.Equal(t, int32(1), createCalls.Load(), "graph replacement must reuse the original issue instead of recreating it")
-	require.Equal(t, 1, countRows(t, fixture.db, `SELECT COUNT(*) FROM automation_work_items
-		WHERE project_id = ? AND automation_id = ? AND origin_version_id = ? AND work_item_key = ?`,
-		fixture.project.ID, replacement.Automation.ID, replacement.Version.ID, githubIssueResourceID(&GitHubRepoRef{FullName: "example/runtime"}, 94)))
+	require.Equal(t, 1, fixture.matchingWorkItems(t, storefixture.WorkItemMatch{ProjectID: fixture.project.ID, AutomationID: replacement.Automation.ID, VersionID: replacement.Version.ID, Key: githubIssueResourceID(&GitHubRepoRef{FullName: "example/runtime"}, 94)}))
 }
 
 func TestAutomationGitHubIssueProjectionRepairRejectsDeletedSourceGraph(t *testing.T) {
@@ -3713,11 +3774,8 @@ func TestAutomationGitHubIssueCreationRepairsPartialMultiBindingProjection(t *te
 	bindings := make([]models.AutomationBinding, 0, len(definitions))
 	for i, definition := range definitions {
 		sourceNode := automationNodeByKey(t, definition, "bug_finder")
-		var invocationID string
-		require.NoError(t, fixture.db.QueryRowContext(ctx, `INSERT INTO automation_invocations
-			(project_id, automation_id, version_id, trigger_node_id, trigger_resource_type, trigger_resource_id, occurrence_key, status, started_at)
-			VALUES (?, ?, ?, ?, 'schedule', ?, ?, 'running', CURRENT_TIMESTAMP) RETURNING id`, fixture.project.ID,
-			definition.Automation.ID, definition.Version.ID, sourceNode.ID, schedules[i].ID, fmt.Sprintf("partial-multi-binding-%d", i)).Scan(&invocationID))
+		invocationID := persistence.NewID()
+		require.NoError(t, fixture.stores.Fixtures.SeedAutomationInvocation(ctx, models.AutomationInvocation{ID: invocationID, ProjectID: fixture.project.ID, AutomationID: definition.Automation.ID, VersionID: definition.Version.ID, TriggerNodeID: sourceNode.ID, TriggerResourceID: schedules[i].ID, OccurrenceKey: fmt.Sprintf("partial-multi-binding-%d", i), TriggerResourceType: "schedule", Status: models.AutomationInvocationRunning}))
 		bindings = append(bindings, models.AutomationBinding{AutomationID: definition.Automation.ID, VersionID: definition.Version.ID,
 			InvocationID: invocationID, NodeID: sourceNode.ID})
 	}
@@ -3737,11 +3795,17 @@ func TestAutomationGitHubIssueCreationRepairsPartialMultiBindingProjection(t *te
 	_, firstErr := createIssue(causalCtx, input)
 	require.ErrorContains(t, firstErr, "injected second binding projection failure")
 	var firstProjectedItems, secondProjectedItems int
-	require.NoError(t, fixture.db.QueryRow(`SELECT COUNT(*) FROM automation_work_items WHERE automation_id = ?`,
-		fixture.definition.Automation.ID).Scan(&firstProjectedItems))
+	{
+		value, err := fixture.stores.Fixtures.CountMatchingWorkItems(context.Background(), storefixture.WorkItemMatch{AutomationID: fixture.definition.Automation.ID})
+		require.NoError(t, err)
+		firstProjectedItems = value
+	}
 	require.Equal(t, 1, firstProjectedItems, "the injected failure must happen after the first binding projects")
-	require.NoError(t, fixture.db.QueryRow(`SELECT COUNT(*) FROM automation_work_items WHERE automation_id = ?`,
-		secondDefinition.Automation.ID).Scan(&secondProjectedItems))
+	{
+		value, err := fixture.stores.Fixtures.CountMatchingWorkItems(context.Background(), storefixture.WorkItemMatch{AutomationID: secondDefinition.Automation.ID})
+		require.NoError(t, err)
+		secondProjectedItems = value
+	}
 	require.Zero(t, secondProjectedItems, "the injected failure must leave the second binding unprojected")
 	_, err = fixture.db.Exec(`DROP TRIGGER fail_second_automation_issue_projection`)
 	require.NoError(t, err)
@@ -3774,7 +3838,7 @@ func TestAutomationGitHubIssueCreationUsesLaunchAuthorizationAfterGraphReplaceme
 	ctx := newCausalContext("launch-safe-after-save")
 	replaced := replaceAutomationGitHubIssueGraph(t, fixture)
 	fixture.task.CreatedVia = persistence.AutomationCompilerTaskCreatedVia(fixture.definition.Automation.ID, "bug_finder")
-	_, err := fixture.db.ExecContext(context.Background(), `UPDATE tasks SET created_via = ? WHERE id = ?`, fixture.task.CreatedVia, fixture.task.ID)
+	err := fixture.stores.Fixtures.SetTaskCreationOrigin(context.Background(), fixture.task.ID, fixture.task.CreatedVia)
 	require.NoError(t, err)
 	activityKey := githubIssueCreationActivityKey(ctx, &GitHubRepoRef{FullName: "example/runtime"}, githubCreateIssueRuntimeInput{
 		Title: "Launch-safe bug", Body: "## Summary\nA user-visible bug.", Labels: []string{"bug"},
@@ -3829,18 +3893,14 @@ func TestMaintainedGitHubSDLCCategoryLabelsAreProvisionedAndVerified(t *testing.
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			fixture := newAutomationRuntimeFixture(t, AutomationAdapterGitHubSDLC)
+			fixture := newAutomationRuntimeStoreFixture(t, AutomationAdapterGitHubSDLC)
 			ctx := context.Background()
 			projectRepo := fixture.stores.Projects
 			fixture.project.RepoURL = "https://github.com/example/runtime.git"
 			require.NoError(t, projectRepo.Update(ctx, &fixture.project))
 			bugFinder := automationNodeByKey(t, fixture.definition, "bug_finder")
-			var invocationID string
-			require.NoError(t, fixture.db.QueryRowContext(ctx, `INSERT INTO automation_invocations
-				(project_id, automation_id, version_id, trigger_node_id, trigger_resource_type, trigger_resource_id,
-				 occurrence_key, status, started_at) VALUES (?, ?, ?, ?, 'manual', ?, ?, 'running', CURRENT_TIMESTAMP)
-				 RETURNING id`, fixture.project.ID, fixture.definition.Automation.ID, fixture.definition.Version.ID,
-				bugFinder.ID, fixture.schedule.ID, "labels:"+tt.name).Scan(&invocationID))
+			invocationID := persistence.NewID()
+			require.NoError(t, fixture.stores.Fixtures.SeedAutomationInvocation(ctx, models.AutomationInvocation{ID: invocationID, ProjectID: fixture.project.ID, AutomationID: fixture.definition.Automation.ID, VersionID: fixture.definition.Version.ID, TriggerNodeID: bugFinder.ID, TriggerResourceID: fixture.schedule.ID, OccurrenceKey: "labels:" + tt.name, TriggerResourceType: "manual", Status: models.AutomationInvocationRunning}))
 			execution := models.Execution{TaskID: fixture.task.ID, Status: models.ExecRunning, PromptSent: "category label test"}
 			require.NoError(t, fixture.stores.Executions.Create(ctx, &execution))
 			binding := models.AutomationBinding{AutomationID: fixture.definition.Automation.ID, VersionID: fixture.definition.Version.ID,
@@ -3878,9 +3938,11 @@ func TestMaintainedGitHubSDLCCategoryLabelsAreProvisionedAndVerified(t *testing.
 			require.Equal(t, int32(1), ensureCalls.Load())
 			require.Equal(t, tt.wantCreateCalls, createCalls.Load())
 			var projectionRows int
-			require.NoError(t, fixture.db.QueryRow(`SELECT COUNT(*) FROM automation_activities
-				WHERE project_id = ? AND automation_id = ? AND activity_type = 'create_github_issue' AND status = 'completed'`,
-				fixture.project.ID, fixture.definition.Automation.ID).Scan(&projectionRows))
+			{
+				value, err := fixture.stores.Fixtures.CountMatchingActivities(context.Background(), storefixture.ActivityMatch{ProjectID: fixture.project.ID, AutomationID: fixture.definition.Automation.ID, Type: "create_github_issue", Status: "completed"})
+				require.NoError(t, err)
+				projectionRows = value
+			}
 			require.Equal(t, tt.wantProjectionRows, projectionRows)
 		})
 	}
@@ -3936,7 +3998,7 @@ func TestAutomationGitHubIssueCreationDoesNotReadExistingIssuesForDeduplication(
 }
 
 func TestAutomationGitHubIssueCreationSerializesLocalDedupAcrossExecutions(t *testing.T) {
-	fixture := newAutomationRuntimeFixture(t, AutomationAdapterGitHubSDLC)
+	fixture := newAutomationRuntimeStoreFixture(t, AutomationAdapterGitHubSDLC)
 	ctx := context.Background()
 	projectRepo := fixture.stores.Projects
 	fixture.project.RepoURL = "https://github.com/example/runtime.git"
@@ -3946,11 +4008,8 @@ func TestAutomationGitHubIssueCreationSerializesLocalDedupAcrossExecutions(t *te
 
 	newCausalContext := func(occurrence string) context.Context {
 		t.Helper()
-		var invocationID string
-		require.NoError(t, fixture.db.QueryRowContext(ctx, `INSERT INTO automation_invocations
-			(project_id, automation_id, version_id, trigger_node_id, trigger_resource_type, trigger_resource_id, occurrence_key, status, started_at)
-			VALUES (?, ?, ?, ?, 'schedule', ?, ?, 'running', CURRENT_TIMESTAMP) RETURNING id`, fixture.project.ID,
-			fixture.definition.Automation.ID, fixture.definition.Version.ID, bugFinder.ID, fixture.schedule.ID, occurrence).Scan(&invocationID))
+		invocationID := persistence.NewID()
+		require.NoError(t, fixture.stores.Fixtures.SeedAutomationInvocation(ctx, models.AutomationInvocation{ID: invocationID, ProjectID: fixture.project.ID, AutomationID: fixture.definition.Automation.ID, VersionID: fixture.definition.Version.ID, TriggerNodeID: bugFinder.ID, TriggerResourceID: fixture.schedule.ID, OccurrenceKey: occurrence, TriggerResourceType: "schedule", Status: models.AutomationInvocationRunning}))
 		execution := models.Execution{TaskID: fixture.task.ID, Status: models.ExecRunning, PromptSent: occurrence}
 		require.NoError(t, fixture.stores.Executions.Create(ctx, &execution))
 		binding := models.AutomationBinding{AutomationID: fixture.definition.Automation.ID, VersionID: fixture.definition.Version.ID,
@@ -4108,16 +4167,13 @@ func TestAutomationObservabilityRecordsSafeLifecycleAndGraphMetrics(t *testing.T
 }
 
 func TestAutomationLiveTaskRetryReplacesEarlierFailedDispatchState(t *testing.T) {
-	fixture := newAutomationRuntimeFixture(t, AutomationAdapterNativeSDLC)
+	fixture := newAutomationRuntimeStoreFixture(t, AutomationAdapterNativeSDLC)
 	ctx := context.Background()
 	producer := automationNodeByKey(t, fixture.definition, "vision_suggestions")
 	newInvocationBinding := func(occurrence string) models.AutomationBinding {
 		t.Helper()
-		var invocationID string
-		require.NoError(t, fixture.db.QueryRowContext(ctx, `INSERT INTO automation_invocations
-			(project_id, automation_id, version_id, trigger_node_id, trigger_resource_type, trigger_resource_id, occurrence_key, status, started_at)
-			VALUES (?, ?, ?, ?, 'schedule', ?, ?, 'running', CURRENT_TIMESTAMP) RETURNING id`, fixture.project.ID,
-			fixture.definition.Automation.ID, fixture.definition.Version.ID, producer.ID, fixture.schedule.ID, occurrence).Scan(&invocationID))
+		invocationID := persistence.NewID()
+		require.NoError(t, fixture.stores.Fixtures.SeedAutomationInvocation(ctx, models.AutomationInvocation{ID: invocationID, ProjectID: fixture.project.ID, AutomationID: fixture.definition.Automation.ID, VersionID: fixture.definition.Version.ID, TriggerNodeID: producer.ID, TriggerResourceID: fixture.schedule.ID, OccurrenceKey: occurrence, TriggerResourceType: "schedule", Status: models.AutomationInvocationRunning}))
 		return models.AutomationBinding{AutomationID: fixture.definition.Automation.ID, VersionID: fixture.definition.Version.ID,
 			InvocationID: invocationID, NodeID: producer.ID}
 	}
@@ -4126,32 +4182,11 @@ func TestAutomationLiveTaskRetryReplacesEarlierFailedDispatchState(t *testing.T)
 		failedActivityID    = "ffffffffffffffffffffffffffffffff"
 		completedActivityID = "00000000000000000000000000000000"
 	)
-	sameStartedAt := time.Now().UTC().Add(-time.Hour).Format("2006-01-02 15:04:05")
-	_, err := fixture.db.ExecContext(ctx, `INSERT INTO automation_activities
-		(id, project_id, automation_id, version_id, node_id, invocation_id, activity_key, activity_type, status, started_at, completed_at)
-		VALUES (?, ?, ?, ?, ?, ?, 'retry:failed', 'task_execution', 'failed', ?, ?)`, failedActivityID,
-		fixture.project.ID, fixture.definition.Automation.ID, fixture.definition.Version.ID, producer.ID,
-		failedBinding.InvocationID, sameStartedAt, sameStartedAt)
-	require.NoError(t, err)
-	_, err = fixture.db.ExecContext(ctx, `INSERT INTO automation_activity_resources
-		(activity_id, resource_type, resource_id, relation) VALUES (?, 'task', ?, 'subject')`, failedActivityID, fixture.task.ID)
-	require.NoError(t, err)
-
+	sameStartedAt := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
+	require.NoError(t, fixture.stores.Fixtures.SeedAutomationActivity(ctx, models.AutomationActivity{ID: failedActivityID, ProjectID: fixture.project.ID, AutomationID: fixture.definition.Automation.ID, VersionID: fixture.definition.Version.ID, NodeID: producer.ID, InvocationID: failedBinding.InvocationID, ActivityKey: "retry:failed", ActivityType: "task_execution", Status: models.AutomationActivityFailed, StartedAt: sameStartedAt, CompletedAt: &sameStartedAt}, []models.AutomationActivityResource{{ResourceType: "task", ResourceID: fixture.task.ID, Relation: "subject"}}))
 	completedBinding := newInvocationBinding("retry:completed")
-	_, err = fixture.db.ExecContext(ctx, `INSERT INTO automation_activities
-		(id, project_id, automation_id, version_id, node_id, invocation_id, activity_key, activity_type, status, started_at, completed_at)
-		VALUES (?, ?, ?, ?, ?, ?, 'retry:completed', 'task_execution', 'completed', ?, ?)`, completedActivityID,
-		fixture.project.ID, fixture.definition.Automation.ID, fixture.definition.Version.ID, producer.ID,
-		completedBinding.InvocationID, sameStartedAt, sameStartedAt)
-	require.NoError(t, err)
-	_, err = fixture.db.ExecContext(ctx, `INSERT INTO automation_activity_resources
-		(activity_id, resource_type, resource_id, relation) VALUES (?, 'task', ?, 'subject')`, completedActivityID, fixture.task.ID)
-	require.NoError(t, err)
-	_, err = fixture.db.ExecContext(ctx, `INSERT INTO automation_live_activity_states
-		(project_id, automation_id, version_id, node_id, state_key, activity_id, invocation_id, activity_status, completed_at, activity_rowid)
-		SELECT project_id, automation_id, version_id, node_id, 'task:' || ?, id, invocation_id, status, completed_at, rowid
-		FROM automation_activities WHERE id = ?`, fixture.task.ID, completedActivityID)
-	require.NoError(t, err)
+	require.NoError(t, fixture.stores.Fixtures.SeedAutomationActivity(ctx, models.AutomationActivity{ID: completedActivityID, ProjectID: fixture.project.ID, AutomationID: fixture.definition.Automation.ID, VersionID: fixture.definition.Version.ID, NodeID: producer.ID, InvocationID: completedBinding.InvocationID, ActivityKey: "retry:completed", ActivityType: "task_execution", Status: models.AutomationActivityCompleted, StartedAt: sameStartedAt, CompletedAt: &sameStartedAt}, []models.AutomationActivityResource{{ResourceType: "task", ResourceID: fixture.task.ID, Relation: "subject"}}))
+	require.NoError(t, fixture.stores.Fixtures.SetLiveAutomationActivity(ctx, completedActivityID, fixture.task.ID))
 
 	graph, err := NewAutomationGraphService(fixture.repo).GetLive(ctx, fixture.project.ID, fixture.definition.Automation.ID, time.Now())
 	require.NoError(t, err)
@@ -4171,33 +4206,17 @@ func TestAutomationLiveTaskRetryReplacesEarlierFailedDispatchState(t *testing.T)
 }
 
 func TestAutomationLiveWorkItemSuccessReplacesEarlierFailedActivityState(t *testing.T) {
-	fixture := newAutomationRuntimeFixture(t, AutomationAdapterGitHubSDLC)
+	fixture := newAutomationRuntimeStoreFixture(t, AutomationAdapterGitHubSDLC)
 	ctx := context.Background()
 	implementation := automationNodeByKey(t, fixture.definition, "implementation")
 	workItemID := "feedfacefeedfacefeedfacefeedface"
 	failedActivityID := "feedfacefeedfacefeedfacefeedfac1"
 	completedActivityID := "feedfacefeedfacefeedfacefeedfac2"
-	completedAt := time.Now().UTC().Format("2006-01-02 15:04:05")
-	_, err := fixture.db.ExecContext(ctx, `INSERT INTO automation_work_items
-		(id, project_id, automation_id, origin_version_id, work_item_key, kind, title, status)
-		VALUES (?, ?, ?, ?, 'github:example/repo:issue:99', 'github_issue', 'Issue 99', 'completed')`, workItemID,
-		fixture.project.ID, fixture.definition.Automation.ID, fixture.definition.Version.ID)
-	require.NoError(t, err)
-	_, err = fixture.db.ExecContext(ctx, `INSERT INTO automation_activities
-		(id, project_id, automation_id, version_id, node_id, work_item_id, activity_key, activity_type, status, started_at, completed_at, error_message)
-		VALUES (?, ?, ?, ?, ?, ?, 'issue:99:failed', 'task_execution', 'failed', ?, ?, 'oauth expired')`, failedActivityID,
-		fixture.project.ID, fixture.definition.Automation.ID, fixture.definition.Version.ID, implementation.ID, workItemID, completedAt, completedAt)
-	require.NoError(t, err)
-	_, err = fixture.db.ExecContext(ctx, `INSERT INTO automation_activities
-		(id, project_id, automation_id, version_id, node_id, work_item_id, activity_key, activity_type, status, started_at, completed_at)
-		VALUES (?, ?, ?, ?, ?, ?, 'issue:99:completed', 'implementation_task', 'completed', ?, ?)`, completedActivityID,
-		fixture.project.ID, fixture.definition.Automation.ID, fixture.definition.Version.ID, implementation.ID, workItemID, completedAt, completedAt)
-	require.NoError(t, err)
-	_, err = fixture.db.ExecContext(ctx, `INSERT INTO automation_live_activity_states
-		(project_id, automation_id, version_id, node_id, state_key, activity_id, work_item_id, activity_status, completed_at, activity_rowid)
-		SELECT project_id, automation_id, version_id, node_id, 'work:' || work_item_id, id, work_item_id, status, completed_at, rowid
-		FROM automation_activities WHERE id = ?`, completedActivityID)
-	require.NoError(t, err)
+	completedAt := time.Now().UTC().Truncate(time.Second)
+	require.NoError(t, fixture.stores.Fixtures.SeedAutomationWorkItem(ctx, models.AutomationWorkItem{ID: workItemID, ProjectID: fixture.project.ID, AutomationID: fixture.definition.Automation.ID, OriginVersionID: fixture.definition.Version.ID, WorkItemKey: "github:example/repo:issue:99", Kind: "github_issue", Title: "Issue 99", Status: models.AutomationWorkItemCompleted}))
+	require.NoError(t, fixture.stores.Fixtures.SeedAutomationActivity(ctx, models.AutomationActivity{ID: failedActivityID, ProjectID: fixture.project.ID, AutomationID: fixture.definition.Automation.ID, VersionID: fixture.definition.Version.ID, NodeID: implementation.ID, WorkItemID: workItemID, ActivityKey: "issue:99:failed", ActivityType: "task_execution", Status: models.AutomationActivityFailed, StartedAt: completedAt, CompletedAt: &completedAt, ErrorMessage: "oauth expired"}, nil))
+	require.NoError(t, fixture.stores.Fixtures.SeedAutomationActivity(ctx, models.AutomationActivity{ID: completedActivityID, ProjectID: fixture.project.ID, AutomationID: fixture.definition.Automation.ID, VersionID: fixture.definition.Version.ID, NodeID: implementation.ID, WorkItemID: workItemID, ActivityKey: "issue:99:completed", ActivityType: "implementation_task", Status: models.AutomationActivityCompleted, StartedAt: completedAt, CompletedAt: &completedAt}, nil))
+	require.NoError(t, fixture.stores.Fixtures.SetLiveAutomationActivity(ctx, completedActivityID, ""))
 
 	graph, err := NewAutomationGraphService(fixture.repo).GetLive(ctx, fixture.project.ID, fixture.definition.Automation.ID, time.Now())
 	require.NoError(t, err)
@@ -4354,7 +4373,7 @@ func TestAutomationExternalRefreshValidationPreservesMissingProjectAndDraftBehav
 }
 
 func TestAutomationExternalRefreshClosedPullRequestWithoutMergeReconcilesFailure(t *testing.T) {
-	fixture := newAutomationRuntimeFixture(t, AutomationAdapterGitHubSDLC)
+	fixture := newAutomationRuntimeStoreFixture(t, AutomationAdapterGitHubSDLC)
 	ctx := context.Background()
 	projectRepo := fixture.stores.Projects
 	fixture.project.RepoURL = "https://github.com/example/runtime"
@@ -4387,8 +4406,8 @@ func TestAutomationExternalRefreshClosedPullRequestWithoutMergeReconcilesFailure
 	stored, err := pullRequests.GetByTaskID(ctx, fixture.task.ID)
 	require.NoError(t, err)
 	require.Equal(t, "closed", stored.PRState, "closed but unmerged pull requests must remain closed")
-	require.NotZero(t, countRows(t, fixture.db, `SELECT COUNT(*) FROM automation_activities WHERE automation_id = ? AND activity_type = 'pull_request_state' AND status = 'failed'`, fixture.definition.Automation.ID), "closed pull requests must project a failed state")
-	require.Zero(t, countRows(t, fixture.db, `SELECT COUNT(*) FROM automation_work_items WHERE automation_id = ? AND status = 'completed'`, fixture.definition.Automation.ID), "closed but unmerged pull requests must not complete their work item")
+	require.NotZero(t, fixture.matchingActivities(t, storefixture.ActivityMatch{AutomationID: fixture.definition.Automation.ID, Type: "pull_request_state", Status: "failed"}), "closed pull requests must project a failed state")
+	require.Zero(t, fixture.matchingWorkItems(t, storefixture.WorkItemMatch{AutomationID: fixture.definition.Automation.ID, Status: "completed"}), "closed but unmerged pull requests must not complete their work item")
 }
 
 func TestAutomationExternalRefreshAndLiveLoadDefinitionOnce(t *testing.T) {
@@ -4610,7 +4629,7 @@ func BenchmarkOptimizationAutomationExternalRefreshEndToEnd(b *testing.B) {
 }
 
 func TestAutomationExternalPullRequestRefreshIsExplicitCachedAndReconcilesProjection(t *testing.T) {
-	fixture := newAutomationRuntimeFixture(t, AutomationAdapterGitHubSDLC)
+	fixture := newAutomationRuntimeStoreFixture(t, AutomationAdapterGitHubSDLC)
 	ctx := context.Background()
 	projectRepo := fixture.stores.Projects
 	fixture.project.RepoURL = "https://github.com/example/runtime"
@@ -4638,10 +4657,7 @@ func TestAutomationExternalPullRequestRefreshIsExplicitCachedAndReconcilesProjec
 	provider := &fakeAutomationPullRequestProvider{pull: GitHubPullRequest{Number: 7, URL: record.PRURL, State: "closed", Merged: true}}
 	external := NewAutomationExternalStateService(fixture.repo, pullRequests, projectRepo, provider)
 	visionTrigger := automationNodeByKey(t, fixture.definition, "vision_suggestions")
-	_, err = fixture.db.ExecContext(ctx, `INSERT INTO automation_invocations
-		(project_id, automation_id, version_id, trigger_node_id, trigger_resource_type, trigger_resource_id, occurrence_key, status, started_at, completed_at)
-		VALUES (?, ?, ?, ?, 'schedule', ?, 'external-health', 'completed', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
-		fixture.project.ID, fixture.definition.Automation.ID, fixture.definition.Version.ID, visionTrigger.ID, fixture.schedule.ID)
+	err = fixture.stores.Fixtures.SeedAutomationInvocation(ctx, models.AutomationInvocation{ID: persistence.NewID(), ProjectID: fixture.project.ID, AutomationID: fixture.definition.Automation.ID, VersionID: fixture.definition.Version.ID, TriggerNodeID: visionTrigger.ID, TriggerResourceType: "schedule", TriggerResourceID: fixture.schedule.ID, OccurrenceKey: "external-health", Status: models.AutomationInvocationCompleted, StartedAt: &now, CompletedAt: &now})
 	require.NoError(t, err)
 	health, err := fixture.repo.RecomputeAutomationHealth(ctx, fixture.project.ID, fixture.definition.Automation.ID, now)
 	require.NoError(t, err)
@@ -4666,7 +4682,11 @@ func TestAutomationExternalPullRequestRefreshIsExplicitCachedAndReconcilesProjec
 	require.Equal(t, models.AutomationHealthHealthy, storedAutomation.HealthState, "successful refresh must persistently clear stale external degradation")
 	require.Equal(t, models.AutomationActive, storedAutomation.LifecycleState, "external health evaluation must never change lifecycle")
 	var completed int
-	require.NoError(t, fixture.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM automation_work_items WHERE automation_id = ? AND status = 'completed'`, fixture.definition.Automation.ID).Scan(&completed))
+	{
+		value, err := fixture.stores.Fixtures.CountMatchingWorkItems(context.Background(), storefixture.WorkItemMatch{AutomationID: fixture.definition.Automation.ID, Status: "completed"})
+		require.NoError(t, err)
+		completed = value
+	}
 	require.Equal(t, 1, completed, "merged PR state must advance the persisted Automation projection")
 
 	state, err = external.Refresh(ctx, fixture.project.ID, fixture.definition.Automation.ID, now.Add(30*time.Second))
@@ -4749,7 +4769,7 @@ func TestAutomationReconcilerRefreshesStaleExternalPullRequestStateInBackground(
 }
 
 func TestAutomationReconcilerSkipsExternalStateRefreshWhenLiveViewNotRecentlyOpen(t *testing.T) {
-	fixture := newAutomationRuntimeFixture(t, AutomationAdapterGitHubSDLC)
+	fixture := newAutomationRuntimeStoreFixture(t, AutomationAdapterGitHubSDLC)
 	ctx := context.Background()
 	projectRepo := fixture.stores.Projects
 	fixture.project.RepoURL = "https://github.com/example/runtime"
@@ -5675,4 +5695,17 @@ func (f automationRuntimeFixture) dispatchOutcome(t *testing.T, id string) store
 	state, err := f.stores.Fixtures.InspectAutomationDispatch(t.Context(), id)
 	require.NoError(t, err)
 	return state
+}
+
+func (f automationRuntimeFixture) matchingWorkItems(t *testing.T, m storefixture.WorkItemMatch) int {
+	t.Helper()
+	n, err := f.stores.Fixtures.CountMatchingWorkItems(t.Context(), m)
+	require.NoError(t, err)
+	return n
+}
+func (f automationRuntimeFixture) matchingActivities(t *testing.T, m storefixture.ActivityMatch) int {
+	t.Helper()
+	n, err := f.stores.Fixtures.CountMatchingActivities(t.Context(), m)
+	require.NoError(t, err)
+	return n
 }
