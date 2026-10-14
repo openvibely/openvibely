@@ -22,6 +22,8 @@ type SkillEventFilter struct {
 
 // Fixtures describes test domain state, never tables, query text, or connections.
 type Fixtures interface {
+	// SetTaskProject simulates ownership changing while an operation waits for a lease.
+	SetTaskProject(context.Context, string, string) error
 	FailExecutionCancellation(context.Context, string) error
 	FailTaskAttachmentCreation(context.Context) error
 	FailTaskActiveLaneMove(context.Context, string) error
