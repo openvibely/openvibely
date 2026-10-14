@@ -21,7 +21,8 @@ templ TaskDetailPanel() {
 		#task-details-opener, #task-workspace-back { flex-shrink:0; }
 		#task-workspace-back:not([hidden]) + #task-details-opener { margin-left:-4px; }
 		#task-breadcrumb-changes { font-size:16px; line-height:22px; }
-		#task-breadcrumb-toolbar button:focus-visible { outline:2px solid oklch(var(--p)); outline-offset:2px; border-radius:6px; }
+		/* Breadcrumb chrome uses its hover/open surface instead of a primary focus ring. */
+		#task-breadcrumb-toolbar button:focus-visible { outline:none; }
 		#task-breadcrumb-changes[hidden] { display:none; }
 		#task-workspaces { display:flex; position:relative; flex:1; min-height:0; min-width:0; gap:12px; }
 		#tab-chat, #tab-changes { order:0; flex:1; min-width:0; min-height:0; }
