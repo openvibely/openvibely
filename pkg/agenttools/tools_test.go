@@ -188,12 +188,12 @@ func TestNormalizeBashTimeout(t *testing.T) {
 func TestProviderBashDefinitionsMatch(t *testing.T) {
 	var openAI, anthropic string
 	for _, tool := range openaiclient.DefaultTools() {
-		if tool.Name == "bash" {
+		if tool.Name == "shell" {
 			openAI = string(tool.ParameterSchema())
 		}
 	}
 	for _, tool := range anthropicclient.DefaultTools() {
-		if tool.Name == "bash" {
+		if tool.Name == "shell" {
 			anthropic = string(tool.ParameterSchema())
 		}
 	}

@@ -165,6 +165,7 @@ type CompletionsHistoryMessage struct {
 
 // SendOptions configures a single Send call.
 type SendOptions struct {
+	EnvironmentWorkDir  string // When set, add local execution context to the conversation.
 	Model               string
 	MaxOutputTokens     int
 	System              string
@@ -531,6 +532,9 @@ func (c *Client) Send(ctx context.Context, prompt string, opts *SendOptions) (*R
 		return nil, fmt.Errorf("build input items: %w", err)
 	}
 
+	if opts.EnvironmentWorkDir != "" {
+		inputItems = ensureExecutionEnvironment(inputItems, opts.EnvironmentWorkDir)
+	}
 	payload := map[string]any{
 		"prompt_cache_key": c.sessionID,
 		"model":            opts.Model,

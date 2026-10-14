@@ -1393,6 +1393,10 @@ func TestSendAgentic_CompactionStateReplaysAcrossExecutions(t *testing.T) {
 	if _, err := secondClient.SendAgentic(context.Background(), "second prompt", &AgenticOptions{Model: "claude-sonnet-4-6", MaxTokens: 1024, DisableTools: true, AutoCompaction: true, NativeCompactionStateJSON: first.NativeCompactionStateJSON}); err != nil {
 		t.Fatal(err)
 	}
+	if len(replayedMessages) != 5 || !strings.Contains(fmt.Sprint(replayedMessages[2]["content"]), "<openvibely_execution_environment>") {
+		t.Fatalf("missing restored environment after compaction: %#v", replayedMessages)
+	}
+	replayedMessages = append(replayedMessages[:2], replayedMessages[3:]...)
 	if len(replayedMessages) != 4 {
 		t.Fatalf("replayed messages = %#v, want compacted assistant, tool result, final assistant, and current user", replayedMessages)
 	}

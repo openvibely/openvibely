@@ -15,7 +15,7 @@ func TestDefaultTools_AllPresent(t *testing.T) {
 		"read_file":   false,
 		"write_file":  false,
 		"edit_file":   false,
-		"bash":        false,
+		"shell":       false,
 		"list_files":  false,
 		"grep_search": false,
 	}

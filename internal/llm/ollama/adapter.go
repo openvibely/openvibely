@@ -24,6 +24,7 @@ import (
 	llmusage "github.com/openvibely/openvibely/internal/llm/usage"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/pkg/executionenv"
 )
 
 // HTTPDoer is an interface for making HTTP requests.
@@ -202,13 +203,13 @@ func (a *Adapter) callChat(ctx context.Context, message string, attachments []mo
 		agent.Model, baseURL, len(chatHistory), len(message), len(attachments), execID, isTaskFollowup)
 
 	systemPromptStr := llmprompt.BuildChatSystemPrompt(isTaskFollowup, chatMode, chatSystemContext, false)
-	systemPromptStr = llmprompt.AppendWorktreeContextPrompt(systemPromptStr, workDir)
 	messages := buildChatHistory(systemPromptStr, chatHistory)
 
 	userMsg := chatMessage{Role: "user", Content: message}
 	if images := encodeImageAttachments(attachments); len(images) > 0 {
 		userMsg.Images = images
 	}
+	messages = append(messages, chatMessage{Role: "user", Content: executionenv.Context(workDir)})
 	messages = append(messages, userMsg)
 
 	opts := ollamaRequestOptions(agent)
@@ -267,6 +268,7 @@ func (a *Adapter) callStreaming(ctx context.Context, prompt string, attachments 
 	if images := encodeImageAttachments(attachments); len(images) > 0 {
 		userMsg.Images = images
 	}
+	messages = append(messages, chatMessage{Role: "user", Content: executionenv.Context(workDir)})
 	messages = append(messages, userMsg)
 
 	reqBody := chatRequest{

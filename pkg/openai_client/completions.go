@@ -210,6 +210,9 @@ func (c *Client) SendCompletions(ctx context.Context, prompt string, opts *Compl
 		})
 	}
 
+	if !opts.DisableTools {
+		messages = ensureCompletionsEnvironment(messages, opts.WorkDir)
+	}
 	result := &AgenticResponse{Model: opts.Model}
 	var allText strings.Builder
 	finalReasoningContent := ""

@@ -31,6 +31,7 @@ import (
 	llmusage "github.com/openvibely/openvibely/internal/llm/usage"
 	"github.com/openvibely/openvibely/internal/models"
 	anthropicclient "github.com/openvibely/openvibely/pkg/anthropic_client"
+	"github.com/openvibely/openvibely/pkg/executionenv"
 	openaiclient "github.com/openvibely/openvibely/pkg/openai_client"
 	"github.com/openvibely/openvibely/pkg/toolschema"
 )
@@ -686,6 +687,9 @@ func openAIContextWindow(model string) int {
 func estimateModelVisibleRequestTokens(req llmcontracts.AgentRequest) int {
 	total := estimatedUTF8Tokens(req.Message) + estimatedUTF8Tokens(req.NativeCompactionStateJSON)
 	total += estimateProviderSystemPromptTokens(req)
+	if !req.RawDirectPrompt {
+		total += estimatedUTF8Tokens(executionenv.Context(req.WorkDir))
+	}
 	total += estimateRuntimeToolDefinitionTokens(llmcontracts.RuntimeToolsFromContext(req.Ctx))
 	total += estimateAgentDefinitionTokens(req.AgentDefinition)
 	for _, att := range req.Attachments {
@@ -719,7 +723,6 @@ func estimateProviderSystemPromptTokens(req llmcontracts.AgentRequest) int {
 			case models.ProviderAnthropic:
 				base = llmprompt.BuildAnthropicChatSystemPrompt(req.Agent.Model, req.Followup, req.ChatMode, req.ChatSystemContext, false)
 			}
-			base = llmprompt.AppendWorktreeContextPrompt(base, req.WorkDir)
 			if req.ChatMode == models.ChatModeOrchestrate && !req.Followup && (req.Agent.Provider == models.ProviderOpenAI || req.Agent.Provider == models.ProviderAnthropic) {
 				rt := llmcontracts.RuntimeToolsFromContext(req.Ctx)
 				base = llmprompt.ApplyChatActionToolMode(base, rt.DefinitionNames())

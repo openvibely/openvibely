@@ -408,6 +408,9 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 		if opts.OnCompaction != nil {
 			opts.OnCompaction(strings.TrimSpace(summary))
 		}
+		if !opts.DisableTools {
+			compactedItems = ensureExecutionEnvironment(compactedItems, opts.WorkDir)
+		}
 		// Explicit compaction retires prior configuration updates. Re-establish
 		// the selected effort after the compaction item so the request-level
 		// effort can remain pinned to the original cacheable baseline.
@@ -471,6 +474,9 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 	persistSteeringHistory := opts.InitialInputCommit
 	pendingAsyncDeliveries := append([]AsyncToolCallRecord(nil), recoveredAsyncDeliveries...)
 	for turn := 0; turn < opts.MaxTurns; turn++ {
+		if !opts.DisableTools {
+			inputItems = ensureExecutionEnvironment(inputItems, opts.WorkDir)
+		}
 		if persistSteeringHistory != nil {
 			if err := persistSteeringHistory(ctx, inputItems); err != nil {
 				return nil, err

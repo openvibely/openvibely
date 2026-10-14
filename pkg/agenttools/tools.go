@@ -10,6 +10,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/openvibely/openvibely/pkg/executionenv"
 )
 
 // Bash timeouts are shared by every provider.
@@ -28,7 +30,7 @@ func Execute(ctx context.Context, workDir, name string, input json.RawMessage) (
 		return execWriteFile(workDir, input)
 	case "edit_file":
 		return execEditFile(workDir, input)
-	case "bash":
+	case "bash", "Bash", "shell":
 		return execBash(ctx, workDir, input)
 	case "list_files":
 		return execListFiles(workDir, input)
@@ -340,7 +342,11 @@ func execBash(ctx context.Context, workDir string, input json.RawMessage) (strin
 	cmdCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(cmdCtx, "bash", "-c", params.Command)
+	shell, err := executionenv.Resolve()
+	if err != nil {
+		return "", err
+	}
+	cmd := exec.CommandContext(cmdCtx, shell.Path, shell.Args(params.Command)...)
 	cmd.Dir = workDir
 
 	env := os.Environ()

@@ -138,7 +138,7 @@ func mapBuiltInToolName(name string) string {
 		return "Write"
 	case "edit_file":
 		return "Edit"
-	case "bash":
+	case "bash", "shell":
 		return "Bash"
 	case "list_files":
 		return "Glob"
@@ -508,7 +508,6 @@ func (a *Adapter) callChatStreaming(ctx context.Context, message string, attachm
 
 	rt := llmcontracts.RuntimeToolsFromContext(ctx)
 	systemPromptStr := llmprompt.BuildAnthropicChatSystemPrompt(agent.Model, isTaskFollowup, chatMode, chatSystemContext, false)
-	systemPromptStr = llmprompt.AppendWorktreeContextPrompt(systemPromptStr, workDir)
 	systemPromptStr = appendToolModeSystemPrompt(systemPromptStr, rt, chatMode, isTaskFollowup)
 	client.History = append(client.History, buildClientHistory(chatHistory)...)
 
@@ -838,7 +837,7 @@ func toolSecondaryInfo(name string, input json.RawMessage) string {
 			parts := splitPath(fp)
 			return parts[len(parts)-1]
 		}
-	case "bash", "Bash":
+	case "bash", "Bash", "shell":
 		if cmd, ok := m["command"].(string); ok {
 			cmd = truncateToolSecondary(cmd, 320)
 			return "$ " + cmd

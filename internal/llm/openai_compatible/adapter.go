@@ -386,7 +386,6 @@ func (a *Adapter) callChatStreaming(ctx context.Context, req llmcontracts.AgentR
 	client.SetCompletionsHistory(history)
 	rt := llmcontracts.RuntimeToolsFromContext(ctx)
 	systemPrompt := llmprompt.BuildChatSystemPrompt(req.Followup, req.ChatMode, req.ChatSystemContext, false)
-	systemPrompt = llmprompt.AppendWorktreeContextPrompt(systemPrompt, workDir)
 	if req.ChatMode == models.ChatModeOrchestrate && !req.Followup {
 		systemPrompt = llmprompt.ApplyChatActionToolMode(systemPrompt, rt.DefinitionNames())
 	}
@@ -623,7 +622,7 @@ func mapBuiltInToolName(name string) string {
 		return "Write"
 	case "edit_file":
 		return "Edit"
-	case "bash":
+	case "bash", "shell":
 		return "Bash"
 	case "list_files":
 		return "Glob"
@@ -918,7 +917,7 @@ func toolSecondaryInfo(name string, input json.RawMessage) string {
 	switch strings.ToLower(strings.TrimSpace(name)) {
 	case "read_file", "write_file", "edit_file":
 		return get("file_path")
-	case "bash":
+	case "bash", "shell":
 		return get("command")
 	case "grep_search":
 		return get("pattern")

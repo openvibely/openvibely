@@ -3,6 +3,7 @@ package agenttools
 import (
 	"fmt"
 
+	"github.com/openvibely/openvibely/pkg/executionenv"
 	"github.com/openvibely/openvibely/pkg/toolschema"
 )
 
@@ -14,7 +15,17 @@ type Definition struct {
 
 // Definitions returns a fresh slice around shared, read-only schemas.
 func Definitions() []Definition {
-	return append([]Definition(nil), definitions...)
+	out := append([]Definition(nil), definitions...)
+	for i := range out {
+		if out[i].Name == "shell" {
+			if shell, err := executionenv.Resolve(); err == nil {
+				out[i].Description += " Selected shell: " + shell.Name + ". " + shell.Instruction()
+			} else {
+				out[i].Description += " Shell unavailable: " + err.Error()
+			}
+		}
+	}
+	return out
 }
 
 var definitions = []Definition{readFileTool, writeFileTool, editFileTool, bashTool, listFilesTool, grepSearchTool}
@@ -92,14 +103,14 @@ var editFileTool = Definition{
 }
 
 var bashTool = Definition{
-	Name:        "bash",
-	Description: fmt.Sprintf("Execute a bash command and return its stdout and stderr. The command runs in the working directory. Use this for running tests, builds, git commands, and other shell operations. Commands have a default timeout of %d seconds.", DefaultBashTimeoutSeconds),
+	Name:        "shell",
+	Description: fmt.Sprintf("Execute a shell command and return its stdout and stderr. The command runs in the working directory. Use this for running tests, builds, git commands, and other shell operations. Commands have a default timeout of %d seconds.", DefaultBashTimeoutSeconds),
 	Schema: &toolschema.Schema{
 		Type: "object",
 		Properties: map[string]*toolschema.Schema{
 			"command": {
 				Type:        "string",
-				Description: "The bash command to execute.",
+				Description: "The command to execute using the selected shell.",
 			},
 			"timeout": {
 				Type:        "integer",
