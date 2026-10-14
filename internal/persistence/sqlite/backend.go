@@ -38,6 +38,8 @@ func NewStores(db *sql.DB, broadcaster *events.Broadcaster) persistence.Stores {
 	automations.SetBroadcaster(broadcaster)
 	executions := NewExecutionRepo(db)
 	executions.SetAutomationRepo(automations)
+	tasks := NewTaskRepo(db, broadcaster)
+	tasks.SetExecutionRepo(executions)
 	alerts := NewAlertRepo(db)
 	alerts.SetAutomationRepo(automations)
 	return persistence.Stores{
@@ -76,7 +78,7 @@ func NewStores(db *sql.DB, broadcaster *events.Broadcaster) persistence.Stores {
 		TaskCommitStats:      NewTaskCommitStatRepo(db),
 		TaskGoals:            NewTaskGoalRepo(db),
 		TaskPullRequests:     NewTaskPullRequestRepo(db),
-		Tasks:                NewTaskRepo(db, broadcaster),
+		Tasks:                tasks,
 		TelegramAuth:         NewTelegramAuthRepo(db),
 		TelegramUserProjects: NewTelegramUserProjectRepo(db),
 		ThreadInputs:         NewThreadInputRepo(db),
