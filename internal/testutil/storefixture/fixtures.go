@@ -27,7 +27,11 @@ type ExecutionUsageRecord struct {
 }
 
 // Fixtures describes test domain state, never tables, query text, or connections.
+type ChannelProjectSelectionCounts struct{ Discord, Slack, Telegram, Email int }
+
 type Fixtures interface {
+	ChannelProjectSelections(context.Context) (ChannelProjectSelectionCounts, error)
+	PendingSteering(context.Context, string, string) ([]models.ThreadInput, error)
 	SetTaskDisplayOrder(context.Context, string, int) error
 	SeedProjects(context.Context, []models.Project) error
 	// SetTaskPromptCreationFailure rejects durable task inserts containing the given prompt fragment until disabled.

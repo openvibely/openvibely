@@ -20,7 +20,6 @@ import (
 	"github.com/openvibely/openvibely/internal/events"
 	llmprompt "github.com/openvibely/openvibely/internal/llm/prompt"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/openvibely/openvibely/internal/testutil/teststores"
 	"github.com/openvibely/openvibely/web/static"
@@ -2098,7 +2097,7 @@ func TestHandler_DirectBrowserAttachmentFailurePreservesReferencedSession(t *tes
 }
 
 func TestHandler_ChatSteer_CreatesPendingSteeringInput(t *testing.T) {
-	h, e, llmConfigRepo := setupTestHandler(t)
+	h, e, llmConfigRepo, db := setupTestHandlerWithStores(t)
 	ctx := context.Background()
 	agent := createAgent(t, llmConfigRepo)
 	project := createProject(t, h, "Chat Steering Project")
@@ -2135,7 +2134,7 @@ func TestHandler_ChatSteer_CreatesPendingSteeringInput(t *testing.T) {
 	history, err := h.execRepo.ListChatHistory(ctx, project.ID, 10)
 	require.NoError(t, err)
 	require.Len(t, history, 1)
-	inputs, err := h.threadInputRepo.(*sqlite.ThreadInputRepo).ListPendingSteering(ctx, activeExec.ID, activeExec.ID)
+	inputs, err := db.Fixtures.PendingSteering(ctx, activeExec.ID, activeExec.ID)
 	require.NoError(t, err)
 	require.Len(t, inputs, 1)
 	assert.Equal(t, "Actually answer about queues", inputs[0].Content)
@@ -2143,7 +2142,7 @@ func TestHandler_ChatSteer_CreatesPendingSteeringInput(t *testing.T) {
 }
 
 func TestHandler_ChatSteer_FailurePreservesAttachmentSessionForRetry(t *testing.T) {
-	h, e, llmConfigRepo, db := setupTestHandlerWithDB(t)
+	h, e, llmConfigRepo, db := setupTestHandlerWithStores(t)
 	ctx := context.Background()
 	agent := createAgent(t, llmConfigRepo)
 	project := createProject(t, h, "Failed Chat steer attachment retry")
@@ -2162,7 +2161,7 @@ func TestHandler_ChatSteer_FailurePreservesAttachmentSessionForRetry(t *testing.
 	attachmentPath := filepath.Join(sessionDir, "retry.txt")
 	require.NoError(t, os.MkdirAll(sessionDir, 0o755))
 	require.NoError(t, os.WriteFile(attachmentPath, []byte("retry content"), 0o600))
-	_, err := db.Exec(`CREATE TRIGGER fail_chat_steer_input BEFORE INSERT ON thread_inputs BEGIN SELECT RAISE(ABORT, 'injected steer failure'); END`)
+	err := db.Fixtures.SetQueuedInputCreationFailure(ctx, "steer with retained attachment", true)
 	require.NoError(t, err)
 
 	form := url.Values{}
@@ -2173,7 +2172,7 @@ func TestHandler_ChatSteer_FailurePreservesAttachmentSessionForRetry(t *testing.
 	require.Equal(t, http.StatusInternalServerError, failed.Code)
 	require.FileExists(t, attachmentPath, "failed steering must retain pending attachments for retry")
 
-	_, err = db.Exec(`DROP TRIGGER fail_chat_steer_input`)
+	err = db.Fixtures.SetQueuedInputCreationFailure(ctx, "steer with retained attachment", false)
 	require.NoError(t, err)
 	retried := htmxPost(e, "/chat/steer?project_id="+project.ID, form)
 	require.Equal(t, http.StatusOK, retried.Code)
@@ -2181,7 +2180,7 @@ func TestHandler_ChatSteer_FailurePreservesAttachmentSessionForRetry(t *testing.
 	assertContains(t, retried, `aria-label="Attachments included with this steering instruction"`)
 	require.FileExists(t, attachmentPath, "successful steering keeps pending files until the steering input is consumed")
 
-	inputs, err := h.threadInputRepo.(*sqlite.ThreadInputRepo).ListPendingSteering(ctx, activeExec.ID, activeExec.ID)
+	inputs, err := db.Fixtures.PendingSteering(ctx, activeExec.ID, activeExec.ID)
 	require.NoError(t, err)
 	require.Len(t, inputs, 1)
 	assert.Equal(t, sessionID, inputs[0].AttachmentSessionID)
@@ -3302,7 +3301,7 @@ func TestRollbackAttachmentPublications_MetadataDeleteFailureRetainsReferencedFi
 			return errors.New("injected chat metadata delete failure")
 		})
 		require.Len(t, errs, 1)
-		persisted, err := h.chatAttachmentRepo.(*sqlite.ChatAttachmentRepo).GetByID(ctx, attachment.ID)
+		persisted, err := h.chatAttachmentRepo.GetByIDForProject(ctx, attachment.ID, chatTask.ProjectID)
 		require.NoError(t, err)
 		require.NotNil(t, persisted)
 		require.FileExists(t, persisted.FilePath, "rollback must retain a file while ChatAttachment metadata still references it")

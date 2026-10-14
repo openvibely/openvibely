@@ -2209,7 +2209,8 @@ func TestHandler_DeleteModel_OnlyModel_Allowed(t *testing.T) {
 	rec := htmxDelete(e, "/models/"+defaultAgent.ID)
 	assertCode(t, rec, http.StatusOK)
 
-	count, err := llmConfigRepo.(*sqlite.LLMConfigRepo).Count(ctx)
+	configs, err := llmConfigRepo.List(ctx)
+	count := len(configs)
 	if err != nil {
 		t.Fatalf("count after delete: %v", err)
 	}
@@ -7627,7 +7628,7 @@ func TestHandler_RunTask_PromotesPendingTaskThreadInputInsteadOfOriginalPrompt(t
 }
 
 func TestHandler_TaskThreadSteer_CreatesPendingSteeringInput(t *testing.T) {
-	h, e, llmConfigRepo := setupTestHandler(t)
+	h, e, llmConfigRepo, db := setupTestHandlerWithStores(t)
 	ctx := context.Background()
 	agent := createAgent(t, llmConfigRepo)
 	project := createProject(t, h, "Thread Steering Project")
@@ -7662,7 +7663,7 @@ func TestHandler_TaskThreadSteer_CreatesPendingSteeringInput(t *testing.T) {
 	if len(execs) != 1 || execs[0].ID != activeExec.ID || execs[0].Status != models.ExecRunning {
 		t.Fatalf("expected active execution to keep running, got %#v", execs)
 	}
-	inputs, err := h.threadInputRepo.(*sqlite.ThreadInputRepo).ListPendingSteering(ctx, activeExec.ID, activeExec.ID)
+	inputs, err := db.Fixtures.PendingSteering(ctx, activeExec.ID, activeExec.ID)
 	require.NoError(t, err)
 	require.Len(t, inputs, 1)
 	assert.Equal(t, "Stop and use the new interface", inputs[0].Content)
@@ -8951,7 +8952,9 @@ func TestHandler_GetTaskThread_ChannelSwarmChildFollowupSurvivesStaleRecoverySwe
 		tk.AgentID = &agent.ID
 	})
 	exec := &models.Execution{TaskID: worker.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "Continue worker implementation", IsFollowup: true}
-	assert.NoError(t, h.execRepo.(*sqlite.ExecutionRepo).CreateDirectTaskFollowup(ctx, exec))
+	started, admissionErr := h.execRepo.CreateDirectTaskFollowupOrQueue(ctx, exec, &models.ThreadInput{AgentConfigID: exec.AgentConfigID, Content: exec.PromptSent})
+	assert.NoError(t, admissionErr)
+	assert.True(t, started)
 	h.StartChannelTaskRun(ctx, service.ChannelTaskRunRequest{
 		ExecID:    exec.ID,
 		TaskID:    worker.ID,

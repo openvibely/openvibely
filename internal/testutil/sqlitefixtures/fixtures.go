@@ -582,3 +582,12 @@ func (f *fixtures) SetTaskDisplayOrder(ctx context.Context, id string, order int
 	_, err := f.db.ExecContext(ctx, `UPDATE tasks SET display_order = ? WHERE id = ?`, order, id)
 	return err
 }
+
+func (f *fixtures) ChannelProjectSelections(ctx context.Context) (storefixture.ChannelProjectSelectionCounts, error) {
+	var counts storefixture.ChannelProjectSelectionCounts
+	err := f.db.QueryRowContext(ctx, `SELECT (SELECT COUNT(*) FROM discord_user_projects),(SELECT COUNT(*) FROM slack_user_projects),(SELECT COUNT(*) FROM telegram_user_projects),(SELECT COUNT(*) FROM email_sender_projects)`).Scan(&counts.Discord, &counts.Slack, &counts.Telegram, &counts.Email)
+	return counts, err
+}
+func (f *fixtures) PendingSteering(ctx context.Context, runID, turnID string) ([]models.ThreadInput, error) {
+	return sqlite.NewThreadInputRepo(f.db).ListPendingSteering(ctx, runID, turnID)
+}

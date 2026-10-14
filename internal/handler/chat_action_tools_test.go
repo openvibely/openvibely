@@ -15,7 +15,6 @@ import (
 	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
-	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/openvibely/openvibely/internal/testutil/teststores"
@@ -159,7 +158,7 @@ func TestHandlerSupportsChatActionToolsResolvesMixtureAggregator(t *testing.T) {
 }
 
 func TestUpdateProjectSettingsCapabilityAndInheritedDefaultModel(t *testing.T) {
-	h, _, llmConfigRepo, db := setupTestHandlerWithDB(t)
+	h, _, llmConfigRepo, db := setupTestHandlerWithStores(t)
 	ctx := context.Background()
 	project := &models.Project{Name: "Chat Project Settings"}
 	require.NoError(t, h.projectRepo.Create(ctx, project))
@@ -243,7 +242,7 @@ func TestUpdateProjectSettingsCapabilityAndInheritedDefaultModel(t *testing.T) {
 	require.NotNil(t, resolved)
 	require.Equal(t, model.ID, resolved.ID)
 
-	_, err = db.ExecContext(ctx, `SELECT 1`)
+	_, err = db.Projects.GetByID(ctx, project.ID)
 	require.NoError(t, err)
 }
 
@@ -339,7 +338,7 @@ func TestListCapabilitiesExecutorIncludesSelectedMemoryHandles(t *testing.T) {
 }
 
 func TestViewSwarmRuntimeToolResolvesCurrentTaskThreadParent(t *testing.T) {
-	h, _, _, _ := setupTestHandlerWithDB(t)
+	h, _, _, _ := setupTestHandlerWithStores(t)
 	project := createProject(t, h, "Current Swarm Project")
 	parent := createTask(t, h, project.ID, "Current parent", func(task *models.Task) {
 		task.SwarmRole = models.SwarmRoleParent
@@ -458,9 +457,9 @@ func TestListChannelsPlanModeReturnsPromptSafeStatus(t *testing.T) {
 
 	require.NoError(t, webhookRepo.Create(ctx, &models.WebhookEndpoint{ProjectID: project.ID, Name: "Deploy Alerts", Enabled: true, PathToken: secretValues[9], Secret: secretValues[8], DefaultPriority: 2}))
 	require.NoError(t, webhookRepo.Create(ctx, &models.WebhookEndpoint{ProjectID: project.ID, Name: "Disabled Hook", Enabled: false, DefaultPriority: 2}))
-	require.NoError(t, channelTargetRepo.(*sqlite.ChannelTargetRepo).Upsert(ctx, models.ChannelTarget{ID: persistence.NewID(), ProjectID: project.ID, Platform: "slack", TargetKind: "channel", Name: "ops", TargetID: secretValues[10], ThreadID: secretValues[11], Home: true}))
-	require.NoError(t, channelTargetRepo.(*sqlite.ChannelTargetRepo).Upsert(ctx, models.ChannelTarget{ID: persistence.NewID(), ProjectID: project.ID, Platform: "slack", TargetKind: "user", TargetID: "U123"}))
-	require.NoError(t, channelTargetRepo.(*sqlite.ChannelTargetRepo).Upsert(ctx, models.ChannelTarget{ID: persistence.NewID(), ProjectID: project.ID, Platform: "email", TargetKind: "email", Name: "team", TargetID: "team@example.com", DefaultSubject: secretValues[12]}))
+	require.NoError(t, db.Fixtures.SeedChannelTarget(ctx, models.ChannelTarget{ID: persistence.NewID(), ProjectID: project.ID, Platform: "slack", TargetKind: "channel", Name: "ops", TargetID: secretValues[10], ThreadID: secretValues[11], Home: true}))
+	require.NoError(t, db.Fixtures.SeedChannelTarget(ctx, models.ChannelTarget{ID: persistence.NewID(), ProjectID: project.ID, Platform: "slack", TargetKind: "user", TargetID: "U123"}))
+	require.NoError(t, db.Fixtures.SeedChannelTarget(ctx, models.ChannelTarget{ID: persistence.NewID(), ProjectID: project.ID, Platform: "email", TargetKind: "email", Name: "team", TargetID: "team@example.com", DefaultSubject: secretValues[12]}))
 
 	rt := h.buildChatActionToolRuntimeFromDefs(
 		streamingResponseParams{ProjectID: project.ID, ChatMode: models.ChatModePlan},
@@ -936,7 +935,7 @@ func TestViewPulseRuntimeToolQueuedOnlyAgenda(t *testing.T) {
 }
 
 func TestViewPulseRuntimeToolBlockedTasksAreCompactAndProjectScoped(t *testing.T) {
-	h, _, _, _ := setupTestHandlerWithDB(t)
+	h, _, _, _ := setupTestHandlerWithStores(t)
 	ctx := context.Background()
 	project := createProject(t, h, "Blocked Pulse Project")
 	foreign := createProject(t, h, "Foreign Blocked Pulse Project")
@@ -1218,7 +1217,7 @@ func TestCancelTaskRuntimeToolReturnsNotCancellableWithoutMutation(t *testing.T)
 }
 
 func TestWebRuntimeToolsUseSharedInputDecoder(t *testing.T) {
-	h, _, _, _ := setupTestHandlerWithDB(t)
+	h, _, _, _ := setupTestHandlerWithStores(t)
 	project := createProject(t, h, "Shared Web Runtime Decoder")
 	handlers := h.chatActionHandlers(
 		streamingResponseParams{ExecID: "shared-web-runtime-decoder", ProjectID: project.ID},
@@ -1266,7 +1265,7 @@ func TestCreateTaskRuntimeToolNormalizesAndDecodesInput(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			h, _, _, _ := setupTestHandlerWithDB(t)
+			h, _, _, _ := setupTestHandlerWithStores(t)
 			project := createProject(t, h, "Runtime input "+tt.name)
 			handler := h.chatActionHandlers(
 				streamingResponseParams{ExecID: "runtime-input-exec", ProjectID: project.ID},
@@ -1466,7 +1465,7 @@ func TestCreateTaskRuntimeToolDecodesTypedChainConfigDirectly(t *testing.T) {
 func TestScheduleTaskRuntimeToolExecutesTypedRequest(t *testing.T) {
 	for _, surface := range []chatcontrol.Surface{chatcontrol.SurfaceWeb, chatcontrol.SurfaceAPI} {
 		t.Run(string(surface), func(t *testing.T) {
-			h, _, _, _ := setupTestHandlerWithDB(t)
+			h, _, _, _ := setupTestHandlerWithStores(t)
 			ctx := context.Background()
 			project := createProject(t, h, "Typed Schedule Project "+string(surface))
 			foreignProject := createProject(t, h, "Foreign Schedule Project "+string(surface))
@@ -1567,7 +1566,7 @@ func TestScheduleTaskRuntimeToolDefaultsScheduleFields(t *testing.T) {
 }
 
 func TestScheduleRuntimeToolValidationErrorsAndNoChange(t *testing.T) {
-	h, _, _, _ := setupTestHandlerWithDB(t)
+	h, _, _, _ := setupTestHandlerWithStores(t)
 	ctx := context.Background()
 	project := createProject(t, h, "Runtime Schedule Validation Project")
 	task := createTask(t, h, project.ID, "Schedule validation target")
@@ -1821,7 +1820,7 @@ func TestChatActionHandlers_CoverageWebAndAPI(t *testing.T) {
 }
 
 func TestListTasksRuntimeTool_WebAndAPIExecutableAndPlanExposed(t *testing.T) {
-	h, _, _, _ := setupTestHandlerWithDB(t)
+	h, _, _, _ := setupTestHandlerWithStores(t)
 	project := createProject(t, h, "List Tasks Handler Project")
 	target := createTask(t, h, project.ID, "Implement issue 25")
 	createTask(t, h, project.ID, "Unrelated handler task")
@@ -1958,7 +1957,7 @@ func TestViewUsageAnalyticsRuntimeTool_MultipleModelsProviderFilterAndCostAvaila
 }
 
 func TestViewUsageAnalyticsRuntimeTool_SanitizesAccountLimitSummaries(t *testing.T) {
-	h, _, llmConfigRepo, _ := setupTestHandlerWithDB(t)
+	h, _, llmConfigRepo, env := setupTestHandlerWithStores(t)
 	ctx := context.Background()
 	project := createProject(t, h, "Usage Account Project")
 	cfg := &models.LLMConfig{
@@ -1974,7 +1973,7 @@ func TestViewUsageAnalyticsRuntimeTool_SanitizesAccountLimitSummaries(t *testing
 	used := 91.0
 	window := 300
 	reset := time.Now().UTC().Add(time.Hour).Format(time.RFC3339)
-	require.NoError(t, h.usageRepo.(*sqlite.UsageRepo).CreateAccountUsageSnapshot(ctx, &models.AccountUsageSnapshot{
+	require.NoError(t, env.Fixtures.SeedAccountUsageSnapshot(ctx, &models.AccountUsageSnapshot{
 		Provider:             "openai",
 		AccountID:            cfg.OAuthAccountID,
 		AgentConfigID:        cfg.ID,
@@ -2015,7 +2014,7 @@ func TestViewUsageAnalyticsRuntimeTool_CapabilityRegistration(t *testing.T) {
 		}
 		require.Truef(t, found, "view_usage_analytics definition missing in mode %s", mode)
 	}
-	h, _, _, _ := setupTestHandlerWithDB(t)
+	h, _, _, _ := setupTestHandlerWithStores(t)
 	project := createProject(t, h, "Usage Capability Project")
 	rt := h.buildChatActionToolRuntimeFromDefs(
 		streamingResponseParams{ProjectID: project.ID, ChatMode: models.ChatModePlan},
@@ -2290,7 +2289,7 @@ func TestCreateTaskRuntimeTool_OmittedCategoryAutoStartActivatesAfterAttachmentC
 // in the summary or when a referenced task ID cannot be verified in the
 // current project's task store.
 func TestCreateTaskRuntimeTool_FailsLoudlyOnPersistenceFailure(t *testing.T) {
-	h, _, _, db := setupTestHandlerWithDB(t)
+	h, _, _, db := setupTestHandlerWithStores(t)
 	ctx := context.Background()
 	project := createProject(t, h, "Create Task Failure Project")
 	input := json.RawMessage(`{"title":"Fix bug","prompt":"do it"}`)
@@ -2307,7 +2306,7 @@ func TestCreateTaskRuntimeTool_FailsLoudlyOnPersistenceFailure(t *testing.T) {
 	})
 
 	t.Run("system Memory Curator assignment", func(t *testing.T) {
-		agentRepo := teststores.Of(db).Agents
+		agentRepo := db.Agents
 		h.SetAgentRepo(agentRepo)
 		memoryCurator := &models.Agent{
 			Name:       "System: Memory Curator",
@@ -2369,7 +2368,7 @@ func TestCreateTaskRuntimeTool_FailsLoudlyOnPersistenceFailure(t *testing.T) {
 // email_sender_projects). The web/API path is informational: the frontend manages
 // the active project_id, so the handler must not touch channel tables.
 func TestWebAPISwitchProject_IsInformationalOnly(t *testing.T) {
-	h, _, _, db := setupTestHandlerWithDB(t)
+	h, _, _, db := setupTestHandlerWithStores(t)
 	ctx := context.Background()
 
 	project1 := createProject(t, h, "Alpha")
@@ -2396,22 +2395,9 @@ func TestWebAPISwitchProject_IsInformationalOnly(t *testing.T) {
 		t.Fatalf("expected informational response mentioning Alpha, got: %q", result)
 	}
 
-	// Assert no channel-specific persistence rows were written.
-	channelTables := []string{
-		"discord_user_projects",
-		"slack_user_projects",
-		"telegram_user_projects",
-		"email_sender_projects",
-	}
-	for _, table := range channelTables {
-		var count int
-		if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM "+table).Scan(&count); err != nil {
-			t.Fatalf("count(%s): %v", table, err)
-		}
-		if count != 0 {
-			t.Errorf("web/API switch_project must not write to %s: found %d row(s)", table, count)
-		}
-	}
+	counts, err := db.Fixtures.ChannelProjectSelections(ctx)
+	require.NoError(t, err)
+	require.Zero(t, counts, "web/API switch_project must not persist channel project selections")
 }
 
 func TestGitHubOpenPullRequestRuntimeToolCreatesAndPersistsPR(t *testing.T) {
@@ -2660,7 +2646,7 @@ func TestGitHubPRRuntimeToolsShareTargetRejections(t *testing.T) {
 }
 
 func TestInteractiveGitHubRuntimeExplicitRepositoryUsesProjectEndpointByParsedHost(t *testing.T) {
-	h, _, _, _ := setupTestHandlerWithDB(t)
+	h, _, _, _ := setupTestHandlerWithStores(t)
 	ctx := context.Background()
 	const enterpriseEndpoint = "https://github.example.com/api/v3"
 	project := &models.Project{
@@ -3244,7 +3230,7 @@ func TestListChannelsDirectGitHubAppConfiguredNotConnected(t *testing.T) {
 }
 
 func TestListTasksStrictNullFiltersPreserveBacklogResults(t *testing.T) {
-	h, _, _, _ := setupTestHandlerWithDB(t)
+	h, _, _, _ := setupTestHandlerWithStores(t)
 	project := createProject(t, h, "Strict task lookup")
 	pending := createTask(t, h, project.ID, "Pending backlog", func(task *models.Task) { task.Category = models.CategoryBacklog; task.Status = models.StatusPending })
 	failed := createTask(t, h, project.ID, "Failed backlog", func(task *models.Task) { task.Category = models.CategoryBacklog; task.Status = models.StatusFailed })

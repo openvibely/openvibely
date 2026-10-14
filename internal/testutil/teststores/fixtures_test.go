@@ -526,3 +526,34 @@ func TestContextIOCountsPhysicalReadsAndWrites(t *testing.T) {
 		})
 	}
 }
+
+func TestChannelSelectionSnapshotSharesStoresAndIsolation(t *testing.T) {
+	for _, production := range []bool{false, true} {
+		name := "isolated"
+		if production {
+			name = "production"
+		}
+		t.Run(name, func(t *testing.T) {
+			var opts []teststores.Option
+			if production {
+				opts = append(opts, teststores.WithProductionTopology())
+			}
+			env := teststores.New(t, opts...)
+			ctx := t.Context()
+			before, err := env.Fixtures.ChannelProjectSelections(ctx)
+			require.NoError(t, err)
+			require.Zero(t, before)
+			require.NoError(t, env.DiscordUserProjects.SetUserProject(ctx, "discord-user", "default"))
+			require.NoError(t, env.SlackUserProjects.SetUserProject(ctx, "team", "slack-user", "default"))
+			require.NoError(t, env.TelegramUserProjects.SetUserProject(ctx, "71", "default"))
+			require.NoError(t, env.EmailSenderProjects.SetSenderProject(ctx, "test@example.com", "default"))
+			counts, err := env.Fixtures.ChannelProjectSelections(ctx)
+			require.NoError(t, err)
+			require.Equal(t, storefixture.ChannelProjectSelectionCounts{Discord: 1, Slack: 1, Telegram: 1, Email: 1}, counts)
+			other := teststores.New(t)
+			empty, err := other.Fixtures.ChannelProjectSelections(ctx)
+			require.NoError(t, err)
+			require.Zero(t, empty)
+		})
+	}
+}
