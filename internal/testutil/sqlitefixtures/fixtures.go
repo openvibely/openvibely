@@ -500,3 +500,8 @@ func (f *fixtures) ExecutionUsage(ctx context.Context, id string) ([]storefixtur
 	}
 	return records, rows.Err()
 }
+
+func (f *fixtures) SetExecutionTerminalState(ctx context.Context, id string, status models.ExecutionStatus, completedAt time.Time) error {
+	_, err := f.db.ExecContext(ctx, `UPDATE executions SET status = ?, completed_at = ? WHERE id = ?`, status, completedAt, id)
+	return err
+}

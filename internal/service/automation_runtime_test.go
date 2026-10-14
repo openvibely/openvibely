@@ -243,15 +243,16 @@ func TestGitHubIssueRuntimeMyAssignedIssuesValidatesPaginationBeforeRepoResoluti
 }
 
 func TestAutomationManualRunUsesExistingDispatchWithoutChangingSchedule(t *testing.T) {
-	fixture := newAutomationRuntimeFixture(t, AutomationAdapterNativeSDLC)
+	fixture := newAutomationRuntimeStoreFixture(t, AutomationAdapterNativeSDLC)
 	ctx := context.Background()
 	triggerNode := automationNodeByKey(t, fixture.definition, "vision_suggestions")
-	_, err := fixture.db.Exec(`INSERT INTO automation_invocations
-		(id, project_id, automation_id, version_id, trigger_node_id, trigger_resource_type, trigger_resource_id, occurrence_key, status, started_at, completed_at)
-		VALUES (?, ?, ?, ?, ?, 'manual', ?, 'manual:previous-failed', 'failed', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
-		"previous-failed-manual-run", fixture.project.ID, fixture.definition.Automation.ID, fixture.definition.Version.ID, triggerNode.ID, fixture.schedule.ID)
-	require.NoError(t, err)
-	_, _, err = fixture.repo.RecordProjectionEvent(ctx, persistence.AutomationProjectionEvent{
+	now := time.Now().UTC()
+	require.NoError(t, fixture.stores.Fixtures.SeedAutomationInvocation(ctx, models.AutomationInvocation{
+		ID: "previous-failed-manual-run", ProjectID: fixture.project.ID, AutomationID: fixture.definition.Automation.ID,
+		VersionID: fixture.definition.Version.ID, TriggerNodeID: triggerNode.ID, TriggerResourceType: "manual",
+		TriggerResourceID: fixture.schedule.ID, OccurrenceKey: "manual:previous-failed", Status: "failed", CompletedAt: &now,
+	}))
+	_, _, err := fixture.repo.RecordProjectionEvent(ctx, persistence.AutomationProjectionEvent{
 		Context: models.AutomationContext{ProjectID: fixture.project.ID},
 		Binding: models.AutomationBinding{AutomationID: fixture.definition.Automation.ID, VersionID: fixture.definition.Version.ID,
 			NodeID: triggerNode.ID, InvocationID: "previous-failed-manual-run"},
@@ -259,8 +260,7 @@ func TestAutomationManualRunUsesExistingDispatchWithoutChangingSchedule(t *testi
 		Resources: []models.AutomationActivityResource{{ResourceType: "task", ResourceID: fixture.task.ID}},
 	})
 	require.NoError(t, err)
-	_, err = fixture.db.Exec(`UPDATE tasks SET status = 'failed' WHERE id = ?`, fixture.task.ID)
-	require.NoError(t, err)
+	require.NoError(t, fixture.stores.Fixtures.SetTaskStatus(ctx, fixture.task.ID, models.TaskStatus("failed")))
 	before, err := fixture.schedRepo.GetByID(ctx, fixture.schedule.ID)
 	require.NoError(t, err)
 
@@ -314,10 +314,8 @@ func TestAutomationManualRunUsesExistingDispatchWithoutChangingSchedule(t *testi
 	}
 	require.True(t, activityNodeFound)
 	require.NoError(t, fixture.repo.MarkDispatchSubmitted(ctx, leased.ID, "manual-run-test", execution.ID))
-	_, err = fixture.db.Exec(`UPDATE executions SET status = 'completed', completed_at = CURRENT_TIMESTAMP WHERE id = ?`, execution.ID)
-	require.NoError(t, err)
-	_, err = fixture.db.Exec(`UPDATE tasks SET status = 'completed' WHERE id = ?`, fixture.task.ID)
-	require.NoError(t, err)
+	require.NoError(t, fixture.stores.Fixtures.SetExecutionTerminalState(ctx, execution.ID, models.ExecCompleted, time.Now().UTC()))
+	require.NoError(t, fixture.stores.Fixtures.SetTaskStatus(ctx, fixture.task.ID, models.TaskStatus("completed")))
 	require.NoError(t, fixture.repo.CompleteDispatch(ctx, leased.ID, execution.ID, models.ExecCompleted, ""))
 
 	dueSchedule, err := fixture.schedRepo.GetByID(ctx, fixture.schedule.ID)
@@ -934,7 +932,6 @@ func TestAutomationRuntimeMultipleCapacityQueuedDispatchesDrainFIFOWithoutDuplic
 
 	projectRepo := fixture.stores.Projects
 	execRepo := fixture.stores.Executions
-	execRepo.(*sqlite.ExecutionRepo).SetAutomationRepo(fixture.repo.(*sqlite.AutomationRepo))
 	llmSvc := NewLLMService(llmConfigRepo, execRepo, fixture.taskRepo, projectRepo, fixture.schedRepo, fixture.stores.Attachments)
 	mockLLM := testutil.NewMockLLMCaller()
 	mockLLM.Response = "multiple queued Automation tasks completed"
@@ -1082,7 +1079,6 @@ func TestAutomationRuntimeCapacityQueueRespectsProjectAndModelLimits(t *testing.
 				require.NoError(t, projectRepo.Update(ctx, &fixture.project))
 			}
 			execRepo := fixture.stores.Executions
-			execRepo.(*sqlite.ExecutionRepo).SetAutomationRepo(fixture.repo.(*sqlite.AutomationRepo))
 			llmSvc := NewLLMService(llmConfigRepo, execRepo, fixture.taskRepo, projectRepo, fixture.schedRepo, fixture.stores.Attachments)
 			mockLLM := testutil.NewMockLLMCaller()
 			mockLLM.Response = "capacity-limited Automation completed"
@@ -1169,7 +1165,6 @@ func TestAutomationRuntimeModelTransferDoesNotHoldGlobalCapacity(t *testing.T) {
 
 	projectRepo := fixture.stores.Projects
 	execRepo := fixture.stores.Executions
-	execRepo.(*sqlite.ExecutionRepo).SetAutomationRepo(fixture.repo.(*sqlite.AutomationRepo))
 	llmSvc := NewLLMService(llmConfigRepo, execRepo, fixture.taskRepo, projectRepo, fixture.schedRepo, fixture.stores.Attachments)
 	mockLLM := testutil.NewMockLLMCaller()
 	mockLLM.Response = "capacity transfer completed"
@@ -1287,7 +1282,6 @@ func TestAutomationRuntimeCancelCapacityQueuedDispatchCleansQueueAndReservation(
 
 	projectRepo := fixture.stores.Projects
 	execRepo := fixture.stores.Executions
-	execRepo.(*sqlite.ExecutionRepo).SetAutomationRepo(fixture.repo.(*sqlite.AutomationRepo))
 	llmSvc := NewLLMService(llmConfigRepo, execRepo, fixture.taskRepo, projectRepo, fixture.schedRepo, fixture.stores.Attachments)
 	mockLLM := testutil.NewMockLLMCaller()
 	mockLLM.Response = "should not execute"
@@ -1346,7 +1340,6 @@ func TestAutomationRuntimePreparedDispatchWaitsPendingForGlobalCapacity(t *testi
 
 	projectRepo := fixture.stores.Projects
 	execRepo := fixture.stores.Executions
-	execRepo.(*sqlite.ExecutionRepo).SetAutomationRepo(fixture.repo.(*sqlite.AutomationRepo))
 	llmSvc := NewLLMService(llmConfigRepo, execRepo, fixture.taskRepo, projectRepo, fixture.schedRepo, fixture.stores.Attachments)
 	mockLLM := testutil.NewMockLLMCaller()
 	mockLLM.Response = "automation capacity run completed"
@@ -1413,7 +1406,6 @@ func TestAutomationRuntimeCapacityQueuedDispatchUsesEditedTaskAndModelCapacity(t
 
 	projectRepo := fixture.stores.Projects
 	execRepo := fixture.stores.Executions
-	execRepo.(*sqlite.ExecutionRepo).SetAutomationRepo(fixture.repo.(*sqlite.AutomationRepo))
 	llmSvc := NewLLMService(llmConfigRepo, execRepo, fixture.taskRepo, projectRepo, fixture.schedRepo, fixture.stores.Attachments)
 	mockLLM := testutil.NewMockLLMCaller()
 	mockLLM.Response = "edited automation run completed"
@@ -1516,7 +1508,6 @@ func TestAutomationRuntimeCancellationDuringAdmittedModelTransferTerminalizesDis
 
 	projectRepo := fixture.stores.Projects
 	execRepo := fixture.stores.Executions
-	execRepo.(*sqlite.ExecutionRepo).SetAutomationRepo(fixture.repo.(*sqlite.AutomationRepo))
 	llmSvc := NewLLMService(llmConfigRepo, execRepo, fixture.taskRepo, projectRepo, fixture.schedRepo, fixture.stores.Attachments)
 	mockLLM := testutil.NewMockLLMCaller()
 	llmSvc.SetLLMCaller(mockLLM)
@@ -1611,7 +1602,6 @@ func TestAutomationRuntimeSetupFailureAfterClaimTerminalizesDispatch(t *testing.
 
 	projectRepo := fixture.stores.Projects
 	execRepo := fixture.stores.Executions
-	execRepo.(*sqlite.ExecutionRepo).SetAutomationRepo(fixture.repo.(*sqlite.AutomationRepo))
 	llmSvc := NewLLMService(llmConfigRepo, execRepo, fixture.taskRepo, projectRepo, fixture.schedRepo, fixture.stores.Attachments)
 	mockLLM := testutil.NewMockLLMCaller()
 	llmSvc.SetLLMCaller(mockLLM)
@@ -1686,7 +1676,6 @@ func TestAutomationRuntimePreparedDispatchUsesExistingWorkerPipeline(t *testing.
 	require.NoError(t, fixture.db.QueryRow(`UPDATE tasks SET agent_id = ? WHERE id = ? RETURNING id`, agent.ID, fixture.task.ID).Scan(new(string)))
 	projectRepo := fixture.stores.Projects
 	execRepo := fixture.stores.Executions
-	execRepo.(*sqlite.ExecutionRepo).SetAutomationRepo(fixture.repo.(*sqlite.AutomationRepo))
 	llmSvc := NewLLMService(llmConfigRepo, execRepo, fixture.taskRepo, projectRepo, fixture.schedRepo, fixture.stores.Attachments)
 	mockLLM := testutil.NewMockLLMCaller()
 	mockLLM.Response = "automation run completed"
@@ -4914,8 +4903,7 @@ func TestAutomationRuntimeNativeNotificationRequiresProducerActionEdge(t *testin
 	})
 	require.NoError(t, err)
 
-	alertRepo := teststores.Of(h.db).Alerts
-	alertRepo.(*sqlite.AlertRepo).SetAutomationRepo(h.automationRepo.(*sqlite.AutomationRepo))
+	alertRepo := h.stores.Alerts
 	alertSvc := NewAlertService(alertRepo, nil)
 	create := func(nodeKey, key string) (*models.Alert, error) {
 		node := automationNodeByKey(t, saved.Definition, nodeKey)
@@ -5023,7 +5011,7 @@ func requireAlertApprovedDecisionProjection(t *testing.T, db *sql.DB, projectID,
 }
 
 func TestAutomationRuntimeNativeInboxUsesConfiguredImplementationGoal(t *testing.T) {
-	h := newAutomationSaveHarness(t, "Native implementation goal")
+	h := newAutomationSaveStoreHarness(t, "Native implementation goal")
 	ctx := context.Background()
 	candidate := customNativeMailboxCandidate("Native implementation goal")
 	const configuredGoal = "Complete the approved change with focused regression coverage."
@@ -5033,8 +5021,7 @@ func TestAutomationRuntimeNativeInboxUsesConfiguredImplementationGoal(t *testing
 	})
 	require.NoError(t, err)
 
-	alertRepo := teststores.Of(h.db).Alerts
-	alertRepo.(*sqlite.AlertRepo).SetAutomationRepo(h.automationRepo.(*sqlite.AutomationRepo))
+	alertRepo := h.stores.Alerts
 	alertSvc := NewAlertService(alertRepo, nil)
 	producer := automationNodeByKey(t, saved.Definition, "custom_producer")
 	producerCtx := WithAutomationContext(ctx, models.AutomationContext{ProjectID: h.project.ID, Bindings: []models.AutomationBinding{{
@@ -5069,7 +5056,7 @@ func TestAutomationRuntimeNativeInboxUsesConfiguredImplementationGoal(t *testing
 	linkedAlert, err := alertSvc.GetByID(ctx, h.project.ID, alert.ID)
 	require.NoError(t, err)
 	require.NotNil(t, linkedAlert.ImplementationTaskID)
-	goal, err := teststores.Of(h.db).TaskGoals.GetByTaskID(ctx, *linkedAlert.ImplementationTaskID)
+	goal, err := h.stores.TaskGoals.GetByTaskID(ctx, *linkedAlert.ImplementationTaskID)
 	require.NoError(t, err)
 	require.NotNil(t, goal)
 	require.Equal(t, configuredGoal, goal.Objective)
@@ -5083,8 +5070,7 @@ func TestAutomationRuntimeNativeNotificationCreationRepairsStaleProducerBindingA
 	first, err := h.compiler.Save(ctx, AutomationSaveRequest{ProjectID: h.project.ID, Source: "template", CreatedVia: "web", Candidate: candidate})
 	require.NoError(t, err)
 
-	alertRepo := teststores.Of(h.db).Alerts
-	alertRepo.(*sqlite.AlertRepo).SetAutomationRepo(h.automationRepo.(*sqlite.AutomationRepo))
+	alertRepo := h.stores.Alerts
 	alertSvc := NewAlertService(alertRepo, nil)
 	producer := automationNodeByKey(t, first.Definition, "vision_suggestions")
 	producerTaskID := automationResourceID(t, first.Definition, "vision_suggestions", "task")
@@ -5115,8 +5101,7 @@ func TestAutomationRuntimeNativeNotificationCreationReusesIdempotencyKeyAfterGra
 	first, err := h.compiler.Save(ctx, AutomationSaveRequest{ProjectID: h.project.ID, Source: "manual", CreatedVia: "web", Candidate: candidate})
 	require.NoError(t, err)
 
-	alertRepo := teststores.Of(h.db).Alerts
-	alertRepo.(*sqlite.AlertRepo).SetAutomationRepo(h.automationRepo.(*sqlite.AutomationRepo))
+	alertRepo := h.stores.Alerts
 	alertSvc := NewAlertService(alertRepo, nil)
 	createFromProducer := func(definition *models.AutomationDefinition, title string) (*models.Alert, error) {
 		producer := automationNodeByKey(t, definition, "custom_producer")
@@ -5150,8 +5135,7 @@ func TestAutomationRuntimeNativeNotificationCreationAllowsDistinctIdempotencyKey
 	definition, err := h.compiler.Save(ctx, AutomationSaveRequest{ProjectID: h.project.ID, Source: "manual", CreatedVia: "web", Candidate: candidate})
 	require.NoError(t, err)
 
-	alertRepo := teststores.Of(h.db).Alerts
-	alertRepo.(*sqlite.AlertRepo).SetAutomationRepo(h.automationRepo.(*sqlite.AutomationRepo))
+	alertRepo := h.stores.Alerts
 	alertSvc := NewAlertService(alertRepo, nil)
 	producer := automationNodeByKey(t, definition.Definition, "custom_producer")
 	producerCtx := WithAutomationContext(ctx, models.AutomationContext{ProjectID: h.project.ID, Bindings: []models.AutomationBinding{{
@@ -5167,14 +5151,13 @@ func TestAutomationRuntimeNativeNotificationCreationAllowsDistinctIdempotencyKey
 }
 
 func TestAutomationRuntimeNativeExistingNotificationListScopesToAutomationOwnership(t *testing.T) {
-	h := newAutomationSaveHarness(t, "Native existing notification list")
+	h := newAutomationSaveStoreHarness(t, "Native existing notification list")
 	ctx := context.Background()
 	candidate := customNativeMailboxCandidate("Native existing notification list")
 	definition, err := h.compiler.Save(ctx, AutomationSaveRequest{ProjectID: h.project.ID, Source: "manual", CreatedVia: "web", Candidate: candidate})
 	require.NoError(t, err)
 
-	alertRepo := teststores.Of(h.db).Alerts
-	alertRepo.(*sqlite.AlertRepo).SetAutomationRepo(h.automationRepo.(*sqlite.AutomationRepo))
+	alertRepo := h.stores.Alerts
 	alertSvc := NewAlertService(alertRepo, nil)
 	producer := automationNodeByKey(t, definition.Definition, "custom_producer")
 	producerCtx := WithAutomationContext(ctx, models.AutomationContext{ProjectID: h.project.ID, Bindings: []models.AutomationBinding{{
@@ -5223,8 +5206,7 @@ func TestAutomationRuntimeNativeInboxOwnershipSurvivesCompatibleAutomationUpdate
 	first, err := h.compiler.Save(ctx, AutomationSaveRequest{ProjectID: h.project.ID, Source: "manual", CreatedVia: "web", Candidate: candidate})
 	require.NoError(t, err)
 
-	alertRepo := teststores.Of(h.db).Alerts
-	alertRepo.(*sqlite.AlertRepo).SetAutomationRepo(h.automationRepo.(*sqlite.AutomationRepo))
+	alertRepo := h.stores.Alerts
 	alertSvc := NewAlertService(alertRepo, nil)
 	producer := automationNodeByKey(t, first.Definition, "custom_producer")
 	producerCtx := WithAutomationContext(ctx, models.AutomationContext{ProjectID: h.project.ID, Bindings: []models.AutomationBinding{{
@@ -5304,13 +5286,13 @@ func customGitHubMailboxCandidate(name string) models.AutomationDraftCandidate {
 func TestAutomationRuntimeGitHubInboxOwnershipSurvivesCompatibleAutomationUpdate(t *testing.T) {
 	h := newAutomationSaveHarness(t, "GitHub ownership replacement")
 	ctx := context.Background()
-	projectRepo := teststores.Of(h.db).Projects
+	projectRepo := h.stores.Projects
 	h.project.RepoURL = "https://github.com/example/runtime.git"
 	require.NoError(t, projectRepo.Update(ctx, &h.project))
-	settingsRepo := teststores.Of(h.db).Settings
+	settingsRepo := h.stores.Settings
 	require.NoError(t, settingsRepo.Set(ctx, GitHubSettingAuthMode, GitHubAuthModePAT))
 	require.NoError(t, settingsRepo.Set(ctx, GitHubSettingPAT, "test-token"))
-	githubAuthRepo := teststores.Of(h.db).GitHubAuth
+	githubAuthRepo := h.stores.GitHubAuth
 	require.NoError(t, githubAuthRepo.UpsertAuthorizedActor(ctx, &models.GitHubAuthorizedActor{GitHubLogin: "automation-bot"}))
 	h.compiler.validator.SetCapabilityDependencies(projectRepo, settingsRepo, githubAuthRepo)
 	candidate := customGitHubMailboxCandidate("GitHub ownership replacement")
@@ -5356,8 +5338,7 @@ func TestAutomationRuntimeNativeInboxOwnershipMovesToCurrentRenamedMailbox(t *te
 	first, err := h.compiler.Save(ctx, AutomationSaveRequest{ProjectID: h.project.ID, Source: "manual", CreatedVia: "web", Candidate: candidate})
 	require.NoError(t, err)
 
-	alertRepo := teststores.Of(h.db).Alerts
-	alertRepo.(*sqlite.AlertRepo).SetAutomationRepo(h.automationRepo.(*sqlite.AutomationRepo))
+	alertRepo := h.stores.Alerts
 	alertSvc := NewAlertService(alertRepo, nil)
 	producer := automationNodeByKey(t, first.Definition, "custom_producer")
 	producerCtx := WithAutomationContext(ctx, models.AutomationContext{ProjectID: h.project.ID, Bindings: []models.AutomationBinding{{
@@ -5408,8 +5389,7 @@ func TestAutomationRuntimeCustomNativeInboxRequiresSameAutomationOwnership(t *te
 	second, err := h.compiler.Save(ctx, AutomationSaveRequest{ProjectID: h.project.ID, Source: "manual", CreatedVia: "web", Candidate: customNativeMailboxCandidate("Second Native mailbox")})
 	require.NoError(t, err)
 
-	alertRepo := teststores.Of(h.db).Alerts
-	alertRepo.(*sqlite.AlertRepo).SetAutomationRepo(h.automationRepo.(*sqlite.AutomationRepo))
+	alertRepo := h.stores.Alerts
 	alertSvc := NewAlertService(alertRepo, nil)
 	createApproved := func(definition *models.AutomationDefinition, title, key string) *models.Alert {
 		producer := automationNodeByKey(t, definition, "custom_producer")
@@ -5495,8 +5475,7 @@ func TestAutomationRuntimeCustomNativeMailboxUsesRoleTopologyInsteadOfMaintained
 	require.NoError(t, err)
 	producer := automationNodeByKey(t, saved.Definition, "custom_producer")
 	producerTaskID := automationResourceID(t, saved.Definition, "custom_producer", "task")
-	alertRepo := teststores.Of(h.db).Alerts
-	alertRepo.(*sqlite.AlertRepo).SetAutomationRepo(h.automationRepo.(*sqlite.AutomationRepo))
+	alertRepo := h.stores.Alerts
 	alertSvc := NewAlertService(alertRepo, nil)
 	ctx = WithAutomationContext(ctx, models.AutomationContext{ProjectID: h.project.ID, Bindings: []models.AutomationBinding{{AutomationID: saved.Definition.Automation.ID, VersionID: saved.Definition.Version.ID, NodeID: producer.ID}}})
 	alert, err := alertSvc.CreateActionable(ctx, &models.Alert{ProjectID: h.project.ID, SourceTaskID: &producerTaskID, Type: "suggestion", Title: "Custom Native finding", Body: "Review me", IdempotencyKey: "custom-native-finding"})
@@ -5537,8 +5516,7 @@ func TestAutomationRuntimeReducedNativeApprovalBranchesEndAtGate(t *testing.T) {
 			saved, err := h.compiler.Save(ctx, AutomationSaveRequest{ProjectID: h.project.ID, Source: "template", CreatedVia: "web", Candidate: candidate})
 			require.NoError(t, err)
 
-			alertRepo := teststores.Of(h.db).Alerts
-			alertRepo.(*sqlite.AlertRepo).SetAutomationRepo(h.automationRepo.(*sqlite.AutomationRepo))
+			alertRepo := h.stores.Alerts
 			alertSvc := NewAlertService(alertRepo, nil)
 			producer := automationNodeByKey(t, saved.Definition, "vision_suggestions")
 			producerCtx := WithAutomationContext(ctx, models.AutomationContext{ProjectID: h.project.ID, Bindings: []models.AutomationBinding{{
@@ -5637,7 +5615,6 @@ func TestAutomationRuntimeNativeAlertLifecycleAndLiveProjection(t *testing.T) {
 	require.Equal(t, 1, graph.ActiveWorkItems, "inbox processing completion must not masquerade as implementation completion")
 	implementationExecution := models.Execution{TaskID: implementation.ID, Status: models.ExecRunning, PromptSent: "private implementation prompt"}
 	execRepo := fixture.stores.Executions
-	execRepo.(*sqlite.ExecutionRepo).SetAutomationRepo(fixture.repo.(*sqlite.AutomationRepo))
 	require.NoError(t, execRepo.Create(ctx, &implementationExecution))
 	implementationBinding := contextForTask.Bindings[0]
 	_, _, err = fixture.repo.RecordProjectionEvent(ctx, persistence.AutomationProjectionEvent{
