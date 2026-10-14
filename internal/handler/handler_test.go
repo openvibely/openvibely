@@ -26,6 +26,7 @@ import (
 	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/openvibely/openvibely/internal/testutil/storefixture"
 	"github.com/openvibely/openvibely/internal/testutil/teststores"
 	"github.com/openvibely/openvibely/web/static"
 	"github.com/openvibely/openvibely/web/templates/components"
@@ -324,8 +325,7 @@ func TestHandler_GetTaskLargeHistoryUsesNarrowExecutionMetrics(t *testing.T) {
 }
 
 func BenchmarkHandler_GetTask_MetricsProjection(b *testing.B) {
-	db := teststores.NewDB(b)
-	h, e, llmConfigRepo := setupTestHandlerForDB(b, db)
+	h, e, llmConfigRepo, db := setupTestHandlerWithStores(b)
 	ctx := context.Background()
 	agent := createAgentTB(b, llmConfigRepo)
 	project := createProjectTB(b, h, "Initial Detail Metrics Benchmark Project")
@@ -340,7 +340,7 @@ func BenchmarkHandler_GetTask_MetricsProjection(b *testing.B) {
 	if err := h.taskSvc.Update(ctx, task); err != nil {
 		b.Fatalf("update task to active completed: %v", err)
 	}
-	seedLargeExecutionHistory(b, db, task.ID, agent.ID, 200, 4*1024, 64*1024)
+	seedStoreExecutionHistory(b, db, task.ID, agent.ID, 200, 4*1024, 64*1024)
 
 	b.ReportAllocs()
 	b.ResetTimer()
@@ -415,14 +415,14 @@ func TestHandler_GetTaskExecutions(t *testing.T) {
 }
 
 func TestHandler_GetTaskExecutions_BoundedProductionFixture(t *testing.T) {
-	h, e, llmConfigRepo, db := setupTestHandlerWithDB(t)
+	h, e, llmConfigRepo, db := setupTestHandlerWithStores(t)
 
 	agent := createAgent(t, llmConfigRepo)
 	project := createProject(t, h, "Execution History Project")
 	task := createTask(t, h, project.ID, "Large Execution History", func(tk *models.Task) {
 		tk.Status = models.StatusRunning
 	})
-	seedLargeExecutionHistory(t, db, task.ID, agent.ID, 200, 4*1024, 64*1024)
+	seedStoreExecutionHistory(t, db, task.ID, agent.ID, 200, 4*1024, 64*1024)
 
 	rec := htmxGet(e, "/tasks/"+task.ID+"/executions")
 	assertCode(t, rec, http.StatusOK)
@@ -448,13 +448,13 @@ func TestHandler_GetTaskExecutions_BoundedProductionFixture(t *testing.T) {
 }
 
 func TestHandler_GetTaskExecutions_LoadOlderPage(t *testing.T) {
-	h, e, llmConfigRepo, db := setupTestHandlerWithDB(t)
+	h, e, llmConfigRepo, db := setupTestHandlerWithStores(t)
 	agent := createAgent(t, llmConfigRepo)
 	project := createProject(t, h, "Execution History Project")
 	task := createTask(t, h, project.ID, "Paged Execution History", func(tk *models.Task) {
 		tk.Status = models.StatusRunning
 	})
-	seedLargeExecutionHistory(t, db, task.ID, agent.ID, 25, 16, 64)
+	seedStoreExecutionHistory(t, db, task.ID, agent.ID, 25, 16, 64)
 
 	rec := htmxGet(e, "/tasks/"+task.ID+"/executions?limit=5")
 	assertCode(t, rec, http.StatusOK)
@@ -462,7 +462,7 @@ func TestHandler_GetTaskExecutions_LoadOlderPage(t *testing.T) {
 	assertContains(t, rec, "output-020-")
 	assertNotContains(t, rec, "output-019-")
 
-	oldestVisibleID := newestHistoryExecutionID(t, db, task.ID, 5)
+	oldestVisibleID := newestStoreHistoryExecutionID(t, db, task.ID, 5)
 	older := htmxGet(e, "/tasks/"+task.ID+"/executions?before="+oldestVisibleID+"&limit=5")
 	assertCode(t, older, http.StatusOK)
 	assertContains(t, older, `id="task-execution-history-loaded-older"`)
@@ -477,13 +477,13 @@ func TestHandler_GetTaskExecutions_LoadOlderPage(t *testing.T) {
 }
 
 func TestHandler_TaskExecutionWindowsPreserveSharedBoundaries(t *testing.T) {
-	h, _, llmConfigRepo, db := setupTestHandlerWithDB(t)
+	h, _, llmConfigRepo, db := setupTestHandlerWithStores(t)
 	agent := createAgent(t, llmConfigRepo)
 	project := createProject(t, h, "Shared Execution Window Project")
 	task := createTask(t, h, project.ID, "Shared Execution Window Task", func(tk *models.Task) {
 		tk.Status = models.StatusCompleted
 	})
-	seedLargeExecutionHistory(t, db, task.ID, agent.ID, 25, 16, 64)
+	seedStoreExecutionHistory(t, db, task.ID, agent.ID, 25, 16, 64)
 	ctx := context.Background()
 
 	history, hasOlder, err := h.loadTaskExecutionHistoryWindow(ctx, task.ID, "", 5)
@@ -515,13 +515,13 @@ func TestHandler_TaskExecutionWindowsPreserveSharedBoundaries(t *testing.T) {
 }
 
 func TestHandler_TaskExecutionWindowRoutesNormalizeInvalidLimits(t *testing.T) {
-	h, e, llmConfigRepo, db := setupTestHandlerWithDB(t)
+	h, e, llmConfigRepo, db := setupTestHandlerWithStores(t)
 	agent := createAgent(t, llmConfigRepo)
 	project := createProject(t, h, "Execution Window Limit Project")
 	task := createTask(t, h, project.ID, "Execution Window Limit Task", func(tk *models.Task) {
 		tk.Status = models.StatusRunning
 	})
-	seedLargeExecutionHistory(t, db, task.ID, agent.ID, 6, 8, 16)
+	seedStoreExecutionHistory(t, db, task.ID, agent.ID, 6, 8, 16)
 
 	for _, rawLimit := range []string{"", "0", "-3"} {
 		historyPath := "/tasks/" + task.ID + "/executions"
@@ -9448,4 +9448,32 @@ func TestHandler_NewTaskPastScheduleDoesNotCreateTask(t *testing.T) {
 	tasks, err := h.taskRepo.ListByProject(context.Background(), project.ID, "")
 	require.NoError(t, err)
 	require.Empty(t, tasks)
+}
+
+func seedStoreExecutionHistory(t testing.TB, env *teststores.Env, taskID, agentID string, count, promptBytes, outputBytes int) {
+	t.Helper()
+	base := time.Date(2026, 8, 13, 12, 0, 0, 0, time.UTC)
+	entries := make([]storefixture.ExecutionHistoryEntry, 0, count)
+	for i := 0; i < count; i++ {
+		completed := base.Add(time.Duration(i)*time.Second + time.Second)
+		entry := storefixture.ExecutionHistoryEntry{ID: fmt.Sprintf("exec-%03d", i), TaskID: taskID, AgentConfigID: agentID, Status: models.ExecCompleted,
+			PromptSent: fmt.Sprintf("prompt-%03d-", i) + strings.Repeat("P", promptBytes), Output: fmt.Sprintf("output-%03d-", i) + strings.Repeat("O", outputBytes),
+			TokensUsed: 64, DurationMs: 1500, StartedAt: base.Add(time.Duration(i) * time.Second), CompletedAt: &completed}
+		if i == count-1 {
+			entry.Status = models.ExecRunning
+			entry.CompletedAt = nil
+		} else if i == count-2 {
+			entry.Status = models.ExecFailed
+			entry.ErrorMessage = "failure message " + strings.Repeat("E", 256)
+		}
+		entries = append(entries, entry)
+	}
+	require.NoError(t, env.Fixtures.SeedExecutionHistory(context.Background(), entries))
+}
+func newestStoreHistoryExecutionID(t testing.TB, env *teststores.Env, taskID string, offset int) string {
+	t.Helper()
+	execs, err := env.Executions.ListByTask(context.Background(), taskID)
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, len(execs), offset)
+	return execs[offset-1].ID
 }
