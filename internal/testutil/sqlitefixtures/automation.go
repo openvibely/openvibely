@@ -2,6 +2,7 @@ package sqlitefixtures
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"strings"
 	"time"
@@ -393,4 +394,100 @@ func optionalActivityStart(at time.Time) any {
 		return nil
 	}
 	return at.UTC().Format("2006-01-02 15:04:05")
+}
+
+func (f *fixtures) AutomationDefinitionResources(ctx context.Context, match storefixture.AutomationResourceMatch) ([]models.AutomationDefinitionResource, error) {
+	q := `SELECT r.project_id,r.automation_id,r.version_id,r.node_id,n.node_key,r.resource_type,r.resource_id,r.relation FROM automation_definition_resources r JOIN automation_nodes n ON n.id=r.node_id AND n.version_id=r.version_id WHERE 1=1`
+	var args []any
+	for _, v := range []struct{ column, value string }{{"r.project_id", match.ProjectID}, {"r.automation_id", match.AutomationID}, {"r.version_id", match.VersionID}, {"n.node_key", match.NodeKey}, {"r.resource_type", match.ResourceType}} {
+		if v.value != "" {
+			q += " AND " + v.column + "=?"
+			args = append(args, v.value)
+		}
+	}
+	rows, err := f.db.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var result []models.AutomationDefinitionResource
+	for rows.Next() {
+		var r models.AutomationDefinitionResource
+		if err := rows.Scan(&r.ProjectID, &r.AutomationID, &r.VersionID, &r.NodeID, &r.NodeKey, &r.ResourceType, &r.ResourceID, &r.Relation); err != nil {
+			return nil, err
+		}
+		result = append(result, r)
+	}
+	return result, rows.Err()
+}
+func (f *fixtures) AutomationOwnedScheduleIDs(ctx context.Context, id string) ([]string, error) {
+	rows, err := f.db.QueryContext(ctx, `SELECT schedule_id FROM automation_trigger_owners WHERE automation_id=? ORDER BY schedule_id`, id)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+func (f *fixtures) ClearAutomationTemplateRevision(ctx context.Context, id string) error {
+	_, err := f.db.ExecContext(ctx, `UPDATE automations SET template_revision=NULL WHERE id=?`, id)
+	return err
+}
+
+func (f *fixtures) GitHubIssueClaims(ctx context.Context, project, repo, fingerprint string) ([]storefixture.GitHubIssueClaim, error) {
+	q := `SELECT owner_token,projection_source_json,mutation_state,created_issue_number FROM automation_github_issue_dedup_leases WHERE project_id=? AND repository_full_name=?`
+	args := []any{project, repo}
+	if fingerprint != "" {
+		q += ` AND title_fingerprint=?`
+		args = append(args, fingerprint)
+	}
+	rows, err := f.db.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var result []storefixture.GitHubIssueClaim
+	for rows.Next() {
+		var claim storefixture.GitHubIssueClaim
+		var number sql.NullInt64
+		if err := rows.Scan(&claim.OwnerToken, &claim.ProjectionSource, &claim.MutationState, &number); err != nil {
+			return nil, err
+		}
+		if number.Valid {
+			n := int(number.Int64)
+			claim.IssueNumber = &n
+		}
+		result = append(result, claim)
+	}
+	return result, rows.Err()
+}
+func (f *fixtures) ExpireGitHubIssueClaim(ctx context.Context, project, repo, fingerprint string, at time.Time) error {
+	_, err := f.db.ExecContext(ctx, `UPDATE automation_github_issue_dedup_leases SET lease_expires_at=? WHERE project_id=? AND repository_full_name=? AND title_fingerprint=?`, at, project, repo, fingerprint)
+	return err
+}
+func (f *fixtures) SetIssueProjectionFailure(ctx context.Context, failure *storefixture.IssueProjectionFailure) error {
+	if _, err := f.db.ExecContext(ctx, `DROP TRIGGER IF EXISTS fail_fixture_issue_projection`); err != nil {
+		return err
+	}
+	if failure == nil {
+		return nil
+	}
+	target, condition, message := "automation_work_items", "", "injected issue projection failure"
+	if failure.AutomationID != "" {
+		condition = " WHEN NEW.automation_id='" + strings.ReplaceAll(failure.AutomationID, "'", "''") + "'"
+		message = "injected second binding projection failure"
+	}
+	if failure.AssignmentEventKey != "" {
+		target = "automation_transitions"
+		condition = " WHEN NEW.event_key='" + strings.ReplaceAll(failure.AssignmentEventKey, "'", "''") + "'"
+	}
+	_, err := f.db.ExecContext(ctx, "CREATE TRIGGER fail_fixture_issue_projection BEFORE INSERT ON "+target+condition+" BEGIN SELECT RAISE(FAIL, '"+message+"'); END")
+	return err
 }
