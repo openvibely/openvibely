@@ -30,7 +30,7 @@ type ExecutionUsageRecord struct {
 type ChannelProjectSelectionCounts struct{ Discord, Slack, Telegram, Email int }
 
 // AutomationStateCounts includes retained graphs and unbound resources, so failed saves cannot hide orphaned state.
-type AutomationStateCounts struct{ Automations, Versions, Nodes, Edges, Resources, Tasks, Schedules int }
+type AutomationStateCounts struct{ Automations, Versions, Nodes, Edges, Resources, Tasks, Schedules, Invocations, WorkItems, Activities, ChatConfirmations int }
 
 type ProjectAutomationState struct{ Automations, Tasks, Schedules int }
 
