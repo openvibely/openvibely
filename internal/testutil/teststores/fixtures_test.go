@@ -355,3 +355,38 @@ func TestProjectDeletionFaultRollsBackAndCanBeRemoved(t *testing.T) {
 		})
 	}
 }
+
+func TestSettingsPhysicalReadCounters(t *testing.T) {
+	for _, production := range []bool{false, true} {
+		name := "isolated"
+		if production {
+			name = "production"
+		}
+		t.Run(name, func(t *testing.T) {
+			options := []teststores.Option{teststores.WithIOCounting()}
+			if production {
+				options = append(options, teststores.WithProductionTopology())
+			}
+			env := teststores.New(t, options...)
+			ctx := t.Context()
+			require.NoError(t, env.Settings.Set(ctx, "counter-first", "first"))
+			require.NoError(t, env.Settings.Set(ctx, "counter-second", "second"))
+			env.IO.Reset()
+			env.IO.SetEnabled(true)
+			_, err := env.Settings.GetMany(ctx, []string{"counter-first", "counter-second"})
+			require.NoError(t, err)
+			_, err = env.Settings.Get(ctx, "counter-first")
+			require.NoError(t, err)
+			env.IO.SetEnabled(false)
+			stats := env.IO.Snapshot()
+			require.Equal(t, 1, stats.SettingsSnapshotReads)
+			require.Equal(t, 1, stats.SettingsSingleReads)
+			require.Equal(t, 2, stats.Requests)
+			_, err = env.Settings.Get(ctx, "counter-first")
+			require.NoError(t, err)
+			require.Equal(t, stats, env.IO.Snapshot())
+			env.IO.Reset()
+			require.Zero(t, env.IO.Snapshot().SettingsSingleReads)
+		})
+	}
+}

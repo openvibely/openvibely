@@ -2,7 +2,6 @@ package handler
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -25,7 +24,6 @@ import (
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
-	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/openvibely/openvibely/internal/testutil/teststores"
@@ -4413,7 +4411,7 @@ func TestProcessStreamingResponse_CommitsLocalSteeringAfterContinuation(t *testi
 }
 
 func TestPreparePendingSteeringInputsPreservesCurrentReasoningContent(t *testing.T) {
-	h, _, llmConfigRepo := setupTestHandler(t)
+	h, _, llmConfigRepo, env := setupTestHandlerWithStores(t)
 	ctx := context.Background()
 	agent := createAgent(t, llmConfigRepo)
 	project := createProject(t, h, "Reasoning Steering Project")
@@ -4427,7 +4425,7 @@ func TestPreparePendingSteeringInputsPreservesCurrentReasoningContent(t *testing
 		ex.PromptSent = "active prompt"
 		ex.IsFollowup = true
 	})
-	require.NoError(t, h.execRepo.(*sqlite.ExecutionRepo).UpdateReasoningContent(ctx, exec.ID, "first private reasoning plus detail"))
+	require.NoError(t, env.Fixtures.SetExecutionReasoning(ctx, exec.ID, "first private reasoning plus detail"))
 
 	steering := &models.ThreadInput{
 		Scope:          models.ThreadInputScopeTask,
@@ -4463,7 +4461,7 @@ func TestPreparePendingSteeringInputsPreservesCurrentReasoningContent(t *testing
 	require.Equal(t, "assistant answer", params.ChatHistory[1].Output)
 	require.Equal(t, "first private reasoning plus detail", params.ChatHistory[1].ReasoningContent)
 
-	require.NoError(t, h.execRepo.(*sqlite.ExecutionRepo).UpdateReasoningContent(ctx, exec.ID, "final private reasoning"))
+	require.NoError(t, env.Fixtures.SetExecutionReasoning(ctx, exec.ID, "final private reasoning"))
 	require.NoError(t, h.persistSteeringReplayHistory(ctx, params, "assistant answerfinal answer"))
 	stored, err := h.execRepo.GetByID(ctx, exec.ID)
 	require.NoError(t, err)
@@ -4810,7 +4808,7 @@ func TestProcessStreamingResponse_AppliesPreparedSteeringAfterSuccessfulProvider
 }
 
 func TestProcessStreamingResponse_InterruptsForLateAttachmentSteeringAndCommitsIt(t *testing.T) {
-	h, _, llmConfigRepo, db := setupTestHandlerWithDB(t)
+	h, _, llmConfigRepo, db := setupTestHandlerWithStores(t)
 	h.workerSvc = nil
 	t.Setenv("OPENVIBELY_ALLOW_PRIVATE_MODEL_ENDPOINTS", "true")
 	ctx := context.Background()
@@ -4892,17 +4890,12 @@ func TestProcessStreamingResponse_InterruptsForLateAttachmentSteeringAndCommitsI
 	require.Equal(t, sessionID, applied.AttachmentSessionID)
 	require.NoFileExists(t, filepath.Join(pendingDir, "screen.png"))
 
-	var usageCount, totalTokens int
-	var usageStatus, operation string
-	err = db.QueryRowContext(ctx, `
-		SELECT COUNT(*), COALESCE(MAX(total_tokens), 0), COALESCE(MAX(status), ''), COALESCE(MAX(operation), '')
-		FROM llm_usage_events
-		WHERE execution_id = ?`, exec.ID).Scan(&usageCount, &totalTokens, &usageStatus, &operation)
+	usage, err := db.Fixtures.ExecutionUsage(ctx, exec.ID)
 	require.NoError(t, err)
-	require.Equal(t, 1, usageCount, "the interrupted request has no completed usage record")
-	require.Equal(t, 37, totalTokens)
-	require.Equal(t, string(models.ExecCompleted), usageStatus)
-	require.Equal(t, string(llmcontracts.OperationStreaming), operation)
+	require.Len(t, usage, 1, "the interrupted request has no completed usage record")
+	require.Equal(t, 37, usage[0].TotalTokens)
+	require.Equal(t, string(models.ExecCompleted), usage[0].Status)
+	require.Equal(t, string(llmcontracts.OperationStreaming), usage[0].Operation)
 }
 
 func TestProcessStreamingResponse_SendsAndCommitsPreparedSteeringAttachmentsAfterSuccessfulProviderCall(t *testing.T) {
@@ -6945,7 +6938,7 @@ func TestSelectAgent_AutoUsesCompactCatalogAndHydratesSelectedModel(t *testing.T
 	db, counter := testutil.NewStatementCountingTestDB(t)
 	h, _, llmConfigRepo := setupTestHandlerForDB(t, db)
 	ctx := context.Background()
-	clearModelConfigs(t, db)
+	clearModelConfigs(t, llmConfigRepo)
 
 	haiku := richAutoSelectionConfig("Haiku", models.ProviderOpenAICompatible, models.AuthMethodAPIKey, "claude-3-haiku", false)
 	sonnet := richAutoSelectionConfig("Sonnet", models.ProviderOpenAICompatible, models.AuthMethodAPIKey, "claude-3-5-sonnet", true)
@@ -6973,7 +6966,7 @@ func TestSelectAgent_AutoWithImagesUsesVisionCatalogAndHydratesEligibleModel(t *
 	db, counter := testutil.NewStatementCountingTestDB(t)
 	h, _, llmConfigRepo := setupTestHandlerForDB(t, db)
 	ctx := context.Background()
-	clearModelConfigs(t, db)
+	clearModelConfigs(t, llmConfigRepo)
 
 	textOnly := richAutoSelectionConfig("Text-only model", models.ProviderOpenAICompatible, models.AuthMethodAPIKey, "text-only", false)
 	apiKey := richAutoSelectionConfig("Anthropic API", models.ProviderAnthropic, models.AuthMethodAPIKey, "claude-3-haiku", false)
@@ -7008,10 +7001,9 @@ func TestSelectAgent_AutoCompactSelectionLargeFixture(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping browser/task-thread auto-selection large fixture in short mode")
 	}
-	db := teststores.NewDB(t)
-	h, _, llmConfigRepo := setupTestHandlerForDB(t, db)
+	h, _, llmConfigRepo, _ := setupTestHandlerWithStores(t)
 	ctx := context.Background()
-	clearModelConfigs(t, db)
+	clearModelConfigs(t, llmConfigRepo)
 	seedLargeAutoSelectionConfigs(t, ctx, llmConfigRepo, 50)
 	message := "build endpoint handler service database integration test"
 
@@ -7024,10 +7016,9 @@ func TestSelectAgent_AutoCompactSelectionLargeFixture(t *testing.T) {
 
 func BenchmarkBrowserTaskThreadAutoSelection(b *testing.B) {
 	b.Run("compact_then_get", func(b *testing.B) {
-		db := teststores.NewDB(b)
-		h, _, llmConfigRepo := setupTestHandlerForDB(b, db)
+		h, _, llmConfigRepo, _ := setupTestHandlerWithStores(b)
 		ctx := context.Background()
-		clearModelConfigs(b, db)
+		clearModelConfigs(b, llmConfigRepo)
 		seedLargeAutoSelectionConfigs(b, ctx, llmConfigRepo, 50)
 		message := "build endpoint handler service database integration test"
 
@@ -7043,9 +7034,9 @@ func BenchmarkBrowserTaskThreadAutoSelection(b *testing.B) {
 	})
 }
 
-func clearModelConfigs(tb testing.TB, db *sql.DB) {
+func clearModelConfigs(tb testing.TB, configs persistence.LLMConfigStore) {
 	tb.Helper()
-	teststores.ClearLLMConfigs(tb, teststores.Of(db).LLMConfigs)
+	teststores.ClearLLMConfigs(tb, configs)
 }
 
 func richAutoSelectionConfig(name string, provider models.LLMProvider, authMethod models.AuthMethod, model string, isDefault bool) *models.LLMConfig {
@@ -9030,8 +9021,7 @@ func TestExecuteViewTaskThreadUsesBoundedExecutionReads(t *testing.T) {
 }
 
 func TestExecuteViewTaskThreadPreservesBrowserFormattingContract(t *testing.T) {
-	db := teststores.NewDB(t)
-	h, _, agentRepo := setupTestHandlerForDB(t, db)
+	h, _, agentRepo, _ := setupTestHandlerWithStores(t)
 	project := createProject(t, h, "Browser Thread Formatting Project")
 	agent := createAgent(t, agentRepo)
 	task := createTask(t, h, project.ID, "Browser Thread Formatting Task", func(tk *models.Task) {
@@ -9140,7 +9130,7 @@ func TestCompleteWithSuccessCommitCancellationCancelsTask(t *testing.T) {
 func TestCompleteExecutionSuccessAtomicBoardState(t *testing.T) {
 	for _, scenario := range []string{"success", "task write failure", "pending steering", "cancelled", "chat"} {
 		t.Run(scenario, func(t *testing.T) {
-			h, _, configs, db := setupTestHandlerWithDB(t)
+			h, _, configs, db := setupTestHandlerWithStores(t)
 			ctx := context.Background()
 			agent := createAgent(t, configs)
 			task := createTask(t, h, "default", "Atomic completion", func(task *models.Task) {
@@ -9152,8 +9142,7 @@ func TestCompleteExecutionSuccessAtomicBoardState(t *testing.T) {
 			})
 			execution := createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) { ex.Status = models.ExecRunning; ex.IsFollowup = true })
 			if scenario == "task write failure" {
-				_, err := db.Exec(`CREATE TRIGGER reject_task_completion BEFORE UPDATE OF status ON tasks WHEN NEW.status = 'completed' BEGIN SELECT RAISE(ABORT, 'task completion rejected'); END`)
-				require.NoError(t, err)
+				require.NoError(t, db.Fixtures.FailTaskCompletion(ctx))
 			}
 			if scenario == "pending steering" {
 				input := &models.ThreadInput{Scope: models.ThreadInputScopeTask, ProjectID: task.ProjectID, TaskID: task.ID, RunExecutionID: execution.ID, AgentConfigID: agent.ID, InputMode: models.ThreadInputModeQueued, Content: "more work"}

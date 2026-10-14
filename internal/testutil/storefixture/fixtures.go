@@ -20,8 +20,17 @@ type SkillEventFilter struct {
 	ProjectID, TaskID, SkillHandle, AgentID, EventType, Source, Surface, SkillScope string
 }
 
+// ExecutionUsageRecord describes one recorded provider usage result.
+type ExecutionUsageRecord struct {
+	TotalTokens       int
+	Status, Operation string
+}
+
 // Fixtures describes test domain state, never tables, query text, or connections.
 type Fixtures interface {
+	ExecutionUsage(context.Context, string) ([]ExecutionUsageRecord, error)
+	SetExecutionReasoning(context.Context, string, string) error
+	FailTaskCompletion(context.Context) error
 	CountProjectAgentMutations(context.Context, string) (int, error)
 	CountTasks(context.Context) (int, error)
 	SetProjectDeletionFailure(context.Context, string, bool) error
@@ -130,6 +139,8 @@ type Fixtures interface {
 // SQLite counts executed statements; other backends must count their database
 // requests, including requests made inside a single store method.
 type IOStats struct {
+	// SettingsSingleReads counts physical reads loading one setting by key.
+	SettingsSingleReads int
 	// SettingsSnapshotReads counts physical reads loading a group of settings.
 	SettingsSnapshotReads int
 	// ProjectCatalogReads counts physical unfiltered project-list reads.
