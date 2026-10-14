@@ -22,6 +22,9 @@ type SkillEventFilter struct {
 
 // Fixtures describes test domain state, never tables, query text, or connections.
 type Fixtures interface {
+	RenewAutomationDispatchLease(context.Context, string, string, time.Time) error
+	AutomationDispatchState(context.Context, string) (AutomationDispatchState, error)
+	CompleteAutomationActivity(context.Context, string, time.Time) error
 	SeedAutomationNode(context.Context, models.AutomationNode) error
 	SetAutomationUpdatedAt(context.Context, string, time.Time) error
 	SeedAutomationInvocation(context.Context, models.AutomationInvocation) error
@@ -110,4 +113,10 @@ type IOCounter interface {
 	Reset()
 	SetEnabled(bool)
 	Snapshot() IOStats
+}
+
+// AutomationDispatchState exposes durable dispatch outcome and outstanding task reservations.
+type AutomationDispatchState struct {
+	Status           string
+	TaskReservations int
 }
