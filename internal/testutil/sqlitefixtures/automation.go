@@ -100,7 +100,7 @@ func (f *fixtures) FailLatestActiveAutomationInvocation(ctx context.Context, pro
 }
 
 func (f *fixtures) SetAutomationInvocationCompletionTime(ctx context.Context, id string, at time.Time) error {
-	_, err := f.db.ExecContext(ctx, `UPDATE automation_invocations SET completed_at = ?, updated_at = ? WHERE id = ?`, at, at, id)
+	_, err := f.db.ExecContext(ctx, `UPDATE automation_invocations SET completed_at = ?, updated_at = ? WHERE id = ?`, at.UTC().Format("2006-01-02 15:04:05"), at.UTC().Format("2006-01-02 15:04:05"), id)
 	return err
 }
 func (f *fixtures) SetTaskPullRequestUpdatedAt(ctx context.Context, id string, at time.Time) error {
@@ -124,4 +124,28 @@ func (f *fixtures) SeedAutomationActivity(ctx context.Context, a models.Automati
 		}
 	}
 	return tx.Commit()
+}
+
+func (f *fixtures) SetAutomationInvocationStart(ctx context.Context, id string, at time.Time) error {
+	_, err := f.db.ExecContext(ctx, `UPDATE automation_invocations SET created_at=?,started_at=? WHERE id=?`, at.UTC().Format("2006-01-02 15:04:05"), at.UTC().Format("2006-01-02 15:04:05"), id)
+	return err
+}
+func (f *fixtures) SetAutomationActivityStart(ctx context.Context, id string, at time.Time) error {
+	_, err := f.db.ExecContext(ctx, `UPDATE automation_activities SET started_at=? WHERE id=?`, at.UTC().Format("2006-01-02 15:04:05"), id)
+	return err
+}
+func (f *fixtures) SetAutomationTransitionTime(ctx context.Context, automationID, eventKey string, at time.Time) error {
+	_, err := f.db.ExecContext(ctx, `UPDATE automation_transitions SET occurred_at=? WHERE automation_id=? AND event_key=?`, at.UTC().Format("2006-01-02 15:04:05"), automationID, eventKey)
+	return err
+}
+func (f *fixtures) SetAutomationWorkItemHistory(ctx context.Context, id string, createdAt time.Time, completed bool) error {
+	status := "active"
+	var completedAt *time.Time
+	if completed {
+		status = "completed"
+		now := time.Now().UTC()
+		completedAt = &now
+	}
+	_, err := f.db.ExecContext(ctx, `UPDATE automation_work_items SET created_at=?,status=?,completed_at=? WHERE id=?`, createdAt.UTC().Format("2006-01-02 15:04:05"), status, completedAt, id)
+	return err
 }

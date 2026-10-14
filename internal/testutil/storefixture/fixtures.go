@@ -30,6 +30,10 @@ type ExecutionUsageRecord struct {
 type ChannelProjectSelectionCounts struct{ Discord, Slack, Telegram, Email int }
 
 type Fixtures interface {
+	SetAutomationInvocationStart(context.Context, string, time.Time) error
+	SetAutomationActivityStart(context.Context, string, time.Time) error
+	SetAutomationTransitionTime(context.Context, string, string, time.Time) error
+	SetAutomationWorkItemHistory(context.Context, string, time.Time, bool) error
 	// SeedAutomationActivity preserves historical resource identities without current normalization.
 	SeedAutomationActivity(context.Context, models.AutomationActivity, []models.AutomationActivityResource) error
 	SetAutomationInvocationCompletionTime(context.Context, string, time.Time) error
