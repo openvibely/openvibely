@@ -16,6 +16,7 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/openvibely/openvibely/internal/testutil/storefixture"
 	"github.com/openvibely/openvibely/internal/testutil/teststores"
 	"github.com/stretchr/testify/require"
 )
@@ -1603,7 +1604,7 @@ func TestAutomationCompilerSavePreservesAgentReferenceSemanticsAndRollback(t *te
 type automationSavePerformanceFixture struct {
 	ctx       context.Context
 	project   models.Project
-	counter   *testutil.SQLStatementCounter
+	counter   storefixture.IOCounter
 	refs      []string
 	optimized *AutomationCompiler
 }
@@ -1615,15 +1616,16 @@ type automationSavePerformanceSample struct {
 
 func newAutomationSavePerformanceFixture(tb testing.TB) *automationSavePerformanceFixture {
 	tb.Helper()
-	db, counter := testutil.NewStatementCountingTestDB(tb)
+	db := teststores.New(tb, teststores.WithIOCounting())
+	counter := db.IO
 	ctx := context.Background()
-	projectRepo := teststores.Of(db).Projects
+	projectRepo := db.Projects
 	project := models.Project{Name: "Automation Agent Save performance"}
 	if err := projectRepo.Create(ctx, &project); err != nil {
 		tb.Fatalf("create performance project: %v", err)
 	}
-	agentRepo := teststores.Of(db).Agents
-	teststores.ClearAgents(tb, teststores.Of(db).Agents)
+	agentRepo := db.Agents
+	teststores.ClearAgents(tb, db.Agents)
 	refs := make([]string, 0, automationCapabilityLimit)
 	for i := 0; i < automationCapabilityLimit; i++ {
 		agent := automationValidationFixtureAgent(fmt.Sprintf("Performance Agent %02d", i), fmt.Sprintf("performance-agent-%02d", i))
@@ -1634,13 +1636,13 @@ func newAutomationSavePerformanceFixture(tb testing.TB) *automationSavePerforman
 	}
 
 	registry := NewAutomationAdapterRegistry()
-	automationRepo := teststores.Of(db).Automations
+	automationRepo := db.Automations
 	drafts := NewAutomationDraftService(automationRepo, registry)
 	validator := NewAutomationSaveValidator(registry, drafts)
-	taskRepo := teststores.Of(db).Tasks
-	scheduleRepo := teststores.Of(db).Schedules
+	taskRepo := db.Tasks
+	scheduleRepo := db.Schedules
 	newCompiler := func() *AutomationCompiler {
-		compiler := NewAutomationCompiler(automationRepo, NewTaskService(taskRepo, teststores.Of(db).Attachments, nil), taskRepo, scheduleRepo, validator)
+		compiler := NewAutomationCompiler(automationRepo, NewTaskService(taskRepo, db.Attachments, nil), taskRepo, scheduleRepo, validator)
 		compiler.SetAgentRepository(agentRepo)
 		return compiler
 	}
@@ -1658,10 +1660,10 @@ func countAutomationSaveStatements(tb testing.TB, fixture *automationSavePerform
 		tb.Fatalf("SaveValidatedCandidate: %v", err)
 	}
 	fixture.counter.SetEnabled(false)
-	statements := fixture.counter.Statements()
+	statements := fixture.counter.Snapshot()
 	return automationSavePerformanceSample{
-		agentQueries:  len(selectableAgentValidationStatements(statements)),
-		sqlStatements: len(statements),
+		agentQueries:  statements.AgentReads,
+		sqlStatements: statements.Requests,
 	}
 }
 
@@ -1722,15 +1724,16 @@ func BenchmarkAutomationCompilerSaveAgentResolution(b *testing.B) {
 	originalLogWriter := log.Writer()
 	log.SetOutput(io.Discard)
 	b.Cleanup(func() { log.SetOutput(originalLogWriter) })
-	db, counter := testutil.NewStatementCountingTestDB(b)
+	db := teststores.New(b, teststores.WithIOCounting())
+	counter := db.IO
 	ctx := context.Background()
-	projectRepo := teststores.Of(db).Projects
+	projectRepo := db.Projects
 	project := models.Project{Name: "Automation Agent Save benchmark"}
 	if err := projectRepo.Create(ctx, &project); err != nil {
 		b.Fatalf("create benchmark project: %v", err)
 	}
-	agentRepo := teststores.Of(db).Agents
-	teststores.ClearAgents(b, teststores.Of(db).Agents)
+	agentRepo := db.Agents
+	teststores.ClearAgents(b, db.Agents)
 	refs := make([]string, 0, automationCapabilityLimit)
 	for i := 0; i < automationCapabilityLimit; i++ {
 		agent := automationValidationFixtureAgent(fmt.Sprintf("Save benchmark Agent %02d", i), fmt.Sprintf("save-benchmark-agent-%02d", i))
@@ -1745,12 +1748,12 @@ func BenchmarkAutomationCompilerSaveAgentResolution(b *testing.B) {
 	if !ok {
 		b.Fatal("custom Automation adapter is unavailable")
 	}
-	automationRepo := teststores.Of(db).Automations
+	automationRepo := db.Automations
 	drafts := NewAutomationDraftService(automationRepo, registry)
 	validator := NewAutomationSaveValidator(registry, drafts)
-	taskRepo := teststores.Of(db).Tasks
-	scheduleRepo := teststores.Of(db).Schedules
-	compiler := NewAutomationCompiler(automationRepo, NewTaskService(taskRepo, teststores.Of(db).Attachments, nil), taskRepo, scheduleRepo, validator)
+	taskRepo := db.Tasks
+	scheduleRepo := db.Schedules
+	compiler := NewAutomationCompiler(automationRepo, NewTaskService(taskRepo, db.Attachments, nil), taskRepo, scheduleRepo, validator)
 	compiler.SetAgentRepository(agentRepo)
 
 	for _, referenceCount := range []int{1, 5, 20, 50} {
@@ -1770,7 +1773,7 @@ func BenchmarkAutomationCompilerSaveAgentResolution(b *testing.B) {
 					b.Fatalf("%s warm-up: %v", name, err)
 				}
 				counter.SetEnabled(false)
-				return len(selectableAgentValidationStatements(counter.Statements()))
+				return counter.Snapshot().AgentReads
 			}
 
 			b.Run("compact_batch", func(b *testing.B) {
@@ -1818,9 +1821,9 @@ func BenchmarkAutomationCompilerSaveAgentResolution(b *testing.B) {
 					b.Fatalf("counted SaveValidatedCandidate: %v", err)
 				}
 				counter.SetEnabled(false)
-				statements := counter.Statements()
-				agentQueryCount := len(selectableAgentValidationStatements(statements))
-				totalStatementCount := len(statements)
+				statements := counter.Snapshot()
+				agentQueryCount := statements.AgentReads
+				totalStatementCount := statements.Requests
 				b.ReportAllocs()
 				b.ResetTimer()
 				for i := 0; i < b.N; i++ {
@@ -1843,13 +1846,14 @@ func BenchmarkAutomationCompilerSaveAgentResolution(b *testing.B) {
 }
 
 func BenchmarkAutomationAgentReferenceValidationProjection(b *testing.B) {
-	db, counter := testutil.NewStatementCountingTestDB(b)
+	db := teststores.New(b, teststores.WithIOCounting())
+	counter := db.IO
 	ctx := context.Background()
-	projectRepo := teststores.Of(db).Projects
+	projectRepo := db.Projects
 	project := models.Project{Name: "Automation Agent validation benchmark"}
 	require.NoError(b, projectRepo.Create(ctx, &project))
-	agentRepo := teststores.Of(db).Agents
-	teststores.ClearAgents(b, teststores.Of(db).Agents)
+	agentRepo := db.Agents
+	teststores.ClearAgents(b, db.Agents)
 	refs := make([]string, 0, automationCapabilityLimit)
 	for i := 0; i < automationCapabilityLimit; i++ {
 		agent := automationValidationFixtureAgent(fmt.Sprintf("Benchmark Agent %02d", i), fmt.Sprintf("benchmark-agent-%02d", i))
@@ -1859,14 +1863,14 @@ func BenchmarkAutomationAgentReferenceValidationProjection(b *testing.B) {
 		refs = append(refs, agent.Key)
 	}
 	registry := NewAutomationAdapterRegistry()
-	automationRepo := teststores.Of(db).Automations
+	automationRepo := db.Automations
 	drafts := NewAutomationDraftService(automationRepo, registry)
 	capabilities := NewAutomationCapabilitySnapshotBuilder(projectRepo, agentRepo, nil, nil)
 	drafts.SetCapabilitySnapshotBuilder(capabilities)
 	validator := NewAutomationSaveValidator(registry, drafts)
-	taskRepo := teststores.Of(db).Tasks
-	scheduleRepo := teststores.Of(db).Schedules
-	compiler := NewAutomationCompiler(automationRepo, NewTaskService(taskRepo, teststores.Of(db).Attachments, nil), taskRepo, scheduleRepo, validator)
+	taskRepo := db.Tasks
+	scheduleRepo := db.Schedules
+	compiler := NewAutomationCompiler(automationRepo, NewTaskService(taskRepo, db.Attachments, nil), taskRepo, scheduleRepo, validator)
 
 	for _, referenceCount := range []int{1, 5, 20, 50} {
 		candidate := automationValidationReferenceCandidate(refs[:referenceCount])
@@ -1878,7 +1882,7 @@ func BenchmarkAutomationAgentReferenceValidationProjection(b *testing.B) {
 				b.Fatalf("validation: %v", err)
 			}
 			counter.SetEnabled(false)
-			queryCount := len(selectableAgentValidationStatements(counter.Statements()))
+			queryCount := counter.Snapshot().AgentReads
 			if queryCount != 1 {
 				b.Fatalf("batched query count = %d, want 1", queryCount)
 			}
@@ -1899,7 +1903,7 @@ func BenchmarkAutomationAgentReferenceValidationProjection(b *testing.B) {
 type automationLiveYAMLBenchmarkFixture struct {
 	ctx           context.Context
 	project       models.Project
-	counter       *testutil.SQLStatementCounter
+	counter       storefixture.IOCounter
 	drafts        *AutomationDraftService
 	graphSvc      *AutomationGraphService
 	automationIDs map[int]string
@@ -1907,24 +1911,25 @@ type automationLiveYAMLBenchmarkFixture struct {
 
 func newAutomationLiveYAMLBenchmarkFixture(tb testing.TB, nodeCounts []int) *automationLiveYAMLBenchmarkFixture {
 	tb.Helper()
-	db, counter := testutil.NewStatementCountingTestDB(tb)
+	db := teststores.New(tb, teststores.WithIOCounting())
+	counter := db.IO
 	ctx := context.Background()
-	projectRepo := teststores.Of(db).Projects
+	projectRepo := db.Projects
 	project := models.Project{Name: "Automation Live YAML benchmark"}
 	if err := projectRepo.Create(ctx, &project); err != nil {
 		tb.Fatalf("create benchmark project: %v", err)
 	}
 
 	registry := NewAutomationAdapterRegistry()
-	automationRepo := teststores.Of(db).Automations
-	taskRepo := teststores.Of(db).Tasks
-	scheduleRepo := teststores.Of(db).Schedules
+	automationRepo := db.Automations
+	taskRepo := db.Tasks
+	scheduleRepo := db.Schedules
 	drafts := NewAutomationDraftService(automationRepo, registry)
 	capabilities := NewAutomationCapabilitySnapshotBuilder(projectRepo, nil, taskRepo, nil)
-	capabilities.SetLLMConfigRepository(teststores.Of(db).LLMConfigs)
+	capabilities.SetLLMConfigRepository(db.LLMConfigs)
 	drafts.SetCapabilitySnapshotBuilder(capabilities)
 	validator := NewAutomationSaveValidator(registry, drafts)
-	taskSvc := NewTaskService(taskRepo, teststores.Of(db).Attachments, nil)
+	taskSvc := NewTaskService(taskRepo, db.Attachments, nil)
 	compiler := NewAutomationCompiler(automationRepo, taskSvc, taskRepo, scheduleRepo, validator)
 	automationIDs := make(map[int]string, len(nodeCounts))
 	for _, nodeCount := range nodeCounts {
@@ -1962,7 +1967,7 @@ func (f *automationLiveYAMLBenchmarkFixture) statementCount(nodeCount int) (int,
 	f.counter.SetEnabled(true)
 	err := f.run(nodeCount)
 	f.counter.SetEnabled(false)
-	return len(f.counter.Statements()), err
+	return f.counter.Snapshot().Requests, err
 }
 
 func TestAutomationLiveYAMLUsesBoundedQueries(t *testing.T) {
@@ -2082,16 +2087,6 @@ func assertAutomationValidationProjection(t *testing.T, statement string) {
 			t.Fatalf("validation projection selected forbidden column %q: %s", forbidden, statement)
 		}
 	}
-}
-
-func selectableAgentValidationStatements(statements []string) []string {
-	filtered := make([]string, 0, len(statements))
-	for _, statement := range statements {
-		if strings.Contains(strings.ToLower(statement), "from agents") {
-			filtered = append(filtered, statement)
-		}
-	}
-	return filtered
 }
 
 func BenchmarkAutomationRuntimeReadProjection(b *testing.B) {

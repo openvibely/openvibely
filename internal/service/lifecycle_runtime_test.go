@@ -8,19 +8,20 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/openvibely/openvibely/internal/agentskills"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/openvibely/openvibely/internal/testutil/teststores"
 )
 
 func TestAgentInspectorListAgentsUsesCompactProjection(t *testing.T) {
-	db, counter := testutil.NewStatementCountingTestDB(t)
-	repo := teststores.Of(db).Agents
+	db := teststores.New(t, teststores.WithIOCounting())
+	counter := db.IO
+	repo := db.Agents
 	ctx := context.Background()
-	teststores.ClearAgents(t, teststores.Of(db).Agents)
+	teststores.ClearAgents(t, db.Agents)
 
 	visible := &models.Agent{
 		Name:         "Alpha Agent",
@@ -74,7 +75,7 @@ func TestAgentInspectorListAgentsUsesCompactProjection(t *testing.T) {
 	if err := repo.Create(ctx, archivedAt); err != nil {
 		t.Fatalf("create archived-at agent: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, `UPDATE agents SET archived_at = datetime('now') WHERE id = ?`, archivedAt.ID); err != nil {
+	if err := db.Fixtures.SetAgentArchivedAt(ctx, archivedAt.ID, time.Now()); err != nil {
 		t.Fatalf("archive agent by timestamp: %v", err)
 	}
 
@@ -123,25 +124,9 @@ func TestAgentInspectorListAgentsUsesCompactProjection(t *testing.T) {
 		t.Fatalf("agent_list JSON summaries = %#v", decoded)
 	}
 
-	statements := counter.Statements()
-	if len(statements) != 1 {
-		t.Fatalf("statements = %#v, want exactly one compact query", statements)
-	}
-	statement := strings.ToLower(statements[0])
-	projection := strings.SplitN(statement, "from agents", 2)[0]
-	for _, forbidden := range []string{
-		"system_prompt", "model", "tools", "tool_config", "plugins", "mcp_servers",
-		"permission_defaults_json", "model_defaults_json", "source_refs_json",
-		"created_at", "updated_at",
-	} {
-		if strings.Contains(projection, forbidden) {
-			t.Fatalf("compact agent-list query selected forbidden column %q: %s", forbidden, statements[0])
-		}
-	}
-	for _, required := range []string{"json_each", "json_extract", "json_group_array"} {
-		if !strings.Contains(statement, required) {
-			t.Fatalf("compact agent-list query must derive skill names with %s: %s", required, statements[0])
-		}
+	stats := counter.Snapshot()
+	if stats.Requests != 1 || stats.AgentReads != 1 || stats.ReadTextBytes > 4096 {
+		t.Fatalf("expected one bounded agent summary read, got %+v", stats)
 	}
 
 	full, err := repo.GetByID(ctx, visible.ID)
