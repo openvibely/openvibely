@@ -142,7 +142,6 @@ func categorizeProviderError(err error) error {
 }
 
 type contextCompactionFallbackKey struct{}
-type nativeCompactionDisabledKey struct{}
 
 var knownUnsupportedNativeCompaction sync.Map
 

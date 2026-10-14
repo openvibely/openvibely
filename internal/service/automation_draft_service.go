@@ -48,16 +48,6 @@ type AutomationDraftService struct {
 	capabilities *AutomationCapabilitySnapshotBuilder
 }
 
-type AutomationDraftCreateRequest struct {
-	ProjectID    string
-	AutomationID string
-	VersionID    string
-	Source       string
-	CreatedVia   string
-	StableKey    string
-	Candidate    models.AutomationDraftCandidate
-}
-
 func NewAutomationDraftService(repo persistence.AutomationStore, registry *AutomationAdapterRegistry) *AutomationDraftService {
 	if registry == nil {
 		registry = NewAutomationAdapterRegistry()
