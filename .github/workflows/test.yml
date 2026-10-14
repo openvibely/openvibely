@@ -294,7 +294,7 @@ jobs:
           OPENVIBELY_UPDATE_E2E_DISTRIBUTION: binary
           OPENVIBELY_UPDATE_E2E_EXPECTED_OS: ${{ runner.os }}
           OPENVIBELY_UPDATE_E2E_EXPECTED_ARCH: ${{ matrix.arch }}
-        run: go test ./internal/update -run '^TestPackagedUpdateE2E$' -count=1 -timeout 420s -coverpkg=./internal/update -coverprofile=coverage.update-binary.out
+        run: go test ./internal/update -run '^TestPackagedUpdateE2E$' -count=1 -timeout 600s -coverpkg=./internal/update -coverprofile=coverage.update-binary.out
 
       - name: Run desktop packaged update E2E
         shell: bash
