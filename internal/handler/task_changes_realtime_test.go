@@ -544,7 +544,7 @@ new file mode 100644
 }
 
 func TestGetTaskChanges_WorktreeFollowupReeditingCommittedFileRendersSingleDiffEntry(t *testing.T) {
-	h, e, llmConfigRepo, db := setupTestHandlerWithDB(t)
+	h, e, llmConfigRepo, db := setupTestHandlerWithStores(t)
 	defer db.Close()
 	ctx := context.Background()
 

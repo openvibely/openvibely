@@ -20,6 +20,14 @@ func (c *ioCounter) Snapshot() storefixture.IOStats {
 	for _, statement := range statements {
 		q := strings.ToLower(strings.Join(strings.Fields(statement), " "))
 		if strings.HasPrefix(q, "select ") {
+			if strings.Contains(q, "from executions") {
+				if strings.Contains(q, "order by started_at desc, rowid desc limit ?") {
+					stats.ExecutionWindowReads++
+				}
+				if strings.Contains(q, "order by started_at asc") && !strings.Contains(q, " limit ") {
+					stats.UnboundedExecutionHistoryReads++
+				}
+			}
 			if strings.Contains(q, "from agents") {
 				stats.AgentReads++
 			}

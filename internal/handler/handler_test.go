@@ -553,13 +553,6 @@ func TestHandler_TaskExecutionWindowRoutesNormalizeInvalidLimits(t *testing.T) {
 }
 
 func TestHandler_TaskExecutionWindowRoutesKeepExactShortAndEmptyHistories(t *testing.T) {
-	h, e, llmConfigRepo, db := setupTestHandlerWithDB(t)
-	agent := createAgent(t, llmConfigRepo)
-	project := createProject(t, h, "Execution Window Boundary Project")
-	task := createTask(t, h, project.ID, "Execution Window Boundary Task", func(tk *models.Task) {
-		tk.Status = models.StatusCompleted
-	})
-
 	for _, tc := range []struct {
 		name  string
 		count int
@@ -569,9 +562,14 @@ func TestHandler_TaskExecutionWindowRoutesKeepExactShortAndEmptyHistories(t *tes
 		{name: "empty", count: 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := db.ExecContext(context.Background(), "DELETE FROM executions WHERE task_id = ?", task.ID)
-			require.NoError(t, err)
-			seedLargeExecutionHistory(t, db, task.ID, agent.ID, tc.count, 8, 16)
+			h, e, llmConfigRepo, db := setupTestHandlerWithStores(t)
+			agent := createAgent(t, llmConfigRepo)
+			project := createProject(t, h, "Execution Window Boundary Project")
+			task := createTask(t, h, project.ID, "Execution Window Boundary Task", func(tk *models.Task) {
+				tk.Status = models.StatusCompleted
+			})
+
+			seedStoreExecutionHistory(t, db, task.ID, agent.ID, tc.count, 8, 16)
 
 			history := htmxGet(e, "/tasks/"+task.ID+"/executions?limit=5")
 			assertCode(t, history, http.StatusOK)
@@ -597,14 +595,16 @@ func TestHandler_TaskExecutionWindowRoutesKeepExactShortAndEmptyHistories(t *tes
 }
 
 func TestHandler_GetTaskThreadActivePollUsesSharedExecutionWindow(t *testing.T) {
-	db, counter := testutil.NewStatementCountingTestDB(t)
-	h, e, llmConfigRepo := setupTestHandlerForDB(t, db)
+	db := teststores.New(t, teststores.WithIOCounting())
+	counter := db.IO
+	env := wireTestHandler(t, db.Stores, testHandlerOptions{})
+	h, e, llmConfigRepo := env.Handler, env.Echo, env.LLMConfigRepo
 	agent := createAgent(t, llmConfigRepo)
 	project := createProject(t, h, "Active Poll Execution Window Project")
 	task := createTask(t, h, project.ID, "Active Poll Execution Window Task", func(tk *models.Task) {
 		tk.Status = models.StatusRunning
 	})
-	seedLargeExecutionHistory(t, db, task.ID, agent.ID, 7, 8, 16)
+	seedStoreExecutionHistory(t, db, task.ID, agent.ID, 7, 8, 16)
 
 	counter.Reset()
 	counter.SetEnabled(true)
@@ -628,21 +628,9 @@ func TestHandler_GetTaskThreadActivePollUsesSharedExecutionWindow(t *testing.T) 
 		lastIndex = index
 	}
 
-	windowQuerySeen := false
-	for _, statement := range counter.Statements() {
-		if !strings.Contains(statement, "FROM executions") {
-			continue
-		}
-		if strings.Contains(statement, "ORDER BY started_at ASC") {
-			t.Fatalf("active poll executed an unbounded chronological execution query: %s", statement)
-		}
-		if strings.Contains(statement, "ORDER BY started_at DESC, rowid DESC LIMIT ?") {
-			windowQuerySeen = true
-		}
-	}
-	if !windowQuerySeen {
-		t.Fatalf("active poll did not execute the canonical bounded task execution query; statements: %#v", counter.Statements())
-	}
+	stats := counter.Snapshot()
+	require.Positive(t, stats.ExecutionWindowReads, "active poll must read a bounded history window")
+	require.Zero(t, stats.UnboundedExecutionHistoryReads, "active poll must not read unbounded chronological history")
 }
 
 func BenchmarkHandler_GetTaskExecutions_ContentionWithLightweightDBRequest(b *testing.B) {
@@ -1678,8 +1666,7 @@ func TestHandler_GetTaskThreadPollUsesCompactTaskMetadata(t *testing.T) {
 }
 
 func TestHandler_GetTaskThreadPollIgnoresTaskPromptAndConfigChanges(t *testing.T) {
-	db := teststores.NewDB(t)
-	h, e, llmConfigRepo := setupTestHandlerForDB(t, db)
+	h, e, llmConfigRepo, db := setupTestHandlerWithStores(t)
 	ctx := context.Background()
 	agent := createAgent(t, llmConfigRepo)
 	project := createProject(t, h, "Thread Poll Stable Project")
@@ -1697,9 +1684,10 @@ func TestHandler_GetTaskThreadPollIgnoresTaskPromptAndConfigChanges(t *testing.T
 
 	first := htmxGet(e, "/tasks/"+task.ID+"/thread?poll=1&limit=5")
 	assertCode(t, first, http.StatusOK)
-	if _, err := db.ExecContext(ctx, `UPDATE tasks SET prompt = ?, chain_config = ?, swarm_config = ? WHERE id = ?`, strings.Repeat("second prompt payload", 4096), strings.Repeat("changed chain payload", 4096), strings.Repeat("changed swarm payload", 4096), task.ID); err != nil {
-		t.Fatalf("update ignored task payloads: %v", err)
-	}
+	require.NoError(t, db.Fixtures.SetTaskPayload(ctx, task.ID, storefixture.TaskPayload{
+		Prompt: strings.Repeat("second prompt payload", 4096), ChainConfig: strings.Repeat("changed chain payload", 4096), SwarmConfig: strings.Repeat("changed swarm payload", 4096),
+	}))
+
 	second := htmxGet(e, "/tasks/"+task.ID+"/thread?poll=1&limit=5")
 	assertCode(t, second, http.StatusOK)
 	if first.Body.String() != second.Body.String() {
@@ -5834,7 +5822,7 @@ func TestLayout_ThemeAndSidebarPreferencesPersistBeforeFirstPaint(t *testing.T) 
 }
 
 func TestLayout_UIPreferencesRestoreFromSettings(t *testing.T) {
-	h, e, _, _ := setupTestHandlerWithDB(t)
+	h, e, _, _ := setupTestHandlerWithStores(t)
 	require.NoError(t, h.settingsRepo.Set(context.Background(), uiPreferenceThemeKey, "openvibely-light"))
 	require.NoError(t, h.settingsRepo.Set(context.Background(), uiPreferenceSidebarCollapsedKey, "true"))
 
@@ -5972,7 +5960,7 @@ func TestTaskChangesUsesPersistedSplitDiffViewPreference(t *testing.T) {
 }
 
 func TestTaskDetailChangesRefreshRestoresInlineOrSplitWithoutSaving(t *testing.T) {
-	h, e, _, _ := setupTestHandlerWithDB(t)
+	h, e, _, _ := setupTestHandlerWithStores(t)
 	project := createProject(t, h, "Diff Refresh Project")
 	task := createTask(t, h, project.ID, "Diff Refresh Task")
 
@@ -9332,14 +9320,14 @@ func TestModelsListOmitsEagerEditConfiguration(t *testing.T) {
 }
 
 func BenchmarkHandlerListModelsHTMXLargeEditConfig(b *testing.B) {
-	_, e, _, db := setupTestHandlerWithDB(b)
-	teststores.ClearLLMConfigs(b, teststores.Of(db).LLMConfigs)
+	_, e, _, db := setupTestHandlerWithStores(b)
+	teststores.ClearLLMConfigs(b, db.LLMConfigs)
 	extraBody := `{"padding":"` + strings.Repeat("x", 1024*1024-len(`{"padding":""}`)) + `"}`
 	if len(extraBody) != 1024*1024 {
 		b.Fatalf("extra_body_json fixture size = %d, want %d", len(extraBody), 1024*1024)
 	}
 	for i := 0; i < 50; i++ {
-		err := teststores.Of(db).LLMConfigs.Create(context.Background(), &models.LLMConfig{
+		err := db.LLMConfigs.Create(context.Background(), &models.LLMConfig{
 			Name: fmt.Sprintf("Large Custom %02d", i), Provider: models.ProviderOpenAICompatible, Model: "custom-model",
 			APIKey: "secret", Temperature: 0.2, IsDefault: i == 0, AuthMethod: models.AuthMethodAPIKey,
 			BaseURL: "https://example.com/v1", Transport: "chat_completions", PresetSlug: "custom", ExtraBodyJSON: extraBody,

@@ -53,7 +53,11 @@ type ExecutionHistoryEntry struct {
 	CompletedAt                                                 *time.Time
 }
 
+// TaskPayload captures task instructions and orchestration configuration without lifecycle changes.
+type TaskPayload struct{ Prompt, ChainConfig, SwarmConfig string }
+
 type Fixtures interface {
+	SetTaskPayload(context.Context, string, TaskPayload) error
 	SeedExecutionHistory(context.Context, []ExecutionHistoryEntry) error
 	AsyncToolCallStatus(context.Context, string) (string, error)
 	RemoveAutomationTaskBinding(context.Context, string, string) error
@@ -219,6 +223,8 @@ type Fixtures interface {
 // SQLite counts executed statements; other backends must count their database
 // requests, including requests made inside a single store method.
 type IOStats struct {
+	// ExecutionWindowReads counts bounded newest-first history requests; UnboundedExecutionHistoryReads counts full chronological history requests.
+	ExecutionWindowReads, UnboundedExecutionHistoryReads int
 	// AgentReads counts physical reads of saved agent definitions.
 	AgentReads                                                                  int
 	ModelRuntimeListReads, ModelRuntimeLookupReads, ModelCreationSelectionReads int

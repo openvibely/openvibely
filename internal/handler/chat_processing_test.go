@@ -8747,9 +8747,11 @@ func TestProcessStreamingResponseConstructsRealHardenedGitHubRuntimeOnceFor50Too
 	require.Equal(t, 1, constructions, "processStreamingResponse must construct the real hardened runtime once for all 50 tool calls")
 }
 
-func newProductionHardenedRuntimeDispatchFixture() (*Handler, context.Context, streamingResponseParams, []llmcontracts.RuntimeToolDefinition) {
-	llmSvc := service.NewLLMService(nil, nil, nil, teststores.Of(nil).Projects, nil, nil)
-	llmSvc.SetAutomationRepo(teststores.Of(nil).Automations)
+func newProductionHardenedRuntimeDispatchFixture(tb testing.TB) (*Handler, context.Context, streamingResponseParams, []llmcontracts.RuntimeToolDefinition) {
+	tb.Helper()
+	env := teststores.New(tb)
+	llmSvc := service.NewLLMService(nil, nil, nil, env.Projects, nil, nil)
+	llmSvc.SetAutomationRepo(env.Automations)
 	llmSvc.SetGitHubIssueRuntimeProvider(&fakeGitHubService{})
 	h := &Handler{llmSvc: llmSvc}
 	task := models.Task{ID: "runtime-fixture-task", ProjectID: "runtime-fixture-project", Category: models.CategoryScheduled}
@@ -8766,7 +8768,7 @@ func newProductionHardenedRuntimeDispatchFixture() (*Handler, context.Context, s
 }
 
 func TestTaskFollowupRuntimeReusesRealHardenedGitHubRuntimeFor50Dispatches(t *testing.T) {
-	h, ctx, params, defs := newProductionHardenedRuntimeDispatchFixture()
+	h, ctx, params, defs := newProductionHardenedRuntimeDispatchFixture(t)
 	constructions := 0
 	h.githubRuntimeHook = func() { constructions++ }
 	channelCalls := 0
@@ -8817,7 +8819,8 @@ func TestTaskFollowupRuntimeReusesRealHardenedGitHubRuntimeFor50Dispatches(t *te
 var taskFollowupDispatchBenchmarkOutput string
 
 func BenchmarkTaskFollowupHardenedGitHubRuntime50Dispatches(b *testing.B) {
-	h, ctx, params, defs := newProductionHardenedRuntimeDispatchFixture()
+	b.StopTimer()
+	h, ctx, params, defs := newProductionHardenedRuntimeDispatchFixture(b)
 	contextRT := &llmcontracts.RuntimeTools{
 		Definitions: []llmcontracts.RuntimeToolDefinition{{Name: "context_tool"}},
 		Executor: func(_ context.Context, _ string, _ json.RawMessage) (string, bool, bool, error) {
@@ -8835,6 +8838,8 @@ func BenchmarkTaskFollowupHardenedGitHubRuntime50Dispatches(b *testing.B) {
 		b.Fatal("fixture must construct the real hardened Automation GitHub runtime")
 	}
 
+	b.ResetTimer()
+	b.StartTimer()
 	for i := 0; i < b.N; i++ {
 		runtime := h.buildStreamingResponseActionRuntime(ctx, params, nil, defs, models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)
 		for call := 0; call < 50; call++ {

@@ -580,7 +580,7 @@ func TestHandler_ProjectCapacityInheritedLimitsOmitAvailableSlots(t *testing.T) 
 
 func TestHandler_ProjectCapacityRepositoryErrors(t *testing.T) {
 	t.Run("collection list", func(t *testing.T) {
-		_, e, _, db := setupTestHandlerWithDB(t)
+		_, e, _, db := setupTestHandlerWithStores(t)
 		require.NoError(t, db.Close())
 
 		req := httptest.NewRequest(http.MethodGet, "/api/capacity/projects", nil)
@@ -590,7 +590,7 @@ func TestHandler_ProjectCapacityRepositoryErrors(t *testing.T) {
 	})
 
 	t.Run("detail lookup", func(t *testing.T) {
-		_, e, _, db := setupTestHandlerWithDB(t)
+		_, e, _, db := setupTestHandlerWithStores(t)
 		require.NoError(t, db.Close())
 
 		req := httptest.NewRequest(http.MethodGet, "/api/capacity/projects/project-id", nil)
@@ -1027,7 +1027,7 @@ func TestHandler_GetModelCapacity_OverCapacityClampsAvailableSlots(t *testing.T)
 }
 
 func TestHandler_GetModelCapacities_RepositoryError(t *testing.T) {
-	_, e, _, db := setupTestHandlerWithDB(t)
+	_, e, _, db := setupTestHandlerWithStores(t)
 	require.NoError(t, db.Close())
 
 	req := httptest.NewRequest(http.MethodGet, "/api/capacity/models", nil)
@@ -1038,7 +1038,7 @@ func TestHandler_GetModelCapacities_RepositoryError(t *testing.T) {
 }
 
 func TestHandler_GetModelCapacity_RepositoryError(t *testing.T) {
-	_, e, _, db := setupTestHandlerWithDB(t)
+	_, e, _, db := setupTestHandlerWithStores(t)
 	require.NoError(t, db.Close())
 
 	req := httptest.NewRequest(http.MethodGet, "/api/capacity/models/model-id", nil)

@@ -654,7 +654,7 @@ func TestAgentsListFiltersForeignProjectRowsBeforePaginationAndSelection(t *test
 }
 
 func TestUnmanagedSkillsRenderNoSelectionUIOrMetadata(t *testing.T) {
-	h, e, _, _ := setupTestHandlerWithDB(t)
+	h, e, _, _ := setupTestHandlerWithStores(t)
 	h.SetAgentSkillRoot("")
 	rec := serveCardPageRequest(t, e, "/skills?project_id=default")
 	require.Equal(t, http.StatusOK, rec.Code)

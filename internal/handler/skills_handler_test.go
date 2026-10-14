@@ -411,7 +411,7 @@ func TestDeleteSkillUsesSharedIndexCleanupSemantics(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			h, e, _, _ := setupTestHandlerWithDB(t)
+			h, e, _, _ := setupTestHandlerWithStores(t)
 			root := t.TempDir()
 			h.SetAgentSkillRoot(root)
 			project := createProject(t, h, "Shared Skill Index Cleanup Project")
@@ -460,7 +460,7 @@ func TestDeleteSkillUsesSharedIndexCleanupSemantics(t *testing.T) {
 }
 
 func TestDeleteSkillsBulkUsesScopeSpecificIndexCleanup(t *testing.T) {
-	h, e, _, _ := setupTestHandlerWithDB(t)
+	h, e, _, _ := setupTestHandlerWithStores(t)
 	globalRoot := t.TempDir()
 	projectRepoPath := t.TempDir()
 	h.SetAgentSkillRoot(globalRoot)
