@@ -1,4 +1,4 @@
-package handler
+package sqlite_test
 
 import (
 	"bytes"
@@ -12,7 +12,8 @@ import (
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
-	"github.com/openvibely/openvibely/internal/testutil/teststores"
+	"github.com/openvibely/openvibely/internal/persistence/sqlite"
+	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/openvibely/openvibely/web/templates/components"
 )
 
@@ -258,9 +259,9 @@ func logBreadcrumbSelectorPlanMatrix(tb testing.TB, db *sql.DB, benchmarkCase br
 }
 
 func TestTaskRepo_BreadcrumbSelectorWriteStorageScope(t *testing.T) {
-	db := teststores.NewDB(t)
+	db := testutil.NewTestDB(t)
 	defer db.Close()
-	repo := teststores.Of(db).Tasks
+	repo := sqlite.NewTaskRepo(db, nil)
 	ctx := context.Background()
 
 	fingerprint := func() string {
@@ -384,7 +385,7 @@ func newBreadcrumbSelectorBenchmarkRepo(tb testing.TB, taskCount int) (*sql.DB, 
 
 func newBreadcrumbSelectorBenchmarkRepoWithSchedules(tb testing.TB, taskCount int, includeSchedules bool) (*sql.DB, persistence.TaskStore) {
 	tb.Helper()
-	db := teststores.NewDB(tb)
+	db := testutil.NewTestDB(tb)
 	tx, err := db.BeginTx(context.Background(), nil)
 	if err != nil {
 		tb.Fatalf("begin breadcrumb selector fixture: %v", err)
@@ -418,7 +419,7 @@ func newBreadcrumbSelectorBenchmarkRepoWithSchedules(tb testing.TB, taskCount in
 		if err := tx.Commit(); err != nil {
 			tb.Fatalf("commit %d-task breadcrumb selector fixture: %v", taskCount, err)
 		}
-		return db, teststores.Of(db).Tasks
+		return db, sqlite.NewTaskRepo(db, nil)
 	}
 	_, err = tx.ExecContext(context.Background(), `
 		INSERT INTO schedules (id, task_id, run_at, repeat_type, repeat_interval, enabled, next_run)
@@ -443,7 +444,7 @@ func newBreadcrumbSelectorBenchmarkRepoWithSchedules(tb testing.TB, taskCount in
 	if err := tx.Commit(); err != nil {
 		tb.Fatalf("commit breadcrumb selector fixture: %v", err)
 	}
-	return db, teststores.Of(db).Tasks
+	return db, sqlite.NewTaskRepo(db, nil)
 }
 
 func breadcrumbSelectorBenchmarkTaskID(n int) string {

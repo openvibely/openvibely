@@ -596,3 +596,8 @@ func (f *fixtures) MakeProjectDetailsUnreadable(ctx context.Context, id string) 
 	_, err := f.db.ExecContext(ctx, `UPDATE projects SET created_at = 'not-a-timestamp', updated_at = 'not-a-timestamp' WHERE id = ?`, id)
 	return err
 }
+
+func (f *fixtures) SetTaskCategory(ctx context.Context, id string, category models.TaskCategory) error {
+	_, err := f.db.ExecContext(ctx, `UPDATE tasks SET category = ? WHERE id = ?`, category, id)
+	return err
+}

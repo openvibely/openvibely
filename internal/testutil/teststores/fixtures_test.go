@@ -587,3 +587,42 @@ func TestUnreadableProjectDetailsPreserveSelectorIdentity(t *testing.T) {
 		})
 	}
 }
+
+func TestFailLatestActiveInvocationPreservesScopeAndTerminalHistory(t *testing.T) {
+	for _, production := range []bool{false, true} {
+		name := "isolated"
+		if production {
+			name = "production"
+		}
+		t.Run(name, func(t *testing.T) {
+			var opts []teststores.Option
+			if production {
+				opts = append(opts, teststores.WithProductionTopology())
+			}
+			env := teststores.New(t, opts...)
+			ctx := t.Context()
+			for _, id := range []string{"target", "other"} {
+				require.NoError(t, env.Fixtures.SeedAutomation(ctx, models.Automation{ID: id, ProjectID: "default", StableKey: id, Name: id, AutomationType: "custom", LifecycleState: "active"}))
+				require.NoError(t, env.Fixtures.SeedAutomationVersion(ctx, models.AutomationVersion{ID: id + "-version", ProjectID: "default", AutomationID: id, Version: 1, State: "published", Source: "manual", AdapterKey: "custom"}))
+				require.NoError(t, env.Fixtures.SeedAutomationNode(ctx, models.AutomationNode{ID: id + "-node", ProjectID: "default", AutomationID: id, VersionID: id + "-version", NodeKey: "trigger", Name: "Trigger", NodeType: "trigger", Role: "schedule"}))
+			}
+			for _, v := range []struct{ id, automation, status string }{{"older", "target", "running"}, {"newer", "target", "claimed"}, {"terminal", "target", "completed"}, {"foreign", "other", "running"}} {
+				require.NoError(t, env.Fixtures.SeedAutomationInvocation(ctx, models.AutomationInvocation{ID: v.id, ProjectID: "default", AutomationID: v.automation, VersionID: v.automation + "-version", TriggerNodeID: v.automation + "-node", TriggerResourceType: "manual", TriggerResourceID: "test", OccurrenceKey: v.id, Status: models.AutomationInvocationStatus(v.status)}))
+			}
+			_, err := env.Fixtures.FailLatestActiveAutomationInvocation(ctx, "missing-project", "target")
+			require.Error(t, err)
+			id, err := env.Fixtures.FailLatestActiveAutomationInvocation(ctx, "default", "target")
+			require.NoError(t, err)
+			require.Equal(t, "newer", id)
+			for _, v := range []struct{ id, automation, status string }{{"older", "target", "running"}, {"newer", "target", "failed"}, {"terminal", "target", "completed"}, {"foreign", "other", "running"}} {
+				row, err := env.Automations.GetAutomationInvocation(ctx, "default", v.automation, v.id)
+				require.NoError(t, err)
+				require.NotNil(t, row)
+				require.Equal(t, v.status, string(row.Status))
+				if v.id == "newer" {
+					require.NotNil(t, row.CompletedAt)
+				}
+			}
+		})
+	}
+}
