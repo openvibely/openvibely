@@ -30,6 +30,10 @@ type ExecutionUsageRecord struct {
 type ChannelProjectSelectionCounts struct{ Discord, Slack, Telegram, Email int }
 
 type Fixtures interface {
+	RemoveAutomationCandidate(context.Context, string, string, string) error
+	SetAutomationCandidate(context.Context, string, models.AutomationDraftCandidate) error
+	SetAutomationHealthEvaluationTime(context.Context, string, *time.Time) error
+	SetAutomationPublishedVersion(context.Context, string, string) error
 	SetAutomationInvocationStart(context.Context, string, time.Time) error
 	SetAutomationActivityStart(context.Context, string, time.Time) error
 	SetAutomationTransitionTime(context.Context, string, string, time.Time) error

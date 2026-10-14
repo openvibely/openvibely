@@ -642,38 +642,32 @@ func BenchmarkAutomationTransitionHistoryQuery(b *testing.B) {
 }
 
 func TestAutomationHistoryHealthReconciliationCoversEverySavedAutomationBeyondOneBatch(t *testing.T) {
-	fixture := newAutomationRuntimeFixture(t, AutomationAdapterNativeSDLC)
-	ctx := context.Background()
-
+	fixture := newAutomationRuntimeStoreFixture(t, AutomationAdapterNativeSDLC)
+	ctx := t.Context()
+	ids := []string{fixture.definition.Automation.ID}
+	now := time.Date(2026, time.July, 27, 12, 0, 0, 0, time.UTC)
 	for i := 0; i < 101; i++ {
-		automationID := fmt.Sprintf("health-batch-automation-%03d", i)
+		id := fmt.Sprintf("health-batch-automation-%03d", i)
 		versionID := fmt.Sprintf("health-batch-version-%03d", i)
-		_, err := fixture.db.ExecContext(ctx, `INSERT INTO automations
-			(id, project_id, stable_key, name, automation_type, lifecycle_state, created_via)
-			VALUES (?, ?, ?, ?, 'custom', 'active', 'web')`,
-			automationID, fixture.project.ID, automationID, fmt.Sprintf("Health batch %03d", i))
-		require.NoError(t, err)
-		_, err = fixture.db.ExecContext(ctx, `INSERT INTO automation_versions
-			(id, project_id, automation_id, version, state, source, adapter_key, schema_version, published_at)
-			VALUES (?, ?, ?, 1, 'published', 'manual', 'custom', 1, CURRENT_TIMESTAMP)`,
-			versionID, fixture.project.ID, automationID)
-		require.NoError(t, err)
-		_, err = fixture.db.ExecContext(ctx, `UPDATE automations SET published_version_id = ? WHERE id = ?`, versionID, automationID)
-		require.NoError(t, err)
+		require.NoError(t, fixture.stores.Fixtures.SeedAutomation(ctx, models.Automation{ID: id, ProjectID: fixture.project.ID, StableKey: id, Name: fmt.Sprintf("Health batch %03d", i), AutomationType: "custom", LifecycleState: "active", CreatedVia: "web", PublishedVersionID: &versionID}))
+		require.NoError(t, fixture.stores.Fixtures.SeedAutomationVersion(ctx, models.AutomationVersion{ID: versionID, ProjectID: fixture.project.ID, AutomationID: id, Version: 1, State: "published", Source: "manual", AdapterKey: "custom", PublishedAt: &now}))
+		ids = append(ids, id)
 	}
-	_, err := fixture.db.ExecContext(ctx, `UPDATE automations SET health_evaluated_at = NULL WHERE project_id = ?`, fixture.project.ID)
+	for _, id := range ids {
+		require.NoError(t, fixture.stores.Fixtures.SetAutomationHealthEvaluationTime(ctx, id, nil))
+	}
+	require.NoError(t, fixture.repo.RecomputeAutomationHealthForAll(ctx, now, 100))
+	cards, err := fixture.repo.ListPortfolioCards(ctx, fixture.project.ID)
 	require.NoError(t, err)
-
-	err = fixture.repo.RecomputeAutomationHealthForAll(ctx, time.Date(2026, time.July, 27, 12, 0, 0, 0, time.UTC), 100)
-	require.NoError(t, err)
-
-	var saved, evaluated int
-	require.NoError(t, fixture.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM automations
-		WHERE project_id = ? AND published_version_id IS NOT NULL`, fixture.project.ID).Scan(&saved))
-	require.Greater(t, saved, 100)
-	require.NoError(t, fixture.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM automations
-		WHERE project_id = ? AND published_version_id IS NOT NULL AND health_evaluated_at IS NOT NULL`, fixture.project.ID).Scan(&evaluated))
-	require.Equal(t, saved, evaluated, "one reconciliation pass must not permanently starve saved Automations beyond the first batch")
+	require.Len(t, cards, len(ids))
+	require.Greater(t, len(cards), 100)
+	for _, card := range cards {
+		definition, err := fixture.repo.GetDefinition(ctx, fixture.project.ID, card.Automation.ID)
+		require.NoError(t, err)
+		require.NotNil(t, definition)
+		require.NotNil(t, definition.Automation.PublishedVersionID)
+		require.NotNil(t, definition.Automation.HealthEvaluatedAt, "one reconciliation pass must not starve saved Automations beyond the first batch: %s", card.Automation.ID)
+	}
 }
 
 func TestAutomationHistoryHealthIgnoresStaleFailureAfterRecentSuccesses(t *testing.T) {
@@ -790,17 +784,24 @@ func TestAutomationHistoryHealthChangedInputsPersistAffectedRecords(t *testing.T
 	})
 
 	t.Run("publication", func(t *testing.T) {
-		db := teststores.NewDB(t)
-		repo := teststores.Of(db).Automations
+		db := teststores.New(t)
+		repo := db.Automations
 		ctx := context.Background()
-		project := automationTestProject(t, teststores.Of(db).Projects, "Health publication")
+		project := automationTestProject(t, db.Projects, "Health publication")
 		automationID, versionID := "health-publication-automation", "health-publication-version"
-		require.NoError(t, insertMinimalAutomationDefinition(ctx, db, project.ID, automationID, versionID, false))
+		require.NoError(t, db.Fixtures.SeedAutomation(ctx, models.Automation{ID: automationID, ProjectID: project.ID, StableKey: automationID, Name: automationID, AutomationType: "custom", LifecycleState: "active", CreatedVia: "web"}))
+		now := time.Now().UTC()
+		require.NoError(t, db.Fixtures.SeedAutomationVersion(ctx, models.AutomationVersion{ID: versionID, ProjectID: project.ID, AutomationID: automationID, Version: 1, State: "published", Source: "manual", AdapterKey: "custom", PublishedAt: &now}))
+		for _, n := range []models.AutomationNode{{ID: automationID + "-trigger", NodeKey: "trigger", Name: "Trigger", NodeType: "trigger", Role: "trigger"}, {ID: automationID + "-gate", NodeKey: "gate", Name: "Gate", NodeType: "human_gate", Role: "approval"}} {
+			n.ProjectID = project.ID
+			n.AutomationID = automationID
+			n.VersionID = versionID
+			require.NoError(t, db.Fixtures.SeedAutomationNode(ctx, n))
+		}
 		require.NoError(t, repo.RecomputeAutomationHealthForAll(ctx, time.Date(2026, time.August, 2, 15, 0, 0, 0, time.UTC), 100))
 		requireAutomationHealthUnevaluated(t, repo, project.ID, automationID)
 
-		_, err := db.ExecContext(ctx, `UPDATE automations SET published_version_id = ? WHERE id = ?`, versionID, automationID)
-		require.NoError(t, err)
+		require.NoError(t, db.Fixtures.SetAutomationPublishedVersion(ctx, automationID, versionID))
 		require.NoError(t, repo.RecomputeAutomationHealthForAll(ctx, time.Date(2026, time.August, 2, 15, 1, 0, 0, time.UTC), 100))
 		requireAutomationHealthState(t, repo, project.ID, automationID, models.AutomationHealthUnknown, "No terminal invocation yet")
 	})
