@@ -1479,3 +1479,45 @@ func TestDetailReadObserversAndHistoricalState(t *testing.T) {
 		})
 	}
 }
+
+func TestDiscardedIssueDiscoveryRollsBackAndRestoresIntegrity(t *testing.T) {
+	for _, production := range []bool{false, true} {
+		t.Run(fmt.Sprintf("production_%v", production), func(t *testing.T) {
+			var opts []teststores.Option
+			if production {
+				opts = append(opts, teststores.WithProductionTopology())
+			}
+			env := teststores.New(t, opts...)
+			ctx := t.Context()
+			task := models.Task{ProjectID: "default", Title: "legacy discovery", Prompt: "test", Category: models.CategoryBacklog, Status: models.StatusPending}
+			require.NoError(t, env.Tasks.Create(ctx, &task))
+			seed := storefixture.DiscardedIssueDiscovery{ProjectID: "default", AutomationID: "discarded-automation", TaskID: task.ID, ResourceID: "issue-1", WorkItemID: "parent", ActivityID: "activity", ChildID: "parent", InputID: "input", BindingID: "binding", EventKey: "event", VersionID: "discarded-version", NodeID: "discarded-node"}
+			require.Error(t, env.Fixtures.SeedDiscardedIssueDiscovery(ctx, seed))
+			count, err := env.Fixtures.CountMatchingWorkItems(ctx, storefixture.WorkItemMatch{ID: seed.WorkItemID})
+			require.NoError(t, err)
+			require.Zero(t, count)
+			count, err = env.Fixtures.CountMatchingActivities(ctx, storefixture.ActivityMatch{ID: seed.ActivityID})
+			require.NoError(t, err)
+			require.Zero(t, count)
+			count, err = env.Fixtures.CountAutomationInputBinding(ctx, seed.BindingID)
+			require.NoError(t, err)
+			require.Zero(t, count)
+			inputs, err := env.ThreadInputs.ListPendingForTask(ctx, task.ID)
+			require.NoError(t, err)
+			require.Empty(t, inputs)
+			seed.ChildID = "child"
+			require.NoError(t, env.Fixtures.SeedDiscardedIssueDiscovery(ctx, seed))
+			count, err = env.Fixtures.CountMatchingWorkItems(ctx, storefixture.WorkItemMatch{ID: seed.WorkItemID})
+			require.NoError(t, err)
+			require.Equal(t, 1, count)
+			count, err = env.Fixtures.CountAutomationInputBinding(ctx, seed.BindingID)
+			require.NoError(t, err)
+			require.Equal(t, 1, count)
+			count, err = env.Fixtures.CountTransitionEvents(ctx, seed.ProjectID, seed.AutomationID, []string{seed.EventKey})
+			require.NoError(t, err)
+			require.Equal(t, 1, count)
+			invalid := models.Task{ProjectID: "missing", Title: "foreign key check", Category: models.CategoryBacklog, Status: models.StatusPending}
+			require.Error(t, env.Tasks.Create(ctx, &invalid))
+		})
+	}
+}

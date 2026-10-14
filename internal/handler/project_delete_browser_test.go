@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/testutil/teststores"
 	"github.com/openvibely/openvibely/web/static"
 	"github.com/stretchr/testify/require"
 )
@@ -107,26 +106,11 @@ func TestProjectDeletionConfirmationAndSuccessfulFlowInChrome(t *testing.T) {
 		t.Skip("Chrome/Chromium executable not found")
 	}
 
-	_, app, _, db := setupTestHandlerWithDB(t)
-	projectRepo := teststores.Of(db).Projects
+	_, app, _, db := setupTestHandlerWithStores(t)
+	projectRepo := db.Projects
 	project := models.Project{Name: "Disposable Browser Delete Project"}
 	require.NoError(t, projectRepo.Create(t.Context(), &project))
-	require.NoError(t, func() error {
-		_, err := db.ExecContext(t.Context(), `
-			CREATE TABLE memory_consolidation_runs (id TEXT PRIMARY KEY);
-			CREATE TABLE memory_consolidation_schedules (
-				project_id TEXT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
-				last_run_id TEXT REFERENCES memory_consolidation_runs(id) ON DELETE SET NULL
-			);
-			INSERT INTO memory_consolidation_schedules(project_id) VALUES (?)`, project.ID)
-		return err
-	}())
-	_, err := db.ExecContext(t.Context(), `PRAGMA foreign_keys=OFF`)
-	require.NoError(t, err)
-	_, err = db.ExecContext(t.Context(), `DROP TABLE memory_consolidation_runs`)
-	require.NoError(t, err)
-	_, err = db.ExecContext(t.Context(), `PRAGMA foreign_keys=ON`)
-	require.NoError(t, err)
+	require.NoError(t, db.Fixtures.SetProjectDeletionFailure(t.Context(), project.ID, true))
 
 	result := make(chan string, 1)
 	var deleteRequests atomic.Int32
@@ -199,9 +183,9 @@ func TestProjectDeletionConfirmationAndSuccessfulFlowInChrome(t *testing.T) {
 		recorder := httptest.NewRecorder()
 		app.ServeHTTP(recorder, r)
 		if firstDelete {
-			if _, dropErr := db.ExecContext(r.Context(), `DROP TABLE memory_consolidation_schedules`); dropErr != nil {
+			if dropErr := db.Fixtures.SetProjectDeletionFailure(r.Context(), project.ID, false); dropErr != nil {
 				select {
-				case result <- "fail:removing disposable legacy constraint: " + dropErr.Error():
+				case result <- "fail:clearing project deletion failure: " + dropErr.Error():
 				default:
 				}
 			}

@@ -3,7 +3,6 @@ package server
 import (
 	"bytes"
 	"context"
-	"database/sql"
 	"encoding/base64"
 	"errors"
 	"log"
@@ -26,8 +25,6 @@ import (
 	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
-	"github.com/openvibely/openvibely/internal/persistence/sqlite"
-	"github.com/openvibely/openvibely/internal/persistence/sqlite/database"
 	"github.com/openvibely/openvibely/internal/testutil/teststores"
 	openaiclient "github.com/openvibely/openvibely/pkg/openai_client"
 )
@@ -322,11 +319,8 @@ func TestStartRefreshesExpiringOAuthConfigsInBackground(t *testing.T) {
 
 	tmpDir := t.TempDir()
 	databasePath := filepath.Join(tmpDir, "oauth-background.db")
-	db, err := database.New(databasePath)
-	if err != nil {
-		t.Fatalf("prepare database: %v", err)
-	}
-	repo := teststores.Of(db).LLMConfigs
+	db := teststores.OpenBackend(t, databasePath, nil)
+	repo := db.Stores().LLMConfigs
 	cfg := &models.LLMConfig{Name: "Idle OpenAI", Provider: models.ProviderOpenAI, Model: "gpt", AuthMethod: models.AuthMethodOAuth, OAuthAccessToken: "expired-access", OAuthRefreshToken: "old-refresh", OAuthExpiresAt: time.Now().Add(-time.Minute).UnixMilli()}
 	if err := repo.Create(context.Background(), cfg); err != nil {
 		db.Close()
@@ -346,7 +340,7 @@ func TestStartRefreshesExpiringOAuthConfigsInBackground(t *testing.T) {
 		EnvironmentExplicitlySet: true,
 		UpdateServiceURL:         mockUpdateServiceURL(t),
 	}
-	instance, err := Start(context.Background(), serverCfg)
+	instance, err := startTestServer(t, context.Background(), serverCfg)
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}
@@ -357,12 +351,9 @@ func TestStartRefreshesExpiringOAuthConfigsInBackground(t *testing.T) {
 		t.Fatal("background OAuth refresh did not run after startup")
 	}
 
-	readDB, err := database.New(databasePath)
-	if err != nil {
-		t.Fatalf("open refreshed database: %v", err)
-	}
+	readDB := teststores.OpenBackend(t, databasePath, nil)
 	defer readDB.Close()
-	readRepo := teststores.Of(readDB).LLMConfigs
+	readRepo := readDB.Stores().LLMConfigs
 	deadline := time.Now().Add(5 * time.Second)
 	for {
 		loaded, loadErr := readRepo.GetByID(context.Background(), cfg.ID)
@@ -396,7 +387,7 @@ func TestStart_RejectsDirectHostedSSOAuthModeInDesktop(t *testing.T) {
 		AppBaseURL:               "https://alice.openvibely.ai",
 		AuthSessionSecret:        base64.RawURLEncoding.EncodeToString([]byte("0123456789abcdef0123456789abcdef")),
 	}
-	instance, err := Start(context.Background(), cfg)
+	instance, err := startTestServer(t, context.Background(), cfg)
 	if instance != nil {
 		instance.Shutdown()
 	}
@@ -438,7 +429,7 @@ func TestStart_HostedSSOWiringRedirectsDirectNavigation(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	instance, err := Start(ctx, cfg)
+	instance, err := startTestServer(t, ctx, cfg)
 	if err != nil {
 		t.Fatalf("Start hosted: %v", err)
 	}
@@ -536,7 +527,7 @@ func TestStart_HostedSSOWiringRedirectsDirectNavigation(t *testing.T) {
 }
 
 type closeTrackingBackend struct {
-	*sqlite.Backend
+	persistence.Backend
 	closed bool
 }
 
@@ -555,10 +546,7 @@ func TestStart_ClosesSplitDatabaseAfterConfirmationSecretFailure(t *testing.T) {
 
 	var opened *closeTrackingBackend
 	openPersistence = func(cfg *config.Config, broadcaster *events.Broadcaster) (persistence.Backend, error) {
-		backend, err := sqlite.Open(cfg.DatabasePath, broadcaster)
-		if err != nil {
-			return nil, err
-		}
+		backend := teststores.OpenBackend(t, cfg.DatabasePath, broadcaster)
 		opened = &closeTrackingBackend{Backend: backend}
 		return opened, nil
 	}
@@ -576,7 +564,7 @@ func TestStart_ClosesSplitDatabaseAfterConfirmationSecretFailure(t *testing.T) {
 		Environment:      "test",
 		UpdateServiceURL: mockUpdateServiceURL(t),
 	}
-	instance, err := Start(context.Background(), cfg)
+	instance, err := startTestServer(t, context.Background(), cfg)
 	if instance != nil || err == nil || !strings.Contains(err.Error(), "initializing automation confirmation secret") {
 		t.Fatalf("Start() = (%#v, %v), want confirmation secret failure", instance, err)
 	}
@@ -609,7 +597,7 @@ func TestStart_BootstrapAndShutdown(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	inst, err := Start(ctx, cfg)
+	inst, err := startTestServer(t, ctx, cfg)
 	if err != nil {
 		t.Fatalf("Start() failed: %v", err)
 	}
@@ -670,7 +658,7 @@ func TestStart_SeedsBuiltInSystemAgentsAndMaintenanceSchedulesOnFreshDB(t *testi
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	inst, err := Start(ctx, cfg)
+	inst, err := startTestServer(t, ctx, cfg)
 	if err != nil {
 		cancel()
 		t.Fatalf("Start() fresh failed: %v", err)
@@ -681,7 +669,7 @@ func TestStart_SeedsBuiltInSystemAgentsAndMaintenanceSchedulesOnFreshDB(t *testi
 	assertFreshSystemSeedState(t, cfg.DatabasePath)
 
 	restartCtx, restartCancel := context.WithCancel(context.Background())
-	restarted, err := Start(restartCtx, cfg)
+	restarted, err := startTestServer(t, restartCtx, cfg)
 	if err != nil {
 		restartCancel()
 		t.Fatalf("Start() restart failed: %v", err)
@@ -694,11 +682,9 @@ func TestStart_SeedsBuiltInSystemAgentsAndMaintenanceSchedulesOnFreshDB(t *testi
 
 func assertFreshSystemSeedState(t *testing.T, dbPath string) {
 	t.Helper()
-	db, err := database.New(dbPath)
-	if err != nil {
-		t.Fatalf("open seeded db: %v", err)
-	}
-	defer db.Close()
+	backend := teststores.OpenBackend(t, dbPath, nil)
+	db := backend.Stores()
+	defer backend.Close()
 
 	assertSingleProtectedSystemAgent(t, db, "memory_curator")
 	assertSingleProtectedSystemAgent(t, db, "skill_curator")
@@ -706,7 +692,7 @@ func assertFreshSystemSeedState(t *testing.T, dbPath string) {
 	assertSingleScheduledSystemTask(t, db, "System: Memory Consolidation", "memory_curator")
 	assertSingleScheduledSystemTask(t, db, "System: Skill Library Maintenance", "skill_curator")
 
-	maxWorkers, err := teststores.Of(db).Workers.GetMaxWorkers(context.Background())
+	maxWorkers, err := db.Workers.GetMaxWorkers(context.Background())
 	if err != nil {
 		t.Fatalf("read global worker limit after startup: %v", err)
 	}
@@ -715,44 +701,49 @@ func assertFreshSystemSeedState(t *testing.T, dbPath string) {
 	}
 }
 
-func assertSingleProtectedSystemAgent(t *testing.T, db *sql.DB, systemKind string) {
+func assertSingleProtectedSystemAgent(t *testing.T, stores persistence.Stores, systemKind string) {
 	t.Helper()
-	var count int
-	if err := db.QueryRow(`
-		SELECT COUNT(*)
-		FROM agents
-		WHERE system_kind = ?
-		  AND key = ?
-		  AND generated_status = 'protected'
-		  AND created_by = 'system'
-		  AND enabled = 1
-		  AND selectable_as_primary = 0
-	`, systemKind, systemKind).Scan(&count); err != nil {
-		t.Fatalf("count protected system agent %s: %v", systemKind, err)
+	agents, err := stores.Agents.ListIncludingArchived(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	count := 0
+	for _, a := range agents {
+		if a.SystemKind == systemKind && a.Key == systemKind && a.GeneratedStatus == "protected" && a.CreatedBy == "system" && a.Enabled && !a.SelectableAsPrimary {
+			count++
+		}
 	}
 	if count != 1 {
 		t.Fatalf("expected one protected %s agent, got %d", systemKind, count)
 	}
 }
-
-func assertSingleScheduledSystemTask(t *testing.T, db *sql.DB, title, systemKind string) {
+func assertSingleScheduledSystemTask(t *testing.T, stores persistence.Stores, title, systemKind string) {
 	t.Helper()
-	var count int
-	if err := db.QueryRow(`
-		SELECT COUNT(*)
-		FROM tasks t
-		JOIN agents a ON a.id = t.agent_definition_id
-		JOIN schedules s ON s.task_id = t.id
-		WHERE t.project_id = 'default'
-		  AND t.title = ?
-		  AND t.category = 'scheduled'
-		  AND a.system_kind = ?
-		  AND s.repeat_type = 'daily'
-		  AND s.repeat_interval = 1
-		  AND s.enabled = 1
-		  AND s.clear_context_on_start = 1
-	`, title, systemKind).Scan(&count); err != nil {
-		t.Fatalf("count scheduled system task %s: %v", title, err)
+	tasks, err := stores.Tasks.ListByProject(t.Context(), "default", "scheduled")
+	if err != nil {
+		t.Fatal(err)
+	}
+	count := 0
+	for _, task := range tasks {
+		if task.Title != title || task.AgentDefinitionID == nil {
+			continue
+		}
+		agent, err := stores.Agents.GetByID(t.Context(), *task.AgentDefinitionID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if agent == nil || agent.SystemKind != systemKind {
+			continue
+		}
+		schedules, err := stores.Schedules.ListByTask(t.Context(), task.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, schedule := range schedules {
+			if schedule.RepeatType == models.RepeatDaily && schedule.RepeatInterval == 1 && schedule.Enabled && schedule.ClearContextOnStart {
+				count++
+			}
+		}
 	}
 	if count != 1 {
 		t.Fatalf("expected one scheduled system task %q for %s, got %d", title, systemKind, count)
@@ -774,7 +765,7 @@ func TestStart_NormalizesAppStorageDefaults(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 
-			inst, err := Start(ctx, cfg)
+			inst, err := startTestServer(t, ctx, cfg)
 			if err != nil {
 				t.Fatalf("Start() failed: %v", err)
 			}
@@ -1158,7 +1149,7 @@ func TestStart_ServerModeDefaults(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	inst, err := Start(ctx, cfg)
+	inst, err := startTestServer(t, ctx, cfg)
 	if err != nil {
 		t.Fatalf("Start() failed: %v", err)
 	}
@@ -1200,4 +1191,10 @@ func TestOpenPersistence_SQLiteDriverOpensBackend(t *testing.T) {
 	if backend.Stores().Tasks == nil {
 		t.Fatal("sqlite backend returned no task store")
 	}
+}
+
+func startTestServer(t *testing.T, ctx context.Context, cfg *config.Config) (*Instance, error) {
+	t.Helper()
+	cfg.DatabaseDriver = teststores.Driver()
+	return Start(ctx, cfg)
 }

@@ -20,6 +20,7 @@ import (
 	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/openvibely/openvibely/internal/testutil/teststores"
 	"github.com/stretchr/testify/require"
 )
 
@@ -753,8 +754,8 @@ func TestChatActionReadHelpersUseRepositories(t *testing.T) {
 }
 
 func TestChatModelStatusToolsUseCompactRuntimeSummaries(t *testing.T) {
-	db, counter := testutil.NewStatementCountingTestDB(t)
-	h, _, llmConfigRepo := setupTestHandlerForDB(t, db)
+	h, _, llmConfigRepo, env := setupTestHandlerWithStores(t, teststores.WithIOCounting())
+	counter := env.IO
 	ctx := context.Background()
 	largeBody := strings.Repeat("large-provider-json", 4096)
 	model := &models.LLMConfig{
@@ -780,41 +781,10 @@ func TestChatModelStatusToolsUseCompactRuntimeSummaries(t *testing.T) {
 	require.Contains(t, getOut, "max_workers: 4")
 	require.Contains(t, settingsOut, "Compact Runtime Model")
 	require.Contains(t, settingsOut, "max_workers=4, timeout=30s")
-	assertChatModelStatusStatementsCompact(t, counter.Statements())
-}
-
-func assertChatModelStatusStatementsCompact(t *testing.T, statements []string) {
-	t.Helper()
-	var runtimeListQueries, targetedLookupQueries int
-	for _, raw := range statements {
-		stmt := strings.ToLower(strings.Join(strings.Fields(raw), " "))
-		if !strings.Contains(stmt, " from agent_configs") {
-			continue
-		}
-		projection := strings.Split(stmt, " from agent_configs")[0]
-		for _, forbidden := range []string{"api_key", "oauth_access_token", "oauth_refresh_token", "oauth_client_secret", "oauth_authorize_url", "oauth_token_url", "ollama_base_url", "base_url", "models_url", "extra_headers_json", "extra_body_json", "custom_auth_config_json", "custom_auth_state_json", "mixture_config_json"} {
-			if strings.Contains(projection, forbidden) {
-				t.Fatalf("chat model/status query selected forbidden column %q: %s", forbidden, raw)
-			}
-		}
-		if strings.Contains(projection, "select id, name, provider, model, is_default, auth_method, max_workers, worker_timeout") && strings.Contains(stmt, "where name = ? collate nocase") {
-			targetedLookupQueries++
-			continue
-		}
-		if strings.Contains(projection, "select id, name, provider, model, is_default, auth_method, max_workers, worker_timeout") && strings.Contains(stmt, "order by is_default desc, name asc") && !strings.Contains(stmt, " where ") {
-			runtimeListQueries++
-			continue
-		}
-		if strings.Contains(projection, "select id, name, provider, model, reasoning_effort") {
-			t.Fatalf("chat model/status tool used full model list query: %s", raw)
-		}
-	}
-	if runtimeListQueries != 2 {
-		t.Fatalf("runtime list compact query count = %d, want 2; statements: %#v", runtimeListQueries, statements)
-	}
-	if targetedLookupQueries != 1 {
-		t.Fatalf("targeted lookup compact query count = %d, want 1; statements: %#v", targetedLookupQueries, statements)
-	}
+	require.Equal(t, 2, counter.Snapshot().ModelRuntimeListReads)
+	require.Equal(t, 1, counter.Snapshot().ModelRuntimeLookupReads)
+	require.Equal(t, 3, counter.Snapshot().ModelReads)
+	require.Zero(t, counter.Snapshot().ModelDetailReads)
 }
 
 func TestChatActionRuntimeBuildersFiltersAndLineageHelpers(t *testing.T) {

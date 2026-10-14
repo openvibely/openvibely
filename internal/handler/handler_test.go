@@ -3,7 +3,6 @@ package handler
 import (
 	"bytes"
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"mime/multipart"
@@ -38,19 +37,6 @@ func setupTestHandler(t testing.TB) (*Handler, *echo.Echo, persistence.LLMConfig
 	return h, e, llmConfigRepo
 }
 
-func setupTestHandlerForDB(t testing.TB, db *sql.DB) (*Handler, *echo.Echo, persistence.LLMConfigStore) {
-	t.Helper()
-	env := newTestHandlerEnv(t, db)
-	return env.Handler, env.Echo, env.LLMConfigRepo
-}
-
-func setupTestHandlerWithDB(t testing.TB) (*Handler, *echo.Echo, persistence.LLMConfigStore, *sql.DB) {
-	t.Helper()
-	env := newTestHandlerEnv(t, teststores.NewDB(t))
-	return env.Handler, env.Echo, env.LLMConfigRepo, env.DB
-}
-
-// createProject creates a test project with the given name.
 func createProject(t *testing.T, h *Handler, name string) *models.Project {
 	return createProjectTB(t, h, name)
 }

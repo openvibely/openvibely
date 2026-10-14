@@ -22,6 +22,7 @@ import (
 	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/openvibely/openvibely/internal/testutil/storefixture"
 	"github.com/openvibely/openvibely/internal/testutil/teststores"
 	"github.com/stretchr/testify/require"
 )
@@ -1575,7 +1576,8 @@ func TestHandler_AgentModelPickerRoutesUseCompactProjection(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected list status 200, got %d: %s", rec.Code, rec.Body.String())
 	}
-	assertCompactAgentPickerQueries(t, counter.Statements(), 1)
+	require.GreaterOrEqual(t, counter.Snapshot().ModelPickerReads, 1)
+	require.Zero(t, counter.Snapshot().ModelFullCatalogReads)
 	body := rec.Body.String()
 	inheritIndex := strings.Index(body, `<option value="inherit">Inherit (from task)</option>`)
 	defaultIndex := strings.Index(body, `>Agent Picker Default (agent-picker-default)</option>`)
@@ -1592,7 +1594,8 @@ func TestHandler_AgentModelPickerRoutesUseCompactProjection(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected create status 200, got %d: %s", rec.Code, rec.Body.String())
 	}
-	assertCompactAgentPickerQueries(t, counter.Statements(), 2)
+	require.GreaterOrEqual(t, counter.Snapshot().ModelPickerReads, 2)
+	require.Zero(t, counter.Snapshot().ModelFullCatalogReads)
 	created := requireUserAgentByName(t, agentRepo, "Projection Create")
 	if created.Model != "agent-picker-model-17" {
 		t.Fatalf("known create model normalized to %q", created.Model)
@@ -1606,7 +1609,8 @@ func TestHandler_AgentModelPickerRoutesUseCompactProjection(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected update status 200, got %d: %s", rec.Code, rec.Body.String())
 	}
-	assertCompactAgentPickerQueries(t, counter.Statements(), 2)
+	require.GreaterOrEqual(t, counter.Snapshot().ModelPickerReads, 2)
+	require.Zero(t, counter.Snapshot().ModelFullCatalogReads)
 	updated, err := agentRepo.GetByID(t.Context(), agent.ID)
 	if err != nil {
 		t.Fatalf("reload updated agent: %v", err)
@@ -1637,7 +1641,8 @@ func TestHandler_AgentModelNormalizationPreservesBlankInheritUnknownAndKnown(t *
 		if rec.Code != http.StatusOK {
 			t.Fatalf("%s: expected status 200, got %d: %s", tc.name, rec.Code, rec.Body.String())
 		}
-		assertCompactAgentPickerQueries(t, counter.Statements(), 2)
+		require.GreaterOrEqual(t, counter.Snapshot().ModelPickerReads, 2)
+		require.Zero(t, counter.Snapshot().ModelFullCatalogReads)
 		created := requireUserAgentByName(t, agentRepo, tc.name)
 		if created.Model != tc.wantModel {
 			t.Fatalf("%s: model = %q, want %q", tc.name, created.Model, tc.wantModel)
@@ -1666,7 +1671,8 @@ func TestHandler_AgentModelNormalizationPreservesBlankInheritUnknownAndKnown(t *
 		if rec.Code != http.StatusOK {
 			t.Fatalf("%s: expected status 200, got %d: %s", tc.name, rec.Code, rec.Body.String())
 		}
-		assertCompactAgentPickerQueries(t, counter.Statements(), 2)
+		require.GreaterOrEqual(t, counter.Snapshot().ModelPickerReads, 2)
+		require.Zero(t, counter.Snapshot().ModelFullCatalogReads)
 		updated, err := agentRepo.GetByID(t.Context(), agent.ID)
 		if err != nil {
 			t.Fatalf("reload %s: %v", tc.name, err)
@@ -1710,8 +1716,9 @@ func TestHandler_GenerateAgentNormalizesModelsWithCompactPickerProjection(t *tes
 			if rec.Code != http.StatusOK {
 				t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
 			}
-			assertCompactAgentPickerQueries(t, counter.Statements(), 1)
-			assertGenerateAgentLoadedFullDefaultModel(t, counter.Statements())
+			require.GreaterOrEqual(t, counter.Snapshot().ModelPickerReads, 1)
+			require.Zero(t, counter.Snapshot().ModelFullCatalogReads)
+			require.Positive(t, counter.Snapshot().ModelDefaultDetailReads)
 
 			var generated struct {
 				Model          string `json:"model"`
@@ -1730,11 +1737,11 @@ func TestHandler_GenerateAgentNormalizesModelsWithCompactPickerProjection(t *tes
 	}
 }
 
-func setupAgentModelPickerProjectionTest(t *testing.T) (*Handler, *echo.Echo, persistence.LLMConfigStore, persistence.AgentStore, *testutil.SQLStatementCounter) {
+func setupAgentModelPickerProjectionTest(t *testing.T) (*Handler, *echo.Echo, persistence.LLMConfigStore, persistence.AgentStore, storefixture.IOCounter) {
 	t.Helper()
-	db, counter := testutil.NewStatementCountingTestDB(t)
-	h, e, llmConfigRepo := setupTestHandlerForDB(t, db)
-	agentRepo := teststores.Of(db).Agents
+	h, e, llmConfigRepo, env := setupTestHandlerWithStores(t, teststores.WithIOCounting())
+	counter := env.IO
+	agentRepo := env.Agents
 	h.SetAgentRepo(agentRepo)
 
 	largeBody := strings.Repeat("x", 64*1024)
@@ -1804,45 +1811,6 @@ func requireUserAgentByName(t *testing.T, repo persistence.AgentStore, name stri
 	}
 	t.Fatalf("user agent %q not found in %+v", name, agents)
 	return models.Agent{}
-}
-
-func assertCompactAgentPickerQueries(t *testing.T, statements []string, minQueries int) {
-	t.Helper()
-	queries := 0
-	for _, statement := range statements {
-		stmt := strings.ToLower(strings.Join(strings.Fields(statement), " "))
-		if !strings.Contains(stmt, " from agent_configs order by is_default desc, name asc") {
-			continue
-		}
-		queries++
-		projection := strings.Split(stmt, " from agent_configs ")[0]
-		if !strings.Contains(projection, "select id, name, model, provider, preset_slug, reasoning_effort, is_default") {
-			t.Fatalf("agent picker projection = %q, want model identity, grouping, and effort metadata in %s", projection, statement)
-		}
-		for _, forbidden := range []string{"api_key", "oauth_access_token", "oauth_refresh_token", "oauth_client_secret", "oauth_authorize_url", "oauth_token_url", "ollama_base_url", "base_url", "models_url", "auth_header_name", "auth_header_value_prefix", "extra_headers_json", "extra_body_json", "custom_auth_config_json", "custom_auth_state_json", "oauth_config_revision", "mixture_config_json", "created_at", "updated_at", "max_workers", "worker_timeout", "auto_start_tasks"} {
-			if strings.Contains(projection, forbidden) {
-				t.Fatalf("agent picker query selected forbidden column %q: %s", forbidden, statement)
-			}
-		}
-	}
-	if queries < minQueries {
-		t.Fatalf("found %d compact agent picker queries, want at least %d; statements: %#v", queries, minQueries, statements)
-	}
-}
-
-func assertGenerateAgentLoadedFullDefaultModel(t *testing.T, statements []string) {
-	t.Helper()
-	for _, statement := range statements {
-		stmt := strings.ToLower(strings.Join(strings.Fields(statement), " "))
-		if strings.Contains(stmt, " from agent_configs where is_default = 1 limit 1") || strings.Contains(stmt, " from agent_configs a left join oauth_connections") && strings.Contains(stmt, " where a.is_default = 1 limit 1") {
-			projection := strings.Split(stmt, " from agent_configs")[0]
-			if strings.Contains(projection, "api_key") && strings.Contains(projection, "extra_body_json") {
-				return
-			}
-			t.Fatalf("GenerateAgent default-model query did not use full execution projection: %s", statement)
-		}
-	}
-	t.Fatalf("GenerateAgent did not load the full default model; statements: %#v", statements)
 }
 
 func TestHandler_GenerateAgent_RejectsUninstalledPluginSelection(t *testing.T) {

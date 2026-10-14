@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -18,7 +17,6 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/testutil"
-	"github.com/openvibely/openvibely/internal/testutil/sqlitefixtures"
 	"github.com/openvibely/openvibely/internal/testutil/storefixture"
 	"github.com/openvibely/openvibely/internal/testutil/teststores"
 	"github.com/stretchr/testify/require"
@@ -30,23 +28,9 @@ type automationRuntimeFixture struct {
 	task       models.Task
 	schedule   models.Schedule
 	definition *models.AutomationDefinition
-	db         *sql.DB
 	repo       persistence.AutomationStore
 	taskRepo   persistence.TaskStore
 	schedRepo  persistence.ScheduleStore
-}
-
-func newAutomationRuntimeFixture(t *testing.T, adapterKey string) automationRuntimeFixture {
-	t.Helper()
-	db := teststores.NewDB(t)
-	return newAutomationRuntimeFixtureWithDB(t, db, adapterKey)
-}
-
-func newAutomationRuntimeFixtureWithDB(t *testing.T, db *sql.DB, adapterKey string) automationRuntimeFixture {
-	t.Helper()
-	fixture := buildAutomationRuntimeFixture(t, &teststores.Env{Stores: teststores.Of(db), Fixtures: sqlitefixtures.New(db)}, adapterKey)
-	fixture.db = db
-	return fixture
 }
 
 func newAutomationRuntimeStoreFixture(t *testing.T, adapterKey string, opts ...teststores.Option) automationRuntimeFixture {
@@ -2357,223 +2341,188 @@ func TestAutomationRuntimeSharedInboxExecutionPreservesMultipleBindings(t *testi
 }
 
 func TestAutomationRuntimeAuthorizedAssigneeScanReanchorsStaleIssueProjection(t *testing.T) {
-	fixture := newAutomationRuntimeFixture(t, AutomationAdapterGitHubSDLC)
-	ctx := context.Background()
-	projectRepo := fixture.stores.Projects
-	fixture.project.RepoURL = "https://github.com/example/runtime.git"
-	require.NoError(t, projectRepo.Update(ctx, &fixture.project))
-	repoRef := &GitHubRepoRef{Owner: "example", Name: "runtime", FullName: "example/runtime", HTMLURL: "https://github.com/example/runtime"}
-	issue := GitHubIssue{Number: 288, URL: "https://github.com/example/runtime/issues/288", Title: "Stale assigned issue", Body: "Stale issue body", State: "open", Assignees: []string{"dubee"}, Labels: []string{"bug"}, CompleteForTaskCreation: true, TaskCreationCompletenessKnown: true}
-	resourceID := githubIssueResourceID(repoRef, issue.Number)
+	for _, production := range []bool{false, true} {
+		t.Run(fmt.Sprintf("production_%v", production), func(t *testing.T) {
+			var storeOptions []teststores.Option
+			if production {
+				storeOptions = append(storeOptions, teststores.WithProductionTopology())
+			}
 
-	_, err := fixture.db.ExecContext(ctx, `PRAGMA foreign_keys = OFF`)
-	require.NoError(t, err)
-	_, err = fixture.db.ExecContext(ctx, `INSERT INTO automation_work_items
-		(id, project_id, automation_id, origin_version_id, work_item_key, kind, title, status)
-		VALUES ('stale-github-issue-work-item', ?, ?, 'discarded-version', ?, 'github_issue', 'Old title', 'waiting')`,
-		fixture.project.ID, fixture.definition.Automation.ID, resourceID)
-	require.NoError(t, err)
-	_, err = fixture.db.ExecContext(ctx, `INSERT INTO automation_activities
-		(id, project_id, automation_id, version_id, node_id, work_item_id, activity_key, activity_type, status)
-		VALUES ('stale-github-issue-activity', ?, ?, 'discarded-version', 'discarded-inbox-node', 'stale-github-issue-work-item', 'stale-discovery', 'discover_assigned_issue', 'completed')`,
-		fixture.project.ID, fixture.definition.Automation.ID)
-	require.NoError(t, err)
-	_, err = fixture.db.ExecContext(ctx, `INSERT INTO automation_activity_resources
-		(activity_id, resource_type, resource_id, relation) VALUES ('stale-github-issue-activity', 'github_issue', ?, 'subject')`, resourceID)
-	require.NoError(t, err)
-	_, err = fixture.db.ExecContext(ctx, `INSERT INTO automation_work_item_positions
-		(work_item_id, project_id, automation_id, version_id, node_id, state)
-		VALUES ('stale-github-issue-work-item', ?, ?, 'discarded-version', 'discarded-inbox-node', 'waiting')`,
-		fixture.project.ID, fixture.definition.Automation.ID)
-	require.NoError(t, err)
-	_, err = fixture.db.ExecContext(ctx, `INSERT INTO thread_inputs
-		(id, scope, project_id, task_id, input_mode, input_status, content, queue_position, source)
-		VALUES ('stale-thread-input', 'task_thread', ?, ?, 'queued', 'pending', 'stale queued follow-up', 1, 'test')`,
-		fixture.project.ID, fixture.task.ID)
-	require.NoError(t, err)
-	_, err = fixture.db.ExecContext(ctx, `INSERT INTO automation_thread_input_bindings
-		(id, thread_input_id, project_id, automation_id, version_id, node_id, work_item_id, binding_key)
-		VALUES ('stale-thread-input-binding', 'stale-thread-input', ?, ?, 'discarded-version', 'discarded-inbox-node', 'stale-github-issue-work-item', 'stale:0')`,
-		fixture.project.ID, fixture.definition.Automation.ID)
-	require.NoError(t, err)
-	_, err = fixture.db.ExecContext(ctx, `INSERT INTO automation_work_items
-		(id, project_id, automation_id, origin_version_id, parent_work_item_id, work_item_key, kind, title, status)
-		VALUES ('stale-child-work-item', ?, ?, 'discarded-version', 'stale-github-issue-work-item', 'stale-child-key', 'work', 'Stale child', 'waiting')`,
-		fixture.project.ID, fixture.definition.Automation.ID)
-	require.NoError(t, err)
-	_, err = fixture.db.ExecContext(ctx, `INSERT INTO automation_transitions
-		(project_id, automation_id, version_id, work_item_id, activity_id, to_node_id, event_key, state)
-		VALUES (?, ?, 'discarded-version', 'stale-github-issue-work-item', 'stale-github-issue-activity', 'discarded-inbox-node', 'stale-transition', 'waiting')`,
-		fixture.project.ID, fixture.definition.Automation.ID)
-	require.NoError(t, err)
-	_, err = fixture.db.ExecContext(ctx, `PRAGMA foreign_keys = ON`)
-	require.NoError(t, err)
+			fixture := newAutomationRuntimeStoreFixture(t, AutomationAdapterGitHubSDLC, storeOptions...)
+			ctx := context.Background()
+			projectRepo := fixture.stores.Projects
+			fixture.project.RepoURL = "https://github.com/example/runtime.git"
+			require.NoError(t, projectRepo.Update(ctx, &fixture.project))
+			repoRef := &GitHubRepoRef{Owner: "example", Name: "runtime", FullName: "example/runtime", HTMLURL: "https://github.com/example/runtime"}
+			issue := GitHubIssue{Number: 288, URL: "https://github.com/example/runtime/issues/288", Title: "Stale assigned issue", Body: "Stale issue body", State: "open", Assignees: []string{"dubee"}, Labels: []string{"bug"}, CompleteForTaskCreation: true, TaskCreationCompletenessKnown: true}
+			resourceID := githubIssueResourceID(repoRef, issue.Number)
 
-	provider := &fakeGitHubIssueRuntimeProvider{
-		resolveRepoFn: func(context.Context, string, string) (*GitHubRepoRef, error) { return repoRef, nil },
-		listAssignedIssuesFn: func(_ context.Context, _ *GitHubRepoRef, assignee string) ([]GitHubIssue, error) {
-			require.Equal(t, "dubee", assignee)
-			return []GitHubIssue{issue}, nil
-		},
-	}
-	githubAuthRepo := fixture.stores.GitHubAuth
-	require.NoError(t, githubAuthRepo.UpsertAuthorizedActor(ctx, &models.GitHubAuthorizedActor{GitHubLogin: "dubee"}))
-	handlers := buildGitHubIssueRuntimeHandlers(githubIssueRuntimeOptions{ProjectID: fixture.project.ID, ProjectRepo: projectRepo,
-		TaskRepo: fixture.taskRepo, AutomationRepo: fixture.repo, GitHubAuthRepo: githubAuthRepo, GitHub: provider})
-	inboxCtx := newAutomationGitHubIssueCausalContext(t, fixture, fixture.definition, fixture.task, "dev_inbox", "stale-assigned-scan")
+			seed := storefixture.DiscardedIssueDiscovery{ProjectID: fixture.project.ID, AutomationID: fixture.definition.Automation.ID, TaskID: fixture.task.ID, ResourceID: resourceID,
+				WorkItemID: "stale-github-issue-work-item", ActivityID: "stale-github-issue-activity", ChildID: "stale-child-work-item", InputID: "stale-thread-input", BindingID: "stale-thread-input-binding", EventKey: "stale-transition", VersionID: "discarded-version", NodeID: "discarded-inbox-node"}
+			require.NoError(t, fixture.stores.Fixtures.SeedDiscardedIssueDiscovery(ctx, seed))
 
-	out, err := handlers["github_list_assigned_issues"](inboxCtx, json.RawMessage(`{"assignee":"dubee"}`))
-	require.NoError(t, err)
-	require.Contains(t, out, `"number":288`)
-	var originVersionID, title string
-	require.NoError(t, fixture.db.QueryRowContext(ctx, `SELECT origin_version_id, title FROM automation_work_items
-		WHERE automation_id = ? AND work_item_key = ?`, fixture.definition.Automation.ID, resourceID).Scan(&originVersionID, &title))
-	require.Equal(t, fixture.definition.Version.ID, originVersionID)
-	require.Equal(t, issue.Title, title)
-	var staleRows int
-	{
-		value, err := fixture.stores.Fixtures.CountMatchingWorkItems(context.Background(), storefixture.WorkItemMatch{ID: "stale-github-issue-work-item"})
-		require.NoError(t, err)
-		staleRows = value
+			provider := &fakeGitHubIssueRuntimeProvider{
+				resolveRepoFn: func(context.Context, string, string) (*GitHubRepoRef, error) { return repoRef, nil },
+				listAssignedIssuesFn: func(_ context.Context, _ *GitHubRepoRef, assignee string) ([]GitHubIssue, error) {
+					require.Equal(t, "dubee", assignee)
+					return []GitHubIssue{issue}, nil
+				},
+			}
+			githubAuthRepo := fixture.stores.GitHubAuth
+			require.NoError(t, githubAuthRepo.UpsertAuthorizedActor(ctx, &models.GitHubAuthorizedActor{GitHubLogin: "dubee"}))
+			handlers := buildGitHubIssueRuntimeHandlers(githubIssueRuntimeOptions{ProjectID: fixture.project.ID, ProjectRepo: projectRepo,
+				TaskRepo: fixture.taskRepo, AutomationRepo: fixture.repo, GitHubAuthRepo: githubAuthRepo, GitHub: provider})
+			inboxCtx := newAutomationGitHubIssueCausalContext(t, fixture, fixture.definition, fixture.task, "dev_inbox", "stale-assigned-scan")
+
+			out, err := handlers["github_list_assigned_issues"](inboxCtx, json.RawMessage(`{"assignee":"dubee"}`))
+			require.NoError(t, err)
+			require.Contains(t, out, `"number":288`)
+			discovery, err := fixture.stores.Fixtures.IssueDiscovery(ctx, fixture.project.ID, fixture.definition.Automation.ID, resourceID)
+			require.NoError(t, err)
+			require.Equal(t, fixture.definition.Version.ID, discovery.OriginVersionID)
+			require.Equal(t, issue.Title, discovery.Title)
+			var staleRows int
+			{
+				value, err := fixture.stores.Fixtures.CountMatchingWorkItems(context.Background(), storefixture.WorkItemMatch{ID: "stale-github-issue-work-item"})
+				require.NoError(t, err)
+				staleRows = value
+			}
+			require.Zero(t, staleRows)
+			{
+				value, err := fixture.stores.Fixtures.CountMatchingActivities(context.Background(), storefixture.ActivityMatch{ID: "stale-github-issue-activity"})
+				require.NoError(t, err)
+				staleRows = value
+			}
+			require.Zero(t, staleRows)
+			staleRows, err = fixture.stores.Fixtures.CountTransitionEvents(ctx, fixture.project.ID, fixture.definition.Automation.ID, []string{seed.EventKey})
+			require.NoError(t, err)
+			require.Zero(t, staleRows)
+			staleRows, err = fixture.stores.Fixtures.CountAutomationInputBinding(ctx, seed.BindingID)
+			require.NoError(t, err)
+			require.Zero(t, staleRows)
+			{
+				value, err := fixture.stores.Fixtures.CountMatchingWorkItems(context.Background(), storefixture.WorkItemMatch{ID: "stale-child-work-item"})
+				require.NoError(t, err)
+				staleRows = value
+			}
+			require.Zero(t, staleRows)
+
+		})
 	}
-	require.Zero(t, staleRows)
-	{
-		value, err := fixture.stores.Fixtures.CountMatchingActivities(context.Background(), storefixture.ActivityMatch{ID: "stale-github-issue-activity"})
-		require.NoError(t, err)
-		staleRows = value
-	}
-	require.Zero(t, staleRows)
-	require.NoError(t, fixture.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM automation_transitions WHERE event_key = 'stale-transition'`).Scan(&staleRows))
-	require.Zero(t, staleRows)
-	require.NoError(t, fixture.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM automation_thread_input_bindings WHERE id = 'stale-thread-input-binding'`).Scan(&staleRows))
-	require.Zero(t, staleRows)
-	{
-		value, err := fixture.stores.Fixtures.CountMatchingWorkItems(context.Background(), storefixture.WorkItemMatch{ID: "stale-child-work-item"})
-		require.NoError(t, err)
-		staleRows = value
-	}
-	require.Zero(t, staleRows)
 }
 
 func TestAutomationRuntimeGitHubIssueTaskCreationAllowsLaterInboxInvocation(t *testing.T) {
-	fixture := newAutomationRuntimeFixture(t, AutomationAdapterGitHubSDLC)
-	ctx := context.Background()
-	projectRepo := fixture.stores.Projects
-	fixture.project.RepoURL = "https://github.com/example/runtime.git"
-	require.NoError(t, projectRepo.Update(ctx, &fixture.project))
+	for _, production := range []bool{false, true} {
+		t.Run(fmt.Sprintf("production_%v", production), func(t *testing.T) {
+			var storeOptions []teststores.Option
+			if production {
+				storeOptions = append(storeOptions, teststores.WithProductionTopology())
+			}
 
-	provider := &fakeGitHubIssueRuntimeProvider{resolveRepoFn: func(context.Context, string, string) (*GitHubRepoRef, error) {
-		return &GitHubRepoRef{Owner: "example", Name: "runtime", FullName: "example/runtime", HTMLURL: "https://github.com/example/runtime"}, nil
-	}}
-	opts := githubIssueRuntimeOptions{ProjectID: fixture.project.ID, ProjectRepo: projectRepo, TaskRepo: fixture.taskRepo,
-		AutomationRepo: fixture.repo, GitHub: provider}
-	repoRef, err := provider.ResolveRepo(ctx, fixture.project.RepoURL, "")
-	require.NoError(t, err)
-	issue := GitHubIssue{Number: 91, URL: "https://github.com/example/runtime/issues/91", Title: "Created before inbox run", State: "open"}
+			fixture := newAutomationRuntimeStoreFixture(t, AutomationAdapterGitHubSDLC, storeOptions...)
+			ctx := context.Background()
+			projectRepo := fixture.stores.Projects
+			fixture.project.RepoURL = "https://github.com/example/runtime.git"
+			require.NoError(t, projectRepo.Update(ctx, &fixture.project))
 
-	producerCtx := newAutomationGitHubIssueCausalContext(t, fixture, fixture.definition, fixture.task, "bug_finder", "producer-invocation-a")
-	recorded, err := recordGitHubIssueCreated(producerCtx, opts, repoRef, &issue, "cross-invocation-issue")
-	require.NoError(t, err)
-	require.Equal(t, 1, recorded)
-	var githubMailboxOwners int
-	require.NoError(t, fixture.db.QueryRow(`SELECT COUNT(*) FROM automation_artifact_mailbox_owners WHERE artifact_type = 'github_issue'`).Scan(&githubMailboxOwners))
-	require.Zero(t, githubMailboxOwners, "GitHub issue discovery no longer relies on durable issue-key mailbox owner mappings")
+			provider := &fakeGitHubIssueRuntimeProvider{resolveRepoFn: func(context.Context, string, string) (*GitHubRepoRef, error) {
+				return &GitHubRepoRef{Owner: "example", Name: "runtime", FullName: "example/runtime", HTMLURL: "https://github.com/example/runtime"}, nil
+			}}
+			opts := githubIssueRuntimeOptions{ProjectID: fixture.project.ID, ProjectRepo: projectRepo, TaskRepo: fixture.taskRepo,
+				AutomationRepo: fixture.repo, GitHub: provider}
+			repoRef, err := provider.ResolveRepo(ctx, fixture.project.RepoURL, "")
+			require.NoError(t, err)
+			issue := GitHubIssue{Number: 91, URL: "https://github.com/example/runtime/issues/91", Title: "Created before inbox run", State: "open"}
 
-	inboxCtx := newAutomationGitHubIssueCausalContext(t, fixture, fixture.definition, fixture.task, "dev_inbox", "inbox-invocation-b")
-	filtered, err := filterGitHubAssignedIssuesForAutomationInbox(inboxCtx, opts, repoRef, []GitHubIssue{issue})
-	require.NoError(t, err)
-	require.Len(t, filtered, 1)
-	require.NoError(t, recordGitHubAssignedIssues(inboxCtx, opts, repoRef, filtered))
+			producerCtx := newAutomationGitHubIssueCausalContext(t, fixture, fixture.definition, fixture.task, "bug_finder", "producer-invocation-a")
+			recorded, err := recordGitHubIssueCreated(producerCtx, opts, repoRef, &issue, "cross-invocation-issue")
+			require.NoError(t, err)
+			require.Equal(t, 1, recorded)
+			githubMailboxOwners, err := fixture.stores.Fixtures.CountIssueMailboxOwners(ctx)
+			require.NoError(t, err)
+			require.Zero(t, githubMailboxOwners, "GitHub issue discovery no longer relies on durable issue-key mailbox owner mappings")
 
-	var discoveredWorkItemID string
-	var discoveredWorkStatus models.AutomationWorkItemStatus
-	var discoveredPositionState models.AutomationTransitionState
-	require.NoError(t, fixture.db.QueryRow(`SELECT work_item.id, work_item.status, position.state
-		FROM automation_work_items work_item
-		JOIN automation_work_item_positions position ON position.work_item_id = work_item.id
-		JOIN automation_nodes node ON node.id = position.node_id
-		WHERE work_item.project_id = ? AND work_item.automation_id = ? AND work_item.work_item_key = ?
-			AND node.role = 'github_inbox'`, fixture.project.ID, fixture.definition.Automation.ID,
-		githubIssueResourceID(repoRef, issue.Number)).Scan(&discoveredWorkItemID, &discoveredWorkStatus, &discoveredPositionState))
-	require.Equal(t, models.AutomationWorkItemWaiting, discoveredWorkStatus, "completed issue discovery must wait at the inbox rather than remain running")
-	require.Equal(t, models.AutomationTransitionWaiting, discoveredPositionState)
-	liveAfterDiscovery, err := NewAutomationGraphService(fixture.repo).GetLive(ctx, fixture.project.ID, fixture.definition.Automation.ID, time.Now().UTC())
-	require.NoError(t, err)
-	devInbox := automationNodeByKey(t, fixture.definition, "dev_inbox")
-	for _, node := range liveAfterDiscovery.Nodes {
-		if node.ID == devInbox.ID {
-			require.Zero(t, node.Counts.Running)
-			require.Equal(t, 1, node.Counts.Waiting)
-		}
-	}
-	require.NoError(t, fixture.db.QueryRow(`UPDATE automation_work_item_positions SET state = 'active'
-		WHERE work_item_id = ? AND node_id = ? RETURNING work_item_id`, discoveredWorkItemID, devInbox.ID).Scan(new(string)))
-	legacyLive, err := NewAutomationGraphService(fixture.repo).GetLive(ctx, fixture.project.ID, fixture.definition.Automation.ID, time.Now().UTC())
-	require.NoError(t, err)
-	for _, node := range legacyLive.Nodes {
-		if node.ID == devInbox.ID {
-			require.Zero(t, node.Counts.Running, "legacy active inbox positions must not leave the completed poll looking stuck")
-			require.Zero(t, node.Counts.Waiting, "legacy active inbox positions predate explicit waiting semantics and must not look actionable forever")
-		}
-	}
-	portfolioCounts, err := fixture.repo.PortfolioOperationalCounts(ctx, fixture.project.ID, time.Now().UTC().Add(-time.Hour))
-	require.NoError(t, err)
-	require.Zero(t, portfolioCounts[fixture.definition.Automation.ID].Running)
-	require.Zero(t, portfolioCounts[fixture.definition.Automation.ID].Waiting)
+			inboxCtx := newAutomationGitHubIssueCausalContext(t, fixture, fixture.definition, fixture.task, "dev_inbox", "inbox-invocation-b")
+			filtered, err := filterGitHubAssignedIssuesForAutomationInbox(inboxCtx, opts, repoRef, []GitHubIssue{issue})
+			require.NoError(t, err)
+			require.Len(t, filtered, 1)
+			require.NoError(t, recordGitHubAssignedIssues(inboxCtx, opts, repoRef, filtered))
 
-	producerAutomationCtx, ok := AutomationContextFromContext(producerCtx)
-	require.True(t, ok)
-	inboxAutomationCtx, ok := AutomationContextFromContext(inboxCtx)
-	require.True(t, ok)
-	require.NotEqual(t, producerAutomationCtx.Bindings[0].InvocationID, inboxAutomationCtx.Bindings[0].InvocationID,
-		"issue creation and later inbox discovery must use distinct invocations")
-	var originInvocationID, discoveryInvocationID string
-	require.NoError(t, fixture.db.QueryRow(`SELECT work_item.origin_invocation_id, discovery.invocation_id
-		FROM automation_work_items work_item
-		JOIN automation_activities discovery ON discovery.work_item_id = work_item.id
-			AND discovery.activity_type = 'discover_assigned_issue'
-		JOIN automation_activity_resources resource ON resource.activity_id = discovery.id
-			AND resource.resource_type = 'github_issue' AND resource.resource_id = ?
-		WHERE work_item.project_id = ? AND work_item.automation_id = ?`, githubIssueResourceID(repoRef, issue.Number),
-		fixture.project.ID, fixture.definition.Automation.ID).Scan(&originInvocationID, &discoveryInvocationID))
-	require.Equal(t, producerAutomationCtx.Bindings[0].InvocationID, originInvocationID)
-	require.Equal(t, inboxAutomationCtx.Bindings[0].InvocationID, discoveryInvocationID)
+			discovery, err := fixture.stores.Fixtures.IssueDiscovery(ctx, fixture.project.ID, fixture.definition.Automation.ID, githubIssueResourceID(repoRef, issue.Number))
+			require.NoError(t, err)
+			discoveredWorkItemID := discovery.WorkItemID
+			require.Equal(t, models.AutomationWorkItemWaiting, discovery.Status, "completed issue discovery must wait at the inbox rather than remain running")
+			require.Equal(t, models.AutomationTransitionWaiting, discovery.Position)
+			liveAfterDiscovery, err := NewAutomationGraphService(fixture.repo).GetLive(ctx, fixture.project.ID, fixture.definition.Automation.ID, time.Now().UTC())
+			require.NoError(t, err)
+			devInbox := automationNodeByKey(t, fixture.definition, "dev_inbox")
+			for _, node := range liveAfterDiscovery.Nodes {
+				if node.ID == devInbox.ID {
+					require.Zero(t, node.Counts.Running)
+					require.Equal(t, 1, node.Counts.Waiting)
+				}
+			}
+			require.NoError(t, fixture.stores.Fixtures.SetAutomationPositionState(ctx, discoveredWorkItemID, devInbox.ID, models.AutomationPositionState("active")))
+			legacyLive, err := NewAutomationGraphService(fixture.repo).GetLive(ctx, fixture.project.ID, fixture.definition.Automation.ID, time.Now().UTC())
+			require.NoError(t, err)
+			for _, node := range legacyLive.Nodes {
+				if node.ID == devInbox.ID {
+					require.Zero(t, node.Counts.Running, "legacy active inbox positions must not leave the completed poll looking stuck")
+					require.Zero(t, node.Counts.Waiting, "legacy active inbox positions predate explicit waiting semantics and must not look actionable forever")
+				}
+			}
+			portfolioCounts, err := fixture.repo.PortfolioOperationalCounts(ctx, fixture.project.ID, time.Now().UTC().Add(-time.Hour))
+			require.NoError(t, err)
+			require.Zero(t, portfolioCounts[fixture.definition.Automation.ID].Running)
+			require.Zero(t, portfolioCounts[fixture.definition.Automation.ID].Waiting)
 
-	workerSvc := newTestWorkerService(t)
-	taskSvc := NewTaskService(fixture.taskRepo, nil, workerSvc)
-	llmSvc := &LLMService{automationRepo: fixture.repo, githubIssueRuntime: provider, projectRepo: projectRepo,
-		taskRepo: fixture.taskRepo, taskSvc: taskSvc}
-	runtime := llmSvc.taskControlRuntimeTools(fixture.task)
-	require.NotNil(t, runtime)
-	wrongExecution := models.Execution{TaskID: fixture.task.ID, Status: models.ExecRunning, PromptSent: "wrong inbox execution"}
-	require.NoError(t, fixture.stores.Executions.Create(ctx, &wrongExecution))
-	wrongExecutionCtx := withAutomationExecution(inboxCtx, fixture.task.ID, wrongExecution.ID)
-	_, handled, isErr, err := runtime.Executor(wrongExecutionCtx, "create_task", json.RawMessage(`{
+			producerAutomationCtx, ok := AutomationContextFromContext(producerCtx)
+			require.True(t, ok)
+			inboxAutomationCtx, ok := AutomationContextFromContext(inboxCtx)
+			require.True(t, ok)
+			require.NotEqual(t, producerAutomationCtx.Bindings[0].InvocationID, inboxAutomationCtx.Bindings[0].InvocationID,
+				"issue creation and later inbox discovery must use distinct invocations")
+			require.Equal(t, producerAutomationCtx.Bindings[0].InvocationID, discovery.OriginInvocationID)
+			require.Equal(t, inboxAutomationCtx.Bindings[0].InvocationID, discovery.DiscoveryInvocationID)
+
+			workerSvc := newTestWorkerService(t)
+			taskSvc := NewTaskService(fixture.taskRepo, nil, workerSvc)
+			llmSvc := &LLMService{automationRepo: fixture.repo, githubIssueRuntime: provider, projectRepo: projectRepo,
+				taskRepo: fixture.taskRepo, taskSvc: taskSvc}
+			runtime := llmSvc.taskControlRuntimeTools(fixture.task)
+			require.NotNil(t, runtime)
+			wrongExecution := models.Execution{TaskID: fixture.task.ID, Status: models.ExecRunning, PromptSent: "wrong inbox execution"}
+			require.NoError(t, fixture.stores.Executions.Create(ctx, &wrongExecution))
+			wrongExecutionCtx := withAutomationExecution(inboxCtx, fixture.task.ID, wrongExecution.ID)
+			_, handled, isErr, err := runtime.Executor(wrongExecutionCtx, "create_task", json.RawMessage(`{
 		"title":"Reject different execution","prompt":"must not persist","category":"backlog",
 		"source_github_issue_number":91
 	}`))
-	require.True(t, handled)
-	require.True(t, isErr)
-	require.ErrorContains(t, err, "not discovered by this exact current Automation execution")
-	rejectedTask, err := fixture.taskRepo.GetByProjectAndTitle(ctx, fixture.project.ID, "Reject different execution")
-	require.NoError(t, err)
-	require.Nil(t, rejectedTask)
+			require.True(t, handled)
+			require.True(t, isErr)
+			require.ErrorContains(t, err, "not discovered by this exact current Automation execution")
+			rejectedTask, err := fixture.taskRepo.GetByProjectAndTitle(ctx, fixture.project.ID, "Reject different execution")
+			require.NoError(t, err)
+			require.Nil(t, rejectedTask)
 
-	output, handled, isErr, err := runtime.Executor(inboxCtx, "create_task", json.RawMessage(`{
+			output, handled, isErr, err := runtime.Executor(inboxCtx, "create_task", json.RawMessage(`{
 		"title":"Implement issue from prior invocation","prompt":"implement issue 91","category":"backlog",
 		"source_github_issue_number":91
 	}`))
-	require.NoError(t, err)
-	require.True(t, handled)
-	require.False(t, isErr)
-	implementationTask, err := fixture.taskRepo.GetByProjectAndTitle(ctx, fixture.project.ID, "Implement issue from prior invocation")
-	require.NoError(t, err)
-	require.Contains(t, output, implementationTask.ID)
-	select {
-	case submitted := <-workerSvc.Submitted():
-		require.Equal(t, implementationTask.ID, submitted.ID)
-	case <-time.After(time.Second):
-		t.Fatal("approved GitHub issue task was not submitted")
+			require.NoError(t, err)
+			require.True(t, handled)
+			require.False(t, isErr)
+			implementationTask, err := fixture.taskRepo.GetByProjectAndTitle(ctx, fixture.project.ID, "Implement issue from prior invocation")
+			require.NoError(t, err)
+			require.Contains(t, output, implementationTask.ID)
+			select {
+			case submitted := <-workerSvc.Submitted():
+				require.Equal(t, implementationTask.ID, submitted.ID)
+			case <-time.After(time.Second):
+				t.Fatal("approved GitHub issue task was not submitted")
+			}
+
+		})
 	}
 }
 

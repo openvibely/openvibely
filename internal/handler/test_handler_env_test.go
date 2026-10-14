@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"database/sql"
 	"testing"
 	"time"
 
@@ -18,7 +17,6 @@ import (
 // testHandlerEnv is a fully wired test handler plus the repositories and services it uses,
 // so tests can reach the same instances the handler holds.
 type testHandlerEnv struct {
-	DB      *sql.DB
 	Handler *Handler
 	Echo    *echo.Echo
 	LLM     *testutil.MockLLMCaller
@@ -62,17 +60,6 @@ func withTestInsights() testHandlerOption {
 
 // newTestHandlerEnv is the single place handler tests build a fully wired Handler. It also
 // waits for tracked background turns before the test's database closes.
-func newTestHandlerEnv(t testing.TB, db *sql.DB, opts ...testHandlerOption) *testHandlerEnv {
-	t.Helper()
-	var o testHandlerOptions
-	for _, opt := range opts {
-		opt(&o)
-	}
-
-	env := wireTestHandler(t, teststores.Of(db, teststores.WithBroadcaster(o.broadcaster)), o)
-	env.DB = db
-	return env
-}
 
 func setupTestHandlerWithStores(t testing.TB, options ...teststores.Option) (*Handler, *echo.Echo, persistence.LLMConfigStore, *teststores.Env) {
 	t.Helper()
@@ -166,10 +153,6 @@ func waitForHandlerBackgroundWork(t testing.TB, h *Handler) {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-}
-
-func newTestRuntimeStores(db *sql.DB) RuntimeStores {
-	return runtimeStoresForTests(teststores.Of(db))
 }
 
 func runtimeStoresForTests(stores persistence.Stores) RuntimeStores {
