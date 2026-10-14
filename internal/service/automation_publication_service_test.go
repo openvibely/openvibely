@@ -213,7 +213,7 @@ func TestGitHubSDLCReducedGraphRequiresSetupOnlyForRetainedGitHubRuntimeNodes(t 
 func TestMaintainedSDLCSaveRemovesOptionalVisionProducerAndOwnedResources(t *testing.T) {
 	for _, adapterKey := range []string{AutomationAdapterNativeSDLC, AutomationAdapterGitHubSDLC} {
 		t.Run(adapterKey, func(t *testing.T) {
-			h := newAutomationSaveHarness(t, "Optional producer "+adapterKey)
+			h := newAutomationSaveStoreHarness(t, "Optional producer "+adapterKey)
 			ctx := context.Background()
 			if adapterKey == AutomationAdapterGitHubSDLC {
 				projectRepo := h.stores.Projects
@@ -245,22 +245,37 @@ func TestMaintainedSDLCSaveRemovesOptionalVisionProducerAndOwnedResources(t *tes
 			for _, resource := range replacement.Definition.Resources {
 				require.NotEqual(t, "vision_suggestions", resource.NodeKey)
 			}
-			require.Equal(t, 1, countRows(t, h.db, `SELECT COUNT(*) FROM tasks WHERE id = ?`, visionTaskID), "replacement preserves the backing domain Task while removing its graph binding")
-			require.Zero(t, countRows(t, h.db, `SELECT COUNT(*) FROM schedules WHERE id = ?`, visionScheduleID))
+			retainedTask, err := h.taskRepo.GetByID(ctx, visionTaskID)
+			require.NoError(t, err)
+			require.NotNil(t, retainedTask, "replacement preserves the backing domain Task")
+			removedSchedule, err := h.scheduleRepo.GetByID(ctx, visionScheduleID)
+			require.NoError(t, err)
+			require.Nil(t, removedSchedule)
 			bugNode := automationNodeByKey(t, replacement.Definition, "bug_finder")
 			actionKey := "notification"
 			if adapterKey == AutomationAdapterGitHubSDLC {
 				actionKey = "issue"
 			}
 			actionNode := automationNodeByKey(t, replacement.Definition, actionKey)
-			require.Equal(t, 1, countRows(t, h.db, `SELECT COUNT(*) FROM automation_edges WHERE version_id = ? AND source_node_id = ? AND target_node_id = ?`, replacement.Definition.Version.ID, bugNode.ID, actionNode.ID), "deleting Vision Suggestions must preserve Bug Finder's shared action connection")
+			persisted, err := h.automationRepo.GetDefinitionVersion(ctx, h.project.ID, replacement.Definition.Automation.ID, replacement.Definition.Version.ID)
+			require.NoError(t, err)
+			require.NotNil(t, persisted)
+			edgeCount := 0
+			for _, edge := range persisted.Edges {
+				if edge.SourceNodeID == bugNode.ID && edge.TargetNodeID == actionNode.ID {
+					edgeCount++
+				}
+			}
+			require.Equal(t, 1, edgeCount, "deleting Vision Suggestions must preserve Bug Finder's shared action connection")
 
 			restored, err := h.compiler.Save(ctx, AutomationSaveRequest{ProjectID: h.project.ID, AutomationID: initial.Definition.Automation.ID,
 				Source: "manual", CreatedVia: "web", Candidate: fullCandidate})
 			require.NoError(t, err, "restoring a maintained node must reuse its preserved backing Task")
 			require.Equal(t, visionTaskID, automationResourceID(t, restored.Definition, "vision_suggestions", "task"))
 			require.NotEqual(t, visionScheduleID, automationResourceID(t, restored.Definition, "vision_suggestions", "schedule"))
-			require.Equal(t, 1, countRows(t, h.db, `SELECT COUNT(*) FROM tasks WHERE created_via = ?`, persistence.AutomationCompilerTaskCreatedVia(initial.Definition.Automation.ID, "vision_suggestions")))
+			originCount, err := h.stores.Fixtures.CountTasksByCreationOrigin(ctx, "", persistence.AutomationCompilerTaskCreatedVia(initial.Definition.Automation.ID, "vision_suggestions"))
+			require.NoError(t, err)
+			require.Equal(t, 1, originCount)
 
 			bugOnly := fullCandidate
 			for _, node := range append([]models.AutomationDraftNode(nil), bugOnly.Nodes...) {
@@ -277,8 +292,7 @@ func TestMaintainedSDLCSaveRemovesOptionalVisionProducerAndOwnedResources(t *tes
 				require.Equal(t, "bug_finder", resource.NodeKey)
 			}
 
-			_, err = h.db.ExecContext(ctx, `UPDATE tasks SET created_via = ? WHERE id = ?`, persistence.AutomationCompilerTaskCreatedVia(persistence.NewID(), "vision_suggestions"), visionTaskID)
-			require.NoError(t, err)
+			require.NoError(t, h.stores.Fixtures.SetTaskCreationOrigin(ctx, visionTaskID, persistence.AutomationCompilerTaskCreatedVia(persistence.NewID(), "vision_suggestions")))
 			_, err = h.compiler.Save(ctx, AutomationSaveRequest{ProjectID: h.project.ID, AutomationID: initial.Definition.Automation.ID,
 				Source: "manual", CreatedVia: "web", Candidate: fullCandidate})
 			require.ErrorContains(t, err, "task with this name already exists", "restore must not adopt a task whose durable origin belongs to another Automation")
@@ -688,7 +702,7 @@ func TestAutomationSaveCreatesCurrentGraphTaskAndScheduleAtomically(t *testing.T
 }
 
 func TestAutomationSaveRecreatesDeletedRetainedNativeNodeResources(t *testing.T) {
-	h := newAutomationSaveHarness(t, "Recover deleted retained Native node resources")
+	h := newAutomationSaveStoreHarness(t, "Recover deleted retained Native node resources")
 	ctx := context.Background()
 	candidate, err := h.drafts.TemplateCandidate(AutomationAdapterNativeSDLC)
 	require.NoError(t, err)
@@ -733,18 +747,35 @@ func TestAutomationSaveRecreatesDeletedRetainedNativeNodeResources(t *testing.T)
 	require.Equal(t, visionTaskID, automationResourceID(t, recovered.Definition, "vision_suggestions", "task"))
 	require.Equal(t, visionScheduleID, automationResourceID(t, recovered.Definition, "vision_suggestions", "schedule"))
 	require.Equal(t, originalOptimizationNode.Config["prompt"], automationDraftNodeByKey(t, reopened.Candidate, "optimization_finder").Config["prompt"])
-	require.Equal(t, originalNodeCount, countRows(t, h.db, `SELECT COUNT(*) FROM automation_nodes WHERE version_id = ?`, recovered.Definition.Version.ID))
-	require.Equal(t, 1, countRows(t, h.db, `SELECT COUNT(*) FROM automation_definition_resources WHERE automation_id = ? AND node_id = (SELECT id FROM automation_nodes WHERE version_id = ? AND node_key = 'optimization_finder') AND resource_type = 'task'`, recovered.Definition.Automation.ID, recovered.Definition.Version.ID))
-	require.Equal(t, 1, countRows(t, h.db, `SELECT COUNT(*) FROM automation_definition_resources WHERE automation_id = ? AND node_id = (SELECT id FROM automation_nodes WHERE version_id = ? AND node_key = 'optimization_finder') AND resource_type = 'schedule'`, recovered.Definition.Automation.ID, recovered.Definition.Version.ID))
+	persisted, err := h.automationRepo.GetDefinitionVersion(ctx, h.project.ID, recovered.Definition.Automation.ID, recovered.Definition.Version.ID)
+	require.NoError(t, err)
+	require.NotNil(t, persisted)
+	require.Len(t, persisted.Nodes, originalNodeCount)
+	taskBindings, scheduleBindings := 0, 0
+	for _, resource := range persisted.Resources {
+		if resource.NodeID == automationNodeByKey(t, persisted, "optimization_finder").ID {
+			switch resource.ResourceType {
+			case "task":
+				taskBindings++
+			case "schedule":
+				scheduleBindings++
+			}
+		}
+	}
+	require.Equal(t, 1, taskBindings)
+	require.Equal(t, 1, scheduleBindings)
 
 	repeated, err := h.compiler.Save(ctx, AutomationSaveRequest{ProjectID: h.project.ID, AutomationID: first.Definition.Automation.ID,
 		Source: "manual", CreatedVia: "web", Candidate: reopened.Candidate})
 	require.NoError(t, err)
 	require.Equal(t, recoveredOptimizationTaskID, automationResourceID(t, repeated.Definition, "optimization_finder", "task"))
 	require.Equal(t, recoveredOptimizationScheduleID, automationResourceID(t, repeated.Definition, "optimization_finder", "schedule"))
-	require.Equal(t, 1, countRows(t, h.db, `SELECT COUNT(*) FROM tasks WHERE project_id = ? AND created_via = ?`, h.project.ID,
-		persistence.AutomationCompilerTaskCreatedVia(first.Definition.Automation.ID, "optimization_finder")))
-	require.Equal(t, 1, countRows(t, h.db, `SELECT COUNT(*) FROM automation_trigger_owners WHERE project_id = ? AND automation_id = ? AND node_id = (SELECT id FROM automation_nodes WHERE version_id = ? AND node_key = 'optimization_finder')`, h.project.ID, first.Definition.Automation.ID, repeated.Definition.Version.ID))
+	originCount, err := h.stores.Fixtures.CountTasksByCreationOrigin(ctx, h.project.ID, persistence.AutomationCompilerTaskCreatedVia(first.Definition.Automation.ID, "optimization_finder"))
+	require.NoError(t, err)
+	require.Equal(t, 1, originCount)
+	ownerCount, err := h.stores.Fixtures.CountAutomationTriggerOwners(ctx, h.project.ID, first.Definition.Automation.ID, automationNodeByKey(t, repeated.Definition, "optimization_finder").ID)
+	require.NoError(t, err)
+	require.Equal(t, 1, ownerCount)
 }
 
 func TestAutomationSaveRecreatesDeletedRetainedNativeResourcesPreservesPausedLifecycle(t *testing.T) {
@@ -1129,7 +1160,7 @@ func TestAutomationPauseAndResumeGenericActivityOnlyCreatedTask(t *testing.T) {
 }
 
 func TestAutomationDispatchClaimRejectsCurrentActivityTaskAfterLifecycleDeactivation(t *testing.T) {
-	h := newAutomationSaveHarness(t, "Activity issue dispatch gate")
+	h := newAutomationSaveStoreHarness(t, "Activity issue dispatch gate")
 	ctx := context.Background()
 	saved, err := h.compiler.Save(ctx, AutomationSaveRequest{ProjectID: h.project.ID, Source: "manual", CreatedVia: "web",
 		Candidate: customTaskOnlyCandidate("Activity issue dispatch gate", "Keep the definition task in Backlog.", models.CategoryBacklog)})
@@ -1139,9 +1170,7 @@ func TestAutomationDispatchClaimRejectsCurrentActivityTaskAfterLifecycleDeactiva
 	// Simulate Pause winning the lifecycle/claim serialization point while an
 	// already queued Task still carries its pre-Pause Active snapshot. The final
 	// dispatch gate must fail closed even without relying on queue pruning.
-	_, err = h.db.ExecContext(ctx, `UPDATE automations SET lifecycle_state = 'paused' WHERE id = ? AND project_id = ?`,
-		saved.Definition.Automation.ID, h.project.ID)
-	require.NoError(t, err)
+	require.NoError(t, h.stores.Fixtures.SetAutomationLifecycleSnapshot(ctx, h.project.ID, saved.Definition.Automation.ID, models.AutomationPaused))
 	claim, claimed, err := h.taskRepo.ClaimTaskForDispatch(ctx, issueTask.ID)
 	require.NoError(t, err)
 	require.False(t, claimed)

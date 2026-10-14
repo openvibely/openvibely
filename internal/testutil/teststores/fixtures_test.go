@@ -782,3 +782,46 @@ func TestProjectAutomationStateIncludesUnpublishedAndChatResources(t *testing.T)
 		})
 	}
 }
+
+func TestAutomationFixtureOriginAndLifecycleScopes(t *testing.T) {
+	for _, production := range []bool{false, true} {
+		name := "isolated"
+		if production {
+			name = "production"
+		}
+		t.Run(name, func(t *testing.T) {
+			var opts []teststores.Option
+			if production {
+				opts = append(opts, teststores.WithProductionTopology())
+			}
+			env := teststores.New(t, opts...)
+			ctx := t.Context()
+			project := models.Project{Name: "Other scope"}
+			require.NoError(t, env.Projects.Create(ctx, &project))
+			for _, pid := range []string{"default", project.ID} {
+				task := models.Task{ProjectID: pid, Title: "origin", Category: models.CategoryBacklog, Status: models.StatusPending}
+				require.NoError(t, env.Tasks.Create(ctx, &task))
+				require.NoError(t, env.Fixtures.SetTaskCreationOrigin(ctx, task.ID, "legacy-origin"))
+				stored, err := env.Tasks.GetByID(ctx, task.ID)
+				require.NoError(t, err)
+				require.Equal(t, "legacy-origin", stored.CreatedVia)
+			}
+			n, err := env.Fixtures.CountTasksByCreationOrigin(ctx, "", "legacy-origin")
+			require.NoError(t, err)
+			require.Equal(t, 2, n)
+			n, err = env.Fixtures.CountTasksByCreationOrigin(ctx, project.ID, "legacy-origin")
+			require.NoError(t, err)
+			require.Equal(t, 1, n)
+			a := models.Automation{ID: "lifecycle-snapshot", ProjectID: "default", StableKey: "snapshot", Name: "Snapshot", AutomationType: "custom", LifecycleState: models.AutomationActive}
+			require.NoError(t, env.Fixtures.SeedAutomation(ctx, a))
+			require.NoError(t, env.Fixtures.SetAutomationLifecycleSnapshot(ctx, project.ID, a.ID, models.AutomationPaused))
+			stored, err := env.Automations.GetByStableKey(ctx, "default", a.StableKey)
+			require.NoError(t, err)
+			require.Equal(t, models.AutomationActive, stored.LifecycleState)
+			require.NoError(t, env.Fixtures.SetAutomationLifecycleSnapshot(ctx, "default", a.ID, models.AutomationPaused))
+			stored, err = env.Automations.GetByStableKey(ctx, "default", a.StableKey)
+			require.NoError(t, err)
+			require.Equal(t, models.AutomationPaused, stored.LifecycleState)
+		})
+	}
+}
