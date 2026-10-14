@@ -19,6 +19,22 @@ func (c *ioCounter) Snapshot() storefixture.IOStats {
 	stats := storefixture.IOStats{Requests: len(statements), ReadTextBytes: c.counter.SelectedTextBytes()}
 	for _, statement := range statements {
 		q := strings.ToLower(strings.Join(strings.Fields(statement), " "))
+		if strings.HasPrefix(q, "select ") && strings.Contains(q, "from agent_configs") {
+			stats.ModelReads++
+			projection := strings.Split(q, " from agent_configs")[0]
+			if projection == "select id, name, provider, model, is_default, auth_method" || strings.HasPrefix(projection, "select id, name, provider, model, auth_method, is_default,") {
+				stats.ModelSelectionReads++
+			}
+		}
+		if strings.Contains(q, "substr(t.prompt") {
+			stats.TaskContextReads++
+		}
+		if strings.Contains(q, "update tasks ") || strings.HasPrefix(q, "insert into tasks ") || strings.HasPrefix(q, "delete from tasks ") {
+			stats.TaskWrites++
+		}
+		if strings.HasPrefix(q, "update executions ") || strings.HasPrefix(q, "insert into executions ") || strings.HasPrefix(q, "delete from executions ") {
+			stats.ExecutionWrites++
+		}
 		if strings.HasPrefix(q, "select ") && strings.Contains(q, "from slack_authorized_users") {
 			stats.SlackAuthorizationReads++
 		}

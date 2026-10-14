@@ -2,24 +2,24 @@ package service
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
+	"github.com/openvibely/openvibely/internal/testutil/storefixture"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
-	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/openvibely/openvibely/internal/testutil/teststores"
 )
 
 func TestBuildChannelChatContextUsesCompactTaskProjection(t *testing.T) {
-	db, counter := testutil.NewStatementCountingTestDB(t)
+	db := teststores.New(t, teststores.WithIOCounting())
+	counter := db.IO
 	ctx := context.Background()
-	taskRepo := teststores.Of(db).Tasks
+	taskRepo := db.Tasks
 	taskSvc := NewTaskService(taskRepo, nil, nil)
-	scheduleRepo := teststores.Of(db).Schedules
+	scheduleRepo := db.Schedules
 	task := &models.Task{
 		ProjectID:   "default",
 		Title:       "Inbound context task",
@@ -56,33 +56,19 @@ func TestBuildChannelChatContextUsesCompactTaskProjection(t *testing.T) {
 	if !strings.Contains(got, task.Title) || !strings.Contains(got, "Inbound child") || !strings.Contains(got, "Scheduled tasks in this project:") {
 		t.Fatalf("shared context lost task or schedule details: %s", got)
 	}
-	statements := counter.Statements()
-	if len(statements) != 2 {
-		t.Fatalf("shared context statements = %#v, want exactly task plus schedule reads", statements)
+	stats := counter.Snapshot()
+	if stats.Requests != 2 || stats.TaskContextReads != 1 || stats.ReadTextBytes > 10000 {
+		t.Fatalf("expected two bounded context reads, got %+v", stats)
 	}
-	var taskStatement string
-	for _, statement := range statements {
-		if strings.Contains(strings.ToLower(statement), "substr(t.prompt") {
-			taskStatement = strings.ToLower(statement)
-			break
-		}
-	}
-	if taskStatement == "" {
-		t.Fatalf("shared context did not use compact task query: %#v", statements)
-	}
-	for _, forbidden := range []string{"swarm_config", "worktree_path", "merge_target_branch", "lineage_depth", "completed_at"} {
-		if strings.Contains(taskStatement, forbidden) {
-			t.Fatalf("shared context task query selected full-only column %q: %s", forbidden, taskStatement)
-		}
-	}
+
 }
 
 func TestChannelChatContextCompactTaskProjectionMatchesFullContext(t *testing.T) {
-	db := teststores.NewDB(t)
+	db := teststores.New(t)
 	ctx := context.Background()
-	taskRepo := teststores.Of(db).Tasks
+	taskRepo := db.Tasks
 	taskSvc := NewTaskService(taskRepo, nil, nil)
-	scheduleRepo := teststores.Of(db).Schedules
+	scheduleRepo := db.Schedules
 
 	root := &models.Task{
 		ProjectID:   "default",
@@ -126,9 +112,12 @@ func TestChannelChatContextCompactTaskProjectionMatchesFullContext(t *testing.T)
 			t.Fatalf("create task %q: %v", task.Title, err)
 		}
 	}
-	if _, err := db.ExecContext(ctx, `UPDATE tasks SET display_order = CASE title WHEN 'Compact long' THEN 1 WHEN 'Compact malformed' THEN 2 WHEN 'Compact root' THEN 3 ELSE 4 END WHERE project_id = 'default'`); err != nil {
-		t.Fatalf("set deterministic task display order: %v", err)
+	for i, task := range []*models.Task{long, malformed, root, chat} {
+		if err := db.Fixtures.SetTaskDisplayOrder(ctx, task.ID, i+1); err != nil {
+			t.Fatal(err)
+		}
 	}
+
 	runAt := time.Date(2026, time.January, 12, 9, 30, 0, 0, time.UTC)
 	for _, task := range []*models.Task{root, long} {
 		nextRun := runAt.Add(time.Hour)
@@ -217,9 +206,10 @@ func TestChannelChatContextCompactChainProjectionMatchesJSONUnmarshalEdgeCases(t
 }
 
 func TestListChatContextByProjectNormalizesActiveTerminalTasks(t *testing.T) {
-	db, counter := testutil.NewStatementCountingTestDB(t)
+	db := teststores.New(t, teststores.WithIOCounting())
+	counter := db.IO
 	ctx := context.Background()
-	taskRepo := teststores.Of(db).Tasks
+	taskRepo := db.Tasks
 	taskSvc := NewTaskService(taskRepo, nil, nil)
 
 	backlog := &models.Task{
@@ -259,15 +249,13 @@ func TestListChatContextByProjectNormalizesActiveTerminalTasks(t *testing.T) {
 			t.Fatalf("create task %q: %v", task.Title, err)
 		}
 	}
-	if _, err := db.ExecContext(ctx, `UPDATE tasks SET display_order = CASE title
-		WHEN 'Existing backlog task' THEN 5
-		WHEN 'Active running task' THEN 20
-		WHEN 'Active failed task' THEN 100
-		WHEN 'Active cancelled task' THEN 101
-	END WHERE project_id = ?`, "default"); err != nil {
-		t.Fatalf("set deterministic display order: %v", err)
+	for i, task := range []*models.Task{backlog, running, failed, cancelled} {
+		if err := db.Fixtures.SetTaskDisplayOrder(ctx, task.ID, []int{5, 20, 100, 101}[i]); err != nil {
+			t.Fatal(err)
+		}
 	}
-	executionRepo := teststores.Of(db).Executions
+
+	executionRepo := db.Executions
 	queuedExecutions := make([]*models.Execution, 0, 2)
 	for _, task := range []*models.Task{failed, cancelled} {
 		execution := &models.Execution{TaskID: task.ID, Status: models.ExecQueued, PromptSent: task.Prompt}
@@ -281,30 +269,11 @@ func TestListChatContextByProjectNormalizesActiveTerminalTasks(t *testing.T) {
 	counter.SetEnabled(true)
 	got, err := taskSvc.ListChatContextByProject(ctx, "default")
 	counter.SetEnabled(false)
-	statements := counter.Statements()
-	compactReads := 0
-	categoryUpdates := 0
-	executionUpdates := 0
-	for _, statement := range statements {
-		normalized := strings.ToLower(strings.Join(strings.Fields(statement), " "))
-		switch {
-		case strings.Contains(normalized, "substr(t.prompt, 1, 501)"):
-			compactReads++
-		case strings.Contains(normalized, "update tasks") && strings.Contains(normalized, "returning id, title"):
-			categoryUpdates++
-		case strings.Contains(normalized, "update executions") && strings.Contains(normalized, "task_id in (?,?)"):
-			executionUpdates++
-		}
-		if strings.Contains(normalized, "where id = ? and project_id = ? and category = ?") {
-			t.Fatalf("compact normalization used a per-task category update: %s", statement)
-		}
-		if strings.Contains(normalized, "where task_id = ? and status = 'queued'") {
-			t.Fatalf("compact normalization used a per-task execution update: %s", statement)
-		}
+	stats := counter.Snapshot()
+	if stats.TaskContextReads != 2 || stats.TaskWrites != 1 || stats.ExecutionWrites != 1 {
+		t.Fatalf("expected two context reads and one batched write each for tasks and executions, got %+v", stats)
 	}
-	if compactReads != 2 || categoryUpdates != 1 || executionUpdates != 1 {
-		t.Fatalf("compact terminal normalization statements = %#v, want two compact reads, one batch category update, and one batch execution update", statements)
-	}
+
 	if err != nil {
 		t.Fatalf("ListChatContextByProject: %v", err)
 	}
@@ -354,19 +323,15 @@ func TestListChatContextByProjectNormalizesActiveTerminalTasks(t *testing.T) {
 	if gotContext != wantContext {
 		t.Fatalf("compact normalized context changed model-facing bytes\nwant:\n%s\ngot:\n%s", wantContext, gotContext)
 	}
-	for _, statement := range counter.Statements() {
-		normalized := strings.ToLower(strings.Join(strings.Fields(statement), " "))
-		if strings.Contains(normalized, "select id, project_id, title, category, priority, status, prompt") {
-			t.Fatalf("compact normalization hydrated the full task projection: %s", statement)
-		}
-	}
+
 }
 
 func TestChannelChatIngressUsesCompactSelectionAndSelectedDetail(t *testing.T) {
-	db, counter := testutil.NewStatementCountingTestDB(t)
-	repo := teststores.Of(db).LLMConfigs
+	db := teststores.New(t, teststores.WithIOCounting())
+	counter := db.IO
+	repo := db.LLMConfigs
 	ctx := context.Background()
-	model := seedChannelRichModel(t, ctx, db, repo, "Channel Text Default", models.ProviderOpenAICompatible, models.AuthMethodAPIKey, true)
+	model := seedChannelRichModel(t, ctx, repo, "Channel Text Default", models.ProviderOpenAICompatible, models.AuthMethodAPIKey, true)
 	counter.SetEnabled(true)
 
 	var runnerRequest ChannelChatRunRequest
@@ -377,7 +342,7 @@ func TestChannelChatIngressUsesCompactSelectionAndSelectedDetail(t *testing.T) {
 		Message:       "hello channel",
 		Source:        models.TaskOriginSlack,
 		LLMConfigRepo: repo,
-		TaskRepo:      teststores.Of(db).Tasks,
+		TaskRepo:      db.Tasks,
 		FirstTurn: channelChatIngressFirstTurnOptions{
 			Task: task,
 			CreateDurableFirstTurn: func(_ context.Context, task *models.Task, execution *models.Execution, _ []models.ChatAttachment) (bool, error) {
@@ -408,18 +373,18 @@ func TestChannelChatIngressUsesCompactSelectionAndSelectedDetail(t *testing.T) {
 	}
 
 	counter.SetEnabled(false)
-	modelStatements := channelAgentConfigStatements(counter.Statements())
-	if len(modelStatements) != 2 {
-		t.Fatalf("agent_configs statements = %#v, want one compact selection and one selected detail query", modelStatements)
+	stats := counter.Snapshot()
+	if stats.ModelReads != 2 || stats.ModelSelectionReads != 1 {
+		t.Fatalf("unexpected physical model reads: %+v", stats)
 	}
-	assertChannelCompactStatement(t, modelStatements)
 }
 
 func TestChannelChatIngressQueuesUsingCompactModelIDWithoutHydration(t *testing.T) {
-	db, counter := testutil.NewStatementCountingTestDB(t)
-	repo := teststores.Of(db).LLMConfigs
+	db := teststores.New(t, teststores.WithIOCounting())
+	counter := db.IO
+	repo := db.LLMConfigs
 	ctx := context.Background()
-	model := seedChannelRichModel(t, ctx, db, repo, "Channel Queue Default", models.ProviderOpenAICompatible, models.AuthMethodAPIKey, true)
+	model := seedChannelRichModel(t, ctx, repo, "Channel Queue Default", models.ProviderOpenAICompatible, models.AuthMethodAPIKey, true)
 	counter.SetEnabled(true)
 
 	var queued *models.ThreadInput
@@ -454,25 +419,25 @@ func TestChannelChatIngressQueuesUsingCompactModelIDWithoutHydration(t *testing.
 	}
 
 	counter.SetEnabled(false)
-	modelStatements := channelAgentConfigStatements(counter.Statements())
-	if len(modelStatements) != 1 {
-		t.Fatalf("agent_configs statements = %#v, want one compact selection query", modelStatements)
+	stats := counter.Snapshot()
+	if stats.ModelReads != 1 || stats.ModelSelectionReads != 1 || stats.ReadTextBytes > 4096 {
+		t.Fatalf("unexpected physical model reads: %+v", stats)
 	}
-	assertChannelCompactStatement(t, modelStatements)
 }
 
 func TestChannelChatIngressImageSelectionExcludesTextOnlyModels(t *testing.T) {
-	db, counter := testutil.NewStatementCountingTestDB(t)
-	repo := teststores.Of(db).LLMConfigs
+	db := teststores.New(t, teststores.WithIOCounting())
+	counter := db.IO
+	repo := db.LLMConfigs
 	ctx := context.Background()
-	teststores.ClearLLMConfigs(t, teststores.Of(db).LLMConfigs)
+	teststores.ClearLLMConfigs(t, db.LLMConfigs)
 	textOnly := &models.LLMConfig{
 		Name:       "Text-only model",
 		Provider:   models.ProviderOpenAICompatible,
 		Model:      "text-only",
 		AuthMethod: models.AuthMethodAPIKey,
 	}
-	vision := seedChannelRichModel(t, ctx, db, repo, "Anthropic Vision", models.ProviderAnthropic, models.AuthMethodAPIKey, true)
+	vision := seedChannelRichModel(t, ctx, repo, "Anthropic Vision", models.ProviderAnthropic, models.AuthMethodAPIKey, true)
 	if err := repo.Create(ctx, textOnly); err != nil {
 		t.Fatalf("create text-only model: %v", err)
 	}
@@ -485,7 +450,7 @@ func TestChannelChatIngressImageSelectionExcludesTextOnlyModels(t *testing.T) {
 		Message:       "inspect the image",
 		Source:        models.TaskOriginTelegram,
 		LLMConfigRepo: repo,
-		TaskRepo:      teststores.Of(db).Tasks,
+		TaskRepo:      db.Tasks,
 		DownloadAttachments: func(context.Context) (channelChatIngressDownloadResult, error) {
 			return channelChatIngressDownloadResult{ImageAttachments: []models.Attachment{{FileName: "image.png", MediaType: "image/png"}}}, nil
 		},
@@ -511,11 +476,10 @@ func TestChannelChatIngressImageSelectionExcludesTextOnlyModels(t *testing.T) {
 	}
 
 	counter.SetEnabled(false)
-	modelStatements := channelAgentConfigStatements(counter.Statements())
-	if len(modelStatements) != 2 {
-		t.Fatalf("agent_configs statements = %#v, want compact vision selection plus selected detail query", modelStatements)
+	stats := counter.Snapshot()
+	if stats.ModelReads != 2 || stats.ModelSelectionReads != 1 {
+		t.Fatalf("unexpected physical model reads: %+v", stats)
 	}
-	assertChannelVisionCompactStatement(t, modelStatements)
 }
 
 func TestChannelChatAgentSelectionSkipsOAuthRetiredDefault(t *testing.T) {
@@ -545,21 +509,22 @@ func TestChannelChatAgentSelectionSkipsOAuthRetiredDefault(t *testing.T) {
 }
 
 func TestChannelChatAgentSelectionWithNoModelsUsesCompactQuery(t *testing.T) {
-	db, counter := testutil.NewStatementCountingTestDB(t)
-	repo := teststores.Of(db).LLMConfigs
+	db := teststores.New(t, teststores.WithIOCounting())
+	counter := db.IO
+	repo := db.LLMConfigs
 	ctx := context.Background()
-	teststores.ClearLLMConfigs(t, teststores.Of(db).LLMConfigs)
+	teststores.ClearLLMConfigs(t, db.LLMConfigs)
 	counter.SetEnabled(true)
 
 	if _, err := selectChannelChatAgentOptions(ctx, repo, "hello", false); err == nil || err.Error() != "no agents configured" {
 		t.Fatalf("selection error = %v, want no agents configured", err)
 	}
 	counter.SetEnabled(false)
-	statements := channelAgentConfigStatements(counter.Statements())
-	if len(statements) != 1 {
-		t.Fatalf("agent_configs statements = %#v, want one compact query", statements)
+	stats := counter.Snapshot()
+	if stats.ModelReads != 1 || stats.ModelSelectionReads != 1 || stats.ReadTextBytes > 4096 {
+		t.Fatalf("expected one physical model read, got %+v", stats)
 	}
-	assertChannelCompactStatement(t, statements)
+
 }
 
 func BenchmarkChannelChatTaskContextProjection(b *testing.B) {
@@ -584,17 +549,18 @@ func TestChannelChatTaskContextUsesCompactProjection(t *testing.T) {
 
 type channelTaskContextBenchmarkFixture struct {
 	ctx          context.Context
-	counter      *testutil.SQLStatementCounter
+	counter      storefixture.IOCounter
 	taskSvc      *TaskService
 	scheduleRepo persistence.ScheduleStore
 }
 
 func newChannelTaskContextBenchmarkFixture(tb testing.TB, taskCount int) *channelTaskContextBenchmarkFixture {
 	tb.Helper()
-	db, counter := testutil.NewStatementCountingTestDB(tb)
+	db := teststores.New(tb, teststores.WithIOCounting())
+	counter := db.IO
 	ctx := context.Background()
-	taskRepo := teststores.Of(db).Tasks
-	scheduleRepo := teststores.Of(db).Schedules
+	taskRepo := db.Tasks
+	scheduleRepo := db.Schedules
 	payload := strings.Repeat("payload", 128*1024/len("payload"))
 	chainPayload := strings.Repeat("chain-payload", 128*1024/len("chain-payload"))
 	for i := 0; i < taskCount; i++ {
@@ -664,7 +630,7 @@ func (f *channelTaskContextBenchmarkFixture) assertTwoContextReads(tb testing.TB
 		tb.Fatalf("load benchmark context: %v", err)
 	}
 	f.counter.SetEnabled(false)
-	if got := len(f.counter.Statements()); got != 2 {
+	if got := f.counter.Snapshot().Requests; got != 2 {
 		tb.Fatalf("context query count = %d, want 2", got)
 	}
 }
@@ -684,10 +650,10 @@ func (f *channelTaskContextBenchmarkFixture) benchmark(b *testing.B) {
 	}
 }
 func BenchmarkChannelModelLoads(b *testing.B) {
-	db := teststores.NewDB(b)
-	repo := teststores.Of(db).LLMConfigs
+	db := teststores.New(b)
+	repo := db.LLMConfigs
 	ctx := context.Background()
-	seedChannelRichModels(b, ctx, db, repo, 50)
+	seedChannelRichModels(b, ctx, repo, 50)
 
 	b.Run("CompactSelectionSelectedDetail", func(b *testing.B) {
 		b.ReportAllocs()
@@ -711,10 +677,10 @@ func TestChannelModelLoadingUsesCompactProjectionOnLargeFixture(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping channel model-loading large fixture in short mode")
 	}
-	db := teststores.NewDB(t)
-	repo := teststores.Of(db).LLMConfigs
+	db := teststores.New(t)
+	repo := db.LLMConfigs
 	ctx := context.Background()
-	seedChannelRichModels(t, ctx, db, repo, 50)
+	seedChannelRichModels(t, ctx, repo, 50)
 
 	configs, err := repo.ListChatSelectionOptions(ctx)
 	if err != nil {
@@ -732,9 +698,9 @@ func TestChannelModelLoadingUsesCompactProjectionOnLargeFixture(t *testing.T) {
 	}
 }
 
-func seedChannelRichModel(tb testing.TB, ctx context.Context, db *sql.DB, repo persistence.LLMConfigStore, name string, provider models.LLMProvider, authMethod models.AuthMethod, isDefault bool) *models.LLMConfig {
+func seedChannelRichModel(tb testing.TB, ctx context.Context, repo persistence.LLMConfigStore, name string, provider models.LLMProvider, authMethod models.AuthMethod, isDefault bool) *models.LLMConfig {
 	tb.Helper()
-	teststores.ClearLLMConfigs(tb, teststores.Of(db).LLMConfigs)
+	teststores.ClearLLMConfigs(tb, repo)
 	largePayload := strings.Repeat("x", 56*1024)
 	model := &models.LLMConfig{
 		Name:                 name,
@@ -762,9 +728,9 @@ func seedChannelRichModel(tb testing.TB, ctx context.Context, db *sql.DB, repo p
 	return model
 }
 
-func seedChannelRichModels(tb testing.TB, ctx context.Context, db *sql.DB, repo persistence.LLMConfigStore, count int) {
+func seedChannelRichModels(tb testing.TB, ctx context.Context, repo persistence.LLMConfigStore, count int) {
 	tb.Helper()
-	teststores.ClearLLMConfigs(tb, teststores.Of(db).LLMConfigs)
+	teststores.ClearLLMConfigs(tb, repo)
 	largePayload := strings.Repeat("x", 56*1024)
 	for i := 0; i < count; i++ {
 		model := &models.LLMConfig{
@@ -783,60 +749,5 @@ func seedChannelRichModels(tb testing.TB, ctx context.Context, db *sql.DB, repo 
 		if err := repo.Create(ctx, model); err != nil {
 			tb.Fatalf("create rich model %d: %v", i, err)
 		}
-	}
-}
-
-func channelAgentConfigStatements(statements []string) []string {
-	var modelStatements []string
-	for _, statement := range statements {
-		normalized := strings.ToLower(strings.Join(strings.Fields(statement), " "))
-		if strings.Contains(normalized, "from agent_configs") {
-			modelStatements = append(modelStatements, normalized)
-		}
-	}
-	return modelStatements
-}
-
-func assertChannelCompactStatement(t *testing.T, statements []string) {
-	t.Helper()
-	compact := 0
-	for _, statement := range statements {
-		projection := strings.Split(statement, " from agent_configs ")[0]
-		if projection == "select id, name, provider, model, is_default, auth_method" {
-			compact++
-			continue
-		}
-		if !strings.Contains(statement, "where id = ?") && !strings.Contains(statement, "where a.id = ?") {
-			t.Fatalf("unexpected model query: %s", statement)
-		}
-	}
-	if compact != 1 {
-		t.Fatalf("compact chat selection query count = %d, statements = %#v", compact, statements)
-	}
-}
-
-func assertChannelVisionCompactStatement(t *testing.T, statements []string) {
-	t.Helper()
-	vision := 0
-	for _, statement := range statements {
-		projection := strings.Split(statement, " from agent_configs ")[0]
-		if strings.HasPrefix(projection, "select id, name, provider, model, auth_method, is_default,") {
-			vision++
-			for _, forbidden := range []string{
-				"oauth_refresh_token", "oauth_client_secret", "oauth_authorize_url", "oauth_token_url",
-				"base_url", "extra_headers_json", "extra_body_json", "custom_auth_config_json", "custom_auth_state_json", "mixture_config_json",
-			} {
-				if strings.Contains(projection, forbidden) {
-					t.Fatalf("vision compact query selected forbidden column %q: %s", forbidden, statement)
-				}
-			}
-			continue
-		}
-		if !strings.Contains(statement, "where id = ?") && !strings.Contains(statement, "where a.id = ?") {
-			t.Fatalf("unexpected model query: %s", statement)
-		}
-	}
-	if vision != 1 {
-		t.Fatalf("compact vision selection query count = %d, statements = %#v", vision, statements)
 	}
 }

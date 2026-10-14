@@ -577,3 +577,8 @@ func (f *fixtures) SeedProjects(ctx context.Context, projects []models.Project) 
 	}
 	return tx.Commit()
 }
+
+func (f *fixtures) SetTaskDisplayOrder(ctx context.Context, id string, order int) error {
+	_, err := f.db.ExecContext(ctx, `UPDATE tasks SET display_order = ? WHERE id = ?`, order, id)
+	return err
+}
