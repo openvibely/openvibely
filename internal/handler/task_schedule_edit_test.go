@@ -497,20 +497,11 @@ func TestHandler_CreateTask_FromSchedulePage_RejectsInvalidRepeatTypeWithoutPers
 }
 
 func TestHandler_CreateTask_FromSchedulePage_RollsBackTaskWhenScheduleCreationFails(t *testing.T) {
-	h, e, _, db := setupTestHandlerWithDB(t)
+	h, e, _, db := setupTestHandlerWithStores(t)
 	ctx := context.Background()
-	if _, err := db.ExecContext(ctx, `CREATE TRIGGER fail_task_schedule_insert
-		BEFORE INSERT ON schedules
-		BEGIN
-			SELECT RAISE(ABORT, 'injected schedule failure');
-		END`); err != nil {
-		t.Fatalf("create schedule failure trigger: %v", err)
+	if err := db.Fixtures.FailScheduleCreation(ctx); err != nil {
+		t.Fatal(err)
 	}
-	defer func() {
-		if _, err := db.ExecContext(ctx, `DROP TRIGGER fail_task_schedule_insert`); err != nil {
-			t.Errorf("drop schedule failure trigger: %v", err)
-		}
-	}()
 
 	form := url.Values{
 		"title":           {"Schedule persistence failure task"},

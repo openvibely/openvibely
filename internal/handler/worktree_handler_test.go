@@ -254,9 +254,9 @@ func TestHandler_TaskCardMergeOptionsUseAuthoritativeStateAndProjectOwnership(t 
 }
 
 func TestHandler_TaskCardMergeMenuStatesUseConstantDatabaseQueriesForNonMergeableCards(t *testing.T) {
-	db, counter := testutil.NewStatementCountingTestDB(t)
-	h, _, _ := setupTestHandlerForDB(t, db)
-	h.taskPullRequestRepo = teststores.Of(db).TaskPullRequests
+	h, _, _, env := setupTestHandlerWithStores(t, teststores.WithIOCounting())
+	counter := env.IO
+	h.taskPullRequestRepo = env.TaskPullRequests
 	project := &models.Project{Name: "Menu Query Budget", RepoPath: t.TempDir(), IsDefault: true}
 	if err := h.projectSvc.Create(t.Context(), project); err != nil {
 		t.Fatal(err)
@@ -282,9 +282,9 @@ func TestHandler_TaskCardMergeMenuStatesUseConstantDatabaseQueriesForNonMergeabl
 	if len(states) != len(tasks) {
 		t.Fatalf("menu states=%d, want %d", len(states), len(tasks))
 	}
-	statements := counter.Statements()
-	if len(statements) != 2 {
-		t.Fatalf("100 non-mergeable cards executed %d database statements, want constant project+PR queries; statements=%v", len(statements), statements)
+	observed := counter.Snapshot()
+	if observed.Requests != 2 {
+		t.Fatalf("100 non-mergeable cards executed %d physical database requests, want 2", observed.Requests)
 	}
 	for _, state := range states {
 		if state.LocalEligible || state.FastForwardEligible || state.RebaseEligible {
@@ -1453,7 +1453,7 @@ func TestHandler_TaskCardMutationRejectsProjectChangeDuringRepositoryLease(t *te
 		{name: "rebase", route: "rebase"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			h, e, _, db := setupTestHandlerWithDB(t)
+			h, e, _, db := setupTestHandlerWithStores(t)
 			h.SetWorktreeService(service.NewWorktreeService(h.taskRepo, h.projectRepo, h.settingsRepo))
 			ctx := context.Background()
 			repoDir := createHandlerTestGitRepo(t)
@@ -1524,7 +1524,7 @@ func TestHandler_TaskCardMutationRejectsProjectChangeDuringRepositoryLease(t *te
 			case <-time.After(100 * time.Millisecond):
 			}
 
-			if _, err := db.ExecContext(ctx, "UPDATE tasks SET project_id = ? WHERE id = ?", foreignProject.ID, task.ID); err != nil {
+			if err := db.Fixtures.MoveTaskProject(ctx, task.ID, foreignProject.ID); err != nil {
 				close(releaseLease)
 				t.Fatal(err)
 			}
@@ -2222,7 +2222,7 @@ func TestHandler_MergeTaskBranch_ChangesTabSquashConflictRefreshesRetryWithoutRe
 }
 
 func TestHandler_GetTaskChanges_LiveConflictRecoverySurvivesStatusPersistenceFailure(t *testing.T) {
-	h, e, _, db := setupTestHandlerWithDB(t)
+	h, e, _, db := setupTestHandlerWithStores(t)
 	defer db.Close()
 	ctx := context.Background()
 	repoDir := createHandlerTestGitRepo(t)
@@ -2264,7 +2264,7 @@ func TestHandler_GetTaskChanges_LiveConflictRecoverySurvivesStatusPersistenceFai
 	if err := h.taskRepo.Create(ctx, task); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Exec(`CREATE TRIGGER reject_conflict_status BEFORE UPDATE OF merge_status ON tasks WHEN NEW.merge_status = 'conflict' BEGIN SELECT RAISE(ABORT, 'injected conflict status failure'); END`); err != nil {
+	if err := db.Fixtures.FailConflictStatus(ctx); err != nil {
 		t.Fatal(err)
 	}
 

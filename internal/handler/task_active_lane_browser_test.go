@@ -156,7 +156,7 @@ func TestActiveLaneGroupedDragUsesRealHandlerPersistenceAndRollbackInChrome(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	ctx := context.Background()
 	project := tc.CreateProject().WithName("Native Active lane persistence").Build()
 	model := tc.CreateLLMConfig().WithName("Native Active lane model").WithProvider(models.ProviderTest).WithModel("test-model").AsDefault().Build()
@@ -171,7 +171,7 @@ func TestActiveLaneGroupedDragUsesRealHandlerPersistenceAndRollbackInChrome(t *t
 	}
 	first, second := makeBacklog("Success first"), makeBacklog("Success second")
 	failFirst, failSecond := makeBacklog("Failure first"), makeBacklog("Failure second")
-	if _, err := tc.db.ExecContext(ctx, `CREATE TRIGGER fail_native_second_active_lane BEFORE UPDATE ON tasks WHEN OLD.id = '`+failSecond.ID+`' AND NEW.category = 'active' BEGIN SELECT RAISE(FAIL, 'forced native later failure'); END`); err != nil {
+	if err := tc.stores.Fixtures.FailTaskActiveLaneMove(ctx, failSecond.ID); err != nil {
 		t.Fatal(err)
 	}
 

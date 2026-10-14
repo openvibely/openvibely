@@ -21,7 +21,7 @@ import (
 )
 
 func TestHandler_GetTaskStatusCountsUsesOnlyCompactProjectPredicates(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	project := tc.CreateProject().WithName("Task Status Count Project").Build()
 	foreign := tc.CreateProject().WithName("Foreign Task Status Count Project").Build()
 	empty := tc.CreateProject().WithName("Empty Task Status Count Project").Build()
@@ -47,21 +47,7 @@ func TestHandler_GetTaskStatusCountsUsesOnlyCompactProjectPredicates(t *testing.
 	}
 	require.NoError(t, tc.scheduleRepo.Create(context.Background(), scheduled))
 	ctx := context.Background()
-	reservationStatements := []struct {
-		query string
-		args  []any
-	}{
-		{`INSERT INTO automations (id, project_id, stable_key, name) VALUES ('status-count-auto', ?, 'status-count-auto', 'Status count automation')`, []any{project.ID}},
-		{`INSERT INTO automation_versions (id, project_id, automation_id, version, adapter_key) VALUES ('status-count-version', ?, 'status-count-auto', 1, 'test')`, []any{project.ID}},
-		{`INSERT INTO automation_nodes (id, project_id, automation_id, version_id, node_key, name, node_type, role) VALUES ('status-count-node', ?, 'status-count-auto', 'status-count-version', 'trigger', 'Trigger', 'trigger', 'trigger')`, []any{project.ID}},
-		{`INSERT INTO automation_invocations (id, project_id, automation_id, version_id, trigger_node_id, trigger_resource_type, trigger_resource_id, occurrence_key) VALUES ('status-count-invocation', ?, 'status-count-auto', 'status-count-version', 'status-count-node', 'schedule', ?, 'status-count-occurrence')`, []any{project.ID, scheduled.ID}},
-		{`INSERT INTO automation_dispatch_outbox (id, invocation_id, task_id) VALUES ('status-count-dispatch', 'status-count-invocation', ?)`, []any{scheduledAutomationTask.ID}},
-		{`INSERT INTO automation_task_run_reservations (task_id, dispatch_id, project_id) VALUES (?, 'status-count-dispatch', ?)`, []any{scheduledAutomationTask.ID, project.ID}},
-	}
-	for _, statement := range reservationStatements {
-		_, err := tc.db.ExecContext(ctx, statement.query, statement.args...)
-		require.NoError(t, err)
-	}
+	require.NoError(t, tc.stores.Fixtures.SeedReservedAutomationTask(ctx, project.ID, scheduledAutomationTask.ID, scheduled.ID))
 	tc.CreateTask(project.ID).WithTitle("Active failed").WithCategory(models.CategoryActive).WithStatus(models.StatusFailed).Build()
 	tc.CreateTask(project.ID).WithTitle("Active cancelled").WithCategory(models.CategoryActive).WithStatus(models.StatusCancelled).Build()
 	tc.CreateTask(project.ID).WithTitle("Hidden chat failed").WithCategory(models.CategoryChat).WithStatus(models.StatusFailed).Build()

@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
 )
@@ -139,7 +140,7 @@ func TestHandler_ListTasks_HTMXUpdate(t *testing.T) {
 }
 
 func TestHandler_ListTasks_HTMXUpdate_DefaultsDateSortsNewestFirstAndPreservesCookies(t *testing.T) {
-	h, e, _, db := setupTestHandlerWithDB(t)
+	h, e, _, db := setupTestHandlerWithStores(t)
 	ctx := context.Background()
 
 	createTask := func(title string, category models.TaskCategory) *models.Task {
@@ -180,9 +181,24 @@ func TestHandler_ListTasks_HTMXUpdate_DefaultsDateSortsNewestFirstAndPreservesCo
 		{newCompleted.ID, "2024-03-01 10:00:00", "2024-06-01 10:00:00", "2024-01-03 10:00:00"},
 	}
 	for _, update := range updates {
-		if _, err := db.ExecContext(ctx, `UPDATE tasks SET created_at = ?, updated_at = ?, completed_at = ? WHERE id = ?`,
-			update.createdAt, update.updatedAt, update.completedAt, update.id); err != nil {
-			t.Fatalf("set timestamps for task %s: %v", update.id, err)
+		created, err := time.Parse("2006-01-02 15:04:05", update.createdAt)
+		if err != nil {
+			t.Fatal(err)
+		}
+		updated, err := time.Parse("2006-01-02 15:04:05", update.updatedAt)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var completed *time.Time
+		if value, ok := update.completedAt.(string); ok {
+			at, err := time.Parse("2006-01-02 15:04:05", value)
+			if err != nil {
+				t.Fatal(err)
+			}
+			completed = &at
+		}
+		if err := db.Fixtures.SetTaskDates(ctx, update.id, created, updated, completed); err != nil {
+			t.Fatal(err)
 		}
 	}
 

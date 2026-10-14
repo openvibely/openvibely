@@ -626,17 +626,13 @@ func TestChannelRemovalSettingFailureDoesNotReportSuccess(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			h, e, _, db := setupTestHandlerWithDB(t)
+			h, e, _, db := setupTestHandlerWithStores(t)
 			if tc.configureHandler != nil {
 				tc.configureHandler(h)
 			}
 			require.NoError(t, h.settingsRepo.Set(context.Background(), tc.firstKey, "configured"))
 			require.NoError(t, h.settingsRepo.Set(context.Background(), tc.failKey, "configured"))
-			trigger := fmt.Sprintf(`CREATE TRIGGER fail_channel_setting_reset
-				BEFORE UPDATE ON app_settings
-				WHEN NEW.key = '%s' AND NEW.value = ''
-				BEGIN SELECT RAISE(FAIL, 'injected settings write failure'); END`, tc.failKey)
-			require.NoError(t, func() error { _, err := db.Exec(trigger); return err }())
+			require.NoError(t, db.Fixtures.FailClearingSetting(t.Context(), tc.failKey))
 
 			for _, htmx := range []bool{true, false} {
 				mode := "redirect"

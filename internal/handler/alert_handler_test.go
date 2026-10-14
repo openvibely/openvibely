@@ -12,7 +12,6 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/service"
-	"github.com/openvibely/openvibely/internal/testutil/teststores"
 	"github.com/stretchr/testify/require"
 )
 
@@ -366,7 +365,7 @@ func TestHandler_ListAlerts(t *testing.T) {
 }
 
 func TestHandler_ListAlertsSupportsWorkflowFiltersAndRefreshPreservation(t *testing.T) {
-	h, e, _, db := setupTestHandlerWithDB(t)
+	h, e, _, db := setupTestHandlerWithStores(t)
 	project := createProject(t, h, "Alert filter project")
 	foreign := createProject(t, h, "Foreign alert filter project")
 
@@ -394,8 +393,8 @@ func TestHandler_ListAlertsSupportsWorkflowFiltersAndRefreshPreservation(t *test
 	linkedCompleted := createFilteredAlert(project.ID, "Completed with implementation task", models.AlertDecisionApproved, models.AlertProcessingCompleted, "cleanup target")
 	unlinkedCompleted := createFilteredAlert(project.ID, "Completed without implementation task", models.AlertDecisionApproved, models.AlertProcessingCompleted, "cleanup target")
 	implementationTask := &models.Task{ProjectID: project.ID, Title: "Implemented notification", Category: models.CategoryBacklog, Priority: 2, Status: models.StatusCompleted, Prompt: "Implemented", ChainConfig: "{}", SwarmConfig: "{}"}
-	require.NoError(t, teststores.Of(db).Tasks.Create(t.Context(), implementationTask))
-	_, err := db.ExecContext(t.Context(), `UPDATE alerts SET implementation_task_id = ?, implementation_task_was_linked = 1 WHERE id = ? AND project_id = ?`, implementationTask.ID, linkedCompleted.ID, project.ID)
+	require.NoError(t, db.Tasks.Create(t.Context(), implementationTask))
+	err := db.Fixtures.LinkHistoricalAlertTask(t.Context(), project.ID, linkedCompleted.ID, implementationTask.ID)
 	require.NoError(t, err)
 	createFilteredAlert(project.ID, "Operational excluded", models.AlertDecisionNotRequired, models.AlertProcessingNotApplicable, "other")
 	foreignAlert := createFilteredAlert(foreign.ID, "Foreign pending match", models.AlertDecisionPending, models.AlertProcessingFailed, "needle")

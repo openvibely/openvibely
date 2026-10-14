@@ -79,6 +79,17 @@ type GitHubIssueClaim struct {
 }
 type IssueProjectionFailure struct{ AutomationID, AssignmentEventKey string }
 type Fixtures interface {
+	SetDefaultProject(context.Context, string) error
+	FailClearingSetting(context.Context, string) error
+	FailConflictStatus(context.Context) error
+	MoveTaskProject(context.Context, string, string) error
+	SetTaskDates(context.Context, string, time.Time, time.Time, *time.Time) error
+	LinkHistoricalAlertTask(context.Context, string, string, string) error
+	FailCapacitySources(context.Context) error
+
+	SeedReservedAutomationTask(context.Context, string, string, string) error
+	CountTaskThreadInputs(context.Context, string) (int, error)
+
 	GitHubIssueClaims(context.Context, string, string, string) ([]GitHubIssueClaim, error)
 	ExpireGitHubIssueClaim(context.Context, string, string, string, time.Time) error
 	SetIssueProjectionFailure(context.Context, *IssueProjectionFailure) error

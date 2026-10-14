@@ -2751,16 +2751,9 @@ func TestHandler_WorkerSettings(t *testing.T) {
 }
 
 func TestHandler_WorkerSettingsReportsCapacitySourceFailures(t *testing.T) {
-	_, e, _, db := setupTestHandlerWithDB(t)
+	_, e, _, db := setupTestHandlerWithStores(t)
 	ctx := context.Background()
-	for _, statement := range []string{
-		`ALTER TABLE projects RENAME TO unavailable_projects_fixture`,
-		`ALTER TABLE agent_configs RENAME TO unavailable_agent_configs_fixture`,
-	} {
-		if _, err := db.ExecContext(ctx, statement); err != nil {
-			t.Fatalf("simulate worker capacity source failure with %q: %v", statement, err)
-		}
-	}
+	require.NoError(t, db.Fixtures.FailCapacitySources(ctx))
 	req := httptest.NewRequest(http.MethodGet, "/workers", nil)
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
@@ -3532,7 +3525,7 @@ func TestHandler_UpdateTask_NormalizesWhitespaceAndRejectsBlankFields(t *testing
 }
 
 func TestHandler_UpdateTask_DetailCategoryTransitionsRefreshCompletedAt(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	ctx := context.Background()
 	task := createTask(t, tc.handler, "default", "Recompleted Through Detail Edit", func(tk *models.Task) {
 		tk.Category = models.CategoryCompleted
@@ -3543,10 +3536,8 @@ func TestHandler_UpdateTask_DetailCategoryTransitionsRefreshCompletedAt(t *testi
 		tk.Status = models.StatusCompleted
 	})
 
-	_, err := tc.db.ExecContext(ctx, `UPDATE tasks SET completed_at = ? WHERE id = ?`, "2000-01-01 00:00:00", task.ID)
-	require.NoError(t, err)
-	_, err = tc.db.ExecContext(ctx, `UPDATE tasks SET completed_at = ? WHERE id = ?`, "2020-01-01 00:00:00", other.ID)
-	require.NoError(t, err)
+	require.NoError(t, tc.stores.Fixtures.SetTaskCompletedAt(ctx, task.ID, time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)))
+	require.NoError(t, tc.stores.Fixtures.SetTaskCompletedAt(ctx, other.ID, time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)))
 
 	updateCategory := func(category models.TaskCategory) {
 		t.Helper()
@@ -3966,7 +3957,7 @@ func TestHandler_UpdateTask_CategoryChangeFromActiveQueuedToCompletedStopsTask(t
 }
 
 func TestHandler_UpdateTask_CategoryChangeFromCompletedToActiveIsMetadataOnly(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	ctx := context.Background()
 	task := createTask(t, tc.handler, "default", "Completed Task", func(tk *models.Task) {
 		tk.Category = models.CategoryCompleted
@@ -3995,8 +3986,8 @@ func TestHandler_UpdateTask_CategoryChangeFromCompletedToActiveIsMetadataOnly(t 
 	execs, err := tc.execRepo.ListByTaskChronological(ctx, task.ID)
 	require.NoError(t, err)
 	assert.Empty(t, execs, "task detail metadata save must not create an execution")
-	var threadInputs int
-	require.NoError(t, tc.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM thread_inputs WHERE task_id = ?`, task.ID).Scan(&threadInputs))
+	threadInputs, err := tc.stores.Fixtures.CountTaskThreadInputs(ctx, task.ID)
+	require.NoError(t, err)
 	assert.Equal(t, 0, threadInputs, "task detail metadata save must not queue a thread input")
 	assert.Equal(t, 0, tc.handler.workerSvc.QueueSize(), "task detail metadata save must not queue worker work")
 	assert.Equal(t, 0, tc.handler.workerSvc.TotalRunning(), "task detail metadata save must not start worker work")

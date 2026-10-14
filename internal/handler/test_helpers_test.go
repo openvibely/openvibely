@@ -2,7 +2,6 @@ package handler
 
 import (
 	"context"
-	"database/sql"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -23,7 +22,6 @@ type TestContext struct {
 	t              *testing.T
 	handler        *Handler
 	echo           *echo.Echo
-	db             *sql.DB
 	llmConfigRepo  persistence.LLMConfigStore
 	projectRepo    persistence.ProjectStore
 	taskRepo       persistence.TaskStore
@@ -34,13 +32,6 @@ type TestContext struct {
 	attachmentRepo persistence.AttachmentStore
 	alertRepo      persistence.AlertStore
 	settingsRepo   persistence.SettingsStore
-}
-
-// NewTestContext creates a new test context with all dependencies initialized
-func NewTestContext(t *testing.T) *TestContext {
-	t.Helper()
-	env := newTestHandlerEnv(t, teststores.NewDB(t), withTestTaskGoals())
-	return testContextFromHandler(t, env, &teststores.Env{Stores: teststores.Of(env.DB)})
 }
 
 func NewStoreTestContext(t *testing.T) *TestContext {
@@ -56,7 +47,6 @@ func testContextFromHandler(t *testing.T, env *testHandlerEnv, stores *teststore
 		t:              t,
 		handler:        env.Handler,
 		echo:           env.Echo,
-		db:             env.DB,
 		llmConfigRepo:  env.LLMConfigRepo,
 		projectRepo:    env.ProjectRepo,
 		taskRepo:       env.TaskRepo,

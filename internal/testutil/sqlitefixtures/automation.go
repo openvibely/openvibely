@@ -491,3 +491,33 @@ func (f *fixtures) SetIssueProjectionFailure(ctx context.Context, failure *store
 	_, err := f.db.ExecContext(ctx, "CREATE TRIGGER fail_fixture_issue_projection BEFORE INSERT ON "+target+condition+" BEGIN SELECT RAISE(FAIL, '"+message+"'); END")
 	return err
 }
+
+func (f *fixtures) CountTaskThreadInputs(ctx context.Context, id string) (int, error) {
+	var n int
+	err := f.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM thread_inputs WHERE task_id=?`, id).Scan(&n)
+	return n, err
+}
+func (f *fixtures) SeedReservedAutomationTask(ctx context.Context, project, task, schedule string) error {
+	tx, err := f.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	statements := []struct {
+		query string
+		args  []any
+	}{
+		{`INSERT INTO automations(id,project_id,stable_key,name) VALUES('status-count-auto',?,'status-count-auto','Status count automation')`, []any{project}},
+		{`INSERT INTO automation_versions(id,project_id,automation_id,version,adapter_key) VALUES('status-count-version',?,'status-count-auto',1,'test')`, []any{project}},
+		{`INSERT INTO automation_nodes(id,project_id,automation_id,version_id,node_key,name,node_type,role) VALUES('status-count-node',?,'status-count-auto','status-count-version','trigger','Trigger','trigger','trigger')`, []any{project}},
+		{`INSERT INTO automation_invocations(id,project_id,automation_id,version_id,trigger_node_id,trigger_resource_type,trigger_resource_id,occurrence_key) VALUES('status-count-invocation',?,'status-count-auto','status-count-version','status-count-node','schedule',?,'status-count-occurrence')`, []any{project, schedule}},
+		{`INSERT INTO automation_dispatch_outbox(id,invocation_id,task_id) VALUES('status-count-dispatch','status-count-invocation',?)`, []any{task}},
+		{`INSERT INTO automation_task_run_reservations(task_id,dispatch_id,project_id) VALUES(?,'status-count-dispatch',?)`, []any{task, project}},
+	}
+	for _, s := range statements {
+		if _, err = tx.ExecContext(ctx, s.query, s.args...); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
