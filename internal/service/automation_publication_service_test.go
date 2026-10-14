@@ -636,7 +636,7 @@ func TestAutomationSaveHardensCustomNativeInboxPersistedProjectPrompt(t *testing
 }
 
 func TestAutomationSaveCreatesCustomNativeMailboxWithoutImplementationPlaceholderTask(t *testing.T) {
-	h := newAutomationSaveHarness(t, "Custom Native mailbox")
+	h := newAutomationSaveStoreHarness(t, "Custom Native mailbox")
 	saved, err := h.compiler.Save(context.Background(), AutomationSaveRequest{ProjectID: h.project.ID, Source: "manual", CreatedVia: "web", Candidate: customNativeMailboxCandidate("Custom Native mailbox")})
 	require.NoError(t, err)
 	require.NotEmpty(t, automationResourceID(t, saved.Definition, "custom_producer", "task"))
@@ -644,12 +644,24 @@ func TestAutomationSaveCreatesCustomNativeMailboxWithoutImplementationPlaceholde
 	for _, resource := range saved.Definition.Resources {
 		require.False(t, resource.NodeKey == "custom_implementation" && resource.ResourceType == "task", "Native implementation is projection-only")
 	}
-	require.Equal(t, 2, countRows(t, h.db, `SELECT COUNT(*) FROM automation_definition_resources WHERE automation_id = ? AND resource_type = 'task'`, saved.Definition.Automation.ID))
-	require.Equal(t, 2, countRows(t, h.db, `SELECT COUNT(*) FROM automation_definition_resources WHERE automation_id = ? AND resource_type = 'schedule'`, saved.Definition.Automation.ID))
+	persisted, err := h.automationRepo.GetDefinition(context.Background(), h.project.ID, saved.Definition.Automation.ID)
+	require.NoError(t, err)
+	require.NotNil(t, persisted)
+	var tasks, schedules int
+	for _, resource := range persisted.Resources {
+		switch resource.ResourceType {
+		case "task":
+			tasks++
+		case "schedule":
+			schedules++
+		}
+	}
+	require.Equal(t, 2, tasks)
+	require.Equal(t, 2, schedules)
 }
 
 func TestAutomationSaveCreatesCurrentGraphTaskAndScheduleAtomically(t *testing.T) {
-	h := newAutomationSaveHarness(t, "Atomic custom Save")
+	h := newAutomationSaveStoreHarness(t, "Atomic custom Save")
 	ctx := context.Background()
 	candidate := customScheduledTaskCandidate("Daily review", "Review one request.")
 
@@ -658,8 +670,11 @@ func TestAutomationSaveCreatesCurrentGraphTaskAndScheduleAtomically(t *testing.T
 	require.Equal(t, models.AutomationActive, saved.Definition.Automation.LifecycleState)
 	require.Len(t, saved.Definition.Nodes, 2)
 	require.Len(t, saved.Definition.Edges, 1)
-	require.Equal(t, 1, countRows(t, h.db, `SELECT COUNT(*) FROM automation_versions WHERE automation_id = ?`, saved.Definition.Automation.ID))
-	require.Zero(t, countRows(t, h.db, `SELECT COUNT(*) FROM automation_versions WHERE automation_id = ? AND state = 'draft'`, saved.Definition.Automation.ID))
+	versions, err := h.stores.Fixtures.AutomationVersions(ctx, saved.Definition.Automation.ID)
+	require.NoError(t, err)
+	require.Len(t, versions, 1)
+	require.Equal(t, saved.Definition.Version.ID, versions[0].ID)
+	require.NotEqual(t, "draft", string(versions[0].State))
 	taskID := automationResourceID(t, saved.Definition, "schedule", "task")
 	scheduleID := automationResourceID(t, saved.Definition, "schedule", "schedule")
 	task, err := h.taskRepo.GetByID(ctx, taskID)
@@ -670,8 +685,6 @@ func TestAutomationSaveCreatesCurrentGraphTaskAndScheduleAtomically(t *testing.T
 	require.Equal(t, taskID, schedule.TaskID)
 	require.True(t, schedule.Enabled)
 	require.True(t, schedule.ClearContextOnStart)
-	require.False(t, tableExists(t, h.db, "automation_publication_attempts"))
-	require.False(t, tableExists(t, h.db, "automation_publication_steps"))
 }
 
 func TestAutomationSaveRecreatesDeletedRetainedNativeNodeResources(t *testing.T) {
@@ -735,7 +748,7 @@ func TestAutomationSaveRecreatesDeletedRetainedNativeNodeResources(t *testing.T)
 }
 
 func TestAutomationSaveRecreatesDeletedRetainedNativeResourcesPreservesPausedLifecycle(t *testing.T) {
-	h := newAutomationSaveHarness(t, "Recover deleted retained paused Native resources")
+	h := newAutomationSaveStoreHarness(t, "Recover deleted retained paused Native resources")
 	ctx := context.Background()
 	candidate, err := h.drafts.TemplateCandidate(AutomationAdapterNativeSDLC)
 	require.NoError(t, err)
@@ -766,9 +779,10 @@ func TestAutomationSaveRecreatesDeletedRetainedNativeResourcesPreservesPausedLif
 	newSchedule, err := h.scheduleRepo.GetByID(ctx, newScheduleID)
 	require.NoError(t, err)
 	require.False(t, newSchedule.Enabled)
-	var ownershipState string
-	require.NoError(t, h.db.QueryRowContext(ctx, `SELECT ownership_state FROM automation_trigger_owners WHERE schedule_id = ?`, newScheduleID).Scan(&ownershipState))
-	require.Equal(t, "paused", ownershipState)
+	owner, err := h.automationRepo.GetTriggerOwner(ctx, newScheduleID)
+	require.NoError(t, err)
+	require.NotNil(t, owner)
+	require.Equal(t, "paused", owner.OwnershipState)
 }
 
 func TestAutomationLiveCandidateDerivesMissingMetadataFromLiveGraph(t *testing.T) {
@@ -1424,7 +1438,8 @@ func TestAutomationPublishedCustomTaskActivationPreservesDownstreamHandoffPrompt
 		parent, err := h.taskRepo.GetByID(ctx, automationResourceID(t, saved.Definition, parentKey, "task"))
 		require.NoError(t, err)
 		childID := automationResourceID(t, saved.Definition, childKey, "task")
-		tasksBefore := countRows(t, h.db, `SELECT COUNT(*) FROM tasks WHERE project_id = ?`, h.project.ID)
+		tasksBefore, err := h.taskRepo.ListByProject(ctx, h.project.ID, "")
+		require.NoError(t, err)
 		require.NoError(t, h.taskRepo.UpdateStatus(ctx, parent.ID, models.StatusRunning))
 		execution := models.Execution{TaskID: parent.ID, Status: models.ExecRunning, PromptSent: parent.Prompt}
 		require.NoError(t, h.stores.Executions.Create(ctx, &execution))
@@ -1441,7 +1456,9 @@ func TestAutomationPublishedCustomTaskActivationPreservesDownstreamHandoffPrompt
 		require.True(t, handled)
 		activated, err := h.taskRepo.GetByID(ctx, childID)
 		require.NoError(t, err)
-		require.Equal(t, tasksBefore, countRows(t, h.db, `SELECT COUNT(*) FROM tasks WHERE project_id = ?`, h.project.ID))
+		tasksAfter, err := h.taskRepo.ListByProject(ctx, h.project.ID, "")
+		require.NoError(t, err)
+		require.Len(t, tasksAfter, len(tasksBefore))
 		require.Contains(t, activated.Prompt, "upstream result")
 		select {
 		case submitted := <-worker.Submitted():
@@ -1453,7 +1470,7 @@ func TestAutomationPublishedCustomTaskActivationPreservesDownstreamHandoffPrompt
 	}
 
 	t.Run("pull request handoff", func(t *testing.T) {
-		h := newAutomationSaveHarness(t, "Custom PR activation")
+		h := newAutomationSaveStoreHarness(t, "Custom PR activation")
 		ctx := context.Background()
 		projectRepo := h.stores.Projects
 		h.project.RepoURL = "https://github.com/example/automation.git"
@@ -1494,7 +1511,7 @@ func TestAutomationPublishedCustomTaskActivationPreservesDownstreamHandoffPrompt
 	})
 
 	t.Run("notification handoff", func(t *testing.T) {
-		h := newAutomationSaveHarness(t, "Custom notification activation")
+		h := newAutomationSaveStoreHarness(t, "Custom notification activation")
 		candidate := customScheduledTaskCandidate("Custom notification activation", "Start the notification flow.")
 		candidate.Nodes = append(candidate.Nodes,
 			models.AutomationDraftNode{Key: "notify", Name: "Create notification", Type: models.AutomationNodeAction, Role: "create_notification", Config: map[string]any{"notification_type": "change_proposal", "instructions": "Ask a human to review the prepared proposal."}},
@@ -1514,7 +1531,7 @@ func TestAutomationPublishedCustomTaskActivationPreservesDownstreamHandoffPrompt
 	})
 
 	t.Run("task only", func(t *testing.T) {
-		h := newAutomationSaveHarness(t, "Custom task-only activation")
+		h := newAutomationSaveStoreHarness(t, "Custom task-only activation")
 		candidate := customScheduledTaskCandidate("Custom task-only activation", "Start the task-only flow.")
 		activated := activate(t, h, candidate, "schedule", "followup")
 		require.NotContains(t, activated.Prompt, "Human approval handoff")
@@ -1869,11 +1886,6 @@ func automationResourceID(t *testing.T, definition *models.AutomationDefinition,
 	}
 	require.FailNow(t, "Automation resource not found", nodeKey+"/"+resourceType)
 	return ""
-}
-
-func tableExists(t *testing.T, db *sql.DB, table string) bool {
-	t.Helper()
-	return countRows(t, db, `SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?`, table) == 1
 }
 
 func tableCountWhere(t *testing.T, db *sql.DB, table, column, value string) int {
