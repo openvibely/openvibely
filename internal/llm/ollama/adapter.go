@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/applog"
+	"github.com/openvibely/openvibely/internal/httpclient"
 	"github.com/openvibely/openvibely/internal/httpretry"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	llmoutput "github.com/openvibely/openvibely/internal/llm/output"
@@ -31,7 +32,6 @@ type HTTPDoer interface {
 }
 
 const (
-	defaultOllamaRequestTimeout = 10 * time.Minute
 	// DefaultContextWindow is the conservative enforced window for arbitrary
 	// local models when no explicit model metadata is configured.
 	DefaultContextWindow = 8192
@@ -73,7 +73,7 @@ func ensureOllamaRequestFits(body []byte, agent models.LLMConfig) error {
 }
 
 // DefaultHTTPClient is the default HTTP client for Ollama requests.
-var DefaultHTTPClient HTTPDoer = &http.Client{Timeout: defaultOllamaRequestTimeout}
+var DefaultHTTPClient HTTPDoer = httpclient.NewModel(nil)
 
 var retryAfter = time.After
 
@@ -384,7 +384,7 @@ func (a *Adapter) streamWithRetry(ctx context.Context, url string, body []byte, 
 			result := ollamaStreamResult{}
 			observed := false
 			resp, err := a.doWithRetry(streamCtx, func() (*http.Request, error) {
-				httpReq, err := http.NewRequestWithContext(streamCtx, http.MethodPost, url, bytes.NewReader(body))
+				httpReq, err := http.NewRequestWithContext(httpclient.Streaming(streamCtx), http.MethodPost, url, bytes.NewReader(body))
 				if err != nil {
 					return nil, err
 				}

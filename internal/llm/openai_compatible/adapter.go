@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/applog"
+	"github.com/openvibely/openvibely/internal/httpclient"
 	llmattachment "github.com/openvibely/openvibely/internal/llm/attachment"
 	"github.com/openvibely/openvibely/internal/llm/contextlimits"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
@@ -116,7 +117,7 @@ func (a *Adapter) client(ctx context.Context, agent models.LLMConfig) (*openaicl
 	if _, err := llmcustomauth.ValidateEndpoint(agent.BaseURL, requestPrivate); err != nil {
 		return nil, nil, fmt.Errorf("invalid custom provider base URL: %w", err)
 	}
-	client.SetHTTPClient(llmcustomauth.NewHTTPClient(10*time.Minute, requestPrivate))
+	client.SetHTTPClient(llmcustomauth.NewModelHTTPClient(requestPrivate))
 	finalize := func(req *http.Request, body []byte) error {
 		if agent.AuthMethod == models.AuthMethodOAuth {
 			if err := a.verifyOAuthRevision(req.Context(), agent); err != nil {
@@ -230,7 +231,7 @@ func (a *Adapter) ensureFreshOAuth(ctx context.Context, agent models.LLMConfig, 
 			if parseErr != nil {
 				return llmcustomauth.TokenSet{}, parseErr
 			}
-			refreshClient := llmcustomauth.NewHTTPClient(30*time.Second, cfg.AllowPrivateEndpoints)
+			refreshClient := llmcustomauth.NewHTTPClient(httpclient.OAuthTimeout, cfg.AllowPrivateEndpoints)
 			refreshed, refreshErr := llmcustomauth.Refresh(ctx, refreshClient, cfg, agent.OAuthRefreshToken, llmcustomauth.RefreshOptions{
 				ClientID: agent.OAuthClientID, ClientSecret: agent.OAuthClientSecret,
 			})

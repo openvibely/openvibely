@@ -19,6 +19,7 @@ import (
 	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/chatcontrol"
 	"github.com/openvibely/openvibely/internal/events"
+	"github.com/openvibely/openvibely/internal/httpclient"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	llmoutput "github.com/openvibely/openvibely/internal/llm/output"
 	"github.com/openvibely/openvibely/internal/models"
@@ -162,6 +163,7 @@ func NewSlackService(
 	slackAuthRepo persistence.SlackAuthStore,
 ) *SlackService {
 	return &SlackService{
+
 		settingsRepo:         settingsRepo,
 		projectRepo:          projectRepo,
 		llmConfigRepo:        llmConfigRepo,
@@ -174,9 +176,8 @@ func NewSlackService(
 		slackUserProjectRepo: slackUserProjectRepo,
 		slackTaskContextRepo: slackTaskContextRepo,
 		slackAuthRepo:        slackAuthRepo,
-		httpClient: &http.Client{
-			Timeout: 20 * time.Second,
-		},
+		httpClient:           httpclient.New(httpclient.MessagingTimeout),
+
 		oauthBaseURL:            defaultSlackAPIBaseURL,
 		uploadsDir:              "uploads",
 		userProjects:            make(map[string]string),

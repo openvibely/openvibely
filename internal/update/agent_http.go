@@ -11,7 +11,8 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-	"time"
+
+	"github.com/openvibely/openvibely/internal/httpclient"
 )
 
 type APIErrorEnvelope struct {
@@ -50,14 +51,16 @@ func NewAgentHTTPClient(rawURL, token string, supplied *http.Client) (*AgentHTTP
 			return nil, errors.New("agent unix URL must be an absolute socket path")
 		}
 		socket := u.Path
-		transport := &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-			return (&net.Dialer{}).DialContext(ctx, "unix", socket)
-		}}
-		supplied = &http.Client{Transport: transport, Timeout: 15 * time.Second}
+		transport := httpclient.NewDirectTransport()
+		transport.DialContext = func(ctx context.Context, _, _ string) (net.Conn, error) {
+			return httpclient.NewDialer().DialContext(ctx, "unix", socket)
+		}
+		supplied = httpclient.New(httpclient.UpdateTimeout)
+		supplied.Transport = transport
 		u, _ = url.Parse("http://openvibely-agent")
 	}
 	if supplied == nil {
-		supplied = &http.Client{Timeout: 15 * time.Second}
+		supplied = httpclient.New(httpclient.UpdateTimeout)
 	}
 	clone := *supplied
 	clone.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }

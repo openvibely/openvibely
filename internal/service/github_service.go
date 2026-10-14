@@ -23,6 +23,7 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/openvibely/openvibely/internal/applog"
+	"github.com/openvibely/openvibely/internal/httpclient"
 	"github.com/openvibely/openvibely/internal/httpretry"
 	"github.com/openvibely/openvibely/internal/persistence"
 	"golang.org/x/sync/errgroup"
@@ -231,23 +232,20 @@ type GitHubService struct {
 }
 
 func NewGitHubService(settingsRepo persistence.SettingsStore, appID, appSlug, appPrivateKey, projectRepoRoot string) *GitHubService {
+	client := httpclient.New(httpclient.GitHubTimeout)
+	client.CheckRedirect = func(_ *http.Request, _ []*http.Request) error { return errGitHubRedirectNotAllowed }
 	return &GitHubService{
 		settingsRepo:    settingsRepo,
 		appID:           strings.TrimSpace(appID),
 		appSlug:         strings.TrimSpace(appSlug),
 		appPrivateKey:   strings.TrimSpace(appPrivateKey),
 		projectRepoRoot: strings.TrimSpace(projectRepoRoot),
-		httpClient: &http.Client{
-			Timeout: 20 * time.Second,
-			CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
-				return errGitHubRedirectNotAllowed
-			},
-		},
-		retryPolicy: httpretry.DefaultPolicy(),
-		apiBaseURL:  defaultGitHubAPIBaseURL,
-		webBaseURL:  defaultGitHubWebBaseURL,
-		runGit:      defaultRunGit,
-		nowFn:       time.Now,
+		httpClient:      client,
+		retryPolicy:     httpretry.DefaultPolicy(),
+		apiBaseURL:      defaultGitHubAPIBaseURL,
+		webBaseURL:      defaultGitHubWebBaseURL,
+		runGit:          defaultRunGit,
+		nowFn:           time.Now,
 	}
 }
 

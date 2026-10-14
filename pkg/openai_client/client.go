@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/applog"
+	"github.com/openvibely/openvibely/internal/httpclient"
 	"github.com/openvibely/openvibely/internal/httpretry"
 	"github.com/openvibely/openvibely/internal/models"
 )
@@ -34,8 +35,6 @@ func catalogDefaultModel() string {
 }
 
 const (
-	defaultModelRequestTimeout = 10 * time.Minute
-
 	openAIOAuthClientID = "app_EMoamEEZ73f0CkXaXp7hrann"
 	// ChatGPT Codex backend requires this query parameter.
 	openAIOAuthClientVersion = "0.144.0"
@@ -56,21 +55,24 @@ var OpenAIChatGPTAPIBaseURL = "https://chatgpt.com/backend-api/codex/"
 // It is a variable so tests can override it.
 var OpenAIOAuthTokenURL = "https://auth.openai.com/oauth/token"
 
-var oauthHTTPClient = &http.Client{Timeout: 30 * time.Second}
+var oauthHTTPClient = httpclient.New(httpclient.OAuthTimeout)
 
-var defaultHTTPClient = &http.Client{
-	Timeout: defaultModelRequestTimeout,
-	Transport: &loggingRoundTripper{
-		base: &http.Transport{
-			MaxIdleConns:        100,
-			MaxIdleConnsPerHost: 100,
-			IdleConnTimeout:     90 * time.Second,
-		},
-	},
+var defaultHTTPClient = newDefaultHTTPClient()
+
+func newDefaultHTTPClient() *http.Client {
+	client := httpclient.NewModel(httpclient.NewDirectTransport())
+	client.Transport = &loggingRoundTripper{base: client.Transport}
+	return client
 }
 
 type loggingRoundTripper struct {
 	base http.RoundTripper
+}
+
+func (rt *loggingRoundTripper) CloseIdleConnections() {
+	if closer, ok := rt.base.(interface{ CloseIdleConnections() }); ok {
+		closer.CloseIdleConnections()
+	}
 }
 
 func (rt *loggingRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -89,6 +91,7 @@ func (rt *loggingRoundTripper) RoundTrip(req *http.Request) (*http.Response, err
 	}
 
 	body, readErr := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
 	if readErr != nil {
 		applog.Infof("[openai-client] non-2xx response status=%d method=%s url=%s body_read_error=%v", resp.StatusCode, req.Method, req.URL.String(), readErr)
 		resp.Body = io.NopCloser(bytes.NewReader(nil))
@@ -640,7 +643,6 @@ func (c *Client) Send(ctx context.Context, prompt string, opts *SendOptions) (*R
 	}
 
 	result, err := httpretry.DoStreamTurn(ctx, httpretry.StreamTurnPolicy{
-		RetryConnectionFailuresWithoutBudget: true,
 		OnRetry: func(event httpretry.RetryEvent) {
 			if httpretry.IsConnectionSetupFailure(event.Err) {
 				applog.Infof("[openai-client] reconnecting responses stream in %v: %v", event.Delay, event.Err)
