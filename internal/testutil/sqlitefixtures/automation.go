@@ -3,6 +3,7 @@ package sqlitefixtures
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"time"
 
 	"github.com/openvibely/openvibely/internal/persistence/sqlite"
@@ -301,4 +302,88 @@ func (f *fixtures) CountAutomationResourceLinks(ctx context.Context, kind, id st
 }
 func (f *fixtures) AutomationContextForWorkItem(ctx context.Context, projectID, key string) (models.AutomationContext, error) {
 	return sqlite.NewAutomationRepo(f.db).BindingsForWorkItemKey(ctx, projectID, key)
+}
+
+func (f *fixtures) EditPendingAutomationTask(ctx context.Context, id, agentID string, prompt *string) error {
+	var updated string
+	return f.db.QueryRowContext(ctx, `UPDATE tasks SET agent_id=?, prompt=COALESCE(?,prompt) WHERE id=? AND status='pending' RETURNING id`, agentID, prompt, id).Scan(&updated)
+}
+func (f *fixtures) ExpireAutomationDispatch(ctx context.Context, id string, at time.Time) error {
+	tx, err := f.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err = tx.ExecContext(ctx, `UPDATE automation_dispatch_outbox SET claim_expires_at=? WHERE id=?`, at, id); err != nil {
+		return err
+	}
+	if _, err = tx.ExecContext(ctx, `UPDATE automation_task_run_reservations SET lease_expires_at=? WHERE dispatch_id=?`, at, id); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+func (f *fixtures) InspectAutomationDispatch(ctx context.Context, id string) (storefixture.AutomationDispatchOutcome, error) {
+	var s storefixture.AutomationDispatchOutcome
+	err := f.db.QueryRowContext(ctx, `SELECT d.status,COALESCE(d.execution_id,''),t.status,COALESCE(e.status,''),i.status,
+ COALESCE((SELECT status FROM automation_activities WHERE invocation_id=i.id AND activity_key='dispatch:'||d.id||':execute'),''),
+ COALESCE(e.error_message,''),COALESCE(e.prompt_sent,''),COALESCE(e.agent_config_id,''),
+ (SELECT COUNT(*) FROM automation_task_run_reservations WHERE dispatch_id=d.id),
+ (SELECT COUNT(*) FROM executions WHERE dispatch_id=d.id),
+ (SELECT COUNT(*) FROM automation_activities WHERE activity_key='dispatch:'||d.id||':execute'),
+ (SELECT COUNT(DISTINCT a.id) FROM automation_activities a JOIN automation_activity_resources ar ON ar.activity_id=a.id WHERE ar.resource_type='execution' AND ar.resource_id=e.id),
+ e.completed_at IS NOT NULL,i.completed_at IS NOT NULL,d.next_attempt_at
+ FROM automation_dispatch_outbox d JOIN tasks t ON t.id=d.task_id JOIN automation_invocations i ON i.id=d.invocation_id LEFT JOIN executions e ON e.id=d.execution_id WHERE d.id=?`, id).Scan(&s.Status, &s.ExecutionID, &s.TaskStatus, &s.ExecutionStatus, &s.InvocationStatus, &s.ActivityStatus, &s.ExecutionError, &s.PromptSent, &s.AgentConfigID, &s.Reservations, &s.Executions, &s.Activities, &s.ExecutionActivities, &s.ExecutionCompleted, &s.InvocationCompleted, &s.NextAttemptAt)
+	return s, err
+}
+
+func (f *fixtures) SeedAutomationTriggerOwnership(ctx context.Context, n models.AutomationNode, scheduleID, taskID string) error {
+	tx, err := f.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for _, r := range []struct{ kind, id string }{{"schedule", scheduleID}, {"task", taskID}} {
+		if _, err = tx.ExecContext(ctx, `INSERT INTO automation_definition_resources(project_id,automation_id,version_id,node_id,resource_type,resource_id,relation) VALUES(?,?,?,?,?,?,'owned')`, n.ProjectID, n.AutomationID, n.VersionID, n.ID, r.kind, r.id); err != nil {
+			return err
+		}
+	}
+	if _, err = tx.ExecContext(ctx, `INSERT INTO automation_trigger_owners(schedule_id,project_id,automation_id,version_id,node_id,ownership_state) VALUES(?,?,?,?,?,'active')`, scheduleID, n.ProjectID, n.AutomationID, n.VersionID, n.ID); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+func (f *fixtures) AutomationDispatchOrder(ctx context.Context, ids []string) ([]string, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	args := make([]any, len(ids))
+	for i, id := range ids {
+		args[i] = id
+	}
+	rows, err := f.db.QueryContext(ctx, `SELECT id FROM automation_dispatch_outbox WHERE id IN (`+strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")+`) ORDER BY created_at,id`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var result []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		result = append(result, id)
+	}
+	return result, rows.Err()
+}
+func (f *fixtures) CountTaskAutomationReservations(ctx context.Context, ids []string) (int, error) {
+	if len(ids) == 0 {
+		return 0, nil
+	}
+	args := make([]any, len(ids))
+	for i, id := range ids {
+		args[i] = id
+	}
+	var n int
+	err := f.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM automation_task_run_reservations WHERE task_id IN (`+strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")+`)`, args...).Scan(&n)
+	return n, err
 }

@@ -27,6 +27,12 @@ func (c *ioCounter) Snapshot() storefixture.IOStats {
 	stats := storefixture.IOStats{Requests: len(statements), ReadTextBytes: c.counter.SelectedTextBytes()}
 	for _, statement := range statements {
 		q := strings.ToLower(strings.Join(strings.Fields(statement), " "))
+		if strings.Contains(q, "from tasks") {
+			stats.TaskReads++
+			if strings.HasPrefix(q, "select id, status from tasks") {
+				stats.TaskActionReads++
+			}
+		}
 		if q == "select exists(select 1 from automations where project_id = ? and id = ?)" {
 			stats.AutomationIdentityReads++
 		}

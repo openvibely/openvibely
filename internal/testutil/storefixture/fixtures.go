@@ -62,6 +62,14 @@ type PendingTask struct {
 	Category                     models.TaskCategory
 }
 type Fixtures interface {
+	SeedAutomationTriggerOwnership(context.Context, models.AutomationNode, string, string) error
+	AutomationDispatchOrder(context.Context, []string) ([]string, error)
+	CountTaskAutomationReservations(context.Context, []string) (int, error)
+
+	EditPendingAutomationTask(context.Context, string, string, *string) error
+	ExpireAutomationDispatch(context.Context, string, time.Time) error
+	InspectAutomationDispatch(context.Context, string) (AutomationDispatchOutcome, error)
+
 	// Projection inventories count exact durable state without history pagination.
 	CountAutomationActivities(context.Context, string, string, models.AutomationActivityStatus) (int, error)
 	CountAutomationWorkItems(context.Context, string, string) (int, error)
@@ -249,6 +257,7 @@ type Fixtures interface {
 // SQLite counts executed statements; other backends must count their database
 // requests, including requests made inside a single store method.
 type IOStats struct {
+	TaskReads, TaskActionReads                                                                                         int
 	AutomationIdentityReads, AutomationGraphReads, AutomationDefinitionNodeReads                                       int
 	AutomationPageReads, AutomationDirectReads, AutomationSelectedMetricsReads                                         int
 	AutomationHealthWrites, AgentReferenceReads, AgentDetailReads                                                      int
@@ -326,3 +335,12 @@ const (
 	AnalyticsAgentEvidence AnalyticsWorkload = "agent_evidence"
 	AnalyticsOverview      AnalyticsWorkload = "overview"
 )
+
+// AutomationDispatchOutcome observes dispatch ownership and execution state in one backend read.
+type AutomationDispatchOutcome struct {
+	Status, ExecutionID, TaskStatus, ExecutionStatus, InvocationStatus, ActivityStatus string
+	ExecutionError, PromptSent, AgentConfigID                                          string
+	Reservations, Executions, Activities, ExecutionActivities                          int
+	ExecutionCompleted, InvocationCompleted                                            bool
+	NextAttemptAt                                                                      time.Time
+}
