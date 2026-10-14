@@ -436,10 +436,10 @@ func TestMergeBranchRecordsAppCreatedMergeCommitStat(t *testing.T) {
 
 func TestTaskCommitStatUpsertDoesNotDoubleCountDuplicateCommit(t *testing.T) {
 	ctx := context.Background()
-	db := teststores.NewDB(t)
-	projectRepo := teststores.Of(db).Projects
-	taskRepo := teststores.Of(db).Tasks
-	statRepo := teststores.Of(db).TaskCommitStats
+	env := teststores.New(t)
+	projectRepo := env.Projects
+	taskRepo := env.Tasks
+	statRepo := env.TaskCommitStats
 
 	project := &models.Project{Name: "Duplicate Stats"}
 	if err := projectRepo.Create(ctx, project); err != nil {
@@ -463,7 +463,7 @@ func TestTaskCommitStatUpsertDoesNotDoubleCountDuplicateCommit(t *testing.T) {
 		t.Fatalf("second upsert: %v", err)
 	}
 
-	svc := NewUpcomingService(teststores.Of(db).Upcoming)
+	svc := NewUpcomingService(env.Upcoming)
 	svc.SetTaskCommitStatRepo(statRepo)
 	history, err := svc.GenerateHistory(ctx, project.ID, models.TimeRangeWeek)
 	if err != nil {

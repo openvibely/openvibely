@@ -154,10 +154,10 @@ func TestAgentInspectorListAgentsUsesCompactProjection(t *testing.T) {
 }
 
 func BenchmarkLifecycleAgentListProjection(b *testing.B) {
-	db := teststores.NewDB(b)
-	repo := teststores.Of(db).Agents
+	env := teststores.New(b)
+	repo := env.Agents
 	ctx := context.Background()
-	teststores.ClearAgents(b, teststores.Of(db).Agents)
+	teststores.ClearAgents(b, env.Agents)
 	for i := 0; i < 100; i++ {
 		agent := lifecycleBenchmarkAgent(i)
 		if err := repo.Create(ctx, agent); err != nil {
@@ -256,8 +256,8 @@ func appendIndexHeader(t *testing.T, path, header string) {
 }
 
 func TestCatalogSkillResolver_UsesOwningAgentSkill(t *testing.T) {
-	db := teststores.NewDB(t)
-	agents := teststores.Of(db).Agents
+	env := teststores.New(t)
+	agents := env.Agents
 	ctx := context.Background()
 	a := &models.Agent{Name: "Router", Key: "router", Enabled: true, SelectableAsPrimary: true}
 	if err := agents.Create(ctx, a); err != nil {
@@ -280,8 +280,8 @@ func TestCatalogSkillResolver_UsesOwningAgentSkill(t *testing.T) {
 }
 
 func TestCatalogSkillResolver_DoesNotFallbackToTaskCatalogForOwnedHook(t *testing.T) {
-	db := teststores.NewDB(t)
-	agents := teststores.Of(db).Agents
+	env := teststores.New(t)
+	agents := env.Agents
 	ctx := context.Background()
 	owner := &models.Agent{Name: "Router", Key: "router", Enabled: true, SelectableAsPrimary: true}
 	if err := agents.Create(ctx, owner); err != nil {

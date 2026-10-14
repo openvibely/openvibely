@@ -4,7 +4,11 @@ package sqlitefixtures
 import (
 	"context"
 	"database/sql"
+	"strings"
 	"time"
+
+	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 
 	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/testutil/storefixture"
@@ -43,4 +47,50 @@ func (f *fixtures) CountAutomations(ctx context.Context) (int, error) {
 	var count int
 	err := f.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM automations`).Scan(&count)
 	return count, err
+}
+
+func (f *fixtures) ClaimScheduleOccurrence(ctx context.Context, schedule models.Schedule, now time.Time, next *time.Time) (bool, error) {
+	return sqlite.NewScheduleRepo(f.db).ClaimCalendarOccurrence(ctx, schedule, now, next)
+}
+func (f *fixtures) SetScheduleRunTimes(ctx context.Context, id string, last time.Time, next *time.Time) error {
+	return sqlite.NewScheduleRepo(f.db).MarkRan(ctx, id, last, next)
+}
+func (f *fixtures) PauseScheduleAfterEnable(ctx context.Context, id string) error {
+	// SQLite trigger definitions cannot bind parameters. Quote the fixture identifier as a literal.
+	_, err := f.db.ExecContext(ctx, `CREATE TRIGGER pause_schedule_after_enable
+ AFTER UPDATE OF enabled ON schedules WHEN NEW.id = '`+strings.ReplaceAll(id, "'", "''")+`' AND NEW.enabled = 1
+ BEGIN UPDATE schedules SET enabled = 0 WHERE id = NEW.id; END`)
+	return err
+}
+
+func (f *fixtures) ExecutionOutputState(ctx context.Context, id string) (storefixture.ExecutionOutputState, error) {
+	var state storefixture.ExecutionOutputState
+	err := f.db.QueryRowContext(ctx, `SELECT output, (SELECT COUNT(*) FROM execution_output_chunks WHERE execution_id = executions.id) FROM executions WHERE id = ?`, id).Scan(&state.Materialized, &state.PendingSegments)
+	if err == sql.ErrNoRows {
+		err = persistence.ErrNotFound
+	}
+	return state, err
+}
+
+func (f *fixtures) SetLegacyAgentName(ctx context.Context, id, name string) error {
+	result, err := f.db.ExecContext(ctx, `UPDATE agents SET name = ? WHERE id = ?`, name, id)
+	if err != nil {
+		return err
+	}
+	n, err := result.RowsAffected()
+	if err == nil && n == 0 {
+		return persistence.ErrNotFound
+	}
+	return err
+}
+
+func (f *fixtures) SeedChannelTarget(ctx context.Context, target models.ChannelTarget) error {
+	return sqlite.NewChannelTargetRepo(f.db).Upsert(ctx, target)
+}
+func (f *fixtures) ChannelMessageSends(ctx context.Context, projectID string) ([]models.ChannelMessageSend, error) {
+	return sqlite.NewChannelTargetRepo(f.db).ListSendsByProject(ctx, projectID)
+}
+
+func (f *fixtures) ProducedCommitStats(ctx context.Context, projectID string, since time.Time) ([]models.TaskCommitStat, error) {
+	return sqlite.NewTaskCommitStatRepo(f.db).ListProducedCommitStats(ctx, projectID, since)
 }

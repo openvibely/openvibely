@@ -110,11 +110,11 @@ func automationNodeByKey(t *testing.T, definition *models.AutomationDefinition, 
 
 func TestGitHubIssueRuntimeAssignedIssuePaginationPresenceAware(t *testing.T) {
 	ctx := context.Background()
-	db := teststores.NewDB(t)
-	projectRepo := teststores.Of(db).Projects
+	env := teststores.New(t)
+	projectRepo := env.Projects
 	project := models.Project{Name: "GitHub pagination runtime", RepoURL: "https://github.com/openvibely/openvibely"}
 	require.NoError(t, projectRepo.Create(ctx, &project))
-	authRepo := teststores.Of(db).GitHubAuth
+	authRepo := env.GitHubAuth
 	require.NoError(t, authRepo.UpsertAuthorizedActor(ctx, &models.GitHubAuthorizedActor{GitHubLogin: "openvibely"}))
 
 	issues := make([]GitHubIssue, 101)
@@ -202,8 +202,8 @@ func TestGitHubIssueRuntimeAssignedIssuePaginationPresenceAware(t *testing.T) {
 
 func TestGitHubIssueRuntimeMyAssignedIssuesValidatesPaginationBeforeRepoResolution(t *testing.T) {
 	ctx := context.Background()
-	db := teststores.NewDB(t)
-	projectRepo := teststores.Of(db).Projects
+	env := teststores.New(t)
+	projectRepo := env.Projects
 	var providerCalls atomic.Int32
 	provider := &fakeGitHubIssueRuntimeProvider{
 		listMyIssuesFn: func(context.Context, *GitHubRepoRef) (*GitHubAuthenticatedUser, []GitHubIssue, error) {

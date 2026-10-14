@@ -8,7 +8,6 @@ import (
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
-	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/openvibely/openvibely/internal/testutil/teststores"
 	"github.com/stretchr/testify/require"
@@ -57,7 +56,7 @@ func TestSchedulerHonorsCalendarSkipsAndPauseBeforeDispatch(t *testing.T) {
 }
 
 func TestScheduleCalendarActionRejectsMalformedSelections(t *testing.T) {
-	repo := teststores.Of(teststores.NewDB(t)).Schedules
+	repo := teststores.New(t).Schedules
 	for _, action := range []models.ScheduleCalendarAction{
 		{Action: "pause"}, {Action: "skip"}, {Action: "unexpected"},
 		{Action: "skip", Skips: []models.ScheduleSkip{{StartAt: 10, EndAt: 9}}},
@@ -118,7 +117,7 @@ func TestSchedulerRecoversAdmissionBeforeWorkerSubmission(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
 	schedule := &models.Schedule{TaskID: task.ID, RunAt: now, RepeatType: models.RepeatOnce, RepeatInterval: 1, Enabled: true, ClearContextOnStart: true}
 	require.NoError(t, repo.Create(ctx, schedule))
-	claimed, err := repo.(*sqlite.ScheduleRepo).ClaimCalendarOccurrence(ctx, *schedule, now, nil)
+	claimed, err := storeEnv.Fixtures.ClaimScheduleOccurrence(ctx, *schedule, now, nil)
 	require.NoError(t, err)
 	require.True(t, claimed)
 	// Simulate losing the old scheduler and its in-memory worker queue.
@@ -161,7 +160,7 @@ func TestCalendarWorkerRestartExecutesReservedRun(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
 	schedule := &models.Schedule{TaskID: task.ID, RunAt: now, RepeatType: models.RepeatOnce, RepeatInterval: 1, Enabled: true, ClearContextOnStart: true}
 	require.NoError(t, schedules.Create(ctx, schedule))
-	admitted, err := schedules.(*sqlite.ScheduleRepo).ClaimCalendarOccurrence(ctx, *schedule, now, nil)
+	admitted, err := storeEnv.Fixtures.ClaimScheduleOccurrence(ctx, *schedule, now, nil)
 	require.NoError(t, err)
 	require.True(t, admitted)
 	before, err := executions.ListByTask(ctx, task.ID)
@@ -213,7 +212,7 @@ func TestCalendarPlannerAdmissionRecovery(t *testing.T) {
 			now := time.Now().UTC().Truncate(time.Second)
 			schedule := &models.Schedule{TaskID: parent.ID, RunAt: now, RepeatType: models.RepeatOnce, RepeatInterval: 1, Enabled: true, ClearContextOnStart: true}
 			require.NoError(t, schedules.Create(ctx, schedule))
-			claimed, err := schedules.(*sqlite.ScheduleRepo).ClaimCalendarOccurrence(ctx, *schedule, now, nil)
+			claimed, err := storeEnv.Fixtures.ClaimScheduleOccurrence(ctx, *schedule, now, nil)
 			require.NoError(t, err)
 			require.True(t, claimed)
 			// The persisted flag wins over stale handoff metadata.
@@ -267,7 +266,7 @@ func TestCalendarPlannerCancelledHandoff(t *testing.T) {
 			now := time.Now().UTC().Truncate(time.Second)
 			schedule := &models.Schedule{TaskID: parent.ID, RunAt: now, RepeatType: models.RepeatOnce, RepeatInterval: 1, Enabled: true, ClearContextOnStart: true}
 			require.NoError(t, schedules.Create(ctx, schedule))
-			claimed, err := schedules.(*sqlite.ScheduleRepo).ClaimCalendarOccurrence(ctx, *schedule, now, nil)
+			claimed, err := storeEnv.Fixtures.ClaimScheduleOccurrence(ctx, *schedule, now, nil)
 			require.NoError(t, err)
 			require.True(t, claimed)
 			stale, err := schedules.ListCalendarAdmissions(ctx)
@@ -332,7 +331,7 @@ func TestCalendarDeletedScheduleCannotRecoverPlanner(t *testing.T) {
 			now := time.Now().UTC().Truncate(time.Second)
 			schedule := &models.Schedule{TaskID: parent.ID, RunAt: now, RepeatType: models.RepeatOnce, RepeatInterval: 1, Enabled: true, ClearContextOnStart: true}
 			require.NoError(t, schedules.Create(ctx, schedule))
-			claimed, err := schedules.(*sqlite.ScheduleRepo).ClaimCalendarOccurrence(ctx, *schedule, now, nil)
+			claimed, err := storeEnv.Fixtures.ClaimScheduleOccurrence(ctx, *schedule, now, nil)
 			require.NoError(t, err)
 			require.True(t, claimed)
 			require.NoError(t, swarm.StartPlannerForScheduledRun(ctx, parent.ID, true))
@@ -387,7 +386,7 @@ func TestCalendarActiveRecoveryPreservesParentAdmission(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
 	schedule := &models.Schedule{TaskID: parent.ID, RunAt: now, RepeatType: models.RepeatOnce, RepeatInterval: 1, Enabled: true, ClearContextOnStart: true}
 	require.NoError(t, schedules.Create(ctx, schedule))
-	claimed, err := schedules.(*sqlite.ScheduleRepo).ClaimCalendarOccurrence(ctx, *schedule, now, nil)
+	claimed, err := storeEnv.Fixtures.ClaimScheduleOccurrence(ctx, *schedule, now, nil)
 	require.NoError(t, err)
 	require.True(t, claimed)
 	scheduler := NewSchedulerService(schedules, tasks, worker)

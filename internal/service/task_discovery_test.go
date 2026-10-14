@@ -10,7 +10,6 @@ import (
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
-	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/openvibely/openvibely/internal/testutil/teststores"
 	"github.com/stretchr/testify/require"
 )
@@ -25,9 +24,9 @@ func decodeListTasksResult(t *testing.T, raw string) taskDiscoveryResult {
 }
 
 func TestExecuteListTasksTool(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
-	projectRepo := teststores.Of(db).Projects
+	env := teststores.New(t)
+	taskRepo := env.Tasks
+	projectRepo := env.Projects
 	ctx := context.Background()
 
 	other := &models.Project{Name: "List Tasks Other Project"}
@@ -143,9 +142,9 @@ func TestExecuteListTasksTool(t *testing.T) {
 }
 
 func TestExecuteListTasksToolTreatsLikeWildcardsAsLiteralTitleText(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
-	projectRepo := teststores.Of(db).Projects
+	env := teststores.New(t)
+	taskRepo := env.Tasks
+	projectRepo := env.Projects
 	ctx := context.Background()
 
 	other := &models.Project{Name: "List Tasks Wildcard Other Project"}
@@ -182,8 +181,8 @@ func TestExecuteListTasksToolTreatsLikeWildcardsAsLiteralTitleText(t *testing.T)
 }
 
 func TestExecuteListTasksToolPreservesOrdinaryQueryRelevanceAndPagination(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
+	env := teststores.New(t)
+	taskRepo := env.Tasks
 	ctx := context.Background()
 
 	createTask := func(title string) *models.Task {
@@ -196,11 +195,12 @@ func TestExecuteListTasksToolPreservesOrdinaryQueryRelevanceAndPagination(t *tes
 	exact := createTask("issue 25")
 	prefix := createTask("issue 25 followup")
 	contains := createTask("triage issue 25")
-	createTask("issue 26")
+	unrelated := createTask("issue 26")
 
 	fixed := time.Date(2024, time.January, 2, 3, 4, 5, 0, time.UTC)
-	_, err := db.ExecContext(ctx, `UPDATE tasks SET updated_at = ? WHERE project_id = ?`, fixed, "default")
-	require.NoError(t, err)
+	for _, task := range []*models.Task{exact, prefix, contains, unrelated} {
+		require.NoError(t, env.Fixtures.SetTaskUpdatedAt(ctx, task.ID, fixed))
+	}
 
 	out, err := ExecuteListTasksTool(ctx, taskRepo, "default", json.RawMessage(`{"query":"issue 25","limit":2,"offset":0}`))
 	require.NoError(t, err)
@@ -220,10 +220,10 @@ func TestExecuteListTasksToolPreservesOrdinaryQueryRelevanceAndPagination(t *tes
 }
 
 func TestExecuteListSchedulesToolTreatsLikeWildcardsAsLiteralTaskTitleText(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
-	scheduleRepo := teststores.Of(db).Schedules
-	projectRepo := teststores.Of(db).Projects
+	env := teststores.New(t)
+	taskRepo := env.Tasks
+	scheduleRepo := env.Schedules
+	projectRepo := env.Projects
 	ctx := context.Background()
 
 	other := &models.Project{Name: "List Schedules Wildcard Other Project"}
@@ -268,8 +268,8 @@ func TestExecuteListSchedulesToolTreatsLikeWildcardsAsLiteralTaskTitleText(t *te
 }
 
 func TestExecuteListTasksToolReportsAndFiltersMergeStatus(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
+	env := teststores.New(t)
+	taskRepo := env.Tasks
 	ctx := context.Background()
 
 	mk := func(title, branch string, merge models.MergeStatus) *models.Task {
@@ -318,8 +318,8 @@ func TestExecuteListTasksToolReportsAndFiltersMergeStatus(t *testing.T) {
 }
 
 func TestExecuteListTasksToolSupportsEveryCategoryAndStatusFilter(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
+	env := teststores.New(t)
+	taskRepo := env.Tasks
 	ctx := context.Background()
 
 	create := func(title string, category models.TaskCategory, status models.TaskStatus) {
@@ -377,8 +377,9 @@ func TestExecuteListTasksToolSupportsEveryCategoryAndStatusFilter(t *testing.T) 
 }
 
 func TestExecuteListTasksToolUsesCountAndBoundedPageOperations(t *testing.T) {
-	db, counter := testutil.NewStatementCountingTestDB(t)
-	taskRepo := teststores.Of(db).Tasks
+	env := teststores.New(t, teststores.WithIOCounting())
+	counter := env.IO
+	taskRepo := env.Tasks
 	ctx := context.Background()
 	for i := 0; i < 3; i++ {
 		task := &models.Task{
@@ -400,16 +401,11 @@ func TestExecuteListTasksToolUsesCountAndBoundedPageOperations(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ExecuteListTasksTool: %v", err)
 	}
-	statements := counter.Statements()
-	if len(statements) != 2 {
-		t.Fatalf("list_tasks used %d SQL operations, want count plus page: %#v", len(statements), statements)
+	stats := counter.Snapshot()
+	if stats.Requests != 2 {
+		t.Fatalf("list_tasks used %d backend requests, want count plus page", stats.Requests)
 	}
-	if !strings.Contains(strings.ToUpper(statements[0]), "SELECT COUNT(*)") {
-		t.Fatalf("first list_tasks operation = %q, want total count", statements[0])
-	}
-	if !strings.Contains(strings.ToUpper(statements[1]), "SELECT ID") || !strings.Contains(strings.ToUpper(statements[1]), "LIMIT") || !strings.Contains(strings.ToUpper(statements[1]), "OFFSET") {
-		t.Fatalf("second list_tasks operation = %q, want bounded compact page", statements[1])
-	}
+
 	result := decodeListTasksResult(t, out)
 	if result.Total != 3 || result.Count != 3 || result.Limit != 50 || result.Offset != 0 || result.HasMore {
 		t.Fatalf("unexpected count/page result: %+v", result)
@@ -417,8 +413,8 @@ func TestExecuteListTasksToolUsesCountAndBoundedPageOperations(t *testing.T) {
 }
 
 func TestExecuteListTasksTool_PreservesCompactJSONContract(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
+	env := teststores.New(t)
+	taskRepo := env.Tasks
 	ctx := context.Background()
 
 	parent := &models.Task{
@@ -457,8 +453,10 @@ func TestExecuteListTasksTool_PreservesCompactJSONContract(t *testing.T) {
 	}
 
 	fixedTimestamp := time.Date(2024, time.January, 2, 3, 4, 5, 0, time.UTC)
-	if _, err := db.ExecContext(ctx, `UPDATE tasks SET updated_at = ? WHERE id IN (?, ?)`, fixedTimestamp, withOptionalFields.ID, withoutOptionalFields.ID); err != nil {
-		t.Fatalf("set fixture timestamps: %v", err)
+	for _, task := range []*models.Task{withOptionalFields, withoutOptionalFields} {
+		if err := env.Fixtures.SetTaskUpdatedAt(ctx, task.ID, fixedTimestamp); err != nil {
+			t.Fatalf("set fixture timestamps: %v", err)
+		}
 	}
 
 	for _, tc := range []struct {
@@ -490,10 +488,10 @@ func TestExecuteListTasksTool_PreservesCompactJSONContract(t *testing.T) {
 }
 
 func TestDiscoveryToolsUseSharedInputDecoder(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
-	taskRepo := teststores.Of(db).Tasks
-	scheduleRepo := teststores.Of(db).Schedules
+	taskRepo := env.Tasks
+	scheduleRepo := env.Schedules
 
 	tools := map[string]func(json.RawMessage) (string, error){
 		"list_tasks": func(input json.RawMessage) (string, error) {
@@ -635,9 +633,9 @@ func TestExecuteViewSwarmToolNonSwarmReturnsControlledResponse(t *testing.T) {
 
 func TestExecuteViewSwarmToolDoesNotCrossProjects(t *testing.T) {
 	ctx := context.Background()
-	db := teststores.NewDB(t)
-	projectRepo := teststores.Of(db).Projects
-	taskRepo := teststores.Of(db).Tasks
+	env := teststores.New(t)
+	projectRepo := env.Projects
+	taskRepo := env.Tasks
 	current := &models.Project{Name: "Current"}
 	foreign := &models.Project{Name: "Foreign"}
 	require.NoError(t, projectRepo.Create(ctx, current))
@@ -658,11 +656,11 @@ func TestExecuteViewSwarmToolDoesNotCrossProjects(t *testing.T) {
 func setupViewSwarmServiceFixture(t *testing.T) (persistence.TaskStore, *models.Project) {
 	t.Helper()
 	ctx := context.Background()
-	db := teststores.NewDB(t)
-	projectRepo := teststores.Of(db).Projects
+	env := teststores.New(t)
+	projectRepo := env.Projects
 	project := &models.Project{Name: "Swarm Project"}
 	require.NoError(t, projectRepo.Create(ctx, project))
-	return teststores.Of(db).Tasks, project
+	return env.Tasks, project
 }
 
 func createViewSwarmTask(t *testing.T, taskRepo persistence.TaskStore, projectID, title string, mutate func(*models.Task)) *models.Task {

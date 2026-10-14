@@ -22,7 +22,6 @@ import (
 	llmopenai "github.com/openvibely/openvibely/internal/llm/openai"
 	"github.com/openvibely/openvibely/internal/llm/stream"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/openvibely/openvibely/internal/testutil/teststores"
 	openaiclient "github.com/openvibely/openvibely/pkg/openai_client"
@@ -2289,7 +2288,7 @@ func TestLocalCompactionActivityPersistsAcrossProviderRetry(t *testing.T) {
 			if err := repo.Create(ctx, execution); err != nil {
 				t.Fatal(err)
 			}
-			if err := repo.(*sqlite.ExecutionRepo).UpdateOutput(ctx, execution.ID, "[Thinking]\nInterrupted reasoning"); err != nil {
+			if err := repo.FinalizeOutput(ctx, execution.ID, "[Thinking]\nInterrupted reasoning"); err != nil {
 				t.Fatal(err)
 			}
 			svc := &LLMService{execRepo: repo}

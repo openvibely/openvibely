@@ -7957,7 +7957,7 @@ func TestProcessStreamingResponse_TaskFollowupRateLimitFailurePreservesHistory(t
 		ex.IsFollowup = true
 	})
 	streamedPrefix := "Investigating prior changes..."
-	if err := h.execRepo.(*sqlite.ExecutionRepo).UpdateOutput(ctx, failedFollowup.ID, streamedPrefix); err != nil {
+	if err := h.execRepo.FinalizeOutput(ctx, failedFollowup.ID, streamedPrefix); err != nil {
 		t.Fatalf("seed streamed output: %v", err)
 	}
 

@@ -59,3 +59,38 @@ func TestFixturesShareStoreStateWithoutApplyingTransitions(t *testing.T) {
 		t.Fatalf("test databases are not isolated: %v, %v", absent, err)
 	}
 }
+
+func TestIOCounterMeasuresBackendRequestsWithinStoreCalls(t *testing.T) {
+	env := teststores.New(t, teststores.WithIOCounting())
+	ctx := context.Background()
+	task := models.Task{ProjectID: "default", Title: "Measured task", Category: models.CategoryBacklog, Status: models.StatusPending}
+	env.IO.Reset()
+	env.IO.SetEnabled(true)
+	if err := env.Tasks.Create(ctx, &task); err != nil {
+		t.Fatal(err)
+	}
+	env.IO.SetEnabled(false)
+	if got := env.IO.Snapshot(); got.Requests <= 1 {
+		t.Fatalf("counter must capture the multiple backend requests within Create, got %+v", got)
+	}
+	env.IO.Reset()
+	env.IO.SetEnabled(true)
+	if _, err := env.Tasks.GetByID(ctx, task.ID); err != nil {
+		t.Fatal(err)
+	}
+	env.IO.SetEnabled(false)
+	measured := env.IO.Snapshot()
+	if measured.Requests != 1 || measured.ReadTextBytes < len(task.Title) {
+		t.Fatalf("expected one actual read with measured payload, got %+v", measured)
+	}
+	if _, err := env.Tasks.GetByID(ctx, task.ID); err != nil {
+		t.Fatal(err)
+	}
+	if got := env.IO.Snapshot(); got != measured {
+		t.Fatalf("disabled counter changed: %+v", got)
+	}
+	env.IO.Reset()
+	if got := env.IO.Snapshot(); got.Requests != 0 || got.ReadTextBytes != 0 {
+		t.Fatalf("reset retained measurements: %+v", got)
+	}
+}

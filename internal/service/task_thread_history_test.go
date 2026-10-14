@@ -16,8 +16,8 @@ import (
 
 func TestLoadBoundedTaskThreadExecutionsHandlesInvalidInputs(t *testing.T) {
 	ctx := context.Background()
-	db := teststores.NewDB(t)
-	execRepo := teststores.Of(db).Executions
+	env := teststores.New(t)
+	execRepo := env.Executions
 	task := &models.Task{ID: "task-history-invalid"}
 
 	for _, tt := range []struct {

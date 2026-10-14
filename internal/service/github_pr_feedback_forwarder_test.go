@@ -82,8 +82,8 @@ func (p *synchronizedPRFeedbackProvider) ListPullRequestFeedback(ctx context.Con
 
 func TestGitHubPRFeedbackForwarderResolvesPATIdentityThroughEnterpriseEndpoint(t *testing.T) {
 	ctx := context.Background()
-	db := teststores.NewDB(t)
-	settingsRepo := teststores.Of(db).Settings
+	env := teststores.New(t)
+	settingsRepo := env.Settings
 	if err := settingsRepo.Set(ctx, GitHubSettingPAT, "enterprise-token"); err != nil {
 		t.Fatalf("set PAT: %v", err)
 	}
@@ -114,9 +114,9 @@ func TestGitHubPRFeedbackForwarderResolvesPATIdentityThroughEnterpriseEndpoint(t
 	}))
 	defer enterpriseServer.Close()
 
-	projectRepo := teststores.Of(db).Projects
-	taskRepo := teststores.Of(db).Tasks
-	prRepo := teststores.Of(db).TaskPullRequests
+	projectRepo := env.Projects
+	taskRepo := env.Tasks
+	prRepo := env.TaskPullRequests
 	project := &models.Project{Name: "Enterprise Identity", RepoPath: t.TempDir(), RepoURL: "https://github.example.com/acme/widgets"}
 	if err := projectRepo.Create(ctx, project); err != nil {
 		t.Fatalf("create project: %v", err)
@@ -134,9 +134,9 @@ func TestGitHubPRFeedbackForwarderResolvesPATIdentityThroughEnterpriseEndpoint(t
 	forwarder := NewGitHubPRFeedbackForwarder(
 		github,
 		prRepo,
-		teststores.Of(db).GitHubPRFeedback,
-		teststores.Of(db).GitHubAuth,
-		teststores.Of(db).ThreadInputs,
+		env.GitHubPRFeedback,
+		env.GitHubAuth,
+		env.ThreadInputs,
 	)
 	_, err := forwarder.ForwardAuthorizedFeedback(ctx, project.ID, &GitHubRepoRef{
 		Owner:      "acme",
@@ -158,13 +158,13 @@ func TestGitHubPRFeedbackForwarderResolvesPATIdentityThroughEnterpriseEndpoint(t
 
 func TestGitHubPRFeedbackForwarderQueuesAuthorizedFeedbackOnce(t *testing.T) {
 	ctx := context.Background()
-	db := teststores.NewDB(t)
-	projectRepo := teststores.Of(db).Projects
-	taskRepo := teststores.Of(db).Tasks
-	prRepo := teststores.Of(db).TaskPullRequests
-	feedbackRepo := teststores.Of(db).GitHubPRFeedback
-	authRepo := teststores.Of(db).GitHubAuth
-	threadInputRepo := teststores.Of(db).ThreadInputs
+	env := teststores.New(t)
+	projectRepo := env.Projects
+	taskRepo := env.Tasks
+	prRepo := env.TaskPullRequests
+	feedbackRepo := env.GitHubPRFeedback
+	authRepo := env.GitHubAuth
+	threadInputRepo := env.ThreadInputs
 
 	project := &models.Project{ID: "proj-pr-feedback", Name: "PR Feedback", RepoPath: t.TempDir(), RepoURL: "https://github.com/openvibely/openvibely"}
 	if err := projectRepo.Create(ctx, project); err != nil {
@@ -334,13 +334,13 @@ func TestGitHubPRFeedbackRepoAtomicallyDeduplicatesMixedCaseRepository(t *testin
 
 func TestGitHubPRFeedbackForwarderDoesNotFetchPersistedPRFromSelectedRepository(t *testing.T) {
 	ctx := context.Background()
-	db := teststores.NewDB(t)
-	projectRepo := teststores.Of(db).Projects
-	taskRepo := teststores.Of(db).Tasks
-	prRepo := teststores.Of(db).TaskPullRequests
-	feedbackRepo := teststores.Of(db).GitHubPRFeedback
-	authRepo := teststores.Of(db).GitHubAuth
-	threadInputRepo := teststores.Of(db).ThreadInputs
+	env := teststores.New(t)
+	projectRepo := env.Projects
+	taskRepo := env.Tasks
+	prRepo := env.TaskPullRequests
+	feedbackRepo := env.GitHubPRFeedback
+	authRepo := env.GitHubAuth
+	threadInputRepo := env.ThreadInputs
 
 	project := &models.Project{ID: "proj-pr-repo-mismatch", Name: "PR Repo Mismatch", RepoPath: t.TempDir(), RepoURL: "https://github.com/example/repo-b"}
 	if err := projectRepo.Create(ctx, project); err != nil {
@@ -401,13 +401,13 @@ func TestParsePersistedGitHubPullRequestURLMatchesExplicitDefaultHTTPSPort(t *te
 
 func TestGitHubPRFeedbackForwarderUsesEnterpriseHostAndAPIEndpoint(t *testing.T) {
 	ctx := context.Background()
-	db := teststores.NewDB(t)
-	projectRepo := teststores.Of(db).Projects
-	taskRepo := teststores.Of(db).Tasks
-	prRepo := teststores.Of(db).TaskPullRequests
-	feedbackRepo := teststores.Of(db).GitHubPRFeedback
-	authRepo := teststores.Of(db).GitHubAuth
-	threadInputRepo := teststores.Of(db).ThreadInputs
+	env := teststores.New(t)
+	projectRepo := env.Projects
+	taskRepo := env.Tasks
+	prRepo := env.TaskPullRequests
+	feedbackRepo := env.GitHubPRFeedback
+	authRepo := env.GitHubAuth
+	threadInputRepo := env.ThreadInputs
 
 	project := &models.Project{ID: "proj-enterprise-pr-feedback", Name: "Enterprise PR Feedback", RepoPath: t.TempDir(), RepoURL: "https://github.example.com:8443/acme/widgets"}
 	if err := projectRepo.Create(ctx, project); err != nil {

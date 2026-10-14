@@ -1042,7 +1042,7 @@ func TestHandler_Chat_LoadsRunningExecutions(t *testing.T) {
 	}
 
 	// Simulate partial output being written
-	err = h.execRepo.(*sqlite.ExecutionRepo).UpdateOutput(ctx, exec.ID, "This is a partial response...")
+	err = h.execRepo.FinalizeOutput(ctx, exec.ID, "This is a partial response...")
 	if err != nil {
 		t.Fatalf("failed to update output: %v", err)
 	}
@@ -1658,7 +1658,7 @@ func TestHandler_ChatStreamSSE_EmitsDoneForCancelledExecution(t *testing.T) {
 		ex.Status = models.ExecCancelled
 		ex.PromptSent = "stopped chat"
 	})
-	require.NoError(t, h.execRepo.(*sqlite.ExecutionRepo).UpdateOutput(ctx, exec.ID, "partial output"))
+	require.NoError(t, h.execRepo.FinalizeOutput(ctx, exec.ID, "partial output"))
 
 	req := httptest.NewRequest(http.MethodGet, "/events/chat/"+exec.ID, nil)
 	rec := httptest.NewRecorder()
@@ -1682,7 +1682,7 @@ func TestHandler_ChatStop_CancelsActiveChatTurn(t *testing.T) {
 		ex.Status = models.ExecRunning
 		ex.PromptSent = "active chat"
 	})
-	require.NoError(t, h.execRepo.(*sqlite.ExecutionRepo).UpdateOutput(ctx, activeExec.ID, "partial output"))
+	require.NoError(t, h.execRepo.FinalizeOutput(ctx, activeExec.ID, "partial output"))
 	hub := events.NewExecutionStreamHub()
 	h.SetExecutionStreamHub(hub)
 	sub, _, err := hub.Subscribe(activeExec.ID)
@@ -5483,7 +5483,7 @@ func createChatStreamExecution(t *testing.T, tc *TestContext, execStatus models.
 	require.NoError(t, tc.execRepo.Create(ctx, exec))
 	if execStatus == models.ExecRunning {
 		if output != "" {
-			require.NoError(t, tc.execRepo.(*sqlite.ExecutionRepo).UpdateOutput(ctx, exec.ID, output))
+			require.NoError(t, tc.execRepo.FinalizeOutput(ctx, exec.ID, output))
 		}
 	} else {
 		require.NoError(t, tc.execRepo.Complete(ctx, exec.ID, execStatus, output, errMsg, 0, 0))

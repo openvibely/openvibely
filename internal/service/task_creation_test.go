@@ -23,13 +23,13 @@ func TestExecuteTaskCreationsRejectsRetiredOnlyAutomaticSelection(t *testing.T) 
 }
 
 func TestExecuteTaskCreations(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
-	attachmentRepo := teststores.Of(db).Attachments
+	env := teststores.New(t)
+	taskRepo := env.Tasks
+	attachmentRepo := env.Attachments
 	workerSvc := NewWorkerService(nil, 0, nil)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 
-	projectRepo := teststores.Of(db).Projects
+	projectRepo := env.Projects
 	project := &models.Project{Name: "Test Project"}
 	if err := projectRepo.Create(context.Background(), project); err != nil {
 		t.Fatalf("failed to create project: %v", err)
@@ -73,10 +73,10 @@ func TestExecuteTaskCreations(t *testing.T) {
 }
 
 func TestExecuteTaskCreationsWithIndexedReturn_PreservesRequestIndexAfterFailure(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
-	taskSvc := NewTaskService(taskRepo, teststores.Of(db).Attachments, NewWorkerService(nil, 0, nil))
-	projectRepo := teststores.Of(db).Projects
+	env := teststores.New(t)
+	taskRepo := env.Tasks
+	taskSvc := NewTaskService(taskRepo, env.Attachments, NewWorkerService(nil, 0, nil))
+	projectRepo := env.Projects
 	project := &models.Project{Name: "Indexed Creation Project"}
 	ctx := context.Background()
 	if err := projectRepo.Create(ctx, project); err != nil {
@@ -105,10 +105,10 @@ func TestExecuteTaskCreationsWithIndexedReturn_PreservesRequestIndexAfterFailure
 }
 
 func TestExecuteTaskCreations_ActiveTaskWaitsForWorkerAdmissionAtCapacity(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
-	attachmentRepo := teststores.Of(db).Attachments
-	projectRepo := teststores.Of(db).Projects
+	env := teststores.New(t)
+	taskRepo := env.Tasks
+	attachmentRepo := env.Attachments
+	projectRepo := env.Projects
 	ctx := context.Background()
 
 	maxWorkers := 1
@@ -157,15 +157,15 @@ func TestExecuteTaskCreations_ActiveTaskWaitsForWorkerAdmissionAtCapacity(t *tes
 }
 
 func TestExecuteTaskCreations_PersistsIndependentAutoMergeOptions(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
-	taskRepo := teststores.Of(db).Tasks
-	projectRepo := teststores.Of(db).Projects
+	taskRepo := env.Tasks
+	projectRepo := env.Projects
 	project := &models.Project{Name: "Runtime auto-merge project"}
 	if err := projectRepo.Create(ctx, project); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
-	taskSvc := NewTaskService(taskRepo, teststores.Of(db).Attachments, NewWorkerService(nil, 0, nil))
+	taskSvc := NewTaskService(taskRepo, env.Attachments, NewWorkerService(nil, 0, nil))
 	created, summary := ExecuteTaskCreationsWithReturn(ctx, []TaskCreationRequest{{Title: "Runtime merge task", Prompt: "work", Priority: 2, AutoMerge: true, AutoMergeOnGoalAchieved: true, MergeTargetBranch: "develop"}}, project.ID, taskSvc)
 	if len(created) != 1 {
 		t.Fatalf("created len=%d summary=%s", len(created), summary)
@@ -202,13 +202,13 @@ func TestExecuteTaskCreations_Empty(t *testing.T) {
 // [TASK_ID:xxx] markers into clickable links. If this format changes, the frontend
 // JS must be updated too (and vice versa).
 func TestExecuteTaskCreations_SummaryMatchesFrontendRegex(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
-	attachmentRepo := teststores.Of(db).Attachments
+	env := teststores.New(t)
+	taskRepo := env.Tasks
+	attachmentRepo := env.Attachments
 	workerSvc := NewWorkerService(nil, 0, nil)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 
-	projectRepo := teststores.Of(db).Projects
+	projectRepo := env.Projects
 	project := &models.Project{Name: "Test Project"}
 	if err := projectRepo.Create(context.Background(), project); err != nil {
 		t.Fatalf("failed to create project: %v", err)
@@ -268,13 +268,13 @@ func TestBuildTaskContextString_Empty(t *testing.T) {
 // --- Task Edit Tests ---
 
 func TestExecuteTaskEdits(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
-	attachmentRepo := teststores.Of(db).Attachments
+	env := teststores.New(t)
+	taskRepo := env.Tasks
+	attachmentRepo := env.Attachments
 	workerSvc := NewWorkerService(nil, 0, nil)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 
-	projectRepo := teststores.Of(db).Projects
+	projectRepo := env.Projects
 	project := &models.Project{Name: "Test Project"}
 	if err := projectRepo.Create(context.Background(), project); err != nil {
 		t.Fatalf("failed to create project: %v", err)
@@ -333,13 +333,13 @@ func TestExecuteTaskEdits(t *testing.T) {
 }
 
 func TestExecuteTaskEdits_TaskNotFound(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
-	attachmentRepo := teststores.Of(db).Attachments
+	env := teststores.New(t)
+	taskRepo := env.Tasks
+	attachmentRepo := env.Attachments
 	workerSvc := NewWorkerService(nil, 0, nil)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 
-	projectRepo := teststores.Of(db).Projects
+	projectRepo := env.Projects
 	project := &models.Project{Name: "Test Project"}
 	if err := projectRepo.Create(context.Background(), project); err != nil {
 		t.Fatalf("failed to create project: %v", err)
@@ -360,13 +360,13 @@ func TestExecuteTaskEdits_TaskNotFound(t *testing.T) {
 }
 
 func TestExecuteTaskEdits_WrongProject(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
-	attachmentRepo := teststores.Of(db).Attachments
+	env := teststores.New(t)
+	taskRepo := env.Tasks
+	attachmentRepo := env.Attachments
 	workerSvc := NewWorkerService(nil, 0, nil)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 
-	projectRepo := teststores.Of(db).Projects
+	projectRepo := env.Projects
 	project1 := &models.Project{Name: "Project 1"}
 	if err := projectRepo.Create(context.Background(), project1); err != nil {
 		t.Fatalf("failed to create project1: %v", err)
@@ -404,13 +404,13 @@ func TestExecuteTaskEdits_WrongProject(t *testing.T) {
 }
 
 func TestExecuteTaskEdits_NoChanges(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
-	attachmentRepo := teststores.Of(db).Attachments
+	env := teststores.New(t)
+	taskRepo := env.Tasks
+	attachmentRepo := env.Attachments
 	workerSvc := NewWorkerService(nil, 0, nil)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 
-	projectRepo := teststores.Of(db).Projects
+	projectRepo := env.Projects
 	project := &models.Project{Name: "Test Project"}
 	if err := projectRepo.Create(context.Background(), project); err != nil {
 		t.Fatalf("failed to create project: %v", err)
@@ -448,13 +448,13 @@ func TestExecuteTaskEdits_Empty(t *testing.T) {
 }
 
 func TestExecuteTaskEdits_CategoryChange(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
-	attachmentRepo := teststores.Of(db).Attachments
+	env := teststores.New(t)
+	taskRepo := env.Tasks
+	attachmentRepo := env.Attachments
 	workerSvc := newTestWorkerService(t)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 
-	projectRepo := teststores.Of(db).Projects
+	projectRepo := env.Projects
 	project := &models.Project{Name: "Test Project"}
 	if err := projectRepo.Create(context.Background(), project); err != nil {
 		t.Fatalf("failed to create project: %v", err)
@@ -508,11 +508,11 @@ func TestExecuteTaskEdits_CategoryActiveNoOpDoesNotDoubleSubmit(t *testing.T) {
 	for _, status := range []models.TaskStatus{models.StatusPending, models.StatusQueued, models.StatusRunning} {
 		t.Run(string(status), func(t *testing.T) {
 			ctx := context.Background()
-			db := teststores.NewDB(t)
-			taskRepo := teststores.Of(db).Tasks
+			env := teststores.New(t)
+			taskRepo := env.Tasks
 			workerSvc := newTestWorkerService(t)
-			taskSvc := NewTaskService(taskRepo, teststores.Of(db).Attachments, workerSvc)
-			projectRepo := teststores.Of(db).Projects
+			taskSvc := NewTaskService(taskRepo, env.Attachments, workerSvc)
+			projectRepo := env.Projects
 			project := &models.Project{Name: "Test Project"}
 			if err := projectRepo.Create(ctx, project); err != nil {
 				t.Fatalf("failed to create project: %v", err)
@@ -540,11 +540,11 @@ func TestExecuteTaskEdits_CategoryBacklogCancelsActiveRunningOrQueuedTask(t *tes
 	for _, status := range []models.TaskStatus{models.StatusRunning, models.StatusQueued} {
 		t.Run(string(status), func(t *testing.T) {
 			ctx := context.Background()
-			db := teststores.NewDB(t)
-			taskRepo := teststores.Of(db).Tasks
+			env := teststores.New(t)
+			taskRepo := env.Tasks
 			workerSvc := newTestWorkerService(t)
-			taskSvc := NewTaskService(taskRepo, teststores.Of(db).Attachments, workerSvc)
-			projectRepo := teststores.Of(db).Projects
+			taskSvc := NewTaskService(taskRepo, env.Attachments, workerSvc)
+			projectRepo := env.Projects
 			project := &models.Project{Name: "Test Project"}
 			if err := projectRepo.Create(ctx, project); err != nil {
 				t.Fatalf("failed to create project: %v", err)
@@ -585,10 +585,10 @@ func TestExecuteTaskEdits_CategoryBacklogCancelsActiveRunningOrQueuedTask(t *tes
 
 func TestExecuteTaskEdits_RejectsInvalidPriorities(t *testing.T) {
 	ctx := context.Background()
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
-	taskSvc := NewTaskService(taskRepo, teststores.Of(db).Attachments, nil)
-	projectRepo := teststores.Of(db).Projects
+	env := teststores.New(t)
+	taskRepo := env.Tasks
+	taskSvc := NewTaskService(taskRepo, env.Attachments, nil)
+	projectRepo := env.Projects
 	project := &models.Project{Name: "Runtime Invalid Priority Project"}
 	if err := projectRepo.Create(ctx, project); err != nil {
 		t.Fatalf("failed to create project: %v", err)
@@ -647,10 +647,10 @@ func TestExecuteTaskEdits_RejectsInvalidPriorities(t *testing.T) {
 
 func TestExecuteTaskEdits_PersistsValidPriorities(t *testing.T) {
 	ctx := context.Background()
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
-	taskSvc := NewTaskService(taskRepo, teststores.Of(db).Attachments, nil)
-	projectRepo := teststores.Of(db).Projects
+	env := teststores.New(t)
+	taskRepo := env.Tasks
+	taskSvc := NewTaskService(taskRepo, env.Attachments, nil)
+	projectRepo := env.Projects
 	project := &models.Project{Name: "Runtime Valid Priority Project"}
 	if err := projectRepo.Create(ctx, project); err != nil {
 		t.Fatalf("failed to create project: %v", err)
@@ -684,11 +684,11 @@ func TestExecuteTaskEdits_PersistsValidPriorities(t *testing.T) {
 
 func TestExecuteTaskEdits_TitleAndCategoryChangePersistsAndSubmits(t *testing.T) {
 	ctx := context.Background()
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
+	env := teststores.New(t)
+	taskRepo := env.Tasks
 	workerSvc := newTestWorkerService(t)
-	taskSvc := NewTaskService(taskRepo, teststores.Of(db).Attachments, workerSvc)
-	projectRepo := teststores.Of(db).Projects
+	taskSvc := NewTaskService(taskRepo, env.Attachments, workerSvc)
+	projectRepo := env.Projects
 	project := &models.Project{Name: "Test Project"}
 	if err := projectRepo.Create(ctx, project); err != nil {
 		t.Fatalf("failed to create project: %v", err)
@@ -734,11 +734,11 @@ func TestExecuteTaskEdits_TitleAndCategoryChangePersistsAndSubmits(t *testing.T)
 
 func TestExecuteTaskEdits_TitleOnlyDoesNotSubmit(t *testing.T) {
 	ctx := context.Background()
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
+	env := teststores.New(t)
+	taskRepo := env.Tasks
 	workerSvc := newTestWorkerService(t)
-	taskSvc := NewTaskService(taskRepo, teststores.Of(db).Attachments, workerSvc)
-	projectRepo := teststores.Of(db).Projects
+	taskSvc := NewTaskService(taskRepo, env.Attachments, workerSvc)
+	projectRepo := env.Projects
 	project := &models.Project{Name: "Test Project"}
 	if err := projectRepo.Create(ctx, project); err != nil {
 		t.Fatalf("failed to create project: %v", err)
@@ -761,20 +761,20 @@ func TestExecuteTaskEdits_TitleOnlyDoesNotSubmit(t *testing.T) {
 }
 
 func TestExecuteTaskEdits_AgentReassignment(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
-	attachmentRepo := teststores.Of(db).Attachments
+	env := teststores.New(t)
+	taskRepo := env.Tasks
+	attachmentRepo := env.Attachments
 	workerSvc := NewWorkerService(nil, 0, nil)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 
-	projectRepo := teststores.Of(db).Projects
+	projectRepo := env.Projects
 	project := &models.Project{Name: "Test Project"}
 	if err := projectRepo.Create(context.Background(), project); err != nil {
 		t.Fatalf("failed to create project: %v", err)
 	}
 
 	// Create agent configs for testing
-	llmConfigRepo := teststores.Of(db).LLMConfigs
+	llmConfigRepo := env.LLMConfigs
 	initialAgent := &models.LLMConfig{Name: "Initial Agent", Provider: "anthropic", Model: "claude-sonnet-4-5-20250929"}
 	if err := llmConfigRepo.Create(context.Background(), initialAgent); err != nil {
 		t.Fatalf("failed to create initial agent: %v", err)
@@ -829,20 +829,20 @@ func TestExecuteTaskEdits_AgentReassignment(t *testing.T) {
 }
 
 func TestExecuteTaskEdits_AgentReassignmentNoChange(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
-	attachmentRepo := teststores.Of(db).Attachments
+	env := teststores.New(t)
+	taskRepo := env.Tasks
+	attachmentRepo := env.Attachments
 	workerSvc := NewWorkerService(nil, 0, nil)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 
-	projectRepo := teststores.Of(db).Projects
+	projectRepo := env.Projects
 	project := &models.Project{Name: "Test Project"}
 	if err := projectRepo.Create(context.Background(), project); err != nil {
 		t.Fatalf("failed to create project: %v", err)
 	}
 
 	// Create an agent config
-	llmConfigRepo := teststores.Of(db).LLMConfigs
+	llmConfigRepo := env.LLMConfigs
 	agent := &models.LLMConfig{Name: "Same Agent", Provider: "anthropic", Model: "claude-sonnet-4-5-20250929"}
 	if err := llmConfigRepo.Create(context.Background(), agent); err != nil {
 		t.Fatalf("failed to create agent: %v", err)
@@ -876,20 +876,20 @@ func TestExecuteTaskEdits_AgentReassignmentNoChange(t *testing.T) {
 }
 
 func TestExecuteTaskEdits_AgentConfigIDAlias(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
-	attachmentRepo := teststores.Of(db).Attachments
+	env := teststores.New(t)
+	taskRepo := env.Tasks
+	attachmentRepo := env.Attachments
 	workerSvc := NewWorkerService(nil, 0, nil)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 
-	projectRepo := teststores.Of(db).Projects
+	projectRepo := env.Projects
 	project := &models.Project{Name: "Test Project"}
 	if err := projectRepo.Create(context.Background(), project); err != nil {
 		t.Fatalf("failed to create project: %v", err)
 	}
 
 	// Create agent configs for testing
-	llmConfigRepo := teststores.Of(db).LLMConfigs
+	llmConfigRepo := env.LLMConfigs
 	initialAgent := &models.LLMConfig{Name: "Initial Agent", Provider: "anthropic", Model: "claude-sonnet-4-5-20250929"}
 	if err := llmConfigRepo.Create(context.Background(), initialAgent); err != nil {
 		t.Fatalf("failed to create initial agent: %v", err)
@@ -944,20 +944,20 @@ func TestExecuteTaskEdits_AgentConfigIDAlias(t *testing.T) {
 }
 
 func TestExecuteTaskEdits_AgentAssignmentFromNil(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
-	attachmentRepo := teststores.Of(db).Attachments
+	env := teststores.New(t)
+	taskRepo := env.Tasks
+	attachmentRepo := env.Attachments
 	workerSvc := NewWorkerService(nil, 0, nil)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 
-	projectRepo := teststores.Of(db).Projects
+	projectRepo := env.Projects
 	project := &models.Project{Name: "Test Project"}
 	if err := projectRepo.Create(context.Background(), project); err != nil {
 		t.Fatalf("failed to create project: %v", err)
 	}
 
 	// Create an agent config
-	llmConfigRepo := teststores.Of(db).LLMConfigs
+	llmConfigRepo := env.LLMConfigs
 	agent := &models.LLMConfig{Name: "First Agent", Provider: "anthropic", Model: "claude-sonnet-4-5-20250929"}
 	if err := llmConfigRepo.Create(context.Background(), agent); err != nil {
 		t.Fatalf("failed to create agent: %v", err)
@@ -1005,18 +1005,18 @@ func TestExecuteTaskEdits_AgentAssignmentFromNil(t *testing.T) {
 }
 
 func TestExecuteTaskEdits_PrimaryAgentDefinitionByIDPreservesModelConfig(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
-	taskRepo := teststores.Of(db).Tasks
-	taskSvc := NewTaskService(taskRepo, teststores.Of(db).Attachments, NewWorkerService(nil, 0, nil))
-	agentRepo := teststores.Of(db).Agents
+	taskRepo := env.Tasks
+	taskSvc := NewTaskService(taskRepo, env.Attachments, NewWorkerService(nil, 0, nil))
+	agentRepo := env.Agents
 	taskSvc.SetAgentRepo(agentRepo)
 
 	project := &models.Project{Name: "Primary Agent Edit By ID"}
-	if err := teststores.Of(db).Projects.Create(ctx, project); err != nil {
+	if err := env.Projects.Create(ctx, project); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
-	modelRepo := teststores.Of(db).LLMConfigs
+	modelRepo := env.LLMConfigs
 	modelConfig := &models.LLMConfig{Name: "Selected model", Provider: "anthropic", Model: "claude-sonnet-4-5-20250929"}
 	if err := modelRepo.Create(ctx, modelConfig); err != nil {
 		t.Fatalf("create model config: %v", err)
@@ -1047,15 +1047,15 @@ func TestExecuteTaskEdits_PrimaryAgentDefinitionByIDPreservesModelConfig(t *test
 }
 
 func TestExecuteTaskEdits_PrimaryAgentDefinitionByName(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
-	taskRepo := teststores.Of(db).Tasks
-	taskSvc := NewTaskService(taskRepo, teststores.Of(db).Attachments, NewWorkerService(nil, 0, nil))
-	agentRepo := teststores.Of(db).Agents
+	taskRepo := env.Tasks
+	taskSvc := NewTaskService(taskRepo, env.Attachments, NewWorkerService(nil, 0, nil))
+	agentRepo := env.Agents
 	taskSvc.SetAgentRepo(agentRepo)
 
 	project := &models.Project{Name: "Primary Agent Edit By Name"}
-	if err := teststores.Of(db).Projects.Create(ctx, project); err != nil {
+	if err := env.Projects.Create(ctx, project); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
 	agentDef := &models.Agent{Name: "Docs Reviewer", Key: "docs_reviewer", Enabled: true, SelectableAsPrimary: true}
@@ -1081,17 +1081,17 @@ func TestExecuteTaskEdits_PrimaryAgentDefinitionByName(t *testing.T) {
 }
 
 func TestExecuteTaskEdits_ClearPrimaryAgentDefinitionPreservesModelConfig(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
-	taskRepo := teststores.Of(db).Tasks
-	taskSvc := NewTaskService(taskRepo, teststores.Of(db).Attachments, NewWorkerService(nil, 0, nil))
-	agentRepo := teststores.Of(db).Agents
+	taskRepo := env.Tasks
+	taskSvc := NewTaskService(taskRepo, env.Attachments, NewWorkerService(nil, 0, nil))
+	agentRepo := env.Agents
 
 	project := &models.Project{Name: "Primary Agent Clear"}
-	if err := teststores.Of(db).Projects.Create(ctx, project); err != nil {
+	if err := env.Projects.Create(ctx, project); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
-	modelRepo := teststores.Of(db).LLMConfigs
+	modelRepo := env.LLMConfigs
 	modelConfig := &models.LLMConfig{Name: "Selected model", Provider: "anthropic", Model: "claude-sonnet-4-5-20250929"}
 	if err := modelRepo.Create(ctx, modelConfig); err != nil {
 		t.Fatalf("create model config: %v", err)
@@ -1122,15 +1122,15 @@ func TestExecuteTaskEdits_ClearPrimaryAgentDefinitionPreservesModelConfig(t *tes
 }
 
 func TestExecuteTaskEdits_PrimaryAgentDefinitionRejectsInvalidWithoutPartialEdit(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
-	taskRepo := teststores.Of(db).Tasks
-	taskSvc := NewTaskService(taskRepo, teststores.Of(db).Attachments, NewWorkerService(nil, 0, nil))
-	agentRepo := teststores.Of(db).Agents
+	taskRepo := env.Tasks
+	taskSvc := NewTaskService(taskRepo, env.Attachments, NewWorkerService(nil, 0, nil))
+	agentRepo := env.Agents
 	taskSvc.SetAgentRepo(agentRepo)
 
 	project := &models.Project{Name: "Primary Agent Invalid"}
-	if err := teststores.Of(db).Projects.Create(ctx, project); err != nil {
+	if err := env.Projects.Create(ctx, project); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
 	agentDef := &models.Agent{Name: "Reviewer", Key: "reviewer", Enabled: true, SelectableAsPrimary: true}
@@ -1160,13 +1160,13 @@ func TestExecuteTaskEdits_PrimaryAgentDefinitionRejectsInvalidWithoutPartialEdit
 }
 
 func TestExecuteTaskEdits_PrimaryAgentDefinitionRejectsCrossProject(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
-	taskRepo := teststores.Of(db).Tasks
-	taskSvc := NewTaskService(taskRepo, teststores.Of(db).Attachments, NewWorkerService(nil, 0, nil))
-	agentRepo := teststores.Of(db).Agents
+	taskRepo := env.Tasks
+	taskSvc := NewTaskService(taskRepo, env.Attachments, NewWorkerService(nil, 0, nil))
+	agentRepo := env.Agents
 	taskSvc.SetAgentRepo(agentRepo)
-	projectRepo := teststores.Of(db).Projects
+	projectRepo := env.Projects
 	projectA := &models.Project{Name: "Project A"}
 	if err := projectRepo.Create(ctx, projectA); err != nil {
 		t.Fatalf("create project A: %v", err)
@@ -1198,20 +1198,20 @@ func TestExecuteTaskEdits_PrimaryAgentDefinitionRejectsCrossProject(t *testing.T
 }
 
 func TestExecuteTaskEdits_AgentIDStillOnlyChangesModelConfig(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
-	taskRepo := teststores.Of(db).Tasks
-	taskSvc := NewTaskService(taskRepo, teststores.Of(db).Attachments, NewWorkerService(nil, 0, nil))
-	agentRepo := teststores.Of(db).Agents
+	taskRepo := env.Tasks
+	taskSvc := NewTaskService(taskRepo, env.Attachments, NewWorkerService(nil, 0, nil))
+	agentRepo := env.Agents
 	project := &models.Project{Name: "Model Config Only Edit"}
-	if err := teststores.Of(db).Projects.Create(ctx, project); err != nil {
+	if err := env.Projects.Create(ctx, project); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
 	primaryAgent := &models.Agent{Name: "Primary Agent", Key: "primary_agent", Enabled: true, SelectableAsPrimary: true}
 	if err := agentRepo.Create(ctx, primaryAgent); err != nil {
 		t.Fatalf("create primary agent: %v", err)
 	}
-	modelRepo := teststores.Of(db).LLMConfigs
+	modelRepo := env.LLMConfigs
 	modelConfig := &models.LLMConfig{Name: "Model Config 2", Provider: "anthropic", Model: "claude-sonnet-4-5-20250929"}
 	if err := modelRepo.Create(ctx, modelConfig); err != nil {
 		t.Fatalf("create model config: %v", err)
@@ -1238,13 +1238,13 @@ func TestExecuteTaskEdits_AgentIDStillOnlyChangesModelConfig(t *testing.T) {
 }
 
 func TestExecuteTaskEdits_InvalidCategory(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
-	attachmentRepo := teststores.Of(db).Attachments
+	env := teststores.New(t)
+	taskRepo := env.Tasks
+	attachmentRepo := env.Attachments
 	workerSvc := NewWorkerService(nil, 0, nil)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 
-	projectRepo := teststores.Of(db).Projects
+	projectRepo := env.Projects
 	project := &models.Project{Name: "Test Project"}
 	if err := projectRepo.Create(context.Background(), project); err != nil {
 		t.Fatalf("failed to create project: %v", err)
@@ -1284,13 +1284,13 @@ func TestExecuteTaskEdits_InvalidCategory(t *testing.T) {
 }
 
 func TestExecuteTaskEdits_WithAttachments(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
-	attachmentRepo := teststores.Of(db).Attachments
+	env := teststores.New(t)
+	taskRepo := env.Tasks
+	attachmentRepo := env.Attachments
 	workerSvc := NewWorkerService(nil, 0, nil)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 
-	projectRepo := teststores.Of(db).Projects
+	projectRepo := env.Projects
 	project := &models.Project{Name: "Test Project"}
 	if err := projectRepo.Create(context.Background(), project); err != nil {
 		t.Fatalf("failed to create project: %v", err)
@@ -1364,13 +1364,13 @@ func TestExecuteTaskEdits_WithAttachments(t *testing.T) {
 }
 
 func TestExecuteTaskEdits_AttachmentsNonexistentFile(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
-	attachmentRepo := teststores.Of(db).Attachments
+	env := teststores.New(t)
+	taskRepo := env.Tasks
+	attachmentRepo := env.Attachments
 	workerSvc := NewWorkerService(nil, 0, nil)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 
-	projectRepo := teststores.Of(db).Projects
+	projectRepo := env.Projects
 	project := &models.Project{Name: "Test Project"}
 	if err := projectRepo.Create(context.Background(), project); err != nil {
 		t.Fatalf("failed to create project: %v", err)
@@ -1417,13 +1417,13 @@ func TestExecuteTaskEdits_AttachmentsNonexistentFile(t *testing.T) {
 // --- Task Execution Tests ---
 
 func TestExecuteTaskExecutions(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
-	attachmentRepo := teststores.Of(db).Attachments
+	env := teststores.New(t)
+	taskRepo := env.Tasks
+	attachmentRepo := env.Attachments
 	workerSvc := NewWorkerService(nil, 0, nil) // No workers, just testing submission
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 
-	projectRepo := teststores.Of(db).Projects
+	projectRepo := env.Projects
 	project := &models.Project{Name: "Test Project"}
 	if err := projectRepo.Create(context.Background(), project); err != nil {
 		t.Fatalf("failed to create project: %v", err)
@@ -1517,13 +1517,13 @@ func TestExecuteTaskExecutions(t *testing.T) {
 }
 
 func TestExecuteTaskExecutions_ByTaskID_ExecutesOnlyTarget(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
-	attachmentRepo := teststores.Of(db).Attachments
+	env := teststores.New(t)
+	taskRepo := env.Tasks
+	attachmentRepo := env.Attachments
 	workerSvc := NewWorkerService(nil, 0, nil)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 
-	projectRepo := teststores.Of(db).Projects
+	projectRepo := env.Projects
 	project := &models.Project{Name: "Test Project"}
 	if err := projectRepo.Create(context.Background(), project); err != nil {
 		t.Fatalf("failed to create project: %v", err)
@@ -1581,13 +1581,13 @@ func TestExecuteTaskExecutions_ByTaskID_ExecutesOnlyTarget(t *testing.T) {
 }
 
 func TestExecuteTaskExecutions_ByTitle_ExecutesOnlyTarget(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
-	attachmentRepo := teststores.Of(db).Attachments
+	env := teststores.New(t)
+	taskRepo := env.Tasks
+	attachmentRepo := env.Attachments
 	workerSvc := NewWorkerService(nil, 0, nil)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 
-	projectRepo := teststores.Of(db).Projects
+	projectRepo := env.Projects
 	project := &models.Project{Name: "Test Project"}
 	if err := projectRepo.Create(context.Background(), project); err != nil {
 		t.Fatalf("failed to create project: %v", err)
@@ -1643,13 +1643,13 @@ func TestExecuteTaskExecutions_ByTitle_ExecutesOnlyTarget(t *testing.T) {
 }
 
 func TestExecuteTaskExecutions_WithPriorityFilter(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
-	attachmentRepo := teststores.Of(db).Attachments
+	env := teststores.New(t)
+	taskRepo := env.Tasks
+	attachmentRepo := env.Attachments
 	workerSvc := NewWorkerService(nil, 0, nil)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 
-	projectRepo := teststores.Of(db).Projects
+	projectRepo := env.Projects
 	project := &models.Project{Name: "Test Project"}
 	if err := projectRepo.Create(context.Background(), project); err != nil {
 		t.Fatalf("failed to create project: %v", err)
@@ -1712,13 +1712,13 @@ func TestExecuteTaskExecutions_WithPriorityFilter(t *testing.T) {
 }
 
 func TestExecuteTaskExecutions_NoMatchingTasks(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
-	attachmentRepo := teststores.Of(db).Attachments
+	env := teststores.New(t)
+	taskRepo := env.Tasks
+	attachmentRepo := env.Attachments
 	workerSvc := NewWorkerService(nil, 0, nil)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 
-	projectRepo := teststores.Of(db).Projects
+	projectRepo := env.Projects
 	project := &models.Project{Name: "Test Project"}
 	if err := projectRepo.Create(context.Background(), project); err != nil {
 		t.Fatalf("failed to create project: %v", err)
@@ -1743,13 +1743,13 @@ func TestExecuteTaskExecutions_NoMatchingTasks(t *testing.T) {
 }
 
 func TestExecuteTaskExecutions_InvalidTag(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
-	attachmentRepo := teststores.Of(db).Attachments
+	env := teststores.New(t)
+	taskRepo := env.Tasks
+	attachmentRepo := env.Attachments
 	workerSvc := NewWorkerService(nil, 0, nil)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 
-	projectRepo := teststores.Of(db).Projects
+	projectRepo := env.Projects
 	project := &models.Project{Name: "Test Project"}
 	if err := projectRepo.Create(context.Background(), project); err != nil {
 		t.Fatalf("failed to create project: %v", err)
@@ -1778,13 +1778,13 @@ func TestExecuteTaskExecutions_Empty(t *testing.T) {
 }
 
 func TestExecuteTaskExecutions_NoMatchingTasksWithPriority(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
-	attachmentRepo := teststores.Of(db).Attachments
+	env := teststores.New(t)
+	taskRepo := env.Tasks
+	attachmentRepo := env.Attachments
 	workerSvc := NewWorkerService(nil, 0, nil)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 
-	projectRepo := teststores.Of(db).Projects
+	projectRepo := env.Projects
 	project := &models.Project{Name: "Test Project"}
 	if err := projectRepo.Create(context.Background(), project); err != nil {
 		t.Fatalf("failed to create project: %v", err)
@@ -1833,13 +1833,13 @@ func TestExecuteTaskExecutions_NoMatchingTasksWithPriority(t *testing.T) {
 }
 
 func TestExecuteTaskExecutions_MultipleTagsWithPriorityNoMatch(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
-	attachmentRepo := teststores.Of(db).Attachments
+	env := teststores.New(t)
+	taskRepo := env.Tasks
+	attachmentRepo := env.Attachments
 	workerSvc := NewWorkerService(nil, 0, nil)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 
-	projectRepo := teststores.Of(db).Projects
+	projectRepo := env.Projects
 	project := &models.Project{Name: "Test Project"}
 	if err := projectRepo.Create(context.Background(), project); err != nil {
 		t.Fatalf("failed to create project: %v", err)
@@ -1895,13 +1895,13 @@ func TestExecuteTaskExecutions_MultipleTagsWithPriorityNoMatch(t *testing.T) {
 }
 
 func TestExecuteTaskExecutions_PriorityOnly(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
-	attachmentRepo := teststores.Of(db).Attachments
+	env := teststores.New(t)
+	taskRepo := env.Tasks
+	attachmentRepo := env.Attachments
 	workerSvc := NewWorkerService(nil, 0, nil)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 
-	projectRepo := teststores.Of(db).Projects
+	projectRepo := env.Projects
 	project := &models.Project{Name: "Test Project"}
 	if err := projectRepo.Create(context.Background(), project); err != nil {
 		t.Fatalf("failed to create project: %v", err)
@@ -2001,13 +2001,13 @@ func TestExecuteTaskExecutions_PriorityOnly(t *testing.T) {
 }
 
 func TestExecuteTaskExecutions_PriorityOnlyNoMatch(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
-	attachmentRepo := teststores.Of(db).Attachments
+	env := teststores.New(t)
+	taskRepo := env.Tasks
+	attachmentRepo := env.Attachments
 	workerSvc := NewWorkerService(nil, 0, nil)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 
-	projectRepo := teststores.Of(db).Projects
+	projectRepo := env.Projects
 	project := &models.Project{Name: "Test Project"}
 	if err := projectRepo.Create(context.Background(), project); err != nil {
 		t.Fatalf("failed to create project: %v", err)
@@ -2046,13 +2046,13 @@ func TestExecuteTaskExecutions_PriorityOnlyNoMatch(t *testing.T) {
 }
 
 func TestExecuteTaskExecutions_CompletedBacklogTasksExcludedByDefault(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
-	attachmentRepo := teststores.Of(db).Attachments
+	env := teststores.New(t)
+	taskRepo := env.Tasks
+	attachmentRepo := env.Attachments
 	workerSvc := NewWorkerService(nil, 0, nil)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 
-	projectRepo := teststores.Of(db).Projects
+	projectRepo := env.Projects
 	project := &models.Project{Name: "Test Project"}
 	if err := projectRepo.Create(context.Background(), project); err != nil {
 		t.Fatalf("failed to create project: %v", err)
@@ -2128,13 +2128,13 @@ func TestExecuteTaskExecutions_CompletedBacklogTasksExcludedByDefault(t *testing
 }
 
 func TestExecuteTaskExecutions_CompletedCategoryTasksExcludedByDefault(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
-	attachmentRepo := teststores.Of(db).Attachments
+	env := teststores.New(t)
+	taskRepo := env.Tasks
+	attachmentRepo := env.Attachments
 	workerSvc := NewWorkerService(nil, 0, nil)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 
-	projectRepo := teststores.Of(db).Projects
+	projectRepo := env.Projects
 	project := &models.Project{Name: "Test Project"}
 	if err := projectRepo.Create(context.Background(), project); err != nil {
 		t.Fatalf("failed to create project: %v", err)
@@ -2180,13 +2180,13 @@ func TestExecuteTaskExecutions_CompletedCategoryTasksExcludedByDefault(t *testin
 }
 
 func TestExecuteTaskExecutions_CompletedCategoryTasksIncludedWhenExplicitlyRequested(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
-	attachmentRepo := teststores.Of(db).Attachments
+	env := teststores.New(t)
+	taskRepo := env.Tasks
+	attachmentRepo := env.Attachments
 	workerSvc := NewWorkerService(nil, 0, nil)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 
-	projectRepo := teststores.Of(db).Projects
+	projectRepo := env.Projects
 	project := &models.Project{Name: "Test Project"}
 	if err := projectRepo.Create(context.Background(), project); err != nil {
 		t.Fatalf("failed to create project: %v", err)
@@ -2266,16 +2266,16 @@ func TestBuildModelContextString_Empty(t *testing.T) {
 }
 
 func TestExecuteTaskCreations_ResolvesAgentNameInSharedService(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
-	taskRepo := teststores.Of(db).Tasks
-	attachmentRepo := teststores.Of(db).Attachments
+	taskRepo := env.Tasks
+	attachmentRepo := env.Attachments
 	workerSvc := NewWorkerService(nil, 0, nil)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
-	agentRepo := teststores.Of(db).Agents
+	agentRepo := env.Agents
 	taskSvc.SetAgentRepo(agentRepo)
 
-	projectRepo := teststores.Of(db).Projects
+	projectRepo := env.Projects
 	project := &models.Project{Name: "Shared Agent Resolution"}
 	if err := projectRepo.Create(ctx, project); err != nil {
 		t.Fatalf("create project: %v", err)
@@ -2299,19 +2299,23 @@ func TestExecuteTaskCreations_ResolvesAgentNameInSharedService(t *testing.T) {
 }
 
 func TestExecuteTaskCreations_ResolvesSingleSelectableAgentByTrimmedName(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
-	taskRepo := teststores.Of(db).Tasks
-	taskSvc := NewTaskService(taskRepo, teststores.Of(db).Attachments, NewWorkerService(nil, 0, nil))
-	agentRepo := teststores.Of(db).Agents
+	taskRepo := env.Tasks
+	taskSvc := NewTaskService(taskRepo, env.Attachments, NewWorkerService(nil, 0, nil))
+	agentRepo := env.Agents
 	taskSvc.SetAgentRepo(agentRepo)
 
 	project := &models.Project{Name: "Trimmed Agent Resolution"}
-	if err := teststores.Of(db).Projects.Create(ctx, project); err != nil {
+	if err := env.Projects.Create(ctx, project); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, `INSERT INTO agents (id, name, key, model, enabled, selectable_as_primary) VALUES (lower(hex(randomblob(16))), ?, ?, 'inherit', 1, 1)`, " Reviewer ", "legacy_spaced_reviewer"); err != nil {
-		t.Fatalf("insert legacy spaced agent: %v", err)
+	legacy := &models.Agent{Name: "Reviewer", Key: "legacy_spaced_reviewer", Model: "inherit", Enabled: true, SelectableAsPrimary: true}
+	if err := agentRepo.Create(ctx, legacy); err != nil {
+		t.Fatal(err)
+	}
+	if err := env.Fixtures.SetLegacyAgentName(ctx, legacy.ID, " Reviewer "); err != nil {
+		t.Fatal(err)
 	}
 	legacy, err := agentRepo.GetUniqueSelectableByName(ctx, "Reviewer")
 	if err != nil {
@@ -2335,15 +2339,15 @@ func TestExecuteTaskCreations_ResolvesSingleSelectableAgentByTrimmedName(t *test
 }
 
 func TestExecuteTaskCreations_UnresolvedAgentNameFailsInsteadOfCreatingUnassignedTask(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
-	taskRepo := teststores.Of(db).Tasks
-	attachmentRepo := teststores.Of(db).Attachments
+	taskRepo := env.Tasks
+	attachmentRepo := env.Attachments
 	workerSvc := NewWorkerService(nil, 0, nil)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
-	taskSvc.SetAgentRepo(teststores.Of(db).Agents)
+	taskSvc.SetAgentRepo(env.Agents)
 
-	projectRepo := teststores.Of(db).Projects
+	projectRepo := env.Projects
 	project := &models.Project{Name: "Unresolved Agent Resolution"}
 	if err := projectRepo.Create(ctx, project); err != nil {
 		t.Fatalf("create project: %v", err)
@@ -2366,15 +2370,15 @@ func TestExecuteTaskCreations_UnresolvedAgentNameFailsInsteadOfCreatingUnassigne
 }
 
 func TestExecuteTaskCreations_RejectsSystemAgentByNameAndID(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
-	taskRepo := teststores.Of(db).Tasks
-	taskSvc := NewTaskService(taskRepo, teststores.Of(db).Attachments, NewWorkerService(nil, 0, nil))
-	agentRepo := teststores.Of(db).Agents
+	taskRepo := env.Tasks
+	taskSvc := NewTaskService(taskRepo, env.Attachments, NewWorkerService(nil, 0, nil))
+	agentRepo := env.Agents
 	taskSvc.SetAgentRepo(agentRepo)
 
 	project := &models.Project{Name: "Protected Agent Assignment"}
-	if err := teststores.Of(db).Projects.Create(ctx, project); err != nil {
+	if err := env.Projects.Create(ctx, project); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
 	memoryCurator := &models.Agent{
@@ -2413,9 +2417,9 @@ func TestExecuteTaskCreations_RejectsSystemAgentByNameAndID(t *testing.T) {
 }
 
 func TestExecuteTaskCreations_WithChainConfig(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
-	attachmentRepo := teststores.Of(db).Attachments
+	env := teststores.New(t)
+	taskRepo := env.Tasks
+	attachmentRepo := env.Attachments
 	workerSvc := NewWorkerService(nil, 0, nil)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 
@@ -2470,9 +2474,9 @@ func TestExecuteTaskCreations_WithChainConfig(t *testing.T) {
 // TestExecuteTaskCreations_ToolCallChainConfig verifies that a tool-call-style
 // chain config creates both parent and blocked child in one call with no edits.
 func TestExecuteTaskCreations_ToolCallChainConfig(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
-	attachmentRepo := teststores.Of(db).Attachments
+	env := teststores.New(t)
+	taskRepo := env.Tasks
+	attachmentRepo := env.Attachments
 	workerSvc := NewWorkerService(nil, 0, nil)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 
@@ -2546,9 +2550,9 @@ func TestExecuteTaskCreations_ToolCallChainConfig(t *testing.T) {
 }
 
 func TestExecuteTaskEdits_WithChainConfig(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
-	attachmentRepo := teststores.Of(db).Attachments
+	env := teststores.New(t)
+	taskRepo := env.Tasks
+	attachmentRepo := env.Attachments
 	workerSvc := NewWorkerService(nil, 0, nil)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 
@@ -2625,9 +2629,9 @@ func TestExecuteTaskEdits_WithChainConfig(t *testing.T) {
 }
 
 func TestExecuteTaskEdits_DisableChain(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
-	attachmentRepo := teststores.Of(db).Attachments
+	env := teststores.New(t)
+	taskRepo := env.Tasks
+	attachmentRepo := env.Attachments
 	workerSvc := NewWorkerService(nil, 0, nil)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 
@@ -3075,12 +3079,12 @@ func TestBuildChatContext_FiltersChatTasks(t *testing.T) {
 }
 
 func TestAutoStartTasks_EnabledInModel(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
 
-	projectRepo := teststores.Of(db).Projects
-	taskRepo := teststores.Of(db).Tasks
-	llmConfigRepo := teststores.Of(db).LLMConfigs
+	projectRepo := env.Projects
+	taskRepo := env.Tasks
+	llmConfigRepo := env.LLMConfigs
 	ws := NewWorkerService(nil, 0, nil)
 	taskSvc := NewTaskService(taskRepo, nil, ws)
 
@@ -3132,12 +3136,12 @@ func TestAutoStartTasks_EnabledInModel(t *testing.T) {
 }
 
 func TestAutoStartTasks_DisabledInModel(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
 
-	projectRepo := teststores.Of(db).Projects
-	taskRepo := teststores.Of(db).Tasks
-	llmConfigRepo := teststores.Of(db).LLMConfigs
+	projectRepo := env.Projects
+	taskRepo := env.Tasks
+	llmConfigRepo := env.LLMConfigs
 	ws := NewWorkerService(nil, 0, nil)
 	taskSvc := NewTaskService(taskRepo, nil, ws)
 
@@ -3276,11 +3280,11 @@ func TestTaskCreationSelectionPreservesBehaviorWithCompactRows(t *testing.T) {
 }
 
 func TestTaskCreationDefaultModelSentinelSkipsAutoSelection(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
 
-	projectRepo := teststores.Of(db).Projects
-	taskRepo := teststores.Of(db).Tasks
+	projectRepo := env.Projects
+	taskRepo := env.Tasks
 	taskSvc := NewTaskService(taskRepo, nil, nil)
 	project := &models.Project{Name: "Test Project", RepoPath: t.TempDir()}
 	if err := projectRepo.Create(ctx, project); err != nil {
@@ -3311,12 +3315,12 @@ func TestTaskCreationDefaultModelSentinelSkipsAutoSelection(t *testing.T) {
 }
 
 func TestAutoStartTasks_ExplicitCategoryOverrides(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
 
-	projectRepo := teststores.Of(db).Projects
-	taskRepo := teststores.Of(db).Tasks
-	llmConfigRepo := teststores.Of(db).LLMConfigs
+	projectRepo := env.Projects
+	taskRepo := env.Tasks
+	llmConfigRepo := env.LLMConfigs
 	ws := NewWorkerService(nil, 0, nil)
 	taskSvc := NewTaskService(taskRepo, nil, ws)
 
@@ -3368,13 +3372,13 @@ func TestAutoStartTasks_ExplicitCategoryOverrides(t *testing.T) {
 }
 
 func TestAutoStartTasks_SingleAgentAvailable(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
 
-	projectRepo := teststores.Of(db).Projects
-	taskRepo := teststores.Of(db).Tasks
-	llmConfigRepo := teststores.Of(db).LLMConfigs
-	attachmentRepo := teststores.Of(db).Attachments
+	projectRepo := env.Projects
+	taskRepo := env.Tasks
+	llmConfigRepo := env.LLMConfigs
+	attachmentRepo := env.Attachments
 	workerSvc := NewWorkerService(nil, 0, nil)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 
@@ -3424,16 +3428,16 @@ func TestAutoStartTasks_SingleAgentAvailable(t *testing.T) {
 }
 
 func TestExecuteTaskCreationsWithReturn_PersistsGoal(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
 	project := &models.Project{Name: "Goal Creation Project", RepoPath: t.TempDir()}
-	if err := teststores.Of(db).Projects.Create(ctx, project); err != nil {
+	if err := env.Projects.Create(ctx, project); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
-	taskRepo := teststores.Of(db).Tasks
-	goalRepo := teststores.Of(db).TaskGoals
+	taskRepo := env.Tasks
+	goalRepo := env.TaskGoals
 	goalSvc := NewTaskGoalService(goalRepo, taskRepo, nil)
-	taskSvc := NewTaskService(taskRepo, teststores.Of(db).Attachments, nil)
+	taskSvc := NewTaskService(taskRepo, env.Attachments, nil)
 	taskSvc.SetTaskGoalService(goalSvc)
 
 	created, summary := ExecuteTaskCreationsWithReturn(ctx, []TaskCreationRequest{{Title: "Goal create", Prompt: "prompt", Goal: "All tests pass", Category: "backlog"}}, project.ID, taskSvc)

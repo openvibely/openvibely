@@ -167,9 +167,9 @@ func TestChannelChatContextCompactTaskProjectionMatchesFullContext(t *testing.T)
 }
 
 func TestChannelChatContextCompactChainProjectionMatchesJSONUnmarshalEdgeCases(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
-	taskRepo := teststores.Of(db).Tasks
+	taskRepo := env.Tasks
 	taskSvc := NewTaskService(taskRepo, nil, nil)
 
 	cases := []struct {
@@ -519,10 +519,10 @@ func TestChannelChatIngressImageSelectionExcludesTextOnlyModels(t *testing.T) {
 }
 
 func TestChannelChatAgentSelectionSkipsOAuthRetiredDefault(t *testing.T) {
-	db := teststores.NewDB(t)
-	repo := teststores.Of(db).LLMConfigs
+	env := teststores.New(t)
+	repo := env.LLMConfigs
 	ctx := context.Background()
-	teststores.ClearLLMConfigs(t, teststores.Of(db).LLMConfigs)
+	teststores.ClearLLMConfigs(t, env.LLMConfigs)
 	retired := &models.LLMConfig{Name: "Retired", Provider: models.ProviderOpenAI, Model: "gpt-5.3-codex", AuthMethod: models.AuthMethodOAuth, IsDefault: true}
 	if err := repo.Create(ctx, retired); err != nil {
 		t.Fatal(err)

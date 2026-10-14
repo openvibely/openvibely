@@ -33,9 +33,9 @@ func newTestWorkerService(t *testing.T) *WorkerService {
 }
 
 func TestTaskService_ListNormalizesActiveTerminalTasks(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
-	attachmentRepo := teststores.Of(db).Attachments
+	env := teststores.New(t)
+	taskRepo := env.Tasks
+	attachmentRepo := env.Attachments
 	svc := NewTaskService(taskRepo, attachmentRepo, nil)
 	ctx := context.Background()
 
@@ -82,8 +82,8 @@ func TestTaskService_ListNormalizesActiveTerminalTasks(t *testing.T) {
 }
 
 func TestTaskService_UpdateCategoryStartsPlannerForBacklogSwarmParent(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
+	env := teststores.New(t)
+	taskRepo := env.Tasks
 	workerSvc := newTestWorkerService(t)
 	taskSvc := NewTaskService(taskRepo, nil, workerSvc)
 	swarmSvc := NewSwarmService(taskSvc, taskRepo, nil, workerSvc)
@@ -120,10 +120,10 @@ func TestTaskService_UpdateCategoryStartsPlannerForBacklogSwarmParent(t *testing
 }
 
 func TestTaskService_Create_DefaultsStatus(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
+	env := teststores.New(t)
+	taskRepo := env.Tasks
 	workerSvc := newTestWorkerService(t)
-	attachmentRepo := teststores.Of(db).Attachments
+	attachmentRepo := env.Attachments
 	svc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 	ctx := context.Background()
 
@@ -146,9 +146,9 @@ func TestTaskService_Create_DefaultsStatus(t *testing.T) {
 }
 
 func TestTaskService_Create_NormalizesPriority(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
-	svc := NewTaskService(taskRepo, teststores.Of(db).Attachments, nil)
+	env := teststores.New(t)
+	taskRepo := env.Tasks
+	svc := NewTaskService(taskRepo, env.Attachments, nil)
 	ctx := context.Background()
 
 	cases := []struct {
@@ -187,9 +187,9 @@ func TestTaskService_Create_NormalizesPriority(t *testing.T) {
 }
 
 func TestTaskService_Update_RejectsInvalidPriority(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
-	svc := NewTaskService(taskRepo, teststores.Of(db).Attachments, nil)
+	env := teststores.New(t)
+	taskRepo := env.Tasks
+	svc := NewTaskService(taskRepo, env.Attachments, nil)
 	ctx := context.Background()
 
 	for _, priority := range []int{0, -1, 5} {
@@ -219,9 +219,9 @@ func TestTaskService_Update_RejectsInvalidPriority(t *testing.T) {
 }
 
 func TestTaskService_Update_PersistsValidPriorities(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
-	svc := NewTaskService(taskRepo, teststores.Of(db).Attachments, nil)
+	env := teststores.New(t)
+	taskRepo := env.Tasks
+	svc := NewTaskService(taskRepo, env.Attachments, nil)
 	ctx := context.Background()
 
 	for priority := 1; priority <= 4; priority++ {
@@ -252,9 +252,9 @@ func TestTaskService_Update_PersistsValidPriorities(t *testing.T) {
 }
 
 func TestTaskService_Create_NormalizesTitlePromptAndDuplicateCheck(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
-	svc := NewTaskService(taskRepo, teststores.Of(db).Attachments, nil)
+	env := teststores.New(t)
+	taskRepo := env.Tasks
+	svc := NewTaskService(taskRepo, env.Attachments, nil)
 	ctx := context.Background()
 
 	first := &models.Task{
@@ -292,9 +292,9 @@ func TestTaskService_Create_NormalizesTitlePromptAndDuplicateCheck(t *testing.T)
 }
 
 func TestTaskService_CreateAndUpdateRejectNormalizedBlankTitlePrompt(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
-	svc := NewTaskService(taskRepo, teststores.Of(db).Attachments, nil)
+	env := teststores.New(t)
+	taskRepo := env.Tasks
+	svc := NewTaskService(taskRepo, env.Attachments, nil)
 	ctx := context.Background()
 
 	for _, tt := range []struct {
@@ -336,9 +336,9 @@ func TestTaskService_CreateAndUpdateRejectNormalizedBlankTitlePrompt(t *testing.
 }
 
 func TestTaskService_Update_NormalizesTitlePromptAndDuplicateCheck(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
-	svc := NewTaskService(taskRepo, teststores.Of(db).Attachments, nil)
+	env := teststores.New(t)
+	taskRepo := env.Tasks
+	svc := NewTaskService(taskRepo, env.Attachments, nil)
 	ctx := context.Background()
 
 	existing := &models.Task{ProjectID: "default", Title: "Existing title", Prompt: "existing prompt", Category: models.CategoryBacklog, Status: models.StatusPending}
@@ -364,10 +364,10 @@ func TestTaskService_Update_NormalizesTitlePromptAndDuplicateCheck(t *testing.T)
 }
 
 func TestTaskService_Create_ActiveAutoSubmits(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
+	env := teststores.New(t)
+	taskRepo := env.Tasks
 	workerSvc := newTestWorkerService(t)
-	attachmentRepo := teststores.Of(db).Attachments
+	attachmentRepo := env.Attachments
 	svc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 	ctx := context.Background()
 
@@ -392,10 +392,10 @@ func TestTaskService_Create_ActiveAutoSubmits(t *testing.T) {
 }
 
 func TestTaskService_Create_NonActiveDoesNotSubmit(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
+	env := teststores.New(t)
+	taskRepo := env.Tasks
 	workerSvc := newTestWorkerService(t)
-	attachmentRepo := teststores.Of(db).Attachments
+	attachmentRepo := env.Attachments
 	svc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 	ctx := context.Background()
 
@@ -417,11 +417,11 @@ func TestTaskService_Create_NonActiveDoesNotSubmit(t *testing.T) {
 }
 
 func TestTaskService_RunTask_ResumesGoalPausedByUserStop(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
+	env := teststores.New(t)
+	taskRepo := env.Tasks
 	workerSvc := newTestWorkerService(t)
-	attachmentRepo := teststores.Of(db).Attachments
-	goalSvc := NewTaskGoalService(teststores.Of(db).TaskGoals, taskRepo, nil)
+	attachmentRepo := env.Attachments
+	goalSvc := NewTaskGoalService(env.TaskGoals, taskRepo, nil)
 	svc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 	svc.SetTaskGoalService(goalSvc)
 	ctx := context.Background()
@@ -443,11 +443,11 @@ func TestTaskService_RunTask_ResumesGoalPausedByUserStop(t *testing.T) {
 }
 
 func TestTaskService_RunTask_DoesNotResumeExplicitlyPausedGoal(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
+	env := teststores.New(t)
+	taskRepo := env.Tasks
 	workerSvc := newTestWorkerService(t)
-	attachmentRepo := teststores.Of(db).Attachments
-	goalSvc := NewTaskGoalService(teststores.Of(db).TaskGoals, taskRepo, nil)
+	attachmentRepo := env.Attachments
+	goalSvc := NewTaskGoalService(env.TaskGoals, taskRepo, nil)
 	svc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 	svc.SetTaskGoalService(goalSvc)
 	ctx := context.Background()
@@ -468,11 +468,11 @@ func TestTaskService_RunTask_DoesNotResumeExplicitlyPausedGoal(t *testing.T) {
 }
 
 func TestTaskService_UpdateStatus_RunningActiveResumesGoalPausedByUserStop(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
+	env := teststores.New(t)
+	taskRepo := env.Tasks
 	workerSvc := newTestWorkerService(t)
-	attachmentRepo := teststores.Of(db).Attachments
-	goalSvc := NewTaskGoalService(teststores.Of(db).TaskGoals, taskRepo, nil)
+	attachmentRepo := env.Attachments
+	goalSvc := NewTaskGoalService(env.TaskGoals, taskRepo, nil)
 	svc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 	svc.SetTaskGoalService(goalSvc)
 	ctx := context.Background()
@@ -499,10 +499,10 @@ func TestTaskService_UpdateStatus_RunningActiveResumesGoalPausedByUserStop(t *te
 }
 
 func TestTaskService_UpdateCategory_ToActiveAutoSubmits(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
+	env := teststores.New(t)
+	taskRepo := env.Tasks
 	workerSvc := newTestWorkerService(t)
-	attachmentRepo := teststores.Of(db).Attachments
+	attachmentRepo := env.Attachments
 	svc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 	ctx := context.Background()
 
@@ -736,11 +736,11 @@ func TestTaskService_UpdateCategory_PromotesQueuedTaskThreadFollowupBeforeOrigin
 
 func TestTaskService_MoveTasksToActiveLaneRoutesSingleQueuedFollowupAndReturnsLaneConflict(t *testing.T) {
 	ctx := context.Background()
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
-	threadRepo := teststores.Of(db).ThreadInputs
+	env := teststores.New(t)
+	taskRepo := env.Tasks
+	threadRepo := env.ThreadInputs
 	worker := newTestWorkerService(t)
-	svc := NewTaskService(taskRepo, teststores.Of(db).Attachments, worker)
+	svc := NewTaskService(taskRepo, env.Attachments, worker)
 	task := &models.Task{ProjectID: "default", Title: "Queued followup lane move", Category: models.CategoryBacklog, Status: models.StatusPending, Prompt: "original prompt"}
 	require.NoError(t, taskRepo.Create(ctx, task))
 	input := &models.ThreadInput{Scope: models.ThreadInputScopeTask, ProjectID: "default", TaskID: task.ID, InputMode: models.ThreadInputModeQueued, InputStatus: models.ThreadInputPending, Content: "queued followup"}
@@ -769,11 +769,11 @@ func TestTaskService_MoveTasksToActiveLaneRoutesSingleQueuedFollowupAndReturnsLa
 
 func TestTaskService_MoveTasksToActiveLaneRoutesSingleFailedFollowupAndReturnsLaneConflict(t *testing.T) {
 	ctx := context.Background()
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
-	execRepo := teststores.Of(db).Executions
+	env := teststores.New(t)
+	taskRepo := env.Tasks
+	execRepo := env.Executions
 	worker := newTestWorkerService(t)
-	svc := NewTaskService(taskRepo, teststores.Of(db).Attachments, worker)
+	svc := NewTaskService(taskRepo, env.Attachments, worker)
 	task := &models.Task{ProjectID: "default", Title: "Failed followup lane move", Category: models.CategoryBacklog, Status: models.StatusFailed, Prompt: "original prompt"}
 	require.NoError(t, taskRepo.Create(ctx, task))
 	require.NoError(t, execRepo.Create(ctx, &models.Execution{TaskID: task.ID, Status: models.ExecFailed, PromptSent: "failed followup", IsFollowup: true}))
@@ -837,11 +837,11 @@ func TestTaskService_MoveTasksToActiveLaneFencesConcurrentLifecycleOwnedTransiti
 
 func TestTaskService_MoveTasksToActiveLaneFencesConcurrentFailedFollowupTransition(t *testing.T) {
 	ctx := context.Background()
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
-	execRepo := teststores.Of(db).Executions
+	env := teststores.New(t)
+	taskRepo := env.Tasks
+	execRepo := env.Executions
 	worker := newTestWorkerService(t)
-	svc := NewTaskService(taskRepo, teststores.Of(db).Attachments, worker)
+	svc := NewTaskService(taskRepo, env.Attachments, worker)
 	task := &models.Task{ProjectID: "default", Title: "Concurrent failed followup lane move", Category: models.CategoryBacklog, Status: models.StatusFailed, Prompt: "original prompt"}
 	require.NoError(t, taskRepo.Create(ctx, task))
 	failed := &models.Execution{TaskID: task.ID, Status: models.ExecFailed, PromptSent: "failed followup", IsFollowup: true}
@@ -868,11 +868,11 @@ func TestTaskService_MoveTasksToActiveLaneFencesConcurrentFailedFollowupTransiti
 
 func TestTaskService_MoveTasksToActiveLaneRejectsLifecycleOwnedGroupBeforeSubmission(t *testing.T) {
 	ctx := context.Background()
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
-	threadRepo := teststores.Of(db).ThreadInputs
+	env := teststores.New(t)
+	taskRepo := env.Tasks
+	threadRepo := env.ThreadInputs
 	worker := newTestWorkerService(t)
-	svc := NewTaskService(taskRepo, teststores.Of(db).Attachments, worker)
+	svc := NewTaskService(taskRepo, env.Attachments, worker)
 	ordinary := &models.Task{ProjectID: "default", Title: "Ordinary lifecycle group card", Category: models.CategoryBacklog, Status: models.StatusPending}
 	owned := &models.Task{ProjectID: "default", Title: "Owned lifecycle group card", Category: models.CategoryBacklog, Status: models.StatusPending}
 	for _, task := range []*models.Task{ordinary, owned} {
@@ -897,9 +897,9 @@ func TestTaskService_MoveTasksToActiveLaneRejectsLifecycleOwnedGroupBeforeSubmis
 
 func TestTaskService_UpdateCategory_RollsBackDeferredActivationWhenReloadFails(t *testing.T) {
 	ctx := context.Background()
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
-	svc := NewTaskService(taskRepo, teststores.Of(db).Attachments, newTestWorkerService(t))
+	env := teststores.New(t)
+	taskRepo := env.Tasks
+	svc := NewTaskService(taskRepo, env.Attachments, newTestWorkerService(t))
 	task := &models.Task{
 		ProjectID: "default",
 		Title:     "Deferred activation reload failure",
@@ -921,9 +921,9 @@ func TestTaskService_UpdateCategory_RollsBackDeferredActivationWhenReloadFails(t
 
 func TestTaskService_UpdateCategory_RollsBackDeferredActivationWhenReloadContextIsCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
-	svc := NewTaskService(taskRepo, teststores.Of(db).Attachments, newTestWorkerService(t))
+	env := teststores.New(t)
+	taskRepo := env.Tasks
+	svc := NewTaskService(taskRepo, env.Attachments, newTestWorkerService(t))
 	task := &models.Task{
 		ProjectID: "default",
 		Title:     "Deferred activation cancelled reload",
@@ -1119,10 +1119,10 @@ func TestTaskService_RunTask_PromotesQueuedTaskThreadFollowupBeforeOriginalPromp
 
 func TestTaskService_UpdateCategory_RetriesFailedTaskThreadFollowupBeforeOriginalPrompt(t *testing.T) {
 	ctx := context.Background()
-	db := teststores.NewDB(t)
-	projectRepo := teststores.Of(db).Projects
-	taskRepo := teststores.Of(db).Tasks
-	attachmentRepo := teststores.Of(db).Attachments
+	env := teststores.New(t)
+	projectRepo := env.Projects
+	taskRepo := env.Tasks
+	attachmentRepo := env.Attachments
 	project := &models.Project{Name: "Manual Active Failed Followup Retry Project"}
 	require.NoError(t, projectRepo.Create(ctx, project))
 	workerSvc := NewWorkerService(nil, 0, nil)
@@ -1152,9 +1152,9 @@ func TestTaskService_UpdateCategory_RetriesFailedTaskThreadFollowupBeforeOrigina
 
 func TestTaskService_RunTask_DoesNotRerunOriginalPromptWhenQueuedFollowupPromotionFails(t *testing.T) {
 	ctx := context.Background()
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
-	attachmentRepo := teststores.Of(db).Attachments
+	env := teststores.New(t)
+	taskRepo := env.Tasks
+	attachmentRepo := env.Attachments
 	workerSvc := NewWorkerService(nil, 0, nil)
 	svc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 	task := &models.Task{ProjectID: "default", Title: "Promotion Failure", Category: models.CategoryCompleted, Status: models.StatusCompleted, Prompt: "original prompt"}
@@ -1177,10 +1177,10 @@ func TestTaskService_RunTask_DoesNotRerunOriginalPromptWhenQueuedFollowupPromoti
 }
 
 func TestTaskService_RunTask_ResetsStatusAndSubmits(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
+	env := teststores.New(t)
+	taskRepo := env.Tasks
 	workerSvc := newTestWorkerService(t)
-	attachmentRepo := teststores.Of(db).Attachments
+	attachmentRepo := env.Attachments
 	svc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 	ctx := context.Background()
 
@@ -1222,10 +1222,10 @@ func TestTaskService_RunTask_ResetsStatusAndSubmits(t *testing.T) {
 }
 
 func TestTaskService_RunTask_MovesBacklogToActive(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
+	env := teststores.New(t)
+	taskRepo := env.Tasks
 	workerSvc := newTestWorkerService(t)
-	attachmentRepo := teststores.Of(db).Attachments
+	attachmentRepo := env.Attachments
 	svc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 	ctx := context.Background()
 
@@ -1268,10 +1268,10 @@ func TestTaskService_RunTask_MovesBacklogToActive(t *testing.T) {
 }
 
 func TestTaskService_RunTask_KeepsActiveCategory(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
+	env := teststores.New(t)
+	taskRepo := env.Tasks
 	workerSvc := newTestWorkerService(t)
-	attachmentRepo := teststores.Of(db).Attachments
+	attachmentRepo := env.Attachments
 	svc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 	ctx := context.Background()
 
@@ -1311,10 +1311,10 @@ func TestTaskService_RunTask_KeepsActiveCategory(t *testing.T) {
 }
 
 func TestTaskService_RunTask_RunningNoOpDoesNotSubmit(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
+	env := teststores.New(t)
+	taskRepo := env.Tasks
 	workerSvc := newTestWorkerService(t)
-	attachmentRepo := teststores.Of(db).Attachments
+	attachmentRepo := env.Attachments
 	svc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 	ctx := context.Background()
 
@@ -1351,10 +1351,10 @@ func TestTaskService_RunTask_RunningNoOpDoesNotSubmit(t *testing.T) {
 }
 
 func TestTaskService_RunTask_QueuedNoOpDoesNotSubmit(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
+	env := teststores.New(t)
+	taskRepo := env.Tasks
 	workerSvc := newTestWorkerService(t)
-	attachmentRepo := teststores.Of(db).Attachments
+	attachmentRepo := env.Attachments
 	svc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 	ctx := context.Background()
 
@@ -1391,15 +1391,15 @@ func TestTaskService_RunTask_QueuedNoOpDoesNotSubmit(t *testing.T) {
 }
 
 func TestTaskService_MoveCompletedActiveToCompleted(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
+	env := teststores.New(t)
+	taskRepo := env.Tasks
 	workerSvc := newTestWorkerService(t)
-	attachmentRepo := teststores.Of(db).Attachments
+	attachmentRepo := env.Attachments
 	svc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 	ctx := context.Background()
 
 	projectB := &models.Project{Name: "Move completed service project B"}
-	require.NoError(t, teststores.Of(db).Projects.Create(ctx, projectB))
+	require.NoError(t, env.Projects.Create(ctx, projectB))
 
 	// Create tasks in various states
 	completedActive := &models.Task{
@@ -1467,10 +1467,10 @@ func TestTaskService_MoveCompletedActiveToCompleted(t *testing.T) {
 }
 
 func TestTaskService_Create_DuplicateTitle(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
+	env := teststores.New(t)
+	taskRepo := env.Tasks
 	workerSvc := newTestWorkerService(t)
-	attachmentRepo := teststores.Of(db).Attachments
+	attachmentRepo := env.Attachments
 	svc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 	ctx := context.Background()
 
@@ -1504,10 +1504,10 @@ func TestTaskService_Create_DuplicateTitle(t *testing.T) {
 }
 
 func TestTaskService_Update_DuplicateTitle(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
+	env := teststores.New(t)
+	taskRepo := env.Tasks
 	workerSvc := newTestWorkerService(t)
-	attachmentRepo := teststores.Of(db).Attachments
+	attachmentRepo := env.Attachments
 	svc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 	ctx := context.Background()
 
@@ -1543,8 +1543,8 @@ func TestTaskService_Update_DuplicateTitle(t *testing.T) {
 }
 
 func TestTaskService_Delete_TerminalizesRetainedSwarmChildren(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
+	env := teststores.New(t)
+	taskRepo := env.Tasks
 	workerSvc := newTestWorkerService(t)
 	svc := NewTaskService(taskRepo, nil, workerSvc)
 	ctx := context.Background()
@@ -1642,17 +1642,17 @@ func TestTaskService_Delete_RollsBackPendingSessionRetirementWhenDeleteFails(t *
 }
 
 func TestTaskService_Delete_PreventsUploadMetadataRaceFromLeakingFile(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
-	attachmentRepo := teststores.Of(db).Attachments
-	chatAttachmentRepo := teststores.Of(db).ChatAttachments
+	env := teststores.New(t)
+	taskRepo := env.Tasks
+	attachmentRepo := env.Attachments
+	chatAttachmentRepo := env.ChatAttachments
 	workerSvc := newTestWorkerService(t)
 	svc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 	svc.SetDeletionUploadsDir(filepath.Join(t.TempDir(), "uploads"))
 	ctx := context.Background()
 	task := &models.Task{ProjectID: "default", Title: "Concurrent upload", Category: models.CategoryBacklog, Status: models.StatusRunning, Prompt: "test"}
 	require.NoError(t, taskRepo.Create(ctx, task))
-	require.NoError(t, teststores.Of(db).Executions.Create(ctx, &models.Execution{ID: "race-exec", TaskID: task.ID, Status: models.ExecRunning, PromptSent: "prompt"}))
+	require.NoError(t, env.Executions.Create(ctx, &models.Execution{ID: "race-exec", TaskID: task.ID, Status: models.ExecRunning, PromptSent: "prompt"}))
 
 	latePath := filepath.Join(t.TempDir(), "late-upload.txt")
 	require.NoError(t, os.WriteFile(latePath, []byte("late"), 0o600))
@@ -1678,11 +1678,11 @@ func TestTaskService_Delete_PreventsUploadMetadataRaceFromLeakingFile(t *testing
 }
 
 func TestTaskService_Delete_SerializesPendingPublicationAfterRetirement(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
-	threadInputRepo := teststores.Of(db).ThreadInputs
+	env := teststores.New(t)
+	taskRepo := env.Tasks
+	threadInputRepo := env.ThreadInputs
 	uploadsDir := filepath.Join(t.TempDir(), "uploads")
-	svc := NewTaskService(taskRepo, teststores.Of(db).Attachments, newTestWorkerService(t))
+	svc := NewTaskService(taskRepo, env.Attachments, newTestWorkerService(t))
 	svc.SetDeletionUploadsDir(uploadsDir)
 	ctx := context.Background()
 	task := &models.Task{ProjectID: "default", Title: "Retired publication", Category: models.CategoryBacklog, Status: models.StatusPending, Prompt: "test"}
@@ -1742,11 +1742,11 @@ func TestTaskService_Delete_SerializesPendingPublicationAfterRetirement(t *testi
 }
 
 func TestTaskService_Delete_RejectsPendingSessionOwnerAcquiredAfterCommitBeforeRemoval(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
-	threadInputRepo := teststores.Of(db).ThreadInputs
+	env := teststores.New(t)
+	taskRepo := env.Tasks
+	threadInputRepo := env.ThreadInputs
 	uploadsDir := filepath.Join(t.TempDir(), "uploads")
-	svc := NewTaskService(taskRepo, teststores.Of(db).Attachments, newTestWorkerService(t))
+	svc := NewTaskService(taskRepo, env.Attachments, newTestWorkerService(t))
 	svc.SetDeletionUploadsDir(uploadsDir)
 	ctx := context.Background()
 	deletedTask := &models.Task{ProjectID: "default", Title: "Deleted pending owner", Category: models.CategoryBacklog, Status: models.StatusPending, Prompt: "test"}
@@ -1782,16 +1782,16 @@ func TestTaskService_Delete_RejectsPendingSessionOwnerAcquiredAfterCommitBeforeR
 }
 
 func TestTaskService_Delete_RejectsUnsafePendingUploadSessionBeforeCancellation(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
-	attachmentRepo := teststores.Of(db).Attachments
+	env := teststores.New(t)
+	taskRepo := env.Tasks
+	attachmentRepo := env.Attachments
 	workerSvc := newTestWorkerService(t)
 	svc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 	svc.SetDeletionUploadsDir(filepath.Join(t.TempDir(), "uploads"))
 	ctx := context.Background()
 	task := &models.Task{ProjectID: "default", Title: "Unsafe pending upload", Category: models.CategoryBacklog, Status: models.StatusPending, Prompt: "test"}
 	require.NoError(t, taskRepo.Create(ctx, task))
-	require.NoError(t, teststores.Of(db).ThreadInputs.CreateQueued(ctx, &models.ThreadInput{
+	require.NoError(t, env.ThreadInputs.CreateQueued(ctx, &models.ThreadInput{
 		Scope: models.ThreadInputScopeTask, ProjectID: "default", TaskID: task.ID, Content: "follow up", AttachmentSessionID: "../outside",
 	}))
 	cancelled := false
@@ -1806,14 +1806,14 @@ func TestTaskService_Delete_RejectsUnsafePendingUploadSessionBeforeCancellation(
 }
 
 func TestTaskService_Delete_RejectsPendingUploadsWithoutConfiguredRoot(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
+	env := teststores.New(t)
+	taskRepo := env.Tasks
 	workerSvc := newTestWorkerService(t)
-	svc := NewTaskService(taskRepo, teststores.Of(db).Attachments, workerSvc)
+	svc := NewTaskService(taskRepo, env.Attachments, workerSvc)
 	ctx := context.Background()
 	task := &models.Task{ProjectID: "default", Title: "Missing upload root", Category: models.CategoryBacklog, Status: models.StatusPending, Prompt: "test"}
 	require.NoError(t, taskRepo.Create(ctx, task))
-	require.NoError(t, teststores.Of(db).ThreadInputs.CreateQueued(ctx, &models.ThreadInput{
+	require.NoError(t, env.ThreadInputs.CreateQueued(ctx, &models.ThreadInput{
 		Scope: models.ThreadInputScopeTask, ProjectID: "default", TaskID: task.ID, Content: "follow up", AttachmentSessionID: "abcdefabcdefabcdefabcdefabcdefab",
 	}))
 	cancelled := false
@@ -1828,9 +1828,9 @@ func TestTaskService_Delete_RejectsPendingUploadsWithoutConfiguredRoot(t *testin
 }
 
 func TestTaskService_Delete_PreservesFilesStillReferencedByAnotherTask(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
-	attachmentRepo := teststores.Of(db).Attachments
+	env := teststores.New(t)
+	taskRepo := env.Tasks
+	attachmentRepo := env.Attachments
 	uploadsDir := filepath.Join(t.TempDir(), "uploads")
 	svc := NewTaskService(taskRepo, attachmentRepo, newTestWorkerService(t))
 	svc.SetDeletionUploadsDir(uploadsDir)
@@ -1849,7 +1849,7 @@ func TestTaskService_Delete_PreservesFilesStillReferencedByAnotherTask(t *testin
 	require.NoError(t, os.MkdirAll(sharedDir, 0o700))
 	require.NoError(t, os.WriteFile(filepath.Join(sharedDir, "pending.txt"), []byte("pending"), 0o600))
 	for _, task := range []*models.Task{first, second} {
-		require.NoError(t, teststores.Of(db).ThreadInputs.CreateQueued(ctx, &models.ThreadInput{
+		require.NoError(t, env.ThreadInputs.CreateQueued(ctx, &models.ThreadInput{
 			Scope: models.ThreadInputScopeTask, ProjectID: "default", TaskID: task.ID, Content: "follow up", AttachmentSessionID: sharedSession,
 		}))
 	}
@@ -1901,9 +1901,9 @@ func TestTaskService_Delete_PreservesExecutionLinkedSessionOwnedByAnotherProject
 }
 
 func TestTaskService_Delete_SurfacesPostDeleteAttachmentCleanupFailure(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
-	attachmentRepo := teststores.Of(db).Attachments
+	env := teststores.New(t)
+	taskRepo := env.Tasks
+	attachmentRepo := env.Attachments
 	svc := NewTaskService(taskRepo, attachmentRepo, newTestWorkerService(t))
 	ctx := context.Background()
 	task := &models.Task{ProjectID: "default", Title: "Cleanup failure", Category: models.CategoryBacklog, Status: models.StatusPending, Prompt: "test"}
@@ -1922,13 +1922,13 @@ func TestTaskService_Delete_SurfacesPostDeleteAttachmentCleanupFailure(t *testin
 }
 
 func TestTaskService_Delete_DeletesAttachments(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
-	attachmentRepo := teststores.Of(db).Attachments
+	env := teststores.New(t)
+	taskRepo := env.Tasks
+	attachmentRepo := env.Attachments
 	workerSvc := newTestWorkerService(t)
 	svc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 	ctx := context.Background()
-	chatAttachmentRepo := teststores.Of(db).ChatAttachments
+	chatAttachmentRepo := env.ChatAttachments
 	uploadsDir := filepath.Join(t.TempDir(), "uploads")
 	svc.SetDeletionUploadsDir(uploadsDir)
 	cancelled := make(chan struct{})
@@ -1975,7 +1975,7 @@ func TestTaskService_Delete_DeletesAttachments(t *testing.T) {
 	executionAttachmentPath := filepath.Join(uploadsDir, "chat", "delete-exec", "execution.txt")
 	require.NoError(t, os.MkdirAll(filepath.Dir(executionAttachmentPath), 0o700))
 	require.NoError(t, os.WriteFile(executionAttachmentPath, []byte("execution attachment"), 0o600))
-	require.NoError(t, teststores.Of(db).Executions.Create(ctx, &models.Execution{ID: "delete-exec", TaskID: task.ID, Status: models.ExecCompleted, PromptSent: "prompt"}))
+	require.NoError(t, env.Executions.Create(ctx, &models.Execution{ID: "delete-exec", TaskID: task.ID, Status: models.ExecCompleted, PromptSent: "prompt"}))
 	require.NoError(t, chatAttachmentRepo.Create(ctx, &models.ChatAttachment{
 		ExecutionID: "delete-exec",
 		FileName:    "execution.txt",
@@ -1988,7 +1988,7 @@ func TestTaskService_Delete_DeletesAttachments(t *testing.T) {
 	pendingUploadDir := filepath.Join(uploadsDir, "chat", "pending", pendingSessionID)
 	require.NoError(t, os.MkdirAll(pendingUploadDir, 0o700))
 	require.NoError(t, os.WriteFile(filepath.Join(pendingUploadDir, "pending.txt"), []byte("pending"), 0o600))
-	require.NoError(t, teststores.Of(db).ThreadInputs.CreateQueued(ctx, &models.ThreadInput{
+	require.NoError(t, env.ThreadInputs.CreateQueued(ctx, &models.ThreadInput{
 		Scope: models.ThreadInputScopeTask, ProjectID: "default", TaskID: task.ID, Content: "follow up", AttachmentSessionID: pendingSessionID,
 	}))
 
@@ -2050,10 +2050,10 @@ func TestTaskService_Delete_DeletesAttachments(t *testing.T) {
 }
 
 func TestTaskService_UpdateCategory_FromCompletedToActiveResetsStatus(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
+	env := teststores.New(t)
+	taskRepo := env.Tasks
 	workerSvc := newTestWorkerService(t)
-	attachmentRepo := teststores.Of(db).Attachments
+	attachmentRepo := env.Attachments
 	svc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 	ctx := context.Background()
 
@@ -2117,11 +2117,11 @@ func TestTaskService_UpdateCategory_NonActiveRunningOrQueuedDoesNotCancel(t *tes
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			db := teststores.NewDB(t)
-			taskRepo := teststores.Of(db).Tasks
+			env := teststores.New(t)
+			taskRepo := env.Tasks
 			workerSvc := newTestWorkerService(t)
-			goalSvc := NewTaskGoalService(teststores.Of(db).TaskGoals, taskRepo, nil)
-			svc := NewTaskService(taskRepo, teststores.Of(db).Attachments, workerSvc)
+			goalSvc := NewTaskGoalService(env.TaskGoals, taskRepo, nil)
+			svc := NewTaskService(taskRepo, env.Attachments, workerSvc)
 			svc.SetTaskGoalService(goalSvc)
 			ctx := context.Background()
 
@@ -2164,10 +2164,10 @@ func TestTaskService_UpdateCategory_NonActiveRunningOrQueuedDoesNotCancel(t *tes
 }
 
 func TestTaskService_CancelTask_AllowsActivePendingTask(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
+	env := teststores.New(t)
+	taskRepo := env.Tasks
 	workerSvc := newTestWorkerService(t)
-	attachmentRepo := teststores.Of(db).Attachments
+	attachmentRepo := env.Attachments
 	svc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 	ctx := context.Background()
 
@@ -2190,10 +2190,10 @@ func TestTaskService_CancelTask_AllowsActivePendingTask(t *testing.T) {
 }
 
 func TestTaskService_CancelTask_DoesNotAllowOrdinaryScheduledPendingTask(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
+	env := teststores.New(t)
+	taskRepo := env.Tasks
 	workerSvc := newTestWorkerService(t)
-	svc := NewTaskService(taskRepo, teststores.Of(db).Attachments, workerSvc)
+	svc := NewTaskService(taskRepo, env.Attachments, workerSvc)
 	ctx := context.Background()
 
 	task := &models.Task{
@@ -2216,11 +2216,11 @@ func TestTaskService_CancelTask_DoesNotAllowOrdinaryScheduledPendingTask(t *test
 }
 
 func TestTaskService_CancelTask_RunningTaskPreservesCancellationOrdering(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
+	env := teststores.New(t)
+	taskRepo := env.Tasks
 	workerSvc := newTestWorkerService(t)
-	goalSvc := NewTaskGoalService(teststores.Of(db).TaskGoals, taskRepo, nil)
-	svc := NewTaskService(taskRepo, teststores.Of(db).Attachments, workerSvc)
+	goalSvc := NewTaskGoalService(env.TaskGoals, taskRepo, nil)
+	svc := NewTaskService(taskRepo, env.Attachments, workerSvc)
 	svc.SetTaskGoalService(goalSvc)
 	ctx := context.Background()
 
@@ -2283,10 +2283,10 @@ func TestTaskService_CancelTask_RunningTaskPreservesCancellationOrdering(t *test
 }
 
 func TestTaskService_CancelTask_AllowsQueuedTask(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
+	env := teststores.New(t)
+	taskRepo := env.Tasks
 	workerSvc := newTestWorkerService(t)
-	attachmentRepo := teststores.Of(db).Attachments
+	attachmentRepo := env.Attachments
 	svc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 	ctx := context.Background()
 
@@ -2318,11 +2318,11 @@ func TestTaskService_CancelTask_AllowsQueuedTask(t *testing.T) {
 }
 
 func TestTaskService_CancelTaskObservedDoesNotCancelNewFollowup(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
-	execRepo := teststores.Of(db).Executions
+	env := teststores.New(t)
+	taskRepo := env.Tasks
+	execRepo := env.Executions
 	worker := newTestWorkerService(t)
-	svc := NewTaskService(taskRepo, teststores.Of(db).Attachments, worker)
+	svc := NewTaskService(taskRepo, env.Attachments, worker)
 	ctx := context.Background()
 	task := &models.Task{ProjectID: "default", Title: "Superseded Stop", Prompt: "test", Status: models.StatusRunning, Category: models.CategoryActive}
 	require.NoError(t, taskRepo.Create(ctx, task))
@@ -2341,7 +2341,7 @@ func TestTaskService_CancelTaskObservedDoesNotCancelNewFollowup(t *testing.T) {
 	started, err := execRepo.CreateDirectTaskFollowupOrQueue(ctx, next, &models.ThreadInput{Content: "new"})
 	require.NoError(t, err)
 	require.True(t, started)
-	inputRepo := teststores.Of(db).ThreadInputs
+	inputRepo := env.ThreadInputs
 	queued := &models.ThreadInput{Scope: models.ThreadInputScopeTask, ProjectID: "default", TaskID: task.ID, Content: "another follow-up"}
 	require.NoError(t, inputRepo.CreateQueued(ctx, queued))
 	cancelled := make(chan struct{}, 1)
@@ -2373,10 +2373,10 @@ func TestTaskService_CancelTaskObservedDoesNotCancelNewFollowup(t *testing.T) {
 }
 
 func TestTaskService_ObserveTaskCancellationKeepsTaskAndCutoffTogether(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
-	execRepo := teststores.Of(db).Executions
-	svc := NewTaskService(taskRepo, teststores.Of(db).Attachments, nil)
+	env := teststores.New(t)
+	taskRepo := env.Tasks
+	execRepo := env.Executions
+	svc := NewTaskService(taskRepo, env.Attachments, nil)
 	ctx := context.Background()
 	task := &models.Task{ProjectID: "default", Title: "Atomic Stop Observation", Prompt: "test", Status: models.StatusRunning, Category: models.CategoryActive}
 	require.NoError(t, taskRepo.Create(ctx, task))
@@ -2424,10 +2424,10 @@ func TestTaskService_ObserveTaskCancellationKeepsTaskAndCutoffTogether(t *testin
 }
 
 func TestTaskService_CancelTaskDoesNotPurgeRerunSubmittedDuringStop(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
+	env := teststores.New(t)
+	taskRepo := env.Tasks
 	worker := newTestWorkerService(t)
-	svc := NewTaskService(taskRepo, teststores.Of(db).Attachments, worker)
+	svc := NewTaskService(taskRepo, env.Attachments, worker)
 	ctx := context.Background()
 	task := &models.Task{ProjectID: "default", Title: "Rerun During Stop", Prompt: "test", Status: models.StatusRunning, Category: models.CategoryActive}
 	require.NoError(t, taskRepo.Create(ctx, task))
@@ -2503,11 +2503,11 @@ func TestTaskService_CancelTask_ReturnsCategoryUpdateFailure(t *testing.T) {
 }
 
 func TestTaskService_UpdateCategory_FromActiveToCompletedCancelsRunning(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
+	env := teststores.New(t)
+	taskRepo := env.Tasks
 	workerSvc := newTestWorkerService(t)
-	attachmentRepo := teststores.Of(db).Attachments
-	goalSvc := NewTaskGoalService(teststores.Of(db).TaskGoals, taskRepo, nil)
+	attachmentRepo := env.Attachments
+	goalSvc := NewTaskGoalService(env.TaskGoals, taskRepo, nil)
 	svc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 	svc.SetTaskGoalService(goalSvc)
 	ctx := context.Background()
@@ -2549,11 +2549,11 @@ func TestTaskService_UpdateCategory_FromActiveToCompletedCancelsRunning(t *testi
 }
 
 func TestTaskService_UpdateCategoryDemotionDoesNotCancelConcurrentFollowup(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
-	execRepo := teststores.Of(db).Executions
+	env := teststores.New(t)
+	taskRepo := env.Tasks
+	execRepo := env.Executions
 	worker := newTestWorkerService(t)
-	svc := NewTaskService(taskRepo, teststores.Of(db).Attachments, worker)
+	svc := NewTaskService(taskRepo, env.Attachments, worker)
 	ctx := context.Background()
 	task := &models.Task{ProjectID: "default", Title: "Demotion Follow-up", Prompt: "test", Status: models.StatusRunning, Category: models.CategoryActive}
 	require.NoError(t, taskRepo.Create(ctx, task))
@@ -2602,11 +2602,11 @@ func TestTaskService_UpdateCategoryDemotionDoesNotCancelConcurrentFollowup(t *te
 }
 
 func TestTaskService_UpdateCategory_FromActiveToCompletedCancelsQueued(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
+	env := teststores.New(t)
+	taskRepo := env.Tasks
 	workerSvc := newTestWorkerService(t)
-	attachmentRepo := teststores.Of(db).Attachments
-	goalSvc := NewTaskGoalService(teststores.Of(db).TaskGoals, taskRepo, nil)
+	attachmentRepo := env.Attachments
+	goalSvc := NewTaskGoalService(env.TaskGoals, taskRepo, nil)
 	svc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 	svc.SetTaskGoalService(goalSvc)
 	ctx := context.Background()
@@ -2645,11 +2645,11 @@ func TestTaskService_UpdateCategory_FromActiveToCompletedCancelsQueued(t *testin
 }
 
 func TestTaskService_UpdateCategory_FromActiveToBacklogCancelsQueued(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
+	env := teststores.New(t)
+	taskRepo := env.Tasks
 	workerSvc := newTestWorkerService(t)
-	attachmentRepo := teststores.Of(db).Attachments
-	goalSvc := NewTaskGoalService(teststores.Of(db).TaskGoals, taskRepo, nil)
+	attachmentRepo := env.Attachments
+	goalSvc := NewTaskGoalService(env.TaskGoals, taskRepo, nil)
 	svc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 	svc.SetTaskGoalService(goalSvc)
 	ctx := context.Background()
@@ -2688,11 +2688,11 @@ func TestTaskService_UpdateCategory_FromActiveToBacklogCancelsQueued(t *testing.
 }
 
 func TestTaskService_UpdateCategory_ToActiveResumesGoalPausedByUserStop(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
+	env := teststores.New(t)
+	taskRepo := env.Tasks
 	workerSvc := newTestWorkerService(t)
-	attachmentRepo := teststores.Of(db).Attachments
-	goalSvc := NewTaskGoalService(teststores.Of(db).TaskGoals, taskRepo, nil)
+	attachmentRepo := env.Attachments
+	goalSvc := NewTaskGoalService(env.TaskGoals, taskRepo, nil)
 	svc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 	svc.SetTaskGoalService(goalSvc)
 	ctx := context.Background()
@@ -2720,10 +2720,10 @@ func TestTaskService_UpdateCategory_ToActiveResumesGoalPausedByUserStop(t *testi
 }
 
 func TestTaskService_UpdateCategory_FromRunningToActiveResetsStatus(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
+	env := teststores.New(t)
+	taskRepo := env.Tasks
 	workerSvc := newTestWorkerService(t)
-	attachmentRepo := teststores.Of(db).Attachments
+	attachmentRepo := env.Attachments
 	svc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 	ctx := context.Background()
 
@@ -2763,8 +2763,8 @@ func TestTaskService_UpdateCategory_FromRunningToActiveResetsStatus(t *testing.T
 }
 
 func TestTaskService_ActiveTaskWithCompletedStatusIsNotDeleted(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
+	env := teststores.New(t)
+	taskRepo := env.Tasks
 	ctx := context.Background()
 
 	// Create a task in the active category
@@ -2835,10 +2835,10 @@ func TestTaskService_DeleteAll_CleansEveryUploadOwner(t *testing.T) {
 	}
 	for i, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			db := teststores.NewDB(t)
-			taskRepo := teststores.Of(db).Tasks
-			attachmentRepo := teststores.Of(db).Attachments
-			chatAttachmentRepo := teststores.Of(db).ChatAttachments
+			env := teststores.New(t)
+			taskRepo := env.Tasks
+			attachmentRepo := env.Attachments
+			chatAttachmentRepo := env.ChatAttachments
 			uploadsDir := filepath.Join(t.TempDir(), "uploads")
 			svc := NewTaskService(taskRepo, attachmentRepo, newTestWorkerService(t))
 			svc.SetDeletionUploadsDir(uploadsDir)
@@ -2850,7 +2850,7 @@ func TestTaskService_DeleteAll_CleansEveryUploadOwner(t *testing.T) {
 			require.NoError(t, os.WriteFile(taskPath, []byte("task"), 0o600))
 			require.NoError(t, attachmentRepo.Create(ctx, &models.Attachment{TaskID: task.ID, FileName: "task.txt", FilePath: taskPath, MediaType: "text/plain", FileSize: 4}))
 			execID := fmt.Sprintf("bulk-exec-%d", i)
-			require.NoError(t, teststores.Of(db).Executions.Create(ctx, &models.Execution{ID: execID, TaskID: task.ID, Status: models.ExecCompleted, PromptSent: "prompt"}))
+			require.NoError(t, env.Executions.Create(ctx, &models.Execution{ID: execID, TaskID: task.ID, Status: models.ExecCompleted, PromptSent: "prompt"}))
 			execPath := filepath.Join(uploadsDir, "chat", execID, "execution.txt")
 			require.NoError(t, os.MkdirAll(filepath.Dir(execPath), 0o700))
 			require.NoError(t, os.WriteFile(execPath, []byte("execution"), 0o600))
@@ -2863,7 +2863,7 @@ func TestTaskService_DeleteAll_CleansEveryUploadOwner(t *testing.T) {
 			if tt.category == models.CategoryChat {
 				input = &models.ThreadInput{Scope: models.ThreadInputScopeChat, ProjectID: "default", RunExecutionID: execID, Content: "follow up", AttachmentSessionID: sessionID}
 			}
-			require.NoError(t, teststores.Of(db).ThreadInputs.CreateQueued(ctx, input))
+			require.NoError(t, env.ThreadInputs.CreateQueued(ctx, input))
 			count, err := tt.delete(svc, ctx, "default")
 			require.NoError(t, err)
 			require.Equal(t, 1, count)
@@ -2898,9 +2898,9 @@ func TestTaskService_DeleteAll_PreservesFilesWhenDurableDeleteFails(t *testing.T
 }
 
 func TestTaskService_DeleteAll_SurfacesCleanupFailureAfterDurableDelete(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
-	attachmentRepo := teststores.Of(db).Attachments
+	env := teststores.New(t)
+	taskRepo := env.Tasks
+	attachmentRepo := env.Attachments
 	svc := NewTaskService(taskRepo, attachmentRepo, newTestWorkerService(t))
 	ctx := context.Background()
 	task := &models.Task{ProjectID: "default", Title: "Bulk cleanup failure", Category: models.CategoryBacklog, Status: models.StatusPending, Prompt: "test"}
@@ -2919,11 +2919,11 @@ func TestTaskService_DeleteAll_SurfacesCleanupFailureAfterDurableDelete(t *testi
 }
 
 func TestTaskService_DeleteAllCompleted(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
-	projectRepo := teststores.Of(db).Projects
+	env := teststores.New(t)
+	taskRepo := env.Tasks
+	projectRepo := env.Projects
 	workerSvc := newTestWorkerService(t)
-	attachmentRepo := teststores.Of(db).Attachments
+	attachmentRepo := env.Attachments
 	svc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 	ctx := context.Background()
 
@@ -3014,11 +3014,11 @@ func TestTaskService_DeleteAllCompleted(t *testing.T) {
 }
 
 func TestTaskService_DeleteAllBacklog(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
-	projectRepo := teststores.Of(db).Projects
+	env := teststores.New(t)
+	taskRepo := env.Tasks
+	projectRepo := env.Projects
 	workerSvc := newTestWorkerService(t)
-	attachmentRepo := teststores.Of(db).Attachments
+	attachmentRepo := env.Attachments
 	svc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 	ctx := context.Background()
 
@@ -3109,11 +3109,11 @@ func TestTaskService_DeleteAllBacklog(t *testing.T) {
 }
 
 func TestTaskService_ActivateAllBacklog(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
-	projectRepo := teststores.Of(db).Projects
+	env := teststores.New(t)
+	taskRepo := env.Tasks
+	projectRepo := env.Projects
 	workerSvc := newTestWorkerService(t)
-	attachmentRepo := teststores.Of(db).Attachments
+	attachmentRepo := env.Attachments
 	svc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 	ctx := context.Background()
 
@@ -3195,12 +3195,12 @@ func TestTaskService_ActivateAllBacklog(t *testing.T) {
 }
 
 func TestTaskService_ActivateAllBacklog_ResumesGoalPausedByUserStop(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
-	projectRepo := teststores.Of(db).Projects
+	env := teststores.New(t)
+	taskRepo := env.Tasks
+	projectRepo := env.Projects
 	workerSvc := newTestWorkerService(t)
-	attachmentRepo := teststores.Of(db).Attachments
-	goalSvc := NewTaskGoalService(teststores.Of(db).TaskGoals, taskRepo, nil)
+	attachmentRepo := env.Attachments
+	goalSvc := NewTaskGoalService(env.TaskGoals, taskRepo, nil)
 	svc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 	svc.SetTaskGoalService(goalSvc)
 	ctx := context.Background()
@@ -3268,10 +3268,10 @@ func TestWorkerService_Submit_SkipsChatTasks(t *testing.T) {
 }
 
 func TestTaskService_ExecuteBacklogTasks_All(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
+	env := teststores.New(t)
+	taskRepo := env.Tasks
 	workerSvc := newTestWorkerService(t)
-	attachmentRepo := teststores.Of(db).Attachments
+	attachmentRepo := env.Attachments
 	svc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 	ctx := context.Background()
 
@@ -3343,11 +3343,11 @@ func TestTaskService_ExecuteBacklogTasks_All(t *testing.T) {
 }
 
 func TestTaskService_ExecuteBacklogTasks_ResumesGoalPausedByUserStop(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
+	env := teststores.New(t)
+	taskRepo := env.Tasks
 	workerSvc := newTestWorkerService(t)
-	attachmentRepo := teststores.Of(db).Attachments
-	goalSvc := NewTaskGoalService(teststores.Of(db).TaskGoals, taskRepo, nil)
+	attachmentRepo := env.Attachments
+	goalSvc := NewTaskGoalService(env.TaskGoals, taskRepo, nil)
 	svc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 	svc.SetTaskGoalService(goalSvc)
 	ctx := context.Background()
@@ -3377,10 +3377,10 @@ func TestTaskService_ExecuteBacklogTasks_ResumesGoalPausedByUserStop(t *testing.
 }
 
 func TestTaskService_ExecuteBacklogTasks_FilterByPriority(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
+	env := teststores.New(t)
+	taskRepo := env.Tasks
 	workerSvc := newTestWorkerService(t)
-	attachmentRepo := teststores.Of(db).Attachments
+	attachmentRepo := env.Attachments
 	svc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 	ctx := context.Background()
 
@@ -3453,10 +3453,10 @@ func TestTaskService_ExecuteBacklogTasks_FilterByPriority(t *testing.T) {
 }
 
 func TestTaskService_ExecuteBacklogTasks_ReExecutesFailedTasks(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
+	env := teststores.New(t)
+	taskRepo := env.Tasks
 	workerSvc := newTestWorkerService(t)
-	attachmentRepo := teststores.Of(db).Attachments
+	attachmentRepo := env.Attachments
 	svc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 	ctx := context.Background()
 
@@ -3494,10 +3494,10 @@ func TestTaskService_ExecuteBacklogTasks_ReExecutesFailedTasks(t *testing.T) {
 }
 
 func TestTaskService_ExecuteBacklogTasks_SkipsRunningTasks(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
+	env := teststores.New(t)
+	taskRepo := env.Tasks
 	workerSvc := newTestWorkerService(t)
-	attachmentRepo := teststores.Of(db).Attachments
+	attachmentRepo := env.Attachments
 	svc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 	ctx := context.Background()
 
@@ -3526,10 +3526,10 @@ func TestTaskService_ExecuteBacklogTasks_SkipsRunningTasks(t *testing.T) {
 }
 
 func TestTaskService_ExecuteBacklogTasks_EmptyBacklog(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
+	env := teststores.New(t)
+	taskRepo := env.Tasks
 	workerSvc := newTestWorkerService(t)
-	attachmentRepo := teststores.Of(db).Attachments
+	attachmentRepo := env.Attachments
 	svc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 	ctx := context.Background()
 
@@ -3547,10 +3547,10 @@ func TestTaskService_ExecuteBacklogTasks_EmptyBacklog(t *testing.T) {
 }
 
 func TestTaskService_ExecuteBacklogTasks_ReExecutesCompletedTasks(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
+	env := teststores.New(t)
+	taskRepo := env.Tasks
 	workerSvc := newTestWorkerService(t)
-	attachmentRepo := teststores.Of(db).Attachments
+	attachmentRepo := env.Attachments
 	svc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 	ctx := context.Background()
 
@@ -3589,8 +3589,8 @@ func TestTaskService_ExecuteBacklogTasks_ReExecutesCompletedTasks(t *testing.T) 
 }
 
 func TestTaskRepo_CountBacklogByPriority(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
+	env := teststores.New(t)
+	taskRepo := env.Tasks
 	ctx := context.Background()
 
 	// Create backlog tasks with different priorities
@@ -3628,10 +3628,10 @@ func TestTaskRepo_CountBacklogByPriority(t *testing.T) {
 }
 
 func TestTaskService_Create_ChatTaskDoesNotAutoSubmit(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
+	env := teststores.New(t)
+	taskRepo := env.Tasks
 	workerSvc := newTestWorkerService(t)
-	attachmentRepo := teststores.Of(db).Attachments
+	attachmentRepo := env.Attachments
 	svc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 	ctx := context.Background()
 
@@ -3656,8 +3656,8 @@ func TestTaskService_Create_ChatTaskDoesNotAutoSubmit(t *testing.T) {
 }
 
 func TestWorkerService_ProjectConcurrency_Tracking(t *testing.T) {
-	db := teststores.NewDB(t)
-	projectRepo := teststores.Of(db).Projects
+	env := teststores.New(t)
+	projectRepo := env.Projects
 	ctx := context.Background()
 
 	// Create a project with max_workers = 2
@@ -3723,8 +3723,8 @@ func TestWorkerService_ProjectConcurrency_Tracking(t *testing.T) {
 }
 
 func TestWorkerService_ProjectConcurrency_NoLimit(t *testing.T) {
-	db := teststores.NewDB(t)
-	projectRepo := teststores.Of(db).Projects
+	env := teststores.New(t)
+	projectRepo := env.Projects
 
 	ws := NewWorkerService(nil, 0, projectRepo)
 
@@ -3766,8 +3766,8 @@ func TestWorkerService_ProjectConcurrency_NilProjectRepo(t *testing.T) {
 }
 
 func TestWorkerService_ProjectConcurrency_MultipleProjects(t *testing.T) {
-	db := teststores.NewDB(t)
-	projectRepo := teststores.Of(db).Projects
+	env := teststores.New(t)
+	projectRepo := env.Projects
 	ctx := context.Background()
 
 	// Project A: max 1 worker
@@ -3827,9 +3827,9 @@ func TestWorkerService_SubmitReservedUpgradesExistingQueuedTask(t *testing.T) {
 func TestWorkerService_StartReconcilesDurableActiveLaneReservationWhileCapacityFull(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
-	execRepo := teststores.Of(db).Executions
+	env := teststores.New(t)
+	taskRepo := env.Tasks
+	execRepo := env.Executions
 	task := &models.Task{ProjectID: "default", Title: "Restart reserved worker task", Category: models.CategoryBacklog, Status: models.StatusPending}
 	require.NoError(t, taskRepo.Create(ctx, task))
 	admissions, err := taskRepo.MoveTasksToActiveLane(ctx, "default", []persistence.ActiveLaneTaskMove{{ID: task.ID, ExpectedCategory: models.CategoryBacklog, ExpectedStatus: models.StatusPending}}, models.StatusRunning)
@@ -3855,10 +3855,10 @@ func TestWorkerService_StartReconcilesDurableActiveLaneReservationWhileCapacityF
 func TestWorkerService_ReservedDispatchRefreshesMetadataAfterCapacityWait(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
-	execRepo := teststores.Of(db).Executions
-	modelRepo := teststores.Of(db).LLMConfigs
+	env := teststores.New(t)
+	taskRepo := env.Tasks
+	execRepo := env.Executions
+	modelRepo := env.LLMConfigs
 	firstModel := &models.LLMConfig{Name: "Capacity original model", Provider: models.ProviderTest, Model: "original-model"}
 	secondModel := &models.LLMConfig{Name: "Capacity current model", Provider: models.ProviderTest, Model: "current-model"}
 	require.NoError(t, modelRepo.Create(ctx, firstModel))
@@ -3869,13 +3869,13 @@ func TestWorkerService_ReservedDispatchRefreshesMetadataAfterCapacityWait(t *tes
 	require.NoError(t, err)
 	require.Len(t, admissions, 1)
 
-	defaultProject, err := teststores.Of(db).Projects.GetByID(ctx, "default")
+	defaultProject, err := env.Projects.GetByID(ctx, "default")
 	require.NoError(t, err)
 	maxWorkers := 1
 	defaultProject.MaxWorkers = &maxWorkers
-	require.NoError(t, teststores.Of(db).Projects.Update(ctx, defaultProject))
+	require.NoError(t, env.Projects.Update(ctx, defaultProject))
 	worker := NewWorkerService(nil, 2, nil)
-	worker.SetProjectRepo(teststores.Of(db).Projects)
+	worker.SetProjectRepo(env.Projects)
 	worker.SetTaskRepo(taskRepo)
 	worker.SetExecutionRepo(execRepo)
 	worker.SetLLMConfigRepo(modelRepo)
@@ -3914,9 +3914,9 @@ func TestWorkerService_ReservedDispatchRefreshesMetadataAfterCapacityWait(t *tes
 func TestWorkerService_RetriesTransientReservedClaimFailureWithSameExecution(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
-	execRepo := teststores.Of(db).Executions
+	env := teststores.New(t)
+	taskRepo := env.Tasks
+	execRepo := env.Executions
 	task := &models.Task{ProjectID: "default", Title: "Retry reserved claim", Category: models.CategoryBacklog, Status: models.StatusPending, Prompt: "run once"}
 	require.NoError(t, taskRepo.Create(ctx, task))
 	admissions, err := taskRepo.MoveTasksToActiveLane(ctx, "default", []persistence.ActiveLaneTaskMove{{ID: task.ID, ExpectedCategory: models.CategoryBacklog, ExpectedStatus: models.StatusPending}}, models.StatusRunning)
@@ -3974,9 +3974,9 @@ func TestWorkerService_PrunesAndCancelsStaleDurableReservation(t *testing.T) {
 func TestWorkerService_DispatchPrunesNonPendingTasks(t *testing.T) {
 	// When dispatchNext scans the queue, tasks whose status changed to
 	// completed should be pruned from the queue instead of being dispatched.
-	db := teststores.NewDB(t)
-	projectRepo := teststores.Of(db).Projects
-	taskRepo := teststores.Of(db).Tasks
+	env := teststores.New(t)
+	projectRepo := env.Projects
+	taskRepo := env.Tasks
 	ctx := context.Background()
 
 	project := &models.Project{Name: "Test Project"}
@@ -4029,9 +4029,9 @@ func TestWorkerService_DispatchPrunesNonPendingTasks(t *testing.T) {
 func TestWorkerService_DispatchPrunesNonActiveCategoryTasks(t *testing.T) {
 	// When a task's category is changed away from active/scheduled,
 	// dispatchNext should prune it from the queue.
-	db := teststores.NewDB(t)
-	projectRepo := teststores.Of(db).Projects
-	taskRepo := teststores.Of(db).Tasks
+	env := teststores.New(t)
+	projectRepo := env.Projects
+	taskRepo := env.Tasks
 	ctx := context.Background()
 
 	project := &models.Project{Name: "Test Project"}
@@ -4079,8 +4079,8 @@ func TestWorkerService_DispatchPrunesNonActiveCategoryTasks(t *testing.T) {
 	}
 }
 func TestTaskService_MoveTasksToActiveLaneRoutesSingleSwarmPlannerAndReturnsLaneConflict(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
+	env := teststores.New(t)
+	taskRepo := env.Tasks
 	workerSvc := newTestWorkerService(t)
 	taskSvc := NewTaskService(taskRepo, nil, workerSvc)
 	swarmSvc := NewSwarmService(taskSvc, taskRepo, nil, workerSvc)
@@ -4096,8 +4096,8 @@ func TestTaskService_MoveTasksToActiveLaneRoutesSingleSwarmPlannerAndReturnsLane
 }
 
 func TestTaskService_MoveTasksToActiveLaneFencesConcurrentSwarmParentTransition(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
+	env := teststores.New(t)
+	taskRepo := env.Tasks
 	workerSvc := newTestWorkerService(t)
 	taskSvc := NewTaskService(taskRepo, nil, workerSvc)
 	swarmSvc := NewSwarmService(taskSvc, taskRepo, nil, workerSvc)
@@ -4122,9 +4122,9 @@ func TestTaskService_MoveTasksToActiveLaneFencesConcurrentSwarmParentTransition(
 }
 
 func TestTaskService_ActivateAllBacklogStartsSwarmPlanner(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
-	projectRepo := teststores.Of(db).Projects
+	env := teststores.New(t)
+	taskRepo := env.Tasks
+	projectRepo := env.Projects
 	workerSvc := newTestWorkerService(t)
 	taskSvc := NewTaskService(taskRepo, nil, workerSvc)
 	swarmSvc := NewSwarmService(taskSvc, taskRepo, nil, workerSvc)
@@ -4144,8 +4144,8 @@ func TestTaskService_ActivateAllBacklogStartsSwarmPlanner(t *testing.T) {
 }
 
 func TestTaskService_ExecuteBacklogTasksStartsSwarmPlanner(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
+	env := teststores.New(t)
+	taskRepo := env.Tasks
 	workerSvc := newTestWorkerService(t)
 	taskSvc := NewTaskService(taskRepo, nil, workerSvc)
 	swarmSvc := NewSwarmService(taskSvc, taskRepo, nil, workerSvc)
@@ -4163,8 +4163,8 @@ func TestTaskService_ExecuteBacklogTasksStartsSwarmPlanner(t *testing.T) {
 }
 
 func TestTaskService_ExecuteTasksByTagsStartsSwarmPlanner(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
+	env := teststores.New(t)
+	taskRepo := env.Tasks
 	workerSvc := newTestWorkerService(t)
 	taskSvc := NewTaskService(taskRepo, nil, workerSvc)
 	swarmSvc := NewSwarmService(taskSvc, taskRepo, nil, workerSvc)
@@ -4182,8 +4182,8 @@ func TestTaskService_ExecuteTasksByTagsStartsSwarmPlanner(t *testing.T) {
 }
 
 func TestTaskService_UpdateStatusPendingStartsSwarmPlanner(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
+	env := teststores.New(t)
+	taskRepo := env.Tasks
 	workerSvc := newTestWorkerService(t)
 	taskSvc := NewTaskService(taskRepo, nil, workerSvc)
 	swarmSvc := NewSwarmService(taskSvc, taskRepo, nil, workerSvc)

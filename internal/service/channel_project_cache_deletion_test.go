@@ -15,18 +15,18 @@ import (
 
 func TestChannelProjectSelectionCacheMissCannotRepopulateDeletedProject(t *testing.T) {
 	t.Run("slack", func(t *testing.T) {
-		db := teststores.NewDB(t)
+		env := teststores.New(t)
 		ctx := context.Background()
-		projectRepo := teststores.Of(db).Projects
+		projectRepo := env.Projects
 		projectA, err := projectRepo.GetByID(ctx, "default")
 		require.NoError(t, err)
 		require.NotNil(t, projectA)
 		projectB := &models.Project{Name: "Concurrent Slack B"}
 		require.NoError(t, projectRepo.Create(ctx, projectB))
-		userProjectRepo := teststores.Of(db).SlackUserProjects
+		userProjectRepo := env.SlackUserProjects
 		require.NoError(t, userProjectRepo.SetUserProject(ctx, "T-RACE", "U-RACE", projectB.ID))
 
-		svc := NewSlackService(teststores.Of(db).Settings, projectRepo, nil, nil, nil, nil, nil, nil, nil, userProjectRepo, nil, nil)
+		svc := NewSlackService(env.Settings, projectRepo, nil, nil, nil, nil, nil, nil, nil, userProjectRepo, nil, nil)
 		projectSvc := NewProjectService(projectRepo)
 		svc.SetProjectCreationServices(projectSvc, nil, nil, nil)
 		populateStarted := make(chan struct{})
@@ -66,18 +66,18 @@ func TestChannelProjectSelectionCacheMissCannotRepopulateDeletedProject(t *testi
 	})
 
 	t.Run("discord", func(t *testing.T) {
-		db := teststores.NewDB(t)
+		env := teststores.New(t)
 		ctx := context.Background()
-		projectRepo := teststores.Of(db).Projects
+		projectRepo := env.Projects
 		projectA, err := projectRepo.GetByID(ctx, "default")
 		require.NoError(t, err)
 		require.NotNil(t, projectA)
 		projectB := &models.Project{Name: "Concurrent Discord B"}
 		require.NoError(t, projectRepo.Create(ctx, projectB))
-		userProjectRepo := teststores.Of(db).DiscordUserProjects
+		userProjectRepo := env.DiscordUserProjects
 		require.NoError(t, userProjectRepo.SetUserProject(ctx, "U-RACE", projectB.ID))
 
-		svc := NewDiscordService(teststores.Of(db).Settings, projectRepo, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+		svc := NewDiscordService(env.Settings, projectRepo, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 		svc.SetDiscordUserProjectRepo(userProjectRepo)
 		projectSvc := NewProjectService(projectRepo)
 		svc.SetProjectCreationServices(projectSvc, nil, nil, nil)
@@ -110,15 +110,15 @@ func TestChannelProjectSelectionCacheMissCannotRepopulateDeletedProject(t *testi
 	})
 
 	t.Run("telegram", func(t *testing.T) {
-		db := teststores.NewDB(t)
+		env := teststores.New(t)
 		ctx := context.Background()
-		projectRepo := teststores.Of(db).Projects
+		projectRepo := env.Projects
 		projectA, err := projectRepo.GetByID(ctx, "default")
 		require.NoError(t, err)
 		require.NotNil(t, projectA)
 		projectB := &models.Project{Name: "Concurrent Telegram B"}
 		require.NoError(t, projectRepo.Create(ctx, projectB))
-		userProjectRepo := teststores.Of(db).TelegramUserProjects
+		userProjectRepo := env.TelegramUserProjects
 		const userID int64 = 11841184
 		require.NoError(t, userProjectRepo.SetUserProject(ctx, "11841184", projectB.ID))
 
@@ -161,9 +161,9 @@ func TestChannelProjectSelectionCacheMissCannotRepopulateDeletedProject(t *testi
 
 func TestChannelProjectSelectionCacheMissCannotOverwriteSuccessfulSwitch(t *testing.T) {
 	t.Run("slack", func(t *testing.T) {
-		db := teststores.NewDB(t)
+		env := teststores.New(t)
 		ctx := context.Background()
-		projectRepo := teststores.Of(db).Projects
+		projectRepo := env.Projects
 		projectA, err := projectRepo.GetByID(ctx, "default")
 		require.NoError(t, err)
 		require.NotNil(t, projectA)
@@ -171,10 +171,10 @@ func TestChannelProjectSelectionCacheMissCannotOverwriteSuccessfulSwitch(t *test
 		require.NoError(t, projectRepo.Create(ctx, projectB))
 		projectC := &models.Project{Name: "Concurrent Slack C"}
 		require.NoError(t, projectRepo.Create(ctx, projectC))
-		userProjectRepo := teststores.Of(db).SlackUserProjects
+		userProjectRepo := env.SlackUserProjects
 		require.NoError(t, userProjectRepo.SetUserProject(ctx, "T-SWITCH", "U-SWITCH", projectB.ID))
 
-		svc := NewSlackService(teststores.Of(db).Settings, projectRepo, nil, nil, nil, nil, nil, nil, nil, userProjectRepo, nil, nil)
+		svc := NewSlackService(env.Settings, projectRepo, nil, nil, nil, nil, nil, nil, nil, userProjectRepo, nil, nil)
 		projectSvc := NewProjectService(projectRepo)
 		svc.SetProjectCreationServices(projectSvc, nil, nil, nil)
 		populateStarted := make(chan struct{})
@@ -214,9 +214,9 @@ func TestChannelProjectSelectionCacheMissCannotOverwriteSuccessfulSwitch(t *test
 	})
 
 	t.Run("discord", func(t *testing.T) {
-		db := teststores.NewDB(t)
+		env := teststores.New(t)
 		ctx := context.Background()
-		projectRepo := teststores.Of(db).Projects
+		projectRepo := env.Projects
 		projectA, err := projectRepo.GetByID(ctx, "default")
 		require.NoError(t, err)
 		require.NotNil(t, projectA)
@@ -224,10 +224,10 @@ func TestChannelProjectSelectionCacheMissCannotOverwriteSuccessfulSwitch(t *test
 		require.NoError(t, projectRepo.Create(ctx, projectB))
 		projectC := &models.Project{Name: "Concurrent Discord C"}
 		require.NoError(t, projectRepo.Create(ctx, projectC))
-		userProjectRepo := teststores.Of(db).DiscordUserProjects
+		userProjectRepo := env.DiscordUserProjects
 		require.NoError(t, userProjectRepo.SetUserProject(ctx, "U-SWITCH", projectB.ID))
 
-		svc := NewDiscordService(teststores.Of(db).Settings, projectRepo, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+		svc := NewDiscordService(env.Settings, projectRepo, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 		svc.SetDiscordUserProjectRepo(userProjectRepo)
 		projectSvc := NewProjectService(projectRepo)
 		svc.SetProjectCreationServices(projectSvc, nil, nil, nil)
@@ -260,9 +260,9 @@ func TestChannelProjectSelectionCacheMissCannotOverwriteSuccessfulSwitch(t *test
 	})
 
 	t.Run("telegram", func(t *testing.T) {
-		db := teststores.NewDB(t)
+		env := teststores.New(t)
 		ctx := context.Background()
-		projectRepo := teststores.Of(db).Projects
+		projectRepo := env.Projects
 		projectA, err := projectRepo.GetByID(ctx, "default")
 		require.NoError(t, err)
 		require.NotNil(t, projectA)
@@ -270,7 +270,7 @@ func TestChannelProjectSelectionCacheMissCannotOverwriteSuccessfulSwitch(t *test
 		require.NoError(t, projectRepo.Create(ctx, projectB))
 		projectC := &models.Project{Name: "Concurrent Telegram C"}
 		require.NoError(t, projectRepo.Create(ctx, projectC))
-		userProjectRepo := teststores.Of(db).TelegramUserProjects
+		userProjectRepo := env.TelegramUserProjects
 		const userID int64 = 11841185
 		require.NoError(t, userProjectRepo.SetUserProject(ctx, "11841185", projectB.ID))
 
@@ -334,32 +334,32 @@ func TestChannelProjectSelectionInvalidationPreservesUnrelatedSelections(t *test
 }
 
 func TestSlackService_LiveDeletedSelectedProjectFallsBackWithoutRestart(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
-	projectRepo := teststores.Of(db).Projects
+	projectRepo := env.Projects
 	projectA, err := projectRepo.GetByID(ctx, "default")
 	require.NoError(t, err)
 	require.NotNil(t, projectA)
 	projectB := &models.Project{Name: "Selected B"}
 	require.NoError(t, projectRepo.Create(ctx, projectB))
 
-	taskRepo := teststores.Of(db).Tasks
-	execRepo := teststores.Of(db).Executions
-	llmConfigRepo := teststores.Of(db).LLMConfigs
-	scheduleRepo := teststores.Of(db).Schedules
-	attachmentRepo := teststores.Of(db).Attachments
+	taskRepo := env.Tasks
+	execRepo := env.Executions
+	llmConfigRepo := env.LLMConfigs
+	scheduleRepo := env.Schedules
+	attachmentRepo := env.Attachments
 	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, scheduleRepo, attachmentRepo)
 	llmSvc.SetLLMCaller(testutil.NewMockLLMCaller())
 	workerSvc := NewWorkerService(llmSvc, 0, nil)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
-	authRepo := teststores.Of(db).SlackAuth
+	authRepo := env.SlackAuth
 	for _, project := range []*models.Project{projectA, projectB} {
 		require.NoError(t, authRepo.Create(ctx, &models.SlackAuthorizedUser{
 			ProjectID: project.ID, SlackUserID: "U1184", DisplayName: "Issue 1184", AddedBy: "test",
 		}))
 	}
-	userProjectRepo := teststores.Of(db).SlackUserProjects
-	svc := NewSlackService(teststores.Of(db).Settings, projectRepo, llmConfigRepo, taskRepo, execRepo, scheduleRepo, taskSvc, llmSvc, workerSvc, userProjectRepo, teststores.Of(db).SlackTaskContexts, authRepo)
+	userProjectRepo := env.SlackUserProjects
+	svc := NewSlackService(env.Settings, projectRepo, llmConfigRepo, taskRepo, execRepo, scheduleRepo, taskSvc, llmSvc, workerSvc, userProjectRepo, env.SlackTaskContexts, authRepo)
 	projectSvc := NewProjectService(projectRepo)
 	projectSvc.SetTaskService(taskSvc)
 	svc.SetProjectCreationServices(projectSvc, nil, nil, nil)
@@ -389,7 +389,7 @@ func TestSlackService_LiveDeletedSelectedProjectFallsBackWithoutRestart(t *testi
 	require.NoError(t, err)
 	require.Empty(t, tasksB, "deleted project must not receive a task")
 
-	fresh := NewSlackService(teststores.Of(db).Settings, projectRepo, llmConfigRepo, taskRepo, execRepo, scheduleRepo, taskSvc, llmSvc, workerSvc, userProjectRepo, teststores.Of(db).SlackTaskContexts, authRepo)
+	fresh := NewSlackService(env.Settings, projectRepo, llmConfigRepo, taskRepo, execRepo, scheduleRepo, taskSvc, llmSvc, workerSvc, userProjectRepo, env.SlackTaskContexts, authRepo)
 	freshProject, err := fresh.getActiveProject(ctx, "T1184", "U1184")
 	require.NoError(t, err)
 	require.Equal(t, projectA.ID, freshProject, "fresh services must retain the existing fallback")
@@ -406,20 +406,20 @@ func TestSlackService_LiveDeletedSelectedProjectFallsBackWithoutRestart(t *testi
 }
 
 func TestSlackService_DeletedOnlyAuthorizedProjectFallsBackToDefault(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
-	projectRepo := teststores.Of(db).Projects
+	projectRepo := env.Projects
 	projectA, err := projectRepo.GetByID(ctx, "default")
 	require.NoError(t, err)
 	require.NotNil(t, projectA)
 	projectB := &models.Project{Name: "Only Authorized B"}
 	require.NoError(t, projectRepo.Create(ctx, projectB))
 
-	authRepo := teststores.Of(db).SlackAuth
+	authRepo := env.SlackAuth
 	require.NoError(t, authRepo.Create(ctx, &models.SlackAuthorizedUser{
 		ProjectID: projectB.ID, SlackUserID: "U_ONLY_B", DisplayName: "Only B", AddedBy: "test",
 	}))
-	svc := NewSlackService(teststores.Of(db).Settings, projectRepo, nil, nil, nil, nil, nil, nil, nil, nil, nil, authRepo)
+	svc := NewSlackService(env.Settings, projectRepo, nil, nil, nil, nil, nil, nil, nil, nil, nil, authRepo)
 	projectSvc := NewProjectService(projectRepo)
 	svc.SetProjectCreationServices(projectSvc, nil, nil, nil)
 	require.NoError(t, svc.setActiveProject(ctx, "T_ONLY", "U_ONLY_B", projectB.ID))
@@ -432,35 +432,35 @@ func TestSlackService_DeletedOnlyAuthorizedProjectFallsBackToDefault(t *testing.
 }
 
 func TestDiscordService_LiveDeletedSelectedProjectFallsBackWithoutRestart(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
-	projectRepo := teststores.Of(db).Projects
+	projectRepo := env.Projects
 	projectA, err := projectRepo.GetByID(ctx, "default")
 	require.NoError(t, err)
 	require.NotNil(t, projectA)
 	projectB := &models.Project{Name: "Selected B"}
 	require.NoError(t, projectRepo.Create(ctx, projectB))
 
-	taskRepo := teststores.Of(db).Tasks
-	execRepo := teststores.Of(db).Executions
-	llmConfigRepo := teststores.Of(db).LLMConfigs
-	scheduleRepo := teststores.Of(db).Schedules
-	attachmentRepo := teststores.Of(db).Attachments
+	taskRepo := env.Tasks
+	execRepo := env.Executions
+	llmConfigRepo := env.LLMConfigs
+	scheduleRepo := env.Schedules
+	attachmentRepo := env.Attachments
 	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, scheduleRepo, attachmentRepo)
 	llmSvc.SetLLMCaller(testutil.NewMockLLMCaller())
 	workerSvc := NewWorkerService(llmSvc, 0, nil)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
-	settingsRepo := teststores.Of(db).Settings
+	settingsRepo := env.Settings
 	require.NoError(t, settingsRepo.Set(ctx, DiscordSettingSendResponses, "true"))
-	authRepo := teststores.Of(db).DiscordAuth
+	authRepo := env.DiscordAuth
 	userID := "1518288288572641184"
 	for _, project := range []*models.Project{projectA, projectB} {
 		require.NoError(t, authRepo.Create(ctx, &models.DiscordAuthorizedUser{
 			ProjectID: project.ID, DiscordUserID: userID, DisplayName: "Issue 1184", AddedBy: "test",
 		}))
 	}
-	userProjectRepo := teststores.Of(db).DiscordUserProjects
-	svc := NewDiscordService(settingsRepo, projectRepo, llmConfigRepo, taskRepo, execRepo, scheduleRepo, taskSvc, llmSvc, workerSvc, authRepo, teststores.Of(db).DiscordTaskContexts)
+	userProjectRepo := env.DiscordUserProjects
+	svc := NewDiscordService(settingsRepo, projectRepo, llmConfigRepo, taskRepo, execRepo, scheduleRepo, taskSvc, llmSvc, workerSvc, authRepo, env.DiscordTaskContexts)
 	svc.SetDiscordUserProjectRepo(userProjectRepo)
 	projectSvc := NewProjectService(projectRepo)
 	projectSvc.SetTaskService(taskSvc)
@@ -488,38 +488,38 @@ func TestDiscordService_LiveDeletedSelectedProjectFallsBackWithoutRestart(t *tes
 	require.NoError(t, err)
 	require.Empty(t, tasksB, "deleted project must not receive a task")
 
-	fresh := NewDiscordService(settingsRepo, projectRepo, llmConfigRepo, taskRepo, execRepo, scheduleRepo, taskSvc, llmSvc, workerSvc, authRepo, teststores.Of(db).DiscordTaskContexts)
+	fresh := NewDiscordService(settingsRepo, projectRepo, llmConfigRepo, taskRepo, execRepo, scheduleRepo, taskSvc, llmSvc, workerSvc, authRepo, env.DiscordTaskContexts)
 	fresh.SetDiscordUserProjectRepo(userProjectRepo)
 	require.Equal(t, projectA.ID, fresh.getActiveProject(ctx, userID), "fresh services must retain the existing fallback")
 }
 
 func TestTelegramService_LiveDeletedSelectedProjectFallsBackWithoutRestart(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
-	projectRepo := teststores.Of(db).Projects
+	projectRepo := env.Projects
 	projectA, err := projectRepo.GetByID(ctx, "default")
 	require.NoError(t, err)
 	require.NotNil(t, projectA)
 	projectB := &models.Project{Name: "Selected B"}
 	require.NoError(t, projectRepo.Create(ctx, projectB))
 
-	taskRepo := teststores.Of(db).Tasks
-	execRepo := teststores.Of(db).Executions
-	llmConfigRepo := teststores.Of(db).LLMConfigs
-	scheduleRepo := teststores.Of(db).Schedules
-	attachmentRepo := teststores.Of(db).Attachments
+	taskRepo := env.Tasks
+	execRepo := env.Executions
+	llmConfigRepo := env.LLMConfigs
+	scheduleRepo := env.Schedules
+	attachmentRepo := env.Attachments
 	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, scheduleRepo, attachmentRepo)
 	llmSvc.SetLLMCaller(testutil.NewMockLLMCaller())
 	workerSvc := NewWorkerService(llmSvc, 0, nil)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
-	authRepo := teststores.Of(db).TelegramAuth
+	authRepo := env.TelegramAuth
 	const userID int64 = 1184001
 	for _, project := range []*models.Project{projectA, projectB} {
 		require.NoError(t, authRepo.Create(ctx, &models.TelegramAuthorizedUser{
 			ProjectID: project.ID, TelegramUserID: userID, TelegramUsername: "issue1184", DisplayName: "Issue 1184", AddedBy: "test",
 		}))
 	}
-	userProjectRepo := teststores.Of(db).TelegramUserProjects
+	userProjectRepo := env.TelegramUserProjects
 	svc := &TelegramService{
 		projectRepo:             projectRepo,
 		llmConfigRepo:           llmConfigRepo,

@@ -10,7 +10,6 @@ import (
 	"github.com/openvibely/openvibely/internal/events"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/testutil/teststores"
 )
 
@@ -36,10 +35,10 @@ func TestStreamingWriterReportsActivity(t *testing.T) {
 
 func TestStreamingWriter_PeriodicFlush(t *testing.T) {
 
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
-	llmConfigRepo := teststores.Of(db).LLMConfigs
-	execRepo := teststores.Of(db).Executions
+	env := teststores.New(t)
+	taskRepo := env.Tasks
+	llmConfigRepo := env.LLMConfigs
+	execRepo := env.Executions
 	ctx := context.Background()
 
 	task := &models.Task{
@@ -84,16 +83,12 @@ func TestStreamingWriter_PeriodicFlush(t *testing.T) {
 	}
 
 	sw.Flush()
-	var finalizedOutput string
-	var remainingChunks int
-	if err := db.QueryRowContext(ctx, `SELECT output FROM executions WHERE id = ?`, exec.ID).Scan(&finalizedOutput); err != nil {
-		t.Fatalf("failed to read finalized execution output: %v", err)
+	state, err := env.Fixtures.ExecutionOutputState(ctx, exec.ID)
+	if err != nil {
+		t.Fatalf("read durable execution output state: %v", err)
 	}
-	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM execution_output_chunks WHERE execution_id = ?`, exec.ID).Scan(&remainingChunks); err != nil {
-		t.Fatalf("failed to count finalized output chunks: %v", err)
-	}
-	if finalizedOutput != "hello world" || remainingChunks != 0 {
-		t.Fatalf("final flush should materialize output and clear chunks, output=%q remaining_chunks=%d", finalizedOutput, remainingChunks)
+	if state.Materialized != "hello world" || state.PendingSegments != 0 {
+		t.Fatalf("final flush should materialize output and clear buffered segments, state=%+v", state)
 	}
 }
 
@@ -280,10 +275,10 @@ func TestStreamingWriter_PeriodicFlushPersistsOnlyNewDeltasFromSeed(t *testing.T
 
 func TestStreamingWriter_StopPreventsLeak(t *testing.T) {
 
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
-	llmConfigRepo := teststores.Of(db).LLMConfigs
-	execRepo := teststores.Of(db).Executions
+	env := teststores.New(t)
+	taskRepo := env.Tasks
+	llmConfigRepo := env.LLMConfigs
+	execRepo := env.Executions
 	ctx := context.Background()
 
 	task := &models.Task{
@@ -322,10 +317,10 @@ func TestStreamingWriter_StopPreventsLeak(t *testing.T) {
 
 func TestStreamingWriter_FlushSucceedsAfterContextCancel(t *testing.T) {
 
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
-	llmConfigRepo := teststores.Of(db).LLMConfigs
-	execRepo := teststores.Of(db).Executions
+	env := teststores.New(t)
+	taskRepo := env.Tasks
+	llmConfigRepo := env.LLMConfigs
+	execRepo := env.Executions
 
 	bgCtx := context.Background()
 
@@ -375,10 +370,10 @@ func TestStreamingWriter_FlushSucceedsAfterContextCancel(t *testing.T) {
 }
 
 func TestStreamingWriter_NewWriterSeedsExistingOutputOnRetry(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
-	llmConfigRepo := teststores.Of(db).LLMConfigs
-	execRepo := teststores.Of(db).Executions
+	env := teststores.New(t)
+	taskRepo := env.Tasks
+	llmConfigRepo := env.LLMConfigs
+	execRepo := env.Executions
 	ctx := context.Background()
 
 	task := &models.Task{
@@ -407,7 +402,7 @@ func TestStreamingWriter_NewWriterSeedsExistingOutputOnRetry(t *testing.T) {
 		t.Fatalf("failed to create execution: %v", err)
 	}
 
-	if err := execRepo.(*sqlite.ExecutionRepo).UpdateOutput(ctx, exec.ID, "existing streamed output\n"); err != nil {
+	if err := execRepo.FinalizeOutput(ctx, exec.ID, "existing streamed output\n"); err != nil {
 		t.Fatalf("failed to seed existing output: %v", err)
 	}
 
@@ -432,10 +427,10 @@ func TestStreamingWriter_NewWriterSeedsExistingOutputOnRetry(t *testing.T) {
 }
 
 func TestStreamingWriter_EmptyRetryFlushDoesNotOverwriteExistingOutput(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
-	llmConfigRepo := teststores.Of(db).LLMConfigs
-	execRepo := teststores.Of(db).Executions
+	env := teststores.New(t)
+	taskRepo := env.Tasks
+	llmConfigRepo := env.LLMConfigs
+	execRepo := env.Executions
 	ctx := context.Background()
 
 	task := &models.Task{
@@ -464,7 +459,7 @@ func TestStreamingWriter_EmptyRetryFlushDoesNotOverwriteExistingOutput(t *testin
 		t.Fatalf("failed to create execution: %v", err)
 	}
 
-	if err := execRepo.(*sqlite.ExecutionRepo).UpdateOutput(ctx, exec.ID, "tool output before 429"); err != nil {
+	if err := execRepo.FinalizeOutput(ctx, exec.ID, "tool output before 429"); err != nil {
 		t.Fatalf("failed to seed execution output: %v", err)
 	}
 
@@ -517,10 +512,10 @@ func TestStreamingWriter_PublishesDeltaImmediatelyWithOffset(t *testing.T) {
 }
 
 func TestStreamingWriter_WriteDoesNotFlushSynchronouslyWhenIntervalElapsed(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
-	llmConfigRepo := teststores.Of(db).LLMConfigs
-	execRepo := teststores.Of(db).Executions
+	env := teststores.New(t)
+	taskRepo := env.Tasks
+	llmConfigRepo := env.LLMConfigs
+	execRepo := env.Executions
 	ctx := context.Background()
 
 	task := &models.Task{ProjectID: "default", Title: "No Eager Flush", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "test"}
@@ -557,10 +552,10 @@ func TestStreamingWriter_WriteDoesNotFlushSynchronouslyWhenIntervalElapsed(t *te
 }
 
 func TestStreamingWriter_DoesNotPublishSeedOrWriteText(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
-	llmConfigRepo := teststores.Of(db).LLMConfigs
-	execRepo := teststores.Of(db).Executions
+	env := teststores.New(t)
+	taskRepo := env.Tasks
+	llmConfigRepo := env.LLMConfigs
+	execRepo := env.Executions
 	ctx := context.Background()
 
 	task := &models.Task{ProjectID: "default", Title: "Seed Publish", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "test"}
@@ -575,7 +570,7 @@ func TestStreamingWriter_DoesNotPublishSeedOrWriteText(t *testing.T) {
 	if err := execRepo.Create(ctx, exec); err != nil {
 		t.Fatalf("failed to create execution: %v", err)
 	}
-	if err := execRepo.(*sqlite.ExecutionRepo).UpdateOutput(ctx, exec.ID, "seed"); err != nil {
+	if err := execRepo.FinalizeOutput(ctx, exec.ID, "seed"); err != nil {
 		t.Fatalf("failed to seed execution: %v", err)
 	}
 

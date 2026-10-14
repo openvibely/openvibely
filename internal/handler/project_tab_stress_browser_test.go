@@ -16,7 +16,6 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/events"
-	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/openvibely/openvibely/internal/testutil/teststores"
 	"github.com/openvibely/openvibely/web/static"
@@ -74,7 +73,7 @@ func TestProjectTabsUnderLoadInChrome(t *testing.T) {
 				go func() {
 					defer wg.Done()
 					for sequence := 0; ctx.Err() == nil; sequence++ {
-						if err := execRepo.(*sqlite.ExecutionRepo).UpdateOutput(ctx, id, fmt.Sprintf("%d\n%s", sequence, payload)); err != nil {
+						if err := execRepo.FinalizeOutput(ctx, id, fmt.Sprintf("%d\n%s", sequence, payload)); err != nil {
 							if ctx.Err() == nil {
 								failures <- err
 							}

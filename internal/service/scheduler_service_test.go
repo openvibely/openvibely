@@ -16,10 +16,10 @@ import (
 )
 
 func TestSchedulerService_CheckDueTasks(t *testing.T) {
-	db := teststores.NewDB(t)
-	scheduleRepo := teststores.Of(db).Schedules
-	taskRepo := teststores.Of(db).Tasks
-	agentRepo := teststores.Of(db).Agents
+	env := teststores.New(t)
+	scheduleRepo := env.Schedules
+	taskRepo := env.Tasks
+	agentRepo := env.Agents
 	workerSvc := newTestWorkerService(t)
 	ctx := context.Background()
 
@@ -79,9 +79,9 @@ func TestSchedulerService_CheckDueTasks(t *testing.T) {
 }
 
 func TestSchedulerService_CheckDueTasksClearsCancellationRequestBeforeSubmit(t *testing.T) {
-	db := teststores.NewDB(t)
-	scheduleRepo := teststores.Of(db).Schedules
-	taskRepo := teststores.Of(db).Tasks
+	env := teststores.New(t)
+	scheduleRepo := env.Schedules
+	taskRepo := env.Tasks
 	workerSvc := newTestWorkerService(t)
 	ctx := context.Background()
 	svc := NewSchedulerService(scheduleRepo, taskRepo, workerSvc)
@@ -142,9 +142,9 @@ func TestSchedulerService_CheckDueTasksDeletesOrphanedDueSchedule(t *testing.T) 
 }
 
 func TestSchedulerService_CheckDueTasksSubmitsOneTimeScheduleCreatedForCompletedScheduledTask(t *testing.T) {
-	db := teststores.NewDB(t)
-	scheduleRepo := teststores.Of(db).Schedules
-	taskRepo := teststores.Of(db).Tasks
+	env := teststores.New(t)
+	scheduleRepo := env.Schedules
+	taskRepo := env.Tasks
 	workerSvc := newTestWorkerService(t)
 	ctx := context.Background()
 	svc := NewSchedulerService(scheduleRepo, taskRepo, workerSvc)
@@ -185,9 +185,9 @@ func TestSchedulerService_CheckDueTasksSubmitsOneTimeScheduleCreatedForCompleted
 func TestSchedulerService_CheckDueTasksOneTimeScheduleUsesLastRunInsteadOfTaskStatus(t *testing.T) {
 	for _, status := range []models.TaskStatus{models.StatusCompleted, models.StatusFailed} {
 		t.Run("manual "+string(status), func(t *testing.T) {
-			db := teststores.NewDB(t)
-			scheduleRepo := teststores.Of(db).Schedules
-			taskRepo := teststores.Of(db).Tasks
+			env := teststores.New(t)
+			scheduleRepo := env.Schedules
+			taskRepo := env.Tasks
 			workerSvc := newTestWorkerService(t)
 			ctx := context.Background()
 
@@ -436,16 +436,16 @@ func TestSchedulerService_MalformedScheduleDoesNotBlockLaterValidSchedule(t *tes
 }
 
 func TestSchedulerService_CheckDueTasks_PersistsContextBoundaryAfterWorkerReload(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	scheduleRepo := teststores.Of(db).Schedules
-	taskRepo := teststores.Of(db).Tasks
-	projectRepo := teststores.Of(db).Projects
-	llmConfigRepo := teststores.Of(db).LLMConfigs
-	execRepo := teststores.Of(db).Executions
-	attachmentRepo := teststores.Of(db).Attachments
+	scheduleRepo := env.Schedules
+	taskRepo := env.Tasks
+	projectRepo := env.Projects
+	llmConfigRepo := env.LLMConfigs
+	execRepo := env.Executions
+	attachmentRepo := env.Attachments
 
 	model := &models.LLMConfig{Name: "Scheduled context model", Provider: models.ProviderTest, Model: "test", IsDefault: true}
 	if err := llmConfigRepo.Create(ctx, model); err != nil {
@@ -512,16 +512,16 @@ func TestSchedulerService_CheckDueTasks_PersistsContextBoundaryAfterWorkerReload
 }
 
 func TestSchedulerService_CheckDueTasks_SwarmPlannerPersistsContextBoundary(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	scheduleRepo := teststores.Of(db).Schedules
-	taskRepo := teststores.Of(db).Tasks
-	projectRepo := teststores.Of(db).Projects
-	llmConfigRepo := teststores.Of(db).LLMConfigs
-	execRepo := teststores.Of(db).Executions
-	attachmentRepo := teststores.Of(db).Attachments
+	scheduleRepo := env.Schedules
+	taskRepo := env.Tasks
+	projectRepo := env.Projects
+	llmConfigRepo := env.LLMConfigs
+	execRepo := env.Executions
+	attachmentRepo := env.Attachments
 	model := &models.LLMConfig{Name: "Scheduled swarm context model", Provider: models.ProviderTest, Model: "test", IsDefault: true}
 	if err := llmConfigRepo.Create(ctx, model); err != nil {
 		t.Fatalf("create model: %v", err)
@@ -587,9 +587,9 @@ func TestSchedulerService_CheckDueTasks_SwarmPlannerPersistsContextBoundary(t *t
 }
 
 func TestSchedulerService_CheckDueTasks_StartsPlannerForSwarmParent(t *testing.T) {
-	db := teststores.NewDB(t)
-	scheduleRepo := teststores.Of(db).Schedules
-	taskRepo := teststores.Of(db).Tasks
+	env := teststores.New(t)
+	scheduleRepo := env.Schedules
+	taskRepo := env.Tasks
 	workerSvc := newTestWorkerService(t)
 	taskSvc := NewTaskService(taskRepo, nil, workerSvc)
 	swarmSvc := NewSwarmService(taskSvc, taskRepo, nil, workerSvc)
@@ -642,9 +642,9 @@ func TestSchedulerService_CheckDueTasks_StartsPlannerForSwarmParent(t *testing.T
 }
 
 func TestSchedulerService_CheckDueTasks_SubmitsMemoryConsolidationTask(t *testing.T) {
-	db := teststores.NewDB(t)
-	scheduleRepo := teststores.Of(db).Schedules
-	taskRepo := teststores.Of(db).Tasks
+	env := teststores.New(t)
+	scheduleRepo := env.Schedules
+	taskRepo := env.Tasks
 	workerSvc := newTestWorkerService(t)
 	ctx := context.Background()
 
@@ -697,9 +697,9 @@ func TestSchedulerService_CheckDueTasks_SubmitsMemoryConsolidationTask(t *testin
 }
 
 func TestSchedulerService_CheckDueTasks_SkipsRunningRecurringTaskAndAdvancesNextRun(t *testing.T) {
-	db := teststores.NewDB(t)
-	scheduleRepo := teststores.Of(db).Schedules
-	taskRepo := teststores.Of(db).Tasks
+	env := teststores.New(t)
+	scheduleRepo := env.Schedules
+	taskRepo := env.Tasks
 	workerSvc := newTestWorkerService(t)
 	ctx := context.Background()
 	svc := NewSchedulerService(scheduleRepo, taskRepo, workerSvc)
@@ -753,9 +753,9 @@ func TestSchedulerService_CheckDueTasks_SkipsRunningRecurringTaskAndAdvancesNext
 }
 
 func TestSchedulerService_CheckDueTasks_SkipsRunningTask(t *testing.T) {
-	db := teststores.NewDB(t)
-	scheduleRepo := teststores.Of(db).Schedules
-	taskRepo := teststores.Of(db).Tasks
+	env := teststores.New(t)
+	scheduleRepo := env.Schedules
+	taskRepo := env.Tasks
 	workerSvc := newTestWorkerService(t)
 	ctx := context.Background()
 
@@ -792,21 +792,21 @@ func TestSchedulerService_CheckDueTasks_SkipsRunningTask(t *testing.T) {
 }
 
 func TestSchedulerService_CheckActiveTasks_DoesNotSubmitBehindDirectFollowup(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
-	taskRepo := teststores.Of(db).Tasks
+	taskRepo := env.Tasks
 	workerSvc := newTestWorkerService(t)
 	task := &models.Task{ProjectID: "default", Title: "Follow-up owns admission", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "stored original prompt"}
 	if err := taskRepo.Create(ctx, task); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
 	exec := &models.Execution{TaskID: task.ID, Status: models.ExecRunning, PromptSent: "active direct follow-up", IsFollowup: true}
-	started, err := teststores.Of(db).Executions.CreateDirectTaskFollowupOrQueue(ctx, exec, &models.ThreadInput{Content: exec.PromptSent, Source: models.TaskOriginWeb})
+	started, err := env.Executions.CreateDirectTaskFollowupOrQueue(ctx, exec, &models.ThreadInput{Content: exec.PromptSent, Source: models.TaskOriginWeb})
 	if err != nil || !started {
 		t.Fatalf("admit direct follow-up: started=%v err=%v", started, err)
 	}
 
-	svc := NewSchedulerService(teststores.Of(db).Schedules, taskRepo, workerSvc)
+	svc := NewSchedulerService(env.Schedules, taskRepo, workerSvc)
 	for i := 0; i < 5; i++ {
 		svc.checkActiveTasks(ctx)
 	}
@@ -815,31 +815,31 @@ func TestSchedulerService_CheckActiveTasks_DoesNotSubmitBehindDirectFollowup(t *
 		t.Fatalf("scheduler resubmitted original prompt behind direct follow-up: %#v", submitted)
 	case <-time.After(100 * time.Millisecond):
 	}
-	execs, err := teststores.Of(db).Executions.ListByTaskChronological(ctx, task.ID)
+	execs, err := env.Executions.ListByTaskChronological(ctx, task.ID)
 	if err != nil || len(execs) != 1 || execs[0].ID != exec.ID || execs[0].PromptSent != "active direct follow-up" {
 		t.Fatalf("expected only direct follow-up execution, got %#v err=%v", execs, err)
 	}
 }
 
 func TestSchedulerService_CheckActiveTasks_DoesNotRecoverStaleQueuedFollowup(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
-	taskRepo := teststores.Of(db).Tasks
+	taskRepo := env.Tasks
 	workerSvc := newTestWorkerService(t)
 	task := &models.Task{ProjectID: "default", Title: "long follow-up", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "stored original prompt"}
 	if err := taskRepo.Create(ctx, task); err != nil {
 		t.Fatal(err)
 	}
 	exec := &models.Execution{TaskID: task.ID, Status: models.ExecRunning, PromptSent: "long direct follow-up", IsFollowup: true}
-	started, err := teststores.Of(db).Executions.CreateDirectTaskFollowupOrQueue(ctx, exec, &models.ThreadInput{Content: exec.PromptSent})
+	started, err := env.Executions.CreateDirectTaskFollowupOrQueue(ctx, exec, &models.ThreadInput{Content: exec.PromptSent})
 	if err != nil || !started {
 		t.Fatalf("admit follow-up: started=%v err=%v", started, err)
 	}
-	if _, err := db.ExecContext(ctx, `UPDATE tasks SET updated_at = datetime('now', '-15 minutes') WHERE id = ?`, task.ID); err != nil {
+	if err := env.Fixtures.SetTaskUpdatedAt(ctx, task.ID, time.Now().UTC().Add(-15*time.Minute)); err != nil {
 		t.Fatal(err)
 	}
 
-	NewSchedulerService(teststores.Of(db).Schedules, taskRepo, workerSvc).checkActiveTasks(ctx)
+	NewSchedulerService(env.Schedules, taskRepo, workerSvc).checkActiveTasks(ctx)
 	select {
 	case submitted := <-workerSvc.Submitted():
 		t.Fatalf("stale recovery submitted original prompt behind active follow-up: %#v", submitted)
@@ -855,9 +855,9 @@ func TestSchedulerService_CheckActiveTasks_DoesNotRecoverStaleQueuedFollowup(t *
 }
 
 func TestSchedulerService_CheckActiveTasksSubmitsAdmissionWithoutPayload(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
-	taskRepo := teststores.Of(db).Tasks
+	taskRepo := env.Tasks
 	workerSvc := newTestWorkerService(t)
 
 	task := &models.Task{
@@ -876,7 +876,7 @@ func TestSchedulerService_CheckActiveTasksSubmitsAdmissionWithoutPayload(t *test
 		t.Fatalf("create task: %v", err)
 	}
 
-	NewSchedulerService(teststores.Of(db).Schedules, taskRepo, workerSvc).checkActiveTasks(ctx)
+	NewSchedulerService(env.Schedules, taskRepo, workerSvc).checkActiveTasks(ctx)
 
 	select {
 	case submitted := <-workerSvc.Submitted():
@@ -1033,9 +1033,9 @@ func benchmarkActivePendingAdmissionProjection(b *testing.B, repo persistence.Ta
 }
 
 func TestSchedulerService_CheckActiveTasks(t *testing.T) {
-	db := teststores.NewDB(t)
-	scheduleRepo := teststores.Of(db).Schedules
-	taskRepo := teststores.Of(db).Tasks
+	env := teststores.New(t)
+	scheduleRepo := env.Schedules
+	taskRepo := env.Tasks
 	workerSvc := newTestWorkerService(t)
 	ctx := context.Background()
 
@@ -1081,9 +1081,9 @@ func TestSchedulerService_CheckActiveTasks(t *testing.T) {
 }
 
 func TestSchedulerService_CheckActiveTasks_NoDuplicateSubmission(t *testing.T) {
-	db := teststores.NewDB(t)
-	scheduleRepo := teststores.Of(db).Schedules
-	taskRepo := teststores.Of(db).Tasks
+	env := teststores.New(t)
+	scheduleRepo := env.Schedules
+	taskRepo := env.Tasks
 	workerSvc := newTestWorkerService(t)
 	ctx := context.Background()
 
@@ -1124,9 +1124,9 @@ func TestSchedulerService_CheckActiveTasks_NoDuplicateSubmission(t *testing.T) {
 }
 
 func TestSchedulerService_CheckDueTasks_RepeatingSchedule(t *testing.T) {
-	db := teststores.NewDB(t)
-	scheduleRepo := teststores.Of(db).Schedules
-	taskRepo := teststores.Of(db).Tasks
+	env := teststores.New(t)
+	scheduleRepo := env.Schedules
+	taskRepo := env.Tasks
 	workerSvc := newTestWorkerService(t)
 	ctx := context.Background()
 
@@ -1176,9 +1176,9 @@ func TestSchedulerService_CheckDueTasks_RepeatingSchedule(t *testing.T) {
 // pre-advanced next_run to the NEXT day, so a daily 1:33 AM schedule created at
 // 1:34 AM would not run until tomorrow.
 func TestSchedulerService_DailyScheduleFiresSameDay(t *testing.T) {
-	db := teststores.NewDB(t)
-	scheduleRepo := teststores.Of(db).Schedules
-	taskRepo := teststores.Of(db).Tasks
+	env := teststores.New(t)
+	scheduleRepo := env.Schedules
+	taskRepo := env.Tasks
 	workerSvc := newTestWorkerService(t)
 	ctx := context.Background()
 
@@ -1235,9 +1235,9 @@ func TestSchedulerService_DailyScheduleFiresSameDay(t *testing.T) {
 // scheduler resets a completed/failed task to pending before submitting it.
 // This is important for repeating schedules where the task runs multiple times.
 func TestSchedulerService_ScheduledTaskResetsCompletedStatus(t *testing.T) {
-	db := teststores.NewDB(t)
-	scheduleRepo := teststores.Of(db).Schedules
-	taskRepo := teststores.Of(db).Tasks
+	env := teststores.New(t)
+	scheduleRepo := env.Schedules
+	taskRepo := env.Tasks
 	workerSvc := newTestWorkerService(t)
 	ctx := context.Background()
 
@@ -1284,9 +1284,9 @@ func TestSchedulerService_ScheduledTaskResetsCompletedStatus(t *testing.T) {
 }
 
 func TestSchedulerService_StartupCatchesMissedSchedules(t *testing.T) {
-	db := teststores.NewDB(t)
-	scheduleRepo := teststores.Of(db).Schedules
-	taskRepo := teststores.Of(db).Tasks
+	env := teststores.New(t)
+	scheduleRepo := env.Schedules
+	taskRepo := env.Tasks
 	workerSvc := newTestWorkerService(t)
 	ctx := context.Background()
 
@@ -1419,9 +1419,9 @@ func TestSchedulerService_DragDropReschedule_DoesNotExecuteCompletedTask(t *test
 }
 
 func TestSchedulerService_RecurringSchedule_ExecutesCompletedTask(t *testing.T) {
-	db := teststores.NewDB(t)
-	scheduleRepo := teststores.Of(db).Schedules
-	taskRepo := teststores.Of(db).Tasks
+	env := teststores.New(t)
+	scheduleRepo := env.Schedules
+	taskRepo := env.Tasks
 	workerSvc := newTestWorkerService(t)
 	ctx := context.Background()
 
@@ -1473,9 +1473,9 @@ func TestSchedulerService_RecurringSchedule_ExecutesCompletedTask(t *testing.T) 
 // This handles the case where a thread follow-up goroutine crashed without
 // cleaning up the task status.
 func TestSchedulerService_RecoverStaleQueuedTasks(t *testing.T) {
-	db := teststores.NewDB(t)
-	scheduleRepo := teststores.Of(db).Schedules
-	taskRepo := teststores.Of(db).Tasks
+	env := teststores.New(t)
+	scheduleRepo := env.Schedules
+	taskRepo := env.Tasks
 	workerSvc := newTestWorkerService(t)
 	ctx := context.Background()
 
@@ -1499,8 +1499,7 @@ func TestSchedulerService_RecoverStaleQueuedTasks(t *testing.T) {
 	}
 
 	// Manually set updated_at to the past to simulate a stale task
-	_, err := db.ExecContext(ctx,
-		`UPDATE tasks SET updated_at = datetime('now', '-15 minutes') WHERE id = ?`, task.ID)
+	err := env.Fixtures.SetTaskUpdatedAt(ctx, task.ID, time.Now().UTC().Add(-15*time.Minute))
 	if err != nil {
 		t.Fatalf("Set stale updated_at: %v", err)
 	}
@@ -1579,9 +1578,9 @@ func TestSchedulerService_RestartRecoveryPromotesQueuedFollowupBeforeOriginalPro
 // checkActiveTasks does NOT reset tasks that recently entered "queued" status.
 // These tasks are actively being handled by thread follow-up goroutines.
 func TestSchedulerService_DoesNotRecoverRecentQueuedTasks(t *testing.T) {
-	db := teststores.NewDB(t)
-	scheduleRepo := teststores.Of(db).Schedules
-	taskRepo := teststores.Of(db).Tasks
+	env := teststores.New(t)
+	scheduleRepo := env.Schedules
+	taskRepo := env.Tasks
 	workerSvc := newTestWorkerService(t)
 	ctx := context.Background()
 
@@ -1626,11 +1625,11 @@ func TestSchedulerService_DoesNotRecoverRecentQueuedTasks(t *testing.T) {
 }
 
 func TestSchedulerService_WorktreeCleanupIntegration(t *testing.T) {
-	db := teststores.NewDB(t)
-	scheduleRepo := teststores.Of(db).Schedules
-	taskRepo := teststores.Of(db).Tasks
-	projectRepo := teststores.Of(db).Projects
-	settingsRepo := teststores.Of(db).Settings
+	env := teststores.New(t)
+	scheduleRepo := env.Schedules
+	taskRepo := env.Tasks
+	projectRepo := env.Projects
+	settingsRepo := env.Settings
 	workerSvc := newTestWorkerService(t)
 	ctx := context.Background()
 
@@ -1757,9 +1756,9 @@ func TestSchedulerService_CheckDueTasks_ReenabledScheduleRuns(t *testing.T) {
 }
 
 func TestSchedulerService_CheckDueTasks_PausedDueScheduleResumesWithoutLosingOccurrence(t *testing.T) {
-	db := teststores.NewDB(t)
-	scheduleRepo := teststores.Of(db).Schedules
-	taskRepo := teststores.Of(db).Tasks
+	env := teststores.New(t)
+	scheduleRepo := env.Schedules
+	taskRepo := env.Tasks
 	workerSvc := newTestWorkerService(t)
 	ctx := context.Background()
 	task := &models.Task{
@@ -1810,9 +1809,9 @@ func TestSchedulerService_CheckDueTasks_PausedDueScheduleResumesWithoutLosingOcc
 }
 
 func TestSchedulerService_CheckActiveTasksStartsSwarmPlanner(t *testing.T) {
-	db := teststores.NewDB(t)
-	scheduleRepo := teststores.Of(db).Schedules
-	taskRepo := teststores.Of(db).Tasks
+	env := teststores.New(t)
+	scheduleRepo := env.Schedules
+	taskRepo := env.Tasks
 	workerSvc := newTestWorkerService(t)
 	taskSvc := NewTaskService(taskRepo, nil, workerSvc)
 	swarmSvc := NewSwarmService(taskSvc, taskRepo, nil, workerSvc)
@@ -1886,9 +1885,9 @@ func TestSchedulerService_DSTGapPersistsNextRunAndDoesNotDispatchEarly(t *testin
 	time.Local = location
 	t.Cleanup(func() { time.Local = originalLocal })
 
-	db := teststores.NewDB(t)
-	scheduleRepo := teststores.Of(db).Schedules
-	taskRepo := teststores.Of(db).Tasks
+	env := teststores.New(t)
+	scheduleRepo := env.Schedules
+	taskRepo := env.Tasks
 	workerSvc := newTestWorkerService(t)
 	svc := NewSchedulerService(scheduleRepo, taskRepo, workerSvc)
 	ctx := context.Background()
@@ -1942,9 +1941,9 @@ func TestSchedulerConversationSchedulesAreAdmitted(t *testing.T) {
 		for _, category := range []models.TaskCategory{models.CategoryChat, models.CategoryScheduled, models.CategoryBacklog} {
 			t.Run(string(repeat)+"/"+string(category), func(t *testing.T) {
 				ctx := context.Background()
-				db := teststores.NewDB(t)
-				tasks := teststores.Of(db).Tasks
-				schedules := teststores.Of(db).Schedules
+				env := teststores.New(t)
+				tasks := env.Tasks
+				schedules := env.Schedules
 				workers := newTestWorkerService(t)
 				svc := NewSchedulerService(schedules, tasks, workers)
 				task := &models.Task{ProjectID: "default", Title: "Due schedule", Prompt: "test", Category: models.CategoryScheduled, Status: models.StatusPending}
@@ -1972,7 +1971,7 @@ func TestSchedulerConversationSchedulesAreAdmitted(t *testing.T) {
 				due, err := schedules.ListDue(ctx, time.Now().UTC())
 				require.NoError(t, err)
 				require.Empty(t, due)
-				executions, err := teststores.Of(db).Executions.ListByTask(ctx, task.ID)
+				executions, err := env.Executions.ListByTask(ctx, task.ID)
 				require.NoError(t, err)
 				require.Len(t, executions, 1)
 

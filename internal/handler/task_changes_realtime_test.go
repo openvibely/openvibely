@@ -24,13 +24,13 @@ import (
 // displays in-progress diffs from running executions, not just completed ones.
 // This is the end-to-end test for the realtime diff update feature.
 func TestGetTaskChanges_ShowsRealtimeDiffDuringExecution(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
 
-	projectRepo := teststores.Of(db).Projects
-	taskRepo := teststores.Of(db).Tasks
-	execRepo := teststores.Of(db).Executions
-	llmConfigRepo := teststores.Of(db).LLMConfigs
+	projectRepo := env.Projects
+	taskRepo := env.Tasks
+	execRepo := env.Executions
+	llmConfigRepo := env.LLMConfigs
 
 	// Create test project
 	project := &models.Project{
@@ -95,12 +95,12 @@ index 0000000..d3103f9
 	}
 
 	// Set up handler
-	attachmentRepo := teststores.Of(db).Attachments
+	attachmentRepo := env.Attachments
 	h := &Handler{
 		projectRepo:       projectRepo,
 		taskRepo:          taskRepo,
 		execRepo:          execRepo,
-		reviewCommentRepo: teststores.Of(db).ReviewComments,
+		reviewCommentRepo: env.ReviewComments,
 		taskSvc:           service.NewTaskService(taskRepo, attachmentRepo, nil),
 	}
 
@@ -151,13 +151,13 @@ index 0000000..d3103f9
 // 4. User opens Changes tab
 // 5. Changes tab shows current diff (not waiting for completion)
 func TestGetTaskChanges_RealtimeUpdateFlow(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
 
-	projectRepo := teststores.Of(db).Projects
-	taskRepo := teststores.Of(db).Tasks
-	execRepo := teststores.Of(db).Executions
-	llmConfigRepo := teststores.Of(db).LLMConfigs
+	projectRepo := env.Projects
+	taskRepo := env.Tasks
+	execRepo := env.Executions
+	llmConfigRepo := env.LLMConfigs
 
 	project := &models.Project{
 		Name:     "test-project",
@@ -221,12 +221,12 @@ index 0000000..ce01362
 	}
 
 	// Step 4: User opens Changes tab while task is running
-	attachmentRepo := teststores.Of(db).Attachments
+	attachmentRepo := env.Attachments
 	h := &Handler{
 		projectRepo:       projectRepo,
 		taskRepo:          taskRepo,
 		execRepo:          execRepo,
-		reviewCommentRepo: teststores.Of(db).ReviewComments,
+		reviewCommentRepo: env.ReviewComments,
 		taskSvc:           service.NewTaskService(taskRepo, attachmentRepo, nil),
 	}
 
@@ -303,13 +303,13 @@ index 0000000..b6fc4c6
 // for the viewport-jump bug: the frontend uses a content fingerprint to skip DOM
 // replacement when the diff hasn't changed, so stable server responses are critical.
 func TestGetTaskChanges_StableDOMOnUnchangedDiff(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
 
-	projectRepo := teststores.Of(db).Projects
-	taskRepo := teststores.Of(db).Tasks
-	execRepo := teststores.Of(db).Executions
-	llmConfigRepo := teststores.Of(db).LLMConfigs
+	projectRepo := env.Projects
+	taskRepo := env.Tasks
+	execRepo := env.Executions
+	llmConfigRepo := env.LLMConfigs
 
 	project := &models.Project{
 		Name:     "test-project",
@@ -374,12 +374,12 @@ new file mode 100644
 		t.Fatalf("update diff: %v", err)
 	}
 
-	attachmentRepo := teststores.Of(db).Attachments
+	attachmentRepo := env.Attachments
 	h := &Handler{
 		projectRepo:       projectRepo,
 		taskRepo:          taskRepo,
 		execRepo:          execRepo,
-		reviewCommentRepo: teststores.Of(db).ReviewComments,
+		reviewCommentRepo: env.ReviewComments,
 		taskSvc:           service.NewTaskService(taskRepo, attachmentRepo, nil),
 	}
 
@@ -427,13 +427,13 @@ new file mode 100644
 // the server returns different HTML. This complements TestGetTaskChanges_StableDOMOnUnchangedDiff
 // and ensures the frontend fingerprint correctly detects actual content changes.
 func TestGetTaskChanges_DiffUpdateProducesDifferentDOM(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
 
-	projectRepo := teststores.Of(db).Projects
-	taskRepo := teststores.Of(db).Tasks
-	execRepo := teststores.Of(db).Executions
-	llmConfigRepo := teststores.Of(db).LLMConfigs
+	projectRepo := env.Projects
+	taskRepo := env.Tasks
+	execRepo := env.Executions
+	llmConfigRepo := env.LLMConfigs
 
 	project := &models.Project{
 		Name:     "test-project",
@@ -475,12 +475,12 @@ func TestGetTaskChanges_DiffUpdateProducesDifferentDOM(t *testing.T) {
 		t.Fatalf("create execution: %v", err)
 	}
 
-	attachmentRepo := teststores.Of(db).Attachments
+	attachmentRepo := env.Attachments
 	h := &Handler{
 		projectRepo:       projectRepo,
 		taskRepo:          taskRepo,
 		execRepo:          execRepo,
-		reviewCommentRepo: teststores.Of(db).ReviewComments,
+		reviewCommentRepo: env.ReviewComments,
 		taskSvc:           service.NewTaskService(taskRepo, attachmentRepo, nil),
 	}
 
