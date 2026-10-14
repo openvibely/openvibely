@@ -19,6 +19,9 @@ func TestProviderInterop_AdapterRouting(t *testing.T) {
 	mock.Tokens = 100
 	svc.SetLLMCaller(mock)
 	svc.initProviderAdapters()
+	svc.providerAdapters[models.ProviderOllama] = providerAdapterFunc(func(req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
+		return llmcontracts.AgentResult{Output: mock.Response, TextOnlyOutput: mock.TextOnly, Usage: llmcontracts.Usage{TotalTokens: mock.Tokens}}, nil
+	})
 
 	// Test that both Anthropic and OpenAI providers can route to test adapter
 	providers := []models.LLMProvider{
