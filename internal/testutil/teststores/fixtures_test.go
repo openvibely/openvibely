@@ -246,3 +246,41 @@ func TestRecoveryFixturesShareBackendAndRestoreIntegrity(t *testing.T) {
 		})
 	}
 }
+
+func TestTelegramAuthorizationFixturesAndPhysicalReads(t *testing.T) {
+	for _, production := range []bool{false, true} {
+		name := "isolated"
+		if production {
+			name = "production"
+		}
+		t.Run(name, func(t *testing.T) {
+			options := []teststores.Option{teststores.WithIOCounting()}
+			if production {
+				options = append(options, teststores.WithProductionTopology())
+			}
+			env := teststores.New(t, options...)
+			ctx := t.Context()
+			require.NoError(t, env.Fixtures.SeedTelegramAuthorizedUsers(ctx, []models.TelegramAuthorizedUser{{ProjectID: "default", TelegramUserID: 71, DisplayName: "authorized", AddedBy: "test"}}))
+			env.IO.Reset()
+			env.IO.SetEnabled(true)
+			for i := 0; i < 2; i++ {
+				allowed, err := env.TelegramAuth.IsAuthorized(ctx, "default", 71, "")
+				require.NoError(t, err)
+				require.True(t, allowed)
+			}
+			env.IO.SetEnabled(false)
+			measured := env.IO.Snapshot()
+			require.Equal(t, 2, measured.TelegramAuthorizationReads)
+			require.Equal(t, 2, measured.Requests)
+			_, err := env.TelegramAuth.IsAuthorized(ctx, "default", 71, "")
+			require.NoError(t, err)
+			require.Equal(t, measured, env.IO.Snapshot())
+			env.IO.Reset()
+			require.Zero(t, env.IO.Snapshot().TelegramAuthorizationReads)
+			other := teststores.New(t)
+			allowed, err := other.TelegramAuth.IsAuthorized(ctx, "default", 71, "")
+			require.NoError(t, err)
+			require.False(t, allowed)
+		})
+	}
+}

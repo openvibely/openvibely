@@ -409,3 +409,32 @@ func (f *fixtures) SetStaleProjectDefaultModel(ctx context.Context, projectID, m
 	_, err = conn.ExecContext(ctx, `UPDATE projects SET default_agent_config_id=? WHERE id=?`, modelID, projectID)
 	return err
 }
+
+func (f *fixtures) FailExecutionCreation(ctx context.Context) error {
+	_, err := f.db.ExecContext(ctx, `CREATE TRIGGER fixture_fail_execution_creation BEFORE INSERT ON executions BEGIN SELECT RAISE(FAIL, 'forced execution create failure'); END`)
+	return err
+}
+func (f *fixtures) FailTelegramProjectSelectionWrites(ctx context.Context) error {
+	_, err := f.db.ExecContext(ctx, `CREATE TRIGGER fail_telegram_user_project_insert BEFORE INSERT ON telegram_user_projects BEGIN SELECT RAISE(ABORT, 'forced telegram user project write failure'); END;
+ CREATE TRIGGER fail_telegram_user_project_update BEFORE UPDATE ON telegram_user_projects BEGIN SELECT RAISE(ABORT, 'forced telegram user project write failure'); END;`)
+	return err
+}
+
+func (f *fixtures) SeedTelegramAuthorizedUsers(ctx context.Context, users []models.TelegramAuthorizedUser) error {
+	tx, err := f.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	stmt, err := tx.PrepareContext(ctx, `INSERT INTO telegram_authorized_users (project_id, telegram_user_id, display_name, added_by) VALUES (?, ?, ?, ?)`)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+	for _, u := range users {
+		if _, err = stmt.ExecContext(ctx, u.ProjectID, u.TelegramUserID, u.DisplayName, u.AddedBy); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}

@@ -473,9 +473,9 @@ func TestWorkerService_ResolveAgentConfigID(t *testing.T) {
 // Previously, the re-queue logic only allowed "active" category tasks, silently
 // dropping scheduled tasks.
 func TestWorkerService_ScheduledTaskNotDroppedOnRequeue(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
-	projectRepo := teststores.Of(db).Projects
+	db := teststores.New(t)
+	taskRepo := db.Tasks
+	projectRepo := db.Projects
 	ctx := context.Background()
 
 	// Create a project with max_workers=1

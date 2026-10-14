@@ -1366,7 +1366,7 @@ edges:
 }
 
 func TestAutomationDraftYAMLRoundTripAndStrictDecoding(t *testing.T) {
-	repo := teststores.Of(teststores.NewDB(t)).Automations
+	repo := teststores.New(t).Automations
 	drafts := NewAutomationDraftService(repo, NewAutomationAdapterRegistry())
 	for _, adapter := range []string{AutomationAdapterNativeSDLC, AutomationAdapterGitHubSDLC} {
 		candidate, err := drafts.TemplateCandidate(adapter)
