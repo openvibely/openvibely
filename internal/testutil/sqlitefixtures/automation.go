@@ -34,3 +34,8 @@ func (f *fixtures) SetAutomationNodeConfig(ctx context.Context, id, config strin
 	_, err := f.db.ExecContext(ctx, `UPDATE automation_nodes SET config_json = ? WHERE id = ?`, config, id)
 	return err
 }
+
+func (f *fixtures) SetAutomationTemplateRevision(ctx context.Context, projectID, id string, revision int) error {
+	_, err := f.db.ExecContext(ctx, `UPDATE automations SET template_revision=? WHERE id=? AND project_id=?`, revision, id, projectID)
+	return err
+}

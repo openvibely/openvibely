@@ -2,13 +2,14 @@ package handler
 
 import (
 	"bytes"
-	"database/sql"
 	"encoding/json"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"testing"
+
+	"github.com/openvibely/openvibely/internal/testutil/storefixture"
 
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/agentlibrary"
@@ -37,7 +38,7 @@ func TestSkillWriteEventType(t *testing.T) {
 }
 
 func TestCreateSkillRecordsCreatedThenEditedEvents(t *testing.T) {
-	h, e, _, db := setupTestHandlerWithDB(t)
+	h, e, _, db := setupTestHandlerWithStores(t)
 	root := t.TempDir()
 	h.SetAgentSkillRoot(root)
 	project := createProject(t, h, "Skill Analytics Project")
@@ -71,7 +72,7 @@ func TestCreateSkillRecordsCreatedThenEditedEvents(t *testing.T) {
 }
 
 func TestImportSkillPackageRecordsCreatedThenEditedEvents(t *testing.T) {
-	h, e, _, db := setupTestHandlerWithDB(t)
+	h, e, _, db := setupTestHandlerWithStores(t)
 	root := t.TempDir()
 	h.SetAgentSkillRoot(root)
 	project := createProject(t, h, "Imported Skill Analytics Project")
@@ -92,11 +93,11 @@ func TestImportSkillPackageRecordsCreatedThenEditedEvents(t *testing.T) {
 }
 
 func TestCreateAgentOwnedSkillRecordsCreatedEvent(t *testing.T) {
-	db := teststores.NewDB(t)
-	agentRepo := teststores.Of(db).Agents
-	lifecycleRepo := teststores.Of(db).Lifecycle
-	projectRepo := teststores.Of(db).Projects
-	skillAnalyticsRepo := teststores.Of(db).SkillAnalytics
+	db := teststores.New(t)
+	agentRepo := db.Agents
+	lifecycleRepo := db.Lifecycle
+	projectRepo := db.Projects
+	skillAnalyticsRepo := db.SkillAnalytics
 	agent := &models.Agent{Name: "Reviewer", Key: "reviewer", Scope: models.AgentScopeProject, Enabled: true}
 	require.NoError(t, agentRepo.Create(t.Context(), agent))
 	project := &models.Project{Name: "Agent Skill Analytics Project", RepoPath: t.TempDir()}
@@ -129,11 +130,11 @@ func TestCreateAgentOwnedSkillRecordsCreatedEvent(t *testing.T) {
 }
 
 func TestEditedAgentOwnedSkillFlowsKeepEditedEvents(t *testing.T) {
-	db := teststores.NewDB(t)
-	projectRepo := teststores.Of(db).Projects
+	db := teststores.New(t)
+	projectRepo := db.Projects
 	project := &models.Project{Name: "Edited Agent Skill Analytics Project", RepoPath: t.TempDir()}
 	require.NoError(t, projectRepo.Create(t.Context(), project))
-	agentRepo := teststores.Of(db).Agents
+	agentRepo := db.Agents
 	agent := &models.Agent{
 		Name:      "Reviewer",
 		Key:       "reviewer",
@@ -142,12 +143,12 @@ func TestEditedAgentOwnedSkillFlowsKeepEditedEvents(t *testing.T) {
 		Enabled:   true,
 	}
 	require.NoError(t, agentRepo.Create(t.Context(), agent))
-	lifecycleRepo := teststores.Of(db).Lifecycle
+	lifecycleRepo := db.Lifecycle
 	h := &Handler{
 		agentRepo:          agentRepo,
 		lifecycleRepo:      lifecycleRepo,
 		projectRepo:        projectRepo,
-		skillAnalyticsRepo: teststores.Of(db).SkillAnalytics,
+		skillAnalyticsRepo: db.SkillAnalytics,
 		agentSkillRoot:     t.TempDir(),
 	}
 	projectRoot := filepath.Join(project.RepoPath, ".openvibely")
@@ -177,42 +178,10 @@ func TestEditedAgentOwnedSkillFlowsKeepEditedEvents(t *testing.T) {
 	}
 }
 
-type skillAnalyticsEventForTest struct {
-	ProjectID   string
-	AgentID     string
-	SkillScope  string
-	SkillHandle string
-	EventType   string
-	Source      string
-	Surface     string
-}
-
-func skillAnalyticsEventsForTest(t testing.TB, db *sql.DB, handle string) []skillAnalyticsEventForTest {
+func skillAnalyticsEventsForTest(t testing.TB, env *teststores.Env, handle string) []models.SkillAnalyticsEvent {
 	t.Helper()
-	rows, err := db.QueryContext(t.Context(), `
-		SELECT COALESCE(project_id, ''), COALESCE(agent_id, ''), skill_scope,
-		       skill_handle, event_type, source, surface
-		FROM skill_analytics_events
-		WHERE skill_handle = ?
-		ORDER BY rowid`, handle)
+	events, err := env.Fixtures.SkillEvents(t.Context(), storefixture.SkillEventFilter{SkillHandle: handle})
 	require.NoError(t, err)
-	defer rows.Close()
-
-	var events []skillAnalyticsEventForTest
-	for rows.Next() {
-		var event skillAnalyticsEventForTest
-		require.NoError(t, rows.Scan(
-			&event.ProjectID,
-			&event.AgentID,
-			&event.SkillScope,
-			&event.SkillHandle,
-			&event.EventType,
-			&event.Source,
-			&event.Surface,
-		))
-		events = append(events, event)
-	}
-	require.NoError(t, rows.Err())
 	return events
 }
 

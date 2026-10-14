@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"sort"
@@ -17,7 +16,6 @@ import (
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
-	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/openvibely/openvibely/internal/testutil/teststores"
 	"github.com/stretchr/testify/require"
@@ -324,11 +322,11 @@ func TestAutomationNotificationCreationAllowsMissingIdempotencyKey(t *testing.T)
 }
 
 func TestAlertRuntimeCreateNotificationIgnoresHiddenIdempotencyKey(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
 	project := &models.Project{Name: "Runtime hidden idempotency"}
-	require.NoError(t, teststores.Of(db).Projects.Create(ctx, project))
-	alertSvc := NewAlertService(teststores.Of(db).Alerts, nil)
+	require.NoError(t, env.Projects.Create(ctx, project))
+	alertSvc := NewAlertService(env.Alerts, nil)
 	handlers := BuildAlertRuntimeActionHandlers(AlertRuntimeOptions{ProjectID: project.ID, AlertSvc: alertSvc})
 	input := json.RawMessage(`{"type":"bug_suggestion","title":"Hidden key notification","idempotency_key":"hidden-runtime-key"}`)
 
@@ -346,8 +344,8 @@ func TestAlertRuntimeCreateNotificationIgnoresHiddenIdempotencyKey(t *testing.T)
 	require.NotEqual(t, first.Notification.ID, second.Notification.ID)
 	require.Empty(t, first.Notification.IdempotencyKey)
 	require.Empty(t, second.Notification.IdempotencyKey)
-	var storedWithHiddenKey int
-	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM alerts WHERE project_id = ? AND idempotency_key = ?`, project.ID, "hidden-runtime-key").Scan(&storedWithHiddenKey))
+	storedWithHiddenKey, err := env.Fixtures.CountAlertsWithIdempotencyKey(ctx, project.ID, "hidden-runtime-key")
+	require.NoError(t, err)
 	require.Zero(t, storedWithHiddenKey)
 }
 
@@ -1551,12 +1549,12 @@ func TestBuildChannelUtilityActionHandlersAutomationReadsRejectForeignProject(t 
 }
 
 func TestBuildChannelUtilityActionHandlersUpdateAutomationTemplate(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
-	projectRepo := teststores.Of(db).Projects
-	taskRepo := teststores.Of(db).Tasks
-	scheduleRepo := teststores.Of(db).Schedules
-	automationRepo := teststores.Of(db).Automations
+	projectRepo := env.Projects
+	taskRepo := env.Tasks
+	scheduleRepo := env.Schedules
+	automationRepo := env.Automations
 	project := &models.Project{Name: "Channel Automation Update"}
 	require.NoError(t, projectRepo.Create(ctx, project))
 	foreign := &models.Project{Name: "Foreign Channel Automation Update"}
@@ -1587,7 +1585,7 @@ func TestBuildChannelUtilityActionHandlersUpdateAutomationTemplate(t *testing.T)
 		ActivityStatus: models.AutomationActivityRunning,
 	})
 	require.NoError(t, err)
-	_, err = db.Exec(`UPDATE automations SET template_revision = 0 WHERE id = ? AND project_id = ?`, automationID, project.ID)
+	err = env.Fixtures.SetAutomationTemplateRevision(ctx, project.ID, automationID, 0)
 	require.NoError(t, err)
 
 	handlers := buildChannelUtilityActionHandlers(channelUtilityActionHandlerOptions{
@@ -1617,8 +1615,10 @@ func TestBuildChannelUtilityActionHandlersUpdateAutomationTemplate(t *testing.T)
 		var expected map[string]any
 		require.NoError(t, json.Unmarshal(expectedJSON, &expected))
 
-		var graphNodeCount int
-		require.NoError(t, db.QueryRowContext(ctx, `SELECT COUNT(*) FROM automation_nodes WHERE project_id = ? AND automation_id = ? AND version_id = ?`, project.ID, card.Automation.ID, card.Version.ID).Scan(&graphNodeCount))
+		definition, err := env.Automations.GetDefinitionVersion(ctx, project.ID, card.Automation.ID, card.Version.ID)
+		require.NoError(t, err)
+		require.NotNil(t, definition)
+		graphNodeCount := len(definition.Nodes)
 		require.Equal(t, float64(graphNodeCount), expected["graph_node_count"])
 		require.NotContains(t, expected, "node_count")
 		for _, optionalTiming := range []string{"next_run", "last_run"} {
@@ -1657,13 +1657,13 @@ func TestBuildChannelUtilityActionHandlersUpdateAutomationTemplate(t *testing.T)
 	require.NoError(t, err)
 	assertAutomationSummary(getOut, "automation")
 
-	beforeGraphID := channelAutomationPublishedGraphID(t, db, automationID)
+	beforeGraphID := channelAutomationPublishedGraphID(t, env, automationID)
 	updateOut, err := handlers["update_automation_template"](ctx, json.RawMessage(`{"name":" channel native sdlc "}`))
 	require.NoError(t, err)
 	require.Contains(t, updateOut, `"applied":true`)
 	require.Contains(t, updateOut, fmt.Sprintf(`"template_revision":%d`, currentRevision))
 	assertAutomationSummary(updateOut, "automation")
-	afterGraphID := channelAutomationPublishedGraphID(t, db, automationID)
+	afterGraphID := channelAutomationPublishedGraphID(t, env, automationID)
 	require.NotEqual(t, beforeGraphID, afterGraphID)
 
 	currentOut, err := handlers["update_automation_template"](ctx, json.RawMessage(fmt.Sprintf(`{"automation_id":%q}`, automationID)))
@@ -1671,7 +1671,7 @@ func TestBuildChannelUtilityActionHandlersUpdateAutomationTemplate(t *testing.T)
 	require.Contains(t, currentOut, `"applied":false`)
 	require.Contains(t, currentOut, `"reason":"already_current"`)
 	assertAutomationSummary(currentOut, "automation")
-	require.Equal(t, afterGraphID, channelAutomationPublishedGraphID(t, db, automationID))
+	require.Equal(t, afterGraphID, channelAutomationPublishedGraphID(t, env, automationID))
 
 	duplicateCandidate, err := drafts.TemplateCandidate(AutomationAdapterNativeSDLC)
 	require.NoError(t, err)
@@ -1683,14 +1683,14 @@ func TestBuildChannelUtilityActionHandlersUpdateAutomationTemplate(t *testing.T)
 	require.NoError(t, err)
 	firstDuplicateID := firstDuplicate.Definition.Automation.ID
 	secondDuplicateID := secondDuplicate.Definition.Automation.ID
-	firstDuplicateGraphID := channelAutomationPublishedGraphID(t, db, firstDuplicateID)
-	secondDuplicateGraphID := channelAutomationPublishedGraphID(t, db, secondDuplicateID)
+	firstDuplicateGraphID := channelAutomationPublishedGraphID(t, env, firstDuplicateID)
+	secondDuplicateGraphID := channelAutomationPublishedGraphID(t, env, secondDuplicateID)
 	duplicateIDs := []string{firstDuplicateID, secondDuplicateID}
 	sort.Strings(duplicateIDs)
 	_, err = handlers["update_automation_template"](ctx, json.RawMessage(`{"name":" duplicate channel review "}`))
 	require.EqualError(t, err, fmt.Sprintf("update_automation_template: automation name %q is ambiguous in current project; use automation_id (%s)", "duplicate channel review", strings.Join(duplicateIDs, ", ")))
-	require.Equal(t, firstDuplicateGraphID, channelAutomationPublishedGraphID(t, db, firstDuplicateID), "ambiguous name must not mutate the first Automation")
-	require.Equal(t, secondDuplicateGraphID, channelAutomationPublishedGraphID(t, db, secondDuplicateID), "ambiguous name must not mutate the second Automation")
+	require.Equal(t, firstDuplicateGraphID, channelAutomationPublishedGraphID(t, env, firstDuplicateID), "ambiguous name must not mutate the first Automation")
+	require.Equal(t, secondDuplicateGraphID, channelAutomationPublishedGraphID(t, env, secondDuplicateID), "ambiguous name must not mutate the second Automation")
 
 	foreignCandidate := candidate
 	foreignCandidate.Name = "Foreign Channel Native SDLC"
@@ -1700,10 +1700,10 @@ func TestBuildChannelUtilityActionHandlersUpdateAutomationTemplate(t *testing.T)
 	require.ErrorContains(t, err, "not found in current project")
 }
 
-func channelAutomationPublishedGraphID(t *testing.T, db *sql.DB, automationID string) string {
+func channelAutomationPublishedGraphID(t *testing.T, env *teststores.Env, automationID string) string {
 	t.Helper()
-	var graphID string
-	require.NoError(t, db.QueryRow(`SELECT published_version_id FROM automations WHERE id = ?`, automationID).Scan(&graphID))
+	graphID, err := env.Fixtures.PublishedAutomationVersionID(t.Context(), automationID)
+	require.NoError(t, err)
 	return graphID
 }
 
@@ -1834,18 +1834,18 @@ func TestBuildChannelUtilityActionHandlersViewPulseUsesUpcomingService(t *testin
 }
 
 func TestBuildChannelUtilityActionHandlersListSchedulesIncludesEmptyDaysAndNullNextRun(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
-	projectRepo := teststores.Of(db).Projects
-	taskRepo := teststores.Of(db).Tasks
-	scheduleRepo := teststores.Of(db).Schedules
+	projectRepo := env.Projects
+	taskRepo := env.Tasks
+	scheduleRepo := env.Schedules
 	project := &models.Project{Name: "Schedule Discovery Contract"}
 	require.NoError(t, projectRepo.Create(ctx, project))
 	task := &models.Task{ProjectID: project.ID, Title: "One time", Prompt: "prompt", Category: models.CategoryScheduled, Status: models.StatusPending, Priority: 2}
 	require.NoError(t, taskRepo.Create(ctx, task))
 	schedule := &models.Schedule{TaskID: task.ID, RunAt: time.Now().UTC().Add(time.Hour), RepeatType: models.RepeatOnce, RepeatInterval: 1, Enabled: true}
 	require.NoError(t, scheduleRepo.Create(ctx, schedule))
-	_, err := db.ExecContext(ctx, `UPDATE schedules SET next_run = NULL WHERE id = ?`, schedule.ID)
+	err := env.Fixtures.SetScheduleNextRun(ctx, schedule.ID, nil)
 	require.NoError(t, err)
 
 	handlers := buildChannelUtilityActionHandlers(channelUtilityActionHandlerOptions{ProjectID: project.ID, TaskRepo: taskRepo, ScheduleRepo: scheduleRepo})
@@ -1921,13 +1921,13 @@ func TestBuildChannelUtilityActionHandlersListChannelsReportsGitHubAppConnection
 }
 
 func TestChannelServiceListChannelsIncludesProviderStatusAndCountsSafely(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
-	settingsRepo := teststores.Of(db).Settings
-	projectRepo := teststores.Of(db).Projects
-	emailAuthRepo := teststores.Of(db).EmailAuth
-	webhookRepo := teststores.Of(db).Webhooks
-	channelTargetRepo := teststores.Of(db).ChannelTargets
+	settingsRepo := env.Settings
+	projectRepo := env.Projects
+	emailAuthRepo := env.EmailAuth
+	webhookRepo := env.Webhooks
+	channelTargetRepo := env.ChannelTargets
 	project := &models.Project{Name: "Channel Surface Complete Status"}
 	require.NoError(t, projectRepo.Create(ctx, project))
 	settings := map[string]string{
@@ -1960,7 +1960,7 @@ func TestChannelServiceListChannelsIncludesProviderStatusAndCountsSafely(t *test
 	require.NoError(t, settingsRepo.Set(ctx, SendMessageAllowExplicitTargetsSetting+":"+project.ID, "true"))
 	require.NoError(t, emailAuthRepo.Create(ctx, &models.EmailAuthorizedSender{ProjectID: project.ID, EmailAddress: "sender@example.com", DisplayName: "Sender", AddedBy: "test"}))
 	require.NoError(t, webhookRepo.Create(ctx, &models.WebhookEndpoint{ProjectID: project.ID, Name: "Deploy", Enabled: true, PathToken: "WEBHOOK-PATH-TOKEN-MUST-NOT-LEAK", Secret: "WEBHOOK-SECRET-MUST-NOT-LEAK", DefaultPriority: 2}))
-	require.NoError(t, channelTargetRepo.(*sqlite.ChannelTargetRepo).Upsert(ctx, models.ChannelTarget{ID: "target-1", ProjectID: project.ID, Platform: "slack", TargetKind: "channel", Name: "ops", TargetID: "RAW-TARGET-ID-MUST-NOT-LEAK", Home: true}))
+	require.NoError(t, env.Fixtures.SeedChannelTarget(ctx, models.ChannelTarget{ID: "target-1", ProjectID: project.ID, Platform: "slack", TargetKind: "channel", Name: "ops", TargetID: "RAW-TARGET-ID-MUST-NOT-LEAK", Home: true}))
 	router := NewChannelMessageRouter(channelTargetRepo, settingsRepo)
 	emailStatus := func(context.Context) EmailConnectionStatus {
 		return EmailConnectionStatus{Configured: true, Running: true, Address: "bot@example.com", Provider: EmailProviderCustom, IMAPHost: "imap.example.com", IMAPPort: 993, SMTPHost: "smtp.example.com", SMTPPort: 587}
@@ -3263,17 +3263,20 @@ func TestExecuteUpdateProjectSettingsRuntimeRejectsWorkerLimitAboveFiniteGlobal(
 }
 
 func TestExecuteUpdateProjectSettingsRuntimeRejectsAmbiguousModelName(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
-	projectRepo := teststores.Of(db).Projects
+	projectRepo := env.Projects
 	projectSvc := NewProjectService(projectRepo)
-	llmConfigRepo := teststores.Of(db).LLMConfigs
+	llmConfigRepo := env.LLMConfigs
 	project := &models.Project{Name: "Ambiguous Model Project"}
 	require.NoError(t, projectRepo.Create(ctx, project))
-	_, err := db.ExecContext(ctx, `INSERT INTO agent_configs (id, name, provider, model, is_default, auth_method) VALUES
-		('ambiguous-model-a', 'Ambiguous Runtime Model', 'test', 'test-a', 0, 'api_key'),
-		('ambiguous-model-b', 'ambiguous runtime model', 'test', 'test-b', 0, 'api_key')`)
-	require.NoError(t, err)
+	for _, model := range []models.LLMConfig{
+		{Name: "Ambiguous Runtime Model", Provider: models.ProviderTest, Model: "test-a", AuthMethod: models.AuthMethodAPIKey},
+		{Name: "Second unique runtime model", Provider: models.ProviderTest, Model: "test-b", AuthMethod: models.AuthMethodAPIKey},
+	} {
+		require.NoError(t, llmConfigRepo.Create(ctx, &model))
+		require.NoError(t, env.Fixtures.SetLegacyModelName(ctx, model.ID, "Ambiguous Runtime Model"))
+	}
 
 	out, err := ExecuteUpdateProjectSettingsRuntime(ctx, UpdateProjectSettingsRuntimeOptions{
 		ProjectID:     project.ID,
@@ -3401,11 +3404,11 @@ func TestCreateAgentRuntimeRollsBackWhenMaterializationFails(t *testing.T) {
 }
 
 func TestCreateAgentRuntimeCreatesAgentAndRejectsUnsafeInputs(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
-	agentRepo := teststores.Of(db).Agents
-	llmConfigRepo := teststores.Of(db).LLMConfigs
-	projectRepo := teststores.Of(db).Projects
+	agentRepo := env.Agents
+	llmConfigRepo := env.LLMConfigs
+	projectRepo := env.Projects
 	project := &models.Project{Name: "Runtime Agent Service Project"}
 	require.NoError(t, projectRepo.Create(ctx, project))
 
@@ -3648,11 +3651,11 @@ func TestUpdateAgentRuntimePatchesSafeFieldsAndPreservesOwnership(t *testing.T) 
 }
 
 func TestUpdateAgentRuntimeRejectsUnsafeTargetsAndInputsWithoutPartialSave(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
-	agentRepo := teststores.Of(db).Agents
-	llmConfigRepo := teststores.Of(db).LLMConfigs
-	projectRepo := teststores.Of(db).Projects
+	agentRepo := env.Agents
+	llmConfigRepo := env.LLMConfigs
+	projectRepo := env.Projects
 	project := &models.Project{Name: "Runtime Agent Reject Project"}
 	require.NoError(t, projectRepo.Create(ctx, project))
 	foreign := &models.Project{Name: "Foreign Runtime Agent Project"}

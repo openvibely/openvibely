@@ -17,7 +17,6 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
-	"github.com/openvibely/openvibely/internal/persistence/sqlite/database"
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/internal/testutil/teststores"
 	"github.com/stretchr/testify/assert"
@@ -385,13 +384,9 @@ func TestUploadChatAttachment_RejectsRetiredSessionWithoutRecreatingDirectory(t 
 func TestUploadChatAttachment_SerializesPublicationWithConcurrentRetirement(t *testing.T) {
 	useTempUploadsDir(t)
 
-	db, err := database.New(filepath.Join(t.TempDir(), "attachment-retirement.db"))
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, db.Close()) })
-	h := &Handler{
-		chatAttachmentRepo: teststores.Of(db).ChatAttachments,
-		threadInputRepo:    teststores.Of(db).ThreadInputs,
-	}
+	stores := teststores.New(t, teststores.WithProductionTopology())
+	h := &Handler{chatAttachmentRepo: stores.ChatAttachments, threadInputRepo: stores.ThreadInputs}
+
 	e := echo.New()
 	const sessionID = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
 
