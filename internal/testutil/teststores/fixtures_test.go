@@ -864,3 +864,50 @@ func TestTaskDiscoveryWorkloadPreservesPayloadAndOrdering(t *testing.T) {
 		})
 	}
 }
+
+func TestExecutionHistoryFixturePersistsExactStateAndRollsBack(t *testing.T) {
+	for _, production := range []bool{false, true} {
+		name := "isolated"
+		if production {
+			name = "production"
+		}
+		t.Run(name, func(t *testing.T) {
+			var opts []teststores.Option
+			if production {
+				opts = append(opts, teststores.WithProductionTopology())
+			}
+			env := teststores.New(t, opts...)
+			ctx := t.Context()
+			task := models.Task{ProjectID: "default", Title: "History fixture", Category: models.CategoryBacklog, Status: models.StatusPending, Priority: 2}
+			require.NoError(t, env.Tasks.Create(ctx, &task))
+			agent := models.LLMConfig{Name: "History model", Provider: models.ProviderTest, Model: "test"}
+			require.NoError(t, env.LLMConfigs.Create(ctx, &agent))
+			started := time.Date(2026, 8, 13, 12, 0, 0, 0, time.UTC)
+			completed := started.Add(time.Second)
+			entry := storefixture.ExecutionHistoryEntry{ID: "history-valid", TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecFailed, PromptSent: "prompt", Output: "output", ErrorMessage: "failure", TokensUsed: 64, DurationMs: 1500, StartedAt: started, CompletedAt: &completed}
+			invalid := entry
+			invalid.ID = "history-invalid"
+			invalid.TaskID = "missing-task"
+			require.Error(t, env.Fixtures.SeedExecutionHistory(ctx, []storefixture.ExecutionHistoryEntry{entry, invalid}))
+			rows, err := env.Executions.ListByTask(ctx, task.ID)
+			require.NoError(t, err)
+			require.Empty(t, rows)
+			require.NoError(t, env.Fixtures.SeedExecutionHistory(ctx, []storefixture.ExecutionHistoryEntry{entry}))
+			got, err := env.Executions.GetByID(ctx, entry.ID)
+			require.NoError(t, err)
+			require.NotNil(t, got)
+			require.Equal(t, entry.Status, got.Status)
+			require.Equal(t, entry.PromptSent, got.PromptSent)
+			require.Equal(t, entry.Output, got.Output)
+			require.Equal(t, entry.ErrorMessage, got.ErrorMessage)
+			require.Equal(t, entry.TokensUsed, got.TokensUsed)
+			require.Equal(t, entry.DurationMs, got.DurationMs)
+			require.True(t, started.Equal(got.StartedAt))
+			require.NotNil(t, got.CompletedAt)
+			require.True(t, completed.Equal(*got.CompletedAt))
+			stored, err := env.Tasks.GetByID(ctx, task.ID)
+			require.NoError(t, err)
+			require.Equal(t, models.StatusPending, stored.Status)
+		})
+	}
+}

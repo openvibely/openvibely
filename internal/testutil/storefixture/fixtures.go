@@ -43,7 +43,18 @@ type TaskDiscoveryWorkload struct {
 // AutomationExecutionOwnership preserves exact activity and execution-resource multiplicity.
 type AutomationExecutionOwnership struct{ Activities, ExecutionResources int }
 
+// ExecutionHistoryEntry describes historical output without applying live execution transitions.
+type ExecutionHistoryEntry struct {
+	ID, TaskID, AgentConfigID, PromptSent, Output, ErrorMessage string
+	Status                                                      models.ExecutionStatus
+	TokensUsed                                                  int
+	DurationMs                                                  int64
+	StartedAt                                                   time.Time
+	CompletedAt                                                 *time.Time
+}
+
 type Fixtures interface {
+	SeedExecutionHistory(context.Context, []ExecutionHistoryEntry) error
 	AsyncToolCallStatus(context.Context, string) (string, error)
 	RemoveAutomationTaskBinding(context.Context, string, string) error
 	AutomationExecutionOwnership(context.Context, string, string) (AutomationExecutionOwnership, error)

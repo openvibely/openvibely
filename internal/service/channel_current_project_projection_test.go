@@ -9,16 +9,17 @@ import (
 
 	"github.com/openvibely/openvibely/internal/chatcontrol"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/persistence"
-	"github.com/openvibely/openvibely/internal/testutil"
+
+	"github.com/openvibely/openvibely/internal/testutil/storefixture"
 	"github.com/openvibely/openvibely/internal/testutil/teststores"
 	"github.com/stretchr/testify/require"
 )
 
 func TestChannelCurrentProjectUsesIdentityProjection(t *testing.T) {
-	db, counter := testutil.NewStatementCountingTestDB(t)
+	db := teststores.New(t, teststores.WithIOCounting())
+	counter := db.IO
 	ctx := context.Background()
-	projectRepo := teststores.Of(db).Projects
+	projectRepo := db.Projects
 	project := &models.Project{
 		Name:        "Channel identity project",
 		Description: strings.Repeat("d", 16<<10),
@@ -41,7 +42,8 @@ func TestChannelCurrentProjectUsesIdentityProjection(t *testing.T) {
 			counter.SetEnabled(false)
 			require.NoError(t, err)
 			require.Equal(t, "Current project: Channel identity project (id: "+project.ID+")", currentProject)
-			requireProjectIdentityQuery(t, counter.Statements())
+			require.Equal(t, 1, counter.Snapshot().Requests)
+			require.Less(t, counter.Snapshot().ReadTextBytes, 1024)
 
 			missingID := "missing-channel-project"
 			missingHandlers := buildChannelContextModeActionHandlers(channelContextModeActionHandlerOptions{
@@ -55,15 +57,10 @@ func TestChannelCurrentProjectUsesIdentityProjection(t *testing.T) {
 			counter.SetEnabled(false)
 			require.NoError(t, err)
 			require.Equal(t, "Current project ID: "+missingID+" (details unavailable)", missingProject)
-			requireProjectIdentityQuery(t, counter.Statements())
+			require.Equal(t, 1, counter.Snapshot().Requests)
+			require.Less(t, counter.Snapshot().ReadTextBytes, 1024)
 		})
 	}
-}
-
-func requireProjectIdentityQuery(t *testing.T, statements []string) {
-	t.Helper()
-	require.Len(t, statements, 1)
-	require.Equal(t, "select id, name from projects where id = ?", strings.ToLower(strings.Join(strings.Fields(statements[0]), " ")))
 }
 
 func TestChannelCurrentProjectUsesCompactProjection(t *testing.T) {
@@ -92,7 +89,7 @@ func TestChannelCurrentProjectUsesCompactProjection(t *testing.T) {
 }
 
 type channelCurrentProjectProjectionFixture struct {
-	counter        *testutil.SQLStatementCounter
+	counter        storefixture.IOCounter
 	compactHandler chatcontrol.RuntimeActionHandler
 	expected       string
 }
@@ -100,19 +97,13 @@ type channelCurrentProjectProjectionFixture struct {
 func newChannelCurrentProjectProjectionFixture(tb testing.TB, fileBacked, large, missing bool) *channelCurrentProjectProjectionFixture {
 	tb.Helper()
 
-	var projectRepo, writeRepo persistence.ProjectStore
-	var counter *testutil.SQLStatementCounter
+	opts := []teststores.Option{teststores.WithIOCounting()}
 	if fileBacked {
-		reader, writer, statementCounter := testutil.NewFileBackedSplitStatementCountingTestDB(tb)
-		projectRepo = teststores.Of(reader).Projects
-		writeRepo = teststores.Of(writer).Projects
-		counter = statementCounter
-	} else {
-		db, statementCounter := testutil.NewStatementCountingTestDB(tb)
-		projectRepo = teststores.Of(db).Projects
-		writeRepo = projectRepo
-		counter = statementCounter
+		opts = append(opts, teststores.WithProductionTopology())
 	}
+	env := teststores.New(tb, opts...)
+	projectRepo := env.Projects
+	counter := env.IO
 
 	project := &models.Project{Name: "Benchmark channel project"}
 	if large {
@@ -120,7 +111,7 @@ func newChannelCurrentProjectProjectionFixture(tb testing.TB, fileBacked, large,
 		project.RepoPath = strings.Repeat("p", 2<<10)
 		project.RepoURL = strings.Repeat("u", 2<<10)
 	}
-	if err := writeRepo.Create(context.Background(), project); err != nil {
+	if err := projectRepo.Create(context.Background(), project); err != nil {
 		tb.Fatalf("Create: %v", err)
 	}
 	lookupID := project.ID
@@ -180,14 +171,14 @@ func (f *channelCurrentProjectProjectionFixture) observeLookup(tb testing.TB, lo
 	if got != f.expected {
 		tb.Fatalf("observed lookup = %q, want %q", got, f.expected)
 	}
-	statements := f.counter.Statements()
-	if len(statements) != 1 {
-		tb.Fatalf("observed SQL statements = %d, want one: %v", len(statements), statements)
+	stats := f.counter.Snapshot()
+	if stats.Requests != 1 {
+		tb.Fatalf("observed SQL statements = %d, want one: %v", stats.Requests, stats)
 	}
 	return channelCurrentProjectProjectionMeasurement{
 		responseBytes:     len(got),
-		selectedTextBytes: f.counter.SelectedTextBytes(),
-		sqlStatements:     len(statements),
+		selectedTextBytes: stats.ReadTextBytes,
+		sqlStatements:     stats.Requests,
 	}
 }
 
