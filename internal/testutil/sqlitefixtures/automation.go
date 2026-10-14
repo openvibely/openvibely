@@ -4,6 +4,9 @@ import (
 	"context"
 	"time"
 
+	"github.com/openvibely/openvibely/internal/persistence/sqlite"
+	"github.com/openvibely/openvibely/internal/testutil/storefixture"
+
 	"github.com/openvibely/openvibely/internal/models"
 )
 
@@ -69,5 +72,18 @@ func (f *fixtures) SetAutomationUpdatedAt(ctx context.Context, id string, at tim
 
 func (f *fixtures) SeedAutomationNode(ctx context.Context, n models.AutomationNode) error {
 	_, err := f.db.ExecContext(ctx, `INSERT INTO automation_nodes(id,project_id,automation_id,version_id,node_key,name,node_type,role,config_json,position_x,position_y) VALUES(?,?,?,?,?,?,?,?,?,?,?)`, n.ID, n.ProjectID, n.AutomationID, n.VersionID, n.NodeKey, n.Name, n.NodeType, n.Role, n.ConfigJSON, n.PositionX, n.PositionY)
+	return err
+}
+
+func (f *fixtures) RenewAutomationDispatchLease(ctx context.Context, id, owner string, expires time.Time) error {
+	return sqlite.NewAutomationRepo(f.db).RenewDispatchLease(ctx, id, owner, expires)
+}
+func (f *fixtures) AutomationDispatchState(ctx context.Context, id string) (storefixture.AutomationDispatchState, error) {
+	var state storefixture.AutomationDispatchState
+	err := f.db.QueryRowContext(ctx, `SELECT status,(SELECT COUNT(*) FROM automation_task_run_reservations WHERE dispatch_id = ?) FROM automation_dispatch_outbox WHERE id = ?`, id, id).Scan(&state.Status, &state.TaskReservations)
+	return state, err
+}
+func (f *fixtures) CompleteAutomationActivity(ctx context.Context, id string, at time.Time) error {
+	_, err := f.db.ExecContext(ctx, `UPDATE automation_activities SET status='completed',completed_at=? WHERE id=?`, at.UTC().Format(time.RFC3339Nano), id)
 	return err
 }
