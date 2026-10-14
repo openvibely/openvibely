@@ -41,7 +41,7 @@ func TestShellSelection(t *testing.T) {
 			if tc.name == "windows legacy powershell" && got.DisplayName() != "Windows PowerShell" {
 				t.Fatalf("legacy shell mislabeled: %+v", got)
 			}
-			if tc.name == "windows pwsh" && (got.Path != "pwsh" || got.DisplayName() != "PowerShell 7") {
+			if tc.name == "windows pwsh" && (got.Path != "pwsh" || got.DisplayName() != "PowerShell (pwsh)") {
 				t.Fatalf("did not prefer pwsh: %+v", got)
 			}
 		})

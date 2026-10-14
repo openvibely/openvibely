@@ -79,7 +79,7 @@ func (s Shell) DisplayName() string {
 	case "powershell":
 		name := filepath.Base(strings.ReplaceAll(s.Path, `\`, "/"))
 		if strings.EqualFold(name, "pwsh") || strings.EqualFold(name, "pwsh.exe") {
-			return "PowerShell 7"
+			return "PowerShell (pwsh)"
 		}
 		return "Windows PowerShell"
 	case "cmd":
