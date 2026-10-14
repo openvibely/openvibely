@@ -172,3 +172,17 @@ func (f *fixtures) SetAutomationCandidate(ctx context.Context, id string, candid
 	_, err = f.db.ExecContext(ctx, `UPDATE automation_graph_metadata SET candidate_json = ? WHERE automation_id = ?`, string(data), id)
 	return err
 }
+
+func (f *fixtures) AutomationState(ctx context.Context) (storefixture.AutomationStateCounts, error) {
+	var state storefixture.AutomationStateCounts
+	err := f.db.QueryRowContext(ctx, `SELECT (SELECT COUNT(*) FROM automations),(SELECT COUNT(*) FROM automation_versions),(SELECT COUNT(*) FROM automation_nodes),(SELECT COUNT(*) FROM automation_edges),(SELECT COUNT(*) FROM automation_definition_resources),(SELECT COUNT(*) FROM tasks),(SELECT COUNT(*) FROM schedules)`).Scan(&state.Automations, &state.Versions, &state.Nodes, &state.Edges, &state.Resources, &state.Tasks, &state.Schedules)
+	return state, err
+}
+func (f *fixtures) FailScheduleCreation(ctx context.Context) error {
+	_, err := f.db.ExecContext(ctx, `CREATE TRIGGER fail_atomic_automation_schedule BEFORE INSERT ON schedules BEGIN SELECT RAISE(ABORT, 'injected schedule failure'); END`)
+	return err
+}
+func (f *fixtures) FailScheduleUpdate(ctx context.Context) error {
+	_, err := f.db.ExecContext(ctx, `CREATE TRIGGER fail_atomic_automation_schedule_update BEFORE UPDATE ON schedules BEGIN SELECT RAISE(ABORT, 'injected schedule update failure'); END`)
+	return err
+}

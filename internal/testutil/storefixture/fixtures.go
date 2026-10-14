@@ -29,7 +29,13 @@ type ExecutionUsageRecord struct {
 // Fixtures describes test domain state, never tables, query text, or connections.
 type ChannelProjectSelectionCounts struct{ Discord, Slack, Telegram, Email int }
 
+// AutomationStateCounts includes retained graphs and unbound resources, so failed saves cannot hide orphaned state.
+type AutomationStateCounts struct{ Automations, Versions, Nodes, Edges, Resources, Tasks, Schedules int }
+
 type Fixtures interface {
+	AutomationState(context.Context) (AutomationStateCounts, error)
+	FailScheduleCreation(context.Context) error
+	FailScheduleUpdate(context.Context) error
 	RemoveAutomationCandidate(context.Context, string, string, string) error
 	SetAutomationCandidate(context.Context, string, models.AutomationDraftCandidate) error
 	SetAutomationHealthEvaluationTime(context.Context, string, *time.Time) error
