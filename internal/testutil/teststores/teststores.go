@@ -31,19 +31,6 @@ func Driver() string {
 	return driver
 }
 
-// NewDB opens a fresh, isolated, migrated database for the selected backend.
-// It is closed when the test finishes.
-func NewDB(tb testing.TB) *sql.DB {
-	tb.Helper()
-	switch driver := Driver(); driver {
-	case config.DatabaseDriverSQLite:
-		return testutil.NewTestDB(tb)
-	default:
-		tb.Fatalf("unsupported %s %q (supported: %s)", DriverEnv, driver, config.DatabaseDriverSQLite)
-		return nil
-	}
-}
-
 type options struct {
 	productionTopology bool
 	countIO            bool
@@ -64,21 +51,6 @@ func WithIOCounting() Option {
 // WithBroadcaster wires b into stores that publish events.
 func WithBroadcaster(b *events.Broadcaster) Option {
 	return func(o *options) { o.broadcaster = b }
-}
-
-// Of builds the selected backend's stores on a database opened by NewDB.
-// Each call returns new store instances.
-func Of(db *sql.DB, opts ...Option) persistence.Stores {
-	var o options
-	for _, opt := range opts {
-		opt(&o)
-	}
-	switch Driver() {
-	case config.DatabaseDriverSQLite:
-		return sqlite.NewStores(db, o.broadcaster)
-	default:
-		panic("teststores: unsupported " + DriverEnv + " " + Driver())
-	}
 }
 
 // Env is a fresh test database and the stores built on it.
@@ -162,15 +134,6 @@ func New(tb testing.TB, opts ...Option) *Env {
 	}
 }
 
-// RequireSQLite skips tests that depend on SQLite internals (statement
-// counting, file-backed topology, triggers, PRAGMAs) on other backends.
-func RequireSQLite(tb testing.TB) {
-	tb.Helper()
-	if driver := Driver(); driver != config.DatabaseDriverSQLite {
-		tb.Skipf("requires sqlite; %s=%s", DriverEnv, driver)
-	}
-}
-
 // ClearLLMConfigs deletes every model config through the store.
 func ClearLLMConfigs(tb testing.TB, s persistence.LLMConfigStore) {
 	tb.Helper()
@@ -198,5 +161,23 @@ func ClearAgents(tb testing.TB, s persistence.AgentStore) {
 		if err := s.Delete(ctx, a.ID); err != nil {
 			tb.Fatalf("delete agent %s: %v", a.ID, err)
 		}
+	}
+}
+
+// OpenBackend opens isolated persistent test storage for startup/restart tests.
+// Callers supply a path under testing.TB.TempDir; no connection handles escape.
+func OpenBackend(tb testing.TB, path string, broadcaster *events.Broadcaster) persistence.Backend {
+	tb.Helper()
+	switch driver := Driver(); driver {
+	case config.DatabaseDriverSQLite:
+		backend, err := sqlite.Open(path, broadcaster)
+		if err != nil {
+			tb.Fatalf("open test backend: %v", err)
+		}
+		tb.Cleanup(func() { _ = backend.Close() })
+		return backend
+	default:
+		tb.Fatalf("unsupported %s %q (supported: %s)", DriverEnv, driver, config.DatabaseDriverSQLite)
+		return nil
 	}
 }

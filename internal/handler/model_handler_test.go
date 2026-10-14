@@ -16,7 +16,8 @@ import (
 
 	llmcustomauth "github.com/openvibely/openvibely/internal/llm/customauth"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/openvibely/openvibely/internal/testutil/teststores"
+	"github.com/stretchr/testify/require"
 )
 
 func assertOAuthCredentialStateCleared(t *testing.T, cfg *models.LLMConfig) {
@@ -2371,8 +2372,8 @@ func TestCreateModel_HTMX_ReturnsContentInsteadOfRedirect(t *testing.T) {
 }
 
 func TestModelMutations_HTMXReturnRefreshedList(t *testing.T) {
-	db, statementCounter := testutil.NewStatementCountingTestDB(t)
-	_, e, llmConfigRepo := setupTestHandlerForDB(t, db)
+	_, e, llmConfigRepo, env := setupTestHandlerWithStores(t, teststores.WithIOCounting())
+	statementCounter := env.IO
 	ctx := context.Background()
 	largePayload := strings.Repeat("large-edit-only-json", 4096)
 	largeCustom := &models.LLMConfig{
@@ -2403,7 +2404,8 @@ func TestModelMutations_HTMXReturnRefreshedList(t *testing.T) {
 	e.ServeHTTP(createRec, createReq)
 	statementCounter.SetEnabled(false)
 	assertRefreshedModelsResponse(t, createRec, "Mutation Created Model", "Large Custom Provider", "0 / 2 active")
-	assertCompactModelsRefreshQuery(t, statementCounter.Statements())
+	require.Equal(t, 1, statementCounter.Snapshot().ModelCardReads)
+	require.Zero(t, statementCounter.Snapshot().ModelFullCatalogReads)
 	assertNotContains(t, createRec, largePayload)
 	assertNotContains(t, createRec, "secret-api-key")
 
@@ -2435,7 +2437,8 @@ func TestModelMutations_HTMXReturnRefreshedList(t *testing.T) {
 	updateRec := htmxPut(e, "/models/"+created.ID, updateForm)
 	statementCounter.SetEnabled(false)
 	assertRefreshedModelsResponse(t, updateRec, "Mutation Updated Model", "Large Custom Provider", "0 / 3 active")
-	assertCompactModelsRefreshQuery(t, statementCounter.Statements())
+	require.Equal(t, 1, statementCounter.Snapshot().ModelCardReads)
+	require.Zero(t, statementCounter.Snapshot().ModelFullCatalogReads)
 	assertNotContains(t, updateRec, largePayload)
 
 	statementCounter.Reset()
@@ -2443,7 +2446,8 @@ func TestModelMutations_HTMXReturnRefreshedList(t *testing.T) {
 	defaultRec := htmxPost(e, "/models/"+created.ID+"/set-default", nil)
 	statementCounter.SetEnabled(false)
 	assertRefreshedModelsResponse(t, defaultRec, "Mutation Updated Model", "Large Custom Provider", "data-model-is-default=\"true\"")
-	assertCompactModelsRefreshQuery(t, statementCounter.Statements())
+	require.Equal(t, 1, statementCounter.Snapshot().ModelCardReads)
+	require.Zero(t, statementCounter.Snapshot().ModelFullCatalogReads)
 	assertNotContains(t, defaultRec, largePayload)
 
 	statementCounter.Reset()
@@ -2456,7 +2460,8 @@ func TestModelMutations_HTMXReturnRefreshedList(t *testing.T) {
 	if body := deleteRec.Body.String(); !strings.Contains(body, "models-container") || strings.Contains(body, "Mutation Updated Model") {
 		t.Errorf("delete HTMX response did not contain the refreshed model list: %s", body)
 	}
-	assertCompactModelsRefreshQuery(t, statementCounter.Statements())
+	require.Equal(t, 1, statementCounter.Snapshot().ModelCardReads)
+	require.Zero(t, statementCounter.Snapshot().ModelFullCatalogReads)
 	assertNotContains(t, deleteRec, largePayload)
 
 	details := htmxGet(e, "/models/"+largeCustom.ID+"/edit-details")
@@ -2482,31 +2487,6 @@ func assertRefreshedModelsResponse(t *testing.T, rec *httptest.ResponseRecorder,
 	for _, value := range expected {
 		if !strings.Contains(body, value) {
 			t.Errorf("HTMX response missing %q: %s", value, body)
-		}
-	}
-}
-
-func assertCompactModelsRefreshQuery(t *testing.T, statements []string) {
-	t.Helper()
-	var refreshStatements []string
-	for _, statement := range statements {
-		normalized := strings.Join(strings.Fields(statement), " ")
-		if strings.Contains(normalized, "FROM agent_configs AS configs WHERE 1=1 ORDER BY name COLLATE NOCASE ASC, name ASC, id ASC") {
-			refreshStatements = append(refreshStatements, normalized)
-		}
-	}
-	if len(refreshStatements) != 1 {
-		t.Fatalf("expected exactly one model-card refresh query, got %d in statements: %q", len(refreshStatements), statements)
-	}
-	refresh := refreshStatements[0]
-	for _, forbidden := range []string{"oauth_refresh_token", "oauth_client_secret", "extra_headers_json", "extra_body_json", "custom_auth_config_json", "custom_auth_state_json"} {
-		if strings.Contains(refresh, forbidden) {
-			t.Fatalf("model refresh query selected edit-only column %q: %s", forbidden, refresh)
-		}
-	}
-	for _, required := range []string{"CASE WHEN api_key != '' THEN 1 ELSE 0 END", "json_array_length"} {
-		if !strings.Contains(refresh, required) {
-			t.Fatalf("model refresh query does not look like compact card projection; missing %q in %s", required, refresh)
 		}
 	}
 }

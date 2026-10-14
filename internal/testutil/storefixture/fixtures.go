@@ -86,6 +86,11 @@ type NativeAlertProjection struct {
 }
 type NativeMailboxKeys struct{ Producer, Action, Gate, Mailbox string }
 type Fixtures interface {
+	SeedDiscardedIssueDiscovery(context.Context, DiscardedIssueDiscovery) error
+	IssueDiscovery(context.Context, string, string, string) (IssueDiscoveryState, error)
+	CountIssueMailboxOwners(context.Context) (int, error)
+	CountAutomationInputBinding(context.Context, string) (int, error)
+
 	NativeAlertProjection(context.Context, string, string, string, string) (NativeAlertProjection, error)
 	NativeMailboxKeys(context.Context, string, string, string) (NativeMailboxKeys, error)
 	CountTransitionEvents(context.Context, string, string, []string) (int, error)
@@ -318,6 +323,7 @@ type Fixtures interface {
 // SQLite counts executed statements; other backends must count their database
 // requests, including requests made inside a single store method.
 type IOStats struct {
+	ModelDefaultDetailReads, ModelCardReads                                                              int
 	APIChatStatusReads, TaskMarkerReads                                                                  int
 	ExecutionMetricsReads, ExecutionPayloadReads, AgentLabelReads, ThreadMetadataReads, TaskPayloadReads int
 
@@ -420,4 +426,15 @@ type AutomationDispatchOutcome struct {
 	Reservations, Executions, Activities, ExecutionActivities                          int
 	ExecutionCompleted, InvocationCompleted                                            bool
 	NextAttemptAt                                                                      time.Time
+}
+
+// DiscardedIssueDiscovery describes an issue projection whose graph revision no longer exists.
+type DiscardedIssueDiscovery struct {
+	ProjectID, AutomationID, TaskID, ResourceID                                      string
+	WorkItemID, ActivityID, ChildID, InputID, BindingID, EventKey, VersionID, NodeID string
+}
+type IssueDiscoveryState struct {
+	WorkItemID, Title, OriginVersionID, OriginInvocationID, DiscoveryInvocationID string
+	Status                                                                        models.AutomationWorkItemStatus
+	Position                                                                      models.AutomationTransitionState
 }

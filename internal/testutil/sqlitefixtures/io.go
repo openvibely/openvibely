@@ -48,6 +48,12 @@ func (c *ioCounter) Snapshot() storefixture.IOStats {
 	stats := storefixture.IOStats{Requests: len(statements), ReadTextBytes: c.counter.SelectedTextBytes()}
 	for _, statement := range statements {
 		q := strings.ToLower(strings.Join(strings.Fields(statement), " "))
+		if strings.Contains(q, "from agent_configs as configs where 1=1 order by name collate nocase asc, name asc, id asc") {
+			stats.ModelCardReads++
+		}
+		if strings.Contains(q, "from agent_configs a left join oauth_connections") && strings.Contains(q, "where a.is_default = 1 limit 1") && strings.Contains(q, "api_key") && strings.Contains(q, "extra_body_json") {
+			stats.ModelDefaultDetailReads++
+		}
 		if strings.HasPrefix(q, "select id, status") && strings.Contains(q, "from executions where id = ?") {
 			stats.APIChatStatusReads++
 		}
