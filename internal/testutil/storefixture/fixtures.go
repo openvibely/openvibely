@@ -71,7 +71,22 @@ type WorkItemMatch struct{ ProjectID, AutomationID, VersionID, ID, Key, Kind, St
 type PositionMatch struct{ ProjectID, AutomationID, VersionID, WorkItemID, NodeID, NodeKey, State, WorkItemKey string }
 type TransitionMatch struct{ ProjectID, AutomationID, VersionID, WorkItemID, EdgeKey, State string }
 
+type AutomationResourceMatch struct{ ProjectID, AutomationID, VersionID, NodeKey, ResourceType string }
+
+type GitHubIssueClaim struct {
+	OwnerToken, ProjectionSource, MutationState string
+	IssueNumber                                 *int
+}
+type IssueProjectionFailure struct{ AutomationID, AssignmentEventKey string }
 type Fixtures interface {
+	GitHubIssueClaims(context.Context, string, string, string) ([]GitHubIssueClaim, error)
+	ExpireGitHubIssueClaim(context.Context, string, string, string, time.Time) error
+	SetIssueProjectionFailure(context.Context, *IssueProjectionFailure) error
+
+	AutomationDefinitionResources(context.Context, AutomationResourceMatch) ([]models.AutomationDefinitionResource, error)
+	AutomationOwnedScheduleIDs(context.Context, string) ([]string, error)
+	ClearAutomationTemplateRevision(context.Context, string) error
+
 	AutomationActivityResources(context.Context, ActivityMatch) ([]models.AutomationActivityResource, error)
 
 	CountMatchingActivities(context.Context, ActivityMatch) (int, error)

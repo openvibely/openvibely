@@ -84,7 +84,7 @@ func TestAutomationPortfolioCardKebabEnablesAndDisablesInPlace(t *testing.T) {
 }
 
 func TestAutomationPortfolioRunNowQueuesManualDispatchWithoutChangingCadence(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	project := tc.CreateProject().WithName("Automation card run now").Build()
 	automationRepo := tc.stores.Automations
 	registration := service.NewAutomationRegistrationService(automationRepo, service.NewAutomationAdapterRegistry())
@@ -126,13 +126,20 @@ func TestAutomationPortfolioRunNowQueuesManualDispatchWithoutChangingCadence(t *
 	require.Contains(t, hxTrigger, `"toast_key":"automation:`)
 	require.Contains(t, hxTrigger, `"click_url":"/automations/`+definition.Automation.ID+`?project_id=`+project.ID+`"`)
 
-	var triggerType, triggerResourceID, prompt string
-	require.NoError(t, tc.db.QueryRow(`SELECT i.trigger_resource_type, i.trigger_resource_id, t.prompt
-		FROM automation_invocations i JOIN automation_dispatch_outbox d ON d.invocation_id = i.id
-		JOIN tasks t ON t.id = d.task_id WHERE i.automation_id = ?`, definition.Automation.ID).Scan(&triggerType, &triggerResourceID, &prompt))
-	require.Equal(t, "manual", triggerType)
-	require.Equal(t, schedule.ID, triggerResourceID)
-	require.Equal(t, task.Prompt, prompt)
+	invocations, err := automationRepo.ListAutomationInvocations(t.Context(), project.ID, definition.Automation.ID, 50, "")
+	require.NoError(t, err)
+	require.Len(t, invocations.Items, 1)
+	dispatch, err := automationRepo.LeaseNextDispatch(t.Context(), "inspect-manual-run", time.Now().UTC(), time.Minute)
+	require.NoError(t, err)
+	require.NotNil(t, dispatch)
+	require.Equal(t, invocations.Items[0].ID, dispatch.InvocationID)
+	envelope, err := automationRepo.GetDispatchEnvelope(t.Context(), dispatch.ID)
+	require.NoError(t, err)
+	require.NotNil(t, envelope)
+	require.Equal(t, "manual", invocations.Items[0].TriggerResourceType)
+	require.Equal(t, schedule.ID, invocations.Items[0].TriggerResourceID)
+	require.Equal(t, task.Prompt, envelope.Task.Prompt)
+
 	after, err := tc.scheduleRepo.GetByID(context.Background(), schedule.ID)
 	require.NoError(t, err)
 	require.Equal(t, before.RunAt, after.RunAt)
@@ -721,7 +728,7 @@ func TestAutomationDuplicateNameIsAlwaysDistinct(t *testing.T) {
 }
 
 func TestAutomationTemplateBuilderAddsAndSavesCustomNodes(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	project := tc.CreateProject().WithName("Template Custom Nodes Project").Build()
 	automationRepo := tc.stores.Automations
 	registry := service.NewAutomationAdapterRegistry()
@@ -799,7 +806,7 @@ func TestAutomationTemplateBuilderAddsAndSavesCustomNodes(t *testing.T) {
 	saved := post(url.Values{"save_changes": {"true"}})
 	require.Equal(t, http.StatusNoContent, saved.Code, saved.Body.String())
 	require.NotEmpty(t, saved.Header().Get("HX-Redirect"))
-	require.Equal(t, 1, tableCountHandler(t, tc, "automations"))
+	require.Equal(t, 1, automationStateHandler(t, tc).Automations)
 
 	// Reintroduce the stale browser fields and exercise the same mutation sequence
 	// through the existing-Automation builder before any edit Save.
@@ -851,15 +858,11 @@ func TestAutomationTemplateBuilderAddsAndSavesCustomNodes(t *testing.T) {
 		_, hasSourceFiles := node.Config["source_files"]
 		require.False(t, hasSourceFiles, "edit preview must remove stale source_files from custom node %s", key)
 	}
-	require.Equal(t, 1, tableCountHandler(t, tc, "automation_versions"), "edit preview must remain browser-local")
+	require.Equal(t, 1, automationStateHandler(t, tc).Versions, "edit preview must remain browser-local")
 
 	countNodeResources := func(nodeKey, resourceType string) int {
 		t.Helper()
-		var count int
-		require.NoError(t, tc.db.QueryRow(`SELECT COUNT(*) FROM automation_definition_resources r
-			JOIN automation_nodes n ON n.id = r.node_id AND n.version_id = r.version_id
-			WHERE r.project_id = ? AND n.node_key = ? AND r.resource_type = ?`, project.ID, nodeKey, resourceType).Scan(&count))
-		return count
+		return len(automationResourcesHandler(t, tc, storefixture.AutomationResourceMatch{ProjectID: project.ID, NodeKey: nodeKey, ResourceType: resourceType}))
 	}
 	require.Equal(t, 1, countNodeResources("extra_review", "schedule"))
 	require.Equal(t, 1, countNodeResources("extra_review", "task"))
@@ -981,7 +984,7 @@ func TestAutomationBuilderPreviewRestoresDetailsView(t *testing.T) {
 }
 
 func TestAutomationYAMLParseReportsMalformedDocumentsWithoutSideEffects(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	project := tc.CreateProject().WithName("YAML parse-only project").Build()
 
 	invalid := tc.HTTP().Post("/automations/yaml/parse?project_id=" + project.ID).WithForm(url.Values{
@@ -1011,9 +1014,9 @@ func TestAutomationYAMLParseReportsMalformedDocumentsWithoutSideEffects(t *testi
 	require.NoError(t, json.Unmarshal(valid.Body.Bytes(), &validResult))
 	require.True(t, validResult.Valid)
 
-	for _, table := range []string{"automations", "automation_versions"} {
-		require.Zero(t, tableCountHandler(t, tc, table), "parse-only validation must not change %s", table)
-	}
+	state := automationStateHandler(t, tc)
+	require.Zero(t, state.Automations, "parse-only validation must not create automations")
+	require.Zero(t, state.Versions, "parse-only validation must not create versions")
 }
 
 func TestAutomationBuilderVisualActionsDecodeAndReserializeYAML(t *testing.T) {
@@ -1664,7 +1667,7 @@ func issueCodesHandler(candidate models.AutomationDraftCandidate, drafts *servic
 }
 
 func TestAutomationBuilderConfiguresGoalsForOwnedAndImplementationTasks(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	ctx := context.Background()
 	project := tc.CreateProject().WithName("Automation task goals").Build()
 	automationRepo := tc.stores.Automations
@@ -1702,10 +1705,9 @@ func TestAutomationBuilderConfiguresGoalsForOwnedAndImplementationTasks(t *testi
 	}).Execute()
 	require.Equal(t, http.StatusNoContent, saved.Code, saved.Body.String())
 
-	var taskID string
-	require.NoError(t, tc.db.QueryRowContext(ctx, `SELECT resource_id FROM automation_definition_resources resource
-		JOIN automation_nodes node ON node.id = resource.node_id
-		WHERE node.node_key = 'vision_suggestions' AND resource.resource_type = 'task'`).Scan(&taskID))
+	resources := automationResourcesHandler(t, tc, storefixture.AutomationResourceMatch{NodeKey: "vision_suggestions", ResourceType: "task"})
+	require.Len(t, resources, 1)
+	taskID := resources[0].ResourceID
 	goal, err := tc.stores.TaskGoals.GetByTaskID(ctx, taskID)
 	require.NoError(t, err)
 	require.NotNil(t, goal)
@@ -1713,7 +1715,7 @@ func TestAutomationBuilderConfiguresGoalsForOwnedAndImplementationTasks(t *testi
 }
 
 func TestAutomationLegacyMaintainedTemplateCanReplaceWithLatestRevision(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	ctx := context.Background()
 	project := tc.CreateProject().WithName("Legacy maintained template update").Build()
 	automationRepo := tc.stores.Automations
@@ -1737,8 +1739,7 @@ func TestAutomationLegacyMaintainedTemplateCanReplaceWithLatestRevision(t *testi
 	require.NotNil(t, templateRevision)
 	require.Equal(t, service.CurrentAutomationTemplateRevision(service.AutomationAdapterNativeSDLC), *templateRevision)
 
-	_, err = tc.db.ExecContext(ctx, `UPDATE automations SET template_revision = 0 WHERE id = ?`, automationID)
-	require.NoError(t, err)
+	require.NoError(t, tc.stores.Fixtures.SetAutomationTemplateRevision(ctx, project.ID, automationID, 0))
 	liveOutdated := tc.HTTP().Get("/automations/" + automationID + "?project_id=" + project.ID).Execute()
 	require.Equal(t, http.StatusOK, liveOutdated.Code, liveOutdated.Body.String())
 	require.Contains(t, liveOutdated.Body.String(), `data-automation-live-update-template`)
@@ -1756,8 +1757,7 @@ func TestAutomationLegacyMaintainedTemplateCanReplaceWithLatestRevision(t *testi
 	require.Contains(t, outdated.Body.String(), `data-automation-builder-cancel`)
 	require.Contains(t, outdated.Body.String(), `href="/automations/`+automationID+`?project_id=`+project.ID+`"`)
 	require.Contains(t, outdated.Body.String(), `hx-get="/automations/`+automationID+`?project_id=`+project.ID+`"`)
-	_, err = tc.db.ExecContext(ctx, `UPDATE automations SET template_revision = NULL WHERE id = ?`, automationID)
-	require.NoError(t, err)
+	require.NoError(t, tc.stores.Fixtures.ClearAutomationTemplateRevision(ctx, automationID))
 	withoutVision := automationCandidateWithoutNodeHandler(candidate, "vision_suggestions")
 	edited := tc.HTMX().Post("/automations/" + automationID + "/builder?project_id=" + project.ID).WithForm(url.Values{
 		"project_id": {project.ID}, "candidate_json": {automationDraftCandidateJSONForTest(t, withoutVision)}, "save_changes": {"true"},
@@ -1776,7 +1776,7 @@ func TestAutomationLegacyMaintainedTemplateCanReplaceWithLatestRevision(t *testi
 	}).Execute()
 	require.Equal(t, http.StatusNoContent, updated.Code, updated.Body.String())
 	require.NotEmpty(t, updated.Header().Get("HX-Redirect"))
-	require.Equal(t, 1, tableCountHandler(t, tc, "automation_versions"), "template update must replace the graph without adding history")
+	require.Equal(t, 1, automationStateHandler(t, tc).Versions, "template update must replace the graph without adding history")
 	templateRevision = storedAutomationHandler(t, tc, project.ID, automationID).TemplateRevision
 	require.NotNil(t, templateRevision)
 	require.Equal(t, service.CurrentAutomationTemplateRevision(service.AutomationAdapterNativeSDLC), *templateRevision)
@@ -1861,7 +1861,7 @@ func TestAutomationGitHubTemplateSaveExplainsUnavailableProjectSetup(t *testing.
 }
 
 func TestAutomationGitHubTemplateSaveUsesVisibleGitHubSetupAndBrowserActionFields(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	ctx := context.Background()
 	project := tc.CreateProject().WithName("Configured GitHub template").Build()
 	project.RepoURL = "https://github.com/openvibely/openvibely"
@@ -1913,12 +1913,12 @@ func TestAutomationGitHubTemplateSaveUsesVisibleGitHubSetupAndBrowserActionField
 	}).Execute()
 	require.Equal(t, http.StatusNoContent, saved.Code, saved.Body.String())
 	require.NotEmpty(t, saved.Header().Get("HX-Redirect"))
-	require.Equal(t, 1, tableCountHandler(t, tc, "automations"))
-	require.NotZero(t, tableCountHandler(t, tc, "tasks"))
-	require.NotZero(t, tableCountHandler(t, tc, "schedules"))
-	var legacyInboxRows int
-	require.NoError(t, tc.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM github_project_inboxes WHERE project_id = ?`, project.ID).Scan(&legacyInboxRows))
-	require.Zero(t, legacyInboxRows, "visible Authorized Users must not require a hidden legacy inbox row")
+	require.Equal(t, 1, automationStateHandler(t, tc).Automations)
+	require.NotZero(t, automationStateHandler(t, tc).Tasks)
+	require.NotZero(t, automationStateHandler(t, tc).Schedules)
+	legacyInbox, err := tc.stores.GitHubAuth.GetProjectInbox(ctx, project.ID)
+	require.NoError(t, err)
+	require.Nil(t, legacyInbox, "visible Authorized Users must not require a hidden legacy inbox row")
 
 	stored := onlySavedAutomationHandler(t, tc, project.ID)
 	automationID, templateRevision := stored.ID, stored.TemplateRevision
@@ -2064,7 +2064,7 @@ func seedExistingVisionDriverForHandler(t *testing.T, tc *TestContext, automatio
 }
 
 func TestAutomationBuilderWebSaveIsBrowserLocalUntilAtomicSaveAndProjectScoped(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	project := tc.CreateProject().WithName("Builder Project").Build()
 	other := tc.CreateProject().WithName("Builder Other").Build()
 	automationRepo := tc.stores.Automations
@@ -2122,9 +2122,9 @@ func TestAutomationBuilderWebSaveIsBrowserLocalUntilAtomicSaveAndProjectScoped(t
 	}).Execute()
 	require.Equal(t, http.StatusBadRequest, rejectedVisionTemplate.Code, rejectedVisionTemplate.Body.String())
 	require.Contains(t, rejectedVisionTemplate.Body.String(), "unsupported automation template")
-	require.Zero(t, tableCountHandler(t, tc, "automations"))
-	require.Zero(t, tableCountHandler(t, tc, "tasks"))
-	require.Zero(t, tableCountHandler(t, tc, "schedules"))
+	require.Zero(t, automationStateHandler(t, tc).Automations)
+	require.Zero(t, automationStateHandler(t, tc).Tasks)
+	require.Zero(t, automationStateHandler(t, tc).Schedules)
 
 	preview := tc.HTMX().Post("/automations/builder?project_id=" + project.ID).WithForm(url.Values{
 		"project_id": {project.ID}, "source": {"template"}, "template_key": {service.AutomationAdapterNativeSDLC},
@@ -2144,9 +2144,9 @@ func TestAutomationBuilderWebSaveIsBrowserLocalUntilAtomicSaveAndProjectScoped(t
 	require.NotContains(t, previewBody, "Enabled when applied")
 	require.NotContains(t, previewBody, `_enabled\"`)
 	require.Empty(t, preview.Header().Get("HX-Redirect"), "selecting a template must remain browser-local until Save changes")
-	require.Zero(t, tableCountHandler(t, tc, "automations"))
-	require.Zero(t, tableCountHandler(t, tc, "tasks"))
-	require.Zero(t, tableCountHandler(t, tc, "schedules"))
+	require.Zero(t, automationStateHandler(t, tc).Automations)
+	require.Zero(t, automationStateHandler(t, tc).Tasks)
+	require.Zero(t, automationStateHandler(t, tc).Schedules)
 
 	candidate := automationCandidateFromResponse(t, preview)
 	yaml, err := service.EncodeAutomationDraftYAML(candidate)
@@ -2159,14 +2159,16 @@ func TestAutomationBuilderWebSaveIsBrowserLocalUntilAtomicSaveAndProjectScoped(t
 	saved := onlySavedAutomationHandler(t, tc, project.ID)
 	automationID, versionID := saved.ID, *saved.PublishedVersionID
 	require.Equal(t, fmt.Sprintf("/automations/%s?project_id=%s", automationID, project.ID), created.Header().Get("HX-Redirect"))
-	require.NotZero(t, tableCountHandler(t, tc, "tasks"))
-	require.NotZero(t, tableCountHandler(t, tc, "schedules"))
-	var enabledSchedules int
-	require.NoError(t, tc.db.QueryRow(`SELECT COUNT(*) FROM schedules WHERE enabled = 1`).Scan(&enabledSchedules))
-	require.Equal(t, tableCountHandler(t, tc, "schedules"), enabledSchedules, "active Automation schedules must always be enabled after Save")
-	var schedulesKeepingContext int
-	require.NoError(t, tc.db.QueryRow(`SELECT COUNT(*) FROM schedules WHERE clear_context_on_start = 0`).Scan(&schedulesKeepingContext))
-	require.Zero(t, schedulesKeepingContext, "template YAML preserves clear_context_on_start for its owned schedules")
+	require.NotZero(t, automationStateHandler(t, tc).Tasks)
+	require.NotZero(t, automationStateHandler(t, tc).Schedules)
+	schedules, err := tc.scheduleRepo.ListByProject(t.Context(), project.ID)
+	require.NoError(t, err)
+	require.Len(t, schedules, automationStateHandler(t, tc).Schedules)
+	for _, schedule := range schedules {
+		require.True(t, schedule.Enabled, "active Automation schedules must always be enabled after Save")
+		require.True(t, schedule.ClearContextOnStart, "template YAML preserves clear_context_on_start")
+	}
+
 	compiledTasks, err := tc.taskRepo.ListByProject(context.Background(), project.ID, "")
 	require.NoError(t, err)
 	require.NotEmpty(t, compiledTasks)
@@ -2178,9 +2180,18 @@ func TestAutomationBuilderWebSaveIsBrowserLocalUntilAtomicSaveAndProjectScoped(t
 	cloned := tc.HTMX().Post("/automations/" + automationID + "/builder?project_id=" + project.ID).WithForm(url.Values{"project_id": {project.ID}}).Execute()
 	require.Equal(t, 200, cloned.Code)
 	require.Contains(t, cloned.Body.String(), `id="automation-builder"`)
-	var publishedCount, draftCount int
-	require.NoError(t, tc.db.QueryRow(`SELECT COUNT(*) FROM automation_versions WHERE automation_id = ? AND state = 'published'`, automationID).Scan(&publishedCount))
-	require.NoError(t, tc.db.QueryRow(`SELECT COUNT(*) FROM automation_versions WHERE automation_id = ? AND state = 'draft'`, automationID).Scan(&draftCount))
+	versions, err := tc.stores.Fixtures.AutomationVersions(t.Context(), automationID)
+	require.NoError(t, err)
+	publishedCount, draftCount := 0, 0
+	for _, v := range versions {
+		if v.State == "published" {
+			publishedCount++
+		}
+		if v.State == "draft" {
+			draftCount++
+		}
+	}
+
 	require.Equal(t, 1, publishedCount)
 	require.Zero(t, draftCount, "opening Edit automation must not clone a persisted draft")
 
@@ -2189,12 +2200,12 @@ func TestAutomationBuilderWebSaveIsBrowserLocalUntilAtomicSaveAndProjectScoped(t
 	foreignDraft := tc.HTTP().Get(fmt.Sprintf("/automations/%s/drafts/%s?project_id=%s", automationID, versionID, other.ID)).Execute()
 	require.Equal(t, http.StatusNotFound, foreignDraft.Code)
 
-	var ownedScheduleID string
-	require.NoError(t, tc.db.QueryRow(`SELECT schedule_id FROM automation_trigger_owners WHERE automation_id = ? LIMIT 1`, automationID).Scan(&ownedScheduleID))
-	var ownedScheduleCount int
-	require.NoError(t, tc.db.QueryRow(`SELECT COUNT(*) FROM automation_trigger_owners WHERE automation_id = ?`, automationID).Scan(&ownedScheduleCount))
-	taskCountBeforeDelete := tableCountHandler(t, tc, "tasks")
-	scheduleCountBeforeDelete := tableCountHandler(t, tc, "schedules")
+	ownedSchedules, err := tc.stores.Fixtures.AutomationOwnedScheduleIDs(t.Context(), automationID)
+	require.NoError(t, err)
+	require.NotEmpty(t, ownedSchedules)
+	ownedScheduleID, ownedScheduleCount := ownedSchedules[0], len(ownedSchedules)
+	taskCountBeforeDelete := automationStateHandler(t, tc).Tasks
+	scheduleCountBeforeDelete := automationStateHandler(t, tc).Schedules
 	foreignDelete := tc.HTMX().Post(fmt.Sprintf("/automations/%s/delete?project_id=%s", automationID, other.ID)).WithForm(url.Values{"project_id": {other.ID}}).Execute()
 	require.Equal(t, 404, foreignDelete.Code)
 	stillPresent, err := automationRepo.GetDefinition(context.Background(), project.ID, automationID)
@@ -2207,15 +2218,15 @@ func TestAutomationBuilderWebSaveIsBrowserLocalUntilAtomicSaveAndProjectScoped(t
 	gone, err := automationRepo.GetDefinition(context.Background(), project.ID, automationID)
 	require.NoError(t, err)
 	require.Nil(t, gone)
-	require.Equal(t, taskCountBeforeDelete-ownedScheduleCount, tableCountHandler(t, tc, "tasks"), "deleting an Automation must delete its owned trigger tasks")
-	require.Equal(t, scheduleCountBeforeDelete-ownedScheduleCount, tableCountHandler(t, tc, "schedules"), "deleting an Automation must delete its owned trigger schedules")
+	require.Equal(t, taskCountBeforeDelete-ownedScheduleCount, automationStateHandler(t, tc).Tasks, "deleting an Automation must delete its owned trigger tasks")
+	require.Equal(t, scheduleCountBeforeDelete-ownedScheduleCount, automationStateHandler(t, tc).Schedules, "deleting an Automation must delete its owned trigger schedules")
 	ownedSchedule, err := tc.scheduleRepo.GetByID(context.Background(), ownedScheduleID)
 	require.NoError(t, err)
 	require.Nil(t, ownedSchedule, "deleted Automation trigger must not remain as a paused schedule")
 }
 
 func TestAutomationBuilderRecoversDeletedRetainedNativeResources(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	project := tc.CreateProject().WithName("Recover Native automation resources").Build()
 	automationRepo := tc.stores.Automations
 	registry := service.NewAutomationAdapterRegistry()
@@ -2250,12 +2261,9 @@ func TestAutomationBuilderRecoversDeletedRetainedNativeResources(t *testing.T) {
 
 	resourceID := func(nodeKey, resourceType string) string {
 		t.Helper()
-		var id string
-		require.NoError(t, tc.db.QueryRowContext(context.Background(), `SELECT resource.resource_id
-			FROM automation_definition_resources resource JOIN automation_nodes node ON node.id = resource.node_id
-			WHERE resource.project_id = ? AND resource.automation_id = ? AND resource.resource_type = ? AND node.node_key = ?`,
-			project.ID, automationID, resourceType, nodeKey).Scan(&id))
-		return id
+		resources := automationResourcesHandler(t, tc, storefixture.AutomationResourceMatch{ProjectID: project.ID, AutomationID: automationID, NodeKey: nodeKey, ResourceType: resourceType})
+		require.Len(t, resources, 1)
+		return resources[0].ResourceID
 	}
 	oldTaskID := resourceID("optimization_finder", "task")
 	oldScheduleID := resourceID("optimization_finder", "schedule")
@@ -2285,11 +2293,7 @@ func TestAutomationBuilderRecoversDeletedRetainedNativeResources(t *testing.T) {
 	newScheduleID := resourceID("optimization_finder", "schedule")
 	require.NotEqual(t, oldTaskID, newTaskID)
 	require.NotEqual(t, oldScheduleID, newScheduleID)
-	var recoveredResourceCount int
-	require.NoError(t, tc.db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM automation_definition_resources resource
-		JOIN automation_nodes node ON node.id = resource.node_id AND node.version_id = resource.version_id
-		WHERE resource.project_id = ? AND resource.automation_id = ? AND resource.version_id = ? AND node.node_key = 'optimization_finder'`,
-		project.ID, automationID, definition.Version.ID).Scan(&recoveredResourceCount))
+	recoveredResourceCount := len(automationResourcesHandler(t, tc, storefixture.AutomationResourceMatch{ProjectID: project.ID, AutomationID: automationID, VersionID: definition.Version.ID, NodeKey: "optimization_finder"}))
 	require.Equal(t, 2, recoveredResourceCount)
 
 	live := tc.HTTP().Get("/automations/" + automationID + "?project_id=" + project.ID).Execute()
@@ -2329,11 +2333,17 @@ func savedAutomationByNameHandler(t *testing.T, tc *TestContext, projectID, name
 	return matches[0]
 }
 
-func tableCountHandler(t *testing.T, tc *TestContext, table string) int {
+func automationStateHandler(t *testing.T, tc *TestContext) storefixture.AutomationStateCounts {
 	t.Helper()
-	var count int
-	require.NoError(t, tc.db.QueryRow(`SELECT COUNT(*) FROM `+table).Scan(&count))
-	return count
+	state, err := tc.stores.Fixtures.AutomationState(t.Context())
+	require.NoError(t, err)
+	return state
+}
+func automationResourcesHandler(t *testing.T, tc *TestContext, match storefixture.AutomationResourceMatch) []models.AutomationDefinitionResource {
+	t.Helper()
+	resources, err := tc.stores.Fixtures.AutomationDefinitionResources(t.Context(), match)
+	require.NoError(t, err)
+	return resources
 }
 
 func automationChatCustomApprovalCandidate(t *testing.T, drafts *service.AutomationDraftService) models.AutomationDraftCandidate {
@@ -3587,7 +3597,7 @@ func TestAutomationCanonicalChatRuntimeExecutesPreviewAndDirectSave(t *testing.T
 }
 
 func TestAutomationTaskFollowupGitHubToolsUseHardenedRuntime(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	ctx := context.Background()
 	project := tc.CreateProject().WithName("Automation follow-up GitHub safety").Build()
 	project.RepoURL = "https://github.com/example/runtime.git"
@@ -3612,11 +3622,8 @@ func TestAutomationTaskFollowupGitHubToolsUseHardenedRuntime(t *testing.T) {
 			bugFinder = node
 		}
 	}
-	var invocationID string
-	require.NoError(t, tc.db.QueryRowContext(ctx, `INSERT INTO automation_invocations
-		(project_id, automation_id, version_id, trigger_node_id, trigger_resource_type, trigger_resource_id, occurrence_key, status, started_at)
-		VALUES (?, ?, ?, ?, 'schedule', ?, 'followup-safe', 'running', CURRENT_TIMESTAMP) RETURNING id`, project.ID,
-		definition.Automation.ID, definition.Version.ID, bugFinder.ID, schedule.ID).Scan(&invocationID))
+	invocationID := persistence.NewID()
+	require.NoError(t, tc.stores.Fixtures.SeedAutomationInvocation(ctx, models.AutomationInvocation{ID: invocationID, ProjectID: project.ID, AutomationID: definition.Automation.ID, VersionID: definition.Version.ID, TriggerNodeID: bugFinder.ID, TriggerResourceType: "schedule", TriggerResourceID: schedule.ID, OccurrenceKey: "followup-safe", Status: models.AutomationInvocationRunning}))
 	execution := models.Execution{TaskID: task.ID, Status: models.ExecRunning, PromptSent: "follow-up"}
 	require.NoError(t, tc.execRepo.Create(ctx, &execution))
 	binding := models.AutomationBinding{AutomationID: definition.Automation.ID, VersionID: definition.Version.ID,
@@ -3701,14 +3708,13 @@ func TestAutomationTaskFollowupGitHubToolsUseHardenedRuntime(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, output, `"Number":91`)
 	require.Equal(t, 1, createCalls)
-	var provenance int
-	require.NoError(t, tc.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM automation_activity_resources
-		WHERE resource_type = 'github_issue' AND resource_id = 'github:example/runtime:issue:91'`).Scan(&provenance))
+	provenance, err := tc.stores.Fixtures.CountAutomationResourceLinks(ctx, "github_issue", "github:example/runtime:issue:91")
+	require.NoError(t, err)
 	require.Equal(t, 1, provenance, "follow-up issue creation must retain Automation provenance")
 }
 
 func TestReplacedAutomationOriginTaskGitHubMutationsRemainFailClosed(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	ctx := context.Background()
 	project := tc.CreateProject().WithName("Replaced Automation origin").Build()
 	project.RepoURL = "https://github.com/example/runtime.git"
@@ -3751,34 +3757,18 @@ func TestReplacedAutomationOriginTaskGitHubMutationsRemainFailClosed(t *testing.
 	// work-item activity key and child relation are feature-owned compatibility
 	// evidence; a generic create_task activity must not be backfilled.
 	legacyWorkItemID := "legacy-issue-work-item"
-	require.NoError(t, tc.db.QueryRowContext(ctx, `INSERT INTO automation_work_items
-		(id, project_id, automation_id, origin_version_id, work_item_key, kind, title, status)
-		VALUES (?, ?, ?, ?, 'github:example/runtime:issue:17', 'github_issue', 'Issue 17', 'active') RETURNING id`,
-		legacyWorkItemID, project.ID, first.Definition.Automation.ID, first.Definition.Version.ID).Scan(&legacyWorkItemID))
+	require.NoError(t, tc.stores.Fixtures.SeedAutomationWorkItem(ctx, models.AutomationWorkItem{ID: legacyWorkItemID, ProjectID: project.ID, AutomationID: first.Definition.Automation.ID, OriginVersionID: first.Definition.Version.ID, WorkItemKey: "github:example/runtime:issue:17", Kind: "github_issue", Title: "Issue 17", Status: models.AutomationWorkItemActive}))
 	legacyActivityID := "legacy-issue-create-task"
-	require.NoError(t, tc.db.QueryRowContext(ctx, `INSERT INTO automation_activities
-		(id, project_id, automation_id, version_id, node_id, work_item_id, activity_key, activity_type, status, completed_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, 'create_task', 'completed', CURRENT_TIMESTAMP) RETURNING id`, legacyActivityID,
-		project.ID, first.Definition.Automation.ID, first.Definition.Version.ID, originalNodeID, legacyWorkItemID,
-		"work-item:"+legacyWorkItemID+":implementation-task").Scan(&legacyActivityID))
-	_, err = tc.db.ExecContext(ctx, `INSERT INTO automation_activity_resources
-		(activity_id, resource_type, resource_id, relation) VALUES (?, 'task', ?, 'child')`, legacyActivityID, originalTask.ID)
-	require.NoError(t, err)
-	_, err = tc.db.ExecContext(ctx, `UPDATE tasks SET created_via = '' WHERE id = ?`, originalTask.ID)
-	require.NoError(t, err)
+	completedAt := time.Now().UTC().Truncate(time.Second)
+	require.NoError(t, tc.stores.Fixtures.SeedAutomationActivity(ctx, models.AutomationActivity{ID: legacyActivityID, ProjectID: project.ID, AutomationID: first.Definition.Automation.ID, VersionID: first.Definition.Version.ID, NodeID: originalNodeID, WorkItemID: legacyWorkItemID, ActivityKey: "work-item:" + legacyWorkItemID + ":implementation-task", ActivityType: "create_task", Status: models.AutomationActivityCompleted, CompletedAt: &completedAt}, []models.AutomationActivityResource{{ResourceType: "task", ResourceID: originalTask.ID, Relation: "child"}}))
+	require.NoError(t, tc.stores.Fixtures.SetTaskCreationOrigin(ctx, originalTask.ID, ""))
 	originalTask.CreatedVia = ""
 
 	unrelatedTask := models.Task{ProjectID: project.ID, Title: "Unrelated pre-feature task", Category: models.CategoryBacklog,
 		Priority: 2, Status: models.StatusPending, Prompt: "Remain unrelated."}
 	require.NoError(t, tc.taskRepo.Create(ctx, &unrelatedTask))
 	genericActivityID := "generic-create-task"
-	require.NoError(t, tc.db.QueryRowContext(ctx, `INSERT INTO automation_activities
-		(id, project_id, automation_id, version_id, node_id, work_item_id, activity_key, activity_type, status, completed_at)
-		VALUES (?, ?, ?, ?, ?, ?, 'execution:legacy:create-task:unrelated', 'create_task', 'completed', CURRENT_TIMESTAMP) RETURNING id`,
-		genericActivityID, project.ID, first.Definition.Automation.ID, first.Definition.Version.ID, originalNodeID, legacyWorkItemID).Scan(&genericActivityID))
-	_, err = tc.db.ExecContext(ctx, `INSERT INTO automation_activity_resources
-		(activity_id, resource_type, resource_id, relation) VALUES (?, 'task', ?, 'child')`, genericActivityID, unrelatedTask.ID)
-	require.NoError(t, err)
+	require.NoError(t, tc.stores.Fixtures.SeedAutomationActivity(ctx, models.AutomationActivity{ID: genericActivityID, ProjectID: project.ID, AutomationID: first.Definition.Automation.ID, VersionID: first.Definition.Version.ID, NodeID: originalNodeID, WorkItemID: legacyWorkItemID, ActivityKey: "execution:legacy:create-task:unrelated", ActivityType: "create_task", Status: models.AutomationActivityCompleted, CompletedAt: &completedAt}, []models.AutomationActivityResource{{ResourceType: "task", ResourceID: unrelatedTask.ID, Relation: "child"}}))
 
 	replacement := candidate
 	replacement.Description = "Replacement graph"
