@@ -117,12 +117,28 @@ func (t *modelTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		resp.Body = &deadlineBody{ReadCloser: resp.Body, ctx: ctx, close: cancel}
 		return resp, nil
 	}
-	// Start the header wait only after the request has been fully written.
-	// Connection establishment is bounded by the transport's dial/TLS limits.
-	ctx, activity, stop := WithActivityTimeout(req.Context(), 0)
+	// Bound upload inactivity separately from the subsequent header wait.
+	// Connection establishment is also bounded by the dial/TLS limits.
+	ctx, activity, stop := WithActivityTimeout(req.Context(), t.idle)
 	var phaseMu sync.Mutex
 	headersReceived := false
+	uploading := true
+	uploadActivity := func() {
+		phaseMu.Lock()
+		defer phaseMu.Unlock()
+		if uploading && !headersReceived {
+			activity(t.idle)
+		}
+	}
 	ctx = httptrace.WithClientTrace(ctx, &httptrace.ClientTrace{
+		GotConn: func(httptrace.GotConnInfo) {
+			phaseMu.Lock()
+			defer phaseMu.Unlock()
+			if !headersReceived {
+				uploading = true // The transport may replay a request on a new connection.
+				activity(t.idle)
+			}
+		},
 		WroteRequest: func(info httptrace.WroteRequestInfo) {
 			if info.Err != nil {
 				return
@@ -130,11 +146,33 @@ func (t *modelTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 			phaseMu.Lock()
 			defer phaseMu.Unlock()
 			if !headersReceived {
+				uploading = false
 				activity(t.header)
 			}
 		},
 	})
-	resp, err := t.base.RoundTrip(req.Clone(ctx))
+	request := req.Clone(ctx)
+	wrapUpload := func(body io.ReadCloser) io.ReadCloser {
+		if body == nil || body == http.NoBody {
+			return body
+		}
+		// Do not cancel on EOF or Close: header and response-body waits follow.
+		return struct {
+			io.Reader
+			io.Closer
+		}{activityReader{body, uploadActivity}, body}
+	}
+	request.Body = wrapUpload(request.Body)
+	if req.GetBody != nil {
+		request.GetBody = func() (io.ReadCloser, error) {
+			body, err := req.GetBody()
+			if err != nil {
+				return nil, err
+			}
+			return wrapUpload(body), nil
+		}
+	}
+	resp, err := t.base.RoundTrip(request)
 	if err != nil {
 		if cause := context.Cause(ctx); cause != nil {
 			err = cause
