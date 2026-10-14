@@ -22,6 +22,8 @@ type SkillEventFilter struct {
 
 // Fixtures describes test domain state, never tables, query text, or connections.
 type Fixtures interface {
+	// SeedForwardedGitHubFeedback preserves legacy repository spelling without queuing another input.
+	SeedForwardedGitHubFeedback(context.Context, models.GitHubPRFeedbackForwarded) error
 	// SetTaskProject simulates ownership changing while an operation waits for a lease.
 	SetTaskProject(context.Context, string, string) error
 	FailExecutionCancellation(context.Context, string) error
@@ -111,6 +113,8 @@ type Fixtures interface {
 // SQLite counts executed statements; other backends must count their database
 // requests, including requests made inside a single store method.
 type IOStats struct {
+	// GitHubAuthorizationReads counts physical reads checking authorized GitHub actors.
+	GitHubAuthorizationReads int
 	// ExecutionHistoryReads counts physical reads of task execution transcripts.
 	ExecutionHistoryReads int
 	Requests              int

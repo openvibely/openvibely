@@ -189,3 +189,24 @@ func TestHistoryIOCounterMeasuresPhysicalReads(t *testing.T) {
 	env.IO.Reset()
 	require.Zero(t, env.IO.Snapshot().ExecutionHistoryReads)
 }
+
+func TestGitHubAuthorizationCounterMeasuresPhysicalReads(t *testing.T) {
+	env := teststores.New(t, teststores.WithIOCounting())
+	ctx := context.Background()
+	require.NoError(t, env.GitHubAuth.UpsertAuthorizedActor(ctx, &models.GitHubAuthorizedActor{GitHubLogin: "alice", Permission: "triage"}))
+	env.IO.Reset()
+	env.IO.SetEnabled(true)
+	for range 2 {
+		authorized, err := env.GitHubAuth.IsActorAuthorized(ctx, "ALICE")
+		require.NoError(t, err)
+		require.True(t, authorized)
+	}
+	env.IO.SetEnabled(false)
+	require.Equal(t, 2, env.IO.Snapshot().GitHubAuthorizationReads)
+	require.Equal(t, 2, env.IO.Snapshot().Requests)
+	_, err := env.GitHubAuth.IsActorAuthorized(ctx, "alice")
+	require.NoError(t, err)
+	require.Equal(t, 2, env.IO.Snapshot().GitHubAuthorizationReads)
+	env.IO.Reset()
+	require.Zero(t, env.IO.Snapshot().GitHubAuthorizationReads)
+}

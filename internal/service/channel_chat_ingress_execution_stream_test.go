@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"database/sql"
 	"testing"
 	"time"
 
@@ -13,10 +12,10 @@ import (
 )
 
 func TestCompleteChannelExecutionPublishesFailedTerminalEvent(t *testing.T) {
-	db := teststores.NewDB(t)
+	db := teststores.New(t)
 	ctx := context.Background()
-	execRepo := teststores.Of(db).Executions
-	taskRepo := teststores.Of(db).Tasks
+	execRepo := db.Executions
+	taskRepo := db.Tasks
 	_, task, exec := createChannelExecutionStreamFixture(t, ctx, db, execRepo, taskRepo)
 	hub := events.NewExecutionStreamHub()
 	sub, _, err := hub.Subscribe(exec.ID)
@@ -51,11 +50,11 @@ func TestCompleteChannelExecutionPublishesFailedTerminalEvent(t *testing.T) {
 	}
 }
 
-func createChannelExecutionStreamFixture(t *testing.T, ctx context.Context, db *sql.DB, execRepo persistence.ExecutionStore, taskRepo persistence.TaskStore) (*models.Project, *models.Task, *models.Execution) {
+func createChannelExecutionStreamFixture(t *testing.T, ctx context.Context, db *teststores.Env, execRepo persistence.ExecutionStore, taskRepo persistence.TaskStore) (*models.Project, *models.Task, *models.Execution) {
 	t.Helper()
-	llmConfigRepo := teststores.Of(db).LLMConfigs
+	llmConfigRepo := db.LLMConfigs
 	agent := ensureDefaultAgent(t, llmConfigRepo)
-	projectRepo := teststores.Of(db).Projects
+	projectRepo := db.Projects
 	project := &models.Project{Name: "Channel execution stream project", RepoPath: t.TempDir()}
 	if err := projectRepo.Create(ctx, project); err != nil {
 		t.Fatalf("create project: %v", err)
@@ -72,9 +71,9 @@ func createChannelExecutionStreamFixture(t *testing.T, ctx context.Context, db *
 }
 
 func TestCompleteChannelExecutionDoesNotPublishTerminalWhenExecutionCompleteFails(t *testing.T) {
-	db := teststores.NewDB(t)
-	execRepo := teststores.Of(db).Executions
-	taskRepo := teststores.Of(db).Tasks
+	db := teststores.New(t)
+	execRepo := db.Executions
+	taskRepo := db.Tasks
 	hub := events.NewExecutionStreamHub()
 	sub, unsubscribe, err := hub.Subscribe("exec-channel-failed-complete")
 	if err != nil {

@@ -943,7 +943,7 @@ func TestAnthropicCheckpointOnlyFollowupBudget(t *testing.T) {
 		{name: "oversized checkpoint restores transcript", reportedTokens: 190000, wantSummary: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			repo := teststores.Of(teststores.NewDB(t)).Executions
+			repo := teststores.New(t).Executions
 			ctx := context.Background()
 			agent := models.LLMConfig{ID: "model", Provider: models.ProviderAnthropic, Model: "claude-opus-5-5", ContextWindow: 200000}
 			state := `[{"type":"text","text":"` + strings.Repeat("x", 274000) + `"}]`
