@@ -5643,19 +5643,11 @@ func TestChatAutoScrollScript_EarlierLoaderUsesTopIntentWithoutDuplicateRebinds(
 		"window.bindChatEarlierHTMXLifecycle",
 		"document.body.addEventListener('htmx:afterSettle'",
 		"window.restoreChatEarlierScroll(container)",
-		"container.dataset.earlierPrevScrollHeight",
-		"container.dataset.earlierPrevScrollTop",
-		"container.dataset.earlierPrevBottomDistance",
-		"container.dataset.earlierAnchorExecId",
-		"container.dataset.earlierAnchorOffsetTop",
-		"container.dataset.earlierIntentRevision",
-		"var preparedIntentRevision = parseInt(container.dataset.earlierIntentRevision",
-		"if (currentIntentRevision !== preparedIntentRevision)",
-		"if (tracker && tracker.shouldAutoScroll()) window.chatAutoScroll.scrollToBottom(container, false)",
+		"container._earlierAnchor",
+		"container.style.overflowAnchor = 'none'",
+		"container.scrollTop += position - anchor.position",
+		"compensateChatEarlierLayout(container)",
 		"clearChatEarlierRestoreState(container)",
-		"requestAnimationFrame(function()",
-		"container.scrollTop = Math.max(0, (container.scrollHeight || 0) - prevBottomDistance)",
-		"currentOffset - anchorOffsetTop",
 		"earlierAnchorRestoring",
 		"function maybeLoadEarlier()", "addEventListener('scroll', function()",
 		"addEventListener('wheel'",
@@ -5773,7 +5765,7 @@ func TestBrowserFunctional_TranscriptScrollCoordinatorInChrome(t *testing.T) {
 			surface.dispatchEvent(new Event('scroll'));
 			resolveEarlierHydration();
 			await wait(100);
-			if (!tracker.userScrolledUp || Math.abs(surface.scrollTop - 90) > 1) fail(surfaceId + ' delayed earlier-page restore overrode newer upward-reading intent');
+			if (!tracker.userScrolledUp || Math.abs(surface.scrollTop - 210) > 1) fail(surfaceId + ' delayed earlier-page restore overrode newer upward-reading intent');
 			surface.remove();
 		}
 		async function verifyDeliberateSend(surfaceId) {
