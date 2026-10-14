@@ -158,11 +158,31 @@ func TestProcessFailedStartDoesNotLeak(t *testing.T) {
 }
 
 func TestProcessYieldBounds(t *testing.T) {
-	for _, n := range []int{-1, 0, 1, 1000, int(^uint(0) >> 1)} {
-		got := processYield(&n, 10000)
-		if got < 250*time.Millisecond || got > 30*time.Second {
-			t.Fatalf("unbounded wait: %v", got)
-		}
+	integer := func(n int) *int { return &n }
+	for _, tc := range []struct {
+		name               string
+		value              *int
+		shell, poll, input time.Duration
+	}{
+		{"default", nil, 10 * time.Second, 5 * time.Second, 250 * time.Millisecond},
+		{"negative", integer(-1), 250 * time.Millisecond, 5 * time.Second, 250 * time.Millisecond},
+		{"zero", integer(0), 250 * time.Millisecond, 5 * time.Second, 250 * time.Millisecond},
+		{"one second", integer(1000), time.Second, 5 * time.Second, time.Second},
+		{"thirty seconds", integer(30000), 30 * time.Second, 30 * time.Second, 30 * time.Second},
+		{"five minutes", integer(300000), 30 * time.Second, 5 * time.Minute, 30 * time.Second},
+		{"overflow", integer(int(^uint(0) >> 1)), 30 * time.Second, 5 * time.Minute, 30 * time.Second},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := processYield(tc.value, 10000); got != tc.shell {
+				t.Fatalf("shell wait = %v, want %v", got, tc.shell)
+			}
+			if got := processInteractionYield(tc.value, true); got != tc.poll {
+				t.Fatalf("poll wait = %v, want %v", got, tc.poll)
+			}
+			if got := processInteractionYield(tc.value, false); got != tc.input {
+				t.Fatalf("input/control wait = %v, want %v", got, tc.input)
+			}
+		})
 	}
 }
 
