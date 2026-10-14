@@ -557,3 +557,33 @@ func TestChannelSelectionSnapshotSharesStoresAndIsolation(t *testing.T) {
 		})
 	}
 }
+
+func TestUnreadableProjectDetailsPreserveSelectorIdentity(t *testing.T) {
+	for _, production := range []bool{false, true} {
+		name := "isolated"
+		if production {
+			name = "production"
+		}
+		t.Run(name, func(t *testing.T) {
+			var opts []teststores.Option
+			if production {
+				opts = append(opts, teststores.WithProductionTopology())
+			}
+			env := teststores.New(t, opts...)
+			ctx := t.Context()
+			project := models.Project{Name: "Selector survives damaged details"}
+			require.NoError(t, env.Projects.Create(ctx, &project))
+			before, err := env.Projects.ListSelectorOptions(ctx)
+			require.NoError(t, err)
+			require.NoError(t, env.Fixtures.MakeProjectDetailsUnreadable(ctx, project.ID))
+			_, err = env.Projects.GetByID(ctx, project.ID)
+			require.Error(t, err)
+			after, err := env.Projects.ListSelectorOptions(ctx)
+			require.NoError(t, err)
+			require.Equal(t, before, after)
+			other := teststores.New(t, opts...)
+			_, err = other.Projects.GetByID(ctx, "default")
+			require.NoError(t, err)
+		})
+	}
+}

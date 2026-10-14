@@ -591,3 +591,8 @@ func (f *fixtures) ChannelProjectSelections(ctx context.Context) (storefixture.C
 func (f *fixtures) PendingSteering(ctx context.Context, runID, turnID string) ([]models.ThreadInput, error) {
 	return sqlite.NewThreadInputRepo(f.db).ListPendingSteering(ctx, runID, turnID)
 }
+
+func (f *fixtures) MakeProjectDetailsUnreadable(ctx context.Context, id string) error {
+	_, err := f.db.ExecContext(ctx, `UPDATE projects SET created_at = 'not-a-timestamp', updated_at = 'not-a-timestamp' WHERE id = ?`, id)
+	return err
+}
