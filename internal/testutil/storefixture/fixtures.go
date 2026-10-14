@@ -22,6 +22,10 @@ type SkillEventFilter struct {
 
 // Fixtures describes test domain state, never tables, query text, or connections.
 type Fixtures interface {
+	// SetTaskCreationFailure fails inserts for a title until disabled, allowing retry/recovery tests.
+	SetTaskCreationFailure(context.Context, string, bool) error
+	// SetStaleProjectDefaultModel constructs a legacy reference to a missing model.
+	SetStaleProjectDefaultModel(context.Context, string, string) error
 	// ObserveAgentDeclarationWrites starts observing durable agent updates and lifecycle-hook mutations.
 	ObserveAgentDeclarationWrites(context.Context) error
 	AgentDeclarationWrites(context.Context) (int, error)

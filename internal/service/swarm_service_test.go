@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"sort"
@@ -13,7 +12,6 @@ import (
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
-	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/openvibely/openvibely/internal/testutil/teststores"
 	"github.com/stretchr/testify/require"
@@ -388,8 +386,8 @@ func TestSwarmServiceStartPlannerDisambiguatesRepeatedTitleCollisions(t *testing
 }
 
 func TestSwarmServiceScheduledStartMarksExistingPlannerBoundary(t *testing.T) {
-	db := teststores.NewDB(t)
-	repo := teststores.Of(db).Tasks
+	db := teststores.New(t)
+	repo := db.Tasks
 	taskSvc := NewTaskService(repo, nil, nil)
 	workerSvc := newTestWorkerService(t)
 	svc := NewSwarmService(taskSvc, repo, nil, nil)
@@ -411,11 +409,11 @@ func TestSwarmServiceScheduledStartMarksExistingPlannerBoundary(t *testing.T) {
 	}
 	svc.workerSvc = workerSvc
 
-	schedules := teststores.Of(db).Schedules
+	schedules := db.Schedules
 	now := time.Now().UTC().Truncate(time.Second)
 	schedule := &models.Schedule{TaskID: parent.ID, RunAt: now, RepeatType: models.RepeatOnce, RepeatInterval: 1, Enabled: true, ClearContextOnStart: true}
 	require.NoError(t, schedules.Create(context.Background(), schedule))
-	claimed, err := schedules.(*sqlite.ScheduleRepo).ClaimCalendarOccurrence(context.Background(), *schedule, now, nil)
+	claimed, err := db.Fixtures.ClaimScheduleOccurrence(context.Background(), *schedule, now, nil)
 	require.NoError(t, err)
 	require.True(t, claimed)
 	if err := svc.StartPlannerForScheduledRun(context.Background(), parent.ID, true); err != nil {
@@ -686,9 +684,9 @@ func TestSwarmServiceFollowupPlannerRerunDisambiguatesOccupiedWorkerTitle(t *tes
 
 func TestSwarmServiceFollowupPlannerRetryReconcilesPartiallyCreatedWorkers(t *testing.T) {
 	ctx := context.Background()
-	db := teststores.NewDB(t)
-	repo := teststores.Of(db).Tasks
-	execRepo := teststores.Of(db).Executions
+	db := teststores.New(t)
+	repo := db.Tasks
+	execRepo := db.Executions
 	taskSvc := NewTaskService(repo, nil, nil)
 	svc := NewSwarmService(taskSvc, repo, execRepo, nil)
 
@@ -723,12 +721,12 @@ func TestSwarmServiceFollowupPlannerRetryReconcilesPartiallyCreatedWorkers(t *te
 	if err := repo.UpdateStatus(ctx, planner.ID, models.StatusCompleted); err != nil {
 		t.Fatalf("complete planner task: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, `CREATE TRIGGER fail_second_followup_worker BEFORE INSERT ON tasks WHEN NEW.title = 'New worker two' BEGIN SELECT RAISE(ABORT, 'forced second worker failure'); END`); err != nil {
+	if err := db.Fixtures.SetTaskCreationFailure(ctx, "New worker two", true); err != nil {
 		t.Fatalf("create failure trigger: %v", err)
 	}
 
-	if err := svc.applyCompletedPlannerExecution(ctx, planner); err == nil || !strings.Contains(err.Error(), "forced second worker failure") {
-		t.Fatalf("first application error = %v, want forced second worker failure", err)
+	if err := svc.applyCompletedPlannerExecution(ctx, planner); err == nil || !strings.Contains(err.Error(), "forced task creation failure") {
+		t.Fatalf("first application error = %v, want forced task creation failure", err)
 	}
 	children, err := repo.ListSwarmChildren(ctx, parent.ID)
 	if err != nil {
@@ -737,7 +735,7 @@ func TestSwarmServiceFollowupPlannerRetryReconcilesPartiallyCreatedWorkers(t *te
 	if got := countSwarmWorkers(children); got != 2 {
 		t.Fatalf("workers after partial failure = %d, want existing plus first new worker", got)
 	}
-	if _, err := db.ExecContext(ctx, `DROP TRIGGER fail_second_followup_worker`); err != nil {
+	if err := db.Fixtures.SetTaskCreationFailure(ctx, "New worker two", false); err != nil {
 		t.Fatalf("drop failure trigger: %v", err)
 	}
 
@@ -841,9 +839,9 @@ func TestSwarmServiceCreateAssignsProjectDefaultModelToChildren(t *testing.T) {
 
 func TestSwarmServiceResolveAssignedAgentIDFallbacks(t *testing.T) {
 	ctx := context.Background()
-	db := teststores.NewDB(t)
-	projectRepo := teststores.Of(db).Projects
-	llmConfigRepo := teststores.Of(db).LLMConfigs
+	db := teststores.New(t)
+	projectRepo := db.Projects
+	llmConfigRepo := db.LLMConfigs
 	svc := NewSwarmService(nil, nil, nil, nil)
 	svc.SetModelSelectionRepos(llmConfigRepo, projectRepo)
 
@@ -868,7 +866,7 @@ func TestSwarmServiceResolveAssignedAgentIDFallbacks(t *testing.T) {
 	staleID := "missing-project-default"
 	staleProject := &models.Project{Name: "Resolver Stale Project"}
 	require.NoError(t, projectRepo.Create(ctx, staleProject))
-	require.NoError(t, setStaleProjectDefaultModelForTest(ctx, db, staleProject.ID, staleID))
+	require.NoError(t, db.Fixtures.SetStaleProjectDefaultModel(ctx, staleProject.ID, staleID))
 	resolved = svc.resolveAssignedAgentID(ctx, staleProject.ID, nil)
 	require.NotNil(t, resolved)
 	require.Equal(t, globalAgent.ID, *resolved)
@@ -941,20 +939,6 @@ func BenchmarkSwarmAssignedAgentIDResolution(b *testing.B) {
 
 func swarmPtrString(value string) *string {
 	return &value
-}
-
-func setStaleProjectDefaultModelForTest(ctx context.Context, db interface {
-	ExecContext(context.Context, string, ...any) (sql.Result, error)
-}, projectID, modelID string) error {
-	if _, err := db.ExecContext(ctx, `PRAGMA foreign_keys = OFF`); err != nil {
-		return err
-	}
-	if _, err := db.ExecContext(ctx, `UPDATE projects SET default_agent_config_id = ? WHERE id = ?`, modelID, projectID); err != nil {
-		_, _ = db.ExecContext(ctx, `PRAGMA foreign_keys = ON`)
-		return err
-	}
-	_, err := db.ExecContext(ctx, `PRAGMA foreign_keys = ON`)
-	return err
 }
 
 func createWideSwarmModelResolutionFixture(t testing.TB, ctx context.Context, projectRepo persistence.ProjectStore, llmConfigRepo persistence.LLMConfigStore) (string, string) {

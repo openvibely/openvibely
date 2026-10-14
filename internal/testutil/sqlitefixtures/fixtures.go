@@ -382,3 +382,30 @@ func (f *fixtures) AgentDeclarationWrites(ctx context.Context) (int, error) {
 	err := f.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM declaration_write_counts`).Scan(&count)
 	return count, err
 }
+
+func (f *fixtures) SetTaskCreationFailure(ctx context.Context, title string, enabled bool) error {
+	if _, err := f.db.ExecContext(ctx, `DROP TRIGGER IF EXISTS fixture_fail_task_creation`); err != nil {
+		return err
+	}
+	if !enabled {
+		return nil
+	}
+	_, err := f.db.ExecContext(ctx, `CREATE TRIGGER fixture_fail_task_creation BEFORE INSERT ON tasks WHEN NEW.title = `+sqliteLiteral(title)+` BEGIN SELECT RAISE(ABORT, 'forced task creation failure'); END`)
+	return err
+}
+func (f *fixtures) SetStaleProjectDefaultModel(ctx context.Context, projectID, modelID string) (err error) {
+	conn, err := f.db.Conn(ctx)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	if _, err = conn.ExecContext(ctx, `PRAGMA foreign_keys=OFF`); err != nil {
+		return err
+	}
+	defer func() {
+		_, restoreErr := conn.ExecContext(context.Background(), `PRAGMA foreign_keys=ON`)
+		err = errors.Join(err, restoreErr)
+	}()
+	_, err = conn.ExecContext(ctx, `UPDATE projects SET default_agent_config_id=? WHERE id=?`, modelID, projectID)
+	return err
+}
