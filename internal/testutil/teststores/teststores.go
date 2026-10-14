@@ -110,6 +110,20 @@ func New(tb testing.TB, opts ...Option) *Env {
 		var counter storefixture.IOCounter
 		if o.productionTopology {
 			reader, writer, sqliteCounter := testutil.NewFileBackedSplitStatementCountingTestDB(tb)
+			if reader.Stats().MaxOpenConnections != 1 || writer.Stats().MaxOpenConnections != 1 {
+				tb.Fatal("expected production 1W + 1R topology")
+			}
+			var readerQueryOnly, writerQueryOnly int
+			if err := reader.QueryRow(`PRAGMA query_only`).Scan(&readerQueryOnly); err != nil {
+				tb.Fatal(err)
+			}
+			if err := writer.QueryRow(`PRAGMA query_only`).Scan(&writerQueryOnly); err != nil {
+				tb.Fatal(err)
+			}
+			if readerQueryOnly != 1 || writerQueryOnly != 0 {
+				tb.Fatalf("query_only reader=%d writer=%d, want 1/0", readerQueryOnly, writerQueryOnly)
+			}
+
 			tb.Cleanup(sqlite.RegisterDedicatedWriter(reader, writer))
 			if o.countIO {
 				counter = sqlitefixtures.NewIOCounter(sqliteCounter)
