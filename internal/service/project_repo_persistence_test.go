@@ -15,12 +15,12 @@ import (
 	"github.com/openvibely/openvibely/internal/testutil/teststores"
 )
 
-func TestProjectService_DeleteRollsBackTasksWhenLegacyConstraintFails(t *testing.T) {
-	db := teststores.NewDB(t)
+func TestProjectService_DeleteRollsBackTasksWhenRelationalDeleteFails(t *testing.T) {
+	db := teststores.New(t)
 	ctx := context.Background()
-	projectRepo := teststores.Of(db).Projects
-	taskRepo := teststores.Of(db).Tasks
-	attachmentRepo := teststores.Of(db).Attachments
+	projectRepo := db.Projects
+	taskRepo := db.Tasks
+	attachmentRepo := db.Attachments
 	projectSvc := NewProjectService(projectRepo)
 	projectSvc.SetTaskService(NewTaskService(taskRepo, attachmentRepo, nil))
 
@@ -39,22 +39,7 @@ func TestProjectService_DeleteRollsBackTasksWhenLegacyConstraintFails(t *testing
 	if err := attachmentRepo.Create(ctx, &models.Attachment{TaskID: task.ID, FileName: "rollback-attachment.txt", FilePath: attachmentPath, MediaType: "text/plain", FileSize: 12}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.ExecContext(ctx, `
-		CREATE TABLE memory_consolidation_runs (id TEXT PRIMARY KEY);
-		CREATE TABLE memory_consolidation_schedules (
-			project_id TEXT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
-			last_run_id TEXT REFERENCES memory_consolidation_runs(id) ON DELETE SET NULL
-		);
-		INSERT INTO memory_consolidation_schedules(project_id) VALUES (?)`, project.ID); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.ExecContext(ctx, `PRAGMA foreign_keys=OFF`); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.ExecContext(ctx, `DROP TABLE memory_consolidation_runs`); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.ExecContext(ctx, `PRAGMA foreign_keys=ON`); err != nil {
+	if err := db.Fixtures.SetProjectDeletionFailure(ctx, project.ID, true); err != nil {
 		t.Fatal(err)
 	}
 
@@ -67,8 +52,8 @@ func TestProjectService_DeleteRollsBackTasksWhenLegacyConstraintFails(t *testing
 	}
 
 	err := projectSvc.Delete(ctx, project.ID)
-	if err == nil || !strings.Contains(err.Error(), "no such table: main.memory_consolidation_runs") {
-		t.Fatalf("Delete error = %v, want missing memory_consolidation_runs", err)
+	if err == nil || !strings.Contains(err.Error(), "forced project deletion failure") {
+		t.Fatalf("Delete error = %v, want injected deletion failure", err)
 	}
 	storedProject, getErr := projectRepo.GetByID(ctx, project.ID)
 	if getErr != nil || storedProject == nil {
@@ -87,13 +72,13 @@ func TestProjectService_DeleteRollsBackTasksWhenLegacyConstraintFails(t *testing
 }
 
 func TestProjectService_DeleteRollbackDoesNotCancelOrMoveRunningTaskWorktree(t *testing.T) {
-	db := teststores.NewDB(t)
+	db := teststores.New(t)
 	ctx := context.Background()
-	projectRepo := teststores.Of(db).Projects
-	taskRepo := teststores.Of(db).Tasks
+	projectRepo := db.Projects
+	taskRepo := db.Tasks
 	workerSvc := NewWorkerService(nil, 0, projectRepo)
 	projectSvc := NewProjectService(projectRepo)
-	projectSvc.SetTaskService(NewTaskService(taskRepo, teststores.Of(db).Attachments, workerSvc))
+	projectSvc.SetTaskService(NewTaskService(taskRepo, db.Attachments, workerSvc))
 
 	repoDir := filepath.Join(t.TempDir(), "running-repository")
 	if err := os.MkdirAll(repoDir, 0o755); err != nil {
@@ -135,26 +120,11 @@ func TestProjectService_DeleteRollbackDoesNotCancelOrMoveRunningTaskWorktree(t *
 	defer cancel()
 	workerSvc.RegisterCancel(task.ID, cancel)
 
-	if _, err := db.ExecContext(ctx, `
-		CREATE TABLE memory_consolidation_runs (id TEXT PRIMARY KEY);
-		CREATE TABLE memory_consolidation_schedules (
-			project_id TEXT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
-			last_run_id TEXT REFERENCES memory_consolidation_runs(id) ON DELETE SET NULL
-		);
-		INSERT INTO memory_consolidation_schedules(project_id) VALUES (?)`, project.ID); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.ExecContext(ctx, `PRAGMA foreign_keys=OFF`); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.ExecContext(ctx, `DROP TABLE memory_consolidation_runs`); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.ExecContext(ctx, `PRAGMA foreign_keys=ON`); err != nil {
+	if err := db.Fixtures.SetProjectDeletionFailure(ctx, project.ID, true); err != nil {
 		t.Fatal(err)
 	}
 
-	if err := projectSvc.Delete(ctx, project.ID); err == nil || !strings.Contains(err.Error(), "no such table: main.memory_consolidation_runs") {
+	if err := projectSvc.Delete(ctx, project.ID); err == nil || !strings.Contains(err.Error(), "forced project deletion failure") {
 		t.Fatalf("forced project deletion error = %v, want relational failure before repository cleanup", err)
 	}
 	select {
@@ -168,12 +138,12 @@ func TestProjectService_DeleteRollbackDoesNotCancelOrMoveRunningTaskWorktree(t *
 }
 
 func TestProjectService_DeleteCleansLocalTaskWorktreeAndMutationHistory(t *testing.T) {
-	db := teststores.NewDB(t)
+	db := teststores.New(t)
 	ctx := context.Background()
-	projectRepo := teststores.Of(db).Projects
-	taskRepo := teststores.Of(db).Tasks
+	projectRepo := db.Projects
+	taskRepo := db.Tasks
 	projectSvc := NewProjectService(projectRepo)
-	projectSvc.SetTaskService(NewTaskService(taskRepo, teststores.Of(db).Attachments, nil))
+	projectSvc.SetTaskService(NewTaskService(taskRepo, db.Attachments, nil))
 
 	repoDir := filepath.Join(t.TempDir(), "user-repository")
 	if err := os.MkdirAll(repoDir, 0o755); err != nil {
@@ -212,7 +182,7 @@ func TestProjectService_DeleteCleansLocalTaskWorktreeAndMutationHistory(t *testi
 	if err := taskRepo.UpdateWorktreeInfo(ctx, task.ID, worktreePath, branch); err != nil {
 		t.Fatal(err)
 	}
-	if err := teststores.Of(db).AgentMutations.Create(ctx, &models.AgentConfigMutation{
+	if err := db.AgentMutations.Create(ctx, &models.AgentConfigMutation{
 		TaskRunID: "run", ProjectID: project.ID, TargetType: models.MutationTargetSkill, TargetKey: "example",
 		Action: "delete", IdempotencyKey: "project-delete-mutation",
 	}); err != nil {
@@ -242,8 +212,8 @@ func TestProjectService_DeleteCleansLocalTaskWorktreeAndMutationHistory(t *testi
 	if err := branchCheck.Run(); err == nil {
 		t.Fatalf("managed task branch %q still exists", branch)
 	}
-	var mutationCount int
-	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM agent_config_mutations WHERE project_id = ?`, project.ID).Scan(&mutationCount); err != nil {
+	mutationCount, err := db.Fixtures.CountProjectAgentMutations(ctx, project.ID)
+	if err != nil {
 		t.Fatal(err)
 	}
 	if mutationCount != 0 {

@@ -11,7 +11,7 @@ import (
 )
 
 func (f *fixtures) SeedAutomation(ctx context.Context, a models.Automation) error {
-	_, err := f.db.ExecContext(ctx, `INSERT INTO automations (id,project_id,stable_key,name,description,automation_type,lifecycle_state,published_version_id) VALUES (?,?,?,?,?,?,?,?)`, a.ID, a.ProjectID, a.StableKey, a.Name, a.Description, a.AutomationType, a.LifecycleState, a.PublishedVersionID)
+	_, err := f.db.ExecContext(ctx, `INSERT INTO automations (id,project_id,stable_key,name,description,automation_type,lifecycle_state,published_version_id,created_via) VALUES (?,?,?,?,?,?,?,?,?)`, a.ID, a.ProjectID, a.StableKey, a.Name, a.Description, a.AutomationType, a.LifecycleState, a.PublishedVersionID, a.CreatedVia)
 	return err
 }
 func (f *fixtures) SeedAutomationVersion(ctx context.Context, v models.AutomationVersion) error {
@@ -85,5 +85,10 @@ func (f *fixtures) AutomationDispatchState(ctx context.Context, id string) (stor
 }
 func (f *fixtures) CompleteAutomationActivity(ctx context.Context, id string, at time.Time) error {
 	_, err := f.db.ExecContext(ctx, `UPDATE automation_activities SET status='completed',completed_at=? WHERE id=?`, at.UTC().Format(time.RFC3339Nano), id)
+	return err
+}
+
+func (f *fixtures) SeedAutomationIssueTaskOrigin(ctx context.Context, origin storefixture.AutomationIssueTaskOrigin) error {
+	_, err := f.db.ExecContext(ctx, `INSERT INTO automation_github_issue_task_provenance (project_id,automation_id,task_id,issue_resource_id,implementation_node_key) VALUES (?,?,?,?,?)`, origin.ProjectID, origin.AutomationID, origin.TaskID, origin.IssueResourceID, origin.ImplementationNodeKey)
 	return err
 }

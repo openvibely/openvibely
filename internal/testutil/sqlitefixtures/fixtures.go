@@ -451,3 +451,27 @@ func (f *fixtures) FailXTaskContextWrites(ctx context.Context) error {
 	_, err := f.db.ExecContext(ctx, `CREATE TRIGGER fail_x_context BEFORE INSERT ON x_task_context BEGIN SELECT RAISE(ABORT, 'forced X context failure'); END`)
 	return err
 }
+
+func (f *fixtures) CountTasks(ctx context.Context) (int, error) {
+	var n int
+	err := f.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM tasks`).Scan(&n)
+	return n, err
+}
+
+// SetProjectDeletionFailure fails the final delete, after dependent cleanup has begun.
+func (f *fixtures) SetProjectDeletionFailure(ctx context.Context, id string, enabled bool) error {
+	if _, err := f.db.ExecContext(ctx, `DROP TRIGGER IF EXISTS fixture_fail_project_deletion`); err != nil {
+		return err
+	}
+	if !enabled {
+		return nil
+	}
+	_, err := f.db.ExecContext(ctx, `CREATE TRIGGER fixture_fail_project_deletion BEFORE DELETE ON projects WHEN OLD.id = '`+strings.ReplaceAll(id, "'", "''")+`' BEGIN SELECT RAISE(ABORT, 'forced project deletion failure'); END`)
+	return err
+}
+
+func (f *fixtures) CountProjectAgentMutations(ctx context.Context, id string) (int, error) {
+	var n int
+	err := f.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM agent_config_mutations WHERE project_id = ?`, id).Scan(&n)
+	return n, err
+}
