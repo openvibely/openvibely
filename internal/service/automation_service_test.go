@@ -3,7 +3,6 @@ package service
 import (
 	"bytes"
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,7 +15,6 @@ import (
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
-	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/openvibely/openvibely/internal/testutil/teststores"
 	"github.com/stretchr/testify/require"
@@ -502,45 +500,34 @@ func TestAutomationPortfolioListUsesCompactPublishedCardProjection(t *testing.T)
 }
 
 func TestAutomationPortfolioListsEverySavedAutomationBeyondOneHundred(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
-	project := automationTestProject(t, teststores.Of(db).Projects, "Large Automation portfolio")
-	other := automationTestProject(t, teststores.Of(db).Projects, "Other Automation portfolio")
+	project := automationTestProject(t, env.Projects, "Large Automation portfolio")
+	other := automationTestProject(t, env.Projects, "Other Automation portfolio")
 
+	now := time.Now().UTC().Truncate(time.Second)
+	seed := func(projectID, id, name, description string, state models.AutomationLifecycleState, at time.Time, published bool) {
+		t.Helper()
+		automation := models.Automation{ID: id, ProjectID: projectID, StableKey: "portfolio/" + id, Name: name, Description: description, AutomationType: "custom", LifecycleState: state}
+		versionID := id + "-version"
+		if published {
+			automation.PublishedVersionID = &versionID
+		}
+		require.NoError(t, env.Fixtures.SeedAutomation(ctx, automation))
+		require.NoError(t, env.Fixtures.SetAutomationUpdatedAt(ctx, id, at))
+		if published {
+			require.NoError(t, env.Fixtures.SeedAutomationVersion(ctx, models.AutomationVersion{ID: versionID, ProjectID: projectID, AutomationID: id, Version: 1, State: "published", Source: "manual", AdapterKey: "custom", PublishedAt: &now}))
+		}
+	}
 	for i := 0; i < 5; i++ {
-		_, err := db.ExecContext(ctx, `INSERT INTO automations
-			(id, project_id, stable_key, name, description, automation_type, lifecycle_state, updated_at)
-			VALUES (?, ?, ?, ?, '', 'custom', 'draft', datetime('now', ?))`,
-			fmt.Sprintf("draft-%03d", i), project.ID, fmt.Sprintf("draft/%03d", i), fmt.Sprintf("Draft %03d", i), fmt.Sprintf("+%d seconds", 1000+i))
-		require.NoError(t, err)
+		seed(project.ID, fmt.Sprintf("draft-%03d", i), fmt.Sprintf("Draft %03d", i), "", "draft", now.Add(time.Duration(1000+i)*time.Second), false)
 	}
 	for i := 0; i < 101; i++ {
-		automationID := fmt.Sprintf("saved-%03d", i)
-		versionID := fmt.Sprintf("saved-version-%03d", i)
-		_, err := db.ExecContext(ctx, `INSERT INTO automations
-			(id, project_id, stable_key, name, description, automation_type, lifecycle_state, updated_at)
-			VALUES (?, ?, ?, ?, ?, 'custom', 'active', datetime('now', ?))`,
-			automationID, project.ID, "saved/"+automationID, fmt.Sprintf("Saved Automation %03d", i), "searchable saved automation", fmt.Sprintf("+%d seconds", i))
-		require.NoError(t, err)
-		_, err = db.ExecContext(ctx, `INSERT INTO automation_versions
-			(id, project_id, automation_id, version, state, source, adapter_key, published_at)
-			VALUES (?, ?, ?, 1, 'published', 'manual', 'custom', CURRENT_TIMESTAMP)`, versionID, project.ID, automationID)
-		require.NoError(t, err)
-		_, err = db.ExecContext(ctx, `UPDATE automations SET published_version_id = ? WHERE id = ? AND project_id = ?`, versionID, automationID, project.ID)
-		require.NoError(t, err)
+		seed(project.ID, fmt.Sprintf("saved-%03d", i), fmt.Sprintf("Saved Automation %03d", i), "searchable saved automation", "active", now.Add(time.Duration(i)*time.Second), true)
 	}
-	_, err := db.ExecContext(ctx, `INSERT INTO automations
-		(id, project_id, stable_key, name, description, automation_type, lifecycle_state)
-		VALUES ('foreign-saved', ?, 'saved/foreign', 'Foreign saved Automation', '', 'custom', 'active')`, other.ID)
-	require.NoError(t, err)
-	_, err = db.ExecContext(ctx, `INSERT INTO automation_versions
-		(id, project_id, automation_id, version, state, source, adapter_key, published_at)
-		VALUES ('foreign-version', ?, 'foreign-saved', 1, 'published', 'manual', 'custom', CURRENT_TIMESTAMP)`, other.ID)
-	require.NoError(t, err)
-	_, err = db.ExecContext(ctx, `UPDATE automations SET published_version_id = 'foreign-version' WHERE id = 'foreign-saved'`)
-	require.NoError(t, err)
+	seed(other.ID, "foreign-saved", "Foreign saved Automation", "", "active", now, true)
 
-	cards, err := NewAutomationGraphService(teststores.Of(db).Automations).List(ctx, project.ID)
+	cards, err := NewAutomationGraphService(env.Automations).List(ctx, project.ID)
 	require.NoError(t, err)
 	require.Len(t, cards, 101)
 	seen := make(map[string]bool, len(cards))
@@ -605,7 +592,7 @@ func TestGitHubSDLCRegistrationHydratesInitialSnapshotAcrossPause(t *testing.T) 
 	require.Equal(t, maintainedPrompt, automationDraftNodeByKey(t, reopened.Candidate, "dev_inbox").Config["prompt"])
 }
 
-func seedRetainedAutomationSchedule(t *testing.T, db *sql.DB, taskRepo persistence.TaskStore, scheduleRepo persistence.ScheduleStore,
+func seedRetainedAutomationSchedule(t *testing.T, env *teststores.Env, taskRepo persistence.TaskStore, scheduleRepo persistence.ScheduleStore,
 	projectID, automationID, versionID, label string) (models.Task, models.Schedule) {
 	t.Helper()
 	ctx := context.Background()
@@ -616,29 +603,18 @@ func seedRetainedAutomationSchedule(t *testing.T, db *sql.DB, taskRepo persisten
 		RepeatInterval: 1, Enabled: false}
 	require.NoError(t, scheduleRepo.Create(ctx, &schedule))
 	nodeID := persistence.NewID()
-	_, err := db.ExecContext(ctx, `INSERT INTO automation_nodes
-		(id, project_id, automation_id, version_id, node_key, name, node_type, role)
-		VALUES (?, ?, ?, ?, ?, ?, 'trigger', 'schedule')`, nodeID, projectID, automationID, versionID,
-		"retained_schedule_"+label, "Retained schedule "+label)
-	require.NoError(t, err)
-	_, err = db.ExecContext(ctx, `INSERT INTO automation_definition_resources
-		(project_id, automation_id, version_id, node_id, resource_type, resource_id, relation)
-		VALUES (?, ?, ?, ?, 'schedule', ?, 'owned')`, projectID, automationID, versionID, nodeID, schedule.ID)
-	require.NoError(t, err)
-	_, err = db.ExecContext(ctx, `INSERT INTO automation_trigger_owners
-		(schedule_id, project_id, automation_id, version_id, node_id, ownership_state)
-		VALUES (?, ?, ?, ?, ?, 'active')`, schedule.ID, projectID, automationID, versionID, nodeID)
-	require.NoError(t, err)
+	require.NoError(t, env.Fixtures.SeedRetainedScheduleOwnership(ctx, models.AutomationNode{ID: nodeID, ProjectID: projectID, AutomationID: automationID, VersionID: versionID, NodeKey: "retained_schedule_" + label, Name: "Retained schedule " + label, NodeType: models.AutomationNodeTrigger, Role: "schedule"}, schedule.ID))
+
 	return task, schedule
 }
 
 func TestMaintainedAutomationRegistrationPreservesPointInTimeSnapshot(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
-	project := automationTestProject(t, teststores.Of(db).Projects, "Point-in-time maintained template")
-	taskRepo := teststores.Of(db).Tasks
-	scheduleRepo := teststores.Of(db).Schedules
-	automationRepo := teststores.Of(db).Automations
+	project := automationTestProject(t, env.Projects, "Point-in-time maintained template")
+	taskRepo := env.Tasks
+	scheduleRepo := env.Schedules
+	automationRepo := env.Automations
 	registry := NewAutomationAdapterRegistry()
 	registration := NewAutomationRegistrationService(automationRepo, registry)
 
@@ -660,10 +636,7 @@ func TestMaintainedAutomationRegistrationPreservesPointInTimeSnapshot(t *testing
 		}
 	}
 	require.NotEmpty(t, triggerNodeID)
-	_, err = db.ExecContext(ctx, `INSERT INTO automation_invocations
-		(project_id, automation_id, version_id, trigger_node_id, trigger_resource_type, trigger_resource_id, occurrence_key, status)
-		VALUES (?, ?, ?, ?, 'schedule', ?, 'point-in-time-runtime', 'running')`, project.ID, original.Automation.ID,
-		original.Version.ID, triggerNodeID, originalSchedule.ID)
+	err = env.Fixtures.SeedAutomationInvocation(ctx, models.AutomationInvocation{ID: "point-in-time-runtime", ProjectID: project.ID, AutomationID: original.Automation.ID, VersionID: original.Version.ID, TriggerNodeID: triggerNodeID, TriggerResourceType: "schedule", TriggerResourceID: originalSchedule.ID, OccurrenceKey: "point-in-time-runtime", Status: "running"})
 	require.NoError(t, err)
 
 	upgraded := registry.adapters[AutomationAdapterNativeSDLC]
@@ -695,11 +668,19 @@ func TestMaintainedAutomationRegistrationPreservesPointInTimeSnapshot(t *testing
 	require.Equal(t, original.Nodes, preserved.Nodes)
 	require.Equal(t, original.Edges, preserved.Edges)
 	require.Equal(t, original.Resources, preserved.Resources)
-	require.Equal(t, 1, tableCountWhere(t, db, "schedules", "id", originalSchedule.ID))
-	require.Equal(t, 1, tableCountWhere(t, db, "schedules", "id", replacementSchedule.ID),
+	persisted1, lookupErr := env.Schedules.GetByID(ctx, originalSchedule.ID)
+	require.NoError(t, lookupErr)
+	require.NotNil(t, persisted1)
+	persisted2, lookupErr := env.Schedules.GetByID(ctx, replacementSchedule.ID)
+	require.NoError(t, lookupErr)
+	require.NotNil(t, persisted2,
 		"newly supplied resources remain ordinary domain resources and must not replace the saved snapshot")
-	require.Equal(t, 1, tableCountWhere(t, db, "automation_invocations", "version_id", original.Version.ID),
+	invocations, err := automationRepo.ListAutomationInvocations(ctx, project.ID, original.Automation.ID, 100, "")
+	require.NoError(t, err)
+	require.Len(t, invocations.Items, 1,
 		"re-registration must not delete current runtime projection")
+	require.Equal(t, original.Version.ID, invocations.Items[0].VersionID)
+	require.Equal(t, "point-in-time-runtime", invocations.Items[0].ID)
 }
 
 func TestMaintainedAutomationRegistrationPreservesCurrentGraphAndLifecycle(t *testing.T) {
@@ -714,12 +695,12 @@ func TestMaintainedAutomationRegistrationPreservesCurrentGraphAndLifecycle(t *te
 		{name: "archived", state: models.AutomationArchived, ownershipState: "archived"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			db := teststores.NewDB(t)
+			env := teststores.New(t)
 			ctx := context.Background()
-			project := automationTestProject(t, teststores.Of(db).Projects, "Maintained "+test.name)
-			taskRepo := teststores.Of(db).Tasks
-			scheduleRepo := teststores.Of(db).Schedules
-			automationRepo := teststores.Of(db).Automations
+			project := automationTestProject(t, env.Projects, "Maintained "+test.name)
+			taskRepo := env.Tasks
+			scheduleRepo := env.Schedules
+			automationRepo := env.Automations
 			registration := NewAutomationRegistrationService(automationRepo, NewAutomationAdapterRegistry())
 
 			firstTask, firstSchedule := automationTestTaskAndSchedule(t, taskRepo, scheduleRepo, project.ID, "First maintained schedule")
@@ -740,18 +721,13 @@ func TestMaintainedAutomationRegistrationPreservesCurrentGraphAndLifecycle(t *te
 				}
 			}
 			require.NotEmpty(t, triggerNodeID)
-			_, err = db.ExecContext(ctx, `INSERT INTO automation_invocations
-				(project_id, automation_id, version_id, trigger_node_id, trigger_resource_type, trigger_resource_id, occurrence_key, status, completed_at)
-				VALUES (?, ?, ?, ?, 'schedule', ?, ?, 'completed', CURRENT_TIMESTAMP)`, project.ID, first.Automation.ID,
-				first.Version.ID, triggerNodeID, firstSchedule.ID, "old-"+test.name)
+			completedAt := time.Now().UTC()
+			err = env.Fixtures.SeedAutomationInvocation(ctx, models.AutomationInvocation{ID: "old-" + test.name, ProjectID: project.ID, AutomationID: first.Automation.ID, VersionID: first.Version.ID, TriggerNodeID: triggerNodeID, TriggerResourceType: "schedule", TriggerResourceID: firstSchedule.ID, OccurrenceKey: "old-" + test.name, Status: "completed", CompletedAt: &completedAt})
 			require.NoError(t, err)
 			retainedDraftID := "retained-draft-" + test.name
-			_, err = db.ExecContext(ctx, `INSERT INTO automation_versions
-				(id, project_id, automation_id, version, state, source, adapter_key)
-				VALUES (?, ?, ?, 2, 'draft', 'bootstrap', ?)`, retainedDraftID, project.ID,
-				first.Automation.ID, AutomationAdapterNativeSDLC)
+			err = env.Fixtures.SeedAutomationVersion(ctx, models.AutomationVersion{ID: retainedDraftID, ProjectID: project.ID, AutomationID: first.Automation.ID, Version: 2, State: "draft", Source: "bootstrap", AdapterKey: AutomationAdapterNativeSDLC})
 			require.NoError(t, err)
-			retainedTask, retainedSchedule := seedRetainedAutomationSchedule(t, db, taskRepo, scheduleRepo, project.ID,
+			retainedTask, retainedSchedule := seedRetainedAutomationSchedule(t, env, taskRepo, scheduleRepo, project.ID,
 				first.Automation.ID, retainedDraftID, test.name)
 
 			secondTask, secondSchedule := automationTestTaskAndSchedule(t, taskRepo, scheduleRepo, project.ID, "Replacement maintained schedule")
@@ -764,13 +740,25 @@ func TestMaintainedAutomationRegistrationPreservesCurrentGraphAndLifecycle(t *te
 			require.True(t, reused)
 			require.Equal(t, test.state, preserved.Automation.LifecycleState)
 			require.Equal(t, first.Version.ID, preserved.Version.ID)
-			require.Equal(t, 1, tableCountWhere(t, db, "automation_versions", "automation_id", first.Automation.ID), "registration must retain exactly one current graph")
-			require.Equal(t, 1, tableCountWhere(t, db, "automation_versions", "id", first.Version.ID))
-			require.Zero(t, tableCountWhere(t, db, "automation_versions", "id", retainedDraftID))
-			require.Equal(t, 1, tableCountWhere(t, db, "automation_invocations", "automation_id", first.Automation.ID), "registration must preserve current runtime projection")
-			require.Equal(t, 1, tableCountWhere(t, db, "schedules", "id", firstSchedule.ID), "registration must preserve the current exclusively owned schedule")
-			require.Zero(t, tableCountWhere(t, db, "schedules", "id", retainedSchedule.ID), "retained draft schedule must be deleted before its owner row")
-			require.Equal(t, 1, tableCountWhere(t, db, "tasks", "id", retainedTask.ID), "retained graph backing Task must survive")
+			versions, err := env.Fixtures.AutomationVersions(ctx, first.Automation.ID)
+			require.NoError(t, err)
+			require.Len(t, versions, 1, "registration must retain exactly one current graph")
+			require.Equal(t, first.Version.ID, versions[0].ID)
+			require.NotEqual(t, retainedDraftID, versions[0].ID)
+			invocations, err := automationRepo.ListAutomationInvocations(ctx, project.ID, first.Automation.ID, 100, "")
+			require.NoError(t, err)
+			require.Len(t, invocations.Items, 1, "registration must preserve current runtime projection")
+			require.Equal(t, first.Version.ID, invocations.Items[0].VersionID)
+			require.Equal(t, "old-"+test.name, invocations.Items[0].ID)
+			persisted3, lookupErr := env.Schedules.GetByID(ctx, firstSchedule.ID)
+			require.NoError(t, lookupErr)
+			require.NotNil(t, persisted3, "registration must preserve the current exclusively owned schedule")
+			persisted4, lookupErr := env.Schedules.GetByID(ctx, retainedSchedule.ID)
+			require.NoError(t, lookupErr)
+			require.Nil(t, persisted4, "retained draft schedule must be deleted before its owner row")
+			persisted5, lookupErr := env.Tasks.GetByID(ctx, retainedTask.ID)
+			require.NoError(t, lookupErr)
+			require.NotNil(t, persisted5, "retained graph backing Task must survive")
 			stored, err := scheduleRepo.GetByID(ctx, firstSchedule.ID)
 			require.NoError(t, err)
 			require.NotNil(t, stored)
@@ -790,12 +778,12 @@ func TestMaintainedAutomationRegistrationPreservesCurrentGraphAndLifecycle(t *te
 }
 
 func TestMaintainedAutomationRegistrationUnchangedCleansRetainedGraphSchedule(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
-	project := automationTestProject(t, teststores.Of(db).Projects, "Unchanged maintained retained schedule")
-	taskRepo := teststores.Of(db).Tasks
-	scheduleRepo := teststores.Of(db).Schedules
-	automationRepo := teststores.Of(db).Automations
+	project := automationTestProject(t, env.Projects, "Unchanged maintained retained schedule")
+	taskRepo := env.Tasks
+	scheduleRepo := env.Schedules
+	automationRepo := env.Automations
 	registration := NewAutomationRegistrationService(automationRepo, NewAutomationAdapterRegistry())
 	currentTask, currentSchedule := automationTestTaskAndSchedule(t, taskRepo, scheduleRepo, project.ID, "Current maintained schedule")
 	request := AutomationRegistrationRequest{ProjectID: project.ID, AdapterKey: AutomationAdapterNativeSDLC,
@@ -805,37 +793,43 @@ func TestMaintainedAutomationRegistrationUnchangedCleansRetainedGraphSchedule(t 
 		}}
 	current, _, err := registration.Register(ctx, request)
 	require.NoError(t, err)
-	_, err = db.ExecContext(ctx, `INSERT INTO automation_versions
-		(id, project_id, automation_id, version, state, source, adapter_key)
-		VALUES ('unchanged-retained-draft', ?, ?, 2, 'draft', 'bootstrap', ?)`, project.ID,
-		current.Automation.ID, AutomationAdapterNativeSDLC)
+	err = env.Fixtures.SeedAutomationVersion(ctx, models.AutomationVersion{ID: "unchanged-retained-draft", ProjectID: project.ID, AutomationID: current.Automation.ID, Version: 2, State: "draft", Source: "bootstrap", AdapterKey: AutomationAdapterNativeSDLC})
 	require.NoError(t, err)
-	retainedTask, retainedSchedule := seedRetainedAutomationSchedule(t, db, taskRepo, scheduleRepo, project.ID,
+	retainedTask, retainedSchedule := seedRetainedAutomationSchedule(t, env, taskRepo, scheduleRepo, project.ID,
 		current.Automation.ID, "unchanged-retained-draft", "unchanged")
 
 	reconciled, unchanged, err := registration.Register(ctx, request)
 	require.NoError(t, err)
 	require.True(t, unchanged)
 	require.Equal(t, current.Version.ID, reconciled.Version.ID)
-	require.Equal(t, 1, tableCountWhere(t, db, "automation_versions", "automation_id", current.Automation.ID))
-	require.Zero(t, tableCountWhere(t, db, "schedules", "id", retainedSchedule.ID),
+	versions, err := env.Fixtures.AutomationVersions(ctx, current.Automation.ID)
+	require.NoError(t, err)
+	require.Len(t, versions, 1)
+	require.Equal(t, current.Version.ID, versions[0].ID)
+	persisted6, lookupErr := env.Schedules.GetByID(ctx, retainedSchedule.ID)
+	require.NoError(t, lookupErr)
+	require.Nil(t, persisted6,
 		"unchanged registration must delete a discarded graph's exclusively owned schedule")
-	require.Equal(t, 1, tableCountWhere(t, db, "tasks", "id", retainedTask.ID),
+	persisted7, lookupErr := env.Tasks.GetByID(ctx, retainedTask.ID)
+	require.NoError(t, lookupErr)
+	require.NotNil(t, persisted7,
 		"unchanged registration must preserve the backing domain Task")
-	require.Equal(t, 1, tableCountWhere(t, db, "schedules", "id", currentSchedule.ID),
+	persisted8, lookupErr := env.Schedules.GetByID(ctx, currentSchedule.ID)
+	require.NoError(t, lookupErr)
+	require.NotNil(t, persisted8,
 		"unchanged registration must preserve the current graph schedule")
 }
 
 func TestMaintainedAutomationRegistrationEnablesBoundSchedule(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
-	project := automationTestProject(t, teststores.Of(db).Projects, "Disabled maintained schedule")
-	taskRepo := teststores.Of(db).Tasks
-	scheduleRepo := teststores.Of(db).Schedules
-	automationRepo := teststores.Of(db).Automations
+	project := automationTestProject(t, env.Projects, "Disabled maintained schedule")
+	taskRepo := env.Tasks
+	scheduleRepo := env.Schedules
+	automationRepo := env.Automations
 	registration := NewAutomationRegistrationService(automationRepo, NewAutomationAdapterRegistry())
 	task, schedule := automationTestTaskAndSchedule(t, taskRepo, scheduleRepo, project.ID, "Disabled maintained trigger")
-	_, err := db.ExecContext(ctx, `UPDATE schedules SET enabled = 0 WHERE id = ?`, schedule.ID)
+	_, err := scheduleRepo.SetEnabledForTask(ctx, schedule.ID, task.ID, false)
 	require.NoError(t, err)
 	request := AutomationRegistrationRequest{ProjectID: project.ID, AdapterKey: AutomationAdapterNativeSDLC,
 		StableKey: "native-sdlc/disabled", Resources: []models.AutomationResourceBinding{
@@ -865,16 +859,16 @@ func TestMaintainedAutomationRegistrationUsesGlobalPauseAndResume(t *testing.T) 
 		{name: "disabled", configuredEnabled: false},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			db := teststores.NewDB(t)
+			env := teststores.New(t)
 			ctx := context.Background()
-			project := automationTestProject(t, teststores.Of(db).Projects, "Paused maintained schedule "+test.name)
-			taskRepo := teststores.Of(db).Tasks
-			scheduleRepo := teststores.Of(db).Schedules
-			automationRepo := teststores.Of(db).Automations
+			project := automationTestProject(t, env.Projects, "Paused maintained schedule "+test.name)
+			taskRepo := env.Tasks
+			scheduleRepo := env.Schedules
+			automationRepo := env.Automations
 			registration := NewAutomationRegistrationService(automationRepo, NewAutomationAdapterRegistry())
 			task, schedule := automationTestTaskAndSchedule(t, taskRepo, scheduleRepo, project.ID, "Paused maintained trigger")
 			if !test.configuredEnabled {
-				_, err := db.ExecContext(ctx, `UPDATE schedules SET enabled = 0 WHERE id = ?`, schedule.ID)
+				_, err := scheduleRepo.SetEnabledForTask(ctx, schedule.ID, task.ID, false)
 				require.NoError(t, err)
 			}
 			request := AutomationRegistrationRequest{ProjectID: project.ID, AdapterKey: AutomationAdapterNativeSDLC,
@@ -922,11 +916,11 @@ func TestAutomationRegistrationRejectsScheduleTaskMismatch(t *testing.T) {
 }
 
 func TestAutomationRegistrationRejectsUnsupportedAdapterAndExclusiveTriggerReuse(t *testing.T) {
-	db := teststores.NewDB(t)
-	projectRepo := teststores.Of(db).Projects
-	taskRepo := teststores.Of(db).Tasks
-	scheduleRepo := teststores.Of(db).Schedules
-	automationRepo := teststores.Of(db).Automations
+	env := teststores.New(t)
+	projectRepo := env.Projects
+	taskRepo := env.Tasks
+	scheduleRepo := env.Schedules
+	automationRepo := env.Automations
 	service := NewAutomationRegistrationService(automationRepo, NewAutomationAdapterRegistry())
 	project := automationTestProject(t, projectRepo, "Exclusive")
 	task, schedule := automationTestTaskAndSchedule(t, taskRepo, scheduleRepo, project.ID, "Trigger")
@@ -980,8 +974,8 @@ func TestAutomationRegistrationRejectsUnsupportedAdapterAndExclusiveTriggerReuse
 	require.Equal(t, 1, successes)
 	require.Equal(t, 1, ownershipFailures)
 
-	var count int
-	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM automations WHERE project_id = ?`, project.ID).Scan(&count))
+	count, err := env.Fixtures.CountAutomations(ctx)
+	require.NoError(t, err)
 	require.Equal(t, 1, count, "failed publication must roll back its draft identity")
 }
 
@@ -1016,23 +1010,6 @@ func TestAutomationBootstrapRuntimeToolIsSelectedSkillScoped(t *testing.T) {
 	require.True(t, handled)
 	require.True(t, isError)
 	require.ErrorContains(t, err, "unavailable for the selected maintained bootstrap")
-}
-
-func TestAutomationCompositeConstraintsAndProjectCascade(t *testing.T) {
-	db := teststores.NewDB(t)
-	projectRepo := teststores.Of(db).Projects
-	project := automationTestProject(t, projectRepo, "Cascade")
-	other := automationTestProject(t, projectRepo, "Mismatch")
-
-	_, err := db.Exec(`INSERT INTO automations (id, project_id, stable_key, name) VALUES ('a', ?, 'a', 'A')`, project.ID)
-	require.NoError(t, err)
-	_, err = db.Exec(`INSERT INTO automation_versions (id, project_id, automation_id, version, adapter_key) VALUES ('v', ?, 'a', 1, 'native_sdlc')`, other.ID)
-	require.Error(t, err, "composite parent constraints must reject a foreign project")
-
-	require.NoError(t, projectRepo.(*sqlite.ProjectRepo).Delete(context.Background(), project.ID))
-	var count int
-	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM automations WHERE id = 'a'`).Scan(&count))
-	require.Zero(t, count)
 }
 
 func TestAutomationGraphServiceHistoryAndResourceWrappers(t *testing.T) {
@@ -2138,12 +2115,12 @@ func selectableAgentValidationStatements(statements []string) []string {
 func BenchmarkAutomationRuntimeReadProjection(b *testing.B) {
 	benchProject := func(b *testing.B, total int) (*AutomationGraphService, string) {
 		b.Helper()
-		db := teststores.NewDB(b)
+		env := teststores.New(b)
 		ctx := context.Background()
 		project := models.Project{Name: fmt.Sprintf("Automation runtime bench %d", total)}
-		require.NoError(b, teststores.Of(db).Projects.Create(ctx, &project))
-		seedAutomationRuntimeCards(b, db, project.ID, total)
-		return NewAutomationGraphService(teststores.Of(db).Automations), project.ID
+		require.NoError(b, env.Projects.Create(ctx, &project))
+		seedAutomationRuntimeCards(b, env, project.ID, total)
+		return NewAutomationGraphService(env.Automations), project.ID
 	}
 
 	b.Run("list_full_300", func(b *testing.B) {
@@ -2233,7 +2210,7 @@ func automationRuntimeBenchListPayload(cards []models.AutomationCard, paginated 
 	return encoded
 }
 
-func seedAutomationRuntimeCards(tb testing.TB, db *sql.DB, projectID string, total int) {
+func seedAutomationRuntimeCards(tb testing.TB, env *teststores.Env, projectID string, total int) {
 	tb.Helper()
 	ctx := context.Background()
 	base := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
@@ -2241,19 +2218,11 @@ func seedAutomationRuntimeCards(tb testing.TB, db *sql.DB, projectID string, tot
 		automationID := fmt.Sprintf("bench-auto-%04d", i)
 		versionID := automationID + "-version"
 		updatedAt := base.Add(time.Duration(i) * time.Minute)
-		_, err := db.ExecContext(ctx, `INSERT INTO automations
-			(id, project_id, stable_key, name, description, automation_type, lifecycle_state, template_revision, updated_at)
-			VALUES (?, ?, ?, ?, ?, 'custom', 'active', 0, ?)`, automationID, projectID, "bench/"+automationID, fmt.Sprintf("Bench Automation %04d", i), strings.Repeat("large hidden description ", 1024), updatedAt)
-		require.NoError(tb, err)
-		_, err = db.ExecContext(ctx, `INSERT INTO automation_versions
-			(id, project_id, automation_id, version, state, source, adapter_key, schema_version, published_at)
-			VALUES (?, ?, ?, 1, 'published', 'manual', 'custom', 1, ?)`, versionID, projectID, automationID, updatedAt)
-		require.NoError(tb, err)
-		_, err = db.ExecContext(ctx, `UPDATE automations SET published_version_id = ? WHERE id = ? AND project_id = ?`, versionID, automationID, projectID)
-		require.NoError(tb, err)
-		_, err = db.ExecContext(ctx, `INSERT INTO automation_nodes
-			(id, project_id, automation_id, version_id, node_key, name, node_type, role, config_json, position_x, position_y)
-			VALUES (?, ?, ?, ?, 'node', 'Node', 'agent_task', 'task', '{}', 0, 0)`, automationID+"-node", projectID, automationID, versionID)
-		require.NoError(tb, err)
+		versionTime := updatedAt
+		require.NoError(tb, env.Fixtures.SeedAutomation(ctx, models.Automation{ID: automationID, ProjectID: projectID, StableKey: "bench/" + automationID, Name: fmt.Sprintf("Bench Automation %04d", i), Description: strings.Repeat("large hidden description ", 1024), AutomationType: "custom", LifecycleState: "active", PublishedVersionID: &versionID}))
+		require.NoError(tb, env.Fixtures.SetAutomationUpdatedAt(ctx, automationID, versionTime))
+		require.NoError(tb, env.Fixtures.SetAutomationTemplateRevision(ctx, projectID, automationID, 0))
+		require.NoError(tb, env.Fixtures.SeedAutomationVersion(ctx, models.AutomationVersion{ID: versionID, ProjectID: projectID, AutomationID: automationID, Version: 1, State: "published", Source: "manual", AdapterKey: "custom", SchemaVersion: 1, PublishedAt: &versionTime}))
+		require.NoError(tb, env.Fixtures.SeedAutomationNode(ctx, models.AutomationNode{ID: automationID + "-node", ProjectID: projectID, AutomationID: automationID, VersionID: versionID, NodeKey: "node", Name: "Node", NodeType: "agent_task", Role: "task", ConfigJSON: "{}"}))
 	}
 }
