@@ -19,6 +19,7 @@ import (
 	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/chatcontrol"
 	"github.com/openvibely/openvibely/internal/events"
+	"github.com/openvibely/openvibely/internal/httpclient"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	llmoutput "github.com/openvibely/openvibely/internal/llm/output"
 	"github.com/openvibely/openvibely/internal/models"
@@ -168,22 +169,20 @@ func NewSlackService(
 		}
 	}
 	return &SlackService{
-		settingsRepo:         settingsRepo,
-		projectRepo:          projectRepo,
-		llmConfigRepo:        llmConfigRepo,
-		taskRepo:             taskRepo,
-		execRepo:             execRepo,
-		scheduleRepo:         scheduleRepo,
-		taskSvc:              taskSvc,
-		llmSvc:               llmSvc,
-		workerSvc:            workerSvc,
-		usageAnalyticsSvc:    usageAnalyticsSvc,
-		slackUserProjectRepo: slackUserProjectRepo,
-		slackTaskContextRepo: slackTaskContextRepo,
-		slackAuthRepo:        slackAuthRepo,
-		httpClient: &http.Client{
-			Timeout: 20 * time.Second,
-		},
+		settingsRepo:            settingsRepo,
+		projectRepo:             projectRepo,
+		llmConfigRepo:           llmConfigRepo,
+		taskRepo:                taskRepo,
+		execRepo:                execRepo,
+		scheduleRepo:            scheduleRepo,
+		taskSvc:                 taskSvc,
+		llmSvc:                  llmSvc,
+		workerSvc:               workerSvc,
+		usageAnalyticsSvc:       usageAnalyticsSvc,
+		slackUserProjectRepo:    slackUserProjectRepo,
+		slackTaskContextRepo:    slackTaskContextRepo,
+		slackAuthRepo:           slackAuthRepo,
+		httpClient:              httpclient.New(httpclient.MessagingTimeout),
 		oauthBaseURL:            defaultSlackAPIBaseURL,
 		uploadsDir:              "uploads",
 		userProjects:            make(map[string]string),

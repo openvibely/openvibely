@@ -20,6 +20,8 @@ import (
 	"time"
 
 	"golang.org/x/sync/singleflight"
+
+	"github.com/openvibely/openvibely/internal/httpclient"
 )
 
 type Config struct {
@@ -547,10 +549,11 @@ func ValidateEndpoint(raw string, requestPrivate bool) (*url.URL, error) {
 // and validates redirects, preventing DNS and redirect bypasses.
 func NewHTTPClient(timeout time.Duration, requestPrivate bool) *http.Client {
 	allowPrivate := requestPrivate && PrivateEndpointPolicyEnabled()
-	transport := http.DefaultTransport.(*http.Transport).Clone()
-	transport.Proxy = nil
-	dialer := &net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}
+	transport := httpclient.NewDirectTransport()
+	dialer := httpclient.NewDialer()
 	transport.DialContext = func(ctx context.Context, network, address string) (net.Conn, error) {
+		ctx, cancel := context.WithTimeout(ctx, httpclient.ConnectTimeout)
+		defer cancel()
 		host, port, err := net.SplitHostPort(address)
 		if err != nil {
 			return nil, err
@@ -816,4 +819,12 @@ func jwtExpiryMillis(token string) int64 {
 		return 0
 	}
 	return claims.ExpiresAt * 1000
+}
+
+// NewModelHTTPClient preserves endpoint security while using model timeouts.
+func NewModelHTTPClient(requestPrivate bool) *http.Client {
+	guarded := NewHTTPClient(0, requestPrivate)
+	client := httpclient.NewModel(guarded.Transport)
+	client.CheckRedirect = guarded.CheckRedirect
+	return client
 }

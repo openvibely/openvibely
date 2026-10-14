@@ -17,6 +17,7 @@ import (
 	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/chatcontrol"
 	"github.com/openvibely/openvibely/internal/events"
+	"github.com/openvibely/openvibely/internal/httpclient"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	llmoutput "github.com/openvibely/openvibely/internal/llm/output"
 	"github.com/openvibely/openvibely/internal/models"
@@ -139,7 +140,7 @@ func NewDiscordService(
 		discordTaskContextRepo: discordTaskContextRepo,
 		userProjects:           make(map[string]string),
 		uploadsDir:             "uploads",
-		httpClient:             &http.Client{Timeout: 20 * time.Second},
+		httpClient:             httpclient.New(httpclient.MessagingTimeout),
 	}
 }
 

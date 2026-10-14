@@ -24,6 +24,7 @@ import (
 
 	"github.com/cyberphone/json-canonicalization/go/src/webpki.org/jsoncanonicalizer"
 	"github.com/openvibely/openvibely/internal/buildinfo"
+	"github.com/openvibely/openvibely/internal/httpclient"
 	"golang.org/x/mod/semver"
 )
 
@@ -176,7 +177,7 @@ func DecodePublicKeys(embeddedID, embeddedBase64, filePath string) (map[string]e
 
 func NewClient(cfg ClientConfig) *Client {
 	if cfg.HTTPClient == nil {
-		cfg.HTTPClient = &http.Client{Timeout: 15 * time.Second}
+		cfg.HTTPClient = httpclient.New(httpclient.UpdateTimeout)
 	}
 	if cfg.Now == nil {
 		cfg.Now = time.Now

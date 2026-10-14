@@ -1786,7 +1786,7 @@ func TestSendAgentic_ResponsesLiteStreamFailureFallsBackAfterRetries(t *testing.
 	if resp.Text != "recovered" {
 		t.Fatalf("Text = %q, want recovered", resp.Text)
 	}
-	if websocketAttempts.Load() != int32(httpretry.StreamTurnMaxRetries+1) || httpRequests.Load() != 1 {
+	if websocketAttempts.Load() != int32(httpretry.StreamTurnMaxRetries) || httpRequests.Load() != 1 {
 		t.Fatalf("attempts websocket=%d HTTP=%d", websocketAttempts.Load(), httpRequests.Load())
 	}
 }

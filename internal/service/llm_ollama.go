@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/openvibely/openvibely/internal/httpclient"
 	"github.com/openvibely/openvibely/internal/httpretry"
 )
 
@@ -39,11 +40,9 @@ type OllamaModelDetails struct {
 	QuantizationLevel string   `json:"quantization_level"`
 }
 
-const defaultOllamaRequestTimeout = 10 * time.Minute
-
 // OllamaHTTPClient is an interface for making HTTP requests to Ollama.
 // Can be overridden in tests.
-var OllamaHTTPClient HTTPDoer = &http.Client{Timeout: defaultOllamaRequestTimeout}
+var OllamaHTTPClient HTTPDoer = httpclient.NewModel(nil)
 
 // HTTPDoer is an interface for making HTTP requests.
 type HTTPDoer interface {

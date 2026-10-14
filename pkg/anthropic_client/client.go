@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/applog"
+	"github.com/openvibely/openvibely/internal/httpclient"
 	"github.com/openvibely/openvibely/internal/httpretry"
 	"github.com/openvibely/openvibely/internal/models"
 )
@@ -35,7 +36,7 @@ import (
 // It is a variable (not a constant) to allow overriding in tests.
 var AnthropicAPIHost = "https://api.anthropic.com"
 
-var oauthHTTPClient = &http.Client{Timeout: 30 * time.Second}
+var oauthHTTPClient = httpclient.New(httpclient.OAuthTimeout)
 
 // ErrOAuthReauthenticationRequired marks a permanently invalid refresh grant.
 var ErrOAuthReauthenticationRequired = errors.New("OAuth reauthentication required")
@@ -49,8 +50,7 @@ const (
 	OAuthBetaHeader     = "oauth-2025-04-20"
 	// ClaudeCodeVersion identifies the compatible Claude Code request shape used
 	// for Anthropic subscription OAuth billing attribution.
-	ClaudeCodeVersion          = "2.1.280"
-	defaultModelRequestTimeout = 10 * time.Minute
+	ClaudeCodeVersion = "2.1.280"
 
 	oauthClientID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
 	oauthScope    = "user:profile user:inference user:sessions:claude_code user:mcp_servers"
@@ -69,14 +69,7 @@ func catalogDefaultModel() string {
 
 // defaultHTTPClient is a shared HTTP client with connection pooling.
 // Reusing a single client avoids repeated TCP/TLS handshakes across API calls.
-var defaultHTTPClient = &http.Client{
-	Timeout: defaultModelRequestTimeout,
-	Transport: &http.Transport{
-		MaxIdleConns:        100,
-		MaxIdleConnsPerHost: 100,
-		IdleConnTimeout:     90 * time.Second,
-	},
-}
+var defaultHTTPClient = httpclient.NewModel(httpclient.NewDirectTransport())
 
 // StoredAuth holds OAuth tokens or an API key.
 type StoredAuth struct {
@@ -383,7 +376,6 @@ func (c *Client) Send(ctx context.Context, prompt string, opts *SendOptions) (*R
 	}
 
 	result, err := httpretry.DoStreamTurn(ctx, httpretry.StreamTurnPolicy{
-		RetryConnectionFailuresWithoutBudget: true,
 		OnRetry: func(event httpretry.RetryEvent) {
 			if httpretry.IsConnectionSetupFailure(event.Err) {
 				applog.Infof("[anthropicclient] reconnecting messages stream in %v: %v", event.Delay, event.Err)
@@ -402,6 +394,9 @@ func (c *Client) Send(ctx context.Context, prompt string, opts *SendOptions) (*R
 					return nil, err
 				}
 				httpReq.Header.Set("Content-Type", "application/json")
+				if opts.Stream {
+					httpReq.Header.Set("Accept", "text/event-stream")
+				}
 				httpReq.Header.Set("anthropic-version", AnthropicAPIVersion)
 				if c.auth.APIKey != "" {
 					httpReq.Header.Set("x-api-key", c.auth.APIKey)
