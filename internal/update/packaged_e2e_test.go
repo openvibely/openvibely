@@ -1428,7 +1428,9 @@ func freeTCPPort(t *testing.T) string {
 
 func waitForHealthVersion(t *testing.T, baseURL, version string, diagnostics ...func() string) {
 	t.Helper()
-	waitForHealthVersionWithin(t, baseURL, version, 45*time.Second, diagnostics...)
+	// Initial startup creates a fresh database and runs every migration. On
+	// Windows CI, migrations alone can exceed 45 seconds before HTTP starts.
+	waitForHealthVersionWithin(t, baseURL, version, 120*time.Second, diagnostics...)
 }
 
 func waitForHealthVersionWithin(t *testing.T, baseURL, version string, timeout time.Duration, diagnostics ...func() string) {
