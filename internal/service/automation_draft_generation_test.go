@@ -13,12 +13,12 @@ import (
 )
 
 func TestAutomationCapabilitySnapshotIsBoundedDeterministicAndSecretFree(t *testing.T) {
-	db := teststores.NewDB(t)
-	projectRepo := teststores.Of(db).Projects
+	env := teststores.New(t)
+	projectRepo := env.Projects
 	project := automationTestProject(t, projectRepo, "Snapshot")
-	agentRepo := teststores.Of(db).Agents
-	taskRepo := teststores.Of(db).Tasks
-	settingsRepo := teststores.Of(db).Settings
+	agentRepo := env.Agents
+	taskRepo := env.Tasks
+	settingsRepo := env.Settings
 	agent := models.Agent{Name: "Builder", Key: "builder", Scope: models.AgentScopeProject, ProjectID: project.ID, Enabled: true, SelectableAsPrimary: true, SystemPrompt: "secret prompt", Tools: []string{"Read", "Write"}, Skills: []models.SkillConfig{{Name: "review", Description: "Review code", Content: "private skill body"}}}
 	require.NoError(t, agentRepo.Create(context.Background(), &agent))
 	task := models.Task{ProjectID: project.ID, Title: "Reusable Inbox", Prompt: "private task prompt", Category: models.CategoryBacklog, Priority: 2, Status: models.StatusPending}
@@ -511,16 +511,16 @@ func (s *automationCapabilityGitHubResolverStub) ResolveRepo(_ context.Context, 
 func (s *automationCapabilityGitHubResolverStub) GlobalAPIEndpoint(context.Context) string { return "" }
 
 func TestAutomationCapabilitySnapshotAcceptsAuthorizedUserAndLocalGitHubRemote(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
-	projectRepo := teststores.Of(db).Projects
+	projectRepo := env.Projects
 	project := automationTestProject(t, projectRepo, "Local GitHub snapshot")
 	project.RepoPath = "/projects/local-github"
 	require.NoError(t, projectRepo.Update(ctx, &project))
-	settingsRepo := teststores.Of(db).Settings
+	settingsRepo := env.Settings
 	require.NoError(t, settingsRepo.Set(ctx, GitHubSettingAuthMode, GitHubAuthModePAT))
 	require.NoError(t, settingsRepo.Set(ctx, GitHubSettingPAT, "secret-not-rendered"))
-	githubAuthRepo := teststores.Of(db).GitHubAuth
+	githubAuthRepo := env.GitHubAuth
 	require.NoError(t, githubAuthRepo.UpsertAuthorizedActor(ctx, &models.GitHubAuthorizedActor{GitHubLogin: "automation-bot"}))
 	provider := &automationCapabilityGitHubResolverStub{automationCapabilityGitHubStatusStub: automationCapabilityGitHubStatusStub{
 		status: GitHubConnectionStatus{AuthMode: GitHubAuthModePAT, Configured: true, Connected: true, HasPAT: true},
@@ -537,12 +537,12 @@ func TestAutomationCapabilitySnapshotAcceptsAuthorizedUserAndLocalGitHubRemote(t
 }
 
 func TestAutomationCapabilitySnapshotRequiresUsableConnectedGitHubMode(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
-	projectRepo := teststores.Of(db).Projects
+	projectRepo := env.Projects
 	project := automationTestProject(t, projectRepo, "GitHub snapshot")
-	settingsRepo := teststores.Of(db).Settings
-	githubAuthRepo := teststores.Of(db).GitHubAuth
+	settingsRepo := env.Settings
+	githubAuthRepo := env.GitHubAuth
 	builder := NewAutomationCapabilitySnapshotBuilder(projectRepo, nil, nil, settingsRepo)
 	builder.SetGitHubAuthRepository(githubAuthRepo)
 

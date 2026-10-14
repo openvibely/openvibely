@@ -382,12 +382,12 @@ func TestPrepareLifecycleTurn_AfterCompletePreservesRuntimeTools(t *testing.T) {
 		done <- nil
 		return json.RawMessage(`{"summary":"ok","nothing_to_save":true}`), nil
 	}), nil)
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	worker := NewWorkerService(nil, 0, nil)
 	worker.SetLifecycleRunner(runner)
 	worker.SetLifecycleSkillRoot(t.TempDir())
-	worker.SetLifecycleAgentRepo(teststores.Of(db).Agents)
-	worker.SetLifecycleRepo(teststores.Of(db).Lifecycle)
+	worker.SetLifecycleAgentRepo(env.Agents)
+	worker.SetLifecycleRepo(env.Lifecycle)
 
 	turn := worker.PrepareLifecycleTurn(ctx, models.Task{ID: "task-tools"})
 	turn.AfterComplete(nil, llmcontracts.ChatContext{})
@@ -421,8 +421,8 @@ func TestPrepareLifecycleTurn_AssignedAgentRoutesAgentOwnedSkills(t *testing.T) 
 	writeLifecycleTestSkill(t, root, "task_agent", "task_skill", "assigned agent skill body")
 	writeLifecycleStandaloneSkill(t, root, "standalone_skill", "standalone body")
 
-	db := teststores.NewDB(t)
-	agentRepo := teststores.Of(db).Agents
+	env := teststores.New(t)
+	agentRepo := env.Agents
 	agent := &models.Agent{ID: "task-agent-id", Key: "task_agent", Name: "Task Agent", Enabled: true, Tools: []string{"skill_view"}}
 	if err := agentRepo.Create(ctx, agent); err != nil {
 		t.Fatalf("create task agent: %v", err)
@@ -473,8 +473,8 @@ func TestPrepareLifecycleTurn_SelectedTaskSkillsDoNotHideHookSkills(t *testing.T
 	writeLifecycleStandaloneSkill(t, root, "task_skill", "task skill body")
 	writeLifecycleTestSkill(t, root, "skill_curator", "observe_task_for_learning", "observer skill body")
 
-	db := teststores.NewDB(t)
-	agentRepo := teststores.Of(db).Agents
+	env := teststores.New(t)
+	agentRepo := env.Agents
 	agent, err := agentRepo.GetByKey(ctx, "skill_curator")
 	if err != nil {
 		t.Fatalf("load skill curator: %v", err)
@@ -506,7 +506,7 @@ func TestPrepareLifecycleTurn_SelectedTaskSkillsDoNotHideHookSkills(t *testing.T
 	worker.SetLifecycleRunner(runner)
 	worker.SetLifecycleSkillRoot(root)
 	worker.SetLifecycleAgentRepo(agentRepo)
-	worker.SetLifecycleRepo(teststores.Of(db).Lifecycle)
+	worker.SetLifecycleRepo(env.Lifecycle)
 
 	turn := worker.PrepareLifecycleTurn(ctx, models.Task{ID: "task-selected-skill"})
 	turn.AfterComplete(nil, llmcontracts.ChatContext{})
@@ -563,13 +563,13 @@ func TestPrepareLifecycleTurn_SeparatesTaskTurnAndAfterCompleteRuntimeTools(t *t
 
 func TestPrepareLifecycleTurn_OrdinaryTaskWithActiveGoalRunsGoalAgentAfterComplete(t *testing.T) {
 	ctx := context.Background()
-	db := teststores.NewDB(t)
-	agentRepo := teststores.Of(db).Agents
-	taskRepo := teststores.Of(db).Tasks
-	goalSvc := NewTaskGoalService(teststores.Of(db).TaskGoals, taskRepo, nil)
+	env := teststores.New(t)
+	agentRepo := env.Agents
+	taskRepo := env.Tasks
+	goalSvc := NewTaskGoalService(env.TaskGoals, taskRepo, nil)
 
 	project := &models.Project{Name: "Ordinary Goal Project"}
-	if err := teststores.Of(db).Projects.Create(ctx, project); err != nil {
+	if err := env.Projects.Create(ctx, project); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
 	task := models.Task{ID: "ordinary-goal-task", ProjectID: project.ID, Title: "Ordinary goal task", Prompt: "work", Category: models.CategoryActive, Status: models.StatusRunning}
@@ -790,8 +790,8 @@ func TestPrepareLifecycleTurn_NormalTaskAssignedToSkillMaintainerDoesNotGetMutat
 	writeLifecycleTestSkill(t, root, "skill_curator", "maintain_skill_library", "maintenance skill body")
 	writeLifecycleStandaloneSkill(t, root, "other_skill", "other skill body")
 	ctx := context.Background()
-	db := teststores.NewDB(t)
-	agentRepo := teststores.Of(db).Agents
+	env := teststores.New(t)
+	agentRepo := env.Agents
 	agent, err := agentRepo.GetBySystemKind(ctx, models.AgentSystemKindSkillCurator)
 	if err != nil || agent == nil {
 		t.Fatalf("load system agent: agent=%#v err=%v", agent, err)
@@ -800,7 +800,7 @@ func TestPrepareLifecycleTurn_NormalTaskAssignedToSkillMaintainerDoesNotGetMutat
 	worker := NewWorkerService(nil, 0, nil)
 	worker.SetLifecycleSkillRoot(root)
 	worker.SetLifecycleAgentRepo(agentRepo)
-	worker.SetLifecycleRepo(teststores.Of(db).Lifecycle)
+	worker.SetLifecycleRepo(env.Lifecycle)
 	turn := worker.PrepareLifecycleTurn(ctx, models.Task{ID: "normal-task", Title: "User task", Category: models.CategoryActive, AgentDefinitionID: &agent.ID})
 	rt := llmcontracts.RuntimeToolsFromContext(turn.Ctx)
 	assertTaskRuntimeIsSelectedSkillOnly(t, rt)
@@ -818,8 +818,8 @@ func TestPrepareLifecycleTurn_ScheduledSkillMaintenanceTaskUsesScopedSkillLibrar
 	writeLifecycleStandaloneSkill(t, root, "other_skill", "other skill body")
 	writeLifecycleStandaloneSkill(t, root, "maintain_skill_library", "standalone maintenance body")
 	ctx := context.Background()
-	db := teststores.NewDB(t)
-	agentRepo := teststores.Of(db).Agents
+	env := teststores.New(t)
+	agentRepo := env.Agents
 	agent, err := agentRepo.GetBySystemKind(ctx, models.AgentSystemKindSkillCurator)
 	if err != nil || agent == nil {
 		t.Fatalf("load system agent: agent=%#v err=%v", agent, err)
@@ -840,7 +840,7 @@ func TestPrepareLifecycleTurn_ScheduledSkillMaintenanceTaskUsesScopedSkillLibrar
 	worker.SetLifecycleRunner(runner)
 	worker.SetLifecycleSkillRoot(root)
 	worker.SetLifecycleAgentRepo(agentRepo)
-	worker.SetLifecycleRepo(teststores.Of(db).Lifecycle)
+	worker.SetLifecycleRepo(env.Lifecycle)
 	task := models.Task{ID: "maintenance-task", Title: agentLibraryMaintenanceTaskTitle, Category: models.CategoryScheduled, AgentDefinitionID: &agent.ID}
 	turn := worker.PrepareLifecycleTurn(ctx, task)
 	if !routeCalled {
@@ -871,7 +871,7 @@ func TestPrepareLifecycleTurn_ScheduledSkillMaintenanceTaskUsesScopedSkillLibrar
 	llmSvc := NewLLMService(nil, nil, nil, nil, nil, nil)
 	llmSvc.SetGlobalSkillRoot(root)
 	llmSvc.SetAgentRepo(agentRepo)
-	llmSvc.SetLifecycleRepo(teststores.Of(db).Lifecycle)
+	llmSvc.SetLifecycleRepo(env.Lifecycle)
 	maintenanceTools := llmSvc.agentDeclaredSkillRuntimeTools(turn.Ctx, task, agent, "")
 	mergedTools := llmcontracts.CompositeRuntimeTools(maintenanceTools, rt)
 	for _, want := range []string{"skill_view", "skills_list", "agent_list", "agent_view", "skill_manage", "skill_import", "agent_skill_manage"} {
@@ -972,8 +972,8 @@ func TestPrepareLifecycleTurn_TaskFollowupUsesTurnPromptForSelectedMemoryView(t 
 		t.Fatalf("write original memory: %v", err)
 	}
 
-	db := teststores.NewDB(t)
-	projectRepo := teststores.Of(db).Projects
+	env := teststores.New(t)
+	projectRepo := env.Projects
 	project := &models.Project{Name: "Project", RepoPath: repoPath}
 	if err := projectRepo.Create(ctx, project); err != nil {
 		t.Fatalf("create project: %v", err)
@@ -1043,13 +1043,13 @@ func TestPrepareLifecycleTurn_MemoryCuratorRouteTaskSelectsRelevantMemory(t *tes
 		t.Fatalf("write unindexed memory: %v", err)
 	}
 
-	db := teststores.NewDB(t)
-	projectRepo := teststores.Of(db).Projects
+	env := teststores.New(t)
+	projectRepo := env.Projects
 	project := &models.Project{Name: "Project", RepoPath: repoPath}
 	if err := projectRepo.Create(ctx, project); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
-	agentRepo := teststores.Of(db).Agents
+	agentRepo := env.Agents
 	agent := &models.Agent{
 		ID:                  "memory-agent",
 		Key:                 "memory_curator",
@@ -1150,8 +1150,8 @@ func TestPrepareLifecycleTurn_HonorsExplicitIndexedMemoryViewRequest(t *testing.
 		t.Fatalf("write MEMORIES.md: %v", err)
 	}
 
-	db := teststores.NewDB(t)
-	projectRepo := teststores.Of(db).Projects
+	env := teststores.New(t)
+	projectRepo := env.Projects
 	project := &models.Project{Name: "Project", RepoPath: repoPath}
 	if err := projectRepo.Create(ctx, project); err != nil {
 		t.Fatalf("create project: %v", err)
@@ -1212,8 +1212,8 @@ func TestPrepareLifecycleTurn_SemanticRealtimePromptKeepsMemoryRecallBeforeSelec
 
 	root := t.TempDir()
 	writeLifecycleStandaloneSkill(t, root, "openvibely_htmx_templ_ui_workflow", "HTMX skill body")
-	db := teststores.NewDB(t)
-	projectRepo := teststores.Of(db).Projects
+	env := teststores.New(t)
+	projectRepo := env.Projects
 	project := &models.Project{Name: "Realtime Project", RepoPath: repoPath}
 	if err := projectRepo.Create(ctx, project); err != nil {
 		t.Fatalf("create project: %v", err)
@@ -1288,13 +1288,13 @@ func TestBuildTaskMemoryRuntimeToolsRequiresAssignedAgentMemoryViewGrant(t *test
 		t.Fatalf("write selected memory: %v", err)
 	}
 
-	db := teststores.NewDB(t)
-	projectRepo := teststores.Of(db).Projects
+	env := teststores.New(t)
+	projectRepo := env.Projects
 	project := &models.Project{Name: "Project", RepoPath: repoPath}
 	if err := projectRepo.Create(ctx, project); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
-	agentRepo := teststores.Of(db).Agents
+	agentRepo := env.Agents
 	withoutMemory := &models.Agent{ID: "agent-no-memory", Name: "No Memory", Tools: []string{"Read"}}
 	withMemory := &models.Agent{ID: "agent-with-memory", Name: "With Memory", Tools: []string{"memory_view"}}
 	if err := agentRepo.Create(ctx, withoutMemory); err != nil {
@@ -1325,8 +1325,8 @@ func TestPrepareLifecycleTurn_MemoryConsolidationTaskRoutesConsolidateMemorySkil
 	writeLifecycleTestSkill(t, root, "memory_curator", "update_memory", "update body")
 	writeLifecycleTestSkill(t, root, "memory_curator", "consolidate_memory", "consolidate body")
 
-	db := teststores.NewDB(t)
-	agentRepo := teststores.Of(db).Agents
+	env := teststores.New(t)
+	agentRepo := env.Agents
 	agent := &models.Agent{
 		ID:                  "memory-agent",
 		Key:                 "memory_curator",
@@ -1354,7 +1354,7 @@ func TestPrepareLifecycleTurn_MemoryConsolidationTaskRoutesConsolidateMemorySkil
 	worker.SetLifecycleRunner(runner)
 	worker.SetLifecycleSkillRoot(root)
 	worker.SetLifecycleAgentRepo(agentRepo)
-	worker.SetLifecycleRepo(teststores.Of(db).Lifecycle)
+	worker.SetLifecycleRepo(env.Lifecycle)
 	turn := worker.PrepareLifecycleTurn(ctx, models.Task{ID: "memory-task", Title: "System: Memory Consolidation", Category: models.CategoryScheduled, AgentDefinitionID: &agent.ID})
 	if !routeCalled {
 		t.Fatal("assigned system tasks should run skill routing")
@@ -1378,8 +1378,8 @@ func TestPrepareLifecycleTurn_MemoryConsolidationTaskRoutesConsolidateMemorySkil
 
 func TestPrepareLifecycleTurn_AssignedAgentWithNoSkillsRoutesEmptyIndex(t *testing.T) {
 	ctx := context.Background()
-	db := teststores.NewDB(t)
-	agentRepo := teststores.Of(db).Agents
+	env := teststores.New(t)
+	agentRepo := env.Agents
 	agent := &models.Agent{
 		ID:                  "memory-agent",
 		Key:                 "memory_curator",
@@ -1480,8 +1480,8 @@ func TestPrepareLifecycleTurn_AssignedAgentRouteHookDoesNotExposeStandaloneSkill
 	writeLifecycleTestSkill(t, root, "task_agent", "task_skill", "task skill body")
 	writeLifecycleStandaloneSkill(t, root, "standalone_skill", "standalone body")
 
-	db := teststores.NewDB(t)
-	agentRepo := teststores.Of(db).Agents
+	env := teststores.New(t)
+	agentRepo := env.Agents
 	agent := &models.Agent{ID: "task-agent-id", Key: "task_agent", Name: "Task Agent", Enabled: true, Tools: []string{"skill_view", "skills_list"}}
 	if err := agentRepo.Create(ctx, agent); err != nil {
 		t.Fatalf("create task agent: %v", err)
@@ -1555,8 +1555,8 @@ func appendLifecycleTestHeader(t *testing.T, path, header string) {
 
 func TestPrepareLifecycleTurn_AfterCompleteDoesNotPreExposeScopedFileTools(t *testing.T) {
 	ctx := context.Background()
-	db := teststores.NewDB(t)
-	agentRepo := teststores.Of(db).Agents
+	env := teststores.New(t)
+	agentRepo := env.Agents
 	hookAgent := &models.Agent{
 		Key:     "custom_memory_hook",
 		Name:    "Custom Memory Hook",
@@ -1593,7 +1593,7 @@ func TestPrepareLifecycleTurn_AfterCompleteDoesNotPreExposeScopedFileTools(t *te
 	worker := NewWorkerService(nil, 0, nil)
 	worker.SetLifecycleRunner(runner)
 	worker.SetLifecycleAgentRepo(agentRepo)
-	worker.SetLifecycleRepo(teststores.Of(db).Lifecycle)
+	worker.SetLifecycleRepo(env.Lifecycle)
 
 	turn := worker.PrepareLifecycleTurn(ctx, models.Task{ID: "task-hook-scoped-files", ProjectID: "default"})
 	turn.AfterComplete(nil, llmcontracts.ChatContext{})
@@ -1613,8 +1613,8 @@ func TestPrepareLifecycleTurn_AfterCompleteIncludesAssignedAgentLearningContextA
 	root := t.TempDir()
 	writeLifecycleTestSkill(t, root, "reviewer", "review_migrations", "migration review body")
 
-	db := teststores.NewDB(t)
-	agentRepo := teststores.Of(db).Agents
+	env := teststores.New(t)
+	agentRepo := env.Agents
 	agent := &models.Agent{ID: "reviewer-id", Key: "reviewer", Name: "Reviewer", Description: "Reviews code changes", Enabled: true, Scope: models.AgentScopeProject, Tools: []string{"skill_view"}}
 	if err := agentRepo.Create(ctx, agent); err != nil {
 		t.Fatalf("create agent: %v", err)
@@ -1663,7 +1663,7 @@ func TestPrepareLifecycleTurn_AfterCompleteIncludesAssignedAgentLearningContextA
 	worker.SetLifecycleRunner(runner)
 	worker.SetLifecycleSkillRoot(root)
 	worker.SetLifecycleAgentRepo(agentRepo)
-	worker.SetLifecycleRepo(teststores.Of(db).Lifecycle)
+	worker.SetLifecycleRepo(env.Lifecycle)
 
 	turn := worker.PrepareLifecycleTurn(ctx, models.Task{ID: "task-learning", ProjectID: "default", AgentDefinitionID: &agent.ID})
 	turn.AfterComplete(nil, llmcontracts.ChatContext{})
@@ -1689,14 +1689,14 @@ func stringSliceContains(values []string, want string) bool {
 
 func TestAfterCompleteEligibilityRunsProtectedGoalAgentOnlyForActiveGoal(t *testing.T) {
 	ctx := context.Background()
-	db := teststores.NewDB(t)
-	agentRepo := teststores.Of(db).Agents
-	taskRepo := teststores.Of(db).Tasks
-	goalSvc := NewTaskGoalService(teststores.Of(db).TaskGoals, taskRepo, nil)
+	env := teststores.New(t)
+	agentRepo := env.Agents
+	taskRepo := env.Tasks
+	goalSvc := NewTaskGoalService(env.TaskGoals, taskRepo, nil)
 	w := &WorkerService{agentRepo: agentRepo, taskGoalSvc: goalSvc}
 
 	project := &models.Project{Name: "Goal Eligibility Project"}
-	if err := teststores.Of(db).Projects.Create(ctx, project); err != nil {
+	if err := env.Projects.Create(ctx, project); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
 	task := models.Task{ID: "task-goal-eligibility", ProjectID: project.ID, Title: "Goal eligibility", Prompt: "work", Category: models.CategoryActive, Status: models.StatusRunning}
@@ -1863,8 +1863,8 @@ func TestPrepareLifecycleTurn_AlwaysUseNotAppliedToAssignedAgentTasks(t *testing
 	}
 
 	ctx := context.Background()
-	db := teststores.NewDB(t)
-	agentRepo := teststores.Of(db).Agents
+	env := teststores.New(t)
+	agentRepo := env.Agents
 	agent, err := agentRepo.GetBySystemKind(ctx, models.AgentSystemKindSkillCurator)
 	if err != nil || agent == nil {
 		t.Fatalf("load system agent: %v / %v", err, agent)
@@ -1873,7 +1873,7 @@ func TestPrepareLifecycleTurn_AlwaysUseNotAppliedToAssignedAgentTasks(t *testing
 	worker := NewWorkerService(nil, 0, nil)
 	worker.SetLifecycleSkillRoot(root)
 	worker.SetLifecycleAgentRepo(agentRepo)
-	worker.SetLifecycleRepo(teststores.Of(db).Lifecycle)
+	worker.SetLifecycleRepo(env.Lifecycle)
 
 	turn := worker.PrepareLifecycleTurn(ctx, models.Task{
 		ID: "task-agent-no-always", Category: models.CategoryActive,

@@ -60,9 +60,9 @@ func TestEmailInboundReceiptRepoExistsBatchUsesBoundedQueries(t *testing.T) {
 }
 
 func TestEmailInboundReceiptHandoffIsAtomicAndIdempotent(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
-	receipts := teststores.Of(db).EmailInboundReceipts
+	receipts := env.EmailInboundReceipts
 	mailbox, messageKey := "imap.example.com\x00bot@example.com", "message-id:<atomic@example.com>"
 
 	alreadyHandedOff, err := receipts.WithHandoff(ctx, mailbox, messageKey, func(persistence.Tx) error {
@@ -165,17 +165,17 @@ type emailPollReceiptTestHarness struct {
 
 func newEmailPollReceiptTestHarness(t *testing.T) *emailPollReceiptTestHarness {
 	t.Helper()
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
-	settingsRepo := teststores.Of(db).Settings
-	projectRepo := teststores.Of(db).Projects
-	llmConfigRepo := teststores.Of(db).LLMConfigs
-	taskRepo := teststores.Of(db).Tasks
-	execRepo := teststores.Of(db).Executions
-	threadInputRepo := teststores.Of(db).ThreadInputs
-	emailAuthRepo := teststores.Of(db).EmailAuth
-	emailTaskContextRepo := teststores.Of(db).EmailTaskContexts
-	emailSenderProjectRepo := teststores.Of(db).EmailSenderProjects
+	settingsRepo := env.Settings
+	projectRepo := env.Projects
+	llmConfigRepo := env.LLMConfigs
+	taskRepo := env.Tasks
+	execRepo := env.Executions
+	threadInputRepo := env.ThreadInputs
+	emailAuthRepo := env.EmailAuth
+	emailTaskContextRepo := env.EmailTaskContexts
+	emailSenderProjectRepo := env.EmailSenderProjects
 	project := &models.Project{Name: "Email Receipt Project"}
 	require.NoError(t, projectRepo.Create(ctx, project))
 	require.NoError(t, emailAuthRepo.Create(ctx, &models.EmailAuthorizedSender{ProjectID: project.ID, EmailAddress: "alice@example.com", AddedBy: "test"}))
@@ -184,14 +184,14 @@ func newEmailPollReceiptTestHarness(t *testing.T) *emailPollReceiptTestHarness {
 	require.NoError(t, llmConfigRepo.Create(ctx, agent))
 	require.NoError(t, settingsRepo.Set(ctx, EmailSettingAddress, "bot@example.com"))
 
-	attachmentRepo := teststores.Of(db).Attachments
-	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, teststores.Of(db).Schedules, attachmentRepo)
+	attachmentRepo := env.Attachments
+	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, env.Schedules, attachmentRepo)
 	llmSvc.SetLLMCaller(testutil.NewMockLLMCaller())
-	svc := NewEmailService(settingsRepo, projectRepo, llmConfigRepo, taskRepo, execRepo, teststores.Of(db).Schedules, NewTaskService(taskRepo, attachmentRepo, nil), llmSvc, nil, emailAuthRepo, emailTaskContextRepo)
+	svc := NewEmailService(settingsRepo, projectRepo, llmConfigRepo, taskRepo, execRepo, env.Schedules, NewTaskService(taskRepo, attachmentRepo, nil), llmSvc, nil, emailAuthRepo, emailTaskContextRepo)
 	svc.SetEmailSenderProjectRepo(emailSenderProjectRepo)
 	svc.SetThreadInputRepo(threadInputRepo)
 	svc.SetChannelChatRunner(func(context.Context, ChannelChatRunRequest) {})
-	receipts := &countingEmailInboundReceiptStore{inner: teststores.Of(db).EmailInboundReceipts}
+	receipts := &countingEmailInboundReceiptStore{inner: env.EmailInboundReceipts}
 	svc.emailInboundReceiptStore = receipts
 	return &emailPollReceiptTestHarness{ctx: ctx, svc: svc, project: project, agent: agent, taskRepo: taskRepo, execRepo: execRepo, threadInputRepo: threadInputRepo, emailTaskContextRepo: emailTaskContextRepo, receipts: receipts}
 }
@@ -271,14 +271,14 @@ func TestEmailPollOncePreservesFilteringAndAcknowledgement(t *testing.T) {
 }
 
 func TestEmailPollOnceDoesNotDeduplicateDistinctIdenticalMessagesWithoutMessageID(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	client := newFakeEmailIMAPClient(
 		testIMAPMessageWithoutMessageID(1, 101, "same", "alice@example.com", "identical body"),
 		testIMAPMessageWithoutMessageID(2, 102, "same", "alice@example.com", "identical body"),
 	)
 	client.uidValidity = 77
 	processed := 0
-	svc := &EmailService{emailInboundReceiptStore: teststores.Of(db).EmailInboundReceipts}
+	svc := &EmailService{emailInboundReceiptStore: env.EmailInboundReceipts}
 	svc.processIncomingMessageFn = func(_ context.Context, _ EmailInboundMessage) bool {
 		processed++
 		return true
@@ -292,10 +292,10 @@ func TestEmailPollOnceDoesNotDeduplicateDistinctIdenticalMessagesWithoutMessageI
 }
 
 func TestEmailPollOnceBatchesReceiptRecoveryWithNewHandoff(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
 	cfg := EmailRuntimeConfig{Address: "bot@example.com", IMAPHost: "imap.example.com"}
-	receipts := teststores.Of(db).EmailInboundReceipts
+	receipts := env.EmailInboundReceipts
 	mailboxIdentity := emailMailboxIdentity(cfg)
 	require.NoError(t, receipts.Record(ctx, mailboxIdentity, "message-id:<message-1@example.com>"))
 	client := newFakeEmailIMAPClient(
@@ -388,10 +388,10 @@ func TestEmailPollOnceKeepsUIDIdentityAcrossExpunges(t *testing.T) {
 }
 
 func TestEmailPollOnceUsesMIMEMessageIDBeforeEnvelopeAndUID(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
 	cfg := EmailRuntimeConfig{Address: "bot@example.com", IMAPHost: "imap.example.com"}
-	receipts := teststores.Of(db).EmailInboundReceipts
+	receipts := env.EmailInboundReceipts
 	mailboxIdentity := emailMailboxIdentity(cfg)
 	require.NoError(t, receipts.Record(ctx, mailboxIdentity, "message-id:<message-1@example.com>"))
 	message := testIMAPMessageWithBody(1, "already handed off", "alice@example.com", "body")
@@ -417,10 +417,10 @@ func TestEmailPollOnceUsesMIMEMessageIDBeforeEnvelopeAndUID(t *testing.T) {
 }
 
 func TestEmailPollOnceUsesMIMEMessageIDAfterUIDMetadataFallback(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
 	cfg := EmailRuntimeConfig{Address: "bot@example.com", IMAPHost: "imap.example.com"}
-	receipts := &countingEmailInboundReceiptStore{inner: teststores.Of(db).EmailInboundReceipts}
+	receipts := &countingEmailInboundReceiptStore{inner: env.EmailInboundReceipts}
 	mailboxIdentity := emailMailboxIdentity(cfg)
 	require.NoError(t, receipts.Record(ctx, mailboxIdentity, "message-id:<message-1@example.com>"))
 	receipts.recordCalls = 0
@@ -491,10 +491,10 @@ func TestEmailPollOnceRecordsMIMEMessageIDAfterUIDMetadataFallback(t *testing.T)
 }
 
 func TestEmailPollOnceSkipsReceiptedLargeMIMEBodyBeforeParsing(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
 	cfg := EmailRuntimeConfig{Address: "bot@example.com", IMAPHost: "imap.example.com"}
-	receipts := &countingEmailInboundReceiptStore{inner: teststores.Of(db).EmailInboundReceipts}
+	receipts := &countingEmailInboundReceiptStore{inner: env.EmailInboundReceipts}
 	mailboxIdentity := emailMailboxIdentity(cfg)
 	require.NoError(t, receipts.Record(ctx, mailboxIdentity, "message-id:<message-1@example.com>"))
 	receipts.recordCalls = 0
@@ -523,10 +523,10 @@ func TestEmailPollOnceSkipsReceiptedLargeMIMEBodyBeforeParsing(t *testing.T) {
 }
 
 func TestEmailPollOncePreservesUnresolvedMIMEAttachmentAndOrdering(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
 	cfg := EmailRuntimeConfig{Address: "bot@example.com", IMAPHost: "imap.example.com"}
-	receipts := teststores.Of(db).EmailInboundReceipts
+	receipts := env.EmailInboundReceipts
 	mailboxIdentity := emailMailboxIdentity(cfg)
 	require.NoError(t, receipts.Record(ctx, mailboxIdentity, "message-id:<message-1@example.com>"))
 	client := newFakeEmailIMAPClient(
@@ -561,13 +561,13 @@ func TestEmailPollOncePreservesUnresolvedMIMEAttachmentAndOrdering(t *testing.T)
 	assert.Equal(t, [][]uint32{{1, 2, 3}}, client.storeBatches())
 }
 func TestEmailPollOnceDoesNotRepeatDurableHandoffAfterStoreFailure(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	client := newFakeEmailIMAPClient(
 		testIMAPMessage(1, "durable-one", "alice@example.com"),
 		testIMAPMessage(2, "durable-two", "alice@example.com"),
 	)
 	client.storeFailures = 1
-	receipts := teststores.Of(db).EmailInboundReceipts
+	receipts := env.EmailInboundReceipts
 	processed := 0
 	newService := func() *EmailService {
 		svc := &EmailService{emailInboundReceiptStore: receipts}
@@ -1758,9 +1758,9 @@ func TestChannelChatIngressReportsTaskAndQueuePersistenceFailures(t *testing.T) 
 }
 
 func TestEmailService_ProcessIncomingUsesFreshNormalizedAddress(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
-	settingsRepo := teststores.Of(db).Settings
+	settingsRepo := env.Settings
 	require.NoError(t, settingsRepo.Set(ctx, EmailSettingAddress, " Bot@Example.com "))
 	svc := &EmailService{settingsRepo: settingsRepo}
 
@@ -1778,10 +1778,10 @@ func TestEmailProcessIncomingAcknowledgesIntentionalIgnores(t *testing.T) {
 	svc := &EmailService{}
 	assert.True(t, svc.ProcessIncoming(context.Background(), EmailInboundMessage{FromAddress: "noreply@example.com", Body: "automated"}))
 
-	db := teststores.NewDB(t)
-	projectRepo := teststores.Of(db).Projects
+	env := teststores.New(t)
+	projectRepo := env.Projects
 	require.NoError(t, projectRepo.Create(context.Background(), &models.Project{Name: "Email"}))
-	svc = NewEmailService(nil, projectRepo, teststores.Of(db).LLMConfigs, teststores.Of(db).Tasks, teststores.Of(db).Executions, teststores.Of(db).Schedules, &TaskService{}, &LLMService{}, nil, teststores.Of(db).EmailAuth, teststores.Of(db).EmailTaskContexts)
+	svc = NewEmailService(nil, projectRepo, env.LLMConfigs, env.Tasks, env.Executions, env.Schedules, &TaskService{}, &LLMService{}, nil, env.EmailAuth, env.EmailTaskContexts)
 	assert.True(t, svc.ProcessIncoming(context.Background(), EmailInboundMessage{FromAddress: "unauthorized@example.com", Subject: "request", Body: "hello"}))
 }
 
@@ -1791,13 +1791,13 @@ func TestNormalizeEmailPasswordForProvider(t *testing.T) {
 }
 
 func TestEmailService_LoadConfigNormalizesSavedProviderAppPassword(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
-	settingsRepo := teststores.Of(db).Settings
+	settingsRepo := env.Settings
 	require.NoError(t, settingsRepo.Set(ctx, EmailSettingProvider, EmailProviderGmail))
 	require.NoError(t, settingsRepo.Set(ctx, EmailSettingAddress, "bot@example.com"))
 	require.NoError(t, settingsRepo.Set(ctx, EmailSettingPassword, "abcd efgh ijkl mnop"))
-	svc := NewEmailService(settingsRepo, teststores.Of(db).Projects, teststores.Of(db).LLMConfigs, teststores.Of(db).Tasks, teststores.Of(db).Executions, teststores.Of(db).Schedules, nil, nil, nil, teststores.Of(db).EmailAuth, teststores.Of(db).EmailTaskContexts)
+	svc := NewEmailService(settingsRepo, env.Projects, env.LLMConfigs, env.Tasks, env.Executions, env.Schedules, nil, nil, nil, env.EmailAuth, env.EmailTaskContexts)
 
 	cfg, err := svc.loadConfig(ctx)
 	require.NoError(t, err)
@@ -1813,15 +1813,15 @@ func TestEmailService_IgnoresUnauthorizedAutomatedAndSelfSentMessages(t *testing
 }
 
 func TestEmailService_AuthorizationRequiresConfiguredSender(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
-	settingsRepo := teststores.Of(db).Settings
-	projectRepo := teststores.Of(db).Projects
-	emailAuthRepo := teststores.Of(db).EmailAuth
-	emailSenderProjectRepo := teststores.Of(db).EmailSenderProjects
+	settingsRepo := env.Settings
+	projectRepo := env.Projects
+	emailAuthRepo := env.EmailAuth
+	emailSenderProjectRepo := env.EmailSenderProjects
 	project := &models.Project{Name: "Email Project"}
 	require.NoError(t, projectRepo.Create(ctx, project))
-	svc := NewEmailService(settingsRepo, projectRepo, teststores.Of(db).LLMConfigs, teststores.Of(db).Tasks, teststores.Of(db).Executions, teststores.Of(db).Schedules, nil, nil, nil, emailAuthRepo, teststores.Of(db).EmailTaskContexts)
+	svc := NewEmailService(settingsRepo, projectRepo, env.LLMConfigs, env.Tasks, env.Executions, env.Schedules, nil, nil, nil, emailAuthRepo, env.EmailTaskContexts)
 	svc.SetEmailSenderProjectRepo(emailSenderProjectRepo)
 
 	assert.Empty(t, svc.resolveAuthorizedProject(ctx, "alice@example.com"))
@@ -1922,20 +1922,20 @@ func TestEmailService_ReplyPathsBoundReferenceChains(t *testing.T) {
 
 	for _, path := range paths {
 		t.Run(path.name, func(t *testing.T) {
-			db := teststores.NewDB(t)
+			env := teststores.New(t)
 			ctx := context.Background()
-			settingsRepo := teststores.Of(db).Settings
+			settingsRepo := env.Settings
 			for key, value := range map[string]string{EmailSettingAddress: "bot@example.com", EmailSettingPassword: "secret", EmailSettingIMAPHost: "imap.example.com", EmailSettingSMTPHost: "smtp.example.com", EmailSettingSendResponses: "true"} {
 				require.NoError(t, settingsRepo.Set(ctx, key, value))
 			}
-			projectRepo := teststores.Of(db).Projects
+			projectRepo := env.Projects
 			projects, err := projectRepo.List(ctx)
 			require.NoError(t, err)
 			task := models.Task{ProjectID: projects[0].ID, Title: "Email task", Prompt: "request", Category: models.CategoryActive, Status: models.StatusCompleted, CreatedVia: models.TaskOriginEmail}
-			require.NoError(t, teststores.Of(db).Tasks.Create(ctx, &task))
-			contextRepo := teststores.Of(db).EmailTaskContexts
+			require.NoError(t, env.Tasks.Create(ctx, &task))
+			contextRepo := env.EmailTaskContexts
 			require.NoError(t, contextRepo.Upsert(ctx, &models.EmailTaskContext{TaskID: task.ID, EmailFrom: "alice@example.com", EmailMessageID: "<reply@example.com>", EmailReferences: testEmailReferenceChain(80), EmailSubject: "Question"}))
-			svc := NewEmailService(settingsRepo, projectRepo, teststores.Of(db).LLMConfigs, teststores.Of(db).Tasks, teststores.Of(db).Executions, teststores.Of(db).Schedules, nil, nil, nil, teststores.Of(db).EmailAuth, contextRepo)
+			svc := NewEmailService(settingsRepo, projectRepo, env.LLMConfigs, env.Tasks, env.Executions, env.Schedules, nil, nil, nil, env.EmailAuth, contextRepo)
 			var inReplyTo, references string
 			svc.sendMail = func(_ context.Context, _ EmailRuntimeConfig, _, _, _, _, gotInReplyTo, gotReferences string) error {
 				inReplyTo, references = gotInReplyTo, gotReferences
@@ -2025,19 +2025,19 @@ func startTestSMTPServer(t *testing.T) (string, int, <-chan []byte) {
 }
 
 func TestEmailService_UsesThreadScopedSessionForInReplyToOnlyActiveChatAndHistory(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
-	settingsRepo := teststores.Of(db).Settings
-	projectRepo := teststores.Of(db).Projects
-	llmConfigRepo := teststores.Of(db).LLMConfigs
-	taskRepo := teststores.Of(db).Tasks
-	execRepo := teststores.Of(db).Executions
-	emailAuthRepo := teststores.Of(db).EmailAuth
-	emailTaskContextRepo := teststores.Of(db).EmailTaskContexts
+	settingsRepo := env.Settings
+	projectRepo := env.Projects
+	llmConfigRepo := env.LLMConfigs
+	taskRepo := env.Tasks
+	execRepo := env.Executions
+	emailAuthRepo := env.EmailAuth
+	emailTaskContextRepo := env.EmailTaskContexts
 	project := &models.Project{Name: "Email In-Reply-To Project"}
 	require.NoError(t, projectRepo.Create(ctx, project))
 	require.NoError(t, emailAuthRepo.Create(ctx, &models.EmailAuthorizedSender{ProjectID: project.ID, EmailAddress: "alice@example.com", AddedBy: "test"}))
-	emailSenderProjectRepo := teststores.Of(db).EmailSenderProjects
+	emailSenderProjectRepo := env.EmailSenderProjects
 	require.NoError(t, emailSenderProjectRepo.SetSenderProject(ctx, "alice@example.com", project.ID))
 	agent := &models.LLMConfig{Name: "Email Agent", Provider: models.ProviderTest, Model: "test", IsDefault: true}
 	require.NoError(t, llmConfigRepo.Create(ctx, agent))
@@ -2052,14 +2052,14 @@ func TestEmailService_UsesThreadScopedSessionForInReplyToOnlyActiveChatAndHistor
 	otherExec := &models.Execution{TaskID: otherTask.ID, AgentConfigID: agent.ID, Status: models.ExecCompleted, PromptSent: "other prior"}
 	require.NoError(t, execRepo.Create(ctx, otherExec))
 
-	attachmentRepo := teststores.Of(db).Attachments
-	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, teststores.Of(db).Schedules, attachmentRepo)
+	attachmentRepo := env.Attachments
+	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, env.Schedules, attachmentRepo)
 	llmSvc.SetLLMCaller(testutil.NewMockLLMCaller())
 	workerSvc := NewWorkerService(llmSvc, 0, nil)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
-	svc := NewEmailService(settingsRepo, projectRepo, llmConfigRepo, taskRepo, execRepo, teststores.Of(db).Schedules, taskSvc, llmSvc, workerSvc, emailAuthRepo, emailTaskContextRepo)
+	svc := NewEmailService(settingsRepo, projectRepo, llmConfigRepo, taskRepo, execRepo, env.Schedules, taskSvc, llmSvc, workerSvc, emailAuthRepo, emailTaskContextRepo)
 	svc.SetEmailSenderProjectRepo(emailSenderProjectRepo)
-	threadInputRepo := teststores.Of(db).ThreadInputs
+	threadInputRepo := env.ThreadInputs
 	svc.SetThreadInputRepo(threadInputRepo)
 	var runReq ChannelChatRunRequest
 	svc.SetChannelChatRunner(func(_ context.Context, req ChannelChatRunRequest) { runReq = req })
@@ -2085,19 +2085,19 @@ func TestEmailService_UsesThreadScopedSessionForInReplyToOnlyActiveChatAndHistor
 }
 
 func TestEmailService_UsesOutboundResponseIDForActiveChatQueue(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
-	settingsRepo := teststores.Of(db).Settings
-	projectRepo := teststores.Of(db).Projects
-	llmConfigRepo := teststores.Of(db).LLMConfigs
-	taskRepo := teststores.Of(db).Tasks
-	execRepo := teststores.Of(db).Executions
-	emailAuthRepo := teststores.Of(db).EmailAuth
-	emailTaskContextRepo := teststores.Of(db).EmailTaskContexts
+	settingsRepo := env.Settings
+	projectRepo := env.Projects
+	llmConfigRepo := env.LLMConfigs
+	taskRepo := env.Tasks
+	execRepo := env.Executions
+	emailAuthRepo := env.EmailAuth
+	emailTaskContextRepo := env.EmailTaskContexts
 	project := &models.Project{Name: "Email Outbound Active Project"}
 	require.NoError(t, projectRepo.Create(ctx, project))
 	require.NoError(t, emailAuthRepo.Create(ctx, &models.EmailAuthorizedSender{ProjectID: project.ID, EmailAddress: "alice@example.com", AddedBy: "test"}))
-	emailSenderProjectRepo := teststores.Of(db).EmailSenderProjects
+	emailSenderProjectRepo := env.EmailSenderProjects
 	require.NoError(t, emailSenderProjectRepo.SetSenderProject(ctx, "alice@example.com", project.ID))
 	agent := &models.LLMConfig{Name: "Email Agent", Provider: models.ProviderTest, Model: "test", IsDefault: true}
 	require.NoError(t, llmConfigRepo.Create(ctx, agent))
@@ -2109,14 +2109,14 @@ func TestEmailService_UsesOutboundResponseIDForActiveChatQueue(t *testing.T) {
 	require.NoError(t, execRepo.Create(ctx, activeExec))
 	require.NoError(t, emailTaskContextRepo.RecordOutboundMessageRef(ctx, project.ID, "Alice@Example.com", "<bot-response@example.com>", sessionKey))
 
-	attachmentRepo := teststores.Of(db).Attachments
-	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, teststores.Of(db).Schedules, attachmentRepo)
+	attachmentRepo := env.Attachments
+	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, env.Schedules, attachmentRepo)
 	llmSvc.SetLLMCaller(testutil.NewMockLLMCaller())
 	workerSvc := NewWorkerService(llmSvc, 0, nil)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
-	svc := NewEmailService(settingsRepo, projectRepo, llmConfigRepo, taskRepo, execRepo, teststores.Of(db).Schedules, taskSvc, llmSvc, workerSvc, emailAuthRepo, emailTaskContextRepo)
+	svc := NewEmailService(settingsRepo, projectRepo, llmConfigRepo, taskRepo, execRepo, env.Schedules, taskSvc, llmSvc, workerSvc, emailAuthRepo, emailTaskContextRepo)
 	svc.SetEmailSenderProjectRepo(emailSenderProjectRepo)
-	threadInputRepo := teststores.Of(db).ThreadInputs
+	threadInputRepo := env.ThreadInputs
 	svc.SetThreadInputRepo(threadInputRepo)
 	var runReq ChannelChatRunRequest
 	svc.SetChannelChatRunner(func(_ context.Context, req ChannelChatRunRequest) { runReq = req })
@@ -2133,21 +2133,21 @@ func TestEmailService_UsesOutboundResponseIDForActiveChatQueue(t *testing.T) {
 }
 
 func TestEmailService_UsesOutboundResponseIDForCompletedHistory(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
-	settingsRepo := teststores.Of(db).Settings
-	projectRepo := teststores.Of(db).Projects
-	llmConfigRepo := teststores.Of(db).LLMConfigs
-	taskRepo := teststores.Of(db).Tasks
-	execRepo := teststores.Of(db).Executions
-	emailAuthRepo := teststores.Of(db).EmailAuth
-	emailTaskContextRepo := teststores.Of(db).EmailTaskContexts
+	settingsRepo := env.Settings
+	projectRepo := env.Projects
+	llmConfigRepo := env.LLMConfigs
+	taskRepo := env.Tasks
+	execRepo := env.Executions
+	emailAuthRepo := env.EmailAuth
+	emailTaskContextRepo := env.EmailTaskContexts
 	project := &models.Project{Name: "Email Outbound History Project"}
 	require.NoError(t, projectRepo.Create(ctx, project))
 	otherProject := &models.Project{Name: "Other Email Project"}
 	require.NoError(t, projectRepo.Create(ctx, otherProject))
 	require.NoError(t, emailAuthRepo.Create(ctx, &models.EmailAuthorizedSender{ProjectID: project.ID, EmailAddress: "alice@example.com", AddedBy: "test"}))
-	emailSenderProjectRepo := teststores.Of(db).EmailSenderProjects
+	emailSenderProjectRepo := env.EmailSenderProjects
 	require.NoError(t, emailSenderProjectRepo.SetSenderProject(ctx, "alice@example.com", project.ID))
 	agent := &models.LLMConfig{Name: "Email Agent", Provider: models.ProviderTest, Model: "test", IsDefault: true}
 	require.NoError(t, llmConfigRepo.Create(ctx, agent))
@@ -2160,14 +2160,14 @@ func TestEmailService_UsesOutboundResponseIDForCompletedHistory(t *testing.T) {
 	require.NoError(t, emailTaskContextRepo.RecordOutboundMessageRef(ctx, project.ID, "alice@example.com", "<bot-response@example.com>", sessionKey))
 	require.NoError(t, emailTaskContextRepo.RecordOutboundMessageRef(ctx, otherProject.ID, "alice@example.com", "<foreign-bot-response@example.com>", "email:alice@example.com:<foreign@example.com>"))
 
-	attachmentRepo := teststores.Of(db).Attachments
-	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, teststores.Of(db).Schedules, attachmentRepo)
+	attachmentRepo := env.Attachments
+	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, env.Schedules, attachmentRepo)
 	llmSvc.SetLLMCaller(testutil.NewMockLLMCaller())
 	workerSvc := NewWorkerService(llmSvc, 0, nil)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
-	svc := NewEmailService(settingsRepo, projectRepo, llmConfigRepo, taskRepo, execRepo, teststores.Of(db).Schedules, taskSvc, llmSvc, workerSvc, emailAuthRepo, emailTaskContextRepo)
+	svc := NewEmailService(settingsRepo, projectRepo, llmConfigRepo, taskRepo, execRepo, env.Schedules, taskSvc, llmSvc, workerSvc, emailAuthRepo, emailTaskContextRepo)
 	svc.SetEmailSenderProjectRepo(emailSenderProjectRepo)
-	svc.SetThreadInputRepo(teststores.Of(db).ThreadInputs)
+	svc.SetThreadInputRepo(env.ThreadInputs)
 	var runReq ChannelChatRunRequest
 	svc.SetChannelChatRunner(func(_ context.Context, req ChannelChatRunRequest) { runReq = req })
 
@@ -2187,19 +2187,19 @@ func TestEmailService_UsesOutboundResponseIDForCompletedHistory(t *testing.T) {
 }
 
 func TestEmailService_UsesThreadScopedSessionForActiveChatAndHistory(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
-	settingsRepo := teststores.Of(db).Settings
-	projectRepo := teststores.Of(db).Projects
-	llmConfigRepo := teststores.Of(db).LLMConfigs
-	taskRepo := teststores.Of(db).Tasks
-	execRepo := teststores.Of(db).Executions
-	emailAuthRepo := teststores.Of(db).EmailAuth
-	emailTaskContextRepo := teststores.Of(db).EmailTaskContexts
+	settingsRepo := env.Settings
+	projectRepo := env.Projects
+	llmConfigRepo := env.LLMConfigs
+	taskRepo := env.Tasks
+	execRepo := env.Executions
+	emailAuthRepo := env.EmailAuth
+	emailTaskContextRepo := env.EmailTaskContexts
 	project := &models.Project{Name: "Email Session Project"}
 	require.NoError(t, projectRepo.Create(ctx, project))
 	require.NoError(t, emailAuthRepo.Create(ctx, &models.EmailAuthorizedSender{ProjectID: project.ID, EmailAddress: "alice@example.com", AddedBy: "test"}))
-	emailSenderProjectRepo := teststores.Of(db).EmailSenderProjects
+	emailSenderProjectRepo := env.EmailSenderProjects
 	require.NoError(t, emailSenderProjectRepo.SetSenderProject(ctx, "alice@example.com", project.ID))
 	agent := &models.LLMConfig{Name: "Email Agent", Provider: models.ProviderTest, Model: "test", IsDefault: true}
 	require.NoError(t, llmConfigRepo.Create(ctx, agent))
@@ -2214,14 +2214,14 @@ func TestEmailService_UsesThreadScopedSessionForActiveChatAndHistory(t *testing.
 	completedExec := &models.Execution{TaskID: completedTask.ID, AgentConfigID: agent.ID, Status: models.ExecCompleted, PromptSent: "other prior"}
 	require.NoError(t, execRepo.Create(ctx, completedExec))
 
-	attachmentRepo := teststores.Of(db).Attachments
-	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, teststores.Of(db).Schedules, attachmentRepo)
+	attachmentRepo := env.Attachments
+	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, env.Schedules, attachmentRepo)
 	llmSvc.SetLLMCaller(testutil.NewMockLLMCaller())
 	workerSvc := NewWorkerService(llmSvc, 0, nil)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
-	svc := NewEmailService(settingsRepo, projectRepo, llmConfigRepo, taskRepo, execRepo, teststores.Of(db).Schedules, taskSvc, llmSvc, workerSvc, emailAuthRepo, emailTaskContextRepo)
+	svc := NewEmailService(settingsRepo, projectRepo, llmConfigRepo, taskRepo, execRepo, env.Schedules, taskSvc, llmSvc, workerSvc, emailAuthRepo, emailTaskContextRepo)
 	svc.SetEmailSenderProjectRepo(emailSenderProjectRepo)
-	svc.SetThreadInputRepo(teststores.Of(db).ThreadInputs)
+	svc.SetThreadInputRepo(env.ThreadInputs)
 	var runReq ChannelChatRunRequest
 	svc.SetChannelChatRunner(func(_ context.Context, req ChannelChatRunRequest) { runReq = req })
 	svc.ProcessIncoming(ctx, EmailInboundMessage{FromAddress: "alice@example.com", Subject: "Other", Body: "continue other", MessageID: "<other-2@example.com>", References: "<other@example.com>"})
@@ -2230,21 +2230,21 @@ func TestEmailService_UsesThreadScopedSessionForActiveChatAndHistory(t *testing.
 	require.Equal(t, "email:alice@example.com:<other@example.com>", runReq.ReplyContext.EmailSessionKey)
 	require.Len(t, runReq.ChatHistory, 1)
 	require.Equal(t, completedExec.ID, runReq.ChatHistory[0].ID)
-	pending, err := teststores.Of(db).ThreadInputs.ListPendingForChat(ctx, project.ID)
+	pending, err := env.ThreadInputs.ListPendingForChat(ctx, project.ID)
 	require.NoError(t, err)
 	require.Empty(t, pending)
 }
 
 func TestEmailService_SendResponsesDisabledSkipsReplies(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
-	settingsRepo := teststores.Of(db).Settings
+	settingsRepo := env.Settings
 	require.NoError(t, settingsRepo.Set(ctx, EmailSettingAddress, "bot@example.com"))
 	require.NoError(t, settingsRepo.Set(ctx, EmailSettingPassword, "secret"))
 	require.NoError(t, settingsRepo.Set(ctx, EmailSettingIMAPHost, "imap.example.com"))
 	require.NoError(t, settingsRepo.Set(ctx, EmailSettingSMTPHost, "smtp.example.com"))
 	require.NoError(t, settingsRepo.Set(ctx, EmailSettingSendResponses, "false"))
-	svc := NewEmailService(settingsRepo, teststores.Of(db).Projects, teststores.Of(db).LLMConfigs, teststores.Of(db).Tasks, teststores.Of(db).Executions, teststores.Of(db).Schedules, nil, nil, nil, teststores.Of(db).EmailAuth, teststores.Of(db).EmailTaskContexts)
+	svc := NewEmailService(settingsRepo, env.Projects, env.LLMConfigs, env.Tasks, env.Executions, env.Schedules, nil, nil, nil, env.EmailAuth, env.EmailTaskContexts)
 	called := false
 	svc.sendMail = func(context.Context, EmailRuntimeConfig, string, string, string, string, string, string) error {
 		called = true
@@ -2255,13 +2255,13 @@ func TestEmailService_SendResponsesDisabledSkipsReplies(t *testing.T) {
 }
 
 func TestEmailService_SendTaskCompletionPreservesThreading(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
-	settingsRepo := teststores.Of(db).Settings
+	settingsRepo := env.Settings
 	for k, v := range map[string]string{EmailSettingAddress: "bot@example.com", EmailSettingPassword: "secret", EmailSettingIMAPHost: "imap.example.com", EmailSettingSMTPHost: "smtp.example.com", EmailSettingSendResponses: "true"} {
 		require.NoError(t, settingsRepo.Set(ctx, k, v))
 	}
-	svc := NewEmailService(settingsRepo, teststores.Of(db).Projects, teststores.Of(db).LLMConfigs, teststores.Of(db).Tasks, teststores.Of(db).Executions, teststores.Of(db).Schedules, nil, nil, nil, teststores.Of(db).EmailAuth, teststores.Of(db).EmailTaskContexts)
+	svc := NewEmailService(settingsRepo, env.Projects, env.LLMConfigs, env.Tasks, env.Executions, env.Schedules, nil, nil, nil, env.EmailAuth, env.EmailTaskContexts)
 	var gotTo, gotSubject, gotInReplyTo, gotRefs string
 	svc.sendMail = func(_ context.Context, _ EmailRuntimeConfig, to, subject, body, messageID, inReplyTo, references string) error {
 		gotTo, gotSubject, gotInReplyTo, gotRefs = to, subject, inReplyTo, references
@@ -2276,22 +2276,22 @@ func TestEmailService_SendTaskCompletionPreservesThreading(t *testing.T) {
 }
 
 func TestEmailService_SendChatResponseRecordsOutboundMessageRef(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
-	settingsRepo := teststores.Of(db).Settings
+	settingsRepo := env.Settings
 	for k, v := range map[string]string{EmailSettingAddress: "bot@example.com", EmailSettingPassword: "secret", EmailSettingIMAPHost: "imap.example.com", EmailSettingSMTPHost: "smtp.example.com", EmailSettingSendResponses: "true"} {
 		require.NoError(t, settingsRepo.Set(ctx, k, v))
 	}
-	projectRepo := teststores.Of(db).Projects
+	projectRepo := env.Projects
 	project := &models.Project{Name: "Email Outbound Alias Project"}
 	require.NoError(t, projectRepo.Create(ctx, project))
-	taskRepo := teststores.Of(db).Tasks
+	taskRepo := env.Tasks
 	task := models.Task{ProjectID: project.ID, Title: "Email chat", Prompt: "request", Category: models.CategoryChat, Status: models.StatusCompleted, CreatedVia: models.TaskOriginEmail}
 	require.NoError(t, taskRepo.Create(ctx, &task))
-	contextRepo := teststores.Of(db).EmailTaskContexts
+	contextRepo := env.EmailTaskContexts
 	sessionKey := "email:alice@example.com:<root@example.com>"
 	require.NoError(t, contextRepo.Upsert(ctx, &models.EmailTaskContext{TaskID: task.ID, EmailFrom: "alice@example.com", EmailMessageID: "<root@example.com>", EmailSubject: "Root", EmailSessionKey: sessionKey}))
-	svc := NewEmailService(settingsRepo, projectRepo, teststores.Of(db).LLMConfigs, taskRepo, teststores.Of(db).Executions, teststores.Of(db).Schedules, nil, nil, nil, teststores.Of(db).EmailAuth, contextRepo)
+	svc := NewEmailService(settingsRepo, projectRepo, env.LLMConfigs, taskRepo, env.Executions, env.Schedules, nil, nil, nil, env.EmailAuth, contextRepo)
 	var outboundMessageID string
 	svc.sendMail = func(_ context.Context, _ EmailRuntimeConfig, _, _, _, messageID, _, _ string) error {
 		outboundMessageID = messageID
@@ -2307,13 +2307,13 @@ func TestEmailService_SendChatResponseRecordsOutboundMessageRef(t *testing.T) {
 }
 
 func TestEmailService_SendOutboundMessage_NewEmailUsesSMTPWithoutReplyHeaders(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
-	settingsRepo := teststores.Of(db).Settings
+	settingsRepo := env.Settings
 	for k, v := range map[string]string{EmailSettingAddress: "bot@example.com", EmailSettingPassword: "secret", EmailSettingIMAPHost: "imap.example.com", EmailSettingSMTPHost: "smtp.example.com"} {
 		require.NoError(t, settingsRepo.Set(ctx, k, v))
 	}
-	svc := NewEmailService(settingsRepo, teststores.Of(db).Projects, teststores.Of(db).LLMConfigs, teststores.Of(db).Tasks, teststores.Of(db).Executions, teststores.Of(db).Schedules, nil, nil, nil, teststores.Of(db).EmailAuth, teststores.Of(db).EmailTaskContexts)
+	svc := NewEmailService(settingsRepo, env.Projects, env.LLMConfigs, env.Tasks, env.Executions, env.Schedules, nil, nil, nil, env.EmailAuth, env.EmailTaskContexts)
 	var gotTo, gotSubject, gotBody, gotInReplyTo, gotRefs string
 	svc.sendMail = func(_ context.Context, _ EmailRuntimeConfig, to, subject, body, messageID, inReplyTo, references string) error {
 		gotTo, gotSubject, gotBody, gotInReplyTo, gotRefs = to, subject, body, inReplyTo, references
@@ -2398,9 +2398,9 @@ func TestEmailService_OutboundPathsLoadOneCurrentSettingsSnapshot(t *testing.T) 
 }
 
 func TestEmailService_SettingsSnapshotsArePartialFreshAndPerOperation(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
-	settingsRepo := teststores.Of(db).Settings
+	settingsRepo := env.Settings
 	for key, value := range map[string]string{
 		EmailSettingProvider: EmailProviderGmail,
 		EmailSettingAddress:  " Bot@Example.com ",
@@ -2408,7 +2408,7 @@ func TestEmailService_SettingsSnapshotsArePartialFreshAndPerOperation(t *testing
 	} {
 		require.NoError(t, settingsRepo.Set(ctx, key, value))
 	}
-	svc := NewEmailService(settingsRepo, teststores.Of(db).Projects, teststores.Of(db).LLMConfigs, teststores.Of(db).Tasks, teststores.Of(db).Executions, teststores.Of(db).Schedules, nil, nil, nil, teststores.Of(db).EmailAuth, teststores.Of(db).EmailTaskContexts)
+	svc := NewEmailService(settingsRepo, env.Projects, env.LLMConfigs, env.Tasks, env.Executions, env.Schedules, nil, nil, nil, env.EmailAuth, env.EmailTaskContexts)
 	var configs []EmailRuntimeConfig
 	svc.sendMail = func(_ context.Context, cfg EmailRuntimeConfig, _, _, _, _, _, _ string) error {
 		configs = append(configs, cfg)
@@ -2451,8 +2451,8 @@ func TestEmailService_SettingsSnapshotsArePartialFreshAndPerOperation(t *testing
 }
 
 func TestEmailService_SettingsSnapshotHonorsCancellation(t *testing.T) {
-	db := teststores.NewDB(t)
-	svc := NewEmailService(teststores.Of(db).Settings, teststores.Of(db).Projects, teststores.Of(db).LLMConfigs, teststores.Of(db).Tasks, teststores.Of(db).Executions, teststores.Of(db).Schedules, nil, nil, nil, teststores.Of(db).EmailAuth, teststores.Of(db).EmailTaskContexts)
+	env := teststores.New(t)
+	svc := NewEmailService(env.Settings, env.Projects, env.LLMConfigs, env.Tasks, env.Executions, env.Schedules, nil, nil, nil, env.EmailAuth, env.EmailTaskContexts)
 	called := false
 	svc.sendMail = func(context.Context, EmailRuntimeConfig, string, string, string, string, string, string) error {
 		called = true
@@ -2466,8 +2466,8 @@ func TestEmailService_SettingsSnapshotHonorsCancellation(t *testing.T) {
 }
 
 func TestEmailService_SendOutboundMessage_ValidationAndMissingConfig(t *testing.T) {
-	db := teststores.NewDB(t)
-	svc := NewEmailService(teststores.Of(db).Settings, teststores.Of(db).Projects, teststores.Of(db).LLMConfigs, teststores.Of(db).Tasks, teststores.Of(db).Executions, teststores.Of(db).Schedules, nil, nil, nil, teststores.Of(db).EmailAuth, teststores.Of(db).EmailTaskContexts)
+	env := teststores.New(t)
+	svc := NewEmailService(env.Settings, env.Projects, env.LLMConfigs, env.Tasks, env.Executions, env.Schedules, nil, nil, nil, env.EmailAuth, env.EmailTaskContexts)
 	invalid := svc.SendOutboundMessage(context.Background(), "not-an-email", "Subject", "body")
 	require.False(t, invalid.OK)
 	require.Contains(t, invalid.Error, "invalid email recipient")
@@ -2904,7 +2904,7 @@ func TestEmailServiceReloadFencesBlockedPreviousAccount(t *testing.T) {
 }
 
 func TestEmailServiceRemovalFencesBlockedPoll(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	cfg := EmailRuntimeConfig{
 		Provider:     EmailProviderCustom,
 		Address:      "old@example.com",
@@ -2914,7 +2914,7 @@ func TestEmailServiceRemovalFencesBlockedPoll(t *testing.T) {
 		PollInterval: time.Hour,
 	}
 	client := newBlockingEmailIMAPClient(testIMAPMessageWithBody(1, "removed account", "alice@example.com", "old body"))
-	receipts := &countingEmailInboundReceiptStore{inner: teststores.Of(db).EmailInboundReceipts}
+	receipts := &countingEmailInboundReceiptStore{inner: env.EmailInboundReceipts}
 	var processed atomic.Int32
 	svc := &EmailService{emailInboundReceiptStore: receipts}
 	svc.configLoader = func(context.Context) (EmailRuntimeConfig, error) { return cfg, nil }
@@ -3128,13 +3128,13 @@ func TestEmailServiceStartWaitsForConcurrentStopFence(t *testing.T) {
 }
 
 func TestEmailService_CompleteExecutionUsesSharedChatPromotion(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
-	taskRepo := teststores.Of(db).Tasks
-	execRepo := teststores.Of(db).Executions
+	taskRepo := env.Tasks
+	execRepo := env.Executions
 	project := &models.Project{Name: "Email Promotion Project"}
-	require.NoError(t, teststores.Of(db).Projects.Create(ctx, project))
-	llmConfigRepo := teststores.Of(db).LLMConfigs
+	require.NoError(t, env.Projects.Create(ctx, project))
+	llmConfigRepo := env.LLMConfigs
 	agent := &models.LLMConfig{Name: "Email Promotion Agent", Provider: models.ProviderTest, Model: "test", IsDefault: true}
 	require.NoError(t, llmConfigRepo.Create(ctx, agent))
 	agentID := agent.ID
@@ -3164,16 +3164,16 @@ func TestEmailService_CompleteExecutionUsesSharedChatPromotion(t *testing.T) {
 // switch_project executor (with persistence) is wired into the ChannelChatRunRequest
 // handed to the handler runner.
 func TestEmailServiceProcessIncomingPassesChannelRuntimeTools(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
-	settingsRepo := teststores.Of(db).Settings
-	projectRepo := teststores.Of(db).Projects
-	llmConfigRepo := teststores.Of(db).LLMConfigs
-	taskRepo := teststores.Of(db).Tasks
-	execRepo := teststores.Of(db).Executions
-	emailAuthRepo := teststores.Of(db).EmailAuth
-	emailTaskContextRepo := teststores.Of(db).EmailTaskContexts
-	emailSenderProjectRepo := teststores.Of(db).EmailSenderProjects
+	settingsRepo := env.Settings
+	projectRepo := env.Projects
+	llmConfigRepo := env.LLMConfigs
+	taskRepo := env.Tasks
+	execRepo := env.Executions
+	emailAuthRepo := env.EmailAuth
+	emailTaskContextRepo := env.EmailTaskContexts
+	emailSenderProjectRepo := env.EmailSenderProjects
 
 	project := &models.Project{Name: "Email RT Project"}
 	require.NoError(t, projectRepo.Create(ctx, project))
@@ -3182,12 +3182,12 @@ func TestEmailServiceProcessIncomingPassesChannelRuntimeTools(t *testing.T) {
 	agent := &models.LLMConfig{Name: "Email Agent", Provider: models.ProviderTest, Model: "test", IsDefault: true}
 	require.NoError(t, llmConfigRepo.Create(ctx, agent))
 
-	attachmentRepo := teststores.Of(db).Attachments
-	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, teststores.Of(db).Schedules, attachmentRepo)
+	attachmentRepo := env.Attachments
+	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, env.Schedules, attachmentRepo)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, nil)
-	svc := NewEmailService(settingsRepo, projectRepo, llmConfigRepo, taskRepo, execRepo, teststores.Of(db).Schedules, taskSvc, llmSvc, nil, emailAuthRepo, emailTaskContextRepo)
+	svc := NewEmailService(settingsRepo, projectRepo, llmConfigRepo, taskRepo, execRepo, env.Schedules, taskSvc, llmSvc, nil, emailAuthRepo, emailTaskContextRepo)
 	svc.SetEmailSenderProjectRepo(emailSenderProjectRepo)
-	svc.SetThreadInputRepo(teststores.Of(db).ThreadInputs)
+	svc.SetThreadInputRepo(env.ThreadInputs)
 
 	var got ChannelChatRunRequest
 	svc.SetChannelChatRunner(func(_ context.Context, req ChannelChatRunRequest) { got = req })
@@ -3208,16 +3208,16 @@ func TestEmailServiceProcessIncomingPassesChannelRuntimeTools(t *testing.T) {
 // switch_project through the channel RuntimeTools executor (built by buildEmailActionToolRuntime)
 // actually persists the sender's active project in the email_sender_projects table.
 func TestEmailServiceSwitchProjectViaRuntimeToolsPersists(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
-	settingsRepo := teststores.Of(db).Settings
-	projectRepo := teststores.Of(db).Projects
-	llmConfigRepo := teststores.Of(db).LLMConfigs
-	taskRepo := teststores.Of(db).Tasks
-	execRepo := teststores.Of(db).Executions
-	emailAuthRepo := teststores.Of(db).EmailAuth
-	emailTaskContextRepo := teststores.Of(db).EmailTaskContexts
-	emailSenderProjectRepo := teststores.Of(db).EmailSenderProjects
+	settingsRepo := env.Settings
+	projectRepo := env.Projects
+	llmConfigRepo := env.LLMConfigs
+	taskRepo := env.Tasks
+	execRepo := env.Executions
+	emailAuthRepo := env.EmailAuth
+	emailTaskContextRepo := env.EmailTaskContexts
+	emailSenderProjectRepo := env.EmailSenderProjects
 
 	project1 := &models.Project{Name: "Default Email Project"}
 	project2 := &models.Project{Name: "Target Email Project"}
@@ -3228,12 +3228,12 @@ func TestEmailServiceSwitchProjectViaRuntimeToolsPersists(t *testing.T) {
 	agent := &models.LLMConfig{Name: "Email Agent", Provider: models.ProviderTest, Model: "test", IsDefault: true}
 	require.NoError(t, llmConfigRepo.Create(ctx, agent))
 
-	attachmentRepo := teststores.Of(db).Attachments
-	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, teststores.Of(db).Schedules, attachmentRepo)
+	attachmentRepo := env.Attachments
+	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, env.Schedules, attachmentRepo)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, nil)
-	svc := NewEmailService(settingsRepo, projectRepo, llmConfigRepo, taskRepo, execRepo, teststores.Of(db).Schedules, taskSvc, llmSvc, nil, emailAuthRepo, emailTaskContextRepo)
+	svc := NewEmailService(settingsRepo, projectRepo, llmConfigRepo, taskRepo, execRepo, env.Schedules, taskSvc, llmSvc, nil, emailAuthRepo, emailTaskContextRepo)
 	svc.SetEmailSenderProjectRepo(emailSenderProjectRepo)
-	svc.SetThreadInputRepo(teststores.Of(db).ThreadInputs)
+	svc.SetThreadInputRepo(env.ThreadInputs)
 
 	var got ChannelChatRunRequest
 	svc.SetChannelChatRunner(func(_ context.Context, req ChannelChatRunRequest) { got = req })
@@ -3261,16 +3261,16 @@ func TestEmailServiceSwitchProjectViaRuntimeToolsPersists(t *testing.T) {
 }
 
 func TestEmailServiceSwitchProjectViaRuntimeToolsNormalizesDisplayNameSender(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
-	settingsRepo := teststores.Of(db).Settings
-	projectRepo := teststores.Of(db).Projects
-	llmConfigRepo := teststores.Of(db).LLMConfigs
-	taskRepo := teststores.Of(db).Tasks
-	execRepo := teststores.Of(db).Executions
-	emailAuthRepo := teststores.Of(db).EmailAuth
-	emailTaskContextRepo := teststores.Of(db).EmailTaskContexts
-	emailSenderProjectRepo := teststores.Of(db).EmailSenderProjects
+	settingsRepo := env.Settings
+	projectRepo := env.Projects
+	llmConfigRepo := env.LLMConfigs
+	taskRepo := env.Tasks
+	execRepo := env.Executions
+	emailAuthRepo := env.EmailAuth
+	emailTaskContextRepo := env.EmailTaskContexts
+	emailSenderProjectRepo := env.EmailSenderProjects
 
 	project1 := &models.Project{Name: "Default Display Email Project"}
 	project2 := &models.Project{Name: "Target Display Email Project"}
@@ -3281,12 +3281,12 @@ func TestEmailServiceSwitchProjectViaRuntimeToolsNormalizesDisplayNameSender(t *
 	agent := &models.LLMConfig{Name: "Email Agent", Provider: models.ProviderTest, Model: "test", IsDefault: true}
 	require.NoError(t, llmConfigRepo.Create(ctx, agent))
 
-	attachmentRepo := teststores.Of(db).Attachments
-	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, teststores.Of(db).Schedules, attachmentRepo)
+	attachmentRepo := env.Attachments
+	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, env.Schedules, attachmentRepo)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, nil)
-	svc := NewEmailService(settingsRepo, projectRepo, llmConfigRepo, taskRepo, execRepo, teststores.Of(db).Schedules, taskSvc, llmSvc, nil, emailAuthRepo, emailTaskContextRepo)
+	svc := NewEmailService(settingsRepo, projectRepo, llmConfigRepo, taskRepo, execRepo, env.Schedules, taskSvc, llmSvc, nil, emailAuthRepo, emailTaskContextRepo)
 	svc.SetEmailSenderProjectRepo(emailSenderProjectRepo)
-	svc.SetThreadInputRepo(teststores.Of(db).ThreadInputs)
+	svc.SetThreadInputRepo(env.ThreadInputs)
 
 	var got ChannelChatRunRequest
 	svc.SetChannelChatRunner(func(_ context.Context, req ChannelChatRunRequest) { got = req })
@@ -3315,16 +3315,16 @@ func TestEmailServiceSwitchProjectViaRuntimeToolsNormalizesDisplayNameSender(t *
 }
 
 func TestEmailServiceSwitchProjectViaRuntimeToolsAllowsSystemAuthorizedSenderAcrossProjects(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
-	settingsRepo := teststores.Of(db).Settings
-	projectRepo := teststores.Of(db).Projects
-	llmConfigRepo := teststores.Of(db).LLMConfigs
-	taskRepo := teststores.Of(db).Tasks
-	execRepo := teststores.Of(db).Executions
-	emailAuthRepo := teststores.Of(db).EmailAuth
-	emailTaskContextRepo := teststores.Of(db).EmailTaskContexts
-	emailSenderProjectRepo := teststores.Of(db).EmailSenderProjects
+	settingsRepo := env.Settings
+	projectRepo := env.Projects
+	llmConfigRepo := env.LLMConfigs
+	taskRepo := env.Tasks
+	execRepo := env.Executions
+	emailAuthRepo := env.EmailAuth
+	emailTaskContextRepo := env.EmailTaskContexts
+	emailSenderProjectRepo := env.EmailSenderProjects
 
 	project1 := &models.Project{Name: "openvibely"}
 	project2 := &models.Project{Name: "Default Project"}
@@ -3335,12 +3335,12 @@ func TestEmailServiceSwitchProjectViaRuntimeToolsAllowsSystemAuthorizedSenderAcr
 	agent := &models.LLMConfig{Name: "Email Agent", Provider: models.ProviderTest, Model: "test", IsDefault: true}
 	require.NoError(t, llmConfigRepo.Create(ctx, agent))
 
-	attachmentRepo := teststores.Of(db).Attachments
-	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, teststores.Of(db).Schedules, attachmentRepo)
+	attachmentRepo := env.Attachments
+	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, env.Schedules, attachmentRepo)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, nil)
-	svc := NewEmailService(settingsRepo, projectRepo, llmConfigRepo, taskRepo, execRepo, teststores.Of(db).Schedules, taskSvc, llmSvc, nil, emailAuthRepo, emailTaskContextRepo)
+	svc := NewEmailService(settingsRepo, projectRepo, llmConfigRepo, taskRepo, execRepo, env.Schedules, taskSvc, llmSvc, nil, emailAuthRepo, emailTaskContextRepo)
 	svc.SetEmailSenderProjectRepo(emailSenderProjectRepo)
-	svc.SetThreadInputRepo(teststores.Of(db).ThreadInputs)
+	svc.SetThreadInputRepo(env.ThreadInputs)
 
 	var got ChannelChatRunRequest
 	svc.SetChannelChatRunner(func(_ context.Context, req ChannelChatRunRequest) { got = req })
@@ -3369,12 +3369,12 @@ func TestEmailServiceSwitchProjectViaRuntimeToolsAllowsSystemAuthorizedSenderAcr
 // resolveAuthorizedProject returns the sender's saved active project (from
 // email_sender_projects) instead of the first authorized project in the list.
 func TestEmailServiceResolveAuthorizedProjectUsesSavedSelection(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
-	settingsRepo := teststores.Of(db).Settings
-	projectRepo := teststores.Of(db).Projects
-	emailAuthRepo := teststores.Of(db).EmailAuth
-	emailSenderProjectRepo := teststores.Of(db).EmailSenderProjects
+	settingsRepo := env.Settings
+	projectRepo := env.Projects
+	emailAuthRepo := env.EmailAuth
+	emailSenderProjectRepo := env.EmailSenderProjects
 
 	project1 := &models.Project{Name: "First Project"}
 	project2 := &models.Project{Name: "Second Project"}
@@ -3535,34 +3535,34 @@ func TestEmailService_InboundInlineTextAttachmentHonorsSkipSetting(t *testing.T)
 
 func newEmailAttachmentTestService(t *testing.T) (*EmailService, persistence.ChatAttachmentStore, persistence.ThreadInputStore, *models.Project, *models.LLMConfig, *models.LLMConfig) {
 	t.Helper()
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
-	settingsRepo := teststores.Of(db).Settings
-	projectRepo := teststores.Of(db).Projects
-	llmConfigRepo := teststores.Of(db).LLMConfigs
-	taskRepo := teststores.Of(db).Tasks
-	execRepo := teststores.Of(db).Executions
-	emailAuthRepo := teststores.Of(db).EmailAuth
-	emailTaskContextRepo := teststores.Of(db).EmailTaskContexts
+	settingsRepo := env.Settings
+	projectRepo := env.Projects
+	llmConfigRepo := env.LLMConfigs
+	taskRepo := env.Tasks
+	execRepo := env.Executions
+	emailAuthRepo := env.EmailAuth
+	emailTaskContextRepo := env.EmailTaskContexts
 	project := &models.Project{Name: "Email Attachment Project", IsDefault: true}
 	require.NoError(t, projectRepo.Create(ctx, project))
 	require.NoError(t, emailAuthRepo.Create(ctx, &models.EmailAuthorizedSender{ProjectID: project.ID, EmailAddress: "alice@example.com", AddedBy: "test"}))
-	emailSenderProjectRepo := teststores.Of(db).EmailSenderProjects
+	emailSenderProjectRepo := env.EmailSenderProjects
 	require.NoError(t, emailSenderProjectRepo.SetSenderProject(ctx, "alice@example.com", project.ID))
 	defaultAgent := &models.LLMConfig{Name: "text-only", Provider: models.ProviderOpenAICompatible, AuthMethod: models.AuthMethodAPIKey, Model: "text-only", IsDefault: true}
 	require.NoError(t, llmConfigRepo.Create(ctx, defaultAgent))
 	visionAgent := &models.LLMConfig{Name: "vision", Provider: models.ProviderAnthropic, AuthMethod: models.AuthMethodAPIKey, Model: "claude-sonnet-5", APIKey: "key"}
 	require.NoError(t, llmConfigRepo.Create(ctx, visionAgent))
-	attachmentRepo := teststores.Of(db).Attachments
-	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, teststores.Of(db).Schedules, attachmentRepo)
+	attachmentRepo := env.Attachments
+	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, env.Schedules, attachmentRepo)
 	llmSvc.SetLLMCaller(testutil.NewMockLLMCaller())
 	workerSvc := NewWorkerService(llmSvc, 0, nil)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
-	svc := NewEmailService(settingsRepo, projectRepo, llmConfigRepo, taskRepo, execRepo, teststores.Of(db).Schedules, taskSvc, llmSvc, workerSvc, emailAuthRepo, emailTaskContextRepo)
+	svc := NewEmailService(settingsRepo, projectRepo, llmConfigRepo, taskRepo, execRepo, env.Schedules, taskSvc, llmSvc, workerSvc, emailAuthRepo, emailTaskContextRepo)
 	svc.SetEmailSenderProjectRepo(emailSenderProjectRepo)
-	threadInputRepo := teststores.Of(db).ThreadInputs
+	threadInputRepo := env.ThreadInputs
 	svc.SetThreadInputRepo(threadInputRepo)
-	chatAttachmentRepo := teststores.Of(db).ChatAttachments
+	chatAttachmentRepo := env.ChatAttachments
 	svc.SetChatAttachmentRepo(chatAttachmentRepo)
 	svc.SetUploadsDir(t.TempDir())
 	return svc, chatAttachmentRepo, threadInputRepo, project, defaultAgent, visionAgent

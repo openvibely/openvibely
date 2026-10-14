@@ -16,16 +16,16 @@ import (
 )
 
 func TestInsightsService_ResolveDirectAnalysisContext(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
-	projectRepo := teststores.Of(db).Projects
-	llmConfigRepo := teststores.Of(db).LLMConfigs
+	projectRepo := env.Projects
+	llmConfigRepo := env.LLMConfigs
 	svc := NewInsightsService(
-		teststores.Of(db).Insights,
-		teststores.Of(db).Tasks,
+		env.Insights,
+		env.Tasks,
 		projectRepo,
 		llmConfigRepo,
-		teststores.Of(db).Executions,
+		env.Executions,
 	)
 
 	project := &models.Project{Name: "Direct analysis context", RepoPath: t.TempDir()}
@@ -65,14 +65,14 @@ func TestInsightsService_ResolveDirectAnalysisContext(t *testing.T) {
 
 func TestInsightsService_DirectAnalysisReportsPreserveSetupErrors(t *testing.T) {
 	t.Run("missing project", func(t *testing.T) {
-		db := teststores.NewDB(t)
+		env := teststores.New(t)
 		ctx := context.Background()
-		projectRepo := teststores.Of(db).Projects
-		taskRepo := teststores.Of(db).Tasks
-		insightsRepo := teststores.Of(db).Insights
-		llmConfigRepo := teststores.Of(db).LLMConfigs
-		execRepo := teststores.Of(db).Executions
-		llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, teststores.Of(db).Schedules, teststores.Of(db).Attachments)
+		projectRepo := env.Projects
+		taskRepo := env.Tasks
+		insightsRepo := env.Insights
+		llmConfigRepo := env.LLMConfigs
+		execRepo := env.Executions
+		llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, env.Schedules, env.Attachments)
 		mock := testutil.NewMockLLMCaller()
 		llmSvc.SetLLMCaller(mock)
 		svc := NewInsightsService(insightsRepo, taskRepo, projectRepo, llmConfigRepo, execRepo)
@@ -98,14 +98,14 @@ func TestInsightsService_DirectAnalysisReportsPreserveSetupErrors(t *testing.T) 
 	})
 
 	t.Run("missing default agent", func(t *testing.T) {
-		db := teststores.NewDB(t)
+		env := teststores.New(t)
 		ctx := context.Background()
-		projectRepo := teststores.Of(db).Projects
-		taskRepo := teststores.Of(db).Tasks
-		insightsRepo := teststores.Of(db).Insights
-		llmConfigRepo := teststores.Of(db).LLMConfigs
-		execRepo := teststores.Of(db).Executions
-		llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, teststores.Of(db).Schedules, teststores.Of(db).Attachments)
+		projectRepo := env.Projects
+		taskRepo := env.Tasks
+		insightsRepo := env.Insights
+		llmConfigRepo := env.LLMConfigs
+		execRepo := env.Executions
+		llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, env.Schedules, env.Attachments)
 		mock := testutil.NewMockLLMCaller()
 		llmSvc.SetLLMCaller(mock)
 		svc := NewInsightsService(insightsRepo, taskRepo, projectRepo, llmConfigRepo, execRepo)
@@ -145,14 +145,14 @@ func TestInsightsService_DirectAnalysisReportsPreserveSetupErrors(t *testing.T) 
 }
 
 func TestInsightsService_DirectAnalysisReportsPreserveNilLLMBehavior(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
 	svc := NewInsightsService(
-		teststores.Of(db).Insights,
-		teststores.Of(db).Tasks,
-		teststores.Of(db).Projects,
-		teststores.Of(db).LLMConfigs,
-		teststores.Of(db).Executions,
+		env.Insights,
+		env.Tasks,
+		env.Projects,
+		env.LLMConfigs,
+		env.Executions,
 	)
 
 	knowledge, err := svc.ExtractKnowledge(ctx, "missing-project")
@@ -168,14 +168,14 @@ func TestInsightsService_DirectAnalysisReportsPreserveNilLLMBehavior(t *testing.
 }
 
 func TestInsightsService_GetDashboard(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
 
-	projectRepo := teststores.Of(db).Projects
-	taskRepo := teststores.Of(db).Tasks
-	insightsRepo := teststores.Of(db).Insights
-	llmConfigRepo := teststores.Of(db).LLMConfigs
-	execRepo := teststores.Of(db).Executions
+	projectRepo := env.Projects
+	taskRepo := env.Tasks
+	insightsRepo := env.Insights
+	llmConfigRepo := env.LLMConfigs
+	execRepo := env.Executions
 
 	svc := NewInsightsService(insightsRepo, taskRepo, projectRepo, llmConfigRepo, execRepo)
 
@@ -219,14 +219,14 @@ func TestInsightsService_GetDashboard(t *testing.T) {
 }
 
 func TestInsightsService_DetectBugPatterns(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
 
-	projectRepo := teststores.Of(db).Projects
-	taskRepo := teststores.Of(db).Tasks
-	insightsRepo := teststores.Of(db).Insights
-	llmConfigRepo := teststores.Of(db).LLMConfigs
-	execRepo := teststores.Of(db).Executions
+	projectRepo := env.Projects
+	taskRepo := env.Tasks
+	insightsRepo := env.Insights
+	llmConfigRepo := env.LLMConfigs
+	execRepo := env.Executions
 
 	svc := NewInsightsService(insightsRepo, taskRepo, projectRepo, llmConfigRepo, execRepo)
 
@@ -491,15 +491,15 @@ func TestInsightsService_RunAnalysisStalePendingTasks(t *testing.T) {
 }
 
 func TestInsightsService_GenerateProactiveSuggestionsParsesAndDeduplicates(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
 
-	projectRepo := teststores.Of(db).Projects
-	taskRepo := teststores.Of(db).Tasks
-	insightsRepo := teststores.Of(db).Insights
-	llmConfigRepo := teststores.Of(db).LLMConfigs
-	execRepo := teststores.Of(db).Executions
-	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, teststores.Of(db).Schedules, teststores.Of(db).Attachments)
+	projectRepo := env.Projects
+	taskRepo := env.Tasks
+	insightsRepo := env.Insights
+	llmConfigRepo := env.LLMConfigs
+	execRepo := env.Executions
+	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, env.Schedules, env.Attachments)
 	mock := testutil.NewMockLLMCaller()
 	mock.Response = `[{"title":"Split deployment checks","description":"Deployment work is failing often.","suggestion":"Split smoke tests from release steps.","impact":"Faster diagnosis","severity":"high","confidence":0.95},{"title":"Document retry limits","description":"Retries are implicit.","suggestion":"Write down retry boundaries.","impact":"Fewer duplicate side effects","severity":"medium","confidence":2}]`
 	llmSvc.SetLLMCaller(mock)
@@ -689,14 +689,14 @@ func TestInsightsService_AIBackedWorkflowsPersistAndListResults(t *testing.T) {
 }
 
 func TestInsightsService_UpdateAndAcceptInsight(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
 
-	projectRepo := teststores.Of(db).Projects
-	taskRepo := teststores.Of(db).Tasks
-	insightsRepo := teststores.Of(db).Insights
-	llmConfigRepo := teststores.Of(db).LLMConfigs
-	execRepo := teststores.Of(db).Executions
+	projectRepo := env.Projects
+	taskRepo := env.Tasks
+	insightsRepo := env.Insights
+	llmConfigRepo := env.LLMConfigs
+	execRepo := env.Executions
 
 	svc := NewInsightsService(insightsRepo, taskRepo, projectRepo, llmConfigRepo, execRepo)
 
@@ -967,14 +967,14 @@ func TestInsightsService_ExtractJSONObject(t *testing.T) {
 }
 
 func TestInsightsService_HealthCheckDashboardIntegration(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
 
-	projectRepo := teststores.Of(db).Projects
-	taskRepo := teststores.Of(db).Tasks
-	insightsRepo := teststores.Of(db).Insights
-	llmConfigRepo := teststores.Of(db).LLMConfigs
-	execRepo := teststores.Of(db).Executions
+	projectRepo := env.Projects
+	taskRepo := env.Tasks
+	insightsRepo := env.Insights
+	llmConfigRepo := env.LLMConfigs
+	execRepo := env.Executions
 
 	svc := NewInsightsService(insightsRepo, taskRepo, projectRepo, llmConfigRepo, execRepo)
 
@@ -1101,14 +1101,14 @@ func TestInsightsService_ParseIdeaGradeResponse(t *testing.T) {
 }
 
 func TestInsightsService_IdeaGradeDashboardIntegration(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
 
-	projectRepo := teststores.Of(db).Projects
-	taskRepo := teststores.Of(db).Tasks
-	insightsRepo := teststores.Of(db).Insights
-	llmConfigRepo := teststores.Of(db).LLMConfigs
-	execRepo := teststores.Of(db).Executions
+	projectRepo := env.Projects
+	taskRepo := env.Tasks
+	insightsRepo := env.Insights
+	llmConfigRepo := env.LLMConfigs
+	execRepo := env.Executions
 
 	svc := NewInsightsService(insightsRepo, taskRepo, projectRepo, llmConfigRepo, execRepo)
 

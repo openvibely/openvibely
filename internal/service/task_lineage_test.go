@@ -6,7 +6,6 @@ import (
 
 	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/openvibely/openvibely/internal/testutil/teststores"
 )
@@ -29,12 +28,11 @@ func TestIsTerminalStatus(t *testing.T) {
 
 // TestTaskLineage_PersistsInDB verifies lineage fields round-trip through DB.
 func TestTaskLineage_PersistsInDB(t *testing.T) {
-	db := teststores.NewDB(t)
 	ctx := context.Background()
-
 	broadcaster := events.NewBroadcaster()
-	taskRepo := teststores.Of(db, teststores.WithBroadcaster(broadcaster)).Tasks
-	projectRepo := teststores.Of(db).Projects
+	env := teststores.New(t, teststores.WithBroadcaster(broadcaster))
+	taskRepo := env.Tasks
+	projectRepo := env.Projects
 
 	project := &models.Project{Name: "Lineage Test", Description: "test"}
 	if err := projectRepo.Create(ctx, project); err != nil {
@@ -87,63 +85,13 @@ func TestTaskLineage_PersistsInDB(t *testing.T) {
 	}
 }
 
-// TestTaskLineage_UpdateLineage verifies the UpdateLineage repo method.
-func TestTaskLineage_UpdateLineage(t *testing.T) {
-	db := teststores.NewDB(t)
-	ctx := context.Background()
-
-	broadcaster := events.NewBroadcaster()
-	taskRepo := teststores.Of(db, teststores.WithBroadcaster(broadcaster)).Tasks
-	projectRepo := teststores.Of(db).Projects
-
-	project := &models.Project{Name: "Update Lineage", Description: "test"}
-	if err := projectRepo.Create(ctx, project); err != nil {
-		t.Fatalf("Create project: %v", err)
-	}
-
-	task := &models.Task{
-		ProjectID:   project.ID,
-		Title:       "Task",
-		Category:    models.CategoryActive,
-		Status:      models.StatusPending,
-		Prompt:      "prompt",
-		ChainConfig: "{}",
-	}
-	if err := taskRepo.Create(ctx, task); err != nil {
-		t.Fatalf("Create task: %v", err)
-	}
-
-	// Initially empty
-	got, _ := taskRepo.GetByID(ctx, task.ID)
-	if got.BaseBranch != "" || got.BaseCommitSHA != "" || got.LineageDepth != 0 {
-		t.Fatalf("Expected empty lineage, got branch=%q sha=%q depth=%d", got.BaseBranch, got.BaseCommitSHA, got.LineageDepth)
-	}
-
-	// Update lineage
-	if err := taskRepo.(*sqlite.TaskRepo).UpdateLineage(ctx, task.ID, "task/parent-branch", "abc123", 2); err != nil {
-		t.Fatalf("UpdateLineage: %v", err)
-	}
-
-	got, _ = taskRepo.GetByID(ctx, task.ID)
-	if got.BaseBranch != "task/parent-branch" {
-		t.Errorf("BaseBranch: got %q, want %q", got.BaseBranch, "task/parent-branch")
-	}
-	if got.BaseCommitSHA != "abc123" {
-		t.Errorf("BaseCommitSHA: got %q, want %q", got.BaseCommitSHA, "abc123")
-	}
-	if got.LineageDepth != 2 {
-		t.Errorf("LineageDepth: got %d, want 2", got.LineageDepth)
-	}
-}
-
 // TestTaskLineage_HasNonTerminalDescendants verifies descendant check.
 func TestTaskLineage_HasNonTerminalDescendants(t *testing.T) {
-	db := teststores.NewDB(t)
 	ctx := context.Background()
-
 	broadcaster := events.NewBroadcaster()
-	taskRepo := teststores.Of(db, teststores.WithBroadcaster(broadcaster)).Tasks
-	projectRepo := teststores.Of(db).Projects
+	env := teststores.New(t, teststores.WithBroadcaster(broadcaster))
+	taskRepo := env.Tasks
+	projectRepo := env.Projects
 
 	project := &models.Project{Name: "Descendants", Description: "test"}
 	if err := projectRepo.Create(ctx, project); err != nil {
@@ -222,12 +170,11 @@ func TestTaskLineage_HasNonTerminalDescendants(t *testing.T) {
 
 // TestWorkerService_DependencyGating verifies that chained tasks wait for parent completion.
 func TestWorkerService_DependencyGating(t *testing.T) {
-	db := teststores.NewDB(t)
 	ctx := context.Background()
-
 	broadcaster := events.NewBroadcaster()
-	taskRepo := teststores.Of(db, teststores.WithBroadcaster(broadcaster)).Tasks
-	projectRepo := teststores.Of(db).Projects
+	env := teststores.New(t, teststores.WithBroadcaster(broadcaster))
+	taskRepo := env.Tasks
+	projectRepo := env.Projects
 
 	project := &models.Project{Name: "Gating", Description: "test"}
 	if err := projectRepo.Create(ctx, project); err != nil {
@@ -302,12 +249,11 @@ func TestWorkerService_DependencyGating(t *testing.T) {
 // TestTaskLineage_NonChainedTasksUnaffected verifies that non-chained tasks
 // dispatch immediately without any lineage checks.
 func TestTaskLineage_NonChainedTasksUnaffected(t *testing.T) {
-	db := teststores.NewDB(t)
 	ctx := context.Background()
-
 	broadcaster := events.NewBroadcaster()
-	taskRepo := teststores.Of(db, teststores.WithBroadcaster(broadcaster)).Tasks
-	projectRepo := teststores.Of(db).Projects
+	env := teststores.New(t, teststores.WithBroadcaster(broadcaster))
+	taskRepo := env.Tasks
+	projectRepo := env.Projects
 
 	project := &models.Project{Name: "NonChained", Description: "test"}
 	if err := projectRepo.Create(ctx, project); err != nil {
@@ -347,16 +293,15 @@ func TestTaskLineage_NonChainedTasksUnaffected(t *testing.T) {
 
 // TestTaskLineage_ChainCreationSetsLineageDepth verifies multi-level chain depth.
 func TestTaskLineage_ChainCreationSetsLineageDepth(t *testing.T) {
-	db := teststores.NewDB(t)
 	ctx := context.Background()
-
 	broadcaster := events.NewBroadcaster()
-	taskRepo := teststores.Of(db, teststores.WithBroadcaster(broadcaster)).Tasks
-	execRepo := teststores.Of(db).Executions
-	llmConfigRepo := teststores.Of(db).LLMConfigs
-	projectRepo := teststores.Of(db).Projects
-	scheduleRepo := teststores.Of(db).Schedules
-	attachmentRepo := teststores.Of(db).Attachments
+	env := teststores.New(t, teststores.WithBroadcaster(broadcaster))
+	taskRepo := env.Tasks
+	execRepo := env.Executions
+	llmConfigRepo := env.LLMConfigs
+	projectRepo := env.Projects
+	scheduleRepo := env.Schedules
+	attachmentRepo := env.Attachments
 
 	workerSvc := NewWorkerService(nil, 0, nil)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)

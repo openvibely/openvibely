@@ -87,8 +87,8 @@ func cloneURL(u *url.URL) *url.URL {
 }
 
 func TestSlackService_GetConnectionStatus(t *testing.T) {
-	db := teststores.NewDB(t)
-	settingsRepo := teststores.Of(db).Settings
+	env := teststores.New(t)
+	settingsRepo := env.Settings
 	require.NoError(t, settingsRepo.Set(context.Background(), SlackSettingClientID, "cid"))
 	require.NoError(t, settingsRepo.Set(context.Background(), SlackSettingClientSecret, "secret"))
 	require.NoError(t, settingsRepo.Set(context.Background(), SlackSettingAppToken, "xapp-1"))
@@ -104,8 +104,8 @@ func TestSlackService_GetConnectionStatus(t *testing.T) {
 }
 
 func TestSlackService_GetConnectionStatus_ManualOverrideSource(t *testing.T) {
-	db := teststores.NewDB(t)
-	settingsRepo := teststores.Of(db).Settings
+	env := teststores.New(t)
+	settingsRepo := env.Settings
 	require.NoError(t, settingsRepo.Set(context.Background(), SlackSettingClientID, "cid"))
 	require.NoError(t, settingsRepo.Set(context.Background(), SlackSettingClientSecret, "secret"))
 	require.NoError(t, settingsRepo.Set(context.Background(), SlackSettingAppToken, "xapp-1"))
@@ -122,8 +122,8 @@ func TestSlackService_GetConnectionStatus_ManualOverrideSource(t *testing.T) {
 }
 
 func TestSlackService_ConnectURLStoresState(t *testing.T) {
-	db := teststores.NewDB(t)
-	settingsRepo := teststores.Of(db).Settings
+	env := teststores.New(t)
+	settingsRepo := env.Settings
 	require.NoError(t, settingsRepo.Set(context.Background(), SlackSettingClientID, "cid"))
 	require.NoError(t, settingsRepo.Set(context.Background(), SlackSettingClientSecret, "secret"))
 
@@ -139,8 +139,8 @@ func TestSlackService_ConnectURLStoresState(t *testing.T) {
 }
 
 func TestSlackService_HandleOAuthCallback(t *testing.T) {
-	db := teststores.NewDB(t)
-	settingsRepo := teststores.Of(db).Settings
+	env := teststores.New(t)
+	settingsRepo := env.Settings
 	require.NoError(t, settingsRepo.Set(context.Background(), SlackSettingClientID, "cid"))
 	require.NoError(t, settingsRepo.Set(context.Background(), SlackSettingClientSecret, "secret"))
 	require.NoError(t, settingsRepo.Set(context.Background(), SlackSettingBotToken, "xoxb-old-oauth"))
@@ -267,8 +267,8 @@ func TestSlackService_HandleOAuthCallbackFailurePreservesPreviousConfiguration(t
 
 func TestSlackService_HandleOAuthCallbackMissingIdentityPreservesPreviousConfiguration(t *testing.T) {
 	ctx := context.Background()
-	db := teststores.NewDB(t)
-	settingsRepo := teststores.Of(db).Settings
+	env := teststores.New(t)
+	settingsRepo := env.Settings
 	require.NoError(t, settingsRepo.SetMany(ctx, map[string]string{
 		SlackSettingClientID:         "cid",
 		SlackSettingClientSecret:     "secret",
@@ -298,8 +298,8 @@ func TestSlackService_HandleOAuthCallbackMissingIdentityPreservesPreviousConfigu
 }
 
 func TestSlackService_HandleOAuthCallbackInvalidState(t *testing.T) {
-	db := teststores.NewDB(t)
-	settingsRepo := teststores.Of(db).Settings
+	env := teststores.New(t)
+	settingsRepo := env.Settings
 	require.NoError(t, settingsRepo.Set(context.Background(), SlackSettingClientID, "cid"))
 	require.NoError(t, settingsRepo.Set(context.Background(), SlackSettingClientSecret, "secret"))
 	require.NoError(t, settingsRepo.Set(context.Background(), SlackSettingOAuthState, "expected-state"))
@@ -357,9 +357,9 @@ func newSlackSocketIngressTestService(t *testing.T) (*SlackService, *sql.DB, per
 }
 
 func TestSlackInboundReceiptHandoffIsAtomicAndIdempotent(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
-	receipts := teststores.Of(db).SlackInboundReceipts
+	receipts := env.SlackInboundReceipts
 	eventKey := "T1|D1|1710000000.100000|U1"
 
 	alreadyHandedOff, err := receipts.WithHandoff(ctx, eventKey, func(persistence.Tx) error {
@@ -1227,10 +1227,10 @@ func TestSlackService_SocketEventRestartAfterFirstTurnPartialPersistenceLeavesNo
 }
 
 func TestRunChannelChatFirstTurnDeadlineCleanupUsesNonCancelledContext(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
-	projectRepo := teststores.Of(db).Projects
-	taskRepo := teststores.Of(db).Tasks
+	projectRepo := env.Projects
+	taskRepo := env.Tasks
 	project := &models.Project{Name: "deadline cleanup"}
 	require.NoError(t, projectRepo.Create(ctx, project))
 	agent := &models.LLMConfig{ID: "agent-deadline-cleanup"}
@@ -1332,8 +1332,8 @@ func TestSlackService_SocketEventTerminallyAcknowledgesSupportedEventsWithoutSta
 }
 
 func TestSlackService_EventFilteringAcceptsDMAppMentionsAndChannelMessageMentions(t *testing.T) {
-	db := teststores.NewDB(t)
-	settingsRepo := teststores.Of(db).Settings
+	env := teststores.New(t)
+	settingsRepo := env.Settings
 	require.NoError(t, settingsRepo.Set(context.Background(), SlackSettingBotUserID, "UBOT"))
 
 	svc := NewSlackService(settingsRepo, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
@@ -1374,8 +1374,8 @@ func TestSlackService_EventFilteringAcceptsDMAppMentionsAndChannelMessageMention
 }
 
 func TestSlackService_EventFilteringDedupesAppMentionAndMessageEventForSameSlackMessage(t *testing.T) {
-	db := teststores.NewDB(t)
-	settingsRepo := teststores.Of(db).Settings
+	env := teststores.New(t)
+	settingsRepo := env.Settings
 	require.NoError(t, settingsRepo.Set(context.Background(), SlackSettingBotUserID, "UBOT"))
 
 	svc := NewSlackService(settingsRepo, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
@@ -1403,8 +1403,8 @@ func TestSlackService_EventFilteringDedupesAppMentionAndMessageEventForSameSlack
 }
 
 func TestSlackService_EventFilteringIgnoresBotSelfAndNonDMMessages(t *testing.T) {
-	db := teststores.NewDB(t)
-	settingsRepo := teststores.Of(db).Settings
+	env := teststores.New(t)
+	settingsRepo := env.Settings
 	require.NoError(t, settingsRepo.Set(context.Background(), SlackSettingBotUserID, "UBOT"))
 
 	svc := NewSlackService(settingsRepo, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
@@ -1450,18 +1450,18 @@ func TestSlackService_EventFilteringIgnoresBotSelfAndNonDMMessages(t *testing.T)
 }
 
 func TestSlackService_RuntimeCreateTaskTool_CreatedTasksGetSlackOriginAndContext(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
 
-	projectRepo := teststores.Of(db).Projects
-	taskRepo := teststores.Of(db).Tasks
-	llmConfigRepo := teststores.Of(db).LLMConfigs
-	execRepo := teststores.Of(db).Executions
-	scheduleRepo := teststores.Of(db).Schedules
-	attachmentRepo := teststores.Of(db).Attachments
-	settingsRepo := teststores.Of(db).Settings
-	slackUserProjectRepo := teststores.Of(db).SlackUserProjects
-	slackTaskContextRepo := teststores.Of(db).SlackTaskContexts
+	projectRepo := env.Projects
+	taskRepo := env.Tasks
+	llmConfigRepo := env.LLMConfigs
+	execRepo := env.Executions
+	scheduleRepo := env.Schedules
+	attachmentRepo := env.Attachments
+	settingsRepo := env.Settings
+	slackUserProjectRepo := env.SlackUserProjects
+	slackTaskContextRepo := env.SlackTaskContexts
 
 	project := &models.Project{Name: "Slack Tool Project"}
 	require.NoError(t, projectRepo.Create(ctx, project))
@@ -1472,7 +1472,7 @@ func TestSlackService_RuntimeCreateTaskTool_CreatedTasksGetSlackOriginAndContext
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 	swarmSvc := NewSwarmService(taskSvc, taskRepo, execRepo, workerSvc)
 	taskSvc.SetSwarmService(swarmSvc)
-	agentRepo := teststores.Of(db).Agents
+	agentRepo := env.Agents
 	taskSvc.SetAgentRepo(agentRepo)
 	agent := &models.Agent{Name: "Reviewer", Key: "reviewer", Enabled: true, SelectableAsPrimary: true}
 	require.NoError(t, agentRepo.Create(ctx, agent))
@@ -1545,19 +1545,19 @@ func TestSlackService_RuntimeCreateTaskTool_CreatedTasksGetSlackOriginAndContext
 }
 
 func TestSlackService_RuntimeListAlertsTool_Handled(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
 
-	projectRepo := teststores.Of(db).Projects
-	taskRepo := teststores.Of(db).Tasks
-	llmConfigRepo := teststores.Of(db).LLMConfigs
-	execRepo := teststores.Of(db).Executions
-	scheduleRepo := teststores.Of(db).Schedules
-	attachmentRepo := teststores.Of(db).Attachments
-	settingsRepo := teststores.Of(db).Settings
-	slackUserProjectRepo := teststores.Of(db).SlackUserProjects
-	slackTaskContextRepo := teststores.Of(db).SlackTaskContexts
-	alertRepo := teststores.Of(db).Alerts
+	projectRepo := env.Projects
+	taskRepo := env.Tasks
+	llmConfigRepo := env.LLMConfigs
+	execRepo := env.Executions
+	scheduleRepo := env.Schedules
+	attachmentRepo := env.Attachments
+	settingsRepo := env.Settings
+	slackUserProjectRepo := env.SlackUserProjects
+	slackTaskContextRepo := env.SlackTaskContexts
+	alertRepo := env.Alerts
 
 	project := &models.Project{Name: "Slack Alerts Runtime"}
 	require.NoError(t, projectRepo.Create(ctx, project))
@@ -1581,15 +1581,15 @@ func TestSlackService_RuntimeListAlertsTool_Handled(t *testing.T) {
 }
 
 func TestSlackService_NotificationLifecycleRuntimeUsesPersistedChannelTask(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
-	projectRepo := teststores.Of(db).Projects
-	taskRepo := teststores.Of(db).Tasks
+	projectRepo := env.Projects
+	taskRepo := env.Tasks
 	project := &models.Project{Name: "Slack Notification Lifecycle"}
 	require.NoError(t, projectRepo.Create(ctx, project))
 	caller := &models.Task{ProjectID: project.ID, Title: "Slack chat", Prompt: "process", Category: models.CategoryChat, Status: models.StatusPending, Priority: 2}
 	require.NoError(t, taskRepo.Create(ctx, caller))
-	alertSvc := NewAlertService(teststores.Of(db).Alerts, nil)
+	alertSvc := NewAlertService(env.Alerts, nil)
 	alert, err := alertSvc.CreateActionable(ctx, &models.Alert{ProjectID: project.ID, Type: "suggestion", Title: "Slack suggestion", Severity: models.SeverityInfo})
 	require.NoError(t, err)
 	require.NoError(t, alertSvc.SetDecision(ctx, project.ID, alert.ID, models.AlertDecisionApproved))
@@ -1607,19 +1607,19 @@ func TestSlackService_NotificationLifecycleRuntimeUsesPersistedChannelTask(t *te
 }
 
 func TestSlackService_RuntimeExecutorHandlesAllDefinedTools(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
 
-	projectRepo := teststores.Of(db).Projects
-	taskRepo := teststores.Of(db).Tasks
-	llmConfigRepo := teststores.Of(db).LLMConfigs
-	execRepo := teststores.Of(db).Executions
-	scheduleRepo := teststores.Of(db).Schedules
-	attachmentRepo := teststores.Of(db).Attachments
-	settingsRepo := teststores.Of(db).Settings
-	slackUserProjectRepo := teststores.Of(db).SlackUserProjects
-	slackTaskContextRepo := teststores.Of(db).SlackTaskContexts
-	alertRepo := teststores.Of(db).Alerts
+	projectRepo := env.Projects
+	taskRepo := env.Tasks
+	llmConfigRepo := env.LLMConfigs
+	execRepo := env.Executions
+	scheduleRepo := env.Schedules
+	attachmentRepo := env.Attachments
+	settingsRepo := env.Settings
+	slackUserProjectRepo := env.SlackUserProjects
+	slackTaskContextRepo := env.SlackTaskContexts
+	alertRepo := env.Alerts
 
 	project := &models.Project{Name: "Slack Full Runtime"}
 	require.NoError(t, projectRepo.Create(ctx, project))
@@ -1649,19 +1649,19 @@ func TestSlackService_RuntimeExecutorHandlesAllDefinedTools(t *testing.T) {
 }
 
 func TestSlackService_ProcessIncomingMessage_AuthorizationEnforced(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
 
-	projectRepo := teststores.Of(db).Projects
-	taskRepo := teststores.Of(db).Tasks
-	llmConfigRepo := teststores.Of(db).LLMConfigs
-	execRepo := teststores.Of(db).Executions
-	scheduleRepo := teststores.Of(db).Schedules
-	attachmentRepo := teststores.Of(db).Attachments
-	settingsRepo := teststores.Of(db).Settings
-	slackUserProjectRepo := teststores.Of(db).SlackUserProjects
-	slackTaskContextRepo := teststores.Of(db).SlackTaskContexts
-	slackAuthRepo := teststores.Of(db).SlackAuth
+	projectRepo := env.Projects
+	taskRepo := env.Tasks
+	llmConfigRepo := env.LLMConfigs
+	execRepo := env.Executions
+	scheduleRepo := env.Schedules
+	attachmentRepo := env.Attachments
+	settingsRepo := env.Settings
+	slackUserProjectRepo := env.SlackUserProjects
+	slackTaskContextRepo := env.SlackTaskContexts
+	slackAuthRepo := env.SlackAuth
 
 	project := &models.Project{Name: "Slack Auth Enforce"}
 	require.NoError(t, projectRepo.Create(ctx, project))
@@ -1704,12 +1704,12 @@ func TestSlackService_ProcessIncomingMessage_AuthorizationEnforced(t *testing.T)
 }
 
 func TestSlackService_CheckAuthorization_FallsBackToAnyProject(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
 
-	projectRepo := teststores.Of(db).Projects
-	settingsRepo := teststores.Of(db).Settings
-	slackAuthRepo := teststores.Of(db).SlackAuth
+	projectRepo := env.Projects
+	settingsRepo := env.Settings
+	slackAuthRepo := env.SlackAuth
 
 	projectA := &models.Project{Name: "Project A"}
 	projectB := &models.Project{Name: "Project B"}
@@ -1800,12 +1800,12 @@ func countChannelAuthTableStatements(statements []string, table string) int {
 }
 
 func TestSlackService_CheckAuthorization_NoUsersConfiguredDenyAll(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
 
-	projectRepo := teststores.Of(db).Projects
-	settingsRepo := teststores.Of(db).Settings
-	slackAuthRepo := teststores.Of(db).SlackAuth
+	projectRepo := env.Projects
+	settingsRepo := env.Settings
+	slackAuthRepo := env.SlackAuth
 
 	project := &models.Project{Name: "Project Empty Auth"}
 	require.NoError(t, projectRepo.Create(ctx, project))
@@ -1817,13 +1817,13 @@ func TestSlackService_CheckAuthorization_NoUsersConfiguredDenyAll(t *testing.T) 
 }
 
 func TestSlackService_SendTaskCompletionNotification(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
 
-	projectRepo := teststores.Of(db).Projects
-	taskRepo := teststores.Of(db).Tasks
-	settingsRepo := teststores.Of(db).Settings
-	slackTaskContextRepo := teststores.Of(db).SlackTaskContexts
+	projectRepo := env.Projects
+	taskRepo := env.Tasks
+	settingsRepo := env.Settings
+	slackTaskContextRepo := env.SlackTaskContexts
 
 	project := &models.Project{Name: "Slack Notify Project"}
 	require.NoError(t, projectRepo.Create(ctx, project))
@@ -1877,19 +1877,19 @@ func TestSlackService_SendTaskCompletionNotification(t *testing.T) {
 }
 
 func TestSlackService_ProcessIncomingMessage_QueuesWhenChatActive(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
 
-	projectRepo := teststores.Of(db).Projects
-	taskRepo := teststores.Of(db).Tasks
-	llmConfigRepo := teststores.Of(db).LLMConfigs
-	execRepo := teststores.Of(db).Executions
-	scheduleRepo := teststores.Of(db).Schedules
-	attachmentRepo := teststores.Of(db).Attachments
-	settingsRepo := teststores.Of(db).Settings
-	slackUserProjectRepo := teststores.Of(db).SlackUserProjects
-	slackTaskContextRepo := teststores.Of(db).SlackTaskContexts
-	threadInputRepo := teststores.Of(db).ThreadInputs
+	projectRepo := env.Projects
+	taskRepo := env.Tasks
+	llmConfigRepo := env.LLMConfigs
+	execRepo := env.Executions
+	scheduleRepo := env.Schedules
+	attachmentRepo := env.Attachments
+	settingsRepo := env.Settings
+	slackUserProjectRepo := env.SlackUserProjects
+	slackTaskContextRepo := env.SlackTaskContexts
+	threadInputRepo := env.ThreadInputs
 
 	project := &models.Project{Name: "Slack Queue Project"}
 	require.NoError(t, projectRepo.Create(ctx, project))
@@ -1933,18 +1933,18 @@ func TestSlackService_ProcessIncomingMessage_QueuesWhenChatActive(t *testing.T) 
 }
 
 func TestSlackService_ProcessIncomingMessage_UsesSharedChannelChatRunner(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
 
-	projectRepo := teststores.Of(db).Projects
-	taskRepo := teststores.Of(db).Tasks
-	llmConfigRepo := teststores.Of(db).LLMConfigs
-	execRepo := teststores.Of(db).Executions
-	scheduleRepo := teststores.Of(db).Schedules
-	attachmentRepo := teststores.Of(db).Attachments
-	settingsRepo := teststores.Of(db).Settings
-	slackUserProjectRepo := teststores.Of(db).SlackUserProjects
-	slackTaskContextRepo := teststores.Of(db).SlackTaskContexts
+	projectRepo := env.Projects
+	taskRepo := env.Tasks
+	llmConfigRepo := env.LLMConfigs
+	execRepo := env.Executions
+	scheduleRepo := env.Schedules
+	attachmentRepo := env.Attachments
+	settingsRepo := env.Settings
+	slackUserProjectRepo := env.SlackUserProjects
+	slackTaskContextRepo := env.SlackTaskContexts
 
 	project := &models.Project{Name: "Slack Shared Runner Project"}
 	require.NoError(t, projectRepo.Create(ctx, project))
@@ -1991,18 +1991,18 @@ func TestSlackService_ProcessIncomingMessage_UsesSharedChannelChatRunner(t *test
 }
 
 func TestSlackService_SendToTaskUsesSharedRunnerAndQueuesActiveTask(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
-	projectRepo := teststores.Of(db).Projects
-	taskRepo := teststores.Of(db).Tasks
-	llmConfigRepo := teststores.Of(db).LLMConfigs
-	execRepo := teststores.Of(db).Executions
-	scheduleRepo := teststores.Of(db).Schedules
-	attachmentRepo := teststores.Of(db).Attachments
-	settingsRepo := teststores.Of(db).Settings
-	slackUserProjectRepo := teststores.Of(db).SlackUserProjects
-	slackTaskContextRepo := teststores.Of(db).SlackTaskContexts
-	threadInputRepo := teststores.Of(db).ThreadInputs
+	projectRepo := env.Projects
+	taskRepo := env.Tasks
+	llmConfigRepo := env.LLMConfigs
+	execRepo := env.Executions
+	scheduleRepo := env.Schedules
+	attachmentRepo := env.Attachments
+	settingsRepo := env.Settings
+	slackUserProjectRepo := env.SlackUserProjects
+	slackTaskContextRepo := env.SlackTaskContexts
+	threadInputRepo := env.ThreadInputs
 	project := &models.Project{Name: "Slack Task Runner Project"}
 	require.NoError(t, projectRepo.Create(ctx, project))
 	agent, err := llmConfigRepo.GetDefault(ctx)
@@ -2057,18 +2057,18 @@ func TestSlackService_SendToTaskUsesSharedRunnerAndQueuesActiveTask(t *testing.T
 }
 
 func TestSlackService_SendToTask_QueuesDuringStartingFirstTurnBeforeExecutionExists(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
-	projectRepo := teststores.Of(db).Projects
-	taskRepo := teststores.Of(db).Tasks
-	llmConfigRepo := teststores.Of(db).LLMConfigs
-	execRepo := teststores.Of(db).Executions
-	scheduleRepo := teststores.Of(db).Schedules
-	attachmentRepo := teststores.Of(db).Attachments
-	settingsRepo := teststores.Of(db).Settings
-	slackUserProjectRepo := teststores.Of(db).SlackUserProjects
-	slackTaskContextRepo := teststores.Of(db).SlackTaskContexts
-	threadInputRepo := teststores.Of(db).ThreadInputs
+	projectRepo := env.Projects
+	taskRepo := env.Tasks
+	llmConfigRepo := env.LLMConfigs
+	execRepo := env.Executions
+	scheduleRepo := env.Schedules
+	attachmentRepo := env.Attachments
+	settingsRepo := env.Settings
+	slackUserProjectRepo := env.SlackUserProjects
+	slackTaskContextRepo := env.SlackTaskContexts
+	threadInputRepo := env.ThreadInputs
 	project := &models.Project{Name: "Slack Starting First Turn Project"}
 	require.NoError(t, projectRepo.Create(ctx, project))
 	agent, err := llmConfigRepo.GetDefault(ctx)
@@ -2106,12 +2106,12 @@ func TestSlackService_SendToTask_QueuesDuringStartingFirstTurnBeforeExecutionExi
 }
 
 func TestSlackService_CompleteExecution_FailurePromotesQueuedChat(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
-	projectRepo := teststores.Of(db).Projects
-	taskRepo := teststores.Of(db).Tasks
-	execRepo := teststores.Of(db).Executions
-	llmConfigRepo := teststores.Of(db).LLMConfigs
+	projectRepo := env.Projects
+	taskRepo := env.Tasks
+	execRepo := env.Executions
+	llmConfigRepo := env.LLMConfigs
 	project := &models.Project{Name: "Slack Failed Promotion Project"}
 	require.NoError(t, projectRepo.Create(ctx, project))
 	agents, err := llmConfigRepo.List(ctx)
@@ -2137,12 +2137,12 @@ func TestSlackService_CompleteExecution_FailurePromotesQueuedChat(t *testing.T) 
 }
 
 func TestSlackService_SendChatResponse_SendsChatTaskOutput(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
-	projectRepo := teststores.Of(db).Projects
-	taskRepo := teststores.Of(db).Tasks
-	settingsRepo := teststores.Of(db).Settings
-	slackTaskContextRepo := teststores.Of(db).SlackTaskContexts
+	projectRepo := env.Projects
+	taskRepo := env.Tasks
+	settingsRepo := env.Settings
+	slackTaskContextRepo := env.SlackTaskContexts
 	project := &models.Project{Name: "Slack Chat Response Project"}
 	require.NoError(t, projectRepo.Create(ctx, project))
 	task := &models.Task{ProjectID: project.ID, Title: "chat", Category: models.CategoryChat, Status: models.StatusCompleted, Prompt: "prompt", CreatedVia: models.TaskOriginSlack}
@@ -2166,14 +2166,14 @@ func TestSlackService_SendChatResponse_SendsChatTaskOutput(t *testing.T) {
 // This is a regression test: before the fix, all goal tool handlers were stubs
 // that always returned "task goal tools are unavailable on Slack".
 func TestSlackService_GoalTools_SetGetClearPauseResume(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
 
-	projectRepo := teststores.Of(db).Projects
-	taskRepo := teststores.Of(db).Tasks
-	attachmentRepo := teststores.Of(db).Attachments
-	taskGoalRepo := teststores.Of(db).TaskGoals
-	settingsRepo := teststores.Of(db).Settings
+	projectRepo := env.Projects
+	taskRepo := env.Tasks
+	attachmentRepo := env.Attachments
+	taskGoalRepo := env.TaskGoals
+	settingsRepo := env.Settings
 	workerSvc := NewWorkerService(nil, 0, projectRepo)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 	goalSvc := NewTaskGoalService(taskGoalRepo, taskRepo, nil)
@@ -2231,12 +2231,12 @@ func TestSlackService_GoalTools_SetGetClearPauseResume(t *testing.T) {
 // taskGoalSvc is nil (not yet wired), goal tools return a descriptive error
 // rather than panicking.
 func TestSlackService_GoalTools_UnavailableWithoutService(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
 
-	projectRepo := teststores.Of(db).Projects
-	taskRepo := teststores.Of(db).Tasks
-	settingsRepo := teststores.Of(db).Settings
+	projectRepo := env.Projects
+	taskRepo := env.Tasks
+	settingsRepo := env.Settings
 
 	project := &models.Project{Name: "Slack Goal Nil Svc", RepoPath: "/tmp/test"}
 	require.NoError(t, projectRepo.Create(ctx, project))
@@ -2259,14 +2259,14 @@ func TestSlackService_GoalTools_UnavailableWithoutService(t *testing.T) {
 // mark_task_goal_achieved and report_task_goal_blocked are callable from Slack
 // (previously blocked by the unavailable stub).
 func TestSlackService_GoalTools_MarkAchievedReportBlocked(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
 
-	projectRepo := teststores.Of(db).Projects
-	taskRepo := teststores.Of(db).Tasks
-	attachmentRepo := teststores.Of(db).Attachments
-	taskGoalRepo := teststores.Of(db).TaskGoals
-	settingsRepo := teststores.Of(db).Settings
+	projectRepo := env.Projects
+	taskRepo := env.Tasks
+	attachmentRepo := env.Attachments
+	taskGoalRepo := env.TaskGoals
+	settingsRepo := env.Settings
 	workerSvc := NewWorkerService(nil, 0, projectRepo)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 	goalSvc := NewTaskGoalService(taskGoalRepo, taskRepo, nil)
@@ -2347,8 +2347,8 @@ func TestSlackService_SendOutboundMessage_MissingTokenReturnsCleanError(t *testi
 }
 
 func TestSlackService_ConnectURLIncludesFilesReadScope(t *testing.T) {
-	db := teststores.NewDB(t)
-	settingsRepo := teststores.Of(db).Settings
+	env := teststores.New(t)
+	settingsRepo := env.Settings
 	require.NoError(t, settingsRepo.Set(context.Background(), SlackSettingClientID, "cid"))
 	require.NoError(t, settingsRepo.Set(context.Background(), SlackSettingClientSecret, "secret"))
 
@@ -2364,8 +2364,8 @@ func TestSlackService_ConnectURLIncludesFilesReadScope(t *testing.T) {
 }
 
 func TestSlackService_EventFilteringPreservesFileMetadata(t *testing.T) {
-	db := teststores.NewDB(t)
-	settingsRepo := teststores.Of(db).Settings
+	env := teststores.New(t)
+	settingsRepo := env.Settings
 	require.NoError(t, settingsRepo.Set(context.Background(), SlackSettingBotUserID, "UBOT"))
 
 	svc := NewSlackService(settingsRepo, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
@@ -2445,8 +2445,8 @@ func TestSlackService_EventFilteringPreservesFileMetadata(t *testing.T) {
 }
 
 func TestSlackService_EventFilteringAcceptsAttachmentOnlyMessages(t *testing.T) {
-	db := teststores.NewDB(t)
-	settingsRepo := teststores.Of(db).Settings
+	env := teststores.New(t)
+	settingsRepo := env.Settings
 	require.NoError(t, settingsRepo.Set(context.Background(), SlackSettingBotUserID, "UBOT"))
 
 	svc := NewSlackService(settingsRepo, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
@@ -2490,8 +2490,8 @@ func TestSlackService_EventFilteringAcceptsAttachmentOnlyMessages(t *testing.T) 
 }
 
 func TestSlackService_EventFilteringPreservesAttachmentAndBlockFileReferences(t *testing.T) {
-	db := teststores.NewDB(t)
-	settingsRepo := teststores.Of(db).Settings
+	env := teststores.New(t)
+	settingsRepo := env.Settings
 	require.NoError(t, settingsRepo.Set(context.Background(), SlackSettingBotUserID, "UBOT"))
 
 	svc := NewSlackService(settingsRepo, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
@@ -3758,18 +3758,18 @@ func useTempSlackUploadsDir(t *testing.T, svc *SlackService) string {
 }
 
 func TestSlackService_RuntimeSwitchProject_PersistsToRepo(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
 
-	projectRepo := teststores.Of(db).Projects
-	taskRepo := teststores.Of(db).Tasks
-	llmConfigRepo := teststores.Of(db).LLMConfigs
-	execRepo := teststores.Of(db).Executions
-	scheduleRepo := teststores.Of(db).Schedules
-	attachmentRepo := teststores.Of(db).Attachments
-	settingsRepo := teststores.Of(db).Settings
-	slackUserProjectRepo := teststores.Of(db).SlackUserProjects
-	slackTaskContextRepo := teststores.Of(db).SlackTaskContexts
+	projectRepo := env.Projects
+	taskRepo := env.Tasks
+	llmConfigRepo := env.LLMConfigs
+	execRepo := env.Executions
+	scheduleRepo := env.Schedules
+	attachmentRepo := env.Attachments
+	settingsRepo := env.Settings
+	slackUserProjectRepo := env.SlackUserProjects
+	slackTaskContextRepo := env.SlackTaskContexts
 
 	project1 := &models.Project{Name: "Alpha", RepoPath: "/tmp/alpha", IsDefault: true}
 	require.NoError(t, projectRepo.Create(ctx, project1))
@@ -3962,8 +3962,8 @@ func TestSlackTextAndAttachmentHelpers(t *testing.T) {
 
 func TestSlackServiceSendCompletionThreadAndLifecycleHelpers(t *testing.T) {
 	ctx := context.Background()
-	db := teststores.NewDB(t)
-	settingsRepo := teststores.Of(db).Settings
+	env := teststores.New(t)
+	settingsRepo := env.Settings
 	svc := NewSlackService(settingsRepo, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 
 	var posted []string

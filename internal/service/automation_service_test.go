@@ -115,11 +115,11 @@ func automationTestTaskAndSchedule(t *testing.T, dbRepo persistence.TaskStore, s
 }
 
 func TestAutomationRegistrationTelemetryReportsCreationTruthfully(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
-	project := automationTestProject(t, teststores.Of(db).Projects, "Registration telemetry")
-	task, schedule := automationTestTaskAndSchedule(t, teststores.Of(db).Tasks, teststores.Of(db).Schedules, project.ID, "Registered task")
-	registration := NewAutomationRegistrationService(teststores.Of(db).Automations, NewAutomationAdapterRegistry())
+	project := automationTestProject(t, env.Projects, "Registration telemetry")
+	task, schedule := automationTestTaskAndSchedule(t, env.Tasks, env.Schedules, project.ID, "Registered task")
+	registration := NewAutomationRegistrationService(env.Automations, NewAutomationAdapterRegistry())
 	request := AutomationRegistrationRequest{
 		ProjectID: project.ID, AdapterKey: AutomationAdapterNativeSDLC, StableKey: "native-sdlc/telemetry",
 		Resources: []models.AutomationResourceBinding{
@@ -325,12 +325,12 @@ func TestRegisteredMaintainedAutomationCanBeReopenedAndSaved(t *testing.T) {
 }
 
 func TestRegisteredSharedInboxTaskCanBeReopenedAndSaved(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
-	project := automationTestProject(t, teststores.Of(db).Projects, "Editable shared inbox Automation")
-	taskRepo := teststores.Of(db).Tasks
-	scheduleRepo := teststores.Of(db).Schedules
-	automationRepo := teststores.Of(db).Automations
+	project := automationTestProject(t, env.Projects, "Editable shared inbox Automation")
+	taskRepo := env.Tasks
+	scheduleRepo := env.Schedules
+	automationRepo := env.Automations
 	registry := NewAutomationAdapterRegistry()
 	worker, schedule := automationTestTaskAndSchedule(t, taskRepo, scheduleRepo, project.ID, "Shared inbox worker")
 
@@ -365,7 +365,7 @@ func TestRegisteredSharedInboxTaskCanBeReopenedAndSaved(t *testing.T) {
 		}
 	}
 	validator := NewAutomationSaveValidator(registry, drafts)
-	compiler := NewAutomationCompiler(automationRepo, NewTaskService(taskRepo, teststores.Of(db).Attachments, nil), taskRepo, scheduleRepo, validator)
+	compiler := NewAutomationCompiler(automationRepo, NewTaskService(taskRepo, env.Attachments, nil), taskRepo, scheduleRepo, validator)
 
 	saved, err := compiler.Save(ctx, AutomationSaveRequest{ProjectID: project.ID, AutomationID: definition.Automation.ID,
 		Source: "manual", CreatedVia: "web", Candidate: reopened.Candidate})
@@ -558,12 +558,12 @@ func TestAutomationPortfolioListsEverySavedAutomationBeyondOneHundred(t *testing
 }
 
 func TestGitHubSDLCRegistrationHydratesInitialSnapshotAcrossPause(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
-	project := automationTestProject(t, teststores.Of(db).Projects, "Registered GitHub prompt parity")
-	taskRepo := teststores.Of(db).Tasks
-	scheduleRepo := teststores.Of(db).Schedules
-	automationRepo := teststores.Of(db).Automations
+	project := automationTestProject(t, env.Projects, "Registered GitHub prompt parity")
+	taskRepo := env.Tasks
+	scheduleRepo := env.Schedules
+	automationRepo := env.Automations
 	registration := NewAutomationRegistrationService(automationRepo, NewAutomationAdapterRegistry())
 
 	maintainedPrompt := githubSDLCDevInboxPrompt
@@ -906,15 +906,15 @@ func TestMaintainedAutomationRegistrationUsesGlobalPauseAndResume(t *testing.T) 
 }
 
 func TestAutomationRegistrationRejectsScheduleTaskMismatch(t *testing.T) {
-	db := teststores.NewDB(t)
-	project := automationTestProject(t, teststores.Of(db).Projects, "Mismatched scheduled task")
-	taskRepo := teststores.Of(db).Tasks
-	scheduleRepo := teststores.Of(db).Schedules
+	env := teststores.New(t)
+	project := automationTestProject(t, env.Projects, "Mismatched scheduled task")
+	taskRepo := env.Tasks
+	scheduleRepo := env.Schedules
 	firstTask, schedule := automationTestTaskAndSchedule(t, taskRepo, scheduleRepo, project.ID, "Actual scheduled task")
 	secondTask := models.Task{ProjectID: project.ID, Title: "Incorrect visual task", Category: models.CategoryScheduled, Status: models.StatusPending, Priority: 2, Prompt: "different task"}
 	require.NoError(t, taskRepo.Create(context.Background(), &secondTask))
 
-	_, _, err := NewAutomationRegistrationService(teststores.Of(db).Automations, NewAutomationAdapterRegistry()).Register(context.Background(), AutomationRegistrationRequest{
+	_, _, err := NewAutomationRegistrationService(env.Automations, NewAutomationAdapterRegistry()).Register(context.Background(), AutomationRegistrationRequest{
 		ProjectID: project.ID, AdapterKey: AutomationAdapterNativeSDLC, StableKey: "native-sdlc/mismatch",
 		Resources: []models.AutomationResourceBinding{
 			{NodeKey: "vision_suggestions", ResourceType: "schedule", ResourceID: schedule.ID},
@@ -990,10 +990,10 @@ func TestAutomationRegistrationRejectsUnsupportedAdapterAndExclusiveTriggerReuse
 }
 
 func TestAutomationBootstrapRuntimeToolIsSelectedSkillScoped(t *testing.T) {
-	db := teststores.NewDB(t)
-	projectRepo := teststores.Of(db).Projects
+	env := teststores.New(t)
+	projectRepo := env.Projects
 	project := automationTestProject(t, projectRepo, "Runtime scope")
-	repo := teststores.Of(db).Automations
+	repo := env.Automations
 	llm := &LLMService{}
 	llm.SetAutomationRegistrationService(NewAutomationRegistrationService(repo, NewAutomationAdapterRegistry()))
 	task := models.Task{ID: "bootstrap-task", ProjectID: project.ID}
@@ -1005,8 +1005,8 @@ func TestAutomationBootstrapRuntimeToolIsSelectedSkillScoped(t *testing.T) {
 	require.Len(t, runtime.Definitions, 1)
 	require.Equal(t, "register_automation_resources", runtime.Definitions[0].Name)
 
-	taskRepo := teststores.Of(db).Tasks
-	scheduleRepo := teststores.Of(db).Schedules
+	taskRepo := env.Tasks
+	scheduleRepo := env.Schedules
 	producer, schedule := automationTestTaskAndSchedule(t, taskRepo, scheduleRepo, project.ID, "Runtime producer")
 	input := fmt.Sprintf(`{"adapter_key":"native_sdlc","stable_key":"native-sdlc/default","resources":[{"node_key":"vision_suggestions","resource_type":"schedule","resource_id":%q},{"node_key":"vision_suggestions","resource_type":"task","resource_id":%q}]}`, schedule.ID, producer.ID)
 	output, handled, isError, err := runtime.Executor(nativeCtx, "register_automation_resources", []byte(input))
@@ -1040,11 +1040,11 @@ func TestAutomationCompositeConstraintsAndProjectCascade(t *testing.T) {
 }
 
 func TestAutomationGraphServiceHistoryAndResourceWrappers(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
-	project := automationTestProject(t, teststores.Of(db).Projects, "Automation graph wrappers")
-	task, schedule := automationTestTaskAndSchedule(t, teststores.Of(db).Tasks, teststores.Of(db).Schedules, project.ID, "Automation wrapper task")
-	automationRepo := teststores.Of(db).Automations
+	project := automationTestProject(t, env.Projects, "Automation graph wrappers")
+	task, schedule := automationTestTaskAndSchedule(t, env.Tasks, env.Schedules, project.ID, "Automation wrapper task")
+	automationRepo := env.Automations
 	registration := NewAutomationRegistrationService(automationRepo, NewAutomationAdapterRegistry())
 	definition, reused, err := registration.Register(ctx, AutomationRegistrationRequest{
 		ProjectID: project.ID, AdapterKey: AutomationAdapterNativeSDLC, StableKey: "native-sdlc/wrappers",
@@ -1101,12 +1101,12 @@ func TestAutomationGraphServiceHistoryAndResourceWrappers(t *testing.T) {
 }
 
 func TestAutomationAgentReferenceValidationMatchesCapabilityAndFallback(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
-	projectRepo := teststores.Of(db).Projects
+	projectRepo := env.Projects
 	project := automationTestProject(t, projectRepo, "Agent validation parity")
-	agentRepo := teststores.Of(db).Agents
-	teststores.ClearAgents(t, teststores.Of(db).Agents)
+	agentRepo := env.Agents
+	teststores.ClearAgents(t, env.Agents)
 
 	global := automationValidationFixtureAgent("Global Agent", "global-agent")
 	require.NoError(t, agentRepo.Create(ctx, global))
@@ -1121,9 +1121,9 @@ func TestAutomationAgentReferenceValidationMatchesCapabilityAndFallback(t *testi
 	capabilities := NewAutomationCapabilitySnapshotBuilder(projectRepo, agentRepo, nil, nil)
 	snapshot, err := capabilities.BuildForValidation(ctx, project.ID, true)
 	require.NoError(t, err)
-	capabilityIssues := NewAutomationDraftService(teststores.Of(db).Automations, NewAutomationAdapterRegistry()).ValidateCandidateWithCapabilities(candidate, snapshot)
+	capabilityIssues := NewAutomationDraftService(env.Automations, NewAutomationAdapterRegistry()).ValidateCandidateWithCapabilities(candidate, snapshot)
 
-	validator := NewAutomationSaveValidator(NewAutomationAdapterRegistry(), NewAutomationDraftService(teststores.Of(db).Automations, NewAutomationAdapterRegistry()))
+	validator := NewAutomationSaveValidator(NewAutomationAdapterRegistry(), NewAutomationDraftService(env.Automations, NewAutomationAdapterRegistry()))
 	validator.SetAgentRepository(agentRepo)
 	fallbackIssues, err := validator.agentIssues(ctx, project.ID, candidate)
 	require.NoError(t, err)

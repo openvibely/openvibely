@@ -44,10 +44,16 @@ func NewDB(tb testing.TB) *sql.DB {
 }
 
 type options struct {
+	countIO     bool
 	broadcaster *events.Broadcaster
 }
 
 type Option func(*options)
+
+// WithIOCounting instruments real backend requests and data read by the driver.
+func WithIOCounting() Option {
+	return func(o *options) { o.countIO = true }
+}
 
 // WithBroadcaster wires b into stores that publish events.
 func WithBroadcaster(b *events.Broadcaster) Option {
@@ -71,6 +77,7 @@ func Of(db *sql.DB, opts ...Option) persistence.Stores {
 
 // Env is a fresh test database and the stores built on it.
 type Env struct {
+	IO       storefixture.IOCounter
 	Fixtures storefixture.Fixtures
 	persistence.Stores
 }
@@ -84,8 +91,16 @@ func New(tb testing.TB, opts ...Option) *Env {
 	}
 	switch driver := Driver(); driver {
 	case config.DatabaseDriverSQLite:
-		db := testutil.NewTestDB(tb)
-		return &Env{Fixtures: sqlitefixtures.New(db), Stores: sqlite.NewStores(db, o.broadcaster)}
+		var db *sql.DB
+		var counter storefixture.IOCounter
+		if o.countIO {
+			var sqliteCounter *testutil.SQLStatementCounter
+			db, sqliteCounter = testutil.NewStatementCountingTestDB(tb)
+			counter = sqlitefixtures.NewIOCounter(sqliteCounter)
+		} else {
+			db = testutil.NewTestDB(tb)
+		}
+		return &Env{Fixtures: sqlitefixtures.New(db), Stores: sqlite.NewStores(db, o.broadcaster), IO: counter}
 	default:
 		tb.Fatalf("unsupported %s %q (supported: %s)", DriverEnv, driver, config.DatabaseDriverSQLite)
 		return nil

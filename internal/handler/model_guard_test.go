@@ -60,9 +60,9 @@ func TestHandlerHasConfiguredModelsNilRepoErrors(t *testing.T) {
 }
 
 func TestHandlerHasConfiguredModelsEmptyRepo(t *testing.T) {
-	db := teststores.NewDB(t)
-	repo := teststores.Of(db).LLMConfigs
-	teststores.ClearLLMConfigs(t, teststores.Of(db).LLMConfigs)
+	env := teststores.New(t)
+	repo := env.LLMConfigs
+	teststores.ClearLLMConfigs(t, env.LLMConfigs)
 	h := &Handler{llmConfigRepo: repo}
 	c := echo.New().NewContext(httptest.NewRequest(http.MethodGet, "/", nil), httptest.NewRecorder())
 

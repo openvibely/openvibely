@@ -252,14 +252,14 @@ func TestProjectService_DeleteCleansLocalTaskWorktreeAndMutationHistory(t *testi
 }
 
 func TestProjectService_DeleteCleansManagedCloneAndPreservesUserOwnedGitHubCheckout(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
-	projectRepo := teststores.Of(db).Projects
-	taskRepo := teststores.Of(db).Tasks
+	projectRepo := env.Projects
+	taskRepo := env.Tasks
 	projectSvc := NewProjectService(projectRepo)
-	projectSvc.SetTaskService(NewTaskService(taskRepo, teststores.Of(db).Attachments, nil))
+	projectSvc.SetTaskService(NewTaskService(taskRepo, env.Attachments, nil))
 	managedRoot := filepath.Join(t.TempDir(), "managed-repositories")
-	projectSvc.SetManagedProjectRepoResolver(NewGitHubService(teststores.Of(db).Settings, "", "", "", managedRoot))
+	projectSvc.SetManagedProjectRepoResolver(NewGitHubService(env.Settings, "", "", "", managedRoot))
 
 	managed := &models.Project{Name: "Managed clone", RepoURL: "https://github.com/example/managed"}
 	if err := projectRepo.Create(ctx, managed); err != nil {
@@ -338,11 +338,11 @@ func TestProjectService_DeleteCleansManagedCloneAndPreservesUserOwnedGitHubCheck
 }
 
 func TestProjectService_DeleteFilesystemStagingFailurePreservesRelationalData(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
-	projectRepo := teststores.Of(db).Projects
-	taskRepo := teststores.Of(db).Tasks
-	attachmentRepo := teststores.Of(db).Attachments
+	projectRepo := env.Projects
+	taskRepo := env.Tasks
+	attachmentRepo := env.Attachments
 	projectSvc := NewProjectService(projectRepo)
 	projectSvc.SetTaskService(NewTaskService(taskRepo, attachmentRepo, nil))
 
@@ -380,8 +380,8 @@ func TestProjectService_DeleteFilesystemStagingFailurePreservesRelationalData(t 
 // catches project repo paths that no longer exist on disk — the core of the
 // container-restart persistence bug.
 func TestValidateRepoPaths_DetectsMissingRepoPath(t *testing.T) {
-	db := teststores.NewDB(t)
-	projectRepo := teststores.Of(db).Projects
+	env := teststores.New(t)
+	projectRepo := env.Projects
 	svc := NewProjectService(projectRepo)
 	ctx := context.Background()
 
@@ -408,8 +408,8 @@ func TestValidateRepoPaths_DetectsMissingRepoPath(t *testing.T) {
 // TestValidateRepoPaths_SkipsExistingPath ensures valid repo paths don't
 // produce false positives.
 func TestValidateRepoPaths_SkipsExistingPath(t *testing.T) {
-	db := teststores.NewDB(t)
-	projectRepo := teststores.Of(db).Projects
+	env := teststores.New(t)
+	projectRepo := env.Projects
 	svc := NewProjectService(projectRepo)
 	ctx := context.Background()
 
@@ -431,8 +431,8 @@ func TestValidateRepoPaths_SkipsExistingPath(t *testing.T) {
 // TestValidateRepoPaths_SkipsEmptyRepoPath ensures projects without repo_path
 // (no repo configured) don't produce warnings.
 func TestValidateRepoPaths_SkipsEmptyRepoPath(t *testing.T) {
-	db := teststores.NewDB(t)
-	projectRepo := teststores.Of(db).Projects
+	env := teststores.New(t)
+	projectRepo := env.Projects
 	svc := NewProjectService(projectRepo)
 	ctx := context.Background()
 
@@ -450,8 +450,8 @@ func TestValidateRepoPaths_SkipsEmptyRepoPath(t *testing.T) {
 }
 
 func TestValidateRepoPaths_PreservesWarningContentsForMixedPaths(t *testing.T) {
-	db := teststores.NewDB(t)
-	projectRepo := teststores.Of(db).Projects
+	env := teststores.New(t)
+	projectRepo := env.Projects
 	svc := NewProjectService(projectRepo)
 	ctx := context.Background()
 
@@ -491,13 +491,13 @@ func TestValidateRepoPaths_PreservesWarningContentsForMixedPaths(t *testing.T) {
 // TestExecuteTaskWithAgent_FailsOnMissingRepoPath verifies that task execution
 // produces a clear failure when the project repo path is gone (post-restart).
 func TestExecuteTaskWithAgent_FailsOnMissingRepoPath(t *testing.T) {
-	db := teststores.NewDB(t)
-	llmConfigRepo := teststores.Of(db).LLMConfigs
-	execRepo := teststores.Of(db).Executions
-	taskRepo := teststores.Of(db).Tasks
-	projectRepo := teststores.Of(db).Projects
-	scheduleRepo := teststores.Of(db).Schedules
-	attachmentRepo := teststores.Of(db).Attachments
+	env := teststores.New(t)
+	llmConfigRepo := env.LLMConfigs
+	execRepo := env.Executions
+	taskRepo := env.Tasks
+	projectRepo := env.Projects
+	scheduleRepo := env.Schedules
+	attachmentRepo := env.Attachments
 	ctx := context.Background()
 
 	mock := testutil.NewMockLLMCaller()
@@ -572,10 +572,10 @@ func TestExecuteTaskWithAgent_FailsOnMissingRepoPath(t *testing.T) {
 }
 
 func TestProjectService_ValidatesProjectWorkerLimitAgainstGlobal(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
-	projectRepo := teststores.Of(db).Projects
-	workerRepo := teststores.Of(db).Workers
+	projectRepo := env.Projects
+	workerRepo := env.Workers
 	svc := NewProjectService(projectRepo)
 	svc.SetWorkerRepo(workerRepo)
 

@@ -8648,7 +8648,7 @@ func TestHandler_GetTaskThread_HidesLifecycleAgentActivity(t *testing.T) {
 		Status:         models.LifecycleExecCompleted,
 		OutputJSON:     `{"title":"Prepared useful context","content":"private context"}`,
 	}
-	if err := h.lifecycleRepo.(*sqlite.LifecycleRepo).CreateExecution(ctx, lifeExec); err != nil {
+	if err := h.lifecycleRepo.CreateExecution(ctx, lifeExec); err != nil {
 		t.Fatalf("create lifecycle execution: %v", err)
 	}
 
@@ -8832,7 +8832,7 @@ func TestHandler_GetTaskThread_RunningPlaceholder_NoLiteralThinkingText(t *testi
 		ex.Status = models.ExecRunning
 		ex.PromptSent = "Thread prompt"
 	})
-	assert.NoError(t, h.execRepo.(*sqlite.ExecutionRepo).UpdateOutput(ctx, exec.ID, ""))
+	assert.NoError(t, h.execRepo.FinalizeOutput(ctx, exec.ID, ""))
 
 	rec := htmxGet(e, "/tasks/"+task.ID+"/thread")
 	assertCode(t, rec, http.StatusOK)
@@ -8860,7 +8860,7 @@ func TestHandler_GetTaskThread_RunningWithPartialOutput_ShowsStreamingDots(t *te
 		ex.Status = models.ExecRunning
 		ex.PromptSent = "Thread prompt"
 	})
-	assert.NoError(t, h.execRepo.(*sqlite.ExecutionRepo).UpdateOutput(ctx, exec.ID, "Partial thread output"))
+	assert.NoError(t, h.execRepo.FinalizeOutput(ctx, exec.ID, "Partial thread output"))
 
 	rec := htmxGet(e, "/tasks/"+task.ID+"/thread")
 	assertCode(t, rec, http.StatusOK)
@@ -8907,7 +8907,7 @@ func TestHandler_GetTaskThread_ScheduledTaskExecutionSurvivesStaleRecoverySweep(
 		ex.Status = models.ExecRunning
 		ex.PromptSent = "Consolidate memories"
 	})
-	assert.NoError(t, h.execRepo.(*sqlite.ExecutionRepo).UpdateOutput(ctx, exec.ID, "partial consolidation output"))
+	assert.NoError(t, h.execRepo.FinalizeOutput(ctx, exec.ID, "partial consolidation output"))
 
 	// Simulate an unrelated concurrent request triggering the stale-execution
 	// recovery sweep while the scheduled task is legitimately still running.
@@ -8970,7 +8970,7 @@ func TestHandler_GetTaskThread_ChannelSwarmChildFollowupSurvivesStaleRecoverySwe
 		stored, err := h.execRepo.GetByID(ctx, exec.ID)
 		return err == nil && stored != nil && stored.Status == models.ExecRunning
 	}, 2*time.Second, 25*time.Millisecond)
-	assert.NoError(t, h.execRepo.(*sqlite.ExecutionRepo).UpdateOutput(ctx, exec.ID, "partial worker output"))
+	assert.NoError(t, h.execRepo.FinalizeOutput(ctx, exec.ID, "partial worker output"))
 
 	_, err := h.execRepo.RecoverStaleRunningTaskExecutions(ctx)
 	assert.NoError(t, err)
@@ -9101,7 +9101,7 @@ func TestHandler_GetTaskThread_PreservesHistoryAfterFailureAndRetry(t *testing.T
 		ex.IsFollowup = true
 	})
 	streamedFailureOutput := "running go test ./...\n--- FAIL: TestWidget"
-	if err := h.execRepo.(*sqlite.ExecutionRepo).UpdateOutput(ctx, failedFollowup.ID, streamedFailureOutput); err != nil {
+	if err := h.execRepo.FinalizeOutput(ctx, failedFollowup.ID, streamedFailureOutput); err != nil {
 		t.Fatalf("failed to seed streamed failure output: %v", err)
 	}
 	h.execRepo.Complete(ctx, failedFollowup.ID, models.ExecFailed, "", "go test failed", 0, 120)
@@ -9169,7 +9169,7 @@ func TestHandler_GetTaskThread_PreservesHistoryAfterRateLimitFailure(t *testing.
 		ex.IsFollowup = true
 	})
 	streamedFailureOutput := "starting retry flow..."
-	if err := h.execRepo.(*sqlite.ExecutionRepo).UpdateOutput(ctx, rateLimited.ID, streamedFailureOutput); err != nil {
+	if err := h.execRepo.FinalizeOutput(ctx, rateLimited.ID, streamedFailureOutput); err != nil {
 		t.Fatalf("failed to seed streamed failure output: %v", err)
 	}
 	rateLimitErr := `API error 429: {"type":"error","error":{"type":"rate_limit_error","message":"This request would exceed your account's rate limit. Please try again later."}}`

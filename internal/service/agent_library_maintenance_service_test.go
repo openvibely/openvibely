@@ -15,9 +15,9 @@ import (
 
 func TestAgentLibraryMaintenanceService_ProjectDeclarationsRetainPrecedenceAcrossContextChanges(t *testing.T) {
 	ctx := context.Background()
-	db := teststores.NewDB(t)
-	agentRepo := teststores.Of(db).Agents
-	projectRepo := teststores.Of(db).Projects
+	env := teststores.New(t)
+	agentRepo := env.Agents
+	projectRepo := env.Projects
 	projectAModel := &models.Project{Name: "Project A", RepoPath: t.TempDir()}
 	projectBModel := &models.Project{Name: "Project B", RepoPath: t.TempDir()}
 	if err := projectRepo.Create(ctx, projectAModel); err != nil {
@@ -65,9 +65,9 @@ func TestAgentLibraryMaintenanceService_ProjectDeclarationsRetainPrecedenceAcros
 
 func TestAgentLibraryMaintenanceService_ProjectDeclarationRemovalRestoresGlobalPrecedence(t *testing.T) {
 	ctx := context.Background()
-	db := teststores.NewDB(t)
-	agentRepo := teststores.Of(db).Agents
-	projectRepo := teststores.Of(db).Projects
+	env := teststores.New(t)
+	agentRepo := env.Agents
+	projectRepo := env.Projects
 	project := &models.Project{Name: "Project", RepoPath: t.TempDir()}
 	if err := projectRepo.Create(ctx, project); err != nil {
 		t.Fatalf("create project: %v", err)
@@ -96,9 +96,9 @@ func TestAgentLibraryMaintenanceService_ProjectDeclarationRemovalRestoresGlobalP
 
 func TestAgentLibraryMaintenanceService_ProjectDeclarationRekeyRestoresGlobalPrecedence(t *testing.T) {
 	ctx := context.Background()
-	db := teststores.NewDB(t)
-	agentRepo := teststores.Of(db).Agents
-	projectRepo := teststores.Of(db).Projects
+	env := teststores.New(t)
+	agentRepo := env.Agents
+	projectRepo := env.Projects
 	project := &models.Project{Name: "Project", RepoPath: t.TempDir()}
 	if err := projectRepo.Create(ctx, project); err != nil {
 		t.Fatalf("create project: %v", err)
@@ -137,9 +137,9 @@ func assertAgentDeclarationState(t *testing.T, ctx context.Context, agentRepo pe
 
 func TestAgentLibraryMaintenanceService_ProtectedRepairUsesCachedDeclarations(t *testing.T) {
 	ctx := context.Background()
-	db := teststores.NewDB(t)
-	agentRepo := teststores.Of(db).Agents
-	lifecycleRepo := teststores.Of(db).Lifecycle
+	env := teststores.New(t)
+	agentRepo := env.Agents
+	lifecycleRepo := env.Lifecycle
 	root := t.TempDir()
 	if err := builtinskills.SyncTo(root); err != nil {
 		t.Fatalf("SyncTo: %v", err)
@@ -192,8 +192,8 @@ func writeAgentRootDeclarationAt(t *testing.T, root, directoryKey, declarationKe
 
 func TestAgentLibraryMaintenanceService_SyncRootDeclarationsWithoutLifecycleRepo(t *testing.T) {
 	ctx := context.Background()
-	db := teststores.NewDB(t)
-	agentRepo := teststores.Of(db).Agents
+	env := teststores.New(t)
+	agentRepo := env.Agents
 	root := t.TempDir()
 	dir := filepath.Join(root, "agents", "hooked")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -322,9 +322,9 @@ func TestAgentLibraryMaintenanceService_WarmSyncSkipsUnchangedDeclarationContent
 }
 
 func TestAgentLibraryMaintenanceService_SyncRootDeclarationsAppliesAgentMetadata(t *testing.T) {
-	db := teststores.NewDB(t)
-	agentRepo := teststores.Of(db).Agents
-	lifecycleRepo := teststores.Of(db).Lifecycle
+	env := teststores.New(t)
+	agentRepo := env.Agents
+	lifecycleRepo := env.Lifecycle
 	root := t.TempDir()
 	agentDir := filepath.Join(root, "agents", "backend")
 	if err := os.MkdirAll(agentDir, 0o755); err != nil {
@@ -382,9 +382,9 @@ lifecycle_hooks:
 
 func TestAgentLibraryMaintenanceService_SyncRootDeclarationsSkipsProtectedSystemAgents(t *testing.T) {
 	ctx := context.Background()
-	db := teststores.NewDB(t)
-	agentRepo := teststores.Of(db).Agents
-	lifecycleRepo := teststores.Of(db).Lifecycle
+	env := teststores.New(t)
+	agentRepo := env.Agents
+	lifecycleRepo := env.Lifecycle
 	root := t.TempDir()
 	if err := builtinskills.SyncTo(root); err != nil {
 		t.Fatalf("SyncTo: %v", err)
@@ -419,9 +419,9 @@ func TestAgentLibraryMaintenanceService_SyncRootDeclarationsSkipsProtectedSystem
 
 func TestAgentLibraryMaintenanceService_SyncRootDeclarationsSeedsProtectedGoalAgent(t *testing.T) {
 	ctx := context.Background()
-	db := teststores.NewDB(t)
-	agentRepo := teststores.Of(db).Agents
-	lifecycleRepo := teststores.Of(db).Lifecycle
+	env := teststores.New(t)
+	agentRepo := env.Agents
+	lifecycleRepo := env.Lifecycle
 	agentsRoot := t.TempDir()
 	if err := builtinskills.SyncTo(agentsRoot); err != nil {
 		t.Fatalf("SyncTo: %v", err)
@@ -462,9 +462,9 @@ func TestAgentLibraryMaintenanceService_SyncRootDeclarationsSeedsProtectedGoalAg
 
 func TestAgentLibraryMaintenanceService_SyncRootDeclarationsRepairsLegacyGoalAgentByKey(t *testing.T) {
 	ctx := context.Background()
-	db := teststores.NewDB(t)
-	agentRepo := teststores.Of(db).Agents
-	lifecycleRepo := teststores.Of(db).Lifecycle
+	env := teststores.New(t)
+	agentRepo := env.Agents
+	lifecycleRepo := env.Lifecycle
 	agentsRoot := t.TempDir()
 	if err := builtinskills.SyncTo(agentsRoot); err != nil {
 		t.Fatalf("SyncTo: %v", err)
@@ -521,11 +521,11 @@ func TestAgentLibraryMaintenanceService_SyncRootDeclarationsRepairsLegacyGoalAge
 }
 
 func TestAgentLibraryMaintenanceService_EnsureProjectCreatesVisibleScheduledTask(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
-	scheduleRepo := teststores.Of(db).Schedules
-	agentRepo := teststores.Of(db).Agents
-	lifecycleRepo := teststores.Of(db).Lifecycle
+	env := teststores.New(t)
+	taskRepo := env.Tasks
+	scheduleRepo := env.Schedules
+	agentRepo := env.Agents
+	lifecycleRepo := env.Lifecycle
 	agentsRoot := t.TempDir()
 	if err := builtinskills.SyncTo(agentsRoot); err != nil {
 		t.Fatalf("SyncTo: %v", err)
@@ -535,7 +535,7 @@ func TestAgentLibraryMaintenanceService_EnsureProjectCreatesVisibleScheduledTask
 	svc.SetAgentsRootPath(agentsRoot)
 
 	ctx := context.Background()
-	projectRepo := teststores.Of(db).Projects
+	projectRepo := env.Projects
 	project := &models.Project{Name: "agent-library-maintenance", Description: "test"}
 	if err := projectRepo.Create(ctx, project); err != nil {
 		t.Fatalf("create project: %v", err)
@@ -711,12 +711,12 @@ func TestAgentLibraryMaintenanceService_EnsureProjectCreatesVisibleScheduledTask
 }
 func TestAgentLibraryMaintenanceService_EnsureProjectPreservesSystemAgentModelAndEnabled(t *testing.T) {
 	ctx := context.Background()
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
-	scheduleRepo := teststores.Of(db).Schedules
-	agentRepo := teststores.Of(db).Agents
-	lifecycleRepo := teststores.Of(db).Lifecycle
-	modelRepo := teststores.Of(db).LLMConfigs
+	env := teststores.New(t)
+	taskRepo := env.Tasks
+	scheduleRepo := env.Schedules
+	agentRepo := env.Agents
+	lifecycleRepo := env.Lifecycle
+	modelRepo := env.LLMConfigs
 	modelCfg := &models.LLMConfig{Name: "System Agent Model", Provider: models.ProviderAnthropic, Model: "claude-system-test", AuthMethod: models.AuthMethodAPIKey, APIKey: "test-key"}
 	if err := modelRepo.Create(ctx, modelCfg); err != nil {
 		t.Fatalf("create model config: %v", err)
@@ -725,7 +725,7 @@ func TestAgentLibraryMaintenanceService_EnsureProjectPreservesSystemAgentModelAn
 	if err := builtinskills.SyncTo(agentsRoot); err != nil {
 		t.Fatalf("SyncTo: %v", err)
 	}
-	projectRepo := teststores.Of(db).Projects
+	projectRepo := env.Projects
 	project := &models.Project{Name: "system-agent-controls", Description: "test"}
 	if err := projectRepo.Create(ctx, project); err != nil {
 		t.Fatalf("create project: %v", err)
@@ -773,11 +773,11 @@ func TestAgentLibraryMaintenanceService_EnsureProjectPreservesSystemAgentModelAn
 
 func TestAgentLibraryMaintenanceService_EnsureGlobalAgentsRepairsRequiredGoalEnabledButPreservesModel(t *testing.T) {
 	ctx := context.Background()
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
-	scheduleRepo := teststores.Of(db).Schedules
-	agentRepo := teststores.Of(db).Agents
-	modelRepo := teststores.Of(db).LLMConfigs
+	env := teststores.New(t)
+	taskRepo := env.Tasks
+	scheduleRepo := env.Schedules
+	agentRepo := env.Agents
+	modelRepo := env.LLMConfigs
 	modelCfg := &models.LLMConfig{Name: "Goal Model", Provider: models.ProviderOpenAI, Model: "gpt-goal-test", AuthMethod: models.AuthMethodAPIKey, APIKey: "test-key"}
 	if err := modelRepo.Create(ctx, modelCfg); err != nil {
 		t.Fatalf("create model config: %v", err)
@@ -812,11 +812,11 @@ func TestAgentLibraryMaintenanceService_EnsureGlobalAgentsRepairsRequiredGoalEna
 
 func TestAgentLibraryMaintenanceService_EnsureProjectSanitizesLegacySystemDeclarationGrants(t *testing.T) {
 	ctx := context.Background()
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
-	scheduleRepo := teststores.Of(db).Schedules
-	agentRepo := teststores.Of(db).Agents
-	lifecycleRepo := teststores.Of(db).Lifecycle
+	env := teststores.New(t)
+	taskRepo := env.Tasks
+	scheduleRepo := env.Schedules
+	agentRepo := env.Agents
+	lifecycleRepo := env.Lifecycle
 	agentsRoot := t.TempDir()
 	if err := builtinskills.SyncTo(agentsRoot); err != nil {
 		t.Fatalf("SyncTo: %v", err)
@@ -832,7 +832,7 @@ func TestAgentLibraryMaintenanceService_EnsureProjectSanitizesLegacySystemDeclar
 	if err := os.WriteFile(declPath, []byte(legacyText), 0o644); err != nil {
 		t.Fatalf("write legacy declaration: %v", err)
 	}
-	projectRepo := teststores.Of(db).Projects
+	projectRepo := env.Projects
 	project := &models.Project{Name: "legacy-system-declaration", Description: "test"}
 	if err := projectRepo.Create(ctx, project); err != nil {
 		t.Fatalf("create project: %v", err)

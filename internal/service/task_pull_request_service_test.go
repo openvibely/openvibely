@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/testutil/teststores"
 )
 
@@ -579,7 +578,7 @@ func TestTaskPullRequestServiceOpenForTaskFallbackRoundTripsGitSpecialPaths(t *t
 	if _, err := svc.OpenForTask(ctx, project, task, OpenTaskPullRequestOptions{CommitMessage: "Publish special paths"}); err != nil {
 		t.Fatalf("OpenForTask: %v", err)
 	}
-	stats, err := statRepo.(*sqlite.TaskCommitStatRepo).ListProducedCommitStats(ctx, project.ID, time.Now().UTC().Add(-time.Minute))
+	stats, err := storeEnv.Fixtures.ProducedCommitStats(ctx, project.ID, time.Now().UTC().Add(-time.Minute))
 	if err != nil {
 		t.Fatalf("list stats: %v", err)
 	}
@@ -652,7 +651,7 @@ func TestTaskPullRequestServiceOpenForTaskRecordsPublishedCommitStat(t *testing.
 	if err != nil {
 		t.Fatalf("OpenForTask: %v", err)
 	}
-	stats, err := statRepo.(*sqlite.TaskCommitStatRepo).ListProducedCommitStats(ctx, project.ID, time.Now().UTC().Add(-time.Minute))
+	stats, err := storeEnv.Fixtures.ProducedCommitStats(ctx, project.ID, time.Now().UTC().Add(-time.Minute))
 	if err != nil {
 		t.Fatalf("list stats: %v", err)
 	}
@@ -724,7 +723,7 @@ func TestTaskPullRequestServiceOpenForTaskRecordsPublishedUpdateCommitStat(t *te
 	if err != nil {
 		t.Fatalf("OpenForTask: %v", err)
 	}
-	stats, err := statRepo.(*sqlite.TaskCommitStatRepo).ListProducedCommitStats(ctx, project.ID, time.Now().UTC().Add(-time.Minute))
+	stats, err := storeEnv.Fixtures.ProducedCommitStats(ctx, project.ID, time.Now().UTC().Add(-time.Minute))
 	if err != nil {
 		t.Fatalf("list stats: %v", err)
 	}

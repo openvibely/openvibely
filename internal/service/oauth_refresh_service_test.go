@@ -14,8 +14,8 @@ import (
 )
 
 func TestOAuthRefreshServiceRunOnceTimesOutAnthropicIdentityAndContinues(t *testing.T) {
-	db := teststores.NewDB(t)
-	repo := teststores.Of(db).LLMConfigs
+	env := teststores.New(t)
+	repo := env.LLMConfigs
 	ctx := context.Background()
 	anthropic := &models.LLMConfig{
 		Name: "Anthropic", Provider: models.ProviderAnthropic, Model: "claude",
@@ -69,8 +69,8 @@ func TestOAuthRefreshServiceRunOnceTimesOutAnthropicIdentityAndContinues(t *test
 }
 
 func TestOAuthRefreshServiceRunOnceAdoptsVerifiedAnthropicPrincipal(t *testing.T) {
-	db := teststores.NewDB(t)
-	repo := teststores.Of(db).LLMConfigs
+	env := teststores.New(t)
+	repo := env.LLMConfigs
 	ctx := context.Background()
 	configs := []*models.LLMConfig{
 		{Name: "First", Provider: models.ProviderAnthropic, Model: "claude-one", AuthMethod: models.AuthMethodOAuth, OAuthAccessToken: "access-a", OAuthRefreshToken: "refresh-a", OAuthExpiresAt: time.Now().Add(3 * time.Hour).UnixMilli()},
@@ -122,8 +122,8 @@ func TestOAuthRefreshServiceRunOnceAdoptsVerifiedAnthropicPrincipal(t *testing.T
 }
 
 func TestOAuthRefreshServiceRunOnceAdoptsVerifiedOpenAIPrincipal(t *testing.T) {
-	db := teststores.NewDB(t)
-	repo := teststores.Of(db).LLMConfigs
+	env := teststores.New(t)
+	repo := env.LLMConfigs
 	ctx := context.Background()
 	configs := []*models.LLMConfig{
 		{Name: "First", Provider: models.ProviderOpenAI, Model: "gpt-one", AuthMethod: models.AuthMethodOAuth, OAuthAccessToken: "access-a", OAuthRefreshToken: "refresh-a", OAuthExpiresAt: time.Now().Add(3 * time.Hour).UnixMilli()},
@@ -175,8 +175,8 @@ func TestOAuthRefreshServiceRunOnceAdoptsVerifiedOpenAIPrincipal(t *testing.T) {
 }
 
 func TestOAuthRefreshServiceRunOnceLinksExpiredOpenAIJWTWithMatchingIdentity(t *testing.T) {
-	db := teststores.NewDB(t)
-	repo := teststores.Of(db).LLMConfigs
+	env := teststores.New(t)
+	repo := env.LLMConfigs
 	ctx := context.Background()
 	sharedToken := openAITestJWT(`{"sub":"user-shared","chatgpt_account_id":"account-shared","email":"owner@example.com"}`)
 	differentToken := openAITestJWT(`{"sub":"user-other","chatgpt_account_id":"account-shared","email":"other@example.com"}`)
@@ -248,8 +248,8 @@ func TestOAuthRefreshServiceRunOnceUsesPersistedVerifiedOpenAIPrincipalAfterKeyR
 }
 
 func TestOAuthRefreshServiceRunOnceRefreshesEachExpiringConfigIndependently(t *testing.T) {
-	db := teststores.NewDB(t)
-	repo := teststores.Of(db).LLMConfigs
+	env := teststores.New(t)
+	repo := env.LLMConfigs
 	ctx := context.Background()
 	expiresSoon := time.Now().Add(5 * time.Minute).UnixMilli()
 	configs := []*models.LLMConfig{
@@ -349,8 +349,8 @@ func TestOAuthRefreshServiceRunOnceRefreshesSharedConnectionOnce(t *testing.T) {
 }
 
 func TestOAuthRefreshServicePersistsPermanentReauthAndSkipsUntilCleared(t *testing.T) {
-	db := teststores.NewDB(t)
-	repo := teststores.Of(db).LLMConfigs
+	env := teststores.New(t)
+	repo := env.LLMConfigs
 	ctx := context.Background()
 	cfg := &models.LLMConfig{Name: "Anthropic", Provider: models.ProviderAnthropic, Model: "claude", AuthMethod: models.AuthMethodOAuth, OAuthAccessToken: "old", OAuthRefreshToken: "refresh", OAuthExpiresAt: time.Now().Add(-time.Minute).UnixMilli()}
 	if err := repo.Create(ctx, cfg); err != nil {
@@ -394,8 +394,8 @@ func TestOAuthRefreshServicePersistsPermanentReauthAndSkipsUntilCleared(t *testi
 }
 
 func TestOAuthRefreshServiceStopWaitsForCanceledRefresh(t *testing.T) {
-	db := teststores.NewDB(t)
-	repo := teststores.Of(db).LLMConfigs
+	env := teststores.New(t)
+	repo := env.LLMConfigs
 	cfg := &models.LLMConfig{Name: "OpenAI", Provider: models.ProviderOpenAI, Model: "gpt", AuthMethod: models.AuthMethodOAuth, OAuthAccessToken: "old", OAuthRefreshToken: "refresh", OAuthExpiresAt: time.Now().Add(-time.Minute).UnixMilli()}
 	if err := repo.Create(context.Background(), cfg); err != nil {
 		t.Fatalf("create config: %v", err)
@@ -422,8 +422,8 @@ func TestOAuthRefreshServiceStopWaitsForCanceledRefresh(t *testing.T) {
 }
 
 func TestOAuthRefreshServiceReturnsOnlyOperationalErrors(t *testing.T) {
-	db := teststores.NewDB(t)
-	repo := teststores.Of(db).LLMConfigs
+	env := teststores.New(t)
+	repo := env.LLMConfigs
 	ctx := context.Background()
 	cfg := &models.LLMConfig{Name: "OpenAI", Provider: models.ProviderOpenAI, Model: "gpt", AuthMethod: models.AuthMethodOAuth, OAuthAccessToken: "old", OAuthRefreshToken: "refresh", OAuthExpiresAt: time.Now().Add(-time.Minute).UnixMilli()}
 	if err := repo.Create(ctx, cfg); err != nil {

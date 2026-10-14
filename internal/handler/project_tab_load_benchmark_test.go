@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/events"
-	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/openvibely/openvibely/internal/testutil/teststores"
 )
@@ -95,7 +94,7 @@ func BenchmarkProjectTabNavigationUnderLoad(b *testing.B) {
 							for {
 								sequence++
 								if mode.database {
-									if err := execWriter.(*sqlite.ExecutionRepo).UpdateOutput(ctx, id, fmt.Sprintf("%d\n%s", sequence, payload)); err != nil {
+									if err := execWriter.FinalizeOutput(ctx, id, fmt.Sprintf("%d\n%s", sequence, payload)); err != nil {
 										if ctx.Err() == nil {
 											errors <- err
 										}

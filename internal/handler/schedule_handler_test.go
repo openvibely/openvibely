@@ -634,14 +634,14 @@ func TestCreateScheduledTaskFromScheduleUsesCompactAgentProjection(t *testing.T)
 }
 
 func BenchmarkScheduleAgentOptionProjectionAndContent(b *testing.B) {
-	db := teststores.NewDB(b)
-	agentRepo := teststores.Of(db).Agents
-	projectRepo := teststores.Of(db).Projects
+	env := teststores.New(b)
+	agentRepo := env.Agents
+	projectRepo := env.Projects
 	project := &models.Project{Name: "Schedule Benchmark Project"}
 	if err := projectRepo.Create(context.Background(), project); err != nil {
 		b.Fatalf("create benchmark project: %v", err)
 	}
-	teststores.ClearAgents(b, teststores.Of(db).Agents)
+	teststores.ClearAgents(b, env.Agents)
 	for i := 0; i < 1000; i++ {
 		agent := &models.Agent{
 			Name:                fmt.Sprintf("Schedule Agent %04d", i),

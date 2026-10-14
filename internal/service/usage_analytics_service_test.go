@@ -28,10 +28,10 @@ import (
 )
 
 func TestUsageAnalyticsService_AccountInventoryAndScopedLimits(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
-	usageRepo := teststores.Of(db).Usage
-	configRepo := teststores.Of(db).LLMConfigs
+	usageRepo := env.Usage
+	configRepo := env.LLMConfigs
 	svc := NewUsageAnalyticsService(usageRepo, configRepo)
 	for i, account := range []string{"one", "one", "two"} {
 		cfg := &models.LLMConfig{Name: fmt.Sprintf("model-%d", i), Provider: models.ProviderOpenAI, Model: "test", AuthMethod: models.AuthMethodOAuth, OAuthAccessToken: "token-" + account, OAuthAccountID: account}
@@ -263,12 +263,12 @@ func TestUsageAnalyticsActionFilterFromInput_UsesNormalizedSummary(t *testing.T)
 }
 
 func TestExecuteViewUsageAnalyticsTool_ValidatesResultLimitsAndPreservesDefaults(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
-	usageRepo := teststores.Of(db).Usage
-	svc := NewUsageAnalyticsService(usageRepo, teststores.Of(db).LLMConfigs)
+	usageRepo := env.Usage
+	svc := NewUsageAnalyticsService(usageRepo, env.LLMConfigs)
 	project := &models.Project{Name: "Usage Analytics Tool Project"}
-	if err := teststores.Of(db).Projects.Create(ctx, project); err != nil {
+	if err := env.Projects.Create(ctx, project); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
 	projectID := project.ID
@@ -355,11 +355,11 @@ func TestExecuteViewUsageAnalyticsTool_ValidatesResultLimitsAndPreservesDefaults
 }
 
 func TestRecordUsageFromResult_PersistsOpenAICompatibleUsageAndAggregates(t *testing.T) {
-	db := teststores.NewDB(t)
-	repo := teststores.Of(db).Usage
+	env := teststores.New(t)
+	repo := env.Usage
 	ctx := context.Background()
 
-	configRepo := teststores.Of(db).LLMConfigs
+	configRepo := env.LLMConfigs
 	compatible := models.LLMConfig{Name: "OpenRouter", Provider: models.ProviderOpenAICompatible, AuthMethod: models.AuthMethodAPIKey, Model: "deepseek/deepseek-chat-v3.1:free", APIKey: "key"}
 	if err := configRepo.Create(ctx, &compatible); err != nil {
 		t.Fatalf("create compatible config: %v", err)
@@ -401,11 +401,11 @@ func TestRecordUsageFromResult_PersistsOpenAICompatibleUsageAndAggregates(t *tes
 }
 
 func TestRecordUsageFromResult_PersistsAnthropicAndOpenAIDetails(t *testing.T) {
-	db := teststores.NewDB(t)
-	repo := teststores.Of(db).Usage
+	env := teststores.New(t)
+	repo := env.Usage
 	ctx := context.Background()
 
-	configRepo := teststores.Of(db).LLMConfigs
+	configRepo := env.LLMConfigs
 	anthropic := models.LLMConfig{Name: "Anthropic", Provider: models.ProviderAnthropic, AuthMethod: models.AuthMethodOAuth, Model: "claude-sonnet-4-20250514", OAuthAccessToken: "token", OAuthAccountID: "anthropic-account"}
 	if err := configRepo.Create(ctx, &anthropic); err != nil {
 		t.Fatalf("create anthropic config: %v", err)
@@ -445,15 +445,15 @@ func TestRecordUsageFromResult_PersistsAnthropicAndOpenAIDetails(t *testing.T) {
 }
 
 func TestLLMService_CallAgentDirectRecordsAPIKeyUsageWithoutExecution(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
-	configRepo := teststores.Of(db).LLMConfigs
-	execRepo := teststores.Of(db).Executions
-	taskRepo := teststores.Of(db).Tasks
-	projectRepo := teststores.Of(db).Projects
-	scheduleRepo := teststores.Of(db).Schedules
-	attachmentRepo := teststores.Of(db).Attachments
-	usageRepo := teststores.Of(db).Usage
+	configRepo := env.LLMConfigs
+	execRepo := env.Executions
+	taskRepo := env.Tasks
+	projectRepo := env.Projects
+	scheduleRepo := env.Schedules
+	attachmentRepo := env.Attachments
+	usageRepo := env.Usage
 	svc := NewLLMService(configRepo, execRepo, taskRepo, projectRepo, scheduleRepo, attachmentRepo)
 	svc.SetUsageRepo(usageRepo)
 	svc.providerAdapters = map[models.LLMProvider]ProviderAdapter{
@@ -473,15 +473,15 @@ func TestLLMService_CallAgentDirectRecordsAPIKeyUsageWithoutExecution(t *testing
 }
 
 func TestLLMService_CallAgentDirectRecordsOpenAICompatibleUsage(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
-	configRepo := teststores.Of(db).LLMConfigs
-	execRepo := teststores.Of(db).Executions
-	taskRepo := teststores.Of(db).Tasks
-	projectRepo := teststores.Of(db).Projects
-	scheduleRepo := teststores.Of(db).Schedules
-	attachmentRepo := teststores.Of(db).Attachments
-	usageRepo := teststores.Of(db).Usage
+	configRepo := env.LLMConfigs
+	execRepo := env.Executions
+	taskRepo := env.Tasks
+	projectRepo := env.Projects
+	scheduleRepo := env.Schedules
+	attachmentRepo := env.Attachments
+	usageRepo := env.Usage
 	svc := NewLLMService(configRepo, execRepo, taskRepo, projectRepo, scheduleRepo, attachmentRepo)
 	svc.SetUsageRepo(usageRepo)
 	svc.providerAdapters = map[models.LLMProvider]ProviderAdapter{
@@ -505,15 +505,15 @@ func TestLLMService_CallAgentDirectRecordsOpenAICompatibleUsage(t *testing.T) {
 }
 
 func TestLLMService_CallAgentDirectUsageInfersProjectFromWorkDir(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
-	configRepo := teststores.Of(db).LLMConfigs
-	execRepo := teststores.Of(db).Executions
-	taskRepo := teststores.Of(db).Tasks
-	projectRepo := teststores.Of(db).Projects
-	scheduleRepo := teststores.Of(db).Schedules
-	attachmentRepo := teststores.Of(db).Attachments
-	usageRepo := teststores.Of(db).Usage
+	configRepo := env.LLMConfigs
+	execRepo := env.Executions
+	taskRepo := env.Tasks
+	projectRepo := env.Projects
+	scheduleRepo := env.Schedules
+	attachmentRepo := env.Attachments
+	usageRepo := env.Usage
 	svc := NewLLMService(configRepo, execRepo, taskRepo, projectRepo, scheduleRepo, attachmentRepo)
 	svc.SetUsageRepo(usageRepo)
 	svc.providerAdapters = map[models.LLMProvider]ProviderAdapter{
@@ -548,9 +548,9 @@ func (a staticProviderAdapter) Call(req llmcontracts.AgentRequest) (llmcontracts
 }
 
 func TestUsageAnalyticsService_RefreshesAccountsAndProvidersInParallel(t *testing.T) {
-	db := teststores.NewDB(t)
-	usageRepo := teststores.Of(db).Usage
-	configRepo := teststores.Of(db).LLMConfigs
+	env := teststores.New(t)
+	usageRepo := env.Usage
+	configRepo := env.LLMConfigs
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	for _, provider := range []models.LLMProvider{models.ProviderOpenAI, models.ProviderAnthropic} {
@@ -794,9 +794,9 @@ func TestUsageAnalyticsService_DedupesAccountLimitsByOAuthAccount(t *testing.T) 
 }
 
 func TestUsageAnalyticsService_DedupesAnthropicAccountLimitsByOAuthProfile(t *testing.T) {
-	db := teststores.NewDB(t)
-	usageRepo := teststores.Of(db).Usage
-	configRepo := teststores.Of(db).LLMConfigs
+	env := teststores.New(t)
+	usageRepo := env.Usage
+	configRepo := env.LLMConfigs
 	ctx := context.Background()
 
 	sonnet := &models.LLMConfig{Name: "Anthropic Sonnet", Provider: models.ProviderAnthropic, Model: "claude-sonnet", AuthMethod: models.AuthMethodOAuth, OAuthAccessToken: "access-one", OAuthRefreshToken: "refresh-one", OAuthExpiresAt: time.Now().Add(2 * time.Hour).UnixMilli()}
@@ -863,9 +863,9 @@ func TestUsageAnalyticsService_DedupesAnthropicAccountLimitsByOAuthProfile(t *te
 }
 
 func TestUsageAnalyticsService_KeepsAnthropicConfigsSeparateWhenProfileFails(t *testing.T) {
-	db := teststores.NewDB(t)
-	usageRepo := teststores.Of(db).Usage
-	configRepo := teststores.Of(db).LLMConfigs
+	env := teststores.New(t)
+	usageRepo := env.Usage
+	configRepo := env.LLMConfigs
 	ctx := context.Background()
 
 	first := &models.LLMConfig{Name: "Anthropic One", Provider: models.ProviderAnthropic, Model: "claude-sonnet", AuthMethod: models.AuthMethodOAuth, OAuthAccessToken: "access-one", OAuthRefreshToken: "refresh-one", OAuthExpiresAt: time.Now().Add(2 * time.Hour).UnixMilli()}
@@ -1382,9 +1382,9 @@ func TestUsageAnalyticsService_SharedAccountFailureFallsBackToHealthyConfig(t *t
 				name = string(provider) + "/reconnect_required"
 			}
 			t.Run(name, func(t *testing.T) {
-				db := teststores.NewDB(t)
-				usageRepo := teststores.Of(db).Usage
-				configRepo := teststores.Of(db).LLMConfigs
+				env := teststores.New(t)
+				usageRepo := env.Usage
+				configRepo := env.LLMConfigs
 				ctx := context.Background()
 
 				first := &models.LLMConfig{
@@ -1688,9 +1688,9 @@ func TestUsageAnalyticsService_SharedAccountNewerFailureDoesNotOverrideHealthyCa
 func TestUsageAnalyticsService_RefreshKeepsDuplicateAccountCredentialsIsolated(t *testing.T) {
 	for _, provider := range []models.LLMProvider{models.ProviderOpenAI, models.ProviderAnthropic} {
 		t.Run(string(provider), func(t *testing.T) {
-			db := teststores.NewDB(t)
-			usageRepo := teststores.Of(db).Usage
-			configRepo := teststores.Of(db).LLMConfigs
+			env := teststores.New(t)
+			usageRepo := env.Usage
+			configRepo := env.LLMConfigs
 			ctx := context.Background()
 
 			first := &models.LLMConfig{Name: "First", Provider: provider, Model: "model-one", AuthMethod: models.AuthMethodOAuth, OAuthAccessToken: "access-one", OAuthRefreshToken: "refresh-one", OAuthAccountID: "shared-account"}
@@ -1744,9 +1744,9 @@ func TestUsageAnalyticsService_RefreshKeepsDuplicateAccountCredentialsIsolated(t
 }
 
 func TestUsageAnalyticsService_DedupesAccountLimitsByOpenAIAccountID(t *testing.T) {
-	db := teststores.NewDB(t)
-	usageRepo := teststores.Of(db).Usage
-	configRepo := teststores.Of(db).LLMConfigs
+	env := teststores.New(t)
+	usageRepo := env.Usage
+	configRepo := env.LLMConfigs
 	ctx := context.Background()
 
 	codex := &models.LLMConfig{Name: "Codex", Provider: models.ProviderOpenAI, Model: "gpt-5.5-codex", AuthMethod: models.AuthMethodOAuth, OAuthAccessToken: "token-one", OAuthAccountID: "acct-same"}
@@ -1789,9 +1789,9 @@ func TestUsageAnalyticsService_DedupesAccountLimitsByOpenAIAccountID(t *testing.
 }
 
 func TestUsageAnalyticsService_KeepsDistinctOAuthAccountsSeparate(t *testing.T) {
-	db := teststores.NewDB(t)
-	usageRepo := teststores.Of(db).Usage
-	configRepo := teststores.Of(db).LLMConfigs
+	env := teststores.New(t)
+	usageRepo := env.Usage
+	configRepo := env.LLMConfigs
 	ctx := context.Background()
 
 	first := &models.LLMConfig{Name: "Anthropic One", Provider: models.ProviderAnthropic, Model: "claude-sonnet", AuthMethod: models.AuthMethodOAuth, OAuthAccessToken: "access-one", OAuthRefreshToken: "refresh-one", OAuthAccountID: "organization:org-one"}
@@ -2054,9 +2054,9 @@ func TestUsageAnalyticsService_RejectsStaleSnapshotAfterFetchGenerationChange(t 
 	for _, provider := range []models.LLMProvider{models.ProviderOpenAI, models.ProviderAnthropic} {
 		for _, change := range []string{"reconnect", "model_edit"} {
 			t.Run(string(provider)+"/"+change, func(t *testing.T) {
-				db := teststores.NewDB(t)
-				usageRepo := teststores.Of(db).Usage
-				configRepo := teststores.Of(db).LLMConfigs
+				env := teststores.New(t)
+				usageRepo := env.Usage
+				configRepo := env.LLMConfigs
 				ctx := context.Background()
 
 				config := &models.LLMConfig{
@@ -2137,9 +2137,9 @@ func TestUsageAnalyticsService_StaleAccountIdentityResolutionReturnsAuthoritativ
 	for _, provider := range []models.LLMProvider{models.ProviderOpenAI, models.ProviderAnthropic} {
 		for _, mutation := range []string{"reconnect", "model_edit"} {
 			t.Run(string(provider)+"/"+mutation, func(t *testing.T) {
-				db := teststores.NewDB(t)
-				usageRepo := teststores.Of(db).Usage
-				configRepo := teststores.Of(db).LLMConfigs
+				env := teststores.New(t)
+				usageRepo := env.Usage
+				configRepo := env.LLMConfigs
 				ctx := context.Background()
 
 				oldAccess := "old-access"
@@ -2238,9 +2238,9 @@ func TestUsageAnalyticsService_StaleAccountIdentityResolutionReturnsAuthoritativ
 }
 
 func TestUsageAnalyticsService_AnthropicProfileRaceAbandonsStaleUsageRequest(t *testing.T) {
-	db := teststores.NewDB(t)
-	usageRepo := teststores.Of(db).Usage
-	configRepo := teststores.Of(db).LLMConfigs
+	env := teststores.New(t)
+	usageRepo := env.Usage
+	configRepo := env.LLMConfigs
 	ctx := context.Background()
 	config := &models.LLMConfig{
 		Name:              "Anthropic profile race",
@@ -2302,9 +2302,9 @@ func TestUsageAnalyticsService_AnthropicProfileRaceAbandonsStaleUsageRequest(t *
 }
 
 func TestUsageAnalyticsService_AccountUsageRefreshesExpiredOpenAIOAuthBeforeRequest(t *testing.T) {
-	db := teststores.NewDB(t)
-	usageRepo := teststores.Of(db).Usage
-	configRepo := teststores.Of(db).LLMConfigs
+	env := teststores.New(t)
+	usageRepo := env.Usage
+	configRepo := env.LLMConfigs
 	ctx := context.Background()
 
 	jwtWithAccountID := "header.eyJodHRwczovL2FwaS5vcGVuYWkuY29tL2F1dGgiOnsiY2hhdGdwdF9hY2NvdW50X2lkIjoiYWNjdC1mcm9tLWp3dCJ9fQ.sig"
@@ -2366,9 +2366,9 @@ func TestUsageAnalyticsService_AccountUsageRefreshesExpiredOpenAIOAuthBeforeRequ
 }
 
 func TestUsageAnalyticsService_AccountUsageRecoversUnauthorizedAnthropicWithFreshToken(t *testing.T) {
-	db := teststores.NewDB(t)
-	usageRepo := teststores.Of(db).Usage
-	configRepo := teststores.Of(db).LLMConfigs
+	env := teststores.New(t)
+	usageRepo := env.Usage
+	configRepo := env.LLMConfigs
 	ctx := context.Background()
 
 	config := &models.LLMConfig{Name: "Anthropic OAuth", Provider: models.ProviderAnthropic, Model: "claude-sonnet", AuthMethod: models.AuthMethodOAuth, OAuthAccessToken: "stale-token", OAuthRefreshToken: "refresh-token", OAuthExpiresAt: time.Now().Add(2 * time.Hour).UnixMilli(), OAuthAccountID: "acct-anthropic"}
