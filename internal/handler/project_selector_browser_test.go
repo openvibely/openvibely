@@ -24,7 +24,7 @@ func TestProjectRelatedModalClosePositionStaysStationaryInChrome(t *testing.T) {
 		t.Skip("Chrome/Chromium executable not found")
 	}
 
-	_, app, _, _ := setupTestHandlerWithDB(t)
+	_, app, _, _ := setupTestHandlerWithStores(t)
 	result := make(chan string, 2)
 	runner := `<script>
 	(async function() {

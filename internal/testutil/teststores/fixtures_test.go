@@ -911,3 +911,53 @@ func TestExecutionHistoryFixturePersistsExactStateAndRollsBack(t *testing.T) {
 		})
 	}
 }
+
+func TestHistoryIOCountersDistinguishBoundedAndUnboundedReads(t *testing.T) {
+	for _, production := range []bool{false, true} {
+		name := "isolated"
+		if production {
+			name = "production"
+		}
+		t.Run(name, func(t *testing.T) {
+			opts := []teststores.Option{teststores.WithIOCounting()}
+			if production {
+				opts = append(opts, teststores.WithProductionTopology())
+			}
+			env := teststores.New(t, opts...)
+			ctx := t.Context()
+			task := models.Task{ProjectID: "default", Title: "History instrumentation", Category: models.CategoryBacklog, Status: models.StatusPending, Priority: 2}
+			require.NoError(t, env.Tasks.Create(ctx, &task))
+			before, err := env.Tasks.GetByID(ctx, task.ID)
+			require.NoError(t, err)
+			payload := storefixture.TaskPayload{Prompt: "changed instructions", ChainConfig: "legacy chain", SwarmConfig: "legacy swarm"}
+			require.NoError(t, env.Fixtures.SetTaskPayload(ctx, task.ID, payload))
+			after, err := env.Tasks.GetByID(ctx, task.ID)
+			require.NoError(t, err)
+			require.Equal(t, payload.Prompt, after.Prompt)
+			require.Equal(t, payload.ChainConfig, after.ChainConfig)
+			require.Equal(t, payload.SwarmConfig, after.SwarmConfig)
+			require.Equal(t, before.UpdatedAt, after.UpdatedAt)
+			require.Equal(t, before.Status, after.Status)
+			for _, bounded := range []bool{true, false} {
+				env.IO.Reset()
+				env.IO.SetEnabled(true)
+				if bounded {
+					_, err = env.Executions.ListByTaskChronologicalLimit(ctx, task.ID, 3)
+				} else {
+					_, err = env.Executions.ListByTaskChronological(ctx, task.ID)
+				}
+				env.IO.SetEnabled(false)
+				require.NoError(t, err)
+				stats := env.IO.Snapshot()
+				require.Equal(t, 1, stats.Requests)
+				if bounded {
+					require.Equal(t, 1, stats.ExecutionWindowReads)
+					require.Zero(t, stats.UnboundedExecutionHistoryReads)
+				} else {
+					require.Equal(t, 1, stats.UnboundedExecutionHistoryReads)
+					require.Zero(t, stats.ExecutionWindowReads)
+				}
+			}
+		})
+	}
+}

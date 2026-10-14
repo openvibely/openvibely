@@ -14,21 +14,20 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/service"
-	"github.com/openvibely/openvibely/internal/testutil/teststores"
 )
 
 func TestHandler_GetTaskChangesFile_LoadsRequestedInlineFile(t *testing.T) {
-	h, e, _, db := setupTestHandlerWithDB(t)
+	h, e, _, db := setupTestHandlerWithStores(t)
 	defer db.Close()
 
 	ctx := context.Background()
-	projectRepo := teststores.Of(db).Projects
+	projectRepo := db.Projects
 	projects, err := projectRepo.List(ctx)
 	if err != nil || len(projects) == 0 {
 		t.Fatalf("expected default project, err=%v", err)
 	}
 	project := projects[0]
-	reviewRepo := teststores.Of(db).ReviewComments
+	reviewRepo := db.ReviewComments
 	h.SetReviewCommentRepo(reviewRepo)
 
 	task := &models.Task{
@@ -140,13 +139,13 @@ diff --git a/b.txt b/b.txt
 }
 
 func TestHandlerLoadTaskReviewComments_PreservesOptionalReadContract(t *testing.T) {
-	h, _, _, db := setupTestHandlerWithDB(t)
+	h, _, _, db := setupTestHandlerWithStores(t)
 	defer db.Close()
 
 	ctx := context.Background()
 	project := createProject(t, h, "Review comment loader")
 	task := createTask(t, h, project.ID, "Review comment loader task")
-	reviewRepo := teststores.Of(db).ReviewComments
+	reviewRepo := db.ReviewComments
 	h.SetReviewCommentRepo(reviewRepo)
 	comment := &models.ReviewComment{
 		TaskID:      task.ID,
@@ -178,7 +177,7 @@ func TestHandlerLoadTaskReviewComments_PreservesOptionalReadContract(t *testing.
 }
 
 func TestHandler_GetTaskChangesFile_RecoversLiveWorktreeLineage(t *testing.T) {
-	h, e, _, db := setupTestHandlerWithDB(t)
+	h, e, _, db := setupTestHandlerWithStores(t)
 	defer db.Close()
 
 	ctx := context.Background()
@@ -272,7 +271,7 @@ func TestHandler_GetTaskChangesFile_RecoversLiveWorktreeLineage(t *testing.T) {
 }
 
 func TestHandler_GetTaskChangesFile_LoadsTargetedWorktreeUntrackedFile(t *testing.T) {
-	h, e, _, db := setupTestHandlerWithDB(t)
+	h, e, _, db := setupTestHandlerWithStores(t)
 	defer db.Close()
 
 	ctx := context.Background()
@@ -339,7 +338,7 @@ func TestHandler_GetTaskChangesFile_LoadsTargetedWorktreeUntrackedFile(t *testin
 }
 
 func TestHandler_GetTaskChangesFile_FallsBackToPreservedDiffWhenNonActiveBranchAlreadyMerged(t *testing.T) {
-	h, e, _, db := setupTestHandlerWithDB(t)
+	h, e, _, db := setupTestHandlerWithStores(t)
 	defer db.Close()
 
 	ctx := context.Background()
@@ -424,7 +423,7 @@ func TestHandler_GetTaskChangesFile_FallsBackToPreservedDiffWhenNonActiveBranchA
 }
 
 func TestCaptureTaskDiffOutput_UsesCurrentWorktreeLineageWhenMetadataIsStale(t *testing.T) {
-	h, _, _, db := setupTestHandlerWithDB(t)
+	h, _, _, db := setupTestHandlerWithStores(t)
 	defer db.Close()
 
 	ctx := context.Background()
@@ -482,11 +481,11 @@ func TestCaptureTaskDiffOutput_UsesCurrentWorktreeLineageWhenMetadataIsStale(t *
 }
 
 func TestHandler_GetTaskChangesFile_InvalidIndexReturnsBadRequest(t *testing.T) {
-	h, e, _, db := setupTestHandlerWithDB(t)
+	h, e, _, db := setupTestHandlerWithStores(t)
 	defer db.Close()
 
 	ctx := context.Background()
-	projectRepo := teststores.Of(db).Projects
+	projectRepo := db.Projects
 	projects, err := projectRepo.List(ctx)
 	if err != nil || len(projects) == 0 {
 		t.Fatalf("expected default project, err=%v", err)

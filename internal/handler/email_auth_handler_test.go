@@ -160,7 +160,7 @@ func TestEmailAuthorizedSendersValidation(t *testing.T) {
 }
 
 func TestEmailConfigurePresetsRemove(t *testing.T) {
-	h, e, _, _ := setupTestHandlerWithDB(t)
+	h, e, _, _ := setupTestHandlerWithStores(t)
 	form := url.Values{"email_provider": {"gmail"}, "email_address": {"bot@example.com"}, "email_password": {"abcd efgh ijkl mnop"}, "email_send_responses": {"true"}, "email_mark_existing_seen_on_start": {"true"}}
 	req := httptest.NewRequest(http.MethodPost, "/channels/email/configure", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -263,7 +263,7 @@ func (s *testEmailService) TestConnection(ctx context.Context) error {
 }
 
 func TestChannelsPageEmailUI(t *testing.T) {
-	h, e, _, _ := setupTestHandlerWithDB(t)
+	h, e, _, _ := setupTestHandlerWithStores(t)
 	_ = h.settingsRepo.Set(httptest.NewRequest(http.MethodGet, "/", nil).Context(), "email_address", "bot@example.com")
 	_ = h.settingsRepo.Set(httptest.NewRequest(http.MethodGet, "/", nil).Context(), "email_password", "super-secret-app-password")
 	_ = h.emailAuthRepo.Create(httptest.NewRequest(http.MethodGet, "/", nil).Context(), &models.EmailAuthorizedSender{ProjectID: "default", EmailAddress: "alice@example.com", AddedBy: "test"})

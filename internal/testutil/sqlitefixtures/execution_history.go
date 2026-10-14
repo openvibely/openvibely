@@ -27,3 +27,9 @@ func (f *fixtures) SeedExecutionHistory(ctx context.Context, entries []storefixt
 	}
 	return tx.Commit()
 }
+
+// SetTaskPayload deliberately preserves status and timestamps for polling stability tests.
+func (f *fixtures) SetTaskPayload(ctx context.Context, taskID string, payload storefixture.TaskPayload) error {
+	_, err := f.db.ExecContext(ctx, `UPDATE tasks SET prompt=?, chain_config=?, swarm_config=? WHERE id=?`, payload.Prompt, payload.ChainConfig, payload.SwarmConfig, taskID)
+	return err
+}
