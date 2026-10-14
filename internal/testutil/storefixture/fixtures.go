@@ -40,7 +40,13 @@ type TaskDiscoveryWorkload struct {
 	Count, PromptBytes, ConfigurationBytes int
 }
 
+// AutomationExecutionOwnership preserves exact activity and execution-resource multiplicity.
+type AutomationExecutionOwnership struct{ Activities, ExecutionResources int }
+
 type Fixtures interface {
+	RemoveAutomationTaskBinding(context.Context, string, string) error
+	AutomationExecutionOwnership(context.Context, string, string) (AutomationExecutionOwnership, error)
+	CountDispatchExecutions(context.Context, string) (int, error)
 	// CountAutomationInvocations includes all retained history; an empty trigger ID includes every trigger.
 	CountAutomationInvocations(context.Context, string, string, string) (int, error)
 	SeedTaskDiscoveryWorkload(context.Context, TaskDiscoveryWorkload) error
