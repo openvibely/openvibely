@@ -184,10 +184,10 @@ func TestTaskThreadPendingInputs_NoPendingInputs(t *testing.T) {
 }
 
 func TestTaskThreadPendingInputs_QueryFailureIsServerError(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	p := tc.CreateProject().Build()
 	task := tc.CreateTask(p.ID).Build()
-	if err := tc.db.Close(); err != nil {
+	if err := tc.stores.Close(); err != nil {
 		t.Fatalf("close test database: %v", err)
 	}
 

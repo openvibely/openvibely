@@ -19,7 +19,6 @@ import (
 	llmcustomauth "github.com/openvibely/openvibely/internal/llm/customauth"
 	llmoauth "github.com/openvibely/openvibely/internal/llm/oauth"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/service"
 	anthropicclient "github.com/openvibely/openvibely/pkg/anthropic_client"
 	"github.com/stretchr/testify/require"
@@ -47,7 +46,7 @@ func TestAnthropicOAuthCallbackPersistsProfileAndAdoptsVerifiedSameUser(t *testi
 	anthropicclient.AnthropicAPIHost = server.URL
 	defer func() { anthropicclient.AnthropicAPIHost = oldHost }()
 
-	h, _, repo := setupTestHandler(t)
+	h, _, repo, _ := setupTestHandlerWithStores(t)
 	h.oauthIdentityResolver = service.ResolveAnthropicOAuthIdentity
 	var configs []*models.LLMConfig
 	for _, suffix := range []string{"a", "b", "c"} {
@@ -123,7 +122,7 @@ func TestOpenAIOAuthCallbackPersistsIdentityAndAdoptsVerifiedSameUserAndAccount(
 	}))
 	defer server.Close()
 
-	h, _, repo := setupTestHandler(t)
+	h, _, repo, _ := setupTestHandlerWithStores(t)
 	h.openAIIdentityResolver = func(_ context.Context, token string) (service.OpenAIOAuthIdentity, error) {
 		for suffix, payload := range identities {
 			expected := "header." + base64.RawURLEncoding.EncodeToString([]byte(payload)) + ".signature"
@@ -200,7 +199,7 @@ func TestStandardOAuthCallbackClearsStaleAccountIdentityWhenNewIdentityIsUnavail
 			}))
 			defer tokenServer.Close()
 
-			h, _, repo := setupTestHandler(t)
+			h, _, repo, env := setupTestHandlerWithStores(t)
 			config := &models.LLMConfig{
 				Name:              string(provider) + " reconnect",
 				Provider:          provider,
@@ -221,7 +220,7 @@ func TestStandardOAuthCallbackClearsStaleAccountIdentityWhenNewIdentityIsUnavail
 				AuthMethod: models.AuthMethodOAuth,
 			}
 			require.NoError(t, repo.Create(context.Background(), sibling))
-			require.NoError(t, repo.(*sqlite.LLMConfigRepo).LinkOAuthConnection(context.Background(), sibling.ID, current.OAuthConnectionID))
+			require.NoError(t, env.Fixtures.LinkModelOAuthConnection(context.Background(), sibling.ID, current.OAuthConnectionID))
 
 			_, err = h.exchangeOAuthCodeAndSaveTokens(&oauthPendingFlow{
 				ConfigID:       current.ID,
@@ -322,14 +321,14 @@ func TestStandardOAuthCallbackRejectsModelReassignedToAnotherConnection(t *testi
 			}))
 			defer tokenServer.Close()
 
-			h, _, repo := setupTestHandler(t)
+			h, _, repo, env := setupTestHandlerWithStores(t)
 			first := &models.LLMConfig{Name: string(provider) + " first", Provider: provider, Model: "model-one", AuthMethod: models.AuthMethodOAuth, OAuthAccessToken: "first-access", OAuthRefreshToken: "first-refresh"}
 			second := &models.LLMConfig{Name: string(provider) + " second", Provider: provider, Model: "model-two", AuthMethod: models.AuthMethodOAuth, OAuthAccessToken: "second-access", OAuthRefreshToken: "second-refresh"}
 			require.NoError(t, repo.Create(context.Background(), first))
 			require.NoError(t, repo.Create(context.Background(), second))
 			started, err := repo.GetByID(context.Background(), first.ID)
 			require.NoError(t, err)
-			require.NoError(t, repo.(*sqlite.LLMConfigRepo).LinkOAuthConnection(context.Background(), first.ID, second.OAuthConnectionID))
+			require.NoError(t, env.Fixtures.LinkModelOAuthConnection(context.Background(), first.ID, second.OAuthConnectionID))
 
 			_, err = h.exchangeOAuthCodeAndSaveTokens(&oauthPendingFlow{
 				ConfigID:       started.ID,
@@ -367,7 +366,7 @@ func TestStandardOAuthCallbackFencesConcurrentRefreshWrites(t *testing.T) {
 				}))
 				defer tokenServer.Close()
 
-				h, _, repo := setupTestHandler(t)
+				h, _, repo, _ := setupTestHandlerWithStores(t)
 				config := &models.LLMConfig{
 					Name:              name,
 					Provider:          provider,
@@ -448,7 +447,7 @@ func TestExchangeCustomOAuthRejectsMissingRequiredProfileMetadata(t *testing.T) 
 	}))
 	defer server.Close()
 
-	h, _, repo := setupTestHandler(t)
+	h, _, repo, _ := setupTestHandlerWithStores(t)
 	cfg := llmcustomauth.Config{
 		Enabled:               true,
 		AccessTokenField:      "token",
@@ -496,7 +495,7 @@ func TestExchangeCustomOAuthRejectsMissingRequiredTeamMetadata(t *testing.T) {
 	}))
 	defer server.Close()
 
-	h, _, repo := setupTestHandler(t)
+	h, _, repo, _ := setupTestHandlerWithStores(t)
 	cfg := llmcustomauth.Config{
 		Enabled:               true,
 		AccessTokenField:      "token",
@@ -544,7 +543,7 @@ func TestExchangeCustomOAuthRejectsInvalidProfileHeaderMetadataBeforePersistence
 	}))
 	defer server.Close()
 
-	h, _, repo := setupTestHandler(t)
+	h, _, repo, _ := setupTestHandlerWithStores(t)
 	cfg := llmcustomauth.Config{
 		Enabled:               true,
 		AccessTokenField:      "token",
@@ -598,7 +597,7 @@ func TestExchangeCustomOAuthRechecksRevisionBeforeProfileRequest(t *testing.T) {
 	}))
 	defer server.Close()
 
-	h, _, repo := setupTestHandler(t)
+	h, _, repo, _ := setupTestHandlerWithStores(t)
 	cfg := llmcustomauth.Config{
 		Enabled:               true,
 		AccessTokenField:      "token",
@@ -646,7 +645,7 @@ func TestExchangeCustomOAuthRejectsStaleGenerationBeforeNetworkRequest(t *testin
 	}))
 	defer server.Close()
 
-	h, _, repo := setupTestHandler(t)
+	h, _, repo, _ := setupTestHandlerWithStores(t)
 	cfg := llmcustomauth.Config{Enabled: true, AllowPrivateEndpoints: true}
 	model := &models.LLMConfig{
 		Name:                 "Stale custom OAuth",
@@ -1564,7 +1563,7 @@ func TestHandler_completeOAuthFlow(t *testing.T) {
 		},
 	} {
 		t.Run("succeeds unchanged "+tc.name+" oauth flow", func(t *testing.T) {
-			h, _, repo := setupTestHandler(t)
+			h, _, repo, _ := setupTestHandlerWithStores(t)
 			model := &models.LLMConfig{
 				Name:       "Unchanged " + tc.name + " OAuth",
 				Provider:   tc.provider,
@@ -1609,7 +1608,7 @@ func TestHandler_completeOAuthFlow(t *testing.T) {
 		})
 
 		t.Run("rejects stale edited "+tc.name+" oauth flow", func(t *testing.T) {
-			h, _, repo := setupTestHandler(t)
+			h, _, repo, _ := setupTestHandlerWithStores(t)
 			model := &models.LLMConfig{
 				Name:       "Stale " + tc.name + " OAuth",
 				Provider:   tc.provider,
@@ -1660,7 +1659,7 @@ func TestHandler_completeOAuthFlow(t *testing.T) {
 	}
 
 	t.Run("rejects deleted standard oauth flow", func(t *testing.T) {
-		h, _, repo := setupTestHandler(t)
+		h, _, repo, _ := setupTestHandlerWithStores(t)
 		model := &models.LLMConfig{
 			Name:       "Deleted OpenAI OAuth",
 			Provider:   models.ProviderOpenAI,
@@ -1861,7 +1860,7 @@ func TestHandler_OAuthStatus(t *testing.T) {
 	})
 
 	t.Run("returns connected for OAuth model with valid tokens", func(t *testing.T) {
-		h, e, llmConfigRepo := setupTestHandler(t)
+		h, e, llmConfigRepo, env := setupTestHandlerWithStores(t)
 
 		// Create an OAuth model
 		model := &models.LLMConfig{
@@ -1879,7 +1878,7 @@ func TestHandler_OAuthStatus(t *testing.T) {
 
 		// Update with valid tokens
 		futureExpiry := time.Now().Add(1 * time.Hour).UnixMilli()
-		err = h.llmConfigRepo.(*sqlite.LLMConfigRepo).UpdateOAuthTokens(context.Background(), modelID, "access-token", "refresh-token", futureExpiry)
+		err = env.Fixtures.SetModelOAuthTokens(context.Background(), modelID, "access-token", "refresh-token", futureExpiry)
 		require.NoError(t, err)
 
 		req := httptest.NewRequest(http.MethodGet, "/models/"+modelID+"/oauth/status", nil)
@@ -1899,7 +1898,7 @@ func TestHandler_OAuthStatus(t *testing.T) {
 	})
 
 	t.Run("returns expired for OAuth model with expired tokens", func(t *testing.T) {
-		h, e, llmConfigRepo := setupTestHandler(t)
+		h, e, llmConfigRepo, env := setupTestHandlerWithStores(t)
 
 		// Create an OAuth model
 		model := &models.LLMConfig{
@@ -1917,7 +1916,7 @@ func TestHandler_OAuthStatus(t *testing.T) {
 
 		// Update with expired tokens
 		pastExpiry := time.Now().Add(-1 * time.Hour).UnixMilli()
-		err = h.llmConfigRepo.(*sqlite.LLMConfigRepo).UpdateOAuthTokens(context.Background(), modelID, "access-token", "refresh-token", pastExpiry)
+		err = env.Fixtures.SetModelOAuthTokens(context.Background(), modelID, "access-token", "refresh-token", pastExpiry)
 		require.NoError(t, err)
 
 		req := httptest.NewRequest(http.MethodGet, "/models/"+modelID+"/oauth/status", nil)

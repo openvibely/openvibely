@@ -201,7 +201,7 @@ func TestBreadcrumbSelectorScheduleOriginShowsOnlyTasksWithScheduleRows(t *testi
 }
 
 func TestBreadcrumbSelectorAutomationResultsAreProjectScopedBoundedAndPreserveViews(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	owning := tc.CreateProject().WithName("Automation selector owning").Build()
 	foreign := tc.CreateProject().WithName("Automation selector foreign").Build()
 	repo := tc.stores.Automations
@@ -210,14 +210,8 @@ func TestBreadcrumbSelectorAutomationResultsAreProjectScopedBoundedAndPreserveVi
 	insertPublished := func(projectID, id, name string) {
 		t.Helper()
 		versionID := id + "-version"
-		_, err := tc.db.Exec(`INSERT INTO automations (id, project_id, stable_key, name, lifecycle_state)
-			VALUES (?, ?, ?, ?, 'active')`, id, projectID, id, name)
-		require.NoError(t, err)
-		_, err = tc.db.Exec(`INSERT INTO automation_versions (id, project_id, automation_id, version, state, source, adapter_key)
-			VALUES (?, ?, ?, 1, 'published', 'manual', 'custom')`, versionID, projectID, id)
-		require.NoError(t, err)
-		_, err = tc.db.Exec(`UPDATE automations SET published_version_id = ? WHERE id = ?`, versionID, id)
-		require.NoError(t, err)
+		require.NoError(t, tc.stores.Fixtures.SeedAutomation(t.Context(), models.Automation{ID: id, ProjectID: projectID, StableKey: id, Name: name, AutomationType: "custom", LifecycleState: models.AutomationActive, PublishedVersionID: &versionID}))
+		require.NoError(t, tc.stores.Fixtures.SeedAutomationVersion(t.Context(), models.AutomationVersion{ID: versionID, ProjectID: projectID, AutomationID: id, Version: 1, State: models.AutomationVersionPublished, Source: "manual", AdapterKey: "custom"}))
 	}
 
 	for i := 0; i < 24; i++ {

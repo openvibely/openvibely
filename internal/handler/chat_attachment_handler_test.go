@@ -17,7 +17,6 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
-	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/persistence/sqlite/database"
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/internal/testutil/teststores"
@@ -192,7 +191,7 @@ func TestDeleteChatAttachmentRejectsCrossProjectAttachment(t *testing.T) {
 	httpErr, ok := err.(*echo.HTTPError)
 	require.True(t, ok)
 	assert.Equal(t, http.StatusNotFound, httpErr.Code)
-	stored, getErr := fixture.chatAttachmentRepo.(*sqlite.ChatAttachmentRepo).GetByID(context.Background(), fixture.attachment.ID)
+	stored, getErr := fixture.chatAttachmentRepo.GetByIDForProject(context.Background(), fixture.attachment.ID, fixture.owningProject.ID)
 	require.NoError(t, getErr)
 	require.NotNil(t, stored)
 	assert.FileExists(t, fixture.attachment.FilePath)
@@ -209,7 +208,7 @@ func TestDeleteChatAttachmentRemovesSameProjectAttachment(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusOK, rec.Code)
-	stored, getErr := fixture.chatAttachmentRepo.(*sqlite.ChatAttachmentRepo).GetByID(context.Background(), fixture.attachment.ID)
+	stored, getErr := fixture.chatAttachmentRepo.GetByIDForProject(context.Background(), fixture.attachment.ID, fixture.owningProject.ID)
 	require.NoError(t, getErr)
 	assert.Nil(t, stored)
 	assert.NoFileExists(t, fixture.attachment.FilePath)

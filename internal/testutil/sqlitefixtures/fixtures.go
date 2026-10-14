@@ -282,3 +282,21 @@ func (f *fixtures) SetLegacyWebhookPriority(ctx context.Context, id string, prio
 	_, err := f.db.ExecContext(ctx, `UPDATE webhook_endpoints SET default_priority = ? WHERE id = ?`, priority, id)
 	return err
 }
+
+func (f *fixtures) RemoveAllProjects(ctx context.Context) error {
+	_, err := f.db.ExecContext(ctx, `DELETE FROM projects WHERE 1 = 1`)
+	return err
+}
+func (f *fixtures) SeedSavedChannelTargets(ctx context.Context, targets []models.ChannelTarget) error {
+	tx, err := f.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for _, v := range targets {
+		if _, err = tx.ExecContext(ctx, `INSERT INTO channel_targets (id,project_id,platform,target_kind,name,target_id,thread_id,is_home,default_subject,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)`, v.ID, v.ProjectID, v.Platform, v.TargetKind, v.Name, v.TargetID, v.ThreadID, v.Home, v.DefaultSubject, v.UpdatedAt.UTC().Format("2006-01-02 15:04:05")); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}

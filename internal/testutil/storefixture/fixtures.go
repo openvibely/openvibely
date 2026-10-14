@@ -22,6 +22,10 @@ type SkillEventFilter struct {
 
 // Fixtures describes test domain state, never tables, query text, or connections.
 type Fixtures interface {
+	// RemoveAllProjects constructs the empty-installation state, including removal of the protected default.
+	RemoveAllProjects(context.Context) error
+	// SeedSavedChannelTargets preserves historical timestamps and home flags without applying save transitions.
+	SeedSavedChannelTargets(context.Context, []models.ChannelTarget) error
 	WebhookEndpoints(context.Context, string) ([]models.WebhookEndpoint, error)
 	TaskAgentAssignments(context.Context, string) ([]models.TaskAgentAssignment, error)
 	SetLegacyWebhookPriority(context.Context, string, int) error

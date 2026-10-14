@@ -2,7 +2,6 @@ package handler
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -14,9 +13,7 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
-	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/service"
-	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/openvibely/openvibely/internal/testutil/teststores"
 )
 
@@ -75,7 +72,7 @@ func (e *outboundTargetTestEmail) SendOutboundMessage(_ context.Context, to, sub
 }
 
 func TestOutboundTargetHandlersDenyCrossProjectTargetIDs(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	ownerProject := tc.CreateProject().WithName("Owner Project").Build()
 	otherProject := tc.CreateProject().WithName("Other Project").Build()
 	targetRepo := tc.stores.ChannelTargets
@@ -92,7 +89,7 @@ func TestOutboundTargetHandlersDenyCrossProjectTargetIDs(t *testing.T) {
 		Name:      "alerts",
 		TargetID:  "COWNER",
 	}
-	if err := targetRepo.(*sqlite.ChannelTargetRepo).Upsert(context.Background(), target); err != nil {
+	if err := tc.stores.Fixtures.SeedChannelTarget(context.Background(), target); err != nil {
 		t.Fatalf("upsert target: %v", err)
 	}
 
@@ -137,7 +134,7 @@ func TestOutboundTargetHandlersDenyCrossProjectTargetIDs(t *testing.T) {
 	}
 
 	otherTarget := models.ChannelTarget{ID: persistence.NewID(), ProjectID: otherProject.ID, Platform: "slack", Name: "other", TargetID: "COTHER"}
-	if err := targetRepo.(*sqlite.ChannelTargetRepo).Upsert(context.Background(), otherTarget); err != nil {
+	if err := tc.stores.Fixtures.SeedChannelTarget(context.Background(), otherTarget); err != nil {
 		t.Fatalf("upsert other target: %v", err)
 	}
 	validThenInvalid := url.Values{}
@@ -170,7 +167,7 @@ func TestOutboundTargetHandlersDenyCrossProjectTargetIDs(t *testing.T) {
 }
 
 func TestOutboundTargetFragmentsShareResolvedProjectContext(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	projectA := tc.CreateProject().WithName("Outbound Fragment A").Build()
 	projectB := tc.CreateProject().WithName("Outbound Fragment B").Build()
 	targetRepo := tc.stores.ChannelTargets
@@ -191,7 +188,7 @@ func TestOutboundTargetFragmentsShareResolvedProjectContext(t *testing.T) {
 		TargetID:   "fragment-b@example.com",
 	}
 	for _, target := range []models.ChannelTarget{targetA, targetB} {
-		if err := targetRepo.(*sqlite.ChannelTargetRepo).Upsert(context.Background(), target); err != nil {
+		if err := tc.stores.Fixtures.SeedChannelTarget(context.Background(), target); err != nil {
 			t.Fatalf("upsert target %+v: %v", target, err)
 		}
 	}
@@ -258,7 +255,7 @@ func TestOutboundTargetFragmentsShareResolvedProjectContext(t *testing.T) {
 		false,
 	)
 
-	if _, err := tc.db.ExecContext(context.Background(), "DELETE FROM projects"); err != nil {
+	if err := tc.stores.Fixtures.RemoveAllProjects(context.Background()); err != nil {
 		t.Fatalf("clear projects for empty-context regression: %v", err)
 	}
 	modalBody := requestFragment("/channels/outbound-targets")
@@ -287,15 +284,16 @@ func TestOutboundTargetFragmentsShareResolvedProjectContext(t *testing.T) {
 }
 
 func TestOutboundTargetsCardFragmentUsesAggregateSummaryWithoutMaterializedRows(t *testing.T) {
-	db, counter := testutil.NewStatementCountingTestDB(t)
+	env := teststores.New(t, teststores.WithIOCounting())
+	counter := env.IO
 	ctx := context.Background()
-	projectRepo := teststores.Of(db).Projects
+	projectRepo := env.Projects
 	project := &models.Project{Name: "Aggregate Card Project"}
 	if err := projectRepo.Create(ctx, project); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
-	targetRepo := teststores.Of(db).ChannelTargets
-	settingsRepo := teststores.Of(db).Settings
+	targetRepo := env.ChannelTargets
+	settingsRepo := env.Settings
 	if err := settingsRepo.Set(ctx, service.SendMessageAllowExplicitTargetsSetting+":"+project.ID, "true"); err != nil {
 		t.Fatalf("set explicit target policy: %v", err)
 	}
@@ -305,7 +303,7 @@ func TestOutboundTargetsCardFragmentUsesAggregateSummaryWithoutMaterializedRows(
 		if platform == "matrix" {
 			targetKind = "room"
 		}
-		if err := targetRepo.(*sqlite.ChannelTargetRepo).Upsert(ctx, models.ChannelTarget{
+		if err := env.Fixtures.SeedChannelTarget(ctx, models.ChannelTarget{
 			ID:             fmt.Sprintf("aggregate-card-target-%04d", i),
 			ProjectID:      project.ID,
 			Platform:       platform,
@@ -342,15 +340,8 @@ func TestOutboundTargetsCardFragmentUsesAggregateSummaryWithoutMaterializedRows(
 	if strings.Contains(cardBody, "matrix: 240") || strings.Contains(cardBody, "DESTINATION-WITH-LONG-MATERIALIZED-ID") || strings.Contains(cardBody, "Subject 0001") {
 		t.Fatalf("card fragment should not render unknown platform labels or materialized row fields: %s", cardBody)
 	}
-	statements := strings.Join(counter.Statements(), "\n")
-	if !strings.Contains(statements, "GROUP BY platform, target_kind") {
-		t.Fatalf("card fragment should use aggregate summary query, got statements:\n%s", statements)
-	}
-	if strings.Contains(statements, "SELECT id, project_id, platform, target_kind, name, target_id, thread_id, is_home, default_subject, created_at, updated_at") {
-		t.Fatalf("card fragment must not call ListByProject, got statements:\n%s", statements)
-	}
-	if selectedBytes := counter.SelectedTextBytes(); selectedBytes > 2000 {
-		t.Fatalf("card fragment selected too much row text for aggregate summary: %d bytes; statements:\n%s", selectedBytes, statements)
+	if stats := counter.Snapshot(); stats.Requests != 2 || stats.ReadTextBytes > 2000 {
+		t.Fatalf("aggregate card backend I/O exceeded budget: %+v", stats)
 	}
 
 	fullRec := httptest.NewRecorder()
@@ -367,17 +358,17 @@ func TestOutboundTargetsCardFragmentUsesAggregateSummaryWithoutMaterializedRows(
 }
 
 func TestOutboundTargetsPersistOnlyOnSaveSettings(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	project := tc.CreateProject().WithName("Staged Outbound Targets").Build()
 	targetRepo := tc.stores.ChannelTargets
 	tc.handler.SetChannelTargetRepo(targetRepo)
 
 	keep := models.ChannelTarget{ID: persistence.NewID(), ProjectID: project.ID, Platform: "email", Name: "keep", TargetID: "keep@example.com"}
 	remove := models.ChannelTarget{ID: persistence.NewID(), ProjectID: project.ID, Platform: "slack", Name: "remove", TargetID: "CREMOVE"}
-	if err := targetRepo.(*sqlite.ChannelTargetRepo).Upsert(context.Background(), keep); err != nil {
+	if err := tc.stores.Fixtures.SeedChannelTarget(context.Background(), keep); err != nil {
 		t.Fatalf("upsert keep target: %v", err)
 	}
-	if err := targetRepo.(*sqlite.ChannelTargetRepo).Upsert(context.Background(), remove); err != nil {
+	if err := tc.stores.Fixtures.SeedChannelTarget(context.Background(), remove); err != nil {
 		t.Fatalf("upsert remove target: %v", err)
 	}
 
@@ -479,7 +470,7 @@ func TestOutboundTargetsPersistOnlyOnSaveSettings(t *testing.T) {
 }
 
 func TestEditingOutboundTargetPreservesIDAndTestsEditedDraft(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	project := tc.CreateProject().WithName("Edited Outbound Target Project").Build()
 	targetRepo := tc.stores.ChannelTargets
 	email := &outboundTargetTestEmail{}
@@ -499,7 +490,7 @@ func TestEditingOutboundTargetPreservesIDAndTestsEditedDraft(t *testing.T) {
 		ThreadID:       "old-thread",
 		DefaultSubject: "Original subject",
 	}
-	if err := targetRepo.(*sqlite.ChannelTargetRepo).Upsert(context.Background(), target); err != nil {
+	if err := tc.stores.Fixtures.SeedChannelTarget(context.Background(), target); err != nil {
 		t.Fatalf("upsert target: %v", err)
 	}
 
@@ -668,7 +659,7 @@ func TestOutboundTargetDraftTestRendersCleanFailure(t *testing.T) {
 }
 
 func TestOutboundTargetTestPreservesThreadIDAndEscapesResult(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	project := tc.CreateProject().WithName("Outbound Target Project").Build()
 	targetRepo := tc.stores.ChannelTargets
 	slack := &outboundTargetTestSlack{}
@@ -686,7 +677,7 @@ func TestOutboundTargetTestPreservesThreadIDAndEscapesResult(t *testing.T) {
 		ThreadID:  "1690000000.000000",
 		Home:      true,
 	}
-	if err := targetRepo.(*sqlite.ChannelTargetRepo).Upsert(context.Background(), target); err != nil {
+	if err := tc.stores.Fixtures.SeedChannelTarget(context.Background(), target); err != nil {
 		t.Fatalf("upsert target: %v", err)
 	}
 
@@ -904,11 +895,12 @@ func TestDiscordOutboundTargetDraftTestUserDMDispatchesAsDM(t *testing.T) {
 // TestAuthorizedUsersMutationDoesNotAffectOutboundTargets verifies that adding and removing
 // Slack or Discord authorized users does not mutate the outbound channel_targets table.
 func BenchmarkOutboundTargetsCardRefreshUsesAggregateSummary(b *testing.B) {
-	db, counter := testutil.NewStatementCountingTestDB(b)
+	env := teststores.New(b, teststores.WithIOCounting())
+	counter := env.IO
 	projectID := "outbound-card-refresh-bench-project"
-	seedOutboundTargetsCardBenchFixture(b, db, projectID, 20000)
-	targetRepo := teststores.Of(db).ChannelTargets
-	settingsRepo := teststores.Of(db).Settings
+	projectID = seedOutboundTargetsCardBenchFixture(b, env, projectID, 20000)
+	targetRepo := env.ChannelTargets
+	settingsRepo := env.Settings
 	ctx := context.Background()
 	if err := settingsRepo.Set(ctx, service.SendMessageAllowExplicitTargetsSetting+":"+projectID, "true"); err != nil {
 		b.Fatalf("set explicit policy: %v", err)
@@ -948,7 +940,7 @@ func BenchmarkOutboundTargetsCardRefreshUsesAggregateSummary(b *testing.B) {
 			}
 			rows = 4
 			htmlBytes = len(html)
-			selectedTextBytes = counter.SelectedTextBytes()
+			selectedTextBytes = counter.Snapshot().ReadTextBytes
 		}
 		b.ReportMetric(float64(rows), "rows/op")
 		b.ReportMetric(5, "materialized_fields/op")
@@ -958,11 +950,15 @@ func BenchmarkOutboundTargetsCardRefreshUsesAggregateSummary(b *testing.B) {
 	})
 }
 
-func seedOutboundTargetsCardBenchFixture(tb testing.TB, db *sql.DB, projectID string, rows int) {
+func seedOutboundTargetsCardBenchFixture(tb testing.TB, env *teststores.Env, projectID string, rows int) string {
 	tb.Helper()
-	if _, err := db.Exec(`INSERT INTO projects (id, name, description, repo_path) VALUES (?, 'Outbound Card Bench', '', '')`, projectID); err != nil {
-		tb.Fatalf("seed project: %v", err)
+	project := &models.Project{Name: "Outbound Card Bench"}
+	if err := env.Projects.Create(tb.Context(), project); err != nil {
+		tb.Fatal(err)
 	}
+	projectID = project.ID
+	targets := make([]models.ChannelTarget, 0, rows)
+
 	for i := 0; i < rows; i++ {
 		platform := "slack"
 		targetKind := "channel"
@@ -978,17 +974,12 @@ func seedOutboundTargetsCardBenchFixture(tb testing.TB, db *sql.DB, projectID st
 		case 3:
 			platform = "discord"
 		}
-		isHome := 0
-		if i%5000 == 0 {
-			isHome = 1
-		}
-		if _, err := db.Exec(`
-			INSERT INTO channel_targets (id, project_id, platform, target_kind, name, target_id, thread_id, is_home, default_subject, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			fmt.Sprintf("card-bench-target-%05d", i), projectID, platform, targetKind, fmt.Sprintf("target-%05d", i), fmt.Sprintf("DESTINATION-%05d", i), fmt.Sprintf("thread-%05d", i), isHome, fmt.Sprintf("Subject %05d", i), time.Date(2024, 1, 1, 0, 0, i%60, 0, time.UTC).Add(time.Duration(i)*time.Second).Format("2006-01-02 15:04:05")); err != nil {
-			tb.Fatalf("seed target %d: %v", i, err)
-		}
+		targets = append(targets, models.ChannelTarget{ID: fmt.Sprintf("card-bench-target-%05d", i), ProjectID: projectID, Platform: platform, TargetKind: targetKind, Name: fmt.Sprintf("target-%05d", i), TargetID: fmt.Sprintf("DESTINATION-%05d", i), ThreadID: fmt.Sprintf("thread-%05d", i), Home: i%5000 == 0, DefaultSubject: fmt.Sprintf("Subject %05d", i), UpdatedAt: time.Date(2024, 1, 1, 0, 0, i%60, 0, time.UTC).Add(time.Duration(i) * time.Second)})
 	}
+	if err := env.Fixtures.SeedSavedChannelTargets(tb.Context(), targets); err != nil {
+		tb.Fatal(err)
+	}
+	return projectID
 }
 
 func TestAuthorizedUsersMutationDoesNotAffectOutboundTargets(t *testing.T) {
@@ -1006,10 +997,10 @@ func TestAuthorizedUsersMutationDoesNotAffectOutboundTargets(t *testing.T) {
 		ID: persistence.NewID(), ProjectID: project.ID,
 		Platform: "discord", TargetKind: "user", Name: "", TargetID: "1518288288572641398",
 	}
-	if err := targetRepo.(*sqlite.ChannelTargetRepo).Upsert(context.Background(), slackChannelTarget); err != nil {
+	if err := db.Fixtures.SeedChannelTarget(context.Background(), slackChannelTarget); err != nil {
 		t.Fatalf("upsert slack channel target: %v", err)
 	}
-	if err := targetRepo.(*sqlite.ChannelTargetRepo).Upsert(context.Background(), discordUserTarget); err != nil {
+	if err := db.Fixtures.SeedChannelTarget(context.Background(), discordUserTarget); err != nil {
 		t.Fatalf("upsert discord user target: %v", err)
 	}
 
