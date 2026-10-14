@@ -2340,7 +2340,7 @@ func TestSlackService_SendOutboundDirectMessage_OpensDMBeforePosting(t *testing.
 }
 
 func TestSlackService_SendOutboundMessage_MissingTokenReturnsCleanError(t *testing.T) {
-	svc := NewSlackService(teststores.Of(teststores.NewDB(t)).Settings, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	svc := NewSlackService(teststores.New(t).Settings, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	res := svc.SendOutboundMessage(context.Background(), "C123", "", "hello")
 	require.False(t, res.OK)
 	require.Contains(t, res.Error, "slack bot token is not configured")
@@ -2534,7 +2534,7 @@ func TestSlackService_EventFilteringIgnoresExternalAttachmentImageURLs(t *testin
 }
 
 func TestSlackService_ProcessIncomingMessage_DownloadsPersistsAndPassesImageAttachment(t *testing.T) {
-	db := teststores.NewDB(t)
+	db := teststores.New(t)
 	ctx := context.Background()
 	projectRepo, taskRepo, llmConfigRepo, execRepo, scheduleRepo, attachmentRepo, chatAttachmentRepo, settingsRepo, slackUserProjectRepo, slackTaskContextRepo := newSlackAttachmentTestRepos(t, db)
 	project := &models.Project{Name: "Slack Attachment Project"}
@@ -2607,7 +2607,7 @@ func TestSlackService_ProcessIncomingMessage_DownloadsPersistsAndPassesImageAtta
 }
 
 func TestSlackService_ProcessIncomingMessage_SelectsVisionAgentForImageAttachment(t *testing.T) {
-	db := teststores.NewDB(t)
+	db := teststores.New(t)
 	ctx := context.Background()
 	projectRepo, taskRepo, llmConfigRepo, execRepo, scheduleRepo, attachmentRepo, chatAttachmentRepo, settingsRepo, slackUserProjectRepo, slackTaskContextRepo := newSlackAttachmentTestRepos(t, db)
 	project := &models.Project{Name: "Slack Vision Routing Project"}
@@ -2673,7 +2673,7 @@ func TestSlackService_ProcessIncomingMessage_SelectsVisionAgentForImageAttachmen
 }
 
 func TestSlackService_ProcessIncomingMessage_SelectsVisionAgentForIDOnlyFileInfoImage(t *testing.T) {
-	db := teststores.NewDB(t)
+	db := teststores.New(t)
 	ctx := context.Background()
 	projectRepo, taskRepo, llmConfigRepo, execRepo, scheduleRepo, attachmentRepo, chatAttachmentRepo, settingsRepo, slackUserProjectRepo, slackTaskContextRepo := newSlackAttachmentTestRepos(t, db)
 	project := &models.Project{Name: "Slack ID Only Vision Routing Project"}
@@ -2750,7 +2750,7 @@ func TestSlackService_ProcessIncomingMessage_SelectsVisionAgentForIDOnlyFileInfo
 }
 
 func TestSlackService_ProcessIncomingMessage_SniffsUnknownTypeImageWhenFileInfoFails(t *testing.T) {
-	db := teststores.NewDB(t)
+	db := teststores.New(t)
 	ctx := context.Background()
 	projectRepo, taskRepo, llmConfigRepo, execRepo, scheduleRepo, attachmentRepo, chatAttachmentRepo, settingsRepo, slackUserProjectRepo, slackTaskContextRepo := newSlackAttachmentTestRepos(t, db)
 	project := &models.Project{Name: "Slack Unknown Type Vision Project"}
@@ -2833,7 +2833,7 @@ func TestSlackService_ProcessIncomingMessage_SniffsUnknownTypeImageWhenFileInfoF
 }
 
 func TestSlackService_ProcessIncomingMessage_DuplicateImageNamesGetDistinctLinkedPaths(t *testing.T) {
-	db := teststores.NewDB(t)
+	db := teststores.New(t)
 	ctx := context.Background()
 	projectRepo, taskRepo, llmConfigRepo, execRepo, scheduleRepo, attachmentRepo, chatAttachmentRepo, settingsRepo, slackUserProjectRepo, slackTaskContextRepo := newSlackAttachmentTestRepos(t, db)
 	project := &models.Project{Name: "Slack Duplicate Attachment Project"}
@@ -2888,7 +2888,7 @@ func TestSlackService_ProcessIncomingMessage_DuplicateImageNamesGetDistinctLinke
 }
 
 func TestSlackService_LinkAttachmentsToExecutionRollsBackPartialLinksOnFailure(t *testing.T) {
-	db := teststores.NewDB(t)
+	db := teststores.New(t)
 	ctx := context.Background()
 	projectRepo, taskRepo, llmConfigRepo, execRepo, _, _, chatAttachmentRepo, settingsRepo, _, _ := newSlackAttachmentTestRepos(t, db)
 	project := &models.Project{Name: "Slack Attachment Rollback Project"}
@@ -2941,7 +2941,7 @@ func TestSlackService_LinkAttachmentsToExecutionRollsBackPartialLinksOnFailure(t
 }
 
 func TestSlackService_ProcessIncomingMessage_AttachmentStoreFailurePersistsFailedTurn(t *testing.T) {
-	db := teststores.NewDB(t)
+	db := teststores.New(t)
 	ctx := context.Background()
 	projectRepo, taskRepo, llmConfigRepo, execRepo, scheduleRepo, attachmentRepo, chatAttachmentRepo, settingsRepo, slackUserProjectRepo, slackTaskContextRepo := newSlackAttachmentTestRepos(t, db)
 	project := &models.Project{Name: "Slack Attachment Store Failure Project"}
@@ -3018,7 +3018,7 @@ func TestSlackService_ProcessIncomingMessage_AttachmentStoreFailurePersistsFaile
 }
 
 func TestSlackService_ProcessIncomingMessage_ResolvesSlackFileInfoPlaceholder(t *testing.T) {
-	db := teststores.NewDB(t)
+	db := teststores.New(t)
 	ctx := context.Background()
 	projectRepo, taskRepo, llmConfigRepo, execRepo, scheduleRepo, attachmentRepo, chatAttachmentRepo, settingsRepo, slackUserProjectRepo, slackTaskContextRepo := newSlackAttachmentTestRepos(t, db)
 	project := &models.Project{Name: "Slack FileInfo Attachment Project"}
@@ -3082,7 +3082,7 @@ func TestSlackService_ProcessIncomingMessage_ResolvesSlackFileInfoPlaceholder(t 
 }
 
 func TestSlackService_ProcessIncomingMessage_UsesURLPrivateWhenOptionalFileInfoFails(t *testing.T) {
-	db := teststores.NewDB(t)
+	db := teststores.New(t)
 	ctx := context.Background()
 	projectRepo, taskRepo, llmConfigRepo, execRepo, scheduleRepo, attachmentRepo, chatAttachmentRepo, settingsRepo, slackUserProjectRepo, slackTaskContextRepo := newSlackAttachmentTestRepos(t, db)
 	project := &models.Project{Name: "Slack Optional FileInfo Project"}
@@ -3146,7 +3146,7 @@ func TestSlackService_ProcessIncomingMessage_UsesURLPrivateWhenOptionalFileInfoF
 }
 
 func TestSlackService_ProcessIncomingMessage_FallsBackToSlackImageThumbnailWhenDownloadURLReturnsHTML(t *testing.T) {
-	db := teststores.NewDB(t)
+	db := teststores.New(t)
 	ctx := context.Background()
 	projectRepo, taskRepo, llmConfigRepo, execRepo, scheduleRepo, attachmentRepo, chatAttachmentRepo, settingsRepo, slackUserProjectRepo, slackTaskContextRepo := newSlackAttachmentTestRepos(t, db)
 	project := &models.Project{Name: "Slack Thumbnail Attachment Project"}
@@ -3208,7 +3208,7 @@ func TestSlackService_ProcessIncomingMessage_FallsBackToSlackImageThumbnailWhenD
 }
 
 func TestSlackService_ProcessIncomingMessage_AttachmentFailureStillPersistsChatTurn(t *testing.T) {
-	db := teststores.NewDB(t)
+	db := teststores.New(t)
 	ctx := context.Background()
 	projectRepo, taskRepo, llmConfigRepo, execRepo, scheduleRepo, attachmentRepo, _, settingsRepo, slackUserProjectRepo, slackTaskContextRepo := newSlackAttachmentTestRepos(t, db)
 	project := &models.Project{Name: "Slack Attachment Failure Project"}
@@ -3282,7 +3282,7 @@ func TestSlackService_ProcessIncomingMessage_AttachmentFailureStillPersistsChatT
 }
 
 func TestSlackService_ProcessIncomingMessage_PreservesBotTokenAcrossSlackFileRedirect(t *testing.T) {
-	db := teststores.NewDB(t)
+	db := teststores.New(t)
 	ctx := context.Background()
 	projectRepo, taskRepo, llmConfigRepo, execRepo, scheduleRepo, attachmentRepo, chatAttachmentRepo, settingsRepo, slackUserProjectRepo, slackTaskContextRepo := newSlackAttachmentTestRepos(t, db)
 	project := &models.Project{Name: "Slack Redirect Attachment Project"}
@@ -3411,7 +3411,7 @@ func TestSlackService_DownloadSlackPrivateFileEnforcesBodySizeLimit(t *testing.T
 }
 
 func TestSlackService_ProcessIncomingMessage_RejectsInvalidSlackImageBytes(t *testing.T) {
-	db := teststores.NewDB(t)
+	db := teststores.New(t)
 	ctx := context.Background()
 	projectRepo, taskRepo, llmConfigRepo, execRepo, scheduleRepo, attachmentRepo, _, settingsRepo, slackUserProjectRepo, slackTaskContextRepo := newSlackAttachmentTestRepos(t, db)
 	project := &models.Project{Name: "Slack Invalid Attachment Project"}
@@ -3475,10 +3475,10 @@ func TestSlackService_SetUploadsDir_NormalizesConfiguredRoot(t *testing.T) {
 }
 
 func TestSlackService_ProcessIncomingMessage_QueuesSlackFilesInAttachmentSession(t *testing.T) {
-	db := teststores.NewDB(t)
+	db := teststores.New(t)
 	ctx := context.Background()
 	projectRepo, taskRepo, llmConfigRepo, execRepo, scheduleRepo, attachmentRepo, _, settingsRepo, slackUserProjectRepo, slackTaskContextRepo := newSlackAttachmentTestRepos(t, db)
-	threadInputRepo := teststores.Of(db).ThreadInputs
+	threadInputRepo := db.ThreadInputs
 	project := &models.Project{Name: "Slack Queued Attachment Project"}
 	require.NoError(t, projectRepo.Create(ctx, project))
 	require.NoError(t, settingsRepo.Set(ctx, SlackSettingBotTokenOverride, "xoxb-test"))
@@ -3576,10 +3576,10 @@ func TestSlackService_SaveChatAttachmentsToPendingSessionCleansSourceWhenFirstSt
 }
 
 func TestSlackService_ProcessIncomingMessage_QueuedAttachmentDownloadFailurePersistsChatTurn(t *testing.T) {
-	db := teststores.NewDB(t)
+	db := teststores.New(t)
 	ctx := context.Background()
 	projectRepo, taskRepo, llmConfigRepo, execRepo, scheduleRepo, attachmentRepo, _, settingsRepo, slackUserProjectRepo, slackTaskContextRepo := newSlackAttachmentTestRepos(t, db)
-	threadInputRepo := teststores.Of(db).ThreadInputs
+	threadInputRepo := db.ThreadInputs
 	project := &models.Project{Name: "Slack Queued Attachment Failure Project"}
 	require.NoError(t, projectRepo.Create(ctx, project))
 	require.NoError(t, settingsRepo.Set(ctx, SlackSettingBotTokenOverride, "xoxb-test"))
@@ -3655,10 +3655,10 @@ func TestSlackService_ProcessIncomingMessage_QueuedAttachmentDownloadFailurePers
 }
 
 func TestSlackService_ProcessIncomingMessage_QueuedAttachmentStagingFailurePersistsChatTurn(t *testing.T) {
-	db := teststores.NewDB(t)
+	db := teststores.New(t)
 	ctx := context.Background()
 	projectRepo, taskRepo, llmConfigRepo, execRepo, scheduleRepo, attachmentRepo, _, settingsRepo, slackUserProjectRepo, slackTaskContextRepo := newSlackAttachmentTestRepos(t, db)
-	threadInputRepo := teststores.Of(db).ThreadInputs
+	threadInputRepo := db.ThreadInputs
 	project := &models.Project{Name: "Slack Queued Attachment Staging Failure Project"}
 	require.NoError(t, projectRepo.Create(ctx, project))
 	require.NoError(t, settingsRepo.Set(ctx, SlackSettingBotTokenOverride, "xoxb-test"))
@@ -3733,20 +3733,18 @@ func TestSlackService_ProcessIncomingMessage_QueuedAttachmentStagingFailurePersi
 	require.Contains(t, createdExec.ErrorMessage, "unable to store attachment")
 }
 
-func newSlackAttachmentTestRepos(t *testing.T, db interface{}) (persistence.ProjectStore, persistence.TaskStore, persistence.LLMConfigStore, persistence.ExecutionStore, persistence.ScheduleStore, persistence.AttachmentStore, persistence.ChatAttachmentStore, persistence.SettingsStore, persistence.SlackUserProjectStore, persistence.SlackTaskContextStore) {
+func newSlackAttachmentTestRepos(t *testing.T, db *teststores.Env) (persistence.ProjectStore, persistence.TaskStore, persistence.LLMConfigStore, persistence.ExecutionStore, persistence.ScheduleStore, persistence.AttachmentStore, persistence.ChatAttachmentStore, persistence.SettingsStore, persistence.SlackUserProjectStore, persistence.SlackTaskContextStore) {
 	t.Helper()
-	sqlDB, ok := db.(*sql.DB)
-	require.True(t, ok)
-	projectRepo := teststores.Of(sqlDB).Projects
-	taskRepo := teststores.Of(sqlDB).Tasks
-	llmConfigRepo := teststores.Of(sqlDB).LLMConfigs
-	execRepo := teststores.Of(sqlDB).Executions
-	scheduleRepo := teststores.Of(sqlDB).Schedules
-	attachmentRepo := teststores.Of(sqlDB).Attachments
-	chatAttachmentRepo := teststores.Of(sqlDB).ChatAttachments
-	settingsRepo := teststores.Of(sqlDB).Settings
-	slackUserProjectRepo := teststores.Of(sqlDB).SlackUserProjects
-	slackTaskContextRepo := teststores.Of(sqlDB).SlackTaskContexts
+	projectRepo := db.Projects
+	taskRepo := db.Tasks
+	llmConfigRepo := db.LLMConfigs
+	execRepo := db.Executions
+	scheduleRepo := db.Schedules
+	attachmentRepo := db.Attachments
+	chatAttachmentRepo := db.ChatAttachments
+	settingsRepo := db.Settings
+	slackUserProjectRepo := db.SlackUserProjects
+	slackTaskContextRepo := db.SlackTaskContexts
 	return projectRepo, taskRepo, llmConfigRepo, execRepo, scheduleRepo, attachmentRepo, chatAttachmentRepo, settingsRepo, slackUserProjectRepo, slackTaskContextRepo
 }
 

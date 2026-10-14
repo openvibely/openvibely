@@ -210,3 +210,39 @@ func TestGitHubAuthorizationCounterMeasuresPhysicalReads(t *testing.T) {
 	env.IO.Reset()
 	require.Zero(t, env.IO.Snapshot().GitHubAuthorizationReads)
 }
+
+func TestRecoveryFixturesShareBackendAndRestoreIntegrity(t *testing.T) {
+	for _, production := range []bool{false, true} {
+		name := "isolated"
+		var options []teststores.Option
+		if production {
+			name = "production"
+			options = append(options, teststores.WithProductionTopology())
+		}
+		t.Run(name, func(t *testing.T) {
+			env := teststores.New(t, options...)
+			ctx := context.Background()
+			project := models.Project{Name: "Legacy model reference"}
+			require.NoError(t, env.Projects.Create(ctx, &project))
+			require.NoError(t, env.Fixtures.SetStaleProjectDefaultModel(ctx, project.ID, "missing-model"))
+			loaded, err := env.Projects.GetByID(ctx, project.ID)
+			require.NoError(t, err)
+			require.NotNil(t, loaded)
+			require.NotNil(t, loaded.DefaultAgentConfigID)
+			require.Equal(t, "missing-model", *loaded.DefaultAgentConfigID)
+			orphan := models.Task{ProjectID: "missing-project", Title: "Must reject", Category: models.CategoryBacklog, Status: models.StatusPending}
+			require.Error(t, env.Tasks.Create(ctx, &orphan), "fixture must restore referential integrity")
+			task := models.Task{ProjectID: project.ID, Title: "Retry worker", Category: models.CategoryBacklog, Status: models.StatusPending}
+			require.NoError(t, env.Fixtures.SetTaskCreationFailure(ctx, task.Title, true))
+			require.ErrorContains(t, env.Tasks.Create(ctx, &task), "forced task creation failure")
+			saved, err := env.Tasks.ListByProject(ctx, project.ID, "")
+			require.NoError(t, err)
+			require.Empty(t, saved)
+			require.NoError(t, env.Fixtures.SetTaskCreationFailure(ctx, task.Title, false))
+			require.NoError(t, env.Tasks.Create(ctx, &task))
+			saved, err = env.Tasks.ListByProject(ctx, project.ID, "")
+			require.NoError(t, err)
+			require.Len(t, saved, 1)
+		})
+	}
+}
