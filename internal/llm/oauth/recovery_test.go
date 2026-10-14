@@ -10,7 +10,6 @@ import (
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
-	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/testutil/teststores"
 )
 
@@ -139,7 +138,7 @@ func TestManagerEnsureFreshSingleflightPreservesEachLinkedModel(t *testing.T) {
 	repo := storeEnv.Stores.LLMConfigs
 	first := createOAuthConfig(t, repo, models.LLMConfig{ID: "shared-first", Name: "Shared First", Model: "model-first", Provider: models.ProviderOpenAI})
 	second := createOAuthConfig(t, repo, models.LLMConfig{ID: "shared-second", Name: "Shared Second", Model: "model-second", Provider: models.ProviderOpenAI})
-	if err := repo.(*sqlite.LLMConfigRepo).LinkOAuthConnection(context.Background(), second.ID, first.OAuthConnectionID); err != nil {
+	if err := storeEnv.Fixtures.LinkModelOAuthConnection(context.Background(), second.ID, first.OAuthConnectionID); err != nil {
 		t.Fatalf("LinkOAuthConnection: %v", err)
 	}
 	second.OAuthConnectionID = first.OAuthConnectionID
@@ -202,7 +201,7 @@ func TestManagerEnsureFreshRetriesSharedRefreshAfterInitiatorCancellation(t *tes
 	repo := storeEnv.Stores.LLMConfigs
 	first := createOAuthConfig(t, repo, models.LLMConfig{ID: "cancel-first", Name: "Cancel First", Provider: models.ProviderOpenAI})
 	second := createOAuthConfig(t, repo, models.LLMConfig{ID: "cancel-second", Name: "Cancel Second", Provider: models.ProviderOpenAI})
-	if err := repo.(*sqlite.LLMConfigRepo).LinkOAuthConnection(context.Background(), second.ID, first.OAuthConnectionID); err != nil {
+	if err := storeEnv.Fixtures.LinkModelOAuthConnection(context.Background(), second.ID, first.OAuthConnectionID); err != nil {
 		t.Fatalf("LinkOAuthConnection: %v", err)
 	}
 	second.OAuthConnectionID = first.OAuthConnectionID
@@ -410,7 +409,7 @@ func TestManagerRecoverUnauthorizedSkipsRefreshWhenConfigAlreadyChanged(t *testi
 	storeEnv := teststores.New(t)
 	repo := storeEnv.Stores.LLMConfigs
 	cfg := createOAuthConfig(t, repo, models.LLMConfig{ID: "cfg-race", Provider: models.ProviderAnthropic})
-	if err := repo.(*sqlite.LLMConfigRepo).UpdateOAuthTokens(context.Background(), cfg.ID, "already-new", "already-refresh", time.Now().Add(time.Hour).UnixMilli()); err != nil {
+	if err := storeEnv.Fixtures.SetModelOAuthTokens(context.Background(), cfg.ID, "already-new", "already-refresh", time.Now().Add(time.Hour).UnixMilli()); err != nil {
 		t.Fatalf("UpdateOAuthTokens: %v", err)
 	}
 	mgr := NewManager(repo)
@@ -438,7 +437,7 @@ func TestManagerEnsureFreshDoesNotSkipChangedButStillExpiringToken(t *testing.T)
 	storeEnv := teststores.New(t)
 	repo := storeEnv.Stores.LLMConfigs
 	cfg := createOAuthConfig(t, repo, models.LLMConfig{ID: "cfg-still-expiring", Provider: models.ProviderOpenAI})
-	if err := repo.(*sqlite.LLMConfigRepo).UpdateOAuthTokens(context.Background(), cfg.ID, "changed-but-expiring", "changed-refresh", time.Now().Add(time.Minute).UnixMilli()); err != nil {
+	if err := storeEnv.Fixtures.SetModelOAuthTokens(context.Background(), cfg.ID, "changed-but-expiring", "changed-refresh", time.Now().Add(time.Minute).UnixMilli()); err != nil {
 		t.Fatalf("UpdateOAuthTokens: %v", err)
 	}
 	mgr := NewManager(repo)
@@ -470,7 +469,7 @@ func TestManagerRefreshRejectsConnectionReassignment(t *testing.T) {
 	mgr := NewManager(repo)
 
 	_, err := mgr.EnsureFresh(context.Background(), cfg, time.Hour, func(ctx context.Context, refreshing models.LLMConfig) (TokenSet, error) {
-		if updateErr := repo.(*sqlite.LLMConfigRepo).LinkOAuthConnection(ctx, refreshing.ID, other.OAuthConnectionID); updateErr != nil {
+		if updateErr := storeEnv.Fixtures.LinkModelOAuthConnection(ctx, refreshing.ID, other.OAuthConnectionID); updateErr != nil {
 			return TokenSet{}, updateErr
 		}
 		return TokenSet{AccessToken: "stale-access", RefreshToken: "stale-refresh", ExpiresAt: time.Now().Add(2 * time.Hour).UnixMilli()}, nil

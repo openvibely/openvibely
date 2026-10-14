@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -62,7 +61,7 @@ func (s *chatRecallHookStore) UpdateExecution(ctx context.Context, e *models.Lif
 }
 
 func (s *chatRecallHookStore) FindExecutionByIdempotencyKey(ctx context.Context, key string) (*models.LifecycleExecution, error) {
-	return nil, sql.ErrNoRows
+	return nil, persistence.ErrNotFound
 }
 
 type chatRecallHookInvoker struct {

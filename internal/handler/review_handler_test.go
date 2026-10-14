@@ -16,7 +16,6 @@ import (
 	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
-	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/openvibely/openvibely/internal/testutil/teststores"
@@ -205,7 +204,9 @@ func TestDeleteReviewComment(t *testing.T) {
 	}
 
 	// Verify comment is gone
-	count, _ := reviewRepo.(*sqlite.ReviewCommentRepo).CountByTask(ctx, taskID)
+	storedComments, err := reviewRepo.ListByTask(ctx, taskID)
+	require.NoError(t, err)
+	count := len(storedComments)
 	if count != 0 {
 		t.Errorf("expected 0 comments after delete, got %d", count)
 	}
@@ -324,9 +325,9 @@ func TestSubmitReview_UsesBoundedChronologicalHistory(t *testing.T) {
 		require.Equal(t, models.ExecCompleted, execution.Status)
 	}
 
-	comments, err := reviewRepo.(*sqlite.ReviewCommentRepo).CountByTask(ctx, taskID)
+	comments, err := reviewRepo.ListByTask(ctx, taskID)
 	require.NoError(t, err)
-	require.Zero(t, comments, "direct admission should clear submitted review comments")
+	require.Empty(t, comments, "direct admission should clear submitted review comments")
 	allHistory, err := execRepo.ListByTaskChronological(ctx, taskID)
 	require.NoError(t, err)
 	var oldest *models.Execution
@@ -363,7 +364,9 @@ func TestAddMultipleComments_SameFile(t *testing.T) {
 	}
 
 	// Verify both comments exist
-	count, _ := reviewRepo.(*sqlite.ReviewCommentRepo).CountByTask(ctx, taskID)
+	storedComments, err := reviewRepo.ListByTask(ctx, taskID)
+	require.NoError(t, err)
+	count := len(storedComments)
 	if count != 2 {
 		t.Errorf("expected 2 comments, got %d", count)
 	}
@@ -450,7 +453,8 @@ func TestSubmitReview_RejectsForeignProjectTaskBeforeSideEffects(t *testing.T) {
 
 	require.Equal(t, http.StatusNotFound, rec.Code)
 
-	commentCount, err := reviewRepo.(*sqlite.ReviewCommentRepo).CountByTask(ctx, foreignTaskID)
+	storedComments, err := reviewRepo.ListByTask(ctx, foreignTaskID)
+	commentCount := len(storedComments)
 	require.NoError(t, err)
 	require.Equal(t, 1, commentCount, "foreign task comments must not be cleared")
 
@@ -518,7 +522,8 @@ func TestSubmitReview_CreatesFollowupExecutionAndClearsComments(t *testing.T) {
 		t.Fatalf("expected HX-Redirect to chat tab, got %q", got)
 	}
 
-	count, err := reviewRepo.(*sqlite.ReviewCommentRepo).CountByTask(ctx, taskID)
+	storedComments, err := reviewRepo.ListByTask(ctx, taskID)
+	count := len(storedComments)
 	if err != nil {
 		t.Fatalf("CountByTask: %v", err)
 	}

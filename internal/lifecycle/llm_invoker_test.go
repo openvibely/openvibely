@@ -8,7 +8,6 @@ import (
 
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/testutil/teststores"
 )
 
@@ -218,13 +217,13 @@ func TestLLMHookInvoker_PreservesLegacyProviderModelSlug(t *testing.T) {
 }
 
 func TestRunner_GoalHookAfterConfiguredModelDeletionUsesDefault(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
-	llmRepo := teststores.Of(db).LLMConfigs
-	agentRepo := teststores.Of(db).Agents
-	lifecycleRepo := teststores.Of(db).Lifecycle
-	projectRepo := teststores.Of(db).Projects
-	taskRepo := teststores.Of(db).Tasks
+	llmRepo := env.LLMConfigs
+	agentRepo := env.Agents
+	lifecycleRepo := env.Lifecycle
+	projectRepo := env.Projects
+	taskRepo := env.Tasks
 
 	project := &models.Project{Name: "Lifecycle model deletion", RepoPath: "/tmp/lifecycle-model-deletion"}
 	if err := projectRepo.Create(ctx, project); err != nil {
@@ -288,11 +287,12 @@ func TestRunner_GoalHookAfterConfiguredModelDeletionUsesDefault(t *testing.T) {
 	if caller.lastConfig.ID != defaultConfig.ID || caller.lastConfig.Provider == "" || caller.lastConfig.Model != defaultConfig.Model {
 		t.Fatalf("goal hook used invalid model config: %#v", caller.lastConfig)
 	}
-	executions, err := lifecycleRepo.(*sqlite.LifecycleRepo).ListExecutionsForTask(ctx, task.ID)
+	page, err := lifecycleRepo.ListExecutionsForTaskPage(ctx, task.ID, 2, "")
 	if err != nil {
 		t.Fatalf("list lifecycle executions: %v", err)
 	}
-	if len(executions) != 1 || executions[0].Status != models.LifecycleExecCompleted {
+	executions := page.Items
+	if page.HasMore || len(executions) != 1 || executions[0].Status != models.LifecycleExecCompleted {
 		t.Fatalf("lifecycle executions = %+v, want one completed execution", executions)
 	}
 }

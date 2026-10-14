@@ -2,14 +2,13 @@ package service
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
-	"strings"
 	"testing"
+	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
-	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/openvibely/openvibely/internal/testutil/storefixture"
 	"github.com/openvibely/openvibely/internal/testutil/teststores"
 	"github.com/stretchr/testify/require"
 )
@@ -78,7 +77,7 @@ func TestLoadBoundedTaskThreadExecutionsCoversPagingBoundaries(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, tt.wantIDs, serviceThreadHistoryExecutionIDs(got))
 			require.Equal(t, tt.wantLens, callbackLens)
-			require.Len(t, serviceThreadHistoryExecutionQueries(counter.Statements()), tt.wantPages)
+			require.Equal(t, tt.wantPages, counter.Snapshot().Requests)
 		})
 	}
 }
@@ -100,16 +99,17 @@ func TestLoadBoundedTaskThreadExecutionsStopsOnBudgetAfterBoundedPages(t *testin
 	require.NoError(t, err)
 	require.Equal(t, serviceThreadHistoryIDs("history-budget", 5, 45), serviceThreadHistoryExecutionIDs(got))
 	require.Equal(t, []int{20, 40}, callbackLens)
-	require.Len(t, serviceThreadHistoryExecutionQueries(counter.Statements()), 2)
+	require.Equal(t, 2, counter.Snapshot().Requests)
 }
 
-func newServiceThreadHistoryFixture(t *testing.T, name string) (*sql.DB, *testutil.SQLStatementCounter, persistence.ExecutionStore, *models.Task) {
+func newServiceThreadHistoryFixture(t *testing.T, name string) (*teststores.Env, storefixture.IOCounter, persistence.ExecutionStore, *models.Task) {
 	t.Helper()
-	db, counter := testutil.NewStatementCountingTestDB(t)
+	db := teststores.New(t, teststores.WithIOCounting())
+	counter := db.IO
 	ctx := context.Background()
-	projectRepo := teststores.Of(db).Projects
-	taskRepo := teststores.Of(db).Tasks
-	execRepo := teststores.Of(db).Executions
+	projectRepo := db.Projects
+	taskRepo := db.Tasks
+	execRepo := db.Executions
 	project := &models.Project{Name: "Thread History " + name}
 	require.NoError(t, projectRepo.Create(ctx, project))
 	task := &models.Task{
@@ -123,9 +123,9 @@ func newServiceThreadHistoryFixture(t *testing.T, name string) (*sql.DB, *testut
 	return db, counter, execRepo, task
 }
 
-func seedServiceThreadHistoryExecutions(t *testing.T, ctx context.Context, db *sql.DB, execRepo persistence.ExecutionStore, taskID string, count int, idPrefix string) {
+func seedServiceThreadHistoryExecutions(t *testing.T, ctx context.Context, db *teststores.Env, execRepo persistence.ExecutionStore, taskID string, count int, idPrefix string) {
 	t.Helper()
-	startedAt := "2026-01-02 03:04:05"
+	startedAt := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
 	for i := 0; i < count; i++ {
 		exec := &models.Execution{
 			ID:         fmt.Sprintf("%s-%02d", idPrefix, i),
@@ -135,8 +135,7 @@ func seedServiceThreadHistoryExecutions(t *testing.T, ctx context.Context, db *s
 			IsFollowup: i > 0,
 		}
 		require.NoError(t, execRepo.Create(ctx, exec))
-		_, err := db.ExecContext(ctx, `UPDATE executions SET started_at = ? WHERE id = ?`, startedAt, exec.ID)
-		require.NoError(t, err)
+		require.NoError(t, db.Fixtures.SetExecutionStartedAt(ctx, exec.ID, startedAt))
 		require.NoError(t, execRepo.Complete(ctx, exec.ID, models.ExecCompleted, fmt.Sprintf("output-%02d", i), "", 0, 0))
 	}
 }
@@ -155,14 +154,4 @@ func serviceThreadHistoryExecutionIDs(executions []models.Execution) []string {
 		ids = append(ids, execution.ID)
 	}
 	return ids
-}
-
-func serviceThreadHistoryExecutionQueries(statements []string) []string {
-	var queries []string
-	for _, statement := range statements {
-		if strings.Contains(strings.ToLower(statement), "from executions") {
-			queries = append(queries, statement)
-		}
-	}
-	return queries
 }

@@ -10,15 +10,26 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 )
 
-// Fixtures is implemented alongside each backend for tests only. Its contract
-// describes domain state, never tables, query text, or database connections.
 // ExecutionOutputState distinguishes committed transcript text from pending buffered segments.
 type ExecutionOutputState struct {
 	Materialized    string
 	PendingSegments int
 }
 
+type SkillEventFilter struct {
+	ProjectID, TaskID, SkillHandle, AgentID, EventType, Source, Surface, SkillScope string
+}
+
+// Fixtures describes test domain state, never tables, query text, or connections.
 type Fixtures interface {
+	// PromoteQueuedTaskInput atomically reserves an input and execution without model-selection validation.
+	PromoteQueuedTaskInput(context.Context, string, *models.Execution) error
+	// SetModelOAuthTokens simulates credential replacement by a competing refresher.
+	SetModelOAuthTokens(context.Context, string, string, string, int64) error
+	SeedAccountUsageSnapshot(context.Context, *models.AccountUsageSnapshot) error
+	CountAccountUsageSnapshots(context.Context) (int, error)
+	LinkModelOAuthConnection(context.Context, string, string) error
+	SkillEvents(context.Context, SkillEventFilter) ([]models.SkillAnalyticsEvent, error)
 	ProducedCommitStats(context.Context, string, time.Time) ([]models.TaskCommitStat, error)
 	SeedChannelTarget(context.Context, models.ChannelTarget) error
 	ChannelMessageSends(context.Context, string) ([]models.ChannelMessageSend, error)

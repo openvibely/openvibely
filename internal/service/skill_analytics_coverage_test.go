@@ -9,7 +9,6 @@ import (
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
-	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/testutil/teststores"
 )
 
@@ -72,12 +71,12 @@ func TestSkillAnalyticsInstrumentationRecordsSelectionViewAndEditEvents(t *testi
 		}
 	}
 
-	metrics, err := repo.(*sqlite.SkillAnalyticsRepo).GetTopSkills(ctx, persistence.SkillAnalyticsFilter{ProjectID: project.ID, Limit: 10})
+	dashboard, err := repo.BuildDashboard(ctx, persistence.SkillAnalyticsFilter{ProjectID: project.ID, Limit: 10}, nil)
 	if err != nil {
 		t.Fatalf("GetTopSkills: %v", err)
 	}
 	byHandle := map[string]models.SkillAnalyticsSkillMetric{}
-	for _, metric := range metrics {
+	for _, metric := range dashboard.TopSkills {
 		byHandle[metric.SkillHandle] = metric
 	}
 	if byHandle["global_skill"].SelectedCount != 1 || byHandle["global_skill"].SkillScope != models.SkillScopeGlobal {
@@ -99,11 +98,7 @@ func TestSkillAnalyticsInstrumentationRecordsSelectionViewAndEditEvents(t *testi
 		t.Fatalf("agent_created_skill metric = %#v", byHandle["agent_created_skill"])
 	}
 
-	followThrough, err := repo.(*sqlite.SkillAnalyticsRepo).GetSelectionFollowThrough(ctx, persistence.SkillAnalyticsFilter{ProjectID: project.ID, Limit: 10})
-	if err != nil {
-		t.Fatalf("GetSelectionFollowThrough: %v", err)
-	}
-	for _, metric := range followThrough {
+	for _, metric := range dashboard.FollowThrough {
 		if metric.SkillHandle == "project_skill" && (metric.SelectedCount != 1 || metric.LoadedOrViewed != 1 || metric.IgnoredCount != 0) {
 			t.Fatalf("project_skill follow-through = %#v", metric)
 		}

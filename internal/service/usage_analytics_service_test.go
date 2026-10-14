@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"database/sql"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -21,7 +20,6 @@ import (
 	llmusage "github.com/openvibely/openvibely/internal/llm/usage"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
-	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/testutil/teststores"
 	anthropicclient "github.com/openvibely/openvibely/pkg/anthropic_client"
 	openaiclient "github.com/openvibely/openvibely/pkg/openai_client"
@@ -609,9 +607,9 @@ func TestUsageAnalyticsService_RefreshesAccountsAndProvidersInParallel(t *testin
 }
 
 func TestUsageAnalyticsService_BuildAnalyticsUsageIncludesSnapshotsAndLocalUsage(t *testing.T) {
-	db := teststores.NewDB(t)
-	usageRepo := teststores.Of(db).Usage
-	configRepo := teststores.Of(db).LLMConfigs
+	env := teststores.New(t)
+	usageRepo := env.Usage
+	configRepo := env.LLMConfigs
 	ctx := context.Background()
 
 	config := &models.LLMConfig{Name: "OpenAI OAuth", Provider: models.ProviderOpenAI, Model: "gpt-5.3-codex", AuthMethod: models.AuthMethodOAuth, OAuthAccessToken: "token", OAuthAccountID: "acct-openai"}
@@ -621,7 +619,7 @@ func TestUsageAnalyticsService_BuildAnalyticsUsageIncludesSnapshotsAndLocalUsage
 	pct := 42.0
 	window := 300
 	reset := "2026-06-04T05:59:00Z"
-	if err := usageRepo.(*sqlite.UsageRepo).CreateAccountUsageSnapshot(ctx, &models.AccountUsageSnapshot{Provider: "openai", AccountID: "acct-openai", AgentConfigID: config.ID, PlanType: "pro", PrimaryLabel: "5-hour session", PrimaryUsedPercent: &pct, PrimaryWindowMinutes: &window, PrimaryResetsAt: &reset}); err != nil {
+	if err := env.Fixtures.SeedAccountUsageSnapshot(ctx, &models.AccountUsageSnapshot{Provider: "openai", AccountID: "acct-openai", AgentConfigID: config.ID, PlanType: "pro", PrimaryLabel: "5-hour session", PrimaryUsedPercent: &pct, PrimaryWindowMinutes: &window, PrimaryResetsAt: &reset}); err != nil {
 		t.Fatalf("snapshot: %v", err)
 	}
 	if err := usageRepo.RecordUsageEvent(ctx, &models.LLMUsageEvent{Provider: "openai", Model: "gpt-5.3-codex", Operation: "task", InputTokens: 10, OutputTokens: 5}); err != nil {
@@ -645,9 +643,9 @@ func TestUsageAnalyticsService_BuildAnalyticsUsageIncludesSnapshotsAndLocalUsage
 }
 
 func TestUsageAnalyticsService_APIKeyUsageDoesNotCreateAccountLimitCards(t *testing.T) {
-	db := teststores.NewDB(t)
-	usageRepo := teststores.Of(db).Usage
-	configRepo := teststores.Of(db).LLMConfigs
+	env := teststores.New(t)
+	usageRepo := env.Usage
+	configRepo := env.LLMConfigs
 	ctx := context.Background()
 
 	apiKeyConfig := &models.LLMConfig{Name: "OpenAI API", Provider: models.ProviderOpenAI, Model: "gpt-5.3-codex", AuthMethod: models.AuthMethodAPIKey, APIKey: "sk-test"}
@@ -658,7 +656,7 @@ func TestUsageAnalyticsService_APIKeyUsageDoesNotCreateAccountLimitCards(t *test
 		t.Fatalf("usage event: %v", err)
 	}
 	pct := 75.0
-	if err := usageRepo.(*sqlite.UsageRepo).CreateAccountUsageSnapshot(ctx, &models.AccountUsageSnapshot{Provider: "openai", AgentConfigID: apiKeyConfig.ID, PlanType: "ChatGPT Pro", PrimaryLabel: "5-hour session", PrimaryUsedPercent: &pct}); err != nil {
+	if err := env.Fixtures.SeedAccountUsageSnapshot(ctx, &models.AccountUsageSnapshot{Provider: "openai", AgentConfigID: apiKeyConfig.ID, PlanType: "ChatGPT Pro", PrimaryLabel: "5-hour session", PrimaryUsedPercent: &pct}); err != nil {
 		t.Fatalf("stray api-key snapshot: %v", err)
 	}
 
@@ -676,9 +674,9 @@ func TestUsageAnalyticsService_APIKeyUsageDoesNotCreateAccountLimitCards(t *test
 }
 
 func TestUsageAnalyticsService_RefreshFetchesAndStoresOAuthAccountUsage(t *testing.T) {
-	db := teststores.NewDB(t)
-	usageRepo := teststores.Of(db).Usage
-	configRepo := teststores.Of(db).LLMConfigs
+	env := teststores.New(t)
+	usageRepo := env.Usage
+	configRepo := env.LLMConfigs
 	ctx := context.Background()
 
 	openai := &models.LLMConfig{Name: "OpenAI OAuth", Provider: models.ProviderOpenAI, Model: "gpt-5.3-codex", AuthMethod: models.AuthMethodOAuth, OAuthAccessToken: "token", OAuthAccountID: "acct-openai"}
@@ -729,8 +727,8 @@ func TestUsageAnalyticsService_RefreshFetchesAndStoresOAuthAccountUsage(t *testi
 			t.Fatalf("unexpected refreshed account limit: %+v", account)
 		}
 	}
-	var snapshotCount int
-	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM account_usage_snapshots`).Scan(&snapshotCount); err != nil {
+	snapshotCount, err := env.Fixtures.CountAccountUsageSnapshots(ctx)
+	if err != nil {
 		t.Fatalf("count snapshots: %v", err)
 	}
 	if snapshotCount != 2 {
@@ -739,9 +737,9 @@ func TestUsageAnalyticsService_RefreshFetchesAndStoresOAuthAccountUsage(t *testi
 }
 
 func TestUsageAnalyticsService_DedupesAccountLimitsByOAuthAccount(t *testing.T) {
-	db := teststores.NewDB(t)
-	usageRepo := teststores.Of(db).Usage
-	configRepo := teststores.Of(db).LLMConfigs
+	env := teststores.New(t)
+	usageRepo := env.Usage
+	configRepo := env.LLMConfigs
 	ctx := context.Background()
 
 	sonnet := &models.LLMConfig{Name: "Anthropic Sonnet", Provider: models.ProviderAnthropic, Model: "claude-sonnet", AuthMethod: models.AuthMethodOAuth, OAuthAccessToken: "same-access", OAuthRefreshToken: "same-refresh", OAuthAccountID: "organization:org-same", OAuthExpiresAt: time.Now().Add(2 * time.Hour).UnixMilli()}
@@ -784,8 +782,8 @@ func TestUsageAnalyticsService_DedupesAccountLimitsByOAuthAccount(t *testing.T) 
 		t.Fatalf("unexpected deduped account limits: %+v", view.AccountLimits)
 	}
 
-	var snapshotCount int
-	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM account_usage_snapshots`).Scan(&snapshotCount); err != nil {
+	snapshotCount, err := env.Fixtures.CountAccountUsageSnapshots(ctx)
+	if err != nil {
 		t.Fatalf("count account snapshots: %v", err)
 	}
 	if snapshotCount != 1 {
@@ -909,9 +907,9 @@ func TestUsageAnalyticsService_KeepsAnthropicConfigsSeparateWhenProfileFails(t *
 }
 
 func TestUsageAnalyticsService_DedupesStaleAnthropicSnapshotsByConfigOAuthAccountID(t *testing.T) {
-	db := teststores.NewDB(t)
-	usageRepo := teststores.Of(db).Usage
-	configRepo := teststores.Of(db).LLMConfigs
+	env := teststores.New(t)
+	usageRepo := env.Usage
+	configRepo := env.LLMConfigs
 	ctx := context.Background()
 
 	sonnet := &models.LLMConfig{Name: "Anthropic Sonnet", Provider: models.ProviderAnthropic, Model: "claude-sonnet", AuthMethod: models.AuthMethodOAuth, OAuthAccessToken: "token-one", OAuthAccountID: "organization:org-same"}
@@ -924,7 +922,7 @@ func TestUsageAnalyticsService_DedupesStaleAnthropicSnapshotsByConfigOAuthAccoun
 	}
 
 	oldPct := 100.0
-	if err := usageRepo.(*sqlite.UsageRepo).CreateAccountUsageSnapshot(ctx, &models.AccountUsageSnapshot{
+	if err := env.Fixtures.SeedAccountUsageSnapshot(ctx, &models.AccountUsageSnapshot{
 		Provider:             "anthropic",
 		AccountID:            sonnet.ID,
 		AgentConfigID:        sonnet.ID,
@@ -935,7 +933,7 @@ func TestUsageAnalyticsService_DedupesStaleAnthropicSnapshotsByConfigOAuthAccoun
 		t.Fatalf("create stale sonnet snapshot: %v", err)
 	}
 	otherOldPct := 2.0
-	if err := usageRepo.(*sqlite.UsageRepo).CreateAccountUsageSnapshot(ctx, &models.AccountUsageSnapshot{
+	if err := env.Fixtures.SeedAccountUsageSnapshot(ctx, &models.AccountUsageSnapshot{
 		Provider:             "anthropic",
 		AccountID:            opus.ID,
 		AgentConfigID:        opus.ID,
@@ -946,7 +944,7 @@ func TestUsageAnalyticsService_DedupesStaleAnthropicSnapshotsByConfigOAuthAccoun
 		t.Fatalf("create stale opus snapshot: %v", err)
 	}
 	currentPct := 1.0
-	if err := usageRepo.(*sqlite.UsageRepo).CreateAccountUsageSnapshot(ctx, &models.AccountUsageSnapshot{
+	if err := env.Fixtures.SeedAccountUsageSnapshot(ctx, &models.AccountUsageSnapshot{
 		Provider:             "anthropic",
 		AccountID:            "organization:org-same",
 		AgentConfigID:        sonnet.ID,
@@ -984,9 +982,9 @@ func TestUsageAnalyticsService_DedupesStaleAnthropicSnapshotsByConfigOAuthAccoun
 func TestUsageAnalyticsService_SharedConnectionFailureUsesOneRequestAndAllowsSeparateConnectionFallback(t *testing.T) {
 	for _, provider := range []models.LLMProvider{models.ProviderOpenAI, models.ProviderAnthropic} {
 		t.Run(string(provider), func(t *testing.T) {
-			db := teststores.NewDB(t)
-			usageRepo := teststores.Of(db).Usage
-			configRepo := teststores.Of(db).LLMConfigs
+			env := teststores.New(t)
+			usageRepo := env.Usage
+			configRepo := env.LLMConfigs
 			ctx := context.Background()
 			first := &models.LLMConfig{
 				Name:              "A shared failed connection",
@@ -1009,7 +1007,7 @@ func TestUsageAnalyticsService_SharedConnectionFailureUsesOneRequestAndAllowsSep
 					t.Fatalf("create %s: %v", cfg.Name, err)
 				}
 			}
-			if err := configRepo.(*sqlite.LLMConfigRepo).LinkOAuthConnection(ctx, second.ID, first.OAuthConnectionID); err != nil {
+			if err := env.Fixtures.LinkModelOAuthConnection(ctx, second.ID, first.OAuthConnectionID); err != nil {
 				t.Fatalf("link shared connection: %v", err)
 			}
 
@@ -1072,9 +1070,9 @@ func TestUsageAnalyticsService_SharedConnectionFailureUsesOneRequestAndAllowsSep
 func TestUsageAnalyticsService_DistinctSameAccountConnectionFailuresPersistIndependentCooldowns(t *testing.T) {
 	for _, provider := range []models.LLMProvider{models.ProviderOpenAI, models.ProviderAnthropic} {
 		t.Run(string(provider), func(t *testing.T) {
-			db := teststores.NewDB(t)
-			usageRepo := teststores.Of(db).Usage
-			configRepo := teststores.Of(db).LLMConfigs
+			env := teststores.New(t)
+			usageRepo := env.Usage
+			configRepo := env.LLMConfigs
 			ctx := context.Background()
 
 			first := &models.LLMConfig{
@@ -1108,7 +1106,7 @@ func TestUsageAnalyticsService_DistinctSameAccountConnectionFailuresPersistIndep
 					t.Fatalf("create %s: %v", cfg.Name, err)
 				}
 			}
-			if err := configRepo.(*sqlite.LLMConfigRepo).LinkOAuthConnection(ctx, firstSibling.ID, first.OAuthConnectionID); err != nil {
+			if err := env.Fixtures.LinkModelOAuthConnection(ctx, firstSibling.ID, first.OAuthConnectionID); err != nil {
 				t.Fatalf("link shared connection: %v", err)
 			}
 
@@ -1160,9 +1158,9 @@ func TestUsageAnalyticsService_DistinctSameAccountConnectionFailuresPersistIndep
 func TestUsageAnalyticsService_SharedConnectionDedupesWithoutProviderIdentity(t *testing.T) {
 	for _, provider := range []models.LLMProvider{models.ProviderOpenAI, models.ProviderAnthropic} {
 		t.Run(string(provider), func(t *testing.T) {
-			db := teststores.NewDB(t)
-			usageRepo := teststores.Of(db).Usage
-			configRepo := teststores.Of(db).LLMConfigs
+			env := teststores.New(t)
+			usageRepo := env.Usage
+			configRepo := env.LLMConfigs
 			ctx := context.Background()
 			first := &models.LLMConfig{Name: "Shared first", Provider: provider, Model: "model-one", AuthMethod: models.AuthMethodOAuth, OAuthAccessToken: "access", OAuthRefreshToken: "refresh", OAuthExpiresAt: time.Now().Add(time.Hour).UnixMilli()}
 			second := &models.LLMConfig{Name: "Shared second", Provider: provider, Model: "model-two", AuthMethod: models.AuthMethodOAuth}
@@ -1171,7 +1169,7 @@ func TestUsageAnalyticsService_SharedConnectionDedupesWithoutProviderIdentity(t 
 					t.Fatalf("create %s: %v", cfg.Name, err)
 				}
 			}
-			if err := configRepo.(*sqlite.LLMConfigRepo).LinkOAuthConnection(ctx, second.ID, first.OAuthConnectionID); err != nil {
+			if err := env.Fixtures.LinkModelOAuthConnection(ctx, second.ID, first.OAuthConnectionID); err != nil {
 				t.Fatalf("link connection: %v", err)
 			}
 			calls := 0
@@ -1195,9 +1193,9 @@ func TestUsageAnalyticsService_SharedConnectionDedupesWithoutProviderIdentity(t 
 func TestUsageAnalyticsService_MovedSnapshotOriginRemainsAttributedToOriginalConnection(t *testing.T) {
 	for _, provider := range []models.LLMProvider{models.ProviderOpenAI, models.ProviderAnthropic} {
 		t.Run(string(provider), func(t *testing.T) {
-			db := teststores.NewDB(t)
-			usageRepo := teststores.Of(db).Usage
-			configRepo := teststores.Of(db).LLMConfigs
+			env := teststores.New(t)
+			usageRepo := env.Usage
+			configRepo := env.LLMConfigs
 			ctx := context.Background()
 
 			origin := &models.LLMConfig{
@@ -1231,7 +1229,7 @@ func TestUsageAnalyticsService_MovedSnapshotOriginRemainsAttributedToOriginalCon
 					t.Fatalf("create %s: %v", cfg.Name, err)
 				}
 			}
-			if err := configRepo.(*sqlite.LLMConfigRepo).LinkOAuthConnection(ctx, sibling.ID, origin.OAuthConnectionID); err != nil {
+			if err := env.Fixtures.LinkModelOAuthConnection(ctx, sibling.ID, origin.OAuthConnectionID); err != nil {
 				t.Fatalf("link sibling to account A: %v", err)
 			}
 
@@ -1251,7 +1249,7 @@ func TestUsageAnalyticsService_MovedSnapshotOriginRemainsAttributedToOriginalCon
 			if err != nil || !stored {
 				t.Fatalf("store account A snapshot = %v, %v", stored, err)
 			}
-			if err := configRepo.(*sqlite.LLMConfigRepo).LinkOAuthConnection(ctx, origin.ID, target.OAuthConnectionID); err != nil {
+			if err := env.Fixtures.LinkModelOAuthConnection(ctx, origin.ID, target.OAuthConnectionID); err != nil {
 				t.Fatalf("move snapshot origin to account B: %v", err)
 			}
 
@@ -1286,9 +1284,9 @@ func TestUsageAnalyticsService_MovedSnapshotOriginRemainsAttributedToOriginalCon
 func TestUsageAnalyticsService_MovedLegacySnapshotOriginRemainsAttributedToOriginalConnection(t *testing.T) {
 	for _, provider := range []models.LLMProvider{models.ProviderOpenAI, models.ProviderAnthropic} {
 		t.Run(string(provider), func(t *testing.T) {
-			db := teststores.NewDB(t)
-			usageRepo := teststores.Of(db).Usage
-			configRepo := teststores.Of(db).LLMConfigs
+			env := teststores.New(t)
+			usageRepo := env.Usage
+			configRepo := env.LLMConfigs
 			ctx := context.Background()
 
 			origin := &models.LLMConfig{
@@ -1320,7 +1318,7 @@ func TestUsageAnalyticsService_MovedLegacySnapshotOriginRemainsAttributedToOrigi
 					t.Fatalf("create %s: %v", cfg.Name, err)
 				}
 			}
-			if err := configRepo.(*sqlite.LLMConfigRepo).LinkOAuthConnection(ctx, sibling.ID, origin.OAuthConnectionID); err != nil {
+			if err := env.Fixtures.LinkModelOAuthConnection(ctx, sibling.ID, origin.OAuthConnectionID); err != nil {
 				t.Fatalf("link sibling to account A: %v", err)
 			}
 
@@ -1340,7 +1338,7 @@ func TestUsageAnalyticsService_MovedLegacySnapshotOriginRemainsAttributedToOrigi
 			if err != nil || !stored {
 				t.Fatalf("store legacy account A snapshot = %v, %v", stored, err)
 			}
-			if err := configRepo.(*sqlite.LLMConfigRepo).LinkOAuthConnection(ctx, origin.ID, target.OAuthConnectionID); err != nil {
+			if err := env.Fixtures.LinkModelOAuthConnection(ctx, origin.ID, target.OAuthConnectionID); err != nil {
 				t.Fatalf("move snapshot origin to account B: %v", err)
 			}
 
@@ -1499,9 +1497,9 @@ func TestUsageAnalyticsService_SharedAccountFailureFallsBackToHealthyConfig(t *t
 func TestUsageAnalyticsService_SharedAccountRecentFailureDoesNotSuppressHealthyConfig(t *testing.T) {
 	for _, provider := range []models.LLMProvider{models.ProviderOpenAI, models.ProviderAnthropic} {
 		t.Run(string(provider), func(t *testing.T) {
-			db := teststores.NewDB(t)
-			usageRepo := teststores.Of(db).Usage
-			configRepo := teststores.Of(db).LLMConfigs
+			env := teststores.New(t)
+			usageRepo := env.Usage
+			configRepo := env.LLMConfigs
 			ctx := context.Background()
 
 			first := &models.LLMConfig{
@@ -1534,7 +1532,7 @@ func TestUsageAnalyticsService_SharedAccountRecentFailureDoesNotSuppressHealthyC
 			if err := configRepo.Create(ctx, second); err != nil {
 				t.Fatalf("create healthy config: %v", err)
 			}
-			if err := usageRepo.(*sqlite.UsageRepo).CreateAccountUsageSnapshot(ctx, &models.AccountUsageSnapshot{
+			if err := env.Fixtures.SeedAccountUsageSnapshot(ctx, &models.AccountUsageSnapshot{
 				Provider:             string(provider),
 				AccountID:            "shared-account",
 				AgentConfigID:        first.ID,
@@ -1589,9 +1587,9 @@ func TestUsageAnalyticsService_SharedAccountRecentFailureDoesNotSuppressHealthyC
 func TestUsageAnalyticsService_SharedAccountNewerFailureDoesNotOverrideHealthyCachedSuccess(t *testing.T) {
 	for _, provider := range []models.LLMProvider{models.ProviderOpenAI, models.ProviderAnthropic} {
 		t.Run(string(provider), func(t *testing.T) {
-			db := teststores.NewDB(t)
-			usageRepo := teststores.Of(db).Usage
-			configRepo := teststores.Of(db).LLMConfigs
+			env := teststores.New(t)
+			usageRepo := env.Usage
+			configRepo := env.LLMConfigs
 			ctx := context.Background()
 
 			failed := &models.LLMConfig{
@@ -1626,7 +1624,7 @@ func TestUsageAnalyticsService_SharedAccountNewerFailureDoesNotOverrideHealthyCa
 			}
 
 			pct := 17.0
-			if err := usageRepo.(*sqlite.UsageRepo).CreateAccountUsageSnapshot(ctx, &models.AccountUsageSnapshot{
+			if err := env.Fixtures.SeedAccountUsageSnapshot(ctx, &models.AccountUsageSnapshot{
 				Provider:             string(provider),
 				AccountID:            "shared-account",
 				AgentConfigID:        healthy.ID,
@@ -1636,7 +1634,7 @@ func TestUsageAnalyticsService_SharedAccountNewerFailureDoesNotOverrideHealthyCa
 			}); err != nil {
 				t.Fatalf("create healthy cached snapshot: %v", err)
 			}
-			if err := usageRepo.(*sqlite.UsageRepo).CreateAccountUsageSnapshot(ctx, &models.AccountUsageSnapshot{
+			if err := env.Fixtures.SeedAccountUsageSnapshot(ctx, &models.AccountUsageSnapshot{
 				Provider:             string(provider),
 				AccountID:            "shared-account",
 				AgentConfigID:        failed.ID,
@@ -1824,9 +1822,9 @@ func TestUsageAnalyticsService_KeepsDistinctOAuthAccountsSeparate(t *testing.T) 
 }
 
 func TestUsageAnalyticsService_RefreshFailureKeepsLocalUsageAndBacksOff(t *testing.T) {
-	db := teststores.NewDB(t)
-	usageRepo := teststores.Of(db).Usage
-	configRepo := teststores.Of(db).LLMConfigs
+	env := teststores.New(t)
+	usageRepo := env.Usage
+	configRepo := env.LLMConfigs
 	ctx := context.Background()
 
 	config := &models.LLMConfig{Name: "OpenAI OAuth", Provider: models.ProviderOpenAI, Model: "gpt-5.3-codex", AuthMethod: models.AuthMethodOAuth, OAuthAccessToken: "token", OAuthAccountID: "acct-openai"}
@@ -1841,7 +1839,7 @@ func TestUsageAnalyticsService_RefreshFailureKeepsLocalUsageAndBacksOff(t *testi
 	modelPct := 7.5
 	monthlyLimit := 200.0
 	usedCredits := 12.5
-	if err := usageRepo.(*sqlite.UsageRepo).CreateAccountUsageSnapshot(ctx, &models.AccountUsageSnapshot{
+	if err := env.Fixtures.SeedAccountUsageSnapshot(ctx, &models.AccountUsageSnapshot{
 		Provider:             "openai",
 		AccountID:            "acct-openai",
 		AgentConfigID:        config.ID,
@@ -1937,9 +1935,9 @@ func TestUsageAnalyticsService_ReconnectDoesNotReusePriorGenerationSnapshot(t *t
 	for _, provider := range []models.LLMProvider{models.ProviderOpenAI, models.ProviderAnthropic} {
 		for _, identity := range []string{"known", "unavailable"} {
 			t.Run(string(provider)+"/"+identity, func(t *testing.T) {
-				db := teststores.NewDB(t)
-				usageRepo := teststores.Of(db).Usage
-				configRepo := teststores.Of(db).LLMConfigs
+				env := teststores.New(t)
+				usageRepo := env.Usage
+				configRepo := env.LLMConfigs
 				ctx := context.Background()
 
 				config := &models.LLMConfig{
@@ -1956,7 +1954,7 @@ func TestUsageAnalyticsService_ReconnectDoesNotReusePriorGenerationSnapshot(t *t
 					t.Fatalf("create OAuth config: %v", err)
 				}
 				oldPct := 83.0
-				if err := usageRepo.(*sqlite.UsageRepo).CreateAccountUsageSnapshot(ctx, &models.AccountUsageSnapshot{
+				if err := env.Fixtures.SeedAccountUsageSnapshot(ctx, &models.AccountUsageSnapshot{
 					Provider:             string(provider),
 					AccountID:            "principal-a",
 					AgentConfigID:        config.ID,
@@ -1999,9 +1997,9 @@ func TestUsageAnalyticsService_ReconnectDoesNotReusePriorGenerationSnapshot(t *t
 func TestUsageAnalyticsService_PriorGenerationSnapshotDoesNotSuppressRefreshWithoutIdentity(t *testing.T) {
 	for _, provider := range []models.LLMProvider{models.ProviderOpenAI, models.ProviderAnthropic} {
 		t.Run(string(provider), func(t *testing.T) {
-			db := teststores.NewDB(t)
-			usageRepo := teststores.Of(db).Usage
-			configRepo := teststores.Of(db).LLMConfigs
+			env := teststores.New(t)
+			usageRepo := env.Usage
+			configRepo := env.LLMConfigs
 			ctx := context.Background()
 			config := &models.LLMConfig{
 				Name:              string(provider) + " unknown identity reconnect",
@@ -2016,7 +2014,7 @@ func TestUsageAnalyticsService_PriorGenerationSnapshotDoesNotSuppressRefreshWith
 			if err := configRepo.Create(ctx, config); err != nil {
 				t.Fatalf("create OAuth config: %v", err)
 			}
-			if err := usageRepo.(*sqlite.UsageRepo).CreateAccountUsageSnapshot(ctx, &models.AccountUsageSnapshot{
+			if err := env.Fixtures.SeedAccountUsageSnapshot(ctx, &models.AccountUsageSnapshot{
 				Provider:      string(provider),
 				AccountID:     "principal-a",
 				AgentConfigID: config.ID,
@@ -2665,9 +2663,9 @@ func TestNormalizeOpenAIAccountUsageDuplicateSemanticWindowsRenderOnce(t *testin
 }
 
 func TestNormalizeOpenAIAdditionalPrimaryWindowPersistsCurrentLimit(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
-	configRepo := teststores.Of(db).LLMConfigs
+	configRepo := env.LLMConfigs
 	cfg := models.LLMConfig{Name: "OpenAI OAuth", Provider: models.ProviderOpenAI, Model: "gpt-5.3-codex", AuthMethod: models.AuthMethodOAuth, OAuthAccessToken: "test-token", OAuthAccountID: "acct-openai"}
 	if err := configRepo.Create(ctx, &cfg); err != nil {
 		t.Fatalf("create config: %v", err)
@@ -2705,8 +2703,8 @@ func TestNormalizeOpenAIAdditionalPrimaryWindowPersistsCurrentLimit(t *testing.T
 		t.Fatalf("extra-limit raw JSON exposed provider identity: %s", limit.RawJSON)
 	}
 
-	repo := teststores.Of(db).Usage
-	if err := repo.(*sqlite.UsageRepo).CreateAccountUsageSnapshot(ctx, snapshot); err != nil {
+	repo := env.Usage
+	if err := env.Fixtures.SeedAccountUsageSnapshot(ctx, snapshot); err != nil {
 		t.Fatalf("persist snapshot: %v", err)
 	}
 	stored, err := repo.GetLatestAccountUsageSnapshots(ctx, "openai")
@@ -3072,13 +3070,13 @@ func TestOpenAIUsageEndpointMatchesRunbookPathStyles(t *testing.T) {
 }
 
 func BenchmarkUsageAnalyticsServiceBuildAnalyticsUsage50K(b *testing.B) {
-	db := teststores.NewDB(b)
+	env := teststores.New(b)
 	ctx := context.Background()
-	seedUsageAnalyticsBenchmarkEvents(b, db, ctx, 50000)
-	usageRepo := teststores.Of(db).Usage
+	projectIDs := seedUsageAnalyticsBenchmarkEvents(b, env, ctx, 50000)
+	usageRepo := env.Usage
 	svc := NewUsageAnalyticsService(usageRepo, nil)
 	filter := persistence.UsageFilter{
-		ProjectID: "bench-project-0",
+		ProjectID: projectIDs[0],
 		DateFrom:  time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
 		DateTo:    time.Date(2026, 4, 1, 23, 59, 59, 0, time.UTC),
 		GroupBy:   "day",
@@ -3093,57 +3091,26 @@ func BenchmarkUsageAnalyticsServiceBuildAnalyticsUsage50K(b *testing.B) {
 	}
 }
 
-func seedUsageAnalyticsBenchmarkEvents(b *testing.B, db *sql.DB, ctx context.Context, count int) {
+func seedUsageAnalyticsBenchmarkEvents(b *testing.B, env *teststores.Env, ctx context.Context, count int) []string {
 	b.Helper()
+	var projectIDs []string
 	for i := 0; i < 3; i++ {
-		if _, err := db.ExecContext(ctx, `INSERT INTO projects (id, name) VALUES (?, ?)`, fmt.Sprintf("bench-project-%d", i), fmt.Sprintf("Bench Project %d", i)); err != nil {
-			b.Fatalf("insert project: %v", err)
+		p := models.Project{Name: fmt.Sprintf("Bench Project %d", i)}
+		if err := env.Projects.Create(ctx, &p); err != nil {
+			b.Fatal(err)
 		}
+		projectIDs = append(projectIDs, p.ID)
 	}
-	tx, err := db.BeginTx(ctx, nil)
-	if err != nil {
-		b.Fatalf("begin seed tx: %v", err)
-	}
-	stmt, err := tx.PrepareContext(ctx, `
-		INSERT INTO llm_usage_events (
-			id, provider, account_id, project_id, model, operation, status,
-			input_tokens, output_tokens, cached_input_tokens, reasoning_output_tokens, total_tokens, cost_usd, raw_usage_json, occurred_at
-		) VALUES (?, ?, ?, ?, ?, 'task', 'completed', ?, ?, ?, ?, ?, ?, '{}', ?)`)
-	if err != nil {
-		_ = tx.Rollback()
-		b.Fatalf("prepare seed usage: %v", err)
-	}
-	defer stmt.Close()
 	providers := []string{"openai", "anthropic"}
-	models := []string{"gpt-5", "gpt-5-mini", "claude-sonnet", "claude-opus"}
+	modelNames := []string{"gpt-5", "gpt-5-mini", "claude-sonnet", "claude-opus"}
 	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	for i := 0; i < count; i++ {
-		input := 100 + i%37
-		output := 40 + i%23
-		cached := i % 17
-		reasoning := i % 11
-		total := input + output
-		cost := float64(total) / 1000000
-		occurred := base.Add(time.Duration(i%2160) * time.Hour)
-		if _, err := stmt.ExecContext(ctx,
-			fmt.Sprintf("bench-usage-%05d", i),
-			providers[i%len(providers)],
-			fmt.Sprintf("acct-%d", i%5),
-			fmt.Sprintf("bench-project-%d", i%3),
-			models[i%len(models)],
-			input,
-			output,
-			cached,
-			reasoning,
-			total,
-			cost,
-			occurred.Format("2006-01-02 15:04:05"),
-		); err != nil {
-			_ = tx.Rollback()
-			b.Fatalf("insert usage event %d: %v", i, err)
+		input, output := 100+i%37, 40+i%23
+		cost := float64(input+output) / 1000000
+		event := models.LLMUsageEvent{Provider: providers[i%len(providers)], AccountID: fmt.Sprintf("acct-%d", i%5), ProjectID: projectIDs[i%3], Model: modelNames[i%len(modelNames)], Operation: "task", Status: "completed", InputTokens: input, OutputTokens: output, CachedInputTokens: i % 17, ReasoningOutputTokens: i % 11, TotalTokens: input + output, CostUSD: &cost, RawUsageJSON: "{}", OccurredAt: base.Add(time.Duration(i%2160) * time.Hour)}
+		if err := env.Usage.RecordUsageEvent(ctx, &event); err != nil {
+			b.Fatalf("seed usage event %d: %v", i, err)
 		}
 	}
-	if err := tx.Commit(); err != nil {
-		b.Fatalf("commit seed tx: %v", err)
-	}
+	return projectIDs
 }
