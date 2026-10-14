@@ -6,11 +6,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/require"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/testutil/storefixture"
 	"github.com/openvibely/openvibely/internal/testutil/teststores"
+	"github.com/stretchr/testify/require"
 )
 
 func TestFixturesShareStoreStateWithoutApplyingTransitions(t *testing.T) {
@@ -170,4 +170,22 @@ func TestRetainedScheduleFixtureRollsBackAndSharesStoreState(t *testing.T) {
 			require.Equal(t, schedule.ID, graph.Resources[0].ResourceID)
 		})
 	}
+}
+
+func TestHistoryIOCounterMeasuresPhysicalReads(t *testing.T) {
+	env := teststores.New(t, teststores.WithIOCounting())
+	ctx := context.Background()
+	env.IO.SetEnabled(true)
+	_, err := env.Executions.ListByTaskChronologicalLimit(ctx, "missing-task", 20)
+	require.NoError(t, err)
+	require.Equal(t, 1, env.IO.Snapshot().ExecutionHistoryReads)
+	_, err = env.Executions.ListByTaskChronologicalLimit(ctx, "missing-task", 20)
+	require.NoError(t, err)
+	require.Equal(t, 2, env.IO.Snapshot().ExecutionHistoryReads)
+	env.IO.SetEnabled(false)
+	_, err = env.Executions.ListByTaskChronologicalLimit(ctx, "missing-task", 20)
+	require.NoError(t, err)
+	require.Equal(t, 2, env.IO.Snapshot().ExecutionHistoryReads)
+	env.IO.Reset()
+	require.Zero(t, env.IO.Snapshot().ExecutionHistoryReads)
 }

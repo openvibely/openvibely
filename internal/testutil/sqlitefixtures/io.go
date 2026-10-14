@@ -1,6 +1,8 @@
 package sqlitefixtures
 
 import (
+	"strings"
+
 	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/openvibely/openvibely/internal/testutil/storefixture"
 )
@@ -13,5 +15,13 @@ func NewIOCounter(counter *testutil.SQLStatementCounter) storefixture.IOCounter 
 func (c *ioCounter) Reset()                  { c.counter.Reset() }
 func (c *ioCounter) SetEnabled(enabled bool) { c.counter.SetEnabled(enabled) }
 func (c *ioCounter) Snapshot() storefixture.IOStats {
-	return storefixture.IOStats{Requests: len(c.counter.Statements()), ReadTextBytes: c.counter.SelectedTextBytes()}
+	statements := c.counter.Statements()
+	stats := storefixture.IOStats{Requests: len(statements), ReadTextBytes: c.counter.SelectedTextBytes()}
+	for _, statement := range statements {
+		q := strings.ToLower(strings.Join(strings.Fields(statement), " "))
+		if strings.Contains(q, "from executions where task_id = ?") && strings.Contains(q, "prompt_sent") && strings.Contains(q, "output") {
+			stats.ExecutionHistoryReads++
+		}
+	}
+	return stats
 }

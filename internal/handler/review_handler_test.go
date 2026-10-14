@@ -2,7 +2,6 @@ package handler
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -12,8 +11,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/events"
+
+	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/service"
@@ -23,21 +23,22 @@ import (
 )
 
 func setupReviewHandler(t *testing.T) (*Handler, *echo.Echo, persistence.ReviewCommentStore, persistence.ExecutionStore, *testutil.MockLLMCaller, string) {
-	return setupReviewHandlerForDB(t, teststores.NewDB(t))
+	b := events.NewBroadcaster()
+	return setupReviewHandlerForStores(t, teststores.New(t, teststores.WithBroadcaster(b)), b)
 }
 
-func setupReviewHandlerForDB(t *testing.T, db *sql.DB) (*Handler, *echo.Echo, persistence.ReviewCommentStore, persistence.ExecutionStore, *testutil.MockLLMCaller, string) {
+func setupReviewHandlerForStores(t *testing.T, stores *teststores.Env, broadcaster *events.Broadcaster) (*Handler, *echo.Echo, persistence.ReviewCommentStore, persistence.ExecutionStore, *testutil.MockLLMCaller, string) {
 	t.Helper()
 
-	env := newTestHandlerEnv(t, db, withTestBroadcaster(events.NewBroadcaster()), withTestTaskGoals())
+	env := wireTestHandler(t, stores.Stores, testHandlerOptions{taskGoals: true, broadcaster: broadcaster})
 	h, e := env.Handler, env.Echo
 	projectSvc, llmConfigRepo, taskRepo, execRepo, mockLLM := env.ProjectSvc, env.LLMConfigRepo, env.TaskRepo, env.ExecRepo, env.LLM
 	env.WorkerSvc.SetProjectRepo(env.ProjectRepo)
 	env.WorkerSvc.SetTaskRepo(taskRepo)
 	env.WorkerSvc.SetLLMConfigRepo(llmConfigRepo)
-	reviewCommentRepo := teststores.Of(db).ReviewComments
+	reviewCommentRepo := stores.ReviewComments
 	h.SetReviewCommentRepo(reviewCommentRepo)
-	threadInputRepo := teststores.Of(db).ThreadInputs
+	threadInputRepo := stores.ThreadInputs
 	h.SetThreadInputRepo(threadInputRepo)
 	env.LLMSvc.SetThreadInputRepo(threadInputRepo)
 
@@ -271,8 +272,10 @@ func TestSubmitReview_NoComments(t *testing.T) {
 }
 
 func TestSubmitReview_UsesBoundedChronologicalHistory(t *testing.T) {
-	db, counter := testutil.NewStatementCountingTestDB(t)
-	h, e, reviewRepo, execRepo, mockLLM, taskID := setupReviewHandlerForDB(t, db)
+	broadcaster := events.NewBroadcaster()
+	stores := teststores.New(t, teststores.WithIOCounting(), teststores.WithBroadcaster(broadcaster))
+	counter := stores.IO
+	h, e, reviewRepo, execRepo, mockLLM, taskID := setupReviewHandlerForStores(t, stores, broadcaster)
 	ctx := context.Background()
 
 	task, err := h.taskRepo.GetByID(ctx, taskID)
@@ -288,11 +291,10 @@ func TestSubmitReview_UsesBoundedChronologicalHistory(t *testing.T) {
 			StartsNewContext: i == 16,
 		}
 		require.NoError(t, execRepo.Create(ctx, exec))
-		_, err = db.ExecContext(ctx, `UPDATE executions
-			SET output = ?, error_message = ?, started_at = datetime('2026-01-01 00:00:00', ?), completed_at = datetime('2026-01-01 00:00:00', ?)
-			WHERE id = ?`,
-			fmt.Sprintf("output-%02d", i), strings.Repeat("history-error-", 64), fmt.Sprintf("+%d seconds", i), fmt.Sprintf("+%d seconds", i), exec.ID)
-		require.NoError(t, err)
+		require.NoError(t, execRepo.Complete(ctx, exec.ID, models.ExecCompleted, fmt.Sprintf("output-%02d", i), strings.Repeat("history-error-", 64), 0, 0))
+		at := time.Date(2026, 1, 1, 0, 0, i, 0, time.UTC)
+		require.NoError(t, stores.Fixtures.SetExecutionStartedAt(ctx, exec.ID, at))
+		require.NoError(t, stores.Fixtures.SetExecutionCompletedAt(ctx, exec.ID, at))
 	}
 	require.NoError(t, reviewRepo.Create(ctx, &models.ReviewComment{
 		TaskID: taskID, FilePath: "main.go", LineNumber: 42, LineType: "new", CommentText: "address the review",
@@ -306,15 +308,7 @@ func TestSubmitReview_UsesBoundedChronologicalHistory(t *testing.T) {
 	counter.SetEnabled(false)
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 
-	var historyQueries []string
-	for _, statement := range counter.Statements() {
-		if strings.Contains(statement, "FROM executions WHERE task_id = ?") && strings.Contains(statement, "prompt_sent") && strings.Contains(statement, "output") {
-			historyQueries = append(historyQueries, statement)
-		}
-	}
-	require.Len(t, historyQueries, 1, "expected one direct review history query")
-	require.Contains(t, historyQueries[0], "ORDER BY started_at DESC, rowid DESC LIMIT ?")
-	require.NotContains(t, historyQueries[0], "ORDER BY started_at ASC, rowid ASC")
+	require.Equal(t, 1, counter.Snapshot().ExecutionHistoryReads, "expected one physical review history read")
 
 	require.Eventually(t, func() bool { return mockLLM.CallCount() > 0 }, time.Second, 10*time.Millisecond)
 	history := mockLLM.LastAgentRequest().ChatHistory
