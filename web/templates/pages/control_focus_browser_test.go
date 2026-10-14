@@ -31,7 +31,7 @@ func TestBrowserFunctional_NeutralControlFocus(t *testing.T) {
 		_ = components.TaskChangeActivity("audit").Render(r.Context(), w)
 		_ = kanbanSearch().Render(r.Context(), w)
 		_ = automationBreadcrumb("audit-project", "automation", "Audit automation", "History", false).Render(r.Context(), w)
-		fmt.Fprint(w, `<div id="audit-examples"><button class="btn btn-primary">Save</button><button class="btn btn-primary btn-outline">Run</button><a class="btn btn-primary" href="#apply">Apply</a><a class="link link-primary" href="#release">Release notes</a><input type="checkbox" class="checkbox checkbox-primary"/><input type="checkbox" class="toggle toggle-primary"/><button class="btn ov-task-result-start-btn">Start</button><span class="chat-markdown"><a href="#chat-link">Chat link</a></span><a class="ov-task-result-link" href="#task-link">Task link</a><button class="chat-input-option-btn">Choice</button><details class="stream-thinking"><summary>Thinking</summary></details><button class="stream-tool-output-toggle">Tool output</button></div>`)
+		fmt.Fprint(w, `<div id="audit-examples"><button class="btn btn-primary">Save</button><button class="btn btn-secondary">Add</button><input type="checkbox" class="toggle toggle-secondary toggle-sm"/><button class="btn btn-primary btn-outline">Run</button><a class="btn btn-primary" href="#apply">Apply</a><a class="link link-primary" href="#release">Release notes</a><input type="checkbox" class="checkbox checkbox-primary"/><input type="checkbox" class="toggle toggle-primary"/><button class="btn ov-task-result-start-btn">Start</button><span class="chat-markdown"><a href="#chat-link">Chat link</a></span><a class="ov-task-result-link" href="#task-link">Task link</a><button class="chat-input-option-btn">Choice</button><details class="stream-thinking"><summary>Thinking</summary></details><button class="stream-tool-output-toggle">Tool output</button></div>`)
 	}))
 	defer server.Close()
 	runComposerFocusCDP(t, chrome, server.URL+"/tasks/audit", "neutral-focus", func(b *composerFocusCDP) {
@@ -41,14 +41,14 @@ func TestBrowserFunctional_NeutralControlFocus(t *testing.T) {
 		b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyUp", "key": "Tab", "code": "Tab"}, nil)
 		for _, theme := range []string{"dark", "light"} {
 			b.evaluate(`document.documentElement.setAttribute('data-theme','` + theme + `');'ready'`)
-			b.waitFor("primary actions retain colors with neutral focus in "+theme, `(function(){
+			b.waitFor("actions retain colors with neutral focus in "+theme, `(function(){
  const reference=document.createElement('span');reference.style.outline='1px solid oklch(var(--bc) / .5)';document.body.append(reference);
  const neutral=getComputedStyle(reference).outlineColor;reference.remove();
- for(const e of document.querySelectorAll('#audit-examples .btn-primary,#audit-examples .link-primary')) {
+ for(const e of document.querySelectorAll('#audit-examples .btn-primary,#audit-examples .btn-secondary,#audit-examples .link-primary')) {
   e.style.transition='none';e.blur();const before=getComputedStyle(e);const colors=[before.color,before.backgroundColor,before.borderTopColor].join('|');
   e.focus();const after=getComputedStyle(e);
   if(!e.matches(':focus-visible')||after.outlineStyle!=='solid'||after.outlineWidth!=='1px'||after.outlineColor!==neutral)return e.className+' '+after.outline;
-  if(colors!==[after.color,after.backgroundColor,after.borderTopColor].join('|'))return 'focus changed primary colors';
+  if(colors!==[after.color,after.backgroundColor,after.borderTopColor].join('|'))return 'focus changed action colors';
  }
  return '';
 })()`, "")
