@@ -444,7 +444,7 @@ func TestDefaultTools(t *testing.T) {
 		}
 	}
 
-	expected := []string{"read_file", "write_file", "edit_file", "shell", "interact_process", "list_files", "grep_search"}
+	expected := []string{"read_file", "write_file", "edit_file", "shell", "process", "list_files", "grep_search"}
 	for _, name := range expected {
 		if !names[name] {
 			t.Errorf("missing tool: %s", name)

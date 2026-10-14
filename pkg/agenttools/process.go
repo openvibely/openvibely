@@ -83,11 +83,22 @@ func processWorkDir(dir string) (string, error) {
 }
 
 func processYield(value *int, fallback int) time.Duration {
+	return boundedProcessYield(value, fallback, 250, 30000)
+}
+
+func boundedProcessYield(value *int, fallback, minimum, maximum int) time.Duration {
 	n := fallback
 	if value != nil {
 		n = *value
 	}
-	return time.Duration(min(30000, max(250, n))) * time.Millisecond
+	return time.Duration(min(maximum, max(minimum, n))) * time.Millisecond
+}
+
+func processInteractionYield(value *int, polling bool) time.Duration {
+	if polling {
+		return boundedProcessYield(value, 5000, 5000, 300000)
+	}
+	return processYield(value, 250)
 }
 
 func (m *processManager) remove(s *processSession) {
@@ -251,7 +262,7 @@ func (s *processSession) readResult(note string) (string, bool, bool) {
 		}
 		output += "[/process]"
 	} else {
-		output += "\n[process]\nsession_id: " + s.id + "\nstatus: running\nnext: call interact_process with this session_id to read output or send input\n[/process]"
+		output += "\n[process]\nsession_id: " + s.id + "\nstatus: running\nnext: call process with this session_id to read output or send input\n[/process]"
 	}
 	return output, s.finished, s.timedOut
 }
@@ -268,7 +279,7 @@ func (m *processManager) interact(ctx context.Context, dir, id, input string, cl
 		return "", fmt.Errorf("unknown or expired process session for this working directory")
 	}
 	if !s.interaction.TryLock() {
-		return "", fmt.Errorf("another interact_process call is using this session; retry after it returns")
+		return "", fmt.Errorf("another process call is using this session; retry after it returns")
 	}
 	defer s.interaction.Unlock()
 	if err := ctx.Err(); err != nil {
@@ -347,7 +358,7 @@ func execBash(ctx context.Context, workDir string, input json.RawMessage) (strin
 	return shellProcesses.start(ctx, workDir, p.Command, NormalizeBashTimeout(p.Timeout), processYield(p.Yield, 10000))
 }
 
-func execInteractProcess(ctx context.Context, workDir string, input json.RawMessage) (string, error) {
+func execProcess(ctx context.Context, workDir string, input json.RawMessage) (string, error) {
 	var p struct {
 		SessionID  string `json:"session_id"`
 		Input      string `json:"input"`
@@ -367,11 +378,8 @@ func execInteractProcess(ctx context.Context, workDir string, input json.RawMess
 	if p.Terminate && (p.Input != "" || p.CloseStdin) {
 		return "", fmt.Errorf("terminate cannot be combined with input or close_stdin")
 	}
-	fallback := 10000
-	if p.Input != "" {
-		fallback = 250
-	}
-	return shellProcesses.interact(ctx, workDir, p.SessionID, p.Input, p.CloseStdin, p.Terminate, processYield(p.Yield, fallback))
+	polling := p.Input == "" && !p.CloseStdin && !p.Terminate
+	return shellProcesses.interact(ctx, workDir, p.SessionID, p.Input, p.CloseStdin, p.Terminate, processInteractionYield(p.Yield, polling))
 }
 
 // ShutdownProcesses stops background shell processes during application shutdown.
