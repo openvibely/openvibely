@@ -84,10 +84,15 @@ func Of(db *sql.DB, opts ...Option) persistence.Stores {
 // Env is a fresh test database and the stores built on it.
 type Env struct {
 	closeBackend func() error
+	suspendIO    func(context.Context) (func() error, error)
 	IO           storefixture.IOCounter
 	Fixtures     storefixture.Fixtures
 	persistence.Stores
 }
+
+// SuspendIO prevents backend I/O until the returned idempotent release is called.
+// Stores still perform real requests, allowing tests to exercise cancellation while blocked.
+func (e *Env) SuspendIO(ctx context.Context) (func() error, error) { return e.suspendIO(ctx) }
 
 // Close makes the backend unavailable for failure-path tests without exposing handles.
 func (e *Env) Close() error { return e.closeBackend() }
@@ -109,7 +114,7 @@ func New(tb testing.TB, opts ...Option) *Env {
 			if o.countIO {
 				counter = sqlitefixtures.NewIOCounter(sqliteCounter)
 			}
-			return &Env{closeBackend: func() error { return errors.Join(reader.Close(), writer.Close()) }, Fixtures: sqlitefixtures.New(writer), Stores: sqlite.NewStores(reader, o.broadcaster), IO: counter}
+			return &Env{suspendIO: sqlitefixtures.SuspendIO(reader, writer), closeBackend: func() error { return errors.Join(reader.Close(), writer.Close()) }, Fixtures: sqlitefixtures.New(writer), Stores: sqlite.NewStores(reader, o.broadcaster), IO: counter}
 		} else if o.countIO {
 			var sqliteCounter *testutil.SQLStatementCounter
 			db, sqliteCounter = testutil.NewStatementCountingTestDB(tb)
@@ -117,7 +122,7 @@ func New(tb testing.TB, opts ...Option) *Env {
 		} else {
 			db = testutil.NewTestDB(tb)
 		}
-		return &Env{closeBackend: db.Close, Fixtures: sqlitefixtures.New(db), Stores: sqlite.NewStores(db, o.broadcaster), IO: counter}
+		return &Env{suspendIO: sqlitefixtures.SuspendIO(db), closeBackend: db.Close, Fixtures: sqlitefixtures.New(db), Stores: sqlite.NewStores(db, o.broadcaster), IO: counter}
 	default:
 		tb.Fatalf("unsupported %s %q (supported: %s)", DriverEnv, driver, config.DatabaseDriverSQLite)
 		return nil
