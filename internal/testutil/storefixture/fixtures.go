@@ -239,6 +239,7 @@ type IOCounter interface {
 type AutomationDispatchState struct {
 	Status           string
 	TaskReservations int
+	Executions       int
 }
 
 // AutomationIssueTaskOrigin records the issue and graph node that produced a task.

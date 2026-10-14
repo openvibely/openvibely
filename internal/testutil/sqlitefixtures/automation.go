@@ -81,7 +81,7 @@ func (f *fixtures) RenewAutomationDispatchLease(ctx context.Context, id, owner s
 }
 func (f *fixtures) AutomationDispatchState(ctx context.Context, id string) (storefixture.AutomationDispatchState, error) {
 	var state storefixture.AutomationDispatchState
-	err := f.db.QueryRowContext(ctx, `SELECT status,(SELECT COUNT(*) FROM automation_task_run_reservations WHERE dispatch_id = ?) FROM automation_dispatch_outbox WHERE id = ?`, id, id).Scan(&state.Status, &state.TaskReservations)
+	err := f.db.QueryRowContext(ctx, `SELECT status,(SELECT COUNT(*) FROM automation_task_run_reservations WHERE dispatch_id = ?),(SELECT COUNT(*) FROM executions WHERE dispatch_id = ?) FROM automation_dispatch_outbox WHERE id = ?`, id, id, id).Scan(&state.Status, &state.TaskReservations, &state.Executions)
 	return state, err
 }
 func (f *fixtures) CompleteAutomationActivity(ctx context.Context, id string, at time.Time) error {
