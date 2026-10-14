@@ -53,7 +53,7 @@ func TestProcessSessionProviderLoops(t *testing.T) {
 					t.Error(err)
 				}
 				definitions, _ := json.Marshal(body["tools"])
-				if !strings.Contains(string(definitions), "interact_process") {
+				if !strings.Contains(string(definitions), "process") {
 					t.Error("missing shared process tool")
 				}
 				emit := func(v any) { b, _ := json.Marshal(v); fmt.Fprintf(w, "data: %s\n\n", b) }
@@ -62,7 +62,7 @@ func TestProcessSessionProviderLoops(t *testing.T) {
 				args := map[string]any{"command": command, "yield_time_ms": 250, "timeout": 10}
 				finished := strings.Contains(last, "status: completed") || calls > 6
 				if calls > 1 {
-					name = "interact_process"
+					name = "process"
 					args = map[string]any{"session_id": sessionID, "yield_time_ms": 1000}
 					if calls == 2 {
 						args["input"] = "hello\n"

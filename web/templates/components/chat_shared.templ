@@ -4931,6 +4931,7 @@ templ ChatAutoScrollScript() {
 				'Write': 'write_file',
 				'Edit': 'edit_file',
 				'Bash': 'bash',
+				'Shell': 'shell',
 				'Grep': 'grep_search',
 				'Glob': 'list_files',
 				'List Files': 'list_files',
@@ -5203,7 +5204,7 @@ templ ChatAutoScrollScript() {
 				// Display name mapping: raw tool names → friendly names (matching Claude Code VSCode)
 			var displayNames = {
 				'read_file': 'Read', 'write_file': 'Write', 'edit_file': 'Edit',
-				'bash': 'Bash', 'grep_search': 'Grep', 'list_files': 'List Files',
+				'bash': 'Bash', 'shell': 'Shell', 'grep_search': 'Grep', 'list_files': 'List Files',
 				'web_search': 'Web Search', 'web.run': 'Web Search', 'web_fetch': 'Web Fetch',
 				'code_execution': 'Code Execution', 'bash_code_execution': 'Bash Code Execution'
 			};
@@ -5737,7 +5738,7 @@ templ ChatAutoScrollScript() {
 				}
 
 				// Extract IN content based on tool type
-				if (dn === 'Bash' && seg.secondary) {
+				if ((dn === 'Bash' || dn === 'Shell') && seg.secondary) {
 					hasIn = true;
 					inLabel = 'IN';
 					inContent = seg.secondary;
@@ -6018,9 +6019,9 @@ templ ChatAutoScrollScript() {
 					nameSpan.className = 'tool-name-text';
 					nameSpan.textContent = dn;
 					header.appendChild(nameSpan);
-					// Show secondary in header for file-based tools (filename), but NOT for bash/grep
+					// Show secondary in header for file-based tools (filename), but NOT for bash/shell/grep
 					// (those show their input in the IN row instead to avoid duplication)
-					if (seg.secondary && dn !== 'Bash' && dn !== 'Grep') {
+					if (seg.secondary && dn !== 'Bash' && dn !== 'Shell' && dn !== 'Grep') {
 						var secondarySpan = document.createElement('span');
 						secondarySpan.className = 'tool-name-secondary';
 						secondarySpan.textContent = seg.secondary;

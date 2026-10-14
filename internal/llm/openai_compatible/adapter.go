@@ -624,7 +624,7 @@ func mapBuiltInToolName(name string) string {
 		return "Write"
 	case "edit_file":
 		return "Edit"
-	case "bash", "shell", "interact_process":
+	case "bash", "shell", "process":
 		return "Bash"
 	case "list_files":
 		return "Glob"

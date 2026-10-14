@@ -28,8 +28,8 @@ func Execute(ctx context.Context, workDir, name string, input json.RawMessage) (
 		return execEditFile(workDir, input)
 	case "bash", "Bash", "shell":
 		return execBash(ctx, workDir, input)
-	case "interact_process":
-		return execInteractProcess(ctx, workDir, input)
+	case "process":
+		return execProcess(ctx, workDir, input)
 	case "list_files":
 		return execListFiles(workDir, input)
 	case "grep_search":
