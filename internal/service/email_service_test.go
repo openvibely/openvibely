@@ -32,30 +32,38 @@ import (
 )
 
 func TestEmailInboundReceiptRepoExistsBatchUsesBoundedQueries(t *testing.T) {
-	db, counter := testutil.NewStatementCountingTestDB(t)
-	ctx := context.Background()
-	receipts := teststores.Of(db).EmailInboundReceipts
-	mailbox := "imap.example.com\x00bot@example.com"
-	messageKeys := make([]string, 501)
-	for i := range messageKeys {
-		messageKeys[i] = fmt.Sprintf("message-id:<batch-%d@example.com>", i)
-	}
-	require.NoError(t, receipts.Record(ctx, mailbox, messageKeys[0]))
-	require.NoError(t, receipts.Record(ctx, mailbox, messageKeys[500]))
+	for _, topology := range []struct {
+		name string
+		opts []teststores.Option
+	}{
+		{name: "isolated"}, {name: "production", opts: []teststores.Option{teststores.WithProductionTopology()}},
+	} {
+		t.Run(topology.name, func(t *testing.T) {
+			opts := topology.opts
+			env := teststores.New(t, append(opts, teststores.WithIOCounting())...)
+			counter := env.IO
+			ctx := context.Background()
+			receipts := env.EmailInboundReceipts
+			mailbox := "imap.example.com\x00bot@example.com"
+			messageKeys := make([]string, 501)
+			for i := range messageKeys {
+				messageKeys[i] = fmt.Sprintf("message-id:<batch-%d@example.com>", i)
+			}
+			require.NoError(t, receipts.Record(ctx, mailbox, messageKeys[0]))
+			require.NoError(t, receipts.Record(ctx, mailbox, messageKeys[500]))
 
-	counter.Reset()
-	counter.SetEnabled(true)
-	existing, err := receipts.ExistsBatch(ctx, mailbox, messageKeys)
-	counter.SetEnabled(false)
+			counter.Reset()
+			counter.SetEnabled(true)
+			existing, err := receipts.ExistsBatch(ctx, mailbox, messageKeys)
+			counter.SetEnabled(false)
 
-	require.NoError(t, err)
-	assert.Len(t, existing, 2)
-	assert.Contains(t, existing, messageKeys[0])
-	assert.Contains(t, existing, messageKeys[500])
-	statements := counter.Statements()
-	require.Len(t, statements, 2, "501 keys must use two bounded batch statements")
-	for _, statement := range statements {
-		assert.Contains(t, statement, "message_key IN")
+			require.NoError(t, err)
+			assert.Len(t, existing, 2)
+			assert.Contains(t, existing, messageKeys[0])
+			assert.Contains(t, existing, messageKeys[500])
+			require.Equal(t, 2, counter.Snapshot().Requests, "501 keys must use two bounded backend requests")
+
+		})
 	}
 }
 
@@ -217,57 +225,81 @@ func TestEmailPollOnceFailsClosedWhenReceiptBatchFails(t *testing.T) {
 }
 
 func TestEmailPollOnceUsesPollSnapshotForSelfAddress(t *testing.T) {
-	db, counter := testutil.NewStatementCountingTestDB(t)
-	ctx := context.Background()
-	settingsRepo := teststores.Of(db).Settings
-	require.NoError(t, settingsRepo.Set(ctx, EmailSettingAddress, "old@example.com"))
+	for _, topology := range []struct {
+		name string
+		opts []teststores.Option
+	}{
+		{name: "isolated"}, {name: "production", opts: []teststores.Option{teststores.WithProductionTopology()}},
+	} {
+		t.Run(topology.name, func(t *testing.T) {
+			opts := topology.opts
+			env := teststores.New(t, append(opts, teststores.WithIOCounting())...)
+			counter := env.IO
+			ctx := context.Background()
+			settingsRepo := env.Settings
+			require.NoError(t, settingsRepo.Set(ctx, EmailSettingAddress, "old@example.com"))
 
-	client := newFakeEmailIMAPClient(
-		testIMAPMessageWithBody(1, "self one", "bot@example.com", "first"),
-		testIMAPMessageWithBody(2, "self two", "bot@example.com", "second"),
-	)
-	svc := &EmailService{settingsRepo: settingsRepo}
-	svc.connectIMAP = func(context.Context, EmailRuntimeConfig) (emailIMAPClient, error) { return client, nil }
+			client := newFakeEmailIMAPClient(
+				testIMAPMessageWithBody(1, "self one", "bot@example.com", "first"),
+				testIMAPMessageWithBody(2, "self two", "bot@example.com", "second"),
+			)
+			svc := &EmailService{settingsRepo: settingsRepo}
+			svc.connectIMAP = func(context.Context, EmailRuntimeConfig) (emailIMAPClient, error) { return client, nil }
 
-	counter.Reset()
-	counter.SetEnabled(true)
-	svc.pollOnce(ctx, EmailRuntimeConfig{Address: " Bot@Example.com ", IMAPHost: "imap.example.com"})
-	counter.SetEnabled(false)
+			counter.Reset()
+			counter.SetEnabled(true)
+			svc.pollOnce(ctx, EmailRuntimeConfig{Address: " Bot@Example.com ", IMAPHost: "imap.example.com"})
+			counter.SetEnabled(false)
 
-	assert.Empty(t, counter.Statements(), "the poll snapshot must avoid per-message settings queries")
-	assert.Equal(t, []uint32{1, 2}, client.seenIDs(), "self-sent messages must still be ignored and acknowledged")
+			assert.Zero(t, counter.Snapshot().Requests, "the poll snapshot must avoid per-message settings queries")
+			assert.Equal(t, []uint32{1, 2}, client.seenIDs(), "self-sent messages must still be ignored and acknowledged")
+
+		})
+	}
 }
 
 func TestEmailPollOncePreservesFilteringAndAcknowledgement(t *testing.T) {
-	db, counter := testutil.NewStatementCountingTestDB(t)
-	ctx := context.Background()
-	settingsRepo := teststores.Of(db).Settings
-	require.NoError(t, settingsRepo.Set(ctx, EmailSettingAddress, "old@example.com"))
-	messageWithHeaders := func(id uint32, subject, envelopeFrom, headerFrom, extraHeaders, body string) *imap.Message {
-		msg := testIMAPMessageWithBody(id, subject, envelopeFrom, body)
-		msg.Body = testIMAPBodySections(fmt.Sprintf("From: %s\r\nSubject: %s\r\nMessage-ID: <message-%d@example.com>\r\n%sContent-Type: text/plain; charset=utf-8\r\n\r\n%s", headerFrom, subject, id, extraHeaders, body))
-		return msg
+	for _, topology := range []struct {
+		name string
+		opts []teststores.Option
+	}{
+		{name: "isolated"}, {name: "production", opts: []teststores.Option{teststores.WithProductionTopology()}},
+	} {
+		t.Run(topology.name, func(t *testing.T) {
+			opts := topology.opts
+			env := teststores.New(t, append(opts, teststores.WithIOCounting())...)
+			counter := env.IO
+			ctx := context.Background()
+			settingsRepo := env.Settings
+			require.NoError(t, settingsRepo.Set(ctx, EmailSettingAddress, "old@example.com"))
+			messageWithHeaders := func(id uint32, subject, envelopeFrom, headerFrom, extraHeaders, body string) *imap.Message {
+				msg := testIMAPMessageWithBody(id, subject, envelopeFrom, body)
+				msg.Body = testIMAPBodySections(fmt.Sprintf("From: %s\r\nSubject: %s\r\nMessage-ID: <message-%d@example.com>\r\n%sContent-Type: text/plain; charset=utf-8\r\n\r\n%s", headerFrom, subject, id, extraHeaders, body))
+				return msg
+			}
+			client := newFakeEmailIMAPClient(
+				messageWithHeaders(1, "self", "bot@example.com", "Display Name <BOT@example.com>", "", "self body"),
+				messageWithHeaders(2, "automated", "noreply@example.com", "noreply@example.com", "Auto-Submitted: auto-generated\r\n", "automated body"),
+				messageWithHeaders(3, "list", "user@example.com", "user@example.com", "List-Unsubscribe: <mailto:unsubscribe@example.com>\r\n", "list body"),
+				messageWithHeaders(4, "bulk", "user@example.com", "user@example.com", "Precedence: bulk\r\n", "bulk body"),
+				messageWithHeaders(5, "junk", "user@example.com", "user@example.com", "Precedence: junk\r\n", "junk body"),
+				messageWithHeaders(6, "empty", "user@example.com", "user@example.com", "", ""),
+				messageWithHeaders(7, "ordinary", "user@example.com", "user@example.com", "", "ordinary body"),
+			)
+			svc := &EmailService{settingsRepo: settingsRepo}
+			svc.connectIMAP = func(context.Context, EmailRuntimeConfig) (emailIMAPClient, error) { return client, nil }
+
+			counter.Reset()
+			counter.SetEnabled(true)
+			svc.pollOnce(ctx, EmailRuntimeConfig{Address: " Bot@Example.com ", IMAPHost: "imap.example.com"})
+			counter.SetEnabled(false)
+
+			assert.Equal(t, []uint32{1, 2, 3, 4, 5, 6}, client.seenIDs(), "ignored messages must be acknowledged while ordinary messages remain retryable")
+			assert.Equal(t, [][]uint32{{1, 2, 3, 4, 5, 6}}, client.storeBatches())
+			assert.Zero(t, counter.Snapshot().Requests, "the poll snapshot must supply the self address without settings reads")
+
+		})
 	}
-	client := newFakeEmailIMAPClient(
-		messageWithHeaders(1, "self", "bot@example.com", "Display Name <BOT@example.com>", "", "self body"),
-		messageWithHeaders(2, "automated", "noreply@example.com", "noreply@example.com", "Auto-Submitted: auto-generated\r\n", "automated body"),
-		messageWithHeaders(3, "list", "user@example.com", "user@example.com", "List-Unsubscribe: <mailto:unsubscribe@example.com>\r\n", "list body"),
-		messageWithHeaders(4, "bulk", "user@example.com", "user@example.com", "Precedence: bulk\r\n", "bulk body"),
-		messageWithHeaders(5, "junk", "user@example.com", "user@example.com", "Precedence: junk\r\n", "junk body"),
-		messageWithHeaders(6, "empty", "user@example.com", "user@example.com", "", ""),
-		messageWithHeaders(7, "ordinary", "user@example.com", "user@example.com", "", "ordinary body"),
-	)
-	svc := &EmailService{settingsRepo: settingsRepo}
-	svc.connectIMAP = func(context.Context, EmailRuntimeConfig) (emailIMAPClient, error) { return client, nil }
-
-	counter.Reset()
-	counter.SetEnabled(true)
-	svc.pollOnce(ctx, EmailRuntimeConfig{Address: " Bot@Example.com ", IMAPHost: "imap.example.com"})
-	counter.SetEnabled(false)
-
-	assert.Equal(t, []uint32{1, 2, 3, 4, 5, 6}, client.seenIDs(), "ignored messages must be acknowledged while ordinary messages remain retryable")
-	assert.Equal(t, [][]uint32{{1, 2, 3, 4, 5, 6}}, client.storeBatches())
-	assert.Empty(t, counter.Statements(), "the poll snapshot must supply the self address without settings reads")
 }
 
 func TestEmailPollOnceDoesNotDeduplicateDistinctIdenticalMessagesWithoutMessageID(t *testing.T) {

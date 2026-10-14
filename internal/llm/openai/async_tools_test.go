@@ -42,92 +42,102 @@ func TestRuntimeOpenAIToolsMarksOnlyAllowlistedReadToolsAsync(t *testing.T) {
 }
 
 func TestAsyncRuntimeToolCallbacksRecoverAndTerminalizeDurableRows(t *testing.T) {
-	db := teststores.NewDB(t)
-	ctx := context.Background()
-	stores := teststores.Of(db)
-	project := &models.Project{Name: "Async Recover Project"}
-	if err := stores.Projects.Create(ctx, project); err != nil {
-		t.Fatalf("insert project: %v", err)
-	}
-	task := &models.Task{ProjectID: project.ID, Title: "Async Recover Task", Status: models.StatusRunning, Category: models.CategoryActive, Prompt: "prompt"}
-	if err := stores.Tasks.Create(ctx, task); err != nil {
-		t.Fatalf("insert task: %v", err)
-	}
-	execution := &models.Execution{ID: "async-recover-exec", TaskID: task.ID, Status: models.ExecRunning, PromptSent: "prompt"}
-	if err := stores.Executions.Create(ctx, execution); err != nil {
-		t.Fatalf("insert execution: %v", err)
-	}
-	projectID, taskID, execID := project.ID, task.ID, execution.ID
-	repo := teststores.Of(db).OpenAIAsyncToolCalls
-	now := time.Now().UTC()
-	create := func(callID, toolName string, deadline time.Time) *models.OpenAIAsyncToolCall {
-		call, err := repo.CreatePending(ctx, &models.OpenAIAsyncToolCall{
-			ProjectID: projectID, TaskID: taskID, ExecutionID: execID, ResponseID: "resp_" + callID,
-			CallID: callID, ToolName: toolName, ArgumentsJSON: `{"handle":"provider_architecture.md"}`, DeadlineAt: deadline,
-		})
-		if err != nil {
-			t.Fatalf("CreatePending %s: %v", callID, err)
-		}
-		return call
-	}
-	completed := create("call_completed", "memory_view", now.Add(time.Hour))
-	if err := repo.MarkCompleted(ctx, completed.ID, "completed output", false, now); err != nil {
-		t.Fatalf("MarkCompleted: %v", err)
-	}
-	pending := create("call_pending", "memory_view", now.Add(time.Hour))
-	running := create("call_running", "memory_view", now.Add(time.Hour))
-	if claimed, err := repo.ClaimForRun(ctx, running.ID, now); err != nil || !claimed {
-		t.Fatalf("ClaimForRun running claimed=%v err=%v", claimed, err)
-	}
-	stale := create("call_stale", "list_tasks", now.Add(time.Hour))
-	expired := create("call_expired", "memory_view", now.Add(-time.Minute))
-
-	adapter := &Adapter{execRepo: teststores.Of(db).Executions, asyncToolCalls: repo}
-	var executed []string
-	callbacks, err := adapter.asyncRuntimeToolCallbacks(ctx, projectID, execID, true,
-		[]openaiclient.ToolDefinition{{Type: "function", Name: "memory_view", Async: true}},
-		func(_ context.Context, name string, input json.RawMessage) (string, bool, error) {
-			executed = append(executed, name+":"+string(input))
-			return "recovered " + name, false, nil
-		},
-		func(name string) bool { return name == "memory_view" },
-		".",
-	)
-	if err != nil {
-		t.Fatalf("asyncRuntimeToolCallbacks: %v", err)
-	}
-	if !callbacks.enabled {
-		t.Fatal("callbacks disabled")
-	}
-	if len(callbacks.initialResults) != 3 {
-		t.Fatalf("initialResults = %#v, want completed plus pending/running", callbacks.initialResults)
-	}
-	byCallID := map[string]openaiclient.AsyncToolResult{}
-	for _, result := range callbacks.initialResults {
-		byCallID[result.Record.CallID] = result
-	}
-	if byCallID["call_completed"].Output != "completed output" || byCallID["call_pending"].Output != "recovered memory_view" || byCallID["call_running"].Output != "recovered memory_view" {
-		t.Fatalf("unexpected recovered outputs: %#v", byCallID)
-	}
-	if len(executed) != 2 {
-		t.Fatalf("executed = %#v, want pending and running only", executed)
-	}
-	for _, tt := range []struct {
-		id     string
-		status string
+	for _, topology := range []struct {
+		name string
+		opts []teststores.Option
 	}{
-		{pending.ID, models.OpenAIAsyncToolCallCompleted},
-		{running.ID, models.OpenAIAsyncToolCallCompleted},
-		{stale.ID, models.OpenAIAsyncToolCallStale},
-		{expired.ID, models.OpenAIAsyncToolCallExpired},
+		{name: "isolated"}, {name: "production", opts: []teststores.Option{teststores.WithProductionTopology()}},
 	} {
-		var status string
-		if err := db.QueryRowContext(ctx, `SELECT status FROM openai_async_tool_calls WHERE id = ?`, tt.id).Scan(&status); err != nil {
-			t.Fatalf("load status: %v", err)
-		}
-		if status != tt.status {
-			t.Fatalf("status for %s = %s, want %s", tt.id, status, tt.status)
-		}
+		t.Run(topology.name, func(t *testing.T) {
+			opts := topology.opts
+			stores := teststores.New(t, opts...)
+			ctx := context.Background()
+			project := &models.Project{Name: "Async Recover Project"}
+			if err := stores.Projects.Create(ctx, project); err != nil {
+				t.Fatalf("insert project: %v", err)
+			}
+			task := &models.Task{ProjectID: project.ID, Title: "Async Recover Task", Status: models.StatusRunning, Category: models.CategoryActive, Prompt: "prompt"}
+			if err := stores.Tasks.Create(ctx, task); err != nil {
+				t.Fatalf("insert task: %v", err)
+			}
+			execution := &models.Execution{ID: "async-recover-exec", TaskID: task.ID, Status: models.ExecRunning, PromptSent: "prompt"}
+			if err := stores.Executions.Create(ctx, execution); err != nil {
+				t.Fatalf("insert execution: %v", err)
+			}
+			projectID, taskID, execID := project.ID, task.ID, execution.ID
+			repo := stores.OpenAIAsyncToolCalls
+			now := time.Now().UTC()
+			create := func(callID, toolName string, deadline time.Time) *models.OpenAIAsyncToolCall {
+				call, err := repo.CreatePending(ctx, &models.OpenAIAsyncToolCall{
+					ProjectID: projectID, TaskID: taskID, ExecutionID: execID, ResponseID: "resp_" + callID,
+					CallID: callID, ToolName: toolName, ArgumentsJSON: `{"handle":"provider_architecture.md"}`, DeadlineAt: deadline,
+				})
+				if err != nil {
+					t.Fatalf("CreatePending %s: %v", callID, err)
+				}
+				return call
+			}
+			completed := create("call_completed", "memory_view", now.Add(time.Hour))
+			if err := repo.MarkCompleted(ctx, completed.ID, "completed output", false, now); err != nil {
+				t.Fatalf("MarkCompleted: %v", err)
+			}
+			pending := create("call_pending", "memory_view", now.Add(time.Hour))
+			running := create("call_running", "memory_view", now.Add(time.Hour))
+			if claimed, err := repo.ClaimForRun(ctx, running.ID, now); err != nil || !claimed {
+				t.Fatalf("ClaimForRun running claimed=%v err=%v", claimed, err)
+			}
+			stale := create("call_stale", "list_tasks", now.Add(time.Hour))
+			expired := create("call_expired", "memory_view", now.Add(-time.Minute))
+
+			adapter := &Adapter{execRepo: stores.Executions, asyncToolCalls: repo}
+			var executed []string
+			callbacks, err := adapter.asyncRuntimeToolCallbacks(ctx, projectID, execID, true,
+				[]openaiclient.ToolDefinition{{Type: "function", Name: "memory_view", Async: true}},
+				func(_ context.Context, name string, input json.RawMessage) (string, bool, error) {
+					executed = append(executed, name+":"+string(input))
+					return "recovered " + name, false, nil
+				},
+				func(name string) bool { return name == "memory_view" },
+				".",
+			)
+			if err != nil {
+				t.Fatalf("asyncRuntimeToolCallbacks: %v", err)
+			}
+			if !callbacks.enabled {
+				t.Fatal("callbacks disabled")
+			}
+			if len(callbacks.initialResults) != 3 {
+				t.Fatalf("initialResults = %#v, want completed plus pending/running", callbacks.initialResults)
+			}
+			byCallID := map[string]openaiclient.AsyncToolResult{}
+			for _, result := range callbacks.initialResults {
+				byCallID[result.Record.CallID] = result
+			}
+			if byCallID["call_completed"].Output != "completed output" || byCallID["call_pending"].Output != "recovered memory_view" || byCallID["call_running"].Output != "recovered memory_view" {
+				t.Fatalf("unexpected recovered outputs: %#v", byCallID)
+			}
+			if len(executed) != 2 {
+				t.Fatalf("executed = %#v, want pending and running only", executed)
+			}
+			for _, tt := range []struct {
+				id     string
+				status string
+			}{
+				{pending.ID, models.OpenAIAsyncToolCallCompleted},
+				{running.ID, models.OpenAIAsyncToolCallCompleted},
+				{stale.ID, models.OpenAIAsyncToolCallStale},
+				{expired.ID, models.OpenAIAsyncToolCallExpired},
+			} {
+				status, err := stores.Fixtures.AsyncToolCallStatus(ctx, tt.id)
+				if err != nil {
+					t.Fatalf("load status: %v", err)
+				}
+				if status != tt.status {
+					t.Fatalf("status for %s = %s, want %s", tt.id, status, tt.status)
+				}
+			}
+
+		})
 	}
 }
 

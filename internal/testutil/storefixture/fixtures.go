@@ -44,6 +44,7 @@ type TaskDiscoveryWorkload struct {
 type AutomationExecutionOwnership struct{ Activities, ExecutionResources int }
 
 type Fixtures interface {
+	AsyncToolCallStatus(context.Context, string) (string, error)
 	RemoveAutomationTaskBinding(context.Context, string, string) error
 	AutomationExecutionOwnership(context.Context, string, string) (AutomationExecutionOwnership, error)
 	CountDispatchExecutions(context.Context, string) (int, error)
