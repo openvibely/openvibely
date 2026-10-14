@@ -468,15 +468,16 @@ func (a *Adapter) CallDirect(ctx context.Context, prompt string, attachments []m
 		toolPolicy := runtimeToolPolicyOptions(true, models.ChatModeOrchestrate)
 		restoreOpenAIAstraReasoningState(ctx, client, agent.Model)
 		resp, err := client.SendAgentic(ctx, fullPrompt, &openaiclient.AgenticOptions{
-			Model:            agent.Model,
-			ContextWindow:    agent.ContextWindow,
-			MaxOutputTokens:  openAIDirectOutputBudget,
-			System:           systemPrompt,
-			ReasoningEffort:  reasoningEffort(agent.Model, agent.ReasoningEffort),
-			ReasoningSummary: "auto",
-			WorkDir:          effectiveWorkDir,
-			Attachments:      oaAttachments,
-			ExtraTools:       runtimeOpenAITools(rt, false), ToolExecutor: composeRuntimeToolExecutor(nil, rt),
+			OmitExecutionEnvironment: rawDirectPrompt || lifecycleHookCall,
+			Model:                    agent.Model,
+			ContextWindow:            agent.ContextWindow,
+			MaxOutputTokens:          openAIDirectOutputBudget,
+			System:                   systemPrompt,
+			ReasoningEffort:          reasoningEffort(agent.Model, agent.ReasoningEffort),
+			ReasoningSummary:         "auto",
+			WorkDir:                  effectiveWorkDir,
+			Attachments:              oaAttachments,
+			ExtraTools:               runtimeOpenAITools(rt, false), ToolExecutor: composeRuntimeToolExecutor(nil, rt),
 			ToolFilter:                     llmcontracts.ComposeRuntimeToolFilter(nil, rt, toolPolicy),
 			OnSteeringToolRefresh:          openAISteeringToolRefresh(nil, nil, nil, toolPolicy, false, false),
 			OnToolBoundarySteering:         llmcontracts.SteeringCallbackFromContext(ctx),
@@ -498,7 +499,7 @@ func (a *Adapter) CallDirect(ctx context.Context, prompt string, attachments []m
 	}
 
 	environmentWorkDir := effectiveWorkDir
-	if rawDirectPrompt {
+	if rawDirectPrompt || lifecycleHookCall {
 		environmentWorkDir = ""
 	}
 	resp, err := client.Send(ctx, fullPrompt, &openaiclient.SendOptions{

@@ -104,13 +104,29 @@ func WorktreeContext(workDir string) string {
 // differs. Calling it at every model boundary also restores context after compaction.
 func Ensure[T any](messages []T, workDir string, read func(T) (string, string), makeMessage func(string) T) []T {
 	current := Context(workDir)
+	found := false
 	for i := len(messages) - 1; i >= 0; i-- {
 		role, text := read(messages[i])
 		if role == "user" && strings.HasPrefix(text, Marker+"\n") {
+			found = true
 			if text == current {
 				return messages
 			}
 			break
+		}
+	}
+	// Plain-text history replay can omit app-generated messages. Seed before
+	// the first user request so reconstructing a conversation keeps its prefix
+	// stable. If an environment was retained, append changes near the new turn.
+	if !found {
+		for i, message := range messages {
+			role, text := read(message)
+			if role == "user" && text != "" {
+				out := make([]T, 0, len(messages)+1)
+				out = append(out, messages[:i]...)
+				out = append(out, makeMessage(current))
+				return append(out, messages[i:]...)
+			}
 		}
 	}
 	// Keep an ordinary user request last. Never insert between an assistant

@@ -457,6 +457,7 @@ func (a *Adapter) callDirect(ctx context.Context, prompt string, attachments []m
 		System:                    systemPrompt,
 		WorkDir:                   workDir,
 		Attachments:               mcAttachments,
+		OmitExecutionEnvironment:  rawDirectPrompt || lifecycleHookCall,
 		DisableTools:              disableTools,
 		SkipDefaultTools:          skipDefaultTools,
 		AutoCompaction:            !agent.DisableNativeCompaction && anthropicclient.SupportsNativeCompaction(agent.Model),

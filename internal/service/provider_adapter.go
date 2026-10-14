@@ -687,7 +687,7 @@ func openAIContextWindow(model string) int {
 func estimateModelVisibleRequestTokens(req llmcontracts.AgentRequest) int {
 	total := estimatedUTF8Tokens(req.Message) + estimatedUTF8Tokens(req.NativeCompactionStateJSON)
 	total += estimateProviderSystemPromptTokens(req)
-	if !req.RawDirectPrompt {
+	if !req.RawDirectPrompt && !req.LifecycleHookCall {
 		total += estimatedUTF8Tokens(executionenv.Context(req.WorkDir))
 	}
 	total += estimateRuntimeToolDefinitionTokens(llmcontracts.RuntimeToolsFromContext(req.Ctx))

@@ -109,3 +109,17 @@ func TestEnvironmentLifecycle(t *testing.T) {
 		t.Fatal("context/executor mismatch")
 	}
 }
+
+func TestReconstructedHistoryKeepsEnvironmentPrefix(t *testing.T) {
+	type message struct{ role, text string }
+	read := func(m message) (string, string) { return m.role, m.text }
+	makeMessage := func(text string) message { return message{"user", text} }
+	dir := t.TempDir()
+	first := Ensure([]message{{"system", "instructions"}, {"user", "first"}}, dir, read, makeMessage)
+	second := Ensure([]message{{"system", "instructions"}, {"user", "first"}, {"assistant", "answer"}, {"user", "second"}}, dir, read, makeMessage)
+	for i := range first {
+		if first[i] != second[i] {
+			t.Fatalf("prefix changed: %#v -> %#v", first, second)
+		}
+	}
+}
