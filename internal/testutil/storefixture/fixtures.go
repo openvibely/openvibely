@@ -180,6 +180,8 @@ type Fixtures interface {
 // SQLite counts executed statements; other backends must count their database
 // requests, including requests made inside a single store method.
 type IOStats struct {
+	ModelRuntimeListReads, ModelRuntimeLookupReads, ModelCreationSelectionReads int
+	ExecutionCountReads, ExecutionPageReads, AlertReads, ProjectReads           int
 	// ModelReads and TaskContextReads count physical model-catalog/detail and task-context reads.
 	ModelReads, TaskContextReads int
 	// ModelSelectionReads counts physical compact model-selection reads, excluding full detail hydration.

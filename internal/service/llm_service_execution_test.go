@@ -746,9 +746,10 @@ func TestLLMService_CallAgentDirect_TestProviderUsesMockCaller(t *testing.T) {
 }
 
 func TestLLMService_CallAgentDirect_ExplicitProjectBypassesRootDiscoveryOnSuccessAndFailure(t *testing.T) {
-	db, counter := testutil.NewStatementCountingTestDB(t)
-	projectRepo := teststores.Of(db).Projects
-	usageRepo := teststores.Of(db).Usage
+	db := teststores.New(t, teststores.WithIOCounting())
+	counter := db.IO
+	projectRepo := db.Projects
+	usageRepo := db.Usage
 	ctx := context.Background()
 
 	project := &models.Project{Name: "Explicit Usage Project", RepoPath: t.TempDir()}
@@ -780,12 +781,10 @@ func TestLLMService_CallAgentDirect_ExplicitProjectBypassesRootDiscoveryOnSucces
 	}
 	counter.SetEnabled(false)
 
-	for _, statement := range counter.Statements() {
-		normalized := strings.ToLower(strings.Join(strings.Fields(statement), " "))
-		if strings.Contains(normalized, " from projects") {
-			t.Fatalf("explicit project performed root discovery: %s", statement)
-		}
+	if counter.Snapshot().ProjectReads != 0 {
+		t.Fatalf("explicit project performed root discovery: %+v", counter.Snapshot())
 	}
+
 	totals, err := usageRepo.GetUsageTotals(ctx, persistence.UsageFilter{ProjectID: project.ID})
 	if err != nil {
 		t.Fatalf("GetUsageTotals: %v", err)
