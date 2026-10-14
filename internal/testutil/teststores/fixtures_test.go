@@ -657,3 +657,48 @@ func TestLegacyAutomationActivityFixtureIsAtomic(t *testing.T) {
 		})
 	}
 }
+
+func TestSuspendedBackendIOHonorsCancellationAndResumes(t *testing.T) {
+	for _, production := range []bool{false, true} {
+		name := "isolated"
+		if production {
+			name = "production"
+		}
+		t.Run(name, func(t *testing.T) {
+			var opts []teststores.Option
+			if production {
+				opts = append(opts, teststores.WithProductionTopology())
+			}
+			env := teststores.New(t, opts...)
+			ctx := context.Background()
+			require.NoError(t, env.Settings.Set(ctx, "suspension-test", "before"))
+			release, err := env.SuspendIO(ctx)
+			require.NoError(t, err)
+			t.Cleanup(func() { require.NoError(t, release()) })
+			for _, write := range []bool{false, true} {
+				blocked, cancel := context.WithTimeout(ctx, 25*time.Millisecond)
+				if write {
+					err = env.Settings.Set(blocked, "suspension-test", "blocked")
+				} else {
+					_, err = env.Settings.Get(blocked, "suspension-test")
+				}
+				cancel()
+				require.ErrorIs(t, err, context.DeadlineExceeded)
+			}
+			// Waiting to suspend an already occupied backend must also honor cancellation.
+			blocked, cancel := context.WithTimeout(ctx, 25*time.Millisecond)
+			_, err = env.SuspendIO(blocked)
+			cancel()
+			require.ErrorIs(t, err, context.DeadlineExceeded)
+			require.NoError(t, release())
+			require.NoError(t, release())
+			value, err := env.Settings.Get(ctx, "suspension-test")
+			require.NoError(t, err)
+			require.Equal(t, "before", value)
+			require.NoError(t, env.Settings.Set(ctx, "suspension-test", "after"))
+			value, err = env.Settings.Get(ctx, "suspension-test")
+			require.NoError(t, err)
+			require.Equal(t, "after", value)
+		})
+	}
+}

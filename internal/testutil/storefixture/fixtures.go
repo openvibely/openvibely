@@ -33,6 +33,7 @@ type ChannelProjectSelectionCounts struct{ Discord, Slack, Telegram, Email int }
 type AutomationStateCounts struct{ Automations, Versions, Nodes, Edges, Resources, Tasks, Schedules int }
 
 type Fixtures interface {
+	SetSlackAuthorizationUnavailable(context.Context, bool) error
 	AutomationState(context.Context) (AutomationStateCounts, error)
 	FailScheduleCreation(context.Context) error
 	FailScheduleUpdate(context.Context) error

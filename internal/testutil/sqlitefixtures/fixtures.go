@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"errors"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
@@ -599,5 +600,38 @@ func (f *fixtures) MakeProjectDetailsUnreadable(ctx context.Context, id string) 
 
 func (f *fixtures) SetTaskCategory(ctx context.Context, id string, category models.TaskCategory) error {
 	_, err := f.db.ExecContext(ctx, `UPDATE tasks SET category = ? WHERE id = ?`, category, id)
+	return err
+}
+
+// SuspendIO reserves each single-connection pool without exposing the handles.
+func SuspendIO(pools ...*sql.DB) func(context.Context) (func() error, error) {
+	return func(ctx context.Context) (func() error, error) {
+		var conns []*sql.Conn
+		var once sync.Once
+		var releaseErr error
+		release := func() error {
+			once.Do(func() {
+				for _, conn := range conns {
+					releaseErr = errors.Join(releaseErr, conn.Close())
+				}
+			})
+			return releaseErr
+		}
+		for _, pool := range pools {
+			conn, err := pool.Conn(ctx)
+			if err != nil {
+				return nil, errors.Join(err, release())
+			}
+			conns = append(conns, conn)
+		}
+		return release, nil
+	}
+}
+func (f *fixtures) SetSlackAuthorizationUnavailable(ctx context.Context, unavailable bool) error {
+	query := `ALTER TABLE slack_authorized_users RENAME TO slack_authorized_users_unavailable`
+	if !unavailable {
+		query = `ALTER TABLE slack_authorized_users_unavailable RENAME TO slack_authorized_users`
+	}
+	_, err := f.db.ExecContext(ctx, query)
 	return err
 }
