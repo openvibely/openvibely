@@ -353,3 +353,8 @@ func (f *fixtures) SetTaskProject(ctx context.Context, id, projectID string) err
 	}
 	return nil
 }
+
+func (f *fixtures) SeedForwardedGitHubFeedback(ctx context.Context, v models.GitHubPRFeedbackForwarded) error {
+	_, err := f.db.ExecContext(ctx, `INSERT INTO github_pr_feedback_forwarded (task_pull_request_id,task_id,repo_full_name,pr_number,feedback_kind,github_id,author_login,body,created_at) VALUES (?,?,?,?,?,?,?,?,?)`, v.TaskPullRequestID, v.TaskID, v.RepoFullName, v.PRNumber, v.FeedbackKind, v.GitHubID, v.AuthorLogin, v.Body, v.CreatedAt.UTC().Format(time.RFC3339Nano))
+	return err
+}

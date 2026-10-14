@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -13,9 +12,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/openvibely/openvibely/internal/testutil/storefixture"
+
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
-	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/openvibely/openvibely/internal/testutil/teststores"
 )
 
@@ -226,13 +226,13 @@ func TestGitHubPRFeedbackForwarderQueuesAuthorizedFeedbackOnce(t *testing.T) {
 
 func TestGitHubPRFeedbackForwarderDeduplicatesPreexistingMixedCaseRepository(t *testing.T) {
 	ctx := context.Background()
-	db := teststores.NewDB(t)
-	projectRepo := teststores.Of(db).Projects
-	taskRepo := teststores.Of(db).Tasks
-	prRepo := teststores.Of(db).TaskPullRequests
-	feedbackRepo := teststores.Of(db).GitHubPRFeedback
-	authRepo := teststores.Of(db).GitHubAuth
-	threadInputRepo := teststores.Of(db).ThreadInputs
+	db := teststores.New(t)
+	projectRepo := db.Projects
+	taskRepo := db.Tasks
+	prRepo := db.TaskPullRequests
+	feedbackRepo := db.GitHubPRFeedback
+	authRepo := db.GitHubAuth
+	threadInputRepo := db.ThreadInputs
 
 	project := &models.Project{Name: "Mixed Case Feedback", RepoPath: t.TempDir(), RepoURL: "https://github.com/Owner/Repo"}
 	if err := projectRepo.Create(ctx, project); err != nil {
@@ -249,10 +249,7 @@ func TestGitHubPRFeedbackForwarderDeduplicatesPreexistingMixedCaseRepository(t *
 	if err := prRepo.Upsert(ctx, pr); err != nil {
 		t.Fatalf("upsert pr: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, `INSERT INTO github_pr_feedback_forwarded (
-		task_pull_request_id, task_id, repo_full_name, pr_number, feedback_kind, github_id,
-		author_login, body, created_at
-	) VALUES (?, ?, 'Owner/Repo', 42, 'issue_comment', 'mixed-case-existing', 'alice', 'Already forwarded.', '2026-07-09T10:00:00Z')`, pr.ID, task.ID); err != nil {
+	if err := db.Fixtures.SeedForwardedGitHubFeedback(ctx, models.GitHubPRFeedbackForwarded{TaskPullRequestID: pr.ID, TaskID: task.ID, RepoFullName: "Owner/Repo", PRNumber: 42, FeedbackKind: "issue_comment", GitHubID: "mixed-case-existing", AuthorLogin: "alice", Body: "Already forwarded.", CreatedAt: time.Date(2026, 7, 9, 10, 0, 0, 0, time.UTC)}); err != nil {
 		t.Fatalf("seed mixed-case feedback: %v", err)
 	}
 
@@ -278,12 +275,12 @@ func TestGitHubPRFeedbackForwarderDeduplicatesPreexistingMixedCaseRepository(t *
 
 func TestGitHubPRFeedbackRepoAtomicallyDeduplicatesMixedCaseRepository(t *testing.T) {
 	ctx := context.Background()
-	db := teststores.NewDB(t)
-	projectRepo := teststores.Of(db).Projects
-	taskRepo := teststores.Of(db).Tasks
-	prRepo := teststores.Of(db).TaskPullRequests
-	feedbackRepo := teststores.Of(db).GitHubPRFeedback
-	threadInputRepo := teststores.Of(db).ThreadInputs
+	db := teststores.New(t)
+	projectRepo := db.Projects
+	taskRepo := db.Tasks
+	prRepo := db.TaskPullRequests
+	feedbackRepo := db.GitHubPRFeedback
+	threadInputRepo := db.ThreadInputs
 
 	project := &models.Project{Name: "Atomic Mixed Case Feedback", RepoPath: t.TempDir()}
 	if err := projectRepo.Create(ctx, project); err != nil {
@@ -297,10 +294,7 @@ func TestGitHubPRFeedbackRepoAtomicallyDeduplicatesMixedCaseRepository(t *testin
 	if err := prRepo.Upsert(ctx, pr); err != nil {
 		t.Fatalf("upsert pr: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, `INSERT INTO github_pr_feedback_forwarded (
-		task_pull_request_id, task_id, repo_full_name, pr_number, feedback_kind, github_id,
-		author_login, body, created_at
-	) VALUES (?, ?, 'Owner/Repo', 42, 'issue_comment', 'mixed-case-atomic', 'alice', 'Already recorded.', '2026-07-09T10:00:00Z')`, pr.ID, task.ID); err != nil {
+	if err := db.Fixtures.SeedForwardedGitHubFeedback(ctx, models.GitHubPRFeedbackForwarded{TaskPullRequestID: pr.ID, TaskID: task.ID, RepoFullName: "Owner/Repo", PRNumber: 42, FeedbackKind: "issue_comment", GitHubID: "mixed-case-atomic", AuthorLogin: "alice", Body: "Already recorded.", CreatedAt: time.Date(2026, 7, 9, 10, 0, 0, 0, time.UTC)}); err != nil {
 		t.Fatalf("seed mixed-case feedback: %v", err)
 	}
 
@@ -467,13 +461,13 @@ func TestGitHubPRFeedbackForwarderUsesEnterpriseHostAndAPIEndpoint(t *testing.T)
 
 func TestGitHubPRFeedbackForwarderUsesPersistedRepositoryForEachPR(t *testing.T) {
 	ctx := context.Background()
-	db := teststores.NewDB(t)
-	projectRepo := teststores.Of(db).Projects
-	taskRepo := teststores.Of(db).Tasks
-	prRepo := teststores.Of(db).TaskPullRequests
-	feedbackRepo := teststores.Of(db).GitHubPRFeedback
-	authRepo := teststores.Of(db).GitHubAuth
-	threadInputRepo := teststores.Of(db).ThreadInputs
+	db := teststores.New(t)
+	projectRepo := db.Projects
+	taskRepo := db.Tasks
+	prRepo := db.TaskPullRequests
+	feedbackRepo := db.GitHubPRFeedback
+	authRepo := db.GitHubAuth
+	threadInputRepo := db.ThreadInputs
 
 	project := &models.Project{ID: "proj-multi-pr-repos", Name: "Multiple PR Repos", RepoPath: t.TempDir(), RepoURL: "https://github.com/example/current"}
 	if err := projectRepo.Create(ctx, project); err != nil {
@@ -568,12 +562,12 @@ func TestGitHubPRFeedbackForwarderUsesPersistedRepositoryForEachPR(t *testing.T)
 }
 
 type githubPRFeedbackForwarderFixture struct {
-	db              *sql.DB
+	env             *teststores.Env
 	project         *models.Project
 	task            *models.Task
 	forwarder       *GitHubPRFeedbackForwarder
 	provider        *fakePRFeedbackProvider
-	counter         *testutil.SQLStatementCounter
+	counter         storefixture.IOCounter
 	threadInputRepo persistence.ThreadInputStore
 }
 
@@ -606,12 +600,12 @@ func TestGitHubPRFeedbackForwarderCachesAuthorizationDecisionsPerPass(t *testing
 			if err != nil {
 				t.Fatalf("forward feedback: %v", err)
 			}
-			statements := fixture.counter.Statements()
-			if got := countGitHubAuthorizationLookups(statements); got != tc.wantAuthorization {
-				t.Fatalf("authorization lookups = %d, want %d; statements: %q", got, tc.wantAuthorization, statements)
+			statements := fixture.counter.Snapshot()
+			if got := statements.GitHubAuthorizationReads; got != tc.wantAuthorization {
+				t.Fatalf("authorization lookups = %d, want %d; backend I/O: %+v", got, tc.wantAuthorization, statements)
 			}
-			if len(statements) < tc.wantAuthorization {
-				t.Fatalf("total SQL statements = %d, want at least %d", len(statements), tc.wantAuthorization)
+			if statements.Requests < tc.wantAuthorization {
+				t.Fatalf("total SQL statements = %d, want at least %d", statements.Requests, tc.wantAuthorization)
 			}
 			if got := len(result.Forwarded); got != tc.wantForwarded || result.SkippedUnauthorized != tc.wantSkippedUnauth {
 				t.Fatalf("forward result = %#v, want forwarded=%d skipped_unauthorized=%d", result, tc.wantForwarded, tc.wantSkippedUnauth)
@@ -634,7 +628,7 @@ func TestGitHubPRFeedbackForwarderCachesAuthorizationDecisionsPerPass(t *testing
 			if err != nil {
 				t.Fatalf("forward feedback second pass: %v", err)
 			}
-			if got := countGitHubAuthorizationLookups(fixture.counter.Statements()); got != tc.wantAuthorization {
+			if got := fixture.counter.Snapshot().GitHubAuthorizationReads; got != tc.wantAuthorization {
 				t.Fatalf("second-pass authorization lookups = %d, want %d", got, tc.wantAuthorization)
 			}
 			if len(second.Forwarded) != 0 || second.SkippedDuplicate != tc.itemCount {
@@ -661,15 +655,15 @@ func TestGitHubPRFeedbackForwarderKeepsAuthorizationFilteringAndErrorsFailClosed
 		if result.SkippedSelfOrBot != 2 || len(result.Forwarded) != 0 {
 			t.Fatalf("forward result = %#v", result)
 		}
-		if got := countGitHubAuthorizationLookups(fixture.counter.Statements()); got != 0 {
+		if got := fixture.counter.Snapshot().GitHubAuthorizationReads; got != 0 {
 			t.Fatalf("self/bot feedback authorization lookups = %d, want 0", got)
 		}
 	})
 
 	t.Run("authorization lookup error aborts forwarding", func(t *testing.T) {
 		fixture := newGitHubPRFeedbackForwarderFixture(t, []string{"alice"}, realisticGitHubPRFeedbackItems(1, []string{"alice"}, "auth-error"))
-		authDB := teststores.NewDB(t)
-		fixture.forwarder.authRepo = teststores.Of(authDB).GitHubAuth
+		authDB := teststores.New(t)
+		fixture.forwarder.authRepo = authDB.GitHubAuth
 		if err := authDB.Close(); err != nil {
 			t.Fatalf("close authorization database: %v", err)
 		}
@@ -736,7 +730,7 @@ func TestGitHubPRFeedbackForwarderConcurrentPassesKeepCachesIndependentAndQueueO
 		forwarded += len(outcome.result.Forwarded)
 		duplicates += outcome.result.SkippedDuplicate
 	}
-	if got := countGitHubAuthorizationLookups(fixture.counter.Statements()); got != 2 {
+	if got := fixture.counter.Snapshot().GitHubAuthorizationReads; got != 2 {
 		t.Fatalf("concurrent authorization lookups = %d, want one per forwarding pass", got)
 	}
 	if forwarded != 1 || duplicates != 1 {
@@ -768,7 +762,7 @@ func TestGitHubPRFeedbackForwarderUsesOneAuthorizationLookupPerBatch(t *testing.
 			if len(result.Forwarded) != itemCount {
 				t.Fatalf("forwarded = %d, want %d", len(result.Forwarded), itemCount)
 			}
-			if got := countGitHubAuthorizationLookups(fixture.counter.Statements()); got != 1 {
+			if got := fixture.counter.Snapshot().GitHubAuthorizationReads; got != 1 {
 				t.Fatalf("authorization selects = %d, want 1", got)
 			}
 		})
@@ -798,11 +792,11 @@ func BenchmarkGitHubPRFeedbackForwarderAuthorizationCache(b *testing.B) {
 			fixture.counter.SetEnabled(true)
 			forward()
 			fixture.counter.SetEnabled(false)
-			statements := fixture.counter.Statements()
-			authorizationSelects := countGitHubAuthorizationLookups(statements)
+			statements := fixture.counter.Snapshot()
+			authorizationSelects := statements.GitHubAuthorizationReads
 			wantAuthorizationSelects := 1
 			if authorizationSelects != wantAuthorizationSelects {
-				b.Fatalf("warm authorization selects = %d, want %d; statements: %q", authorizationSelects, wantAuthorizationSelects, statements)
+				b.Fatalf("warm authorization selects = %d, want %d; backend I/O: %+v", authorizationSelects, wantAuthorizationSelects, statements)
 			}
 
 			durations := make([]time.Duration, 0, b.N)
@@ -816,7 +810,7 @@ func BenchmarkGitHubPRFeedbackForwarderAuthorizationCache(b *testing.B) {
 			b.StopTimer()
 			sort.Slice(durations, func(i, j int) bool { return durations[i] < durations[j] })
 			b.ReportMetric(float64(durations[len(durations)/2].Nanoseconds()), "median_wall_ns/op")
-			b.ReportMetric(float64(len(statements)), "sqlite_statements/op")
+			b.ReportMetric(float64(statements.Requests), "backend_requests/op")
 			b.ReportMetric(float64(authorizationSelects), "authorization_selects/op")
 		})
 	}
@@ -825,13 +819,14 @@ func BenchmarkGitHubPRFeedbackForwarderAuthorizationCache(b *testing.B) {
 func newGitHubPRFeedbackForwarderFixture(tb testing.TB, authorizedLogins []string, items []GitHubPullRequestFeedback) githubPRFeedbackForwarderFixture {
 	tb.Helper()
 	ctx := context.Background()
-	db, counter := testutil.NewStatementCountingTestDB(tb)
-	projectRepo := teststores.Of(db).Projects
-	taskRepo := teststores.Of(db).Tasks
-	prRepo := teststores.Of(db).TaskPullRequests
-	feedbackRepo := teststores.Of(db).GitHubPRFeedback
-	authRepo := teststores.Of(db).GitHubAuth
-	threadInputRepo := teststores.Of(db).ThreadInputs
+	env := teststores.New(tb, teststores.WithIOCounting())
+	counter := env.IO
+	projectRepo := env.Projects
+	taskRepo := env.Tasks
+	prRepo := env.TaskPullRequests
+	feedbackRepo := env.GitHubPRFeedback
+	authRepo := env.GitHubAuth
+	threadInputRepo := env.ThreadInputs
 	project := &models.Project{Name: "PR feedback authorization cache", RepoPath: tb.TempDir(), RepoURL: "https://github.com/openvibely/openvibely"}
 	if err := projectRepo.Create(ctx, project); err != nil {
 		tb.Fatalf("create project: %v", err)
@@ -850,7 +845,7 @@ func newGitHubPRFeedbackForwarderFixture(tb testing.TB, authorizedLogins []strin
 	}
 	provider := &fakePRFeedbackProvider{items: items}
 	return githubPRFeedbackForwarderFixture{
-		db:              db,
+		env:             env,
 		project:         project,
 		task:            task,
 		forwarder:       NewGitHubPRFeedbackForwarder(provider, prRepo, feedbackRepo, authRepo, threadInputRepo),
@@ -880,16 +875,4 @@ func realisticGitHubPRFeedbackItems(count int, authors []string, idPrefix string
 
 func githubPRFeedbackTestRepo() *GitHubRepoRef {
 	return &GitHubRepoRef{Owner: "openvibely", Name: "openvibely", FullName: "openvibely/openvibely"}
-}
-
-func countGitHubAuthorizationLookups(statements []string) int {
-	const authorizationQuery = "SELECT COUNT(*) FROM GITHUB_AUTHORIZED_ACTORS WHERE LOWER(GITHUB_LOGIN) = ?"
-	count := 0
-	for _, statement := range statements {
-		normalized := strings.Join(strings.Fields(strings.ToUpper(statement)), " ")
-		if normalized == authorizationQuery {
-			count++
-		}
-	}
-	return count
 }

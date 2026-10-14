@@ -13,7 +13,6 @@ import (
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
-	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/openvibely/openvibely/internal/testutil/teststores"
 )
@@ -341,8 +340,8 @@ func TestDirectModelUsageExplicitProjectAvoidsFallbackLookupAt500Projects(t *tes
 }
 
 func TestLLMService_projectIDForWorkDir_DeletedAndEmptyRepositoriesDoNotMatch(t *testing.T) {
-	db := teststores.NewDB(t)
-	repo := teststores.Of(db).Projects
+	db := teststores.New(t)
+	repo := db.Projects
 	svc := NewLLMService(nil, nil, nil, repo, nil, nil)
 	ctx := context.Background()
 	root := t.TempDir()
@@ -357,7 +356,7 @@ func TestLLMService_projectIDForWorkDir_DeletedAndEmptyRepositoriesDoNotMatch(t 
 	if got := svc.projectIDForWorkDir(ctx, workDir); got != project.ID {
 		t.Fatalf("projectIDForWorkDir before delete = %q, want %q", got, project.ID)
 	}
-	if err := repo.(*sqlite.ProjectRepo).Delete(ctx, project.ID); err != nil {
+	if _, _, err := repo.DeleteWithCleanupManifest(ctx, project.ID, nil); err != nil {
 		t.Fatalf("Delete project: %v", err)
 	}
 	if got := svc.projectIDForWorkDir(ctx, workDir); got != "" {
