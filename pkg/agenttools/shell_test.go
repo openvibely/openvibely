@@ -24,7 +24,7 @@ func TestNativeShellToolAndLegacyAlias(t *testing.T) {
 	args, _ := json.Marshal(map[string]any{"command": command})
 	for _, name := range []string{"shell", "bash", "Bash"} {
 		out, err := agenttools.Execute(context.Background(), t.TempDir(), name, args)
-		if err != nil || strings.TrimSpace(out) != "shell-ok" {
+		if err != nil || !strings.HasPrefix(out, "shell-ok") || !strings.Contains(out, "exit_code: 0") {
 			t.Fatalf("%s: %q %v", name, out, err)
 		}
 	}

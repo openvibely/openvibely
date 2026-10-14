@@ -12,12 +12,13 @@ import (
 func TestDefaultTools_AllPresent(t *testing.T) {
 	tools := DefaultTools()
 	expected := map[string]bool{
-		"read_file":   false,
-		"write_file":  false,
-		"edit_file":   false,
-		"shell":       false,
-		"list_files":  false,
-		"grep_search": false,
+		"read_file":        false,
+		"write_file":       false,
+		"edit_file":        false,
+		"shell":            false,
+		"interact_process": false,
+		"list_files":       false,
+		"grep_search":      false,
 	}
 
 	for _, tool := range tools {

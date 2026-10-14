@@ -59,7 +59,8 @@ func detect(goos, preferred string, lookup func(string) (string, error), getenv 
 func (s Shell) Args(command string) []string {
 	switch s.Name {
 	case "powershell":
-		return []string{"-NoProfile", "-NonInteractive", "-Command", command}
+		// Keep stdin prompts available to interact_process.
+		return []string{"-NoProfile", "-Command", command}
 	case "cmd":
 		return []string{"/d", "/s", "/c", command}
 	default:

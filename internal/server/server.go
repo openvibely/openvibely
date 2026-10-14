@@ -35,6 +35,7 @@ import (
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/internal/update"
+	"github.com/openvibely/openvibely/pkg/agenttools"
 
 	_ "github.com/openvibely/openvibely/docs" // Swagger docs
 )
@@ -1313,6 +1314,7 @@ func Start(ctx context.Context, cfg *config.Config, options ...Options) (*Instan
 		}
 		h.StopXService()
 		e.Close()
+		agenttools.ShutdownProcesses()
 		closeDatabase()
 		close(shutdownDone)
 	}
