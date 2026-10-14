@@ -788,10 +788,12 @@ func TestAPIChatMessage_NoAgents(t *testing.T) {
 }
 
 func TestAPIChatMessage_HydratesSingleConfiguredModelWithoutEmbeddingCatalog(t *testing.T) {
-	db, counter := testutil.NewStatementCountingTestDB(t)
-	h, e, llmConfigRepo := setupTestHandlerForDB(t, db)
+	db := teststores.New(t, teststores.WithIOCounting())
+	counter := db.IO
+	wired := wireTestHandler(t, db.Stores, testHandlerOptions{})
+	h, e, llmConfigRepo := wired.Handler, wired.Echo, wired.LLMConfigRepo
 	ctx := context.Background()
-	teststores.ClearLLMConfigs(t, teststores.Of(db).LLMConfigs)
+	teststores.ClearLLMConfigs(t, db.LLMConfigs)
 
 	largeProviderJSON := strings.Repeat("large-provider-json", 4096)
 	agent := &models.LLMConfig{
@@ -836,7 +838,7 @@ func TestAPIChatMessage_HydratesSingleConfiguredModelWithoutEmbeddingCatalog(t *
 		t.Fatal("timed out waiting for mock provider call")
 	}
 
-	assertAPIChatSelectionStatements(t, counter.Statements())
+	require.Equal(t, 1, counter.Snapshot().ModelSelectionReads)
 	call := mock.LastCall()
 	require.Equal(t, agent.ID, call.Agent.ID)
 	require.Equal(t, "secret-api-key", call.Agent.APIKey)
@@ -905,10 +907,12 @@ func TestAPIChatMessage_MultipleModelsDefaultFallbackHydratesSelectedModel(t *te
 }
 
 func TestAPIChatMessage_QueuedBehindActiveTurnStoresSelectedModelWithoutFullList(t *testing.T) {
-	db, counter := testutil.NewStatementCountingTestDB(t)
-	h, e, llmConfigRepo := setupTestHandlerForDB(t, db)
+	db := teststores.New(t, teststores.WithIOCounting())
+	counter := db.IO
+	wired := wireTestHandler(t, db.Stores, testHandlerOptions{})
+	h, e, llmConfigRepo := wired.Handler, wired.Echo, wired.LLMConfigRepo
 	ctx := context.Background()
-	teststores.ClearLLMConfigs(t, teststores.Of(db).LLMConfigs)
+	teststores.ClearLLMConfigs(t, db.LLMConfigs)
 
 	agent := &models.LLMConfig{
 		Name: "Queued API Chat Model", Provider: models.ProviderTest, Model: "claude-sonnet-queued",
@@ -944,15 +948,17 @@ func TestAPIChatMessage_QueuedBehindActiveTurnStoresSelectedModelWithoutFullList
 	require.NoError(t, err)
 	require.NotNil(t, queued)
 	require.Equal(t, agent.ID, queued.AgentConfigID)
-	assertAPIChatSelectionStatements(t, counter.Statements())
-	assertNoAPIChatFullListStatement(t, counter.Statements())
+	require.Equal(t, 1, counter.Snapshot().ModelSelectionReads)
+	require.Zero(t, counter.Snapshot().ModelFullCatalogReads)
 }
 
 func TestAPIChatMessage_QueuedPromotionHydratesSelectedModelWithoutEmbeddingCatalog(t *testing.T) {
-	db, counter := testutil.NewStatementCountingTestDB(t)
-	h, e, llmConfigRepo := setupTestHandlerForDB(t, db)
+	db := teststores.New(t, teststores.WithIOCounting())
+	counter := db.IO
+	wired := wireTestHandler(t, db.Stores, testHandlerOptions{})
+	h, e, llmConfigRepo := wired.Handler, wired.Echo, wired.LLMConfigRepo
 	ctx := context.Background()
-	teststores.ClearLLMConfigs(t, teststores.Of(db).LLMConfigs)
+	teststores.ClearLLMConfigs(t, db.LLMConfigs)
 
 	largeProviderJSON := strings.Repeat("queued-promotion-large", 4096)
 	agent := &models.LLMConfig{
@@ -1006,7 +1012,7 @@ func TestAPIChatMessage_QueuedPromotionHydratesSelectedModelWithoutEmbeddingCata
 	}
 	counter.SetEnabled(false)
 
-	assertNoAPIChatFullListStatement(t, counter.Statements())
+	require.Zero(t, counter.Snapshot().ModelFullCatalogReads)
 	call := mock.LastCall()
 	require.Equal(t, agent.ID, call.Agent.ID)
 	require.Equal(t, "queued-promotion-secret", call.Agent.APIKey)
@@ -1025,41 +1031,6 @@ func TestAPIChatMessage_QueuedPromotionHydratesSelectedModelWithoutEmbeddingCata
 	require.NotContains(t, request.ChatSystemContext, "Current tasks in this project")
 	require.NotContains(t, request.ChatSystemContext, "queued-promotion-secret")
 	require.NotContains(t, request.ChatSystemContext, largeProviderJSON)
-}
-
-func assertAPIChatSelectionStatements(t *testing.T, statements []string) {
-	t.Helper()
-	var selectionStatements []string
-	for _, statement := range statements {
-		normalized := strings.Join(strings.Fields(statement), " ")
-		if strings.Contains(normalized, "FROM agent_configs ORDER BY is_default DESC, name ASC") {
-			selectionStatements = append(selectionStatements, normalized)
-		}
-	}
-	if len(selectionStatements) != 1 {
-		t.Fatalf("expected exactly one API Chat model-selection query, got %d in statements: %q", len(selectionStatements), statements)
-	}
-	selection := selectionStatements[0]
-	projection := strings.Split(strings.ToLower(selection), " from agent_configs ")[0]
-	if !strings.Contains(projection, "select id, name, provider, model, is_default") {
-		t.Fatalf("API Chat selection query does not use id/name/provider/model/is_default projection: %s", selection)
-	}
-	for _, forbidden := range []string{"api_key", "oauth_access_token", "oauth_refresh_token", "oauth_client_secret", "oauth_authorize_url", "oauth_token_url", "ollama_base_url", "base_url", "models_url", "extra_headers_json", "extra_body_json", "custom_auth_config_json", "custom_auth_state_json", "mixture_config_json"} {
-		if strings.Contains(projection, forbidden) {
-			t.Fatalf("API Chat selection query selected forbidden column %q: %s", forbidden, selection)
-		}
-	}
-}
-
-func assertNoAPIChatFullListStatement(t *testing.T, statements []string) {
-	t.Helper()
-	for _, statement := range statements {
-		normalized := strings.ToLower(strings.Join(strings.Fields(statement), " "))
-		if strings.Contains(normalized, " from agent_configs order by is_default desc, name asc") &&
-			strings.Contains(normalized, "api_key") {
-			t.Fatalf("API Chat called full model List before selection: %s", statement)
-		}
-	}
 }
 
 func TestAPIChatMessage_ResponseFormat(t *testing.T) {
@@ -1425,89 +1396,109 @@ func TestAPIChatMessage_QueuesBehindActiveTurnWithAttachments(t *testing.T) {
 }
 
 func TestAPIChatMessage_QueuedAttachmentMetadataFailureRemovesPendingSession(t *testing.T) {
-	h, e, llmConfigRepo, db := setupTestHandlerWithDB(t)
-	agent := createAgent(t, llmConfigRepo)
-	project := createProject(t, h, "API Chat Queue Rollback Project")
-	activeTask := createTask(t, h, project.ID, "API Active Chat Rollback", func(tk *models.Task) {
-		tk.Category = models.CategoryChat
-		tk.Status = models.StatusRunning
-		tk.AgentID = &agent.ID
-	})
-	createExec(t, h, activeTask.ID, agent.ID, func(ex *models.Execution) {
-		ex.Status = models.ExecRunning
-		ex.PromptSent = "active api chat"
-	})
-	require.NoError(t, func() error {
-		_, err := db.Exec(`CREATE TRIGGER fail_api_queued_input BEFORE INSERT ON thread_inputs BEGIN SELECT RAISE(ABORT, 'injected queued metadata failure'); END`)
-		return err
-	}())
+	for _, production := range []bool{false, true} {
+		name := "isolated"
+		if production {
+			name = "production"
+		}
+		t.Run(name, func(t *testing.T) {
+			var options []teststores.Option
+			if production {
+				options = append(options, teststores.WithProductionTopology())
+			}
+			h, e, llmConfigRepo, db := setupTestHandlerWithStores(t, options...)
+			agent := createAgent(t, llmConfigRepo)
+			project := createProject(t, h, "API Chat Queue Rollback Project")
+			activeTask := createTask(t, h, project.ID, "API Active Chat Rollback", func(tk *models.Task) {
+				tk.Category = models.CategoryChat
+				tk.Status = models.StatusRunning
+				tk.AgentID = &agent.ID
+			})
+			createExec(t, h, activeTask.ID, agent.ID, func(ex *models.Execution) {
+				ex.Status = models.ExecRunning
+				ex.PromptSent = "active api chat"
+			})
+			require.NoError(t, db.Fixtures.SetQueuedInputCreationFailure(context.Background(), "", true))
 
-	var buf bytes.Buffer
-	writer := multipart.NewWriter(&buf)
-	require.NoError(t, writer.WriteField("message", "queued api chat rollback"))
-	require.NoError(t, writer.WriteField("project_id", project.ID))
-	part, err := writer.CreateFormFile("attachments", "queued.txt")
-	require.NoError(t, err)
-	_, err = part.Write([]byte("queued attachment content"))
-	require.NoError(t, err)
-	require.NoError(t, writer.Close())
+			var buf bytes.Buffer
+			writer := multipart.NewWriter(&buf)
+			require.NoError(t, writer.WriteField("message", "queued api chat rollback"))
+			require.NoError(t, writer.WriteField("project_id", project.ID))
+			part, err := writer.CreateFormFile("attachments", "queued.txt")
+			require.NoError(t, err)
+			_, err = part.Write([]byte("queued attachment content"))
+			require.NoError(t, err)
+			require.NoError(t, writer.Close())
 
-	req := httptest.NewRequest(http.MethodPost, "/api/chat/message", &buf)
-	req.Header.Set("Content-Type", writer.FormDataContentType())
-	rec := httptest.NewRecorder()
-	e.ServeHTTP(rec, req)
+			req := httptest.NewRequest(http.MethodPost, "/api/chat/message", &buf)
+			req.Header.Set("Content-Type", writer.FormDataContentType())
+			rec := httptest.NewRecorder()
+			e.ServeHTTP(rec, req)
 
-	require.Equal(t, http.StatusInternalServerError, rec.Code)
+			require.Equal(t, http.StatusInternalServerError, rec.Code)
 
-	var retiredSessionID string
-	require.NoError(t, db.QueryRow(`SELECT session_id FROM retired_attachment_sessions`).Scan(&retiredSessionID))
-	require.NotEmpty(t, retiredSessionID)
-	require.NoDirExists(t, filepath.Join(uploadsDir, "chat", "pending", retiredSessionID))
+			retiredSessions, err := db.Fixtures.RetiredAttachmentSessions(context.Background())
+			require.NoError(t, err)
+			require.Len(t, retiredSessions, 1)
+			retiredSessionID := retiredSessions[0]
+			require.NotEmpty(t, retiredSessionID)
+			require.NoDirExists(t, filepath.Join(uploadsDir, "chat", "pending", retiredSessionID))
+		})
+	}
 }
 
 func TestAPIChatMessage_ImmediateAttachmentMetadataFailureRemovesFile(t *testing.T) {
-	h, e, llmConfigRepo, db := setupTestHandlerWithDB(t)
-	createAgent(t, llmConfigRepo)
-	project := createProject(t, h, "API Chat Immediate Rollback Project")
-	require.NoError(t, func() error {
-		_, err := db.Exec(`CREATE TRIGGER fail_api_chat_attachment BEFORE INSERT ON chat_attachments BEGIN SELECT RAISE(ABORT, 'injected attachment metadata failure'); END`)
-		return err
-	}())
-
-	var buf bytes.Buffer
-	writer := multipart.NewWriter(&buf)
-	require.NoError(t, writer.WriteField("message", "immediate api chat rollback"))
-	require.NoError(t, writer.WriteField("project_id", project.ID))
-	part, err := writer.CreateFormFile("attachments", "immediate.txt")
-	require.NoError(t, err)
-	_, err = part.Write([]byte("immediate attachment content"))
-	require.NoError(t, err)
-	require.NoError(t, writer.Close())
-
-	req := httptest.NewRequest(http.MethodPost, "/api/chat/message", &buf)
-	req.Header.Set("Content-Type", writer.FormDataContentType())
-	rec := httptest.NewRecorder()
-	e.ServeHTTP(rec, req)
-
-	require.Equal(t, http.StatusCreated, rec.Code)
-	var files []string
-	require.NoError(t, filepath.Walk(filepath.Join(uploadsDir, "chat"), func(path string, info os.FileInfo, walkErr error) error {
-		if walkErr != nil {
-			if os.IsNotExist(walkErr) {
-				return nil
+	for _, production := range []bool{false, true} {
+		name := "isolated"
+		if production {
+			name = "production"
+		}
+		t.Run(name, func(t *testing.T) {
+			var options []teststores.Option
+			if production {
+				options = append(options, teststores.WithProductionTopology())
 			}
-			return walkErr
-		}
-		if !info.IsDir() {
-			files = append(files, path)
-		}
-		return nil
-	}))
-	require.Empty(t, files, "failed immediate metadata publication must remove its file")
-	chatEntries, readErr := os.ReadDir(filepath.Join(uploadsDir, "chat"))
-	if !os.IsNotExist(readErr) {
-		require.NoError(t, readErr)
-		require.Empty(t, chatEntries, "failed immediate metadata publication must remove its empty execution directory")
+			h, e, llmConfigRepo, db := setupTestHandlerWithStores(t, options...)
+			createAgent(t, llmConfigRepo)
+			project := createProject(t, h, "API Chat Immediate Rollback Project")
+			require.NoError(t, db.Fixtures.FailChatAttachmentCreation(context.Background()))
+
+			var buf bytes.Buffer
+			writer := multipart.NewWriter(&buf)
+			require.NoError(t, writer.WriteField("message", "immediate api chat rollback"))
+			require.NoError(t, writer.WriteField("project_id", project.ID))
+			part, err := writer.CreateFormFile("attachments", "immediate.txt")
+			require.NoError(t, err)
+			_, err = part.Write([]byte("immediate attachment content"))
+			require.NoError(t, err)
+			require.NoError(t, writer.Close())
+
+			req := httptest.NewRequest(http.MethodPost, "/api/chat/message", &buf)
+			req.Header.Set("Content-Type", writer.FormDataContentType())
+			rec := httptest.NewRecorder()
+			e.ServeHTTP(rec, req)
+
+			require.Equal(t, http.StatusCreated, rec.Code)
+			var files []string
+			require.NoError(t, filepath.Walk(filepath.Join(uploadsDir, "chat"), func(path string, info os.FileInfo, walkErr error) error {
+				if walkErr != nil {
+					if os.IsNotExist(walkErr) {
+						return nil
+					}
+					return walkErr
+				}
+				if !info.IsDir() {
+					files = append(files, path)
+				}
+				return nil
+			}))
+			require.Empty(t, files, "failed immediate metadata publication must remove its file")
+			chatEntries, readErr := os.ReadDir(filepath.Join(uploadsDir, "chat"))
+			if !os.IsNotExist(readErr) {
+				require.NoError(t, readErr)
+				require.Empty(t, chatEntries, "failed immediate metadata publication must remove its empty execution directory")
+			}
+		})
 	}
 }
 

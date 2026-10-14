@@ -28,6 +28,9 @@ func (c *ioCounter) Snapshot() storefixture.IOStats {
 					stats.UnboundedExecutionHistoryReads++
 				}
 			}
+			if strings.Contains(q, " from schedules ") {
+				stats.ScheduleReads++
+			}
 			if strings.Contains(q, "from agents") {
 				stats.AgentReads++
 			}
@@ -58,6 +61,15 @@ func (c *ioCounter) Snapshot() storefixture.IOStats {
 		}
 		if strings.HasPrefix(q, "select ") && strings.Contains(q, "from agent_configs") {
 			stats.ModelReads++
+			if strings.Contains(q, "from agent_configs order by is_default desc, name asc") || strings.Contains(q, "from agent_configs a ") && strings.Contains(q, "order by a.is_default desc, a.name asc") {
+				stats.ModelCatalogReads++
+			}
+			if strings.HasPrefix(q, "select id, name, model, provider, preset_slug, reasoning_effort, is_default") {
+				stats.ModelPickerReads++
+			}
+			if (strings.Contains(q, " from agent_configs order by is_default desc, name asc") || strings.Contains(q, "from agent_configs a ") && strings.Contains(q, "order by a.is_default desc, a.name asc")) && strings.Contains(q, "api_key") {
+				stats.ModelFullCatalogReads++
+			}
 			projection := strings.Split(q, " from agent_configs")[0]
 			if projection == "select id, name, provider, model, is_default, auth_method" || strings.HasPrefix(projection, "select id, name, provider, model, auth_method, is_default,") {
 				stats.ModelSelectionReads++
