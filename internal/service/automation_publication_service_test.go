@@ -11,6 +11,7 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/openvibely/openvibely/internal/testutil/storefixture"
 	"github.com/openvibely/openvibely/internal/testutil/teststores"
 	"github.com/stretchr/testify/require"
 )
@@ -290,7 +291,7 @@ func TestMaintainedSDLCSaveRemovesOptionalVisionProducerAndOwnedResources(t *tes
 }
 
 func TestAutomationSaveRejectsNewVisionDriverAndAllowsExistingEdit(t *testing.T) {
-	h := newAutomationSaveHarness(t, "Vision Driver creation boundary")
+	h := newAutomationSaveStoreHarness(t, "Vision Driver creation boundary")
 	ctx := context.Background()
 	candidate, err := h.drafts.TemplateCandidate(AutomationAdapterVisionDriver)
 	require.NoError(t, err)
@@ -300,9 +301,9 @@ func TestAutomationSaveRejectsNewVisionDriverAndAllowsExistingEdit(t *testing.T)
 			Source: "template", CreatedVia: "web", Candidate: candidate})
 		require.ErrorContains(t, err, "Vision Driver cannot be created")
 	}
-	require.Zero(t, countRows(t, h.db, `SELECT COUNT(*) FROM automations`))
-	require.Zero(t, countRows(t, h.db, `SELECT COUNT(*) FROM tasks`))
-	require.Zero(t, countRows(t, h.db, `SELECT COUNT(*) FROM schedules`))
+	require.Zero(t, automationStateForTest(t, h.stores).Automations)
+	require.Zero(t, automationStateForTest(t, h.stores).Tasks)
+	require.Zero(t, automationStateForTest(t, h.stores).Schedules)
 
 	existing, editable := seedExistingVisionDriverAutomation(t, h)
 	editable.Description = "Edited existing Vision Driver"
@@ -312,7 +313,7 @@ func TestAutomationSaveRejectsNewVisionDriverAndAllowsExistingEdit(t *testing.T)
 	require.NoError(t, err)
 	require.Equal(t, existing.Automation.ID, saved.Definition.Automation.ID)
 	require.Equal(t, "Edited existing Vision Driver", saved.Definition.Automation.Description)
-	require.Equal(t, 1, countRows(t, h.db, `SELECT COUNT(*) FROM automations`))
+	require.Equal(t, 1, automationStateForTest(t, h.stores).Automations)
 }
 
 func TestAutomationSaveRejectsInvalidMaintainedGitHubActionSettingsAtomically(t *testing.T) {
@@ -342,7 +343,7 @@ func TestAutomationSaveRejectsInvalidMaintainedGitHubActionSettingsAtomically(t 
 		{name: "pull request draft wrong type", role: "open_pull_request", field: "draft", value: "false", wantCode: "pull_request_draft"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			h := newAutomationSaveHarness(t, "Invalid maintained GitHub settings "+test.name)
+			h := newAutomationSaveStoreHarness(t, "Invalid maintained GitHub settings "+test.name)
 			candidate, err := h.drafts.TemplateCandidate(AutomationAdapterGitHubSDLC)
 			require.NoError(t, err)
 			for i := range candidate.Nodes {
@@ -360,9 +361,9 @@ func TestAutomationSaveRejectsInvalidMaintainedGitHubActionSettingsAtomically(t 
 				ProjectID: h.project.ID, Source: "template", CreatedVia: "web", Candidate: candidate,
 			})
 			require.ErrorContains(t, err, "automation graph validation failed")
-			require.Zero(t, countRows(t, h.db, `SELECT COUNT(*) FROM automations`))
-			require.Zero(t, countRows(t, h.db, `SELECT COUNT(*) FROM tasks`))
-			require.Zero(t, countRows(t, h.db, `SELECT COUNT(*) FROM schedules`))
+			require.Zero(t, automationStateForTest(t, h.stores).Automations)
+			require.Zero(t, automationStateForTest(t, h.stores).Tasks)
+			require.Zero(t, automationStateForTest(t, h.stores).Schedules)
 		})
 	}
 }
@@ -395,7 +396,7 @@ func TestAutomationSaveRejectsSemanticRepairsAndPreservesSelectedTaskCategories(
 		}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			h := newAutomationSaveHarness(t, "Strict semantic Save "+test.name)
+			h := newAutomationSaveStoreHarness(t, "Strict semantic Save "+test.name)
 			candidate := customScheduledTaskCandidate("Strict semantic Save", "Review one request.")
 			if test.candidate != nil {
 				candidate = test.candidate(&h)
@@ -408,9 +409,9 @@ func TestAutomationSaveRejectsSemanticRepairsAndPreservesSelectedTaskCategories(
 				ProjectID: h.project.ID, Source: "manual", CreatedVia: "web", Candidate: candidate,
 			})
 			require.ErrorContains(t, err, "automation graph validation failed")
-			require.Zero(t, countRows(t, h.db, `SELECT COUNT(*) FROM automations`))
-			require.Zero(t, countRows(t, h.db, `SELECT COUNT(*) FROM tasks`))
-			require.Zero(t, countRows(t, h.db, `SELECT COUNT(*) FROM schedules`))
+			require.Zero(t, automationStateForTest(t, h.stores).Automations)
+			require.Zero(t, automationStateForTest(t, h.stores).Tasks)
+			require.Zero(t, automationStateForTest(t, h.stores).Schedules)
 		})
 	}
 
@@ -436,7 +437,7 @@ func TestAutomationSaveRejectsSemanticRepairsAndPreservesSelectedTaskCategories(
 		}, nodeKey: "child", want: models.CategoryBacklog},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			h := newAutomationSaveHarness(t, test.name)
+			h := newAutomationSaveStoreHarness(t, test.name)
 			saved, err := h.compiler.Save(context.Background(), AutomationSaveRequest{
 				ProjectID: h.project.ID, Source: "manual", CreatedVia: "web", Candidate: test.candidate,
 			})
@@ -445,8 +446,10 @@ func TestAutomationSaveRejectsSemanticRepairsAndPreservesSelectedTaskCategories(
 			require.NoError(t, err)
 			require.Equal(t, test.want, task.Category)
 
-			var candidateJSON string
-			require.NoError(t, h.db.QueryRow(`SELECT candidate_json FROM automation_graph_metadata WHERE automation_id = ?`, saved.Definition.Automation.ID).Scan(&candidateJSON))
+			metadata, err := h.automationRepo.GetAutomationGraphMetadata(t.Context(), h.project.ID, saved.Definition.Automation.ID, saved.Definition.Version.ID)
+			require.NoError(t, err)
+			require.NotNil(t, metadata)
+			candidateJSON := metadata.CandidateJSON
 			var stored models.AutomationDraftCandidate
 			require.NoError(t, json.Unmarshal([]byte(candidateJSON), &stored))
 			require.Equal(t, string(test.want), automationDraftNodeByKey(t, stored, test.nodeKey).Config["category"])
@@ -930,23 +933,31 @@ func TestAutomationReplacementUsesOneCurrentGraphAndDeletesRemovedSchedule(t *te
 }
 
 func TestAutomationSaveRollsBackAllRowsWhenScheduleCreationFails(t *testing.T) {
-	h := newAutomationSaveHarness(t, "Atomic automation save")
+	t.Run("isolated", func(t *testing.T) { testAutomationSaveRollsBackAllRowsWhenScheduleCreationFails(t) })
+	t.Run("production", func(t *testing.T) {
+		testAutomationSaveRollsBackAllRowsWhenScheduleCreationFails(t, teststores.WithProductionTopology())
+	})
+}
+func testAutomationSaveRollsBackAllRowsWhenScheduleCreationFails(t *testing.T, opts ...teststores.Option) {
+	h := newAutomationSaveStoreHarnessWithOptions(t, opts, "Atomic automation save")
 	ctx := context.Background()
 	candidate, err := h.drafts.TemplateCandidate(AutomationAdapterNativeSDLC)
 	require.NoError(t, err)
-	_, err = h.db.ExecContext(ctx, `CREATE TRIGGER fail_atomic_automation_schedule
-		BEFORE INSERT ON schedules BEGIN SELECT RAISE(ABORT, 'injected schedule failure'); END`)
-	require.NoError(t, err)
+	require.NoError(t, h.stores.Fixtures.FailScheduleCreation(ctx))
 
 	_, err = h.compiler.Save(ctx, AutomationSaveRequest{ProjectID: h.project.ID, Source: "template", CreatedVia: "web", Candidate: candidate})
 	require.ErrorContains(t, err, "injected schedule failure")
-	for _, table := range []string{"automations", "automation_versions", "automation_nodes", "automation_edges", "automation_definition_resources", "tasks", "schedules"} {
-		require.Zero(t, countRows(t, h.db, "SELECT COUNT(*) FROM "+table), table+" must remain empty after the failed atomic Save")
-	}
+	require.Equal(t, storefixture.AutomationStateCounts{}, automationStateForTest(t, h.stores), "failed Save must leave no graph or runtime resources")
 }
 
 func TestAutomationReplacementRollsBackToCurrentGraphWhenScheduleUpdateFails(t *testing.T) {
-	h := newAutomationSaveHarness(t, "Atomic automation replacement")
+	t.Run("isolated", func(t *testing.T) { testAutomationReplacementRollsBackToCurrentGraphWhenScheduleUpdateFails(t) })
+	t.Run("production", func(t *testing.T) {
+		testAutomationReplacementRollsBackToCurrentGraphWhenScheduleUpdateFails(t, teststores.WithProductionTopology())
+	})
+}
+func testAutomationReplacementRollsBackToCurrentGraphWhenScheduleUpdateFails(t *testing.T, opts ...teststores.Option) {
+	h := newAutomationSaveStoreHarnessWithOptions(t, opts, "Atomic automation replacement")
 	ctx := context.Background()
 	candidate, err := h.drafts.TemplateCandidate(AutomationAdapterNativeSDLC)
 	require.NoError(t, err)
@@ -958,9 +969,7 @@ func TestAutomationReplacementRollsBackToCurrentGraphWhenScheduleUpdateFails(t *
 	require.NoError(t, err)
 
 	candidate.Nodes[0].Config["prompt"] = "replacement prompt that must roll back"
-	_, err = h.db.ExecContext(ctx, `CREATE TRIGGER fail_atomic_automation_schedule_update
-		BEFORE UPDATE ON schedules BEGIN SELECT RAISE(ABORT, 'injected schedule update failure'); END`)
-	require.NoError(t, err)
+	require.NoError(t, h.stores.Fixtures.FailScheduleUpdate(ctx))
 	_, err = h.compiler.Save(ctx, AutomationSaveRequest{ProjectID: h.project.ID, AutomationID: first.Definition.Automation.ID,
 		Source: "manual", CreatedVia: "web", Candidate: candidate})
 	require.ErrorContains(t, err, "injected schedule update failure")
@@ -970,8 +979,9 @@ func TestAutomationReplacementRollsBackToCurrentGraphWhenScheduleUpdateFails(t *
 	storedTask, err := h.taskRepo.GetByID(ctx, taskID)
 	require.NoError(t, err)
 	require.Equal(t, originalTask.Prompt, storedTask.Prompt)
-	require.Equal(t, 1, countRows(t, h.db, `SELECT COUNT(*) FROM automation_versions WHERE automation_id = ?`, first.Definition.Automation.ID))
-	require.False(t, tableExists(t, h.db, "automation_publication_attempts"))
+	versions, err := h.stores.Fixtures.AutomationVersions(ctx, first.Definition.Automation.ID)
+	require.NoError(t, err)
+	require.Len(t, versions, 1)
 }
 
 func TestAutomationSavePreservesPausedAndArchivedLifecycle(t *testing.T) {
@@ -1799,19 +1809,19 @@ func TestAutomationDeleteRemovesOwnedScheduleAndTriggerTask(t *testing.T) {
 }
 
 func TestAutomationSavePreviewRejectsUnavailableGitHubIntegrationWithoutPersistence(t *testing.T) {
-	h := newAutomationSaveHarness(t, "Atomic GitHub validation")
+	h := newAutomationSaveStoreHarness(t, "Atomic GitHub validation")
 	candidate, err := h.drafts.TemplateCandidate(AutomationAdapterGitHubSDLC)
 	require.NoError(t, err)
 	plan, _, err := h.compiler.PreviewSave(context.Background(), h.project.ID, candidate)
 	require.NoError(t, err)
 	require.NotEmpty(t, plan.Validation)
-	require.Zero(t, countRows(t, h.db, `SELECT COUNT(*) FROM automations`))
-	require.Zero(t, countRows(t, h.db, `SELECT COUNT(*) FROM tasks`))
-	require.Zero(t, countRows(t, h.db, `SELECT COUNT(*) FROM schedules`))
+	require.Zero(t, automationStateForTest(t, h.stores).Automations)
+	require.Zero(t, automationStateForTest(t, h.stores).Tasks)
+	require.Zero(t, automationStateForTest(t, h.stores).Schedules)
 }
 
 func TestAutomationSaveValidationIssueAppearsInPreviewAndBlocksPersistence(t *testing.T) {
-	h := newAutomationSaveHarness(t, "Shared save validation")
+	h := newAutomationSaveStoreHarness(t, "Shared save validation")
 	candidate := customScheduledTaskCandidate("Shared save validation", "Review one request.")
 	candidate.Nodes[0].Config["agent_ref"] = " missing-agent "
 
@@ -1824,10 +1834,10 @@ func TestAutomationSaveValidationIssueAppearsInPreviewAndBlocksPersistence(t *te
 		ProjectID: h.project.ID, Source: "manual", CreatedVia: "web", Candidate: candidate,
 	})
 	require.ErrorContains(t, err, "automation graph validation failed: Agent selection cannot be resolved because project capabilities are unavailable.")
-	require.Zero(t, countRows(t, h.db, `SELECT COUNT(*) FROM automations`))
-	require.Zero(t, countRows(t, h.db, `SELECT COUNT(*) FROM automation_definition_resources`))
-	require.Zero(t, countRows(t, h.db, `SELECT COUNT(*) FROM tasks`))
-	require.Zero(t, countRows(t, h.db, `SELECT COUNT(*) FROM schedules`))
+	require.Zero(t, automationStateForTest(t, h.stores).Automations)
+	require.Zero(t, automationStateForTest(t, h.stores).Resources)
+	require.Zero(t, automationStateForTest(t, h.stores).Tasks)
+	require.Zero(t, automationStateForTest(t, h.stores).Schedules)
 }
 
 func customTaskOnlyCandidate(name, prompt string, category models.TaskCategory) models.AutomationDraftCandidate {
@@ -1876,4 +1886,16 @@ func countRows(t *testing.T, db *sql.DB, query string, args ...any) int {
 	var count int
 	require.NoError(t, db.QueryRow(query, args...).Scan(&count))
 	return count
+}
+
+func automationStateForTest(t *testing.T, env *teststores.Env) storefixture.AutomationStateCounts {
+	t.Helper()
+	state, err := env.Fixtures.AutomationState(t.Context())
+	require.NoError(t, err)
+	return state
+}
+
+func newAutomationSaveStoreHarnessWithOptions(t *testing.T, opts []teststores.Option, name string) automationSaveHarness {
+	t.Helper()
+	return buildAutomationSaveHarness(t, teststores.New(t, opts...), name)
 }
