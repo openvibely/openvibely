@@ -191,8 +191,8 @@ func TestPeerInternalStreamErrorIsRetryable(t *testing.T) {
 }
 
 func TestBackoffHonorsRetryAfterAndExponentialDelay(t *testing.T) {
-	if got := Backoff(2, nil, time.Second); got != 4*time.Second {
-		t.Fatalf("exponential backoff = %v, want 4s", got)
+	if got := Backoff(2, nil, time.Second); got < 3600*time.Millisecond || got > 4400*time.Millisecond {
+		t.Fatalf("exponential backoff = %v, want 4s +/-10%%", got)
 	}
 	resp := &http.Response{StatusCode: http.StatusTooManyRequests, Header: http.Header{"Retry-After": []string{"7"}}}
 	if got := Backoff(0, resp, time.Second); got != 7*time.Second {
@@ -292,11 +292,8 @@ func TestStreamTurnRetryDelayNumericOverflow(t *testing.T) {
 	}
 	err := NewResponseError(resp, errors.New("rate limited"))
 	got := StreamTurnRetryDelay(1, err)
-	if got <= 0 || got > StreamTurnMaxBackoff {
-		t.Fatalf("got = %v, want positive delay <= %v", got, StreamTurnMaxBackoff)
-	}
-	if got != StreamTurnMaxBackoff {
-		t.Fatalf("got = %v, want %v", got, StreamTurnMaxBackoff)
+	if got <= DefaultMaxBackoff {
+		t.Fatalf("overflowing server wait = %v, must exceed retry limit", got)
 	}
 }
 
@@ -434,46 +431,23 @@ func TestDoStreamTurnCustomRetryBudget(t *testing.T) {
 	}
 }
 
-func TestDoStreamTurnConnectionRetryCanBypassStreamBudget(t *testing.T) {
+func TestDoStreamTurnConnectionRetriesShareBudgetAndBackoff(t *testing.T) {
 	attempts := 0
 	var delays []time.Duration
-	var retryAttempts []int
-	policy := StreamTurnPolicy{
-		RetryConnectionFailuresWithoutBudget: true,
-		After: func(time.Duration) <-chan time.Time {
-			ch := make(chan time.Time, 1)
-			ch <- time.Time{}
-			return ch
-		},
-		OnRetry: func(event RetryEvent) {
-			delays = append(delays, event.Delay)
-			retryAttempts = append(retryAttempts, event.Attempt)
-		},
-	}
-	result, err := DoStreamTurn(context.Background(), policy, func(context.Context) (string, error) {
+	_, err := DoStreamTurn(context.Background(), StreamTurnPolicy{
+		After:   instantPolicy().After,
+		OnRetry: func(event RetryEvent) { delays = append(delays, event.Delay) },
+	}, func(context.Context) (string, error) {
 		attempts++
-		if attempts <= StreamTurnMaxRetries+2 {
-			return "", errors.New(`send request: Post "https://provider.test": dial tcp: no such host`)
-		}
-		return "ok", nil
+		return "", errors.New("send request: dial tcp: no such host")
 	})
-	if err != nil || result != "ok" {
-		t.Fatalf("result/error = %q/%v, want ok/nil", result, err)
+	if err == nil || attempts != 7 || len(delays) != 6 {
+		t.Fatalf("attempts=%d delays=%v err=%v", attempts, delays, err)
 	}
-	if attempts != StreamTurnMaxRetries+3 {
-		t.Fatalf("attempts = %d, want %d", attempts, StreamTurnMaxRetries+3)
-	}
-	if len(delays) != StreamTurnMaxRetries+2 {
-		t.Fatalf("delays = %v, want %d entries", delays, StreamTurnMaxRetries+2)
-	}
-	for i, want := range []time.Duration{5 * time.Second, 10 * time.Second, 20 * time.Second, 40 * time.Second, 60 * time.Second, 60 * time.Second, 60 * time.Second} {
-		if delays[i] != want {
-			t.Fatalf("delay[%d] = %v, want %v; all delays=%v", i, delays[i], want, delays)
-		}
-	}
-	for i, got := range retryAttempts {
-		if want := i + 1; got != want {
-			t.Fatalf("retry attempt[%d] = %d, want %d; all attempts=%v", i, got, want, retryAttempts)
+	for i, seconds := range []int{1, 2, 4, 8, 16, 30} {
+		want := time.Duration(seconds) * time.Second
+		if delays[i] < want*9/10 || delays[i] > want*11/10 {
+			t.Fatalf("retry %d delay = %v", i+1, delays[i])
 		}
 	}
 }
@@ -549,4 +523,87 @@ func TestMaxBackoffAppliesToNetworkAndStreamRetries(t *testing.T) {
 			t.Fatalf("attempts = %d, want 1 when delay exceeds maximum", attempts)
 		}
 	})
+}
+
+func TestBackoffServerMinimumAndJitter(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	for _, header := range []string{"", "invalid", "0", "-1", "1", now.Add(-time.Minute).Format(http.TimeFormat)} {
+		resp := &http.Response{Header: http.Header{"Retry-After": {header}}}
+		for i := 0; i < 100; i++ {
+			got := Backoff(5, resp, DefaultBaseDelay, now)
+			if got < 27*time.Second || got > 33*time.Second {
+				t.Fatalf("header %q: %v", header, got)
+			}
+		}
+	}
+	for _, header := range []string{"120", now.Add(120 * time.Second).Format(http.TimeFormat)} {
+		got := Backoff(5, &http.Response{Header: http.Header{"Retry-After": {header}}}, DefaultBaseDelay, now)
+		if got != 120*time.Second {
+			t.Fatalf("server minimum %q: %v", header, got)
+		}
+	}
+}
+
+func TestStreamTurnRejectsLongServerWait(t *testing.T) {
+	for _, header := range []string{"121", "9223372037", "99999999999999999999"} {
+		attempts := 0
+		expected := NewResponseError(&http.Response{StatusCode: 503, Header: http.Header{"Retry-After": {header}}}, errors.New("unavailable"))
+		_, err := DoStreamTurn(context.Background(), StreamTurnPolicy{After: instantPolicy().After}, func(context.Context) (string, error) {
+			attempts++
+			return "", expected
+		})
+		if err != expected || attempts != 1 {
+			t.Fatalf("header %s: attempts=%d error=%v", header, attempts, err)
+		}
+	}
+}
+
+func TestDoServerWaitLimitPreservesResponse(t *testing.T) {
+	for _, seconds := range []string{"120", "121"} {
+		attempts := 0
+		body := &trackingBody{reader: strings.NewReader("busy")}
+		client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+			attempts++
+			if attempts > 1 {
+				return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader("ok"))}, nil
+			}
+			return &http.Response{StatusCode: 503, Header: http.Header{"Retry-After": {seconds}}, Body: body}, nil
+		})}
+		policy := instantPolicy()
+		policy.OnRetry = func(e RetryEvent) {
+			if e.Delay != 2*time.Minute {
+				t.Errorf("delay=%v", e.Delay)
+			}
+		}
+		resp, err := Do(context.Background(), client, func() (*http.Request, error) { return http.NewRequest("GET", "https://example.test", nil) }, policy)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if seconds == "121" && (attempts != 1 || body.closed || body.read != 0) {
+			t.Fatalf("server response consumed or retried: attempts=%d body=%+v", attempts, body)
+		}
+		if seconds == "120" && (attempts != 2 || !body.closed) {
+			t.Fatalf("allowed wait: attempts=%d body=%+v", attempts, body)
+		}
+		resp.Body.Close()
+	}
+}
+
+func TestNestedStreamTurnsShareRetryBudget(t *testing.T) {
+	attempts := 0
+	p := StreamTurnPolicy{After: instantPolicy().After}
+	_, err := DoStreamTurn(context.Background(), p, func(ctx context.Context) (string, error) {
+		return DoStreamTurn(ctx, p, func(context.Context) (string, error) { attempts++; return "", io.ErrUnexpectedEOF })
+	})
+	if err == nil || attempts != 7 {
+		t.Fatalf("attempts=%d err=%v", attempts, err)
+	}
+}
+
+func TestRecoveryIsBounded(t *testing.T) {
+	attempts := 0
+	_, err := DoStreamTurn(context.Background(), StreamTurnPolicy{Recover: func(error) (bool, error) { return true, nil }}, func(context.Context) (string, error) { attempts++; return "", io.ErrUnexpectedEOF })
+	if err == nil || attempts != 7 {
+		t.Fatalf("attempts=%d err=%v", attempts, err)
+	}
 }

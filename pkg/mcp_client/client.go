@@ -10,6 +10,7 @@ import (
 	"net/http"
 
 	"github.com/openvibely/openvibely/internal/applog"
+	"github.com/openvibely/openvibely/internal/httpclient"
 	"os"
 	"os/exec"
 	"sort"
@@ -422,7 +423,7 @@ func startServer(ctx context.Context, cfg models.MCPServerConfig, workDir string
 		for k, v := range cfg.Headers {
 			srv.headers[k] = v
 		}
-		srv.httpClient = &http.Client{Timeout: 60 * time.Second}
+		srv.httpClient = httpclient.New(httpclient.MCPTimeout)
 
 	default:
 		return nil, fmt.Errorf("unsupported MCP type %q for server %q", cfg.Type, cfg.Name)

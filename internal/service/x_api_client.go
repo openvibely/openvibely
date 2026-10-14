@@ -18,12 +18,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/openvibely/openvibely/internal/httpclient"
 	"github.com/openvibely/openvibely/internal/httpretry"
 )
 
 const (
-	xAPIBaseURL      = "https://api.x.com"
-	xMaxRetryBackoff = time.Minute
+	xAPIBaseURL = "https://api.x.com"
 )
 
 type XCredentials struct{ ConsumerKey, ConsumerSecret, AccessToken, AccessTokenSecret string }
@@ -67,9 +67,9 @@ type XAPIClient struct {
 }
 
 func NewXAPIClient(credentials XCredentials) *XAPIClient {
-	return &XAPIClient{baseURL: xAPIBaseURL, client: &http.Client{Timeout: 30 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error {
-		return http.ErrUseLastResponse
-	}}, credentials: credentials, now: time.Now, nonce: xNonce, after: time.After, maxRetries: 2}
+	client := httpclient.New(httpclient.XTimeout)
+	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	return &XAPIClient{baseURL: xAPIBaseURL, client: client, credentials: credentials, now: time.Now, nonce: xNonce, after: time.After, maxRetries: httpretry.DefaultMaxRetries}
 }
 
 func xNonce() string {
@@ -136,7 +136,6 @@ func (c *XAPIClient) doJSON(ctx context.Context, method, path string, query url.
 	}
 	policy := httpretry.DefaultPolicy()
 	policy.MaxRetries = c.maxRetries
-	policy.MaxBackoff = xMaxRetryBackoff
 	policy.After = c.after
 	policy.Now = c.now
 	policy.RetryableResponse = func(resp *http.Response) bool {
@@ -203,9 +202,9 @@ func xNormalizeRetryHeaders(resp *http.Response, now time.Time) {
 	if resp == nil {
 		return
 	}
-	maxSeconds := uint64(xMaxRetryBackoff / time.Second)
-	if seconds, ok := xBoundedRetryAfterSeconds(strings.TrimSpace(resp.Header.Get("Retry-After")), maxSeconds); ok {
-		resp.Header.Set("Retry-After", strconv.FormatUint(seconds, 10))
+	// Preserve Retry-After verbatim: the shared parser handles dates and
+	// overflow, and rejects excessive waits instead of retrying early.
+	if strings.TrimSpace(resp.Header.Get("Retry-After")) != "" {
 		return
 	}
 	reset := strings.TrimSpace(resp.Header.Get("x-rate-limit-reset"))
@@ -220,35 +219,11 @@ func xNormalizeRetryHeaders(resp *http.Response, now time.Time) {
 	if delay <= 0 {
 		return
 	}
-	if delay > xMaxRetryBackoff {
-		delay = xMaxRetryBackoff
+	seconds := delay / time.Second
+	if delay%time.Second != 0 {
+		seconds++
 	}
-	seconds := uint64((delay + time.Second - 1) / time.Second)
-	if seconds == 0 {
-		seconds = 1
-	}
-	resp.Header.Set("Retry-After", strconv.FormatUint(seconds, 10))
-}
-
-func xBoundedRetryAfterSeconds(value string, maximum uint64) (uint64, bool) {
-	if value == "" {
-		return 0, false
-	}
-	for _, r := range value {
-		if r < '0' || r > '9' {
-			return 0, false
-		}
-	}
-	value = strings.TrimLeft(value, "0")
-	if value == "" {
-		return 0, true
-	}
-	maxText := strconv.FormatUint(maximum, 10)
-	if len(value) > len(maxText) || (len(value) == len(maxText) && value > maxText) {
-		return maximum, true
-	}
-	parsed, err := strconv.ParseUint(value, 10, 64)
-	return parsed, err == nil
+	resp.Header.Set("Retry-After", strconv.FormatInt(int64(seconds), 10))
 }
 
 func xProviderError(data []byte) string {

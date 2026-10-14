@@ -16,16 +16,12 @@ import (
 )
 
 const (
-	DefaultMaxRetries = 3
-	DefaultMaxBackoff = 30 * time.Second
-
-	// Stream turn retry defaults match the Codex bundle's Responses stream
-	// retry behavior while remaining provider-neutral for OpenVibely callers.
-	StreamTurnMaxRetries        = 5
-	StreamTurnBaseDelay         = 200 * time.Millisecond
-	StreamTurnMaxBackoff        = 60 * time.Second
-	ConnectionRetryInitialDelay = 5 * time.Second
-	ConnectionRetryMaxDelay     = 60 * time.Second
+	DefaultMaxRetries = 6
+	DefaultBaseDelay  = time.Second
+	// DefaultMaxBackoff is the largest accepted server-directed wait.
+	DefaultMaxBackoff    = 2 * time.Minute
+	LocalBackoffCap      = 30 * time.Second
+	StreamTurnMaxRetries = DefaultMaxRetries
 )
 
 type Policy struct {
@@ -70,12 +66,11 @@ type RetryEvent struct {
 // visible/persisted deltas are appended, marked, or rolled back.
 type StreamTurnPolicy struct {
 	// MaxRetries overrides the default when positive.
-	MaxRetries                           int
-	After                                func(time.Duration) <-chan time.Time
-	OnRetry                              func(RetryEvent)
-	RetryableError                       func(error) bool
-	RetryConnectionFailuresWithoutBudget bool
-	Recover                              func(error) (bool, error)
+	MaxRetries     int
+	After          func(time.Duration) <-chan time.Time
+	OnRetry        func(RetryEvent)
+	RetryableError func(error) bool
+	Recover        func(error) (bool, error)
 }
 
 // StreamError marks a failure that happened while consuming a successful HTTP
@@ -116,7 +111,7 @@ func NewResponseError(resp *http.Response, err error) error {
 func DefaultPolicy() Policy {
 	return Policy{
 		MaxRetries: DefaultMaxRetries,
-		BaseDelay:  time.Second,
+		BaseDelay:  DefaultBaseDelay,
 		MaxBackoff: DefaultMaxBackoff,
 		After:      time.After,
 		Now:        time.Now,
@@ -211,48 +206,21 @@ func messageHasStatusCode(msg string, statusCode int) bool {
 	return false
 }
 
-// StreamTurnBackoff returns the provider stream-turn backoff for a one-based
-// retry number: 200ms * 2^(retry-1), jittered by +/-10% and capped.
+// StreamTurnBackoff returns the shared jittered delay for a one-based retry.
 func StreamTurnBackoff(retry int) time.Duration {
-	if retry < 1 {
-		retry = 1
-	}
-	if retry >= 63 {
-		return StreamTurnMaxBackoff
-	}
-	factor := time.Duration(1) << uint(retry-1)
-	const maxDuration = time.Duration(1<<63 - 1)
-	if StreamTurnBaseDelay > maxDuration/factor {
-		return StreamTurnMaxBackoff
-	}
-	delay := StreamTurnBaseDelay * factor
-	jitter := 0.9 + rand.Float64()*0.2
-	delay = time.Duration(float64(delay) * jitter)
-	if delay > StreamTurnMaxBackoff {
-		return StreamTurnMaxBackoff
-	}
-	return delay
+	return Backoff(retry-1, nil, DefaultBaseDelay)
 }
 
 func StreamTurnRetryDelay(retry int, err error, now ...time.Time) time.Duration {
 	var responseErr *ResponseError
-	if errors.As(err, &responseErr) && strings.TrimSpace(responseErr.Header.Get("Retry-After")) != "" {
-		current := time.Now()
-		if len(now) > 0 {
-			current = now[0]
-		}
-		delay := Backoff(retry-1, &http.Response{StatusCode: responseErr.StatusCode, Header: responseErr.Header}, StreamTurnBaseDelay, current)
-		if delay > StreamTurnMaxBackoff || delay < 0 {
-			return StreamTurnMaxBackoff
-		}
-		return delay
+	if errors.As(err, &responseErr) {
+		return Backoff(retry-1, &http.Response{Header: responseErr.Header}, DefaultBaseDelay, now...)
 	}
 	return StreamTurnBackoff(retry)
 }
 
 // IsConnectionSetupFailure reports whether the request failed before a stream
-// was established. Hosted providers may retry these on a separate reconnect
-// lane without consuming the ordinary stream retry budget.
+// was established. These failures consume the same budget as stream errors.
 func IsConnectionSetupFailure(err error) bool {
 	if err == nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return false
@@ -279,11 +247,14 @@ func IsConnectionSetupFailure(err error) bool {
 // DoStreamTurn retries a logical model turn using the shared stream retry
 // policy. It is intended to wrap provider-specific request construction and
 // parsing, while keeping retry count, backoff, Retry-After handling, and
-// optional connection reconnect behavior consistent across providers. It does
+// connection failure behavior consistent across providers. It does
 // not buffer callbacks or enforce UI rollback; fn/callers decide live-output
 // semantics.
 func DoStreamTurn[T any](ctx context.Context, policy StreamTurnPolicy, fn func(context.Context) (T, error)) (T, error) {
 	maxRetries := streamTurnNotifyPolicy(policy).MaxRetries
+	if nested, _ := ctx.Value(retryContextKey{}).(bool); nested {
+		maxRetries = 0
+	}
 	after := policy.After
 	if after == nil {
 		after = time.After
@@ -296,9 +267,11 @@ func DoStreamTurn[T any](ctx context.Context, policy StreamTurnPolicy, fn func(c
 	}
 
 	retries := 0
-	connectionRetries := 0
-	connectionDelay := ConnectionRetryInitialDelay
 	for {
+		if err := ctx.Err(); err != nil {
+			var zero T
+			return zero, err
+		}
 		attemptCtx := context.WithValue(ctx, retryContextKey{}, true)
 		result, err := fn(attemptCtx)
 		if err == nil {
@@ -308,12 +281,13 @@ func DoStreamTurn[T any](ctx context.Context, policy StreamTurnPolicy, fn func(c
 			var zero T
 			return zero, ctxErr
 		}
-		if policy.Recover != nil {
+		if policy.Recover != nil && retries < maxRetries {
 			recovered, recoverErr := policy.Recover(err)
 			if recoverErr != nil {
 				return result, recoverErr
 			}
 			if recovered {
+				retries++
 				continue
 			}
 		}
@@ -321,28 +295,14 @@ func DoStreamTurn[T any](ctx context.Context, policy StreamTurnPolicy, fn func(c
 			return result, err
 		}
 
-		if policy.RetryConnectionFailuresWithoutBudget && IsConnectionSetupFailure(err) {
-			connectionRetries++
-			delay := connectionDelay
-			if connectionDelay < ConnectionRetryMaxDelay {
-				connectionDelay *= 2
-				if connectionDelay > ConnectionRetryMaxDelay {
-					connectionDelay = ConnectionRetryMaxDelay
-				}
-			}
-			notify(streamTurnNotifyPolicy(policy), connectionRetries, delay, 0, err)
-			if waitErr := wait(ctx, after, delay); waitErr != nil {
-				var zero T
-				return zero, waitErr
-			}
-			continue
-		}
-
 		if retries >= maxRetries {
 			return result, err
 		}
 		retries++
 		delay := StreamTurnRetryDelay(retries, err)
+		if delay > DefaultMaxBackoff {
+			return result, err
+		}
 		notify(streamTurnNotifyPolicy(policy), retries, delay, 0, err)
 		if waitErr := wait(ctx, after, delay); waitErr != nil {
 			var zero T
@@ -364,7 +324,17 @@ func streamTurnNotifyPolicy(policy StreamTurnPolicy) Policy {
 	}
 }
 
+// Backoff caps exponential backoff before applying +/-10% jitter. Retry-After
+// is a minimum, never truncated: callers reject waits above their limit.
 func Backoff(retry int, resp *http.Response, baseDelay time.Duration, now ...time.Time) time.Duration {
+	if baseDelay <= 0 {
+		baseDelay = DefaultBaseDelay
+	}
+	local := min(baseDelay, LocalBackoffCap)
+	for i := 0; i < retry && local < LocalBackoffCap; i++ {
+		local = min(local*2, LocalBackoffCap)
+	}
+	local = time.Duration(float64(local) * (0.9 + rand.Float64()*0.2))
 	const maxDuration = time.Duration(1<<63 - 1)
 	if resp != nil {
 		retryAfter := strings.TrimSpace(resp.Header.Get("Retry-After"))
@@ -372,7 +342,7 @@ func Backoff(retry int, resp *http.Response, baseDelay time.Duration, now ...tim
 			if time.Duration(seconds) > maxDuration/time.Second {
 				return maxDuration
 			}
-			return time.Duration(seconds) * time.Second
+			return max(local, time.Duration(seconds)*time.Second)
 		} else if errors.Is(err, strconv.ErrRange) && !strings.HasPrefix(retryAfter, "-") {
 			return maxDuration
 		}
@@ -382,24 +352,11 @@ func Backoff(retry int, resp *http.Response, baseDelay time.Duration, now ...tim
 				current = now[0]
 			}
 			if delay := at.Sub(current); delay > 0 {
-				return delay
+				return max(local, delay)
 			}
 		}
 	}
-	if baseDelay <= 0 {
-		baseDelay = time.Second
-	}
-	if retry < 0 {
-		retry = 0
-	}
-	if retry >= 63 {
-		return maxDuration
-	}
-	factor := time.Duration(1) << uint(retry)
-	if baseDelay > maxDuration/factor {
-		return maxDuration
-	}
-	return baseDelay * factor
+	return local
 }
 
 // Do executes a fresh request for every attempt. It retries transient network
@@ -411,6 +368,9 @@ func Do(ctx context.Context, client Doer, buildReq func() (*http.Request, error)
 		policy.MaxRetries = 0
 	}
 	for attempt := 0; attempt <= policy.MaxRetries; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		req, err := buildReq()
 		if err != nil {
 			return nil, fmt.Errorf("create request: %w", err)
@@ -459,9 +419,16 @@ func Do(ctx context.Context, client Doer, buildReq func() (*http.Request, error)
 // thinking, or tool activity. This avoids replaying partial turns and tool calls.
 func DoStream[T any](ctx context.Context, policy Policy, fn func(context.Context) (result T, observed bool, err error)) (T, error) {
 	policy = normalize(policy)
+	if nested, _ := ctx.Value(retryContextKey{}).(bool); nested {
+		policy.MaxRetries = 0
+	}
 	for attempt := 0; attempt <= policy.MaxRetries; attempt++ {
 		// A streamed operation owns the retry budget. Any HTTP helper it calls
 		// must make a single attempt so nested policies cannot multiply it.
+		if err := ctx.Err(); err != nil {
+			var zero T
+			return zero, err
+		}
 		attemptCtx := context.WithValue(ctx, retryContextKey{}, true)
 		result, observed, err := fn(attemptCtx)
 		if err == nil {
@@ -500,7 +467,7 @@ func normalize(policy Policy) Policy {
 		policy.MaxRetries = 0
 	}
 	if policy.BaseDelay <= 0 {
-		policy.BaseDelay = time.Second
+		policy.BaseDelay = DefaultBaseDelay
 	}
 	if policy.MaxBackoff <= 0 {
 		policy.MaxBackoff = DefaultMaxBackoff

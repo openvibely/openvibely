@@ -471,7 +471,6 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 	for turn := 0; turn < opts.MaxTurns; turn++ {
 		// Send request (streaming)
 		resp, err := httpretry.DoStreamTurn(ctx, httpretry.StreamTurnPolicy{
-			RetryConnectionFailuresWithoutBudget: true,
 			OnRetry: func(event httpretry.RetryEvent) {
 				if httpretry.IsConnectionSetupFailure(event.Err) {
 					applog.Infof("[anthropicclient] reconnecting agentic turn %d after connection error in %v: %v", turn+1, event.Delay, event.Err)
@@ -1334,6 +1333,7 @@ func (c *Client) sendAgenticTurnOnce(ctx context.Context, messages []agenticMess
 			return nil, err
 		}
 		httpReq.Header.Set("Content-Type", "application/json")
+		httpReq.Header.Set("Accept", "text/event-stream")
 		httpReq.Header.Set("anthropic-version", AnthropicAPIVersion)
 		httpReq.Header.Set("anthropic-beta", strings.Join(betaHeaders, ","))
 		if c.auth.APIKey != "" {

@@ -22,6 +22,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/applog"
+	"github.com/openvibely/openvibely/internal/httpclient"
 	llmcustomauth "github.com/openvibely/openvibely/internal/llm/customauth"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/service"
@@ -794,7 +795,7 @@ func (h *Handler) exchangeCustomOAuthCodeAndSaveTokens(flow *oauthPendingFlow, c
 	if _, err := llmcustomauth.ValidateEndpoint(flow.TokenURL, cfg.AllowPrivateEndpoints); err != nil {
 		return 0, fmt.Errorf("invalid custom OAuth token URL: %w", err)
 	}
-	customHTTPClient := llmcustomauth.NewHTTPClient(30*time.Second, cfg.AllowPrivateEndpoints)
+	customHTTPClient := llmcustomauth.NewHTTPClient(httpclient.OAuthTimeout, cfg.AllowPrivateEndpoints)
 	resp, err := customHTTPClient.Do(req)
 	if err != nil {
 		return 0, err
@@ -1228,7 +1229,7 @@ func untrackOAuthServer(configID, serverID string) {
 }
 
 func cancelOpenAIOAuthCallbackServer() error {
-	client := &http.Client{Timeout: 500 * time.Millisecond}
+	client := httpclient.New(httpclient.LocalOAuthProbeTimeout)
 	resp, err := client.Get(fmt.Sprintf("http://127.0.0.1:%d/cancel", openAIOAuthPort))
 	if err != nil {
 		return err

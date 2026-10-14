@@ -15,6 +15,7 @@ import (
 	"sync/atomic"
 
 	"github.com/coder/websocket"
+	"github.com/openvibely/openvibely/internal/httpclient"
 	"github.com/openvibely/openvibely/internal/httpretry"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/models"
@@ -91,21 +92,21 @@ func shouldFallbackResponsesWebsocket(ctx context.Context, err error) bool {
 		errors.As(err, &responseErr) && responseErr.StatusCode == http.StatusUpgradeRequired
 }
 
-// doResponsesStreamTurn gives WebSocket its full retry budget before switching
-// the session to HTTP, which then gets its own retry budget (as in Codex).
+// doResponsesStreamTurn reserves the last retry for HTTP fallback. Switching
+// transports does not reset the shared retry budget or bypass Retry-After.
 func doResponsesStreamTurn[T any](ctx context.Context, c *Client, _ string, policy httpretry.StreamTurnPolicy, fn func(context.Context) (T, error)) (T, error) {
 	state := c.responsesTransportState
-	result, err := httpretry.DoStreamTurn(ctx, policy, fn)
-	// Recovery failures end the turn even when their underlying cause is a
-	// retryable transport error. HTTP fallback must not resume generation.
-	if llmcontracts.ErrorIs(err, llmcontracts.ErrorMidTurnCompactionFailed) {
-		return result, err
+	onRetry := policy.OnRetry
+	policy.OnRetry = func(event httpretry.RetryEvent) {
+		if event.Attempt == event.MaxRetries && c.supportsResponsesWebsockets && !state.websocketDisabled.Load() &&
+			!llmcontracts.ErrorIs(event.Err, llmcontracts.ErrorMidTurnCompactionFailed) &&
+			(isRetryableResponsesTransportError(event.Err) || httpretry.IsRetryableError(event.Err)) {
+			state.disableWebsocket()
+		}
+		if onRetry != nil {
+			onRetry(event)
+		}
 	}
-	if err == nil || ctx.Err() != nil || !c.supportsResponsesWebsockets || state.websocketDisabled.Load() ||
-		!(isRetryableResponsesTransportError(err) || httpretry.IsRetryableError(err)) {
-		return result, err
-	}
-	state.disableWebsocket()
 	return httpretry.DoStreamTurn(ctx, policy, fn)
 }
 
@@ -429,7 +430,9 @@ func (c *Client) openResponsesWebsocketStream(ctx context.Context, payload map[s
 		headers.Set("OpenAI-Beta", openAIResponsesWebsocketBeta)
 		headers.Set("session-id", c.sessionID)
 		headers.Set("thread-id", c.sessionID)
-		conn, resp, err := websocket.Dial(ctx, endpoint, &websocket.DialOptions{
+		dialCtx, cancelDial := context.WithTimeout(ctx, httpclient.ModelHeaderTimeout)
+		defer cancelDial()
+		conn, resp, err := websocket.Dial(dialCtx, endpoint, &websocket.DialOptions{
 			HTTPClient:      c.httpClient,
 			HTTPHeader:      headers,
 			CompressionMode: websocket.CompressionContextTakeover,
@@ -495,7 +498,9 @@ func (c *Client) openResponsesWebsocketStream(ctx context.Context, payload map[s
 		state.mu.Unlock()
 		return nil, fmt.Errorf("marshal websocket request: %w", err)
 	}
-	writeErr := conn.Write(ctx, websocket.MessageText, body)
+	writeCtx, cancelWrite := context.WithTimeout(ctx, httpclient.ModelHeaderTimeout)
+	writeErr := conn.Write(writeCtx, websocket.MessageText, body)
+	cancelWrite()
 	if writeErr != nil {
 		state.resetConnectionLocked()
 		state.mu.Unlock()
@@ -531,7 +536,16 @@ func (c *Client) openResponsesWebsocketStream(ctx context.Context, payload map[s
 			state.lastResponseID = id
 		}
 		for {
-			messageType, data, readErr := conn.Read(ctx)
+			readCtx, activity, stop := httpclient.WithActivityTimeout(ctx, httpclient.ModelIdleTimeout)
+			messageType, reader, readErr := conn.Reader(readCtx)
+			var data []byte
+			if readErr == nil {
+				data, readErr = httpclient.ReadAllWithActivity(reader, func() { activity(httpclient.ModelIdleTimeout) })
+			}
+			if readErr != nil && context.Cause(readCtx) != nil {
+				readErr = context.Cause(readCtx)
+			}
+			stop()
 			if readErr != nil {
 				state.resetConnectionLocked()
 				kind := errResponsesWebsocketTransport
