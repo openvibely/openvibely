@@ -36,7 +36,7 @@ templ DesktopWindowControls(platform string) {
   <script>
    window.openVibelyInstallWindowControls = function(runtime) {
     var controls = document.querySelector('.desktop-window-controls');
-    if (!controls || controls.dataset.installed || !runtime.Window.IsMaximised) return;
+    if (!controls || controls.dataset.installed || !runtime?.Window?.IsMaximised) return;
     controls.dataset.installed = 'true';
     var bar = document.getElementById('desktop-project-titlebar');
     var maximize = controls.querySelector('[data-window-action="ToggleMaximise"]');
