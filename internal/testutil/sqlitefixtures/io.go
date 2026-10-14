@@ -19,6 +19,32 @@ func (c *ioCounter) Snapshot() storefixture.IOStats {
 	stats := storefixture.IOStats{Requests: len(statements), ReadTextBytes: c.counter.SelectedTextBytes()}
 	for _, statement := range statements {
 		q := strings.ToLower(strings.Join(strings.Fields(statement), " "))
+		if strings.HasPrefix(q, "select ") {
+			if strings.Contains(q, " from projects") {
+				stats.ProjectReads++
+			}
+			if strings.Contains(q, " from alerts") {
+				stats.AlertReads++
+			}
+			if strings.Contains(q, "from executions") && strings.Contains(q, "count(*)") {
+				stats.ExecutionCountReads++
+			}
+			if strings.Contains(q, "from executions") && strings.Contains(q, "order by started_at asc, rowid asc limit ? offset ?") {
+				stats.ExecutionPageReads++
+			}
+			if strings.Contains(q, "from agent_configs") {
+				if strings.HasPrefix(q, "select id, name, provider, model, is_default, auth_method, max_workers, worker_timeout") {
+					if strings.Contains(q, "where name = ? collate nocase") {
+						stats.ModelRuntimeLookupReads++
+					} else if strings.Contains(q, "order by is_default desc, name asc") {
+						stats.ModelRuntimeListReads++
+					}
+				}
+				if strings.HasPrefix(q, "select id, name, provider, model, is_default, auto_start_tasks, auth_method from agent_configs") {
+					stats.ModelCreationSelectionReads++
+				}
+			}
+		}
 		if strings.HasPrefix(q, "select ") && strings.Contains(q, "from agent_configs") {
 			stats.ModelReads++
 			projection := strings.Split(q, " from agent_configs")[0]

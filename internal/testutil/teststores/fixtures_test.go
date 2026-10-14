@@ -702,3 +702,43 @@ func TestSuspendedBackendIOHonorsCancellationAndResumes(t *testing.T) {
 		})
 	}
 }
+
+func TestChannelRuntimeCounterMeasuresBackendReads(t *testing.T) {
+	for _, production := range []bool{false, true} {
+		name := "isolated"
+		if production {
+			name = "production"
+		}
+		t.Run(name, func(t *testing.T) {
+			opts := []teststores.Option{teststores.WithIOCounting()}
+			if production {
+				opts = append(opts, teststores.WithProductionTopology())
+			}
+			env := teststores.New(t, opts...)
+			ctx := t.Context()
+			env.IO.SetEnabled(true)
+			_, err := env.LLMConfigs.ListRuntimeSummaries(ctx)
+			require.NoError(t, err)
+			_, err = env.LLMConfigs.GetRuntimeSummary(ctx, "", "missing")
+			require.NoError(t, err)
+			_, err = env.LLMConfigs.ListTaskCreationSelectionOptions(ctx)
+			require.NoError(t, err)
+			_, err = env.Executions.CountByTask(ctx, "missing")
+			require.NoError(t, err)
+			_, err = env.Executions.ListByTaskChronologicalPage(ctx, "missing", 0, 3)
+			require.NoError(t, err)
+			_, err = env.Projects.List(ctx)
+			require.NoError(t, err)
+			env.IO.SetEnabled(false)
+			stats := env.IO.Snapshot()
+			require.Equal(t, 1, stats.ModelRuntimeListReads)
+			require.Equal(t, 1, stats.ModelRuntimeLookupReads)
+			require.Equal(t, 1, stats.ModelCreationSelectionReads)
+			require.Equal(t, 3, stats.ModelReads)
+			require.Equal(t, 1, stats.ExecutionCountReads)
+			require.Equal(t, 1, stats.ExecutionPageReads)
+			require.Equal(t, 1, stats.ProjectReads)
+			require.Equal(t, 6, stats.Requests)
+		})
+	}
+}
