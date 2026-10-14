@@ -22,6 +22,10 @@ func TestBrowserFunctional_DesktopWindowControls(t *testing.T) {
 				}
 				fmt.Fprint(w, `</header><dialog id="dialog">Modal</dialog><script>
      window.calls=[];window.maximized=false;window.fullscreen=false;window.handlers={};window.sent={};
+     // An events-only runtime must not abort the rest of desktop setup or
+     // prevent a later installation with the full window API.
+     window.openVibelyInstallWindowControls({Events:{On:()=>{},Emit:()=>{}}});
+     window.skippedIncompleteRuntime=!document.querySelector('.desktop-window-controls').dataset.installed;
      window.testRuntime={Window:{Close:()=>window.calls.push('Close'),Minimise:()=>window.calls.push('Minimise'),ToggleMaximise:()=>window.calls.push('ToggleMaximise'),UnFullscreen:()=>window.calls.push('UnFullscreen'),IsMaximised:async()=>window.maximized,IsFullscreen:async()=>window.fullscreen},Events:{On:(name,fn)=>window.handlers[name]=fn,Emit:(name,data)=>window.sent[name]=data}};
      window.openVibelyInstallWindowControls(window.testRuntime);
     </script></body></html>`)
@@ -32,6 +36,7 @@ func TestBrowserFunctional_DesktopWindowControls(t *testing.T) {
 				// installs its runtime. Wait for the installer's readiness event
 				// before clicking controls or reading runtime state.
 				browser.waitFor("caption runtime installed", `String(!!window.sent?.['desktop:controls-ready'])`, "true")
+				browser.waitFor("incomplete runtime leaves controls uninstalled", `String(window.skippedIncompleteRuntime)`, "true")
 				browser.waitFor("caption initialized", `document.querySelector('[data-maximize-icon]').parentElement.getAttribute('aria-label')`, "Maximize window")
 				browser.evaluate(`document.querySelector('[data-window-action="Minimise"]').click();document.querySelector('[data-window-action="ToggleMaximise"]').click();document.querySelector('[data-window-action="Close"] svg path').dispatchEvent(new MouseEvent('click',{bubbles:true}));'ok'`)
 				browser.waitFor("caption clicks reach runtime", `window.calls.join(',')`, "Minimise,ToggleMaximise,Close")
