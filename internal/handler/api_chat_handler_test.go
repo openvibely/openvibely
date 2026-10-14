@@ -3,7 +3,7 @@ package handler
 import (
 	"bytes"
 	"context"
-	"database/sql"
+
 	"encoding/json"
 	"fmt"
 	"mime/multipart"
@@ -1742,8 +1742,8 @@ func TestAPIChatMessageStatus_Completed(t *testing.T) {
 }
 
 func TestAPIChatMessageStatus_CompletedManyTaskMarkersUsesCompactQueries(t *testing.T) {
-	db, counter := testutil.NewStatementCountingTestDB(t)
-	h, e, _ := setupTestHandlerForDB(t, db)
+	h, e, _, db := setupTestHandlerWithStores(t, teststores.WithIOCounting())
+	counter := db.IO
 	execID, expectedTaskIDs := setupAPIChatStatusMarkerFixture(t, h, db, 25, false)
 
 	counter.Reset()
@@ -1758,12 +1758,12 @@ func TestAPIChatMessageStatus_CompletedManyTaskMarkersUsesCompactQueries(t *test
 	assert.Equal(t, execID, resp.MessageID)
 	assert.Equal(t, expectedTaskIDs, resp.TaskIDs)
 
-	assertAPIChatStatusCompactStatements(t, counter.Statements(), 1)
+	assertAPIChatStatusIO(t, db, 1)
 }
 
 func TestAPIChatMessageStatus_CompletedWithoutTaskMarkersSkipsTaskLookup(t *testing.T) {
-	db, counter := testutil.NewStatementCountingTestDB(t)
-	h, e, llmConfigRepo := setupTestHandlerForDB(t, db)
+	h, e, llmConfigRepo, db := setupTestHandlerWithStores(t, teststores.WithIOCounting())
+	counter := db.IO
 	ctx := context.Background()
 	agent := createAgentTB(t, llmConfigRepo)
 	project := createProjectTB(t, h, "API Chat Status No Markers Project")
@@ -1788,18 +1788,18 @@ func TestAPIChatMessageStatus_CompletedWithoutTaskMarkersSkipsTaskLookup(t *test
 	assert.Equal(t, "completed", resp.Status)
 	assert.Equal(t, "AI response text", resp.Response)
 	assert.Empty(t, resp.TaskIDs)
-	assertAPIChatStatusCompactStatements(t, counter.Statements(), 0)
+	assertAPIChatStatusIO(t, db, 0)
 }
 
 func BenchmarkAPIChatMessageStatusCompactProjection(b *testing.B) {
-	db, counter := testutil.NewStatementCountingTestDB(b)
-	h, e, _ := setupTestHandlerForDB(b, db)
+	h, e, _, db := setupTestHandlerWithStores(b, teststores.WithIOCounting())
+	counter := db.IO
 	execID, _ := setupAPIChatStatusMarkerFixture(b, h, db, 25, true)
 
 	counter.SetEnabled(true)
 	serveAPIChatMessageStatusCompact(b, h, e, execID)
 	counter.SetEnabled(false)
-	statementCount := len(counter.Statements())
+	statementCount := counter.Snapshot().Requests
 
 	b.ReportAllocs()
 	b.ResetTimer()
@@ -1809,7 +1809,7 @@ func BenchmarkAPIChatMessageStatusCompactProjection(b *testing.B) {
 	b.ReportMetric(float64(statementCount), "sqlite-statements/op")
 }
 
-func setupAPIChatStatusMarkerFixture(tb testing.TB, h *Handler, db *sql.DB, markerCount int, large bool) (string, []string) {
+func setupAPIChatStatusMarkerFixture(tb testing.TB, h *Handler, db *teststores.Env, markerCount int, large bool) (string, []string) {
 	tb.Helper()
 	ctx := context.Background()
 	agent := createAgentTB(tb, h.llmConfigRepo)
@@ -1868,10 +1868,10 @@ func setupAPIChatStatusMarkerFixture(tb testing.TB, h *Handler, db *sql.DB, mark
 	return exec.ID, expected
 }
 
-func setAPIChatStatusHeavyExecutionFields(ctx context.Context, db *sql.DB, execID string) error {
+func setAPIChatStatusHeavyExecutionFields(ctx context.Context, db *teststores.Env, execID string) error {
 	largeReasoning := strings.Repeat("large reasoning content ", 8192)
 	largeDiff := strings.Repeat("large diff output ", 8192)
-	execs := teststores.Of(db).Executions
+	execs := db.Executions
 	if err := execs.ReplaceReasoningReplay(ctx, execID, largeReasoning, nil); err != nil {
 		return err
 	}
@@ -1889,37 +1889,13 @@ func serveAPIChatMessageStatusCompact(tb testing.TB, h *Handler, e *echo.Echo, e
 	return rec
 }
 
-func assertAPIChatStatusCompactStatements(t *testing.T, statements []string, wantTaskQueries int) {
+func assertAPIChatStatusIO(t *testing.T, env *teststores.Env, wantTasks int) {
 	t.Helper()
-	statusQueries := 0
-	taskQueries := 0
-	for _, statement := range statements {
-		normalized := strings.ToLower(strings.Join(strings.Fields(statement), " "))
-		if strings.Contains(normalized, "from executions where id = ?") {
-			statusQueries++
-			projection := strings.Split(normalized, " from executions where id = ?")[0]
-			if !strings.Contains(projection, "select id, status") {
-				t.Fatalf("API Chat status query does not use compact execution projection: %s", statement)
-			}
-			for _, forbidden := range []string{"prompt_sent", "reasoning_content", "diff_output"} {
-				if strings.Contains(projection, forbidden) {
-					t.Fatalf("API Chat status query selected forbidden column %q: %s", forbidden, statement)
-				}
-			}
-		}
-		if strings.Contains(normalized, "select id from tasks where id in") && strings.Contains(normalized, "category != ?") {
-			taskQueries++
-		}
-		if strings.Contains(normalized, "from tasks where id = ?") {
-			t.Fatalf("API Chat status used per-marker full task lookup: %s", statement)
-		}
-	}
-	if statusQueries != 1 {
-		t.Fatalf("API Chat status execution queries = %d, want 1; statements: %#v", statusQueries, statements)
-	}
-	if taskQueries != wantTaskQueries {
-		t.Fatalf("API Chat status task filter queries = %d, want %d; statements: %#v", taskQueries, wantTaskQueries, statements)
-	}
+	stats := env.IO.Snapshot()
+	require.Equal(t, 1, stats.APIChatStatusReads)
+	require.Equal(t, 1, stats.ExecutionReads)
+	require.Equal(t, wantTasks, stats.TaskMarkerReads)
+	require.Equal(t, wantTasks, stats.TaskReads)
 }
 
 func TestAPIChatMessageStatus_Failed(t *testing.T) {

@@ -4804,121 +4804,170 @@ func TestAutomationReconcilerSkipsExternalStateRefreshWhenLiveViewNotRecentlyOpe
 }
 
 func TestAutomationRuntimeNativeNotificationRequiresProducerActionEdge(t *testing.T) {
-	h := newAutomationSaveHarness(t, "Native notification producer authorization")
-	ctx := context.Background()
-	candidate, err := h.drafts.TemplateCandidate(AutomationAdapterNativeSDLC)
-	require.NoError(t, err)
-	candidate = automationCandidateWithoutEdge(candidate, "vision_to_notification")
-	saved, err := h.compiler.Save(ctx, AutomationSaveRequest{
-		ProjectID: h.project.ID, Source: "template", CreatedVia: "web", Candidate: candidate,
-	})
-	require.NoError(t, err)
+	for _, production := range []bool{false, true} {
+		name := "isolated"
+		if production {
+			name = "production"
+		}
+		t.Run(name, func(t *testing.T) {
+			var opts []teststores.Option
+			if production {
+				opts = append(opts, teststores.WithProductionTopology())
+			}
+			h := newAutomationSaveStoreHarnessWithOptions(t, opts, "Native notification producer authorization")
+			ctx := context.Background()
+			candidate, err := h.drafts.TemplateCandidate(AutomationAdapterNativeSDLC)
+			require.NoError(t, err)
+			candidate = automationCandidateWithoutEdge(candidate, "vision_to_notification")
+			saved, err := h.compiler.Save(ctx, AutomationSaveRequest{
+				ProjectID: h.project.ID, Source: "template", CreatedVia: "web", Candidate: candidate,
+			})
+			require.NoError(t, err)
 
-	alertRepo := h.stores.Alerts
-	alertSvc := NewAlertService(alertRepo, nil)
-	create := func(nodeKey, key string) (*models.Alert, error) {
-		node := automationNodeByKey(t, saved.Definition, nodeKey)
-		boundCtx := WithAutomationContext(ctx, models.AutomationContext{ProjectID: h.project.ID, Bindings: []models.AutomationBinding{{
-			AutomationID: saved.Definition.Automation.ID, VersionID: saved.Definition.Version.ID, NodeID: node.ID,
-		}}})
-		return alertSvc.CreateActionable(boundCtx, &models.Alert{
-			ProjectID: h.project.ID, Type: "suggestion", Title: nodeKey, IdempotencyKey: key,
+			alertRepo := h.stores.Alerts
+			alertSvc := NewAlertService(alertRepo, nil)
+			create := func(nodeKey, key string) (*models.Alert, error) {
+				node := automationNodeByKey(t, saved.Definition, nodeKey)
+				boundCtx := WithAutomationContext(ctx, models.AutomationContext{ProjectID: h.project.ID, Bindings: []models.AutomationBinding{{
+					AutomationID: saved.Definition.Automation.ID, VersionID: saved.Definition.Version.ID, NodeID: node.ID,
+				}}})
+				return alertSvc.CreateActionable(boundCtx, &models.Alert{
+					ProjectID: h.project.ID, Type: "suggestion", Title: nodeKey, IdempotencyKey: key,
+				})
+			}
+
+			_, err = create("vision_suggestions", "disconnected-native-producer")
+			require.ErrorContains(t, err, "not authorized")
+			require.Zero(t, nativeAlertCount(t, h.stores, h.project.ID, "disconnected-native-producer"))
+			require.Zero(t, nativeWorkCount(t, h.stores, storefixture.WorkItemMatch{AutomationID: saved.Definition.Automation.ID}))
+			require.Zero(t, nativeActivityCount(t, h.stores, storefixture.ActivityMatch{AutomationID: saved.Definition.Automation.ID}))
+			require.Zero(t, nativeTransitionCount(t, h.stores, storefixture.TransitionMatch{AutomationID: saved.Definition.Automation.ID}))
+
+			alert, err := create("bug_finder", "connected-native-producer")
+			require.NoError(t, err)
+			require.NotNil(t, alert)
+			require.Equal(t, 1, nativeAlertExists(t, h.stores, h.project.ID, alert.ID))
+			require.Equal(t, 1, nativeWorkCount(t, h.stores, storefixture.WorkItemMatch{AutomationID: saved.Definition.Automation.ID}))
+			require.Equal(t, 1, nativeActivityCount(t, h.stores, storefixture.ActivityMatch{AutomationID: saved.Definition.Automation.ID, Type: "create_notification"}))
+			require.Equal(t, 2, nativeTransitionCount(t, h.stores, storefixture.TransitionMatch{AutomationID: saved.Definition.Automation.ID}))
+			producer := automationNodeByKey(t, saved.Definition, "bug_finder")
+			notification := automationNodeByKey(t, saved.Definition, "notification")
+			approval := automationNodeByKey(t, saved.Definition, "approval")
+			requireAlertCreatedWaitingProjection(t, h.stores, h.project.ID, saved.Definition.Automation.ID, saved.Definition.Version.ID, alert.ID, producer.ID, notification.ID, approval.ID)
+			for _, scope := range []struct{ project, automation, version, alert string }{
+				{"foreign", saved.Definition.Automation.ID, saved.Definition.Version.ID, alert.ID},
+				{h.project.ID, "foreign", saved.Definition.Version.ID, alert.ID},
+				{h.project.ID, saved.Definition.Automation.ID, "foreign", alert.ID},
+				{h.project.ID, saved.Definition.Automation.ID, saved.Definition.Version.ID, "foreign"},
+			} {
+				_, err := h.stores.Fixtures.NativeAlertProjection(ctx, scope.project, scope.automation, scope.version, scope.alert)
+				require.Error(t, err)
+			}
+			keys := []string{"alert:" + alert.ID + ":created:notification", "alert:" + alert.ID + ":created:waiting"}
+			require.Equal(t, 2, nativeEventCount(t, h.stores, h.project.ID, saved.Definition.Automation.ID, keys))
+			require.Zero(t, nativeEventCount(t, h.stores, "foreign", saved.Definition.Automation.ID, keys))
+			require.Zero(t, nativeEventCount(t, h.stores, h.project.ID, "foreign", keys))
+			require.Zero(t, nativeEventCount(t, h.stores, h.project.ID, saved.Definition.Automation.ID, nil))
+			require.Zero(t, nativeEventCount(t, h.stores, h.project.ID, saved.Definition.Automation.ID, []string{"missing"}))
+
 		})
 	}
-
-	_, err = create("vision_suggestions", "disconnected-native-producer")
-	require.ErrorContains(t, err, "not authorized")
-	require.Zero(t, countRows(t, h.db, `SELECT COUNT(*) FROM alerts WHERE project_id = ? AND idempotency_key = ?`, h.project.ID, "disconnected-native-producer"))
-	require.Zero(t, countRows(t, h.db, `SELECT COUNT(*) FROM automation_work_items WHERE automation_id = ?`, saved.Definition.Automation.ID))
-	require.Zero(t, countRows(t, h.db, `SELECT COUNT(*) FROM automation_activities WHERE automation_id = ?`, saved.Definition.Automation.ID))
-	require.Zero(t, countRows(t, h.db, `SELECT COUNT(*) FROM automation_transitions WHERE automation_id = ?`, saved.Definition.Automation.ID))
-
-	alert, err := create("bug_finder", "connected-native-producer")
-	require.NoError(t, err)
-	require.NotNil(t, alert)
-	require.Equal(t, 1, countRows(t, h.db, `SELECT COUNT(*) FROM alerts WHERE id = ?`, alert.ID))
-	require.Equal(t, 1, countRows(t, h.db, `SELECT COUNT(*) FROM automation_work_items WHERE automation_id = ?`, saved.Definition.Automation.ID))
-	require.Equal(t, 1, countRows(t, h.db, `SELECT COUNT(*) FROM automation_activities WHERE automation_id = ? AND activity_type = 'create_notification'`, saved.Definition.Automation.ID))
-	require.Equal(t, 2, countRows(t, h.db, `SELECT COUNT(*) FROM automation_transitions WHERE automation_id = ?`, saved.Definition.Automation.ID))
-	producer := automationNodeByKey(t, saved.Definition, "bug_finder")
-	notification := automationNodeByKey(t, saved.Definition, "notification")
-	approval := automationNodeByKey(t, saved.Definition, "approval")
-	requireAlertCreatedWaitingProjection(t, h.db, h.project.ID, saved.Definition.Automation.ID, saved.Definition.Version.ID, alert.ID, producer.ID, notification.ID, approval.ID)
 }
 
-func requireAlertCreatedWaitingProjection(t *testing.T, db *sql.DB, projectID, automationID, versionID, alertID, producerNodeID, notificationNodeID, approvalNodeID string) {
+func requireAlertCreatedWaitingProjection(t *testing.T, env *teststores.Env, projectID, automationID, versionID, alertID, producerNodeID, notificationNodeID, approvalNodeID string) {
 	t.Helper()
-	var workItemID, kind string
-	require.NoError(t, db.QueryRow(`SELECT id, kind FROM automation_work_items
-		WHERE project_id = ? AND automation_id = ? AND origin_version_id = ? AND work_item_key = ?`,
-		projectID, automationID, versionID, "alert:"+alertID).Scan(&workItemID, &kind))
-	require.Equal(t, "suggestion", kind)
-
-	var activityID, activityNode string
-	var activityStatus models.AutomationActivityStatus
-	require.NoError(t, db.QueryRow(`SELECT id, node_id, status FROM automation_activities
-		WHERE project_id = ? AND automation_id = ? AND version_id = ? AND work_item_id = ?
-			AND activity_key = ? AND activity_type = 'create_notification'`,
-		projectID, automationID, versionID, workItemID, "alert:"+alertID+":create").Scan(&activityID, &activityNode, &activityStatus))
-	require.Equal(t, notificationNodeID, activityNode)
-	require.Equal(t, models.AutomationActivityCompleted, activityStatus)
-	require.Equal(t, 1, countRows(t, db, `SELECT COUNT(*) FROM automation_activity_resources
-		WHERE activity_id = ? AND resource_type = 'alert' AND resource_id = ?`, activityID, alertID))
-	require.Equal(t, 1, countRows(t, db, `SELECT COUNT(*) FROM automation_activities
-		WHERE project_id = ? AND automation_id = ? AND version_id = ? AND activity_key = ?`,
-		projectID, automationID, versionID, "alert:"+alertID+":create"))
-
-	type transitionRow struct {
-		eventKey   string
-		activityID sql.NullString
-		state      models.AutomationTransitionState
-		fromNode   sql.NullString
-		toNode     string
-	}
-	rows, err := db.Query(`SELECT event_key, activity_id, state, from_node_id, to_node_id
-		FROM automation_transitions
-		WHERE project_id = ? AND automation_id = ? AND version_id = ? AND work_item_id = ?
-			AND event_key IN (?, ?)
-		ORDER BY event_key`, projectID, automationID, versionID, workItemID,
-		"alert:"+alertID+":created:notification", "alert:"+alertID+":created:waiting")
+	p, err := env.Fixtures.NativeAlertProjection(t.Context(), projectID, automationID, versionID, alertID)
 	require.NoError(t, err)
-	defer rows.Close()
-	var transitions []transitionRow
-	for rows.Next() {
-		var value transitionRow
-		require.NoError(t, rows.Scan(&value.eventKey, &value.activityID, &value.state, &value.fromNode, &value.toNode))
-		transitions = append(transitions, value)
+	require.Equal(t, "suggestion", p.Kind)
+	require.Equal(t, notificationNodeID, p.ActivityNodeID)
+	require.Equal(t, models.AutomationActivityCompleted, p.ActivityStatus)
+	require.Equal(t, 1, p.ResourceCount)
+	require.Equal(t, 1, p.ActivityCount)
+	var transitions []models.AutomationTransition
+	for _, tr := range p.Transitions {
+		if tr.EventKey != "alert:"+alertID+":decision:approved" {
+			transitions = append(transitions, tr)
+		}
 	}
-	require.NoError(t, rows.Err())
 	require.Len(t, transitions, 2)
-	require.Equal(t, "alert:"+alertID+":created:notification", transitions[0].eventKey)
-	require.True(t, transitions[0].activityID.Valid)
-	require.Equal(t, activityID, transitions[0].activityID.String)
-	require.Equal(t, models.AutomationTransitionEntered, transitions[0].state)
-	require.True(t, transitions[0].fromNode.Valid)
-	require.Equal(t, producerNodeID, transitions[0].fromNode.String)
-	require.Equal(t, notificationNodeID, transitions[0].toNode)
-	require.Equal(t, "alert:"+alertID+":created:waiting", transitions[1].eventKey)
-	require.True(t, transitions[1].activityID.Valid)
-	require.Equal(t, activityID, transitions[1].activityID.String)
-	require.Equal(t, models.AutomationTransitionWaiting, transitions[1].state)
-	require.True(t, transitions[1].fromNode.Valid)
-	require.Equal(t, notificationNodeID, transitions[1].fromNode.String)
-	require.Equal(t, approvalNodeID, transitions[1].toNode)
+	require.Equal(t, "alert:"+alertID+":created:notification", transitions[0].EventKey)
+	require.Equal(t, p.ActivityID, transitions[0].ActivityID)
+	require.NotEmpty(t, transitions[0].ActivityID)
+	require.Equal(t, models.AutomationTransitionEntered, transitions[0].State)
+	require.Equal(t, producerNodeID, transitions[0].FromNodeID)
+	require.NotEmpty(t, transitions[0].FromNodeID)
+	require.Equal(t, notificationNodeID, transitions[0].ToNodeID)
+	require.Equal(t, "alert:"+alertID+":created:waiting", transitions[1].EventKey)
+	require.Equal(t, p.ActivityID, transitions[1].ActivityID)
+	require.NotEmpty(t, transitions[1].ActivityID)
+	require.Equal(t, models.AutomationTransitionWaiting, transitions[1].State)
+	require.Equal(t, notificationNodeID, transitions[1].FromNodeID)
+	require.NotEmpty(t, transitions[1].FromNodeID)
+	require.Equal(t, approvalNodeID, transitions[1].ToNodeID)
 }
-
-func requireAlertApprovedDecisionProjection(t *testing.T, db *sql.DB, projectID, automationID, versionID, alertID, approvalNodeID, inboxNodeID string) {
+func requireAlertApprovedDecisionProjection(t *testing.T, env *teststores.Env, projectID, automationID, versionID, alertID, approvalNodeID, inboxNodeID string) {
 	t.Helper()
-	var state models.AutomationTransitionState
-	var fromNode sql.NullString
-	var toNode string
-	require.NoError(t, db.QueryRow(`SELECT state, from_node_id, to_node_id FROM automation_transitions
-		WHERE project_id = ? AND automation_id = ? AND version_id = ? AND event_key = ?`,
-		projectID, automationID, versionID, "alert:"+alertID+":decision:"+string(models.AlertDecisionApproved)).Scan(&state, &fromNode, &toNode))
-	require.Equal(t, models.AutomationTransitionEntered, state)
-	require.True(t, fromNode.Valid)
-	require.Equal(t, approvalNodeID, fromNode.String)
-	require.Equal(t, inboxNodeID, toNode)
+	p, err := env.Fixtures.NativeAlertProjection(t.Context(), projectID, automationID, versionID, alertID)
+	require.NoError(t, err)
+	var transitions []models.AutomationTransition
+	for _, tr := range p.Transitions {
+		if tr.EventKey == "alert:"+alertID+":decision:approved" {
+			transitions = append(transitions, tr)
+		}
+	}
+	require.Len(t, transitions, 1)
+	require.Equal(t, models.AutomationTransitionEntered, transitions[0].State)
+	require.NotEmpty(t, transitions[0].FromNodeID)
+	require.Equal(t, approvalNodeID, transitions[0].FromNodeID)
+	require.Equal(t, inboxNodeID, transitions[0].ToNodeID)
+}
+func nativeWorkCount(t *testing.T, e *teststores.Env, m storefixture.WorkItemMatch) int {
+	t.Helper()
+	n, err := e.Fixtures.CountMatchingWorkItems(t.Context(), m)
+	require.NoError(t, err)
+	return n
+}
+func nativeActivityCount(t *testing.T, e *teststores.Env, m storefixture.ActivityMatch) int {
+	t.Helper()
+	n, err := e.Fixtures.CountMatchingActivities(t.Context(), m)
+	require.NoError(t, err)
+	return n
+}
+func nativeTransitionCount(t *testing.T, e *teststores.Env, m storefixture.TransitionMatch) int {
+	t.Helper()
+	n, err := e.Fixtures.CountMatchingTransitions(t.Context(), m)
+	require.NoError(t, err)
+	return n
+}
+func nativeVersionCount(t *testing.T, e *teststores.Env, p, a, v string) int {
+	t.Helper()
+	d, err := e.Automations.GetDefinitionVersion(t.Context(), p, a, v)
+	require.NoError(t, err)
+	if d == nil {
+		return 0
+	}
+	return 1
+}
+func nativeAlertCount(t *testing.T, e *teststores.Env, p, k string) int {
+	t.Helper()
+	n, err := e.Fixtures.CountAlertsWithIdempotencyKey(t.Context(), p, k)
+	require.NoError(t, err)
+	return n
+}
+func nativeAlertExists(t *testing.T, e *teststores.Env, p, id string) int {
+	t.Helper()
+	a, err := e.Alerts.GetByIDForProject(t.Context(), p, id)
+	require.NoError(t, err)
+	if a == nil {
+		return 0
+	}
+	return 1
+}
+func nativeEventCount(t *testing.T, e *teststores.Env, p, a string, keys []string) int {
+	t.Helper()
+	n, err := e.Fixtures.CountTransitionEvents(t.Context(), p, a, keys)
+	require.NoError(t, err)
+	return n
 }
 
 func TestAutomationRuntimeNativeInboxUsesConfiguredImplementationGoal(t *testing.T) {
@@ -4974,7 +5023,7 @@ func TestAutomationRuntimeNativeInboxUsesConfiguredImplementationGoal(t *testing
 }
 
 func TestAutomationRuntimeNativeNotificationCreationRepairsStaleProducerBindingAfterTemplateUpdate(t *testing.T) {
-	h := newAutomationSaveHarness(t, "Native stale producer notification")
+	h := newAutomationSaveStoreHarness(t, "Native stale producer notification")
 	ctx := context.Background()
 	candidate, err := h.drafts.TemplateCandidate(AutomationAdapterNativeSDLC)
 	require.NoError(t, err)
@@ -4993,7 +5042,7 @@ func TestAutomationRuntimeNativeNotificationCreationRepairsStaleProducerBindingA
 	second, err := h.compiler.Save(ctx, AutomationSaveRequest{ProjectID: h.project.ID, AutomationID: first.Definition.Automation.ID, Source: "template", CreatedVia: "web", Candidate: candidate})
 	require.NoError(t, err)
 	require.NotEqual(t, first.Definition.Version.ID, second.Definition.Version.ID)
-	require.Zero(t, countRows(t, h.db, `SELECT COUNT(*) FROM automation_versions WHERE id = ?`, first.Definition.Version.ID))
+	require.Zero(t, nativeVersionCount(t, h.stores, h.project.ID, first.Definition.Automation.ID, first.Definition.Version.ID))
 
 	alert, err := alertSvc.CreateActionable(staleCtx, &models.Alert{ProjectID: h.project.ID, Type: "product_suggestion", Title: "Stale Native finder result", SourceTaskID: &producerTaskID})
 	require.NoError(t, err)
@@ -5001,46 +5050,58 @@ func TestAutomationRuntimeNativeNotificationCreationRepairsStaleProducerBindingA
 	currentProducer := automationNodeByKey(t, second.Definition, "vision_suggestions")
 	currentNotification := automationNodeByKey(t, second.Definition, "notification")
 	currentApproval := automationNodeByKey(t, second.Definition, "approval")
-	requireAlertCreatedWaitingProjection(t, h.db, h.project.ID, second.Definition.Automation.ID, second.Definition.Version.ID, alert.ID, currentProducer.ID, currentNotification.ID, currentApproval.ID)
-	require.Zero(t, countRows(t, h.db, `SELECT COUNT(*) FROM automation_work_items WHERE origin_version_id = ?`, first.Definition.Version.ID))
+	requireAlertCreatedWaitingProjection(t, h.stores, h.project.ID, second.Definition.Automation.ID, second.Definition.Version.ID, alert.ID, currentProducer.ID, currentNotification.ID, currentApproval.ID)
+	require.Zero(t, nativeWorkCount(t, h.stores, storefixture.WorkItemMatch{VersionID: first.Definition.Version.ID}))
 }
 
 func TestAutomationRuntimeNativeNotificationCreationReusesIdempotencyKeyAfterGraphReplacement(t *testing.T) {
-	h := newAutomationSaveHarness(t, "Native producer idempotency replacement")
-	ctx := context.Background()
-	candidate := customNativeMailboxCandidate("Native producer idempotency replacement")
-	first, err := h.compiler.Save(ctx, AutomationSaveRequest{ProjectID: h.project.ID, Source: "manual", CreatedVia: "web", Candidate: candidate})
-	require.NoError(t, err)
+	for _, production := range []bool{false, true} {
+		name := "isolated"
+		if production {
+			name = "production"
+		}
+		t.Run(name, func(t *testing.T) {
+			var opts []teststores.Option
+			if production {
+				opts = append(opts, teststores.WithProductionTopology())
+			}
+			h := newAutomationSaveStoreHarnessWithOptions(t, opts, "Native producer idempotency replacement")
+			ctx := context.Background()
+			candidate := customNativeMailboxCandidate("Native producer idempotency replacement")
+			first, err := h.compiler.Save(ctx, AutomationSaveRequest{ProjectID: h.project.ID, Source: "manual", CreatedVia: "web", Candidate: candidate})
+			require.NoError(t, err)
 
-	alertRepo := h.stores.Alerts
-	alertSvc := NewAlertService(alertRepo, nil)
-	createFromProducer := func(definition *models.AutomationDefinition, title string) (*models.Alert, error) {
-		producer := automationNodeByKey(t, definition, "custom_producer")
-		producerCtx := WithAutomationContext(ctx, models.AutomationContext{ProjectID: h.project.ID, Bindings: []models.AutomationBinding{{
-			AutomationID: definition.Automation.ID, VersionID: definition.Version.ID, NodeID: producer.ID,
-		}}})
-		return alertSvc.CreateActionable(producerCtx, &models.Alert{ProjectID: h.project.ID, Type: "suggestion", Title: title, IdempotencyKey: "native-reused-after-save"})
+			alertRepo := h.stores.Alerts
+			alertSvc := NewAlertService(alertRepo, nil)
+			createFromProducer := func(definition *models.AutomationDefinition, title string) (*models.Alert, error) {
+				producer := automationNodeByKey(t, definition, "custom_producer")
+				producerCtx := WithAutomationContext(ctx, models.AutomationContext{ProjectID: h.project.ID, Bindings: []models.AutomationBinding{{
+					AutomationID: definition.Automation.ID, VersionID: definition.Version.ID, NodeID: producer.ID,
+				}}})
+				return alertSvc.CreateActionable(producerCtx, &models.Alert{ProjectID: h.project.ID, Type: "suggestion", Title: title, IdempotencyKey: "native-reused-after-save"})
+			}
+			firstAlert, err := createFromProducer(first.Definition, "Original Native finding")
+			require.NoError(t, err)
+
+			candidate.Description = "Updated without changing the logical mailbox."
+			second, err := h.compiler.Save(ctx, AutomationSaveRequest{ProjectID: h.project.ID, AutomationID: first.Definition.Automation.ID, Source: "manual", CreatedVia: "web", Candidate: candidate})
+			require.NoError(t, err)
+			require.NotEqual(t, first.Definition.Version.ID, second.Definition.Version.ID)
+			secondAlert, err := createFromProducer(second.Definition, "Reworded Native finding")
+			require.NoError(t, err)
+			require.Equal(t, firstAlert.ID, secondAlert.ID)
+			require.Equal(t, 1, nativeAlertCount(t, h.stores, h.project.ID, "native-reused-after-save"))
+
+			currentProducer := automationNodeByKey(t, second.Definition, "custom_producer")
+			currentNotification := automationNodeByKey(t, second.Definition, "custom_notification")
+			currentApproval := automationNodeByKey(t, second.Definition, "custom_approval")
+			requireAlertCreatedWaitingProjection(t, h.stores, h.project.ID, second.Definition.Automation.ID, second.Definition.Version.ID, firstAlert.ID, currentProducer.ID, currentNotification.ID, currentApproval.ID)
+		})
 	}
-	firstAlert, err := createFromProducer(first.Definition, "Original Native finding")
-	require.NoError(t, err)
-
-	candidate.Description = "Updated without changing the logical mailbox."
-	second, err := h.compiler.Save(ctx, AutomationSaveRequest{ProjectID: h.project.ID, AutomationID: first.Definition.Automation.ID, Source: "manual", CreatedVia: "web", Candidate: candidate})
-	require.NoError(t, err)
-	require.NotEqual(t, first.Definition.Version.ID, second.Definition.Version.ID)
-	secondAlert, err := createFromProducer(second.Definition, "Reworded Native finding")
-	require.NoError(t, err)
-	require.Equal(t, firstAlert.ID, secondAlert.ID)
-	require.Equal(t, 1, countRows(t, h.db, `SELECT COUNT(*) FROM alerts WHERE project_id = ? AND idempotency_key = ?`, h.project.ID, "native-reused-after-save"))
-
-	currentProducer := automationNodeByKey(t, second.Definition, "custom_producer")
-	currentNotification := automationNodeByKey(t, second.Definition, "custom_notification")
-	currentApproval := automationNodeByKey(t, second.Definition, "custom_approval")
-	requireAlertCreatedWaitingProjection(t, h.db, h.project.ID, second.Definition.Automation.ID, second.Definition.Version.ID, firstAlert.ID, currentProducer.ID, currentNotification.ID, currentApproval.ID)
 }
 
 func TestAutomationRuntimeNativeNotificationCreationAllowsDistinctIdempotencyKeys(t *testing.T) {
-	h := newAutomationSaveHarness(t, "Native producer distinct idempotency keys")
+	h := newAutomationSaveStoreHarness(t, "Native producer distinct idempotency keys")
 	ctx := context.Background()
 	candidate := customNativeMailboxCandidate("Native producer distinct idempotency keys")
 	definition, err := h.compiler.Save(ctx, AutomationSaveRequest{ProjectID: h.project.ID, Source: "manual", CreatedVia: "web", Candidate: candidate})
@@ -5058,7 +5119,7 @@ func TestAutomationRuntimeNativeNotificationCreationAllowsDistinctIdempotencyKey
 	second, err := alertSvc.CreateActionable(producerCtx, &models.Alert{ProjectID: h.project.ID, Type: "suggestion", Title: "Second Native finding", IdempotencyKey: "native-distinct-two"})
 	require.NoError(t, err)
 	require.NotEqual(t, first.ID, second.ID)
-	require.Equal(t, 2, countRows(t, h.db, `SELECT COUNT(*) FROM alerts WHERE project_id = ? AND idempotency_key IN ('native-distinct-one', 'native-distinct-two')`, h.project.ID))
+	require.Equal(t, 2, nativeAlertCount(t, h.stores, h.project.ID, "native-distinct-one")+nativeAlertCount(t, h.stores, h.project.ID, "native-distinct-two"))
 }
 
 func TestAutomationRuntimeNativeExistingNotificationListScopesToAutomationOwnership(t *testing.T) {
@@ -5111,7 +5172,7 @@ func TestAutomationRuntimeNativeExistingNotificationListScopesToAutomationOwners
 }
 
 func TestAutomationRuntimeNativeInboxOwnershipSurvivesCompatibleAutomationUpdate(t *testing.T) {
-	h := newAutomationSaveHarness(t, "Native ownership replacement")
+	h := newAutomationSaveStoreHarness(t, "Native ownership replacement")
 	ctx := context.Background()
 	candidate := customNativeMailboxCandidate("Native ownership replacement")
 	first, err := h.compiler.Save(ctx, AutomationSaveRequest{ProjectID: h.project.ID, Source: "manual", CreatedVia: "web", Candidate: candidate})
@@ -5125,21 +5186,17 @@ func TestAutomationRuntimeNativeInboxOwnershipSurvivesCompatibleAutomationUpdate
 	}}})
 	alert, err := alertSvc.CreateActionable(producerCtx, &models.Alert{ProjectID: h.project.ID, Type: "suggestion", Title: "Survive Native edit", IdempotencyKey: "survive-native-edit"})
 	require.NoError(t, err)
-	var producerKey, actionKey, gateKey, mailboxKey string
-	require.NoError(t, h.db.QueryRow(`SELECT producer_node_key, action_node_key, gate_node_key, mailbox_node_key
-		FROM automation_artifact_mailbox_owners WHERE project_id = ? AND automation_id = ? AND artifact_type = 'alert' AND artifact_id = ?`,
-		h.project.ID, first.Definition.Automation.ID, alert.ID).Scan(&producerKey, &actionKey, &gateKey, &mailboxKey))
-	require.Empty(t, producerKey)
-	require.Empty(t, actionKey)
-	require.Empty(t, gateKey)
-	require.Empty(t, mailboxKey)
+	keys, err := h.stores.Fixtures.NativeMailboxKeys(ctx, h.project.ID, first.Definition.Automation.ID, alert.ID)
+	require.NoError(t, err)
+	require.Equal(t, storefixture.NativeMailboxKeys{}, keys)
+
 	require.NoError(t, alertSvc.SetDecision(ctx, h.project.ID, alert.ID, models.AlertDecisionApproved))
 
 	candidate.Description = "Updated configuration with the same logical mailbox."
 	second, err := h.compiler.Save(ctx, AutomationSaveRequest{ProjectID: h.project.ID, AutomationID: first.Definition.Automation.ID, Source: "manual", CreatedVia: "web", Candidate: candidate})
 	require.NoError(t, err)
 	require.NotEqual(t, first.Definition.Version.ID, second.Definition.Version.ID)
-	require.Equal(t, 0, countRows(t, h.db, `SELECT COUNT(*) FROM automation_versions WHERE id = ?`, first.Definition.Version.ID), "Save must still delete the replaced graph revision")
+	require.Equal(t, 0, nativeVersionCount(t, h.stores, h.project.ID, first.Definition.Automation.ID, first.Definition.Version.ID), "Save must still delete the replaced graph revision")
 
 	inbox := automationNodeByKey(t, second.Definition, "custom_approved_inbox")
 	inboxCtx := WithAutomationContext(ctx, models.AutomationContext{ProjectID: h.project.ID, Bindings: []models.AutomationBinding{{
@@ -5165,8 +5222,8 @@ func TestAutomationRuntimeNativeInboxOwnershipSurvivesCompatibleAutomationUpdate
 	currentProducer := automationNodeByKey(t, second.Definition, "custom_producer")
 	currentNotification := automationNodeByKey(t, second.Definition, "custom_notification")
 	currentApproval := automationNodeByKey(t, second.Definition, "custom_approval")
-	requireAlertCreatedWaitingProjection(t, h.db, h.project.ID, second.Definition.Automation.ID, second.Definition.Version.ID, alert.ID, currentProducer.ID, currentNotification.ID, currentApproval.ID)
-	requireAlertApprovedDecisionProjection(t, h.db, h.project.ID, second.Definition.Automation.ID, second.Definition.Version.ID, alert.ID, currentApproval.ID, inbox.ID)
+	requireAlertCreatedWaitingProjection(t, h.stores, h.project.ID, second.Definition.Automation.ID, second.Definition.Version.ID, alert.ID, currentProducer.ID, currentNotification.ID, currentApproval.ID)
+	requireAlertApprovedDecisionProjection(t, h.stores, h.project.ID, second.Definition.Automation.ID, second.Definition.Version.ID, alert.ID, currentApproval.ID, inbox.ID)
 }
 
 func customGitHubMailboxCandidate(name string) models.AutomationDraftCandidate {
@@ -5245,7 +5302,7 @@ func TestAutomationRuntimeGitHubInboxOwnershipSurvivesCompatibleAutomationUpdate
 }
 
 func TestAutomationRuntimeNativeInboxOwnershipMovesToCurrentRenamedMailbox(t *testing.T) {
-	h := newAutomationSaveHarness(t, "Renamed Native mailbox")
+	h := newAutomationSaveStoreHarness(t, "Renamed Native mailbox")
 	ctx := context.Background()
 	candidate := customNativeMailboxCandidate("Renamed Native mailbox")
 	first, err := h.compiler.Save(ctx, AutomationSaveRequest{ProjectID: h.project.ID, Source: "manual", CreatedVia: "web", Candidate: candidate})
@@ -5290,12 +5347,12 @@ func TestAutomationRuntimeNativeInboxOwnershipMovesToCurrentRenamedMailbox(t *te
 	currentProducer := automationNodeByKey(t, second.Definition, "custom_producer")
 	currentNotification := automationNodeByKey(t, second.Definition, "custom_notification")
 	currentApproval := automationNodeByKey(t, second.Definition, "custom_approval")
-	requireAlertCreatedWaitingProjection(t, h.db, h.project.ID, second.Definition.Automation.ID, second.Definition.Version.ID, alert.ID, currentProducer.ID, currentNotification.ID, currentApproval.ID)
-	requireAlertApprovedDecisionProjection(t, h.db, h.project.ID, second.Definition.Automation.ID, second.Definition.Version.ID, alert.ID, currentApproval.ID, inbox.ID)
+	requireAlertCreatedWaitingProjection(t, h.stores, h.project.ID, second.Definition.Automation.ID, second.Definition.Version.ID, alert.ID, currentProducer.ID, currentNotification.ID, currentApproval.ID)
+	requireAlertApprovedDecisionProjection(t, h.stores, h.project.ID, second.Definition.Automation.ID, second.Definition.Version.ID, alert.ID, currentApproval.ID, inbox.ID)
 }
 
 func TestAutomationRuntimeCustomNativeInboxRequiresSameAutomationOwnership(t *testing.T) {
-	h := newAutomationSaveHarness(t, "Scoped Native runtime")
+	h := newAutomationSaveStoreHarness(t, "Scoped Native runtime")
 	ctx := context.Background()
 	first, err := h.compiler.Save(ctx, AutomationSaveRequest{ProjectID: h.project.ID, Source: "manual", CreatedVia: "web", Candidate: customNativeMailboxCandidate("First Native mailbox")})
 	require.NoError(t, err)
@@ -5373,16 +5430,12 @@ func TestAutomationRuntimeCustomNativeInboxRequiresSameAutomationOwnership(t *te
 	require.ErrorContains(t, err, "not owned by this Automation inbox")
 	_, err = handlers["claim_alert"](inboxCtx, json.RawMessage(`{"alert_id":"`+forgedAlert.ID+`","lease_seconds":60}`))
 	require.ErrorContains(t, err, "not owned by this Automation inbox")
-	require.Zero(t, countRows(t, h.db, `SELECT COUNT(*) FROM automation_transitions
-		WHERE project_id = ? AND automation_id = ? AND event_key IN (?, ?)`, h.project.ID, first.Definition.Automation.ID,
-		"alert:"+secondAlert.ID+":created:notification", "alert:"+secondAlert.ID+":created:waiting"))
-	require.Zero(t, countRows(t, h.db, `SELECT COUNT(*) FROM automation_transitions
-		WHERE project_id = ? AND automation_id = ? AND event_key IN (?, ?)`, h.project.ID, first.Definition.Automation.ID,
-		"alert:"+forgedAlert.ID+":created:notification", "alert:"+forgedAlert.ID+":created:waiting"))
+	require.Zero(t, nativeEventCount(t, h.stores, h.project.ID, first.Definition.Automation.ID, []string{"alert:" + secondAlert.ID + ":created:notification", "alert:" + secondAlert.ID + ":created:waiting"}))
+	require.Zero(t, nativeEventCount(t, h.stores, h.project.ID, first.Definition.Automation.ID, []string{"alert:" + forgedAlert.ID + ":created:notification", "alert:" + forgedAlert.ID + ":created:waiting"}))
 }
 
 func TestAutomationRuntimeCustomNativeMailboxUsesRoleTopologyInsteadOfMaintainedNodeKeys(t *testing.T) {
-	h := newAutomationSaveHarness(t, "Custom Native runtime")
+	h := newAutomationSaveStoreHarness(t, "Custom Native runtime")
 	ctx := context.Background()
 	saved, err := h.compiler.Save(ctx, AutomationSaveRequest{ProjectID: h.project.ID, Source: "manual", CreatedVia: "web", Candidate: customNativeMailboxCandidate("Custom Native runtime")})
 	require.NoError(t, err)
@@ -5405,7 +5458,7 @@ func TestAutomationRuntimeCustomNativeMailboxUsesRoleTopologyInsteadOfMaintained
 	require.Len(t, taskContext.Bindings, 1)
 	require.Equal(t, implementationNode.ID, taskContext.Bindings[0].NodeID)
 	for _, edgeKey := range []string{"custom_approval_inbox", "custom_inbox_implementation"} {
-		require.Equal(t, 1, countRows(t, h.db, `SELECT COUNT(*) FROM automation_transitions tr JOIN automation_edges e ON e.id = tr.edge_id WHERE tr.automation_id = ? AND e.edge_key = ?`, saved.Definition.Automation.ID, edgeKey))
+		require.Equal(t, 1, nativeTransitionCount(t, h.stores, storefixture.TransitionMatch{AutomationID: saved.Definition.Automation.ID, EdgeKey: edgeKey}))
 	}
 }
 
@@ -5419,7 +5472,7 @@ func TestAutomationRuntimeReducedNativeApprovalBranchesEndAtGate(t *testing.T) {
 		{name: "approval without inbox branch", decision: models.AlertDecisionApproved, removeKeys: []string{"inbox", "implementation", "completed"}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			h := newAutomationSaveHarness(t, "Reduced Native decision")
+			h := newAutomationSaveStoreHarness(t, "Reduced Native decision")
 			ctx := context.Background()
 			candidate, err := h.drafts.TemplateCandidate(AutomationAdapterNativeSDLC)
 			require.NoError(t, err)
@@ -5442,7 +5495,7 @@ func TestAutomationRuntimeReducedNativeApprovalBranchesEndAtGate(t *testing.T) {
 			stored, err := alertSvc.GetByID(ctx, h.project.ID, alert.ID)
 			require.NoError(t, err)
 			require.Equal(t, test.decision, stored.DecisionState)
-			require.Equal(t, 1, countRows(t, h.db, `SELECT COUNT(*) FROM automation_work_items WHERE automation_id = ? AND status = 'completed'`, saved.Definition.Automation.ID))
+			require.Equal(t, 1, nativeWorkCount(t, h.stores, storefixture.WorkItemMatch{AutomationID: saved.Definition.Automation.ID, Status: "completed"}))
 		})
 	}
 }

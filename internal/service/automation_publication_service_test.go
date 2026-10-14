@@ -2,7 +2,7 @@ package service
 
 import (
 	"context"
-	"database/sql"
+
 	"encoding/json"
 	"strings"
 	"testing"
@@ -18,7 +18,6 @@ import (
 
 type automationSaveHarness struct {
 	stores         *teststores.Env
-	db             *sql.DB
 	project        models.Project
 	automationRepo persistence.AutomationStore
 	taskRepo       persistence.TaskStore
@@ -37,13 +36,6 @@ func (s *recordingAutomationTaskService) SubmitSavedAutomationTask(task models.T
 	s.submitted = append(s.submitted, task)
 }
 
-func newAutomationSaveHarness(t *testing.T, name string) automationSaveHarness {
-	t.Helper()
-	db := teststores.NewDB(t)
-	h := buildAutomationSaveHarness(t, &teststores.Env{Stores: teststores.Of(db)}, name)
-	h.db = db
-	return h
-}
 func newAutomationSaveStoreHarness(t *testing.T, name string) automationSaveHarness {
 	t.Helper()
 	return buildAutomationSaveHarness(t, teststores.New(t), name)
@@ -1905,18 +1897,6 @@ func automationResourceID(t *testing.T, definition *models.AutomationDefinition,
 	}
 	require.FailNow(t, "Automation resource not found", nodeKey+"/"+resourceType)
 	return ""
-}
-
-func tableCountWhere(t *testing.T, db *sql.DB, table, column, value string) int {
-	t.Helper()
-	return countRows(t, db, "SELECT COUNT(*) FROM "+table+" WHERE "+column+" = ?", value)
-}
-
-func countRows(t *testing.T, db *sql.DB, query string, args ...any) int {
-	t.Helper()
-	var count int
-	require.NoError(t, db.QueryRow(query, args...).Scan(&count))
-	return count
 }
 
 func automationStateForTest(t *testing.T, env *teststores.Env) storefixture.AutomationStateCounts {
