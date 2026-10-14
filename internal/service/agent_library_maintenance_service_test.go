@@ -228,10 +228,16 @@ lifecycle_hooks:
 }
 
 func TestAgentLibraryMaintenanceService_WarmSyncSkipsUnchangedDeclarationContent(t *testing.T) {
+	t.Run("isolated", func(t *testing.T) { testWarmDeclarationSync(t) })
+	t.Run("production", func(t *testing.T) { testWarmDeclarationSync(t, teststores.WithProductionTopology()) })
+}
+
+func testWarmDeclarationSync(t *testing.T, options ...teststores.Option) {
+	t.Helper()
 	ctx := context.Background()
-	db := teststores.NewDB(t)
-	agentRepo := teststores.Of(db).Agents
-	lifecycleRepo := teststores.Of(db).Lifecycle
+	db := teststores.New(t, options...)
+	agentRepo := db.Agents
+	lifecycleRepo := db.Lifecycle
 	root := t.TempDir()
 	writeDeclaration := func(key, name string) {
 		t.Helper()
@@ -254,23 +260,10 @@ func TestAgentLibraryMaintenanceService_WarmSyncSkipsUnchangedDeclarationContent
 	if cold.ContentReads != 3 || cold.Parses != 3 {
 		t.Fatalf("expected cold reads/parses for one ordinary and two protected declarations, got %#v", cold)
 	}
-	if _, err := db.Exec(`
-		CREATE TEMP TABLE declaration_write_counts (kind TEXT NOT NULL);
-		CREATE TEMP TRIGGER count_agent_updates AFTER UPDATE ON agents BEGIN
-			INSERT INTO declaration_write_counts(kind) VALUES ('agent_update');
-		END;
-		CREATE TEMP TRIGGER count_hook_inserts AFTER INSERT ON agent_lifecycle_hooks BEGIN
-			INSERT INTO declaration_write_counts(kind) VALUES ('hook_insert');
-		END;
-		CREATE TEMP TRIGGER count_hook_updates AFTER UPDATE ON agent_lifecycle_hooks BEGIN
-			INSERT INTO declaration_write_counts(kind) VALUES ('hook_update');
-		END;
-		CREATE TEMP TRIGGER count_hook_deletes AFTER DELETE ON agent_lifecycle_hooks BEGIN
-			INSERT INTO declaration_write_counts(kind) VALUES ('hook_delete');
-		END;
-	`); err != nil {
+	if err := db.Fixtures.ObserveAgentDeclarationWrites(ctx); err != nil {
 		t.Fatalf("install declaration write instrumentation: %v", err)
 	}
+
 	if err := svc.SyncRootDeclarations(ctx, ""); err != nil {
 		t.Fatalf("warm SyncRootDeclarations: %v", err)
 	}
@@ -278,8 +271,8 @@ func TestAgentLibraryMaintenanceService_WarmSyncSkipsUnchangedDeclarationContent
 	if warm != cold {
 		t.Fatalf("unchanged warm sync performed content I/O: cold=%#v warm=%#v", cold, warm)
 	}
-	var writes int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM declaration_write_counts`).Scan(&writes); err != nil {
+	writes, err := db.Fixtures.AgentDeclarationWrites(ctx)
+	if err != nil {
 		t.Fatalf("count declaration writes: %v", err)
 	}
 	if writes != 0 {
@@ -297,6 +290,10 @@ func TestAgentLibraryMaintenanceService_WarmSyncSkipsUnchangedDeclarationContent
 	}
 	if err := svc.SyncRootDeclarations(ctx, ""); err != nil {
 		t.Fatalf("changed SyncRootDeclarations: %v", err)
+	}
+	writes, err = db.Fixtures.AgentDeclarationWrites(ctx)
+	if err != nil || writes == 0 {
+		t.Fatalf("changed declaration must produce observed durable writes: writes=%d err=%v", writes, err)
 	}
 	changed := svc.DeclarationSyncMetrics()
 	if changed.ContentReads != warm.ContentReads+1 || changed.Parses != warm.Parses+1 {
