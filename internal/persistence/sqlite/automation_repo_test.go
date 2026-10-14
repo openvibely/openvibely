@@ -32,9 +32,6 @@ func TestAutomationRepoPublishRegisteredAndQuerySurfaces(t *testing.T) {
 	}
 
 	repo := NewAutomationRepo(db)
-	if repo.DB() != db {
-		t.Fatal("DB should expose the backing database")
-	}
 	publication := models.AutomationRegisteredPublication{
 		ProjectID:      projectID,
 		StableKey:      "registered/nightly",

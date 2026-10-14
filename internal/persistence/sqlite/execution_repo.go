@@ -28,13 +28,6 @@ func (r *ExecutionRepo) SetAutomationRepo(repo *AutomationRepo) {
 	r.automationRepo = repo
 }
 
-func (r *ExecutionRepo) DB() *sql.DB {
-	if r == nil {
-		return nil
-	}
-	return r.db
-}
-
 const executionOutputSelect = `COALESCE(executions.output, '') || COALESCE((
 		SELECT group_concat(output, '') FROM (
 			SELECT output FROM execution_output_chunks WHERE execution_id = executions.id ORDER BY id
