@@ -1685,12 +1685,16 @@ func TestThinkingCSS_UsesReadableLightThemeForegrounds(t *testing.T) {
 		`[data-theme="light"] .stream-thinking .stream-thinking-body {`,
 		"color: var(--ov-l-text);",
 		`.stream-thinking summary:focus-visible {`,
-		"outline: 2px solid var(--ov-link-color);",
+		"outline: 1px solid oklch(var(--bc) / .5);",
 	} {
 		if !strings.Contains(html, fragment) {
 			t.Errorf("expected readable light thinking CSS fragment %q", fragment)
 		}
 	}
+	if !strings.Contains(strings.Join(strings.Fields(html), " "), `.stream-thinking summary:focus-visible { outline: 1px solid oklch(var(--bc) / .5); outline-offset: 2px;`) {
+		t.Error("expected thin neutral focus outline on .stream-thinking summary")
+	}
+
 }
 
 func TestToolOutputToggleCSS_UsesCompactThemeSafeColorWithoutRestylingContainer(t *testing.T) {
@@ -1723,7 +1727,7 @@ func TestToolOutputToggleCSS_UsesCompactThemeSafeColorWithoutRestylingContainer(
 		"font-weight: 500;",
 		"transition: background-color 120ms ease, color 120ms ease;",
 		".stream-tool-output-toggle:focus-visible {",
-		"outline: 2px solid var(--ov-link-color);",
+		"outline: 1px solid oklch(var(--bc) / .5);",
 	}
 	for _, fragment := range expected {
 		if !strings.Contains(html, fragment) {
@@ -1734,6 +1738,10 @@ func TestToolOutputToggleCSS_UsesCompactThemeSafeColorWithoutRestylingContainer(
 	if strings.Contains(html, ".stream-tool-output-container") {
 		t.Error("tool output toggle styling must use the original tool container without adding a new surface")
 	}
+	if !strings.Contains(strings.Join(strings.Fields(html), " "), `.stream-tool-output-toggle:focus-visible { outline: 1px solid oklch(var(--bc) / .5); outline-offset: 2px;`) {
+		t.Error("expected thin neutral focus outline on .stream-tool-output-toggle")
+	}
+
 }
 
 func TestToolOutputCSS_UsesBoundedResponsiveScrollableContainer(t *testing.T) {
