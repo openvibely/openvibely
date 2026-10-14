@@ -19,8 +19,8 @@ import (
 	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
-	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/service"
+	"github.com/openvibely/openvibely/internal/testutil/teststores"
 	"github.com/openvibely/openvibely/web/static"
 	"github.com/openvibely/openvibely/web/templates/components"
 	"github.com/openvibely/openvibely/web/templates/pages"
@@ -41,12 +41,11 @@ func TestAutomationClaimsRefreshCapacityQueuedBoardThroughLiveEventsInChrome(t *
 
 	for _, trigger := range []string{"scheduled", "manual"} {
 		t.Run(trigger, func(t *testing.T) {
-			tc := NewTestContext(t)
-			ctx := context.Background()
 			broadcaster := events.NewBroadcaster()
-			tc.handler.broadcaster = broadcaster
+			stores := teststores.New(t, teststores.WithBroadcaster(broadcaster))
+			tc := testContextFromHandler(t, wireTestHandler(t, stores.Stores, testHandlerOptions{taskGoals: true, broadcaster: broadcaster}), stores)
+			ctx := context.Background()
 			automationRepo := tc.stores.Automations
-			automationRepo.(*sqlite.AutomationRepo).SetBroadcaster(broadcaster)
 
 			project := models.Project{Name: "Automation " + trigger + " live board"}
 			if err := tc.projectRepo.Create(ctx, &project); err != nil {
@@ -74,11 +73,14 @@ func TestAutomationClaimsRefreshCapacityQueuedBoardThroughLiveEventsInChrome(t *
 			decoy := createAutomationLiveBoardTask(t, ctx, tc.taskRepo, project.ID, "Project-scoped decoy", models.CategoryScheduled)
 			ordinary := createAutomationLiveBoardTask(t, ctx, tc.taskRepo, project.ID, "Ordinary future schedule", models.CategoryScheduled)
 			failed := createAutomationLiveBoardTask(t, ctx, tc.taskRepo, project.ID, "Terminal failed Automation", models.CategoryCompleted)
-			if _, err := tc.db.ExecContext(ctx, `UPDATE tasks SET status = 'failed', completed_at = CURRENT_TIMESTAMP WHERE id = ?`, failed.ID); err != nil {
+			if err := stores.Fixtures.SetTaskStatus(ctx, failed.ID, models.StatusFailed); err != nil {
 				t.Fatalf("terminalize failed fixture: %v", err)
 			}
+			if err := stores.Fixtures.SetTaskCompletedAt(ctx, failed.ID, time.Now().UTC()); err != nil {
+				t.Fatal(err)
+			}
 			cancelled := createAutomationLiveBoardTask(t, ctx, tc.taskRepo, project.ID, "Terminal cancelled Automation", models.CategoryBacklog)
-			if _, err := tc.db.ExecContext(ctx, `UPDATE tasks SET status = 'cancelled' WHERE id = ?`, cancelled.ID); err != nil {
+			if err := stores.Fixtures.SetTaskStatus(ctx, cancelled.ID, models.StatusCancelled); err != nil {
 				t.Fatalf("terminalize cancelled fixture: %v", err)
 			}
 
@@ -95,7 +97,7 @@ func TestAutomationClaimsRefreshCapacityQueuedBoardThroughLiveEventsInChrome(t *
 				_, _ = w.Write(htmxJS)
 			})
 			mux.HandleFunc("/foreign-event", func(w http.ResponseWriter, _ *http.Request) {
-				if err := tc.taskRepo.UpdateCategory(ctx, decoy.ID, models.CategoryActive); err != nil {
+				if err := stores.Fixtures.SetTaskCategory(ctx, decoy.ID, models.CategoryActive); err != nil {
 					t.Fatalf("make decoy board-visible: %v", err)
 				}
 				broadcaster.Publish(events.TaskEvent{Type: events.TaskBoardUpdated, ProjectID: "foreign-project", TaskID: decoy.ID})
@@ -198,13 +200,12 @@ func TestAutomationRunNowSupersedesFailedLiveStateAcrossRefreshAndReloadInChrome
 		t.Fatalf("read pinned HTMX fixture: %v", err)
 	}
 
-	tc := NewTestContext(t)
-	ctx := context.Background()
 	broadcaster := events.NewBroadcaster()
-	tc.handler.broadcaster = broadcaster
+	stores := teststores.New(t, teststores.WithBroadcaster(broadcaster))
+	tc := testContextFromHandler(t, wireTestHandler(t, stores.Stores, testHandlerOptions{taskGoals: true, broadcaster: broadcaster}), stores)
+	ctx := context.Background()
 	project := tc.CreateProject().WithName("Automation failed Run now freshness").Build()
 	automationRepo := tc.stores.Automations
-	automationRepo.(*sqlite.AutomationRepo).SetBroadcaster(broadcaster)
 	registration := service.NewAutomationRegistrationService(automationRepo, service.NewAutomationAdapterRegistry())
 	lifecycle := service.NewAutomationLifecycleService(automationRepo, tc.scheduleRepo)
 	tc.handler.SetAutomationServices(service.NewAutomationGraphService(automationRepo), registration)
@@ -230,12 +231,11 @@ func TestAutomationRunNowSupersedesFailedLiveStateAcrossRefreshAndReloadInChrome
 	if triggerNode == nil {
 		t.Fatal("vision_suggestions trigger node not found")
 	}
-	if _, err := tc.db.ExecContext(ctx, `INSERT INTO automation_invocations
-		(id, project_id, automation_id, version_id, trigger_node_id, trigger_resource_type, trigger_resource_id, occurrence_key, status, started_at, completed_at)
-		VALUES ('browser-previous-failure', ?, ?, ?, ?, 'manual', ?, 'manual:browser-previous-failure', 'failed', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
-		project.ID, definition.Automation.ID, definition.Version.ID, triggerNode.ID, schedule.ID); err != nil {
-		t.Fatalf("insert prior failed invocation: %v", err)
+	completedAt := time.Now().UTC()
+	if err := stores.Fixtures.SeedAutomationInvocation(ctx, models.AutomationInvocation{ID: "browser-previous-failure", ProjectID: project.ID, AutomationID: definition.Automation.ID, VersionID: definition.Version.ID, TriggerNodeID: triggerNode.ID, TriggerResourceType: "manual", TriggerResourceID: schedule.ID, OccurrenceKey: "manual:browser-previous-failure", Status: "failed", CompletedAt: &completedAt}); err != nil {
+		t.Fatal(err)
 	}
+
 	if _, _, err := automationRepo.RecordProjectionEvent(ctx, persistence.AutomationProjectionEvent{
 		Context: models.AutomationContext{ProjectID: project.ID},
 		Binding: models.AutomationBinding{AutomationID: definition.Automation.ID, VersionID: definition.Version.ID,
@@ -245,7 +245,7 @@ func TestAutomationRunNowSupersedesFailedLiveStateAcrossRefreshAndReloadInChrome
 	}); err != nil {
 		t.Fatalf("record prior failed projection: %v", err)
 	}
-	if _, err := tc.db.ExecContext(ctx, `UPDATE tasks SET status = 'failed' WHERE id = ?`, task.ID); err != nil {
+	if err := stores.Fixtures.SetTaskStatus(ctx, task.ID, models.StatusFailed); err != nil {
 		t.Fatalf("fail scheduled task: %v", err)
 	}
 	failedGraph, err := service.NewAutomationGraphService(automationRepo).GetLive(ctx, project.ID, definition.Automation.ID, time.Now().UTC())
@@ -263,15 +263,11 @@ func TestAutomationRunNowSupersedesFailedLiveStateAcrossRefreshAndReloadInChrome
 		return c.HTML(http.StatusOK, stale.String())
 	})
 	tc.echo.POST("/terminal-failure", func(c echo.Context) error {
-		var invocationID string
-		if err := tc.db.QueryRowContext(c.Request().Context(), `SELECT id FROM automation_invocations
-			WHERE project_id = ? AND automation_id = ? AND status IN ('claimed','dispatched','running') ORDER BY rowid DESC LIMIT 1`,
-			project.ID, definition.Automation.ID).Scan(&invocationID); err != nil {
+		invocationID, err := stores.Fixtures.FailLatestActiveAutomationInvocation(c.Request().Context(), project.ID, definition.Automation.ID)
+		if err != nil {
 			return err
 		}
-		if _, err := tc.db.ExecContext(c.Request().Context(), `UPDATE automation_invocations SET status = 'failed', completed_at = CURRENT_TIMESTAMP WHERE id = ?`, invocationID); err != nil {
-			return err
-		}
+
 		if _, _, err := automationRepo.RecordProjectionEvent(c.Request().Context(), persistence.AutomationProjectionEvent{
 			Context: models.AutomationContext{ProjectID: project.ID},
 			Binding: models.AutomationBinding{AutomationID: definition.Automation.ID, VersionID: definition.Version.ID,

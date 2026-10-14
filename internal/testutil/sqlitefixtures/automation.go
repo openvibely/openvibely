@@ -92,3 +92,9 @@ func (f *fixtures) SeedAutomationIssueTaskOrigin(ctx context.Context, origin sto
 	_, err := f.db.ExecContext(ctx, `INSERT INTO automation_github_issue_task_provenance (project_id,automation_id,task_id,issue_resource_id,implementation_node_key) VALUES (?,?,?,?,?)`, origin.ProjectID, origin.AutomationID, origin.TaskID, origin.IssueResourceID, origin.ImplementationNodeKey)
 	return err
 }
+
+func (f *fixtures) FailLatestActiveAutomationInvocation(ctx context.Context, projectID, automationID string) (string, error) {
+	var id string
+	err := f.db.QueryRowContext(ctx, `UPDATE automation_invocations SET status = 'failed', completed_at = CURRENT_TIMESTAMP WHERE id = (SELECT id FROM automation_invocations WHERE project_id = ? AND automation_id = ? AND status IN ('claimed','dispatched','running') ORDER BY rowid DESC LIMIT 1) RETURNING id`, projectID, automationID).Scan(&id)
+	return id, err
+}

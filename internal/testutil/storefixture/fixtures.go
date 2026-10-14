@@ -30,6 +30,10 @@ type ExecutionUsageRecord struct {
 type ChannelProjectSelectionCounts struct{ Discord, Slack, Telegram, Email int }
 
 type Fixtures interface {
+	// SetTaskCategory constructs board state without publishing application events.
+	SetTaskCategory(context.Context, string, models.TaskCategory) error
+	// FailLatestActiveAutomationInvocation simulates a terminal runtime failure before projection reconciliation.
+	FailLatestActiveAutomationInvocation(context.Context, string, string) (string, error)
 	// MakeProjectDetailsUnreadable constructs damaged detail metadata while preserving selector identity.
 	MakeProjectDetailsUnreadable(context.Context, string) error
 	ChannelProjectSelections(context.Context) (ChannelProjectSelectionCounts, error)
