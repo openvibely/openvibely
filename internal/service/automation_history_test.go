@@ -211,13 +211,19 @@ func assertAutomationHistoryPlan(t testing.TB, plan, wantIndex string) {
 }
 
 func TestAutomationHistoryStablePaginationAndProjectIsolation(t *testing.T) {
-	fixture := newAutomationRuntimeFixture(t, AutomationAdapterNativeSDLC)
+	t.Run("isolated", func(t *testing.T) { testAutomationHistoryStablePaginationAndProjectIsolation(t) })
+	t.Run("production", func(t *testing.T) {
+		testAutomationHistoryStablePaginationAndProjectIsolation(t, teststores.WithProductionTopology())
+	})
+}
+
+func testAutomationHistoryStablePaginationAndProjectIsolation(t *testing.T, opts ...teststores.Option) {
+	fixture := newAutomationRuntimeStoreFixture(t, AutomationAdapterNativeSDLC, opts...)
 	ctx := context.Background()
 	for i := 0; i < 4; i++ {
-		createHistoryInvocation(t, fixture, fmt.Sprint(i), "completed")
+		invocation := createHistoryInvocation(t, fixture, fmt.Sprint(i), "completed")
+		require.NoError(t, fixture.stores.Fixtures.SetAutomationInvocationStart(ctx, invocation.ID, time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)))
 	}
-	_, err := fixture.db.Exec(`UPDATE automation_invocations SET created_at = '2026-01-02 03:04:05', started_at = '2026-01-02 03:04:05' WHERE automation_id = ?`, fixture.definition.Automation.ID)
-	require.NoError(t, err)
 
 	first, err := fixture.repo.ListAutomationInvocations(ctx, fixture.project.ID, fixture.definition.Automation.ID, 2, "")
 	require.NoError(t, err)
@@ -237,7 +243,14 @@ func TestAutomationHistoryStablePaginationAndProjectIsolation(t *testing.T) {
 }
 
 func TestAutomationHistoryInvocationIsolationWorkItemLifetimeAndReplay(t *testing.T) {
-	fixture := newAutomationRuntimeFixture(t, AutomationAdapterNativeSDLC)
+	t.Run("isolated", func(t *testing.T) { testAutomationHistoryInvocationIsolationWorkItemLifetimeAndReplay(t) })
+	t.Run("production", func(t *testing.T) {
+		testAutomationHistoryInvocationIsolationWorkItemLifetimeAndReplay(t, teststores.WithProductionTopology())
+	})
+}
+
+func testAutomationHistoryInvocationIsolationWorkItemLifetimeAndReplay(t *testing.T, opts ...teststores.Option) {
+	fixture := newAutomationRuntimeStoreFixture(t, AutomationAdapterNativeSDLC, opts...)
 	ctx := context.Background()
 	invocationA := createHistoryInvocation(t, fixture, "a", "completed")
 	invocationB := createHistoryInvocation(t, fixture, "b", "completed")
@@ -259,10 +272,8 @@ func TestAutomationHistoryInvocationIsolationWorkItemLifetimeAndReplay(t *testin
 		EventKey: "history:b:waiting", FromNodeID: producer.ID, ToNodeID: gate.ID, Transition: models.AutomationTransitionWaiting,
 	})
 	require.NoError(t, err)
-	_, err = fixture.db.Exec(`UPDATE automation_transitions SET occurred_at = CASE event_key
-		WHEN 'history:a:entered' THEN '2026-01-01 00:00:00' WHEN 'history:b:waiting' THEN '2026-01-01 00:01:00' ELSE occurred_at END
-		WHERE automation_id = ?`, fixture.definition.Automation.ID)
-	require.NoError(t, err)
+	require.NoError(t, fixture.stores.Fixtures.SetAutomationTransitionTime(ctx, fixture.definition.Automation.ID, "history:a:entered", time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)))
+	require.NoError(t, fixture.stores.Fixtures.SetAutomationTransitionTime(ctx, fixture.definition.Automation.ID, "history:b:waiting", time.Date(2026, 1, 1, 0, 1, 0, 0, time.UTC)))
 
 	graphService := NewAutomationGraphService(fixture.repo)
 	invocationGraph, err := graphService.GetInvocationHistory(ctx, fixture.project.ID, fixture.definition.Automation.ID, invocationA.ID, 50, "", "")
@@ -299,7 +310,14 @@ func TestAutomationHistoryInvocationIsolationWorkItemLifetimeAndReplay(t *testin
 }
 
 func TestAutomationHistoryMetricsAndHealthUsePersistedEvents(t *testing.T) {
-	fixture := newAutomationRuntimeFixture(t, AutomationAdapterNativeSDLC)
+	t.Run("isolated", func(t *testing.T) { testAutomationHistoryMetricsAndHealthUsePersistedEvents(t) })
+	t.Run("production", func(t *testing.T) {
+		testAutomationHistoryMetricsAndHealthUsePersistedEvents(t, teststores.WithProductionTopology())
+	})
+}
+
+func testAutomationHistoryMetricsAndHealthUsePersistedEvents(t *testing.T, opts ...teststores.Option) {
+	fixture := newAutomationRuntimeStoreFixture(t, AutomationAdapterNativeSDLC, opts...)
 	ctx := context.Background()
 	invocation := createHistoryInvocation(t, fixture, "metrics", "completed")
 	producer := automationNodeByKey(t, fixture.definition, "vision_suggestions")
@@ -326,10 +344,9 @@ func TestAutomationHistoryMetricsAndHealthUsePersistedEvents(t *testing.T) {
 		EventKey: "metric:completed", FromNodeID: gate.ID, ToNodeID: completedNode.ID, Transition: models.AutomationTransitionCompleted,
 	})
 	require.NoError(t, err)
-	_, err = fixture.db.Exec(`UPDATE automation_transitions SET occurred_at = CASE event_key
-		WHEN 'metric:entered' THEN '2026-01-01 00:00:00' WHEN 'metric:gate' THEN '2026-01-01 00:02:00'
-		WHEN 'metric:completed' THEN '2026-01-01 00:05:00' ELSE occurred_at END`)
-	require.NoError(t, err)
+	require.NoError(t, fixture.stores.Fixtures.SetAutomationTransitionTime(ctx, fixture.definition.Automation.ID, "metric:entered", time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)))
+	require.NoError(t, fixture.stores.Fixtures.SetAutomationTransitionTime(ctx, fixture.definition.Automation.ID, "metric:gate", time.Date(2026, 1, 1, 0, 2, 0, 0, time.UTC)))
+	require.NoError(t, fixture.stores.Fixtures.SetAutomationTransitionTime(ctx, fixture.definition.Automation.ID, "metric:completed", time.Date(2026, 1, 1, 0, 5, 0, 0, time.UTC)))
 
 	metrics, err := fixture.repo.GetAutomationMetrics(ctx, fixture.project.ID, fixture.definition.Automation.ID, fixture.definition.Version.ID, time.Now().UTC())
 	require.NoError(t, err)
@@ -356,11 +373,10 @@ func TestAutomationHistoryMetricsAndHealthUsePersistedEvents(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, models.AutomationHealthHealthy, health.State)
 	for i := 0; i < 3; i++ {
-		createHistoryInvocation(t, fixture, fmt.Sprintf("failed-%d", i), "failed")
+		invocation := createHistoryInvocation(t, fixture, fmt.Sprintf("failed-%d", i), "failed")
+		require.NoError(t, fixture.stores.Fixtures.SetAutomationInvocationCompletionTime(ctx, invocation.ID, time.Date(2099, 1, 1, 0, 0, 0, 0, time.UTC)))
 	}
-	_, err = fixture.db.Exec(`UPDATE automation_invocations SET completed_at = '2099-01-01 00:00:00'
-		WHERE automation_id = ? AND status = 'failed'`, fixture.definition.Automation.ID)
-	require.NoError(t, err)
+
 	health, err = fixture.repo.RecomputeAutomationHealth(ctx, fixture.project.ID, fixture.definition.Automation.ID, time.Now().UTC())
 	require.NoError(t, err)
 	require.Equal(t, models.AutomationHealthUnhealthy, health.State)
@@ -379,7 +395,14 @@ func TestAutomationHistoryMetricsAndHealthUsePersistedEvents(t *testing.T) {
 }
 
 func TestAutomationHistoryReplayPaginationSeedsPersistedPriorState(t *testing.T) {
-	fixture := newAutomationRuntimeFixture(t, AutomationAdapterNativeSDLC)
+	t.Run("isolated", func(t *testing.T) { testAutomationHistoryReplayPaginationSeedsPersistedPriorState(t) })
+	t.Run("production", func(t *testing.T) {
+		testAutomationHistoryReplayPaginationSeedsPersistedPriorState(t, teststores.WithProductionTopology())
+	})
+}
+
+func testAutomationHistoryReplayPaginationSeedsPersistedPriorState(t *testing.T, opts ...teststores.Option) {
+	fixture := newAutomationRuntimeStoreFixture(t, AutomationAdapterNativeSDLC, opts...)
 	ctx := context.Background()
 	invocationA := createHistoryInvocation(t, fixture, "replay-a", "completed")
 	invocationB := createHistoryInvocation(t, fixture, "replay-b", "completed")
@@ -400,10 +423,8 @@ func TestAutomationHistoryReplayPaginationSeedsPersistedPriorState(t *testing.T)
 		EventKey: "replay:paged:waiting", FromNodeID: producer.ID, ToNodeID: gate.ID, Transition: models.AutomationTransitionWaiting,
 	})
 	require.NoError(t, err)
-	_, err = fixture.db.Exec(`UPDATE automation_transitions SET occurred_at = CASE event_key
-		WHEN 'replay:paged:entered' THEN '2026-01-01 00:00:00' WHEN 'replay:paged:waiting' THEN '2026-01-01 00:01:00' ELSE occurred_at END
-		WHERE automation_id = ?`, fixture.definition.Automation.ID)
-	require.NoError(t, err)
+	require.NoError(t, fixture.stores.Fixtures.SetAutomationTransitionTime(ctx, fixture.definition.Automation.ID, "replay:paged:entered", time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)))
+	require.NoError(t, fixture.stores.Fixtures.SetAutomationTransitionTime(ctx, fixture.definition.Automation.ID, "replay:paged:waiting", time.Date(2026, 1, 1, 0, 1, 0, 0, time.UTC)))
 
 	graphService := NewAutomationGraphService(fixture.repo)
 	first, err := graphService.GetWorkItemHistory(ctx, fixture.project.ID, fixture.definition.Automation.ID, item.ID, 1, "", "")
@@ -419,23 +440,28 @@ func TestAutomationHistoryReplayPaginationSeedsPersistedPriorState(t *testing.T)
 }
 
 func TestAutomationHistoryActivityCursorIsStableAndCollectionBound(t *testing.T) {
-	fixture := newAutomationRuntimeFixture(t, AutomationAdapterNativeSDLC)
+	t.Run("isolated", func(t *testing.T) { testAutomationHistoryActivityCursorIsStableAndCollectionBound(t) })
+	t.Run("production", func(t *testing.T) {
+		testAutomationHistoryActivityCursorIsStableAndCollectionBound(t, teststores.WithProductionTopology())
+	})
+}
+
+func testAutomationHistoryActivityCursorIsStableAndCollectionBound(t *testing.T, opts ...teststores.Option) {
+	fixture := newAutomationRuntimeStoreFixture(t, AutomationAdapterNativeSDLC, opts...)
 	ctx := context.Background()
 	invocation := createHistoryInvocation(t, fixture, "activity-pages", "completed")
 	producer := automationNodeByKey(t, fixture.definition, "vision_suggestions")
 	binding := models.AutomationBinding{AutomationID: fixture.definition.Automation.ID, VersionID: fixture.definition.Version.ID, InvocationID: invocation.ID, NodeID: producer.ID}
 	for i := 0; i < 3; i++ {
-		_, _, err := fixture.repo.RecordProjectionEvent(ctx, persistence.AutomationProjectionEvent{
+		_, activity, err := fixture.repo.RecordProjectionEvent(ctx, persistence.AutomationProjectionEvent{
 			Context: models.AutomationContext{ProjectID: fixture.project.ID, Bindings: []models.AutomationBinding{binding}}, Binding: binding,
 			WorkItemKey: "activity:paged", ActivityKey: fmt.Sprintf("activity:paged:%d", i), ActivityType: "producer", ActivityStatus: models.AutomationActivityCompleted,
 			EventKey: fmt.Sprintf("activity:paged:entered:%d", i), ToNodeID: producer.ID, Transition: models.AutomationTransitionEntered,
 		})
 		require.NoError(t, err)
+		require.NoError(t, fixture.stores.Fixtures.SetAutomationActivityStart(ctx, activity.ID, time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)))
+		require.NoError(t, fixture.stores.Fixtures.SetAutomationTransitionTime(ctx, fixture.definition.Automation.ID, fmt.Sprintf("activity:paged:entered:%d", i), time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)))
 	}
-	_, err := fixture.db.Exec(`UPDATE automation_activities SET started_at = '2026-01-01 00:00:00' WHERE automation_id = ?`, fixture.definition.Automation.ID)
-	require.NoError(t, err)
-	_, err = fixture.db.Exec(`UPDATE automation_transitions SET occurred_at = '2026-01-01 00:00:00' WHERE automation_id = ?`, fixture.definition.Automation.ID)
-	require.NoError(t, err)
 
 	first, err := fixture.repo.ListAutomationActivities(ctx, fixture.project.ID, fixture.definition.Automation.ID, invocation.ID, "", 2, "")
 	require.NoError(t, err)
@@ -457,7 +483,14 @@ func TestAutomationHistoryActivityCursorIsStableAndCollectionBound(t *testing.T)
 }
 
 func TestAutomationHistoryWorkItemPaginationIsStableAndFilterBound(t *testing.T) {
-	fixture := newAutomationRuntimeFixture(t, AutomationAdapterNativeSDLC)
+	t.Run("isolated", func(t *testing.T) { testAutomationHistoryWorkItemPaginationIsStableAndFilterBound(t) })
+	t.Run("production", func(t *testing.T) {
+		testAutomationHistoryWorkItemPaginationIsStableAndFilterBound(t, teststores.WithProductionTopology())
+	})
+}
+
+func testAutomationHistoryWorkItemPaginationIsStableAndFilterBound(t *testing.T, opts ...teststores.Option) {
+	fixture := newAutomationRuntimeStoreFixture(t, AutomationAdapterNativeSDLC, opts...)
 	ctx := context.Background()
 	producer := automationNodeByKey(t, fixture.definition, "vision_suggestions")
 	binding := models.AutomationBinding{AutomationID: fixture.definition.Automation.ID, VersionID: fixture.definition.Version.ID, NodeID: producer.ID}
@@ -467,13 +500,8 @@ func TestAutomationHistoryWorkItemPaginationIsStableAndFilterBound(t *testing.T)
 			WorkItemKey: fmt.Sprintf("work-item:paged:%d", i), WorkItemKind: "test", ActivityKey: fmt.Sprintf("work-item:paged:%d:create", i), ActivityType: "producer", ActivityStatus: models.AutomationActivityRunning,
 		})
 		require.NoError(t, err)
-		if i >= 4 {
-			_, err = fixture.db.ExecContext(ctx, `UPDATE automation_work_items SET status = 'completed', completed_at = CURRENT_TIMESTAMP WHERE id = ?`, item.ID)
-			require.NoError(t, err)
-		}
+		require.NoError(t, fixture.stores.Fixtures.SetAutomationWorkItemHistory(ctx, item.ID, time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), i >= 4))
 	}
-	_, err := fixture.db.Exec(`UPDATE automation_work_items SET created_at = '2026-01-01 00:00:00' WHERE automation_id = ?`, fixture.definition.Automation.ID)
-	require.NoError(t, err)
 
 	unfilteredFirst, err := fixture.repo.ListAutomationWorkItems(ctx, fixture.project.ID, fixture.definition.Automation.ID, "", 3, "")
 	require.NoError(t, err)
