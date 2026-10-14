@@ -32,7 +32,7 @@ func TestBrowserFunctional_EarlierPrependPreservesMovingReader(t *testing.T) {
 					if r.URL.Path == "/earlier" {
 						// Give continued wheel input time to change the tracker revision.
 						time.Sleep(120 * time.Millisecond)
-						fmt.Fprint(w, `<div id="older" data-execution-pair="true" style="height:500px">Older messages</div>`)
+						fmt.Fprint(w, `<div id="oldest" data-execution-pair="true" style="height:500px">Oldest messages</div><div id="older" data-execution-pair="true" style="height:500px">Older messages</div>`)
 						return
 					}
 					fmt.Fprintf(w, `<!doctype html><html><head><style>
@@ -60,8 +60,8 @@ func TestBrowserFunctional_EarlierPrependPreservesMovingReader(t *testing.T) {
       check(offset(), initialOffset-8, 'immediate prepend');
       // Aggressive input during cooperative rendering must remain relative to
       // the same message, even as an older message changes height above it.
-      messages.dispatchEvent(new WheelEvent('wheel', {deltaY:-80}));
-      messages.scrollTop -= 80;
+      messages.dispatchEvent(new WheelEvent('wheel', {deltaY:80}));
+      messages.scrollTop += 80;
       messages.dispatchEvent(new Event('scroll'));
       const readingOffset = offset();
       document.getElementById('older').style.height = '750px';
@@ -71,9 +71,19 @@ func TestBrowserFunctional_EarlierPrependPreservesMovingReader(t *testing.T) {
       messages.lastElementChild.style.height = '900px';
       await wait(60);
       check(offset(), readingOffset, 'streaming below reader');
+      // Move into the newly loaded page before hydration completes.
+      messages.dispatchEvent(new WheelEvent('wheel', {deltaY:-1000}));
+      messages.scrollTop = 100;
+      messages.dispatchEvent(new Event('scroll'));
+      const oldest = document.getElementById('oldest');
+      const olderOffset = () => oldest.getBoundingClientRect().top - messages.getBoundingClientRect().top;
+      const readingOlderOffset = olderOffset();
+      document.getElementById('older').style.height = '1050px';
+      await wait(60);
+      check(olderOffset(), readingOlderOffset, 'hydration below newly visible reader');
       finishHydration();
       await wait(80);
-      check(offset(), readingOffset, 'settled prepend');
+      check(olderOffset(), readingOlderOffset, 'settled prepend');
       if (!tracker.userScrolledUp) throw new Error('reader became pinned');
       if (messages._earlierAnchor || messages.dataset.earlierRequestLoading === 'true' || messages.style.overflowAnchor) throw new Error('transaction not cleaned up');
       if (messages.querySelector('[data-earlier-loader]')) throw new Error('final page retained loader');
