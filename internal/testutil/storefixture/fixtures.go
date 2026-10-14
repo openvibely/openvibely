@@ -22,6 +22,10 @@ type SkillEventFilter struct {
 
 // Fixtures describes test domain state, never tables, query text, or connections.
 type Fixtures interface {
+	CountProjectAgentMutations(context.Context, string) (int, error)
+	CountTasks(context.Context) (int, error)
+	SetProjectDeletionFailure(context.Context, string, bool) error
+	SeedAutomationIssueTaskOrigin(context.Context, AutomationIssueTaskOrigin) error
 	SetProjectDefault(context.Context, string, bool) error
 	FailXTaskOriginWrites(context.Context) error
 	FailXTaskContextWrites(context.Context) error
@@ -150,4 +154,9 @@ type IOCounter interface {
 type AutomationDispatchState struct {
 	Status           string
 	TaskReservations int
+}
+
+// AutomationIssueTaskOrigin records the issue and graph node that produced a task.
+type AutomationIssueTaskOrigin struct {
+	ProjectID, AutomationID, TaskID, IssueResourceID, ImplementationNodeKey string
 }

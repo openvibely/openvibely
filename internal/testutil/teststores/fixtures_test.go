@@ -320,3 +320,38 @@ func TestSettingsAndProjectIOCountsPhysicalReads(t *testing.T) {
 		})
 	}
 }
+
+func TestProjectDeletionFaultRollsBackAndCanBeRemoved(t *testing.T) {
+	for _, production := range []bool{false, true} {
+		name := "isolated"
+		if production {
+			name = "production"
+		}
+		t.Run(name, func(t *testing.T) {
+			var options []teststores.Option
+			if production {
+				options = append(options, teststores.WithProductionTopology())
+			}
+			env := teststores.New(t, options...)
+			ctx := t.Context()
+			project := &models.Project{Name: "Deletion rollback"}
+			require.NoError(t, env.Projects.Create(ctx, project))
+			task := &models.Task{ProjectID: project.ID, Title: "Retained task", Category: models.CategoryBacklog, Status: models.StatusPending}
+			require.NoError(t, env.Tasks.Create(ctx, task))
+			require.NoError(t, env.Fixtures.SetProjectDeletionFailure(ctx, project.ID, true))
+			_, deleted, err := env.Projects.DeleteWithCleanupManifest(ctx, project.ID, nil)
+			require.Error(t, err)
+			require.False(t, deleted)
+			saved, err := env.Tasks.GetByID(ctx, task.ID)
+			require.NoError(t, err)
+			require.NotNil(t, saved)
+			require.NoError(t, env.Fixtures.SetProjectDeletionFailure(ctx, project.ID, false))
+			_, deleted, err = env.Projects.DeleteWithCleanupManifest(ctx, project.ID, nil)
+			require.NoError(t, err)
+			require.True(t, deleted)
+			saved, err = env.Tasks.GetByID(ctx, task.ID)
+			require.NoError(t, err)
+			require.Nil(t, saved)
+		})
+	}
+}

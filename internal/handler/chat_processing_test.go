@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/openvibely/openvibely/internal/testutil/storefixture"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -6127,10 +6128,10 @@ func TestCompleteWithSuccess_UpdatesTaskStatusBeforeDiffCapture(t *testing.T) {
 }
 
 func TestCompleteWithSuccess_GitHubSDLCImplementationWithoutPullRequestFailsTask(t *testing.T) {
-	h, _, llmConfigRepo, db := setupTestHandlerWithDB(t)
+	h, _, llmConfigRepo, db := setupTestHandlerWithStores(t)
 	ctx := context.Background()
-	prRepo := teststores.Of(db).TaskPullRequests
-	automationRepo := teststores.Of(db).Automations
+	prRepo := db.TaskPullRequests
+	automationRepo := db.Automations
 	h.SetTaskPullRequestRepo(prRepo)
 	h.SetAutomationServices(service.NewAutomationGraphService(automationRepo), nil)
 
@@ -6138,16 +6139,11 @@ func TestCompleteWithSuccess_GitHubSDLCImplementationWithoutPullRequestFailsTask
 	require.NoError(t, llmConfigRepo.Create(ctx, agent))
 	project := &models.Project{Name: "GitHub SDLC PR required"}
 	require.NoError(t, h.projectSvc.Create(ctx, project))
-	_, err := db.ExecContext(ctx, `INSERT INTO automations (id, project_id, stable_key, name, automation_type, lifecycle_state, created_via)
-		VALUES ('github-sdlc-completion-automation', ?, 'github-sdlc-completion', 'GitHub SDLC', 'custom', 'active', 'test')`, project.ID)
-	require.NoError(t, err)
+	require.NoError(t, db.Fixtures.SeedAutomation(ctx, models.Automation{ID: "github-sdlc-completion-automation", ProjectID: project.ID, StableKey: "github-sdlc-completion", Name: "GitHub SDLC", AutomationType: "custom", LifecycleState: "active", CreatedVia: "test"}))
 
 	task := &models.Task{ProjectID: project.ID, Title: "Implement GitHub issue #42", Category: models.CategoryActive, Priority: 2, Prompt: "Test", Status: models.StatusRunning, CreatedVia: "automation:github-sdlc-completion-automation:implementation"}
 	require.NoError(t, h.taskSvc.Create(ctx, task))
-	_, err = db.ExecContext(ctx, `INSERT INTO automation_github_issue_task_provenance
-		(project_id, automation_id, task_id, issue_resource_id, implementation_node_key)
-		VALUES (?, 'github-sdlc-completion-automation', ?, 'github_issue:openvibely/openvibely:42', 'implementation')`, project.ID, task.ID)
-	require.NoError(t, err)
+	require.NoError(t, db.Fixtures.SeedAutomationIssueTaskOrigin(ctx, storefixture.AutomationIssueTaskOrigin{ProjectID: project.ID, AutomationID: "github-sdlc-completion-automation", TaskID: task.ID, IssueResourceID: "github_issue:openvibely/openvibely:42", ImplementationNodeKey: "implementation"}))
 
 	exec := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "Test"}
 	require.NoError(t, h.execRepo.Create(ctx, exec))
@@ -6166,10 +6162,10 @@ func TestCompleteWithSuccess_GitHubSDLCImplementationWithoutPullRequestFailsTask
 }
 
 func TestCompleteWithSuccess_GitHubSDLCImplementationWithSuccessfullyReplacedPullRequestCompletesTask(t *testing.T) {
-	h, _, llmConfigRepo, db := setupTestHandlerWithDB(t)
+	h, _, llmConfigRepo, db := setupTestHandlerWithStores(t)
 	ctx := context.Background()
-	prRepo := teststores.Of(db).TaskPullRequests
-	automationRepo := teststores.Of(db).Automations
+	prRepo := db.TaskPullRequests
+	automationRepo := db.Automations
 	h.SetTaskPullRequestRepo(prRepo)
 	h.SetAutomationServices(service.NewAutomationGraphService(automationRepo), nil)
 
@@ -6192,16 +6188,11 @@ func TestCompleteWithSuccess_GitHubSDLCImplementationWithSuccessfullyReplacedPul
 			return replacementHead, nil
 		},
 	})
-	_, err := db.ExecContext(ctx, `INSERT INTO automations (id, project_id, stable_key, name, automation_type, lifecycle_state, created_via)
-		VALUES ('github-sdlc-completion-automation', ?, 'github-sdlc-completion', 'GitHub SDLC', 'custom', 'active', 'test')`, project.ID)
-	require.NoError(t, err)
+	require.NoError(t, db.Fixtures.SeedAutomation(ctx, models.Automation{ID: "github-sdlc-completion-automation", ProjectID: project.ID, StableKey: "github-sdlc-completion", Name: "GitHub SDLC", AutomationType: "custom", LifecycleState: "active", CreatedVia: "test"}))
 
 	task := &models.Task{ProjectID: project.ID, Title: "Implement GitHub issue #42", Category: models.CategoryActive, Priority: 2, Prompt: "Test", Status: models.StatusRunning, WorktreePath: t.TempDir(), WorktreeBranch: "task/issue-42", CreatedVia: "automation:github-sdlc-completion-automation:implementation"}
 	require.NoError(t, h.taskSvc.Create(ctx, task))
-	_, err = db.ExecContext(ctx, `INSERT INTO automation_github_issue_task_provenance
-		(project_id, automation_id, task_id, issue_resource_id, implementation_node_key)
-		VALUES (?, 'github-sdlc-completion-automation', ?, 'github_issue:openvibely/openvibely:42', 'implementation')`, project.ID, task.ID)
-	require.NoError(t, err)
+	require.NoError(t, db.Fixtures.SeedAutomationIssueTaskOrigin(ctx, storefixture.AutomationIssueTaskOrigin{ProjectID: project.ID, AutomationID: "github-sdlc-completion-automation", TaskID: task.ID, IssueResourceID: "github_issue:openvibely/openvibely:42", ImplementationNodeKey: "implementation"}))
 	require.NoError(t, prRepo.Upsert(ctx, &models.TaskPullRequest{TaskID: task.ID, PRNumber: 123, PRURL: "https://github.com/openvibely/openvibely/pull/123", PRState: "open", PublishedHeadSHA: previousHead}))
 
 	replaced, err := h.newTaskPullRequestService().ReplaceBranchHeadForTask(ctx, project, task, previousHead)
@@ -6543,10 +6534,10 @@ func TestCompleteWithSuccessDefersStartupSyncPublicationForPendingSteering(t *te
 }
 
 func TestCompleteWithSuccess_GitHubSDLCImplementationWithOldOpenPullRequestHeadFailsTask(t *testing.T) {
-	h, _, llmConfigRepo, db := setupTestHandlerWithDB(t)
+	h, _, llmConfigRepo, db := setupTestHandlerWithStores(t)
 	ctx := context.Background()
-	prRepo := teststores.Of(db).TaskPullRequests
-	automationRepo := teststores.Of(db).Automations
+	prRepo := db.TaskPullRequests
+	automationRepo := db.Automations
 	h.SetTaskPullRequestRepo(prRepo)
 	h.SetAutomationServices(service.NewAutomationGraphService(automationRepo), nil)
 
@@ -6562,16 +6553,11 @@ func TestCompleteWithSuccess_GitHubSDLCImplementationWithOldOpenPullRequestHeadF
 			return &service.GitHubPullRequest{Number: 123, URL: "https://github.com/openvibely/openvibely/pull/123", State: "open", HeadRef: "task/issue-42", HeadRepoFullName: "openvibely/openvibely", HeadSHA: "cccccccccccccccccccccccccccccccccccccccc"}, nil
 		},
 	})
-	_, err := db.ExecContext(ctx, `INSERT INTO automations (id, project_id, stable_key, name, automation_type, lifecycle_state, created_via)
-		VALUES ('github-sdlc-completion-automation', ?, 'github-sdlc-completion', 'GitHub SDLC', 'custom', 'active', 'test')`, project.ID)
-	require.NoError(t, err)
+	require.NoError(t, db.Fixtures.SeedAutomation(ctx, models.Automation{ID: "github-sdlc-completion-automation", ProjectID: project.ID, StableKey: "github-sdlc-completion", Name: "GitHub SDLC", AutomationType: "custom", LifecycleState: "active", CreatedVia: "test"}))
 
 	task := &models.Task{ProjectID: project.ID, Title: "Implement GitHub issue #42", Category: models.CategoryActive, Priority: 2, Prompt: "Test", Status: models.StatusRunning, WorktreeBranch: "task/issue-42", CreatedVia: "automation:github-sdlc-completion-automation:implementation"}
 	require.NoError(t, h.taskSvc.Create(ctx, task))
-	_, err = db.ExecContext(ctx, `INSERT INTO automation_github_issue_task_provenance
-		(project_id, automation_id, task_id, issue_resource_id, implementation_node_key)
-		VALUES (?, 'github-sdlc-completion-automation', ?, 'github_issue:openvibely/openvibely:42', 'implementation')`, project.ID, task.ID)
-	require.NoError(t, err)
+	require.NoError(t, db.Fixtures.SeedAutomationIssueTaskOrigin(ctx, storefixture.AutomationIssueTaskOrigin{ProjectID: project.ID, AutomationID: "github-sdlc-completion-automation", TaskID: task.ID, IssueResourceID: "github_issue:openvibely/openvibely:42", ImplementationNodeKey: "implementation"}))
 	require.NoError(t, prRepo.Upsert(ctx, &models.TaskPullRequest{TaskID: task.ID, PRNumber: 123, PRURL: "https://github.com/openvibely/openvibely/pull/123", PRState: "open", PublishedHeadSHA: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}))
 
 	exec := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "Test"}
@@ -6591,10 +6577,10 @@ func TestCompleteWithSuccess_GitHubSDLCImplementationWithOldOpenPullRequestHeadF
 }
 
 func TestCompleteWithSuccess_GitHubSDLCImplementationWithStaleOpenPullRequestFailsTask(t *testing.T) {
-	h, _, llmConfigRepo, db := setupTestHandlerWithDB(t)
+	h, _, llmConfigRepo, db := setupTestHandlerWithStores(t)
 	ctx := context.Background()
-	prRepo := teststores.Of(db).TaskPullRequests
-	automationRepo := teststores.Of(db).Automations
+	prRepo := db.TaskPullRequests
+	automationRepo := db.Automations
 	h.SetTaskPullRequestRepo(prRepo)
 	h.SetAutomationServices(service.NewAutomationGraphService(automationRepo), nil)
 
@@ -6610,16 +6596,11 @@ func TestCompleteWithSuccess_GitHubSDLCImplementationWithStaleOpenPullRequestFai
 			return &service.GitHubPullRequest{Number: 123, URL: "https://github.com/openvibely/openvibely/pull/123", State: "closed", HeadRef: "task/issue-42", HeadRepoFullName: "openvibely/openvibely"}, nil
 		},
 	})
-	_, err := db.ExecContext(ctx, `INSERT INTO automations (id, project_id, stable_key, name, automation_type, lifecycle_state, created_via)
-		VALUES ('github-sdlc-completion-automation', ?, 'github-sdlc-completion', 'GitHub SDLC', 'custom', 'active', 'test')`, project.ID)
-	require.NoError(t, err)
+	require.NoError(t, db.Fixtures.SeedAutomation(ctx, models.Automation{ID: "github-sdlc-completion-automation", ProjectID: project.ID, StableKey: "github-sdlc-completion", Name: "GitHub SDLC", AutomationType: "custom", LifecycleState: "active", CreatedVia: "test"}))
 
 	task := &models.Task{ProjectID: project.ID, Title: "Implement GitHub issue #42", Category: models.CategoryActive, Priority: 2, Prompt: "Test", Status: models.StatusRunning, WorktreeBranch: "task/issue-42", CreatedVia: "automation:github-sdlc-completion-automation:implementation"}
 	require.NoError(t, h.taskSvc.Create(ctx, task))
-	_, err = db.ExecContext(ctx, `INSERT INTO automation_github_issue_task_provenance
-		(project_id, automation_id, task_id, issue_resource_id, implementation_node_key)
-		VALUES (?, 'github-sdlc-completion-automation', ?, 'github_issue:openvibely/openvibely:42', 'implementation')`, project.ID, task.ID)
-	require.NoError(t, err)
+	require.NoError(t, db.Fixtures.SeedAutomationIssueTaskOrigin(ctx, storefixture.AutomationIssueTaskOrigin{ProjectID: project.ID, AutomationID: "github-sdlc-completion-automation", TaskID: task.ID, IssueResourceID: "github_issue:openvibely/openvibely:42", ImplementationNodeKey: "implementation"}))
 	require.NoError(t, prRepo.Upsert(ctx, &models.TaskPullRequest{TaskID: task.ID, PRNumber: 123, PRURL: "https://github.com/openvibely/openvibely/pull/123", PRState: "open", PublishedHeadSHA: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}))
 
 	exec := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "Test"}
@@ -6639,10 +6620,10 @@ func TestCompleteWithSuccess_GitHubSDLCImplementationWithStaleOpenPullRequestFai
 }
 
 func TestCompleteWithSuccess_GitHubSDLCImplementationWithClosedPullRequestFailsTask(t *testing.T) {
-	h, _, llmConfigRepo, db := setupTestHandlerWithDB(t)
+	h, _, llmConfigRepo, db := setupTestHandlerWithStores(t)
 	ctx := context.Background()
-	prRepo := teststores.Of(db).TaskPullRequests
-	automationRepo := teststores.Of(db).Automations
+	prRepo := db.TaskPullRequests
+	automationRepo := db.Automations
 	h.SetTaskPullRequestRepo(prRepo)
 	h.SetAutomationServices(service.NewAutomationGraphService(automationRepo), nil)
 
@@ -6650,16 +6631,11 @@ func TestCompleteWithSuccess_GitHubSDLCImplementationWithClosedPullRequestFailsT
 	require.NoError(t, llmConfigRepo.Create(ctx, agent))
 	project := &models.Project{Name: "GitHub SDLC closed PR"}
 	require.NoError(t, h.projectSvc.Create(ctx, project))
-	_, err := db.ExecContext(ctx, `INSERT INTO automations (id, project_id, stable_key, name, automation_type, lifecycle_state, created_via)
-		VALUES ('github-sdlc-completion-automation', ?, 'github-sdlc-completion', 'GitHub SDLC', 'custom', 'active', 'test')`, project.ID)
-	require.NoError(t, err)
+	require.NoError(t, db.Fixtures.SeedAutomation(ctx, models.Automation{ID: "github-sdlc-completion-automation", ProjectID: project.ID, StableKey: "github-sdlc-completion", Name: "GitHub SDLC", AutomationType: "custom", LifecycleState: "active", CreatedVia: "test"}))
 
 	task := &models.Task{ProjectID: project.ID, Title: "Implement GitHub issue #42", Category: models.CategoryActive, Priority: 2, Prompt: "Test", Status: models.StatusRunning, CreatedVia: "automation:github-sdlc-completion-automation:implementation"}
 	require.NoError(t, h.taskSvc.Create(ctx, task))
-	_, err = db.ExecContext(ctx, `INSERT INTO automation_github_issue_task_provenance
-		(project_id, automation_id, task_id, issue_resource_id, implementation_node_key)
-		VALUES (?, 'github-sdlc-completion-automation', ?, 'github_issue:openvibely/openvibely:42', 'implementation')`, project.ID, task.ID)
-	require.NoError(t, err)
+	require.NoError(t, db.Fixtures.SeedAutomationIssueTaskOrigin(ctx, storefixture.AutomationIssueTaskOrigin{ProjectID: project.ID, AutomationID: "github-sdlc-completion-automation", TaskID: task.ID, IssueResourceID: "github_issue:openvibely/openvibely:42", ImplementationNodeKey: "implementation"}))
 	require.NoError(t, prRepo.Upsert(ctx, &models.TaskPullRequest{TaskID: task.ID, PRNumber: 123, PRURL: "https://github.com/openvibely/openvibely/pull/123", PRState: "closed"}))
 
 	exec := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "Test"}

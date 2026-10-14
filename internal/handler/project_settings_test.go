@@ -25,21 +25,21 @@ import (
 func TestProjectSettings_EndToEnd(t *testing.T) {
 	t.Setenv("OPENVIBELY_ENABLE_LOCAL_REPO_PATH", "true")
 
-	db := teststores.NewDB(t)
+	broadcaster := events.NewBroadcaster()
+	db := teststores.New(t, teststores.WithBroadcaster(broadcaster))
 	ctx := context.Background()
 
 	// Setup broadcaster
-	broadcaster := events.NewBroadcaster()
 
 	// Setup repositories
-	projectRepo := teststores.Of(db).Projects
-	llmConfigRepo := teststores.Of(db).LLMConfigs
-	taskRepo := teststores.Of(db, teststores.WithBroadcaster(broadcaster)).Tasks
-	execRepo := teststores.Of(db).Executions
-	scheduleRepo := teststores.Of(db).Schedules
-	workerRepo := teststores.Of(db).Workers
-	attachmentRepo := teststores.Of(db).Attachments
-	chatAttachmentRepo := teststores.Of(db).ChatAttachments
+	projectRepo := db.Projects
+	llmConfigRepo := db.LLMConfigs
+	taskRepo := db.Tasks
+	execRepo := db.Executions
+	scheduleRepo := db.Schedules
+	workerRepo := db.Workers
+	attachmentRepo := db.Attachments
+	chatAttachmentRepo := db.ChatAttachments
 
 	// Setup services (need to setup in correct order due to dependencies)
 	projectSvc := service.NewProjectService(projectRepo)
@@ -69,7 +69,7 @@ func TestProjectSettings_EndToEnd(t *testing.T) {
 		nil, // settingsRepo
 		broadcaster,
 		nil, // telegramSvc
-		newTestRuntimeStores(db),
+		runtimeStoresForTests(db.Stores),
 	)
 
 	e := echo.New()
@@ -1140,19 +1140,18 @@ func TestDeleteProject(t *testing.T) {
 	t.Setenv("OPENVIBELY_ENABLE_LOCAL_REPO_PATH", "true")
 	useTempUploadsDir(t)
 
-	db := teststores.NewDB(t)
+	broadcaster := events.NewBroadcaster()
+	db := teststores.New(t, teststores.WithBroadcaster(broadcaster))
 	ctx := context.Background()
 
-	broadcaster := events.NewBroadcaster()
-
-	projectRepo := teststores.Of(db).Projects
-	llmConfigRepo := teststores.Of(db).LLMConfigs
-	taskRepo := teststores.Of(db, teststores.WithBroadcaster(broadcaster)).Tasks
-	execRepo := teststores.Of(db).Executions
-	scheduleRepo := teststores.Of(db).Schedules
-	workerRepo := teststores.Of(db).Workers
-	attachmentRepo := teststores.Of(db).Attachments
-	chatAttachmentRepo := teststores.Of(db).ChatAttachments
+	projectRepo := db.Projects
+	llmConfigRepo := db.LLMConfigs
+	taskRepo := db.Tasks
+	execRepo := db.Executions
+	scheduleRepo := db.Schedules
+	workerRepo := db.Workers
+	attachmentRepo := db.Attachments
+	chatAttachmentRepo := db.ChatAttachments
 
 	projectSvc := service.NewProjectService(projectRepo)
 	llmSvc := service.NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, scheduleRepo, attachmentRepo)
@@ -1181,7 +1180,7 @@ func TestDeleteProject(t *testing.T) {
 		nil, // settingsRepo
 		broadcaster,
 		nil, // telegramSvc
-		newTestRuntimeStores(db),
+		runtimeStoresForTests(db.Stores),
 	)
 
 	e := echo.New()
@@ -1325,7 +1324,7 @@ func TestDeleteProject(t *testing.T) {
 		}
 
 		pendingInput := &models.ThreadInput{Scope: models.ThreadInputScopeTask, ProjectID: project.ID, TaskID: attachmentTask.ID, Content: "queued with file", AttachmentSessionID: sessionID}
-		if err := teststores.Of(db).ThreadInputs.CreateQueued(ctx, pendingInput); err != nil {
+		if err := db.ThreadInputs.CreateQueued(ctx, pendingInput); err != nil {
 			t.Fatalf("failed to create pending task-thread input: %v", err)
 		}
 
@@ -1343,14 +1342,14 @@ func TestDeleteProject(t *testing.T) {
 			t.Fatalf("expected status 200, got %d", rec.Code)
 		}
 
-		retired, err := teststores.Of(db).ThreadInputs.IsAttachmentSessionRetired(ctx, sessionID)
+		retired, err := db.ThreadInputs.IsAttachmentSessionRetired(ctx, sessionID)
 		if err != nil {
 			t.Fatalf("failed to check retired session: %v", err)
 		}
 		if !retired {
 			t.Fatalf("expected session %s to be retired", sessionID)
 		}
-		remainingInput, err := teststores.Of(db).ThreadInputs.GetByID(ctx, pendingInput.ID)
+		remainingInput, err := db.ThreadInputs.GetByID(ctx, pendingInput.ID)
 		if err != nil {
 			t.Fatalf("failed to load thread input: %v", err)
 		}
@@ -1440,22 +1439,7 @@ func TestDeleteProject(t *testing.T) {
 		if err := taskRepo.Create(ctx, retainedTask); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := db.ExecContext(ctx, `
-			CREATE TABLE memory_consolidation_runs (id TEXT PRIMARY KEY);
-			CREATE TABLE memory_consolidation_schedules (
-				project_id TEXT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
-				last_run_id TEXT REFERENCES memory_consolidation_runs(id) ON DELETE SET NULL
-			);
-			INSERT INTO memory_consolidation_schedules(project_id) VALUES (?)`, project.ID); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := db.ExecContext(ctx, `PRAGMA foreign_keys=OFF`); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := db.ExecContext(ctx, `DROP TABLE memory_consolidation_runs`); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := db.ExecContext(ctx, `PRAGMA foreign_keys=ON`); err != nil {
+		if err := db.Fixtures.SetProjectDeletionFailure(ctx, project.ID, true); err != nil {
 			t.Fatal(err)
 		}
 
@@ -1476,7 +1460,7 @@ func TestDeleteProject(t *testing.T) {
 		if stored, getErr := taskRepo.GetByID(ctx, retainedTask.ID); getErr != nil || stored == nil {
 			t.Fatalf("task after failed handler deletion = %#v, err=%v", stored, getErr)
 		}
-		if _, dropErr := db.ExecContext(ctx, `DROP TABLE memory_consolidation_schedules`); dropErr != nil {
+		if dropErr := db.Fixtures.SetProjectDeletionFailure(ctx, project.ID, false); dropErr != nil {
 			t.Fatal(dropErr)
 		}
 		if err := projectSvc.Delete(ctx, project.ID); err != nil {
@@ -1907,10 +1891,10 @@ func TestGlobalPersonality(t *testing.T) {
 func TestEditProjectDialogShowsRepositoryPathHealth(t *testing.T) {
 	t.Setenv("OPENVIBELY_ENABLE_LOCAL_REPO_PATH", "true")
 
-	db := teststores.NewDB(t)
+	db := teststores.New(t)
 	ctx := context.Background()
-	projectRepo := teststores.Of(db).Projects
-	llmConfigRepo := teststores.Of(db).LLMConfigs
+	projectRepo := db.Projects
+	llmConfigRepo := db.LLMConfigs
 	projectSvc := service.NewProjectService(projectRepo)
 	h := New(projectSvc, nil, nil, nil, nil, nil, nil, nil, llmConfigRepo, nil, nil, nil, nil, nil, nil, projectRepo, nil, events.NewBroadcaster(), nil, RuntimeStores{})
 	e := echo.New()
@@ -1944,8 +1928,8 @@ func TestEditProjectDialogShowsRepositoryPathHealth(t *testing.T) {
 		if after.RepoPath != before.RepoPath || after.RepoURL != before.RepoURL || after.UpdatedAt != before.UpdatedAt {
 			t.Fatalf("settings render mutated project row: before=%+v after=%+v", before, after)
 		}
-		var taskCount int
-		if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM tasks`).Scan(&taskCount); err != nil {
+		taskCount, err := db.Fixtures.CountTasks(ctx)
+		if err != nil {
 			t.Fatalf("count tasks: %v", err)
 		}
 		if taskCount != 0 {
