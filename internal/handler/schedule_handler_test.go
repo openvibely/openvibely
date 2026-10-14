@@ -16,7 +16,6 @@ import (
 	"github.com/labstack/echo/v4/middleware"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
-	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/openvibely/openvibely/internal/testutil/teststores"
 	"github.com/openvibely/openvibely/web/templates/pages"
@@ -400,7 +399,7 @@ func TestCreateSchedule_HTMX_Success(t *testing.T) {
 }
 
 func TestCreateSchedule_HTMX_UsesMainTaskDetailExecutionOrdering(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	ctx := context.Background()
 	project := tc.CreateProject().Build()
 	agent := tc.CreateLLMConfig().Build()
@@ -418,10 +417,10 @@ func TestCreateSchedule_HTMX_UsesMainTaskDetailExecutionOrdering(t *testing.T) {
 		t.Fatalf("complete newer execution: %v", err)
 	}
 	baseStartedAt := time.Now().UTC().Add(-2 * time.Hour)
-	if _, err := tc.db.ExecContext(ctx, `UPDATE executions SET started_at = ? WHERE id = ?`, baseStartedAt, older.ID); err != nil {
+	if err := tc.stores.Fixtures.SetExecutionStartedAt(ctx, older.ID, baseStartedAt); err != nil {
 		t.Fatalf("set older execution start: %v", err)
 	}
-	if _, err := tc.db.ExecContext(ctx, `UPDATE executions SET started_at = ? WHERE id = ?`, baseStartedAt.Add(time.Hour), newer.ID); err != nil {
+	if err := tc.stores.Fixtures.SetExecutionStartedAt(ctx, newer.ID, baseStartedAt.Add(time.Hour)); err != nil {
 		t.Fatalf("set newer execution start: %v", err)
 	}
 
@@ -1847,14 +1846,14 @@ func TestToggleScheduleEnabled_HTMXFromScheduleRefreshesSchedulePage(t *testing.
 }
 
 func TestToggleScheduleEnabled_FiredOneTimeReturnsBadRequestWithoutMutation(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	project := tc.CreateProject().Build()
 	task := tc.CreateTask(project.ID).Build()
 	s := tc.CreateSchedule(task.ID).WithRunAt(time.Now().Add(-time.Hour)).Build()
-	if err := tc.scheduleRepo.(*sqlite.ScheduleRepo).MarkRan(context.Background(), s.ID, time.Now(), nil); err != nil {
+	if err := tc.stores.Fixtures.SetScheduleRunTimes(context.Background(), s.ID, time.Now(), nil); err != nil {
 		t.Fatalf("mark one-time schedule ran: %v", err)
 	}
-	if err := tc.scheduleRepo.(*sqlite.ScheduleRepo).ToggleEnabled(context.Background(), s.ID, false); err != nil {
+	if _, err := tc.scheduleRepo.SetEnabledForTask(context.Background(), s.ID, s.TaskID, false); err != nil {
 		t.Fatalf("pause one-time schedule: %v", err)
 	}
 
@@ -2169,7 +2168,7 @@ func TestConversationScheduleFormsCreateRunnableSchedules(t *testing.T) {
 }
 
 func TestConversationScheduleEditAndResume(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	project := tc.CreateProject().Build()
 	task := tc.CreateTask(project.ID).Build()
 	schedule := tc.CreateSchedule(task.ID).WithRunAt(time.Now().Add(time.Hour)).Build()
@@ -2182,7 +2181,7 @@ func TestConversationScheduleEditAndResume(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("edit: %d %s", rec.Code, rec.Body.String())
 	}
-	if err := tc.scheduleRepo.(*sqlite.ScheduleRepo).ToggleEnabled(context.Background(), schedule.ID, false); err != nil {
+	if _, err := tc.scheduleRepo.SetEnabledForTask(context.Background(), schedule.ID, schedule.TaskID, false); err != nil {
 		t.Fatal(err)
 	}
 	if err := tc.taskRepo.UpdateCategory(context.Background(), task.ID, models.CategoryChat); err != nil {
