@@ -1050,7 +1050,7 @@ func TestAutomationPauseAndArchiveDemotePendingActiveRoots(t *testing.T) {
 	}
 }
 
-func seedActivityOnlyAutomationIssueTask(t *testing.T, h automationSaveHarness, definition *models.AutomationDefinition, nodeKey string, category models.TaskCategory) models.Task {
+func seedActivityOnlyAutomationIssueTask(t *testing.T, h automationSaveHarness, definition *models.AutomationDefinition, nodeKey string, category models.TaskCategory, activityKey ...string) models.Task {
 	t.Helper()
 	ctx := context.Background()
 	node := automationNodeByKey(t, definition, nodeKey)
@@ -1058,10 +1058,14 @@ func seedActivityOnlyAutomationIssueTask(t *testing.T, h automationSaveHarness, 
 		Priority: 2, Status: models.StatusPending, Prompt: "Implement the approved issue.",
 		CreatedVia: persistence.AutomationCompilerTaskCreatedVia(definition.Automation.ID, node.NodeKey)}
 	require.NoError(t, h.taskRepo.Create(ctx, &task))
+	key := "implementation-task:" + task.ID
+	if len(activityKey) > 0 {
+		key = activityKey[0]
+	}
 	binding := models.AutomationBinding{AutomationID: definition.Automation.ID, VersionID: definition.Version.ID, NodeID: node.ID}
 	_, _, err := h.automationRepo.RecordProjectionEvent(ctx, persistence.AutomationProjectionEvent{
 		Context: models.AutomationContext{ProjectID: h.project.ID}, Binding: binding,
-		WorkItemKey: "issue-work-item:" + persistence.NewID(), ActivityKey: "implementation-task:" + task.ID,
+		WorkItemKey: "issue-work-item:" + persistence.NewID(), ActivityKey: key,
 		ActivityType: "create_task", ActivityStatus: models.AutomationActivityCompleted,
 		Resources: []models.AutomationActivityResource{{ResourceType: "task", ResourceID: task.ID, Relation: "child"}},
 	})
@@ -1107,15 +1111,12 @@ func TestAutomationPauseArchiveAndResumeActivityOnlyIssueTasks(t *testing.T) {
 }
 
 func TestAutomationPauseAndResumeGenericActivityOnlyCreatedTask(t *testing.T) {
-	h := newAutomationSaveHarness(t, "Generic activity child lifecycle")
+	h := newAutomationSaveStoreHarness(t, "Generic activity child lifecycle")
 	ctx := context.Background()
 	saved, err := h.compiler.Save(ctx, AutomationSaveRequest{ProjectID: h.project.ID, Source: "manual", CreatedVia: "web",
 		Candidate: customTaskOnlyCandidate("Generic activity child lifecycle", "Keep the definition task in Backlog.", models.CategoryBacklog)})
 	require.NoError(t, err)
-	child := seedActivityOnlyAutomationIssueTask(t, h, saved.Definition, "root", models.CategoryActive)
-	_, err = h.db.ExecContext(ctx, `UPDATE automation_activities SET activity_key = 'execution:generic:create-task'
-		WHERE id = (SELECT activity_id FROM automation_activity_resources WHERE resource_type = 'task' AND resource_id = ?)`, child.ID)
-	require.NoError(t, err)
+	child := seedActivityOnlyAutomationIssueTask(t, h, saved.Definition, "root", models.CategoryActive, "execution:generic:create-task")
 
 	require.NoError(t, h.lifecycle.Pause(ctx, h.project.ID, saved.Definition.Automation.ID))
 	stored, err := h.taskRepo.GetByID(ctx, child.ID)
@@ -1347,7 +1348,7 @@ func TestAutomationCustomScheduledGitHubInboxCreatesRuntimeIssueTasksWithoutRela
 }
 
 func TestAutomationResumeAdmitsDeferredScheduleGitHubInboxHandoff(t *testing.T) {
-	h := newAutomationSaveHarness(t, "Deferred scheduled GitHub inbox")
+	h := newAutomationSaveStoreHarness(t, "Deferred scheduled GitHub inbox")
 	ctx := context.Background()
 	projectRepo := h.stores.Projects
 	h.project.RepoURL = "https://github.com/example/automation.git"
@@ -1411,11 +1412,7 @@ func TestAutomationResumeAdmitsDeferredScheduleGitHubInboxHandoff(t *testing.T) 
 	deferred, err := h.taskRepo.GetByID(ctx, childID)
 	require.NoError(t, err)
 	require.Equal(t, models.CategoryBacklog, deferred.Category)
-	var entered int
-	require.NoError(t, h.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM automation_transitions
-		WHERE project_id = ? AND automation_id = ? AND version_id = ? AND from_node_id = ? AND to_node_id = ? AND state = 'entered'`,
-		h.project.ID, saved.Definition.Automation.ID, saved.Definition.Version.ID, sourceNode.ID,
-		automationNodeByKey(t, saved.Definition, "followup").ID).Scan(&entered))
+	entered := countAutomationHandoffs(t, h, saved.Definition, sourceNode.ID, automationNodeByKey(t, saved.Definition, "followup").ID, models.AutomationTransitionEntered)
 	require.Equal(t, 1, entered)
 
 	recorder := &recordingAutomationTaskService{TaskService: NewTaskService(h.taskRepo, h.stores.Attachments, nil)}
@@ -1552,7 +1549,7 @@ func TestAutomationCustomTaskFanoutContinuesAfterBusyBranch(t *testing.T) {
 		{name: "busy last", busyNodeKey: "second", busyStatus: models.StatusRunning, eligibleNode: "first"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			h := newAutomationSaveHarness(t, "Independent fanout "+test.name)
+			h := newAutomationSaveStoreHarness(t, "Independent fanout "+test.name)
 			ctx := context.Background()
 			candidate := models.AutomationDraftCandidate{
 				SchemaVersion: 1, Name: "Independent fanout", Description: "Activate every eligible child",
@@ -1613,11 +1610,7 @@ func TestAutomationCustomTaskFanoutContinuesAfterBusyBranch(t *testing.T) {
 			default:
 				t.Fatal("eligible fanout child was not submitted")
 			}
-			var blockedTransitions int
-			require.NoError(t, h.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM automation_transitions
-				WHERE project_id = ? AND automation_id = ? AND version_id = ? AND from_node_id = ? AND to_node_id = ? AND state = 'blocked'`,
-				h.project.ID, saved.Definition.Automation.ID, saved.Definition.Version.ID, sourceNode.ID,
-				automationNodeByKey(t, saved.Definition, test.busyNodeKey).ID).Scan(&blockedTransitions))
+			blockedTransitions := countAutomationHandoffs(t, h, saved.Definition, sourceNode.ID, automationNodeByKey(t, saved.Definition, test.busyNodeKey).ID, models.AutomationTransitionBlocked)
 			require.Equal(t, 1, blockedTransitions)
 
 			handled, err = llmSvc.activatePublishedCustomAutomationChild(causalCtx, *parent, "shared parent result\n[STATUS: SUCCESS]")
@@ -1628,10 +1621,7 @@ func TestAutomationCustomTaskFanoutContinuesAfterBusyBranch(t *testing.T) {
 				t.Fatalf("fanout retry submitted child %s more than once", duplicate.ID)
 			default:
 			}
-			require.Equal(t, 1, countRows(t, h.db, `SELECT COUNT(*) FROM automation_transitions
-				WHERE project_id = ? AND automation_id = ? AND version_id = ? AND from_node_id = ? AND to_node_id = ? AND state = 'blocked'`,
-				h.project.ID, saved.Definition.Automation.ID, saved.Definition.Version.ID, sourceNode.ID,
-				automationNodeByKey(t, saved.Definition, test.busyNodeKey).ID))
+			require.Equal(t, 1, countAutomationHandoffs(t, h, saved.Definition, sourceNode.ID, automationNodeByKey(t, saved.Definition, test.busyNodeKey).ID, models.AutomationTransitionBlocked))
 		})
 	}
 }
@@ -1639,7 +1629,7 @@ func TestAutomationCustomTaskFanoutContinuesAfterBusyBranch(t *testing.T) {
 func TestAutomationInactiveLifecycleDefersCompiledChildHandoff(t *testing.T) {
 	for _, state := range []models.AutomationLifecycleState{models.AutomationPaused, models.AutomationArchived} {
 		t.Run(string(state), func(t *testing.T) {
-			h := newAutomationSaveHarness(t, "Deferred child handoff "+string(state))
+			h := newAutomationSaveStoreHarness(t, "Deferred child handoff "+string(state))
 			ctx := context.Background()
 			candidate := customScheduledTaskCandidate("Deferred handoff", "Produce parent output.")
 			candidate.Nodes = append(candidate.Nodes, models.AutomationDraftNode{Key: "downstream", Name: "Downstream", Type: models.AutomationNodeAgentTask, Role: "task",
@@ -1684,30 +1674,30 @@ func TestAutomationInactiveLifecycleDefersCompiledChildHandoff(t *testing.T) {
 			require.Equal(t, models.CategoryBacklog, deferred.Category)
 			require.Equal(t, models.StatusPending, deferred.Status)
 			require.Contains(t, deferred.Prompt, "parent result")
-			var enteredTransitions int
-			require.NoError(t, h.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM automation_transitions
-				WHERE project_id = ? AND automation_id = ? AND version_id = ? AND from_node_id = ? AND to_node_id = ? AND state = 'entered'`,
-				h.project.ID, saved.Definition.Automation.ID, saved.Definition.Version.ID, sourceNode.ID, automationNodeByKey(t, saved.Definition, "downstream").ID).Scan(&enteredTransitions))
+			enteredTransitions := countAutomationHandoffs(t, h, saved.Definition, sourceNode.ID, automationNodeByKey(t, saved.Definition, "downstream").ID, models.AutomationTransitionEntered)
 			require.Equal(t, 1, enteredTransitions, "inactive handoff must retain its causal transition for Resume")
 			followupNode := automationNodeByKey(t, saved.Definition, "downstream")
-			var resumableChildren int
-			require.NoError(t, h.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM automation_definition_resources resource
-				JOIN automation_nodes n ON n.id = resource.node_id AND n.version_id = resource.version_id
-				JOIN tasks t ON t.id = resource.resource_id AND t.project_id = resource.project_id
-				WHERE resource.project_id = ? AND resource.automation_id = ? AND resource.version_id = ?
-					AND resource.resource_type = 'task' AND n.node_key = ? AND t.category = 'backlog'
-					AND t.status = 'pending' AND t.parent_task_id = ? AND EXISTS (
-						SELECT 1 FROM automation_transitions transition
-						WHERE transition.project_id = resource.project_id AND transition.automation_id = resource.automation_id
-							AND transition.version_id = resource.version_id AND transition.from_node_id = ?
-							AND transition.to_node_id = n.id AND transition.state = 'entered')`,
-				h.project.ID, saved.Definition.Automation.ID, saved.Definition.Version.ID, followupNode.NodeKey, parent.ID, sourceNode.ID).Scan(&resumableChildren))
+			current, err := h.automationRepo.GetDefinitionVersion(ctx, h.project.ID, saved.Definition.Automation.ID, saved.Definition.Version.ID)
+			require.NoError(t, err)
+			require.NotNil(t, current)
+			resumableChildren := 0
+			for _, resource := range current.Resources {
+				if resource.NodeID != followupNode.ID || resource.ResourceType != "task" {
+					continue
+				}
+				task, err := h.taskRepo.GetByID(ctx, resource.ResourceID)
+				require.NoError(t, err)
+				if task != nil && task.ProjectID == h.project.ID && task.Category == models.CategoryBacklog && task.Status == models.StatusPending && task.ParentTaskID != nil && *task.ParentTaskID == parent.ID && countAutomationHandoffs(t, h, current, sourceNode.ID, followupNode.ID, models.AutomationTransitionEntered) > 0 {
+					resumableChildren++
+				}
+			}
+
 			require.Equal(t, 1, resumableChildren, "deferred child must remain eligible through the exact current graph handoff")
-			var savedCandidateJSON string
-			require.NoError(t, h.db.QueryRowContext(ctx, `SELECT candidate_json FROM automation_graph_metadata
-				WHERE project_id = ? AND automation_id = ? AND version_id = ?`, h.project.ID, saved.Definition.Automation.ID, saved.Definition.Version.ID).Scan(&savedCandidateJSON))
+			metadata, err := h.automationRepo.GetAutomationGraphMetadata(ctx, h.project.ID, saved.Definition.Automation.ID, saved.Definition.Version.ID)
+			require.NoError(t, err)
+			require.NotNil(t, metadata)
 			var savedCandidate models.AutomationDraftCandidate
-			require.NoError(t, json.Unmarshal([]byte(savedCandidateJSON), &savedCandidate))
+			require.NoError(t, json.Unmarshal([]byte(metadata.CandidateJSON), &savedCandidate))
 			var savedFollowup models.AutomationDraftNode
 			for _, node := range savedCandidate.Nodes {
 				if node.Key == "downstream" {
@@ -1910,4 +1900,25 @@ func automationStateForTest(t *testing.T, env *teststores.Env) storefixture.Auto
 func newAutomationSaveStoreHarnessWithOptions(t *testing.T, opts []teststores.Option, name string) automationSaveHarness {
 	t.Helper()
 	return buildAutomationSaveHarness(t, teststores.New(t, opts...), name)
+}
+
+// countAutomationHandoffs reads every history page so a duplicate cannot hide beyond the first page.
+func countAutomationHandoffs(t *testing.T, h automationSaveHarness, definition *models.AutomationDefinition, from, to string, state models.AutomationTransitionState) int {
+	t.Helper()
+	count := 0
+	cursor := ""
+	for {
+		page, err := h.automationRepo.ListAutomationTransitions(t.Context(), h.project.ID, definition.Automation.ID, "", "", 100, cursor)
+		require.NoError(t, err)
+		for _, transition := range page.Items {
+			if transition.VersionID == definition.Version.ID && transition.FromNodeID == from && transition.ToNodeID == to && transition.State == state {
+				count++
+			}
+		}
+		if page.NextCursor == "" {
+			return count
+		}
+		require.NotEqual(t, cursor, page.NextCursor)
+		cursor = page.NextCursor
+	}
 }
