@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -12,9 +11,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
-	"github.com/openvibely/openvibely/internal/persistence/sqlite"
-	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/openvibely/openvibely/internal/testutil/storefixture"
 	"github.com/openvibely/openvibely/internal/testutil/teststores"
 )
 
@@ -24,9 +23,7 @@ const (
 )
 
 type validationProjectionFixture struct {
-	reader      *sql.DB
-	writer      *sql.DB
-	counter     *testutil.SQLStatementCounter
+	counter     storefixture.IOCounter
 	projectRepo persistence.ProjectStore
 	projectSvc  *ProjectService
 	repoPath    string
@@ -82,7 +79,7 @@ func BenchmarkValidateRepoPathsProjectionFileBacked(b *testing.B) {
 			if _, err := fixture.projectRepo.ListRepoValidationProjects(context.Background()); err != nil {
 				b.Fatalf("count compact project load: %v", err)
 			}
-			statementCount := len(fixture.counter.Statements())
+			statementCount := fixture.counter.Snapshot().Requests
 			fixture.counter.SetEnabled(false)
 			selectedBytes := validationCompactSelectedBytes(b, fixture.projectRepo)
 			b.ReportAllocs()
@@ -107,7 +104,7 @@ func BenchmarkValidateRepoPathsProjectionFileBacked(b *testing.B) {
 			if got := fixture.projectSvc.ValidateRepoPaths(context.Background()); len(got) != 0 {
 				b.Fatalf("count validation warnings = %v", got)
 			}
-			statementCount := len(fixture.counter.Statements())
+			statementCount := fixture.counter.Snapshot().Requests
 			fixture.counter.SetEnabled(false)
 			b.ReportAllocs()
 			b.ResetTimer()
@@ -124,62 +121,37 @@ func BenchmarkValidateRepoPathsProjectionFileBacked(b *testing.B) {
 
 func newValidationProjectionFixture(tb testing.TB, projectCount int) *validationProjectionFixture {
 	tb.Helper()
-	reader, writer, counter := testutil.NewFileBackedSplitStatementCountingTestDB(tb)
-	if reader.Stats().MaxOpenConnections != 1 || writer.Stats().MaxOpenConnections != 1 {
-		tb.Fatalf("validation fixture requires production 1W + 1R topology: reader_max=%d writer_max=%d", reader.Stats().MaxOpenConnections, writer.Stats().MaxOpenConnections)
-	}
-	var readerQueryOnly, writerQueryOnly int
-	if err := reader.QueryRow(`PRAGMA query_only`).Scan(&readerQueryOnly); err != nil {
-		tb.Fatalf("read reader query_only pragma: %v", err)
-	}
-	if err := writer.QueryRow(`PRAGMA query_only`).Scan(&writerQueryOnly); err != nil {
-		tb.Fatalf("read writer query_only pragma: %v", err)
-	}
-	if readerQueryOnly != 1 || writerQueryOnly != 0 {
-		tb.Fatalf("validation fixture query_only: reader=%d writer=%d, want 1/0", readerQueryOnly, writerQueryOnly)
-	}
-	unregisterWriter := sqlite.RegisterDedicatedWriter(reader, writer)
-	tb.Cleanup(unregisterWriter)
+	env := teststores.New(tb, teststores.WithProductionTopology(), teststores.WithIOCounting())
 
 	repoPath := filepath.Join(tb.TempDir(), "existing-repository")
 	if err := os.MkdirAll(repoPath, 0o755); err != nil {
 		tb.Fatalf("create existing repository path: %v", err)
 	}
-	seedValidationProjectionProjects(tb, writer, projectCount, repoPath)
-	repo := teststores.Of(reader).Projects
+	seedValidationProjectionProjects(tb, env, projectCount, repoPath)
+	repo := env.Projects
 	return &validationProjectionFixture{
-		reader:      reader,
-		writer:      writer,
-		counter:     counter,
+		counter:     env.IO,
 		projectRepo: repo,
 		projectSvc:  NewProjectService(repo),
 		repoPath:    repoPath,
 	}
 }
 
-func seedValidationProjectionProjects(tb testing.TB, db *sql.DB, projectCount int, repoPath string) {
+func seedValidationProjectionProjects(tb testing.TB, env *teststores.Env, projectCount int, repoPath string) {
 	tb.Helper()
 	ctx := context.Background()
-	tx, err := db.BeginTx(ctx, nil)
-	if err != nil {
-		tb.Fatalf("begin validation projection fixture: %v", err)
+	if err := env.Fixtures.RemoveAllProjects(ctx); err != nil {
+		tb.Fatal(err)
 	}
-	defer func() { _ = tx.Rollback() }()
-	if _, err := tx.ExecContext(ctx, `DELETE FROM projects`); err != nil {
-		tb.Fatalf("clear projects: %v", err)
-	}
+	var projects []models.Project
 	largeDescription := strings.Repeat("production-shaped project description ", 16<<10/len("production-shaped project description "))
 	largeURL := "https://github.example.test/openvibely/" + strings.Repeat("repository-configuration/", 80)
 	for i := 0; i < projectCount; i++ {
-		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO projects (id, name, description, repo_path, repo_url, is_default) VALUES (?, ?, ?, ?, ?, ?)`,
-			fmt.Sprintf("validation-projection-project-%04d", i), fmt.Sprintf("Validation Project %04d", i),
-			largeDescription, repoPath, largeURL, i == 0); err != nil {
-			tb.Fatalf("insert validation project %d: %v", i, err)
-		}
+		p := models.Project{ID: fmt.Sprintf("validation-projection-project-%04d", i), Name: fmt.Sprintf("Validation Project %04d", i), Description: largeDescription, RepoPath: repoPath, RepoURL: largeURL, IsDefault: i == 0}
+		projects = append(projects, p)
 	}
-	if err := tx.Commit(); err != nil {
-		tb.Fatalf("commit validation projection fixture: %v", err)
+	if err := env.Fixtures.SeedProjects(ctx, projects); err != nil {
+		tb.Fatal(err)
 	}
 }
 
@@ -263,7 +235,7 @@ func (fixture *validationProjectionFixture) countProjectLoadStatements(tb testin
 		tb.Fatalf("count compact project load: %v", err)
 	}
 	fixture.counter.SetEnabled(false)
-	return len(fixture.counter.Statements())
+	return fixture.counter.Snapshot().Requests
 }
 
 func (fixture *validationProjectionFixture) countCompleteValidationStatements(tb testing.TB) int {
@@ -274,7 +246,7 @@ func (fixture *validationProjectionFixture) countCompleteValidationStatements(tb
 		tb.Fatalf("compact validation warnings = %v", got)
 	}
 	fixture.counter.SetEnabled(false)
-	return len(fixture.counter.Statements())
+	return fixture.counter.Snapshot().Requests
 }
 
 func (fixture *validationProjectionFixture) selectedBytes(tb testing.TB) int {
