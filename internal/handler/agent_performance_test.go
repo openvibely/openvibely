@@ -16,18 +16,18 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/service"
-	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/openvibely/openvibely/internal/testutil/teststores"
 )
 
 type agentRefreshBenchmarkContextKey struct{}
 
 func BenchmarkListAgentsHTMXWarm100(b *testing.B) {
-	db, statementCounter := testutil.NewStatementCountingTestDB(b)
-	agentRepo := teststores.Of(db).Agents
-	lifecycleRepo := teststores.Of(db).Lifecycle
-	llmConfigRepo := teststores.Of(db).LLMConfigs
-	projectRepo := teststores.Of(db).Projects
+	db := teststores.New(b, teststores.WithIOCounting())
+	statementCounter := db.IO
+	agentRepo := db.Agents
+	lifecycleRepo := db.Lifecycle
+	llmConfigRepo := db.LLMConfigs
+	projectRepo := db.Projects
 	projectSvc := service.NewProjectService(projectRepo)
 	globalRoot := b.TempDir()
 	projectCheckout := b.TempDir()
@@ -81,33 +81,28 @@ func BenchmarkListAgentsHTMXWarm100(b *testing.B) {
 	}
 	warmDeclarationMetricsAfter := maintenance.DeclarationSyncMetrics()
 	statementCounter.SetEnabled(false)
-	warmStatements := statementCounter.Statements()
-	warmAgentLists := countSQLStatements(warmStatements, "SELECT ", " FROM agents WHERE COALESCE(generated_status, 'user_edited') <> 'archived' ORDER BY name COLLATE NOCASE ASC, name ASC, id ASC LIMIT ? OFFSET ?")
-	warmWrites := countSQLStatements(warmStatements, "INSERT ", "") + countSQLStatements(warmStatements, "UPDATE ", "") + countSQLStatements(warmStatements, "DELETE ", "")
-	warmAgentHookWrites := countSQLStatements(warmStatements, "INSERT ", "agents") + countSQLStatements(warmStatements, "UPDATE ", "agents") + countSQLStatements(warmStatements, "DELETE ", "agents") +
-		countSQLStatements(warmStatements, "INSERT ", "agent_lifecycle_hooks") + countSQLStatements(warmStatements, "UPDATE ", "agent_lifecycle_hooks") + countSQLStatements(warmStatements, "DELETE ", "agent_lifecycle_hooks")
+	stats := statementCounter.Snapshot()
+	warmAgentLists, warmWrites, warmAgentHookWrites := stats.AgentPageReads, stats.MutationRequests, stats.AgentDeclarationMutationRequests
+
 	if warmDeclarationMetricsAfter != warmDeclarationMetricsBefore {
 		b.Fatalf("warm ListAgents read or parsed unchanged declarations: before=%#v after=%#v", warmDeclarationMetricsBefore, warmDeclarationMetricsAfter)
 	}
 	if warmAgentLists == 0 {
-		b.Fatalf("warm ListAgents did not execute a bounded agent-page query; statements: %q", warmStatements)
+		b.Fatalf("warm ListAgents did not execute a bounded agent-page query; backend stats: %+v", stats)
 	}
-	for _, statement := range warmStatements {
-		normalized := strings.ToUpper(strings.TrimSpace(statement))
-		if strings.Contains(normalized, " FROM AGENTS WHERE COALESCE(GENERATED_STATUS, 'USER_EDITED') <> 'ARCHIVED' ORDER BY NAME ASC") &&
-			!strings.Contains(normalized, " LIMIT ? OFFSET ?") {
-			b.Fatalf("warm ListAgents executed an unbounded agent-list query: %q", statement)
-		}
+	if stats.UnboundedAgentListReads != 0 {
+		b.Fatalf("warm ListAgents executed %d unbounded agent-list reads", stats.UnboundedAgentListReads)
 	}
+
 	if warmAgentHookWrites != 0 {
-		b.Fatalf("warm ListAgents executed %d agent/hook writes, want 0; statements: %q", warmAgentHookWrites, warmStatements)
+		b.Fatalf("warm ListAgents executed %d agent/hook writes, want 0; backend stats: %+v", warmAgentHookWrites, stats)
 	}
 	if warmWrites != 0 {
-		b.Fatalf("warm ListAgents executed %d SQLite writes, want 0; statements: %q", warmWrites, warmStatements)
+		b.Fatalf("warm ListAgents executed %d SQLite writes, want 0; backend stats: %+v", warmWrites, stats)
 	}
 
 	b.ReportAllocs()
-	b.ReportMetric(float64(len(warmStatements)), "sqlite-statements/op")
+	b.ReportMetric(float64(stats.Requests), "sqlite-statements/op")
 	b.ReportMetric(float64(warmAgentLists), "agent-page-statements/op")
 	b.ReportMetric(float64(warmWrites), "sqlite-writes/op")
 	b.ReportMetric(float64(warmDeclarationMetricsAfter.ContentReads-warmDeclarationMetricsBefore.ContentReads), "declaration-reads/op")
@@ -133,7 +128,7 @@ func BenchmarkListAgentsHTMXWarm100(b *testing.B) {
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
 			firstRefreshStatement := make(chan struct{}, 1)
-			statementCounter.SetObserver(func(ctx context.Context, _ string) {
+			statementCounter.ObserveRequests(func(ctx context.Context) {
 				if marked, _ := ctx.Value(agentRefreshBenchmarkContextKey{}).(bool); marked {
 					select {
 					case firstRefreshStatement <- struct{}{}:
@@ -157,15 +152,14 @@ func BenchmarkListAgentsHTMXWarm100(b *testing.B) {
 			}
 			for query := 0; query < unrelatedQueriesPerBurst; query++ {
 				startedAt := time.Now()
-				var count int
-				err := db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM projects`).Scan(&count)
+				_, err := db.Projects.List(context.Background())
 				waits = append(waits, time.Since(startedAt))
 				if err != nil {
 					b.Fatal(err)
 				}
 			}
 			wg.Wait()
-			statementCounter.SetObserver(nil)
+			statementCounter.ObserveRequests(nil)
 			close(errs)
 			for refreshErr := range errs {
 				if refreshErr != nil {
@@ -183,20 +177,6 @@ func BenchmarkListAgentsHTMXWarm100(b *testing.B) {
 			b.ReportMetric(float64(p95.Nanoseconds()), "query-wait-p95-ns")
 		}
 	})
-}
-func countSQLStatements(statements []string, prefix, contains string) int {
-	count := 0
-	for _, statement := range statements {
-		normalized := strings.ToUpper(strings.TrimSpace(statement))
-		if prefix != "" && !strings.HasPrefix(normalized, strings.ToUpper(prefix)) {
-			continue
-		}
-		if contains != "" && !strings.Contains(normalized, strings.ToUpper(contains)) {
-			continue
-		}
-		count++
-	}
-	return count
 }
 
 func writeAgentBenchmarkDeclarations(b *testing.B, root, scope, projectID string, start, end int, prompt string) {

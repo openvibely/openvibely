@@ -46,9 +46,14 @@ func (f *fixtures) SetAutomationTemplateRevision(ctx context.Context, projectID,
 }
 
 func (f *fixtures) SeedAutomationInvocation(ctx context.Context, v models.AutomationInvocation) error {
-	_, err := f.db.ExecContext(ctx, `INSERT INTO automation_invocations (id,project_id,automation_id,version_id,trigger_node_id,trigger_resource_type,trigger_resource_id,occurrence_key,status,completed_at,started_at,error_message) VALUES (?,?,?,?,?,?,?,?,?,?,COALESCE(?,CURRENT_TIMESTAMP),?)`, v.ID, v.ProjectID, v.AutomationID, v.VersionID, v.TriggerNodeID, v.TriggerResourceType, v.TriggerResourceID, v.OccurrenceKey, v.Status, v.CompletedAt, v.StartedAt, v.ErrorMessage)
+	var createdAt any
+	if !v.CreatedAt.IsZero() {
+		createdAt = v.CreatedAt.UTC().Format("2006-01-02 15:04:05")
+	}
+	_, err := f.db.ExecContext(ctx, `INSERT INTO automation_invocations (id,project_id,automation_id,version_id,trigger_node_id,trigger_resource_type,trigger_resource_id,occurrence_key,status,completed_at,started_at,error_message,skipped_reason,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,COALESCE(?,CURRENT_TIMESTAMP),?,?,COALESCE(?,CURRENT_TIMESTAMP))`, v.ID, v.ProjectID, v.AutomationID, v.VersionID, v.TriggerNodeID, v.TriggerResourceType, v.TriggerResourceID, v.OccurrenceKey, v.Status, v.CompletedAt, v.StartedAt, v.ErrorMessage, v.SkippedReason, createdAt)
 	return err
 }
+
 func (f *fixtures) SeedRetainedScheduleOwnership(ctx context.Context, n models.AutomationNode, scheduleID string) error {
 	tx, err := f.db.BeginTx(ctx, nil)
 	if err != nil {

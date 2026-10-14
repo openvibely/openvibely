@@ -14,7 +14,8 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/events"
-	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/testutil/storefixture"
 	"github.com/openvibely/openvibely/internal/testutil/teststores"
 )
 
@@ -33,25 +34,28 @@ func BenchmarkProjectTabNavigationUnderLoad(b *testing.B) {
 		{"Idle", false, false}, {"Database", true, false}, {"SSE", false, true}, {"DatabaseAndSSE", true, true},
 	} {
 		b.Run(mode.name, func(b *testing.B) {
-			reader, writer, _ := testutil.NewFileBackedSplitStatementCountingTestDB(b)
+
 			broadcaster := events.NewBroadcaster()
-			env := newTestHandlerEnv(b, reader, withTestBroadcaster(broadcaster))
-			taskWriter := teststores.Of(writer).Tasks
-			execWriter := teststores.Of(writer).Executions
+			stores := teststores.New(b, teststores.WithProductionTopology(), teststores.WithBroadcaster(broadcaster))
+			env := wireTestHandler(b, stores.Stores, testHandlerOptions{broadcaster: broadcaster})
+			taskWriter := stores.Tasks
+			execWriter := stores.Executions
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			for p := 0; p < 3; p++ {
 				projectID := fmt.Sprintf("load-project-%d", p)
-				seedSwitchProject(b, writer, projectID, projectID, false, "", "", "")
+				if err := stores.Fixtures.SeedProjects(ctx, []models.Project{{ID: projectID, Name: projectID}}); err != nil {
+					b.Fatal(err)
+				}
 				for j := 0; j < 10; j++ {
 					id := fmt.Sprintf("load-task-%d-%d", p, j)
-					if _, err := writer.ExecContext(ctx, `INSERT INTO tasks (id, project_id, title, prompt, category, status) VALUES (?, ?, ?, 'benchmark', 'active', 'pending')`, id, projectID, id); err != nil {
+					if err := stores.Fixtures.SeedPendingTasks(ctx, []storefixture.PendingTask{{ID: id, ProjectID: projectID, Title: id, Prompt: "benchmark", Category: models.CategoryActive}}); err != nil {
 						b.Fatal(err)
 					}
 					if claimed, err := taskWriter.ClaimTask(ctx, id); err != nil || !claimed {
 						b.Fatalf("claim %s: claimed=%v err=%v", id, claimed, err)
 					}
-					if _, err := writer.ExecContext(ctx, `INSERT INTO executions (id, task_id, status, prompt_sent) VALUES (?, ?, 'running', 'benchmark')`, id, id); err != nil {
+					if err := stores.Fixtures.SeedExecutionHistory(ctx, []storefixture.ExecutionHistoryEntry{{ID: id, TaskID: id, Status: models.ExecRunning, PromptSent: "benchmark", StartedAt: time.Now().UTC()}}); err != nil {
 						b.Fatal(err)
 					}
 				}
@@ -138,7 +142,7 @@ func BenchmarkProjectTabNavigationUnderLoad(b *testing.B) {
 				}
 			}
 			latencies := make([]time.Duration, b.N)
-			beforeReader, beforeWriter := reader.Stats(), writer.Stats()
+			beforeReader, beforeWriter := stores.Contention().Reads, stores.Contention().Writes
 			beforeOps, beforeDelivered := operations.Load(), delivered.Load()
 			b.ReportAllocs()
 			b.ResetTimer()
@@ -171,7 +175,7 @@ func BenchmarkProjectTabNavigationUnderLoad(b *testing.B) {
 			}
 			elapsed := time.Since(started)
 			b.StopTimer()
-			afterReader, afterWriter := reader.Stats(), writer.Stats()
+			afterReader, afterWriter := stores.Contention().Reads, stores.Contention().Writes
 			ops, received := operations.Load()-beforeOps, delivered.Load()-beforeDelivered
 			cancel()
 			workers.Wait()

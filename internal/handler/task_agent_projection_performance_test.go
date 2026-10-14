@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"runtime"
 	"slices"
 	"strings"
@@ -15,15 +14,13 @@ import (
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
-	"github.com/openvibely/openvibely/internal/persistence/sqlite"
-	"github.com/openvibely/openvibely/internal/persistence/sqlite/database"
 	"github.com/openvibely/openvibely/internal/testutil/teststores"
 )
 
 const taskUIAgentPerformanceSamples = 5
 
 type taskUIAgentRenderFixture struct {
-	connections       *database.Connections
+	connections       *teststores.Env
 	h                 *Handler
 	e                 http.Handler
 	agentRepo         persistence.AgentStore
@@ -68,24 +65,10 @@ func BenchmarkHandlerTaskUIAgentProjection(b *testing.B) {
 
 func newTaskUIAgentRenderFixture(tb testing.TB) *taskUIAgentRenderFixture {
 	tb.Helper()
-	connections, err := database.NewReadWrite(filepath.Join(tb.TempDir(), "task-ui-agent-performance.db"))
-	if err != nil {
-		tb.Fatalf("open production-topology database: %v", err)
-	}
-	tb.Cleanup(func() {
-		if err := connections.Close(); err != nil {
-			tb.Errorf("close production-topology database: %v", err)
-		}
-	})
-	if connections.Reader == connections.Writer || connections.Reader.Stats().MaxOpenConnections != 1 || connections.Writer.Stats().MaxOpenConnections != 1 {
-		tb.Fatalf("Task UI performance fixture must use production 1W + 1R topology: reader=%p writer=%p reader_max=%d writer_max=%d",
-			connections.Reader, connections.Writer, connections.Reader.Stats().MaxOpenConnections, connections.Writer.Stats().MaxOpenConnections)
-	}
-	unregister := sqlite.RegisterDedicatedWriter(connections.Reader, connections.Writer)
-	tb.Cleanup(unregister)
+	connections := teststores.New(tb, teststores.WithProductionTopology())
 
 	ctx := context.Background()
-	writerAgentRepo := teststores.Of(connections.Writer).Agents
+	writerAgentRepo := connections.Agents
 	var assignedID, fallbackID string
 	for i := 0; i < 1000; i++ {
 		agent := newProductionTaskUIAgent(fmt.Sprintf("Task UI Performance Agent %04d", i))
@@ -104,7 +87,7 @@ func newTaskUIAgentRenderFixture(tb testing.TB) *taskUIAgentRenderFixture {
 		}
 	}
 
-	writerTaskRepo := teststores.Of(connections.Writer).Tasks
+	writerTaskRepo := connections.Tasks
 	boardTask := &models.Task{
 		ProjectID:         "default",
 		Title:             "Task UI Performance Board Badge",
@@ -141,13 +124,14 @@ func newTaskUIAgentRenderFixture(tb testing.TB) *taskUIAgentRenderFixture {
 		tb.Fatalf("create Task UI no-Agent detail task: %v", err)
 	}
 
-	h, e, _ := setupTestHandlerForDB(tb, connections.Reader)
-	h.SetAgentRepo(teststores.Of(connections.Reader).Agents)
+	wired := wireTestHandler(tb, connections.Stores, testHandlerOptions{})
+	h, e := wired.Handler, wired.Echo
+	h.SetAgentRepo(connections.Agents)
 	return &taskUIAgentRenderFixture{
 		connections:       connections,
 		h:                 h,
 		e:                 e,
-		agentRepo:         teststores.Of(connections.Reader).Agents,
+		agentRepo:         connections.Agents,
 		projectID:         "default",
 		detailTask:        detailTask.ID,
 		noAgentDetailTask: noAgentDetailTask.ID,
@@ -328,14 +312,14 @@ func (fixture *taskUIAgentRenderFixture) measureConcurrentRead(t *testing.T, loa
 		go func() {
 			ready <- struct{}{}
 			<-start
-			var projectID string
-			readErrors <- fixture.connections.Reader.QueryRowContext(context.Background(), `SELECT id FROM projects ORDER BY id LIMIT 1`).Scan(&projectID)
+			_, err := fixture.connections.Projects.GetIdentityByID(context.Background(), "default")
+			readErrors <- err
 		}()
 	}
 	for range concurrentReaders {
 		<-ready
 	}
-	before := fixture.connections.Reader.Stats()
+	before := fixture.connections.Contention().Reads
 	close(start)
 	for range concurrentReaders {
 		if err := <-readErrors; err != nil {
@@ -346,7 +330,7 @@ func (fixture *taskUIAgentRenderFixture) measureConcurrentRead(t *testing.T, loa
 	if result.code != http.StatusOK {
 		t.Fatalf("render with concurrent reads = status %d body %s", result.code, result.body)
 	}
-	after := fixture.connections.Reader.Stats()
+	after := fixture.connections.Contention().Reads
 	return after.WaitDuration - before.WaitDuration, after.WaitCount - before.WaitCount
 }
 

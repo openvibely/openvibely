@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"database/sql"
 	"encoding/base64"
 	"fmt"
 	"io"
@@ -24,8 +23,8 @@ import (
 	messagemail "github.com/emersion/go-message/mail"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
-	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/openvibely/openvibely/internal/testutil/storefixture"
 	"github.com/openvibely/openvibely/internal/testutil/teststores"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -1055,8 +1054,8 @@ func BenchmarkEmailPollOnceReceiptDeduplication(b *testing.B) {
 }
 
 type emailPollAddressSnapshotBenchmarkFixture struct {
-	db           *sql.DB
-	counter      *testutil.SQLStatementCounter
+	db           *teststores.Env
+	counter      storefixture.IOCounter
 	settingsRepo persistence.SettingsStore
 	svc          *EmailService
 	client       *fakeEmailIMAPClient
@@ -1065,9 +1064,10 @@ type emailPollAddressSnapshotBenchmarkFixture struct {
 
 func newEmailPollAddressSnapshotBenchmarkFixture(tb testing.TB, messageCount int) *emailPollAddressSnapshotBenchmarkFixture {
 	tb.Helper()
-	db, counter := testutil.NewStatementCountingTestDB(tb)
+	db := teststores.New(tb, teststores.WithIOCounting())
+	counter := db.IO
 	ctx := context.Background()
-	settingsRepo := teststores.Of(db).Settings
+	settingsRepo := db.Settings
 	if err := settingsRepo.Set(ctx, EmailSettingAddress, "bot@example.com"); err != nil {
 		tb.Fatalf("save email address: %v", err)
 	}
@@ -1118,30 +1118,18 @@ func (f *emailPollAddressSnapshotBenchmarkFixture) poll(ctx context.Context) {
 	f.svc.pollOnce(ctx, f.cfg)
 }
 
-const emailPollAddressPointQuery = "SELECT value FROM app_settings WHERE key = ?"
-
-func isEmailPollAddressPointQuery(query string) bool {
-	return strings.EqualFold(strings.TrimSpace(query), emailPollAddressPointQuery)
-}
-
 func TestEmailPollOnceAddressSnapshotAvoidsSettingsQueries(t *testing.T) {
 	for _, messageCount := range []int{1, 10, 100} {
 		t.Run(fmt.Sprintf("%d messages", messageCount), func(t *testing.T) {
 			fixture := newEmailPollAddressSnapshotBenchmarkFixture(t, messageCount)
 			fixture.useAddressSnapshot()
-			var totalStatements atomic.Int64
-			var appSettingsStatements atomic.Int64
-			fixture.counter.SetObserver(func(_ context.Context, query string) {
-				totalStatements.Add(1)
-				if isEmailPollAddressPointQuery(query) {
-					appSettingsStatements.Add(1)
-				}
-			})
+			fixture.counter.Reset()
+			fixture.counter.SetEnabled(true)
 			fixture.reset()
 			fixture.poll(context.Background())
 			require.Len(t, fixture.client.seenIDs(), messageCount)
-			require.Zero(t, totalStatements.Load())
-			require.Zero(t, appSettingsStatements.Load())
+			require.Zero(t, fixture.counter.Snapshot().Requests)
+			require.Zero(t, fixture.counter.Snapshot().SettingsSingleReads)
 		})
 	}
 }
@@ -1152,19 +1140,12 @@ func BenchmarkEmailPollAddressSnapshot(b *testing.B) {
 			fixture := newEmailPollAddressSnapshotBenchmarkFixture(b, messageCount)
 			fixture.useAddressSnapshot()
 			ctx := context.Background()
-			var totalStatements atomic.Int64
-			var appSettingsStatements atomic.Int64
-			fixture.counter.SetObserver(func(_ context.Context, query string) {
-				totalStatements.Add(1)
-				if isEmailPollAddressPointQuery(query) {
-					appSettingsStatements.Add(1)
-				}
-			})
+			fixture.counter.Reset()
+			fixture.counter.SetEnabled(true)
 			fixture.reset()
 			fixture.poll(ctx)
 			require.Len(b, fixture.client.seenIDs(), messageCount, "warm poll must acknowledge every self-sent message")
-			totalStatements.Store(0)
-			appSettingsStatements.Store(0)
+			fixture.counter.Reset()
 			fixture.counter.Reset()
 			durations := make([]time.Duration, 0, b.N)
 			b.ReportAllocs()
@@ -1178,8 +1159,8 @@ func BenchmarkEmailPollAddressSnapshot(b *testing.B) {
 			b.StopTimer()
 			sort.Slice(durations, func(i, j int) bool { return durations[i] < durations[j] })
 			b.ReportMetric(float64(durations[len(durations)/2].Nanoseconds()), "median_wall_ns/op")
-			b.ReportMetric(float64(totalStatements.Load())/float64(b.N), "sql_statements/op")
-			b.ReportMetric(float64(appSettingsStatements.Load())/float64(b.N), "app_settings_statements/op")
+			b.ReportMetric(float64(fixture.counter.Snapshot().Requests)/float64(b.N), "sql_statements/op")
+			b.ReportMetric(float64(fixture.counter.Snapshot().SettingsSingleReads)/float64(b.N), "app_settings_statements/op")
 		})
 	}
 }
@@ -1191,13 +1172,11 @@ const (
 	emailPollContentionHold         = 10 * time.Millisecond
 )
 
-const emailPollContentionQuery = "SELECT COUNT(*) FROM projects"
-
 // emailPollContentionReceiptStore holds a real SQLite query open after the first
 // message reaches the receipt-record boundary so unrelated-query waits are
 // measured against the same database hold.
 type emailPollContentionReceiptStore struct {
-	db       *sql.DB
+	db       *teststores.Env
 	acquired chan struct{}
 	release  <-chan struct{}
 	finished chan struct{}
@@ -1211,7 +1190,7 @@ func (s *emailPollContentionReceiptStore) Exists(_ context.Context, _, _ string)
 }
 
 func (s *emailPollContentionReceiptStore) holdCommonQuery() {
-	rows, err := s.db.QueryContext(context.Background(), emailPollContentionQuery)
+	release, err := s.db.HoldProjectRead(context.Background())
 	s.queryErr = err
 	close(s.acquired)
 	if err != nil {
@@ -1222,7 +1201,7 @@ func (s *emailPollContentionReceiptStore) holdCommonQuery() {
 	case <-s.release:
 	case <-s.abort:
 	}
-	_ = rows.Close()
+	_ = release()
 	close(s.finished)
 }
 
@@ -1294,7 +1273,7 @@ func measureEmailPollAddressSnapshotContention(tb testing.TB) []time.Duration {
 		queryErrors := make(chan error, emailPollContentionQueries)
 		// Snapshot before launching competitors. The ready/start barrier proves all
 		// competitors are queued behind the same held database connection.
-		waitCount := fixture.db.Stats().WaitCount
+		waitCount := fixture.db.Contention().Reads.WaitCount
 		var queries sync.WaitGroup
 		queries.Add(emailPollContentionQueries)
 		for i := 0; i < emailPollContentionQueries; i++ {
@@ -1303,8 +1282,7 @@ func measureEmailPollAddressSnapshotContention(tb testing.TB) []time.Duration {
 				queryReady <- struct{}{}
 				<-startQueries
 				started := time.Now()
-				var projectCount int
-				err := fixture.db.QueryRowContext(ctx, emailPollContentionQuery).Scan(&projectCount)
+				_, err := fixture.db.Projects.List(ctx)
 				if err != nil {
 					queryErrors <- err
 					return
@@ -1317,7 +1295,7 @@ func measureEmailPollAddressSnapshotContention(tb testing.TB) []time.Duration {
 		}
 		close(startQueries)
 		require.Eventually(tb, func() bool {
-			return fixture.db.Stats().WaitCount >= waitCount+emailPollContentionQueries
+			return fixture.db.Contention().Reads.WaitCount >= waitCount+emailPollContentionQueries
 		}, time.Second, time.Millisecond, "all unrelated queries must queue behind the common poll query")
 
 		started := time.Now()
@@ -2535,22 +2513,18 @@ func BenchmarkEmailServiceSettingsContention(b *testing.B) {
 		unrelatedQueries = 100
 	)
 	b.Run("current", func(b *testing.B) {
-		db := teststores.NewDB(b)
+		db := teststores.New(b)
 		ctx := context.Background()
-		settingsRepo := teststores.Of(db).Settings
+		settingsRepo := db.Settings
 		for key, value := range map[string]string{
 			EmailSettingProvider: EmailProviderCustom, EmailSettingAddress: "bot@example.com", EmailSettingPassword: "secret",
 			EmailSettingIMAPHost: "imap.example.com", EmailSettingSMTPHost: "smtp.example.com", EmailSettingSendResponses: "true",
 		} {
 			require.NoError(b, settingsRepo.Set(ctx, key, value))
 		}
-		svc := NewEmailService(settingsRepo, teststores.Of(db).Projects, teststores.Of(db).LLMConfigs, teststores.Of(db).Tasks, teststores.Of(db).Executions, teststores.Of(db).Schedules, nil, nil, nil, teststores.Of(db).EmailAuth, teststores.Of(db).EmailTaskContexts)
+		svc := NewEmailService(settingsRepo, db.Projects, db.LLMConfigs, db.Tasks, db.Executions, db.Schedules, nil, nil, nil, db.EmailAuth, db.EmailTaskContexts)
 		var settingsSelects atomic.Int64
-		settingsRepo.(*sqlite.SettingsRepo).SetQueryObserver(func(query string) {
-			if strings.Contains(query, "FROM app_settings") {
-				settingsSelects.Add(1)
-			}
-		})
+		db.ObserveSettingsReads(func() { settingsSelects.Add(1) }, nil)
 		var smtpCalls atomic.Int64
 		svc.sendMail = func(context.Context, EmailRuntimeConfig, string, string, string, string, string, string) error {
 			smtpCalls.Add(1)
@@ -2564,14 +2538,7 @@ func BenchmarkEmailServiceSettingsContention(b *testing.B) {
 			acquired := make(chan struct{})
 			release := make(chan struct{})
 			var blockFirst sync.Once
-			settingsRepo.(*sqlite.SettingsRepo).SetQueryAcquiredObserver(func(query string) {
-				if strings.Contains(query, "FROM app_settings") {
-					blockFirst.Do(func() {
-						close(acquired)
-						<-release
-					})
-				}
-			})
+			db.ObserveSettingsReads(func() { settingsSelects.Add(1) }, func() { blockFirst.Do(func() { close(acquired); <-release }) })
 
 			iterationStart := time.Now()
 			emailDone := make(chan error, 1)
@@ -2591,7 +2558,7 @@ func BenchmarkEmailServiceSettingsContention(b *testing.B) {
 			}()
 			<-acquired
 
-			waitCount := db.Stats().WaitCount
+			waitCount := db.Contention().Reads.WaitCount
 			waitResults := make(chan time.Duration, unrelatedQueries)
 			var unrelated sync.WaitGroup
 			unrelated.Add(unrelatedQueries)
@@ -2599,8 +2566,7 @@ func BenchmarkEmailServiceSettingsContention(b *testing.B) {
 				go func() {
 					defer unrelated.Done()
 					waitStart := time.Now()
-					var value string
-					err := db.QueryRowContext(ctx, "SELECT value FROM app_settings WHERE key = ?", EmailSettingAddress).Scan(&value)
+					_, err := db.Projects.GetIdentityByID(ctx, "default")
 					if err != nil {
 						b.Errorf("unrelated query failed: %v", err)
 					}
@@ -2608,7 +2574,7 @@ func BenchmarkEmailServiceSettingsContention(b *testing.B) {
 				}()
 			}
 			require.Eventually(b, func() bool {
-				return db.Stats().WaitCount >= waitCount+unrelatedQueries
+				return db.Contention().Reads.WaitCount >= waitCount+unrelatedQueries
 			}, time.Second, time.Millisecond, "all unrelated queries must queue behind acquired settings query")
 			close(release)
 			unrelated.Wait()
@@ -2620,7 +2586,7 @@ func BenchmarkEmailServiceSettingsContention(b *testing.B) {
 			}
 		}
 		b.StopTimer()
-		settingsRepo.(*sqlite.SettingsRepo).SetQueryAcquiredObserver(nil)
+		db.ObserveSettingsReads(nil, nil)
 		require.Equal(b, int64(b.N*emailOperations), smtpCalls.Load(), "every measured operation must reach the stubbed SMTP handoff")
 		expectedSettingsSelects := int64(b.N * emailOperations)
 		require.Equal(b, expectedSettingsSelects, settingsSelects.Load(), "measured service path must match the settings-read ledger")
@@ -3480,7 +3446,8 @@ func TestEmailService_InboundInlineTextAttachmentHonorsSkipSetting(t *testing.T)
 		require.Empty(t, body)
 		require.Empty(t, attachments)
 
-		svc, _, _, project, _, _ := newEmailAttachmentTestService(t)
+		env := teststores.New(t)
+		svc, _, _, project, _, _ := newEmailAttachmentTestServiceWithStores(t, env)
 		called := false
 		svc.SetChannelChatRunner(func(context.Context, ChannelChatRunRequest) { called = true })
 		svc.ProcessIncoming(ctx, EmailInboundMessage{FromAddress: "alice@example.com", Subject: "Notes", MessageID: "<notes-skipped@example.com>", Body: body, Attachments: attachments})
@@ -3488,9 +3455,9 @@ func TestEmailService_InboundInlineTextAttachmentHonorsSkipSetting(t *testing.T)
 		tasks, err := svc.taskRepo.ListByProject(ctx, project.ID, "")
 		require.NoError(t, err)
 		require.Empty(t, tasks, "skipped attachment-only email must not create a task")
-		executions, err := svc.execRepo.(*sqlite.ExecutionRepo).ListByProject(ctx, project.ID, 10)
+		executions, err := env.Fixtures.CountProjectExecutions(ctx, project.ID)
 		require.NoError(t, err)
-		require.Empty(t, executions, "skipped attachment-only email must not create an execution")
+		require.Zero(t, executions, "skipped attachment-only email must not create an execution")
 	})
 
 	t.Run("enabled attachment-only message is linked to the execution", func(t *testing.T) {
@@ -3518,7 +3485,10 @@ func TestEmailService_InboundInlineTextAttachmentHonorsSkipSetting(t *testing.T)
 
 func newEmailAttachmentTestService(t *testing.T) (*EmailService, persistence.ChatAttachmentStore, persistence.ThreadInputStore, *models.Project, *models.LLMConfig, *models.LLMConfig) {
 	t.Helper()
-	env := teststores.New(t)
+	return newEmailAttachmentTestServiceWithStores(t, teststores.New(t))
+}
+func newEmailAttachmentTestServiceWithStores(t *testing.T, env *teststores.Env) (*EmailService, persistence.ChatAttachmentStore, persistence.ThreadInputStore, *models.Project, *models.LLMConfig, *models.LLMConfig) {
+	t.Helper()
 	ctx := context.Background()
 	settingsRepo := env.Settings
 	projectRepo := env.Projects

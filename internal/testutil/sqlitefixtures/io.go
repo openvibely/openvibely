@@ -1,6 +1,7 @@
 package sqlitefixtures
 
 import (
+	"context"
 	"strings"
 
 	"github.com/openvibely/openvibely/internal/testutil"
@@ -12,6 +13,13 @@ type ioCounter struct{ counter *testutil.SQLStatementCounter }
 func NewIOCounter(counter *testutil.SQLStatementCounter) storefixture.IOCounter {
 	return &ioCounter{counter: counter}
 }
+func (c *ioCounter) ObserveRequests(observer func(context.Context)) {
+	if observer == nil {
+		c.counter.SetObserver(nil)
+		return
+	}
+	c.counter.SetObserver(func(ctx context.Context, _ string) { observer(ctx) })
+}
 func (c *ioCounter) Reset()                  { c.counter.Reset() }
 func (c *ioCounter) SetEnabled(enabled bool) { c.counter.SetEnabled(enabled) }
 func (c *ioCounter) Snapshot() storefixture.IOStats {
@@ -19,7 +27,20 @@ func (c *ioCounter) Snapshot() storefixture.IOStats {
 	stats := storefixture.IOStats{Requests: len(statements), ReadTextBytes: c.counter.SelectedTextBytes()}
 	for _, statement := range statements {
 		q := strings.ToLower(strings.Join(strings.Fields(statement), " "))
+		if strings.HasPrefix(q, "insert ") || strings.HasPrefix(q, "update ") || strings.HasPrefix(q, "delete ") {
+			stats.MutationRequests++
+			if strings.Contains(q, "agents") || strings.Contains(q, "agent_lifecycle_hooks") {
+				stats.AgentDeclarationMutationRequests++
+			}
+		}
 		if strings.HasPrefix(q, "select ") {
+			if strings.Contains(q, " from agents where coalesce(generated_status, 'user_edited') <> 'archived' order by name collate nocase asc, name asc, id asc limit ? offset ?") {
+				stats.AgentPageReads++
+			}
+			if strings.Contains(q, " from agents where coalesce(generated_status, 'user_edited') <> 'archived' order by name asc") && !strings.Contains(q, " limit ? offset ?") {
+				stats.UnboundedAgentListReads++
+			}
+
 			if strings.Contains(q, "from executions") {
 				if strings.Contains(q, "order by started_at desc, rowid desc limit ?") {
 					stats.ExecutionWindowReads++

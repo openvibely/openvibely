@@ -16,7 +16,8 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/events"
-	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/testutil/storefixture"
 	"github.com/openvibely/openvibely/internal/testutil/teststores"
 	"github.com/openvibely/openvibely/web/static"
 )
@@ -38,26 +39,29 @@ func TestProjectTabsUnderLoadInChrome(t *testing.T) {
 	}{{10, 0, false}, {30, 0, false}, {30, 150 * time.Millisecond, false}, {30, 150 * time.Millisecond, true}} {
 		t.Run(fmt.Sprintf("3x%d/delay=%s/burst=%t", scenario.tasks, scenario.delay, scenario.burst), func(t *testing.T) {
 			tasks := scenario.tasks
-			reader, writer, _ := testutil.NewFileBackedSplitStatementCountingTestDB(t)
+
 			broadcaster := events.NewBroadcaster()
-			env := newTestHandlerEnv(t, reader, withTestBroadcaster(broadcaster))
-			taskRepo := teststores.Of(writer).Tasks
-			execRepo := teststores.Of(writer).Executions
+			stores := teststores.New(t, teststores.WithProductionTopology(), teststores.WithBroadcaster(broadcaster))
+			env := wireTestHandler(t, stores.Stores, testHandlerOptions{broadcaster: broadcaster})
+			taskRepo := stores.Tasks
+			execRepo := stores.Executions
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			var ids []string
 			for p := 0; p < 3; p++ {
 				project := fmt.Sprintf("stress-project-%d", p)
-				seedSwitchProject(t, writer, project, project, false, "", "", "")
+				if err := stores.Fixtures.SeedProjects(ctx, []models.Project{{ID: project, Name: project}}); err != nil {
+					t.Fatal(err)
+				}
 				for j := 0; j < tasks; j++ {
 					id := fmt.Sprintf("stress-task-%d-%d", p, j)
-					if _, err := writer.ExecContext(ctx, `INSERT INTO tasks (id,project_id,title,prompt,category,status) VALUES (?,?,?,'stress','active','pending')`, id, project, id); err != nil {
+					if err := stores.Fixtures.SeedPendingTasks(ctx, []storefixture.PendingTask{{ID: id, ProjectID: project, Title: id, Prompt: "stress", Category: models.CategoryActive}}); err != nil {
 						t.Fatal(err)
 					}
 					if claimed, err := taskRepo.ClaimTask(ctx, id); err != nil || !claimed {
 						t.Fatalf("claim: %v %v", claimed, err)
 					}
-					if _, err := writer.ExecContext(ctx, `INSERT INTO executions(id,task_id,status,prompt_sent) VALUES (?,?,'running','stress')`, id, id); err != nil {
+					if err := stores.Fixtures.SeedExecutionHistory(ctx, []storefixture.ExecutionHistoryEntry{{ID: id, TaskID: id, Status: models.ExecRunning, PromptSent: "stress", StartedAt: time.Now().UTC()}}); err != nil {
 						t.Fatal(err)
 					}
 					ids = append(ids, id)
@@ -173,7 +177,7 @@ func TestProjectTabsUnderLoadInChrome(t *testing.T) {
 			defer stopHandlerBrowserProcess(cmd)
 			select {
 			case outcome := <-result:
-				t.Logf("%s; operations=%d navigations=%d SSE connections=%d reader wait=%v writer wait=%v", outcome, operations.Load(), navigations.Load(), streamConnections.Load(), reader.Stats().WaitDuration, writer.Stats().WaitDuration)
+				t.Logf("%s; operations=%d navigations=%d SSE connections=%d reader wait=%v writer wait=%v", outcome, operations.Load(), navigations.Load(), streamConnections.Load(), stores.Contention().Reads.WaitDuration, stores.Contention().Writes.WaitDuration)
 				if !strings.HasPrefix(outcome, "pass:") {
 					t.Error(outcome)
 				}

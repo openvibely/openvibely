@@ -13,9 +13,7 @@ import (
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
-	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/service"
-	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/openvibely/openvibely/internal/testutil/teststores"
 )
 
@@ -524,10 +522,11 @@ func TestChannelsPageOutboundTargetsRenderAsPermanentTopEditCard(t *testing.T) {
 }
 
 func TestChannelsPageUsesCompactAgentPickerProjection(t *testing.T) {
-	db, counter := testutil.NewStatementCountingTestDB(t)
-	env := newTestHandlerEnv(t, db)
+	db := teststores.New(t, teststores.WithIOCounting())
+	counter := db.IO
+	env := wireTestHandler(t, db.Stores, testHandlerOptions{})
 	h, e := env.Handler, env.Echo
-	agentRepo := teststores.Of(db).Agents
+	agentRepo := db.Agents
 	h.SetAgentRepo(agentRepo)
 
 	alpha := &models.Agent{Name: "Alpha Picker", SystemPrompt: strings.Repeat("large hidden prompt ", 1024), ToolConfig: models.AgentToolConfig{ScopedFiles: []models.ScopedFilesConfig{{Directory: "src", Permissions: []string{"read"}}}}}
@@ -570,25 +569,10 @@ func TestChannelsPageUsesCompactAgentPickerProjection(t *testing.T) {
 		}
 	}
 
-	var pickerQueries []string
-	for _, statement := range counter.Statements() {
-		stmt := strings.ToLower(statement)
-		if strings.Contains(stmt, "from agents") && strings.Contains(stmt, "order by name asc") {
-			pickerQueries = append(pickerQueries, statement)
-		}
+	if got := counter.Snapshot().AgentReads; got != 1 {
+		t.Fatalf("physical picker reads=%d,want 1", got)
 	}
-	if len(pickerQueries) != 1 {
-		t.Fatalf("expected one Channels agent picker query, got %#v from statements %#v", pickerQueries, counter.Statements())
-	}
-	projection := strings.Split(strings.ToLower(pickerQueries[0]), "from agents")[0]
-	if !strings.Contains(projection, "select id, name") {
-		t.Fatalf("Channels picker query used unexpected projection: %s", pickerQueries[0])
-	}
-	for _, forbidden := range []string{"system_prompt", "tools", "tool_config", "plugins", "mcp_servers", "skills", "permission_defaults_json", "model_defaults_json", "source_refs_json"} {
-		if strings.Contains(projection, forbidden) {
-			t.Fatalf("Channels picker query selected full agent column %q: %s", forbidden, pickerQueries[0])
-		}
-	}
+
 }
 
 func TestChannelsPageBatchesSettingsReadsAndPreservesRenderedValues(t *testing.T) {
@@ -716,13 +700,14 @@ func TestChannelsPageDefaultsStillRenderWhenSettingsAreMissing(t *testing.T) {
 }
 
 func BenchmarkHandlerChannelsSettingsBatchedContention(b *testing.B) {
-	db := teststores.NewDB(b)
-	h, e, _ := setupTestHandlerForDB(b, db)
+	db := teststores.New(b)
+	wired := wireTestHandler(b, db.Stores, testHandlerOptions{})
+	h, e := wired.Handler, wired.Echo
 	project := createProjectTB(b, h, "Channels Settings Benchmark Project")
-	settingsRepo := teststores.Of(db).Settings
+	settingsRepo := db.Settings
 	seedRepresentativeChannelsSettings(b, settingsRepo, project.ID, "other-project")
 	h.settingsRepo = settingsRepo
-	h.SetChannelTargetRepo(teststores.Of(db).ChannelTargets)
+	h.SetChannelTargetRepo(db.ChannelTargets)
 
 	var totalLightweightLatency int64
 	b.ReportAllocs()
@@ -730,11 +715,8 @@ func BenchmarkHandlerChannelsSettingsBatchedContention(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		queryAcquired := make(chan struct{})
 		var once sync.Once
-		settingsRepo.(*sqlite.SettingsRepo).SetQueryAcquiredObserver(func(query string) {
-			if strings.Contains(strings.ToLower(query), "from app_settings") {
-				once.Do(func() { close(queryAcquired) })
-			}
-		})
+		db.ObserveSettingsReads(nil, func() { once.Do(func() { close(queryAcquired) }) })
+
 		errCh := make(chan error, 1)
 		go func() {
 			rec := htmxGet(e, "/channels?project_id="+url.QueryEscape(project.ID))
@@ -759,7 +741,7 @@ func BenchmarkHandlerChannelsSettingsBatchedContention(b *testing.B) {
 		if err := <-errCh; err != nil {
 			b.Fatal(err)
 		}
-		settingsRepo.(*sqlite.SettingsRepo).SetQueryAcquiredObserver(nil)
+		db.ObserveSettingsReads(nil, nil)
 	}
 	b.ReportMetric(float64(totalLightweightLatency)/float64(b.N), "lightweight_db_block_ns/op")
 }

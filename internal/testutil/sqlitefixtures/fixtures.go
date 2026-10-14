@@ -644,3 +644,8 @@ func (f *fixtures) AsyncToolCallStatus(ctx context.Context, id string) (string, 
 	}
 	return status, err
 }
+
+func (f *fixtures) ClearProjects(ctx context.Context) error {
+	_, err := f.db.ExecContext(ctx, `DELETE FROM projects`)
+	return err
+}
