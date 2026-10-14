@@ -578,14 +578,28 @@ func (ws *WorktreeService) syncWorktreeFromMainAtStartUnlocked(ctx context.Conte
 	runGit := func(dir string, args ...string) ([]byte, error) {
 		cmdCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
 		defer cancel()
-		cmd := exec.CommandContext(cmdCtx, "git", args...)
-		cmd.Dir = dir
-		cmd.Env = append(os.Environ(),
-			"GIT_TERMINAL_PROMPT=0",
-			"GIT_ASKPASS=true",
-			"SSH_ASKPASS=true",
-		)
-		return cmd.CombinedOutput()
+		for attempt := 0; ; attempt++ {
+			cmd := exec.CommandContext(cmdCtx, "git", args...)
+			cmd.Dir = dir
+			cmd.Env = append(os.Environ(),
+				"GIT_TERMINAL_PROMPT=0",
+				"GIT_ASKPASS=true",
+				"SSH_ASKPASS=true",
+			)
+			out, err := cmd.CombinedOutput()
+			// Another Git process may briefly own the index. Retry only this
+			// contention error, without deleting a lock owned by another process.
+			if err == nil || attempt >= 2 || !strings.Contains(string(out), "index.lock") || !strings.Contains(string(out), "File exists") {
+				return out, err
+			}
+			timer := time.NewTimer(time.Duration(attempt+1) * 250 * time.Millisecond)
+			select {
+			case <-cmdCtx.Done():
+				timer.Stop()
+				return out, cmdCtx.Err()
+			case <-timer.C:
+			}
+		}
 	}
 
 	currentBranch := GetCurrentBranch(task.WorktreePath)
@@ -597,10 +611,7 @@ func (ws *WorktreeService) syncWorktreeFromMainAtStartUnlocked(ctx context.Conte
 	statusOut, statusErr := runGit(task.WorktreePath, "status", "--porcelain")
 	if statusErr != nil {
 		applog.Infof("[worktree] startup auto-merge failed task=%s unable to read git status: %v", task.ID, statusErr)
-		if ws.taskRepo != nil {
-			_ = ws.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusFailed)
-		}
-		return false, fmt.Errorf("could not check worktree status in %s: %w", task.WorktreePath, statusErr)
+		return false, fmt.Errorf("could not check worktree status in %s: %w: %s", task.WorktreePath, statusErr, strings.TrimSpace(string(statusOut)))
 	}
 	if strings.TrimSpace(string(statusOut)) != "" {
 		applog.Infof("[worktree] startup auto-merge skipped task=%s branch=%s reason=dirty_worktree", task.ID, currentBranch)
@@ -647,9 +658,6 @@ func (ws *WorktreeService) syncWorktreeFromMainAtStartUnlocked(ctx context.Conte
 			return false, conflictErr
 		}
 
-		if ws.taskRepo != nil {
-			_ = ws.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusFailed)
-		}
 		if mergeMsg == "" {
 			mergeMsg = mergeErr.Error()
 		}
