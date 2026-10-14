@@ -9259,3 +9259,79 @@ func TestFollowupStopDuringFinalizationPreservesSuccessor(t *testing.T) {
 		})
 	}
 }
+
+func TestProcessStreamingResponse_FollowupIndexLock(t *testing.T) {
+	for _, transient := range []bool{true, false} {
+		t.Run(fmt.Sprintf("transient=%v", transient), func(t *testing.T) {
+			h, _, configs := setupTestHandler(t)
+			h.workerSvc = nil
+			ctx := context.Background()
+			mock := testutil.NewMockLLMCaller()
+			mock.Response = "Done."
+			mock.TextOnly = mock.Response
+			h.llmSvc.SetLLMCaller(mock)
+			repoDir := createHandlerTestGitRepo(t)
+			project := &models.Project{Name: "Index lock followup", RepoPath: repoDir}
+			require.NoError(t, h.projectSvc.Create(ctx, project))
+			agent := createAgent(t, configs)
+			task := createTask(t, h, project.ID, "Locked followup", func(tk *models.Task) {
+				tk.Status = models.StatusRunning
+				tk.Category = models.CategoryActive
+				tk.MergeStatus = models.MergeStatusPending
+			})
+			h.worktreeSvc = service.NewWorktreeService(h.taskRepo, h.projectRepo, h.settingsRepo)
+			wtPath, wtBranch, err := h.worktreeSvc.SetupWorktree(ctx, task, repoDir)
+			require.NoError(t, err)
+			task.WorktreePath, task.WorktreeBranch = wtPath, wtBranch
+			runGit := func(dir string, args ...string) string {
+				cmd := exec.Command("git", args...)
+				cmd.Dir = dir
+				out, err := cmd.CombinedOutput()
+				require.NoError(t, err, string(out))
+				return strings.TrimSpace(string(out))
+			}
+			require.NoError(t, os.WriteFile(filepath.Join(repoDir, "update.txt"), []byte("target update"), 0644))
+			runGit(repoDir, "add", "update.txt")
+			runGit(repoDir, "commit", "-m", "advance target")
+			lockPath := runGit(wtPath, "rev-parse", "--git-path", "index.lock")
+			if !filepath.IsAbs(lockPath) {
+				lockPath = filepath.Join(wtPath, lockPath)
+			}
+			require.NoError(t, os.WriteFile(lockPath, []byte("held by another process"), 0644))
+			t.Cleanup(func() { _ = os.Remove(lockPath) })
+			if transient {
+				released := make(chan error, 1)
+				go func() {
+					time.Sleep(100 * time.Millisecond)
+					released <- os.Remove(lockPath)
+				}()
+				defer func() { require.NoError(t, <-released) }()
+			}
+			execution := createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) {
+				ex.Status = models.ExecRunning
+				ex.IsFollowup = true
+				ex.PromptSent = "Continue"
+			})
+			h.processStreamingResponse(streamingResponseParams{
+				ExecID: execution.ID, TaskID: task.ID, Task: task,
+				Agent: *agent, ProjectID: project.ID, Message: "Continue",
+				IsTaskFollowup: true, DeferHistoryLoad: true,
+			})
+			updated, err := h.taskRepo.GetByID(ctx, task.ID)
+			require.NoError(t, err)
+			require.Equal(t, models.MergeStatusPending, updated.MergeStatus)
+			finished, err := h.execRepo.GetByID(ctx, execution.ID)
+			require.NoError(t, err)
+			if transient {
+				require.Equal(t, models.StatusCompleted, updated.Status)
+				require.Equal(t, models.ExecCompleted, finished.Status)
+				require.FileExists(t, filepath.Join(wtPath, "update.txt"))
+			} else {
+				require.Equal(t, models.StatusFailed, updated.Status)
+				require.Equal(t, models.ExecFailed, finished.Status)
+				require.Contains(t, finished.ErrorMessage, "index.lock")
+				require.FileExists(t, lockPath)
+			}
+		})
+	}
+}

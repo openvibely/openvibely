@@ -1,8 +1,9 @@
 package prompt
 
 import (
-	"path/filepath"
 	"strings"
+
+	"github.com/openvibely/openvibely/pkg/executionenv"
 )
 
 // AgentSystemPrompt is the shared system prompt for all agentic code execution,
@@ -12,7 +13,7 @@ import (
 // Sections mirror the Claude CLI binary's internal prompt:
 //   - Doing tasks, Executing actions with care, Using your tools,
 //     Tone and style, Output efficiency
-const AgentSystemPrompt = `You are an expert software engineer acting as a coding agent. You have tools to read files, write files, edit files, run bash commands, list directories, and search code.
+const AgentSystemPrompt = `You are an expert software engineer acting as a coding agent. You have tools to read files, write files, edit files, run shell commands, list directories, and search code.
 
 # Doing tasks
 
@@ -40,7 +41,7 @@ const AgentSystemPrompt = `You are an expert software engineer acting as a codin
 
 - Use read_file to examine files before editing them
 - Use edit_file for surgical changes (find/replace), write_file for new files or full rewrites
-- Use bash to run tests, builds, git commands, and other shell operations
+- Use shell to run tests, builds, git commands, and other shell operations
 - Use list_files and grep_search to explore the codebase
 - Break down complex tasks into smaller steps
 
@@ -76,16 +77,6 @@ func buildAgentSystemPrompt(base, projectInstructions string, workDir ...string)
 	var sb strings.Builder
 	sb.WriteString(base)
 
-	worktreePath := ""
-	if len(workDir) > 0 {
-		worktreePath = strings.TrimSpace(workDir[0])
-	}
-	if worktreeContext := BuildWorktreeContextSentence(worktreePath); worktreeContext != "" {
-		sb.WriteString("\n# Worktree Context\n\n")
-		sb.WriteString(worktreeContext)
-		sb.WriteString("\n")
-	}
-
 	if projectInstructions != "" {
 		sb.WriteString("\n# Project Instructions\n\n")
 		sb.WriteString("The following are project-specific instructions that MUST be followed:\n\n")
@@ -99,17 +90,7 @@ func buildAgentSystemPrompt(base, projectInstructions string, workDir ...string)
 // BuildWorktreeContextSentence returns the canonical worktree orientation
 // sentence used across API and CLI prompt paths.
 func BuildWorktreeContextSentence(workDir string) string {
-	workDir = strings.TrimSpace(workDir)
-	if workDir == "" {
-		return ""
-	}
-	clean := filepath.Clean(workDir)
-	parent := filepath.Base(filepath.Dir(clean))
-	base := filepath.Base(clean)
-	if parent != ".worktrees" || !strings.HasPrefix(base, "task_") {
-		return ""
-	}
-	return "You are operating in an isolated git worktree at " + workDir + ". Treat this path as the repository root for this run. The app automatically commits changes in your task worktree when the task completes. You do not need to run git commit unless the user explicitly requests it."
+	return executionenv.WorktreeContext(strings.TrimSpace(workDir))
 }
 
 // AppendWorktreeContextPrompt appends explicit worktree context to an existing

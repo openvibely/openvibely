@@ -3042,6 +3042,10 @@ func TestSendAgentic_AutoCompactionMidTurn_APIKey(t *testing.T) {
 		case 3:
 			w.Header().Set("Content-Type", "text/event-stream")
 			input := body["input"].([]any)
+			encodedContext, _ := json.Marshal(input)
+			if !strings.Contains(string(encodedContext), "openvibely_execution_environment") || !strings.Contains(string(encodedContext), "Shell:") || strings.Contains(string(encodedContext), "Shell executable:") {
+				t.Fatalf("environment not restored after compaction: %s", encodedContext)
+			}
 			if len(input) < 2 {
 				t.Fatalf("input len = %d, want at least 2 after compaction", len(input))
 			}
@@ -4307,9 +4311,13 @@ func TestAgenticResponse_UpdatesHistory(t *testing.T) {
 		t.Fatalf("SendAgentic: %v", err)
 	}
 
-	if len(client.History) != 2 {
-		t.Fatalf("history len = %d, want 2", len(client.History))
+	if len(client.History) != 3 {
+		t.Fatalf("history len = %d, want 3", len(client.History))
 	}
+	if !strings.HasPrefix(client.History[0].Content, "<openvibely_execution_environment>") {
+		t.Fatal("missing persisted environment")
+	}
+	client.History = client.History[1:]
 	if client.History[0].Role != "user" || client.History[0].Content != "Hello" {
 		t.Errorf("history[0] = %+v", client.History[0])
 	}
@@ -5203,8 +5211,8 @@ func TestSendAgentic_AstraConfigurationUpdateReplaysPinnedBaseline(t *testing.T)
 		if updates != 1 {
 			t.Fatalf("request %d configuration updates = %d, want 1 in %#v", requestNumber, updates, input)
 		}
-		if updateIndex != 3 {
-			t.Fatalf("request %d configuration update index = %d, want stable index 3 after Responses Lite metadata in %#v", requestNumber, updateIndex, input)
+		if updateIndex != 4 {
+			t.Fatalf("request %d configuration update index = %d, want stable index 4 after Responses Lite metadata and environment in %#v", requestNumber, updateIndex, input)
 		}
 	}
 }

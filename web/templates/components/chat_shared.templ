@@ -3964,6 +3964,7 @@ templ ChatAutoScrollScript() {
 			}
 
 			function recoverIdleEarlierRequest() {
+				if (container.dataset.earlierAnchorRestoring === 'true') return false;
 				if (container.dataset.earlierRequestLoading !== 'true') return true;
 				var busyLoader = container.querySelector('[data-earlier-loader="true"][data-loading="true"]');
 				if (busyLoader) return false;
@@ -4029,7 +4030,7 @@ templ ChatAutoScrollScript() {
 					if (!['ArrowUp', 'PageUp', 'Home'].includes(event.key)) return;
 					if (event.repeat) return;
 					document.querySelectorAll('#chat-messages, #task-thread-messages').forEach(function(container) {
-						if (container.dataset.earlierLoaderBound !== 'true' || container.scrollTop > 12) return;
+						if (container.dataset.earlierLoaderBound !== 'true' || container.scrollTop > 12 || container.dataset.earlierAnchorRestoring === 'true') return;
 						if (container.dataset.earlierRequestLoading === 'true' && container.querySelector('[data-earlier-loader="true"][data-loading="true"]')) return;
 						container.dataset.earlierRequestLoading = 'false';
 						container.dataset.earlierGestureLocked = 'false';
@@ -4069,22 +4070,62 @@ templ ChatAutoScrollScript() {
 
 			window.prepareChatEarlierSwap = function(loader) {
 				var container = getEarlierContainerForElement(loader);
-				if (!container || container.dataset.earlierSwapPrepared === 'true') return;
-				container.dataset.earlierSwapPrepared = 'true';
-				container.dataset.earlierPrevScrollHeight = String(container.scrollHeight || 0);
-				container.dataset.earlierPrevScrollTop = String(container.scrollTop || 0);
-				container.dataset.earlierPrevBottomDistance = String((container.scrollHeight || 0) - (container.scrollTop || 0));
-				var tracker = container.id ? window['scrollTracker_' + container.id] : null;
-				container.dataset.earlierIntentRevision = String(tracker ? (tracker.intentRevision || 0) : (window._chatScrollIntentRevision || 0));
+				if (!container || container._earlierAnchor) return;
 				var anchor = getFirstVisibleExecutionPair(container);
-				if (anchor && anchor.pair) {
-					container.dataset.earlierAnchorExecId = anchor.pair.getAttribute('data-exec-id') || '';
-					container.dataset.earlierAnchorOffsetTop = String(anchor.offset || 0);
-				} else {
-					delete container.dataset.earlierAnchorExecId;
-					delete container.dataset.earlierAnchorOffsetTop;
-				}
+				var tracker = container.id ? window['scrollTracker_' + container.id] : null;
+				container._earlierAnchor = {
+					pair: anchor && anchor.pair,
+					position: anchor ? anchor.offset + container.scrollTop : container.scrollHeight,
+					intentRevision: tracker ? tracker.intentRevision : 0,
+					overflowAnchor: container.style.overflowAnchor
+				};
+				// Own compensation for this transaction; native anchoring must not
+				// apply the same prepend delta a second time.
+				container.style.overflowAnchor = 'none';
+				rememberChatEarlierLayout(container);
 			};
+
+			function rememberChatEarlierLayout(container) {
+				var anchor = container._earlierAnchor;
+				var top = container.getBoundingClientRect().top;
+				anchor.scrollTop = container.scrollTop;
+				anchor.rows = Array.prototype.map.call(container.querySelectorAll(':scope > [data-execution-pair="true"]'), function(pair) {
+					var rect = pair.getBoundingClientRect();
+					return { pair: pair, top: rect.top - top + container.scrollTop, bottom: rect.bottom - top + container.scrollTop };
+				});
+			}
+
+			function compensateChatEarlierLayout(container) {
+				var anchor = container._earlierAnchor;
+				if (!anchor || !container.isConnected) return;
+				// Scroll events are queued: rendering may already have resized the DOM.
+				// Select the reader's new row using the last compensated layout, then
+				// measure that row's movement. Selecting from the resized DOM loses
+				// growth above it; compensating the old row includes growth below it.
+				if (container.scrollTop !== anchor.scrollTop) {
+					var row = anchor.rows.find(function(row) {
+						return row.pair.isConnected && row.bottom > container.scrollTop + 1 && row.top < container.scrollTop + container.clientHeight - 1;
+					});
+					if (row) {
+						anchor.pair = row.pair;
+						anchor.position = row.top;
+					}
+				}
+				var tracker = container.id ? window['scrollTracker_' + container.id] : null;
+				var position = anchor.pair && anchor.pair.isConnected
+					? anchor.pair.getBoundingClientRect().top - container.getBoundingClientRect().top + container.scrollTop
+					: container.scrollHeight;
+				// Apply only layout movement above the reader, retaining all wheel,
+				// touch and scrollbar movement made while the request was pending.
+				// An explicit return to latest (including send) still takes precedence.
+				if (tracker && tracker.intentRevision !== anchor.intentRevision && tracker.shouldAutoScroll()) {
+					window.chatAutoScroll.scrollToBottom(container, false);
+				} else {
+					container.scrollTop += position - anchor.position;
+				}
+				anchor.position = position;
+				rememberChatEarlierLayout(container);
+			}
 
 			function setAllEarlierLoadersIdle(container) {
 				container.querySelectorAll('[data-earlier-loader="true"]').forEach(function(loader) {
@@ -4100,13 +4141,28 @@ templ ChatAutoScrollScript() {
 				var container = getEarlierContainerForElement(swapped);
 				if (!container) return;
 				container.dataset.earlierRequestLoading = 'false';
-				delete container.dataset.earlierSwapPrepared;
+				clearChatEarlierRestoreState(container);
 				setAllEarlierLoadersIdle(container);
 			};
 
 			window.afterChatEarlierSwap = function(swapped) {
 				var container = getEarlierContainerForElement(swapped);
 				if (!container) return;
+				if (container._earlierAnchor && container._earlierAnchor.started) return;
+				if (container._earlierAnchor) container._earlierAnchor.started = true;
+				container.dataset.earlierAnchorRestoring = 'true';
+				compensateChatEarlierLayout(container);
+				var anchor = container._earlierAnchor;
+				if (anchor && !anchor.onScroll) {
+					anchor.onScroll = function() {
+						compensateChatEarlierLayout(container);
+					};
+					container.addEventListener('scroll', anchor.onScroll, { passive: true });
+				}
+				if (anchor && !anchor.observer && window.ResizeObserver) {
+					anchor.observer = new ResizeObserver(function() { compensateChatEarlierLayout(container); });
+					Array.prototype.forEach.call(container.children, function(child) { anchor.observer.observe(child); });
+				}
 				setAllEarlierLoadersIdle(container);
 				if (window.htmx) htmx.process(container);
 					var hydrationPromise = null;
@@ -4114,6 +4170,7 @@ templ ChatAutoScrollScript() {
 					else if (window.cleanAssistantMessages) hydrationPromise = window.cleanAssistantMessages(container);
 					container._chatEarlierHydrationPromise = Promise.resolve(hydrationPromise).catch(function() { return false; });
 				if (window._initThreadStreaming) window._initThreadStreaming();
+				compensateChatEarlierLayout(container);
 			};
 
 			window.bindChatEarlierHTMXLifecycle = function() {
@@ -4151,69 +4208,30 @@ templ ChatAutoScrollScript() {
 			};
 
 			function clearChatEarlierRestoreState(container) {
-				delete container.dataset.earlierPrevScrollHeight;
-				delete container.dataset.earlierPrevScrollTop;
-				delete container.dataset.earlierPrevBottomDistance;
-				delete container.dataset.earlierAnchorExecId;
-				delete container.dataset.earlierAnchorOffsetTop;
-				delete container.dataset.earlierIntentRevision;
-				delete container.dataset.earlierSwapPrepared;
+				var anchor = container._earlierAnchor;
+				if (anchor) {
+					if (anchor.observer) anchor.observer.disconnect();
+					if (anchor.onScroll) container.removeEventListener('scroll', anchor.onScroll);
+					container.style.overflowAnchor = anchor.overflowAnchor;
+					delete container._earlierAnchor;
+				}
+				container.dataset.earlierAnchorRestoring = 'false';
+				container.dataset.earlierRequestLoading = 'false';
 			}
 
 			window.restoreChatEarlierScroll = function(container) {
 				if (!container) return;
-				var prevHeight = parseInt(container.dataset.earlierPrevScrollHeight || '0', 10) || 0;
-				var prevTop = parseInt(container.dataset.earlierPrevScrollTop || '0', 10) || 0;
-				var prevBottomDistance = parseInt(container.dataset.earlierPrevBottomDistance || '0', 10) || 0;
-				var anchorExecID = container.dataset.earlierAnchorExecId || '';
-				var anchorOffsetTop = parseFloat(container.dataset.earlierAnchorOffsetTop || '0') || 0;
-				var preparedIntentRevision = parseInt(container.dataset.earlierIntentRevision || '0', 10) || 0;
-				if (prevHeight <= 0) {
-					container.dataset.earlierRequestLoading = 'false';
-					clearChatEarlierRestoreState(container);
-					return;
-				}
-					container.dataset.earlierAnchorRestoring = 'true';
-					var hydrationPromise = container._chatEarlierHydrationPromise || Promise.resolve();
-					Promise.resolve(hydrationPromise).then(function() {
-						delete container._chatEarlierHydrationPromise;
-						requestAnimationFrame(function() {
-					var tracker = container.id ? window['scrollTracker_' + container.id] : null;
-					var currentIntentRevision = tracker ? (tracker.intentRevision || 0) : (window._chatScrollIntentRevision || 0);
-					if (currentIntentRevision !== preparedIntentRevision) {
-						if (tracker && tracker.shouldAutoScroll()) window.chatAutoScroll.scrollToBottom(container, false);
-						clearChatEarlierRestoreState(container);
-						requestAnimationFrame(function() {
-							container.dataset.earlierAnchorRestoring = 'false';
-							container.dataset.earlierRequestLoading = 'false';
-						});
-						return;
-					}
-					var restored = false;
-					if (prevBottomDistance > 0) {
-						container.scrollTop = Math.max(0, (container.scrollHeight || 0) - prevBottomDistance);
-						restored = true;
-					}
-					if (!restored && anchorExecID) {
-						var anchorPair = container.querySelector(':scope > [data-exec-id="' + anchorExecID.replace(/"/g, '\\"') + '"]');
-						if (anchorPair) {
-							var containerTop = container.getBoundingClientRect().top;
-							var currentOffset = anchorPair.getBoundingClientRect().top - containerTop;
-							container.scrollTop += currentOffset - anchorOffsetTop;
-							restored = true;
-						}
-					}
-					if (!restored) {
-						container.scrollTop = prevTop + Math.max(0, (container.scrollHeight || 0) - prevHeight);
-					}
-					clearChatEarlierRestoreState(container);
+				var anchor = container._earlierAnchor;
+				var hydrationPromise = container._chatEarlierHydrationPromise || Promise.resolve();
+				Promise.resolve(hydrationPromise).then(function() {
 					requestAnimationFrame(function() {
-						container.dataset.earlierAnchorRestoring = 'false';
-						container.dataset.earlierRequestLoading = 'false';
+						if (container._earlierAnchor !== anchor) return;
+						compensateChatEarlierLayout(container);
+						delete container._chatEarlierHydrationPromise;
+						clearChatEarlierRestoreState(container);
 					});
-						});
-					});
-				};
+				});
+			};
 
 				window.pruneChatExecutionWindow = function(containerOrID) {
 				var container = typeof containerOrID === 'string' ? document.getElementById(containerOrID) : containerOrID;
@@ -4913,6 +4931,7 @@ templ ChatAutoScrollScript() {
 				'Write': 'write_file',
 				'Edit': 'edit_file',
 				'Bash': 'bash',
+				'Shell': 'shell',
 				'Grep': 'grep_search',
 				'Glob': 'list_files',
 				'List Files': 'list_files',
@@ -5185,7 +5204,7 @@ templ ChatAutoScrollScript() {
 				// Display name mapping: raw tool names → friendly names (matching Claude Code VSCode)
 			var displayNames = {
 				'read_file': 'Read', 'write_file': 'Write', 'edit_file': 'Edit',
-				'bash': 'Bash', 'grep_search': 'Grep', 'list_files': 'List Files',
+				'bash': 'Bash', 'shell': 'Shell', 'grep_search': 'Grep', 'list_files': 'List Files',
 				'web_search': 'Web Search', 'web.run': 'Web Search', 'web_fetch': 'Web Fetch',
 				'code_execution': 'Code Execution', 'bash_code_execution': 'Bash Code Execution'
 			};
@@ -5719,7 +5738,7 @@ templ ChatAutoScrollScript() {
 				}
 
 				// Extract IN content based on tool type
-				if (dn === 'Bash' && seg.secondary) {
+				if ((dn === 'Bash' || dn === 'Shell') && seg.secondary) {
 					hasIn = true;
 					inLabel = 'IN';
 					inContent = seg.secondary;
@@ -6000,9 +6019,9 @@ templ ChatAutoScrollScript() {
 					nameSpan.className = 'tool-name-text';
 					nameSpan.textContent = dn;
 					header.appendChild(nameSpan);
-					// Show secondary in header for file-based tools (filename), but NOT for bash/grep
+					// Show secondary in header for file-based tools (filename), but NOT for bash/shell/grep
 					// (those show their input in the IN row instead to avoid duplication)
-					if (seg.secondary && dn !== 'Bash' && dn !== 'Grep') {
+					if (seg.secondary && dn !== 'Bash' && dn !== 'Shell' && dn !== 'Grep') {
 						var secondarySpan = document.createElement('span');
 						secondarySpan.className = 'tool-name-secondary';
 						secondarySpan.textContent = seg.secondary;

@@ -200,15 +200,15 @@ func TestCallStreamingTaskIncludesWorktreeRootContext(t *testing.T) {
 	}
 	systemPrompt := doer.request.Messages[0].Content
 	want := "You are operating in an isolated git worktree at " + workDir + ". Treat this path as the repository root for this run."
-	if !strings.Contains(systemPrompt, want) {
+	if len(doer.request.Messages) < 3 || doer.request.Messages[1].Role != "user" || !strings.Contains(doer.request.Messages[1].Content, want) {
 		t.Fatalf("task system prompt missing worktree root context %q: %q", want, systemPrompt)
 	}
 	if !strings.Contains(systemPrompt, "PROJECT_RULES_SENTINEL") {
 		t.Fatalf("task system prompt dropped project instructions: %q", systemPrompt)
 	}
-	if len(doer.request.Messages) < 2 ||
-		!strings.Contains(doer.request.Messages[1].Content, "If you recovered and completed the requested outcome, report success") ||
-		!strings.Contains(doer.request.Messages[1].Content, "[STATUS: FAILED | <describe what prevented completion>]") {
+	if len(doer.request.Messages) < 3 ||
+		!strings.Contains(doer.request.Messages[len(doer.request.Messages)-1].Content, "If you recovered and completed the requested outcome, report success") ||
+		!strings.Contains(doer.request.Messages[len(doer.request.Messages)-1].Content, "[STATUS: FAILED | <describe what prevented completion>]") {
 		t.Fatalf("task user prompt missing provider-neutral outcome status contract: %#v", doer.request.Messages)
 	}
 }
@@ -244,7 +244,7 @@ func TestCallStreamingZeroHistoryFollowupUsesChatAssembly(t *testing.T) {
 		t.Fatalf("zero-history follow-up did not use Chat assembly: %q", systemPrompt)
 	}
 	wantWorktreeContext := "You are operating in an isolated git worktree at " + workDir + ". Treat this path as the repository root for this run."
-	if !strings.Contains(systemPrompt, wantWorktreeContext) {
+	if len(doer.request.Messages) < 3 || !strings.Contains(doer.request.Messages[1].Content, wantWorktreeContext) {
 		t.Fatalf("zero-history follow-up missing worktree root context %q: %q", wantWorktreeContext, systemPrompt)
 	}
 	if strings.Contains(systemPrompt, llmprompt.ChatActionToolModeInstructions) {

@@ -295,21 +295,22 @@ func (a *Adapter) callDirect(ctx context.Context, req llmcontracts.AgentRequest,
 	}
 	contextWindow, maxOutput := compatibleResolvedLimits(req.Agent)
 	resp, err := client.SendCompletions(ctx, prompt, &openaiclient.CompletionsOptions{
-		Model:            strings.TrimSpace(req.Agent.Model),
-		ContextWindow:    contextWindow,
-		MaxOutputTokens:  maxOutput,
-		Temperature:      compatibleTemperature(req.Agent),
-		System:           systemPrompt,
-		WorkDir:          effectiveWorkDir(workDir),
-		DisableTools:     req.DisableTools,
-		SkipDefaultTools: taskSkipDefaultTools(ctx, req.AgentDefinition),
-		Attachments:      attachments,
-		ExtraTools:       runtimeTools(ctx),
-		ExtraHeaders:     extraHeaders,
-		FinalizeRequest:  finalizeRequest,
-		ExtraBody:        extraBody,
-		ToolExecutor:     toolExecutor(ctx, workDir),
-		ToolFilter:       toolFilter(ctx, true, models.ChatModeOrchestrate, req.AgentDefinition),
+		Model:                    strings.TrimSpace(req.Agent.Model),
+		ContextWindow:            contextWindow,
+		MaxOutputTokens:          maxOutput,
+		Temperature:              compatibleTemperature(req.Agent),
+		System:                   systemPrompt,
+		WorkDir:                  effectiveWorkDir(workDir),
+		OmitExecutionEnvironment: req.RawDirectPrompt || req.LifecycleHookCall,
+		DisableTools:             req.DisableTools,
+		SkipDefaultTools:         taskSkipDefaultTools(ctx, req.AgentDefinition),
+		Attachments:              attachments,
+		ExtraTools:               runtimeTools(ctx),
+		ExtraHeaders:             extraHeaders,
+		FinalizeRequest:          finalizeRequest,
+		ExtraBody:                extraBody,
+		ToolExecutor:             toolExecutor(ctx, workDir),
+		ToolFilter:               toolFilter(ctx, true, models.ChatModeOrchestrate, req.AgentDefinition),
 	})
 	err = a.persistReasoningContent(ctx, req.ExecID, req.Agent, client, err)
 	if err != nil {
@@ -342,24 +343,25 @@ func (a *Adapter) callTaskStreaming(ctx context.Context, req llmcontracts.AgentR
 
 	contextWindow, maxOutput := compatibleResolvedLimits(req.Agent)
 	resp, err := client.SendCompletions(ctx, fullPrompt, &openaiclient.CompletionsOptions{
-		Model:            strings.TrimSpace(req.Agent.Model),
-		ContextWindow:    contextWindow,
-		MaxOutputTokens:  maxOutput,
-		Temperature:      compatibleTemperature(req.Agent),
-		System:           llmprompt.BuildAgentSystemPrompt(req.ProjectInstructions, effectiveWorkDir(workDir)),
-		WorkDir:          effectiveWorkDir(workDir),
-		DisableTools:     req.DisableTools,
-		SkipDefaultTools: taskSkipDefaultTools(ctx, req.AgentDefinition),
-		Attachments:      attachments,
-		ExtraTools:       runtimeTools(ctx),
-		ExtraHeaders:     extraHeaders,
-		FinalizeRequest:  finalizeRequest,
-		ExtraBody:        extraBody,
-		ToolExecutor:     toolExecutor(ctx, workDir),
-		ToolFilter:       toolFilter(ctx, true, models.ChatModeOrchestrate, req.AgentDefinition),
-		OnText:           streamText(sw),
-		OnToolUse:        streamToolUse(sw),
-		OnToolResult:     streamToolResult(sw),
+		Model:                    strings.TrimSpace(req.Agent.Model),
+		ContextWindow:            contextWindow,
+		MaxOutputTokens:          maxOutput,
+		Temperature:              compatibleTemperature(req.Agent),
+		System:                   llmprompt.BuildAgentSystemPrompt(req.ProjectInstructions, effectiveWorkDir(workDir)),
+		WorkDir:                  effectiveWorkDir(workDir),
+		OmitExecutionEnvironment: req.RawDirectPrompt || req.LifecycleHookCall,
+		DisableTools:             req.DisableTools,
+		SkipDefaultTools:         taskSkipDefaultTools(ctx, req.AgentDefinition),
+		Attachments:              attachments,
+		ExtraTools:               runtimeTools(ctx),
+		ExtraHeaders:             extraHeaders,
+		FinalizeRequest:          finalizeRequest,
+		ExtraBody:                extraBody,
+		ToolExecutor:             toolExecutor(ctx, workDir),
+		ToolFilter:               toolFilter(ctx, true, models.ChatModeOrchestrate, req.AgentDefinition),
+		OnText:                   streamText(sw),
+		OnToolUse:                streamToolUse(sw),
+		OnToolResult:             streamToolResult(sw),
 	})
 	err = a.persistReasoningContent(ctx, req.ExecID, req.Agent, client, err)
 	if err != nil {
@@ -386,7 +388,6 @@ func (a *Adapter) callChatStreaming(ctx context.Context, req llmcontracts.AgentR
 	client.SetCompletionsHistory(history)
 	rt := llmcontracts.RuntimeToolsFromContext(ctx)
 	systemPrompt := llmprompt.BuildChatSystemPrompt(req.Followup, req.ChatMode, req.ChatSystemContext, false)
-	systemPrompt = llmprompt.AppendWorktreeContextPrompt(systemPrompt, workDir)
 	if req.ChatMode == models.ChatModeOrchestrate && !req.Followup {
 		systemPrompt = llmprompt.ApplyChatActionToolMode(systemPrompt, rt.DefinitionNames())
 	}
@@ -623,7 +624,7 @@ func mapBuiltInToolName(name string) string {
 		return "Write"
 	case "edit_file":
 		return "Edit"
-	case "bash":
+	case "bash", "shell", "interact_process":
 		return "Bash"
 	case "list_files":
 		return "Glob"
@@ -918,7 +919,7 @@ func toolSecondaryInfo(name string, input json.RawMessage) string {
 	switch strings.ToLower(strings.TrimSpace(name)) {
 	case "read_file", "write_file", "edit_file":
 		return get("file_path")
-	case "bash":
+	case "bash", "shell":
 		return get("command")
 	case "grep_search":
 		return get("pattern")

@@ -121,7 +121,7 @@ func AllowsBuiltInTool(name string, opts BuiltInToolPolicyOptions) bool {
 		return true
 	}
 	for _, tool := range opts.ConfiguredTools {
-		if strings.EqualFold(strings.TrimSpace(tool), mapped) {
+		if strings.EqualFold(strings.TrimSpace(tool), mapped) || (strings.EqualFold(mapped, "Bash") && strings.EqualFold(strings.TrimSpace(tool), "Shell")) {
 			return true
 		}
 	}

@@ -1393,6 +1393,10 @@ func TestSendAgentic_CompactionStateReplaysAcrossExecutions(t *testing.T) {
 	if _, err := secondClient.SendAgentic(context.Background(), "second prompt", &AgenticOptions{Model: "claude-sonnet-4-6", MaxTokens: 1024, DisableTools: true, AutoCompaction: true, NativeCompactionStateJSON: first.NativeCompactionStateJSON}); err != nil {
 		t.Fatal(err)
 	}
+	if len(replayedMessages) != 5 || !strings.Contains(fmt.Sprint(replayedMessages[2]["content"]), "<openvibely_execution_environment>") {
+		t.Fatalf("missing restored environment after compaction: %#v", replayedMessages)
+	}
+	replayedMessages = append(replayedMessages[:2], replayedMessages[3:]...)
 	if len(replayedMessages) != 4 {
 		t.Fatalf("replayed messages = %#v, want compacted assistant, tool result, final assistant, and current user", replayedMessages)
 	}
@@ -1651,12 +1655,12 @@ func TestSendAgentic_PauseTurnEchoesToolUseInputWhenMissingFromStream(t *testing
 			if !ok || len(msgs) < 2 {
 				t.Fatalf("turn 2 expected >=2 messages, got %#v", reqBody["messages"])
 			}
-			assistant, ok := msgs[1].(map[string]interface{})
+			assistant, ok := msgs[2].(map[string]interface{})
 			if !ok {
-				t.Fatalf("turn 2 message 1 type mismatch: %#v", msgs[1])
+				t.Fatalf("turn 2 message 2 type mismatch: %#v", msgs[2])
 			}
 			if role, _ := assistant["role"].(string); role != "assistant" {
-				t.Fatalf("turn 2 message 1 role = %q, want assistant", role)
+				t.Fatalf("turn 2 message 2 role = %q, want assistant", role)
 			}
 			blocks, ok := assistant["content"].([]interface{})
 			if !ok || len(blocks) < 2 {

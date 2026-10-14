@@ -23,7 +23,7 @@ func TestOpenAIReplayLoadedBeforeBudgetAndTrimming(t *testing.T) {
 	svc := NewLLMService(nil, repo, nil, nil, nil, nil)
 	req := llmcontracts.AgentRequest{Ctx: ctx, Agent: models.LLMConfig{Provider: models.ProviderOpenAI, ContextWindow: 10000}, Message: "follow up", ChatHistory: []models.Execution{{ID: "steered", PromptSent: "small prompt"}}}
 	before := calculateRequestBudget(req)
-	loaded, err := svc.loadOpenAIReplayHistory(req)
+	loaded, err := svc.loadProviderReplayHistory(req)
 	require.NoError(t, err)
 	require.Equal(t, replay, loaded.ChatHistory[0].ReplayMessages)
 	require.Greater(t, calculateRequestBudget(loaded).HistoryTokens, before.HistoryTokens+40000)
@@ -45,7 +45,7 @@ func TestOpenAIReplayLoadedBeforeBudgetAndTrimming(t *testing.T) {
 	require.False(t, called, "oversized saved replay must be caught before the provider request")
 
 	req.Agent.Provider = models.ProviderOpenAICompatible
-	compatible, err := svc.loadOpenAIReplayHistory(req)
+	compatible, err := svc.loadProviderReplayHistory(req)
 	require.NoError(t, err)
 	require.Nil(t, compatible.ChatHistory[0].ReplayMessages, "compatible providers keep their existing history path")
 }
@@ -62,4 +62,27 @@ func TestOpenAIRequestBudgetUsesEffectiveReplay(t *testing.T) {
 	trimmed := historyWithinRequestBudget(req, req.ChatHistory)
 	require.Len(t, trimmed, 1)
 	require.Equal(t, latest, trimmed[0], "do not truncate an image checkpoint that fits")
+}
+
+func TestAnthropicEnvironmentReplayLoadedBeforeBudget(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	task := &models.Task{ProjectID: "default", Title: "environment snapshot", Category: models.CategoryBacklog, Status: models.StatusCompleted}
+	require.NoError(t, repository.NewTaskRepo(db, nil).Create(ctx, task))
+	_, err := db.ExecContext(ctx, `INSERT INTO executions (id, task_id, status, prompt_sent) VALUES ('environment', ?, 'completed', 'question')`, task.ID)
+	require.NoError(t, err)
+	repo := repository.NewExecutionRepo(db)
+	replay := []models.ExecutionReplayMessage{{UserContent: "question", AssistantContent: "answer", TranscriptJSON: `{"anthropic_execution_environment":"saved environment"}`}}
+	require.NoError(t, repo.ReplaceReasoningReplay(ctx, "environment", "", replay))
+	svc := NewLLMService(nil, repo, nil, nil, nil, nil)
+	req := llmcontracts.AgentRequest{Ctx: ctx, Agent: models.LLMConfig{Provider: models.ProviderAnthropic}, ChatHistory: []models.Execution{{ID: "environment", PromptSent: "question"}}}
+	loaded, err := svc.loadProviderReplayHistory(req)
+	require.NoError(t, err)
+	require.Equal(t, replay, loaded.ChatHistory[0].ReplayMessages)
+	require.Nil(t, req.ChatHistory[0].ReplayMessages)
+	// Explicitly trimmed replay must not be reloaded.
+	req.ChatHistory[0].ReplayMessages = []models.ExecutionReplayMessage{}
+	loaded, err = svc.loadProviderReplayHistory(req)
+	require.NoError(t, err)
+	require.Empty(t, loaded.ChatHistory[0].ReplayMessages)
 }

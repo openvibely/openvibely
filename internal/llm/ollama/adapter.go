@@ -24,6 +24,7 @@ import (
 	llmusage "github.com/openvibely/openvibely/internal/llm/usage"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
+	"github.com/openvibely/openvibely/pkg/executionenv"
 )
 
 // HTTPDoer is an interface for making HTTP requests.
@@ -202,13 +203,13 @@ func (a *Adapter) callChat(ctx context.Context, message string, attachments []mo
 		agent.Model, baseURL, len(chatHistory), len(message), len(attachments), execID, isTaskFollowup)
 
 	systemPromptStr := llmprompt.BuildChatSystemPrompt(isTaskFollowup, chatMode, chatSystemContext, false)
-	systemPromptStr = llmprompt.AppendWorktreeContextPrompt(systemPromptStr, workDir)
 	messages := buildChatHistory(systemPromptStr, chatHistory)
 
 	userMsg := chatMessage{Role: "user", Content: message}
 	if images := encodeImageAttachments(attachments); len(images) > 0 {
 		userMsg.Images = images
 	}
+	messages = ensureExecutionEnvironment(messages, workDir)
 	messages = append(messages, userMsg)
 
 	opts := ollamaRequestOptions(agent)
@@ -267,6 +268,7 @@ func (a *Adapter) callStreaming(ctx context.Context, prompt string, attachments 
 	if images := encodeImageAttachments(attachments); len(images) > 0 {
 		userMsg.Images = images
 	}
+	messages = ensureExecutionEnvironment(messages, workDir)
 	messages = append(messages, userMsg)
 
 	reqBody := chatRequest{
@@ -503,4 +505,10 @@ func encodeImageAttachments(attachments []models.Attachment) []string {
 		applog.Infof("[ollama] added image attachment %s (%s, %d bytes)", att.FileName, att.MediaType, len(data))
 	}
 	return images
+}
+
+func ensureExecutionEnvironment(messages []chatMessage, workDir string) []chatMessage {
+	return executionenv.Ensure(messages, workDir, func(m chatMessage) (string, string) {
+		return m.Role, m.Content
+	}, func(text string) chatMessage { return chatMessage{Role: "user", Content: text} })
 }

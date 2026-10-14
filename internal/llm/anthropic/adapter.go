@@ -3,6 +3,7 @@ package anthropic
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"os"
@@ -16,10 +17,12 @@ import (
 	llmoauth "github.com/openvibely/openvibely/internal/llm/oauth"
 	llmprompt "github.com/openvibely/openvibely/internal/llm/prompt"
 	llmstream "github.com/openvibely/openvibely/internal/llm/stream"
+	"github.com/openvibely/openvibely/internal/llm/tokenestimate"
 	llmusage "github.com/openvibely/openvibely/internal/llm/usage"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
 	anthropicclient "github.com/openvibely/openvibely/pkg/anthropic_client"
+	"github.com/openvibely/openvibely/pkg/executionenv"
 	mcpclient "github.com/openvibely/openvibely/pkg/mcp_client"
 )
 
@@ -138,7 +141,7 @@ func mapBuiltInToolName(name string) string {
 		return "Write"
 	case "edit_file":
 		return "Edit"
-	case "bash":
+	case "bash", "shell", "interact_process":
 		return "Bash"
 	case "list_files":
 		return "Glob"
@@ -348,7 +351,7 @@ func recoveryMessages(ctx context.Context) []anthropicclient.Message {
 }
 
 // Call handles Anthropic LLM requests.
-func (a *Adapter) Call(ctx context.Context, req llmcontracts.AgentRequest, workDir string, w *llmstream.Writer) (llmcontracts.AgentResult, error) {
+func (a *Adapter) Call(ctx context.Context, req llmcontracts.AgentRequest, workDir string, w *llmstream.Writer) (result llmcontracts.AgentResult, callErr error) {
 	agent := req.Agent
 	ctx = llmcontracts.WithNativeCompactionStateJSON(ctx, req.NativeCompactionStateJSON)
 	if llmcontracts.HistoryContinuationFromContext(ctx) {
@@ -383,6 +386,23 @@ func (a *Adapter) Call(ctx context.Context, req llmcontracts.AgentRequest, workD
 		req.Agent = agent
 	} else {
 		return llmcontracts.AgentResult{}, fmt.Errorf("Anthropic model %q is no longer supported; select a supported model", agent.Model)
+	}
+
+	if a.execRepo != nil && req.ExecID != "" && !req.RawDirectPrompt && !req.LifecycleHookCall {
+		// Store the actual environment for this execution, not the environment
+		// of a future client rebuilding its history.
+		environment := executionenv.Context(workDir)
+		defer func() {
+			saved, err := json.Marshal(anthropicEnvironmentReplay{Environment: environment, Messages: []anthropicclient.Message{{Role: "user", Content: req.Message}, {Role: "assistant", Content: result.TextOnlyOutput}}})
+			if err == nil {
+				err = a.execRepo.ReplaceReasoningReplay(context.WithoutCancel(ctx), req.ExecID, "", []models.ExecutionReplayMessage{{
+					UserContent: req.Message, AssistantContent: result.TextOnlyOutput, TranscriptJSON: string(saved),
+				}})
+			}
+			if err != nil {
+				callErr = errors.Join(callErr, fmt.Errorf("persist Anthropic execution environment: %w", err))
+			}
+		}()
 	}
 
 	extraTools, toolExecutor, toolFilter, cleanupRuntime := buildAnthropicRuntime(ctx, workDir, req.AgentDefinition)
@@ -457,6 +477,7 @@ func (a *Adapter) callDirect(ctx context.Context, prompt string, attachments []m
 		System:                    systemPrompt,
 		WorkDir:                   workDir,
 		Attachments:               mcAttachments,
+		OmitExecutionEnvironment:  rawDirectPrompt || lifecycleHookCall,
 		DisableTools:              disableTools,
 		SkipDefaultTools:          skipDefaultTools,
 		AutoCompaction:            !agent.DisableNativeCompaction && anthropicclient.SupportsNativeCompaction(agent.Model),
@@ -508,7 +529,6 @@ func (a *Adapter) callChatStreaming(ctx context.Context, message string, attachm
 
 	rt := llmcontracts.RuntimeToolsFromContext(ctx)
 	systemPromptStr := llmprompt.BuildAnthropicChatSystemPrompt(agent.Model, isTaskFollowup, chatMode, chatSystemContext, false)
-	systemPromptStr = llmprompt.AppendWorktreeContextPrompt(systemPromptStr, workDir)
 	systemPromptStr = appendToolModeSystemPrompt(systemPromptStr, rt, chatMode, isTaskFollowup)
 	client.History = append(client.History, buildClientHistory(chatHistory)...)
 
@@ -773,9 +793,22 @@ func buildClientHistory(chatHistory []models.Execution) []anthropicclient.Messag
 }
 
 // Recovery has no new prompt to replace a trailing user message.
+type anthropicEnvironmentReplay struct {
+	Environment string                    `json:"anthropic_execution_environment"`
+	Messages    []anthropicclient.Message `json:"messages,omitempty"`
+}
+
 func buildRecoveryHistory(chatHistory []models.Execution) []anthropicclient.Message {
 	var messages []anthropicclient.Message
+	lastEnvironment := ""
 	for _, exec := range chatHistory {
+		for _, replay := range exec.ReplayMessages {
+			var saved anthropicEnvironmentReplay
+			if json.Unmarshal([]byte(replay.TranscriptJSON), &saved) == nil && strings.HasPrefix(saved.Environment, executionenv.Marker+"\n") && saved.Environment != lastEnvironment {
+				messages = append(messages, anthropicclient.Message{Role: "user", Content: saved.Environment})
+				lastEnvironment = saved.Environment
+			}
+		}
 		if exec.PromptSent != "" {
 			messages = appendMergedMessage(messages, "user", exec.PromptSent)
 		}
@@ -786,9 +819,19 @@ func buildRecoveryHistory(chatHistory []models.Execution) []anthropicclient.Mess
 	return messages
 }
 
+// EstimateHistoryTokens counts the messages actually reconstructed for Anthropic,
+// including environment changes, without counting durable replay copies twice.
+func EstimateHistoryTokens(history []models.Execution) int {
+	total := 0
+	for _, message := range buildRecoveryHistory(history) {
+		total += tokenestimate.FromText(message.Content)
+	}
+	return total
+}
+
 // appendMergedMessage appends a message, merging with the previous if same role.
 func appendMergedMessage(messages []anthropicclient.Message, role, content string) []anthropicclient.Message {
-	if len(messages) > 0 && messages[len(messages)-1].Role == role {
+	if len(messages) > 0 && messages[len(messages)-1].Role == role && !strings.HasPrefix(messages[len(messages)-1].Content, executionenv.Marker+"\n") {
 		messages[len(messages)-1].Content += "\n\n" + content
 		return messages
 	}
@@ -838,7 +881,7 @@ func toolSecondaryInfo(name string, input json.RawMessage) string {
 			parts := splitPath(fp)
 			return parts[len(parts)-1]
 		}
-	case "bash", "Bash":
+	case "bash", "Bash", "shell":
 		if cmd, ok := m["command"].(string); ok {
 			cmd = truncateToolSecondary(cmd, 320)
 			return "$ " + cmd

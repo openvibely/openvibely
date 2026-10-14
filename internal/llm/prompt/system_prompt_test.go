@@ -5,12 +5,12 @@ import (
 	"testing"
 )
 
-func TestBuildAgentSystemPrompt_IncludesWorktreeContextWhenProvided(t *testing.T) {
+func TestBuildAgentSystemPrompt_DoesNotDuplicateEnvironmentContext(t *testing.T) {
 	worktreePath := "/tmp/.worktrees/task_123"
 	got := BuildAgentSystemPrompt("", worktreePath)
 
-	if !strings.Contains(got, "You are operating in an isolated git worktree at "+worktreePath+". Treat this path as the repository root for this run.") {
-		t.Fatalf("expected worktree context in system prompt, got: %q", got)
+	if strings.Contains(got, "You are operating in an isolated git worktree at "+worktreePath+". Treat this path as the repository root for this run.") {
+		t.Fatalf("worktree context belongs in the environment message, not the system prompt, got: %q", got)
 	}
 }
 
