@@ -2,17 +2,17 @@ package service
 
 import (
 	"context"
-	"database/sql"
+
 	"fmt"
 	"runtime"
 	"sort"
-	"strings"
+
 	"testing"
 	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
-	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/openvibely/openvibely/internal/testutil/storefixture"
 	"github.com/openvibely/openvibely/internal/testutil/teststores"
 	"github.com/stretchr/testify/require"
 )
@@ -420,8 +420,9 @@ func TestAutomationHistoryHealthIgnoresStaleFailureAfterRecentSuccesses(t *testi
 func TestAutomationHistoryHealthStableNoChangeSkipsAutomationUpdatesAndReducesSQL(t *testing.T) {
 	for _, count := range []int{100, 500} {
 		t.Run(fmt.Sprintf("%d", count), func(t *testing.T) {
-			db, counter := testutil.NewStatementCountingTestDB(t)
-			repo := teststores.Of(db).Automations
+			db := teststores.New(t, teststores.WithIOCounting())
+			counter := db.IO
+			repo := db.Automations
 			ctx := context.Background()
 			now := time.Date(2026, time.August, 1, 12, 0, 0, 0, time.UTC)
 			fixture := seedAutomationHealthReconciliationFixture(t, db, count, now)
@@ -432,11 +433,11 @@ func TestAutomationHistoryHealthStableNoChangeSkipsAutomationUpdatesAndReducesSQ
 			require.NoError(t, repo.RecomputeAutomationHealthForAll(ctx, now.Add(time.Minute), 100))
 			counter.SetEnabled(false)
 
-			statements := counter.Statements()
-			updates := countAutomationHealthUpdates(statements)
+			stats := counter.Snapshot()
+			updates := stats.AutomationHealthWrites
 			baselineStatements := legacyAutomationHealthStatementCount(count)
 			require.Zero(t, updates, "stable published Automations must not issue unchanged UPDATE automations statements")
-			require.LessOrEqual(t, len(statements), baselineStatements/10, "stable health SQL should drop by at least 90%% versus the former per-Automation path")
+			require.LessOrEqual(t, stats.Requests, baselineStatements/10, "stable health SQL should drop by at least 90%% versus the former per-Automation path")
 			requireAutomationHealthEvaluatedCount(t, db, fixture.projectID, count)
 			requireAutomationHealthUnevaluated(t, repo, fixture.projectID, fixture.unpublishedAutomationID)
 		})
@@ -521,6 +522,7 @@ func TestAutomationHistoryHealthChangedInputsPersistAffectedRecords(t *testing.T
 			n.ProjectID = project.ID
 			n.AutomationID = automationID
 			n.VersionID = versionID
+			n.ConfigJSON = "{}"
 			require.NoError(t, db.Fixtures.SeedAutomationNode(ctx, n))
 		}
 		require.NoError(t, repo.RecomputeAutomationHealthForAll(ctx, time.Date(2026, time.August, 2, 15, 0, 0, 0, time.UTC), 100))
@@ -540,14 +542,14 @@ type automationHealthReconciliationFixture struct {
 	unpublishedAutomationID  string
 }
 
-func seedAutomationHealthReconciliationFixture(tb testing.TB, db *sql.DB, automationCount int, now time.Time) automationHealthReconciliationFixture {
+func seedAutomationHealthReconciliationFixture(tb testing.TB, db *teststores.Env, automationCount int, now time.Time) automationHealthReconciliationFixture {
 	tb.Helper()
 	ctx := context.Background()
-	projectRepo := teststores.Of(db).Projects
+	projectRepo := db.Projects
 	project := models.Project{Name: fmt.Sprintf("Health reconciliation %d", automationCount)}
 	require.NoError(tb, projectRepo.Create(ctx, &project))
-	taskRepo := teststores.Of(db).Tasks
-	pullRepo := teststores.Of(db).TaskPullRequests
+	taskRepo := db.Tasks
+	pullRepo := db.TaskPullRequests
 	fixture := automationHealthReconciliationFixture{projectID: project.ID}
 	for i := 0; i < automationCount; i++ {
 		automationID := fmt.Sprintf("health-reconcile-%03d", i)
@@ -597,66 +599,44 @@ func seedAutomationHealthReconciliationFixture(tb testing.TB, db *sql.DB, automa
 	return fixture
 }
 
-func insertMinimalAutomationDefinition(ctx context.Context, db *sql.DB, projectID, automationID, versionID string, published bool) error {
-	if _, err := db.ExecContext(ctx, `INSERT INTO automations
-		(id, project_id, stable_key, name, automation_type, lifecycle_state, created_via)
-		VALUES (?, ?, ?, ?, 'custom', 'active', 'web')`, automationID, projectID, automationID, automationID); err != nil {
+func insertMinimalAutomationDefinition(ctx context.Context, db *teststores.Env, projectID, automationID, versionID string, published bool) error {
+	if err := db.Fixtures.SeedAutomation(ctx, models.Automation{ID: automationID, ProjectID: projectID, StableKey: automationID, Name: automationID, AutomationType: "custom", LifecycleState: "active", CreatedVia: "web"}); err != nil {
 		return err
 	}
-	if _, err := db.ExecContext(ctx, `INSERT INTO automation_versions
-		(id, project_id, automation_id, version, state, source, adapter_key, schema_version, published_at)
-		VALUES (?, ?, ?, 1, 'published', 'manual', 'custom', 1, CURRENT_TIMESTAMP)`, versionID, projectID, automationID); err != nil {
+	now := time.Now().UTC()
+	if err := db.Fixtures.SeedAutomationVersion(ctx, models.AutomationVersion{ID: versionID, ProjectID: projectID, AutomationID: automationID, Version: 1, State: "published", Source: "manual", AdapterKey: "custom", PublishedAt: &now}); err != nil {
 		return err
 	}
-	if _, err := db.ExecContext(ctx, `INSERT INTO automation_nodes
-		(id, project_id, automation_id, version_id, node_key, name, node_type, role)
-		VALUES (?, ?, ?, ?, 'trigger', 'Trigger', 'trigger', 'trigger'), (?, ?, ?, ?, 'gate', 'Gate', 'human_gate', 'approval')`,
-		automationID+"-trigger", projectID, automationID, versionID, automationID+"-gate", projectID, automationID, versionID); err != nil {
-		return err
+	for _, n := range []models.AutomationNode{{ID: automationID + "-trigger", NodeKey: "trigger", Name: "Trigger", NodeType: "trigger", Role: "trigger"}, {ID: automationID + "-gate", NodeKey: "gate", Name: "Gate", NodeType: "human_gate", Role: "approval"}} {
+		n.ProjectID = projectID
+		n.AutomationID = automationID
+		n.VersionID = versionID
+		n.ConfigJSON = "{}"
+		if err := db.Fixtures.SeedAutomationNode(ctx, n); err != nil {
+			return err
+		}
 	}
 	if published {
-		_, err := db.ExecContext(ctx, `UPDATE automations SET published_version_id = ? WHERE id = ?`, versionID, automationID)
-		return err
+		return db.Fixtures.SetAutomationPublishedVersion(ctx, automationID, versionID)
 	}
 	return nil
 }
-
-func insertAutomationHealthInvocation(tb testing.TB, db *sql.DB, projectID, automationID, versionID, triggerID, invocationID, status string, at time.Time) {
+func insertAutomationHealthInvocation(tb testing.TB, db *teststores.Env, projectID, automationID, versionID, triggerID, invocationID, status string, at time.Time) {
 	tb.Helper()
-	var completed interface{}
+	var completed *time.Time
 	if status == "completed" || status == "failed" || status == "cancelled" || status == "skipped" {
-		completed = at.UTC()
+		completed = &at
 	}
-	_, err := db.ExecContext(context.Background(), `INSERT INTO automation_invocations
-		(id, project_id, automation_id, version_id, trigger_node_id, trigger_resource_type, trigger_resource_id,
-		 occurrence_key, status, started_at, completed_at, updated_at, error_message)
-		VALUES (?, ?, ?, ?, ?, 'schedule', ?, ?, ?, ?, ?, ?, ?)`, invocationID, projectID, automationID, versionID, triggerID,
-		"health-schedule", invocationID, status, at.UTC(), completed, at.UTC(), map[bool]string{true: "dispatch failed", false: ""}[status == "failed"])
-	require.NoError(tb, err)
+	require.NoError(tb, db.Fixtures.SeedAutomationInvocation(tb.Context(), models.AutomationInvocation{ID: invocationID, ProjectID: projectID, AutomationID: automationID, VersionID: versionID, TriggerNodeID: triggerID, TriggerResourceType: "schedule", TriggerResourceID: "health-schedule", OccurrenceKey: invocationID, Status: models.AutomationInvocationStatus(status), StartedAt: &at, UpdatedAt: at, CompletedAt: completed, ErrorMessage: map[bool]string{true: "dispatch failed", false: ""}[status == "failed"]}))
 }
-
-func insertAutomationHealthPosition(tb testing.TB, db *sql.DB, projectID, automationID, versionID, nodeID, workItemID string, state models.AutomationPositionState) {
+func insertAutomationHealthPosition(tb testing.TB, db *teststores.Env, projectID, automationID, versionID, nodeID, workItemID string, state models.AutomationPositionState) {
 	tb.Helper()
-	_, err := db.ExecContext(context.Background(), `INSERT INTO automation_work_items
-		(id, project_id, automation_id, origin_version_id, work_item_key, kind, title, status)
-		VALUES (?, ?, ?, ?, ?, 'health', 'Health position', ?)`, workItemID, projectID, automationID, versionID, workItemID, string(state))
-	require.NoError(tb, err)
-	_, err = db.ExecContext(context.Background(), `INSERT INTO automation_work_item_positions
-		(work_item_id, project_id, automation_id, version_id, node_id, state)
-		VALUES (?, ?, ?, ?, ?, ?)`, workItemID, projectID, automationID, versionID, nodeID, string(state))
-	require.NoError(tb, err)
+	require.NoError(tb, db.Fixtures.SeedAutomationWorkItemPosition(tb.Context(), models.AutomationWorkItem{ID: workItemID, ProjectID: projectID, AutomationID: automationID, OriginVersionID: versionID, WorkItemKey: workItemID, Kind: "health", Title: "Health position", Status: models.AutomationWorkItemStatus(state)}, models.AutomationWorkItemPosition{WorkItemID: workItemID, ProjectID: projectID, AutomationID: automationID, VersionID: versionID, NodeID: nodeID, State: state}))
 }
-
-func insertAutomationHealthActivityResources(tb testing.TB, db *sql.DB, projectID, automationID, versionID, nodeID, invocationID, taskID, pullID string, index int) {
+func insertAutomationHealthActivityResources(tb testing.TB, db *teststores.Env, projectID, automationID, versionID, nodeID, invocationID, taskID, pullID string, index int) {
 	tb.Helper()
-	activityID := fmt.Sprintf("%s-activity-%03d", automationID, index)
-	_, err := db.ExecContext(context.Background(), `INSERT INTO automation_activities
-		(id, project_id, automation_id, version_id, node_id, invocation_id, activity_key, activity_type, status)
-		VALUES (?, ?, ?, ?, ?, ?, ?, 'pull_request', 'completed')`, activityID, projectID, automationID, versionID, nodeID, invocationID, activityID)
-	require.NoError(tb, err)
-	_, err = db.ExecContext(context.Background(), `INSERT INTO automation_activity_resources (activity_id, resource_type, resource_id, relation)
-		VALUES (?, 'task', ?, 'subject'), (?, 'pull_request', ?, 'subject')`, activityID, taskID, activityID, pullID)
-	require.NoError(tb, err)
+	id := fmt.Sprintf("%s-activity-%03d", automationID, index)
+	require.NoError(tb, db.Fixtures.SeedAutomationActivity(tb.Context(), models.AutomationActivity{ID: id, ProjectID: projectID, AutomationID: automationID, VersionID: versionID, NodeID: nodeID, InvocationID: invocationID, ActivityKey: id, ActivityType: "pull_request", Status: "completed"}, []models.AutomationActivityResource{{ResourceType: "task", ResourceID: taskID, Relation: "subject"}, {ResourceType: "pull_request", ResourceID: pullID, Relation: "subject"}}))
 }
 
 func attachAutomationHealthPullRequest(t *testing.T, fixture automationRuntimeFixture, invocationID string, updatedAt time.Time) {
@@ -671,16 +651,6 @@ func attachAutomationHealthPullRequest(t *testing.T, fixture automationRuntimeFi
 	require.NoError(t, fixture.stores.Fixtures.SetTaskPullRequestUpdatedAt(ctx, fixture.task.ID, updatedAt))
 }
 
-func countAutomationHealthUpdates(statements []string) int {
-	count := 0
-	for _, statement := range statements {
-		if strings.HasPrefix(strings.ToUpper(strings.TrimSpace(statement)), "UPDATE AUTOMATIONS") {
-			count++
-		}
-	}
-	return count
-}
-
 func legacyAutomationHealthStatementCount(automationCount int) int {
 	if automationCount <= 0 {
 		return 1
@@ -688,11 +658,16 @@ func legacyAutomationHealthStatementCount(automationCount int) int {
 	return 4*automationCount + automationCount/100 + 1
 }
 
-func requireAutomationHealthEvaluatedCount(t *testing.T, db *sql.DB, projectID string, expected int) {
+func requireAutomationHealthEvaluatedCount(t *testing.T, db *teststores.Env, projectID string, expected int) {
 	t.Helper()
-	var evaluated int
-	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM automations
-		WHERE project_id = ? AND published_version_id IS NOT NULL AND health_evaluated_at IS NOT NULL`, projectID).Scan(&evaluated))
+	cards, err := db.Automations.ListPortfolioCards(t.Context(), projectID)
+	require.NoError(t, err)
+	evaluated := 0
+	for _, card := range cards {
+		if card.Automation.PublishedVersionID != nil && card.Automation.HealthEvaluatedAt != nil {
+			evaluated++
+		}
+	}
 	require.Equal(t, expected, evaluated)
 }
 
@@ -729,31 +704,31 @@ type automationHealthMeasurement struct {
 
 type automationHealthBenchmarkPath struct {
 	name    string
-	measure func(testing.TB, *sql.DB, persistence.AutomationStore, time.Time) error
+	measure func(testing.TB, *teststores.Env, persistence.AutomationStore, time.Time) error
 }
 
-func measureAutomationHealthReconciliation(tb testing.TB, db *sql.DB, repo persistence.AutomationStore, counter *testutil.SQLStatementCounter, now time.Time, measure func(testing.TB, *sql.DB, persistence.AutomationStore, time.Time) error) automationHealthMeasurement {
+func measureAutomationHealthReconciliation(tb testing.TB, db *teststores.Env, repo persistence.AutomationStore, counter storefixture.IOCounter, now time.Time, measure func(testing.TB, *teststores.Env, persistence.AutomationStore, time.Time) error) automationHealthMeasurement {
 	tb.Helper()
 	var beforeMem, afterMem runtime.MemStats
 	runtime.ReadMemStats(&beforeMem)
 	counter.Reset()
 	counter.SetEnabled(true)
-	beforeStats := db.Stats()
+	beforeStats := db.Contention().Reads
 	start := time.Now()
 	require.NoError(tb, measure(tb, db, repo, now))
 	duration := time.Since(start)
-	afterStats := db.Stats()
+	afterStats := db.Contention().Reads
 	counter.SetEnabled(false)
 	runtime.ReadMemStats(&afterMem)
-	statements := counter.Statements()
+	stats := counter.Snapshot()
 	return automationHealthMeasurement{
-		duration: duration, statements: len(statements), updates: countAutomationHealthUpdates(statements),
+		duration: duration, statements: stats.Requests, updates: stats.AutomationHealthWrites,
 		waitCount: afterStats.WaitCount - beforeStats.WaitCount, wait: afterStats.WaitDuration - beforeStats.WaitDuration,
 		allocs: afterMem.Mallocs - beforeMem.Mallocs, bytes: afterMem.TotalAlloc - beforeMem.TotalAlloc,
 	}
 }
 
-func measureCurrentAutomationHealthPath(tb testing.TB, _ *sql.DB, repo persistence.AutomationStore, now time.Time) error {
+func measureCurrentAutomationHealthPath(tb testing.TB, _ *teststores.Env, repo persistence.AutomationStore, now time.Time) error {
 	tb.Helper()
 	return repo.RecomputeAutomationHealthForAll(context.Background(), now, 100)
 }
@@ -778,8 +753,9 @@ func BenchmarkAutomationHealthReconciliation(b *testing.B) {
 	for _, count := range []int{1, 10, 100, 500} {
 		for _, path := range paths {
 			b.Run(fmt.Sprintf("%s/stable/%d", path.name, count), func(b *testing.B) {
-				db, counter := testutil.NewStatementCountingTestDB(b)
-				repo := teststores.Of(db).Automations
+				db := teststores.New(b, teststores.WithIOCounting())
+				counter := db.IO
+				repo := db.Automations
 				now := time.Now().UTC()
 				seedAutomationHealthReconciliationFixture(b, db, count, now)
 				require.NoError(b, repo.RecomputeAutomationHealthForAll(context.Background(), now, 100))
@@ -808,8 +784,9 @@ func BenchmarkAutomationHealthReconciliation(b *testing.B) {
 				b.ReportMetric(float64(totalWait.Nanoseconds())/float64(b.N), "db_wait_ns/op")
 			})
 			b.Run(fmt.Sprintf("%s/changed-position/%d", path.name, count), func(b *testing.B) {
-				db, counter := testutil.NewStatementCountingTestDB(b)
-				repo := teststores.Of(db).Automations
+				db := teststores.New(b, teststores.WithIOCounting())
+				counter := db.IO
+				repo := db.Automations
 				now := time.Now().UTC()
 				fixture := seedAutomationHealthReconciliationFixture(b, db, count, now)
 				require.NoError(b, repo.RecomputeAutomationHealthForAll(context.Background(), now, 100))
@@ -826,7 +803,7 @@ func BenchmarkAutomationHealthReconciliation(b *testing.B) {
 						state = models.AutomationPositionBlocked
 					}
 					b.StopTimer()
-					_, err := db.ExecContext(context.Background(), `UPDATE automation_work_item_positions SET state = ? WHERE work_item_id = ? AND node_id = ?`, string(state), fixture.changePositionWorkItemID, fixture.changePositionNodeID)
+					err := db.Fixtures.SetAutomationPositionState(context.Background(), fixture.changePositionWorkItemID, fixture.changePositionNodeID, state)
 					require.NoError(b, err)
 					b.StartTimer()
 					measurement := measureAutomationHealthReconciliation(b, db, repo, counter, measurementTime, path.measure)

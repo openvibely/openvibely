@@ -1102,19 +1102,19 @@ func TestAutomationBuilderPreviewUsesCompilerValidation(t *testing.T) {
 }
 
 func TestAutomationBuilderPreviewUsesSingleCompactAgentValidationPass(t *testing.T) {
-	db, counter := testutil.NewStatementCountingTestDB(t)
-	h, _, _ := setupTestHandlerForDB(t, db)
+	h, _, _, db := setupTestHandlerWithStores(t, teststores.WithIOCounting())
+	counter := db.IO
 	ctx := context.Background()
-	projectRepo := teststores.Of(db).Projects
+	projectRepo := db.Projects
 	project := &models.Project{Name: "Single Agent validation preview"}
 	require.NoError(t, projectRepo.Create(ctx, project))
-	agentRepo := teststores.Of(db).Agents
+	agentRepo := db.Agents
 	agent := &models.Agent{Name: "Preview Agent", Key: "preview-agent", SystemPrompt: "private preview prompt", Model: "inherit", Tools: []string{"Read"}, Enabled: true, SelectableAsPrimary: true}
 	require.NoError(t, agentRepo.Create(ctx, agent))
 	h.SetAgentRepo(agentRepo)
 
 	registry := service.NewAutomationAdapterRegistry()
-	automationRepo := teststores.Of(db).Automations
+	automationRepo := db.Automations
 	drafts := service.NewAutomationDraftService(automationRepo, registry)
 	capabilities := service.NewAutomationCapabilitySnapshotBuilder(projectRepo, agentRepo, nil, nil)
 	validator := service.NewAutomationSaveValidator(registry, drafts)
@@ -1135,21 +1135,8 @@ func TestAutomationBuilderPreviewUsesSingleCompactAgentValidationPass(t *testing
 	counter.SetEnabled(false)
 	require.NoError(t, err)
 	require.Empty(t, result.ValidationErrors)
-	agentStatements := make([]string, 0)
-	for _, statement := range counter.Statements() {
-		if strings.Contains(strings.ToLower(statement), "from agents") {
-			agentStatements = append(agentStatements, statement)
-		}
-	}
-	require.Len(t, agentStatements, 1)
-	projection := strings.ToLower(strings.SplitN(strings.Join(strings.Fields(agentStatements[0]), " "), " from agents", 2)[0])
-	require.Contains(t, projection, "select id")
-	require.Contains(t, projection, "coalesce(key, '')")
-	require.Contains(t, projection, "project_id")
-	for _, forbidden := range []string{"system_prompt", "tools", "tool_config", "plugins", "mcp_servers", "skills", "permission_defaults_json", "model_defaults_json", "source_refs_json", "created_at", "updated_at"} {
-		require.NotContains(t, projection, forbidden)
-	}
-
+	require.Equal(t, 1, counter.Snapshot().AgentReferenceReads)
+	require.Zero(t, counter.Snapshot().AgentDetailReads)
 	delete(candidate.Nodes[0].Config, "agent_ref")
 	counter.Reset()
 	counter.SetEnabled(true)
@@ -1157,29 +1144,23 @@ func TestAutomationBuilderPreviewUsesSingleCompactAgentValidationPass(t *testing
 	counter.SetEnabled(false)
 	require.NoError(t, err)
 	require.Empty(t, result.ValidationErrors)
-	agentStatements = agentStatements[:0]
-	for _, statement := range counter.Statements() {
-		if strings.Contains(strings.ToLower(statement), "from agents") {
-			agentStatements = append(agentStatements, statement)
-		}
-	}
-	require.Empty(t, agentStatements)
+	require.Zero(t, counter.Snapshot().AgentReads)
 }
 
 func TestAutomationBuilderEditUsesSingleCompactAgentValidationPass(t *testing.T) {
-	db, counter := testutil.NewStatementCountingTestDB(t)
-	h, e, _ := setupTestHandlerForDB(t, db)
+	h, e, _, db := setupTestHandlerWithStores(t, teststores.WithIOCounting())
+	counter := db.IO
 	ctx := context.Background()
-	projectRepo := teststores.Of(db).Projects
+	projectRepo := db.Projects
 	project := &models.Project{Name: "Single Agent validation edit"}
 	require.NoError(t, projectRepo.Create(ctx, project))
-	agentRepo := teststores.Of(db).Agents
+	agentRepo := db.Agents
 	agent := &models.Agent{Name: "Edit Agent", Key: "edit-agent", SystemPrompt: "private edit prompt", Model: "inherit", Tools: []string{"Read"}, Enabled: true, SelectableAsPrimary: true}
 	require.NoError(t, agentRepo.Create(ctx, agent))
 	h.SetAgentRepo(agentRepo)
 
 	registry := service.NewAutomationAdapterRegistry()
-	automationRepo := teststores.Of(db).Automations
+	automationRepo := db.Automations
 	drafts := service.NewAutomationDraftService(automationRepo, registry)
 	capabilities := service.NewAutomationCapabilitySnapshotBuilder(projectRepo, agentRepo, nil, nil)
 	validator := service.NewAutomationSaveValidator(registry, drafts)
@@ -1213,22 +1194,9 @@ func TestAutomationBuilderEditUsesSingleCompactAgentValidationPass(t *testing.T)
 	counter.SetEnabled(false)
 	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
 
-	countAgentQueries := func() (compact, rich int) {
-		for _, statement := range counter.Statements() {
-			query := strings.ToLower(strings.Join(strings.Fields(statement), " "))
-			if !strings.Contains(query, "from agents") {
-				continue
-			}
-			projection := strings.SplitN(query, " from agents", 2)[0]
-			if strings.Contains(projection, "system_prompt") {
-				rich++
-				continue
-			}
-			if strings.Contains(projection, "coalesce(key, '')") && strings.Contains(projection, "coalesce(project_id, '')") {
-				compact++
-			}
-		}
-		return compact, rich
+	countAgentQueries := func() (int, int) {
+		stats := counter.Snapshot()
+		return stats.AgentReferenceReads, stats.AgentDetailReads
 	}
 	compactAgentQueries, richAgentQueries := countAgentQueries()
 	require.Equal(t, 1, compactAgentQueries, "edit preview must read selectable Agent identities once")
@@ -1248,7 +1216,8 @@ func TestAutomationBuilderEditUsesSingleCompactAgentValidationPass(t *testing.T)
 	require.Equal(t, 2, compactAgentQueries, "edit save must perform one compact validation query and one save-scoped compact resolution query")
 	require.Zero(t, richAgentQueries, "edit save must not hydrate the rich Agent catalog during materialization")
 
-	_, err = db.ExecContext(ctx, `UPDATE agents SET enabled = 0 WHERE id = ?`, agent.ID)
+	agent.Enabled = false
+	err = agentRepo.Update(ctx, agent)
 	require.NoError(t, err)
 	malformedForm := url.Values{"project_id": {project.ID}, "automation_yaml": {""}, "save_changes": {"true"}}
 	malformedRequest := httptest.NewRequest(http.MethodPost, "/automations/"+saved.Definition.Automation.ID+"/builder?project_id="+project.ID, strings.NewReader(malformedForm.Encode()))
@@ -1263,14 +1232,14 @@ func TestAutomationBuilderEditUsesSingleCompactAgentValidationPass(t *testing.T)
 }
 
 func TestAutomationBuilderCreateBatchesAgentResolution(t *testing.T) {
-	db, counter := testutil.NewStatementCountingTestDB(t)
-	h, e, _ := setupTestHandlerForDB(t, db)
+	h, e, _, db := setupTestHandlerWithStores(t, teststores.WithIOCounting())
+	counter := db.IO
 	ctx := context.Background()
-	projectRepo := teststores.Of(db).Projects
+	projectRepo := db.Projects
 	project := &models.Project{Name: "Batched builder Agent create"}
 	require.NoError(t, projectRepo.Create(ctx, project))
-	agentRepo := teststores.Of(db).Agents
-	teststores.ClearAgents(t, teststores.Of(db).Agents)
+	agentRepo := db.Agents
+	teststores.ClearAgents(t, db.Agents)
 	refs := make([]string, 0, 5)
 	agentIDs := make(map[string]struct{}, 5)
 	for i := 0; i < 5; i++ {
@@ -1283,7 +1252,7 @@ func TestAutomationBuilderCreateBatchesAgentResolution(t *testing.T) {
 	h.SetAgentRepo(agentRepo)
 
 	registry := service.NewAutomationAdapterRegistry()
-	automationRepo := teststores.Of(db).Automations
+	automationRepo := db.Automations
 	drafts := service.NewAutomationDraftService(automationRepo, registry)
 	capabilities := service.NewAutomationCapabilitySnapshotBuilder(projectRepo, agentRepo, nil, nil)
 	validator := service.NewAutomationSaveValidator(registry, drafts)
@@ -1305,41 +1274,27 @@ func TestAutomationBuilderCreateBatchesAgentResolution(t *testing.T) {
 	require.Equal(t, http.StatusNoContent, response.Code, response.Body.String())
 	require.NotEmpty(t, response.Header().Get("HX-Redirect"))
 
-	compactAgentQueries, richAgentQueries := 0, 0
-	for _, statement := range counter.Statements() {
-		query := strings.ToLower(strings.Join(strings.Fields(statement), " "))
-		if !strings.Contains(query, "from agents") {
-			continue
-		}
-		projection := strings.SplitN(query, " from agents", 2)[0]
-		if strings.Contains(projection, "system_prompt") {
-			richAgentQueries++
-		} else if strings.Contains(projection, "coalesce(key, '')") && strings.Contains(projection, "coalesce(project_id, '')") {
-			compactAgentQueries++
-		}
-	}
+	stats := counter.Snapshot()
+	compactAgentQueries, richAgentQueries := stats.AgentReferenceReads, stats.AgentDetailReads
 	require.Equal(t, 2, compactAgentQueries, "builder create should perform one compact validation query and one save-scoped compact resolution query")
 	require.Zero(t, richAgentQueries, "builder create must not hydrate rich Agent rows during Save")
 
-	rows, err := db.QueryContext(ctx, `SELECT agent_definition_id FROM tasks WHERE project_id = ? AND agent_definition_id IS NOT NULL`, project.ID)
+	tasks, err := db.Tasks.ListByProject(ctx, project.ID, "")
 	require.NoError(t, err)
-	defer rows.Close()
 	resolvedIDs := make(map[string]struct{}, 5)
-	for rows.Next() {
-		var agentID string
-		require.NoError(t, rows.Scan(&agentID))
-		resolvedIDs[agentID] = struct{}{}
+	for _, task := range tasks {
+		if task.AgentDefinitionID != nil {
+			resolvedIDs[*task.AgentDefinitionID] = struct{}{}
+		}
 	}
-	require.NoError(t, rows.Err())
 	require.Len(t, resolvedIDs, len(agentIDs), "each builder task should retain its selected Agent definition")
 	for agentID := range agentIDs {
 		require.Contains(t, resolvedIDs, agentID)
 	}
-	var taskCount, scheduleCount int
-	require.NoError(t, db.QueryRowContext(ctx, `SELECT COUNT(*) FROM tasks WHERE project_id = ?`, project.ID).Scan(&taskCount))
-	require.NoError(t, db.QueryRowContext(ctx, `SELECT COUNT(*) FROM schedules s JOIN tasks t ON t.id = s.task_id WHERE t.project_id = ?`, project.ID).Scan(&scheduleCount))
-	require.Equal(t, 5, taskCount)
-	require.Equal(t, 2, scheduleCount)
+	schedules, err := db.Schedules.ListByProject(ctx, project.ID)
+	require.NoError(t, err)
+	require.Len(t, tasks, 5)
+	require.Len(t, schedules, 2)
 }
 
 func serviceAutomationValidationReferenceCandidateForHandler(refs []string) models.AutomationDraftCandidate {
@@ -2730,15 +2685,15 @@ func TestAutomationChatReadToolsPreserveSharedSummaryEnvelope(t *testing.T) {
 }
 
 func TestAutomationChatReadToolsUseBoundedRuntimePageAndDirectLookup(t *testing.T) {
-	db, counter := testutil.NewStatementCountingTestDB(t)
-	h, _, _ := setupTestHandlerForDB(t, db)
+	h, _, _, db := setupTestHandlerWithStores(t, teststores.WithIOCounting())
+	counter := db.IO
 	ctx := context.Background()
-	projectRepo := teststores.Of(db).Projects
+	projectRepo := db.Projects
 	project := &models.Project{Name: "Bounded Automation runtime reads"}
 	require.NoError(t, projectRepo.Create(ctx, project))
 	foreign := &models.Project{Name: "Foreign bounded Automation runtime reads"}
 	require.NoError(t, projectRepo.Create(ctx, foreign))
-	automationRepo := teststores.Of(db).Automations
+	automationRepo := db.Automations
 	h.SetAutomationServices(service.NewAutomationGraphService(automationRepo), nil)
 
 	insertAutomation := func(projectID string, ordinal int) string {
@@ -2749,20 +2704,11 @@ func TestAutomationChatReadToolsUseBoundedRuntimePageAndDirectLookup(t *testing.
 		}
 		versionID := automationID + "-version"
 		updatedAt := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC).Add(time.Duration(ordinal) * time.Minute)
-		_, err := db.ExecContext(ctx, `INSERT INTO automations
-			(id, project_id, stable_key, name, description, automation_type, lifecycle_state, template_revision, updated_at)
-			VALUES (?, ?, ?, ?, ?, 'custom', 'active', 0, ?)`, automationID, projectID, "runtime/"+automationID, fmt.Sprintf("Runtime %03d", ordinal), strings.Repeat("hidden-description ", 32), updatedAt)
-		require.NoError(t, err)
-		_, err = db.ExecContext(ctx, `INSERT INTO automation_versions
-			(id, project_id, automation_id, version, state, source, adapter_key, schema_version, published_at)
-			VALUES (?, ?, ?, 1, 'published', 'manual', 'custom', 1, ?)`, versionID, projectID, automationID, updatedAt)
-		require.NoError(t, err)
-		_, err = db.ExecContext(ctx, `UPDATE automations SET published_version_id = ? WHERE id = ? AND project_id = ?`, versionID, automationID, projectID)
-		require.NoError(t, err)
-		_, err = db.ExecContext(ctx, `INSERT INTO automation_nodes
-			(id, project_id, automation_id, version_id, node_key, name, node_type, role, config_json, position_x, position_y)
-			VALUES (?, ?, ?, ?, 'node', 'Node', 'agent_task', 'task', '{}', 0, 0)`, automationID+"-node", projectID, automationID, versionID)
-		require.NoError(t, err)
+		require.NoError(t, db.Fixtures.SeedAutomation(ctx, models.Automation{ID: automationID, ProjectID: projectID, StableKey: "runtime/" + automationID, Name: fmt.Sprintf("Runtime %03d", ordinal), Description: strings.Repeat("hidden-description ", 32), AutomationType: "custom", LifecycleState: "active"}))
+		require.NoError(t, db.Fixtures.SetAutomationUpdatedAt(ctx, automationID, updatedAt))
+		require.NoError(t, db.Fixtures.SeedAutomationVersion(ctx, models.AutomationVersion{ID: versionID, ProjectID: projectID, AutomationID: automationID, Version: 1, State: "published", Source: "manual", AdapterKey: "custom", PublishedAt: &updatedAt}))
+		require.NoError(t, db.Fixtures.SetAutomationPublishedVersion(ctx, automationID, versionID))
+		require.NoError(t, db.Fixtures.SeedAutomationNode(ctx, models.AutomationNode{ID: automationID + "-node", ProjectID: projectID, AutomationID: automationID, VersionID: versionID, NodeKey: "node", Name: "Node", NodeType: "agent_task", Role: "task", ConfigJSON: "{}"}))
 		return automationID
 	}
 
@@ -2799,10 +2745,8 @@ func TestAutomationChatReadToolsUseBoundedRuntimePageAndDirectLookup(t *testing.
 	require.Equal(t, float64(service.AutomationRuntimeListDefaultLimit), pagination["returned"])
 	require.Equal(t, true, pagination["has_more"])
 	require.Equal(t, float64(service.AutomationRuntimeListDefaultLimit), pagination["next_offset"])
-	statements := strings.ToLower(strings.Join(counter.Statements(), "\n"))
-	require.Contains(t, statements, "limit ? offset ?")
-	require.Contains(t, statements, "selected_automations(automation_id) as (values")
-	require.NotContains(t, statements, "listing automation portfolio cards")
+	require.Equal(t, 1, counter.Snapshot().AutomationPageReads)
+	require.Equal(t, 1, counter.Snapshot().AutomationSelectedMetricsReads)
 
 	capped := executeOK("list_automations", json.RawMessage(`{"limit":500,"offset":0}`))
 	cappedPagination, _ := capped["pagination"].(map[string]any)
@@ -2823,10 +2767,9 @@ func TestAutomationChatReadToolsUseBoundedRuntimePageAndDirectLookup(t *testing.
 	counter.SetEnabled(false)
 	gotAutomation, _ := got["automation"].(map[string]any)
 	require.Equal(t, lastID, gotAutomation["id"])
-	getStatements := strings.ToLower(strings.Join(counter.Statements(), "\n"))
-	require.Contains(t, getStatements, "where a.project_id = ? and a.id = ?")
-	require.Contains(t, getStatements, "selected_automations(automation_id) as (values (?))")
-	require.NotContains(t, getStatements, "order by a.updated_at desc, a.id limit ?")
+	require.Equal(t, 1, counter.Snapshot().AutomationDirectReads)
+	require.Equal(t, 1, counter.Snapshot().AutomationSelectedMetricsReads)
+	require.Zero(t, counter.Snapshot().AutomationPageReads)
 
 	unknown := executeOK("get_automation", json.RawMessage(fmt.Sprintf(`{"automation_id":%q}`, foreignID)))
 	require.False(t, unknown["found"].(bool))
@@ -4122,22 +4065,22 @@ func (f *handlerAutomationExternalProvider) GetPullRequest(context.Context, *ser
 }
 
 func TestAutomationLiveYAMLUsesLoadedGraphWithoutSecondDefinitionRead(t *testing.T) {
-	db, counter := testutil.NewStatementCountingTestDB(t)
-	h, e, llmConfigRepo := setupTestHandlerForDB(t, db)
+	h, e, llmConfigRepo, db := setupTestHandlerWithStores(t, teststores.WithIOCounting())
+	counter := db.IO
 	ctx := context.Background()
-	projectRepo := teststores.Of(db).Projects
+	projectRepo := db.Projects
 	project := &models.Project{Name: "Automation Live YAML query budget"}
 	require.NoError(t, projectRepo.Create(ctx, project))
 
-	taskRepo := teststores.Of(db).Tasks
+	taskRepo := db.Tasks
 	task := &models.Task{ProjectID: project.ID, Title: "Live YAML task", Category: models.CategoryScheduled,
 		Priority: 2, Status: models.StatusPending, Prompt: "Review the current request."}
 	require.NoError(t, taskRepo.Create(ctx, task))
 	schedule := &models.Schedule{TaskID: task.ID, RunAt: time.Now().UTC().Add(time.Hour),
 		RepeatType: models.RepeatDaily, RepeatInterval: 1, Enabled: true, ClearContextOnStart: true}
-	require.NoError(t, teststores.Of(db).Schedules.Create(ctx, schedule))
+	require.NoError(t, db.Schedules.Create(ctx, schedule))
 
-	automationRepo := teststores.Of(db).Automations
+	automationRepo := db.Automations
 	registry := service.NewAutomationAdapterRegistry()
 	registration := service.NewAutomationRegistrationService(automationRepo, registry)
 	drafts := service.NewAutomationDraftService(automationRepo, registry)
@@ -4165,23 +4108,14 @@ func TestAutomationLiveYAMLUsesLoadedGraphWithoutSecondDefinitionRead(t *testing
 
 	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
 	require.Contains(t, response.Body.String(), "schema_version")
-	statements := counter.Statements()
-	count := func(fragment string) int {
-		count := 0
-		for _, statement := range statements {
-			if strings.Contains(strings.ToLower(strings.Join(strings.Fields(statement), " ")), fragment) {
-				count++
-			}
-		}
-		return count
-	}
-	require.Equal(t, 1, count("from automation_versions"), "Live YAML must not reload the published version")
-	require.Equal(t, 1, count("from automation_nodes"), "Live YAML must not reload automation nodes")
-	require.Equal(t, 1, count("from automation_edges"), "Live YAML must not reload automation edges")
-	require.Equal(t, 1, count("select adr.id, adr.project_id"), "Live YAML must not reload definition resources")
-	require.Equal(t, 1, count("from automation_graph_metadata"), "Live YAML should read candidate metadata once")
-	require.Zero(t, count("from agent_configs"), "Live YAML must not run capability validation")
-	require.Equal(t, 13, len(statements), "Live YAML should perform only the bounded metadata read after GetLive plus the route project lookup; statements: %#v", statements)
+	stats := counter.Snapshot()
+	require.Equal(t, 1, stats.AutomationVersionReads, "Live YAML must not reload the published version")
+	require.Equal(t, 1, stats.AutomationNodeReads, "Live YAML must not reload automation nodes")
+	require.Equal(t, 1, stats.AutomationEdgeReads, "Live YAML must not reload automation edges")
+	require.Equal(t, 1, stats.AutomationResourceReads, "Live YAML must not reload definition resources")
+	require.Equal(t, 1, stats.AutomationMetadataReads, "Live YAML should read candidate metadata once")
+	require.Zero(t, stats.ModelReads, "Live YAML must not run capability validation")
+	require.Equal(t, 13, stats.Requests, "Live YAML should perform only the bounded metadata read after GetLive plus the route project lookup")
 }
 
 func TestRefreshAutomationExternalStateRouteRendersLiveGraphAndPreservesProjectScope(t *testing.T) {

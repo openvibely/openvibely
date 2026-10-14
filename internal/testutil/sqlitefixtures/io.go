@@ -27,6 +27,52 @@ func (c *ioCounter) Snapshot() storefixture.IOStats {
 	stats := storefixture.IOStats{Requests: len(statements), ReadTextBytes: c.counter.SelectedTextBytes()}
 	for _, statement := range statements {
 		q := strings.ToLower(strings.Join(strings.Fields(statement), " "))
+		if q == "select exists(select 1 from automations where project_id = ? and id = ?)" {
+			stats.AutomationIdentityReads++
+		}
+		if strings.Contains(q, "automation_versions") || strings.Contains(q, "automation_nodes") || strings.Contains(q, "automation_edges") || strings.Contains(q, "automation_definition_resources") {
+			stats.AutomationGraphReads++
+		}
+		if strings.Contains(q, "select id, project_id, automation_id, version_id, node_key, name, node_type, role, config_json") && strings.Contains(q, "from automation_nodes") {
+			stats.AutomationDefinitionNodeReads++
+		}
+
+		if strings.Contains(q, "from automations a") && strings.Contains(q, "limit ? offset ?") {
+			stats.AutomationPageReads++
+		}
+		if strings.Contains(q, "where a.project_id = ? and a.id = ?") {
+			stats.AutomationDirectReads++
+		}
+		if strings.Contains(q, "selected_automations(automation_id) as (values") {
+			stats.AutomationSelectedMetricsReads++
+		}
+		if strings.HasPrefix(q, "update automations") {
+			stats.AutomationHealthWrites++
+		}
+		if strings.Contains(q, "from agents") {
+			projection := strings.SplitN(q, " from agents", 2)[0]
+			if strings.Contains(projection, "system_prompt") {
+				stats.AgentDetailReads++
+			} else if strings.Contains(projection, "coalesce(key, '')") && strings.Contains(projection, "coalesce(project_id, '')") {
+				stats.AgentReferenceReads++
+			}
+		}
+		if strings.Contains(q, "from automation_versions") {
+			stats.AutomationVersionReads++
+		}
+		if strings.Contains(q, "from automation_nodes") {
+			stats.AutomationNodeReads++
+		}
+		if strings.Contains(q, "from automation_edges") {
+			stats.AutomationEdgeReads++
+		}
+		if strings.Contains(q, "select adr.id, adr.project_id") {
+			stats.AutomationResourceReads++
+		}
+		if strings.Contains(q, "from automation_graph_metadata") {
+			stats.AutomationMetadataReads++
+		}
+
 		if strings.HasPrefix(q, "insert ") || strings.HasPrefix(q, "update ") || strings.HasPrefix(q, "delete ") {
 			stats.MutationRequests++
 			if strings.Contains(q, "agents") || strings.Contains(q, "agent_lifecycle_hooks") {

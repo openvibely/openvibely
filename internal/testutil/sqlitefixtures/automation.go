@@ -46,11 +46,14 @@ func (f *fixtures) SetAutomationTemplateRevision(ctx context.Context, projectID,
 }
 
 func (f *fixtures) SeedAutomationInvocation(ctx context.Context, v models.AutomationInvocation) error {
-	var createdAt any
+	var createdAt, updatedAt any
+	if !v.UpdatedAt.IsZero() {
+		updatedAt = v.UpdatedAt.UTC()
+	}
 	if !v.CreatedAt.IsZero() {
 		createdAt = v.CreatedAt.UTC().Format("2006-01-02 15:04:05")
 	}
-	_, err := f.db.ExecContext(ctx, `INSERT INTO automation_invocations (id,project_id,automation_id,version_id,trigger_node_id,trigger_resource_type,trigger_resource_id,occurrence_key,status,completed_at,started_at,error_message,skipped_reason,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,COALESCE(?,CURRENT_TIMESTAMP),?,?,COALESCE(?,CURRENT_TIMESTAMP))`, v.ID, v.ProjectID, v.AutomationID, v.VersionID, v.TriggerNodeID, v.TriggerResourceType, v.TriggerResourceID, v.OccurrenceKey, v.Status, v.CompletedAt, v.StartedAt, v.ErrorMessage, v.SkippedReason, createdAt)
+	_, err := f.db.ExecContext(ctx, `INSERT INTO automation_invocations (id,project_id,automation_id,version_id,trigger_node_id,trigger_resource_type,trigger_resource_id,occurrence_key,status,completed_at,started_at,error_message,skipped_reason,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,COALESCE(?,CURRENT_TIMESTAMP),?,?,COALESCE(?,CURRENT_TIMESTAMP),COALESCE(?,CURRENT_TIMESTAMP))`, v.ID, v.ProjectID, v.AutomationID, v.VersionID, v.TriggerNodeID, v.TriggerResourceType, v.TriggerResourceID, v.OccurrenceKey, v.Status, v.CompletedAt, v.StartedAt, v.ErrorMessage, v.SkippedReason, createdAt, updatedAt)
 	return err
 }
 
@@ -120,7 +123,7 @@ func (f *fixtures) SeedAutomationActivity(ctx context.Context, a models.Automati
 		return err
 	}
 	defer tx.Rollback()
-	_, err = tx.ExecContext(ctx, `INSERT INTO automation_activities(id,project_id,automation_id,version_id,node_id,invocation_id,activity_key,activity_type,status) VALUES(?,?,?,?,?,?,?,?,?)`, a.ID, a.ProjectID, a.AutomationID, a.VersionID, a.NodeID, a.InvocationID, a.ActivityKey, a.ActivityType, a.Status)
+	_, err = tx.ExecContext(ctx, `INSERT INTO automation_activities(id,project_id,automation_id,version_id,node_id,invocation_id,work_item_id,activity_key,activity_type,status) VALUES(?,?,?,?,?,NULLIF(?, ''),NULLIF(?, ''),?,?,?)`, a.ID, a.ProjectID, a.AutomationID, a.VersionID, a.NodeID, a.InvocationID, a.WorkItemID, a.ActivityKey, a.ActivityType, a.Status)
 	if err != nil {
 		return err
 	}
@@ -161,7 +164,7 @@ func (f *fixtures) SetAutomationHealthEvaluationTime(ctx context.Context, id str
 	return err
 }
 func (f *fixtures) SetAutomationPublishedVersion(ctx context.Context, id, versionID string) error {
-	_, err := f.db.ExecContext(ctx, `UPDATE automations SET published_version_id = ? WHERE id = ?`, versionID, id)
+	_, err := f.db.ExecContext(ctx, `UPDATE automations SET published_version_id = NULLIF(?, '') WHERE id = ?`, versionID, id)
 	return err
 }
 
@@ -193,7 +196,7 @@ func (f *fixtures) FailScheduleUpdate(ctx context.Context) error {
 }
 
 func (f *fixtures) SeedAutomationEdge(ctx context.Context, e models.AutomationEdge) error {
-	_, err := f.db.ExecContext(ctx, `INSERT INTO automation_edges(project_id,automation_id,version_id,source_node_id,target_node_id,edge_key,label,condition_json) VALUES(?,?,?,?,?,?,?,?)`, e.ProjectID, e.AutomationID, e.VersionID, e.SourceNodeID, e.TargetNodeID, e.EdgeKey, e.Label, e.ConditionJSON)
+	_, err := f.db.ExecContext(ctx, `INSERT INTO automation_edges(project_id,automation_id,version_id,source_node_id,target_node_id,edge_key,label,condition_json,display_order) VALUES(?,?,?,?,?,?,?,?,?)`, e.ProjectID, e.AutomationID, e.VersionID, e.SourceNodeID, e.TargetNodeID, e.EdgeKey, e.Label, e.ConditionJSON, e.DisplayOrder)
 	return err
 }
 func (f *fixtures) SeedAutomationResource(ctx context.Context, r models.AutomationDefinitionResource) error {
@@ -250,4 +253,52 @@ func (f *fixtures) CountDispatchExecutions(ctx context.Context, dispatchID strin
 func (f *fixtures) RemoveAutomationTaskBinding(ctx context.Context, versionID, taskID string) error {
 	_, err := f.db.ExecContext(ctx, `DELETE FROM automation_definition_resources WHERE version_id = ? AND resource_type = 'task' AND resource_id = ?`, versionID, taskID)
 	return err
+}
+
+func (f *fixtures) SeedAutomationWorkItemPosition(ctx context.Context, w models.AutomationWorkItem, p models.AutomationWorkItemPosition) error {
+	tx, err := f.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err = tx.ExecContext(ctx, `INSERT INTO automation_work_items(id,project_id,automation_id,origin_version_id,work_item_key,kind,title,status) VALUES(?,?,?,?,?,?,?,?)`, w.ID, w.ProjectID, w.AutomationID, w.OriginVersionID, w.WorkItemKey, w.Kind, w.Title, w.Status); err != nil {
+		return err
+	}
+	if _, err = tx.ExecContext(ctx, `INSERT INTO automation_work_item_positions(work_item_id,project_id,automation_id,version_id,node_id,state) VALUES(?,?,?,?,?,?)`, p.WorkItemID, p.ProjectID, p.AutomationID, p.VersionID, p.NodeID, p.State); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+func (f *fixtures) SetAutomationPositionState(ctx context.Context, workItemID, nodeID string, state models.AutomationPositionState) error {
+	_, err := f.db.ExecContext(ctx, `UPDATE automation_work_item_positions SET state=? WHERE work_item_id=? AND node_id=?`, state, workItemID, nodeID)
+	return err
+}
+
+func (f *fixtures) CountAutomationActivities(ctx context.Context, automationID, kind string, status models.AutomationActivityStatus) (int, error) {
+	var n int
+	err := f.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM automation_activities WHERE automation_id=? AND activity_type=? AND status=?`, automationID, kind, status).Scan(&n)
+	return n, err
+}
+func (f *fixtures) CountAutomationWorkItems(ctx context.Context, automationID, key string) (int, error) {
+	var n int
+	err := f.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM automation_work_items WHERE automation_id=? AND work_item_key=?`, automationID, key).Scan(&n)
+	return n, err
+}
+func (f *fixtures) CountAutomationTransitions(ctx context.Context, automationID, edgeKey string) (int, error) {
+	var n int
+	var err error
+	if edgeKey == "" {
+		err = f.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM automation_transitions WHERE automation_id=?`, automationID).Scan(&n)
+	} else {
+		err = f.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM automation_transitions tr JOIN automation_edges e ON e.id=tr.edge_id WHERE tr.automation_id=? AND e.edge_key=?`, automationID, edgeKey).Scan(&n)
+	}
+	return n, err
+}
+func (f *fixtures) CountAutomationResourceLinks(ctx context.Context, kind, id string) (int, error) {
+	var n int
+	err := f.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM automation_activity_resources WHERE resource_type=? AND resource_id=?`, kind, id).Scan(&n)
+	return n, err
+}
+func (f *fixtures) AutomationContextForWorkItem(ctx context.Context, projectID, key string) (models.AutomationContext, error) {
+	return sqlite.NewAutomationRepo(f.db).BindingsForWorkItemKey(ctx, projectID, key)
 }

@@ -1095,3 +1095,95 @@ func TestBulkHistoryFixturesShareStateAndRollbackInvalidReferences(t *testing.T)
 		})
 	}
 }
+
+func TestAutomationHealthAndProjectionFixturesShareBackendState(t *testing.T) {
+	for _, production := range []bool{false, true} {
+		name := "isolated"
+		if production {
+			name = "production"
+		}
+		t.Run(name, func(t *testing.T) {
+			opts := []teststores.Option{teststores.WithIOCounting()}
+			if production {
+				opts = append(opts, teststores.WithProductionTopology())
+			}
+			env := teststores.New(t, opts...)
+			ctx := t.Context()
+			a := models.Automation{ID: "inventory", ProjectID: "default", StableKey: "inventory", Name: "Inventory", AutomationType: "custom", LifecycleState: "active"}
+			require.NoError(t, env.Fixtures.SeedAutomation(ctx, a))
+			require.NoError(t, env.Fixtures.SeedAutomationVersion(ctx, models.AutomationVersion{ID: "inventory-version", ProjectID: a.ProjectID, AutomationID: a.ID, Version: 1, State: "published", Source: "manual", AdapterKey: "custom"}))
+			require.NoError(t, env.Fixtures.SetAutomationPublishedVersion(ctx, a.ID, "inventory-version"))
+			for _, id := range []string{"source", "target"} {
+				require.NoError(t, env.Fixtures.SeedAutomationNode(ctx, models.AutomationNode{ID: id, ProjectID: a.ProjectID, AutomationID: a.ID, VersionID: "inventory-version", NodeKey: id, Name: id, NodeType: "agent_task", Role: "task", ConfigJSON: "{}"}))
+			}
+			require.NoError(t, env.Fixtures.SeedAutomationEdge(ctx, models.AutomationEdge{ProjectID: a.ProjectID, AutomationID: a.ID, VersionID: "inventory-version", SourceNodeID: "source", TargetNodeID: "target", EdgeKey: "next", DisplayOrder: 7, ConditionJSON: "{}"}))
+			w := models.AutomationWorkItem{ID: "position-work", ProjectID: a.ProjectID, AutomationID: a.ID, OriginVersionID: "inventory-version", WorkItemKey: "position-work", Kind: "health", Title: "Position", Status: "active"}
+			pos := models.AutomationWorkItemPosition{WorkItemID: w.ID, ProjectID: a.ProjectID, AutomationID: a.ID, VersionID: "inventory-version", NodeID: "source", State: models.AutomationPositionActive}
+			require.NoError(t, env.Fixtures.SeedAutomationWorkItemPosition(ctx, w, pos))
+			w.ID = "rollback-work"
+			w.WorkItemKey = w.ID
+			pos.WorkItemID = w.ID
+			pos.NodeID = "missing-node"
+			require.Error(t, env.Fixtures.SeedAutomationWorkItemPosition(ctx, w, pos))
+			missing, err := env.Automations.GetAutomationWorkItem(ctx, a.ProjectID, a.ID, w.ID)
+			require.NoError(t, err)
+			require.Nil(t, missing)
+			require.NoError(t, env.Fixtures.SetAutomationPositionState(ctx, "position-work", "source", models.AutomationPositionBlocked))
+			health, err := env.Automations.RecomputeAutomationHealth(ctx, a.ProjectID, a.ID, time.Now().UTC())
+			require.NoError(t, err)
+			require.Equal(t, models.AutomationHealthDegraded, health.State)
+			env.IO.Reset()
+			env.IO.SetEnabled(true)
+			require.NoError(t, env.Fixtures.SetAutomationHealth(ctx, a.ID, models.AutomationHealthHealthy, "observed"))
+			definition, err := env.Automations.GetDefinition(ctx, a.ProjectID, a.ID)
+			env.IO.SetEnabled(false)
+			require.NoError(t, err)
+			require.NotNil(t, definition)
+			stats := env.IO.Snapshot()
+			require.Equal(t, 1, stats.AutomationHealthWrites)
+			require.Equal(t, 1, stats.AutomationVersionReads)
+			require.Equal(t, 1, stats.AutomationDefinitionNodeReads)
+			require.Equal(t, 1, stats.AutomationEdgeReads)
+			require.Equal(t, 7, definition.Edges[0].DisplayOrder)
+			activity := models.AutomationActivity{ID: "inventory-activity", ProjectID: a.ProjectID, AutomationID: a.ID, VersionID: "inventory-version", NodeID: "source", WorkItemID: "position-work", ActivityKey: "inventory-activity", ActivityType: "claim_notification", Status: models.AutomationActivityRunning}
+			require.NoError(t, env.Fixtures.SeedAutomationActivity(ctx, activity, []models.AutomationActivityResource{{ResourceType: "alert", ResourceID: "inventory-alert", Relation: "subject"}}))
+			n, err := env.Fixtures.CountAutomationActivities(ctx, a.ID, "claim_notification", models.AutomationActivityRunning)
+			require.NoError(t, err)
+			require.Equal(t, 1, n)
+			for _, kind := range []string{"other", "claim_notification"} {
+				n, err = env.Fixtures.CountAutomationActivities(ctx, a.ID, kind, models.AutomationActivityCompleted)
+				require.NoError(t, err)
+				require.Zero(t, n)
+			}
+			n, err = env.Fixtures.CountAutomationActivities(ctx, "foreign", "claim_notification", models.AutomationActivityRunning)
+			require.NoError(t, err)
+			require.Zero(t, n)
+			n, err = env.Fixtures.CountAutomationWorkItems(ctx, a.ID, "position-work")
+			require.NoError(t, err)
+			require.Equal(t, 1, n)
+			n, err = env.Fixtures.CountAutomationWorkItems(ctx, a.ID, "rollback-work")
+			require.NoError(t, err)
+			require.Zero(t, n)
+			n, err = env.Fixtures.CountAutomationResourceLinks(ctx, "alert", "inventory-alert")
+			require.NoError(t, err)
+			require.Equal(t, 1, n)
+			n, err = env.Fixtures.CountAutomationResourceLinks(ctx, "task", "inventory-alert")
+			require.NoError(t, err)
+			require.Zero(t, n)
+			binding := models.AutomationBinding{AutomationID: a.ID, VersionID: "inventory-version", NodeID: "target"}
+			_, _, err = env.Automations.RecordProjectionEvent(ctx, persistence.AutomationProjectionEvent{Context: models.AutomationContext{ProjectID: a.ProjectID}, Binding: binding, WorkItemKey: "transition-work", ActivityKey: "transition-activity", ActivityType: "test", ActivityStatus: models.AutomationActivityCompleted, EventKey: "transition-event", FromNodeID: "source", ToNodeID: "target", Transition: models.AutomationTransitionEntered})
+			require.NoError(t, err)
+			for _, key := range []string{"", "next"} {
+				n, err = env.Fixtures.CountAutomationTransitions(ctx, a.ID, key)
+				require.NoError(t, err)
+				require.Equal(t, 1, n)
+			}
+			n, err = env.Fixtures.CountAutomationTransitions(ctx, a.ID, "missing-edge")
+			require.NoError(t, err)
+			require.Zero(t, n)
+			n, err = env.Fixtures.CountAutomationTransitions(ctx, "foreign", "")
+			require.NoError(t, err)
+			require.Zero(t, n)
+		})
+	}
+}
