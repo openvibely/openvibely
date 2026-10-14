@@ -3,8 +3,9 @@ package handler
 import (
 	"bytes"
 	"context"
-	"database/sql"
 	"encoding/json"
+	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/testutil/storefixture"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -12,25 +13,26 @@ import (
 
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/service"
-	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/openvibely/openvibely/internal/testutil/teststores"
 )
 
 func TestAPIGetProjectsUsesCompactProjectionAndPreservesContract(t *testing.T) {
-	db, counter := testutil.NewStatementCountingTestDB(t)
-	repo := teststores.Of(db).Projects
+	env := teststores.New(t, teststores.WithIOCounting())
+	counter := env.IO
+	repo := env.Projects
 	ctx := context.Background()
-	if _, err := db.ExecContext(ctx, `UPDATE projects SET is_default = 0 WHERE id = 'default'`); err != nil {
-		t.Fatalf("clear default project flag: %v", err)
-	}
 
 	description := strings.Repeat("large project description ", 4096)
 	repoPath := "/workspace/" + strings.Repeat("nested/repository/", 64)
 	repoURL := "https://github.example.test/" + strings.Repeat("organization/repository/", 64)
-	seedAPIProject(t, db, "api-default", "Zebra Default", true, description, repoPath, repoURL)
-	seedAPIProject(t, db, "api-alpha", "Alpha", false, description, "/alpha/path", repoURL)
-	seedAPIProject(t, db, "api-same-b", "Same", false, description, "/same-b/path", repoURL)
-	seedAPIProject(t, db, "api-same-a", "Same", false, description, "/same-a/path", repoURL)
+	seedAPIProject(t, env.Fixtures, "api-default", "Zebra Default", true, description, repoPath, repoURL)
+	seedAPIProject(t, env.Fixtures, "api-alpha", "Alpha", false, description, "/alpha/path", repoURL)
+	seedAPIProject(t, env.Fixtures, "api-same-b", "Same", false, description, "/same-b/path", repoURL)
+	seedAPIProject(t, env.Fixtures, "api-same-a", "Same", false, description, "/same-a/path", repoURL)
+
+	if err := env.Fixtures.SetDefaultProject(ctx, "api-default"); err != nil {
+		t.Fatal(err)
+	}
 
 	h := &Handler{projectSvc: service.NewProjectService(repo)}
 	e := echo.New()
@@ -43,18 +45,10 @@ func TestAPIGetProjectsUsesCompactProjectionAndPreservesContract(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
 	}
-	statements := counter.Statements()
-	if len(statements) != 1 {
-		t.Fatalf("APIGetProjects statements = %d, want 1: %#v", len(statements), statements)
-	}
-	query := strings.ToLower(strings.Join(strings.Fields(statements[0]), " "))
-	if query != "select id, name, repo_path, created_at from projects order by is_default desc, name asc" {
-		t.Fatalf("APIGetProjects query = %q", query)
-	}
-	for _, omitted := range []string{"description", "repo_url", "default_agent_config_id", "max_workers", "updated_at"} {
-		if strings.Contains(query, omitted) {
-			t.Errorf("APIGetProjects selected omitted column %q: %s", omitted, query)
-		}
+	counter.SetEnabled(false)
+	observed := counter.Snapshot()
+	if observed.Requests != 1 || observed.ReadTextBytes > 16*1024 {
+		t.Fatalf("unexpected physical project IO: %+v", observed)
 	}
 
 	var response ProjectsListResponse
@@ -118,11 +112,9 @@ func TestAPIGetProjectsUsesCompactProjectionAndPreservesContract(t *testing.T) {
 	}
 }
 
-func seedAPIProject(t *testing.T, db *sql.DB, id, name string, isDefault bool, description, repoPath, repoURL string) {
+func seedAPIProject(t *testing.T, fixtures storefixture.Fixtures, id, name string, isDefault bool, description, repoPath, repoURL string) {
 	t.Helper()
-	if _, err := db.ExecContext(context.Background(),
-		`INSERT INTO projects (id, name, description, repo_path, repo_url, is_default) VALUES (?, ?, ?, ?, ?, ?)`,
-		id, name, description, repoPath, repoURL, isDefault); err != nil {
-		t.Fatalf("seed API project %q: %v", id, err)
+	if err := fixtures.SeedProjects(context.Background(), []models.Project{{ID: id, Name: name, IsDefault: isDefault, Description: description, RepoPath: repoPath, RepoURL: repoURL}}); err != nil {
+		t.Fatal(err)
 	}
 }

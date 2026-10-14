@@ -1277,3 +1277,40 @@ func TestProjectionInventoryPreservesHistoryAndScope(t *testing.T) {
 		})
 	}
 }
+
+func TestReservedAutomationTaskFixtureRollsBackAndScopes(t *testing.T) {
+	for _, production := range []bool{false, true} {
+		name := "isolated"
+		if production {
+			name = "production"
+		}
+		t.Run(name, func(t *testing.T) {
+			var opts []teststores.Option
+			if production {
+				opts = append(opts, teststores.WithProductionTopology())
+			}
+			env := teststores.New(t, opts...)
+			ctx := t.Context()
+			before, err := env.Fixtures.AutomationState(ctx)
+			require.NoError(t, err)
+			require.Error(t, env.Fixtures.SeedReservedAutomationTask(ctx, "default", "missing", "schedule"))
+			after, err := env.Fixtures.AutomationState(ctx)
+			require.NoError(t, err)
+			require.Equal(t, before, after)
+			task := models.Task{ProjectID: "default", Title: "Reserved", Prompt: "work", Category: models.CategoryScheduled, Status: models.StatusQueued, Priority: 2}
+			require.NoError(t, env.Tasks.Create(ctx, &task))
+			schedule := models.Schedule{TaskID: task.ID, RunAt: time.Now().UTC(), RepeatType: models.RepeatDaily, RepeatInterval: 1, Enabled: true}
+			require.NoError(t, env.Schedules.Create(ctx, &schedule))
+			require.NoError(t, env.Fixtures.SeedReservedAutomationTask(ctx, "default", task.ID, schedule.ID))
+			n, err := env.Fixtures.CountTaskAutomationReservations(ctx, []string{task.ID})
+			require.NoError(t, err)
+			require.Equal(t, 1, n)
+			n, err = env.Fixtures.CountTaskAutomationReservations(ctx, []string{"foreign"})
+			require.NoError(t, err)
+			require.Zero(t, n)
+			n, err = env.Fixtures.CountTaskThreadInputs(ctx, task.ID)
+			require.NoError(t, err)
+			require.Zero(t, n)
+		})
+	}
+}

@@ -23,7 +23,6 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/service"
-	"github.com/openvibely/openvibely/internal/testutil/teststores"
 	"github.com/openvibely/openvibely/web/static"
 	"github.com/openvibely/openvibely/web/templates/layout"
 	"github.com/openvibely/openvibely/web/templates/pages"
@@ -79,7 +78,7 @@ func TestEveryCollectionBulkRouteRejectsMalformedPayload(t *testing.T) {
 
 func TestBulkHandlersPreflightWithoutPartialDeletion(t *testing.T) {
 	t.Run("models", func(t *testing.T) {
-		tc := NewTestContext(t)
+		tc := NewStoreTestContext(t)
 		defaultModel := &models.LLMConfig{Name: "Default protected", Provider: models.ProviderTest, Model: "default-protected", IsDefault: true}
 		ordinaryModel := &models.LLMConfig{Name: "Ordinary model", Provider: models.ProviderTest, Model: "ordinary-model"}
 		require.NoError(t, tc.llmConfigRepo.Create(t.Context(), defaultModel))
@@ -93,7 +92,7 @@ func TestBulkHandlersPreflightWithoutPartialDeletion(t *testing.T) {
 	})
 
 	t.Run("personalities", func(t *testing.T) {
-		tc := NewTestContext(t)
+		tc := NewStoreTestContext(t)
 		repo := tc.stores.CustomPersonalities
 		tc.handler.SetCustomPersonalityRepo(repo)
 		active := &models.CustomPersonality{Name: "Active custom", Key: "active_custom", SystemPrompt: "A sufficiently long active prompt."}
@@ -112,7 +111,7 @@ func TestBulkHandlersPreflightWithoutPartialDeletion(t *testing.T) {
 	})
 
 	t.Run("channels", func(t *testing.T) {
-		tc := NewTestContext(t)
+		tc := NewStoreTestContext(t)
 		repo := tc.stores.Webhooks
 		tc.handler.SetWebhookRepo(repo)
 		firstProject := tc.CreateProject().WithName("Bulk channels first").Build()
@@ -136,7 +135,7 @@ func TestBulkHandlersPreflightWithoutPartialDeletion(t *testing.T) {
 	})
 
 	t.Run("channels mixed success", func(t *testing.T) {
-		tc := NewTestContext(t)
+		tc := NewStoreTestContext(t)
 		repo := tc.stores.Webhooks
 		tc.handler.SetWebhookRepo(repo)
 		project := tc.CreateProject().WithName("Bulk channels success").Build()
@@ -156,7 +155,7 @@ func TestBulkHandlersPreflightWithoutPartialDeletion(t *testing.T) {
 	})
 
 	t.Run("channels reject unsupported provider", func(t *testing.T) {
-		tc := NewTestContext(t)
+		tc := NewStoreTestContext(t)
 		require.NoError(t, tc.settingsRepo.Set(t.Context(), service.GitHubSettingPAT, "preserve-on-invalid-provider"))
 		rec := serveBulkDeleteRequest(t, tc.echo, "/channels/bulk", bulkIDsRequest{IDs: []string{"channel:github", "channel:unknown"}})
 		require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
@@ -166,7 +165,7 @@ func TestBulkHandlersPreflightWithoutPartialDeletion(t *testing.T) {
 	})
 
 	t.Run("webhooks", func(t *testing.T) {
-		tc := NewTestContext(t)
+		tc := NewStoreTestContext(t)
 		repo := tc.stores.Webhooks
 		tc.handler.SetWebhookRepo(repo)
 		firstProject := tc.CreateProject().WithName("Bulk webhook first").Build()
@@ -185,7 +184,7 @@ func TestBulkHandlersPreflightWithoutPartialDeletion(t *testing.T) {
 		}
 	})
 	t.Run("agents", func(t *testing.T) {
-		tc := NewTestContext(t)
+		tc := NewStoreTestContext(t)
 		repo := tc.stores.Agents
 		tc.handler.SetAgentRepo(repo)
 		ordinary := &models.Agent{Name: "Ordinary bulk agent", Key: "ordinary_bulk_agent", Scope: models.AgentScopeGlobal, Enabled: true, GeneratedStatus: models.AgentStatusUserEdited}
@@ -202,25 +201,25 @@ func TestBulkHandlersPreflightWithoutPartialDeletion(t *testing.T) {
 	})
 
 	t.Run("automations", func(t *testing.T) {
-		tc := NewTestContext(t)
+		tc := NewStoreTestContext(t)
 		repo := tc.stores.Automations
 		tc.handler.SetAutomationBuilderServices(nil, nil, nil, nil, nil, service.NewAutomationLifecycleService(repo, tc.scheduleRepo))
 		firstProject := tc.CreateProject().WithName("Bulk automation first").Build()
 		secondProject := tc.CreateProject().WithName("Bulk automation second").Build()
-		var ownID, foreignID string
-		require.NoError(t, tc.db.QueryRow(`INSERT INTO automations (project_id, stable_key, name) VALUES (?, 'own', 'Own') RETURNING id`, firstProject.ID).Scan(&ownID))
-		require.NoError(t, tc.db.QueryRow(`INSERT INTO automations (project_id, stable_key, name) VALUES (?, 'foreign', 'Foreign') RETURNING id`, secondProject.ID).Scan(&foreignID))
+		ownID, foreignID := persistence.NewID(), persistence.NewID()
+		require.NoError(t, tc.stores.Fixtures.SeedAutomation(t.Context(), models.Automation{ID: ownID, ProjectID: firstProject.ID, StableKey: "own", Name: "Own", AutomationType: "custom", LifecycleState: "active"}))
+		require.NoError(t, tc.stores.Fixtures.SeedAutomation(t.Context(), models.Automation{ID: foreignID, ProjectID: secondProject.ID, StableKey: "foreign", Name: "Foreign", AutomationType: "custom", LifecycleState: "active"}))
 		rec := serveBulkDeleteRequest(t, tc.echo, "/automations/bulk?project_id="+firstProject.ID, bulkIDsRequest{IDs: []string{ownID, foreignID}})
 		require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
-		for _, id := range []string{ownID, foreignID} {
-			var count int
-			require.NoError(t, tc.db.QueryRow(`SELECT COUNT(*) FROM automations WHERE id = ?`, id).Scan(&count))
-			require.Equal(t, 1, count)
+		for _, item := range []struct{ project, id string }{{firstProject.ID, ownID}, {secondProject.ID, foreignID}} {
+			exists, err := repo.Exists(t.Context(), item.project, item.id)
+			require.NoError(t, err)
+			require.True(t, exists)
 		}
 	})
 
 	t.Run("skills", func(t *testing.T) {
-		tc := NewTestContext(t)
+		tc := NewStoreTestContext(t)
 		root := t.TempDir()
 		tc.handler.SetAgentSkillRoot(root)
 		existing := filepath.Join(root, "skills", "existing-skill")
@@ -991,15 +990,15 @@ func TestCardBrowserRenderShellSetsPaginationHeadersForFragmentsAndHTMXRefreshes
 }
 
 func TestCardPaginationAutomationHandlerReturnsProjectScopedPages(t *testing.T) {
-	h, e, _, db := setupTestHandlerWithDB(t)
+	h, e, _, db := setupTestHandlerWithStores(t)
 	ctx := context.Background()
-	projectRepo := teststores.Of(db).Projects
+	projectRepo := db.Projects
 	project := &models.Project{Name: "Paged automation project"}
 	other := &models.Project{Name: "Other automation project"}
 	require.NoError(t, projectRepo.Create(ctx, project))
 	require.NoError(t, projectRepo.Create(ctx, other))
 
-	automationRepo := teststores.Of(db).Automations
+	automationRepo := db.Automations
 	registration := service.NewAutomationRegistrationService(automationRepo, service.NewAutomationAdapterRegistry())
 	h.SetAutomationServices(service.NewAutomationGraphService(automationRepo), registration)
 	for i := 0; i < 3; i++ {
@@ -1050,8 +1049,13 @@ func TestCardPaginationAutomationHandlerReturnsProjectScopedPages(t *testing.T) 
 		"Paged automation 02": time.Date(2026, time.January, 2, 0, 0, 0, 0, time.UTC),
 	}
 	for name, updatedAt := range updatedAtByName {
-		_, err = db.ExecContext(ctx, `UPDATE automations SET updated_at = ? WHERE project_id = ? AND name = ?`, updatedAt, project.ID, name)
+		cards, err := automationRepo.ListPortfolioCards(ctx, project.ID)
 		require.NoError(t, err)
+		for _, card := range cards {
+			if card.Automation.Name == name {
+				require.NoError(t, db.Fixtures.SetAutomationUpdatedAt(ctx, card.Automation.ID, updatedAt))
+			}
+		}
 	}
 	recentFirst := serveCardPageRequest(t, e, "/automations?project_id="+project.ID+"&page=0&page_size=2&search=paged+automation&sort=updated_desc&card_page=1")
 	require.Equal(t, http.StatusOK, recentFirst.Code)

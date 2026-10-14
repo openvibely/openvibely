@@ -649,3 +649,37 @@ func (f *fixtures) ClearProjects(ctx context.Context) error {
 	_, err := f.db.ExecContext(ctx, `DELETE FROM projects`)
 	return err
 }
+
+func (f *fixtures) FailClearingSetting(ctx context.Context, key string) error {
+	_, err := f.db.ExecContext(ctx, `CREATE TRIGGER fail_channel_setting_reset BEFORE UPDATE ON app_settings WHEN NEW.key = `+sqliteLiteral(key)+` AND NEW.value = '' BEGIN SELECT RAISE(FAIL, 'injected settings write failure'); END`)
+	return err
+}
+func (f *fixtures) FailConflictStatus(ctx context.Context) error {
+	_, err := f.db.ExecContext(ctx, `CREATE TRIGGER reject_conflict_status BEFORE UPDATE OF merge_status ON tasks WHEN NEW.merge_status = 'conflict' BEGIN SELECT RAISE(ABORT, 'injected conflict status failure'); END`)
+	return err
+}
+func (f *fixtures) MoveTaskProject(ctx context.Context, id, project string) error {
+	_, err := f.db.ExecContext(ctx, `UPDATE tasks SET project_id=? WHERE id=?`, project, id)
+	return err
+}
+func (f *fixtures) SetTaskDates(ctx context.Context, id string, created, updated time.Time, completed *time.Time) error {
+	_, err := f.db.ExecContext(ctx, `UPDATE tasks SET created_at=?,updated_at=?,completed_at=? WHERE id=?`, created, updated, completed, id)
+	return err
+}
+func (f *fixtures) LinkHistoricalAlertTask(ctx context.Context, project, id, task string) error {
+	_, err := f.db.ExecContext(ctx, `UPDATE alerts SET implementation_task_id=?,implementation_task_was_linked=1 WHERE id=? AND project_id=?`, task, id, project)
+	return err
+}
+func (f *fixtures) FailCapacitySources(ctx context.Context) error {
+	for _, q := range []string{`ALTER TABLE projects RENAME TO unavailable_projects_fixture`, `ALTER TABLE agent_configs RENAME TO unavailable_agent_configs_fixture`} {
+		if _, err := f.db.ExecContext(ctx, q); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (f *fixtures) SetDefaultProject(ctx context.Context, id string) error {
+	_, err := f.db.ExecContext(ctx, `UPDATE projects SET is_default=(id=?)`, id)
+	return err
+}
