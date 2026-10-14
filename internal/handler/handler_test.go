@@ -256,8 +256,8 @@ func TestHandler_GetTask_HTMX(t *testing.T) {
 }
 
 func TestHandler_GetTaskLargeHistoryUsesNarrowExecutionMetrics(t *testing.T) {
-	db, counter := testutil.NewStatementCountingTestDB(t)
-	h, e, llmConfigRepo := setupTestHandlerForDB(t, db)
+	h, e, llmConfigRepo, db := setupTestHandlerWithStores(t, teststores.WithIOCounting())
+	counter := db.IO
 	ctx := context.Background()
 
 	agent := createAgent(t, llmConfigRepo)
@@ -273,10 +273,8 @@ func TestHandler_GetTaskLargeHistoryUsesNarrowExecutionMetrics(t *testing.T) {
 	if err := h.taskSvc.Update(ctx, task); err != nil {
 		t.Fatalf("update task to active completed: %v", err)
 	}
-	seedLargeExecutionHistory(t, db, task.ID, agent.ID, 200, 4*1024, 64*1024)
-	if _, err := db.ExecContext(ctx, `UPDATE executions SET status = ?, duration_ms = ?, completed_at = ? WHERE id = ?`, models.ExecCompleted, int64(65_000), "2026-08-13 12:03:20", "exec-199"); err != nil {
-		t.Fatalf("complete latest execution: %v", err)
-	}
+	seedStoreExecutionHistory(t, db, task.ID, agent.ID, 200, 4*1024, 64*1024)
+	require.NoError(t, db.Fixtures.SetHistoricalExecutionCompletion(ctx, "exec-199", time.Date(2026, 8, 13, 12, 3, 20, 0, time.UTC), 65000))
 
 	checkInitialDetail := func(name string, htmx bool) {
 		t.Helper()
@@ -297,26 +295,10 @@ func TestHandler_GetTaskLargeHistoryUsesNarrowExecutionMetrics(t *testing.T) {
 			assertContains(t, rec, required)
 		}
 
-		metricsQuerySeen := false
-		for _, stmt := range counter.Statements() {
-			if !strings.Contains(stmt, "FROM executions") {
-				continue
-			}
-			if strings.Contains(stmt, "latest_started_at") && strings.Contains(stmt, "latest_duration_ms") {
-				metricsQuerySeen = true
-			}
-			for _, forbidden := range []string{"prompt_sent", "output", "error_message", "reasoning_content", "diff_output"} {
-				if strings.Contains(stmt, forbidden) {
-					t.Fatalf("%s execution query scanned historical %s text: %s", name, forbidden, stmt)
-				}
-			}
-			if strings.Contains(stmt, "ORDER BY started_at ASC, rowid ASC") {
-				t.Fatalf("%s initial detail path executed the unbounded chronological execution query: %s", name, stmt)
-			}
-		}
-		if !metricsQuerySeen {
-			t.Fatalf("%s initial detail path did not execute compact task execution metrics query; statements: %#v", name, counter.Statements())
-		}
+		stats := counter.Snapshot()
+		require.Positive(t, stats.ExecutionMetricsReads)
+		require.Zero(t, stats.ExecutionPayloadReads)
+		require.Zero(t, stats.UnboundedExecutionHistoryReads)
 	}
 
 	checkInitialDetail("HTMX", true)
@@ -634,14 +616,14 @@ func TestHandler_GetTaskThreadActivePollUsesSharedExecutionWindow(t *testing.T) 
 
 func BenchmarkHandler_GetTaskExecutions_ContentionWithLightweightDBRequest(b *testing.B) {
 	b.Run("bounded_poll", func(b *testing.B) {
-		db, counter := testutil.NewStatementCountingTestDB(b)
-		h, e, llmConfigRepo := setupTestHandlerForDB(b, db)
+		h, e, llmConfigRepo, db := setupTestHandlerWithStores(b, teststores.WithIOCounting())
+		counter := db.IO
 		agent := createAgentTB(b, llmConfigRepo)
 		project := createProjectTB(b, h, "Contention Benchmark Project")
 		task := createTaskTB(b, h, project.ID, "Contention Benchmark Task", func(tk *models.Task) {
 			tk.Status = models.StatusRunning
 		})
-		seedLargeExecutionHistory(b, db, task.ID, agent.ID, 200, 4*1024, 64*1024)
+		seedStoreExecutionHistory(b, db, task.ID, agent.ID, 200, 4*1024, 64*1024)
 
 		var totalLightweightLatency int64
 		b.ReportAllocs()
@@ -649,11 +631,7 @@ func BenchmarkHandler_GetTaskExecutions_ContentionWithLightweightDBRequest(b *te
 		for i := 0; i < b.N; i++ {
 			queryStarted := make(chan struct{})
 			var once sync.Once
-			counter.SetObserver(func(_ context.Context, query string) {
-				if strings.Contains(query, "FROM executions WHERE task_id = ? ORDER BY started_at DESC") {
-					once.Do(func() { close(queryStarted) })
-				}
-			})
+			counter.ObserveReads(storefixture.ExecutionWindowRead, func(context.Context) { once.Do(func() { close(queryStarted) }) })
 			errCh := make(chan error, 1)
 			go func() {
 				rec := htmxGet(e, "/tasks/"+task.ID+"/executions")
@@ -678,62 +656,16 @@ func BenchmarkHandler_GetTaskExecutions_ContentionWithLightweightDBRequest(b *te
 			if err := <-errCh; err != nil {
 				b.Fatal(err)
 			}
-			counter.SetObserver(nil)
+			counter.ObserveReads(storefixture.AgentRead, nil)
 		}
 		b.ReportMetric(float64(totalLightweightLatency)/float64(b.N), "lightweight_db_block_ns/op")
 	})
 }
 
-func seedLargeExecutionHistory(t testing.TB, db *sql.DB, taskID, agentID string, count, promptBytes, outputBytes int) {
-	t.Helper()
-	base := time.Date(2026, 8, 13, 12, 0, 0, 0, time.UTC)
-	stmt, err := db.Prepare(`INSERT INTO executions
-		(id, task_id, agent_config_id, status, prompt_sent, output, error_message, tokens_used, duration_ms, started_at, completed_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-	require.NoError(t, err)
-	defer stmt.Close()
-	for i := 0; i < count; i++ {
-		status := models.ExecCompleted
-		errorMessage := ""
-		completed := any(base.Add(time.Duration(i)*time.Second + time.Second).Format("2006-01-02 15:04:05"))
-		if i == count-1 {
-			status = models.ExecRunning
-			completed = nil
-		} else if i == count-2 {
-			status = models.ExecFailed
-			errorMessage = "failure message " + strings.Repeat("E", 256)
-		}
-		prompt := fmt.Sprintf("prompt-%03d-", i) + strings.Repeat("P", promptBytes)
-		output := fmt.Sprintf("output-%03d-", i) + strings.Repeat("O", outputBytes)
-		_, err := stmt.Exec(
-			fmt.Sprintf("exec-%03d", i),
-			taskID,
-			agentID,
-			status,
-			prompt,
-			output,
-			errorMessage,
-			64,
-			1500,
-			base.Add(time.Duration(i)*time.Second).Format("2006-01-02 15:04:05"),
-			completed,
-		)
-		require.NoError(t, err)
-	}
-}
-
-func newestHistoryExecutionID(t testing.TB, db *sql.DB, taskID string, offset int) string {
-	t.Helper()
-	execs, err := teststores.Of(db).Executions.ListByTask(context.Background(), taskID)
-	require.NoError(t, err)
-	require.Greater(t, len(execs), offset-1)
-	return execs[offset-1].ID
-}
-
 func TestHandler_GetTaskDetailStatusUsesCompactAgentLabelProjection(t *testing.T) {
-	db, counter := testutil.NewStatementCountingTestDB(t)
-	h, e, llmConfigRepo := setupTestHandlerForDB(t, db)
-	h.SetAgentRepo(teststores.Of(db).Agents)
+	h, e, llmConfigRepo, db := setupTestHandlerWithStores(t, teststores.WithIOCounting())
+	counter := db.IO
+	h.SetAgentRepo(db.Agents)
 	ctx := context.Background()
 
 	model := createAgent(t, llmConfigRepo)
@@ -765,26 +697,9 @@ func TestHandler_GetTaskDetailStatusUsesCompactAgentLabelProjection(t *testing.T
 	assertContains(t, assignedResponse, "Agent:")
 	assertContains(t, assignedResponse, "Compact Status Agent")
 
-	agentQuerySeen := false
-	for _, statement := range counter.Statements() {
-		lower := strings.ToLower(statement)
-		if !strings.Contains(lower, "from agents") {
-			continue
-		}
-		agentQuerySeen = true
-		projection := strings.Split(lower, "from agents")[0]
-		if !strings.Contains(projection, "select id, name") {
-			t.Fatalf("status Agent query projection = %q, want only identity columns: %s", projection, statement)
-		}
-		for _, forbidden := range []string{"system_prompt", "tools", "tool_config", "plugins", "mcp_servers", "skills", "permission_defaults_json", "model_defaults_json", "source_refs_json"} {
-			if strings.Contains(projection, forbidden) {
-				t.Fatalf("status Agent query selected forbidden column %q: %s", forbidden, statement)
-			}
-		}
-	}
-	if !agentQuerySeen {
-		t.Fatalf("status did not execute the compact Agent label query; statements: %#v", counter.Statements())
-	}
+	require.Equal(t, 1, counter.Snapshot().AgentReads)
+	require.Equal(t, 1, counter.Snapshot().AgentLabelReads)
+	require.Zero(t, counter.Snapshot().AgentDetailReads)
 
 	counter.Reset()
 	counter.SetEnabled(true)
@@ -793,17 +708,13 @@ func TestHandler_GetTaskDetailStatusUsesCompactAgentLabelProjection(t *testing.T
 	assertCode(t, noAgentResponse, http.StatusOK)
 	assertContains(t, noAgentResponse, "Agent:")
 	assertContains(t, noAgentResponse, "No agent")
-	for _, statement := range counter.Statements() {
-		if strings.Contains(strings.ToLower(statement), "from agents") {
-			t.Fatalf("status without an Agent unexpectedly queried the Agent catalog: %s", statement)
-		}
-	}
+	require.Zero(t, counter.Snapshot().AgentReads)
 }
 
 func TestHandler_GetTaskDetailStatusPreservesAgentAvailabilityAndTaskStates(t *testing.T) {
-	db, counter := testutil.NewStatementCountingTestDB(t)
-	h, e, llmConfigRepo := setupTestHandlerForDB(t, db)
-	h.SetAgentRepo(teststores.Of(db).Agents)
+	h, e, llmConfigRepo, db := setupTestHandlerWithStores(t, teststores.WithIOCounting())
+	counter := db.IO
+	h.SetAgentRepo(db.Agents)
 	ctx := context.Background()
 
 	model := createAgent(t, llmConfigRepo)
@@ -861,11 +772,7 @@ func TestHandler_GetTaskDetailStatusPreservesAgentAvailabilityAndTaskStates(t *t
 			assertContains(t, response, "Test Agent")
 			assertContains(t, response, "Agent:")
 			assertContains(t, response, "No agent")
-			for _, statement := range counter.Statements() {
-				if strings.Contains(strings.ToLower(statement), "from agents") {
-					t.Fatalf("task without an Agent queried the Agent catalog: %s", statement)
-				}
-			}
+			require.Zero(t, counter.Snapshot().AgentReads)
 		})
 	}
 
@@ -894,15 +801,7 @@ func TestHandler_GetTaskDetailStatusPreservesAgentAvailabilityAndTaskStates(t *t
 				}
 			})
 			if tc.name == "missing" || tc.name == "invalid" {
-				if _, err := db.ExecContext(ctx, `PRAGMA foreign_keys = OFF`); err != nil {
-					t.Fatalf("disable foreign-key checks for invalid Agent fixture: %v", err)
-				}
-				if _, err := db.ExecContext(ctx, `UPDATE tasks SET agent_definition_id = ? WHERE id = ?`, tc.definitionID, task.ID); err != nil {
-					t.Fatalf("set invalid Agent definition fixture: %v", err)
-				}
-				if _, err := db.ExecContext(ctx, `PRAGMA foreign_keys = ON`); err != nil {
-					t.Fatalf("restore foreign-key checks after invalid Agent fixture: %v", err)
-				}
+				require.NoError(t, db.Fixtures.SetDanglingTaskAgent(ctx, task.ID, tc.definitionID))
 			}
 			counter.Reset()
 			counter.SetEnabled(true)
@@ -914,25 +813,9 @@ func TestHandler_GetTaskDetailStatusPreservesAgentAvailabilityAndTaskStates(t *t
 			assertContains(t, response, "Agent:")
 			assertContains(t, response, tc.want)
 
-			agentQueries := 0
-			for _, statement := range counter.Statements() {
-				if !strings.Contains(strings.ToLower(statement), "from agents") {
-					continue
-				}
-				agentQueries++
-				projection := strings.Split(strings.ToLower(statement), "from agents")[0]
-				if !strings.Contains(projection, "select id, name") {
-					t.Fatalf("status Agent query projection = %q, want identity-only query: %s", projection, statement)
-				}
-				for _, forbidden := range []string{"system_prompt", "tools", "tool_config", "plugins", "mcp_servers", "skills", "permission_defaults_json", "model_defaults_json", "source_refs_json"} {
-					if strings.Contains(projection, forbidden) {
-						t.Fatalf("status Agent query selected forbidden column %q: %s", forbidden, statement)
-					}
-				}
-			}
-			if agentQueries != 1 {
-				t.Fatalf("status Agent lookup count = %d, want one targeted lookup; statements: %#v", agentQueries, counter.Statements())
-			}
+			require.Equal(t, 1, counter.Snapshot().AgentReads)
+			require.Equal(t, 1, counter.Snapshot().AgentLabelReads)
+			require.Zero(t, counter.Snapshot().AgentDetailReads)
 		})
 	}
 
@@ -945,7 +828,8 @@ func TestHandler_GetTaskDetailStatusPreservesAgentAvailabilityAndTaskStates(t *t
 	fullPage := htmxGet(e, "/tasks/"+fullDetailTask.ID)
 	counter.SetEnabled(false)
 	assertCode(t, fullPage, http.StatusOK)
-	assertLegacyTaskUIAgentProjectionQuery(t, counter)
+	require.Equal(t, 1, counter.Snapshot().AgentReads)
+	require.Zero(t, counter.Snapshot().AgentDetailReads)
 }
 
 func TestHandler_GetTaskDetailStatus(t *testing.T) {
@@ -1030,10 +914,10 @@ func TestHandler_GetTaskDetailStatus(t *testing.T) {
 }
 
 func TestHandler_GetTaskDetailStatusLargeHistoryUsesNarrowExecutionMetrics(t *testing.T) {
-	db, counter := testutil.NewStatementCountingTestDB(t)
-	h, e, llmConfigRepo := setupTestHandlerForDB(t, db)
+	h, e, llmConfigRepo, db := setupTestHandlerWithStores(t, teststores.WithIOCounting())
+	counter := db.IO
 	ctx := context.Background()
-	agentRepo := teststores.Of(db).Agents
+	agentRepo := db.Agents
 	h.SetAgentRepo(agentRepo)
 	agent := createAgent(t, llmConfigRepo)
 	agentDef := &models.Agent{
@@ -1060,10 +944,8 @@ func TestHandler_GetTaskDetailStatusLargeHistoryUsesNarrowExecutionMetrics(t *te
 	if err := h.taskSvc.Update(ctx, task); err != nil {
 		t.Fatalf("update task to active completed: %v", err)
 	}
-	seedLargeExecutionHistory(t, db, task.ID, agent.ID, 200, 4*1024, 64*1024)
-	if _, err := db.ExecContext(ctx, `UPDATE executions SET status = ?, duration_ms = ?, completed_at = ? WHERE id = ?`, models.ExecCompleted, int64(65_000), "2026-08-13 12:03:20", "exec-199"); err != nil {
-		t.Fatalf("complete latest execution: %v", err)
-	}
+	seedStoreExecutionHistory(t, db, task.ID, agent.ID, 200, 4*1024, 64*1024)
+	require.NoError(t, db.Fixtures.SetHistoricalExecutionCompletion(ctx, "exec-199", time.Date(2026, 8, 13, 12, 3, 20, 0, time.UTC), 65000))
 	counter.Reset()
 	counter.SetEnabled(true)
 	rec := htmxGet(e, "/tasks/"+task.ID+"/detail-status")
@@ -1073,31 +955,18 @@ func TestHandler_GetTaskDetailStatusLargeHistoryUsesNarrowExecutionMetrics(t *te
 		assertContains(t, rec, required)
 	}
 
-	metricsQuerySeen := false
-	for _, stmt := range counter.Statements() {
-		if !strings.Contains(stmt, "FROM executions") {
-			continue
-		}
-		if strings.Contains(stmt, "latest_started_at") && strings.Contains(stmt, "latest_duration_ms") {
-			metricsQuerySeen = true
-		}
-		for _, forbidden := range []string{"prompt_sent", "output", "error_message", "reasoning_content", "diff_output"} {
-			if strings.Contains(stmt, forbidden) {
-				t.Fatalf("detail-status execution query scanned historical %s text: %s", forbidden, stmt)
-			}
-		}
-	}
-	if !metricsQuerySeen {
-		t.Fatalf("detail-status did not execute compact task execution metrics query; statements: %#v", counter.Statements())
-	}
+	stats := counter.Snapshot()
+	require.Positive(t, stats.ExecutionMetricsReads)
+	require.Zero(t, stats.ExecutionPayloadReads)
+	require.Zero(t, stats.UnboundedExecutionHistoryReads)
 }
 
 func BenchmarkHandler_GetTaskDetailStatus_MetricsProjection(b *testing.B) {
 	b.Run("narrow_projection", func(b *testing.B) {
-		db, counter := testutil.NewStatementCountingTestDB(b)
-		h, e, llmConfigRepo := setupTestHandlerForDB(b, db)
+		h, e, llmConfigRepo, db := setupTestHandlerWithStores(b, teststores.WithIOCounting())
+		counter := db.IO
 		ctx := context.Background()
-		agentRepo := teststores.Of(db).Agents
+		agentRepo := db.Agents
 		h.SetAgentRepo(agentRepo)
 		agent := createAgentTB(b, llmConfigRepo)
 		agentDef := &models.Agent{Name: "Primary Metrics Agent", Key: "primary_metrics_agent", SystemPrompt: "Handle metrics tasks.", Model: "inherit", Enabled: true, SelectableAsPrimary: true}
@@ -1117,21 +986,15 @@ func BenchmarkHandler_GetTaskDetailStatus_MetricsProjection(b *testing.B) {
 		if err := h.taskSvc.Update(ctx, task); err != nil {
 			b.Fatalf("update task to active completed: %v", err)
 		}
-		seedLargeExecutionHistory(b, db, task.ID, agent.ID, 200, 4*1024, 64*1024)
-		if _, err := db.ExecContext(ctx, `UPDATE executions SET status = ?, duration_ms = ?, completed_at = ? WHERE id = ?`, models.ExecCompleted, int64(65_000), "2026-08-13 12:03:20", "exec-199"); err != nil {
-			b.Fatalf("complete latest execution: %v", err)
-		}
+		seedStoreExecutionHistory(b, db, task.ID, agent.ID, 200, 4*1024, 64*1024)
+		require.NoError(b, db.Fixtures.SetHistoricalExecutionCompletion(ctx, "exec-199", time.Date(2026, 8, 13, 12, 3, 20, 0, time.UTC), 65000))
 		var totalLightweightLatency int64
 		b.ReportAllocs()
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
 			queryStarted := make(chan struct{})
 			var once sync.Once
-			counter.SetObserver(func(_ context.Context, query string) {
-				if strings.Contains(query, "latest_started_at") {
-					once.Do(func() { close(queryStarted) })
-				}
-			})
+			counter.ObserveReads(storefixture.ExecutionMetricsRead, func(context.Context) { once.Do(func() { close(queryStarted) }) })
 			errCh := make(chan error, 1)
 			go func() {
 				rec := htmxGet(e, "/tasks/"+task.ID+"/detail-status")
@@ -1156,7 +1019,7 @@ func BenchmarkHandler_GetTaskDetailStatus_MetricsProjection(b *testing.B) {
 			if err := <-errCh; err != nil {
 				b.Fatal(err)
 			}
-			counter.SetObserver(nil)
+			counter.ObserveReads(storefixture.AgentRead, nil)
 		}
 		b.ReportMetric(float64(totalLightweightLatency)/float64(b.N), "lightweight_db_block_ns/op")
 		b.ReportMetric(0, "db_text_bytes_scanned/op")
@@ -1164,9 +1027,9 @@ func BenchmarkHandler_GetTaskDetailStatus_MetricsProjection(b *testing.B) {
 }
 
 func BenchmarkHandler_GetTaskDetailStatus_AgentProjection(b *testing.B) {
-	db, counter := testutil.NewStatementCountingTestDB(b)
-	h, e, llmConfigRepo := setupTestHandlerForDB(b, db)
-	agentRepo := teststores.Of(db).Agents
+	h, e, llmConfigRepo, db := setupTestHandlerWithStores(b, teststores.WithIOCounting())
+	counter := db.IO
+	agentRepo := db.Agents
 	h.SetAgentRepo(agentRepo)
 	teststores.ClearAgents(b, agentRepo)
 
@@ -1196,11 +1059,7 @@ func BenchmarkHandler_GetTaskDetailStatus_AgentProjection(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		queryStarted := make(chan struct{})
 		var once sync.Once
-		counter.SetObserver(func(_ context.Context, query string) {
-			if strings.Contains(strings.ToLower(query), "from agents") {
-				once.Do(func() { close(queryStarted) })
-			}
-		})
+		counter.ObserveReads(storefixture.AgentRead, func(context.Context) { once.Do(func() { close(queryStarted) }) })
 
 		type lookupResult struct {
 			responseBytes int
@@ -1226,8 +1085,7 @@ func BenchmarkHandler_GetTaskDetailStatus_AgentProjection(b *testing.B) {
 		}
 
 		lightweightStart := time.Now()
-		var projectID string
-		if err := db.QueryRowContext(context.Background(), `SELECT id FROM projects ORDER BY id LIMIT 1`).Scan(&projectID); err != nil {
+		if _, err := db.Projects.GetIdentityByID(context.Background(), project.ID); err != nil {
 			b.Fatalf("lightweight project lookup: %v", err)
 		}
 		totalLightweightWait += time.Since(lightweightStart)
@@ -1235,7 +1093,7 @@ func BenchmarkHandler_GetTaskDetailStatus_AgentProjection(b *testing.B) {
 		if !lookupComplete {
 			result = <-resultCh
 		}
-		counter.SetObserver(nil)
+		counter.ObserveReads(storefixture.AgentRead, nil)
 		if result.err != nil {
 			b.Fatal(result.err)
 		}
@@ -1613,8 +1471,8 @@ func TestHandler_GetTask_StatusIndicator(t *testing.T) {
 }
 
 func TestHandler_GetTaskThreadPollUsesCompactTaskMetadata(t *testing.T) {
-	db, counter := testutil.NewStatementCountingTestDB(t)
-	h, e, llmConfigRepo := setupTestHandlerForDB(t, db)
+	h, e, llmConfigRepo, db := setupTestHandlerWithStores(t, teststores.WithIOCounting())
+	counter := db.IO
 	ctx := context.Background()
 	agent := createAgent(t, llmConfigRepo)
 	project := createProject(t, h, "Thread Poll Projection Project")
@@ -1624,9 +1482,7 @@ func TestHandler_GetTaskThreadPollUsesCompactTaskMetadata(t *testing.T) {
 		tk.AgentID = &agent.ID
 		tk.Prompt = strings.Repeat("large-current-task-prompt", 8192)
 	})
-	if _, err := db.ExecContext(ctx, `UPDATE tasks SET chain_config = ?, swarm_config = ? WHERE id = ?`, strings.Repeat("large-chain-config", 8192), strings.Repeat("large-swarm-config", 8192), task.ID); err != nil {
-		t.Fatalf("seed large task configs: %v", err)
-	}
+	require.NoError(t, db.Fixtures.SetTaskPayload(ctx, task.ID, storefixture.TaskPayload{Prompt: task.Prompt, ChainConfig: strings.Repeat("large-chain-config", 8192), SwarmConfig: strings.Repeat("large-swarm-config", 8192)}))
 	exec := createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) {
 		ex.Status = models.ExecRunning
 		ex.PromptSent = "stable execution prompt"
@@ -1645,23 +1501,8 @@ func TestHandler_GetTaskThreadPollUsesCompactTaskMetadata(t *testing.T) {
 	assertNotContains(t, rec, "large-chain-config")
 	assertNotContains(t, rec, "large-swarm-config")
 
-	var compactTaskQuerySeen bool
-	for _, stmt := range counter.Statements() {
-		if !strings.Contains(stmt, "FROM tasks") || !strings.Contains(stmt, "WHERE id = ?") {
-			continue
-		}
-		if strings.Contains(stmt, "SELECT id, project_id, category, status, agent_id, agent_definition_id") {
-			compactTaskQuerySeen = true
-		}
-		for _, forbidden := range []string{"prompt", "chain_config", "swarm_config"} {
-			if strings.Contains(stmt, forbidden) {
-				t.Fatalf("poll task metadata query selected %s: %s", forbidden, stmt)
-			}
-		}
-	}
-	if !compactTaskQuerySeen {
-		t.Fatalf("poll did not execute compact task metadata query; statements: %#v", counter.Statements())
-	}
+	require.Positive(t, counter.Snapshot().ThreadMetadataReads)
+	require.Zero(t, counter.Snapshot().TaskPayloadReads)
 }
 
 func TestHandler_GetTaskThreadPollIgnoresTaskPromptAndConfigChanges(t *testing.T) {
@@ -9450,24 +9291,4 @@ func newestStoreHistoryExecutionID(t testing.TB, env *teststores.Env, taskID str
 	require.NoError(t, err)
 	require.GreaterOrEqual(t, len(execs), offset)
 	return execs[offset-1].ID
-}
-
-func assertLegacyTaskUIAgentProjectionQuery(t *testing.T, counter *testutil.SQLStatementCounter) {
-	t.Helper()
-	var agentStatements []string
-	for _, statement := range counter.Statements() {
-		if strings.Contains(strings.ToLower(statement), "from agents") {
-			agentStatements = append(agentStatements, statement)
-		}
-	}
-	if len(agentStatements) != 1 {
-		t.Fatalf("Agent statements = %#v, want one compact catalog query", agentStatements)
-	}
-	query := strings.ToLower(strings.Join(strings.Fields(agentStatements[0]), " "))
-	projection := strings.Split(query, " from agents ")[0]
-	for _, forbidden := range []string{"description", "system_prompt", "tools", "tool_config", "plugins", "mcp_servers", "skills", "permission_defaults_json", "model_defaults_json", "source_refs_json", "created_at", "updated_at"} {
-		if strings.Contains(projection, forbidden) {
-			t.Fatalf("Task UI query selected forbidden Agent column %q: %s", forbidden, agentStatements[0])
-		}
-	}
 }

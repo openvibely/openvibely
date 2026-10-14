@@ -20,6 +20,27 @@ func (c *ioCounter) ObserveRequests(observer func(context.Context)) {
 	}
 	c.counter.SetObserver(func(ctx context.Context, _ string) { observer(ctx) })
 }
+func (c *ioCounter) ObserveReads(kind storefixture.ReadOperation, observer func(context.Context)) {
+	if observer == nil {
+		c.counter.SetObserver(nil)
+		return
+	}
+	c.counter.SetObserver(func(ctx context.Context, query string) {
+		q := strings.ToLower(strings.Join(strings.Fields(query), " "))
+		match := false
+		switch kind {
+		case storefixture.ExecutionWindowRead:
+			match = strings.Contains(q, "from executions where task_id = ? order by started_at desc")
+		case storefixture.ExecutionMetricsRead:
+			match = strings.Contains(q, "latest_started_at")
+		case storefixture.AgentRead:
+			match = strings.Contains(q, "from agents")
+		}
+		if match {
+			observer(ctx)
+		}
+	})
+}
 func (c *ioCounter) Reset()                  { c.counter.Reset() }
 func (c *ioCounter) SetEnabled(enabled bool) { c.counter.SetEnabled(enabled) }
 func (c *ioCounter) Snapshot() storefixture.IOStats {
@@ -27,6 +48,29 @@ func (c *ioCounter) Snapshot() storefixture.IOStats {
 	stats := storefixture.IOStats{Requests: len(statements), ReadTextBytes: c.counter.SelectedTextBytes()}
 	for _, statement := range statements {
 		q := strings.ToLower(strings.Join(strings.Fields(statement), " "))
+		if strings.Contains(q, "from executions") {
+			if strings.Contains(q, "latest_started_at") && strings.Contains(q, "latest_duration_ms") {
+				stats.ExecutionMetricsReads++
+			}
+			for _, field := range []string{"prompt_sent", "output", "error_message", "reasoning_content", "diff_output"} {
+				if strings.Contains(q, field) {
+					stats.ExecutionPayloadReads++
+					break
+				}
+			}
+		}
+		if strings.Contains(q, "from agents") && strings.HasPrefix(q, "select id, name from agents") {
+			stats.AgentLabelReads++
+		}
+		if strings.Contains(q, "from tasks") && strings.Contains(q, "where id = ?") {
+			if strings.HasPrefix(q, "select id, project_id, category, status, agent_id, agent_definition_id") {
+				stats.ThreadMetadataReads++
+			}
+			if strings.Contains(q, "prompt") || strings.Contains(q, "chain_config") || strings.Contains(q, "swarm_config") {
+				stats.TaskPayloadReads++
+			}
+		}
+
 		if strings.Contains(q, "from tasks") {
 			stats.TaskReads++
 			if strings.HasPrefix(q, "select id, status from tasks") {
