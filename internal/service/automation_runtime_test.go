@@ -382,9 +382,8 @@ func TestAutomationManualRunQueuesEveryScheduleEntryAndRejectsTamperedBinding(t 
 func TestAutomationManualRunSkipsBusyEntryAndRejectsInactiveLifecycle(t *testing.T) {
 	for _, status := range []models.TaskStatus{models.StatusQueued, models.StatusRunning} {
 		t.Run(string(status), func(t *testing.T) {
-			fixture := newAutomationRuntimeFixture(t, AutomationAdapterNativeSDLC)
-			_, err := fixture.db.Exec(`UPDATE tasks SET status = ? WHERE id = ?`, status, fixture.task.ID)
-			require.NoError(t, err)
+			fixture := newAutomationRuntimeStoreFixture(t, AutomationAdapterNativeSDLC)
+			require.NoError(t, fixture.stores.Fixtures.SetTaskStatus(t.Context(), fixture.task.ID, status))
 			invocations, dispatches, err := fixture.repo.ClaimManualAutomationRun(context.Background(), fixture.project.ID, fixture.definition.Automation.ID, time.Now().UTC())
 			require.NoError(t, err)
 			require.Len(t, invocations, 1)
@@ -395,7 +394,7 @@ func TestAutomationManualRunSkipsBusyEntryAndRejectsInactiveLifecycle(t *testing
 	}
 
 	t.Run("reserved", func(t *testing.T) {
-		fixture := newAutomationRuntimeFixture(t, AutomationAdapterNativeSDLC)
+		fixture := newAutomationRuntimeStoreFixture(t, AutomationAdapterNativeSDLC)
 		_, firstDispatches, err := fixture.repo.ClaimManualAutomationRun(context.Background(), fixture.project.ID, fixture.definition.Automation.ID, time.Now().UTC())
 		require.NoError(t, err)
 		require.Len(t, firstDispatches, 1)
@@ -409,21 +408,21 @@ func TestAutomationManualRunSkipsBusyEntryAndRejectsInactiveLifecycle(t *testing
 
 	for _, state := range []models.AutomationLifecycleState{models.AutomationPaused, models.AutomationArchived} {
 		t.Run(string(state), func(t *testing.T) {
-			fixture := newAutomationRuntimeFixture(t, AutomationAdapterNativeSDLC)
+			fixture := newAutomationRuntimeStoreFixture(t, AutomationAdapterNativeSDLC)
 			require.NoError(t, fixture.repo.SetAutomationLifecycle(context.Background(), fixture.project.ID, fixture.definition.Automation.ID, state))
 			invocations, dispatches, err := fixture.repo.ClaimManualAutomationRun(context.Background(), fixture.project.ID, fixture.definition.Automation.ID, time.Now().UTC())
 			require.ErrorIs(t, err, persistence.ErrAutomationNotActive)
 			require.Empty(t, invocations)
 			require.Empty(t, dispatches)
-			var count int
-			require.NoError(t, fixture.db.QueryRow(`SELECT COUNT(*) FROM automation_invocations WHERE automation_id = ?`, fixture.definition.Automation.ID).Scan(&count))
+			count, err := fixture.stores.Fixtures.CountAutomationInvocations(t.Context(), fixture.project.ID, fixture.definition.Automation.ID, "")
+			require.NoError(t, err)
 			require.Zero(t, count)
 		})
 	}
 }
 
 func TestAutomationRuntimeAdvancesStaleTerminalScheduledOccurrence(t *testing.T) {
-	fixture := newAutomationRuntimeFixture(t, AutomationAdapterGitHubSDLC)
+	fixture := newAutomationRuntimeStoreFixture(t, AutomationAdapterGitHubSDLC)
 	ctx := context.Background()
 
 	due := time.Now().UTC().Truncate(time.Hour).Add(-3 * time.Hour)
@@ -468,9 +467,13 @@ func TestAutomationRuntimeAdvancesStaleTerminalScheduledOccurrence(t *testing.T)
 	require.NotNil(t, repaired.LastRun)
 	require.True(t, repaired.LastRun.Equal(firstClaimAt.UTC()), "repair must not rewrite the original run marker")
 
-	var invocationCount, dispatchCount int
-	require.NoError(t, fixture.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM automation_invocations WHERE trigger_resource_id = ?`, fixture.schedule.ID).Scan(&invocationCount))
-	require.NoError(t, fixture.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM automation_dispatch_outbox WHERE invocation_id = ?`, invocation.ID).Scan(&dispatchCount))
+	invocationCount := fixture.scheduleInvocationCount(t)
+	dispatchCount := automationRuntimeDispatchCount(t, fixture)
+	envelope, err := fixture.repo.GetDispatchEnvelope(ctx, dispatch.ID)
+	require.NoError(t, err)
+	require.NotNil(t, envelope)
+	require.Len(t, envelope.Context.Bindings, 1)
+	require.Equal(t, invocation.ID, envelope.Context.Bindings[0].InvocationID)
 	require.Equal(t, 1, invocationCount)
 	require.Equal(t, 1, dispatchCount)
 }
@@ -686,7 +689,7 @@ func TestAutomationDeleteAllowsOrphanedRunningInvocationAfterTaskDeletion(t *tes
 }
 
 func TestAutomationDeleteRejectsInFlightDispatchAndPreservesRestartRecovery(t *testing.T) {
-	fixture := newAutomationRuntimeFixture(t, AutomationAdapterNativeSDLC)
+	fixture := newAutomationRuntimeStoreFixture(t, AutomationAdapterNativeSDLC)
 	ctx := context.Background()
 	now := time.Now().UTC()
 	_, dispatch, err := fixture.repo.ClaimScheduledOccurrence(ctx, fixture.schedule, now, fixture.schedule.ComputeNextRun(now))
@@ -705,13 +708,17 @@ func TestAutomationDeleteRejectsInFlightDispatchAndPreservesRestartRecovery(t *t
 	definition, err := fixture.repo.GetDefinition(ctx, fixture.project.ID, fixture.definition.Automation.ID)
 	require.NoError(t, err)
 	require.NotNil(t, definition, "rejected deletion must preserve Automation recovery ownership")
-	var outboxRows, reservationRows, executionRows int
-	require.NoError(t, fixture.db.QueryRow(`SELECT COUNT(*) FROM automation_dispatch_outbox WHERE id = ?`, dispatch.ID).Scan(&outboxRows))
-	require.NoError(t, fixture.db.QueryRow(`SELECT COUNT(*) FROM automation_task_run_reservations WHERE dispatch_id = ?`, dispatch.ID).Scan(&reservationRows))
-	require.NoError(t, fixture.db.QueryRow(`SELECT COUNT(*) FROM executions WHERE id = ? AND dispatch_id = ?`, execution.ID, dispatch.ID).Scan(&executionRows))
-	require.Equal(t, 1, outboxRows)
-	require.Equal(t, 1, reservationRows)
-	require.Equal(t, 1, executionRows)
+	state, err := fixture.stores.Fixtures.AutomationDispatchState(ctx, dispatch.ID)
+	require.NoError(t, err)
+	require.Equal(t, 1, state.TaskReservations)
+	envelope, err := fixture.repo.GetDispatchEnvelope(ctx, dispatch.ID)
+	require.NoError(t, err)
+	require.NotNil(t, envelope)
+	require.Equal(t, dispatch.ID, envelope.DispatchID)
+	persisted, err := fixture.stores.Executions.GetByID(ctx, execution.ID)
+	require.NoError(t, err)
+	require.NotNil(t, persisted)
+	require.Equal(t, dispatch.ID, persisted.DispatchID)
 	recovered, err := fixture.stores.Executions.RecoverStaleRunningTaskExecutions(ctx)
 	require.NoError(t, err)
 	require.Zero(t, recovered, "generic recovery must leave the preserved dispatch to Automation reconciliation")
@@ -720,21 +727,20 @@ func TestAutomationDeleteRejectsInFlightDispatchAndPreservesRestartRecovery(t *t
 	require.NoError(t, fixture.taskRepo.UpdateStatus(ctx, fixture.task.ID, models.StatusCompleted))
 	reconciler := NewAutomationReconciler(fixture.repo, fixture.stores.Executions, NewWorkerService(nil, 1, nil))
 	require.NoError(t, reconciler.ReconcileOnce(ctx))
-	var outboxStatus string
-	require.NoError(t, fixture.db.QueryRow(`SELECT status FROM automation_dispatch_outbox WHERE id = ?`, dispatch.ID).Scan(&outboxStatus))
-	require.Equal(t, "completed", outboxStatus)
+	state, err = fixture.stores.Fixtures.AutomationDispatchState(ctx, dispatch.ID)
+	require.NoError(t, err)
+	require.Equal(t, "completed", state.Status)
 	require.NoError(t, lifecycle.Delete(ctx, fixture.project.ID, fixture.definition.Automation.ID), "terminal reconciliation must make deletion safe")
 }
 
 func TestAutomationRuntimeSchedulerRoutesOwnedTriggerAtomically(t *testing.T) {
-	fixture := newAutomationRuntimeFixture(t, AutomationAdapterNativeSDLC)
+	fixture := newAutomationRuntimeStoreFixture(t, AutomationAdapterNativeSDLC)
 	require.NoError(t, fixture.taskRepo.UpdateCategory(context.Background(), fixture.task.ID, models.CategoryActive))
 	scheduler := NewSchedulerService(fixture.schedRepo, fixture.taskRepo, NewWorkerService(nil, 1, nil))
 	scheduler.SetAutomationRepo(fixture.repo)
 	scheduler.checkDueTasks(context.Background())
-	var invocations, dispatches int
-	require.NoError(t, fixture.db.QueryRow(`SELECT COUNT(*) FROM automation_invocations WHERE trigger_resource_id = ?`, fixture.schedule.ID).Scan(&invocations))
-	require.NoError(t, fixture.db.QueryRow(`SELECT COUNT(*) FROM automation_dispatch_outbox`).Scan(&dispatches))
+	invocations := fixture.scheduleInvocationCount(t)
+	dispatches := automationRuntimeDispatchCount(t, fixture)
 	require.Equal(t, 1, invocations)
 	require.Equal(t, 1, dispatches)
 	stored, err := fixture.schedRepo.GetByID(context.Background(), fixture.schedule.ID)
@@ -798,58 +804,69 @@ func TestAutomationRuntimeMonthlyMonthEndClaimPersistsNextRunSequence(t *testing
 }
 
 func TestAutomationRuntimeConcurrentSchedulePollersShareOneOccurrence(t *testing.T) {
-	fixture := newAutomationRuntimeFixture(t, AutomationAdapterNativeSDLC)
-	ctx := context.Background()
-	now := time.Now().UTC()
-	next := fixture.schedule.ComputeNextRun(now)
-	const pollers = 8
-	type result struct {
-		invocationID string
-		dispatchID   string
-		err          error
-	}
-	results := make(chan result, pollers)
-	start := make(chan struct{})
-	var wg sync.WaitGroup
-	for i := 0; i < pollers; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			<-start
-			invocation, dispatch, err := fixture.repo.ClaimScheduledOccurrence(ctx, fixture.schedule, now, next)
-			value := result{err: err}
-			if invocation != nil {
-				value.invocationID = invocation.ID
+	for _, production := range []bool{false, true} {
+		name := "isolated"
+		if production {
+			name = "production"
+		}
+		t.Run(name, func(t *testing.T) {
+			var opts []teststores.Option
+			if production {
+				opts = append(opts, teststores.WithProductionTopology())
 			}
-			if dispatch != nil {
-				value.dispatchID = dispatch.ID
+			fixture := newAutomationRuntimeStoreFixture(t, AutomationAdapterNativeSDLC, opts...)
+			ctx := context.Background()
+			now := time.Now().UTC()
+			next := fixture.schedule.ComputeNextRun(now)
+			const pollers = 8
+			type result struct {
+				invocationID string
+				dispatchID   string
+				err          error
 			}
-			results <- value
-		}()
+			results := make(chan result, pollers)
+			start := make(chan struct{})
+			var wg sync.WaitGroup
+			for i := 0; i < pollers; i++ {
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					<-start
+					invocation, dispatch, err := fixture.repo.ClaimScheduledOccurrence(ctx, fixture.schedule, now, next)
+					value := result{err: err}
+					if invocation != nil {
+						value.invocationID = invocation.ID
+					}
+					if dispatch != nil {
+						value.dispatchID = dispatch.ID
+					}
+					results <- value
+				}()
+			}
+			close(start)
+			wg.Wait()
+			close(results)
+			invocations := map[string]bool{}
+			dispatches := map[string]bool{}
+			for value := range results {
+				require.NoError(t, value.err)
+				require.NotEmpty(t, value.invocationID)
+				require.NotEmpty(t, value.dispatchID)
+				invocations[value.invocationID] = true
+				dispatches[value.dispatchID] = true
+			}
+			require.Len(t, invocations, 1)
+			require.Len(t, dispatches, 1)
+			invocationRows := fixture.scheduleInvocationCount(t)
+			dispatchRows := automationRuntimeDispatchCount(t, fixture)
+			require.Equal(t, 1, invocationRows)
+			require.Equal(t, 1, dispatchRows)
+		})
 	}
-	close(start)
-	wg.Wait()
-	close(results)
-	invocations := map[string]bool{}
-	dispatches := map[string]bool{}
-	for value := range results {
-		require.NoError(t, value.err)
-		require.NotEmpty(t, value.invocationID)
-		require.NotEmpty(t, value.dispatchID)
-		invocations[value.invocationID] = true
-		dispatches[value.dispatchID] = true
-	}
-	require.Len(t, invocations, 1)
-	require.Len(t, dispatches, 1)
-	var invocationRows, dispatchRows int
-	require.NoError(t, fixture.db.QueryRow(`SELECT COUNT(*) FROM automation_invocations WHERE trigger_resource_id = ?`, fixture.schedule.ID).Scan(&invocationRows))
-	require.NoError(t, fixture.db.QueryRow(`SELECT COUNT(*) FROM automation_dispatch_outbox`).Scan(&dispatchRows))
-	require.Equal(t, 1, invocationRows)
-	require.Equal(t, 1, dispatchRows)
 }
 
 func TestAutomationRuntimeExpectedDueCASLeavesNoOrphanInvocation(t *testing.T) {
-	fixture := newAutomationRuntimeFixture(t, AutomationAdapterNativeSDLC)
+	fixture := newAutomationRuntimeStoreFixture(t, AutomationAdapterNativeSDLC)
 	ctx := context.Background()
 	stale := fixture.schedule
 	future := time.Now().UTC().Add(time.Hour)
@@ -857,8 +874,7 @@ func TestAutomationRuntimeExpectedDueCASLeavesNoOrphanInvocation(t *testing.T) {
 	require.NoError(t, fixture.schedRepo.Update(ctx, &fixture.schedule))
 	_, _, err := fixture.repo.ClaimScheduledOccurrence(ctx, stale, time.Now().UTC(), stale.ComputeNextRun(time.Now().UTC()))
 	require.ErrorIs(t, err, persistence.ErrAutomationScheduleChanged)
-	var invocations int
-	require.NoError(t, fixture.db.QueryRow(`SELECT COUNT(*) FROM automation_invocations WHERE trigger_resource_id = ?`, stale.ID).Scan(&invocations))
+	invocations := fixture.scheduleInvocationCount(t)
 	require.Zero(t, invocations)
 }
 
@@ -5645,4 +5661,44 @@ func TestAutomationRuntimeNativeAlertLifecycleAndLiveProjection(t *testing.T) {
 	require.NoError(t, err)
 	require.NotContains(t, string(encoded), "private body")
 	require.NotContains(t, string(encoded), "Implement safely")
+}
+
+func (f automationRuntimeFixture) scheduleInvocationCount(t *testing.T) int {
+	t.Helper()
+	count, err := f.stores.Fixtures.CountAutomationInvocations(t.Context(), f.project.ID, f.definition.Automation.ID, f.schedule.ID)
+	require.NoError(t, err)
+	return count
+}
+func automationRuntimeDispatchCount(t *testing.T, f automationRuntimeFixture) int {
+	t.Helper()
+	state, err := f.stores.Fixtures.AutomationState(t.Context())
+	require.NoError(t, err)
+	return state.Dispatches
+}
+
+func TestAutomationRuntimeInvocationCountIncludesAllRetainedHistory(t *testing.T) {
+	f := newAutomationRuntimeStoreFixture(t, AutomationAdapterNativeSDLC)
+	require.NoError(t, f.stores.Fixtures.SetTaskStatus(t.Context(), f.task.ID, models.StatusRunning))
+	for i := 0; i < 105; i++ {
+		invocations, dispatches, err := f.repo.ClaimManualAutomationRun(t.Context(), f.project.ID, f.definition.Automation.ID, time.Now().UTC())
+		require.NoError(t, err)
+		require.Len(t, invocations, 1)
+		require.Empty(t, dispatches)
+	}
+	require.Equal(t, 105, f.scheduleInvocationCount(t))
+	for _, scope := range [][3]string{
+		{f.project.ID, f.definition.Automation.ID, ""},
+		{"other-project", f.definition.Automation.ID, f.schedule.ID},
+		{f.project.ID, "other-automation", f.schedule.ID},
+		{f.project.ID, f.definition.Automation.ID, "other-trigger"},
+	} {
+		count, err := f.stores.Fixtures.CountAutomationInvocations(t.Context(), scope[0], scope[1], scope[2])
+		require.NoError(t, err)
+		if scope[2] == "" {
+			require.Equal(t, 105, count)
+		} else {
+			require.Zero(t, count)
+		}
+	}
+	require.Zero(t, automationRuntimeDispatchCount(t, f))
 }
