@@ -65,13 +65,13 @@ func TestOpenAIRequestBudgetUsesEffectiveReplay(t *testing.T) {
 }
 
 func TestAnthropicEnvironmentReplayLoadedBeforeBudget(t *testing.T) {
-	db := testutil.NewTestDB(t)
+	db := teststores.New(t)
 	ctx := context.Background()
 	task := &models.Task{ProjectID: "default", Title: "environment snapshot", Category: models.CategoryBacklog, Status: models.StatusCompleted}
-	require.NoError(t, repository.NewTaskRepo(db, nil).Create(ctx, task))
-	_, err := db.ExecContext(ctx, `INSERT INTO executions (id, task_id, status, prompt_sent) VALUES ('environment', ?, 'completed', 'question')`, task.ID)
+	require.NoError(t, db.Tasks.Create(ctx, task))
+	err := db.Executions.Create(ctx, &models.Execution{ID: "environment", TaskID: task.ID, Status: models.ExecCompleted, PromptSent: "question"})
 	require.NoError(t, err)
-	repo := repository.NewExecutionRepo(db)
+	repo := db.Executions
 	replay := []models.ExecutionReplayMessage{{UserContent: "question", AssistantContent: "answer", TranscriptJSON: `{"anthropic_execution_environment":"saved environment"}`}}
 	require.NoError(t, repo.ReplaceReasoningReplay(ctx, "environment", "", replay))
 	svc := NewLLMService(nil, repo, nil, nil, nil, nil)

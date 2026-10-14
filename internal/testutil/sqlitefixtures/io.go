@@ -20,6 +20,9 @@ func (c *ioCounter) Snapshot() storefixture.IOStats {
 	for _, statement := range statements {
 		q := strings.ToLower(strings.Join(strings.Fields(statement), " "))
 		if strings.HasPrefix(q, "select ") {
+			if strings.Contains(q, "from agents") {
+				stats.AgentReads++
+			}
 			if strings.Contains(q, " from projects") {
 				stats.ProjectReads++
 			}

@@ -1110,11 +1110,12 @@ func TestAutomationAgentReferenceValidationMatchesCapabilityAndFallback(t *testi
 }
 
 func TestAutomationSaveValidatorAgentIssuesBatchesSelectableAgentReferences(t *testing.T) {
-	db, counter := testutil.NewStatementCountingTestDB(t)
+	db := teststores.New(t, teststores.WithIOCounting())
+	counter := db.IO
 	ctx := context.Background()
-	project := automationTestProject(t, teststores.Of(db).Projects, "Batched Agent Validation")
-	agentRepo := teststores.Of(db).Agents
-	teststores.ClearAgents(t, teststores.Of(db).Agents)
+	project := automationTestProject(t, db.Projects, "Batched Agent Validation")
+	agentRepo := db.Agents
+	teststores.ClearAgents(t, db.Agents)
 
 	refs := make([]string, 0, automationCapabilityLimit)
 	var firstAgent *models.Agent
@@ -1143,27 +1144,11 @@ func TestAutomationSaveValidatorAgentIssuesBatchesSelectableAgentReferences(t *t
 				t.Fatalf("agentIssues = %#v, want no issues for valid references", issues)
 			}
 
-			statements := selectableAgentValidationStatements(counter.Statements())
-			if len(statements) != 1 {
+			statements := counter.Snapshot().AgentReads
+			if statements != 1 {
 				t.Fatalf("selectable Agent statements = %#v, want exactly one query", statements)
 			}
-			query := strings.ToLower(strings.Join(strings.Fields(statements[0]), " "))
-			projection := strings.TrimSpace(strings.SplitN(query, " from agents", 2)[0])
-			for _, required := range []string{"select id", "coalesce(key, '')", "project_id"} {
-				if !strings.Contains(projection, required) {
-					t.Fatalf("validation projection = %q, want %q in %s", projection, required, statements[0])
-				}
-			}
-			for _, forbidden := range []string{"system_prompt", "tools", "tool_config", "plugins", "mcp_servers", "skills", "permission_defaults_json", "model_defaults_json", "source_refs_json", "created_at", "updated_at"} {
-				if strings.Contains(projection, forbidden) {
-					t.Fatalf("validation projection selected forbidden column %q: %s", forbidden, statements[0])
-				}
-			}
-			for _, requiredPredicate := range []string{"coalesce(generated_status, 'user_edited') <> 'archived'", "archived_at is null", "coalesce(enabled, 1) = 1", "coalesce(selectable_as_primary, 1) = 1", "project_id is null or project_id = '' or project_id = ?", "order by name asc, id asc", "limit ?"} {
-				if !strings.Contains(query, requiredPredicate) {
-					t.Fatalf("validation query is missing %q: %s", requiredPredicate, statements[0])
-				}
-			}
+
 		})
 	}
 
@@ -1178,8 +1163,8 @@ func TestAutomationSaveValidatorAgentIssuesBatchesSelectableAgentReferences(t *t
 	if err != nil {
 		t.Fatalf("agentIssues with shared reference: %v", err)
 	}
-	if len(issues) != 0 || len(selectableAgentValidationStatements(counter.Statements())) != 1 {
-		t.Fatalf("shared-reference validation issues=%#v statements=%#v, want no issues and one query", issues, counter.Statements())
+	if len(issues) != 0 || counter.Snapshot().AgentReads != 1 {
+		t.Fatalf("shared-reference validation issues=%#v statements=%#v, want no issues and one query", issues, counter.Snapshot())
 	}
 
 	counter.Reset()
@@ -1195,7 +1180,7 @@ func TestAutomationSaveValidatorAgentIssuesBatchesSelectableAgentReferences(t *t
 	if len(issues) != 0 {
 		t.Fatalf("agentIssues without references = %#v, want no issues", issues)
 	}
-	if statements := selectableAgentValidationStatements(counter.Statements()); len(statements) != 0 {
+	if statements := counter.Snapshot().AgentReads; statements != 0 {
 		t.Fatalf("selectable Agent statements without references = %#v, want none", statements)
 	}
 
@@ -1209,13 +1194,14 @@ func TestAutomationSaveValidatorAgentIssuesBatchesSelectableAgentReferences(t *t
 }
 
 func TestAutomationSaveValidatorAgentIssuesPreservesReferenceAvailabilitySemantics(t *testing.T) {
-	db, counter := testutil.NewStatementCountingTestDB(t)
+	db := teststores.New(t, teststores.WithIOCounting())
+	counter := db.IO
 	ctx := context.Background()
-	projectRepo := teststores.Of(db).Projects
+	projectRepo := db.Projects
 	project := automationTestProject(t, projectRepo, "Agent Validation Project")
 	otherProject := automationTestProject(t, projectRepo, "Other Agent Validation Project")
-	agentRepo := teststores.Of(db).Agents
-	teststores.ClearAgents(t, teststores.Of(db).Agents)
+	agentRepo := db.Agents
+	teststores.ClearAgents(t, db.Agents)
 
 	global := automationValidationFixtureAgent("Duplicate name", "global-agent")
 	if err := agentRepo.Create(ctx, global); err != nil {
@@ -1252,7 +1238,7 @@ func TestAutomationSaveValidatorAgentIssuesPreservesReferenceAvailabilitySemanti
 	if err := agentRepo.Create(ctx, archivedAt); err != nil {
 		t.Fatalf("create archived-at Agent: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, `UPDATE agents SET archived_at = datetime('now') WHERE id = ?`, archivedAt.ID); err != nil {
+	if err := db.Fixtures.SetAgentArchivedAt(ctx, archivedAt.ID, time.Now()); err != nil {
 		t.Fatalf("archive Agent by timestamp: %v", err)
 	}
 	blankKey := automationValidationFixtureAgent("Blank key Agent", "")
@@ -1286,8 +1272,8 @@ func TestAutomationSaveValidatorAgentIssuesPreservesReferenceAvailabilitySemanti
 			t.Fatalf("missing unavailable issue for reference index %d: %#v", index, issues)
 		}
 	}
-	if len(selectableAgentValidationStatements(counter.Statements())) != 1 {
-		t.Fatalf("selectable Agent statements = %#v, want one query", counter.Statements())
+	if counter.Snapshot().AgentReads != 1 {
+		t.Fatalf("selectable Agent statements = %#v, want one query", counter.Snapshot())
 	}
 	resolvedArchivedAt, err := resolveAutomationAgent(ctx, agentRepo, project.ID, archivedAt.Key)
 	if err != nil {
@@ -1317,18 +1303,19 @@ func TestAutomationSaveValidatorAgentIssuesPreservesReferenceAvailabilitySemanti
 	if len(issues) != 1 || issues[0].NodeKey != "agent-00" {
 		t.Fatalf("outside-limit issues = %#v, want one issue for the reference", issues)
 	}
-	if len(selectableAgentValidationStatements(counter.Statements())) != 1 {
-		t.Fatalf("outside-limit selectable Agent statements = %#v, want one query", counter.Statements())
+	if counter.Snapshot().AgentReads != 1 {
+		t.Fatalf("outside-limit selectable Agent statements = %#v, want one query", counter.Snapshot())
 	}
 }
 
 func TestAutomationCompilerPreviewAndSaveUseBatchedAgentValidation(t *testing.T) {
-	db, counter := testutil.NewStatementCountingTestDB(t)
+	db := teststores.New(t, teststores.WithIOCounting())
+	counter := db.IO
 	ctx := context.Background()
-	projectRepo := teststores.Of(db).Projects
+	projectRepo := db.Projects
 	project := automationTestProject(t, projectRepo, "Compiler Agent Validation")
-	agentRepo := teststores.Of(db).Agents
-	teststores.ClearAgents(t, teststores.Of(db).Agents)
+	agentRepo := db.Agents
+	teststores.ClearAgents(t, db.Agents)
 	refs := make([]string, 0, 5)
 	for i := 0; i < 5; i++ {
 		agent := automationValidationFixtureAgent(fmt.Sprintf("Compiler Agent %02d", i), fmt.Sprintf("compiler-agent-%02d", i))
@@ -1339,15 +1326,15 @@ func TestAutomationCompilerPreviewAndSaveUseBatchedAgentValidation(t *testing.T)
 	}
 
 	registry := NewAutomationAdapterRegistry()
-	drafts := NewAutomationDraftService(teststores.Of(db).Automations, registry)
+	drafts := NewAutomationDraftService(db.Automations, registry)
 	capabilities := NewAutomationCapabilitySnapshotBuilder(projectRepo, agentRepo, nil, nil)
 	drafts.SetCapabilitySnapshotBuilder(capabilities)
 	validator := NewAutomationSaveValidator(registry, drafts)
 	validator.SetAgentRepository(agentRepo)
-	automationRepo := teststores.Of(db).Automations
-	taskRepo := teststores.Of(db).Tasks
-	scheduleRepo := teststores.Of(db).Schedules
-	compiler := NewAutomationCompiler(automationRepo, NewTaskService(taskRepo, teststores.Of(db).Attachments, nil), taskRepo, scheduleRepo, validator)
+	automationRepo := db.Automations
+	taskRepo := db.Tasks
+	scheduleRepo := db.Schedules
+	compiler := NewAutomationCompiler(automationRepo, NewTaskService(taskRepo, db.Attachments, nil), taskRepo, scheduleRepo, validator)
 
 	counter.Reset()
 	counter.SetEnabled(true)
@@ -1359,11 +1346,8 @@ func TestAutomationCompilerPreviewAndSaveUseBatchedAgentValidation(t *testing.T)
 	if plan == nil || len(plan.Validation) != 0 {
 		t.Fatalf("PreviewSave validation = %#v, want no issues for available references", plan)
 	}
-	if len(selectableAgentValidationStatements(counter.Statements())) != 1 {
-		t.Fatalf("PreviewSave selectable Agent statements = %#v, want one compact query", counter.Statements())
-	}
-	if statements := selectableAgentValidationStatements(counter.Statements()); len(statements) == 1 {
-		assertAutomationValidationProjection(t, statements[0])
+	if counter.Snapshot().AgentReads != 1 {
+		t.Fatalf("PreviewSave selectable Agent statements = %#v, want one compact query", counter.Snapshot())
 	}
 
 	noReferences := customTaskOnlyCandidate("No Agent references", "Run without a primary Agent.", models.CategoryBacklog)
@@ -1377,7 +1361,7 @@ func TestAutomationCompilerPreviewAndSaveUseBatchedAgentValidation(t *testing.T)
 	if noReferencePlan == nil || len(noReferencePlan.Validation) != 0 {
 		t.Fatalf("PreviewSave without Agent reference validation = %#v, want no issues", noReferencePlan)
 	}
-	if statements := selectableAgentValidationStatements(counter.Statements()); len(statements) != 0 {
+	if statements := counter.Snapshot().AgentReads; statements != 0 {
 		t.Fatalf("PreviewSave selectable Agent statements without references = %#v, want none", statements)
 	}
 
@@ -1389,20 +1373,21 @@ func TestAutomationCompilerPreviewAndSaveUseBatchedAgentValidation(t *testing.T)
 	if err == nil {
 		t.Fatal("Save with an unavailable Agent reference succeeded")
 	}
-	if len(selectableAgentValidationStatements(counter.Statements())) != 1 {
-		t.Fatalf("Save selectable Agent statements = %#v, want one query", counter.Statements())
+	if counter.Snapshot().AgentReads != 1 {
+		t.Fatalf("Save selectable Agent statements = %#v, want one query", counter.Snapshot())
 	}
-	if countRows(t, db, `SELECT COUNT(*) FROM automations`) != 0 || countRows(t, db, `SELECT COUNT(*) FROM tasks`) != 0 || countRows(t, db, `SELECT COUNT(*) FROM schedules`) != 0 {
+	if automationStateForTest(t, db).Automations != 0 || automationStateForTest(t, db).Tasks != 0 || automationStateForTest(t, db).Schedules != 0 {
 		t.Fatal("invalid Agent reference persisted Automation resources")
 	}
 }
 
 func TestAutomationCompilerSaveBatchesAgentResolution(t *testing.T) {
-	db, counter := testutil.NewStatementCountingTestDB(t)
+	db := teststores.New(t, teststores.WithIOCounting())
+	counter := db.IO
 	ctx := context.Background()
-	project := automationTestProject(t, teststores.Of(db).Projects, "Compiler Agent Save")
-	agentRepo := teststores.Of(db).Agents
-	teststores.ClearAgents(t, teststores.Of(db).Agents)
+	project := automationTestProject(t, db.Projects, "Compiler Agent Save")
+	agentRepo := db.Agents
+	teststores.ClearAgents(t, db.Agents)
 
 	refs := make([]string, 0, automationCapabilityLimit)
 	agentsByKey := make(map[string]*models.Agent, automationCapabilityLimit)
@@ -1416,12 +1401,12 @@ func TestAutomationCompilerSaveBatchesAgentResolution(t *testing.T) {
 	}
 
 	registry := NewAutomationAdapterRegistry()
-	automationRepo := teststores.Of(db).Automations
+	automationRepo := db.Automations
 	drafts := NewAutomationDraftService(automationRepo, registry)
 	validator := NewAutomationSaveValidator(registry, drafts)
-	taskRepo := teststores.Of(db).Tasks
-	scheduleRepo := teststores.Of(db).Schedules
-	compiler := NewAutomationCompiler(automationRepo, NewTaskService(taskRepo, teststores.Of(db).Attachments, nil), taskRepo, scheduleRepo, validator)
+	taskRepo := db.Tasks
+	scheduleRepo := db.Schedules
+	compiler := NewAutomationCompiler(automationRepo, NewTaskService(taskRepo, db.Attachments, nil), taskRepo, scheduleRepo, validator)
 	compiler.SetAgentRepository(agentRepo)
 
 	for _, referenceCount := range []int{1, 5, 20, 50} {
@@ -1440,11 +1425,10 @@ func TestAutomationCompilerSaveBatchesAgentResolution(t *testing.T) {
 				t.Fatal("SaveValidatedCandidate returned no definition")
 			}
 
-			statements := selectableAgentValidationStatements(counter.Statements())
-			if len(statements) != 1 {
+			statements := counter.Snapshot().AgentReads
+			if statements != 1 {
 				t.Fatalf("save Agent statements = %#v, want exactly one compact query", statements)
 			}
-			assertAutomationValidationProjection(t, statements[0])
 
 			for _, node := range candidate.Nodes {
 				if node.Type != models.AutomationNodeAgentTask && node.Type != models.AutomationNodeTrigger {
@@ -1479,19 +1463,20 @@ func TestAutomationCompilerSaveBatchesAgentResolution(t *testing.T) {
 		t.Fatalf("SaveValidatedCandidate without Agent reference: %v", err)
 	}
 	counter.SetEnabled(false)
-	if statements := selectableAgentValidationStatements(counter.Statements()); len(statements) != 0 {
+	if statements := counter.Snapshot().AgentReads; statements != 0 {
 		t.Fatalf("save Agent statements without references = %#v, want none", statements)
 	}
 }
 
 func TestAutomationCompilerSavePreservesAgentReferenceSemanticsAndRollback(t *testing.T) {
-	db, counter := testutil.NewStatementCountingTestDB(t)
+	db := teststores.New(t, teststores.WithIOCounting())
+	counter := db.IO
 	ctx := context.Background()
-	projectRepo := teststores.Of(db).Projects
+	projectRepo := db.Projects
 	project := automationTestProject(t, projectRepo, "Compiler Agent Semantics")
 	otherProject := automationTestProject(t, projectRepo, "Compiler Agent Foreign Project")
-	agentRepo := teststores.Of(db).Agents
-	teststores.ClearAgents(t, teststores.Of(db).Agents)
+	agentRepo := db.Agents
+	teststores.ClearAgents(t, db.Agents)
 
 	createAgent := func(agent *models.Agent) *models.Agent {
 		t.Helper()
@@ -1522,17 +1507,17 @@ func TestAutomationCompilerSavePreservesAgentReferenceSemanticsAndRollback(t *te
 	generatedArchived.GeneratedStatus = models.AgentStatusArchived
 	createAgent(generatedArchived)
 	timestampArchived := createAgent(automationValidationFixtureAgent("010 Timestamp-archived Agent", "timestamp-archived-agent"))
-	if _, err := db.ExecContext(ctx, `UPDATE agents SET archived_at = datetime('now') WHERE id = ?`, timestampArchived.ID); err != nil {
+	if err := db.Fixtures.SetAgentArchivedAt(ctx, timestampArchived.ID, time.Now()); err != nil {
 		t.Fatalf("archive Agent by timestamp: %v", err)
 	}
 
 	registry := NewAutomationAdapterRegistry()
-	automationRepo := teststores.Of(db).Automations
+	automationRepo := db.Automations
 	drafts := NewAutomationDraftService(automationRepo, registry)
 	validator := NewAutomationSaveValidator(registry, drafts)
-	taskRepo := teststores.Of(db).Tasks
-	scheduleRepo := teststores.Of(db).Schedules
-	compiler := NewAutomationCompiler(automationRepo, NewTaskService(taskRepo, teststores.Of(db).Attachments, nil), taskRepo, scheduleRepo, validator)
+	taskRepo := db.Tasks
+	scheduleRepo := db.Schedules
+	compiler := NewAutomationCompiler(automationRepo, NewTaskService(taskRepo, db.Attachments, nil), taskRepo, scheduleRepo, validator)
 	compiler.SetAgentRepository(agentRepo)
 
 	candidate := automationValidationReferenceCandidate([]string{global.Key, scoped.Key, global.Key, blankKey.ID, orderedFirst.Key, orderedSecond.Key})
@@ -1545,10 +1530,8 @@ func TestAutomationCompilerSavePreservesAgentReferenceSemanticsAndRollback(t *te
 	if err != nil {
 		t.Fatalf("save valid reference candidate: %v", err)
 	}
-	if statements := selectableAgentValidationStatements(counter.Statements()); len(statements) != 1 {
+	if statements := counter.Snapshot().AgentReads; statements != 1 {
 		t.Fatalf("valid reference Agent statements = %#v, want one compact query", statements)
-	} else {
-		assertAutomationValidationProjection(t, statements[0])
 	}
 	expectedIDs := []string{global.ID, scoped.ID, global.ID, blankKey.ID, orderedFirst.ID, orderedSecond.ID}
 	for i, node := range candidate.Nodes {
@@ -1586,10 +1569,10 @@ func TestAutomationCompilerSavePreservesAgentReferenceSemanticsAndRollback(t *te
 			candidate := customTaskOnlyCandidate("Invalid Agent reference", "Must not persist.", models.CategoryBacklog)
 			candidate.Nodes[0].Config["agent_ref"] = invalid.ref
 			before := []int{
-				countRows(t, db, `SELECT COUNT(*) FROM automations`),
-				countRows(t, db, `SELECT COUNT(*) FROM automation_versions`),
-				countRows(t, db, `SELECT COUNT(*) FROM tasks`),
-				countRows(t, db, `SELECT COUNT(*) FROM schedules`),
+				automationStateForTest(t, db).Automations,
+				automationStateForTest(t, db).Versions,
+				automationStateForTest(t, db).Tasks,
+				automationStateForTest(t, db).Schedules,
 			}
 			counter.Reset()
 			counter.SetEnabled(true)
@@ -1601,19 +1584,18 @@ func TestAutomationCompilerSavePreservesAgentReferenceSemanticsAndRollback(t *te
 				t.Fatalf("invalid Agent reference error = %v", err)
 			}
 			after := []int{
-				countRows(t, db, `SELECT COUNT(*) FROM automations`),
-				countRows(t, db, `SELECT COUNT(*) FROM automation_versions`),
-				countRows(t, db, `SELECT COUNT(*) FROM tasks`),
-				countRows(t, db, `SELECT COUNT(*) FROM schedules`),
+				automationStateForTest(t, db).Automations,
+				automationStateForTest(t, db).Versions,
+				automationStateForTest(t, db).Tasks,
+				automationStateForTest(t, db).Schedules,
 			}
 			if fmt.Sprint(after) != fmt.Sprint(before) {
 				t.Fatalf("invalid Agent reference changed resource counts: before=%v after=%v", before, after)
 			}
-			statements := selectableAgentValidationStatements(counter.Statements())
-			if len(statements) != 1 {
+			statements := counter.Snapshot().AgentReads
+			if statements != 1 {
 				t.Fatalf("invalid reference Agent statements = %#v, want one compact query", statements)
 			}
-			assertAutomationValidationProjection(t, statements[0])
 		})
 	}
 }

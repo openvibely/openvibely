@@ -729,6 +729,8 @@ func TestChannelRuntimeCounterMeasuresBackendReads(t *testing.T) {
 			require.NoError(t, err)
 			_, err = env.Projects.List(ctx)
 			require.NoError(t, err)
+			_, err = env.Agents.ListSelectableReferencesForProject(ctx, "default", 50)
+			require.NoError(t, err)
 			env.IO.SetEnabled(false)
 			stats := env.IO.Snapshot()
 			require.Equal(t, 1, stats.ModelRuntimeListReads)
@@ -738,7 +740,8 @@ func TestChannelRuntimeCounterMeasuresBackendReads(t *testing.T) {
 			require.Equal(t, 1, stats.ExecutionCountReads)
 			require.Equal(t, 1, stats.ExecutionPageReads)
 			require.Equal(t, 1, stats.ProjectReads)
-			require.Equal(t, 6, stats.Requests)
+			require.Equal(t, 1, stats.AgentReads)
+			require.Equal(t, 7, stats.Requests)
 		})
 	}
 }
