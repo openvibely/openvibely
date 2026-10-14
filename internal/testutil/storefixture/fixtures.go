@@ -33,6 +33,9 @@ type ChannelProjectSelectionCounts struct{ Discord, Slack, Telegram, Email int }
 type AutomationStateCounts struct{ Automations, Versions, Nodes, Edges, Resources, Tasks, Schedules int }
 
 type Fixtures interface {
+	SeedAutomationEdge(context.Context, models.AutomationEdge) error
+	SeedAutomationResource(context.Context, models.AutomationDefinitionResource) error
+	SetAutomationHealth(context.Context, string, models.AutomationHealthState, string) error
 	SetSlackAuthorizationUnavailable(context.Context, bool) error
 	AutomationState(context.Context) (AutomationStateCounts, error)
 	FailScheduleCreation(context.Context) error

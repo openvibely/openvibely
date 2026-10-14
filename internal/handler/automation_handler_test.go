@@ -22,12 +22,13 @@ import (
 	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/openvibely/openvibely/internal/testutil/storefixture"
 	"github.com/openvibely/openvibely/internal/testutil/teststores"
 	"github.com/stretchr/testify/require"
 )
 
 func TestAutomationPortfolioCardKebabEnablesAndDisablesInPlace(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	project := tc.CreateProject().WithName("Automation card lifecycle").Build()
 	automationRepo := tc.stores.Automations
 	registration := service.NewAutomationRegistrationService(automationRepo, service.NewAutomationAdapterRegistry())
@@ -147,7 +148,7 @@ func TestAutomationPortfolioRunNowQueuesManualDispatchWithoutChangingCadence(t *
 }
 
 func TestAutomationPagesRenderRegisteredDefinitionsAndEnforceProject(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	project := tc.CreateProject().WithName("Automation Project").Build()
 	other := tc.CreateProject().WithName("Other Project").Build()
 	automationRepo := tc.stores.Automations
@@ -307,7 +308,7 @@ func TestAutomationBrowserSaveRejectsExplicitInvalidSemanticConfiguration(t *tes
 		}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			tc := NewTestContext(t)
+			tc := NewStoreTestContext(t)
 			project := tc.CreateProject().WithName("Strict browser Save " + test.name).Build()
 			automationRepo := tc.stores.Automations
 			registry := service.NewAutomationAdapterRegistry()
@@ -352,9 +353,9 @@ func TestAutomationBrowserSaveRejectsExplicitInvalidSemanticConfiguration(t *tes
 				require.Contains(t, response.Body.String(), test.wantMessage)
 			}
 			require.Empty(t, response.Header().Get("HX-Redirect"))
-			require.Zero(t, tableCountHandler(t, tc, "automations"))
-			require.Zero(t, tableCountHandler(t, tc, "tasks"))
-			require.Zero(t, tableCountHandler(t, tc, "schedules"))
+			require.Zero(t, automationHandlerState(t, tc).Automations)
+			require.Zero(t, automationHandlerState(t, tc).Tasks)
+			require.Zero(t, automationHandlerState(t, tc).Schedules)
 		})
 	}
 }
@@ -661,7 +662,7 @@ func TestAutomationDuplicateOpensUnsavedDraftAndSavesIndependentCopy(t *testing.
 }
 
 func TestAutomationDuplicateNameRemainsDistinctAfterPreviewNormalization(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	project := tc.CreateProject().WithName("Duplicate name boundary project").Build()
 	automationRepo := tc.stores.Automations
 	registry := service.NewAutomationAdapterRegistry()
@@ -873,7 +874,7 @@ func TestAutomationTemplateBuilderAddsAndSavesCustomNodes(t *testing.T) {
 }
 
 func TestAutomationBlankBuilderOffersGraphYAMLAndDetailsViews(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	project := tc.CreateProject().WithName("Blank Builder Project").Build()
 	automationRepo := tc.stores.Automations
 	registry := service.NewAutomationAdapterRegistry()
@@ -905,18 +906,18 @@ func TestAutomationBlankBuilderOffersGraphYAMLAndDetailsViews(t *testing.T) {
 	require.NotContains(t, opened.Body.String(), "Apply changes")
 	require.NotContains(t, opened.Body.String(), `data-delete-automation-open`, "an unsaved browser design is not an Automation yet")
 	require.NotContains(t, opened.Body.String(), "Suggested nodes")
-	require.Zero(t, tableCountHandler(t, tc, "automations"))
+	require.Zero(t, automationHandlerState(t, tc).Automations)
 
 	candidate := automationCandidateFromResponse(t, opened)
 	require.Empty(t, candidate.Nodes)
 	require.Empty(t, candidate.Edges)
-	require.Zero(t, tableCountHandler(t, tc, "automations"))
-	require.Zero(t, tableCountHandler(t, tc, "tasks"))
-	require.Zero(t, tableCountHandler(t, tc, "schedules"))
+	require.Zero(t, automationHandlerState(t, tc).Automations)
+	require.Zero(t, automationHandlerState(t, tc).Tasks)
+	require.Zero(t, automationHandlerState(t, tc).Schedules)
 }
 
 func TestAutomationBlankBuilderUsesYAMLForCustomTopology(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	project := tc.CreateProject().WithName("YAML Custom Project").Build()
 	automationRepo := tc.stores.Automations
 	registry := service.NewAutomationAdapterRegistry()
@@ -954,11 +955,11 @@ func TestAutomationBlankBuilderUsesYAMLForCustomTopology(t *testing.T) {
 	require.Contains(t, preview.Body.String(), "Task prompt")
 	require.Contains(t, preview.Body.String(), "Task goal (optional)")
 	require.NotContains(t, preview.Body.String(), "Human result")
-	require.Zero(t, tableCountHandler(t, tc, "automations"))
+	require.Zero(t, automationHandlerState(t, tc).Automations)
 }
 
 func TestAutomationBuilderPreviewRestoresDetailsView(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	project := tc.CreateProject().WithName("Details preview project").Build()
 	automationRepo := tc.stores.Automations
 	registry := service.NewAutomationAdapterRegistry()
@@ -1023,7 +1024,7 @@ func TestAutomationYAMLParseReportsMalformedDocumentsWithoutSideEffects(t *testi
 }
 
 func TestAutomationBuilderVisualActionsDecodeAndReserializeYAML(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	project := tc.CreateProject().WithName("Visual YAML Builder Project").Build()
 	automationRepo := tc.stores.Automations
 	registry := service.NewAutomationAdapterRegistry()
@@ -1056,12 +1057,12 @@ func TestAutomationBuilderVisualActionsDecodeAndReserializeYAML(t *testing.T) {
 	require.Contains(t, response.Body.String(), "Task prompt")
 	require.Contains(t, response.Body.String(), "Task goal (optional)")
 	require.NotContains(t, response.Body.String(), "Human result")
-	require.Zero(t, tableCountHandler(t, tc, "automations"))
-	require.Zero(t, tableCountHandler(t, tc, "automation_versions"))
+	require.Zero(t, automationHandlerState(t, tc).Automations)
+	require.Zero(t, automationHandlerState(t, tc).Versions)
 }
 
 func TestAutomationBuilderPreviewUsesCompilerValidation(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	project := tc.CreateProject().WithName("Compiler Preview Project").Build()
 	automationRepo := tc.stores.Automations
 	registry := service.NewAutomationAdapterRegistry()
@@ -1084,7 +1085,7 @@ func TestAutomationBuilderPreviewUsesCompilerValidation(t *testing.T) {
 		require.Equal(t, http.StatusOK, response.Code, response.Body.String())
 		require.Contains(t, response.Body.String(), "Configure the selected GitHub authentication mode")
 		require.Contains(t, response.Body.String(), "GitHub Authorized User")
-		require.Zero(t, tableCountHandler(t, tc, "automations"))
+		require.Zero(t, automationHandlerState(t, tc).Automations)
 	})
 
 	t.Run("agent selection", func(t *testing.T) {
@@ -1103,7 +1104,7 @@ func TestAutomationBuilderPreviewUsesCompilerValidation(t *testing.T) {
 		}).Execute()
 		require.Equal(t, http.StatusOK, response.Code, response.Body.String())
 		require.Contains(t, response.Body.String(), "Agent selection is unavailable in this project.")
-		require.Zero(t, tableCountHandler(t, tc, "automations"))
+		require.Zero(t, automationHandlerState(t, tc).Automations)
 	})
 }
 
@@ -1372,7 +1373,7 @@ func serviceAutomationValidationReferenceCandidateForHandler(refs []string) mode
 func TestAutomationBuilderRejectsUnsafeAndUnsupportedYAMLWithoutSideEffects(t *testing.T) {
 	newBuilder := func(t *testing.T) (*TestContext, *models.Project, persistence.AutomationStore, *service.AutomationDraftService) {
 		t.Helper()
-		tc := NewTestContext(t)
+		tc := NewStoreTestContext(t)
 		project := tc.CreateProject().WithName("YAML configuration validation project").Build()
 		automationRepo := tc.stores.Automations
 		registry := service.NewAutomationAdapterRegistry()
@@ -1421,10 +1422,10 @@ func TestAutomationBuilderRejectsUnsafeAndUnsupportedYAMLWithoutSideEffects(t *t
 			require.Equal(t, http.StatusOK, response.Code, response.Body.String())
 			require.Empty(t, response.Header().Get("HX-Redirect"))
 			require.Contains(t, response.Body.String(), testCase.message)
-			require.Zero(t, tableCountHandler(t, tc, "automations"))
-			require.Zero(t, tableCountHandler(t, tc, "automation_versions"))
-			require.Zero(t, tableCountHandler(t, tc, "tasks"))
-			require.Zero(t, tableCountHandler(t, tc, "schedules"))
+			require.Zero(t, automationHandlerState(t, tc).Automations)
+			require.Zero(t, automationHandlerState(t, tc).Versions)
+			require.Zero(t, automationHandlerState(t, tc).Tasks)
+			require.Zero(t, automationHandlerState(t, tc).Schedules)
 		})
 	}
 
@@ -1442,8 +1443,8 @@ func TestAutomationBuilderRejectsUnsafeAndUnsupportedYAMLWithoutSideEffects(t *t
 			automationID, versionID := saved.ID, *saved.PublishedVersionID
 			before, err := automationRepo.GetDefinition(context.Background(), project.ID, automationID)
 			require.NoError(t, err)
-			baselineTasks := tableCountHandler(t, tc, "tasks")
-			baselineSchedules := tableCountHandler(t, tc, "schedules")
+			baselineTasks := automationHandlerState(t, tc).Tasks
+			baselineSchedules := automationHandlerState(t, tc).Schedules
 
 			invalid := validCandidate(t, drafts)
 			testCase.mutate(invalid)
@@ -1459,8 +1460,8 @@ func TestAutomationBuilderRejectsUnsafeAndUnsupportedYAMLWithoutSideEffects(t *t
 			after, err := automationRepo.GetDefinition(context.Background(), project.ID, automationID)
 			require.NoError(t, err)
 			require.Equal(t, before, after)
-			require.Equal(t, baselineTasks, tableCountHandler(t, tc, "tasks"))
-			require.Equal(t, baselineSchedules, tableCountHandler(t, tc, "schedules"))
+			require.Equal(t, baselineTasks, automationHandlerState(t, tc).Tasks)
+			require.Equal(t, baselineSchedules, automationHandlerState(t, tc).Schedules)
 		})
 	}
 }
@@ -1468,7 +1469,7 @@ func TestAutomationBuilderRejectsUnsafeAndUnsupportedYAMLWithoutSideEffects(t *t
 func TestAutomationBuilderRejectsEmptyYAMLWithoutSideEffects(t *testing.T) {
 	newBuilder := func(t *testing.T) (*TestContext, *models.Project, persistence.AutomationStore, *service.AutomationDraftService) {
 		t.Helper()
-		tc := NewTestContext(t)
+		tc := NewStoreTestContext(t)
 		project := tc.CreateProject().WithName("Empty YAML Builder Project").Build()
 		automationRepo := tc.stores.Automations
 		registry := service.NewAutomationAdapterRegistry()
@@ -1491,9 +1492,9 @@ func TestAutomationBuilderRejectsEmptyYAMLWithoutSideEffects(t *testing.T) {
 		require.Empty(t, response.Header().Get("HX-Redirect"))
 		require.Contains(t, response.Body.String(), "YAML did not parse")
 		require.Regexp(t, `(?s)<textarea[^>]*name="automation_yaml"[^>]*>\s*</textarea>`, response.Body.String())
-		require.Zero(t, tableCountHandler(t, tc, "automations"))
-		require.Zero(t, tableCountHandler(t, tc, "tasks"))
-		require.Zero(t, tableCountHandler(t, tc, "schedules"))
+		require.Zero(t, automationHandlerState(t, tc).Automations)
+		require.Zero(t, automationHandlerState(t, tc).Tasks)
+		require.Zero(t, automationHandlerState(t, tc).Schedules)
 	})
 
 	t.Run("saved edit", func(t *testing.T) {
@@ -1527,7 +1528,7 @@ func TestAutomationBuilderRejectsEmptyYAMLWithoutSideEffects(t *testing.T) {
 }
 
 func TestAutomationBuilderRejectsMalformedYAMLWithoutSideEffects(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	project := tc.CreateProject().WithName("Malformed YAML Project").Build()
 	automationRepo := tc.stores.Automations
 	drafts := service.NewAutomationDraftService(automationRepo, service.NewAutomationAdapterRegistry())
@@ -1542,9 +1543,9 @@ func TestAutomationBuilderRejectsMalformedYAMLWithoutSideEffects(t *testing.T) {
 	require.Contains(t, response.Body.String(), "YAML did not parse")
 	require.Contains(t, response.Body.String(), `name="automation_yaml"`)
 	require.Contains(t, response.Body.String(), "name: duplicate")
-	require.Zero(t, tableCountHandler(t, tc, "automations"))
-	require.Zero(t, tableCountHandler(t, tc, "tasks"))
-	require.Zero(t, tableCountHandler(t, tc, "schedules"))
+	require.Zero(t, automationHandlerState(t, tc).Automations)
+	require.Zero(t, automationHandlerState(t, tc).Tasks)
+	require.Zero(t, automationHandlerState(t, tc).Schedules)
 }
 
 func TestAutomationBuilderManualInboxDefaultsMatchMaintainedTemplateDefaults(t *testing.T) {
@@ -1558,7 +1559,7 @@ func TestAutomationBuilderManualInboxDefaultsMatchMaintainedTemplateDefaults(t *
 		{name: "github", adapterKey: service.AutomationAdapterGitHubSDLC, nodeKind: "github_inbox", templateKey: "dev_inbox"},
 	} {
 		t.Run(tcSpec.name, func(t *testing.T) {
-			tc := NewTestContext(t)
+			tc := NewStoreTestContext(t)
 			project := tc.CreateProject().WithName("Inbox Defaults Project").Build()
 			automationRepo := tc.stores.Automations
 			registry := service.NewAutomationAdapterRegistry()
@@ -1599,7 +1600,7 @@ func TestAutomationBuilderManualInboxDefaultsMatchMaintainedTemplateDefaults(t *
 }
 
 func TestAutomationBuilderSavesUnsupportedCustomConnectionsWithoutExecutingThem(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	project := tc.CreateProject().WithName("Freeform Builder Project").Build()
 	automationRepo := tc.stores.Automations
 	registry := service.NewAutomationAdapterRegistry()
@@ -1649,8 +1650,8 @@ func TestAutomationBuilderSavesUnsupportedCustomConnectionsWithoutExecutingThem(
 	require.Equal(t, 200, saved.Code, saved.Body.String())
 	require.Empty(t, saved.Header().Get("HX-Redirect"), "invalid designs must remain in the editor")
 	require.Contains(t, saved.Body.String(), "Save did not apply. Resolve the setup items below and try again.")
-	require.Zero(t, tableCountHandler(t, tc, "tasks"), "invalid Save must not create partial task resources")
-	require.Zero(t, tableCountHandler(t, tc, "schedules"), "invalid Save must not create partial schedule resources")
+	require.Zero(t, automationHandlerState(t, tc).Tasks, "invalid Save must not create partial task resources")
+	require.Zero(t, automationHandlerState(t, tc).Schedules, "invalid Save must not create partial schedule resources")
 }
 
 func automationDraftNodeByKeyHandler(t *testing.T, candidate models.AutomationDraftCandidate, key string) models.AutomationDraftNode {
@@ -1857,7 +1858,7 @@ func automationNodeByKeyHandler(nodes []models.AutomationNode, key string) *mode
 }
 
 func TestAutomationGitHubTemplateSaveExplainsUnavailableProjectSetup(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	ctx := context.Background()
 	projectDefault := createAgent(t, tc.llmConfigRepo, func(a *models.LLMConfig) {
 		a.Name = "Project default automation model"
@@ -1906,9 +1907,9 @@ func TestAutomationGitHubTemplateSaveExplainsUnavailableProjectSetup(t *testing.
 	require.Contains(t, saved.Body.String(), "Configure connected GitHub authentication")
 	require.Contains(t, saved.Body.String(), "at least one GitHub Authorized User")
 	require.Contains(t, saved.Body.String(), "a project GitHub repository URL or a GitHub remote")
-	require.Zero(t, tableCountHandler(t, tc, "automations"))
-	require.Zero(t, tableCountHandler(t, tc, "tasks"))
-	require.Zero(t, tableCountHandler(t, tc, "schedules"))
+	require.Zero(t, automationHandlerState(t, tc).Automations)
+	require.Zero(t, automationHandlerState(t, tc).Tasks)
+	require.Zero(t, automationHandlerState(t, tc).Schedules)
 }
 
 func TestAutomationGitHubTemplateSaveUsesVisibleGitHubSetupAndBrowserActionFields(t *testing.T) {
@@ -2004,7 +2005,7 @@ func TestAutomationGitHubTemplateSaveUsesVisibleGitHubSetupAndBrowserActionField
 }
 
 func TestAutomationBrowserRejectsForgedNewVisionDriverCandidateAndAllowsExistingEdit(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	project := tc.CreateProject().WithName("Forged Vision Driver candidate").Build()
 	automationRepo := tc.stores.Automations
 	registry := service.NewAutomationAdapterRegistry()
@@ -2025,9 +2026,9 @@ func TestAutomationBrowserRejectsForgedNewVisionDriverCandidateAndAllowsExisting
 	require.Empty(t, response.Header().Get("HX-Redirect"))
 	require.Contains(t, response.Body.String(), "Save did not apply")
 	require.Contains(t, response.Body.String(), "Vision Driver")
-	require.Zero(t, tableCountHandler(t, tc, "automations"))
-	require.Zero(t, tableCountHandler(t, tc, "tasks"))
-	require.Zero(t, tableCountHandler(t, tc, "schedules"))
+	require.Zero(t, automationHandlerState(t, tc).Automations)
+	require.Zero(t, automationHandlerState(t, tc).Tasks)
+	require.Zero(t, automationHandlerState(t, tc).Schedules)
 
 	existing := seedExistingVisionDriverForHandler(t, tc, automationRepo, project.ID, candidate)
 	candidate.Description = "Edited existing Vision Driver through the browser"
@@ -2039,14 +2040,14 @@ func TestAutomationBrowserRejectsForgedNewVisionDriverCandidateAndAllowsExisting
 	}).Execute()
 	require.Equal(t, http.StatusNoContent, edited.Code, edited.Body.String())
 	require.NotEmpty(t, edited.Header().Get("HX-Redirect"))
-	require.Equal(t, 1, tableCountHandler(t, tc, "automations"))
+	require.Equal(t, 1, automationHandlerState(t, tc).Automations)
 	stored, err := automationRepo.GetDefinition(context.Background(), project.ID, existing.Automation.ID)
 	require.NoError(t, err)
 	require.Equal(t, candidate.Description, stored.Automation.Description)
 }
 
 func TestAutomationDuplicateRejectsSavedVisionDriver(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	project := tc.CreateProject().WithName("Vision Driver duplicate eligibility").Build()
 	automationRepo := tc.stores.Automations
 	registry := service.NewAutomationAdapterRegistry()
@@ -2424,7 +2425,7 @@ func TestAutomationBrowserSaveRejectsMalformedConnectorPorts(t *testing.T) {
 		{name: "missing target", fromPort: "right"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			tc := NewTestContext(t)
+			tc := NewStoreTestContext(t)
 			project := tc.CreateProject().WithName("Strict connector Save").Build()
 			automationRepo := tc.stores.Automations
 			registry := service.NewAutomationAdapterRegistry()
@@ -2448,15 +2449,15 @@ func TestAutomationBrowserSaveRejectsMalformedConnectorPorts(t *testing.T) {
 			}).Execute()
 			require.Equal(t, http.StatusOK, response.Code)
 			require.Contains(t, response.Body.String(), "Graph connections must run from a source OUT port to a target IN port.")
-			require.Zero(t, tableCountHandler(t, tc, "automations"), "malformed browser geometry must not stage an Automation")
-			require.Zero(t, tableCountHandler(t, tc, "tasks"))
-			require.Zero(t, tableCountHandler(t, tc, "schedules"))
+			require.Zero(t, automationHandlerState(t, tc).Automations, "malformed browser geometry must not stage an Automation")
+			require.Zero(t, automationHandlerState(t, tc).Tasks)
+			require.Zero(t, automationHandlerState(t, tc).Schedules)
 		})
 	}
 }
 
 func TestAutomationChatExplicitSavePersistsInSingleToolCall(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	ctx := context.Background()
 	project := tc.CreateProject().WithName("Automation direct Chat save").Build()
 	automationRepo := tc.stores.Automations
@@ -2491,9 +2492,9 @@ func TestAutomationChatExplicitSavePersistsInSingleToolCall(t *testing.T) {
 	require.Contains(t, output, `"active":true`)
 	require.Contains(t, output, `"url":"/automations/`)
 	require.NotContains(t, output, "confirmation")
-	require.Equal(t, 1, tableCountHandler(t, tc, "automations"))
-	require.Equal(t, 3, tableCountHandler(t, tc, "tasks"), "Save creates two runtime tasks beside the Chat thread")
-	require.Equal(t, 1, tableCountHandler(t, tc, "schedules"))
+	require.Equal(t, 1, automationHandlerState(t, tc).Automations)
+	require.Equal(t, 3, automationHandlerState(t, tc).Tasks, "Save creates two runtime tasks beside the Chat thread")
+	require.Equal(t, 1, automationHandlerState(t, tc).Schedules)
 	require.Nil(t, chatcontrol.Get("plan_automation_save"))
 	require.NotNil(t, chatcontrol.Get("save_automation"))
 	for _, def := range chatcontrol.ToolDefsForContext(models.ChatModePlan, chatcontrol.SurfaceWeb, true) {
@@ -2976,7 +2977,7 @@ func TestAutomationChatDeleteAutomationByIDAndExactNamePreservesDomainTasks(t *t
 }
 
 func TestAutomationChatDeleteAutomationRejectsInvalidTargetsAndPlanMode(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	ctx := context.Background()
 	project := tc.CreateProject().WithName("Automation delete guards").Build()
 	foreign := tc.CreateProject().WithName("Foreign Automation delete guards").Build()
@@ -3178,7 +3179,7 @@ func currentAutomationPublishedGraphID(t *testing.T, tc *TestContext, projectID,
 }
 
 func TestAutomationChatLifecycleActionsRejectAmbiguousForeignPlanAndArchivedTargets(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	ctx := context.Background()
 	project := tc.CreateProject().WithName("Automation lifecycle guards").Build()
 	foreign := tc.CreateProject().WithName("Foreign Automation lifecycle guards").Build()
@@ -3286,7 +3287,7 @@ func TestAutomationChatSaveYAMLPersistsThroughCompilerPipeline(t *testing.T) {
 func TestAutomationChatSaveYAMLRejectsCandidateIdentityFieldsWithoutSideEffects(t *testing.T) {
 	for _, field := range []string{"automation_id", "version_id", "candidate", "candidate_json", "token_id"} {
 		t.Run(field, func(t *testing.T) {
-			tc := NewTestContext(t)
+			tc := NewStoreTestContext(t)
 			ctx := context.Background()
 			project := tc.CreateProject().WithName("Automation YAML Chat identity").Build()
 			automationRepo := tc.stores.Automations
@@ -3315,9 +3316,9 @@ func TestAutomationChatSaveYAMLRejectsCandidateIdentityFieldsWithoutSideEffects(
 			require.Contains(t, output, `"active":false`)
 			require.Contains(t, output, "unsupported_candidate_identity")
 			require.Contains(t, output, field)
-			require.Zero(t, tableCountHandler(t, tc, "automations"))
-			require.Zero(t, tableCountHandler(t, tc, "tasks"))
-			require.Zero(t, tableCountHandler(t, tc, "schedules"))
+			require.Zero(t, automationHandlerState(t, tc).Automations)
+			require.Zero(t, automationHandlerState(t, tc).Tasks)
+			require.Zero(t, automationHandlerState(t, tc).Schedules)
 		})
 	}
 }
@@ -3373,7 +3374,7 @@ func TestAutomationChatSaveYAMLRejectsInvalidDefinitionsWithoutSideEffects(t *te
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			tc := NewTestContext(t)
+			tc := NewStoreTestContext(t)
 			ctx := context.Background()
 			project := tc.CreateProject().WithName("Automation YAML Chat invalid").Build()
 			automationRepo := tc.stores.Automations
@@ -3395,15 +3396,15 @@ func TestAutomationChatSaveYAMLRejectsInvalidDefinitionsWithoutSideEffects(t *te
 			require.Contains(t, output, `"active":false`)
 			require.Contains(t, output, test.wantCode)
 			require.Contains(t, output, test.wantMessage)
-			require.Zero(t, tableCountHandler(t, tc, "automations"))
-			require.Zero(t, tableCountHandler(t, tc, "tasks"))
-			require.Zero(t, tableCountHandler(t, tc, "schedules"))
+			require.Zero(t, automationHandlerState(t, tc).Automations)
+			require.Zero(t, automationHandlerState(t, tc).Tasks)
+			require.Zero(t, automationHandlerState(t, tc).Schedules)
 		})
 	}
 }
 
 func TestAutomationChatAndWebCreationHaveNoDraftSurfaceBeforeSave(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	project := tc.CreateProject().WithName("Automation save surfaces").Build()
 	automationRepo := tc.stores.Automations
 	registry := service.NewAutomationAdapterRegistry()
@@ -3428,11 +3429,11 @@ func TestAutomationChatAndWebCreationHaveNoDraftSurfaceBeforeSave(t *testing.T) 
 	require.Contains(t, []int{http.StatusNotFound, http.StatusMethodNotAllowed}, oldRoute.Code)
 	builder := tc.HTMX().Post("/automations/builder?project_id=" + project.ID).WithForm(url.Values{"project_id": {project.ID}, "source": {"blank"}}).Execute()
 	require.Equal(t, http.StatusOK, builder.Code)
-	require.Zero(t, tableCountHandler(t, tc, "automations"), "opening the browser-local builder must not persist an Automation")
+	require.Zero(t, automationHandlerState(t, tc).Automations, "opening the browser-local builder must not persist an Automation")
 }
 
 func TestAutomationChatSaveRejectsCandidateIdentity(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	ctx := context.Background()
 	project := tc.CreateProject().WithName("Automation Chat Identity").Build()
 	automationRepo := tc.stores.Automations
@@ -3450,7 +3451,7 @@ func TestAutomationChatSaveRejectsCandidateIdentity(t *testing.T) {
 	require.NoError(t, tc.taskRepo.Create(ctx, &chatTask))
 	planExecution := models.Execution{TaskID: chatTask.ID, Status: models.ExecRunning, PromptSent: "plan it"}
 	require.NoError(t, tc.execRepo.Create(ctx, &planExecution))
-	initialTasks := tableCountHandler(t, tc, "tasks")
+	initialTasks := automationHandlerState(t, tc).Tasks
 
 	output, err := tc.handler.executeAutomationSaveAction(ctx, streamingResponseParams{ProjectID: project.ID, TaskID: chatTask.ID, ExecID: planExecution.ID},
 		json.RawMessage(fmt.Sprintf(`{"source":"candidate","candidate":%s}`, raw)))
@@ -3458,13 +3459,13 @@ func TestAutomationChatSaveRejectsCandidateIdentity(t *testing.T) {
 	require.Contains(t, output, `"active":false`)
 	require.Contains(t, output, "unsupported_candidate_identity")
 	require.Contains(t, output, "candidate")
-	require.Zero(t, tableCountHandler(t, tc, "automations"))
-	require.Equal(t, initialTasks, tableCountHandler(t, tc, "tasks"))
-	require.Zero(t, tableCountHandler(t, tc, "schedules"))
+	require.Zero(t, automationHandlerState(t, tc).Automations)
+	require.Equal(t, initialTasks, automationHandlerState(t, tc).Tasks)
+	require.Zero(t, automationHandlerState(t, tc).Schedules)
 }
 
 func TestAutomationDescribeFailureIsVisibleAndPreservesInput(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	ctx := context.Background()
 	project := tc.CreateProject().WithName("Unsupported stock monitor").Build()
 	automationRepo := tc.stores.Automations
@@ -3491,13 +3492,13 @@ func TestAutomationDescribeFailureIsVisibleAndPreservesInput(t *testing.T) {
 	require.Contains(t, response.Body.String(), "Could not generate a supported Automation")
 	require.Contains(t, response.Body.String(), html.EscapeString(description))
 	require.Equal(t, 2, mock.CallCount(), "invalid generation receives one bounded repair attempt")
-	require.Zero(t, tableCountHandler(t, tc, "automations"))
-	require.Zero(t, tableCountHandler(t, tc, "tasks"))
-	require.Zero(t, tableCountHandler(t, tc, "schedules"))
+	require.Zero(t, automationHandlerState(t, tc).Automations)
+	require.Zero(t, automationHandlerState(t, tc).Tasks)
+	require.Zero(t, automationHandlerState(t, tc).Schedules)
 }
 
 func TestAutomationDescribePreviewUsesEditShell(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	ctx := context.Background()
 	project := tc.CreateProject().WithName("Describe save surface").Build()
 	automationRepo := tc.stores.Automations
@@ -3534,9 +3535,9 @@ func TestAutomationDescribePreviewUsesEditShell(t *testing.T) {
 	require.NotContains(t, previewBody, `Saving validates and applies this Automation immediately.`)
 	require.Empty(t, preview.Header().Get("HX-Redirect"), "Describe preview must remain browser-local until Save")
 	require.Equal(t, 1, mock.CallCount())
-	require.Zero(t, tableCountHandler(t, tc, "automations"))
-	require.Zero(t, tableCountHandler(t, tc, "tasks"))
-	require.Zero(t, tableCountHandler(t, tc, "schedules"))
+	require.Zero(t, automationHandlerState(t, tc).Automations)
+	require.Zero(t, automationHandlerState(t, tc).Tasks)
+	require.Zero(t, automationHandlerState(t, tc).Schedules)
 }
 
 func TestAutomationCanonicalChatRuntimeExecutesPreviewAndDirectSave(t *testing.T) {
@@ -3895,7 +3896,7 @@ func TestReplacedAutomationOriginTaskGitHubMutationsRemainFailClosed(t *testing.
 }
 
 func TestGoalAgentAutomationImplementationContinuationProjectsRunningNode(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	ctx := context.Background()
 	project := tc.CreateProject().WithName("Goal continuation Automation projection").Build()
 	agent := tc.CreateLLMConfig().Build()
@@ -4022,7 +4023,7 @@ func TestGoalAgentAutomationImplementationContinuationProjectsRunningNode(t *tes
 }
 
 func TestAutomationSendToTaskPersistsCausalBindingsWithQueuedInput(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	ctx := context.Background()
 	project := tc.CreateProject().WithName("Automation queue project").Build()
 	agent := models.LLMConfig{Name: "Automation queue model", Provider: models.ProviderTest, Model: "test", IsDefault: true}
@@ -4150,7 +4151,7 @@ func TestAutomationLiveYAMLUsesLoadedGraphWithoutSecondDefinitionRead(t *testing
 }
 
 func TestRefreshAutomationExternalStateRouteRendersLiveGraphAndPreservesProjectScope(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	ctx := context.Background()
 	project := tc.CreateProject().WithName("External refresh handler project").Build()
 	automationRepo := tc.stores.Automations
@@ -4188,4 +4189,11 @@ func TestRefreshAutomationExternalStateRouteRendersLiveGraphAndPreservesProjectS
 	mismatched := tc.HTMX().Post(fmt.Sprintf("/automations/%s/refresh-external?project_id=%s", definition.Automation.ID, foreign.ID)).Execute()
 	require.Equal(t, http.StatusNotFound, mismatched.Code)
 	require.Zero(t, provider.calls, "missing and project-mismatched refreshes must not call GitHub")
+}
+
+func automationHandlerState(t *testing.T, tc *TestContext) storefixture.AutomationStateCounts {
+	t.Helper()
+	state, err := tc.stores.Fixtures.AutomationState(context.Background())
+	require.NoError(t, err)
+	return state
 }
