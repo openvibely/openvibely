@@ -94,6 +94,9 @@ func TestProjectTabsDoNotHighlightSelectedTabWithPrimaryFocusRing(t *testing.T) 
 	if !strings.Contains(html, `#desktop-project-titlebar [data-project-tab]:focus-visible { outline: none; }`) {
 		t.Error("selected project tabs must not show the primary focus ring")
 	}
+	if !strings.Contains(html, `#desktop-project-titlebar #project-selector-trigger:focus-visible { outline: none; }`) {
+		t.Error("project selector trigger must not show the primary focus ring")
+	}
 }
 
 func TestProjectTabsShowNavigationHintWithoutRedundantLabels(t *testing.T) {

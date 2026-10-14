@@ -76,6 +76,9 @@ func TestBreadcrumbSelectorRendersAccessibleBoundedDialog(t *testing.T) {
 			t.Errorf("selector markup should not contain %q", forbidden)
 		}
 	}
+	if !strings.Contains(body, `[data-breadcrumb-selector] [data-breadcrumb-selector-button]:focus-visible { outline:none; }`) {
+		t.Error("breadcrumb selector trigger must not show the primary focus ring")
+	}
 }
 
 func TestBrowserFunctional_BreadcrumbSelectorKeyboardFocusAndContainmentInChrome(t *testing.T) {

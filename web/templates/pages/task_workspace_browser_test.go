@@ -816,6 +816,7 @@ func TestBrowserFunctional_BreadcrumbStationaryPointerHasSingleHighlight(t *test
 		b.call("Emulation.setDeviceMetricsOverride", map[string]any{"width": 1500, "height": 900, "deviceScaleFactor": 1, "mobile": false}, nil)
 		b.waitFor("breadcrumb", `String(!!document.querySelector('[data-breadcrumb-selector-button]'))`, "true")
 		b.evaluate(`document.querySelector('[data-breadcrumb-selector-button]').focus(); 'focused'`)
+		b.waitFor("breadcrumb trigger has no primary focus ring", `getComputedStyle(document.querySelector('[data-breadcrumb-selector-button]')).outlineStyle`, "none")
 		b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": "Enter", "code": "Enter"}, nil)
 		b.waitFor("results", `String(document.querySelectorAll('[data-breadcrumb-selector-option]').length)`, "2")
 		b.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseMoved", "x": 10, "y": 10}, nil)
