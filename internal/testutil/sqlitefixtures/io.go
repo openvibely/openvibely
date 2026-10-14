@@ -19,6 +19,12 @@ func (c *ioCounter) Snapshot() storefixture.IOStats {
 	stats := storefixture.IOStats{Requests: len(statements), ReadTextBytes: c.counter.SelectedTextBytes()}
 	for _, statement := range statements {
 		q := strings.ToLower(strings.Join(strings.Fields(statement), " "))
+		if strings.HasPrefix(q, "select ") && strings.Contains(q, "from app_settings where key in") {
+			stats.SettingsSnapshotReads++
+		}
+		if strings.HasPrefix(q, "select ") && strings.Contains(q, "from projects order by") {
+			stats.ProjectCatalogReads++
+		}
 		if strings.HasPrefix(q, "select ") && strings.Contains(q, "from telegram_authorized_users") {
 			stats.TelegramAuthorizationReads++
 		}

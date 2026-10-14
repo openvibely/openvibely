@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"reflect"
 	"testing"
 
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
@@ -20,41 +21,36 @@ func TestProviderInterop_AdapterRouting(t *testing.T) {
 	svc.SetLLMCaller(mock)
 	svc.initProviderAdapters()
 
-	// Test that both Anthropic and OpenAI providers can route to test adapter
-	providers := []models.LLMProvider{
-		models.ProviderTest,
-		models.ProviderAnthropic,
-		models.ProviderOpenAI,
-		models.ProviderOllama,
+	// Registration must select each concrete adapter, but only the test adapter
+	// may execute here: choosing a native adapter directly bypasses ProviderTest.
+	expected := map[models.LLMProvider]ProviderAdapter{
+		models.ProviderTest:      &testProviderAdapter{},
+		models.ProviderAnthropic: &anthropicProviderAdapter{},
+		models.ProviderOpenAI:    &openAIProviderAdapter{},
+		models.ProviderOllama:    &ollamaProviderAdapter{},
 	}
-
-	for _, provider := range providers {
+	for provider, want := range expected {
 		adapter, ok := svc.adapterFor(provider)
-		if !ok {
-			t.Fatalf("expected adapter for provider %s", provider)
+		if !ok || reflect.TypeOf(adapter) != reflect.TypeOf(want) {
+			t.Fatalf("provider %s: adapter %T, want %T", provider, adapter, want)
 		}
-
-		// Use ProviderTest to route to mock
-		testAgent := models.LLMConfig{Provider: models.ProviderTest, Model: "test-model"}
-		res, err := adapter.Call(llmcontracts.AgentRequest{
-			Ctx:       context.Background(),
-			Operation: llmcontracts.OperationDirect,
-			Message:   "test cross-provider",
-			Agent:     testAgent,
-			ExecID:    "exec-cross-1",
-		})
-
-		if provider == models.ProviderTest {
-			if err != nil {
-				t.Fatalf("adapter for %s error: %v", provider, err)
-			}
-			if res.Output != "cross-provider-output" {
-				t.Errorf("provider %s: expected output, got %q", provider, res.Output)
-			}
-		}
-
-		t.Logf("Provider %s adapter routing verified", provider)
 	}
+	testAgent := models.LLMConfig{Provider: models.ProviderTest, Model: "test-model"}
+	adapter, ok := svc.adapterFor(testAgent.Provider)
+	if !ok {
+		t.Fatal("test adapter missing")
+	}
+	res, err := adapter.Call(llmcontracts.AgentRequest{Ctx: context.Background(), Operation: llmcontracts.OperationDirect, Message: "test cross-provider", Agent: testAgent, ExecID: "exec-cross-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Output != "cross-provider-output" {
+		t.Fatalf("unexpected output %q", res.Output)
+	}
+	if mock.CallCount() != 1 {
+		t.Fatalf("expected one mock call, got %d", mock.CallCount())
+	}
+
 }
 
 // Test tool call ID normalization (cross-provider compatibility)
