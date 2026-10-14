@@ -901,7 +901,7 @@ func TestAutomationSavePreservesLegacyScheduleClearContextValue(t *testing.T) {
 }
 
 func TestAutomationReplacementUsesOneCurrentGraphAndDeletesRemovedSchedule(t *testing.T) {
-	h := newAutomationSaveHarness(t, "Atomic replacement")
+	h := newAutomationSaveStoreHarness(t, "Atomic replacement")
 	ctx := context.Background()
 	candidate := customScheduledTaskCandidate("Daily review", "Review one request.")
 	first, err := h.compiler.Save(ctx, AutomationSaveRequest{ProjectID: h.project.ID, Source: "manual", CreatedVia: "web", Candidate: candidate})
@@ -918,8 +918,12 @@ func TestAutomationReplacementUsesOneCurrentGraphAndDeletesRemovedSchedule(t *te
 		Source: "manual", CreatedVia: "web", Candidate: replacement})
 	require.NoError(t, err)
 	require.NotEqual(t, oldGraphID, saved.Definition.Version.ID)
-	require.Equal(t, 1, countRows(t, h.db, `SELECT COUNT(*) FROM automation_versions WHERE automation_id = ?`, saved.Definition.Automation.ID))
-	require.Zero(t, countRows(t, h.db, `SELECT COUNT(*) FROM automation_versions WHERE id = ?`, oldGraphID))
+	versions, err := h.stores.Fixtures.AutomationVersions(ctx, saved.Definition.Automation.ID)
+	require.NoError(t, err)
+	require.Len(t, versions, 1)
+	require.Equal(t, saved.Definition.Version.ID, versions[0].ID)
+	require.NotEqual(t, oldGraphID, versions[0].ID)
+
 	removed, err := h.scheduleRepo.GetByID(ctx, oldScheduleID)
 	require.NoError(t, err)
 	require.Nil(t, removed)
@@ -1124,48 +1128,38 @@ func TestAutomationDispatchClaimRejectsCurrentActivityTaskAfterLifecycleDeactiva
 }
 
 func TestAutomationSaveReplacesLegacyRetainedDraftGraph(t *testing.T) {
-	h := newAutomationSaveHarness(t, "Legacy retained draft Save")
+	h := newAutomationSaveStoreHarness(t, "Legacy retained draft Save")
 	ctx := context.Background()
 	candidate := customTaskOnlyCandidate("Legacy retained draft Save", "Run current behavior.", models.CategoryBacklog)
 	first, err := h.compiler.Save(ctx, AutomationSaveRequest{ProjectID: h.project.ID, Source: "manual", CreatedVia: "web", Candidate: candidate})
 	require.NoError(t, err)
-	_, err = h.db.ExecContext(ctx, `INSERT INTO automation_versions
-		(id, project_id, automation_id, version, state, source, adapter_key)
-		VALUES ('legacy-failed-draft', ?, ?, 2, 'draft', 'manual', 'custom')`, h.project.ID, first.Definition.Automation.ID)
-	require.NoError(t, err)
+	require.NoError(t, h.stores.Fixtures.SeedAutomationVersion(ctx, models.AutomationVersion{ID: "legacy-failed-draft", ProjectID: h.project.ID, AutomationID: first.Definition.Automation.ID, Version: 2, State: "draft", Source: "manual", AdapterKey: "custom"}))
+
 	retainedTask := models.Task{ProjectID: h.project.ID, Title: "Legacy failed draft schedule task", Category: models.CategoryScheduled,
 		Priority: 2, Status: models.StatusPending, Prompt: "Preserve this domain task."}
 	require.NoError(t, h.taskRepo.Create(ctx, &retainedTask))
 	retainedSchedule := models.Schedule{TaskID: retainedTask.ID, RunAt: time.Now().UTC().Add(time.Hour), RepeatType: models.RepeatDaily,
 		RepeatInterval: 1, Enabled: false}
 	require.NoError(t, h.scheduleRepo.Create(ctx, &retainedSchedule))
-	_, err = h.db.ExecContext(ctx, `INSERT INTO automation_nodes
-		(id, project_id, automation_id, version_id, node_key, name, node_type, role)
-		VALUES ('legacy-failed-schedule-node', ?, ?, 'legacy-failed-draft', 'legacy_schedule', 'Legacy schedule', 'trigger', 'schedule')`,
-		h.project.ID, first.Definition.Automation.ID)
-	require.NoError(t, err)
-	_, err = h.db.ExecContext(ctx, `INSERT INTO automation_definition_resources
-		(project_id, automation_id, version_id, node_id, resource_type, resource_id, relation)
-		VALUES (?, ?, 'legacy-failed-draft', 'legacy-failed-schedule-node', 'schedule', ?, 'owned')`,
-		h.project.ID, first.Definition.Automation.ID, retainedSchedule.ID)
-	require.NoError(t, err)
-	_, err = h.db.ExecContext(ctx, `INSERT INTO automation_trigger_owners
-		(schedule_id, project_id, automation_id, version_id, node_id, ownership_state)
-		VALUES (?, ?, ?, 'legacy-failed-draft', 'legacy-failed-schedule-node', 'active')`,
-		retainedSchedule.ID, h.project.ID, first.Definition.Automation.ID)
-	require.NoError(t, err)
+	require.NoError(t, h.stores.Fixtures.SeedRetainedScheduleOwnership(ctx, models.AutomationNode{ID: "legacy-failed-schedule-node", ProjectID: h.project.ID, AutomationID: first.Definition.Automation.ID, VersionID: "legacy-failed-draft", NodeKey: "legacy_schedule", Name: "Legacy schedule", NodeType: "trigger", Role: "schedule"}, retainedSchedule.ID))
 
 	candidate.Description = "Replacement behavior."
 	replacement, err := h.compiler.Save(ctx, AutomationSaveRequest{ProjectID: h.project.ID,
 		AutomationID: first.Definition.Automation.ID, Source: "manual", CreatedVia: "web", Candidate: candidate})
 	require.NoError(t, err)
 	require.NotEqual(t, first.Definition.Version.ID, replacement.Definition.Version.ID)
-	require.Equal(t, 1, countRows(t, h.db, `SELECT COUNT(*) FROM automation_versions WHERE automation_id = ?`, first.Definition.Automation.ID))
-	require.Zero(t, countRows(t, h.db, `SELECT COUNT(*) FROM automation_versions WHERE id = 'legacy-failed-draft'`))
-	require.Zero(t, countRows(t, h.db, `SELECT COUNT(*) FROM schedules WHERE id = ?`, retainedSchedule.ID),
-		"replacement Save must remove schedules exclusively owned by every discarded graph")
-	require.Equal(t, 1, countRows(t, h.db, `SELECT COUNT(*) FROM tasks WHERE id = ?`, retainedTask.ID),
-		"replacement Save must preserve the backing domain Task")
+	versions, err := h.stores.Fixtures.AutomationVersions(ctx, first.Definition.Automation.ID)
+	require.NoError(t, err)
+	require.Len(t, versions, 1)
+	require.Equal(t, replacement.Definition.Version.ID, versions[0].ID)
+	require.NotEqual(t, "legacy-failed-draft", versions[0].ID)
+	removed, err := h.scheduleRepo.GetByID(ctx, retainedSchedule.ID)
+	require.NoError(t, err)
+	require.Nil(t, removed, "replacement Save must remove schedules exclusively owned by discarded graphs")
+	retained, err := h.taskRepo.GetByID(ctx, retainedTask.ID)
+	require.NoError(t, err)
+	require.NotNil(t, retained, "replacement Save must preserve the backing domain Task")
+
 	require.Equal(t, 1, replacement.Definition.Version.Version)
 }
 
@@ -1213,19 +1207,19 @@ func TestAutomationRenameUpdatesBoundTaskTitles(t *testing.T) {
 func TestAutomationSaveSubmitsExistingRootsThatBecomePendingActive(t *testing.T) {
 	for _, test := range []struct {
 		name  string
-		setup func(*testing.T, *sql.DB, string)
+		setup func(*testing.T, *teststores.Env, string)
 	}{
-		{name: "backlog to active", setup: func(t *testing.T, db *sql.DB, taskID string) {
-			_, err := db.Exec(`UPDATE tasks SET category = 'backlog' WHERE id = ?`, taskID)
+		{name: "backlog to active", setup: func(t *testing.T, db *teststores.Env, taskID string) {
+			err := db.Fixtures.SetTaskCategory(t.Context(), taskID, models.CategoryBacklog)
 			require.NoError(t, err)
 		}},
-		{name: "completed reset to pending", setup: func(t *testing.T, db *sql.DB, taskID string) {
-			_, err := db.Exec(`UPDATE tasks SET status = 'completed' WHERE id = ?`, taskID)
+		{name: "completed reset to pending", setup: func(t *testing.T, db *teststores.Env, taskID string) {
+			err := db.Fixtures.SetTaskStatus(t.Context(), taskID, models.StatusCompleted)
 			require.NoError(t, err)
 		}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			h := newAutomationSaveHarness(t, "Submit existing root "+test.name)
+			h := newAutomationSaveStoreHarness(t, "Submit existing root "+test.name)
 			ctx := context.Background()
 			recorder := &recordingAutomationTaskService{TaskService: NewTaskService(h.taskRepo, h.stores.Attachments, nil)}
 			h.compiler.taskSvc = recorder
@@ -1234,7 +1228,7 @@ func TestAutomationSaveSubmitsExistingRootsThatBecomePendingActive(t *testing.T)
 			require.NoError(t, err)
 			taskID := automationResourceID(t, first.Definition, "root", "task")
 			recorder.submitted = nil
-			test.setup(t, h.db, taskID)
+			test.setup(t, h.stores, taskID)
 
 			_, err = h.compiler.Save(ctx, AutomationSaveRequest{ProjectID: h.project.ID, AutomationID: first.Definition.Automation.ID,
 				Source: "manual", CreatedVia: "web", Candidate: candidate})
