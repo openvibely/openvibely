@@ -83,11 +83,22 @@ func processWorkDir(dir string) (string, error) {
 }
 
 func processYield(value *int, fallback int) time.Duration {
+	return boundedProcessYield(value, fallback, 250, 30000)
+}
+
+func boundedProcessYield(value *int, fallback, minimum, maximum int) time.Duration {
 	n := fallback
 	if value != nil {
 		n = *value
 	}
-	return time.Duration(min(30000, max(250, n))) * time.Millisecond
+	return time.Duration(min(maximum, max(minimum, n))) * time.Millisecond
+}
+
+func processInteractionYield(value *int, polling bool) time.Duration {
+	if polling {
+		return boundedProcessYield(value, 5000, 5000, 300000)
+	}
+	return processYield(value, 250)
 }
 
 func (m *processManager) remove(s *processSession) {
@@ -367,11 +378,8 @@ func execInteractProcess(ctx context.Context, workDir string, input json.RawMess
 	if p.Terminate && (p.Input != "" || p.CloseStdin) {
 		return "", fmt.Errorf("terminate cannot be combined with input or close_stdin")
 	}
-	fallback := 10000
-	if p.Input != "" {
-		fallback = 250
-	}
-	return shellProcesses.interact(ctx, workDir, p.SessionID, p.Input, p.CloseStdin, p.Terminate, processYield(p.Yield, fallback))
+	polling := p.Input == "" && !p.CloseStdin && !p.Terminate
+	return shellProcesses.interact(ctx, workDir, p.SessionID, p.Input, p.CloseStdin, p.Terminate, processInteractionYield(p.Yield, polling))
 }
 
 // ShutdownProcesses stops background shell processes during application shutdown.

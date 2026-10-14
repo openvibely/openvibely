@@ -181,7 +181,7 @@ var interactProcessTool = Definition{
 		Properties: map[string]*toolschema.Schema{
 			"session_id":    {Type: "string", Description: "The session_id returned by shell."},
 			"input":         {Type: "string", Description: "Optional stdin text, up to 65536 bytes. Empty or omitted means poll only. Include a newline when answering a prompt."},
-			"yield_time_ms": {Type: "integer", Description: "Maximum wait for output or completion, in milliseconds. Default: 10000 for polling, 250 with input. Clamped to 250..30000."},
+			"yield_time_ms": {Type: "integer", Description: "Maximum wait for output or completion, in milliseconds. Polling without input or control actions: default 5000, clamped to 5000..300000. Sending input, closing stdin, or terminating: default 250, clamped to 250..30000. Does not extend the command's total runtime timeout."},
 			"close_stdin":   {Type: "boolean", Description: "Close stdin after sending any input, delivering EOF. Default: false."},
 			"terminate":     {Type: "boolean", Description: "Stop the running process. Cannot be combined with input or close_stdin. Default: false."},
 		},
