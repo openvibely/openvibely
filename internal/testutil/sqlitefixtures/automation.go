@@ -2,6 +2,7 @@ package sqlitefixtures
 
 import (
 	"context"
+	"encoding/json"
 	"time"
 
 	"github.com/openvibely/openvibely/internal/persistence/sqlite"
@@ -147,5 +148,27 @@ func (f *fixtures) SetAutomationWorkItemHistory(ctx context.Context, id string, 
 		completedAt = &now
 	}
 	_, err := f.db.ExecContext(ctx, `UPDATE automation_work_items SET created_at=?,status=?,completed_at=? WHERE id=?`, createdAt.UTC().Format("2006-01-02 15:04:05"), status, completedAt, id)
+	return err
+}
+
+func (f *fixtures) SetAutomationHealthEvaluationTime(ctx context.Context, id string, at *time.Time) error {
+	_, err := f.db.ExecContext(ctx, `UPDATE automations SET health_evaluated_at = ? WHERE id = ?`, at, id)
+	return err
+}
+func (f *fixtures) SetAutomationPublishedVersion(ctx context.Context, id, versionID string) error {
+	_, err := f.db.ExecContext(ctx, `UPDATE automations SET published_version_id = ? WHERE id = ?`, versionID, id)
+	return err
+}
+
+func (f *fixtures) RemoveAutomationCandidate(ctx context.Context, projectID, automationID, versionID string) error {
+	_, err := f.db.ExecContext(ctx, `DELETE FROM automation_graph_metadata WHERE project_id = ? AND automation_id = ? AND version_id = ?`, projectID, automationID, versionID)
+	return err
+}
+func (f *fixtures) SetAutomationCandidate(ctx context.Context, id string, candidate models.AutomationDraftCandidate) error {
+	data, err := json.Marshal(candidate)
+	if err != nil {
+		return err
+	}
+	_, err = f.db.ExecContext(ctx, `UPDATE automation_graph_metadata SET candidate_json = ? WHERE automation_id = ?`, string(data), id)
 	return err
 }

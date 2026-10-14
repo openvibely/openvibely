@@ -769,14 +769,12 @@ func TestAutomationSaveRecreatesDeletedRetainedNativeResourcesPreservesPausedLif
 }
 
 func TestAutomationLiveCandidateDerivesMissingMetadataFromLiveGraph(t *testing.T) {
-	h := newAutomationSaveHarness(t, "Live candidate graph fallback")
+	h := newAutomationSaveStoreHarness(t, "Live candidate graph fallback")
 	ctx := context.Background()
 	candidate := customScheduledTaskCandidate("Live candidate graph fallback", "Review the current request.")
 	saved, err := h.compiler.Save(ctx, AutomationSaveRequest{ProjectID: h.project.ID, Source: "manual", CreatedVia: "web", Candidate: candidate})
 	require.NoError(t, err)
-	_, err = h.db.ExecContext(ctx, `DELETE FROM automation_graph_metadata WHERE project_id = ? AND automation_id = ? AND version_id = ?`,
-		h.project.ID, saved.Definition.Automation.ID, saved.Definition.Version.ID)
-	require.NoError(t, err)
+	require.NoError(t, h.stores.Fixtures.RemoveAutomationCandidate(ctx, h.project.ID, saved.Definition.Automation.ID, saved.Definition.Version.ID))
 
 	graph, err := NewAutomationGraphService(h.automationRepo).GetLive(ctx, h.project.ID, saved.Definition.Automation.ID, time.Now().UTC())
 	require.NoError(t, err)
@@ -817,14 +815,17 @@ func TestAutomationLiveCandidateMatchesCurrentCandidate(t *testing.T) {
 }
 
 func TestAutomationLiveCandidatePreservesLegacyScheduleContext(t *testing.T) {
-	h := newAutomationSaveHarness(t, "Live legacy schedule context")
+	h := newAutomationSaveStoreHarness(t, "Live legacy schedule context")
 	ctx := context.Background()
 	candidate := customScheduledTaskCandidate("Live legacy schedule context", "Review the current request.")
 	saved, err := h.compiler.Save(ctx, AutomationSaveRequest{ProjectID: h.project.ID, Source: "manual", CreatedVia: "web", Candidate: candidate})
 	require.NoError(t, err)
 	scheduleID := automationResourceID(t, saved.Definition, "schedule", "schedule")
-	_, err = h.db.ExecContext(ctx, `UPDATE schedules SET clear_context_on_start = 0 WHERE id = ?`, scheduleID)
+	schedule, err := h.scheduleRepo.GetByID(ctx, scheduleID)
 	require.NoError(t, err)
+	require.NotNil(t, schedule)
+	schedule.ClearContextOnStart = false
+	require.NoError(t, h.scheduleRepo.Update(ctx, schedule))
 
 	graph, err := NewAutomationGraphService(h.automationRepo).GetLive(ctx, h.project.ID, saved.Definition.Automation.ID, time.Now().UTC())
 	require.NoError(t, err)
@@ -866,7 +867,7 @@ func TestAutomationCurrentCandidateRecoversMissingScheduleContextAfterDeletion(t
 }
 
 func TestAutomationSavePreservesLegacyScheduleClearContextValue(t *testing.T) {
-	h := newAutomationSaveHarness(t, "Legacy schedule context")
+	h := newAutomationSaveStoreHarness(t, "Legacy schedule context")
 	ctx := context.Background()
 	candidate := customScheduledTaskCandidate("Legacy schedule context", "Review one request.")
 	first, err := h.compiler.Save(ctx, AutomationSaveRequest{
@@ -875,14 +876,14 @@ func TestAutomationSavePreservesLegacyScheduleClearContextValue(t *testing.T) {
 	require.NoError(t, err)
 
 	scheduleID := automationResourceID(t, first.Definition, "schedule", "schedule")
-	require.NoError(t, h.db.QueryRowContext(ctx, `UPDATE schedules SET clear_context_on_start = 0 WHERE id = ? RETURNING id`, scheduleID).Scan(&scheduleID))
+	schedule, err := h.scheduleRepo.GetByID(ctx, scheduleID)
+	require.NoError(t, err)
+	require.NotNil(t, schedule)
+	schedule.ClearContextOnStart = false
+	require.NoError(t, h.scheduleRepo.Update(ctx, schedule))
 
 	delete(candidate.Nodes[0].Config, "clear_context_on_start")
-	legacyJSON, err := json.Marshal(candidate)
-	require.NoError(t, err)
-	_, err = h.db.ExecContext(ctx, `UPDATE automation_graph_metadata SET candidate_json = ? WHERE automation_id = ?`,
-		string(legacyJSON), first.Definition.Automation.ID)
-	require.NoError(t, err)
+	require.NoError(t, h.stores.Fixtures.SetAutomationCandidate(ctx, first.Definition.Automation.ID, candidate))
 
 	reopened, err := h.drafts.CurrentCandidate(ctx, h.project.ID, first.Definition.Automation.ID)
 	require.NoError(t, err)
@@ -1169,15 +1170,14 @@ func TestAutomationSaveReplacesLegacyRetainedDraftGraph(t *testing.T) {
 }
 
 func TestAutomationSavePreservesScheduleTimingWhenCadenceIsUnchanged(t *testing.T) {
-	h := newAutomationSaveHarness(t, "Preserve schedule timing")
+	h := newAutomationSaveStoreHarness(t, "Preserve schedule timing")
 	ctx := context.Background()
 	candidate := customScheduledTaskCandidate("Scheduled review", "Review one request.")
 	first, err := h.compiler.Save(ctx, AutomationSaveRequest{ProjectID: h.project.ID, Source: "manual", CreatedVia: "web", Candidate: candidate})
 	require.NoError(t, err)
 	scheduleID := automationResourceID(t, first.Definition, "schedule", "schedule")
 	preservedNextRun := time.Date(2042, time.March, 4, 5, 6, 7, 0, time.UTC)
-	_, err = h.db.ExecContext(ctx, `UPDATE schedules SET next_run = ? WHERE id = ?`, preservedNextRun, scheduleID)
-	require.NoError(t, err)
+	require.NoError(t, h.stores.Fixtures.SetScheduleNextRun(ctx, scheduleID, &preservedNextRun))
 	before, err := h.scheduleRepo.GetByID(ctx, scheduleID)
 	require.NoError(t, err)
 
