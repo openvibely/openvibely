@@ -588,11 +588,12 @@ func (ws *WorktreeService) syncWorktreeFromMainAtStartUnlocked(ctx context.Conte
 			)
 			out, err := cmd.CombinedOutput()
 			// Another Git process may briefly own the index. Retry only this
-			// contention error, without deleting a lock owned by another process.
+			// contention error after 1s and 2s, without deleting a lock owned by
+			// another process.
 			if err == nil || attempt >= 2 || !strings.Contains(string(out), "index.lock") || !strings.Contains(string(out), "File exists") {
 				return out, err
 			}
-			timer := time.NewTimer(time.Duration(attempt+1) * 250 * time.Millisecond)
+			timer := time.NewTimer(time.Duration(attempt+1) * time.Second)
 			select {
 			case <-cmdCtx.Done():
 				timer.Stop()
