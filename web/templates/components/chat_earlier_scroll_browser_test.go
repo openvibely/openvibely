@@ -74,16 +74,26 @@ func TestBrowserFunctional_EarlierPrependPreservesMovingReader(t *testing.T) {
       // Move into the newly loaded page before hydration completes.
       messages.dispatchEvent(new WheelEvent('wheel', {deltaY:-1000}));
       messages.scrollTop = 100;
-      messages.dispatchEvent(new Event('scroll'));
+      // Let the browser queue scroll while rendering changes in the same turn.
       const oldest = document.getElementById('oldest');
       const olderOffset = () => oldest.getBoundingClientRect().top - messages.getBoundingClientRect().top;
       const readingOlderOffset = olderOffset();
       document.getElementById('older').style.height = '1050px';
       await wait(60);
       check(olderOffset(), readingOlderOffset, 'hydration below newly visible reader');
+      // Conversely, a queued downward scroll into the next row must retain
+      // compensation for growth above that row in the very same turn.
+      messages.dispatchEvent(new WheelEvent('wheel', {deltaY:500}));
+      messages.scrollTop = 600;
+      const older = document.getElementById('older');
+      const nextOffset = () => older.getBoundingClientRect().top - messages.getBoundingClientRect().top;
+      const readingNextOffset = nextOffset();
+      oldest.style.height = '800px';
+      await wait(60);
+      check(nextOffset(), readingNextOffset, 'queued scroll with hydration above reader');
       finishHydration();
       await wait(80);
-      check(olderOffset(), readingOlderOffset, 'settled prepend');
+      check(nextOffset(), readingNextOffset, 'settled prepend');
       if (!tracker.userScrolledUp) throw new Error('reader became pinned');
       if (messages._earlierAnchor || messages.dataset.earlierRequestLoading === 'true' || messages.style.overflowAnchor) throw new Error('transaction not cleaned up');
       if (messages.querySelector('[data-earlier-loader]')) throw new Error('final page retained loader');

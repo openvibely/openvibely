@@ -4082,11 +4082,35 @@ templ ChatAutoScrollScript() {
 				// Own compensation for this transaction; native anchoring must not
 				// apply the same prepend delta a second time.
 				container.style.overflowAnchor = 'none';
+				rememberChatEarlierLayout(container);
 			};
+
+			function rememberChatEarlierLayout(container) {
+				var anchor = container._earlierAnchor;
+				var top = container.getBoundingClientRect().top;
+				anchor.scrollTop = container.scrollTop;
+				anchor.rows = Array.prototype.map.call(container.querySelectorAll(':scope > [data-execution-pair="true"]'), function(pair) {
+					var rect = pair.getBoundingClientRect();
+					return { pair: pair, top: rect.top - top + container.scrollTop, bottom: rect.bottom - top + container.scrollTop };
+				});
+			}
 
 			function compensateChatEarlierLayout(container) {
 				var anchor = container._earlierAnchor;
 				if (!anchor || !container.isConnected) return;
+				// Scroll events are queued: rendering may already have resized the DOM.
+				// Select the reader's new row using the last compensated layout, then
+				// measure that row's movement. Selecting from the resized DOM loses
+				// growth above it; compensating the old row includes growth below it.
+				if (container.scrollTop !== anchor.scrollTop) {
+					var row = anchor.rows.find(function(row) {
+						return row.pair.isConnected && row.bottom > container.scrollTop + 1 && row.top < container.scrollTop + container.clientHeight - 1;
+					});
+					if (row) {
+						anchor.pair = row.pair;
+						anchor.position = row.top;
+					}
+				}
 				var tracker = container.id ? window['scrollTracker_' + container.id] : null;
 				var position = anchor.pair && anchor.pair.isConnected
 					? anchor.pair.getBoundingClientRect().top - container.getBoundingClientRect().top + container.scrollTop
@@ -4100,6 +4124,7 @@ templ ChatAutoScrollScript() {
 					container.scrollTop += position - anchor.position;
 				}
 				anchor.position = position;
+				rememberChatEarlierLayout(container);
 			}
 
 			function setAllEarlierLoadersIdle(container) {
@@ -4130,14 +4155,7 @@ templ ChatAutoScrollScript() {
 				var anchor = container._earlierAnchor;
 				if (anchor && !anchor.onScroll) {
 					anchor.onScroll = function() {
-						// Flush pending layout movement before choosing the message now
-						// visible to the reader. Otherwise a resize and scroll in the
-						// same frame could discard an unapplied prepend delta.
 						compensateChatEarlierLayout(container);
-						var visible = getFirstVisibleExecutionPair(container);
-						if (!visible) return;
-						anchor.pair = visible.pair;
-						anchor.position = visible.offset + container.scrollTop;
 					};
 					container.addEventListener('scroll', anchor.onScroll, { passive: true });
 				}
