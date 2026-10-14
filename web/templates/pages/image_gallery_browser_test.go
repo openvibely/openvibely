@@ -103,6 +103,19 @@ func TestBrowserFunctional_SharedImageGallery(t *testing.T) {
 		b.waitFor("fullscreen transparent preview", `String((()=>{const d=document.getElementById('image-gallery'),r=d.getBoundingClientRect();return r.left===0 && r.top===0 && Math.abs(r.width-innerWidth)<1 && Math.abs(r.height-innerHeight)<1 && getComputedStyle(d).backgroundColor==='rgba(0, 0, 0, 0)';})())`, "true")
 		b.click(`[data-gallery-image]`)
 		b.waitFor("image click keeps preview open", `String(document.getElementById('image-gallery').open)`, "true")
+		// Dragging across the preview chrome must not start a selection that
+		// can paint over the image, even before zooming.
+		var selectionStart struct {
+			X float64 `json:"x"`
+			Y float64 `json:"y"`
+		}
+		json.Unmarshal([]byte(b.evaluate(`JSON.stringify((()=>{const r=document.querySelector('[data-gallery-name]').getBoundingClientRect();return {x:r.left+2,y:r.top+r.height/2}})())`)), &selectionStart)
+		b.call("Input.dispatchMouseEvent", map[string]any{"type": "mousePressed", "x": selectionStart.X, "y": selectionStart.Y, "button": "left", "clickCount": 1}, nil)
+		b.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseMoved", "x": selectionStart.X + 200, "y": selectionStart.Y, "button": "left", "buttons": 1}, nil)
+		b.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseReleased", "x": selectionStart.X + 200, "y": selectionStart.Y, "button": "left", "clickCount": 1}, nil)
+		b.waitFor("preview does not create text selection", `String(window.getSelection().isCollapsed && document.getElementById('image-gallery').open)`, "true")
+		b.waitFor("WebKit preview selection disabled", `getComputedStyle(document.querySelector('[data-gallery-image]')).webkitUserSelect`, "none")
+
 		b.waitFor("arrows outside clipped image stage", `String((()=>{const stage=document.querySelector('[data-gallery-stage]').getBoundingClientRect(), prev=document.querySelector('[data-gallery-prev]').getBoundingClientRect(), next=document.querySelector('[data-gallery-next]').getBoundingClientRect();return prev.right<stage.left && next.left>stage.right && Math.abs(prev.top+prev.height/2-stage.top-stage.height/2)<1;})())`, "true")
 		b.evaluate(`window.galleryArrowPositions=Array.from(document.querySelectorAll('.image-gallery-arrow'),el=>{const r=el.getBoundingClientRect();return [r.x,r.y]});'saved'`)
 		b.evaluate(`window.galleryBoundaryImage=document.querySelector('[data-gallery-image]');window.galleryBoundaryTransform=window.galleryBoundaryImage.style.transform;'saved'`)
@@ -126,6 +139,7 @@ func TestBrowserFunctional_SharedImageGallery(t *testing.T) {
 		b.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseMoved", "x": point.X + 30, "y": point.Y + 30, "button": "left", "buttons": 1}, nil)
 		b.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseReleased", "x": point.X + 30, "y": point.Y + 30, "button": "left", "clickCount": 1}, nil)
 		b.waitFor("image panned", `String(!document.querySelector('[data-gallery-image]').style.transform.startsWith('translate(0px, 0px)'))`, "true")
+		b.waitFor("panning does not select preview", `String(window.getSelection().isCollapsed && document.getElementById('image-gallery').open)`, "true")
 		b.click(`[data-gallery-fit]`)
 		b.waitFor("fit reset", `document.querySelector('[data-gallery-image]').style.transform`, "translate(0px, 0px) scale(1)")
 		// A click spanning background and image is retargeted to their shared
