@@ -14,6 +14,7 @@ import (
 
 const (
 	ConnectTimeout         = 30 * time.Second
+	ModelUploadTimeout     = 10 * time.Minute
 	ModelHeaderTimeout     = 5 * time.Minute
 	ModelIdleTimeout       = 5 * time.Minute
 	ModelRequestTimeout    = 10 * time.Minute
@@ -66,7 +67,7 @@ func NewModel(base http.RoundTripper) *http.Client {
 	if base == nil {
 		base = NewTransport()
 	}
-	return &http.Client{Transport: &modelTransport{base: base, header: ModelHeaderTimeout, idle: ModelIdleTimeout, total: ModelRequestTimeout}}
+	return &http.Client{Transport: &modelTransport{base: base, upload: ModelUploadTimeout, header: ModelHeaderTimeout, idle: ModelIdleTimeout, total: ModelRequestTimeout}}
 }
 
 type streamingKey struct{}
@@ -77,8 +78,8 @@ func Streaming(ctx context.Context) context.Context {
 }
 
 type modelTransport struct {
-	base                http.RoundTripper
-	header, idle, total time.Duration
+	base                        http.RoundTripper
+	upload, header, idle, total time.Duration
 }
 
 func (t *modelTransport) CloseIdleConnections() {
@@ -117,26 +118,19 @@ func (t *modelTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		resp.Body = &deadlineBody{ReadCloser: resp.Body, ctx: ctx, close: cancel}
 		return resp, nil
 	}
-	// Bound upload inactivity separately from the subsequent header wait.
-	// Connection establishment is also bounded by the dial/TLS limits.
-	ctx, activity, stop := WithActivityTimeout(req.Context(), t.idle)
+	// Bound connection setup and upload by one total deadline. Once sending
+	// finishes, give headers their full allowance, then use body inactivity.
+	uploadDeadline := time.Now().Add(t.upload)
+	ctx, activity, stop := WithActivityTimeout(req.Context(), t.upload)
 	var phaseMu sync.Mutex
 	headersReceived := false
-	uploading := true
-	uploadActivity := func() {
-		phaseMu.Lock()
-		defer phaseMu.Unlock()
-		if uploading && !headersReceived {
-			activity(t.idle)
-		}
-	}
 	ctx = httptrace.WithClientTrace(ctx, &httptrace.ClientTrace{
 		GotConn: func(httptrace.GotConnInfo) {
 			phaseMu.Lock()
 			defer phaseMu.Unlock()
 			if !headersReceived {
-				uploading = true // The transport may replay a request on a new connection.
-				activity(t.idle)
+				// A transport replay retains the original upload deadline.
+				activity(time.Until(uploadDeadline))
 			}
 		},
 		WroteRequest: func(info httptrace.WroteRequestInfo) {
@@ -146,33 +140,11 @@ func (t *modelTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 			phaseMu.Lock()
 			defer phaseMu.Unlock()
 			if !headersReceived {
-				uploading = false
 				activity(t.header)
 			}
 		},
 	})
-	request := req.Clone(ctx)
-	wrapUpload := func(body io.ReadCloser) io.ReadCloser {
-		if body == nil || body == http.NoBody {
-			return body
-		}
-		// Do not cancel on EOF or Close: header and response-body waits follow.
-		return struct {
-			io.Reader
-			io.Closer
-		}{activityReader{body, uploadActivity}, body}
-	}
-	request.Body = wrapUpload(request.Body)
-	if req.GetBody != nil {
-		request.GetBody = func() (io.ReadCloser, error) {
-			body, err := req.GetBody()
-			if err != nil {
-				return nil, err
-			}
-			return wrapUpload(body), nil
-		}
-	}
-	resp, err := t.base.RoundTrip(request)
+	resp, err := t.base.RoundTrip(req.Clone(ctx))
 	if err != nil {
 		if cause := context.Cause(ctx); cause != nil {
 			err = cause
