@@ -150,19 +150,9 @@ import "C"
 import "github.com/wailsapp/wails/v3/pkg/application"
 
 func registerPlatformWindowControls(app *application.App, _ *application.WebviewWindow) {
+	visibility := &captionVisibility{}
 	app.Event.On("desktop:controls-visibility", func(event *application.CustomEvent) {
-		if event.Sender != "main" {
-			return
-		}
-		data, ok := event.Data.(map[string]any)
-		if !ok {
-			return
-		}
-		hidden, ok := data["hidden"].(bool)
-		if !ok {
-			return
-		}
-		application.InvokeAsync(func() {
+		visibility.handle(event, application.InvokeAsync, func(hidden bool) {
 			value := C.int(0)
 			if hidden {
 				value = 1

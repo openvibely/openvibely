@@ -409,7 +409,8 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						new MutationObserver(syncNativeTheme).observe(document.documentElement, {attributes: true, attributeFilter: ['data-theme']});
 						syncNativeTheme();
 						const preview = document.getElementById('image-gallery');
-						const syncNativeVisibility = () => runtime.Events.Emit('desktop:controls-visibility', {hidden: !!preview?.open});
+						let visibilitySequence = 0;
+						const syncNativeVisibility = () => runtime.Events.Emit('desktop:controls-visibility', {hidden: !!preview?.open, page: performance.timeOrigin, sequence: ++visibilitySequence});
 						if (preview) new MutationObserver(syncNativeVisibility).observe(preview, {attributes: true, attributeFilter: ['open']});
 						syncNativeVisibility();
 					}
