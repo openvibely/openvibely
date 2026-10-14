@@ -35,6 +35,12 @@ type AutomationStateCounts struct{ Automations, Versions, Nodes, Edges, Resource
 type ProjectAutomationState struct{ Automations, Tasks, Schedules int }
 
 type Fixtures interface {
+	// SetAutomationLifecycleSnapshot bypasses queue pruning to construct a stale dispatch candidate.
+	SetAutomationLifecycleSnapshot(context.Context, string, string, models.AutomationLifecycleState) error
+	SetTaskCreationOrigin(context.Context, string, string) error
+	CountTasksByCreationOrigin(context.Context, string, string) (int, error)
+	CountAutomationTriggerOwners(context.Context, string, string, string) (int, error)
+
 	ProjectAutomationState(context.Context, string) (ProjectAutomationState, error)
 	SeedAutomationEdge(context.Context, models.AutomationEdge) error
 	SeedAutomationResource(context.Context, models.AutomationDefinitionResource) error

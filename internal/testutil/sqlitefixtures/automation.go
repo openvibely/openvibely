@@ -205,3 +205,22 @@ func (f *fixtures) ProjectAutomationState(ctx context.Context, projectID string)
 	err := f.db.QueryRowContext(ctx, `SELECT (SELECT COUNT(*) FROM automations WHERE project_id = ?),(SELECT COUNT(*) FROM tasks WHERE project_id = ?),(SELECT COUNT(*) FROM schedules s JOIN tasks t ON t.id = s.task_id WHERE t.project_id = ?)`, projectID, projectID, projectID).Scan(&state.Automations, &state.Tasks, &state.Schedules)
 	return state, err
 }
+
+func (f *fixtures) SetAutomationLifecycleSnapshot(ctx context.Context, project, id string, state models.AutomationLifecycleState) error {
+	_, err := f.db.ExecContext(ctx, `UPDATE automations SET lifecycle_state = ? WHERE id = ? AND project_id = ?`, state, id, project)
+	return err
+}
+func (f *fixtures) SetTaskCreationOrigin(ctx context.Context, id, origin string) error {
+	_, err := f.db.ExecContext(ctx, `UPDATE tasks SET created_via = ? WHERE id = ?`, origin, id)
+	return err
+}
+func (f *fixtures) CountTasksByCreationOrigin(ctx context.Context, project, origin string) (int, error) {
+	var n int
+	err := f.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM tasks WHERE created_via = ? AND (? = '' OR project_id = ?)`, origin, project, project).Scan(&n)
+	return n, err
+}
+func (f *fixtures) CountAutomationTriggerOwners(ctx context.Context, project, automation, node string) (int, error) {
+	var n int
+	err := f.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM automation_trigger_owners WHERE project_id = ? AND automation_id = ? AND node_id = ?`, project, automation, node).Scan(&n)
+	return n, err
+}
