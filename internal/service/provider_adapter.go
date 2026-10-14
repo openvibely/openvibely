@@ -1456,7 +1456,7 @@ func buildLocalSummaryCompactionPrompt(history []models.Execution) string {
 			sb.WriteString("\n\n")
 		}
 		writeExecutionReplayForCompaction(&sb, exec)
-		if len(exec.ReplayMessages) == 0 {
+		if len(exec.ReplayMessages) == 0 || environmentReplayMissingAnswer(exec.ReplayMessages) {
 			if replay := llmprompt.ReplayAssistantContent(exec); strings.TrimSpace(replay) != "" {
 				sb.WriteString("Assistant: ")
 				sb.WriteString(strings.TrimSpace(replay))
@@ -1469,6 +1469,34 @@ func buildLocalSummaryCompactionPrompt(history []models.Execution) string {
 	}
 	sb.WriteString(localContextCompactionInstruction)
 	return sb.String()
+}
+
+// Environment snapshots can be written after a stream fails, when the adapter
+// returns no answer even though the stream writer already persisted output.
+// Such snapshots must not hide that output (or the execution's failure reason).
+func environmentReplayMissingAnswer(replays []models.ExecutionReplayMessage) bool {
+	for _, replay := range replays {
+		var snapshot struct {
+			Environment string `json:"anthropic_execution_environment"`
+			Messages    []struct {
+				Role    string `json:"role"`
+				Content string `json:"content"`
+			} `json:"messages"`
+		}
+		if json.Unmarshal([]byte(replay.TranscriptJSON), &snapshot) != nil || snapshot.Environment == "" {
+			continue
+		}
+		hasAnswer := false
+		for _, message := range snapshot.Messages {
+			if message.Role == "assistant" && strings.TrimSpace(message.Content) != "" {
+				hasAnswer = true
+			}
+		}
+		if !hasAnswer {
+			return true
+		}
+	}
+	return false
 }
 
 func writeExecutionReplayForCompaction(sb *strings.Builder, exec models.Execution) {
