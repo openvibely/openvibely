@@ -62,6 +62,16 @@ type PendingTask struct {
 	Category                     models.TaskCategory
 }
 type Fixtures interface {
+	// Projection inventories count exact durable state without history pagination.
+	CountAutomationActivities(context.Context, string, string, models.AutomationActivityStatus) (int, error)
+	CountAutomationWorkItems(context.Context, string, string) (int, error)
+	CountAutomationTransitions(context.Context, string, string) (int, error)
+	CountAutomationResourceLinks(context.Context, string, string) (int, error)
+	AutomationContextForWorkItem(context.Context, string, string) (models.AutomationContext, error)
+
+	SeedAutomationWorkItemPosition(context.Context, models.AutomationWorkItem, models.AutomationWorkItemPosition) error
+	SetAutomationPositionState(context.Context, string, string, models.AutomationPositionState) error
+
 	// ClearProjects removes default and user projects to construct an empty workspace.
 	ClearProjects(context.Context) error
 	SeedPendingTasks(context.Context, []PendingTask) error
@@ -239,6 +249,11 @@ type Fixtures interface {
 // SQLite counts executed statements; other backends must count their database
 // requests, including requests made inside a single store method.
 type IOStats struct {
+	AutomationIdentityReads, AutomationGraphReads, AutomationDefinitionNodeReads                                       int
+	AutomationPageReads, AutomationDirectReads, AutomationSelectedMetricsReads                                         int
+	AutomationHealthWrites, AgentReferenceReads, AgentDetailReads                                                      int
+	AutomationVersionReads, AutomationNodeReads, AutomationEdgeReads, AutomationResourceReads, AutomationMetadataReads int
+
 	AgentPageReads, UnboundedAgentListReads, MutationRequests, AgentDeclarationMutationRequests int
 
 	// ExecutionWindowReads counts bounded newest-first history requests; UnboundedExecutionHistoryReads counts full chronological history requests.

@@ -23,7 +23,6 @@ import (
 	"github.com/openvibely/openvibely/internal/lifecycle"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
-	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/openvibely/openvibely/internal/testutil/storefixture"
@@ -5856,13 +5855,9 @@ func TestLayout_UIPreferencesRestoreFromSettings(t *testing.T) {
 }
 
 func TestLayout_UIPreferencesDoNotReadSettingsForHTMXFragments(t *testing.T) {
-	h, e, _, _ := setupTestHandlerWithStores(t)
+	_, e, _, stores := setupTestHandlerWithStores(t)
 	settingsQueries := 0
-	h.settingsRepo.(*sqlite.SettingsRepo).SetQueryObserver(func(query string) {
-		if strings.Contains(query, "app_settings") {
-			settingsQueries++
-		}
-	})
+	stores.ObserveSettingsReads(func() { settingsQueries++ }, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/tasks", nil)
 	req.Header.Set("HX-Request", "true")
