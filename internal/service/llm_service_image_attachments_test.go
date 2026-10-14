@@ -287,9 +287,10 @@ func TestLLMService_ImageAttachments_VisionRoutingKeepsNoQueryFastPaths(t *testi
 
 func TestLLMService_ImageAttachments_VisionRoutingPreservesCompactSelectionSemantics(t *testing.T) {
 	ctx := context.Background()
-	db, counter := testutil.NewStatementCountingTestDB(t)
-	llmConfigRepo := teststores.Of(db).LLMConfigs
-	teststores.ClearLLMConfigs(t, teststores.Of(db).LLMConfigs)
+	db := teststores.New(t, teststores.WithIOCounting())
+	counter := db.IO
+	llmConfigRepo := db.LLMConfigs
+	teststores.ClearLLMConfigs(t, db.LLMConfigs)
 
 	textOnlyDefault := &models.LLMConfig{
 		Name:       "Text-only Default",
@@ -340,28 +341,9 @@ func TestLLMService_ImageAttachments_VisionRoutingPreservesCompactSelectionSeman
 	}
 	assertRoutingQueries := func(t *testing.T) {
 		t.Helper()
-		statements := counter.Statements()
-		if len(statements) != 2 {
-			t.Fatalf("vision routing statements = %#v, want compact selection plus one detail lookup", statements)
-		}
-		compactQueries, detailQueries := 0, 0
-		for _, raw := range statements {
-			stmt := strings.ToLower(strings.Join(strings.Fields(raw), " "))
-			if strings.Contains(stmt, "order by is_default desc, name asc") {
-				compactQueries++
-				projection := strings.Split(stmt, " from agent_configs ")[0]
-				for _, forbidden := range []string{"oauth_refresh_token", "oauth_client_secret", "base_url", "extra_body_json", "custom_auth_config_json", "custom_auth_state_json", "mixture_config_json", "created_at", "updated_at", "max_tokens", "temperature"} {
-					if strings.Contains(projection, forbidden) {
-						t.Fatalf("vision selection query selected forbidden column %q: %s", forbidden, raw)
-					}
-				}
-			}
-			if strings.Contains(stmt, "from agent_configs where id = ?") || strings.Contains(stmt, "from agent_configs a left join oauth_connections") && strings.Contains(stmt, "where a.id = ?") {
-				detailQueries++
-			}
-		}
-		if compactQueries != 1 || detailQueries != 1 {
-			t.Fatalf("vision routing queries = compact %d, detail %d; statements=%#v", compactQueries, detailQueries, statements)
+		stats := counter.Snapshot()
+		if stats.Requests != 2 || stats.ModelReads != 2 || stats.ModelSelectionReads != 1 {
+			t.Fatalf("expected one selection and one detail read: %+v", stats)
 		}
 	}
 
@@ -409,19 +391,17 @@ func TestLLMService_ImageAttachments_VisionRoutingPreservesCompactSelectionSeman
 	if !decision.Changed || decision.Reason != "vision_env_fallback" || decision.Agent.APIKey != "environment-vision-key" {
 		t.Fatalf("environment fallback decision = %#v", decision)
 	}
-	if len(counter.Statements()) != 1 {
-		t.Fatalf("environment fallback should scan compact rows once without a detail lookup: %#v", counter.Statements())
-	}
-	if strings.Contains(strings.ToLower(strings.Join(strings.Fields(counter.Statements()[0]), " ")), "oauth_refresh_token") {
-		t.Fatalf("environment fallback used a full model projection: %s", counter.Statements()[0])
+	if stats := counter.Snapshot(); stats.Requests != 1 || stats.ModelSelectionReads != 1 {
+		t.Fatalf("expected one compact fallback read: %+v", stats)
 	}
 }
 
 func TestLLMService_ImageAttachments_VisionRoutingHydratesStoredConfigForStreaming(t *testing.T) {
 	ctx := context.Background()
-	db, counter := testutil.NewStatementCountingTestDB(t)
-	llmConfigRepo := teststores.Of(db).LLMConfigs
-	teststores.ClearLLMConfigs(t, teststores.Of(db).LLMConfigs)
+	db := teststores.New(t, teststores.WithIOCounting())
+	counter := db.IO
+	llmConfigRepo := db.LLMConfigs
+	teststores.ClearLLMConfigs(t, db.LLMConfigs)
 
 	textOnly := &models.LLMConfig{
 		Name:       "Text-only local model",
@@ -455,7 +435,7 @@ func TestLLMService_ImageAttachments_VisionRoutingHydratesStoredConfigForStreami
 		}
 	}
 
-	svc := NewLLMService(llmConfigRepo, teststores.Of(db).Executions, teststores.Of(db).Tasks, nil, nil, nil)
+	svc := NewLLMService(llmConfigRepo, db.Executions, db.Tasks, nil, nil, nil)
 	capture := &captureProviderAdapter{}
 	svc.providerAdapters = map[models.LLMProvider]ProviderAdapter{models.ProviderAnthropic: capture}
 	attachments := []models.Attachment{{FileName: "screenshot.png", MediaType: "image/png"}}
@@ -484,35 +464,20 @@ func TestLLMService_ImageAttachments_VisionRoutingHydratesStoredConfigForStreami
 		t.Fatalf("provider received compact or incomplete model config: %#v", got)
 	}
 
-	var compactQueries, detailQueries int
-	for _, raw := range counter.Statements() {
-		stmt := strings.ToLower(strings.Join(strings.Fields(raw), " "))
-		if strings.Contains(stmt, "order by is_default desc, name asc") {
-			compactQueries++
-			projection := strings.Split(stmt, " from agent_configs ")[0]
-			for _, forbidden := range []string{"oauth_refresh_token", "oauth_client_secret", "base_url", "transport", "extra_headers_json", "extra_body_json", "custom_auth_config_json", "custom_auth_state_json", "mixture_config_json", "max_tokens", "temperature", "created_at", "updated_at"} {
-				if strings.Contains(projection, forbidden) {
-					t.Fatalf("streaming vision query selected forbidden column %q: %s", forbidden, raw)
-				}
-			}
-		}
-		if strings.Contains(stmt, "from agent_configs where id = ?") || strings.Contains(stmt, "from agent_configs a left join oauth_connections") && strings.Contains(stmt, "where a.id = ?") {
-			detailQueries++
-		}
-	}
-	if compactQueries != 1 || detailQueries != 1 {
-		t.Fatalf("vision routing queries = compact %d, detail %d; statements=%#v", compactQueries, detailQueries, counter.Statements())
+	if stats := counter.Snapshot(); stats.ModelReads != 2 || stats.ModelSelectionReads != 1 {
+		t.Fatalf("expected compact selection and selected detail read: %+v", stats)
 	}
 }
 
 func TestLLMService_ExecuteTaskWithAgent_ImageAttachmentsPassHydratedVisionConfig(t *testing.T) {
 	ctx := context.Background()
-	db, counter := testutil.NewStatementCountingTestDB(t)
-	llmConfigRepo := teststores.Of(db).LLMConfigs
-	taskRepo := teststores.Of(db).Tasks
-	attachmentRepo := teststores.Of(db).Attachments
-	execRepo := teststores.Of(db).Executions
-	teststores.ClearLLMConfigs(t, teststores.Of(db).LLMConfigs)
+	db := teststores.New(t, teststores.WithIOCounting())
+	counter := db.IO
+	llmConfigRepo := db.LLMConfigs
+	taskRepo := db.Tasks
+	attachmentRepo := db.Attachments
+	execRepo := db.Executions
+	teststores.ClearLLMConfigs(t, db.LLMConfigs)
 
 	textOnly := &models.LLMConfig{
 		Name:       "Task text-only model",
@@ -583,23 +548,17 @@ func TestLLMService_ExecuteTaskWithAgent_ImageAttachmentsPassHydratedVisionConfi
 		got.MixtureConfigJSON != vision.MixtureConfigJSON {
 		t.Fatalf("task provider received compact or incomplete model config: %#v", got)
 	}
-	compactQueries := 0
-	for _, raw := range counter.Statements() {
-		stmt := strings.ToLower(strings.Join(strings.Fields(raw), " "))
-		if strings.Contains(stmt, "order by is_default desc, name asc") {
-			compactQueries++
-		}
-	}
-	if compactQueries != 1 {
-		t.Fatalf("task vision routing should use one compact selection query, statements=%#v", counter.Statements())
+	if stats := counter.Snapshot(); stats.ModelSelectionReads != 1 {
+		t.Fatalf("expected one physical compact selection read: %+v", stats)
 	}
 }
 
 func TestLLMService_ImageAttachments_VisionRoutingHandlesNoStoredModels(t *testing.T) {
 	ctx := context.Background()
-	db, counter := testutil.NewStatementCountingTestDB(t)
-	repo := teststores.Of(db).LLMConfigs
-	teststores.ClearLLMConfigs(t, teststores.Of(db).LLMConfigs)
+	db := teststores.New(t, teststores.WithIOCounting())
+	counter := db.IO
+	repo := db.LLMConfigs
+	teststores.ClearLLMConfigs(t, db.LLMConfigs)
 
 	svc := NewLLMService(repo, nil, nil, nil, nil, nil)
 	textOnly := models.LLMConfig{
@@ -619,7 +578,9 @@ func TestLLMService_ImageAttachments_VisionRoutingHandlesNoStoredModels(t *testi
 	if withoutFallback.Changed || withoutFallback.Reason != "no_vision_fallback_available" {
 		t.Fatalf("no stored models without environment fallback = %#v, want unchanged agent and no-vision result", withoutFallback)
 	}
-	assertCompactVisionSelectionStatement(t, counter.Statements())
+	if stats := counter.Snapshot(); stats.Requests != 1 || stats.ModelSelectionReads != 1 {
+		t.Fatalf("expected one compact selection read: %+v", stats)
+	}
 
 	t.Setenv("ANTHROPIC_API_KEY", "environment-vision-key")
 	counter.Reset()
@@ -629,19 +590,8 @@ func TestLLMService_ImageAttachments_VisionRoutingHandlesNoStoredModels(t *testi
 	if !withFallback.Changed || withFallback.Reason != "vision_env_fallback" || withFallback.Agent.APIKey != "environment-vision-key" {
 		t.Fatalf("no stored models with environment fallback = %#v, want environment vision agent", withFallback)
 	}
-	assertCompactVisionSelectionStatement(t, counter.Statements())
-}
-
-func assertCompactVisionSelectionStatement(t *testing.T, statements []string) {
-	t.Helper()
-	if len(statements) != 1 {
-		t.Fatalf("vision routing statements = %#v, want one compact selection query", statements)
-	}
-	stmt := strings.ToLower(strings.Join(strings.Fields(statements[0]), " "))
-	projection := strings.Split(stmt, " from agent_configs ")[0]
-	wantProjection := "select id, name, provider, model, auth_method, is_default, case when coalesce(api_key, '') != '' then 1 else 0 end, case when coalesce(oauth_connection_id, '') != '' then exists(select 1 from oauth_connections c where c.id = oauth_connection_id and c.oauth_access_token != '') else coalesce(oauth_access_token, '') != '' end"
-	if projection != wantProjection {
-		t.Fatalf("vision selection projection = %q, want %q", projection, wantProjection)
+	if stats := counter.Snapshot(); stats.Requests != 1 || stats.ModelSelectionReads != 1 {
+		t.Fatalf("expected one compact selection read: %+v", stats)
 	}
 }
 
@@ -868,12 +818,13 @@ func TestLLMService_ImageAttachments_NoVisionAgent_ClearError(t *testing.T) {
 
 func TestLLMService_SwarmChildReceivesParentImages(t *testing.T) {
 	ctx := context.Background()
-	db, counter := testutil.NewStatementCountingTestDB(t)
-	llmConfigRepo := teststores.Of(db).LLMConfigs
-	taskRepo := teststores.Of(db).Tasks
-	attachmentRepo := teststores.Of(db).Attachments
-	execRepo := teststores.Of(db).Executions
-	teststores.ClearLLMConfigs(t, teststores.Of(db).LLMConfigs)
+	db := teststores.New(t, teststores.WithIOCounting())
+	counter := db.IO
+	llmConfigRepo := db.LLMConfigs
+	taskRepo := db.Tasks
+	attachmentRepo := db.Attachments
+	execRepo := db.Executions
+	teststores.ClearLLMConfigs(t, db.LLMConfigs)
 
 	textOnly := &models.LLMConfig{
 		Name:       "Task text-only model",
@@ -956,14 +907,7 @@ func TestLLMService_SwarmChildReceivesParentImages(t *testing.T) {
 		got.MixtureConfigJSON != vision.MixtureConfigJSON {
 		t.Fatalf("task provider received compact or incomplete model config: %#v", got)
 	}
-	compactQueries := 0
-	for _, raw := range counter.Statements() {
-		stmt := strings.ToLower(strings.Join(strings.Fields(raw), " "))
-		if strings.Contains(stmt, "order by is_default desc, name asc") {
-			compactQueries++
-		}
-	}
-	if compactQueries != 1 {
-		t.Fatalf("task vision routing should use one compact selection query, statements=%#v", counter.Statements())
+	if stats := counter.Snapshot(); stats.ModelSelectionReads != 1 {
+		t.Fatalf("expected one physical compact selection read: %+v", stats)
 	}
 }

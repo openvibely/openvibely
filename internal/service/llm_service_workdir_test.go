@@ -14,6 +14,7 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/openvibely/openvibely/internal/testutil/storefixture"
 	"github.com/openvibely/openvibely/internal/testutil/teststores"
 )
 
@@ -189,14 +190,15 @@ func TestCleanProjectWorkDirMatches_PathBoundariesAndSeparators(t *testing.T) {
 }
 
 func TestLLMService_projectIDForWorkDir_EmptyWorkDirSkipsLookup(t *testing.T) {
-	db, counter := testutil.NewStatementCountingTestDB(t)
-	svc := NewLLMService(nil, nil, nil, teststores.Of(db).Projects, nil, nil)
+	db := teststores.New(t, teststores.WithIOCounting())
+	counter := db.IO
+	svc := NewLLMService(nil, nil, nil, db.Projects, nil, nil)
 	counter.SetEnabled(true)
 	if got := svc.projectIDForWorkDir(context.Background(), "  "); got != "" {
 		t.Fatalf("projectIDForWorkDir(empty) = %q, want empty", got)
 	}
 	counter.SetEnabled(false)
-	if statements := counter.Statements(); len(statements) != 0 {
+	if statements := counter.Snapshot(); statements.Requests != 0 {
 		t.Fatalf("empty work directory executed statements: %v", statements)
 	}
 }
@@ -225,10 +227,11 @@ func callDirectAttributionPath(ctx context.Context, svc *LLMService, workDir str
 	return err
 }
 
-func setupDirectAttributionFixture(tb testing.TB, projectCount int) (*LLMService, persistence.ProjectStore, *testutil.SQLStatementCounter, string, string) {
+func setupDirectAttributionFixture(tb testing.TB, projectCount int) (*LLMService, persistence.ProjectStore, storefixture.IOCounter, string, string) {
 	tb.Helper()
-	db, counter := testutil.NewStatementCountingTestDB(tb)
-	repo := teststores.Of(db).Projects
+	db := teststores.New(tb, teststores.WithIOCounting())
+	counter := db.IO
+	repo := db.Projects
 	ctx := context.Background()
 	description := strings.Repeat("d", 16<<10)
 	repoURL := "https://example.test/" + strings.Repeat("u", 2<<10)
@@ -293,9 +296,9 @@ func BenchmarkDirectModelUsageAttribution(b *testing.B) {
 						b.Fatalf("instrumented direct call: %v", err)
 					}
 					counter.SetEnabled(false)
-					statementCount := len(counter.Statements())
+					statementCount := counter.Snapshot().Requests
 					if statementCount != benchmarkCase.wantProjectReads {
-						b.Fatalf("project lookup statements = %d, want %d: %v", statementCount, benchmarkCase.wantProjectReads, counter.Statements())
+						b.Fatalf("project lookup statements = %d, want %d: %v", statementCount, benchmarkCase.wantProjectReads, counter.Snapshot())
 					}
 					b.ReportAllocs()
 					b.ResetTimer()
@@ -331,8 +334,8 @@ func TestDirectModelUsageExplicitProjectAvoidsFallbackLookupAt500Projects(t *tes
 			t.Fatalf("%s instrumented direct call: %v", name, err)
 		}
 		counter.SetEnabled(false)
-		if statements := counter.Statements(); len(statements) != want {
-			t.Fatalf("%s project lookup statements = %d, want %d: %v", name, len(statements), want, statements)
+		if statements := counter.Snapshot(); statements.Requests != want {
+			t.Fatalf("%s project lookup statements = %d, want %d: %v", name, statements.Requests, want, statements)
 		}
 	}
 	assertProjectStatements("fallback", candidate, 1)
