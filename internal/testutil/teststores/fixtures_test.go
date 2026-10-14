@@ -8,6 +8,7 @@ import (
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
+	"github.com/openvibely/openvibely/internal/testutil/storefixture"
 	"github.com/openvibely/openvibely/internal/testutil/teststores"
 )
 
@@ -92,5 +93,31 @@ func TestIOCounterMeasuresBackendRequestsWithinStoreCalls(t *testing.T) {
 	env.IO.Reset()
 	if got := env.IO.Snapshot(); got.Requests != 0 || got.ReadTextBytes != 0 {
 		t.Fatalf("reset retained measurements: %+v", got)
+	}
+}
+
+func TestSkillEventFixturePreservesIdentityAndFilters(t *testing.T) {
+	env := teststores.New(t)
+	ctx := context.Background()
+	project := models.Project{Name: "Other skill event project"}
+	if err := env.Projects.Create(ctx, &project); err != nil {
+		t.Fatal(err)
+	}
+	for _, projectID := range []string{"default", project.ID} {
+		event := models.SkillAnalyticsEvent{ProjectID: projectID, ThreadID: "hook-execution", SkillHandle: "observe", SkillScope: models.SkillScopeAgentOwned, EventType: models.SkillEventSelected, Source: models.SkillEventSourceLifecycleHook, Surface: models.SkillSurfaceLifecycleHook}
+		if err := env.SkillAnalytics.RecordEvent(ctx, &event); err != nil {
+			t.Fatal(err)
+		}
+	}
+	events, err := env.Fixtures.SkillEvents(ctx, storefixture.SkillEventFilter{ProjectID: project.ID, SkillHandle: "observe", EventType: models.SkillEventSelected, Source: models.SkillEventSourceLifecycleHook, Surface: models.SkillSurfaceLifecycleHook, SkillScope: models.SkillScopeAgentOwned})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 1 || events[0].ProjectID != project.ID || events[0].ThreadID != "hook-execution" || events[0].ID == "" {
+		t.Fatalf("unexpected persisted skill evidence: %+v", events)
+	}
+	absent, err := env.Fixtures.SkillEvents(ctx, storefixture.SkillEventFilter{ProjectID: project.ID, SkillHandle: "missing"})
+	if err != nil || len(absent) != 0 {
+		t.Fatalf("missing event filter: %+v, %v", absent, err)
 	}
 }

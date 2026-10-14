@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -19,7 +18,7 @@ import (
 	"github.com/openvibely/openvibely/internal/memory"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
-	"github.com/openvibely/openvibely/internal/persistence/sqlite"
+	"github.com/openvibely/openvibely/internal/testutil/storefixture"
 	"github.com/openvibely/openvibely/internal/testutil/teststores"
 )
 
@@ -56,7 +55,7 @@ func (s *routeHookStore) UpdateExecution(ctx context.Context, e *models.Lifecycl
 }
 
 func (s *routeHookStore) FindExecutionByIdempotencyKey(ctx context.Context, key string) (*models.LifecycleExecution, error) {
-	return nil, sql.ErrNoRows
+	return nil, persistence.ErrNotFound
 }
 
 type routeHookInvoker struct {
@@ -626,11 +625,11 @@ func TestPrepareLifecycleTurn_OrdinaryTaskWithActiveGoalRunsGoalAgentAfterComple
 
 func TestPrepareLifecycleTurn_RecordsLifecycleHookSkillAnalyticsForRouteHooks(t *testing.T) {
 	ctx := context.Background()
-	db := teststores.NewDB(t)
-	projectRepo := teststores.Of(db).Projects
-	taskRepo := teststores.Of(db).Tasks
-	skillRepo := teststores.Of(db).SkillAnalytics
-	agentRepo := teststores.Of(db).Agents
+	env := teststores.New(t)
+	projectRepo := env.Projects
+	taskRepo := env.Tasks
+	skillRepo := env.SkillAnalytics
+	agentRepo := env.Agents
 	skillCuratorAgent := &models.Agent{Name: "Skill Curator Test", Key: "skill_curator_test", Model: "inherit", Enabled: true}
 	if err := agentRepo.Create(ctx, skillCuratorAgent); err != nil {
 		t.Fatalf("create skill curator agent: %v", err)
@@ -677,36 +676,32 @@ func TestPrepareLifecycleTurn_RecordsLifecycleHookSkillAnalyticsForRouteHooks(t 
 	worker.PrepareLifecycleTurn(ctx, taskA)
 	worker.PrepareLifecycleTurn(ctx, taskB)
 
-	var routeCount, recallCount int
-	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM skill_analytics_events WHERE project_id = ? AND task_id = ? AND skill_handle = 'route_task' AND event_type = 'selected' AND source = 'lifecycle_hook' AND surface = 'lifecycle_hook' AND skill_scope = 'agent_owned' AND agent_id = ?`, projectA.ID, taskA.ID, skillCuratorAgent.ID).Scan(&routeCount); err != nil {
-		t.Fatalf("count route analytics: %v", err)
-	}
-	if routeCount != 1 {
-		t.Fatalf("project A route_task selected events = %d, want 1", routeCount)
-	}
-	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM skill_analytics_events WHERE project_id = ? AND task_id = ? AND skill_handle = 'recall_memory' AND event_type = 'selected' AND source = 'lifecycle_hook' AND surface = 'lifecycle_hook' AND skill_scope = 'agent_owned' AND agent_id = ?`, projectA.ID, taskA.ID, memoryCuratorAgent.ID).Scan(&recallCount); err != nil {
-		t.Fatalf("count recall analytics: %v", err)
-	}
-	if recallCount != 1 {
-		t.Fatalf("project A recall_memory selected events = %d, want 1", recallCount)
+	for handle, agentID := range map[string]string{"route_task": skillCuratorAgent.ID, "recall_memory": memoryCuratorAgent.ID} {
+		events, err := env.Fixtures.SkillEvents(ctx, storefixture.SkillEventFilter{ProjectID: projectA.ID, TaskID: taskA.ID, SkillHandle: handle, AgentID: agentID, EventType: models.SkillEventSelected, Source: models.SkillEventSourceLifecycleHook, Surface: models.SkillSurfaceLifecycleHook, SkillScope: models.SkillScopeAgentOwned})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(events) != 1 {
+			t.Fatalf("project A %s selected events = %d, want 1", handle, len(events))
+		}
 	}
 
-	underusedA, err := skillRepo.(*sqlite.SkillAnalyticsRepo).GetUnderusedSkills(ctx, persistence.SkillAnalyticsFilter{ProjectID: projectA.ID}, []persistence.EnabledSkillInfo{{Handle: "route_task", Scope: models.SkillScopeAgentOwned, Enabled: true}, {Handle: "recall_memory", Scope: models.SkillScopeAgentOwned, Enabled: true}})
+	underusedA, err := skillRepo.BuildDashboard(ctx, persistence.SkillAnalyticsFilter{ProjectID: projectA.ID}, []persistence.EnabledSkillInfo{{Handle: "route_task", Scope: models.SkillScopeAgentOwned, Enabled: true}, {Handle: "recall_memory", Scope: models.SkillScopeAgentOwned, Enabled: true}})
 	if err != nil {
 		t.Fatalf("GetUnderusedSkills project A: %v", err)
 	}
 	for _, handle := range []string{"route_task", "recall_memory"} {
-		metric := findLifecycleTurnUnderusedSkill(underusedA, handle)
+		metric := findLifecycleTurnUnderusedSkill(underusedA.Underused, handle)
 		if metric == nil || metric.ActivityCount != 1 || metric.LastActivity == nil {
 			t.Fatalf("project A %s underused metric = %+v, want activity 1 with last activity", handle, metric)
 		}
 	}
 
-	underusedB, err := skillRepo.(*sqlite.SkillAnalyticsRepo).GetUnderusedSkills(ctx, persistence.SkillAnalyticsFilter{ProjectID: projectB.ID}, []persistence.EnabledSkillInfo{{Handle: "route_task", Scope: models.SkillScopeAgentOwned, Enabled: true}})
+	underusedB, err := skillRepo.BuildDashboard(ctx, persistence.SkillAnalyticsFilter{ProjectID: projectB.ID}, []persistence.EnabledSkillInfo{{Handle: "route_task", Scope: models.SkillScopeAgentOwned, Enabled: true}})
 	if err != nil {
 		t.Fatalf("GetUnderusedSkills project B: %v", err)
 	}
-	metricB := findLifecycleTurnUnderusedSkill(underusedB, "route_task")
+	metricB := findLifecycleTurnUnderusedSkill(underusedB.Underused, "route_task")
 	if metricB == nil || metricB.ActivityCount != 1 || metricB.LastActivity == nil {
 		t.Fatalf("project B route_task metric = %+v, want only project B activity", metricB)
 	}
@@ -714,11 +709,11 @@ func TestPrepareLifecycleTurn_RecordsLifecycleHookSkillAnalyticsForRouteHooks(t 
 
 func TestPrepareLifecycleTurn_RecordsLifecycleHookSkillAnalyticsForAfterCompleteHooks(t *testing.T) {
 	ctx := context.Background()
-	db := teststores.NewDB(t)
-	projectRepo := teststores.Of(db).Projects
-	taskRepo := teststores.Of(db).Tasks
-	skillRepo := teststores.Of(db).SkillAnalytics
-	agentRepo := teststores.Of(db).Agents
+	env := teststores.New(t)
+	projectRepo := env.Projects
+	taskRepo := env.Tasks
+	skillRepo := env.SkillAnalytics
+	agentRepo := env.Agents
 	skillCuratorAgent := &models.Agent{Name: "Skill Curator After Test", Key: "skill_curator_after_test", Model: "inherit", Enabled: true}
 	if err := agentRepo.Create(ctx, skillCuratorAgent); err != nil {
 		t.Fatalf("create skill curator agent: %v", err)
@@ -750,18 +745,23 @@ func TestPrepareLifecycleTurn_RecordsLifecycleHookSkillAnalyticsForAfterComplete
 		t.Fatal("timed out waiting for after_complete hook")
 	}
 
-	underused, err := skillRepo.(*sqlite.SkillAnalyticsRepo).GetUnderusedSkills(ctx, persistence.SkillAnalyticsFilter{ProjectID: project.ID}, []persistence.EnabledSkillInfo{{Handle: "observe_task_for_learning", Scope: models.SkillScopeAgentOwned, Enabled: true}})
+	underused, err := skillRepo.BuildDashboard(ctx, persistence.SkillAnalyticsFilter{ProjectID: project.ID}, []persistence.EnabledSkillInfo{{Handle: "observe_task_for_learning", Scope: models.SkillScopeAgentOwned, Enabled: true}})
 	if err != nil {
 		t.Fatalf("GetUnderusedSkills: %v", err)
 	}
-	metric := findLifecycleTurnUnderusedSkill(underused, "observe_task_for_learning")
+	metric := findLifecycleTurnUnderusedSkill(underused.Underused, "observe_task_for_learning")
 	if metric == nil || metric.ActivityCount != 1 || metric.SelectedCount != 1 || metric.LastActivity == nil {
 		t.Fatalf("observe_task_for_learning metric = %+v, want selected activity", metric)
 	}
-	var threadID string
-	if err := db.QueryRowContext(ctx, `SELECT COALESCE(thread_id, '') FROM skill_analytics_events WHERE project_id = ? AND task_id = ? AND skill_handle = 'observe_task_for_learning'`, project.ID, task.ID).Scan(&threadID); err != nil {
-		t.Fatalf("load analytics thread id: %v", err)
+	events, err := env.Fixtures.SkillEvents(ctx, storefixture.SkillEventFilter{ProjectID: project.ID, TaskID: task.ID, SkillHandle: "observe_task_for_learning"})
+	if err != nil {
+		t.Fatal(err)
 	}
+	if len(events) != 1 {
+		t.Fatalf("expected one lifecycle skill event, got %d", len(events))
+	}
+	threadID := events[0].ThreadID
+
 	if threadID == "" || !strings.HasPrefix(threadID, "exec-observe") {
 		t.Fatalf("thread_id = %q, want lifecycle execution id", threadID)
 	}

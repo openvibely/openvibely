@@ -94,3 +94,51 @@ func (f *fixtures) ChannelMessageSends(ctx context.Context, projectID string) ([
 func (f *fixtures) ProducedCommitStats(ctx context.Context, projectID string, since time.Time) ([]models.TaskCommitStat, error) {
 	return sqlite.NewTaskCommitStatRepo(f.db).ListProducedCommitStats(ctx, projectID, since)
 }
+
+// SkillEvents returns persisted evidence without dashboard aggregation.
+func (f *fixtures) SkillEvents(ctx context.Context, filter storefixture.SkillEventFilter) ([]models.SkillAnalyticsEvent, error) {
+	query := `SELECT id, created_at, COALESCE(project_id,''), COALESCE(task_id,''), COALESCE(execution_id,''), COALESCE(thread_id,''), COALESCE(agent_id,''), skill_scope, skill_handle, event_type, source, surface FROM skill_analytics_events WHERE 1=1`
+	var args []any
+	for _, term := range []struct{ column, value string }{
+		{"project_id", filter.ProjectID}, {"task_id", filter.TaskID}, {"skill_handle", filter.SkillHandle}, {"agent_id", filter.AgentID}, {"event_type", filter.EventType}, {"source", filter.Source}, {"surface", filter.Surface}, {"skill_scope", filter.SkillScope},
+	} {
+		if term.value != "" {
+			query += " AND " + term.column + " = ?"
+			args = append(args, term.value)
+		}
+	}
+	rows, err := f.db.QueryContext(ctx, query+" ORDER BY rowid", args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var events []models.SkillAnalyticsEvent
+	for rows.Next() {
+		var e models.SkillAnalyticsEvent
+		if err := rows.Scan(&e.ID, &e.CreatedAt, &e.ProjectID, &e.TaskID, &e.ExecutionID, &e.ThreadID, &e.AgentID, &e.SkillScope, &e.SkillHandle, &e.EventType, &e.Source, &e.Surface); err != nil {
+			return nil, err
+		}
+		events = append(events, e)
+	}
+	return events, rows.Err()
+}
+
+func (f *fixtures) SeedAccountUsageSnapshot(ctx context.Context, snapshot *models.AccountUsageSnapshot) error {
+	return sqlite.NewUsageRepo(f.db).CreateAccountUsageSnapshot(ctx, snapshot)
+}
+func (f *fixtures) CountAccountUsageSnapshots(ctx context.Context) (int, error) {
+	var count int
+	err := f.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM account_usage_snapshots`).Scan(&count)
+	return count, err
+}
+func (f *fixtures) LinkModelOAuthConnection(ctx context.Context, modelID, connectionID string) error {
+	return sqlite.NewLLMConfigRepo(f.db).LinkOAuthConnection(ctx, modelID, connectionID)
+}
+
+func (f *fixtures) SetModelOAuthTokens(ctx context.Context, id, access, refresh string, expiresAt int64) error {
+	return sqlite.NewLLMConfigRepo(f.db).UpdateOAuthTokens(ctx, id, access, refresh, expiresAt)
+}
+
+func (f *fixtures) PromoteQueuedTaskInput(ctx context.Context, id string, execution *models.Execution) error {
+	return sqlite.NewThreadInputRepo(f.db).ClaimQueuedForTaskExecution(ctx, id, execution)
+}

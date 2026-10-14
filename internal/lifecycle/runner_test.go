@@ -2,7 +2,6 @@ package lifecycle
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,6 +12,7 @@ import (
 
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 )
 
 // memStore is an in-memory HookStore used to drive the runner in tests.
@@ -63,7 +63,7 @@ func (m *memStore) UpdateExecution(ctx context.Context, e *models.LifecycleExecu
 
 func (m *memStore) FindExecutionByIdempotencyKey(ctx context.Context, key string) (*models.LifecycleExecution, error) {
 	if key == "" {
-		return nil, sql.ErrNoRows
+		return nil, persistence.ErrNotFound
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -73,7 +73,7 @@ func (m *memStore) FindExecutionByIdempotencyKey(ctx context.Context, key string
 			return &e, nil
 		}
 	}
-	return nil, sql.ErrNoRows
+	return nil, persistence.ErrNotFound
 }
 
 func (m *memStore) AppendExecutionEvent(ctx context.Context, event *models.LifecycleExecutionEvent) error {

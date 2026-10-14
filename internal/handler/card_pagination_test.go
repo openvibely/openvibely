@@ -21,7 +21,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/persistence/sqlite"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/internal/testutil/teststores"
 	"github.com/openvibely/openvibely/web/static"
@@ -1038,7 +1038,7 @@ func TestCardPaginationAutomationHandlerReturnsProjectScopedPages(t *testing.T) 
 	require.Equal(t, "false", last.Header().Get(cardPageHasMoreHeader))
 	require.Equal(t, 1, strings.Count(last.Body.String(), "data-automation-url="))
 	require.Contains(t, last.Body.String(), "Paged automation")
-	later, err := automationRepo.(*sqlite.AutomationRepo).ListPortfolioCardsPage(ctx, project.ID, 2, 2, "paged automation")
+	later, err := automationRepo.ListPortfolioCardsPageFiltered(ctx, project.ID, 2, 2, persistence.AutomationCardListFilter{Search: "paged automation"})
 	require.NoError(t, err)
 	require.Len(t, later, 1)
 	require.Contains(t, last.Body.String(), later[0].Automation.Name)

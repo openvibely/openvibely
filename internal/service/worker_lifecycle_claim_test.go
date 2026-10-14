@@ -11,7 +11,6 @@ import (
 	"github.com/openvibely/openvibely/internal/lifecycle"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
-	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/openvibely/openvibely/internal/testutil/teststores"
 	"github.com/stretchr/testify/require"
@@ -33,13 +32,13 @@ import (
 //  4. Asserts that a TaskStatusChanged(pending -> running) event was
 //     published before the lifecycle hook fired.
 func TestWorkerService_TaskAdmissionQueuesFollowupAfterPersistedClaim(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
-	projectRepo := teststores.Of(db).Projects
-	taskRepo := teststores.Of(db).Tasks
-	llmConfigRepo := teststores.Of(db).LLMConfigs
-	execRepo := teststores.Of(db).Executions
-	inputRepo := teststores.Of(db).ThreadInputs
+	projectRepo := env.Projects
+	taskRepo := env.Tasks
+	llmConfigRepo := env.LLMConfigs
+	execRepo := env.Executions
+	inputRepo := env.ThreadInputs
 	project := &models.Project{Name: "task admission claim race"}
 	if err := projectRepo.Create(ctx, project); err != nil {
 		t.Fatalf("create project: %v", err)
@@ -55,7 +54,7 @@ func TestWorkerService_TaskAdmissionQueuesFollowupAfterPersistedClaim(t *testing
 
 	caller := testutil.NewMockLLMCaller()
 	caller.Response = "ordinary run complete"
-	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, nil, teststores.Of(db).Attachments)
+	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, nil, env.Attachments)
 	llmSvc.SetLLMCaller(caller)
 	worker := NewWorkerService(llmSvc, 1, projectRepo)
 	worker.SetLLMConfigRepo(llmConfigRepo)
@@ -118,10 +117,10 @@ func TestWorkerService_TaskAdmissionQueuesFollowupAfterPersistedClaim(t *testing
 	}
 
 	promoted := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: pending[0].Content, IsFollowup: true}
-	if err := inputRepo.(*sqlite.ThreadInputRepo).ClaimQueuedForTaskExecution(ctx, pending[0].ID, promoted); err != nil {
+	if err := env.Fixtures.PromoteQueuedTaskInput(ctx, pending[0].ID, promoted); err != nil {
 		t.Fatalf("promote FIFO head: %v", err)
 	}
-	if err := inputRepo.(*sqlite.ThreadInputRepo).ClaimQueuedForTaskExecution(ctx, pending[0].ID, &models.Execution{TaskID: task.ID, Status: models.ExecRunning}); err != persistence.ErrInputNotPending {
+	if err := env.Fixtures.PromoteQueuedTaskInput(ctx, pending[0].ID, &models.Execution{TaskID: task.ID, Status: models.ExecRunning}); err != persistence.ErrInputNotPending {
 		t.Fatalf("expected exactly-once promotion rejection, got %v", err)
 	}
 	execs, err = execRepo.ListByTaskChronological(ctx, task.ID)
@@ -135,13 +134,13 @@ func TestWorkerService_TaskAdmissionQueuesFollowupAfterPersistedClaim(t *testing
 }
 
 func TestWorkerService_TaskAdmissionRunsFirstTurnWhenFollowupArrivesBeforeClaim(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
-	projectRepo := teststores.Of(db).Projects
-	taskRepo := teststores.Of(db).Tasks
-	llmConfigRepo := teststores.Of(db).LLMConfigs
-	execRepo := teststores.Of(db).Executions
-	inputRepo := teststores.Of(db).ThreadInputs
+	projectRepo := env.Projects
+	taskRepo := env.Tasks
+	llmConfigRepo := env.LLMConfigs
+	execRepo := env.Executions
+	inputRepo := env.ThreadInputs
 	project := &models.Project{Name: "follow-up before task claim"}
 	require.NoError(t, projectRepo.Create(ctx, project))
 	agent := &models.LLMConfig{Name: "Reverse Admission Agent", Provider: models.ProviderTest, Model: "test-model", MaxTokens: 4096, AuthMethod: models.AuthMethodAPIKey, IsDefault: true}
@@ -151,7 +150,7 @@ func TestWorkerService_TaskAdmissionRunsFirstTurnWhenFollowupArrivesBeforeClaim(
 
 	caller := testutil.NewMockLLMCaller()
 	caller.Response = "ordinary run complete"
-	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, nil, teststores.Of(db).Attachments)
+	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, nil, env.Attachments)
 	llmSvc.SetLLMCaller(caller)
 	worker := NewWorkerService(llmSvc, 1, projectRepo)
 	worker.SetLLMConfigRepo(llmConfigRepo)
@@ -191,8 +190,8 @@ func TestWorkerService_TaskAdmissionRunsFirstTurnWhenFollowupArrivesBeforeClaim(
 	require.Len(t, pending, 1)
 	require.Equal(t, queued.ID, pending[0].ID)
 	promoted := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: queued.Content, IsFollowup: true}
-	require.NoError(t, inputRepo.(*sqlite.ThreadInputRepo).ClaimQueuedForTaskExecution(ctx, queued.ID, promoted))
-	require.ErrorIs(t, inputRepo.(*sqlite.ThreadInputRepo).ClaimQueuedForTaskExecution(ctx, queued.ID, &models.Execution{TaskID: task.ID, Status: models.ExecRunning}), persistence.ErrInputNotPending)
+	require.NoError(t, env.Fixtures.PromoteQueuedTaskInput(ctx, queued.ID, promoted))
+	require.ErrorIs(t, env.Fixtures.PromoteQueuedTaskInput(ctx, queued.ID, &models.Execution{TaskID: task.ID, Status: models.ExecRunning}), persistence.ErrInputNotPending)
 	execs, err = execRepo.ListByTaskChronological(ctx, task.ID)
 	require.NoError(t, err)
 	require.Len(t, execs, 2)
@@ -200,13 +199,13 @@ func TestWorkerService_TaskAdmissionRunsFirstTurnWhenFollowupArrivesBeforeClaim(
 }
 
 func TestWorkerService_TaskClaimedBeforeLifecycleHooks(t *testing.T) {
-	db := teststores.NewDB(t)
 	broadcaster := events.NewBroadcaster()
-	taskRepo := teststores.Of(db, teststores.WithBroadcaster(broadcaster)).Tasks
-	projectRepo := teststores.Of(db).Projects
-	llmConfigRepo := teststores.Of(db).LLMConfigs
-	execRepo := teststores.Of(db).Executions
-	attachmentRepo := teststores.Of(db).Attachments
+	env := teststores.New(t, teststores.WithBroadcaster(broadcaster))
+	taskRepo := env.Tasks
+	projectRepo := env.Projects
+	llmConfigRepo := env.LLMConfigs
+	execRepo := env.Executions
+	attachmentRepo := env.Attachments
 	ctx := context.Background()
 
 	// Subscribe to events BEFORE dispatching.
@@ -294,7 +293,7 @@ func TestWorkerService_TaskClaimedBeforeLifecycleHooks(t *testing.T) {
 	ws.SetLLMConfigRepo(llmConfigRepo)
 	ws.SetTaskRepo(taskRepo)
 	ws.SetLifecycleRunner(runner)
-	ws.SetLifecycleRepo(teststores.Of(db).Lifecycle)
+	ws.SetLifecycleRepo(env.Lifecycle)
 	ws.SetExecutionRepo(execRepo)
 	ws.Start(ctx)
 	defer ws.Stop()

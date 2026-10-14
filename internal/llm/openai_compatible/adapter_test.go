@@ -16,7 +16,6 @@ import (
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	llmprompt "github.com/openvibely/openvibely/internal/llm/prompt"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/testutil/teststores"
 	openaiclient "github.com/openvibely/openvibely/pkg/openai_client"
 	"github.com/stretchr/testify/require"
@@ -826,7 +825,7 @@ func TestPrepareClientHistoryLoadsReasoningOnlyForKimi(t *testing.T) {
 	}
 	require.NoError(t, execRepo.Create(ctx, execution))
 	require.NoError(t, execRepo.Complete(ctx, execution.ID, models.ExecCompleted, "answer", "", 0, 0))
-	require.NoError(t, execRepo.(*sqlite.ExecutionRepo).UpdateReasoningContent(ctx, execution.ID, "private thought"))
+	require.NoError(t, execRepo.ReplaceReasoningReplay(ctx, execution.ID, "private thought", nil))
 
 	lightHistory, err := execRepo.ListByTask(ctx, task.ID)
 	require.NoError(t, err)
@@ -982,7 +981,7 @@ func TestPersistReasoningContentClearsStaleReasoning(t *testing.T) {
 		PromptSent:    "question",
 	}
 	require.NoError(t, execRepo.Create(ctx, execution))
-	require.NoError(t, execRepo.(*sqlite.ExecutionRepo).UpdateReasoningContent(ctx, execution.ID, "stale thought"))
+	require.NoError(t, execRepo.ReplaceReasoningReplay(ctx, execution.ID, "stale thought", nil))
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
