@@ -28,7 +28,7 @@ func Definitions() []Definition {
 	return out
 }
 
-var definitions = []Definition{readFileTool, writeFileTool, editFileTool, bashTool, interactProcessTool, listFilesTool, grepSearchTool}
+var definitions = []Definition{readFileTool, writeFileTool, editFileTool, bashTool, processTool, listFilesTool, grepSearchTool}
 
 var readFileTool = Definition{
 	Name:        "read_file",
@@ -104,7 +104,7 @@ var editFileTool = Definition{
 
 var bashTool = Definition{
 	Name:        "shell",
-	Description: fmt.Sprintf("Execute a shell command and return its stdout and stderr. The command runs in the working directory. Use this for running tests, builds, git commands, and other shell operations. Commands have a default total runtime timeout of %d seconds. If still running after yield_time_ms, returns a session_id; use interact_process to read output, send stdin input, or stop it. Sessions use pipes, not a terminal (no TTY).", DefaultBashTimeoutSeconds),
+	Description: fmt.Sprintf("Execute a shell command and return its stdout and stderr. The command runs in the working directory. Use this for running tests, builds, git commands, and other shell operations. Commands have a default total runtime timeout of %d seconds. If still running after yield_time_ms, returns a session_id; use process to read output, send stdin input, or stop it. Sessions use pipes, not a terminal (no TTY).", DefaultBashTimeoutSeconds),
 	Schema: &toolschema.Schema{
 		Type: "object",
 		Properties: map[string]*toolschema.Schema{
@@ -173,8 +173,8 @@ var grepSearchTool = Definition{
 	},
 }
 
-var interactProcessTool = Definition{
-	Name:        "interact_process",
+var processTool = Definition{
+	Name:        "process",
 	Description: "Interact with a running shell session returned by shell. With no input, wait for new stdout/stderr or completion. Optionally send input (include a newline to submit a line), close stdin, or terminate the process. Does not start a new command. Returns unread output, running status and session_id, or final exit_code. Sessions are restricted to their original working directory, expire five minutes after completion, and are removed after final output is read. Output is bounded; truncation is reported. Interactive programs requiring a TTY are unsupported.",
 	Schema: &toolschema.Schema{
 		Type: "object",
