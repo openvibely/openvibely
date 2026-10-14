@@ -230,3 +230,19 @@ func (f *fixtures) CountAutomationInvocations(ctx context.Context, projectID, au
 	err := f.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM automation_invocations WHERE project_id=? AND automation_id=? AND (?='' OR trigger_resource_id=?)`, projectID, automationID, triggerID, triggerID).Scan(&count)
 	return count, err
 }
+
+func (f *fixtures) AutomationExecutionOwnership(ctx context.Context, activityID, executionID string) (storefixture.AutomationExecutionOwnership, error) {
+	var state storefixture.AutomationExecutionOwnership
+	err := f.db.QueryRowContext(ctx, `SELECT (SELECT COUNT(*) FROM automation_activities WHERE id = ?), (SELECT COUNT(*) FROM automation_activity_resources WHERE activity_id = ? AND resource_type = 'execution' AND resource_id = ?)`, activityID, activityID, executionID).Scan(&state.Activities, &state.ExecutionResources)
+	return state, err
+}
+func (f *fixtures) CountDispatchExecutions(ctx context.Context, dispatchID string) (int, error) {
+	var count int
+	err := f.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM executions WHERE dispatch_id = ?`, dispatchID).Scan(&count)
+	return count, err
+}
+
+func (f *fixtures) RemoveAutomationTaskBinding(ctx context.Context, versionID, taskID string) error {
+	_, err := f.db.ExecContext(ctx, `DELETE FROM automation_definition_resources WHERE version_id = ? AND resource_type = 'task' AND resource_id = ?`, versionID, taskID)
+	return err
+}

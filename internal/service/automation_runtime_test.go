@@ -329,55 +329,57 @@ func TestAutomationManualRunUsesExistingDispatchWithoutChangingSchedule(t *testi
 }
 
 func TestAutomationManualRunQueuesEveryScheduleEntryAndRejectsTamperedBinding(t *testing.T) {
-	fixture := newAutomationRuntimeFixture(t, AutomationAdapterNativeSDLC)
-	ctx := context.Background()
-	secondTask := models.Task{ProjectID: fixture.project.ID, Title: "Second manual entry", Category: models.CategoryScheduled, Priority: 3, Status: models.StatusPending, Prompt: "second persisted prompt"}
-	require.NoError(t, fixture.taskRepo.Create(ctx, &secondTask))
-	secondRunAt := time.Now().UTC().Add(2 * time.Hour).Truncate(time.Second)
-	secondNextRun := secondRunAt.Add(time.Hour)
-	secondSchedule := models.Schedule{TaskID: secondTask.ID, RunAt: secondRunAt, NextRun: &secondNextRun, RepeatType: models.RepeatHours, RepeatInterval: 1, Enabled: true, ClearContextOnStart: true}
-	require.NoError(t, fixture.schedRepo.Create(ctx, &secondSchedule))
-	var secondNodeID string
-	require.NoError(t, fixture.db.QueryRow(`INSERT INTO automation_nodes
-		(project_id, automation_id, version_id, node_key, name, node_type, role)
-		VALUES (?, ?, ?, 'second_manual_entry', 'Second manual entry', 'agent_task', 'task') RETURNING id`,
-		fixture.project.ID, fixture.definition.Automation.ID, fixture.definition.Version.ID).Scan(&secondNodeID))
-	for _, resource := range []struct{ kind, id string }{{"task", secondTask.ID}, {"schedule", secondSchedule.ID}} {
-		_, err := fixture.db.Exec(`INSERT INTO automation_definition_resources
-			(project_id, automation_id, version_id, node_id, resource_type, resource_id, relation)
-			VALUES (?, ?, ?, ?, ?, ?, 'owned')`, fixture.project.ID, fixture.definition.Automation.ID,
-			fixture.definition.Version.ID, secondNodeID, resource.kind, resource.id)
-		require.NoError(t, err)
+	for _, production := range []bool{false, true} {
+		name := "isolated"
+		if production {
+			name = "production"
+		}
+		t.Run(name, func(t *testing.T) {
+			var opts []teststores.Option
+			if production {
+				opts = append(opts, teststores.WithProductionTopology())
+			}
+			fixture := newAutomationRuntimeStoreFixture(t, AutomationAdapterNativeSDLC, opts...)
+			ctx := context.Background()
+			secondTask := models.Task{ProjectID: fixture.project.ID, Title: "Second manual entry", Category: models.CategoryScheduled, Priority: 3, Status: models.StatusPending, Prompt: "second persisted prompt"}
+			require.NoError(t, fixture.taskRepo.Create(ctx, &secondTask))
+			secondRunAt := time.Now().UTC().Add(2 * time.Hour).Truncate(time.Second)
+			secondNextRun := secondRunAt.Add(time.Hour)
+			secondSchedule := models.Schedule{TaskID: secondTask.ID, RunAt: secondRunAt, NextRun: &secondNextRun, RepeatType: models.RepeatHours, RepeatInterval: 1, Enabled: true, ClearContextOnStart: true}
+			require.NoError(t, fixture.schedRepo.Create(ctx, &secondSchedule))
+			secondNodeID := persistence.NewID()
+			require.NoError(t, fixture.stores.Fixtures.SeedRetainedScheduleOwnership(ctx, models.AutomationNode{
+				ID: secondNodeID, ProjectID: fixture.project.ID, AutomationID: fixture.definition.Automation.ID, VersionID: fixture.definition.Version.ID,
+				NodeKey: "second_manual_entry", Name: "Second manual entry", NodeType: models.AutomationNodeAgentTask, Role: "task",
+			}, secondSchedule.ID))
+			require.NoError(t, fixture.stores.Fixtures.SeedAutomationResource(ctx, models.AutomationDefinitionResource{
+				ProjectID: fixture.project.ID, AutomationID: fixture.definition.Automation.ID, VersionID: fixture.definition.Version.ID,
+				NodeID: secondNodeID, ResourceType: "task", ResourceID: secondTask.ID, Relation: "owned",
+			}))
+
+			invocations, dispatches, err := fixture.repo.ClaimManualAutomationRun(ctx, fixture.project.ID, fixture.definition.Automation.ID, time.Now().UTC())
+			require.NoError(t, err)
+			require.Len(t, invocations, 2)
+			require.Len(t, dispatches, 2)
+			dispatchedTasks := []string{dispatches[0].TaskID, dispatches[1].TaskID}
+			require.ElementsMatch(t, []string{fixture.task.ID, secondTask.ID}, dispatchedTasks)
+			storedSecond, err := fixture.schedRepo.GetByID(ctx, secondSchedule.ID)
+			require.NoError(t, err)
+			require.Equal(t, secondRunAt, storedSecond.RunAt)
+			require.Equal(t, &secondNextRun, storedSecond.NextRun)
+			require.Nil(t, storedSecond.LastRun)
+
+			tampered := newAutomationRuntimeStoreFixture(t, AutomationAdapterNativeSDLC, opts...)
+			require.NoError(t, tampered.stores.Fixtures.RemoveAutomationTaskBinding(ctx, tampered.definition.Version.ID, tampered.task.ID))
+			invocations, dispatches, err = tampered.repo.ClaimManualAutomationRun(ctx, tampered.project.ID, tampered.definition.Automation.ID, time.Now().UTC())
+			require.ErrorIs(t, err, persistence.ErrAutomationNoScheduleEntries)
+			require.Empty(t, invocations)
+			require.Empty(t, dispatches)
+			invocationCount, err := tampered.stores.Fixtures.CountAutomationInvocations(ctx, tampered.project.ID, tampered.definition.Automation.ID, "")
+			require.NoError(t, err)
+			require.Zero(t, invocationCount)
+		})
 	}
-	_, err := fixture.db.Exec(`INSERT INTO automation_trigger_owners
-		(schedule_id, project_id, automation_id, version_id, node_id, ownership_state)
-		VALUES (?, ?, ?, ?, ?, 'active')`, secondSchedule.ID, fixture.project.ID, fixture.definition.Automation.ID,
-		fixture.definition.Version.ID, secondNodeID)
-	require.NoError(t, err)
-
-	invocations, dispatches, err := fixture.repo.ClaimManualAutomationRun(ctx, fixture.project.ID, fixture.definition.Automation.ID, time.Now().UTC())
-	require.NoError(t, err)
-	require.Len(t, invocations, 2)
-	require.Len(t, dispatches, 2)
-	dispatchedTasks := []string{dispatches[0].TaskID, dispatches[1].TaskID}
-	require.ElementsMatch(t, []string{fixture.task.ID, secondTask.ID}, dispatchedTasks)
-	storedSecond, err := fixture.schedRepo.GetByID(ctx, secondSchedule.ID)
-	require.NoError(t, err)
-	require.Equal(t, secondRunAt, storedSecond.RunAt)
-	require.Equal(t, &secondNextRun, storedSecond.NextRun)
-	require.Nil(t, storedSecond.LastRun)
-
-	tampered := newAutomationRuntimeFixture(t, AutomationAdapterNativeSDLC)
-	_, err = tampered.db.Exec(`DELETE FROM automation_definition_resources
-		WHERE version_id = ? AND resource_type = 'task' AND resource_id = ?`, tampered.definition.Version.ID, tampered.task.ID)
-	require.NoError(t, err)
-	invocations, dispatches, err = tampered.repo.ClaimManualAutomationRun(ctx, tampered.project.ID, tampered.definition.Automation.ID, time.Now().UTC())
-	require.ErrorIs(t, err, persistence.ErrAutomationNoScheduleEntries)
-	require.Empty(t, invocations)
-	require.Empty(t, dispatches)
-	var invocationCount int
-	require.NoError(t, tampered.db.QueryRow(`SELECT COUNT(*) FROM automation_invocations WHERE automation_id = ?`, tampered.definition.Automation.ID).Scan(&invocationCount))
-	require.Zero(t, invocationCount)
 }
 
 func TestAutomationManualRunSkipsBusyEntryAndRejectsInactiveLifecycle(t *testing.T) {
@@ -611,82 +613,112 @@ func testAutomationRuntimeAtomicRecovery(t *testing.T, opts ...teststores.Option
 }
 
 func TestAutomationDeleteRejectsOrdinaryRunningExecution(t *testing.T) {
-	fixture := newAutomationRuntimeFixture(t, AutomationAdapterNativeSDLC)
-	ctx := context.Background()
-	producer := automationNodeByKey(t, fixture.definition, "vision_suggestions")
-	binding := models.AutomationBinding{
-		AutomationID: fixture.definition.Automation.ID,
-		VersionID:    fixture.definition.Version.ID,
-		NodeID:       producer.ID,
+	for _, production := range []bool{false, true} {
+		name := "isolated"
+		if production {
+			name = "production"
+		}
+		t.Run(name, func(t *testing.T) {
+			var opts []teststores.Option
+			if production {
+				opts = append(opts, teststores.WithProductionTopology())
+			}
+			fixture := newAutomationRuntimeStoreFixture(t, AutomationAdapterNativeSDLC, opts...)
+			ctx := context.Background()
+			producer := automationNodeByKey(t, fixture.definition, "vision_suggestions")
+			binding := models.AutomationBinding{
+				AutomationID: fixture.definition.Automation.ID,
+				VersionID:    fixture.definition.Version.ID,
+				NodeID:       producer.ID,
+			}
+			execution := models.Execution{TaskID: fixture.task.ID, Status: models.ExecRunning, PromptSent: "ordinary automation task"}
+			execRepo := fixture.stores.Executions
+			require.NoError(t, execRepo.Create(ctx, &execution))
+			require.Empty(t, execution.DispatchID, "ordinary task execution must not depend on scheduler dispatch ownership")
+			require.NoError(t, fixture.taskRepo.UpdateStatus(ctx, fixture.task.ID, models.StatusRunning))
+			_, activity, err := fixture.repo.RecordProjectionEvent(ctx, persistence.AutomationProjectionEvent{
+				Context:        models.AutomationContext{ProjectID: fixture.project.ID, Bindings: []models.AutomationBinding{binding}},
+				Binding:        binding,
+				WorkItemKey:    "execution:" + execution.ID + ":root",
+				WorkItemKind:   "task_execution",
+				WorkItemTitle:  fixture.task.Title,
+				ActivityKey:    "execution:" + execution.ID + ":run",
+				ActivityType:   "task_execution",
+				ActivityStatus: models.AutomationActivityRunning,
+				EventKey:       "execution:" + execution.ID + ":entered",
+				ToNodeID:       binding.NodeID,
+				Transition:     models.AutomationTransitionEntered,
+				Resources:      []models.AutomationActivityResource{{ResourceType: "execution", ResourceID: execution.ID}, {ResourceType: "task", ResourceID: fixture.task.ID}},
+			})
+			require.NoError(t, err)
+
+			lifecycle := NewAutomationLifecycleService(fixture.repo, fixture.schedRepo)
+			err = lifecycle.Delete(ctx, fixture.project.ID, fixture.definition.Automation.ID)
+			require.ErrorIs(t, err, persistence.ErrAutomationDispatchInFlight)
+			definition, err := fixture.repo.GetDefinition(ctx, fixture.project.ID, fixture.definition.Automation.ID)
+			require.NoError(t, err)
+			require.NotNil(t, definition, "rejected deletion must preserve the Automation graph")
+			persisted, err := execRepo.GetByID(ctx, execution.ID)
+			require.NoError(t, err)
+			require.NotNil(t, persisted)
+			require.Equal(t, models.ExecRunning, persisted.Status)
+			ownership, err := fixture.stores.Fixtures.AutomationExecutionOwnership(ctx, activity.ID, execution.ID)
+			require.NoError(t, err)
+			require.Equal(t, 1, ownership.Activities)
+			require.Equal(t, 1, ownership.ExecutionResources)
+			unrelated, err := fixture.stores.Fixtures.AutomationExecutionOwnership(ctx, activity.ID, "other-execution")
+			require.NoError(t, err)
+			require.Equal(t, 1, unrelated.Activities)
+			require.Zero(t, unrelated.ExecutionResources)
+
+			require.NoError(t, execRepo.Complete(ctx, execution.ID, models.ExecCompleted, "ok", "", 1, 1))
+			require.NoError(t, fixture.taskRepo.UpdateStatus(ctx, fixture.task.ID, models.StatusCompleted))
+			require.NoError(t, lifecycle.Delete(ctx, fixture.project.ID, fixture.definition.Automation.ID), "terminal ordinary execution must not block deletion")
+		})
 	}
-	execution := models.Execution{TaskID: fixture.task.ID, Status: models.ExecRunning, PromptSent: "ordinary automation task"}
-	execRepo := fixture.stores.Executions
-	require.NoError(t, execRepo.Create(ctx, &execution))
-	require.Empty(t, execution.DispatchID, "ordinary task execution must not depend on scheduler dispatch ownership")
-	require.NoError(t, fixture.taskRepo.UpdateStatus(ctx, fixture.task.ID, models.StatusRunning))
-	_, activity, err := fixture.repo.RecordProjectionEvent(ctx, persistence.AutomationProjectionEvent{
-		Context:        models.AutomationContext{ProjectID: fixture.project.ID, Bindings: []models.AutomationBinding{binding}},
-		Binding:        binding,
-		WorkItemKey:    "execution:" + execution.ID + ":root",
-		WorkItemKind:   "task_execution",
-		WorkItemTitle:  fixture.task.Title,
-		ActivityKey:    "execution:" + execution.ID + ":run",
-		ActivityType:   "task_execution",
-		ActivityStatus: models.AutomationActivityRunning,
-		EventKey:       "execution:" + execution.ID + ":entered",
-		ToNodeID:       binding.NodeID,
-		Transition:     models.AutomationTransitionEntered,
-		Resources:      []models.AutomationActivityResource{{ResourceType: "execution", ResourceID: execution.ID}, {ResourceType: "task", ResourceID: fixture.task.ID}},
-	})
-	require.NoError(t, err)
-
-	lifecycle := NewAutomationLifecycleService(fixture.repo, fixture.schedRepo)
-	err = lifecycle.Delete(ctx, fixture.project.ID, fixture.definition.Automation.ID)
-	require.ErrorIs(t, err, persistence.ErrAutomationDispatchInFlight)
-	definition, err := fixture.repo.GetDefinition(ctx, fixture.project.ID, fixture.definition.Automation.ID)
-	require.NoError(t, err)
-	require.NotNil(t, definition, "rejected deletion must preserve the Automation graph")
-	var executionRows, activityRows, resourceRows int
-	require.NoError(t, fixture.db.QueryRow(`SELECT COUNT(*) FROM executions WHERE id = ? AND status = 'running'`, execution.ID).Scan(&executionRows))
-	require.NoError(t, fixture.db.QueryRow(`SELECT COUNT(*) FROM automation_activities WHERE id = ?`, activity.ID).Scan(&activityRows))
-	require.NoError(t, fixture.db.QueryRow(`SELECT COUNT(*) FROM automation_activity_resources WHERE activity_id = ? AND resource_type = 'execution' AND resource_id = ?`, activity.ID, execution.ID).Scan(&resourceRows))
-	require.Equal(t, 1, executionRows)
-	require.Equal(t, 1, activityRows)
-	require.Equal(t, 1, resourceRows)
-
-	require.NoError(t, execRepo.Complete(ctx, execution.ID, models.ExecCompleted, "ok", "", 1, 1))
-	require.NoError(t, fixture.taskRepo.UpdateStatus(ctx, fixture.task.ID, models.StatusCompleted))
-	require.NoError(t, lifecycle.Delete(ctx, fixture.project.ID, fixture.definition.Automation.ID), "terminal ordinary execution must not block deletion")
 }
 
 func TestAutomationDeleteAllowsOrphanedRunningInvocationAfterTaskDeletion(t *testing.T) {
-	fixture := newAutomationRuntimeFixture(t, AutomationAdapterNativeSDLC)
-	ctx := context.Background()
-	now := time.Now().UTC()
-	invocation, dispatch, err := fixture.repo.ClaimScheduledOccurrence(ctx, fixture.schedule, now, fixture.schedule.ComputeNextRun(now))
-	require.NoError(t, err)
-	require.NotNil(t, dispatch)
-	leased, err := fixture.repo.LeaseNextDispatch(ctx, "task-deleting-process", now, time.Minute)
-	require.NoError(t, err)
-	require.Equal(t, dispatch.ID, leased.ID)
-	_, err = fixture.taskRepo.ClaimAutomationDispatch(ctx, dispatch.ID, "task-deleting-process")
-	require.NoError(t, err)
+	for _, production := range []bool{false, true} {
+		name := "isolated"
+		if production {
+			name = "production"
+		}
+		t.Run(name, func(t *testing.T) {
+			var opts []teststores.Option
+			if production {
+				opts = append(opts, teststores.WithProductionTopology())
+			}
+			fixture := newAutomationRuntimeStoreFixture(t, AutomationAdapterNativeSDLC, opts...)
+			ctx := context.Background()
+			now := time.Now().UTC()
+			invocation, dispatch, err := fixture.repo.ClaimScheduledOccurrence(ctx, fixture.schedule, now, fixture.schedule.ComputeNextRun(now))
+			require.NoError(t, err)
+			require.NotNil(t, dispatch)
+			leased, err := fixture.repo.LeaseNextDispatch(ctx, "task-deleting-process", now, time.Minute)
+			require.NoError(t, err)
+			require.Equal(t, dispatch.ID, leased.ID)
+			_, err = fixture.taskRepo.ClaimAutomationDispatch(ctx, dispatch.ID, "task-deleting-process")
+			require.NoError(t, err)
 
-	require.NoError(t, fixture.taskRepo.Delete(ctx, fixture.task.ID), "ordinary task deletion reproduces the orphaned invocation in existing databases")
-	invocationStatus := fixture.invocationStatus(t, invocation.ID)
-	require.Equal(t, "running", invocationStatus)
-	var dispatchRows, executionRows int
-	require.NoError(t, fixture.db.QueryRow(`SELECT COUNT(*) FROM automation_dispatch_outbox WHERE invocation_id = ?`, invocation.ID).Scan(&dispatchRows))
-	require.NoError(t, fixture.db.QueryRow(`SELECT COUNT(*) FROM executions WHERE dispatch_id = ?`, dispatch.ID).Scan(&executionRows))
-	require.Zero(t, dispatchRows)
-	require.Zero(t, executionRows)
+			require.NoError(t, fixture.taskRepo.Delete(ctx, fixture.task.ID), "ordinary task deletion reproduces the orphaned invocation in existing databases")
+			invocationStatus := fixture.invocationStatus(t, invocation.ID)
+			require.Equal(t, "running", invocationStatus)
+			inventory, err := fixture.stores.Fixtures.AutomationState(ctx)
+			require.NoError(t, err)
+			require.Zero(t, inventory.Dispatches)
+			executionRows, err := fixture.stores.Fixtures.CountDispatchExecutions(ctx, dispatch.ID)
+			require.NoError(t, err)
+			require.Zero(t, executionRows)
 
-	lifecycle := NewAutomationLifecycleService(fixture.repo, fixture.schedRepo)
-	require.NoError(t, lifecycle.Delete(ctx, fixture.project.ID, fixture.definition.Automation.ID),
-		"a running invocation with no surviving dispatch or execution cannot own in-flight work")
-	definition, err := fixture.repo.GetDefinition(ctx, fixture.project.ID, fixture.definition.Automation.ID)
-	require.NoError(t, err)
-	require.Nil(t, definition)
+			lifecycle := NewAutomationLifecycleService(fixture.repo, fixture.schedRepo)
+			require.NoError(t, lifecycle.Delete(ctx, fixture.project.ID, fixture.definition.Automation.ID),
+				"a running invocation with no surviving dispatch or execution cannot own in-flight work")
+			definition, err := fixture.repo.GetDefinition(ctx, fixture.project.ID, fixture.definition.Automation.ID)
+			require.NoError(t, err)
+			require.Nil(t, definition)
+		})
+	}
 }
 
 func TestAutomationDeleteRejectsInFlightDispatchAndPreservesRestartRecovery(t *testing.T) {
