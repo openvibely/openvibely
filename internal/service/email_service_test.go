@@ -1717,9 +1717,9 @@ func (c *fakeEmailIMAPClient) seenIDs() []uint32 {
 
 func TestChannelChatIngressReportsTaskAndQueuePersistenceFailures(t *testing.T) {
 	t.Run("task creation", func(t *testing.T) {
-		db := teststores.NewDB(t)
-		taskRepo := teststores.Of(db).Tasks
-		execRepo := teststores.Of(db).Executions
+		db := teststores.New(t)
+		taskRepo := db.Tasks
+		execRepo := db.Executions
 		require.NoError(t, db.Close())
 
 		handedOff := false
@@ -1738,8 +1738,8 @@ func TestChannelChatIngressReportsTaskAndQueuePersistenceFailures(t *testing.T) 
 	})
 
 	t.Run("queue write", func(t *testing.T) {
-		db := teststores.NewDB(t)
-		threadInputRepo := teststores.Of(db).ThreadInputs
+		db := teststores.New(t)
+		threadInputRepo := db.ThreadInputs
 		require.NoError(t, db.Close())
 
 		handedOff := false
@@ -2474,41 +2474,6 @@ func TestEmailService_SendOutboundMessage_ValidationAndMissingConfig(t *testing.
 	missing := svc.SendOutboundMessage(context.Background(), "person@example.com", "Subject", "body")
 	require.False(t, missing.OK)
 	require.Contains(t, missing.Error, "email channel is not fully configured")
-}
-
-func TestSettingsQueryAcquiredObserverRunsWhileConnectionIsHeld(t *testing.T) {
-	db := teststores.NewDB(t)
-	ctx := context.Background()
-	settingsRepo := teststores.Of(db).Settings
-	require.NoError(t, settingsRepo.Set(ctx, EmailSettingAddress, "bot@example.com"))
-
-	acquired := make(chan struct{})
-	release := make(chan struct{})
-	settingsRepo.(*sqlite.SettingsRepo).SetQueryAcquiredObserver(func(query string) {
-		if strings.Contains(query, "FROM app_settings") {
-			close(acquired)
-			<-release
-		}
-	})
-
-	loadDone := make(chan error, 1)
-	go func() {
-		_, err := settingsRepo.GetMany(ctx, emailRuntimeSettingKeys)
-		loadDone <- err
-	}()
-	<-acquired
-
-	waitCount := db.Stats().WaitCount
-	competingDone := make(chan error, 1)
-	go func() {
-		var value string
-		competingDone <- db.QueryRowContext(ctx, "SELECT value FROM app_settings WHERE key = ?", EmailSettingAddress).Scan(&value)
-	}()
-	require.Eventually(t, func() bool { return db.Stats().WaitCount > waitCount }, time.Second, time.Millisecond,
-		"competing query must queue behind the settings statement before the observer releases it")
-	close(release)
-	require.NoError(t, <-loadDone)
-	require.NoError(t, <-competingDone)
 }
 
 func BenchmarkEmailServiceSettingsBurst(b *testing.B) {

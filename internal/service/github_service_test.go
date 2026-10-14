@@ -1625,7 +1625,7 @@ func TestGitHubServiceUpdatePullRequestBody(t *testing.T) {
 }
 func newPATGitHubService(t *testing.T, apiBaseURL string) *GitHubService {
 	t.Helper()
-	settingsRepo := teststores.Of(teststores.NewDB(t)).Settings
+	settingsRepo := teststores.New(t).Settings
 	ctx := context.Background()
 	if err := settingsRepo.Set(ctx, GitHubSettingAuthMode, GitHubAuthModePAT); err != nil {
 		t.Fatalf("set auth mode: %v", err)

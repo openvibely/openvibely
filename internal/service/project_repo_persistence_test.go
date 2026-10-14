@@ -684,7 +684,7 @@ func TestEnsureRepoRoot_UnderDataVolume(t *testing.T) {
 	dataDir := t.TempDir()
 	repoRoot := filepath.Join(dataDir, "repos")
 
-	settingsRepo := teststores.Of(teststores.NewDB(t)).Settings
+	settingsRepo := teststores.New(t).Settings
 	svc := NewGitHubService(settingsRepo, "", "", "", repoRoot)
 
 	ctx := context.Background()

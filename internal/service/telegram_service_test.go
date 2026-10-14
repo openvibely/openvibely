@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -22,7 +21,6 @@ import (
 	"github.com/openvibely/openvibely/internal/chatcontrol"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
-	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/openvibely/openvibely/internal/testutil/teststores"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -552,7 +550,7 @@ func TestTelegramChatHandoffReportsTaskPersistenceFailure(t *testing.T) {
 	svc := &TelegramService{
 		projectRepo:     projectRepo,
 		llmConfigRepo:   env.LLMConfigs,
-		taskRepo:        teststores.Of(closedTestDB(t)).Tasks,
+		taskRepo:        closedTestStores(t).Tasks,
 		execRepo:        env.Executions,
 		threadInputRepo: env.ThreadInputs,
 		userProjects:    map[int64]string{7: project.ID},
@@ -564,19 +562,18 @@ func TestTelegramChatHandoffReportsTaskPersistenceFailure(t *testing.T) {
 }
 
 func TestTelegramChatHandoffReportsExecutionPersistenceFailure(t *testing.T) {
-	db := teststores.NewDB(t)
-	projectRepo := teststores.Of(db).Projects
+	db := teststores.New(t)
+	projectRepo := db.Projects
 	project := &models.Project{Name: "Telegram execution failure", IsDefault: true}
 	require.NoError(t, projectRepo.Create(context.Background(), project))
-	_, err := db.Exec(`CREATE TRIGGER fail_telegram_execution BEFORE INSERT ON executions BEGIN SELECT RAISE(FAIL, 'injected execution failure'); END`)
-	require.NoError(t, err)
+	require.NoError(t, db.Fixtures.FailExecutionCreation(t.Context()))
 
 	svc := &TelegramService{
 		projectRepo:     projectRepo,
-		llmConfigRepo:   teststores.Of(db).LLMConfigs,
-		taskRepo:        teststores.Of(db).Tasks,
-		execRepo:        teststores.Of(db).Executions,
-		threadInputRepo: teststores.Of(db).ThreadInputs,
+		llmConfigRepo:   db.LLMConfigs,
+		taskRepo:        db.Tasks,
+		execRepo:        db.Executions,
+		threadInputRepo: db.ThreadInputs,
 		userProjects:    map[int64]string{7: project.ID},
 		sendMessageFunc: func(int64, string) {},
 	}
@@ -786,9 +783,9 @@ func telegramJSONResponse(body string) *http.Response {
 }
 
 // Helper to create a TelegramService for testing (no real bot connection)
-func closedTestDB(t *testing.T) *sql.DB {
+func closedTestStores(t *testing.T) *teststores.Env {
 	t.Helper()
-	db := teststores.NewDB(t)
+	db := teststores.New(t)
 	require.NoError(t, db.Close())
 	return db
 }
@@ -998,7 +995,7 @@ func TestTelegramService_RuntimeListAlertsTool_Handled(t *testing.T) {
 	project := &models.Project{Name: "Telegram Alerts Runtime", RepoPath: "/tmp/test", IsDefault: true}
 	require.NoError(t, projectRepo.Create(ctx, project))
 
-	alertRepo := teststores.Of(teststores.NewDB(t)).Alerts
+	alertRepo := teststores.New(t).Alerts
 	svc.alertSvc = NewAlertService(alertRepo, nil)
 
 	rt := svc.buildTelegramActionToolRuntime(project.ID, 12345, 12345, nil)
@@ -1018,7 +1015,7 @@ func TestTelegramService_RuntimeExecutorHandlesAllDefinedTools(t *testing.T) {
 	project := &models.Project{Name: "Telegram Full Runtime", RepoPath: "/tmp/test", IsDefault: true}
 	require.NoError(t, projectRepo.Create(ctx, project))
 
-	alertRepo := teststores.Of(teststores.NewDB(t)).Alerts
+	alertRepo := teststores.New(t).Alerts
 	svc.alertSvc = NewAlertService(alertRepo, nil)
 
 	rt := svc.buildTelegramActionToolRuntime(project.ID, 12345, 12345, nil)
@@ -2288,10 +2285,11 @@ func TestTelegramService_CheckAuthorization(t *testing.T) {
 }
 
 func TestTelegramService_CheckAuthorizationRejectedActiveProjectUsesSingleLookup(t *testing.T) {
-	db, counter := testutil.NewStatementCountingTestDB(t)
+	db := teststores.New(t, teststores.WithIOCounting())
+	counter := db.IO
 	ctx := context.Background()
-	projectRepo := teststores.Of(db).Projects
-	telegramAuthRepo := teststores.Of(db).TelegramAuth
+	projectRepo := db.Projects
+	telegramAuthRepo := db.TelegramAuth
 
 	project := &models.Project{Name: "Telegram Single Auth Lookup"}
 	require.NoError(t, projectRepo.Create(ctx, project))
@@ -2308,16 +2306,17 @@ func TestTelegramService_CheckAuthorizationRejectedActiveProjectUsesSingleLookup
 	counter.SetEnabled(false)
 
 	require.False(t, authorized)
-	statements := counter.Statements()
-	require.Len(t, statements, 1, "rejected active-project authorization should issue one statement: %q", statements)
-	require.Equal(t, 1, countChannelAuthTableStatements(statements, "telegram_authorized_users"), "statements: %q", statements)
+	stats := counter.Snapshot()
+	require.Equal(t, 1, stats.Requests, "rejected authorization should issue one physical request")
+	require.Equal(t, 1, stats.TelegramAuthorizationReads)
+
 }
 
 func BenchmarkTelegramRejectedAuthorizationSingleLookupLargeAllowlist(b *testing.B) {
-	db := teststores.NewDB(b)
+	db := teststores.New(b)
 	ctx := context.Background()
-	projectRepo := teststores.Of(db).Projects
-	telegramAuthRepo := teststores.Of(db).TelegramAuth
+	projectRepo := db.Projects
+	telegramAuthRepo := db.TelegramAuth
 	project := &models.Project{Name: "Telegram Rejected Auth Benchmark"}
 	require.NoError(b, projectRepo.Create(ctx, project))
 	seedTelegramAuthorizedUsers(b, db, project.ID, 1000, 100000)
@@ -2339,44 +2338,27 @@ func BenchmarkTelegramRejectedAuthorizationSingleLookupLargeAllowlist(b *testing
 	}
 }
 
-func seedTelegramAuthorizedUsers(tb testing.TB, db *sql.DB, projectID string, firstUserID int64, count int) {
+func seedTelegramAuthorizedUsers(tb testing.TB, db *teststores.Env, projectID string, firstUserID int64, count int) {
 	tb.Helper()
-	tx, err := db.Begin()
-	require.NoError(tb, err)
-	stmt, err := tx.Prepare(`INSERT INTO telegram_authorized_users (project_id, telegram_user_id, display_name, added_by) VALUES (?, ?, ?, ?)`)
-	require.NoError(tb, err)
-	for i := 0; i < count; i++ {
-		_, err = stmt.Exec(projectID, firstUserID+int64(i), "Benchmark User", "test")
-		require.NoError(tb, err)
+	users := make([]models.TelegramAuthorizedUser, count)
+	for i := range users {
+		users[i] = models.TelegramAuthorizedUser{ProjectID: projectID, TelegramUserID: firstUserID + int64(i), DisplayName: "Benchmark User", AddedBy: "test"}
 	}
-	require.NoError(tb, stmt.Close())
-	require.NoError(tb, tx.Commit())
+	require.NoError(tb, db.Fixtures.SeedTelegramAuthorizedUsers(context.Background(), users))
 }
 
 // --- App Settings Tests ---
 
-func installFailingTelegramUserProjectWrites(t *testing.T, db *sql.DB) {
+func installFailingTelegramUserProjectWrites(t *testing.T, db *teststores.Env) {
 	t.Helper()
-	_, err := db.Exec(`
-		CREATE TRIGGER fail_telegram_user_project_insert
-		BEFORE INSERT ON telegram_user_projects
-		BEGIN
-			SELECT RAISE(ABORT, 'forced telegram user project write failure');
-		END;
-		CREATE TRIGGER fail_telegram_user_project_update
-		BEFORE UPDATE ON telegram_user_projects
-		BEGIN
-			SELECT RAISE(ABORT, 'forced telegram user project write failure');
-		END;
-	`)
-	require.NoError(t, err)
+	require.NoError(t, db.Fixtures.FailTelegramProjectSelectionWrites(t.Context()))
 }
 
 func newTelegramProjectSwitchFailureFixture(t *testing.T) (*TelegramService, persistence.TelegramUserProjectStore, *models.Project, *models.Project, int64) {
 	t.Helper()
-	db := teststores.NewDB(t)
-	projectRepo := teststores.Of(db).Projects
-	userProjectRepo := teststores.Of(db).TelegramUserProjects
+	db := teststores.New(t)
+	projectRepo := db.Projects
+	userProjectRepo := db.TelegramUserProjects
 	ctx := context.Background()
 	projectA := &models.Project{Name: "Project A", RepoPath: "/tmp/a", IsDefault: true}
 	require.NoError(t, projectRepo.Create(ctx, projectA))
@@ -2396,9 +2378,9 @@ func newTelegramProjectSwitchFailureFixture(t *testing.T) (*TelegramService, per
 }
 
 func TestTelegramService_HandleStart_PersistenceFailureLeavesActiveProjectUnchanged(t *testing.T) {
-	db := teststores.NewDB(t)
-	projectRepo := teststores.Of(db).Projects
-	userProjectRepo := teststores.Of(db).TelegramUserProjects
+	db := teststores.New(t)
+	projectRepo := db.Projects
+	userProjectRepo := db.TelegramUserProjects
 	ctx := context.Background()
 	previousProject := &models.Project{Name: "Previous Project", RepoPath: "/tmp/previous"}
 	require.NoError(t, projectRepo.Create(ctx, previousProject))
@@ -3343,8 +3325,8 @@ func TestTelegramService_QueueChatInputCleansPendingAttachmentsWhenQueueInsertFa
 	require.NoError(t, err)
 	require.NotNil(t, agent)
 
-	queueDB := teststores.NewDB(t)
-	threadInputRepo := teststores.Of(queueDB).ThreadInputs
+	queueDB := teststores.New(t)
+	threadInputRepo := queueDB.ThreadInputs
 	require.NoError(t, queueDB.Close())
 
 	fileBody := "queued telegram attachment"
@@ -3378,37 +3360,36 @@ func TestTelegramService_QueueChatInputCleansPendingAttachmentsWhenQueueInsertFa
 func TestTelegramService_HandleChatMessageCleansDownloadedAttachmentOnPostDownloadFailures(t *testing.T) {
 	tests := []struct {
 		name        string
-		configure   func(t *testing.T, db *sql.DB, projectID string, svc *TelegramService)
+		configure   func(t *testing.T, db *teststores.Env, projectID string, svc *TelegramService)
 		wantMessage string
 	}{
 		{
 			name: "agent selection fails",
-			configure: func(t *testing.T, db *sql.DB, projectID string, svc *TelegramService) {
-				modelDB := teststores.NewDB(t)
-				svc.llmConfigRepo = teststores.Of(modelDB).LLMConfigs
+			configure: func(t *testing.T, db *teststores.Env, projectID string, svc *TelegramService) {
+				modelDB := teststores.New(t)
+				svc.llmConfigRepo = modelDB.LLMConfigs
 				require.NoError(t, modelDB.Close())
 			},
 			wantMessage: "Error selecting model",
 		},
 		{
 			name: "active chat lookup fails",
-			configure: func(t *testing.T, db *sql.DB, projectID string, svc *TelegramService) {
-				svc.execRepo = teststores.Of(closedTestDB(t)).Executions
+			configure: func(t *testing.T, db *teststores.Env, projectID string, svc *TelegramService) {
+				svc.execRepo = closedTestStores(t).Executions
 			},
 			wantMessage: "Error checking active chat response",
 		},
 		{
 			name: "task creation fails",
-			configure: func(t *testing.T, db *sql.DB, projectID string, svc *TelegramService) {
-				svc.taskRepo = teststores.Of(closedTestDB(t)).Tasks
+			configure: func(t *testing.T, db *teststores.Env, projectID string, svc *TelegramService) {
+				svc.taskRepo = closedTestStores(t).Tasks
 			},
 			wantMessage: "Error processing your message",
 		},
 		{
 			name: "execution creation fails",
-			configure: func(t *testing.T, db *sql.DB, projectID string, svc *TelegramService) {
-				_, err := db.Exec(`CREATE TRIGGER telegram_test_fail_execution_insert BEFORE INSERT ON executions BEGIN SELECT RAISE(FAIL, 'forced execution create failure'); END;`)
-				require.NoError(t, err)
+			configure: func(t *testing.T, db *teststores.Env, projectID string, svc *TelegramService) {
+				require.NoError(t, db.Fixtures.FailExecutionCreation(t.Context()))
 			},
 			wantMessage: "Error processing your message",
 		},
@@ -3416,12 +3397,12 @@ func TestTelegramService_HandleChatMessageCleansDownloadedAttachmentOnPostDownlo
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			db := teststores.NewDB(t)
+			db := teststores.New(t)
 			ctx := context.Background()
-			projectRepo := teststores.Of(db).Projects
-			taskRepo := teststores.Of(db).Tasks
-			execRepo := teststores.Of(db).Executions
-			llmConfigRepo := teststores.Of(db).LLMConfigs
+			projectRepo := db.Projects
+			taskRepo := db.Tasks
+			execRepo := db.Executions
+			llmConfigRepo := db.LLMConfigs
 
 			project := &models.Project{Name: "Telegram Attachment Cleanup Project"}
 			require.NoError(t, projectRepo.Create(ctx, project))
