@@ -1081,7 +1081,8 @@ func TestListPullRequestFeedbackFetchesSourcesConcurrentlyAndContinuesPagination
 
 func TestListPullRequestFeedbackCancelsOutstandingSourcesOnError(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
-	entered := make(chan string, 3)
+	// Record initial source requests and every retry without blocking handlers.
+	entered := make(chan string, 3+httpretry.DefaultMaxRetries)
 	returnError := make(chan struct{})
 	canceled := make(chan string, 2)
 

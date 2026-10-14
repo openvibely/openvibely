@@ -19,6 +19,8 @@ import (
 	"sync"
 	"time"
 	"unicode/utf8"
+
+	"github.com/openvibely/openvibely/internal/httpclient"
 )
 
 const (
@@ -78,16 +80,15 @@ func (e *ExchangeError) Error() string {
 }
 
 func NewHostedSSOClient(controlURL, clientID, callbackURL string) *HostedSSOClient {
+	client := httpclient.New(httpclient.HostedSSOTimeout)
+	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	return &HostedSSOClient{
 		ControlURL:  controlURL,
 		ClientID:    clientID,
 		CallbackURL: callbackURL,
-		HTTPClient: &http.Client{
-			Timeout:       5 * time.Second,
-			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
-		},
-		Sleep: sleepContext,
-		Now:   time.Now,
+		HTTPClient:  client,
+		Sleep:       sleepContext,
+		Now:         time.Now,
 	}
 }
 

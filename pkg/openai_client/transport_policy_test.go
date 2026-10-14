@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/coder/websocket"
@@ -158,10 +159,10 @@ func TestResponsesFallbackBudgets(t *testing.T) {
 			}
 			return 0, errResponsesWebsocketTransport
 		})
-		if err == nil || wsAttempts != 3 {
+		if err == nil || wsAttempts != 2 {
 			t.Fatalf("model=%s attempts=%d err=%v", model, wsAttempts, err)
 		}
-		wantHTTP := 3
+		wantHTTP := 1
 		if httpAttempts != wantHTTP {
 			t.Fatalf("model=%s HTTP attempts=%d want=%d", model, httpAttempts, wantHTTP)
 		}
@@ -213,23 +214,35 @@ func TestTerminalWebsocketHandshakeDoesNotRetryOrFallback(t *testing.T) {
 }
 
 func TestCompactionConnectionFailuresHaveBoundedRetries(t *testing.T) {
-	client := NewWithAPIKey("test")
-	var websocketAttempts, httpAttempts atomic.Int32
-	client.SetHTTPClient(&http.Client{Transport: completionsRoundTripFunc(func(r *http.Request) (*http.Response, error) {
-		if r.Method == http.MethodGet {
-			websocketAttempts.Add(1)
-		} else {
-			httpAttempts.Add(1)
+	synctest.Test(t, func(t *testing.T) {
+		client := NewWithAPIKey("test")
+		var websocketAttempts, httpAttempts atomic.Int32
+		client.SetHTTPClient(&http.Client{Transport: completionsRoundTripFunc(func(r *http.Request) (*http.Response, error) {
+			if r.Method == http.MethodGet {
+				websocketAttempts.Add(1)
+			} else {
+				httpAttempts.Add(1)
+			}
+			return nil, fmt.Errorf("connection refused")
+		})})
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		defer cancel()
+		_, _, err := client.compactAgenticInputItemsViaResponsesV2(ctx, []any{map[string]any{"type": "message", "role": "user", "content": "old message"}}, nil, &AgenticOptions{Model: "gpt-6-sol"})
+		if err == nil || ctx.Err() != nil {
+			t.Fatalf("compaction did not fail within retry budget: %v", err)
 		}
-		return nil, fmt.Errorf("connection refused")
-	})})
-	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
-	defer cancel()
-	_, _, err := client.compactAgenticInputItemsViaResponsesV2(ctx, []any{map[string]any{"type": "message", "role": "user", "content": "old message"}}, nil, &AgenticOptions{Model: "gpt-6-sol"})
-	if err == nil || ctx.Err() != nil {
-		t.Fatalf("compaction did not fail within retry budget: %v", err)
-	}
-	if websocketAttempts.Load() != 3 || httpAttempts.Load() != 3 {
-		t.Fatalf("attempts WS=%d HTTP=%d, want three each", websocketAttempts.Load(), httpAttempts.Load())
+		if websocketAttempts.Load() != int32(httpretry.DefaultMaxRetries) || httpAttempts.Load() != 1 {
+			t.Fatalf("attempts WS=%d HTTP=%d, want six WS and one HTTP", websocketAttempts.Load(), httpAttempts.Load())
+		}
+	})
+}
+
+func TestResponsesFallbackDoesNotBypassRetryAfterLimit(t *testing.T) {
+	client := NewWithAPIKey("test")
+	calls := 0
+	expected := httpretry.NewResponseError(&http.Response{StatusCode: http.StatusServiceUnavailable, Header: http.Header{"Retry-After": {"121"}}}, errResponsesWebsocketTransport)
+	_, err := doResponsesStreamTurn(context.Background(), client, "gpt-6-sol", httpretry.StreamTurnPolicy{}, func(context.Context) (int, error) { calls++; return 0, expected })
+	if err != expected || calls != 1 || client.responsesTransportState.websocketDisabled.Load() {
+		t.Fatalf("calls=%d fallback=%v err=%v", calls, client.responsesTransportState.websocketDisabled.Load(), err)
 	}
 }

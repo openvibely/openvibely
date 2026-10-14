@@ -220,7 +220,6 @@ func (c *Client) SendCompletions(ctx context.Context, prompt string, opts *Compl
 			return nil, err
 		}
 		turnResult, err := httpretry.DoStreamTurn(ctx, httpretry.StreamTurnPolicy{
-			RetryConnectionFailuresWithoutBudget: true,
 			OnRetry: func(event httpretry.RetryEvent) {
 				if httpretry.IsConnectionSetupFailure(event.Err) {
 					applog.Infof("[openai-completions] reconnecting turn %d after connection error in %v: %v", turn+1, event.Delay, event.Err)

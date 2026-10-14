@@ -16,6 +16,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"time"
+
+	"github.com/openvibely/openvibely/internal/httpclient"
 )
 
 type ExecutableUpdateHelperConfig struct {
@@ -1041,7 +1043,7 @@ func isExpectedProcessExit(err error) bool {
 
 func waitForExpectedHealth(ctx context.Context, endpoint, expected string, client *http.Client) error {
 	if client == nil {
-		client = &http.Client{Timeout: 3 * time.Second}
+		client = httpclient.New(httpclient.HealthTimeout)
 	}
 	ticker := time.NewTicker(250 * time.Millisecond)
 	defer ticker.Stop()

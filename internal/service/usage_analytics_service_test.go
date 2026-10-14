@@ -13,6 +13,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
@@ -77,38 +78,46 @@ func TestUsageAnalyticsService_UsageRequestRetries(t *testing.T) {
 		wantCalls  int
 	}{
 		{"server recovers", http.StatusServiceUnavailable, false, 2},
-		{"server retry budget", http.StatusBadGateway, true, 3},
+		{"overall deadline bounds shared retries", http.StatusBadGateway, true, 0},
 		{"unauthorized stays with OAuth recovery", http.StatusUnauthorized, true, 1},
 		{"rate limit stays with cooldown", http.StatusTooManyRequests, true, 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			calls := 0
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				calls++
-				if r.Header.Get("Authorization") != "Bearer test" {
-					t.Error("retry lost authorization header")
-				}
-				if calls == 1 || tc.persistent {
-					w.WriteHeader(tc.status)
+			synctest.Test(t, func(t *testing.T) {
+				calls := 0
+				svc := NewUsageAnalyticsService(nil, nil)
+				svc.httpClient = &http.Client{Transport: usageRetryTransport(func(r *http.Request) (*http.Response, error) {
+					calls++
+					if r.Header.Get("Authorization") != "Bearer test" {
+						t.Error("retry lost authorization header")
+					}
+					status := http.StatusOK
+					if calls == 1 || tc.persistent {
+						status = tc.status
+					}
+					return &http.Response{StatusCode: status, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"ok":true}`))}, nil
+				})}
+				req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, "https://usage.test", nil)
+				req.Header.Set("Authorization", "Bearer test")
+				start := time.Now()
+				raw, err := svc.doAccountUsageRequest(req)
+				if tc.wantCalls == 0 {
+					if !errors.Is(err, context.DeadlineExceeded) || time.Since(start) != 16*time.Second || calls < 4 || calls > 5 {
+						t.Fatalf("calls=%d elapsed=%v err=%v", calls, time.Since(start), err)
+					}
 					return
 				}
-				_, _ = w.Write([]byte(`{"ok":true}`))
-			}))
-			defer server.Close()
-			svc := NewUsageAnalyticsService(nil, nil)
-			req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, server.URL, nil)
-			req.Header.Set("Authorization", "Bearer test")
-			raw, err := svc.doAccountUsageRequest(req)
-			if calls != tc.wantCalls {
-				t.Fatalf("calls = %d, want %d", calls, tc.wantCalls)
-			}
-			if tc.persistent {
-				if !isAccountUsageHTTPStatus(err, tc.status) {
-					t.Fatalf("status lost: %v", err)
+				if calls != tc.wantCalls {
+					t.Fatalf("calls=%d want=%d", calls, tc.wantCalls)
 				}
-			} else if err != nil || raw["ok"] != true {
-				t.Fatalf("recovery = %v, %v", raw, err)
-			}
+				if tc.persistent {
+					if !isAccountUsageHTTPStatus(err, tc.status) {
+						t.Fatalf("status lost: %v", err)
+					}
+				} else if err != nil || raw["ok"] != true {
+					t.Fatalf("recovery=%v err=%v", raw, err)
+				}
+			})
 		})
 	}
 }

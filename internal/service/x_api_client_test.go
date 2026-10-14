@@ -93,7 +93,7 @@ func TestXAPIClientRetriesRateLimitResetWithBoundedDelay(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "1", user.ID)
 	require.Equal(t, int32(2), calls.Load())
-	require.Equal(t, []time.Duration{time.Minute}, delays)
+	require.Equal(t, []time.Duration{2 * time.Minute}, delays)
 }
 
 func TestXAPIClientDoesNotRetryAmbiguousPostFailure(t *testing.T) {
@@ -108,10 +108,10 @@ func TestXAPIClientDoesNotRetryAmbiguousPostFailure(t *testing.T) {
 	require.Equal(t, int32(1), calls.Load())
 }
 
-func TestXNormalizeRetryHeadersClampsOversizedDecimal(t *testing.T) {
+func TestXNormalizeRetryHeadersPreservesOversizedDecimal(t *testing.T) {
 	resp := &http.Response{Header: http.Header{"Retry-After": {strings.Repeat("9", 1000)}}}
 	xNormalizeRetryHeaders(resp, time.Now())
-	require.Equal(t, "60", resp.Header.Get("Retry-After"))
+	require.Equal(t, strings.Repeat("9", 1000), resp.Header.Get("Retry-After"))
 }
 func TestXAPIClientCancellationStopsRetry(t *testing.T) {
 	var calls atomic.Int32
