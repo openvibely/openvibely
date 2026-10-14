@@ -3,6 +3,7 @@ package teststores_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -1184,6 +1185,95 @@ func TestAutomationHealthAndProjectionFixturesShareBackendState(t *testing.T) {
 			n, err = env.Fixtures.CountAutomationTransitions(ctx, "foreign", "")
 			require.NoError(t, err)
 			require.Zero(t, n)
+		})
+	}
+}
+
+func TestProjectionInventoryPreservesHistoryAndScope(t *testing.T) {
+	for _, production := range []bool{false, true} {
+		name := "isolated"
+		if production {
+			name = "production"
+		}
+		t.Run(name, func(t *testing.T) {
+			var opts []teststores.Option
+			if production {
+				opts = append(opts, teststores.WithProductionTopology())
+			}
+			env := teststores.New(t, opts...)
+			ctx := t.Context()
+			require.NoError(t, env.Fixtures.SeedAutomation(ctx, models.Automation{ID: "history", ProjectID: "default", StableKey: "history", Name: "History", AutomationType: "custom", LifecycleState: "active"}))
+			require.NoError(t, env.Fixtures.SeedAutomationVersion(ctx, models.AutomationVersion{ID: "history-v", ProjectID: "default", AutomationID: "history", Version: 1, State: "published", Source: "manual", AdapterKey: "custom"}))
+			require.NoError(t, env.Fixtures.SetAutomationPublishedVersion(ctx, "history", "history-v"))
+			for _, id := range []string{"from", "to"} {
+				require.NoError(t, env.Fixtures.SeedAutomationNode(ctx, models.AutomationNode{ID: id, ProjectID: "default", AutomationID: "history", VersionID: "history-v", NodeKey: id, Name: id, NodeType: "agent_task", Role: "task", ConfigJSON: "{}"}))
+			}
+			require.NoError(t, env.Fixtures.SeedAutomationEdge(ctx, models.AutomationEdge{ProjectID: "default", AutomationID: "history", VersionID: "history-v", SourceNodeID: "from", TargetNodeID: "to", EdgeKey: "next", ConditionJSON: "{}"}))
+			w := models.AutomationWorkItem{ID: "work", ProjectID: "default", AutomationID: "history", OriginVersionID: "history-v", WorkItemKey: "work-key", Kind: "test", Title: "Work", Status: models.AutomationWorkItemActive}
+			require.NoError(t, env.Fixtures.SeedAutomationWorkItem(ctx, w))
+			at := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+			pos := models.AutomationWorkItemPosition{WorkItemID: w.ID, ProjectID: w.ProjectID, AutomationID: w.AutomationID, VersionID: w.OriginVersionID, NodeID: "from", State: models.AutomationPositionWaiting, EnteredAt: at, UpdatedAt: at}
+			require.NoError(t, env.Fixtures.SeedAutomationPosition(ctx, pos))
+			require.NoError(t, env.Fixtures.SeedAutomationPosition(ctx, pos))
+			n, err := env.Fixtures.CountMatchingPositions(ctx, storefixture.PositionMatch{ProjectID: "default", AutomationID: "history", VersionID: "history-v", WorkItemID: w.ID, NodeID: "from", NodeKey: "from", State: "waiting", WorkItemKey: w.WorkItemKey})
+			require.NoError(t, err)
+			require.Equal(t, 1, n)
+			for _, m := range []storefixture.PositionMatch{{ProjectID: "foreign"}, {VersionID: "old"}, {NodeKey: "to"}, {WorkItemKey: "missing"}, {State: "active"}} {
+				n, err = env.Fixtures.CountMatchingPositions(ctx, m)
+				require.NoError(t, err)
+				require.Zero(t, n)
+			}
+			n, err = env.Fixtures.CountMatchingWorkItems(ctx, storefixture.WorkItemMatch{ID: w.ID, ProjectID: w.ProjectID, AutomationID: w.AutomationID, VersionID: w.OriginVersionID, Key: w.WorkItemKey, Kind: w.Kind, Status: "active"})
+			require.NoError(t, err)
+			require.Equal(t, 1, n)
+			for _, m := range []storefixture.WorkItemMatch{{ProjectID: "foreign"}, {VersionID: "old"}, {Key: "missing"}, {Status: "completed"}} {
+				n, err = env.Fixtures.CountMatchingWorkItems(ctx, m)
+				require.NoError(t, err)
+				require.Zero(t, n)
+			}
+			// More than two history pages: exact counts must not depend on pagination or equal-time cursors.
+			for i := 0; i < 105; i++ {
+				id := fmt.Sprintf("history-%03d", i)
+				a := models.AutomationActivity{ID: id, ProjectID: "default", AutomationID: "history", VersionID: "history-v", NodeID: "from", WorkItemID: w.ID, ActivityKey: id, ActivityType: "task_execution", Status: models.AutomationActivityFailed, StartedAt: at, CompletedAt: &at, ErrorMessage: "preserved failure"}
+				require.NoError(t, env.Fixtures.SeedAutomationActivity(ctx, a, []models.AutomationActivityResource{{ResourceType: "task", ResourceID: "historic-task", Relation: "subject"}}))
+			}
+			m := storefixture.ActivityMatch{ProjectID: "default", AutomationID: "history", VersionID: "history-v", Type: "task_execution", Status: "failed", HasWorkItem: true, WorkItemID: w.ID}
+			n, err = env.Fixtures.CountMatchingActivities(ctx, m)
+			require.NoError(t, err)
+			require.Equal(t, 105, n)
+			links, err := env.Fixtures.AutomationActivityResources(ctx, m)
+			require.NoError(t, err)
+			require.Len(t, links, 105)
+			for _, bad := range []storefixture.ActivityMatch{{ProjectID: "foreign"}, {VersionID: "old"}, {Key: "missing"}, {Status: "completed"}, {WorkItemID: "missing"}} {
+				n, err = env.Fixtures.CountMatchingActivities(ctx, bad)
+				require.NoError(t, err)
+				require.Zero(t, n)
+				links, err = env.Fixtures.AutomationActivityResources(ctx, bad)
+				require.NoError(t, err)
+				require.Empty(t, links)
+			}
+			page, err := env.Automations.ListAutomationActivities(ctx, "default", "history", "", "", 1, "")
+			require.NoError(t, err)
+			require.Len(t, page.Items, 1)
+			require.True(t, page.Items[0].StartedAt.Equal(at))
+			require.NotNil(t, page.Items[0].CompletedAt)
+			require.True(t, page.Items[0].CompletedAt.Equal(at))
+			require.Equal(t, "preserved failure", page.Items[0].ErrorMessage)
+			status, err := env.Fixtures.AutomationActivityStatus(ctx, "history-000")
+			require.NoError(t, err)
+			require.Equal(t, models.AutomationActivityFailed, status)
+			require.NoError(t, env.Fixtures.SetLiveAutomationActivity(ctx, "history-000", ""))
+			binding := models.AutomationBinding{AutomationID: "history", VersionID: "history-v", NodeID: "to", WorkItemID: w.ID}
+			_, _, err = env.Automations.RecordProjectionEvent(ctx, persistence.AutomationProjectionEvent{Context: models.AutomationContext{ProjectID: "default"}, Binding: binding, ActivityKey: "handoff", ActivityType: "handoff", ActivityStatus: models.AutomationActivityCompleted, EventKey: "handoff", FromNodeID: "from", ToNodeID: "to", Transition: models.AutomationTransitionEntered})
+			require.NoError(t, err)
+			n, err = env.Fixtures.CountMatchingTransitions(ctx, storefixture.TransitionMatch{ProjectID: "default", AutomationID: "history", VersionID: "history-v", WorkItemID: w.ID, EdgeKey: "next", State: "entered"})
+			require.NoError(t, err)
+			require.Equal(t, 1, n)
+			for _, bad := range []storefixture.TransitionMatch{{ProjectID: "foreign"}, {VersionID: "old"}, {EdgeKey: "missing"}, {State: "blocked"}} {
+				n, err = env.Fixtures.CountMatchingTransitions(ctx, bad)
+				require.NoError(t, err)
+				require.Zero(t, n)
+			}
 		})
 	}
 }
