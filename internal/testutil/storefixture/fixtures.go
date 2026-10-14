@@ -28,6 +28,11 @@ type ExecutionUsageRecord struct {
 
 // Fixtures describes test domain state, never tables, query text, or connections.
 type Fixtures interface {
+	SeedProjects(context.Context, []models.Project) error
+	// SetTaskPromptCreationFailure rejects durable task inserts containing the given prompt fragment until disabled.
+	SetTaskPromptCreationFailure(context.Context, string, bool) error
+	// SetQueuedInputCreationFailure rejects durable input inserts containing the given content fragment until disabled.
+	SetQueuedInputCreationFailure(context.Context, string, bool) error
 	ProjectExecutions(context.Context, string, int) ([]models.Execution, error)
 	SeedSlackAuthorizedUsers(context.Context, []models.SlackAuthorizedUser) error
 	SetSlackProjectSelectionUnavailable(context.Context, bool) error

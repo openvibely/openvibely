@@ -579,35 +579,22 @@ func TestTelegramService_LiveDeletedSelectedProjectFallsBackWithoutRestart(t *te
 }
 
 func TestProjectService_FailedDeletePreservesRegisteredChannelCache(t *testing.T) {
-	db := teststores.NewDB(t)
+	db := teststores.New(t)
 	ctx := context.Background()
-	projectRepo := teststores.Of(db).Projects
+	projectRepo := db.Projects
 	project := &models.Project{Name: "Delete failure target"}
 	require.NoError(t, projectRepo.Create(ctx, project))
 
-	svc := NewSlackService(teststores.Of(db).Settings, projectRepo, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	svc := NewSlackService(db.Settings, projectRepo, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	projectSvc := NewProjectService(projectRepo)
 	projectSvc.RegisterProjectSelectionCacheInvalidator(svc)
 	require.NoError(t, svc.setActiveProject(ctx, "T_FAIL", "U_FAIL", project.ID))
 
-	_, err := db.ExecContext(ctx, `
-		CREATE TABLE memory_consolidation_runs (id TEXT PRIMARY KEY);
-		CREATE TABLE memory_consolidation_schedules (
-			project_id TEXT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
-			last_run_id TEXT REFERENCES memory_consolidation_runs(id) ON DELETE SET NULL
-		);
-		INSERT INTO memory_consolidation_schedules(project_id) VALUES (?)`, project.ID)
-	require.NoError(t, err)
-	_, err = db.ExecContext(ctx, `PRAGMA foreign_keys=OFF`)
-	require.NoError(t, err)
-	_, err = db.ExecContext(ctx, `DROP TABLE memory_consolidation_runs`)
-	require.NoError(t, err)
-	_, err = db.ExecContext(ctx, `PRAGMA foreign_keys=ON`)
-	require.NoError(t, err)
+	require.NoError(t, db.Fixtures.SetProjectDeletionFailure(ctx, project.ID, true))
 
 	deleteErr := projectSvc.Delete(ctx, project.ID)
 	require.Error(t, deleteErr)
-	require.Contains(t, deleteErr.Error(), "memory_consolidation_runs")
+	require.Contains(t, deleteErr.Error(), "forced project deletion failure")
 	require.Equal(t, project.ID, svc.userProjects[slackUserProjectKey("T_FAIL", "U_FAIL")], "failed deletion must not clear a valid cache entry")
 	stored, err := projectRepo.GetByID(ctx, project.ID)
 	require.NoError(t, err)

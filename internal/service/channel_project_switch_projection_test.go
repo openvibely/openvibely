@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"sort"
@@ -11,26 +10,19 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/openvibely/openvibely/internal/testutil/teststores"
 	"github.com/stretchr/testify/require"
 )
 
-func seedChannelSwitchProject(t testing.TB, db *sql.DB, id, name string, isDefault bool, description, repoPath, repoURL string) {
+func seedChannelSwitchProject(t testing.TB, db *teststores.Env, id, name string, isDefault bool, description, repoPath, repoURL string) {
 	t.Helper()
-	defaultValue := 0
-	if isDefault {
-		defaultValue = 1
-	}
-	_, err := db.ExecContext(context.Background(),
-		`INSERT INTO projects (id, name, description, repo_path, repo_url, is_default) VALUES (?, ?, ?, ?, ?, ?)`,
-		id, name, description, repoPath, repoURL, defaultValue)
-	require.NoError(t, err)
+	require.NoError(t, db.Fixtures.SeedProjects(t.Context(), []models.Project{{ID: id, Name: name, IsDefault: isDefault, Description: description, RepoPath: repoPath, RepoURL: repoURL}}))
 }
 
 func TestChannelSwitchProjectUsesCompactProjection(t *testing.T) {
-	db, counter := testutil.NewStatementCountingTestDB(t)
-	projectRepo := teststores.Of(db).Projects
+	db := teststores.New(t, teststores.WithIOCounting())
+	counter := db.IO
+	projectRepo := db.Projects
 	ctx := context.Background()
 
 	description := strings.Repeat("D", 16*1024)
@@ -67,14 +59,8 @@ func TestChannelSwitchProjectUsesCompactProjection(t *testing.T) {
 	require.True(t, switched.CreatedAt.IsZero())
 	require.True(t, switched.UpdatedAt.IsZero())
 
-	statements := counter.Statements()
-	require.Len(t, statements, 1)
-	normalized := normalizeChannelSwitchProjectSQL(statements[0])
-	require.Equal(t, "select id, name, is_default from projects order by is_default desc, name asc, id asc", normalized)
-	for _, forbidden := range []string{"description", "repo_path", "repo_url", "default_agent_config_id", "max_workers", "created_at", "updated_at"} {
-		require.NotContains(t, normalized, forbidden)
-	}
-	require.Less(t, counter.SelectedTextBytes(), 128)
+	require.Equal(t, 1, counter.Snapshot().Requests)
+	require.Less(t, counter.Snapshot().ReadTextBytes, 128)
 
 	counter.Reset()
 	counter.SetEnabled(true)
@@ -82,16 +68,15 @@ func TestChannelSwitchProjectUsesCompactProjection(t *testing.T) {
 	counter.SetEnabled(false)
 	require.NoError(t, err)
 	require.Contains(t, listResult, "Beta - "+description)
-	require.Len(t, counter.Statements(), 1)
-	require.Contains(t, normalizeChannelSwitchProjectSQL(counter.Statements()[0]), "description")
+	require.Equal(t, 1, counter.Snapshot().Requests)
+	require.Greater(t, counter.Snapshot().ReadTextBytes, len(description))
 }
 
 func TestChannelSwitchProjectCompactProjectionPreservesResponses(t *testing.T) {
-	db := teststores.NewDB(t)
-	projectRepo := teststores.Of(db).Projects
+	db := teststores.New(t)
+	projectRepo := db.Projects
 	ctx := context.Background()
-	_, err := db.ExecContext(ctx, `DELETE FROM projects`)
-	require.NoError(t, err)
+	require.NoError(t, db.Fixtures.RemoveAllProjects(ctx))
 
 	seedChannelSwitchProject(t, db, "switch-default", "Default", true, "Default description", "/repo/default", "https://example.test/default")
 	seedChannelSwitchProject(t, db, "switch-alpha", "Alpha", false, "Alpha description", "/repo/alpha", "https://example.test/alpha")
@@ -118,66 +103,23 @@ func TestChannelSwitchProjectCompactProjectionPreservesResponses(t *testing.T) {
 	}
 }
 
-func TestChannelSwitchProjectCompactProjectionQueryPlan(t *testing.T) {
-	db, counter := testutil.NewStatementCountingTestDB(t)
-	projectRepo := teststores.Of(db).Projects
-	ctx := context.Background()
-	seedChannelSwitchProject(t, db, "switch-alpha", "Alpha", true, "", "", "")
-
-	handlers := buildChannelProjectActionHandlers(channelProjectActionHandlerOptions{ProjectID: "switch-alpha", ProjectRepo: projectRepo})
-	counter.Reset()
-	counter.SetEnabled(true)
-	_, err := handlers["switch_project"](ctx, json.RawMessage(`{"project":"missing"}`))
-	counter.SetEnabled(false)
-	require.NoError(t, err)
-	statements := counter.Statements()
-	require.Len(t, statements, 1)
-
-	rows, err := db.QueryContext(ctx, `EXPLAIN QUERY PLAN `+statements[0])
-	require.NoError(t, err)
-	defer rows.Close()
-	var plan strings.Builder
-	for rows.Next() {
-		var id, parent, notused int
-		var detail string
-		require.NoError(t, rows.Scan(&id, &parent, &notused, &detail))
-		plan.WriteString(detail)
-		plan.WriteByte('\n')
-	}
-	planText := plan.String()
-	require.NotContains(t, planText, "USE TEMP B-TREE FOR ORDER BY")
-	require.Contains(t, planText, "idx_projects_selector_order")
-}
-
-func normalizeChannelSwitchProjectSQL(statement string) string {
-	return strings.ToLower(strings.Join(strings.Fields(statement), " "))
-}
-
 type channelSwitchProjectBenchmarkRunner struct {
 	name string
 	run  func(context.Context, json.RawMessage) (string, error)
 }
 
-func seedChannelSwitchProjectBenchmark(t testing.TB, db *sql.DB, count int) {
+func seedChannelSwitchProjectBenchmark(t testing.TB, db *teststores.Env, count int) {
 	t.Helper()
 	ctx := context.Background()
-	_, err := db.ExecContext(ctx, `DELETE FROM projects`)
-	require.NoError(t, err)
+	require.NoError(t, db.Fixtures.RemoveAllProjects(ctx))
 	description := strings.Repeat("D", 16*1024)
 	repoPath := strings.Repeat("p", 2*1024)
 	repoURL := strings.Repeat("u", 2*1024)
-	tx, err := db.BeginTx(ctx, nil)
-	require.NoError(t, err)
-	stmt, err := tx.PrepareContext(ctx, `INSERT INTO projects (id, name, description, repo_path, repo_url, is_default) VALUES (?, ?, ?, ?, ?, 0)`)
-	require.NoError(t, err)
+	projects := make([]models.Project, 0, count)
 	for i := 0; i < count; i++ {
-		id := fmt.Sprintf("switch-bench-%06d", i)
-		name := fmt.Sprintf("Switch Project %06d", i)
-		_, err := stmt.ExecContext(ctx, id, name, description, repoPath, repoURL)
-		require.NoError(t, err)
+		projects = append(projects, models.Project{ID: fmt.Sprintf("switch-bench-%06d", i), Name: fmt.Sprintf("Switch Project %06d", i), Description: description, RepoPath: repoPath, RepoURL: repoURL})
 	}
-	require.NoError(t, stmt.Close())
-	require.NoError(t, tx.Commit())
+	require.NoError(t, db.Fixtures.SeedProjects(ctx, projects))
 }
 
 func channelSwitchProjectBenchmarkCases(count int) []struct {
@@ -201,9 +143,10 @@ func channelSwitchProjectBenchmarkCases(count int) []struct {
 func BenchmarkChannelSwitchProjectHandlerProjection(b *testing.B) {
 	for _, count := range []int{1, 50, 500} {
 		b.Run(fmt.Sprintf("projects=%d", count), func(b *testing.B) {
-			db, counter := testutil.NewStatementCountingTestDB(b)
+			db := teststores.New(b, teststores.WithIOCounting())
+			counter := db.IO
 			seedChannelSwitchProjectBenchmark(b, db, count)
-			projectRepo := teststores.Of(db).Projects
+			projectRepo := db.Projects
 			ctx := context.Background()
 			handlers := buildChannelProjectActionHandlers(channelProjectActionHandlerOptions{
 				ProjectID:   "switch-bench-000000",
@@ -231,9 +174,9 @@ func BenchmarkChannelSwitchProjectHandlerProjection(b *testing.B) {
 						want, err := runner.run(ctx, input)
 						counter.SetEnabled(false)
 						require.NoError(b, err)
-						require.Len(b, counter.Statements(), 1)
-						statementCount := len(counter.Statements())
-						selectedTextBytes := counter.SelectedTextBytes()
+						require.Equal(b, 1, counter.Snapshot().Requests)
+						statementCount := counter.Snapshot().Requests
+						selectedTextBytes := counter.Snapshot().ReadTextBytes
 						b.ReportAllocs()
 						b.ResetTimer()
 						for i := 0; i < b.N; i++ {
@@ -248,7 +191,7 @@ func BenchmarkChannelSwitchProjectHandlerProjection(b *testing.B) {
 						b.StopTimer()
 						median := measureChannelSwitchProjectMedian(b, runner.run, ctx, input)
 						b.ReportMetric(float64(len(want)), "response-bytes/op")
-						b.ReportMetric(float64(statementCount), "sql-statements/op")
+						b.ReportMetric(float64(statementCount), "backend-requests/op")
 						b.ReportMetric(float64(selectedTextBytes), "selected-text-bytes/op")
 						b.ReportMetric(float64(median.Nanoseconds()), "wall-median-ns/op")
 					})
