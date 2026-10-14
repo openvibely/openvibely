@@ -1946,6 +1946,13 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						border-color: #646fe4 !important;
 					}
 
+				/* Keep primary action colors separate from keyboard focus feedback. */
+				.btn.btn-primary:focus-visible,
+				.link.link-primary:focus-visible {
+					outline: 1px solid oklch(var(--bc) / .5);
+					outline-offset: 2px;
+				}
+
 				/* Focus is neutral; checked/on colors remain owned by the control theme. */
 				input.checkbox-primary:focus-visible,
 				input.toggle-primary:focus-visible {
