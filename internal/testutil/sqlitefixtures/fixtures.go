@@ -358,3 +358,27 @@ func (f *fixtures) SeedForwardedGitHubFeedback(ctx context.Context, v models.Git
 	_, err := f.db.ExecContext(ctx, `INSERT INTO github_pr_feedback_forwarded (task_pull_request_id,task_id,repo_full_name,pr_number,feedback_kind,github_id,author_login,body,created_at) VALUES (?,?,?,?,?,?,?,?,?)`, v.TaskPullRequestID, v.TaskID, v.RepoFullName, v.PRNumber, v.FeedbackKind, v.GitHubID, v.AuthorLogin, v.Body, v.CreatedAt.UTC().Format(time.RFC3339Nano))
 	return err
 }
+
+func (f *fixtures) ObserveAgentDeclarationWrites(ctx context.Context) error {
+	_, err := f.db.ExecContext(ctx, `
+		CREATE TEMP TABLE declaration_write_counts (kind TEXT NOT NULL);
+		CREATE TEMP TRIGGER count_agent_updates AFTER UPDATE ON agents BEGIN
+			INSERT INTO declaration_write_counts(kind) VALUES ('agent_update');
+		END;
+		CREATE TEMP TRIGGER count_hook_inserts AFTER INSERT ON agent_lifecycle_hooks BEGIN
+			INSERT INTO declaration_write_counts(kind) VALUES ('hook_insert');
+		END;
+		CREATE TEMP TRIGGER count_hook_updates AFTER UPDATE ON agent_lifecycle_hooks BEGIN
+			INSERT INTO declaration_write_counts(kind) VALUES ('hook_update');
+		END;
+		CREATE TEMP TRIGGER count_hook_deletes AFTER DELETE ON agent_lifecycle_hooks BEGIN
+			INSERT INTO declaration_write_counts(kind) VALUES ('hook_delete');
+		END;
+	`)
+	return err
+}
+func (f *fixtures) AgentDeclarationWrites(ctx context.Context) (int, error) {
+	var count int
+	err := f.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM declaration_write_counts`).Scan(&count)
+	return count, err
+}

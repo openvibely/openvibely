@@ -22,6 +22,9 @@ type SkillEventFilter struct {
 
 // Fixtures describes test domain state, never tables, query text, or connections.
 type Fixtures interface {
+	// ObserveAgentDeclarationWrites starts observing durable agent updates and lifecycle-hook mutations.
+	ObserveAgentDeclarationWrites(context.Context) error
+	AgentDeclarationWrites(context.Context) (int, error)
 	// SeedForwardedGitHubFeedback preserves legacy repository spelling without queuing another input.
 	SeedForwardedGitHubFeedback(context.Context, models.GitHubPRFeedbackForwarded) error
 	// SetTaskProject simulates ownership changing while an operation waits for a lease.

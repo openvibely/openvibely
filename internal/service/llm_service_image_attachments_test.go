@@ -15,10 +15,11 @@ import (
 
 func TestLLMService_ReconcileMissingTaskAttachmentsRemovesBrokenMetadata(t *testing.T) {
 	ctx := context.Background()
-	db := teststores.NewDB(t)
-	projectRepo := teststores.Of(db).Projects
-	taskRepo := teststores.Of(db, teststores.WithBroadcaster(events.NewBroadcaster())).Tasks
-	attachmentRepo := teststores.Of(db).Attachments
+	broadcaster := events.NewBroadcaster()
+	db := teststores.New(t, teststores.WithBroadcaster(broadcaster))
+	projectRepo := db.Projects
+	taskRepo := db.Tasks
+	attachmentRepo := db.Attachments
 	project := &models.Project{Name: "Broken attachment project"}
 	if err := projectRepo.Create(ctx, project); err != nil {
 		t.Fatal(err)
@@ -32,7 +33,7 @@ func TestLLMService_ReconcileMissingTaskAttachmentsRemovesBrokenMetadata(t *test
 		t.Fatal(err)
 	}
 
-	svc := NewLLMService(teststores.Of(db).LLMConfigs, teststores.Of(db).Executions, taskRepo, projectRepo, nil, attachmentRepo)
+	svc := NewLLMService(db.LLMConfigs, db.Executions, taskRepo, projectRepo, nil, attachmentRepo)
 	valid := svc.reconcileMissingTaskAttachments(ctx, task.ID, []models.Attachment{*missing})
 	if len(valid) != 0 {
 		t.Fatalf("expected broken attachment to be excluded from execution, got %#v", valid)
@@ -48,15 +49,15 @@ func TestLLMService_ReconcileMissingTaskAttachmentsRemovesBrokenMetadata(t *test
 
 func TestLLMService_ImageAttachments_TextOnlyAgentRoutesToVisionAgent(t *testing.T) {
 	ctx := context.Background()
-	db := teststores.NewDB(t)
+	broadcaster := events.NewBroadcaster()
+	db := teststores.New(t, teststores.WithBroadcaster(broadcaster))
 
 	// Create repos
-	projectRepo := teststores.Of(db).Projects
-	llmConfigRepo := teststores.Of(db).LLMConfigs
-	broadcaster := events.NewBroadcaster()
-	taskRepo := teststores.Of(db, teststores.WithBroadcaster(broadcaster)).Tasks
-	execRepo := teststores.Of(db).Executions
-	attachmentRepo := teststores.Of(db).Attachments
+	projectRepo := db.Projects
+	llmConfigRepo := db.LLMConfigs
+	taskRepo := db.Tasks
+	execRepo := db.Executions
+	attachmentRepo := db.Attachments
 
 	// Create a test project
 	project := &models.Project{Name: "Test Project"}
@@ -183,9 +184,10 @@ func TestLLMService_ImageAttachments_TextOnlyAgentRoutesToVisionAgent(t *testing
 
 func TestLLMService_ImageAttachments_VisionRoutingKeepsNoQueryFastPaths(t *testing.T) {
 	ctx := context.Background()
-	db, counter := testutil.NewStatementCountingTestDB(t)
-	llmConfigRepo := teststores.Of(db).LLMConfigs
-	teststores.ClearLLMConfigs(t, teststores.Of(db).LLMConfigs)
+	db := teststores.New(t, teststores.WithIOCounting())
+	counter := db.IO
+	llmConfigRepo := db.LLMConfigs
+	teststores.ClearLLMConfigs(t, db.LLMConfigs)
 	textOnly := &models.LLMConfig{
 		Name:       "Fast-path text model",
 		Provider:   models.ProviderOpenAICompatible,
@@ -276,8 +278,8 @@ func TestLLMService_ImageAttachments_VisionRoutingKeepsNoQueryFastPaths(t *testi
 			if decision.Changed || decision.Agent != tc.agent {
 				t.Fatalf("fast path decision = %#v, want unchanged agent %#v", decision, tc.agent)
 			}
-			if statements := counter.Statements(); len(statements) != 0 {
-				t.Fatalf("fast path executed model queries: %#v", statements)
+			if stats := counter.Snapshot(); stats.Requests != 0 {
+				t.Fatalf("fast path executed backend requests: %+v", stats)
 			}
 		})
 	}
@@ -645,15 +647,15 @@ func assertCompactVisionSelectionStatement(t *testing.T, statements []string) {
 
 func TestLLMService_ImageAttachments_VisionRouting_Integration(t *testing.T) {
 	ctx := context.Background()
-	db := teststores.NewDB(t)
+	broadcaster := events.NewBroadcaster()
+	db := teststores.New(t, teststores.WithBroadcaster(broadcaster))
 
 	// Create repos
-	projectRepo := teststores.Of(db).Projects
-	llmConfigRepo := teststores.Of(db).LLMConfigs
-	broadcaster := events.NewBroadcaster()
-	taskRepo := teststores.Of(db, teststores.WithBroadcaster(broadcaster)).Tasks
-	execRepo := teststores.Of(db).Executions
-	attachmentRepo := teststores.Of(db).Attachments
+	projectRepo := db.Projects
+	llmConfigRepo := db.LLMConfigs
+	taskRepo := db.Tasks
+	execRepo := db.Executions
+	attachmentRepo := db.Attachments
 
 	// Create a test project
 	project := &models.Project{Name: "Test Project"}
@@ -763,15 +765,15 @@ func TestLLMService_ImageAttachments_VisionRouting_Integration(t *testing.T) {
 
 func TestLLMService_ImageAttachments_NoVisionAgent_ClearError(t *testing.T) {
 	ctx := context.Background()
-	db := teststores.NewDB(t)
+	broadcaster := events.NewBroadcaster()
+	db := teststores.New(t, teststores.WithBroadcaster(broadcaster))
 
 	// Create repos
-	projectRepo := teststores.Of(db).Projects
-	llmConfigRepo := teststores.Of(db).LLMConfigs
-	broadcaster := events.NewBroadcaster()
-	taskRepo := teststores.Of(db, teststores.WithBroadcaster(broadcaster)).Tasks
-	execRepo := teststores.Of(db).Executions
-	attachmentRepo := teststores.Of(db).Attachments
+	projectRepo := db.Projects
+	llmConfigRepo := db.LLMConfigs
+	taskRepo := db.Tasks
+	execRepo := db.Executions
+	attachmentRepo := db.Attachments
 
 	// Create a test project
 	project := &models.Project{Name: "Test Project"}
