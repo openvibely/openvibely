@@ -121,3 +121,32 @@ func TestBrowserPerformance_QuotedToolExamplesUseBoundedScans(t *testing.T) {
  return {};
  `)
 }
+
+func TestBrowserFunctional_ShellAndLegacyBashUseInputRows(t *testing.T) {
+	runIncrementalChatBrowser(t, `
+ for (const sample of [
+  {name:'shell', result:'shell', label:'Shell'},
+  {name:'Shell', result:'shell', label:'Shell'},
+  {name:'bash', result:'bash', label:'Bash'},
+  {name:'Bash', result:'bash', label:'Bash'}
+ ]) {
+  const call = '[Using tool: '+sample.name+' | $ printf hello]\n';
+  for (const suffix of ['', '[Tool '+sample.result+' done]\nhello\n[/Tool]\n']) {
+   await window.renderStreamingContent(stream, call+suffix, false);
+   const cards = stream.querySelectorAll('.stream-tool');
+   assert(cards.length === 1, 'expected one tool card for '+sample.name);
+   const card = cards[0];
+   assert(card.querySelector('.tool-name-text').textContent === sample.label, 'incorrect display name');
+   assert(!card.querySelector('.tool-name-secondary'), 'command leaked into header');
+   const input = card.querySelector('[data-tool-row="in"] > pre');
+   assert(input && input.textContent === '$ printf hello', 'command missing from IN row for '+sample.name);
+   if (suffix) {
+    const output = card.querySelector('[data-tool-row="out"] > pre');
+    assert(output && output.textContent === 'hello', 'result missing from OUT row');
+    assert(!card.querySelector('.tool-spinner'), 'completed tool still pending');
+   }
+  }
+ }
+ return {};
+ `)
+}
