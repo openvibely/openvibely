@@ -487,3 +487,42 @@ func TestCatalogAndInboundFaultFixturesShareBackend(t *testing.T) {
 		})
 	}
 }
+
+func TestContextIOCountsPhysicalReadsAndWrites(t *testing.T) {
+	for _, production := range []bool{false, true} {
+		name := "isolated"
+		if production {
+			name = "production"
+		}
+		t.Run(name, func(t *testing.T) {
+			opts := []teststores.Option{teststores.WithIOCounting()}
+			if production {
+				opts = append(opts, teststores.WithProductionTopology())
+			}
+			env := teststores.New(t, opts...)
+			ctx := t.Context()
+			task := models.Task{ProjectID: "default", Title: "measured context", Category: models.CategoryBacklog, Status: models.StatusPending}
+			require.NoError(t, env.Tasks.Create(ctx, &task))
+			env.IO.Reset()
+			env.IO.SetEnabled(true)
+			for i := 0; i < 2; i++ {
+				_, err := env.Tasks.ListChatContextByProject(ctx, "default")
+				require.NoError(t, err)
+				_, err = env.LLMConfigs.ListChatSelectionOptions(ctx)
+				require.NoError(t, err)
+				require.NoError(t, env.Fixtures.SetTaskDisplayOrder(ctx, task.ID, i))
+			}
+			env.IO.SetEnabled(false)
+			stats := env.IO.Snapshot()
+			require.Equal(t, 2, stats.TaskContextReads)
+			require.Equal(t, 2, stats.ModelReads)
+			require.Equal(t, 2, stats.ModelSelectionReads)
+			require.Equal(t, 2, stats.TaskWrites)
+			_, err := env.Tasks.ListChatContextByProject(ctx, "default")
+			require.NoError(t, err)
+			require.Equal(t, stats, env.IO.Snapshot())
+			env.IO.Reset()
+			require.Zero(t, env.IO.Snapshot().TaskContextReads)
+		})
+	}
+}

@@ -28,6 +28,7 @@ type ExecutionUsageRecord struct {
 
 // Fixtures describes test domain state, never tables, query text, or connections.
 type Fixtures interface {
+	SetTaskDisplayOrder(context.Context, string, int) error
 	SeedProjects(context.Context, []models.Project) error
 	// SetTaskPromptCreationFailure rejects durable task inserts containing the given prompt fragment until disabled.
 	SetTaskPromptCreationFailure(context.Context, string, bool) error
@@ -150,6 +151,12 @@ type Fixtures interface {
 // SQLite counts executed statements; other backends must count their database
 // requests, including requests made inside a single store method.
 type IOStats struct {
+	// ModelReads and TaskContextReads count physical model-catalog/detail and task-context reads.
+	ModelReads, TaskContextReads int
+	// ModelSelectionReads counts physical compact model-selection reads, excluding full detail hydration.
+	ModelSelectionReads int
+	// TaskWrites and ExecutionWrites count physical mutation requests, including batched requests.
+	TaskWrites, ExecutionWrites int
 	// SlackAuthorizationReads counts physical reads checking Slack authorization.
 	SlackAuthorizationReads int
 	// SettingsSingleReads counts physical reads loading one setting by key.
