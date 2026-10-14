@@ -105,8 +105,10 @@ type Fixtures interface {
 // SQLite counts executed statements; other backends must count their database
 // requests, including requests made inside a single store method.
 type IOStats struct {
-	Requests      int
-	ReadTextBytes int
+	// ExecutionHistoryReads counts physical reads of task execution transcripts.
+	ExecutionHistoryReads int
+	Requests              int
+	ReadTextBytes         int
 }
 
 type IOCounter interface {
