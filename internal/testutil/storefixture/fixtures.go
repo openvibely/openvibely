@@ -22,6 +22,9 @@ type SkillEventFilter struct {
 
 // Fixtures describes test domain state, never tables, query text, or connections.
 type Fixtures interface {
+	SetProjectDefault(context.Context, string, bool) error
+	FailXTaskOriginWrites(context.Context) error
+	FailXTaskContextWrites(context.Context) error
 	SeedTelegramAuthorizedUsers(context.Context, []models.TelegramAuthorizedUser) error
 	FailExecutionCreation(context.Context) error
 	FailTelegramProjectSelectionWrites(context.Context) error
@@ -123,6 +126,10 @@ type Fixtures interface {
 // SQLite counts executed statements; other backends must count their database
 // requests, including requests made inside a single store method.
 type IOStats struct {
+	// SettingsSnapshotReads counts physical reads loading a group of settings.
+	SettingsSnapshotReads int
+	// ProjectCatalogReads counts physical unfiltered project-list reads.
+	ProjectCatalogReads int
 	// TelegramAuthorizationReads counts physical reads checking Telegram authorization.
 	TelegramAuthorizationReads int
 	// GitHubAuthorizationReads counts physical reads checking authorized GitHub actors.

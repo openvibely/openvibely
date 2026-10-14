@@ -284,3 +284,39 @@ func TestTelegramAuthorizationFixturesAndPhysicalReads(t *testing.T) {
 		})
 	}
 }
+
+func TestSettingsAndProjectIOCountsPhysicalReads(t *testing.T) {
+	for _, production := range []bool{false, true} {
+		name := "isolated"
+		if production {
+			name = "production"
+		}
+		t.Run(name, func(t *testing.T) {
+			opts := []teststores.Option{teststores.WithIOCounting()}
+			if production {
+				opts = append(opts, teststores.WithProductionTopology())
+			}
+			env := teststores.New(t, opts...)
+			ctx := t.Context()
+			require.NoError(t, env.Settings.SetMany(ctx, map[string]string{"first": "one", "second": "two"}))
+			env.IO.SetEnabled(true)
+			for i := 0; i < 2; i++ {
+				values, err := env.Settings.GetMany(ctx, []string{"first", "second"})
+				require.NoError(t, err)
+				require.Equal(t, "one", values["first"])
+			}
+			_, err := env.Projects.List(ctx)
+			require.NoError(t, err)
+			env.IO.SetEnabled(false)
+			measured := env.IO.Snapshot()
+			require.Equal(t, 2, measured.SettingsSnapshotReads)
+			require.Equal(t, 1, measured.ProjectCatalogReads)
+			require.Equal(t, 3, measured.Requests)
+			_, err = env.Projects.List(ctx)
+			require.NoError(t, err)
+			require.Equal(t, measured, env.IO.Snapshot())
+			env.IO.Reset()
+			require.Zero(t, env.IO.Snapshot())
+		})
+	}
+}

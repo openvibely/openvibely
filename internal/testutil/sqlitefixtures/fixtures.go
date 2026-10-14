@@ -438,3 +438,16 @@ func (f *fixtures) SeedTelegramAuthorizedUsers(ctx context.Context, users []mode
 	}
 	return tx.Commit()
 }
+
+func (f *fixtures) SetProjectDefault(ctx context.Context, id string, value bool) error {
+	_, err := f.db.ExecContext(ctx, `UPDATE projects SET is_default=? WHERE id=?`, value, id)
+	return err
+}
+func (f *fixtures) FailXTaskOriginWrites(ctx context.Context) error {
+	_, err := f.db.ExecContext(ctx, `CREATE TRIGGER fail_x_origin BEFORE UPDATE OF created_via ON tasks WHEN NEW.created_via = 'x' BEGIN SELECT RAISE(ABORT, 'forced X origin failure'); END`)
+	return err
+}
+func (f *fixtures) FailXTaskContextWrites(ctx context.Context) error {
+	_, err := f.db.ExecContext(ctx, `CREATE TRIGGER fail_x_context BEFORE INSERT ON x_task_context BEGIN SELECT RAISE(ABORT, 'forced X context failure'); END`)
+	return err
+}
