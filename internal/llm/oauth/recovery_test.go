@@ -76,8 +76,8 @@ func (c *waitingSignalContext) Done() <-chan struct{} {
 }
 
 func TestManagerEnsureFreshSingleflightsConcurrentRefresh(t *testing.T) {
-	db := teststores.NewDB(t)
-	repo := teststores.Of(db).LLMConfigs
+	storeEnv := teststores.New(t)
+	repo := storeEnv.Stores.LLMConfigs
 	cfg := createOAuthConfig(t, repo, models.LLMConfig{ID: "cfg-singleflight", Provider: models.ProviderOpenAI})
 	mgr := NewManager(repo)
 
@@ -135,8 +135,8 @@ func TestManagerEnsureFreshSingleflightsConcurrentRefresh(t *testing.T) {
 }
 
 func TestManagerEnsureFreshSingleflightPreservesEachLinkedModel(t *testing.T) {
-	db := teststores.NewDB(t)
-	repo := teststores.Of(db).LLMConfigs
+	storeEnv := teststores.New(t)
+	repo := storeEnv.Stores.LLMConfigs
 	first := createOAuthConfig(t, repo, models.LLMConfig{ID: "shared-first", Name: "Shared First", Model: "model-first", Provider: models.ProviderOpenAI})
 	second := createOAuthConfig(t, repo, models.LLMConfig{ID: "shared-second", Name: "Shared Second", Model: "model-second", Provider: models.ProviderOpenAI})
 	if err := repo.(*sqlite.LLMConfigRepo).LinkOAuthConnection(context.Background(), second.ID, first.OAuthConnectionID); err != nil {
@@ -198,8 +198,8 @@ func TestManagerEnsureFreshSingleflightPreservesEachLinkedModel(t *testing.T) {
 }
 
 func TestManagerEnsureFreshRetriesSharedRefreshAfterInitiatorCancellation(t *testing.T) {
-	db := teststores.NewDB(t)
-	repo := teststores.Of(db).LLMConfigs
+	storeEnv := teststores.New(t)
+	repo := storeEnv.Stores.LLMConfigs
 	first := createOAuthConfig(t, repo, models.LLMConfig{ID: "cancel-first", Name: "Cancel First", Provider: models.ProviderOpenAI})
 	second := createOAuthConfig(t, repo, models.LLMConfig{ID: "cancel-second", Name: "Cancel Second", Provider: models.ProviderOpenAI})
 	if err := repo.(*sqlite.LLMConfigRepo).LinkOAuthConnection(context.Background(), second.ID, first.OAuthConnectionID); err != nil {
@@ -298,8 +298,8 @@ func TestManagerEnsureFreshRetriesSharedRefreshAfterInitiatorCancellation(t *tes
 }
 
 func TestManagerEnsureFreshCanceledWaiterReturnsWhileRefreshContinues(t *testing.T) {
-	db := teststores.NewDB(t)
-	repo := teststores.Of(db).LLMConfigs
+	storeEnv := teststores.New(t)
+	repo := storeEnv.Stores.LLMConfigs
 	cfg := createOAuthConfig(t, repo, models.LLMConfig{ID: "cancel-waiter", Provider: models.ProviderAnthropic})
 	mgr := NewManager(repo)
 
@@ -358,8 +358,8 @@ func TestManagerEnsureFreshCanceledWaiterReturnsWhileRefreshContinues(t *testing
 }
 
 func TestManagerEnsureFreshUsesDurableLeaseAcrossManagers(t *testing.T) {
-	db := teststores.NewDB(t)
-	repo := teststores.Of(db).LLMConfigs
+	storeEnv := teststores.New(t)
+	repo := storeEnv.Stores.LLMConfigs
 	cfg := createOAuthConfig(t, repo, models.LLMConfig{ID: "cfg-durable-lease", Provider: models.ProviderOpenAI})
 	firstManager := NewManager(repo)
 	secondManager := NewManager(repo)
@@ -407,8 +407,8 @@ func TestManagerEnsureFreshUsesDurableLeaseAcrossManagers(t *testing.T) {
 }
 
 func TestManagerRecoverUnauthorizedSkipsRefreshWhenConfigAlreadyChanged(t *testing.T) {
-	db := teststores.NewDB(t)
-	repo := teststores.Of(db).LLMConfigs
+	storeEnv := teststores.New(t)
+	repo := storeEnv.Stores.LLMConfigs
 	cfg := createOAuthConfig(t, repo, models.LLMConfig{ID: "cfg-race", Provider: models.ProviderAnthropic})
 	if err := repo.(*sqlite.LLMConfigRepo).UpdateOAuthTokens(context.Background(), cfg.ID, "already-new", "already-refresh", time.Now().Add(time.Hour).UnixMilli()); err != nil {
 		t.Fatalf("UpdateOAuthTokens: %v", err)
@@ -435,8 +435,8 @@ func TestManagerRecoverUnauthorizedSkipsRefreshWhenConfigAlreadyChanged(t *testi
 }
 
 func TestManagerEnsureFreshDoesNotSkipChangedButStillExpiringToken(t *testing.T) {
-	db := teststores.NewDB(t)
-	repo := teststores.Of(db).LLMConfigs
+	storeEnv := teststores.New(t)
+	repo := storeEnv.Stores.LLMConfigs
 	cfg := createOAuthConfig(t, repo, models.LLMConfig{ID: "cfg-still-expiring", Provider: models.ProviderOpenAI})
 	if err := repo.(*sqlite.LLMConfigRepo).UpdateOAuthTokens(context.Background(), cfg.ID, "changed-but-expiring", "changed-refresh", time.Now().Add(time.Minute).UnixMilli()); err != nil {
 		t.Fatalf("UpdateOAuthTokens: %v", err)
@@ -463,8 +463,8 @@ func TestManagerEnsureFreshDoesNotSkipChangedButStillExpiringToken(t *testing.T)
 }
 
 func TestManagerRefreshRejectsConnectionReassignment(t *testing.T) {
-	db := teststores.NewDB(t)
-	repo := teststores.Of(db).LLMConfigs
+	storeEnv := teststores.New(t)
+	repo := storeEnv.Stores.LLMConfigs
 	cfg := createOAuthConfig(t, repo, models.LLMConfig{ID: "cfg-stale", Provider: models.ProviderOpenAI})
 	other := createOAuthConfig(t, repo, models.LLMConfig{ID: "cfg-other", Name: "Other account", Provider: models.ProviderOpenAI, OAuthAccessToken: "other-access", OAuthRefreshToken: "other-refresh"})
 	mgr := NewManager(repo)
@@ -495,8 +495,8 @@ func TestManagerRefreshRejectsConnectionReassignment(t *testing.T) {
 }
 
 func TestManagerRefreshPersistsSelectedConfigOnly(t *testing.T) {
-	db := teststores.NewDB(t)
-	repo := teststores.Of(db).LLMConfigs
+	storeEnv := teststores.New(t)
+	repo := storeEnv.Stores.LLMConfigs
 	selected := createOAuthConfig(t, repo, models.LLMConfig{ID: "selected", Name: "Selected", Provider: models.ProviderAnthropic})
 	other := createOAuthConfig(t, repo, models.LLMConfig{ID: "other", Name: "Other", Provider: models.ProviderAnthropic, OAuthAccessToken: "other-access", OAuthRefreshToken: "other-refresh"})
 	mgr := NewManager(repo)

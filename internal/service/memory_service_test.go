@@ -47,8 +47,8 @@ func TestMemoryService_SetLifecycleRepo_Stores(t *testing.T) {
 	store := memory.NewFileStore(resolver)
 	svc := NewMemoryService(nil, nil, nil, nil, store, resolver)
 
-	db := teststores.NewDB(t)
-	repo := teststores.Of(db).Lifecycle
+	storeEnv := teststores.New(t)
+	repo := storeEnv.Stores.Lifecycle
 	svc.SetLifecycleRepo(repo)
 
 	if svc.lifecycleRepo != repo {
@@ -86,11 +86,11 @@ func TestMemoryService_EnsureProject_NilTaskRepo_Idempotent(t *testing.T) {
 // TestMemoryService_EnsureProject_NoRepoPath verifies that EnsureProject returns an
 // error when the project has no local repo_path configured.
 func TestMemoryService_EnsureProject_NoRepoPath(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
-	scheduleRepo := teststores.Of(db).Schedules
-	agentRepo := teststores.Of(db).Agents
-	projectRepo := teststores.Of(db).Projects
+	storeEnv := teststores.New(t)
+	taskRepo := storeEnv.Stores.Tasks
+	scheduleRepo := storeEnv.Stores.Schedules
+	agentRepo := storeEnv.Stores.Agents
+	projectRepo := storeEnv.Stores.Projects
 
 	resolver, _ := memory.NewPathResolver("", "")
 	store := memory.NewFileStore(resolver)
@@ -113,11 +113,11 @@ func TestMemoryService_EnsureProject_NoRepoPath(t *testing.T) {
 // TestMemoryService_EnsureProject_WithRepoPath exercises the full EnsureProject path:
 // memory directory setup, agent reconciliation, and consolidation task/schedule creation.
 func TestMemoryService_EnsureProject_WithRepoPath(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
-	scheduleRepo := teststores.Of(db).Schedules
-	agentRepo := teststores.Of(db).Agents
-	projectRepo := teststores.Of(db).Projects
+	storeEnv := teststores.New(t)
+	taskRepo := storeEnv.Stores.Tasks
+	scheduleRepo := storeEnv.Stores.Schedules
+	agentRepo := storeEnv.Stores.Agents
+	projectRepo := storeEnv.Stores.Projects
 
 	resolver, _ := memory.NewPathResolver("", "")
 	store := memory.NewFileStore(resolver)
@@ -171,11 +171,11 @@ func TestMemoryService_EnsureProject_WithRepoPath(t *testing.T) {
 }
 
 func TestMemoryService_EnsureProject_RepairsMaintenanceScheduleClearContext(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
-	scheduleRepo := teststores.Of(db).Schedules
-	agentRepo := teststores.Of(db).Agents
-	projectRepo := teststores.Of(db).Projects
+	storeEnv := teststores.New(t)
+	taskRepo := storeEnv.Stores.Tasks
+	scheduleRepo := storeEnv.Stores.Schedules
+	agentRepo := storeEnv.Stores.Agents
+	projectRepo := storeEnv.Stores.Projects
 
 	resolver, _ := memory.NewPathResolver("", "")
 	store := memory.NewFileStore(resolver)
@@ -232,11 +232,11 @@ func TestMemoryService_EnsureProject_RepairsMaintenanceScheduleClearContext(t *t
 // TestMemoryService_EnsureProject_WithRepoPath_Idempotent verifies that calling
 // EnsureProject multiple times does not create duplicate tasks or schedules.
 func TestMemoryService_EnsureProject_WithRepoPath_Idempotent(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
-	scheduleRepo := teststores.Of(db).Schedules
-	agentRepo := teststores.Of(db).Agents
-	projectRepo := teststores.Of(db).Projects
+	storeEnv := teststores.New(t)
+	taskRepo := storeEnv.Stores.Tasks
+	scheduleRepo := storeEnv.Stores.Schedules
+	agentRepo := storeEnv.Stores.Agents
+	projectRepo := storeEnv.Stores.Projects
 
 	resolver, _ := memory.NewPathResolver("", "")
 	store := memory.NewFileStore(resolver)
@@ -272,10 +272,10 @@ func TestMemoryService_EnsureProject_WithRepoPath_Idempotent(t *testing.T) {
 
 func TestMemoryService_EnsureGlobalAgentsCreatesAndRepairsMemoryCuratorAndHooks(t *testing.T) {
 	ctx := context.Background()
-	db := teststores.NewDB(t)
-	agentRepo := teststores.Of(db).Agents
-	lifecycleRepo := teststores.Of(db).Lifecycle
-	projectRepo := teststores.Of(db).Projects
+	storeEnv := teststores.New(t)
+	agentRepo := storeEnv.Stores.Agents
+	lifecycleRepo := storeEnv.Stores.Lifecycle
+	projectRepo := storeEnv.Stores.Projects
 	staleProject := &models.Project{Name: "stale-memory-agent-project", RepoPath: t.TempDir()}
 	if err := projectRepo.Create(ctx, staleProject); err != nil {
 		t.Fatalf("create stale project: %v", err)
@@ -413,9 +413,9 @@ func TestMemoryService_EnsureGlobalAgentsCreatesAndRepairsMemoryCuratorAndHooks(
 
 func TestMemoryService_EnsureGlobalAgentsRepairsLegacyMemoryAliasInPlace(t *testing.T) {
 	ctx := context.Background()
-	db := teststores.NewDB(t)
-	agentRepo := teststores.Of(db).Agents
-	lifecycleRepo := teststores.Of(db).Lifecycle
+	storeEnv := teststores.New(t)
+	agentRepo := storeEnv.Stores.Agents
+	lifecycleRepo := storeEnv.Stores.Lifecycle
 	resolver, _ := memory.NewPathResolver("", "")
 	store := memory.NewFileStore(resolver)
 	svc := NewMemoryService(nil, nil, agentRepo, nil, store, resolver)

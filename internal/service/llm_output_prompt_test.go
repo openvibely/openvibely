@@ -12,16 +12,16 @@ import (
 )
 
 func TestLLMService_CallAgentDirectStreaming_TaskFollowupFlag(t *testing.T) {
-	db := teststores.NewDB(t)
-	llmConfigRepo := teststores.Of(db).LLMConfigs
-	execRepo := teststores.Of(db).Executions
-	taskRepo := teststores.Of(db).Tasks
-	attachmentRepo := teststores.Of(db).Attachments
-	scheduleRepo := teststores.Of(db).Schedules
+	storeEnv := teststores.New(t)
+	llmConfigRepo := storeEnv.Stores.LLMConfigs
+	execRepo := storeEnv.Stores.Executions
+	taskRepo := storeEnv.Stores.Tasks
+	attachmentRepo := storeEnv.Stores.Attachments
+	scheduleRepo := storeEnv.Stores.Schedules
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, teststores.Of(db).Projects, scheduleRepo, attachmentRepo)
+	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, storeEnv.Stores.Projects, scheduleRepo, attachmentRepo)
 
 	defaultAgent, _ := llmConfigRepo.GetDefault(ctx)
 	if defaultAgent == nil {
@@ -72,10 +72,10 @@ func TestLLMService_CallAgentDirectStreaming_TaskFollowupFlag(t *testing.T) {
 }
 
 func TestChatHistoryIncludesFailedExecutions(t *testing.T) {
-	db := teststores.NewDB(t)
-	execRepo := teststores.Of(db).Executions
-	taskRepo := teststores.Of(db).Tasks
-	llmConfigRepo := teststores.Of(db).LLMConfigs
+	storeEnv := teststores.New(t)
+	execRepo := storeEnv.Stores.Executions
+	taskRepo := storeEnv.Stores.Tasks
+	llmConfigRepo := storeEnv.Stores.LLMConfigs
 	ctx := context.Background()
 
 	task := &models.Task{

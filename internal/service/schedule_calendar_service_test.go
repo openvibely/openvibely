@@ -18,10 +18,10 @@ func TestSchedulerHonorsCalendarSkipsAndPauseBeforeDispatch(t *testing.T) {
 	for _, mode := range []string{"skip", "pause_all"} {
 		for _, repeat := range []models.RepeatType{models.RepeatOnce, models.RepeatMinutes} {
 			t.Run(mode+"/"+string(repeat), func(t *testing.T) {
-				db := teststores.NewDB(t)
+				storeEnv := teststores.New(t)
 				ctx := context.Background()
-				schedules := teststores.Of(db).Schedules
-				tasks := teststores.Of(db).Tasks
+				schedules := storeEnv.Stores.Schedules
+				tasks := storeEnv.Stores.Tasks
 				worker := newTestWorkerService(t)
 				svc := NewSchedulerService(schedules, tasks, worker)
 				now := time.Now().UTC().Truncate(time.Second)
@@ -71,10 +71,10 @@ func TestScheduleCalendarActionRejectsMalformedSelections(t *testing.T) {
 func TestSchedulerPreservesRestoredRunAfterDowntime(t *testing.T) {
 	for _, afterDay := range []bool{false, true} {
 		t.Run(fmt.Sprint(afterDay), func(t *testing.T) {
-			db := teststores.NewDB(t)
+			storeEnv := teststores.New(t)
 			ctx := context.Background()
-			repo := teststores.Of(db).Schedules
-			tasks := teststores.Of(db).Tasks
+			repo := storeEnv.Stores.Schedules
+			tasks := storeEnv.Stores.Tasks
 			worker := newTestWorkerService(t)
 			svc := NewSchedulerService(repo, tasks, worker)
 			day := time.Date(2026, 10, 10, 0, 0, 0, 0, time.UTC)
@@ -109,10 +109,10 @@ func TestSchedulerPreservesRestoredRunAfterDowntime(t *testing.T) {
 }
 
 func TestSchedulerRecoversAdmissionBeforeWorkerSubmission(t *testing.T) {
-	db := teststores.NewDB(t)
+	storeEnv := teststores.New(t)
 	ctx := context.Background()
-	repo := teststores.Of(db).Schedules
-	tasks := teststores.Of(db).Tasks
+	repo := storeEnv.Stores.Schedules
+	tasks := storeEnv.Stores.Tasks
 	task := &models.Task{ProjectID: "default", Title: "Restart recovery", Prompt: "test", Category: models.CategoryCompleted, Status: models.StatusCompleted}
 	require.NoError(t, tasks.Create(ctx, task))
 	now := time.Now().UTC().Truncate(time.Second)
@@ -124,8 +124,8 @@ func TestSchedulerRecoversAdmissionBeforeWorkerSubmission(t *testing.T) {
 	// Simulate losing the old scheduler and its in-memory worker queue.
 	worker := newTestWorkerService(t)
 	worker.SetTaskRepo(tasks)
-	worker.SetExecutionRepo(teststores.Of(db).Executions)
-	svc := NewSchedulerService(teststores.Of(db).Schedules, tasks, worker)
+	worker.SetExecutionRepo(storeEnv.Stores.Executions)
+	svc := NewSchedulerService(storeEnv.Stores.Schedules, tasks, worker)
 	svc.now = func() time.Time { return now.Add(time.Minute) }
 	svc.checkDueTasks(ctx)
 	select {
@@ -139,21 +139,21 @@ func TestSchedulerRecoversAdmissionBeforeWorkerSubmission(t *testing.T) {
 	executionID := worker.reserved[task.ID]
 	worker.mu.Unlock()
 	require.NotEmpty(t, executionID, "recovered work must use the existing execution reservation")
-	executions, err := teststores.Of(db).Executions.ListByTask(ctx, task.ID)
+	executions, err := storeEnv.Stores.Executions.ListByTask(ctx, task.ID)
 	require.NoError(t, err)
 	require.Len(t, executions, 1)
 	require.Equal(t, executionID, executions[0].ID)
 }
 
 func TestCalendarWorkerRestartExecutesReservedRun(t *testing.T) {
-	db := teststores.NewDB(t)
+	storeEnv := teststores.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	tasks := teststores.Of(db).Tasks
-	schedules := teststores.Of(db).Schedules
-	executions := teststores.Of(db).Executions
-	projects := teststores.Of(db).Projects
-	configs := teststores.Of(db).LLMConfigs
+	tasks := storeEnv.Stores.Tasks
+	schedules := storeEnv.Stores.Schedules
+	executions := storeEnv.Stores.Executions
+	projects := storeEnv.Stores.Projects
+	configs := storeEnv.Stores.LLMConfigs
 	model := &models.LLMConfig{Name: "Calendar recovery model", Provider: models.ProviderTest, Model: "test-model", AuthMethod: models.AuthMethodAPIKey}
 	require.NoError(t, configs.Create(ctx, model))
 	task := &models.Task{ProjectID: "default", Title: "Durable calendar worker", Prompt: "test", AgentID: &model.ID, Category: models.CategoryScheduled, Status: models.StatusPending}
@@ -167,7 +167,7 @@ func TestCalendarWorkerRestartExecutesReservedRun(t *testing.T) {
 	before, err := executions.ListByTask(ctx, task.ID)
 	require.NoError(t, err)
 	require.Len(t, before, 1)
-	llm := NewLLMService(configs, executions, tasks, projects, schedules, teststores.Of(db).Attachments)
+	llm := NewLLMService(configs, executions, tasks, projects, schedules, storeEnv.Stores.Attachments)
 	mock := testutil.NewMockLLMCaller()
 	mock.Response = "Recovered run complete"
 	mock.TextOnly = mock.Response
@@ -198,12 +198,12 @@ func TestCalendarWorkerRestartExecutesReservedRun(t *testing.T) {
 func TestCalendarPlannerAdmissionRecovery(t *testing.T) {
 	for _, existing := range []bool{false, true} {
 		t.Run(fmt.Sprint(existing), func(t *testing.T) {
-			db := teststores.NewDB(t)
+			storeEnv := teststores.New(t)
 			ctx := context.Background()
-			tasks := teststores.Of(db).Tasks
-			schedules := teststores.Of(db).Schedules
+			tasks := storeEnv.Stores.Tasks
+			schedules := storeEnv.Stores.Schedules
 			worker := newTestWorkerService(t)
-			swarm := NewSwarmService(NewTaskService(tasks, nil, worker), tasks, teststores.Of(db).Executions, worker)
+			swarm := NewSwarmService(NewTaskService(tasks, nil, worker), tasks, storeEnv.Stores.Executions, worker)
 			parent := &models.Task{ProjectID: "default", Title: "Planner recovery", Prompt: "plan", Category: models.CategoryScheduled, Status: models.StatusPending, SwarmRole: models.SwarmRoleParent}
 			require.NoError(t, tasks.Create(ctx, parent))
 			if existing {
@@ -229,8 +229,8 @@ func TestCalendarPlannerAdmissionRecovery(t *testing.T) {
 			require.NoError(t, swarm.StartPlannerForScheduledRun(ctx, parent.ID, true))
 			// Lose all in-memory queues, then use actual startup reservation recovery.
 			recovered := newTestWorkerService(t)
-			recovered.SetTaskRepo(teststores.Of(db).Tasks)
-			recovered.SetExecutionRepo(teststores.Of(db).Executions)
+			recovered.SetTaskRepo(storeEnv.Stores.Tasks)
+			recovered.SetExecutionRepo(storeEnv.Stores.Executions)
 			recovered.ReconcileReservedTasks(ctx)
 			select {
 			case task := <-recovered.Submitted():
@@ -246,7 +246,7 @@ func TestCalendarPlannerAdmissionRecovery(t *testing.T) {
 			_, started, err = tasks.ClaimReservedTaskForDispatch(ctx, admission.Task.ID, admission.ExecutionID)
 			require.NoError(t, err)
 			require.False(t, started)
-			executions, err := teststores.Of(db).Executions.CountByTask(ctx, admission.Task.ID)
+			executions, err := storeEnv.Stores.Executions.CountByTask(ctx, admission.Task.ID)
 			require.NoError(t, err)
 			require.Equal(t, 1, executions)
 		})
@@ -256,12 +256,12 @@ func TestCalendarPlannerAdmissionRecovery(t *testing.T) {
 func TestCalendarPlannerCancelledHandoff(t *testing.T) {
 	for _, transferred := range []bool{false, true} {
 		t.Run(fmt.Sprint(transferred), func(t *testing.T) {
-			db := teststores.NewDB(t)
+			storeEnv := teststores.New(t)
 			ctx := context.Background()
-			tasks := teststores.Of(db).Tasks
-			schedules := teststores.Of(db).Schedules
+			tasks := storeEnv.Stores.Tasks
+			schedules := storeEnv.Stores.Schedules
 			worker := newTestWorkerService(t)
-			swarm := NewSwarmService(NewTaskService(tasks, nil, worker), tasks, teststores.Of(db).Executions, worker)
+			swarm := NewSwarmService(NewTaskService(tasks, nil, worker), tasks, storeEnv.Stores.Executions, worker)
 			parent := &models.Task{ProjectID: "default", Title: "Cancelled calendar swarm", Prompt: "plan", Category: models.CategoryScheduled, Status: models.StatusPending, SwarmRole: models.SwarmRoleParent}
 			require.NoError(t, tasks.Create(ctx, parent))
 			now := time.Now().UTC().Truncate(time.Second)
@@ -285,7 +285,7 @@ func TestCalendarPlannerCancelledHandoff(t *testing.T) {
 				// Parent withdrawal must cancel the durable planner reservation
 				// even before the service cascades cancellation to its children.
 				require.NoError(t, tasks.UpdateStatus(ctx, parent.ID, models.StatusCancelled))
-				reserved, err := teststores.Of(db).Executions.GetByID(ctx, queued.ExecutionID)
+				reserved, err := storeEnv.Stores.Executions.GetByID(ctx, queued.ExecutionID)
 				require.NoError(t, err)
 				require.Equal(t, models.ExecCancelled, reserved.Status)
 				child, err := tasks.GetByID(ctx, queued.Task.ID)
@@ -321,12 +321,12 @@ func TestCalendarPlannerCancelledHandoff(t *testing.T) {
 func TestCalendarDeletedScheduleCannotRecoverPlanner(t *testing.T) {
 	for _, started := range []bool{false, true} {
 		t.Run(fmt.Sprint(started), func(t *testing.T) {
-			db := teststores.NewDB(t)
+			storeEnv := teststores.New(t)
 			ctx := context.Background()
-			tasks := teststores.Of(db).Tasks
-			schedules := teststores.Of(db).Schedules
+			tasks := storeEnv.Stores.Tasks
+			schedules := storeEnv.Stores.Schedules
 			worker := newTestWorkerService(t)
-			swarm := NewSwarmService(NewTaskService(tasks, nil, worker), tasks, teststores.Of(db).Executions, worker)
+			swarm := NewSwarmService(NewTaskService(tasks, nil, worker), tasks, storeEnv.Stores.Executions, worker)
 			parent := &models.Task{ProjectID: "default", Title: "Deleted schedule", Prompt: "plan", Category: models.CategoryActive, Status: models.StatusPending, SwarmRole: models.SwarmRoleParent}
 			require.NoError(t, tasks.Create(ctx, parent))
 			now := time.Now().UTC().Truncate(time.Second)
@@ -348,7 +348,7 @@ func TestCalendarDeletedScheduleCannotRecoverPlanner(t *testing.T) {
 			require.NoError(t, schedules.Delete(ctx, schedule.ID))
 			child, err := tasks.GetByID(ctx, admission.Task.ID)
 			require.NoError(t, err)
-			reserved, err := teststores.Of(db).Executions.GetByID(ctx, admission.ExecutionID)
+			reserved, err := storeEnv.Stores.Executions.GetByID(ctx, admission.ExecutionID)
 			require.NoError(t, err)
 			status := string(reserved.Status)
 			if started {
@@ -362,7 +362,7 @@ func TestCalendarDeletedScheduleCannotRecoverPlanner(t *testing.T) {
 				require.False(t, ok)
 				recovered := newTestWorkerService(t)
 				recovered.SetTaskRepo(tasks)
-				recovered.SetExecutionRepo(teststores.Of(db).Executions)
+				recovered.SetExecutionRepo(storeEnv.Stores.Executions)
 				recovered.ReconcileReservedTasks(ctx)
 				recovered.ReconcilePendingTasks(ctx)
 				select {
@@ -376,12 +376,12 @@ func TestCalendarDeletedScheduleCannotRecoverPlanner(t *testing.T) {
 }
 
 func TestCalendarActiveRecoveryPreservesParentAdmission(t *testing.T) {
-	db := teststores.NewDB(t)
+	storeEnv := teststores.New(t)
 	ctx := context.Background()
-	tasks := teststores.Of(db).Tasks
-	schedules := teststores.Of(db).Schedules
+	tasks := storeEnv.Stores.Tasks
+	schedules := storeEnv.Stores.Schedules
 	worker := newTestWorkerService(t)
-	swarm := NewSwarmService(NewTaskService(tasks, nil, worker), tasks, teststores.Of(db).Executions, worker)
+	swarm := NewSwarmService(NewTaskService(tasks, nil, worker), tasks, storeEnv.Stores.Executions, worker)
 	parent := &models.Task{ProjectID: "default", Title: "Pending handoff", Prompt: "plan", Category: models.CategoryActive, Status: models.StatusPending, SwarmRole: models.SwarmRoleParent}
 	require.NoError(t, tasks.Create(ctx, parent))
 	now := time.Now().UTC().Truncate(time.Second)

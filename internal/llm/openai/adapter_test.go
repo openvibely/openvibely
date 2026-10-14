@@ -718,9 +718,9 @@ func TestLeasedResponsesTransportSurvivesConcurrentCachePressure(t *testing.T) {
 }
 
 func TestInitialTaskAndFollowupShareTransportScope(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
-	execRepo := teststores.Of(db).Executions
+	storeEnv := teststores.New(t)
+	taskRepo := storeEnv.Stores.Tasks
+	execRepo := storeEnv.Stores.Executions
 	ctx := context.Background()
 	task := &models.Task{
 		ProjectID: "default", Title: "Transport reuse", Category: models.CategoryActive,

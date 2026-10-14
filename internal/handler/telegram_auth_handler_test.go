@@ -17,11 +17,11 @@ import (
 
 func setupTelegramAuthHandler(t *testing.T) (*Handler, *echo.Echo, persistence.TelegramAuthStore, string) {
 	t.Helper()
-	db := teststores.NewDB(t)
+	storeEnv := teststores.New(t)
 
-	projectRepo := teststores.Of(db).Projects
-	telegramAuthRepo := teststores.Of(db).TelegramAuth
-	llmConfigRepo := teststores.Of(db).LLMConfigs
+	projectRepo := storeEnv.Stores.Projects
+	telegramAuthRepo := storeEnv.Stores.TelegramAuth
+	llmConfigRepo := storeEnv.Stores.LLMConfigs
 	projectSvc := service.NewProjectService(projectRepo)
 
 	h := New(

@@ -24,16 +24,16 @@ type memoryScheduleTestRepos struct {
 
 func newMemoryScheduleTestService(t *testing.T) (*MemoryService, memoryScheduleTestRepos) {
 	t.Helper()
-	db := teststores.NewDB(t)
-	projectRepo := teststores.Of(db).Projects
+	storeEnv := teststores.New(t)
+	projectRepo := storeEnv.Stores.Projects
 	project := &models.Project{Name: "Memory test", RepoPath: t.TempDir()}
 	if err := projectRepo.Create(context.Background(), project); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
-	taskRepo := teststores.Of(db).Tasks
-	scheduleRepo := teststores.Of(db).Schedules
-	agentRepo := teststores.Of(db).Agents
-	lifecycleRepo := teststores.Of(db).Lifecycle
+	taskRepo := storeEnv.Stores.Tasks
+	scheduleRepo := storeEnv.Stores.Schedules
+	agentRepo := storeEnv.Stores.Agents
+	lifecycleRepo := storeEnv.Stores.Lifecycle
 	resolver, err := memory.NewPathResolver(t.TempDir(), "")
 	if err != nil {
 		t.Fatalf("path resolver: %v", err)

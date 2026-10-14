@@ -32,8 +32,8 @@ func benchmarkSeedCustomPersonalities(b *testing.B, repo persistence.CustomPerso
 func BenchmarkListPersonalitiesRuntimePage(b *testing.B) {
 	for _, n := range []int{0, 25, 500, 5000} {
 		b.Run(fmt.Sprintf("custom_%d", n), func(b *testing.B) {
-			db := teststores.NewDB(b)
-			repo := teststores.Of(db).CustomPersonalities
+			storeEnv := teststores.New(b)
+			repo := storeEnv.Stores.CustomPersonalities
 			benchmarkSeedCustomPersonalities(b, repo, n)
 			ctx := context.Background()
 			page, err := ListPersonalitiesRuntimePage(ctx, repo, PersonalityListDefaultLimit, 0)

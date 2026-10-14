@@ -57,17 +57,17 @@ func (f *fakeDiscordOutbound) SendOutboundDirectMessage(_ context.Context, userI
 
 func setupChannelMessageRouterTest(t *testing.T) (context.Context, persistence.ChannelTargetStore, persistence.SettingsStore, persistence.SlackAuthStore, persistence.TelegramAuthStore, persistence.EmailAuthStore, persistence.DiscordAuthStore, *models.Project, *ChannelMessageRouter, *fakeSlackOutbound, *fakeTelegramOutbound, *fakeEmailOutbound, *fakeDiscordOutbound) {
 	t.Helper()
-	db := teststores.NewDB(t)
+	storeEnv := teststores.New(t)
 	ctx := context.Background()
-	projectRepo := teststores.Of(db).Projects
+	projectRepo := storeEnv.Stores.Projects
 	project := &models.Project{Name: "Router Project"}
 	require.NoError(t, projectRepo.Create(ctx, project))
-	targetRepo := teststores.Of(db).ChannelTargets
-	settingsRepo := teststores.Of(db).Settings
-	slackAuthRepo := teststores.Of(db).SlackAuth
-	telegramAuthRepo := teststores.Of(db).TelegramAuth
-	emailAuthRepo := teststores.Of(db).EmailAuth
-	discordAuthRepo := teststores.Of(db).DiscordAuth
+	targetRepo := storeEnv.Stores.ChannelTargets
+	settingsRepo := storeEnv.Stores.Settings
+	slackAuthRepo := storeEnv.Stores.SlackAuth
+	telegramAuthRepo := storeEnv.Stores.TelegramAuth
+	emailAuthRepo := storeEnv.Stores.EmailAuth
+	discordAuthRepo := storeEnv.Stores.DiscordAuth
 	router := NewChannelMessageRouter(targetRepo, settingsRepo)
 	slack := &fakeSlackOutbound{}
 	telegram := &fakeTelegramOutbound{}

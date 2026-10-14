@@ -701,8 +701,8 @@ func TestSupportsReasoningContentReplayForKimiOnly(t *testing.T) {
 
 func TestEnsureFreshOAuthKeepsOpaqueTokenWithUnknownExpiry(t *testing.T) {
 	ctx := context.Background()
-	db := teststores.NewDB(t)
-	configRepo := teststores.Of(db).LLMConfigs
+	storeEnv := teststores.New(t)
+	configRepo := storeEnv.Stores.LLMConfigs
 	agent := &models.LLMConfig{
 		Name:             "Opaque custom OAuth",
 		Provider:         models.ProviderOpenAICompatible,
@@ -723,8 +723,8 @@ func TestEnsureFreshOAuthKeepsOpaqueTokenWithUnknownExpiry(t *testing.T) {
 
 func TestOAuthRequestRejectsConfigurationChangedAfterClientCreation(t *testing.T) {
 	ctx := context.Background()
-	db := teststores.NewDB(t)
-	configRepo := teststores.Of(db).LLMConfigs
+	storeEnv := teststores.New(t)
+	configRepo := storeEnv.Stores.LLMConfigs
 	agent := &models.LLMConfig{
 		Name:             "Revision guarded OAuth",
 		Provider:         models.ProviderOpenAICompatible,
@@ -771,8 +771,8 @@ func TestOAuthInferenceUsesOnlyConfiguredAccessTokenHeader(t *testing.T) {
 	defer server.Close()
 
 	ctx := context.Background()
-	db := teststores.NewDB(t)
-	configRepo := teststores.Of(db).LLMConfigs
+	storeEnv := teststores.New(t)
+	configRepo := storeEnv.Stores.LLMConfigs
 	agent := &models.LLMConfig{
 		Name:             "Custom token header",
 		Provider:         models.ProviderOpenAICompatible,
@@ -803,10 +803,10 @@ func TestOAuthInferenceUsesOnlyConfiguredAccessTokenHeader(t *testing.T) {
 
 func TestPrepareClientHistoryLoadsReasoningOnlyForKimi(t *testing.T) {
 	ctx := context.Background()
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
-	agentRepo := teststores.Of(db).LLMConfigs
-	execRepo := teststores.Of(db).Executions
+	storeEnv := teststores.New(t)
+	taskRepo := storeEnv.Stores.Tasks
+	agentRepo := storeEnv.Stores.LLMConfigs
+	execRepo := storeEnv.Stores.Executions
 
 	task := &models.Task{
 		ProjectID: "default",
@@ -847,10 +847,10 @@ func TestPrepareClientHistoryLoadsReasoningOnlyForKimi(t *testing.T) {
 
 func TestPrepareClientHistoryPreservesSteeringMessageBoundaries(t *testing.T) {
 	ctx := context.Background()
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
-	agentRepo := teststores.Of(db).LLMConfigs
-	execRepo := teststores.Of(db).Executions
+	storeEnv := teststores.New(t)
+	taskRepo := storeEnv.Stores.Tasks
+	agentRepo := storeEnv.Stores.LLMConfigs
+	execRepo := storeEnv.Stores.Executions
 
 	task := &models.Task{
 		ProjectID: "default",
@@ -908,10 +908,10 @@ func TestPrepareClientHistoryPreservesSteeringMessageBoundaries(t *testing.T) {
 
 func TestPrepareClientHistoryPreservesToolTranscript(t *testing.T) {
 	ctx := context.Background()
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
-	agentRepo := teststores.Of(db).LLMConfigs
-	execRepo := teststores.Of(db).Executions
+	storeEnv := teststores.New(t)
+	taskRepo := storeEnv.Stores.Tasks
+	agentRepo := storeEnv.Stores.LLMConfigs
+	execRepo := storeEnv.Stores.Executions
 
 	task := &models.Task{
 		ProjectID: "default",
@@ -960,10 +960,10 @@ func TestPrepareClientHistoryPreservesToolTranscript(t *testing.T) {
 
 func TestPersistReasoningContentClearsStaleReasoning(t *testing.T) {
 	ctx := context.Background()
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
-	agentRepo := teststores.Of(db).LLMConfigs
-	execRepo := teststores.Of(db).Executions
+	storeEnv := teststores.New(t)
+	taskRepo := storeEnv.Stores.Tasks
+	agentRepo := storeEnv.Stores.LLMConfigs
+	execRepo := storeEnv.Stores.Executions
 
 	task := &models.Task{
 		ProjectID: "default",

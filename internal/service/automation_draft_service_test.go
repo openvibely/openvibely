@@ -1031,9 +1031,9 @@ func TestAutomationDraftReopenLimitsLegacySemanticCleanupToTrustedSavedGraphs(t 
 }
 
 func TestAutomationDraftRejectsMissingAndUnsupportedSchemaVersions(t *testing.T) {
-	db := teststores.NewDB(t)
-	project := automationTestProject(t, teststores.Of(db).Projects, "Schema versions")
-	repo := teststores.Of(db).Automations
+	storeEnv := teststores.New(t)
+	project := automationTestProject(t, storeEnv.Stores.Projects, "Schema versions")
+	repo := storeEnv.Stores.Automations
 	svc := NewAutomationDraftService(repo, NewAutomationAdapterRegistry())
 
 	for _, version := range []int{0, 2} {
@@ -1051,14 +1051,14 @@ func TestAutomationDraftRejectsMissingAndUnsupportedSchemaVersions(t *testing.T)
 }
 
 func TestAutomationTaskReferencesResolveInsideSelectedProject(t *testing.T) {
-	db := teststores.NewDB(t)
+	storeEnv := teststores.New(t)
 	ctx := context.Background()
-	projectRepo := teststores.Of(db).Projects
+	projectRepo := storeEnv.Stores.Projects
 	project := automationTestProject(t, projectRepo, "Reference project")
 	other := automationTestProject(t, projectRepo, "Other reference project")
-	agentRepo := teststores.Of(db).Agents
-	taskRepo := teststores.Of(db).Tasks
-	settingsRepo := teststores.Of(db).Settings
+	agentRepo := storeEnv.Stores.Agents
+	taskRepo := storeEnv.Stores.Tasks
+	settingsRepo := storeEnv.Stores.Settings
 	agent := models.Agent{Name: "Project Architect", Key: "project_architect", Scope: models.AgentScopeProject, ProjectID: project.ID,
 		Enabled: true, SelectableAsPrimary: true, Skills: []models.SkillConfig{{Name: "project-guidance", Description: "Guide project work", Content: "safe"}}}
 	require.NoError(t, agentRepo.Create(ctx, &agent))
@@ -1071,7 +1071,7 @@ func TestAutomationTaskReferencesResolveInsideSelectedProject(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, snapshot.Agents, models.AutomationCapabilityRef{ID: "project_architect", Name: "Project Architect"})
 
-	svc := NewAutomationDraftService(teststores.Of(db).Automations, NewAutomationAdapterRegistry())
+	svc := NewAutomationDraftService(storeEnv.Stores.Automations, NewAutomationAdapterRegistry())
 	svc.SetCapabilitySnapshotBuilder(capabilities)
 	candidate, err := svc.TemplateCandidate(AutomationAdapterVisionDriver)
 	require.NoError(t, err)

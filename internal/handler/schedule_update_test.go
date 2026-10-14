@@ -18,9 +18,9 @@ import (
 // TestUpdateSchedule_RecurringAfterRun verifies that updating a recurring schedule
 // that has already run doesn't reset NextRun to the past
 func TestUpdateSchedule_RecurringAfterRun(t *testing.T) {
-	db := teststores.NewDB(t)
-	scheduleRepo := teststores.Of(db).Schedules
-	taskRepo := teststores.Of(db).Tasks
+	storeEnv := teststores.New(t)
+	scheduleRepo := storeEnv.Stores.Schedules
+	taskRepo := storeEnv.Stores.Tasks
 
 	// Create a task
 	task := &models.Task{

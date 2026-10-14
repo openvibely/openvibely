@@ -21,9 +21,9 @@ import (
 // to 'pending' so it can run again. This is a regression test for the bug where
 // completed tasks wouldn't re-run after schedule changes.
 func TestUpdateSchedule_CompletedTaskToFuture(t *testing.T) {
-	db := teststores.NewDB(t)
-	scheduleRepo := teststores.Of(db).Schedules
-	taskRepo := teststores.Of(db).Tasks
+	storeEnv := teststores.New(t)
+	scheduleRepo := storeEnv.Stores.Schedules
+	taskRepo := storeEnv.Stores.Tasks
 
 	// Create a task with completed status (simulating a task that already ran)
 	task := &models.Task{

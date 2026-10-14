@@ -12,21 +12,21 @@ import (
 )
 
 func TestAutomationChatConfirmationBindsExactCandidateWithoutCreatingAutomation(t *testing.T) {
-	db := teststores.NewDB(t)
+	storeEnv := teststores.New(t)
 	ctx := context.Background()
-	projectRepo := teststores.Of(db).Projects
+	projectRepo := storeEnv.Projects
 	project := automationTestProject(t, projectRepo, "Confirmation")
-	taskRepo := teststores.Of(db).Tasks
+	taskRepo := storeEnv.Tasks
 	chatTask := models.Task{ProjectID: project.ID, Title: "Chat confirmation thread", Prompt: "chat", Category: models.CategoryChat, Priority: 2, Status: models.StatusRunning}
 	require.NoError(t, taskRepo.Create(ctx, &chatTask))
-	execRepo := teststores.Of(db).Executions
+	execRepo := storeEnv.Executions
 	planExec := models.Execution{TaskID: chatTask.ID, Status: models.ExecCompleted, PromptSent: "create an automation"}
 	require.NoError(t, execRepo.Create(ctx, &planExec))
 	planTime := time.Now().UTC().Add(-2 * time.Minute)
-	_, err := db.ExecContext(ctx, `UPDATE executions SET started_at = ? WHERE id = ?`, planTime, planExec.ID)
+	err := storeEnv.Fixtures.SetExecutionStartedAt(ctx, planExec.ID, planTime)
 	require.NoError(t, err)
 
-	automationRepo := teststores.Of(db).Automations
+	automationRepo := storeEnv.Automations
 	registry := NewAutomationAdapterRegistry()
 	drafts := NewAutomationDraftService(automationRepo, registry)
 	candidate, err := drafts.TemplateCandidate(AutomationAdapterNativeSDLC)
@@ -38,13 +38,13 @@ func TestAutomationChatConfirmationBindsExactCandidateWithoutCreatingAutomation(
 		ThreadID: chatTask.ID, PlanMessageID: planExec.ID, AutomationName: candidate.Name, Source: "manual", Candidate: candidate})
 	require.NoError(t, err)
 
-	var automationCount int
-	require.NoError(t, db.QueryRowContext(ctx, `SELECT COUNT(*) FROM automations`).Scan(&automationCount))
+	automationCount, err := storeEnv.Fixtures.CountAutomations(ctx)
+	require.NoError(t, err)
 	require.Zero(t, automationCount, "planning and confirmation state must not create an Automation")
 
 	confirming := models.Execution{TaskID: chatTask.ID, Status: models.ExecRunning, PromptSent: "save " + candidate.Name}
 	require.NoError(t, execRepo.Create(ctx, &confirming))
-	_, err = db.ExecContext(ctx, `UPDATE executions SET started_at = ? WHERE id = ?`, planTime.Add(time.Minute), confirming.ID)
+	err = storeEnv.Fixtures.SetExecutionStartedAt(ctx, confirming.ID, planTime.Add(time.Minute))
 	require.NoError(t, err)
 	prepared, err := confirmation.PrepareChatConfirmation(ctx, project.ID, "alice", chatTask.ID, confirming.ID, confirming.PromptSent)
 	require.NoError(t, err)
@@ -61,14 +61,16 @@ func TestAutomationChatConfirmationBindsExactCandidateWithoutCreatingAutomation(
 	require.JSONEq(t, mustJSON(t, candidate), receipt.CandidateJSON)
 
 	validator := NewAutomationSaveValidator(registry, drafts)
-	compiler := NewAutomationCompiler(automationRepo, NewTaskService(taskRepo, teststores.Of(db).Attachments, nil), taskRepo, teststores.Of(db).Schedules, validator)
+	compiler := NewAutomationCompiler(automationRepo, NewTaskService(taskRepo, storeEnv.Attachments, nil), taskRepo, storeEnv.Schedules, validator)
 	tampered := candidate
 	tampered.Description = "A different graph than the one displayed."
 	_, err = compiler.Save(ctx, AutomationSaveRequest{ProjectID: project.ID, Source: "manual", CreatedVia: "chat", Candidate: tampered,
 		ConfirmationTokenID: tokenID, ConfirmationPrincipal: "alice", ConfirmationThreadID: chatTask.ID,
 		ConfirmingUserInputID: confirming.ID})
 	require.ErrorContains(t, err, "does not match this Save")
-	require.Zero(t, countRows(t, db, `SELECT COUNT(*) FROM automations`))
+	automationCount, err = storeEnv.Fixtures.CountAutomations(ctx)
+	require.NoError(t, err)
+	require.Zero(t, automationCount)
 	receipt, err = automationRepo.GetAutomationConfirmationReceipt(ctx, tokenID)
 	require.NoError(t, err)
 	require.Nil(t, receipt.ConsumedAt, "a mismatched candidate must not consume confirmation")

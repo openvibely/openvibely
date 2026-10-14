@@ -14,14 +14,14 @@ import (
 )
 
 func TestExecuteChatTaskCreations(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
-	attachmentRepo := teststores.Of(db).Attachments
+	storeEnv := teststores.New(t)
+	taskRepo := storeEnv.Stores.Tasks
+	attachmentRepo := storeEnv.Stores.Attachments
 	workerSvc := service.NewWorkerService(nil, 0, nil)
 	taskSvc := service.NewTaskService(taskRepo, attachmentRepo, workerSvc)
 
 	// Create a project first
-	projectRepo := teststores.Of(db).Projects
+	projectRepo := storeEnv.Stores.Projects
 	project := &models.Project{Name: "Test Project"}
 	if err := projectRepo.Create(context.Background(), project); err != nil {
 		t.Fatalf("failed to create project: %v", err)
@@ -106,13 +106,13 @@ func TestDeferActiveTasksWithAttachments_DuplicateTitlesRetainRequestIdentity(t 
 }
 
 func TestExecuteChatTaskCreations_DuplicateTitle(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
-	attachmentRepo := teststores.Of(db).Attachments
+	storeEnv := teststores.New(t)
+	taskRepo := storeEnv.Stores.Tasks
+	attachmentRepo := storeEnv.Stores.Attachments
 	workerSvc := service.NewWorkerService(nil, 0, nil)
 	taskSvc := service.NewTaskService(taskRepo, attachmentRepo, workerSvc)
 
-	projectRepo := teststores.Of(db).Projects
+	projectRepo := storeEnv.Stores.Projects
 	project := &models.Project{Name: "Test Project"}
 	if err := projectRepo.Create(context.Background(), project); err != nil {
 		t.Fatalf("failed to create project: %v", err)
@@ -143,13 +143,13 @@ func TestExecuteChatTaskCreations_DuplicateTitle(t *testing.T) {
 }
 
 func TestExecuteChatTaskCreations_InvalidCategory(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
-	attachmentRepo := teststores.Of(db).Attachments
+	storeEnv := teststores.New(t)
+	taskRepo := storeEnv.Stores.Tasks
+	attachmentRepo := storeEnv.Stores.Attachments
 	workerSvc := service.NewWorkerService(nil, 0, nil)
 	taskSvc := service.NewTaskService(taskRepo, attachmentRepo, workerSvc)
 
-	projectRepo := teststores.Of(db).Projects
+	projectRepo := storeEnv.Stores.Projects
 	project := &models.Project{Name: "Test Project"}
 	if err := projectRepo.Create(context.Background(), project); err != nil {
 		t.Fatalf("failed to create project: %v", err)
@@ -287,13 +287,13 @@ func TestBuildTaskContextString_ExcludesChatTasks(t *testing.T) {
 // --- Task Edit Tests ---
 
 func TestExecuteChatTaskEdits(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
-	attachmentRepo := teststores.Of(db).Attachments
+	storeEnv := teststores.New(t)
+	taskRepo := storeEnv.Stores.Tasks
+	attachmentRepo := storeEnv.Stores.Attachments
 	workerSvc := service.NewWorkerService(nil, 0, nil)
 	taskSvc := service.NewTaskService(taskRepo, attachmentRepo, workerSvc)
 
-	projectRepo := teststores.Of(db).Projects
+	projectRepo := storeEnv.Stores.Projects
 	project := &models.Project{Name: "Test Project"}
 	if err := projectRepo.Create(context.Background(), project); err != nil {
 		t.Fatalf("failed to create project: %v", err)
@@ -342,13 +342,13 @@ func TestExecuteChatTaskEdits(t *testing.T) {
 }
 
 func TestExecuteChatTaskEdits_TaskNotFound(t *testing.T) {
-	db := teststores.NewDB(t)
-	taskRepo := teststores.Of(db).Tasks
-	attachmentRepo := teststores.Of(db).Attachments
+	storeEnv := teststores.New(t)
+	taskRepo := storeEnv.Stores.Tasks
+	attachmentRepo := storeEnv.Stores.Attachments
 	workerSvc := service.NewWorkerService(nil, 0, nil)
 	taskSvc := service.NewTaskService(taskRepo, attachmentRepo, workerSvc)
 
-	projectRepo := teststores.Of(db).Projects
+	projectRepo := storeEnv.Stores.Projects
 	project := &models.Project{Name: "Test Project"}
 	if err := projectRepo.Create(context.Background(), project); err != nil {
 		t.Fatalf("failed to create project: %v", err)

@@ -14,12 +14,12 @@ import (
 )
 
 func TestSkillAnalyticsInstrumentationRecordsSelectionViewAndEditEvents(t *testing.T) {
-	db := teststores.NewDB(t)
+	storeEnv := teststores.New(t)
 	ctx := context.Background()
-	repo := teststores.Of(db).SkillAnalytics
-	projectRepo := teststores.Of(db).Projects
-	taskRepo := teststores.Of(db).Tasks
-	agentRepo := teststores.Of(db).Agents
+	repo := storeEnv.Stores.SkillAnalytics
+	projectRepo := storeEnv.Stores.Projects
+	taskRepo := storeEnv.Stores.Tasks
+	agentRepo := storeEnv.Stores.Agents
 	project := &models.Project{Name: "Skill Analytics Project"}
 	if err := projectRepo.Create(ctx, project); err != nil {
 		t.Fatalf("create project: %v", err)

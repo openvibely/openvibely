@@ -12,11 +12,11 @@ import (
 )
 
 func TestExecuteTaskEditsRefreshesBlockedChildChainConfigAndActivationCreatesGrandchild(t *testing.T) {
-	db := teststores.NewDB(t)
+	storeEnv := teststores.New(t)
 	ctx := context.Background()
-	projectRepo := teststores.Of(db).Projects
-	taskRepo := teststores.Of(db).Tasks
-	taskSvc := NewTaskService(taskRepo, teststores.Of(db).Attachments, nil)
+	projectRepo := storeEnv.Stores.Projects
+	taskRepo := storeEnv.Stores.Tasks
+	taskSvc := NewTaskService(taskRepo, storeEnv.Stores.Attachments, nil)
 	project := &models.Project{Name: "Chain Sync"}
 	require.NoError(t, projectRepo.Create(ctx, project))
 
@@ -74,11 +74,11 @@ func TestExecuteTaskEditsRefreshesBlockedChildChainConfigAndActivationCreatesGra
 }
 
 func TestExecuteTaskEditsDoesNotRewriteOrDuplicateStartedChainChild(t *testing.T) {
-	db := teststores.NewDB(t)
+	storeEnv := teststores.New(t)
 	ctx := context.Background()
-	projectRepo := teststores.Of(db).Projects
-	taskRepo := teststores.Of(db).Tasks
-	taskSvc := NewTaskService(taskRepo, teststores.Of(db).Attachments, nil)
+	projectRepo := storeEnv.Stores.Projects
+	taskRepo := storeEnv.Stores.Tasks
+	taskSvc := NewTaskService(taskRepo, storeEnv.Stores.Attachments, nil)
 	project := &models.Project{Name: "Started Chain Child"}
 	require.NoError(t, projectRepo.Create(ctx, project))
 

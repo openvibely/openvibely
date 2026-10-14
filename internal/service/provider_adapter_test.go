@@ -882,8 +882,8 @@ func TestProviderContextCompactionFallback_RetainsUserMessagesWithinUTF8Budget(t
 }
 
 func TestReportedContextUsagePersistsAndTriggersNextTurn(t *testing.T) {
-	db := teststores.NewDB(t)
-	repo := teststores.Of(db).Executions
+	storeEnv := teststores.New(t)
+	repo := storeEnv.Stores.Executions
 	ctx := context.Background()
 	first := llmcontracts.AgentRequest{Ctx: ctx, Operation: llmcontracts.OperationStreaming, ChatMode: models.ChatModeOrchestrate, ProjectID: "usage-project", ExecID: "previous", Agent: models.LLMConfig{ID: "usage-model", Provider: models.ProviderOpenAICompatible, ContextWindow: 10000}, Message: "short"}
 	adapter := providerAdapterFunc(func(req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
@@ -1001,8 +1001,8 @@ func TestAnthropicCheckpointOnlyFollowupBudget(t *testing.T) {
 }
 
 func TestNativeCheckpointFailureSummarizesOriginalTranscript(t *testing.T) {
-	db := teststores.NewDB(t)
-	repo := teststores.Of(db).Executions
+	storeEnv := teststores.New(t)
+	repo := storeEnv.Stores.Executions
 	ctx := context.Background()
 	state := `[{"type":"compaction","encrypted_content":"opaque"}]`
 	checkpointAgent := models.LLMConfig{ID: "model", Provider: models.ProviderOpenAI}
@@ -1142,8 +1142,8 @@ func TestProviderContextCompactionFallback_NativeProvidersReceiveProactiveThresh
 }
 
 func TestProviderContextCompactionFallback_OpenAICompatibleProactiveSummaryAndPersistence(t *testing.T) {
-	db := teststores.NewDB(t)
-	execRepo := teststores.Of(db).Executions
+	storeEnv := teststores.New(t)
+	execRepo := storeEnv.Stores.Executions
 	svc := NewLLMService(nil, execRepo, nil, nil, nil, nil)
 	var requests []llmcontracts.AgentRequest
 	adapter := providerAdapterFunc(func(req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
@@ -1178,8 +1178,8 @@ func TestProviderContextCompactionFallback_OpenAICompatibleProactiveSummaryAndPe
 }
 
 func TestProviderContextCompactionFallback_RestoresDurableCheckpointOnFollowingTurn(t *testing.T) {
-	db := teststores.NewDB(t)
-	execRepo := teststores.Of(db).Executions
+	storeEnv := teststores.New(t)
+	execRepo := storeEnv.Stores.Executions
 	checkpointHistory := []models.Execution{{Output: compactedHistorySummaryPrefix + "\n\nsummary", Status: models.ExecCompleted}}
 	if err := execRepo.UpsertChatCompactionCheckpoint(context.Background(), models.ChatCompactionCheckpoint{ScopeType: "chat_project", ScopeID: "project-restore", SourceExecutionID: "source", History: checkpointHistory, Summary: "summary", Strategy: "local_summary"}); err != nil {
 		t.Fatalf("UpsertChatCompactionCheckpoint: %v", err)
@@ -1200,8 +1200,8 @@ func TestProviderContextCompactionFallback_RestoresDurableCheckpointOnFollowingT
 }
 
 func TestProviderSessionState_PersistsWithoutReplacingCompactionCheckpoint(t *testing.T) {
-	db := teststores.NewDB(t)
-	repo := teststores.Of(db).Executions
+	storeEnv := teststores.New(t)
+	repo := storeEnv.Stores.Executions
 	checkpointHistory := []models.Execution{{Output: compactedHistorySummaryPrefix + "\n\nsummary", Status: models.ExecCompleted}}
 	agent := models.LLMConfig{ID: "astra-model", Provider: models.ProviderOpenAI, Model: "gpt-6-astra"}
 	if err := repo.UpsertChatCompactionCheckpoint(context.Background(), models.ChatCompactionCheckpoint{
@@ -1325,8 +1325,8 @@ func TestProviderContextCompactionFallback_PreservesReplayAndAuthorizationBounda
 }
 
 func TestProviderContextCompactionFallback_NativeSuccessPersistsCheckpoint(t *testing.T) {
-	db := teststores.NewDB(t)
-	execRepo := teststores.Of(db).Executions
+	storeEnv := teststores.New(t)
+	execRepo := storeEnv.Stores.Executions
 	svc := NewLLMService(nil, execRepo, nil, nil, nil, nil)
 	adapter := providerAdapterFunc(func(req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
 		return llmcontracts.AgentResult{Output: "ok", Compacted: true, NativeCompactionStateJSON: `[{"type":"compaction","encrypted_content":"opaque"}]`, NativeCompactionStrategy: "openai_responses"}, nil
@@ -1345,8 +1345,8 @@ func TestProviderContextCompactionFallback_NativeSuccessPersistsCheckpoint(t *te
 }
 
 func TestProviderContextCompactionFallback_RestoresNativeStateForMatchingModelOnly(t *testing.T) {
-	db := teststores.NewDB(t)
-	execRepo := teststores.Of(db).Executions
+	storeEnv := teststores.New(t)
+	execRepo := storeEnv.Stores.Executions
 	state := `[{"type":"compaction","encrypted_content":"opaque"}]`
 	checkpointAgent := models.LLMConfig{ID: "model-1", Provider: models.ProviderOpenAI}
 	if err := execRepo.UpsertChatCompactionCheckpoint(context.Background(), models.ChatCompactionCheckpoint{
@@ -1940,8 +1940,8 @@ func TestNativeCompactionCapabilityCacheIsConfigurationScoped(t *testing.T) {
 }
 
 func TestNativeCheckpointRequiresCompleteCompatibilityIdentity(t *testing.T) {
-	db := teststores.NewDB(t)
-	repo := teststores.Of(db).Executions
+	storeEnv := teststores.New(t)
+	repo := storeEnv.Stores.Executions
 	base := models.LLMConfig{ID: "same-id", Provider: models.ProviderOpenAI, Model: "gpt-5.3-codex", BaseURL: "https://one.example/v1", AuthMethod: models.AuthMethodAPIKey, APIKey: "one"}
 	if err := repo.UpsertChatCompactionCheckpoint(context.Background(), models.ChatCompactionCheckpoint{ScopeType: "chat_project", ScopeID: "identity", ModelConfigID: base.ID, CompatibilityKey: providerCompatibilityKey(base), ProviderStateJSON: `[{"type":"compaction"}]`}); err != nil {
 		t.Fatal(err)
@@ -2275,13 +2275,13 @@ func TestLocalCompactionActivityPersistsAcrossProviderRetry(t *testing.T) {
 	for _, fail := range []bool{false, true} {
 		t.Run(fmt.Sprint(fail), func(t *testing.T) {
 			ctx := context.Background()
-			db := teststores.NewDB(t)
-			repo := teststores.Of(db).Executions
+			storeEnv := teststores.New(t)
+			repo := storeEnv.Stores.Executions
 			task := &models.Task{ProjectID: "default", Title: "Compaction", Prompt: "continue", Category: models.CategoryActive, Status: models.StatusPending}
-			if err := teststores.Of(db).Tasks.Create(ctx, task); err != nil {
+			if err := storeEnv.Stores.Tasks.Create(ctx, task); err != nil {
 				t.Fatal(err)
 			}
-			agent, err := teststores.Of(db).LLMConfigs.GetDefault(ctx)
+			agent, err := storeEnv.Stores.LLMConfigs.GetDefault(ctx)
 			if err != nil || agent == nil {
 				t.Fatalf("model: %v", err)
 			}
