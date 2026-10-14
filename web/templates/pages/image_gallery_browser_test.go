@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -20,6 +21,11 @@ func TestBrowserFunctional_SharedImageGallery(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
 	project := models.Project{ID: "images", Name: "Images"}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/wails/runtime.js" {
+			w.Header().Set("Content-Type", "application/javascript")
+			io.WriteString(w, `export const Events={On:()=>{},Emit:(name,data)=>{window.nativeControlEvents=window.nativeControlEvents||{};window.nativeControlEvents[name]=data;}};`)
+			return
+		}
 		if static.ServeAsset(w, r) {
 			return
 		}
@@ -68,8 +74,14 @@ func TestBrowserFunctional_SharedImageGallery(t *testing.T) {
 	defer server.Close()
 	runComposerFocusCDP(t, chrome, server.URL+"/gallery", "image-gallery", func(b *composerFocusCDP) {
 		b.waitFor("gallery entries", `String(!!document.querySelector("#attachment-list [data-image-gallery-item]") && !!window.imageGallery)`, "true")
+		if runtime.GOOS == "darwin" {
+			b.waitFor("native controls initially visible", `String(window.nativeControlEvents?.['desktop:controls-visibility']?.hidden)`, "false")
+		}
 		b.click(`#attachment-list [data-image-gallery-item]`)
 		b.waitFor("task gallery loaded", `document.querySelector('[data-gallery-count]').textContent+':'+document.querySelector('[data-gallery-status]').textContent`, "1 / 2:")
+		if runtime.GOOS == "darwin" {
+			b.waitFor("preview hides native controls", `String(window.nativeControlEvents?.['desktop:controls-visibility']?.hidden)`, "true")
+		}
 		for _, theme := range []string{"dark", "light"} {
 			b.evaluate(`document.documentElement.dataset.theme='` + theme + `';document.documentElement.dataset.colorTheme='openvibely-` + theme + `';'set'`)
 			for _, control := range []string{"close", "next", "plus"} {
@@ -138,6 +150,9 @@ func TestBrowserFunctional_SharedImageGallery(t *testing.T) {
 		b.click(`#attachment-list [data-image-gallery-item]`)
 		b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": "Escape"}, nil)
 		b.waitFor("closed and focus restored", `String(!document.getElementById('image-gallery').open && document.activeElement.hasAttribute('data-image-gallery-item'))`, "true")
+		if runtime.GOOS == "darwin" {
+			b.waitFor("closing restores native controls", `String(window.nativeControlEvents?.['desktop:controls-visibility']?.hidden)`, "false")
+		}
 		b.click(`[data-image-name="message.svg"]`)
 		b.waitFor("message scoped gallery", `document.querySelector('[data-gallery-count]').textContent`, "1 / 1")
 		b.call("Input.dispatchMouseEvent", map[string]any{"type": "mousePressed", "x": 5, "y": 5, "button": "left", "clickCount": 1}, nil)

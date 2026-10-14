@@ -96,6 +96,15 @@ package main
 
 static char ovTrafficLightsKey;
 static NSAppearanceName ovTrafficLightsAppearanceName;
+static BOOL ovTrafficLightsHidden;
+static void ovSetTrafficLightsHidden(int hidden) {
+    ovTrafficLightsHidden = hidden != 0;
+    for (NSWindow *window in NSApp.windows) {
+        OVTrafficLights *controls = objc_getAssociatedObject(window, &ovTrafficLightsKey);
+        controls.hidden = ovTrafficLightsHidden;
+        [controls refresh];
+    }
+}
 static void ovSetTrafficLightsDark(int dark) {
     ovTrafficLightsAppearanceName = dark ? NSAppearanceNameDarkAqua : NSAppearanceNameAqua;
     for (NSWindow *window in NSApp.windows) {
@@ -115,6 +124,7 @@ static void ovAttachTrafficLights(NSWindow *window) {
         [controls release];
     }
     if (controls.superview != content) [content addSubview:controls positioned:NSWindowAbove relativeTo:nil];
+    controls.hidden = ovTrafficLightsHidden;
     if (ovTrafficLightsAppearanceName) controls.appearance = [NSAppearance appearanceNamed:ovTrafficLightsAppearanceName];
     CGFloat y = content.isFlipped ? (46 - NSHeight(controls.frame)) / 2 :
         NSHeight(content.bounds) - (46 + NSHeight(controls.frame)) / 2;
@@ -140,6 +150,26 @@ import "C"
 import "github.com/wailsapp/wails/v3/pkg/application"
 
 func registerPlatformWindowControls(app *application.App, _ *application.WebviewWindow) {
+	app.Event.On("desktop:controls-visibility", func(event *application.CustomEvent) {
+		if event.Sender != "main" {
+			return
+		}
+		data, ok := event.Data.(map[string]any)
+		if !ok {
+			return
+		}
+		hidden, ok := data["hidden"].(bool)
+		if !ok {
+			return
+		}
+		application.InvokeAsync(func() {
+			value := C.int(0)
+			if hidden {
+				value = 1
+			}
+			C.ovSetTrafficLightsHidden(value)
+		})
+	})
 	app.Event.On("desktop:controls-theme", func(event *application.CustomEvent) {
 		if event.Sender != "main" {
 			return
