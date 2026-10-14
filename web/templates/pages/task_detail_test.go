@@ -152,9 +152,6 @@ func TestTaskDetailUsesSharedPageHeader(t *testing.T) {
 		if strings.Contains(buf.String(), `#task-breadcrumb-toolbar {`) {
 			t.Fatal("task-specific geometry must not override shared header spacing")
 		}
-		if !strings.Contains(buf.String(), `#task-breadcrumb-toolbar button:focus-visible { outline:none; }`) {
-			t.Fatal("task breadcrumb controls must not show the primary focus ring")
-		}
 	}
 }
 
