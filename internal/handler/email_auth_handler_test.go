@@ -10,12 +10,11 @@ import (
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/testutil/teststores"
 )
 
 func TestEmailAuthorizedSendersHandlers(t *testing.T) {
-	h, e, _, db := setupTestHandlerWithDB(t)
-	h.SetEmailAuthRepo(teststores.Of(db).EmailAuth)
+	h, e, _, db := setupTestHandlerWithStores(t)
+	h.SetEmailAuthRepo(db.EmailAuth)
 	project := createProject(t, h, "Email Auth UI")
 	otherProject := createProject(t, h, "Other Email Auth UI")
 
@@ -102,7 +101,7 @@ func TestEmailAuthorizedSendersHandlers(t *testing.T) {
 }
 
 func TestEmailConfigureDoesNotSaveTypedAuthorizedSenderWithoutAdd(t *testing.T) {
-	h, e, _, _ := setupTestHandlerWithDB(t)
+	h, e, _, _ := setupTestHandlerWithStores(t)
 	project := createProject(t, h, "Email Configure Sender")
 
 	form := url.Values{
@@ -145,7 +144,7 @@ func TestEmailConfigureDoesNotSaveTypedAuthorizedSenderWithoutAdd(t *testing.T) 
 }
 
 func TestEmailAuthorizedSendersValidation(t *testing.T) {
-	_, e, _, _ := setupTestHandlerWithDB(t)
+	_, e, _, _ := setupTestHandlerWithStores(t)
 	rec := postForm(e, "/channels/email/authorized-senders", url.Values{"email_address": {"a@example.com"}})
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected missing project 400, got %d", rec.Code)
@@ -205,7 +204,7 @@ func TestEmailConfigurePresetsRemove(t *testing.T) {
 
 func TestChannelsEmailTestConnection(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
-		h, e, _, _ := setupTestHandlerWithDB(t)
+		h, e, _, _ := setupTestHandlerWithStores(t)
 		h.SetEmailService(&testEmailService{testFn: func(ctx context.Context) error { return nil }})
 
 		rec := htmxPost(e, "/channels/email/test", nil)
@@ -220,7 +219,7 @@ func TestChannelsEmailTestConnection(t *testing.T) {
 	})
 
 	t.Run("failure escapes service error", func(t *testing.T) {
-		h, e, _, _ := setupTestHandlerWithDB(t)
+		h, e, _, _ := setupTestHandlerWithStores(t)
 		h.SetEmailService(&testEmailService{testFn: func(ctx context.Context) error {
 			return errors.New(`smtp <bad> & "quoted"`)
 		}})
@@ -237,7 +236,7 @@ func TestChannelsEmailTestConnection(t *testing.T) {
 	})
 
 	t.Run("service missing uses email channel name", func(t *testing.T) {
-		_, e, _, _ := setupTestHandlerWithDB(t)
+		_, e, _, _ := setupTestHandlerWithStores(t)
 
 		rec := htmxPost(e, "/channels/email/test", nil)
 

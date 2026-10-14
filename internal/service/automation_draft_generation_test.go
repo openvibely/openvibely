@@ -587,10 +587,10 @@ func TestAutomationCapabilitySnapshotRequiresUsableConnectedGitHubMode(t *testin
 }
 
 func TestAutomationDescriptionGenerationUsesOneRepairAndNoPersistence(t *testing.T) {
-	db := teststores.NewDB(t)
-	projectRepo := teststores.Of(db).Projects
-	project := automationTestProject(t, projectRepo, "Describe")
-	repo := teststores.Of(db).Automations
+	env := teststores.New(t)
+	projectRepo := env.Projects
+	automationTestProject(t, projectRepo, "Describe")
+	repo := env.Automations
 	svc := NewAutomationDraftService(repo, NewAutomationAdapterRegistry())
 	valid, err := svc.TemplateCandidate(AutomationAdapterVisionDriver)
 	require.NoError(t, err)
@@ -611,8 +611,8 @@ func TestAutomationDescriptionGenerationUsesOneRepairAndNoPersistence(t *testing
 	require.NoError(t, err)
 	require.Equal(t, 2, calls)
 	require.Equal(t, "Daily Vision Review", preview.Candidate.Name)
-	var count int
-	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM automations WHERE project_id = ?`, project.ID).Scan(&count))
+	count, err := env.Fixtures.CountAutomations(context.Background())
+	require.NoError(t, err)
 	require.Zero(t, count, "preview must remain ephemeral")
 
 	calls = 0

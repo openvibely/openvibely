@@ -859,9 +859,9 @@ func TestAPIChatMessage_HydratesSingleConfiguredModelWithoutEmbeddingCatalog(t *
 }
 
 func TestAPIChatMessage_MultipleModelsDefaultFallbackHydratesSelectedModel(t *testing.T) {
-	h, e, llmConfigRepo, db := setupTestHandlerWithDB(t)
+	h, e, llmConfigRepo, db := setupTestHandlerWithStores(t)
 	ctx := context.Background()
-	teststores.ClearLLMConfigs(t, teststores.Of(db).LLMConfigs)
+	teststores.ClearLLMConfigs(t, db.LLMConfigs)
 
 	nonDefault := &models.LLMConfig{
 		Name: "API Chat Non Default Opus", Provider: models.ProviderTest, Model: "claude-opus-non-default",

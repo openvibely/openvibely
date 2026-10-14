@@ -76,7 +76,7 @@ func TestFilterTaskThreadRuntimeToolDefs_GoalStatusToolsRequireExplicitGrant(t *
 }
 
 func TestFilterTaskThreadRuntimeToolDefs_CreateNotificationDispatchUsesPersistedTaskContext(t *testing.T) {
-	h, _, _, _ := setupTestHandlerWithDB(t)
+	h, _, _, _ := setupTestHandlerWithStores(t)
 	ctx := context.Background()
 	project := createProject(t, h, "Task Thread Notification Project")
 	task := createTask(t, h, project.ID, "Task Thread Notification Source", func(task *models.Task) {

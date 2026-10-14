@@ -19,6 +19,7 @@ import (
 
 // TestContext holds all the test dependencies and helpers for handler tests
 type TestContext struct {
+	stores         *teststores.Env
 	t              *testing.T
 	handler        *Handler
 	echo           *echo.Echo
@@ -39,7 +40,19 @@ type TestContext struct {
 func NewTestContext(t *testing.T) *TestContext {
 	t.Helper()
 	env := newTestHandlerEnv(t, teststores.NewDB(t), withTestTaskGoals())
+	return testContextFromHandler(t, env, &teststores.Env{Stores: teststores.Of(env.DB)})
+}
+
+func NewStoreTestContext(t *testing.T) *TestContext {
+	t.Helper()
+	stores := teststores.New(t)
+	env := wireTestHandler(t, stores.Stores, testHandlerOptions{taskGoals: true})
+	return testContextFromHandler(t, env, stores)
+}
+
+func testContextFromHandler(t *testing.T, env *testHandlerEnv, stores *teststores.Env) *TestContext {
 	return &TestContext{
+		stores:         stores,
 		t:              t,
 		handler:        env.Handler,
 		echo:           env.Echo,
@@ -48,7 +61,7 @@ func NewTestContext(t *testing.T) *TestContext {
 		projectRepo:    env.ProjectRepo,
 		taskRepo:       env.TaskRepo,
 		execRepo:       env.ExecRepo,
-		usageRepo:      teststores.Of(env.DB).Usage,
+		usageRepo:      stores.Usage,
 		scheduleRepo:   env.ScheduleRepo,
 		workerRepo:     env.WorkerRepo,
 		attachmentRepo: env.AttachmentRepo,

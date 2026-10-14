@@ -34,7 +34,7 @@ import (
 )
 
 func setupTestHandler(t testing.TB) (*Handler, *echo.Echo, persistence.LLMConfigStore) {
-	h, e, llmConfigRepo, _ := setupTestHandlerWithDB(t)
+	h, e, llmConfigRepo, _ := setupTestHandlerWithStores(t)
 	return h, e, llmConfigRepo
 }
 
@@ -2108,9 +2108,9 @@ func TestHandler_ModelDeletionResetsProtectedAgentOverrides(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			h, e, repo, db := setupTestHandlerWithDB(t)
+			h, e, repo, db := setupTestHandlerWithStores(t)
 			ctx := context.Background()
-			agentRepo := teststores.Of(db).Agents
+			agentRepo := db.Agents
 
 			target, err := repo.GetDefault(ctx)
 			if err != nil || target == nil {
@@ -3356,10 +3356,10 @@ func assertTaskPrimaryAgentDefinition(t *testing.T, h *Handler, taskID string, w
 }
 
 func TestHandler_UpdateTask_AssignsAndClearsPrimaryAgentDefinition(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	ctx := context.Background()
 	project := tc.CreateProject().Build()
-	agentRepo := teststores.Of(tc.db).Agents
+	agentRepo := tc.stores.Agents
 	tc.handler.agentRepo = agentRepo
 	projectAgent := createScheduleTestAgent(t, agentRepo, "Task Edit Runner", models.AgentScopeProject, project.ID, true)
 	globalAgent := createScheduleTestAgent(t, agentRepo, "Task Edit Global Runner", models.AgentScopeGlobal, "", true)
@@ -3433,10 +3433,10 @@ func TestHandler_UpdateTask_RejectsInvalidPrimaryAgentDefinitions(t *testing.T) 
 
 	for _, tt := range cases {
 		t.Run(tt.name, func(t *testing.T) {
-			tc := NewTestContext(t)
+			tc := NewStoreTestContext(t)
 			project := tc.CreateProject().WithName("Project A").Build()
 			otherProject := tc.CreateProject().WithName("Project B").Build()
-			agentRepo := teststores.Of(tc.db).Agents
+			agentRepo := tc.stores.Agents
 			tc.handler.agentRepo = agentRepo
 			previous := createScheduleTestAgent(t, agentRepo, "Existing Task Edit Agent", models.AgentScopeProject, project.ID, true)
 			task := createTask(t, tc.handler, project.ID, "Task Edit Invalid Agent", func(tk *models.Task) {
@@ -3728,7 +3728,7 @@ func TestHandler_ListTasks_DoesNotRenderBlockedSwarmParentAsActiveQueuedWhenNoCh
 }
 
 func TestHandler_UpdateTaskCategory_BacklogToRunningLanePersistsRequestedStatus(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	ctx := context.Background()
 	project := tc.CreateProject().WithName("Single running lane project").Build()
 	model := tc.CreateLLMConfig().WithName("Single running lane model").WithProvider(models.ProviderTest).WithModel("test-model").AsDefault().Build()
@@ -3932,7 +3932,7 @@ func TestHandler_UpdateTaskCategory_AllowsScheduledTaskToScheduled(t *testing.T)
 }
 
 func TestHandler_UpdateTask_CategoryChangeFromActiveQueuedToCompletedStopsTask(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	ctx := context.Background()
 	task := &models.Task{
 		ProjectID: "default",
@@ -4013,7 +4013,7 @@ func TestHandler_UpdateTask_CategoryChangeFromCompletedToActiveIsMetadataOnly(t 
 	assert.Equal(t, 0, tc.handler.workerSvc.QueueSize(), "task detail metadata save must not queue worker work")
 	assert.Equal(t, 0, tc.handler.workerSvc.TotalRunning(), "task detail metadata save must not start worker work")
 	assert.Equal(t, 0, tc.handler.workerSvc.ProjectRunning(updated.ProjectID), "task detail metadata save must not start project worker work")
-	lifecyclePage, err := teststores.Of(tc.db).Lifecycle.ListExecutionsForTaskPage(ctx, task.ID, 1, "")
+	lifecyclePage, err := tc.stores.Lifecycle.ListExecutionsForTaskPage(ctx, task.ID, 1, "")
 	require.NoError(t, err)
 	assert.Empty(t, lifecyclePage.Items, "task detail metadata save must not create lifecycle continuations")
 	schedules, err := tc.scheduleRepo.ListByTask(ctx, task.ID)
@@ -4048,7 +4048,7 @@ func TestHandler_UpdateTaskStatus_DragDrop(t *testing.T) {
 }
 
 func TestHandler_UpdateTaskStatus_MovesToRunning(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	ctx := context.Background()
 	task := createTask(t, tc.handler, "default", "Test Completed Task", func(tk *models.Task) {
 		tk.Status = models.StatusCompleted
@@ -4226,7 +4226,7 @@ func TestHandler_DeleteAllTasksByCategory_CancelledRequestPreservesProjectTasks(
 }
 
 func TestHandler_ExecuteBacklogTasks(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	ctx := context.Background()
 	project := createProject(t, tc.handler, "Execute Backlog Project")
 	otherProject := createProject(t, tc.handler, "Other Execute Backlog Project")
@@ -5867,7 +5867,7 @@ func TestLayout_UIPreferencesRestoreFromSettings(t *testing.T) {
 }
 
 func TestLayout_UIPreferencesDoNotReadSettingsForHTMXFragments(t *testing.T) {
-	h, e, _, _ := setupTestHandlerWithDB(t)
+	h, e, _, _ := setupTestHandlerWithStores(t)
 	settingsQueries := 0
 	h.settingsRepo.(*sqlite.SettingsRepo).SetQueryObserver(func(query string) {
 		if strings.Contains(query, "app_settings") {
@@ -5890,7 +5890,7 @@ func TestLayout_UIPreferencesDoNotReadSettingsForHTMXFragments(t *testing.T) {
 }
 
 func TestSaveUIPreferences_PersistsPreferencesToSettings(t *testing.T) {
-	h, e, _, _ := setupTestHandlerWithDB(t)
+	h, e, _, _ := setupTestHandlerWithStores(t)
 	project := createProject(t, h, "Selected Project")
 	req := httptest.NewRequest(http.MethodPost, "/ui/preferences", strings.NewReader(fmt.Sprintf(`{"theme":"openvibely-dark","sidebar_collapsed":true,"diff_view":"split","project_id":%q}`, project.ID)))
 	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
@@ -5937,7 +5937,7 @@ func TestSaveUIPreferences_RejectsInvalidDiffView(t *testing.T) {
 }
 
 func TestTaskChangesUsesPersistedSplitDiffViewPreference(t *testing.T) {
-	h, e, llmConfigRepo, _ := setupTestHandlerWithDB(t)
+	h, e, llmConfigRepo, _ := setupTestHandlerWithStores(t)
 	project := createProject(t, h, "Diff Pref Project")
 	agent := createAgent(t, llmConfigRepo)
 	task := createTask(t, h, project.ID, "Diff Pref Task")
@@ -6243,14 +6243,14 @@ func TestHandler_TaskThreadSend(t *testing.T) {
 }
 
 func TestHandler_TaskThreadSend_ClearsStaleCancellationMarkerSoGoalAfterCompleteRuns(t *testing.T) {
-	h, e, llmConfigRepo, db := setupTestHandlerWithDB(t)
+	h, e, llmConfigRepo, db := setupTestHandlerWithStores(t)
 	ctx := context.Background()
-	goalRepo := teststores.Of(db).TaskGoals
+	goalRepo := db.TaskGoals
 	goalSvc := service.NewTaskGoalService(goalRepo, h.taskRepo, nil)
 	h.SetTaskGoalService(goalSvc)
 	h.taskSvc.SetTaskGoalService(goalSvc)
 	h.workerSvc.SetTaskGoalService(goalSvc)
-	agentRepo := teststores.Of(db).Agents
+	agentRepo := db.Agents
 	h.SetAgentRepo(agentRepo)
 	h.workerSvc.SetLifecycleAgentRepo(agentRepo)
 
@@ -6556,9 +6556,9 @@ func TestHandler_SwarmFollowupChildQueuesWhenActive(t *testing.T) {
 }
 
 func TestHandler_SubmitReview_SwarmChildQueuesBehindActiveExecutionWithoutRouting(t *testing.T) {
-	h, e, llmConfigRepo, db := setupTestHandlerWithDB(t)
+	h, e, llmConfigRepo, db := setupTestHandlerWithStores(t)
 	h.workerSvc = nil
-	reviewRepo := teststores.Of(db).ReviewComments
+	reviewRepo := db.ReviewComments
 	h.SetReviewCommentRepo(reviewRepo)
 	ctx := context.Background()
 	agent := createAgent(t, llmConfigRepo)
@@ -6626,9 +6626,9 @@ func TestHandler_SubmitReview_SwarmChildQueuesBehindActiveExecutionWithoutRoutin
 }
 
 func TestHandler_SubmitReview_SwarmChildDirectStartAppliesRouting(t *testing.T) {
-	h, e, llmConfigRepo, db := setupTestHandlerWithDB(t)
+	h, e, llmConfigRepo, db := setupTestHandlerWithStores(t)
 	h.workerSvc = nil
-	reviewRepo := teststores.Of(db).ReviewComments
+	reviewRepo := db.ReviewComments
 	h.SetReviewCommentRepo(reviewRepo)
 	ctx := context.Background()
 	agent := createAgent(t, llmConfigRepo)
@@ -7133,7 +7133,7 @@ func TestHandler_CompleteWithCancellation_NotifiesSwarmChildCancellation(t *test
 }
 
 func TestHandler_TaskThreadSend_ResumesGoalPausedByUserStop(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	ctx := context.Background()
 	agent := createAgent(t, tc.llmConfigRepo)
 	project := createProject(t, tc.handler, "Thread Resume Goal Project")
@@ -7160,7 +7160,7 @@ func TestHandler_TaskThreadSend_ResumesGoalPausedByUserStop(t *testing.T) {
 }
 
 func TestHandler_TaskThreadSend_DoesNotResumeExplicitlyPausedGoal(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	ctx := context.Background()
 	agent := createAgent(t, tc.llmConfigRepo)
 	project := createProject(t, tc.handler, "Thread Explicit Pause Project")
@@ -8588,9 +8588,9 @@ func TestHandler_GetTaskThreadExecutionFragmentRejectsWrongTask(t *testing.T) {
 }
 
 func TestHandler_GetTaskThread_ShowsPrimaryAgentDefinition(t *testing.T) {
-	h, e, llmConfigRepo, db := setupTestHandlerWithDB(t)
+	h, e, llmConfigRepo, db := setupTestHandlerWithStores(t)
 	ctx := context.Background()
-	agentRepo := teststores.Of(db).Agents
+	agentRepo := db.Agents
 	h.SetAgentRepo(agentRepo)
 	agent := createAgent(t, llmConfigRepo, func(a *models.LLMConfig) { a.Temperature = 1.0 })
 	agentDef := &models.Agent{
@@ -8624,8 +8624,8 @@ func TestHandler_GetTaskThread_ShowsPrimaryAgentDefinition(t *testing.T) {
 }
 
 func TestHandler_GetTaskThread_HidesLifecycleAgentActivity(t *testing.T) {
-	h, e, llmConfigRepo, db := setupTestHandlerWithDB(t)
-	h.SetLifecycleRepo(teststores.Of(db).Lifecycle)
+	h, e, llmConfigRepo, db := setupTestHandlerWithStores(t)
+	h.SetLifecycleRepo(db.Lifecycle)
 	ctx := context.Background()
 	agent := createAgent(t, llmConfigRepo, func(a *models.LLMConfig) { a.Temperature = 1.0 })
 	project := createProject(t, h, "Lifecycle Thread Project")

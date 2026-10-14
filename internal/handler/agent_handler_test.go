@@ -20,7 +20,6 @@ import (
 	"github.com/openvibely/openvibely/internal/agentplugins"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
-	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/openvibely/openvibely/internal/testutil/teststores"
@@ -34,8 +33,8 @@ func (f llmCallerFunc) CallModel(ctx context.Context, prompt string, attachments
 }
 
 func TestHandler_ListAgents_DeleteConfirmationDialog(t *testing.T) {
-	h, e, _, db := setupTestHandlerWithDB(t)
-	agentRepo := teststores.Of(db).Agents
+	h, e, _, db := setupTestHandlerWithStores(t)
+	agentRepo := db.Agents
 	h.SetAgentRepo(agentRepo)
 
 	// Create a non-protected user agent so the working Delete button is rendered.
@@ -89,8 +88,8 @@ func TestHandler_ListAgents_DeleteConfirmationDialog(t *testing.T) {
 }
 
 func TestHandler_ListAgents_NewAgentModalPreservesCurrentProject(t *testing.T) {
-	h, e, _, db := setupTestHandlerWithDB(t)
-	h.SetAgentRepo(teststores.Of(db).Agents)
+	h, e, _, db := setupTestHandlerWithStores(t)
+	h.SetAgentRepo(db.Agents)
 
 	projectA := &models.Project{Name: "Stored Project A", RepoPath: t.TempDir()}
 	if err := h.projectSvc.Create(t.Context(), projectA); err != nil {
@@ -131,8 +130,8 @@ func TestHandler_ListAgents_NewAgentModalPreservesCurrentProject(t *testing.T) {
 }
 
 func TestHandler_ListAgents_IncludesGenerateUI(t *testing.T) {
-	h, e, _, db := setupTestHandlerWithDB(t)
-	h.SetAgentRepo(teststores.Of(db).Agents)
+	h, e, _, db := setupTestHandlerWithStores(t)
+	h.SetAgentRepo(db.Agents)
 
 	req := httptest.NewRequest(http.MethodGet, "/agents?project_id=default", nil)
 	rec := httptest.NewRecorder()
@@ -473,8 +472,8 @@ func TestHandler_ListAgents_IncludesGenerateUI(t *testing.T) {
 }
 
 func TestHandler_AgentsPage_IncludesRealtimeScopedDirectoryValidation(t *testing.T) {
-	h, e, _, db := setupTestHandlerWithDB(t)
-	h.SetAgentRepo(teststores.Of(db).Agents)
+	h, e, _, db := setupTestHandlerWithStores(t)
+	h.SetAgentRepo(db.Agents)
 
 	req := httptest.NewRequest(http.MethodGet, "/agents?project_id=default", nil)
 	rec := httptest.NewRecorder()
@@ -506,8 +505,8 @@ func TestHandler_CreateAgent_RejectsUnsafeScopedFilesDirectory(t *testing.T) {
 	unsafeDirectories := []string{"../secrets", `..\\secrets`, "/tmp/secrets", "~/secrets", "C:/secrets"}
 	for _, directory := range unsafeDirectories {
 		t.Run(directory, func(t *testing.T) {
-			h, e, _, db := setupTestHandlerWithDB(t)
-			h.SetAgentRepo(teststores.Of(db).Agents)
+			h, e, _, db := setupTestHandlerWithStores(t)
+			h.SetAgentRepo(db.Agents)
 
 			config, err := json.Marshal(models.AgentToolConfig{ScopedFiles: []models.ScopedFilesConfig{{Directory: directory, Permissions: []string{"read"}}}})
 			if err != nil {
@@ -541,8 +540,8 @@ func TestHandler_CreateAgent_RejectsUnsafeScopedFilesDirectory(t *testing.T) {
 }
 
 func TestHandler_GenerateAgent_FallbackWithoutLLM(t *testing.T) {
-	h, e, _, db := setupTestHandlerWithDB(t)
-	h.SetAgentRepo(teststores.Of(db).Agents)
+	h, e, _, db := setupTestHandlerWithStores(t)
+	h.SetAgentRepo(db.Agents)
 	h.llmSvc = nil // Force deterministic fallback generation path.
 
 	form := url.Values{}
@@ -595,8 +594,8 @@ func TestHandler_GenerateAgent_FallbackWithoutLLM(t *testing.T) {
 }
 
 func TestHandler_GenerateAgent_FallbackUIUXProducesStructuredSkills(t *testing.T) {
-	h, e, _, db := setupTestHandlerWithDB(t)
-	h.SetAgentRepo(teststores.Of(db).Agents)
+	h, e, _, db := setupTestHandlerWithStores(t)
+	h.SetAgentRepo(db.Agents)
 	h.llmSvc = nil
 
 	form := url.Values{}
@@ -631,8 +630,8 @@ func TestHandler_GenerateAgent_FallbackUIUXProducesStructuredSkills(t *testing.T
 }
 
 func TestHandler_GenerateAgent_UsesOnlyPinnedDefaultModel(t *testing.T) {
-	h, e, llmConfigRepo, db := setupTestHandlerWithDB(t)
-	h.SetAgentRepo(teststores.Of(db).Agents)
+	h, e, llmConfigRepo, db := setupTestHandlerWithStores(t)
+	h.SetAgentRepo(db.Agents)
 
 	defaultCfg := createAgent(t, llmConfigRepo, func(a *models.LLMConfig) {
 		a.Name = "Pinned Generator"
@@ -689,8 +688,8 @@ func TestHandler_GenerateAgent_UsesOnlyPinnedDefaultModel(t *testing.T) {
 }
 
 func TestHandler_GenerateAgent_RetriesTransientTimeoutThenSucceeds(t *testing.T) {
-	h, e, llmConfigRepo, db := setupTestHandlerWithDB(t)
-	h.SetAgentRepo(teststores.Of(db).Agents)
+	h, e, llmConfigRepo, db := setupTestHandlerWithStores(t)
+	h.SetAgentRepo(db.Agents)
 
 	_ = createAgent(t, llmConfigRepo, func(a *models.LLMConfig) {
 		a.Name = "Pinned Generator"
@@ -746,8 +745,8 @@ func TestHandler_GenerateAgent_RetriesTransientTimeoutThenSucceeds(t *testing.T)
 }
 
 func TestHandler_GenerateAgent_TimeoutUsesClearFallbackError(t *testing.T) {
-	h, e, llmConfigRepo, db := setupTestHandlerWithDB(t)
-	h.SetAgentRepo(teststores.Of(db).Agents)
+	h, e, llmConfigRepo, db := setupTestHandlerWithStores(t)
+	h.SetAgentRepo(db.Agents)
 
 	defaultCfg := createAgent(t, llmConfigRepo, func(a *models.LLMConfig) {
 		a.Name = "Pinned Generator"
@@ -791,8 +790,8 @@ func TestHandler_GenerateAgent_TimeoutUsesClearFallbackError(t *testing.T) {
 }
 
 func TestHandler_GenerateAgent_RepairsMalformedJSONResponse(t *testing.T) {
-	h, e, llmConfigRepo, db := setupTestHandlerWithDB(t)
-	h.SetAgentRepo(teststores.Of(db).Agents)
+	h, e, llmConfigRepo, db := setupTestHandlerWithStores(t)
+	h.SetAgentRepo(db.Agents)
 
 	_ = createAgent(t, llmConfigRepo, func(a *models.LLMConfig) {
 		a.Name = "Pinned Generator"
@@ -852,8 +851,8 @@ func TestHandler_GenerateAgent_RepairsMalformedJSONResponse(t *testing.T) {
 }
 
 func TestHandler_GenerateAgent_IgnoresToolWrapperPrefixAndParsesJSON(t *testing.T) {
-	h, e, llmConfigRepo, db := setupTestHandlerWithDB(t)
-	h.SetAgentRepo(teststores.Of(db).Agents)
+	h, e, llmConfigRepo, db := setupTestHandlerWithStores(t)
+	h.SetAgentRepo(db.Agents)
 
 	_ = createAgent(t, llmConfigRepo, func(a *models.LLMConfig) {
 		a.Name = "Pinned Generator"
@@ -902,8 +901,8 @@ func TestHandler_GenerateAgent_IgnoresToolWrapperPrefixAndParsesJSON(t *testing.
 }
 
 func TestHandler_GenerateAgent_PluginToolOnlyOutputSucceedsOnFirstAttempt(t *testing.T) {
-	h, e, llmConfigRepo, db := setupTestHandlerWithDB(t)
-	h.SetAgentRepo(teststores.Of(db).Agents)
+	h, e, llmConfigRepo, db := setupTestHandlerWithStores(t)
+	h.SetAgentRepo(db.Agents)
 
 	_ = createAgent(t, llmConfigRepo, func(a *models.LLMConfig) {
 		a.Name = "Codex Generator"
@@ -1017,8 +1016,8 @@ func TestBuildAgentGenerationPromptsAvoidProductNameInjection(t *testing.T) {
 }
 
 func TestHandler_GenerateAgent_MalformedJSONFallsBackWithClearError(t *testing.T) {
-	h, e, llmConfigRepo, db := setupTestHandlerWithDB(t)
-	h.SetAgentRepo(teststores.Of(db).Agents)
+	h, e, llmConfigRepo, db := setupTestHandlerWithStores(t)
+	h.SetAgentRepo(db.Agents)
 
 	defaultCfg := createAgent(t, llmConfigRepo, func(a *models.LLMConfig) {
 		a.Name = "Pinned Generator"
@@ -1074,8 +1073,8 @@ func TestHandler_GenerateAgent_MalformedJSONFallsBackWithClearError(t *testing.T
 }
 
 func TestHandler_GenerateAgent_RecoversFromProviderMalformedJSONError(t *testing.T) {
-	h, e, llmConfigRepo, db := setupTestHandlerWithDB(t)
-	h.SetAgentRepo(teststores.Of(db).Agents)
+	h, e, llmConfigRepo, db := setupTestHandlerWithStores(t)
+	h.SetAgentRepo(db.Agents)
 
 	_ = createAgent(t, llmConfigRepo, func(a *models.LLMConfig) {
 		a.Name = "Pinned Generator"
@@ -1135,8 +1134,8 @@ func TestHandler_GenerateAgent_RecoversFromProviderMalformedJSONError(t *testing
 }
 
 func TestHandler_GenerateAgent_ProviderMalformedJSONFallsBackWithActionableError(t *testing.T) {
-	h, e, llmConfigRepo, db := setupTestHandlerWithDB(t)
-	h.SetAgentRepo(teststores.Of(db).Agents)
+	h, e, llmConfigRepo, db := setupTestHandlerWithStores(t)
+	h.SetAgentRepo(db.Agents)
 
 	defaultCfg := createAgent(t, llmConfigRepo, func(a *models.LLMConfig) {
 		a.Name = "Pinned Generator"
@@ -1243,8 +1242,8 @@ func TestBuildAgentGenerationPrompt_ExcludesPluginAndToolCatalogContext(t *testi
 }
 
 func TestHandler_GenerateAgent_FallbackIncludesSelectedPlugins(t *testing.T) {
-	h, e, _, db := setupTestHandlerWithDB(t)
-	h.SetAgentRepo(teststores.Of(db).Agents)
+	h, e, _, db := setupTestHandlerWithStores(t)
+	h.SetAgentRepo(db.Agents)
 	h.llmSvc = nil
 
 	origDiscover := discoverPluginStateFn
@@ -1299,8 +1298,8 @@ func TestHandler_GenerateAgent_FallbackIncludesSelectedPlugins(t *testing.T) {
 }
 
 func TestHandler_CreateAgent_DefaultsPluginsOffWhenNotSelected(t *testing.T) {
-	h, e, llmConfigRepo, db := setupTestHandlerWithDB(t)
-	agentRepo := teststores.Of(db).Agents
+	h, e, llmConfigRepo, db := setupTestHandlerWithStores(t)
+	agentRepo := db.Agents
 	h.SetAgentRepo(agentRepo)
 
 	if err := llmConfigRepo.Create(context.Background(), &models.LLMConfig{
@@ -1342,7 +1341,7 @@ func TestHandler_CreateAgent_DefaultsPluginsOffWhenNotSelected(t *testing.T) {
 		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
 	}
 
-	agents, err := agentRepo.(*sqlite.AgentRepo).List(context.Background())
+	agents, err := liveTestAgents(context.Background(), agentRepo)
 	if err != nil {
 		t.Fatalf("list agents: %v", err)
 	}
@@ -1366,8 +1365,8 @@ func TestHandler_CreateAgent_DefaultsPluginsOffWhenNotSelected(t *testing.T) {
 }
 
 func TestHandler_CreateAgent_PersistsSendMessageToolGrant(t *testing.T) {
-	h, e, _, db := setupTestHandlerWithDB(t)
-	agentRepo := teststores.Of(db).Agents
+	h, e, _, db := setupTestHandlerWithStores(t)
+	agentRepo := db.Agents
 	h.SetAgentRepo(agentRepo)
 
 	form := url.Values{}
@@ -1390,7 +1389,7 @@ func TestHandler_CreateAgent_PersistsSendMessageToolGrant(t *testing.T) {
 		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
 	}
 
-	agents, err := agentRepo.(*sqlite.AgentRepo).List(context.Background())
+	agents, err := liveTestAgents(context.Background(), agentRepo)
 	if err != nil {
 		t.Fatalf("list agents: %v", err)
 	}
@@ -1406,8 +1405,8 @@ func TestHandler_CreateAgent_PersistsSendMessageToolGrant(t *testing.T) {
 }
 
 func TestHandler_CreateAgent_RejectsUninstalledPluginSelection(t *testing.T) {
-	h, e, _, db := setupTestHandlerWithDB(t)
-	h.SetAgentRepo(teststores.Of(db).Agents)
+	h, e, _, db := setupTestHandlerWithStores(t)
+	h.SetAgentRepo(db.Agents)
 
 	origDiscover := discoverPluginStateFn
 	defer func() { discoverPluginStateFn = origDiscover }()
@@ -1439,8 +1438,8 @@ func TestHandler_CreateAgent_RejectsUninstalledPluginSelection(t *testing.T) {
 }
 
 func TestHandler_UpdateAgent_IsolatesPluginSelectionPerAgent(t *testing.T) {
-	h, e, llmConfigRepo, db := setupTestHandlerWithDB(t)
-	agentRepo := teststores.Of(db).Agents
+	h, e, llmConfigRepo, db := setupTestHandlerWithStores(t)
+	agentRepo := db.Agents
 	h.SetAgentRepo(agentRepo)
 
 	if err := llmConfigRepo.Create(context.Background(), &models.LLMConfig{
@@ -1510,8 +1509,8 @@ func TestHandler_UpdateAgent_IsolatesPluginSelectionPerAgent(t *testing.T) {
 }
 
 func TestHandler_ListAgents_IncludesDefaultOffPluginText(t *testing.T) {
-	h, e, llmConfigRepo, db := setupTestHandlerWithDB(t)
-	h.SetAgentRepo(teststores.Of(db).Agents)
+	h, e, llmConfigRepo, db := setupTestHandlerWithStores(t)
+	h.SetAgentRepo(db.Agents)
 
 	openAIConfig := &models.LLMConfig{
 		Name:       "GPT 5.4",
@@ -1794,7 +1793,7 @@ func agentDialogModelForm(name, model string) url.Values {
 
 func requireUserAgentByName(t *testing.T, repo persistence.AgentStore, name string) models.Agent {
 	t.Helper()
-	agents, err := repo.(*sqlite.AgentRepo).List(t.Context())
+	agents, err := liveTestAgents(t.Context(), repo)
 	if err != nil {
 		t.Fatalf("list agents: %v", err)
 	}
@@ -1847,8 +1846,8 @@ func assertGenerateAgentLoadedFullDefaultModel(t *testing.T, statements []string
 }
 
 func TestHandler_GenerateAgent_RejectsUninstalledPluginSelection(t *testing.T) {
-	h, e, _, db := setupTestHandlerWithDB(t)
-	h.SetAgentRepo(teststores.Of(db).Agents)
+	h, e, _, db := setupTestHandlerWithStores(t)
+	h.SetAgentRepo(db.Agents)
 	h.llmSvc = nil
 
 	origDiscover := discoverPluginStateFn
@@ -1875,7 +1874,7 @@ func TestHandler_GenerateAgent_RejectsUninstalledPluginSelection(t *testing.T) {
 }
 
 func TestHandler_GetPluginState_IncludesRuntimeStatus(t *testing.T) {
-	_, e, _, _ := setupTestHandlerWithDB(t)
+	_, e, _, _ := setupTestHandlerWithStores(t)
 
 	origDiscover := discoverPluginStateFn
 	origRuntime := pluginMCPRuntimeStateFn
@@ -1918,7 +1917,7 @@ func TestHandler_GetPluginState_IncludesRuntimeStatus(t *testing.T) {
 }
 
 func TestHandler_GetPluginState_RuntimePluginIDEnriched(t *testing.T) {
-	_, e, _, _ := setupTestHandlerWithDB(t)
+	_, e, _, _ := setupTestHandlerWithStores(t)
 
 	origDiscover := discoverPluginStateFn
 	origRuntime := pluginMCPRuntimeStateFn
@@ -1987,7 +1986,7 @@ func TestHandler_GetPluginState_RuntimePluginIDEnriched(t *testing.T) {
 }
 
 func TestHandler_InstallPlugin_ReturnsMCPStartupWarning(t *testing.T) {
-	h, e, _, _ := setupTestHandlerWithDB(t)
+	h, e, _, _ := setupTestHandlerWithStores(t)
 
 	origInstall := installPluginFn
 	origEnsure := ensurePluginMCPRunningFn
@@ -2055,7 +2054,7 @@ func TestHandler_InstallPlugin_ReturnsMCPStartupWarning(t *testing.T) {
 }
 
 func TestHandler_InstallPlugin_TargetInstallFailureReturnsBadRequest(t *testing.T) {
-	_, e, _, _ := setupTestHandlerWithDB(t)
+	_, e, _, _ := setupTestHandlerWithStores(t)
 
 	origInstall := installPluginFn
 	origEnsure := ensurePluginMCPRunningFn
@@ -2100,8 +2099,8 @@ func TestHandler_InstallPlugin_TargetInstallFailureReturnsBadRequest(t *testing.
 }
 
 func TestHandler_InstallPlugin_EditAgentAutoEnablesPlugin(t *testing.T) {
-	h, e, _, db := setupTestHandlerWithDB(t)
-	agentRepo := teststores.Of(db).Agents
+	h, e, _, db := setupTestHandlerWithStores(t)
+	agentRepo := db.Agents
 	h.SetAgentRepo(agentRepo)
 
 	agent := &models.Agent{Name: "agent-a", Description: "a", SystemPrompt: "a", Model: "inherit", Tools: []string{"Read"}}
@@ -2165,8 +2164,8 @@ func TestHandler_InstallPlugin_EditAgentAutoEnablesPlugin(t *testing.T) {
 }
 
 func TestHandler_InstallPlugin_EditAgentEnableFailureReturnsRetryableError(t *testing.T) {
-	h, e, _, db := setupTestHandlerWithDB(t)
-	agentRepo := teststores.Of(db).Agents
+	h, e, _, db := setupTestHandlerWithStores(t)
+	agentRepo := db.Agents
 	h.SetAgentRepo(agentRepo)
 
 	agent := &models.Agent{Name: "agent-a", Description: "a", SystemPrompt: "a", Model: "inherit", Tools: []string{"Read"}}
@@ -2229,7 +2228,7 @@ func TestHandler_InstallPlugin_EditAgentEnableFailureReturnsRetryableError(t *te
 }
 
 func TestHandler_UninstallPlugin_SuccessSuppressesReconcileWarningPayload(t *testing.T) {
-	h, e, _, _ := setupTestHandlerWithDB(t)
+	h, e, _, _ := setupTestHandlerWithStores(t)
 
 	origUninstall := uninstallPluginFn
 	origReconcile := reconcilePluginMCPRunningFn
@@ -2288,7 +2287,7 @@ func TestHandler_UninstallPlugin_SuccessSuppressesReconcileWarningPayload(t *tes
 }
 
 func TestHandler_UninstallPlugin_ErrorReturnsBadRequest(t *testing.T) {
-	_, e, _, _ := setupTestHandlerWithDB(t)
+	_, e, _, _ := setupTestHandlerWithStores(t)
 
 	origUninstall := uninstallPluginFn
 	defer func() {
@@ -2313,8 +2312,8 @@ func TestHandler_UninstallPlugin_ErrorReturnsBadRequest(t *testing.T) {
 }
 
 func TestHandler_CreateAgent_RejectsInvalidScopedFilesDirectory(t *testing.T) {
-	h, e, _, db := setupTestHandlerWithDB(t)
-	h.SetAgentRepo(teststores.Of(db).Agents)
+	h, e, _, db := setupTestHandlerWithStores(t)
+	h.SetAgentRepo(db.Agents)
 
 	cases := []string{"/tmp/outside", "../outside", ".."}
 	for _, dir := range cases {
@@ -2370,8 +2369,8 @@ func TestHandler_AgentDialogFormParsing_CreateAndUpdatePersistSharedFields(t *te
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			h, e, llmConfigRepo, db := setupTestHandlerWithDB(t)
-			agentRepo := teststores.Of(db).Agents
+			h, e, llmConfigRepo, db := setupTestHandlerWithStores(t)
+			agentRepo := db.Agents
 			h.SetAgentRepo(agentRepo)
 
 			model := createAgent(t, llmConfigRepo, func(a *models.LLMConfig) {
@@ -2474,8 +2473,8 @@ func TestHandler_AgentDialogFormParsing_CreateAndUpdatePersistSharedFields(t *te
 }
 
 func TestHandler_UpdateAgent_OmittedOptionalJSONFieldsPreserveExistingValues(t *testing.T) {
-	h, e, llmConfigRepo, db := setupTestHandlerWithDB(t)
-	agentRepo := teststores.Of(db).Agents
+	h, e, llmConfigRepo, db := setupTestHandlerWithStores(t)
+	agentRepo := db.Agents
 	h.SetAgentRepo(agentRepo)
 	model := createAgent(t, llmConfigRepo, func(a *models.LLMConfig) {
 		a.Model = "omitted-json-model"
@@ -2563,8 +2562,8 @@ func TestHandler_AgentDialogFormParsing_RejectsInvalidToolConfigForCreateAndUpda
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			h, e, _, db := setupTestHandlerWithDB(t)
-			agentRepo := teststores.Of(db).Agents
+			h, e, _, db := setupTestHandlerWithStores(t)
+			agentRepo := db.Agents
 			h.SetAgentRepo(agentRepo)
 			var agentID string
 			if tc.method == http.MethodPut {
@@ -2608,8 +2607,8 @@ func TestHandler_AgentDialogFormParsing_RejectsInvalidPluginIDsForCreateAndUpdat
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			h, e, _, db := setupTestHandlerWithDB(t)
-			agentRepo := teststores.Of(db).Agents
+			h, e, _, db := setupTestHandlerWithStores(t)
+			agentRepo := db.Agents
 			h.SetAgentRepo(agentRepo)
 			origDiscover := discoverPluginStateFn
 			defer func() { discoverPluginStateFn = origDiscover }()
@@ -2673,9 +2672,9 @@ func agentNameValidationForm(name string) url.Values {
 }
 
 func TestHandler_CreateAgent_RollsBackWhenMaterializationFails(t *testing.T) {
-	h, e, _, db := setupTestHandlerWithDB(t)
-	agentRepo := teststores.Of(db).Agents
-	lifecycleRepo := teststores.Of(db).Lifecycle
+	h, e, _, db := setupTestHandlerWithStores(t)
+	agentRepo := db.Agents
+	lifecycleRepo := db.Lifecycle
 	h.SetAgentRepo(agentRepo)
 	h.SetLifecycleRepo(lifecycleRepo)
 
@@ -2688,8 +2687,8 @@ func TestHandler_CreateAgent_RollsBackWhenMaterializationFails(t *testing.T) {
 	form.Set("scope", "global")
 	form.Set("lifecycle_hooks_json", `[{"when":"before_run","skill_key":"load_context","enabled":true}]`)
 
-	var hookCountBefore int
-	require.NoError(t, db.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM agent_lifecycle_hooks`).Scan(&hookCountBefore))
+	hookCountBefore, err := db.Fixtures.CountLifecycleHooks(t.Context())
+	require.NoError(t, err)
 
 	rec := performAgentDialogRequest(t, e, http.MethodPost, "/agents", form)
 	require.Equal(t, http.StatusInternalServerError, rec.Code, rec.Body.String())
@@ -2697,8 +2696,8 @@ func TestHandler_CreateAgent_RollsBackWhenMaterializationFails(t *testing.T) {
 	matches, err := agentRepo.ListByName(t.Context(), "Retryable Browser Agent")
 	require.NoError(t, err)
 	require.Empty(t, matches)
-	var hookCount int
-	require.NoError(t, db.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM agent_lifecycle_hooks`).Scan(&hookCount))
+	hookCount, err := db.Fixtures.CountLifecycleHooks(t.Context())
+	require.NoError(t, err)
 	require.Equal(t, hookCountBefore, hookCount)
 
 	require.NoError(t, os.Remove(root))
@@ -2719,8 +2718,8 @@ func TestHandler_CreateAgent_RollsBackWhenMaterializationFails(t *testing.T) {
 }
 
 func TestHandler_CreateAgent_RejectsBlankAndDuplicateSelectableNames(t *testing.T) {
-	h, e, _, db := setupTestHandlerWithDB(t)
-	agentRepo := teststores.Of(db).Agents
+	h, e, _, db := setupTestHandlerWithStores(t)
+	agentRepo := db.Agents
 	h.SetAgentRepo(agentRepo)
 
 	blank := agentNameValidationForm("   \t  ")
@@ -2732,7 +2731,7 @@ func TestHandler_CreateAgent_RejectsBlankAndDuplicateSelectableNames(t *testing.
 		t.Fatalf("expected controlled blank-name validation error, got %s", rec.Body.String())
 	}
 
-	agents, err := agentRepo.(*sqlite.AgentRepo).List(t.Context())
+	agents, err := liveTestAgents(t.Context(), agentRepo)
 	if err != nil {
 		t.Fatalf("list agents: %v", err)
 	}
@@ -2763,7 +2762,7 @@ func TestHandler_CreateAgent_RejectsBlankAndDuplicateSelectableNames(t *testing.
 	if !strings.Contains(strings.ToLower(rec.Body.String()), "already exists") {
 		t.Fatalf("expected duplicate-name validation error, got %s", rec.Body.String())
 	}
-	matches, err := agentRepo.(*sqlite.AgentRepo).ListSelectableByName(t.Context(), "Reviewer")
+	matches, err := selectableTestAgentsByName(t.Context(), agentRepo, "Reviewer")
 	if err != nil {
 		t.Fatalf("list reviewer matches: %v", err)
 	}
@@ -2773,8 +2772,8 @@ func TestHandler_CreateAgent_RejectsBlankAndDuplicateSelectableNames(t *testing.
 }
 
 func TestHandler_UpdateAgent_RejectsBlankAndDuplicateSelectableNamesWithoutMutating(t *testing.T) {
-	h, e, _, db := setupTestHandlerWithDB(t)
-	agentRepo := teststores.Of(db).Agents
+	h, e, _, db := setupTestHandlerWithStores(t)
+	agentRepo := db.Agents
 	h.SetAgentRepo(agentRepo)
 
 	reviewer := &models.Agent{Name: "Reviewer", Key: "reviewer", Model: "inherit", Enabled: true, SelectableAsPrimary: true}
@@ -2827,8 +2826,8 @@ func TestHandler_UpdateAgent_RejectsBlankAndDuplicateSelectableNamesWithoutMutat
 }
 
 func TestHandler_AgentNameValidation_AllowsDisabledAndNonPrimaryDuplicates(t *testing.T) {
-	h, e, _, db := setupTestHandlerWithDB(t)
-	agentRepo := teststores.Of(db).Agents
+	h, e, _, db := setupTestHandlerWithStores(t)
+	agentRepo := db.Agents
 	h.SetAgentRepo(agentRepo)
 
 	primary := &models.Agent{Name: "Reviewer", Key: "reviewer", Model: "inherit", Enabled: true, SelectableAsPrimary: true}
@@ -2850,7 +2849,7 @@ func TestHandler_AgentNameValidation_AllowsDisabledAndNonPrimaryDuplicates(t *te
 		t.Fatalf("expected non-primary duplicate create status 200, got %d: %s", rec.Code, rec.Body.String())
 	}
 
-	matches, err := agentRepo.(*sqlite.AgentRepo).ListSelectableByName(t.Context(), "Reviewer")
+	matches, err := selectableTestAgentsByName(t.Context(), agentRepo, "Reviewer")
 	if err != nil {
 		t.Fatalf("list selectable reviewer matches: %v", err)
 	}
@@ -2860,8 +2859,8 @@ func TestHandler_AgentNameValidation_AllowsDisabledAndNonPrimaryDuplicates(t *te
 }
 
 func TestHandler_AgentsPage_AdvancedTabsAreReachableAndSubmitted(t *testing.T) {
-	h, e, _, db := setupTestHandlerWithDB(t)
-	agentRepo := teststores.Of(db).Agents
+	h, e, _, db := setupTestHandlerWithStores(t)
+	agentRepo := db.Agents
 	h.SetAgentRepo(agentRepo)
 	protected := &models.Agent{Name: "System: Goal Agent", Key: "test_goal_agent_ui", SystemKind: models.AgentSystemKindGoal, SystemPrompt: "goal", Model: "inherit", GeneratedStatus: models.AgentStatusProtected, CreatedBy: models.AgentCreatedBySystem, Enabled: true}
 	if err := agentRepo.Create(t.Context(), protected); err != nil {
@@ -2906,9 +2905,9 @@ func TestHandler_AgentsPage_AdvancedTabsAreReachableAndSubmitted(t *testing.T) {
 }
 
 func TestHandler_CreateAgent_PersistsLifecycleTabs(t *testing.T) {
-	h, e, _, db := setupTestHandlerWithDB(t)
-	agentRepo := teststores.Of(db).Agents
-	lifecycleRepo := teststores.Of(db).Lifecycle
+	h, e, _, db := setupTestHandlerWithStores(t)
+	agentRepo := db.Agents
+	lifecycleRepo := db.Lifecycle
 	h.SetAgentRepo(agentRepo)
 	h.SetLifecycleRepo(lifecycleRepo)
 
@@ -2937,7 +2936,7 @@ func TestHandler_CreateAgent_PersistsLifecycleTabs(t *testing.T) {
 		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
 	}
 
-	agents, err := agentRepo.(*sqlite.AgentRepo).List(t.Context())
+	agents, err := liveTestAgents(t.Context(), agentRepo)
 	if err != nil {
 		t.Fatalf("list agents: %v", err)
 	}
@@ -2973,8 +2972,8 @@ func TestHandler_CreateAgent_PersistsLifecycleTabs(t *testing.T) {
 }
 
 func TestHandler_CreateAgent_ConvertsFormSkillsToAgentOwnedSkillFiles(t *testing.T) {
-	h, e, _, db := setupTestHandlerWithDB(t)
-	agentRepo := teststores.Of(db).Agents
+	h, e, _, db := setupTestHandlerWithStores(t)
+	agentRepo := db.Agents
 	h.SetAgentRepo(agentRepo)
 	root := t.TempDir()
 	h.SetAgentSkillRoot(root)
@@ -3033,8 +3032,8 @@ func TestHandler_CreateAgent_ConvertsFormSkillsToAgentOwnedSkillFiles(t *testing
 }
 
 func TestHandler_ListAgents_MaterializesLegacyDBAgentsToDisk(t *testing.T) {
-	h, e, _, db := setupTestHandlerWithDB(t)
-	agentRepo := teststores.Of(db).Agents
+	h, e, _, db := setupTestHandlerWithStores(t)
+	agentRepo := db.Agents
 	h.SetAgentRepo(agentRepo)
 	root := t.TempDir()
 	h.SetAgentSkillRoot(root)
@@ -3095,11 +3094,11 @@ func TestHandler_ListAgents_MaterializesLegacyDBAgentsToDisk(t *testing.T) {
 }
 
 func TestHandler_ListAgents_ProjectScopedAgentMaterializesInOwningProject(t *testing.T) {
-	h, e, _, db := setupTestHandlerWithDB(t)
-	agentRepo := teststores.Of(db).Agents
-	lifecycleRepo := teststores.Of(db).Lifecycle
-	taskRepo := teststores.Of(db).Tasks
-	scheduleRepo := teststores.Of(db).Schedules
+	h, e, _, db := setupTestHandlerWithStores(t)
+	agentRepo := db.Agents
+	lifecycleRepo := db.Lifecycle
+	taskRepo := db.Tasks
+	scheduleRepo := db.Schedules
 	globalRoot := t.TempDir()
 	maintenanceSvc := service.NewAgentLibraryMaintenanceService(taskRepo, scheduleRepo, agentRepo)
 	maintenanceSvc.SetLifecycleRepo(lifecycleRepo)
@@ -3176,11 +3175,11 @@ func TestHandler_ListAgents_ProjectScopedAgentMaterializesInOwningProject(t *tes
 }
 
 func TestHandler_ListAgents_IgnoresProjectDeclarationFromWrongRoot(t *testing.T) {
-	h, e, _, db := setupTestHandlerWithDB(t)
-	agentRepo := teststores.Of(db).Agents
-	lifecycleRepo := teststores.Of(db).Lifecycle
-	taskRepo := teststores.Of(db).Tasks
-	scheduleRepo := teststores.Of(db).Schedules
+	h, e, _, db := setupTestHandlerWithStores(t)
+	agentRepo := db.Agents
+	lifecycleRepo := db.Lifecycle
+	taskRepo := db.Tasks
+	scheduleRepo := db.Schedules
 	globalRoot := t.TempDir()
 	maintenanceSvc := service.NewAgentLibraryMaintenanceService(taskRepo, scheduleRepo, agentRepo)
 	maintenanceSvc.SetLifecycleRepo(lifecycleRepo)
@@ -3276,8 +3275,8 @@ func TestHandler_ListAgents_IgnoresProjectDeclarationFromWrongRoot(t *testing.T)
 }
 
 func TestHandler_UpdateAgent_RefreshesMaterializedAgentRootFile(t *testing.T) {
-	h, e, _, db := setupTestHandlerWithDB(t)
-	agentRepo := teststores.Of(db).Agents
+	h, e, _, db := setupTestHandlerWithStores(t)
+	agentRepo := db.Agents
 	h.SetAgentRepo(agentRepo)
 	root := t.TempDir()
 	h.SetAgentSkillRoot(root)
@@ -3320,8 +3319,8 @@ func TestHandler_UpdateAgent_RefreshesMaterializedAgentRootFile(t *testing.T) {
 }
 
 func TestHandler_UpdateAgent_AllowsEligibleSystemAgentModelAndEnabledControls(t *testing.T) {
-	h, e, llmConfigRepo, db := setupTestHandlerWithDB(t)
-	agentRepo := teststores.Of(db).Agents
+	h, e, llmConfigRepo, db := setupTestHandlerWithStores(t)
+	agentRepo := db.Agents
 	h.SetAgentRepo(agentRepo)
 	modelCfg := createAgent(t, llmConfigRepo, func(a *models.LLMConfig) {
 		a.Name = "System Control Model"
@@ -3378,8 +3377,8 @@ func TestHandler_UpdateAgent_AllowsEligibleSystemAgentModelAndEnabledControls(t 
 }
 
 func TestHandler_UpdateAgent_AllowsProtectedSystemAgentSaveWithDisabledFieldsOmitted(t *testing.T) {
-	h, e, llmConfigRepo, db := setupTestHandlerWithDB(t)
-	agentRepo := teststores.Of(db).Agents
+	h, e, llmConfigRepo, db := setupTestHandlerWithStores(t)
+	agentRepo := db.Agents
 	h.SetAgentRepo(agentRepo)
 	modelCfg := createAgent(t, llmConfigRepo, func(a *models.LLMConfig) {
 		a.Name = "Browser System Control Model"
@@ -3438,8 +3437,8 @@ func TestHandler_UpdateAgent_AllowsProtectedSystemAgentSaveWithDisabledFieldsOmi
 }
 
 func TestHandler_UpdateAgent_RejectsRequiredGoalAgentDisable(t *testing.T) {
-	h, e, llmConfigRepo, db := setupTestHandlerWithDB(t)
-	agentRepo := teststores.Of(db).Agents
+	h, e, llmConfigRepo, db := setupTestHandlerWithStores(t)
+	agentRepo := db.Agents
 	h.SetAgentRepo(agentRepo)
 	modelCfg := createAgent(t, llmConfigRepo, func(a *models.LLMConfig) {
 		a.Name = "Goal Model"
@@ -3492,8 +3491,8 @@ func TestHandler_UpdateAgent_RejectsRequiredGoalAgentDisable(t *testing.T) {
 }
 
 func TestHandler_UpdateAgent_RejectsProtectedAgentEdits(t *testing.T) {
-	h, e, _, db := setupTestHandlerWithDB(t)
-	agentRepo := teststores.Of(db).Agents
+	h, e, _, db := setupTestHandlerWithStores(t)
+	agentRepo := db.Agents
 	h.SetAgentRepo(agentRepo)
 
 	agent := &models.Agent{
@@ -3537,9 +3536,9 @@ func TestHandler_UpdateAgent_RejectsProtectedAgentEdits(t *testing.T) {
 }
 
 func TestHandler_UpdateAgent_ReconcilesLifecycleHooksFromMainForm(t *testing.T) {
-	h, e, _, db := setupTestHandlerWithDB(t)
-	agentRepo := teststores.Of(db).Agents
-	lifecycleRepo := teststores.Of(db).Lifecycle
+	h, e, _, db := setupTestHandlerWithStores(t)
+	agentRepo := db.Agents
+	lifecycleRepo := db.Lifecycle
 	h.SetAgentRepo(agentRepo)
 	h.SetLifecycleRepo(lifecycleRepo)
 
@@ -3581,8 +3580,8 @@ func TestHandler_UpdateAgent_ReconcilesLifecycleHooksFromMainForm(t *testing.T) 
 }
 
 func TestHandler_UpdateAgent_PersistsDisabledAdvancedFields(t *testing.T) {
-	h, e, _, db := setupTestHandlerWithDB(t)
-	agentRepo := teststores.Of(db).Agents
+	h, e, _, db := setupTestHandlerWithStores(t)
+	agentRepo := db.Agents
 	h.SetAgentRepo(agentRepo)
 
 	agent := &models.Agent{
@@ -3646,11 +3645,11 @@ func TestHandler_UpdateAgent_PersistsDisabledAdvancedFields(t *testing.T) {
 }
 
 func TestHandler_CreateAgent_ProjectScopedUsesExplicitURLProjectOverStoredSelection(t *testing.T) {
-	h, e, _, db := setupTestHandlerWithDB(t)
-	agentRepo := teststores.Of(db).Agents
-	lifecycleRepo := teststores.Of(db).Lifecycle
-	taskRepo := teststores.Of(db).Tasks
-	scheduleRepo := teststores.Of(db).Schedules
+	h, e, _, db := setupTestHandlerWithStores(t)
+	agentRepo := db.Agents
+	lifecycleRepo := db.Lifecycle
+	taskRepo := db.Tasks
+	scheduleRepo := db.Schedules
 
 	globalRoot := t.TempDir()
 	maintenanceSvc := service.NewAgentLibraryMaintenanceService(taskRepo, scheduleRepo, agentRepo)
@@ -3730,11 +3729,11 @@ func TestHandler_CreateAgent_ProjectScopedUsesExplicitURLProjectOverStoredSelect
 //   - proj1 does not get a copied or rewritten agent directory
 //   - DB row remains disabled after a fresh ListAgents call
 func TestHandler_UpdateAgent_ProjectScopedWritesCorrectProjectDirectory(t *testing.T) {
-	h, e, _, db := setupTestHandlerWithDB(t)
-	agentRepo := teststores.Of(db).Agents
-	lifecycleRepo := teststores.Of(db).Lifecycle
-	taskRepo := teststores.Of(db).Tasks
-	scheduleRepo := teststores.Of(db).Schedules
+	h, e, _, db := setupTestHandlerWithStores(t)
+	agentRepo := db.Agents
+	lifecycleRepo := db.Lifecycle
+	taskRepo := db.Tasks
+	scheduleRepo := db.Schedules
 
 	globalRoot := t.TempDir()
 
@@ -3857,8 +3856,8 @@ func TestHandler_UpdateAgent_ProjectScopedWritesCorrectProjectDirectory(t *testi
 }
 
 func TestHandler_ListAgents_RendersAdvancedStateForEditModal(t *testing.T) {
-	h, e, _, db := setupTestHandlerWithDB(t)
-	agentRepo := teststores.Of(db).Agents
+	h, e, _, db := setupTestHandlerWithStores(t)
+	agentRepo := db.Agents
 	h.SetAgentRepo(agentRepo)
 
 	agent := &models.Agent{
@@ -3903,8 +3902,8 @@ func TestHandler_ListAgents_RendersAdvancedStateForEditModal(t *testing.T) {
 }
 
 func TestHandler_DeleteAgentsBulkReportsCleanupFailureAfterDatabaseDelete(t *testing.T) {
-	h, e, _, db := setupTestHandlerWithDB(t)
-	agentRepo := teststores.Of(db).Agents
+	h, e, _, db := setupTestHandlerWithStores(t)
+	agentRepo := db.Agents
 	h.SetAgentRepo(agentRepo)
 	root := t.TempDir()
 	h.SetAgentSkillRoot(root)
@@ -3944,8 +3943,8 @@ func TestHandler_DeleteAgentsBulkReportsCleanupFailureAfterDatabaseDelete(t *tes
 }
 
 func TestHandler_ListAgents_DeleteUsesDurableDeleteRequest(t *testing.T) {
-	h, e, _, db := setupTestHandlerWithDB(t)
-	agentRepo := teststores.Of(db).Agents
+	h, e, _, db := setupTestHandlerWithStores(t)
+	agentRepo := db.Agents
 	h.SetAgentRepo(agentRepo)
 
 	agent := &models.Agent{Name: "Delete Me", Key: "delete_me", Scope: models.AgentScopeGlobal, Model: "inherit", Enabled: true}
@@ -4009,4 +4008,31 @@ func TestParseMCPServersFromSettingsFilePreservesNestedRuntimeFields(t *testing.
 	if !reflect.DeepEqual(servers, want) {
 		t.Fatalf("servers = %#v, want %#v", servers, want)
 	}
+}
+
+func liveTestAgents(ctx context.Context, repo persistence.AgentStore) ([]models.Agent, error) {
+	agents, err := repo.ListIncludingArchived(ctx)
+	if err != nil {
+		return nil, err
+	}
+	live := agents[:0]
+	for _, agent := range agents {
+		if agent.GeneratedStatus != models.AgentStatusArchived {
+			live = append(live, agent)
+		}
+	}
+	return live, nil
+}
+func selectableTestAgentsByName(ctx context.Context, repo persistence.AgentStore, name string) ([]models.Agent, error) {
+	agents, err := repo.ListByName(ctx, name)
+	if err != nil {
+		return nil, err
+	}
+	selected := agents[:0]
+	for _, agent := range agents {
+		if agent.Enabled && agent.SelectableAsPrimary {
+			selected = append(selected, agent)
+		}
+	}
+	return selected, nil
 }

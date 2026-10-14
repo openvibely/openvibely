@@ -22,6 +22,20 @@ type SkillEventFilter struct {
 
 // Fixtures describes test domain state, never tables, query text, or connections.
 type Fixtures interface {
+	WebhookEndpoints(context.Context, string) ([]models.WebhookEndpoint, error)
+	TaskAgentAssignments(context.Context, string) ([]models.TaskAgentAssignment, error)
+	SetLegacyWebhookPriority(context.Context, string, int) error
+	SetInputEditHoldUntil(context.Context, string, time.Time) error
+	FailExecutionReplayWrites(context.Context) error
+	FailSteeringPreparation(context.Context) error
+	CountProjectExecutions(context.Context, string) (int, error)
+	SeedAutomation(context.Context, models.Automation) error
+	SeedAutomationVersion(context.Context, models.AutomationVersion) error
+	AutomationVersions(context.Context, string) ([]models.AutomationVersion, error)
+	SetAutomationNodeConfig(context.Context, string, string) error
+	SeedLifecycleEvent(context.Context, *models.LifecycleExecutionEvent) error
+	SetLifecycleExecutionIdentity(context.Context, string, string, time.Time) error
+	CountLifecycleHooks(context.Context) (int, error)
 	CountProducedCommitStats(context.Context) (int, error)
 	LatestExecution(context.Context) (*models.Execution, error)
 	SeedDiscordAuthorizedUsers(context.Context, []models.DiscordAuthorizedUser) error

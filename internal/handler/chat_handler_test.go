@@ -1897,7 +1897,7 @@ func TestHandler_BrowserPendingAttachmentMetadataFailurePreservesReferencedSessi
 }
 
 func TestCleanupUnpublishedPendingAttachmentSession_RejectsOwnerAcquiredBeforeRemoval(t *testing.T) {
-	h, _, _, _ := setupTestHandlerWithDB(t)
+	h, _, _, _ := setupTestHandlerWithStores(t)
 	project := createProject(t, h, "Pending attachment retirement race")
 	otherTask := createTask(t, h, project.ID, "Late pending owner", func(task *models.Task) {
 		task.Category = models.CategoryBacklog
@@ -1928,7 +1928,7 @@ func TestCleanupUnpublishedPendingAttachmentSession_RejectsOwnerAcquiredBeforeRe
 }
 
 func TestCleanupUnpublishedPendingAttachmentSession_PreservesAlreadyOwnedSession(t *testing.T) {
-	h, _, _, db := setupTestHandlerWithDB(t)
+	h, _, _, db := setupTestHandlerWithStores(t)
 	project := createProject(t, h, "Pending attachment existing owner")
 	ownerTask := createTask(t, h, project.ID, "Existing pending owner", func(task *models.Task) {
 		task.Category = models.CategoryBacklog
@@ -1952,7 +1952,7 @@ func TestCleanupUnpublishedPendingAttachmentSession_PreservesAlreadyOwnedSession
 	require.NoError(t, h.cleanupUnpublishedPendingAttachmentSession(context.Background(), sessionID))
 	require.FileExists(t, pendingFile)
 
-	retired, err := teststores.Of(db).ThreadInputs.IsAttachmentSessionRetired(context.Background(), sessionID)
+	retired, err := db.ThreadInputs.IsAttachmentSessionRetired(context.Background(), sessionID)
 	require.NoError(t, err)
 	require.False(t, retired)
 }
@@ -5585,7 +5585,7 @@ func stopChatStreamSSETest(t *testing.T, cancel context.CancelFunc, errCh <-chan
 }
 
 func TestChatStreamSSE_StreamsHubDeltaBeforeDBUpdate(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	hub := events.NewExecutionStreamHub()
 	tc.handler.SetExecutionStreamHub(hub)
 	exec := createRunningChatStreamExecution(t, tc, "")
@@ -5605,7 +5605,7 @@ func TestChatStreamSSE_StreamsHubDeltaBeforeDBUpdate(t *testing.T) {
 }
 
 func TestChatStreamSSE_DoesNotSubscribeMissingExecution(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	hub := events.NewExecutionStreamHub()
 	tc.handler.SetExecutionStreamHub(hub)
 
@@ -5622,7 +5622,7 @@ func TestChatStreamSSE_DoesNotSubscribeMissingExecution(t *testing.T) {
 }
 
 func TestChatStreamSSE_DBFallbackHonorsOffsetAndClampsMidRune(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	exec := createRunningChatStreamExecution(t, tc, "héllo")
 
 	rec, cancel, errCh := startChatStreamSSETest(t, tc.handler, exec.ID, "offset=2")
@@ -5647,7 +5647,7 @@ func TestChatStreamSSE_ReplaysTerminalOutputBeforeTerminalEvent(t *testing.T) {
 	}
 	for _, tcse := range cases {
 		t.Run(tcse.name, func(t *testing.T) {
-			tc := NewTestContext(t)
+			tc := NewStoreTestContext(t)
 			hub := events.NewExecutionStreamHub()
 			tc.handler.SetExecutionStreamHub(hub)
 			exec := createChatStreamExecution(t, tc, tcse.execStatus, tcse.taskStatus, "héllo final", tcse.errMsg)
@@ -5674,7 +5674,7 @@ func TestChatStreamSSE_ReplaysTerminalOutputBeforeTerminalEvent(t *testing.T) {
 }
 
 func TestChatStreamSSE_HubErrorReplaysDBOutputBeforeExactHubError(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	hub := events.NewExecutionStreamHub()
 	tc.handler.SetExecutionStreamHub(hub)
 	exec := createRunningChatStreamExecution(t, tc, "hello durable tail")
@@ -5702,7 +5702,7 @@ func TestChatStreamSSE_HubErrorReplaysDBOutputBeforeExactHubError(t *testing.T) 
 }
 
 func TestChatStreamSSE_TerminalErrorFramesMultilineData(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	hub := events.NewExecutionStreamHub()
 	tc.handler.SetExecutionStreamHub(hub)
 	exec := createRunningChatStreamExecution(t, tc, "")

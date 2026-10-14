@@ -9,7 +9,6 @@ import (
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/testutil/teststores"
 	"github.com/stretchr/testify/require"
 )
@@ -20,9 +19,9 @@ func TestChatAutoSelectionCatalogFallback(t *testing.T) {
 		{Name: "OAuth retired", Provider: models.ProviderOpenAI, Model: "gpt-5.3-codex", AuthMethod: models.AuthMethodOAuth, IsDefault: true},
 	} {
 		t.Run(retired.Name, func(t *testing.T) {
-			h, _, repo, db := setupTestHandlerWithDB(t)
+			h, _, repo, db := setupTestHandlerWithStores(t)
 			ctx := context.Background()
-			teststores.ClearLLMConfigs(t, teststores.Of(db).LLMConfigs)
+			teststores.ClearLLMConfigs(t, db.LLMConfigs)
 			require.NoError(t, repo.Create(ctx, &retired))
 			for _, images := range []bool{false, true} {
 				selected, err := h.autoSelectAgent(ctx, "hello", images)
@@ -52,9 +51,9 @@ func TestAPIChatRejectsUnsupportedOnlyCatalogBeforeSideEffects(t *testing.T) {
 		{Name: "OAuth retired", Provider: models.ProviderOpenAI, Model: "gpt-5.3-codex", AuthMethod: models.AuthMethodOAuth},
 	} {
 		t.Run(retired.Name, func(t *testing.T) {
-			h, e, repo, db := setupTestHandlerWithDB(t)
+			h, e, repo, db := setupTestHandlerWithStores(t)
 			ctx := context.Background()
-			teststores.ClearLLMConfigs(t, teststores.Of(db).LLMConfigs)
+			teststores.ClearLLMConfigs(t, db.LLMConfigs)
 			require.NoError(t, repo.Create(ctx, &retired))
 			project := createProject(t, h, "Unsupported API chat")
 			form := url.Values{"project_id": {project.ID}, "message": {"hello"}}
@@ -67,9 +66,9 @@ func TestAPIChatRejectsUnsupportedOnlyCatalogBeforeSideEffects(t *testing.T) {
 			tasks, err := h.taskRepo.ListByProject(ctx, project.ID, "")
 			require.NoError(t, err)
 			require.Empty(t, tasks)
-			executions, err := h.execRepo.(*sqlite.ExecutionRepo).ListByProject(ctx, project.ID, 50)
+			executions, err := db.Fixtures.CountProjectExecutions(ctx, project.ID)
 			require.NoError(t, err)
-			require.Empty(t, executions)
+			require.Zero(t, executions)
 			inputs, err := h.threadInputRepo.ListPendingForChat(ctx, project.ID)
 			require.NoError(t, err)
 			require.Empty(t, inputs)

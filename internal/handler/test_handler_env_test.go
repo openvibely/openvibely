@@ -69,25 +69,38 @@ func newTestHandlerEnv(t testing.TB, db *sql.DB, opts ...testHandlerOption) *tes
 		opt(&o)
 	}
 
+	env := wireTestHandler(t, teststores.Of(db, teststores.WithBroadcaster(o.broadcaster)), o)
+	env.DB = db
+	return env
+}
+
+func setupTestHandlerWithStores(t testing.TB) (*Handler, *echo.Echo, persistence.LLMConfigStore, *teststores.Env) {
+	t.Helper()
+	stores := teststores.New(t)
+	env := wireTestHandler(t, stores.Stores, testHandlerOptions{})
+	return env.Handler, env.Echo, env.LLMConfigRepo, stores
+}
+
+func wireTestHandler(t testing.TB, stores persistence.Stores, o testHandlerOptions) *testHandlerEnv {
+	t.Helper()
 	oldUploadsDir := uploadsDir
 	uploadsDir = t.TempDir()
 	t.Cleanup(func() { uploadsDir = oldUploadsDir })
 
 	env := &testHandlerEnv{
-		DB:             db,
 		LLM:            testutil.NewMockLLMCaller(),
-		ProjectRepo:    teststores.Of(db).Projects,
-		TaskRepo:       teststores.Of(db, teststores.WithBroadcaster(o.broadcaster)).Tasks,
-		LLMConfigRepo:  teststores.Of(db).LLMConfigs,
-		ExecRepo:       teststores.Of(db).Executions,
-		ScheduleRepo:   teststores.Of(db).Schedules,
-		WorkerRepo:     teststores.Of(db).Workers,
-		AttachmentRepo: teststores.Of(db).Attachments,
-		AlertRepo:      teststores.Of(db).Alerts,
-		SettingsRepo:   teststores.Of(db).Settings,
+		ProjectRepo:    stores.Projects,
+		TaskRepo:       stores.Tasks,
+		LLMConfigRepo:  stores.LLMConfigs,
+		ExecRepo:       stores.Executions,
+		ScheduleRepo:   stores.Schedules,
+		WorkerRepo:     stores.Workers,
+		AttachmentRepo: stores.Attachments,
+		AlertRepo:      stores.Alerts,
+		SettingsRepo:   stores.Settings,
 	}
-	chatAttachmentRepo := teststores.Of(db).ChatAttachments
-	upcomingRepo := teststores.Of(db).Upcoming
+	chatAttachmentRepo := stores.ChatAttachments
+	upcomingRepo := stores.Upcoming
 
 	env.ProjectSvc = service.NewProjectService(env.ProjectRepo)
 	env.LLMSvc = service.NewLLMService(env.LLMConfigRepo, env.ExecRepo, env.TaskRepo, env.ProjectRepo, env.ScheduleRepo, env.AttachmentRepo)
@@ -99,26 +112,26 @@ func newTestHandlerEnv(t testing.TB, db *sql.DB, opts ...testHandlerOption) *tes
 	alertSvc := service.NewAlertService(env.AlertRepo, nil)
 	upcomingSvc := service.NewUpcomingService(upcomingRepo)
 	if o.taskGoals {
-		env.TaskGoals = service.NewTaskGoalService(teststores.Of(db).TaskGoals, env.TaskRepo, nil)
+		env.TaskGoals = service.NewTaskGoalService(stores.TaskGoals, env.TaskRepo, nil)
 		env.TaskSvc.SetTaskGoalService(env.TaskGoals)
 		env.WorkerSvc.SetTaskGoalService(env.TaskGoals)
 	}
 	var insightsSvc *service.InsightsService
 	if o.insights {
-		insightsSvc = service.NewInsightsService(teststores.Of(db).Insights, env.TaskRepo, env.ProjectRepo, env.LLMConfigRepo, env.ExecRepo)
+		insightsSvc = service.NewInsightsService(stores.Insights, env.TaskRepo, env.ProjectRepo, env.LLMConfigRepo, env.ExecRepo)
 		insightsSvc.SetLLMService(env.LLMSvc)
 	}
 
 	h := New(env.ProjectSvc, env.TaskSvc, env.LLMSvc, env.WorkerSvc, schedulerSvc, alertSvc, upcomingSvc, insightsSvc,
 		env.LLMConfigRepo, env.TaskRepo, env.ScheduleRepo, env.ExecRepo, env.WorkerRepo, env.AttachmentRepo, chatAttachmentRepo,
-		env.ProjectRepo, env.SettingsRepo, o.broadcaster, nil, newTestRuntimeStores(db))
+		env.ProjectRepo, env.SettingsRepo, o.broadcaster, nil, runtimeStoresForTests(stores))
 	h.oauthIdentityResolver = nil
-	h.SetGitHubAuthRepo(teststores.Of(db).GitHubAuth)
-	h.SetSlackAuthRepo(teststores.Of(db).SlackAuth)
-	h.SetEmailAuthRepo(teststores.Of(db).EmailAuth)
-	h.SetEmailTaskContextRepo(teststores.Of(db).EmailTaskContexts)
-	h.SetDiscordAuthRepo(teststores.Of(db).DiscordAuth)
-	h.SetDiscordTaskContextRepo(teststores.Of(db).DiscordTaskContexts)
+	h.SetGitHubAuthRepo(stores.GitHubAuth)
+	h.SetSlackAuthRepo(stores.SlackAuth)
+	h.SetEmailAuthRepo(stores.EmailAuth)
+	h.SetEmailTaskContextRepo(stores.EmailTaskContexts)
+	h.SetDiscordAuthRepo(stores.DiscordAuth)
+	h.SetDiscordTaskContextRepo(stores.DiscordTaskContexts)
 	h.SetLocalRepoPathEnabled(true)
 	if env.TaskGoals != nil {
 		h.SetTaskGoalService(env.TaskGoals)
@@ -156,11 +169,15 @@ func waitForHandlerBackgroundWork(t testing.TB, h *Handler) {
 }
 
 func newTestRuntimeStores(db *sql.DB) RuntimeStores {
+	return runtimeStoresForTests(teststores.Of(db))
+}
+
+func runtimeStoresForTests(stores persistence.Stores) RuntimeStores {
 	return RuntimeStores{
-		ThreadInputs:      teststores.Of(db).ThreadInputs,
-		Usage:             teststores.Of(db).Usage,
-		SkillAnalytics:    teststores.Of(db).SkillAnalytics,
-		TaskCommitStats:   teststores.Of(db).TaskCommitStats,
-		ChatInputRequests: teststores.Of(db).ChatInputRequests,
+		ThreadInputs:      stores.ThreadInputs,
+		Usage:             stores.Usage,
+		SkillAnalytics:    stores.SkillAnalytics,
+		TaskCommitStats:   stores.TaskCommitStats,
+		ChatInputRequests: stores.ChatInputRequests,
 	}
 }

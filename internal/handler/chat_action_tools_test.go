@@ -248,9 +248,9 @@ func TestUpdateProjectSettingsCapabilityAndInheritedDefaultModel(t *testing.T) {
 }
 
 func TestSaveCustomPersonalityRuntimeToolCreatesListsAndSelects(t *testing.T) {
-	h, _, _, db := setupTestHandlerWithDB(t)
+	h, _, _, db := setupTestHandlerWithStores(t)
 	ctx := context.Background()
-	customRepo := teststores.Of(db).CustomPersonalities
+	customRepo := db.CustomPersonalities
 	h.SetCustomPersonalityRepo(customRepo)
 	project := createProject(t, h, "Chat Personality Project")
 
@@ -395,15 +395,15 @@ func TestViewSwarmRuntimeToolResolvesCurrentTaskThreadParent(t *testing.T) {
 }
 
 func TestListChannelsPlanModeReturnsPromptSafeStatus(t *testing.T) {
-	h, _, _, db := setupTestHandlerWithDB(t)
+	h, _, _, db := setupTestHandlerWithStores(t)
 	ctx := context.Background()
 	project := createProject(t, h, "Channel Status Project")
 
-	webhookRepo := teststores.Of(db).Webhooks
+	webhookRepo := db.Webhooks
 	h.SetWebhookRepo(webhookRepo)
-	channelTargetRepo := teststores.Of(db).ChannelTargets
+	channelTargetRepo := db.ChannelTargets
 	h.SetChannelTargetRepo(channelTargetRepo)
-	telegramAuthRepo := teststores.Of(db).TelegramAuth
+	telegramAuthRepo := db.TelegramAuth
 	h.SetTelegramAuthRepo(telegramAuthRepo)
 
 	h.SetGitHubService(&fakeGitHubService{statusFn: func(ctx context.Context) (service.GitHubConnectionStatus, error) {
@@ -537,10 +537,10 @@ func TestListChannelsOutboundTargetAggregateSummaryMatchesMaterializedOutput(t *
 }
 
 func TestListChannelsEmptyOutboundTargetSummaryKeepsEmptyByPlatform(t *testing.T) {
-	h, _, _, db := setupTestHandlerWithDB(t)
+	h, _, _, db := setupTestHandlerWithStores(t)
 	ctx := context.Background()
 	project := createProject(t, h, "Empty Channel Status Targets")
-	h.SetChannelTargetRepo(teststores.Of(db).ChannelTargets)
+	h.SetChannelTargetRepo(db.ChannelTargets)
 
 	rt := h.buildChatActionToolRuntimeFromDefs(
 		streamingResponseParams{ProjectID: project.ID, ChatMode: models.ChatModePlan},
@@ -791,7 +791,7 @@ type testPulseTaskEntry struct {
 }
 
 func TestViewPulseRuntimeToolReturnsUpcomingAgenda(t *testing.T) {
-	h, _, _, _ := setupTestHandlerWithDB(t)
+	h, _, _, _ := setupTestHandlerWithStores(t)
 	ctx := context.Background()
 	project := createProject(t, h, "Pulse Runtime Project")
 	foreign := createProject(t, h, "Foreign Pulse Project")
@@ -875,7 +875,7 @@ func TestViewPulseRuntimeToolReturnsUpcomingAgenda(t *testing.T) {
 }
 
 func TestViewPulseRuntimeToolEmptyProjectReturnsZeroAgenda(t *testing.T) {
-	h, _, _, _ := setupTestHandlerWithDB(t)
+	h, _, _, _ := setupTestHandlerWithStores(t)
 	ctx := context.Background()
 	project := createProject(t, h, "Empty Pulse Project")
 	rt := h.buildChatActionToolRuntimeFromDefs(
@@ -906,7 +906,7 @@ func TestViewPulseRuntimeToolEmptyProjectReturnsZeroAgenda(t *testing.T) {
 }
 
 func TestViewPulseRuntimeToolQueuedOnlyAgenda(t *testing.T) {
-	h, _, _, _ := setupTestHandlerWithDB(t)
+	h, _, _, _ := setupTestHandlerWithStores(t)
 	ctx := context.Background()
 	project := createProject(t, h, "Queued-only Pulse Project")
 	queued := &models.Task{ProjectID: project.ID, Title: "Queued work", Prompt: "wait for capacity", Category: models.CategoryActive, Status: models.StatusQueued, Priority: 2}
@@ -986,7 +986,7 @@ func TestViewPulseRuntimeToolBlockedTasksAreCompactAndProjectScoped(t *testing.T
 // backing the follow-up, matching resolveTaskIDForTool's handling for the
 // goal and send_to_task runtime tools.
 func TestViewTaskThreadResolvesCurrentTaskID(t *testing.T) {
-	h, _, _, _ := setupTestHandlerWithDB(t)
+	h, _, _, _ := setupTestHandlerWithStores(t)
 	project := createProject(t, h, "View Task Thread Current")
 	task := &models.Task{ProjectID: project.ID, Title: "Audit target task", Category: models.CategoryActive, Status: models.StatusCompleted, Prompt: "do the work", Priority: 2}
 	if err := h.taskRepo.Create(context.Background(), task); err != nil {
@@ -1039,7 +1039,7 @@ func decodeCancelTaskRuntimeToolResponse(t *testing.T, out string) cancelTaskRun
 }
 
 func TestCancelTaskRuntimeToolCancelsRunningTaskByID(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	ctx := context.Background()
 	project := tc.CreateProject().Build()
 	agent := tc.CreateLLMConfig().Build()
@@ -1081,7 +1081,7 @@ func TestCancelTaskRuntimeToolCancelsRunningTaskByID(t *testing.T) {
 }
 
 func TestCancelTaskRuntimeToolCancelsQueuedTaskByExactTitleAndPendingInputs(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	ctx := context.Background()
 	project := tc.CreateProject().Build()
 	agent := tc.CreateLLMConfig().Build()
@@ -1112,7 +1112,7 @@ func TestCancelTaskRuntimeToolCancelsQueuedTaskByExactTitleAndPendingInputs(t *t
 }
 
 func TestCancelTaskRuntimeToolResolvesCurrentTaskID(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	ctx := context.Background()
 	project := tc.CreateProject().Build()
 	task := tc.CreateTask(project.ID).WithTitle("Current cancellable task").WithStatus(models.StatusPending).WithCategory(models.CategoryActive).Build()
@@ -1134,7 +1134,7 @@ func TestCancelTaskRuntimeToolResolvesCurrentTaskID(t *testing.T) {
 }
 
 func TestCancelTaskRuntimeToolRejectsForeignProjectTargets(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	ctx := context.Background()
 	project := tc.CreateProject().Build()
 	foreignProject := tc.CreateProject().Build()
@@ -1195,7 +1195,7 @@ func TestCancelTaskRuntimeToolReturnsNotCancellableWithoutMutation(t *testing.T)
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tc := NewTestContext(t)
+			tc := NewStoreTestContext(t)
 			ctx := context.Background()
 			project := tc.CreateProject().Build()
 			task := tc.CreateTask(project.ID).WithTitle("Not cancellable " + tt.name).WithStatus(tt.status).WithCategory(tt.category).Build()
@@ -1335,9 +1335,9 @@ func TestCreateTaskRuntimeToolUsesCompactModelSelection(t *testing.T) {
 }
 
 func TestCreateTaskRuntimeToolDefersAutoStartUntilChatAttachmentsActivate(t *testing.T) {
-	h, _, llmConfigRepo, db := setupTestHandlerWithDB(t)
+	h, _, llmConfigRepo, db := setupTestHandlerWithStores(t)
 	ctx := context.Background()
-	teststores.ClearLLMConfigs(t, teststores.Of(db).LLMConfigs)
+	teststores.ClearLLMConfigs(t, db.LLMConfigs)
 	project := createProject(t, h, "Runtime Attachment Deferral")
 	agent := &models.LLMConfig{Name: "Attachment Auto Start", Provider: models.ProviderTest, Model: "claude-sonnet-attachments", IsDefault: true, AutoStartTasks: true}
 	require.NoError(t, llmConfigRepo.Create(ctx, agent))
@@ -1425,7 +1425,7 @@ func assertCreateTaskRuntimeUsesCompactModelSelection(t *testing.T, statements [
 }
 
 func TestCreateTaskRuntimeToolDecodesTypedChainConfigDirectly(t *testing.T) {
-	h, _, _, _ := setupTestHandlerWithDB(t)
+	h, _, _, _ := setupTestHandlerWithStores(t)
 	ctx := context.Background()
 	project := createProject(t, h, "Typed Create Task Project")
 	handler := h.chatActionHandlers(
@@ -1540,7 +1540,7 @@ func TestScheduleTaskRuntimeToolExecutesTypedRequest(t *testing.T) {
 }
 
 func TestScheduleTaskRuntimeToolDefaultsScheduleFields(t *testing.T) {
-	h, _, _, _ := setupTestHandlerWithDB(t)
+	h, _, _, _ := setupTestHandlerWithStores(t)
 	ctx := context.Background()
 	project := createProject(t, h, "Runtime Schedule Defaults Project")
 	task := createTask(t, h, project.ID, "Schedule defaults")
@@ -1661,7 +1661,7 @@ func TestScheduleRuntimeToolsResolveCurrentTaskInTaskThread(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("schedule omitted task reference", func(t *testing.T) {
-		h, _, _, _ := setupTestHandlerWithDB(t)
+		h, _, _, _ := setupTestHandlerWithStores(t)
 		project := createProject(t, h, "Current Schedule Omitted Project")
 		task := createTask(t, h, project.ID, "Schedule current task omitted")
 		handlers := h.chatActionHandlers(streamingResponseParams{ProjectID: project.ID, TaskID: task.ID, IsTaskFollowup: true}, nil, models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)
@@ -1677,7 +1677,7 @@ func TestScheduleRuntimeToolsResolveCurrentTaskInTaskThread(t *testing.T) {
 	})
 
 	t.Run("schedule explicit current task_id", func(t *testing.T) {
-		h, _, _, _ := setupTestHandlerWithDB(t)
+		h, _, _, _ := setupTestHandlerWithStores(t)
 		project := createProject(t, h, "Current Schedule Explicit Project")
 		task := createTask(t, h, project.ID, "Schedule current task explicit")
 		handlers := h.chatActionHandlers(streamingResponseParams{ProjectID: project.ID, TaskID: task.ID, IsTaskFollowup: true}, nil, models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)
@@ -1693,7 +1693,7 @@ func TestScheduleRuntimeToolsResolveCurrentTaskInTaskThread(t *testing.T) {
 	})
 
 	t.Run("modify explicit current task_id without schedule_id", func(t *testing.T) {
-		h, _, _, _ := setupTestHandlerWithDB(t)
+		h, _, _, _ := setupTestHandlerWithStores(t)
 		project := createProject(t, h, "Current Modify Schedule Project")
 		task := createTask(t, h, project.ID, "Modify current task schedule")
 		schedule := createSchedule(t, h, task.ID, time.Now().UTC().Add(time.Hour))
@@ -1709,7 +1709,7 @@ func TestScheduleRuntimeToolsResolveCurrentTaskInTaskThread(t *testing.T) {
 	})
 
 	t.Run("modify omitted task reference without schedule_id", func(t *testing.T) {
-		h, _, _, _ := setupTestHandlerWithDB(t)
+		h, _, _, _ := setupTestHandlerWithStores(t)
 		project := createProject(t, h, "Current Modify Schedule Omitted Project")
 		task := createTask(t, h, project.ID, "Modify current task schedule omitted")
 		schedule := createSchedule(t, h, task.ID, time.Now().UTC().Add(time.Hour))
@@ -1725,7 +1725,7 @@ func TestScheduleRuntimeToolsResolveCurrentTaskInTaskThread(t *testing.T) {
 	})
 
 	t.Run("delete explicit current task_id without schedule_id", func(t *testing.T) {
-		h, _, _, _ := setupTestHandlerWithDB(t)
+		h, _, _, _ := setupTestHandlerWithStores(t)
 		project := createProject(t, h, "Current Delete Schedule Project")
 		task := createTask(t, h, project.ID, "Delete current task schedule")
 		createSchedule(t, h, task.ID, time.Now().UTC().Add(time.Hour))
@@ -1741,7 +1741,7 @@ func TestScheduleRuntimeToolsResolveCurrentTaskInTaskThread(t *testing.T) {
 	})
 
 	t.Run("delete omitted task reference without schedule_id", func(t *testing.T) {
-		h, _, _, _ := setupTestHandlerWithDB(t)
+		h, _, _, _ := setupTestHandlerWithStores(t)
 		project := createProject(t, h, "Current Delete Schedule Omitted Project")
 		task := createTask(t, h, project.ID, "Delete current task schedule omitted")
 		createSchedule(t, h, task.ID, time.Now().UTC().Add(time.Hour))
@@ -1757,7 +1757,7 @@ func TestScheduleRuntimeToolsResolveCurrentTaskInTaskThread(t *testing.T) {
 	})
 
 	t.Run("current outside task follow-up is rejected", func(t *testing.T) {
-		h, _, _, _ := setupTestHandlerWithDB(t)
+		h, _, _, _ := setupTestHandlerWithStores(t)
 		project := createProject(t, h, "Current Schedule Outside Project")
 		task := createTask(t, h, project.ID, "Outside current task schedule")
 		createSchedule(t, h, task.ID, time.Now().UTC().Add(time.Hour))
@@ -1867,7 +1867,7 @@ func TestListTasksRuntimeTool_WebAndAPIExecutableAndPlanExposed(t *testing.T) {
 }
 
 func TestViewUsageAnalyticsRuntimeTool_NoUsageDataReturnsZeroSummary(t *testing.T) {
-	h, _, llmConfigRepo, _ := setupTestHandlerWithDB(t)
+	h, _, llmConfigRepo, _ := setupTestHandlerWithStores(t)
 	ctx := context.Background()
 	project := createProject(t, h, "Usage Empty Project")
 	require.NoError(t, llmConfigRepo.Create(ctx, &models.LLMConfig{
@@ -1903,7 +1903,7 @@ func TestViewUsageAnalyticsRuntimeTool_NoUsageDataReturnsZeroSummary(t *testing.
 }
 
 func TestViewUsageAnalyticsRuntimeTool_MultipleModelsProviderFilterAndCostAvailability(t *testing.T) {
-	h, _, _, _ := setupTestHandlerWithDB(t)
+	h, _, _, _ := setupTestHandlerWithStores(t)
 	ctx := context.Background()
 	project := createProject(t, h, "Usage Breakdown Project")
 	otherProject := createProject(t, h, "Usage Other Project")
@@ -2042,7 +2042,7 @@ func TestViewUsageAnalyticsRuntimeTool_CapabilityRegistration(t *testing.T) {
 }
 
 func TestCreateSwarmTaskRuntimeTool_StartFlagDoesNotDeferActiveSwarm(t *testing.T) {
-	h, _, _, _ := setupTestHandlerWithDB(t)
+	h, _, _, _ := setupTestHandlerWithStores(t)
 	project := createProject(t, h, "Deferred Swarm Tool Project")
 	handlers := h.chatActionHandlers(streamingResponseParams{ExecID: "exec-swarm-deferred", ProjectID: project.ID}, nil, models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)
 	createHandler := handlers["create_swarm_task"]
@@ -2073,7 +2073,7 @@ func TestCreateSwarmTaskRuntimeTool_StartFlagDoesNotDeferActiveSwarm(t *testing.
 }
 
 func TestCreateSwarmTaskRuntimeTool_BacklogCategoryDefersPlanner(t *testing.T) {
-	h, _, _, _ := setupTestHandlerWithDB(t)
+	h, _, _, _ := setupTestHandlerWithStores(t)
 	project := createProject(t, h, "Backlog Swarm Tool Project")
 	handlers := h.chatActionHandlers(streamingResponseParams{ExecID: "exec-swarm-backlog", ProjectID: project.ID}, nil, models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)
 	createHandler := handlers["create_swarm_task"]
@@ -2109,14 +2109,14 @@ func TestCreateSwarmTaskRuntimeTool_BacklogCategoryDefersPlanner(t *testing.T) {
 }
 
 func TestCreateSwarmTaskRuntimeTool_PersistsGoalTriageReviewAndAssignments(t *testing.T) {
-	h, _, llmConfigRepo, db := setupTestHandlerWithDB(t)
+	h, _, llmConfigRepo, db := setupTestHandlerWithStores(t)
 	ctx := context.Background()
 	project := createProject(t, h, "Swarm Tool Metadata Project")
 	modelConfig := createAgent(t, llmConfigRepo, func(c *models.LLMConfig) {
 		c.Name = "Explicit Swarm Model"
 		c.IsDefault = false
 	})
-	agentRepo := teststores.Of(db).Agents
+	agentRepo := db.Agents
 	h.SetAgentRepo(agentRepo)
 	agentDef := &models.Agent{Name: "Swarm Reviewer", Key: "swarm-reviewer", Enabled: true, SelectableAsPrimary: true}
 	require.NoError(t, agentRepo.Create(ctx, agentDef))
@@ -2160,7 +2160,7 @@ func TestCreateSwarmTaskRuntimeTool_PersistsGoalTriageReviewAndAssignments(t *te
 	require.NoError(t, err)
 	require.False(t, cfg.ReviewerEnabled)
 	require.False(t, cfg.MergerEnabled)
-	goal, err := teststores.Of(db).TaskGoals.GetByTaskID(ctx, parent.ID)
+	goal, err := db.TaskGoals.GetByTaskID(ctx, parent.ID)
 	require.NoError(t, err)
 	require.NotNil(t, goal)
 	require.Equal(t, "All tests pass", goal.Objective)
@@ -2170,7 +2170,7 @@ func TestCreateSwarmTaskRuntimeTool_PersistsGoalTriageReviewAndAssignments(t *te
 }
 
 func TestCreateSwarmTaskRuntimeTool_ChannelSurfaceUsesActiveProject(t *testing.T) {
-	h, _, _, _ := setupTestHandlerWithDB(t)
+	h, _, _, _ := setupTestHandlerWithStores(t)
 	authorizedProject := createProject(t, h, "Email Authorized Swarm Project")
 	foreignProject := createProject(t, h, "Email Foreign Swarm Project")
 
@@ -2206,7 +2206,7 @@ func TestCreateSwarmTaskRuntimeTool_ChannelSurfaceUsesActiveProject(t *testing.T
 }
 
 func TestCreateSwarmTaskRuntimeTool_CreatesParentAndPlanner(t *testing.T) {
-	h, _, _, _ := setupTestHandlerWithDB(t)
+	h, _, _, _ := setupTestHandlerWithStores(t)
 	project := createProject(t, h, "Swarm Tool Project")
 	handlers := h.chatActionHandlers(streamingResponseParams{ExecID: "exec-swarm", ProjectID: project.ID}, nil, models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)
 	createHandler := handlers["create_swarm_task"]
@@ -2235,7 +2235,7 @@ func TestCreateSwarmTaskRuntimeTool_CreatesParentAndPlanner(t *testing.T) {
 }
 
 func TestCreateTaskRuntimeTool_OmittedCategoryAutoStartActivatesAfterAttachmentConversion(t *testing.T) {
-	h, _, llmConfigRepo, _ := setupTestHandlerWithDB(t)
+	h, _, llmConfigRepo, _ := setupTestHandlerWithStores(t)
 	ctx := context.Background()
 	project := createProject(t, h, "Runtime Attachment Deferral Project")
 	modelConfig := createAgent(t, llmConfigRepo, func(c *models.LLMConfig) {
@@ -2415,7 +2415,7 @@ func TestWebAPISwitchProject_IsInformationalOnly(t *testing.T) {
 }
 
 func TestGitHubOpenPullRequestRuntimeToolCreatesAndPersistsPR(t *testing.T) {
-	h, _, _, db := setupTestHandlerWithDB(t)
+	h, _, _, db := setupTestHandlerWithStores(t)
 	ctx := context.Background()
 	project := &models.Project{Name: "GitHub PR Runtime", RepoPath: t.TempDir(), RepoURL: "https://github.com/openvibely/openvibely"}
 	if err := h.projectSvc.Create(ctx, project); err != nil {
@@ -2425,7 +2425,7 @@ func TestGitHubOpenPullRequestRuntimeToolCreatesAndPersistsPR(t *testing.T) {
 	if err := h.taskRepo.Create(ctx, task); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
-	h.SetTaskPullRequestRepo(teststores.Of(db).TaskPullRequests)
+	h.SetTaskPullRequestRepo(db.TaskPullRequests)
 	var createdReq service.GitHubCreatePullRequestRequest
 	h.SetGitHubService(&fakeGitHubService{
 		resolveRepoFn: func(_ context.Context, repoURL, repoPath string) (*service.GitHubRepoRef, error) {
@@ -2477,7 +2477,7 @@ func TestGitHubOpenPullRequestRuntimeToolCreatesAndPersistsPR(t *testing.T) {
 }
 
 func TestGitHubReplacePullRequestBranchRuntimeToolUsesLeaseGuard(t *testing.T) {
-	h, _, _, db := setupTestHandlerWithDB(t)
+	h, _, _, db := setupTestHandlerWithStores(t)
 	ctx := context.Background()
 	project := &models.Project{Name: "GitHub PR Replacement", RepoPath: t.TempDir(), RepoURL: "https://github.com/openvibely/openvibely"}
 	if err := h.projectSvc.Create(ctx, project); err != nil {
@@ -2487,7 +2487,7 @@ func TestGitHubReplacePullRequestBranchRuntimeToolUsesLeaseGuard(t *testing.T) {
 	if err := h.taskRepo.Create(ctx, task); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
-	h.SetTaskPullRequestRepo(teststores.Of(db).TaskPullRequests)
+	h.SetTaskPullRequestRepo(db.TaskPullRequests)
 	if err := h.taskPullRequestRepo.Upsert(ctx, &models.TaskPullRequest{TaskID: task.ID, PRNumber: 4, PRURL: "https://github.com/openvibely/openvibely/pull/4", PRState: "open"}); err != nil {
 		t.Fatalf("seed PR record: %v", err)
 	}
@@ -2532,7 +2532,7 @@ func TestGitHubReplacePullRequestBranchRuntimeToolUsesLeaseGuard(t *testing.T) {
 }
 
 func TestGitHubReplacePullRequestBranchRuntimeToolRejectsClosedLivePR(t *testing.T) {
-	h, _, _, db := setupTestHandlerWithDB(t)
+	h, _, _, db := setupTestHandlerWithStores(t)
 	ctx := context.Background()
 	project := &models.Project{Name: "Closed GitHub PR Replacement", RepoPath: t.TempDir(), RepoURL: "https://github.com/openvibely/openvibely"}
 	if err := h.projectSvc.Create(ctx, project); err != nil {
@@ -2542,7 +2542,7 @@ func TestGitHubReplacePullRequestBranchRuntimeToolRejectsClosedLivePR(t *testing
 	if err := h.taskRepo.Create(ctx, task); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
-	h.SetTaskPullRequestRepo(teststores.Of(db).TaskPullRequests)
+	h.SetTaskPullRequestRepo(db.TaskPullRequests)
 	previousHead := strings.Repeat("a", 40)
 	if err := h.taskPullRequestRepo.Upsert(ctx, &models.TaskPullRequest{TaskID: task.ID, PRNumber: 4, PRURL: "https://github.com/openvibely/openvibely/pull/4", PRState: "open", PublishedHeadSHA: previousHead, NeedsRepublish: true}); err != nil {
 		t.Fatalf("seed PR record: %v", err)
@@ -2584,7 +2584,7 @@ func TestGitHubReplacePullRequestBranchRuntimeToolRejectsClosedLivePR(t *testing
 }
 
 func TestGitHubPRRuntimeToolsShareTargetRejections(t *testing.T) {
-	h, _, _, db := setupTestHandlerWithDB(t)
+	h, _, _, db := setupTestHandlerWithStores(t)
 	ctx := context.Background()
 	project := &models.Project{Name: "GitHub PR target", RepoURL: "https://github.com/openvibely/openvibely"}
 	if err := h.projectSvc.Create(ctx, project); err != nil {
@@ -2598,7 +2598,7 @@ func TestGitHubPRRuntimeToolsShareTargetRejections(t *testing.T) {
 	if err := h.taskRepo.Create(ctx, otherTask); err != nil {
 		t.Fatalf("create cross-project task: %v", err)
 	}
-	h.SetTaskPullRequestRepo(teststores.Of(db).TaskPullRequests)
+	h.SetTaskPullRequestRepo(db.TaskPullRequests)
 
 	params := streamingResponseParams{ProjectID: project.ID}
 	handlers := h.chatActionHandlers(params, nil, models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)
@@ -2710,13 +2710,13 @@ func TestInteractiveGitHubRuntimeExplicitRepositoryUsesProjectEndpointByParsedHo
 }
 
 func TestGitHubAuthAndInboxRuntimeToolsUseConfiguredRepository(t *testing.T) {
-	h, _, _, db := setupTestHandlerWithDB(t)
+	h, _, _, db := setupTestHandlerWithStores(t)
 	ctx := context.Background()
 	project := &models.Project{Name: "GitHub Inbox", RepoURL: "https://github.com/openvibely/openvibely"}
 	if err := h.projectSvc.Create(ctx, project); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
-	authRepo := teststores.Of(db).GitHubAuth
+	authRepo := db.GitHubAuth
 	h.SetGitHubAuthRepo(authRepo)
 	if err := authRepo.UpsertProjectInbox(ctx, &models.GitHubProjectInbox{ProjectID: project.ID, GitHubLogin: "Dev-Bot", Enabled: true}); err != nil {
 		t.Fatalf("configure github inbox: %v", err)
@@ -2945,7 +2945,7 @@ func TestGitHubAuthAndInboxRuntimeToolsUseConfiguredRepository(t *testing.T) {
 }
 
 func TestWebChatCreateProjectRuntimeCreatesGitHubBackedProject(t *testing.T) {
-	h, _, _, db := setupTestHandlerWithDB(t)
+	h, _, _, db := setupTestHandlerWithStores(t)
 	ctx := context.Background()
 	current := createProject(t, h, "Current Runtime Project")
 	h.SetGitHubService(&fakeGitHubService{cloneFn: func(ctx context.Context, projectID, repoURL string) (string, string, error) {
@@ -2979,7 +2979,7 @@ func TestWebChatCreateProjectRuntimeCreatesGitHubBackedProject(t *testing.T) {
 	require.True(t, resp.RepoPathPresent)
 	require.False(t, resp.Switched, "web/API Chat has no persisted project switch callback")
 
-	projectRepo := teststores.Of(db).Projects
+	projectRepo := db.Projects
 	created, err := projectRepo.GetByID(ctx, resp.ProjectID)
 	require.NoError(t, err)
 	require.NotNil(t, created)
@@ -3004,9 +3004,9 @@ func TestWebChatCreateProjectRuntimePlanModeBlocked(t *testing.T) {
 }
 
 func TestCreateAgentRuntimeTool_WebAPIRollsBackFailedMaterialization(t *testing.T) {
-	h, _, _, db := setupTestHandlerWithDB(t)
+	h, _, _, db := setupTestHandlerWithStores(t)
 	ctx := context.Background()
-	agentRepo := teststores.Of(db).Agents
+	agentRepo := db.Agents
 	h.SetAgentRepo(agentRepo)
 	h.SetAgentSkillRoot(t.TempDir())
 	project := createProject(t, h, "Runtime Agent Rollback Project")
@@ -3040,9 +3040,9 @@ func TestCreateAgentRuntimeTool_WebAPIRollsBackFailedMaterialization(t *testing.
 }
 
 func TestCreateAgentRuntimeTool_WebAPIRollsBackPostWriteMaterializationFailure(t *testing.T) {
-	h, _, _, db := setupTestHandlerWithDB(t)
+	h, _, _, db := setupTestHandlerWithStores(t)
 	ctx := context.Background()
-	agentRepo := teststores.Of(db).Agents
+	agentRepo := db.Agents
 	h.SetAgentRepo(agentRepo)
 	h.SetAgentSkillRoot(t.TempDir())
 	project := createProject(t, h, "Runtime Agent Post-Write Rollback Project")
@@ -3084,9 +3084,9 @@ func TestCreateAgentRuntimeTool_WebAPIRollsBackPostWriteMaterializationFailure(t
 }
 
 func TestCreateAgentRuntimeTool_WebAPICreatesProjectScopedAgentAndMaterializes(t *testing.T) {
-	h, _, llmConfigRepo, db := setupTestHandlerWithDB(t)
+	h, _, llmConfigRepo, db := setupTestHandlerWithStores(t)
 	ctx := context.Background()
-	agentRepo := teststores.Of(db).Agents
+	agentRepo := db.Agents
 	h.SetAgentRepo(agentRepo)
 	h.SetAgentSkillRoot(t.TempDir())
 	project := createProject(t, h, "Runtime Agent Project")
@@ -3171,7 +3171,7 @@ func TestCreateAgentRuntimeTool_PlanModeDoesNotExposeWriteAction(t *testing.T) {
 }
 
 func TestListChannelsWithoutProjectReturnsEmptySafeSummary(t *testing.T) {
-	h, _, _, _ := setupTestHandlerWithDB(t)
+	h, _, _, _ := setupTestHandlerWithStores(t)
 	ctx := context.Background()
 	rt := h.buildChatActionToolRuntimeFromDefs(
 		streamingResponseParams{ChatMode: models.ChatModePlan},
@@ -3197,7 +3197,7 @@ func TestListChannelsWithoutProjectReturnsEmptySafeSummary(t *testing.T) {
 }
 
 func TestListChannelsDirectGitHubAppConfiguredNotConnected(t *testing.T) {
-	h, _, _, _ := setupTestHandlerWithDB(t)
+	h, _, _, _ := setupTestHandlerWithStores(t)
 	ctx := context.Background()
 	project := createProject(t, h, "Direct GitHub App Status")
 	for key, value := range map[string]string{

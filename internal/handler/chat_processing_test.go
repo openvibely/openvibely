@@ -358,7 +358,7 @@ func TestFinalizeStreamingTurn_BroadcastsTaskFollowupResponseDone(t *testing.T) 
 func TestFinalizeStreamingTurn_BroadcastsPersistedTerminalStatus(t *testing.T) {
 	for _, status := range []models.ExecutionStatus{models.ExecFailed, models.ExecCancelled} {
 		t.Run(string(status), func(t *testing.T) {
-			tc := NewTestContext(t)
+			tc := NewStoreTestContext(t)
 			project := tc.CreateProject().Build()
 			task := tc.CreateTask(project.ID).WithCategory(models.CategoryBacklog).Build()
 			exec := &models.Execution{TaskID: task.ID, Status: status, PromptSent: "terminal status"}
@@ -531,9 +531,9 @@ func TestCombineContexts_BothEmpty(t *testing.T) {
 }
 
 func TestResolveTaskAgentDefinitionForTask_LoadsAssignedDefinition(t *testing.T) {
-	h, _, _, db := setupTestHandlerWithDB(t)
+	h, _, _, db := setupTestHandlerWithStores(t)
 	ctx := context.Background()
-	agentRepo := teststores.Of(db).Agents
+	agentRepo := db.Agents
 	h.SetAgentRepo(agentRepo)
 
 	project := createProject(t, h, "agent-def-project")
@@ -1239,14 +1239,14 @@ func TestProcessStreamingResponse_TaskFollowupListCapabilitiesIncludesSelectedMe
 }
 
 func TestProcessStreamingResponse_ManualFollowupReactivatesAchievedGoalForCheckpoint(t *testing.T) {
-	h, _, llmConfigRepo, db := setupTestHandlerWithDB(t)
+	h, _, llmConfigRepo, db := setupTestHandlerWithStores(t)
 	ctx := context.Background()
-	goalRepo := teststores.Of(db).TaskGoals
+	goalRepo := db.TaskGoals
 	goalSvc := service.NewTaskGoalService(goalRepo, h.taskRepo, nil)
 	h.SetTaskGoalService(goalSvc)
 	h.taskSvc.SetTaskGoalService(goalSvc)
 	h.workerSvc.SetTaskGoalService(goalSvc)
-	agentRepo := teststores.Of(db).Agents
+	agentRepo := db.Agents
 	h.SetAgentRepo(agentRepo)
 	h.workerSvc.SetLifecycleAgentRepo(agentRepo)
 	mock := testutil.NewMockLLMCaller()
@@ -1304,9 +1304,9 @@ func TestProcessStreamingResponse_ManualFollowupReactivatesAchievedGoalForCheckp
 }
 
 func TestProcessStreamingResponse_GoalAgentQueuedFollowupDoesNotReactivateAchievedGoal(t *testing.T) {
-	h, _, llmConfigRepo, db := setupTestHandlerWithDB(t)
+	h, _, llmConfigRepo, db := setupTestHandlerWithStores(t)
 	ctx := context.Background()
-	goalRepo := teststores.Of(db).TaskGoals
+	goalRepo := db.TaskGoals
 	goalSvc := service.NewTaskGoalService(goalRepo, h.taskRepo, nil)
 	h.SetTaskGoalService(goalSvc)
 	h.taskSvc.SetTaskGoalService(goalSvc)
@@ -1354,14 +1354,14 @@ func TestProcessStreamingResponse_GoalAgentQueuedFollowupDoesNotReactivateAchiev
 }
 
 func TestProcessStreamingResponse_CancelledTaskFollowupSkipsAfterCompleteHooksAndContinuations(t *testing.T) {
-	h, _, llmConfigRepo, db := setupTestHandlerWithDB(t)
+	h, _, llmConfigRepo, db := setupTestHandlerWithStores(t)
 	ctx := context.Background()
-	goalRepo := teststores.Of(db).TaskGoals
+	goalRepo := db.TaskGoals
 	goalSvc := service.NewTaskGoalService(goalRepo, h.taskRepo, nil)
 	h.SetTaskGoalService(goalSvc)
 	h.taskSvc.SetTaskGoalService(goalSvc)
 	h.workerSvc.SetTaskGoalService(goalSvc)
-	agentRepo := teststores.Of(db).Agents
+	agentRepo := db.Agents
 	h.SetAgentRepo(agentRepo)
 	h.workerSvc.SetLifecycleAgentRepo(agentRepo)
 
@@ -1434,10 +1434,10 @@ func TestProcessStreamingResponse_CancelledTaskFollowupSkipsAfterCompleteHooksAn
 }
 
 func TestProcessStreamingResponse_DeadlineFailureRunsAfterCompleteDespiteCancelledFinalStatus(t *testing.T) {
-	h, _, llmConfigRepo, db := setupTestHandlerWithDB(t)
+	h, _, llmConfigRepo, db := setupTestHandlerWithStores(t)
 	h.workerSvc.SetTaskRepo(h.taskRepo)
 	ctx := context.Background()
-	goalRepo := teststores.Of(db).TaskGoals
+	goalRepo := db.TaskGoals
 	goalSvc := service.NewTaskGoalService(goalRepo, h.taskRepo, nil)
 	h.SetTaskGoalService(goalSvc)
 	h.taskSvc.SetTaskGoalService(goalSvc)
@@ -1540,14 +1540,14 @@ func TestProcessStreamingResponse_DeadlineFailureRunsAfterCompleteDespiteCancell
 }
 
 func TestProcessStreamingResponse_GenericAfterCompleteRunsGoalAgentWithoutAutoEnqueue(t *testing.T) {
-	h, _, llmConfigRepo, db := setupTestHandlerWithDB(t)
+	h, _, llmConfigRepo, db := setupTestHandlerWithStores(t)
 	ctx := context.Background()
-	goalRepo := teststores.Of(db).TaskGoals
+	goalRepo := db.TaskGoals
 	goalSvc := service.NewTaskGoalService(goalRepo, h.taskRepo, nil)
 	h.SetTaskGoalService(goalSvc)
 	h.taskSvc.SetTaskGoalService(goalSvc)
 	h.workerSvc.SetTaskGoalService(goalSvc)
-	agentRepo := teststores.Of(db).Agents
+	agentRepo := db.Agents
 	h.SetAgentRepo(agentRepo)
 	h.workerSvc.SetLifecycleAgentRepo(agentRepo)
 	mock := testutil.NewMockLLMCaller()
@@ -1607,19 +1607,19 @@ func TestProcessStreamingResponse_GenericAfterCompleteRunsGoalAgentWithoutAutoEn
 }
 
 func TestProcessStreamingResponse_GenericAfterCompletePublishesReloadedGoalStatus(t *testing.T) {
-	h, _, llmConfigRepo, db := setupTestHandlerWithDB(t)
+	h, _, llmConfigRepo, db := setupTestHandlerWithStores(t)
 	ctx := context.Background()
 	broadcaster := events.NewBroadcaster()
 	h.broadcaster = broadcaster
 	sub, err := broadcaster.Subscribe()
 	require.NoError(t, err)
 	defer broadcaster.Unsubscribe(sub)
-	goalRepo := teststores.Of(db).TaskGoals
+	goalRepo := db.TaskGoals
 	goalSvc := service.NewTaskGoalService(goalRepo, h.taskRepo, broadcaster)
 	h.SetTaskGoalService(goalSvc)
 	h.taskSvc.SetTaskGoalService(goalSvc)
 	h.workerSvc.SetTaskGoalService(goalSvc)
-	agentRepo := teststores.Of(db).Agents
+	agentRepo := db.Agents
 	h.SetAgentRepo(agentRepo)
 	h.workerSvc.SetLifecycleAgentRepo(agentRepo)
 	mock := testutil.NewMockLLMCaller()
@@ -3053,7 +3053,7 @@ func TestQueuedTaskFollowupRoutesMemoryFromFollowupMessageAfterInitialMemoryTask
 }
 
 func TestStartQueuedXTaskThreadInputCarriesAuthorizedRuntimeTools(t *testing.T) {
-	h, _, llmConfigRepo, db := setupTestHandlerWithDB(t)
+	h, _, llmConfigRepo, db := setupTestHandlerWithStores(t)
 	ctx := context.Background()
 	t.Setenv("OPENVIBELY_ALLOW_PRIVATE_MODEL_ENDPOINTS", "true")
 	var providerMu sync.Mutex
@@ -3095,9 +3095,9 @@ func TestStartQueuedXTaskThreadInputCarriesAuthorizedRuntimeTools(t *testing.T) 
 		tk.Status = models.StatusCompleted
 		tk.AgentID = &agent.ID
 	})
-	auth := teststores.Of(db).XAuth
-	selections := teststores.Of(db).XUserProjects
-	h.SetXRepositories(auth, selections, teststores.Of(db).XTaskContexts, teststores.Of(db).XInboundReceipts)
+	auth := db.XAuth
+	selections := db.XUserProjects
+	h.SetXRepositories(auth, selections, db.XTaskContexts, db.XInboundReceipts)
 	require.NoError(t, auth.Create(ctx, &models.XAuthorizedUser{ProjectID: project.ID, XUserID: "123"}))
 	require.NoError(t, auth.Create(ctx, &models.XAuthorizedUser{ProjectID: targetProject.ID, XUserID: "123"}))
 	input := &models.ThreadInput{
@@ -3136,7 +3136,7 @@ func TestStartQueuedXTaskThreadInputCarriesAuthorizedRuntimeTools(t *testing.T) 
 }
 
 func TestStartImmediateXTaskThreadRunCarriesAuthorizedRuntimeTools(t *testing.T) {
-	h, _, llmConfigRepo, db := setupTestHandlerWithDB(t)
+	h, _, llmConfigRepo, db := setupTestHandlerWithStores(t)
 	ctx := context.Background()
 	t.Setenv("OPENVIBELY_ALLOW_PRIVATE_MODEL_ENDPOINTS", "true")
 	var providerMu sync.Mutex
@@ -3183,9 +3183,9 @@ func TestStartImmediateXTaskThreadRunCarriesAuthorizedRuntimeTools(t *testing.T)
 		ex.PromptSent = "switch if needed"
 		ex.IsFollowup = true
 	})
-	auth := teststores.Of(db).XAuth
-	selections := teststores.Of(db).XUserProjects
-	h.SetXRepositories(auth, selections, teststores.Of(db).XTaskContexts, teststores.Of(db).XInboundReceipts)
+	auth := db.XAuth
+	selections := db.XUserProjects
+	h.SetXRepositories(auth, selections, db.XTaskContexts, db.XInboundReceipts)
 	require.NoError(t, auth.Create(ctx, &models.XAuthorizedUser{ProjectID: project.ID, XUserID: "123"}))
 	require.NoError(t, auth.Create(ctx, &models.XAuthorizedUser{ProjectID: targetProject.ID, XUserID: "123"}))
 	input := models.ThreadInput{Source: models.TaskOriginX, ProjectID: project.ID, XAccountID: "bot-account", XUserID: "123", XConversationID: "conversation", XReplyToTweetID: "tweet", XUsername: "alice"}
@@ -3907,7 +3907,7 @@ func TestStartChannelTaskRun_RoutesSwarmChildBeforeSetupFailure(t *testing.T) {
 }
 
 func TestStartChannelTaskRunIncludesTaskGoalContext(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	ctx := context.Background()
 	agent := createAgent(t, tc.llmConfigRepo)
 	project := createProject(t, tc.handler, "Channel Goal Context Project")
@@ -5831,9 +5831,9 @@ func TestResolveWorktreeWorkDir_UnbornRepoFailsClosed(t *testing.T) {
 }
 
 func TestResolveWorktreeWorkDir_SyncsExistingWorktreeFromTargetBeforeFollowup(t *testing.T) {
-	h, _, _, db := setupTestHandlerWithDB(t)
+	h, _, _, db := setupTestHandlerWithStores(t)
 	ctx := context.Background()
-	prRepo := teststores.Of(db).TaskPullRequests
+	prRepo := db.TaskPullRequests
 	h.SetTaskPullRequestRepo(prRepo)
 
 	repoDir := createHandlerTestGitRepo(t)
@@ -6228,9 +6228,9 @@ func TestCompleteWithSuccess_GitHubSDLCImplementationWithSuccessfullyReplacedPul
 }
 
 func TestRepublishOpenPullRequestAfterStartupSyncPreservesPendingUntilCompletion(t *testing.T) {
-	h, _, _, db := setupTestHandlerWithDB(t)
+	h, _, _, db := setupTestHandlerWithStores(t)
 	ctx := context.Background()
-	prRepo := teststores.Of(db).TaskPullRequests
+	prRepo := db.TaskPullRequests
 	h.SetTaskPullRequestRepo(prRepo)
 
 	project := &models.Project{Name: "Startup sync publication", RepoURL: "https://github.com/openvibely/openvibely", RepoPath: t.TempDir()}
@@ -6277,9 +6277,9 @@ func TestRepublishOpenPullRequestAfterStartupSyncPreservesPendingUntilCompletion
 }
 
 func TestStartupSyncSkipsClosedLivePullRequestAndCancelsPendingPublication(t *testing.T) {
-	h, _, _, db := setupTestHandlerWithDB(t)
+	h, _, _, db := setupTestHandlerWithStores(t)
 	ctx := context.Background()
-	prRepo := teststores.Of(db).TaskPullRequests
+	prRepo := db.TaskPullRequests
 	h.SetTaskPullRequestRepo(prRepo)
 	project := &models.Project{Name: "Closed startup PR", RepoURL: "https://github.com/openvibely/openvibely", RepoPath: t.TempDir()}
 	require.NoError(t, h.projectSvc.Create(ctx, project))
@@ -6322,9 +6322,9 @@ func TestStartupSyncSkipsClosedLivePullRequestAndCancelsPendingPublication(t *te
 }
 
 func TestStartupSyncPublicationDoesNotReadPRAfterSuccessfulPublish(t *testing.T) {
-	h, _, _, db := setupTestHandlerWithDB(t)
+	h, _, _, db := setupTestHandlerWithStores(t)
 	ctx := context.Background()
-	prRepo := teststores.Of(db).TaskPullRequests
+	prRepo := db.TaskPullRequests
 	h.SetTaskPullRequestRepo(prRepo)
 	project := &models.Project{Name: "PR closes during publication", RepoURL: "https://github.com/openvibely/openvibely", RepoPath: t.TempDir()}
 	require.NoError(t, h.projectSvc.Create(ctx, project))
@@ -6368,10 +6368,10 @@ func TestStartupSyncPublicationDoesNotReadPRAfterSuccessfulPublish(t *testing.T)
 }
 
 func TestProcessStreamingResponseRepublishesOpenPRAfterStartupSync(t *testing.T) {
-	h, _, llmConfigRepo, db := setupTestHandlerWithDB(t)
+	h, _, llmConfigRepo, db := setupTestHandlerWithStores(t)
 	h.workerSvc = nil
 	ctx := context.Background()
-	prRepo := teststores.Of(db).TaskPullRequests
+	prRepo := db.TaskPullRequests
 	h.SetTaskPullRequestRepo(prRepo)
 
 	agent := createAgent(t, llmConfigRepo)
@@ -6435,10 +6435,10 @@ func TestProcessStreamingResponseRepublishesOpenPRAfterStartupSync(t *testing.T)
 }
 
 func TestProcessStreamingResponseKeepsStartupSyncPublicationPendingAfterFailure(t *testing.T) {
-	h, _, llmConfigRepo, db := setupTestHandlerWithDB(t)
+	h, _, llmConfigRepo, db := setupTestHandlerWithStores(t)
 	h.workerSvc = nil
 	ctx := context.Background()
-	prRepo := teststores.Of(db).TaskPullRequests
+	prRepo := db.TaskPullRequests
 	h.SetTaskPullRequestRepo(prRepo)
 
 	agent := createAgent(t, llmConfigRepo)
@@ -6494,9 +6494,9 @@ func TestProcessStreamingResponseKeepsStartupSyncPublicationPendingAfterFailure(
 }
 
 func TestCompleteWithSuccessDefersStartupSyncPublicationForPendingSteering(t *testing.T) {
-	h, _, llmConfigRepo, db := setupTestHandlerWithDB(t)
+	h, _, llmConfigRepo, db := setupTestHandlerWithStores(t)
 	ctx := context.Background()
-	prRepo := teststores.Of(db).TaskPullRequests
+	prRepo := db.TaskPullRequests
 	h.SetTaskPullRequestRepo(prRepo)
 
 	agent := createAgent(t, llmConfigRepo)
@@ -8098,7 +8098,7 @@ func TestProcessStreamingResponse_TaskFollowupBroadcastsRealtimeDiffSnapshots(t 
 }
 
 func TestFormatThreadTranscript_FullContent(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	h := tc.handler
 
 	task := &models.Task{
@@ -8149,7 +8149,7 @@ func TestFormatThreadTranscript_FullContent(t *testing.T) {
 }
 
 func TestFormatThreadTranscript_Pagination(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	h := tc.handler
 
 	task := &models.Task{
@@ -8190,7 +8190,7 @@ func TestFormatThreadTranscript_Pagination(t *testing.T) {
 }
 
 func TestFormatThreadTranscript_OffsetAndLimit(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	h := tc.handler
 
 	task := &models.Task{
@@ -8228,7 +8228,7 @@ func TestFormatThreadTranscript_OffsetAndLimit(t *testing.T) {
 }
 
 func TestFormatThreadTranscript_OffsetBeyondTotal(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	h := tc.handler
 
 	task := &models.Task{
@@ -8250,7 +8250,7 @@ func TestFormatThreadTranscript_OffsetBeyondTotal(t *testing.T) {
 }
 
 func TestFormatThreadTranscript_Empty(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	h := tc.handler
 
 	task := &models.Task{
@@ -8268,7 +8268,7 @@ func TestFormatThreadTranscript_Empty(t *testing.T) {
 }
 
 func TestFormatThreadTranscript_LargeMessageTruncation(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	h := tc.handler
 
 	task := &models.Task{
@@ -8460,9 +8460,9 @@ func TestProcessStreamingResponse_ActionMarkerTextIsInert(t *testing.T) {
 }
 
 func TestStartQueuedChatInputPreservesChannelOriginMetadata(t *testing.T) {
-	h, _, llmConfigRepo, db := setupTestHandlerWithDB(t)
+	h, _, llmConfigRepo, db := setupTestHandlerWithStores(t)
 	h.workerSvc = nil
-	h.SetSlackTaskContextRepo(teststores.Of(db).SlackTaskContexts)
+	h.SetSlackTaskContextRepo(db.SlackTaskContexts)
 	ctx := context.Background()
 	agent := createAgent(t, llmConfigRepo)
 	project := createProject(t, h, "Queued Channel Metadata Project")
@@ -8718,7 +8718,7 @@ func TestCancelThreadInputBroadcastsChatCancellation(t *testing.T) {
 
 func TestProcessStreamingResponseConstructsRealHardenedGitHubRuntimeOnceFor50ToolCalls(t *testing.T) {
 	t.Setenv("OPENVIBELY_ALLOW_PRIVATE_MODEL_ENDPOINTS", "true")
-	h, _, llmConfigRepo, db := setupTestHandlerWithDB(t)
+	h, _, llmConfigRepo, db := setupTestHandlerWithStores(t)
 	h.workerSvc = nil
 	ctx := context.Background()
 	project := createProject(t, h, "Real hardened runtime construction project")
@@ -8764,7 +8764,7 @@ func TestProcessStreamingResponseConstructsRealHardenedGitHubRuntimeOnceFor50Too
 		execution.IsFollowup = true
 	})
 
-	automationRepo := teststores.Of(db).Automations
+	automationRepo := db.Automations
 	h.llmSvc.SetAutomationRepo(automationRepo)
 	h.llmSvc.SetGitHubIssueRuntimeProvider(&fakeGitHubService{})
 	constructions := 0
@@ -8881,11 +8881,11 @@ func BenchmarkTaskFollowupHardenedGitHubRuntime50Dispatches(b *testing.B) {
 }
 
 func TestExecuteListAgentsUsesRuntimeSummariesAndPreservesOutput(t *testing.T) {
-	h, _, _, db := setupTestHandlerWithDB(t)
+	h, _, _, db := setupTestHandlerWithStores(t)
 	ctx := context.Background()
-	agentRepo := teststores.Of(db).Agents
+	agentRepo := db.Agents
 	h.SetAgentRepo(agentRepo)
-	teststores.ClearAgents(t, teststores.Of(db).Agents)
+	teststores.ClearAgents(t, db.Agents)
 
 	agents := []*models.Agent{
 		{Name: "Alpha Agent", Description: "alpha description", Model: "inherit", Skills: []models.SkillConfig{{Name: "one"}, {Name: "two"}}, MCPServers: []models.MCPServerConfig{{Name: "browser"}}, Enabled: true, SelectableAsPrimary: true},
@@ -8911,7 +8911,7 @@ func TestExecuteListAgentsUsesRuntimeSummariesAndPreservesOutput(t *testing.T) {
 	require.Equal(t, "Configured Agents:\nAgent definitions not available.", strings.TrimSpace(h.executeListAgents(ctx)))
 
 	h.SetAgentRepo(agentRepo)
-	teststores.ClearAgents(t, teststores.Of(db).Agents)
+	teststores.ClearAgents(t, db.Agents)
 	require.Contains(t, h.executeListAgents(ctx), "No agents configured.")
 }
 
@@ -9236,7 +9236,7 @@ func TestCompleteExecutionSuccessAtomicBoardState(t *testing.T) {
 func TestFollowupStopDuringFinalizationPreservesSuccessor(t *testing.T) {
 	for _, successor := range []bool{false, true} {
 		t.Run(fmt.Sprintf("successor=%t", successor), func(t *testing.T) {
-			h, _, configs, db := setupTestHandlerWithDB(t)
+			h, _, configs, db := setupTestHandlerWithStores(t)
 			ctx := context.Background()
 			agent := createAgent(t, configs)
 			repoDir := createHandlerTestGitRepo(t)
@@ -9288,7 +9288,7 @@ func TestFollowupStopDuringFinalizationPreservesSuccessor(t *testing.T) {
 				require.Equal(t, models.StatusCancelled, storedTask.Status)
 				require.Equal(t, models.CategoryBacklog, storedTask.Category)
 			}
-			alerts, err := teststores.Of(db).Alerts.ListByProject(ctx, project.ID, 100)
+			alerts, err := db.Alerts.ListByProject(ctx, project.ID, 100)
 			require.NoError(t, err)
 			require.Empty(t, alerts, "Stop must not create a failure alert")
 		})

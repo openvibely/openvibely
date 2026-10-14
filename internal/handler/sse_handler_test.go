@@ -57,7 +57,7 @@ func TestWriteSSEEvent_DataLine(t *testing.T) {
 
 // LiveEventsSSE with nil broadcasters returns 503.
 func TestLiveEventsSSE_NoBroadcasters(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	rec := tc.HTTP().Get("/events/live").Execute()
 	tc.Assert(rec).StatusCode(http.StatusServiceUnavailable)
 }

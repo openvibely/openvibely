@@ -9,7 +9,7 @@ import (
 )
 
 func TestHandlerTaskReferenceAdapterDelegatesExplicitLookupAndPreservesCurrentHandling(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	ctx := context.Background()
 	project := tc.CreateProject().Build()
 	foreignProject := tc.CreateProject().Build()

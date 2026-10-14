@@ -78,7 +78,7 @@ func TestOutboundTargetHandlersDenyCrossProjectTargetIDs(t *testing.T) {
 	tc := NewTestContext(t)
 	ownerProject := tc.CreateProject().WithName("Owner Project").Build()
 	otherProject := tc.CreateProject().WithName("Other Project").Build()
-	targetRepo := teststores.Of(tc.db).ChannelTargets
+	targetRepo := tc.stores.ChannelTargets
 	slack := &outboundTargetTestSlack{}
 	router := service.NewChannelMessageRouter(targetRepo, tc.settingsRepo)
 	router.SetSlackService(slack)
@@ -173,7 +173,7 @@ func TestOutboundTargetFragmentsShareResolvedProjectContext(t *testing.T) {
 	tc := NewTestContext(t)
 	projectA := tc.CreateProject().WithName("Outbound Fragment A").Build()
 	projectB := tc.CreateProject().WithName("Outbound Fragment B").Build()
-	targetRepo := teststores.Of(tc.db).ChannelTargets
+	targetRepo := tc.stores.ChannelTargets
 	tc.handler.SetChannelTargetRepo(targetRepo)
 
 	targetA := models.ChannelTarget{
@@ -369,7 +369,7 @@ func TestOutboundTargetsCardFragmentUsesAggregateSummaryWithoutMaterializedRows(
 func TestOutboundTargetsPersistOnlyOnSaveSettings(t *testing.T) {
 	tc := NewTestContext(t)
 	project := tc.CreateProject().WithName("Staged Outbound Targets").Build()
-	targetRepo := teststores.Of(tc.db).ChannelTargets
+	targetRepo := tc.stores.ChannelTargets
 	tc.handler.SetChannelTargetRepo(targetRepo)
 
 	keep := models.ChannelTarget{ID: persistence.NewID(), ProjectID: project.ID, Platform: "email", Name: "keep", TargetID: "keep@example.com"}
@@ -481,7 +481,7 @@ func TestOutboundTargetsPersistOnlyOnSaveSettings(t *testing.T) {
 func TestEditingOutboundTargetPreservesIDAndTestsEditedDraft(t *testing.T) {
 	tc := NewTestContext(t)
 	project := tc.CreateProject().WithName("Edited Outbound Target Project").Build()
-	targetRepo := teststores.Of(tc.db).ChannelTargets
+	targetRepo := tc.stores.ChannelTargets
 	email := &outboundTargetTestEmail{}
 	router := service.NewChannelMessageRouter(targetRepo, tc.settingsRepo)
 	router.SetEmailService(email)
@@ -565,9 +565,9 @@ func TestEditingOutboundTargetPreservesIDAndTestsEditedDraft(t *testing.T) {
 }
 
 func TestOutboundTargetDraftTestSendsWithoutPersisting(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	project := tc.CreateProject().WithName("Outbound Draft Test Project").Build()
-	targetRepo := teststores.Of(tc.db).ChannelTargets
+	targetRepo := tc.stores.ChannelTargets
 	slack := &outboundTargetTestSlack{}
 	router := service.NewChannelMessageRouter(targetRepo, tc.settingsRepo)
 	router.SetSlackService(slack)
@@ -601,9 +601,9 @@ func TestOutboundTargetDraftTestSendsWithoutPersisting(t *testing.T) {
 }
 
 func TestOutboundTargetSaveAndDraftTestShareCanonicalValidation(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	project := tc.CreateProject().WithName("Outbound Shared Validation Project").Build()
-	targetRepo := teststores.Of(tc.db).ChannelTargets
+	targetRepo := tc.stores.ChannelTargets
 	slack := &outboundTargetTestSlack{}
 	router := service.NewChannelMessageRouter(targetRepo, tc.settingsRepo)
 	router.SetSlackService(slack)
@@ -643,9 +643,9 @@ func TestOutboundTargetSaveAndDraftTestShareCanonicalValidation(t *testing.T) {
 }
 
 func TestOutboundTargetDraftTestRendersCleanFailure(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	project := tc.CreateProject().WithName("Outbound Draft Failure Project").Build()
-	targetRepo := teststores.Of(tc.db).ChannelTargets
+	targetRepo := tc.stores.ChannelTargets
 	router := service.NewChannelMessageRouter(targetRepo, tc.settingsRepo)
 	tc.handler.SetChannelTargetRepo(targetRepo)
 	tc.handler.SetChannelMessageRouter(router)
@@ -670,7 +670,7 @@ func TestOutboundTargetDraftTestRendersCleanFailure(t *testing.T) {
 func TestOutboundTargetTestPreservesThreadIDAndEscapesResult(t *testing.T) {
 	tc := NewTestContext(t)
 	project := tc.CreateProject().WithName("Outbound Target Project").Build()
-	targetRepo := teststores.Of(tc.db).ChannelTargets
+	targetRepo := tc.stores.ChannelTargets
 	slack := &outboundTargetTestSlack{}
 	router := service.NewChannelMessageRouter(targetRepo, tc.settingsRepo)
 	router.SetSlackService(slack)
@@ -713,9 +713,9 @@ func TestOutboundTargetTestPreservesThreadIDAndEscapesResult(t *testing.T) {
 // TestSavingUserDMOutboundTargetPersistsTargetKind verifies that posting target_kind=user
 // saves the target with target_kind 'user' and the test button dispatches as a direct message.
 func TestSavingUserDMOutboundTargetPersistsTargetKind(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	project := tc.CreateProject().WithName("User DM Target Project").Build()
-	targetRepo := teststores.Of(tc.db).ChannelTargets
+	targetRepo := tc.stores.ChannelTargets
 	slack := &outboundTargetTestSlack{}
 	router := service.NewChannelMessageRouter(targetRepo, tc.settingsRepo)
 	router.SetSlackService(slack)
@@ -772,9 +772,9 @@ func TestSavingUserDMOutboundTargetPersistsTargetKind(t *testing.T) {
 // TestOutboundTargetDraftTestUserDMDispatchesAsDM verifies that a draft test for a Slack
 // user DM target (target_kind=user) dispatches via SendOutboundDirectMessage.
 func TestOutboundTargetDraftTestUserDMDispatchesAsDM(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	project := tc.CreateProject().WithName("Draft DM Project").Build()
-	targetRepo := teststores.Of(tc.db).ChannelTargets
+	targetRepo := tc.stores.ChannelTargets
 	slack := &outboundTargetTestSlack{}
 	router := service.NewChannelMessageRouter(targetRepo, tc.settingsRepo)
 	router.SetSlackService(slack)
@@ -809,9 +809,9 @@ func TestOutboundTargetDraftTestUserDMDispatchesAsDM(t *testing.T) {
 // target posted with target_kind=user is saved with target_kind 'user' and that the test
 // button dispatches via SendOutboundDirectMessage, not SendOutboundMessage.
 func TestSavingDiscordUserDMOutboundTargetPersistsTargetKind(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	project := tc.CreateProject().WithName("Discord User DM Target Project").Build()
-	targetRepo := teststores.Of(tc.db).ChannelTargets
+	targetRepo := tc.stores.ChannelTargets
 	discord := &outboundTargetTestDiscord{}
 	router := service.NewChannelMessageRouter(targetRepo, tc.settingsRepo)
 	router.SetDiscordService(discord)
@@ -868,9 +868,9 @@ func TestSavingDiscordUserDMOutboundTargetPersistsTargetKind(t *testing.T) {
 // TestDiscordOutboundTargetDraftTestUserDMDispatchesAsDM verifies that a draft test for a
 // Discord user DM target (target_kind=user) dispatches via SendOutboundDirectMessage.
 func TestDiscordOutboundTargetDraftTestUserDMDispatchesAsDM(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	project := tc.CreateProject().WithName("Discord Draft DM Project").Build()
-	targetRepo := teststores.Of(tc.db).ChannelTargets
+	targetRepo := tc.stores.ChannelTargets
 	discord := &outboundTargetTestDiscord{}
 	router := service.NewChannelMessageRouter(targetRepo, tc.settingsRepo)
 	router.SetDiscordService(discord)
@@ -992,9 +992,9 @@ func seedOutboundTargetsCardBenchFixture(tb testing.TB, db *sql.DB, projectID st
 }
 
 func TestAuthorizedUsersMutationDoesNotAffectOutboundTargets(t *testing.T) {
-	h, e, _, db := setupTestHandlerWithDB(t)
+	h, e, _, db := setupTestHandlerWithStores(t)
 	project := createProject(t, h, "Auth Isolation Project")
-	targetRepo := teststores.Of(db).ChannelTargets
+	targetRepo := db.ChannelTargets
 	h.SetChannelTargetRepo(targetRepo)
 
 	// Seed two outbound targets: a Slack channel and a Discord user DM.
@@ -1080,9 +1080,9 @@ func TestAuthorizedUsersMutationDoesNotAffectOutboundTargets(t *testing.T) {
 // TestOutboundTargetMutationDoesNotAffectAuthorizedUsers verifies that saving or removing
 // outbound targets does not modify the Slack or Discord authorized users tables.
 func TestOutboundTargetMutationDoesNotAffectAuthorizedUsers(t *testing.T) {
-	h, e, _, db := setupTestHandlerWithDB(t)
+	h, e, _, db := setupTestHandlerWithStores(t)
 	project := createProject(t, h, "Outbound Isolation Project")
-	targetRepo := teststores.Of(db).ChannelTargets
+	targetRepo := db.ChannelTargets
 	h.SetChannelTargetRepo(targetRepo)
 
 	// Seed one Slack and one Discord authorized user.

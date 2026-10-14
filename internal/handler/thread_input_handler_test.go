@@ -13,13 +13,12 @@ import (
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
-	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 )
 
-// threadInputRepo is wired in NewTestContext (derived from execRepo.DB()).
+// threadInputRepo uses the same stores as the test handler.
 
 func TestCancelThreadInput_NonExistentID(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	// CancelPending on a missing ID returns ErrInputNotPending.
 	// Handler should return 200 with the hidden-row fragment so HTMX removes
 	// the stale composer row rather than leaving it stuck.
@@ -34,7 +33,7 @@ func TestCancelThreadInput_NonExistentID(t *testing.T) {
 }
 
 func TestCancelThreadInput_SuccessReportsCancelled(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	ctx := context.Background()
 	p := tc.CreateProject().Build()
 	task := tc.CreateTask(p.ID).Build()
@@ -65,7 +64,7 @@ func TestCancelThreadInput_SuccessReportsCancelled(t *testing.T) {
 }
 
 func TestCancelThreadInput_AlreadyAppliedReturnsRemovedRow(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	ctx := context.Background()
 	p := tc.CreateProject().Build()
 	task := tc.CreateTask(p.ID).Build()
@@ -120,7 +119,7 @@ func TestCancelThreadInput_AlreadyAppliedReturnsRemovedRow(t *testing.T) {
 }
 
 func TestCancelThreadInput_PreparedSteeringReturnsRemovedRow(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	ctx := context.Background()
 	p := tc.CreateProject().Build()
 	task := tc.CreateTask(p.ID).Build()
@@ -185,14 +184,14 @@ func TestCancelThreadInput_PreparedSteeringReturnsRemovedRow(t *testing.T) {
 }
 
 func TestChatQueuedInputSteer_NonExistentID(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	// GetByID returns (nil, nil) for missing ID → 409 "queued input is no longer pending"
 	rec := tc.HTTP().Post("/chat/queued/nonexistent-input/steer").Execute()
 	tc.Assert(rec).StatusCode(http.StatusConflict)
 }
 
 func TestChatQueuedInputSteer_WithAttachmentsShowsSteeringAttachmentIndicator(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	ctx := context.Background()
 	p := tc.CreateProject().Build()
 	task := tc.CreateTask(p.ID).WithCategory(models.CategoryChat).Build()
@@ -233,7 +232,7 @@ func TestChatQueuedInputSteer_WithAttachmentsShowsSteeringAttachmentIndicator(t 
 }
 
 func TestTaskThreadQueuedInputSteer_NonExistentInput(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	p := tc.CreateProject().Build()
 	task := tc.CreateTask(p.ID).Build()
 	// Input doesn't exist → GetByID returns nil → 409
@@ -242,7 +241,7 @@ func TestTaskThreadQueuedInputSteer_NonExistentInput(t *testing.T) {
 }
 
 func TestPublishThreadInputCancelledEvent_NilInput(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	// publishThreadInputCancelledEvent with nil input is a no-op; call it to exercise the nil guard.
 	tc.handler.publishThreadInputCancelledEvent(nil)
 }
@@ -250,7 +249,7 @@ func TestPublishThreadInputCancelledEvent_NilInput(t *testing.T) {
 func TestEditThreadInput(t *testing.T) {
 	for _, scope := range []models.ThreadInputScope{models.ThreadInputScopeTask, models.ThreadInputScopeChat} {
 		t.Run(string(scope), func(t *testing.T) {
-			tc := NewTestContext(t)
+			tc := NewStoreTestContext(t)
 			ctx := context.Background()
 			p := tc.CreateProject().Build()
 			task := tc.CreateTask(p.ID).Build()
@@ -279,7 +278,7 @@ func TestEditThreadInput(t *testing.T) {
 }
 
 func TestEditThreadInputSteeringConsumptionGuard(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	ctx := context.Background()
 	p := tc.CreateProject().Build()
 	task := tc.CreateTask(p.ID).Build()
@@ -312,7 +311,7 @@ func TestEditThreadInputSteeringConsumptionGuard(t *testing.T) {
 func TestEditingHoldsQueuedMessageAfterTurnFinishes(t *testing.T) {
 	for _, scope := range []models.ThreadInputScope{models.ThreadInputScopeTask, models.ThreadInputScopeChat} {
 		t.Run(string(scope), func(t *testing.T) {
-			tc := NewTestContext(t)
+			tc := NewStoreTestContext(t)
 			ctx := context.Background()
 			p := tc.CreateProject().Build()
 			task := tc.CreateTask(p.ID).Build()
@@ -353,7 +352,7 @@ func TestEditingHoldsQueuedMessageAfterTurnFinishes(t *testing.T) {
 func TestFinishingQueuedEditResumesAfterCompletedTurn(t *testing.T) {
 	for _, save := range []bool{false, true} {
 		t.Run(fmt.Sprint("save=", save), func(t *testing.T) {
-			tc := NewTestContext(t)
+			tc := NewStoreTestContext(t)
 			ctx := context.Background()
 			p := tc.CreateProject().Build()
 			task := tc.CreateTask(p.ID).Build()
@@ -383,7 +382,7 @@ func TestFinishingQueuedEditResumesAfterCompletedTurn(t *testing.T) {
 }
 
 func TestExpiredEditorResumesQueuedMessage(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	ctx := context.Background()
 	p := tc.CreateProject().Build()
 	task := tc.CreateTask(p.ID).Build()
@@ -399,7 +398,7 @@ func TestExpiredEditorResumesQueuedMessage(t *testing.T) {
 	require.NoError(t, err)
 	require.Nil(t, next)
 	// Simulate a crashed browser without waiting for wall-clock expiry.
-	_, err = tc.execRepo.(*sqlite.ExecutionRepo).DB().ExecContext(ctx, `UPDATE thread_inputs SET edit_hold_until = datetime('now', '-1 second') WHERE id = ?`, input.ID)
+	err = tc.stores.Fixtures.SetInputEditHoldUntil(ctx, input.ID, time.Now().UTC().Add(-time.Second))
 	require.NoError(t, err)
 	tc.Assert(tc.HTTP().Post(endpoint).WithForm(url.Values{"renew": {"true"}}).Execute()).StatusCode(http.StatusConflict)
 	tc.handler.RecoverExpiredInputEdits(ctx)
@@ -414,7 +413,7 @@ func TestExpiredEditorResumesQueuedMessage(t *testing.T) {
 }
 
 func TestEditHoldOwnerRoutes(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	ctx := context.Background()
 	project := tc.CreateProject().Build()
 	input := &models.ThreadInput{Scope: models.ThreadInputScopeChat, ProjectID: project.ID, Content: "original"}

@@ -10,15 +10,13 @@ import (
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
-	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/service"
-	"github.com/openvibely/openvibely/internal/testutil/teststores"
 )
 
 func newInsightsHandlerTestContext(t *testing.T) (*TestContext, persistence.InsightsStore) {
 	t.Helper()
-	tc := NewTestContext(t)
-	insightsRepo := teststores.Of(tc.db).Insights
+	tc := NewStoreTestContext(t)
+	insightsRepo := tc.stores.Insights
 	tc.handler.insightsSvc = service.NewInsightsService(insightsRepo, tc.taskRepo, tc.projectRepo, tc.llmConfigRepo, tc.execRepo)
 	return tc, insightsRepo
 }
@@ -42,27 +40,27 @@ func createHandlerTestInsight(t *testing.T, repo persistence.InsightsStore, proj
 
 // ProactiveInsights always renders (no nil-service guard upfront).
 func TestProactiveInsights_NoProjects(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	rec := tc.HTTP().Get("/insights").Execute()
 	tc.Assert(rec).StatusCode(http.StatusOK)
 }
 
 func TestProactiveInsights_WithProject(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	tc.CreateProject().WithName("Insights Project").Build()
 	rec := tc.HTTP().Get("/insights").Execute()
 	tc.Assert(rec).StatusCode(http.StatusOK).Contains("Insights Project")
 }
 
 func TestProactiveInsights_WithProjectID(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	p := tc.CreateProject().Build()
 	rec := tc.HTTP().Get("/insights?project_id=" + p.ID).Execute()
 	tc.Assert(rec).StatusCode(http.StatusOK)
 }
 
 func TestProactiveInsights_HTMX(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	tc.CreateProject().Build()
 	rec := tc.HTMX().Get("/insights").Execute()
 	tc.Assert(rec).StatusCode(http.StatusOK)
@@ -143,7 +141,7 @@ func TestInsightsMutations_EnforceProjectOwnershipAndRenderScopedCards(t *testin
 	if foreignKnowledgeDelete.Code != http.StatusNotFound || strings.Contains(foreignKnowledgeDelete.Body.String(), foreignKnowledge.Content) {
 		t.Fatalf("foreign knowledge delete response = %d %q, want not found", foreignKnowledgeDelete.Code, foreignKnowledgeDelete.Body.String())
 	}
-	if stillThere, err := insightsRepo.(*sqlite.InsightsRepo).GetKnowledge(context.Background(), projectB.ID, foreignKnowledge.ID); err != nil || stillThere == nil {
+	if stillThere, err := tc.stores.Fixtures.KnowledgeEntry(context.Background(), projectB.ID, foreignKnowledge.ID); err != nil || stillThere == nil {
 		t.Fatalf("foreign knowledge disappeared after delete rejection: %#v err=%v", stillThere, err)
 	}
 
@@ -210,7 +208,7 @@ func TestInsightsMutations_EnforceProjectOwnershipAndRenderScopedCards(t *testin
 	if sameKnowledgeDelete.Code != http.StatusOK || sameKnowledgeDelete.Body.Len() != 0 {
 		t.Fatalf("same-project knowledge delete = %d %q, want empty 200", sameKnowledgeDelete.Code, sameKnowledgeDelete.Body.String())
 	}
-	if deleted, err := insightsRepo.(*sqlite.InsightsRepo).GetKnowledge(context.Background(), projectA.ID, sameKnowledge.ID); err != nil || deleted != nil {
+	if deleted, err := tc.stores.Fixtures.KnowledgeEntry(context.Background(), projectA.ID, sameKnowledge.ID); err != nil || deleted != nil {
 		t.Fatalf("same-project knowledge remained after delete: %#v err=%v", deleted, err)
 	}
 
@@ -235,86 +233,86 @@ func TestInsightsMutations_EnforceProjectOwnershipAndRenderScopedCards(t *testin
 }
 
 func TestRunInsightsAnalysis_MissingProjectID(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	rec := tc.HTTP().Post("/insights/analyze").Execute()
 	tc.Assert(rec).StatusCode(http.StatusBadRequest)
 }
 
 func TestRunInsightsAnalysis_NilService(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	rec := tc.HTTP().Post("/insights/analyze?project_id=proj-1").Execute()
 	tc.Assert(rec).StatusCode(http.StatusBadRequest)
 }
 
 func TestExtractInsightsKnowledge_NilService(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	rec := tc.HTTP().Post("/insights/extract-knowledge?project_id=proj-1").Execute()
 	tc.Assert(rec).StatusCode(http.StatusBadRequest)
 }
 
 func TestUpdateInsightStatus_NilService(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	form := url.Values{"status": []string{"acknowledged"}}
 	rec := tc.HTTP().Patch("/insights/i-1/status").WithForm(form).Execute()
 	tc.Assert(rec).StatusCode(http.StatusBadRequest)
 }
 
 func TestDeleteInsight_NilService(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	rec := tc.HTTP().Delete("/insights/i-1").Execute()
 	tc.Assert(rec).StatusCode(http.StatusBadRequest)
 }
 
 func TestListInsightsByType_MissingParams(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	rec := tc.HTTP().Get("/insights/by-type").Execute()
 	tc.Assert(rec).StatusCode(http.StatusBadRequest)
 }
 
 func TestListInsightsByType_NilService(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	rec := tc.HTTP().Get("/insights/by-type?project_id=proj-1&type=performance").Execute()
 	tc.Assert(rec).StatusCode(http.StatusBadRequest)
 }
 
 func TestListInsightReports_MissingParams(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	rec := tc.HTTP().Get("/insights/reports").Execute()
 	tc.Assert(rec).StatusCode(http.StatusBadRequest)
 }
 
 func TestListInsightReports_NilService(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	rec := tc.HTTP().Get("/insights/reports?project_id=proj-1").Execute()
 	tc.Assert(rec).StatusCode(http.StatusBadRequest)
 }
 
 func TestRunHealthCheck_MissingProjectID(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	rec := tc.HTTP().Post("/insights/health-check").Execute()
 	tc.Assert(rec).StatusCode(http.StatusBadRequest)
 }
 
 func TestRunHealthCheck_NilService(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	rec := tc.HTTP().Post("/insights/health-check?project_id=proj-1").Execute()
 	tc.Assert(rec).StatusCode(http.StatusBadRequest)
 }
 
 func TestGradeIdeas_MissingProjectID(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	rec := tc.HTTP().Post("/history/grade-ideas").Execute()
 	tc.Assert(rec).StatusCode(http.StatusBadRequest)
 }
 
 func TestGradeIdeas_NilService(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	rec := tc.HTTP().Post("/history/grade-ideas?project_id=proj-1").Execute()
 	tc.Assert(rec).StatusCode(http.StatusBadRequest)
 }
 
 func TestDeleteKnowledgeEntry_NilService(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	rec := tc.HTTP().Delete("/insights/knowledge/k-1").Execute()
 	tc.Assert(rec).StatusCode(http.StatusBadRequest)
 }

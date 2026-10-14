@@ -17,7 +17,6 @@ import (
 	llmopenai_compatible "github.com/openvibely/openvibely/internal/llm/openai_compatible"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
-	"github.com/openvibely/openvibely/internal/testutil/teststores"
 	"github.com/stretchr/testify/require"
 )
 
@@ -46,12 +45,12 @@ func TestRequestUserInputToolWebOnlyRegistryAndHandler(t *testing.T) {
 	}
 	require.NotContains(t, handlerToolDefNames(chatcontrol.ToolDefsForContext(models.ChatModePlan, chatcontrol.SurfaceWeb, false)), "request_user_input")
 
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	require.NoError(t, chatcontrol.ValidateHandlerCoverage(models.ChatModeOrchestrate, chatcontrol.SurfaceWeb, false, tc.handler.chatActionHandlers(streamingResponseParams{}, nil, models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)))
 }
 
 func TestRequestUserInputToolPublishesSSEAndReturnsAnswer(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	project := tc.CreateProject().WithName("Interactive answers").Build()
 	cb := events.NewChatBroadcaster()
 	tc.handler.SetChatBroadcaster(cb)
@@ -99,7 +98,7 @@ func TestRequestUserInputToolPublishesSSEAndReturnsAnswer(t *testing.T) {
 }
 
 func TestRequestUserInputRuntimeRejectsTaskThreadFollowupEvenWhenProviderCallsHiddenTool(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	project := tc.CreateProject().WithName("Thread boundary").Build()
 	cb := events.NewChatBroadcaster()
 	tc.handler.SetChatBroadcaster(cb)
@@ -217,7 +216,7 @@ func TestRequestUserInputAnswerResumesProviderToolLoopAndAllowsAffirmativeCreate
 }
 
 func TestChatInputRequestAnswerRejectsInvalidCrossProjectAndDuplicate(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	project := tc.CreateProject().WithName("Owner").Build()
 	other := tc.CreateProject().WithName("Other").Build()
 	pending, err := tc.handler.chatInputRequests.create(project.ID, "exec-2", []chatInputRequestQuestion{{ID: "create", Question: "Create it?", Options: []chatInputRequestOption{{Label: "Yes", Description: "Create it"}, {Label: "No", Description: "Skip it"}}}})
@@ -243,7 +242,7 @@ func TestChatInputRequestAnswerRejectsInvalidCrossProjectAndDuplicate(t *testing
 }
 
 func TestChatInputRequestsRendersPendingAndOmitsCompletedRequests(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	project := tc.CreateProject().WithName("Input request state").Build()
 	pending, err := tc.handler.chatInputRequests.create(project.ID, "exec-state", []chatInputRequestQuestion{{
 		ID: "create", Question: "Create it?", Options: []chatInputRequestOption{{Label: "Yes", Description: "Create it"}, {Label: "No", Description: "Skip it"}},
@@ -262,7 +261,7 @@ func TestChatInputRequestsRendersPendingAndOmitsCompletedRequests(t *testing.T) 
 }
 
 func TestChatInputRequestRecoveredAfterRestartRendersAndUnblocksChat(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	ctx := context.Background()
 	agent := createAgent(t, tc.llmConfigRepo)
 	project := tc.CreateProject().WithName("Recovered input request").Build()
@@ -280,7 +279,7 @@ func TestChatInputRequestRecoveredAfterRestartRendersAndUnblocksChat(t *testing.
 	questionsJSON, err := json.Marshal(questions)
 	require.NoError(t, err)
 	reqID := persistence.NewID()
-	repo := teststores.Of(tc.db).ChatInputRequests
+	repo := tc.stores.ChatInputRequests
 	require.NoError(t, repo.Create(ctx, persistence.ChatInputRequestRecord{ID: reqID, ProjectID: project.ID, ExecutionID: exec.ID, QuestionsJSON: string(questionsJSON), ExpiresAt: time.Now().Add(time.Hour)}))
 	tc.handler.chatInputRequests = newChatInputRequestBroker()
 
@@ -304,7 +303,7 @@ func TestChatInputRequestRecoveredAfterRestartRendersAndUnblocksChat(t *testing.
 }
 
 func TestChatInputRequestProjectPreflightPreservesBlankAndUnknownResponses(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 
 	answer := postInputRequestJSON(t, tc, "/chat/input-requests/missing-request/answer", `{"project_id":"missing-project","answers":[]}`, http.StatusForbidden)
 	require.Contains(t, answer.Body.String(), "project not found")
@@ -323,7 +322,7 @@ func TestChatInputRequestProjectPreflightPreservesBlankAndUnknownResponses(t *te
 }
 
 func TestRequestUserInputCancellationAndTimeout(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	project := tc.CreateProject().WithName("Cancelled").Build()
 	cb := events.NewChatBroadcaster()
 	tc.handler.SetChatBroadcaster(cb)
@@ -361,7 +360,7 @@ func TestRequestUserInputCancellationAndTimeout(t *testing.T) {
 }
 
 func TestChatPageRendersInputRequestClientControls(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	project := tc.CreateProject().WithName("Render").Build()
 	body := tc.HTTP().Get("/chat?project_id=" + project.ID).Execute().Body.String()
 	require.Contains(t, body, "chat_user_input_requested")
@@ -372,7 +371,7 @@ func TestChatPageRendersInputRequestClientControls(t *testing.T) {
 }
 
 func TestChatPageServerRendersPendingInputRequestCard(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	project := tc.CreateProject().WithName("Server card").Build()
 	pending, err := tc.handler.chatInputRequests.create(project.ID, "exec-server", []chatInputRequestQuestion{{
 		ID:       "create",
@@ -405,7 +404,7 @@ func TestChatPageServerRendersPendingInputRequestCard(t *testing.T) {
 }
 
 func TestChatPageLoadsWhenInputRequestsFailToLoad(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	ctx := context.Background()
 	agent := createAgent(t, tc.llmConfigRepo)
 	project := tc.CreateProject().WithName("Broken input request").Build()
@@ -414,7 +413,7 @@ func TestChatPageLoadsWhenInputRequestsFailToLoad(t *testing.T) {
 	})
 	exec := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecCompleted, PromptSent: "ask me"}
 	require.NoError(t, tc.execRepo.Create(ctx, exec))
-	repo := teststores.Of(tc.db).ChatInputRequests
+	repo := tc.stores.ChatInputRequests
 	require.NoError(t, repo.Create(ctx, persistence.ChatInputRequestRecord{
 		ID: persistence.NewID(), ProjectID: project.ID, ExecutionID: exec.ID, QuestionsJSON: "{not json", ExpiresAt: time.Now().Add(time.Hour),
 	}))

@@ -20,7 +20,7 @@ import (
 )
 
 func TestImageGalleryAttachmentAccess(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	useTempUploadsDir(t)
 	p := tc.CreateProject().Build()
 	other := tc.CreateProject().Build()

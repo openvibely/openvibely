@@ -17,8 +17,6 @@ import (
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
-	"github.com/openvibely/openvibely/internal/persistence/sqlite"
-	"github.com/openvibely/openvibely/internal/testutil/teststores"
 	"github.com/openvibely/openvibely/web/templates/components"
 )
 
@@ -31,9 +29,9 @@ type webhookTestContext struct {
 
 func newWebhookTestContext(t *testing.T) *webhookTestContext {
 	t.Helper()
-	tc := NewTestContext(t)
-	webhookRepo := teststores.Of(tc.db).Webhooks
-	agentRepo := teststores.Of(tc.db).Agents
+	tc := NewStoreTestContext(t)
+	webhookRepo := tc.stores.Webhooks
+	agentRepo := tc.stores.Agents
 	tc.handler.SetWebhookRepo(webhookRepo)
 	tc.handler.SetAgentRepo(agentRepo)
 	return &webhookTestContext{
@@ -479,7 +477,7 @@ func TestWebhookCRUD_RejectsUnavailableAgentsWithoutMutation(t *testing.T) {
 	if createRec.Code != http.StatusBadRequest {
 		t.Fatalf("foreign create: expected 400, got %d; body=%s", createRec.Code, createRec.Body.String())
 	}
-	createdWebhooks, err := wtc.webhookRepo.(*sqlite.WebhookRepo).ListByProject(context.Background(), projectA.ID)
+	createdWebhooks, err := wtc.stores.Fixtures.WebhookEndpoints(context.Background(), projectA.ID)
 	if err != nil {
 		t.Fatalf("list project A webhooks after rejected create: %v", err)
 	}
@@ -620,7 +618,7 @@ func TestWebhookInbound_TaskAgentAssignmentsPersisted(t *testing.T) {
 		t.Fatalf("expected 1 task")
 	}
 
-	assignments, err := wtc.webhookRepo.(*sqlite.WebhookRepo).GetTaskAgentAssignments(context.Background(), tasks[0].ID)
+	assignments, err := wtc.stores.Fixtures.TaskAgentAssignments(context.Background(), tasks[0].ID)
 	if err != nil {
 		t.Fatalf("GetTaskAgentAssignments: %v", err)
 	}
@@ -708,7 +706,7 @@ func TestWebhookCRUD_CreateViaForm(t *testing.T) {
 		t.Fatalf("expected 201, got %d; body=%s", rec.Code, rec.Body.String())
 	}
 
-	webhooks, _ := wtc.webhookRepo.(*sqlite.WebhookRepo).ListByProject(context.Background(), project.ID)
+	webhooks, _ := wtc.stores.Fixtures.WebhookEndpoints(context.Background(), project.ID)
 	if len(webhooks) != 1 {
 		t.Fatalf("expected 1 webhook, got %d", len(webhooks))
 	}
@@ -749,7 +747,7 @@ func TestWebhookCRUD_CreatePreservesEnabledFormValue(t *testing.T) {
 				t.Fatalf("create: expected 201, got %d; body=%s", rec.Code, rec.Body.String())
 			}
 
-			webhooks, err := wtc.webhookRepo.(*sqlite.WebhookRepo).ListByProject(context.Background(), project.ID)
+			webhooks, err := wtc.stores.Fixtures.WebhookEndpoints(context.Background(), project.ID)
 			if err != nil {
 				t.Fatalf("ListByProject: %v", err)
 			}
@@ -835,7 +833,7 @@ func TestWebhookCRUD_CreateAndUpdateNormalizeEditableFieldsAndAgents(t *testing.
 		t.Fatalf("create: expected 201, got %d; body=%s", createRec.Code, createRec.Body.String())
 	}
 
-	webhooks, err := wtc.webhookRepo.(*sqlite.WebhookRepo).ListByProject(context.Background(), project.ID)
+	webhooks, err := wtc.stores.Fixtures.WebhookEndpoints(context.Background(), project.ID)
 	if err != nil {
 		t.Fatalf("ListByProject: %v", err)
 	}
@@ -895,7 +893,7 @@ func TestWebhookCRUD_BlankNameLifecycleBehavior(t *testing.T) {
 	if createRec.Code != http.StatusCreated {
 		t.Fatalf("create blank name: expected 201, got %d; body=%s", createRec.Code, createRec.Body.String())
 	}
-	webhooks, err := wtc.webhookRepo.(*sqlite.WebhookRepo).ListByProject(context.Background(), project.ID)
+	webhooks, err := wtc.stores.Fixtures.WebhookEndpoints(context.Background(), project.ID)
 	if err != nil {
 		t.Fatalf("ListByProject: %v", err)
 	}
@@ -948,7 +946,7 @@ func TestWebhookCRUD_DefaultPriorityMatchesCanonicalScale(t *testing.T) {
 			t.Fatalf("create priority=%d: expected 201, got %d; body=%s", want, rec.Code, rec.Body.String())
 		}
 
-		webhooks, _ := wtc.webhookRepo.(*sqlite.WebhookRepo).ListByProject(context.Background(), project.ID)
+		webhooks, _ := wtc.stores.Fixtures.WebhookEndpoints(context.Background(), project.ID)
 		var created *models.WebhookEndpoint
 		for i := range webhooks {
 			if webhooks[i].DefaultPriority == want {
@@ -1003,7 +1001,7 @@ func TestWebhookCRUD_BlankDefaultPriorityDoesNotProduceLegacyZero(t *testing.T) 
 		t.Fatalf("create: expected 201, got %d; body=%s", rec.Code, rec.Body.String())
 	}
 
-	webhooks, _ := wtc.webhookRepo.(*sqlite.WebhookRepo).ListByProject(context.Background(), project.ID)
+	webhooks, _ := wtc.stores.Fixtures.WebhookEndpoints(context.Background(), project.ID)
 	if len(webhooks) != 1 {
 		t.Fatalf("expected 1 webhook, got %d", len(webhooks))
 	}
@@ -1096,7 +1094,7 @@ func TestWebhookInbound_LegacyZeroDefaultPriorityDoesNotProduceNoBadgeTask(t *te
 	}
 	// Force the legacy value past repository-level validation, if any, by
 	// writing it directly so this test exercises a genuinely stored 0.
-	if _, err := wtc.db.Exec(`UPDATE webhook_endpoints SET default_priority = 0 WHERE id = ?`, w.ID); err != nil {
+	if err := wtc.stores.Fixtures.SetLegacyWebhookPriority(context.Background(), w.ID, 0); err != nil {
 		t.Fatalf("force legacy default_priority=0: %v", err)
 	}
 
@@ -1144,7 +1142,7 @@ func TestWebhookCRUD_HTMXMutationsTriggerChannelsRefresh(t *testing.T) {
 	}
 	assertChannelsRefreshTrigger(t, createRec)
 
-	webhooks, _ := wtc.webhookRepo.(*sqlite.WebhookRepo).ListByProject(context.Background(), project.ID)
+	webhooks, _ := wtc.stores.Fixtures.WebhookEndpoints(context.Background(), project.ID)
 	if len(webhooks) != 1 {
 		t.Fatalf("expected 1 webhook after create, got %d", len(webhooks))
 	}
@@ -1259,7 +1257,7 @@ func TestWebhookCRUD_MissingMutationsReturnNotFound(t *testing.T) {
 	wtc := newWebhookTestContext(t)
 	project := wtc.CreateProject().WithName("WH Missing Mutations").Build()
 	endpoint := wtc.createEndpoint(t, project.ID, "Stale Endpoint", true)
-	if err := wtc.webhookRepo.(*sqlite.WebhookRepo).Delete(context.Background(), endpoint.ID); err != nil {
+	if err := wtc.webhookRepo.DeleteForProject(context.Background(), project.ID, endpoint.ID); err != nil {
 		t.Fatalf("delete endpoint before stale requests: %v", err)
 	}
 
@@ -1359,7 +1357,7 @@ func TestWebhookCRUD_TestRepeatedClicksCreateUniqueTasksWithAgentsAndWorkerSubmi
 		if task.AgentDefinitionID == nil || *task.AgentDefinitionID != agent1.ID {
 			t.Fatalf("task %s primary agent = %v, want %s", task.ID, task.AgentDefinitionID, agent1.ID)
 		}
-		assignments, err := wtc.webhookRepo.(*sqlite.WebhookRepo).GetTaskAgentAssignments(context.Background(), task.ID)
+		assignments, err := wtc.stores.Fixtures.TaskAgentAssignments(context.Background(), task.ID)
 		if err != nil {
 			t.Fatalf("GetTaskAgentAssignments(%s): %v", task.ID, err)
 		}
@@ -1597,7 +1595,7 @@ func TestWebhookCreate_WithoutProjectID(t *testing.T) {
 		t.Fatalf("create: expected 201, got %d; body=%s", rec.Code, rec.Body.String())
 	}
 
-	webhooksProj1, _ := wtc.webhookRepo.(*sqlite.WebhookRepo).ListByProject(context.Background(), proj1.ID)
+	webhooksProj1, _ := wtc.stores.Fixtures.WebhookEndpoints(context.Background(), proj1.ID)
 	if len(webhooksProj1) != 1 {
 		t.Fatalf("expected 1 webhook for proj1, got %d", len(webhooksProj1))
 	}

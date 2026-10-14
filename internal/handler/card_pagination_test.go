@@ -52,11 +52,11 @@ func requireCardPaginationBrowserProcess(t *testing.T, ctx context.Context, out 
 	require.NoError(t, err, "Chrome output: %s", out)
 }
 func TestEveryCollectionBulkRouteRejectsMalformedPayload(t *testing.T) {
-	tc := NewTestContext(t)
-	tc.handler.SetAgentRepo(teststores.Of(tc.db).Agents)
-	tc.handler.SetWebhookRepo(teststores.Of(tc.db).Webhooks)
-	tc.handler.SetCustomPersonalityRepo(teststores.Of(tc.db).CustomPersonalities)
-	automationRepo := teststores.Of(tc.db).Automations
+	tc := NewStoreTestContext(t)
+	tc.handler.SetAgentRepo(tc.stores.Agents)
+	tc.handler.SetWebhookRepo(tc.stores.Webhooks)
+	tc.handler.SetCustomPersonalityRepo(tc.stores.CustomPersonalities)
+	automationRepo := tc.stores.Automations
 	tc.handler.SetAutomationServices(service.NewAutomationGraphService(automationRepo), nil)
 	tc.handler.SetAutomationBuilderServices(nil, nil, nil, nil, nil, service.NewAutomationLifecycleService(automationRepo, tc.scheduleRepo))
 	project := tc.CreateProject().WithName("Bulk validation").Build()
@@ -94,7 +94,7 @@ func TestBulkHandlersPreflightWithoutPartialDeletion(t *testing.T) {
 
 	t.Run("personalities", func(t *testing.T) {
 		tc := NewTestContext(t)
-		repo := teststores.Of(tc.db).CustomPersonalities
+		repo := tc.stores.CustomPersonalities
 		tc.handler.SetCustomPersonalityRepo(repo)
 		active := &models.CustomPersonality{Name: "Active custom", Key: "active_custom", SystemPrompt: "A sufficiently long active prompt."}
 		inactive := &models.CustomPersonality{Name: "Inactive custom", Key: "inactive_custom", SystemPrompt: "A sufficiently long inactive prompt."}
@@ -113,7 +113,7 @@ func TestBulkHandlersPreflightWithoutPartialDeletion(t *testing.T) {
 
 	t.Run("channels", func(t *testing.T) {
 		tc := NewTestContext(t)
-		repo := teststores.Of(tc.db).Webhooks
+		repo := tc.stores.Webhooks
 		tc.handler.SetWebhookRepo(repo)
 		firstProject := tc.CreateProject().WithName("Bulk channels first").Build()
 		secondProject := tc.CreateProject().WithName("Bulk channels second").Build()
@@ -137,7 +137,7 @@ func TestBulkHandlersPreflightWithoutPartialDeletion(t *testing.T) {
 
 	t.Run("channels mixed success", func(t *testing.T) {
 		tc := NewTestContext(t)
-		repo := teststores.Of(tc.db).Webhooks
+		repo := tc.stores.Webhooks
 		tc.handler.SetWebhookRepo(repo)
 		project := tc.CreateProject().WithName("Bulk channels success").Build()
 		webhook := &models.WebhookEndpoint{ProjectID: project.ID, Name: "Mixed webhook", Enabled: true}
@@ -167,7 +167,7 @@ func TestBulkHandlersPreflightWithoutPartialDeletion(t *testing.T) {
 
 	t.Run("webhooks", func(t *testing.T) {
 		tc := NewTestContext(t)
-		repo := teststores.Of(tc.db).Webhooks
+		repo := tc.stores.Webhooks
 		tc.handler.SetWebhookRepo(repo)
 		firstProject := tc.CreateProject().WithName("Bulk webhook first").Build()
 		secondProject := tc.CreateProject().WithName("Bulk webhook second").Build()
@@ -186,7 +186,7 @@ func TestBulkHandlersPreflightWithoutPartialDeletion(t *testing.T) {
 	})
 	t.Run("agents", func(t *testing.T) {
 		tc := NewTestContext(t)
-		repo := teststores.Of(tc.db).Agents
+		repo := tc.stores.Agents
 		tc.handler.SetAgentRepo(repo)
 		ordinary := &models.Agent{Name: "Ordinary bulk agent", Key: "ordinary_bulk_agent", Scope: models.AgentScopeGlobal, Enabled: true, GeneratedStatus: models.AgentStatusUserEdited}
 		protected := &models.Agent{Name: "Protected bulk agent", Key: "protected_bulk_agent", Scope: models.AgentScopeGlobal, Enabled: true, GeneratedStatus: models.AgentStatusProtected}
@@ -203,7 +203,7 @@ func TestBulkHandlersPreflightWithoutPartialDeletion(t *testing.T) {
 
 	t.Run("automations", func(t *testing.T) {
 		tc := NewTestContext(t)
-		repo := teststores.Of(tc.db).Automations
+		repo := tc.stores.Automations
 		tc.handler.SetAutomationBuilderServices(nil, nil, nil, nil, nil, service.NewAutomationLifecycleService(repo, tc.scheduleRepo))
 		firstProject := tc.CreateProject().WithName("Bulk automation first").Build()
 		secondProject := tc.CreateProject().WithName("Bulk automation second").Build()
@@ -246,11 +246,11 @@ func serveBulkDeleteRequest(t *testing.T, e *echo.Echo, path string, payload any
 }
 
 func TestCollectionHandlersNormalizeRejectedToolbarState(t *testing.T) {
-	tc := NewTestContext(t)
-	tc.handler.SetAgentRepo(teststores.Of(tc.db).Agents)
-	tc.handler.SetWebhookRepo(teststores.Of(tc.db).Webhooks)
-	tc.handler.SetCustomPersonalityRepo(teststores.Of(tc.db).CustomPersonalities)
-	automationRepo := teststores.Of(tc.db).Automations
+	tc := NewStoreTestContext(t)
+	tc.handler.SetAgentRepo(tc.stores.Agents)
+	tc.handler.SetWebhookRepo(tc.stores.Webhooks)
+	tc.handler.SetCustomPersonalityRepo(tc.stores.CustomPersonalities)
+	automationRepo := tc.stores.Automations
 	tc.handler.SetAutomationServices(service.NewAutomationGraphService(automationRepo), nil)
 	project := tc.CreateProject().WithName("Rejected toolbar state").Build()
 	for _, path := range []string{
@@ -323,8 +323,8 @@ func TestAlertsEmptyStateRecognizesEveryActiveFilter(t *testing.T) {
 
 func TestIndividualMutationRefreshesPreserveValidatedListState(t *testing.T) {
 	t.Run("agent create", func(t *testing.T) {
-		tc := NewTestContext(t)
-		tc.handler.SetAgentRepo(teststores.Of(tc.db).Agents)
+		tc := NewStoreTestContext(t)
+		tc.handler.SetAgentRepo(tc.stores.Agents)
 		tc.handler.SetAgentSkillRoot(t.TempDir())
 		form := url.Values{
 			"name": {"mutation-agent"}, "description": {"mutation"}, "system_prompt": {"do work"},
@@ -341,7 +341,7 @@ func TestIndividualMutationRefreshesPreserveValidatedListState(t *testing.T) {
 	})
 
 	t.Run("model set default", func(t *testing.T) {
-		tc := NewTestContext(t)
+		tc := NewStoreTestContext(t)
 		first := &models.LLMConfig{Name: "First model", Provider: models.ProviderTest, Model: "first", IsDefault: true}
 		second := &models.LLMConfig{Name: "Second model", Provider: models.ProviderTest, Model: "second"}
 		require.NoError(t, tc.llmConfigRepo.Create(t.Context(), first))
@@ -356,8 +356,8 @@ func TestIndividualMutationRefreshesPreserveValidatedListState(t *testing.T) {
 	})
 
 	t.Run("personality create", func(t *testing.T) {
-		tc := NewTestContext(t)
-		tc.handler.SetCustomPersonalityRepo(teststores.Of(tc.db).CustomPersonalities)
+		tc := NewStoreTestContext(t)
+		tc.handler.SetCustomPersonalityRepo(tc.stores.CustomPersonalities)
 		project := tc.CreateProject().WithName("Personality mutation state").Build()
 		form := url.Values{"name": {"Mutation personality"}, "description": {"mutation"}, "system_prompt": {"A sufficiently long personality prompt."}}
 		req := httptest.NewRequest(http.MethodPost, "/personality/custom?project_id="+project.ID+"&kind=base&active=false&sort=name_desc&search=Base", strings.NewReader(form.Encode()))
@@ -372,11 +372,11 @@ func TestIndividualMutationRefreshesPreserveValidatedListState(t *testing.T) {
 }
 
 func TestCollectionHandlersRenderValidatedToolbarState(t *testing.T) {
-	tc := NewTestContext(t)
-	tc.handler.SetAgentRepo(teststores.Of(tc.db).Agents)
-	tc.handler.SetWebhookRepo(teststores.Of(tc.db).Webhooks)
-	tc.handler.SetCustomPersonalityRepo(teststores.Of(tc.db).CustomPersonalities)
-	automationRepo := teststores.Of(tc.db).Automations
+	tc := NewStoreTestContext(t)
+	tc.handler.SetAgentRepo(tc.stores.Agents)
+	tc.handler.SetWebhookRepo(tc.stores.Webhooks)
+	tc.handler.SetCustomPersonalityRepo(tc.stores.CustomPersonalities)
+	automationRepo := tc.stores.Automations
 	tc.handler.SetAutomationServices(service.NewAutomationGraphService(automationRepo), nil)
 	project := tc.CreateProject().WithName("Toolbar state").Build()
 	tests := []struct {
@@ -403,10 +403,10 @@ func TestCollectionHandlersRenderValidatedToolbarState(t *testing.T) {
 }
 
 func TestCollectionSortMenusUseConsistentDefaultsAndOptions(t *testing.T) {
-	tc := NewTestContext(t)
-	tc.handler.SetWebhookRepo(teststores.Of(tc.db).Webhooks)
-	tc.handler.SetCustomPersonalityRepo(teststores.Of(tc.db).CustomPersonalities)
-	tc.handler.SetAutomationServices(service.NewAutomationGraphService(teststores.Of(tc.db).Automations), nil)
+	tc := NewStoreTestContext(t)
+	tc.handler.SetWebhookRepo(tc.stores.Webhooks)
+	tc.handler.SetCustomPersonalityRepo(tc.stores.CustomPersonalities)
+	tc.handler.SetAutomationServices(service.NewAutomationGraphService(tc.stores.Automations), nil)
 	project := tc.CreateProject().WithName("Sort menu contract").Build()
 
 	for _, test := range []struct {
@@ -438,7 +438,7 @@ func TestCollectionSortMenusUseConsistentDefaultsAndOptions(t *testing.T) {
 }
 
 func TestModelsNameSortIsCaseInsensitiveInBothDirections(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	for _, config := range []*models.LLMConfig{
 		{Name: "mix", Provider: models.ProviderTest, Model: "mix-test"},
 		{Name: "Sol xhigh", Provider: models.ProviderTest, Model: "sol-xhigh-test"},
@@ -464,8 +464,8 @@ func TestModelsNameSortIsCaseInsensitiveInBothDirections(t *testing.T) {
 }
 
 func TestPersonalityFilteringAndSortingPrecedePagination(t *testing.T) {
-	h, e, _, db := setupTestHandlerWithDB(t)
-	repo := teststores.Of(db).CustomPersonalities
+	h, e, _, db := setupTestHandlerWithStores(t)
+	repo := db.CustomPersonalities
 	h.SetCustomPersonalityRepo(repo)
 	for _, personality := range []*models.CustomPersonality{
 		{Name: "Aardvark custom", Key: "aardvark_custom", Description: "first by name", SystemPrompt: "A sufficiently long custom personality prompt."},
@@ -537,8 +537,8 @@ func TestChannelsSortContractOrdersMixedVisibleCardsByName(t *testing.T) {
 }
 
 func TestChannelsWebhookEnabledFilterAppliesAcrossFixedAndPaginatedCards(t *testing.T) {
-	tc := NewTestContext(t)
-	webhookRepo := teststores.Of(tc.db).Webhooks
+	tc := NewStoreTestContext(t)
+	webhookRepo := tc.stores.Webhooks
 	tc.handler.SetWebhookRepo(webhookRepo)
 	project := tc.CreateProject().WithName("Channels webhook enabled filter").Build()
 	require.NoError(t, tc.settingsRepo.Set(t.Context(), service.GitHubSettingPAT, "configured-test-pat"))
@@ -573,8 +573,8 @@ func TestChannelsWebhookEnabledFilterAppliesAcrossFixedAndPaginatedCards(t *test
 }
 
 func TestChannelsCombinedWebhookFiltersAreConjunctiveBeforePagination(t *testing.T) {
-	tc := NewTestContext(t)
-	webhookRepo := teststores.Of(tc.db).Webhooks
+	tc := NewStoreTestContext(t)
+	webhookRepo := tc.stores.Webhooks
 	tc.handler.SetWebhookRepo(webhookRepo)
 	project := tc.CreateProject().WithName("Channels combined webhook filters").Build()
 	for _, enabled := range []bool{true, false} {
@@ -629,8 +629,8 @@ func TestChannelsSearchFiltersFixedCardsOnServer(t *testing.T) {
 }
 
 func TestAgentsListFiltersForeignProjectRowsBeforePaginationAndSelection(t *testing.T) {
-	tc := NewTestContext(t)
-	repo := teststores.Of(tc.db).Agents
+	tc := NewStoreTestContext(t)
+	repo := tc.stores.Agents
 	tc.handler.SetAgentRepo(repo)
 	projectA := tc.CreateProject().WithName("Agent isolation project A").Build()
 	projectB := tc.CreateProject().WithName("Agent isolation project B").Build()
@@ -667,12 +667,12 @@ func TestUnmanagedSkillsRenderNoSelectionUIOrMetadata(t *testing.T) {
 }
 
 func TestEveryCollectionPageAcceptsAndRejectsItsFilterAndSortValues(t *testing.T) {
-	tc := NewTestContext(t)
-	tc.handler.SetAgentRepo(teststores.Of(tc.db).Agents)
-	tc.handler.SetWebhookRepo(teststores.Of(tc.db).Webhooks)
-	tc.handler.SetCustomPersonalityRepo(teststores.Of(tc.db).CustomPersonalities)
+	tc := NewStoreTestContext(t)
+	tc.handler.SetAgentRepo(tc.stores.Agents)
+	tc.handler.SetWebhookRepo(tc.stores.Webhooks)
+	tc.handler.SetCustomPersonalityRepo(tc.stores.CustomPersonalities)
 	tc.handler.SetAgentSkillRoot(t.TempDir())
-	automationRepo := teststores.Of(tc.db).Automations
+	automationRepo := tc.stores.Automations
 	tc.handler.SetAutomationServices(service.NewAutomationGraphService(automationRepo), nil)
 	project := tc.CreateProject().WithName("Collection parser matrix").Build()
 
@@ -856,7 +856,7 @@ func TestParseCardPageRequestKeepsFullDocumentsAlignedWithLoaderSize(t *testing.
 }
 
 func TestCardPaginationRefreshWindowPreservesLoadedCardsAndContinuation(t *testing.T) {
-	_, e, repo, _ := setupTestHandlerWithDB(t)
+	_, e, repo, _ := setupTestHandlerWithStores(t)
 	ctx := context.Background()
 	for i := 0; i < 41; i++ {
 		require.NoError(t, repo.Create(ctx, &models.LLMConfig{
@@ -881,7 +881,7 @@ func TestCardPaginationRefreshWindowPreservesLoadedCardsAndContinuation(t *testi
 }
 
 func TestCardPaginationModelHandlerReturnsPagesAndEndState(t *testing.T) {
-	_, e, repo, _ := setupTestHandlerWithDB(t)
+	_, e, repo, _ := setupTestHandlerWithStores(t)
 	ctx := context.Background()
 	for i := 0; i < 5; i++ {
 		config := &models.LLMConfig{
@@ -921,8 +921,8 @@ func TestCardPaginationModelHandlerReturnsPagesAndEndState(t *testing.T) {
 }
 
 func TestCardPaginationAgentHandlerBoundsSearchResults(t *testing.T) {
-	h, e, _, db := setupTestHandlerWithDB(t)
-	agentRepo := teststores.Of(db).Agents
+	h, e, _, db := setupTestHandlerWithStores(t)
+	agentRepo := db.Agents
 	h.SetAgentRepo(agentRepo)
 	ctx := context.Background()
 	for i := 0; i < 3; i++ {
@@ -946,8 +946,8 @@ func TestCardPaginationAgentHandlerBoundsSearchResults(t *testing.T) {
 
 func TestCardBrowserRenderShellSetsPaginationHeadersForFragmentsAndHTMXRefreshes(t *testing.T) {
 	t.Run("agents", func(t *testing.T) {
-		h, e, _, db := setupTestHandlerWithDB(t)
-		agentRepo := teststores.Of(db).Agents
+		h, e, _, db := setupTestHandlerWithStores(t)
+		agentRepo := db.Agents
 		h.SetAgentRepo(agentRepo)
 		ctx := context.Background()
 		for i := 0; i < cardPageDefaultSize+1; i++ {
@@ -967,12 +967,12 @@ func TestCardBrowserRenderShellSetsPaginationHeadersForFragmentsAndHTMXRefreshes
 	})
 
 	t.Run("alerts", func(t *testing.T) {
-		_, e, _, db := setupTestHandlerWithDB(t)
+		_, e, _, db := setupTestHandlerWithStores(t)
 		ctx := context.Background()
-		projectRepo := teststores.Of(db).Projects
+		projectRepo := db.Projects
 		project := &models.Project{Name: "Header contract alerts"}
 		require.NoError(t, projectRepo.Create(ctx, project))
-		alertRepo := teststores.Of(db).Alerts
+		alertRepo := db.Alerts
 		for i := 0; i < cardPageDefaultSize+1; i++ {
 			alert := &models.Alert{ProjectID: project.ID, Type: models.AlertCustom, Severity: models.SeverityInfo, Title: fmt.Sprintf("Header Contract Alert %02d", i), Message: "header contract", Source: "header-contract"}
 			require.NoError(t, alertRepo.Create(ctx, alert))
@@ -1090,7 +1090,7 @@ func TestCardPaginationAutomationHandlerReturnsProjectScopedPages(t *testing.T) 
 }
 
 func TestCardPaginationSkillsHandlerBoundsFilesystemCards(t *testing.T) {
-	h, e, _, _ := setupTestHandlerWithDB(t)
+	h, e, _, _ := setupTestHandlerWithStores(t)
 	root := t.TempDir()
 	h.SetAgentSkillRoot(root)
 	for i := 0; i < 5; i++ {
@@ -1111,15 +1111,15 @@ func TestCardPaginationSkillsHandlerBoundsFilesystemCards(t *testing.T) {
 }
 
 func TestCardPaginationAlertsAndWebhooksStayProjectScoped(t *testing.T) {
-	h, e, _, db := setupTestHandlerWithDB(t)
+	h, e, _, db := setupTestHandlerWithStores(t)
 	ctx := context.Background()
-	projectRepo := teststores.Of(db).Projects
+	projectRepo := db.Projects
 	project := &models.Project{Name: "Paged handler project"}
 	other := &models.Project{Name: "Other paged handler project"}
 	require.NoError(t, projectRepo.Create(ctx, project))
 	require.NoError(t, projectRepo.Create(ctx, other))
 
-	alertRepo := teststores.Of(db).Alerts
+	alertRepo := db.Alerts
 	for i := 0; i < 3; i++ {
 		alert := &models.Alert{ProjectID: project.ID, Type: models.AlertCustom, Severity: models.SeverityInfo, Title: fmt.Sprintf("Paged alert %02d", i), Message: "needle summary", Source: "handler-page"}
 		require.NoError(t, alertRepo.Create(ctx, alert))
@@ -1133,7 +1133,7 @@ func TestCardPaginationAlertsAndWebhooksStayProjectScoped(t *testing.T) {
 	require.Equal(t, 2, strings.Count(alerts.Body.String(), "data-alert-id="))
 	require.NotContains(t, alerts.Body.String(), "Foreign alert")
 
-	webhookRepo := teststores.Of(db).Webhooks
+	webhookRepo := db.Webhooks
 	h.SetWebhookRepo(webhookRepo)
 	for i := 0; i < 3; i++ {
 		endpoint := &models.WebhookEndpoint{ProjectID: project.ID, Name: fmt.Sprintf("Paged webhook %02d", i), Enabled: true}
@@ -1150,8 +1150,8 @@ func TestCardPaginationAlertsAndWebhooksStayProjectScoped(t *testing.T) {
 }
 
 func TestCardPaginationPersonalityHandlerFiltersFixedCardsAndPagesCustomCards(t *testing.T) {
-	h, e, _, db := setupTestHandlerWithDB(t)
-	repo := teststores.Of(db).CustomPersonalities
+	h, e, _, db := setupTestHandlerWithStores(t)
+	repo := db.CustomPersonalities
 	h.SetCustomPersonalityRepo(repo)
 	ctx := context.Background()
 	presets := service.AllPersonalities()
@@ -1188,8 +1188,8 @@ func TestCardPaginationPersonalityHandlerFiltersFixedCardsAndPagesCustomCards(t 
 }
 
 func TestCardPaginationPersonalityHandlerKeepsMatchingActiveCardOutsidePageWindow(t *testing.T) {
-	h, e, _, db := setupTestHandlerWithDB(t)
-	repo := teststores.Of(db).CustomPersonalities
+	h, e, _, db := setupTestHandlerWithStores(t)
+	repo := db.CustomPersonalities
 	h.SetCustomPersonalityRepo(repo)
 	ctx := context.Background()
 	presets := service.AllPersonalities()

@@ -15,7 +15,6 @@ import (
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
-	"github.com/openvibely/openvibely/internal/testutil/teststores"
 	"github.com/openvibely/openvibely/web/static"
 )
 
@@ -28,9 +27,9 @@ func TestAgentEditModalIgnoresOutOfOrderLifecycleResponsesInChrome(t *testing.T)
 		t.Skip("Chrome/Chromium executable not found")
 	}
 
-	tc := NewTestContext(t)
-	agentRepo := teststores.Of(tc.db).Agents
-	lifecycleRepo := teststores.Of(tc.db).Lifecycle
+	tc := NewStoreTestContext(t)
+	agentRepo := tc.stores.Agents
+	lifecycleRepo := tc.stores.Lifecycle
 	tc.handler.SetAgentRepo(agentRepo)
 	tc.handler.SetLifecycleRepo(lifecycleRepo)
 

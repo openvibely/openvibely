@@ -23,7 +23,7 @@ func TestAppAndLoginPagesLoadWithoutExternalNetworkInChrome(t *testing.T) {
 	if chrome == "" {
 		t.Skip("Chrome/Chromium executable not found")
 	}
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	project := tc.CreateProject().WithName("Offline Assets").Build()
 
 	probe := `<script>window.addEventListener('load', function() { setTimeout(function() {

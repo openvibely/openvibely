@@ -19,8 +19,8 @@ import (
 )
 
 func TestCreateTaskPullRequest_RequiresWorktreeBranch(t *testing.T) {
-	h, e, _, db := setupTestHandlerWithDB(t)
-	h.SetTaskPullRequestRepo(teststores.Of(db).TaskPullRequests)
+	h, e, _, db := setupTestHandlerWithStores(t)
+	h.SetTaskPullRequestRepo(db.TaskPullRequests)
 
 	project := &models.Project{Name: "PR Project", RepoPath: "/tmp/repo", RepoURL: "https://github.com/openvibely/openvibely"}
 	if err := h.projectSvc.Create(context.Background(), project); err != nil {
@@ -50,8 +50,8 @@ func TestCreateTaskPullRequest_RequiresWorktreeBranch(t *testing.T) {
 
 func TestCreateTaskPullRequest_TaskDetailRejectsForeignProjectTaskBeforeGitHubSideEffects(t *testing.T) {
 	ctx := context.Background()
-	h, e, _, db := setupTestHandlerWithDB(t)
-	prRepo := teststores.Of(db).TaskPullRequests
+	h, e, _, db := setupTestHandlerWithStores(t)
+	prRepo := db.TaskPullRequests
 	h.SetTaskPullRequestRepo(prRepo)
 
 	githubCalls := 0
@@ -112,8 +112,8 @@ func TestCreateTaskPullRequest_TaskDetailRejectsForeignProjectTaskBeforeGitHubSi
 
 func TestCreateTaskPullRequest_TaskDetailAllowsSelectedProjectTask(t *testing.T) {
 	ctx := context.Background()
-	h, e, _, db := setupTestHandlerWithDB(t)
-	prRepo := teststores.Of(db).TaskPullRequests
+	h, e, _, db := setupTestHandlerWithStores(t)
+	prRepo := db.TaskPullRequests
 	h.SetTaskPullRequestRepo(prRepo)
 
 	createCalls := 0
@@ -170,8 +170,8 @@ func TestCreateTaskPullRequest_TaskDetailAllowsSelectedProjectTask(t *testing.T)
 }
 
 func TestCreateTaskPullRequest_TaskCardOwnershipFailuresAreIndistinguishable(t *testing.T) {
-	h, e, _, db := setupTestHandlerWithDB(t)
-	h.SetTaskPullRequestRepo(teststores.Of(db).TaskPullRequests)
+	h, e, _, db := setupTestHandlerWithStores(t)
+	h.SetTaskPullRequestRepo(db.TaskPullRequests)
 
 	project := &models.Project{Name: "PR Project", RepoPath: "/tmp/repo", RepoURL: "https://github.com/openvibely/openvibely"}
 	if err := h.projectSvc.Create(context.Background(), project); err != nil {
@@ -321,11 +321,11 @@ func TestCreateTaskPullRequest_TaskCardRevalidatesProjectContextInsideRepository
 
 func TestCreateTaskPullRequest_UsesGlobalEnterpriseEndpointAndIgnoresRequestOverride(t *testing.T) {
 	const enterpriseEndpoint = "https://github.example.com/api/v3"
-	h, e, _, db := setupTestHandlerWithDB(t)
-	h.SetTaskPullRequestRepo(teststores.Of(db).TaskPullRequests)
+	h, e, _, db := setupTestHandlerWithStores(t)
+	h.SetTaskPullRequestRepo(db.TaskPullRequests)
 
 	// Seed the global GitHub API endpoint setting.
-	settingsRepo := teststores.Of(db).Settings
+	settingsRepo := db.Settings
 	if err := settingsRepo.Set(context.Background(), service.GitHubSettingAPIEndpoint, enterpriseEndpoint); err != nil {
 		t.Fatal(err)
 	}
@@ -379,8 +379,8 @@ func TestCreateTaskPullRequest_UsesGlobalEnterpriseEndpointAndIgnoresRequestOver
 }
 
 func TestCreateTaskPullRequest_CreatesAndPersistsPR(t *testing.T) {
-	h, e, _, db := setupTestHandlerWithDB(t)
-	h.SetTaskPullRequestRepo(teststores.Of(db).TaskPullRequests)
+	h, e, _, db := setupTestHandlerWithStores(t)
+	h.SetTaskPullRequestRepo(db.TaskPullRequests)
 
 	h.SetGitHubService(&fakeGitHubService{
 		resolveRepoFn: func(_ context.Context, repoURL, repoPath string) (*service.GitHubRepoRef, error) {
@@ -437,8 +437,8 @@ func TestCreateTaskPullRequest_CreatesAndPersistsPR(t *testing.T) {
 }
 
 func TestCreateTaskPullRequest_PublishesDirtyWorktreeWithDiffSummaryMessage(t *testing.T) {
-	h, e, _, db := setupTestHandlerWithDB(t)
-	h.SetTaskPullRequestRepo(teststores.Of(db).TaskPullRequests)
+	h, e, _, db := setupTestHandlerWithStores(t)
+	h.SetTaskPullRequestRepo(db.TaskPullRequests)
 	var publishedReq service.GitHubPublishBranchRequest
 	h.SetGitHubService(&fakeGitHubService{
 		resolveRepoFn: func(_ context.Context, repoURL, repoPath string) (*service.GitHubRepoRef, error) {
@@ -503,8 +503,8 @@ func TestCreateTaskPullRequest_PublishesDirtyWorktreeWithDiffSummaryMessage(t *t
 }
 
 func TestCreateTaskPullRequest_ReusesExistingTaskPR(t *testing.T) {
-	h, e, _, db := setupTestHandlerWithDB(t)
-	prRepo := teststores.Of(db).TaskPullRequests
+	h, e, _, db := setupTestHandlerWithStores(t)
+	prRepo := db.TaskPullRequests
 	h.SetTaskPullRequestRepo(prRepo)
 
 	createCalls := 0
@@ -564,8 +564,8 @@ func TestCreateTaskPullRequest_ReusesExistingTaskPR(t *testing.T) {
 }
 
 func TestCreateTaskPullRequest_NoGitHubServiceShowsToast(t *testing.T) {
-	h, e, _, db := setupTestHandlerWithDB(t)
-	h.SetTaskPullRequestRepo(teststores.Of(db).TaskPullRequests)
+	h, e, _, db := setupTestHandlerWithStores(t)
+	h.SetTaskPullRequestRepo(db.TaskPullRequests)
 	// Do NOT set GitHub service — simulates missing GitHub integration
 
 	project := &models.Project{Name: "No GH Project", RepoPath: "/tmp/repo", RepoURL: "https://github.com/openvibely/openvibely"}
@@ -595,8 +595,8 @@ func TestCreateTaskPullRequest_NoGitHubServiceShowsToast(t *testing.T) {
 }
 
 func TestCreateTaskPullRequest_PublishBranchFailureShowsToast(t *testing.T) {
-	h, e, _, db := setupTestHandlerWithDB(t)
-	h.SetTaskPullRequestRepo(teststores.Of(db).TaskPullRequests)
+	h, e, _, db := setupTestHandlerWithStores(t)
+	h.SetTaskPullRequestRepo(db.TaskPullRequests)
 
 	h.SetGitHubService(&fakeGitHubService{
 		resolveRepoFn: func(_ context.Context, repoURL, repoPath string) (*service.GitHubRepoRef, error) {
@@ -634,8 +634,8 @@ func TestCreateTaskPullRequest_PublishBranchFailureShowsToast(t *testing.T) {
 }
 
 func TestCreateTaskPullRequest_CreatePRAlreadyExistsRecoversByFindingPR(t *testing.T) {
-	h, e, _, db := setupTestHandlerWithDB(t)
-	h.SetTaskPullRequestRepo(teststores.Of(db).TaskPullRequests)
+	h, e, _, db := setupTestHandlerWithStores(t)
+	h.SetTaskPullRequestRepo(db.TaskPullRequests)
 
 	findCalls := 0
 	h.SetGitHubService(&fakeGitHubService{
@@ -692,8 +692,8 @@ func TestCreateTaskPullRequest_CreatePRAlreadyExistsRecoversByFindingPR(t *testi
 }
 
 func TestCreateTaskPullRequest_CreatePRFailureShowsToast(t *testing.T) {
-	h, e, _, db := setupTestHandlerWithDB(t)
-	h.SetTaskPullRequestRepo(teststores.Of(db).TaskPullRequests)
+	h, e, _, db := setupTestHandlerWithStores(t)
+	h.SetTaskPullRequestRepo(db.TaskPullRequests)
 
 	h.SetGitHubService(&fakeGitHubService{
 		resolveRepoFn: func(_ context.Context, repoURL, repoPath string) (*service.GitHubRepoRef, error) {

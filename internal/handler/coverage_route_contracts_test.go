@@ -20,7 +20,6 @@ import (
 	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/internal/testutil"
-	"github.com/openvibely/openvibely/internal/testutil/teststores"
 	"github.com/stretchr/testify/require"
 )
 
@@ -51,7 +50,7 @@ func TestAutomationChatActionHelpersFormatPrincipalPlansAndJSON(t *testing.T) {
 }
 
 func TestSystemUpdateRoutesReturnUnavailableContractsWhenCoordinatorMissing(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 
 	for _, tcse := range []struct {
 		name   string
@@ -74,7 +73,7 @@ func TestSystemUpdateRoutesReturnUnavailableContractsWhenCoordinatorMissing(t *t
 }
 
 func TestSwarmRoutesValidateMissingServiceAndTaskContracts(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	project := tc.CreateProject().WithName("Swarm Route Contracts").Build()
 	task := tc.CreateTask(project.ID).WithTitle("Ordinary task").WithCategory(models.CategoryBacklog).Build()
 
@@ -113,7 +112,7 @@ func TestSwarmRoutesValidateMissingServiceAndTaskContracts(t *testing.T) {
 }
 
 func TestTaskBoardMutationRoutesValidateAndPersistExpectedState(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	project := tc.CreateProject().WithName("Task Board Mutation Contracts").Build()
 	first := tc.CreateTask(project.ID).WithTitle("First backlog item").WithCategory(models.CategoryBacklog).Build()
 	second := tc.CreateTask(project.ID).WithTitle("Second backlog item").WithCategory(models.CategoryBacklog).Build()
@@ -158,7 +157,7 @@ func TestTaskBoardMutationRoutesValidateAndPersistExpectedState(t *testing.T) {
 }
 
 func TestMoveCompletedActiveToCompletedRequiresAndScopesProject(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	ctx := context.Background()
 	projectA := tc.CreateProject().WithName("Move completed project A").Build()
 	projectB := tc.CreateProject().WithName("Move completed project B").Build()
@@ -190,7 +189,7 @@ func TestMoveCompletedActiveToCompletedRequiresAndScopesProject(t *testing.T) {
 }
 
 func TestBatchUpdateTaskCategoryRejectsForeignMixedAndMissingIDsBeforeMutation(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	ctx := context.Background()
 	projectA := tc.CreateProject().WithName("Batch category project A").Build()
 	projectB := tc.CreateProject().WithName("Batch category project B").Build()
@@ -236,7 +235,7 @@ func TestBatchUpdateTaskCategoryRejectsForeignMixedAndMissingIDsBeforeMutation(t
 }
 
 func TestBatchUpdateTaskCategoryPreservesSameProjectHTMXAndActiveSubmission(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	ctx := context.Background()
 	project := tc.CreateProject().WithName("Batch category success project").Build()
 	model := tc.CreateLLMConfig().WithName("Batch category model").WithProvider(models.ProviderTest).WithModel("test-model").AsDefault().Build()
@@ -297,7 +296,7 @@ func TestBatchUpdateTaskCategoryPreservesSameProjectHTMXAndActiveSubmission(t *t
 }
 
 func TestBatchUpdateTaskCategoryActiveLaneRejectsStaleBrowserStateAtomically(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	ctx := context.Background()
 	project := tc.CreateProject().WithName("Stale Active lane project").Build()
 	tc.CreateLLMConfig().WithName("Stale lane model").WithProvider(models.ProviderTest).WithModel("test-model").AsDefault().Build()
@@ -330,7 +329,7 @@ func TestBatchUpdateTaskCategoryActiveLaneRejectsStaleBrowserStateAtomically(t *
 }
 
 func TestUpdateTaskCategoryRunningLaneRoutesQueuedFollowupAndReturnsConflict(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	ctx := context.Background()
 	project := tc.CreateProject().WithName("Lifecycle routed Active lane project").Build()
 	model := tc.CreateLLMConfig().WithName("Lifecycle routed lane model").WithProvider(models.ProviderTest).WithModel("test-model").AsDefault().Build()
@@ -353,7 +352,7 @@ func TestUpdateTaskCategoryRunningLaneRoutesQueuedFollowupAndReturnsConflict(t *
 	task := tc.CreateTask(project.ID).WithTitle("Lifecycle routed lane task").WithCategory(models.CategoryBacklog).Build()
 	task.AgentID = &model.ID
 	require.NoError(t, tc.taskRepo.Update(ctx, task))
-	threadRepo := teststores.Of(tc.db).ThreadInputs
+	threadRepo := tc.stores.ThreadInputs
 	require.NoError(t, threadRepo.CreateQueued(ctx, &models.ThreadInput{Scope: models.ThreadInputScopeTask, ProjectID: project.ID, TaskID: task.ID, AgentConfigID: model.ID, InputMode: models.ThreadInputModeQueued, InputStatus: models.ThreadInputPending, Content: "queued followup"}))
 	expected, err := json.Marshal([]persistence.ActiveLaneTaskMove{{ID: task.ID, ExpectedCategory: models.CategoryBacklog, ExpectedStatus: models.StatusPending}})
 	require.NoError(t, err)
@@ -381,7 +380,7 @@ func TestUpdateTaskCategoryRunningLaneRoutesQueuedFollowupAndReturnsConflict(t *
 }
 
 func TestUpdateTaskCategoryQueuedToRunningRejectsStaleTerminalState(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	ctx := context.Background()
 	project := tc.CreateProject().WithName("Stale queued lane project").Build()
 	tc.CreateLLMConfig().WithName("Stale queued lane model").WithProvider(models.ProviderTest).WithModel("test-model").AsDefault().Build()
@@ -449,7 +448,7 @@ func TestBatchUpdateTaskCategoryActiveLaneRollsBackLaterWriteFailure(t *testing.
 }
 
 func TestUpdateTaskChainConfigCreatesAndRemovesBlockedChild(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	ctx := context.Background()
 	project := tc.CreateProject().WithName("Chain Route Contracts").Build()
 	parent := tc.CreateTask(project.ID).WithTitle("Parent chain task").WithCategory(models.CategoryBacklog).Build()
@@ -500,7 +499,7 @@ func TestUpdateTaskChainConfigCreatesAndRemovesBlockedChild(t *testing.T) {
 }
 
 func TestSummaryGenerationRoutesRequireProjectAndRenderServiceErrors(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	project := tc.CreateProject().WithName("Summary Route Contracts").Build()
 
 	missingPulse := tc.HTTP().Post("/upcoming/summary").Execute()
@@ -519,7 +518,7 @@ func TestSummaryGenerationRoutesRequireProjectAndRenderServiceErrors(t *testing.
 }
 
 func TestTaskGoalRoutesReturnJSONLifecycle(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	project := tc.CreateProject().WithName("Goal Route Contracts").Build()
 	task := tc.CreateTask(project.ID).WithTitle("Goal-backed task").WithCategory(models.CategoryBacklog).Build()
 
@@ -574,7 +573,7 @@ func TestTaskGoalRoutesReturnJSONLifecycle(t *testing.T) {
 }
 
 func TestQueuedInputRoutesValidateStaleAndMissingInputs(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	project := tc.CreateProject().WithName("Queued Input Route Contracts").Build()
 	task := tc.CreateTask(project.ID).WithTitle("Queued input task").WithCategory(models.CategoryBacklog).Build()
 
@@ -592,7 +591,7 @@ func TestQueuedInputRoutesValidateStaleAndMissingInputs(t *testing.T) {
 }
 
 func TestPluginMarketplaceRoutesDecodeCallHooksAndReturnJSON(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	origAdd := addMarketplaceFn
 	origUpdate := updateMarketplaceFn
 	origRemove := removeMarketplaceFn
@@ -651,8 +650,8 @@ func TestPluginMarketplaceRoutesDecodeCallHooksAndReturnJSON(t *testing.T) {
 }
 
 func TestGetAgentJSONReturnsAgentOrNotFound(t *testing.T) {
-	tc := NewTestContext(t)
-	agentRepo := teststores.Of(tc.db).Agents
+	tc := NewStoreTestContext(t)
+	agentRepo := tc.stores.Agents
 	tc.handler.SetAgentRepo(agentRepo)
 	agent := &models.Agent{Name: "JSON Agent", Key: "json-agent", Model: "inherit", Scope: models.AgentScopeProject, CreatedAt: time.Now(), UpdatedAt: time.Now()}
 	require.NoError(t, agentRepo.Create(context.Background(), agent))
@@ -666,7 +665,7 @@ func TestGetAgentJSONReturnsAgentOrNotFound(t *testing.T) {
 }
 
 func TestChatRuntimeSummaryHelpersUseRepositoriesAndPersistAlertActions(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	ctx := context.Background()
 	project := tc.CreateProject().WithName("Runtime Summary Project").Build()
 	limited := 3
@@ -678,7 +677,7 @@ func TestChatRuntimeSummaryHelpersUseRepositoriesAndPersistAlertActions(t *testi
 	model.MaxWorkers = 2
 	model.WorkerTimeout = 45
 	require.NoError(t, tc.llmConfigRepo.Update(ctx, model))
-	agentRepo := teststores.Of(tc.db).Agents
+	agentRepo := tc.stores.Agents
 	tc.handler.SetAgentRepo(agentRepo)
 	require.NoError(t, agentRepo.Create(ctx, &models.Agent{Name: "Runtime Agent", Key: "runtime-agent", Description: "Does runtime work", Model: "gpt-test", Skills: []models.SkillConfig{{Name: "Audit"}}, MCPServers: []models.MCPServerConfig{{Name: "tools", Command: []string{"node"}}}, Scope: models.AgentScopeProject}))
 	require.NoError(t, tc.settingsRepo.Set(ctx, "personality", "direct"))
@@ -726,7 +725,7 @@ func TestChatRuntimeSummaryHelpersUseRepositoriesAndPersistAlertActions(t *testi
 }
 
 func TestChatActionReadHelpersUseRepositories(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	ctx := context.Background()
 	project := tc.CreateProject().WithName("Action Helper Project").Build()
 	project.Description = "action helper description"
@@ -907,7 +906,7 @@ func mustGithubToolJSON(t *testing.T, payload map[string]any) string {
 }
 
 func TestChatAlertMutationRequestsPreserveResultContracts(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	ctx := context.Background()
 	project := tc.CreateProject().WithName("Alert mutation project").Build()
 	first := &models.Alert{ProjectID: project.ID, Type: models.AlertCustom, Severity: models.SeverityInfo, Title: "First alert", Message: "first"}
@@ -946,11 +945,11 @@ func TestChatAlertMutationRequestsPreserveResultContracts(t *testing.T) {
 }
 
 func TestChatActionRuntimeExecutorCoversToolClosuresAndValidation(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	ctx := context.Background()
 	project := tc.CreateProject().WithName("Runtime Executor Coverage").Build()
 	task := tc.CreateTask(project.ID).WithTitle("Runtime executor task").WithCategory(models.CategoryBacklog).Build()
-	tc.handler.SetGitHubAuthRepo(teststores.Of(tc.db).GitHubAuth)
+	tc.handler.SetGitHubAuthRepo(tc.stores.GitHubAuth)
 	model := tc.CreateLLMConfig().WithName("Executor Model").WithProvider(models.ProviderOpenAI).WithModel("gpt-test").WithAPIKey("key").Build()
 	model.IsDefault = true
 	require.NoError(t, tc.llmConfigRepo.Update(ctx, model))
@@ -1108,7 +1107,7 @@ func TestTaskFormAndAgentSelectionHelpers(t *testing.T) {
 	ctx := context.Background()
 	project := tc.CreateProject().WithName("Agent helper project").Build()
 	otherProject := tc.CreateProject().WithName("Other helper project").Build()
-	agentRepo := teststores.Of(tc.db).Agents
+	agentRepo := tc.stores.Agents
 	tc.handler.SetAgentRepo(agentRepo)
 
 	archivedAt := time.Now()
