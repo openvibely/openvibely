@@ -21,7 +21,6 @@ import (
 	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/service"
-	"github.com/openvibely/openvibely/internal/testutil/teststores"
 	"github.com/openvibely/openvibely/web/static"
 	"github.com/openvibely/openvibely/web/templates/components"
 	"github.com/openvibely/openvibely/web/templates/pages"
@@ -46,7 +45,7 @@ func TestAutomationClaimsRefreshCapacityQueuedBoardThroughLiveEventsInChrome(t *
 			ctx := context.Background()
 			broadcaster := events.NewBroadcaster()
 			tc.handler.broadcaster = broadcaster
-			automationRepo := teststores.Of(tc.db).Automations
+			automationRepo := tc.stores.Automations
 			automationRepo.(*sqlite.AutomationRepo).SetBroadcaster(broadcaster)
 
 			project := models.Project{Name: "Automation " + trigger + " live board"}
@@ -204,7 +203,7 @@ func TestAutomationRunNowSupersedesFailedLiveStateAcrossRefreshAndReloadInChrome
 	broadcaster := events.NewBroadcaster()
 	tc.handler.broadcaster = broadcaster
 	project := tc.CreateProject().WithName("Automation failed Run now freshness").Build()
-	automationRepo := teststores.Of(tc.db).Automations
+	automationRepo := tc.stores.Automations
 	automationRepo.(*sqlite.AutomationRepo).SetBroadcaster(broadcaster)
 	registration := service.NewAutomationRegistrationService(automationRepo, service.NewAutomationAdapterRegistry())
 	lifecycle := service.NewAutomationLifecycleService(automationRepo, tc.scheduleRepo)

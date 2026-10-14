@@ -27,7 +27,7 @@ func TestChatInputRequestBrowserRendersSubmitsRetriesAndDisablesControls(t *test
 		t.Skip("Chrome/Chromium executable not found")
 	}
 
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	project := tc.CreateProject().WithName("Browser input request").Build()
 	pending, err := tc.handler.chatInputRequests.create(project.ID, "exec-browser", []chatInputRequestQuestion{
 		{
@@ -280,7 +280,7 @@ func TestChatInputRequestBrowserRefreshRestoresPendingControls(t *testing.T) {
 		t.Skip("Chrome/Chromium executable not found")
 	}
 
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	project := tc.CreateProject().WithName("Browser input refresh").Build()
 	pending, err := tc.handler.chatInputRequests.create(project.ID, "exec-refresh", []chatInputRequestQuestion{{
 		ID:       "continue",

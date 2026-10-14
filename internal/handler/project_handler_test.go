@@ -18,7 +18,7 @@ import (
 // ---- Home ----
 
 func TestCreateProject_EnterpriseRepositoryRequiresGlobalAPIEndpoint(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	tc.handler.SetGitHubService(&fakeGitHubService{
 		cloneFn: func(_ context.Context, projectID, repoURL string) (string, string, error) {
 			// Simulate the error ConfigureGitHubRepoEndpoint returns when no global
@@ -53,7 +53,7 @@ func TestCreateProject_EnterpriseRepositoryRequiresGlobalAPIEndpoint(t *testing.
 }
 
 func TestHome_Redirect(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	rec := tc.HTTP().Get("/").Execute()
 	if rec.Code != http.StatusSeeOther {
 		t.Fatalf("expected 303, got %d", rec.Code)
@@ -64,7 +64,7 @@ func TestHome_Redirect(t *testing.T) {
 }
 
 func TestHome_WithProjectID(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	rec := tc.HTTP().Get("/?project_id=abc123").Execute()
 	if rec.Code != http.StatusSeeOther {
 		t.Fatalf("expected 303, got %d", rec.Code)
@@ -78,7 +78,7 @@ func TestHome_WithProjectID(t *testing.T) {
 // ---- ListProjects ----
 
 func TestListProjects(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	tc.CreateProject().WithName("Project Alpha").Build()
 	tc.CreateProject().WithName("Project Beta").Build()
 
@@ -98,7 +98,7 @@ func TestListProjects(t *testing.T) {
 // ---- CreateProject ----
 
 func TestNewProjectDialog_CreateButtonShowsCloneProgress(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	rec := tc.HTMX().Get("/projects/new").Execute()
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
@@ -122,7 +122,7 @@ func TestNewProjectDialog_CreateButtonShowsCloneProgress(t *testing.T) {
 }
 
 func TestCreateProject_Local_Success_Redirect(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	rec := tc.HTTP().Post("/projects").WithForm(url.Values{
 		"name":        {"My New Project"},
 		"repo_source": {"local"},
@@ -139,7 +139,7 @@ func TestCreateProject_Local_Success_Redirect(t *testing.T) {
 }
 
 func TestCreateProject_HTMX_Success(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	rec := tc.HTMX().Post("/projects").WithForm(url.Values{
 		"name":        {"HTMX Project"},
 		"repo_source": {"local"},
@@ -154,7 +154,7 @@ func TestCreateProject_HTMX_Success(t *testing.T) {
 }
 
 func TestCreateProject_LocalPathDisabled(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	// Force local path to be disabled via env — we can test the normalizeRepoSource fallback
 	// by submitting repo_source=local without setting the enable env var.
 	// The handler checks isLocalRepoPathEnabled() which reads OPENVIBELY_ENABLE_LOCAL_REPO_PATH.
@@ -172,7 +172,7 @@ func TestCreateProject_LocalPathDisabled(t *testing.T) {
 }
 
 func TestCreateProject_WhitespaceOnlyName_Rejected(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 
 	before, err := tc.handler.projectSvc.List(context.Background())
 	if err != nil {
@@ -198,7 +198,7 @@ func TestCreateProject_WhitespaceOnlyName_Rejected(t *testing.T) {
 }
 
 func TestCreateProject_TrimsSurroundingWhitespaceInName(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 
 	rec := tc.HTTP().Post("/projects").WithForm(url.Values{
 		"name":        {"  Client Work  "},
@@ -230,7 +230,7 @@ func TestCreateProject_TrimsSurroundingWhitespaceInName(t *testing.T) {
 // ---- UpdateProject ----
 
 func TestUpdateProject_NotFound(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	rec := tc.HTTP().Put("/projects/nonexistent-id").WithForm(url.Values{
 		"name":        {"Updated"},
 		"repo_source": {"local"},
@@ -241,7 +241,7 @@ func TestUpdateProject_NotFound(t *testing.T) {
 }
 
 func TestUpdateProject_Success_HTMX(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	project := tc.CreateProject().WithName("Original Name").Build()
 
 	rec := tc.HTMX().Put("/projects/" + project.ID).WithForm(url.Values{
@@ -258,7 +258,7 @@ func TestUpdateProject_Success_HTMX(t *testing.T) {
 }
 
 func TestUpdateProject_Success_Redirect(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	project := tc.CreateProject().WithName("Old Name").Build()
 
 	rec := tc.HTTP().Put("/projects/" + project.ID).WithForm(url.Values{
@@ -271,7 +271,7 @@ func TestUpdateProject_Success_Redirect(t *testing.T) {
 }
 
 func TestUpdateProject_WhitespaceOnlyName_Rejected(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	project := tc.CreateProject().WithName("Keep This Name").Build()
 
 	rec := tc.HTTP().Put("/projects/" + project.ID).WithForm(url.Values{
@@ -293,7 +293,7 @@ func TestUpdateProject_WhitespaceOnlyName_Rejected(t *testing.T) {
 }
 
 func TestUpdateProject_TrimsSurroundingWhitespaceInName(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	project := tc.CreateProject().WithName("Original Name").Build()
 
 	rec := tc.HTTP().Put("/projects/" + project.ID).WithForm(url.Values{
@@ -317,7 +317,7 @@ func TestUpdateProject_TrimsSurroundingWhitespaceInName(t *testing.T) {
 func TestUpdateProject_InvalidMaxWorkersRejectedWithoutMutation(t *testing.T) {
 	for _, maxWorkers := range []string{"-1", "not-a-number"} {
 		t.Run(maxWorkers, func(t *testing.T) {
-			tc := NewTestContext(t)
+			tc := NewStoreTestContext(t)
 			limit := 2
 			project := &models.Project{Name: "Worker Limited Project", MaxWorkers: &limit}
 			if err := tc.handler.projectSvc.Create(context.Background(), project); err != nil {
@@ -356,7 +356,7 @@ func TestUpdateProject_InvalidMaxWorkersRejectedWithoutMutation(t *testing.T) {
 }
 
 func TestCreateProject_InvalidMaxWorkersRejectedWithoutCreate(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	before, err := tc.handler.projectSvc.List(context.Background())
 	if err != nil {
 		t.Fatalf("listing projects before create failed: %v", err)
@@ -387,7 +387,7 @@ func TestCreateProject_InvalidMaxWorkersRejectedWithoutCreate(t *testing.T) {
 // ---- DeleteProject ----
 
 func TestDeleteProject_DefaultProject_Rejected(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	// The default project ("default") is seeded in migrations; it has is_default=true.
 	rec := tc.HTTP().Delete("/projects/default").Execute()
 	if rec.Code != http.StatusBadRequest {
@@ -396,7 +396,7 @@ func TestDeleteProject_DefaultProject_Rejected(t *testing.T) {
 }
 
 func TestDeleteProject_NotFound(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	rec := tc.HTTP().Delete("/projects/no-such-project").Execute()
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("expected 404, got %d", rec.Code)
@@ -404,7 +404,7 @@ func TestDeleteProject_NotFound(t *testing.T) {
 }
 
 func TestDeleteProject_Success(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	project := tc.CreateProject().WithName("Deletable").Build()
 
 	rec := tc.HTTP().Delete("/projects/" + project.ID).Execute()
@@ -414,7 +414,7 @@ func TestDeleteProject_Success(t *testing.T) {
 }
 
 func TestDeleteProject_Success_HTMX(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	project := tc.CreateProject().WithName("HTMX Deletable").Build()
 
 	rec := tc.HTMX().Delete("/projects/" + project.ID).Execute()
@@ -429,7 +429,7 @@ func TestDeleteProject_Success_HTMX(t *testing.T) {
 // ---- NewProjectDialog ----
 
 func TestNewProjectDialog_ViaTestContext(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	rec := tc.HTTP().Get("/projects/new").Execute()
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", rec.Code)
@@ -439,7 +439,7 @@ func TestNewProjectDialog_ViaTestContext(t *testing.T) {
 // ---- EditProjectDialog ----
 
 func TestEditProjectDialog_NotFound(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	rec := tc.HTTP().Get("/projects/nonexistent/edit").Execute()
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("expected 404, got %d", rec.Code)
@@ -447,7 +447,7 @@ func TestEditProjectDialog_NotFound(t *testing.T) {
 }
 
 func TestEditProjectDialog_Success(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	project := tc.CreateProject().WithName("Edit Me").Build()
 	rec := tc.HTTP().Get("/projects/" + project.ID + "/edit").Execute()
 	if rec.Code != http.StatusOK {
@@ -458,7 +458,7 @@ func TestEditProjectDialog_Success(t *testing.T) {
 // ---- ViewSchedule ----
 
 func TestViewSchedule_Success(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	project := tc.CreateProject().Build()
 	rec := tc.HTTP().Get("/schedule?project_id=" + project.ID).Execute()
 	if rec.Code != http.StatusOK {
@@ -467,7 +467,7 @@ func TestViewSchedule_Success(t *testing.T) {
 }
 
 func TestViewSchedule_NotFound_Project(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	rec := tc.HTTP().Get("/schedule?project_id=nonexistent").Execute()
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("expected 404, got %d", rec.Code)
@@ -475,7 +475,7 @@ func TestViewSchedule_NotFound_Project(t *testing.T) {
 }
 
 func TestViewSchedule_HTMX(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	project := tc.CreateProject().Build()
 	rec := tc.HTMX().Get("/schedule?project_id=" + project.ID).Execute()
 	if rec.Code != http.StatusOK {
@@ -670,7 +670,7 @@ func TestParseNonNegativeWorkerLimit(t *testing.T) {
 }
 
 func TestParseProjectFormSettings_NormalizesCommonFieldsAndSourceValidation(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	form := url.Values{}
 	form.Set("name", "Shared Project")
 	form.Set("description", "shared settings")
@@ -751,7 +751,7 @@ func TestParseProjectFormSettings_NormalizesCommonFieldsAndSourceValidation(t *t
 }
 
 func TestParseProjectFormSettings_ValidatesMaxWorkersContract(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 
 	parse := func(maxWorkers string, includeField bool) (projectFormSettings, error) {
 		form := url.Values{}
@@ -824,7 +824,7 @@ func intPointer(v int) *int {
 }
 
 func TestParseProjectFormSettings_TrimsNameAndRejectsBlank(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 
 	trimForm := url.Values{}
 	trimForm.Set("name", "  Client Work  ")

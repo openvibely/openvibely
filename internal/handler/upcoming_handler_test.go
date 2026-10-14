@@ -9,7 +9,7 @@ import (
 )
 
 func TestViewHistoryRendersExecutionWithNullAgentConfigID(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	project := tc.CreateProject().WithName("History Project").Build()
 	agent := tc.CreateLLMConfig().WithName("Deleted Model").Build()
 	task := tc.CreateTask(project.ID).

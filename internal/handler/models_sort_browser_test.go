@@ -43,7 +43,7 @@ func TestModelsSortBrowserPreservesViewportFocusStateAndSharedGeometry(t *testin
 		t.Skip("Chrome/Chromium executable not found")
 	}
 
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	project := tc.CreateProject().WithName("Models sort browser").Build()
 	for i := 0; i < 40; i++ {
 		config := &models.LLMConfig{

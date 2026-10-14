@@ -312,8 +312,8 @@ func TestChannelsPageTelegramRichMessagesToggleDefaultsCheckedAndHonorsSavedFals
 }
 
 func TestChannelsPageOutboundTargetsRenderAsPermanentTopEditCard(t *testing.T) {
-	h, e, _, db := setupTestHandlerWithDB(t)
-	targetRepo := teststores.Of(db).ChannelTargets
+	h, e, _, db := setupTestHandlerWithStores(t)
+	targetRepo := db.ChannelTargets
 	h.SetChannelTargetRepo(targetRepo)
 	seedTarget := models.ChannelTarget{
 		ID:             persistence.NewID(),
@@ -688,7 +688,7 @@ func TestChannelsPageBatchesSettingsReadsAndPreservesRenderedValues(t *testing.T
 }
 
 func TestChannelsPageDefaultsStillRenderWhenSettingsAreMissing(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	rec := tc.HTMX().Get("/channels?project_id=default").Execute()
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected Channels status 200, got %d; body=%s", rec.Code, rec.Body.String())
@@ -819,7 +819,7 @@ func seedRepresentativeChannelsSettings(t testing.TB, settingsRepo persistence.S
 }
 
 func TestChannelsPageExplicitTargetsSettingMatchesFullPageAndHTMX(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	if err := tc.settingsRepo.Set(context.Background(), service.SendMessageAllowExplicitTargetsSetting+":default", "true"); err != nil {
 		t.Fatalf("failed to seed explicit target policy: %v", err)
 	}
@@ -875,7 +875,7 @@ func TestChannelsPageOutboundTargetTestButtonIncludesSelectedProjectID(t *testin
 		t.Fatal("expected distinct projects")
 	}
 
-	targetRepo := teststores.Of(tc.db).ChannelTargets
+	targetRepo := tc.stores.ChannelTargets
 	slack := &outboundTargetTestSlack{}
 	router := service.NewChannelMessageRouter(targetRepo, tc.settingsRepo)
 	router.SetSlackService(slack)
@@ -980,7 +980,7 @@ func TestChannelsPageConnectedCardsHideTokenSpecificTextAndActions(t *testing.T)
 }
 
 func TestChannelsPageStatusBadgesRenderAtBottomOfDetailsSection(t *testing.T) {
-	h, e, _, db := setupTestHandlerWithDB(t)
+	h, e, _, db := setupTestHandlerWithStores(t)
 
 	h.SetGitHubService(&fakeGitHubService{
 		statusFn: func(ctx context.Context) (service.GitHubConnectionStatus, error) {
@@ -1018,7 +1018,7 @@ func TestChannelsPageStatusBadgesRenderAtBottomOfDetailsSection(t *testing.T) {
 		}
 	}
 	if h.telegramAuthRepo == nil {
-		h.SetTelegramAuthRepo(teststores.Of(db).TelegramAuth)
+		h.SetTelegramAuthRepo(db.TelegramAuth)
 	}
 	if err := h.telegramAuthRepo.Create(context.Background(), &models.TelegramAuthorizedUser{
 		ProjectID:        "default",
@@ -1030,7 +1030,7 @@ func TestChannelsPageStatusBadgesRenderAtBottomOfDetailsSection(t *testing.T) {
 		t.Fatalf("failed to seed telegram authorized user: %v", err)
 	}
 	if h.discordAuthRepo == nil {
-		h.SetDiscordAuthRepo(teststores.Of(db).DiscordAuth)
+		h.SetDiscordAuthRepo(db.DiscordAuth)
 	}
 	if err := h.discordAuthRepo.Create(context.Background(), &models.DiscordAuthorizedUser{
 		ProjectID:     "default",
@@ -1170,8 +1170,8 @@ func TestChannelsPageTelegramMenuShowsDeleteAndNoChannelMenuUsesRemove(t *testin
 }
 
 func TestChannelsPageDeleteActionsUseConfirmationDialog(t *testing.T) {
-	h, e, _, db := setupTestHandlerWithDB(t)
-	webhookRepo := teststores.Of(db).Webhooks
+	h, e, _, db := setupTestHandlerWithStores(t)
+	webhookRepo := db.Webhooks
 	h.SetWebhookRepo(webhookRepo)
 
 	h.SetGitHubService(&fakeGitHubService{

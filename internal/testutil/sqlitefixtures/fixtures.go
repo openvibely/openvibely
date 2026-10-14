@@ -239,3 +239,46 @@ func (f *fixtures) CountProducedCommitStats(ctx context.Context) (int, error) {
 	err := f.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM task_commit_stats`).Scan(&count)
 	return count, err
 }
+
+func (f *fixtures) CountLifecycleHooks(ctx context.Context) (int, error) {
+	var count int
+	err := f.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM agent_lifecycle_hooks`).Scan(&count)
+	return count, err
+}
+
+func (f *fixtures) SeedLifecycleEvent(ctx context.Context, event *models.LifecycleExecutionEvent) error {
+	return sqlite.NewLifecycleRepo(f.db).AppendExecutionEvent(ctx, event)
+}
+func (f *fixtures) SetLifecycleExecutionIdentity(ctx context.Context, oldID, id string, at time.Time) error {
+	_, err := f.db.ExecContext(ctx, `UPDATE lifecycle_executions SET id = ?, started_at = ? WHERE id = ?`, id, at.UTC().Format("2006-01-02 15:04:05.999999999"), oldID)
+	return err
+}
+
+func (f *fixtures) FailExecutionReplayWrites(ctx context.Context) error {
+	_, err := f.db.ExecContext(ctx, `CREATE TRIGGER fail_replay_insert BEFORE INSERT ON execution_replay_messages BEGIN SELECT RAISE(FAIL, 'injected replay failure'); END`)
+	return err
+}
+func (f *fixtures) FailSteeringPreparation(ctx context.Context) error {
+	_, err := f.db.ExecContext(ctx, `CREATE TRIGGER fail_steering_prepare BEFORE UPDATE ON thread_inputs WHEN NEW.input_mode = 'steering' BEGIN SELECT RAISE(FAIL, 'injected preparation failure'); END`)
+	return err
+}
+func (f *fixtures) CountProjectExecutions(ctx context.Context, projectID string) (int, error) {
+	var count int
+	err := f.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM executions e JOIN tasks t ON t.id=e.task_id WHERE t.project_id=?`, projectID).Scan(&count)
+	return count, err
+}
+
+func (f *fixtures) SetInputEditHoldUntil(ctx context.Context, id string, at time.Time) error {
+	return f.setTime(ctx, `UPDATE thread_inputs SET edit_hold_until = ? WHERE id = ?`, id, at)
+}
+
+func (f *fixtures) WebhookEndpoints(ctx context.Context, projectID string) ([]models.WebhookEndpoint, error) {
+	return sqlite.NewWebhookRepo(f.db).ListByProject(ctx, projectID)
+}
+func (f *fixtures) TaskAgentAssignments(ctx context.Context, taskID string) ([]models.TaskAgentAssignment, error) {
+	return sqlite.NewWebhookRepo(f.db).GetTaskAgentAssignments(ctx, taskID)
+}
+func (f *fixtures) SetLegacyWebhookPriority(ctx context.Context, id string, priority int) error {
+	_, err := f.db.ExecContext(ctx, `UPDATE webhook_endpoints SET default_priority = ? WHERE id = ?`, priority, id)
+	return err
+}

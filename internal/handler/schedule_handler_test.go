@@ -54,7 +54,7 @@ func assertSchedulesTaskDetailFragment(t *testing.T, body string) {
 }
 
 func TestCreateSchedule_InvalidDate(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	project := tc.CreateProject().Build()
 	task := tc.CreateTask(project.ID).Build()
 
@@ -70,7 +70,7 @@ func TestCreateSchedule_InvalidDate(t *testing.T) {
 }
 
 func TestCreateSchedule_RejectsOversizedIntervalWithoutPersistence(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	project := tc.CreateProject().Build()
 	task := tc.CreateTask(project.ID).Build()
 
@@ -118,7 +118,7 @@ func TestScheduleMutationRoutesRejectForeignProjectContext(t *testing.T) {
 	}
 
 	t.Run("create without agent assignment field", func(t *testing.T) {
-		tc := NewTestContext(t)
+		tc := NewStoreTestContext(t)
 		projectA := tc.CreateProject().WithName("Project A").Build()
 		projectB := tc.CreateProject().WithName("Project B").Build()
 		task := tc.CreateTask(projectA.ID).Build()
@@ -138,7 +138,7 @@ func TestScheduleMutationRoutesRejectForeignProjectContext(t *testing.T) {
 
 	for _, method := range []string{http.MethodPut, http.MethodPost} {
 		t.Run("update "+method, func(t *testing.T) {
-			tc := NewTestContext(t)
+			tc := NewStoreTestContext(t)
 			projectA := tc.CreateProject().WithName("Project A").Build()
 			projectB := tc.CreateProject().WithName("Project B").Build()
 			task := tc.CreateTask(projectA.ID).Build()
@@ -183,7 +183,7 @@ func TestScheduleMutationRoutesRejectForeignProjectContext(t *testing.T) {
 		}},
 	} {
 		t.Run(endpoint.name, func(t *testing.T) {
-			tc := NewTestContext(t)
+			tc := NewStoreTestContext(t)
 			projectA := tc.CreateProject().WithName("Project A").Build()
 			projectB := tc.CreateProject().WithName("Project B").Build()
 			task := tc.CreateTask(projectA.ID).Build()
@@ -211,7 +211,7 @@ func TestScheduleMutationRoutesRejectForeignProjectContext(t *testing.T) {
 	}
 
 	t.Run("delete", func(t *testing.T) {
-		tc := NewTestContext(t)
+		tc := NewStoreTestContext(t)
 		projectA := tc.CreateProject().WithName("Project A").Build()
 		projectB := tc.CreateProject().WithName("Project B").Build()
 		task := tc.CreateTask(projectA.ID).Build()
@@ -233,7 +233,7 @@ func TestScheduleMutationRoutesRejectForeignProjectContext(t *testing.T) {
 	})
 
 	t.Run("reschedule", func(t *testing.T) {
-		tc := NewTestContext(t)
+		tc := NewStoreTestContext(t)
 		projectA := tc.CreateProject().WithName("Project A").Build()
 		projectB := tc.CreateProject().WithName("Project B").Build()
 		task := tc.CreateTask(projectA.ID).Build()
@@ -271,7 +271,7 @@ func TestCreateAndUpdateSchedule_NativeRedirectParity(t *testing.T) {
 		{name: "update inferred project", operation: "update"},
 	} {
 		t.Run(tcse.name, func(t *testing.T) {
-			tc := NewTestContext(t)
+			tc := NewStoreTestContext(t)
 			project := tc.CreateProject().Build()
 			task := tc.CreateTask(project.ID).Build()
 			runAt := time.Now().Add(time.Hour).Format("2006-01-02T15:04")
@@ -305,7 +305,7 @@ func TestCreateAndUpdateSchedule_NativeRedirectParity(t *testing.T) {
 }
 
 func TestCreateSchedule_Success_Redirect(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	project := tc.CreateProject().Build()
 	task := tc.CreateTask(project.ID).Build()
 
@@ -342,7 +342,7 @@ func TestCreateSchedule_Success_Redirect(t *testing.T) {
 }
 
 func TestCreateSchedule_OneTimeResetsCompletedScheduledTask(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	project := tc.CreateProject().Build()
 	task := tc.CreateTask(project.ID).
 		WithCategory(models.CategoryScheduled).
@@ -382,7 +382,7 @@ func TestCreateSchedule_OneTimeResetsCompletedScheduledTask(t *testing.T) {
 }
 
 func TestCreateSchedule_HTMX_Success(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	project := tc.CreateProject().Build()
 	task := tc.CreateTask(project.ID).Build()
 
@@ -456,7 +456,7 @@ func TestCreateSchedule_HTMX_UsesMainTaskDetailExecutionOrdering(t *testing.T) {
 }
 
 func TestCreateSchedule_DefaultRepeatType(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	project := tc.CreateProject().Build()
 	task := tc.CreateTask(project.ID).Build()
 
@@ -717,10 +717,10 @@ func createScheduleTestAgent(t *testing.T, repo persistence.AgentStore, name str
 }
 
 func TestCreateSchedule_AssignsPrimaryAgent(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	project := tc.CreateProject().Build()
 	task := tc.CreateTask(project.ID).Build()
-	agentRepo := teststores.Of(tc.db).Agents
+	agentRepo := tc.stores.Agents
 	tc.handler.agentRepo = agentRepo
 	agent := createScheduleTestAgent(t, agentRepo, "Schedule Runner", models.AgentScopeProject, project.ID, true)
 
@@ -746,9 +746,9 @@ func TestCreateSchedule_AssignsPrimaryAgent(t *testing.T) {
 }
 
 func TestCreateSchedule_ExplicitNoAgentClearsPrimaryAgent(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	project := tc.CreateProject().Build()
-	agentRepo := teststores.Of(tc.db).Agents
+	agentRepo := tc.stores.Agents
 	tc.handler.agentRepo = agentRepo
 	agent := createScheduleTestAgent(t, agentRepo, "Existing Runner", models.AgentScopeGlobal, "", true)
 	task := tc.CreateTask(project.ID).Build()
@@ -774,14 +774,14 @@ func TestCreateSchedule_ExplicitNoAgentClearsPrimaryAgent(t *testing.T) {
 }
 
 func TestUpdateSchedule_PersistsAndClearsPrimaryAgentWithoutChangingModel(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	project := tc.CreateProject().Build()
 	model := tc.CreateLLMConfig().Build()
 	taskBuilder := tc.CreateTask(project.ID)
 	taskBuilder.task.AgentID = &model.ID
 	task := taskBuilder.Build()
 	schedule := tc.CreateSchedule(task.ID).Build()
-	agentRepo := teststores.Of(tc.db).Agents
+	agentRepo := tc.stores.Agents
 	tc.handler.agentRepo = agentRepo
 	agent := createScheduleTestAgent(t, agentRepo, "Updated Runner", models.AgentScopeProject, project.ID, true)
 	runAt := time.Now().Add(2 * time.Hour).Format("2006-01-02T15:04")
@@ -814,12 +814,12 @@ func TestUpdateSchedule_PersistsAndClearsPrimaryAgentWithoutChangingModel(t *tes
 }
 
 func TestUpdateSchedule_RejectsIneligibleAndCrossProjectAgents(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	project := tc.CreateProject().Build()
 	otherProject := tc.CreateProject().WithName("Other Project").Build()
 	task := tc.CreateTask(project.ID).Build()
 	schedule := tc.CreateSchedule(task.ID).Build()
-	agentRepo := teststores.Of(tc.db).Agents
+	agentRepo := tc.stores.Agents
 	tc.handler.agentRepo = agentRepo
 	ineligible := createScheduleTestAgent(t, agentRepo, "Maintenance Agent", models.AgentScopeGlobal, "", false)
 	otherProjectAgent := createScheduleTestAgent(t, agentRepo, "Other Project Agent", models.AgentScopeProject, otherProject.ID, true)
@@ -844,10 +844,10 @@ func TestUpdateSchedule_RejectsIneligibleAndCrossProjectAgents(t *testing.T) {
 }
 
 func TestViewSchedule_PrimaryAgentOptionsAreEligibleAndProjectScoped(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	project := tc.CreateProject().Build()
 	otherProject := tc.CreateProject().WithName("Other Project").Build()
-	agentRepo := teststores.Of(tc.db).Agents
+	agentRepo := tc.stores.Agents
 	tc.handler.agentRepo = agentRepo
 	global := createScheduleTestAgent(t, agentRepo, "Global Runner", models.AgentScopeGlobal, "", true)
 	projectAgent := createScheduleTestAgent(t, agentRepo, "Project Runner", models.AgentScopeProject, project.ID, true)
@@ -885,7 +885,7 @@ func TestViewSchedule_PrimaryAgentOptionsAreEligibleAndProjectScoped(t *testing.
 }
 
 func TestViewSchedule_AutoMergeOptionRendered(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	project := tc.CreateProject().Build()
 
 	rec := tc.HTTP().Get("/schedule?project_id=" + project.ID).Execute()
@@ -925,7 +925,7 @@ func TestCreateScheduledTask_AutoMergeIntent(t *testing.T) {
 		{name: "native omitted", wantStatus: http.StatusSeeOther},
 	} {
 		t.Run(tcse.name, func(t *testing.T) {
-			tc := NewTestContext(t)
+			tc := NewStoreTestContext(t)
 			project := tc.CreateProject().Build()
 			title := "Scheduled Auto-Merge " + tcse.name
 			form := url.Values{
@@ -1006,7 +1006,7 @@ func TestCreateScheduledTask_AutoMergeIntent(t *testing.T) {
 }
 
 func TestCreateScheduledTask_NativeFormRedirectsToProjectSchedule(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	project := tc.CreateProject().Build()
 	runAt := time.Now().Add(-2 * time.Minute).Format("2006-01-02T15:04")
 
@@ -1060,9 +1060,9 @@ func TestCreateScheduledTask_PersistsPrimaryAgentAndExplicitNoAgent(t *testing.T
 		{name: "no agent", assignAgent: false},
 	} {
 		t.Run(tcse.name, func(t *testing.T) {
-			tc := NewTestContext(t)
+			tc := NewStoreTestContext(t)
 			project := tc.CreateProject().Build()
-			agentRepo := teststores.Of(tc.db).Agents
+			agentRepo := tc.stores.Agents
 			tc.handler.agentRepo = agentRepo
 			agent := createScheduleTestAgent(t, agentRepo, "Scheduled Creator", models.AgentScopeProject, project.ID, true)
 			agentID := ""
@@ -1100,7 +1100,7 @@ func TestCreateScheduledTask_PersistsPrimaryAgentAndExplicitNoAgent(t *testing.T
 // ---- UpdateSchedule ----
 
 func TestUpdateSchedule_NotFound(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 
 	runAt := time.Now().Add(time.Hour).Format("2006-01-02T15:04")
 	rec := tc.HTTP().Put("/schedules/nonexistent-id").WithForm(url.Values{
@@ -1115,7 +1115,7 @@ func TestUpdateSchedule_NotFound(t *testing.T) {
 }
 
 func TestUpdateSchedule_InvalidDate(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	project := tc.CreateProject().Build()
 	task := tc.CreateTask(project.ID).Build()
 	schedule := tc.CreateSchedule(task.ID).Build()
@@ -1132,7 +1132,7 @@ func TestUpdateSchedule_InvalidDate(t *testing.T) {
 }
 
 func TestUpdateSchedule_RejectsOversizedIntervalWithoutPersistence(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	project := tc.CreateProject().Build()
 	task := tc.CreateTask(project.ID).Build()
 	schedule := tc.CreateSchedule(task.ID).WithRepeatType(models.RepeatDaily).WithRepeatInterval(2).Build()
@@ -1157,7 +1157,7 @@ func TestUpdateSchedule_RejectsOversizedIntervalWithoutPersistence(t *testing.T)
 }
 
 func TestUpdateSchedule_ClearsCancellationRequestWhenResettingScheduledTaskPending(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	project := tc.CreateProject().Build()
 	task := tc.CreateTask(project.ID).
 		WithCategory(models.CategoryScheduled).
@@ -1191,7 +1191,7 @@ func TestUpdateSchedule_ClearsCancellationRequestWhenResettingScheduledTaskPendi
 }
 
 func TestUpdateSchedule_Success_Redirect(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	project := tc.CreateProject().Build()
 	task := tc.CreateTask(project.ID).Build()
 	schedule := tc.CreateSchedule(task.ID).Build()
@@ -1209,7 +1209,7 @@ func TestUpdateSchedule_Success_Redirect(t *testing.T) {
 }
 
 func TestUpdateSchedule_HTMX_Success(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	project := tc.CreateProject().Build()
 	task := tc.CreateTask(project.ID).Build()
 	schedule := tc.CreateSchedule(task.ID).Build()
@@ -1228,9 +1228,9 @@ func TestUpdateSchedule_HTMX_Success(t *testing.T) {
 }
 
 func TestUpdateSchedule_WithoutAgentFieldPreservesExistingAssignment(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	project := tc.CreateProject().Build()
-	agentRepo := teststores.Of(tc.db).Agents
+	agentRepo := tc.stores.Agents
 	tc.handler.agentRepo = agentRepo
 	protected := createScheduleTestAgent(t, agentRepo, "Protected Scheduled Maintenance", models.AgentScopeGlobal, "", false)
 	task := tc.CreateTask(project.ID).Build()
@@ -1255,11 +1255,11 @@ func TestUpdateSchedule_WithoutAgentFieldPreservesExistingAssignment(t *testing.
 }
 
 func TestUpdateSchedule_HTMXResponseHydratesSavedPrimaryAgent(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	project := tc.CreateProject().Build()
 	task := tc.CreateTask(project.ID).Build()
 	schedule := tc.CreateSchedule(task.ID).Build()
-	agentRepo := teststores.Of(tc.db).Agents
+	agentRepo := tc.stores.Agents
 	tc.handler.agentRepo = agentRepo
 	agent := createScheduleTestAgent(t, agentRepo, "HTMX Scheduled Runner", models.AgentScopeProject, project.ID, true)
 	runAt := time.Now().Add(2 * time.Hour).Format("2006-01-02T15:04")
@@ -1284,12 +1284,12 @@ func TestUpdateSchedule_HTMXResponseHydratesSavedPrimaryAgent(t *testing.T) {
 }
 
 func TestUpdateSchedule_NativeFormMethodOverridePersistsPrimaryAgent(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	tc.echo.Pre(middleware.MethodOverride())
 	project := tc.CreateProject().Build()
 	task := tc.CreateTask(project.ID).Build()
 	schedule := tc.CreateSchedule(task.ID).Build()
-	agentRepo := teststores.Of(tc.db).Agents
+	agentRepo := tc.stores.Agents
 	tc.handler.agentRepo = agentRepo
 	agent := createScheduleTestAgent(t, agentRepo, "Native Scheduled Runner", models.AgentScopeProject, project.ID, true)
 	runAt := time.Now().Add(2 * time.Hour).Format("2006-01-02T15:04")
@@ -1317,7 +1317,7 @@ func TestUpdateSchedule_NativeFormMethodOverridePersistsPrimaryAgent(t *testing.
 // ---- DeleteSchedule ----
 
 func TestDeleteSchedule_HTMX(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	project := tc.CreateProject().Build()
 	task := tc.CreateTask(project.ID).Build()
 	schedule := tc.CreateSchedule(task.ID).Build()
@@ -1330,7 +1330,7 @@ func TestDeleteSchedule_HTMX(t *testing.T) {
 }
 
 func TestDeleteSchedule_HTMXFromScheduleRefreshesSchedulePage(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	project := tc.CreateProject().Build()
 	task := tc.CreateTask(project.ID).WithTitle("Deleted schedule card").Build()
 	schedule := tc.CreateSchedule(task.ID).WithRunAt(time.Now().Add(time.Hour)).Build()
@@ -1360,7 +1360,7 @@ func TestDeleteSchedule_HTMXFromScheduleRefreshesSchedulePage(t *testing.T) {
 }
 
 func TestDeleteSchedule_Redirect(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	project := tc.CreateProject().Build()
 	task := tc.CreateTask(project.ID).Build()
 	schedule := tc.CreateSchedule(task.ID).Build()
@@ -1373,7 +1373,7 @@ func TestDeleteSchedule_Redirect(t *testing.T) {
 }
 
 func TestDeleteSchedule_BrowserDeletePreservesScheduledTaskCategory(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	project := tc.CreateProject().Build()
 	task := tc.CreateTask(project.ID).
 		WithCategory(models.CategoryScheduled).
@@ -1405,7 +1405,7 @@ func TestDeleteSchedule_BrowserDeletePreservesScheduledTaskCategory(t *testing.T
 // ---- RescheduleTask ----
 
 func TestRescheduleTask_InvalidDate(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	project := tc.CreateProject().Build()
 	task := tc.CreateTask(project.ID).Build()
 	schedule := tc.CreateSchedule(task.ID).Build()
@@ -1421,7 +1421,7 @@ func TestRescheduleTask_InvalidDate(t *testing.T) {
 }
 
 func TestRescheduleTask_InvalidHour(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	project := tc.CreateProject().Build()
 	task := tc.CreateTask(project.ID).Build()
 	schedule := tc.CreateSchedule(task.ID).Build()
@@ -1437,7 +1437,7 @@ func TestRescheduleTask_InvalidHour(t *testing.T) {
 }
 
 func TestRescheduleTask_NotFound(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 
 	rec := tc.HTMX().Patch("/schedules/nonexistent/reschedule").WithForm(url.Values{
 		"new_date": {time.Now().AddDate(0, 0, 1).Format("2006-01-02")},
@@ -1450,7 +1450,7 @@ func TestRescheduleTask_NotFound(t *testing.T) {
 }
 
 func TestRescheduleTask_Success_HTMX(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	project := tc.CreateProject().Build()
 	task := tc.CreateTask(project.ID).Build()
 	schedule := tc.CreateSchedule(task.ID).WithRepeatType(models.RepeatDaily).Build()
@@ -1467,7 +1467,7 @@ func TestRescheduleTask_Success_HTMX(t *testing.T) {
 }
 
 func TestRescheduleTask_Success_Redirect(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	project := tc.CreateProject().Build()
 	task := tc.CreateTask(project.ID).Build()
 	schedule := tc.CreateSchedule(task.ID).WithRepeatType(models.RepeatDaily).Build()
@@ -1486,7 +1486,7 @@ func TestRescheduleTask_Success_Redirect(t *testing.T) {
 // ---- GetExecution ----
 
 func TestGetExecution_NotFound(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	rec := tc.HTTP().Get("/executions/nonexistent").Execute()
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("expected 404, got %d", rec.Code)
@@ -1494,7 +1494,7 @@ func TestGetExecution_NotFound(t *testing.T) {
 }
 
 func TestGetExecution_Success(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	agent := tc.CreateLLMConfig().Build()
 	project := tc.CreateProject().WithName("Execution Detail Project").Build()
 	task := tc.CreateTask(project.ID).WithPrompt("same-project task prompt").Build()
@@ -1516,7 +1516,7 @@ func TestGetExecution_Success(t *testing.T) {
 }
 
 func TestGetExecution_RejectsForeignProjectExecution(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	agent := tc.CreateLLMConfig().Build()
 	projectA := tc.CreateProject().WithName("Execution Detail Project A").Build()
 	projectB := tc.CreateProject().WithName("Execution Detail Project B").Build()
@@ -1546,7 +1546,7 @@ func TestGetExecution_RejectsForeignProjectExecution(t *testing.T) {
 // ---- WorkerSettings ----
 
 func TestWorkerSettings_NonHTMX(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	rec := tc.HTTP().Get("/workers").Execute()
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", rec.Code)
@@ -1555,7 +1555,7 @@ func TestWorkerSettings_NonHTMX(t *testing.T) {
 }
 
 func TestWorkerSettings_HTMX(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	rec := tc.HTMX().Get("/workers").Execute()
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", rec.Code)
@@ -1565,7 +1565,7 @@ func TestWorkerSettings_HTMX(t *testing.T) {
 // ---- UpdateWorkerSettings ----
 
 func TestUpdateWorkerSettings_HTMX(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	rec := tc.HTMX().Post("/workers").WithForm(url.Values{
 		"max_workers": {"3"},
 	}).Execute()
@@ -1575,7 +1575,7 @@ func TestUpdateWorkerSettings_HTMX(t *testing.T) {
 }
 
 func TestUpdateWorkerSettings_Redirect(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	rec := tc.HTTP().Post("/workers").WithForm(url.Values{
 		"max_workers": {"2"},
 	}).Execute()
@@ -1585,7 +1585,7 @@ func TestUpdateWorkerSettings_Redirect(t *testing.T) {
 }
 
 func TestUpdateWorkerSettings_Clamps(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	// Value of 99 should be clamped to 10
 	rec := tc.HTTP().Post("/workers").WithForm(url.Values{
 		"max_workers": {"99"},
@@ -1598,7 +1598,7 @@ func TestUpdateWorkerSettings_Clamps(t *testing.T) {
 // ---- UpdateProjectWorkerLimit ----
 
 func TestUpdateProjectWorkerLimit_NotFound(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	rec := tc.HTMX().Post("/workers/projects/nonexistent/limit").WithForm(url.Values{
 		"max_workers": {"2"},
 	}).Execute()
@@ -1608,7 +1608,7 @@ func TestUpdateProjectWorkerLimit_NotFound(t *testing.T) {
 }
 
 func TestUpdateProjectWorkerLimit_Success(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	project := tc.CreateProject().Build()
 
 	rec := tc.HTMX().Post("/workers/projects/" + project.ID + "/limit").WithForm(url.Values{
@@ -1620,7 +1620,7 @@ func TestUpdateProjectWorkerLimit_Success(t *testing.T) {
 }
 
 func TestUpdateProjectWorkerLimit_Zero_RemovesLimit(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	project := tc.CreateProject().Build()
 
 	rec := tc.HTMX().Post("/workers/projects/" + project.ID + "/limit").WithForm(url.Values{
@@ -1634,7 +1634,7 @@ func TestUpdateProjectWorkerLimit_Zero_RemovesLimit(t *testing.T) {
 // ---- GlobalWorkerStats / ProjectWorkerStats / ModelWorkerStats ----
 
 func TestGlobalWorkerStats(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	rec := tc.HTTP().Get("/workers/stats/global").Execute()
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", rec.Code)
@@ -1642,7 +1642,7 @@ func TestGlobalWorkerStats(t *testing.T) {
 }
 
 func TestProjectWorkerStats(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	tc.CreateProject().Build()
 	rec := tc.HTTP().Get("/workers/stats/projects").Execute()
 	if rec.Code != http.StatusOK {
@@ -1651,7 +1651,7 @@ func TestProjectWorkerStats(t *testing.T) {
 }
 
 func TestModelWorkerStats(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	rec := tc.HTTP().Get("/workers/stats/models").Execute()
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", rec.Code)
@@ -1661,7 +1661,7 @@ func TestModelWorkerStats(t *testing.T) {
 // ---- Capacity API ----
 
 func TestGetGlobalCapacity(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	rec := tc.HTTP().Get("/api/capacity/global").Execute()
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", rec.Code)
@@ -1673,7 +1673,7 @@ func TestGetGlobalCapacity(t *testing.T) {
 }
 
 func TestGetProjectCapacities(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	tc.CreateProject().WithName("Cap Test Project").Build()
 
 	rec := tc.HTTP().Get("/api/capacity/projects").Execute()
@@ -1690,7 +1690,7 @@ func TestGetProjectCapacities(t *testing.T) {
 }
 
 func TestGetProjectCapacity_NotFound(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	rec := tc.HTTP().Get("/api/capacity/projects/nonexistent").Execute()
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("expected 404, got %d", rec.Code)
@@ -1698,7 +1698,7 @@ func TestGetProjectCapacity_NotFound(t *testing.T) {
 }
 
 func TestGetProjectCapacity_Success(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	project := tc.CreateProject().Build()
 
 	rec := tc.HTTP().Get("/api/capacity/projects/" + project.ID).Execute()
@@ -1715,7 +1715,7 @@ func TestGetProjectCapacity_Success(t *testing.T) {
 }
 
 func TestGetModelCapacities(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	rec := tc.HTTP().Get("/api/capacity/models").Execute()
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", rec.Code)
@@ -1723,7 +1723,7 @@ func TestGetModelCapacities(t *testing.T) {
 }
 
 func TestGetModelCapacity_NotFound(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	rec := tc.HTTP().Get("/api/capacity/models/nonexistent").Execute()
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("expected 404, got %d", rec.Code)
@@ -1733,7 +1733,7 @@ func TestGetModelCapacity_NotFound(t *testing.T) {
 // ---- ToggleScheduleEnabled ----
 
 func TestToggleScheduleEnabled_NotFound(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	rec := tc.HTTP().Post("/schedules/nonexistent/toggle").Execute()
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("expected 404, got %d", rec.Code)
@@ -1741,7 +1741,7 @@ func TestToggleScheduleEnabled_NotFound(t *testing.T) {
 }
 
 func TestToggleScheduleEnabled_DisableAndEnable(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	project := tc.CreateProject().Build()
 	task := tc.CreateTask(project.ID).Build()
 	future := time.Now().Add(time.Hour)
@@ -1773,7 +1773,7 @@ func TestToggleScheduleEnabled_DisableAndEnable(t *testing.T) {
 }
 
 func TestToggleScheduleEnabled_HTMX_Returns200(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	project := tc.CreateProject().Build()
 	task := tc.CreateTask(project.ID).Build()
 	s := tc.CreateSchedule(task.ID).WithRunAt(time.Now().Add(time.Hour)).Build()
@@ -1825,7 +1825,7 @@ func TestToggleScheduleEnabled_HTMX_Returns200(t *testing.T) {
 }
 
 func TestToggleScheduleEnabled_HTMXFromScheduleRefreshesSchedulePage(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	project := tc.CreateProject().Build()
 	task := tc.CreateTask(project.ID).WithTitle("Schedule page toggle").Build()
 	now := time.Now().Local()
@@ -1896,7 +1896,7 @@ func TestToggleScheduleEnabled_FiredOneTimeReturnsBadRequestWithoutMutation(t *t
 }
 
 func TestToggleScheduleEnabled_NonHTMX_RedirectContainsTaskID(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	project := tc.CreateProject().Build()
 	task := tc.CreateTask(project.ID).Build()
 	s := tc.CreateSchedule(task.ID).WithRunAt(time.Now().Add(time.Hour)).Build()
@@ -1913,7 +1913,7 @@ func TestToggleScheduleEnabled_NonHTMX_RedirectContainsTaskID(t *testing.T) {
 }
 
 func TestToggleScheduleEnabled_StaleNextRunRecomputed(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	project := tc.CreateProject().Build()
 	task := tc.CreateTask(project.ID).Build()
 	// Schedule started yesterday and is daily
@@ -1937,7 +1937,7 @@ func TestToggleScheduleEnabled_StaleNextRunRecomputed(t *testing.T) {
 }
 
 func TestToggleScheduleEnabled_DisabledExcludedFromListDue(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	project := tc.CreateProject().Build()
 	task := tc.CreateTask(project.ID).Build()
 	past := time.Now().Add(-time.Hour)
@@ -1990,7 +1990,7 @@ func TestScheduleToggleEndpoints_StaleNextRunParity(t *testing.T) {
 
 	for _, endpoint := range endpoints {
 		t.Run(endpoint.name, func(t *testing.T) {
-			tc := NewTestContext(t)
+			tc := NewStoreTestContext(t)
 			project := tc.CreateProject().Build()
 			task := tc.CreateTask(project.ID).Build()
 			stale := time.Now().Add(-25 * time.Hour)
@@ -2032,7 +2032,7 @@ func TestScheduleToggleEndpoints_StaleNextRunParity(t *testing.T) {
 // ---- APIToggleScheduleEnabled ----
 
 func TestAPIToggleScheduleEnabled_NotFound(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	rec := tc.HTTP().Post("/api/schedules/nonexistent/toggle").Execute()
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("expected 404, got %d", rec.Code)
@@ -2040,7 +2040,7 @@ func TestAPIToggleScheduleEnabled_NotFound(t *testing.T) {
 }
 
 func TestAPIToggleScheduleEnabled_RoundTrip(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	project := tc.CreateProject().Build()
 	task := tc.CreateTask(project.ID).Build()
 	s := tc.CreateSchedule(task.ID).WithRunAt(time.Now().Add(time.Hour)).Build()
@@ -2073,7 +2073,7 @@ func TestAPIToggleScheduleEnabled_RoundTrip(t *testing.T) {
 }
 
 func TestDeleteSchedule_TaskPanelRestoresEmptyState(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	project := tc.CreateProject().Build()
 	task := tc.CreateTask(project.ID).Build()
 	schedule := tc.CreateSchedule(task.ID).Build()
@@ -2093,7 +2093,7 @@ func TestDeleteSchedule_TaskPanelRestoresEmptyState(t *testing.T) {
 }
 
 func TestTaskPanelScheduleRejectsPastStart(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	project := tc.CreateProject().Build()
 	task := tc.CreateTask(project.ID).Build()
 	form := url.Values{"run_at": {time.Now().Add(-11 * time.Hour).Format("2006-01-02T15:04")}, "repeat_type": {"weekly"}, "repeat_interval": {"1"}}
@@ -2118,7 +2118,7 @@ func TestTaskPanelScheduleRejectsPastStart(t *testing.T) {
 }
 
 func TestTaskPanelScheduleEditPreservesNextRun(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	project := tc.CreateProject().Build()
 	task := tc.CreateTask(project.ID).Build()
 	anchor := time.Now().Add(-7 * 24 * time.Hour).Truncate(time.Minute)
@@ -2147,7 +2147,7 @@ func TestTaskPanelScheduleEditPreservesNextRun(t *testing.T) {
 func TestConversationScheduleFormsCreateRunnableSchedules(t *testing.T) {
 	for _, repeat := range []string{"once", "daily"} {
 		t.Run(repeat, func(t *testing.T) {
-			tc := NewTestContext(t)
+			tc := NewStoreTestContext(t)
 			project := tc.CreateProject().Build()
 			task := tc.CreateTask(project.ID).WithCategory(models.CategoryChat).Build()
 			rec := tc.HTMX().Post("/tasks/" + task.ID + "/schedule?from=task-panel").WithForm(url.Values{
@@ -2199,7 +2199,7 @@ func TestUpdateSchedule_OneTimeRunValidation(t *testing.T) {
 		for _, status := range []models.TaskStatus{models.StatusPending, models.StatusCompleted} {
 			for _, edit := range []string{"past", "future", "unchanged historical"} {
 				t.Run(fmt.Sprintf("%s/%s/%s", source, status, edit), func(t *testing.T) {
-					tc := NewTestContext(t)
+					tc := NewStoreTestContext(t)
 					ctx := context.Background()
 					project := tc.CreateProject().Build()
 					task := tc.CreateTask(project.ID).WithCategory(models.CategoryScheduled).WithStatus(status).Build()

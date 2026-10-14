@@ -14,7 +14,7 @@ import (
 
 // TestHandler_GetTask_HTMX_Refactored demonstrates the refactored test using new helpers
 func TestHandler_GetTask_HTMX_Refactored(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 
 	// Create test data using fluent builders
 	project := tc.CreateProject().WithName("Test Project").Build()
@@ -36,7 +36,7 @@ func TestHandler_GetTask_HTMX_Refactored(t *testing.T) {
 
 // TestHandler_GetTaskExecutions_Refactored demonstrates refactored execution test
 func TestHandler_GetTaskExecutions_Refactored(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 
 	// Create test data with builders
 	agent := tc.CreateLLMConfig().
@@ -76,7 +76,7 @@ func TestHandler_GetTaskExecutions_Refactored(t *testing.T) {
 
 // TestHandler_GetTask_StatusIndicator_Refactored shows test case table refactoring
 func TestHandler_GetTask_StatusIndicator_Refactored(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	agent := tc.CreateLLMConfig().Build()
 	project := tc.CreateProject().Build()
 
@@ -159,7 +159,7 @@ func TestHandler_GetTask_StatusIndicator_Refactored(t *testing.T) {
 
 // TestCreateModel_AnthropicAPIKey_Refactored shows form submission refactoring
 func TestCreateModel_AnthropicAPIKey_Refactored(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 
 	form := url.Values{
 		"name":                {"My Anthropic Model"},
@@ -207,7 +207,7 @@ func TestCreateModel_AnthropicAPIKey_Refactored(t *testing.T) {
 
 // TestHandler_TasksPage_NoDialogContainer_Refactored shows simple GET test refactoring
 func TestHandler_TasksPage_NoDialogContainer_Refactored(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	project := tc.CreateProject().Build()
 
 	rec := tc.HTTP().Get("/tasks?project_id=" + project.ID).Execute()
@@ -220,7 +220,7 @@ func TestHandler_TasksPage_NoDialogContainer_Refactored(t *testing.T) {
 
 // TestHandler_ScheduleCreation_Refactored demonstrates schedule testing
 func TestHandler_ScheduleCreation_Refactored(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 
 	project := tc.CreateProject().Build()
 	task := tc.CreateTask(project.ID).
@@ -247,7 +247,7 @@ func TestHandler_ScheduleCreation_Refactored(t *testing.T) {
 
 // TestHandler_TaskThreadFollowup_Refactored shows complex interaction test
 func TestHandler_TaskThreadFollowup_Refactored(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 
 	// Setup test data
 	agent := tc.CreateLLMConfig().Build()

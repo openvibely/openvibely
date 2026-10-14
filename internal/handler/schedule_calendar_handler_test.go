@@ -70,7 +70,7 @@ func TestScheduleCalendarActionBulkSelectionAndProjectIsolation(t *testing.T) {
 }
 
 func TestScheduleCalendarRoutesPersistAndRenderState(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	project := tc.CreateProject().Build()
 	action := models.ScheduleCalendarAction{Action: "skip", Skips: []models.ScheduleSkip{{StartAt: time.Now().Truncate(time.Hour).Unix(), EndAt: time.Now().Truncate(time.Hour).Add(time.Hour).Unix()}}}
 	data, err := json.Marshal(action)

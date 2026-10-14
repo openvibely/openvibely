@@ -21,13 +21,13 @@ import (
 )
 
 func TestUploadAttachment_TaskNotFound(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	rec := tc.HTTP().Post("/tasks/nonexistent-task/attachments").Execute()
 	tc.Assert(rec).StatusCode(http.StatusNotFound)
 }
 
 func TestUploadAttachment_NoFiles(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	p := tc.CreateProject().Build()
 	task := tc.CreateTask(p.ID).Build()
 
@@ -75,7 +75,7 @@ func TestTaskAttachmentMultipartAdmissionRejectsMalformedFormAcrossSurfaces(t *t
 		},
 	} {
 		t.Run(tcCase.name, func(t *testing.T) {
-			tc := NewTestContext(t)
+			tc := NewStoreTestContext(t)
 			project := tc.CreateProject().Build()
 			method, target := tcCase.setup(t, tc, project.ID)
 			req := httptest.NewRequest(method, target, strings.NewReader("malformed multipart body"))
@@ -95,7 +95,7 @@ func TestTaskAttachmentMultipartAdmissionRejectsMalformedFormAcrossSurfaces(t *t
 }
 
 func TestUploadAttachment_Success(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	p := tc.CreateProject().Build()
 	task := tc.CreateTask(p.ID).Build()
 
@@ -165,7 +165,7 @@ func TestUploadAttachment_RejectsCrossProjectBeforePersistence(t *testing.T) {
 		},
 	} {
 		t.Run(tcCase.name, func(t *testing.T) {
-			tc := NewTestContext(t)
+			tc := NewStoreTestContext(t)
 			owningProject := tc.CreateProject().WithName("Attachment owner").Build()
 			foreignProject := tc.CreateProject().WithName("Attachment foreign").Build()
 			task := tc.CreateTask(owningProject.ID).Build()
@@ -394,7 +394,7 @@ func withTaskAttachmentUploadsDir(t *testing.T) string {
 func TestTaskAttachmentUploadsPersistEquivalentRowsAcrossSurfaces(t *testing.T) {
 	for _, surface := range taskAttachmentUploadSurfaces() {
 		t.Run(surface.name, func(t *testing.T) {
-			tc := NewTestContext(t)
+			tc := NewStoreTestContext(t)
 			project := tc.CreateProject().Build()
 			uploadsRoot := withTaskAttachmentUploadsDir(t)
 
@@ -493,7 +493,7 @@ func TestTaskAttachmentUploadsAllowValidMultiFileBodyAboveSingleFileRequestCapAc
 		},
 	} {
 		t.Run(tcCase.name, func(t *testing.T) {
-			tc := NewTestContext(t)
+			tc := NewStoreTestContext(t)
 			project := tc.CreateProject().Build()
 			uploadsRoot := withTaskAttachmentUploadsDir(t)
 			files := []taskAttachmentTestFile{
@@ -605,7 +605,7 @@ func TestTaskAttachmentUploadsAllowPaddedBoundaryDelimiterWhitespaceAcrossSurfac
 		},
 	} {
 		t.Run(tcCase.name, func(t *testing.T) {
-			tc := NewTestContext(t)
+			tc := NewStoreTestContext(t)
 			project := tc.CreateProject().Build()
 			withTaskAttachmentUploadsDir(t)
 			files := []taskAttachmentTestFile{
@@ -637,7 +637,7 @@ func TestTaskAttachmentUploadsAllowPaddedBoundaryDelimiterWhitespaceAcrossSurfac
 func TestTaskAttachmentUploadsRejectOversizedFilesAcrossSurfaces(t *testing.T) {
 	for _, surface := range taskAttachmentUploadSurfaces() {
 		t.Run(surface.name, func(t *testing.T) {
-			tc := NewTestContext(t)
+			tc := NewStoreTestContext(t)
 			project := tc.CreateProject().Build()
 			withTaskAttachmentUploadsDir(t)
 
@@ -685,7 +685,7 @@ func TestTaskAttachmentUploadsCleanPartialFilesOnCopyFailureAcrossSurfaces(t *te
 
 	for _, surface := range taskAttachmentUploadSurfaces() {
 		t.Run(surface.name, func(t *testing.T) {
-			tc := NewTestContext(t)
+			tc := NewStoreTestContext(t)
 			project := tc.CreateProject().Build()
 			uploadsRoot := withTaskAttachmentUploadsDir(t)
 
@@ -786,7 +786,7 @@ func TestTaskCreateAndEditAttachmentFormsRejectOversizedMultipartBeforeMutation(
 		t.Run(tcCase.name, func(t *testing.T) {
 			tmpMultipartDir := t.TempDir()
 			t.Setenv("TMPDIR", tmpMultipartDir)
-			tc := NewTestContext(t)
+			tc := NewStoreTestContext(t)
 			project := tc.CreateProject().Build()
 			withTaskAttachmentUploadsDir(t)
 			method, target, assertNoMutation := tcCase.target(t, tc, project.ID)
@@ -820,7 +820,7 @@ func TestTaskCreateAndEditAttachmentFormsRejectOversizedMultipartBeforeMutation(
 func TestUploadAttachment_OversizedMultipartRequestIsBoundedBeforePersistence(t *testing.T) {
 	tmpMultipartDir := t.TempDir()
 	t.Setenv("TMPDIR", tmpMultipartDir)
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	project := tc.CreateProject().Build()
 	task := tc.CreateTask(project.ID).Build()
 	uploadsRoot := withTaskAttachmentUploadsDir(t)
@@ -1051,7 +1051,7 @@ func TestTaskAttachmentDuplicateNamesPersistIndependentlyAcrossSurfaces(t *testi
 
 	for _, tcCase := range cases {
 		t.Run(tcCase.name, func(t *testing.T) {
-			tc := NewTestContext(t)
+			tc := NewStoreTestContext(t)
 			project := tc.CreateProject().Build()
 			withTaskAttachmentUploadsDir(t)
 			taskID, method, target, fields := tcCase.setup(t, tc, project.ID)
@@ -1074,7 +1074,7 @@ func TestTaskAttachmentDuplicateNamesPersistIndependentlyAcrossSurfaces(t *testi
 }
 
 func TestUploadAttachment_DuplicateNameAcrossRequestsPreservesBothFiles(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	project := tc.CreateProject().Build()
 	task := tc.CreateTask(project.ID).WithCategory(models.CategoryBacklog).Build()
 	withTaskAttachmentUploadsDir(t)
@@ -1094,7 +1094,7 @@ func TestUploadAttachment_DuplicateNameAcrossRequestsPreservesBothFiles(t *testi
 func TestTaskAttachmentDuplicateDeletionPreservesSurvivorForExecutionReconciliation(t *testing.T) {
 	for _, deleteIndex := range []int{0, 1} {
 		t.Run(fmt.Sprintf("delete-%d", deleteIndex), func(t *testing.T) {
-			tc := NewTestContext(t)
+			tc := NewStoreTestContext(t)
 			project := tc.CreateProject().Build()
 			task := tc.CreateTask(project.ID).WithCategory(models.CategoryBacklog).Build()
 			withTaskAttachmentUploadsDir(t)
@@ -1197,7 +1197,7 @@ func TestTaskAttachmentCollidingRepositoryFailurePreservesExistingPublication(t 
 }
 
 func TestUploadAttachment_ListFailureDoesNotAllocateCollidingDestination(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	project := tc.CreateProject().Build()
 	task := tc.CreateTask(project.ID).WithCategory(models.CategoryBacklog).Build()
 	uploadsRoot := withTaskAttachmentUploadsDir(t)
@@ -1249,7 +1249,7 @@ func TestUploadAttachment_ListFailureDoesNotAllocateCollidingDestination(t *test
 }
 
 func TestTaskAttachmentCollidingCopyFailurePreservesExistingPublication(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	project := tc.CreateProject().Build()
 	task := tc.CreateTask(project.ID).WithCategory(models.CategoryBacklog).Build()
 	uploadsRoot := withTaskAttachmentUploadsDir(t)
@@ -1281,13 +1281,13 @@ func TestTaskAttachmentCollidingCopyFailurePreservesExistingPublication(t *testi
 }
 
 func TestDeleteAttachment_NotFound(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	rec := tc.HTTP().Delete("/attachments/nonexistent-attachment").Execute()
 	tc.Assert(rec).StatusCode(http.StatusNotFound)
 }
 
 func TestDeleteAttachment_Success(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	p := tc.CreateProject().Build()
 	task := tc.CreateTask(p.ID).Build()
 
@@ -1348,7 +1348,7 @@ func TestDeleteAttachment_RejectsCrossProjectBeforeDeletingRowOrFile(t *testing.
 		},
 	} {
 		t.Run(tcCase.name, func(t *testing.T) {
-			tc := NewTestContext(t)
+			tc := NewStoreTestContext(t)
 			owningProject := tc.CreateProject().WithName("Attachment delete owner").Build()
 			foreignProject := tc.CreateProject().WithName("Attachment delete foreign").Build()
 			task := tc.CreateTask(owningProject.ID).Build()

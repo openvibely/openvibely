@@ -9,11 +9,10 @@ import (
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/testutil/teststores"
 )
 
 func TestHandler_GetTask_HTMXHistoryCacheMissReturnsFullTitledDocument(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	project := tc.CreateProject().Build()
 	task := tc.CreateTask(project.ID).
 		WithTitle("Restore <task> & title").
@@ -457,9 +456,9 @@ func TestHandler_TaskCard_SelectionHandling(t *testing.T) {
 }
 
 func TestHandler_ListTasks_HTMXUpdate_ShowsAgentDefinitionBadge(t *testing.T) {
-	h, e, _, db := setupTestHandlerWithDB(t)
+	h, e, _, db := setupTestHandlerWithStores(t)
 	ctx := context.Background()
-	agentRepo := teststores.Of(db).Agents
+	agentRepo := db.Agents
 	h.SetAgentRepo(agentRepo)
 
 	agentDef := &models.Agent{

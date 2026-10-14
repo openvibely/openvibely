@@ -34,7 +34,7 @@ func runChatInputRequestProgressBrowser(t *testing.T, resolution string) {
 		t.Skip("Chrome/Chromium executable not found")
 	}
 
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	project := tc.CreateProject().WithName("Browser input model menu").Build()
 	agent := tc.CreateLLMConfig().WithName("Alpha").WithProvider(models.ProviderOpenAI).WithModel("gpt-5").WithAPIKey("sk-test").AsDefault().Build()
 	tc.CreateLLMConfig().WithName("Beta").WithProvider(models.ProviderAnthropic).WithModel("claude-sonnet-4").WithAPIKey("sk-test").Build()

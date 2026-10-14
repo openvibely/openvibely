@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/stretchr/testify/require"
 )
@@ -40,7 +39,7 @@ func TestLateSteeringCommitSurvivesModelFailureCleanup(t *testing.T) {
 }
 
 func TestLateSteeringPreparationPropagatesCheckpointFailure(t *testing.T) {
-	h, _, configs := setupTestHandler(t)
+	h, _, configs, env := setupTestHandlerWithStores(t)
 	ctx := context.Background()
 	agent := createAgent(t, configs)
 	agent.Provider = models.ProviderOpenAI
@@ -49,7 +48,7 @@ func TestLateSteeringPreparationPropagatesCheckpointFailure(t *testing.T) {
 	exec := createExec(t, h, task.ID, agent.ID)
 	checkpoint := []models.ExecutionReplayMessage{{TranscriptJSON: `{"responses_input":[{"type":"message","role":"user","content":"original"}]}`}}
 	require.NoError(t, h.execRepo.ReplaceReasoningReplay(ctx, exec.ID, "", checkpoint))
-	_, err := h.execRepo.(*sqlite.ExecutionRepo).DB().ExecContext(ctx, `CREATE TRIGGER fail_replay_insert BEFORE INSERT ON execution_replay_messages BEGIN SELECT RAISE(FAIL, 'injected replay failure'); END`)
+	err := env.Fixtures.FailExecutionReplayWrites(ctx)
 	require.NoError(t, err)
 	params := streamingResponseParams{ExecID: exec.ID, Agent: *agent, Message: "previous steer", ChatHistory: []models.Execution{{ID: exec.ID + "-steering-context-1", ReplayMessages: checkpoint}}}
 	batch := preparedSteeringBatch{inputs: []models.ThreadInput{{Content: "unsent steer"}}}
@@ -59,7 +58,7 @@ func TestLateSteeringPreparationPropagatesCheckpointFailure(t *testing.T) {
 }
 
 func TestSteeringPreparationFailureStopsHandler(t *testing.T) {
-	h, _, configs := setupTestHandler(t)
+	h, _, configs, env := setupTestHandlerWithStores(t)
 	h.workerSvc = nil
 	ctx := context.Background()
 	agent := createAgent(t, configs)
@@ -75,7 +74,7 @@ func TestSteeringPreparationFailureStopsHandler(t *testing.T) {
 	mock.OnCall = func(context.Context, testutil.MockLLMCall) {
 		require.Equal(t, 1, mock.CallCount())
 		require.NoError(t, h.threadInputRepo.CreateSteeringForActiveExecution(ctx, input, exec.ID))
-		_, err := h.execRepo.(*sqlite.ExecutionRepo).DB().ExecContext(ctx, `CREATE TRIGGER fail_steering_prepare BEFORE UPDATE ON thread_inputs WHEN NEW.input_mode = 'steering' BEGIN SELECT RAISE(FAIL, 'injected preparation failure'); END`)
+		err := env.Fixtures.FailSteeringPreparation(ctx)
 		require.NoError(t, err)
 	}
 	h.processStreamingResponse(streamingResponseParams{ExecID: exec.ID, TaskID: task.ID, ProjectID: project.ID, Agent: *agent, Message: "original", IsTaskFollowup: true, suppressQueuedTurnPromotion: true})

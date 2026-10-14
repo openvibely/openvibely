@@ -10,18 +10,17 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/persistence/sqlite"
-	"github.com/openvibely/openvibely/internal/testutil/teststores"
 	"github.com/openvibely/openvibely/internal/viewmodels"
 )
 
 func TestHandler_AgentLifecycleHooks_RejectForeignProjectWithoutMutation(t *testing.T) {
-	h, e, _, db := setupTestHandlerWithDB(t)
-	agentRepo := teststores.Of(db).Agents
-	lifecycleRepo := teststores.Of(db).Lifecycle
+	h, e, _, db := setupTestHandlerWithStores(t)
+	agentRepo := db.Agents
+	lifecycleRepo := db.Lifecycle
 	h.SetAgentRepo(agentRepo)
 	h.SetLifecycleRepo(lifecycleRepo)
 
@@ -159,9 +158,9 @@ func TestHandler_AgentLifecycleHooks_RejectForeignProjectWithoutMutation(t *test
 }
 
 func TestHandler_AgentLifecycleHooks_AllowsOwningProjectAndGlobalContexts(t *testing.T) {
-	h, e, _, db := setupTestHandlerWithDB(t)
-	agentRepo := teststores.Of(db).Agents
-	lifecycleRepo := teststores.Of(db).Lifecycle
+	h, e, _, db := setupTestHandlerWithStores(t)
+	agentRepo := db.Agents
+	lifecycleRepo := db.Lifecycle
 	h.SetAgentRepo(agentRepo)
 	h.SetLifecycleRepo(lifecycleRepo)
 
@@ -288,9 +287,9 @@ func TestHandler_AgentLifecycleHooks_AllowsOwningProjectAndGlobalContexts(t *tes
 }
 
 func TestHandler_GetAgentLifecycleHooks_ReturnsAgentScopedHooks(t *testing.T) {
-	h, e, _, db := setupTestHandlerWithDB(t)
-	agentRepo := teststores.Of(db).Agents
-	lifecycleRepo := teststores.Of(db).Lifecycle
+	h, e, _, db := setupTestHandlerWithStores(t)
+	agentRepo := db.Agents
+	lifecycleRepo := db.Lifecycle
 	h.SetAgentRepo(agentRepo)
 	h.SetLifecycleRepo(lifecycleRepo)
 
@@ -328,9 +327,9 @@ func TestHandler_GetAgentLifecycleHooks_ReturnsAgentScopedHooks(t *testing.T) {
 }
 
 func TestHandler_SaveAgentLifecycleHooks_ReconcilesSet(t *testing.T) {
-	h, e, _, db := setupTestHandlerWithDB(t)
-	agentRepo := teststores.Of(db).Agents
-	lifecycleRepo := teststores.Of(db).Lifecycle
+	h, e, _, db := setupTestHandlerWithStores(t)
+	agentRepo := db.Agents
+	lifecycleRepo := db.Lifecycle
 	h.SetAgentRepo(agentRepo)
 	h.SetLifecycleRepo(lifecycleRepo)
 
@@ -383,9 +382,9 @@ func TestHandler_SaveAgentLifecycleHooks_ReconcilesSet(t *testing.T) {
 }
 
 func TestHandler_SaveAgentLifecycleHooks_RejectsInvalidWhenAndTaskMode(t *testing.T) {
-	h, e, _, db := setupTestHandlerWithDB(t)
-	agentRepo := teststores.Of(db).Agents
-	lifecycleRepo := teststores.Of(db).Lifecycle
+	h, e, _, db := setupTestHandlerWithStores(t)
+	agentRepo := db.Agents
+	lifecycleRepo := db.Lifecycle
 	h.SetAgentRepo(agentRepo)
 	h.SetLifecycleRepo(lifecycleRepo)
 
@@ -406,14 +405,14 @@ func TestHandler_SaveAgentLifecycleHooks_RejectsInvalidWhenAndTaskMode(t *testin
 }
 
 func TestHandler_SaveAgentLifecycleHooks_RejectsProtectedAgent(t *testing.T) {
-	h, e, _, db := setupTestHandlerWithDB(t)
-	agentRepo := teststores.Of(db).Agents
-	lifecycleRepo := teststores.Of(db).Lifecycle
+	h, e, _, db := setupTestHandlerWithStores(t)
+	agentRepo := db.Agents
+	lifecycleRepo := db.Lifecycle
 	h.SetAgentRepo(agentRepo)
 	h.SetLifecycleRepo(lifecycleRepo)
 
 	// Use the seeded built-in agent from migration 078.
-	all, err := agentRepo.(*sqlite.AgentRepo).List(t.Context())
+	all, err := liveTestAgents(t.Context(), agentRepo)
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
@@ -440,7 +439,7 @@ func TestHandler_SaveAgentLifecycleHooks_RejectsProtectedAgent(t *testing.T) {
 }
 
 func TestTaskDetailLifecycleTabRendersSelectedMemoryClientUI(t *testing.T) {
-	h, e, _, _ := setupTestHandlerWithDB(t)
+	h, e, _, _ := setupTestHandlerWithStores(t)
 	project := createProject(t, h, "Lifecycle UI Project")
 	task := createTask(t, h, project.ID, "Lifecycle UI Task")
 
@@ -472,9 +471,9 @@ func TestTaskDetailLifecycleTabRendersSelectedMemoryClientUI(t *testing.T) {
 }
 
 func TestHandler_GetLifecycleExecutionEvents_ReturnsTraceEventsForSameProject(t *testing.T) {
-	h, e, _, db := setupTestHandlerWithDB(t)
-	agentRepo := teststores.Of(db).Agents
-	lifecycleRepo := teststores.Of(db).Lifecycle
+	h, e, _, db := setupTestHandlerWithStores(t)
+	agentRepo := db.Agents
+	lifecycleRepo := db.Lifecycle
 	h.SetLifecycleRepo(lifecycleRepo)
 
 	project := createProject(t, h, "trace-events-project")
@@ -487,7 +486,7 @@ func TestHandler_GetLifecycleExecutionEvents_ReturnsTraceEventsForSameProject(t 
 	if err := lifecycleRepo.CreateExecution(t.Context(), exec); err != nil {
 		t.Fatalf("create exec: %v", err)
 	}
-	if err := lifecycleRepo.(*sqlite.LifecycleRepo).AppendExecutionEvent(t.Context(), &models.LifecycleExecutionEvent{LifecycleExecutionID: exec.ID, EventType: "tool_call", PayloadJSON: `{"name":"skills_list"}`}); err != nil {
+	if err := db.Fixtures.SeedLifecycleEvent(t.Context(), &models.LifecycleExecutionEvent{LifecycleExecutionID: exec.ID, EventType: "tool_call", PayloadJSON: `{"name":"skills_list"}`}); err != nil {
 		t.Fatalf("append event: %v", err)
 	}
 
@@ -508,9 +507,9 @@ func TestHandler_GetLifecycleExecutionEvents_ReturnsTraceEventsForSameProject(t 
 }
 
 func TestHandler_GetLifecycleExecutionEvents_RejectsForeignProject(t *testing.T) {
-	h, e, _, db := setupTestHandlerWithDB(t)
-	agentRepo := teststores.Of(db).Agents
-	lifecycleRepo := teststores.Of(db).Lifecycle
+	h, e, _, db := setupTestHandlerWithStores(t)
+	agentRepo := db.Agents
+	lifecycleRepo := db.Lifecycle
 	h.SetLifecycleRepo(lifecycleRepo)
 
 	projectA := createProject(t, h, "trace-project-a")
@@ -524,7 +523,7 @@ func TestHandler_GetLifecycleExecutionEvents_RejectsForeignProject(t *testing.T)
 	if err := lifecycleRepo.CreateExecution(t.Context(), exec); err != nil {
 		t.Fatalf("create exec: %v", err)
 	}
-	if err := lifecycleRepo.(*sqlite.LifecycleRepo).AppendExecutionEvent(t.Context(), &models.LifecycleExecutionEvent{LifecycleExecutionID: exec.ID, EventType: "tool_result", PayloadJSON: `{"secret_payload":"project-a-only"}`}); err != nil {
+	if err := db.Fixtures.SeedLifecycleEvent(t.Context(), &models.LifecycleExecutionEvent{LifecycleExecutionID: exec.ID, EventType: "tool_result", PayloadJSON: `{"secret_payload":"project-a-only"}`}); err != nil {
 		t.Fatalf("append event: %v", err)
 	}
 
@@ -541,9 +540,9 @@ func TestHandler_GetLifecycleExecutionEvents_RejectsForeignProject(t *testing.T)
 }
 
 func TestHandler_GetTaskLifecycleExecution_ReturnsPromptSafeViewAndRejectsForeign(t *testing.T) {
-	h, e, _, db := setupTestHandlerWithDB(t)
-	agentRepo := teststores.Of(db).Agents
-	lifecycleRepo := teststores.Of(db).Lifecycle
+	h, e, _, db := setupTestHandlerWithStores(t)
+	agentRepo := db.Agents
+	lifecycleRepo := db.Lifecycle
 	h.SetLifecycleRepo(lifecycleRepo)
 	h.SetAgentRepo(agentRepo)
 
@@ -610,8 +609,8 @@ func TestHandler_GetTaskLifecycleExecution_ReturnsPromptSafeViewAndRejectsForeig
 }
 
 func TestHandler_GetLifecycleActivity_UnknownIDsReturnControlledNotFound(t *testing.T) {
-	h, e, _, db := setupTestHandlerWithDB(t)
-	lifecycleRepo := teststores.Of(db).Lifecycle
+	h, e, _, db := setupTestHandlerWithStores(t)
+	lifecycleRepo := db.Lifecycle
 	h.SetLifecycleRepo(lifecycleRepo)
 	project := createProject(t, h, "unknown-lifecycle-project")
 
@@ -638,9 +637,9 @@ func TestHandler_GetLifecycleActivity_UnknownIDsReturnControlledNotFound(t *test
 }
 
 func TestHandler_GetTaskLifecycleExecutions_RejectsForeignProject(t *testing.T) {
-	h, e, _, db := setupTestHandlerWithDB(t)
-	agentRepo := teststores.Of(db).Agents
-	lifecycleRepo := teststores.Of(db).Lifecycle
+	h, e, _, db := setupTestHandlerWithStores(t)
+	agentRepo := db.Agents
+	lifecycleRepo := db.Lifecycle
 	h.SetAgentRepo(agentRepo)
 	h.SetLifecycleRepo(lifecycleRepo)
 
@@ -680,9 +679,9 @@ func TestHandler_GetTaskLifecycleExecutions_RejectsForeignProject(t *testing.T) 
 }
 
 func TestHandler_GetTaskLifecycleExecutions_ReturnsPromptSafeView(t *testing.T) {
-	h, e, _, db := setupTestHandlerWithDB(t)
-	agentRepo := teststores.Of(db).Agents
-	lifecycleRepo := teststores.Of(db).Lifecycle
+	h, e, _, db := setupTestHandlerWithStores(t)
+	agentRepo := db.Agents
+	lifecycleRepo := db.Lifecycle
 	h.SetAgentRepo(agentRepo)
 	h.SetLifecycleRepo(lifecycleRepo)
 	h.SetAgentRepo(agentRepo)
@@ -849,9 +848,9 @@ func TestHandler_GetTaskLifecycleExecutions_ReturnsPromptSafeView(t *testing.T) 
 }
 
 func TestHandler_GetTaskLifecycleExecutions_PaginatesAndPreservesProjectBoundary(t *testing.T) {
-	h, e, _, db := setupTestHandlerWithDB(t)
-	agentRepo := teststores.Of(db).Agents
-	lifecycleRepo := teststores.Of(db).Lifecycle
+	h, e, _, db := setupTestHandlerWithStores(t)
+	agentRepo := db.Agents
+	lifecycleRepo := db.Lifecycle
 	h.SetAgentRepo(agentRepo)
 	h.SetLifecycleRepo(lifecycleRepo)
 
@@ -863,12 +862,12 @@ func TestHandler_GetTaskLifecycleExecutions_PaginatesAndPreservesProjectBoundary
 	}
 	rows := []struct {
 		id string
-		at string
+		at time.Time
 	}{
-		{id: "handler-a", at: "2000-01-01 10:00:00"},
-		{id: "handler-b", at: "2000-01-01 11:00:00"},
-		{id: "handler-c", at: "2000-01-01 12:00:00"},
-		{id: "handler-d", at: "2000-01-01 13:00:00"},
+		{id: "handler-a", at: time.Date(2000, 1, 1, 10, 0, 0, 0, time.UTC)},
+		{id: "handler-b", at: time.Date(2000, 1, 1, 11, 0, 0, 0, time.UTC)},
+		{id: "handler-c", at: time.Date(2000, 1, 1, 12, 0, 0, 0, time.UTC)},
+		{id: "handler-d", at: time.Date(2000, 1, 1, 13, 0, 0, 0, time.UTC)},
 	}
 	for _, row := range rows {
 		exec := &models.LifecycleExecution{
@@ -880,7 +879,7 @@ func TestHandler_GetTaskLifecycleExecutions_PaginatesAndPreservesProjectBoundary
 		if err := lifecycleRepo.CreateExecution(t.Context(), exec); err != nil {
 			t.Fatalf("create execution %s: %v", row.id, err)
 		}
-		if _, err := db.ExecContext(t.Context(), `UPDATE lifecycle_executions SET id = ?, started_at = ? WHERE id = ?`, row.id, row.at, exec.ID); err != nil {
+		if err := db.Fixtures.SetLifecycleExecutionIdentity(t.Context(), exec.ID, row.id, row.at); err != nil {
 			t.Fatalf("set execution %s: %v", row.id, err)
 		}
 	}
@@ -933,7 +932,7 @@ func TestHandler_GetTaskLifecycleExecutions_PaginatesAndPreservesProjectBoundary
 	if err := lifecycleRepo.CreateExecution(t.Context(), newExec); err != nil {
 		t.Fatalf("create newer execution: %v", err)
 	}
-	if _, err := db.ExecContext(t.Context(), `UPDATE lifecycle_executions SET id = ?, started_at = ? WHERE id = ?`, "handler-new", "2000-01-01 14:00:00", newExec.ID); err != nil {
+	if err := db.Fixtures.SetLifecycleExecutionIdentity(t.Context(), newExec.ID, "handler-new", time.Date(2000, 1, 1, 14, 0, 0, 0, time.UTC)); err != nil {
 		t.Fatalf("set newer execution: %v", err)
 	}
 	newer := getPage(basePath + "&after=" + url.QueryEscape(first.Items[0].ID))
@@ -971,9 +970,9 @@ func lifecycleViewIDs(rows []viewmodels.LifecycleExecutionView) []string {
 }
 
 func TestHandler_GetTaskLifecycleExecutions_BoundsPromptSafeDetailPayload(t *testing.T) {
-	h, e, _, db := setupTestHandlerWithDB(t)
-	agentRepo := teststores.Of(db).Agents
-	lifecycleRepo := teststores.Of(db).Lifecycle
+	h, e, _, db := setupTestHandlerWithStores(t)
+	agentRepo := db.Agents
+	lifecycleRepo := db.Lifecycle
 	h.SetAgentRepo(agentRepo)
 	h.SetLifecycleRepo(lifecycleRepo)
 

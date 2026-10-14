@@ -52,8 +52,8 @@ func worktreeExecute(e *echo.Echo, req *http.Request) *httptest.ResponseRecorder
 }
 
 func TestHandler_TaskCardMergeOptionsUseAuthoritativeStateAndProjectOwnership(t *testing.T) {
-	h, e, _, db := setupTestHandlerWithDB(t)
-	h.taskPullRequestRepo = teststores.Of(db).TaskPullRequests
+	h, e, _, db := setupTestHandlerWithStores(t)
+	h.taskPullRequestRepo = db.TaskPullRequests
 	h.SetGitHubService(&fakeGitHubService{})
 	h.worktreeSvc = service.NewWorktreeService(h.taskRepo, h.projectRepo, nil)
 	ctx := context.Background()
@@ -294,8 +294,8 @@ func TestHandler_TaskCardMergeMenuStatesUseConstantDatabaseQueriesForNonMergeabl
 }
 
 func TestHandler_TaskBoardRecoversMetadataWithoutLocalEligibilityForNonMergeableCards(t *testing.T) {
-	h, e, _, db := setupTestHandlerWithDB(t)
-	h.taskPullRequestRepo = teststores.Of(db).TaskPullRequests
+	h, e, _, db := setupTestHandlerWithStores(t)
+	h.taskPullRequestRepo = db.TaskPullRequests
 	ctx := context.Background()
 	repoDir := createHandlerTestGitRepo(t)
 	project := &models.Project{Name: "Recovery Budget", RepoPath: repoDir, IsDefault: true}
@@ -357,8 +357,8 @@ func TestHandler_TaskBoardRecoversMetadataWithoutLocalEligibilityForNonMergeable
 
 func TestHandler_TaskBoardInvalidBranchDoesNotDisableValidCardActions(t *testing.T) {
 	ctx := context.Background()
-	h, _, _, db := setupTestHandlerWithDB(t)
-	h.taskPullRequestRepo = teststores.Of(db).TaskPullRequests
+	h, _, _, db := setupTestHandlerWithStores(t)
+	h.taskPullRequestRepo = db.TaskPullRequests
 	repoDir := createHandlerTestGitRepo(t)
 	project := &models.Project{Name: "Mixed relationship cards", RepoPath: repoDir, IsDefault: true}
 	if err := h.projectSvc.Create(ctx, project); err != nil {
@@ -412,8 +412,8 @@ func TestHandler_TaskBoardRelationshipSnapshotSupportsShallowRepositories(t *tes
 	runGit(t, worktreePath, "add", "feature.txt")
 	runGit(t, worktreePath, "commit", "-m", "shallow feature")
 
-	h, e, _, db := setupTestHandlerWithDB(t)
-	h.taskPullRequestRepo = teststores.Of(db).TaskPullRequests
+	h, e, _, db := setupTestHandlerWithStores(t)
+	h.taskPullRequestRepo = db.TaskPullRequests
 	project := &models.Project{Name: "Shallow Relationship", RepoPath: repoDir, IsDefault: true}
 	if err := h.projectSvc.Create(ctx, project); err != nil {
 		t.Fatal(err)
@@ -538,8 +538,8 @@ func TestTaskCardRelationshipSnapshotFailsClosedAbovePairLimit(t *testing.T) {
 }
 
 func TestTaskCardRelationshipSnapshotFailureDisablesLocalActions(t *testing.T) {
-	h, _, _, db := setupTestHandlerWithDB(t)
-	h.taskPullRequestRepo = teststores.Of(db).TaskPullRequests
+	h, _, _, db := setupTestHandlerWithStores(t)
+	h.taskPullRequestRepo = db.TaskPullRequests
 	ctx := context.Background()
 	repoDir := createHandlerTestGitRepo(t)
 	worktreePath := filepath.Join(repoDir, ".worktrees", "relationship-failure")
@@ -629,8 +629,8 @@ exec "$OPENVIBELY_REAL_GIT" "$@"
 }
 
 func TestHandler_TaskBoardDefersTerminalCardGitState(t *testing.T) {
-	h, e, _, db := setupTestHandlerWithDB(t)
-	h.taskPullRequestRepo = teststores.Of(db).TaskPullRequests
+	h, e, _, db := setupTestHandlerWithStores(t)
+	h.taskPullRequestRepo = db.TaskPullRequests
 	ctx := context.Background()
 	repoDir := createHandlerTestGitRepo(t)
 	project := &models.Project{Name: "Terminal Git Budget", RepoPath: repoDir, IsDefault: true}
@@ -814,8 +814,8 @@ func TestTaskCardRepositorySnapshotLoadsExactWorktreeDirtyStateInProcess(t *test
 }
 
 func TestHandler_TaskBoardRecoversPendingAndBlockedBranchesForCreatePR(t *testing.T) {
-	h, e, _, db := setupTestHandlerWithDB(t)
-	h.taskPullRequestRepo = teststores.Of(db).TaskPullRequests
+	h, e, _, db := setupTestHandlerWithStores(t)
+	h.taskPullRequestRepo = db.TaskPullRequests
 	prNumber := 90
 	h.SetGitHubService(&fakeGitHubService{
 		resolveRepoFn: func(_ context.Context, _, _ string) (*service.GitHubRepoRef, error) {
@@ -939,8 +939,8 @@ func findButtonWithAttributes(body string, attributes ...string) string {
 }
 
 func TestHandler_TaskCardMenuUsesRepositoryDefaultMergeTarget(t *testing.T) {
-	h, e, _, db := setupTestHandlerWithDB(t)
-	h.taskPullRequestRepo = teststores.Of(db).TaskPullRequests
+	h, e, _, db := setupTestHandlerWithStores(t)
+	h.taskPullRequestRepo = db.TaskPullRequests
 	h.SetGitHubService(&fakeGitHubService{})
 	ctx := context.Background()
 	repoDir := t.TempDir()
@@ -1011,8 +1011,8 @@ func TestHandler_TaskCardMergeOptionsUseCanonicalMergeEligibility(t *testing.T) 
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			h, e, _, db := setupTestHandlerWithDB(t)
-			h.taskPullRequestRepo = teststores.Of(db).TaskPullRequests
+			h, e, _, db := setupTestHandlerWithStores(t)
+			h.taskPullRequestRepo = db.TaskPullRequests
 			h.SetGitHubService(&fakeGitHubService{})
 			ctx := context.Background()
 			repoDir := createHandlerTestGitRepo(t)
@@ -1056,8 +1056,8 @@ func TestHandler_TaskCardMergeOptionsUseCanonicalMergeEligibility(t *testing.T) 
 }
 
 func TestHandler_TaskCardCreatePROptionUsesAuthoritativeEligibility(t *testing.T) {
-	h, e, _, db := setupTestHandlerWithDB(t)
-	h.taskPullRequestRepo = teststores.Of(db).TaskPullRequests
+	h, e, _, db := setupTestHandlerWithStores(t)
+	h.taskPullRequestRepo = db.TaskPullRequests
 	ctx := context.Background()
 	repoDir := t.TempDir()
 	cmd := exec.Command("git", "init", "-b", "main")

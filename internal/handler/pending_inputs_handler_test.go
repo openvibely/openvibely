@@ -27,7 +27,7 @@ import (
 // ---------------------------------------------------------------------------
 
 func TestChatPendingInputs_NoPendingInputs(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	p := tc.CreateProject().Build()
 
 	rec := tc.HTTP().Get("/chat/pending-inputs?project_id=" + p.ID).Execute()
@@ -43,7 +43,7 @@ func TestChatPendingInputs_ExcludesPreparedInFlightSteering(t *testing.T) {
 	// Regression: prepared/in-flight steering (expected_turn_id=NULL) must NOT appear
 	// in the pending-inputs fragment returned on reconnect. The steering row was
 	// already consumed by the provider; showing it again would be a stale ghost.
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	ctx := context.Background()
 	p := tc.CreateProject().Build()
 	// Chat steering requires a chat-category task (exec must join a chat task).
@@ -96,7 +96,7 @@ func TestChatPendingInputs_ExcludesPreparedInFlightSteering(t *testing.T) {
 func TestChatPendingInputs_IncludesValidPendingSteering(t *testing.T) {
 	// A steering row that has NOT been prepared yet (expected_turn_id still set)
 	// should appear in the pending-inputs fragment.
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	ctx := context.Background()
 	p := tc.CreateProject().Build()
 	task := tc.CreateTask(p.ID).WithCategory(models.CategoryChat).Build()
@@ -143,7 +143,7 @@ func TestChatPendingInputs_IncludesValidPendingSteering(t *testing.T) {
 }
 
 func TestChatPendingInputs_IncludesQueuedInput(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	ctx := context.Background()
 	p := tc.CreateProject().Build()
 
@@ -171,7 +171,7 @@ func TestChatPendingInputs_IncludesQueuedInput(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestTaskThreadPendingInputs_NoPendingInputs(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	p := tc.CreateProject().Build()
 	task := tc.CreateTask(p.ID).Build()
 
@@ -200,7 +200,7 @@ func TestTaskThreadPendingInputs_QueryFailureIsServerError(t *testing.T) {
 
 func TestTaskThreadPendingInputs_ExcludesPreparedInFlightSteering(t *testing.T) {
 	// Regression: prepared/in-flight steering must not appear in the fragment.
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	ctx := context.Background()
 	p := tc.CreateProject().Build()
 	task := tc.CreateTask(p.ID).Build()
@@ -248,7 +248,7 @@ func TestTaskThreadPendingInputs_ExcludesPreparedInFlightSteering(t *testing.T) 
 }
 
 func TestTaskThreadPendingInputs_IncludesValidPendingSteering(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	ctx := context.Background()
 	p := tc.CreateProject().Build()
 	task := tc.CreateTask(p.ID).Build()
@@ -296,7 +296,7 @@ func TestTaskThreadPendingInputs_IncludesValidPendingSteering(t *testing.T) {
 }
 
 func TestTaskThreadPendingInputs_IncludesQueuedInput(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	ctx := context.Background()
 	p := tc.CreateProject().Build()
 	task := tc.CreateTask(p.ID).Build()
@@ -325,7 +325,7 @@ func TestTaskThreadPendingInputs_IncludesQueuedInput(t *testing.T) {
 }
 
 func TestTaskThreadQueuedInputSteer_ResponseCarriesTaskID(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	ctx := context.Background()
 	p := tc.CreateProject().Build()
 	task := tc.CreateTask(p.ID).WithStatus(models.StatusRunning).Build()
@@ -366,7 +366,7 @@ func TestTaskThreadQueuedInputSteer_ResponseCarriesTaskID(t *testing.T) {
 }
 
 func TestTaskThreadQueuedInputSteerRejectsStaleClientTurnWithoutMutation(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	ctx := context.Background()
 	p := tc.CreateProject().Build()
 	task := tc.CreateTask(p.ID).WithStatus(models.StatusRunning).Build()
@@ -400,7 +400,7 @@ func TestTaskThreadQueuedInputSteerRejectsStaleClientTurnWithoutMutation(t *test
 func TestTaskThreadPendingInputs_SteerEndpointUsesTaskID(t *testing.T) {
 	// Ensures the generated Steer button href uses the task ID so converted-queued
 	// rows can be promoted through the correct /tasks/:taskId/thread/queued/:id/steer path.
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	ctx := context.Background()
 	p := tc.CreateProject().Build()
 	task := tc.CreateTask(p.ID).WithStatus(models.StatusRunning).Build()
@@ -433,7 +433,7 @@ func TestTaskThreadPendingInputs_SteerEndpointUsesTaskID(t *testing.T) {
 }
 
 func TestChatPendingInputs_SharedRowsAndProjectIsolation(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	ctx := context.Background()
 	project := tc.CreateProject().Build()
 	foreign := tc.CreateProject().Build()

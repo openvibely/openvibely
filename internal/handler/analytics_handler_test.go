@@ -26,27 +26,27 @@ import (
 // --- Analytics page ---
 
 func TestAnalytics_NoProjects(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	rec := tc.HTTP().Get("/analytics").Execute()
 	tc.Assert(rec).StatusCode(http.StatusOK)
 }
 
 func TestAnalytics_WithProject(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	tc.CreateProject().WithName("My Project").Build()
 	rec := tc.HTTP().Get("/analytics").Execute()
 	tc.Assert(rec).StatusCode(http.StatusOK).Contains("My Project")
 }
 
 func TestAnalytics_WithProjectID(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	p := tc.CreateProject().WithName("Selected").Build()
 	rec := tc.HTTP().Get("/analytics?project_id=" + p.ID).Execute()
 	tc.Assert(rec).StatusCode(http.StatusOK).Contains("Selected")
 }
 
 func TestAnalytics_HTMX(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	tc.CreateProject().WithName("HTMX Project").Build()
 	rec := tc.HTMX().Get("/analytics").Execute()
 	tc.Assert(rec).StatusCode(http.StatusOK)
@@ -55,13 +55,13 @@ func TestAnalytics_HTMX(t *testing.T) {
 // --- API endpoints backed by execRepo (wired in NewTestContext) ---
 
 func TestGetAnalyticsUsage_Default(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	rec := tc.HTTP().Get("/api/analytics/usage").Execute()
 	tc.Assert(rec).StatusCode(http.StatusOK)
 }
 
 func TestAnalyticsSupportingEvidenceRequiresProject(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	usage := tc.HTTP().Get("/api/analytics/usage?usage_period=2026-01-10").Execute()
 	tc.Assert(usage).StatusCode(http.StatusBadRequest)
 	skill := tc.HTTP().Get("/api/analytics/skills?skill_period=2026-01-10&skill_event=created").Execute()
@@ -209,25 +209,25 @@ func TestGetAnalyticsUsage_AccountLimitsAreOrderedAndPrivate(t *testing.T) {
 }
 
 func TestGetAnalyticsUsage_Range7d(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	rec := tc.HTTP().Get("/api/analytics/usage?range=7d").Execute()
 	tc.Assert(rec).StatusCode(http.StatusOK)
 }
 
 func TestGetAnalyticsUsage_RangeAll(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	rec := tc.HTTP().Get("/api/analytics/usage?range=all").Execute()
 	tc.Assert(rec).StatusCode(http.StatusOK)
 }
 
 func TestGetAnalyticsUsage_RangeMonth(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	rec := tc.HTTP().Get("/api/analytics/usage?range=month&group_by=week").Execute()
 	tc.Assert(rec).StatusCode(http.StatusOK)
 }
 
 func TestGetAnalyticsUsage_WithProjectFilter(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	p := tc.CreateProject().Build()
 	rec := tc.HTTP().Get("/api/analytics/usage?project_id=" + p.ID).Execute()
 	tc.Assert(rec).StatusCode(http.StatusOK)
@@ -263,7 +263,7 @@ func TestAnalyticsWorkTypeAllowsOnlyCanonicalValues(t *testing.T) {
 }
 
 func TestGetAnalyticsUsage_WithDateRange(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	rec := tc.HTTP().Get("/api/analytics/usage?date_from=2024-01-01T00:00:00Z&date_to=2024-12-31T23:59:59Z").Execute()
 	tc.Assert(rec).StatusCode(http.StatusOK)
 }
@@ -523,7 +523,7 @@ func BenchmarkGetAnalyticsDashboardLargePayloadOverview(b *testing.B) {
 }
 
 func TestGetAnalyticsDashboardRequiresProjectAndReturnsDefinitions(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	missing := tc.HTTP().Get("/api/analytics/dashboard?range=30d").Execute()
 	tc.Assert(missing).StatusCode(http.StatusBadRequest)
 
@@ -590,7 +590,7 @@ func TestGetAnalyticsDashboardExposesWorkflowInvocationStatusAccounting(t *testi
 }
 
 func TestGetAnalyticsDashboardFiltersScopedSkillOutcomeEvidence(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	ctx := context.Background()
 	project := tc.CreateProject().Build()
 	config := tc.CreateLLMConfig().WithProvider(models.ProviderTest).WithModel("test-model").Build()
@@ -607,7 +607,7 @@ func TestGetAnalyticsDashboardFiltersScopedSkillOutcomeEvidence(t *testing.T) {
 		}
 	}
 
-	skillRepo := teststores.Of(tc.db).SkillAnalytics
+	skillRepo := tc.stores.SkillAnalytics
 	for _, event := range []*models.SkillAnalyticsEvent{
 		{ProjectID: project.ID, TaskID: target.ID, SkillHandle: "shared:evaluator", SkillScope: models.SkillScopeProject, EventType: models.SkillEventSelected},
 		{ProjectID: project.ID, TaskID: other.ID, SkillHandle: "shared:evaluator", SkillScope: models.SkillScopeGlobal, EventType: models.SkillEventSelected},
@@ -629,7 +629,7 @@ func TestGetAnalyticsDashboardFiltersScopedSkillOutcomeEvidence(t *testing.T) {
 }
 
 func TestAnalyticsTaskRunActivity(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	tc.Assert(tc.HTTP().Get("/api/analytics/task-run-activity").Execute()).StatusCode(http.StatusBadRequest)
 	rec := tc.HTTP().Get("/api/analytics/task-run-activity?project_id=missing&range=all").Execute()
 	tc.Assert(rec).StatusCode(http.StatusOK)
@@ -643,61 +643,61 @@ func TestAnalyticsTaskRunActivity(t *testing.T) {
 }
 
 func TestGetSuccessFailureRates(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	rec := tc.HTTP().Get("/api/analytics/success-failure-rates").Execute()
 	tc.Assert(rec).StatusCode(http.StatusOK)
 }
 
 func TestGetSuccessFailureRates_GroupByWeek(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	rec := tc.HTTP().Get("/api/analytics/success-failure-rates?group_by=week").Execute()
 	tc.Assert(rec).StatusCode(http.StatusOK)
 }
 
 func TestGetAvgExecutionTimeByTask(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	rec := tc.HTTP().Get("/api/analytics/avg-execution-time-by-task").Execute()
 	tc.Assert(rec).StatusCode(http.StatusOK)
 }
 
 func TestGetAvgExecutionTimeByTask_WithLimit(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	rec := tc.HTTP().Get("/api/analytics/avg-execution-time-by-task?limit=5").Execute()
 	tc.Assert(rec).StatusCode(http.StatusOK)
 }
 
 func TestGetAvgExecutionTimeByAgent(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	rec := tc.HTTP().Get("/api/analytics/avg-execution-time-by-agent").Execute()
 	tc.Assert(rec).StatusCode(http.StatusOK)
 }
 
 func TestGetExecutionTrendsByHour(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	rec := tc.HTTP().Get("/api/analytics/execution-trends-by-hour").Execute()
 	tc.Assert(rec).StatusCode(http.StatusOK)
 }
 
 func TestGetAgentUsageByProject(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	rec := tc.HTTP().Get("/api/analytics/agent-usage-by-project").Execute()
 	tc.Assert(rec).StatusCode(http.StatusOK)
 }
 
 func TestGetMostFrequentTasks(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	rec := tc.HTTP().Get("/api/analytics/most-frequent-tasks").Execute()
 	tc.Assert(rec).StatusCode(http.StatusOK)
 }
 
 func TestGetMostFrequentTasks_WithLimit(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	rec := tc.HTTP().Get("/api/analytics/most-frequent-tasks?limit=3").Execute()
 	tc.Assert(rec).StatusCode(http.StatusOK)
 }
 
 func TestGetMostFrequentTasks_StableTieBreakAndFullHistory(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	ctx := context.Background()
 	project := tc.CreateProject().WithName("Analytics project").Build()
 	agent := &models.LLMConfig{
@@ -845,7 +845,7 @@ func TestGetMostFrequentTasks_RealFiveThousandRecordResponseBoundary(t *testing.
 }
 
 func TestGetFailedTaskPatterns(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	rec := tc.HTTP().Get("/api/analytics/failed-task-patterns").Execute()
 	tc.Assert(rec).StatusCode(http.StatusOK)
 }

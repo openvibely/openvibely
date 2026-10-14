@@ -244,9 +244,9 @@ func TestHandler_AlertMutationHTMXRefreshContract(t *testing.T) {
 }
 
 func TestHandler_IntegratedNotificationApprovalToImplementationTask(t *testing.T) {
-	h, e, _, db := setupTestHandlerWithDB(t)
+	h, e, _, db := setupTestHandlerWithStores(t)
 	ctx := context.Background()
-	taskRepo := teststores.Of(db).Tasks
+	taskRepo := db.Tasks
 	project := createProject(t, h, "Integrated Notification Project")
 	caller := &models.Task{ProjectID: project.ID, Title: "Scheduled scanner", Prompt: "scan approved notifications", Category: models.CategoryScheduled, Status: models.StatusPending, Priority: 2}
 	require.NoError(t, taskRepo.Create(ctx, caller))

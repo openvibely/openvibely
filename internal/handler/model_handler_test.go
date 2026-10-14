@@ -16,7 +16,6 @@ import (
 
 	llmcustomauth "github.com/openvibely/openvibely/internal/llm/customauth"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/testutil"
 )
 
@@ -29,7 +28,7 @@ func assertOAuthCredentialStateCleared(t *testing.T, cfg *models.LLMConfig) {
 }
 
 func TestDisconnectModelOAuthConnectionAffectsAllLinkedModels(t *testing.T) {
-	_, e, repo := setupTestHandler(t)
+	_, e, repo, env := setupTestHandlerWithStores(t)
 	ctx := context.Background()
 	first := &models.LLMConfig{Name: "Shared OpenAI one", Provider: models.ProviderOpenAI, Model: "gpt-one", AuthMethod: models.AuthMethodOAuth, OAuthAccessToken: "secret-access", OAuthRefreshToken: "secret-refresh", OAuthExpiresAt: time.Now().Add(time.Hour).UnixMilli()}
 	second := &models.LLMConfig{Name: "Shared OpenAI two", Provider: models.ProviderOpenAI, Model: "gpt-two", AuthMethod: models.AuthMethodOAuth}
@@ -38,7 +37,7 @@ func TestDisconnectModelOAuthConnectionAffectsAllLinkedModels(t *testing.T) {
 			t.Fatalf("create %s: %v", cfg.Name, err)
 		}
 	}
-	if err := repo.(*sqlite.LLMConfigRepo).LinkOAuthConnection(ctx, second.ID, first.OAuthConnectionID); err != nil {
+	if err := env.Fixtures.LinkModelOAuthConnection(ctx, second.ID, first.OAuthConnectionID); err != nil {
 		t.Fatalf("link OAuth connection: %v", err)
 	}
 
@@ -116,7 +115,7 @@ func TestOAuthConnectionManagementRoutesRenameMoveAndDelete(t *testing.T) {
 }
 
 func TestModelsPageKeepsOAuthAccountActionsInEditorNotModelCards(t *testing.T) {
-	_, e, repo := setupTestHandler(t)
+	_, e, repo, env := setupTestHandlerWithStores(t)
 	ctx := context.Background()
 	cfg := &models.LLMConfig{Name: "Shared Anthropic model", Provider: models.ProviderAnthropic, Model: "claude-sonnet", AuthMethod: models.AuthMethodOAuth, OAuthAccessToken: "secret-access", OAuthRefreshToken: "secret-refresh", OAuthExpiresAt: time.Now().Add(time.Hour).UnixMilli()}
 	if err := repo.Create(ctx, cfg); err != nil {
@@ -126,7 +125,7 @@ func TestModelsPageKeepsOAuthAccountActionsInEditorNotModelCards(t *testing.T) {
 	if err := repo.Create(ctx, sibling); err != nil {
 		t.Fatalf("create sibling OAuth model: %v", err)
 	}
-	if err := repo.(*sqlite.LLMConfigRepo).LinkOAuthConnection(ctx, sibling.ID, cfg.OAuthConnectionID); err != nil {
+	if err := env.Fixtures.LinkModelOAuthConnection(ctx, sibling.ID, cfg.OAuthConnectionID); err != nil {
 		t.Fatalf("link sibling OAuth model: %v", err)
 	}
 

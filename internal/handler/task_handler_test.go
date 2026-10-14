@@ -17,7 +17,6 @@ import (
 	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/service"
-	"github.com/openvibely/openvibely/internal/testutil/teststores"
 	"github.com/stretchr/testify/require"
 )
 
@@ -126,7 +125,7 @@ func TestHandler_GetTaskStatusCountsUsesOnlyCompactProjectPredicates(t *testing.
 }
 
 func TestHandler_GetTaskReferenceCatalog(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	ctx := context.Background()
 	project := tc.CreateProject().WithName("Task Reference Catalog Project").Build()
 	foreign := tc.CreateProject().WithName("Foreign Task Reference Catalog Project").Build()
@@ -138,7 +137,7 @@ func TestHandler_GetTaskReferenceCatalog(t *testing.T) {
 		Priority: 4, Tag: models.TagBug, Prompt: strings.Repeat("p", 400), ChainConfig: `{"enabled":true}`,
 	}
 	require.NoError(t, tc.taskRepo.Create(ctx, catalogTask))
-	require.NoError(t, teststores.Of(tc.db).TaskGoals.CreateOrReplace(ctx, &models.TaskGoal{
+	require.NoError(t, tc.stores.TaskGoals.CreateOrReplace(ctx, &models.TaskGoal{
 		TaskID: catalogTask.ID, GoalID: "catalog-goal", Objective: "finish catalog", Status: models.TaskGoalStatusActive,
 	}))
 	for i := 0; i < 25; i++ {
@@ -205,12 +204,12 @@ func TestHandler_GetTaskReferenceCatalog(t *testing.T) {
 }
 
 func TestHandler_GetTaskReferenceCatalogPreservesBoardStateOrderAndAgentScope(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	ctx := context.Background()
 	project := tc.CreateProject().WithName("Task Reference State Project").Build()
 	foreign := tc.CreateProject().WithName("Foreign Task Reference State Project").Build()
 
-	agentRepo := teststores.Of(tc.db).Agents
+	agentRepo := tc.stores.Agents
 	tc.handler.SetAgentRepo(agentRepo)
 	foreignAgent := &models.Agent{
 		Name: "Foreign Task Agent", Scope: models.AgentScopeProject, ProjectID: foreign.ID,
@@ -310,7 +309,7 @@ func TestHandler_CancelTask(t *testing.T) {
 }
 
 func TestHandler_CancelTask_CancelsAndPublishesEveryRunningExecution(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	ctx := context.Background()
 	project := tc.CreateProject().Build()
 	agent := tc.CreateLLMConfig().Build()
@@ -433,7 +432,7 @@ func TestHandler_CancelRunningExecutionRepositoryErrorIsBestEffortForTaskAndChat
 }
 
 func TestHandler_CancelTask_PausesActiveGoalStoppedByUser(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	ctx := context.Background()
 	project := tc.CreateProject().Build()
 	task := &models.Task{
@@ -475,7 +474,7 @@ func TestHandler_CancelTask_PausesActiveGoalStoppedByUser(t *testing.T) {
 }
 
 func TestHandler_TaskThreadComposerAction_RendersStopAndSendStates(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	ctx := context.Background()
 	project := tc.CreateProject().Build()
 	agent := tc.CreateLLMConfig().Build()
@@ -529,7 +528,7 @@ func TestHandler_TaskThreadComposerAction_RendersStopAndSendStates(t *testing.T)
 }
 
 func TestHandler_TaskThreadStopRejectsDelayedPreviousTurn(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	ctx := context.Background()
 	project := tc.CreateProject().Build()
 	agent := tc.CreateLLMConfig().Build()
@@ -567,7 +566,7 @@ func TestHandler_TaskThreadStopRejectsDelayedPreviousTurn(t *testing.T) {
 }
 
 func TestHandler_QueuedTaskThreadStopKeepsTurnOwnershipAfterRefresh(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	ctx := context.Background()
 	project := tc.CreateProject().Build()
 	agent := tc.CreateLLMConfig().Build()
@@ -689,7 +688,7 @@ func TestHandler_CancelTask_AllowsActivePendingTask(t *testing.T) {
 }
 
 func TestHandler_CancelTaskPulseRefreshesPulseAndKeepsTaskInBacklog(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	ctx := context.Background()
 	project := tc.CreateProject().Build()
 	task := tc.CreateTask(project.ID).
@@ -719,7 +718,7 @@ func TestHandler_CancelTaskPulseRefreshesPulseAndKeepsTaskInBacklog(t *testing.T
 }
 
 func TestHandler_CancelTaskPulseCancelsQueuedInputs(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	ctx := context.Background()
 	project := tc.CreateProject().Build()
 	agent := tc.CreateLLMConfig().Build()
@@ -803,7 +802,7 @@ func TestHandler_CancelTaskPulseRejectsStaleAndForeignCardsWithoutRefresh(t *tes
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tc := NewTestContext(t)
+			tc := NewStoreTestContext(t)
 			project := tc.CreateProject().Build()
 			task := tt.setup(tc, project)
 			rec := tc.HTMX().Post("/tasks/" + task.ID + "/cancel?pulse=1&project_id=" + project.ID).Execute()
@@ -930,7 +929,7 @@ func TestHandler_RunTask_NoModelsConfiguredHTMX(t *testing.T) {
 }
 
 func TestHandler_RunTask_HTMXFromScheduleRefreshesSchedulePage(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	project := tc.CreateProject().Build()
 	task := tc.CreateTask(project.ID).
 		WithTitle("Schedule page run now").
@@ -951,7 +950,7 @@ func TestHandler_RunTask_HTMXFromScheduleRefreshesSchedulePage(t *testing.T) {
 }
 
 func TestHandler_RunTaskRejectsForeignProjectScope(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	project := tc.CreateProject().Build()
 	foreign := tc.CreateProject().Build()
 	task := tc.CreateTask(project.ID).Build()

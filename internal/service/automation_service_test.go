@@ -35,26 +35,19 @@ func (r automationEnterpriseRepoResolver) GlobalAPIEndpoint(context.Context) str
 }
 
 func TestAutomationGraphServiceResolveAutomationCardPreservesChatTargetContract(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
-	projectRepo := teststores.Of(db).Projects
+	projectRepo := env.Projects
 	project := automationTestProject(t, projectRepo, "Automation card resolution")
 	foreign := automationTestProject(t, projectRepo, "Foreign Automation card resolution")
-	graphSvc := NewAutomationGraphService(teststores.Of(db).Automations)
+	graphSvc := NewAutomationGraphService(env.Automations)
 
 	insertAutomation := func(projectID, automationID, name string) {
 		t.Helper()
 		versionID := automationID + "-version"
-		_, err := db.ExecContext(ctx, `INSERT INTO automations
-			(id, project_id, stable_key, name, description, automation_type, lifecycle_state)
-			VALUES (?, ?, ?, ?, '', 'custom', 'active')`, automationID, projectID, "chat/"+automationID, name)
-		require.NoError(t, err)
-		_, err = db.ExecContext(ctx, `INSERT INTO automation_versions
-			(id, project_id, automation_id, version, state, source, adapter_key, published_at)
-			VALUES (?, ?, ?, 1, 'published', 'manual', 'custom', CURRENT_TIMESTAMP)`, versionID, projectID, automationID)
-		require.NoError(t, err)
-		_, err = db.ExecContext(ctx, `UPDATE automations SET published_version_id = ? WHERE id = ? AND project_id = ?`, versionID, automationID, projectID)
-		require.NoError(t, err)
+		now := time.Now().UTC()
+		require.NoError(t, env.Fixtures.SeedAutomation(ctx, models.Automation{ID: automationID, ProjectID: projectID, StableKey: "chat/" + automationID, Name: name, AutomationType: "custom", LifecycleState: models.AutomationActive, PublishedVersionID: &versionID}))
+		require.NoError(t, env.Fixtures.SeedAutomationVersion(ctx, models.AutomationVersion{ID: versionID, ProjectID: projectID, AutomationID: automationID, Version: 1, State: models.AutomationVersionPublished, Source: "manual", AdapterKey: "custom", PublishedAt: &now}))
 	}
 
 	insertAutomation(project.ID, "primary-id", "Nightly Review")
@@ -149,11 +142,11 @@ func TestAutomationRegistrationTelemetryReportsCreationTruthfully(t *testing.T) 
 }
 
 func TestAutomationRegistrationExplicitIdentityAndIsolation(t *testing.T) {
-	db := teststores.NewDB(t)
-	projectRepo := teststores.Of(db).Projects
-	taskRepo := teststores.Of(db).Tasks
-	scheduleRepo := teststores.Of(db).Schedules
-	automationRepo := teststores.Of(db).Automations
+	env := teststores.New(t)
+	projectRepo := env.Projects
+	taskRepo := env.Tasks
+	scheduleRepo := env.Schedules
+	automationRepo := env.Automations
 	service := NewAutomationRegistrationService(automationRepo, NewAutomationAdapterRegistry())
 	graph := NewAutomationGraphService(automationRepo)
 	ctx := context.Background()
@@ -185,18 +178,17 @@ func TestAutomationRegistrationExplicitIdentityAndIsolation(t *testing.T) {
 	require.Equal(t, native.Automation.ID, again.Automation.ID)
 	require.Equal(t, native.Version.ID, again.Version.ID, "setup reruns must not replace the point-in-time snapshot")
 	require.Equal(t, native.Automation.Name, again.Automation.Name, "setup reruns must not rename the saved Automation")
-	var retainedGraphID string
-	require.NoError(t, db.QueryRowContext(ctx, `INSERT INTO automation_versions
-		(project_id, automation_id, version, state, source, adapter_key)
-		VALUES (?, ?, 2, 'draft', 'bootstrap', ?) RETURNING id`, project.ID,
-		native.Automation.ID, AutomationAdapterNativeSDLC).Scan(&retainedGraphID))
+	retainedGraphID := "retained-draft"
+	require.NoError(t, env.Fixtures.SeedAutomationVersion(ctx, models.AutomationVersion{ID: retainedGraphID, ProjectID: project.ID, AutomationID: native.Automation.ID, Version: 2, State: models.AutomationVersionDraft, Source: "bootstrap", AdapterKey: AutomationAdapterNativeSDLC}))
 	again, reused, err = service.Register(ctx, nativeReq)
 	require.NoError(t, err)
 	require.True(t, reused)
 	require.Equal(t, native.Version.ID, again.Version.ID)
-	require.Zero(t, tableCountWhere(t, db, "automation_versions", "id", retainedGraphID),
-		"unchanged maintained registration must remove pre-existing retained draft graphs")
-	require.Equal(t, 1, tableCountWhere(t, db, "automation_versions", "automation_id", native.Automation.ID))
+	versions, err := env.Fixtures.AutomationVersions(ctx, native.Automation.ID)
+	require.NoError(t, err)
+	require.Len(t, versions, 1, "unchanged maintained registration must remove retained draft graphs")
+	require.Equal(t, native.Version.ID, versions[0].ID)
+	require.NotEqual(t, retainedGraphID, versions[0].ID)
 
 	_, _, err = service.Register(ctx, AutomationRegistrationRequest{ProjectID: project.ID, AdapterKey: AutomationAdapterGitHubSDLC,
 		StableKey: nativeReq.StableKey, Resources: []models.AutomationResourceBinding{
@@ -230,12 +222,12 @@ func TestAutomationRegistrationExplicitIdentityAndIsolation(t *testing.T) {
 }
 
 func TestRegisteredMaintainedAutomationCanBeReopenedAndSaved(t *testing.T) {
-	db := teststores.NewDB(t)
+	env := teststores.New(t)
 	ctx := context.Background()
-	project := automationTestProject(t, teststores.Of(db).Projects, "Editable registered maintained Automation")
-	taskRepo := teststores.Of(db).Tasks
-	scheduleRepo := teststores.Of(db).Schedules
-	automationRepo := teststores.Of(db).Automations
+	project := automationTestProject(t, env.Projects, "Editable registered maintained Automation")
+	taskRepo := env.Tasks
+	scheduleRepo := env.Schedules
+	automationRepo := env.Automations
 	registry := NewAutomationAdapterRegistry()
 	task, schedule := automationTestTaskAndSchedule(t, taskRepo, scheduleRepo, project.ID, "Registered maintained trigger")
 
@@ -256,9 +248,11 @@ func TestRegisteredMaintainedAutomationCanBeReopenedAndSaved(t *testing.T) {
 	}
 	require.Equal(t, "native_alert", registeredApprovalConfig["approval_method"], "new registered snapshots must persist valid maintained defaults")
 
-	_, err = db.ExecContext(ctx, `UPDATE automation_nodes SET config_json = '{}'
-		WHERE automation_id = ? AND node_type IN ('action', 'human_gate')`, definition.Automation.ID)
-	require.NoError(t, err, "simulate a registered snapshot created before maintained defaults were persisted")
+	for _, node := range definition.Nodes {
+		if node.NodeType == "action" || node.NodeType == "human_gate" {
+			require.NoError(t, env.Fixtures.SetAutomationNodeConfig(ctx, node.ID, "{}"), "simulate a registered snapshot created before maintained defaults were persisted")
+		}
+	}
 
 	drafts := NewAutomationDraftService(automationRepo, registry)
 	reopened, err := drafts.CurrentCandidate(ctx, project.ID, definition.Automation.ID)
@@ -267,7 +261,7 @@ func TestRegisteredMaintainedAutomationCanBeReopenedAndSaved(t *testing.T) {
 	require.Equal(t, "native_alert", automationDraftNodeByKey(t, reopened.Candidate, "approval").Config["approval_method"])
 
 	validator := NewAutomationSaveValidator(registry, drafts)
-	compiler := NewAutomationCompiler(automationRepo, NewTaskService(taskRepo, teststores.Of(db).Attachments, nil), taskRepo, scheduleRepo, validator)
+	compiler := NewAutomationCompiler(automationRepo, NewTaskService(taskRepo, env.Attachments, nil), taskRepo, scheduleRepo, validator)
 	saved, err := compiler.Save(ctx, AutomationSaveRequest{
 		ProjectID: project.ID, AutomationID: definition.Automation.ID, Source: "manual", CreatedVia: "web", Candidate: reopened.Candidate,
 	})
@@ -301,9 +295,11 @@ func TestRegisteredMaintainedAutomationCanBeReopenedAndSaved(t *testing.T) {
 	require.Equal(t, string(models.CategoryActive), registeredImplementationConfig["category"])
 	require.EqualValues(t, 2, registeredImplementationConfig["priority"])
 
-	_, err = db.ExecContext(ctx, `UPDATE automation_nodes SET config_json = '{}'
-		WHERE automation_id = ? AND node_key = 'implementation'`, githubDefinition.Automation.ID)
-	require.NoError(t, err, "simulate an older point-in-time GitHub snapshot with empty issue-task configuration")
+	for _, node := range githubDefinition.Nodes {
+		if node.NodeKey == "implementation" {
+			require.NoError(t, env.Fixtures.SetAutomationNodeConfig(ctx, node.ID, "{}"), "simulate an older GitHub snapshot with empty issue-task configuration")
+		}
+	}
 	rerun, reused, err := NewAutomationRegistrationService(automationRepo, registry).Register(ctx, AutomationRegistrationRequest{
 		ProjectID: project.ID, AdapterKey: AutomationAdapterGitHubSDLC, StableKey: "github-sdlc/editable",
 	})

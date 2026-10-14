@@ -1354,20 +1354,20 @@ func findSubstring(s, substr string) bool {
 func TestHandler_GetTaskWorktreeInfoDoesNotInferMerge(t *testing.T) {
 	for _, scenario := range []string{"unchanged", "synced main", "manual merge"} {
 		t.Run(scenario, func(t *testing.T) {
-			h, e, _, db := setupTestHandlerWithDB(t)
+			h, e, _, db := setupTestHandlerWithStores(t)
 			ctx := context.Background()
 			repoDir := createHandlerTestGitRepo(t)
 			project := &models.Project{Name: "Unchanged worktree", RepoPath: repoDir}
-			projects := teststores.Of(db).Projects
+			projects := db.Projects
 			if err := projects.Create(ctx, project); err != nil {
 				t.Fatal(err)
 			}
-			tasks := teststores.Of(db).Tasks
+			tasks := db.Tasks
 			task := &models.Task{ProjectID: project.ID, Title: "Read only", Category: models.CategoryCompleted, Status: models.StatusCompleted, MergeTargetBranch: gitCurrentBranch(t, repoDir)}
 			if err := tasks.Create(ctx, task); err != nil {
 				t.Fatal(err)
 			}
-			ws := service.NewWorktreeService(tasks, projects, teststores.Of(db).Settings)
+			ws := service.NewWorktreeService(tasks, projects, db.Settings)
 			path, branch, err := ws.SetupWorktree(ctx, task, repoDir)
 			if err != nil {
 				t.Fatal(err)

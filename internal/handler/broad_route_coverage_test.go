@@ -9,11 +9,10 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/testutil/teststores"
 )
 
 func TestBroadReadOnlyRouteSmokeExercisesProjectTaskAndSettingsSurfaces(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	ctx := context.Background()
 	project := tc.CreateProject().WithName("Broad route project").Build()
 	other := tc.CreateProject().WithName("Other broad project").Build()
@@ -42,7 +41,7 @@ func TestBroadReadOnlyRouteSmokeExercisesProjectTaskAndSettingsSurfaces(t *testi
 	if err := tc.alertRepo.Create(ctx, &models.Alert{ProjectID: project.ID, Type: models.AlertCustom, Severity: models.SeverityWarning, Title: "Broad alert", Message: "needs review"}); err != nil {
 		t.Fatalf("create alert: %v", err)
 	}
-	agentRepo := teststores.Of(tc.db).Agents
+	agentRepo := tc.stores.Agents
 	tc.handler.SetAgentRepo(agentRepo)
 	if err := agentRepo.Create(ctx, &models.Agent{Name: "Broad Agent", Key: "broad-agent", Scope: models.AgentScopeProject, ProjectID: project.ID, Description: "Handles broad smoke routes", Model: agent.Model}); err != nil {
 		t.Fatalf("create agent definition: %v", err)
@@ -160,7 +159,7 @@ func TestBroadReadOnlyRouteSmokeExercisesProjectTaskAndSettingsSurfaces(t *testi
 }
 
 func TestBroadMutationRouteContractsExerciseMoreHandlers(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	ctx := context.Background()
 	project := tc.CreateProject().WithName("Broad mutation project").Build()
 	agent := tc.CreateLLMConfig().WithName("Broad mutation model").WithProvider(models.ProviderTest).WithModel("test-model").AsDefault().Build()
@@ -182,10 +181,10 @@ func TestBroadMutationRouteContractsExerciseMoreHandlers(t *testing.T) {
 	if err := tc.alertRepo.Create(ctx, alert); err != nil {
 		t.Fatalf("create alert: %v", err)
 	}
-	agentRepo := teststores.Of(tc.db).Agents
+	agentRepo := tc.stores.Agents
 	tc.handler.SetAgentRepo(agentRepo)
-	tc.handler.SetWebhookRepo(teststores.Of(tc.db).Webhooks)
-	tc.handler.SetCustomPersonalityRepo(teststores.Of(tc.db).CustomPersonalities)
+	tc.handler.SetWebhookRepo(tc.stores.Webhooks)
+	tc.handler.SetCustomPersonalityRepo(tc.stores.CustomPersonalities)
 
 	projectQuery := "?project_id=" + url.QueryEscape(project.ID)
 	getPaths := []string{

@@ -646,7 +646,7 @@ func TestGetTaskChanges_WorktreeFollowupReeditingCommittedFileRendersSingleDiffE
 }
 
 func TestTaskChangesSummaryAuthoritativePreservedDiffAndScope(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	ctx := context.Background()
 	project := tc.CreateProject().Build()
 	foreign := tc.CreateProject().Build()

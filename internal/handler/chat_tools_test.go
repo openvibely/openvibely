@@ -505,7 +505,7 @@ func TestProcessChatAttachmentsForEdits(t *testing.T) {
 }
 
 func TestExecuteChatTaskEditRequestsCopiesChatAttachmentsAndAppliesEdits(t *testing.T) {
-	h, _, llmConfigRepo, _ := setupTestHandlerWithDB(t)
+	h, _, llmConfigRepo, _ := setupTestHandlerWithStores(t)
 	ctx := context.Background()
 	project := createProject(t, h, "Wrapper Edit Project")
 	agent := createAgent(t, llmConfigRepo)
@@ -544,7 +544,7 @@ func TestExecuteChatTaskEditRequestsCopiesChatAttachmentsAndAppliesEdits(t *test
 }
 
 func TestExecuteChatTaskExecutionRequestsReportsMissingTask(t *testing.T) {
-	h, _, _, _ := setupTestHandlerWithDB(t)
+	h, _, _, _ := setupTestHandlerWithStores(t)
 	project := createProject(t, h, "Wrapper Execute Project")
 	out := h.executeChatTaskExecutionRequests(context.Background(), "exec-wrapper", project.ID, []service.TaskExecutionRequest{{TaskID: "missing-task"}})
 	require.Contains(t, out, "Failed:")

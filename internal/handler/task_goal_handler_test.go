@@ -14,12 +14,11 @@ import (
 	"github.com/openvibely/openvibely/internal/lifecycle"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/service"
-	"github.com/openvibely/openvibely/internal/testutil/teststores"
 	"github.com/openvibely/openvibely/pkg/toolschema"
 )
 
 func TestTaskGoalRoutes_HTMXEditPauseResumeClear(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	project := tc.CreateProject().Build()
 	task := &models.Task{ProjectID: project.ID, Title: "Goal UI", Category: models.CategoryBacklog, Status: models.StatusPending, Prompt: "prompt", Priority: 2}
 	if err := tc.taskRepo.Create(context.Background(), task); err != nil {
@@ -175,7 +174,7 @@ func TestTaskGoalRoutesRejectKnownTaskWithoutProjectContext(t *testing.T) {
 }
 
 func TestTaskGoalRoutesUnknownTaskReturnNotFound(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	for _, route := range []struct {
 		name   string
 		suffix string
@@ -199,7 +198,7 @@ func TestTaskGoalRoutesUnknownTaskReturnNotFound(t *testing.T) {
 
 func newForeignTaskGoalRouteFixture(t *testing.T) (*TestContext, *models.Project, *models.Task, *models.TaskGoal) {
 	t.Helper()
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	ctx := context.Background()
 	projectA := tc.CreateProject().WithName("Project A").Build()
 	projectB := tc.CreateProject().WithName("Project B").Build()
@@ -218,7 +217,7 @@ func newForeignTaskGoalRouteFixture(t *testing.T) (*TestContext, *models.Project
 }
 
 func TestUpdateTask_EditFormSavesGoalAndRefreshesReadOnlySummary(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	project := tc.CreateProject().Build()
 	task := &models.Task{ProjectID: project.ID, Title: "Edit Goal", Category: models.CategoryBacklog, Status: models.StatusPending, Prompt: "prompt", Priority: 2}
 	if err := tc.taskRepo.Create(context.Background(), task); err != nil {
@@ -268,7 +267,7 @@ func TestUpdateTask_EditFormSavesGoalAndRefreshesReadOnlySummary(t *testing.T) {
 }
 
 func TestSetTaskGoalOnCompletedTaskDoesNotStartWork(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	ctx := context.Background()
 	project := tc.CreateProject().Build()
 	agent := tc.CreateLLMConfig().Build()
@@ -295,7 +294,7 @@ func TestSetTaskGoalOnCompletedTaskDoesNotStartWork(t *testing.T) {
 }
 
 func TestUpdateTaskGoalOnCompletedTaskDoesNotReactivateFromOriginalPrompt(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	ctx := context.Background()
 	project := tc.CreateProject().Build()
 	agent := tc.CreateLLMConfig().Build()
@@ -333,7 +332,7 @@ func TestUpdateTaskGoalOnCompletedTaskDoesNotReactivateFromOriginalPrompt(t *tes
 }
 
 func TestUpdateTaskMetadataOnCompletedTaskDoesNotStartWork(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	ctx := context.Background()
 	project := tc.CreateProject().Build()
 	agent := tc.CreateLLMConfig().WithName("Original Model").Build()
@@ -391,7 +390,7 @@ func assertCompletedTaskEditDidNotStartWork(t *testing.T, tc *TestContext, taskI
 			t.Fatalf("metadata save created or started execution: %#v", exec)
 		}
 	}
-	pendingInputs, err := teststores.Of(tc.db).ThreadInputs.ListPendingForTask(ctx, taskID)
+	pendingInputs, err := tc.stores.ThreadInputs.ListPendingForTask(ctx, taskID)
 	if err != nil {
 		t.Fatalf("list thread inputs: %v", err)
 	}
@@ -407,7 +406,7 @@ func assertCompletedTaskEditDidNotStartWork(t *testing.T, tc *TestContext, taskI
 	if got := tc.handler.workerSvc.ProjectRunning(updated.ProjectID); got != 0 {
 		t.Fatalf("project worker running count after metadata save = %d, want 0", got)
 	}
-	lifecyclePage, err := teststores.Of(tc.db).Lifecycle.ListExecutionsForTaskPage(ctx, taskID, 1, "")
+	lifecyclePage, err := tc.stores.Lifecycle.ListExecutionsForTaskPage(ctx, taskID, 1, "")
 	if err != nil {
 		t.Fatalf("list lifecycle executions: %v", err)
 	}
@@ -426,7 +425,7 @@ func assertCompletedTaskEditDidNotStartWork(t *testing.T, tc *TestContext, taskI
 }
 
 func TestTaskGoalPanelLabelsUserStoppedPause(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	ctx := context.Background()
 	project := tc.CreateProject().Build()
 	task := &models.Task{ProjectID: project.ID, Title: "Stopped Goal UI", Category: models.CategoryBacklog, Status: models.StatusCancelled, Prompt: "prompt", Priority: 2}
@@ -454,7 +453,7 @@ func TestTaskGoalPanelLabelsUserStoppedPause(t *testing.T) {
 }
 
 func TestTaskGoalContext_StatusToolGuidanceMatchesAgentGrants(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	project := tc.CreateProject().Build()
 	task := &models.Task{ProjectID: project.ID, Title: "Goal prompt", Category: models.CategoryActive, Status: models.StatusRunning, Prompt: "prompt", Priority: 2}
 	if err := tc.taskRepo.Create(context.Background(), task); err != nil {
@@ -488,7 +487,7 @@ func TestTaskGoalContext_StatusToolGuidanceMatchesAgentGrants(t *testing.T) {
 }
 
 func TestGoalAgentSendToTaskSkipsContinuationWhenGoalPausedByUserStop(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	ctx := context.Background()
 	project := tc.CreateProject().Build()
 	agent := tc.CreateLLMConfig().Build()
@@ -520,7 +519,7 @@ func TestGoalAgentSendToTaskSkipsContinuationWhenGoalPausedByUserStop(t *testing
 }
 
 func TestGoalAgentSendToTaskQueuesWhenGoalStillActive(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	ctx := context.Background()
 	project := tc.CreateProject().Build()
 	agent := tc.CreateLLMConfig().Build()
@@ -558,7 +557,7 @@ func TestGoalAgentSendToTaskQueuesWhenGoalStillActive(t *testing.T) {
 }
 
 func TestGoalAgentSendToTaskQueuesCurrentRunWhenOlderAfterCompleteRowsAreLate(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	ctx := context.Background()
 	project := tc.CreateProject().Build()
 	agent := tc.CreateLLMConfig().Build()
@@ -569,8 +568,8 @@ func TestGoalAgentSendToTaskQueuesCurrentRunWhenOlderAfterCompleteRowsAreLate(t 
 	if _, err := tc.handler.taskGoalSvc.SetGoal(ctx, task.ID, "Audit-only completion required", service.GoalOptions{}); err != nil {
 		t.Fatalf("set goal: %v", err)
 	}
-	tc.handler.lifecycleRepo = teststores.Of(tc.db).Lifecycle
-	lifecycleAgentRepo := teststores.Of(tc.db).Agents
+	tc.handler.lifecycleRepo = tc.stores.Lifecycle
+	lifecycleAgentRepo := tc.stores.Agents
 	goalAgent := &models.Agent{Name: "Goal Agent", Model: "inherit", Enabled: true, SystemKind: models.AgentSystemKindGoal}
 	if err := lifecycleAgentRepo.Create(ctx, goalAgent); err != nil {
 		t.Fatalf("create goal agent: %v", err)
@@ -612,7 +611,7 @@ func TestGoalAgentSendToTaskQueuesCurrentRunWhenOlderAfterCompleteRowsAreLate(t 
 }
 
 func TestLifecycleSendToTaskRejectsCancelledSourceOrDestination(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	ctx := context.Background()
 	project := tc.CreateProject().Build()
 	agent := tc.CreateLLMConfig().Build()
@@ -655,7 +654,7 @@ func TestLifecycleSendToTaskRejectsCancelledSourceOrDestination(t *testing.T) {
 }
 
 func TestLifecycleSendToTaskRejectsCancellationRequestBeforeStatusCancelled(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	ctx := context.Background()
 	project := tc.CreateProject().Build()
 	agent := tc.CreateLLMConfig().Build()
@@ -695,7 +694,7 @@ func TestLifecycleSendToTaskRejectsCancellationRequestBeforeStatusCancelled(t *t
 }
 
 func TestLifecycleSendToTaskRejectsDuringCancelTaskBeforeStatusCancelled(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	ctx := context.Background()
 	project := tc.CreateProject().Build()
 	agent := tc.CreateLLMConfig().Build()
@@ -741,7 +740,7 @@ func TestLifecycleSendToTaskRejectsDuringCancelTaskBeforeStatusCancelled(t *test
 }
 
 func TestLifecycleSendToTaskRejectsStaleTaskRunContinuation(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	ctx := context.Background()
 	project := tc.CreateProject().Build()
 	agent := tc.CreateLLMConfig().Build()
@@ -749,8 +748,8 @@ func TestLifecycleSendToTaskRejectsStaleTaskRunContinuation(t *testing.T) {
 	if err := tc.taskRepo.Create(ctx, task); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
-	tc.handler.lifecycleRepo = teststores.Of(tc.db).Lifecycle
-	lifecycleAgentRepo := teststores.Of(tc.db).Agents
+	tc.handler.lifecycleRepo = tc.stores.Lifecycle
+	lifecycleAgentRepo := tc.stores.Agents
 	lifecycleAgent := &models.Agent{Name: "Lifecycle Agent", Model: "inherit", Enabled: true}
 	if err := lifecycleAgentRepo.Create(ctx, lifecycleAgent); err != nil {
 		t.Fatalf("create lifecycle agent: %v", err)
@@ -784,7 +783,7 @@ func TestLifecycleSendToTaskRejectsStaleTaskRunContinuation(t *testing.T) {
 }
 
 func TestLifecycleSendToTaskAllowsCrossTaskWhenDestinationHasNewerRuns(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	ctx := context.Background()
 	project := tc.CreateProject().Build()
 	agent := tc.CreateLLMConfig().Build()
@@ -796,8 +795,8 @@ func TestLifecycleSendToTaskAllowsCrossTaskWhenDestinationHasNewerRuns(t *testin
 	if err := tc.taskRepo.Create(ctx, destinationTask); err != nil {
 		t.Fatalf("create destination task: %v", err)
 	}
-	tc.handler.lifecycleRepo = teststores.Of(tc.db).Lifecycle
-	lifecycleAgentRepo := teststores.Of(tc.db).Agents
+	tc.handler.lifecycleRepo = tc.stores.Lifecycle
+	lifecycleAgentRepo := tc.stores.Agents
 	lifecycleAgent := &models.Agent{Name: "Cross Task Lifecycle Agent", Model: "inherit", Enabled: true}
 	if err := lifecycleAgentRepo.Create(ctx, lifecycleAgent); err != nil {
 		t.Fatalf("create lifecycle agent: %v", err)
@@ -841,7 +840,7 @@ func TestLifecycleSendToTaskAllowsCrossTaskWhenDestinationHasNewerRuns(t *testin
 func TestGoalAgentSendToTaskRejectsNonActiveGoalStates(t *testing.T) {
 	for _, status := range []models.TaskGoalStatus{models.TaskGoalStatusAchieved, models.TaskGoalStatusPaused, models.TaskGoalStatusBlocked, models.TaskGoalStatusCleared, models.TaskGoalStatusFailed} {
 		t.Run(string(status), func(t *testing.T) {
-			tc := NewTestContext(t)
+			tc := NewStoreTestContext(t)
 			ctx := context.Background()
 			project := tc.CreateProject().Build()
 			agent := tc.CreateLLMConfig().Build()
@@ -873,7 +872,7 @@ func TestGoalAgentSendToTaskRejectsNonActiveGoalStates(t *testing.T) {
 					t.Fatalf("clear goal: %v", err)
 				}
 			case models.TaskGoalStatusFailed:
-				if _, err := teststores.Of(tc.db).TaskGoals.UpdateStatus(ctx, task.ID, goal.GoalID, models.TaskGoalStatusFailed, "failed", false); err != nil {
+				if _, err := tc.stores.TaskGoals.UpdateStatus(ctx, task.ID, goal.GoalID, models.TaskGoalStatusFailed, "failed", false); err != nil {
 					t.Fatalf("mark failed: %v", err)
 				}
 			}
@@ -897,7 +896,7 @@ func TestGoalAgentSendToTaskRejectsNonActiveGoalStates(t *testing.T) {
 }
 
 func TestTaskGoalRuntimeToolsRejectForeignRawTaskID(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	ctx := context.Background()
 	projectA := tc.CreateProject().WithName("Runtime Project A").Build()
 	projectB := tc.CreateProject().WithName("Runtime Project B").Build()
@@ -986,7 +985,7 @@ func TestTaskGoalRuntimeToolsRejectForeignRawTaskID(t *testing.T) {
 }
 
 func TestTaskGoalTools_CurrentAliasAndSendToTaskQueuesOnly(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	project := tc.CreateProject().Build()
 	agent := tc.CreateLLMConfig().Build()
 	task := &models.Task{ProjectID: project.ID, Title: "Goal tools", Category: models.CategoryActive, Status: models.StatusRunning, Prompt: "prompt", Priority: 2, AgentID: &agent.ID}
@@ -1147,7 +1146,7 @@ func TestTaskGoalTools_CurrentAliasAndSendToTaskQueuesOnly(t *testing.T) {
 func TestGoalSaveUnchangedPreservesState(t *testing.T) {
 	for _, status := range []models.TaskGoalStatus{models.TaskGoalStatusPaused, models.TaskGoalStatusAchieved, models.TaskGoalStatusBlocked} {
 		t.Run(string(status), func(t *testing.T) {
-			tc := NewTestContext(t)
+			tc := NewStoreTestContext(t)
 			project := tc.CreateProject().Build()
 			task := &models.Task{ProjectID: project.ID, Title: "Goal state", Category: models.CategoryBacklog, Status: models.StatusPending, Priority: 2}
 			ctx := context.Background()
@@ -1158,7 +1157,7 @@ func TestGoalSaveUnchangedPreservesState(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			repo := teststores.Of(tc.db).TaskGoals
+			repo := tc.stores.TaskGoals
 			before, err := repo.UpdateStatus(ctx, task.ID, goal.GoalID, status, "reason", false)
 			if err != nil {
 				t.Fatal(err)
@@ -1179,7 +1178,7 @@ func TestGoalToolSchemasAllowHandlerTaskReferences(t *testing.T) {
 	for _, name := range []string{"set_task_goal", "clear_task_goal", "get_task_goal", "pause_task_goal", "resume_task_goal", "mark_task_goal_achieved", "report_task_goal_blocked"} {
 		for _, reference := range []string{"omitted", "null", "current", "title"} {
 			t.Run(name+"/"+reference, func(t *testing.T) {
-				tc := NewTestContext(t)
+				tc := NewStoreTestContext(t)
 				ctx := context.Background()
 				project := tc.CreateProject().Build()
 				task := &models.Task{ProjectID: project.ID, Title: "Goal reference", Category: models.CategoryBacklog, Status: models.StatusPending, Prompt: "prompt", Priority: 2}

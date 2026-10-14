@@ -978,7 +978,7 @@ func TestHandler_GetModelCapacity_NoLimit(t *testing.T) {
 }
 
 func TestHandler_GetModelCapacity_OverCapacityClampsAvailableSlots(t *testing.T) {
-	h, e, llmConfigRepo, _ := setupTestHandlerWithDB(t)
+	h, e, llmConfigRepo, _ := setupTestHandlerWithStores(t)
 	ctx := context.Background()
 
 	agent := &models.LLMConfig{

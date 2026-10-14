@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/testutil/teststores"
 	"github.com/openvibely/openvibely/web/static"
 	"github.com/stretchr/testify/require"
 )
@@ -175,8 +174,8 @@ func TestProjectSelectorSearchesOnProductionRenderedPageInChrome(t *testing.T) {
 		t.Skip("Chrome/Chromium executable not found")
 	}
 
-	_, app, _, db := setupTestHandlerWithDB(t)
-	projectRepo := teststores.Of(db).Projects
+	_, app, _, db := setupTestHandlerWithStores(t)
+	projectRepo := db.Projects
 	swarmProject := models.Project{Name: "Swarm Workspace"}
 	unrelatedProject := models.Project{Name: "Unrelated Workspace"}
 	require.NoError(t, projectRepo.Create(t.Context(), &swarmProject))

@@ -17,7 +17,6 @@ import (
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/service"
-	"github.com/openvibely/openvibely/internal/testutil/teststores"
 	"github.com/openvibely/openvibely/web/static"
 	"github.com/openvibely/openvibely/web/templates/layout"
 	"github.com/openvibely/openvibely/web/templates/pages"
@@ -398,10 +397,10 @@ func TestCollectionCardToolbars(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			h, e, _, db := setupTestHandlerWithDB(t)
-			h.SetAgentRepo(teststores.Of(db).Agents)
+			h, e, _, db := setupTestHandlerWithStores(t)
+			h.SetAgentRepo(db.Agents)
 			if tt.name == "automations" {
-				h.SetAutomationServices(service.NewAutomationGraphService(teststores.Of(db).Automations), nil)
+				h.SetAutomationServices(service.NewAutomationGraphService(db.Automations), nil)
 			}
 			h.SetAgentSkillRoot(t.TempDir())
 			req := httptest.NewRequest(http.MethodGet, tt.path, nil)
@@ -566,11 +565,11 @@ func TestCardSearch_ChannelsMutationsRefreshContainerWithoutFullPageReload(t *te
 }
 
 func TestCardSearch_AgentsPage(t *testing.T) {
-	h, e, _, db := setupTestHandlerWithDB(t)
-	h.SetAgentRepo(teststores.Of(db).Agents)
+	h, e, _, db := setupTestHandlerWithStores(t)
+	h.SetAgentRepo(db.Agents)
 
 	// Create an agent so there's a card to search
-	agentRepo := teststores.Of(db).Agents
+	agentRepo := db.Agents
 	agent := &models.Agent{
 		Name:        "TestSearchAgent",
 		Description: "A test agent for search",
@@ -600,8 +599,8 @@ func TestCardSearch_AgentsPage(t *testing.T) {
 }
 
 func TestCardSearch_AgentsPartial(t *testing.T) {
-	h, e, _, db := setupTestHandlerWithDB(t)
-	h.SetAgentRepo(teststores.Of(db).Agents)
+	h, e, _, db := setupTestHandlerWithStores(t)
+	h.SetAgentRepo(db.Agents)
 
 	req := httptest.NewRequest(http.MethodGet, "/agents?project_id=default", nil)
 	req.Header.Set("HX-Request", "true")
@@ -740,8 +739,8 @@ func TestCardSearch_SkillsManualRefreshReappliesActiveSearch(t *testing.T) {
 }
 
 func TestCardSearch_AgentsManualDeleteRefreshReappliesActiveSearch(t *testing.T) {
-	h, e, _, db := setupTestHandlerWithDB(t)
-	h.SetAgentRepo(teststores.Of(db).Agents)
+	h, e, _, db := setupTestHandlerWithStores(t)
+	h.SetAgentRepo(db.Agents)
 	project := createProject(t, h, "Test Project")
 
 	req := httptest.NewRequest(http.MethodGet, "/agents?project_id="+project.ID, nil)
