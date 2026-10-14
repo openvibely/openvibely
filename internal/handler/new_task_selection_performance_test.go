@@ -36,11 +36,11 @@ func TestHandler_NewTaskFirstMessageReusesPreflightSelection(t *testing.T) {
 		{name: "default", agentMode: "default"},
 	} {
 		t.Run(scenario.name, func(t *testing.T) {
-			db := teststores.NewDB(t)
-			env := newTestHandlerEnv(t, db)
+			stores := teststores.New(t)
+			env := wireTestHandler(t, stores.Stores, testHandlerOptions{})
 			env.Handler.startStreamingResponseOverride = func(streamingResponseParams) error { return nil }
 			project := createProjectTB(t, env.Handler, "New task selection "+scenario.name)
-			clearModelConfigs(t, db)
+			clearModelConfigs(t, env.LLMConfigRepo)
 			catalog := seedNewTaskSelectionModels(t, env.LLMConfigRepo, 3, scenario.images)
 			selectionAgentID := scenario.agentMode
 			if scenario.agentMode == "explicit" {
@@ -99,7 +99,7 @@ func TestHandler_NewTaskSelectionHandoffDoesNotRepeatModelLookups(t *testing.T) 
 			env := newTestHandlerEnv(t, db)
 			env.Handler.startStreamingResponseOverride = func(streamingResponseParams) error { return nil }
 			project := createProjectTB(t, env.Handler, "Selection handoff "+scenario.name)
-			clearModelConfigs(t, db)
+			clearModelConfigs(t, env.LLMConfigRepo)
 			catalog := seedNewTaskSelectionModels(t, env.LLMConfigRepo, 3, scenario.vision)
 			if scenario.name == "explicit" {
 				scenario.agentID = catalog[1].ID
@@ -144,7 +144,7 @@ func TestHandler_NewTaskModelSelectionFailuresAreRejectedBeforePersistence(t *te
 			db, _ := testutil.NewStatementCountingTestDB(t)
 			env := newTestHandlerEnv(t, db)
 			project := createProjectTB(t, env.Handler, "Rejected new task model")
-			clearModelConfigs(t, db)
+			clearModelConfigs(t, env.LLMConfigRepo)
 			if scenario.seedModels {
 				seedNewTaskSelectionModels(t, env.LLMConfigRepo, 1, false)
 			}
@@ -167,7 +167,7 @@ func TestHandler_DirectTaskThreadStillSelectsFromRequest(t *testing.T) {
 	env := newTestHandlerEnv(t, db)
 	env.Handler.startStreamingResponseOverride = func(streamingResponseParams) error { return nil }
 	project := createProjectTB(t, env.Handler, "Direct thread selection")
-	clearModelConfigs(t, db)
+	clearModelConfigs(t, env.LLMConfigRepo)
 	model := seedNewTaskSelectionModels(t, env.LLMConfigRepo, 1, false)[0]
 	task := &models.Task{ProjectID: project.ID, Title: "Direct follow-up", Prompt: "initial", Category: models.CategoryCompleted, Status: models.StatusCompleted}
 	require.NoError(t, env.TaskRepo.Create(context.Background(), task))
@@ -199,7 +199,7 @@ func BenchmarkNewTaskFirstSubmitHandlerPath(b *testing.B) {
 			env := newTestHandlerEnv(b, db)
 			h := env.Handler
 			project := createProjectTB(b, h, "New task first-submit benchmark")
-			clearModelConfigs(b, db)
+			clearModelConfigs(b, env.LLMConfigRepo)
 			catalog := seedNewTaskSelectionModels(b, env.LLMConfigRepo, catalogSize, true)
 			h.startStreamingResponseOverride = func(streamingResponseParams) error { return nil }
 			h.processTaskThreadAttachmentsOverride = func(context.Context, string, string) (string, []models.Attachment, []models.ChatAttachment, error) {

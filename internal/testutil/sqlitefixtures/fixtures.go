@@ -475,3 +475,28 @@ func (f *fixtures) CountProjectAgentMutations(ctx context.Context, id string) (i
 	err := f.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM agent_config_mutations WHERE project_id = ?`, id).Scan(&n)
 	return n, err
 }
+
+func (f *fixtures) SetExecutionReasoning(ctx context.Context, id, content string) error {
+	_, err := f.db.ExecContext(ctx, `UPDATE executions SET reasoning_content = ? WHERE id = ?`, content, id)
+	return err
+}
+func (f *fixtures) FailTaskCompletion(ctx context.Context) error {
+	_, err := f.db.ExecContext(ctx, `CREATE TRIGGER reject_task_completion BEFORE UPDATE OF status ON tasks WHEN NEW.status = 'completed' BEGIN SELECT RAISE(ABORT, 'task completion rejected'); END`)
+	return err
+}
+func (f *fixtures) ExecutionUsage(ctx context.Context, id string) ([]storefixture.ExecutionUsageRecord, error) {
+	rows, err := f.db.QueryContext(ctx, `SELECT total_tokens,status,operation FROM llm_usage_events WHERE execution_id = ? ORDER BY id`, id)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var records []storefixture.ExecutionUsageRecord
+	for rows.Next() {
+		var rec storefixture.ExecutionUsageRecord
+		if err := rows.Scan(&rec.TotalTokens, &rec.Status, &rec.Operation); err != nil {
+			return nil, err
+		}
+		records = append(records, rec)
+	}
+	return records, rows.Err()
+}

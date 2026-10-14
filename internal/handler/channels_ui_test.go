@@ -324,7 +324,7 @@ func TestChannelsPageOutboundTargetsRenderAsPermanentTopEditCard(t *testing.T) {
 		Home:           true,
 		DefaultSubject: "Original subject",
 	}
-	if err := targetRepo.(*sqlite.ChannelTargetRepo).Upsert(context.Background(), seedTarget); err != nil {
+	if err := db.Fixtures.SeedChannelTarget(context.Background(), seedTarget); err != nil {
 		t.Fatalf("failed to seed outbound target: %v", err)
 	}
 	h.SetSlackService(&fakeSlackService{
@@ -592,35 +592,24 @@ func TestChannelsPageUsesCompactAgentPickerProjection(t *testing.T) {
 }
 
 func TestChannelsPageBatchesSettingsReadsAndPreservesRenderedValues(t *testing.T) {
-	tc := NewTestContext(t)
+	stores := teststores.New(t, teststores.WithIOCounting())
+	env := wireTestHandler(t, stores.Stores, testHandlerOptions{taskGoals: true})
+	tc := testContextFromHandler(t, env, stores)
 	selectedProject := tc.CreateProject().WithName("Channels Batch Settings Project").Build()
 	otherProject := tc.CreateProject().WithName("Other Channels Project").Build()
 	seedRepresentativeChannelsSettings(t, tc.settingsRepo, selectedProject.ID, otherProject.ID)
 
-	var settingsQueries []string
-	tc.settingsRepo.(*sqlite.SettingsRepo).SetQueryObserver(func(query string) {
-		if strings.Contains(strings.ToLower(query), "from app_settings") {
-			settingsQueries = append(settingsQueries, query)
-		}
-	})
+	stores.IO.Reset()
+	stores.IO.SetEnabled(true)
 	rec := tc.HTMX().Get("/channels?project_id=" + url.QueryEscape(selectedProject.ID)).Execute()
-	tc.settingsRepo.(*sqlite.SettingsRepo).SetQueryObserver(nil)
+	stores.IO.SetEnabled(false)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected Channels status 200, got %d; body=%s", rec.Code, rec.Body.String())
 	}
 
-	var batchQueries, singleQueries int
-	for _, query := range settingsQueries {
-		lower := strings.ToLower(query)
-		if strings.Contains(lower, "select key, value") && strings.Contains(lower, "where key in") {
-			batchQueries++
-		}
-		if strings.Contains(lower, "select value from app_settings where key = ?") {
-			singleQueries++
-		}
-	}
-	if batchQueries != 1 || singleQueries != 0 {
-		t.Fatalf("expected one batched app_settings query and no individual settings queries, got batch=%d single=%d all=%#v", batchQueries, singleQueries, settingsQueries)
+	stats := stores.IO.Snapshot()
+	if stats.SettingsSnapshotReads != 1 || stats.SettingsSingleReads != 0 {
+		t.Fatalf("expected one physical settings snapshot read and no single-setting reads, got %+v", stats)
 	}
 
 	body := rec.Body.String()
@@ -868,7 +857,7 @@ func outboundTargetsPolicyControlMarkup(t *testing.T, body string) string {
 }
 
 func TestChannelsPageOutboundTargetTestButtonIncludesSelectedProjectID(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	firstProject := tc.CreateProject().WithName("First Project").Build()
 	selectedProject := tc.CreateProject().WithName("Selected Project").Build()
 	if firstProject.ID == selectedProject.ID {
@@ -889,7 +878,7 @@ func TestChannelsPageOutboundTargetTestButtonIncludesSelectedProjectID(t *testin
 		Name:      "selected-alerts",
 		TargetID:  "CSELECTED",
 	}
-	if err := targetRepo.(*sqlite.ChannelTargetRepo).Upsert(context.Background(), target); err != nil {
+	if err := tc.stores.Fixtures.SeedChannelTarget(context.Background(), target); err != nil {
 		t.Fatalf("failed to seed selected project target: %v", err)
 	}
 
