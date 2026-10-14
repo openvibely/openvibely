@@ -445,7 +445,7 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 		messages = append(messages, checkpointMessages...)
 	}
 	for _, msg := range c.History {
-		messages = append(messages, agenticMessage{Role: msg.Role, Content: msg.Content})
+		messages = appendHistoryMessage(messages, msg)
 	}
 
 	if !opts.OmitExecutionEnvironment {
@@ -466,7 +466,7 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 	if opts.RecoveryMessages != nil {
 		messages = nil
 		for _, msg := range opts.RecoveryMessages {
-			messages = append(messages, agenticMessage{Role: msg.Role, Content: msg.Content})
+			messages = appendHistoryMessage(messages, msg)
 		}
 	}
 	var allText strings.Builder

@@ -80,3 +80,17 @@ func TestEnvironmentPersistsAcrossToolDisabledTurns(t *testing.T) {
 		t.Fatalf("raw request has extra context: %#v", messages)
 	}
 }
+
+func TestCheckpointEnvironmentDoesNotRepeatDuringHistoryReplay(t *testing.T) {
+	first := executionenv.Context(t.TempDir())
+	second := executionenv.Context(t.TempDir())
+	checkpoint := []agenticMessage{{Role: "assistant", Content: "checkpoint"}, {Role: "user", Content: first}}
+	replayed := appendHistoryMessage(checkpoint, Message{Role: "user", Content: first})
+	if len(replayed) != 2 {
+		t.Fatal("duplicated checkpoint environment")
+	}
+	replayed = appendHistoryMessage(replayed, Message{Role: "user", Content: second})
+	if len(replayed) != 3 || replayed[2].Content != second {
+		t.Fatal("lost changed environment")
+	}
+}
