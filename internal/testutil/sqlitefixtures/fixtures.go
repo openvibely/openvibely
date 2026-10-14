@@ -4,6 +4,7 @@ package sqlitefixtures
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"strings"
 	"time"
 
@@ -20,7 +21,7 @@ type fixtures struct{ db *sql.DB }
 func New(db *sql.DB) storefixture.Fixtures { return &fixtures{db: db} }
 
 func (f *fixtures) setTime(ctx context.Context, query, id string, at time.Time) error {
-	result, err := f.db.ExecContext(ctx, query, at.UTC(), id)
+	result, err := f.db.ExecContext(ctx, query, at.UTC().Format("2006-01-02 15:04:05.999999999"), id)
 	if err != nil {
 		return err
 	}
@@ -141,4 +142,100 @@ func (f *fixtures) SetModelOAuthTokens(ctx context.Context, id, access, refresh 
 
 func (f *fixtures) PromoteQueuedTaskInput(ctx context.Context, id string, execution *models.Execution) error {
 	return sqlite.NewThreadInputRepo(f.db).ClaimQueuedForTaskExecution(ctx, id, execution)
+}
+
+func (f *fixtures) SetTaskCreatedAt(ctx context.Context, id string, at time.Time) error {
+	return f.setTime(ctx, `UPDATE tasks SET created_at = ? WHERE id = ?`, id, at)
+}
+func (f *fixtures) SetExecutionCompletedAt(ctx context.Context, id string, at time.Time) error {
+	return f.setTime(ctx, `UPDATE executions SET completed_at = ? WHERE id = ?`, id, at)
+}
+func (f *fixtures) KnowledgeEntry(ctx context.Context, projectID, id string) (*models.KnowledgeEntry, error) {
+	return sqlite.NewInsightsRepo(f.db).GetKnowledge(ctx, projectID, id)
+}
+
+func (f *fixtures) SetVerifiedOAuthPrincipal(ctx context.Context, id, principal string) error {
+	result, err := f.db.ExecContext(ctx, `UPDATE oauth_connections SET oauth_principal_hash = ?, oauth_principal_verified = 1 WHERE id = ?`, principal, id)
+	if err != nil {
+		return err
+	}
+	n, err := result.RowsAffected()
+	if err == nil && n == 0 {
+		return persistence.ErrNotFound
+	}
+	return err
+}
+
+func sqliteLiteral(value string) string { return "'" + strings.ReplaceAll(value, "'", "''") + "'" }
+func (f *fixtures) FailTaskDeletion(ctx context.Context, id, message string) error {
+	_, err := f.db.ExecContext(ctx, `CREATE TRIGGER fail_fixture_task_delete BEFORE DELETE ON tasks WHEN OLD.id = `+sqliteLiteral(id)+` BEGIN SELECT RAISE(ABORT, `+sqliteLiteral(message)+`); END`)
+	return err
+}
+func (f *fixtures) FailTaskBacklogMove(ctx context.Context, id string) error {
+	_, err := f.db.ExecContext(ctx, `CREATE TRIGGER fail_fixture_task_backlog_move BEFORE UPDATE OF category ON tasks WHEN NEW.id = `+sqliteLiteral(id)+` AND NEW.category = 'backlog' BEGIN SELECT RAISE(FAIL, 'forced category update failure'); END`)
+	return err
+}
+func (f *fixtures) SetTaskStatus(ctx context.Context, id string, status models.TaskStatus) error {
+	_, err := f.db.ExecContext(ctx, `UPDATE tasks SET status = ? WHERE id = ?`, status, id)
+	return err
+}
+
+// SeedOrphanSchedule confines constraint disabling to a checked-out connection.
+func (f *fixtures) SeedOrphanSchedule(ctx context.Context, id, missingTaskID string, at time.Time) error {
+	conn, err := f.db.Conn(ctx)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	if _, err = conn.ExecContext(ctx, `PRAGMA foreign_keys = OFF`); err != nil {
+		return err
+	}
+	_, insertErr := conn.ExecContext(ctx, `INSERT INTO schedules (id,task_id,run_at,repeat_type,repeat_interval,enabled,next_run) VALUES (?,?,?,'once',1,1,?)`, id, missingTaskID, at.UTC().Format("2006-01-02 15:04:05.999999999"), at.UTC().Format("2006-01-02 15:04:05.999999999"))
+	_, restoreErr := conn.ExecContext(context.Background(), `PRAGMA foreign_keys = ON`)
+	return errors.Join(insertErr, restoreErr)
+}
+func (f *fixtures) SeedOverflowSchedule(ctx context.Context, id, taskID string, at time.Time) error {
+	_, err := f.db.ExecContext(ctx, `INSERT INTO schedules (id,task_id,run_at,repeat_type,repeat_interval,enabled,next_run) VALUES (?,?,?,'seconds',9223372036854775807,1,?)`, id, taskID, at.UTC().Format("2006-01-02 15:04:05.999999999"), at.UTC().Format("2006-01-02 15:04:05.999999999"))
+	return err
+}
+
+func (f *fixtures) WriteExecutionSnapshotBaseline(ctx context.Context, id, output string) error {
+	_, err := f.db.ExecContext(ctx, `UPDATE executions SET output = ? WHERE id = ? AND status = 'running'`, output, id)
+	return err
+}
+
+func (f *fixtures) LatestExecution(ctx context.Context) (*models.Execution, error) {
+	var id string
+	err := f.db.QueryRowContext(ctx, `SELECT id FROM executions ORDER BY started_at DESC,rowid DESC LIMIT 1`).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return sqlite.NewExecutionRepo(f.db).GetByID(ctx, id)
+}
+func (f *fixtures) SeedDiscordAuthorizedUsers(ctx context.Context, users []models.DiscordAuthorizedUser) error {
+	tx, err := f.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	stmt, err := tx.PrepareContext(ctx, `INSERT INTO discord_authorized_users (project_id,discord_user_id,display_name,added_by) VALUES (?,?,?,?)`)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+	for _, u := range users {
+		if _, err := stmt.ExecContext(ctx, u.ProjectID, u.DiscordUserID, u.DisplayName, u.AddedBy); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+func (f *fixtures) CountProducedCommitStats(ctx context.Context) (int, error) {
+	var count int
+	err := f.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM task_commit_stats`).Scan(&count)
+	return count, err
 }
