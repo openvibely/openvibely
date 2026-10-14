@@ -1908,24 +1908,23 @@ func BenchmarkProjectDialogModelProjection(b *testing.B) {
 	const maxAllocsPerOp = 200 * 1024
 	const maxDurationPerOp = 200 * time.Microsecond
 	b.ReportAllocs()
+	// Measure allocations around the loop so runtime inspection is not charged
+	// to each database read's latency budget.
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
 	b.ResetTimer()
-	var totalAllocs uint64
 	for i := 0; i < b.N; i++ {
-		var ms runtime.MemStats
-		runtime.ReadMemStats(&ms)
-		before := ms.TotalAlloc
 		configs, err := repo.ListChatSelectionOptions(ctx)
-		runtime.ReadMemStats(&ms)
-		after := ms.TotalAlloc
 		if err != nil {
 			b.Fatal(err)
 		}
 		if len(configs) != 50 || configs[0].ID == "" {
 			b.Fatalf("project dialog model projection returned %d configs", len(configs))
 		}
-		totalAllocs += after - before
 	}
-	allocsPerOp := totalAllocs / uint64(b.N)
+	b.StopTimer()
+	runtime.ReadMemStats(&after)
+	allocsPerOp := (after.TotalAlloc - before.TotalAlloc) / uint64(b.N)
 	if allocsPerOp > maxAllocsPerOp {
 		b.Fatalf("project dialog model projection allocated %d bytes/op, want <= %d", allocsPerOp, maxAllocsPerOp)
 	}
