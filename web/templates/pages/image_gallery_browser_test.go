@@ -74,12 +74,12 @@ func TestBrowserFunctional_SharedImageGallery(t *testing.T) {
 	defer server.Close()
 	runComposerFocusCDP(t, chrome, server.URL+"/gallery", "image-gallery", func(b *composerFocusCDP) {
 		b.waitFor("gallery entries", `String(!!document.querySelector("#attachment-list [data-image-gallery-item]") && !!window.imageGallery)`, "true")
-		if runtime.GOOS == "darwin" {
+		if runtime.GOOS == "darwin" || runtime.GOOS == "linux" {
 			b.waitFor("native controls initially visible", `String(window.nativeControlEvents?.['desktop:controls-visibility']?.hidden)`, "false")
 		}
 		b.click(`#attachment-list [data-image-gallery-item]`)
 		b.waitFor("task gallery loaded", `document.querySelector('[data-gallery-count]').textContent+':'+document.querySelector('[data-gallery-status]').textContent`, "1 / 2:")
-		if runtime.GOOS == "darwin" {
+		if runtime.GOOS == "darwin" || runtime.GOOS == "linux" {
 			b.waitFor("preview hides native controls", `String(window.nativeControlEvents?.['desktop:controls-visibility']?.hidden)`, "true")
 		}
 		for _, theme := range []string{"dark", "light"} {
@@ -150,7 +150,7 @@ func TestBrowserFunctional_SharedImageGallery(t *testing.T) {
 		b.click(`#attachment-list [data-image-gallery-item]`)
 		b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": "Escape"}, nil)
 		b.waitFor("closed and focus restored", `String(!document.getElementById('image-gallery').open && document.activeElement.hasAttribute('data-image-gallery-item'))`, "true")
-		if runtime.GOOS == "darwin" {
+		if runtime.GOOS == "darwin" || runtime.GOOS == "linux" {
 			b.waitFor("closing restores native controls", `String(window.nativeControlEvents?.['desktop:controls-visibility']?.hidden)`, "false")
 		}
 		b.click(`[data-image-name="message.svg"]`)
