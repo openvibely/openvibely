@@ -38,7 +38,10 @@ func TestShellSelection(t *testing.T) {
 			if got.Name != tc.want || (err != nil) != (tc.want == "") {
 				t.Fatalf("got %+v, %v", got, err)
 			}
-			if tc.name == "windows pwsh" && got.Path != "pwsh" {
+			if tc.name == "windows legacy powershell" && got.DisplayName() != "Windows PowerShell" {
+				t.Fatalf("legacy shell mislabeled: %+v", got)
+			}
+			if tc.name == "windows pwsh" && (got.Path != "pwsh" || got.DisplayName() != "PowerShell 7") {
 				t.Fatalf("did not prefer pwsh: %+v", got)
 			}
 		})
@@ -105,8 +108,11 @@ func TestEnvironmentLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(compacted[1].text, "Shell executable: "+shell.Path) {
+	if !strings.Contains(compacted[1].text, "Shell: "+shell.DisplayName()) {
 		t.Fatal("context/executor mismatch")
+	}
+	if strings.Contains(compacted[1].text, "Shell executable:") {
+		t.Fatal("context includes executable path")
 	}
 }
 

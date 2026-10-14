@@ -67,11 +67,33 @@ func (s Shell) Args(command string) []string {
 	}
 }
 
+// DisplayName identifies the shell dialect without exposing its executable path.
+func (s Shell) DisplayName() string {
+	switch s.Name {
+	case "bash":
+		return "Bash"
+	case "zsh":
+		return "Zsh"
+	case "sh":
+		return "POSIX sh"
+	case "powershell":
+		name := filepath.Base(strings.ReplaceAll(s.Path, `\`, "/"))
+		if strings.EqualFold(name, "pwsh") || strings.EqualFold(name, "pwsh.exe") {
+			return "PowerShell 7"
+		}
+		return "Windows PowerShell"
+	case "cmd":
+		return "CMD"
+	default:
+		return s.Name
+	}
+}
+
 func (s Shell) Instruction() string {
 	if s.Name == "sh" {
 		return "Use POSIX sh syntax; Bash extensions are unavailable."
 	}
-	return "Use " + s.Name + " syntax."
+	return "Use " + s.DisplayName() + " syntax."
 }
 
 const Marker = "<openvibely_execution_environment>"
@@ -86,7 +108,7 @@ func Context(workDir string) string {
 	shell, err := Resolve()
 	info := "Shell: unavailable (" + fmt.Sprint(err) + ")"
 	if err == nil {
-		info = fmt.Sprintf("Shell: %s\nShell executable: %s\n%s", shell.Name, shell.Path, shell.Instruction())
+		info = fmt.Sprintf("Shell: %s\n%s", shell.DisplayName(), shell.Instruction())
 	}
 	return fmt.Sprintf("%s\nOS: %s\n%s\nWorking directory: %s\n%s\n</openvibely_execution_environment>", Marker, runtime.GOOS, info, workDir, WorktreeContext(workDir))
 }

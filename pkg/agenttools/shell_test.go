@@ -29,7 +29,7 @@ func TestNativeShellToolAndLegacyAlias(t *testing.T) {
 		}
 	}
 	for _, def := range agenttools.Definitions() {
-		if def.Name == "shell" && !strings.Contains(def.Description, "Selected shell: "+selected.Name) {
+		if def.Name == "shell" && !strings.Contains(def.Description, "Selected shell: "+selected.DisplayName()) {
 			t.Fatal("tool description differs from executor")
 		}
 	}
