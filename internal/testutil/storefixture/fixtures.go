@@ -78,7 +78,18 @@ type GitHubIssueClaim struct {
 	IssueNumber                                 *int
 }
 type IssueProjectionFailure struct{ AutomationID, AssignmentEventKey string }
+type NativeAlertProjection struct {
+	WorkItemID, Kind, ActivityID, ActivityNodeID string
+	ActivityStatus                               models.AutomationActivityStatus
+	ResourceCount, ActivityCount                 int
+	Transitions                                  []models.AutomationTransition
+}
+type NativeMailboxKeys struct{ Producer, Action, Gate, Mailbox string }
 type Fixtures interface {
+	NativeAlertProjection(context.Context, string, string, string, string) (NativeAlertProjection, error)
+	NativeMailboxKeys(context.Context, string, string, string) (NativeMailboxKeys, error)
+	CountTransitionEvents(context.Context, string, string, []string) (int, error)
+
 	SetHistoricalExecutionCompletion(context.Context, string, time.Time, int64) error
 	SetDanglingTaskAgent(context.Context, string, string) error
 
@@ -307,6 +318,7 @@ type Fixtures interface {
 // SQLite counts executed statements; other backends must count their database
 // requests, including requests made inside a single store method.
 type IOStats struct {
+	APIChatStatusReads, TaskMarkerReads                                                                  int
 	ExecutionMetricsReads, ExecutionPayloadReads, AgentLabelReads, ThreadMetadataReads, TaskPayloadReads int
 
 	ExecutionReads                                                                                                     int

@@ -48,6 +48,12 @@ func (c *ioCounter) Snapshot() storefixture.IOStats {
 	stats := storefixture.IOStats{Requests: len(statements), ReadTextBytes: c.counter.SelectedTextBytes()}
 	for _, statement := range statements {
 		q := strings.ToLower(strings.Join(strings.Fields(statement), " "))
+		if strings.HasPrefix(q, "select id, status") && strings.Contains(q, "from executions where id = ?") {
+			stats.APIChatStatusReads++
+		}
+		if strings.Contains(q, "select id from tasks where id in") && strings.Contains(q, "category != ?") {
+			stats.TaskMarkerReads++
+		}
 		if strings.Contains(q, "from executions") {
 			if strings.Contains(q, "latest_started_at") && strings.Contains(q, "latest_duration_ms") {
 				stats.ExecutionMetricsReads++
