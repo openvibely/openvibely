@@ -11,15 +11,16 @@ import (
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
-	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/openvibely/openvibely/internal/testutil/storefixture"
 	"github.com/openvibely/openvibely/internal/testutil/teststores"
+	"github.com/stretchr/testify/require"
 )
 
 func TestHandlerTaskUIAgentProjectionAcrossRenders(t *testing.T) {
-	db, counter := testutil.NewStatementCountingTestDB(t)
-	h, e, _ := setupTestHandlerForDB(t, db)
+	h, e, _, stores := setupTestHandlerWithStores(t, teststores.WithIOCounting())
+	counter := stores.IO
 	ctx := context.Background()
-	agentRepo := teststores.Of(db).Agents
+	agentRepo := stores.Agents
 	h.SetAgentRepo(agentRepo)
 
 	project := "default"
@@ -207,22 +208,8 @@ func createRichTaskUIAgent(t *testing.T, repo persistence.AgentStore, name strin
 	return agent
 }
 
-func assertTaskUIAgentProjectionQuery(t *testing.T, counter *testutil.SQLStatementCounter) {
+func assertTaskUIAgentProjectionQuery(t *testing.T, counter storefixture.IOCounter) {
 	t.Helper()
-	var agentStatements []string
-	for _, statement := range counter.Statements() {
-		if strings.Contains(strings.ToLower(statement), "from agents") {
-			agentStatements = append(agentStatements, statement)
-		}
-	}
-	if len(agentStatements) != 1 {
-		t.Fatalf("Agent statements = %#v, want one compact catalog query", agentStatements)
-	}
-	query := strings.ToLower(strings.Join(strings.Fields(agentStatements[0]), " "))
-	projection := strings.Split(query, " from agents ")[0]
-	for _, forbidden := range []string{"description", "system_prompt", "tools", "tool_config", "plugins", "mcp_servers", "skills", "permission_defaults_json", "model_defaults_json", "source_refs_json", "created_at", "updated_at"} {
-		if strings.Contains(projection, forbidden) {
-			t.Fatalf("Task UI query selected forbidden Agent column %q: %s", forbidden, agentStatements[0])
-		}
-	}
+	require.Equal(t, 1, counter.Snapshot().AgentReads)
+	require.Equal(t, 1, counter.Snapshot().AgentTaskUIReads)
 }

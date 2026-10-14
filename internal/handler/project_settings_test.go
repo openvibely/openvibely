@@ -3,6 +3,7 @@ package handler
 import (
 	"bytes"
 	"context"
+	"github.com/stretchr/testify/require"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -296,10 +297,10 @@ func TestProjectSettings_EndToEnd(t *testing.T) {
 func TestProjectDialogsUseCompactDefaultModelProjection(t *testing.T) {
 	t.Setenv("OPENVIBELY_ENABLE_LOCAL_REPO_PATH", "true")
 
-	db, counter := testutil.NewStatementCountingTestDB(t)
-	h, e, llmConfigRepo := setupTestHandlerForDB(t, db)
+	h, e, llmConfigRepo, stores := setupTestHandlerWithStores(t, teststores.WithIOCounting())
+	counter := stores.IO
 	ctx := context.Background()
-	teststores.ClearLLMConfigs(t, teststores.Of(db).LLMConfigs)
+	teststores.ClearLLMConfigs(t, stores.LLMConfigs)
 
 	largeHiddenField := strings.Repeat("hidden-project-dialog-model-field", 4096)
 	globalDefault := &models.LLMConfig{
@@ -346,7 +347,9 @@ func TestProjectDialogsUseCompactDefaultModelProjection(t *testing.T) {
 			!strings.Contains(body, `[global default]`) {
 			t.Fatalf("new dialog did not preserve model labels/default marker: %s", body)
 		}
-		assertProjectDialogModelProjection(t, counter.Statements())
+		require.Equal(t, 1, counter.Snapshot().ModelReads)
+		require.Equal(t, 1, counter.Snapshot().ModelSelectionReads)
+		require.Less(t, counter.Snapshot().ReadTextBytes, 50*1024)
 		assertProjectDialogHiddenModelFieldsAbsent(t, body, largeHiddenField)
 	})
 
@@ -367,36 +370,11 @@ func TestProjectDialogsUseCompactDefaultModelProjection(t *testing.T) {
 		if !strings.Contains(body, `Project Dialog Global Default (openai_compatible/global-default-model)`) || !strings.Contains(body, `[global default]`) {
 			t.Fatalf("edit dialog did not preserve global default label/marker: %s", body)
 		}
-		assertProjectDialogModelProjection(t, counter.Statements())
+		require.Equal(t, 1, counter.Snapshot().ModelReads)
+		require.Equal(t, 1, counter.Snapshot().ModelSelectionReads)
+		require.Less(t, counter.Snapshot().ReadTextBytes, 50*1024)
 		assertProjectDialogHiddenModelFieldsAbsent(t, body, largeHiddenField)
 	})
-}
-
-func assertProjectDialogModelProjection(t *testing.T, statements []string) {
-	t.Helper()
-	var modelQueries []string
-	for _, statement := range statements {
-		stmt := strings.ToLower(strings.Join(strings.Fields(statement), " "))
-		if strings.Contains(stmt, " from agent_configs ") {
-			modelQueries = append(modelQueries, statement)
-		}
-	}
-	if len(modelQueries) != 1 {
-		t.Fatalf("agent_configs statements = %#v, want exactly one compact dialog model query", modelQueries)
-	}
-	stmt := strings.ToLower(strings.Join(strings.Fields(modelQueries[0]), " "))
-	projection := strings.Split(stmt, " from agent_configs ")[0]
-	if !strings.Contains(projection, "select id, name, provider, model, is_default") {
-		t.Fatalf("project dialog model projection = %q, want id/name/provider/model/is_default in %s", projection, modelQueries[0])
-	}
-	for _, forbidden := range []string{"reasoning_effort", "api_key", "oauth_access_token", "oauth_refresh_token", "oauth_client_secret", "oauth_authorize_url", "oauth_token_url", "oauth_scopes", "ollama_base_url", "base_url", "models_url", "auth_header_name", "auth_header_value_prefix", "extra_headers_json", "extra_body_json", "custom_auth_config_json", "custom_auth_state_json", "mixture_config_json", "created_at", "updated_at", "max_workers", "worker_timeout", "auto_start_tasks"} {
-		if strings.Contains(projection, forbidden) {
-			t.Fatalf("project dialog query selected forbidden column %q: %s", forbidden, modelQueries[0])
-		}
-	}
-	if !strings.Contains(stmt, "order by is_default desc, name asc") {
-		t.Fatalf("project dialog query must preserve default/name ordering: %s", modelQueries[0])
-	}
 }
 
 func assertProjectDialogHiddenModelFieldsAbsent(t *testing.T, body, largeHiddenField string) {

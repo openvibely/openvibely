@@ -2,8 +2,9 @@ package handler
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
+	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/testutil/storefixture"
 	"net/http"
 	"net/http/httptest"
 	"runtime"
@@ -14,15 +15,13 @@ import (
 
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/persistence"
-	"github.com/openvibely/openvibely/internal/persistence/sqlite"
-	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/openvibely/openvibely/internal/testutil/teststores"
 )
 
 const projectCapacityAPIProjectionSamples = 7
 
 type projectCapacityAPIProjectionFixture struct {
-	counter     *testutil.SQLStatementCounter
+	counter     storefixture.IOCounter
 	projectRepo persistence.ProjectStore
 	h           *Handler
 	e           *echo.Echo
@@ -94,94 +93,55 @@ func BenchmarkGetProjectCapacitiesProjection(b *testing.B) {
 
 func newProjectCapacityAPIProjectionFixture(tb testing.TB, projectCount int) *projectCapacityAPIProjectionFixture {
 	tb.Helper()
-	reader, writer, counter := testutil.NewFileBackedSplitStatementCountingTestDB(tb)
-	if reader == writer || reader.Stats().MaxOpenConnections != 1 || writer.Stats().MaxOpenConnections != 1 {
-		tb.Fatalf("project capacity fixture requires production 1W + 1R topology: reader=%p writer=%p reader_max=%d writer_max=%d",
-			reader, writer, reader.Stats().MaxOpenConnections, writer.Stats().MaxOpenConnections)
+	stores := teststores.New(tb, teststores.WithProductionTopology(), teststores.WithIOCounting())
+	if err := stores.Fixtures.ClearProjects(tb.Context()); err != nil {
+		tb.Fatal(err)
 	}
-	unregister := sqlite.RegisterDedicatedWriter(reader, writer)
-	tb.Cleanup(unregister)
-	seedProjectCapacityAPIProjectionFixture(tb, writer, projectCount)
-
-	h, e, _ := setupTestHandlerForDB(tb, reader)
+	seedProjectCapacityAPIProjectionFixture(tb, stores, projectCount)
+	env := wireTestHandler(tb, stores.Stores, testHandlerOptions{})
+	h, e := env.Handler, env.Echo
 	h.workerSvc.SetProjectRepo(h.projectRepo)
-	return &projectCapacityAPIProjectionFixture{
-		counter:     counter,
-		projectRepo: teststores.Of(reader).Projects,
-		h:           h,
-		e:           e,
-	}
+	return &projectCapacityAPIProjectionFixture{counter: stores.IO, h: h, e: e, projectRepo: stores.Projects}
 }
-
-func seedProjectCapacityAPIProjectionFixture(tb testing.TB, db *sql.DB, projectCount int) {
+func seedProjectCapacityAPIProjectionFixture(tb testing.TB, stores *teststores.Env, projectCount int) {
 	tb.Helper()
-	ctx := context.Background()
-	tx, err := db.BeginTx(ctx, nil)
-	if err != nil {
-		tb.Fatalf("begin project capacity fixture: %v", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-
-	if _, err := tx.ExecContext(ctx, "DELETE FROM tasks"); err != nil {
-		tb.Fatalf("clear tasks: %v", err)
-	}
-	if _, err := tx.ExecContext(ctx, "DELETE FROM projects"); err != nil {
-		tb.Fatalf("clear projects: %v", err)
-	}
-
-	projectStmt, err := tx.PrepareContext(ctx, `INSERT INTO projects
-		(id, name, description, repo_path, repo_url, is_default, max_workers)
-		VALUES (?, ?, ?, ?, ?, ?, ?)`)
-	if err != nil {
-		tb.Fatalf("prepare project fixture: %v", err)
-	}
-	defer projectStmt.Close()
-	taskStmt, err := tx.PrepareContext(ctx, `INSERT INTO tasks
-		(id, project_id, title, prompt, category, status)
-		VALUES (?, ?, ?, ?, ?, ?)`)
-	if err != nil {
-		tb.Fatalf("prepare task fixture: %v", err)
-	}
-	defer taskStmt.Close()
-
-	description := strings.Repeat("d", 16*1024)
-	repoPath := strings.Repeat("p", 2*1024)
-	repoURL := strings.Repeat("u", 2*1024)
+	ctx := tb.Context()
+	var projects []models.Project
 	for i := 0; i < projectCount; i++ {
-		projectID := fmt.Sprintf("capacity-api-project-%04d", i)
-		var maxWorkers any
+		var maxWorkers *int
 		switch i % 4 {
 		case 1:
-			maxWorkers = 3
+			v := 3
+			maxWorkers = &v
 		case 2:
-			maxWorkers = 9
+			v := 9
+			maxWorkers = &v
 		case 3:
-			maxWorkers = 0
+			v := 0
+			maxWorkers = &v
 		}
-		if _, err := projectStmt.ExecContext(ctx, projectID, fmt.Sprintf("Capacity API Project %04d", i), description, repoPath, repoURL, i == 0, maxWorkers); err != nil {
-			tb.Fatalf("insert project %d: %v", i, err)
-		}
-
-		status := "pending"
+		projects = append(projects, models.Project{ID: fmt.Sprintf("capacity-api-project-%04d", i), Name: fmt.Sprintf("Capacity API Project %04d", i), Description: strings.Repeat("d", 16*1024), RepoPath: strings.Repeat("p", 2*1024), RepoURL: strings.Repeat("u", 2*1024), IsDefault: i == 0, MaxWorkers: maxWorkers})
+	}
+	if err := stores.Fixtures.SeedProjects(ctx, projects); err != nil {
+		tb.Fatal(err)
+	}
+	for i, p := range projects {
+		status := models.StatusPending
 		if i%2 == 1 {
-			status = "queued"
+			status = models.StatusQueued
 		}
-		if _, err := taskStmt.ExecContext(ctx, fmt.Sprintf("capacity-api-pending-task-%04d", i), projectID, "capacity API pending task", "representative pending work", "active", status); err != nil {
-			tb.Fatalf("insert pending task %d: %v", i, err)
-		}
+		tasks := []models.Task{{ProjectID: p.ID, Title: "capacity API pending task", Prompt: "representative pending work", Category: models.CategoryActive, Status: status}}
 		if i%10 == 0 {
-			if _, err := taskStmt.ExecContext(ctx, fmt.Sprintf("capacity-api-completed-task-%04d", i), projectID, "completed task", "completed work", "active", "completed"); err != nil {
-				tb.Fatalf("insert completed task %d: %v", i, err)
-			}
+			tasks = append(tasks, models.Task{ProjectID: p.ID, Title: "completed task", Prompt: "completed work", Category: models.CategoryActive, Status: models.StatusCompleted})
 		}
 		if i%15 == 0 {
-			if _, err := taskStmt.ExecContext(ctx, fmt.Sprintf("capacity-api-backlog-task-%04d", i), projectID, "backlog task", "backlog work", "backlog", "pending"); err != nil {
-				tb.Fatalf("insert backlog task %d: %v", i, err)
+			tasks = append(tasks, models.Task{ProjectID: p.ID, Title: "backlog task", Prompt: "backlog work", Category: models.CategoryBacklog, Status: models.StatusPending})
+		}
+		for _, task := range tasks {
+			if err := stores.Tasks.Create(ctx, &task); err != nil {
+				tb.Fatal(err)
 			}
 		}
-	}
-	if err := tx.Commit(); err != nil {
-		tb.Fatalf("commit project capacity fixture: %v", err)
 	}
 }
 
@@ -263,7 +223,7 @@ func (fixture *projectCapacityAPIProjectionFixture) queryMetrics(tb testing.TB, 
 	if err != nil {
 		tb.Fatalf("query-metric render: %v", err)
 	}
-	return len(body), len(fixture.counter.Statements())
+	return len(body), fixture.counter.Snapshot().Requests
 }
 
 func (fixture *projectCapacityAPIProjectionFixture) selectedProjectBytes(tb testing.TB) int {
@@ -275,5 +235,5 @@ func (fixture *projectCapacityAPIProjectionFixture) selectedProjectBytes(tb test
 	if _, err := fixture.projectRepo.ListWorkerCapacityProjects(ctx); err != nil {
 		tb.Fatalf("list compact project rows for byte metric: %v", err)
 	}
-	return fixture.counter.SelectedTextBytes()
+	return fixture.counter.Snapshot().ReadTextBytes
 }

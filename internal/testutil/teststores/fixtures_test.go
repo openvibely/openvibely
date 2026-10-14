@@ -1314,3 +1314,82 @@ func TestReservedAutomationTaskFixtureRollsBackAndScopes(t *testing.T) {
 		})
 	}
 }
+
+func TestPerformanceProjectionCountersAndProjectLimits(t *testing.T) {
+	for _, production := range []bool{false, true} {
+		name := "isolated"
+		if production {
+			name = "production"
+		}
+		t.Run(name, func(t *testing.T) {
+			opts := []teststores.Option{teststores.WithIOCounting()}
+			if production {
+				opts = append(opts, teststores.WithProductionTopology())
+			}
+			env := teststores.New(t, opts...)
+			ctx := t.Context()
+			require.NoError(t, env.Fixtures.ClearProjects(ctx))
+			zero, three := 0, 3
+			require.NoError(t, env.Fixtures.SeedProjects(ctx, []models.Project{{ID: "unlimited", Name: "Unlimited"}, {ID: "zero", Name: "Zero", MaxWorkers: &zero}, {ID: "limited", Name: "Limited", MaxWorkers: &three}}))
+			projects, err := env.Projects.ListWorkerCapacityProjects(ctx)
+			require.NoError(t, err)
+			require.Len(t, projects, 3)
+			for _, p := range projects {
+				switch p.ID {
+				case "unlimited":
+					require.Nil(t, p.MaxWorkers)
+				case "zero":
+					require.NotNil(t, p.MaxWorkers)
+					require.Equal(t, 0, *p.MaxWorkers)
+				case "limited":
+					require.NotNil(t, p.MaxWorkers)
+					require.Equal(t, 3, *p.MaxWorkers)
+				}
+			}
+			model := models.LLMConfig{Name: "Counter fixture", Provider: models.ProviderTest, Model: "test", MaxWorkers: 3}
+			require.NoError(t, env.LLMConfigs.Create(ctx, &model))
+			env.IO.Reset()
+			env.IO.SetEnabled(true)
+			_, err = env.LLMConfigs.ListChatSelectionOptions(ctx)
+			require.NoError(t, err)
+			_, err = env.LLMConfigs.ListVisionSelectionOptions(ctx)
+			require.NoError(t, err)
+			_, err = env.LLMConfigs.GetByID(ctx, model.ID)
+			require.NoError(t, err)
+			_, err = env.LLMConfigs.ListBadgeOptions(ctx)
+			require.NoError(t, err)
+			_, err = env.LLMConfigs.ListWorkerCapacities(ctx)
+			require.NoError(t, err)
+			_, err = env.Agents.ListTaskUIOptions(ctx)
+			require.NoError(t, err)
+			_, err = env.Projects.ListWorkerCapacityProjects(ctx)
+			require.NoError(t, err)
+			_, err = env.Tasks.CountPendingByProject(ctx)
+			require.NoError(t, err)
+			env.IO.SetEnabled(false)
+			stats := env.IO.Snapshot()
+			require.Equal(t, 8, stats.Requests)
+			require.Equal(t, 3, stats.NewTaskSelectionReads)
+			require.Equal(t, 2, stats.ModelSelectionReads)
+			require.Equal(t, 1, stats.ModelDetailReads)
+			require.Equal(t, 1, stats.ModelBadgeReads)
+			require.Equal(t, 1, stats.ModelWorkerReads)
+			require.Equal(t, 1, stats.AgentTaskUIReads)
+			require.Equal(t, 1, stats.ProjectCapacityReads)
+			require.Equal(t, 1, stats.PendingProjectCountReads)
+			// A full catalog or project read must not be mistaken for the compact projection.
+			env.IO.Reset()
+			env.IO.SetEnabled(true)
+			_, err = env.LLMConfigs.List(ctx)
+			require.NoError(t, err)
+			_, err = env.Projects.List(ctx)
+			require.NoError(t, err)
+			env.IO.SetEnabled(false)
+			stats = env.IO.Snapshot()
+			require.Zero(t, stats.ModelSelectionReads)
+			require.Zero(t, stats.ModelBadgeReads)
+			require.Zero(t, stats.ProjectCapacityReads)
+			require.Equal(t, 1, stats.ProjectOtherOrderedReads)
+		})
+	}
+}

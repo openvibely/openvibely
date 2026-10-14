@@ -945,7 +945,7 @@ func TestHandler_GetTaskDetailStatusPreservesAgentAvailabilityAndTaskStates(t *t
 	fullPage := htmxGet(e, "/tasks/"+fullDetailTask.ID)
 	counter.SetEnabled(false)
 	assertCode(t, fullPage, http.StatusOK)
-	assertTaskUIAgentProjectionQuery(t, counter)
+	assertLegacyTaskUIAgentProjectionQuery(t, counter)
 }
 
 func TestHandler_GetTaskDetailStatus(t *testing.T) {
@@ -9450,4 +9450,24 @@ func newestStoreHistoryExecutionID(t testing.TB, env *teststores.Env, taskID str
 	require.NoError(t, err)
 	require.GreaterOrEqual(t, len(execs), offset)
 	return execs[offset-1].ID
+}
+
+func assertLegacyTaskUIAgentProjectionQuery(t *testing.T, counter *testutil.SQLStatementCounter) {
+	t.Helper()
+	var agentStatements []string
+	for _, statement := range counter.Statements() {
+		if strings.Contains(strings.ToLower(statement), "from agents") {
+			agentStatements = append(agentStatements, statement)
+		}
+	}
+	if len(agentStatements) != 1 {
+		t.Fatalf("Agent statements = %#v, want one compact catalog query", agentStatements)
+	}
+	query := strings.ToLower(strings.Join(strings.Fields(agentStatements[0]), " "))
+	projection := strings.Split(query, " from agents ")[0]
+	for _, forbidden := range []string{"description", "system_prompt", "tools", "tool_config", "plugins", "mcp_servers", "skills", "permission_defaults_json", "model_defaults_json", "source_refs_json", "created_at", "updated_at"} {
+		if strings.Contains(projection, forbidden) {
+			t.Fatalf("Task UI query selected forbidden Agent column %q: %s", forbidden, agentStatements[0])
+		}
+	}
 }

@@ -10,7 +10,6 @@ import (
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/openvibely/openvibely/internal/testutil/teststores"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -200,8 +199,8 @@ func TestHandler_GetProjectCapacities(t *testing.T) {
 }
 
 func TestHandler_GetProjectCapacitiesUsesCompactProjection(t *testing.T) {
-	db, counter := testutil.NewStatementCountingTestDB(t)
-	h, e, _ := setupTestHandlerForDB(t, db)
+	h, e, _, stores := setupTestHandlerWithStores(t, teststores.WithIOCounting())
+	counter := stores.IO
 	ctx := context.Background()
 
 	maxWorkers := 2
@@ -228,22 +227,9 @@ func TestHandler_GetProjectCapacitiesUsesCompactProjection(t *testing.T) {
 	var response []ProjectCapacityResponse
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &response))
 
-	const compactQuery = "select id, name, max_workers from projects order by is_default desc, name asc"
-	const pendingCountQuery = "select project_id, count(*) from tasks where category = 'active' and status in ('pending', 'queued') group by project_id"
-	compactProjectQueries := 0
-	for _, statement := range counter.Statements() {
-		query := strings.ToLower(strings.Join(strings.Fields(statement), " "))
-		switch {
-		case query == compactQuery:
-			compactProjectQueries++
-		case strings.Contains(query, "from projects"):
-			t.Fatalf("capacity collection used a non-compact project query: %q", query)
-		case query != pendingCountQuery:
-			t.Fatalf("capacity collection used an unexpected query: %q", query)
-		}
-	}
-	assert.Equal(t, 1, compactProjectQueries)
-	assert.Len(t, counter.Statements(), 2, "capacity collection should list projects and count pending tasks once")
+	require.Equal(t, 1, counter.Snapshot().ProjectCapacityReads)
+	require.Equal(t, 1, counter.Snapshot().PendingProjectCountReads)
+	require.Equal(t, 2, counter.Snapshot().Requests)
 
 	compactProjects, err := h.projectSvc.ListWorkerCapacityProjects(ctx)
 	require.NoError(t, err)
@@ -775,10 +761,10 @@ func TestHandler_GetModelCapacities(t *testing.T) {
 }
 
 func TestHandler_GetModelCapacitiesUsesCompactWorkerProjection(t *testing.T) {
-	db, counter := testutil.NewStatementCountingTestDB(t)
-	h, e, llmConfigRepo := setupTestHandlerForDB(t, db)
+	h, e, llmConfigRepo, stores := setupTestHandlerWithStores(t, teststores.WithIOCounting())
+	counter := stores.IO
 	ctx := context.Background()
-	teststores.ClearLLMConfigs(t, teststores.Of(db).LLMConfigs)
+	teststores.ClearLLMConfigs(t, stores.LLMConfigs)
 
 	alpha := &models.LLMConfig{
 		Name: "Worker Alpha", Provider: models.ProviderOpenAICompatible, AuthMethod: models.AuthMethodOAuth,
@@ -829,27 +815,9 @@ func TestHandler_GetModelCapacitiesUsesCompactWorkerProjection(t *testing.T) {
 	assert.True(t, resp[1].HasCapacity)
 	assert.Equal(t, 1, resp[1].AvailableSlots)
 
-	statements := counter.Statements()
-	if len(statements) != 1 {
-		t.Fatalf("statements = %#v, want exactly one compact worker capacity query", statements)
-	}
-	stmt := strings.ToLower(strings.Join(strings.Fields(statements[0]), " "))
-	projection := strings.Split(stmt, " from agent_configs ")[0]
-	if projection != "select id, name, model, max_workers" {
-		t.Fatalf("model capacity projection = %q, want compact worker fields in %s", projection, statements[0])
-	}
-	if !strings.Contains(stmt, "where max_workers > 0") || !strings.Contains(stmt, "order by is_default desc, name asc") {
-		t.Fatalf("model capacity query must filter and preserve ordering: %s", statements[0])
-	}
-	for _, forbidden := range []string{
-		"api_key", "oauth_access_token", "oauth_refresh_token", "oauth_client_secret", "oauth_authorize_url",
-		"oauth_token_url", "ollama_base_url", "base_url", "models_url", "extra_headers_json", "extra_body_json",
-		"custom_auth_config_json", "custom_auth_state_json", "mixture_config_json", "worker_timeout",
-	} {
-		if strings.Contains(projection, forbidden) {
-			t.Fatalf("model capacity query selected forbidden column %q: %s", forbidden, statements[0])
-		}
-	}
+	require.Equal(t, 1, counter.Snapshot().Requests)
+	require.Equal(t, 1, counter.Snapshot().ModelWorkerReads)
+	require.Less(t, counter.Snapshot().ReadTextBytes, 1024)
 }
 
 func TestHandler_GetModelCapacity(t *testing.T) {

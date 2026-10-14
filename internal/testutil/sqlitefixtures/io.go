@@ -113,6 +113,9 @@ func (c *ioCounter) Snapshot() storefixture.IOStats {
 			if strings.Contains(q, " from alerts") {
 				stats.AlertReads++
 			}
+			if strings.Contains(q, "from executions") {
+				stats.ExecutionReads++
+			}
 			if strings.Contains(q, "from executions") && strings.Contains(q, "count(*)") {
 				stats.ExecutionCountReads++
 			}
@@ -132,7 +135,32 @@ func (c *ioCounter) Snapshot() storefixture.IOStats {
 				}
 			}
 		}
+
+		if q == "select id, name, max_workers from projects order by is_default desc, name asc" {
+			stats.ProjectCapacityReads++
+		} else if strings.Contains(q, "from projects") && strings.Contains(q, "order by is_default desc, name asc") && q != "select id, name, is_default from projects order by is_default desc, name asc, id asc" {
+			stats.ProjectOtherOrderedReads++
+		}
+		if q == "select project_id, count(*) from tasks where category = 'active' and status in ('pending', 'queued') group by project_id" {
+			stats.PendingProjectCountReads++
+		}
+		if strings.Contains(q, "from agents") && !strings.Contains(q, "system_prompt") && !strings.Contains(q, "description") && strings.Contains(q, "select id, name,") {
+			stats.AgentTaskUIReads++
+		}
 		if strings.HasPrefix(q, "select ") && strings.Contains(q, "from agent_configs") {
+			if strings.HasPrefix(q, "select id, name, model, max_workers from agent_configs") {
+				stats.ModelWorkerReads++
+			}
+			if strings.HasPrefix(q, "select id, name, model, is_default from agent_configs") {
+				stats.ModelBadgeReads++
+			}
+			if strings.HasPrefix(q, "select a.id, a.name, a.provider, a.model, a.reasoning_effort,") {
+				stats.ModelDetailReads++
+			}
+			if strings.HasPrefix(q, "select id, name, provider, model, is_default, auth_method from agent_configs order by is_default desc, name asc") || strings.HasPrefix(q, "select id, name, provider, model, auth_method, is_default, case when coalesce(api_key, '')") || strings.HasPrefix(q, "select a.id, a.name, a.provider, a.model, a.reasoning_effort,") {
+				stats.NewTaskSelectionReads++
+			}
+
 			stats.ModelReads++
 			if strings.Contains(q, "from agent_configs order by is_default desc, name asc") || strings.Contains(q, "from agent_configs a ") && strings.Contains(q, "order by a.is_default desc, a.name asc") {
 				stats.ModelCatalogReads++
