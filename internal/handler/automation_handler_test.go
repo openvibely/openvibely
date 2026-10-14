@@ -2538,24 +2538,17 @@ func composedChannelAutomationRuntimeForTest(ctx context.Context, h *Handler, pa
 	return h.buildStreamingResponseActionRuntime(ctx, params, newChatActionSummaryCollector(), chatcontrol.ToolDefsForContext(mode, surface, mode == models.ChatModeOrchestrate), mode, surface)
 }
 
-func countRowsForProject(t *testing.T, tc *TestContext, table, projectID string) int {
+func automationProjectState(t *testing.T, tc *TestContext, projectID string) storefixture.ProjectAutomationState {
 	t.Helper()
-	var count int
-	switch table {
-	case "automations", "tasks":
-		require.NoError(t, tc.db.QueryRow(fmt.Sprintf(`SELECT COUNT(*) FROM %s WHERE project_id = ?`, table), projectID).Scan(&count))
-	case "schedules":
-		require.NoError(t, tc.db.QueryRow(`SELECT COUNT(*) FROM schedules s JOIN tasks t ON t.id = s.task_id WHERE t.project_id = ?`, projectID).Scan(&count))
-	default:
-		t.Fatalf("unsupported project row count table %q", table)
-	}
-	return count
+	state, err := tc.stores.Fixtures.ProjectAutomationState(context.Background(), projectID)
+	require.NoError(t, err)
+	return state
 }
 
 func TestAutomationChatChannelRuntimeTemplateSavePersistsInResolvedProject(t *testing.T) {
 	for _, surface := range []chatcontrol.Surface{chatcontrol.SurfaceSlack, chatcontrol.SurfaceTelegram, chatcontrol.SurfaceDiscord, chatcontrol.SurfaceEmail} {
 		t.Run(string(surface), func(t *testing.T) {
-			tc := NewTestContext(t)
+			tc := NewStoreTestContext(t)
 			ctx := context.Background()
 			project := tc.CreateProject().WithName("Channel Automation Save").Build()
 			foreign := tc.CreateProject().WithName("Foreign Automation Save").Build()
@@ -2574,18 +2567,18 @@ func TestAutomationChatChannelRuntimeTemplateSavePersistsInResolvedProject(t *te
 			require.Contains(t, output, `"active":true`)
 			require.Contains(t, output, `"url":"/automations/`)
 			require.Contains(t, output, `project_id=`+project.ID)
-			require.Equal(t, 1, countRowsForProject(t, tc, "automations", project.ID))
-			require.Zero(t, countRowsForProject(t, tc, "automations", foreign.ID))
-			require.NotZero(t, countRowsForProject(t, tc, "tasks", project.ID))
-			require.Zero(t, countRowsForProject(t, tc, "tasks", foreign.ID))
-			require.NotZero(t, countRowsForProject(t, tc, "schedules", project.ID))
-			require.Zero(t, countRowsForProject(t, tc, "schedules", foreign.ID))
+			require.Equal(t, 1, automationProjectState(t, tc, project.ID).Automations)
+			require.Zero(t, automationProjectState(t, tc, foreign.ID).Automations)
+			require.NotZero(t, automationProjectState(t, tc, project.ID).Tasks)
+			require.Zero(t, automationProjectState(t, tc, foreign.ID).Tasks)
+			require.NotZero(t, automationProjectState(t, tc, project.ID).Schedules)
+			require.Zero(t, automationProjectState(t, tc, foreign.ID).Schedules)
 		})
 	}
 }
 
 func TestAutomationChatChannelRuntimeInvalidYAMLReturnsValidationWithoutPersisting(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	ctx := context.Background()
 	project := tc.CreateProject().WithName("Channel Automation Invalid").Build()
 	configureAutomationChatRuntimeTestServices(t, tc)
@@ -2597,13 +2590,13 @@ func TestAutomationChatChannelRuntimeInvalidYAMLReturnsValidationWithoutPersisti
 	require.False(t, isError, output)
 	require.Contains(t, output, `"active":false`)
 	require.Contains(t, output, "invalid_yaml")
-	require.Zero(t, countRowsForProject(t, tc, "automations", project.ID))
-	require.Zero(t, countRowsForProject(t, tc, "tasks", project.ID))
-	require.Zero(t, countRowsForProject(t, tc, "schedules", project.ID))
+	require.Zero(t, automationProjectState(t, tc, project.ID).Automations)
+	require.Zero(t, automationProjectState(t, tc, project.ID).Tasks)
+	require.Zero(t, automationProjectState(t, tc, project.ID).Schedules)
 }
 
 func TestAutomationChatChannelRuntimePlanModePreviewOnly(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	ctx := context.Background()
 	project := tc.CreateProject().WithName("Channel Automation Plan").Build()
 	drafts := configureAutomationChatRuntimeTestServices(t, tc)
@@ -2631,11 +2624,11 @@ func TestAutomationChatChannelRuntimePlanModePreviewOnly(t *testing.T) {
 	require.True(t, handled)
 	require.True(t, isError)
 	require.Contains(t, output, "requires orchestrate mode")
-	require.Zero(t, countRowsForProject(t, tc, "automations", project.ID))
+	require.Zero(t, automationProjectState(t, tc, project.ID).Automations)
 }
 
 func TestAutomationChatReadToolsPreserveSharedSummaryEnvelope(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	ctx := context.Background()
 	project := tc.CreateProject().WithName("Automation Chat reads").Build()
 	configureAutomationChatRuntimeTestServices(t, tc)
@@ -2664,11 +2657,18 @@ func TestAutomationChatReadToolsPreserveSharedSummaryEnvelope(t *testing.T) {
 	cards, err := tc.handler.automationGraphSvc.List(ctx, project.ID)
 	require.NoError(t, err)
 	require.Len(t, cards, 1)
-	var graphNodeCount int
-	require.NoError(t, tc.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM automation_nodes WHERE project_id = ? AND automation_id = ?`, project.ID, automationID).Scan(&graphNodeCount))
+	definition, err := tc.stores.Automations.GetDefinition(ctx, project.ID, automationID)
+	require.NoError(t, err)
+	require.NotNil(t, definition)
+	graphNodeCount := len(definition.Nodes)
 	require.Positive(t, graphNodeCount)
-	var runningNodeID string
-	require.NoError(t, tc.db.QueryRowContext(ctx, `SELECT id FROM automation_nodes WHERE project_id = ? AND automation_id = ? AND version_id = ? ORDER BY id LIMIT 1`, project.ID, automationID, cards[0].Version.ID).Scan(&runningNodeID))
+	runningNodeID := definition.Nodes[0].ID
+	for _, node := range definition.Nodes {
+		if node.ID < runningNodeID {
+			runningNodeID = node.ID
+		}
+	}
+
 	_, _, err = tc.stores.Automations.RecordProjectionEvent(ctx, persistence.AutomationProjectionEvent{
 		Context:        models.AutomationContext{ProjectID: project.ID},
 		Binding:        models.AutomationBinding{AutomationID: automationID, VersionID: cards[0].Version.ID, NodeID: runningNodeID},
@@ -2715,8 +2715,10 @@ func TestAutomationChatReadToolsPreserveSharedSummaryEnvelope(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte(foreignOutput), &foreignSaved))
 	foreignAutomationID, _ := foreignSaved["automation_id"].(string)
 	require.NotEmpty(t, foreignAutomationID)
-	var foreignGraphNodeCount int
-	require.NoError(t, tc.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM automation_nodes WHERE project_id = ? AND automation_id = ?`, foreign.ID, foreignAutomationID).Scan(&foreignGraphNodeCount))
+	foreignDefinition, err := tc.stores.Automations.GetDefinition(ctx, foreign.ID, foreignAutomationID)
+	require.NoError(t, err)
+	require.NotNil(t, foreignDefinition)
+	foreignGraphNodeCount := len(foreignDefinition.Nodes)
 	require.Positive(t, foreignGraphNodeCount)
 
 	for _, request := range []struct {
@@ -2891,7 +2893,7 @@ func TestAutomationChatLifecycleActionsRunPauseAndResumeSavedAutomation(t *testi
 }
 
 func TestAutomationChatDeleteAutomationByIDAndExactNamePreservesDomainTasks(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	ctx := context.Background()
 	project := tc.CreateProject().WithName("Automation delete Chat").Build()
 	drafts, automationRepo := configureAutomationChatRuntimeTestServicesWithRepo(t, tc)
@@ -2935,11 +2937,26 @@ func TestAutomationChatDeleteAutomationByIDAndExactNamePreservesDomainTasks(t *t
 
 	firstID := save("Nightly review loop")
 	secondID := save("Weekly review loop")
-	taskCountBeforeDelete := countRowsForProject(t, tc, "tasks", project.ID)
-	scheduleCountBeforeDelete := countRowsForProject(t, tc, "schedules", project.ID)
-	var firstScheduleID, secondScheduleID string
-	require.NoError(t, tc.db.QueryRow(`SELECT schedule_id FROM automation_trigger_owners WHERE automation_id = ?`, firstID).Scan(&firstScheduleID))
-	require.NoError(t, tc.db.QueryRow(`SELECT schedule_id FROM automation_trigger_owners WHERE automation_id = ?`, secondID).Scan(&secondScheduleID))
+	taskCountBeforeDelete := automationProjectState(t, tc, project.ID).Tasks
+	scheduleCountBeforeDelete := automationProjectState(t, tc, project.ID).Schedules
+	scheduleID := func(automationID string) string {
+		definition, err := automationRepo.GetDefinition(ctx, project.ID, automationID)
+		require.NoError(t, err)
+		require.NotNil(t, definition)
+		var ids []string
+		for _, resource := range definition.Resources {
+			if resource.ResourceType == "schedule" {
+				owner, err := automationRepo.GetTriggerOwner(ctx, resource.ResourceID)
+				require.NoError(t, err)
+				require.NotNil(t, owner)
+				require.Equal(t, automationID, owner.AutomationID)
+				ids = append(ids, resource.ResourceID)
+			}
+		}
+		require.Len(t, ids, 1)
+		return ids[0]
+	}
+	firstScheduleID, secondScheduleID := scheduleID(firstID), scheduleID(secondID)
 
 	byName := delete(`{"name":"nightly review loop"}`)
 	require.Equal(t, "delete_automation", byName["action"])
@@ -2966,8 +2983,8 @@ func TestAutomationChatDeleteAutomationByIDAndExactNamePreservesDomainTasks(t *t
 	require.NoError(t, err)
 	require.Nil(t, secondSchedule)
 
-	require.Equal(t, taskCountBeforeDelete-2, countRowsForProject(t, tc, "tasks", project.ID), "deleting Automations must remove only their Automation-owned trigger tasks")
-	require.Equal(t, scheduleCountBeforeDelete-2, countRowsForProject(t, tc, "schedules", project.ID), "deleting Automations must remove only their owned trigger schedules")
+	require.Equal(t, taskCountBeforeDelete-2, automationProjectState(t, tc, project.ID).Tasks, "deleting Automations must remove only their Automation-owned trigger tasks")
+	require.Equal(t, scheduleCountBeforeDelete-2, automationProjectState(t, tc, project.ID).Schedules, "deleting Automations must remove only their owned trigger schedules")
 	retainedDomainTask, err := tc.taskRepo.GetByID(ctx, domainTask.ID)
 	require.NoError(t, err)
 	require.NotNil(t, retainedDomainTask)
@@ -3048,7 +3065,7 @@ func TestAutomationChatDeleteAutomationRejectsInvalidTargetsAndPlanMode(t *testi
 }
 
 func TestAutomationChatDeleteAutomationRejectsInFlightDispatch(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	ctx := context.Background()
 	project := tc.CreateProject().WithName("Automation delete in-flight guard").Build()
 	drafts, automationRepo := configureAutomationChatRuntimeTestServicesWithRepo(t, tc)
@@ -3068,8 +3085,8 @@ func TestAutomationChatDeleteAutomationRejectsInFlightDispatch(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte(output), &saved))
 	automationID, _ := saved["automation_id"].(string)
 	require.NotEmpty(t, automationID)
-	taskCountBeforeDelete := countRowsForProject(t, tc, "tasks", project.ID)
-	scheduleCountBeforeDelete := countRowsForProject(t, tc, "schedules", project.ID)
+	taskCountBeforeDelete := automationProjectState(t, tc, project.ID).Tasks
+	scheduleCountBeforeDelete := automationProjectState(t, tc, project.ID).Schedules
 
 	runOutput, handled, isError, err := runtime.Executor(ctx, "run_automation_now", json.RawMessage(fmt.Sprintf(`{"automation_id":%q}`, automationID)))
 	require.NoError(t, err)
@@ -3083,12 +3100,12 @@ func TestAutomationChatDeleteAutomationRejectsInFlightDispatch(t *testing.T) {
 	definition, err := automationRepo.GetDefinition(ctx, project.ID, automationID)
 	require.NoError(t, err)
 	require.NotNil(t, definition)
-	require.Equal(t, taskCountBeforeDelete, countRowsForProject(t, tc, "tasks", project.ID))
-	require.Equal(t, scheduleCountBeforeDelete, countRowsForProject(t, tc, "schedules", project.ID))
+	require.Equal(t, taskCountBeforeDelete, automationProjectState(t, tc, project.ID).Tasks)
+	require.Equal(t, scheduleCountBeforeDelete, automationProjectState(t, tc, project.ID).Schedules)
 }
 
 func TestAutomationChatUpdateTemplateAppliesNoopsAndRejectsUnsupportedTargets(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	ctx := context.Background()
 	project := tc.CreateProject().WithName("Automation template update Chat").Build()
 	foreign := tc.CreateProject().WithName("Foreign Automation template update Chat").Build()
@@ -3115,8 +3132,7 @@ func TestAutomationChatUpdateTemplateAppliesNoopsAndRejectsUnsupportedTargets(t 
 	require.NotEmpty(t, automationID)
 	currentRevision := service.CurrentAutomationTemplateRevision(service.AutomationAdapterNativeSDLC)
 	require.Positive(t, currentRevision)
-	_, err := tc.db.Exec(`UPDATE automations SET template_revision = 0 WHERE id = ? AND project_id = ?`, automationID, project.ID)
-	require.NoError(t, err)
+	require.NoError(t, tc.stores.Fixtures.SetAutomationTemplateRevision(ctx, project.ID, automationID, 0))
 
 	listed := executeOK(runtime, "list_automations", nil)
 	automations, _ := listed["automations"].([]any)
@@ -3243,7 +3259,7 @@ func TestAutomationChatLifecycleActionsRejectAmbiguousForeignPlanAndArchivedTarg
 }
 
 func TestAutomationChatSaveYAMLPersistsThroughCompilerPipeline(t *testing.T) {
-	tc := NewTestContext(t)
+	tc := NewStoreTestContext(t)
 	ctx := context.Background()
 	project := tc.CreateProject().WithName("Automation YAML Chat save").Build()
 	automationRepo := tc.stores.Automations
@@ -3276,11 +3292,18 @@ func TestAutomationChatSaveYAMLPersistsThroughCompilerPipeline(t *testing.T) {
 	require.Contains(t, output, `"active":true`)
 	require.Contains(t, output, `"status":"active"`)
 	require.Contains(t, output, `"url":"/automations/`)
-	require.Equal(t, 1, tableCountHandler(t, tc, "automations"))
-	require.Equal(t, 2, tableCountHandler(t, tc, "tasks"))
-	require.Equal(t, 1, tableCountHandler(t, tc, "schedules"))
-	var chatAgentTaskCount int
-	require.NoError(t, tc.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM tasks WHERE project_id = ? AND agent_definition_id = ?`, project.ID, agent.ID).Scan(&chatAgentTaskCount))
+	require.Equal(t, 1, automationHandlerState(t, tc).Automations)
+	require.Equal(t, 2, automationHandlerState(t, tc).Tasks)
+	require.Equal(t, 1, automationHandlerState(t, tc).Schedules)
+	assignments, err := tc.taskRepo.ListByProject(ctx, project.ID, "")
+	require.NoError(t, err)
+	chatAgentTaskCount := 0
+	for _, assignment := range assignments {
+		if assignment.AgentDefinitionID != nil && *assignment.AgentDefinitionID == agent.ID {
+			chatAgentTaskCount++
+		}
+	}
+
 	require.Equal(t, 2, chatAgentTaskCount, "Chat save must persist the selected Agent definition on both materialized tasks")
 }
 

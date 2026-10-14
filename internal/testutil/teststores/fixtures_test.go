@@ -745,3 +745,40 @@ func TestChannelRuntimeCounterMeasuresBackendReads(t *testing.T) {
 		})
 	}
 }
+
+func TestProjectAutomationStateIncludesUnpublishedAndChatResources(t *testing.T) {
+	for _, production := range []bool{false, true} {
+		name := "isolated"
+		if production {
+			name = "production"
+		}
+		t.Run(name, func(t *testing.T) {
+			var opts []teststores.Option
+			if production {
+				opts = append(opts, teststores.WithProductionTopology())
+			}
+			env := teststores.New(t, opts...)
+			ctx := t.Context()
+			project := models.Project{Name: "state scope"}
+			require.NoError(t, env.Projects.Create(ctx, &project))
+			empty, err := env.Fixtures.ProjectAutomationState(ctx, project.ID)
+			require.NoError(t, err)
+			require.Equal(t, storefixture.ProjectAutomationState{}, empty)
+			require.NoError(t, env.Fixtures.SeedAutomation(ctx, models.Automation{ID: "unpublished", ProjectID: project.ID, StableKey: "unpublished", Name: "Unpublished", AutomationType: "custom", LifecycleState: "active"}))
+			task := models.Task{ProjectID: project.ID, Title: "chat", Category: models.CategoryChat, Status: models.StatusPending, Priority: 2}
+			require.NoError(t, env.Tasks.Create(ctx, &task))
+			schedule := models.Schedule{TaskID: task.ID, RunAt: time.Now().Add(time.Hour), RepeatType: models.RepeatOnce, RepeatInterval: 1}
+			require.NoError(t, env.Schedules.Create(ctx, &schedule))
+			got, err := env.Fixtures.ProjectAutomationState(ctx, project.ID)
+			require.NoError(t, err)
+			require.Equal(t, storefixture.ProjectAutomationState{Automations: 1, Tasks: 1, Schedules: 1}, got)
+			foreign, err := env.Fixtures.ProjectAutomationState(ctx, "missing")
+			require.NoError(t, err)
+			require.Equal(t, empty, foreign)
+			require.NoError(t, env.Tasks.Delete(ctx, task.ID))
+			got, err = env.Fixtures.ProjectAutomationState(ctx, project.ID)
+			require.NoError(t, err)
+			require.Equal(t, storefixture.ProjectAutomationState{Automations: 1}, got)
+		})
+	}
+}

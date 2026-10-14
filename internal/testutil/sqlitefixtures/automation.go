@@ -199,3 +199,9 @@ func (f *fixtures) SetAutomationHealth(ctx context.Context, id string, state mod
 	_, err := f.db.ExecContext(ctx, `UPDATE automations SET health_state=?,health_reason=? WHERE id=?`, state, reason, id)
 	return err
 }
+
+func (f *fixtures) ProjectAutomationState(ctx context.Context, projectID string) (storefixture.ProjectAutomationState, error) {
+	var state storefixture.ProjectAutomationState
+	err := f.db.QueryRowContext(ctx, `SELECT (SELECT COUNT(*) FROM automations WHERE project_id = ?),(SELECT COUNT(*) FROM tasks WHERE project_id = ?),(SELECT COUNT(*) FROM schedules s JOIN tasks t ON t.id = s.task_id WHERE t.project_id = ?)`, projectID, projectID, projectID).Scan(&state.Automations, &state.Tasks, &state.Schedules)
+	return state, err
+}

@@ -32,7 +32,10 @@ type ChannelProjectSelectionCounts struct{ Discord, Slack, Telegram, Email int }
 // AutomationStateCounts includes retained graphs and unbound resources, so failed saves cannot hide orphaned state.
 type AutomationStateCounts struct{ Automations, Versions, Nodes, Edges, Resources, Tasks, Schedules int }
 
+type ProjectAutomationState struct{ Automations, Tasks, Schedules int }
+
 type Fixtures interface {
+	ProjectAutomationState(context.Context, string) (ProjectAutomationState, error)
 	SeedAutomationEdge(context.Context, models.AutomationEdge) error
 	SeedAutomationResource(context.Context, models.AutomationDefinitionResource) error
 	SetAutomationHealth(context.Context, string, models.AutomationHealthState, string) error
