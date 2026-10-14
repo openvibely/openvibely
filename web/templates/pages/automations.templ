@@ -81,7 +81,7 @@ templ automationsContent(cards []models.AutomationCard, currentProjectID string,
 			<div class="grid grid-cols-1 gap-4 min-w-0 max-w-full">
 				for _, card := range cards {
 					<div
-						class="card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40 hover:shadow-md transition-all w-full min-w-0 max-w-full focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-inset"
+						class="card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40 hover:shadow-md transition-all w-full min-w-0 max-w-full focus:outline-none focus-visible:ring-1 focus-visible:ring-base-content/50 focus-visible:ring-inset"
 						role="link"
 						tabindex="0"
 						aria-label={ "Open Automation " + card.Automation.Name }
@@ -2310,7 +2310,7 @@ templ automationGraphThemeStyles() {
 			.automation-connect-handle--input { fill: oklch(var(--b2)); cursor: default; }
 			.automation-connect-handle--output { fill: oklch(var(--p)); cursor: crosshair; }
 			.automation-connect-handle--selected { fill: oklch(var(--p)); stroke-width: 4; }
-			.automation-connect-handle--eligible { fill: oklch(var(--su)); stroke: oklch(var(--su)); cursor: crosshair; opacity: 1; stroke-width: 4; }			.automation-connect-handle:focus-visible { outline: none; stroke: oklch(var(--p)); stroke-width: 5; }
+			.automation-connect-handle--eligible { fill: oklch(var(--su)); stroke: oklch(var(--su)); cursor: crosshair; opacity: 1; stroke-width: 4; }			.automation-connect-handle:focus-visible { outline: none; stroke: oklch(var(--bc) / .5); stroke-width: 3; }
 			.automation-edge-hit { fill: none; stroke: transparent; stroke-width: 16; vector-effect: non-scaling-stroke; cursor: pointer; }
 			.automation-draft-edge:focus { outline: none; }
 			.automation-edge-foreground { pointer-events: none; stroke: oklch(var(--bc)); }

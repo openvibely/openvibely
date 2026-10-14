@@ -124,7 +124,7 @@ func TestBrowserFunctional_AlertsTaskLinkedCardsSupportNativeKeyboardNavigationI
 
 		browser.waitFor("task-linked Alerts page", `document.readyState + ':' + Boolean(document.querySelector('[data-alert-id="alert-direct"]')) + ':' + Boolean(document.querySelector('[data-alert-id="alert-source-only"]'))`, "complete:true:true")
 		browser.evaluate(`window.htmx = {ajax: function() { return Promise.resolve(); }, process: function() {}}; window.__alertNavigations = []; window.openVibelyNavigate = function(url) { window.__alertNavigations.push(url); return Promise.resolve(); }; 'ready'`)
-		accessibility := browser.evaluate(fmt.Sprintf(`(function() { var direct = document.querySelector(%q), source = document.querySelector('[data-alert-id="alert-source-only"]'); return [direct.getAttribute('role'), direct.getAttribute('tabindex'), direct.getAttribute('aria-label'), direct.classList.contains('focus-visible:ring-2'), direct.classList.contains('focus-visible:ring-primary'), source.hasAttribute('role'), source.hasAttribute('tabindex')].join('|'); })()`, cardSelector))
+		accessibility := browser.evaluate(fmt.Sprintf(`(function() { var direct = document.querySelector(%q), source = document.querySelector('[data-alert-id="alert-source-only"]'); return [direct.getAttribute('role'), direct.getAttribute('tabindex'), direct.getAttribute('aria-label'), direct.classList.contains('focus-visible:ring-1'), direct.classList.contains('focus-visible:ring-base-content/50'), source.hasAttribute('role'), source.hasAttribute('tabindex')].join('|'); })()`, cardSelector))
 		if accessibility != "link|0|Open task for alert Follow-up required|true|true|false|false" {
 			t.Fatalf("unexpected Alerts card accessibility state: %s", accessibility)
 		}

@@ -129,7 +129,7 @@ func TestAlertsContent_TaskLinkedCardsAreKeyboardAccessible(t *testing.T) {
 		`tabindex="0"`,
 		`aria-label="Open task for alert Build failed"`,
 		`data-task-id="task-direct"`,
-		`focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-inset`,
+		`focus:outline-none focus-visible:ring-1 focus-visible:ring-base-content/50 focus-visible:ring-inset`,
 		`onkeydown="if (event.target !== this || event.repeat || (event.key !== 'Enter' && event.key !== ' ')) return; event.preventDefault(); openAlertTaskDialog(this.dataset.taskId)"`,
 	} {
 		if !strings.Contains(html, required) {

@@ -610,7 +610,7 @@ templ alertRow(alert models.AlertSummary, currentProjectID string, state CardLis
 		id={ "alert-" + alert.ID }
 		data-alert-id={ alert.ID }
 		data-alert-scroll-anchor={ alert.ID }
-		class={ "card bg-base-100 shadow-sm border border-base-300 hover:border-primary/40 hover:shadow-md transition-all w-full min-w-0 max-w-full", templ.KV("opacity-60", alert.IsRead), templ.KV("cursor-pointer", alert.TaskID != nil), templ.KV("focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-inset", alert.TaskID != nil) }
+		class={ "card bg-base-100 shadow-sm border border-base-300 hover:border-primary/40 hover:shadow-md transition-all w-full min-w-0 max-w-full", templ.KV("opacity-60", alert.IsRead), templ.KV("cursor-pointer", alert.TaskID != nil), templ.KV("focus:outline-none focus-visible:ring-1 focus-visible:ring-base-content/50 focus-visible:ring-inset", alert.TaskID != nil) }
 		data-card-select-id={ alert.ID }
 		data-card-select-eligible="true"
 		data-search-card

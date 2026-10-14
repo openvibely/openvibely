@@ -499,7 +499,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						text-decoration-color: var(--ov-link-color-active);
 					}
 					.ov-task-result-link:focus-visible {
-						outline: 2px solid var(--ov-link-focus-ring);
+						outline: 1px solid oklch(var(--bc) / .5);
 						outline-offset: 2px;
 						border-radius: 0.25rem;
 						text-decoration-color: var(--ov-link-color-hover);
@@ -2272,7 +2272,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						text-decoration-color: var(--ov-link-color-active);
 					}
 					.chat-markdown a:focus-visible {
-						outline: 2px solid var(--ov-link-focus-ring);
+						outline: 1px solid oklch(var(--bc) / .5);
 						outline-offset: 2px;
 						border-radius: 0.2rem;
 						text-decoration-color: var(--ov-link-color-hover);
