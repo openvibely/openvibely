@@ -810,10 +810,28 @@ func TestCallStreamingSonnet55PreservesEffortAndThinkingToolHistory(t *testing.T
 		!strings.Contains(firstPayload, "[STATUS: FAILED | <describe what prevented completion>]") {
 		t.Fatalf("task request missing provider-neutral outcome status contract: %#v", gotBodies[0]["messages"])
 	}
-	if strings.Contains(firstPayload, "Bash") {
-		t.Fatalf("SkipDefaultTools should omit default tools, got %#v", gotBodies[0]["tools"])
-	}
 	for i, body := range gotBodies {
+		// Environment context may mention Bash even when local tools are disabled.
+		// Check the advertised tools, not arbitrary text elsewhere in the request.
+		tools, ok := body["tools"].([]any)
+		if !ok {
+			t.Fatalf("request %d tools = %#v, want tool definitions", i+1, body["tools"])
+		}
+		foundRuntimeTool := false
+		for _, rawTool := range tools {
+			tool, _ := rawTool.(map[string]any)
+			switch tool["name"] {
+			case "create_task":
+				foundRuntimeTool = true
+			case "web_search", "web_fetch":
+				// Server-side web tools are independent of SkipDefaultTools.
+			default:
+				t.Fatalf("request %d: SkipDefaultTools advertised unexpected tool %#v", i+1, tool)
+			}
+		}
+		if !foundRuntimeTool {
+			t.Fatalf("request %d omitted create_task", i+1)
+		}
 		if body["model"] != "claude-sonnet-5-5" {
 			t.Errorf("request %d model = %v, want claude-sonnet-5-5", i+1, body["model"])
 		}
