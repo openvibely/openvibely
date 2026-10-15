@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"golang.org/x/net/html"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -11,7 +12,6 @@ import (
 func TestTemplateDialogsHaveConsistentCloseControls(t *testing.T) {
 	templatesRoot := filepath.Join("..", "..", "web", "templates")
 	dialogRe := regexp.MustCompile(`(?s)<dialog\b[^>]*id="([^"]+)"[^>]*>.*?</dialog>`)
-	modalBoxRe := regexp.MustCompile(`(?s)<div\b[^>]*class="[^"]*\bmodal-box\b[^"]*"[^>]*>.*?</div>`)
 
 	var dialogCount int
 	err := filepath.WalkDir(templatesRoot, func(path string, d os.DirEntry, err error) error {
@@ -49,13 +49,7 @@ func TestTemplateDialogsHaveConsistentCloseControls(t *testing.T) {
 				t.Errorf("%s dialog %q close button should not show a redundant tooltip", path, dialogID)
 			}
 
-			modalBoxWithClose := false
-			for _, modalBox := range modalBoxRe.FindAllString(dialogMarkup, -1) {
-				if strings.Contains(modalBox, "ov-modal-close") || strings.Contains(modalBox, "@ModalCloseButton") {
-					modalBoxWithClose = true
-					break
-				}
-			}
+			modalBoxWithClose := modalBoxContainsCloseControl(dialogMarkup)
 			if !modalBoxWithClose {
 				t.Errorf("%s dialog %q close button should be inside a modal-box", path, dialogID)
 			}
@@ -99,5 +93,60 @@ func TestTemplateDialogsHaveConsistentCloseControls(t *testing.T) {
 		if !strings.Contains(helper, expected) {
 			t.Fatalf("expected shared modal close helper markup %q", expected)
 		}
+	}
+}
+
+// Tokenize nesting: a non-greedy div regex stops at an inner toolbar div.
+func modalBoxContainsCloseControl(markup string) bool {
+	z := html.NewTokenizer(strings.NewReader(markup))
+	var stack []bool
+	inside := func() bool {
+		for _, box := range stack {
+			if box {
+				return true
+			}
+		}
+		return false
+	}
+	for {
+		switch z.Next() {
+		case html.ErrorToken:
+			return false
+		case html.StartTagToken:
+			token := z.Token()
+			if token.Data == "div" {
+				box := false
+				for _, attr := range token.Attr {
+					if attr.Key == "class" && strings.Contains(" "+attr.Val+" ", " modal-box ") {
+						box = true
+					}
+				}
+				stack = append(stack, box)
+			}
+			if inside() {
+				for _, attr := range token.Attr {
+					if attr.Key == "class" && strings.Contains(" "+attr.Val+" ", " ov-modal-close ") {
+						return true
+					}
+				}
+			}
+		case html.EndTagToken:
+			if z.Token().Data == "div" && len(stack) > 0 {
+				stack = stack[:len(stack)-1]
+			}
+		case html.TextToken:
+			if inside() && strings.Contains(string(z.Text()), "@ModalCloseButton") {
+				return true
+			}
+		}
+	}
+}
+
+func TestModalBoxCloseControlNesting(t *testing.T) {
+	if !modalBoxContainsCloseControl(`<div class="modal-box"><header><div>Download</div><button class="ov-modal-close">Close</button></header></div>`) {
+		t.Fatal("nested toolbar hid close control")
+	}
+	if modalBoxContainsCloseControl(`<div class="modal-box"><div>Content</div></div><button class="ov-modal-close">Close</button>`) {
+		t.Fatal("accepted close outside modal")
 	}
 }

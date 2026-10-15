@@ -99,6 +99,12 @@ for entry in "${FILES[@]}"; do
   cp "$(fetch "$url" "$sha")" "$dist/$dest"
 done
 
+# Pinned document/media libraries ported with their licenses from digital-agency.
+(cd "$assets/file-vendor" && shasum -a 256 -c SHA256SUMS >/dev/null)
+cp -R "$assets/file-vendor/." "$dist/vendor/"
+rm "$dist/vendor/SHA256SUMS"
+cp -R "$assets/files/." "$dist/"
+
 # Tailwind drops rules in @layer components whose classes never appear in the content
 # files, which removes the DaisyUI components the app does not use.
 {

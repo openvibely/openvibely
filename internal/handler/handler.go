@@ -720,7 +720,9 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 			return next(c)
 		}
 	})
-	e.GET("/favicon.png", h.AppIconPNG)
+	e.GET("/files", h.ListFilesPanel)
+ e.GET("/files/:id", h.GeneratedFileContent)
+ e.GET("/favicon.png", h.AppIconPNG)
 	e.GET("/favicon.ico", h.AppIconICO)
 	e.GET(static.Prefix+"*", echo.WrapHandler(static.Handler()))
 
