@@ -7,16 +7,15 @@ import (
 
 	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
-	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/openvibely/openvibely/internal/testutil/teststores"
 )
 
 func TestAlertService_SetDecisionPublishesInvalidationWithoutReloadingAlert(t *testing.T) {
-	db := testutil.NewTestDB(t)
+	storeEnv := teststores.New(t)
 	ctx := context.Background()
 
-	projectRepo := repository.NewProjectRepo(db)
-	alertRepo := repository.NewAlertRepo(db)
+	projectRepo := storeEnv.Stores.Projects
+	alertRepo := storeEnv.Stores.Alerts
 	broadcaster := events.NewBroadcaster()
 	alertSvc := NewAlertService(alertRepo, broadcaster)
 
