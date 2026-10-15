@@ -17,6 +17,7 @@ var ErrMaxSubscribers = errors.New("maximum subscriber limit reached")
 type TaskEventType string
 
 const (
+	TaskFilesChanged              TaskEventType = "task_files_changed"
 	TaskStatusChanged             TaskEventType = "task_status_changed"
 	TaskCategoryChanged           TaskEventType = "task_category_changed"
 	TaskThreadExecutionStarted    TaskEventType = "task_thread_execution_started"
