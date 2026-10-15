@@ -319,7 +319,7 @@ func TestLoadData_ReadErrorContext(t *testing.T) {
 func TestToInputContent_UnsupportedMediaType(t *testing.T) {
 	att := &FileAttachment{
 		FileName:  "doc.pdf",
-		MediaType: "application/pdf",
+		MediaType: "application/zip",
 		Data:      []byte("PDF data"),
 	}
 	_, err := att.toInputContent()

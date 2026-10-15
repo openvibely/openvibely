@@ -1100,3 +1100,32 @@ func TestCompactionActivityInTaskAndChatResponses(t *testing.T) {
 		})
 	}
 }
+
+func TestCallDirectSendsPDFReference(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "report.pdf")
+	if err := os.WriteFile(path, []byte("%PDF-original"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	var payload string
+	server := newHTTPOnlyOpenAIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Error(err)
+		}
+		data, _ := json.Marshal(body)
+		payload = string(data)
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"output":[{"content":[{"type":"output_text","text":"ok"}]}]}`))
+	}))
+	defer server.Close()
+	original := openaiclient.OpenAIAPIBaseURL
+	openaiclient.OpenAIAPIBaseURL = server.URL + "/v1/"
+	defer func() { openaiclient.OpenAIAPIBaseURL = original }()
+	_, _, err := New(nil, nil, nil, nil).CallDirect(context.Background(), "Analyze", []models.Attachment{{FileName: "report.pdf", FilePath: path, MediaType: "application/pdf"}}, models.LLMConfig{Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodAPIKey, APIKey: "test-key", Model: "test-model"}, "", "", true, false, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(payload, `"type":"input_file"`) || strings.Contains(payload, "data:application/pdf;base64,") || !strings.Contains(payload, path) {
+		t.Fatal("expected PDF path without inline document bytes")
+	}
+}

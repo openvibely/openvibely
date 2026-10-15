@@ -957,6 +957,16 @@ func TestCallChatStreamingUsesRuntimePolicyHistoryAndSystemContext(t *testing.T)
 	}
 }
 
+func TestConvertAttachmentsContextPDFUsesReference(t *testing.T) {
+	files, err := convertAttachmentsContext(context.Background(), []models.Attachment{{FileName: "report.pdf", FilePath: "/missing/report.pdf", MediaType: "application/pdf"}})
+	if err != nil || len(files) != 1 {
+		t.Fatalf("prepare PDF reference: %v %v", files, err)
+	}
+	if files[0].MediaType != "text/plain" || !strings.Contains(string(files[0].Data), "/missing/report.pdf") || files[0].FilePath != "" {
+		t.Fatalf("expected reference without binary file loading: %#v", files[0])
+	}
+}
+
 func TestCompactionActivityInTaskAndChatResponses(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")

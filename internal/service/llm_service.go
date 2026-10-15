@@ -1982,24 +1982,8 @@ func (s *LLMService) hydrateTaskSteeringAttachments(inputs []models.ThreadInput)
 			if err != nil {
 				return nil, fmt.Errorf("reading steering attachment %s: %w", entry.Name(), err)
 			}
-			if taskSteeringImageMediaType(entry.Name()) != "" {
-				attachments = append(attachments, models.Attachment{
-					FileName: entry.Name(), FilePath: path,
-					MediaType: taskSteeringImageMediaType(entry.Name()), FileSize: info.Size(),
-				})
-				continue
-			}
-			if info.Size() > 100*1024 {
-				inputs[i].Content = combineProjectInstructions(inputs[i].Content,
-					fmt.Sprintf("File: %s (attached, %d bytes - too large to include inline)", entry.Name(), info.Size()))
-				continue
-			}
-			content, err := os.ReadFile(path)
-			if err != nil {
-				return nil, fmt.Errorf("reading steering attachment %s: %w", entry.Name(), err)
-			}
-			inputs[i].Content = combineProjectInstructions(inputs[i].Content,
-				fmt.Sprintf("--- Attached Files ---\nFile: %s\n```\n%s\n```", entry.Name(), string(content)))
+			attachments = append(attachments, models.Attachment{FileName: entry.Name(), FilePath: path, MediaType: taskSteeringImageMediaType(entry.Name()), FileSize: info.Size()})
+
 		}
 	}
 	return attachments, nil

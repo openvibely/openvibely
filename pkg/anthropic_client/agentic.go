@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -20,6 +21,7 @@ import (
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/llm/tokenestimate"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/pkg/attachment"
 )
 
 const (
@@ -603,10 +605,17 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 				Error:  exec.isError,
 			})
 
+			content := anthropicStringContentRaw(truncateAnthropicToolOutputForModelInput(exec.output, opts.ToolOutputTokenLimit))
+			if image, ok := attachment.TakeToolImage(ctx, exec.output); ok && !exec.isError {
+				content, _ = json.Marshal([]any{
+					map[string]any{"type": "text", "text": "Image returned by view_image: " + image.Name},
+					map[string]any{"type": "image", "source": map[string]any{"type": "base64", "media_type": image.MediaType, "data": base64.StdEncoding.EncodeToString(image.Data)}},
+				})
+			}
 			toolResults = append(toolResults, agenticBlock{
 				Type:      "tool_result",
 				ToolUseID: exec.block.ID,
-				Content:   anthropicStringContentRaw(truncateAnthropicToolOutputForModelInput(exec.output, opts.ToolOutputTokenLimit)),
+				Content:   content,
 				IsError:   exec.isError,
 			})
 		}

@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -16,6 +17,7 @@ import (
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/llm/tokenestimate"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/pkg/attachment"
 )
 
 // CompletionsOptions configures a /v1/chat/completions call with tool use.
@@ -153,9 +155,12 @@ func (c *Client) SendCompletions(ctx context.Context, prompt string, opts *Compl
 	}
 	if existingCompletionsHistory != nil {
 		for _, msg := range existingCompletionsHistory {
-			content := msg.Content
+			var content interface{} = msg.Content
+			if len(msg.ImageContent) > 0 {
+				content = msg.ImageContent
+			}
 			if msg.Role == "tool" {
-				content = truncateToolOutputForModelInput(content, opts.ToolOutputTokenLimit)
+				content = truncateToolOutputForModelInput(msg.Content, opts.ToolOutputTokenLimit)
 			}
 			messages = append(messages, completionsMessage{
 				Role:             msg.Role,
@@ -200,6 +205,8 @@ func (c *Client) SendCompletions(ctx context.Context, prompt string, opts *Compl
 						"url": imageDataURL(att.MediaType, data),
 					},
 				})
+			} else if att.MediaType == "application/pdf" {
+				return nil, fmt.Errorf("PDF document input is unavailable on this Chat Completions connection; use a document-capable Responses or Anthropic connection")
 			} else if IsTextMediaType(att.MediaType) {
 				// For non-image files, add as text context
 				content = append(content, map[string]interface{}{
@@ -294,6 +301,7 @@ func (c *Client) SendCompletions(ctx context.Context, prompt string, opts *Compl
 		// answer cannot authorize calls whose arguments were produced before it.
 		requestInputIndex := exclusiveCompletionsRequestUserInput(turnResult.toolCalls)
 		// Execute tools and add results
+		var imageMessages []completionsMessage
 		for toolIndex, tc := range turnResult.toolCalls {
 			inputJSON := json.RawMessage(tc.Function.Arguments)
 			if opts.OnToolUse != nil {
@@ -354,6 +362,17 @@ func (c *Client) SendCompletions(ctx context.Context, prompt string, opts *Compl
 				Content:    output,
 				ToolCallID: tc.ID,
 			})
+			if image, ok := attachment.TakeToolImage(ctx, output); ok && !isError {
+				content := []map[string]interface{}{
+					{"type": "text", "text": "Image returned by view_image: " + image.Name},
+					{"type": "image_url", "image_url": map[string]interface{}{"url": "data:" + image.MediaType + ";base64," + base64.StdEncoding.EncodeToString(image.Data)}},
+				}
+				imageMessages = append(imageMessages, completionsMessage{Role: "user", Content: content})
+			}
+		}
+		messages = append(messages, imageMessages...)
+		for _, message := range imageMessages {
+			currentTranscript = append(currentTranscript, CompletionsHistoryMessage{Role: "user", ImageContent: message.Content.([]map[string]interface{})})
 		}
 	}
 

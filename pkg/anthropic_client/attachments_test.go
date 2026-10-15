@@ -17,7 +17,7 @@ func TestMediaTypeFromExtension(t *testing.T) {
 		{"JPEG image alt", "test.jpeg", "image/jpeg"},
 		{"GIF image", "test.gif", "image/gif"},
 		{"WebP image", "test.webp", "image/webp"},
-		{"PDF document", "test.pdf", "application/pdf"},
+		{"PDF uses a file reference", "test.pdf", ""},
 		{"Text file", "test.txt", "text/plain"},
 		{"Go file", "test.go", "text/x-go"},
 		{"Python file", "test.py", "text/x-python"},
@@ -58,27 +58,6 @@ func TestIsImageMediaType(t *testing.T) {
 			got := IsImageMediaType(tt.mediaType)
 			if got != tt.want {
 				t.Errorf("IsImageMediaType(%q) = %v, want %v", tt.mediaType, got, tt.want)
-			}
-		})
-	}
-}
-
-func TestIsDocumentMediaType(t *testing.T) {
-	tests := []struct {
-		mediaType string
-		want      bool
-	}{
-		{"application/pdf", true},
-		{"image/png", false},
-		{"text/plain", false},
-		{"", false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.mediaType, func(t *testing.T) {
-			got := IsDocumentMediaType(tt.mediaType)
-			if got != tt.want {
-				t.Errorf("IsDocumentMediaType(%q) = %v, want %v", tt.mediaType, got, tt.want)
 			}
 		})
 	}
@@ -236,27 +215,11 @@ func TestToContentBlock_Image(t *testing.T) {
 	}
 }
 
-func TestToContentBlock_Document(t *testing.T) {
-	att := &FileAttachment{
-		FileName:  "test.pdf",
-		MediaType: "application/pdf",
-		Data:      []byte("fake pdf data"),
-	}
-
+func TestToContentBlockRejectsPDFBytes(t *testing.T) {
+	att := &FileAttachment{FileName: "test.pdf", MediaType: "application/pdf", Data: []byte("%PDF-binary")}
 	block, err := att.toContentBlock()
-	if err != nil {
-		t.Fatalf("toContentBlock() error = %v", err)
-	}
-
-	if block["type"] != "document" {
-		t.Errorf("type = %v, want 'document'", block["type"])
-	}
-	source, ok := block["source"].(map[string]interface{})
-	if !ok {
-		t.Fatal("source field not a map")
-	}
-	if source["type"] != "base64" || source["media_type"] != "application/pdf" || source["data"] != "ZmFrZSBwZGYgZGF0YQ==" {
-		t.Errorf("document source = %#v", source)
+	if err == nil || block != nil {
+		t.Fatalf("PDF bytes must not become image, document, or text input: %#v %v", block, err)
 	}
 }
 
@@ -283,12 +246,12 @@ func TestBuildContentBlocks(t *testing.T) {
 			wantLen: 2, // Text + image
 		},
 		{
-			name:    "Text with document",
+			name:    "PDF bytes rejected",
 			message: "Read this",
 			attachments: []*FileAttachment{
 				{FileName: "test.pdf", MediaType: "application/pdf", Data: []byte("fake")},
 			},
-			wantLen: 2, // Text + document
+			wantErr: true,
 		},
 		{
 			name:    "Text with multiple attachments",
@@ -336,7 +299,7 @@ func TestIsSupportedFileType(t *testing.T) {
 	}{
 		{"test.png", true},
 		{"test.go", true},
-		{"test.pdf", true},
+		{"test.pdf", false},
 		{"test.bmp", false},
 		{"test.xyz", false},
 		{"test", false},
