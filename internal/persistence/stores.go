@@ -69,6 +69,10 @@ type AlertStore interface {
 
 // AttachmentStore persists task attachments.
 type AttachmentStore interface {
+	CreateGeneratedFile(context.Context, *models.GeneratedFile) error
+	GeneratedFile(context.Context, string, string) (*models.GeneratedFile, error)
+	ListGeneratedFiles(context.Context, string, string) ([]models.GeneratedFile, error)
+	ListUploadedFiles(context.Context, string, string) ([]models.FileListItem, error)
 	CleanupOrphanedFiles(ctx context.Context, uploadsDir string) (int, error)
 	Create(ctx context.Context, att *models.Attachment) error
 	Delete(ctx context.Context, id string) error

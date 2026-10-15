@@ -16,6 +16,7 @@ require (
 	github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c
 	github.com/pressly/goose/v3 v3.29.0
 	github.com/rivo/uniseg v0.4.7
+	github.com/saintfish/chardet v0.0.0-20230101081208-5e3ef4b5456d
 	github.com/santhosh-tekuri/jsonschema/v5 v5.3.1
 	github.com/slack-go/slack v0.30.1
 	github.com/stretchr/testify v1.12.1

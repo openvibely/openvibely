@@ -14,7 +14,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const latestMigrationVersion = 211
+const latestMigrationVersion = 212
 
 func openMigrationTestDB(tb testing.TB, dbPath string) *sql.DB {
 	tb.Helper()
@@ -4160,5 +4160,35 @@ func TestMigration210CalendarRoundTrip(t *testing.T) {
 		if count != 0 {
 			t.Fatalf("rollback left %d calendar schema objects", count)
 		}
+	}
+}
+
+func TestMigration212GeneratedFilesAfterHistoryMetadataUpdate(t *testing.T) {
+	db := openMigrationTestDB(t, filepath.Join(t.TempDir(), "generated-files.db"))
+	goose.SetBaseFS(migrations.FS)
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, ".", 211); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.Up(db, "."); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"generated_files", "executions_history_metadata_task_update", "idx_generated_files_project_execution"} {
+		var count int
+		if err := db.QueryRow("SELECT count(*) FROM sqlite_master WHERE name = ?", name).Scan(&count); err != nil {
+			t.Fatal(err)
+		}
+		if count != 1 {
+			t.Fatalf("schema object %s count = %d, want 1", name, count)
+		}
+	}
+	version, err := goose.GetDBVersion(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if version != latestMigrationVersion {
+		t.Fatalf("migration version = %d, want %d", version, latestMigrationVersion)
 	}
 }
