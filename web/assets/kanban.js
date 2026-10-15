@@ -207,9 +207,23 @@
             batch.running = false; window.kanbanBatchRunning = false;
             window.kanbanClearSelection(); refresh();
             window.dispatchEvent(new CustomEvent('kanban-refresh-unblocked'));
-            if (currentColumn(batchKey) && window.htmx) window.htmx.ajax('GET', '/tasks?project_id=' + encodeURIComponent(project), { target: '#kanban-board', select: '#kanban-board', swap: 'outerHTML' });
+            if (currentColumn(batchKey) && window.htmx) refreshBoard(project);
         }
     };
+    // HTMX queues overlapping requests with their target already resolved, so a refresh queued
+    // behind another board swap would land on the replaced, detached board.
+    let boardRefresh = null, queuedBoardRefresh = null;
+    function refreshBoard(project) {
+        if (boardRefresh) { queuedBoardRefresh = project; return; }
+        boardRefresh = Promise.resolve(window.htmx.ajax('GET', '/tasks?project_id=' + encodeURIComponent(project), { target: '#kanban-board', select: '#kanban-board', swap: 'outerHTML' }))
+            .catch(() => {})
+            .then(() => {
+                boardRefresh = null;
+                if (queuedBoardRefresh === null) return;
+                const next = queuedBoardRefresh; queuedBoardRefresh = null;
+                refreshBoard(next);
+            });
+    }
     let searchTimer = 0;
     function setSearchOpen(search, open) {
         const input = search.querySelector('[data-kanban-search-input]');
