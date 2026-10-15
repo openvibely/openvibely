@@ -879,6 +879,7 @@ func resolveProviderRequestForBudget(req llmcontracts.AgentRequest) llmcontracts
 
 func (s *LLMService) callProviderWithCompaction(adapter ProviderAdapter, req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
 	req.Ctx = attachment.WithToolImages(req.Ctx)
+	req.Ctx = s.withDependencyProgress(req)
 	if files := s.fileRuntime(req); files != nil {
 		req.Ctx = llmcontracts.WithRuntimeTools(req.Ctx, llmcontracts.CompositeRuntimeTools(llmcontracts.RuntimeToolsFromContext(req.Ctx), files))
 	}
