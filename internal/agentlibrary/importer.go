@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/openvibely/openvibely/internal/util"
 	"gopkg.in/yaml.v3"
 )
 
@@ -690,7 +691,7 @@ func (i *Importer) WriteSkill(ctx context.Context, decl *SkillDeclaration, body 
 	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
 		created = true
 	}
-	if err := writeFileReplacing(path, []byte(rendered), 0o644); err != nil {
+	if err := util.WriteFileAtomic(path, []byte(rendered), 0o644); err != nil {
 		return nil, fmt.Errorf("importer: write %s: %w", path, err)
 	}
 	result := &ImportResult{
@@ -925,7 +926,7 @@ func writeResolvedSupportFile(abs string, kind SupportFileKind, content []byte, 
 	if kind == SupportScripts {
 		perm = 0o755
 	}
-	if err := writeFileReplacing(abs, content, perm); err != nil {
+	if err := util.WriteFileAtomic(abs, content, perm); err != nil {
 		return nil, fmt.Errorf("importer: write %s: %w", abs, err)
 	}
 	if kind == SupportScripts {
@@ -1421,40 +1422,10 @@ func (i *Importer) ensureStandaloneSkillIndexEntry(root string, decl *SkillDecla
 	if strings.TrimSpace(merged) == strings.TrimSpace(body) && err == nil {
 		return path, false, nil
 	}
-	if err := writeFileReplacing(path, []byte(merged), 0o644); err != nil {
+	if err := util.WriteFileAtomic(path, []byte(merged), 0o644); err != nil {
 		return path, false, fmt.Errorf("importer: write %s: %w", path, err)
 	}
 	return path, true, nil
-}
-
-func writeFileReplacing(path string, content []byte, perm os.FileMode) error {
-	if info, err := os.Lstat(path); err == nil && info.Mode().IsRegular() {
-		perm = info.Mode().Perm()
-	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("stat %s: %w", path, err)
-	}
-
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".openvibely-skill-write-")
-	if err != nil {
-		return fmt.Errorf("create temporary file for %s: %w", path, err)
-	}
-	tmpPath := tmp.Name()
-	defer os.Remove(tmpPath)
-	if err := tmp.Chmod(perm); err != nil {
-		_ = tmp.Close()
-		return fmt.Errorf("chmod temporary file for %s: %w", path, err)
-	}
-	if _, err := tmp.Write(content); err != nil {
-		_ = tmp.Close()
-		return fmt.Errorf("write temporary file for %s: %w", path, err)
-	}
-	if err := tmp.Close(); err != nil {
-		return fmt.Errorf("close temporary file for %s: %w", path, err)
-	}
-	if err := os.Rename(tmpPath, path); err != nil {
-		return fmt.Errorf("replace %s: %w", path, err)
-	}
-	return nil
 }
 
 func mergeRootSkillIndexBodies(agentKey, existingBody, newBody string) string {

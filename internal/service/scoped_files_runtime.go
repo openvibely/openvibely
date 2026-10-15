@@ -15,6 +15,7 @@ import (
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/memory"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/util"
 	"github.com/openvibely/openvibely/pkg/toolschema"
 )
 
@@ -478,7 +479,7 @@ func (s *scopedFilesToolSession) writeFile(input json.RawMessage) (string, error
 	if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
 		return "", err
 	}
-	if err := atomicWriteService(abs, []byte(memory.Redact(params.Content))); err != nil {
+	if err := util.WriteFileAtomic(abs, []byte(memory.Redact(params.Content)), 0o644); err != nil {
 		return "", err
 	}
 	s.recordTouched(rel)
@@ -520,7 +521,7 @@ func (s *scopedFilesToolSession) editFile(input json.RawMessage) (string, error)
 	} else {
 		next = strings.Replace(content, params.OldString, params.NewString, 1)
 	}
-	if err := atomicWriteService(abs, []byte(memory.Redact(next))); err != nil {
+	if err := util.WriteFileAtomic(abs, []byte(memory.Redact(next)), 0o644); err != nil {
 		return "", err
 	}
 	s.recordTouched(rel)
@@ -616,22 +617,4 @@ func (s *scopedFilesToolSession) recordTouched(rel string) {
 func matchGlob(pattern, name string) bool {
 	ok, err := filepath.Match(pattern, name)
 	return err == nil && ok
-}
-
-func atomicWriteService(path string, data []byte) error {
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".tmp-*")
-	if err != nil {
-		return err
-	}
-	tmpName := tmp.Name()
-	_, writeErr := tmp.Write(data)
-	closeErr := tmp.Close()
-	if writeErr != nil || closeErr != nil {
-		_ = os.Remove(tmpName)
-		if writeErr != nil {
-			return writeErr
-		}
-		return closeErr
-	}
-	return os.Rename(tmpName, path)
 }
