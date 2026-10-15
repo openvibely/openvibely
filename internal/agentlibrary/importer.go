@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/openvibely/openvibely/internal/skilldeps"
 	"github.com/openvibely/openvibely/internal/util"
 	"gopkg.in/yaml.v3"
 )
@@ -1213,10 +1214,11 @@ func RenderSkillMarkdown(decl *SkillDeclaration, body string) (string, error) {
 	renderDecl := any(decl)
 	if !decl.IsAgentRootDeclaration() {
 		renderDecl = standaloneSkillFrontmatter{
-			Kind:    decl.Kind,
-			Version: decl.Version,
-			Skill:   standaloneSkillBlockFrom(decl.Skill),
-			Routing: standaloneRoutingBlockFrom(decl.Routing),
+			Dependencies: decl.Dependencies,
+			Kind:         decl.Kind,
+			Version:      decl.Version,
+			Skill:        standaloneSkillBlockFrom(decl.Skill),
+			Routing:      standaloneRoutingBlockFrom(decl.Routing),
 		}
 	}
 	raw, err := yaml.Marshal(renderDecl)
@@ -1240,10 +1242,11 @@ func RenderSkillMarkdown(decl *SkillDeclaration, body string) (string, error) {
 }
 
 type standaloneSkillFrontmatter struct {
-	Kind    string                  `yaml:"kind"`
-	Version int                     `yaml:"version"`
-	Skill   standaloneSkillBlock    `yaml:"skill"`
-	Routing *standaloneRoutingBlock `yaml:"routing,omitempty"`
+	Dependencies []skilldeps.Dependency  `yaml:"dependencies,omitempty"`
+	Kind         string                  `yaml:"kind"`
+	Version      int                     `yaml:"version"`
+	Skill        standaloneSkillBlock    `yaml:"skill"`
+	Routing      *standaloneRoutingBlock `yaml:"routing,omitempty"`
 }
 
 type standaloneSkillBlock struct {
