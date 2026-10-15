@@ -122,7 +122,7 @@ func TestBrowserPerformance_QuotedToolExamplesUseBoundedScans(t *testing.T) {
  `)
 }
 
-func TestBrowserFunctional_ShellAndLegacyBashUseInputRows(t *testing.T) {
+func TestBrowserFunctional_ToolDisplayNamesAndShellInputRows(t *testing.T) {
 	runIncrementalChatBrowser(t, `
  for (const sample of [
   {name:'shell', result:'shell', label:'Shell'},
@@ -145,6 +145,23 @@ func TestBrowserFunctional_ShellAndLegacyBashUseInputRows(t *testing.T) {
     assert(output && output.textContent === 'hello', 'result missing from OUT row');
     assert(!card.querySelector('.tool-spinner'), 'completed tool still pending');
    }
+  }
+ }
+ const processCall = '[Using tool: process]\n';
+ for (const suffix of ['', '[Tool process done]\nhello\n[/Tool]\n']) {
+  await window.renderStreamingContent(stream, processCall+suffix, false);
+  const cards = stream.querySelectorAll('.stream-tool');
+  assert(cards.length === 1, 'expected one process tool card');
+  const card = cards[0];
+  assert(card.querySelector('.tool-name-text').textContent === 'Process', 'process display name must be capitalized');
+  assert(card.getAttribute('data-tool-name') === 'process', 'display name changed the tool identity');
+  assert(!card.querySelector('[data-tool-row="in"]'), 'process gained a shell command input row');
+  if (suffix) {
+   const output = card.querySelector('[data-tool-row="out"] > pre');
+   assert(output && output.textContent === 'hello', 'process result missing from OUT row');
+   assert(!card.querySelector('.tool-spinner'), 'completed process call still pending');
+  } else {
+   assert(card.querySelector('.tool-spinner'), 'pending process call missing spinner');
   }
  }
  return {};
