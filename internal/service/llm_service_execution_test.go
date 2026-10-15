@@ -1427,10 +1427,11 @@ func TestLLMService_HydrateTaskSteeringAttachmentsKeepsImagesStructured(t *testi
 	inputs := []models.ThreadInput{{Content: "inspect these", AttachmentSessionID: sessionID}}
 	attachments, err := svc.hydrateTaskSteeringAttachments(inputs)
 	require.NoError(t, err)
-	require.Contains(t, inputs[0].Content, "attachment notes")
-	require.Len(t, attachments, 1)
-	require.Equal(t, "screen.png", attachments[0].FileName)
-	require.Equal(t, "image/png", attachments[0].MediaType)
+	require.NotContains(t, inputs[0].Content, "attachment notes")
+	require.Len(t, attachments, 2)
+	require.Equal(t, "notes.txt", attachments[0].FileName)
+	require.Equal(t, "screen.png", attachments[1].FileName)
+	require.Equal(t, "image/png", attachments[1].MediaType)
 }
 
 func TestLLMService_HydrateTaskSteeringMessagesPreservesBoundaries(t *testing.T) {

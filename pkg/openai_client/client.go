@@ -156,11 +156,12 @@ type CompletionsToolCall struct {
 // CompletionsHistoryMessage is a conversation message for Chat Completions
 // providers that require reasoning content to be replayed verbatim.
 type CompletionsHistoryMessage struct {
-	Role             string                `json:"role"`
-	Content          string                `json:"content"`
-	ReasoningContent string                `json:"reasoning_content,omitempty"`
-	ToolCalls        []CompletionsToolCall `json:"tool_calls,omitempty"`
-	ToolCallID       string                `json:"tool_call_id,omitempty"`
+	ImageContent     []map[string]interface{} `json:"image_content,omitempty"`
+	Role             string                   `json:"role"`
+	Content          string                   `json:"content"`
+	ReasoningContent string                   `json:"reasoning_content,omitempty"`
+	ToolCalls        []CompletionsToolCall    `json:"tool_calls,omitempty"`
+	ToolCallID       string                   `json:"tool_call_id,omitempty"`
 }
 
 // SendOptions configures a single Send call.

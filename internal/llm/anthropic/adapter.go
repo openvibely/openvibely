@@ -446,7 +446,7 @@ func (a *Adapter) callDirect(ctx context.Context, prompt string, attachments []m
 		return "", llmusage.FromTotal(0), err
 	}
 
-	mcAttachments, err := convertAttachments(attachments)
+	mcAttachments, err := convertAttachmentsContext(ctx, attachments)
 	if err != nil {
 		return "", llmusage.FromTotal(0), fmt.Errorf("convert attachments: %w", err)
 	}
@@ -532,7 +532,7 @@ func (a *Adapter) callChatStreaming(ctx context.Context, message string, attachm
 	systemPromptStr = appendToolModeSystemPrompt(systemPromptStr, rt, chatMode, isTaskFollowup)
 	client.History = append(client.History, buildClientHistory(chatHistory)...)
 
-	mcAttachments, err := convertAttachments(attachments)
+	mcAttachments, err := convertAttachmentsContext(ctx, attachments)
 	if err != nil {
 		return "", llmusage.FromTotal(0), fmt.Errorf("convert attachments: %w", err)
 	}
@@ -637,7 +637,7 @@ func (a *Adapter) callStreaming(ctx context.Context, prompt string, attachments 
 	rt := llmcontracts.RuntimeToolsFromContext(ctx)
 	fullPrompt := llmprompt.BuildTaskPromptHeader() + prompt
 	fullPrompt += llmprompt.BuildTaskStatusInstructions()
-	mcAttachments, err := convertAttachments(attachments)
+	mcAttachments, err := convertAttachmentsContext(ctx, attachments)
 	if err != nil {
 		return "", "", llmusage.FromTotal(0), fmt.Errorf("convert attachments: %w", err)
 	}
@@ -838,27 +838,17 @@ func appendMergedMessage(messages []anthropicclient.Message, role, content strin
 	return append(messages, anthropicclient.Message{Role: role, Content: content})
 }
 
-// convertAttachments converts internal models.Attachment to anthropicclient.FileAttachment format.
-func convertAttachments(attachments []models.Attachment) ([]*anthropicclient.FileAttachment, error) {
-	if len(attachments) == 0 {
-		return nil, nil
-	}
-
-	prepared, err := llmattachment.Preprocess(attachments)
+// convertAttachmentsContext prepares file references and supported images for Anthropic.
+func convertAttachmentsContext(ctx context.Context, attachments []models.Attachment) ([]*anthropicclient.FileAttachment, error) {
+	inputs, err := llmattachment.ModelInputs(ctx, attachments)
 	if err != nil {
-		return nil, fmt.Errorf("preprocess attachments: %w", err)
+		return nil, err
 	}
-
-	result := make([]*anthropicclient.FileAttachment, 0, len(prepared))
-	for _, att := range prepared {
-		mcAtt, err := anthropicclient.NewFileAttachment(att.FilePath)
-		if err != nil {
-			applog.Infof("[anthropic] convertAttachments error loading %s: %v", att.FilePath, err)
-			return nil, fmt.Errorf("load attachment %s: %w", att.FileName, err)
-		}
-		result = append(result, mcAtt)
+	out := make([]*anthropicclient.FileAttachment, 0, len(inputs))
+	for _, input := range inputs {
+		out = append(out, &anthropicclient.FileAttachment{FileName: input.Name, MediaType: input.MediaType, Data: input.Data})
 	}
-	return result, nil
+	return out, nil
 }
 
 // stopReasonIfMaxTokens returns "max_tokens" if err is errMaxTokens, else empty string.

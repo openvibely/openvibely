@@ -526,7 +526,7 @@ func TestAPIChatMessage_OversizedMultipartWithSplitFileHeaderIsBounded(t *testin
 	req, body, totalSize := newSizedMultipartUploadRequestWithFilePrefix(t, http.MethodPost, "/api/chat/message", map[string]string{
 		"message":    "Check this large upload",
 		"project_id": projectID,
-	}, "attachments", "too-large.txt", "text/plain", 25<<20, invalidMultipartBoundaryPayloadPrefix(), false)
+	}, "attachments", "too-large.txt", "text/plain", 30<<20, invalidMultipartBoundaryPayloadPrefix(), false)
 	body.limitReadChunkSize(1)
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
@@ -727,8 +727,8 @@ func TestAPIChatMessage_AllowsPaddedBoundaryDelimiterWhitespace(t *testing.T) {
 	defer func() { uploadsDir = oldUploadsDir }()
 
 	files := []taskAttachmentTestFile{
-		{name: "padded-first.txt", contentType: "text/plain", content: bytes.Repeat([]byte("a"), 6<<20)},
-		{name: "padded-second.txt", contentType: "text/plain", content: bytes.Repeat([]byte("b"), 6<<20)},
+		{name: "padded-first.pdf", contentType: "text/plain", content: bytes.Repeat([]byte("a"), 14<<20)},
+		{name: "padded-second.pdf", contentType: "text/plain", content: bytes.Repeat([]byte("b"), 14<<20)},
 	}
 	body, contentType := newPaddedDelimiterMultipartBody(t, map[string]string{
 		"message":    "Check these padded boundary files",
@@ -750,7 +750,7 @@ func TestAPIChatMessage_AllowsPaddedBoundaryDelimiterWhitespace(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, attachments, 2)
 	for _, attachment := range attachments {
-		assert.Equal(t, int64(6<<20), attachment.FileSize)
+		assert.Equal(t, int64(14<<20), attachment.FileSize)
 		assert.FileExists(t, attachment.FilePath)
 	}
 }
@@ -1172,7 +1172,7 @@ func TestIsAllowedFileType(t *testing.T) {
 		{"script.exe", false},
 		{"archive.zip", false},
 		{"binary.bin", false},
-		{"image.svg", false},
+		{"image.svg", true},
 		{"noext", false},
 		{"app.wasm", false},
 		{"lib.so", false},
@@ -2632,7 +2632,7 @@ func TestIsAllowedFileType_CodeFiles(t *testing.T) {
 		// Still rejected
 		{"binary.exe", false},
 		{"archive.zip", false},
-		{"image.svg", false},
+		{"image.svg", true},
 		{"binary.bin", false},
 		{"app.wasm", false},
 	}

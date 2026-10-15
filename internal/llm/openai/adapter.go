@@ -445,7 +445,7 @@ func (a *Adapter) CallDirect(ctx context.Context, prompt string, attachments []m
 		}
 	}
 
-	oaAttachments, err := convertAttachments(attachments)
+	oaAttachments, err := convertAttachmentsContext(ctx, attachments)
 	if err != nil {
 		return "", llmusage.FromTotal(0), fmt.Errorf("convert attachments: %w", err)
 	}
@@ -543,7 +543,7 @@ func (a *Adapter) CallStreaming(ctx context.Context, prompt string, attachments 
 		prompt
 	fullPrompt += llmprompt.BuildTaskStatusInstructions()
 
-	oaAttachments, err := convertAttachments(attachments)
+	oaAttachments, err := convertAttachmentsContext(ctx, attachments)
 	if err != nil {
 		return "", "", llmusage.FromTotal(0), fmt.Errorf("convert attachments: %w", err)
 	}
@@ -684,7 +684,7 @@ func (a *Adapter) CallChatStreaming(ctx context.Context, message string, attachm
 	}
 	systemPromptStr = appendToolModeSystemPrompt(systemPromptStr, rt, chatMode, isTaskFollowup)
 
-	oaAttachments, err := convertAttachments(attachments)
+	oaAttachments, err := convertAttachmentsContext(ctx, attachments)
 	if err != nil {
 		return "", llmusage.FromTotal(0), fmt.Errorf("convert attachments: %w", err)
 	}
@@ -820,7 +820,7 @@ func (a *Adapter) CallCompletionsStreaming(ctx context.Context, prompt string, a
 		prompt
 	fullPrompt += llmprompt.BuildTaskStatusInstructions()
 
-	oaAttachments, err := convertAttachments(attachments)
+	oaAttachments, err := convertAttachmentsContext(ctx, attachments)
 	if err != nil {
 		return "", "", llmusage.FromTotal(0), fmt.Errorf("convert attachments: %w", err)
 	}
@@ -903,7 +903,7 @@ func (a *Adapter) CallCompletionsChatStreaming(ctx context.Context, message stri
 	}
 	systemPromptStr = appendToolModeSystemPrompt(systemPromptStr, rt, chatMode, isTaskFollowup)
 
-	oaAttachments, err := convertAttachments(attachments)
+	oaAttachments, err := convertAttachmentsContext(ctx, attachments)
 	if err != nil {
 		return "", llmusage.FromTotal(0), fmt.Errorf("convert attachments: %w", err)
 	}
@@ -1224,36 +1224,19 @@ func restoreOpenAIAstraReasoningState(ctx context.Context, client *openaiclient.
 	}
 }
 
-func convertAttachments(attachments []models.Attachment) ([]*openaiclient.FileAttachment, error) {
-	if len(attachments) == 0 {
-		return nil, nil
-	}
-
-	prepared, err := llmattachment.Preprocess(attachments)
+func convertAttachmentsContext(ctx context.Context, attachments []models.Attachment) ([]*openaiclient.FileAttachment, error) {
+	inputs, err := llmattachment.ModelInputs(ctx, attachments)
 	if err != nil {
-		return nil, fmt.Errorf("preprocess attachments: %w", err)
+		return nil, err
 	}
-
-	result := make([]*openaiclient.FileAttachment, 0, len(prepared))
-	for _, att := range prepared {
-		oaAtt, err := openaiclient.NewFileAttachment(att.FilePath)
-		if err != nil {
-			// Skip unsupported file types silently (e.g. PDFs)
-			if _, ok := err.(*openaiclient.UnsupportedFileTypeError); ok {
-				applog.Infof("[openai-adapter] convertAttachments skipping unsupported file %s: %v", att.FileName, err)
-				continue
-			}
-			return nil, fmt.Errorf("load attachment %s: %w", att.FileName, err)
-		}
-		if strings.TrimSpace(att.FileName) != "" {
-			oaAtt.FileName = att.FileName
-		}
-		if strings.TrimSpace(att.MediaType) != "" {
-			oaAtt.MediaType = strings.TrimSpace(att.MediaType)
-		}
-		result = append(result, oaAtt)
+	out := make([]*openaiclient.FileAttachment, 0, len(inputs))
+	for _, input := range inputs {
+		out = append(out, &openaiclient.FileAttachment{FileName: input.Name, MediaType: input.MediaType, Data: input.Data})
 	}
-	return result, nil
+	return out, nil
+}
+func convertAttachments(attachments []models.Attachment) ([]*openaiclient.FileAttachment, error) {
+	return convertAttachmentsContext(context.Background(), attachments)
 }
 
 func openAILocalSteeringCallback(ctx context.Context) func(context.Context) (openaiclient.LocalSteeringInput, error) {

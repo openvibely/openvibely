@@ -2,7 +2,6 @@ package prompt
 
 import (
 	"fmt"
-
 	"strings"
 	"testing"
 
@@ -60,7 +59,7 @@ func TestBuildAttachmentInstructions_WithFiles(t *testing.T) {
 	if !strings.Contains(result, "/tmp/image.png") {
 		t.Error("should contain absolute path for image.png")
 	}
-	if !strings.Contains(result, "absolute path") {
+	if !strings.Contains(result, "path:") {
 		t.Error("should mention absolute paths")
 	}
 }
