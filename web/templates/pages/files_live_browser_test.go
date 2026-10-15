@@ -45,6 +45,12 @@ func TestBrowserFunctional_PublishedFileRefreshesTaskPanel(t *testing.T) {
 	defer server.Close()
 	runComposerFocusCDP(t, chrome, server.URL+"/test", "files-live", func(b *composerFocusCDP) {
 		b.waitFor("initial files load", `String(!!window.OVFileViewer && document.querySelector('[data-task-files]')?.classList.contains('htmx-settling')===false && document.querySelector('#attachment-list')?.textContent.includes('No files yet.'))`, "true")
+		b.evaluate(`const execution=document.createElement('div');execution.dataset.executionPair='true';execution.dataset.execId='dependency-test';document.body.append(execution);window.dispatchEvent(new CustomEvent('sse-task-event',{detail:{type:'skill_dependency_progress',dependency_name:'paperworks',exec_id:'dependency-test',phase:'downloading',message:'paperworks: downloading'}}));'sent'`)
+		b.waitFor("dependency setup progress", `String(document.querySelector('[data-skill-dependency-status]')?.textContent.includes('paperworks: downloading'))`, "true")
+		b.evaluate(`window.dispatchEvent(new CustomEvent('sse-task-event',{detail:{type:'skill_dependency_progress',dependency_name:'paperworks',exec_id:'other',phase:'failed',message:'other: failed'}}));'sent'`)
+		b.waitFor("unrelated dependency ignored", `String(document.querySelector('[data-skill-dependency-status]')?.textContent.includes('paperworks: downloading'))`, "true")
+		b.evaluate(`window.dispatchEvent(new CustomEvent('sse-task-event',{detail:{type:'skill_dependency_progress',dependency_name:'paperworks',exec_id:'dependency-test',phase:'ready',message:'paperworks: ready'}}));'sent'`)
+		b.waitFor("dependency progress cleared", `String(!document.querySelector('[data-skill-dependency-status]'))`, "true")
 		published.Store(true)
 		b.evaluate(`window.dispatchEvent(new CustomEvent('sse-task-event',{detail:{type:'task_files_changed',task_id:'task',project_id:'files'}}));'sent'`)
 		b.waitFor("published PDF appears without navigation", `String(document.querySelector('#attachment-list')?.textContent.includes('report.pdf'))`, "true")
