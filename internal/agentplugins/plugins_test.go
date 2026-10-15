@@ -699,6 +699,97 @@ func TestLoadPluginMCPServersParsesNestedConfigAndInterpolatesEnv(t *testing.T) 
 	}
 }
 
+func TestLoadPluginMCPServersInterpolatesPluginRootWithoutProcessEnv(t *testing.T) {
+	pluginDir := t.TempDir()
+	pluginRootEnv, pluginRootWasSet := os.LookupEnv("CLAUDE_PLUGIN_ROOT")
+	if err := os.Unsetenv("CLAUDE_PLUGIN_ROOT"); err != nil {
+		t.Fatalf("unset CLAUDE_PLUGIN_ROOT: %v", err)
+	}
+	t.Cleanup(func() {
+		if pluginRootWasSet {
+			_ = os.Setenv("CLAUDE_PLUGIN_ROOT", pluginRootEnv)
+		} else {
+			_ = os.Unsetenv("CLAUDE_PLUGIN_ROOT")
+		}
+	})
+	t.Setenv("PLUGIN_TOKEN", "secret-token")
+
+	data := `{
+  "mcpServers": {
+    "stdio-server": {
+      "command": "${CLAUDE_PLUGIN_ROOT}/bin/server",
+      "args": ["--cwd", "${CLAUDE_PLUGIN_ROOT}", "$CLAUDE_PLUGIN_ROOT/x.js"],
+      "env": {"ROOT": "${CLAUDE_PLUGIN_ROOT}", "TOKEN": "$PLUGIN_TOKEN"}
+    },
+    "http-server": {
+      "url": "https://example.test/${CLAUDE_PLUGIN_ROOT}/mcp",
+      "headers": {"Plugin-Root": "$CLAUDE_PLUGIN_ROOT", "Authorization": "Bearer ${PLUGIN_TOKEN}"}
+    }
+  }
+}`
+	if err := os.WriteFile(filepath.Join(pluginDir, ".mcp.json"), []byte(data), 0o644); err != nil {
+		t.Fatalf("write .mcp.json: %v", err)
+	}
+
+	absolutePluginDir, err := filepath.Abs(pluginDir)
+	if err != nil {
+		t.Fatalf("resolve plugin directory: %v", err)
+	}
+	servers := loadPluginMCPServers(pluginDir)
+	if len(servers) != 2 {
+		t.Fatalf("expected two usable servers, got %#v", servers)
+	}
+	byName := map[string]models.MCPServerConfig{}
+	for _, server := range servers {
+		byName[server.Name] = server
+	}
+	stdio := byName["stdio-server"]
+	wantCommand := []string{filepath.Join(absolutePluginDir, "bin", "server"), "--cwd", absolutePluginDir, filepath.Join(absolutePluginDir, "x.js")}
+	if !reflect.DeepEqual(stdio.Command, wantCommand) {
+		t.Fatalf("stdio command = %#v, want %#v", stdio.Command, wantCommand)
+	}
+	if stdio.Env["ROOT"] != absolutePluginDir || stdio.Env["TOKEN"] != "secret-token" {
+		t.Fatalf("stdio env = %#v", stdio.Env)
+	}
+	httpServer := byName["http-server"]
+	if httpServer.URL != "https://example.test/"+absolutePluginDir+"/mcp" {
+		t.Fatalf("http URL = %q", httpServer.URL)
+	}
+	if httpServer.Headers["Plugin-Root"] != absolutePluginDir || httpServer.Headers["Authorization"] != "Bearer secret-token" {
+		t.Fatalf("http headers = %#v", httpServer.Headers)
+	}
+}
+
+func TestResolveRuntimeBundleReturnsPluginRootInServerCommand(t *testing.T) {
+	tmp := t.TempDir()
+	pluginRoot := filepath.Join(tmp, "plugins")
+	pluginDir := filepath.Join(pluginRoot, "cache", "market", "server-plugin", "20240101T010101")
+	if err := os.MkdirAll(pluginDir, 0o755); err != nil {
+		t.Fatalf("mkdir plugin: %v", err)
+	}
+	config := `{"mcpServers":{"plugin-server":{"command":"${CLAUDE_PLUGIN_ROOT}/bin/server","args":["$CLAUDE_PLUGIN_ROOT/worker.js"]}}}`
+	if err := os.WriteFile(filepath.Join(pluginDir, ".mcp.json"), []byte(config), 0o644); err != nil {
+		t.Fatalf("write .mcp.json: %v", err)
+	}
+
+	origUserPluginBase := userPluginBaseFn
+	defer func() { userPluginBaseFn = origUserPluginBase }()
+	userPluginBaseFn = func() string { return pluginRoot }
+
+	bundle, err := ResolveRuntimeBundle(context.Background(), []string{"server-plugin@market"})
+	if err != nil {
+		t.Fatalf("resolve runtime bundle: %v", err)
+	}
+	merged := MergeAgentWithRuntime(&models.Agent{}, bundle)
+	if len(merged.MCPServers) != 1 {
+		t.Fatalf("merged MCP servers = %#v", merged.MCPServers)
+	}
+	wantCommand := []string{filepath.Join(pluginDir, "bin", "server"), filepath.Join(pluginDir, "worker.js")}
+	if !reflect.DeepEqual(merged.MCPServers[0].Command, wantCommand) {
+		t.Fatalf("merged server command = %#v, want %#v", merged.MCPServers[0].Command, wantCommand)
+	}
+}
+
 func TestResolveRuntimeBundleDeduplicatesPluginResourcesAndMapsServers(t *testing.T) {
 	tmp := t.TempDir()
 	pluginRoot := filepath.Join(tmp, "plugins")
