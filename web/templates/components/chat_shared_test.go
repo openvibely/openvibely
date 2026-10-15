@@ -2335,6 +2335,13 @@ func TestTaskAttachmentListCarriesProjectContext(t *testing.T) {
 		t.Fatalf("render AttachmentList: %v", err)
 	}
 	content := buf.String()
+	if strings.Contains(content, "data-files-panel") || strings.Contains(content, ">Attachments</h3>") {
+		t.Fatal("Files tab must not repeat its heading or open a second file list")
+	}
+	if !strings.Contains(content, `id="add-attachment-btn"`) {
+		t.Fatal("Files tab must retain its upload control")
+	}
+
 	if !strings.Contains(content, `hx-post="/tasks/task-a/attachments?project_id=project-a"`) {
 		t.Fatalf("upload URL must carry project context, got: %s", content)
 	}
@@ -6495,5 +6502,17 @@ func TestChatAutoScrollScript_ToolOutputRendersAllTypesAndPreservesScroll(t *tes
 		if strings.Contains(content, fragment) {
 			t.Fatalf("render pass must not synchronously measure every tool scroller; found %q", fragment)
 		}
+	}
+}
+
+func TestTaskFilesListIncludesGeneratedOutputs(t *testing.T) {
+	var buf bytes.Buffer
+	err := TaskFilesList(nil, "project-a", nil, []models.GeneratedFile{{ID: "output-a", FileName: "report.docx", MediaType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", FileSize: 42}}).Render(context.Background(), &buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := buf.String()
+	if !strings.Contains(content, "/files/output-a?project_id=project-a") || !strings.Contains(content, "report.docx") || strings.Contains(content, "No files yet") {
+		t.Fatalf("missing generated output: %s", content)
 	}
 }
