@@ -113,22 +113,87 @@ var (
 	sharedServers = map[string]*sharedServerEntry{}
 )
 
+// mcpStartupConcurrency bounds how many cold MCP servers NewMCPManager starts at once.
+const mcpStartupConcurrency = 4
+
+type serverAcquireResult struct {
+	key string
+	srv *MCPServer
+	err error
+}
+
 // NewMCPManager creates a manager and starts all configured MCP servers.
 func NewMCPManager(ctx context.Context, configs []models.MCPServerConfig, workDir string) (*MCPManager, error) {
+	// Avoid worker bookkeeping on the common single-server path.
+	if len(configs) == 1 {
+		cfg := configs[0]
+		srv, err := acquireServer(ctx, cfg, workDir, false)
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			if srv != nil {
+				releaseServer(cfg)
+			}
+			return nil, fmt.Errorf("starting MCP servers: %w", ctxErr)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("starting MCP servers failed: %s: %v", cfg.Name, err)
+		}
+		return &MCPManager{servers: []managedServerRef{{key: serverConfigKey(cfg), cfg: cfg, srv: srv}}}, nil
+	}
+	results := make([]serverAcquireResult, len(configs))
+	firstIdx := make(map[string]int, len(configs))
+	var cold []int
+	for i, cfg := range configs {
+		key := serverConfigKey(cfg)
+		results[i].key = key
+		if _, dup := firstIdx[key]; dup {
+			continue
+		}
+		firstIdx[key] = i
+		if srv := acquireWarmServer(key, false); srv != nil {
+			results[i].srv = srv
+			continue
+		}
+		cold = append(cold, i)
+	}
+
+	acquireColdServers(ctx, configs, cold, workDir, results)
+
+	// Duplicates reuse the first entry's outcome so they never launch another process,
+	// while still holding their own reference to keep Close symmetric.
+	for i := range configs {
+		first := firstIdx[results[i].key]
+		if first == i {
+			continue
+		}
+		if results[first].err != nil {
+			results[i].err = results[first].err
+			continue
+		}
+		results[i].srv = acquireWarmServer(results[i].key, false)
+	}
+
+	if err := ctx.Err(); err != nil {
+		for i, r := range results {
+			if r.srv != nil {
+				releaseServer(configs[i])
+			}
+		}
+		return nil, fmt.Errorf("starting MCP servers: %w", err)
+	}
+
 	m := &MCPManager{}
 	var errs []string
-	for _, cfg := range configs {
-		key := serverConfigKey(cfg)
-		srv, err := acquireServer(ctx, cfg, workDir, false)
-		if err != nil {
-			errs = append(errs, fmt.Sprintf("%s: %v", cfg.Name, err))
-			applog.Infof("[mcp] skipping server %q: %v", cfg.Name, err)
+	for i, cfg := range configs {
+		r := results[i]
+		if r.err != nil {
+			errs = append(errs, fmt.Sprintf("%s: %v", cfg.Name, r.err))
+			applog.Infof("[mcp] skipping server %q: %v", cfg.Name, r.err)
 			continue
 		}
 		m.servers = append(m.servers, managedServerRef{
-			key: key,
+			key: r.key,
 			cfg: cfg,
-			srv: srv,
+			srv: r.srv,
 		})
 	}
 
@@ -258,22 +323,61 @@ func PersistentRuntimeState() []models.PluginRuntimeMCP {
 	return out
 }
 
+func acquireColdServers(ctx context.Context, configs []models.MCPServerConfig, idxs []int, workDir string, results []serverAcquireResult) {
+	acquire := func(i int) {
+		if err := ctx.Err(); err != nil {
+			results[i].err = err
+			return
+		}
+		results[i].srv, results[i].err = acquireServer(ctx, configs[i], workDir, false)
+	}
+
+	workers := min(mcpStartupConcurrency, len(idxs))
+	if workers <= 1 {
+		for _, i := range idxs {
+			acquire(i)
+		}
+		return
+	}
+
+	jobs := make(chan int)
+	var wg sync.WaitGroup
+	for range workers {
+		wg.Go(func() {
+			for i := range jobs {
+				acquire(i)
+			}
+		})
+	}
+	for _, i := range idxs {
+		jobs <- i
+	}
+	close(jobs)
+	wg.Wait()
+}
+
+// acquireWarmServer takes a reference on an already running server, or returns nil.
+func acquireWarmServer(key string, persistent bool) *MCPServer {
+	sharedMu.Lock()
+	defer sharedMu.Unlock()
+	existing := sharedServers[key]
+	if existing == nil || existing.srv == nil {
+		return nil
+	}
+	existing.refs++
+	if persistent {
+		existing.persistent = true
+	}
+	existing.updatedAt = time.Now().UTC()
+	return existing.srv
+}
+
 func acquireServer(ctx context.Context, cfg models.MCPServerConfig, workDir string, persistent bool) (*MCPServer, error) {
 	key := serverConfigKey(cfg)
 
-	sharedMu.Lock()
-	existing := sharedServers[key]
-	if existing != nil && existing.srv != nil {
-		existing.refs++
-		if persistent {
-			existing.persistent = true
-		}
-		existing.updatedAt = time.Now().UTC()
-		srv := existing.srv
-		sharedMu.Unlock()
+	if srv := acquireWarmServer(key, persistent); srv != nil {
 		return srv, nil
 	}
-	sharedMu.Unlock()
 
 	srv, startErr := startServerFn(ctx, cfg, workDir)
 	now := time.Now().UTC()
@@ -430,13 +534,13 @@ func startServer(ctx context.Context, cfg models.MCPServerConfig, workDir string
 	}
 
 	// Initialize with JSON-RPC initialize handshake
-	if err := srv.initialize(); err != nil {
+	if err := srv.initialize(ctx); err != nil {
 		srv.Close()
 		return nil, fmt.Errorf("MCP initialize: %w", err)
 	}
 
 	// Fetch tool list
-	if err := srv.fetchTools(); err != nil {
+	if err := srv.fetchTools(ctx); err != nil {
 		srv.Close()
 		return nil, fmt.Errorf("fetching tools: %w", err)
 	}
@@ -529,7 +633,7 @@ func (s *MCPServer) call(ctx context.Context, method string, params interface{})
 	return resp.Result, nil
 }
 
-func (s *MCPServer) initialize() error {
+func (s *MCPServer) initialize(ctx context.Context) error {
 	params := map[string]interface{}{
 		"protocolVersion": "2024-11-05",
 		"capabilities":    map[string]interface{}{},
@@ -538,7 +642,7 @@ func (s *MCPServer) initialize() error {
 			"version": "1.0.0",
 		},
 	}
-	_, err := s.call(context.Background(), "initialize", params)
+	_, err := s.call(ctx, "initialize", params)
 	if err != nil {
 		return err
 	}
@@ -558,8 +662,8 @@ func (s *MCPServer) initialize() error {
 	return err
 }
 
-func (s *MCPServer) fetchTools() error {
-	result, err := s.call(context.Background(), "tools/list", map[string]interface{}{})
+func (s *MCPServer) fetchTools(ctx context.Context) error {
+	result, err := s.call(ctx, "tools/list", map[string]interface{}{})
 	if err != nil {
 		return err
 	}
