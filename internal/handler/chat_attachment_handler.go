@@ -186,7 +186,8 @@ func (h *Handler) DownloadChatAttachment(c echo.Context) error {
 
 	applog.Infof("[handler] DownloadChatAttachment serving file=%s", attachment.FileName)
 
-	// Serve the file
+	c.Response().Header().Set("X-Content-Type-Options", "nosniff")
+	c.Response().Header().Set("Content-Security-Policy", "sandbox")
 	return c.File(attachment.FilePath)
 }
 
