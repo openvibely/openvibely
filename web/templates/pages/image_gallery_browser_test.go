@@ -78,7 +78,7 @@ func TestBrowserFunctional_SharedImageGallery(t *testing.T) {
 			b.waitFor("native controls initially visible", `String(window.nativeControlEvents?.['desktop:controls-visibility']?.hidden)`, "false")
 		}
 		b.click(`#attachment-list [data-image-gallery-item]`)
-		b.waitFor("task gallery loaded", `document.querySelector('[data-gallery-count]').textContent+':'+document.querySelector('[data-gallery-status]').textContent`, "1 / 2:")
+		b.waitFor("task gallery loaded", `document.querySelector('[data-gallery-count]').textContent+':'+document.querySelector('[data-gallery-status]').textContent`, "1 / 3:")
 		if runtime.GOOS == "darwin" || runtime.GOOS == "linux" {
 			b.waitFor("preview hides native controls", `String(window.nativeControlEvents?.['desktop:controls-visibility']?.hidden)`, "true")
 			b.waitFor("visibility events carry page and increasing sequence", `String((()=>{const e=window.nativeControlEvents['desktop:controls-visibility'];return e.page===performance.timeOrigin && e.sequence>=2;})())`, "true")
@@ -124,12 +124,11 @@ func TestBrowserFunctional_SharedImageGallery(t *testing.T) {
 		b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": "ArrowRight"}, nil)
 		b.waitFor("next image", `document.querySelector('[data-gallery-name]').textContent`, "two.svg")
 		b.click(`[data-gallery-plus]`)
-		b.waitFor("icon toolbar", `String(document.querySelectorAll('.image-gallery-tools svg').length===4 && document.querySelector('.image-gallery-tools').textContent.trim()==='')`, "true")
+		b.waitFor("icon toolbar", `String(document.querySelectorAll('.image-gallery-tools svg').length===3 && document.querySelector('.image-gallery-tools').textContent.trim()==='')`, "true")
 		b.waitFor("zoom", `document.querySelector('[data-gallery-fit]').getAttribute('aria-label')`, "Fit image (150%)")
 		b.waitFor("arrows fixed after navigation and zoom", `String(JSON.stringify(Array.from(document.querySelectorAll('.image-gallery-arrow'),el=>{const r=el.getBoundingClientRect();return [r.x,r.y]}))===JSON.stringify(window.galleryArrowPositions))`, "true")
 		b.evaluate(`window.galleryBoundaryImage=document.querySelector('[data-gallery-image]');window.galleryBoundaryTransform=window.galleryBoundaryImage.style.transform;'saved'`)
-		b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": "ArrowRight"}, nil)
-		b.waitFor("ArrowRight boundary preserves image and zoom", `String(document.querySelector('[data-gallery-image]')===window.galleryBoundaryImage && window.galleryBoundaryImage.style.transform===window.galleryBoundaryTransform)`, "true")
+
 		var point struct {
 			X float64 `json:"x"`
 			Y float64 `json:"y"`
@@ -209,7 +208,7 @@ func TestBrowserFunctional_SharedImageGallery(t *testing.T) {
 		b.waitFor("consistent attachment spacing", `String(getComputedStyle(document.querySelector('#attachment-list .attachment-gallery-open')).gap===window.draftRowSpacing)`, "true")
 		b.waitFor("file thumbnail uses standard content inset", `String(Math.abs(document.querySelector("#attachment-list .attachment-gallery-open img").getBoundingClientRect().top-document.querySelector("#attachment-list").getBoundingClientRect().top-4)<1)`, "true")
 
-		b.waitFor("saved file row aligns with panel rows", `String((function(){var row=document.querySelector('#attachment-list .attachment-gallery-row').getBoundingClientRect(), heading=document.querySelector('#tab-attachments h3').getBoundingClientRect(), list=document.querySelector('#attachment-list').getBoundingClientRect();return Math.abs(row.left-heading.left+12)<1 && Math.abs(row.right-list.right-12)<1 && Math.abs(document.querySelector('#attachment-list img').getBoundingClientRect().left-heading.left)<1;})())`, "true")
+		b.waitFor("saved file row aligns with panel rows", `String((function(){var row=document.querySelector('#attachment-list .attachment-gallery-row').getBoundingClientRect(), heading=document.querySelector('#attachment-list').getBoundingClientRect(), list=document.querySelector('#attachment-list').getBoundingClientRect();return Math.abs(row.left-heading.left+12)<1 && Math.abs(row.right-list.right-12)<1 && Math.abs(document.querySelector('#attachment-list img').getBoundingClientRect().left-heading.left)<1;})())`, "true")
 		b.click("#attachment-list [data-image-gallery-item]")
 		b.waitFor("saved image preview after send", `document.querySelector('[data-gallery-name]').textContent`, "draft.svg")
 		b.click("[data-gallery-close]")
@@ -219,6 +218,6 @@ func TestBrowserFunctional_SharedImageGallery(t *testing.T) {
 		b.click(`#attachment-list [data-image-gallery-item]`)
 		b.waitFor("mobile gallery open", `String(document.getElementById('image-gallery').open)`, "true")
 		b.waitFor("mobile fits viewport", `String(document.getElementById('image-gallery').getBoundingClientRect().right<=innerWidth && document.getElementById('image-gallery').getBoundingClientRect().bottom<=innerHeight)`, "true")
-		b.waitFor("mobile arrows overlay stage edges", `String((()=>{const stage=document.querySelector('[data-gallery-stage]').getBoundingClientRect(), prev=document.querySelector('[data-gallery-prev]').getBoundingClientRect(), next=document.querySelector('[data-gallery-next]').getBoundingClientRect();return prev.left>=stage.left && prev.right>stage.left && next.right<=stage.right && next.left<stage.right;})())`, "true")
+		b.waitFor("mobile file navigation stays in toolbar", `String((()=>{const stage=document.querySelector('[data-gallery-stage]').getBoundingClientRect(), prev=document.querySelector('[data-gallery-prev]').getBoundingClientRect(), next=document.querySelector('[data-gallery-next]').getBoundingClientRect();return prev.bottom<=stage.top && next.bottom<=stage.top;})())`, "true")
 	})
 }

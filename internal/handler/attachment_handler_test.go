@@ -416,8 +416,8 @@ func TestTaskAttachmentUploadsPersistEquivalentRowsAcrossSurfaces(t *testing.T) 
 			}
 			att := attachments[0]
 			wantPath := filepath.Join(uploadsRoot, taskID, "equivalent.txt")
-			if att.TaskID != taskID || att.FileName != "equivalent.txt" || att.FilePath != wantPath || att.MediaType != "application/octet-stream" || att.FileSize != int64(len(file.content)) {
-				t.Fatalf("unexpected attachment row: %+v want task=%s file=%s type=%s size=%d", att, taskID, wantPath, "application/octet-stream", len(file.content))
+			if att.TaskID != taskID || att.FileName != "equivalent.txt" || att.FilePath != wantPath || att.MediaType != "text/plain" || att.FileSize != int64(len(file.content)) {
+				t.Fatalf("unexpected attachment row: %+v want task=%s file=%s type=%s size=%d", att, taskID, wantPath, "text/plain", len(file.content))
 			}
 			stored, err := os.ReadFile(att.FilePath)
 			if err != nil {
@@ -497,8 +497,8 @@ func TestTaskAttachmentUploadsAllowValidMultiFileBodyAboveSingleFileRequestCapAc
 			project := tc.CreateProject().Build()
 			uploadsRoot := withTaskAttachmentUploadsDir(t)
 			files := []taskAttachmentTestFile{
-				{name: "first.bin", contentType: "application/octet-stream", content: bytes.Repeat([]byte("a"), 6<<20)},
-				{name: "second.bin", contentType: "application/octet-stream", content: bytes.Repeat([]byte("b"), 6<<20)},
+				{name: "first.bin", contentType: "application/octet-stream", content: bytes.Repeat([]byte("a"), 14<<20)},
+				{name: "second.bin", contentType: "application/octet-stream", content: bytes.Repeat([]byte("b"), 14<<20)},
 			}
 			req, taskIDAfterUpload := tcCase.request(t, tc, project.ID, files)
 			if req.ContentLength <= browserAttachmentRequestLimit(maxUploadSize) {
@@ -609,8 +609,8 @@ func TestTaskAttachmentUploadsAllowPaddedBoundaryDelimiterWhitespaceAcrossSurfac
 			project := tc.CreateProject().Build()
 			withTaskAttachmentUploadsDir(t)
 			files := []taskAttachmentTestFile{
-				{name: "padded-first.bin", contentType: "application/octet-stream", content: bytes.Repeat([]byte("a"), 6<<20)},
-				{name: "padded-second.bin", contentType: "application/octet-stream", content: bytes.Repeat([]byte("b"), 6<<20)},
+				{name: "padded-first.bin", contentType: "application/octet-stream", content: bytes.Repeat([]byte("a"), 14<<20)},
+				{name: "padded-second.bin", contentType: "application/octet-stream", content: bytes.Repeat([]byte("b"), 14<<20)},
 			}
 			req, taskIDAfterUpload := tcCase.request(t, tc, project.ID, files)
 			if req.ContentLength <= browserAttachmentRequestLimit(maxUploadSize) {
@@ -789,7 +789,7 @@ func TestTaskCreateAndEditAttachmentFormsRejectOversizedMultipartBeforeMutation(
 				"category": "backlog",
 				"priority": "2",
 				"prompt":   "mutated prompt",
-			}, "files", "too-large.txt", "text/plain", 25<<20, invalidMultipartBoundaryPayloadPrefix(), false)
+			}, "files", "too-large.txt", "text/plain", 30<<20, invalidMultipartBoundaryPayloadPrefix(), false)
 			body.limitReadChunkSize(1)
 			req.Header.Set("HX-Request", "true")
 			rec := httptest.NewRecorder()
@@ -819,7 +819,7 @@ func TestUploadAttachment_OversizedMultipartRequestIsBoundedBeforePersistence(t 
 	task := tc.CreateTask(project.ID).Build()
 	uploadsRoot := withTaskAttachmentUploadsDir(t)
 
-	req, body, totalSize := newSizedMultipartUploadRequestWithFilePrefix(t, http.MethodPost, "/tasks/"+task.ID+"/attachments", nil, "files", "too-large.txt", "text/plain", 25<<20, invalidMultipartBoundaryPayloadPrefix(), false)
+	req, body, totalSize := newSizedMultipartUploadRequestWithFilePrefix(t, http.MethodPost, "/tasks/"+task.ID+"/attachments", nil, "files", "too-large.txt", "text/plain", 30<<20, invalidMultipartBoundaryPayloadPrefix(), false)
 	body.limitReadChunkSize(1)
 	rec := httptest.NewRecorder()
 	tc.echo.ServeHTTP(rec, req)
@@ -1301,7 +1301,7 @@ func TestDeleteAttachment_Success(t *testing.T) {
 
 	rec := tc.HTTP().Delete("/attachments/" + attachment.ID + "?project_id=" + url.QueryEscape(p.ID)).Execute()
 	tc.Assert(rec).StatusCode(http.StatusOK)
-	if !strings.Contains(rec.Body.String(), `id="attachment-list"`) || !strings.Contains(rec.Body.String(), "No attachments") {
+	if !strings.Contains(rec.Body.String(), `id="attachment-list"`) || !strings.Contains(rec.Body.String(), "No files yet.") {
 		t.Fatalf("expected updated empty attachment list, body=%s", rec.Body.String())
 	}
 
@@ -1385,5 +1385,27 @@ func TestDeleteAttachment_RejectsCrossProjectBeforeDeletingRowOrFile(t *testing.
 				t.Fatalf("attachment file content=%q want=%q", stored, content)
 			}
 		})
+	}
+}
+
+func TestTaskFilesTabIncludesGeneratedOutputs(t *testing.T) {
+	tc := NewStoreTestContext(t)
+	project := tc.CreateProject().Build()
+	task := tc.CreateTask(project.ID).Build()
+	execution := tc.CreateExecution(task.ID, "").Build()
+	file := &models.GeneratedFile{ProjectID: project.ID, ExecutionID: execution.ID, FileName: "report.docx", FilePath: filepath.Join(t.TempDir(), "report.docx"), MediaType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", FileSize: 42}
+	if err := tc.attachmentRepo.CreateGeneratedFile(context.Background(), file); err != nil {
+		t.Fatal(err)
+	}
+	rec := tc.HTTP().Get("/tasks/" + task.ID + "/attachments?project_id=" + url.QueryEscape(project.ID)).Execute()
+	tc.Assert(rec).StatusCode(http.StatusOK)
+	if !strings.Contains(rec.Body.String(), "/files/"+file.ID) || !strings.Contains(rec.Body.String(), "report.docx") {
+		t.Fatalf("generated file missing from task Files tab: %s", rec.Body.String())
+	}
+	other := tc.CreateTask(project.ID).WithTitle("Other task").Build()
+	rec = tc.HTTP().Get("/tasks/" + other.ID + "/attachments?project_id=" + url.QueryEscape(project.ID)).Execute()
+	tc.Assert(rec).StatusCode(http.StatusOK)
+	if strings.Contains(rec.Body.String(), file.ID) {
+		t.Fatal("Files tab included another task's output")
 	}
 }

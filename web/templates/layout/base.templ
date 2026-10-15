@@ -396,6 +396,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 			@MermaidDiagrams()
 			<!-- Markdown rendering for chat/thread messages -->
 			<script src={ static.URL("vendor/marked.min.js") } data-ov-asset="marked"></script>
+ <script src={static.URL("file-math-parser.js")} data-ov-math-parser></script>
 			<link rel="stylesheet" href={ static.URL("vendor/highlight-github-dark.min.css") }/>
 			<script src={ static.URL("vendor/highlight.min.js") }></script>
 			<meta name="ov-asset-chartjs" content={ static.URL("vendor/chart.umd.min.js") }/>
@@ -2822,6 +2823,26 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					for (var i = 0; i < text.length; i++) {
 						while (rangeIndex < ranges.length && i >= ranges[rangeIndex].end) rangeIndex++;
 						var inCode = rangeIndex < ranges.length && i >= ranges[rangeIndex].start && i < ranges[rangeIndex].end;
+						// Promote complete SVG output to a code block. The SVG viewer renders
+						// an isolated image from this source; raw HTML stays escaped.
+						if (!inCode && text.charAt(i) === '<' && /^<svg(?:\s|>)/i.test(text.slice(i, i + 5))) {
+							var candidate = text.slice(i, i + 1024 * 1024);
+							var tags = /<!--[\s\S]*?-->|<!\[CDATA\[[\s\S]*?\]\]>|<\/?svg\b[^>]*>/gi;
+							var depth = 0, tag, end = 0;
+							while ((tag = tags.exec(candidate))) {
+								if (tag[0].startsWith('<!')) continue;
+								if (tag[0].startsWith('</')) depth--;
+								else if (!/\/\s*>$/.test(tag[0])) depth++;
+								if (depth === 0) { end = tags.lastIndex; break; }
+							}
+							if (end) {
+								var svg = candidate.slice(0, end), fence = '```';
+								while (svg.indexOf(fence) !== -1) fence += '`';
+								escaped += '\n\n' + fence + 'svg\n' + svg + '\n' + fence + '\n\n';
+								i += end - 1;
+								continue;
+							}
+						}
 						escaped += text.charAt(i) === '<' && !inCode ? '&lt;' : text.charAt(i);
 					}
 					return escaped;
@@ -3032,6 +3053,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 								';window.escapeRawHTMLForMarkdown=' + window.escapeRawHTMLForMarkdown.toString() +
 								";importScripts(" + JSON.stringify(window.chatMarkedScriptURL()) + ");" +
 								"marked.setOptions({breaks:true,gfm:true});" +
+ "importScripts("+JSON.stringify(new URL(document.querySelector('[data-ov-math-parser]').src,location.href).href)+");" +
 								"self.onmessage=function(event){try{self.postMessage({html:marked.parse(window.escapeRawHTMLForMarkdown(event.data))});}catch(err){self.postMessage({error:String(err&&err.message||err)});}};";
 							window._markdownWorkerURL = window.URL.createObjectURL(new Blob([workerSource], { type: 'text/javascript' }));
 						}
@@ -6644,7 +6666,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 							var anchor = target && target.closest ? target.closest('a[href]') : null;
 							if (!anchor) return;
 							// Image previews and their downloads stay in the app.
-							if (anchor.hasAttribute('data-image-gallery-item') || anchor.hasAttribute('data-gallery-download')) return;
+							if (anchor.hasAttribute('data-image-gallery-item') || anchor.hasAttribute('data-gallery-download') || anchor.hasAttribute('data-file-preview')) return;
 							var href = anchor.getAttribute('href');
 							if (!href) return;
 							var desktop = isDesktopRuntime();
@@ -6687,6 +6709,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				})();
 			</script>
 		@ImageGallery()
+ @FileViewer()
         @templateui.Tooltips()
 		</body>
 	</html>
