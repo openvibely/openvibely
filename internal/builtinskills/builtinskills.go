@@ -35,7 +35,7 @@ func SyncTo(root string) error {
 	if root == "" {
 		return nil
 	}
-	return fs.WalkDir(FS, "builtin", func(path string, d fs.DirEntry, err error) error {
+	err := fs.WalkDir(FS, "builtin", func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -76,6 +76,10 @@ func SyncTo(root string) error {
 		}
 		return nil
 	})
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 var skillsIndexHeaderRegexp = regexp.MustCompile(`(?m)^##[ \t]+([A-Za-z0-9][A-Za-z0-9_./-]*)\s*$`)
