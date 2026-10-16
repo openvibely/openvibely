@@ -96,7 +96,22 @@
  document.addEventListener('htmx:beforeSwap',event=>{const target=event.detail.target;if(event.detail.shouldSwap&&dialog.open&&target&&group&&(target===group||target.contains(group))){if(target.id==='attachment-list'&&target.closest('[data-task-files]')){group=target.closest('[data-task-files]');opener=group}else close()}});
  new MutationObserver(()=>{if(dialog.open&&group&&(!group.isConnected||!opener?.isConnected))close()}).observe(document.body,{childList:true,subtree:true});
  window.imageGallery={close,refreshItem(element){const at=items.findIndex(item=>item.element===element);if(at<0)return;items[at]=itemFrom(element);if(at===index){if(currentKind==='image'&&window.OVFileImage.refresh(items[at])){download.href=items[at].download}else show(at)}}};
- window.OVFileViewer={open,mode};
+ // Retain enhanced published images while the surrounding response is rebuilt.
+ function prepareStream(fragment,previous){
+  const saved=new Map();
+  const key=link=>link.href+'\n'+link.textContent;
+  previous.querySelectorAll('a[data-file-link-bound][data-image-gallery-item]').forEach(link=>{
+   const identity=key(link);if(!saved.has(identity))saved.set(identity,[]);saved.get(identity).push(link);
+  });
+  fragment.querySelectorAll('a[href]').forEach(link=>{
+   const retained=saved.get(key(link))?.shift();if(!retained)return;
+   link.replaceWith(retained);
+   const scope=retained.closest('.chat-markdown')||retained.parentElement;
+   scope.dataset.imageGalleryGroup='';
+   if(dialog.open&&retained===opener)group=scope;
+  });
+ }
+ window.OVFileViewer={open,mode,prepareStream};
  window.addEventListener('sse-task-event',event=>{
   const update=event.detail;
   if(update?.type!=='task_files_changed')return;

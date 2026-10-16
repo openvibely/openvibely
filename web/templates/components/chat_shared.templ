@@ -6046,6 +6046,7 @@ templ ChatAutoScrollScript() {
 				window.setChatRawContent(container, textBuffer);
 				if (window.prepareChatMath) window.prepareChatMath(renderFragment, container);
 				if (window.prepareChatSVG) window.prepareChatSVG(renderFragment, container);
+                window.OVFileViewer?.prepareStream(renderFragment, container);
 				container.replaceChildren(renderFragment);
 				if (window.renderMermaidDiagrams) window.renderMermaidDiagrams(container);
 
