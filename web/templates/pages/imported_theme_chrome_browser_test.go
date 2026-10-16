@@ -29,7 +29,11 @@ func TestBrowserFunctional_ImportedThemeStylesTitlebarMenusAndSchedulePickers(t 
 	if err := ScheduleCalendarControls(nil).Render(context.Background(), &calendar); err != nil {
 		t.Fatalf("render schedule calendar styles: %v", err)
 	}
-	fixture := `<div id="schedule-content">` + calendar.String() + `<div data-calendar-day="2026-10-16" class="schedule-day-selected">Fri</div><div data-calendar-hour="9" class="bg-base-200 schedule-time-label schedule-day-selected">9 AM</div></div>
+	var search bytes.Buffer
+	if err := kanbanSearch().Render(context.Background(), &search); err != nil {
+		t.Fatalf("render kanban search: %v", err)
+	}
+	fixture := `<div id="fixture-search">` + search.String() + `</div><div id="schedule-content">` + calendar.String() + `<div data-calendar-day="2026-10-16" class="schedule-day-selected">Fri</div><div data-calendar-hour="9" class="bg-base-200 schedule-time-label schedule-day-selected">9 AM</div></div>
 <ul id="fixture-menu" class="ov-menu ov-menu-actions dropdown-content menu"><li><button type="button">Action</button></li></ul>
 <div id="fixture-picker">` + picker.String() + `</div><div id="probe"></div>`
 	html := base.String()
@@ -77,6 +81,12 @@ func TestBrowserFunctional_ImportedThemeStylesTitlebarMenusAndSchedulePickers(t 
 			browser.waitFor(check.label, `window.matches('`+strings.ReplaceAll(check.selector, `'`, `\'`)+`', '`+check.property+`', '`+check.value+`')`, "ok")
 		}
 
+		browser.evaluate(`document.querySelector('[data-kanban-search]').dataset.open = 'true';'ok'`)
+		browser.waitFor("task search box surface", `window.matches('.kanban-search', 'backgroundColor', 'var(--ov-input-bg)')`, "ok")
+		browser.waitFor("task search box border", `window.matches('.kanban-search', 'borderTopColor', 'var(--ov-input-border)')`, "ok")
+		browser.waitFor("task search input text", `window.matches('.kanban-search-input', 'color', 'var(--ov-text)')`, "ok")
+		browser.waitFor("task search clear icon", `window.matches('.kanban-search-clear', 'color', 'var(--ov-text-muted)')`, "ok")
+
 		browser.evaluate(`window.openScheduleDateTime(document.querySelector('[data-run-at-picker]'));'ok'`)
 		browser.waitFor("selected date uses theme button", `window.matches('.schedule-datetime-days [aria-pressed="true"]', 'backgroundColor', 'var(--ov-button-bg)')`, "ok")
 		browser.waitFor("selected date text uses theme button text", `window.matches('.schedule-datetime-days [aria-pressed="true"]', 'color', 'var(--ov-button-fg)')`, "ok")
@@ -85,5 +95,6 @@ func TestBrowserFunctional_ImportedThemeStylesTitlebarMenusAndSchedulePickers(t 
 		browser.evaluate(`window.openVibelyThemes.apply('openvibely-dark');'ok'`)
 		browser.waitFor("native theme keeps default selection tint", `window.computed('#schedule-content [data-calendar-day]', 'backgroundColor')`, "rgba(116, 128, 255, 0.16)")
 		browser.waitFor("native theme keeps default menu surface", `window.computed('#fixture-menu', 'backgroundColor')`, "rgb(29, 35, 42)")
+		browser.waitFor("native theme keeps default search surface", `String(window.computed('.kanban-search', 'backgroundColor') === window.themeColor('oklch(var(--b1))'))`, "true")
 	})
 }
