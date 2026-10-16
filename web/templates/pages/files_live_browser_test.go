@@ -21,6 +21,7 @@ func TestBrowserFunctional_PublishedFileRefreshesTaskPanel(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
 	project := models.Project{ID: "files", Name: "Files"}
 	var published atomic.Bool
+	var missedPublication atomic.Bool
 	var loads atomic.Int32
 	liveEvents := make(chan string, 16)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -36,6 +37,10 @@ func TestBrowserFunctional_PublishedFileRefreshesTaskPanel(t *testing.T) {
 				case <-r.Context().Done():
 					return
 				case data := <-liveEvents:
+					if data == "disconnect-and-publish" {
+						missedPublication.Store(true)
+						return
+					}
 					var event struct {
 						Type string `json:"type"`
 					}
@@ -58,6 +63,9 @@ func TestBrowserFunctional_PublishedFileRefreshesTaskPanel(t *testing.T) {
 			var files []models.GeneratedFile
 			if published.Load() {
 				files = []models.GeneratedFile{{ID: "abc123", FileName: "report.pdf", MediaType: "application/pdf"}}
+			}
+			if missedPublication.Load() {
+				files = append(files, models.GeneratedFile{ID: "def456", FileName: "missed.pdf", MediaType: "application/pdf"})
 			}
 			_ = components.TaskFilesList(nil, project.ID, nil, files).Render(r.Context(), w)
 			return
@@ -89,6 +97,12 @@ func TestBrowserFunctional_PublishedFileRefreshesTaskPanel(t *testing.T) {
 		b.evaluateAwait(`new Promise(resolve=>setTimeout(()=>resolve('settled'),300))`)
 		if got := b.evaluate(`String(document.getElementById('image-gallery').open && document.querySelector('[data-result-content]')===window.previewContent)`); got != "true" {
 			t.Fatal("file refresh closed or replaced preview")
+		}
+		b.evaluate(`window.reconnected=false;window.addEventListener('sse-live-connected',event=>{if(event.detail?.reconnected)window.reconnected=true});fetch('/emit',{method:'POST',body:'disconnect-and-publish'});'sent'`)
+		b.waitFor("real stream reconnect", `String(window.reconnected)`, "true")
+		b.waitFor("missed publication appears after reconnect", `String(document.querySelector('#attachment-list')?.textContent.includes('missed.pdf'))`, "true")
+		if got := b.evaluate(`String(document.getElementById('image-gallery').open && document.querySelector('[data-result-content]')===window.previewContent)`); got != "true" {
+			t.Fatal("reconnect closed or replaced preview")
 		}
 		b.click("[data-file-close]")
 		before := loads.Load()

@@ -112,6 +112,11 @@
   });
  }
  window.OVFileViewer={open,mode,prepareStream};
+ // Events missed while disconnected are not replayed by the live stream.
+ window.addEventListener('sse-live-connected',event=>{
+  if(!event.detail?.reconnected)return;
+  document.querySelectorAll('[data-task-files]').forEach(panel=>window.htmx.trigger(panel,'taskFilesChanged'));
+ });
  window.addEventListener('sse-task-event',event=>{
   const update=event.detail;
   if(update?.type!=='task_files_changed')return;
