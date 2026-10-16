@@ -53,6 +53,8 @@ func TestBaseIncludesBuiltInThemeSystem(t *testing.T) {
 		`[data-color-theme^="vscode-"] .card,`,
 		`[data-color-theme^="vscode-"] .dropdown-content:not(.ov-menu){`,
 		`--ov-menu-surface: var(--ov-surface-raised);`,
+		`--ov-diff-del-fg: var(--ov-diff-delete-fg);`,
+		`--ov-diff-del-bg: var(--ov-diff-delete-bg);`,
 		`--ov-border-subtle: var(--ov-subtle-border);`,
 		`html[data-color-theme^="vscode-"] .ov-menu { --ov-menu-active: var(--ov-hover-bg);`,
 		`html[data-color-theme^="vscode-"] #desktop-project-titlebar { background-color: var(--ov-sidebar-bg) !important;`,

@@ -35,7 +35,7 @@ func TestBrowserFunctional_ImportedThemeStylesTitlebarMenusAndSchedulePickers(t 
 	}
 	fixture := `<div id="fixture-search">` + search.String() + `</div><div id="schedule-content">` + calendar.String() + `<div data-calendar-day="2026-10-16" class="schedule-day-selected">Fri</div><div data-calendar-hour="9" class="bg-base-200 schedule-time-label schedule-day-selected">9 AM</div></div>
 <ul id="fixture-menu" class="ov-menu ov-menu-actions dropdown-content menu"><li><button type="button">Action</button></li></ul>
-<div id="fixture-picker">` + picker.String() + `</div><div id="probe"></div>`
+<div id="fixture-picker">` + picker.String() + `</div><span id="fixture-deletions" style="color: var(--ov-diff-del-fg)">-4</span><div id="probe"></div>`
 	html := base.String()
 	end := strings.LastIndex(html, "</body>")
 	page := html[:end] + fixture + html[end:]
@@ -76,6 +76,7 @@ func TestBrowserFunctional_ImportedThemeStylesTitlebarMenusAndSchedulePickers(t 
 			{"date picker surface", ".schedule-datetime-popup", "backgroundColor", "var(--ov-surface-raised)"},
 			{"date picker border", ".schedule-datetime-popup", "borderTopColor", "var(--ov-subtle-border)"},
 			{"date picker text", ".schedule-datetime-popup", "color", "var(--ov-text)"},
+			{"diff deletion count", "#fixture-deletions", "color", "var(--ov-diff-delete-fg)"},
 		}
 		for _, check := range checks {
 			browser.waitFor(check.label, `window.matches('`+strings.ReplaceAll(check.selector, `'`, `\'`)+`', '`+check.property+`', '`+check.value+`')`, "ok")
@@ -95,6 +96,7 @@ func TestBrowserFunctional_ImportedThemeStylesTitlebarMenusAndSchedulePickers(t 
 		browser.evaluate(`window.openVibelyThemes.apply('openvibely-dark');'ok'`)
 		browser.waitFor("native theme keeps default selection tint", `window.computed('#schedule-content [data-calendar-day]', 'backgroundColor')`, "rgba(116, 128, 255, 0.16)")
 		browser.waitFor("native theme keeps default menu surface", `window.computed('#fixture-menu', 'backgroundColor')`, "rgb(29, 35, 42)")
+		browser.waitFor("native theme keeps default deletion count", `window.computed('#fixture-deletions', 'color')`, "rgb(189, 112, 118)")
 		browser.waitFor("native theme keeps default search surface", `String(window.computed('.kanban-search', 'backgroundColor') === window.themeColor('oklch(var(--b1))'))`, "true")
 	})
 }
