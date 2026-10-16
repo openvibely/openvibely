@@ -2418,7 +2418,7 @@ paths:
         Returns 201 immediately with a message ID. The AI processes the message asynchronously.
         Poll GET /api/chat/message/{id} to check status and retrieve the response.
         Supported file types: Images (JPG, PNG, GIF, WebP), Documents (PDF, TXT, MD, CSV), Code (Go, Python, JS, TS, Rust, Java, C/C++, Ruby, PHP, Swift, Kotlin, Shell, SQL, HTML, CSS, SCSS, XML, JSON, YAML, TOML, INI, diff/patch)
-        Maximum file size: 10 MB per file
+        Maximum file size: 25 MiB per file, 200 MiB for video, 256 KiB for ordinary text, 10 MiB for PNG/JPEG/GIF/WebP images
         Maximum files per request: 10
       parameters:
       - description: Chat message text to send to the AI
