@@ -1,26 +1,24 @@
 package layout
 
-// ImageGallery owns the shared shell for all file renderers.
+// ImageGallery is shared by saved attachments, message attachments and drafts.
 templ ImageGallery() {
- <dialog id="image-gallery" class="bg-base-200 text-base-content" aria-label="File preview">
-  <div class="modal-box image-gallery-shell file-viewer-shell bg-base-200">
-   <header>
-    <button type="button" data-gallery-prev class="image-gallery-arrow" aria-label="Previous file" data-tooltip-disabled><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 6 9 12 15 18"/></svg></button>
-    <button type="button" data-gallery-next class="image-gallery-arrow" aria-label="Next file" data-tooltip-disabled><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 6 15 12 9 18"/></svg></button>
-    <h2 data-result-title data-gallery-name>File preview</h2><span data-gallery-count aria-live="polite"></span>
-    <div data-result-actions><a download data-gallery-download aria-label="Download file" data-tooltip-disabled>Download</a></div>
-    <button type="button" data-gallery-close data-file-close class="ov-modal-close" aria-label="Close file preview" data-tooltip-disabled><svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg></button>
-   </header>
+ <dialog id="image-gallery" aria-label="Image preview">
+  <div class="modal-box image-gallery-shell file-viewer-shell">
+   <header><span data-result-title data-gallery-name></span><div data-result-actions></div><span data-gallery-count aria-live="polite"></span><button data-tooltip-disabled type="button" data-gallery-close data-file-close class="ov-modal-close" aria-label="Close image preview"><svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg></button></header>
    <div class="image-gallery-viewer">
-    <div data-gallery-stage hidden><img data-gallery-image alt="" draggable="false"/><p data-gallery-status role="status"></p></div>
+   <div data-gallery-stage hidden><img data-gallery-image alt="" draggable="false"/><p data-gallery-status role="status"></p></div>
     <div data-result-content hidden></div>
+    <button type="button" data-gallery-prev class="image-gallery-arrow" aria-label="Previous image"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 6 9 12 15 18"/></svg></button>
+    <button type="button" data-gallery-next class="image-gallery-arrow" aria-label="Next image"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 6 15 12 9 18"/></svg></button>
    </div>
-   <div data-gallery-thumbnails aria-label="File thumbnails" hidden></div>
-   <footer data-image-controls hidden><div class="image-gallery-tools" role="group" aria-label="Image controls">
-    <button type="button" data-gallery-minus aria-label="Zoom out" data-tooltip-disabled><svg viewBox="0 0 14 14" fill="none" stroke="currentColor"><circle cx="6" cy="6" r="3.5"/><path d="m9 9 3 3M4.5 6h3"/></svg></button>
-    <button type="button" data-gallery-plus aria-label="Zoom in" data-tooltip-disabled><svg viewBox="0 0 14 14" fill="none" stroke="currentColor"><circle cx="6" cy="6" r="3.5"/><path d="m9 9 3 3M4.5 6h3M6 4.5v3"/></svg></button>
-    <button type="button" data-gallery-fit aria-label="Fit image" data-tooltip-disabled><svg viewBox="0 0 14 14" fill="none" stroke="currentColor"><path d="M1.5 4.5h3v-3m5 0v3h3m0 5h-3v3m-5 0v-3h-3"/></svg></button>
-   </div></footer>
+   <footer data-image-controls hidden>
+    <div class="image-gallery-tools" role="group" aria-label="Image controls">
+     <button type="button" data-gallery-minus aria-label="Zoom out" data-tooltip-disabled><svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="6" r="3.5"/><path d="m9 9 3 3M4.5 6h3"/></svg></button>
+     <button type="button" data-gallery-plus aria-label="Zoom in" data-tooltip-disabled><svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="6" r="3.5"/><path d="m9 9 3 3M4.5 6h3M6 4.5v3"/></svg></button>
+     <button type="button" data-gallery-fit aria-label="Fit image" data-tooltip-disabled><svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1.5 4.5h3v-3m5 0v3h3m0 5h-3v3m-5 0v-3h-3"/></svg></button>
+     <a download data-gallery-download aria-label="Download image" data-tooltip-disabled><svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 1v8m-3-3 3 3 3-3M2 8v4h10V8"/></svg></a>
+    </div>
+   </footer>
   </div>
  </dialog>
  <style>
@@ -38,23 +36,25 @@ templ ImageGallery() {
  #image-gallery .image-gallery-tools > * { display:flex; align-items:center; justify-content:center; width:36px; height:36px; border:0; border-radius:50%; background:transparent; color:inherit; cursor:pointer; }
  #image-gallery .image-gallery-tools svg { width:22px; height:22px; }
  #image-gallery .image-gallery-viewer { flex:1; min-height:0; position:relative; display:flex; }
- #image-gallery .image-gallery-arrow { position:static; display:flex; align-items:center; justify-content:center; width:30px; height:30px; border:0; border-radius:6px; padding:4px; cursor:pointer; }
- #image-gallery .image-gallery-arrow svg { display:block; width:22px; height:22px; flex-shrink:0; }
- #image-gallery .image-gallery-arrow:hover:not(:disabled) { background:rgb(0 0 0 / .9); }
+ #image-gallery .image-gallery-arrow { position:absolute; top:50%; transform:translateY(-50%); z-index:1; display:flex; align-items:center; justify-content:center; width:44px; height:44px; border:0; border-radius:50%; background:rgb(0 0 0 / .7); color:#eee; padding:0; cursor:pointer; }
+ #image-gallery .image-gallery-arrow svg { display:block; width:24px; height:24px; flex-shrink:0; }
+ #image-gallery .image-gallery-tools > *:hover, #image-gallery .image-gallery-tools > *:focus-visible,
+ #image-gallery [data-gallery-close]:hover, #image-gallery [data-gallery-close]:focus-visible,
+ #image-gallery .image-gallery-arrow:hover:not(:disabled), #image-gallery .image-gallery-arrow:focus-visible:not(:disabled) { background-image:linear-gradient(rgb(255 255 255 / .12),rgb(255 255 255 / .12)); }
  #image-gallery .image-gallery-arrow:disabled { opacity:.3; cursor:default; }
- #image-gallery [data-gallery-stage] { flex:1; min-width:0; margin-inline:0; min-height:0; overflow:hidden; position:relative; display:flex; justify-content:center; align-items:center; touch-action:none; }
+ #image-gallery [data-gallery-prev] { left:16px; }
+ #image-gallery [data-gallery-next] { right:16px; }
+ #image-gallery [data-gallery-stage] { flex:1; min-width:0; margin-inline:68px; min-height:0; overflow:hidden; position:relative; display:flex; justify-content:center; align-items:center; touch-action:none; }
  #image-gallery img { max-width:100%; max-height:100%; object-fit:contain; user-select:none; flex-shrink:0; }
  #image-gallery [data-gallery-status] { position:absolute; pointer-events:none; }
+ @media (max-width:640px) { #image-gallery [data-gallery-stage] { margin-inline:16px; } }
  [data-image-gallery-item] { cursor:zoom-in; }
- [data-gallery-thumbnails]{display:flex;gap:8px;overflow:auto;justify-content:center;flex-shrink:0;padding:8px} [data-gallery-thumbnails] button{width:48px;height:48px;flex-shrink:0;border-radius:6px;overflow:hidden;opacity:.6;font-size:10px;overflow-wrap:anywhere} [data-gallery-thumbnails] button[aria-pressed=true]{outline:2px solid currentColor;opacity:1} [data-gallery-thumbnails] img,[data-gallery-thumbnails] video{width:100%;height:100%;object-fit:cover}
  .attachment-gallery-row { display:flex; align-items:center; gap:12px; min-width:0; padding:0; width:calc(100% + 24px); margin-inline:-12px; border-radius:8px; }
  .attachment-gallery-open { cursor:pointer; display:flex; align-items:center; gap:12px; min-width:0; flex:1; border-radius:8px; padding:4px 12px; text-align:left; }
  .attachment-gallery-row:hover { background:var(--ov-hover-subtle); background:color-mix(in srgb,currentColor 5%,transparent); }
  .attachment-gallery-open img, [data-pending-attachment] img { width:48px; height:48px; object-fit:cover; border-radius:6px; }
  #image-gallery [hidden]{display:none!important}
- #image-gallery .image-gallery-shell{box-shadow:none;translate:none;scale:none;border:0}
- #image-gallery .image-gallery-viewer{overflow:hidden}
- #image-gallery [data-result-title]{flex:1;min-width:0;overflow-wrap:anywhere}
- #image-gallery [data-result-actions]{display:flex;align-items:center;gap:8px}
+ #image-gallery [data-result-content]{user-select:text}
+ #image-gallery [data-result-content] *{user-select:text}
  </style>
 }

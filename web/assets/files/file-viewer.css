@@ -44,3 +44,6 @@
  #image-gallery:is([data-preview-kind="image"],[data-preview-kind="video"]) [data-gallery-status] { position:absolute; pointer-events:none; }
  @media (max-width:640px) { #image-gallery:is([data-preview-kind="image"],[data-preview-kind="video"]) [data-gallery-stage] { margin-inline:16px; } }
 
+
+#image-gallery header>.image-gallery-arrow{position:static;transform:none;width:30px;height:30px;border-radius:6px;background:var(--studio-soft);color:inherit}
+#image-gallery [data-result-actions] svg{width:22px;height:22px}
