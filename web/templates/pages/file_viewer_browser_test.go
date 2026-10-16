@@ -137,7 +137,7 @@ func TestBrowserFunctional_FileViewers(t *testing.T) {
 		b.evaluate(`window.OVFileViewer.open('/fixture/document.docx'); 'ok'`)
 		b.waitFor("document body loaded", `String(!!document.querySelector('.result-document'))`, "true")
 		b.waitFor("single document toolbar", `String(document.querySelector('[data-result-title]').textContent==='document.docx' && !!document.querySelector('.image-gallery-tools a[href*="download=1"]') && !document.querySelector('[data-document-header]'))`, "true")
-		b.waitFor("document fills modal", `(()=>{const dialog=document.getElementById('image-gallery'),shell=dialog.querySelector('.file-viewer-shell'),body=dialog.querySelector('[data-result-content]'),article=body.querySelector('.result-document');if(!article)return 'false';const d=dialog.getBoundingClientRect(),s=shell.getBoundingClientRect(),a=article.getBoundingClientRect();return String(Math.abs(d.left-s.left)<1 && Math.abs(d.width-s.width)<1 && Math.abs(d.bottom-s.bottom)<1 && Math.abs(a.left-d.left-68)<1 && Math.abs(d.right-a.right-68)<1 && getComputedStyle(body).padding==='0px' && getComputedStyle(shell).boxShadow==='none')})()`, "true")
+		b.waitFor("document fills modal", `(()=>{const dialog=document.getElementById('image-gallery'),shell=dialog.querySelector('.file-viewer-shell'),body=dialog.querySelector('[data-result-content]'),article=body.querySelector('.result-document');if(!article)return 'false';const d=dialog.getBoundingClientRect(),s=shell.getBoundingClientRect(),a=article.getBoundingClientRect();return String(Math.abs(d.left-s.left)<1 && Math.abs(d.width-s.width)<1 && Math.abs(d.bottom-s.bottom)<1 && Math.abs((a.left+a.right)/2-d.width/2)<1 && a.width<=1200 && a.left>=68 && getComputedStyle(body).padding==='0px' && getComputedStyle(shell).boxShadow==='none')})()`, "true")
 		b.click("[data-file-close]")
 		b.waitFor("toolbar cleared on close", `String(document.querySelector('[data-gallery-download]').hidden && !document.querySelector('[data-gallery-download]').hasAttribute('href'))`, "true")
 
@@ -208,7 +208,14 @@ func TestBrowserFunctional_FileViewers(t *testing.T) {
 			b.call("Emulation.setDeviceMetricsOverride", map[string]any{"width": width, "height": 900, "deviceScaleFactor": 1, "mobile": false}, nil)
 			b.waitFor("shared gallery controls and centered Markdown at each viewport", `(()=>{const d=document.getElementById('image-gallery'),m=d.querySelector('[data-file-markdown]'),r=d.getBoundingClientRect(),b=m.getBoundingClientRect();return String(Math.abs(r.width-innerWidth)<1&&Math.abs((b.left+b.right)/2-innerWidth/2)<1&&!!d.querySelector('footer [data-gallery-download]')&&!d.querySelector('footer').hidden&&!!d.querySelector('.image-gallery-viewer>[data-gallery-prev]')&&getComputedStyle(d.querySelector('[data-gallery-prev]')).position==='absolute'&&d.querySelector('[data-gallery-plus]').hidden)})()`, "true")
 		}
+		b.waitFor("document controls do not overlap", `(()=>{const d=document.getElementById('image-gallery'),count=d.querySelector('[data-gallery-count]').getBoundingClientRect(),close=d.querySelector('[data-gallery-close]').getBoundingClientRect(),surface=d.querySelector('[data-result-content]').getBoundingClientRect(),text=d.querySelector('[data-file-markdown]').getBoundingClientRect();return String(count.right+8<=close.left&&surface.width===text.width&&surface.width<innerWidth*.75&&surface.height<innerHeight*.75&&document.activeElement===d)})()`, "true")
+		b.evaluate(`document.documentElement.setAttribute('data-theme','light');'light'`)
+		b.waitFor("document foreground follows light theme", `(()=>{const d=document.getElementById('image-gallery'),p=d.querySelector('[data-file-markdown] p'),surface=d.querySelector('[data-result-content]');const probe=document.createElement('span');probe.style.color='var(--fallback-bc,oklch(var(--bc)))';document.body.append(probe);const ok=getComputedStyle(p).color===getComputedStyle(probe).color&&getComputedStyle(p).color!==getComputedStyle(d).color;probe.remove();return String(ok)})()`, "true")
+		b.click("[data-file-markdown] h1")
+		b.waitFor("document click keeps preview open", `String(document.getElementById('image-gallery').open)`, "true")
 		b.waitFor("KaTeX math", `String(!!document.querySelector('[data-file-markdown] .katex'))`, "true")
-		b.click("[data-file-close]")
+		b.call("Input.dispatchMouseEvent", map[string]any{"type": "mousePressed", "x": 90, "y": 450, "button": "left", "clickCount": 1}, nil)
+		b.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseReleased", "x": 90, "y": 450, "button": "left", "clickCount": 1}, nil)
+		b.waitFor("empty gallery space closes document", `String(!document.getElementById('image-gallery').open && document.activeElement.id==='math')`, "true")
 	})
 }

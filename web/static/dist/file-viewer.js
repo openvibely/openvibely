@@ -26,7 +26,7 @@
  async function show(at){
   if(at<0||at>=items.length)return;
   index=at;const item=items[index],id=++ticket;controller?.abort();controller=new AbortController();
-  if(dialog.contains(document.activeElement))dialog.querySelector('[data-gallery-close]').focus({preventScroll:true});
+  if(dialog.contains(document.activeElement))dialog.focus({preventScroll:true});
   clear();
   currentKind=item.kind;previewKind(currentKind);title.textContent=item.name;download.href=item.download;download.download=item.name;download.hidden=false;
   dialog.querySelector('[data-gallery-count]').textContent=(index+1)+' / '+items.length;
@@ -61,7 +61,7 @@
   items=at<0?[itemFrom(trigger,url)]:links.map(link=>itemFrom(link));
   if(!dialog.contains(trigger)){opener=trigger}else group=null;
   if(!dialog.open)dialog.showModal();show(at<0?0:at);
-  dialog.querySelector('[data-gallery-close]').focus({preventScroll:true});
+  dialog.focus({preventScroll:true});
  }
  function previewKind(kind){
   dialog.dataset.previewKind=kind;
@@ -88,12 +88,11 @@
   if(currentKind==='image'&&['+','=','-','0'].includes(event.key)){event.preventDefault();window.OVFileImage.key(event.key)}
  });
  let backdropPress=false;
- const isBackdrop=target=>!target.closest('img,video,button,a,[data-gallery-name],[data-gallery-count]');
- const mediaPreview=()=>currentKind==='image'||currentKind==='video';
+ const isBackdrop=target=>!target.closest('img,video,button,a,[data-result-content],[data-gallery-name],[data-gallery-count]');
  dialog.addEventListener('pointerdown',event=>{backdropPress=event.button===0&&isBackdrop(event.target)},true);
  dialog.addEventListener('pointerup',event=>{const released=document.elementFromPoint(event.clientX,event.clientY);backdropPress=backdropPress&&event.button===0&&released&&dialog.contains(released)&&isBackdrop(released)},true);
  dialog.addEventListener('pointercancel',()=>{backdropPress=false});
- dialog.addEventListener('click',event=>{if(mediaPreview()?backdropPress&&isBackdrop(event.target):event.target===dialog)close();backdropPress=false;const toggle=event.target.closest('[data-file-html-mode]');if(toggle){const root=toggle.closest('[data-file-viewer]'),source=toggle.dataset.fileHtmlMode==='source';root.querySelector('iframe').hidden=source;root.querySelector('[data-file-source]').hidden=!source}});
+ dialog.addEventListener('click',event=>{if(backdropPress&&isBackdrop(event.target))close();backdropPress=false;const toggle=event.target.closest('[data-file-html-mode]');if(toggle){const root=toggle.closest('[data-file-viewer]'),source=toggle.dataset.fileHtmlMode==='source';root.querySelector('iframe').hidden=source;root.querySelector('[data-file-source]').hidden=!source}});
  document.addEventListener('htmx:beforeSwap',event=>{const target=event.detail.target;if(event.detail.shouldSwap&&dialog.open&&target&&group&&(target===group||target.contains(group))){if(target.id==='attachment-list'&&target.closest('[data-task-files]')){group=target.closest('[data-task-files]');opener=group}else close()}});
  new MutationObserver(()=>{if(dialog.open&&group&&(!group.isConnected||!opener?.isConnected))close()}).observe(document.body,{childList:true,subtree:true});
  window.imageGallery={close,refreshItem(element){const at=items.findIndex(item=>item.element===element);if(at<0)return;items[at]=itemFrom(element);if(at===index){if(currentKind==='image'&&window.OVFileImage.refresh(items[at])){download.href=items[at].download}else show(at)}}};
