@@ -73,3 +73,19 @@ func TestServeAssetOnlyHandlesStaticPaths(t *testing.T) {
 		t.Fatalf("ServeAsset did not serve app.css: %d", rec.Code)
 	}
 }
+
+func TestThemePickerUtilitiesAreBundled(t *testing.T) {
+	var data []byte
+	for _, name := range []string{"dist/app.css", "dist/app-utilities.css"} {
+		part, err := embedded.ReadFile(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		data = append(data, part...)
+	}
+	for _, selector := range []string{`.shadow-md{`, `.hover\:shadow-md:hover{`, `.min-h-24{`, `.focus-visible\:outline-primary:focus-visible{`, `.focus-visible\:outline-offset-2:focus-visible{`} {
+		if !strings.Contains(string(data), selector) {
+			t.Errorf("theme picker utility missing from offline bundle: %s", selector)
+		}
+	}
+}
