@@ -317,6 +317,9 @@ func (r *ExecutionRepo) GetAnalyticsDashboard(ctx context.Context, filter persis
 		if dashboard.Models, err = r.queryModelPerformance(ctx, filter, &dashboard.ModelEffortTrend); err != nil {
 			return dashboard, err
 		}
+		if dashboard.ModelActivity, err = r.queryModelMetrics(ctx, filter, true); err != nil {
+			return dashboard, err
+		}
 		summary := &models.AnalyticsTaskSummary{}
 		var goals, goalN, merged, mergeN int
 		for _, row := range dashboard.Models {
@@ -1231,12 +1234,28 @@ func (r *ExecutionRepo) queryModelCategoryPerformance(ctx context.Context, filte
 }
 
 func (r *ExecutionRepo) queryModelPerformance(ctx context.Context, filter persistence.AnalyticsDashboardFilter, combined ...*[]models.ModelEffortTrend) ([]models.ModelPerformance, error) {
+	return r.queryModelMetrics(ctx, filter, false, combined...)
+}
+
+// Outcome cohorts keep mixed tasks separate; activity groups each task by the model that did the work.
+func (r *ExecutionRepo) queryModelMetrics(ctx context.Context, filter persistence.AnalyticsDashboardFilter, activity bool, combined ...*[]models.ModelEffortTrend) ([]models.ModelPerformance, error) {
 	// Model evaluation includes scheduled and interactive tasks together, even
 	// when an older saved URL or API client still sends a work-type filter.
 	filter.WorkType = ""
 	window, windowArgs := analyticsWindowClause("e", filter)
 	usageWindow, usageArgs := analyticsEventWindowClause("u", "occurred_at", filter)
 	dimension, dimensionArgs := analyticsTaskDimensionClause("t", filter)
+	attributionSQL := `SELECT task_id,CASE WHEN COUNT(DISTINCT config_id)>1 THEN '__mixed__' ELSE MIN(config_id) END model_config_id FROM identities GROUP BY task_id`
+	runModelJoin, usageModelGroup, usageModelJoin, goalJoin := "", "", "", ""
+	if activity {
+		attributionSQL = `SELECT task_id,COALESCE(agent_config_id,'') model_config_id FROM period_runs
+			UNION SELECT task_id,COALESCE(agent_config_id,'') FROM task_usage_events`
+		runModelJoin = " AND COALESCE(e.agent_config_id,'')=a.model_config_id"
+		usageModelGroup = ",COALESCE(u.agent_config_id,'')"
+		usageModelJoin = " AND u.model_config_id=tr.model_config_id"
+		// A participating model does not independently earn the shared task outcome.
+		goalJoin = " AND 0=1"
+	}
 	// Like the other tabs, count activity in the selected period, not lifetime
 	// effort for a cohort of tasks finishing in that period.
 	query := `WITH scoped_tasks AS (
@@ -1263,19 +1282,18 @@ func (r *ExecutionRepo) queryModelPerformance(ctx context.Context, filter persis
 		UNION SELECT u.task_id,u.agent_config_id FROM task_usage_events u
 		WHERE u.agent_config_id IS NOT NULL AND u.agent_config_id<>''
 	), attribution AS (
-		SELECT task_id,CASE WHEN COUNT(DISTINCT config_id)>1 THEN '__mixed__' ELSE MIN(config_id) END model_config_id
-		FROM identities GROUP BY task_id
+		` + attributionSQL + `
 	), task_runs AS MATERIALIZED (
 		SELECT t.id,a.model_config_id,COUNT(e.task_id) runs,
 		SUM(CASE WHEN e.status='completed' THEN 1 ELSE 0 END) completed_runs,
 		SUM(CASE WHEN e.status IN ('completed','failed','cancelled') THEN 1 ELSE 0 END) terminal_runs,
 		SUM(CASE WHEN e.is_followup=1 THEN 1 ELSE 0 END) followups,
 		CAST(SUM(CASE WHEN e.completed_at IS NOT NULL THEN MAX(0,(julianday(e.completed_at)-julianday(e.started_at))*86400000) END) AS INTEGER) duration_ms
-		FROM selected_tasks t JOIN attribution a ON a.task_id=t.id LEFT JOIN period_runs e ON e.task_id=t.id
-		GROUP BY t.id
+		FROM selected_tasks t JOIN attribution a ON a.task_id=t.id LEFT JOIN period_runs e ON e.task_id=t.id` + runModelJoin + `
+		GROUP BY t.id,a.model_config_id
 	), task_usage AS (
-		SELECT u.task_id,SUM(u.total_tokens) tokens,SUM(u.cost_usd) cost
-		FROM task_usage_events u GROUP BY u.task_id
+		SELECT u.task_id,COALESCE(u.agent_config_id,'') model_config_id,SUM(u.total_tokens) tokens,SUM(u.cost_usd) cost
+		FROM task_usage_events u GROUP BY u.task_id` + usageModelGroup + `
 	), ranked_durations AS (
 		SELECT model_config_id,duration_ms,ROW_NUMBER() OVER(PARTITION BY model_config_id ORDER BY duration_ms) rn,
 		COUNT(*) OVER(PARTITION BY model_config_id) n FROM task_runs WHERE duration_ms IS NOT NULL
@@ -1289,7 +1307,7 @@ func (r *ExecutionRepo) queryModelPerformance(ctx context.Context, filter persis
 		SUM(CASE WHEN g.status IN ('achieved','failed','active','paused','blocked') THEN 1 ELSE 0 END) goal_n,
 		SUM(CASE WHEN t.merge_status='merged' THEN 1 ELSE 0 END) merged,
 		SUM(CASE WHEN t.worktree_path<>'' OR t.merge_status<>'' THEN 1 ELSE 0 END) merge_n
-		FROM task_runs tr JOIN selected_tasks t ON t.id=tr.id LEFT JOIN task_goals g ON g.task_id=t.id
+		FROM task_runs tr JOIN selected_tasks t ON t.id=tr.id LEFT JOIN task_goals g ON g.task_id=t.id` + goalJoin + `
 		GROUP BY tr.model_config_id,period
 	), trends AS (
 		SELECT model_config_id,json_group_array(json_object('period',period,
@@ -1308,7 +1326,7 @@ func (r *ExecutionRepo) queryModelPerformance(ctx context.Context, filter persis
 		COALESCE(SUM(u.tokens),0),COUNT(u.tokens),SUM(u.cost),COUNT(u.cost),COALESCE(trends.points,'[]'),
 		json_group_array(json_object('period',` + analyticsPeriodExpression(filter.GroupBy, "t.completed_at") + `,'duration',tr.duration_ms,'tokens',u.tokens,'followups',tr.followups))
 	FROM task_runs tr JOIN selected_tasks t ON t.id=tr.id
-	LEFT JOIN task_goals g ON g.task_id=t.id LEFT JOIN task_usage u ON u.task_id=t.id
+	LEFT JOIN task_goals g ON g.task_id=t.id` + goalJoin + ` LEFT JOIN task_usage u ON u.task_id=t.id` + usageModelJoin + `
 	LEFT JOIN durations d ON d.model_config_id=tr.model_config_id
 	LEFT JOIN trends ON trends.model_config_id=tr.model_config_id
 	LEFT JOIN agent_configs ac ON ac.id=tr.model_config_id
@@ -1335,9 +1353,7 @@ func (r *ExecutionRepo) queryModelPerformance(ctx context.Context, filter persis
 			return nil, fmt.Errorf("scanning model performance: %w", err)
 		}
 		row.MixedModels = row.ModelConfigID == "__mixed__"
-		if !row.MixedModels {
-			effortSamples = append(effortSamples, effortJSON)
-		}
+		effortSamples = append(effortSamples, effortJSON)
 		row.EffortTrend, err = aggregateModelEffortTrend(effortJSON)
 		if err != nil {
 			return nil, err
@@ -1364,6 +1380,11 @@ func (r *ExecutionRepo) queryModelPerformance(ctx context.Context, filter persis
 		if knownCost.Valid {
 			value := knownCost.Float64
 			row.KnownCostUSD = &value
+		}
+		if activity {
+			row.GoalAchievement = models.AnalyticsMetric{}
+			row.MergeCompletion = models.AnalyticsMetric{}
+			row.OutcomeTrend = nil
 		}
 		result = append(result, row)
 	}

@@ -182,32 +182,32 @@ templ analyticsContent(currentProject *models.Project) {
 					<div class="flex items-center gap-2">
 						<h3 class="text-xl font-bold">Models</h3>
 						<button type="button" class="btn btn-ghost btn-circle btn-xs" data-model-attribution-help
-							data-model-help="Tasks with activity in the selected period. Runs are counted by start date; tokens and cost by usage date. Only activity in the selected period is included. Mixed configurations are kept separate. Model labels use the saved configuration; different task difficulty and changing goals affect comparisons."
-							aria-label="Tasks with activity in the selected period. Runs are counted by start date; tokens and cost by usage date. Only activity in the selected period is included. Mixed configurations are kept separate. Model labels use the saved configuration; different task difficulty and changing goals affect comparisons."
+							data-model-help="Tasks with activity in the selected period. Runs are counted by start date; tokens and cost by usage date. Only activity in the selected period is included. Each model receives its own effort, including on shared tasks. Shared task outcomes stay under Mixed models. Model labels use the saved configuration; different task difficulty and changing goals affect comparisons."
+							aria-label="Tasks with activity in the selected period. Runs are counted by start date; tokens and cost by usage date. Only activity in the selected period is included. Each model receives its own effort, including on shared tasks. Shared task outcomes stay under Mixed models. Model labels use the saved configuration; different task difficulty and changing goals affect comparisons."
 						>
 							<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path stroke-linecap="round" d="M12 11v6"></path><path stroke-linecap="round" d="M12 7h.01"></path></svg>
 						</button>
 					</div>
 					@analyticsTaskSummary("models")
 					<div class="card bg-base-100 border border-base-300"><div class="card-body">
-						@analyticsCardHeading("Model comparison", "Current goals and merges, plus effort during the selected period. Follow-ups can reflect changed goals, not just corrections. Each configuration keeps its own color across charts.", false)
+						@analyticsCardHeading("Model comparison", "Current goals and merges, plus each model’s own effort during the selected period. Shared task outcomes stay under Mixed models. Follow-ups can reflect changed goals, not just corrections. Each configuration keeps its own color across charts.", false)
 						<div id="modelScorecard" class="overflow-x-auto" style="min-height:12rem"></div>
 					</div></div>
 					<div class="grid grid-cols-1 xl:grid-cols-2 gap-6">
-						@analyticsModelTrendCard("Task Run Time", "Median combined run time per task, grouped by latest task activity in this range. Waiting and mixed configurations excluded.", "modelTaskTimeTrend")
-						@analyticsChartCard("Task Time Breakdown", "Median of each task’s combined run time in this period. Excludes waiting, unfinished runs, and tasks using multiple models.", "modelTimeChart", "h-80")
+						@analyticsModelTrendCard("Task Run Time", "Median combined run time per task, grouped by latest task activity in this range. Includes each model’s own run time on shared tasks; waiting excluded.", "modelTaskTimeTrend")
+						@analyticsChartCard("Task Time Breakdown", "Median of each model’s combined run time per task in this period. Includes shared tasks; excludes waiting and unfinished runs.", "modelTimeChart", "h-80")
 					</div>
 					<div class="grid grid-cols-1 xl:grid-cols-2 gap-6">
 						@analyticsModelTrendCard("Individual Run Time", "Average individual run time, grouped by run start date. Includes ended failed and cancelled runs.", "modelRunTimeTrend")
 						@analyticsChartCard("Run Time Breakdown", "Average time for one model run on a task. A task can have several runs, including retries and follow-ups. Includes failed and cancelled runs with recorded end times.", "modelRunTimeChart", "h-80")
 					</div>
 					<div class="grid grid-cols-1 xl:grid-cols-2 gap-6">
-						@analyticsModelTrendCard("Tokens per Task", "Average recorded tokens per task, grouped by latest task activity in this range. Mixed configurations excluded.", "modelTokenTrend")
-						@analyticsChartCard("Token Breakdown", "Average recorded tokens, including unsuccessful work. Lower means less usage. Mixed models excluded.", "modelTokensChart", "h-80")
+						@analyticsModelTrendCard("Tokens per Task", "Average recorded tokens per task, grouped by latest task activity in this range. Includes each model’s own tokens on shared tasks.", "modelTokenTrend")
+						@analyticsChartCard("Token Breakdown", "Average recorded tokens, including unsuccessful work. Lower means less usage. Includes each model’s own tokens on shared tasks.", "modelTokensChart", "h-80")
 					</div>
 					<div class="grid grid-cols-1 xl:grid-cols-2 gap-6">
-						@analyticsModelTrendCard("Follow-ups per Task", "Average follow-up runs per task, grouped by latest task activity in this range. Mixed configurations excluded.", "modelFollowupTrend")
-						@analyticsChartCard("Follow-up Breakdown", "Average follow-up runs in the selected period. They can reflect corrections, clarification, or changed goals. Mixed models excluded.", "modelFollowupsChart", "h-80")
+						@analyticsModelTrendCard("Follow-ups per Task", "Average follow-up runs per task, grouped by latest task activity in this range. Includes each model’s own follow-ups on shared tasks.", "modelFollowupTrend")
+						@analyticsChartCard("Follow-up Breakdown", "Average follow-up runs in the selected period. They can reflect corrections, clarification, or changed goals. Includes each model’s own follow-ups on shared tasks.", "modelFollowupsChart", "h-80")
 					</div>
 					<div class="grid grid-cols-1 xl:grid-cols-2 gap-6">
 						<div class="card bg-base-100 border border-base-300 min-w-0"><div class="card-body">
@@ -919,15 +919,16 @@ templ analyticsContent(currentProject *models.Project) {
 									chart.getDatasetMeta(0).data.forEach((bar,i)=>drawModelBarValue(chart,bar,i,label(i),missing(i)));ctx.restore();
 								}};
 							}
+							function modelActivityRows(rows){return (latestDashboard||{}).model_activity||rows.filter(r=>!r.mixed_models);}
 							function modelSlots(rows){
 							 const slots=new Map();
 							 for(const row of ((latestRunActivity||{}).models||[]))slots.set(modelSlotKey(row),row);
-							 for(const row of rows.filter(r=>!r.mixed_models))slots.set(modelSlotKey(row),row);
+							 for(const row of modelActivityRows(rows))slots.set(modelSlotKey(row),row);
 							 return Array.from(slots.values()).sort(compareChartModels);
 							}
 
 							function renderModelCharts(rows, runTimeOnly) {
-								const models=rows.filter(r=>!r.mixed_models);
+								const models=modelActivityRows(rows);
 								const slots=modelSlots(rows);slots.forEach(modelChartColor);
 								const compact=n=>new Intl.NumberFormat(undefined,{notation:'compact',maximumFractionDigits:1}).format(n);
 								function bar(key,id,supported,number,format,sample,axis) {
@@ -972,7 +973,7 @@ templ analyticsContent(currentProject *models.Project) {
 							  if(onlyKey&&onlyKey!==spec.key)continue;
 							  if(spec.run&&!latestRunActivity){renderChartState(spec.key,spec.key+'Chart',[],runActivityFailed?'Run activity unavailable':'Loading analytics…');continue;}
 							  if(!spec.run&&!latestDashboard)continue;
-							  const source=spec.run?latestRunActivity.models:rows.filter(r=>!r.mixed_models);
+							  const source=spec.run?latestRunActivity.models:modelActivityRows(rows);
 							  const select=document.getElementById(spec.key+'Select'),previous=select.value;
 							  select.innerHTML='\x3coption value="combined">All models combined\x3c/option>\x3coption value="all">Each model\x3c/option>'+slots.map(r=>'\x3coption value="'+escapeHTML(modelSlotKey(r))+'">'+escapeHTML(modelConfigLabel(r)+' · '+modelDetailLabel(r))+'\x3c/option>').join('');
 							  select.value=previous==='all'||slots.some(r=>modelSlotKey(r)===previous)?previous:'combined';
@@ -1004,7 +1005,8 @@ templ analyticsContent(currentProject *models.Project) {
 							}
 							function renderModelOutcomeChart(rows) {
 								const metric=document.getElementById('modelOutcomeMetric').value;
-								const models=modelSlots(rows);
+								const outcomes=new Map(rows.filter(r=>!r.mixed_models).map(r=>[modelSlotKey(r),r]));
+								const models=modelSlots(rows).map(r=>({...r,goal_achievement:outcomes.get(modelSlotKey(r))?.goal_achievement,merge_completion:outcomes.get(modelSlotKey(r))?.merge_completion}));
 								const canvas=renderChartState('modelOutcomes','modelOutcomesChart',models,'No outcome evidence in this period');if(!canvas)return;
 								canvas.parentElement.style.minWidth=Math.max(320,models.length*40+64)+'px';
 								const values=models.map(r=>Number((r[metric]||{}).denominator)>0?Number(r[metric].percent||0):null);
@@ -1032,7 +1034,10 @@ templ analyticsContent(currentProject *models.Project) {
 							}
 							function renderModelPerformance(rows) {
 								renderModelCharts(rows);
-								const ordered=rows.slice().sort((a,b)=>Number(!!a.mixed_models)-Number(!!b.mixed_models)||compareChartModels(a,b));
+								const outcomes=new Map(rows.map(r=>[modelSlotKey(r),r]));
+								const activity=modelActivityRows(rows).map(r=>({...r,goal_achievement:outcomes.get(modelSlotKey(r))?.goal_achievement,merge_completion:outcomes.get(modelSlotKey(r))?.merge_completion}));
+								const mixed=rows.filter(r=>r.mixed_models).map(r=>({...r,duration_sample_size:0,token_covered_tasks:0,cost_covered_tasks:0}));
+								const ordered=activity.concat(mixed).sort((a,b)=>Number(!!a.mixed_models)-Number(!!b.mixed_models)||compareChartModels(a,b));
 								const value=analyticsMetricCell;
 								function outcome(metric) {
 									metric=metric||{};
@@ -1041,7 +1046,7 @@ templ analyticsContent(currentProject *models.Project) {
 									return n?value(percent.toFixed(1)+'%',Number(metric.numerator||0)+' / '+n+' tasks',tone):value('Unavailable','n=0');
 								}
 								const headings=[
-									['Model / reasoning','Saved model configuration. Tasks that used more than one configuration appear separately under Mixed models.'],
+									['Model / reasoning','Saved model configuration. Effort counts each model’s own work on all tasks it participated in. Shared task outcomes appear under Mixed models. Task counts across models overlap.'],
 									['Goal achieved','Tasks whose current goal is marked achieved / tasks with a non-cleared goal. An unmet or changed goal is not necessarily a model failure. Tasks without goals are excluded.'],
 									['Merged','Tasks with work merged into the target branch / tasks with a worktree or merge status. Goal achievement does not imply delivery; merging does not imply the goal was evaluated.'],
 									['Run time / task','Median total duration of finished runs started in the selected period, per task. Includes scheduled tasks. Excludes waiting between runs and unfinished runs; not time to merge.'],
@@ -1058,7 +1063,7 @@ templ analyticsContent(currentProject *models.Project) {
 										(Number(r.duration_sample_size||0)>0?value(formatDuration(r.median_duration_ms||0),'Median · n='+r.duration_sample_size):value('Unavailable','n=0'))+
 										(tokens?value(formatNumber(Math.round(Number(r.total_tokens||0)/tokens)),'Recorded · n='+tokens):value('Unavailable','n=0'))+
 										(costs&&r.known_cost_usd!=null?value(formatCost(Number(r.known_cost_usd)/costs),'Recorded · n='+costs):value('Unavailable','n=0'))+
-										(tasks?value(Number(r.average_follow_ups||0).toFixed(1),'Average · n='+tasks):value('Unavailable','n=0'))+'\x3c/tr>';
+										(!r.mixed_models&&tasks?value(Number(r.average_follow_ups||0).toFixed(1),'Average · n='+tasks):value('Unavailable','Shared outcomes only'))+'\x3c/tr>';
 								}).join('')+'\x3c/tbody>\x3c/table>':'\x3cp class="opacity-50">No finished tasks in this period.\x3c/p>';
 							}
 
