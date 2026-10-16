@@ -21,6 +21,8 @@ import (
 )
 
 func TestFileRuntimeViewImageThroughProviderAdapter(t *testing.T) {
+	// The provider fixture uses a loopback HTTP server, never a real model endpoint.
+	t.Setenv("OPENVIBELY_ALLOW_PRIVATE_MODEL_ENDPOINTS", "true")
 	work := t.TempDir()
 	var data bytes.Buffer
 	require.NoError(t, png.Encode(&data, image.NewRGBA(image.Rect(0, 0, 8, 8))))
