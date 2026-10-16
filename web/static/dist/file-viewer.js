@@ -4,7 +4,6 @@
  const title=dialog.querySelector('[data-result-title]'),download=dialog.querySelector('[data-gallery-download]');
  const stage=dialog.querySelector('[data-gallery-stage]'),imageControls=dialog.querySelector('[data-image-controls]');
  const prev=dialog.querySelector('[data-gallery-prev]'),next=dialog.querySelector('[data-gallery-next]');
- const thumbnails=dialog.querySelector('[data-gallery-thumbnails]');
  const selector='[data-image-gallery-item],[data-file-preview]';
  let controller,opener,group,items=[],index=0,ticket=0,currentKind='';
  function mode(raw,key){const url=new URL(raw,location.href);for(const k of ['view','raw','download','thumbnail'])url.searchParams.delete(k);url.searchParams.set(key,'1');return url.href}
@@ -32,8 +31,7 @@
   currentKind=item.kind;previewKind(currentKind);title.textContent=item.name;download.href=item.download;download.download=item.name;download.hidden=false;
   dialog.querySelector('[data-gallery-count]').textContent=(index+1)+' / '+items.length;
   prev.disabled=index===0;next.disabled=index===items.length-1;
-  thumbnails.querySelectorAll('button').forEach((button,i)=>button.setAttribute('aria-pressed',String(i===index)));
-  if(item.kind){stage.hidden=false;imageControls.hidden=item.kind!=='image';window.OVFileImage.render(item);return}
+  if(item.kind){stage.hidden=false;imageControls.hidden=false;window.OVFileImage.render(item);return}
   content.hidden=false;content.textContent='Loading preview…';
   try{
    const response=await fetch(mode(item.raw,'view'),{signal:controller.signal});
@@ -44,7 +42,7 @@
    if(header){title.textContent=header.querySelector('h3')?.textContent||item.name;download.download=title.textContent;const link=header.querySelector('a');if(link)download.href=link.href;header.remove()}
    // A Files-panel link may not have media metadata. Use the server's renderer kind.
    const media=content.querySelector('[data-file-viewer="image"] img,[data-file-viewer="video"] video');
-   if(media){currentKind=media.tagName==='VIDEO'?'video':'image';previewKind(currentKind);const rendered={...item,name:title.textContent,kind:currentKind,url:media.src};content.replaceChildren();content.hidden=true;stage.hidden=false;imageControls.hidden=currentKind!=='image';window.OVFileImage.render(rendered);return}
+   if(media){currentKind=media.tagName==='VIDEO'?'video':'image';previewKind(currentKind);const rendered={...item,name:title.textContent,kind:currentKind,url:media.src};content.replaceChildren();content.hidden=true;stage.hidden=false;imageControls.hidden=false;window.OVFileImage.render(rendered);return}
    if(content.querySelector('[data-files-list]')){title.textContent='Files';download.hidden=true}
    window.OVFilesPDF?.render(content);
    content.querySelectorAll('[data-file-code]').forEach(code=>window.hljs?.highlightElement(code));
@@ -62,11 +60,6 @@
   const at=links.indexOf(trigger);
   items=at<0?[itemFrom(trigger,url)]:links.map(link=>itemFrom(link));
   if(!dialog.contains(trigger)){opener=trigger}else group=null;
-  thumbnails.replaceChildren();thumbnails.hidden=items.length<2;
-  items.forEach((item,i)=>{const button=document.createElement('button');button.type='button';button.title=item.name;button.ariaLabel='Open '+item.name;
-   if(item.kind==='image'||item.kind==='video'){const thumb=document.createElement(item.kind==='video'?'video':'img');thumb.src=item.url;thumb.alt=item.name;if(item.kind==='video'){thumb.muted=true;thumb.preload='metadata'}button.append(thumb)}else button.textContent=item.name;
-   button.onclick=()=>show(i);thumbnails.append(button);
-  });
   if(!dialog.open)dialog.showModal();show(at<0?0:at);
   dialog.querySelector('[data-gallery-close]').focus({preventScroll:true});
  }
@@ -74,6 +67,9 @@
   dialog.dataset.previewKind=kind;
   const media=kind==='image'||kind==='video',header=dialog.querySelector('header'),viewer=dialog.querySelector('.image-gallery-viewer');
   [prev,next].forEach(button=>media?viewer.append(button):header.insertBefore(button,title));
+  const actions=dialog.querySelector('[data-result-actions]');actions.hidden=media;
+  (media?dialog.querySelector('.image-gallery-tools'):actions).append(download);
+  ['minus','plus','fit'].forEach(name=>dialog.querySelector('[data-gallery-'+name+']').hidden=kind!=='image');
  }
  function close(){if(dialog.open)dialog.close()}
  document.addEventListener('click',event=>{
@@ -83,7 +79,7 @@
  });
  prev.onclick=()=>show(index-1);next.onclick=()=>show(index+1);
  dialog.querySelector('[data-gallery-close]').onclick=close;
- dialog.addEventListener('close',()=>{if(dialog.open)return;ticket++;controller?.abort();clear();thumbnails.replaceChildren();thumbnails.hidden=true;title.textContent='File preview';download.hidden=true;download.removeAttribute('href');download.removeAttribute('download');items=[];group=null;if(opener?.isConnected)opener.focus({preventScroll:true});opener=null});
+ dialog.addEventListener('close',()=>{if(dialog.open)return;ticket++;controller?.abort();clear();title.textContent='File preview';download.hidden=true;download.removeAttribute('href');download.removeAttribute('download');items=[];group=null;if(opener?.isConnected)opener.focus({preventScroll:true});opener=null});
  dialog.addEventListener('keydown',event=>{
   if(event.defaultPrevented||event.isComposing||event.altKey||event.metaKey||event.ctrlKey||event.target.closest('input,textarea,select,[contenteditable],[data-sheet-grid]'))return;
   if(event.key==='Escape'){event.preventDefault();close();return}
@@ -91,7 +87,7 @@
   if(currentKind==='image'&&['+','=','-','0'].includes(event.key)){event.preventDefault();window.OVFileImage.key(event.key)}
  });
  let backdropPress=false;
- const isBackdrop=target=>!target.closest('img,video,button,a,[data-gallery-name],[data-gallery-count],[data-gallery-thumbnails]');
+ const isBackdrop=target=>!target.closest('img,video,button,a,[data-gallery-name],[data-gallery-count]');
  const mediaPreview=()=>currentKind==='image'||currentKind==='video';
  dialog.addEventListener('pointerdown',event=>{backdropPress=event.button===0&&isBackdrop(event.target)},true);
  dialog.addEventListener('pointerup',event=>{const released=document.elementFromPoint(event.clientX,event.clientY);backdropPress=backdropPress&&event.button===0&&released&&dialog.contains(released)&&isBackdrop(released)},true);
@@ -99,7 +95,7 @@
  dialog.addEventListener('click',event=>{if(mediaPreview()?backdropPress&&isBackdrop(event.target):event.target===dialog)close();backdropPress=false;const toggle=event.target.closest('[data-file-html-mode]');if(toggle){const root=toggle.closest('[data-file-viewer]'),source=toggle.dataset.fileHtmlMode==='source';root.querySelector('iframe').hidden=source;root.querySelector('[data-file-source]').hidden=!source}});
  document.addEventListener('htmx:beforeSwap',event=>{const target=event.detail.target;if(event.detail.shouldSwap&&dialog.open&&target&&group&&(target===group||target.contains(group))){if(target.id==='attachment-list'&&target.closest('[data-task-files]')){group=target.closest('[data-task-files]');opener=group}else close()}});
  new MutationObserver(()=>{if(dialog.open&&group&&(!group.isConnected||!opener?.isConnected))close()}).observe(document.body,{childList:true,subtree:true});
- window.imageGallery={close,refreshItem(element){const at=items.findIndex(item=>item.element===element);if(at<0)return;items[at]=itemFrom(element);const thumb=thumbnails.children[at]?.querySelector('img,video');if(thumb)thumb.src=items[at].url;if(at===index){if(currentKind==='image'&&window.OVFileImage.refresh(items[at])){download.href=items[at].download}else show(at)}}};
+ window.imageGallery={close,refreshItem(element){const at=items.findIndex(item=>item.element===element);if(at<0)return;items[at]=itemFrom(element);if(at===index){if(currentKind==='image'&&window.OVFileImage.refresh(items[at])){download.href=items[at].download}else show(at)}}};
  window.OVFileViewer={open,mode};
  window.addEventListener('sse-task-event',event=>{
   const update=event.detail;

@@ -80,6 +80,8 @@ func TestBrowserFunctional_SharedImageGallery(t *testing.T) {
 		b.click(`#attachment-list [data-image-gallery-item]`)
 		b.waitFor("task gallery loaded", `document.querySelector('[data-gallery-count]').textContent+':'+document.querySelector('[data-gallery-status]').textContent`, "1 / 3:")
 		if runtime.GOOS == "darwin" || runtime.GOOS == "linux" {
+			b.waitFor("original image toolbar and side navigation", `String((()=>{const d=document.getElementById('image-gallery'),a=d.querySelector('[data-gallery-download]'),prev=d.querySelector('[data-gallery-prev]'),stage=d.querySelector('[data-gallery-stage]');return !!a.closest('footer .image-gallery-tools') && !!a.querySelector('svg') && !a.textContent.trim() && !d.querySelector('[data-gallery-thumbnails]') && d.querySelector('[data-result-actions]').hidden && !!prev.closest('.image-gallery-viewer') && getComputedStyle(prev).position==='absolute' && getComputedStyle(stage).marginLeft==='68px';})())`, "true")
+
 			b.waitFor("preview hides native controls", `String(window.nativeControlEvents?.['desktop:controls-visibility']?.hidden)`, "true")
 			b.waitFor("visibility events carry page and increasing sequence", `String((()=>{const e=window.nativeControlEvents['desktop:controls-visibility'];return e.page===performance.timeOrigin && e.sequence>=2;})())`, "true")
 			b.evaluate(`window.previewVisibilitySequence=window.nativeControlEvents['desktop:controls-visibility'].sequence;'saved'`)
