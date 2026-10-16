@@ -1549,7 +1549,12 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 							});
 							rails.forEach(function(rail) { rail.style.backgroundColor = yamlRailColor(rail === active); });
 						}
-						function layoutYAMLIndentationRails() {
+	                    var yamlThemeObserver = new MutationObserver(function() {
+                        if (!builder.isConnected) { yamlThemeObserver.disconnect(); return; }
+                        updateYAMLActiveRail();
+                    });
+                    yamlThemeObserver.observe(document.documentElement, {attributes: true, attributeFilter: ['data-theme', 'data-color-theme', 'data-ov-theme-layer']});
+					function layoutYAMLIndentationRails() {
 						if (!yamlHighlight) return;
 						yamlHighlight.querySelectorAll('[data-automation-yaml-indent-rail]').forEach(function(rail) {
 							var start = yamlHighlight.querySelector('[data-automation-yaml-highlight-line][data-yaml-line="' + rail.dataset.yamlRailStart + '"]');
@@ -2040,7 +2045,7 @@ yamlViewport.scrollTop = 0;
 					renderEdges(); syncCandidate(); viewBox = initialViewBox.slice(); applyViewBox();
 				});
 					builder.addEventListener('htmx:beforeCleanupElement', function(event) {
-						if (event.target === builder) clearActiveConnection();
+						if (event.target === builder) { clearActiveConnection(); yamlThemeObserver.disconnect(); }
 					});
 						var automationName = builder.querySelector('[data-automation-name]');
 						if (automationName) automationName.addEventListener('input', syncCandidate);					builder.addEventListener('input', function(event) { if (event.target !== yamlEditor && !event.target.closest('[data-automation-node-dialog]')) syncCandidate(); });

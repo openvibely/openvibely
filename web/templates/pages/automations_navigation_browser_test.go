@@ -2114,15 +2114,30 @@ window.addEventListener('DOMContentLoaded', function() {
     nestedRail = Array.from(highlight.querySelectorAll('[data-automation-yaml-indent-rail]')).find(function(rail) { return Number(rail.dataset.yamlRailColumn) === 2 && Number(rail.dataset.yamlRailStart) === 34; });
     if (!nestedRail) fail('expected an indentation rail at column 2 for the edge item fields after restoring typed edit');
     document.documentElement.setAttribute('data-theme', 'dark');
-    editor.dispatchEvent(new KeyboardEvent('keyup', {bubbles: true, key: 'ArrowRight'}));
     await new Promise(function(resolve) { requestAnimationFrame(resolve); });
     var darkActiveColor = window.getComputedStyle(nestedRail).backgroundColor;
     document.documentElement.setAttribute('data-theme', 'light');
-    editor.dispatchEvent(new KeyboardEvent('keyup', {bubbles: true, key: 'ArrowRight'}));
     await new Promise(function(resolve) { requestAnimationFrame(resolve); });
     var lightActiveColor = window.getComputedStyle(nestedRail).backgroundColor;
-    if (darkActiveColor === lightActiveColor) fail('active YAML rail color must differ between dark and light themes: dark=' + darkActiveColor + ' light=' + lightActiveColor);
-    document.documentElement.setAttribute('data-theme', 'dark');
+    if (darkActiveColor === lightActiveColor) fail('theme switch must refresh active YAML rails without editor interaction');
+    document.documentElement.style.setProperty('--ov-focus', '#123456');
+    document.documentElement.style.setProperty('--ov-yaml-indent-rail', '#654321');
+    document.documentElement.setAttribute('data-ov-theme-layer', 'custom');
+    document.documentElement.setAttribute('data-color-theme', 'test-custom');
+    await new Promise(function(resolve) { requestAnimationFrame(resolve); });
+    if (window.getComputedStyle(nestedRail).backgroundColor !== 'rgb(18, 52, 86)') fail('native-to-custom switch did not refresh active rail');
+    var inactiveRail = Array.from(highlight.querySelectorAll('[data-automation-yaml-indent-rail]')).find(function(rail) { return rail !== nestedRail; });
+    if (!inactiveRail || window.getComputedStyle(inactiveRail).backgroundColor !== 'rgb(101, 67, 33)') fail('native-to-custom switch did not refresh inactive rails');
+    for (var nativeMode of ['light', 'dark']) {
+      document.documentElement.setAttribute('data-theme', nativeMode);
+      document.documentElement.setAttribute('data-ov-theme-layer', 'native');
+      document.documentElement.setAttribute('data-color-theme', 'openvibely-' + nativeMode);
+      await new Promise(function(resolve) { requestAnimationFrame(resolve); });
+      if (window.getComputedStyle(nestedRail).backgroundColor !== (nativeMode === 'dark' ? darkActiveColor : lightActiveColor)) fail('return to native did not restore active rail');
+      if (window.getComputedStyle(inactiveRail).backgroundColor !== inactiveColor) fail('return to native did not restore inactive rail');
+    }
+    document.documentElement.style.removeProperty('--ov-focus');
+    document.documentElement.style.removeProperty('--ov-yaml-indent-rail');
     var outsideCursor = editor.value.indexOf('schema_version');
     editor.setSelectionRange(outsideCursor, outsideCursor);
     editor.dispatchEvent(new KeyboardEvent('keyup', {bubbles: true, key: 'ArrowLeft'}));
