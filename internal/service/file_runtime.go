@@ -15,6 +15,7 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/pkg/attachment"
 	"github.com/openvibely/openvibely/pkg/filecontent"
+	"github.com/openvibely/openvibely/pkg/toolschema"
 )
 
 func (s *LLMService) fileRuntime(req llmcontracts.AgentRequest) *llmcontracts.RuntimeTools {
@@ -27,10 +28,10 @@ func (s *LLMService) fileRuntime(req llmcontracts.AgentRequest) *llmcontracts.Ru
 	if req.AgentDefinition != nil && (req.AgentDefinition.ToolConfig.SkipDefaultTools || !AgentAllowsTool(req.AgentDefinition, "Read")) {
 		return nil
 	}
-	defs := []llmcontracts.RuntimeToolDefinition{{Name: "view_image", Description: "Inspect a local PNG, JPEG, GIF, or WebP image visually. Use this after rendering document pages, slides, sheets, or other visual output with skill scripts. Returns image content to the model; does not publish the image to the user.", Access: llmcontracts.RuntimeToolAccessRead, Parameters: json.RawMessage(`{"type":"object","properties":{"file_path":{"type":"string"}},"required":["file_path"],"additionalProperties":false}`)}}
+	defs := []llmcontracts.RuntimeToolDefinition{{Name: "view_image", Description: "Inspect a local PNG, JPEG, GIF, or WebP image visually. Use this after rendering document pages, slides, sheets, or other visual output with skill scripts. Returns image content to the model; does not publish the image to the user.", Access: llmcontracts.RuntimeToolAccessRead, Schema: &toolschema.Schema{Type: "object", Properties: map[string]*toolschema.Schema{"file_path": {Type: "string"}}, Required: []string{"file_path"}, AdditionalProperties: toolschema.Pointer(false)}}}
 	canPublish := req.ChatMode != models.ChatModePlan && AgentAllowsTool(req.AgentDefinition, "Write")
 	if canPublish {
-		defs = append(defs, llmcontracts.RuntimeToolDefinition{Name: "publish_file", Description: "Publish an existing generated file as a durable downloadable chat artifact. Returns its file URL; include a Markdown link to it in the answer. Files are not automatically included in later model context. For interactive HTML use display=canvas; scripts run in an isolated preview.", Access: llmcontracts.RuntimeToolAccessWrite, Parameters: json.RawMessage(`{"type":"object","properties":{"file_path":{"type":"string"},"display":{"type":"string","enum":["","canvas"]}},"required":["file_path"],"additionalProperties":false}`)})
+		defs = append(defs, llmcontracts.RuntimeToolDefinition{Name: "publish_file", Description: "Publish an existing generated file as a durable downloadable chat artifact. Returns its file URL; include a Markdown link to it in the answer. Files are not automatically included in later model context. For interactive HTML use display=canvas; scripts run in an isolated preview.", Access: llmcontracts.RuntimeToolAccessWrite, Schema: &toolschema.Schema{Type: "object", Properties: map[string]*toolschema.Schema{"file_path": {Type: "string"}, "display": {Type: "string", Enum: []any{"", "canvas"}}}, Required: []string{"file_path"}, AdditionalProperties: toolschema.Pointer(false)}})
 	}
 	return &llmcontracts.RuntimeTools{Definitions: defs, Executor: func(ctx context.Context, name string, input json.RawMessage) (string, bool, bool, error) {
 		if name != "publish_file" && name != "view_image" {

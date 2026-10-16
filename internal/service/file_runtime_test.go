@@ -161,3 +161,19 @@ func TestViewImageReadsBytesWithoutPublishing(t *testing.T) {
 	require.True(t, failed)
 	require.ErrorContains(t, err, "requires a PNG")
 }
+
+func TestFileRuntimeUsesTypedSchemas(t *testing.T) {
+	s := &LLMService{attachmentRepo: &fileRuntimeAttachmentStore{}}
+	rt := s.fileRuntime(llmcontracts.AgentRequest{Ctx: context.Background(), ExecID: "execution", ProjectID: "project", Agent: models.LLMConfig{Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodAPIKey}})
+	require.NotNil(t, rt)
+	require.Len(t, rt.Definitions, 2)
+	for _, def := range rt.Definitions {
+		require.NotNil(t, def.Schema)
+		require.Empty(t, def.Parameters)
+		require.Equal(t, []string{"file_path"}, def.Schema.Required)
+		require.Equal(t, "string", def.Schema.Properties["file_path"].Type)
+		require.NotNil(t, def.Schema.AdditionalProperties)
+		require.False(t, *def.Schema.AdditionalProperties)
+		require.True(t, json.Valid(def.ParameterSchema()))
+	}
+}
