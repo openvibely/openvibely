@@ -1578,8 +1578,8 @@ func TestBrowserFunctional_AnalyticsSharedModelActivity(t *testing.T) {
 	fixture := `<main id="reconnect-result"></main><script>
  history.replaceState({},'',location.pathname+'?project_id=p&view=models');
  var configs={};window.Chart=function(ctx,config){configs[ctx.canvas.id]=config;this.destroy=function(){};};
- var activity=[{model_config_id:'a',config_name:'Astra',tasks_used:2,total_tokens:100,token_covered_tasks:1,median_duration_ms:60000,duration_sample_size:1,average_follow_ups:2,effort_trend:[{period:'2026-09-01',tasks:1,tokens:100,token_samples:1,follow_ups:2,median_duration_ms:60000,duration_samples:1}]},{model_config_id:'b',config_name:'Opus',tasks_used:1,total_tokens:200,token_covered_tasks:1,median_duration_ms:120000,duration_sample_size:1,average_follow_ups:1,effort_trend:[]}];
- window.fetch=async function(url){var data={};if(String(url).includes('/dashboard'))data={models:[{model_config_id:'a',config_name:'Astra',tasks_used:1,goal_achievement:{numerator:1,denominator:1,percent:100}},{model_config_id:'__mixed__',config_name:'Mixed models',mixed_models:true,tasks_used:1,goal_achievement:{numerator:1,denominator:1,percent:100}}],model_activity:activity,model_effort_trend:[{period:'2026-09-01',tasks:1,tokens:300,token_samples:1,follow_ups:3,median_duration_ms:180000,duration_samples:1}],agents:[],recent_outcomes:[]};else if(String(url).includes('/task-run-activity'))data={models:[],hours:[]};return {ok:true,json:async()=>data};};
+ var activity=[{model_config_id:'a',config_name:'Astra',tasks_used:2,total_tokens:100,token_covered_tasks:1,median_duration_ms:60000,duration_sample_size:1,average_follow_ups:2,effort_trend:[{period:'2026-09-01',tasks:1,tokens:100,token_samples:1,follow_ups:2,median_duration_ms:60000,duration_samples:1},{period:'2026-09-02',tasks:1,tokens:50,token_samples:1,follow_ups:1,median_duration_ms:30000,duration_samples:1}]},{model_config_id:'b',config_name:'Opus',tasks_used:1,total_tokens:200,token_covered_tasks:1,median_duration_ms:120000,duration_sample_size:1,average_follow_ups:1,effort_trend:[]}];
+ window.fetch=async function(url){var data={};if(String(url).includes('/dashboard'))data={models:[{model_config_id:'a',config_name:'Astra',tasks_used:1,goal_achievement:{numerator:1,denominator:1,percent:100}},{model_config_id:'__mixed__',config_name:'Mixed models',mixed_models:true,tasks_used:1,goal_achievement:{numerator:1,denominator:1,percent:100}}],model_activity:activity,model_effort_trend:[{period:'2026-09-01',tasks:1,tokens:300,token_samples:1,follow_ups:3,median_duration_ms:180000,duration_samples:1},{period:'2026-09-02',tasks:1,tokens:50,token_samples:1,follow_ups:1,median_duration_ms:30000,duration_samples:1}],agents:[],recent_outcomes:[]};else if(String(url).includes('/task-run-activity'))data={models:[],hours:[]};return {ok:true,json:async()=>data};};
  window.addEventListener('load',async function(){var result=document.getElementById('reconnect-result');function assert(ok,msg){if(!ok)throw Error(msg);}try{
  for(var i=0;i<100&&!configs.modelTokensChart;i++)await new Promise(r=>setTimeout(r,20));
  assert(configs.modelTokensChart.data.labels.join('|')==='Astra|Opus','shared-task models missing');
@@ -1588,6 +1588,12 @@ func TestBrowserFunctional_AnalyticsSharedModelActivity(t *testing.T) {
  assert(configs.modelFollowupsChart.data.datasets[0].data.join('|')==='2|1','follow-ups not attributed to actual model');
  assert(configs.modelTokenTrendChart.data.datasets[0].data[0]===300,'combined tokens must include shared task once');
  assert(configs.modelTaskTimeTrendChart.data.datasets[0].data[0]===180000,'combined duration must include whole shared task');
+ for(var [key,expected] of [['modelTaskTimeTrend','60000|30000'],['modelTokenTrend','100|50'],['modelFollowupTrend','2|1']]){
+ var chooser=document.getElementById(key+'Select');chooser.value='a';chooser.dispatchEvent(new Event('change'));
+ var chart=configs[key+'Chart'];
+ assert(chart.data.labels.join('|')==='2026-09-01|2026-09-02','activity dates missing: '+key);
+ assert(chart.data.datasets[0].data.join('|')===expected,'daily values missing: '+key);
+}
  var select=document.getElementById('modelTokenTrendSelect');select.value='a';select.dispatchEvent(new Event('change'));
  assert(configs.modelTokenTrendChart.data.datasets[0].data[0]===100,'individual trend lost shared task');
  var score=document.getElementById('modelScorecard').textContent;

@@ -7,7 +7,8 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 )
 
-// Samples come from the same task rows as the full-period comparison metrics.
+// Each sample contains one task’s work within one time bucket.
+// Combined samples merge models before aggregation so shared tasks count once.
 func aggregateModelEffortTrend(raw ...string) ([]models.ModelEffortTrend, error) {
 	type sample struct {
 		Period    string

@@ -1294,6 +1294,22 @@ func (r *ExecutionRepo) queryModelMetrics(ctx context.Context, filter persistenc
 	), task_usage AS (
 		SELECT u.task_id,COALESCE(u.agent_config_id,'') model_config_id,SUM(u.total_tokens) tokens,SUM(u.cost_usd) cost
 		FROM task_usage_events u GROUP BY u.task_id` + usageModelGroup + `
+	), effort_events AS (
+		SELECT e.task_id,e.agent_config_id,` + analyticsPeriodExpression(filter.GroupBy, "e.started_at") + ` period,
+		CASE WHEN e.completed_at IS NOT NULL THEN MAX(0,(julianday(e.completed_at)-julianday(e.started_at))*86400000) END duration,
+		NULL tokens,CASE WHEN e.is_followup=1 THEN 1 ELSE 0 END followups
+		FROM period_runs e
+		UNION ALL
+		SELECT u.task_id,u.agent_config_id,` + analyticsPeriodExpression(filter.GroupBy, "u.occurred_at") + `,
+		NULL,u.total_tokens,0 FROM task_usage_events u
+	), effort_tasks AS (
+		SELECT e.task_id,a.model_config_id,e.period,CAST(SUM(e.duration) AS INTEGER) duration,
+		SUM(e.tokens) tokens,SUM(e.followups) followups
+		FROM effort_events e JOIN attribution a ON a.task_id=e.task_id` + runModelJoin + `
+		GROUP BY e.task_id,a.model_config_id,e.period
+	), effort_trends AS (
+		SELECT model_config_id,json_group_array(json_object('period',period,'duration',duration,'tokens',tokens,'followups',followups)) points
+		FROM effort_tasks GROUP BY model_config_id
 	), ranked_durations AS (
 		SELECT model_config_id,duration_ms,ROW_NUMBER() OVER(PARTITION BY model_config_id ORDER BY duration_ms) rn,
 		COUNT(*) OVER(PARTITION BY model_config_id) n FROM task_runs WHERE duration_ms IS NOT NULL
@@ -1324,10 +1340,11 @@ func (r *ExecutionRepo) queryModelMetrics(ctx context.Context, filter persistenc
 		SUM(CASE WHEN t.worktree_path<>'' OR t.merge_status<>'' THEN 1 ELSE 0 END),
 		COALESCE(d.median_ms,0),COALESCE(d.p90_ms,0),COALESCE(d.n,0),
 		COALESCE(SUM(u.tokens),0),COUNT(u.tokens),SUM(u.cost),COUNT(u.cost),COALESCE(trends.points,'[]'),
-		json_group_array(json_object('period',` + analyticsPeriodExpression(filter.GroupBy, "t.completed_at") + `,'duration',tr.duration_ms,'tokens',u.tokens,'followups',tr.followups))
+		COALESCE(effort_trends.points,'[]')
 	FROM task_runs tr JOIN selected_tasks t ON t.id=tr.id
 	LEFT JOIN task_goals g ON g.task_id=t.id` + goalJoin + ` LEFT JOIN task_usage u ON u.task_id=t.id` + usageModelJoin + `
 	LEFT JOIN durations d ON d.model_config_id=tr.model_config_id
+	LEFT JOIN effort_trends ON effort_trends.model_config_id=tr.model_config_id
 	LEFT JOIN trends ON trends.model_config_id=tr.model_config_id
 	LEFT JOIN agent_configs ac ON ac.id=tr.model_config_id
 	GROUP BY tr.model_config_id ORDER BY COUNT(*) DESC,ac.name,tr.model_config_id`

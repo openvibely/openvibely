@@ -782,7 +782,7 @@ func analyticsContent(currentProject *models.Project) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = analyticsModelTrendCard("Task Run Time", "Median combined run time per task, grouped by latest task activity in this range. Includes each model’s own run time on shared tasks; waiting excluded.", "modelTaskTimeTrend").Render(ctx, templ_7745c5c3_Buffer)
+			templ_7745c5c3_Err = analyticsModelTrendCard("Task Run Time", "Median combined run time per active task in each period, grouped by run start date. Includes each model’s own run time on shared tasks; waiting excluded.", "modelTaskTimeTrend").Render(ctx, templ_7745c5c3_Buffer)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -806,7 +806,7 @@ func analyticsContent(currentProject *models.Project) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = analyticsModelTrendCard("Tokens per Task", "Average recorded tokens per task, grouped by latest task activity in this range. Includes each model’s own tokens on shared tasks.", "modelTokenTrend").Render(ctx, templ_7745c5c3_Buffer)
+			templ_7745c5c3_Err = analyticsModelTrendCard("Tokens per Task", "Average recorded tokens per task with usage in each period, grouped by usage date. Includes each model’s own tokens on shared tasks.", "modelTokenTrend").Render(ctx, templ_7745c5c3_Buffer)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -818,7 +818,7 @@ func analyticsContent(currentProject *models.Project) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = analyticsModelTrendCard("Follow-ups per Task", "Average follow-up runs per task, grouped by latest task activity in this range. Includes each model’s own follow-ups on shared tasks.", "modelFollowupTrend").Render(ctx, templ_7745c5c3_Buffer)
+			templ_7745c5c3_Err = analyticsModelTrendCard("Follow-ups per Task", "Average follow-up runs per active task in each period, grouped by run start date. Includes each model’s own follow-ups on shared tasks.", "modelFollowupTrend").Render(ctx, templ_7745c5c3_Buffer)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}

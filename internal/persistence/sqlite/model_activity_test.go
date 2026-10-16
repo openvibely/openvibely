@@ -77,3 +77,80 @@ func TestModelActivityAttributesSharedTaskEffortWithoutDuplicatingCombinedTasks(
 		t.Fatalf("combined must count each task once: %+v", combined)
 	}
 }
+
+func TestModelEffortTrendsUseActivityDates(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	_, err := db.Exec(`
+ INSERT INTO projects(id,name) VALUES ('p','Project');
+ INSERT INTO agent_configs(id,name,provider,model) VALUES ('a','Astra','openai','astra'),('b','Opus','anthropic','opus');
+ INSERT INTO tasks(id,project_id,title,status) VALUES ('t','p','Spans days','completed');
+ INSERT INTO executions(id,task_id,agent_config_id,status,started_at,completed_at,is_followup) VALUES
+ ('a1','t','a','completed','2026-09-01 12:00:00','2026-09-01 13:00:00',0),
+ ('a2','t','a','completed','2026-09-02 12:00:00','2026-09-02 14:00:00',1),
+ ('b2','t','b','failed','2026-09-02 14:00:00','2026-09-02 15:00:00',1),
+ ('running','t','a','running','2026-09-04 12:00:00',NULL,1);
+ INSERT INTO llm_usage_events(id,provider,project_id,task_id,execution_id,agent_config_id,model,operation,total_tokens,occurred_at) VALUES
+ ('u1','openai','p','t','a1','a','astra','task',100,'2026-09-01 13:00:00'),
+ ('u2','openai','p','t','a2','a','astra','task_followup',200,'2026-09-02 14:00:00'),
+ ('ub','anthropic','p','t','b2','b','opus','task_followup',300,'2026-09-02 15:00:00'),
+ ('late','openai','p','t',NULL,'a','astra','task_followup',50,'2026-09-03 12:00:00');`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	filter := persistence.AnalyticsDashboardFilter{ProjectID: "p", View: "models", GroupBy: "day", DateFrom: time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC), DateTo: time.Date(2026, 9, 5, 0, 0, 0, 0, time.UTC)}
+	repo := NewExecutionRepo(db)
+	dashboard, err := repo.GetAnalyticsDashboard(context.Background(), filter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	byID := map[string]models.ModelPerformance{}
+	for _, row := range dashboard.ModelActivity {
+		byID[row.ModelConfigID] = row
+	}
+	a := byID["a"]
+	if len(a.EffortTrend) != 4 {
+		t.Fatalf("work collapsed onto latest date: %+v", a.EffortTrend)
+	}
+	check := func(p models.ModelEffortTrend, day string, tokens int64, followups, samples int, duration int64) {
+		t.Helper()
+		if p.Period != day || p.Tasks != 1 || p.Tokens != tokens || p.FollowUps != followups || p.DurationSamples != samples || p.MedianDurationMs < duration-2 || p.MedianDurationMs > duration+2 {
+			t.Fatalf("wrong period activity: %+v", p)
+		}
+	}
+	check(a.EffortTrend[0], "2026-09-01", 100, 0, 1, 3600000)
+	check(a.EffortTrend[1], "2026-09-02", 200, 1, 1, 7200000)
+	check(a.EffortTrend[2], "2026-09-03", 50, 0, 0, 0)
+	check(a.EffortTrend[3], "2026-09-04", 0, 1, 0, 0)
+	if a.EffortTrend[3].TokenSamples != 0 || a.EffortTrend[2].TokenSamples != 1 {
+		t.Fatal("missing usage must remain missing")
+	}
+	check(byID["b"].EffortTrend[0], "2026-09-02", 300, 1, 1, 3600000)
+	if len(dashboard.ModelEffortTrend) != 4 {
+		t.Fatalf("combined dates: %+v", dashboard.ModelEffortTrend)
+	}
+	check(dashboard.ModelEffortTrend[1], "2026-09-02", 500, 2, 1, 10800000)
+	if a.TasksUsed != 1 || a.TotalTokens != 350 || a.RunCount != 3 || a.MedianDurationMs < 10799998 || a.MedianDurationMs > 10800002 {
+		t.Fatalf("period comparison changed: %+v", a)
+	}
+	filter.GroupBy = "month"
+	monthly, err := repo.GetAnalyticsDashboard(context.Background(), filter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(monthly.ModelEffortTrend) != 1 {
+		t.Fatalf("monthly: %+v", monthly.ModelEffortTrend)
+	}
+	check(monthly.ModelEffortTrend[0], "2026-09", 650, 3, 1, 14400000)
+	// Half-open date filtering must omit earlier runs without moving their work to later days.
+	filter.GroupBy = "day"
+	filter.DateFrom = time.Date(2026, 9, 2, 0, 0, 0, 0, time.UTC)
+	filter.DateTo = time.Date(2026, 9, 3, 0, 0, 0, 0, time.UTC)
+	narrowed, err := repo.GetAnalyticsDashboard(context.Background(), filter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(narrowed.ModelEffortTrend) != 1 {
+		t.Fatalf("range: %+v", narrowed.ModelEffortTrend)
+	}
+	check(narrowed.ModelEffortTrend[0], "2026-09-02", 500, 2, 1, 10800000)
+}
