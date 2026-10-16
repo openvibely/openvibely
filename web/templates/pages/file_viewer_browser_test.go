@@ -64,7 +64,7 @@ func TestBrowserFunctional_FileViewers(t *testing.T) {
 		if strings.HasPrefix(r.URL.Path, "/fixture/") {
 			name := strings.TrimPrefix(r.URL.Path, "/fixture/")
 			kind := components.FilePreviewKind(name)
-			text := map[string]string{"data.json": `{"amount":12345678901234567890,"nested":{"ok":true}}`, "table.csv": "Name,Value\nAlpha,42\n,\nBeta,84", "wide.csv": strings.Repeat("value,", 100) + "outside preview", "demo.html": "<button id='demo' onclick='this.textContent=\"Clicked\"'>Click</button>", "math.md": "Math: $x^2$"}[name]
+			text := map[string]string{"data.json": `{"amount":12345678901234567890,"nested":{"ok":true}}`, "table.csv": "Name,Value\nAlpha,42\n,\nBeta,84", "wide.csv": strings.Repeat("value,", 100) + "outside preview", "demo.html": "<button id='demo' onclick='this.textContent=\"Clicked\"'>Click</button>", "math.md": "# Report\n\nMath: $x^2$\n\nA readable paragraph."}[name]
 			if r.URL.Query().Get("view") == "1" {
 				w.Header().Set("Content-Type", "text/html")
 				if name == "document.docx" {
@@ -113,13 +113,13 @@ func TestBrowserFunctional_FileViewers(t *testing.T) {
 		b.click("[data-gallery-plus]")
 		b.waitFor("image-specific zoom", `document.querySelector('[data-gallery-fit]').getAttribute('aria-label')`, "Fit image (150%)")
 		b.click("[data-gallery-next]")
-		b.waitFor("PDF replaces image in same window", `String(document.getElementById('image-gallery').open && document.querySelector('[data-gallery-stage]').hidden && document.querySelector('[data-image-controls]').hidden && !!document.querySelector('[data-pdf-viewer] canvas') && document.querySelector('[data-gallery-count]').textContent==='2 / 3')`, "true")
+		b.waitFor("PDF replaces image in same window", `String(document.getElementById('image-gallery').open && document.querySelector('[data-gallery-stage]').hidden && !document.querySelector('[data-image-controls]').hidden && document.querySelector('[data-gallery-plus]').hidden && !!document.querySelector('[data-pdf-viewer] canvas') && document.querySelector('[data-gallery-count]').textContent==='2 / 3')`, "true")
 		b.click("[data-pdf-page=next]")
 		b.waitFor("PDF page navigation does not change file", `document.querySelector('[data-pdf-page-number]').textContent+':'+document.querySelector('[data-gallery-count]').textContent`, "2 / 2:2 / 3")
 		b.click("[data-pdf-zoom=in]")
 		b.waitFor("PDF has its own download", `String(document.querySelector('[data-gallery-download]').href.includes('mixed.pdf') && document.querySelector('[data-gallery-download]').href.includes('download=1'))`, "true")
 		b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": "ArrowRight"}, nil)
-		b.waitFor("right arrow selects DOCX not PDF page", `String(!!document.querySelector('.result-document') && !document.querySelector('[data-pdf-controls]') && document.querySelector('[data-image-controls]').hidden && document.querySelector('[data-gallery-count]').textContent==='3 / 3' && document.querySelector('[data-gallery-next]').disabled)`, "true")
+		b.waitFor("right arrow selects DOCX not PDF page", `String(!!document.querySelector('.result-document') && !document.querySelector('[data-pdf-controls]') && !document.querySelector('[data-image-controls]').hidden && document.querySelector('[data-gallery-plus]').hidden && document.querySelector('[data-gallery-count]').textContent==='3 / 3' && document.querySelector('[data-gallery-next]').disabled)`, "true")
 		b.waitFor("DOCX download changes", `String(document.querySelector('[data-gallery-download]').href.includes('document.docx'))`, "true")
 		b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": "ArrowLeft"}, nil)
 		b.waitFor("PDF renderer resets on return", `document.querySelector('[data-pdf-page-number]')?.textContent||''`, "1 / 2")
@@ -136,8 +136,8 @@ func TestBrowserFunctional_FileViewers(t *testing.T) {
 		b.click("[data-gallery-close]")
 		b.evaluate(`window.OVFileViewer.open('/fixture/document.docx'); 'ok'`)
 		b.waitFor("document body loaded", `String(!!document.querySelector('.result-document'))`, "true")
-		b.waitFor("single document toolbar", `String(document.querySelector('[data-result-title]').textContent==='document.docx' && !!document.querySelector('[data-result-actions] a[href*="download=1"]') && !document.querySelector('[data-document-header]'))`, "true")
-		b.waitFor("document fills modal", `(()=>{const dialog=document.getElementById('image-gallery'),shell=dialog.querySelector('.file-viewer-shell'),body=dialog.querySelector('[data-result-content]'),article=body.querySelector('.result-document');if(!article)return 'false';const d=dialog.getBoundingClientRect(),s=shell.getBoundingClientRect(),a=article.getBoundingClientRect();return String(Math.abs(d.left-s.left)<1 && Math.abs(d.width-s.width)<1 && Math.abs(d.bottom-s.bottom)<1 && Math.abs(a.left-d.left)<1 && Math.abs(a.right-d.right)<1 && getComputedStyle(body).padding==='0px' && getComputedStyle(shell).boxShadow==='none')})()`, "true")
+		b.waitFor("single document toolbar", `String(document.querySelector('[data-result-title]').textContent==='document.docx' && !!document.querySelector('.image-gallery-tools a[href*="download=1"]') && !document.querySelector('[data-document-header]'))`, "true")
+		b.waitFor("document fills modal", `(()=>{const dialog=document.getElementById('image-gallery'),shell=dialog.querySelector('.file-viewer-shell'),body=dialog.querySelector('[data-result-content]'),article=body.querySelector('.result-document');if(!article)return 'false';const d=dialog.getBoundingClientRect(),s=shell.getBoundingClientRect(),a=article.getBoundingClientRect();return String(Math.abs(d.left-s.left)<1 && Math.abs(d.width-s.width)<1 && Math.abs(d.bottom-s.bottom)<1 && Math.abs(a.left-d.left-68)<1 && Math.abs(d.right-a.right-68)<1 && getComputedStyle(body).padding==='0px' && getComputedStyle(shell).boxShadow==='none')})()`, "true")
 		b.click("[data-file-close]")
 		b.waitFor("toolbar cleared on close", `String(document.querySelector('[data-gallery-download]').hidden && !document.querySelector('[data-gallery-download]').hasAttribute('href'))`, "true")
 
@@ -202,6 +202,12 @@ func TestBrowserFunctional_FileViewers(t *testing.T) {
 		b.waitFor("HTML source", `String(!document.querySelector('[data-file-source]').hidden && document.querySelector('[data-file-source]').textContent.includes('<button'))`, "true")
 		b.click("[data-file-close]")
 		b.click("#math")
+		b.waitFor("fullscreen Markdown with readable typography", `(()=>{const d=document.getElementById('image-gallery'),m=d.querySelector('[data-file-markdown]'),h=m?.querySelector('h1'),p=m?.querySelector('p');if(!h||!p)return 'false';const r=d.getBoundingClientRect(),b=m.getBoundingClientRect();return String(Math.abs(r.left)<1&&Math.abs(r.top)<1&&Math.abs(r.width-innerWidth)<1&&Math.abs(r.height-innerHeight)<1&&Math.abs((b.left+b.right)/2-innerWidth/2)<1&&parseFloat(getComputedStyle(m).paddingLeft)>=16&&parseFloat(getComputedStyle(h).fontSize)>parseFloat(getComputedStyle(p).fontSize))})()`, "true")
+
+		for _, width := range []int{390, 1728} {
+			b.call("Emulation.setDeviceMetricsOverride", map[string]any{"width": width, "height": 900, "deviceScaleFactor": 1, "mobile": false}, nil)
+			b.waitFor("shared gallery controls and centered Markdown at each viewport", `(()=>{const d=document.getElementById('image-gallery'),m=d.querySelector('[data-file-markdown]'),r=d.getBoundingClientRect(),b=m.getBoundingClientRect();return String(Math.abs(r.width-innerWidth)<1&&Math.abs((b.left+b.right)/2-innerWidth/2)<1&&!!d.querySelector('footer [data-gallery-download]')&&!d.querySelector('footer').hidden&&!!d.querySelector('.image-gallery-viewer>[data-gallery-prev]')&&getComputedStyle(d.querySelector('[data-gallery-prev]')).position==='absolute'&&d.querySelector('[data-gallery-plus]').hidden)})()`, "true")
+		}
 		b.waitFor("KaTeX math", `String(!!document.querySelector('[data-file-markdown] .katex'))`, "true")
 		b.click("[data-file-close]")
 	})
