@@ -6,7 +6,7 @@
 
 /* The dialog owns the surface; the shell must not inherit modal-box scaling or decoration. */
 #image-gallery .file-viewer-shell{transform:none;translate:none;scale:none;margin:0;border:0;border-radius:0;box-shadow:none;overflow:hidden}
-#image-gallery .file-viewer-shell>header{padding:12px 48px 12px 16px}
+#image-gallery .file-viewer-shell>header{padding:12px 76px 12px 16px}
 #image-gallery [data-result-content]{padding:0}
 #image-gallery .result-document{flex:1;min-height:0;margin:0;border:0;border-radius:0;box-shadow:none}
 #image-gallery [data-result-actions]{flex:none}
@@ -49,11 +49,16 @@
 #image-gallery [data-result-actions] svg{width:22px;height:22px}
 
 /* Text documents share the fullscreen shell with media, with a readable page inside. */
-#image-gallery .image-gallery-viewer{min-width:0;overflow:hidden}
+#image-gallery .image-gallery-viewer{min-width:0;overflow:hidden;justify-content:center}
 #image-gallery [data-result-content]{min-width:0}
-#image-gallery [data-file-markdown]{width:100%;max-width:80ch;margin-inline:auto;padding:24px clamp(16px,4vw,48px);box-sizing:border-box;overflow-wrap:anywhere;line-height:1.7}
+#image-gallery [data-file-markdown]{width:100%;max-width:none;margin-inline:auto;padding:24px clamp(16px,4vw,48px);box-sizing:border-box;overflow-wrap:anywhere;line-height:1.7}
 #image-gallery [data-file-markdown] img{max-width:100%;height:auto}
 
-#image-gallery .image-gallery-viewer>[data-result-content]{width:auto;min-width:0;margin-inline:68px;background:var(--studio-side);border-radius:8px}
+#image-gallery .image-gallery-viewer>[data-result-content]{width:calc(100% - 136px);max-width:1200px;flex:0 1 1200px;min-width:0;margin-inline:68px;background:var(--studio-side);color:var(--fallback-bc,oklch(var(--bc)));border-radius:8px}
+#image-gallery .image-gallery-viewer>[data-result-content]:has([data-file-markdown]){flex-basis:80ch;max-width:80ch;max-height:100%;height:auto;align-self:center}
+#image-gallery [data-file-viewer="markdown"]{flex:none;min-height:auto}
+#image-gallery:focus{outline:none}
+#image-gallery .file-viewer-shell>header{padding-right:76px}
+#image-gallery header [data-gallery-count]{flex:none}
 #image-gallery [data-result-content] img{flex-shrink:initial;user-select:auto}
 @media(max-width:640px){#image-gallery .image-gallery-viewer>[data-result-content]{margin-inline:16px}}
