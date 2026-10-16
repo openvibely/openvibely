@@ -2537,6 +2537,17 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 
 					/* Built-in VS Code palette application. Variables are generated at build time. */
 [data-ov-theme-layer="custom"]{background-color:var(--ov-content-bg)}
+/* Keep pinned diff headers opaque even when page-local hover rules load later. */
+html[data-ov-theme-layer="custom"] .diff-file-header[data-stuck="1"],
+html[data-ov-theme-layer="custom"] .diff-file-header[data-stuck="1"]:hover { background-color: var(--ov-content-bg) !important; }
+[data-ov-theme-layer="custom"] .chat-markdown pre .code-copy-btn { background: var(--ov-surface-raised); color: var(--ov-text-muted); }
+[data-ov-theme-layer="custom"] .chat-markdown pre .code-copy-btn:hover { background: var(--ov-hover-bg); color: var(--ov-text); }
+[data-ov-theme-layer="custom"] .chat-markdown pre .code-copy-btn.copied { color: var(--ov-success); }
+[data-ov-theme-layer="custom"] .file-input { background-color: var(--ov-input-bg); color: var(--ov-text); border-color: var(--ov-input-border); }
+[data-ov-theme-layer="custom"] .file-input::file-selector-button { background-color: var(--ov-button-bg); color: var(--ov-button-fg); border-color: var(--ov-button-bg); }
+[data-ov-theme-layer="custom"] .file-input:hover:not(:disabled)::file-selector-button { background-color: var(--ov-button-hover-bg); color: var(--ov-button-hover-fg); border-color: var(--ov-button-hover-bg); }
+[data-ov-theme-layer="custom"] .file-input:focus-visible { outline: 2px solid var(--ov-focus); outline-offset: 2px; }
+
 /* Review actions and card selection use plain colors for older WebViews. */
 [data-ov-theme-layer="custom"] .diff-add-comment-btn { background: var(--ov-button-bg); color: var(--ov-button-fg); }
 [data-ov-theme-layer="custom"] .diff-add-comment-btn:hover { background: var(--ov-button-hover-bg); color: var(--ov-button-hover-fg); }
