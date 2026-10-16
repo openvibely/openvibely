@@ -2544,6 +2544,33 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 [data-ov-theme-layer="custom"] [data-search-empty-state][class~="bg-base-200/60"] { background-color: var(--ov-surface); }
 [data-ov-theme-layer="custom"] [data-search-empty-state] p,
 [data-ov-theme-layer="custom"] [data-search-no-results] p { color: var(--ov-text-muted); opacity: 1; }
+/* Shared neutral panels and text must follow the exact palette. */
+[data-ov-theme-layer="custom"] [class~="bg-base-100/45"],
+[data-ov-theme-layer="custom"] [class~="bg-base-100/90"],
+[data-ov-theme-layer="custom"] [class~="bg-base-100/95"] { background-color: var(--ov-surface); }
+[data-ov-theme-layer="custom"] [class~="bg-base-200/20"],
+[data-ov-theme-layer="custom"] [class~="bg-base-200/30"],
+[data-ov-theme-layer="custom"] [class~="bg-base-200/40"],
+[data-ov-theme-layer="custom"] [class~="bg-base-200/45"],
+[data-ov-theme-layer="custom"] [class~="bg-base-200/50"],
+[data-ov-theme-layer="custom"] [class~="bg-base-200/60"] { background-color: var(--ov-surface); }
+[data-ov-theme-layer="custom"] [class~="bg-base-300/40"],
+[data-ov-theme-layer="custom"] [class~="bg-base-300/45"],
+[data-ov-theme-layer="custom"] [class~="bg-base-300/50"] { background-color: var(--ov-surface); }
+[data-ov-theme-layer="custom"] [class~="text-base-content/30"],
+[data-ov-theme-layer="custom"] [class~="text-base-content/35"],
+[data-ov-theme-layer="custom"] [class~="text-base-content/45"],
+[data-ov-theme-layer="custom"] [class~="text-base-content/50"],
+[data-ov-theme-layer="custom"] [class~="text-base-content/55"],
+[data-ov-theme-layer="custom"] [class~="text-base-content/60"],
+[data-ov-theme-layer="custom"] [class~="text-base-content/65"],
+[data-ov-theme-layer="custom"] [class~="text-base-content/70"],
+[data-ov-theme-layer="custom"] [class~="text-base-content/80"],
+[data-ov-theme-layer="custom"] [class~="text-base-content/85"] { color: var(--ov-text-muted); }
+[data-ov-theme-layer="custom"] .stat-title,
+[data-ov-theme-layer="custom"] .stat-desc { color: var(--ov-text-muted); }
+[data-ov-theme-layer="custom"] .stat-value { color: var(--ov-text); }
+[data-ov-theme-layer="custom"] [data-alert-markdown] :not(pre) > code { background: var(--ov-code-bg); color: var(--ov-code-fg); }
 [data-ov-theme-layer="custom"] .sidebar-aside{background-color:var(--ov-sidebar-bg);border-color:var(--ov-sidebar-bg)}
 [data-ov-theme-layer="custom"] .bg-base-100,
 [data-ov-theme-layer="custom"] .card,
