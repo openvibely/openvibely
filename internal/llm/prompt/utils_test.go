@@ -173,3 +173,16 @@ func TestBuildChatHistoryText_LimitsHistory(t *testing.T) {
 		t.Error("should contain most recent message")
 	}
 }
+
+func TestImageInstructionsDoNotRequestFileInspection(t *testing.T) {
+	for _, ext := range []string{"png", "jpeg", "jpg", "gif", "webp"} {
+		result := BuildAttachmentInstructions([]models.Attachment{{FileName: "screenshot." + ext, FilePath: "/tmp/screenshot." + ext}})
+		if !strings.Contains(result, "already included directly") || strings.Contains(result, "Use file tools") {
+			t.Fatal(result)
+		}
+	}
+	result := BuildAttachmentInstructions([]models.Attachment{{FileName: "report.pdf", FilePath: "/tmp/report.pdf"}})
+	if !strings.Contains(result, "Use file tools") || strings.Contains(result, "already included directly") {
+		t.Fatal(result)
+	}
+}

@@ -1,6 +1,7 @@
 package prompt
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -130,9 +131,13 @@ func BuildAttachmentInstructions(attachments []models.Attachment) string {
 	}
 
 	var sb strings.Builder
-	sb.WriteString("Attached files (available to file tools):\n")
+	sb.WriteString("Attached files:\n")
 	for _, att := range attachments {
-		sb.WriteString(llmattachment.Reference(att))
+		if llmattachment.DirectImage(att) {
+			sb.WriteString(fmt.Sprintf("Attached image: %q (path: %q). Its image bytes are already included directly in this request; inspect the image input without reopening it with view_image.", att.FileName, AttachmentAbsPath(att)))
+		} else {
+			sb.WriteString(llmattachment.Reference(att))
+		}
 		sb.WriteByte('\n')
 	}
 	return sb.String() + "\n"

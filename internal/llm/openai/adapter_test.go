@@ -236,6 +236,11 @@ func TestCallDirectUsesResponsesAPIWithAttachmentsAndUsage(t *testing.T) {
 	if err := os.WriteFile(attachmentPath, []byte("coverage notes"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	screenshotPath := filepath.Join(t.TempDir(), "screenshot.png")
+	screenshot := []byte{137, 80, 78, 71, 13, 10, 26, 10}
+	if err := os.WriteFile(screenshotPath, screenshot, 0600); err != nil {
+		t.Fatal(err)
+	}
 	var gotBody map[string]any
 	srv := newHTTPOnlyOpenAIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/responses" {
@@ -257,7 +262,7 @@ func TestCallDirectUsesResponsesAPIWithAttachmentsAndUsage(t *testing.T) {
 	defer func() { openaiclient.OpenAIAPIBaseURL = original }()
 
 	adapter := New(nil, nil, nil, nil)
-	text, usage, err := adapter.CallDirect(context.Background(), "Summarize", []models.Attachment{{FileName: "notes.txt", FilePath: attachmentPath, MediaType: "text/plain"}}, models.LLMConfig{Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodAPIKey, Model: "gpt-test", APIKey: "test-key", ReasoningEffort: "high"}, "", "project instructions", false, false, false)
+	text, usage, err := adapter.CallDirect(context.Background(), "Summarize", []models.Attachment{{FileName: "notes.txt", FilePath: attachmentPath, MediaType: "text/plain"}, {FileName: "screenshot.png", FilePath: screenshotPath, MediaType: "image/png"}}, models.LLMConfig{Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodAPIKey, Model: "gpt-test", APIKey: "test-key", ReasoningEffort: "high"}, "", "project instructions", false, false, false)
 	if err != nil {
 		t.Fatalf("CallDirect: %v", err)
 	}
@@ -272,6 +277,10 @@ func TestCallDirectUsesResponsesAPIWithAttachmentsAndUsage(t *testing.T) {
 		t.Fatalf("request missing input items: %#v", gotBody["input"])
 	}
 	encodedInput, _ := json.Marshal(input)
+	if !strings.Contains(string(encodedInput), "data:image/png;base64,iVBORw0KGgo=") {
+		t.Fatalf("screenshot bytes missing: %s", encodedInput)
+	}
+
 	if !strings.Contains(string(encodedInput), "Attached files") || !strings.Contains(string(encodedInput), "notes.txt") {
 		t.Fatalf("input missing attachment prompt context: %s", encodedInput)
 	}

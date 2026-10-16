@@ -2,11 +2,12 @@ package service
 
 import (
 	"context"
+	"strings"
 
 	"github.com/openvibely/openvibely/internal/agentskills"
 	"github.com/openvibely/openvibely/internal/lifecycle"
+	llmattachment "github.com/openvibely/openvibely/internal/llm/attachment"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
-	llmprompt "github.com/openvibely/openvibely/internal/llm/prompt"
 	"github.com/openvibely/openvibely/internal/models"
 )
 
@@ -20,7 +21,11 @@ func WithAttachedFiles(ctx context.Context, files []models.Attachment) context.C
 
 func attachedFileReferences(ctx context.Context) string {
 	files, _ := ctx.Value(attachedFilesKey{}).([]models.Attachment)
-	return llmprompt.BuildAttachmentInstructions(files)
+	var refs []string
+	for _, file := range files {
+		refs = append(refs, llmattachment.Reference(file))
+	}
+	return strings.Join(refs, "\n")
 }
 
 // Chat file turns use the existing skill selector without enabling memory writes
