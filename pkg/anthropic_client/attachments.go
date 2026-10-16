@@ -10,12 +10,12 @@ import (
 
 // FileAttachment represents a file to be attached to an API request.
 // Files are sent as multimodal content blocks (images as base64 image blocks,
-// PDFs as document blocks, text/code files as inline text blocks).
+// text/code files as inline text blocks).
 type FileAttachment struct {
 	// FileName is the display name for the file.
 	FileName string
 
-	// MediaType is the MIME type (e.g., "image/png", "application/pdf", "text/plain").
+	// MediaType is the MIME type (e.g., "image/png", "text/plain").
 	// If empty, it is auto-detected from the file extension.
 	MediaType string
 
@@ -26,10 +26,7 @@ type FileAttachment struct {
 	FilePath string
 }
 
-// supportedMediaTypes combines the common mappings with Anthropic's PDF support.
-var supportedMediaTypes = attachment.MediaTypes(map[string]string{
-	".pdf": "application/pdf",
-})
+var supportedMediaTypes = attachment.MediaTypes(nil)
 
 // IsSupportedFileType returns true if the file extension is a supported attachment type.
 func IsSupportedFileType(filename string) bool {
@@ -45,11 +42,6 @@ func MediaTypeFromExtension(filename string) string {
 // IsImageMediaType returns true if the media type is an image type.
 func IsImageMediaType(mediaType string) bool {
 	return strings.HasPrefix(mediaType, "image/")
-}
-
-// IsDocumentMediaType returns true if the media type is a document type (PDF).
-func IsDocumentMediaType(mediaType string) bool {
-	return mediaType == "application/pdf"
 }
 
 // IsTextMediaType returns true if the media type is a text/code type.
@@ -95,8 +87,7 @@ func (f *FileAttachment) loadData() ([]byte, error) {
 }
 
 // toContentBlock converts the attachment to an Anthropic API content block.
-// Images become base64 image_source blocks, PDFs become document blocks,
-// and text/code files become text blocks with the file content.
+// Images become base64 image_source blocks; text/code files become text blocks.
 func (f *FileAttachment) toContentBlock() (map[string]interface{}, error) {
 	data, err := f.loadData()
 	if err != nil {
@@ -114,15 +105,8 @@ func (f *FileAttachment) toContentBlock() (map[string]interface{}, error) {
 		}, nil
 	}
 
-	if IsDocumentMediaType(f.MediaType) {
-		return map[string]interface{}{
-			"type": "document",
-			"source": map[string]interface{}{
-				"type":       "base64",
-				"media_type": f.MediaType,
-				"data":       base64.StdEncoding.EncodeToString(data),
-			},
-		}, nil
+	if !IsTextMediaType(f.MediaType) {
+		return nil, fmt.Errorf("unsupported attachment media type %q", f.MediaType)
 	}
 
 	// Text/code files: include as text blocks

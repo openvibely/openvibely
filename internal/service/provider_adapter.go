@@ -19,6 +19,7 @@ import (
 	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/events"
 	llmanthropic "github.com/openvibely/openvibely/internal/llm/anthropic"
+	llmattachment "github.com/openvibely/openvibely/internal/llm/attachment"
 	"github.com/openvibely/openvibely/internal/llm/contextlimits"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	llmmixture "github.com/openvibely/openvibely/internal/llm/mixture"
@@ -31,6 +32,7 @@ import (
 	llmusage "github.com/openvibely/openvibely/internal/llm/usage"
 	"github.com/openvibely/openvibely/internal/models"
 	anthropicclient "github.com/openvibely/openvibely/pkg/anthropic_client"
+	"github.com/openvibely/openvibely/pkg/attachment"
 	"github.com/openvibely/openvibely/pkg/executionenv"
 	openaiclient "github.com/openvibely/openvibely/pkg/openai_client"
 	"github.com/openvibely/openvibely/pkg/toolschema"
@@ -488,9 +490,13 @@ func calculateRequestBudget(req llmcontracts.AgentRequest) requestBudget {
 	budget.NativeStateTokens = estimatedUTF8Tokens(req.NativeCompactionStateJSON)
 	budget.HistoryTokens = estimateHistoryTokens(req.Agent.Provider, req.ChatHistory)
 	for _, att := range req.Attachments {
-		budget.AttachmentTokens += estimateAttachmentTokens(req.Agent.Provider, att)
+		budget.AttachmentTokens += estimateRequestAttachmentTokens(req, att)
 	}
 	return budget
+}
+
+func estimateRequestAttachmentTokens(req llmcontracts.AgentRequest, att models.Attachment) int {
+	return estimateAttachmentTokens(req.Agent.Provider, att)
 }
 
 // Image payload bytes are not text tokens. Match the harness estimates for
@@ -499,24 +505,13 @@ func calculateRequestBudget(req llmcontracts.AgentRequest) requestBudget {
 // Attachment does not currently expose OpenAI original-detail images.
 func estimateAttachmentTokens(provider models.LLMProvider, att models.Attachment) int {
 	metadata := estimatedUTF8Tokens(att.FileName) + estimatedUTF8Tokens(att.MediaType) + estimatedUTF8Tokens(att.FilePath)
-	switch provider {
-	case models.ProviderOpenAI:
-		if openaiclient.IsImageMediaType(att.MediaType) {
-			return metadata + 1844
-		}
-	case models.ProviderAnthropic:
-		if anthropicclient.IsImageMediaType(att.MediaType) {
-			return metadata + 2000
-		}
-	case models.ProviderOpenAICompatible:
-		if openaiclient.IsImageMediaType(att.MediaType) {
-			return metadata + 2000
-		}
+	if !llmattachment.DirectImage(att) {
+		return estimatedUTF8Tokens(llmattachment.Reference(att)) + estimatedUTF8Tokens(att.FileName)*2 + 32
 	}
-	if att.FileSize > 0 {
-		return metadata + tokenestimate.FromByteCount(int(att.FileSize))
+	if provider == models.ProviderOpenAI {
+		return metadata + 1844
 	}
-	return metadata
+	return metadata + 2000
 }
 
 func estimateExecutionTokens(exec models.Execution) int {
@@ -537,8 +532,40 @@ func estimateHistoryTokens(provider models.LLMProvider, history []models.Executi
 	total := 0
 	for _, exec := range history {
 		total += estimateExecutionTokens(exec)
+		for _, replay := range exec.ReplayMessages {
+			imageType, imageTokens := "image_url", 2000
+			if provider == models.ProviderAnthropic {
+				imageType = "image"
+			}
+			if replay.TranscriptJSON != "" {
+				if tokens, err := estimateReplayTranscriptImageTokens(replay.TranscriptJSON, imageType, imageTokens); err == nil {
+					total += tokens - estimatedUTF8Tokens(replay.TranscriptJSON)
+				}
+			}
+		}
 	}
 	return total
+}
+
+// Stored completion transcripts are message arrays, while provider admission
+// expects a request object. Normalize only that envelope and image content field.
+func estimateReplayTranscriptImageTokens(raw, imageType string, imageTokens int) (int, error) {
+	encoded := []byte(raw)
+	var messages []map[string]json.RawMessage
+	if json.Unmarshal(encoded, &messages) == nil && messages != nil {
+		for _, message := range messages {
+			if imageContent := message["image_content"]; len(imageContent) > 0 {
+				message["content"] = imageContent
+				delete(message, "image_content")
+			}
+		}
+		var err error
+		encoded, err = json.Marshal(map[string]any{"messages": messages})
+		if err != nil {
+			return 0, err
+		}
+	}
+	return tokenestimate.FromMessagesJSON(encoded, imageType, imageTokens)
 }
 
 func historyNeedsCompaction(b requestBudget, triggerLimit int) bool {
@@ -622,7 +649,7 @@ func (s *LLMService) preparePendingInputWithBudget(req llmcontracts.AgentRequest
 		return req, false, func() {}, nil
 	}
 	if !providerSupportsArtifactReader(req) {
-		return req, false, func() {}, llmcontracts.NewCategorizedError(llmcontracts.ErrorPendingInputInfeasible, "request preflight", fmt.Errorf("pending input requires %d tokens but safe input limit is %d and no authorized artifact reader is available", budget.PendingTokens, budget.SafeInputLimit))
+		return req, false, func() {}, llmcontracts.NewCategorizedError(llmcontracts.ErrorPendingInputInfeasible, "request preflight", fmt.Errorf("current request requires %d tokens (instructions/tools=%d, message=%d, attachments=%d); safe input limit is %d and no authorized artifact reader is available", budget.FixedTokens+budget.PendingTokens+budget.AttachmentTokens, budget.FixedTokens, budget.PendingTokens, budget.AttachmentTokens, budget.SafeInputLimit))
 	}
 	root := ""
 	if s != nil {
@@ -695,7 +722,7 @@ func estimateModelVisibleRequestTokens(req llmcontracts.AgentRequest) int {
 	total += estimateRuntimeToolDefinitionTokens(llmcontracts.RuntimeToolsFromContext(req.Ctx))
 	total += estimateAgentDefinitionTokens(req.AgentDefinition)
 	for _, att := range req.Attachments {
-		total += estimateAttachmentTokens(req.Agent.Provider, att)
+		total += estimateRequestAttachmentTokens(req, att)
 	}
 	total += estimateHistoryTokens(req.Agent.Provider, req.ChatHistory)
 	return total
@@ -851,6 +878,11 @@ func resolveProviderRequestForBudget(req llmcontracts.AgentRequest) llmcontracts
 }
 
 func (s *LLMService) callProviderWithCompaction(adapter ProviderAdapter, req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
+	req.Ctx = attachment.WithToolImages(req.Ctx)
+	req.Ctx = s.withDependencyProgress(req)
+	if files := s.fileRuntime(req); files != nil {
+		req.Ctx = llmcontracts.WithRuntimeTools(req.Ctx, llmcontracts.CompositeRuntimeTools(llmcontracts.RuntimeToolsFromContext(req.Ctx), files))
+	}
 	req = resolveProviderRequestForBudget(req)
 	req = trackSteeringRecovery(req)
 	var replayErr error

@@ -15,6 +15,7 @@ import (
 	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/lifecycle"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
+	llmprompt "github.com/openvibely/openvibely/internal/llm/prompt"
 	"github.com/openvibely/openvibely/internal/memory"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
@@ -865,6 +866,13 @@ func (w *WorkerService) runLifecycleSlotWithExtras(ctx context.Context, when mod
 	if turn.TaskThreadTurn && turn.TurnPrompt != "" {
 		taskPrompt = turn.TurnPrompt
 		baseExtras = withHookExtra(baseExtras, "original_task_prompt", task.Prompt)
+	}
+	if references := attachedFileReferences(ctx); references != "" {
+		taskPrompt += "\n" + references
+	} else if !turn.TaskThreadTurn && w.llmSvc != nil && w.llmSvc.attachmentRepo != nil {
+		if attachments, err := w.llmSvc.attachmentRepo.ListByTask(ctx, task.ID); err == nil {
+			taskPrompt += "\n" + llmprompt.BuildAttachmentInstructions(attachments)
+		}
 	}
 	in := lifecycle.HookInput{
 		When:       when,

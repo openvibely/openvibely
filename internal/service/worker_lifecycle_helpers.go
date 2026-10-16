@@ -42,7 +42,7 @@ func (w *WorkerService) buildLifecycleReadRuntimeTools(task models.Task, catalog
 	}
 	var tools *llmcontracts.RuntimeTools
 	if catalog.IsAgentOwned() {
-		tools = agentskills.SelectedSkillRuntimeTools(catalog)
+		tools = agentskills.InspectSelectedSkillRuntimeTools(catalog)
 	} else {
 		var inspector agentskills.AgentInspector
 		if w.agentRepo != nil {

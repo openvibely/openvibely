@@ -297,7 +297,7 @@ templ ChatBubbleWithAttachments(role, content string, attachments []models.ChatA
 							<div class="mb-3">
 								<a href={ templ.SafeURL(ChatAttachmentDownloadURL(att.ID, projectID)) } target="_blank" class="block" data-image-gallery-item="" data-image-name={ att.FileName }>
 									<img
-										src={ templ.SafeURL(ChatAttachmentDownloadURL(att.ID, projectID)) }
+										src={ templ.SafeURL(FileURLMode(ChatAttachmentDownloadURL(att.ID, projectID),"thumbnail")) }
 										alt={ att.FileName }
 										class="max-w-full rounded-lg border border-base-content/10 hover:opacity-90 transition-opacity cursor-pointer"
 										style="max-height: 400px; object-fit: contain;"
@@ -313,12 +313,15 @@ templ ChatBubbleWithAttachments(role, content string, attachments []models.ChatA
 									<span>({ FormatFileSize(att.FileSize) })</span>
 								</div>
 							</div>
+
+ } else if FilePreviewKind(att.FileName)=="video" {
+ <a href={templ.SafeURL(ChatAttachmentDownloadURL(att.ID,projectID))} data-image-gallery-item="" data-media-kind="video" data-image-name={att.FileName}><video muted preload="metadata" src={templ.SafeURL(ChatAttachmentDownloadURL(att.ID,projectID))} style="max-height:240px;max-width:100%"></video><span>{att.FileName}</span></a>
 						} else {
 							<div class="flex items-center gap-2 text-xs opacity-90 mb-1.5">
 								<svg class="w-3.5 h-3.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"></path>
 								</svg>
-								<a href={ templ.SafeURL(ChatAttachmentDownloadURL(att.ID, projectID)) } class="hover:underline font-medium" target="_blank">
+								<a href={ templ.SafeURL(ChatAttachmentDownloadURL(att.ID, projectID)) } class="hover:underline font-medium" target="_blank" data-file-preview="">
 									{ att.FileName }
 								</a>
 								<span class="opacity-60">({ FormatFileSize(att.FileSize) })</span>
@@ -2766,10 +2769,10 @@ templ ChatInputForm(config ChatInputFormConfig) {
 						alert('Maximum 3 files allowed');
 						return;
 					}
-					var maxSize = 10 * 1024 * 1024;
+					var maxSize = 25 * 1024 * 1024;
 					for (var j = 0; j < files.length; j++) {
-						if (files[j].size > maxSize) {
-							alert('File "' + files[j].name + '" exceeds 10MB limit');
+						if (files[j].size > (/\.(mp4|m4v|mov|webm|ogv)$/i.test(files[j].name) ? 200 * 1024 * 1024 : maxSize)) {
+							alert('File "' + files[j].name + '" exceeds the upload size limit');
 							return;
 						}
 					}
@@ -6041,6 +6044,9 @@ templ ChatAutoScrollScript() {
 				flushText();
 				container.classList.remove('whitespace-pre-wrap');
 				window.setChatRawContent(container, textBuffer);
+				if (window.prepareChatMath) window.prepareChatMath(renderFragment, container);
+				if (window.prepareChatSVG) window.prepareChatSVG(renderFragment, container);
+                window.OVFileViewer?.prepareStream(renderFragment, container);
 				container.replaceChildren(renderFragment);
 				if (window.renderMermaidDiagrams) window.renderMermaidDiagrams(container);
 

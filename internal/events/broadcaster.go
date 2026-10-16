@@ -17,6 +17,8 @@ var ErrMaxSubscribers = errors.New("maximum subscriber limit reached")
 type TaskEventType string
 
 const (
+	SkillDependencyProgress       TaskEventType = "skill_dependency_progress"
+	TaskFilesChanged              TaskEventType = "task_files_changed"
 	TaskStatusChanged             TaskEventType = "task_status_changed"
 	TaskCategoryChanged           TaskEventType = "task_category_changed"
 	TaskThreadExecutionStarted    TaskEventType = "task_thread_execution_started"
@@ -44,6 +46,7 @@ const (
 
 // TaskEvent represents a task state change event
 type TaskEvent struct {
+	DependencyName      string        `json:"dependency_name,omitempty"`
 	Type                TaskEventType `json:"type"`
 	TaskID              string        `json:"task_id"`
 	TaskName            string        `json:"task_name,omitempty"`

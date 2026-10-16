@@ -115,7 +115,7 @@ func TestBaseIncludesBuiltInThemeSystem(t *testing.T) {
 		`[data-ov-theme-layer="custom"] .stt-recording{background:var(--ov-diff-delete-bg)!important;animation-name:ov-stt-pulse-vscode`,
 		`@keyframes ov-stt-pulse-vscode{`,
 		`[data-ov-theme-layer="custom"] .tabs-bordered,`,
-		`[data-ov-theme-layer="custom"] .toggle{background:var(--ov-surface)!important;`,
+		`[data-ov-theme-layer="custom"] .toggle,[data-ov-theme-layer="custom"] .toggle:hover,[data-ov-theme-layer="custom"] .toggle:focus{--tglbg:var(--ov-input-bg)!important;`,
 		`[data-ov-theme-layer="custom"] .theme-toggle-pill{background:var(--ov-surface-raised)!important;border:1px solid var(--ov-border)!important`,
 		`[data-ov-theme-layer="custom"] .btn-primary,`,
 		`[data-ov-theme-layer="custom"] .ov-badge-default{--ov-btn-bg:var(--ov-button-bg);`,

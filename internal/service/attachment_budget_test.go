@@ -2,18 +2,21 @@ package service
 
 import (
 	"context"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	llmattachment "github.com/openvibely/openvibely/internal/llm/attachment"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/stretchr/testify/require"
 )
 
 func TestImageAttachmentBudgetIgnoresEncodedSize(t *testing.T) {
 	for _, tc := range []struct {
 		provider models.LLMProvider
 		tokens   int
-	}{{models.ProviderOpenAI, 1844}, {models.ProviderAnthropic, 2000}, {models.ProviderOpenAICompatible, 2000}} {
+	}{{models.ProviderOpenAI, 1844}, {models.ProviderAnthropic, 2000}, {models.ProviderOpenAICompatible, 2000}, {models.ProviderOllama, 2000}} {
 		for _, size := range []int64{0, 713753, 794795, 10000000} {
 			att := models.Attachment{FileName: "screen.png", FilePath: "/tmp/screen.png", MediaType: "image/png", FileSize: size}
 			want := tc.tokens + estimatedUTF8Tokens(att.FileName) + estimatedUTF8Tokens(att.FilePath) + estimatedUTF8Tokens(att.MediaType)
@@ -27,12 +30,7 @@ func TestImageAttachmentBudgetIgnoresEncodedSize(t *testing.T) {
 				t.Fatalf("provider=%s total estimate delta=%d want=%d", tc.provider, got, want)
 			}
 		}
-		for _, mediaType := range []string{"text/plain", "application/pdf", ""} {
-			att := models.Attachment{MediaType: mediaType, FileSize: 4001}
-			if got := estimateAttachmentTokens(tc.provider, att); got != 1001+estimatedUTF8Tokens(mediaType) {
-				t.Fatalf("non-image estimate changed: provider=%s type=%s tokens=%d", tc.provider, mediaType, got)
-			}
-		}
+
 	}
 }
 
@@ -107,5 +105,45 @@ func TestCompatibleScreenshotFollowupReachesProvider(t *testing.T) {
 	}
 	if !pendingInputInfeasible(calculateRequestBudget(req)) {
 		t.Fatal("compatible images must still count toward the context limit")
+	}
+}
+
+func TestNonImageAttachmentsBudgetReferencesOnly(t *testing.T) {
+	for _, ext := range []string{"pdf", "doc", "ppt", "docx", "pptx", "xlsx", "xls", "xlsb", "ods", "txt", "csv", "svg", "mp4", "mp3", "zip"} {
+		t.Run(ext, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "file."+ext)
+			att := models.Attachment{FileName: filepath.Base(path), FilePath: path, FileSize: 200 << 20}
+			req := llmcontracts.AgentRequest{Ctx: context.Background(), Agent: models.LLMConfig{Provider: models.ProviderOpenAICompatible, Model: "test", ContextWindow: 32768}, Attachments: []models.Attachment{att}}
+			called := false
+			svc := &LLMService{}
+			_, err := svc.callProviderWithCompaction(providerAdapterFunc(func(got llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
+				called = true
+				require.Less(t, calculateRequestBudget(got).AttachmentTokens, 1000)
+				parts, err := llmattachment.ModelInputs(got.Ctx, got.Attachments)
+				require.NoError(t, err, "references must not read or parse the original")
+				require.Len(t, parts, 1)
+				require.Equal(t, "text/plain", parts[0].MediaType)
+				require.Contains(t, string(parts[0].Data), path)
+				return llmcontracts.AgentResult{}, nil
+			}), req)
+			require.NoError(t, err)
+			require.True(t, called)
+		})
+	}
+}
+
+func TestToolImageReplayBudgetIgnoresEncodedBytes(t *testing.T) {
+	for _, provider := range []models.LLMProvider{models.ProviderOpenAICompatible} {
+		imageType := "image_url"
+		if provider == models.ProviderAnthropic {
+			imageType = "image"
+		}
+		raw := `[{"role":"user","content":[{"type":"` + imageType + `","source":{"data":"` + strings.Repeat("A", 1500000) + `"},"image_url":{"url":"data:image/png;base64,` + strings.Repeat("A", 1500000) + `"}}]}]`
+		if provider == models.ProviderOpenAICompatible {
+			raw = strings.Replace(raw, `"content":`, `"image_content":`, 1)
+		}
+		tokens := estimateHistoryTokens(provider, []models.Execution{{ReplayMessages: []models.ExecutionReplayMessage{{TranscriptJSON: raw}}}})
+		require.GreaterOrEqual(t, tokens, 2000)
+		require.Less(t, tokens, 3000, "persisted image bytes must use the image estimate on follow-ups")
 	}
 }

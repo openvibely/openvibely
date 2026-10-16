@@ -44,9 +44,9 @@ type LifecycleTurn struct {
 }
 
 // PrepareRecallOnlyLifecycleTurn runs only Memory Curator recall hooks for an
-// interactive chat turn. It deliberately skips skill selection, task runtime
-// tools, and after_complete so Chat can recall managed memory without letting
-// Chat prompts or mode-control text update memory.
+// interactive chat turn, plus existing skill selection when files are attached.
+// It skips task mutation tools and after_complete so Chat prompts and mode-control
+// text cannot update memory.
 func (w *WorkerService) PrepareRecallOnlyLifecycleTurn(ctx context.Context, task models.Task) LifecycleTurn {
 	if w == nil {
 		return LifecycleTurn{Ctx: ctx, Task: task, AfterComplete: func(error, llmcontracts.ChatContext) {}}
@@ -96,6 +96,7 @@ func (w *WorkerService) PrepareRecallOnlyLifecycleTurn(ctx context.Context, task
 	if memoryTools := w.buildTaskMemoryRuntimeTools(ctx, task, selectedMemoryEntries); memoryTools != nil {
 		ctx = llmcontracts.WithRuntimeTools(ctx, llmcontracts.CompositeRuntimeTools(memoryTools, llmcontracts.RuntimeToolsFromContext(ctx)))
 	}
+	ctx = w.prepareChatFileSkills(ctx, task)
 	return LifecycleTurn{Ctx: ctx, Task: task, AfterComplete: func(error, llmcontracts.ChatContext) {}}
 }
 

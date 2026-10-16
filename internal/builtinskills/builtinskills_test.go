@@ -449,8 +449,10 @@ func TestSyncTo_InstallsSystemHookSkillsButKeepsDisabledStandaloneSkillsOutOfRou
 	if err != nil {
 		t.Fatalf("BuildCatalog: %v", err)
 	}
-	if entries := cat.Entries(); len(entries) != 0 {
-		t.Fatalf("expected no routable standalone bootstrap skills, got: %+v", entries)
+	for _, entry := range cat.Entries() {
+		if !strings.HasPrefix(entry.Handle, "document_") {
+			t.Fatalf("unexpected routable standalone skill: %+v", entry)
+		}
 	}
 	managementCatalog, err := agentskills.BuildCatalogAll("test-turn", root, "")
 	if err != nil {

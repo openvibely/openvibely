@@ -46,7 +46,7 @@ func Preprocess(in []models.Attachment) ([]models.Attachment, error) {
 			}
 		}
 
-		if strings.HasPrefix(strings.ToLower(out[i].MediaType), "image/") && size > DefaultMaxImageBytes {
+		if DirectImage(out[i]) && size > DefaultMaxImageBytes {
 			return nil, fmt.Errorf("image attachment too large: %s (%d bytes > %d)", out[i].FileName, size, DefaultMaxImageBytes)
 		}
 	}

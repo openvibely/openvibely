@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
+	"github.com/openvibely/openvibely/internal/skilldeps"
 	"github.com/openvibely/openvibely/pkg/toolschema"
 )
 
@@ -71,17 +72,17 @@ type AgentInspector interface {
 // SkillRuntimeTools returns request-scoped runtime tools lifecycle hooks use for
 // read-only standalone skill discovery.
 func SkillRuntimeTools(catalog *Catalog, globalRoot, projectRoot string, inspector AgentInspector) *llmcontracts.RuntimeTools {
-	return skillRuntimeTools(catalog, globalRoot, projectRoot, inspector, true)
+	return skillRuntimeTools(catalog, globalRoot, projectRoot, inspector, true, false)
 }
 
 // SelectedSkillRuntimeTools returns only skill_view scoped to the already
 // selected task skill catalog. It intentionally omits skills_list so normal task
 // turns cannot discover or load skills the lifecycle router did not select.
 func SelectedSkillRuntimeTools(catalog *Catalog) *llmcontracts.RuntimeTools {
-	return skillRuntimeTools(catalog, "", "", nil, false)
+	return skillRuntimeTools(catalog, "", "", nil, false, true)
 }
 
-func skillRuntimeTools(catalog *Catalog, globalRoot, projectRoot string, inspector AgentInspector, includeLibraryTools bool) *llmcontracts.RuntimeTools {
+func skillRuntimeTools(catalog *Catalog, globalRoot, projectRoot string, inspector AgentInspector, includeLibraryTools, prepareDependencies bool) *llmcontracts.RuntimeTools {
 	if catalog == nil {
 		return nil
 	}
@@ -109,6 +110,9 @@ func skillRuntimeTools(catalog *Catalog, globalRoot, projectRoot string, inspect
 			switch strings.ToLower(strings.TrimSpace(name)) {
 			case "skill_view":
 				body, err := resolveSkillView(catalog, input)
+				if err == nil && prepareDependencies {
+					body, err = prepareSkillView(ctx, body)
+				}
 				if err != nil {
 					return err.Error(), true, true, nil
 				}
@@ -309,13 +313,15 @@ func resolveSkillView(catalog *Catalog, input json.RawMessage) (string, error) {
 }
 
 type skillViewResponse struct {
-	Handle      string              `json:"handle"`
-	Source      string              `json:"source,omitempty"`
-	AgentKey    string              `json:"agent_key,omitempty"`
-	Body        string              `json:"body"`
-	SkillDir    string              `json:"skill_dir"`
-	ScriptsDir  string              `json:"scripts_dir"`
-	LinkedFiles map[string][]string `json:"linked_files,omitempty"`
+	Dependencies []skilldeps.Result  `json:"dependencies,omitempty"`
+	Environment  map[string]string   `json:"environment,omitempty"`
+	Handle       string              `json:"handle"`
+	Source       string              `json:"source,omitempty"`
+	AgentKey     string              `json:"agent_key,omitempty"`
+	Body         string              `json:"body"`
+	SkillDir     string              `json:"skill_dir"`
+	ScriptsDir   string              `json:"scripts_dir"`
+	LinkedFiles  map[string][]string `json:"linked_files,omitempty"`
 }
 
 func substituteSkillDirTokens(body, skillDir string) string {
@@ -539,4 +545,56 @@ var agentView = llmcontracts.RuntimeToolDefinition{
 		Required:             []string{"key"},
 		AdditionalProperties: toolschema.Pointer(false),
 	},
+}
+
+// InspectSelectedSkillRuntimeTools reads selected metadata without installing or running tools.
+func InspectSelectedSkillRuntimeTools(catalog *Catalog) *llmcontracts.RuntimeTools {
+	return skillRuntimeTools(catalog, "", "", nil, false, false)
+}
+
+// ExecutingSkillRuntimeTools also prepares dependencies when an executing agent
+// explicitly loads an authorized skill from the library.
+func ExecutingSkillRuntimeTools(catalog *Catalog, globalRoot, projectRoot string, inspector AgentInspector) *llmcontracts.RuntimeTools {
+	return skillRuntimeTools(catalog, globalRoot, projectRoot, inspector, true, true)
+}
+
+func prepareSkillView(ctx context.Context, output string) (string, error) {
+	var view skillViewResponse
+	if err := json.Unmarshal([]byte(output), &view); err != nil {
+		return "", err
+	}
+	// Support-file responses are reads, not another skill activation.
+	if view.SkillDir == "" {
+		return output, nil
+	}
+	deps, err := skilldeps.Parse([]byte(view.Body))
+	if err != nil {
+		return "", fmt.Errorf("skill dependencies: %w", err)
+	}
+	if len(deps) == 0 {
+		return output, nil
+	}
+	manager, err := skilldeps.DefaultManager()
+	if err != nil {
+		return "", err
+	}
+	report := skilldeps.ProgressFromContext(ctx)
+	manager.Progress = func(p skilldeps.Progress) {
+		llmcontracts.NotifyActivity(ctx)
+		if report != nil {
+			report(p)
+		}
+	}
+	view.Dependencies, err = manager.Resolve(ctx, deps)
+	if err != nil {
+		return "", err
+	}
+	view.Environment = map[string]string{}
+	for _, dependency := range view.Dependencies {
+		if dependency.Executable != "" && dependency.EnvironmentVariable != "" {
+			view.Environment[dependency.EnvironmentVariable] = dependency.Executable
+		}
+	}
+	encoded, err := json.MarshalIndent(view, "", "  ")
+	return string(encoded), err
 }

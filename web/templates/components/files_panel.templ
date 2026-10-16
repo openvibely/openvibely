@@ -1,0 +1,26 @@
+package components
+import (
+ "net/url"
+ "github.com/openvibely/openvibely/internal/models"
+)
+
+templ FilesPanelButton(projectID, taskID string) {
+ <button type="button" class="btn btn-ghost btn-xs" data-files-panel={"/files?project_id="+url.QueryEscape(projectID)+"&task_id="+url.QueryEscape(taskID)}>Files</button>
+}
+
+templ FilesPanel(files []models.FileListItem) {
+ <section data-files-list data-image-gallery-group=""><h3>Files</h3>
+ if len(files)==0 {
+ <p>No files yet.</p>
+ }
+ for _,file:=range files {
+ <div class="file-list-row"><a href={templ.SafeURL(file.URL)} data-file-preview="">{file.Name}</a><small>{FormatFileSize(file.Size)}</small>
+ if file.Generated {
+ <small>Generated</small>
+ }
+ <a href={templ.SafeURL(FileURLMode(file.URL,"download"))} download>Download</a><button type="button" data-file-attach={file.URL} data-file-name={file.Name}>Attach to message</button>
+ </div>
+ }
+ <p role="status" data-file-attach-status></p>
+ </section>
+}

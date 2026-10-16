@@ -1072,8 +1072,8 @@ func TestProviderContextCompactionLimits_TriggerMathAndConfiguredClamp(t *testin
 		t.Fatalf("Anthropic configured threshold = %+v, want minimum 50000", limits)
 	}
 	attachmentBudget := calculateRequestBudget(llmcontracts.AgentRequest{Agent: models.LLMConfig{Provider: models.ProviderOpenAICompatible, ProviderContextWindow: 10000}, Attachments: []models.Attachment{{FileSize: 4000}}})
-	if attachmentBudget.AttachmentTokens != 1000 {
-		t.Fatalf("attachment tokens = %d, want rounded bytes/4", attachmentBudget.AttachmentTokens)
+	if attachmentBudget.AttachmentTokens <= 0 || attachmentBudget.AttachmentTokens >= 1000 {
+		t.Fatalf("attachment tokens = %d, want only the file reference", attachmentBudget.AttachmentTokens)
 	}
 
 	limits := compactionLimitsForAgent(models.LLMConfig{Provider: models.ProviderOpenAICompatible, Model: "custom", ProviderContextWindow: 1000})

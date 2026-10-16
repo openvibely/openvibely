@@ -2,8 +2,6 @@ package service
 
 import (
 	"encoding/json"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -138,22 +136,4 @@ func TestAnthropicClientToolSecondaryInfoAndAttachmentConversion(t *testing.T) {
 		t.Fatalf("splitPath parts = %#v", parts)
 	}
 
-	root := t.TempDir()
-	textPath := filepath.Join(root, "note.txt")
-	if err := os.WriteFile(textPath, []byte("hello attachment"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	converted, err := convertAttachments([]models.Attachment{{FileName: "note.txt", FilePath: textPath, MediaType: "text/plain"}})
-	if err != nil {
-		t.Fatalf("convertAttachments: %v", err)
-	}
-	if len(converted) != 1 || converted[0] == nil {
-		t.Fatalf("unexpected converted attachments: %#v", converted)
-	}
-	if empty, err := convertAttachments(nil); err != nil || empty != nil {
-		t.Fatalf("empty convertAttachments = %#v, %v", empty, err)
-	}
-	if _, err := convertAttachments([]models.Attachment{{FileName: "missing.txt", FilePath: filepath.Join(root, "missing.txt")}}); err == nil || !strings.Contains(err.Error(), "load attachment missing.txt") {
-		t.Fatalf("expected missing attachment error, got %v", err)
-	}
 }
