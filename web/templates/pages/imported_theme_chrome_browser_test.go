@@ -35,7 +35,7 @@ func TestBrowserFunctional_ImportedThemeStylesTitlebarMenusAndSchedulePickers(t 
 	}
 	fixture := `<div id="fixture-search">` + search.String() + `</div><div id="schedule-content">` + calendar.String() + `<div data-calendar-day="2026-10-16" class="schedule-day-selected">Fri</div><div data-calendar-hour="9" class="bg-base-200 schedule-time-label schedule-day-selected">9 AM</div></div>
 <ul id="fixture-menu" class="ov-menu ov-menu-actions dropdown-content menu"><li><button type="button">Action</button></li></ul>
-<div id="fixture-picker">` + picker.String() + `</div><span id="fixture-deletions" style="color: var(--ov-diff-del-fg)">-4</span><div id="probe"></div>`
+<div id="fixture-picker">` + picker.String() + `</div><span id="fixture-deletions" style="color: var(--ov-diff-del-fg)">-4</span><span id="fixture-primary-text" class="text-primary">P</span><span id="fixture-running" class="task-state-running">Running</span><span id="fixture-primary-badge" class="badge badge-primary">New</span><div id="probe"></div>`
 	html := base.String()
 	end := strings.LastIndex(html, "</body>")
 	page := html[:end] + fixture + html[end:]
@@ -58,6 +58,8 @@ func TestBrowserFunctional_ImportedThemeStylesTitlebarMenusAndSchedulePickers(t 
 		browser.evaluate(`window.openVibelyThemes.apply('vscode-kimbie-dark');
 			window.themeColor = function(value, property) { var probe = document.getElementById('probe'); probe.style[property || 'backgroundColor'] = value; return getComputedStyle(probe)[property || 'backgroundColor']; };
 			window.computed = function(selector, property) { return getComputedStyle(document.querySelector(selector))[property]; };
+			window.rgbOf = function(color) { var c = document.createElement('canvas'); c.width = c.height = 1; var x = c.getContext('2d'); x.fillStyle = '#000'; x.fillStyle = color; x.fillRect(0, 0, 1, 1); return Array.prototype.slice.call(x.getImageData(0, 0, 1, 1).data, 0, 3); };
+			window.near = function(selector, property, value) { var got = window.rgbOf(window.computed(selector, property)); var want = window.rgbOf(window.themeColor(value, property)); return got.every(function(v, i) { return Math.abs(v - want[i]) <= 2; }) ? 'ok' : got + ' != ' + want; };
 			window.matches = function(selector, property, value) { var got = window.computed(selector, property); var want = window.themeColor(value, property); return got === want ? 'ok' : got + ' != ' + want; };
 			'ok'`)
 		browser.waitFor("theme applied", `document.documentElement.getAttribute('data-color-theme')`, "vscode-kimbie-dark")
@@ -82,6 +84,10 @@ func TestBrowserFunctional_ImportedThemeStylesTitlebarMenusAndSchedulePickers(t 
 			browser.waitFor(check.label, `window.matches('`+strings.ReplaceAll(check.selector, `'`, `\'`)+`', '`+check.property+`', '`+check.value+`')`, "ok")
 		}
 
+		browser.waitFor("primary text uses theme accent", `window.near('#fixture-primary-text', 'color', 'var(--ov-link)')`, "ok")
+		browser.waitFor("running task state uses theme accent", `window.near('#fixture-running', 'color', 'var(--ov-link)')`, "ok")
+		browser.waitFor("primary badge uses theme accent", `window.near('#fixture-primary-badge', 'backgroundColor', 'var(--ov-link)')`, "ok")
+
 		browser.evaluate(`document.querySelector('[data-kanban-search]').dataset.open = 'true';'ok'`)
 		browser.waitFor("task search box surface", `window.matches('.kanban-search', 'backgroundColor', 'var(--ov-input-bg)')`, "ok")
 		browser.waitFor("task search box border", `window.matches('.kanban-search', 'borderTopColor', 'var(--ov-input-border)')`, "ok")
@@ -94,6 +100,8 @@ func TestBrowserFunctional_ImportedThemeStylesTitlebarMenusAndSchedulePickers(t 
 		browser.waitFor("selected time uses theme button", `window.matches('[data-time-column="hour"] [data-time-selected="true"]', 'backgroundColor', 'var(--ov-button-bg)')`, "ok")
 
 		browser.evaluate(`window.openVibelyThemes.apply('openvibely-dark');'ok'`)
+		browser.waitFor("native theme keeps indigo running state", `window.near('#fixture-running', 'color', '#7480ff')`, "ok")
+		browser.waitFor("native theme keeps indigo primary text", `window.near('#fixture-primary-text', 'color', '#7480ff')`, "ok")
 		browser.waitFor("native theme keeps default selection tint", `window.computed('#schedule-content [data-calendar-day]', 'backgroundColor')`, "rgba(116, 128, 255, 0.16)")
 		browser.waitFor("native theme keeps default menu surface", `window.computed('#fixture-menu', 'backgroundColor')`, "rgb(29, 35, 42)")
 		browser.waitFor("native theme keeps default deletion count", `window.computed('#fixture-deletions', 'color')`, "rgb(189, 112, 118)")

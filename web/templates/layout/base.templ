@@ -2688,7 +2688,11 @@ box-shadow: 0 1.25rem 3.5rem rgba(0, 0, 0, 0.45) !important;
 --ov-tooltip-text: var(--ov-text);
 --ov-diff-del-fg: var(--ov-diff-delete-fg);
 --ov-diff-del-bg: var(--ov-diff-delete-bg);
+--p: var(--ov-daisy-primary);
+--pf: var(--ov-daisy-primary);
+--pc: var(--ov-daisy-primary-content);
 }
+[data-color-theme^="vscode-"] .chat-input-recommended-shortcut, [data-color-theme^="vscode-"] .chat-input-recommended-shortcut:hover:where(:not(:disabled)), [data-color-theme^="vscode-"] .chat-input-recommended-shortcut:active:where(:not(:disabled)) { color: oklch(var(--pc)) !important; }
 html[data-color-theme^="vscode-"] .ov-menu { --ov-menu-active: var(--ov-hover-bg); --ov-menu-scroll-thumb: var(--ov-text-muted); background: var(--ov-menu-surface) !important; border-color: var(--ov-subtle-border) !important; color: var(--ov-text); }
 [data-color-theme^="vscode-"] .ov-menu-check { color: var(--ov-text); }
 [data-color-theme^="vscode-"] .ov-tooltip { border-color: var(--ov-subtle-border); }
