@@ -365,6 +365,10 @@ definitions:
         items:
           $ref: '#/definitions/models.AnalyticsInsight'
         type: array
+      model_activity:
+        items:
+          $ref: '#/definitions/models.ModelPerformance'
+        type: array
       model_categories:
         items:
           $ref: '#/definitions/models.ModelCategoryPerformance'

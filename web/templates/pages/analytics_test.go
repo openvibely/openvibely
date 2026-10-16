@@ -1569,3 +1569,32 @@ func TestAnalyticsValueLabelsFollowSelectedTheme(t *testing.T) {
 		}
 	}
 }
+
+func TestBrowserFunctional_AnalyticsSharedModelActivity(t *testing.T) {
+	var rendered bytes.Buffer
+	if err := AnalyticsContent(&models.Project{ID: "p", Name: "P"}).Render(context.Background(), &rendered); err != nil {
+		t.Fatal(err)
+	}
+	fixture := `<main id="reconnect-result"></main><script>
+ history.replaceState({},'',location.pathname+'?project_id=p&view=models');
+ var configs={};window.Chart=function(ctx,config){configs[ctx.canvas.id]=config;this.destroy=function(){};};
+ var activity=[{model_config_id:'a',config_name:'Astra',tasks_used:2,total_tokens:100,token_covered_tasks:1,median_duration_ms:60000,duration_sample_size:1,average_follow_ups:2,effort_trend:[{period:'2026-09-01',tasks:1,tokens:100,token_samples:1,follow_ups:2,median_duration_ms:60000,duration_samples:1}]},{model_config_id:'b',config_name:'Opus',tasks_used:1,total_tokens:200,token_covered_tasks:1,median_duration_ms:120000,duration_sample_size:1,average_follow_ups:1,effort_trend:[]}];
+ window.fetch=async function(url){var data={};if(String(url).includes('/dashboard'))data={models:[{model_config_id:'a',config_name:'Astra',tasks_used:1,goal_achievement:{numerator:1,denominator:1,percent:100}},{model_config_id:'__mixed__',config_name:'Mixed models',mixed_models:true,tasks_used:1,goal_achievement:{numerator:1,denominator:1,percent:100}}],model_activity:activity,model_effort_trend:[{period:'2026-09-01',tasks:1,tokens:300,token_samples:1,follow_ups:3,median_duration_ms:180000,duration_samples:1}],agents:[],recent_outcomes:[]};else if(String(url).includes('/task-run-activity'))data={models:[],hours:[]};return {ok:true,json:async()=>data};};
+ window.addEventListener('load',async function(){var result=document.getElementById('reconnect-result');function assert(ok,msg){if(!ok)throw Error(msg);}try{
+ for(var i=0;i<100&&!configs.modelTokensChart;i++)await new Promise(r=>setTimeout(r,20));
+ assert(configs.modelTokensChart.data.labels.join('|')==='Astra|Opus','shared-task models missing');
+ assert(configs.modelTokensChart.data.datasets[0].data.join('|')==='100|200','tokens not attributed to actual model');
+ assert(configs.modelTimeChart.data.datasets[0].data.join('|')==='60000|120000','time not attributed to actual model');
+ assert(configs.modelFollowupsChart.data.datasets[0].data.join('|')==='2|1','follow-ups not attributed to actual model');
+ assert(configs.modelTokenTrendChart.data.datasets[0].data[0]===300,'combined tokens must include shared task once');
+ assert(configs.modelTaskTimeTrendChart.data.datasets[0].data[0]===180000,'combined duration must include whole shared task');
+ var select=document.getElementById('modelTokenTrendSelect');select.value='a';select.dispatchEvent(new Event('change'));
+ assert(configs.modelTokenTrendChart.data.datasets[0].data[0]===100,'individual trend lost shared task');
+ var score=document.getElementById('modelScorecard').textContent;
+ assert(score.includes('Astra')&&score.includes('Opus')&&score.includes('Mixed models')&&score.includes('100.0%'),'scorecard lost effort or shared outcome');
+ assert(configs.modelOutcomesChart.data.datasets[0].data[0]===100&&configs.modelOutcomesChart.data.datasets[0].data[1]===null,'must preserve single-model outcomes without crediting shared outcomes');
+ result.dataset.testResult='pass';
+ }catch(e){result.dataset.testResult='fail';result.dataset.testError=e.message;}});
+ </script>` + rendered.String()
+	runReconnectChromeFixture(t, fixture)
+}

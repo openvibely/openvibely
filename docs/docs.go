@@ -2283,6 +2283,12 @@ const docTemplate = `{
                         "$ref": "#/definitions/models.AnalyticsInsight"
                     }
                 },
+                "model_activity": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.ModelPerformance"
+                    }
+                },
                 "model_categories": {
                     "type": "array",
                     "items": {
