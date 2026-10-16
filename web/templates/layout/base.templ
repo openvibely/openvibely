@@ -2715,6 +2715,15 @@ html[data-color-theme^="vscode-"] #schedule-content [data-schedule-card][data-ca
 [data-color-theme^="vscode-"] .schedule-datetime-popup [aria-pressed=true],
 [data-color-theme^="vscode-"] .schedule-datetime-popup [data-time-selected=true] { background: var(--ov-button-bg) !important; color: var(--ov-button-fg) !important; }
 [data-color-theme^="vscode-"] .schedule-datetime-popup :focus-visible { outline-color: var(--ov-focus); }
+[data-color-theme^="vscode-"] .kanban-search[data-open="true"] { background: var(--ov-input-bg); border-color: var(--ov-input-border); color: var(--ov-text); }
+[data-color-theme^="vscode-"] .kanban-search[data-open="true"]:focus-within { border-color: var(--ov-focus); }
+[data-color-theme^="vscode-"] .kanban-search-input { color: var(--ov-text); caret-color: var(--ov-text); }
+[data-color-theme^="vscode-"] .kanban-search-input::placeholder { color: var(--ov-text-muted); opacity: 1; }
+[data-color-theme^="vscode-"] .kanban-search[data-open="true"] .kanban-search-toggle:hover { background: transparent !important; }
+[data-color-theme^="vscode-"] .kanban-search-clear { color: var(--ov-text-muted); }
+@media (hover: hover) { [data-color-theme^="vscode-"] .kanban-search-clear:hover { background: var(--ov-hover-bg) !important; color: var(--ov-text); } }
+[data-color-theme^="vscode-"] .kanban-search-toggle:focus-visible,
+[data-color-theme^="vscode-"] .kanban-search-clear:focus-visible { box-shadow: inset 0 0 0 1px var(--ov-focus) !important; }
 [data-color-theme^="vscode-"] .drag-over { border-color: var(--ov-focus) !important; background-color: var(--ov-selection-bg) !important; }
 [data-color-theme^="vscode-"] .task-selected {
 outline-color: var(--ov-focus);
