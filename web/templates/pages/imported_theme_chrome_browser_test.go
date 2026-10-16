@@ -57,6 +57,12 @@ func TestBrowserFunctional_ImportedThemeStylesTitlebarMenusAndSchedulePickers(t 
 	}
 	fixture += `<div hidden>` + review.String() + `</div>`
 
+	var graphStyles bytes.Buffer
+	if err := automationGraphThemeStyles().Render(context.Background(), &graphStyles); err != nil {
+		t.Fatal(err)
+	}
+	fixture += graphStyles.String() + `<svg id="theme-graph"><rect class="automation-graph-node"/><path class="automation-graph-edge"/><circle class="automation-edge-endpoint"/><text class="automation-graph-label">Task</text></svg>`
+
 	var panel bytes.Buffer
 	if err := TaskDetailPanel().Render(context.Background(), &panel); err != nil {
 		t.Fatal(err)
@@ -178,6 +184,15 @@ func TestBrowserFunctional_ImportedThemeStylesTitlebarMenusAndSchedulePickers(t 
 				browser.evaluate(`document.getElementById('theme-breadcrumb-button').removeAttribute('` + attribute + `'); 'ok'`)
 			}
 			browser.waitFor(themeID+" review summary icon", `window.matches('.task-change-icon', 'color', 'var(--ov-text-muted)')`, "ok")
+			for _, check := range []struct{ selector, property, role string }{
+				{".automation-graph-node", "fill", "--ov-surface-raised"},
+				{".automation-graph-node", "stroke", "--ov-automation-node-border"},
+				{".automation-graph-edge", "stroke", "--ov-automation-edge"},
+				{".automation-edge-endpoint", "stroke", "--ov-surface"},
+				{".automation-graph-label", "fill", "--ov-text"},
+			} {
+				browser.waitFor(themeID+check.selector+check.property, `window.matches('#theme-graph `+check.selector+`', '`+check.property+`', 'var(`+check.role+`)')`, "ok")
+			}
 			browser.waitFor(themeID+" notice surface", `window.matches('#theme-notice', 'backgroundColor', 'var(--ov-surface)')`, "ok")
 			browser.waitFor(themeID+" notice text", `window.matches('#theme-notice', 'color', 'var(--ov-text-muted)')`, "ok")
 			browser.waitFor(themeID+" stat label", `window.matches('.stat-title', 'color', 'var(--ov-text-muted)')`, "ok")
