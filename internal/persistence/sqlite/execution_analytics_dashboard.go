@@ -1340,7 +1340,7 @@ func (r *ExecutionRepo) queryModelMetrics(ctx context.Context, filter persistenc
 		SUM(CASE WHEN t.worktree_path<>'' OR t.merge_status<>'' THEN 1 ELSE 0 END),
 		COALESCE(d.median_ms,0),COALESCE(d.p90_ms,0),COALESCE(d.n,0),
 		COALESCE(SUM(u.tokens),0),COUNT(u.tokens),SUM(u.cost),COUNT(u.cost),COALESCE(trends.points,'[]'),
-		COALESCE(effort_trends.points,'[]')
+		COALESCE(effort_trends.points,'[]'),COALESCE(SUM(tr.duration_ms),0)
 	FROM task_runs tr JOIN selected_tasks t ON t.id=tr.id
 	LEFT JOIN task_goals g ON g.task_id=t.id` + goalJoin + ` LEFT JOIN task_usage u ON u.task_id=t.id` + usageModelJoin + `
 	LEFT JOIN durations d ON d.model_config_id=tr.model_config_id
@@ -1366,7 +1366,7 @@ func (r *ExecutionRepo) queryModelMetrics(ctx context.Context, filter persistenc
 		if err := rows.Scan(&row.ModelConfigID, &row.ConfigName, &row.Provider, &row.Model, &row.ReasoningEffort,
 			&row.TasksUsed, &row.RunCount, &completed, &terminal, &followed, &followups,
 			&achieved, &goalDenom, &merged, &mergeDenom, &row.MedianDurationMs, &row.P90DurationMs, &row.DurationSampleSize,
-			&row.TotalTokens, &row.TokenCoveredTasks, &knownCost, &row.CostCoveredTasks, &trendJSON, &effortJSON); err != nil {
+			&row.TotalTokens, &row.TokenCoveredTasks, &knownCost, &row.CostCoveredTasks, &trendJSON, &effortJSON, &row.TotalDurationMs); err != nil {
 			return nil, fmt.Errorf("scanning model performance: %w", err)
 		}
 		row.MixedModels = row.ModelConfigID == "__mixed__"
@@ -1389,6 +1389,7 @@ func (r *ExecutionRepo) queryModelMetrics(ctx context.Context, filter persistenc
 		row.TechnicalCompletion = metric(completed, terminal)
 		row.GoalAchievement = metric(achieved, goalDenom)
 		row.MergeCompletion = metric(merged, mergeDenom)
+		row.TotalFollowUps = followups
 		row.FollowUp = metric(followed, row.TasksUsed)
 		if row.TasksUsed > 0 {
 			row.AverageRuns = float64(row.RunCount) / float64(row.TasksUsed)

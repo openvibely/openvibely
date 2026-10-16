@@ -39,6 +39,7 @@ func aggregateModelEffortTrend(raw ...string) ([]models.ModelEffortTrend, error)
 			p.TokenSamples++
 		}
 		if s.Duration != nil {
+			p.TotalDurationMs += *s.Duration
 			durations[s.Period] = append(durations[s.Period], *s.Duration)
 		}
 	}

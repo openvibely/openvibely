@@ -10,7 +10,7 @@ func TestAggregateModelEffortTrendCombinedSamples(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(rows) != 1 || rows[0].MedianDurationMs != 25 || rows[0].DurationSamples != 4 || rows[0].Tokens != 1000 || rows[0].TokenSamples != 4 || rows[0].Tasks != 4 || rows[0].FollowUps != 4 {
+	if len(rows) != 1 || rows[0].TotalDurationMs != 1060 || rows[0].MedianDurationMs != 25 || rows[0].DurationSamples != 4 || rows[0].Tokens != 1000 || rows[0].TokenSamples != 4 || rows[0].Tasks != 4 || rows[0].FollowUps != 4 {
 		t.Fatalf("combined must use task samples, not model averages: %+v", rows)
 	}
 }
@@ -25,5 +25,15 @@ func TestAggregateModelEffortTrend(t *testing.T) {
 	}
 	if rows[1].Tasks != 1 || rows[1].TokenSamples != 0 || rows[1].DurationSamples != 0 {
 		t.Fatalf("missing samples became zeros: %+v", rows[1])
+	}
+}
+
+func TestModelEffortTrendTotalsAddWorkAcrossTasks(t *testing.T) {
+	rows, err := aggregateModelEffortTrend(`[{"period":"2026-10-14","duration":67080000,"tokens":100,"followups":4},{"period":"2026-10-14","duration":9780000,"tokens":200,"followups":2}]`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 || rows[0].TotalDurationMs != 76860000 || rows[0].Tokens != 300 || rows[0].FollowUps != 6 {
+		t.Fatalf("expected 21h21m, 300 tokens and 6 follow-ups: %+v", rows)
 	}
 }

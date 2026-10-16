@@ -2898,6 +2898,9 @@ const docTemplate = `{
                 },
                 "tokens": {
                     "type": "integer"
+                },
+                "total_duration_ms": {
+                    "type": "integer"
                 }
             }
         },
@@ -2988,6 +2991,12 @@ const docTemplate = `{
                     "$ref": "#/definitions/models.AnalyticsMetric"
                 },
                 "token_covered_tasks": {
+                    "type": "integer"
+                },
+                "total_duration_ms": {
+                    "type": "integer"
+                },
+                "total_follow_ups": {
                     "type": "integer"
                 },
                 "total_tokens": {

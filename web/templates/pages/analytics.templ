@@ -194,20 +194,20 @@ templ analyticsContent(currentProject *models.Project) {
 						<div id="modelScorecard" class="overflow-x-auto" style="min-height:12rem"></div>
 					</div></div>
 					<div class="grid grid-cols-1 xl:grid-cols-2 gap-6">
-						@analyticsModelTrendCard("Task Run Time", "Median combined run time per active task in each period, grouped by run start date. Includes each model’s own run time on shared tasks; waiting excluded.", "modelTaskTimeTrend")
-						@analyticsChartCard("Task Time Breakdown", "Median of each model’s combined run time per task in this period. Includes shared tasks; excludes waiting and unfinished runs.", "modelTimeChart", "h-80")
+						@analyticsModelTrendCard("Total Run Time", "Total recorded duration of ended runs, grouped by run start date. Includes shared tasks, failed and cancelled runs; excludes waiting and unfinished runs.", "modelTaskTimeTrend")
+						@analyticsChartCard("Total Run Time by Model", "Sum of recorded run durations in the selected period. Includes shared tasks; excludes waiting and unfinished runs.", "modelTimeChart", "h-80")
 					</div>
 					<div class="grid grid-cols-1 xl:grid-cols-2 gap-6">
-						@analyticsModelTrendCard("Individual Run Time", "Average individual run time, grouped by run start date. Includes ended failed and cancelled runs.", "modelRunTimeTrend")
-						@analyticsChartCard("Run Time Breakdown", "Average time for one model run on a task. A task can have several runs, including retries and follow-ups. Includes failed and cancelled runs with recorded end times.", "modelRunTimeChart", "h-80")
+						@analyticsModelTrendCard("Task Runs", "Number of task runs by start date. Includes failed, cancelled and unfinished runs.", "modelRunTimeTrend")
+						@analyticsChartCard("Task Runs by Model", "Number of task runs in the selected period, including retries, follow-ups and unfinished runs.", "modelRunTimeChart", "h-80")
 					</div>
 					<div class="grid grid-cols-1 xl:grid-cols-2 gap-6">
-						@analyticsModelTrendCard("Tokens per Task", "Average recorded tokens per task with usage in each period, grouped by usage date. Includes each model’s own tokens on shared tasks.", "modelTokenTrend")
-						@analyticsChartCard("Token Breakdown", "Average recorded tokens, including unsuccessful work. Lower means less usage. Includes each model’s own tokens on shared tasks.", "modelTokensChart", "h-80")
+						@analyticsModelTrendCard("Total Tokens", "Total recorded task tokens by usage date, including each model’s own tokens on shared tasks.", "modelTokenTrend")
+						@analyticsChartCard("Total Tokens by Model", "Total recorded task tokens in the selected period, including unsuccessful work and shared tasks.", "modelTokensChart", "h-80")
 					</div>
 					<div class="grid grid-cols-1 xl:grid-cols-2 gap-6">
-						@analyticsModelTrendCard("Follow-ups per Task", "Average follow-up runs per active task in each period, grouped by run start date. Includes each model’s own follow-ups on shared tasks.", "modelFollowupTrend")
-						@analyticsChartCard("Follow-up Breakdown", "Average follow-up runs in the selected period. They can reflect corrections, clarification, or changed goals. Includes each model’s own follow-ups on shared tasks.", "modelFollowupsChart", "h-80")
+						@analyticsModelTrendCard("Follow-up Runs", "Number of follow-up runs by start date, including each model’s own work on shared tasks.", "modelFollowupTrend")
+						@analyticsChartCard("Follow-up Runs by Model", "Total follow-up runs in the selected period. They can reflect corrections, clarification, or changed goals.", "modelFollowupsChart", "h-80")
 					</div>
 					<div class="grid grid-cols-1 xl:grid-cols-2 gap-6">
 						<div class="card bg-base-100 border border-base-300 min-w-0"><div class="card-body">
@@ -953,20 +953,20 @@ templ analyticsContent(currentProject *models.Project) {
 									});
 								}
 								if(!latestRunActivity)renderChartState('modelRunTime','modelRunTimeChart',[],runActivityFailed?'Run activity unavailable':'Loading analytics…');
-								else bar('modelRunTime','modelRunTimeChart',latestRunActivity.models.filter(r=>r.duration_samples>0),r=>Number(r.average_run_ms||0),formatDuration,r=>r.duration_samples,'Average time per run');
+								else bar('modelRunTime','modelRunTimeChart',latestRunActivity.models,r=>Number(r.runs||0),formatNumber,r=>r.runs,'Task runs');
 								renderModelEffortTrends(rows);
 								if(runTimeOnly&&!latestDashboard)return;
-								bar('modelTime','modelTimeChart',models.filter(r=>r.duration_sample_size>0),r=>Number(r.median_duration_ms||0),formatDuration,r=>r.duration_sample_size,'Median combined run time per task');
-								bar('modelTokens','modelTokensChart',models.filter(r=>r.token_covered_tasks>0),r=>Number(r.total_tokens||0)/r.token_covered_tasks,compact,r=>r.token_covered_tasks,'Recorded tokens / task');
+								bar('modelTime','modelTimeChart',models.filter(r=>r.duration_sample_size>0),r=>Number(r.total_duration_ms||0),formatDuration,r=>r.duration_sample_size,'Total recorded run time');
+								bar('modelTokens','modelTokensChart',models.filter(r=>r.token_covered_tasks>0),r=>Number(r.total_tokens||0),compact,r=>r.token_covered_tasks,'Recorded tokens');
 								renderModelOutcomeChart(rows);
-								bar('modelFollowups','modelFollowupsChart',models.filter(r=>r.tasks_used>0),r=>Number(r.average_follow_ups||0),n=>Number(n).toFixed(1),r=>r.tasks_used,'Follow-up runs / task');
+								bar('modelFollowups','modelFollowupsChart',models.filter(r=>r.tasks_used>0),r=>Number(r.total_follow_ups||0),formatNumber,r=>r.tasks_used,'Follow-up runs');
 							}
 							function renderModelEffortTrends(rows,onlyKey){
 							 const specs=[
-							  {key:'modelTaskTimeTrend',sample:p=>p.duration_samples,value:p=>p.median_duration_ms,format:formatDuration},
-							  {key:'modelRunTimeTrend',sample:p=>p.duration_samples,value:p=>p.average_run_ms,format:formatDuration,run:true},
-							  {key:'modelTokenTrend',sample:p=>p.token_samples,value:p=>p.tokens/p.token_samples,format:n=>new Intl.NumberFormat(undefined,{notation:'compact',maximumFractionDigits:1}).format(n)},
-							  {key:'modelFollowupTrend',sample:p=>p.tasks,value:p=>p.follow_ups/p.tasks,format:n=>Number(n).toFixed(1)}
+							  {key:'modelTaskTimeTrend',sample:p=>p.duration_samples,value:p=>p.total_duration_ms,format:formatDuration},
+							  {key:'modelRunTimeTrend',sample:p=>p.runs,value:p=>p.runs,format:formatNumber,run:true},
+							  {key:'modelTokenTrend',sample:p=>p.token_samples,value:p=>p.tokens,format:n=>new Intl.NumberFormat(undefined,{notation:'compact',maximumFractionDigits:1}).format(n)},
+							  {key:'modelFollowupTrend',sample:p=>p.tasks,value:p=>p.follow_ups,format:formatNumber}
 							 ];
 							 const slots=modelSlots(rows);
 							 for(const spec of specs){
@@ -984,10 +984,10 @@ templ analyticsContent(currentProject *models.Project) {
 							   if(spec.run){
 							    const buckets=new Map();
 							    for(const trend of series.values())for(const p of trend){
-							     const b=buckets.get(p.period)||{period:p.period,duration_samples:0,total:0};
-							     b.duration_samples+=Number(p.duration_samples||0);b.total+=Number(p.average_run_ms||0)*Number(p.duration_samples||0);buckets.set(p.period,b);
+							     const b=buckets.get(p.period)||{period:p.period,runs:0};
+							     b.runs+=Number(p.runs||0);buckets.set(p.period,b);
 							    }
-							    combined=Array.from(buckets.values()).map(p=>({...p,average_run_ms:p.duration_samples?p.total/p.duration_samples:0}));
+							    combined=Array.from(buckets.values());
 							   }
 							   series.clear();series.set('__combined__',combined);
 							  }
@@ -1049,10 +1049,10 @@ templ analyticsContent(currentProject *models.Project) {
 									['Model / reasoning','Saved model configuration. Effort counts each model’s own work on all tasks it participated in. Shared task outcomes appear under Mixed models. Task counts across models overlap.'],
 									['Goal achieved','Tasks whose current goal is marked achieved / tasks with a non-cleared goal. An unmet or changed goal is not necessarily a model failure. Tasks without goals are excluded.'],
 									['Merged','Tasks with work merged into the target branch / tasks with a worktree or merge status. Goal achievement does not imply delivery; merging does not imply the goal was evaluated.'],
-									['Run time / task','Median total duration of finished runs started in the selected period, per task. Includes scheduled tasks. Excludes waiting between runs and unfinished runs; not time to merge.'],
-									['Tokens / task','Average recorded tokens per task within the selected period, including unsuccessful work. Only tasks with recorded usage are included; older records may be incomplete.'],
-									['Cost / task','Average recorded cost per task within the selected period, including unsuccessful work. Only tasks with recorded cost are included; partial cost records may understate total cost.'],
-									['Follow-ups / task','Average number of runs marked as follow-ups per task. Additional effort can mean clarification, changed goals, or corrections—not necessarily model failure.']
+									['Total run time','Total duration of finished runs started in the selected period, across tasks. Includes scheduled tasks. Excludes waiting between runs and unfinished runs; not time to merge.'],
+									['Total tokens','Total recorded tokens within the selected period, including unsuccessful work. Only tasks with recorded usage are included; older records may be incomplete.'],
+									['Recorded cost','Total recorded cost within the selected period, including unsuccessful work. Only tasks with recorded cost are included; partial cost records may understate total cost.'],
+									['Follow-up runs','Total number of runs marked as follow-ups. Additional effort can mean clarification, changed goals, or corrections—not necessarily model failure.']
 								];
 								const target=document.getElementById('modelScorecard');if(!target)return;
 								target.innerHTML=ordered.length?'\x3ctable class="table table-sm">\x3cthead>'+analyticsTableHead(headings)+'\x3c/thead>\x3ctbody>'+ordered.map(function(r){
@@ -1060,10 +1060,10 @@ templ analyticsContent(currentProject *models.Project) {
 									const label=r.mixed_models?'Multiple configurations':modelDetailLabel(r);
 									return '\x3ctr'+(r.mixed_models?' class="border-t-2 border-base-300"':'')+'>'+analyticsIdentityCell(modelConfigLabel(r),[label,tasks+' tasks'])+
 										outcome(r.goal_achievement)+outcome(r.merge_completion)+
-										(Number(r.duration_sample_size||0)>0?value(formatDuration(r.median_duration_ms||0),'Median · n='+r.duration_sample_size):value('Unavailable','n=0'))+
-										(tokens?value(formatNumber(Math.round(Number(r.total_tokens||0)/tokens)),'Recorded · n='+tokens):value('Unavailable','n=0'))+
-										(costs&&r.known_cost_usd!=null?value(formatCost(Number(r.known_cost_usd)/costs),'Recorded · n='+costs):value('Unavailable','n=0'))+
-										(!r.mixed_models&&tasks?value(Number(r.average_follow_ups||0).toFixed(1),'Average · n='+tasks):value('Unavailable','Shared outcomes only'))+'\x3c/tr>';
+										(Number(r.duration_sample_size||0)>0?value(formatDuration(r.total_duration_ms||0),'Recorded · n='+r.duration_sample_size):value('Unavailable','n=0'))+
+										(tokens?value(formatNumber(Number(r.total_tokens||0)),'Recorded · n='+tokens):value('Unavailable','n=0'))+
+										(costs&&r.known_cost_usd!=null?value(formatCost(Number(r.known_cost_usd)),'Recorded · n='+costs):value('Unavailable','n=0'))+
+										(!r.mixed_models&&tasks?value(formatNumber(r.total_follow_ups||0),'Recorded · n='+tasks):value('Unavailable','Shared outcomes only'))+'\x3c/tr>';
 								}).join('')+'\x3c/tbody>\x3c/table>':'\x3cp class="opacity-50">No finished tasks in this period.\x3c/p>';
 							}
 
