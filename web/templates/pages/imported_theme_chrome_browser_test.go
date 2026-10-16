@@ -37,6 +37,11 @@ func TestBrowserFunctional_ImportedThemeStylesTitlebarMenusAndSchedulePickers(t 
 	fixture := `<div id="theme-pinned-header" class="diff-file-header bg-base-200" data-stuck="1" style="position:fixed;left:210px;top:350px;width:140px;height:30px;z-index:999999">Pinned</div><div class="chat-markdown"><pre><button id="theme-copy" class="code-copy-btn" style="position:fixed;left:210px;top:400px;width:100px;height:30px;z-index:999999">Copy</button></pre></div><input id="theme-file" type="file" class="file-input file-input-bordered"/><div data-card-selection-gutter><input id="theme-selection" type="checkbox" class="checkbox checkbox-sm"/></div><button class="diff-add-comment-btn">+</button><div class="review-inline-comment-bar"></div><div id="theme-notice" class="bg-base-200/60 text-base-content/70">Notice</div><div class="stats"><span class="stat-title">Label</span><span class="stat-value">12</span></div><div data-alert-markdown><p><code id="theme-alert-code">example</code></p></div><div data-search-empty-state class="rounded-box bg-base-200/60 p-8 text-center"><h3>No saved automations</h3><p class="mt-2 text-sm text-base-content/65">Create an automation.</p></div><div id="fixture-search">` + search.String() + `</div><div id="schedule-content">` + calendar.String() + `<div data-calendar-day="2026-10-16" class="schedule-day-selected">Fri</div><div data-calendar-hour="9" class="bg-base-200 schedule-time-label schedule-day-selected">9 AM</div></div>
 <ul id="fixture-menu" class="ov-menu ov-menu-actions dropdown-content menu"><li><button type="button">Action</button></li></ul>
 <div id="fixture-picker">` + picker.String() + `</div><span id="fixture-deletions" style="color: var(--ov-diff-del-fg)">-4</span><span id="fixture-primary-text" class="text-primary">P</span><span id="fixture-running" class="task-state-running">Running</span><span id="fixture-primary-badge" class="badge badge-primary">New</span><div id="fixture-column" class="kanban-column bg-base-300"></div><div id="fixture-hover-card" data-search-card class="card bg-base-100 border border-base-300 hover:border-primary/40 cursor-pointer" style="position:fixed;left:300px;top:150px;width:120px;height:60px;z-index:99999">Card</div><input id="fixture-toggle-on" type="checkbox" class="toggle toggle-primary toggle-sm" checked/><input id="fixture-toggle-off" type="checkbox" class="toggle toggle-secondary toggle-sm"/><div id="probe"></div>`
+	var taskCard bytes.Buffer
+	if err := components.TaskCard(models.Task{ID: "theme-title", Title: "Theme task", Status: models.StatusPending}, "p1", "active", nil, nil).Render(context.Background(), &taskCard); err != nil {
+		t.Fatal(err)
+	}
+	fixture += `<div id="theme-task-card">` + taskCard.String() + `</div><div class="chat-markdown"><a id="theme-content-link" href="/example">Content</a></div><a id="theme-result-link" class="ov-task-result-link" href="/example">Result</a><a id="theme-explicit-link" class="link link-primary" href="/example">Link</a>`
 	var question bytes.Buffer
 	if err := ChatInputRequestCard(&events.ChatInputRequestEvent{ID: "theme-question", Questions: []events.ChatInputRequestQuestion{{ID: "q", Question: "Choose", Options: []events.ChatInputRequestOption{{Label: "First", Description: "Description"}}}}}).Render(context.Background(), &question); err != nil {
 		t.Fatal(err)
@@ -97,6 +102,14 @@ func TestBrowserFunctional_ImportedThemeStylesTitlebarMenusAndSchedulePickers(t 
 			'ok'`)
 		browser.waitFor("theme applied", `document.documentElement.getAttribute('data-color-theme')`, "vscode-kimbie-dark")
 
+		for _, themeID := range []string{"vscode-dark-2026", "vscode-light-2026", "github-light", "catppuccin-mocha"} {
+			browser.evaluate(`window.openVibelyThemes.apply('` + themeID + `');'ok'`)
+			browser.waitFor(themeID+" task title inherits normal text", `String(window.computed('#theme-task-card .task-card-title-link', 'color') === window.computed('#theme-task-card .card-body', 'color'))`, "true")
+			for _, selector := range []string{"#theme-content-link", "#theme-result-link", "#theme-explicit-link"} {
+				browser.waitFor(themeID+selector+" keeps link accent", `window.matches('`+selector+`', 'color', 'var(--ov-link)')`, "ok")
+			}
+		}
+		browser.evaluate(`window.openVibelyThemes.apply('vscode-kimbie-dark');'ok'`)
 		checks := []struct{ label, selector, property, value string }{
 			{"title bar uses sidebar color", "#desktop-project-titlebar", "backgroundColor", "var(--ov-sidebar-bg)"},
 			{"selected project tab matches content", ".desktop-project-tab[data-selected=\"true\"]", "backgroundColor", "var(--ov-content-bg)"},
