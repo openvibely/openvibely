@@ -47,6 +47,8 @@ templ FilePreview(name, kind, text, base string) {
  }
  } else if kind=="text" {
  <pre><code data-file-code>{text}</code></pre>
+ } else if kind=="unsupported-encoding" {
+ <p role="status">Unsupported text encoding. Save a copy as UTF-8 to preview it, or download the original.</p>
  } else {
  <p role="status">Preview not available. Download the original to open it on your computer.</p>
  }
