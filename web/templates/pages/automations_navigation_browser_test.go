@@ -750,7 +750,7 @@ func TestAutomationBuilderEditHeaderUsesYAMLAuthoring(t *testing.T) {
 	for _, want := range []string{`data-automation-yaml-builder`, `data-automation-builder-cancel`, `data-automation-builder-save`,
 		`data-automation-view-switcher`, `data-automation-view-graph`, `data-automation-view-yaml`, `data-automation-view-details`,
 		`data-automation-yaml-editor`, `name="automation_yaml"`, `schema_version: 1`,
-		`style="caret-color: var(--ov-syntax-foreground, currentColor);"`, `data-automation-yaml-key`, `data-automation-yaml-value`, `data-automation-yaml-scalar`, `data-automation-yaml-comment`,
+		`style="caret-color: oklch(var(--bc));"`, `data-automation-yaml-key`, `data-automation-yaml-value`, `data-automation-yaml-scalar`, `data-automation-yaml-comment`,
 		`data-automation-yaml-editor-shell`, `data-automation-yaml-line-numbers`, `data-automation-yaml-diagnostic`,
 		`data-automation-graph-panel`, `data-automation-details-panel`, `data-automation-details-form`, `data-automation-node-details`, `data-automation-edge-details`,
 		`min-h-[20rem] flex-1 flex-col overflow-hidden rounded-box border border-base-300 bg-base-200/20 px-0 py-4 font-mono text-sm leading-6`,
@@ -759,7 +759,7 @@ func TestAutomationBuilderEditHeaderUsesYAMLAuthoring(t *testing.T) {
 			t.Errorf("expected synchronized Automation Edit view to contain %q", want)
 		}
 	}
-	for _, forbidden := range []string{`data-automation-yaml-preview`, "Automation YAML", "YAML controls node and connection configuration", `caret-color: oklch(var(--bc));`} {
+	for _, forbidden := range []string{`data-automation-yaml-preview`, "Automation YAML", "YAML controls node and connection configuration"} {
 		if strings.Contains(body, forbidden) {
 			t.Errorf("interactive graph must omit obsolete YAML authoring chrome %q", forbidden)
 		}

@@ -807,7 +807,7 @@ templ analyticsContent(currentProject *models.Project) {
 								charts.agentComparison=createAnalyticsChart(canvas.getContext('2d'),{
 									type:'bar',data:{labels:ranked.map(r=>r.agent_name),datasets:[{data:values,backgroundColor:'rgba(20, 184, 166, 0.5)',borderColor:'rgb(20, 184, 166)',borderWidth:1}]},
 									plugins:[{id:'agentOutcomeValues',afterDatasetsDraw:function(chart){
-										const ctx=chart.ctx;ctx.save();ctx.fillStyle=analyticsValueColor();ctx.font='12px sans-serif';ctx.textAlign='left';ctx.textBaseline='middle';
+										const ctx=chart.ctx;ctx.save();ctx.fillStyle=analyticsValueColor(Chart.defaults?.color||'#9ca3af');ctx.font='12px sans-serif';ctx.textAlign='left';ctx.textBaseline='middle';
 										labels.forEach((label,i)=>ctx.fillText(label,chart.chartArea.right+8,chart.scales.y.getPixelForValue(i)));ctx.restore();
 									}}],
 									options:{indexAxis:'y',layout:{padding:{right:85}},plugins:{legend:{display:false},tooltip:{callbacks:{title:items=>items.length?ranked[items[0].dataIndex].agent_name:'',label:function(item){const m=ranked[item.dataIndex][metric]||{};return Number(m.denominator||0)?labels[item.dataIndex]+' · '+Number(m.numerator||0)+' / '+Number(m.denominator)+' tasks (n='+Number(m.denominator)+')':'Unavailable: no eligible tasks';}}}},scales:{x:{beginAtZero:true,max:100,ticks:{callback:value=>value+'%'}},y:{ticks:{autoSkip:false,callback:function(value){const label=this.getLabelForValue(value);return label.length>26?label.slice(0,23)+'…':label;}}}}}
@@ -826,7 +826,7 @@ templ analyticsContent(currentProject *models.Project) {
 								charts.skillOutcome=createAnalyticsChart(canvas.getContext('2d'),{
 									type:'bar',data:{labels:ranked.map(r=>scopedSkillLabel(r.skill_handle,r.skill_scope)),datasets:[{data:values,backgroundColor:'rgba(20, 184, 166, 0.5)',borderColor:'rgb(20, 184, 166)',borderWidth:1}]},
 									plugins:[{id:'skillOutcomeValues',afterDatasetsDraw:function(chart){
-										const ctx=chart.ctx;ctx.save();ctx.fillStyle=analyticsValueColor();ctx.font='12px sans-serif';ctx.textAlign='left';ctx.textBaseline='middle';
+										const ctx=chart.ctx;ctx.save();ctx.fillStyle=analyticsValueColor(Chart.defaults?.color||'#9ca3af');ctx.font='12px sans-serif';ctx.textAlign='left';ctx.textBaseline='middle';
 										labels.forEach((label,i)=>ctx.fillText(label,chart.chartArea.right+8,chart.scales.y.getPixelForValue(i)));ctx.restore();
 									}}],
 									options:{indexAxis:'y',layout:{padding:{right:120}},plugins:{legend:{display:false},tooltip:{callbacks:{label:item=>labels[item.dataIndex]+' tasks'}}},scales:{x:{beginAtZero:true,max:100,ticks:{callback:value=>value+'%'}},y:{ticks:{autoSkip:false,callback:function(value){const label=this.getLabelForValue(value);return label.length>26?label.slice(0,23)+'…':label;}}}}}
@@ -866,7 +866,8 @@ templ analyticsContent(currentProject *models.Project) {
 									node.parentElement.querySelector('[data-task-summary-sample]').textContent=i&&summary?(m.numerator+' / '+m.denominator+(i===1?' evaluated':' eligible')):'';
 								});
 							}
-							function analyticsValueColor() {
+							function analyticsValueColor(nativeColor = '#9ca3af') {
+                                 if (document.documentElement.getAttribute('data-ov-theme-layer') !== 'custom') return nativeColor;
                                  const style = getComputedStyle(document.documentElement);
                                  return style.getPropertyValue('--ov-text-muted').trim() || Chart.defaults?.color || style.color;
                             }

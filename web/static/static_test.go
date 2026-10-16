@@ -15,6 +15,7 @@ var layoutAssets = []string{
 	"vendor/idiomorph-ext.min.js",
 	"vendor/marked.min.js",
 	"vendor/highlight.min.js",
+	"vendor/highlight-github-dark.min.css",
 	"vendor/chart.umd.min.js",
 }
 

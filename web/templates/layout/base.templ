@@ -116,7 +116,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 							function normalizeStoredTheme(value) { value = String(value || '').trim(); if (value === 'light' || value === 'dark') return fallbackIDForMode(value); if (validTheme(value)) return value; return ''; }
 							function normalizeThemeID(value) { return normalizeStoredTheme(value); }
 							function persistUIPreference(payload) { try { fetch('/ui/preferences', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload), keepalive: true }).catch(function() {}); } catch (_) {} }
-							function setCSSVars(theme) { var css = theme && theme.css ? theme.css : {}; Object.keys(css).forEach(function(name) { if (/^--ov-[a-z0-9-]+$/.test(name)) document.documentElement.style.setProperty(name, String(css[name] || '')); }); var roles = theme && Array.isArray(theme.r) ? theme.r : []; ['automation-node-border', 'automation-edge', 'yaml-indent-rail'].forEach(function(name, index) { if (roles[index]) document.documentElement.style.setProperty('--ov-' + name, String(roles[index])); }); }
+							function setCSSVars(theme) { catalog.forEach(function(entry) { Object.keys(entry.css || {}).forEach(function(name) { if (/^--ov-[a-z0-9-]+$/.test(name)) document.documentElement.style.removeProperty(name); }); }); ['automation-node-border', 'automation-edge', 'yaml-indent-rail'].forEach(function(name) { document.documentElement.style.removeProperty('--ov-' + name); }); if (theme.id === defaultLight || theme.id === defaultDark) return; var css = theme && theme.css ? theme.css : {}; Object.keys(css).forEach(function(name) { if (/^--ov-[a-z0-9-]+$/.test(name)) document.documentElement.style.setProperty(name, String(css[name] || '')); }); var roles = theme && Array.isArray(theme.r) ? theme.r : []; ['automation-node-border', 'automation-edge', 'yaml-indent-rail'].forEach(function(name, index) { if (roles[index]) document.documentElement.style.setProperty('--ov-' + name, String(roles[index])); }); }
 							function updateThemeToggleState(theme) { var mode = modeForTheme(theme); var label = mode === 'dark' ? 'Switch to last light theme' : 'Switch to last dark theme'; document.querySelectorAll('.theme-toggle-icon').forEach(function(icon) { icon.setAttribute('data-theme-current', mode); }); document.querySelectorAll('[data-theme-mode-toggle]').forEach(function(el) { el.setAttribute('aria-pressed', mode === 'dark' ? 'true' : 'false'); el.setAttribute('title', label); el.setAttribute('aria-label', label); el.setAttribute('data-tip', label); }); }
 							function applyTheme(id, options) { options = options || {}; var theme = validTheme(normalizeStoredTheme(id)) || validTheme(defaultDark) || catalog[0]; if (!theme) return null; var themeID = theme.id; var mode = modeForTheme(theme); document.documentElement.setAttribute('data-theme', mode); document.documentElement.setAttribute('data-color-theme', themeID); document.documentElement.setAttribute('data-ov-theme-layer', themeID === defaultLight || themeID === defaultDark ? 'native' : 'custom'); document.documentElement.setAttribute('data-color-theme-kind', theme.kind || mode); setCSSVars(theme); if (options.persistLocal !== false) { safeSet(exactKey, themeID); try { localStorage.setItem('theme', themeID); } catch (_) {} } if (options.persistDB) persistUIPreference({ theme: themeID }); safeSet(mode === 'light' ? lastLightKey : lastDarkKey, themeID); updateThemeToggleState(theme); if (window.openVibelyThemes && typeof window.openVibelyThemes.refreshThemeCards === 'function') window.openVibelyThemes.refreshThemeCards(); return theme; }
 							function initialThemeID() { var rawSaved = document.documentElement.getAttribute('data-ui-theme') || ''; var saved = normalizeStoredTheme(rawSaved); if (saved) { if (rawSaved !== saved) setTimeout(function() { persistUIPreference({ theme: saved }); }, 0); return saved; } var exactRaw = safeGet(exactKey); var exact = normalizeStoredTheme(exactRaw); if (exact) return exact; if (exactRaw) safeRemove(exactKey); var legacy = normalizeStoredTheme(safeGet(legacyModeKey)); if (legacy) return legacy; return defaultDark; }
@@ -394,6 +394,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 			<!-- Markdown rendering for chat/thread messages -->
 			<script src={ static.URL("vendor/marked.min.js") } data-ov-asset="marked"></script>
  <script src={static.URL("file-math-parser.js")} data-ov-math-parser></script>
+			<link rel="stylesheet" href={ static.URL("vendor/highlight-github-dark.min.css") }/>
 			<script src={ static.URL("vendor/highlight.min.js") }></script>
 			<meta name="ov-asset-chartjs" content={ static.URL("vendor/chart.umd.min.js") }/>
 			if serverRuntimeMode(ctx) == "desktop" {
@@ -2848,32 +2849,32 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 [data-ov-theme-layer="custom"] [data-automation-yaml-indent-dot]{background-color:var(--ov-yaml-indent-dot,var(--ov-yaml-indent-rail,var(--ov-border-strong)))!important}
 [data-ov-theme-layer="custom"] [data-automation-yaml-indent-rail]{background-color:var(--ov-yaml-indent-rail,var(--ov-border-strong))}
 [data-ov-theme-layer="custom"] [data-automation-yaml-error-line] { text-decoration-color: var(--ov-error) !important; }
-[data-color-theme] pre,				[data-color-theme] code { color: var(--ov-syntax-foreground); }
-				[data-color-theme] pre { background-color: var(--ov-syntax-background); }
-				[data-color-theme] .hljs,
-				[data-color-theme] .hljs * { color: var(--ov-syntax-foreground); }
-				[data-color-theme] .hljs { color: var(--ov-syntax-foreground); background: var(--ov-syntax-background); }
-				[data-color-theme] .hljs-comment,
-				[data-color-theme] .hljs-quote { color: var(--ov-syntax-comment); }
-				[data-color-theme] .hljs-keyword,
-				[data-color-theme] .hljs-selector-tag,
-				[data-color-theme] .hljs-built_in { color: var(--ov-syntax-keyword); }
-				[data-color-theme] .hljs-string,
-				[data-color-theme] .hljs-attr { color: var(--ov-syntax-string); }
-				[data-color-theme] .hljs-number,
-				[data-color-theme] .hljs-literal { color: var(--ov-syntax-number); }
-				[data-color-theme] .hljs-title,
-				[data-color-theme] .hljs-title.function_,
-				[data-color-theme] .hljs-function { color: var(--ov-syntax-function); }
-				[data-color-theme] .hljs-type,
-				[data-color-theme] .hljs-class .hljs-title { color: var(--ov-syntax-type); }
-				[data-color-theme] .hljs-variable,
-				[data-color-theme] .hljs-params { color: var(--ov-syntax-variable); }
-				[data-color-theme] .hljs-doctag,
-				[data-color-theme] .hljs-meta,
-				[data-color-theme] .hljs-section { color: var(--ov-syntax-title); }
-				[data-color-theme] .hljs-deletion { color: var(--ov-diff-delete-fg); }
-				[data-color-theme] .hljs-addition { color: var(--ov-diff-add-fg); }
+[data-ov-theme-layer="custom"] pre,				[data-ov-theme-layer="custom"] code { color: var(--ov-syntax-foreground); }
+				[data-ov-theme-layer="custom"] pre { background-color: var(--ov-syntax-background); }
+				[data-ov-theme-layer="custom"] .hljs,
+				[data-ov-theme-layer="custom"] .hljs * { color: var(--ov-syntax-foreground); }
+				[data-ov-theme-layer="custom"] .hljs { color: var(--ov-syntax-foreground); background: var(--ov-syntax-background); }
+				[data-ov-theme-layer="custom"] .hljs-comment,
+				[data-ov-theme-layer="custom"] .hljs-quote { color: var(--ov-syntax-comment); }
+				[data-ov-theme-layer="custom"] .hljs-keyword,
+				[data-ov-theme-layer="custom"] .hljs-selector-tag,
+				[data-ov-theme-layer="custom"] .hljs-built_in { color: var(--ov-syntax-keyword); }
+				[data-ov-theme-layer="custom"] .hljs-string,
+				[data-ov-theme-layer="custom"] .hljs-attr { color: var(--ov-syntax-string); }
+				[data-ov-theme-layer="custom"] .hljs-number,
+				[data-ov-theme-layer="custom"] .hljs-literal { color: var(--ov-syntax-number); }
+				[data-ov-theme-layer="custom"] .hljs-title,
+				[data-ov-theme-layer="custom"] .hljs-title.function_,
+				[data-ov-theme-layer="custom"] .hljs-function { color: var(--ov-syntax-function); }
+				[data-ov-theme-layer="custom"] .hljs-type,
+				[data-ov-theme-layer="custom"] .hljs-class .hljs-title { color: var(--ov-syntax-type); }
+				[data-ov-theme-layer="custom"] .hljs-variable,
+				[data-ov-theme-layer="custom"] .hljs-params { color: var(--ov-syntax-variable); }
+				[data-ov-theme-layer="custom"] .hljs-doctag,
+				[data-ov-theme-layer="custom"] .hljs-meta,
+				[data-ov-theme-layer="custom"] .hljs-section { color: var(--ov-syntax-title); }
+				[data-ov-theme-layer="custom"] .hljs-deletion { color: var(--ov-diff-delete-fg); }
+				[data-ov-theme-layer="custom"] .hljs-addition { color: var(--ov-diff-add-fg); }
 			</style>
 			<script>
 // Configure Marked for chat rendering. Re-run this on first use so a

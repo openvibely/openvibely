@@ -1216,7 +1216,7 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 					if (!zone) return;
 					if (valid) {
 						zone.style.backgroundColor = 'var(--ov-schedule-drop-valid-bg, rgba(99, 102, 241, 0.2))';
-						zone.style.outline = '2px dashed var(--ov-schedule-drop-valid-outline, rgba(99, 102, 241, 0.5))';
+						zone.style.outline = '2px solid var(--ov-schedule-drop-valid-outline, rgba(99, 102, 241, 0.5))';
 						zone.style.cursor = '';
 					} else {
 						zone.style.backgroundColor = 'var(--ov-schedule-drop-invalid-bg, rgba(239, 68, 68, 0.15))';

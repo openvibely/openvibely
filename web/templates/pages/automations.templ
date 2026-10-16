@@ -445,7 +445,7 @@ templ automationYAMLSharedScript() {
 				if (!indent) return '';
 				var dots = [];
 				for (var column = 0; column < indent; column++) {
-						dots.push('<span class="absolute z-10 rounded-full" style="left:calc(' + column + 'ch + 0.65ch);top:50%;width:2px;height:2px;transform:translate(-50%,-50%);background-color:var(--ov-yaml-indent-dot, var(--ov-border-strong, rgba(127, 127, 127, 0.45)))" data-automation-yaml-indent-dot aria-hidden="true"></span>');
+						dots.push('<span class="absolute z-10 rounded-full" style="left:calc(' + column + 'ch + 0.65ch);top:50%;width:2px;height:2px;transform:translate(-50%,-50%);background-color:var(--ov-yaml-indent-dot, oklch(var(--bc) / 0.3))" data-automation-yaml-indent-dot aria-hidden="true"></span>');
 				}
 				return '<span class="pointer-events-none absolute inset-y-0 left-0 z-10" style="width:' + indent + 'ch" data-automation-yaml-indent-guides data-automation-yaml-indent-guide aria-hidden="true">' + dots.join('') + '</span>';
 			}
@@ -1193,7 +1193,7 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 										<div class="group relative shrink-0 overflow-hidden border-r border-base-300" style="box-sizing: border-box; width: max-content; min-width: 3.25rem; flex: 0 0 auto;" data-automation-yaml-gutter>
 											<pre class="m-0 h-full w-full min-w-0 select-none overflow-hidden whitespace-nowrap pb-0 pl-2 pr-2 pt-0 text-left text-xs text-base-content/45" style="box-sizing: border-box; text-align: left !important;" aria-label="YAML line numbers" data-automation-yaml-line-numbers>{ automationYAMLLineNumbers(page.YAML) }</pre>											<div class="pointer-events-none absolute inset-y-0 right-0 z-10 hidden w-8" aria-label="YAML section controls" data-automation-yaml-fold-controls hidden></div>
 											</div>									<div class="relative min-h-0 min-w-0 flex-1 overflow-hidden" data-automation-yaml-editor-viewport>										<pre class="absolute left-0 top-0 m-0 min-h-full w-max min-w-full overflow-hidden whitespace-pre px-3 font-mono text-sm leading-6" aria-hidden="true" data-automation-yaml-highlight></pre>
-										<textarea class="absolute inset-0 block h-full w-full resize-none overflow-auto border-0 bg-transparent whitespace-pre px-3 font-mono text-sm leading-6 text-transparent outline-none caret-base-content" style="caret-color: var(--ov-syntax-foreground, currentColor);" form="automation-design-form" name="automation_yaml" data-automation-yaml-editor data-automation-yaml-parse-url={ fmt.Sprintf("/automations/yaml/parse?project_id=%s", currentProjectID) } spellcheck="false" wrap="off" aria-label="Automation definition.">{ page.YAML }</textarea>
+										<textarea class="absolute inset-0 block h-full w-full resize-none overflow-auto border-0 bg-transparent whitespace-pre px-3 font-mono text-sm leading-6 text-transparent outline-none caret-base-content" style="caret-color: oklch(var(--bc));" form="automation-design-form" name="automation_yaml" data-automation-yaml-editor data-automation-yaml-parse-url={ fmt.Sprintf("/automations/yaml/parse?project_id=%s", currentProjectID) } spellcheck="false" wrap="off" aria-label="Automation definition.">{ page.YAML }</textarea>
 									</div>							</div>
 							<p class="mt-3 hidden rounded-box border border-error/30 bg-error/10 px-3 py-2 font-sans text-sm text-error" role="alert" data-automation-yaml-diagnostic></p>
 							</div>
@@ -1498,6 +1498,7 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 						}
 						function yamlRailColor(active) {
 							var isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+                            if (document.documentElement.getAttribute('data-ov-theme-layer') !== 'custom') return active ? (isDark ? 'rgba(212, 212, 212, 0.8)' : 'rgba(64, 64, 64, 0.6)') : 'oklch(var(--bc) / 0.3)';
 							return active ? (isDark ? 'var(--ov-yaml-indent-active, var(--ov-focus, rgba(212, 212, 212, 0.8)))' : 'var(--ov-yaml-indent-active, var(--ov-focus, rgba(64, 64, 64, 0.6)))') : 'var(--ov-yaml-indent-rail, var(--ov-border-strong, rgba(127, 127, 127, 0.45)))';
 						}
 						function yamlContinuousIndentationRails(lines, visibleLines, activeInfo) {
