@@ -34,7 +34,7 @@ func TestBrowserFunctional_ImportedThemeStylesTitlebarMenusAndSchedulePickers(t 
 	if err := kanbanSearch().Render(context.Background(), &search); err != nil {
 		t.Fatalf("render kanban search: %v", err)
 	}
-	fixture := `<div id="theme-notice" class="bg-base-200/60 text-base-content/70">Notice</div><div class="stats"><span class="stat-title">Label</span><span class="stat-value">12</span></div><div data-alert-markdown><p><code id="theme-alert-code">example</code></p></div><div data-search-empty-state class="rounded-box bg-base-200/60 p-8 text-center"><h3>No saved automations</h3><p class="mt-2 text-sm text-base-content/65">Create an automation.</p></div><div id="fixture-search">` + search.String() + `</div><div id="schedule-content">` + calendar.String() + `<div data-calendar-day="2026-10-16" class="schedule-day-selected">Fri</div><div data-calendar-hour="9" class="bg-base-200 schedule-time-label schedule-day-selected">9 AM</div></div>
+	fixture := `<div data-card-selection-gutter><input id="theme-selection" type="checkbox" class="checkbox checkbox-sm"/></div><button class="diff-add-comment-btn">+</button><div class="review-inline-comment-bar"></div><div id="theme-notice" class="bg-base-200/60 text-base-content/70">Notice</div><div class="stats"><span class="stat-title">Label</span><span class="stat-value">12</span></div><div data-alert-markdown><p><code id="theme-alert-code">example</code></p></div><div data-search-empty-state class="rounded-box bg-base-200/60 p-8 text-center"><h3>No saved automations</h3><p class="mt-2 text-sm text-base-content/65">Create an automation.</p></div><div id="fixture-search">` + search.String() + `</div><div id="schedule-content">` + calendar.String() + `<div data-calendar-day="2026-10-16" class="schedule-day-selected">Fri</div><div data-calendar-hour="9" class="bg-base-200 schedule-time-label schedule-day-selected">9 AM</div></div>
 <ul id="fixture-menu" class="ov-menu ov-menu-actions dropdown-content menu"><li><button type="button">Action</button></li></ul>
 <div id="fixture-picker">` + picker.String() + `</div><span id="fixture-deletions" style="color: var(--ov-diff-del-fg)">-4</span><span id="fixture-primary-text" class="text-primary">P</span><span id="fixture-running" class="task-state-running">Running</span><span id="fixture-primary-badge" class="badge badge-primary">New</span><div id="fixture-column" class="kanban-column bg-base-300"></div><div id="fixture-hover-card" data-search-card class="card bg-base-100 border border-base-300 hover:border-primary/40 cursor-pointer" style="position:fixed;left:300px;top:150px;width:120px;height:60px;z-index:99999">Card</div><input id="fixture-toggle-on" type="checkbox" class="toggle toggle-primary toggle-sm" checked/><input id="fixture-toggle-off" type="checkbox" class="toggle toggle-secondary toggle-sm"/><div id="probe"></div>`
 	var question bytes.Buffer
@@ -42,6 +42,12 @@ func TestBrowserFunctional_ImportedThemeStylesTitlebarMenusAndSchedulePickers(t 
 		t.Fatal(err)
 	}
 	fixture += question.String()
+	var review bytes.Buffer
+	if err := components.DiffViewerWithReview("diff --git a/a.txt b/a.txt\n--- a/a.txt\n+++ b/a.txt\n@@ -1 +1 @@\n-old\n+new\n", "theme-review", nil).Render(context.Background(), &review); err != nil {
+		t.Fatal(err)
+	}
+	fixture += `<div hidden>` + review.String() + `</div>`
+
 	var panel bytes.Buffer
 	if err := TaskDetailPanel().Render(context.Background(), &panel); err != nil {
 		t.Fatal(err)
@@ -144,6 +150,21 @@ func TestBrowserFunctional_ImportedThemeStylesTitlebarMenusAndSchedulePickers(t 
 			browser.waitFor(themeID+" stat value", `window.matches('.stat-value', 'color', 'var(--ov-text)')`, "ok")
 			browser.waitFor(themeID+" alert code background", `window.matches('#theme-alert-code', 'backgroundColor', 'var(--ov-code-bg)')`, "ok")
 			browser.waitFor(themeID+" alert code text", `window.matches('#theme-alert-code', 'color', 'var(--ov-code-fg)')`, "ok")
+			browser.waitFor(themeID+" review button", `window.matches('.diff-add-comment-btn', 'backgroundColor', 'var(--ov-button-bg)')`, "ok")
+			browser.waitFor(themeID+" review button text", `window.matches('.diff-add-comment-btn', 'color', 'var(--ov-button-fg)')`, "ok")
+			browser.evaluate(`document.querySelector('.diff-add-comment-btn').style.cssText='position:fixed;left:220px;right:auto;top:300px;transform:none;opacity:1;pointer-events:auto;z-index:999999'; 'ok'`)
+			browser.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseMoved", "x": 228, "y": 308}, nil)
+			browser.waitFor(themeID+" review hover", `window.matches('.diff-add-comment-btn', 'backgroundColor', 'var(--ov-button-hover-bg)')`, "ok")
+			browser.waitFor(themeID+" review hover text", `window.matches('.diff-add-comment-btn', 'color', 'var(--ov-button-hover-fg)')`, "ok")
+			browser.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseMoved", "x": 0, "y": 0}, nil)
+			browser.waitFor(themeID+" comment marker", `window.matches('.review-inline-comment-bar', 'backgroundColor', 'var(--ov-warning)')`, "ok")
+			browser.evaluate(`document.getElementById('theme-selection').checked=false; document.getElementById('theme-selection').indeterminate=false; 'ok'`)
+			browser.waitFor(themeID+" unchecked selection", `window.matches('#theme-selection', 'backgroundColor', 'var(--ov-input-bg)')`, "ok")
+			browser.evaluate(`document.getElementById('theme-selection').checked=true; 'ok'`)
+			browser.waitFor(themeID+" checked selection", `window.matches('#theme-selection', 'backgroundColor', 'var(--ov-button-bg)')`, "ok")
+			browser.waitFor(themeID+" checkmark color", `String(getComputedStyle(document.getElementById('theme-selection')).backgroundImage.includes(window.themeColor('var(--ov-button-fg)')))`, "true")
+			browser.evaluate(`document.getElementById('theme-selection').indeterminate=true; 'ok'`)
+			browser.waitFor(themeID+" mixed selection", `window.matches('#theme-selection', 'backgroundColor', 'var(--ov-button-bg)')`, "ok")
 			browser.waitFor(themeID+" empty state surface", `window.matches('[data-search-empty-state]', 'backgroundColor', 'var(--ov-surface)')`, "ok")
 			browser.waitFor(themeID+" empty state message", `window.matches('[data-search-empty-state] p', 'color', 'var(--ov-text-muted)')`, "ok")
 

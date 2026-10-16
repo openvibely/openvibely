@@ -2537,6 +2537,17 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 
 					/* Built-in VS Code palette application. Variables are generated at build time. */
 [data-ov-theme-layer="custom"]{background-color:var(--ov-content-bg)}
+/* Review actions and card selection use plain colors for older WebViews. */
+[data-ov-theme-layer="custom"] .diff-add-comment-btn { background: var(--ov-button-bg); color: var(--ov-button-fg); }
+[data-ov-theme-layer="custom"] .diff-add-comment-btn:hover { background: var(--ov-button-hover-bg); color: var(--ov-button-hover-fg); }
+[data-ov-theme-layer="custom"] .diff-add-comment-btn:focus-visible { outline: 2px solid var(--ov-focus); outline-offset: 2px; }
+[data-ov-theme-layer="custom"] .review-inline-comment-bar { background: var(--ov-warning); }
+[data-ov-theme-layer="custom"] [data-card-selection-gutter] .checkbox { --chkbg: var(--ov-button-bg); --chkfg: var(--ov-button-fg); background-color: var(--ov-input-bg); border-color: var(--ov-input-border); }
+[data-ov-theme-layer="custom"] [data-card-selection-gutter] .checkbox:checked,
+[data-ov-theme-layer="custom"] [data-card-selection-gutter] .checkbox[aria-checked="true"],
+[data-ov-theme-layer="custom"] [data-card-selection-gutter] .checkbox:indeterminate { background-color: var(--chkbg); border-color: var(--chkbg); }
+[data-ov-theme-layer="custom"] [data-card-selection-gutter] .checkbox:focus-visible { outline-color: var(--ov-focus); }
+
 [data-ov-theme-layer="custom"] body,
 [data-ov-theme-layer="custom"] .drawer-content,
 [data-ov-theme-layer="custom"] #main-content { background-color: var(--ov-content-bg) !important; color: var(--ov-text); }
