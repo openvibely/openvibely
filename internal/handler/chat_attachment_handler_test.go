@@ -179,7 +179,7 @@ func TestDownloadChatAttachmentServesSameProjectAttachment(t *testing.T) {
 	assert.Equal(t, http.StatusOK, rec.Code)
 	assert.Equal(t, string(fixture.fileContent), rec.Body.String())
 	assert.Equal(t, "nosniff", rec.Header().Get("X-Content-Type-Options"))
-	assert.Equal(t, "sandbox", rec.Header().Get("Content-Security-Policy"))
+	assert.Equal(t, "sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src data: blob:", rec.Header().Get("Content-Security-Policy"))
 }
 
 func TestDownloadChatAttachmentSandboxesActiveContent(t *testing.T) {
@@ -214,7 +214,16 @@ func TestDownloadChatAttachmentSandboxesActiveContent(t *testing.T) {
 			assert.Equal(t, http.StatusOK, rec.Code)
 			assert.Equal(t, string(tc.content), rec.Body.String())
 			assert.Equal(t, "nosniff", rec.Header().Get("X-Content-Type-Options"))
-			assert.Equal(t, "sandbox", rec.Header().Get("Content-Security-Policy"))
+			policy := rec.Header().Get("Content-Security-Policy")
+			assert.Contains(t, policy, "sandbox")
+			assert.Contains(t, policy, "default-src 'none'")
+			assert.NotContains(t, policy, "allow-same-origin")
+			if tc.name == "html" {
+				assert.Contains(t, policy, "sandbox allow-scripts;")
+				assert.Contains(t, policy, "connect-src 'none'")
+			} else {
+				assert.Contains(t, policy, "sandbox;")
+			}
 
 			c, rec = newChatAttachmentContext(t, fixture.e, http.MethodGet, attachment.ID, fixture.foreignProject.ID)
 			err := fixture.h.DownloadChatAttachment(c)
