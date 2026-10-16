@@ -2537,6 +2537,14 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 
 					/* Built-in VS Code palette application. Variables are generated at build time. */
 [data-ov-theme-layer="custom"]{background-color:var(--ov-content-bg)}
+[data-ov-theme-layer="custom"] [data-breadcrumb-title] { color:var(--ov-text); }
+[data-ov-theme-layer="custom"] [data-breadcrumb-title]:is(a, button:not(:disabled)) { color:var(--ov-text-muted); opacity:1; }
+[data-ov-theme-layer="custom"] [data-breadcrumb-title]:is(a, button:not(:disabled)):hover { color:var(--ov-text); opacity:1; }
+[data-ov-theme-layer="custom"] [data-breadcrumb-title]:focus-visible { outline-color:var(--ov-focus); }
+[data-ov-theme-layer="custom"] [data-breadcrumb-selector] [data-breadcrumb-selector-button] { color:var(--ov-text); }
+[data-ov-theme-layer="custom"] [data-breadcrumb-selector] [data-breadcrumb-selector-button]:is(:hover, [data-pointer-over], [aria-expanded="true"]) { background:var(--ov-hover-bg); }
+[data-ov-theme-layer="custom"] .task-change-icon { color:var(--ov-text-muted); }
+
 /* Keep pinned diff headers opaque even when page-local hover rules load later. */
 html[data-ov-theme-layer="custom"] .diff-file-header[data-stuck="1"],
 html[data-ov-theme-layer="custom"] .diff-file-header[data-stuck="1"]:hover { background-color: var(--ov-content-bg) !important; }

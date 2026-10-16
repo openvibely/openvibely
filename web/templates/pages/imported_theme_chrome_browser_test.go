@@ -42,6 +42,15 @@ func TestBrowserFunctional_ImportedThemeStylesTitlebarMenusAndSchedulePickers(t 
 		t.Fatal(err)
 	}
 	fixture += question.String()
+	var navigation bytes.Buffer
+	if err := components.BreadcrumbSelector(models.BreadcrumbSelector{ID: "theme-breadcrumb", Kind: "Task"}).Render(context.Background(), &navigation); err != nil {
+		t.Fatal(err)
+	}
+	if err := components.TaskChangeActivity("theme-task").Render(context.Background(), &navigation); err != nil {
+		t.Fatal(err)
+	}
+	fixture += navigation.String() + `<a id="theme-breadcrumb-title" data-breadcrumb-title href="#" style="position:fixed;left:220px;top:360px;width:120px;height:30px;z-index:999999">Tasks</a>`
+
 	var review bytes.Buffer
 	if err := components.DiffViewerWithReview("diff --git a/a.txt b/a.txt\n--- a/a.txt\n+++ b/a.txt\n@@ -1 +1 @@\n-old\n+new\n", "theme-review", nil).Render(context.Background(), &review); err != nil {
 		t.Fatal(err)
@@ -158,6 +167,17 @@ func TestBrowserFunctional_ImportedThemeStylesTitlebarMenusAndSchedulePickers(t 
 			browser.waitFor(themeID+" upload text", `window.matches('#theme-file', 'color', 'var(--ov-text)')`, "ok")
 			browser.waitFor(themeID+" upload button", `String(getComputedStyle(document.getElementById('theme-file'), '::file-selector-button').backgroundColor === window.themeColor('var(--ov-button-bg)'))`, "true")
 			browser.waitFor(themeID+" upload button text", `String(getComputedStyle(document.getElementById('theme-file'), '::file-selector-button').color === window.themeColor('var(--ov-button-fg)'))`, "true")
+			browser.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseMoved", "x": 0, "y": 0}, nil)
+			browser.waitFor(themeID+" breadcrumb text", `window.matches('#theme-breadcrumb-title', 'color', 'var(--ov-text-muted)')`, "ok")
+			browser.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseMoved", "x": 240, "y": 375}, nil)
+			browser.waitFor(themeID+" breadcrumb hover", `window.matches('#theme-breadcrumb-title', 'color', 'var(--ov-text)')`, "ok")
+			browser.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseMoved", "x": 0, "y": 0}, nil)
+			for _, attribute := range []string{"data-pointer-over", "aria-expanded"} {
+				browser.evaluate(`document.getElementById('theme-breadcrumb-button').setAttribute('` + attribute + `', 'true'); 'ok'`)
+				browser.waitFor(themeID+" selector "+attribute, `window.matches('#theme-breadcrumb-button', 'backgroundColor', 'var(--ov-hover-bg)')`, "ok")
+				browser.evaluate(`document.getElementById('theme-breadcrumb-button').removeAttribute('` + attribute + `'); 'ok'`)
+			}
+			browser.waitFor(themeID+" review summary icon", `window.matches('.task-change-icon', 'color', 'var(--ov-text-muted)')`, "ok")
 			browser.waitFor(themeID+" notice surface", `window.matches('#theme-notice', 'backgroundColor', 'var(--ov-surface)')`, "ok")
 			browser.waitFor(themeID+" notice text", `window.matches('#theme-notice', 'color', 'var(--ov-text-muted)')`, "ok")
 			browser.waitFor(themeID+" stat label", `window.matches('.stat-title', 'color', 'var(--ov-text-muted)')`, "ok")
