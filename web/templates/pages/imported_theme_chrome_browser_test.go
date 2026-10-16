@@ -35,7 +35,7 @@ func TestBrowserFunctional_ImportedThemeStylesTitlebarMenusAndSchedulePickers(t 
 	}
 	fixture := `<div id="fixture-search">` + search.String() + `</div><div id="schedule-content">` + calendar.String() + `<div data-calendar-day="2026-10-16" class="schedule-day-selected">Fri</div><div data-calendar-hour="9" class="bg-base-200 schedule-time-label schedule-day-selected">9 AM</div></div>
 <ul id="fixture-menu" class="ov-menu ov-menu-actions dropdown-content menu"><li><button type="button">Action</button></li></ul>
-<div id="fixture-picker">` + picker.String() + `</div><span id="fixture-deletions" style="color: var(--ov-diff-del-fg)">-4</span><span id="fixture-primary-text" class="text-primary">P</span><span id="fixture-running" class="task-state-running">Running</span><span id="fixture-primary-badge" class="badge badge-primary">New</span><div id="fixture-column" class="kanban-column bg-base-300"></div><div id="probe"></div>`
+<div id="fixture-picker">` + picker.String() + `</div><span id="fixture-deletions" style="color: var(--ov-diff-del-fg)">-4</span><span id="fixture-primary-text" class="text-primary">P</span><span id="fixture-running" class="task-state-running">Running</span><span id="fixture-primary-badge" class="badge badge-primary">New</span><div id="fixture-column" class="kanban-column bg-base-300"></div><div id="fixture-hover-card" data-search-card class="card bg-base-100 border border-base-300 hover:border-primary/40 cursor-pointer" style="position:fixed;left:300px;top:150px;width:120px;height:60px;z-index:99999">Card</div><div id="probe"></div>`
 	html := base.String()
 	end := strings.LastIndex(html, "</body>")
 	page := html[:end] + fixture + html[end:]
@@ -55,6 +55,7 @@ func TestBrowserFunctional_ImportedThemeStylesTitlebarMenusAndSchedulePickers(t 
 
 	runComposerFocusCDP(t, chrome, server.URL, "imported-theme-chrome", func(browser *composerFocusCDP) {
 		browser.waitFor("theme runtime", `String(!!(window.openVibelyThemes && window.openVibelyThemes.apply))`, "true")
+		browser.waitFor("page body ready", `String(document.readyState !== 'loading' && !!document.getElementById('fixture-hover-card') && !!document.getElementById('desktop-project-titlebar'))`, "true")
 		browser.evaluate(`window.openVibelyThemes.apply('vscode-kimbie-dark');
 			window.themeColor = function(value, property) { var probe = document.getElementById('probe'); probe.style[property || 'backgroundColor'] = value; return getComputedStyle(probe)[property || 'backgroundColor']; };
 			window.computed = function(selector, property) { return getComputedStyle(document.querySelector(selector))[property]; };
@@ -109,7 +110,22 @@ func TestBrowserFunctional_ImportedThemeStylesTitlebarMenusAndSchedulePickers(t 
 			browser.waitFor(palette.id+" running state uses palette accent", `window.near('#fixture-running', 'color', '`+palette.accent+`')`, "ok")
 		}
 
+		for _, themeID := range []string{"tokyo-night", "github-light", "vscode-kimbie-dark"} {
+			browser.evaluate(`window.openVibelyThemes.apply('` + themeID + `');'ok'`)
+			browser.waitFor(themeID+" thin selected tab", `getComputedStyle(document.querySelector('.desktop-project-tab [aria-selected="true"]'), '::before').borderTopWidth`, "1px")
+			browser.waitFor(themeID+" thin tab baseline", `String(window.computed('#desktop-project-titlebar', 'boxShadow').includes('0px -1px'))`, "true")
+			for _, cardKind := range []string{"search", "task"} {
+				browser.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseMoved", "x": 290, "y": 140}, nil)
+				browser.evaluate(`var card = document.getElementById('fixture-hover-card'); card.classList.toggle('cursor-pointer', '` + cardKind + `' === 'search'); card.toggleAttribute('data-search-card', '` + cardKind + `' === 'search');'ok'`)
+				browser.waitFor(themeID+cardKind+" idle border", `window.matches('#fixture-hover-card', 'borderTopColor', 'var(--ov-subtle-border)')`, "ok")
+				browser.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseMoved", "x": 350, "y": 175}, nil)
+				browser.waitFor(themeID+cardKind+" hover border", `window.matches('#fixture-hover-card', 'borderTopColor', 'var(--ov-link)')`, "ok")
+				browser.waitFor(themeID+cardKind+" stable card fill", `window.matches('#fixture-hover-card', 'backgroundColor', 'var(--ov-surface)')`, "ok")
+			}
+		}
+		browser.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseMoved", "x": 290, "y": 140}, nil)
 		browser.evaluate(`window.openVibelyThemes.apply('openvibely-dark');'ok'`)
+		browser.waitFor("native selected tab retains thick contour", `getComputedStyle(document.querySelector('.desktop-project-tab [aria-selected="true"]'), '::before').borderTopWidth`, "2px")
 		browser.waitFor("native theme restores native layer", `document.documentElement.getAttribute('data-ov-theme-layer')`, "native")
 		browser.waitFor("native theme keeps indigo running state", `window.near('#fixture-running', 'color', '#7480ff')`, "ok")
 		browser.waitFor("native theme keeps indigo primary text", `window.near('#fixture-primary-text', 'color', '#7480ff')`, "ok")
