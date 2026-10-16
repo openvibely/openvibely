@@ -186,3 +186,14 @@ func TestImageInstructionsDoNotRequestFileInspection(t *testing.T) {
 		t.Fatal(result)
 	}
 }
+
+func TestHistoricalImagesRemainFileReferences(t *testing.T) {
+	files := []models.Attachment{{FileName: "previous.png", FilePath: "/tmp/previous.png"}}
+	historical := BuildAttachmentReferences(files)
+	if strings.Contains(historical, "already included") || !strings.Contains(historical, "Use file tools") {
+		t.Fatalf("incorrect historical instructions: %s", historical)
+	}
+	if !strings.Contains(BuildAttachmentInstructions(files), "already included") {
+		t.Fatal("current images must still be identified as direct input")
+	}
+}

@@ -475,7 +475,7 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 	}
 	ctx = service.WithAttachedFiles(ctx, lifecycleFiles)
 	if len(lifecycleFiles) > 0 {
-		params.Message += "\n" + llmprompt.BuildAttachmentInstructions(lifecycleFiles)
+		params.Message += "\n" + llmprompt.BuildAttachmentInstructions(params.ImageAttachments) + llmprompt.BuildAttachmentReferences(lifecycleFiles[len(params.ImageAttachments):])
 	}
 	agentDef := h.resolveTaskAgentDefinitionForTask(ctx, params.TaskID, params.AgentDefinition)
 	params.AgentDefinition = agentDef
