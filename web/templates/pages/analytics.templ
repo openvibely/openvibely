@@ -311,6 +311,12 @@ templ analyticsContent(currentProject *models.Project) {
 					var projectID = dataEl.dataset.projectId;
 						var charts = window._analyticsCharts;
 						var eventSignal = window._analyticsAbortController.signal;
+                        const themeObserver = new MutationObserver(function() {
+                            if (!dataEl.isConnected) { themeObserver.disconnect(); return; }
+                            Object.values(charts).forEach(function(chart) { chart.update('none'); });
+                        });
+                        themeObserver.observe(document.documentElement, {attributes:true, attributeFilter:['data-color-theme']});
+                        eventSignal.addEventListener('abort', function() { themeObserver.disconnect(); }, {once:true});
 						setupAnalyticsPreview();
 						function setupAnalyticsPreview() {
 						 const dialog = document.createElement('dialog');
@@ -781,7 +787,7 @@ templ analyticsContent(currentProject *models.Project) {
 									canvas.closest('.card').style.minWidth='0';plot.style.minWidth=Math.max(320,supported.length*100)+'px';
 									const color=r=>{let hash=0;for(const c of r.agent_id||r.agent_name)hash=(hash*31+c.charCodeAt(0))>>>0;return 'hsla('+(hash%360)+',70%,55%,.7)';};
 									charts[key]=createAnalyticsChart(canvas.getContext('2d'),{type:'bar',data:{labels:supported.map(r=>r.agent_name),datasets:[{data:supported.map(value),backgroundColor:supported.map(color),maxBarThickness:48}]},
-										plugins:[{id:'agentEffortValues',afterDatasetsDraw:function(chart){const ctx=chart.ctx;ctx.save();ctx.fillStyle='#9ca3af';ctx.font='12px sans-serif';ctx.textAlign='center';ctx.textBaseline='bottom';chart.getDatasetMeta(0).data.forEach((b,i)=>ctx.fillText(format(value(supported[i])),b.x,b.y-6));ctx.restore();}}],
+										plugins:[{id:'agentEffortValues',afterDatasetsDraw:function(chart){const ctx=chart.ctx;ctx.save();ctx.fillStyle=analyticsValueColor();ctx.font='12px sans-serif';ctx.textAlign='center';ctx.textBaseline='bottom';chart.getDatasetMeta(0).data.forEach((b,i)=>ctx.fillText(format(value(supported[i])),b.x,b.y-6));ctx.restore();}}],
 										options:{layout:{padding:{top:24}},plugins:{legend:{display:false},tooltip:{callbacks:{label:item=>format(value(supported[item.dataIndex]))+' · n='+sample(supported[item.dataIndex])}}},scales:{x:{ticks:{autoSkip:false,maxRotation:45,minRotation:0}},y:{beginAtZero:true,grace:'15%',ticks:{callback:format}}}}});
 								}
 								bar('agentRunTime','agentRunTimeChart',agents.filter(r=>r.duration_sample_size>0),r=>Number(r.median_duration_ms||0),formatDuration,r=>r.duration_sample_size);
@@ -801,7 +807,7 @@ templ analyticsContent(currentProject *models.Project) {
 								charts.agentComparison=createAnalyticsChart(canvas.getContext('2d'),{
 									type:'bar',data:{labels:ranked.map(r=>r.agent_name),datasets:[{data:values,backgroundColor:'rgba(20, 184, 166, 0.5)',borderColor:'rgb(20, 184, 166)',borderWidth:1}]},
 									plugins:[{id:'agentOutcomeValues',afterDatasetsDraw:function(chart){
-										const ctx=chart.ctx;ctx.save();ctx.fillStyle=Chart.defaults?.color||'#9ca3af';ctx.font='12px sans-serif';ctx.textAlign='left';ctx.textBaseline='middle';
+										const ctx=chart.ctx;ctx.save();ctx.fillStyle=analyticsValueColor();ctx.font='12px sans-serif';ctx.textAlign='left';ctx.textBaseline='middle';
 										labels.forEach((label,i)=>ctx.fillText(label,chart.chartArea.right+8,chart.scales.y.getPixelForValue(i)));ctx.restore();
 									}}],
 									options:{indexAxis:'y',layout:{padding:{right:85}},plugins:{legend:{display:false},tooltip:{callbacks:{title:items=>items.length?ranked[items[0].dataIndex].agent_name:'',label:function(item){const m=ranked[item.dataIndex][metric]||{};return Number(m.denominator||0)?labels[item.dataIndex]+' · '+Number(m.numerator||0)+' / '+Number(m.denominator)+' tasks (n='+Number(m.denominator)+')':'Unavailable: no eligible tasks';}}}},scales:{x:{beginAtZero:true,max:100,ticks:{callback:value=>value+'%'}},y:{ticks:{autoSkip:false,callback:function(value){const label=this.getLabelForValue(value);return label.length>26?label.slice(0,23)+'…':label;}}}}}
@@ -820,7 +826,7 @@ templ analyticsContent(currentProject *models.Project) {
 								charts.skillOutcome=createAnalyticsChart(canvas.getContext('2d'),{
 									type:'bar',data:{labels:ranked.map(r=>scopedSkillLabel(r.skill_handle,r.skill_scope)),datasets:[{data:values,backgroundColor:'rgba(20, 184, 166, 0.5)',borderColor:'rgb(20, 184, 166)',borderWidth:1}]},
 									plugins:[{id:'skillOutcomeValues',afterDatasetsDraw:function(chart){
-										const ctx=chart.ctx;ctx.save();ctx.fillStyle=Chart.defaults?.color||'#9ca3af';ctx.font='12px sans-serif';ctx.textAlign='left';ctx.textBaseline='middle';
+										const ctx=chart.ctx;ctx.save();ctx.fillStyle=analyticsValueColor();ctx.font='12px sans-serif';ctx.textAlign='left';ctx.textBaseline='middle';
 										labels.forEach((label,i)=>ctx.fillText(label,chart.chartArea.right+8,chart.scales.y.getPixelForValue(i)));ctx.restore();
 									}}],
 									options:{indexAxis:'y',layout:{padding:{right:120}},plugins:{legend:{display:false},tooltip:{callbacks:{label:item=>labels[item.dataIndex]+' tasks'}}},scales:{x:{beginAtZero:true,max:100,ticks:{callback:value=>value+'%'}},y:{ticks:{autoSkip:false,callback:function(value){const label=this.getLabelForValue(value);return label.length>26?label.slice(0,23)+'…':label;}}}}}
@@ -860,7 +866,11 @@ templ analyticsContent(currentProject *models.Project) {
 									node.parentElement.querySelector('[data-task-summary-sample]').textContent=i&&summary?(m.numerator+' / '+m.denominator+(i===1?' evaluated':' eligible')):'';
 								});
 							}
-							function createAnalyticsChart(context, config) {
+							function analyticsValueColor() {
+                                 const style = getComputedStyle(document.documentElement);
+                                 return style.getPropertyValue('--ov-text-muted').trim() || Chart.defaults?.color || style.color;
+                            }
+                            function createAnalyticsChart(context, config) {
 							 const options=config.options||(config.options={});
 							 options.responsive=true;options.maintainAspectRatio=false;
 							 if(config.type==='line'){
@@ -904,7 +914,7 @@ templ analyticsContent(currentProject *models.Project) {
 							function compactChartNumber(value){return new Intl.NumberFormat('en',{notation:'compact',maximumFractionDigits:1}).format(value);}
 							function analyticsBarValues(id,label,missing=()=>false){
 								return {id,afterDatasetsDraw:function(chart){
-									const ctx=chart.ctx;ctx.save();ctx.fillStyle='#9ca3af';ctx.font='12px sans-serif';ctx.textAlign='center';ctx.textBaseline='bottom';
+									const ctx=chart.ctx;ctx.save();ctx.fillStyle=analyticsValueColor();ctx.font='12px sans-serif';ctx.textAlign='center';ctx.textBaseline='bottom';
 									chart.getDatasetMeta(0).data.forEach((bar,i)=>drawModelBarValue(chart,bar,i,label(i),missing(i)));ctx.restore();
 								}};
 							}

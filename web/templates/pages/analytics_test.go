@@ -1553,3 +1553,19 @@ func TestBrowserFunctional_AnalyticsContent_GraphPreviewInChrome(t *testing.T) {
  </script><section>` + rendered.String() + `</section>`
 	runReconnectChromeFixture(t, fixture)
 }
+
+func TestAnalyticsValueLabelsFollowSelectedTheme(t *testing.T) {
+	var rendered bytes.Buffer
+	if err := AnalyticsContent(&models.Project{ID: "p", Name: "P"}).Render(context.Background(), &rendered); err != nil {
+		t.Fatal(err)
+	}
+	html := rendered.String()
+	if strings.Contains(html, "ctx.fillStyle='#9ca3af'") || strings.Contains(html, "ctx.fillStyle=Chart.defaults") {
+		t.Fatal("value labels bypass the current theme")
+	}
+	for _, fragment := range []string{"ctx.fillStyle=analyticsValueColor()", "getPropertyValue('--ov-text-muted')", "attributeFilter:['data-color-theme']", "chart.update('none')", "themeObserver.disconnect()"} {
+		if !strings.Contains(html, fragment) {
+			t.Errorf("missing theme-aware chart behavior: %s", fragment)
+		}
+	}
+}
