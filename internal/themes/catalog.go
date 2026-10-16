@@ -51,6 +51,7 @@ func VSCodeCatalog() []Theme {
 		}
 		catalog[i].CSS["--ov-subtle-border"] = subtleBorderColor(catalog[i].Semantic["surface"], catalog[i].Semantic["text"])
 		catalog[i].CSS["--ov-accent-tint"] = accentTintColor(catalog[i].Semantic["focus"])
+		catalog[i].CSS["--ov-daisy-primary"], catalog[i].CSS["--ov-daisy-primary-content"] = daisyPrimaryColors(catalog[i].Semantic["link"], catalog[i].Semantic["contentBg"])
 	}
 	return catalog
 }
@@ -62,6 +63,74 @@ func accentTintColor(focus string) string {
 		return focus
 	}
 	return fmt.Sprintf("#%02X%02X%02X%02X", uint8(rgb[0]), uint8(rgb[1]), uint8(rgb[2]), uint8(math.Round(alpha*0.24*255)))
+}
+
+// daisyPrimaryColors returns DaisyUI oklch triplets for the theme accent and the
+// readable black or white text drawn on it. The link color is used because it is
+// already guaranteed readable as text on the page, unlike some button fills.
+func daisyPrimaryColors(link, page string) (string, string) {
+	rgb, alpha, ok := parseThemeHexColor(link)
+	if !ok {
+		return "", ""
+	}
+	if pageRGB, _, pageOK := parseThemeHexColor(page); pageOK && alpha < 1 {
+		for i := range rgb {
+			rgb[i] = rgb[i]*alpha + pageRGB[i]*(1-alpha)
+		}
+	}
+	content := [3]float64{255, 255, 255}
+	if contrastRatio(rgb, content) < contrastRatio(rgb, [3]float64{}) {
+		content = [3]float64{}
+	}
+	return oklchTriplet(rgb), oklchTriplet(content)
+}
+
+func oklchTriplet(rgb [3]float64) string {
+	var lin [3]float64
+	for i, channel := range rgb {
+		c := channel / 255
+		if c <= 0.04045 {
+			lin[i] = c / 12.92
+		} else {
+			lin[i] = math.Pow((c+0.055)/1.055, 2.4)
+		}
+	}
+	l := math.Cbrt(0.4122214708*lin[0] + 0.5363325363*lin[1] + 0.0514459929*lin[2])
+	m := math.Cbrt(0.2119034982*lin[0] + 0.6806995451*lin[1] + 0.1073969566*lin[2])
+	s := math.Cbrt(0.0883024619*lin[0] + 0.2817188376*lin[1] + 0.6299787005*lin[2])
+	okL := 0.2104542553*l + 0.7936177850*m - 0.0040720468*s
+	okA := 1.9779984951*l - 2.4285922050*m + 0.4505937099*s
+	okB := 0.0259040371*l + 0.7827717662*m - 0.8086757660*s
+	chroma := math.Hypot(okA, okB)
+	hue := math.Atan2(okB, okA) * 180 / math.Pi
+	if hue < 0 {
+		hue += 360
+	}
+	if chroma < 0.0001 {
+		chroma, hue = 0, 0
+	}
+	return fmt.Sprintf("%.4f %.4f %.2f", okL, chroma, hue)
+}
+
+func contrastRatio(a, b [3]float64) float64 {
+	la, lb := relativeLuminance(a), relativeLuminance(b)
+	if la < lb {
+		la, lb = lb, la
+	}
+	return (la + 0.05) / (lb + 0.05)
+}
+
+func relativeLuminance(rgb [3]float64) float64 {
+	var lin [3]float64
+	for i, channel := range rgb {
+		c := channel / 255
+		if c <= 0.03928 {
+			lin[i] = c / 12.92
+		} else {
+			lin[i] = math.Pow((c+0.055)/1.055, 2.4)
+		}
+	}
+	return 0.2126*lin[0] + 0.7152*lin[1] + 0.0722*lin[2]
 }
 
 func subtleBorderColor(surface, text string) string {

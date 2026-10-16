@@ -340,3 +340,20 @@ func camelToKebabForTest(s string) string {
 	}
 	return string(out)
 }
+
+func TestVSCodeCatalogProvidesReadableDaisyPrimary(t *testing.T) {
+	for _, theme := range VSCodeCatalog() {
+		primary := theme.CSS["--ov-daisy-primary"]
+		content := theme.CSS["--ov-daisy-primary-content"]
+		if len(strings.Fields(primary)) != 3 || len(strings.Fields(content)) != 3 {
+			t.Fatalf("%s daisy primary = %q / %q, want oklch triplets", theme.ID, primary, content)
+		}
+	}
+	got, content := daisyPrimaryColors("#FFFFFF", "#000000")
+	if got != "1.0000 0.0000 0.00" || content != "0.0000 0.0000 0.00" {
+		t.Fatalf("white primary = %q with content %q, want white with black text", got, content)
+	}
+	if _, content := daisyPrimaryColors("#0000FF", "#FFFFFF"); content != "1.0000 0.0000 0.00" {
+		t.Fatalf("blue primary content = %q, want white", content)
+	}
+}
