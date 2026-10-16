@@ -433,36 +433,53 @@ func BenchmarkNewMCPManagerWarmPersistent(b *testing.B) {
 	b.Run("parallel4", func(b *testing.B) { run(b, NewMCPManager) })
 }
 
-func TestNewMCPManager_WarmPersistentPerformance(t *testing.T) {
-	if testing.Short() {
-		t.Skip("timing test")
-	}
+// Timing comparisons belong in BenchmarkNewMCPManagerWarmPersistent: shared CI
+// runners cannot reliably enforce a percentage threshold on microsecond calls.
+func TestNewMCPManager_WarmPersistentRepeatedAcquisition(t *testing.T) {
 	resetSharedStateForTests()
 	t.Cleanup(resetSharedStateForTests)
-	configs := []models.MCPServerConfig{helperConfig("warm", 0)}
+	var starts atomic.Int32
+	withStartServerFn(t, func(ctx context.Context, cfg models.MCPServerConfig, workDir string) (*MCPServer, error) {
+		starts.Add(1)
+		return startServer(ctx, cfg, workDir)
+	})
+	cfg := helperConfig("warm", 0)
+	configs := []models.MCPServerConfig{cfg}
 	if err := EnsurePersistentServers(context.Background(), configs, t.TempDir()); err != nil {
 		t.Fatal(err)
 	}
-	measure := func(constructor managerConstructor) time.Duration {
-		start := time.Now()
-		for range 10000 {
-			m, err := constructor(context.Background(), configs, ".")
-			if err != nil {
-				t.Fatal(err)
-			}
-			m.Close()
-		}
-		return time.Since(start) / 10000
-	}
-	var before, after []time.Duration
+	var warmServer *MCPServer
 	for range 20 {
-		before = append(before, measure(sequentialManager))
-		after = append(after, measure(NewMCPManager))
+		m, err := NewMCPManager(context.Background(), configs, ".")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(m.servers) != 1 {
+			m.Close()
+			t.Fatal("expected one warm server")
+		}
+		if warmServer == nil {
+			warmServer = m.servers[0].srv
+		}
+		if m.servers[0].srv != warmServer {
+			m.Close()
+			t.Fatal("warm acquisition replaced the persistent server")
+		}
+		if refs, running, _ := sharedEntry(cfg); refs != 1 || !running {
+			m.Close()
+			t.Fatalf("acquired server refs=%d running=%v, want 1 running", refs, running)
+		}
+		defs := m.ToolDefinitions()
+		m.Close()
+		if len(defs) != 1 || defs[0].Name != "warm__tool_warm" {
+			t.Fatalf("unexpected tool definitions: %#v", defs)
+		}
+		if refs, running, _ := sharedEntry(cfg); refs != 0 || !running {
+			t.Fatalf("released server refs=%d running=%v, want 0 running", refs, running)
+		}
 	}
-	b, a := percentile(before, 0.5), percentile(after, 0.5)
-	t.Logf("warm persistent server: before median=%v p95=%v; after median=%v p95=%v", b, percentile(before, 0.95), a, percentile(after, 0.95))
-	if float64(a) > float64(b)*1.10 {
-		t.Fatalf("warm median regressed >10%%: %v vs %v", a, b)
+	if got := starts.Load(); got != 1 {
+		t.Fatalf("server starts = %d, want 1", got)
 	}
 }
 
