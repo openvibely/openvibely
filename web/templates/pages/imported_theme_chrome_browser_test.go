@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/web/static"
 	"github.com/openvibely/openvibely/web/templates/components"
@@ -36,6 +37,11 @@ func TestBrowserFunctional_ImportedThemeStylesTitlebarMenusAndSchedulePickers(t 
 	fixture := `<div id="fixture-search">` + search.String() + `</div><div id="schedule-content">` + calendar.String() + `<div data-calendar-day="2026-10-16" class="schedule-day-selected">Fri</div><div data-calendar-hour="9" class="bg-base-200 schedule-time-label schedule-day-selected">9 AM</div></div>
 <ul id="fixture-menu" class="ov-menu ov-menu-actions dropdown-content menu"><li><button type="button">Action</button></li></ul>
 <div id="fixture-picker">` + picker.String() + `</div><span id="fixture-deletions" style="color: var(--ov-diff-del-fg)">-4</span><span id="fixture-primary-text" class="text-primary">P</span><span id="fixture-running" class="task-state-running">Running</span><span id="fixture-primary-badge" class="badge badge-primary">New</span><div id="fixture-column" class="kanban-column bg-base-300"></div><div id="fixture-hover-card" data-search-card class="card bg-base-100 border border-base-300 hover:border-primary/40 cursor-pointer" style="position:fixed;left:300px;top:150px;width:120px;height:60px;z-index:99999">Card</div><input id="fixture-toggle-on" type="checkbox" class="toggle toggle-primary toggle-sm" checked/><input id="fixture-toggle-off" type="checkbox" class="toggle toggle-secondary toggle-sm"/><div id="probe"></div>`
+	var question bytes.Buffer
+	if err := ChatInputRequestCard(&events.ChatInputRequestEvent{ID: "theme-question", Questions: []events.ChatInputRequestQuestion{{ID: "q", Question: "Choose", Options: []events.ChatInputRequestOption{{Label: "First", Description: "Description"}}}}}).Render(context.Background(), &question); err != nil {
+		t.Fatal(err)
+	}
+	fixture += question.String()
 	html := base.String()
 	end := strings.LastIndex(html, "</body>")
 	page := html[:end] + fixture + html[end:]
@@ -127,6 +133,15 @@ func TestBrowserFunctional_ImportedThemeStylesTitlebarMenusAndSchedulePickers(t 
 
 		for _, themeID := range []string{"tokyo-night", "github-light", "vscode-kimbie-dark"} {
 			browser.evaluate(`window.openVibelyThemes.apply('` + themeID + `');'ok'`)
+			browser.evaluate(`document.querySelector('.chat-input-recommended-shortcut').style.cssText = 'position:fixed;left:500px;top:150px;z-index:99999';'ok'`)
+			browser.waitFor(themeID+" question text", `window.matches('[data-chat-input-option]', 'color', 'var(--ov-text)')`, "ok")
+			browser.evaluate(`document.querySelector('[data-chat-input-option]').classList.add('chat-input-option-selected');'ok'`)
+			browser.waitFor(themeID+" selected question border", `window.matches('[data-chat-input-option]', 'borderTopColor', 'var(--ov-focus)')`, "ok")
+			for _, x := range []int{490, 550} {
+				browser.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseMoved", "x": x, "y": 165}, nil)
+				browser.waitFor(themeID+" recommended fill", `window.matches('.chat-input-recommended-shortcut', 'backgroundColor', 'var(--ov-button-bg)')`, "ok")
+				browser.waitFor(themeID+" recommended text", `window.matches('.chat-input-recommended-shortcut', 'color', 'var(--ov-button-fg)')`, "ok")
+			}
 			browser.waitFor(themeID+" thin selected tab", `getComputedStyle(document.querySelector('.desktop-project-tab [aria-selected="true"]'), '::before').borderTopWidth`, "1px")
 			browser.waitFor(themeID+" thin tab baseline", `String(window.computed('#desktop-project-titlebar', 'boxShadow').includes('0px -1px'))`, "true")
 			for _, cardKind := range []string{"search", "task"} {

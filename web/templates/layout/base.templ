@@ -2694,7 +2694,13 @@ box-shadow: 0 1.25rem 3.5rem rgba(0, 0, 0, 0.45) !important;
 --pf: var(--ov-daisy-primary);
 --pc: var(--ov-daisy-primary-content);
 }
-[data-ov-theme-layer="custom"] .chat-input-recommended-shortcut, [data-ov-theme-layer="custom"] .chat-input-recommended-shortcut:hover:where(:not(:disabled)), [data-ov-theme-layer="custom"] .chat-input-recommended-shortcut:active:where(:not(:disabled)) { color: oklch(var(--pc)) !important; }
+[data-ov-theme-layer="custom"] .chat-input-option-btn { color: var(--ov-text); }
+[data-ov-theme-layer="custom"] .chat-input-option-btn:focus-visible { outline-color: var(--ov-focus); }
+[data-ov-theme-layer="custom"] .chat-input-option-btn.chat-input-option-selected { border-color: var(--ov-focus) !important; box-shadow: inset 0 0 0 1px var(--ov-focus); }
+[data-ov-theme-layer="custom"] .chat-input-recommended-badge { background: var(--ov-accent-tint); color: var(--ov-link); box-shadow: inset 0 0 0 1px var(--ov-link); }
+[data-ov-theme-layer="custom"] .chat-input-recommended-shortcut,
+[data-ov-theme-layer="custom"] .chat-input-recommended-shortcut:hover,
+[data-ov-theme-layer="custom"] .chat-input-recommended-shortcut:active { background: var(--ov-button-bg) !important; border-color: var(--ov-button-bg) !important; color: var(--ov-button-fg) !important; }
 html[data-ov-theme-layer="custom"] .ov-menu { --ov-menu-active: var(--ov-hover-bg); --ov-menu-scroll-thumb: var(--ov-text-muted); background: var(--ov-menu-surface) !important; border-color: var(--ov-subtle-border) !important; color: var(--ov-text); }
 [data-ov-theme-layer="custom"] .ov-menu-check { color: var(--ov-text); }
 [data-ov-theme-layer="custom"] .ov-tooltip { border-color: var(--ov-subtle-border); }
