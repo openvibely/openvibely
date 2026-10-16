@@ -73,7 +73,9 @@ func runIncrementalChatBrowser(t *testing.T, script string) json.RawMessage {
 	sharedJS = strings.Replace(sharedJS, "function renderPreparedSegments() {", "preparationPhases = preparationPhases.map(window.measureStreamCPU);\nfunction renderPreparedSegments() {", 1)
 	sharedJS = strings.Replace(sharedJS, "function fillLargeToolOutputChunks(done, fail) {", "renderSegment = window.measureStreamCPU(renderSegment); finishRender = window.measureStreamCPU(finishRender);\nfunction fillLargeToolOutputChunks(done, fail) {", 1)
 	styles := strings.Join(regexp.MustCompile(`(?s)<style>.*?</style>`).FindAllString(source, -1), "")
-	fixture := `<!doctype html><html><head>` + styles + `<script src="` + static.URL("vendor/marked.min.js") + `" data-ov-asset="marked"></script></head><body>
+	// Match the page's parser scripts: large Markdown workers import the math
+	// parser through its data attribute, even when the response contains no math.
+	fixture := `<!doctype html><html><head>` + styles + `<script src="` + static.URL("vendor/marked.min.js") + `" data-ov-asset="marked"></script><script src="` + static.URL("file-math-parser.js") + `" data-ov-math-parser></script></head><body>
  <div id="messages" style="height:300px;overflow:auto"><div id="pair" data-execution-pair="true" data-exec-id="fixture" data-exec-status="running"><div id="stream" class="chat-bubble-assistant-msg"></div></div></div>
  <script>` + probe + baseJS + `</script>` + sharedJS + `<script>
  ` + coalescer + `
