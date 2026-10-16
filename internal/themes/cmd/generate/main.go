@@ -364,7 +364,13 @@ func normalizeSemantic(kind string, c map[string]string) map[string]string {
 	m["inputBorder"] = fallback(pick("input.border", "dropdown.border"), m["border"])
 	m["buttonBg"] = m["primary"]
 	m["buttonFg"] = m["primaryForeground"]
-	m["selectionBg"] = fallback(pick("editor.selectionBackground", "list.activeSelectionBackground", "selection.background"), alpha(m["primary"], .32))
+	m["selectionBg"] = alpha(m["primary"], .32)
+	for _, k := range []string{"list.activeSelectionBackground", "editor.selectionBackground", "selection.background"} {
+		if v := pick(k); v != "" && contrastRatio(m["text"], composite(v, m["contentBg"])) >= 3 {
+			m["selectionBg"] = v
+			break
+		}
+	}
 	m["hoverBg"] = fallback(pick("list.hoverBackground", "toolbar.hoverBackground", "editor.hoverHighlightBackground"), alpha(m["primary"], .16))
 	m["buttonHoverBg"] = fallback(pick("button.hoverBackground"), m["focus"])
 	m["buttonHoverFg"] = fallback(pick("button.foreground", "activityBarBadge.foreground"), bestText(m["buttonHoverBg"]))
@@ -406,33 +412,9 @@ func normalizeSyntax(kind string, colors map[string]string, tokens []tokenColor)
 			m[k] = v
 		}
 	}
-	for _, tc := range tokens {
-		fg := cleanColor(tc.Settings.Foreground)
-		if fg == "" || transparent(fg) {
-			continue
-		}
-		for _, scope := range scopes(tc.Scope) {
-			s := strings.ToLower(scope)
-			switch {
-			case strings.Contains(s, "comment"):
-				m["comment"] = fg
-			case strings.Contains(s, "string"):
-				m["string"] = fg
-			case strings.Contains(s, "constant.numeric") || strings.Contains(s, "number"):
-				m["number"] = fg
-			case strings.Contains(s, "keyword") || strings.Contains(s, "storage"):
-				m["keyword"] = fg
-			case strings.Contains(s, "entity.name.function") || strings.Contains(s, "support.function"):
-				m["function"] = fg
-			case strings.Contains(s, "entity.name.type") || strings.Contains(s, "support.type") || strings.Contains(s, "class"):
-				m["type"] = fg
-			case strings.Contains(s, "variable") || strings.Contains(s, "parameter"):
-				m["variable"] = fg
-			case strings.Contains(s, "invalid"):
-				m["error"] = fg
-			case strings.Contains(s, "markup.heading"):
-				m["title"] = fg
-			}
+	for role, target := range syntaxRoleScopes {
+		if fg := resolveTokenColor(tokens, target); fg != "" {
+			m[role] = fg
 		}
 	}
 	for k, v := range fb {
@@ -442,6 +424,40 @@ func normalizeSyntax(kind string, colors map[string]string, tokens []tokenColor)
 	}
 	return m
 }
+
+// Resolved like TextMate: longest matching scope prefix wins, later rules break ties.
+var syntaxRoleScopes = map[string]string{
+	"comment":  "comment.line.double-slash",
+	"string":   "string.quoted.double",
+	"number":   "constant.numeric.decimal",
+	"keyword":  "keyword.control",
+	"function": "entity.name.function",
+	"type":     "entity.name.type.class",
+	"variable": "variable.other.readwrite",
+	"error":    "invalid.illegal",
+	"title":    "markup.heading",
+}
+
+func resolveTokenColor(tokens []tokenColor, target string) string {
+	best, bestLen := "", 0
+	for _, tc := range tokens {
+		fg := cleanColor(tc.Settings.Foreground)
+		if fg == "" || transparent(fg) {
+			continue
+		}
+		for _, scope := range scopes(tc.Scope) {
+			s := strings.ToLower(strings.TrimSpace(scope))
+			if s == "" || strings.ContainsAny(s, " >") {
+				continue
+			}
+			if (s == target || strings.HasPrefix(target, s+".")) && len(s) >= bestLen {
+				best, bestLen = fg, len(s)
+			}
+		}
+	}
+	return best
+}
+
 func scopes(v any) []string {
 	switch x := v.(type) {
 	case string:
@@ -600,6 +616,14 @@ func ensureContrast(preferred, background, fallbackColor string, minimum float64
 		}
 	}
 	return fallbackColor
+}
+
+func composite(top, base string) string {
+	tr, tg, tb, ta := rgba(top)
+	br, bg, bb, _ := rgba(base)
+	a := float64(ta) / 255
+	blend := func(t, b int) int { return int(math.Round(float64(t)*a + float64(b)*(1-a))) }
+	return fmt.Sprintf("#%02X%02X%02X", blend(tr, br), blend(tg, bg), blend(tb, bb))
 }
 
 func opaqueColor(color string) string {
