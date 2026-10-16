@@ -2541,7 +2541,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 [data-color-theme^="vscode-"] .sidebar-aside{background-color:var(--ov-sidebar-bg);border-color:var(--ov-sidebar-bg)}
 [data-color-theme^="vscode-"] .bg-base-100,
 [data-color-theme^="vscode-"] .card,
-[data-color-theme^="vscode-"] .dropdown-content{background-color:var(--ov-surface)!important;border-color:var(--ov-subtle-border)!important}
+[data-color-theme^="vscode-"] .dropdown-content:not(.ov-menu){background-color:var(--ov-surface)!important;border-color:var(--ov-subtle-border)!important}
 [data-color-theme^="vscode-"] .card.border-base-300,
 [data-color-theme^="vscode-"] [data-search-card].border-base-300,
 [data-color-theme^="vscode-"] .hover\:border-primary:hover,
@@ -2678,7 +2678,43 @@ box-shadow: 0 1.25rem 3.5rem rgba(0, 0, 0, 0.45) !important;
 --ov-schedule-drop-invalid-bg: var(--ov-diff-delete-bg);
 --ov-schedule-drop-invalid-outline: var(--ov-error);
 --ov-schedule-timeline-dash: repeating-linear-gradient(to right, var(--ov-link) 0px, var(--ov-link) 4px, transparent 4px, transparent 6px);
+--ov-menu-surface: var(--ov-surface-raised);
+--ov-menu-hover: var(--ov-hover-bg);
+--ov-border-subtle: var(--ov-subtle-border);
+--ov-border-hover: var(--ov-border-strong);
+--ov-hover-subtle: var(--ov-hover-bg);
+--ov-hover: var(--ov-hover-bg);
+--ov-text-primary: var(--ov-text);
+--ov-tooltip-text: var(--ov-text);
 }
+html[data-color-theme^="vscode-"] .ov-menu { --ov-menu-active: var(--ov-hover-bg); --ov-menu-scroll-thumb: var(--ov-text-muted); background: var(--ov-menu-surface) !important; border-color: var(--ov-subtle-border) !important; color: var(--ov-text); }
+[data-color-theme^="vscode-"] .ov-menu-check { color: var(--ov-text); }
+[data-color-theme^="vscode-"] .ov-tooltip { border-color: var(--ov-subtle-border); }
+[data-color-theme^="vscode-"] .ov-tooltip kbd { border-color: var(--ov-subtle-border); background: var(--ov-hover-bg); }
+[data-color-theme^="vscode-"] .ov-mp-star { color: var(--ov-text-muted); }
+[data-color-theme^="vscode-"] .ov-mp-star[aria-pressed="true"] { color: var(--ov-focus); }
+html[data-color-theme^="vscode-"] .ov-mp-effort input[type="range"] { --ov-mp-accent: var(--ov-button-bg); --ov-mp-track: var(--ov-border); accent-color: var(--ov-button-bg); }
+html[data-color-theme^="vscode-"] #desktop-project-titlebar { background-color: var(--ov-sidebar-bg) !important; color: var(--ov-text); --project-tab-selected: var(--ov-content-bg); --project-tab-contour: var(--ov-subtle-border); }
+[data-color-theme^="vscode-"] .desktop-project-tab [role="tab"] { color: var(--ov-text-muted) !important; }
+[data-color-theme^="vscode-"] .desktop-project-tab [role="tab"][aria-selected="true"] { color: var(--ov-text) !important; }
+[data-color-theme^="vscode-"] .desktop-project-tab:not([data-selected="true"])::after { background-color: var(--ov-border) !important; }
+[data-color-theme^="vscode-"] .desktop-project-tab:not([data-selected="true"]):hover [role="tab"],
+[data-color-theme^="vscode-"] .desktop-project-tab [data-close-project]:enabled:hover,
+[data-color-theme^="vscode-"] #desktop-project-titlebar #project-selector-trigger:is(:hover, [data-pointer-over], [aria-expanded="true"]),
+[data-color-theme^="vscode-"] .desktop-window-controls button:not([data-window-action="Close"]):is(:hover, :active, [data-native-hover], [data-native-pressed]) { background-color: var(--ov-hover-bg) !important; }
+[data-color-theme^="vscode-"] #desktop-project-titlebar button:focus-visible:not([data-project-tab]) { outline-color: var(--ov-focus); }
+html[data-color-theme^="vscode-"] #schedule-content .schedule-day-selected { background: var(--ov-accent-tint) !important; }
+html[data-color-theme^="vscode-"] #schedule-content [data-calendar-day].schedule-day-selected { box-shadow: inset 0 2px var(--ov-focus); }
+html[data-color-theme^="vscode-"] #schedule-content [data-calendar-hour].schedule-day-selected { box-shadow: inset 2px 0 var(--ov-focus); }
+[data-color-theme^="vscode-"] .schedule-selection-box { border-color: var(--ov-focus); background: var(--ov-accent-tint); }
+html[data-color-theme^="vscode-"] #schedule-content [data-schedule-card][data-calendar-muted="true"] { background: var(--ov-surface-raised) !important; border-color: var(--ov-subtle-border) !important; }
+[data-color-theme^="vscode-"] #schedule-selection-toolbar,
+[data-color-theme^="vscode-"] #schedule-selection-toolbar button { border-color: var(--ov-subtle-border); }
+[data-color-theme^="vscode-"] .schedule-datetime-popup { background: var(--ov-menu-surface); border-color: var(--ov-subtle-border); color: var(--ov-text); }
+[data-color-theme^="vscode-"] .schedule-datetime-popup button:hover { background: var(--ov-hover-bg); }
+[data-color-theme^="vscode-"] .schedule-datetime-popup [aria-pressed=true],
+[data-color-theme^="vscode-"] .schedule-datetime-popup [data-time-selected=true] { background: var(--ov-button-bg) !important; color: var(--ov-button-fg) !important; }
+[data-color-theme^="vscode-"] .schedule-datetime-popup :focus-visible { outline-color: var(--ov-focus); }
 [data-color-theme^="vscode-"] .drag-over { border-color: var(--ov-focus) !important; background-color: var(--ov-selection-bg) !important; }
 [data-color-theme^="vscode-"] .task-selected {
 outline-color: var(--ov-focus);
