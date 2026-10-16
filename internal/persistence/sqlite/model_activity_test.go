@@ -154,3 +154,37 @@ func TestModelEffortTrendsUseActivityDates(t *testing.T) {
 	}
 	check(narrowed.ModelEffortTrend[0], "2026-09-02", 500, 2, 1, 10800000)
 }
+
+func TestModelAnalyticsIncludesUsageWithoutConfigurationOrExecution(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	_, err := db.Exec(`INSERT INTO projects(id,name) VALUES ('p','Project');
+ INSERT INTO tasks(id,project_id,title,status) VALUES ('t','p','Usage only','completed');
+ INSERT INTO llm_usage_events(id,provider,project_id,task_id,agent_config_id,model,operation,total_tokens,cost_usd,occurred_at) VALUES
+ ('null-config','openai','p','t',NULL,'model','task',100,0.1,'2026-09-01 12:00:00'),
+ ('other-usage','openai','p','t',NULL,'model','task_followup',200,0.2,'2026-09-01 13:00:00');`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dashboard, err := NewExecutionRepo(db).GetAnalyticsDashboard(context.Background(), persistence.AnalyticsDashboardFilter{ProjectID: "p", View: "models", GroupBy: "day"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(dashboard.Models) != 1 || len(dashboard.ModelActivity) != 1 || len(dashboard.ModelEffortTrend) != 1 {
+		t.Fatalf("missing unknown usage: %+v", dashboard)
+	}
+	for _, row := range []models.ModelPerformance{dashboard.Models[0], dashboard.ModelActivity[0]} {
+		if row.ModelConfigID != "" || row.ConfigName != "Unknown configuration" || row.TotalTokens != 300 || row.RunCount != 0 || row.DurationSampleSize != 0 || row.TasksUsed != 1 {
+			t.Fatalf("incorrect unknown attribution: %+v", row)
+		}
+		if row.KnownCostUSD == nil || *row.KnownCostUSD < 0.299 || *row.KnownCostUSD > 0.301 {
+			t.Fatalf("missing cost: %+v", row)
+		}
+	}
+	combined := dashboard.ModelEffortTrend[0]
+	if combined.Tokens != 300 || combined.Tasks != 1 || combined.TokenSamples != 1 || combined.DurationSamples != 0 || combined.TotalDurationMs != 0 || dashboard.TaskSummary.TasksWorkedOn != 1 {
+		t.Fatalf("combined excludes or duplicates usage: %+v", dashboard)
+	}
+	if combined != dashboard.ModelActivity[0].EffortTrend[0] {
+		t.Fatal("individual and combined usage differ")
+	}
+}
