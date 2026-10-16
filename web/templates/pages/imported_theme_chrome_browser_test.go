@@ -247,6 +247,16 @@ func TestBrowserFunctional_ImportedThemeStylesTitlebarMenusAndSchedulePickers(t 
 		}
 		browser.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseMoved", "x": 290, "y": 140}, nil)
 		browser.evaluate(`window.openVibelyThemes.apply('openvibely-dark');'ok'`)
+		browser.evaluate(`var sample=document.createElement('div'); sample.innerHTML='<pre><code class="hljs"><span id="native-keyword" class="hljs-keyword">const</span><span id="native-string" class="hljs-string">text</span></code></pre>'; document.body.appendChild(sample); 'ok'`)
+		for _, mode := range []string{"dark", "light"} {
+			browser.evaluate(`window.openVibelyThemes.apply('openvibely-` + mode + `'); 'ok'`)
+			browser.waitFor(mode+" native syntax keyword matches main GitHub Dark stylesheet", `window.computed('#native-keyword', 'color')`, "rgb(255, 123, 114)")
+			browser.waitFor(mode+" native syntax string matches main GitHub Dark stylesheet", `window.computed('#native-string', 'color')`, "rgb(165, 214, 255)")
+			browser.waitFor(mode+" native palette leaves CSS variables to main stylesheet", `String(document.documentElement.style.getPropertyValue('--ov-diff-add-bg') === '' && document.documentElement.style.getPropertyValue('--ov-syntax-foreground') === '')`, "true")
+			browser.evaluate(`window.openVibelyThemes.apply('github-light'); window.openVibelyThemes.apply('openvibely-` + mode + `'); 'ok'`)
+			browser.waitFor(mode+" returning from custom restores syntax", `window.computed('#native-keyword', 'color')`, "rgb(255, 123, 114)")
+		}
+		browser.evaluate(`window.openVibelyThemes.apply('openvibely-dark'); 'ok'`)
 		browser.waitFor("native selected tab retains thick contour", `getComputedStyle(document.querySelector('.desktop-project-tab [aria-selected="true"]'), '::before').borderTopWidth`, "2px")
 		browser.waitFor("native theme restores native layer", `document.documentElement.getAttribute('data-ov-theme-layer')`, "native")
 		browser.waitFor("native theme keeps indigo running state", `window.near('#fixture-running', 'color', '#7480ff')`, "ok")

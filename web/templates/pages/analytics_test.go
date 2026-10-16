@@ -1563,7 +1563,7 @@ func TestAnalyticsValueLabelsFollowSelectedTheme(t *testing.T) {
 	if strings.Contains(html, "ctx.fillStyle='#9ca3af'") || strings.Contains(html, "ctx.fillStyle=Chart.defaults") {
 		t.Fatal("value labels bypass the current theme")
 	}
-	for _, fragment := range []string{"ctx.fillStyle=analyticsValueColor()", "getPropertyValue('--ov-text-muted')", "attributeFilter:['data-color-theme']", "chart.update('none')", "themeObserver.disconnect()"} {
+	for _, fragment := range []string{"ctx.fillStyle=analyticsValueColor()", "analyticsValueColor(Chart.defaults?.color||'#9ca3af')", "function analyticsValueColor(nativeColor = '#9ca3af')", "if (document.documentElement.getAttribute('data-ov-theme-layer') !== 'custom') return nativeColor;", "getPropertyValue('--ov-text-muted')", "attributeFilter:['data-color-theme']", "chart.update('none')", "themeObserver.disconnect()"} {
 		if !strings.Contains(html, fragment) {
 			t.Errorf("missing theme-aware chart behavior: %s", fragment)
 		}

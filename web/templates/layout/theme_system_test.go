@@ -36,10 +36,10 @@ func TestBaseIncludesBuiltInThemeSystem(t *testing.T) {
 		`window.openVibelyThemes.syncThemeControls`,
 		`[data-ov-theme-layer="custom"]{background-color:var(--ov-content-bg)}`,
 		`[data-ov-theme-layer="custom"] #main-content { background-color: var(--ov-content-bg) !important; color: var(--ov-text); }`,
-		`[data-color-theme] .hljs * { color: var(--ov-syntax-foreground); }`,
-		`[data-color-theme] .hljs-keyword`,
+		`[data-ov-theme-layer="custom"] .hljs * { color: var(--ov-syntax-foreground); }`,
+		`[data-ov-theme-layer="custom"] .hljs-keyword`,
 		`var(--ov-syntax-keyword)`,
-		`[data-color-theme] pre { background-color: var(--ov-syntax-background); }`,
+		`[data-ov-theme-layer="custom"] pre { background-color: var(--ov-syntax-background); }`,
 		`[data-ov-theme-layer="custom"] ::selection { background-color: var(--ov-selection-bg);`,
 		`border-color: var(--ov-input-border);`,
 		`outline-color: var(--ov-focus);`,
@@ -144,8 +144,8 @@ func TestBaseIncludesBuiltInThemeSystem(t *testing.T) {
 	if strings.Contains(html, `--ov-subtle-border:color-mix(`) {
 		t.Fatal("imported-theme subtle borders must use precomputed palette colors for older webviews")
 	}
-	if strings.Contains(html, "highlight-github-dark.min.css") {
-		t.Fatal("base layout must not load the fixed GitHub Dark Highlight.js theme")
+	if !strings.Contains(html, "highlight-github-dark.min.css") {
+		t.Fatal("base layout must preserve the native Highlight.js stylesheet")
 	}
 	if strings.Contains(html, `[data-ov-theme-layer="custom"] [data-automation-yaml-indent-rail]{background-color:var(--ov-yaml-indent-rail,var(--ov-subtle-border))`) {
 		t.Fatal("imported-theme YAML rails must not fall back to the surface-raised alias")
@@ -221,7 +221,7 @@ func TestImportedThemeSubtleBordersBlendWithCardSurface(t *testing.T) {
 		`[data-ov-theme-layer="custom"]{background-color:var(--ov-content-bg)}`,
 		`[data-ov-theme-layer="custom"] .card,`,
 		`[data-ov-theme-layer="custom"] .dropdown-content:not(.ov-menu){background-color:var(--ov-surface)!important;border-color:var(--ov-subtle-border)!important}`,
-		`[data-color-theme] .hljs * { color: var(--ov-syntax-foreground); }`,
+		`[data-ov-theme-layer="custom"] .hljs * { color: var(--ov-syntax-foreground); }`,
 	} {
 		if !strings.Contains(html, fragment) {
 			t.Fatalf("imported-theme styling missing %q", fragment)
@@ -230,8 +230,8 @@ func TestImportedThemeSubtleBordersBlendWithCardSurface(t *testing.T) {
 	if strings.Contains(html, `--ov-subtle-border:color-mix(`) {
 		t.Fatal("imported-theme subtle borders must use precomputed palette colors for older webviews")
 	}
-	if strings.Contains(html, "highlight-github-dark.min.css") {
-		t.Fatal("base layout must not load the fixed GitHub Dark Highlight.js theme")
+	if !strings.Contains(html, "highlight-github-dark.min.css") {
+		t.Fatal("base layout must preserve the native Highlight.js stylesheet")
 	}
 	if strings.Contains(html, `[data-ov-theme-layer="custom"]{--ov-subtle-border:var(--ov-surface-raised)`) {
 		t.Fatal("imported-theme subtle borders must not inherit the raised-surface color")
@@ -285,7 +285,7 @@ func TestBuiltInThemeRuntimeMigratesPersistsAndToggles(t *testing.T) {
 	    documentElement: {
 	      setAttribute(k, v) { attrs[k] = String(v); },
 	      getAttribute(k) { return attrs[k] || ''; },
-	      style: { setProperty(k, v) { if (!/^--ov-[a-z0-9-]+$/.test(k)) throw new Error('unsafe css var ' + k); styleVars[k] = String(v); } }
+	      style: { removeProperty(k) { delete styleVars[k]; }, setProperty(k, v) { if (!/^--ov-[a-z0-9-]+$/.test(k)) throw new Error('unsafe css var ' + k); styleVars[k] = String(v); } }
 	    },
 	    getElementById(id) { return id === 'ov-theme-catalog' ? { getAttribute() { return catalogJSON; } } : null; },
 	    querySelectorAll(selector) { return selector === '[data-theme-mode-toggle]' ? toggles : []; }
@@ -297,7 +297,11 @@ if (legacy.attrs['data-theme'] !== 'light') throw new Error('legacy light mode d
 if (legacy.attrs['data-color-theme'] !== 'openvibely-light') throw new Error('legacy light mode did not choose OpenVibely light theme');
 if (legacy.attrs['data-ov-theme-layer'] !== 'native') throw new Error('OpenVibely light should use the native theme layer');
 if (Object.prototype.hasOwnProperty.call(legacy.store, 'openvibely.colorTheme')) throw new Error('legacy migration should not create an exact theme preference');
-if (!legacy.styleVars['--ov-bg'] || !legacy.styleVars['--ov-syntax-keyword'] || !legacy.styleVars['--ov-automation-node-border'] || !legacy.styleVars['--ov-automation-edge'] || !legacy.styleVars['--ov-yaml-indent-rail']) throw new Error('theme css variables were not applied before paint');
+if (Object.keys(legacy.styleVars).length) throw new Error('native theme must not override main CSS variables');
+legacy.api.apply('github-light');
+if (!legacy.styleVars['--ov-bg']) throw new Error('custom palette not applied');
+legacy.api.apply('openvibely-light');
+if (Object.keys(legacy.styleVars).length) throw new Error('custom variables survived switch to native');
 let lateToggle = toggleEl();legacy.toggles.push(lateToggle);
 legacy.api.syncThemeControls();
 if (lateToggle.attrs['aria-pressed'] !== 'false') throw new Error('late light-mode toggle aria state was not synchronized');
