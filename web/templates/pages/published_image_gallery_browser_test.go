@@ -46,6 +46,9 @@ func TestBrowserFunctional_PublishedImagesShareTaskGallery(t *testing.T) {
 			return
 		}
 		child := templ.ComponentFunc(func(ctx context.Context, w io.Writer) error {
+			if err := components.ChatAutoScrollScript().Render(ctx, w); err != nil {
+				return err
+			}
 			if err := components.TaskFilesList(uploaded, project.ID, nil, files).Render(ctx, w); err != nil {
 				return err
 			}
@@ -57,6 +60,27 @@ func TestBrowserFunctional_PublishedImagesShareTaskGallery(t *testing.T) {
 	defer server.Close()
 	runComposerFocusCDP(t, chrome, server.URL+"/test", "published-images", func(b *composerFocusCDP) {
 		b.waitFor("plain published chat link enhanced", `String(!!document.querySelector('#published-message img')?.naturalWidth)`, "true")
+		b.evaluateAwait(`(async()=>{window.publishedSource='[dog.svg](/files/abc123?project_id=files)';await renderLiveChatContent(document.querySelector('#published-message'),publishedSource);return 'ready'})()`)
+		b.waitFor("streamed published image", `String(!!document.querySelector('#published-message img')?.naturalWidth)`, "true")
+		b.click("#published-message [data-image-gallery-item]")
+		b.waitFor("published gallery image", `String(!!document.querySelector('[data-gallery-image]')?.naturalWidth)`, "true")
+		if got := b.evaluateAwait(`(async()=>{
+          const root=document.querySelector('#published-message'),dialog=document.getElementById('image-gallery'),link=root.querySelector('a');
+          window.OVFileImage.key('+');const image=dialog.querySelector('[data-gallery-image]'),transform=image.style.transform;
+          for(const suffix of [' More',' More text.',' More text.\n\nAnother paragraph.']){
+            await renderLiveChatContent(root,publishedSource+suffix);await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
+            if(!dialog.open)throw Error('published preview closed during streaming');
+            if(root.querySelector('a')!==link||dialog.querySelector('[data-gallery-image]')!==image||image.style.transform!==transform)throw Error('published preview state replaced');
+          }
+          await renderLiveChatContent(root,publishedSource+' Finished.',false,true);
+          await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
+          if(!dialog.open)throw Error('final render closed preview');
+          root.remove();await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
+          if(dialog.open)throw Error('removed response left preview open');
+          return 'pass';
+        })()`); got != "pass" {
+			t.Fatal(got)
+		}
 		b.evaluateAwait(`new Promise(resolve=>setTimeout(()=>resolve('settled'),200))`)
 		if got := b.evaluate(`String(Array.from(document.querySelectorAll('#attachment-list .attachment-gallery-open')).every(link=>link.querySelectorAll('img').length===1))`); got != "true" {
 			t.Fatal("Files rows have duplicate thumbnails")
