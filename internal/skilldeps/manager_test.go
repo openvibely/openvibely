@@ -152,3 +152,49 @@ func TestCancelledInstallAndProgress(t *testing.T) {
 		t.Fatalf("progress: %v", stages)
 	}
 }
+
+func TestCancellationPreservesCachedExecutable(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell fixture")
+	}
+	marker := filepath.Join(t.TempDir(), "check")
+	data := zipTool(t, "bin/tool", fmt.Sprintf("#!/bin/sh\nif [ -f '%s' ]; then touch '%s.started'; while :; do :; done; fi\nexit 0\n", marker, marker))
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write(data) }))
+	defer server.Close()
+	dep := Dependency{Name: "tool", Version: "1", HealthCheck: []string{"version"}, Packages: map[string]Package{"linux/amd64": {URL: server.URL, SHA256: fmt.Sprintf("%x", sha256.Sum256(data)), Format: "zip", Executable: "bin/tool"}}}
+	manager := &Manager{CacheDir: t.TempDir(), Platform: "linux/amd64", Client: server.Client()}
+	installed, err := manager.Resolve(context.Background(), []Dependency{dep})
+	if err != nil || installed[0].Error != "" {
+		t.Fatalf("install: %v %v", installed, err)
+	}
+	if err := os.WriteFile(marker, nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	done := make(chan struct{})
+	go func() { defer close(done); manager.Resolve(ctx, []Dependency{dep}) }()
+	for {
+		if _, err := os.Stat(marker + ".started"); err == nil {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatal("health check did not start")
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+	cancel()
+	<-done
+	if _, err := os.Stat(installed[0].Executable); err != nil {
+		t.Fatalf("cancellation removed working cache: %v", err)
+	}
+	if err := os.Remove(marker); err != nil {
+		t.Fatal(err)
+	}
+	server.Close()
+	cached, err := manager.Resolve(context.Background(), []Dependency{dep})
+	if err != nil || cached[0].Status != "cached" {
+		t.Fatalf("offline cache after cancellation: %v %v", cached, err)
+	}
+}

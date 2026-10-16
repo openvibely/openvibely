@@ -151,6 +151,9 @@ func (m *Manager) resolve(ctx context.Context, d Dependency) (string, string, er
 	if err := cachedHealth(ctx, root, executable, d.HealthCheck); err == nil {
 		return executable, "cached", nil
 	}
+	if err := ctx.Err(); err != nil {
+		return "", "failed", err
+	}
 	if err := os.MkdirAll(filepath.Dir(root), 0700); err != nil {
 		return "", "failed", err
 	}
