@@ -96,3 +96,50 @@ func TestResolveThemeResolvesIncludesAndOverrides(t *testing.T) {
 		t.Fatalf("token colors were not appended across include chain: got %d", len(resolved.TokenColors))
 	}
 }
+
+func TestNormalizeSyntaxPrefersMostSpecificScopeOverSubstringMatches(t *testing.T) {
+	var tokens []tokenColor
+	add := func(scope any, fg string) {
+		tc := tokenColor{Scope: scope}
+		tc.Settings.Foreground = fg
+		tokens = append(tokens, tc)
+	}
+	add("string", "#CE9178")
+	add([]any{"keyword", "storage.type"}, "#569CD6")
+	add("keyword.control", "#C586C0")
+	add([]any{"entity.name.type", "support.class"}, "#4EC9B0")
+	add("storage.type.string.go", "#4EC9B0")
+	add("keyword.operator.class", "#D16969")
+	add("meta.embedded string", "#123456")
+	add("variable.other.readwrite", "#9CDCFE")
+	add("string.quoted.docstring.multi.python", "#D16969")
+
+	syntax := normalizeSyntax("dark", map[string]string{}, tokens)
+	for role, want := range map[string]string{"string": "#CE9178", "keyword": "#C586C0", "type": "#4EC9B0", "variable": "#9CDCFE"} {
+		if syntax[role] != want {
+			t.Fatalf("%s = %s, want %s", role, syntax[role], want)
+		}
+	}
+}
+
+func TestNormalizeSemanticSelectionKeepsTextReadable(t *testing.T) {
+	semantic := normalizeSemantic("high-contrast-dark", map[string]string{
+		"editor.background":          "#000000",
+		"foreground":                 "#FFFFFF",
+		"editor.selectionBackground": "#FFFFFF",
+		"selection.background":       "#008000",
+	})
+	if semantic["selectionBg"] != "#008000" {
+		t.Fatalf("selectionBg = %s, want readable selection.background fallback", semantic["selectionBg"])
+	}
+
+	semantic = normalizeSemantic("dark", map[string]string{
+		"editor.background":              "#000C18",
+		"foreground":                     "#6688CC",
+		"editor.selectionBackground":     "#770811",
+		"list.activeSelectionBackground": "#08286B",
+	})
+	if semantic["selectionBg"] != "#08286B" {
+		t.Fatalf("selectionBg = %s, want list selection color", semantic["selectionBg"])
+	}
+}
