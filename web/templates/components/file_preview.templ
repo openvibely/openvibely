@@ -36,7 +36,7 @@ templ FilePreview(name, kind, text, base string) {
  <nav><button type="button" data-file-html-mode="preview">Preview</button><button type="button" data-file-html-mode="source">Source</button></nav>
  <iframe title={name} sandbox="allow-scripts" referrerpolicy="no-referrer" src={templ.SafeURL(FileURLMode(base,"raw"))}></iframe><pre data-file-source hidden><code data-file-code>{text}</code></pre>
  } else if kind=="markdown" {
- <div data-file-markdown class="markdown-content">{text}</div>
+ <div data-file-markdown class="chat-markdown">{text}</div>
  } else if kind=="json" {
  if node,ok:=fileJSONPreview(text);ok {
  <div data-json-tree>
