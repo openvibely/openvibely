@@ -2323,57 +2323,57 @@ templ automationGraphThemeStyles() {
 			.automation-edge-delete:focus-visible circle, .automation-node-delete:focus-visible circle { stroke: oklch(var(--bc)); stroke-width: 4; }
 			.automation-graph-link:focus-visible .automation-graph-node,
 			.automation-graph-focus:focus-visible .automation-graph-node { stroke-width: 4; }
-				[data-color-theme^="vscode-"] .automation-canvas-shell { background: var(--ov-surface) !important; border-color: var(--ov-subtle-border) !important; }
-				[data-color-theme^="vscode-"] .automation-graph-edge { stroke: var(--ov-automation-edge); opacity: 1; }
-				[data-color-theme^="vscode-"] .automation-graph-edge--highlighted,
-				[data-color-theme^="vscode-"] .automation-graph-edge--preview { stroke: var(--ov-focus); opacity: 1; }
-				[data-color-theme^="vscode-"] .automation-graph-arrow { fill: var(--ov-automation-edge); opacity: 1; }
-				[data-color-theme^="vscode-"] .automation-graph-preview-arrow { fill: var(--ov-focus); opacity: 1; }
-				[data-color-theme^="vscode-"] .automation-graph-node { fill: var(--ov-surface-raised); stroke: var(--ov-automation-node-border); stroke-width: 2.5; }			[data-color-theme^="vscode-"] .automation-graph-node--failed { fill: var(--ov-diff-delete-bg); stroke: var(--ov-error); }
-			[data-color-theme^="vscode-"] .automation-graph-node--blocked { fill: var(--ov-diff-modify-bg); stroke: var(--ov-warning); }
-			[data-color-theme^="vscode-"] .automation-graph-node--waiting { fill: var(--ov-selection-bg); stroke: var(--ov-info); }
-			[data-color-theme^="vscode-"] .automation-graph-node--running { fill: var(--ov-selection-bg); stroke: var(--ov-focus); }
-			[data-color-theme^="vscode-"] .automation-graph-node--completed { fill: var(--ov-diff-add-bg); stroke: var(--ov-success); }
-			[data-color-theme^="vscode-"] .automation-graph-label,
-			[data-color-theme^="vscode-"] .automation-graph-label--primary { fill: var(--ov-text); }
-			[data-color-theme^="vscode-"] .automation-graph-label--secondary,
-			[data-color-theme^="vscode-"] .automation-graph-label--muted { fill: var(--ov-text-muted); }
-			[data-color-theme^="vscode-"] .automation-node-content { color: var(--ov-text); }
-			[data-color-theme^="vscode-"] .automation-node-content small { color: var(--ov-text-muted); }
-			[data-color-theme^="vscode-"] .automation-state-dot { border-color: var(--ov-subtle-border); }
-			[data-color-theme^="vscode-"] .automation-state-dot--failed,
-			[data-color-theme^="vscode-"] .automation-node-state--failed { border-color: var(--ov-error); color: var(--ov-error); }
-			[data-color-theme^="vscode-"] .automation-state-dot--blocked,
-			[data-color-theme^="vscode-"] .automation-node-state--blocked { border-color: var(--ov-warning); color: var(--ov-warning); }
-			[data-color-theme^="vscode-"] .automation-state-dot--waiting,
-			[data-color-theme^="vscode-"] .automation-node-state--waiting { border-color: var(--ov-info); color: var(--ov-info); }
-			[data-color-theme^="vscode-"] .automation-state-dot--running,
-			[data-color-theme^="vscode-"] .automation-node-state--running { border-color: var(--ov-focus); color: var(--ov-focus); }
-			[data-color-theme^="vscode-"] .automation-state-dot--recently_completed,
-			[data-color-theme^="vscode-"] .automation-node-state--recently_completed { border-color: var(--ov-success); color: var(--ov-success); }
-			[data-color-theme^="vscode-"] .automation-state-dot--failed { background: var(--ov-diff-delete-bg); }
-			[data-color-theme^="vscode-"] .automation-state-dot--blocked { background: var(--ov-diff-modify-bg); }
-			[data-color-theme^="vscode-"] .automation-state-dot--waiting,
-			[data-color-theme^="vscode-"] .automation-state-dot--running { background: var(--ov-selection-bg); }
-			[data-color-theme^="vscode-"] .automation-state-dot--recently_completed { background: var(--ov-diff-add-bg); }
-			[data-color-theme^="vscode-"] .automation-connect-handle,
-			[data-color-theme^="vscode-"] .automation-connect-handle:focus-visible { stroke: var(--ov-focus); }
-			[data-color-theme^="vscode-"] .automation-connect-handle--input { fill: var(--ov-surface-raised); }
-			[data-color-theme^="vscode-"] .automation-connect-handle--output,
-			[data-color-theme^="vscode-"] .automation-connect-handle--selected,
-			[data-color-theme^="vscode-"] .automation-edge-endpoint { fill: var(--ov-focus); }
-			[data-color-theme^="vscode-"] .automation-connect-handle--eligible { fill: var(--ov-success); stroke: var(--ov-success); }
-				[data-color-theme^="vscode-"] .automation-edge-foreground { stroke: var(--ov-automation-edge); opacity: 1; }
-				[data-color-theme^="vscode-"] .automation-edge-foreground-arrow { fill: var(--ov-automation-edge); opacity: 1; }
-				[data-color-theme^="vscode-"] .automation-edge-foreground--selected { stroke: var(--ov-focus); opacity: 1; }			[data-color-theme^="vscode-"] .automation-edge-delete circle,
-			[data-color-theme^="vscode-"] .automation-node-delete circle { fill: var(--ov-error); stroke: var(--ov-surface); }
-			[data-color-theme^="vscode-"] .automation-edge-delete .automation-delete-x,
-			[data-color-theme^="vscode-"] .automation-node-delete .automation-delete-x { stroke: var(--ov-error-foreground); }
-			[data-color-theme^="vscode-"] .automation-edge-delete:focus-visible circle,
-			[data-color-theme^="vscode-"] .automation-node-delete:focus-visible circle,
-			[data-color-theme^="vscode-"] .automation-graph-link:focus-visible .automation-graph-node,
-			[data-color-theme^="vscode-"] .automation-graph-focus:focus-visible .automation-graph-node { stroke: var(--ov-focus); }
-				[data-color-theme^="vscode-"] [data-automation-yaml-panel] { --ov-yaml-indent-dot: var(--ov-yaml-indent-rail); --ov-yaml-indent-active: var(--ov-focus); }		</style>}
+				[data-ov-theme-layer="custom"] .automation-canvas-shell { background: var(--ov-surface) !important; border-color: var(--ov-subtle-border) !important; }
+				[data-ov-theme-layer="custom"] .automation-graph-edge { stroke: var(--ov-automation-edge); opacity: 1; }
+				[data-ov-theme-layer="custom"] .automation-graph-edge--highlighted,
+				[data-ov-theme-layer="custom"] .automation-graph-edge--preview { stroke: var(--ov-focus); opacity: 1; }
+				[data-ov-theme-layer="custom"] .automation-graph-arrow { fill: var(--ov-automation-edge); opacity: 1; }
+				[data-ov-theme-layer="custom"] .automation-graph-preview-arrow { fill: var(--ov-focus); opacity: 1; }
+				[data-ov-theme-layer="custom"] .automation-graph-node { fill: var(--ov-surface-raised); stroke: var(--ov-automation-node-border); stroke-width: 2.5; }			[data-ov-theme-layer="custom"] .automation-graph-node--failed { fill: var(--ov-diff-delete-bg); stroke: var(--ov-error); }
+			[data-ov-theme-layer="custom"] .automation-graph-node--blocked { fill: var(--ov-diff-modify-bg); stroke: var(--ov-warning); }
+			[data-ov-theme-layer="custom"] .automation-graph-node--waiting { fill: var(--ov-selection-bg); stroke: var(--ov-info); }
+			[data-ov-theme-layer="custom"] .automation-graph-node--running { fill: var(--ov-selection-bg); stroke: var(--ov-focus); }
+			[data-ov-theme-layer="custom"] .automation-graph-node--completed { fill: var(--ov-diff-add-bg); stroke: var(--ov-success); }
+			[data-ov-theme-layer="custom"] .automation-graph-label,
+			[data-ov-theme-layer="custom"] .automation-graph-label--primary { fill: var(--ov-text); }
+			[data-ov-theme-layer="custom"] .automation-graph-label--secondary,
+			[data-ov-theme-layer="custom"] .automation-graph-label--muted { fill: var(--ov-text-muted); }
+			[data-ov-theme-layer="custom"] .automation-node-content { color: var(--ov-text); }
+			[data-ov-theme-layer="custom"] .automation-node-content small { color: var(--ov-text-muted); }
+			[data-ov-theme-layer="custom"] .automation-state-dot { border-color: var(--ov-subtle-border); }
+			[data-ov-theme-layer="custom"] .automation-state-dot--failed,
+			[data-ov-theme-layer="custom"] .automation-node-state--failed { border-color: var(--ov-error); color: var(--ov-error); }
+			[data-ov-theme-layer="custom"] .automation-state-dot--blocked,
+			[data-ov-theme-layer="custom"] .automation-node-state--blocked { border-color: var(--ov-warning); color: var(--ov-warning); }
+			[data-ov-theme-layer="custom"] .automation-state-dot--waiting,
+			[data-ov-theme-layer="custom"] .automation-node-state--waiting { border-color: var(--ov-info); color: var(--ov-info); }
+			[data-ov-theme-layer="custom"] .automation-state-dot--running,
+			[data-ov-theme-layer="custom"] .automation-node-state--running { border-color: var(--ov-focus); color: var(--ov-focus); }
+			[data-ov-theme-layer="custom"] .automation-state-dot--recently_completed,
+			[data-ov-theme-layer="custom"] .automation-node-state--recently_completed { border-color: var(--ov-success); color: var(--ov-success); }
+			[data-ov-theme-layer="custom"] .automation-state-dot--failed { background: var(--ov-diff-delete-bg); }
+			[data-ov-theme-layer="custom"] .automation-state-dot--blocked { background: var(--ov-diff-modify-bg); }
+			[data-ov-theme-layer="custom"] .automation-state-dot--waiting,
+			[data-ov-theme-layer="custom"] .automation-state-dot--running { background: var(--ov-selection-bg); }
+			[data-ov-theme-layer="custom"] .automation-state-dot--recently_completed { background: var(--ov-diff-add-bg); }
+			[data-ov-theme-layer="custom"] .automation-connect-handle,
+			[data-ov-theme-layer="custom"] .automation-connect-handle:focus-visible { stroke: var(--ov-focus); }
+			[data-ov-theme-layer="custom"] .automation-connect-handle--input { fill: var(--ov-surface-raised); }
+			[data-ov-theme-layer="custom"] .automation-connect-handle--output,
+			[data-ov-theme-layer="custom"] .automation-connect-handle--selected,
+			[data-ov-theme-layer="custom"] .automation-edge-endpoint { fill: var(--ov-focus); }
+			[data-ov-theme-layer="custom"] .automation-connect-handle--eligible { fill: var(--ov-success); stroke: var(--ov-success); }
+				[data-ov-theme-layer="custom"] .automation-edge-foreground { stroke: var(--ov-automation-edge); opacity: 1; }
+				[data-ov-theme-layer="custom"] .automation-edge-foreground-arrow { fill: var(--ov-automation-edge); opacity: 1; }
+				[data-ov-theme-layer="custom"] .automation-edge-foreground--selected { stroke: var(--ov-focus); opacity: 1; }			[data-ov-theme-layer="custom"] .automation-edge-delete circle,
+			[data-ov-theme-layer="custom"] .automation-node-delete circle { fill: var(--ov-error); stroke: var(--ov-surface); }
+			[data-ov-theme-layer="custom"] .automation-edge-delete .automation-delete-x,
+			[data-ov-theme-layer="custom"] .automation-node-delete .automation-delete-x { stroke: var(--ov-error-foreground); }
+			[data-ov-theme-layer="custom"] .automation-edge-delete:focus-visible circle,
+			[data-ov-theme-layer="custom"] .automation-node-delete:focus-visible circle,
+			[data-ov-theme-layer="custom"] .automation-graph-link:focus-visible .automation-graph-node,
+			[data-ov-theme-layer="custom"] .automation-graph-focus:focus-visible .automation-graph-node { stroke: var(--ov-focus); }
+				[data-ov-theme-layer="custom"] [data-automation-yaml-panel] { --ov-yaml-indent-dot: var(--ov-yaml-indent-rail); --ov-yaml-indent-active: var(--ov-focus); }		</style>}
 
 templ automationLiveMoreActions(graph models.AutomationLiveGraph, currentProjectID string, deleteAvailable bool) {
 	@components.CardActionDropdown(components.CardActionDropdownConfig{WrapperClass: "dropdown dropdown-end shrink-0", TriggerClass: "sidebar-toggle-btn header-action-btn btn btn-ghost btn-sm btn-square", IconClass: "h-5 w-5", MenuClass: "z-[100] w-48", Label: "More actions for " + graph.Automation.Name, AutomationLiveMenu: true}) {

@@ -10,8 +10,8 @@ import (
 
 func TestCatalogContainsOpenVibelyDefaultsAndPinnedVSCodeThemes(t *testing.T) {
 	catalog := Catalog()
-	if len(catalog) != ExpectedThemeCount+2 {
-		t.Fatalf("catalog has %d themes, want %d", len(catalog), ExpectedThemeCount+2)
+	if want := ExpectedThemeCount + 2 + len(PaletteThemes()); len(catalog) != want {
+		t.Fatalf("catalog has %d themes, want %d", len(catalog), want)
 	}
 	if catalog[0].ID != OpenVibelyDarkThemeID || catalog[1].ID != OpenVibelyLightThemeID {
 		t.Fatalf("OpenVibely defaults should be first in catalog, got %q then %q", catalog[0].ID, catalog[1].ID)
@@ -355,5 +355,53 @@ func TestVSCodeCatalogProvidesReadableDaisyPrimary(t *testing.T) {
 	}
 	if _, content := daisyPrimaryColors("#0000FF", "#FFFFFF"); content != "1.0000 0.0000 0.00" {
 		t.Fatalf("blue primary content = %q, want white", content)
+	}
+}
+
+func TestPaletteThemesAreReadableAndLayered(t *testing.T) {
+	ratio := func(a, b string) float64 {
+		x, _, okA := parseThemeHexColor(a)
+		y, _, okB := parseThemeHexColor(b)
+		if !okA || !okB {
+			t.Fatalf("invalid colors %q / %q", a, b)
+		}
+		return contrastRatio(x, y)
+	}
+	themes := PaletteThemes()
+	if len(themes) < 10 {
+		t.Fatalf("expected a curated palette set, got %d themes", len(themes))
+	}
+	for _, theme := range themes {
+		s := theme.Semantic
+		for _, pair := range [][3]string{
+			{"text", "surface", "4.5"}, {"text", "contentBg", "4.5"}, {"textMuted", "surface", "4.5"}, {"textMuted", "surfaceRaised", "4.5"},
+			{"link", "contentBg", "4.5"}, {"link", "surface", "4.5"}, {"buttonFg", "buttonBg", "4.5"}, {"buttonHoverFg", "buttonHoverBg", "4.5"},
+			{"errorForeground", "error", "4.5"}, {"warningForeground", "warning", "4.5"}, {"infoForeground", "info", "4.5"}, {"successForeground", "success", "4.5"},
+			{"error", "surface", "3"}, {"warning", "surface", "3"}, {"success", "surface", "3"}, {"info", "surface", "3"},
+			{"borderStrong", "surface", "1.5"}, {"automationEdge", "surface", "3"},
+		} {
+			want, _ := strconv.ParseFloat(pair[2], 64)
+			if got := ratio(s[pair[0]], s[pair[1]]); got < want {
+				t.Errorf("%s: %s on %s contrast %.2f, want >= %.1f", theme.ID, pair[0], pair[1], got, want)
+			}
+		}
+		if got := ratio(s["border"], s["surface"]); got > 1.6 {
+			t.Errorf("%s: card border contrast %.2f is too harsh, want soft layering", theme.ID, got)
+		}
+		for key, color := range theme.Syntax {
+			if key == "background" {
+				continue
+			}
+			want := 4.5
+			if key == "comment" {
+				want = 3
+			}
+			if got := ratio(color, theme.Syntax["background"]); got < want {
+				t.Errorf("%s: syntax %s contrast %.2f, want >= %.1f", theme.ID, key, got, want)
+			}
+		}
+		if theme.CSS["--ov-daisy-primary"] == "" || theme.CSS["--ov-subtle-border"] == "" || theme.CSS["--ov-accent-tint"] == "" {
+			t.Errorf("%s: missing derived app CSS variables", theme.ID)
+		}
 	}
 }
