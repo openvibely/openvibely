@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/web/static"
+	"github.com/openvibely/openvibely/web/templates/components"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -15,6 +16,10 @@ func TestBrowserFunctional_TaskChainPanel(t *testing.T) {
 	task := &models.Task{ID: "chain-task", ProjectID: project.ID, Title: "Chain", Category: models.CategoryBacklog, Status: models.StatusPending}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if static.ServeAsset(w, r) {
+			return
+		}
+		if r.URL.Path == "/tasks/chain-task/attachments" {
+			_ = components.TaskFilesList(nil, project.ID, nil, nil).Render(r.Context(), w)
 			return
 		}
 		if r.URL.Path == "/tasks/chain-task/chain" {
@@ -55,9 +60,17 @@ func TestBrowserFunctional_TaskChainPanel(t *testing.T) {
 				b.evaluate(`window.panelContentTop=document.querySelector("[data-chain-empty]").getBoundingClientRect().top; "saved"`)
 				for _, tab := range []struct{ key, heading string }{{"details", "#task-detail-metrics h3"}, {"schedules", "#task-schedule-panel h3"}, {"attachments", "#tab-attachments h3"}} {
 					b.click("#inspector-tab-" + tab.key)
+					if tab.key == "attachments" && path != "/new?tab=chaining" {
+						// Saved tasks use an upload control instead of a Files heading.
+						b.waitFor("files upload control visible", `String(document.querySelector('#add-attachment-btn')?.getClientRects().length>0)`, "true")
+						b.waitFor("files list below upload control", `String((()=>{const list=document.querySelector('#attachment-list'),add=document.querySelector('#add-attachment-btn');return !!list && list.getBoundingClientRect().top>=add.getBoundingClientRect().bottom;})())`, "true")
+						continue
+					}
 					b.waitFor("heading aligned with "+tab.key, `String(Math.abs(document.querySelector('`+tab.heading+`').getBoundingClientRect().top-window.chainHeadingTop)<1)`, "true")
 				}
-				b.waitFor("files content aligned with chaining", `String(Math.abs(document.querySelector('#draft-panel-attachments, #attachment-list').getBoundingClientRect().top-window.panelContentTop)<1)`, "true")
+				if path == "/new?tab=chaining" {
+					b.waitFor("files content aligned with chaining", `String(Math.abs(document.querySelector('#draft-panel-attachments, #attachment-list').getBoundingClientRect().top-window.panelContentTop)<1)`, "true")
+				}
 				if path != "/new?tab=chaining" {
 					b.click("#inspector-tab-lifecycle")
 					b.waitFor("lifecycle heading aligned", `String(Math.abs(document.querySelector('#tab-lifecycle h3').getBoundingClientRect().top-window.chainHeadingTop)<1)`, "true")

@@ -126,7 +126,7 @@ func TestBrowserFunctional_SharedImageGallery(t *testing.T) {
 		b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": "ArrowRight"}, nil)
 		b.waitFor("next image", `document.querySelector('[data-gallery-name]').textContent`, "two.svg")
 		b.click(`[data-gallery-plus]`)
-		b.waitFor("icon toolbar", `String(document.querySelectorAll('.image-gallery-tools svg').length===3 && document.querySelector('.image-gallery-tools').textContent.trim()==='')`, "true")
+		b.waitFor("icon toolbar", `String(document.querySelectorAll('.image-gallery-tools svg').length===4 && !!document.querySelector('.image-gallery-tools [data-gallery-download][download] svg') && document.querySelector('.image-gallery-tools').textContent.trim()==='')`, "true")
 		b.waitFor("zoom", `document.querySelector('[data-gallery-fit]').getAttribute('aria-label')`, "Fit image (150%)")
 		b.waitFor("arrows fixed after navigation and zoom", `String(JSON.stringify(Array.from(document.querySelectorAll('.image-gallery-arrow'),el=>{const r=el.getBoundingClientRect();return [r.x,r.y]}))===JSON.stringify(window.galleryArrowPositions))`, "true")
 		b.evaluate(`window.galleryBoundaryImage=document.querySelector('[data-gallery-image]');window.galleryBoundaryTransform=window.galleryBoundaryImage.style.transform;'saved'`)
@@ -220,6 +220,6 @@ func TestBrowserFunctional_SharedImageGallery(t *testing.T) {
 		b.click(`#attachment-list [data-image-gallery-item]`)
 		b.waitFor("mobile gallery open", `String(document.getElementById('image-gallery').open)`, "true")
 		b.waitFor("mobile fits viewport", `String(document.getElementById('image-gallery').getBoundingClientRect().right<=innerWidth && document.getElementById('image-gallery').getBoundingClientRect().bottom<=innerHeight)`, "true")
-		b.waitFor("mobile file navigation stays in toolbar", `String((()=>{const stage=document.querySelector('[data-gallery-stage]').getBoundingClientRect(), prev=document.querySelector('[data-gallery-prev]').getBoundingClientRect(), next=document.querySelector('[data-gallery-next]').getBoundingClientRect();return prev.bottom<=stage.top && next.bottom<=stage.top;})())`, "true")
+		b.waitFor("mobile gallery keeps side navigation within viewport", `String((()=>{const stage=document.querySelector('[data-gallery-stage]').getBoundingClientRect(), prev=document.querySelector('[data-gallery-prev]').getBoundingClientRect(), next=document.querySelector('[data-gallery-next]').getBoundingClientRect();return prev.width>0 && next.width>0 && prev.left>=0 && next.right<=innerWidth && prev.right<next.left && Math.abs(prev.top+prev.height/2-stage.top-stage.height/2)<1 && Math.abs(next.top+next.height/2-stage.top-stage.height/2)<1;})())`, "true")
 	})
 }

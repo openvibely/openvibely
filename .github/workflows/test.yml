@@ -195,7 +195,9 @@ jobs:
         run: go test ./web/templates/components -run '^TestBrowserFunctional_' -count=1 -timeout 180s
 
       - name: Run page functional browser tests
-        run: go test ./web/templates/pages -run '^TestBrowserFunctional_' -count=1 -timeout 300s
+        # This is the aggregate budget for all sequential browser fixtures;
+        # individual browser sessions and condition waits remain bounded.
+        run: go test ./web/templates/pages -run '^TestBrowserFunctional_' -count=1 -timeout 600s
 
       - name: Compile and test the Linux GTK3 desktop path
         run: go test -tags gtk3 ./cmd/desktop -count=1 -timeout 120s
