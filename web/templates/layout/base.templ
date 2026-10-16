@@ -1541,8 +1541,8 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				[data-theme="light"]:not([data-ov-theme-layer="custom"]) .card a.font-medium {
 					color: var(--ov-l-text-strong);
 				}
-				[data-theme="light"] .card .text-sm.opacity-60,
-				[data-theme="light"] .card p.opacity-60 {
+				[data-theme="light"]:not([data-ov-theme-layer="custom"]) .card .text-sm.opacity-60,
+				[data-theme="light"]:not([data-ov-theme-layer="custom"]) .card p.opacity-60 {
 					opacity: 1 !important;
 					color: var(--ov-l-text-muted);
 				}
@@ -2655,6 +2655,8 @@ box-shadow: 0 1.25rem 3.5rem rgba(0, 0, 0, 0.45) !important;
 [data-ov-theme-layer="custom"] .opacity-50,
 [data-ov-theme-layer="custom"] .opacity-60,
 [data-ov-theme-layer="custom"] .text-sm.opacity-60 { color: var(--ov-text-muted); }
+[data-ov-theme-layer="custom"] .card .text-sm.opacity-60,
+[data-ov-theme-layer="custom"] .card p.opacity-60 { color: var(--ov-text-muted); opacity: 1 !important; }
 [data-ov-theme-layer="custom"] .border-base-300,
 [data-ov-theme-layer="custom"] .border-base-300\/70,
 [data-ov-theme-layer="custom"] .border-base-300\/80,

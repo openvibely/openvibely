@@ -38,10 +38,11 @@ func TestBrowserFunctional_ImportedThemeStylesTitlebarMenusAndSchedulePickers(t 
 <ul id="fixture-menu" class="ov-menu ov-menu-actions dropdown-content menu"><li><button type="button">Action</button></li></ul>
 <div id="fixture-picker">` + picker.String() + `</div><span id="fixture-deletions" style="color: var(--ov-diff-del-fg)">-4</span><span id="fixture-primary-text" class="text-primary">P</span><span id="fixture-running" class="task-state-running">Running</span><span id="fixture-primary-badge" class="badge badge-primary">New</span><div id="fixture-column" class="kanban-column bg-base-300"></div><div id="fixture-hover-card" data-search-card class="card bg-base-100 border border-base-300 hover:border-primary/40 cursor-pointer" style="position:fixed;left:300px;top:150px;width:120px;height:60px;z-index:99999">Card</div><input id="fixture-toggle-on" type="checkbox" class="toggle toggle-primary toggle-sm" checked/><input id="fixture-toggle-off" type="checkbox" class="toggle toggle-secondary toggle-sm"/><div id="probe"></div>`
 	var taskCard bytes.Buffer
-	if err := components.TaskCard(models.Task{ID: "theme-title", Title: "Theme task", Status: models.StatusPending}, "p1", "active", nil, nil).Render(context.Background(), &taskCard); err != nil {
+	if err := components.TaskCard(models.Task{ID: "theme-title", Title: "Theme task", Prompt: "Task description", Status: models.StatusPending}, "p1", "active", nil, nil).Render(context.Background(), &taskCard); err != nil {
 		t.Fatal(err)
 	}
 	fixture += `<div id="theme-task-card">` + taskCard.String() + `</div><div class="chat-markdown"><a id="theme-content-link" href="/example">Content</a></div><a id="theme-result-link" class="ov-task-result-link" href="/example">Result</a><a id="theme-explicit-link" class="link link-primary" href="/example">Link</a>`
+	fixture += `<div class="card"><p id="theme-card-description" class="text-sm opacity-60 mt-1 line-clamp-2">Automation description</p></div>`
 	var question bytes.Buffer
 	if err := ChatInputRequestCard(&events.ChatInputRequestEvent{ID: "theme-question", Questions: []events.ChatInputRequestQuestion{{ID: "q", Question: "Choose", Options: []events.ChatInputRequestOption{{Label: "First", Description: "Description"}}}}}).Render(context.Background(), &question); err != nil {
 		t.Fatal(err)
@@ -105,8 +106,25 @@ func TestBrowserFunctional_ImportedThemeStylesTitlebarMenusAndSchedulePickers(t 
 		for _, themeID := range []string{"vscode-dark-2026", "vscode-light-2026", "github-light", "catppuccin-mocha"} {
 			browser.evaluate(`window.openVibelyThemes.apply('` + themeID + `');'ok'`)
 			browser.waitFor(themeID+" task title inherits normal text", `String(window.computed('#theme-task-card .task-card-title-link', 'color') === window.computed('#theme-task-card .card-body', 'color'))`, "true")
+			for _, selector := range []string{"#theme-task-card [data-task-prompt]", "#theme-card-description"} {
+				browser.waitFor(themeID+selector+" description uses palette", `window.matches('`+selector+`', 'color', 'var(--ov-text-muted)')`, "ok")
+				browser.waitFor(themeID+selector+" description is not dimmed twice", `window.computed('`+selector+`', 'opacity')`, "1")
+			}
 			for _, selector := range []string{"#theme-content-link", "#theme-result-link", "#theme-explicit-link"} {
 				browser.waitFor(themeID+selector+" keeps link accent", `window.matches('`+selector+`', 'color', 'var(--ov-link)')`, "ok")
+			}
+		}
+		for _, mode := range []string{"dark", "light"} {
+			browser.evaluate(`window.openVibelyThemes.apply('openvibely-` + mode + `');'ok'`)
+			opacity := "0.6"
+			if mode == "light" {
+				opacity = "1"
+			}
+			for _, selector := range []string{"#theme-task-card [data-task-prompt]", "#theme-card-description"} {
+				browser.waitFor(mode+selector+" preserves native opacity", `window.computed('`+selector+`', 'opacity')`, opacity)
+				if mode == "light" {
+					browser.waitFor(mode+selector+" preserves native color", `window.matches('`+selector+`', 'color', 'var(--ov-l-text-muted)')`, "ok")
+				}
 			}
 		}
 		browser.evaluate(`window.openVibelyThemes.apply('vscode-kimbie-dark');'ok'`)
