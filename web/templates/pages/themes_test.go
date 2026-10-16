@@ -18,10 +18,16 @@ func TestThemesContentRendersCatalogCardsAndSearchMetadata(t *testing.T) {
 	if !strings.Contains(html, `data-card-search="themes"`) || !strings.Contains(html, "Search themes...") {
 		t.Fatalf("themes page must use shared card search input")
 	}
-	if got, want := strings.Count(html, `data-theme-id=`), themes.ExpectedThemeCount+2+len(themes.PaletteThemes()); got != want {
+	if got, want := strings.Count(html, `data-theme-id=`), len(themes.Catalog())-15; got != want {
 		t.Fatalf("theme card count = %d, want %d", got, want)
 	}
-	for _, theme := range themes.PaletteThemes() {
+	for _, theme := range themes.Catalog() {
+		if !themeVisibleInPicker(theme.ID) {
+			if strings.Contains(html, `data-theme-id="`+theme.ID+`"`) {
+				t.Fatalf("hidden theme %s remains visible", theme.Name)
+			}
+			continue
+		}
 		if !strings.Contains(html, `data-theme-id="`+theme.ID+`"`) {
 			t.Fatalf("rendered Themes page missing palette theme %q", theme.Name)
 		}
@@ -37,10 +43,8 @@ func TestThemesContentRendersCatalogCardsAndSearchMetadata(t *testing.T) {
 			t.Fatalf("rendered Themes page missing OpenVibely default fragment %q", fragment)
 		}
 	}
-	for _, name := range themes.ExpectedThemeNames {
-		if !strings.Contains(html, name) {
-			t.Fatalf("rendered Themes page missing %q", name)
-		}
+	if !strings.Contains(html, `data-page-header`) || strings.Contains(html, "Choose an OpenVibely") {
+		t.Fatal("Themes must use the shared page header without a subtitle")
 	}
 	for _, fragment := range []string{
 		`data-search-text=`,

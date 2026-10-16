@@ -8,6 +8,20 @@ import (
 	"github.com/openvibely/openvibely/web/templates/layout"
 )
 
+// Keep hidden palettes available to existing saved preferences.
+func themeVisibleInPicker(id string) bool {
+	switch id {
+	case "vscode-dark-modern", "vscode-default-high-contrast", "vscode-abyss",
+		"vscode-kimbie-dark", "vscode-monokai", "vscode-monokai-dimmed",
+		"vscode-red", "vscode-solarized-dark", "vscode-solarized-light",
+		"vscode-tomorrow-night-blue", "nord", "openvibely-paper",
+		"vscode-default-high-contrast-light", "vscode-light", "vscode-dark":
+		return false
+	default:
+		return true
+	}
+}
+
 templ Themes(projects []models.Project, currentProjectID string, catalog []themes.Theme) {
 	@layout.Base("Themes", projects, currentProjectID) {
 		@ThemesContent(catalog)
@@ -17,15 +31,15 @@ templ Themes(projects []models.Project, currentProjectID string, catalog []theme
 templ ThemesContent(catalog []themes.Theme) {
 	<div id="themes-container" data-search-container>
 		@layout.PageTitle("Themes")
-		<div class="flex items-center justify-between mb-6">
-			<div>
-				<h2 class="text-2xl font-bold">Themes</h2>
-					<p class="text-sm opacity-60 mt-1">Choose an OpenVibely theme, a community palette, or a built-in VS Code color theme for this browser.</p>			</div>
+		<div data-page-header class="flex items-center justify-between mb-6">
+			<h2 class="text-2xl font-bold">Themes</h2>
 		</div>
 		@CardSearchInput("themes", "Search themes...")
 		<div class="grid gap-4 md:grid-cols-2 xl:grid-cols-3" data-themes-grid>
 			for _, theme := range catalog {
-				@themeCard(theme)
+				if themeVisibleInPicker(theme.ID) {
+					@themeCard(theme)
+				}
 			}
 		</div>
 		<script>
