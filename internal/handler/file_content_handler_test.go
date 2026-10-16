@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/labstack/echo/v4"
 	llmattachment "github.com/openvibely/openvibely/internal/llm/attachment"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/stretchr/testify/require"
@@ -131,4 +132,18 @@ func TestSteeringDocumentReferenceUsesCommittedPath(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, string(parts[0].Data), target)
 	require.NotContains(t, string(parts[0].Data), "%PDF-original")
+}
+
+func TestFilePreviewReportsUnsupportedEncoding(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "legacy.txt")
+	require.NoError(t, os.WriteFile(path, []byte("caf\xe9"), 0600))
+	e := echo.New()
+	rec := httptest.NewRecorder()
+	c := e.NewContext(httptest.NewRequest(http.MethodGet, "/file?view=1", nil), rec)
+	require.NoError(t, serveFileContent(c, path, "legacy.txt"))
+	require.Contains(t, rec.Body.String(), "Unsupported text encoding")
+	rec = httptest.NewRecorder()
+	c = e.NewContext(httptest.NewRequest(http.MethodGet, "/file?download=1", nil), rec)
+	require.NoError(t, serveFileContent(c, path, "legacy.txt"))
+	require.Equal(t, []byte("caf\xe9"), rec.Body.Bytes())
 }

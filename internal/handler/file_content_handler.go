@@ -59,7 +59,7 @@ func serveFileContent(c echo.Context, path, name string) error {
 			var ok bool
 			text, ok = filecontent.DecodeAttachmentText(data)
 			if !ok {
-				kind = "unknown"
+				kind = "unsupported-encoding"
 			}
 			if len(text) > 1500000 {
 				if kind == "json" {
