@@ -143,7 +143,7 @@ type ChatMessageStatusResponse struct {
 // @Description Returns 201 immediately with a message ID. The AI processes the message asynchronously.
 // @Description Poll GET /api/chat/message/{id} to check status and retrieve the response.
 // @Description Supported file types: Images (JPG, PNG, GIF, WebP), Documents (PDF, TXT, MD, CSV), Code (Go, Python, JS, TS, Rust, Java, C/C++, Ruby, PHP, Swift, Kotlin, Shell, SQL, HTML, CSS, SCSS, XML, JSON, YAML, TOML, INI, diff/patch)
-// @Description Maximum file size: 25 MiB per file, 200 MiB for video, 256 KiB for ordinary text
+// @Description Maximum file size: 25 MiB per file, 200 MiB for video, 256 KiB for ordinary text, 10 MiB for PNG/JPEG/GIF/WebP images
 // @Description Maximum files per request: 10
 // @Tags chat
 // @Accept multipart/form-data
