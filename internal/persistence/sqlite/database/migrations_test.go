@@ -4192,3 +4192,64 @@ func TestMigration212GeneratedFilesAfterHistoryMetadataUpdate(t *testing.T) {
 		t.Fatalf("migration version = %d, want %d", version, latestMigrationVersion)
 	}
 }
+
+func TestMigration212PreservesExistingGeneratedFiles(t *testing.T) {
+	for _, existingIndex := range []bool{false, true} {
+		t.Run(fmt.Sprintf("existing_index_%t", existingIndex), func(t *testing.T) {
+			db := openMigrationTestDB(t, filepath.Join(t.TempDir(), "existing-generated-files.db"))
+			goose.SetBaseFS(migrations.FS)
+			if err := goose.SetDialect("sqlite3"); err != nil {
+				t.Fatal(err)
+			}
+			if err := goose.UpTo(db, ".", 212); err != nil {
+				t.Fatal(err)
+			}
+			// Reproduce an existing table whose migration version is unrecorded.
+			if _, err := db.Exec(`
+				INSERT INTO projects (id, name) VALUES ('project-212', 'Generated files');
+				INSERT INTO tasks (id, project_id, title, category, priority, status, prompt)
+					VALUES ('task-212', 'project-212', 'Generate file', 'backlog', 2, 'completed', 'generate');
+				INSERT INTO executions (id, task_id, status) VALUES ('execution-212', 'task-212', 'completed');
+				INSERT INTO generated_files (id, project_id, execution_id, file_name, file_path, media_type, file_size, display)
+					VALUES ('file-212', 'project-212', 'execution-212', 'report.html', '/files/report.html', 'text/html', 123, 'canvas');
+				DELETE FROM goose_db_version WHERE version_id = 212;
+			`); err != nil {
+				t.Fatal(err)
+			}
+			if !existingIndex {
+				if _, err := db.Exec(`DROP INDEX idx_generated_files_project_execution`); err != nil {
+					t.Fatal(err)
+				}
+			}
+			// Exercise the startup migration path, including a subsequent restart.
+			for attempt := 0; attempt < 2; attempt++ {
+				if err := initializeSQLite(db); err != nil {
+					t.Fatal(err)
+				}
+			}
+			var count int
+			if err := db.QueryRow(`SELECT COUNT(*) FROM generated_files WHERE id = 'file-212'
+				AND project_id = 'project-212' AND execution_id = 'execution-212'
+				AND file_name = 'report.html' AND file_path = '/files/report.html'
+				AND media_type = 'text/html' AND file_size = 123 AND display = 'canvas'`).Scan(&count); err != nil {
+				t.Fatal(err)
+			}
+			if count != 1 {
+				t.Fatal("existing generated file was not preserved")
+			}
+			if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'idx_generated_files_project_execution'`).Scan(&count); err != nil {
+				t.Fatal(err)
+			}
+			if count != 1 {
+				t.Fatal("generated files index is missing")
+			}
+			version, err := goose.GetDBVersion(db)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if version != latestMigrationVersion {
+				t.Fatalf("migration version = %d, want %d", version, latestMigrationVersion)
+			}
+		})
+	}
+}
