@@ -194,7 +194,7 @@ templ analyticsContent(currentProject *models.Project) {
 						<div id="modelScorecard" class="overflow-x-auto" style="min-height:12rem"></div>
 					</div></div>
 					<div class="grid grid-cols-1 xl:grid-cols-2 gap-6">
-						@analyticsModelTrendCard("Task Run Time", "Median combined run time per task, grouped by latest task activity in this range. Includes each model’s own run time on shared tasks; waiting excluded.", "modelTaskTimeTrend")
+						@analyticsModelTrendCard("Task Run Time", "Median combined run time per active task in each period, grouped by run start date. Includes each model’s own run time on shared tasks; waiting excluded.", "modelTaskTimeTrend")
 						@analyticsChartCard("Task Time Breakdown", "Median of each model’s combined run time per task in this period. Includes shared tasks; excludes waiting and unfinished runs.", "modelTimeChart", "h-80")
 					</div>
 					<div class="grid grid-cols-1 xl:grid-cols-2 gap-6">
@@ -202,11 +202,11 @@ templ analyticsContent(currentProject *models.Project) {
 						@analyticsChartCard("Run Time Breakdown", "Average time for one model run on a task. A task can have several runs, including retries and follow-ups. Includes failed and cancelled runs with recorded end times.", "modelRunTimeChart", "h-80")
 					</div>
 					<div class="grid grid-cols-1 xl:grid-cols-2 gap-6">
-						@analyticsModelTrendCard("Tokens per Task", "Average recorded tokens per task, grouped by latest task activity in this range. Includes each model’s own tokens on shared tasks.", "modelTokenTrend")
+						@analyticsModelTrendCard("Tokens per Task", "Average recorded tokens per task with usage in each period, grouped by usage date. Includes each model’s own tokens on shared tasks.", "modelTokenTrend")
 						@analyticsChartCard("Token Breakdown", "Average recorded tokens, including unsuccessful work. Lower means less usage. Includes each model’s own tokens on shared tasks.", "modelTokensChart", "h-80")
 					</div>
 					<div class="grid grid-cols-1 xl:grid-cols-2 gap-6">
-						@analyticsModelTrendCard("Follow-ups per Task", "Average follow-up runs per task, grouped by latest task activity in this range. Includes each model’s own follow-ups on shared tasks.", "modelFollowupTrend")
+						@analyticsModelTrendCard("Follow-ups per Task", "Average follow-up runs per active task in each period, grouped by run start date. Includes each model’s own follow-ups on shared tasks.", "modelFollowupTrend")
 						@analyticsChartCard("Follow-up Breakdown", "Average follow-up runs in the selected period. They can reflect corrections, clarification, or changed goals. Includes each model’s own follow-ups on shared tasks.", "modelFollowupsChart", "h-80")
 					</div>
 					<div class="grid grid-cols-1 xl:grid-cols-2 gap-6">
