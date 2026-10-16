@@ -1604,3 +1604,24 @@ func TestBrowserFunctional_AnalyticsSharedModelActivity(t *testing.T) {
  </script>` + rendered.String()
 	runReconnectChromeFixture(t, fixture)
 }
+
+func TestBrowserFunctional_LearningSeparatesSkillEventTypes(t *testing.T) {
+	var rendered bytes.Buffer
+	if err := AnalyticsContent(&models.Project{ID: "p", Name: "P"}).Render(context.Background(), &rendered); err != nil {
+		t.Fatal(err)
+	}
+	fixture := `<main id="reconnect-result"></main><script>
+ history.replaceState({},'',location.pathname+'?project_id=p&view=learning');
+ var configs={};window.Chart=function(ctx,config){configs[ctx.canvas.id]=config;this.destroy=function(){};};
+ window.fetch=async function(url){return {ok:true,json:async()=>String(url).includes('/analytics/skills')?{usage_over_time:[{period:'2026-09-01',selected_count:3,loaded_count:0,viewed_count:0,created_count:1,edited_count:2},{period:'2026-09-02',selected_count:1,loaded_count:1,viewed_count:1}]}:{}};};
+ window.addEventListener('load',async function(){var result=document.getElementById('reconnect-result');try{
+ for(var i=0;i<100&&!configs.skillUsageTrendChart;i++)await new Promise(r=>setTimeout(r,20));
+ var series=configs.skillUsageTrendChart.data.datasets;
+ var expected={Selected:'3|1',Loaded:'0|1',Viewed:'0|1',Created:'1|0',Edited:'2|0'};
+ if(series.length!==5)throw Error('expected separate event series');
+ for(var s of series)if(s.data.join('|')!==expected[s.label])throw Error('wrong counts or misleading label: '+s.label);
+ result.dataset.testResult='pass';
+ }catch(e){result.dataset.testResult='fail';result.dataset.testError=e.message;}});
+ </script>` + rendered.String()
+	runReconnectChromeFixture(t, fixture)
+}

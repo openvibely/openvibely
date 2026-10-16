@@ -1245,7 +1245,9 @@ func (r *ExecutionRepo) queryModelMetrics(ctx context.Context, filter persistenc
 	window, windowArgs := analyticsWindowClause("e", filter)
 	usageWindow, usageArgs := analyticsEventWindowClause("u", "occurred_at", filter)
 	dimension, dimensionArgs := analyticsTaskDimensionClause("t", filter)
-	attributionSQL := `SELECT task_id,CASE WHEN COUNT(DISTINCT config_id)>1 THEN '__mixed__' ELSE MIN(config_id) END model_config_id FROM identities GROUP BY task_id`
+	// Keep usage-only tasks even when no configuration identity was recorded.
+	attributionSQL := `SELECT t.id task_id,CASE WHEN COUNT(DISTINCT i.config_id)>1 THEN '__mixed__' ELSE COALESCE(MIN(i.config_id),'') END model_config_id
+		FROM selected_tasks t LEFT JOIN identities i ON i.task_id=t.id GROUP BY t.id`
 	runModelJoin, usageModelGroup, usageModelJoin, goalJoin := "", "", "", ""
 	if activity {
 		attributionSQL = `SELECT task_id,COALESCE(agent_config_id,'') model_config_id FROM period_runs
