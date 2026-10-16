@@ -51,6 +51,13 @@ func TestBaseIncludesBuiltInThemeSystem(t *testing.T) {
 		`background-color: var(--ov-hover-bg) !important;`,
 		`var(--ov-diff-modify-bg)`,
 		`[data-color-theme^="vscode-"] .card,`,
+		`[data-color-theme^="vscode-"] .dropdown-content:not(.ov-menu){`,
+		`--ov-menu-surface: var(--ov-surface-raised);`,
+		`--ov-border-subtle: var(--ov-subtle-border);`,
+		`html[data-color-theme^="vscode-"] .ov-menu { --ov-menu-active: var(--ov-hover-bg);`,
+		`html[data-color-theme^="vscode-"] #desktop-project-titlebar { background-color: var(--ov-sidebar-bg) !important;`,
+		`html[data-color-theme^="vscode-"] #schedule-content .schedule-day-selected { background: var(--ov-accent-tint) !important; }`,
+		`[data-color-theme^="vscode-"] .schedule-datetime-popup [data-time-selected=true] { background: var(--ov-button-bg) !important;`,
 		`background-color:var(--ov-surface)!important;border-color:var(--ov-subtle-border)!important`,
 		`[data-color-theme^="vscode-"] .hover\:border-primary\/40:hover`,
 		`border-color:var(--ov-subtle-border)!important`,
@@ -211,7 +218,7 @@ func TestImportedThemeSubtleBordersBlendWithCardSurface(t *testing.T) {
 	for _, fragment := range []string{
 		`[data-color-theme^="vscode-"]{background-color:var(--ov-content-bg)}`,
 		`[data-color-theme^="vscode-"] .card,`,
-		`[data-color-theme^="vscode-"] .dropdown-content{background-color:var(--ov-surface)!important;border-color:var(--ov-subtle-border)!important}`,
+		`[data-color-theme^="vscode-"] .dropdown-content:not(.ov-menu){background-color:var(--ov-surface)!important;border-color:var(--ov-subtle-border)!important}`,
 		`[data-color-theme] .hljs * { color: var(--ov-syntax-foreground); }`,
 	} {
 		if !strings.Contains(html, fragment) {

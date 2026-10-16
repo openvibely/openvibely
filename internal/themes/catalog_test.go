@@ -163,6 +163,22 @@ func TestVSCodeCatalogProvidesSubtleBorderColorsForLegacyWebViews(t *testing.T) 
 	}
 }
 
+func TestVSCodeCatalogProvidesTranslucentAccentTint(t *testing.T) {
+	for _, theme := range VSCodeCatalog() {
+		tint := theme.CSS["--ov-accent-tint"]
+		_, _, _, alpha, ok := parseHexColorForTest(tint)
+		if !ok || len(tint) != 9 {
+			t.Fatalf("theme %s accent tint must be a precomputed #RRGGBBAA color, got %q", theme.Name, tint)
+		}
+		if !strings.HasPrefix(tint, strings.ToUpper(theme.Semantic["focus"][:7])) {
+			t.Fatalf("theme %s accent tint %q does not use focus color %q", theme.Name, tint, theme.Semantic["focus"])
+		}
+		if alpha <= 0 || alpha >= 128 {
+			t.Fatalf("theme %s accent tint alpha = %v, want a light translucent tint", theme.Name, alpha)
+		}
+	}
+}
+
 func contrastRatioForTest(foreground, background string) float64 {
 	fr, fg, fb, fa, foregroundOK := parseHexColorForTest(foreground)
 	br, bg, bb, ba, backgroundOK := parseHexColorForTest(background)

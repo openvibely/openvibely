@@ -1,0 +1,89 @@
+package pages
+
+import (
+	"bytes"
+	"context"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/web/static"
+	"github.com/openvibely/openvibely/web/templates/components"
+	"github.com/openvibely/openvibely/web/templates/layout"
+)
+
+func TestBrowserFunctional_ImportedThemeStylesTitlebarMenusAndSchedulePickers(t *testing.T) {
+	chrome := chatNavigationChromePath(t)
+	projects := []models.Project{{ID: "p1", Name: "Alpha"}, {ID: "p2", Name: "Beta"}}
+	var base bytes.Buffer
+	if err := layout.Base("Imported theme chrome", projects, "p1").Render(layout.WithUIPreferences(layout.WithDesktopMode(context.Background(), true), layout.UIPreferences{PinnedProjectIDs: []string{"p1", "p2"}}), &base); err != nil {
+		t.Fatalf("render base: %v", err)
+	}
+	var picker bytes.Buffer
+	if err := components.ScheduleDateTime("2026-10-16T09:30").Render(context.Background(), &picker); err != nil {
+		t.Fatalf("render schedule picker: %v", err)
+	}
+	var calendar bytes.Buffer
+	if err := ScheduleCalendarControls(nil).Render(context.Background(), &calendar); err != nil {
+		t.Fatalf("render schedule calendar styles: %v", err)
+	}
+	fixture := `<div id="schedule-content">` + calendar.String() + `<div data-calendar-day="2026-10-16" class="schedule-day-selected">Fri</div><div data-calendar-hour="9" class="bg-base-200 schedule-time-label schedule-day-selected">9 AM</div></div>
+<ul id="fixture-menu" class="ov-menu ov-menu-actions dropdown-content menu"><li><button type="button">Action</button></li></ul>
+<div id="fixture-picker">` + picker.String() + `</div><div id="probe"></div>`
+	html := base.String()
+	end := strings.LastIndex(html, "</body>")
+	page := html[:end] + fixture + html[end:]
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if static.ServeAsset(w, r) {
+			return
+		}
+		if r.URL.Path != "/" {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write([]byte(page))
+	}))
+	defer server.Close()
+
+	runComposerFocusCDP(t, chrome, server.URL, "imported-theme-chrome", func(browser *composerFocusCDP) {
+		browser.waitFor("theme runtime", `String(!!(window.openVibelyThemes && window.openVibelyThemes.apply))`, "true")
+		browser.evaluate(`window.openVibelyThemes.apply('vscode-kimbie-dark');
+			window.themeColor = function(value, property) { var probe = document.getElementById('probe'); probe.style[property || 'backgroundColor'] = value; return getComputedStyle(probe)[property || 'backgroundColor']; };
+			window.computed = function(selector, property) { return getComputedStyle(document.querySelector(selector))[property]; };
+			window.matches = function(selector, property, value) { var got = window.computed(selector, property); var want = window.themeColor(value, property); return got === want ? 'ok' : got + ' != ' + want; };
+			'ok'`)
+		browser.waitFor("theme applied", `document.documentElement.getAttribute('data-color-theme')`, "vscode-kimbie-dark")
+
+		checks := []struct{ label, selector, property, value string }{
+			{"title bar uses sidebar color", "#desktop-project-titlebar", "backgroundColor", "var(--ov-sidebar-bg)"},
+			{"selected project tab matches content", ".desktop-project-tab[data-selected=\"true\"]", "backgroundColor", "var(--ov-content-bg)"},
+			{"selected project tab text", ".desktop-project-tab [aria-selected=\"true\"]", "color", "var(--ov-text)"},
+			{"unselected project tab text", ".desktop-project-tab:not([data-selected=\"true\"]) [role=\"tab\"]", "color", "var(--ov-text-muted)"},
+			{"popup menu surface", "#fixture-menu", "backgroundColor", "var(--ov-surface-raised)"},
+			{"popup menu border", "#fixture-menu", "borderTopColor", "var(--ov-subtle-border)"},
+			{"popup menu text", "#fixture-menu", "color", "var(--ov-text)"},
+			{"project tab menu surface", "#project-tab-menu", "backgroundColor", "var(--ov-surface-raised)"},
+			{"selected schedule day", "#schedule-content [data-calendar-day]", "backgroundColor", "var(--ov-accent-tint)"},
+			{"selected schedule hour", "#schedule-content [data-calendar-hour]", "backgroundColor", "var(--ov-accent-tint)"},
+			{"date picker surface", ".schedule-datetime-popup", "backgroundColor", "var(--ov-surface-raised)"},
+			{"date picker border", ".schedule-datetime-popup", "borderTopColor", "var(--ov-subtle-border)"},
+			{"date picker text", ".schedule-datetime-popup", "color", "var(--ov-text)"},
+		}
+		for _, check := range checks {
+			browser.waitFor(check.label, `window.matches('`+strings.ReplaceAll(check.selector, `'`, `\'`)+`', '`+check.property+`', '`+check.value+`')`, "ok")
+		}
+
+		browser.evaluate(`window.openScheduleDateTime(document.querySelector('[data-run-at-picker]'));'ok'`)
+		browser.waitFor("selected date uses theme button", `window.matches('.schedule-datetime-days [aria-pressed="true"]', 'backgroundColor', 'var(--ov-button-bg)')`, "ok")
+		browser.waitFor("selected date text uses theme button text", `window.matches('.schedule-datetime-days [aria-pressed="true"]', 'color', 'var(--ov-button-fg)')`, "ok")
+		browser.waitFor("selected time uses theme button", `window.matches('[data-time-column="hour"] [data-time-selected="true"]', 'backgroundColor', 'var(--ov-button-bg)')`, "ok")
+
+		browser.evaluate(`window.openVibelyThemes.apply('openvibely-dark');'ok'`)
+		browser.waitFor("native theme keeps default selection tint", `window.computed('#schedule-content [data-calendar-day]', 'backgroundColor')`, "rgba(116, 128, 255, 0.16)")
+		browser.waitFor("native theme keeps default menu surface", `window.computed('#fixture-menu', 'backgroundColor')`, "rgb(29, 35, 42)")
+	})
+}

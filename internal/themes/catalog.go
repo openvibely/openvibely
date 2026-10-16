@@ -50,8 +50,18 @@ func VSCodeCatalog() []Theme {
 			catalog[i].CSS = make(map[string]string)
 		}
 		catalog[i].CSS["--ov-subtle-border"] = subtleBorderColor(catalog[i].Semantic["surface"], catalog[i].Semantic["text"])
+		catalog[i].CSS["--ov-accent-tint"] = accentTintColor(catalog[i].Semantic["focus"])
 	}
 	return catalog
+}
+
+// accentTintColor is a translucent focus color for selected rows and ranges.
+func accentTintColor(focus string) string {
+	rgb, alpha, ok := parseThemeHexColor(focus)
+	if !ok {
+		return focus
+	}
+	return fmt.Sprintf("#%02X%02X%02X%02X", uint8(rgb[0]), uint8(rgb[1]), uint8(rgb[2]), uint8(math.Round(alpha*0.24*255)))
 }
 
 func subtleBorderColor(surface, text string) string {
