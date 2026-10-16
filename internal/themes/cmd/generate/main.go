@@ -357,7 +357,7 @@ func normalizeSemantic(kind string, c map[string]string) map[string]string {
 	m["border"] = fallback(pick("contrastBorder", "widget.border", "panel.border", "sideBar.border"), mix(m["text"], m["bg"], .18))
 	m["borderStrong"] = fallback(pick("contrastActiveBorder", "focusBorder"), mix(m["text"], m["bg"], .35))
 	m["primary"] = fallback(pick("button.background", "textLink.foreground", "focusBorder", "activityBarBadge.background"), fb["primary"])
-	m["primaryForeground"] = fallback(pick("button.foreground", "activityBarBadge.foreground"), bestText(m["primary"]))
+	m["primaryForeground"] = fallback(pick("button.foreground", "activityBarBadge.foreground"), bestText(composite(m["primary"], m["contentBg"])))
 	m["focus"] = fallback(pick("focusBorder", "contrastActiveBorder"), m["primary"])
 	m["link"] = readableAccent([]string{pick("textLink.foreground"), pick("textLink.activeForeground"), m["focus"], m["primary"]}, m["contentBg"], 4.5)
 	m["inputBg"] = fallback(pick("input.background", "dropdown.background"), m["surfaceRaised"])
@@ -373,15 +373,15 @@ func normalizeSemantic(kind string, c map[string]string) map[string]string {
 	}
 	m["hoverBg"] = fallback(pick("list.hoverBackground", "toolbar.hoverBackground", "editor.hoverHighlightBackground"), alpha(m["primary"], .16))
 	m["buttonHoverBg"] = fallback(pick("button.hoverBackground"), m["focus"])
-	m["buttonHoverFg"] = fallback(pick("button.foreground", "activityBarBadge.foreground"), bestText(m["buttonHoverBg"]))
+	m["buttonHoverFg"] = fallback(pick("button.foreground", "activityBarBadge.foreground"), bestText(composite(m["buttonHoverBg"], m["contentBg"])))
 	m["buttonSecondaryBg"] = fallback(pick("button.secondaryBackground"), m["surfaceRaised"])
 	m["buttonSecondaryFg"] = fallback(pick("button.secondaryForeground"), m["text"])
 	m["info"] = fallback(pick("notificationsInfoIcon.foreground", "editorInfo.foreground", "problemsInfoIcon.foreground"), fb["info"])
-	m["infoForeground"] = bestText(m["info"])
+	m["infoForeground"] = bestText(composite(m["info"], m["contentBg"]))
 	m["success"] = fallback(pick("testing.iconPassed", "terminal.ansiGreen", "charts.green"), fb["success"])
-	m["successForeground"] = bestText(m["success"])
+	m["successForeground"] = bestText(composite(m["success"], m["contentBg"]))
 	m["warning"] = fallback(pick("notificationsWarningIcon.foreground", "editorWarning.foreground", "problemsWarningIcon.foreground"), fb["warning"])
-	m["warningForeground"] = bestText(m["warning"])
+	m["warningForeground"] = bestText(composite(m["warning"], m["contentBg"]))
 	m["error"] = cleanColor(fb["error"])
 	for _, k := range []string{"errorForeground", "editorError.foreground", "notificationsErrorIcon.foreground"} {
 		// Some themes set errorForeground to a near-white tint that reads as body text.
@@ -390,7 +390,7 @@ func normalizeSemantic(kind string, c map[string]string) map[string]string {
 			break
 		}
 	}
-	m["errorForeground"] = bestText(m["error"])
+	m["errorForeground"] = bestText(composite(m["error"], m["contentBg"]))
 	m["diffAddBg"] = fallback(pick("diffEditor.insertedTextBackground", "diffEditor.insertedLineBackground"), alpha(m["success"], .18))
 	m["diffAddFg"] = m["success"]
 	m["diffModifyBg"] = fallback(pick("diffEditor.unchangedRegionBackground"), alpha(m["warning"], .14))
@@ -705,9 +705,9 @@ func relativeLuminance(r, g, b float64) float64 {
 }
 
 func bestText(bg string) string {
-	r, g, b, _ := rgba(bg)
-	lum := (0.299*float64(r) + 0.587*float64(g) + 0.114*float64(b)) / 255
-	if lum > .55 {
+	bg = opaqueColor(bg)
+	white := contrastRatio("#FFFFFF", bg)
+	if white < 4.5 && contrastRatio("#000000", bg) > white {
 		return "#000000"
 	}
 	return "#FFFFFF"

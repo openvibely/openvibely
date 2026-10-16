@@ -187,3 +187,35 @@ func TestNormalizeSemanticErrorSkipsNearWhiteTint(t *testing.T) {
 		t.Fatalf("error = %s, want themed errorForeground", semantic["error"])
 	}
 }
+
+func TestBestTextPicksHigherContrastForStatusColors(t *testing.T) {
+	for _, tc := range []struct{ bg, want string }{
+		{"#F85149", "#000000"},
+		{"#3794FF", "#000000"},
+		{"#0E639C", "#FFFFFF"},
+		{"#1E1E1E", "#FFFFFF"},
+		{"#FFFFFF", "#000000"},
+	} {
+		if got := bestText(tc.bg); got != tc.want {
+			t.Errorf("bestText(%s) = %s, want %s", tc.bg, got, tc.want)
+		}
+	}
+}
+
+func TestNormalizeSemanticStatusForegroundsAreReadable(t *testing.T) {
+	semantic := normalizeSemantic("dark", map[string]string{
+		"editor.background": "#1E1E1E",
+		"editor.foreground": "#D4D4D4",
+		"button.background": "#2AA19899",
+		"errorForeground":   "#F85149",
+	})
+	if got := semantic["errorForeground"]; got != "#000000" {
+		t.Fatalf("errorForeground = %s, want #000000 on #F85149", got)
+	}
+	for _, pair := range [][2]string{{"errorForeground", "error"}, {"infoForeground", "info"}, {"successForeground", "success"}, {"warningForeground", "warning"}, {"primaryForeground", "primary"}} {
+		bg := composite(semantic[pair[1]], semantic["contentBg"])
+		if ratio := contrastRatio(semantic[pair[0]], bg); ratio < 4.5 {
+			t.Errorf("%s %s on %s contrast %.2f < 4.5", pair[0], semantic[pair[0]], bg, ratio)
+		}
+	}
+}
