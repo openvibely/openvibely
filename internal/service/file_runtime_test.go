@@ -177,3 +177,9 @@ func TestFileRuntimeUsesTypedSchemas(t *testing.T) {
 		require.True(t, json.Valid(def.ParameterSchema()))
 	}
 }
+
+func TestCuratorAttachmentReferencesDoNotClaimImageDelivery(t *testing.T) {
+	refs := attachedFileReferences(WithAttachedFiles(context.Background(), []models.Attachment{{FileName: "screenshot.png", FilePath: "/tmp/screenshot.png"}}))
+	require.Contains(t, refs, "screenshot.png")
+	require.NotContains(t, refs, "already included directly")
+}
