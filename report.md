@@ -1,51 +1,43 @@
 # The Duck Who Borrowed the Moon
 
-Every evening, a small duck named Pip watched the moon settle into the village pond.
+Every evening, a small duck named Pip watched the moon float in the village pond.
 
-“That’s a very fine egg,” he told the frogs.
+“It must get lonely up there,” he told the frogs.
 
-“It’s a reflection,” said the oldest frog.
+“It looks perfectly comfortable down here,” said a frog, pointing at its reflection.
 
-“That’s a very fine name for an egg,” said Pip.
+Pip had an idea. He fetched a little wooden bucket, paddled to the brightest patch of water, and scooped up the moon.
 
-One autumn night, Pip decided the egg looked cold. He gathered reeds, soft grass, and three feathers he was reasonably certain belonged to him. Then he built a nest at the water’s edge.
+For a moment, it shimmered inside his bucket.
 
-But whenever he paddled toward the moon to collect it, his ripples broke it into silver pieces.
+“I’ve got you,” he whispered.
 
-“Oh dear,” he whispered.
+He carried it to the old goose who could no longer make the walk to the pond. At her doorstep, he set the bucket down carefully.
 
-He waited until the pond grew still. The moon returned, perfectly round.
+“A moon,” he announced. “For your garden.”
 
-Pip tried again. Again, silver pieces.
+The goose leaned over the water. A silver circle trembled between their reflections.
 
-On the bank, a young fox watched without laughing.
+“How thoughtful,” she said.
 
-“What are you doing?” she asked.
+They sat together while crickets tuned their fiddles in the grass. Pip told her about the frogs, the reeds, and a particularly rude fish. The goose told him about the spring she had flown beyond the hills.
 
-“Trying to keep that egg warm.”
+Then a cloud covered the sky, and the bucket went dark.
 
-The fox looked up. Pip followed her gaze.
+Pip gasped. “I’ve lost it!”
 
-There was another moon in the sky.
+The goose tucked a wing around him.
 
-Pip sat quietly for a moment.
+“Wait a little.”
 
-“I may have misunderstood something,” he said.
+So they waited. Pip listened to her breathing and the soft scrape of leaves along the path.
 
-“A little,” said the fox.
+At last, the cloud drifted away. The moon returned to the bucket.
 
-They settled beside the empty nest. Above them, clouds drifted away, revealing so many stars that Pip forgot to be embarrassed.
+Pip let out a relieved quack.
 
-Then a tiny peeping came from the reeds.
+“Would you like me to bring it again tomorrow?” he asked.
 
-A lost duckling stumbled onto the bank, shivering. Pip tucked her into the nest and folded a wing over her.
+“Yes,” said the goose. “And bring another story about that rude fish.”
 
-The fox curled nearby to block the wind.
-
-By morning, the duckling’s mother found them. She thanked Pip, who looked at his crooked nest with considerable satisfaction.
-
-“Was it worth all that trouble?” asked the oldest frog.
-
-Pip watched the duckling hurry after her mother.
-
-“Yes,” he said. “I was wrong about the egg. But I was right about the nest.”
+The next evening, Pip arrived with his bucket. The goose had put out two cushions and a plate of peas.
