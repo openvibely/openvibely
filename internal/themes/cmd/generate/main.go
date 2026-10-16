@@ -359,7 +359,7 @@ func normalizeSemantic(kind string, c map[string]string) map[string]string {
 	m["primary"] = fallback(pick("button.background", "textLink.foreground", "focusBorder", "activityBarBadge.background"), fb["primary"])
 	m["primaryForeground"] = fallback(pick("button.foreground", "activityBarBadge.foreground"), bestText(m["primary"]))
 	m["focus"] = fallback(pick("focusBorder", "contrastActiveBorder"), m["primary"])
-	m["link"] = fallback(pick("textLink.foreground", "textLink.activeForeground"), m["primary"])
+	m["link"] = readableAccent([]string{pick("textLink.foreground"), pick("textLink.activeForeground"), m["focus"], m["primary"]}, m["contentBg"], 4.5)
 	m["inputBg"] = fallback(pick("input.background", "dropdown.background"), m["surfaceRaised"])
 	m["inputBorder"] = fallback(pick("input.border", "dropdown.border"), m["border"])
 	m["buttonBg"] = m["primary"]
@@ -382,7 +382,14 @@ func normalizeSemantic(kind string, c map[string]string) map[string]string {
 	m["successForeground"] = bestText(m["success"])
 	m["warning"] = fallback(pick("notificationsWarningIcon.foreground", "editorWarning.foreground", "problemsWarningIcon.foreground"), fb["warning"])
 	m["warningForeground"] = bestText(m["warning"])
-	m["error"] = fallback(pick("errorForeground", "notificationsErrorIcon.foreground", "editorError.foreground"), fb["error"])
+	m["error"] = cleanColor(fb["error"])
+	for _, k := range []string{"errorForeground", "editorError.foreground", "notificationsErrorIcon.foreground"} {
+		// Some themes set errorForeground to a near-white tint that reads as body text.
+		if v := pick(k); v != "" && chroma(composite(v, m["contentBg"])) >= 64 && contrastRatio(composite(v, m["contentBg"]), m["contentBg"]) >= 3 {
+			m["error"] = v
+			break
+		}
+	}
 	m["errorForeground"] = bestText(m["error"])
 	m["diffAddBg"] = fallback(pick("diffEditor.insertedTextBackground", "diffEditor.insertedLineBackground"), alpha(m["success"], .18))
 	m["diffAddFg"] = m["success"]
@@ -616,6 +623,42 @@ func ensureContrast(preferred, background, fallbackColor string, minimum float64
 		}
 	}
 	return fallbackColor
+}
+
+// readableAccent returns the first candidate readable on background, or else
+// shifts the last candidate toward black or white until it is readable.
+func readableAccent(candidates []string, background string, minimum float64) string {
+	background = opaqueColor(background)
+	last := ""
+	for _, c := range candidates {
+		if c == "" || !validCSSColor(c) {
+			continue
+		}
+		last = c
+		if contrastRatio(composite(c, background), background) >= minimum {
+			return c
+		}
+	}
+	if last == "" {
+		return bestText(background)
+	}
+	base := composite(last, background)
+	target := "#FFFFFF"
+	if contrastRatio("#000000", background) > contrastRatio("#FFFFFF", background) {
+		target = "#000000"
+	}
+	for step := 1; step <= 100; step++ {
+		candidate := mix(base, target, float64(step)/100)
+		if contrastRatio(candidate, background) >= minimum {
+			return candidate
+		}
+	}
+	return target
+}
+
+func chroma(color string) int {
+	r, g, b, _ := rgba(color)
+	return max(r, g, b) - min(r, g, b)
 }
 
 func composite(top, base string) string {

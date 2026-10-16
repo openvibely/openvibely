@@ -143,3 +143,47 @@ func TestNormalizeSemanticSelectionKeepsTextReadable(t *testing.T) {
 		t.Fatalf("selectionBg = %s, want list selection color", semantic["selectionBg"])
 	}
 }
+
+func TestNormalizeSemanticLinkStaysReadableWithoutTextLinkColor(t *testing.T) {
+	semantic := normalizeSemantic("dark", map[string]string{
+		"editor.background": "#000C18",
+		"foreground":        "#6688CC",
+		"button.background": "#2B3C5D",
+		"focusBorder":       "#596F99",
+	})
+	if semantic["link"] == "#2B3C5D" {
+		t.Fatal("link fell back to the dark button background")
+	}
+	if got := contrastRatio(semantic["link"], semantic["contentBg"]); got < 4.5 {
+		t.Fatalf("link %s contrast = %.2f, want >= 4.5", semantic["link"], got)
+	}
+
+	semantic = normalizeSemantic("dark", map[string]string{
+		"editor.background":   "#1E1E1E",
+		"textLink.foreground": "#3794FF",
+		"button.background":   "#0E639C",
+	})
+	if semantic["link"] != "#3794FF" {
+		t.Fatalf("link = %s, want readable textLink.foreground", semantic["link"])
+	}
+}
+
+func TestNormalizeSemanticErrorSkipsNearWhiteTint(t *testing.T) {
+	semantic := normalizeSemantic("dark", map[string]string{
+		"editor.background":      "#390000",
+		"foreground":             "#F8F8F8",
+		"errorForeground":        "#FFEAEA",
+		"editorError.foreground": "#FF6666",
+	})
+	if semantic["error"] != "#FF6666" {
+		t.Fatalf("error = %s, want editorError.foreground", semantic["error"])
+	}
+
+	semantic = normalizeSemantic("dark", map[string]string{
+		"editor.background": "#1E1E1E",
+		"errorForeground":   "#F48771",
+	})
+	if semantic["error"] != "#F48771" {
+		t.Fatalf("error = %s, want themed errorForeground", semantic["error"])
+	}
+}
