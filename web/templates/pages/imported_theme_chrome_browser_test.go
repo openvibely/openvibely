@@ -35,7 +35,7 @@ func TestBrowserFunctional_ImportedThemeStylesTitlebarMenusAndSchedulePickers(t 
 	}
 	fixture := `<div id="fixture-search">` + search.String() + `</div><div id="schedule-content">` + calendar.String() + `<div data-calendar-day="2026-10-16" class="schedule-day-selected">Fri</div><div data-calendar-hour="9" class="bg-base-200 schedule-time-label schedule-day-selected">9 AM</div></div>
 <ul id="fixture-menu" class="ov-menu ov-menu-actions dropdown-content menu"><li><button type="button">Action</button></li></ul>
-<div id="fixture-picker">` + picker.String() + `</div><span id="fixture-deletions" style="color: var(--ov-diff-del-fg)">-4</span><span id="fixture-primary-text" class="text-primary">P</span><span id="fixture-running" class="task-state-running">Running</span><span id="fixture-primary-badge" class="badge badge-primary">New</span><div id="fixture-column" class="kanban-column bg-base-300"></div><div id="fixture-hover-card" data-search-card class="card bg-base-100 border border-base-300 hover:border-primary/40 cursor-pointer" style="position:fixed;left:300px;top:150px;width:120px;height:60px;z-index:99999">Card</div><div id="probe"></div>`
+<div id="fixture-picker">` + picker.String() + `</div><span id="fixture-deletions" style="color: var(--ov-diff-del-fg)">-4</span><span id="fixture-primary-text" class="text-primary">P</span><span id="fixture-running" class="task-state-running">Running</span><span id="fixture-primary-badge" class="badge badge-primary">New</span><div id="fixture-column" class="kanban-column bg-base-300"></div><div id="fixture-hover-card" data-search-card class="card bg-base-100 border border-base-300 hover:border-primary/40 cursor-pointer" style="position:fixed;left:300px;top:150px;width:120px;height:60px;z-index:99999">Card</div><input id="fixture-toggle-on" type="checkbox" class="toggle toggle-primary toggle-sm" checked/><input id="fixture-toggle-off" type="checkbox" class="toggle toggle-secondary toggle-sm"/><div id="probe"></div>`
 	html := base.String()
 	end := strings.LastIndex(html, "</body>")
 	page := html[:end] + fixture + html[end:]
@@ -107,6 +107,21 @@ func TestBrowserFunctional_ImportedThemeStylesTitlebarMenusAndSchedulePickers(t 
 			browser.waitFor(palette.id+" title bar", `window.computed('#desktop-project-titlebar', 'backgroundColor')`, palette.sidebar)
 			browser.waitFor(palette.id+" task column matches title bar", `window.matches('#fixture-column', 'backgroundColor', 'var(--ov-sidebar-bg)')`, "ok")
 			browser.waitFor(palette.id+" popup menu surface", `window.matches('#fixture-menu', 'backgroundColor', 'var(--ov-surface-raised)')`, "ok")
+			browser.waitFor(palette.id+" checked toggle uses button color", `window.matches('#fixture-toggle-on', 'backgroundColor', 'var(--ov-button-bg)')`, "ok")
+			browser.waitFor(palette.id+" unchecked toggle uses strong border color", `window.matches('#fixture-toggle-off', 'backgroundColor', 'var(--ov-border-strong)')`, "ok")
+			for _, state := range []struct{ id, color string }{{"on", "--ov-button-bg"}, {"off", "--ov-border-strong"}} {
+				browser.evaluate(`var toggle = document.getElementById('fixture-toggle-` + state.id + `'); toggle.style.cssText = 'position:fixed;left:300px;top:250px;z-index:99999';'ok'`)
+				browser.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseMoved", "x": 305, "y": 255}, nil)
+				browser.waitFor(palette.id+state.id+" toggle hovered", `String(document.getElementById('fixture-toggle-`+state.id+`').matches(':hover'))`, "true")
+				for _, property := range []string{"backgroundColor", "borderTopColor"} {
+					browser.waitFor(palette.id+state.id+" stable toggle "+property, `window.matches('#fixture-toggle-`+state.id+`', '`+property+`', 'var(`+state.color+`)')`, "ok")
+				}
+				browser.evaluate(`document.getElementById('fixture-toggle-` + state.id + `').style.cssText = ''; 'ok'`)
+				browser.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseMoved", "x": 290, "y": 240}, nil)
+			}
+			browser.waitFor(palette.id+" spreadsheet focus follows palette", `String(window.themeColor(getComputedStyle(document.getElementById('image-gallery')).getPropertyValue('--studio-focus')) === window.themeColor('var(--ov-focus)'))`, "true")
+			browser.waitFor(palette.id+" file viewer page uses theme surface", `String(getComputedStyle(document.getElementById('image-gallery')).getPropertyValue('--studio-side').trim() === 'var(--ov-surface)' || window.themeColor(getComputedStyle(document.getElementById('image-gallery')).getPropertyValue('--studio-side')) === window.themeColor('var(--ov-surface)'))`, "true")
+			browser.waitFor(palette.id+" file viewer shell stays transparent", `window.computed('#image-gallery .image-gallery-shell', 'backgroundColor')`, "rgba(0, 0, 0, 0)")
 			browser.waitFor(palette.id+" running state uses palette accent", `window.near('#fixture-running', 'color', '`+palette.accent+`')`, "ok")
 		}
 

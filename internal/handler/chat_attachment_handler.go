@@ -14,13 +14,13 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/attachmentsession"
+	"github.com/openvibely/openvibely/pkg/filecontent"
 	"github.com/openvibely/openvibely/web/templates/components"
 )
 
 const (
-	maxChatUploadSize     = 10 << 20   // 10 MB
-	maxFilesPerUpload     = 3          // Max 3 files per upload
-	maxTextAttachmentSize = 100 * 1024 // 100KB max for text file content injection into prompt
+	maxChatUploadSize = 25 << 20 // Ordinary files; video has a separate limit.
+	maxFilesPerUpload = 3        // Max 3 files per upload
 )
 
 func init() {
@@ -35,7 +35,7 @@ func init() {
 func (h *Handler) UploadChatAttachment(c echo.Context) error {
 	applog.Infof("[handler] UploadChatAttachment")
 
-	form, err := parseBoundedMultipartForm(c, maxChatUploadSize, maxFilesPerUpload)
+	form, err := parseBoundedMultipartForm(c, filecontent.MaxVideoBytes, maxFilesPerUpload)
 	if err != nil {
 		applog.Infof("[handler] UploadChatAttachment error parsing form: %v", err)
 		if httpErr, ok := err.(*echo.HTTPError); ok {
@@ -49,6 +49,8 @@ func (h *Handler) UploadChatAttachment(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "failed to parse form")
 	}
 
+	defer form.RemoveAll()
+
 	// Get the files from request
 	files := form.File["files"]
 	if len(files) == 0 {
@@ -60,6 +62,12 @@ func (h *Handler) UploadChatAttachment(c echo.Context) error {
 	if len(files) > maxFilesPerUpload {
 		applog.Infof("[handler] UploadChatAttachment too many files: %d (max %d)", len(files), maxFilesPerUpload)
 		return echo.NewHTTPError(http.StatusBadRequest, "maximum 3 files per upload")
+	}
+
+	for _, file := range files {
+		if err := validateFileUpload(file); err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		}
 	}
 
 	// Create or reuse a temporary directory for this upload session.
@@ -108,9 +116,9 @@ func (h *Handler) UploadChatAttachment(c echo.Context) error {
 	var attachmentInfos []map[string]interface{}
 	for _, file := range files {
 		// Check file size
-		if file.Size > maxChatUploadSize {
+		if file.Size > filecontent.UploadLimit(file.Filename) {
 			applog.Infof("[handler] UploadChatAttachment file %s too large (%d bytes)", file.Filename, file.Size)
-			return echo.NewHTTPError(http.StatusBadRequest, "file size exceeds 10MB limit")
+			return echo.NewHTTPError(http.StatusBadRequest, "file size exceeds upload limit (25 MiB, or 200 MiB for video)")
 		}
 
 		// Open the uploaded file
@@ -139,6 +147,9 @@ func (h *Handler) UploadChatAttachment(c echo.Context) error {
 
 		// Detect media type
 		mediaType := file.Header.Get("Content-Type")
+		if known, ok := allowedFileExtensions[strings.ToLower(filepath.Ext(filename))]; ok {
+			mediaType = known
+		}
 		if mediaType == "" {
 			mediaType = "application/octet-stream"
 		}
@@ -186,9 +197,8 @@ func (h *Handler) DownloadChatAttachment(c echo.Context) error {
 
 	applog.Infof("[handler] DownloadChatAttachment serving file=%s", attachment.FileName)
 
-	c.Response().Header().Set("X-Content-Type-Options", "nosniff")
-	c.Response().Header().Set("Content-Security-Policy", "sandbox")
-	return c.File(attachment.FilePath)
+	// Serve the file
+	return serveFileContent(c, attachment.FilePath, attachment.FileName)
 }
 
 // DeleteChatAttachment handles deleting a chat attachment
@@ -324,5 +334,5 @@ func (h *Handler) PreviewPendingAttachment(c echo.Context) error {
 	c.Response().Header().Set("Cache-Control", "private, no-store")
 	c.Response().Header().Set("X-Content-Type-Options", "nosniff")
 	c.Response().Header().Set("Content-Security-Policy", "sandbox")
-	return c.File(filepath.Join(uploadsDir, "chat", "pending", sessionID, name))
+	return serveFileContent(c, filepath.Join(uploadsDir, "chat", "pending", sessionID, name), name)
 }

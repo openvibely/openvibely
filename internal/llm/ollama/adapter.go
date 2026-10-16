@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	llmattachment "github.com/openvibely/openvibely/internal/llm/attachment"
 	"io"
 	"net/http"
 	"os"
@@ -149,8 +150,8 @@ func (a *Adapter) callDirect(ctx context.Context, prompt string, attachments []m
 	opts := ollamaRequestOptions(agent)
 
 	userMsg := chatMessage{Role: "user", Content: prompt}
-	if images := encodeImageAttachments(attachments); len(images) > 0 {
-		userMsg.Images = images
+	if attachmentErr := prepareUserAttachments(ctx, &userMsg, attachments); attachmentErr != nil {
+		return "", 0, attachmentErr
 	}
 
 	messages := make([]chatMessage, 0, 2)
@@ -206,8 +207,8 @@ func (a *Adapter) callChat(ctx context.Context, message string, attachments []mo
 	messages := buildChatHistory(systemPromptStr, chatHistory)
 
 	userMsg := chatMessage{Role: "user", Content: message}
-	if images := encodeImageAttachments(attachments); len(images) > 0 {
-		userMsg.Images = images
+	if attachmentErr := prepareUserAttachments(ctx, &userMsg, attachments); attachmentErr != nil {
+		return "", 0, attachmentErr
 	}
 	messages = ensureExecutionEnvironment(messages, workDir)
 	messages = append(messages, userMsg)
@@ -265,8 +266,8 @@ func (a *Adapter) callStreaming(ctx context.Context, prompt string, attachments 
 
 	fullPrompt := prompt + llmprompt.BuildTaskStatusInstructions()
 	userMsg := chatMessage{Role: "user", Content: fullPrompt}
-	if images := encodeImageAttachments(attachments); len(images) > 0 {
-		userMsg.Images = images
+	if attachmentErr := prepareUserAttachments(ctx, &userMsg, attachments); attachmentErr != nil {
+		return "", "", 0, attachmentErr
 	}
 	messages = ensureExecutionEnvironment(messages, workDir)
 	messages = append(messages, userMsg)
@@ -505,6 +506,23 @@ func encodeImageAttachments(attachments []models.Attachment) []string {
 		applog.Infof("[ollama] added image attachment %s (%s, %d bytes)", att.FileName, att.MediaType, len(data))
 	}
 	return images
+}
+
+func prepareUserAttachments(ctx context.Context, message *chatMessage, attachments []models.Attachment) error {
+	inputs, err := llmattachment.ModelInputs(ctx, attachments)
+	if err != nil {
+		return err
+	}
+	for _, input := range inputs {
+		if strings.HasPrefix(input.MediaType, "image/") {
+			message.Images = append(message.Images, base64.StdEncoding.EncodeToString(input.Data))
+		} else if input.MediaType == "text/plain" {
+			message.Content += "\n--- File: " + input.Name + " ---\n" + string(input.Data)
+		} else {
+			return fmt.Errorf("this model connection cannot receive %s documents; use a document-capable connection", input.MediaType)
+		}
+	}
+	return nil
 }
 
 func ensureExecutionEnvironment(messages []chatMessage, workDir string) []chatMessage {

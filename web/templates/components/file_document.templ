@@ -1,0 +1,140 @@
+package components
+import("fmt";"strings";"github.com/openvibely/openvibely/pkg/filecontent")
+func fileDocumentRunClass(run filecontent.DocumentRun)string{classes:=[]string{"doc-run"};if run.Bold{classes=append(classes,"doc-run-bold")};if run.Italic{classes=append(classes,"doc-run-italic")};if run.Underline{classes=append(classes,"doc-run-underline")};if run.Strike{classes=append(classes,"doc-run-strike")};if run.Superscript{classes=append(classes,"doc-run-superscript")};if run.Subscript{classes=append(classes,"doc-run-subscript")};return strings.Join(classes," ")}
+func fileDocumentBlockStyle(block filecontent.DocumentBlock)string{
+ styles:=[]string{}
+ if block.Alignment!=""{styles=append(styles,"text-align:"+block.Alignment)}
+ if value:=fileDocumentTwips(block.IndentStart);value!=""{styles=append(styles,"margin-inline-start:"+value)}
+ if value:=fileDocumentTwips(block.IndentEnd);value!=""{styles=append(styles,"margin-inline-end:"+value)}
+ if block.FirstLine!=0{styles=append(styles,"text-indent:"+fileDocumentTwips(block.FirstLine))}else if block.Hanging!=0{styles=append(styles,"text-indent:"+fileDocumentTwips(-block.Hanging))}
+ return strings.Join(styles,";")
+}
+func fileDocumentTwips(value int)string{if value < -20000 || value > 20000{return ""};if value==0{return ""};return fmt.Sprintf("%.2fpx",float64(value)/15)}
+func fileDocumentBlockClass(block filecontent.DocumentBlock)string{classes:=[]string{};if block.List{classes=append(classes,"result-document-list");if block.ListOrdered{classes=append(classes,"result-document-list-ordered")}};return strings.Join(classes," ")}
+func fileDocumentListMarker(block filecontent.DocumentBlock)string{if block.ListMarker!=""{return block.ListMarker};return "•"}
+templ FileDocumentRuns(runs []filecontent.DocumentRun){
+ for _,run:=range runs {
+  if run.BookmarkID!="" {
+   <span id={run.BookmarkID}></span>
+  } else if run.NoteNumber>0 {
+   <sup id={run.NoteReference}><a href={templ.SafeURL(fmt.Sprintf("#doc-note-%d",run.NoteNumber))} aria-label={fmt.Sprintf("Note %d",run.NoteNumber)}>{fmt.Sprintf("[%d]",run.NoteNumber)}</a></sup>
+  } else if run.Break {
+   <br/>
+  } else if run.ImageDataURI!="" {
+   <img class="doc-run-image" src={templ.SafeURL(run.ImageDataURI)} alt={run.ImageAlt}/>
+  } else if strings.HasPrefix(run.Link,"#doc-bookmark-") {
+   <a href={templ.SafeURL(run.Link)}><span class={fileDocumentRunClass(run)}>{run.Text}</span></a>
+  } else if run.Link!="" {
+   <a href={templ.SafeURL(run.Link)} target="_blank" rel="noopener"><span class={fileDocumentRunClass(run)}>{run.Text}</span></a>
+  } else {
+   <span class={fileDocumentRunClass(run)}>{run.Text}</span>
+  }
+ }
+}
+templ FileDocumentCellContents(cell filecontent.DocumentTableCell){
+ @FileDocumentRuns(cell.Runs)
+ for _, block := range cell.Blocks {
+  @FileDocumentBlock(block)
+ }
+}
+
+templ FileDocumentTableCell(cell filecontent.DocumentTableCell){
+ if !cell.Omit {
+  if cell.Header {
+   if cell.ColSpan>1 {
+    if cell.RowSpan>1 {
+     <th colspan={fmt.Sprint(cell.ColSpan)} rowspan={fmt.Sprint(cell.RowSpan)}>@FileDocumentCellContents(cell)</th>
+    } else {
+     <th colspan={fmt.Sprint(cell.ColSpan)}>@FileDocumentCellContents(cell)</th>
+    }
+   } else if cell.RowSpan>1 {
+    <th rowspan={fmt.Sprint(cell.RowSpan)}>@FileDocumentCellContents(cell)</th>
+   } else {
+    <th>@FileDocumentCellContents(cell)</th>
+   }
+  } else if cell.ColSpan>1 {
+   if cell.RowSpan>1 {
+    <td colspan={fmt.Sprint(cell.ColSpan)} rowspan={fmt.Sprint(cell.RowSpan)}>@FileDocumentCellContents(cell)</td>
+   } else {
+    <td colspan={fmt.Sprint(cell.ColSpan)}>@FileDocumentCellContents(cell)</td>
+   }
+  } else if cell.RowSpan>1 {
+   <td rowspan={fmt.Sprint(cell.RowSpan)}>@FileDocumentCellContents(cell)</td>
+  } else {
+   <td>@FileDocumentCellContents(cell)</td>
+  }
+ }
+}
+templ FileDocumentTableRow(row []filecontent.DocumentTableCell){
+ <tr>
+  for _,cell:=range row {
+   @FileDocumentTableCell(cell)
+  }
+ </tr>
+}
+templ FileDocumentTable(table *filecontent.DocumentTable){
+ <div class="result-document-table-wrap"><table class="result-document-table">
+ if table.HeaderRows>0 {
+  <thead>
+  for i,row:=range table.Rows {
+   if i<table.HeaderRows {
+    @FileDocumentTableRow(row)
+   }
+  }
+  </thead>
+ }
+ <tbody>
+ for i,row:=range table.Rows {
+  if i>=table.HeaderRows {
+   @FileDocumentTableRow(row)
+  }
+ }
+ </tbody></table></div>
+}
+templ FileDocumentBlock(block filecontent.DocumentBlock){
+ if block.Kind=="table" && block.Table!=nil {
+  @FileDocumentTable(block.Table)
+ } else if block.Kind=="heading1" {
+  <h1 style={fileDocumentBlockStyle(block)}>@FileDocumentRuns(block.Runs)</h1>
+ } else if block.Kind=="heading2" {
+  <h2 style={fileDocumentBlockStyle(block)}>@FileDocumentRuns(block.Runs)</h2>
+ } else if block.Kind=="heading3" {
+  <h3 style={fileDocumentBlockStyle(block)}>@FileDocumentRuns(block.Runs)</h3>
+ } else if block.Kind=="heading4" {
+  <h4 style={fileDocumentBlockStyle(block)}>@FileDocumentRuns(block.Runs)</h4>
+ } else if block.Kind=="heading5" {
+  <h5 style={fileDocumentBlockStyle(block)}>@FileDocumentRuns(block.Runs)</h5>
+ } else if block.Kind=="heading6" {
+  <h6 style={fileDocumentBlockStyle(block)}>@FileDocumentRuns(block.Runs)</h6>
+ } else {
+  <p class={fileDocumentBlockClass(block)} style={fileDocumentBlockStyle(block)}>
+   if block.List {
+    <span class="result-document-list-marker" aria-hidden="true">{fileDocumentListMarker(block)}</span>
+   }
+   @FileDocumentRuns(block.Runs)
+  </p>
+ }
+}
+func fileDocxSource(sources []string)string{if len(sources)>0{return sources[0]};return ""}
+templ FileDocumentPreview(name string,document filecontent.DocumentPreview,download string,sources ...string){
+ <header class="v-top" data-document-header><h3>{name}</h3><a class="v-button" href={templ.SafeURL(download)}>Download</a></header><article class="result-document" aria-label="Document preview" data-docx-source={fileDocxSource(sources)}>
+ for _,block:=range document.Blocks {
+  @FileDocumentBlock(block)
+ }
+ if len(document.Notes)>0 {
+  <section aria-label="Document notes"><hr/><ol>
+   for _,note:=range document.Notes {
+    <li id={fmt.Sprintf("doc-note-%d",note.Number)}>
+     for _,block:=range note.Blocks {
+      @FileDocumentBlock(block)
+     }
+     <a href={templ.SafeURL("#"+note.Reference)} aria-label={fmt.Sprintf("Back to note %d reference",note.Number)}>↑</a>
+    </li>
+   }
+  </ol></section>
+ }
+ if len(document.Blocks)==0 {
+  <p class="v-muted">The document has no readable paragraphs. Download it to open in an Office app.</p>
+ }
+ </article>
+}

@@ -393,7 +393,7 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 							const eventType = data.type || event.type;
 							if (!eventType) return;
 
-							if (eventType === 'task_board_updated' || eventType === 'task_status_changed' || eventType === 'task_category_changed' || eventType === 'task_thread_execution_started' || eventType === 'task_lifecycle_execution_changed' || eventType === 'task_thread_input_applied' || eventType === 'task_thread_input_queued' || eventType === 'task_thread_input_steered' || eventType === 'task_thread_input_cancelled' || eventType === 'task_goal_updated' || eventType === 'task_goal_paused' || eventType === 'task_goal_resumed' || eventType === 'task_goal_cleared' || eventType === 'task_goal_evaluated' || eventType === 'task_goal_followup_queued' || eventType === 'alert_created' || eventType.indexOf('automation_') === 0) {
+							if (eventType === 'task_files_changed' || eventType === 'skill_dependency_progress' || eventType === 'task_board_updated' || eventType === 'task_status_changed' || eventType === 'task_category_changed' || eventType === 'task_thread_execution_started' || eventType === 'task_lifecycle_execution_changed' || eventType === 'task_thread_input_applied' || eventType === 'task_thread_input_queued' || eventType === 'task_thread_input_steered' || eventType === 'task_thread_input_cancelled' || eventType === 'task_goal_updated' || eventType === 'task_goal_paused' || eventType === 'task_goal_resumed' || eventType === 'task_goal_cleared' || eventType === 'task_goal_evaluated' || eventType === 'task_goal_followup_queued' || eventType === 'alert_created' || eventType.indexOf('automation_') === 0) {
 								window._tabVisibility.dispatchSSEEvent('sse-task-event', data);
 								if (eventType.indexOf('automation_') === 0) {
 									window._tabVisibility.dispatchSSEEvent('sse-automation-event', data);
@@ -479,6 +479,8 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 								},
 								listeners: {
 									'task_board_updated': handleLiveEvent,
+                                    'task_files_changed': handleLiveEvent,
+                                    'skill_dependency_progress': handleLiveEvent,
 									'task_status_changed': handleLiveEvent,
 									'task_category_changed': handleLiveEvent,
 									'task_thread_execution_started': handleLiveEvent,

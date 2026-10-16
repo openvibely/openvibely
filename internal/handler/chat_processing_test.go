@@ -2784,9 +2784,10 @@ func TestStartQueuedChatInputProcessesSavedAttachmentSession(t *testing.T) {
 	require.False(t, newMessage.Queued)
 
 	request := mock.LastAgentRequest()
-	require.Len(t, request.Attachments, 1)
+	require.Len(t, request.Attachments, 2)
 	require.Equal(t, "diagram.png", request.Attachments[0].FileName)
-	require.Contains(t, request.ChatSystemContext, "queued text attachment")
+	require.Contains(t, request.ChatSystemContext, "notes.txt")
+	require.NotContains(t, request.ChatSystemContext, "queued text attachment")
 	attachments, err := h.chatAttachmentRepo.ListByExecutionIDs(ctx, []string{request.ExecID})
 	require.NoError(t, err)
 	require.Len(t, attachments[request.ExecID], 2)
@@ -4106,9 +4107,10 @@ func TestStartQueuedTaskThreadInputProcessesSavedAttachmentSession(t *testing.T)
 
 	require.Eventually(t, func() bool { return mock.CallCount() == 1 }, 2*time.Second, 25*time.Millisecond)
 	request := mock.LastAgentRequest()
-	require.Len(t, request.Attachments, 1)
-	require.Equal(t, "screen.png", request.Attachments[0].FileName)
-	require.Contains(t, request.ChatSystemContext, "queued task attachment")
+	require.Len(t, request.Attachments, 2)
+	require.Equal(t, "screen.png", request.Attachments[1].FileName)
+	require.Contains(t, request.ChatSystemContext, "instructions.txt")
+	require.NotContains(t, request.ChatSystemContext, "queued task attachment")
 	attachments, err := h.chatAttachmentRepo.ListByExecutionIDs(ctx, []string{request.ExecID})
 	require.NoError(t, err)
 	require.Len(t, attachments[request.ExecID], 2)
@@ -4928,7 +4930,7 @@ func TestProcessStreamingResponse_SendsAndCommitsPreparedSteeringAttachmentsAfte
 	require.NoError(t, os.MkdirAll(pendingDir, 0755))
 	require.NoError(t, os.WriteFile(filepath.Join(pendingDir, "notes.txt"), []byte("steering notes"), 0644))
 	require.NoError(t, os.WriteFile(filepath.Join(pendingDir, "screen.png"), []byte("fake-png"), 0644))
-	largeContent := strings.Repeat("x", maxTextAttachmentSize+1)
+	largeContent := strings.Repeat("x", (256<<10)+1)
 	require.NoError(t, os.WriteFile(filepath.Join(pendingDir, "large.txt"), []byte(largeContent), 0644))
 	steering := &models.ThreadInput{
 		Scope:               models.ThreadInputScopeTask,
@@ -4957,11 +4959,12 @@ func TestProcessStreamingResponse_SendsAndCommitsPreparedSteeringAttachmentsAfte
 	require.Equal(t, 1, mock.CallCount())
 	lastCall := mock.LastCall()
 	require.Contains(t, lastCall.Prompt, "use attached steering files")
-	require.Contains(t, lastCall.Prompt, "steering notes")
-	require.Contains(t, lastCall.Prompt, "large.txt (attached")
+	require.NotContains(t, lastCall.Prompt, "steering notes")
+	require.Contains(t, lastCall.Prompt, "notes.txt")
+	require.Contains(t, lastCall.Prompt, "large.txt")
 	require.NotContains(t, lastCall.Prompt, largeContent[:50])
-	require.Len(t, lastCall.Attachments, 1)
-	require.Equal(t, filepath.Join(pendingDir, "screen.png"), lastCall.Attachments[0].FilePath)
+	require.Len(t, lastCall.Attachments, 3)
+	require.Equal(t, filepath.Join(pendingDir, "screen.png"), lastCall.Attachments[2].FilePath)
 	applied, err := h.threadInputRepo.GetByID(ctx, steering.ID)
 	require.NoError(t, err)
 	require.NotNil(t, applied)
@@ -5035,9 +5038,10 @@ func TestProcessStreamingResponse_DoesNotMovePreparedSteeringAttachmentsWhenProv
 	})
 
 	require.Equal(t, 1, mock.CallCount())
-	require.Contains(t, mock.LastCall().Prompt, "steering notes")
-	require.Len(t, mock.LastCall().Attachments, 1)
-	require.Equal(t, filepath.Join(pendingDir, "screen.png"), mock.LastCall().Attachments[0].FilePath)
+	require.NotContains(t, mock.LastCall().Prompt, "steering notes")
+	require.Contains(t, mock.LastCall().Prompt, "notes.txt")
+	require.Len(t, mock.LastCall().Attachments, 2)
+	require.Equal(t, filepath.Join(pendingDir, "screen.png"), mock.LastCall().Attachments[1].FilePath)
 	stillPending, err := h.threadInputRepo.GetByID(ctx, steering.ID)
 	require.NoError(t, err)
 	require.NotNil(t, stillPending)
@@ -9275,4 +9279,31 @@ func TestProcessStreamingResponse_FollowupIndexLock(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestProcessStreamingResponseHistoricalImageInstructions(t *testing.T) {
+	h, _, configs, stores := setupTestHandlerWithStores(t)
+	h.chatAttachmentRepo = stores.ChatAttachments
+	agent := createAgent(t, configs)
+	project := createProject(t, h, "Historical image")
+	task := createTask(t, h, project.ID, "Review old screenshot", func(task *models.Task) { task.AgentID = &agent.ID })
+	old := createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecCompleted
+		ex.PromptSent = "See screenshot"
+		ex.Output = "Seen"
+	})
+	require.NoError(t, stores.ChatAttachments.Create(context.Background(), &models.ChatAttachment{ExecutionID: old.ID, FileName: "previous.png", FilePath: "/tmp/previous.png", MediaType: "image/png", FileSize: 100}))
+	current := createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) { ex.Status = models.ExecRunning; ex.IsFollowup = true })
+	mock := testutil.NewMockLLMCaller()
+	mock.Response = "Reviewed"
+	mock.TextOnly = "Reviewed"
+	var prompts []string
+	mock.OnCall = func(_ context.Context, call testutil.MockLLMCall) { prompts = append(prompts, call.Prompt) }
+	h.llmSvc.SetLLMCaller(mock)
+	h.processStreamingResponse(streamingResponseParams{ExecID: current.ID, TaskID: task.ID, Message: "Look at the old screenshot again", Agent: *agent, ProjectID: project.ID, IsTaskFollowup: true, ChatHistory: []models.Execution{*old}})
+	require.NotEmpty(t, prompts)
+	prompt := strings.Join(prompts, "\n")
+	require.Contains(t, prompt, "previous.png")
+	require.NotContains(t, prompt, "already included directly")
+	require.Contains(t, prompt, "Use file tools")
 }

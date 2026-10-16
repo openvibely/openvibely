@@ -3,6 +3,7 @@ package handler
 import (
 	"crypto/rand"
 	"fmt"
+	"github.com/openvibely/openvibely/pkg/filecontent"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -21,13 +22,47 @@ import (
 )
 
 const (
-	apiMaxFileSize    = 10 << 20 // 10 MB per file
+	apiMaxFileSize    = 25 << 20 // Ordinary file limit; video is bounded separately.
 	apiMaxFilesPerReq = 10       // Max 10 files per API request
 )
 
 // allowedFileExtensions maps allowed extensions to their MIME types.
 // Includes images, documents, and common programming language files.
 var allowedFileExtensions = map[string]string{
+	".avif":     "image/avif",
+	".bmp":      "image/bmp",
+	".ico":      "image/x-icon",
+	".heic":     "image/heic",
+	".heif":     "image/heif",
+	".svg":      "image/svg+xml",
+	".docx":     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+	".pptx":     "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+	".xlsx":     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+	".xls":      "application/vnd.ms-excel",
+	".xlsb":     "application/vnd.ms-excel.sheet.binary.macroEnabled.12",
+	".ods":      "application/vnd.oasis.opendocument.spreadsheet",
+	".doc":      "application/msword",
+	".ppt":      "application/vnd.ms-powerpoint",
+	".rtf":      "text/rtf",
+	".tsv":      "text/tab-separated-values",
+	".htm":      "text/html",
+	".markdown": "text/markdown",
+	".mdx":      "text/markdown",
+	".mp4":      "video/mp4",
+	".m4v":      "video/mp4",
+	".mov":      "video/quicktime",
+	".webm":     "video/webm",
+	".ogv":      "video/ogg",
+	".aac":      "audio/aac",
+	".flac":     "audio/flac",
+	".m4a":      "audio/mp4",
+	".mp3":      "audio/mpeg",
+	".oga":      "audio/ogg",
+	".ogg":      "audio/ogg",
+	".opus":     "audio/ogg",
+	".wav":      "audio/wav",
+	".weba":     "audio/webm",
+
 	// Images
 	".jpg":  "image/jpeg",
 	".jpeg": "image/jpeg",
@@ -108,7 +143,7 @@ type ChatMessageStatusResponse struct {
 // @Description Returns 201 immediately with a message ID. The AI processes the message asynchronously.
 // @Description Poll GET /api/chat/message/{id} to check status and retrieve the response.
 // @Description Supported file types: Images (JPG, PNG, GIF, WebP), Documents (PDF, TXT, MD, CSV), Code (Go, Python, JS, TS, Rust, Java, C/C++, Ruby, PHP, Swift, Kotlin, Shell, SQL, HTML, CSS, SCSS, XML, JSON, YAML, TOML, INI, diff/patch)
-// @Description Maximum file size: 10 MB per file
+// @Description Maximum file size: 25 MiB per file, 200 MiB for video, 256 KiB for ordinary text
 // @Description Maximum files per request: 10
 // @Tags chat
 // @Accept multipart/form-data
@@ -126,7 +161,7 @@ type ChatMessageStatusResponse struct {
 func (h *Handler) APIChatMessage(c echo.Context) error {
 	contentType := c.Request().Header.Get("Content-Type")
 	if isMultipartContentType(contentType) {
-		if _, err := parseBoundedMultipartForm(c, apiMaxFileSize, apiMaxFilesPerReq); err != nil {
+		if _, err := parseBoundedMultipartForm(c, filecontent.MaxVideoBytes, apiMaxFilesPerReq); err != nil {
 			applog.Infof("[handler] APIChatMessage error parsing form: %v", err)
 			if httpErr, ok := err.(*echo.HTTPError); ok && httpErr.Code == http.StatusRequestEntityTooLarge {
 				return c.JSON(http.StatusRequestEntityTooLarge, map[string]string{"error": "request body too large"})
@@ -190,7 +225,10 @@ func (h *Handler) APIChatMessage(c echo.Context) error {
 
 		for _, file := range files {
 			// Validate file size
-			if file.Size > apiMaxFileSize {
+			if err := validateFileUpload(file); err != nil {
+				return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+			}
+			if file.Size > filecontent.UploadLimit(file.Filename) {
 				return c.JSON(http.StatusRequestEntityTooLarge, map[string]string{
 					"error": fmt.Sprintf("file %q exceeds %dMB size limit", file.Filename, apiMaxFileSize>>20),
 				})

@@ -24,6 +24,7 @@ import (
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/llm/tokenestimate"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/pkg/attachment"
 	"github.com/openvibely/openvibely/pkg/executionenv"
 )
 
@@ -703,6 +704,14 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 			}
 			inputItems = append(inputItems, toolResultItem)
 			localItemsAfterResponse = append(localItemsAfterResponse, toolResultItem)
+			if image, ok := attachment.TakeToolImage(ctx, exec.output); ok && !exec.isError {
+				item := agenticInputItem{"type": "message", "role": "user", "content": []any{
+					map[string]any{"type": "input_text", "text": "Image returned by view_image: " + image.Name},
+					map[string]any{"type": "input_image", "detail": "auto", "image_url": "data:" + image.MediaType + ";base64," + base64.StdEncoding.EncodeToString(image.Data)},
+				}}
+				inputItems = append(inputItems, item)
+				localItemsAfterResponse = append(localItemsAfterResponse, item)
+			}
 			if exec.record.ID != "" {
 				deliveryRecords = append(deliveryRecords, exec.record)
 			}

@@ -17,6 +17,7 @@ import (
 	"github.com/openvibely/openvibely/internal/events"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	llmoutput "github.com/openvibely/openvibely/internal/llm/output"
+	llmprompt "github.com/openvibely/openvibely/internal/llm/prompt"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/service"
@@ -52,7 +53,7 @@ var (
 //   - ProjectID: Project ID for task creation/lookup
 //   - SystemContext: Request-scoped system prompt context (attachments, personality, etc.)
 //   - WorkDir: Working directory for CLI agents (project repo path)
-//   - ImageAttachments: Image files for vision-capable models
+//   - ImageAttachments: Attachments; supported images are inline, other files are references
 //   - IsTaskFollowup: true = coding agent prompt (executes code); false = orchestration prompt (creates tasks)
 //   - ChatMode: orchestration mode for interactive chat (orchestrate/plan)
 type streamingResponseParams struct {
@@ -458,13 +459,31 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 	if chatMode == "" {
 		chatMode = models.ChatModeOrchestrate
 	}
+	lifecycleFiles := append([]models.Attachment(nil), params.ImageAttachments...)
+	if h.chatAttachmentRepo != nil && len(params.ChatHistory) > 0 {
+		ids := make([]string, 0, len(params.ChatHistory))
+		for _, execution := range params.ChatHistory {
+			ids = append(ids, execution.ID)
+		}
+		if byExecution, err := h.chatAttachmentRepo.ListByExecutionIDs(ctx, ids); err == nil {
+			for _, id := range ids {
+				for _, file := range byExecution[id] {
+					lifecycleFiles = append(lifecycleFiles, models.Attachment{FileName: file.FileName, FilePath: file.FilePath, MediaType: file.MediaType, FileSize: file.FileSize})
+				}
+			}
+		}
+	}
+	ctx = service.WithAttachedFiles(ctx, lifecycleFiles)
+	if len(lifecycleFiles) > 0 {
+		params.Message += "\n" + llmprompt.BuildAttachmentInstructions(params.ImageAttachments) + llmprompt.BuildAttachmentReferences(lifecycleFiles[len(params.ImageAttachments):])
+	}
 	agentDef := h.resolveTaskAgentDefinitionForTask(ctx, params.TaskID, params.AgentDefinition)
 	params.AgentDefinition = agentDef
 	ctx = llmcontracts.WithChatMode(ctx, chatMode)
 	// Lifecycle integration for task-thread followups: lifecycle hooks must run on
 	// every model turn including followups. Without this block, followups would
 	// never see selected skills, skill runtime tools, or the available-skills
-	// catalog. Interactive chat only runs memory recall before the model turn;
+	// catalog. Interactive chat runs recall and attached-file skill selection;
 	// it intentionally skips after_complete extraction so Chat prompts and mode
 	// control text are not written back to managed memory.
 	var lifecycleAfter func(err error, chatContext llmcontracts.ChatContext)
@@ -476,7 +495,9 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 				ctx = turn.Ctx
 				lifecycleAfter = turn.AfterComplete
 			} else if !params.IsTaskFollowup {
-				ctx = h.prepareChatMemoryRecall(ctx, *task)
+				chatTask := *task
+				chatTask.Prompt = params.Message
+				ctx = h.prepareChatMemoryRecall(ctx, chatTask)
 			}
 		}
 	}
@@ -595,7 +616,7 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 		for _, input := range batch.inputs {
 			var attachments []models.Attachment
 			if input.AttachmentSessionID != "" {
-				_, attachments, _ = h.previewPendingAttachments(input.AttachmentSessionID)
+				_, attachments, _ = h.previewSteeringAttachments(input.AttachmentSessionID, params.ExecID, params.Agent.Provider)
 			}
 			messages = append(messages, llmcontracts.LocalSteeringMessage{Text: input.Content, Attachments: attachments})
 		}
@@ -1010,7 +1031,7 @@ func (h *Handler) claimPendingSteeringInputsWithOptions(ctx context.Context, par
 			continue
 		}
 		if input.AttachmentSessionID != "" {
-			attachmentContext, imageAttachments, attErr := h.previewPendingAttachments(input.AttachmentSessionID)
+			attachmentContext, imageAttachments, attErr := h.previewSteeringAttachments(input.AttachmentSessionID, params.ExecID, params.Agent.Provider)
 			if attErr != nil {
 				applog.Infof("[handler] claimPendingSteeringInputs exec=%s input=%s attachment preview error: %v", params.ExecID, input.ID, attErr)
 				attachmentContext = fmt.Sprintf("⚠️ Attachment processing error: %v", attErr)

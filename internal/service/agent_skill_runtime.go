@@ -29,7 +29,7 @@ func (s *LLMService) agentDeclaredSkillRuntimeTools(ctx context.Context, task mo
 	readerCatalog := selectedCatalog
 	if agentExplicitlyAllowsAnyTool(agent, "skills_list", "agent_list", "agent_view") {
 		readerCatalog = mergeSkillCatalogs(task.ID+":skill-tools", standaloneCatalog, selectedCatalog)
-		readers = agentskills.SkillRuntimeTools(readerCatalog, s.globalSkillRoot, projectRoot, inspector)
+		readers = agentskills.ExecutingSkillRuntimeTools(readerCatalog, s.globalSkillRoot, projectRoot, inspector)
 	} else if agentExplicitlyAllowsTool(agent, "skill_view") {
 		readers = agentskills.SelectedSkillRuntimeTools(selectedCatalog)
 	}

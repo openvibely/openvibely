@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/openvibely/openvibely/internal/skilldeps"
 	"gopkg.in/yaml.v3"
 )
 
@@ -23,19 +24,20 @@ import (
 // (line 1026). The same struct is consumed by both the importer and the
 // skill_manage mutation tool and agent declaration import path.
 type SkillDeclaration struct {
-	Kind           string              `yaml:"kind"`
-	Version        int                 `yaml:"version"`
-	Agent          AgentDeclaration    `yaml:"agent"`
-	Skill          SkillBlock          `yaml:"skill"`
-	Routing        RoutingBlock        `yaml:"routing"`
-	Tools          []string            `yaml:"tools"`
-	ToolConfig     ToolConfigBlock     `yaml:"tool_config"`
-	Plugins        []string            `yaml:"plugins"`
-	MCPServers     []string            `yaml:"mcp_servers"`
-	Permissions    PermissionsBlock    `yaml:"permissions"`
-	ModelDefaults  ModelDefaultsBlock  `yaml:"model_defaults"`
-	LifecycleHooks map[string]HookDecl `yaml:"lifecycle_hooks"`
-	EvidenceRefs   []string            `yaml:"evidence_refs"`
+	Dependencies   []skilldeps.Dependency `yaml:"dependencies,omitempty"`
+	Kind           string                 `yaml:"kind"`
+	Version        int                    `yaml:"version"`
+	Agent          AgentDeclaration       `yaml:"agent"`
+	Skill          SkillBlock             `yaml:"skill"`
+	Routing        RoutingBlock           `yaml:"routing"`
+	Tools          []string               `yaml:"tools"`
+	ToolConfig     ToolConfigBlock        `yaml:"tool_config"`
+	Plugins        []string               `yaml:"plugins"`
+	MCPServers     []string               `yaml:"mcp_servers"`
+	Permissions    PermissionsBlock       `yaml:"permissions"`
+	ModelDefaults  ModelDefaultsBlock     `yaml:"model_defaults"`
+	LifecycleHooks map[string]HookDecl    `yaml:"lifecycle_hooks"`
+	EvidenceRefs   []string               `yaml:"evidence_refs"`
 }
 
 // AgentDeclaration captures the agent identity fields that may be set through
@@ -177,6 +179,9 @@ func ParseDeclaration(content string) (*SkillDeclaration, string, error) {
 func (d *SkillDeclaration) Validate() error {
 	if d == nil {
 		return errors.New("declaration: nil")
+	}
+	if err := skilldeps.Validate(d.Dependencies); err != nil {
+		return err
 	}
 	if strings.TrimSpace(d.Kind) != "openvibely.agent_skill" {
 		return fmt.Errorf("declaration: kind must be openvibely.agent_skill, got %q", d.Kind)

@@ -149,7 +149,7 @@ func (r *AttachmentRepo) DeleteByTask(ctx context.Context, taskID string) error 
 	return nil
 }
 
-const selectAllTaskAttachmentFilePathsSQL = `SELECT file_path FROM task_attachments`
+const selectAllTaskAttachmentFilePathsSQL = `SELECT file_path FROM task_attachments UNION ALL SELECT file_path FROM generated_files`
 
 // GetAllFilePaths returns all file paths currently in the database
 func (r *AttachmentRepo) GetAllFilePaths(ctx context.Context) ([]string, error) {
