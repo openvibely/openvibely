@@ -126,6 +126,15 @@ func BuildTaskStatusInstructions() string {
 // calls about attached files with their absolute paths. Returns an empty string
 // if there are no attachments.
 func BuildAttachmentInstructions(attachments []models.Attachment) string {
+	return buildAttachmentInstructions(attachments, true)
+}
+
+// BuildAttachmentReferences describes historical files without claiming their bytes are present.
+func BuildAttachmentReferences(attachments []models.Attachment) string {
+	return buildAttachmentInstructions(attachments, false)
+}
+
+func buildAttachmentInstructions(attachments []models.Attachment, imagesIncluded bool) string {
 	if len(attachments) == 0 {
 		return ""
 	}
@@ -133,7 +142,7 @@ func BuildAttachmentInstructions(attachments []models.Attachment) string {
 	var sb strings.Builder
 	sb.WriteString("Attached files:\n")
 	for _, att := range attachments {
-		if llmattachment.DirectImage(att) {
+		if imagesIncluded && llmattachment.DirectImage(att) {
 			sb.WriteString(fmt.Sprintf("Attached image: %q (path: %q). Its image bytes are already included directly in this request; inspect the image input without reopening it with view_image.", att.FileName, AttachmentAbsPath(att)))
 		} else {
 			sb.WriteString(llmattachment.Reference(att))

@@ -9280,3 +9280,30 @@ func TestProcessStreamingResponse_FollowupIndexLock(t *testing.T) {
 		})
 	}
 }
+
+func TestProcessStreamingResponseHistoricalImageInstructions(t *testing.T) {
+	h, _, configs, stores := setupTestHandlerWithStores(t)
+	h.chatAttachmentRepo = stores.ChatAttachments
+	agent := createAgent(t, configs)
+	project := createProject(t, h, "Historical image")
+	task := createTask(t, h, project.ID, "Review old screenshot", func(task *models.Task) { task.AgentID = &agent.ID })
+	old := createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecCompleted
+		ex.PromptSent = "See screenshot"
+		ex.Output = "Seen"
+	})
+	require.NoError(t, stores.ChatAttachments.Create(context.Background(), &models.ChatAttachment{ExecutionID: old.ID, FileName: "previous.png", FilePath: "/tmp/previous.png", MediaType: "image/png", FileSize: 100}))
+	current := createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) { ex.Status = models.ExecRunning; ex.IsFollowup = true })
+	mock := testutil.NewMockLLMCaller()
+	mock.Response = "Reviewed"
+	mock.TextOnly = "Reviewed"
+	var prompts []string
+	mock.OnCall = func(_ context.Context, call testutil.MockLLMCall) { prompts = append(prompts, call.Prompt) }
+	h.llmSvc.SetLLMCaller(mock)
+	h.processStreamingResponse(streamingResponseParams{ExecID: current.ID, TaskID: task.ID, Message: "Look at the old screenshot again", Agent: *agent, ProjectID: project.ID, IsTaskFollowup: true, ChatHistory: []models.Execution{*old}})
+	require.NotEmpty(t, prompts)
+	prompt := strings.Join(prompts, "\n")
+	require.Contains(t, prompt, "previous.png")
+	require.NotContains(t, prompt, "already included directly")
+	require.Contains(t, prompt, "Use file tools")
+}
