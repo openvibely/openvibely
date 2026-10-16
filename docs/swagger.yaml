@@ -772,6 +772,8 @@ definitions:
         type: integer
       tokens:
         type: integer
+      total_duration_ms:
+        type: integer
     type: object
   models.ModelOutcomeTrend:
     properties:
@@ -831,6 +833,10 @@ definitions:
       technical_completion:
         $ref: '#/definitions/models.AnalyticsMetric'
       token_covered_tasks:
+        type: integer
+      total_duration_ms:
+        type: integer
+      total_follow_ups:
         type: integer
       total_tokens:
         type: integer

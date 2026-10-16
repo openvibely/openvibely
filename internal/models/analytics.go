@@ -147,6 +147,8 @@ type ModelCategoryPerformance struct {
 // Each row contains whole-task history for one configuration, or the separate
 // mixed-configuration group. Outcome and usage metrics disclose their coverage.
 type ModelPerformance struct {
+	TotalDurationMs     int64               `json:"total_duration_ms"`
+	TotalFollowUps      int                 `json:"total_follow_ups"`
 	EffortTrend         []ModelEffortTrend  `json:"effort_trend"`
 	OutcomeTrend        []ModelOutcomeTrend `json:"outcome_trend"`
 	ModelConfigID       string              `json:"model_config_id"`
@@ -173,6 +175,7 @@ type ModelPerformance struct {
 }
 
 type ModelEffortTrend struct {
+	TotalDurationMs  int64  `json:"total_duration_ms"`
 	Period           string `json:"period"`
 	Tasks            int    `json:"tasks"`
 	FollowUps        int    `json:"follow_ups"`

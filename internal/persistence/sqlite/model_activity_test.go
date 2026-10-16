@@ -43,7 +43,7 @@ func TestModelActivityAttributesSharedTaskEffortWithoutDuplicatingCombinedTasks(
 		activity[row.ModelConfigID] = row
 	}
 	a, b := activity["a"], activity["b"]
-	if len(activity) != 2 || a.TasksUsed != 2 || a.RunCount != 3 || a.TotalTokens != 400 || a.TokenCoveredTasks != 2 || a.AverageFollowUps != 1 || a.KnownCostUSD == nil || *a.KnownCostUSD != 0.4 {
+	if len(activity) != 2 || a.TasksUsed != 2 || a.RunCount != 3 || a.TotalFollowUps != 2 || a.TotalDurationMs < 179998 || a.TotalDurationMs > 180002 || a.TotalTokens != 400 || a.TokenCoveredTasks != 2 || a.AverageFollowUps != 1 || a.KnownCostUSD == nil || *a.KnownCostUSD != 0.4 {
 		t.Fatalf("Astra activity: %+v", a)
 	}
 	if a.MedianDurationMs < 89998 || a.MedianDurationMs > 90002 {
