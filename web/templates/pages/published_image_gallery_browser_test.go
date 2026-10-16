@@ -107,3 +107,58 @@ func TestBrowserFunctional_PublishedImagesShareTaskGallery(t *testing.T) {
 		b.waitFor("restored Files list retains gallery", `document.querySelector('[data-gallery-count]').textContent`, "2 / 3")
 	})
 }
+
+func TestBrowserFunctional_PublishedDocumentSurvivesStreaming(t *testing.T) {
+	chrome := chatNavigationChromePath(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if static.ServeAsset(w, r) {
+			return
+		}
+		if r.URL.Path == "/files/abc123" {
+			if r.URL.Query().Get("metadata") == "1" {
+				w.Header().Set("Content-Type", "application/json")
+				io.WriteString(w, `{"file_name":"report.md","media_type":"text/plain"}`)
+				return
+			}
+			_ = components.FilePreview("report.md", "markdown", "# Report\n\n"+strings.Repeat("Details.\n\n", 100), r.URL.String()).Render(r.Context(), w)
+			return
+		}
+		if r.URL.Path != "/test" {
+			w.WriteHeader(204)
+			return
+		}
+		child := templ.ComponentFunc(func(ctx context.Context, w io.Writer) error {
+			if err := components.ChatAutoScrollScript().Render(ctx, w); err != nil {
+				return err
+			}
+			_, err := io.WriteString(w, `<div class="chat-markdown" id="published-message"></div>`)
+			return err
+		})
+		_ = layout.Base("Gallery", nil, "").Render(templ.WithChildren(r.Context(), child), w)
+	}))
+	defer server.Close()
+	runComposerFocusCDP(t, chrome, server.URL+"/test", "audit-document-stream", func(b *composerFocusCDP) {
+		b.waitFor("renderer", `typeof window.renderLiveChatContent`, "function")
+		b.evaluateAwait(`(async()=>{window.source='[report.md](/files/abc123)';await renderLiveChatContent(document.querySelector('#published-message'),source);return 'ready'})()`)
+		b.waitFor("published document link", `String(!!document.querySelector('#published-message [data-file-preview]'))`, "true")
+		b.click("#published-message a")
+		b.waitFor("document loaded", `String(document.getElementById('image-gallery').open&&!!document.querySelector('[data-file-markdown] h1'))`, "true")
+		got := b.evaluateAwait(`(async()=>{
+ const root=document.querySelector('#published-message'),dialog=document.getElementById('image-gallery'),link=root.querySelector('a'),content=dialog.querySelector('[data-result-content]'),documentNode=content.firstElementChild;
+ content.scrollTop=100;const scroll=content.scrollTop;if(!scroll)throw Error('fixture must scroll');
+ const paint=()=>new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
+ for(const suffix of [' More text.',' More text.\n\nAnother paragraph.']){
+  await renderLiveChatContent(root,source+suffix);await paint();
+  if(!dialog.open||root.querySelector('a')!==link||content.firstElementChild!==documentNode||content.scrollTop!==scroll)throw Error('stream reset document preview');
+ }
+ await renderLiveChatContent(root,source+' Finished.',false,true);await paint();
+ if(!dialog.open||content.firstElementChild!==documentNode||content.scrollTop!==scroll)throw Error('final render reset document preview');
+ await renderLiveChatContent(root,'Link removed.');await paint();
+ if(dialog.open)throw Error('removed link left preview open');
+ return 'true';
+})()`)
+		if got != "true" {
+			t.Fatal("published Markdown preview closed on next streamed text update")
+		}
+	})
+}
