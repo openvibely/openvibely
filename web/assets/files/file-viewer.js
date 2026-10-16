@@ -112,7 +112,9 @@
  const status=dialog.querySelector('[data-file-attach-status]');attach.disabled=true;
  try{const input=document.querySelector('form input[name=attachment_session_id]')?.closest('form')?.querySelector('input[type=file]');if(!input)throw Error('Open a conversation composer to attach this file.');const response=await fetch(mode(attach.dataset.fileAttach,'download'));if(!response.ok)throw Error('Could not read this file');const blob=await response.blob(),transfer=new DataTransfer();transfer.items.add(new File([blob],attach.dataset.fileName,{type:blob.type}));input.files=transfer.files;input.dispatchEvent(new Event('change',{bubbles:true}));dialog.close()}catch(err){if(status)status.textContent=err.message}finally{attach.disabled=false}
  });
- function scanLinks(root=document){root.querySelectorAll('a[href]:not([data-file-link-bound])').forEach(link=>{
+ // Server-rendered preview links already own their thumbnail and gallery group.
+ // Only enhance ordinary published links, such as links in model responses.
+ function scanLinks(root=document){root.querySelectorAll('a[href]:not([data-file-link-bound]):not([data-image-gallery-item]):not([data-file-preview])').forEach(link=>{
  let url;try{url=new URL(link.href,location.href)}catch{return}
  if(url.origin!==location.origin||!/^\/files\/[a-f0-9]+$/.test(url.pathname)||url.searchParams.has('download')||link.hasAttribute('download'))return;
  link.dataset.fileLinkBound='';link.dataset.filePreview='';
