@@ -36,8 +36,9 @@ type Theme struct {
 }
 
 func Catalog() []Theme {
-	catalog := make([]Theme, 0, ExpectedThemeCount+2)
+	catalog := make([]Theme, 0, ExpectedThemeCount+2+len(paletteSpecs()))
 	catalog = append(catalog, OpenVibelyThemes()...)
+	catalog = append(catalog, PaletteThemes()...)
 	catalog = append(catalog, VSCodeCatalog()...)
 	return catalog
 }

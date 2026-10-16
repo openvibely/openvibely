@@ -993,12 +993,12 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	e.POST("/channels/outbound-targets/:id/test", h.handleOutboundTargetTest)
 	e.POST("/channels/send-message-explicit-targets", h.handleSendMessageExplicitTargets)
 
-		// Personality
-		e.GET("/personality", h.handleAppSettings)
-		e.POST("/personality/save", h.handlePersonalitySave)
+	// Personality
+	e.GET("/personality", h.handleAppSettings)
+	e.POST("/personality/save", h.handlePersonalitySave)
 
-		// Themes
-		e.GET("/themes", h.Themes)
+	// Themes
+	e.GET("/themes", h.Themes)
 
 	// Custom personalities
 	e.POST("/personality/custom", h.CreateCustomPersonality)
