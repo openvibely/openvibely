@@ -42,6 +42,11 @@ func TestBrowserFunctional_ImportedThemeStylesTitlebarMenusAndSchedulePickers(t 
 		t.Fatal(err)
 	}
 	fixture += question.String()
+	var panel bytes.Buffer
+	if err := TaskDetailPanel().Render(context.Background(), &panel); err != nil {
+		t.Fatal(err)
+	}
+	fixture += panel.String()
 	html := base.String()
 	end := strings.LastIndex(html, "</body>")
 	page := html[:end] + fixture + html[end:]
@@ -129,6 +134,14 @@ func TestBrowserFunctional_ImportedThemeStylesTitlebarMenusAndSchedulePickers(t 
 			browser.waitFor(palette.id+" file viewer page uses theme surface", `String(getComputedStyle(document.getElementById('image-gallery')).getPropertyValue('--studio-side').trim() === 'var(--ov-surface)' || window.themeColor(getComputedStyle(document.getElementById('image-gallery')).getPropertyValue('--studio-side')) === window.themeColor('var(--ov-surface)'))`, "true")
 			browser.waitFor(palette.id+" file viewer shell stays transparent", `window.computed('#image-gallery .image-gallery-shell', 'backgroundColor')`, "rgba(0, 0, 0, 0)")
 			browser.waitFor(palette.id+" running state uses palette accent", `window.near('#fixture-running', 'color', '`+palette.accent+`')`, "ok")
+		}
+
+		for _, themeID := range []string{"rose-pine-dawn", "github-light", "tokyo-night", "vscode-light-modern"} {
+			browser.evaluate(`window.openVibelyThemes.apply('` + themeID + `'); document.querySelector('#inspector-tab-details').setAttribute('aria-selected', 'true'); 'ok'`)
+			browser.waitFor(themeID+" task panel surface", `window.matches('#task-details-panel', 'backgroundColor', 'var(--ov-surface)')`, "ok")
+			browser.waitFor(themeID+" task panel text", `window.matches('#task-details-panel', 'color', 'var(--ov-text)')`, "ok")
+			browser.waitFor(themeID+" selected panel tab", `window.matches('#inspector-tab-details', 'color', 'var(--ov-text)')`, "ok")
+			browser.waitFor(themeID+" inactive panel tab", `window.matches('#inspector-tab-schedules', 'color', 'var(--ov-text-muted)')`, "ok")
 		}
 
 		for _, themeID := range []string{"tokyo-night", "github-light", "vscode-kimbie-dark"} {
