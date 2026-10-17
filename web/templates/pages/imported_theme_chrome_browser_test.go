@@ -10,6 +10,7 @@ import (
 
 	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/themes"
 	"github.com/openvibely/openvibely/web/static"
 	"github.com/openvibely/openvibely/web/templates/components"
 	"github.com/openvibely/openvibely/web/templates/layout"
@@ -43,6 +44,11 @@ func TestBrowserFunctional_ImportedThemeStylesTitlebarMenusAndSchedulePickers(t 
 	}
 	fixture += `<div id="theme-task-card">` + taskCard.String() + `</div><div class="chat-markdown"><a id="theme-content-link" href="/example">Content</a></div><a id="theme-result-link" class="ov-task-result-link" href="/example">Result</a><a id="theme-explicit-link" class="link link-primary" href="/example">Link</a>`
 	fixture += `<div class="card"><p id="theme-card-description" class="text-sm opacity-60 mt-1 line-clamp-2">Automation description</p></div>`
+	var themePicker bytes.Buffer
+	if err := ThemesContent(themes.Catalog()).Render(context.Background(), &themePicker); err != nil {
+		t.Fatal(err)
+	}
+	fixture += themePicker.String()
 	var question bytes.Buffer
 	if err := ChatInputRequestCard(&events.ChatInputRequestEvent{ID: "theme-question", Questions: []events.ChatInputRequestQuestion{{ID: "q", Question: "Choose", Options: []events.ChatInputRequestOption{{Label: "First", Description: "Description"}}}}}).Render(context.Background(), &question); err != nil {
 		t.Fatal(err)
@@ -126,6 +132,13 @@ func TestBrowserFunctional_ImportedThemeStylesTitlebarMenusAndSchedulePickers(t 
 					browser.waitFor(mode+selector+" preserves native color", `window.matches('`+selector+`', 'color', 'var(--ov-l-text-muted)')`, "ok")
 				}
 			}
+		}
+		browser.evaluate(`window.openVibelyThemes.apply('vscode-kimbie-dark');'ok'`)
+		for _, id := range []string{"vscode-dark-2026", "vscode-light-2026", "github-light", "catppuccin-mocha"} {
+			browser.evaluate(`window.selectOpenVibelyTheme('` + id + `');'ok'`)
+			browser.waitFor(id+" selected picker border", `window.matches('[data-theme-card][aria-pressed="true"]', 'borderTopColor', 'var(--ov-link)')`, "ok")
+			browser.waitFor(id+" exactly one selected card", `String(document.querySelectorAll('[data-theme-card][aria-pressed="true"]').length)`, "1")
+			browser.waitFor(id+" previous card loses selected border", `window.matches('[data-theme-card][data-theme-id="openvibely-dark"]', 'borderTopColor', 'var(--ov-subtle-border)')`, "ok")
 		}
 		browser.evaluate(`window.openVibelyThemes.apply('vscode-kimbie-dark');'ok'`)
 		checks := []struct{ label, selector, property, value string }{
