@@ -52,7 +52,8 @@ func TestBrowserFunctional_DesktopDownload(t *testing.T) {
 	}))
 	defer server.Close()
 	runComposerFocusCDP(t, chrome, server.URL+"/test", "desktop-download", func(b *composerFocusCDP) {
-		b.waitFor("desktop viewer ready", `String(document.documentElement.dataset.runtime==='desktop' && !!window.OVFileViewer)`, "true")
+		// Navigation can return before Chrome has created the document root.
+		b.waitFor("desktop viewer ready", `String(document.documentElement?.dataset.runtime==='desktop' && !!window.OVFileViewer && !!document.querySelector('#save-file'))`, "true")
 		b.click("#save-file")
 		b.waitFor("save request finished", `String(!document.querySelector('#save-file').hasAttribute('aria-busy'))`, "true")
 		if saves.Load() != 1 {
