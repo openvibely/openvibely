@@ -3360,6 +3360,18 @@ func (h *Handler) executeChatTaskEditRequests(ctx context.Context, execID, proje
 	applog.Infof("[handler] executeChatTaskEditRequests exec=%s found %d task edit requests", execID, len(editRequests))
 	output := ""
 
+	// Authorize every target before attachment copying can mutate files or prompts.
+	var scopedEdits []service.TaskEditRequest
+	for _, req := range editRequests {
+		task, err := h.taskRepo.GetByID(ctx, req.ID)
+		if err != nil || task == nil || projectID == "" || task.ProjectID != projectID {
+			output += fmt.Sprintf("\nFailed to edit task %s: target unavailable in current project.\n", req.ID)
+			continue
+		}
+		scopedEdits = append(scopedEdits, req)
+	}
+	editRequests = scopedEdits
+
 	// Handle "chat" attachment keyword: copy chat attachments to target tasks
 	chatAttCopied, chatOnlyTaskIDs := h.processChatAttachmentsForEdits(ctx, execID, editRequests)
 
@@ -3434,7 +3446,8 @@ func hasOtherEditFields(req service.TaskEditRequest) bool {
 	return req.Title != "" || req.Prompt != "" || req.Category != "" ||
 		req.PrioritySet || req.Priority != 0 || req.Tag != "" || req.AgentID != "" ||
 		req.AgentConfigID != "" || req.AgentDefinitionID != "" || req.Agent != "" ||
-		req.ClearAgentDefinition || req.Chain != nil || len(req.Attachments) > 0
+		req.ClearAgentDefinition || req.Chain != nil || len(req.Attachments) > 0 ||
+		req.AutoMerge != nil || req.AutoMergeOnGoalAchieved != nil || req.MergeTargetBranch != nil
 }
 
 // executeChatTaskExecutionRequests executes tasks from typed runtime-tool requests.
