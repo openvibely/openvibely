@@ -2245,14 +2245,17 @@ func TestHandler_ListModels_IncludesToastModalStackingHooks(t *testing.T) {
 	if !strings.Contains(body, `id="delete_model_confirm_modal" class="modal" data-destructive-confirm-dialog`) {
 		t.Errorf("expected model delete confirmation modal to use shared modal close handling")
 	}
-	if !strings.Contains(body, "document.addEventListener('close', function(event)") || !strings.Contains(body, "event.target.matches('dialog.modal')") {
-		t.Errorf("expected modal close events to resync the toast host")
+	if !strings.Contains(body, "document.querySelectorAll('dialog:modal')") {
+		t.Errorf("expected toast hosting to include native modal dialogs without the modal CSS class")
+	}
+	if !strings.Contains(body, "document.addEventListener('close', function(event)") || !strings.Contains(body, "event.target.matches('dialog')") {
+		t.Errorf("expected all dialog close events to resync the toast host")
 	}
 	if !strings.Contains(body, "dialog.modal > .modal-box") {
 		t.Errorf("expected modal z-index layering rules for modal box")
 	}
-	if !strings.Contains(body, "dialog.modal #toast-container") {
-		t.Errorf("expected modal-scoped toast container z-index override")
+	if !strings.Contains(body, "dialog #toast-container") {
+		t.Errorf("expected toast container z-index override for all dialogs")
 	}
 }
 
