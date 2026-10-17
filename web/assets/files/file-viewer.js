@@ -1,5 +1,23 @@
 (()=>{
  if(window.OVFileViewer)return;
+ let savingDownload=false;
+ document.addEventListener('click',async event=>{
+  if(document.documentElement.dataset.runtime!=='desktop')return;
+  const link=event.target.closest('a[href]');if(!link)return;
+  const url=new URL(link.href,location.href);
+  const supported=/^\/(files\/[^/]+|attachments\/[^/]+\/download|chat\/attachments\/[^/]+\/download|chat\/attachments\/pending\/[^/]+\/[^/]+)$/.test(url.pathname);
+  if(url.protocol!==location.protocol||url.host!==location.host||!supported||(!link.hasAttribute('download')&&url.searchParams.get('download')!=='1'))return;
+  event.preventDefault();event.stopImmediatePropagation();
+  if(savingDownload)return;
+  savingDownload=true;link.setAttribute('aria-busy','true');
+  try{
+   const response=await fetch(url,{method:'POST',headers:{'X-OpenVibely-Save':'1'}});
+   if(!response.ok)throw Error('Could not save the file. Please try again.');
+   const result=await response.json();
+   if(result.saved)window.showToast?.('File saved.','success');
+  }catch(error){window.showToast?.(error.message,'failed')}
+  finally{savingDownload=false;link.removeAttribute('aria-busy')}
+ },true);
  const dialog=document.getElementById('image-gallery'),content=dialog.querySelector('[data-result-content]');
  const title=dialog.querySelector('[data-result-title]'),download=dialog.querySelector('[data-gallery-download]');
  const stage=dialog.querySelector('[data-gallery-stage]'),imageControls=dialog.querySelector('[data-image-controls]');

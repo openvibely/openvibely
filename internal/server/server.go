@@ -434,6 +434,7 @@ func stopUpdateCoordinatorChecks(coordinator updateCoordinatorStarter) {
 // Options supplies optional platform integrations before HTTP serving starts.
 type Options struct {
 	ProjectFolderPicker handler.ProjectFolderPicker
+	DesktopFileSaver    handler.DesktopFileSaver
 }
 
 // Start wires the full OpenVibely backend and starts serving HTTP on cfg.Port.
@@ -1125,6 +1126,7 @@ func Start(ctx context.Context, cfg *config.Config, options ...Options) (*Instan
 		},
 	)
 	for _, option := range options {
+		h.SetDesktopFileSaver(option.DesktopFileSaver)
 		if option.ProjectFolderPicker != nil {
 			h.SetProjectFolderPicker(option.ProjectFolderPicker)
 		}

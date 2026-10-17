@@ -100,6 +100,7 @@ type Handler struct {
 	discordSvc                 DiscordServiceProvider
 	channelMessageRouter       *service.ChannelMessageRouter
 	localRepoPathEnabled       *bool
+	desktopFileSaver           DesktopFileSaver
 	projectFolderPicker        ProjectFolderPicker
 	webhookRepo                persistence.WebhookStore
 	channelTargetRepo          persistence.ChannelTargetStore
@@ -721,8 +722,9 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 		}
 	})
 	e.GET("/files", h.ListFilesPanel)
- e.GET("/files/:id", h.GeneratedFileContent)
- e.GET("/favicon.png", h.AppIconPNG)
+	e.GET("/files/:id", h.GeneratedFileContent)
+	e.POST("/files/:id", h.saveDesktopFile(h.GeneratedFileContent))
+	e.GET("/favicon.png", h.AppIconPNG)
 	e.GET("/favicon.ico", h.AppIconICO)
 	e.GET(static.Prefix+"*", echo.WrapHandler(static.Handler()))
 
@@ -874,6 +876,7 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	e.GET("/tasks/:taskId/attachments", h.GetTaskAttachments)
 	e.POST("/tasks/:taskId/attachments", h.UploadAttachment)
 	e.GET("/attachments/:id/download", h.DownloadTaskAttachment)
+	e.POST("/attachments/:id/download", h.saveDesktopFile(h.DownloadTaskAttachment))
 	e.DELETE("/attachments/:id", h.DeleteAttachment)
 
 	// Executions
@@ -1081,7 +1084,9 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	e.DELETE("/chat/history", h.ClearChat)
 	e.POST("/chat/attachments", h.UploadChatAttachment)
 	e.GET("/chat/attachments/pending/:session/:name", h.PreviewPendingAttachment)
+	e.POST("/chat/attachments/pending/:session/:name", h.saveDesktopFile(h.PreviewPendingAttachment))
 	e.GET("/chat/attachments/:id/download", h.DownloadChatAttachment)
+	e.POST("/chat/attachments/:id/download", h.saveDesktopFile(h.DownloadChatAttachment))
 	e.DELETE("/chat/attachments/:id", h.DeleteChatAttachment)
 
 	// Brief & Debrief

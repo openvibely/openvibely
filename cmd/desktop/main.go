@@ -221,7 +221,7 @@ func runDesktop(cfg *config.Config, start desktopStarter, launch desktopLauncher
 }
 
 func startDesktopBackend(ctx context.Context, cfg *config.Config) (*desktopBackend, error) {
-	inst, err := server.Start(ctx, cfg, server.Options{ProjectFolderPicker: desktopProjectFolderPicker()})
+	inst, err := server.Start(ctx, cfg, server.Options{ProjectFolderPicker: desktopProjectFolderPicker(), DesktopFileSaver: desktopFileSaver()})
 	if err != nil {
 		return nil, err
 	}
