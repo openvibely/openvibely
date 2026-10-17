@@ -71,13 +71,13 @@
    const retry=document.createElement('button');retry.textContent='Retry';retry.onclick=()=>show(index);content.append(status,retry);
   }
  }
- function open(url,trigger){
+ function open(url,trigger,event){
   // Snapshot a list before replacing an in-dialog Files panel.
   group=trigger?.closest('[data-image-gallery-group],[data-files-list],.chat-markdown');
   const links=group?Array.from(group.querySelectorAll(selector)):[];
   const at=links.indexOf(trigger);
   items=at<0?[itemFrom(trigger,url)]:links.map(link=>itemFrom(link));
-  if(!dialog.contains(trigger)){opener=trigger}else group=null;
+  if(!dialog.contains(trigger)){opener=trigger;pointerOpened=!!event && event.detail>0}else group=null;
   if(!dialog.open)dialog.showModal();show(at<0?0:at);
   dialog.focus({preventScroll:true});
  }
@@ -94,7 +94,7 @@
  document.addEventListener('click',event=>{
   const link=event.target.closest(selector);
   if(!link||event.defaultPrevented||event.ctrlKey||event.metaKey||event.shiftKey||event.altKey)return;
-  pointerOpened=event.detail>0;event.preventDefault();event.stopPropagation();open(link.href||link.dataset.imageUrl||link.dataset.filePreview,link);
+  event.preventDefault();event.stopPropagation();open(link.href||link.dataset.imageUrl||link.dataset.filePreview,link,event);
  });
  prev.onclick=()=>show(index-1);next.onclick=()=>show(index+1);
  dialog.querySelector('[data-gallery-close]').onclick=close;
@@ -146,8 +146,8 @@
   });
  });
  document.addEventListener('click',async event=>{
- const expand=event.target.closest('.file-html-canvas button');if(expand){const frame=expand.closest('.file-html-canvas').querySelector('iframe');if(frame)open(frame.src,expand);return}
- const files=event.target.closest('[data-files-panel]');if(files){open(files.dataset.filesPanel,files);return}
+ const expand=event.target.closest('.file-html-canvas button');if(expand){const frame=expand.closest('.file-html-canvas').querySelector('iframe');if(frame)open(frame.src,expand,event);return}
+ const files=event.target.closest('[data-files-panel]');if(files){open(files.dataset.filesPanel,files,event);return}
  const attach=event.target.closest('[data-file-attach]');if(!attach)return;
  const status=dialog.querySelector('[data-file-attach-status]');attach.disabled=true;
  try{const input=document.querySelector('form input[name=attachment_session_id]')?.closest('form')?.querySelector('input[type=file]');if(!input)throw Error('Open a conversation composer to attach this file.');const response=await fetch(mode(attach.dataset.fileAttach,'download'));if(!response.ok)throw Error('Could not read this file');const blob=await response.blob(),transfer=new DataTransfer();transfer.items.add(new File([blob],attach.dataset.fileName,{type:blob.type}));input.files=transfer.files;input.dispatchEvent(new Event('change',{bubbles:true}));dialog.close()}catch(err){if(status)status.textContent=err.message}finally{attach.disabled=false}

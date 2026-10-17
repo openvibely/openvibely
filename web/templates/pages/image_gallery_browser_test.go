@@ -84,6 +84,26 @@ func TestBrowserFunctional_SharedImageGallery(t *testing.T) {
 			b.click("[data-gallery-close]")
 			b.waitFor("pointer preview leaves no active link", `String(!document.getElementById('image-gallery').open && !document.activeElement.matches('[data-image-gallery-item],[data-file-preview]'))`, "true")
 		}
+		b.evaluate(`const controls=document.createElement('div');controls.id='focus-preview-controls';controls.innerHTML='<button id="focus-files" data-files-panel="/attachments/document/download">Files</button><div class="file-html-canvas"><iframe hidden src="about:blank"></iframe><button id="focus-expand">Expand</button></div>';document.body.prepend(controls);'ready'`)
+		for _, selector := range []string{"#focus-files", "#focus-expand"} {
+			// Alternate activation modes to catch state inherited from a previous preview.
+			for _, pointer := range []bool{false, true, false} {
+				if pointer {
+					b.click(selector)
+				} else {
+					b.evaluate(`document.querySelector('` + selector + `').focus();document.querySelector('` + selector + `').click();'activated without pointer'`)
+				}
+				b.waitFor("button preview opens", `String(document.getElementById('image-gallery').open)`, "true")
+				b.click("[data-gallery-close]")
+				expected := "true"
+				if pointer {
+					expected = "false"
+				}
+				b.waitFor("button preview closes", `String(document.getElementById('image-gallery').open)`, "false")
+				b.waitFor("button focus follows current activation", `String(document.activeElement===document.querySelector('`+selector+`'))`, expected)
+			}
+		}
+		b.evaluate(`document.getElementById('focus-preview-controls').remove();'removed'`)
 		b.click(`#attachment-list [data-image-gallery-item]`)
 		b.waitFor("task gallery loaded", `document.querySelector('[data-gallery-count]').textContent+':'+document.querySelector('[data-gallery-status]').textContent`, "1 / 3:")
 		if runtime.GOOS == "darwin" || runtime.GOOS == "linux" {
