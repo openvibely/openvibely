@@ -77,6 +77,13 @@ func TestBrowserFunctional_SharedImageGallery(t *testing.T) {
 		if runtime.GOOS == "darwin" || runtime.GOOS == "linux" {
 			b.waitFor("native controls initially visible", `String(window.nativeControlEvents?.['desktop:controls-visibility']?.hidden)`, "false")
 		}
+		b.waitFor("chat image link fits thumbnail", `String((()=>{const img=document.querySelector('[data-chat-attachment-image]'),link=img.closest('a');return Math.abs(link.getBoundingClientRect().width-img.getBoundingClientRect().width)<1})())`, "true")
+		for _, selector := range []string{"#attachment-list [data-image-gallery-item]", "#attachment-list [data-file-preview]", "a:has([data-chat-attachment-image])"} {
+			b.click(selector)
+			b.waitFor("preview open", `String(document.getElementById('image-gallery').open)`, "true")
+			b.click("[data-gallery-close]")
+			b.waitFor("pointer preview leaves no active link", `String(!document.getElementById('image-gallery').open && !document.activeElement.matches('[data-image-gallery-item],[data-file-preview]'))`, "true")
+		}
 		b.click(`#attachment-list [data-image-gallery-item]`)
 		b.waitFor("task gallery loaded", `document.querySelector('[data-gallery-count]').textContent+':'+document.querySelector('[data-gallery-status]').textContent`, "1 / 3:")
 		if runtime.GOOS == "darwin" || runtime.GOOS == "linux" {

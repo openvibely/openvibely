@@ -23,7 +23,7 @@
  const stage=dialog.querySelector('[data-gallery-stage]'),imageControls=dialog.querySelector('[data-image-controls]');
  const prev=dialog.querySelector('[data-gallery-prev]'),next=dialog.querySelector('[data-gallery-next]');
  const selector='[data-image-gallery-item],[data-file-preview]';
- let controller,opener,group,items=[],index=0,ticket=0,currentKind='';
+ let controller,opener,group,items=[],index=0,ticket=0,currentKind='',pointerOpened=false;
  function mode(raw,key){const url=new URL(raw,location.href);for(const k of ['view','raw','download','thumbnail'])url.searchParams.delete(k);url.searchParams.set(key,'1');return url.href}
  function original(raw){const url=new URL(raw,location.href);return url.origin===location.origin&&/\/(attachments|files)\//.test(url.pathname)?mode(raw,'download'):raw}
  function clear(){
@@ -94,11 +94,11 @@
  document.addEventListener('click',event=>{
   const link=event.target.closest(selector);
   if(!link||event.defaultPrevented||event.ctrlKey||event.metaKey||event.shiftKey||event.altKey)return;
-  event.preventDefault();event.stopPropagation();open(link.href||link.dataset.imageUrl||link.dataset.filePreview,link);
+  pointerOpened=event.detail>0;event.preventDefault();event.stopPropagation();open(link.href||link.dataset.imageUrl||link.dataset.filePreview,link);
  });
  prev.onclick=()=>show(index-1);next.onclick=()=>show(index+1);
  dialog.querySelector('[data-gallery-close]').onclick=close;
- dialog.addEventListener('close',()=>{if(dialog.open)return;ticket++;controller?.abort();clear();title.textContent='File preview';download.hidden=true;download.removeAttribute('href');download.removeAttribute('download');items=[];group=null;if(opener?.isConnected)opener.focus({preventScroll:true});opener=null});
+ dialog.addEventListener('close',()=>{if(dialog.open)return;ticket++;controller?.abort();clear();title.textContent='File preview';download.hidden=true;download.removeAttribute('href');download.removeAttribute('download');items=[];group=null;if(opener?.isConnected){if(pointerOpened)opener.blur();else opener.focus({preventScroll:true});}opener=null});
  dialog.addEventListener('keydown',event=>{
   if(event.defaultPrevented||event.isComposing||event.altKey||event.metaKey||event.ctrlKey||event.target.closest('input,textarea,select,[contenteditable],[data-sheet-grid]'))return;
   if(event.key==='Escape'){event.preventDefault();close();return}
