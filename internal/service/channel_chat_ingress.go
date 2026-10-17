@@ -289,7 +289,6 @@ type channelChatContextOptions struct {
 	AgentRepo             persistence.AgentStore
 	SettingsRepo          persistence.SettingsStore
 	CustomPersonalityRepo persistence.CustomPersonalityStore
-	AttachmentContext     string
 }
 
 func buildChannelChatContext(ctx context.Context, opts channelChatContextOptions) string {
@@ -312,9 +311,6 @@ func buildChannelChatContext(ctx context.Context, opts channelChatContextOptions
 		}
 	}
 	systemContext := BuildChatContextWithAgentDefinitions(existingTasks, availableModels, listChannelChatAssignableAgentDefinitions(ctx, opts.Platform, opts.AgentRepo), schedules, time.Now())
-	if opts.AttachmentContext != "" {
-		systemContext += opts.AttachmentContext
-	}
 	if personalityPrompt := getChannelChatPersonalityContext(ctx, opts.SettingsRepo, opts.CustomPersonalityRepo); personalityPrompt != "" {
 		systemContext += personalityPrompt
 	}
@@ -1091,7 +1087,6 @@ func runChannelChatFirstTurn(ctx context.Context, opts channelChatIngressFirstTu
 		AgentRepo:             opts.AgentRepo,
 		SettingsRepo:          opts.SettingsRepo,
 		CustomPersonalityRepo: opts.CustomPersonalityRepo,
-		AttachmentContext:     opts.AttachmentContext,
 	})
 	workDir := resolveChannelChatWorkDir(ctx, opts.ProjectRepo, opts.ProjectID)
 	initialAckID := opts.InitialAckID
@@ -1120,6 +1115,7 @@ func runChannelChatFirstTurn(ctx context.Context, opts channelChatIngressFirstTu
 		Agent:               *opts.Agent,
 		ChatHistory:         history,
 		SystemContext:       systemContext,
+		AttachmentContext:   opts.AttachmentContext,
 		WorkDir:             workDir,
 		ImageAttachments:    opts.ImageAttachments,
 		Surface:             opts.Surface,

@@ -414,6 +414,7 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 		if !opts.OmitExecutionEnvironment {
 			compactedItems = ensureExecutionEnvironment(compactedItems, opts.WorkDir)
 		}
+		compactedItems = ensureAttachmentContext(ctx, compactedItems)
 		// Explicit compaction retires prior configuration updates. Re-establish
 		// the selected effort after the compaction item so the request-level
 		// effort can remain pinned to the original cacheable baseline.
@@ -440,6 +441,7 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 	if !opts.OmitExecutionEnvironment {
 		inputItems = ensureExecutionEnvironment(inputItems, opts.WorkDir)
 	}
+	inputItems = ensureAttachmentContext(ctx, inputItems)
 	if astraConfigurationUpdateEffort != "" {
 		// The update must immediately precede the next user message. Waiting until
 		// after pre-turn compaction also avoids sending an update into compaction
@@ -480,6 +482,7 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 	persistSteeringHistory := opts.InitialInputCommit
 	pendingAsyncDeliveries := append([]AsyncToolCallRecord(nil), recoveredAsyncDeliveries...)
 	for turn := 0; turn < opts.MaxTurns; turn++ {
+		inputItems = ensureAttachmentContext(ctx, inputItems)
 		if !opts.OmitExecutionEnvironment {
 			inputItems = ensureExecutionEnvironment(inputItems, opts.WorkDir)
 		}

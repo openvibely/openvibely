@@ -1,6 +1,8 @@
 package anthropicclient
 
 import (
+	"context"
+	"github.com/openvibely/openvibely/pkg/attachmentcontext"
 	"github.com/openvibely/openvibely/pkg/executionenv"
 	"strings"
 )
@@ -33,4 +35,8 @@ func appendHistoryMessage(items []agenticMessage, message Message) []agenticMess
 		}
 	}
 	return append(items, agenticMessage{Role: message.Role, Content: message.Content})
+}
+
+func ensureAttachmentContext(ctx context.Context, items []agenticMessage) []agenticMessage {
+	return attachmentcontext.Ensure(ctx, items, func(m agenticMessage) (string, string) { s, _ := m.Content.(string); return m.Role, s }, func(s string) agenticMessage { return agenticMessage{Role: "user", Content: s} })
 }

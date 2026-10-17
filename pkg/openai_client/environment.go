@@ -1,6 +1,10 @@
 package openaiclient
 
-import "github.com/openvibely/openvibely/pkg/executionenv"
+import (
+	"context"
+	"github.com/openvibely/openvibely/pkg/attachmentcontext"
+	"github.com/openvibely/openvibely/pkg/executionenv"
+)
 
 func ensureExecutionEnvironment(items []any, dir string) []any {
 	// Keep pending configuration updates trailing so the caller can replace
@@ -56,4 +60,38 @@ func ensureCompletionsHistoryEnvironment(items []CompletionsHistoryMessage, dir 
 	}, func(text string) CompletionsHistoryMessage {
 		return CompletionsHistoryMessage{Role: "user", Content: text}
 	})
+}
+
+// Restore references after the last opaque compaction item; older visible
+// messages may no longer be available to the model.
+func ensureAttachmentContext(ctx context.Context, items []any) []any {
+	start, end := 0, len(items)
+	for end > 0 {
+		m, ok := items[end-1].(map[string]any)
+		if !ok || m["type"] != "configuration_update" {
+			break
+		}
+		end--
+	}
+	for i := end - 1; i >= 0; i-- {
+		if m, ok := items[i].(map[string]any); ok && m["type"] == "compaction" {
+			start = i + 1
+			break
+		}
+	}
+	restored := attachmentcontext.Ensure(ctx, items[start:end], func(item any) (string, string) {
+		m, ok := item.(map[string]any)
+		if !ok {
+			return "", ""
+		}
+		role, _ := m["role"].(string)
+		text, _ := m["content"].(string)
+		return role, text
+	}, func(text string) any { return map[string]any{"type": "message", "role": "user", "content": text} })
+	out := append([]any(nil), items[:start]...)
+	out = append(out, restored...)
+	return append(out, items[end:]...)
+}
+func ensureCompletionsAttachments(ctx context.Context, items []completionsMessage) []completionsMessage {
+	return attachmentcontext.Ensure(ctx, items, func(m completionsMessage) (string, string) { s, _ := m.Content.(string); return m.Role, s }, func(s string) completionsMessage { return completionsMessage{Role: "user", Content: s} })
 }

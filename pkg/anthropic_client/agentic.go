@@ -475,6 +475,7 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 	hasDurableCompactionState := false
 
 	for turn := 0; turn < opts.MaxTurns; turn++ {
+		messages = ensureAttachmentContext(ctx, messages)
 		if !opts.OmitExecutionEnvironment {
 			messages = ensureExecutionEnvironment(messages, opts.WorkDir)
 		}

@@ -22,6 +22,7 @@ func (h *Handler) StartChannelChatRun(ctx context.Context, req service.ChannelCh
 		ChatHistory:                 filterChatHistory(req.ChatHistory, req.ExecID),
 		ProjectID:                   req.ProjectID,
 		SystemContext:               req.SystemContext,
+		AttachmentContext:           req.AttachmentContext,
 		WorkDir:                     req.WorkDir,
 		ImageAttachments:            req.ImageAttachments,
 		IsTaskFollowup:              false,

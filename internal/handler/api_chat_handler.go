@@ -461,10 +461,7 @@ func (h *Handler) APIChatMessage(c echo.Context) error {
 
 	// Live project catalogs are discovered through runtime tools instead of
 	// being embedded in every API Chat request.
-	fullContext := attachmentContext
-	if personalityContext := h.getPersonalityContext(c.Request().Context(), projectID); personalityContext != "" {
-		fullContext = combineContexts(fullContext, personalityContext)
-	}
+	fullContext := h.getPersonalityContext(c.Request().Context(), projectID)
 
 	// Get working directory for the provider call.
 	workDir := project.RepoPath
@@ -474,18 +471,19 @@ func (h *Handler) APIChatMessage(c echo.Context) error {
 	// ChatResponseDone broadcast) regardless of whether the message came from web, API, or Telegram.
 	// The client receives 201 immediately and polls GET /api/chat/message/:id for the result.
 	if err := h.startStreamingResponse(streamingResponseParams{
-		ExecID:           exec.ID,
-		TaskID:           task.ID,
-		Message:          message,
-		Agent:            *agent,
-		ChatHistory:      priorHistory,
-		ProjectID:        projectID,
-		PrincipalID:      h.authPrincipalID(c),
-		SystemContext:    fullContext,
-		WorkDir:          workDir,
-		ImageAttachments: imageAttachments,
-		IsTaskFollowup:   false,
-		Surface:          chatcontrol.SurfaceAPI,
+		ExecID:            exec.ID,
+		TaskID:            task.ID,
+		Message:           message,
+		Agent:             *agent,
+		ChatHistory:       priorHistory,
+		ProjectID:         projectID,
+		PrincipalID:       h.authPrincipalID(c),
+		SystemContext:     fullContext,
+		AttachmentContext: attachmentContext,
+		WorkDir:           workDir,
+		ImageAttachments:  imageAttachments,
+		IsTaskFollowup:    false,
+		Surface:           chatcontrol.SurfaceAPI,
 	}); err != nil {
 		c.Response().Header().Set("Retry-After", "30")
 		return echo.NewHTTPError(http.StatusServiceUnavailable, err.Error())

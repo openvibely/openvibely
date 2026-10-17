@@ -33,6 +33,7 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 	anthropicclient "github.com/openvibely/openvibely/pkg/anthropic_client"
 	"github.com/openvibely/openvibely/pkg/attachment"
+	"github.com/openvibely/openvibely/pkg/attachmentcontext"
 	"github.com/openvibely/openvibely/pkg/executionenv"
 	openaiclient "github.com/openvibely/openvibely/pkg/openai_client"
 	"github.com/openvibely/openvibely/pkg/toolschema"
@@ -715,6 +716,7 @@ func openAIContextWindow(model string) int {
 
 func estimateModelVisibleRequestTokens(req llmcontracts.AgentRequest) int {
 	total := estimatedUTF8Tokens(req.Message) + estimatedUTF8Tokens(req.NativeCompactionStateJSON)
+	total += estimatedUTF8Tokens(attachmentcontext.Text(req.Ctx))
 	total += estimateProviderSystemPromptTokens(req)
 	if !req.RawDirectPrompt && !req.LifecycleHookCall {
 		total += estimatedUTF8Tokens(executionenv.Context(req.WorkDir))

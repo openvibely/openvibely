@@ -24,6 +24,7 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/openvibely/openvibely/internal/testutil/teststores"
+	"github.com/openvibely/openvibely/pkg/attachmentcontext"
 	openaiclient "github.com/openvibely/openvibely/pkg/openai_client"
 )
 
@@ -2324,5 +2325,35 @@ func TestLocalCompactionActivityPersistsAcrossProviderRetry(t *testing.T) {
 				t.Fatalf("transcript=%q", stored.Output)
 			}
 		})
+	}
+}
+
+func TestAttachmentContextSurvivesRestoredCheckpoint(t *testing.T) {
+	env := teststores.New(t)
+	repo := env.Executions
+	ctx := attachmentcontext.With(context.Background(), "/uploads/report.docx")
+	err := repo.UpsertChatCompactionCheckpoint(ctx, models.ChatCompactionCheckpoint{
+		ScopeType: "chat_project", ScopeID: "attachment-audit", SourceExecutionID: "original-upload",
+		History: []models.Execution{{PromptSent: "Summarize document", Output: "Document was summarized", Status: models.ExecCompleted}},
+		Summary: "Document was summarized", Strategy: "local_summary",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := NewLLMService(nil, repo, nil, nil, nil, nil)
+	req := llmcontracts.AgentRequest{Ctx: ctx, ProjectID: "attachment-audit", Operation: llmcontracts.OperationStreaming,
+		Agent: models.LLMConfig{Provider: models.ProviderOpenAICompatible, Model: "custom"}, Message: "Replace Paver with Fin",
+		ChatHistory: []models.Execution{{ID: "original-upload", PromptSent: "Summarize document", Output: "Document was summarized", Status: models.ExecCompleted}},
+	}
+	got := svc.restoreCompactionCheckpoint(req)
+	body, err := json.Marshal(got.ChatHistory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(body), "/uploads/report.docx") {
+		t.Fatal("checkpoint fixture unexpectedly includes references")
+	}
+	if !strings.Contains(attachmentcontext.Text(got.Ctx), "/uploads/report.docx") {
+		t.Fatalf("restored request lost attachment path: history=%s current=%s", body, got.Message)
 	}
 }

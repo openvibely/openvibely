@@ -17,12 +17,12 @@ import (
 	"github.com/openvibely/openvibely/internal/events"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	llmoutput "github.com/openvibely/openvibely/internal/llm/output"
-	llmprompt "github.com/openvibely/openvibely/internal/llm/prompt"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/internal/update"
 	"github.com/openvibely/openvibely/internal/util"
+	"github.com/openvibely/openvibely/pkg/attachmentcontext"
 )
 
 const (
@@ -51,7 +51,7 @@ var (
 //   - Agent: LLM configuration (model, provider, API key, etc.)
 //   - ChatHistory: Prior conversation turns for context (may be empty for first message)
 //   - ProjectID: Project ID for task creation/lookup
-//   - SystemContext: Request-scoped system prompt context (attachments, personality, etc.)
+//   - SystemContext: Request-scoped system prompt context (personality, task framing, etc.)
 //   - WorkDir: Working directory for CLI agents (project repo path)
 //   - ImageAttachments: Attachments; supported images are inline, other files are references
 //   - IsTaskFollowup: true = coding agent prompt (executes code); false = orchestration prompt (creates tasks)
@@ -93,9 +93,10 @@ type streamingResponseParams struct {
 	// TaskThreadSend so the HTTP handler can return immediately without blocking
 	// on a full execution-history scan when a task has many prior executions.
 	DeferHistoryLoad bool
-	// AttachmentContext is the pre-computed attachment description text to inject
-	// into the system context when DeferHistoryLoad is true.
-	AttachmentContext string
+	// AttachmentContext describes current non-image attachments or attachment errors.
+	// It is added only to the model-facing user message, never system context.
+	AttachmentContext           string
+	historicalAttachmentContext string
 	// Task is the task record supplied for deferred context loading when
 	// DeferHistoryLoad is true.
 	Task *models.Task
@@ -459,24 +460,24 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 	if chatMode == "" {
 		chatMode = models.ChatModeOrchestrate
 	}
-	lifecycleFiles := append([]models.Attachment(nil), params.ImageAttachments...)
-	if h.chatAttachmentRepo != nil && len(params.ChatHistory) > 0 {
-		ids := make([]string, 0, len(params.ChatHistory))
-		for _, execution := range params.ChatHistory {
-			ids = append(ids, execution.ID)
+	// Load deferred history before attachment recovery and lifecycle selection.
+	// Both need the same historical files that the model will receive.
+	if params.DeferHistoryLoad && params.IsTaskFollowup && params.Task != nil {
+		priorExecs, err := h.execRepo.ListByTaskChronologicalLimit(ctx, params.TaskID, taskThreadHistoryLimit)
+		if err != nil {
+			h.completeWithFailure(ctx, params.ExecID, params.TaskID, "Load conversation history: "+err.Error(), 0, params.ChannelReply)
+			h.finalizeStreamingTurn(params, "")
+			return
 		}
-		if byExecution, err := h.chatAttachmentRepo.ListByExecutionIDs(ctx, ids); err == nil {
-			for _, id := range ids {
-				for _, file := range byExecution[id] {
-					lifecycleFiles = append(lifecycleFiles, models.Attachment{FileName: file.FileName, FilePath: file.FilePath, MediaType: file.MediaType, FileSize: file.FileSize})
-				}
-			}
-		}
+		params.ChatHistory = filterChatHistory(priorExecs, params.ExecID)
+	}
+	lifecycleFiles, attachmentErr := h.prepareChatAttachmentContext(ctx, &params)
+	if attachmentErr != nil {
+		h.completeWithFailure(ctx, params.ExecID, params.TaskID, attachmentErr.Error(), 0, params.ChannelReply)
+		h.finalizeStreamingTurn(params, "")
+		return
 	}
 	ctx = service.WithAttachedFiles(ctx, lifecycleFiles)
-	if len(lifecycleFiles) > 0 {
-		params.Message += "\n" + llmprompt.BuildAttachmentInstructions(params.ImageAttachments) + llmprompt.BuildAttachmentReferences(lifecycleFiles[len(params.ImageAttachments):])
-	}
 	agentDef := h.resolveTaskAgentDefinitionForTask(ctx, params.TaskID, params.AgentDefinition)
 	params.AgentDefinition = agentDef
 	ctx = llmcontracts.WithChatMode(ctx, chatMode)
@@ -552,17 +553,14 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 			}
 		}
 	}
-	// Lazy-load chat history, system context, and work dir for task-thread
+	// Lazy-load system context and work dir for task-thread
 	// follow-ups that set DeferHistoryLoad. TaskThreadSend sets this flag so
-	// the HTTP handler can return immediately without blocking on a full
-	// execution-history scan; the expensive DB/FS work runs here, after worker
-	// slots are acquired and lifecycle hooks have run.
+	// the HTTP handler can return immediately. History was loaded above before
+	// attachment recovery; the remaining DB/FS work runs after lifecycle hooks.
 	if params.DeferHistoryLoad && params.IsTaskFollowup && params.Task != nil {
-		priorExecs, _ := h.execRepo.ListByTaskChronologicalLimit(ctx, params.TaskID, taskThreadHistoryLimit)
-		params.ChatHistory = filterChatHistory(priorExecs, params.ExecID)
 		agentDefForSys := params.AgentDefinition // already resolved above
 		sysCtx := combineContexts(
-			buildThreadSystemContext(params.Task.Title, len(params.ChatHistory) > 0, params.AttachmentContext),
+			buildThreadSystemContext(params.Task.Title, len(params.ChatHistory) > 0, ""),
 			h.taskGoalContext(ctx, params.Task.ID, agentDefForSys),
 		)
 		personalityCtx := h.getPersonalityContext(ctx, params.ProjectID)
@@ -707,6 +705,7 @@ modelLoop:
 			break
 		}
 		requestCtx := llmcontracts.WithTransportScope(ctx, streamingTransportScope(params))
+		requestCtx = attachmentcontext.With(requestCtx, params.historicalAttachmentContext)
 		requestCtx = llmcontracts.WithInitialSteeringCommit(requestCtx, nil)
 		if params.Agent.Provider == models.ProviderOpenAI && pendingSteering.count() > 0 {
 			batch := preparedSteeringBatch{inputs: append([]models.ThreadInput(nil), pendingSteering.inputs...)}
@@ -1673,15 +1672,16 @@ func (h *Handler) startQueuedChatInput(ctx context.Context, input models.ThreadI
 		Message:     input.Content,
 		Agent:       *agent,
 		ChatHistory: history, ProjectID: input.ProjectID,
-		SystemContext:    combineContexts(attachmentContext, personalityContext),
-		WorkDir:          workDir,
-		ImageAttachments: imageAttachments,
-		IsTaskFollowup:   false,
-		ChatMode:         chatMode,
-		Surface:          surfaceForThreadInput(input),
-		ChannelReply:     channelReplyFromThreadInput(input),
-		RuntimeTools:     h.xRuntimeToolsForThreadInput(task.ID, input),
-		updateWorkDone:   updateWorkDone,
+		SystemContext:     personalityContext,
+		AttachmentContext: attachmentContext,
+		WorkDir:           workDir,
+		ImageAttachments:  imageAttachments,
+		IsTaskFollowup:    false,
+		ChatMode:          chatMode,
+		Surface:           surfaceForThreadInput(input),
+		ChannelReply:      channelReplyFromThreadInput(input),
+		RuntimeTools:      h.xRuntimeToolsForThreadInput(task.ID, input),
+		updateWorkDone:    updateWorkDone,
 	})
 	updateWorkDone = nil
 }
@@ -2126,7 +2126,7 @@ func (h *Handler) startQueuedTaskThreadInput(ctx context.Context, input models.T
 			agentDef = ad
 		}
 	}
-	systemContext := combineContexts(buildThreadSystemContext(task.Title, len(priorHistory) > 0, attachmentContext), h.taskGoalContext(ctx, task.ID, agentDef))
+	systemContext := combineContexts(buildThreadSystemContext(task.Title, len(priorHistory) > 0, ""), h.taskGoalContext(ctx, task.ID, agentDef))
 	personalityContext := h.getPersonalityContext(ctx, task.ProjectID)
 	workDir, worktreeContext, republishOpenPR, workDirErr := h.resolveWorktreeWorkDir(ctx, task)
 	if workDirErr != nil {
@@ -2152,6 +2152,7 @@ func (h *Handler) startQueuedTaskThreadInput(ctx context.Context, input models.T
 		ChatHistory:                     priorHistory,
 		ProjectID:                       task.ProjectID,
 		SystemContext:                   combineContexts(combineContexts(systemContext, worktreeContext), personalityContext),
+		AttachmentContext:               attachmentContext,
 		WorkDir:                         workDir,
 		RepublishOpenPRAfterStartupSync: republishOpenPR,
 		ImageAttachments:                imageAttachments,

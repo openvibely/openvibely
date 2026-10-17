@@ -539,6 +539,7 @@ func (c *Client) Send(ctx context.Context, prompt string, opts *SendOptions) (*R
 	if opts.EnvironmentWorkDir != "" {
 		inputItems = ensureExecutionEnvironment(inputItems, opts.EnvironmentWorkDir)
 	}
+	inputItems = ensureAttachmentContext(ctx, inputItems)
 	payload := map[string]any{
 		"prompt_cache_key": c.sessionID,
 		"model":            opts.Model,

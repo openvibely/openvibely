@@ -10,6 +10,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/openvibely/openvibely/pkg/attachmentcontext"
 )
 
 func TestStandaloneWebSearchReservedSchema(t *testing.T) {
@@ -185,4 +187,22 @@ func mustJSON(t *testing.T, value any) []byte {
 		t.Fatal(err)
 	}
 	return encoded
+}
+
+func TestAttachmentContextExcludedFromSearch(t *testing.T) {
+	ctx := attachmentcontext.With(context.Background(), "/uploads/private-report.docx")
+	history := []any{
+		map[string]any{"type": "message", "role": "user", "content": "Compare Acme with its competitors"},
+		map[string]any{"type": "message", "role": "assistant", "content": "I will compare them"},
+	}
+	history = ensureAttachmentContext(ctx, history)
+	history = append(history, map[string]any{"type": "message", "role": "user", "content": "Find their latest pricing"})
+	got := standaloneWebSearchRecentInput(history)
+	data, _ := json.Marshal(got)
+	if strings.Contains(string(data), "/uploads/private-report.docx") {
+		t.Errorf("search received private attachment metadata: %s", data)
+	}
+	if !strings.Contains(string(data), "Compare Acme") {
+		t.Errorf("attachment context displaced previous user request: %s", data)
+	}
 }
