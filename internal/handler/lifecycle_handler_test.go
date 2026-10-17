@@ -1042,3 +1042,55 @@ func TestLifecycleViewPreservesParentExecutionLink(t *testing.T) {
 		t.Fatal("missing parent execution link")
 	}
 }
+
+func TestHandler_ProtectedLifecycleHookEnabledStates(t *testing.T) {
+	h, e, _, db := setupTestHandlerWithStores(t)
+	h.SetAgentRepo(db.Agents)
+	h.SetLifecycleRepo(db.Lifecycle)
+	agent := &models.Agent{Name: "Toggle hooks", Key: "toggle-hooks", GeneratedStatus: models.AgentStatusProtected, Enabled: true}
+	if err := db.Agents.Create(t.Context(), agent); err != nil {
+		t.Fatal(err)
+	}
+	hook := &models.AgentLifecycleHook{AgentID: agent.ID, When: models.LifecycleWhen("before_run"), SkillKey: "prepare", Enabled: true, Blocking: true, RunPolicyJSON: `{"test":true}`}
+	if err := db.Lifecycle.CreateHook(t.Context(), hook); err != nil {
+		t.Fatal(err)
+	}
+	for _, enabled := range []bool{false, true} {
+		payload := hookSavePayload{ID: hook.ID, When: string(hook.When), SkillKey: hook.SkillKey, Blocking: true, Enabled: enabled}
+		body, _ := json.Marshal([]hookSavePayload{payload})
+		req := httptest.NewRequest(http.MethodPut, "/agents/"+agent.ID+"/lifecycle-hooks", bytes.NewReader(body))
+		req.Header.Set(echo.HeaderContentType, "application/json")
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("save toggle: %d %s", rec.Code, rec.Body.String())
+		}
+		stored, err := db.Lifecycle.HooksByAgent(t.Context(), agent.ID)
+		if err != nil || len(stored) != 1 {
+			t.Fatalf("hooks: %v %v", stored, err)
+		}
+		if stored[0].Enabled != enabled || stored[0].RunPolicyJSON != hook.RunPolicyJSON {
+			t.Fatalf("unexpected hook: %+v", stored[0])
+		}
+	}
+	for _, change := range []string{"definition", "delete", "duplicate"} {
+		payload := hookSavePayload{ID: hook.ID, When: string(hook.When), SkillKey: hook.SkillKey, Blocking: true}
+		payloads := []hookSavePayload{payload}
+		switch change {
+		case "definition":
+			payloads[0].SkillKey = "changed"
+		case "delete":
+			payloads = nil
+		case "duplicate":
+			payloads = append(payloads, payload)
+		}
+		body, _ := json.Marshal(payloads)
+		req := httptest.NewRequest(http.MethodPut, "/agents/"+agent.ID+"/lifecycle-hooks", bytes.NewReader(body))
+		req.Header.Set(echo.HeaderContentType, "application/json")
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, req)
+		if rec.Code != http.StatusForbidden {
+			t.Fatalf("%s: %d %s", change, rec.Code, rec.Body.String())
+		}
+	}
+}
