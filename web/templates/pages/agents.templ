@@ -365,7 +365,7 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 										<p class="text-sm opacity-70">Lifecycle hooks are implementation hooks, usually for system/lifecycle agents. Normal assigned agents usually need skills, not custom hooks.</p>
 										<div class="alert alert-info text-sm">Task execution is separate from hooks: route_task selects skills, before_run can add context, after_complete observes and learns. task_mode is internal and is not configurable here.</div>
 									<div id="lifecycle_hooks_protected_banner" class="hidden alert alert-warning text-sm">
-										This agent is protected. Lifecycle hooks are shown read-only.
+										You can turn lifecycle hooks on or off. Other hook settings are managed by the system.
 									</div>
 									<div id="lifecycle_hooks_list" class="space-y-2"></div>
 									<button type="button" class="btn btn-outline btn-sm" id="lifecycle_hooks_add_btn" onclick="addLifecycleHookRow()">+ Add Hook</button>
@@ -453,7 +453,7 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 									<label class="label"><span class="label-text">Source evidence URLs (one per line)</span></label>
 									<textarea id="advanced_source_refs" class="textarea textarea-bordered h-16" placeholder="e.g. https://example.com/runbook"></textarea>
 								</div>
-									<p id="advanced_protected_notice" class="hidden alert alert-info text-sm">This is a built-in protected agent. Prompt, tools, skills, hooks, identity, and scope are repaired from bundled declarations; only the model and eligible enabled state can be changed.</p>
+									<p id="advanced_protected_notice" class="hidden alert alert-info text-sm">This is a built-in protected agent. Prompt, tools, skills, hooks, identity, and scope are repaired from bundled declarations; the model, lifecycle hook enabled states, and eligible agent enabled state can be changed.</p>
 									<p id="advanced_required_system_notice" class="hidden alert alert-warning text-sm">Goal Agent is required for goal evaluation and loop continuation safety, so it cannot be disabled.</p>
 							</div>
 						</div>
@@ -1764,7 +1764,7 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 							'</select></label>' +
 						'<div class="flex items-end gap-3">' +
 							'<label class="label cursor-pointer gap-2 justify-start"><input type="checkbox" class="checkbox checkbox-sm" data-hook-field="blocking"' + (hook.blocking ? ' checked' : '') + ' ' + disabled + '/><span class="label-text text-sm">Blocking</span></label>' +
-							'<label class="label cursor-pointer gap-2 justify-start"><input type="checkbox" class="checkbox checkbox-sm" data-hook-field="enabled"' + ((hook.enabled !== false) ? ' checked' : '') + ' ' + disabled + '/><span class="label-text text-sm">Enabled</span></label>' +
+							'<label class="label cursor-pointer gap-2 justify-start"><input type="checkbox" class="checkbox checkbox-sm" data-hook-field="enabled"' + ((hook.enabled !== false) ? ' checked' : '') + '/><span class="label-text text-sm">Enabled</span></label>' +
 							(lifecycleProtectedAgent ? '' : '<button type="button" class="btn btn-ghost btn-xs ml-auto text-error" onclick="removeLifecycleHookRow(' + idx + ')">Remove</button>') +
 						'</div>' +
 					'</div>' +

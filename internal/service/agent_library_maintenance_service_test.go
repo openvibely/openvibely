@@ -737,6 +737,16 @@ func TestAgentLibraryMaintenanceService_EnsureProjectPreservesSystemAgentModelAn
 	if err != nil || agent == nil {
 		t.Fatalf("load skill curator: %v %#v", err, agent)
 	}
+	hooks, err := lifecycleRepo.HooksByAgent(ctx, agent.ID)
+	if err != nil || len(hooks) == 0 {
+		t.Fatalf("hooks: %+v %v", hooks, err)
+	}
+	for i := range hooks {
+		hooks[i].Enabled = false
+		if err := lifecycleRepo.UpdateHook(ctx, &hooks[i]); err != nil {
+			t.Fatal(err)
+		}
+	}
 	agent.Model = modelCfg.ID
 	agent.Enabled = false
 	if err := agentRepo.Update(ctx, agent); err != nil {
@@ -744,6 +754,15 @@ func TestAgentLibraryMaintenanceService_EnsureProjectPreservesSystemAgentModelAn
 	}
 	if err := svc.EnsureProject(ctx, project.ID); err != nil {
 		t.Fatalf("reconcile after user controls: %v", err)
+	}
+	hooks, err = lifecycleRepo.HooksByAgent(ctx, agent.ID)
+	if err != nil || len(hooks) == 0 {
+		t.Fatalf("reconciled hooks: %+v %v", hooks, err)
+	}
+	for _, hook := range hooks {
+		if hook.Enabled {
+			t.Fatalf("repair re-enabled hook: %+v", hook)
+		}
 	}
 	reconciled, err := agentRepo.GetBySystemKind(ctx, models.AgentSystemKindSkillCurator)
 	if err != nil || reconciled == nil {

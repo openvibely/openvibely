@@ -141,6 +141,7 @@ func reconcileDeclaredSystemAgentLifecycleHooks(ctx context.Context, lifecycleRe
 			continue
 		}
 		hook.ID = match.ID
+		hook.Enabled = match.Enabled
 		if !sameLifecycleHook(match, hook) {
 			if err := lifecycleRepo.UpdateHook(ctx, hook); err != nil {
 				return result, err

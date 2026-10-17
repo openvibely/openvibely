@@ -1829,6 +1829,9 @@ func (h *Handler) UpdateAgent(c echo.Context) error {
 		if protectedSystemAgentLockedFieldsChanged(existing, &candidate) {
 			return echo.NewHTTPError(http.StatusForbidden, "protected system agents only allow model and eligible enabled-state changes")
 		}
+		if err := h.saveAgentLifecycleHooksFromForm(c, existing.ID); err != nil {
+			return err
+		}
 		existing.Model = candidate.Model
 		existing.Enabled = candidate.Enabled
 	} else if err := h.applyAgentDialogFormFields(c, existing, agentDialogFormOptions{operation: "UpdateAgent"}); err != nil {
