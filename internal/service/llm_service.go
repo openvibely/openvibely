@@ -21,6 +21,7 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/update"
+	"github.com/openvibely/openvibely/pkg/agenttools"
 	"github.com/openvibely/openvibely/pkg/toolschema"
 )
 
@@ -1091,6 +1092,7 @@ func applyPlannerFollowupEffort(task models.Task, agent *models.LLMConfig, model
 }
 
 func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task, agent models.LLMConfig) (*models.Execution, llmcontracts.ChatContext, error) {
+	ctx = agenttools.WithProcessLifetime(ctx)
 	modelDefaultEffort := agent.ReasoningEffort
 	if s.taskRepo != nil {
 		if err := s.taskRepo.ApplyModelEffort(ctx, task.ID, &agent); err != nil {
@@ -2451,6 +2453,7 @@ func (s *LLMService) directScopedFilesRuntime(ctx context.Context, agentDef *mod
 // workDir is the project's repo path used as the working directory for model calls.
 // isTaskFollowup when true uses the coding agent system prompt instead of task management prompt.
 func (s *LLMService) CallAgentDirectStreamingDetailed(ctx context.Context, message string, attachments []models.Attachment, agent models.LLMConfig, execID string, chatHistory []models.Execution, chatSystemContext string, workDir string, agentDef *models.Agent, isTaskFollowup ...bool) (llmcontracts.AgentResult, error) {
+	ctx = agenttools.WithProcessLifetime(ctx)
 	followup := len(isTaskFollowup) > 0 && isTaskFollowup[0]
 	applog.Infof("[agent-svc] CallAgentDirectStreaming agent=%s model=%s message_len=%d exec=%s history=%d workDir=%s isTaskFollowup=%v", agent.Name, agent.Model, len(message), execID, len(chatHistory), workDir, followup)
 	chatMode := llmcontracts.ChatModeFromContext(ctx)

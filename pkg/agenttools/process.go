@@ -28,6 +28,22 @@ const (
 // IDs are random capabilities; access also requires the original working directory.
 var shellProcesses = &processManager{sessions: make(map[string]*processSession)}
 
+type processLifetimeKey struct{}
+
+// WithProcessLifetime binds shell sessions to the owning execution context.
+// Child tool-request cancellation only ends the wait; execution cancellation
+// terminates the processes, including sessions that have already yielded.
+func WithProcessLifetime(ctx context.Context) context.Context {
+	return context.WithValue(ctx, processLifetimeKey{}, ctx)
+}
+
+func processLifetime(ctx context.Context) context.Context {
+	if owner, ok := ctx.Value(processLifetimeKey{}).(context.Context); ok {
+		return owner
+	}
+	return context.Background()
+}
+
 type processManager struct {
 	closed   bool
 	mu       sync.Mutex
@@ -124,8 +140,8 @@ func (m *processManager) start(ctx context.Context, dir, command string, timeout
 	if err != nil {
 		return "", err
 	}
-	// The request context bounds this wait, not the background process lifetime.
-	life, cancel := context.WithTimeout(context.Background(), time.Duration(timeout)*time.Second)
+	// Individual requests bound waits; the owning execution bounds process lifetime.
+	life, cancel := context.WithTimeout(processLifetime(ctx), time.Duration(timeout)*time.Second)
 	cmd := exec.CommandContext(life, shell.Path, shell.Args(command)...)
 	cmd.Dir = dir
 	for _, e := range os.Environ() {
@@ -149,6 +165,13 @@ func (m *processManager) start(ctx context.Context, dir, command string, timeout
 	cmd.Stdout, cmd.Stderr = s, s
 	m.mu.Lock()
 	if err := ctx.Err(); err != nil {
+		m.mu.Unlock()
+		cancel()
+		cleanup()
+		stdin.Close()
+		return "", err
+	}
+	if err := life.Err(); err != nil {
 		m.mu.Unlock()
 		cancel()
 		cleanup()
