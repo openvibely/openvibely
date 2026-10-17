@@ -46,7 +46,13 @@ func TestPublishFileDurabilityOwnershipAndExplicitContext(t *testing.T) {
 	req := llmcontracts.AgentRequest{Agent: models.LLMConfig{Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodAPIKey}, Ctx: ctx, ExecID: execution.ID, ProjectID: project.ID, WorkDir: work}
 	runtime := svc.fileRuntime(req)
 	require.NotNil(t, runtime)
-	out, handled, failed, err := runtime.Executor(ctx, "publish_file", json.RawMessage(`{"file_path":"demo.html","display":"canvas"}`))
+	for _, definition := range runtime.Definitions {
+		if definition.Name == "publish_file" {
+			require.Len(t, definition.Schema.Properties, 1)
+			require.Contains(t, definition.Schema.Properties, "file_path")
+		}
+	}
+	out, handled, failed, err := runtime.Executor(ctx, "publish_file", json.RawMessage(`{"file_path":"demo.html"}`))
 	require.NoError(t, err)
 	require.True(t, handled)
 	require.False(t, failed)
@@ -67,10 +73,13 @@ func TestPublishFileDurabilityOwnershipAndExplicitContext(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal([]byte(out), &result))
 	require.NotEmpty(t, result.ID)
+	var fields map[string]any
+	require.NoError(t, json.Unmarshal([]byte(out), &fields))
+	require.NotContains(t, fields, "display")
 	require.NoError(t, os.RemoveAll(work))
 	file, err := attachments.GeneratedFile(ctx, result.ID, project.ID)
 	require.NoError(t, err)
-	require.Equal(t, "canvas", file.Display)
+	require.Empty(t, file.Display)
 	orphan := filepath.Join(svc.taskSvc.uploadsDir, "generated", "orphan.txt")
 	require.NoError(t, os.WriteFile(orphan, []byte("orphan"), 0600))
 	removed, err := attachments.CleanupOrphanedFiles(ctx, svc.taskSvc.uploadsDir)

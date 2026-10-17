@@ -8,7 +8,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/openvibely/openvibely/internal/events"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
@@ -31,7 +30,7 @@ func (s *LLMService) fileRuntime(req llmcontracts.AgentRequest) *llmcontracts.Ru
 	defs := []llmcontracts.RuntimeToolDefinition{{Name: "view_image", Description: "Inspect a local PNG, JPEG, GIF, or WebP image visually. Use this after rendering document pages, slides, sheets, or other visual output with skill scripts. Returns image content to the model; does not publish the image to the user.", Access: llmcontracts.RuntimeToolAccessRead, Schema: &toolschema.Schema{Type: "object", Properties: map[string]*toolschema.Schema{"file_path": {Type: "string"}}, Required: []string{"file_path"}, AdditionalProperties: toolschema.Pointer(false)}}}
 	canPublish := req.ChatMode != models.ChatModePlan && AgentAllowsTool(req.AgentDefinition, "Write")
 	if canPublish {
-		defs = append(defs, llmcontracts.RuntimeToolDefinition{Name: "publish_file", Description: "Publish an existing generated file as a durable downloadable chat artifact. Returns its file URL; include a Markdown link to it in the answer. Files are not automatically included in later model context. For interactive HTML use display=canvas; scripts run in an isolated preview.", Access: llmcontracts.RuntimeToolAccessWrite, Schema: &toolschema.Schema{Type: "object", Properties: map[string]*toolschema.Schema{"file_path": {Type: "string"}, "display": {Type: "string", Enum: []any{"", "canvas"}}}, Required: []string{"file_path"}, AdditionalProperties: toolschema.Pointer(false)}})
+		defs = append(defs, llmcontracts.RuntimeToolDefinition{Name: "publish_file", Description: "Publish an existing generated file as a durable downloadable chat artifact. Returns its file URL; include a Markdown link to it in the answer. Files are not automatically included in later model context. HTML files automatically display in an isolated interactive preview.", Access: llmcontracts.RuntimeToolAccessWrite, Schema: &toolschema.Schema{Type: "object", Properties: map[string]*toolschema.Schema{"file_path": {Type: "string"}}, Required: []string{"file_path"}, AdditionalProperties: toolschema.Pointer(false)}})
 	}
 	return &llmcontracts.RuntimeTools{Definitions: defs, Executor: func(ctx context.Context, name string, input json.RawMessage) (string, bool, bool, error) {
 		if name != "publish_file" && name != "view_image" {
@@ -42,7 +41,6 @@ func (s *LLMService) fileRuntime(req llmcontracts.AgentRequest) *llmcontracts.Ru
 		}
 		var args struct {
 			FilePath string `json:"file_path"`
-			Display  string `json:"display"`
 		}
 		if err := json.Unmarshal(input, &args); err != nil {
 			return "", true, true, err
@@ -72,13 +70,6 @@ func (s *LLMService) fileRuntime(req llmcontracts.AgentRequest) *llmcontracts.Ru
 			output, err := attachment.StoreToolImage(ctx, attachment.ToolImage{Name: filepath.Base(path), MediaType: mediaType, Data: data})
 			return output, true, err != nil, err
 		}
-		if args.Display != "" && args.Display != "canvas" {
-			return "", true, true, fmt.Errorf("invalid display")
-		}
-		ext := strings.ToLower(filepath.Ext(path))
-		if args.Display == "canvas" && ext != ".html" && ext != ".htm" {
-			return "", true, true, fmt.Errorf("canvas requires HTML")
-		}
 		root := "uploads"
 		if s.taskSvc != nil && s.taskSvc.uploadsDir != "" {
 			root = s.taskSvc.uploadsDir
@@ -99,7 +90,7 @@ func (s *LLMService) fileRuntime(req llmcontracts.AgentRequest) *llmcontracts.Ru
 			os.RemoveAll(dir)
 			return "", true, true, err
 		}
-		f := models.GeneratedFile{ProjectID: req.ProjectID, ExecutionID: req.ExecID, FileName: filepath.Base(path), FilePath: stored, MediaType: filecontent.FileMediaType(path, data), FileSize: int64(len(data)), Display: args.Display}
+		f := models.GeneratedFile{ProjectID: req.ProjectID, ExecutionID: req.ExecID, FileName: filepath.Base(path), FilePath: stored, MediaType: filecontent.FileMediaType(path, data), FileSize: int64(len(data))}
 		if err = s.attachmentRepo.CreateGeneratedFile(ctx, &f); err != nil {
 			os.RemoveAll(dir)
 			return "", true, true, err
@@ -109,7 +100,7 @@ func (s *LLMService) fileRuntime(req llmcontracts.AgentRequest) *llmcontracts.Ru
 				s.broadcaster.Publish(events.TaskEvent{Type: events.TaskFilesChanged, ProjectID: req.ProjectID, TaskID: execution.TaskID, ExecID: req.ExecID})
 			}
 		}
-		out, _ := json.Marshal(map[string]any{"id": f.ID, "name": f.FileName, "url": "/files/" + f.ID + "?project_id=" + url.QueryEscape(f.ProjectID), "display": f.Display})
+		out, _ := json.Marshal(map[string]any{"id": f.ID, "name": f.FileName, "url": "/files/" + f.ID + "?project_id=" + url.QueryEscape(f.ProjectID)})
 		return string(out), true, false, nil
 	}}
 }
