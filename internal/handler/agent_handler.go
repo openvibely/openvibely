@@ -276,6 +276,8 @@ func normalizeAgentTools(tools []string) []string {
 	for _, tool := range models.AllAgentTools {
 		toolNameMap[strings.ToLower(tool)] = tool
 	}
+	// Shell and Process share the existing Bash permission.
+	toolNameMap["shell"] = "Bash"
 
 	seen := make(map[string]struct{}, len(tools))
 	normalized := make([]string, 0, len(tools))
