@@ -74,3 +74,24 @@ func TestSafeTelegramHTTPErrorRedactsNestedCredentials(t *testing.T) {
 		t.Fatalf("nested credential leaked: %v", err)
 	}
 }
+
+func TestSafeTelegramBotMalformedToken(t *testing.T) {
+	const token = "123:secret-test-token\n"
+	bot, err := newSafeTelegramBot(token)
+	if bot != nil || err == nil {
+		t.Fatal("expected initialization to reject malformed token")
+	}
+	message := err.Error()
+	for _, forbidden := range []string{"secret-test-token", "https://", "api.telegram.org"} {
+		if strings.Contains(message, forbidden) {
+			t.Fatalf("initialization exposed request details: %s", message)
+		}
+	}
+	if !strings.Contains(message, "getMe") || !strings.Contains(message, "invalid control character") {
+		t.Fatalf("missing useful error context: %s", message)
+	}
+	var unsafe *url.Error
+	if errors.As(err, &unsafe) {
+		t.Fatal("credential-bearing parse error exposed through chain")
+	}
+}
