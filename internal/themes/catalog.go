@@ -36,7 +36,7 @@ type Theme struct {
 }
 
 func Catalog() []Theme {
-	catalog := make([]Theme, 0, ExpectedThemeCount+2+len(paletteSpecs()))
+	catalog := make([]Theme, 0, ExpectedThemeCount+3+len(paletteSpecs()))
 	catalog = append(catalog, OpenVibelyThemes()...)
 	catalog = append(catalog, PaletteThemes()...)
 	catalog = append(catalog, VSCodeCatalog()...)
@@ -194,7 +194,21 @@ func OpenVibelyThemes() []Theme {
 	return []Theme{
 		openVibelyDarkTheme(),
 		openVibelyLightTheme(),
+		openVibelyContinuousTheme(),
 	}
+}
+
+// The continuous variant retains native dark styling and only joins the sidebar canvas.
+func openVibelyContinuousTheme() Theme {
+	theme := openVibelyDarkTheme()
+	theme.ID = "openvibely-dark-continuous"
+	theme.Name = "OpenVibely Dark Continuous"
+	theme.Source = "OpenVibely experimental"
+	theme.SearchText = theme.Name + " dark experimental continuous sidebar"
+	theme.Semantic["sidebarBg"] = theme.Semantic["contentBg"]
+	theme.Preview["sidebar"] = theme.Semantic["sidebarBg"]
+	theme.CSS = themeCSSVars(theme.Semantic, theme.Syntax)
+	return theme
 }
 
 func CatalogJSON() string {
