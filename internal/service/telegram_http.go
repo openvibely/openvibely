@@ -18,8 +18,12 @@ type telegramHTTPClient struct {
 }
 
 func newSafeTelegramBot(token string) (*tgbotapi.BotAPI, error) {
-	return tgbotapi.NewBotAPIWithClient(token, tgbotapi.APIEndpoint,
+	bot, err := tgbotapi.NewBotAPIWithClient(token, tgbotapi.APIEndpoint,
 		telegramHTTPClient{client: &http.Client{}, token: token})
+	if err != nil {
+		return nil, safeTelegramHTTPError("getMe", token, err)
+	}
+	return bot, nil
 }
 
 func (c telegramHTTPClient) Do(req *http.Request) (*http.Response, error) {
@@ -47,6 +51,9 @@ func (e *telegramRequestError) Error() string { return e.message }
 func (e *telegramRequestError) Is(target error) bool { return errors.Is(e.cause, target) }
 
 func safeTelegramHTTPError(operation, token string, err error) error {
+	if _, ok := err.(*telegramRequestError); ok {
+		return err
+	}
 	cause := err
 	for {
 		var urlErr *url.Error
