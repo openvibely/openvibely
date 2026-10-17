@@ -23,6 +23,8 @@ func TestRuntimeDocumentFollowupReplaysSkillsAndReferences(t *testing.T) {
 	task := &models.Task{ProjectID: "default", Title: "document", Category: models.CategoryChat, Status: models.StatusCompleted}
 	require.NoError(t, stores.Tasks.Create(ctx, task))
 	phase, step, skillCalls, edits := 0, 0, 0, 0
+	var indexPrefix []chatMessage
+	workDir := t.TempDir()
 	rt := &llmcontracts.RuntimeTools{Definitions: []llmcontracts.RuntimeToolDefinition{{Name: "skill_view", Access: llmcontracts.RuntimeToolAccessRead}, {Name: "edit_file", Access: llmcontracts.RuntimeToolAccessWrite}}, Executor: func(_ context.Context, name string, input json.RawMessage) (string, bool, bool, error) {
 		switch name {
 		case "skill_view":
@@ -41,11 +43,20 @@ func TestRuntimeDocumentFollowupReplaysSkillsAndReferences(t *testing.T) {
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&req))
 		data, _ := json.Marshal(req.Messages)
 		require.Contains(t, string(data), "/uploads/report.docx")
-		indexCount := 0
-		for _, message := range req.Messages {
-			indexCount += strings.Count(message.Content, managedcontext.Marker)
+		indexCount, indexAt := 0, -1
+		for i, message := range req.Messages {
+			if strings.HasPrefix(message.Content, managedcontext.Marker+"\n") {
+				indexCount++
+				indexAt = i
+			}
 		}
 		require.Equal(t, 1, indexCount)
+		if indexCount == 1 {
+			if indexPrefix == nil {
+				indexPrefix = append([]chatMessage(nil), req.Messages[1:indexAt+1]...)
+			}
+			require.Equal(t, indexPrefix, req.Messages[1:indexAt+1], "unchanged index prefix must survive tool calls and fresh-adapter followups")
+		}
 		result := chatMessage{Role: "assistant", Content: "Summary"}
 		if phase == 0 && step == 0 {
 			result.Content = ""
@@ -74,7 +85,7 @@ func TestRuntimeDocumentFollowupReplaysSkillsAndReferences(t *testing.T) {
 		exec := &models.Execution{TaskID: task.ID, Status: models.ExecRunning, PromptSent: prompt}
 		require.NoError(t, stores.Executions.Create(ctx, exec))
 		adapter := New(stores.Executions, nil)
-		result, err := adapter.Call(ctx, llmcontracts.AgentRequest{Operation: llmcontracts.OperationStreaming, Agent: models.LLMConfig{Provider: models.ProviderOllama, Model: "test", OllamaBaseURL: server.URL, ContextWindow: 32768}, ExecID: exec.ID, Message: prompt, ChatHistory: history, ChatMode: models.ChatModeOrchestrate}, t.TempDir(), nil)
+		result, err := adapter.Call(ctx, llmcontracts.AgentRequest{Operation: llmcontracts.OperationStreaming, Agent: models.LLMConfig{Provider: models.ProviderOllama, Model: "test", OllamaBaseURL: server.URL, ContextWindow: 32768}, ExecID: exec.ID, Message: prompt, ChatHistory: history, ChatMode: models.ChatModeOrchestrate}, workDir, nil)
 		require.NoError(t, err)
 		replay, err := stores.Executions.ReplayMessagesByExecutionIDs(ctx, []string{exec.ID})
 		require.NoError(t, err)

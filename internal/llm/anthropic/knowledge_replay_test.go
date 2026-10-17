@@ -39,6 +39,7 @@ func TestKnowledgeReplayAfterCancellationAndCompaction(t *testing.T) {
 	ctx = attachmentcontext.With(ctx, "report.md at "+document)
 	ctx = managedcontext.With(ctx, "documents: edit documents")
 	phase, step, loads := 0, 0, 0
+	var indexPrefix []json.RawMessage
 	var cancel context.CancelFunc
 	rt := &llmcontracts.RuntimeTools{Definitions: append(skills.Definitions, llmcontracts.RuntimeToolDefinition{Name: "edit_file", Access: llmcontracts.RuntimeToolAccessWrite}), Executor: func(callCtx context.Context, name string, input json.RawMessage) (string, bool, bool, error) {
 		if name == "skill_view" {
@@ -64,6 +65,25 @@ func TestKnowledgeReplayAfterCancellationAndCompaction(t *testing.T) {
 			t.Error(err)
 			w.WriteHeader(400)
 			return
+		}
+		indexAt, indexes := -1, 0
+		for i, raw := range body.Messages {
+			var message struct {
+				Role    string `json:"role"`
+				Content any    `json:"content"`
+			}
+			require.NoError(t, json.Unmarshal(raw, &message))
+			if text, ok := message.Content.(string); ok && strings.HasPrefix(text, managedcontext.Marker+"\n") {
+				indexes++
+				indexAt = i
+			}
+		}
+		require.Equal(t, 1, indexes)
+		if indexes == 1 && phase < 3 {
+			if indexPrefix == nil {
+				indexPrefix = append([]json.RawMessage(nil), body.Messages[:indexAt+1]...)
+			}
+			require.Equal(t, indexPrefix, body.Messages[:indexAt+1], "unchanged index prefix must survive tool calls, cancellation and fresh-adapter followups")
 		}
 		all, _ := json.Marshal(body.Messages)
 		// Every fresh request retains the attachment locator even when compaction drops replay.

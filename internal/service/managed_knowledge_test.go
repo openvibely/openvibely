@@ -132,6 +132,7 @@ func TestManagedKnowledgeIndependentControlsAndMaintenance(t *testing.T) {
 	writeLifecycleStandaloneSkill(t, root, "documents", "Document instructions")
 	worker := NewWorkerService(nil, 0, stores.Projects)
 	task := models.Task{ID: "controls", ProjectID: project.ID}
+	priorIndex := managedcontext.Text(worker.prepareMainModelKnowledge(ctx, task, false))
 	for mask := 0; mask < 16; mask++ {
 		p := models.SkillMemoryPermissions{ReadSkills: mask&1 != 0, WriteSkills: mask&2 != 0, ReadMemories: mask&4 != 0, WriteMemories: mask&8 != 0}
 		project.SkillMemoryPermissions = &p
@@ -141,6 +142,11 @@ func TestManagedKnowledgeIndependentControlsAndMaintenance(t *testing.T) {
 			rt := llmcontracts.RuntimeToolsFromContext(turnCtx)
 			require.Equal(t, p.ReadSkills, strings.Contains(managedcontext.Text(turnCtx), "documents"))
 			require.Equal(t, p.ReadMemories, strings.Contains(managedcontext.Text(turnCtx), "chat_memory.md"))
+			history := []string{"Summarize this document", priorIndex, "Summary", "Change the title"}
+			updated := managedcontext.Ensure(turnCtx, history, func(s string) (string, string) { return "user", s }, func(s string) string { return s })
+			require.Equal(t, []string{history[0], managedcontext.Text(turnCtx), history[2], history[3]}, updated)
+			require.Equal(t, p.ReadSkills, strings.Contains(updated[1], "documents"), "disabled skill index must leave history")
+			require.Equal(t, p.ReadMemories, strings.Contains(updated[1], "chat_memory.md"), "disabled memory index must leave history")
 			for name, allowed := range map[string]bool{"skill_view": p.ReadSkills, "memory_view": p.ReadMemories, "memory_save": !chat && p.WriteMemories, "memory_delete": !chat && p.WriteMemories, "skill_manage": false} {
 				require.Equal(t, allowed, rt.HasDefinition(name), "mask=%d chat=%t tool=%s", mask, chat, name)
 				if !allowed {

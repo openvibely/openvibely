@@ -55,6 +55,7 @@ func (a *Adapter) callRuntime(ctx context.Context, req llmcontracts.AgentRequest
 	}
 	makeMessage := func(text string) chatMessage { return chatMessage{Role: "user", Content: text} }
 	replay := []chatMessage{{Role: "user", Content: user.Content}} // Never pin uploaded bytes.
+	replay = managedcontext.SeedReplay(ctx, messages, replay, read, makeMessage)
 	defer func() {
 		if callErr != nil {
 			data, _ := json.Marshal(messages)
