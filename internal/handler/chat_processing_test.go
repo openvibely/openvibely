@@ -9330,3 +9330,97 @@ func TestProcessStreamingResponseHistoricalImageInstructions(t *testing.T) {
 		})
 	}
 }
+
+func TestProcessStreamingResponse_TaskFollowupEditTask(t *testing.T) {
+	t.Setenv("OPENVIBELY_ALLOW_PRIVATE_MODEL_ENDPOINTS", "true")
+	h, _, configs := setupTestHandler(t)
+	ctx := context.Background()
+	project := createProject(t, h, "Followup edits")
+	otherProject := createProject(t, h, "Foreign followup edits")
+	target := createTask(t, h, project.ID, "Target", func(task *models.Task) { task.Category = models.CategoryBacklog })
+	foreign := createTask(t, h, otherProject.ID, "Foreign", func(task *models.Task) { task.Category = models.CategoryBacklog })
+	var requests []struct {
+		Tools []struct {
+			Function struct {
+				Name string `json:"name"`
+			} `json:"function"`
+		} `json:"tools"`
+		Messages []struct {
+			Role    string `json:"role"`
+			Content string `json:"content"`
+		} `json:"messages"`
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request struct {
+			Tools []struct {
+				Function struct {
+					Name string `json:"name"`
+				} `json:"function"`
+			} `json:"tools"`
+			Messages []struct {
+				Role    string `json:"role"`
+				Content string `json:"content"`
+			} `json:"messages"`
+		}
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&request))
+		requests = append(requests, request)
+		w.Header().Set("Content-Type", "text/event-stream")
+		if len(requests) == 1 {
+			calls := []map[string]any{}
+			for i, call := range []struct{ name, args string }{
+				{"list_capabilities", `{}`},
+				{"edit_task", fmt.Sprintf(`{"id":%q,"title":"Edited by followup","prompt":"Updated prompt","priority":4}`, target.ID)},
+				{"edit_task", fmt.Sprintf(`{"id":%q,"title":"Must not change"}`, foreign.ID)},
+			} {
+				calls = append(calls, map[string]any{"index": i, "id": fmt.Sprintf("call_%d", i), "type": "function", "function": map[string]any{"name": call.name, "arguments": call.args}})
+			}
+			payload, err := json.Marshal(map[string]any{"choices": []any{map[string]any{"delta": map[string]any{"tool_calls": calls}, "finish_reason": "tool_calls"}}})
+			require.NoError(t, err)
+			fmt.Fprintf(w, "data: %s\n\ndata: [DONE]\n\n", payload)
+			return
+		}
+		fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"done\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n")
+	}))
+	defer server.Close()
+	agent := createAgent(t, configs, func(config *models.LLMConfig) {
+		config.Provider = models.ProviderOpenAICompatible
+		config.Model = "fixture/model"
+		config.AuthMethod = models.AuthMethodAPIKey
+		config.APIKey = "test-key"
+		config.BaseURL = server.URL + "/v1/"
+		config.PresetSlug = "vllm"
+		config.Transport = "chat_completions"
+	})
+	caller := createTask(t, h, project.ID, "Caller", func(task *models.Task) { task.Status = models.StatusRunning; task.AgentID = &agent.ID })
+	execution := createExec(t, h, caller.ID, agent.ID, func(ex *models.Execution) { ex.Status = models.ExecRunning })
+	h.processStreamingResponse(streamingResponseParams{ExecID: execution.ID, TaskID: caller.ID, Message: "Edit target", Agent: *agent, ProjectID: project.ID, IsTaskFollowup: true, ChatMode: models.ChatModeOrchestrate})
+	require.Len(t, requests, 2)
+	names := []string{}
+	for _, tool := range requests[0].Tools {
+		names = append(names, tool.Function.Name)
+	}
+	require.Contains(t, names, "edit_task")
+	results := []string{}
+	for _, message := range requests[1].Messages {
+		if message.Role == "tool" {
+			results = append(results, message.Content)
+		}
+	}
+	require.Len(t, results, 3)
+	require.Contains(t, results[0], "edit_task")
+	require.Contains(t, results[1], "Edited 1 task(s)")
+	require.Contains(t, results[2], "edit_task: no tasks were updated")
+	for _, name := range []string{"cancel_task", "merge_task", "mark_task_goal_achieved", "report_task_goal_blocked", "request_user_input"} {
+		require.NotContains(t, names, name)
+		require.NotContains(t, results[0], name)
+	}
+	updated, err := h.taskRepo.GetByID(ctx, target.ID)
+	require.NoError(t, err)
+	require.Equal(t, "Edited by followup", updated.Title)
+	require.Equal(t, "Updated prompt", updated.Prompt)
+	require.Equal(t, 4, updated.Priority)
+	unchanged, err := h.taskRepo.GetByID(ctx, foreign.ID)
+	require.NoError(t, err)
+	require.Equal(t, foreign.Title, unchanged.Title)
+	require.Equal(t, foreign.Prompt, unchanged.Prompt)
+}
