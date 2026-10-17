@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/chatcontrol"
+	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/stretchr/testify/require"
 )
@@ -143,5 +144,55 @@ func TestTaskFollowupAppliesSharedAuditorPolicy(t *testing.T) {
 		require.NotContains(t, capabilities, "- "+name+" ")
 		_, handled, _, _ := rt.Executor(ctx, name, json.RawMessage(`{}`))
 		require.False(t, handled, name)
+	}
+}
+
+func TestTaskFollowupCombinedRuntimeCannotRestoreAuditorTools(t *testing.T) {
+	h, _, _ := setupTestHandler(t)
+	project := createProject(t, h, "Combined auditor policy")
+	task := createTask(t, h, project.ID, "Auditor", func(task *models.Task) {
+		task.Category = models.CategoryBacklog
+		task.CreatedVia = "automation:loop:auditor"
+	})
+	for _, source := range []string{"channel", "context"} {
+		t.Run(source, func(t *testing.T) {
+			ctx := context.Background()
+			calls := []string{}
+			injected := &llmcontracts.RuntimeTools{
+				Definitions: chatcontrol.ToolDefsForContext(models.ChatModeOrchestrate, chatcontrol.SurfaceX, true),
+				Executor: func(_ context.Context, name string, _ json.RawMessage) (string, bool, bool, error) {
+					calls = append(calls, name)
+					return "injected", true, false, nil
+				},
+			}
+			params := streamingResponseParams{ProjectID: project.ID, TaskID: task.ID, IsTaskFollowup: true}
+			if source == "channel" {
+				params.RuntimeTools = injected
+			} else {
+				ctx = llmcontracts.WithRuntimeTools(ctx, injected)
+			}
+			defs := filterTaskThreadRuntimeToolDefs(chatcontrol.ToolDefsForContext(models.ChatModeOrchestrate, chatcontrol.SurfaceX, true), nil, false)
+			rt := h.buildStreamingResponseActionRuntime(ctx, params, nil, defs, models.ChatModeOrchestrate, chatcontrol.SurfaceX)
+			capabilities, handled, isErr, err := rt.Executor(ctx, "list_capabilities", json.RawMessage(`{}`))
+			require.NoError(t, err)
+			require.True(t, handled)
+			require.False(t, isErr)
+			require.Contains(t, capabilities, "list_tasks")
+			for name := range chatcontrol.TaskToolNames("") {
+				if chatcontrol.TaskToolNames(task.CreatedVia)[name] {
+					continue
+				}
+				require.False(t, rt.HasDefinition(name), name)
+				require.NotContains(t, capabilities, "- "+name+" ")
+				_, handled, _, _ := rt.Executor(ctx, name, json.RawMessage(`{}`))
+				require.False(t, handled, name)
+			}
+			require.Empty(t, calls)
+			out, handled, isErr, err := rt.Executor(ctx, "list_tasks", json.RawMessage(`{}`))
+			require.NoError(t, err)
+			require.True(t, handled)
+			require.False(t, isErr)
+			require.Equal(t, "injected", out)
+		})
 	}
 }

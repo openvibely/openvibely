@@ -228,20 +228,48 @@ func (h *Handler) buildStreamingResponseActionRuntime(ctx context.Context, param
 	if params.IsTaskFollowup && params.Task == nil && params.TaskID != "" && h.taskRepo != nil {
 		params.Task, _ = h.taskRepo.GetByID(ctx, params.TaskID)
 	}
-	if params.IsTaskFollowup && params.Task != nil {
-		policy := chatcontrol.TaskToolNames(params.Task.CreatedVia)
-		defaults := chatcontrol.TaskToolNames("")
-		kept := make([]llmcontracts.RuntimeToolDefinition, 0, len(defs))
-		for _, def := range defs {
-			if !defaults[def.Name] || policy[def.Name] {
-				kept = append(kept, def)
-			}
-		}
-		defs = kept
-	}
 
 	genericRT := h.buildChatActionToolRuntimeFromDefs(params, collector, defs, mode, surface)
 	runtime := llmcontracts.CompositeRuntimeTools(hardenedAutomationGitHubRT, llmcontracts.RuntimeToolsFromContext(ctx), params.RuntimeTools, genericRT)
+	// Apply task policy after composition so channel/context bundles cannot restore
+	// tools excluded from the generic follow-up runtime.
+	if params.IsTaskFollowup && runtime != nil {
+		createdVia := ""
+		if params.Task != nil {
+			createdVia = params.Task.CreatedVia
+		}
+		policy := chatcontrol.TaskToolNames(createdVia)
+		// Channel-only tools and lifecycle grants retain their existing authorization.
+		defaults := chatcontrol.TaskToolNames("")
+		if automationBound {
+			delete(policy, "github_comment_on_issue")
+		}
+		definitions := make([]llmcontracts.RuntimeToolDefinition, 0, len(runtime.Definitions))
+		for _, def := range runtime.Definitions {
+			if !defaults[def.Name] || policy[def.Name] {
+				definitions = append(definitions, def)
+			}
+		}
+		runtime.Definitions = definitions
+		base := runtime.Executor
+		runtime.Executor = func(ctx context.Context, name string, input json.RawMessage) (string, bool, bool, error) {
+			normalized := strings.ToLower(strings.TrimSpace(name))
+			if defaults[normalized] && !policy[normalized] {
+				return "", false, false, nil
+			}
+			if normalized == "list_capabilities" && runtime.HasDefinition(normalized) {
+				var summaries []chatcontrol.ActionSummary
+				for _, summary := range chatcontrol.ListForContext(mode, surface) {
+					if runtime.HasDefinition(summary.Name) {
+						summaries = append(summaries, summary)
+					}
+				}
+				return formatCapabilities(summaries, service.SelectedMemoryHandlesFromContext(ctx)), true, false, nil
+			}
+			return base(ctx, name, input)
+		}
+	}
+
 	if automationBound && runtime != nil {
 		baseExecutor := runtime.Executor
 		runtime.Executor = func(toolCtx context.Context, name string, input json.RawMessage) (string, bool, bool, error) {
