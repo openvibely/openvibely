@@ -5187,3 +5187,27 @@ func TestTaskRuntimeEditTask(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, attachments)
 }
+
+func TestTaskRuntimeApplicationProviderCannotBypassPolicy(t *testing.T) {
+	svc := &LLMService{}
+	called := false
+	svc.SetTaskRuntimeProvider(func(_ context.Context, task models.Task, execID string, missing map[string]bool) *llmcontracts.RuntimeTools {
+		called = true
+		require.Equal(t, "execution", execID)
+		require.True(t, missing["view_task_thread"])
+		require.False(t, missing["edit_task"])
+		return &llmcontracts.RuntimeTools{
+			Definitions: []llmcontracts.RuntimeToolDefinition{{Name: "cancel_task"}},
+			Executor: func(context.Context, string, json.RawMessage) (string, bool, bool, error) {
+				t.Fatal("forbidden executor invoked")
+				return "", true, false, nil
+			},
+		}
+	})
+	rt := svc.taskActionRuntimeTools(context.Background(), models.Task{ID: "task", ProjectID: "project"}, "execution")
+	require.True(t, called)
+	require.False(t, rt.HasDefinition("cancel_task"))
+	_, handled, _, err := rt.Executor(context.Background(), "cancel_task", json.RawMessage(`{}`))
+	require.NoError(t, err)
+	require.False(t, handled)
+}

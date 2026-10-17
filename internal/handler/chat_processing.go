@@ -225,6 +225,21 @@ func (h *Handler) buildStreamingResponseActionRuntime(ctx context.Context, param
 	if params.IsTaskFollowup && params.Task != nil && h.llmSvc != nil {
 		hardenedAutomationGitHubRT = h.automationGitHubRuntimeTools(ctx, *params.Task, defs)
 	}
+	if params.IsTaskFollowup && params.Task == nil && params.TaskID != "" && h.taskRepo != nil {
+		params.Task, _ = h.taskRepo.GetByID(ctx, params.TaskID)
+	}
+	if params.IsTaskFollowup && params.Task != nil {
+		policy := chatcontrol.TaskToolNames(params.Task.CreatedVia)
+		defaults := chatcontrol.TaskToolNames("")
+		kept := make([]llmcontracts.RuntimeToolDefinition, 0, len(defs))
+		for _, def := range defs {
+			if !defaults[def.Name] || policy[def.Name] {
+				kept = append(kept, def)
+			}
+		}
+		defs = kept
+	}
+
 	genericRT := h.buildChatActionToolRuntimeFromDefs(params, collector, defs, mode, surface)
 	runtime := llmcontracts.CompositeRuntimeTools(hardenedAutomationGitHubRT, llmcontracts.RuntimeToolsFromContext(ctx), params.RuntimeTools, genericRT)
 	if automationBound && runtime != nil {
