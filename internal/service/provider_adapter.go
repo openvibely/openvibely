@@ -350,7 +350,7 @@ func providerTransport(req llmcontracts.AgentRequest) string {
 	case models.ProviderAnthropic:
 		return "anthropic_messages_http"
 	case models.ProviderOllama:
-		return "ollama_http"
+		return "chat_completions"
 	case models.ProviderTest:
 		return "test"
 	default:
@@ -429,14 +429,16 @@ func requestBudgetForAgent(agent models.LLMConfig) requestBudget {
 		reserved = agent.GetDefaultMaxTokens(defaultReservedOutputTokens)
 	}
 	safety := limits.ContextWindow / 50
+	if agent.Provider == models.ProviderOllama {
+		// Match the shared Chat Completions final-payload admission margin.
+		safety = max(1024, safety)
+	}
 	switch agent.Provider {
 	case models.ProviderAnthropic:
 		reserved = anthropicclient.CompactionOutputReserve(llmanthropic.OutputTokenBudget(agent.Model))
 		safety = limits.ContextWindow - limits.EffectiveHardLimit - reserved
-	case models.ProviderOllama:
-		reserved = agent.GetDefaultMaxTokens(4096)
 	}
-	if limits.ContextWindow < 32768 && reserved > limits.ContextWindow/4 {
+	if limits.ContextWindow < 32768 && reserved > limits.ContextWindow/4 && !(agent.Provider == models.ProviderOllama && agent.DefaultMaxTokens > 0) {
 		// Keep deliberately tiny synthetic/test windows useful while preserving
 		// the concrete provider reservation for production-sized windows.
 		reserved = limits.ContextWindow / 4
@@ -463,7 +465,7 @@ func estimateDefaultProviderToolTokens(provider models.LLMProvider) int {
 	switch provider {
 	case models.ProviderAnthropic:
 		defs = anthropicclient.DefaultTools()
-	case models.ProviderOpenAI, models.ProviderOpenAICompatible:
+	case models.ProviderOpenAI, models.ProviderOpenAICompatible, models.ProviderOllama:
 		defs = openaiclient.DefaultTools()
 	default:
 		return 0
@@ -593,7 +595,7 @@ func providerSupportsArtifactReader(req llmcontracts.AgentRequest) bool {
 		return false
 	}
 	switch req.Agent.Provider {
-	case models.ProviderOpenAI, models.ProviderAnthropic, models.ProviderOpenAICompatible:
+	case models.ProviderOpenAI, models.ProviderAnthropic, models.ProviderOpenAICompatible, models.ProviderOllama:
 		return true
 	default:
 		return false

@@ -1,293 +1,207 @@
 package ollama
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"github.com/openvibely/openvibely/pkg/attachmentcontext"
+	"image"
+	"image/png"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 
-	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
-	llmprompt "github.com/openvibely/openvibely/internal/llm/prompt"
+	contracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/testutil/teststores"
+	"github.com/openvibely/openvibely/pkg/attachment"
+	"github.com/stretchr/testify/require"
 )
 
-type recordingHTTPDoer struct {
-	request chatRequest
-	calls   int
+const done = "data: {\"choices\":[{\"delta\":{\"content\":\"done\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":2}}\n\ndata: [DONE]\n\n"
+
+func config(endpoint string) models.LLMConfig {
+	return models.LLMConfig{Provider: models.ProviderOllama, Model: "test", OllamaBaseURL: endpoint, ContextWindow: 32768, DefaultMaxTokens: 6000}
 }
 
-func instantOllamaRetry(t *testing.T) {
-	t.Helper()
-	original := retryAfter
-	retryAfter = func(time.Duration) <-chan time.Time {
-		ch := make(chan time.Time, 1)
-		ch <- time.Time{}
-		return ch
-	}
-	t.Cleanup(func() { retryAfter = original })
-}
-
-type retryingOllamaDoer struct {
-	attempts    int
-	firstErr    error
-	firstStatus int
-}
-
-func (d *retryingOllamaDoer) Do(*http.Request) (*http.Response, error) {
-	d.attempts++
-	if d.attempts == 1 && d.firstErr != nil {
-		return nil, d.firstErr
-	}
-	if d.attempts == 1 && d.firstStatus != 0 {
-		return &http.Response{StatusCode: d.firstStatus, Body: io.NopCloser(strings.NewReader(`{"error":"temporarily unavailable"}`)), Header: make(http.Header)}, nil
-	}
-	return &http.Response{
-		StatusCode: http.StatusOK,
-		Body: io.NopCloser(strings.NewReader(
-			`{"message":{"role":"assistant","content":"retry succeeded"},"done":true,"eval_count":2}` + "\n",
-		)),
-		Header: make(http.Header),
-	}, nil
-}
-
-func TestOllamaResponseErrorCategorizesContextWindow(t *testing.T) {
-	err := ollamaResponseError(http.StatusBadRequest, []byte(`{"error":"prompt exceeds context window"}`))
-	if !llmcontracts.ErrorIs(err, llmcontracts.ErrorContextWindowExceeded) {
-		t.Fatalf("error = %v, want context-window category", err)
-	}
-}
-
-func TestOllamaFinalWirePreflightUsesConfiguredContextWindow(t *testing.T) {
-	for _, operation := range []llmcontracts.Operation{llmcontracts.OperationDirect, llmcontracts.OperationStreaming, llmcontracts.OperationTask} {
-		t.Run(string(operation), func(t *testing.T) {
-			doer := &recordingHTTPDoer{}
-			adapter := New(nil, nil)
-			adapter.SetHTTPClient(doer)
-			req := llmcontracts.AgentRequest{
-				Operation: operation,
-				Message:   strings.Repeat("dense!", 2000),
-				Agent: models.LLMConfig{
-					Provider: models.ProviderOllama, Model: "arbitrary-local", OllamaBaseURL: "http://ollama.invalid", ContextWindow: 4096,
-				},
-			}
-			if operation == llmcontracts.OperationStreaming {
-				req.Followup = true
-				req.ChatHistory = []models.Execution{}
-			}
-			_, err := adapter.Call(context.Background(), req, ".", nil)
-			if err == nil || !llmcontracts.ErrorIs(err, llmcontracts.ErrorContextWindowExceeded) {
-				t.Fatalf("error = %v, want typed final-wire context rejection", err)
-			}
-			if doer.calls != 0 {
-				t.Fatalf("Ollama HTTP calls = %d, want zero", doer.calls)
-			}
-		})
-	}
-}
-
-func TestOllamaRequestPreflightUsesByteEstimate(t *testing.T) {
-	agent := models.LLMConfig{Provider: models.ProviderOllama, ContextWindow: 6000}
-	if err := ensureOllamaRequestFits([]byte(strings.Repeat("a", 12000)), agent); err != nil {
-		t.Fatalf("moderate ASCII payload should fit: %v", err)
-	}
-	if err := ensureOllamaRequestFits([]byte(strings.Repeat("a", 20000)), agent); err == nil || !llmcontracts.ErrorIs(err, llmcontracts.ErrorContextWindowExceeded) {
-		t.Fatalf("err=%v, want typed rejection for oversized payload", err)
-	}
-}
-
-func TestOllamaRequestSetsConfiguredNumCtx(t *testing.T) {
-	doer := &recordingHTTPDoer{}
-	adapter := New(nil, nil)
-	adapter.SetHTTPClient(doer)
-	_, err := adapter.Call(context.Background(), llmcontracts.AgentRequest{
-		Operation: llmcontracts.OperationDirect, Message: "hello",
-		Agent: models.LLMConfig{Provider: models.ProviderOllama, Model: "arbitrary-local", OllamaBaseURL: "http://ollama.invalid", ContextWindow: 8192},
-	}, ".", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if doer.request.Options == nil || doer.request.Options.NumCtx != 8192 || doer.request.Options.NumPredict != 2048 {
-		t.Fatalf("Ollama options = %#v, want num_ctx=8192 and conservative num_predict=2048", doer.request.Options)
-	}
-}
-
-func TestCallDirectRetriesTransientHTTPStatus(t *testing.T) {
-	instantOllamaRetry(t)
-	doer := &retryingOllamaDoer{firstStatus: http.StatusServiceUnavailable}
-	adapter := New(nil, nil)
-	adapter.SetHTTPClient(doer)
-	result, err := adapter.Call(context.Background(), llmcontracts.AgentRequest{
-		Operation: llmcontracts.OperationDirect,
-		Message:   "hello",
-		Agent:     models.LLMConfig{Provider: models.ProviderOllama, Model: "test-model", OllamaBaseURL: "http://ollama.invalid"},
-	}, ".", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if doer.attempts != 2 || result.Output != "retry succeeded" {
-		t.Fatalf("attempts/text = %d/%q, want 2/retry succeeded", doer.attempts, result.Output)
-	}
-}
-
-func TestCallDirectRetriesNetworkTimeout(t *testing.T) {
-	instantOllamaRetry(t)
-	doer := &retryingOllamaDoer{firstErr: errors.New("read: operation timed out")}
-	adapter := New(nil, nil)
-	adapter.SetHTTPClient(doer)
-
-	result, err := adapter.Call(context.Background(), llmcontracts.AgentRequest{
-		Operation: llmcontracts.OperationDirect,
-		Message:   "hello",
-		Agent: models.LLMConfig{
-			Provider:      models.ProviderOllama,
-			Model:         "test-model",
-			OllamaBaseURL: "http://ollama.invalid",
-		},
-	}, ".", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if doer.attempts != 2 || result.Output != "retry succeeded" {
-		t.Fatalf("attempts/text = %d/%q, want 2/retry succeeded", doer.attempts, result.Output)
-	}
-}
-
-func (d *recordingHTTPDoer) Do(req *http.Request) (*http.Response, error) {
-	d.calls++
-	body, err := io.ReadAll(req.Body)
-	if err != nil {
-		return nil, err
-	}
-	if err := json.Unmarshal(body, &d.request); err != nil {
-		return nil, err
-	}
-	return &http.Response{
-		StatusCode: http.StatusOK,
-		Body: io.NopCloser(strings.NewReader(
-			`{"message":{"role":"assistant","content":"follow-up response"},"done":true,"eval_count":2}` + "\n",
-		)),
-		Header: make(http.Header),
-	}, nil
-}
-
-func TestCallStreamingTaskIncludesWorktreeRootContext(t *testing.T) {
-	doer := &recordingHTTPDoer{}
-	adapter := New(nil, nil)
-	adapter.SetHTTPClient(doer)
-	workDir := "/tmp/.worktrees/task_ollama"
-
-	_, err := adapter.Call(context.Background(), llmcontracts.AgentRequest{
-		Operation:           llmcontracts.OperationTask,
-		Message:             "Implement the task",
-		ProjectInstructions: "PROJECT_RULES_SENTINEL",
-		Agent: models.LLMConfig{
-			Name:          "Ollama",
-			Provider:      models.ProviderOllama,
-			Model:         "test-model",
-			OllamaBaseURL: "http://ollama.invalid",
-		},
-	}, workDir, nil)
-	if err != nil {
-		t.Fatalf("Call: %v", err)
-	}
-
-	if len(doer.request.Messages) == 0 || doer.request.Messages[0].Role != "system" {
-		t.Fatalf("task request missing system message: %#v", doer.request.Messages)
-	}
-	systemPrompt := doer.request.Messages[0].Content
-	want := "You are operating in an isolated git worktree at " + workDir + ". Treat this path as the repository root for this run."
-	if len(doer.request.Messages) < 3 || doer.request.Messages[1].Role != "user" || !strings.Contains(doer.request.Messages[1].Content, want) {
-		t.Fatalf("task system prompt missing worktree root context %q: %q", want, systemPrompt)
-	}
-	if !strings.Contains(systemPrompt, "PROJECT_RULES_SENTINEL") {
-		t.Fatalf("task system prompt dropped project instructions: %q", systemPrompt)
-	}
-	if len(doer.request.Messages) < 3 ||
-		!strings.Contains(doer.request.Messages[len(doer.request.Messages)-1].Content, "If you recovered and completed the requested outcome, report success") ||
-		!strings.Contains(doer.request.Messages[len(doer.request.Messages)-1].Content, "[STATUS: FAILED | <describe what prevented completion>]") {
-		t.Fatalf("task user prompt missing provider-neutral outcome status contract: %#v", doer.request.Messages)
-	}
-}
-
-func TestCallStreamingZeroHistoryFollowupUsesChatAssembly(t *testing.T) {
-	doer := &recordingHTTPDoer{}
-	adapter := New(nil, nil)
-	adapter.SetHTTPClient(doer)
-
-	workDir := "/tmp/.worktrees/task_ollama_followup"
-	_, err := adapter.Call(context.Background(), llmcontracts.AgentRequest{
-		Operation:         llmcontracts.OperationStreaming,
-		Message:           "Continue the task",
-		Followup:          true,
-		ChatMode:          models.ChatModeOrchestrate,
-		ChatSystemContext: "FOLLOWUP_CONTEXT_SENTINEL",
-		Agent: models.LLMConfig{
-			Name:          "Ollama",
-			Provider:      models.ProviderOllama,
-			Model:         "test-model",
-			OllamaBaseURL: "http://ollama.invalid",
-		},
-	}, workDir, nil)
-	if err != nil {
-		t.Fatalf("Call: %v", err)
-	}
-
-	if len(doer.request.Messages) == 0 || doer.request.Messages[0].Role != "system" {
-		t.Fatalf("zero-history follow-up missing system message: %#v", doer.request.Messages)
-	}
-	systemPrompt := doer.request.Messages[0].Content
-	if !strings.Contains(systemPrompt, "# Task Follow-up Constraints") || !strings.Contains(systemPrompt, "FOLLOWUP_CONTEXT_SENTINEL") {
-		t.Fatalf("zero-history follow-up did not use Chat assembly: %q", systemPrompt)
-	}
-	wantWorktreeContext := "You are operating in an isolated git worktree at " + workDir + ". Treat this path as the repository root for this run."
-	if len(doer.request.Messages) < 3 || !strings.Contains(doer.request.Messages[1].Content, wantWorktreeContext) {
-		t.Fatalf("zero-history follow-up missing worktree root context %q: %q", wantWorktreeContext, systemPrompt)
-	}
-	if strings.Contains(systemPrompt, llmprompt.ChatActionToolModeInstructions) {
-		t.Fatalf("zero-history follow-up received initial-task guidance: %q", systemPrompt)
-	}
-	if len(doer.request.Tools) != 0 {
-		t.Fatalf("Ollama follow-up advertised unavailable tools: %#v", doer.request.Tools)
-	}
-	if doer.request.Options == nil || doer.request.Options.Temperature == nil || *doer.request.Options.Temperature != 0 {
-		t.Fatalf("Ollama request did not preserve explicit zero temperature: %#v", doer.request.Options)
-	}
-}
-
-func TestHistoricalAttachmentWire(t *testing.T) {
-	for _, compacted := range []bool{false, true} {
-		t.Run(fmt.Sprint(compacted), func(t *testing.T) {
-			var wire string
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				b, _ := io.ReadAll(r.Body)
-				wire = string(b)
-				w.Header().Set("Content-Type", "application/x-ndjson")
-				io.WriteString(w, "{\"message\":{\"role\":\"assistant\",\"content\":\"done\"},\"done\":true}\n")
+func TestSharedOperations(t *testing.T) {
+	for _, name := range []string{"direct", "task", "chat", "followup-nil", "followup-empty", "task-unset", "followup-unset"} {
+		t.Run(name, func(t *testing.T) {
+			var wire map[string]any
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				require.Equal(t, "/v1/chat/completions", r.URL.Path)
+				require.NoError(t, json.NewDecoder(r.Body).Decode(&wire))
+				w.Header().Set("Content-Type", "text/event-stream")
+				io.WriteString(w, done)
 			}))
-			defer server.Close()
-			ctx := attachmentcontext.With(context.Background(), "/uploads/report.docx")
-			history := []models.Execution{{PromptSent: "Summarize", Output: "Summary", Status: models.ExecCompleted}}
-			if compacted {
-				history = []models.Execution{{Output: "Saved compaction summary", Status: models.ExecCompleted}}
+			defer srv.Close()
+			req := contracts.AgentRequest{Operation: contracts.OperationStreaming, Message: "hello", Agent: config(srv.URL), ChatSystemContext: "selected-skill-sentinel"}
+			switch name {
+			case "direct":
+				req.Operation = contracts.OperationDirect
+			case "task", "task-unset":
+				req.Operation = contracts.OperationTask
+			case "chat":
+				req.ChatMode = models.ChatModeOrchestrate
+			default:
+				req.Followup = true
+				if name == "followup-empty" {
+					req.ChatHistory = []models.Execution{}
+				}
 			}
-			_, err := New(nil, nil).Call(ctx, llmcontracts.AgentRequest{
-				Ctx: ctx, Operation: llmcontracts.OperationStreaming, Followup: true,
-				Message: "Edit it", ChatHistory: history,
-				Agent: models.LLMConfig{Provider: models.ProviderOllama, Model: "test", OllamaBaseURL: server.URL},
-			}, ".", nil)
-			if err != nil {
-				t.Fatal(err)
+			if strings.HasSuffix(name, "-unset") {
+				req.Agent.ContextWindow = 0
+				req.Agent.DefaultMaxTokens = 0
 			}
-			if !strings.Contains(wire, "/uploads/report.docx") {
-				t.Fatal("Ollama request omitted historical attachment path")
+			saved := req.Agent
+			result, err := New(nil, nil).Call(context.Background(), req, t.TempDir(), nil)
+			require.NoError(t, err)
+			require.Contains(t, result.Output, "done")
+			require.Equal(t, 10, result.Usage.InputTokens)
+			require.Equal(t, saved, req.Agent)
+			expectedOutput := 6000
+			if strings.HasSuffix(name, "-unset") {
+				expectedOutput = 2048
+			}
+			require.Equal(t, float64(expectedOutput), wire["max_tokens"])
+			require.NotContains(t, wire, "options")
+			require.NotContains(t, wire, "num_ctx")
+			raw, _ := json.Marshal(wire["messages"])
+			if req.Followup || name == "chat" {
+				require.Contains(t, string(raw), "selected-skill-sentinel")
 			}
 		})
 	}
+}
+
+func TestSkillAndImageToolsPersistAndReplay(t *testing.T) {
+	env := teststores.New(t)
+	ctx := attachment.WithToolImages(context.Background())
+	task := &models.Task{ProjectID: "default", Title: "fixture", Prompt: "inspect", Category: models.CategoryActive, Status: models.StatusPending}
+	require.NoError(t, env.Tasks.Create(ctx, task))
+	agent, err := env.LLMConfigs.GetDefault(ctx)
+	require.NoError(t, err)
+	exec := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "inspect"}
+	require.NoError(t, env.Executions.Create(ctx, exec))
+	var imageBuffer bytes.Buffer
+	require.NoError(t, png.Encode(&imageBuffer, image.NewRGBA(image.Rect(0, 0, 2, 2))))
+	imageBytes := imageBuffer.Bytes()
+	encoded := base64.StdEncoding.EncodeToString(imageBytes)
+	calls := 0
+	var wires []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/v1/chat/completions", r.URL.Path)
+		raw, _ := io.ReadAll(r.Body)
+		wires = append(wires, string(raw))
+		calls++
+		w.Header().Set("Content-Type", "text/event-stream")
+		if calls <= 2 {
+			name := "skill_view"
+			if calls == 2 {
+				name = "view_image"
+			}
+			fmt.Fprintf(w, "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_%d\",\"type\":\"function\",\"function\":{\"name\":%q,\"arguments\":\"{}\"}}]},\"finish_reason\":\"tool_calls\"}]}\n\ndata: [DONE]\n\n", calls, name)
+		} else {
+			io.WriteString(w, done)
+		}
+	}))
+	defer srv.Close()
+	executed := []string{}
+	ctx = contracts.WithRuntimeTools(ctx, &contracts.RuntimeTools{
+		SkipDefaultTools: true,
+		Definitions: []contracts.RuntimeToolDefinition{
+			{Name: "skill_view", Access: contracts.RuntimeToolAccessRead, Parameters: json.RawMessage(`{"type":"object"}`)},
+			{Name: "view_image", Access: contracts.RuntimeToolAccessRead, Parameters: json.RawMessage(`{"type":"object"}`)},
+		},
+		Executor: func(ctx context.Context, name string, args json.RawMessage) (string, bool, bool, error) {
+			executed = append(executed, name)
+			if name == "view_image" {
+				out, err := attachment.StoreToolImage(ctx, attachment.ToolImage{Name: "fixture.png", MediaType: "image/png", Data: imageBytes})
+				return out, true, false, err
+			}
+			return "loaded skill instructions sentinel", true, false, nil
+		},
+	})
+	adapter := New(env.Executions, nil)
+	req := contracts.AgentRequest{Ctx: ctx, Operation: contracts.OperationTask, Message: "inspect", ExecID: exec.ID, Agent: config(srv.URL)}
+	_, err = adapter.Call(ctx, req, t.TempDir(), nil)
+	require.NoError(t, err)
+	require.Equal(t, []string{"skill_view", "view_image"}, executed)
+	require.Len(t, wires, 3)
+	require.Contains(t, wires[1], `"tool_call_id":"call_1"`)
+	require.Contains(t, wires[1], "loaded skill instructions sentinel")
+	require.Contains(t, wires[2], "data:image/png;base64,"+encoded)
+	require.NoError(t, env.Executions.Complete(ctx, exec.ID, models.ExecCompleted, "done", "", 0, 0))
+	history, err := env.Executions.ListByTask(ctx, task.ID)
+	require.NoError(t, err)
+	req.ExecID = ""
+	req.Operation = contracts.OperationStreaming
+	req.Followup = true
+	req.Message = "follow up"
+	req.ChatHistory = history
+	_, err = adapter.Call(ctx, req, t.TempDir(), nil)
+	require.NoError(t, err)
+	require.Len(t, wires, 4)
+	require.Contains(t, wires[3], `"tool_call_id":"call_1"`)
+	require.Contains(t, wires[3], "loaded skill instructions sentinel")
+	require.Contains(t, wires[3], "data:image/png;base64,"+encoded)
+	require.Equal(t, 1, strings.Count(wires[3], "follow up"))
+}
+
+func TestSharedErrorsCancellationAndBudget(t *testing.T) {
+	for _, name := range []string{"cancel", "error", "overflow", "output-limit"} {
+		t.Run(name, func(t *testing.T) {
+			calls := 0
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls++
+				if name == "error" {
+					http.Error(w, `{"error":{"message":"unsupported model"}}`, 400)
+					return
+				}
+				w.Header().Set("Content-Type", "text/event-stream")
+				io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"content\":\"partial\"},\"finish_reason\":\"length\"}]}\n\ndata: [DONE]\n\n")
+			}))
+			defer srv.Close()
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			req := contracts.AgentRequest{Operation: contracts.OperationDirect, Message: "hello", Agent: config(srv.URL), DisableTools: true, RawDirectPrompt: true}
+			if name == "cancel" {
+				cancel()
+			}
+			if name == "overflow" {
+				req.Message = strings.Repeat("x", 200000)
+			}
+			_, err := New(nil, nil).Call(ctx, req, t.TempDir(), nil)
+			require.Error(t, err)
+			if name == "cancel" || name == "overflow" {
+				require.Zero(t, calls)
+			} else {
+				require.Equal(t, 1, calls)
+			}
+			if name == "output-limit" {
+				require.True(t, contracts.ErrorIs(err, contracts.ErrorOutputTokenLimitReached))
+			}
+		})
+	}
+}
+
+func TestCancellationDuringStream(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	entered := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"content\":\"partial\"}}]}\n\n")
+		w.(http.Flusher).Flush()
+		close(entered)
+		<-r.Context().Done()
+	}))
+	defer srv.Close()
+	go func() { <-entered; cancel() }()
+	_, err := New(nil, nil).Call(ctx, contracts.AgentRequest{Operation: contracts.OperationDirect, Message: "hello", Agent: config(srv.URL)}, t.TempDir(), nil)
+	require.Error(t, err)
+	require.ErrorIs(t, err, context.Canceled)
 }

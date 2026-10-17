@@ -783,7 +783,7 @@ templ modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, 
 							<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" class="stroke-current shrink-0 w-6 h-6"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
 							<div>
 								<p class="font-semibold">Local Ollama Instance</p>
-								<p class="text-sm">Connects to your local Ollama server. Make sure Ollama is running with <code>ollama serve</code>.</p>
+								<p class="text-sm">Uses Ollama’s OpenAI-compatible Chat Completions API. The editable request budget controls OpenVibely’s budgeting and compaction; it does not set the server context window. Configure the actual window on the Ollama server. Native <code>num_ctx</code> is no longer sent; max output uses <code>max_tokens</code>. Native-only options such as <code>keep_alive</code>, <code>top_k</code>, <code>min_p</code>, and <code>repeat_penalty</code> are not carried over.</p>
 							</div>
 						</div>
 					</div>
@@ -1470,7 +1470,9 @@ templ modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, 
 					var selectedEffort = document.getElementById('model_reasoning_effort').value;
 					setReasoningEffortOptions(provider, model, selectedEffort);
 					updateTemperatureField(provider, model);
-					if (isOpenAICompatibleProvider(provider)) {
+					if (provider === 'ollama') {
+                        discoverOllamaContext();
+                    } else if (isOpenAICompatibleProvider(provider)) {
 						document.getElementById('model_openai_compatible_custom_model').value = model;
 						applyDiscoveredModelLimits(openAICompatibleDiscoveredModels[model]);
 					} else {
@@ -1559,6 +1561,7 @@ templ modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, 
 			}
 
 							function cancelOpenAICompatibleDiscovery() {
+                                cancelOllamaContextDiscovery();
 								openAICompatibleDiscoveryGeneration++;
 								setModelDiscoveryLoading(false);
 								if (openAICompatibleDiscoveryTimer) {
@@ -1637,7 +1640,48 @@ templ modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, 
 				else discoverOpenAICompatibleModels();
 			}
 
+            var ollamaContextGeneration = 0;
+            var ollamaContextController = null;
+            var ollamaDetectedContext = 0;
+            function cancelOllamaContextDiscovery() {
+                ollamaContextGeneration++;
+                if (ollamaContextController) ollamaContextController.abort();
+                ollamaContextController = null;
+                ollamaDetectedContext = 0;
+                updateProviderContextDisplays();
+            }
+            function discoverOllamaContext() {
+                cancelOllamaContextDiscovery();
+                var provider = document.getElementById('model_provider').value;
+                var model = document.getElementById('model_id').value;
+                var endpoint = document.getElementById('model_ollama_base_url').value;
+                if (provider !== 'ollama' || !model) return;
+                var generation = ollamaContextGeneration;
+                var controller = new AbortController();
+                ollamaContextController = controller;
+                function current() {
+                    return generation === ollamaContextGeneration &&
+                        document.getElementById('model_provider').value === provider &&
+                        document.getElementById('model_id').value === model &&
+                        document.getElementById('model_ollama_base_url').value === endpoint;
+                }
+                fetch('/models/ollama/context?' + new URLSearchParams({base_url:endpoint, model:model}), {signal:controller.signal})
+                    .then(function(response) { if (!response.ok) throw Error('Discovery failed'); return response.json(); })
+                    .then(function(data) {
+                        if (!current()) return;
+                        ollamaDetectedContext = Math.max(0, Number(data.context_length) || 0);
+                        updateProviderContextDisplays();
+                    })
+                    .catch(function(error) {
+                        if (!current() || error.name === 'AbortError') return;
+                        ollamaDetectedContext = 0;
+                        updateProviderContextDisplays();
+                    })
+                    .finally(function() { if (current()) ollamaContextController = null; });
+            }
+
 			function ollamaEndpointChanged() {
+                cancelOllamaContextDiscovery();
 				document.getElementById('model_id').replaceChildren(new Option('Loading models…', ''));
 				scheduleAutoDiscoverOpenAICompatibleModels();
 			}
@@ -1662,11 +1706,13 @@ templ modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, 
 						if (generation !== openAICompatibleDiscoveryGeneration || document.getElementById('model_provider').value !== 'ollama') return;
 						var previous = select.value;
 						var names = Array.from(new Set(models.map(function(model) {return model.name || model.model;}).filter(Boolean)));
-						select.replaceChildren();
+						if (previous && names.indexOf(previous) === -1) names.unshift(previous);
+                        select.replaceChildren();
 						names.forEach(function(name) {select.add(new Option(name, name));});
 						if (!select.options.length) select.add(new Option('No models installed', ''));
 						select.value = names.indexOf(previous) !== -1 ? previous : (names[0] || '');
 						if (select.value !== previous) handleModelChange();
+                        else discoverOllamaContext();
 						status.textContent = names.length ? 'Loaded ' + names.length + ' model' + (names.length === 1 ? '.' : 's.') : 'No models installed on this Ollama server. Install a model, then refresh.';
 					})
 					.catch(function(error) {
@@ -1961,7 +2007,7 @@ templ modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, 
 						function automaticModelCompactionThreshold() {
 							var windowSize = Number(document.getElementById('model_context_window_cap').value);
 							var reported = Number(document.getElementById('model_provider_context_window').value);
-							if (!reported && document.getElementById('model_provider').value === 'ollama') reported = 8192;
+							if (document.getElementById('model_provider').value === 'ollama') reported = 0;
 							if (reported > 0) windowSize = Math.min(windowSize, reported);
 							return document.getElementById('model_provider').value === 'anthropic'
 								? Math.max(50000, windowSize - 33000) : Math.floor(windowSize * 0.9);
@@ -1991,9 +2037,18 @@ templ modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, 
 						}
 
 						function updateProviderContextDisplays() {
+                            var ollama = document.getElementById('model_provider').value === 'ollama';
+                            var label = document.querySelector('label[for="model_context_window_cap"]');
+                            if (label) label.textContent = ollama ? 'Request context budget (tokens)' : 'Context window (tokens)';
+                            var outputHelp = document.getElementById('model_output_help');
+                            if (outputHelp) {
+                                var help = ollama ? 'Sent as max_tokens. Reserve enough of the request budget for input. The actual context window is configured on the Ollama server.' : 'Defaults leave room for input. Below 32,768 context tokens, output is limited to one quarter of the window.';
+                                outputHelp.setAttribute('data-model-setting-help', help);
+                                outputHelp.setAttribute('aria-label', help);
+                            }
 							var providerCtx = parseInt(document.getElementById('model_provider_context_window').value, 10) || 0;
 							var providerOut = parseInt(document.getElementById('model_provider_max_output_tokens').value, 10) || 0;
-							document.getElementById('model_provider_context_display').textContent = 'Reported context limit: ' + formatContextLimitTokens(providerCtx);
+							document.getElementById('model_provider_context_display').textContent = document.getElementById('model_provider').value === 'ollama' ? 'Detected server context window: ' + (ollamaDetectedContext > 0 ? formatContextLimitTokens(ollamaDetectedContext) : 'Not detected') : 'Reported context limit: ' + formatContextLimitTokens(providerCtx);
 							document.getElementById('model_provider_max_output_display').textContent = 'Reported output limit: ' + formatContextLimitTokens(providerOut);
 						}
 
@@ -2009,6 +2064,19 @@ templ modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, 
 
 						function updateContextLimitInputs(context, output, preserve) {
 							var defaults = contextLimitDefaults();
+                            if (document.getElementById('model_provider').value === 'ollama') {
+                                var budget = document.getElementById('model_context_window_cap');
+                                var outputBudget = document.getElementById('model_default_max_tokens');
+                                if (!preserve || !(Number(budget.value) > 0)) budget.value = String(defaults.context);
+                                if (!preserve || !(Number(outputBudget.value) > 0)) outputBudget.value = String(Number(budget.value) < 32768 ? Math.min(defaults.output, Math.max(1, Math.floor(Number(budget.value) / 4))) : defaults.output);
+                                outputBudget.disabled = false;
+                                document.getElementById('model_output_limit_field').classList.remove('hidden');
+                                var help = 'OpenVibely request budget only. Configure the actual context window on the Ollama server; num_ctx is not sent.';
+                                document.getElementById('model_context_source').setAttribute('data-model-setting-help', help);
+                                document.getElementById('model_context_source').setAttribute('aria-label', help);
+                                syncModelDefaultControls();
+                                return;
+                            }
 							var input = document.getElementById('model_context_window_cap');
 							var maxOutput = document.getElementById('model_default_max_tokens');
 							function fill(field, suggested, reported) {
@@ -2512,7 +2580,8 @@ templ modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, 
 						default_max_tokens: parseInt(button.dataset.modelDefaultMaxTokens, 10) || 0,
 						compaction_threshold: parseInt(button.dataset.modelCompactionThreshold, 10) || 0
 					});
-				applyMixtureConfig(dbProvider === 'mixture' ? mixtureConfigJSON : '');
+				if (dbProvider === 'ollama') discoverOllamaContext();
+                applyMixtureConfig(dbProvider === 'mixture' ? mixtureConfigJSON : '');
 				resetSecretInputVisibility('model_api_key');
 				resetSecretInputVisibility('model_custom_oauth_client_secret');
 				resetSecretInputVisibility('model_custom_signing_secret');

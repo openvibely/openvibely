@@ -127,3 +127,67 @@ func TestBrowserFunctional_ModelContextDiscoveryAndEdit(t *testing.T) {
  })();</script>`
 	runReconnectChromeFixture(t, fixture)
 }
+
+func TestBrowserFunctional_OllamaActiveContextDiscovery(t *testing.T) {
+	var content bytes.Buffer
+	if err := ModelsContent(nil, nil, false).Render(context.Background(), &content); err != nil {
+		t.Fatal(err)
+	}
+	fixture := `<main id="reconnect-result"></main><script>
+ window.htmx={process:function(){},ajax:function(){return Promise.resolve();}};
+ var pendingContext=[];
+ window.fetch=function(url,opts){
+  if(String(url).indexOf('/models/ollama/context?')===0) return new Promise(function(resolve,reject){pendingContext.push({url:String(url),signal:opts.signal,resolve:function(windowSize){resolve({ok:true,json:function(){return Promise.resolve({context_length:windowSize});}});},reject:reject});});
+  return Promise.resolve({ok:true,json:function(){return Promise.resolve([{name:'loaded:latest'},{name:'unloaded:latest'}]);}});
+ };
+ </script>` + content.String() + `<script>
+ (async function(){
+ var result=document.getElementById('reconnect-result');
+ var field=function(id){return document.getElementById(id);};
+ var wait=function(){return new Promise(function(resolve){setTimeout(resolve,30);});};
+ var expect=function(condition,message){if(!condition)throw Error(message);};
+ var display=function(){return field('model_provider_context_display').textContent;};
+ try {
+  openNewModelModal();
+  field('model_provider').value='ollama';toggleProviderFields();await wait();
+  expect(pendingContext.length>0,'selection did not fetch ps');
+  expect(display().includes('Not detected'),'invented detected context');
+  field('model_context_window_cap').value='65536';field('model_default_max_tokens').value='10000';
+  pendingContext.at(-1).resolve(32768);await wait();
+  expect(display().includes('32,768'),'loaded window not displayed');
+  expect(field('model_context_window_cap').value==='65536','detection changed request budget');
+  field('model_id').value='unloaded:latest';handleModelChange();
+  expect(display().includes('Not detected'),'selection kept old detection');
+  var stale=pendingContext.at(-1);
+  field('model_id').value='loaded:latest';handleModelChange();
+  expect(stale.signal.aborted,'old request not aborted');
+  pendingContext.at(-1).resolve(16384);await wait();
+  stale.resolve(99999);await wait();
+  expect(display().includes('16,384'),'stale model response changed detection');
+  field('model_id').value='unloaded:latest';handleModelChange();
+  pendingContext.at(-1).resolve(0);await wait();expect(display().includes('Not detected'),'unloaded detection');
+  field('model_id').value='loaded:latest';handleModelChange();
+  pendingContext.at(-1).reject(Error('offline'));await wait();expect(display().includes('Not detected'),'failed discovery detection');
+  handleModelChange();stale=pendingContext.at(-1);
+  field('model_ollama_base_url').value='http://different:11434';ollamaEndpointChanged();
+  stale.resolve(99999);await wait();expect(display().includes('Not detected'),'stale endpoint response changed detection');
+  var edit=document.createElement('button');
+  Object.assign(edit.dataset,{modelId:'saved',modelName:'Saved Ollama',modelProvider:'ollama',modelModel:'not-installed:latest',modelTemperature:'0',modelOllamaBaseUrl:'http://saved:11434',modelContextWindowCap:'65536',modelDefaultMaxTokens:'10000',modelProviderContextWindow:'99999'});
+  populateModelEditForm(edit);await wait();
+  expect(field('model_id').value==='not-installed:latest','edit replaced saved model');
+  expect(pendingContext.at(-1).url.includes('not-installed'),'edit did not discover saved model');
+  expect(display().includes('Not detected'),'saved budget treated as detection');
+  pendingContext.at(-1).resolve(8192);await wait();
+  expect(display().includes('8,192'),'edit detection missing');
+  expect(field('model_context_window_cap').value==='65536','edit budget reduced');
+  expect(field('model_default_max_tokens').value==='10000','edit output reduced');
+  var values=new FormData(field('model_form'));expect(values.get('context_window')==='65536'&&values.get('default_max_tokens')==='10000','saved budgets changed on submission');
+  handleModelChange();stale=pendingContext.at(-1);closeModelModal();
+  expect(stale.signal.aborted,'close did not abort');stale.resolve(99999);await wait();
+  expect(display().includes('Not detected'),'closed modal accepted stale response');
+  result.setAttribute('data-test-result','pass');
+ }catch(error){result.setAttribute('data-test-result','fail');result.setAttribute('data-test-error',String(error.stack));}
+ })();
+ </script>`
+	runReconnectChromeFixture(t, fixture)
+}

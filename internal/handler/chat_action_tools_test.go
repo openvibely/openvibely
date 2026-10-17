@@ -104,11 +104,11 @@ func TestSupportsChatActionTools(t *testing.T) {
 			want: true,
 		},
 		{
-			name: "ollama does not support runtime action tools",
+			name: "ollama supports shared runtime action tools",
 			agent: models.LLMConfig{
 				Provider: models.ProviderOllama,
 			},
-			want: false,
+			want: true,
 		},
 	}
 
@@ -137,7 +137,7 @@ func TestHandlerSupportsChatActionToolsResolvesMixtureAggregator(t *testing.T) {
 		{name: "anthropic oauth", provider: models.ProviderAnthropic, authMethod: models.AuthMethodOAuth, want: true},
 		{name: "openai compatible api key", provider: models.ProviderOpenAICompatible, authMethod: models.AuthMethodAPIKey, want: true},
 		{name: "openai compatible oauth", provider: models.ProviderOpenAICompatible, authMethod: models.AuthMethodOAuth, want: true},
-		{name: "ollama", provider: models.ProviderOllama, authMethod: models.AuthMethodAPIKey, want: false},
+		{name: "ollama", provider: models.ProviderOllama, authMethod: models.AuthMethodAPIKey, want: true},
 	}
 
 	for _, tt := range tests {

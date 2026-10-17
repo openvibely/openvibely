@@ -928,6 +928,7 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	e.GET("/models/:id/edit-details", h.GetModelEditDetails)
 	e.GET("/models/openai-compatible/available", h.ListOpenAICompatibleAvailableModels)
 	e.GET("/models/ollama/available", h.ListOllamaAvailableModels)
+	e.GET("/models/ollama/context", h.DetectOllamaContext)
 	e.POST("/models/:id", h.UpdateModel)
 	e.PUT("/models/:id", h.UpdateModel)
 	e.POST("/models/:id/set-default", h.SetDefaultModel)
