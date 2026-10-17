@@ -10,7 +10,7 @@ import (
 
 func TestCatalogContainsOpenVibelyDefaultsAndPinnedVSCodeThemes(t *testing.T) {
 	catalog := Catalog()
-	if want := ExpectedThemeCount + 2 + len(PaletteThemes()); len(catalog) != want {
+	if want := ExpectedThemeCount + len(OpenVibelyThemes()) + len(PaletteThemes()); len(catalog) != want {
 		t.Fatalf("catalog has %d themes, want %d", len(catalog), want)
 	}
 	if catalog[0].ID != OpenVibelyDarkThemeID || catalog[1].ID != OpenVibelyLightThemeID {

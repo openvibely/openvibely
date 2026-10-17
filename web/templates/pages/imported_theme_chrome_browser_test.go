@@ -108,6 +108,13 @@ func TestBrowserFunctional_ImportedThemeStylesTitlebarMenusAndSchedulePickers(t 
 			window.matches = function(selector, property, value) { var got = window.computed(selector, property); var want = window.themeColor(value, property); return got === want ? 'ok' : got + ' != ' + want; };
 			'ok'`)
 		browser.waitFor("theme applied", `document.documentElement.getAttribute('data-color-theme')`, "vscode-kimbie-dark")
+		browser.evaluate(`window.openVibelyThemes.apply('openvibely-dark-continuous');'ok'`)
+		browser.waitFor("continuous sidebar joins canvas", `String(window.computed('#sidebar', 'backgroundColor') === window.computed('body', 'backgroundColor'))`, "true")
+		browser.waitFor("continuous sidebar has no contrasting edge", `String(window.computed('#sidebar', 'borderRightColor') === window.computed('#sidebar', 'backgroundColor'))`, "true")
+		browser.waitFor("continuous retains native styling", `document.documentElement.getAttribute('data-ov-theme-layer')`, "native")
+		browser.evaluate(`window.openVibelyThemes.apply('openvibely-dark');'ok'`)
+		browser.waitFor("default sidebar restored", `window.near('#sidebar', 'backgroundColor', '#1d232a')`, "ok")
+		browser.evaluate(`window.openVibelyThemes.apply('vscode-kimbie-dark');'ok'`)
 
 		for _, themeID := range []string{"vscode-dark-2026", "vscode-light-2026", "github-light", "catppuccin-mocha"} {
 			browser.evaluate(`window.openVibelyThemes.apply('` + themeID + `');'ok'`)
