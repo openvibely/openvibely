@@ -695,7 +695,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					max-width: 380px;
 					width: 100%;
 				}
-				dialog.modal #toast-container {
+				dialog #toast-container {
 					z-index: 1302;
 				}
 				.card-sort-control {
@@ -5196,7 +5196,7 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 			<div id="toast-container"></div>
 			<script>
 				function getTopMostOpenModal() {
-					const openModals = Array.from(document.querySelectorAll('dialog.modal[open]'));
+					const openModals = Array.from(document.querySelectorAll('dialog:modal'));
 					if (openModals.length === 0) return null;
 					return openModals[openModals.length - 1];
 				}
@@ -5256,13 +5256,13 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 				}
 
 				document.addEventListener('close', function(event) {
-					if (event && event.target && event.target.matches && event.target.matches('dialog.modal')) {
+					if (event && event.target && event.target.matches && event.target.matches('dialog')) {
 						setTimeout(syncToastContainerHost, 0);
 					}
 				}, true);
 
 				document.addEventListener('cancel', function(event) {
-					if (event && event.target && event.target.matches && event.target.matches('dialog.modal')) {
+					if (event && event.target && event.target.matches && event.target.matches('dialog')) {
 						setTimeout(syncToastContainerHost, 0);
 					}
 				}, true);
@@ -5299,7 +5299,7 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 				}
 
 				function closeOpenModalsForToastNavigation() {
-					var openModals = Array.from(document.querySelectorAll('dialog.modal[open]'));
+					var openModals = Array.from(document.querySelectorAll('dialog:modal'));
 					if (openModals.length === 0) return;
 					openModals.forEach(function(modal) {
 						try {

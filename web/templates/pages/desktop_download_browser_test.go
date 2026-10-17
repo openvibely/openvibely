@@ -16,6 +16,7 @@ import (
 func TestBrowserFunctional_DesktopDownload(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
 	var saves atomic.Int32
+	var outcome atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if static.ServeAsset(w, r) {
 			return
@@ -24,7 +25,15 @@ func TestBrowserFunctional_DesktopDownload(t *testing.T) {
 			if r.Method == http.MethodPost && r.Header.Get("X-OpenVibely-Save") == "1" && r.URL.Query().Get("project_id") == "project" {
 				saves.Add(1)
 				w.Header().Set("Content-Type", "application/json")
-				io.WriteString(w, `{"saved":false,"canceled":true}`)
+				switch outcome.Load() {
+				case 1:
+					io.WriteString(w, `{"saved":true}`)
+				case 2:
+					w.WriteHeader(http.StatusInternalServerError)
+					io.WriteString(w, `{"message":"Could not save file"}`)
+				default:
+					io.WriteString(w, `{"saved":false,"canceled":true}`)
+				}
 				return
 			}
 			w.Header().Set("Content-Disposition", `attachment; filename="report.docx"`)
@@ -55,11 +64,23 @@ func TestBrowserFunctional_DesktopDownload(t *testing.T) {
 		if saves.Load() != 2 {
 			t.Fatalf("retry after cancellation: %d", saves.Load())
 		}
+		// Native modal dialogs live above ordinary page stacking contexts.
+		b.evaluate(`const gallery=document.getElementById('image-gallery');gallery.showModal();gallery.append(document.querySelector('#save-file'));'opened'`)
+		for _, result := range []int32{1, 2} {
+			outcome.Store(result)
+			b.evaluate(`document.querySelectorAll('.toast-notification').forEach(toast=>toast.remove());'cleared'`)
+			b.click("#save-file")
+			b.waitFor("download toast inside gallery", `String(!!document.querySelector('#image-gallery #toast-container .toast-notification'))`, "true")
+			b.waitFor("download toast above gallery", `(()=>{const toast=document.querySelector('.toast-notification'),r=toast.getBoundingClientRect();return String(toast.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2)))})()`, "true")
+			b.waitFor("toast save finished", `String(!document.querySelector('#save-file').hasAttribute('aria-busy'))`, "true")
+		}
+		b.evaluate(`document.body.append(document.querySelector('#save-file'));document.getElementById('image-gallery').close();'closed'`)
+		b.waitFor("toasts return to page", `String(document.querySelector('#toast-container').parentElement===document.body)`, "true")
 		b.evaluate(`document.documentElement.dataset.runtime='web';document.querySelector('#save-file').addEventListener('click',e=>{window.webDownloadIntercepted=e.defaultPrevented;e.preventDefault()});document.querySelector('#save-file').click();'clicked'`)
 		if got := b.evaluate(`String(window.webDownloadIntercepted)`); got != "false" {
 			t.Fatal("desktop handler intercepted browser download")
 		}
-		if saves.Load() != 2 {
+		if saves.Load() != 4 {
 			t.Fatal("web download used native saver")
 		}
 	})
