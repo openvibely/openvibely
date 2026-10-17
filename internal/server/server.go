@@ -354,12 +354,14 @@ func requestLoggerConfig(output io.Writer) middleware.RequestLoggerConfig {
 		LogURIPath:   true,
 		LogStatus:    true,
 		LogRequestID: true,
-		LogValuesFunc: func(_ echo.Context, values middleware.RequestLoggerValues) error {
-			if values.Method == http.MethodGet && values.Status >= 200 && values.Status < 300 {
-				switch values.URIPath {
-				case "/api/system/update", "/alerts/unread-count", "/chat/input-requests", "/chat/pending-inputs", "/events/live":
-					return nil
-				}
+		LogError:     true,
+		LogValuesFunc: func(c echo.Context, values middleware.RequestLoggerValues) error {
+			failed := values.Error != nil || values.Status >= http.StatusBadRequest
+			contentType, _, _ := strings.Cut(c.Response().Header().Get(echo.HeaderContentType), ";")
+			streaming := strings.EqualFold(strings.TrimSpace(contentType), "text/event-stream") || values.Status == http.StatusSwitchingProtocols
+			// Stream duration measures connection lifetime, not response slowness.
+			if !failed && (values.Latency < time.Second || streaming) {
+				return nil
 			}
 			_, err := fmt.Fprintf(output, "%s method=%s path=%s status=%d latency=%s request_id=%s\n",
 				time.Now().Format(time.RFC3339), values.Method, values.URIPath, values.Status, values.Latency, values.RequestID)

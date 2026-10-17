@@ -260,7 +260,6 @@ func (s *TaskService) normalizeActiveTerminalTasks(ctx context.Context, tasks []
 }
 
 func (s *TaskService) GetByID(ctx context.Context, id string) (*models.Task, error) {
-	applog.Infof("[task-svc] GetByID id=%s", id)
 	return s.repo.GetByID(ctx, id)
 }
 
