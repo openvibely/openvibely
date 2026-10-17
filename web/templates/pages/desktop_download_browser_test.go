@@ -72,6 +72,11 @@ func TestBrowserFunctional_DesktopDownload(t *testing.T) {
 			b.click("#save-file")
 			b.waitFor("download toast inside gallery", `String(!!document.querySelector('#image-gallery #toast-container .toast-notification'))`, "true")
 			b.waitFor("download toast above gallery", `(()=>{const toast=document.querySelector('.toast-notification'),r=toast.getBoundingClientRect();return String(toast.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2)))})()`, "true")
+			b.click(".toast-message-container")
+			b.waitFor("toast click keeps gallery open", `String(document.getElementById('image-gallery').open)`, "true")
+			b.click(".toast-close")
+			b.waitFor("notification dismissed", `String(!document.querySelector('.toast-notification'))`, "true")
+			b.waitFor("dismiss keeps gallery open", `String(document.getElementById('image-gallery').open)`, "true")
 			b.waitFor("toast save finished", `String(!document.querySelector('#save-file').hasAttribute('aria-busy'))`, "true")
 		}
 		b.evaluate(`document.body.append(document.querySelector('#save-file'));document.getElementById('image-gallery').close();'closed'`)

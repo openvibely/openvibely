@@ -106,7 +106,7 @@
   if(currentKind==='image'&&['+','=','-','0'].includes(event.key)){event.preventDefault();window.OVFileImage.key(event.key)}
  });
  let backdropPress=false;
- const isBackdrop=target=>!target.closest('img,video,button,a,[data-result-content],[data-gallery-name],[data-gallery-count]');
+ const isBackdrop=target=>!target.closest('#toast-container,img,video,button,a,[data-result-content],[data-gallery-name],[data-gallery-count]');
  dialog.addEventListener('pointerdown',event=>{backdropPress=event.button===0&&isBackdrop(event.target)},true);
  dialog.addEventListener('pointerup',event=>{const released=document.elementFromPoint(event.clientX,event.clientY);backdropPress=backdropPress&&event.button===0&&released&&dialog.contains(released)&&isBackdrop(released)},true);
  dialog.addEventListener('pointercancel',()=>{backdropPress=false});
