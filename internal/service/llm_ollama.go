@@ -61,7 +61,7 @@ func ListOllamaModels(ctx context.Context, baseURL string) ([]OllamaModelInfo, e
 	if baseURL == "" {
 		baseURL = "http://localhost:11434"
 	}
-	url := strings.TrimRight(baseURL, "/") + "/api/tags"
+	url := strings.TrimSuffix(strings.TrimRight(baseURL, "/"), "/v1") + "/api/tags"
 
 	type bufferedResponse struct {
 		statusCode int
@@ -107,4 +107,57 @@ func ListOllamaModels(ctx context.Context, baseURL string) ([]OllamaModelInfo, e
 	}
 
 	return modelList.Models, nil
+}
+
+// DetectOllamaContextWindow reports only the selected model's active server
+// window. Zero means unloaded or unavailable; no model is loaded by this call.
+func DetectOllamaContextWindow(ctx context.Context, baseURL, model string) (int, error) {
+	ctx, cancel := context.WithTimeout(ctx, ModelDiscoveryTimeout)
+	defer cancel()
+	baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	if baseURL == "" {
+		baseURL = "http://localhost:11434"
+	}
+	baseURL = strings.TrimSuffix(baseURL, "/v1")
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+"/api/ps", nil)
+	if err != nil {
+		return 0, fmt.Errorf("invalid Ollama endpoint")
+	}
+	resp, err := OllamaHTTPClient.Do(req)
+	if err != nil {
+		if ctx.Err() != nil {
+			return 0, ctx.Err()
+		}
+		return 0, fmt.Errorf("Ollama context discovery unavailable")
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return 0, fmt.Errorf("Ollama context discovery status %d", resp.StatusCode)
+	}
+	var result struct {
+		Models []struct {
+			Name          string `json:"name"`
+			Model         string `json:"model"`
+			ContextLength int    `json:"context_length"`
+		} `json:"models"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 4<<20)).Decode(&result); err != nil {
+		return 0, fmt.Errorf("invalid Ollama context discovery response")
+	}
+	canonical := func(name string) string {
+		name = strings.TrimSpace(name)
+		if name != "" && !strings.Contains(name[strings.LastIndex(name, "/")+1:], ":") {
+			name += ":latest"
+		}
+		return name
+	}
+	if strings.TrimSpace(model) == "" {
+		return 0, nil
+	}
+	for _, entry := range result.Models {
+		if canonical(entry.Name) == canonical(model) || canonical(entry.Model) == canonical(model) {
+			return max(0, entry.ContextLength), nil
+		}
+	}
+	return 0, nil
 }

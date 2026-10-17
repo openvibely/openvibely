@@ -701,7 +701,7 @@ func TestProviderContextBudget_NoProviderCallWhenPendingInputCannotBeExternalize
 }
 
 func TestProviderContextCompactionFallback_RetriesStreamingRequestOnceForSupportedProviders(t *testing.T) {
-	providers := []models.LLMProvider{models.ProviderOpenAI, models.ProviderAnthropic, models.ProviderOpenAICompatible}
+	providers := []models.LLMProvider{models.ProviderOpenAI, models.ProviderAnthropic, models.ProviderOpenAICompatible, models.ProviderOllama}
 	for _, provider := range providers {
 		t.Run(string(provider), func(t *testing.T) {
 			svc := NewLLMService(nil, nil, nil, nil, nil, nil)
@@ -1161,6 +1161,42 @@ func TestProviderContextCompactionFallback_OpenAICompatibleProactiveSummaryAndPe
 		{ID: "source", PromptSent: strings.Repeat("n", 28000), Output: "new", Status: models.ExecCompleted},
 	}
 	req := llmcontracts.AgentRequest{Ctx: context.Background(), Operation: llmcontracts.OperationStreaming, Message: strings.Repeat("m", 80), Agent: models.LLMConfig{ID: "model-1", Provider: models.ProviderOpenAICompatible, Model: "compat", ContextWindow: 20000}, ProjectID: "project-1", ChatHistory: history}
+	res, err := svc.callProviderWithContextCompactionFallback(adapter, req)
+	if err != nil || res.Output != "ok" {
+		t.Fatalf("call result=%#v err=%v", res, err)
+	}
+	if len(requests) != 2 || requests[0].Operation != llmcontracts.OperationDirect || requests[1].Operation != llmcontracts.OperationStreaming {
+		t.Fatalf("requests = %#v, want proactive summary then original operation", requests)
+	}
+	checkpoint, err := execRepo.GetChatCompactionCheckpoint(context.Background(), "chat_project", "project-1")
+	if err != nil {
+		t.Fatalf("GetChatCompactionCheckpoint: %v", err)
+	}
+	if checkpoint == nil || checkpoint.SourceExecutionID != "source" || !strings.Contains(checkpoint.Summary, "completed work") {
+		t.Fatalf("checkpoint = %#v", checkpoint)
+	}
+}
+
+func TestProviderContextCompactionFallback_OllamaProactiveSummaryAndPersistence(t *testing.T) {
+	storeEnv := teststores.New(t)
+	execRepo := storeEnv.Stores.Executions
+	svc := NewLLMService(nil, execRepo, nil, nil, nil, nil)
+	var requests []llmcontracts.AgentRequest
+	adapter := providerAdapterFunc(func(req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
+		requests = append(requests, req)
+		if req.Operation == llmcontracts.OperationDirect {
+			if !req.DisableTools || !req.RawDirectPrompt || !req.Agent.DisableNativeCompaction {
+				t.Fatalf("summary request semantics = %#v", req)
+			}
+			return llmcontracts.AgentResult{Output: "completed work; no authorization to write"}, nil
+		}
+		return llmcontracts.AgentResult{Output: "ok", TextOnlyOutput: "ok"}, nil
+	})
+	history := []models.Execution{
+		{ID: "old", PromptSent: strings.Repeat("o", 28000), Output: "old", Status: models.ExecCompleted},
+		{ID: "source", PromptSent: strings.Repeat("n", 28000), Output: "new", Status: models.ExecCompleted},
+	}
+	req := llmcontracts.AgentRequest{Ctx: context.Background(), Operation: llmcontracts.OperationStreaming, Message: strings.Repeat("m", 80), Agent: models.LLMConfig{ID: "model-1", Provider: models.ProviderOllama, Model: "compat", ContextWindow: 20000}, ProjectID: "project-1", ChatHistory: history}
 	res, err := svc.callProviderWithContextCompactionFallback(adapter, req)
 	if err != nil || res.Output != "ok" {
 		t.Fatalf("call result=%#v err=%v", res, err)
@@ -2355,5 +2391,61 @@ func TestAttachmentContextSurvivesRestoredCheckpoint(t *testing.T) {
 	}
 	if !strings.Contains(attachmentcontext.Text(got.Ctx), "/uploads/report.docx") {
 		t.Fatalf("restored request lost attachment path: history=%s current=%s", body, got.Message)
+	}
+}
+
+func TestOllamaCompactionUsesCompatibleWire(t *testing.T) {
+	var requests []map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/chat/completions" {
+			t.Errorf("unexpected endpoint %s", r.URL.Path)
+			http.Error(w, "unexpected endpoint", 400)
+			return
+		}
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Error(err)
+			return
+		}
+		requests = append(requests, body)
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"completed prior work\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n")
+	}))
+	defer server.Close()
+	svc := NewLLMService(nil, nil, nil, nil, nil, nil)
+	req := llmcontracts.AgentRequest{Ctx: context.Background(), Operation: llmcontracts.OperationStreaming, Followup: true, Message: "continue", Agent: models.LLMConfig{Provider: models.ProviderOllama, Model: "local", OllamaBaseURL: server.URL, ContextWindow: 20000, DefaultMaxTokens: 2000, CompactionThreshold: 12000}, ChatHistory: []models.Execution{
+		{ID: "old", PromptSent: strings.Repeat("o", 28000), Output: "old", Status: models.ExecCompleted},
+		{ID: "new", PromptSent: strings.Repeat("n", 28000), Output: "new", Status: models.ExecCompleted},
+	}}
+	_, err := svc.callProviderWithContextCompactionFallback(svc.providerAdapters[models.ProviderOllama], req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(requests) != 2 {
+		t.Fatalf("requests=%d, want summary and continuation", len(requests))
+	}
+	if _, ok := requests[0]["tools"]; ok {
+		t.Fatal("summary inherited tools")
+	}
+	var first strings.Builder
+	for _, raw := range requests[0]["messages"].([]any) {
+		message := raw.(map[string]any)
+		content, _ := message["content"].(string)
+		first.WriteString(content)
+	}
+	if !strings.Contains(first.String(), localContextCompactionInstruction) {
+		t.Fatal("first request was not a compaction summary")
+	}
+	second, _ := json.Marshal(requests[1]["messages"])
+	if !strings.Contains(string(second), "completed prior work") || !strings.Contains(string(second), "continue") {
+		t.Fatal("continuation lost summary or pending input")
+	}
+	for _, body := range requests {
+		if body["model"] != "local" {
+			t.Fatal("compaction changed models")
+		}
+		if _, ok := body["options"]; ok {
+			t.Fatal("native options sent")
+		}
 	}
 }

@@ -70,3 +70,57 @@ func TestListOllamaModelsCancelsStalledRequest(t *testing.T) {
 		t.Fatalf("stalled discovery: err=%v attempts=%d elapsed=%v", err, attempts, time.Since(started))
 	}
 }
+
+func TestDetectOllamaContextWindow(t *testing.T) {
+	original := OllamaHTTPClient
+	t.Cleanup(func() { OllamaHTTPClient = original })
+	for _, tc := range []struct {
+		name, model, body string
+		status, want      int
+	}{
+		{"loaded", "qwen", `{"models":[{"name":"other:latest","context_length":999},{"model":"qwen:latest","context_length":65536}]}`, 200, 65536},
+		{"exact tag", "qwen:small", `{"models":[{"name":"qwen:latest","context_length":65536},{"name":"qwen:small","context_length":8192}]}`, 200, 8192},
+		{"unloaded", "qwen", `{"models":[{"name":"other:latest","context_length":999}]}`, 200, 0},
+		{"missing metadata", "qwen", `{"models":[{"name":"qwen:latest"}]}`, 200, 0},
+		{"failed", "qwen", `private response`, 500, 0},
+		{"malformed", "qwen", `not json`, 200, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			OllamaHTTPClient = ollamaListDoerFunc(func(req *http.Request) (*http.Response, error) {
+				if req.URL.Path != "/api/ps" {
+					t.Fatalf("path %s", req.URL.Path)
+				}
+				if _, ok := req.Context().Deadline(); !ok {
+					t.Fatal("missing discovery deadline")
+				}
+				return &http.Response{StatusCode: tc.status, Body: io.NopCloser(strings.NewReader(tc.body))}, nil
+			})
+			got, err := DetectOllamaContextWindow(context.Background(), "http://fixture/v1/", tc.model)
+			if got != tc.want {
+				t.Fatalf("got %d want %d", got, tc.want)
+			}
+			if tc.name == "failed" || tc.name == "malformed" {
+				if err == nil {
+					t.Fatal("expected error")
+				}
+			} else if err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestDetectOllamaContextCancellation(t *testing.T) {
+	original := OllamaHTTPClient
+	t.Cleanup(func() { OllamaHTTPClient = original })
+	ctx, cancel := context.WithCancel(context.Background())
+	OllamaHTTPClient = ollamaListDoerFunc(func(req *http.Request) (*http.Response, error) {
+		cancel()
+		<-req.Context().Done()
+		return nil, req.Context().Err()
+	})
+	_, err := DetectOllamaContextWindow(ctx, "http://fixture", "qwen")
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("got %v", err)
+	}
+}
