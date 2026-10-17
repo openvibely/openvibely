@@ -1,10 +1,31 @@
 package handler
 
 import (
+	"reflect"
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/models"
 )
+
+func TestNormalizeAgentToolsPreservesShellPermission(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		input []string
+		want  []string
+	}{
+		{"mixed permissions", []string{"Read", "Shell"}, []string{"Read", "Bash"}},
+		{"shell only", []string{"Shell"}, []string{"Bash"}},
+		{"case and whitespace", []string{"Read", " sHeLl "}, []string{"Read", "Bash"}},
+		{"duplicate aliases", []string{"Shell", "Bash", "shell"}, []string{"Bash"}},
+		{"legacy permission", []string{"Read", "Bash"}, []string{"Read", "Bash"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := normalizeAgentTools(tc.input); !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("normalizeAgentTools(%q) = %q, want %q", tc.input, got, tc.want)
+			}
+		})
+	}
+}
 
 func TestDefaultAgentToolsIncludesSelectedMemoryView(t *testing.T) {
 	tools := defaultAgentTools()
