@@ -498,8 +498,8 @@ func ExecuteTaskEdits(ctx context.Context, requests []TaskEditRequest, projectID
 		if req.Category != "" {
 			requestedCategory := models.TaskCategory(req.Category)
 			if requestedCategory != task.Category {
-				// Validate category
-				validCategory := false
+				// Runtime edits also accept scheduled, as advertised by the edit_task schema.
+				validCategory := requestedCategory == models.CategoryScheduled
 				for _, c := range models.SelectableCategories {
 					if requestedCategory == c {
 						validCategory = true

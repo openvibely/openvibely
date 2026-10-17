@@ -5019,7 +5019,7 @@ func TestLLMServiceExecuteTaskWithAgentExposesBootstrapToolsToInitialRuns(t *tes
 	if rt == nil {
 		t.Fatal("expected runtime tools on provider request")
 	}
-	for _, name := range []string{"list_tasks", "create_task", "set_task_goal", "get_task_goal", "schedule_task", "modify_schedule", "github_create_issue", "github_get_issue", "github_get_project_inbox", "github_is_actor_authorized", "github_list_my_assigned_issues", "github_list_assigned_issues", "github_list_assigned_issues_with_prs", "github_comment_on_issue", "github_add_issue_labels", "github_close_issue", "github_open_pull_request", "github_replace_pull_request_branch", "github_forward_pr_feedback_to_tasks"} {
+	for _, name := range []string{"list_tasks", "create_task", "edit_task", "set_task_goal", "get_task_goal", "schedule_task", "modify_schedule", "github_create_issue", "github_get_issue", "github_get_project_inbox", "github_is_actor_authorized", "github_list_my_assigned_issues", "github_list_assigned_issues", "github_list_assigned_issues_with_prs", "github_comment_on_issue", "github_add_issue_labels", "github_close_issue", "github_open_pull_request", "github_replace_pull_request_branch", "github_forward_pr_feedback_to_tasks"} {
 		if !rt.HasDefinition(name) {
 			t.Fatalf("expected %s on initial task run, got %#v", name, rt.Definitions)
 		}
@@ -5040,9 +5040,22 @@ func TestLLMServiceExecuteTaskWithAgentExposesBootstrapToolsToInitialRuns(t *tes
 	if !handled || isErr || err != nil {
 		t.Fatalf("expected list_capabilities handler on initial task run handled=%v isErr=%v err=%v out=%s", handled, isErr, err, out)
 	}
-	if !strings.Contains(out, "schedule_task") || !strings.Contains(out, "github_get_project_inbox") {
+	if !strings.Contains(out, "schedule_task") || !strings.Contains(out, "github_get_project_inbox") || !strings.Contains(out, "edit_task") {
 		t.Fatalf("expected capabilities to include bootstrap tools, got %s", out)
 	}
+	for _, name := range []string{"cancel_task", "merge_task", "mark_task_goal_achieved", "report_task_goal_blocked", "request_user_input"} {
+		require.False(t, rt.HasDefinition(name), name)
+		require.NotContains(t, out, name)
+		_, handled, _, _ := rt.Executor(ctx, name, json.RawMessage(`{}`))
+		require.False(t, handled, name)
+	}
+	edited, handled, isErr, err := rt.Executor(ctx, "edit_task", json.RawMessage(fmt.Sprintf(`{"id":%q,"priority":4}`, task.ID)))
+	require.NoError(t, err, edited)
+	require.True(t, handled)
+	require.False(t, isErr)
+	updated, err := taskRepo.GetByID(ctx, task.ID)
+	require.NoError(t, err)
+	require.Equal(t, 4, updated.Priority)
 	out, handled, isErr, err = rt.Executor(ctx, "create_task", []byte(`{"title":"Implement GitHub issue #42","prompt":"Implement assigned GitHub issue #42 and open a PR."}`))
 	if !handled || isErr || err != nil {
 		t.Fatalf("expected create_task handler for implementation task on initial task run handled=%v isErr=%v err=%v out=%s", handled, isErr, err, out)
@@ -5096,4 +5109,81 @@ func TestLLMServiceExecuteTaskWithAgentExposesBootstrapToolsToInitialRuns(t *tes
 	if loopGoal != nil {
 		t.Fatalf("expected scheduled loop task to have no persisted goal, got %#v", loopGoal)
 	}
+}
+
+func TestTaskRuntimeEditTask(t *testing.T) {
+	ctx := context.Background()
+	env := teststores.New(t)
+	project := &models.Project{Name: "Task edits"}
+	require.NoError(t, env.Projects.Create(ctx, project))
+	foreignProject := &models.Project{Name: "Other project"}
+	require.NoError(t, env.Projects.Create(ctx, foreignProject))
+	caller := &models.Task{ProjectID: project.ID, Title: "Caller", Prompt: "Edit tasks", Category: models.CategoryActive, Status: models.StatusPending}
+	require.NoError(t, env.Tasks.Create(ctx, caller))
+	target := &models.Task{ProjectID: project.ID, Title: "Target", Prompt: "Original", Category: models.CategoryBacklog, Status: models.StatusPending}
+	require.NoError(t, env.Tasks.Create(ctx, target))
+	foreign := &models.Task{ProjectID: foreignProject.ID, Title: "Foreign", Prompt: "Untouched", Category: models.CategoryBacklog, Status: models.StatusPending}
+	require.NoError(t, env.Tasks.Create(ctx, foreign))
+	model := ensureDefaultAgent(t, env.LLMConfigs)
+	agent := &models.Agent{Key: "editor", Name: "Editor", Enabled: true, SelectableAsPrimary: true}
+	require.NoError(t, env.Agents.Create(ctx, agent))
+	taskSvc := NewTaskService(env.Tasks, env.Attachments, NewWorkerService(nil, 0, nil))
+	taskSvc.SetAgentRepo(env.Agents)
+	taskSvc.SetDeletionUploadsDir(t.TempDir())
+	svc := NewLLMService(env.LLMConfigs, env.Executions, env.Tasks, env.Projects, env.Schedules, env.Attachments)
+	svc.SetTaskService(taskSvc)
+	rt := svc.taskActionRuntimeTools(ctx, *caller)
+	require.True(t, rt.HasDefinition("edit_task"))
+	attachment := filepath.Join(t.TempDir(), "input.txt")
+	require.NoError(t, os.WriteFile(attachment, []byte("task attachment"), 0600))
+	payload, err := json.Marshal(map[string]any{
+		"id": target.ID, "title": "Edited", "prompt": "Updated prompt", "priority": 4,
+		"category": "scheduled", "tag": "bug", "agent_id": model.ID, "agent_definition_id": agent.ID,
+		"chain":      map[string]any{"enabled": true, "trigger": "on_completion", "child_title": "Next task"},
+		"auto_merge": true, "auto_merge_on_goal_achieved": true, "merge_target_branch": "develop",
+		"attachments": []string{attachment},
+	})
+	require.NoError(t, err)
+	out, handled, isErr, err := rt.Executor(ctx, "edit_task", payload)
+	require.NoError(t, err, out)
+	require.True(t, handled)
+	require.False(t, isErr, out)
+	updated, err := env.Tasks.GetByID(ctx, target.ID)
+	require.NoError(t, err)
+	require.Equal(t, "Edited", updated.Title)
+	require.Contains(t, updated.Prompt, "Updated prompt")
+	require.Equal(t, 4, updated.Priority)
+	require.Equal(t, models.CategoryScheduled, updated.Category)
+	require.Equal(t, models.TaskTag("bug"), updated.Tag)
+	require.Equal(t, model.ID, *updated.AgentID)
+	require.Equal(t, agent.ID, *updated.AgentDefinitionID)
+	require.True(t, updated.AutoMerge)
+	require.True(t, updated.AutoMergeOnGoalAchieved)
+	require.Equal(t, "develop", updated.MergeTargetBranch)
+	chain, err := updated.ParseChainConfig()
+	require.NoError(t, err)
+	require.True(t, chain.Enabled)
+	require.Equal(t, "Next task", chain.ChildTitle)
+	attachments, err := env.Attachments.ListByTask(ctx, target.ID)
+	require.NoError(t, err)
+	require.Len(t, attachments, 1)
+	content, err := os.ReadFile(attachments[0].FilePath)
+	require.NoError(t, err)
+	require.Equal(t, "task attachment", string(content))
+	require.Contains(t, updated.Prompt, attachments[0].FilePath)
+
+	payload, err = json.Marshal(map[string]any{"id": foreign.ID, "title": "Must not change", "attachments": []string{attachment}})
+	require.NoError(t, err)
+	out, handled, isErr, err = rt.Executor(ctx, "edit_task", payload)
+	require.Error(t, err)
+	require.True(t, handled)
+	require.True(t, isErr)
+	require.Contains(t, err.Error(), "edit_task: no tasks were updated")
+	unchanged, err := env.Tasks.GetByID(ctx, foreign.ID)
+	require.NoError(t, err)
+	require.Equal(t, foreign.Title, unchanged.Title)
+	require.Equal(t, foreign.Prompt, unchanged.Prompt)
+	attachments, err = env.Attachments.ListByTask(ctx, foreign.ID)
+	require.NoError(t, err)
+	require.Empty(t, attachments)
 }
