@@ -16,6 +16,22 @@ import (
 // serveFileContent is called only after the owner route authorizes this file.
 // The original remains byte-for-byte intact; preview decoding is separate.
 func serveFileContent(c echo.Context, path, name string) error {
+	if save, ok := c.Get(desktopSaveKey).(DesktopFileSaver); ok {
+		f, err := os.Open(path)
+		if err != nil {
+			return echo.NewHTTPError(http.StatusNotFound, "file not found")
+		}
+		defer f.Close()
+		info, err := f.Stat()
+		if err != nil || !info.Mode().IsRegular() {
+			return echo.NewHTTPError(http.StatusNotFound, "file not found")
+		}
+		canceled, err := save(c.Request().Context(), filepath.Base(name), f)
+		if err != nil {
+			return echo.NewHTTPError(http.StatusInternalServerError, "Could not save the file. Please try again.").SetInternal(err)
+		}
+		return c.JSON(http.StatusOK, map[string]bool{"saved": !canceled, "canceled": canceled})
+	}
 	c.Response().Header().Set("Cache-Control", "private, no-store")
 	c.Response().Header().Set("X-Content-Type-Options", "nosniff")
 	c.Response().Header().Set("Content-Security-Policy", "sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src data: blob:")
