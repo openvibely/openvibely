@@ -9,7 +9,11 @@
     const selection = () => window.kanbanSelection || new Set();
     const selectionModifier = /Mac|iPhone|iPad|iPod/.test(navigator.platform) ? 'Command' : 'Ctrl';
     function matches(data, filter) {
-        if (filter.status && data.taskStatus !== filter.status.value) return false;
+        if (filter.status) {
+            if (filter.status.value === 'goal-met') {
+                if (data.taskGoalMet !== 'true') return false;
+            } else if (data.taskStatus !== filter.status.value) return false;
+        }
         if (filter.priority && data.taskPriority !== filter.priority.value) return false;
         const merge = filter.merge && filter.merge.value;
         if (merge === 'none') return !data.taskBranch;

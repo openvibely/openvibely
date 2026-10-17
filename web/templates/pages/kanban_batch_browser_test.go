@@ -28,9 +28,9 @@ func testKanbanSelectionFiltersAndBatchResults(t *testing.T, width int) {
 	chrome := chatNavigationChromePath(t)
 	project := models.Project{ID: "batch-project", Name: "Batch"}
 	tasks := []models.Task{
-		{ID: "one", Title: "One", ProjectID: project.ID, Category: models.CategoryCompleted, Status: models.StatusCompleted, WorktreeBranch: "one", Priority: 4},
+		{ID: "one", Title: "One", ProjectID: project.ID, Category: models.CategoryCompleted, Status: models.StatusCompleted, WorktreeBranch: "one", Priority: 4, GoalMet: true},
 		{ID: "two", Title: "Two", ProjectID: project.ID, Category: models.CategoryCompleted, Status: models.StatusFailed, WorktreeBranch: "two", Priority: 2},
-		{ID: "merged", Title: "Merged", ProjectID: project.ID, Category: models.CategoryCompleted, Status: models.StatusCompleted, WorktreeBranch: "merged", MergeStatus: models.MergeStatusMerged},
+		{ID: "merged", Title: "Merged", ProjectID: project.ID, Category: models.CategoryCompleted, Status: models.StatusCompleted, WorktreeBranch: "merged", MergeStatus: models.MergeStatusMerged, GoalMet: true},
 		{ID: "no-branch", Title: "No branch", ProjectID: project.ID, Category: models.CategoryCompleted, Status: models.StatusCompleted},
 		{ID: "backlog", Title: "Backlog", ProjectID: project.ID, Category: models.CategoryBacklog, Status: models.StatusPending},
 		{ID: "active", Title: "Active", ProjectID: project.ID, Category: models.CategoryActive, Status: models.StatusRunning},
@@ -187,6 +187,11 @@ window.addEventListener('DOMContentLoaded', async function() {
   check(!filter('status','completed').classList.contains('active'), 'selected filter has no persistent highlight');
   check(!document.querySelector('[data-kanban-menu-open="true"], [data-menu-submenu-portaled="true"]'), 'filter choice closes entire menu');
   window.closeKanbanMenu(null, false);
+  filter('status','goal-met').click();
+  check(visible().length === 2 && visible().every(c => c.dataset.taskGoalMet === 'true'), 'Goal met includes achieved goals even when merged');
+  check(filter('status','goal-met').querySelector('[data-filter-check]').textContent === '✓', 'Goal met shows selection checkmark');
+  filter('status','completed').click();
+  check(visible().length === 3, 'Succeeded still includes completed tasks without achieved goals');
   filter('merge','unmerged').click();
   check(window.kanbanSelection.size === 0, 'filter clears selection');
   check(visible().length === 1 && visible()[0].dataset.taskId === 'one', 'combined filters');
