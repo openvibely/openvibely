@@ -7,29 +7,30 @@ import (
 	"sync"
 
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
+	llmollama "github.com/openvibely/openvibely/internal/llm/ollama"
 	"github.com/openvibely/openvibely/internal/models"
 	anthropicclient "github.com/openvibely/openvibely/pkg/anthropic_client"
 )
 
 type steeringRecoveryKey struct{}
 type steeringRecovery struct {
-	mu               sync.Mutex
-	transcript       string
-	commit           func(context.Context, []any) error
-	anthropicHistory []models.Execution
+	mu              sync.Mutex
+	transcript      string
+	commit          func(context.Context, []any) error
+	providerHistory []models.Execution
 }
 
 // Track successful commits from this invocation, not an older database snapshot
 // that cannot prove the current prompt was consumed.
 func trackSteeringRecovery(req llmcontracts.AgentRequest) llmcontracts.AgentRequest {
-	if req.Agent.Provider != models.ProviderOpenAI && req.Agent.Provider != models.ProviderAnthropic {
+	if req.Agent.Provider != models.ProviderOpenAI && req.Agent.Provider != models.ProviderAnthropic && req.Agent.Provider != models.ProviderOllama {
 		return req
 	}
 	if req.Ctx == nil {
 		req.Ctx = context.Background()
 	}
 	state := &steeringRecovery{}
-	if req.Agent.Provider == models.ProviderAnthropic {
+	if req.Agent.Provider == models.ProviderAnthropic || req.Agent.Provider == models.ProviderOllama {
 		req.Ctx = context.WithValue(req.Ctx, steeringRecoveryKey{}, state)
 		return req
 	}
@@ -79,10 +80,10 @@ func restoreCurrentSteeringForRecovery(req llmcontracts.AgentRequest) llmcontrac
 	state.mu.Lock()
 	transcript := state.transcript
 	commit := state.commit
-	anthropicHistory := state.anthropicHistory
+	providerHistory := state.providerHistory
 	state.mu.Unlock()
-	if anthropicHistory != nil {
-		req.ChatHistory = append([]models.Execution(nil), anthropicHistory...)
+	if providerHistory != nil {
+		req.ChatHistory = append([]models.Execution(nil), providerHistory...)
 		req.Message = ""
 		req.Attachments = nil
 		req.NativeCompactionStateJSON = ""
@@ -106,20 +107,30 @@ func restoreCurrentSteeringForRecovery(req llmcontracts.AgentRequest) llmcontrac
 
 // Capture each failed attempt, including a failed compacted retry, so recovery
 // never restarts from the pre-call request after tools or steering advanced it.
-func recordAnthropicRecovery(req llmcontracts.AgentRequest, err error) {
-	if req.Agent.Provider != models.ProviderAnthropic || req.Ctx == nil {
+func recordProviderRecovery(req llmcontracts.AgentRequest, err error) {
+	if req.Ctx == nil {
 		return
 	}
 	state, _ := req.Ctx.Value(steeringRecoveryKey{}).(*steeringRecovery)
-	var failure *anthropicclient.ConversationError
-	if state == nil || !errors.As(err, &failure) {
+	if state == nil {
+		return
+	}
+	var raw string
+	var anthropicFailure *anthropicclient.ConversationError
+	var ollamaFailure *llmollama.ConversationError
+	if errors.As(err, &anthropicFailure) {
+		raw = anthropicFailure.MessagesJSON
+	} else if errors.As(err, &ollamaFailure) {
+		raw = ollamaFailure.MessagesJSON
+	} else {
 		return
 	}
 	var messages []struct {
-		Role    string          `json:"role"`
-		Content json.RawMessage `json:"content"`
+		Role      string          `json:"role"`
+		Content   json.RawMessage `json:"content"`
+		ToolCalls json.RawMessage `json:"tool_calls"`
 	}
-	if json.Unmarshal([]byte(failure.MessagesJSON), &messages) != nil {
+	if json.Unmarshal([]byte(raw), &messages) != nil {
 		return
 	}
 	history := make([]models.Execution, 0, len(messages))
@@ -150,9 +161,12 @@ func recordAnthropicRecovery(req llmcontracts.AgentRequest, err error) {
 				}
 			}
 		}
+		if len(message.ToolCalls) > 0 && string(message.ToolCalls) != "null" {
+			execution.Output += "\nTool calls: " + string(message.ToolCalls)
+		}
 		history = append(history, execution)
 	}
 	state.mu.Lock()
-	state.anthropicHistory = history
+	state.providerHistory = history
 	state.mu.Unlock()
 }

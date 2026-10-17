@@ -14,7 +14,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const latestMigrationVersion = 212
+const latestMigrationVersion = 213
 
 func openMigrationTestDB(tb testing.TB, dbPath string) *sql.DB {
 	tb.Helper()
@@ -2444,16 +2444,9 @@ func TestMigration082_NormalizesUnreleasedSkillCuratorNames(t *testing.T) {
 	if tools != `["skill_view","skills_list","agent_list","agent_view","skill_manage","skill_import","agent_skill_manage"]` {
 		t.Fatalf("skill curator tools not normalized: %s", tools)
 	}
-	var routeContract string
-	var routeBlocking int
-	if err := db.QueryRow(`SELECT output_contract, blocking FROM agent_lifecycle_hooks WHERE id = 'hk_old_route'`).Scan(&routeContract, &routeBlocking); err != nil {
-		t.Fatalf("failed to load route hook: %v", err)
-	}
-	if routeContract != "selected_skills" {
-		t.Fatalf("route hook output contract = %q, want selected_skills", routeContract)
-	}
-	if routeBlocking != 0 {
-		t.Fatalf("route hook blocking = %d, want 0 for parallel routing", routeBlocking)
+	var routeCount int
+	if err := db.QueryRow(`SELECT count(*) FROM agent_lifecycle_hooks WHERE id = 'hk_old_route'`).Scan(&routeCount); err != nil || routeCount != 0 {
+		t.Fatalf("obsolete route remains: %d %v", routeCount, err)
 	}
 	var oldCount int
 	if err := db.QueryRow(`
@@ -2534,23 +2527,11 @@ func TestMigration082_AppliesAfterPublic074(t *testing.T) {
 			t.Fatalf("expected agents.%s after migration 082", column)
 		}
 	}
-	var contract string
-	var blocking int
-	if err := db.QueryRow(`
-		SELECT output_contract, blocking
-		FROM agent_lifecycle_hooks
-		WHERE agent_id = 'sys_skill_curator_00000000000000000001'
-		  AND when_slot = 'route_task'
-		  AND skill_key = 'route_task'
-	`).Scan(&contract, &blocking); err != nil {
-		t.Fatalf("failed to load seeded route hook: %v", err)
+	var routeCount int
+	if err := db.QueryRow(`SELECT count(*) FROM agent_lifecycle_hooks WHERE agent_id = 'sys_skill_curator_00000000000000000001' AND when_slot = 'route_task'`).Scan(&routeCount); err != nil || routeCount != 0 {
+		t.Fatalf("obsolete route remains: %d %v", routeCount, err)
 	}
-	if contract != "selected_skills" {
-		t.Fatalf("seeded route hook contract = %q, want selected_skills", contract)
-	}
-	if blocking != 0 {
-		t.Fatalf("seeded route hook blocking = %d, want 0 for parallel routing", blocking)
-	}
+
 }
 
 func applyUnreleasedLifecycleSchemaForTest(db *sql.DB) error {

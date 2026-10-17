@@ -35,6 +35,7 @@ import (
 	"github.com/openvibely/openvibely/pkg/attachment"
 	"github.com/openvibely/openvibely/pkg/attachmentcontext"
 	"github.com/openvibely/openvibely/pkg/executionenv"
+	"github.com/openvibely/openvibely/pkg/managedcontext"
 	openaiclient "github.com/openvibely/openvibely/pkg/openai_client"
 	"github.com/openvibely/openvibely/pkg/toolschema"
 )
@@ -717,6 +718,7 @@ func openAIContextWindow(model string) int {
 func estimateModelVisibleRequestTokens(req llmcontracts.AgentRequest) int {
 	total := estimatedUTF8Tokens(req.Message) + estimatedUTF8Tokens(req.NativeCompactionStateJSON)
 	total += estimatedUTF8Tokens(attachmentcontext.Text(req.Ctx))
+	total += estimatedUTF8Tokens(managedcontext.Text(req.Ctx))
 	total += estimateProviderSystemPromptTokens(req)
 	if !req.RawDirectPrompt && !req.LifecycleHookCall {
 		total += estimatedUTF8Tokens(executionenv.Context(req.WorkDir))
@@ -880,12 +882,29 @@ func resolveProviderRequestForBudget(req llmcontracts.AgentRequest) llmcontracts
 }
 
 func (s *LLMService) callProviderWithCompaction(adapter ProviderAdapter, req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
+	if req.Ctx == nil {
+		req.Ctx = context.Background()
+	}
+
 	req.Ctx = attachment.WithToolImages(req.Ctx)
 	req.Ctx = s.withDependencyProgress(req)
 	if files := s.fileRuntime(req); files != nil {
 		req.Ctx = llmcontracts.WithRuntimeTools(req.Ctx, llmcontracts.CompositeRuntimeTools(llmcontracts.RuntimeToolsFromContext(req.Ctx), files))
 	}
 	req = resolveProviderRequestForBudget(req)
+	if turn, ok := req.Ctx.Value(managedTurnKey{}).(managedTurn); ok {
+		var agent *models.Agent
+		if turn.task.AgentDefinitionID != nil && s.agentRepo != nil {
+			agent, _ = s.agentRepo.GetByID(req.Ctx, *turn.task.AgentDefinitionID)
+		}
+		req.Ctx = llmcontracts.WithRuntimeTools(req.Ctx, guardManagedTools(req.Ctx, llmcontracts.RuntimeToolsFromContext(req.Ctx), s.projectRepo, turn.task, turn.chat, agent))
+		if !projectManagedPermissions(req.Ctx, s.projectRepo, turn.task.ProjectID).ReadSkills && req.AgentDefinition != nil {
+			definition := *req.AgentDefinition
+			definition.Skills = nil
+			req.AgentDefinition = &definition
+		}
+	}
+
 	req = trackSteeringRecovery(req)
 	var replayErr error
 	req, replayErr = s.loadProviderReplayHistory(req)
@@ -996,7 +1015,7 @@ func (s *LLMService) callProviderWithCompaction(adapter ProviderAdapter, req llm
 	}
 	logContextDecisionWithBudget(originalHistory, req, compactionStrategy, externalized, nil, budget)
 	res, err := adapter.Call(req)
-	recordAnthropicRecovery(req, err)
+	recordProviderRecovery(req, err)
 	err = categorizeProviderError(err)
 	if err != nil {
 		logContextFailureWithBudget(req, err, budget)
@@ -1248,7 +1267,7 @@ func (s *LLMService) callCompactedRetryOrLastResort(adapter ProviderAdapter, ori
 	}
 	logContextDecisionWithBudget(originalReq.ChatHistory, prepared, "local_summary_retry", externalized, trigger, budget)
 	res, err := adapter.Call(prepared)
-	recordAnthropicRecovery(prepared, err)
+	recordProviderRecovery(prepared, err)
 	err = categorizeProviderError(err)
 	if err != nil {
 		logContextFailureWithBudget(prepared, err, budget)
@@ -1298,7 +1317,7 @@ func (s *LLMService) callProviderWithLastResortTruncation(adapter ProviderAdapte
 	logContextDecisionWithBudget(req.ChatHistory, truncated, "last_resort", externalized, cause, budget)
 	applog.Infof("[agent-svc] using token-budgeted last-resort truncation provider=%s model=%s failure_category=%s", req.Agent.Provider, req.Agent.Model, contextFailureCategory(cause))
 	res, err := adapter.Call(truncated)
-	recordAnthropicRecovery(truncated, err)
+	recordProviderRecovery(truncated, err)
 	err = categorizeProviderError(err)
 	if err != nil {
 		logContextFailureWithBudget(truncated, err, budget)

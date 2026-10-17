@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
+	llmollama "github.com/openvibely/openvibely/internal/llm/ollama"
 	"github.com/openvibely/openvibely/internal/models"
 	anthropicclient "github.com/openvibely/openvibely/pkg/anthropic_client"
 	"github.com/stretchr/testify/require"
@@ -136,4 +137,15 @@ func TestAnthropicSteeringFallbackRetainsCurrentConversation(t *testing.T) {
 	_, err := (&LLMService{}).callProviderWithCompaction(adapter, req)
 	require.NoError(t, err)
 	require.Equal(t, 3, calls)
+}
+
+func TestOllamaCompactionUsesCompletedToolConversation(t *testing.T) {
+	req := trackSteeringRecovery(llmcontracts.AgentRequest{Ctx: context.Background(), Agent: models.LLMConfig{Provider: models.ProviderOllama}, Message: "original request"})
+	recordProviderRecovery(req, &llmollama.ConversationError{Err: errors.New("context overflow"), MessagesJSON: `[{"role":"user","content":"original request"},{"role":"assistant","content":"","tool_calls":[{"function":{"name":"memory_save","arguments":{"handle":"preference.md"}}}]},{"role":"tool","tool_name":"memory_save","content":"Memory saved successfully"}]`})
+	restored := restoreCurrentSteeringForRecovery(req)
+	require.Empty(t, restored.Message)
+	require.True(t, llmcontracts.HistoryContinuationFromContext(restored.Ctx))
+	require.Len(t, restored.ChatHistory, 3)
+	require.Contains(t, restored.ChatHistory[1].Output, "memory_save")
+	require.Contains(t, restored.ChatHistory[2].Output, "saved successfully")
 }

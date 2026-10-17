@@ -697,7 +697,7 @@ func (h *Handler) chatActionHandlers(params streamingResponseParams, collector *
 			return strings.TrimSpace(h.executeToggleAlertRequests(ctx, params.ProjectID, []service.ToggleAlertRequest{req})), nil
 		},
 		"memory_view": func(_ context.Context, _ json.RawMessage) (string, error) {
-			return "memory_view is available only after the lifecycle memory router selects memory handles for this turn. Use memory_view only with handles listed in the selected memory index.", nil
+			return "memory_view is unavailable for this turn. Only permitted handles in the current project memory index can be read.", nil
 		},
 		"get_chat_mode": func(_ context.Context, _ json.RawMessage) (string, error) {
 			return fmt.Sprintf("Current chat mode: %s", mode), nil
@@ -731,6 +731,19 @@ func (h *Handler) chatActionHandlers(params streamingResponseParams, collector *
 
 			} else if params.AgentDefinition != nil {
 				summaries = filterAssignedAgentCapabilitySummaries(summaries, params.AgentDefinition)
+			}
+			if runtime := llmcontracts.RuntimeToolsFromContext(ctx); runtime != nil && runtime.Filter != nil {
+				kept := summaries[:0]
+				for _, summary := range summaries {
+					if allow, handled := runtime.Filter(summary.Name); handled && !allow {
+						if summary.Name == "memory_view" {
+							selectedMemoryHandles = nil
+						}
+						continue
+					}
+					kept = append(kept, summary)
+				}
+				summaries = kept
 			}
 			return formatCapabilities(summaries, selectedMemoryHandles), nil
 		},
@@ -1104,7 +1117,7 @@ func formatCapabilities(summaries []chatcontrol.ActionSummary, selectedMemoryHan
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("Available capabilities (%d actions):\n", len(summaries)))
 	if len(selectedMemoryHandles) > 0 {
-		sb.WriteString("\nSelected memories for this turn:\n")
+		sb.WriteString("\nAvailable memories for this turn:\n")
 		for _, handle := range selectedMemoryHandles {
 			sb.WriteString(fmt.Sprintf("  - %s\n", handle))
 		}

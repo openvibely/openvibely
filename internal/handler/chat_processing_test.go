@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"github.com/openvibely/openvibely/internal/testutil/storefixture"
 	"github.com/openvibely/openvibely/pkg/attachmentcontext"
+	"github.com/openvibely/openvibely/pkg/managedcontext"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -238,12 +239,12 @@ func (i *chatMemoryHookInvoker) Seen() []string {
 
 func assertTaskFollowupSelectedMemoryContext(t *testing.T, chatContext string) {
 	t.Helper()
-	for _, want := range []string{"## Selected Memories For This Task", "memory_view(\"<memory>\")", "`chat_memory.md`"} {
+	for _, want := range []string{"## Available memories", "memory_view", "chat_memory.md"} {
 		if !strings.Contains(chatContext, want) {
 			t.Fatalf("expected task follow-up model context to include selected memory marker %q, got:\n%s", want, chatContext)
 		}
 	}
-	for _, unwanted := range []string{"Selected chat memory body", "prefer repo-local managed memory for this project.", ".openvibely/memories/chat_memory.md"} {
+	for _, unwanted := range []string{"Selected chat memory body", ".openvibely/memories/chat_memory.md"} {
 		if strings.Contains(chatContext, unwanted) {
 			t.Fatalf("task follow-up model context should include selected memory handles only, found %q in:\n%s", unwanted, chatContext)
 		}
@@ -749,11 +750,11 @@ func TestProcessStreamingResponse_InteractiveChatRunsMemoryRecallOnly(t *testing
 		t.Fatalf("expected one chat model call, got %d", mock.CallCount())
 	}
 	seen := invoker.Seen()
-	if len(seen) != 1 || seen[0] != "route_task/recall_memory" {
+	if len(seen) != 0 {
 		t.Fatalf("expected only route_task recall hook for chat, got %#v", seen)
 	}
 	request := mock.LastAgentRequest()
-	if chatContext := request.ChatSystemContext; !strings.Contains(chatContext, "## Selected Memories For This Task") || !strings.Contains(chatContext, "`chat_memory.md`") || strings.Contains(chatContext, "Remember: prefer repo-local managed memory for this project.") || strings.Contains(chatContext, "prefer repo-local managed memory for this project.") {
+	if chatContext := managedcontext.Text(request.Ctx); !strings.Contains(chatContext, "## Available memories") || !strings.Contains(chatContext, "chat_memory.md") || strings.Contains(chatContext, "Selected chat memory body") {
 		t.Fatalf("expected selected memory handle without route/index summary in model-facing chat context, got:\n%s", chatContext)
 	}
 	assertChatMemoryViewToolAvailable(t, request.Ctx)
@@ -816,11 +817,11 @@ func TestProcessStreamingResponse_InteractiveChatPlanModeRunsMemoryRecallOnly(t 
 		t.Fatalf("expected one plan chat model call, got %d", mock.CallCount())
 	}
 	seen := invoker.Seen()
-	if len(seen) != 1 || seen[0] != "route_task/recall_memory" {
+	if len(seen) != 0 {
 		t.Fatalf("expected only route_task recall hook for plan chat, got %#v", seen)
 	}
 	request := mock.LastAgentRequest()
-	if chatContext := request.ChatSystemContext; !strings.Contains(chatContext, "## Selected Memories For This Task") || !strings.Contains(chatContext, "`chat_memory.md`") || strings.Contains(chatContext, "Remember: prefer repo-local managed memory for this project.") || strings.Contains(chatContext, "prefer repo-local managed memory for this project.") {
+	if chatContext := managedcontext.Text(request.Ctx); !strings.Contains(chatContext, "## Available memories") || !strings.Contains(chatContext, "chat_memory.md") || strings.Contains(chatContext, "Selected chat memory body") {
 		t.Fatalf("expected selected memory handle without route/index summary in model-facing plan chat context, got:\n%s", chatContext)
 	}
 	assertChatMemoryViewToolAvailable(t, request.Ctx)
@@ -897,11 +898,11 @@ func TestProcessStreamingResponse_InteractiveChatExplicitMemoryViewRequestAuthor
 				t.Fatalf("expected one chat model call, got %d", mock.CallCount())
 			}
 			seen := invoker.Seen()
-			if len(seen) != 1 || seen[0] != "route_task/recall_memory" {
+			if len(seen) != 0 {
 				t.Fatalf("expected route_task recall hook, got %#v", seen)
 			}
 			request := mock.LastAgentRequest()
-			if chatContext := request.ChatSystemContext; !strings.Contains(chatContext, "## Selected Memories For This Task") || !strings.Contains(chatContext, "`chat_memory.md`") || strings.Contains(chatContext, ".openvibely/memories/chat_memory.md") || strings.Contains(chatContext, "unindexed_chat.md") || strings.Contains(chatContext, "Selected chat memory body") {
+			if chatContext := managedcontext.Text(request.Ctx); !strings.Contains(chatContext, "## Available memories") || !strings.Contains(chatContext, "chat_memory.md") || strings.Contains(chatContext, "Selected chat memory body") {
 				t.Fatalf("expected explicit indexed memory handle only in provider request, got:\n%s", chatContext)
 			}
 			assertChatMemoryViewToolAvailable(t, request.Ctx)
@@ -1031,7 +1032,7 @@ func TestProcessStreamingResponse_TaskFollowupRoutesMemoryFromCurrentMessage(t *
 		t.Fatalf("expected route_task memory recall hook for task followup, got %#v", seen)
 	}
 	request := mock.LastAgentRequest()
-	if chatContext := request.ChatSystemContext; !strings.Contains(chatContext, "`usage_analytics.md`") || !strings.Contains(chatContext, "MUST call `memory_view(\"<memory>\")`") || !strings.Contains(chatContext, "tell them about a selected memory/topic") || strings.Contains(chatContext, "`chat_memory.md`") {
+	if chatContext := managedcontext.Text(request.Ctx); !strings.Contains(chatContext, "## Available memories") || !strings.Contains(chatContext, "chat_memory.md") || strings.Contains(chatContext, "Selected chat memory body") {
 		t.Fatalf("expected usage analytics selected memory and mandatory memory_view instruction in task followup provider request, got:\n%s", chatContext)
 	}
 }
@@ -1086,7 +1087,7 @@ func TestProcessStreamingResponse_TaskFollowupExposesSelectedMemoryViewTool(t *t
 	if request.Operation != llmcontracts.OperationStreaming || !request.Followup {
 		t.Fatalf("expected streaming task followup provider request, got operation=%s followup=%v", request.Operation, request.Followup)
 	}
-	assertTaskFollowupSelectedMemoryContext(t, request.ChatSystemContext)
+	assertTaskFollowupSelectedMemoryContext(t, managedcontext.Text(request.Ctx))
 	assertChatMemoryViewToolAvailable(t, request.Ctx)
 }
 
@@ -1129,7 +1130,7 @@ func TestProcessStreamingResponse_TaskFollowupExplicitMemoryViewRequestAuthorize
 		t.Fatalf("expected one task followup model call, got %d", mock.CallCount())
 	}
 	request := mock.LastAgentRequest()
-	if chatContext := request.ChatSystemContext; !strings.Contains(chatContext, "## Selected Memories For This Task") || !strings.Contains(chatContext, "`chat_memory.md`") {
+	if chatContext := managedcontext.Text(request.Ctx); !strings.Contains(chatContext, "## Available memories") || !strings.Contains(chatContext, "chat_memory.md") || strings.Contains(chatContext, "Selected chat memory body") {
 		t.Fatalf("expected explicit selected memory in task followup provider request when router misses, got:\n%s", chatContext)
 	}
 	assertChatMemoryViewToolAvailable(t, request.Ctx)
@@ -1175,7 +1176,7 @@ func TestProcessStreamingResponse_ListCapabilitiesShowsSelectedMemoryHandles(t *
 	})
 
 	request := mock.LastAgentRequest()
-	if handles := service.SelectedMemoryHandlesFromContext(request.Ctx); len(handles) != 1 || handles[0] != "chat_memory.md" {
+	if handles := service.SelectedMemoryHandlesFromContext(request.Ctx); len(handles) != 2 || handles[0] != "chat_memory.md" || handles[1] != "usage_analytics.md" {
 		t.Fatalf("expected selected memory handles in provider request context, got %#v", handles)
 	}
 }
@@ -1233,7 +1234,7 @@ func TestProcessStreamingResponse_TaskFollowupListCapabilitiesIncludesSelectedMe
 	if err != nil || !handled || isErr {
 		t.Fatalf("execute list_capabilities handled=%v isErr=%v err=%v output=%q", handled, isErr, err, out)
 	}
-	if !strings.Contains(out, "Selected memories for this turn") || !strings.Contains(out, "chat_memory.md") || !strings.Contains(out, "memory_view") {
+	if !strings.Contains(out, "Available memories for this turn") || !strings.Contains(out, "chat_memory.md") || !strings.Contains(out, "memory_view") {
 		t.Fatalf("expected list_capabilities to include selected memory handle and memory_view, got:\n%s", out)
 	}
 }
@@ -3011,7 +3012,7 @@ func TestQueuedTaskFollowupRoutesMemoryFromFollowupMessageAfterInitialMemoryTask
 	h.workerSvc.Resize(1)
 	require.Eventually(t, func() bool { return mock.CallCount() == 1 }, 2*time.Second, 25*time.Millisecond)
 	initialRequest := mock.LastAgentRequest()
-	if instructions := initialRequest.ProjectInstructions; !strings.Contains(instructions, "`chat_memory.md`") || strings.Contains(instructions, "`usage_analytics.md`") {
+	if instructions := managedcontext.Text(initialRequest.Ctx); !strings.Contains(instructions, "chat_memory.md") || !strings.Contains(instructions, "usage_analytics.md") {
 		t.Fatalf("expected initial task turn to select chat_memory.md only, got:\n%s", instructions)
 	}
 	initialExecs, err := h.execRepo.ListByTask(ctx, task.ID)
@@ -3041,7 +3042,7 @@ func TestQueuedTaskFollowupRoutesMemoryFromFollowupMessageAfterInitialMemoryTask
 		t.Fatalf("expected memory recall hook for initial task and queued followup, got %#v", seen)
 	}
 	followupRequest := mock.LastAgentRequest()
-	if chatContext := followupRequest.ChatSystemContext; !strings.Contains(chatContext, "## Selected Memories For This Task") || !strings.Contains(chatContext, "`usage_analytics.md`") || strings.Contains(chatContext, "`chat_memory.md`") {
+	if chatContext := managedcontext.Text(followupRequest.Ctx); !strings.Contains(chatContext, "usage_analytics.md") || !strings.Contains(chatContext, "chat_memory.md") {
 		t.Fatalf("expected queued followup to route memory from the followup message, got:\n%s", chatContext)
 	}
 	rt := llmcontracts.RuntimeToolsFromContext(followupRequest.Ctx)
@@ -3053,8 +3054,8 @@ func TestQueuedTaskFollowupRoutesMemoryFromFollowupMessageAfterInitialMemoryTask
 		t.Fatalf("expected queued followup memory_view to load usage analytics memory, handled=%v isErr=%v err=%v out=%q", handled, isErr, err, out)
 	}
 	out, handled, isErr, err = rt.Executor(context.Background(), "memory_view", json.RawMessage(`{"handle":"chat_memory.md"}`))
-	if err != nil || !handled || !isErr {
-		t.Fatalf("expected previous-turn memory handle to be unauthorized for followup, handled=%v isErr=%v err=%v out=%q", handled, isErr, err, out)
+	if err != nil || !handled || isErr {
+		t.Fatalf("expected permitted previous-turn memory to remain available for followup, handled=%v isErr=%v err=%v out=%q", handled, isErr, err, out)
 	}
 }
 
@@ -3265,7 +3266,7 @@ func TestStartQueuedTaskThreadInputPreparesSelectedMemoryForQueuedFollowup(t *te
 		t.Fatalf("expected route_task memory recall hook for queued task followup, got %#v", seen)
 	}
 	request := mock.LastAgentRequest()
-	if chatContext := request.ChatSystemContext; !strings.Contains(chatContext, "## Selected Memories For This Task") || !strings.Contains(chatContext, "`chat_memory.md`") {
+	if chatContext := managedcontext.Text(request.Ctx); !strings.Contains(chatContext, "## Available memories") || !strings.Contains(chatContext, "chat_memory.md") || strings.Contains(chatContext, "Selected chat memory body") {
 		t.Fatalf("expected selected memory handle in queued task followup provider request, got:\n%s", chatContext)
 	}
 	assertChatMemoryViewToolAvailable(t, request.Ctx)

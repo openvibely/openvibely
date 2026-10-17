@@ -95,7 +95,7 @@ func TestExecutionEnvironmentSurvivesFreshAdaptersAndDirectoryChanges(t *testing
 		var stored anthropicEnvironmentReplay
 		require.NoError(t, json.Unmarshal([]byte(saved[id][0].TranscriptJSON), &stored))
 		require.Equal(t, executionenv.Context(dir), stored.Environment)
-		require.Equal(t, "answer", stored.Messages[1].Content)
+		require.Contains(t, string(stored.Messages[1].ContentBlocks), "answer")
 		history = append(history, models.Execution{ID: id, PromptSent: "question", Output: result.TextOnlyOutput, Status: models.ExecCompleted})
 		previous = messages
 	}

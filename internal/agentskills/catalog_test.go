@@ -1103,3 +1103,36 @@ func appendBenchmarkHeader(b *testing.B, path, header string) {
 		b.Fatal(err)
 	}
 }
+
+func TestDisabledProjectOverrideCannotRevealGlobalSkill(t *testing.T) {
+	global, project := t.TempDir(), t.TempDir()
+	writeSkill(t, global, "documents", "Global instructions")
+	writeDisabledSkill(t, project, "documents")
+	catalog, err := BuildCatalog("turn", global, project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := catalog.Lookup("documents"); ok {
+		t.Fatal("disabled project override exposed global instructions")
+	}
+	if strings.Contains(RenderCatalogMarkdown(catalog), "documents") {
+		t.Fatal("disabled skill appeared in main-model index")
+	}
+	writeSkill(t, project, "documents", "Enabled project instructions")
+	refreshed, err := BuildCatalog("next", global, project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if entry, ok := refreshed.Lookup("documents"); !ok || entry.Source != SourceProject {
+		t.Fatalf("enabled override not refreshed: %#v", entry)
+	}
+	writeAgentSkill(t, global, "assigned", "documents", "Global agent instructions")
+	writeDisabledAgentSkill(t, project, "assigned", "documents")
+	private, err := BuildAgentCatalog("agent", global, project, "assigned")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := private.Lookup("documents"); ok {
+		t.Fatal("disabled assigned-agent override exposed global instructions")
+	}
+}

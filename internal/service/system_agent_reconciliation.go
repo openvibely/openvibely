@@ -119,12 +119,19 @@ func applySystemAgentDeclaration(agent, want *models.Agent) bool {
 
 func reconcileDeclaredSystemAgentLifecycleHooks(ctx context.Context, lifecycleRepo persistence.LifecycleStore, agentID string, decl *agentlibrary.SkillDeclaration) (systemAgentLifecycleHookReconcileResult, error) {
 	result := systemAgentLifecycleHookReconcileResult{desired: map[string]struct{}{}}
-	if lifecycleRepo == nil || decl == nil || len(decl.LifecycleHooks) == 0 {
+	if lifecycleRepo == nil || decl == nil {
 		return result, nil
 	}
 	existing, err := lifecycleRepo.HooksByAgent(ctx, agentID)
 	if err != nil {
 		return result, err
+	}
+	for _, hook := range existing {
+		if obsoleteCuratorHook(decl.Agent.Key, hook) {
+			if err := lifecycleRepo.DeleteHook(ctx, hook.ID); err != nil {
+				return result, err
+			}
+		}
 	}
 	result.existing = existing
 	for when, hookDecl := range decl.LifecycleHooks {
@@ -149,4 +156,9 @@ func reconcileDeclaredSystemAgentLifecycleHooks(ctx context.Context, lifecycleRe
 		}
 	}
 	return result, nil
+}
+
+func obsoleteCuratorHook(kind string, hook models.AgentLifecycleHook) bool {
+	return kind == models.AgentSystemKindSkillCurator && hook.When == models.LifecycleRouteTask && hook.SkillKey == "route_task" ||
+		(kind == models.AgentSystemKindMemoryCurator || kind == "memory" || kind == "memory_consolidator") && ((hook.When == models.LifecycleRouteTask || hook.When == models.LifecycleBeforeRun) && hook.SkillKey == "recall_memory" || hook.When == models.LifecycleAfterComplete && hook.SkillKey == "update_memory")
 }

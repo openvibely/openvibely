@@ -68,6 +68,7 @@ type chatRequest struct {
 
 // chatMessage represents a message in the Ollama chat format.
 type chatMessage struct {
+	ToolName  string     `json:"tool_name,omitempty"`
 	Role      string     `json:"role"`
 	Content   string     `json:"content"`
 	Images    []string   `json:"images,omitempty"`     // base64-encoded images for multimodal

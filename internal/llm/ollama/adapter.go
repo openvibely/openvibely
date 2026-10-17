@@ -27,6 +27,7 @@ import (
 	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/pkg/attachmentcontext"
 	"github.com/openvibely/openvibely/pkg/executionenv"
+	"github.com/openvibely/openvibely/pkg/managedcontext"
 )
 
 // HTTPDoer is an interface for making HTTP requests.
@@ -104,6 +105,9 @@ func (a *Adapter) SetHTTPClient(client HTTPDoer) {
 // Call handles Ollama LLM requests.
 func (a *Adapter) Call(ctx context.Context, req llmcontracts.AgentRequest, workDir string, w *llmstream.Writer) (llmcontracts.AgentResult, error) {
 	agent := req.Agent
+	if rt := llmcontracts.RuntimeToolsFromContext(ctx); rt != nil && len(rt.Definitions) > 0 && !req.DisableTools {
+		return a.callRuntime(ctx, req, workDir)
+	}
 
 	switch req.Operation {
 	case llmcontracts.OperationTask:
@@ -160,6 +164,7 @@ func (a *Adapter) callDirect(ctx context.Context, prompt string, attachments []m
 		messages = append(messages, chatMessage{Role: "system", Content: projectInstructions})
 	}
 	messages = append(messages, userMsg)
+	messages = managedcontext.Ensure(ctx, messages, func(m chatMessage) (string, string) { return m.Role, m.Content }, func(text string) chatMessage { return chatMessage{Role: "user", Content: text} })
 	messages = attachmentcontext.Ensure(ctx, messages, func(m chatMessage) (string, string) { return m.Role, m.Content }, func(text string) chatMessage { return chatMessage{Role: "user", Content: text} })
 
 	reqBody := chatRequest{
@@ -214,6 +219,7 @@ func (a *Adapter) callChat(ctx context.Context, message string, attachments []mo
 	}
 	messages = ensureExecutionEnvironment(messages, workDir)
 	messages = append(messages, userMsg)
+	messages = managedcontext.Ensure(ctx, messages, func(m chatMessage) (string, string) { return m.Role, m.Content }, func(text string) chatMessage { return chatMessage{Role: "user", Content: text} })
 	messages = attachmentcontext.Ensure(ctx, messages, func(m chatMessage) (string, string) { return m.Role, m.Content }, func(text string) chatMessage { return chatMessage{Role: "user", Content: text} })
 
 	opts := ollamaRequestOptions(agent)
@@ -274,6 +280,7 @@ func (a *Adapter) callStreaming(ctx context.Context, prompt string, attachments 
 	}
 	messages = ensureExecutionEnvironment(messages, workDir)
 	messages = append(messages, userMsg)
+	messages = managedcontext.Ensure(ctx, messages, func(m chatMessage) (string, string) { return m.Role, m.Content }, func(text string) chatMessage { return chatMessage{Role: "user", Content: text} })
 	messages = attachmentcontext.Ensure(ctx, messages, func(m chatMessage) (string, string) { return m.Role, m.Content }, func(text string) chatMessage { return chatMessage{Role: "user", Content: text} })
 
 	reqBody := chatRequest{
@@ -471,6 +478,18 @@ func buildChatHistory(systemPrompt string, history []models.Execution) []chatMes
 	}
 
 	for _, exec := range history {
+		var structured []chatMessage
+		for _, replay := range exec.ReplayMessages {
+			var saved runtimeReplay
+			if json.Unmarshal([]byte(replay.TranscriptJSON), &saved) == nil && len(saved.Messages) > 0 {
+				structured = append(structured, saved.Messages...)
+			}
+		}
+		if len(structured) > 0 {
+			messages = append(messages, structured...)
+			continue
+		}
+
 		if exec.PromptSent != "" {
 			messages = append(messages, chatMessage{
 				Role:    "user",

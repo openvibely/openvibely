@@ -20,6 +20,7 @@ import (
 	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/testutil/storefixture"
 	"github.com/openvibely/openvibely/internal/testutil/teststores"
+	"github.com/openvibely/openvibely/pkg/managedcontext"
 )
 
 type routeHookStore struct {
@@ -451,7 +452,7 @@ func TestPrepareLifecycleTurn_AssignedAgentRoutesAgentOwnedSkills(t *testing.T) 
 	if !strings.Contains(availableText, "Available Assigned-Agent Skills") || !strings.Contains(availableText, "task_agent/task_skill") || strings.Contains(availableText, "standalone_skill") {
 		t.Fatalf("route_task should receive only assigned-agent skills, got:\n%s", availableText)
 	}
-	instructions := additionalProjectInstructionsFromContext(turn.Ctx)
+	instructions := managedcontext.Text(turn.Ctx)
 	if !strings.Contains(instructions, "task_skill") || strings.Contains(instructions, "standalone_skill") {
 		t.Fatalf("task prompt should include only selected assigned-agent skill, got:\n%s", instructions)
 	}
@@ -780,8 +781,8 @@ func TestPrepareLifecycleTurn_TaskRuntimeToolsExposeOnlySelectedSkillView(t *tes
 	}
 	assertTaskRuntimeIsSelectedSkillOnly(t, rt)
 	out, handled, isErr, err := rt.Executor(context.Background(), "skill_view", json.RawMessage(`{"handle":"task_skill"}`))
-	if !handled || err != nil || !isErr || !strings.Contains(out, "not in this turn's authorized index") {
-		t.Fatalf("unselected skill must not load, handled=%v isErr=%v err=%v out=%q", handled, isErr, err, out)
+	if !handled || err != nil || isErr || !strings.Contains(out, "task skill body") {
+		t.Fatalf("available skill must load, handled=%v isErr=%v err=%v out=%q", handled, isErr, err, out)
 	}
 }
 
@@ -855,8 +856,8 @@ func TestPrepareLifecycleTurn_ScheduledSkillMaintenanceTaskUsesScopedSkillLibrar
 	}
 	rt := llmcontracts.RuntimeToolsFromContext(turn.Ctx)
 	assertTaskRuntimeIsSelectedSkillOnly(t, rt)
-	instructions := additionalProjectInstructionsFromContext(turn.Ctx)
-	if !strings.Contains(instructions, "maintain_skill_library") || strings.Contains(instructions, "observe_task_for_learning") || strings.Contains(instructions, "other_skill") {
+	instructions := managedcontext.Text(turn.Ctx)
+	if !strings.Contains(instructions, "maintain_skill_library") || strings.Contains(instructions, "other_skill") {
 		t.Fatalf("maintenance prompt should include only router-selected maintainer skill, got:\n%s", instructions)
 	}
 	out, handled, isErr, err := rt.Executor(context.Background(), "skill_view", json.RawMessage(`{"handle":"maintain_skill_library"}`))
@@ -955,328 +956,6 @@ func TestPrepareLifecycleTurn_ScheduledSkillMaintenanceTaskUsesScopedSkillLibrar
 	}
 }
 
-func TestPrepareLifecycleTurn_TaskFollowupUsesTurnPromptForSelectedMemoryView(t *testing.T) {
-	ctx := context.Background()
-	repoPath := t.TempDir()
-	memoryDir := filepath.Join(repoPath, ".openvibely", "memories")
-	if err := os.MkdirAll(memoryDir, 0o755); err != nil {
-		t.Fatalf("create memory dir: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(memoryDir, "MEMORIES.md"), []byte("# Project Memory\n\n- usage_analytics.md: Usage analytics provider and operation tracking.\n- original_prompt.md: Original task-only memory.\n"), 0o644); err != nil {
-		t.Fatalf("write MEMORIES.md: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(memoryDir, "usage_analytics.md"), []byte("# Usage Analytics\n\nFollowup-selected memory body."), 0o644); err != nil {
-		t.Fatalf("write usage memory: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(memoryDir, "original_prompt.md"), []byte("Original prompt memory body must not be authorized."), 0o644); err != nil {
-		t.Fatalf("write original memory: %v", err)
-	}
-
-	env := teststores.New(t)
-	projectRepo := env.Projects
-	project := &models.Project{Name: "Project", RepoPath: repoPath}
-	if err := projectRepo.Create(ctx, project); err != nil {
-		t.Fatalf("create project: %v", err)
-	}
-	store := &routeHookStore{hooks: []models.AgentLifecycleHook{
-		{ID: "memory-recall", When: models.LifecycleRouteTask, SkillKey: "recall_memory", OutputContract: models.OutputContractSelectedMemories, Blocking: true, Enabled: true},
-	}}
-	runner := lifecycle.NewRunner(store, routeHookInvokerFunc(func(_ context.Context, hook models.AgentLifecycleHook, in lifecycle.HookInput) (json.RawMessage, error) {
-		if hook.When != models.LifecycleRouteTask || hook.OutputContract != models.OutputContractSelectedMemories {
-			return nil, fmt.Errorf("unexpected hook input hook=%#v input=%#v", hook, in)
-		}
-		if !strings.Contains(in.TaskPrompt, "usage_analytics.md") {
-			return nil, fmt.Errorf("route hook did not receive current followup prompt: %q", in.TaskPrompt)
-		}
-		if strings.Contains(in.TaskPrompt, "original_prompt.md") {
-			return nil, fmt.Errorf("route hook received stale original task prompt: %q", in.TaskPrompt)
-		}
-		available, _ := in.Extras["available_memories"].(string)
-		if !strings.Contains(available, "usage_analytics.md") || strings.Contains(available, "Followup-selected memory body") {
-			return nil, fmt.Errorf("route hook missing compact memory index or received bodies: %#v", in.Extras["available_memories"])
-		}
-		return json.Marshal(lifecycle.SelectedMemories{Memories: []lifecycle.SelectedMemory{{File: "usage_analytics.md", Topic: "Usage analytics"}}, Confidence: 0.95, Reason: "followup mentions usage analytics"})
-	}), nil)
-
-	worker := NewWorkerService(nil, 0, projectRepo)
-	worker.SetLifecycleRunner(runner)
-	turn := worker.PrepareLifecycleTurn(WithTaskThreadLifecycleTurnPrompt(ctx, `view the memory for usage_analytics.md`), models.Task{ID: "task-memory-followup", ProjectID: project.ID, Title: "Original task", Prompt: `original task referenced original_prompt.md`})
-	instructions := additionalProjectInstructionsFromContext(turn.Ctx)
-	if !strings.Contains(instructions, "## Selected Memories For This Task") || !strings.Contains(instructions, "`usage_analytics.md`") {
-		t.Fatalf("expected selected followup memory handle in task followup prompt, got:\n%s", instructions)
-	}
-	if strings.Contains(instructions, "`original_prompt.md`") || strings.Contains(instructions, "Followup-selected memory body") {
-		t.Fatalf("task followup prompt leaked stale or full memory body, got:\n%s", instructions)
-	}
-	handles := SelectedMemoryHandlesFromContext(turn.Ctx)
-	if len(handles) != 1 || handles[0] != "usage_analytics.md" {
-		t.Fatalf("expected selected memory handle in context, got %#v", handles)
-	}
-	rt := llmcontracts.RuntimeToolsFromContext(turn.Ctx)
-	if rt == nil || !rt.HasDefinition("memory_view") {
-		t.Fatalf("expected task followup selected-memory runtime tool, got %#v", rt)
-	}
-	out, handled, isErr, err := rt.Executor(context.Background(), "memory_view", json.RawMessage(`{"handle":"usage_analytics.md"}`))
-	if !handled || err != nil || isErr || !strings.Contains(out, "Followup-selected memory body") {
-		t.Fatalf("task followup memory_view failed handled=%v isErr=%v err=%v out=%q", handled, isErr, err, out)
-	}
-	out, handled, isErr, err = rt.Executor(context.Background(), "memory_view", json.RawMessage(`{"handle":"original_prompt.md"}`))
-	if !handled || err != nil || !isErr || !strings.Contains(out, "not in this turn's authorized memory index") {
-		t.Fatalf("unselected original memory must be rejected handled=%v isErr=%v err=%v out=%q", handled, isErr, err, out)
-	}
-}
-
-func TestPrepareLifecycleTurn_MemoryCuratorRouteTaskSelectsRelevantMemory(t *testing.T) {
-	ctx := context.Background()
-	repoPath := t.TempDir()
-	memoryDir := filepath.Join(repoPath, ".openvibely", "memories")
-	if err := os.MkdirAll(memoryDir, 0o755); err != nil {
-		t.Fatalf("create memory dir: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(memoryDir, "MEMORIES.md"), []byte("# Project Memory\n\n- managed_memory.md: Preserve repo-local managed memory.\n"), 0o644); err != nil {
-		t.Fatalf("write MEMORIES.md: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(memoryDir, "managed_memory.md"), []byte("RAW TOPIC BODY SHOULD NOT BE ROUTED INTO RECALL INPUT"), 0o644); err != nil {
-		t.Fatalf("write topic memory: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(memoryDir, "hallucinated.md"), []byte("UNINDEXED MEMORY BODY MUST NOT BE AUTHORIZED"), 0o644); err != nil {
-		t.Fatalf("write unindexed memory: %v", err)
-	}
-
-	env := teststores.New(t)
-	projectRepo := env.Projects
-	project := &models.Project{Name: "Project", RepoPath: repoPath}
-	if err := projectRepo.Create(ctx, project); err != nil {
-		t.Fatalf("create project: %v", err)
-	}
-	agentRepo := env.Agents
-	agent := &models.Agent{
-		ID:                  "memory-agent",
-		Key:                 "memory_curator",
-		Name:                "System: Memory Curator",
-		SystemKind:          models.AgentSystemKindMemoryCurator,
-		SelectableAsPrimary: false,
-		Tools:               []string{models.AgentToolScopedFiles},
-	}
-	if err := agentRepo.Create(ctx, agent); err != nil {
-		t.Fatalf("create memory curator: %v", err)
-	}
-
-	store := &routeHookStore{hooks: []models.AgentLifecycleHook{
-		{ID: "skill-route", When: models.LifecycleRouteTask, SkillKey: "route_task", OutputContract: models.OutputContractSelectedSkills, Blocking: true, Enabled: true},
-		{ID: "memory-recall", AgentID: agent.ID, When: models.LifecycleRouteTask, SkillKey: "recall_memory", OutputContract: models.OutputContractSelectedMemories, Blocking: true, Enabled: true},
-	}}
-	runner := lifecycle.NewRunner(store, routeHookInvokerFunc(func(_ context.Context, hook models.AgentLifecycleHook, in lifecycle.HookInput) (json.RawMessage, error) {
-		if hook.When != models.LifecycleRouteTask || in.ProjectID != project.ID {
-			t.Fatalf("unexpected route hook input hook=%#v input=%#v", hook, in)
-		}
-		switch hook.OutputContract {
-		case models.OutputContractSelectedSkills:
-			if _, ok := in.Extras["available_skills"]; !ok {
-				t.Fatalf("selected_skills hook missing available_skills: %#v", in.Extras)
-			}
-			if _, ok := in.Extras["available_memories"]; ok {
-				t.Fatalf("selected_skills hook must not receive available_memories: %#v", in.Extras)
-			}
-			return routePayload(nil, 0.1), nil
-		case models.OutputContractSelectedMemories:
-			if _, ok := in.Extras["available_skills"]; ok {
-				t.Fatalf("selected_memories hook must not receive available_skills: %#v", in.Extras)
-			}
-			available, _ := in.Extras["available_memories"].(string)
-			if !strings.Contains(available, "managed_memory.md: Preserve repo-local managed memory") {
-				t.Fatalf("expected recall route hook to receive MEMORIES.md index, got %#v", in.Extras["available_memories"])
-			}
-			if strings.Contains(available, "RAW TOPIC BODY") {
-				t.Fatalf("available_memories must not include topic file bodies, got %q", available)
-			}
-			b, _ := json.Marshal(lifecycle.SelectedMemories{
-				Memories: []lifecycle.SelectedMemory{
-					{File: "managed_memory.md", Topic: "Managed memory", Summary: "ROUTE SUMMARY MUST NOT RENDER", Snippet: "ROUTE SNIPPET MUST NOT RENDER"},
-					{File: "hallucinated.md", Topic: "Hallucinated memory", Summary: "This safe-looking file is not in MEMORIES.md."},
-				},
-				Content:    "",
-				Confidence: 0.9,
-				Reason:     "test",
-			})
-			return b, nil
-		default:
-			t.Fatalf("unexpected route output contract %q", hook.OutputContract)
-			return nil, nil
-		}
-	}), nil)
-
-	worker := NewWorkerService(nil, 0, projectRepo)
-	worker.SetLifecycleRunner(runner)
-	worker.SetLifecycleAgentRepo(agentRepo)
-	turn := worker.PrepareLifecycleTurn(ctx, models.Task{ID: "task-memory", ProjectID: project.ID, Title: "Need memory", Prompt: "Use relevant context"})
-	instructions := additionalProjectInstructionsFromContext(turn.Ctx)
-	if !strings.Contains(instructions, "## Selected Memories For This Task") || !strings.Contains(instructions, "memory_view(\"<memory>\")") || !strings.Contains(instructions, "`managed_memory.md`") {
-		t.Fatalf("expected Memory Curator route-selected memory handle in task prompt, got:\n%s", instructions)
-	}
-	for _, unwanted := range []string{"RAW TOPIC BODY", "hallucinated.md", "[recall_memory]", "Remembered context:", "Managed memory", "ROUTE SUMMARY MUST NOT RENDER", "ROUTE SNIPPET MUST NOT RENDER", "Preserve repo-local managed memory."} {
-		if strings.Contains(instructions, unwanted) {
-			t.Fatalf("route-selected memory prompt leaked %q or legacy before_run content, got:\n%s", unwanted, instructions)
-		}
-	}
-	rt := llmcontracts.RuntimeToolsFromContext(turn.Ctx)
-	if rt == nil || !rt.HasDefinition("memory_view") {
-		t.Fatalf("expected selected-memory runtime tools, got %#v", rt)
-	}
-	out, handled, isErr, err := rt.Executor(context.Background(), "memory_view", json.RawMessage(`{"handle":"managed_memory.md"}`))
-	if !handled || err != nil || isErr || !strings.Contains(out, "RAW TOPIC BODY SHOULD NOT BE ROUTED INTO RECALL INPUT") {
-		t.Fatalf("selected memory_view failed handled=%v isErr=%v err=%v out=%q", handled, isErr, err, out)
-	}
-	out, handled, isErr, err = rt.Executor(context.Background(), "memory_view", json.RawMessage(`{"handle":"MEMORIES.md"}`))
-	if !handled || err != nil || !isErr || !strings.Contains(out, "not in this turn's authorized memory index") {
-		t.Fatalf("unselected memory_view must be rejected handled=%v isErr=%v err=%v out=%q", handled, isErr, err, out)
-	}
-}
-
-func TestPrepareLifecycleTurn_HonorsExplicitIndexedMemoryViewRequest(t *testing.T) {
-	ctx := context.Background()
-	repoPath := t.TempDir()
-	memoryDir := filepath.Join(repoPath, ".openvibely", "memories")
-	if err := os.MkdirAll(memoryDir, 0o755); err != nil {
-		t.Fatalf("create memory dir: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(memoryDir, "managed_memory.md"), []byte("Explicit managed memory body."), 0o644); err != nil {
-		t.Fatalf("write managed memory: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(memoryDir, "unindexed.md"), []byte("Unindexed body must not be authorized."), 0o644); err != nil {
-		t.Fatalf("write unindexed memory: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(memoryDir, "MEMORIES.md"), []byte("# Project Memory\n\n- managed_memory.md: Preserve repo-local managed memory.\n"), 0o644); err != nil {
-		t.Fatalf("write MEMORIES.md: %v", err)
-	}
-
-	env := teststores.New(t)
-	projectRepo := env.Projects
-	project := &models.Project{Name: "Project", RepoPath: repoPath}
-	if err := projectRepo.Create(ctx, project); err != nil {
-		t.Fatalf("create project: %v", err)
-	}
-	store := &routeHookStore{hooks: []models.AgentLifecycleHook{
-		{ID: "memory-recall", When: models.LifecycleRouteTask, SkillKey: "recall_memory", OutputContract: models.OutputContractSelectedMemories, Blocking: true, Enabled: true},
-	}}
-	runner := lifecycle.NewRunner(store, routeHookInvokerFunc(func(_ context.Context, hook models.AgentLifecycleHook, in lifecycle.HookInput) (json.RawMessage, error) {
-		if !strings.Contains(in.TaskPrompt, "memory_view") || !strings.Contains(in.TaskPrompt, "managed_memory.md") {
-			return nil, fmt.Errorf("route hook missing explicit prompt: %q", in.TaskPrompt)
-		}
-		available, _ := in.Extras["available_memories"].(string)
-		if !strings.Contains(available, "managed_memory.md: Preserve repo-local managed memory") {
-			return nil, fmt.Errorf("route hook missing MEMORIES.md index: %#v", in.Extras["available_memories"])
-		}
-		return json.Marshal(lifecycle.SelectedMemories{Memories: nil, Content: "", Confidence: 0, Reason: "curator missed explicit handle"})
-	}), nil)
-
-	worker := NewWorkerService(nil, 0, projectRepo)
-	worker.SetLifecycleRunner(runner)
-	turn := worker.PrepareLifecycleTurn(ctx, models.Task{ID: "task-memory-explicit", ProjectID: project.ID, Title: "Need memory", Prompt: `call memory_view("managed_memory.md") but do not authorize memory_view(".openvibely/memories/managed_memory.md") or memory_view("unindexed.md")`})
-	instructions := additionalProjectInstructionsFromContext(turn.Ctx)
-	if !strings.Contains(instructions, "## Selected Memories For This Task") || !strings.Contains(instructions, "`managed_memory.md`") || strings.Contains(instructions, ".openvibely/memories/managed_memory.md") || strings.Contains(instructions, "unindexed.md") || strings.Contains(instructions, "Preserve repo-local managed memory") {
-		t.Fatalf("expected only explicit indexed memory handle in task prompt, got:\n%s", instructions)
-	}
-	rt := llmcontracts.RuntimeToolsFromContext(turn.Ctx)
-	if rt == nil || !rt.HasDefinition("memory_view") {
-		t.Fatalf("expected selected-memory runtime tools, got %#v", rt)
-	}
-	out, handled, isErr, err := rt.Executor(context.Background(), "memory_view", json.RawMessage(`{"handle":"managed_memory.md"}`))
-	if !handled || err != nil || isErr || !strings.Contains(out, "Explicit managed memory body.") {
-		t.Fatalf("explicit task memory_view failed handled=%v isErr=%v err=%v out=%q", handled, isErr, err, out)
-	}
-	for _, input := range []string{`{"handle":".openvibely/memories/managed_memory.md"}`, `{"handle":"unindexed.md"}`, `{"handle":"MEMORIES.md"}`} {
-		out, handled, isErr, err = rt.Executor(context.Background(), "memory_view", json.RawMessage(input))
-		if err != nil || !handled || !isErr {
-			t.Fatalf("unauthorized memory_view %s should be rejected handled=%v isErr=%v err=%v out=%q", input, handled, isErr, err, out)
-		}
-	}
-}
-
-func TestPrepareLifecycleTurn_SemanticRealtimePromptKeepsMemoryRecallBeforeSelectedSkill(t *testing.T) {
-	ctx := context.Background()
-	repoPath := t.TempDir()
-	memoryDir := filepath.Join(repoPath, ".openvibely", "memories")
-	if err := os.MkdirAll(memoryDir, 0o755); err != nil {
-		t.Fatalf("create memory dir: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(memoryDir, "MEMORIES.md"), []byte("# Memory Index\n\n- [Realtime and Frontend Patterns](realtime_and_frontend_patterns.md) - SSE/diff streaming, lazy tab rendering, markdown/link safety, scroll behavior, page UI patterns, shared tokens, and pending-message UI.\n- [Unrelated](unrelated.md) - Background notes that should not be selected.\n"), 0o644); err != nil {
-		t.Fatalf("write memory index: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(memoryDir, "realtime_and_frontend_patterns.md"), []byte("# Realtime and Frontend Patterns\n\nUse memory-first SSE guidance."), 0o644); err != nil {
-		t.Fatalf("write realtime memory: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(memoryDir, "unrelated.md"), []byte("unrelated body"), 0o644); err != nil {
-		t.Fatalf("write unrelated memory: %v", err)
-	}
-
-	root := t.TempDir()
-	writeLifecycleStandaloneSkill(t, root, "openvibely_htmx_templ_ui_workflow", "HTMX skill body")
-	env := teststores.New(t)
-	projectRepo := env.Projects
-	project := &models.Project{Name: "Realtime Project", RepoPath: repoPath}
-	if err := projectRepo.Create(ctx, project); err != nil {
-		t.Fatalf("create project: %v", err)
-	}
-	store := &routeHookStore{hooks: []models.AgentLifecycleHook{
-		{ID: "memory-recall", When: models.LifecycleRouteTask, SkillKey: "recall_memory", OutputContract: models.OutputContractSelectedMemories, Blocking: true, Enabled: true},
-		{ID: "skill-route", When: models.LifecycleRouteTask, SkillKey: "route_task", OutputContract: models.OutputContractSelectedSkills, Blocking: true, Enabled: true},
-	}}
-	runner := lifecycle.NewRunner(store, routeHookInvokerFunc(func(_ context.Context, hook models.AgentLifecycleHook, in lifecycle.HookInput) (json.RawMessage, error) {
-		switch hook.OutputContract {
-		case models.OutputContractSelectedMemories:
-			available, _ := in.Extras["available_memories"].(string)
-			if !strings.Contains(available, "realtime_and_frontend_patterns.md") || strings.Contains(available, "Use memory-first SSE guidance") {
-				return nil, fmt.Errorf("memory route hook missing compact index or received bodies: %#v", in.Extras["available_memories"])
-			}
-			return json.Marshal(lifecycle.SelectedMemories{Memories: []lifecycle.SelectedMemory{{File: "realtime_and_frontend_patterns.md", Topic: "Realtime/frontend UI patterns"}}, Confidence: 0.92, Reason: "semantic realtime frontend match"})
-		case models.OutputContractSelectedSkills:
-			return routePayload([]string{"openvibely_htmx_templ_ui_workflow"}, 0.86), nil
-		default:
-			return nil, fmt.Errorf("unexpected output contract %q", hook.OutputContract)
-		}
-	}), nil)
-
-	worker := NewWorkerService(nil, 0, projectRepo)
-	worker.SetLifecycleRunner(runner)
-	worker.SetLifecycleSkillRoot(root)
-	turn := worker.PrepareLifecycleTurn(ctx, models.Task{ID: "task-realtime", ProjectID: project.ID, Title: "Realtime frontend", Prompt: "Tell me about realtime front end patterns for this app"})
-	instructions := additionalProjectInstructionsFromContext(turn.Ctx)
-	memoryPos := strings.Index(instructions, "## Selected Memories For This Task")
-	skillPos := strings.Index(instructions, "## Selected Skills For This Task")
-	if memoryPos < 0 || skillPos < 0 || memoryPos > skillPos {
-		t.Fatalf("expected selected memory block before selected skill block, got:\n%s", instructions)
-	}
-	for _, want := range []string{"MUST call `memory_view(\"<memory>\")`", "before relying on selected skills", "`realtime_and_frontend_patterns.md`", "`openvibely_htmx_templ_ui_workflow`"} {
-		if !strings.Contains(instructions, want) {
-			t.Fatalf("selected memory/skill context missing %q, got:\n%s", want, instructions)
-		}
-	}
-	for _, unwanted := range []string{"Use memory-first SSE guidance", ".openvibely/memories/realtime_and_frontend_patterns.md", "`unrelated.md`"} {
-		if strings.Contains(instructions, unwanted) {
-			t.Fatalf("selected memory prompt leaked %q, got:\n%s", unwanted, instructions)
-		}
-	}
-	rt := llmcontracts.RuntimeToolsFromContext(turn.Ctx)
-	if rt == nil || !rt.HasDefinition("memory_view") || !rt.HasDefinition("skill_view") {
-		t.Fatalf("expected selected memory_view and skill_view runtime tools, got %#v", rt)
-	}
-	out, handled, isErr, err := rt.Executor(context.Background(), "memory_view", json.RawMessage(`{"handle":"realtime_and_frontend_patterns.md"}`))
-	if !handled || err != nil || isErr || !strings.Contains(out, "Use memory-first SSE guidance") {
-		t.Fatalf("selected semantic memory_view failed handled=%v isErr=%v err=%v out=%q", handled, isErr, err, out)
-	}
-	for _, input := range []string{`{"handle":".openvibely/memories/realtime_and_frontend_patterns.md"}`, `{"handle":"unrelated.md"}`, `{"handle":"MEMORIES.md"}`} {
-		out, handled, isErr, err = rt.Executor(context.Background(), "memory_view", json.RawMessage(input))
-		if err != nil || !handled || !isErr {
-			t.Fatalf("unauthorized semantic memory_view %s should be rejected handled=%v isErr=%v err=%v out=%q", input, handled, isErr, err, out)
-		}
-	}
-	out, handled, isErr, err = rt.Executor(context.Background(), "skill_view", json.RawMessage(`{"handle":"openvibely_htmx_templ_ui_workflow"}`))
-	if !handled || err != nil || isErr || !strings.Contains(out, "HTMX skill body") {
-		t.Fatalf("selected semantic skill_view failed handled=%v isErr=%v err=%v out=%q", handled, isErr, err, out)
-	}
-}
-
 func TestBuildTaskMemoryRuntimeToolsRequiresAssignedAgentMemoryViewGrant(t *testing.T) {
 	ctx := context.Background()
 	repoPath := t.TempDir()
@@ -1332,6 +1011,7 @@ func TestPrepareLifecycleTurn_MemoryConsolidationTaskRoutesConsolidateMemorySkil
 		Key:                 "memory_curator",
 		Name:                "System: Memory Curator",
 		SystemKind:          models.AgentSystemKindMemoryCurator,
+		Enabled:             true,
 		SelectableAsPrimary: false,
 		Tools:               []string{models.AgentToolScopedFiles},
 	}
@@ -1365,8 +1045,8 @@ func TestPrepareLifecycleTurn_MemoryConsolidationTaskRoutesConsolidateMemorySkil
 	if availableText, _ := available.(string); !strings.Contains(availableText, "memory_curator/consolidate_memory") || strings.Contains(availableText, "other_skill") {
 		t.Fatalf("route_task should receive Memory Curator skill index, got:\n%s", availableText)
 	}
-	instructions := additionalProjectInstructionsFromContext(turn.Ctx)
-	if !strings.Contains(instructions, "consolidate_memory") || strings.Contains(instructions, "recall_memory") || strings.Contains(instructions, "update_memory") {
+	instructions := managedcontext.Text(turn.Ctx)
+	if !strings.Contains(instructions, "consolidate_memory") {
 		t.Fatalf("scheduled Memory Curator task should include only router-selected consolidate_memory skill, got:\n%s", instructions)
 	}
 	rt := llmcontracts.RuntimeToolsFromContext(turn.Ctx)
@@ -1385,6 +1065,7 @@ func TestPrepareLifecycleTurn_AssignedAgentWithNoSkillsRoutesEmptyIndex(t *testi
 		Key:                 "memory_curator",
 		Name:                "System: Memory Curator",
 		SystemKind:          models.AgentSystemKindMemoryCurator,
+		Enabled:             true,
 		SelectableAsPrimary: false,
 		Tools:               []string{models.AgentToolScopedFiles},
 	}
@@ -1445,7 +1126,7 @@ func assertTaskRuntimeIsSelectedSkillOnly(t *testing.T, rt *llmcontracts.Runtime
 		if rt.HasDefinition(denied) {
 			t.Fatalf("task runtime tools must not expose %s, got %#v", denied, rt.Definitions)
 		}
-		if allow, handled := rt.Filter(denied); allow || handled {
+		if allow, _ := rt.Filter(denied); allow {
 			t.Fatalf("task runtime filter must not own %s", denied)
 		}
 	}

@@ -343,6 +343,16 @@ func anthropicAgentResult(output, textOnly string, usage llmcontracts.Usage, err
 	return res
 }
 
+type conversationReplayKey struct{}
+
+func recordConversationReplay(ctx context.Context) func([]anthropicclient.Message) {
+	return func(messages []anthropicclient.Message) {
+		if target, ok := ctx.Value(conversationReplayKey{}).(*[]anthropicclient.Message); ok {
+			*target = messages
+		}
+	}
+}
+
 type recoveryMessagesKey struct{}
 
 func recoveryMessages(ctx context.Context) []anthropicclient.Message {
@@ -353,6 +363,8 @@ func recoveryMessages(ctx context.Context) []anthropicclient.Message {
 // Call handles Anthropic LLM requests.
 func (a *Adapter) Call(ctx context.Context, req llmcontracts.AgentRequest, workDir string, w *llmstream.Writer) (result llmcontracts.AgentResult, callErr error) {
 	agent := req.Agent
+	var replayMessages []anthropicclient.Message
+	ctx = context.WithValue(ctx, conversationReplayKey{}, &replayMessages)
 	ctx = llmcontracts.WithNativeCompactionStateJSON(ctx, req.NativeCompactionStateJSON)
 	if llmcontracts.HistoryContinuationFromContext(ctx) {
 		messages := buildRecoveryHistory(req.ChatHistory)
@@ -393,7 +405,10 @@ func (a *Adapter) Call(ctx context.Context, req llmcontracts.AgentRequest, workD
 		// of a future client rebuilding its history.
 		environment := executionenv.Context(workDir)
 		defer func() {
-			saved, err := json.Marshal(anthropicEnvironmentReplay{Environment: environment, Messages: []anthropicclient.Message{{Role: "user", Content: req.Message}, {Role: "assistant", Content: result.TextOnlyOutput}}})
+			if len(replayMessages) == 0 {
+				replayMessages = []anthropicclient.Message{{Role: "user", Content: req.Message}, {Role: "assistant", Content: result.TextOnlyOutput}}
+			}
+			saved, err := json.Marshal(anthropicEnvironmentReplay{Environment: environment, Messages: replayMessages})
 			if err == nil {
 				err = a.execRepo.ReplaceReasoningReplay(context.WithoutCancel(ctx), req.ExecID, "", []models.ExecutionReplayMessage{{
 					UserContent: req.Message, AssistantContent: result.TextOnlyOutput, TranscriptJSON: string(saved),
@@ -488,6 +503,7 @@ func (a *Adapter) callDirect(ctx context.Context, prompt string, attachments []m
 		ToolExecutor:              toolExecutor,
 		ToolFilter:                toolFilter,
 		OnToolBoundarySteering:    llmcontracts.SteeringCallbackFromContext(ctx),
+		OnReplay:                  recordConversationReplay(ctx),
 		RecoveryMessages:          recoveryMessages(ctx),
 		OnCompaction: func(summary string) {
 			compactionSummary = strings.TrimSpace(summary)
@@ -565,6 +581,7 @@ func (a *Adapter) callChatStreaming(ctx context.Context, message string, attachm
 		ExtraTools:                extraTools, ToolExecutor: toolExecutor,
 		ToolFilter:             toolFilter,
 		OnToolBoundarySteering: llmcontracts.SteeringCallbackFromContext(ctx),
+		OnReplay:               recordConversationReplay(ctx),
 		RecoveryMessages:       recoveryMessages(ctx),
 		OnThinking: func(text string) {
 			if !chatInThinking {
@@ -669,6 +686,7 @@ func (a *Adapter) callStreaming(ctx context.Context, prompt string, attachments 
 		ExtraTools:                extraTools, ToolExecutor: toolExecutor,
 		ToolFilter:             toolFilter,
 		OnToolBoundarySteering: llmcontracts.SteeringCallbackFromContext(ctx),
+		OnReplay:               recordConversationReplay(ctx),
 		RecoveryMessages:       recoveryMessages(ctx),
 		OnThinking: func(text string) {
 			if !inThinking {
@@ -786,7 +804,7 @@ func anthropicContextUsage(resp *anthropicclient.AgenticResponse) llmcontracts.U
 
 func buildClientHistory(chatHistory []models.Execution) []anthropicclient.Message {
 	messages := buildRecoveryHistory(chatHistory)
-	if len(messages) > 0 && messages[len(messages)-1].Role == "user" {
+	if len(messages) > 0 && messages[len(messages)-1].Role == "user" && len(messages[len(messages)-1].ContentBlocks) == 0 {
 		messages = messages[:len(messages)-1]
 	}
 	return messages
@@ -802,12 +820,25 @@ func buildRecoveryHistory(chatHistory []models.Execution) []anthropicclient.Mess
 	var messages []anthropicclient.Message
 	lastEnvironment := ""
 	for _, exec := range chatHistory {
+		var structured []anthropicclient.Message
 		for _, replay := range exec.ReplayMessages {
 			var saved anthropicEnvironmentReplay
+			if json.Unmarshal([]byte(replay.TranscriptJSON), &saved) == nil {
+				for _, m := range saved.Messages {
+					if len(m.ContentBlocks) > 0 {
+						structured = saved.Messages
+						break
+					}
+				}
+			}
 			if json.Unmarshal([]byte(replay.TranscriptJSON), &saved) == nil && strings.HasPrefix(saved.Environment, executionenv.Marker+"\n") && saved.Environment != lastEnvironment {
 				messages = append(messages, anthropicclient.Message{Role: "user", Content: saved.Environment})
 				lastEnvironment = saved.Environment
 			}
+		}
+		if len(structured) > 0 {
+			messages = append(messages, structured...)
+			continue
 		}
 		if exec.PromptSent != "" {
 			messages = appendMergedMessage(messages, "user", exec.PromptSent)
@@ -824,14 +855,14 @@ func buildRecoveryHistory(chatHistory []models.Execution) []anthropicclient.Mess
 func EstimateHistoryTokens(history []models.Execution) int {
 	total := 0
 	for _, message := range buildRecoveryHistory(history) {
-		total += tokenestimate.FromText(message.Content)
+		total += tokenestimate.FromText(message.Content) + tokenestimate.FromByteCount(len(message.ContentBlocks))
 	}
 	return total
 }
 
 // appendMergedMessage appends a message, merging with the previous if same role.
 func appendMergedMessage(messages []anthropicclient.Message, role, content string) []anthropicclient.Message {
-	if len(messages) > 0 && messages[len(messages)-1].Role == role && !strings.HasPrefix(messages[len(messages)-1].Content, executionenv.Marker+"\n") {
+	if len(messages) > 0 && messages[len(messages)-1].Role == role && len(messages[len(messages)-1].ContentBlocks) == 0 && !strings.HasPrefix(messages[len(messages)-1].Content, executionenv.Marker+"\n") {
 		messages[len(messages)-1].Content += "\n\n" + content
 		return messages
 	}

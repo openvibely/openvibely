@@ -2420,7 +2420,7 @@ var registry = []ActionDef{
 	// --- Memory domain (read-only, scoped by selected-memory runtime tools) ---
 	{
 		Name:         "memory_view",
-		Description:  "Load an authorized managed memory selected for this turn. Use only handles listed in the selected memory index.",
+		Description:  "Read a permitted managed memory from the current project memory index.",
 		Domain:       DomainMemory,
 		Access:       AccessRead,
 		Sensitivity:  SensitivityNormal,
@@ -2431,7 +2431,7 @@ var registry = []ActionDef{
 			Properties: map[string]*toolschema.Schema{
 				"handle": {
 					Type:        "string",
-					Description: "Selected memory handle/file, e.g. provider_architecture.md",
+					Description: "Memory handle/file, e.g. provider_architecture.md",
 				},
 			},
 			Required:             []string{"handle"},
