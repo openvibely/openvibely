@@ -807,6 +807,16 @@ func buildChannelUtilityActionHandlers(opts channelUtilityActionHandlerOptions) 
 			return ExecuteListTasksTool(ctx, opts.TaskRepo, opts.ProjectID, input)
 		},
 		"view_swarm": func(ctx context.Context, input json.RawMessage) (string, error) {
+			if opts.CallerTaskID != "" {
+				var req ViewSwarmRequest
+				if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
+					return "", err
+				}
+				if req.TaskID == "current" || (req.TaskID == "" && req.Title == "") {
+					req.TaskID = opts.CallerTaskID
+					input, _ = json.Marshal(req)
+				}
+			}
 			return ExecuteViewSwarmTool(ctx, opts.TaskRepo, opts.ProjectID, input)
 		},
 		"list_automations": func(ctx context.Context, input json.RawMessage) (string, error) {

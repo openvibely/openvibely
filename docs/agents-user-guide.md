@@ -103,3 +103,5 @@ Deleting an agent unlinks tasks that referenced it. System agents cannot be dele
 - Prefer routing hints when multiple agents could plausibly handle similar work.
 - Use project-scoped agents for repository-specific conventions.
 - Let agent-owned skills capture role-specific learning that should improve future assigned tasks.
+
+Initial task runs and task-thread follow-ups use the same default application-tool policy (`internal/chatcontrol/task_tools.go`). This includes task editing, thread viewing and messaging, and swarm inspection. Initial runs reuse application handlers for tools not implemented by the service runtime. Explicit lifecycle-agent grants and Automation auditor restrictions remain separate from the ordinary defaults. Add task tools to the shared policy and wire an executor; the initial-run provider regression checks parity with follow-ups.

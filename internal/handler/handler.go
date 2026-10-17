@@ -336,6 +336,10 @@ func New(
 		taskSvc.SetQueuedTaskThreadFollowupHook(h.StartPendingTaskThreadFollowup)
 		taskSvc.SetFailedTaskThreadFollowupRetryHook(h.RetryLatestFailedTaskThreadFollowup)
 	}
+	if llmSvc != nil {
+		llmSvc.SetTaskRuntimeProvider(h.initialTaskRuntimeTools)
+	}
+
 	return h
 }
 
