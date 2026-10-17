@@ -18,7 +18,7 @@ func TestThemesContentRendersCatalogCardsAndSearchMetadata(t *testing.T) {
 	if !strings.Contains(html, `data-card-search="themes"`) || !strings.Contains(html, "Search themes...") {
 		t.Fatalf("themes page must use shared card search input")
 	}
-	if got, want := strings.Count(html, `data-theme-id=`), len(themes.Catalog())-15; got != want {
+	if got, want := strings.Count(html, `data-theme-id=`), len(themes.Catalog())-16; got != want {
 		t.Fatalf("theme card count = %d, want %d", got, want)
 	}
 	for _, theme := range themes.Catalog() {

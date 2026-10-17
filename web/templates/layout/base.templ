@@ -2804,9 +2804,10 @@ html[data-ov-theme-layer="custom"] #schedule-content [data-schedule-card][data-c
 [data-ov-theme-layer="custom"] .schedule-datetime-popup [aria-pressed=true],
 [data-ov-theme-layer="custom"] .schedule-datetime-popup [data-time-selected=true] { background: var(--ov-button-bg) !important; color: var(--ov-button-fg) !important; }
 [data-ov-theme-layer="custom"] .schedule-datetime-popup :focus-visible { outline-color: var(--ov-focus); }
-[data-ov-theme-layer="custom"] .kanban-search[data-open="true"] { background: var(--ov-input-bg); border-color: var(--ov-input-border); color: var(--ov-text); }
-[data-ov-theme-layer="custom"] .kanban-search[data-open="true"]:focus-within { border-color: var(--ov-focus); }
+[data-ov-theme-layer="custom"] .kanban-search[data-open="true"] { background: var(--ov-surface); border-color: var(--ov-subtle-border); color: var(--ov-text); box-shadow: 0 0 #0000, 0 0 #0000, 0 1px 2px 0 rgb(0 0 0 / .05); }
+[data-theme="light"][data-ov-theme-layer="custom"] .kanban-search[data-open="true"] { box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.05); }
 [data-ov-theme-layer="custom"] .kanban-search-input { color: var(--ov-text); caret-color: var(--ov-text); }
+[data-ov-theme-layer="custom"] [data-card-search]::placeholder,
 [data-ov-theme-layer="custom"] .kanban-search-input::placeholder { color: var(--ov-text-muted); opacity: 1; }
 [data-ov-theme-layer="custom"] .kanban-search[data-open="true"] .kanban-search-toggle:hover { background: transparent !important; }
 [data-ov-theme-layer="custom"] .kanban-search-clear { color: var(--ov-text-muted); }
