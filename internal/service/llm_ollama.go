@@ -161,3 +161,52 @@ func DetectOllamaContextWindow(ctx context.Context, baseURL, model string) (int,
 	}
 	return 0, nil
 }
+
+// OllamaModelMetadata separates model capacity from the active server allocation.
+type OllamaModelMetadata struct {
+	ContextLength      int `json:"context_length"`
+	ModelContextLength int `json:"model_context_length"`
+}
+
+// DiscoverOllamaModelMetadata is modal-only discovery. Each endpoint can fail
+// independently; static capacity must never substitute for an active window.
+func DiscoverOllamaModelMetadata(ctx context.Context, baseURL, model string) OllamaModelMetadata {
+	result := OllamaModelMetadata{}
+	result.ContextLength, _ = DetectOllamaContextWindow(ctx, baseURL, model)
+	ctx, cancel := context.WithTimeout(ctx, ModelDiscoveryTimeout)
+	defer cancel()
+	if strings.TrimSpace(model) == "" {
+		return result
+	}
+	baseURL = strings.TrimSuffix(strings.TrimRight(strings.TrimSpace(baseURL), "/"), "/v1")
+	if baseURL == "" {
+		baseURL = "http://localhost:11434"
+	}
+	body, _ := json.Marshal(map[string]string{"model": model})
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+"/api/show", strings.NewReader(string(body)))
+	if err != nil {
+		return result
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := OllamaHTTPClient.Do(req)
+	if err != nil {
+		return result
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return result
+	}
+	var show struct {
+		ModelInfo map[string]json.RawMessage `json:"model_info"`
+	}
+	if json.NewDecoder(io.LimitReader(resp.Body, 4<<20)).Decode(&show) != nil {
+		return result
+	}
+	var architecture string
+	_ = json.Unmarshal(show.ModelInfo["general.architecture"], &architecture)
+	if architecture != "" {
+		_ = json.Unmarshal(show.ModelInfo[architecture+".context_length"], &result.ModelContextLength)
+	}
+	result.ModelContextLength = max(0, result.ModelContextLength)
+	return result
+}

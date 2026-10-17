@@ -1928,9 +1928,5 @@ func normalizeOpenAIModel(value string) string {
 
 // DetectOllamaContext returns transient active-window metadata for the model modal.
 func (h *Handler) DetectOllamaContext(c echo.Context) error {
-	window, err := service.DetectOllamaContextWindow(c.Request().Context(), c.QueryParam("base_url"), c.QueryParam("model"))
-	if err != nil {
-		window = 0
-	}
-	return c.JSON(http.StatusOK, map[string]int{"context_length": window})
+	return c.JSON(http.StatusOK, service.DiscoverOllamaModelMetadata(c.Request().Context(), c.QueryParam("base_url"), c.QueryParam("model")))
 }

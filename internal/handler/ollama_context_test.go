@@ -16,6 +16,11 @@ import (
 func TestOllamaContextModalRouteAndSavedBudget(t *testing.T) {
 	_, e, repo := setupTestHandler(t)
 	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/show" {
+			require.Equal(t, http.MethodPost, r.Method)
+			w.Write([]byte(`{"model_info":{"general.architecture":"llama","llama.context_length":131072}}`))
+			return
+		}
 		require.Equal(t, "/api/ps", r.URL.Path)
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(`{"models":[{"name":"local:latest","context_length":32768}]}`))
@@ -31,6 +36,7 @@ func TestOllamaContextModalRouteAndSavedBudget(t *testing.T) {
 		var body map[string]int
 		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
 		require.Equal(t, tc.want, body["context_length"])
+		require.Equal(t, 131072, body["model_context_length"])
 	}
 	config := &models.LLMConfig{Name: "Saved Ollama", Provider: models.ProviderOllama, Model: "local", OllamaBaseURL: provider.URL, ContextWindow: 65536, DefaultMaxTokens: 10000}
 	require.NoError(t, repo.Create(context.Background(), config))
