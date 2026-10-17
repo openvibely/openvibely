@@ -95,6 +95,8 @@ func buildAutomationTaskCreationCallbacks(callerTaskID, projectID string, llmSvc
 }
 
 type channelTaskActionHandlerOptions struct {
+	AttachmentRepo      persistence.AttachmentStore
+	UploadsDir          string
 	ProjectID           string
 	TaskSvc             *TaskService
 	SwarmSvc            *SwarmService
@@ -595,7 +597,7 @@ func buildChannelTaskActionHandlers(opts channelTaskActionHandlerOptions) map[st
 			if strings.TrimSpace(req.ID) == "" {
 				return "", fmt.Errorf("edit_task requires id")
 			}
-			summary := ExecuteTaskEdits(ctx, []TaskEditRequest{req}, opts.ProjectID, opts.TaskSvc, nil, "")
+			summary := ExecuteTaskEdits(ctx, []TaskEditRequest{req}, opts.ProjectID, opts.TaskSvc, opts.AttachmentRepo, opts.UploadsDir)
 			trimmedSummary := strings.TrimSpace(summary)
 			if strings.Contains(summary, "Failed to edit") && !strings.Contains(summary, "[TASK_EDITED:") {
 				return trimmedSummary, fmt.Errorf("edit_task: no tasks were updated")

@@ -1018,7 +1018,7 @@ var registry = []ActionDef{
 	},
 	{
 		Name:               "edit_task",
-		Description:        "Edit an existing task by id. Can add or modify chain configuration for sequential execution.",
+		Description:        "Edit an existing task by id within the current project. Supports title, prompt, priority, category, tag, Agent/model assignment, chain configuration, auto-merge settings, merge target branch, and attachment file paths.",
 		Domain:             DomainTasks,
 		Access:             AccessWrite,
 		Sensitivity:        SensitivityNormal,

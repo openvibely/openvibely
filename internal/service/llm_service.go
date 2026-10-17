@@ -264,7 +264,23 @@ func (s *LLMService) taskActionRuntimeTools(ctx context.Context, task models.Tas
 		AfterPRFeedbackForwarded: s.promoteQueuedTaskThreadAfterCompletion,
 		SuppressIssueComments:    automationBound,
 	})
-	return llmcontracts.CompositeRuntimeTools(s.taskSendMessageRuntimeTools(task), s.taskControlRuntimeTools(task), githubTools, s.automationBootstrapRuntimeTools(ctx, task))
+	runtime := llmcontracts.CompositeRuntimeTools(s.taskSendMessageRuntimeTools(task), s.taskControlRuntimeTools(task), githubTools, s.automationBootstrapRuntimeTools(ctx, task))
+	if runtime != nil && runtime.HasDefinition("list_capabilities") {
+		baseExecutor := runtime.Executor
+		runtime.Executor = func(ctx context.Context, name string, input json.RawMessage) (string, bool, bool, error) {
+			if name == "list_capabilities" {
+				var summaries []chatcontrol.ActionSummary
+				for _, summary := range chatcontrol.ListForContext(models.ChatModeOrchestrate, chatcontrol.SurfaceWeb) {
+					if runtime.HasDefinition(summary.Name) {
+						summaries = append(summaries, summary)
+					}
+				}
+				return formatChannelCapabilities(summaries), true, false, nil
+			}
+			return baseExecutor(ctx, name, input)
+		}
+	}
+	return runtime
 }
 
 func (s *LLMService) AutomationGitHubRuntimeTools(ctx context.Context, task models.Task, defs []llmcontracts.RuntimeToolDefinition) *llmcontracts.RuntimeTools {
@@ -404,6 +420,7 @@ func (s *LLMService) taskControlRuntimeTools(task models.Task) *llmcontracts.Run
 	allowed := map[string]bool{
 		"list_tasks":                             true,
 		"create_task":                            true,
+		"edit_task":                              true,
 		"create_swarm_task":                      true,
 		"execute_tasks":                          true,
 		"set_task_goal":                          true,
@@ -451,8 +468,14 @@ func (s *LLMService) taskControlRuntimeTools(task models.Task) *llmcontracts.Run
 	if len(filtered) == 0 {
 		return nil
 	}
+	taskUploadsDir := "uploads"
+	if s.taskSvc != nil && strings.TrimSpace(s.taskSvc.uploadsDir) != "" {
+		taskUploadsDir = s.taskSvc.uploadsDir
+	}
 	handlers := buildChannelTaskActionHandlers(channelTaskActionHandlerOptions{
 		ProjectID:          task.ProjectID,
+		AttachmentRepo:     s.attachmentRepo,
+		UploadsDir:         taskUploadsDir,
 		TaskSvc:            s.taskSvc,
 		SwarmSvc:           nil,
 		TaskRepo:           s.taskRepo,
@@ -513,7 +536,13 @@ func (s *LLMService) taskControlRuntimeTools(task models.Task) *llmcontracts.Run
 		}
 	}
 	handlers["list_capabilities"] = func(_ context.Context, _ json.RawMessage) (string, error) {
-		return formatChannelCapabilities(chatcontrol.ListForContext(models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)), nil
+		var summaries []chatcontrol.ActionSummary
+		for _, summary := range chatcontrol.ListForContext(models.ChatModeOrchestrate, chatcontrol.SurfaceWeb) {
+			if allowed[summary.Name] {
+				summaries = append(summaries, summary)
+			}
+		}
+		return formatChannelCapabilities(summaries), nil
 	}
 	return &llmcontracts.RuntimeTools{
 		Definitions: filtered,
