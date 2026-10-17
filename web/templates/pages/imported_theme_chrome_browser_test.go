@@ -100,13 +100,13 @@ func TestBrowserFunctional_ImportedThemeStylesTitlebarMenusAndSchedulePickers(t 
 	runComposerFocusCDP(t, chrome, server.URL, "imported-theme-chrome", func(browser *composerFocusCDP) {
 		browser.waitFor("theme runtime", `String(!!(window.openVibelyThemes && window.openVibelyThemes.apply))`, "true")
 		browser.waitFor("page body ready", `String(document.readyState !== 'loading' && !!document.getElementById('fixture-hover-card') && !!document.getElementById('desktop-project-titlebar'))`, "true")
-		// Every theme retains the default mode toggle colors, fading, and geometry.
+		// Palette colors must preserve native geometry and fading.
 		browser.evaluate(`document.querySelectorAll('.theme-toggle-pill, .theme-toggle-pill span').forEach(function(el) { el.style.transition = 'none'; });
 		window.toggleGeometry = function() {
 			var pill = document.querySelector('.theme-toggle-pill');
 			var origin = pill.getBoundingClientRect();
 			return JSON.stringify([pill, pill.querySelector('.theme-toggle-thumb'), pill.querySelector('.theme-toggle-sun'), pill.querySelector('.theme-toggle-moon')].map(function(el) {
-				var r = el.getBoundingClientRect(); var style = getComputedStyle(el); return [r.x-origin.x, r.y-origin.y, r.width, r.height, el.classList.contains('theme-toggle-icon') ? style.color : null, style.backgroundColor, style.opacity];
+				var r = el.getBoundingClientRect(); var style = getComputedStyle(el); return [r.x-origin.x, r.y-origin.y, r.width, r.height, style.opacity];
 			}));
 		}; 'ok'`)
 		for _, mode := range []string{"light", "dark"} {
@@ -116,7 +116,10 @@ func TestBrowserFunctional_ImportedThemeStylesTitlebarMenusAndSchedulePickers(t 
 					continue
 				}
 				browser.evaluate(`window.openVibelyThemes.apply('` + theme.ID + `'); 'ok'`)
-				browser.waitFor(theme.ID+" preserves default toggle appearance", `window.toggleGeometry() === window.originalToggleGeometry ? 'true' : window.toggleGeometry() + ' expected ' + window.originalToggleGeometry`, "true")
+				browser.waitFor(theme.ID+" preserves default toggle geometry and fading", `window.toggleGeometry() === window.originalToggleGeometry ? 'true' : window.toggleGeometry() + ' expected ' + window.originalToggleGeometry`, "true")
+				if theme.ID != "openvibely-light" && theme.ID != "openvibely-dark" && theme.ID != "openvibely-dark-continuous" {
+					browser.waitFor(theme.ID+" consumes dedicated toggle colors", `JSON.stringify(['.theme-toggle-pill','.theme-toggle-thumb','.theme-toggle-'+(document.documentElement.dataset.theme === 'dark' ? 'moon' : 'sun'),'.theme-toggle-'+(document.documentElement.dataset.theme === 'dark' ? 'sun' : 'moon')].map(function(selector, i) { var probe = document.getElementById('probe'); probe.style.color = 'var(--ov-mode-'+['track','thumb','active','inactive'][i]+')'; return getComputedStyle(document.querySelector(selector))[i < 2 ? 'backgroundColor' : 'color'] === getComputedStyle(probe).color; }))`, "[true,true,true,true]")
+				}
 			}
 		}
 		browser.evaluate(`window.openVibelyThemes.apply('vscode-kimbie-dark');

@@ -231,7 +231,7 @@ func RuntimeCatalogJSON() string {
 			Kind  string            `json:"kind"`
 			Mode  string            `json:"mode"`
 			CSS   map[string]string `json:"css"`
-			Roles [3]string         `json:"r"`
+			Roles [7]string         `json:"r"`
 		}
 		catalog := Catalog()
 		runtime := make([]runtimeTheme, 0, len(catalog))
@@ -247,7 +247,7 @@ func RuntimeCatalogJSON() string {
 			}
 			runtime = append(runtime, runtimeTheme{
 				ID: theme.ID, Kind: theme.Kind, Mode: theme.Mode, CSS: css,
-				Roles: [3]string{theme.CSS["--ov-automation-node-border"], theme.CSS["--ov-automation-edge"], theme.CSS["--ov-yaml-indent-rail"]},
+				Roles: toggleRuntimeRoles(theme),
 			})
 		}
 		data, err := json.Marshal(runtime)
