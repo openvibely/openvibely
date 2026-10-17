@@ -18,6 +18,7 @@ import (
 	"github.com/openvibely/openvibely/internal/llm/tokenestimate"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/pkg/attachment"
+	"github.com/openvibely/openvibely/pkg/managedcontext"
 )
 
 // CompletionsOptions configures a /v1/chat/completions call with tool use.
@@ -233,6 +234,12 @@ func (c *Client) SendCompletions(ctx context.Context, prompt string, opts *Compl
 	var allText strings.Builder
 	finalReasoningContent := ""
 	currentTranscript := []CompletionsHistoryMessage{{Role: "user", Content: prompt}}
+	currentTranscript = managedcontext.SeedReplay(ctx, messages, currentTranscript, func(m completionsMessage) (string, string) {
+		text, _ := m.Content.(string)
+		return m.Role, text
+	}, func(text string) CompletionsHistoryMessage {
+		return CompletionsHistoryMessage{Role: "user", Content: text}
+	})
 
 	for turn := 0; turn < opts.MaxTurns; turn++ {
 		messages = ensureCompletionsAttachments(ctx, messages)
