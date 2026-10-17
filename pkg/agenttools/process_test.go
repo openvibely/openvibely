@@ -227,9 +227,11 @@ func TestProcessShutdown(t *testing.T) {
 }
 
 func TestProcessExecutionCancellation(t *testing.T) {
+	// Cleanups run in reverse order. Stop the independent shell before removing
+	// its working directory, which Windows keeps locked while the shell is alive.
+	dir := t.TempDir()
 	m := testProcessManager(t)
 	_, command := testCommands(t)
-	dir := t.TempDir()
 	owner, cancelOwner := context.WithCancel(context.Background())
 	defer cancelOwner()
 	request, cancelRequest := context.WithCancel(WithProcessLifetime(owner))
