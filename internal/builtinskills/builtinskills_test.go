@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/openvibely/openvibely/internal/agentlibrary"
 	"github.com/openvibely/openvibely/internal/agentskills"
 )
 
@@ -487,6 +488,27 @@ func TestSyncTo_InstallsSystemHookSkillsButKeepsDisabledStandaloneSkillsOutOfRou
 		}
 		if info.Size() == 0 {
 			t.Fatalf("SKILL.md %s is empty", p)
+		}
+	}
+}
+
+func TestSkillCuratorLearningDisabledByDefault(t *testing.T) {
+	root := t.TempDir()
+	if err := SyncTo(root); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(root, "agents", "skill_curator", "SKILLS.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	decl, _, err := agentlibrary.ParseDeclaration(string(data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for slot, want := range map[string]bool{"route_task": true, "after_complete": false} {
+		hook, ok := decl.LifecycleHooks[slot]
+		if !ok || hook.Enabled == nil || *hook.Enabled != want {
+			t.Fatalf("%s default enabled should be %v: %+v", slot, want, hook)
 		}
 	}
 }
