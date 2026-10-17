@@ -52,7 +52,7 @@ func TestBrowserFunctional_FileViewers(t *testing.T) {
 		if r.URL.Path == "/files/abcdef" {
 			if r.URL.Query().Get("metadata") == "1" {
 				w.Header().Set("Content-Type", "application/json")
-				io.WriteString(w, `{"file_name":"generated.html","media_type":"text/html","display":"canvas"}`)
+				io.WriteString(w, `{"file_name":"generated.html","media_type":"text/html"}`)
 			} else if r.URL.Query().Get("view") == "1" {
 				_ = components.FilePreview("generated.html", "html", "<button>Generated</button>", r.URL.String()).Render(r.Context(), w)
 			} else {
@@ -170,7 +170,7 @@ func TestBrowserFunctional_FileViewers(t *testing.T) {
 		}
 		b.evaluate(`svgChat.remove(); 'ok'`)
 
-		b.waitFor("generated canvas", `document.querySelector('.file-html-canvas iframe')?.getAttribute('sandbox')||''`, "allow-scripts")
+		b.waitFor("HTML preview without display metadata", `document.querySelector('.file-html-canvas iframe')?.getAttribute('sandbox')||''`, "allow-scripts")
 		b.evaluate(`const canvas=document.querySelector('.file-html-canvas');canvas.outerHTML=canvas.outerHTML;'restored'`)
 		b.click(".file-html-canvas button")
 		b.waitFor("expanded generated artifact", `String(document.querySelector('[data-file-name]')?.dataset.fileName==='generated.html')`, "true")
