@@ -28,8 +28,24 @@ func TestPaperworksSkillPackages(t *testing.T) {
 		if err != nil || len(dependencies) != 2 || dependencies[0].Name != "paperworks" || dependencies[1].Name != "libreoffice" {
 			t.Fatalf("%s: %v %v", name, dependencies, err)
 		}
-		if len(dependencies[0].Packages) != 0 {
-			t.Fatal("unpublished Paperworks release advertised")
+		paperworks := dependencies[0]
+		if paperworks.Version != "0.0.1-rc1" || paperworks.EnvironmentVariable != "PAPERWORKS" || strings.Join(paperworks.HealthCheck, " ") != "version" {
+			t.Fatalf("%s: invalid Paperworks release configuration: %+v", name, paperworks)
+		}
+		platforms := []string{"darwin/amd64", "darwin/arm64", "linux/amd64", "linux/arm64", "windows/amd64"}
+		if len(paperworks.Packages) != len(platforms) {
+			t.Fatalf("%s: missing release platforms", name)
+		}
+		for _, platform := range platforms {
+			pkg := paperworks.Packages[platform]
+			executable := "paperworks"
+			if strings.HasPrefix(platform, "windows/") {
+				executable += ".exe"
+			}
+			url := "https://github.com/openvibely/openvibely-paperworks/releases/download/v" + paperworks.Version + "/paperworks-" + strings.ReplaceAll(platform, "/", "-") + ".zip"
+			if pkg.URL != url || pkg.Format != "zip" || pkg.Executable != executable || !regexp.MustCompile(`^[a-f0-9]{64}$`).MatchString(pkg.SHA256) {
+				t.Fatalf("%s: invalid %s release package: %+v", name, platform, pkg)
+			}
 		}
 		for _, old := range []string{"document_check.py", "uv run", "pip install", "equation.cjs", "document_native.py", "word_edit.py", "```python", "npm install", "DOCUMENT_JAVA"} {
 			if strings.Contains(string(data), old) {

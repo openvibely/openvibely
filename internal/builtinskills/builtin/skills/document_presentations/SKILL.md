@@ -9,9 +9,35 @@ skill:
     description: Read, create, and edit PowerPoint PPTX slide decks with text, images, tables, and charts.
 dependencies:
   - name: paperworks
-    version: development
+    version: 0.0.1-rc1
     environment_variable: PAPERWORKS
     health_check: [version]
+    packages:
+      darwin/amd64:
+        url: https://github.com/openvibely/openvibely-paperworks/releases/download/v0.0.1-rc1/paperworks-darwin-amd64.zip
+        sha256: 4cd6accfa9ef3cf27c2d5959ad11596a57472993caca6261133e27c5cf69bdab
+        format: zip
+        executable: paperworks
+      darwin/arm64:
+        url: https://github.com/openvibely/openvibely-paperworks/releases/download/v0.0.1-rc1/paperworks-darwin-arm64.zip
+        sha256: b6ddaa7fac8ac5b577f4a7ab5dc0b07d91d12ae0465ebaeae29e7815aa62b091
+        format: zip
+        executable: paperworks
+      linux/amd64:
+        url: https://github.com/openvibely/openvibely-paperworks/releases/download/v0.0.1-rc1/paperworks-linux-amd64.zip
+        sha256: 76d4081f30dc765a84e10854a09b855928b8cc24986eea30a120fa984aaf4e51
+        format: zip
+        executable: paperworks
+      linux/arm64:
+        url: https://github.com/openvibely/openvibely-paperworks/releases/download/v0.0.1-rc1/paperworks-linux-arm64.zip
+        sha256: fe992a22c5fd3998015743af287f99f7a92997fec205df8c98ae2c84ab39c11e
+        format: zip
+        executable: paperworks
+      windows/amd64:
+        url: https://github.com/openvibely/openvibely-paperworks/releases/download/v0.0.1-rc1/paperworks-windows-amd64.zip
+        sha256: 09b9d0b96e664fd0391773d6a7773cd469a7ac73c370bc58c1d3c4b8f3d9c90f
+        format: zip
+        executable: paperworks.exe
   - name: libreoffice
     version: 26.8.1
     environment_variable: DOCUMENT_SOFFICE
