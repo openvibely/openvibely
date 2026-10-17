@@ -4,6 +4,7 @@ import (
 	"context"
 	"github.com/openvibely/openvibely/pkg/attachmentcontext"
 	"github.com/openvibely/openvibely/pkg/executionenv"
+	"github.com/openvibely/openvibely/pkg/managedcontext"
 )
 
 func ensureExecutionEnvironment(items []any, dir string) []any {
@@ -79,7 +80,16 @@ func ensureAttachmentContext(ctx context.Context, items []any) []any {
 			break
 		}
 	}
-	restored := attachmentcontext.Ensure(ctx, items[start:end], func(item any) (string, string) {
+	restored := managedcontext.Ensure(ctx, items[start:end], func(item any) (string, string) {
+		m, ok := item.(map[string]any)
+		if !ok {
+			return "", ""
+		}
+		role, _ := m["role"].(string)
+		text, _ := m["content"].(string)
+		return role, text
+	}, func(text string) any { return map[string]any{"type": "message", "role": "user", "content": text} })
+	restored = attachmentcontext.Ensure(ctx, restored, func(item any) (string, string) {
 		m, ok := item.(map[string]any)
 		if !ok {
 			return "", ""
@@ -93,5 +103,6 @@ func ensureAttachmentContext(ctx context.Context, items []any) []any {
 	return append(out, items[end:]...)
 }
 func ensureCompletionsAttachments(ctx context.Context, items []completionsMessage) []completionsMessage {
+	items = managedcontext.Ensure(ctx, items, func(m completionsMessage) (string, string) { s, _ := m.Content.(string); return m.Role, s }, func(s string) completionsMessage { return completionsMessage{Role: "user", Content: s} })
 	return attachmentcontext.Ensure(ctx, items, func(m completionsMessage) (string, string) { s, _ := m.Content.(string); return m.Role, s }, func(s string) completionsMessage { return completionsMessage{Role: "user", Content: s} })
 }

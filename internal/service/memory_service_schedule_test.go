@@ -204,7 +204,7 @@ func TestMemoryServiceEnsureProjectCreatesMemoryCuratorAgentAndSchedule(t *testi
 	if agent.SystemPrompt == "" || agent.Name != memoryAgentName {
 		t.Fatalf("unexpected built-in agent: %#v", agent)
 	}
-	wantSkills := map[string]bool{"recall_memory": false, "update_memory": false, "consolidate_memory": false}
+	wantSkills := map[string]bool{"consolidate_memory": false}
 	for _, skill := range agent.Skills {
 		if _, ok := wantSkills[skill.Name]; ok {
 			wantSkills[skill.Name] = true
@@ -240,28 +240,8 @@ func TestMemoryServiceEnsureProjectCreatesMemoryCuratorAgentAndSchedule(t *testi
 	if err != nil {
 		t.Fatalf("list memory hooks: %v", err)
 	}
-	wantHooks := map[models.LifecycleWhen]string{
-		models.LifecycleRouteTask:     "recall_memory",
-		models.LifecycleAfterComplete: "update_memory",
-	}
-	for _, hook := range hooks {
-		if want, ok := wantHooks[hook.When]; ok && hook.SkillKey == want && hook.Enabled {
-			delete(wantHooks, hook.When)
-		}
-	}
-	if len(wantHooks) > 0 {
-		t.Fatalf("missing Memory Curator lifecycle hooks: %#v from %#v", wantHooks, hooks)
-	}
-	for _, hook := range hooks {
-		if hook.When == models.LifecycleScheduled {
-			t.Fatalf("Memory Curator should not declare a scheduled lifecycle hook; scheduled consolidation uses a normal scheduled task: %#v", hook)
-		}
-		if hook.When == models.LifecycleBeforeRun && hook.SkillKey == "recall_memory" {
-			t.Fatalf("Memory Curator recall should be route_task selected_memories, not stale before_run context_block: %#v", hook)
-		}
-		if hook.When == models.LifecycleRouteTask && hook.SkillKey == "recall_memory" && hook.Blocking {
-			t.Fatalf("Memory Curator recall route hook should be non-blocking for parallel routing: %#v", hook)
-		}
+	if len(hooks) != 0 {
+		t.Fatalf("obsolete hooks remain: %#v", hooks)
 	}
 
 	tasks, err := repos.tasks.ListByProject(ctx, repos.projectID, string(models.CategoryScheduled))

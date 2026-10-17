@@ -75,9 +75,9 @@ func SkillRuntimeTools(catalog *Catalog, globalRoot, projectRoot string, inspect
 	return skillRuntimeTools(catalog, globalRoot, projectRoot, inspector, true, false)
 }
 
-// SelectedSkillRuntimeTools returns only skill_view scoped to the already
-// selected task skill catalog. It intentionally omits skills_list so normal task
-// turns cannot discover or load skills the lifecycle router did not select.
+// SelectedSkillRuntimeTools returns skill_view scoped to the permitted turn catalog.
+// The main model receives that catalog as an index; broader library discovery
+// tools are reserved for maintenance.
 func SelectedSkillRuntimeTools(catalog *Catalog) *llmcontracts.RuntimeTools {
 	return skillRuntimeTools(catalog, "", "", nil, false, true)
 }
@@ -288,6 +288,9 @@ func resolveSkillView(catalog *Catalog, input json.RawMessage) (string, error) {
 	if !ok {
 		return "", fmt.Errorf("skill_view: handle %q is not in this turn's authorized index", handle)
 	}
+	if skillDisabledOnDisk(entry.AbsolutePath) {
+		return "", fmt.Errorf("skill_view: skill is disabled")
+	}
 	if strings.TrimSpace(params.FilePath) != "" {
 		return resolveSkillSupportFile(entry, params.FilePath)
 	}
@@ -488,7 +491,8 @@ func resolveAgentView(ctx context.Context, inspector AgentInspector, input json.
 
 var skillView = llmcontracts.RuntimeToolDefinition{
 	Name:        "skill_view",
-	Description: "Load an authorized skill for this turn. Use a selected bare handle when only selected skills are available, or a qualified view handle such as standalone:<skill> or agent:<agent>/<skill> when library tools return one. With file_path, loads one support file under references/, templates/, scripts/, or assets/.",
+	Access:      llmcontracts.RuntimeToolAccessRead,
+	Description: "Load an authorized skill for this turn. Use an available bare handle from the permitted skill index, or a qualified view handle such as standalone:<skill> or agent:<agent>/<skill> when library tools return one. With file_path, loads one support file under references/, templates/, scripts/, or assets/.",
 	Schema: &toolschema.Schema{
 		Type: "object",
 		Properties: map[string]*toolschema.Schema{

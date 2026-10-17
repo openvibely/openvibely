@@ -139,6 +139,7 @@ type AgenticOptions struct {
 	OnToolBoundarySteering func(ctx context.Context) (string, error)
 	// RecoveryMessages replaces history and prompt after service-side compaction.
 	RecoveryMessages     []Message
+	OnReplay             func([]Message)
 	OnCompactionProgress func(llmcontracts.CompactionProgress)
 	OnCompaction         func(summary string) // called when context is compacted
 }
@@ -464,6 +465,12 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 		messages = append(messages, agenticMessage{Role: "user", Content: prompt})
 	}
 
+	replay := []Message{{Role: "user", Content: prompt}}
+	defer func() {
+		if opts.OnReplay != nil {
+			opts.OnReplay(replay)
+		}
+	}()
 	result := &AgenticResponse{Model: opts.Model}
 	if opts.RecoveryMessages != nil {
 		messages = nil
@@ -548,6 +555,8 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 			})
 		}
 
+		replayBlocks, _ := json.Marshal(resp.contentBlocks)
+		replay = append(replay, Message{Role: "assistant", ContentBlocks: replayBlocks})
 		// Collect text blocks for this turn.
 		turnText := ""
 		for _, block := range resp.contentBlocks {
@@ -644,6 +653,12 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 			continue
 		}
 
+		replayResults := make([]agenticBlock, 0, len(executed))
+		for _, exec := range executed {
+			replayResults = append(replayResults, agenticBlock{Type: "tool_result", ToolUseID: exec.block.ID, Content: anthropicStringContentRaw(truncateAnthropicToolOutputForModelInput(exec.output, opts.ToolOutputTokenLimit)), IsError: exec.isError})
+		}
+		replayJSON, _ := json.Marshal(replayResults)
+		replay = append(replay, Message{Role: "user", ContentBlocks: replayJSON})
 		// Add tool results as user message.
 		userBlocks := append([]agenticBlock(nil), toolResults...)
 		if opts.OnToolBoundarySteering != nil {
@@ -653,6 +668,9 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 			}
 			if steering = strings.TrimSpace(steering); steering != "" {
 				userBlocks = append(userBlocks, agenticBlock{Type: "text", Text: steering})
+				replayResults = append(replayResults, agenticBlock{Type: "text", Text: steering})
+				replayJSON, _ = json.Marshal(replayResults)
+				replay[len(replay)-1].ContentBlocks = replayJSON
 			}
 		}
 		messages = append(messages, agenticMessage{
@@ -675,8 +693,7 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 	if !opts.OmitExecutionEnvironment {
 		c.History = ensureHistoryEnvironment(c.History, opts.WorkDir)
 	}
-	c.History = append(c.History, Message{Role: "user", Content: prompt})
-	c.History = append(c.History, Message{Role: "assistant", Content: result.Text})
+	c.History = append(c.History, replay...)
 
 	return result, nil
 }

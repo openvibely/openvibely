@@ -11,11 +11,13 @@ import (
 
 	llmanthropic "github.com/openvibely/openvibely/internal/llm/anthropic"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
+	llmollama "github.com/openvibely/openvibely/internal/llm/ollama"
 	llmopenai "github.com/openvibely/openvibely/internal/llm/openai"
 	llmcompatible "github.com/openvibely/openvibely/internal/llm/openai_compatible"
 	"github.com/openvibely/openvibely/internal/models"
 	anthropicclient "github.com/openvibely/openvibely/pkg/anthropic_client"
 	"github.com/openvibely/openvibely/pkg/attachmentcontext"
+	"github.com/openvibely/openvibely/pkg/managedcontext"
 	openaiclient "github.com/openvibely/openvibely/pkg/openai_client"
 	"github.com/stretchr/testify/require"
 )
@@ -82,7 +84,7 @@ func TestCurrentAttachmentContextDoesNotDuplicateReferences(t *testing.T) {
 // reconstructed from persisted attachment metadata. No files or live APIs needed.
 func TestAttachmentReferencesInUserMessagesAcrossProviders(t *testing.T) {
 	for _, state := range []string{"completed", "cancelled", "compacted"} {
-		for _, provider := range []models.LLMProvider{models.ProviderOpenAI, models.ProviderOpenAICompatible, models.ProviderAnthropic} {
+		for _, provider := range []models.LLMProvider{models.ProviderOpenAI, models.ProviderOpenAICompatible, models.ProviderAnthropic, models.ProviderOllama} {
 			t.Run(string(provider)+"/"+state, func(t *testing.T) {
 				h, _, configs, stores := setupTestHandlerWithStores(t)
 				h.chatAttachmentRepo = stores.ChatAttachments
@@ -104,6 +106,7 @@ func TestAttachmentReferencesInUserMessagesAcrossProviders(t *testing.T) {
 				_, err := h.prepareChatAttachmentContext(ctx, &p)
 				require.NoError(t, err)
 				ctx = attachmentcontext.With(ctx, p.historicalAttachmentContext)
+				ctx = managedcontext.With(ctx, "documents: edit docx files; preferences.md: durable preferences")
 				if state == "compacted" {
 					p.ChatHistory = []models.Execution{{PromptSent: "Earlier conversation summary", Output: "Document summarized", Status: models.ExecCompleted}}
 				}
@@ -120,6 +123,8 @@ func TestAttachmentReferencesInUserMessagesAcrossProviders(t *testing.T) {
 					}
 					w.Header().Set("Content-Type", "text/event-stream")
 					switch provider {
+					case models.ProviderOllama:
+						fmt.Fprintln(w, `{"message":{"role":"assistant","content":"Done"},"done":true}`)
 					case models.ProviderOpenAI:
 						fmt.Fprint(w, "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"done\",\"status\":\"completed\",\"output\":[]}}\n\n")
 					case models.ProviderOpenAICompatible:
@@ -144,6 +149,11 @@ func TestAttachmentReferencesInUserMessagesAcrossProviders(t *testing.T) {
 				agent.BaseURL = server.URL + "/v1/"
 				workDir := t.TempDir()
 				switch provider {
+				case models.ProviderOllama:
+					agent.Model = "local-test"
+					agent.OllamaBaseURL = server.URL
+					agent.ContextWindow = 32768
+					_, err = llmollama.New(nil, nil).Call(ctx, llmcontracts.AgentRequest{Operation: llmcontracts.OperationStreaming, Message: p.Message, ChatHistory: p.ChatHistory, ChatSystemContext: p.SystemContext, Followup: true, Agent: *agent, DisableTools: true}, workDir, nil)
 				case models.ProviderOpenAI:
 					original := openaiclient.OpenAIAPIBaseURL
 					openaiclient.OpenAIAPIBaseURL = server.URL + "/v1/"
@@ -168,6 +178,7 @@ func TestAttachmentReferencesInUserMessagesAcrossProviders(t *testing.T) {
 				for _, key := range []string{"system", "instructions"} {
 					encoded, _ := json.Marshal(wire[key])
 					require.NotContains(t, string(encoded), "/missing/reference.docx")
+					require.NotContains(t, string(encoded), "preferences.md")
 				}
 				messages, ok := wire["messages"].([]any)
 				if provider == models.ProviderOpenAI {
@@ -175,9 +186,14 @@ func TestAttachmentReferencesInUserMessagesAcrossProviders(t *testing.T) {
 				}
 				require.True(t, ok, "missing wire messages: %#v", wire)
 				references := 0
+				indexes := 0
 				for _, raw := range messages {
 					msg := raw.(map[string]any)
 					content, _ := json.Marshal(msg["content"])
+					if strings.Contains(string(content), "preferences.md") {
+						indexes++
+						require.Equal(t, "user", msg["role"])
+					}
 					if strings.Contains(string(content), "/missing/reference.docx") {
 						references++
 						require.Equal(t, "user", msg["role"])
@@ -188,6 +204,7 @@ func TestAttachmentReferencesInUserMessagesAcrossProviders(t *testing.T) {
 					require.NotContains(t, string(content), "base64")
 				}
 				require.Equal(t, 1, references)
+				require.Equal(t, 1, indexes)
 			})
 		}
 	}

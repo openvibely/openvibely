@@ -91,8 +91,9 @@ type OAuthUnauthorizedHandler func(ctx context.Context, tokenUsed string) (OAuth
 
 // Message is a single message in a conversation.
 type Message struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role          string          `json:"role"`
+	Content       string          `json:"content"`
+	ContentBlocks json.RawMessage `json:"content_blocks,omitempty"`
 }
 
 // MessagesRequest is sent to the Anthropic Messages API.

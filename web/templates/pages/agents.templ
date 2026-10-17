@@ -372,7 +372,7 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 									<p id="lifecycle_hooks_status" class="hidden text-xs mt-2"></p>
 									<div class="divider text-sm opacity-50">Lifecycle Policy Defaults</div>
 									<p class="text-sm opacity-70">Defaults applied to this agent's lifecycle hooks unless an individual hook overrides them. These do not grant callable tools; use Allowed Tools on Agent Details for concrete tool access.</p>
-									<div class="alert alert-info text-sm">Tool scope: skill_view reads selected skills for the current task scope; skills_list lists standalone skills; skill_manage writes standalone skills; agent_skill_manage is an after-complete learning tool scoped to the task's assigned agent.</div>
+									<div class="alert alert-info text-sm">Tool scope: skill_view reads permitted skills for the assigned agent. Task memory_view, memory_save, and memory_delete grants also require the project’s Skills &amp; Memory permissions. Skill writing is reserved for authorized background maintenance.</div>
 									<div class="grid grid-cols-1 md:grid-cols-2 gap-2">
 									<label class="label cursor-pointer gap-2 justify-start border border-base-300 rounded-lg px-3 py-2">
 										<input type="checkbox" id="perm_read_task_prompt" class="checkbox checkbox-sm"/>
@@ -1602,7 +1602,7 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 
 			function resetLifecycleFormFields() {
 				['perm_read_task_prompt','perm_read_task_execution','perm_read_project_memory','perm_write_project_memory','perm_read_agents','perm_write_agents','perm_read_skills','perm_write_skills','perm_read_repository_files','perm_write_repository_files','perm_use_shell_or_tools'].forEach(id => {
-					const el = document.getElementById(id); if (el) el.checked = false;
+					const el = document.getElementById(id); if (el) { el.checked = false; el.closest('label')?.classList.remove('hidden'); }
 				});
 						['advanced_key','advanced_source_refs'].forEach(id => {					const el = document.getElementById(id); if (el) el.value = '';
 					});
@@ -1699,6 +1699,11 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 					if (banner) banner.classList.toggle('hidden', !isProtected);
 					setProtectedAgentControlState(!!isProtected, !!requiredSystemAgent);
 					lifecycleProtectedAgent = !!isProtected;
+                    ['perm_read_skills','perm_write_skills','perm_read_project_memory','perm_write_project_memory'].forEach(id => {
+                        const input = document.getElementById(id);
+                        if (input) input.closest('label').classList.toggle('hidden', !!isProtected && (data.system_kind === 'skill_curator' || data.system_kind === 'memory_curator'));
+                    });
+
 			}
 
 			let lifecycleHooksState = [];
@@ -1819,7 +1824,7 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 							if (notice) notice.classList.toggle('hidden', !state.protected);
 						if (summary) {
 							summary.textContent = activeAgentID
-								? `When assigned to a task, route_task selects from ${routed.length} indexed skill(s) owned by agent ${state.agent_key || '(unknown)'}. Project skills override global skills.`
+								? `When assigned to a task, the model selects from ${routed.length} indexed skill(s) owned by agent ${state.agent_key || '(unknown)'}. Project skills override global skills.`
 								: 'Save this agent to preview routed skills.';
 						}
 						if (index) {

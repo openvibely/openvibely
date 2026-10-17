@@ -304,7 +304,7 @@ func TestMemoryService_EnsureGlobalAgentsCreatesAndRepairsMemoryCuratorAndHooks(
 	if len(agent.SourceRefs) != 1 || agent.SourceRefs[0] != bundledMemoryDeclarationPath {
 		t.Fatalf("unexpected Memory Curator source refs: %#v", agent.SourceRefs)
 	}
-	for _, want := range []string{"recall_memory", "update_memory", "consolidate_memory"} {
+	for _, want := range []string{"consolidate_memory"} {
 		found := false
 		for _, skill := range agent.Skills {
 			if skill.Name == want {
@@ -320,7 +320,7 @@ func TestMemoryService_EnsureGlobalAgentsCreatesAndRepairsMemoryCuratorAndHooks(
 	if err != nil {
 		t.Fatalf("HooksByAgent fresh: %v", err)
 	}
-	if len(hooks) != 2 {
+	if len(hooks) != 0 {
 		t.Fatalf("expected two fresh Memory Curator hooks, got %d: %#v", len(hooks), hooks)
 	}
 
@@ -396,19 +396,10 @@ func TestMemoryService_EnsureGlobalAgentsCreatesAndRepairsMemoryCuratorAndHooks(
 	if err != nil {
 		t.Fatalf("HooksByAgent repaired: %v", err)
 	}
-	if len(repairedHooks) != 2 {
+	if len(repairedHooks) != 0 {
 		t.Fatalf("expected stale legacy Memory hooks deleted, got %d: %#v", len(repairedHooks), repairedHooks)
 	}
-	have := map[string]models.AgentLifecycleHook{}
-	for _, hook := range repairedHooks {
-		have[string(hook.When)+"/"+hook.SkillKey] = hook
-	}
-	if hook, ok := have["route_task/recall_memory"]; !ok || hook.Blocking || hook.OutputContract != models.OutputContractSelectedMemories || !hook.Enabled {
-		t.Fatalf("Memory route hook was not repaired: %#v", hook)
-	}
-	if hook, ok := have["after_complete/update_memory"]; !ok || hook.OutputContract != models.OutputContractActivitySummary || hook.PayloadJSON != `{"blocks":["conversation_transcript","assigned_agent"]}` || !hook.Enabled {
-		t.Fatalf("Memory after-complete hook was not repaired: %#v", hook)
-	}
+
 }
 
 func TestMemoryService_EnsureGlobalAgentsRepairsLegacyMemoryAliasInPlace(t *testing.T) {
@@ -475,7 +466,7 @@ func TestMemoryService_EnsureGlobalAgentsRepairsLegacyMemoryAliasInPlace(t *test
 	if err != nil {
 		t.Fatalf("HooksByAgent: %v", err)
 	}
-	if len(hooks) != 2 {
+	if len(hooks) != 0 {
 		t.Fatalf("expected only declared Memory hooks after legacy cleanup, got %#v", hooks)
 	}
 	for _, hook := range hooks {

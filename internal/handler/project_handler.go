@@ -448,6 +448,13 @@ func (h *Handler) UpdateProject(c echo.Context) error {
 	p.Description = settings.Description
 	p.DefaultAgentConfigID = settings.DefaultAgentConfigID
 	p.MaxWorkers = settings.MaxWorkers
+	if c.FormValue("skill_memory_settings_present") == "true" {
+		p.SkillMemoryPermissions = &models.SkillMemoryPermissions{
+			ReadSkills: c.FormValue("read_skills") == "on", WriteSkills: c.FormValue("write_skills") == "on",
+			ReadMemories: c.FormValue("read_memories") == "on", WriteMemories: c.FormValue("write_memories") == "on",
+		}
+	}
+
 	if recloneGitHubRepo {
 		reclonedPath, normalizedURL, err := h.githubSvc.RecloneProjectRepo(c.Request().Context(), p.ID, currentRepoPath, settings.RepoURL)
 		if err != nil {

@@ -10,7 +10,7 @@ import (
 	"testing"
 )
 
-func TestFileReferencesReachExistingSkillCurator(t *testing.T) {
+func TestFilesExposeSkillsWithoutChatCurator(t *testing.T) {
 	for _, format := range []string{"pdf", "docx", "xlsx", "pptx"} {
 		for _, chat := range []bool{false, true} {
 			name := "report." + format
@@ -46,8 +46,8 @@ func TestFileReferencesReachExistingSkillCurator(t *testing.T) {
 				t.Fatalf("skill unavailable: %s, %v", body, err)
 			}
 
-			if !called {
-				t.Fatalf("%s chat=%v: skill curator was skipped", format, chat)
+			if chat && called {
+				t.Fatal("ordinary chat called a selector")
 			}
 		}
 	}

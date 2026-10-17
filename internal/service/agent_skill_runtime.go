@@ -14,6 +14,9 @@ func (s *LLMService) agentDeclaredSkillRuntimeTools(ctx context.Context, task mo
 	if s == nil || agent == nil || !agentExplicitlyAllowsAnyTool(agent, "skill_view", "skills_list", "agent_list", "agent_view", "skill_manage", "skill_import", "agent_skill_manage") {
 		return nil
 	}
+	if agent.SystemKind != models.AgentSystemKindSkillCurator || task.Category != models.CategoryScheduled || lifecycleTurnFromContext(ctx).TaskThreadTurn {
+		return agentskills.SelectedSkillRuntimeTools(lifecycleTurnFromContext(ctx).Catalog)
+	}
 	selectedCatalog := lifecycleTurnFromContext(ctx).Catalog
 	projectRoot := ""
 	if s.projectRepo != nil {

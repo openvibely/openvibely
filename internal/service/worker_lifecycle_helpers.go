@@ -14,6 +14,9 @@ import (
 func (w *WorkerService) buildSkillCatalog(ctx context.Context, task models.Task) *agentskills.Catalog {
 	projectRoot := projectSkillRoot(ctx, w.projectRepo, task.ProjectID)
 	if agent := w.taskAgentDefinition(ctx, task); agent != nil && agent.Key != "" {
+		if !agent.Enabled || agent.ArchivedAt != nil || agent.ProjectID != "" && agent.ProjectID != task.ProjectID {
+			return agentskills.NewCatalog(task.ID, nil)
+		}
 		catalog, err := agentskills.BuildAgentCatalog(task.ID, w.globalSkillRoot, projectRoot, agent.Key)
 		if err != nil {
 			return agentskills.NewCatalog(task.ID, nil)
@@ -31,6 +34,9 @@ func (w *WorkerService) buildSkillCatalog(ctx context.Context, task models.Task)
 
 func (w *WorkerService) renderAvailableSkillsForTask(ctx context.Context, task models.Task, projectRoot string) string {
 	if agent := w.taskAgentDefinition(ctx, task); agent != nil && agent.Key != "" {
+		if !agent.Enabled || agent.ArchivedAt != nil || agent.ProjectID != "" && agent.ProjectID != task.ProjectID {
+			return ""
+		}
 		return agentskills.RenderAvailableAgentSkillsMarkdown(w.globalSkillRoot, projectRoot, agent.Key)
 	}
 	return agentskills.RenderAvailableSkillsMarkdown(w.globalSkillRoot, projectRoot)

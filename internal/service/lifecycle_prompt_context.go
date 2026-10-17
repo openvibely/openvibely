@@ -34,20 +34,17 @@ func combineAdditionalProjectInstructions(ctx context.Context, base string) stri
 	return extra + "\n\n" + base
 }
 
-// WithSelectedMemoryHandles annotates ctx with the managed memory handles selected
+// WithSelectedMemoryHandles annotates ctx with the permitted managed memory handles
 // for the current model turn.
 func WithSelectedMemoryHandles(ctx context.Context, handles []string) context.Context {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if len(handles) == 0 {
-		return ctx
-	}
 	return context.WithValue(ctx, selectedMemoryHandlesKey{}, append([]string(nil), handles...))
 }
 
-// SelectedMemoryHandlesFromContext returns the managed memory handles selected
-// for the current model turn, if lifecycle memory recall selected any.
+// SelectedMemoryHandlesFromContext returns the permitted managed memory handles
+// for the current model turn. The historical name remains for custom integrations.
 func SelectedMemoryHandlesFromContext(ctx context.Context) []string {
 	if ctx == nil {
 		return nil

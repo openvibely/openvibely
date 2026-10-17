@@ -53,8 +53,6 @@ func TestSyncTo_SeedsDefaultIndexesAndSkillBodies(t *testing.T) {
 	}
 	for _, want := range []string{
 		"blocking: false",
-		"## skill_curator/route_task",
-		"skills/route_task/SKILL.md",
 		"## skill_curator/observe_task_for_learning",
 		"skills/observe_task_for_learning/SKILL.md",
 		"## skill_curator/maintain_skill_library",
@@ -286,7 +284,7 @@ func TestSyncTo_MemoryRecallSkillUsesIndexSelectionContract(t *testing.T) {
 		t.Fatalf("read memory_curator SKILLS.md: %v", err)
 	}
 	declBody := string(decl)
-	for _, want := range []string{"route_task:", "skill: recall_memory", "blocking: false", "output_contract: selected_memories", "- ScopedFiles", "- memory_view"} {
+	for _, want := range []string{"- ScopedFiles", "- memory_view", "consolidate_memory"} {
 		if !strings.Contains(declBody, want) {
 			t.Fatalf("memory_curator declaration missing route selected-memory hook %q:\n%s", want, declBody)
 		}
@@ -505,7 +503,7 @@ func TestSkillCuratorLearningDisabledByDefault(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for slot, want := range map[string]bool{"route_task": true, "after_complete": false} {
+	for slot, want := range map[string]bool{"after_complete": false} {
 		hook, ok := decl.LifecycleHooks[slot]
 		if !ok || hook.Enabled == nil || *hook.Enabled != want {
 			t.Fatalf("%s default enabled should be %v: %+v", slot, want, hook)

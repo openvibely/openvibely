@@ -44,61 +44,15 @@ type LifecycleTurn struct {
 	AfterComplete func(err error, chatContext llmcontracts.ChatContext)
 }
 
-// PrepareRecallOnlyLifecycleTurn runs only Memory Curator recall hooks for an
-// interactive chat turn, plus existing skill selection when files are attached.
-// It skips task mutation tools and after_complete so Chat prompts and mode-control
-// text cannot update memory.
+// PrepareRecallOnlyLifecycleTurn exposes permitted indexes and readers to the
+// main chat model. Ordinary chat never runs curator selection or memory updates.
 func (w *WorkerService) PrepareRecallOnlyLifecycleTurn(ctx context.Context, task models.Task) LifecycleTurn {
 	ctx = agenttools.WithProcessLifetime(ctx)
 	if w == nil {
 		return LifecycleTurn{Ctx: ctx, Task: task, AfterComplete: func(error, llmcontracts.ChatContext) {}}
 	}
 
-	incomingTurn := lifecycleTurnFromContext(ctx)
-	effectiveTask := task
-	if incomingTurn.TurnPrompt != "" {
-		effectiveTask.Prompt = incomingTurn.TurnPrompt
-	}
-	explicitMemoryEntries := w.explicitIndexedMemoryEntries(ctx, effectiveTask)
-	runID := newLifecycleTaskRunID(task.ID)
-	if projectRoot := projectSkillRoot(ctx, w.projectRepo, task.ProjectID); projectRoot != "" && w.agentRootSyncService != nil {
-		if err := w.agentRootSyncService.SyncRootDeclarationsForProject(ctx, projectRoot, task.ProjectID); err != nil {
-			applog.Infof("[lifecycle-turn] sync agent root declarations failed task=%s: %v", task.ID, err)
-		}
-	}
-	catalog := w.buildSkillCatalog(ctx, task)
-	w.currentCatalog.Store(catalog)
-	hookCtx := ctx
-	if hookReadTools := w.buildLifecycleReadRuntimeTools(task, catalog); hookReadTools != nil {
-		hookCtx = llmcontracts.WithRuntimeTools(hookCtx, hookReadTools)
-	}
-	preparedContext := ""
-	selectedMemoryEntries := []memory.SelectedMemory{}
-	if w.lifecycleRunner != nil {
-		if route := w.runLifecycleSlotFiltered(hookCtx, models.LifecycleRouteTask, task, runID, nil, llmcontracts.ChatContext{}, w.isChatMemoryRecallHook(ctx)); len(route.Outputs) > 0 {
-			if selected, ok := bestSelectedMemories(route.Outputs); ok {
-				selectedMemoryEntries = w.mergeSelectedMemoryEntries(explicitMemoryEntries, w.filterSelectedMemoryEntries(ctx, task, memoryEntriesFromLifecycle(selected)))
-			}
-		}
-		preparedContext = memory.RenderSelectedMemoriesMarkdown(selectedMemoryEntries)
-		before := w.runLifecycleSlotFiltered(hookCtx, models.LifecycleBeforeRun, task, runID, nil, llmcontracts.ChatContext{}, w.isChatMemoryRecallHook(ctx))
-		legacyContext := lifecycle.MergeContextBlocks(before.Outputs)
-		preparedContext = joinLifecyclePromptBlocks(preparedContext, legacyContext)
-		if preparedContext != "" {
-			applog.Debugf("[lifecycle-turn] chat memory prepared_context task=%s bytes=%d", task.ID, len(preparedContext))
-		}
-	}
-	promptContext := buildLifecyclePromptContext("", preparedContext)
-	if promptContext != "" {
-		ctx = withAdditionalProjectInstructions(ctx, promptContext)
-	}
-	if len(selectedMemoryEntries) > 0 {
-		ctx = WithSelectedMemoryHandles(ctx, selectedMemoryHandles(selectedMemoryEntries))
-	}
-	if memoryTools := w.buildTaskMemoryRuntimeTools(ctx, task, selectedMemoryEntries); memoryTools != nil {
-		ctx = llmcontracts.WithRuntimeTools(ctx, llmcontracts.CompositeRuntimeTools(memoryTools, llmcontracts.RuntimeToolsFromContext(ctx)))
-	}
-	ctx = w.prepareChatFileSkills(ctx, task)
+	ctx = w.prepareMainModelKnowledge(ctx, task, true)
 	return LifecycleTurn{Ctx: ctx, Task: task, AfterComplete: func(error, llmcontracts.ChatContext) {}}
 }
 
@@ -108,9 +62,8 @@ func (w *WorkerService) PrepareRecallOnlyLifecycleTurn(ctx context.Context, task
 // with the model-facing chat context from that LLM turn once the LLM returns.
 //
 // This method is the single integration point for lifecycle behavior. Both
-// initial task runs and task-thread followups must call it so selected skills,
-// skill runtime tools, and any recall outputs are consistently delivered to the
-// model per runbook §Lifecycle Slots line 296.
+// initial task runs and task-thread followups call it for scoped knowledge tools
+// and user-configured lifecycle hooks. Built-in curator selection is retired.
 func (w *WorkerService) PrepareLifecycleTurn(ctx context.Context, task models.Task) LifecycleTurn {
 	ctx = agenttools.WithProcessLifetime(ctx)
 	if w == nil {
@@ -147,9 +100,8 @@ func (w *WorkerService) PrepareLifecycleTurn(ctx context.Context, task models.Ta
 	}
 	explicitMemoryEntries := w.explicitIndexedMemoryEntries(ctx, effectiveTask)
 
-	// route_task selects relevant skill handles for this turn. It never changes
-	// Task.AgentDefinitionID. No-agent tasks route standalone skills; assigned-agent
-	// tasks route skills owned by the assigned agent.
+	// Preserve custom route hooks and their recorded outputs. They never change
+	// Task.AgentDefinitionID or restrict the main model to a selected subset.
 	selectedSkillHandles := []string{}
 	var selectedMemories lifecycle.SelectedMemories
 	haveSelectedMemories := false
@@ -232,7 +184,7 @@ func (w *WorkerService) PrepareLifecycleTurn(ctx context.Context, task models.Ta
 	}
 
 	w.recordSelectedSkillEvents(ctx, task, catalog, selectedSkillHandles, selectedSkillsProvenance, lifecycleTurnContext{AssignedAgent: assignedAgent, TaskThreadTurn: incomingTurn.TaskThreadTurn, TurnPrompt: incomingTurn.TurnPrompt, TaskRunID: runID})
-	taskCatalog := catalog.Filter(runID+":selected", selectedSkillHandles)
+	taskCatalog := catalog
 	ctx = withLifecycleTurnContext(ctx, lifecycleTurnContext{Catalog: catalog, SelectedSkillHandles: selectedSkillHandles, SelectedSkillsProvenance: selectedSkillsProvenance, AssignedAgent: assignedAgent, AfterCompleteRuntimeTools: afterCompleteRuntimeTools, TaskThreadTurn: incomingTurn.TaskThreadTurn, TurnPrompt: incomingTurn.TurnPrompt, TaskRunID: runID})
 
 	// before_run: produce context_blocks the model should see. The runbook
@@ -247,7 +199,7 @@ func (w *WorkerService) PrepareLifecycleTurn(ctx context.Context, task models.Ta
 		}
 	}
 
-	skillIndex := agentskills.RenderSelectedSkillsMarkdown(taskCatalog, selectedSkillHandles)
+	skillIndex := ""
 	taskRuntimeTools := llmcontracts.CompositeRuntimeTools(taskTurnRuntimeTools, w.buildTaskSkillRuntimeTools(ctx, task, taskCatalog))
 	if taskRuntimeTools != nil {
 		ctx = llmcontracts.WithRuntimeTools(ctx, taskRuntimeTools)
@@ -267,7 +219,7 @@ func (w *WorkerService) PrepareLifecycleTurn(ctx context.Context, task models.Ta
 	if haveSelectedMemories {
 		selectedMemoryEntries = w.mergeSelectedMemoryEntries(selectedMemoryEntries, w.filterSelectedMemoryEntries(ctx, task, memoryEntriesFromLifecycle(selectedMemories)))
 	}
-	memoryIndex := memory.RenderSelectedMemoriesMarkdown(selectedMemoryEntries)
+	memoryIndex := ""
 	if len(selectedMemoryEntries) > 0 {
 		ctx = WithSelectedMemoryHandles(ctx, selectedMemoryHandles(selectedMemoryEntries))
 	}
@@ -311,6 +263,7 @@ func (w *WorkerService) PrepareLifecycleTurn(ctx context.Context, task models.Ta
 			w.publishGoalEvaluationAfterComplete(bgCtx, t, result)
 		}(task, runID, err, chatContext, llmcontracts.CompositeRuntimeTools(hookMutationTools, afterCompleteRuntimeTools), lifecycleTurnContext{Catalog: taskCatalog, SelectedSkillHandles: selectedSkillHandles, SelectedSkillsProvenance: selectedSkillsProvenance, AssignedAgent: assignedAgent, AfterCompleteRuntimeTools: afterCompleteRuntimeTools, TaskThreadTurn: incomingTurn.TaskThreadTurn, TurnPrompt: incomingTurn.TurnPrompt, TaskRunID: runID})
 	}
+	ctx = w.prepareMainModelKnowledge(ctx, task, false)
 	return LifecycleTurn{Ctx: ctx, Task: task, AfterComplete: after}
 }
 

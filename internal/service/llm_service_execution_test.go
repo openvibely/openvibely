@@ -2495,29 +2495,18 @@ func TestLLMService_ExecuteTaskWithAgent_CustomAgentSkillLibraryToolsUseRoutedSe
 		t.Fatal("expected execution")
 	}
 	rt := llmcontracts.RuntimeToolsFromContext(capture.lastReq.Ctx)
-	if rt == nil || !rt.HasDefinition("skill_manage") || !rt.HasDefinition("skills_list") || !rt.HasDefinition("agent_list") || !rt.HasDefinition("agent_view") || rt.HasDefinition("agent_manage") {
-		t.Fatalf("custom agent should get explicitly declared scoped skill tools, got %#v", rt)
+	if rt == nil || !rt.HasDefinition("skill_view") || rt.HasDefinition("skill_manage") {
+		t.Fatal("custom task must get scoped reads only")
 	}
-	out, handled, isErr, err := rt.Executor(context.Background(), "skills_list", json.RawMessage(`{}`))
-	if !handled || err != nil || isErr || !strings.Contains(out, "## standalone_skill") || strings.Contains(out, "custom_librarian/curate") {
-		t.Fatalf("skills_list should expose standalone skills only handled=%v isErr=%v err=%v out=%q", handled, isErr, err, out)
+	out, handled, isErr, err := rt.Executor(context.Background(), "skill_view", json.RawMessage(`{"handle":"curate"}`))
+	if !handled || isErr || err != nil || !strings.Contains(out, "custom selected skill body") {
+		t.Fatalf("assigned skill unavailable: %s %v", out, err)
 	}
-	out, handled, isErr, err = rt.Executor(context.Background(), "skill_view", json.RawMessage(`{"handle":"standalone_skill"}`))
-	if !handled || err != nil || isErr || !strings.Contains(out, "standalone body") {
-		t.Fatalf("final runtime should view listed standalone skills handled=%v isErr=%v err=%v out=%q", handled, isErr, err, out)
+	_, handled, isErr, err = rt.Executor(context.Background(), "skill_manage", json.RawMessage(`{}`))
+	if !handled || !isErr || err != nil {
+		t.Fatalf("direct write not rejected: %v %v %v", handled, isErr, err)
 	}
-	out, handled, isErr, err = rt.Executor(context.Background(), "skill_view", json.RawMessage(`{"handle":"curate"}`))
-	if !handled || err != nil || isErr || !strings.Contains(out, "custom selected skill body") {
-		t.Fatalf("final runtime should view router-selected agent-owned skill handled=%v isErr=%v err=%v out=%q", handled, isErr, err, out)
-	}
-	out, handled, isErr, err = rt.Executor(context.Background(), "agent_list", json.RawMessage(`{}`))
-	if !handled || err != nil || isErr || !strings.Contains(out, "custom_librarian") || strings.Contains(out, "skill_curator") || strings.Contains(out, "memory_curator") {
-		t.Fatalf("agent_list should expose user-managed agents only handled=%v isErr=%v err=%v out=%q", handled, isErr, err, out)
-	}
-	out, handled, isErr, err = rt.Executor(context.Background(), "skill_manage", json.RawMessage(`{"action":"write_file","handle":"custom_librarian/curate","scope":"global","support":{"kind":"references","path":"forbidden.md","content":"blocked"}}`))
-	if !handled || err != nil || !isErr || !strings.Contains(out, "invalid standalone skill handle") {
-		t.Fatalf("skill_manage must not mutate agent-owned custom skills handled=%v isErr=%v err=%v out=%q", handled, isErr, err, out)
-	}
+
 }
 
 func TestLLMService_ExecuteTaskWithAgent_AllowsScheduledSkillCuratorTask(t *testing.T) {
