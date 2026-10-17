@@ -363,8 +363,8 @@ func requestLoggerConfig(output io.Writer) middleware.RequestLoggerConfig {
 			if !failed && (values.Latency < time.Second || streaming) {
 				return nil
 			}
-			_, err := fmt.Fprintf(output, "%s method=%s path=%s status=%d latency=%s request_id=%s\n",
-				time.Now().Format(time.RFC3339), values.Method, values.URIPath, values.Status, values.Latency, values.RequestID)
+			_, err := fmt.Fprintf(output, "%s method=%s path=%s status=%d failed=%t latency=%s request_id=%s\n",
+				time.Now().Format(time.RFC3339), values.Method, values.URIPath, values.Status, failed, values.Latency, values.RequestID)
 			return err
 		},
 	}
