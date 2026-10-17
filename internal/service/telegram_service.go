@@ -140,7 +140,7 @@ func NewTelegramService(
 		return nil, fmt.Errorf("telegram bot token is empty")
 	}
 
-	bot, err := tgbotapi.NewBotAPI(token)
+	bot, err := newSafeTelegramBot(token)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create telegram bot: %w", err)
 	}
@@ -161,7 +161,7 @@ func NewTelegramService(
 		chatAttachmentRepo:  chatAttachmentRepo,
 		llmSvc:              llmSvc,
 		workerSvc:           workerSvc,
-		newBotAPI:           tgbotapi.NewBotAPI,
+		newBotAPI:           newSafeTelegramBot,
 		userProjects:        make(map[int64]string),
 		userProjectVersions: make(map[int64]uint64),
 		ctx:                 ctx,
@@ -339,7 +339,7 @@ func (s *TelegramService) UpdateToken(token string) error {
 	}
 	newBotAPI := s.newBotAPI
 	if newBotAPI == nil {
-		newBotAPI = tgbotapi.NewBotAPI
+		newBotAPI = newSafeTelegramBot
 	}
 	bot, err := newBotAPI(token)
 	if err != nil {
@@ -907,7 +907,11 @@ func (s *TelegramService) downloadAndSaveTelegramAttachment(
 
 	// Download file
 	fileURL := tgFile.Link(s.bot.Token)
-	resp, err := http.Get(fileURL)
+	req, err := http.NewRequest(http.MethodGet, fileURL, nil)
+	if err != nil {
+		return "", nil, nil, safeTelegramHTTPError("downloadFile", s.bot.Token, err)
+	}
+	resp, err := (telegramHTTPClient{client: http.DefaultClient, token: s.bot.Token}).Do(req)
 	if err != nil {
 		return "", nil, nil, fmt.Errorf("failed to download file: %w", err)
 	}
