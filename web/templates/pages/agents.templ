@@ -1760,7 +1760,7 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 							'<input type="text" class="input input-bordered input-sm" data-hook-field="skill_key" value="' + escapeHtml(hook.skill_key || '') + '" placeholder="load_project_context" ' + disabled + '/></label>' +
 						'<label class="form-control"><span class="label-text text-xs">Output contract</span>' +
 							'<select class="select select-bordered select-sm" data-hook-field="output_contract" ' + disabled + '>' +
-								['','selected_skills','context_block','activity_summary','learning_summary','library_update_summary'].map(c => '<option value="' + c + '"' + ((hook.output_contract || '') === c ? ' selected' : '') + '>' + (c || '(none)') + '</option>').join('') +
+								['','selected_skills','selected_memories','context_block','activity_summary','learning_summary','library_update_summary'].map(c => '<option value="' + c + '"' + ((hook.output_contract || '') === c ? ' selected' : '') + '>' + (c || '(none)') + '</option>').join('') +
 							'</select></label>' +
 						'<div class="flex items-end gap-3">' +
 							'<label class="label cursor-pointer gap-2 justify-start"><input type="checkbox" class="checkbox checkbox-sm" data-hook-field="blocking"' + (hook.blocking ? ' checked' : '') + ' ' + disabled + '/><span class="label-text text-sm">Blocking</span></label>' +
