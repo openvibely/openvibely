@@ -14,6 +14,7 @@ import (
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/memory"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/pkg/agenttools"
 )
 
 const lifecycleHookExecutionTimeout = 10 * time.Minute
@@ -48,6 +49,7 @@ type LifecycleTurn struct {
 // It skips task mutation tools and after_complete so Chat prompts and mode-control
 // text cannot update memory.
 func (w *WorkerService) PrepareRecallOnlyLifecycleTurn(ctx context.Context, task models.Task) LifecycleTurn {
+	ctx = agenttools.WithProcessLifetime(ctx)
 	if w == nil {
 		return LifecycleTurn{Ctx: ctx, Task: task, AfterComplete: func(error, llmcontracts.ChatContext) {}}
 	}
@@ -110,6 +112,7 @@ func (w *WorkerService) PrepareRecallOnlyLifecycleTurn(ctx context.Context, task
 // skill runtime tools, and any recall outputs are consistently delivered to the
 // model per runbook §Lifecycle Slots line 296.
 func (w *WorkerService) PrepareLifecycleTurn(ctx context.Context, task models.Task) LifecycleTurn {
+	ctx = agenttools.WithProcessLifetime(ctx)
 	if w == nil {
 		return LifecycleTurn{Ctx: ctx, Task: task, AfterComplete: func(error, llmcontracts.ChatContext) {}}
 	}
@@ -295,6 +298,7 @@ func (w *WorkerService) PrepareLifecycleTurn(ctx context.Context, task models.Ta
 			}()
 			bgCtx, cancel := context.WithTimeout(context.Background(), lifecycleHookExecutionTimeout)
 			defer cancel()
+			bgCtx = agenttools.WithProcessLifetime(bgCtx)
 			bgCtx = withLifecycleTurnContext(bgCtx, turn)
 			if rt != nil {
 				bgCtx = llmcontracts.WithRuntimeTools(bgCtx, rt)
