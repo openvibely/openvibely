@@ -152,6 +152,8 @@ func TestPaperworksLocalExecutionIntegration(t *testing.T) {
 		if err != nil || len(entries) == 0 {
 			t.Fatalf("no rendered %s pages: %v", kind.skill, err)
 		}
+		exerciseDocumentEditExample(t, executable, office, work, kind.skill, kind.format, data)
+		exerciseDocumentCreationOptions(t, executable, office, work, kind.skill, data)
 	}
 
 }
