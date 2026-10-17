@@ -124,3 +124,42 @@ func TestDetectOllamaContextCancellation(t *testing.T) {
 		t.Fatalf("got %v", err)
 	}
 }
+
+func TestOllamaModelMetadataSeparatesCapacityFromActiveWindow(t *testing.T) {
+	for _, tc := range []struct {
+		name, ps, show   string
+		active, capacity int
+	}{
+		{"loaded", `{"models":[{"name":"fixture:latest","context_length":8192}]}`, `{"model_info":{"general.architecture":"llama","llama.context_length":131072}}`, 8192, 131072},
+		{"unloaded", `{"models":[]}`, `{"model_info":{"general.architecture":"llama","llama.context_length":131072}}`, 0, 131072},
+		{"ps failure", `invalid`, `{"model_info":{"general.architecture":"llama","llama.context_length":131072}}`, 0, 131072},
+		{"show failure", `{"models":[{"name":"fixture","context_length":8192}]}`, `invalid`, 8192, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			original := OllamaHTTPClient
+			t.Cleanup(func() { OllamaHTTPClient = original })
+			calls := 0
+			OllamaHTTPClient = ollamaListDoerFunc(func(req *http.Request) (*http.Response, error) {
+				calls++
+				body := tc.ps
+				if req.URL.Path == "/api/show" {
+					if req.Method != http.MethodPost {
+						t.Errorf("method %s", req.Method)
+					}
+					payload, _ := io.ReadAll(req.Body)
+					if string(payload) != `{"model":"fixture"}` {
+						t.Errorf("payload %s", payload)
+					}
+					body = tc.show
+				} else if req.URL.Path != "/api/ps" {
+					t.Errorf("path %s", req.URL.Path)
+				}
+				return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body))}, nil
+			})
+			got := DiscoverOllamaModelMetadata(context.Background(), "http://fixture.invalid/v1/", "fixture")
+			if calls != 2 || got.ContextLength != tc.active || got.ModelContextLength != tc.capacity {
+				t.Fatalf("calls=%d metadata=%+v", calls, got)
+			}
+		})
+	}
+}

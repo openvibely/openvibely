@@ -885,7 +885,8 @@ templ modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, 
 						<div class="form-control">
 							@modelSettingLabel("Context window (tokens)", "model_context_window_cap", "model_context_source", "Use the reported limit, or enter the window configured on your server.")
 							<input type="number" min="1" step="1" id="model_context_window_cap" name="context_window" class="input input-bordered model-numeric-input" value="200000" required onchange="updateContextLimitInputs(Number(document.getElementById('model_provider_context_window').value), Number(document.getElementById('model_provider_max_output_tokens').value), true)"/>
-							<p id="model_provider_context_display" class="text-sm opacity-70 mt-2">Reported context limit: Not reported</p>
+							<p id="ollama_model_capacity_display" class="text-sm opacity-70 mt-2 hidden">Model context capacity: Not detected</p>
+                            <p id="model_provider_context_display" class="text-sm opacity-70 mt-2">Reported context limit: Not reported</p>
 						</div>
 						<div id="model_output_limit_field" class="form-control">
 							@modelSettingLabel("Max output (tokens)", "model_default_max_tokens", "model_output_help", "Defaults leave room for input. Below 32,768 context tokens, output is limited to one quarter of the window.")
@@ -1643,11 +1644,13 @@ templ modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, 
             var ollamaContextGeneration = 0;
             var ollamaContextController = null;
             var ollamaDetectedContext = 0;
+            var ollamaModelCapacity = 0;
             function cancelOllamaContextDiscovery() {
                 ollamaContextGeneration++;
                 if (ollamaContextController) ollamaContextController.abort();
                 ollamaContextController = null;
                 ollamaDetectedContext = 0;
+                ollamaModelCapacity = 0;
                 updateProviderContextDisplays();
             }
             function discoverOllamaContext() {
@@ -1670,6 +1673,7 @@ templ modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, 
                     .then(function(data) {
                         if (!current()) return;
                         ollamaDetectedContext = Math.max(0, Number(data.context_length) || 0);
+                        ollamaModelCapacity = Math.max(0, Number(data.model_context_length) || 0);
                         updateProviderContextDisplays();
                     })
                     .catch(function(error) {
@@ -2049,7 +2053,12 @@ templ modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, 
 							var providerCtx = parseInt(document.getElementById('model_provider_context_window').value, 10) || 0;
 							var providerOut = parseInt(document.getElementById('model_provider_max_output_tokens').value, 10) || 0;
 							document.getElementById('model_provider_context_display').textContent = document.getElementById('model_provider').value === 'ollama' ? 'Detected server context window: ' + (ollamaDetectedContext > 0 ? formatContextLimitTokens(ollamaDetectedContext) : 'Not detected') : 'Reported context limit: ' + formatContextLimitTokens(providerCtx);
-							document.getElementById('model_provider_max_output_display').textContent = 'Reported output limit: ' + formatContextLimitTokens(providerOut);
+							var capacity = document.getElementById('ollama_model_capacity_display');
+                            if (capacity) {
+                                capacity.classList.toggle('hidden', document.getElementById('model_provider').value !== 'ollama');
+                                capacity.textContent = 'Model context capacity: ' + (ollamaModelCapacity > 0 ? formatContextLimitTokens(ollamaModelCapacity) : 'Not detected');
+                            }
+                            document.getElementById('model_provider_max_output_display').textContent = 'Reported output limit: ' + formatContextLimitTokens(providerOut);
 						}
 
 						function contextLimitDefaults() {

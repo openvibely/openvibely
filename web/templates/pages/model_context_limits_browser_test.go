@@ -137,7 +137,7 @@ func TestBrowserFunctional_OllamaActiveContextDiscovery(t *testing.T) {
  window.htmx={process:function(){},ajax:function(){return Promise.resolve();}};
  var pendingContext=[];
  window.fetch=function(url,opts){
-  if(String(url).indexOf('/models/ollama/context?')===0) return new Promise(function(resolve,reject){pendingContext.push({url:String(url),signal:opts.signal,resolve:function(windowSize){resolve({ok:true,json:function(){return Promise.resolve({context_length:windowSize});}});},reject:reject});});
+  if(String(url).indexOf('/models/ollama/context?')===0) return new Promise(function(resolve,reject){pendingContext.push({url:String(url),signal:opts.signal,resolve:function(windowSize){resolve({ok:true,json:function(){return Promise.resolve({context_length:windowSize,model_context_length:131072});}});},reject:reject});});
   return Promise.resolve({ok:true,json:function(){return Promise.resolve([{name:'loaded:latest'},{name:'unloaded:latest'}]);}});
  };
  </script>` + content.String() + `<script>
@@ -155,9 +155,11 @@ func TestBrowserFunctional_OllamaActiveContextDiscovery(t *testing.T) {
   field('model_context_window_cap').value='65536';field('model_default_max_tokens').value='10000';
   pendingContext.at(-1).resolve(32768);await wait();
   expect(display().includes('32,768'),'loaded window not displayed');
+  expect(field('ollama_model_capacity_display').textContent.includes('131,072'),'model capacity not displayed separately');
   expect(field('model_context_window_cap').value==='65536','detection changed request budget');
   field('model_id').value='unloaded:latest';handleModelChange();
   expect(display().includes('Not detected'),'selection kept old detection');
+  expect(field('ollama_model_capacity_display').textContent.includes('Not detected'),'selection kept old capacity');
   var stale=pendingContext.at(-1);
   field('model_id').value='loaded:latest';handleModelChange();
   expect(stale.signal.aborted,'old request not aborted');
