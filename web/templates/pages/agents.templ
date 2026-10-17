@@ -245,7 +245,11 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 									for _, tool := range models.AllAgentTools {
 										<label class="label cursor-pointer gap-1 px-2 py-1 border border-base-300 rounded-lg">
 											<input type="checkbox" class="checkbox checkbox-sm agent-tool-checkbox" value={ tool } onchange="updateScopedFilesControlsVisibility()"/>
-											<span class="label-text text-sm">{ tool }</span>
+											if tool == "Bash" {
+												<span class="label-text text-sm" title="Run shell commands and use Process to read output, send input, or stop running sessions.">Shell &amp; Process</span>
+											} else {
+												<span class="label-text text-sm">{ tool }</span>
+											}
 										</label>
 									}
 								</div>
@@ -637,9 +641,9 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 		}
 
 			function setAgentTools(tools) {
-				const allowed = Array.isArray(tools) ? tools : [];
+				const allowed = Array.isArray(tools) ? tools.map(tool => String(tool).trim().toLowerCase()) : [];
 				document.querySelectorAll('.agent-tool-checkbox').forEach(cb => {
-					cb.checked = allowed.includes(cb.value);
+					cb.checked = allowed.includes(cb.value.toLowerCase()) || (cb.value === 'Bash' && allowed.includes('shell'));
 				});
 				updateScopedFilesControlsVisibility();
 			}
