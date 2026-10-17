@@ -134,11 +134,22 @@ func TestBrowserFunctional_ImportedThemeStylesTitlebarMenusAndSchedulePickers(t 
 			}
 		}
 		browser.evaluate(`window.openVibelyThemes.apply('vscode-kimbie-dark');'ok'`)
-		for _, id := range []string{"vscode-dark-2026", "vscode-light-2026", "github-light", "catppuccin-mocha"} {
-			browser.evaluate(`window.selectOpenVibelyTheme('` + id + `');'ok'`)
-			browser.waitFor(id+" selected picker border", `window.matches('[data-theme-card][aria-pressed="true"]', 'borderTopColor', 'var(--ov-link)')`, "ok")
+		for _, id := range []string{"openvibely-dark", "openvibely-light", "vscode-dark-2026", "vscode-light-2026", "github-light", "catppuccin-mocha"} {
+			browser.evaluate(`window.selectOpenVibelyTheme('` + id + `');
+                var selected = document.querySelector('[data-theme-card][aria-pressed="true"]');
+                var other = document.querySelector('[data-theme-card][aria-pressed="false"]');
+                selected.style.cssText = 'position:fixed;left:220px;top:150px;width:150px;height:100px;z-index:2147483647';
+                other.style.cssText = 'position:fixed;left:400px;top:150px;width:150px;height:100px;z-index:2147483647';
+                other.id = 'theme-hover-probe'; 'ok'`)
+			browser.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseMoved", "x": 430, "y": 180}, nil)
+			browser.waitFor(id+" unselected card is hovered", `String(document.querySelector('#theme-hover-probe').matches(':hover'))`, "true")
+			browser.waitFor(id+" selected picker border", `window.matches('[data-theme-card][aria-pressed="true"]', 'borderTopColor', 'var(--ov-link, var(--ov-link-color))')`, "ok")
+			browser.waitFor(id+" subdued hover border", `window.matches('#theme-hover-probe', 'borderTopColor', 'oklch(var(--p) / 0.4)')`, "ok")
+			browser.waitFor(id+" selection differs from hover", `String(window.computed('#theme-hover-probe', 'borderTopColor') !== window.computed('[data-theme-card][aria-pressed="true"]', 'borderTopColor'))`, "true")
 			browser.waitFor(id+" exactly one selected card", `String(document.querySelectorAll('[data-theme-card][aria-pressed="true"]').length)`, "1")
-			browser.waitFor(id+" previous card loses selected border", `window.matches('[data-theme-card][data-theme-id="openvibely-dark"]', 'borderTopColor', 'var(--ov-subtle-border)')`, "ok")
+			browser.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseMoved", "x": 250, "y": 180}, nil)
+			browser.waitFor(id+" selected border survives hover", `window.matches('[data-theme-card][aria-pressed="true"]', 'borderTopColor', 'var(--ov-link, var(--ov-link-color))')`, "ok")
+			browser.evaluate(`document.querySelectorAll('[data-theme-card]').forEach(function(card) { card.removeAttribute('style'); card.removeAttribute('id'); }); 'ok'`)
 		}
 		browser.evaluate(`window.openVibelyThemes.apply('vscode-kimbie-dark');'ok'`)
 		checks := []struct{ label, selector, property, value string }{
