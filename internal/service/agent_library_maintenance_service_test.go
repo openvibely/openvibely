@@ -595,7 +595,7 @@ func TestAgentLibraryMaintenanceService_EnsureProjectCreatesVisibleScheduledTask
 	if hook, ok := have["route_task/route_task"]; !ok || hook.OutputContract != models.OutputContractSelectedSkills || hook.Blocking || !hook.Enabled {
 		t.Fatalf("bad route_task hook: %#v", hook)
 	}
-	if hook, ok := have["after_complete/observe_task_for_learning"]; !ok || hook.OutputContract != models.OutputContractLearningSummary || hook.Blocking || !hook.Enabled {
+	if hook, ok := have["after_complete/observe_task_for_learning"]; !ok || hook.OutputContract != models.OutputContractLearningSummary || hook.Blocking || hook.Enabled {
 		t.Fatalf("bad observe hook: %#v", hook)
 	}
 	if hook := have["route_task/route_task"]; hook.PayloadJSON != "{}" {
@@ -742,7 +742,12 @@ func TestAgentLibraryMaintenanceService_EnsureProjectPreservesSystemAgentModelAn
 		t.Fatalf("hooks: %+v %v", hooks, err)
 	}
 	for i := range hooks {
-		hooks[i].Enabled = false
+		wantEnabled := hooks[i].When != models.LifecycleAfterComplete
+		if hooks[i].Enabled != wantEnabled {
+			t.Fatalf("unexpected default enabled state: %+v", hooks[i])
+		}
+		// Opt into learning and opt out of routing; repair must preserve both.
+		hooks[i].Enabled = !wantEnabled
 		if err := lifecycleRepo.UpdateHook(ctx, &hooks[i]); err != nil {
 			t.Fatal(err)
 		}
@@ -760,8 +765,8 @@ func TestAgentLibraryMaintenanceService_EnsureProjectPreservesSystemAgentModelAn
 		t.Fatalf("reconciled hooks: %+v %v", hooks, err)
 	}
 	for _, hook := range hooks {
-		if hook.Enabled {
-			t.Fatalf("repair re-enabled hook: %+v", hook)
+		if hook.Enabled != (hook.When == models.LifecycleAfterComplete) {
+			t.Fatalf("repair changed user hook choice: %+v", hook)
 		}
 	}
 	reconciled, err := agentRepo.GetBySystemKind(ctx, models.AgentSystemKindSkillCurator)

@@ -39,7 +39,7 @@ lifecycle_hooks:
       read_skills: true
       use_shell_or_tools: true
   after_complete:
-    enabled: true
+    enabled: false
     skill: observe_task_for_learning
     blocking: false
     output_contract: learning_summary
