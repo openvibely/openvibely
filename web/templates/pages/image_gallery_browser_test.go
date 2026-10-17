@@ -84,7 +84,7 @@ func TestBrowserFunctional_SharedImageGallery(t *testing.T) {
 			b.click("[data-gallery-close]")
 			b.waitFor("pointer preview leaves no active link", `String(!document.getElementById('image-gallery').open && !document.activeElement.matches('[data-image-gallery-item],[data-file-preview]'))`, "true")
 		}
-		b.evaluate(`const controls=document.createElement('div');controls.id='focus-preview-controls';controls.innerHTML='<button id="focus-files" data-files-panel="/attachments/document/download">Files</button><div class="file-html-canvas"><iframe hidden src="about:blank"></iframe><button id="focus-expand">Expand</button></div>';document.body.prepend(controls);'ready'`)
+		b.evaluate(`const controls=document.createElement('div');controls.id='focus-preview-controls';controls.innerHTML='<button id="focus-files" data-files-panel="/attachments/document/download">Files</button><div class="file-html-canvas"><iframe hidden src="/attachments/document/download"></iframe><button id="focus-expand">Expand</button></div>';document.body.prepend(controls);'ready'`)
 		for _, selector := range []string{"#focus-files", "#focus-expand"} {
 			// Alternate activation modes to catch state inherited from a previous preview.
 			for _, pointer := range []bool{false, true, false} {
@@ -190,10 +190,17 @@ func TestBrowserFunctional_SharedImageGallery(t *testing.T) {
 		json.Unmarshal([]byte(b.evaluate(`JSON.stringify((()=>{const r=document.querySelector('[data-gallery-stage]').getBoundingClientRect();return {x:r.left+2,y:r.top+2};})())`)), &point)
 		b.call("Input.dispatchMouseEvent", map[string]any{"type": "mousePressed", "x": point.X, "y": point.Y, "button": "left", "clickCount": 1}, nil)
 		b.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseReleased", "x": point.X, "y": point.Y, "button": "left", "clickCount": 1}, nil)
-		b.waitFor("empty preview stage dismisses and restores focus", `String(!document.getElementById('image-gallery').open && document.activeElement.hasAttribute('data-image-gallery-item'))`, "true")
+		b.waitFor("empty preview stage dismisses without pointer focus", `String(!document.getElementById('image-gallery').open && !document.querySelector('[data-gallery-download]').hasAttribute('href') && !document.activeElement.hasAttribute('data-image-gallery-item'))`, "true")
 		b.click(`#attachment-list [data-image-gallery-item]`)
 		b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": "Escape"}, nil)
-		b.waitFor("closed and focus restored", `String(!document.getElementById('image-gallery').open && document.activeElement.hasAttribute('data-image-gallery-item'))`, "true")
+		b.waitFor("Escape closes pointer preview without restoring focus", `String(!document.getElementById('image-gallery').open && !document.querySelector('[data-gallery-download]').hasAttribute('href') && !document.activeElement.hasAttribute('data-image-gallery-item'))`, "true")
+		// Keyboard activation must restore the exact opener after close cleanup.
+		b.evaluate(`window.keyboardGalleryOpener=document.querySelector('#attachment-list [data-image-gallery-item]');window.keyboardGalleryOpener.focus();'focused'`)
+		b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": "Enter", "code": "Enter", "windowsVirtualKeyCode": 13}, nil)
+		b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyUp", "key": "Enter", "code": "Enter", "windowsVirtualKeyCode": 13}, nil)
+		b.waitFor("keyboard preview opens", `String(document.getElementById('image-gallery').open)`, "true")
+		b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": "Escape"}, nil)
+		b.waitFor("keyboard close restores opener after cleanup", `String(!document.getElementById('image-gallery').open && !document.querySelector('[data-gallery-download]').hasAttribute('href') && document.activeElement===window.keyboardGalleryOpener)`, "true")
 		if runtime.GOOS == "darwin" || runtime.GOOS == "linux" {
 			b.waitFor("closing restores native controls", `String(window.nativeControlEvents?.['desktop:controls-visibility']?.hidden)`, "false")
 			b.waitFor("restore supersedes hide", `String(window.nativeControlEvents['desktop:controls-visibility'].sequence>window.previewVisibilitySequence)`, "true")
