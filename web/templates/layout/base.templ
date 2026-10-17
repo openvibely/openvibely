@@ -2608,7 +2608,9 @@ html[data-ov-theme-layer="custom"] .diff-file-header[data-stuck="1"]:hover { bac
 [data-ov-theme-layer="custom"] .dropdown-content:not(.ov-menu){background-color:var(--ov-surface)!important;border-color:var(--ov-subtle-border)!important}
 [data-ov-theme-layer="custom"] .card.border-base-300,
 [data-ov-theme-layer="custom"] [data-search-card].border-base-300{border-color:var(--ov-subtle-border)!important}
-[data-ov-theme-layer="custom"] [data-theme-card][aria-pressed="true"] { border-color: var(--ov-link) !important; }
+/* Picker selection remains stronger than hover in native and custom palettes. */
+html #themes-container [data-theme-card][aria-pressed="true"] { border-color: var(--ov-link, var(--ov-link-color)) !important; }
+html #themes-container [data-theme-card][aria-pressed="false"]:hover { border-color: oklch(var(--p) / 0.4) !important; }
 [data-ov-theme-layer="custom"] .hover\:border-primary:hover,
 [data-ov-theme-layer="custom"] [class~="hover:border-primary"]:hover,
 [data-ov-theme-layer="custom"] .hover\:border-primary\/40:hover,
