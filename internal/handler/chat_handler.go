@@ -339,19 +339,20 @@ func (h *Handler) ChatSend(c echo.Context) error {
 	workDir := h.resolveWorkDir(c.Request().Context(), projectID)
 
 	if err := h.startStreamingResponse(streamingResponseParams{
-		ExecID:           exec.ID,
-		TaskID:           task.ID,
-		Message:          message,
-		Agent:            *agent,
-		ChatHistory:      priorHistory,
-		ProjectID:        projectID,
-		PrincipalID:      h.authPrincipalID(c),
-		SystemContext:    combineContexts(attachmentContext, personalityContext),
-		WorkDir:          workDir,
-		ImageAttachments: imageAttachments,
-		IsTaskFollowup:   false,
-		ChatMode:         chatMode,
-		Surface:          chatcontrol.SurfaceWeb,
+		ExecID:            exec.ID,
+		TaskID:            task.ID,
+		Message:           message,
+		Agent:             *agent,
+		ChatHistory:       priorHistory,
+		ProjectID:         projectID,
+		PrincipalID:       h.authPrincipalID(c),
+		SystemContext:     personalityContext,
+		AttachmentContext: attachmentContext,
+		WorkDir:           workDir,
+		ImageAttachments:  imageAttachments,
+		IsTaskFollowup:    false,
+		ChatMode:          chatMode,
+		Surface:           chatcontrol.SurfaceWeb,
 	}); err != nil {
 		c.Response().Header().Set("Retry-After", "30")
 		return echo.NewHTTPError(http.StatusServiceUnavailable, err.Error())

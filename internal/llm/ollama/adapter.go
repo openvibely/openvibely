@@ -25,6 +25,7 @@ import (
 	llmusage "github.com/openvibely/openvibely/internal/llm/usage"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
+	"github.com/openvibely/openvibely/pkg/attachmentcontext"
 	"github.com/openvibely/openvibely/pkg/executionenv"
 )
 
@@ -159,6 +160,7 @@ func (a *Adapter) callDirect(ctx context.Context, prompt string, attachments []m
 		messages = append(messages, chatMessage{Role: "system", Content: projectInstructions})
 	}
 	messages = append(messages, userMsg)
+	messages = attachmentcontext.Ensure(ctx, messages, func(m chatMessage) (string, string) { return m.Role, m.Content }, func(text string) chatMessage { return chatMessage{Role: "user", Content: text} })
 
 	reqBody := chatRequest{
 		Model:    agent.Model,
@@ -212,6 +214,7 @@ func (a *Adapter) callChat(ctx context.Context, message string, attachments []mo
 	}
 	messages = ensureExecutionEnvironment(messages, workDir)
 	messages = append(messages, userMsg)
+	messages = attachmentcontext.Ensure(ctx, messages, func(m chatMessage) (string, string) { return m.Role, m.Content }, func(text string) chatMessage { return chatMessage{Role: "user", Content: text} })
 
 	opts := ollamaRequestOptions(agent)
 
@@ -271,6 +274,7 @@ func (a *Adapter) callStreaming(ctx context.Context, prompt string, attachments 
 	}
 	messages = ensureExecutionEnvironment(messages, workDir)
 	messages = append(messages, userMsg)
+	messages = attachmentcontext.Ensure(ctx, messages, func(m chatMessage) (string, string) { return m.Role, m.Content }, func(text string) chatMessage { return chatMessage{Role: "user", Content: text} })
 
 	reqBody := chatRequest{
 		Model:    agent.Model,

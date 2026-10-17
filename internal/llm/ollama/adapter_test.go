@@ -4,8 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"github.com/openvibely/openvibely/pkg/attachmentcontext"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -255,5 +258,36 @@ func TestCallStreamingZeroHistoryFollowupUsesChatAssembly(t *testing.T) {
 	}
 	if doer.request.Options == nil || doer.request.Options.Temperature == nil || *doer.request.Options.Temperature != 0 {
 		t.Fatalf("Ollama request did not preserve explicit zero temperature: %#v", doer.request.Options)
+	}
+}
+
+func TestHistoricalAttachmentWire(t *testing.T) {
+	for _, compacted := range []bool{false, true} {
+		t.Run(fmt.Sprint(compacted), func(t *testing.T) {
+			var wire string
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				b, _ := io.ReadAll(r.Body)
+				wire = string(b)
+				w.Header().Set("Content-Type", "application/x-ndjson")
+				io.WriteString(w, "{\"message\":{\"role\":\"assistant\",\"content\":\"done\"},\"done\":true}\n")
+			}))
+			defer server.Close()
+			ctx := attachmentcontext.With(context.Background(), "/uploads/report.docx")
+			history := []models.Execution{{PromptSent: "Summarize", Output: "Summary", Status: models.ExecCompleted}}
+			if compacted {
+				history = []models.Execution{{Output: "Saved compaction summary", Status: models.ExecCompleted}}
+			}
+			_, err := New(nil, nil).Call(ctx, llmcontracts.AgentRequest{
+				Ctx: ctx, Operation: llmcontracts.OperationStreaming, Followup: true,
+				Message: "Edit it", ChatHistory: history,
+				Agent: models.LLMConfig{Provider: models.ProviderOllama, Model: "test", OllamaBaseURL: server.URL},
+			}, ".", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(wire, "/uploads/report.docx") {
+				t.Fatal("Ollama request omitted historical attachment path")
+			}
+		})
 	}
 }

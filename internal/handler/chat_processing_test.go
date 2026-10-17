@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/openvibely/openvibely/internal/testutil/storefixture"
+	"github.com/openvibely/openvibely/pkg/attachmentcontext"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -2786,8 +2787,13 @@ func TestStartQueuedChatInputProcessesSavedAttachmentSession(t *testing.T) {
 	request := mock.LastAgentRequest()
 	require.Len(t, request.Attachments, 2)
 	require.Equal(t, "diagram.png", request.Attachments[0].FileName)
-	require.Contains(t, request.ChatSystemContext, "notes.txt")
+	require.Contains(t, request.Message, "notes.txt")
+	require.NotContains(t, request.ChatSystemContext, "notes.txt")
+	require.NotContains(t, strings.TrimPrefix(request.Message, input.Content), "queued text attachment")
 	require.NotContains(t, request.ChatSystemContext, "queued text attachment")
+	saved, err := h.execRepo.GetByID(ctx, request.ExecID)
+	require.NoError(t, err)
+	require.Equal(t, input.Content, saved.PromptSent)
 	attachments, err := h.chatAttachmentRepo.ListByExecutionIDs(ctx, []string{request.ExecID})
 	require.NoError(t, err)
 	require.Len(t, attachments[request.ExecID], 2)
@@ -4109,8 +4115,13 @@ func TestStartQueuedTaskThreadInputProcessesSavedAttachmentSession(t *testing.T)
 	request := mock.LastAgentRequest()
 	require.Len(t, request.Attachments, 2)
 	require.Equal(t, "screen.png", request.Attachments[1].FileName)
-	require.Contains(t, request.ChatSystemContext, "instructions.txt")
+	require.Contains(t, request.Message, "instructions.txt")
+	require.NotContains(t, request.ChatSystemContext, "instructions.txt")
+	require.NotContains(t, strings.TrimPrefix(request.Message, input.Content), "queued task attachment")
 	require.NotContains(t, request.ChatSystemContext, "queued task attachment")
+	saved, err := h.execRepo.GetByID(ctx, request.ExecID)
+	require.NoError(t, err)
+	require.Equal(t, input.Content, saved.PromptSent)
 	attachments, err := h.chatAttachmentRepo.ListByExecutionIDs(ctx, []string{request.ExecID})
 	require.NoError(t, err)
 	require.Len(t, attachments[request.ExecID], 2)
@@ -9282,28 +9293,40 @@ func TestProcessStreamingResponse_FollowupIndexLock(t *testing.T) {
 }
 
 func TestProcessStreamingResponseHistoricalImageInstructions(t *testing.T) {
-	h, _, configs, stores := setupTestHandlerWithStores(t)
-	h.chatAttachmentRepo = stores.ChatAttachments
-	agent := createAgent(t, configs)
-	project := createProject(t, h, "Historical image")
-	task := createTask(t, h, project.ID, "Review old screenshot", func(task *models.Task) { task.AgentID = &agent.ID })
-	old := createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) {
-		ex.Status = models.ExecCompleted
-		ex.PromptSent = "See screenshot"
-		ex.Output = "Seen"
-	})
-	require.NoError(t, stores.ChatAttachments.Create(context.Background(), &models.ChatAttachment{ExecutionID: old.ID, FileName: "previous.png", FilePath: "/tmp/previous.png", MediaType: "image/png", FileSize: 100}))
-	current := createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) { ex.Status = models.ExecRunning; ex.IsFollowup = true })
-	mock := testutil.NewMockLLMCaller()
-	mock.Response = "Reviewed"
-	mock.TextOnly = "Reviewed"
-	var prompts []string
-	mock.OnCall = func(_ context.Context, call testutil.MockLLMCall) { prompts = append(prompts, call.Prompt) }
-	h.llmSvc.SetLLMCaller(mock)
-	h.processStreamingResponse(streamingResponseParams{ExecID: current.ID, TaskID: task.ID, Message: "Look at the old screenshot again", Agent: *agent, ProjectID: project.ID, IsTaskFollowup: true, ChatHistory: []models.Execution{*old}})
-	require.NotEmpty(t, prompts)
-	prompt := strings.Join(prompts, "\n")
-	require.Contains(t, prompt, "previous.png")
-	require.NotContains(t, prompt, "already included directly")
-	require.Contains(t, prompt, "Use file tools")
+	for _, deferred := range []bool{false, true} {
+		t.Run(fmt.Sprintf("deferred=%v", deferred), func(t *testing.T) {
+			h, _, configs, stores := setupTestHandlerWithStores(t)
+			h.chatAttachmentRepo = stores.ChatAttachments
+			agent := createAgent(t, configs)
+			project := createProject(t, h, "Historical image")
+			task := createTask(t, h, project.ID, "Review old screenshot", func(task *models.Task) { task.AgentID = &agent.ID })
+			old := createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) {
+				ex.Status = models.ExecCompleted
+				ex.PromptSent = "See screenshot"
+				ex.Output = "Seen"
+			})
+			require.NoError(t, stores.ChatAttachments.Create(context.Background(), &models.ChatAttachment{ExecutionID: old.ID, FileName: "previous.png", FilePath: "/tmp/previous.png", MediaType: "image/png", FileSize: 100}))
+			current := createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) { ex.Status = models.ExecRunning; ex.IsFollowup = true })
+			mock := testutil.NewMockLLMCaller()
+			mock.Response = "Reviewed"
+			mock.TextOnly = "Reviewed"
+			h.llmSvc.SetLLMCaller(mock)
+			history := []models.Execution{*old}
+			if deferred {
+				history = nil
+			}
+			h.processStreamingResponse(streamingResponseParams{ExecID: current.ID, TaskID: task.ID, Task: task, Message: "Look at the old screenshot again", Agent: *agent, ProjectID: project.ID, IsTaskFollowup: true, DeferHistoryLoad: deferred, ChatHistory: history})
+			require.Len(t, mock.AgentRequests, 1)
+			req := mock.AgentRequests[0]
+			require.Len(t, req.ChatHistory, 1)
+			require.NotContains(t, req.Message, "previous.png")
+			require.NotContains(t, req.ChatSystemContext, "previous.png")
+			require.Empty(t, req.Attachments)
+			require.Equal(t, "See screenshot", req.ChatHistory[0].PromptSent)
+			prompt := attachmentcontext.Text(req.Ctx)
+			require.Contains(t, prompt, "previous.png")
+			require.NotContains(t, prompt, "already included directly")
+			require.Contains(t, prompt, "Use file tools")
+		})
+	}
 }

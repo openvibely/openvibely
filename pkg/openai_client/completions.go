@@ -235,6 +235,7 @@ func (c *Client) SendCompletions(ctx context.Context, prompt string, opts *Compl
 	currentTranscript := []CompletionsHistoryMessage{{Role: "user", Content: prompt}}
 
 	for turn := 0; turn < opts.MaxTurns; turn++ {
+		messages = ensureCompletionsAttachments(ctx, messages)
 		if err := ensureCompletionsRequestFits(messages, tools, opts); err != nil {
 			return nil, err
 		}

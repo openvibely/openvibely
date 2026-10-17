@@ -337,9 +337,12 @@ func TestChannelChatIngressUsesCompactSelectionAndSelectedDetail(t *testing.T) {
 	var runnerRequest ChannelChatRunRequest
 	task := &models.Task{ID: "channel-text-task", Title: "Channel text", Category: models.CategoryChat, Status: models.StatusPending}
 	started := runChannelChatIngress(ctx, channelChatIngressOptions{
-		Platform:      "slack",
-		ProjectID:     "project-1",
-		Message:       "hello channel",
+		Platform:  "slack",
+		ProjectID: "project-1",
+		Message:   "hello channel",
+		DownloadAttachments: func(context.Context) (channelChatIngressDownloadResult, error) {
+			return channelChatIngressDownloadResult{AttachmentContext: "Attached file: /uploads/report.pdf"}, nil
+		},
 		Source:        models.TaskOriginSlack,
 		LLMConfigRepo: repo,
 		TaskRepo:      db.Tasks,
@@ -359,6 +362,9 @@ func TestChannelChatIngressUsesCompactSelectionAndSelectedDetail(t *testing.T) {
 		t.Fatal("runChannelChatIngress returned false")
 	}
 
+	if runnerRequest.AttachmentContext != "Attached file: /uploads/report.pdf" || strings.Contains(runnerRequest.SystemContext, "/uploads/report.pdf") {
+		t.Fatal("attachment reference must reach the runner separately from system context")
+	}
 	if runnerRequest.Agent.ID != model.ID {
 		t.Fatalf("runner selected model ID = %q, want %q", runnerRequest.Agent.ID, model.ID)
 	}
