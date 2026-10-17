@@ -102,7 +102,7 @@ func TestRuntimeCatalogCarriesContrastRolesInCompactBootstrapShape(t *testing.T)
 	type runtimeTheme struct {
 		ID    string            `json:"id"`
 		CSS   map[string]string `json:"css"`
-		Roles [3]string         `json:"r"`
+		Roles [7]string         `json:"r"`
 	}
 	var runtime []runtimeTheme
 	if err := json.Unmarshal([]byte(RuntimeCatalogJSON()), &runtime); err != nil {
@@ -120,6 +120,9 @@ func TestRuntimeCatalogCarriesContrastRolesInCompactBootstrapShape(t *testing.T)
 		expectedTheme, ok := expected[theme.ID]
 		if !ok {
 			t.Fatalf("runtime catalog contains unknown theme %s", theme.ID)
+		}
+		if theme.Roles != toggleRuntimeRoles(expectedTheme) {
+			t.Fatalf("runtime theme %s lost derived toggle roles", theme.ID)
 		}
 		for index, name := range roleNames {
 			if theme.Roles[index] == "" {
