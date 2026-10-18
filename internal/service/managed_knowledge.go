@@ -56,16 +56,16 @@ func (w *WorkerService) prepareMainModelKnowledge(ctx context.Context, task mode
 	var tools []*llmcontracts.RuntimeTools
 	if permissions.ReadSkills {
 		catalog = w.cachedKnowledgeCatalog(ctx, task)
-
-		skillTools := w.buildTaskSkillRuntimeTools(ctx, task, catalog)
-		skillTools.Executor = func(callCtx context.Context, name string, input json.RawMessage) (string, bool, bool, error) {
-			if !strings.EqualFold(strings.TrimSpace(name), "skill_view") {
-				return "", false, false, nil
-			}
-			return w.buildTaskSkillRuntimeTools(callCtx, task, w.cachedKnowledgeCatalog(callCtx, task)).Executor(callCtx, name, input)
-		}
-		tools = append(tools, skillTools)
 	}
+
+	skillTools := w.buildTaskSkillRuntimeTools(ctx, task, catalog)
+	skillTools.Executor = func(callCtx context.Context, name string, input json.RawMessage) (string, bool, bool, error) {
+		if !strings.EqualFold(strings.TrimSpace(name), "skill_view") {
+			return "", false, false, nil
+		}
+		return w.buildTaskSkillRuntimeTools(callCtx, task, w.cachedKnowledgeCatalog(callCtx, task)).Executor(callCtx, name, input)
+	}
+	tools = append(tools, skillTools)
 	var memoryHandles []string
 	if permissions.ReadMemories && w.taskAgentAllowsMemoryView(ctx, task) {
 		memoryIndex := w.cachedKnowledgeMemories(ctx, task)
@@ -76,9 +76,9 @@ func (w *WorkerService) prepareMainModelKnowledge(ctx context.Context, task mode
 		sort.Strings(memoryHandles)
 	}
 	ctx = WithSelectedMemoryHandles(ctx, memoryHandles)
-	canWrite := !chat && permissions.WriteMemories && (agent == nil || agentExplicitlyAllowsTool(agent, "memory_save") || agentExplicitlyAllowsTool(agent, "memory_delete"))
+	canWrite := !chat && (agent == nil || agentExplicitlyAllowsTool(agent, "memory_save") || agentExplicitlyAllowsTool(agent, "memory_delete"))
 
-	tools = append(tools, memory.RuntimeTools(projectRepoPath(ctx, w.projectRepo, task.ProjectID), permissions.ReadMemories && w.taskAgentAllowsMemoryView(ctx, task), canWrite))
+	tools = append(tools, memory.RuntimeTools(projectRepoPath(ctx, w.projectRepo, task.ProjectID), w.taskAgentAllowsMemoryView(ctx, task), canWrite))
 	turn := lifecycleTurnFromContext(ctx)
 	turn.Catalog = catalog
 	turn.SkillIndex = "" // Indexes travel as conversation messages, not provider instructions.
@@ -141,12 +141,8 @@ func guardManagedTools(ctx context.Context, rt *llmcontracts.RuntimeTools, repo 
 	out := &llmcontracts.RuntimeTools{}
 	if rt != nil {
 		*out = *rt
-		out.Definitions = nil
-		for _, def := range rt.Definitions {
-			if allowed(ctx, def.Name) {
-				out.Definitions = append(out.Definitions, def)
-			}
-		}
+		// Keep candidate definitions so live filters can restore newly granted tools.
+		// Providers filter these candidates immediately before each request.
 	}
 	out.Filter = func(name string) (bool, bool) {
 		if !allowed(ctx, name) {

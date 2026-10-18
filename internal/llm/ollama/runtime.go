@@ -75,9 +75,6 @@ func (a *Adapter) callRuntime(ctx context.Context, req llmcontracts.AgentRequest
 	filter := llmcontracts.ComposeRuntimeToolFilter(nil, rt, llmcontracts.RuntimeToolPolicyOptions{ChatMode: req.ChatMode, IsTaskFollowup: req.Followup || req.Operation == llmcontracts.OperationTask})
 	tools := []Tool{}
 	for _, def := range rt.Definitions {
-		if !filter(def.Name) {
-			continue
-		}
 		tools = append(tools, Tool{Type: "function", Function: Function{Name: def.Name, Description: def.Description, Parameters: def.ParameterSchema()}})
 	}
 	sw := llmstream.NewWriterWithPublisher(req.ExecID, "", a.execRepo, ctx, 500*time.Millisecond, a.streamHub)
