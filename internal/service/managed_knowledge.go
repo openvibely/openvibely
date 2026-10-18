@@ -14,6 +14,7 @@ import (
 	"github.com/openvibely/openvibely/internal/memory"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
+	"github.com/openvibely/openvibely/pkg/agenttools"
 	"github.com/openvibely/openvibely/pkg/knowledgecache"
 	"github.com/openvibely/openvibely/pkg/managedcontext"
 )
@@ -173,6 +174,7 @@ func guardManagedTools(ctx context.Context, rt *llmcontracts.RuntimeTools, repo 
 			return "Managed skill/memory operation is not permitted for this turn", true, true, nil
 		}
 		if rt != nil && rt.Executor != nil {
+			callCtx = withManagedFileReadAuthorization(callCtx, repo, task, chat, currentAgent(callCtx))
 			output, handled, failed, err := rt.Executor(callCtx, name, input)
 			if handled && !failed && err == nil && (name == "write_file" || name == "edit_file" || name == "delete_file") && agent != nil && agent.SystemKind == models.AgentSystemKindMemoryCurator {
 				root, _ := memory.SharedRepoMemoryDir(projectRepoPath(callCtx, repo, task.ProjectID))
@@ -183,6 +185,17 @@ func guardManagedTools(ctx context.Context, rt *llmcontracts.RuntimeTools, repo 
 		return "", false, false, nil
 	}
 	return out
+}
+
+func withManagedFileReadAuthorization(ctx context.Context, repo persistence.ProjectStore, task models.Task, chat bool, agent *models.Agent) context.Context {
+	return agenttools.WithFileReadAuthorization(ctx, func(callCtx context.Context, path string) bool {
+		current := agent
+		if resolve, ok := ctx.Value(managedAgentResolverKey{}).(func(context.Context) *models.Agent); ok {
+			current = resolve(callCtx)
+		}
+		input, _ := json.Marshal(map[string]string{"file_path": path})
+		return managedFileOperationAllowed(callCtx, repo, task, chat, current, "read_file", input)
+	})
 }
 
 // File tools keep their document capabilities, but cannot bypass library settings.
