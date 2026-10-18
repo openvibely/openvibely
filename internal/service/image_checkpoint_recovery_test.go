@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"errors"
+	"fmt"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/testutil/teststores"
@@ -12,7 +13,7 @@ import (
 	"testing"
 )
 
-func TestCompletionsRecoveryRetainsImagesThroughSummary(t *testing.T) {
+func TestCompletionsTextCompactionDiscardsImages(t *testing.T) {
 	for _, provider := range []models.LLMProvider{models.ProviderOpenAICompatible, models.ProviderOllama} {
 		req := trackSteeringRecovery(llmcontracts.AgentRequest{Ctx: context.Background(), Agent: models.LLMConfig{Provider: provider}})
 		raw := `[{"role":"user","content":[{"type":"text","text":"look"},{"type":"image_url","image_url":{"url":"data:image/png;base64,UPLOADED"}}]},{"role":"tool","content":"EDIT_COMPLETED","tool_call_id":"edit"},{"role":"user","content":[{"type":"image_url","image_url":{"url":"data:image/png;base64,RENDERED"}}]}]`
@@ -22,16 +23,16 @@ func TestCompletionsRecoveryRetainsImagesThroughSummary(t *testing.T) {
 		require.Contains(t, summaryPrompt, "EDIT_COMPLETED")
 		require.NotContains(t, summaryPrompt, "base64,")
 		compacted := buildCompactedReplacementHistory(recovered.ChatHistory, "edit done")
-		images := retainedCompletionsImages(compacted)
-		require.Len(t, images, 2)
+
 		stores := teststores.New(t).Stores
 		require.NoError(t, stores.Executions.UpsertChatCompactionCheckpoint(context.Background(), models.ChatCompactionCheckpoint{ScopeType: "task", ScopeID: "images", History: compacted}))
 		saved, err := stores.Executions.GetChatCompactionCheckpoint(context.Background(), "task", "images")
 		require.NoError(t, err)
-		images = retainedCompletionsImages(saved.History)
-		require.Len(t, images, 2)
-		require.Contains(t, images[0].ReplayMessages[0].TranscriptJSON, "UPLOADED")
-		require.Contains(t, images[1].ReplayMessages[0].TranscriptJSON, "RENDERED")
+		for _, execution := range saved.History {
+			require.Empty(t, execution.ReplayMessages)
+			require.NotContains(t, execution.Output, "base64,")
+		}
+		require.Contains(t, buildLocalSummaryCompactionPrompt(saved.History), "edit done")
 	}
 }
 func TestFollowupAfterInflightSummaryRetainsRetryWork(t *testing.T) {
@@ -50,4 +51,27 @@ func TestFollowupAfterInflightSummaryRetainsRetryWork(t *testing.T) {
 	restored := svc.restoreCompactionCheckpoint(req)
 	require.Len(t, restored.ChatHistory, 1)
 	require.Contains(t, buildLocalSummaryCompactionPrompt(restored.ChatHistory), "B completed after summary")
+}
+
+// Codex local text compaction rebuilds media-bearing messages as text only
+// (compact.rs, build_compacted_history_with_limit). Old images must not pin
+// context above the request limit after a successful summary.
+func TestTextCompactionFreesImageHistoryBudget(t *testing.T) {
+	for _, provider := range []models.LLMProvider{models.ProviderOpenAICompatible, models.ProviderOllama} {
+		t.Run(string(provider), func(t *testing.T) {
+			req := llmcontracts.AgentRequest{Ctx: context.Background(), Agent: models.LLMConfig{Provider: provider, ContextWindow: 50000}, Message: "continue"}
+			for i := 0; i < 20; i++ {
+				req.ChatHistory = append(req.ChatHistory, models.Execution{Status: models.ExecCompleted, ReplayMessages: []models.ExecutionReplayMessage{{TranscriptJSON: fmt.Sprintf(`[{"role":"user","content":[{"type":"text","text":"inspect image %d"},{"type":"image_url","image_url":{"url":"data:image/png;base64,%d"}}]}]`, i, i)}}})
+			}
+			adapter := providerAdapterFunc(func(llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
+				return llmcontracts.AgentResult{Output: "Images reviewed; continue."}, nil
+			})
+			got, err := (&LLMService{}).compactRequestHistoryWithLocalSummary(adapter, req)
+			require.NoError(t, err)
+			require.NoError(t, ensureRequestFitsWithBudget(got, calculateRequestBudget(got), "after compaction"))
+			for _, execution := range got.ChatHistory {
+				require.Empty(t, execution.ReplayMessages)
+			}
+		})
+	}
 }

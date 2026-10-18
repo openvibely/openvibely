@@ -51,7 +51,9 @@ func TestOpenAIReplayLoadedBeforeBudgetAndTrimming(t *testing.T) {
 		loaded, err := svc.loadProviderReplayHistory(req)
 		require.NoError(t, err)
 		require.Equal(t, imageReplay, loaded.ChatHistory[0].ReplayMessages)
-		require.Len(t, retainedCompletionsImages(buildCompactedReplacementHistory(loaded.ChatHistory, "summary")), 1)
+		for _, execution := range buildCompactedReplacementHistory(loaded.ChatHistory, "summary") {
+			require.Empty(t, execution.ReplayMessages, "text compaction must discard media replay")
+		}
 	}
 }
 
