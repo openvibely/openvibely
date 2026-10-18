@@ -33,7 +33,8 @@ type scopedFilesScope struct {
 }
 
 type scopedFilesToolSession struct {
-	scopes []scopedFilesScope
+	scopes      []scopedFilesScope
+	memoryFiles memory.FileSession
 
 	mu      sync.Mutex
 	touched map[string]struct{}
@@ -170,7 +171,7 @@ var scopedFileDefinitions = []llmcontracts.RuntimeToolDefinition{
 		Required:             []string{"file_path"},
 		AdditionalProperties: toolschema.Pointer(false),
 	}},
-	{Name: "write_file", Description: "Write a file inside the configured scoped directory. Overwrites the file." + scopePrefixDoc, Schema: &toolschema.Schema{
+	{Name: "write_file", Description: "Write a file inside the configured scoped directory. Overwrites the file. For managed memory, read existing files first; if a concurrent-change error occurs, reread and recompute the update before retrying." + scopePrefixDoc, Schema: &toolschema.Schema{
 		Type: "object",
 		Properties: map[string]*toolschema.Schema{
 			"file_path": {
@@ -181,7 +182,7 @@ var scopedFileDefinitions = []llmcontracts.RuntimeToolDefinition{
 		Required:             []string{"file_path", "content"},
 		AdditionalProperties: toolschema.Pointer(false),
 	}},
-	{Name: "edit_file", Description: "Edit a file inside the configured scoped directory by replacing old_string with new_string." + scopePrefixDoc, Schema: &toolschema.Schema{
+	{Name: "edit_file", Description: "Edit a file inside the configured scoped directory by replacing old_string with new_string. Read managed memory files first; reread and recompute after a concurrent-change error." + scopePrefixDoc, Schema: &toolschema.Schema{
 		Type: "object",
 		Properties: map[string]*toolschema.Schema{
 			"file_path": {
@@ -209,7 +210,7 @@ var scopedFileDefinitions = []llmcontracts.RuntimeToolDefinition{
 		Required:             []string{"pattern"},
 		AdditionalProperties: toolschema.Pointer(false),
 	}},
-	{Name: "delete_file", Description: "Delete a file inside the configured scoped directory." + scopePrefixDoc, Schema: &toolschema.Schema{
+	{Name: "delete_file", Description: "Delete a file inside the configured scoped directory. Read managed memory files first; reread and reconsider deletion after a concurrent-change error." + scopePrefixDoc, Schema: &toolschema.Schema{
 		Type: "object",
 		Properties: map[string]*toolschema.Schema{
 			"file_path": {
@@ -221,6 +222,37 @@ var scopedFileDefinitions = []llmcontracts.RuntimeToolDefinition{
 }
 
 func (s *scopedFilesToolSession) execute(ctx context.Context, name string, input json.RawMessage) (string, bool, bool, error) {
+	name = strings.ToLower(strings.TrimSpace(name))
+	if name == "read_file" || name == "write_file" || name == "edit_file" || name == "delete_file" {
+		var params struct {
+			FilePath string `json:"file_path"`
+		}
+		if err := json.Unmarshal(input, &params); err != nil {
+			return "", true, true, err
+		}
+		perm := readPerm()
+		if name == "write_file" || name == "edit_file" {
+			perm = writePerm()
+		}
+		if name == "delete_file" {
+			perm = deletePerm()
+		}
+		path, _, _, err := s.scopedPath(params.FilePath, false, perm)
+		if err != nil {
+			return "", true, true, err
+		}
+		var output string
+		err = s.memoryFiles.Do(ctx, path, name != "read_file", func() error {
+			var callErr error
+			output, _, _, callErr = s.executeUnchecked(ctx, name, input)
+			return callErr
+		})
+		return output, true, err != nil, err
+	}
+	return s.executeUnchecked(ctx, name, input)
+}
+
+func (s *scopedFilesToolSession) executeUnchecked(ctx context.Context, name string, input json.RawMessage) (string, bool, bool, error) {
 	switch strings.ToLower(strings.TrimSpace(name)) {
 	case "list_files":
 		out, err := s.listFiles(input)
