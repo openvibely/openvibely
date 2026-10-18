@@ -1329,9 +1329,6 @@ func (s *LLMService) callProviderWithLastResortTruncation(adapter ProviderAdapte
 	truncated.Agent.ForceNativeCompaction = false
 	truncated.DisableNativeCompaction = true
 	truncated.Agent.DisableNativeCompaction = true
-	if len(retainedCompletionsImages(req.ChatHistory)) > 0 {
-		return llmcontracts.AgentResult{}, cause
-	}
 	truncated.ChatHistory = historyWithinRequestBudget(truncated, llmprompt.LimitChatHistory(req.ChatHistory))
 	if llmcontracts.HistoryContinuationFromContext(req.Ctx) && len(truncated.ChatHistory) == 0 {
 		return llmcontracts.AgentResult{}, llmcontracts.NewCategorizedError(llmcontracts.ErrorContextWindowExceeded, "steering recovery", fmt.Errorf("current conversation cannot fit without discarding consumed steering and tool results: %w", cause))
@@ -1451,7 +1448,7 @@ func (s *LLMService) compactRequestHistoryWithLocalSummary(adapter ProviderAdapt
 			// Claude retries with the successful summary intact. Let request
 			// preflight reject an oversized retry rather than erase its summary
 			// (and the completed-work context it is the only remaining record of).
-			if compacted.Agent.Provider != models.ProviderAnthropic && len(retainedCompletionsImages(compacted.ChatHistory)) == 0 {
+			if compacted.Agent.Provider != models.ProviderAnthropic {
 				compacted.ChatHistory = historyWithinRequestBudget(compacted, compacted.ChatHistory)
 			}
 			compacted.Ctx = llmcontracts.WithNativeCompactionStateJSON(compacted.Ctx, "")
@@ -1611,7 +1608,6 @@ func buildCompactedReplacementHistory(history []models.Execution, summary string
 	retained := retainedUserMessageHistory(history, retainedUserMessageTokenBudget)
 	out := make([]models.Execution, 0, len(retained)+1)
 	out = append(out, retained...)
-	out = append(out, retainedCompletionsImages(history)...)
 	out = append(out, models.Execution{
 		Status: models.ExecCompleted,
 		Output: compactedHistorySummaryPrefix + "\n\n" + strings.TrimSpace(summary),

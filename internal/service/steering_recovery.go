@@ -182,9 +182,6 @@ func recordProviderRecovery(req llmcontracts.AgentRequest, err error) {
 		}
 		history = append(history, execution)
 	}
-	if completionsFailure != nil {
-		history = append(history, retainedCompletionsImages([]models.Execution{{ReplayMessages: []models.ExecutionReplayMessage{{TranscriptJSON: raw}}}})...)
-	}
 	state.mu.Lock()
 	state.providerHistory = history
 	state.mu.Unlock()
