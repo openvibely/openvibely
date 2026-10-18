@@ -1084,11 +1084,21 @@ func (r *ExecutionRepo) ListChatHistory(ctx context.Context, projectID string, l
 	return r.listChatHistoryPage(ctx, projectID, "", limit)
 }
 
+// Checkpoint replay is private persistence data, excluded from public Execution JSON.
+type checkpointExecution struct {
+	models.Execution
+	Replay []models.ExecutionReplayMessage `json:"replay_messages,omitempty"`
+}
+
 func (r *ExecutionRepo) UpsertChatCompactionCheckpoint(ctx context.Context, checkpoint models.ChatCompactionCheckpoint) error {
 	if r == nil || r.db == nil {
 		return nil
 	}
-	historyJSON, err := json.Marshal(checkpoint.History)
+	history := make([]checkpointExecution, len(checkpoint.History))
+	for i, execution := range checkpoint.History {
+		history[i] = checkpointExecution{Execution: execution, Replay: execution.ReplayMessages}
+	}
+	historyJSON, err := json.Marshal(history)
 	if err != nil {
 		return fmt.Errorf("marshal chat compaction checkpoint: %w", err)
 	}
@@ -1133,8 +1143,14 @@ func (r *ExecutionRepo) GetChatCompactionCheckpoint(ctx context.Context, scopeTy
 	if err != nil {
 		return nil, fmt.Errorf("getting chat compaction checkpoint: %w", err)
 	}
-	if err := json.Unmarshal([]byte(historyJSON), &checkpoint.History); err != nil {
+	var history []checkpointExecution
+	if err := json.Unmarshal([]byte(historyJSON), &history); err != nil {
 		return nil, fmt.Errorf("unmarshal chat compaction checkpoint: %w", err)
+	}
+	checkpoint.History = make([]models.Execution, len(history))
+	for i, execution := range history {
+		checkpoint.History[i] = execution.Execution
+		checkpoint.History[i].ReplayMessages = execution.Replay
 	}
 	return &checkpoint, nil
 }

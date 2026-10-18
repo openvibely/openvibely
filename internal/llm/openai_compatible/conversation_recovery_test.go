@@ -25,9 +25,12 @@ func TestRecoverySeedsTaskAndDirectCompletionsHistory(t *testing.T) {
 			defer server.Close()
 			ctx := llmcontracts.WithHistoryContinuation(context.Background())
 			req := llmcontracts.AgentRequest{Operation: operation, Message: "DO_NOT_REPLAY", Agent: models.LLMConfig{Provider: models.ProviderOpenAICompatible, AuthMethod: models.AuthMethodAPIKey, APIKey: "test", PresetSlug: "vllm", BaseURL: server.URL + "/v1", Model: "test"}, ChatHistory: []models.Execution{{PromptSent: "original request", Output: "ALREADY_EDITED", Status: models.ExecCompleted}}}
+			req.ChatHistory = append(req.ChatHistory, models.Execution{Status: models.ExecCompleted, ReplayMessages: []models.ExecutionReplayMessage{{TranscriptJSON: `[{"role":"user","content":[{"type":"image_url","image_url":{"url":"data:image/png;base64,RETAINED"}}]}]`}}})
 			_, err := New(nil, nil).Call(ctx, req, t.TempDir())
 			require.NoError(t, err)
 			require.Contains(t, body, "ALREADY_EDITED")
+			require.Contains(t, body, "data:image/png;base64,RETAINED")
+			require.NotContains(t, body, "image_content")
 			require.NotContains(t, body, "DO_NOT_REPLAY")
 			var request struct {
 				Messages []struct {

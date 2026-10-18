@@ -152,6 +152,17 @@ func recordProviderRecovery(req llmcontracts.AgentRequest, err error) {
 			// Preserve structured tool/compaction blocks for the summarizer,
 			// and retain user instructions separately even if its summary omits them.
 			execution.Output = string(message.Content)
+			if completionsFailure != nil {
+				var blocks []struct{ Type, Text string }
+				if json.Unmarshal(message.Content, &blocks) == nil {
+					execution.Output = ""
+					for _, block := range blocks {
+						if block.Type == "text" {
+							execution.Output += block.Text + "\n"
+						}
+					}
+				}
+			}
 			if message.Role == "user" {
 				var blocks []struct {
 					Type string `json:"type"`
@@ -170,6 +181,9 @@ func recordProviderRecovery(req llmcontracts.AgentRequest, err error) {
 			execution.Output += "\nTool calls: " + string(message.ToolCalls)
 		}
 		history = append(history, execution)
+	}
+	if completionsFailure != nil {
+		history = append(history, retainedCompletionsImages([]models.Execution{{ReplayMessages: []models.ExecutionReplayMessage{{TranscriptJSON: raw}}}})...)
 	}
 	state.mu.Lock()
 	state.providerHistory = history

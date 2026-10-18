@@ -44,10 +44,15 @@ func TestOpenAIReplayLoadedBeforeBudgetAndTrimming(t *testing.T) {
 	require.Error(t, err)
 	require.False(t, called, "oversized saved replay must be caught before the provider request")
 
-	req.Agent.Provider = models.ProviderOpenAICompatible
-	compatible, err := svc.loadProviderReplayHistory(req)
-	require.NoError(t, err)
-	require.Nil(t, compatible.ChatHistory[0].ReplayMessages, "compatible providers keep their existing history path")
+	imageReplay := []models.ExecutionReplayMessage{{TranscriptJSON: `[{"role":"user","content":[{"type":"image_url","image_url":{"url":"data:image/png;base64,RETAINED"}}]}]`}}
+	require.NoError(t, repo.ReplaceReasoningReplay(ctx, "steered", "", imageReplay))
+	for _, provider := range []models.LLMProvider{models.ProviderOpenAICompatible, models.ProviderOllama} {
+		req.Agent.Provider = provider
+		loaded, err := svc.loadProviderReplayHistory(req)
+		require.NoError(t, err)
+		require.Equal(t, imageReplay, loaded.ChatHistory[0].ReplayMessages)
+		require.Len(t, retainedCompletionsImages(buildCompactedReplacementHistory(loaded.ChatHistory, "summary")), 1)
+	}
 }
 
 func TestOpenAIRequestBudgetUsesEffectiveReplay(t *testing.T) {

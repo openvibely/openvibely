@@ -185,6 +185,7 @@ func (c *Client) SendCompletions(ctx context.Context, prompt string, opts *Compl
 		}
 	}
 
+	var promptBlocks []map[string]interface{}
 	// Add current prompt with optional attachments
 	if len(opts.Attachments) > 0 && !opts.ContinueFromHistory {
 		content := make([]map[string]interface{}, 0, 1+len(opts.Attachments))
@@ -221,6 +222,7 @@ func (c *Client) SendCompletions(ctx context.Context, prompt string, opts *Compl
 			Role:    "user",
 			Content: content,
 		})
+		promptBlocks = content
 	} else if !opts.ContinueFromHistory {
 		messages = append(messages, completionsMessage{
 			Role:    "user",
@@ -236,7 +238,7 @@ func (c *Client) SendCompletions(ctx context.Context, prompt string, opts *Compl
 	finalReasoningContent := ""
 	var currentTranscript []CompletionsHistoryMessage
 	if !opts.ContinueFromHistory {
-		currentTranscript = []CompletionsHistoryMessage{{Role: "user", Content: prompt}}
+		currentTranscript = []CompletionsHistoryMessage{{Role: "user", Content: prompt, ImageContent: promptBlocks}}
 	}
 	currentTranscript = managedcontext.SeedReplay(ctx, messages, currentTranscript, func(m completionsMessage) (string, string) {
 		text, _ := m.Content.(string)

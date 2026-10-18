@@ -2,6 +2,7 @@ package openaiclient
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"github.com/stretchr/testify/require"
@@ -28,7 +29,7 @@ func TestCompletionsRecoveryIncludesPriorHistoryAndCurrentToolResults(t *testing
 	defer func() { OpenAIAPIBaseURL = old }()
 	client := newHTTPTestAPIKeyClient("test")
 	client.SetCompletionsHistory([]CompletionsHistoryMessage{{Role: "user", Content: "PRIOR_REQUEST"}})
-	_, err := client.SendCompletions(context.Background(), "edit", &CompletionsOptions{Model: "gpt-test", SkipDefaultTools: true, ExtraTools: []ToolDefinition{{Type: "function", Name: "edit_file", Parameters: json.RawMessage(`{"type":"object"}`)}}, ToolExecutor: func(context.Context, string, json.RawMessage) (string, bool, error) {
+	_, err := client.SendCompletions(context.Background(), "edit", &CompletionsOptions{Model: "gpt-test", Attachments: []*FileAttachment{{FileName: "image.png", MediaType: "image/png", Data: []byte("imagebytes")}}, SkipDefaultTools: true, ExtraTools: []ToolDefinition{{Type: "function", Name: "edit_file", Parameters: json.RawMessage(`{"type":"object"}`)}}, ToolExecutor: func(context.Context, string, json.RawMessage) (string, bool, error) {
 		return "ALREADY_EDITED", false, nil
 	}})
 	require.Error(t, err)
@@ -39,5 +40,7 @@ func TestCompletionsRecoveryIncludesPriorHistoryAndCurrentToolResults(t *testing
 	require.Contains(t, snapshot.MessagesJSON, "PRIOR_REQUEST")
 	require.Contains(t, snapshot.MessagesJSON, "ALREADY_EDITED")
 	require.Contains(t, snapshot.MessagesJSON, "edit_file")
+	require.Contains(t, snapshot.MessagesJSON, base64.StdEncoding.EncodeToString([]byte("imagebytes")))
+	require.NotContains(t, snapshot.MessagesJSON, "image_content")
 	require.Equal(t, 2, calls)
 }
