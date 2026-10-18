@@ -483,6 +483,7 @@ func calculateRequestBudget(req llmcontracts.AgentRequest) requestBudget {
 	fixedReq := req
 	fixedReq.Message = ""
 	fixedReq.ChatHistory = nil
+	fixedReq.SummaryInput = nil
 	fixedReq.NativeCompactionStateJSON = ""
 	fixedReq.Attachments = nil
 	budget.FixedTokens = estimateModelVisibleRequestTokens(fixedReq)
@@ -492,7 +493,7 @@ func calculateRequestBudget(req llmcontracts.AgentRequest) requestBudget {
 	}
 	budget.PendingTokens = estimatedUTF8Tokens(req.Message)
 	budget.NativeStateTokens = estimatedUTF8Tokens(req.NativeCompactionStateJSON)
-	budget.HistoryTokens = estimateHistoryTokens(req.Agent.Provider, req.ChatHistory)
+	budget.HistoryTokens = estimateHistoryTokens(req.Agent.Provider, req.ChatHistory) + estimateSummaryInputTokens(req.Agent.Provider, req.SummaryInput)
 	for _, att := range req.Attachments {
 		budget.AttachmentTokens += estimateRequestAttachmentTokens(req, att)
 	}
@@ -734,10 +735,20 @@ func estimateModelVisibleRequestTokens(req llmcontracts.AgentRequest) int {
 		total += estimateRequestAttachmentTokens(req, att)
 	}
 	total += estimateHistoryTokens(req.Agent.Provider, req.ChatHistory)
+	total += estimateSummaryInputTokens(req.Agent.Provider, req.SummaryInput)
 	return total
 }
 
 func estimateProviderSystemPromptTokens(req llmcontracts.AgentRequest) int {
+	return estimatedUTF8Tokens(providerSystemPrompt(req))
+}
+
+// Render the system instructions separately from the conversation so summary
+// calls can retain the original task/chat instructions without prompt wrapping.
+func providerSystemPrompt(req llmcontracts.AgentRequest) string {
+	if prompt, ok := llmcontracts.SummarySystemPromptFromContext(req.Ctx); ok {
+		return prompt
+	}
 	agentPrompt := func() string {
 		switch req.Agent.Provider {
 		case models.ProviderOpenAI:
@@ -761,29 +772,29 @@ func estimateProviderSystemPromptTokens(req llmcontracts.AgentRequest) int {
 			case models.ProviderAnthropic:
 				base = llmprompt.BuildAnthropicChatSystemPrompt(req.Agent.Model, req.Followup, req.ChatMode, req.ChatSystemContext, false)
 			}
-			if req.ChatMode == models.ChatModeOrchestrate && !req.Followup && (req.Agent.Provider == models.ProviderOpenAI || req.Agent.Provider == models.ProviderAnthropic) {
+			if req.ChatMode == models.ChatModeOrchestrate && !req.Followup {
 				rt := llmcontracts.RuntimeToolsFromContext(req.Ctx)
 				base = llmprompt.ApplyChatActionToolMode(base, rt.DefinitionNames())
 			}
-			return estimatedUTF8Tokens(base)
+			return base
 		}
-		return estimatedUTF8Tokens(agentPrompt())
+		return agentPrompt()
 	case llmcontracts.OperationTask:
-		return estimatedUTF8Tokens(agentPrompt())
+		return agentPrompt()
 	case llmcontracts.OperationDirect:
 		if req.RawDirectPrompt {
-			return 0
+			return ""
 		}
 		if req.LifecycleHookCall {
 			base := req.ProjectInstructions
 			if req.Agent.IsOpenAIOAuth() {
 				base = llmprompt.BuildOpenAIOAuthSystemPrompt(base)
 			}
-			return estimatedUTF8Tokens(base)
+			return base
 		}
-		return estimatedUTF8Tokens(agentPrompt())
+		return agentPrompt()
 	default:
-		return 0
+		return ""
 	}
 }
 
@@ -1450,29 +1461,22 @@ func (s *LLMService) compactRequestHistoryWithLocalSummary(adapter ProviderAdapt
 	summaryBase.Ctx = summaryCtx
 	defer cancelSummary()
 	summaryBase.TransportScope = fmt.Sprintf("compaction:%s:%d", req.ExecID, time.Now().UnixNano())
-	for len(history) > 0 {
-		summary, err := s.localSummaryCompaction(adapter, summaryBase, history, trigger)
-		if err == nil {
-			compacted := req
-			compacted.ChatHistory = buildCompactedReplacementHistory(history, summary)
-			compacted.NativeCompactionStateJSON = ""
-			compacted.ForceNativeCompaction = false
-			compacted.Agent.ForceNativeCompaction = false
-			// Claude retries with the successful summary intact. Let request
-			// preflight reject an oversized retry rather than erase its summary
-			// (and the completed-work context it is the only remaining record of).
-			if compacted.Agent.Provider != models.ProviderAnthropic {
-				compacted.ChatHistory = historyWithinRequestBudget(compacted, compacted.ChatHistory)
-			}
-			compacted.Ctx = llmcontracts.WithNativeCompactionStateJSON(compacted.Ctx, "")
-			return compacted, nil
-		}
-		if !recognizedContextLengthError(err) || len(history) == 1 {
-			return llmcontracts.AgentRequest{}, err
-		}
-		history = history[1:]
+	summary, err := s.localSummaryCompaction(adapter, summaryBase, history, trigger)
+	if err != nil {
+		return llmcontracts.AgentRequest{}, err
 	}
-	return llmcontracts.AgentRequest{}, llmcontracts.NewCategorizedError(llmcontracts.ErrorLocalCompactionFailed, "textual compaction", fmt.Errorf("no history remains to compact"))
+	compacted := req
+	// Retain user messages from the original history, including messages removed
+	// only to make the summarization request fit.
+	compacted.ChatHistory = buildCompactedReplacementHistory(history, summary)
+	compacted.NativeCompactionStateJSON = ""
+	compacted.ForceNativeCompaction = false
+	compacted.Agent.ForceNativeCompaction = false
+	if compacted.Agent.Provider != models.ProviderAnthropic {
+		compacted.ChatHistory = historyWithinRequestBudget(compacted, compacted.ChatHistory)
+	}
+	compacted.Ctx = llmcontracts.WithNativeCompactionStateJSON(compacted.Ctx, "")
+	return compacted, nil
 }
 
 func (s *LLMService) localSummaryCompaction(adapter ProviderAdapter, req llmcontracts.AgentRequest, history []models.Execution, triggers ...error) (string, error) {
@@ -1480,8 +1484,20 @@ func (s *LLMService) localSummaryCompaction(adapter ProviderAdapter, req llmcont
 	if len(triggers) > 0 {
 		trigger = triggers[0]
 	}
+	// Render before changing operation or removing tool/agent metadata. Chat
+	// and task calls have different system instructions; retain the original kind.
+	original := prepareAgentRuntimeRequest(req)
+	if original.Operation == llmcontracts.OperationStreaming && original.Agent.Provider != models.ProviderAnthropic && !requestUsesChatStreaming(original) {
+		original.Operation = llmcontracts.OperationTask
+	}
+	if original.WorkDir == "" && original.Agent.Provider != models.ProviderAnthropic {
+		original.WorkDir = "."
+	}
+	systemPrompt := providerSystemPrompt(original)
 	summaryReq := req
 	summaryReq.NativeCompactionStateJSON = ""
+	summaryReq.ProviderSessionStateJSON = ""
+	summaryReq.ContextTokenEstimate = 0
 	summaryReq.Ctx = llmcontracts.WithoutRuntimeTools(withoutContextCompactionFallback(req.Ctx))
 	summaryReq.Ctx = llmcontracts.WithInitialSteeringCommit(summaryReq.Ctx, nil)
 	summaryReq.Ctx = llmcontracts.WithResponsesRecovery(summaryReq.Ctx, nil)
@@ -1492,12 +1508,19 @@ func (s *LLMService) localSummaryCompaction(adapter ProviderAdapter, req llmcont
 	})
 	summaryReq.Ctx = llmcontracts.WithSteeringCallback(summaryReq.Ctx, func(context.Context) (string, error) { return "", nil })
 	summaryReq.Ctx = llmcontracts.WithNativeCompactionStateJSON(summaryReq.Ctx, "")
+	summaryReq.Ctx = llmcontracts.WithSummarySystemPrompt(summaryReq.Ctx, systemPrompt)
 	summaryReq.Operation = llmcontracts.OperationDirect
-	summaryReq.Message = buildLocalSummaryCompactionPrompt(history)
+	summaryReq.Message = localContextCompactionInstruction
+	var inputErr error
+	summaryReq.SummaryInput, inputErr = summaryHistoryInput(req.Agent.Provider, history)
+	if inputErr != nil {
+		return "", llmcontracts.NewCategorizedError(llmcontracts.ErrorLocalCompactionFailed, "summary history", inputErr)
+	}
 	summaryReq.Attachments = nil
 	summaryReq.ExecID = ""
 	summaryReq.Ctx = llmcontracts.WithTransportScope(summaryReq.Ctx, req.TransportScope)
 	summaryReq.ChatHistory = nil
+	// Already rendered into SummarySystemPrompt; avoid applying agent instructions twice.
 	summaryReq.ChatSystemContext = ""
 	summaryReq.ProjectInstructions = ""
 	summaryReq.AgentDefinition = nil
@@ -1510,111 +1533,43 @@ func (s *LLMService) localSummaryCompaction(adapter ProviderAdapter, req llmcont
 	summaryReq.Agent.DisableNativeCompaction = true
 	summaryReq.Agent.ForceNativeCompaction = false
 	summaryReq.Agent.CompactionThreshold = 0
-	budget := requestBudgetForAgent(summaryReq.Agent)
-	if estimatedUTF8Tokens(summaryReq.Message) > budget.SafeInputLimit {
-		summaryReq.Message = truncateMiddleByEstimatedTokens(summaryReq.Message, budget.SafeInputLimit)
-	}
-	budget = calculateRequestBudget(summaryReq)
-	if err := ensureRequestFitsWithBudget(summaryReq, budget, "textual compaction request"); err != nil {
-		return "", llmcontracts.NewCategorizedError(llmcontracts.ErrorCompactionInputInfeasible, "textual compaction request", err)
-	}
-	logContextDecisionWithBudget(history, summaryReq, "textual_summary", false, trigger, budget)
-	res, err := adapter.Call(summaryReq)
-	err = categorizeProviderError(err)
-	if err != nil {
-		logContextFailureWithBudget(summaryReq, err, budget)
-		if recognizedContextLengthError(err) {
+	for len(summaryReq.SummaryInput) > 0 {
+		if err := summaryReq.Ctx.Err(); err != nil {
 			return "", err
 		}
-		return "", llmcontracts.NewCategorizedError(llmcontracts.ErrorLocalCompactionFailed, "textual compaction", err)
-	}
-	summary := strings.TrimSpace(res.TextOnlyOutput)
-	if summary == "" {
-		summary = strings.TrimSpace(res.Output)
-	}
-	if summary == "" {
-		return "", llmcontracts.NewCategorizedError(llmcontracts.ErrorLocalCompactionFailed, "textual compaction", fmt.Errorf("provider returned an empty summary"))
-	}
-	return summary, nil
-}
-
-func buildLocalSummaryCompactionPrompt(history []models.Execution) string {
-	var sb strings.Builder
-	for _, exec := range history {
-		if strings.TrimSpace(exec.PromptSent) != "" {
-			sb.WriteString("User: ")
-			sb.WriteString(strings.TrimSpace(exec.PromptSent))
-			sb.WriteString("\n\n")
+		// Account for the complete request, including injected context. On either
+		// a local or provider context rejection, remove whole messages and their
+		// tool partners. Never cut through serialized history or tool contents.
+		budget := calculateRequestBudget(summaryReq)
+		err := ensureRequestFitsWithBudget(summaryReq, budget, "summary request")
+		var res llmcontracts.AgentResult
+		if err == nil {
+			logContextDecisionWithBudget(history, summaryReq, "textual_summary", false, trigger, budget)
+			res, err = adapter.Call(summaryReq)
+			err = categorizeProviderError(err)
 		}
-		writeExecutionReplayForCompaction(&sb, exec)
-		if len(exec.ReplayMessages) == 0 || environmentReplayMissingAnswer(exec.ReplayMessages) {
-			if replay := llmprompt.ReplayAssistantContent(exec); strings.TrimSpace(replay) != "" {
-				sb.WriteString("Assistant: ")
-				sb.WriteString(strings.TrimSpace(replay))
-				sb.WriteString("\n\n")
+		if err != nil {
+			logContextFailureWithBudget(summaryReq, err, budget)
+			if recognizedContextLengthError(err) {
+				remaining := removeOldestSummaryMessage(summaryReq.SummaryInput)
+				if len(remaining) == 0 {
+					return "", llmcontracts.NewCategorizedError(llmcontracts.ErrorCompactionInputInfeasible, "summary request", err)
+				}
+				summaryReq.SummaryInput = remaining
+				continue
 			}
+			return "", llmcontracts.NewCategorizedError(llmcontracts.ErrorLocalCompactionFailed, "textual compaction", err)
 		}
+		summary := strings.TrimSpace(res.TextOnlyOutput)
+		if summary == "" {
+			summary = strings.TrimSpace(res.Output)
+		}
+		if summary == "" {
+			return "", llmcontracts.NewCategorizedError(llmcontracts.ErrorLocalCompactionFailed, "textual compaction", fmt.Errorf("provider returned an empty summary"))
+		}
+		return summary, nil
 	}
-	if sb.Len() > 0 {
-		sb.WriteString("---\n\n")
-	}
-	sb.WriteString(localContextCompactionInstruction)
-	return sb.String()
-}
-
-// Environment snapshots can be written after a stream fails, when the adapter
-// returns no answer even though the stream writer already persisted output.
-// Such snapshots must not hide that output (or the execution's failure reason).
-func environmentReplayMissingAnswer(replays []models.ExecutionReplayMessage) bool {
-	for _, replay := range replays {
-		var snapshot struct {
-			Environment string `json:"anthropic_execution_environment"`
-			Messages    []struct {
-				Role    string `json:"role"`
-				Content string `json:"content"`
-			} `json:"messages"`
-		}
-		if json.Unmarshal([]byte(replay.TranscriptJSON), &snapshot) != nil || snapshot.Environment == "" {
-			continue
-		}
-		hasAnswer := false
-		for _, message := range snapshot.Messages {
-			if message.Role == "assistant" && strings.TrimSpace(message.Content) != "" {
-				hasAnswer = true
-			}
-		}
-		if !hasAnswer {
-			return true
-		}
-	}
-	return false
-}
-
-func writeExecutionReplayForCompaction(sb *strings.Builder, exec models.Execution) {
-	for _, replay := range exec.ReplayMessages {
-		replay.TranscriptJSON = completionsSummaryText(replay.TranscriptJSON)
-
-		if strings.TrimSpace(replay.TranscriptJSON) != "" {
-			sb.WriteString("Structured tool/message replay transcript JSON (preserve tool-call/tool-result relationships):\n")
-			sb.WriteString(strings.TrimSpace(replay.TranscriptJSON))
-			sb.WriteString("\n\n")
-			continue
-		}
-		if strings.TrimSpace(replay.UserContent) != "" {
-			sb.WriteString("Replay user/tool-result content: ")
-			sb.WriteString(strings.TrimSpace(replay.UserContent))
-			sb.WriteString("\n\n")
-		}
-		if strings.TrimSpace(replay.AssistantContent) != "" || strings.TrimSpace(replay.ReasoningContent) != "" {
-			sb.WriteString("Replay assistant/tool-call content: ")
-			sb.WriteString(strings.TrimSpace(replay.AssistantContent))
-			if strings.TrimSpace(replay.ReasoningContent) != "" {
-				sb.WriteString("\nReasoning summary: ")
-				sb.WriteString(strings.TrimSpace(replay.ReasoningContent))
-			}
-			sb.WriteString("\n\n")
-		}
-	}
+	return "", llmcontracts.NewCategorizedError(llmcontracts.ErrorCompactionInputInfeasible, "summary request", fmt.Errorf("no history remains to summarize"))
 }
 
 func buildCompactedReplacementHistory(history []models.Execution, summary string) []models.Execution {
@@ -1819,7 +1774,7 @@ func (a *openAIProviderAdapter) Call(req llmcontracts.AgentRequest) (llmcontract
 		switch req.Operation {
 		case llmcontracts.OperationDirect:
 			if openAIDirectClientEnabled(req.Agent) {
-				output, usage, err := a.adapter.CallDirect(req.Ctx, req.Message, req.Attachments, req.Agent, req.WorkDir, req.ProjectInstructions, req.DisableTools, req.RawDirectPrompt, req.LifecycleHookCall)
+				output, usage, err := a.adapter.CallDirect(req.Ctx, req.Message, req.Attachments, req.Agent, req.WorkDir, req.ProjectInstructions, req.DisableTools, req.RawDirectPrompt, req.LifecycleHookCall, req.SummaryInput)
 				return canonicalResult(output, output, usage, err)
 			}
 			return llmcontracts.AgentResult{}, unsupportedModelTransport(req.Agent.Provider, req.Agent.AuthMethod)

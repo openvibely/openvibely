@@ -27,16 +27,16 @@ func TestOrdinaryTurnRecoveryRetainsCompletedTools(t *testing.T) {
 					return llmcontracts.AgentResult{}, &openaiclient.ConversationError{Err: overflow, MessagesJSON: `[{"role":"user","content":"edit file"},{"role":"assistant","content":"","tool_calls":[{"id":"done","type":"function","function":{"name":"edit_file","arguments":"{}"}}]},{"role":"tool","tool_call_id":"done","content":"ALREADY_EDITED"}]`}
 				case 2:
 					require.Equal(t, llmcontracts.OperationDirect, r.Operation)
-					require.Contains(t, r.Message, "ALREADY_EDITED")
-					require.Contains(t, r.Message, "edit_file")
+					require.Contains(t, summaryInputText(r.SummaryInput), "ALREADY_EDITED")
+					require.Contains(t, summaryInputText(r.SummaryInput), "edit_file")
 					// Summarization must not replace the active turn's recovery snapshot.
 					llmcontracts.RecordResponsesRecovery(r.Ctx, `{"responses_input":[{"type":"message","role":"user","content":"BAD_SUMMARY_STATE"}]}`)
 					return llmcontracts.AgentResult{Output: "ALREADY_EDITED; do not repeat the edit"}, nil
 				case 3:
 					require.Empty(t, r.Message)
 					require.True(t, llmcontracts.HistoryContinuationFromContext(r.Ctx))
-					require.Contains(t, buildLocalSummaryCompactionPrompt(r.ChatHistory), "ALREADY_EDITED")
-					require.NotContains(t, buildLocalSummaryCompactionPrompt(r.ChatHistory), "BAD_SUMMARY_STATE")
+					require.Contains(t, summaryHistoryText(t, r.Agent.Provider, r.ChatHistory), "ALREADY_EDITED")
+					require.NotContains(t, summaryHistoryText(t, r.Agent.Provider, r.ChatHistory), "BAD_SUMMARY_STATE")
 					return llmcontracts.AgentResult{Output: "done"}, nil
 				default:
 					t.Fatal("unexpected retry")

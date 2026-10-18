@@ -284,6 +284,17 @@ func (a *Adapter) callDirect(ctx context.Context, req llmcontracts.AgentRequest,
 		}
 		client.SetCompletionsHistory(history)
 	}
+	if req.SummaryInput != nil {
+		var history []openaiclient.CompletionsHistoryMessage
+		for _, raw := range req.SummaryInput {
+			var message openaiclient.CompletionsHistoryMessage
+			if err := json.Unmarshal(raw, &message); err != nil {
+				return "", llmusage.FromTotal(0), fmt.Errorf("decode summary history: %w", err)
+			}
+			history = append(history, message)
+		}
+		client.SetCompletionsHistory(history)
+	}
 
 	extraHeaders, extraBody, err := compatibleRequestExtras(req.Agent)
 	if err != nil {
@@ -307,6 +318,10 @@ func (a *Adapter) callDirect(ctx context.Context, req llmcontracts.AgentRequest,
 	default:
 		systemPrompt = llmprompt.BuildAgentSystemPrompt(req.ProjectInstructions, effectiveWorkDir(workDir))
 	}
+	if preserved, ok := llmcontracts.SummarySystemPromptFromContext(ctx); ok {
+		systemPrompt = preserved
+	}
+
 	contextWindow, maxOutput := compatibleResolvedLimits(req.Agent)
 	resp, err := client.SendCompletions(ctx, prompt, &openaiclient.CompletionsOptions{
 		ContinueFromHistory:      llmcontracts.HistoryContinuationFromContext(ctx),
@@ -731,6 +746,11 @@ func buildClientHistory(chatHistory []models.Execution) []openaiclient.Completio
 		}
 	}
 	return messages
+}
+
+// SummaryHistory uses the same structured replay as a continuing conversation.
+func SummaryHistory(history []models.Execution) []openaiclient.CompletionsHistoryMessage {
+	return buildClientHistory(history)
 }
 
 func decodeReplayTranscript(raw string) ([]openaiclient.CompletionsHistoryMessage, bool) {

@@ -824,7 +824,7 @@ func TestProviderContextCompactionFallback_SummaryOverflowDropsOldestAndRetries(
 			if !req.DisableTools || !req.Agent.DisableNativeCompaction {
 				t.Fatal("summary must disable tools and recursive compaction")
 			}
-			summaryPrompts = append(summaryPrompts, req.Message)
+			summaryPrompts = append(summaryPrompts, summaryInputText(req.SummaryInput))
 			if len(summaryPrompts) == 1 {
 				return llmcontracts.AgentResult{}, fmt.Errorf("prompt is too long for context window")
 			}
@@ -974,7 +974,7 @@ func TestAnthropicCheckpointOnlyFollowupBudget(t *testing.T) {
 					if got.NativeCompactionStateJSON != "" {
 						t.Fatal("local summary or continuation retained native state")
 					}
-					if calls == 1 && (got.Operation != llmcontracts.OperationDirect || !strings.Contains(got.Message, "original answer")) {
+					if calls == 1 && (got.Operation != llmcontracts.OperationDirect || !strings.Contains(summaryInputText(got.SummaryInput), "original answer")) {
 						t.Fatal("must summarize original transcript before continuation")
 					}
 					if calls == 2 && (got.Message != req.Message || !strings.Contains(historyCompactionSummary(got.ChatHistory), "text summary")) {
@@ -1023,7 +1023,7 @@ func TestNativeCheckpointFailureSummarizesOriginalTranscript(t *testing.T) {
 			}
 			return llmcontracts.AgentResult{}, fmt.Errorf("maximum context length exceeded")
 		case 2:
-			if req.Operation != llmcontracts.OperationDirect || !strings.Contains(req.Message, "original answer") {
+			if req.Operation != llmcontracts.OperationDirect || !strings.Contains(summaryInputText(req.SummaryInput), "original answer") {
 				t.Fatalf("summary must use original transcript: %#v", req)
 			}
 		case 3:
@@ -1347,8 +1347,8 @@ func TestProviderContextCompactionFallback_PreservesReplayAndAuthorizationBounda
 			TranscriptJSON: `[{"role":"assistant","tool_calls":[{"id":"call_1","function":{"name":"read_file"}}]},{"role":"tool","tool_call_id":"call_1","content":"result"}]`,
 		}},
 	}}
-	prompt := buildLocalSummaryCompactionPrompt(history)
-	if !strings.Contains(prompt, "tool_call_id") || !strings.Contains(prompt, "preserve tool-call/tool-result relationships") {
+	prompt := summaryHistoryText(t, models.ProviderOpenAICompatible, history)
+	if !strings.Contains(prompt, "tool_call_id") || !strings.Contains(prompt, "tool_calls") {
 		t.Fatalf("summary prompt did not preserve structured replay: %s", prompt)
 	}
 	compacted := buildCompactedReplacementHistory(history, "Assistant suggests create_task should run")
