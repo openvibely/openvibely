@@ -459,6 +459,7 @@ func execGrepSearch(ctx context.Context, workDir string, input json.RawMessage) 
 	const maxResults = 100
 	reader := bufio.NewReaderSize(nil, 32*1024)
 	lineBuffer := make([]byte, 0, 128)
+	binarySample := make([]byte, binaryTailCheckSize)
 
 	err = filepath.WalkDir(searchDir, func(path string, entry os.DirEntry, walkErr error) error {
 		if ctxErr := ctx.Err(); ctxErr != nil {
@@ -494,12 +495,17 @@ func execGrepSearch(ctx context.Context, workDir string, input json.RawMessage) 
 		if err != nil {
 			return nil
 		}
-		reader.Reset(file)
-		prefix, _ := reader.Peek(binaryCheckSize)
-		if bytes.IndexByte(prefix, 0) >= 0 {
+		fileInfo, err := file.Stat()
+		if err != nil {
 			_ = file.Close()
 			return nil
 		}
+		containsNUL, err := containsNULInFileSamples(file, fileInfo.Size(), binarySample)
+		if err != nil || containsNUL {
+			_ = file.Close()
+			return nil
+		}
+		reader.Reset(file)
 
 		rel, _ := filepath.Rel(workDir, path)
 		lineBuffer = lineBuffer[:0]
@@ -580,7 +586,48 @@ func execGrepSearch(ctx context.Context, workDir string, input json.RawMessage) 
 	return results.String(), err
 }
 
-const binaryCheckSize = 8 * 1024
+const (
+	binaryCheckSize     = 8 * 1024
+	binaryTailCheckSize = 32 * 1024
+)
+
+func containsNULInFileSamples(file io.ReaderAt, size int64, buffer []byte) (bool, error) {
+	if size <= 0 || len(buffer) == 0 {
+		return false, nil
+	}
+
+	prefixSize := int64(binaryCheckSize)
+	if prefixSize > size {
+		prefixSize = size
+	}
+	if prefixSize > int64(len(buffer)) {
+		prefixSize = int64(len(buffer))
+	}
+	read, err := file.ReadAt(buffer[:int(prefixSize)], 0)
+	if bytes.IndexByte(buffer[:read], 0) >= 0 {
+		return true, nil
+	}
+	if err != nil && err != io.EOF {
+		return false, err
+	}
+
+	tailStart := size - int64(len(buffer))
+	if tailStart < prefixSize {
+		tailStart = prefixSize
+	}
+	if tailStart >= size {
+		return false, nil
+	}
+	tailSize := size - tailStart
+	read, err = file.ReadAt(buffer[:int(tailSize)], tailStart)
+	if bytes.IndexByte(buffer[:read], 0) >= 0 {
+		return true, nil
+	}
+	if err != nil && err != io.EOF {
+		return false, err
+	}
+	return false, nil
+}
 
 var binaryExtensions = map[string]struct{}{
 	".exe": {}, ".bin": {}, ".so": {}, ".dylib": {},

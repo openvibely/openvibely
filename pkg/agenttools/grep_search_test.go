@@ -110,6 +110,20 @@ func TestGrepSearchSkipsTextExtensionWithLateNUL(t *testing.T) {
 	}
 }
 
+func TestGrepSearchSkipsTrailingNULWithoutReturningEarlierMatches(t *testing.T) {
+	root := t.TempDir()
+	content := "hit\n" + strings.Repeat("padding\n", 16*1024) + "hit\x00"
+	writeTestFile(t, filepath.Join(root, "trailing-nul.txt"), content)
+
+	got, err := agenttools.Execute(context.Background(), root, "grep_search", rawGrepInput("hit", "", ""))
+	if err != nil {
+		t.Fatalf("grep_search: %v", err)
+	}
+	if want := `No matches found for pattern "hit"`; got != want {
+		t.Fatalf("output = %q, want %q", got, want)
+	}
+}
+
 func TestGrepSearchPathIncludeAndSkippedEntries(t *testing.T) {
 	root := t.TempDir()
 	searchDir := filepath.Join(root, "search")
