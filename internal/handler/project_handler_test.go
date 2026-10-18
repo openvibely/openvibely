@@ -106,6 +106,12 @@ func TestNewProjectDialog_CreateButtonShowsCloneProgress(t *testing.T) {
 	body := rec.Body.String()
 	for _, expected := range []string{
 		`id="new-project-form"`,
+		`role="tablist"`,
+		`id="new-project-knowledge"`,
+		`name="skill_memory_settings_present"`,
+		`name="read_skills"`,
+		`name="write_memories"`,
+		`data-global-skill-switch`,
 		`hx-indicator="#new-project-create-progress"`,
 		`id="new-project-create-button"`,
 		`id="new-project-create-progress"`,
@@ -923,4 +929,32 @@ func TestUpdateProjectSkillMemoryChoicesSurviveUnrelatedUpdates(t *testing.T) {
 	saved, err = tc.handler.projectSvc.GetByID(context.Background(), project.ID)
 	require.NoError(t, err)
 	require.Equal(t, models.SkillMemoryPermissions{}, saved.ManagedPermissions())
+}
+
+func TestCreateProjectKnowledgePermissions(t *testing.T) {
+	for _, mode := range []string{"defaults", "disabled", "custom"} {
+		t.Run(mode, func(t *testing.T) {
+			tc := NewStoreTestContext(t)
+			form := url.Values{"name": {"Knowledge create"}, "repo_source": {"local"}}
+			expected := (&models.Project{}).ManagedPermissions()
+			if mode != "defaults" {
+				form.Set("skill_memory_settings_present", "true")
+				expected = models.SkillMemoryPermissions{}
+			}
+			if mode == "custom" {
+				form.Set("read_memories", "on")
+				form.Set("allow_global_skill_writes", "on")
+				expected.ReadMemories = true
+				expected.AllowGlobalSkillWrites = true
+			}
+			rec := tc.HTTP().Post("/projects").WithForm(form).Execute()
+			require.Equal(t, http.StatusSeeOther, rec.Code, rec.Body.String())
+			location, err := url.Parse(rec.Header().Get("Location"))
+			require.NoError(t, err)
+			saved, err := tc.projectRepo.GetByID(t.Context(), location.Query().Get("project_id"))
+			require.NoError(t, err)
+			require.NotNil(t, saved)
+			require.Equal(t, expected, saved.ManagedPermissions())
+		})
+	}
 }
