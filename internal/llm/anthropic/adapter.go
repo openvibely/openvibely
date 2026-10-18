@@ -366,6 +366,18 @@ func (a *Adapter) Call(ctx context.Context, req llmcontracts.AgentRequest, workD
 	var replayMessages []anthropicclient.Message
 	ctx = context.WithValue(ctx, conversationReplayKey{}, &replayMessages)
 	ctx = llmcontracts.WithNativeCompactionStateJSON(ctx, req.NativeCompactionStateJSON)
+	if req.SummaryInput != nil {
+		messages := make([]anthropicclient.Message, 0, len(req.SummaryInput)+1)
+		for _, raw := range req.SummaryInput {
+			var message anthropicclient.Message
+			if err := json.Unmarshal(raw, &message); err != nil {
+				return result, fmt.Errorf("decode summary history: %w", err)
+			}
+			messages = append(messages, message)
+		}
+		messages = append(messages, anthropicclient.Message{Role: "user", Content: req.Message})
+		ctx = context.WithValue(ctx, recoveryMessagesKey{}, messages)
+	}
 	if llmcontracts.HistoryContinuationFromContext(ctx) {
 		messages := buildRecoveryHistory(req.ChatHistory)
 		// Service-side compaction stores its final summary as execution output.
@@ -483,6 +495,10 @@ func (a *Adapter) callDirect(ctx context.Context, prompt string, attachments []m
 		systemPrompt = llmprompt.BuildAnthropicAgentSystemPrompt(agent.Model, projectInstructions, workDir)
 		webSearchEnabled = anthropicModelSupportsWebSearch(agent.Model)
 	}
+	if preserved, ok := llmcontracts.SummarySystemPromptFromContext(ctx); ok {
+		systemPrompt = preserved
+	}
+
 	compactionSummary := ""
 	opts := &anthropicclient.AgenticOptions{
 		Model:                     agent.Model,
@@ -848,6 +864,11 @@ func buildRecoveryHistory(chatHistory []models.Execution) []anthropicclient.Mess
 		}
 	}
 	return messages
+}
+
+// SummaryHistory uses the same structured replay as a continuing conversation.
+func SummaryHistory(history []models.Execution) []anthropicclient.Message {
+	return buildRecoveryHistory(history)
 }
 
 // EstimateHistoryTokens counts the messages actually reconstructed for Anthropic,

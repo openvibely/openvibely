@@ -69,14 +69,14 @@ func TestSteeringCompactionFallbackUsesCurrentConversation(t *testing.T) {
 				case 2:
 					require.Equal(t, llmcontracts.OperationDirect, req.Operation)
 					require.Nil(t, llmcontracts.InitialSteeringCommitFromContext(req.Ctx), "summarization must not consume live steering")
-					require.Contains(t, req.Message, "file already written")
-					require.Contains(t, req.Message, "new steer")
+					require.Contains(t, summaryInputText(req.SummaryInput), "file already written")
+					require.Contains(t, summaryInputText(req.SummaryInput), "new steer")
 					// Deliberately omit both user instructions from the summary.
 					return llmcontracts.AgentResult{Output: "file already written"}, nil
 				case 3:
 					require.Empty(t, req.Message, "do not replay the consumed prompt")
 					require.True(t, llmcontracts.HistoryContinuationFromContext(req.Ctx))
-					require.Contains(t, buildLocalSummaryCompactionPrompt(req.ChatHistory), "new steer")
+					require.Contains(t, summaryHistoryText(t, req.Agent.Provider, req.ChatHistory), "new steer")
 					require.Len(t, req.ChatHistory, 3)
 					require.Equal(t, "late steer", req.ChatHistory[0].PromptSent)
 					require.Equal(t, "new steer", req.ChatHistory[1].PromptSent)
@@ -87,7 +87,7 @@ func TestSteeringCompactionFallbackUsesCurrentConversation(t *testing.T) {
 						return llmcontracts.AgentResult{}, llmcontracts.NewCategorizedError(llmcontracts.ErrorContextWindowExceeded, "retry", errors.New("context length exceeded"))
 					}
 				case 4:
-					require.Contains(t, buildLocalSummaryCompactionPrompt(req.ChatHistory), "retry progress")
+					require.Contains(t, summaryHistoryText(t, req.Agent.Provider, req.ChatHistory), "retry progress")
 					require.Empty(t, req.Message)
 				default:
 					t.Fatal("unexpected recovery request")
