@@ -181,3 +181,9 @@ func responsesCompletionsMessages(items []json.RawMessage) []openaiclient.Comple
 	}
 	return result
 }
+
+// ResponsesSummaryMessages translates a saved Responses conversation for a
+// summary call after switching providers. Tool calls and results stay paired.
+func ResponsesSummaryMessages(items []json.RawMessage) []openaiclient.CompletionsHistoryMessage {
+	return responsesCompletionsMessages(items)
+}

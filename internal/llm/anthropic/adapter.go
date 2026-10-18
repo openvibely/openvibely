@@ -820,7 +820,7 @@ func anthropicContextUsage(resp *anthropicclient.AgenticResponse) llmcontracts.U
 
 func buildClientHistory(chatHistory []models.Execution) []anthropicclient.Message {
 	messages := buildRecoveryHistory(chatHistory)
-	if len(messages) > 0 && messages[len(messages)-1].Role == "user" && len(messages[len(messages)-1].ContentBlocks) == 0 {
+	if len(messages) > 0 && messages[len(messages)-1].Role == "user" && len(messages[len(messages)-1].ContentBlocks) == 0 && !llmprompt.IsCompactionContext(messages[len(messages)-1].Content) {
 		messages = messages[:len(messages)-1]
 	}
 	return messages
@@ -839,13 +839,8 @@ func buildRecoveryHistory(chatHistory []models.Execution) []anthropicclient.Mess
 		var structured []anthropicclient.Message
 		for _, replay := range exec.ReplayMessages {
 			var saved anthropicEnvironmentReplay
-			if json.Unmarshal([]byte(replay.TranscriptJSON), &saved) == nil {
-				for _, m := range saved.Messages {
-					if len(m.ContentBlocks) > 0 {
-						structured = saved.Messages
-						break
-					}
-				}
+			if json.Unmarshal([]byte(replay.TranscriptJSON), &saved) == nil && len(saved.Messages) > 0 {
+				structured = saved.Messages
 			}
 			if json.Unmarshal([]byte(replay.TranscriptJSON), &saved) == nil && strings.HasPrefix(saved.Environment, executionenv.Marker+"\n") && saved.Environment != lastEnvironment {
 				messages = append(messages, anthropicclient.Message{Role: "user", Content: saved.Environment})
@@ -854,6 +849,14 @@ func buildRecoveryHistory(chatHistory []models.Execution) []anthropicclient.Mess
 		}
 		if len(structured) > 0 {
 			messages = append(messages, structured...)
+			// A failed stream can persist its partial answer after the last
+			// replay checkpoint (often a tool result). Keep that answer too.
+			last := structured[len(structured)-1]
+			if (last.Role != "assistant" || (last.Content == "" && len(last.ContentBlocks) == 0)) && (exec.Status == models.ExecFailed || exec.Status == models.ExecRunning) {
+				if output := llmprompt.ReplayAssistantContent(exec); output != "" {
+					messages = appendMergedMessage(messages, "assistant", output)
+				}
+			}
 			continue
 		}
 		if exec.PromptSent != "" {
@@ -883,7 +886,7 @@ func EstimateHistoryTokens(history []models.Execution) int {
 
 // appendMergedMessage appends a message, merging with the previous if same role.
 func appendMergedMessage(messages []anthropicclient.Message, role, content string) []anthropicclient.Message {
-	if len(messages) > 0 && messages[len(messages)-1].Role == role && len(messages[len(messages)-1].ContentBlocks) == 0 && !strings.HasPrefix(messages[len(messages)-1].Content, executionenv.Marker+"\n") {
+	if len(messages) > 0 && messages[len(messages)-1].Role == role && len(messages[len(messages)-1].ContentBlocks) == 0 && !llmprompt.IsApplicationContext(messages[len(messages)-1].Content) && !llmprompt.IsApplicationContext(content) && !llmprompt.IsCompactionContext(content) && !llmprompt.IsCompactionContext(messages[len(messages)-1].Content) {
 		messages[len(messages)-1].Content += "\n\n" + content
 		return messages
 	}

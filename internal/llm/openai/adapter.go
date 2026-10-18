@@ -1167,6 +1167,14 @@ func (a *Adapter) taskTransportScope(ctx context.Context, execID string) string 
 func buildClientHistory(chatHistory []models.Execution) []openaiclient.Message {
 	var messages []openaiclient.Message
 	for _, exec := range chatHistory {
+		if len(exec.RetainedUserMessage) > 0 {
+			var item any
+			if json.Unmarshal(exec.RetainedUserMessage, &item) == nil {
+				prefix := historyMessageItems(messages)
+				messages = []openaiclient.Message{{ResponsesInputItems: append(prefix, item)}}
+				continue
+			}
+		}
 		checkpoint := false
 		for _, replay := range exec.ReplayMessages {
 			var saved struct {
