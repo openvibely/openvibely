@@ -7,15 +7,12 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/util"
 	"github.com/openvibely/openvibely/pkg/knowledgecache"
 	"github.com/openvibely/openvibely/pkg/toolschema"
 )
-
-var storeLocks sync.Map
 
 // RuntimeTools keeps all operations in one project's shared managed-memory directory.
 // Reads recheck the index at execution time, including memories saved during this turn.
@@ -63,10 +60,8 @@ func executeMemory(ctx context.Context, repoPath, name string, input json.RawMes
 	if err != nil {
 		return "", err
 	}
-	lock, _ := storeLocks.LoadOrStore(dir, &sync.Mutex{})
-	mu := lock.(*sync.Mutex)
-	mu.Lock()
-	defer mu.Unlock()
+	unlock := LockStore(dir)
+	defer unlock()
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}

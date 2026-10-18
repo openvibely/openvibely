@@ -145,6 +145,9 @@ func TestScopedFilesRuntimeEditPreservesMemoryFileModeAndCleansTempFiles(t *test
 	if err != nil {
 		t.Fatalf("build scoped runtime: %v", err)
 	}
+	if _, _, _, err := rt.Executor(context.Background(), "read_file", json.RawMessage(`{"file_path":"topic.md"}`)); err != nil {
+		t.Fatal(err)
+	}
 	out, handled, isErr, err := rt.Executor(context.Background(), "edit_file", json.RawMessage(`{"file_path":"topic.md","old_string":"before","new_string":"after"}`))
 	if err != nil || isErr || !handled {
 		t.Fatalf("edit failed handled=%v isErr=%v err=%v out=%q", handled, isErr, err, out)
