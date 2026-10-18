@@ -7012,14 +7012,14 @@ func TestHandler_TaskThreadSend_DoesNotResumeExplicitlyPausedGoal(t *testing.T) 
 	assert.Equal(t, "paused by user", paused.Reason)
 }
 
-func TestHandler_TaskThreadSend_MixtureOllamaAggregatorGetsNoTools(t *testing.T) {
+func TestHandler_TaskThreadSend_MixtureOllamaAggregatorGetsSharedTools(t *testing.T) {
 	h, e, llmConfigRepo := setupTestHandler(t)
 	h.workerSvc = nil
 	ctx := context.Background()
 
 	providerRequests := make(chan map[string]any, 1)
 	providerServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/chat" {
+		if r.URL.Path != "/v1/chat/completions" {
 			http.Error(w, "unexpected path "+r.URL.Path, http.StatusNotFound)
 			return
 		}
@@ -7029,15 +7029,15 @@ func TestHandler_TaskThreadSend_MixtureOllamaAggregatorGetsNoTools(t *testing.T)
 			return
 		}
 		providerRequests <- body
-		w.Header().Set("Content-Type", "application/x-ndjson")
-		_, _ = fmt.Fprintln(w, `{"model":"test-model","message":{"role":"assistant","content":"Runtime actions are unavailable."},"done":false}`)
-		_, _ = fmt.Fprintln(w, `{"model":"test-model","message":{"role":"assistant","content":""},"done":true,"eval_count":8}`)
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprint(w, `data: {"choices":[{"delta":{"content":"Runtime actions are unavailable."}}]}`+"\n\n")
+		_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
 	}))
 	defer providerServer.Close()
 
 	aggregator := &models.LLMConfig{
 		Name: "Task Followup Ollama Aggregator", Provider: models.ProviderOllama, Model: "test-model",
-		OllamaBaseURL: providerServer.URL,
+		OllamaBaseURL: providerServer.URL, ContextWindow: 65536,
 	}
 	require.NoError(t, llmConfigRepo.Create(ctx, aggregator))
 	mixture := &models.LLMConfig{
@@ -7065,14 +7065,14 @@ func TestHandler_TaskThreadSend_MixtureOllamaAggregatorGetsNoTools(t *testing.T)
 	case <-time.After(3 * time.Second):
 		t.Fatal("timed out waiting for task-followup Ollama mixture aggregator request")
 	}
-	require.NotContains(t, providerRequest, "tools", "runtime-tool-incapable follow-up aggregator must not receive tools")
+	require.Contains(t, providerRequest, "tools", "Ollama follow-up must receive shared tools")
 	messages, _ := providerRequest["messages"].([]any)
 	require.True(t, slices.ContainsFunc(messages, func(raw any) bool {
 		message, _ := raw.(map[string]any)
 		content, _ := message["content"].(string)
 		return message["role"] == "system" &&
 			!strings.Contains(content, "[CREATE_TASK]")
-	}), "runtime-tool-incapable follow-up aggregator must not receive marker guidance")
+	}), "follow-up aggregator must not receive marker guidance")
 	require.Eventually(t, func() bool {
 		execs, err := h.execRepo.ListByTaskChronological(ctx, task.ID)
 		return err == nil && len(execs) == 1 && execs[0].Status == models.ExecCompleted

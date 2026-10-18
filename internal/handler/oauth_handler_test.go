@@ -25,6 +25,7 @@ import (
 )
 
 func TestAnthropicOAuthCallbackPersistsProfileAndAdoptsVerifiedSameUser(t *testing.T) {
+	attempts := map[string]int{}
 	profiles := map[string]string{
 		"Bearer access-a": `{"organization":{"uuid":"org-shared"},"account":{"uuid":"user-shared","display_name":"Primary account"}}`,
 		"Bearer access-b": `{"organization":{"uuid":"org-shared"},"account":{"uuid":"user-shared","display_name":"Primary account"}}`,
@@ -32,6 +33,11 @@ func TestAnthropicOAuthCallbackPersistsProfileAndAdoptsVerifiedSameUser(t *testi
 	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
+		attempts[r.URL.Path]++
+		if attempts[r.URL.Path] == 1 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
 		if r.URL.Path == "/api/oauth/profile" {
 			profile, ok := profiles[r.Header.Get("Authorization")]
 			require.True(t, ok, "unexpected profile authorization")
@@ -1512,6 +1518,7 @@ func TestHandler_completeOAuthFlow(t *testing.T) {
 	t.Run("classifies token exchange failure and consumes state", func(t *testing.T) {
 		h, _, _ := setupTestHandler(t)
 		tokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Retry-After", "121") // Terminal fixture: beyond the standard retry wait budget.
 			w.WriteHeader(http.StatusBadGateway)
 			_, _ = w.Write([]byte(`{"error":"invalid_grant","access_token":"secret-access","email":"private@example.com"}`))
 		}))

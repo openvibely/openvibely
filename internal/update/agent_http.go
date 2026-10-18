@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/openvibely/openvibely/internal/httpclient"
+	"github.com/openvibely/openvibely/internal/httpretry"
 )
 
 type APIErrorEnvelope struct {
@@ -91,7 +92,7 @@ func (c *AgentHTTPClient) Do(ctx context.Context, method, path, idempotency stri
 		}
 		req.Header.Set("Idempotency-Key", idempotency)
 	}
-	resp, err := c.client.Do(req)
+	resp, err := httpretry.DoRequest(c.client, req)
 	if err != nil {
 		return errors.Join(ErrUpdateRetryable, err)
 	}

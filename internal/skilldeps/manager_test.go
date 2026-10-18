@@ -42,7 +42,13 @@ func TestInstallConcurrentCacheAndCorruption(t *testing.T) {
 	}
 	data := zipTool(t, "bin/tool", "#!/bin/sh\nexit 0\n")
 	var calls atomic.Int32
-	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { calls.Add(1); w.Write(data) }))
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if calls.Add(1) == 1 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		w.Write(data)
+	}))
 	defer server.Close()
 	dep := Dependency{Name: "tool", Version: "1.0", HealthCheck: []string{"--version"}, Packages: map[string]Package{"linux/amd64": {URL: server.URL, SHA256: fmt.Sprintf("%x", sha256.Sum256(data)), Format: "zip", Executable: "bin/tool"}}}
 	manager := &Manager{CacheDir: t.TempDir(), Platform: "linux/amd64", Client: server.Client()}
@@ -58,7 +64,7 @@ func TestInstallConcurrentCacheAndCorruption(t *testing.T) {
 		}()
 	}
 	wg.Wait()
-	if calls.Load() != 1 {
+	if calls.Load() != 2 {
 		t.Fatalf("downloaded %d times", calls.Load())
 	}
 	server.Close()
@@ -69,7 +75,10 @@ func TestInstallConcurrentCacheAndCorruption(t *testing.T) {
 	if err = os.WriteFile(result[0].Executable, []byte("broken"), 0755); err != nil {
 		t.Fatal(err)
 	}
-	result, err = manager.Resolve(context.Background(), []Dependency{dep})
+	// A broken offline cache must fail within the caller's retry budget.
+	retryCtx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	result, err = manager.Resolve(retryCtx, []Dependency{dep})
 	if err != nil || result[0].Executable != "" || result[0].Error == "" {
 		t.Fatalf("used broken cache: %v %v", result, err)
 	}

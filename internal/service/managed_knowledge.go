@@ -3,6 +3,8 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -16,6 +18,8 @@ import (
 	"github.com/openvibely/openvibely/pkg/managedcontext"
 )
 
+type managedAgentResolverKey struct{}
+type managedWorkDirKey struct{}
 type managedTurnKey struct{}
 type managedTurn struct {
 	task models.Task
@@ -38,6 +42,7 @@ const memoryWritingInstructions = `Use memory_save to retain durable preferences
 
 func (w *WorkerService) prepareMainModelKnowledge(ctx context.Context, task models.Task, chat bool) context.Context {
 	ctx = context.WithValue(ctx, managedTurnKey{}, managedTurn{task, chat})
+	ctx = context.WithValue(ctx, managedAgentResolverKey{}, func(c context.Context) *models.Agent { return w.taskAgentDefinition(c, task) })
 	// A new user turn is a fallback for dropped filesystem events.
 	if root := projectSkillRoot(ctx, w.projectRepo, task.ProjectID); root != "" {
 		knowledgecache.Invalidate(root)
@@ -76,9 +81,9 @@ func (w *WorkerService) prepareMainModelKnowledge(ctx context.Context, task mode
 		sort.Strings(memoryHandles)
 	}
 	ctx = WithSelectedMemoryHandles(ctx, memoryHandles)
-	canWrite := !chat && (agent == nil || agentExplicitlyAllowsTool(agent, "memory_save") || agentExplicitlyAllowsTool(agent, "memory_delete"))
+	canWrite := !chat
 
-	tools = append(tools, memory.RuntimeTools(projectRepoPath(ctx, w.projectRepo, task.ProjectID), w.taskAgentAllowsMemoryView(ctx, task), canWrite))
+	tools = append(tools, memory.RuntimeTools(projectRepoPath(ctx, w.projectRepo, task.ProjectID), true, canWrite))
 	turn := lifecycleTurnFromContext(ctx)
 	turn.Catalog = catalog
 	turn.SkillIndex = "" // Indexes travel as conversation messages, not provider instructions.
@@ -109,7 +114,14 @@ func (w *WorkerService) prepareMainModelKnowledge(ctx context.Context, task mode
 // Apply after composition as well as at preparation: definitions and executors must
 // obey the same policy, including requests to tools omitted from the definitions.
 func guardManagedTools(ctx context.Context, rt *llmcontracts.RuntimeTools, repo persistence.ProjectStore, task models.Task, chat bool, agent *models.Agent) *llmcontracts.RuntimeTools {
+	currentAgent := func(c context.Context) *models.Agent {
+		if resolve, ok := ctx.Value(managedAgentResolverKey{}).(func(context.Context) *models.Agent); ok {
+			return resolve(c)
+		}
+		return agent
+	}
 	allowed := func(callCtx context.Context, name string) bool {
+		agent := currentAgent(callCtx)
 		p := projectManagedPermissions(callCtx, repo, task.ProjectID)
 		if task.AgentDefinitionID != nil && (agent == nil || !agent.Enabled || agent.ArchivedAt != nil || agent.ProjectID != "" && agent.ProjectID != task.ProjectID) {
 			p = models.SkillMemoryPermissions{}
@@ -157,7 +169,7 @@ func guardManagedTools(ctx context.Context, rt *llmcontracts.RuntimeTools, repo 
 		if err := callCtx.Err(); err != nil {
 			return "", true, true, err
 		}
-		if !allowed(callCtx, name) || !managedFileOperationAllowed(callCtx, repo, task, chat, agent, name, input) {
+		if !allowed(callCtx, name) || !managedFileOperationAllowed(callCtx, repo, task, chat, currentAgent(callCtx), name, input) {
 			return "Managed skill/memory operation is not permitted for this turn", true, true, nil
 		}
 		if rt != nil && rt.Executor != nil {
@@ -191,7 +203,50 @@ func managedFileOperationAllowed(ctx context.Context, repo persistence.ProjectSt
 	if path == "" {
 		path = params.Path
 	}
-	path = "/" + filepath.ToSlash(filepath.Clean(path)) + "/"
+	if !filepath.IsAbs(path) {
+		root, _ := ctx.Value(managedWorkDirKey{}).(string)
+		if root == "" {
+			root = task.WorktreePath
+		}
+		if root == "" {
+			root = projectRepoPath(ctx, repo, task.ProjectID)
+		}
+		path = filepath.Join(root, path)
+	}
+	suppliedPath := path
+	// Resolve existing ancestors too, so creation through a directory symlink is checked.
+	suffix := ""
+	for hops := 0; ; hops++ {
+		if hops > 64 {
+			return false
+		}
+		resolved, err := filepath.EvalSymlinks(path)
+		if err == nil {
+			path = filepath.Join(resolved, suffix)
+			break
+		}
+		if !os.IsNotExist(err) {
+			return false
+		}
+		if info, statErr := os.Lstat(path); statErr == nil && info.Mode()&os.ModeSymlink != 0 {
+			target, linkErr := os.Readlink(path)
+			if linkErr != nil {
+				return false
+			}
+			if !filepath.IsAbs(target) {
+				target = filepath.Join(filepath.Dir(path), target)
+			}
+			path = target
+			continue
+		}
+		parent := filepath.Dir(path)
+		if parent == path || path == "." {
+			break
+		}
+		suffix = filepath.Join(filepath.Base(path), suffix)
+		path = parent
+	}
+	path = "/" + strings.ToLower(filepath.ToSlash(filepath.Clean(path))) + "/" + strings.ToLower(filepath.ToSlash(filepath.Clean(suppliedPath))) + "/"
 	permissions := projectManagedPermissions(ctx, repo, task.ProjectID)
 	if strings.Contains(path, "/.openvibely/memories/") {
 		// Main turns use scoped memory tools; broad file tools must not bypass
@@ -224,6 +279,9 @@ func (w *WorkerService) cachedKnowledgeSkills(ctx context.Context, task models.T
 	agentID := ""
 	if task.AgentDefinitionID != nil {
 		agentID = *task.AgentDefinitionID
+	}
+	if agent := w.taskAgentDefinition(ctx, task); agent != nil {
+		agentID += fmt.Sprintf(":%s:%s:%t:%v", agent.Key, agent.ProjectID, agent.Enabled, agent.ArchivedAt)
 	}
 	key := "skills:" + task.ProjectID + ":" + root + ":" + w.globalSkillRoot + ":" + agentID
 	var roots []string
