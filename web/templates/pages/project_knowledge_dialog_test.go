@@ -87,7 +87,11 @@ func TestBrowserProjectDialogStableTabHeight(t *testing.T) {
 					     const workers = box.querySelector('[name="max_workers"]');
 					     if (model.closest('[data-project-panel]').dataset.projectPanel !== 'execution' || workers.closest('[data-project-panel]').dataset.projectPanel !== 'execution') return 'controls outside execution';
 					     const m = model.getBoundingClientRect(), w = workers.getBoundingClientRect();
-					     if (innerWidth > 640 ? Math.abs(m.top - w.top) > 1 || w.left <= m.left : w.top <= m.top) return 'incorrect field layout';
+					     if (w.top <= m.top || Math.abs(m.right - w.right) > 1) return 'controls not in aligned rows';
+					     const label = box.querySelector('label[for="' + model.id + '"]').getBoundingClientRect();
+					     const resource = box.querySelector('thead th').getBoundingClientRect();
+					     if (Math.abs(label.left - resource.left) > 1 || label.right > m.left || Math.abs((label.top + label.bottom) / 2 - (m.top + m.bottom) / 2) > 1) return 'labels not aligned';
+					     if (m.width > content.clientWidth * 0.51 || content.scrollWidth > content.clientWidth) return 'controls overflow';
 					     if (box.querySelector('thead th').textContent !== 'Resource') return 'missing resource heading';
 					   }
 					   const after = box.getBoundingClientRect();
